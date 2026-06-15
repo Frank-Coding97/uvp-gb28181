@@ -1,0 +1,495 @@
+package controllers
+
+import (
+	"gin-fast/app/global/app"
+	"gin-fast/app/global/consts"
+	"gin-fast/app/models"
+	"gin-fast/app/service"
+	"gin-fast/app/utils/datascope"
+	"gin-fast/app/utils/filehelper"
+	"gin-fast/app/utils/imagehelper"
+	"gin-fast/app/utils/tenanthelper"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+	"gorm.io/gorm"
+)
+
+// SysAffixController 文件附件控制器
+// @Summary 文件附件管理API
+// @Description 文件附件管理相关接口
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Router /sysAffix [get]
+type SysAffixController struct {
+	Common
+	affixService *service.SysAffixService
+}
+
+// NewSysAffixController 创建文件附件控制器
+func NewSysAffixController() *SysAffixController {
+	return &SysAffixController{
+		Common:       Common{},
+		affixService: service.NewSysAffixService(),
+	}
+}
+
+// Upload 上传文件
+// @Summary 上传文件
+// @Description 上传文件并保存记录，支持生成缩略图
+// @Tags 文件附件管理
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "上传的文件"
+// @Param isThumb formData int false "是否生成缩略图(0或1)" default(0)
+// @Param width formData int false "缩略图宽度" default(120)
+// @Param height formData int false "缩略图高度" default(120)
+// @Success 200 {object} map[string]interface{} "文件上传成功"
+// @Failure 400 {object} map[string]interface{} "请求参数错误"
+// @Failure 500 {object} map[string]interface{} "服务器内部错误"
+// @Router /sysAffix/upload [post]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) Upload(c *gin.Context) {
+	var req models.UploadRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 处理文件上传
+	response, err := app.UploadService.HandleUpload(c, "file")
+	if err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 创建文件记录
+	affix := models.NewSysAffix()
+	affix.Name = response.FileName
+	affix.Path = response.Path
+	affix.Url = response.Url
+	affix.Size = int(response.Size)
+	affix.Suffix = response.FileType
+	affix.Ftype = filehelper.GetFileTypeBySuffix(response.FileType) // 根据后缀判断文件类型
+
+	// 生成缩略图逻辑
+	// 条件：1. 上传类型为本地 2. isThumb为1 3. 文件类型为图片 4. width和height大于0
+	if req.IsThumb == 1 &&
+		app.ConfigYml.GetString("upload.upload_type") == consts.UploadTypeLocal &&
+		affix.Ftype == consts.UploadFileTypeImage &&
+		req.Width > 0 && req.Height > 0 {
+
+		// 生成缩略图文件名
+		thumbnailName := imagehelper.GenerateThumbnailName(response.FileName, req.Width, req.Height)
+
+		// 获取原图所在目录
+		originalDir := filepath.Dir(response.Path)
+
+		// 构建缩略图完整路径
+		thumbnailPath := filepath.Join(originalDir, thumbnailName)
+
+		// 生成缩略图
+		if err := imagehelper.GenerateThumbnail(response.Path, thumbnailPath, req.Width, req.Height); err != nil {
+			// 缩略图生成失败不影响原图上传，记录日志即可
+			app.ZapLog.Warn("生成缩略图失败", zap.Error(err))
+		} else {
+			// 缩略图生成成功，保存缩略图信息
+			affix.ThumbnailName = thumbnailName
+			affix.ThumbnailPath = thumbnailPath
+
+			// 获取缩略图URL（从原图URL中提取相对路径部分）
+			// 原图URL格式: /public/uploads/2025-01-27/20250127_xxx.jpg
+			// 缩略图URL格式: /public/uploads/2025-01-27/w120_h120_20250127_xxx.jpg
+			urlParts := strings.Split(response.Url, "/")
+			if len(urlParts) > 0 {
+				// 获取最后一个部分（文件名）
+				urlParts[len(urlParts)-1] = thumbnailName
+				affix.ThumbnailUrl = strings.Join(urlParts, "/")
+			}
+		}
+	}
+
+	// 保存到数据库
+	if err := affix.Create(c); err != nil {
+		ac.FailAndAbort(c, "保存文件记录失败", err)
+	}
+
+	// 构建返回响应
+	responseData := gin.H{
+		"id":    affix.ID,
+		"name":  affix.Name,
+		"path":  affix.Path,
+		"size":  affix.Size,
+		"ftype": affix.Ftype,
+		"url":   affix.Url,
+	}
+
+	// 如果生成了缩略图，添加到响应中
+	if affix.ThumbnailUrl != "" {
+		responseData["thumbnailName"] = affix.ThumbnailName
+		responseData["thumbnailPath"] = affix.ThumbnailPath
+		responseData["thumbnailUrl"] = affix.ThumbnailUrl
+	}
+
+	// 返回成功响应
+	ac.Success(c, responseData)
+}
+
+// Delete 删除文件
+// @Summary 删除文件
+// @Description 删除文件记录和物理文件
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param affix body models.AffixDeleteRequest true "文件删除请求参数"
+// @Success 200 {object} map[string]interface{} "文件删除成功"
+// @Failure 400 {object} map[string]interface{} "请求参数错误"
+// @Failure 500 {object} map[string]interface{} "服务器内部错误"
+// @Router /sysAffix/delete [delete]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) Delete(c *gin.Context) {
+	var req models.AffixDeleteRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 查找文件记录
+	affix := models.NewSysAffix()
+	if err := affix.GetByID(c, req.ID); err != nil {
+		ac.FailAndAbort(c, "文件不存在", err)
+	}
+
+	// 删除物理文件
+	if err := app.UploadService.DeleteFile(affix.Path); err != nil {
+		// 报错后继续删除数据库记录
+		app.ZapLog.Error("删除物理文件失败", zap.Error(err))
+	}
+
+	// 删除缩略图文件（如果存在）
+	if affix.ThumbnailPath != "" {
+		if err := app.UploadService.DeleteFile(affix.ThumbnailPath); err != nil {
+			// 缩略图删除失败不影响主流程，记录日志即可
+			app.ZapLog.Warn("删除缩略图文件失败", zap.Error(err))
+		}
+	}
+
+	// 删除数据库记录
+	if err := affix.Delete(c); err != nil {
+		ac.FailAndAbort(c, "删除文件记录失败", err)
+	}
+
+	// 返回成功响应
+	ac.SuccessWithMessage(c, "删除成功", nil)
+}
+
+// UpdateName 修改文件名
+// @Summary 修改文件名
+// @Description 修改文件名称
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param affix body models.UpdateNameRequest true "文件名修改请求参数"
+// @Success 200 {object} map[string]interface{} "文件名修改成功"
+// @Failure 400 {object} map[string]interface{} "请求参数错误"
+// @Failure 500 {object} map[string]interface{} "服务器内部错误"
+// @Router /sysAffix/updateName [put]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) UpdateName(c *gin.Context) {
+	var req models.UpdateNameRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 查找文件记录
+	affix := models.NewSysAffix()
+	if err := affix.GetByID(c, req.ID); err != nil {
+		ac.FailAndAbort(c, "文件不存在", err)
+	}
+
+	// 更新文件名
+	affix.Name = req.Name
+	if err := affix.Update(c); err != nil {
+		ac.FailAndAbort(c, "更新文件名失败", err)
+	}
+
+	// 返回成功响应
+	ac.Success(c, gin.H{
+		"id":    affix.ID,
+		"name":  affix.Name,
+		"path":  affix.Path,
+		"size":  affix.Size,
+		"ftype": affix.Ftype,
+	})
+}
+
+// List 文件列表（分页查询）
+// @Summary 文件列表
+// @Description 获取文件列表，支持分页和过滤
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param pageNum query int false "页码" default(1)
+// @Param pageSize query int false "每页数量" default(10)
+// @Param name query string false "文件名"
+// @Param ftype query int false "文件类型"
+// @Success 200 {object} map[string]interface{} "成功返回文件列表"
+// @Failure 500 {object} map[string]interface{} "服务器内部错误"
+// @Router /sysAffix/list [get]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) List(c *gin.Context) {
+	var req models.ListRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 获取查询条件
+	query := req.Handle()
+
+	// 获取总数
+	affixList := models.NewSysAffixList()
+	total, err := affixList.GetTotal(c, query, datascope.GetDataScope(c), tenanthelper.TenantScope(c))
+	if err != nil {
+		ac.FailAndAbort(c, "获取文件总数失败", err)
+	}
+
+	// 获取了分页数据及数据权限
+	err = affixList.Find(c, req.Paginate(), query, func(d *gorm.DB) *gorm.DB {
+		return d.Preload("User", func(d *gorm.DB) *gorm.DB {
+			return d.Preload("Department")
+		})
+	}, datascope.GetDataScope(c), tenanthelper.TenantScope(c))
+	if err != nil {
+		ac.FailAndAbort(c, "获取文件列表失败", err)
+	}
+
+	// 返回成功响应
+	ac.Success(c, gin.H{
+		"list":  affixList,
+		"total": total,
+	})
+}
+
+// GetByID 根据ID获取文件信息
+// @Summary 根据ID获取文件信息
+// @Description 根据文件ID获取文件详细信息
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param id path int true "文件ID"
+// @Success 200 {object} map[string]interface{} "成功返回文件信息"
+// @Failure 400 {object} map[string]interface{} "文件ID格式错误"
+// @Failure 500 {object} map[string]interface{} "服务器内部错误"
+// @Router /sysAffix/{id} [get]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) GetByID(c *gin.Context) {
+	// 获取路径参数
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.FailAndAbort(c, "无效的文件ID", err)
+	}
+
+	// 查找文件记录
+	affix := models.NewSysAffix()
+	if err := affix.GetByID(c, uint(id)); err != nil {
+		ac.FailAndAbort(c, "文件不存在", err)
+	}
+
+	// 返回成功响应
+	ac.Success(c, gin.H{
+		"id":        affix.ID,
+		"name":      affix.Name,
+		"path":      affix.Path,
+		"size":      affix.Size,
+		"ftype":     affix.Ftype,
+		"createdBy": affix.CreatedBy,
+	})
+}
+
+// Download 获取文件URL
+// @Summary 获取文件URL
+// @Description 根据文件ID获取文件下载URL
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param id path int true "文件ID"
+// @Success 200 {object} map[string]interface{} "成功返回文件URL"
+// @Failure 400 {object} map[string]interface{} "文件ID格式错误"
+// @Failure 500 {object} map[string]interface{} "服务器内部错误"
+// @Router /sysAffix/download/{id} [get]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) Download(c *gin.Context) {
+	// 获取路径参数
+	idStr := c.Param("id")
+	id, err := strconv.ParseUint(idStr, 10, 32)
+	if err != nil {
+		ac.FailAndAbort(c, "无效的文件ID", err)
+	}
+
+	// 查找文件记录
+	affix := models.NewSysAffix()
+	if err := affix.GetByID(c, uint(id)); err != nil {
+		ac.FailAndAbort(c, "文件不存在", err)
+	}
+
+	// 从URL中提取文件路径
+	// 注意：这里需要根据实际的上传方式（本地或七牛云）来处理文件下载
+	// 由于项目已有完整的上传服务，我们可以直接返回文件URL，让前端处理下载
+	ac.Success(c, gin.H{
+		"id":   affix.ID,
+		"name": affix.Name,
+		"url":  affix.Url,
+		"path": affix.Path,
+	})
+}
+
+// ChunkInit 初始化分片上传
+// @Summary 初始化分片上传
+// @Description 初始化大文件分片上传，支持秒传检测和断点续传
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param body body models.ChunkInitRequest true "初始化参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /sysAffix/chunk/init [post]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) ChunkInit(c *gin.Context) {
+	var req models.ChunkInitRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 获取当前租户ID
+	tenantID := ac.GetCurrentTenantID(c)
+
+	// 调用 Service 处理初始化逻辑
+	result, err := ac.affixService.InitChunkUpload(c, &req, tenantID)
+	if err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 秒传命中，返回已有文件信息
+	if result.ExistFile != nil {
+		ac.Success(c, gin.H{
+			"uploadId":       "",
+			"uploadedChunks": []int{},
+			"existFile": gin.H{
+				"id":     result.ExistFile.ID,
+				"name":   result.ExistFile.Name,
+				"path":   result.ExistFile.Path,
+				"size":   result.ExistFile.Size,
+				"ftype":  result.ExistFile.Ftype,
+				"url":    result.ExistFile.Url,
+				"suffix": result.ExistFile.Suffix,
+			},
+		})
+		return
+	}
+
+	// 返回初始化结果
+	ac.Success(c, gin.H{
+		"uploadId":       result.UploadId,
+		"uploadedChunks": result.UploadedChunks,
+		"existFile":      nil,
+	})
+}
+
+// ChunkUpload 上传单个分片
+// @Summary 上传分片
+// @Description 上传大文件的单个分片
+// @Tags 文件附件管理
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "分片文件"
+// @Param uploadId formData string true "上传会话ID"
+// @Param chunkIndex formData int true "分片序号"
+// @Param totalChunks formData int true "总分片数"
+// @Success 200 {object} map[string]interface{}
+// @Router /sysAffix/chunk/upload [post]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) ChunkUpload(c *gin.Context) {
+	var req models.ChunkUploadRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 获取当前用户信息
+	userID := ac.GetCurrentUserID(c)
+	tenantID := ac.GetCurrentTenantID(c)
+
+	// 调用 Service 保存分片
+	if err := ac.affixService.SaveChunk(c, &req, userID, tenantID); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	ac.Success(c, gin.H{
+		"chunkIndex": req.ChunkIndex,
+		"received":   true,
+	})
+}
+
+// ChunkMerge 合并分片
+// @Summary 合并分片
+// @Description 合并所有已上传的分片为最终文件
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param body body models.ChunkMergeRequest true "合并参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /sysAffix/chunk/merge [post]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) ChunkMerge(c *gin.Context) {
+	var req models.ChunkMergeRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 获取当前用户信息
+	userID := ac.GetCurrentUserID(c)
+	tenantID := ac.GetCurrentTenantID(c)
+
+	// 调用 Service 合并分片
+	affix, err := ac.affixService.MergeChunks(c, &req, userID, tenantID)
+	if err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	ac.Success(c, gin.H{
+		"id":     affix.ID,
+		"name":   affix.Name,
+		"path":   affix.Path,
+		"size":   affix.Size,
+		"ftype":  affix.Ftype,
+		"url":    affix.Url,
+		"suffix": affix.Suffix,
+	})
+}
+
+// ChunkCancel 取消分片上传
+// @Summary 取消分片上传
+// @Description 取消分片上传并清理临时文件
+// @Tags 文件附件管理
+// @Accept json
+// @Produce json
+// @Param body body models.ChunkCancelRequest true "取消参数"
+// @Success 200 {object} map[string]interface{}
+// @Router /sysAffix/chunk/cancel [delete]
+// @Security ApiKeyAuth
+func (ac *SysAffixController) ChunkCancel(c *gin.Context) {
+	var req models.ChunkCancelRequest
+	if err := req.Validate(c); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	// 获取当前租户ID
+	tenantID := ac.GetCurrentTenantID(c)
+
+	// 调用 Service 取消上传
+	if err := ac.affixService.CancelChunkUpload(c, req.UploadId, tenantID); err != nil {
+		ac.FailAndAbort(c, err.Error(), err)
+	}
+
+	ac.SuccessWithMessage(c, "已取消上传", nil)
+}

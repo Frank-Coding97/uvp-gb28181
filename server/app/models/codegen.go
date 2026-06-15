@@ -1,0 +1,730 @@
+package models
+
+import (
+	"database/sql"
+	"fmt"
+
+	"gin-fast/app/utils/common"
+	"strconv"
+	"strings"
+)
+
+// CodeGenContext 代码生成上下文 - 统一参数结构体
+type CodeGenContext struct {
+	// 基础信息
+	TableName string `json:"tableName"` // 表名
+	DirName   string `json:"dirName"`   // 目录名（全英文字母小写）
+	FileName  string `json:"fileName"`  // 文件名（全英文字母小写）
+	Comment   string `json:"comment"`   // 表注释/描述
+
+	// 派生信息
+	StructName      string `json:"structName"`      // 大驼峰结构体名
+	StructNameLower string `json:"structNameLower"` // 小驼峰结构体名
+
+	// 列信息
+	Columns      ColumnTemplateList `json:"columns"`      // 字段列表
+	PrimaryKey   *ColumnTemplate    `json:"primaryKey"`   // 主键
+	HasTimeField bool               `json:"hasTimeField"` // 是否有时间字段
+	HasCreatedBy bool               `json:"hasCreatedBy"` // 是否有created_by字段
+	HasTenantID  bool               `json:"hasTenantID"`  // 是否有tenant_id字段
+
+	// 参数模型中的时间字段判断
+	HasTimeFieldInQuery bool `json:"hasTimeFieldInQuery"` // 是否在查询中有时间字段
+	HasTimeFieldInForm  bool `json:"hasTimeFieldInForm"`  // 是否在表单中有时间字段
+
+	// 树形结构相关
+	IsTree        bool            `json:"isTree"`        // 是否生成树形结构
+	ParentIdField *ColumnTemplate `json:"parentIdField"` // 父ID字段（树形结构时使用）
+
+	// 关联树形分类相关
+	IsRelationTree             bool   `json:"isRelationTree"`             // 是否关联树形分类
+	RelationFieldJsonTag       string `json:"relationFieldJsonTag"`       // 关联字段的JsonTag（小驼峰）
+	RelationFieldJsonTagPascal string `json:"relationFieldJsonTagPascal"` // 关联字段的JsonTag（大驼峰）
+	RelationFieldDataName      string `json:"relationFieldDataName"`      // 关联字段的数据库名
+
+	// 扩展参数
+	ExtraParams map[string]interface{} `json:"extraParams"` // 额外参数
+}
+
+// NewCodeGenContext 创建代码生成上下文
+func NewCodeGenContext(tableName, dirName, fileName, comment string, columns ColumnTemplateList, isTree bool) *CodeGenContext {
+	// 日光时间字段判断 - 筛选实际会被渲染的时间字段
+	hasTimeInQuery := len(columns.Filter(func(col ColumnTemplate) bool {
+		return col.QueryShow && col.GoType == "time.Time"
+	})) > 0
+
+	hasTimeInForm := len(columns.Filter(func(col ColumnTemplate) bool {
+		return col.FormShow && col.GoType == "time.Time"
+	})) > 0
+
+	primaryKey := columns.GetPrimaryKey()
+	var parentIdField *ColumnTemplate
+	if isTree {
+		parentIdField = columns.GetParentIdField(primaryKey)
+	}
+
+	ctx := &CodeGenContext{
+		TableName:           tableName,
+		DirName:             common.KeepLettersOnlyLower(dirName),
+		FileName:            common.KeepLettersOnlyLower(fileName),
+		Comment:             comment,
+		Columns:             columns,
+		PrimaryKey:          primaryKey,
+		StructName:          common.ToCamelCase(fileName),
+		StructNameLower:     common.ToCamelCaseLower(fileName),
+		ExtraParams:         make(map[string]interface{}),
+		HasTimeField:        columns.HasTimeField(),
+		HasCreatedBy:        columns.HasCreatedBy(),
+		HasTenantID:         columns.HasTenantID(),
+		HasTimeFieldInQuery: hasTimeInQuery,
+		HasTimeFieldInForm:  hasTimeInForm,
+		IsTree:              isTree,
+		ParentIdField:       parentIdField,
+	}
+	return ctx
+}
+
+// MenuApiContext 菜单API上下文
+type MenuApiContext struct {
+	TableName string `json:"tableName"` // 表名
+	FileName  string `json:"fileName"`  // 自定义文件名 (全英文字母小写)
+	DirName   string `json:"dirName"`   // 目录名（全英文字母小写）
+	Comment   string `json:"comment"`   // 表注释/描述
+}
+
+// FrontendGenContext 前端代码生成上下文
+type FrontendGenContext struct {
+	// 基础信息
+	TableName string `json:"tableName"` // 表名
+	DirName   string `json:"dirName"`   // 目录名（全英文字母小写）
+	FileName  string `json:"fileName"`  // 文件名（全英文字母小写）
+
+	// 派生信息
+	StructName      string `json:"structName"`      // 大驼峰结构体名
+	StructNameLower string `json:"structNameLower"` // 小驼峰结构体名
+
+	// 列信息
+	Columns    ColumnTemplateList `json:"columns"`    // 字段列表
+	PrimaryKey *ColumnTemplate    `json:"primaryKey"` // 主键
+
+	// 树形结构相关
+	IsTree        bool            `json:"isTree"`        // 是否生成树形结构
+	ParentIdField *ColumnTemplate `json:"parentIdField"` // 父ID字段（树形结构时使用）
+
+	// 关联树形分类相关
+	IsRelationTree         bool               `json:"isRelationTree"`         // 是否关联树形分类
+	RelationTreeDirName    string             `json:"relationTreeDirName"`    // 关联树形分类的目录名
+	RelationTreeFileName   string             `json:"relationTreeFileName"`   // 关联树形分类的文件名
+	RelationTreeStructName string             `json:"relationTreeStructName"` // 关联树形分类的结构体名
+	RelationFieldJsonTag   string             `json:"relationFieldJsonTag"`   // 关联字段的JsonTag
+	RelationFieldComment   string             `json:"relationFieldComment"`   // 关联字段的注释
+	RelationTreeColumns    ColumnTemplateList `json:"relationTreeColumns"`    // 关联树形分类的字段列表
+	RelationTreePrimaryKey *ColumnTemplate    `json:"relationTreePrimaryKey"` // 关联树形分类的主键
+
+	// 扩展参数
+	ExtraParams map[string]interface{} `json:"extraParams"` // 额外参数
+}
+
+// NewFrontendGenContext 创建前端代码生成上下文
+func NewFrontendGenContext(tableName, dirName, fileName string, columns ColumnTemplateList, isTree bool) *FrontendGenContext {
+	primaryKey := columns.GetPrimaryKey()
+	var parentIdField *ColumnTemplate
+	if isTree && primaryKey != nil {
+		parentIdField = columns.GetParentIdField(primaryKey)
+	}
+
+	ctx := &FrontendGenContext{
+		TableName:       tableName,
+		DirName:         common.KeepLettersOnlyLower(dirName),
+		FileName:        common.KeepLettersOnlyLower(fileName),
+		Columns:         columns,
+		PrimaryKey:      primaryKey,
+		StructName:      common.ToCamelCase(fileName),
+		StructNameLower: common.ToCamelCaseLower(fileName),
+		IsTree:          isTree,
+		ParentIdField:   parentIdField,
+		ExtraParams:     make(map[string]interface{}),
+	}
+	return ctx
+}
+
+// TableInfo 表信息结构体
+type TableInfo struct {
+	TableName    string         `json:"tableName"`    // 表名
+	TableComment sql.NullString `json:"tableComment"` // 表注释/描述
+}
+
+// TableColumn 数据库字段信息结构体
+type TableColumn struct {
+	ColumnName       string         `json:"columnName"`       // 列名
+	DataType         string         `json:"dataType"`         // 数据类型
+	ColumnComment    sql.NullString `json:"columnComment"`    // 列注释
+	IsNullable       string         `json:"isNullable"`       // 是否可为空
+	ColumnDefault    sql.NullString `json:"columnDefault"`    // 默认值
+	ColumnKey        sql.NullString `json:"columnKey"`        // 列键信息
+	Extra            sql.NullString `json:"extra"`            // 额外信息
+	MaxLength        sql.NullInt64  `json:"maxLength"`        // 最大长度
+	NumericPrecision sql.NullInt64  `json:"numericPrecision"` // 数值精度
+	NumericScale     sql.NullInt64  `json:"numericScale"`     // 数值标度
+	IsUnsigned       bool           `json:"isUnsigned"`       // 是否为无符号类型
+}
+
+// 是否主键
+// IsPrimaryKey 是否主键
+func (tc *TableColumn) IsPrimaryKey() bool {
+	return tc.ColumnKey.Valid && tc.ColumnKey.String == "PRI"
+}
+
+// normalizeDataType 标准化数据类型，将不同数据库的数据类型转换为统一的小写格式
+func (tc *TableColumn) normalizeDataType() string {
+	dataType := strings.ToLower(tc.DataType)
+
+	// 移除括号和长度信息，如 varchar(255) -> varchar
+	if idx := strings.Index(dataType, "("); idx != -1 {
+		dataType = dataType[:idx]
+	}
+
+	// 处理不同数据库的类型别名
+	switch dataType {
+	case "int", "integer", "int4", "int2", "int1", "tinyint", "smallint", "mediumint":
+		return "integer"
+	case "bigint", "int8":
+		return "bigint"
+	case "varchar", "char", "text", "nvarchar", "ntext", "string", "character varying", "character":
+		return "string"
+	case "datetime", "timestamp", "timestamp without time zone", "timestamp with time zone", "timestamptz":
+		return "datetime"
+	case "date":
+		return "date"
+	case "time":
+		return "time"
+	case "decimal", "numeric", "float", "double", "real", "double precision", "float4", "float8", "money":
+		return "decimal"
+	case "boolean", "bool", "bit":
+		return "boolean"
+	case "json", "jsonb":
+		return "json"
+	case "binary", "varbinary", "blob", "bytea":
+		return "binary"
+	default:
+		return "string"
+	}
+}
+
+// GoType 获取Go语言类型
+func (tc *TableColumn) GoType() string {
+	// 使用标准化后的数据类型进行判断
+	dataType := tc.normalizeDataType()
+
+	switch dataType {
+	case "integer":
+		if tc.IsUnsigned {
+			return "uint"
+		}
+		return "int"
+	case "bigint":
+		if tc.IsUnsigned {
+			return "uint64"
+		}
+		return "int64"
+	case "string", "json":
+		return "string"
+	case "datetime", "date", "time", "timestamp":
+		return "time.Time"
+	case "decimal":
+		return "float64"
+	case "boolean":
+		return "bool"
+	case "binary":
+		return "[]byte"
+	default:
+		return "string"
+	}
+}
+
+// FrontendType 获取前端TypeScript类型
+func (tc *TableColumn) FrontendType() string {
+	// 使用标准化后的数据类型进行判断
+	dataType := tc.normalizeDataType()
+
+	switch dataType {
+	case "integer", "bigint", "decimal":
+		return "number"
+	case "string", "json":
+		return "string"
+	case "datetime", "date", "time", "timestamp":
+		return "string" // 前端通常使用字符串表示日期
+	case "boolean":
+		return "boolean"
+	case "binary":
+		return "string" // 二进制数据在前端通常用字符串表示（如base64）
+	default:
+		return "string"
+	}
+}
+
+func (tc *TableColumn) BuildGormTag() string {
+	// 构建列名
+	columnTag := fmt.Sprintf("column:%s", tc.ColumnName)
+	tags := []string{columnTag}
+
+	// 处理主键
+	if tc.IsPrimaryKey() {
+		tags = append(tags, "primaryKey")
+	}
+
+	// 处理可为 null
+	if tc.IsNullable == "NO" {
+		tags = append(tags, "not null")
+	}
+
+	// 处理默认值
+	if tc.ColumnDefault.Valid {
+		defaultValue := tc.ColumnDefault.String
+		// 如果默认值包含特殊字符，需要添加引号
+		if needsQuotes(tc.DataType) && !isNumericOrBoolean(defaultValue) {
+			defaultValue = fmt.Sprintf("'%s'", defaultValue)
+		}
+		tags = append(tags, fmt.Sprintf("default:%s", defaultValue))
+	}
+
+	// 处理自动递增
+	if tc.Extra.Valid && tc.Extra.String == "auto_increment" {
+		tags = append(tags, "autoIncrement")
+	}
+
+	// 处理唯一键
+	if tc.ColumnKey.Valid && tc.ColumnKey.String == "UNI" {
+		tags = append(tags, "uniqueIndex")
+	}
+
+	// 处理索引 (MUL 表示普通索引)
+	if tc.ColumnKey.Valid && tc.ColumnKey.String == "MUL" {
+		tags = append(tags, "index")
+	}
+
+	// 处理字段长度
+	if tc.MaxLength.Valid && tc.MaxLength.Int64 > 0 {
+		tags = append(tags, fmt.Sprintf("size:%d", tc.MaxLength.Int64))
+	}
+
+	// 处理数值类型精度
+	if isDecimalType(tc.DataType) && tc.NumericPrecision.Valid && tc.NumericScale.Valid {
+		precision := tc.NumericPrecision.Int64
+		scale := tc.NumericScale.Int64
+		if precision > 0 && scale >= 0 {
+			tags = append(tags, fmt.Sprintf("precision:%d", precision))
+			if scale > 0 {
+				tags = append(tags, fmt.Sprintf("scale:%d", scale))
+			}
+		}
+	}
+
+	// 构建最终标签
+	return strings.Join(tags, ";")
+}
+
+// normalizeDataTypeString 标准化数据类型字符串（静态函数版本，不依赖TableColumn）
+func normalizeDataTypeString(dataType string) string {
+	dataType = strings.ToLower(dataType)
+
+	// 移除括号和长度信息，如 varchar(255) -> varchar
+	if idx := strings.Index(dataType, "("); idx != -1 {
+		dataType = dataType[:idx]
+	}
+
+	// 处理不同数据库的类型别名
+	switch dataType {
+	case "int", "integer", "int4", "int2", "int1", "tinyint", "smallint", "mediumint":
+		return "integer"
+	case "bigint", "int8":
+		return "bigint"
+	case "varchar", "char", "text", "nvarchar", "ntext", "string", "character varying", "character":
+		return "string"
+	case "datetime", "timestamp", "timestamp without time zone", "timestamp with time zone", "timestamptz":
+		return "datetime"
+	case "date":
+		return "date"
+	case "time":
+		return "time"
+	case "decimal", "numeric", "float", "double", "real", "double precision", "float4", "float8", "money":
+		return "decimal"
+	case "boolean", "bool", "bit":
+		return "boolean"
+	case "json", "jsonb":
+		return "json"
+	case "binary", "varbinary", "blob", "bytea":
+		return "binary"
+	default:
+		return "string"
+	}
+}
+
+// isDecimalType 判断是否为decimal/numeric类型
+func isDecimalType(dataType string) bool {
+	normalized := normalizeDataTypeString(dataType)
+	return normalized == "decimal"
+}
+
+// needsQuotes 判断数据类型是否需要引号包围默认值
+func needsQuotes(dataType string) bool {
+	normalized := normalizeDataTypeString(dataType)
+	switch normalized {
+	case "string", "datetime", "date", "time", "json":
+		return true
+	default:
+		return false
+	}
+}
+
+// isNumericOrBoolean 判断值是否为数字或布尔值
+func isNumericOrBoolean(value string) bool {
+	if value == "CURRENT_TIMESTAMP" || value == "NULL" {
+		return true
+	}
+	// 检查是否为数字
+	if _, err := strconv.Atoi(value); err == nil {
+		return true
+	}
+	if _, err := strconv.ParseFloat(value, 64); err == nil {
+		return true
+	}
+	// 检查是否为布尔值
+	if value == "true" || value == "false" || value == "0" || value == "1" {
+		return true
+	}
+	return false
+}
+
+type TableColumns []TableColumn
+
+// ColumnTemplate 列模板
+func (tcs TableColumns) ColumnTemplate() ColumnTemplateList {
+	columnTemplates := make([]ColumnTemplate, 0, len(tcs))
+	for _, column := range tcs {
+		// 转换字段名（驼峰命名）
+		fieldName := common.ToCamelCase(column.ColumnName)
+
+		// 定义需要排除的字段列表（系统字段）
+		excludeFields := map[string]bool{
+			"CreatedAt": true,
+			"UpdatedAt": true,
+			"DeletedAt": true,
+			"CreatedBy": true,
+			"TenantId":  true,
+		}
+
+		// 主键字段
+		isPrimary := column.ColumnKey.String == "PRI"
+		comment := fieldName
+		if column.ColumnComment.String != "" {
+			comment = column.ColumnComment.String
+		}
+
+		columnTemplates = append(columnTemplates, ColumnTemplate{
+			FieldName:    fieldName,
+			GoType:       column.GoType(),
+			FrontendType: column.FrontendType(),
+			JsonTag:      common.ToCamelCaseLower(column.ColumnName),
+			GormTag:      column.BuildGormTag(),
+			Comment:      comment,
+			IsPrimary:    isPrimary,
+			Exclude:      excludeFields[fieldName],
+		})
+	}
+	return columnTemplates
+}
+
+// 是否包含主键
+// HasPrimaryKey 是否包含主键
+func (tcs TableColumns) HasPrimaryKey() bool {
+	for _, tc := range tcs {
+		if tc.IsPrimaryKey() {
+			return true
+		}
+	}
+	return false
+}
+
+// 主键字段数量
+// PrimaryKeyCount 主键字段数量
+func (tcs TableColumns) PrimaryKeyCount() int {
+	count := 0
+	for _, tc := range tcs {
+		if tc.IsPrimaryKey() {
+			count++
+		}
+	}
+	return count
+}
+
+// 获取主键
+// GetPrimaryKey 获取主键
+func (tcs TableColumns) GetPrimaryKey() *TableColumn {
+	for _, tc := range tcs {
+		if tc.IsPrimaryKey() {
+			return &tc
+		}
+	}
+	return nil
+}
+
+// ColumnTemplate 字段模板数据
+type ColumnTemplate struct {
+	DataName     string `json:"dataName"`     // 数据库字段名
+	FieldName    string `json:"fieldName"`    // 字段名 （驼峰命名）
+	GoType       string `json:"goType"`       // Go类型
+	FrontendType string `json:"frontendType"` // 前端类型
+	JsonTag      string `json:"jsonTag"`      // JSON标签
+	GormTag      string `json:"gormTag"`      // GORM标签
+	Comment      string `json:"comment"`      // 注释
+	IsPrimary    bool   `json:"isPrimary"`    // 是否主键
+	IsParentKey  bool   `json:"isParentKey"`  // 是否父级键
+	Exclude      bool   `json:"exclude"`      // 是否在Create/Update中排除
+	Required     bool   `json:"required"`     // 是否必填
+	ListShow     bool   `json:"listShow"`     // 是否在列表中显示
+	FormShow     bool   `json:"formShow"`     // 是否在表单中显示
+	QueryShow    bool   `json:"queryShow"`    // 是否在查询中显示
+	QueryType    string `json:"queryType"`    // 查询类型： EQ 等于 NE 不等于 GT 大于 GTE 大于等于 LT 小于 LTE 小于等于 LIKE 包含 BETWEEN 范围
+	FormType     string `json:"formType"`     // 表单类型 : input 文本框 textarea 文本域 number 数字输入框 select 下拉框 radio 单选框 checkbox 复选框 datetime 日期时间
+	DictType     string `json:"dictType"`     // 关联的字典
+}
+
+type ColumnTemplateList []ColumnTemplate
+
+func (c ColumnTemplateList) Filter(fn func(col ColumnTemplate) bool) ColumnTemplateList {
+	filtered := make(ColumnTemplateList, 0)
+	for _, col := range c {
+		if fn(col) {
+			filtered = append(filtered, col)
+		}
+	}
+	return filtered
+}
+
+func (c ColumnTemplateList) GetPrimaryKey() *ColumnTemplate {
+	for _, col := range c {
+		if col.IsPrimary {
+			return &col
+		}
+	}
+	return nil
+}
+
+// 是否有时间字段
+// HasTimeField 是否有时间字段
+func (c ColumnTemplateList) HasTimeField() bool {
+	for _, col := range c {
+		if col.GoType == "time.Time" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasCreatedBy 是否有created_by字段
+func (c ColumnTemplateList) HasCreatedBy() bool {
+	for _, col := range c {
+		if col.DataName == "created_by" {
+			return true
+		}
+	}
+	return false
+}
+
+// HasTenantID 是否有tenant_id字段
+func (c ColumnTemplateList) HasTenantID() bool {
+	for _, col := range c {
+		if col.DataName == "tenant_id" {
+			return true
+		}
+	}
+	return false
+}
+
+// GetParentIdField 获取父ID字段（树形结构时使用）
+func (c ColumnTemplateList) GetParentIdField(primaryKey *ColumnTemplate) *ColumnTemplate {
+	if primaryKey == nil {
+		return nil
+	}
+	// 查找与主键类型相同的  parent_id 字段
+	for _, col := range c {
+		if col.DataName == "parent_id" && col.GoType == primaryKey.GoType {
+			return &col
+		}
+	}
+	return nil
+}
+
+// FileTreeNode 文件树节点 - 用于表示代码生成的目录结构
+type FileTreeNode struct {
+	Name     string          `json:"name"`               // 节点名称（文件名或目录名）
+	Path     string          `json:"path"`               // 完整路径
+	Type     string          `json:"type"`               // 节点类型: "file" 或 "directory"
+	Children []*FileTreeNode `json:"children,omitempty"` // 子节点（仅目录有）
+}
+
+// BuildFileTree 构建文件树结构
+func BuildFileTree(dirName, fileName string, frontendDir string) []*FileTreeNode {
+	root := []*FileTreeNode{}
+
+	// 后端代码目录结构
+	backendRoot := &FileTreeNode{
+		Name: "backend",
+		Path: "backend",
+		Type: "directory",
+		Children: []*FileTreeNode{
+			{
+				Name: "plugins",
+				Path: "plugins",
+				Type: "directory",
+				Children: []*FileTreeNode{
+					{
+						Name: dirName,
+						Path: "plugins/" + dirName,
+						Type: "directory",
+						Children: []*FileTreeNode{
+							{
+								Name: "controllers",
+								Path: "plugins/" + dirName + "/controllers",
+								Type: "directory",
+								Children: []*FileTreeNode{
+									{
+										Name: fileName + "controller.go",
+										Path: "plugins/" + dirName + "/controllers/" + fileName + "controller.go",
+										Type: "file",
+									},
+								},
+							},
+							{
+								Name: "models",
+								Path: "plugins/" + dirName + "/models",
+								Type: "directory",
+								Children: []*FileTreeNode{
+									{
+										Name: fileName + ".go",
+										Path: "plugins/" + dirName + "/models/" + fileName + ".go",
+										Type: "file",
+									},
+									{
+										Name: fileName + "param.go",
+										Path: "plugins/" + dirName + "/models/" + fileName + "param.go",
+										Type: "file",
+									},
+								},
+							},
+							{
+								Name: "service",
+								Path: "plugins/" + dirName + "/service",
+								Type: "directory",
+								Children: []*FileTreeNode{
+									{
+										Name: fileName + "service.go",
+										Path: "plugins/" + dirName + "/service/" + fileName + "service.go",
+										Type: "file",
+									},
+								},
+							},
+							{
+								Name: "routes",
+								Path: "plugins/" + dirName + "/routes",
+								Type: "directory",
+								Children: []*FileTreeNode{
+									{
+										Name: fileName + "routes.go",
+										Path: "plugins/" + dirName + "/routes/" + fileName + "routes.go",
+										Type: "file",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			{
+				Name: dirName + "init.go",
+				Path: "plugins/" + dirName + "init.go",
+				Type: "file",
+			},
+		},
+	}
+	root = append(root, backendRoot)
+
+	// 前端代码目录结构
+	if frontendDir != "" {
+		frontendRoot := &FileTreeNode{
+			Name: "frontend",
+			Path: "frontend",
+			Type: "directory",
+			Children: []*FileTreeNode{
+				{
+					Name: "src",
+					Path: "src",
+					Type: "directory",
+					Children: []*FileTreeNode{
+						{
+							Name: "plugins",
+							Path: "src/plugins",
+							Type: "directory",
+							Children: []*FileTreeNode{
+								{
+									Name: dirName,
+									Path: "src/plugins/" + dirName,
+									Type: "directory",
+									Children: []*FileTreeNode{
+										{
+											Name: "api",
+											Path: "src/plugins/" + dirName + "/api",
+											Type: "directory",
+											Children: []*FileTreeNode{
+												{
+													Name: fileName + ".ts",
+													Path: "src/plugins/" + dirName + "/api/" + fileName + ".ts",
+													Type: "file",
+												},
+											},
+										},
+										{
+											Name: "hooks",
+											Path: "src/plugins/" + dirName + "/hooks",
+											Type: "directory",
+											Children: []*FileTreeNode{
+												{
+													Name: fileName + ".ts",
+													Path: "src/plugins/" + dirName + "/hooks/" + fileName + ".ts",
+													Type: "file",
+												},
+											},
+										},
+										{
+											Name: "views",
+											Path: "src/plugins/" + dirName + "/views",
+											Type: "directory",
+											Children: []*FileTreeNode{
+												{
+													Name: fileName,
+													Path: "src/plugins/" + dirName + "/views/" + fileName,
+													Type: "directory",
+													Children: []*FileTreeNode{
+														{
+															Name: fileName + "list.vue",
+															Path: "src/plugins/" + dirName + "/views/" + fileName + "/" + fileName + "list.vue",
+															Type: "file",
+														},
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		}
+		root = append(root, frontendRoot)
+	}
+
+	return root
+}

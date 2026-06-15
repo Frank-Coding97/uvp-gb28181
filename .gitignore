@@ -1,0 +1,49 @@
+# ===== monorepo 顶层忽略 =====
+# 各子项目(server/ web/)另有自己的 .gitignore,此处仅覆盖顶层与跨项目通用项
+
+# 操作系统
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+
+# IDE / 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AI 工具
+.claude/
+CLAUDE.md
+AGENTS.md
+.trae/
+.roo/
+.history/
+
+# Go 构建产物 (server)
+server/bin/
+server/dist/
+*.exe
+*.test
+*.out
+
+# Node 依赖与构建产物 (web)
+web/node_modules/
+web/dist/
+web/dist-ssr/
+
+# 日志与临时
+*.log
+logs/
+tmp/
+temp/
+
+# 环境与本地配置
+.env
+.env.local
+.env.production

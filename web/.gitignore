@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist.zip
+dist.7z
+dist-ssr
+*.local
+
+# Editor directories and files
+.vscode/
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Husky
+.husky/
+
+# Roo
+.roo/
+
+# claude
+CLAUDE.md
+# src/plugins directory
+src/plugins/*/
+!src/plugins/example/
+/plans
+/AGENTS.md
+/.history
