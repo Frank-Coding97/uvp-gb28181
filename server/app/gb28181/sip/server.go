@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"github.com/emiago/sipgo"
-	"github.com/emiago/sipgo/sip"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
@@ -44,10 +43,8 @@ func NewServer(cfg gbconfig.Config) (*Server, error) {
 func (s *Server) registerHandlers() {
 	regHandler := handler.NewRegisterHandler(s.cfg)
 	s.srv.OnRegister(regHandler.Handle)
-	// MESSAGE(心跳等)留 T5 接入,先占位回 200
-	s.srv.OnMessage(func(req *sip.Request, tx sip.ServerTransaction) {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
-	})
+	msgHandler := handler.NewMessageHandler(s.cfg)
+	s.srv.OnMessage(msgHandler.Handle)
 }
 
 // Start 启动双栈监听(配置里声明的每个 transport 各起一个 goroutine)

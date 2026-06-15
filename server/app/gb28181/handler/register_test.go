@@ -244,3 +244,80 @@ func TestRegisterRefresh(t *testing.T) {
 		t.Errorf("期望 1 条记录,实际 %d", count)
 	}
 }
+
+// sendKeepalive 模拟设备发 Keepalive MESSAGE
+func sendKeepalive(t *testing.T, deviceID string) int {
+	ua, _ := sipgo.NewUA(sipgo.WithUserAgent(deviceID))
+	client, _ := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
+	defer client.Close()
+
+	recipient := sip.Uri{}
+	sip.ParseUri("sip:34020000002000000001@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	req := sip.NewRequest(sip.MESSAGE, recipient)
+	body := `<?xml version="1.0" encoding="UTF-8"?>
+<Notify><CmdType>Keepalive</CmdType><SN>1</SN><DeviceID>` + deviceID + `</DeviceID><Status>OK</Status></Notify>`
+	req.SetBody([]byte(body))
+	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
+	req.SetTransport("UDP")
+
+	tx, err := client.TransactionRequest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("发心跳事务: %v", err)
+	}
+	defer tx.Terminate()
+	res := <-tx.Responses()
+	if res == nil {
+		t.Fatal("心跳无响应")
+	}
+	return int(res.StatusCode)
+}
+
+// TestKeepalive T5-测1(AC-4): 注册后发心跳 → 200 + Redis 在线态刷新 + keepalive_time 更新
+func TestKeepalive(t *testing.T) {
+	setupEnv(t)
+	cleanupDevice(testDeviceID)
+	defer cleanupDevice(testDeviceID)
+	stop := startTestServer(t, testCfg())
+	defer stop()
+
+	// 先注册建档
+	if code := doRegister(t, testDeviceID, testPassword, 3600); code != 200 {
+		t.Fatalf("前置注册失败: %d", code)
+	}
+	// 删掉 Redis 在线态,验证心跳能重新写回
+	_ = app.Cache.Del(context.Background(), gbdevice.OnlineKey(testDeviceID))
+
+	code := sendKeepalive(t, testDeviceID)
+	if code != 200 {
+		t.Fatalf("心跳期望 200,实际 %d", code)
+	}
+	if !gbdevice.IsOnline(context.Background(), testDeviceID) {
+		t.Error("心跳后 Redis 在线态未刷新")
+	}
+	d, _ := gbmodels.FindByDeviceID(context.Background(), testDeviceID)
+	if d == nil || d.KeepaliveTime == nil {
+		t.Error("心跳后 keepalive_time 未更新")
+	}
+}
+
+// TestMalformedMessage T5-测3: 畸形 MESSAGE → 不 panic,回 200
+func TestMalformedMessage(t *testing.T) {
+	setupEnv(t)
+	stop := startTestServer(t, testCfg())
+	defer stop()
+
+	ua, _ := sipgo.NewUA(sipgo.WithUserAgent("badmsg"))
+	client, _ := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
+	defer client.Close()
+	recipient := sip.Uri{}
+	sip.ParseUri("sip:34020000002000000001@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	req := sip.NewRequest(sip.MESSAGE, recipient)
+	req.SetBody([]byte("garbage-not-xml"))
+	req.SetTransport("UDP")
+	tx, _ := client.TransactionRequest(context.Background(), req)
+	defer tx.Terminate()
+	res := <-tx.Responses()
+	if res == nil || res.StatusCode != 200 {
+		t.Fatalf("畸形消息期望回 200,实际 %v", res)
+	}
+}
