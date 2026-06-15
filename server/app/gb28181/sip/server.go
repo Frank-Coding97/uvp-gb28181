@@ -9,6 +9,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -16,7 +17,7 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
-	cfg     gbconfig.SIPConfig
+	cfg     gbconfig.Config
 	ua      *sipgo.UserAgent
 	srv     *sipgo.Server
 	cancel  context.CancelFunc
@@ -25,7 +26,7 @@ type Server struct {
 }
 
 // NewServer 创建 SIP 服务
-func NewServer(cfg gbconfig.SIPConfig) (*Server, error) {
+func NewServer(cfg gbconfig.Config) (*Server, error) {
 	ua, err := sipgo.NewUA(sipgo.WithUserAgent("UVP-GB28181"))
 	if err != nil {
 		return nil, fmt.Errorf("创建 SIP UA 失败: %w", err)
@@ -40,11 +41,10 @@ func NewServer(cfg gbconfig.SIPConfig) (*Server, error) {
 }
 
 // registerHandlers 注册 SIP 方法处理器
-// T3 阶段先注册最简占位(回 200),REGISTER/MESSAGE 业务逻辑在 T4/T5 接入
 func (s *Server) registerHandlers() {
-	s.srv.OnRegister(func(req *sip.Request, tx sip.ServerTransaction) {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
-	})
+	regHandler := handler.NewRegisterHandler(s.cfg)
+	s.srv.OnRegister(regHandler.Handle)
+	// MESSAGE(心跳等)留 T5 接入,先占位回 200
 	s.srv.OnMessage(func(req *sip.Request, tx sip.ServerTransaction) {
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 	})
@@ -56,8 +56,8 @@ func (s *Server) Start() error {
 	s.cancel = cancel
 	s.started = true
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.IP, s.cfg.Port)
-	for _, tran := range s.cfg.Transport {
+	addr := fmt.Sprintf("%s:%d", s.cfg.SIP.IP, s.cfg.SIP.Port)
+	for _, tran := range s.cfg.SIP.Transport {
 		t := tran
 		s.wg.Add(1)
 		go func() {

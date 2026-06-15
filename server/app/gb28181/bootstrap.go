@@ -22,7 +22,7 @@ func Start() {
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
-	srv, err := gbsip.NewServer(cfg.SIP)
+	srv, err := gbsip.NewServer(cfg)
 	if err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务创建失败", zap.Error(err))
 		return
