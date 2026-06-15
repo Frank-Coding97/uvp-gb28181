@@ -1,6 +1,7 @@
 package main
 
 import (
+	"uvplatform.cn/uvp-gb28181/app/gb28181"
 	"uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	_ "uvplatform.cn/uvp-gb28181/bootstrap"
@@ -29,7 +30,11 @@ func main() {
 	routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
-	// 启动服务器
+	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
+	gb28181.Start()
+	// 启动服务器(阻塞直到收到退出信号)
 	_ = ginhelper.StartServer(engine)
+	// 优雅关闭 GB28181 SIP 服务
+	gb28181.Stop()
 
 }
