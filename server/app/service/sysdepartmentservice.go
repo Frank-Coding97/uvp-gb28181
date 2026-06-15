@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"errors"
-	"gin-fast/app/models"
+	"uvplatform.cn/uvp-gb28181/app/models"
 
 	"gorm.io/gorm"
 )

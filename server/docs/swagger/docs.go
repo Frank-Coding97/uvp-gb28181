@@ -9,15 +9,14 @@ const docTemplate = `{
     "info": {
         "description": "{{escape .Description}}",
         "title": "{{.Title}}",
-        "termsOfService": "https://github.com/your-repo/gin-fast",
+        "termsOfService": "https://github.com/Frank-Coding97/uvp-gb28181",
         "contact": {
-            "name": "API Support",
-            "url": "https://github.com/your-repo/gin-fast/issues",
-            "email": "your-email@example.com"
+            "name": "UVP Support",
+            "url": "https://github.com/Frank-Coding97/uvp-gb28181/issues"
         },
         "license": {
             "name": "MIT",
-            "url": "https://github.com/your-repo/gin-fast/blob/master/LICENSE"
+            "url": "https://github.com/Frank-Coding97/uvp-gb28181/blob/main/LICENSE"
         },
         "version": "{{.Version}}"
     },
@@ -467,7 +466,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/gin-fast_app_models.LoginRequest"
+                            "$ref": "#/definitions/models.LoginRequest"
                         }
                     }
                 ],
@@ -5006,7 +5005,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/gin-fast_app_models.DeleteRequest"
+                            "$ref": "#/definitions/uvplatform_cn_uvp-gb28181_app_models.DeleteRequest"
                         }
                     }
                 ],
@@ -5060,7 +5059,7 @@ const docTemplate = `{
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/gin-fast_app_models.UpdateRequest"
+                            "$ref": "#/definitions/uvplatform_cn_uvp-gb28181_app_models.UpdateRequest"
                         }
                     }
                 ],
@@ -5506,84 +5505,6 @@ const docTemplate = `{
         }
     },
     "definitions": {
-        "gin-fast_app_models.DeleteRequest": {
-            "type": "object",
-            "required": [
-                "id"
-            ],
-            "properties": {
-                "id": {
-                    "type": "integer"
-                }
-            }
-        },
-        "gin-fast_app_models.LoginRequest": {
-            "type": "object",
-            "required": [
-                "password",
-                "username"
-            ],
-            "properties": {
-                "password": {
-                    "type": "string"
-                },
-                "tenantCode": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "gin-fast_app_models.UpdateRequest": {
-            "type": "object",
-            "required": [
-                "deptId",
-                "id",
-                "nickName",
-                "roles",
-                "sex",
-                "userName"
-            ],
-            "properties": {
-                "deptId": {
-                    "type": "integer"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "nickName": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string"
-                },
-                "phone": {
-                    "type": "string"
-                },
-                "roles": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "sex": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "integer"
-                },
-                "userName": {
-                    "type": "string"
-                }
-            }
-        },
         "models.AddRequest": {
             "type": "object",
             "required": [
@@ -5701,6 +5622,24 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "uploadId": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.LoginRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "tenantCode": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 }
             }
@@ -6529,6 +6468,66 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "uvplatform_cn_uvp-gb28181_app_models.DeleteRequest": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "uvplatform_cn_uvp-gb28181_app_models.UpdateRequest": {
+            "type": "object",
+            "required": [
+                "deptId",
+                "id",
+                "nickName",
+                "roles",
+                "sex",
+                "userName"
+            ],
+            "properties": {
+                "deptId": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "nickName": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "roles": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "userName": {
+                    "type": "string"
+                }
+            }
         }
     }
 }`
@@ -6539,8 +6538,8 @@ var SwaggerInfo = &swag.Spec{
 	Host:             "localhost:8080",
 	BasePath:         "/api",
 	Schemes:          []string{},
-	Title:            "Gin-Fast API",
-	Description:      "基于Gin框架的快速开发脚手架API文档",
+	Title:            "UVP-GB28181 API",
+	Description:      "UVP 国标 GB28181 上级平台 API 文档",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

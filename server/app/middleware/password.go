@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gin-fast/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"

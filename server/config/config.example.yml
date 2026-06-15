@@ -54,10 +54,10 @@ httpserver:
   idle_timeout: 60    # TCP空闲连接超时(秒)
   handler_timeout: 30 #  请求处理超时(秒)，超过该时间，将返回超时错误
 token:
-  jwttokensignkey:  "gin-fast"   #设置token生成时加密的签名
+  jwttokensignkey:  "CHANGE_ME_TO_A_RANDOM_SECRET"   # ⚠️ 部署前必须改成项目专属随机字符串(token 加密签名,泄露=任何人可伪造 token)
   jwttokenexpire:  43200    #设置token过期时间，单位秒 示例:43200=12小时
   jwttokenrefreshexpire:  2592000  #设置刷新token过期时间，单位秒 示例:2592000=30天
-  cachekeyprefix: "gin-fast:"  # 缓存前缀
+  cachekeyprefix: "uvp-gb28181:"  # 缓存前缀
   isCache: false  # 是否开启token缓存 (注意开启后会降低token验证的性能,但是注销token后token立即失效)
 redis:
   host: "127.0.0.1"
@@ -102,7 +102,7 @@ gormv2: # 只针对 gorm  操作数据库有效
     timezone: "Local"            # 时区配置，例如: Local, Asia/Shanghai, UTC 等
     write:
       host: "127.0.0.1"
-      database: "gin-fast"
+      database: "uvp_gb28181"
       port: 3306
       prefix: ""
       user: "root"
@@ -115,7 +115,7 @@ gormv2: # 只针对 gorm  操作数据库有效
     isopenreaddb: 0                     # 是否开启读写分离配置（1=开启、0=关闭），IsOpenReadDb=1,Read 部分参数有效，否则Read部分参数直接忽略
     read:
       host: "127.0.0.1"
-      database: "gin-fast"
+      database: "uvp_gb28181"
       port: 3306                        #注意，非3306，请自行调整
       prefix: ""
       user: "root"
@@ -131,7 +131,7 @@ gormv2: # 只针对 gorm  操作数据库有效
     timezone: ""                  # SQL Server 不需要时区配置
     write:
       host: "127.0.0.1"
-      database: "gin-fast"
+      database: "uvp_gb28181"
       port: 1433
       prefix: ""
       user: ""
@@ -143,7 +143,7 @@ gormv2: # 只针对 gorm  操作数据库有效
     isopenreaddb: 0            # 是否开启读写分离配置（1=开启、0=关闭
     read:
       host: "127.0.0.1"
-      database: "gin-fast"
+      database: "uvp_gb28181"
       port: 1433
       prefix: ""
       user: ""
@@ -158,7 +158,7 @@ gormv2: # 只针对 gorm  操作数据库有效
     timezone: "Asia/Shanghai"       # 时区配置，例如: Asia/Shanghai, UTC 等
     write:
       host: "127.0.0.1"
-      database: "gin-fast"
+      database: "uvp_gb28181"
       port: 5432
       prefix: ""
       user: ""
@@ -170,7 +170,7 @@ gormv2: # 只针对 gorm  操作数据库有效
     isopenreaddb: 0            # 是否开启读写分离配置（1=开启、0=关闭），IsOpenReadDb=1,Read  部分参数有效，否则Read部分参数直接忽略
     read:
       host: "127.0.0.1"
-      database: "gin-fast"
+      database: "uvp_gb28181"
       port: 5432
       prefix: ""
       user: ""

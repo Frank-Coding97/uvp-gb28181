@@ -1,8 +1,8 @@
 package controllers
 
 import (
-	"gin-fast/app/models"
-	"gin-fast/app/service"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/service"
 
 	"github.com/gin-gonic/gin"
 )

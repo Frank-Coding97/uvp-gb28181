@@ -2,8 +2,8 @@ package tokeneasy
 
 import (
 	"context"
-	"gin-fast/app/global/app"
-	"gin-fast/app/utils/tokenhelper"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 	"sync"
 )
 

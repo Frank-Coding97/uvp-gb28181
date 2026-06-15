@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"errors"
 
-	"gin-fast/app/models"
-	"gin-fast/app/service"
-	"gin-fast/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/service"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 
 	"github.com/gin-gonic/gin"
 )

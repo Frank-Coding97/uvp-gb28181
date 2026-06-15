@@ -1,14 +1,14 @@
 package service
 
 import (
-	"gin-fast/plugins/{{.DirName}}/models"
+	"uvplatform.cn/uvp-gb28181/plugins/{{.DirName}}/models"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 {{- if or .HasCreatedBy .HasTenantID}}
-	"gin-fast/app/utils/datascope"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 {{- end}}
 {{- if .HasTenantID}}
-	"gin-fast/app/utils/tenanthelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
 {{- end}}
 )
 

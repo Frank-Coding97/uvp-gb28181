@@ -5,7 +5,7 @@ import (
 	"crypto/md5"
 	"errors"
 	"fmt"
-	"gin-fast/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"

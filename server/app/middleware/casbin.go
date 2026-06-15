@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"gin-fast/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/gin-gonic/gin"
 )

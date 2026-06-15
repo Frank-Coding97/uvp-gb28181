@@ -1,8 +1,8 @@
 package tokeneasy
 
 import (
-	"gin-fast/app/global/app"
-	"gin-fast/app/utils/ymlconfig"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 	"sync"
 )
 

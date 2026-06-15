@@ -3,8 +3,8 @@ package gormhelper
 import (
 	"errors"
 	"fmt"
-	"gin-fast/app/global/app"
-	"gin-fast/app/global/myerrors"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 	"strings"
 	"time"
 

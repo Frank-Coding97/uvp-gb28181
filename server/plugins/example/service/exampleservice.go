@@ -1,7 +1,7 @@
 package service
 
 import (
-	"gin-fast/plugins/example/models"
+	"uvplatform.cn/uvp-gb28181/plugins/example/models"
 
 	"github.com/gin-gonic/gin"
 )

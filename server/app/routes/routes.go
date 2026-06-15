@@ -8,9 +8,9 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
-	"gin-fast/app/controllers"
-	"gin-fast/app/global/app"
-	"gin-fast/app/middleware"
+	"uvplatform.cn/uvp-gb28181/app/controllers"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/middleware"
 )
 
 var userControllers = controllers.NewUserController()                       // 用户控制器

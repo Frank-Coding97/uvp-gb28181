@@ -1,4 +1,4 @@
-module gin-fast
+module uvplatform.cn/uvp-gb28181
 
 go 1.25
 

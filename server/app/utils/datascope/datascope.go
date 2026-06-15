@@ -1,9 +1,9 @@
 package datascope
 
 import (
-	"gin-fast/app/global/app"
-	"gin-fast/app/models"
-	"gin-fast/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"strconv"
 	"strings"
 

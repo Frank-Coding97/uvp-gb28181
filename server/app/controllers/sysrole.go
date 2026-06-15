@@ -2,10 +2,10 @@ package controllers
 
 import (
 	"fmt"
-	"gin-fast/app/global/app"
-	"gin-fast/app/models"
-	"gin-fast/app/service"
-	"gin-fast/app/utils/tenanthelper"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/service"
+	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
 	"strconv"
 
 	"github.com/gin-gonic/gin"

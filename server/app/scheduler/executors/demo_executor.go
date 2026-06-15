@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"gin-fast/app/utils/schedulerhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 // DemoExecutor 演示执行器，用于测试和演示调度器功能

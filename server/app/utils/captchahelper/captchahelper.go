@@ -1,7 +1,7 @@
 package captchahelper
 
 import (
-	"gin-fast/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"sync"
 
 	"github.com/mojocn/base64Captcha"

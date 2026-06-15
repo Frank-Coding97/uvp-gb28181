@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"io"
 
-	"gin-fast/app/global/app"
-	"gin-fast/app/utils/captchahelper"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/captchahelper"
 
 	"github.com/gin-gonic/gin"
 )

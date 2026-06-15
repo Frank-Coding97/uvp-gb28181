@@ -3,8 +3,8 @@ package service
 import (
 	"context"
 	"errors"
-	"gin-fast/app/global/app"
-	"gin-fast/app/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
 )
 
 type SysParamService struct {

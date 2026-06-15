@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"gin-fast/app/global/app"
-	"gin-fast/app/models"
-	"gin-fast/app/utils/schedulerhelper"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 
 	"go.uber.org/zap"
 )

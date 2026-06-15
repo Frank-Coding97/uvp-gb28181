@@ -1,7 +1,7 @@
 package app
 
 import (
-	"gin-fast/app/utils/schedulerhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 // JobSchedulerInterf 任务调度器接口

@@ -4,7 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"gin-fast/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"strconv"
 	"strings"
 )

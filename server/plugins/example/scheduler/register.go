@@ -1,8 +1,8 @@
 package scheduler
 
 import (
-	"gin-fast/app/global/app"
-	"gin-fast/plugins/example/scheduler/executors"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/plugins/example/scheduler/executors"
 )
 
 // RegisterExampleExecutors 注册示例插件的所有执行器

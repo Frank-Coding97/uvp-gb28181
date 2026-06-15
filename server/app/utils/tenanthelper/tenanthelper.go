@@ -1,7 +1,7 @@
 package tenanthelper
 
 import (
-	"gin-fast/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

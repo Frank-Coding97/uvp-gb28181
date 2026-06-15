@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"gin-fast/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
 )

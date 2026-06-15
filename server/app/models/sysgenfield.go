@@ -3,8 +3,8 @@ package models
 import (
 	"context"
 	"fmt"
-	"gin-fast/app/global/app"
-	"gin-fast/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 
 	"gorm.io/gorm"
 )

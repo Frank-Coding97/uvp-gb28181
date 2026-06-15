@@ -2,7 +2,7 @@ package models
 
 import (
 	"context"
-	"gin-fast/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"gorm.io/gorm"
 )

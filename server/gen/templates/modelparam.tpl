@@ -4,7 +4,7 @@ import (
 {{- if .HasTimeField}}
 	"time"
 {{- end}}
-	"gin-fast/app/models"
+	"uvplatform.cn/uvp-gb28181/app/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

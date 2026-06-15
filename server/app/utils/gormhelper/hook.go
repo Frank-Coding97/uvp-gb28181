@@ -1,8 +1,8 @@
 package gormhelper
 
 import (
-	"gin-fast/app/global/app"
-	"gin-fast/app/global/myerrors"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 	"reflect"
 	"strings"
 

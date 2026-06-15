@@ -1,25 +1,24 @@
 package main
 
 import (
-	"gin-fast/app/routes"
-	"gin-fast/app/utils/ginhelper"
-	_ "gin-fast/bootstrap"
+	"uvplatform.cn/uvp-gb28181/app/routes"
+	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
+	_ "uvplatform.cn/uvp-gb28181/bootstrap"
 
-	_ "gin-fast/docs/swagger" // swagger docs
-	_ "gin-fast/plugins"
+	_ "uvplatform.cn/uvp-gb28181/docs/swagger" // swagger docs
+	_ "uvplatform.cn/uvp-gb28181/plugins"
 )
 
-// @title Gin-Fast API
+// @title UVP-GB28181 API
 // @version 1.0
-// @description 基于Gin框架的快速开发脚手架API文档
-// @termsOfService https://github.com/your-repo/gin-fast
+// @description UVP 国标 GB28181 上级平台 API 文档
+// @termsOfService https://github.com/Frank-Coding97/uvp-gb28181
 
-// @contact.name API Support
-// @contact.url https://github.com/your-repo/gin-fast/issues
-// @contact.email your-email@example.com
+// @contact.name UVP Support
+// @contact.url https://github.com/Frank-Coding97/uvp-gb28181/issues
 
 // @license.name MIT
-// @license.url https://github.com/your-repo/gin-fast/blob/master/LICENSE
+// @license.url https://github.com/Frank-Coding97/uvp-gb28181/blob/main/LICENSE
 
 // @host localhost:8080
 // @BasePath /api

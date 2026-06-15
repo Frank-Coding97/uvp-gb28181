@@ -1,7 +1,7 @@
 package app
 
 import (
-	"gin-fast/app/global/consts"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
 
 	"log"
 

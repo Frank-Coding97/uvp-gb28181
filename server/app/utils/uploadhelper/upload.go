@@ -2,8 +2,8 @@ package uploadhelper
 
 import (
 	"errors"
-	"gin-fast/app/global/app"
-	"gin-fast/app/global/consts"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
 )
 
 // GetUploadType 获取上传类型

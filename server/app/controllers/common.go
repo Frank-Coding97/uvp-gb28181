@@ -3,9 +3,9 @@ package controllers
 import (
 	"errors"
 	"fmt"
-	"gin-fast/app/global/app"
-	"gin-fast/app/global/consts"
-	"gin-fast/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"

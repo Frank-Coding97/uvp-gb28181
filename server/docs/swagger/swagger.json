@@ -1,17 +1,16 @@
 {
     "swagger": "2.0",
     "info": {
-        "description": "基于Gin框架的快速开发脚手架API文档",
-        "title": "Gin-Fast API",
-        "termsOfService": "https://github.com/your-repo/gin-fast",
+        "description": "UVP 国标 GB28181 上级平台 API 文档",
+        "title": "UVP-GB28181 API",
+        "termsOfService": "https://github.com/Frank-Coding97/uvp-gb28181",
         "contact": {
-            "name": "API Support",
-            "url": "https://github.com/your-repo/gin-fast/issues",
-            "email": "your-email@example.com"
+            "name": "UVP Support",
+            "url": "https://github.com/Frank-Coding97/uvp-gb28181/issues"
         },
         "license": {
             "name": "MIT",
-            "url": "https://github.com/your-repo/gin-fast/blob/master/LICENSE"
+            "url": "https://github.com/Frank-Coding97/uvp-gb28181/blob/main/LICENSE"
         },
         "version": "1.0"
     },
@@ -461,7 +460,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/gin-fast_app_models.LoginRequest"
+                            "$ref": "#/definitions/models.LoginRequest"
                         }
                     }
                 ],
@@ -5000,7 +4999,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/gin-fast_app_models.DeleteRequest"
+                            "$ref": "#/definitions/uvplatform_cn_uvp-gb28181_app_models.DeleteRequest"
                         }
                     }
                 ],
@@ -5054,7 +5053,7 @@
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/gin-fast_app_models.UpdateRequest"
+                            "$ref": "#/definitions/uvplatform_cn_uvp-gb28181_app_models.UpdateRequest"
                         }
                     }
                 ],
@@ -5500,84 +5499,6 @@
         }
     },
     "definitions": {
-        "gin-fast_app_models.DeleteRequest": {
-            "type": "object",
-            "required": [
-                "id"
-            ],
-            "properties": {
-                "id": {
-                    "type": "integer"
-                }
-            }
-        },
-        "gin-fast_app_models.LoginRequest": {
-            "type": "object",
-            "required": [
-                "password",
-                "username"
-            ],
-            "properties": {
-                "password": {
-                    "type": "string"
-                },
-                "tenantCode": {
-                    "type": "string"
-                },
-                "username": {
-                    "type": "string"
-                }
-            }
-        },
-        "gin-fast_app_models.UpdateRequest": {
-            "type": "object",
-            "required": [
-                "deptId",
-                "id",
-                "nickName",
-                "roles",
-                "sex",
-                "userName"
-            ],
-            "properties": {
-                "deptId": {
-                    "type": "integer"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "email": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "integer"
-                },
-                "nickName": {
-                    "type": "string"
-                },
-                "password": {
-                    "type": "string"
-                },
-                "phone": {
-                    "type": "string"
-                },
-                "roles": {
-                    "type": "array",
-                    "items": {
-                        "type": "integer"
-                    }
-                },
-                "sex": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "integer"
-                },
-                "userName": {
-                    "type": "string"
-                }
-            }
-        },
         "models.AddRequest": {
             "type": "object",
             "required": [
@@ -5695,6 +5616,24 @@
                     "type": "integer"
                 },
                 "uploadId": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.LoginRequest": {
+            "type": "object",
+            "required": [
+                "password",
+                "username"
+            ],
+            "properties": {
+                "password": {
+                    "type": "string"
+                },
+                "tenantCode": {
+                    "type": "string"
+                },
+                "username": {
                     "type": "string"
                 }
             }
@@ -6520,6 +6459,66 @@
                     "type": "integer"
                 },
                 "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "uvplatform_cn_uvp-gb28181_app_models.DeleteRequest": {
+            "type": "object",
+            "required": [
+                "id"
+            ],
+            "properties": {
+                "id": {
+                    "type": "integer"
+                }
+            }
+        },
+        "uvplatform_cn_uvp-gb28181_app_models.UpdateRequest": {
+            "type": "object",
+            "required": [
+                "deptId",
+                "id",
+                "nickName",
+                "roles",
+                "sex",
+                "userName"
+            ],
+            "properties": {
+                "deptId": {
+                    "type": "integer"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "integer"
+                },
+                "nickName": {
+                    "type": "string"
+                },
+                "password": {
+                    "type": "string"
+                },
+                "phone": {
+                    "type": "string"
+                },
+                "roles": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "sex": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "integer"
+                },
+                "userName": {
                     "type": "string"
                 }
             }

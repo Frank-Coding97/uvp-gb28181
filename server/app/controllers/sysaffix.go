@@ -1,14 +1,14 @@
 package controllers
 
 import (
-	"gin-fast/app/global/app"
-	"gin-fast/app/global/consts"
-	"gin-fast/app/models"
-	"gin-fast/app/service"
-	"gin-fast/app/utils/datascope"
-	"gin-fast/app/utils/filehelper"
-	"gin-fast/app/utils/imagehelper"
-	"gin-fast/app/utils/tenanthelper"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/service"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.cn/uvp-gb28181/app/utils/filehelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/imagehelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
 	"path/filepath"
 	"strconv"
 	"strings"

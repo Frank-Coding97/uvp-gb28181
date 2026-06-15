@@ -1,6 +1,6 @@
 package plugins
 
 import (
-	 _ "gin-fast/plugins/{{.DirName}}/routes"
+	 _ "uvplatform.cn/uvp-gb28181/plugins/{{.DirName}}/routes"
 )
 

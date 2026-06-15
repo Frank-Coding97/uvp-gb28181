@@ -3,7 +3,7 @@ package cachehelper
 import (
 	"context"
 	"errors"
-	"gin-fast/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"time"
 
 	"github.com/go-redis/redis/v8"

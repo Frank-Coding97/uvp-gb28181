@@ -1,58 +1,5 @@
 basePath: /api
 definitions:
-  gin-fast_app_models.DeleteRequest:
-    properties:
-      id:
-        type: integer
-    required:
-    - id
-    type: object
-  gin-fast_app_models.LoginRequest:
-    properties:
-      password:
-        type: string
-      tenantCode:
-        type: string
-      username:
-        type: string
-    required:
-    - password
-    - username
-    type: object
-  gin-fast_app_models.UpdateRequest:
-    properties:
-      deptId:
-        type: integer
-      description:
-        type: string
-      email:
-        type: string
-      id:
-        type: integer
-      nickName:
-        type: string
-      password:
-        type: string
-      phone:
-        type: string
-      roles:
-        items:
-          type: integer
-        type: array
-      sex:
-        type: string
-      status:
-        type: integer
-      userName:
-        type: string
-    required:
-    - deptId
-    - id
-    - nickName
-    - roles
-    - sex
-    - userName
-    type: object
   models.AddRequest:
     properties:
       deptId:
@@ -135,6 +82,18 @@ definitions:
     - fileSize
     - totalChunks
     - uploadId
+    type: object
+  models.LoginRequest:
+    properties:
+      password:
+        type: string
+      tenantCode:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
     type: object
   models.RefreshRequest:
     properties:
@@ -693,18 +652,58 @@ definitions:
     - id
     - name
     type: object
+  uvplatform_cn_uvp-gb28181_app_models.DeleteRequest:
+    properties:
+      id:
+        type: integer
+    required:
+    - id
+    type: object
+  uvplatform_cn_uvp-gb28181_app_models.UpdateRequest:
+    properties:
+      deptId:
+        type: integer
+      description:
+        type: string
+      email:
+        type: string
+      id:
+        type: integer
+      nickName:
+        type: string
+      password:
+        type: string
+      phone:
+        type: string
+      roles:
+        items:
+          type: integer
+        type: array
+      sex:
+        type: string
+      status:
+        type: integer
+      userName:
+        type: string
+    required:
+    - deptId
+    - id
+    - nickName
+    - roles
+    - sex
+    - userName
+    type: object
 host: localhost:8080
 info:
   contact:
-    email: your-email@example.com
-    name: API Support
-    url: https://github.com/your-repo/gin-fast/issues
-  description: 基于Gin框架的快速开发脚手架API文档
+    name: UVP Support
+    url: https://github.com/Frank-Coding97/uvp-gb28181/issues
+  description: UVP 国标 GB28181 上级平台 API 文档
   license:
     name: MIT
-    url: https://github.com/your-repo/gin-fast/blob/master/LICENSE
-  termsOfService: https://github.com/your-repo/gin-fast
-  title: Gin-Fast API
+    url: https://github.com/Frank-Coding97/uvp-gb28181/blob/main/LICENSE
+  termsOfService: https://github.com/Frank-Coding97/uvp-gb28181
+  title: UVP-GB28181 API
   version: "1.0"
 paths:
   /captcha/verify:
@@ -996,7 +995,7 @@ paths:
         name: loginReq
         required: true
         schema:
-          $ref: '#/definitions/gin-fast_app_models.LoginRequest'
+          $ref: '#/definitions/models.LoginRequest'
       produces:
       - application/json
       responses:
@@ -3987,7 +3986,7 @@ paths:
         name: user
         required: true
         schema:
-          $ref: '#/definitions/gin-fast_app_models.DeleteRequest'
+          $ref: '#/definitions/uvplatform_cn_uvp-gb28181_app_models.DeleteRequest'
       produces:
       - application/json
       responses:
@@ -4022,7 +4021,7 @@ paths:
         name: user
         required: true
         schema:
-          $ref: '#/definitions/gin-fast_app_models.UpdateRequest'
+          $ref: '#/definitions/uvplatform_cn_uvp-gb28181_app_models.UpdateRequest'
       produces:
       - application/json
       responses:

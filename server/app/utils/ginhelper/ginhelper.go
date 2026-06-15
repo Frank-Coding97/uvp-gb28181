@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"gin-fast/app/global/app"
-	"gin-fast/app/global/consts"
-	"gin-fast/app/scheduler"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	"uvplatform.cn/uvp-gb28181/app/scheduler"
 
 	"io"
 

@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"gin-fast/app/global/app"
-	"gin-fast/app/models"
-	"gin-fast/app/utils/schedulerhelper"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

@@ -1,8 +1,8 @@
 package plugins
 
 import (
-	_ "gin-fast/plugins/example/routes"
-	"gin-fast/plugins/example/scheduler"
+	_ "uvplatform.cn/uvp-gb28181/plugins/example/routes"
+	"uvplatform.cn/uvp-gb28181/plugins/example/scheduler"
 )
 
 // 插件初始化时自动执行

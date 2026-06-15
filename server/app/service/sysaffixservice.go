@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
-	"gin-fast/app/global/app"
-	"gin-fast/app/models"
-	"gin-fast/app/utils/filehelper"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/filehelper"
 	"io"
 	"os"
 	"path/filepath"
