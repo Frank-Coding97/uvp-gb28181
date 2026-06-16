@@ -86,3 +86,18 @@ func ListOnline(c context.Context) (GbDeviceList, error) {
 	err := app.DB().WithContext(c).Where("status = ?", DeviceStatusOnline).Find(&list).Error
 	return list, err
 }
+
+// ListPaged 分页查询设备列表,返回当页数据与总数
+func ListPaged(c context.Context, page, pageSize int) (GbDeviceList, int64, error) {
+	var list GbDeviceList
+	var total int64
+	if err := app.DB().WithContext(c).Model(&GbDevice{}).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := app.DB().WithContext(c).
+		Order("id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&list).Error
+	return list, total, err
+}
