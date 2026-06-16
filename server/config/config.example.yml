@@ -237,4 +237,5 @@ gb28181:
   device:
     keepalive_interval: 60   # 设备心跳周期(秒)
     keepalive_timeout_count: 3 # 连续丢失阈值,超过判离线
+    keepalive_grace_seconds: 15 # 离线判定宽限缓冲(秒),避开边界误判
     offline_scan_interval: 30 # 离线扫描周期(秒)

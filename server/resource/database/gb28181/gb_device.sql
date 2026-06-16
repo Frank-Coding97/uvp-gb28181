@@ -13,9 +13,12 @@ CREATE TABLE `gb_device` (
   `ip` varchar(64) NOT NULL DEFAULT '' COMMENT '设备来源IP',
   `port` int DEFAULT '0' COMMENT '设备来源端口',
   `register_time` datetime DEFAULT NULL COMMENT '最近注册成功时间',
-  `keepalive_time` datetime DEFAULT NULL COMMENT '最近心跳时间',
+  `register_expire_at` datetime DEFAULT NULL COMMENT '注册到期时刻',
+  `keepalive_time` datetime DEFAULT NULL COMMENT '【事实】最后心跳时间=在线判定唯一真相',
+  `keepalive_interval` int DEFAULT '60' COMMENT '【事实】该设备期望心跳周期(秒)',
   `expires` int DEFAULT '0' COMMENT '注册有效期(秒)',
-  `status` tinyint(1) DEFAULT '0' COMMENT '在线状态 0离线 1在线',
+  `status` tinyint(1) DEFAULT '0' COMMENT '【物化缓存】在线状态 0离线 1在线,由事实派生',
+  `offline_at` datetime DEFAULT NULL COMMENT '最近被判离线的时刻',
   `created_at` datetime DEFAULT NULL,
   `updated_at` datetime DEFAULT NULL,
   `deleted_at` datetime DEFAULT NULL,
@@ -23,5 +26,6 @@ CREATE TABLE `gb_device` (
   `tenant_id` int unsigned DEFAULT '0' COMMENT '租户ID',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_id` (`device_id`) USING BTREE,
-  KEY `idx_deleted_at` (`deleted_at`)
+  KEY `idx_deleted_at` (`deleted_at`),
+  KEY `idx_status_keepalive` (`status`, `keepalive_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181国标设备表';

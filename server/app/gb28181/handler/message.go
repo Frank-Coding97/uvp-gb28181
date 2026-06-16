@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"time"
 
 	"github.com/emiago/sipgo/sip"
 
@@ -15,17 +14,11 @@ import (
 )
 
 // MessageHandler 处理 MESSAGE(MANSCDP):本期处理 Keepalive 心跳
-type MessageHandler struct {
-	onlineTTL time.Duration
-}
+type MessageHandler struct{}
 
 // NewMessageHandler 创建消息处理器
 func NewMessageHandler(cfg gbconfig.Config) *MessageHandler {
-	ttl := time.Duration(cfg.Device.KeepaliveInterval*cfg.Device.KeepaliveTimeoutCount) * time.Second
-	if ttl <= 0 {
-		ttl = 180 * time.Second
-	}
-	return &MessageHandler{onlineTTL: ttl}
+	return &MessageHandler{}
 }
 
 // Handle 处理 MESSAGE 请求
@@ -41,7 +34,7 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 
 	if head.IsKeepalive() && head.DeviceID != "" {
 		ctx := context.Background()
-		if err := device.Keepalive(ctx, head.DeviceID, h.onlineTTL); err != nil {
+		if err := device.Keepalive(ctx, head.DeviceID); err != nil {
 			app.ZapLog.Error("GB28181 心跳处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
 		}
 	}

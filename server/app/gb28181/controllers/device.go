@@ -6,7 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbdevice "uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
@@ -19,10 +19,16 @@ func NewDeviceController() *DeviceController {
 	return &DeviceController{Common: controllers.Common{}}
 }
 
-// deviceVO 设备列表项(DB 字段 + Redis 实时在线态)
+// deviceVO 设备列表项(DB 字段 + 从事实派生的实时在线态)
 type deviceVO struct {
 	*gbmodels.GbDevice
-	Online bool `json:"online"` // Redis 实时在线态(比 status 字段更实时)
+	Online bool `json:"online"` // 从 keepalive_time 事实派生,比 status 缓存更实时
+}
+
+// toVO 构造 VO,在线态按设备 keepalive_interval + 全局容忍/宽限派生
+func toVO(d *gbmodels.GbDevice) deviceVO {
+	dev := gbconfig.Load().Device
+	return deviceVO{GbDevice: d, Online: d.IsOnlineByFact(dev.KeepaliveTimeoutCount, dev.KeepaliveGraceSeconds)}
 }
 
 // List 设备列表(分页)
@@ -45,7 +51,7 @@ func (dc *DeviceController) List(c *gin.Context) {
 
 	vos := make([]deviceVO, 0, len(list))
 	for _, d := range list {
-		vos = append(vos, deviceVO{GbDevice: d, Online: gbdevice.IsOnline(c, d.DeviceID)})
+		vos = append(vos, toVO(d))
 	}
 
 	dc.Success(c, gin.H{
@@ -69,5 +75,5 @@ func (dc *DeviceController) GetByDeviceID(c *gin.Context) {
 		dc.FailAndAbort(c, "设备不存在", nil)
 		return
 	}
-	dc.Success(c, deviceVO{GbDevice: d, Online: gbdevice.IsOnline(c, deviceID)})
+	dc.Success(c, toVO(d))
 }

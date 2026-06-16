@@ -13,11 +13,9 @@ import (
 	"github.com/icholy/digest"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbdevice "uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 
 	"go.uber.org/zap"
@@ -52,14 +50,6 @@ func setupEnv(t *testing.T) {
 		}
 		_ = db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", func(g *gorm.DB) { g.Statement.RaiseErrorOnNotFound = false })
 		app.GormDbMysql = db
-	}
-	if app.Cache == nil {
-		addr := c.GetString("redis.host") + ":" + strconv.Itoa(c.GetInt("redis.port"))
-		cache, err := cachehelper.NewRedisHelper(addr, c.GetString("redis.password"), c.GetInt("redis.indexdb"))
-		if err != nil {
-			t.Skipf("跳过(无法连接 Redis): %v", err)
-		}
-		app.Cache = cache
 	}
 }
 
@@ -151,9 +141,6 @@ func cleanupDevice(id string) {
 	if app.GormDbMysql != nil {
 		app.GormDbMysql.Unscoped().Where("device_id = ?", id).Delete(&gbmodels.GbDevice{})
 	}
-	if app.Cache != nil {
-		_ = app.Cache.Del(context.Background(), gbdevice.OnlineKey(id))
-	}
 }
 
 // TestRegisterChallenge T4-测1(AC-2): 无鉴权 REGISTER → 401 挑战
@@ -201,9 +188,12 @@ func TestRegisterSuccess(t *testing.T) {
 	if d.Status != gbmodels.DeviceStatusOnline {
 		t.Errorf("期望在线,实际 status=%d", d.Status)
 	}
-	// Redis 在线态
-	if !gbdevice.IsOnline(context.Background(), testDeviceID) {
-		t.Error("Redis 在线态未写入")
+	// 事实层:keepalive_time 已记录,派生在线为 true
+	if d.KeepaliveTime == nil {
+		t.Error("注册后 keepalive_time(事实)未记录")
+	}
+	if !d.IsOnlineByFact(3, 15) {
+		t.Error("从事实派生应为在线")
 	}
 }
 
@@ -285,19 +275,25 @@ func TestKeepalive(t *testing.T) {
 	if code := doRegister(t, testDeviceID, testPassword, 3600); code != 200 {
 		t.Fatalf("前置注册失败: %d", code)
 	}
-	// 删掉 Redis 在线态,验证心跳能重新写回
-	_ = app.Cache.Del(context.Background(), gbdevice.OnlineKey(testDeviceID))
+	// 先把 keepalive_time 人为改旧,验证心跳能刷新它
+	app.GormDbMysql.Model(&gbmodels.GbDevice{}).Where("device_id = ?", testDeviceID).
+		Update("keepalive_time", time.Now().Add(-10*time.Minute))
+	before, _ := gbmodels.FindByDeviceID(context.Background(), testDeviceID)
 
 	code := sendKeepalive(t, testDeviceID)
 	if code != 200 {
 		t.Fatalf("心跳期望 200,实际 %d", code)
 	}
-	if !gbdevice.IsOnline(context.Background(), testDeviceID) {
-		t.Error("心跳后 Redis 在线态未刷新")
-	}
 	d, _ := gbmodels.FindByDeviceID(context.Background(), testDeviceID)
 	if d == nil || d.KeepaliveTime == nil {
-		t.Error("心跳后 keepalive_time 未更新")
+		t.Fatal("心跳后 keepalive_time 未更新")
+	}
+	// keepalive_time 事实被刷新(比改旧的值新)
+	if !d.KeepaliveTime.After(*before.KeepaliveTime) {
+		t.Error("心跳后 keepalive_time(事实)未刷新")
+	}
+	if !d.IsOnlineByFact(3, 15) {
+		t.Error("心跳后从事实派生应为在线")
 	}
 }
 

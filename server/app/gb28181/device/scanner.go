@@ -10,23 +10,33 @@ import (
 	"go.uber.org/zap"
 )
 
-// OfflineScanner 离线扫描器:周期扫描,把 Redis 在线态已消失但 MySQL 仍在线的设备置为离线
-// 作为 Redis TTL 的兜底(TTL 过期 key 自动消失,但 MySQL status 字段需要主动纠正)
+// OfflineScanner 离线扫描器:周期从事实(keepalive_time)重新判定,把超时的在线设备置离线
+// 无状态:每轮都从 DB 事实重算,进程重启不影响正确性
 type OfflineScanner struct {
-	interval time.Duration
-	stop     chan struct{}
-	done     chan struct{}
+	interval     time.Duration
+	timeoutCount int
+	grace        int
+	stop         chan struct{}
+	done         chan struct{}
 }
 
 // NewOfflineScanner 创建离线扫描器
-func NewOfflineScanner(intervalSeconds int) *OfflineScanner {
+func NewOfflineScanner(intervalSeconds, timeoutCount, graceSeconds int) *OfflineScanner {
 	if intervalSeconds <= 0 {
 		intervalSeconds = 30
 	}
+	if timeoutCount <= 0 {
+		timeoutCount = 3
+	}
+	if graceSeconds < 0 {
+		graceSeconds = 0
+	}
 	return &OfflineScanner{
-		interval: time.Duration(intervalSeconds) * time.Second,
-		stop:     make(chan struct{}),
-		done:     make(chan struct{}),
+		interval:     time.Duration(intervalSeconds) * time.Second,
+		timeoutCount: timeoutCount,
+		grace:        graceSeconds,
+		stop:         make(chan struct{}),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -53,22 +63,20 @@ func (s *OfflineScanner) Stop() {
 	<-s.done
 }
 
-// scanOnce 执行一次扫描:遍历 MySQL 在线设备,Redis 无在线态的置离线
+// scanOnce 执行一次扫描:查 status=1 但心跳超时的设备,置离线
 func (s *OfflineScanner) scanOnce() {
 	ctx := context.Background()
-	onlineInDB, err := gbmodels.ListOnline(ctx)
+	stale, err := gbmodels.ListStaleOnline(ctx, s.timeoutCount, s.grace)
 	if err != nil {
-		app.ZapLog.Error("GB28181 离线扫描:查询在线设备失败", zap.Error(err))
+		app.ZapLog.Error("GB28181 离线扫描:查询超时设备失败", zap.Error(err))
 		return
 	}
-	for _, d := range onlineInDB {
-		if !IsOnline(ctx, d.DeviceID) {
-			if err := gbmodels.UpdateStatus(ctx, d.DeviceID, gbmodels.DeviceStatusOffline); err != nil {
-				app.ZapLog.Error("GB28181 离线扫描:置离线失败", zap.String("deviceId", d.DeviceID), zap.Error(err))
-				continue
-			}
-			app.ZapLog.Info("GB28181 设备超时离线", zap.String("deviceId", d.DeviceID))
+	for _, d := range stale {
+		if err := gbmodels.MarkOffline(ctx, d.DeviceID); err != nil {
+			app.ZapLog.Error("GB28181 离线扫描:置离线失败", zap.String("deviceId", d.DeviceID), zap.Error(err))
+			continue
 		}
+		app.ZapLog.Info("GB28181 设备超时离线", zap.String("deviceId", d.DeviceID))
 	}
 }
 

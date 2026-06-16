@@ -23,6 +23,7 @@ type SIPConfig struct {
 type DeviceConfig struct {
 	KeepaliveInterval     int // 心跳周期(秒)
 	KeepaliveTimeoutCount int // 连续丢失阈值
+	KeepaliveGraceSeconds int // 离线判定宽限缓冲(秒),避开边界误判
 	OfflineScanInterval   int // 离线扫描周期(秒)
 }
 
@@ -42,6 +43,7 @@ func Load() Config {
 		Device: DeviceConfig{
 			KeepaliveInterval:     c.GetInt("gb28181.device.keepalive_interval"),
 			KeepaliveTimeoutCount: c.GetInt("gb28181.device.keepalive_timeout_count"),
+			KeepaliveGraceSeconds: c.GetInt("gb28181.device.keepalive_grace_seconds"),
 			OfflineScanInterval:   c.GetInt("gb28181.device.offline_scan_interval"),
 		},
 	}

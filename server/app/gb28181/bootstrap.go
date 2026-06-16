@@ -37,8 +37,12 @@ func Start() {
 	}
 	sipServer = srv
 
-	// 启动离线扫描器(TTL 兜底)
-	offlineScanner = device.NewOfflineScanner(cfg.Device.OfflineScanInterval)
+	// 启动离线扫描器(基于 keepalive_time 事实派生)
+	offlineScanner = device.NewOfflineScanner(
+		cfg.Device.OfflineScanInterval,
+		cfg.Device.KeepaliveTimeoutCount,
+		cfg.Device.KeepaliveGraceSeconds,
+	)
 	offlineScanner.Start()
 	app.ZapLog.Info("GB28181 离线扫描器已启动", zap.Int("intervalSeconds", cfg.Device.OfflineScanInterval))
 }

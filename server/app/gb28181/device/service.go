@@ -6,17 +6,7 @@ import (
 	"time"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
-
-// onlineKeyPrefix Redis 在线态 key 前缀
-// 底座 CacheInterf 不自动加前缀(cachekeyprefix 仅 token 模块用),故此处拼全
-const onlineKeyPrefix = "uvp-gb28181:device:online:"
-
-// OnlineKey 设备在线态 Redis key
-func OnlineKey(deviceID string) string {
-	return onlineKeyPrefix + deviceID
-}
 
 // RegisterInfo 注册时采集的信息
 type RegisterInfo struct {
@@ -27,57 +17,39 @@ type RegisterInfo struct {
 	Expires   int
 }
 
-// HandleRegister 处理注册成功:自动建档(upsert)+ 写 Redis 在线态
-// onlineTTL = 心跳周期 × 丢失阈值
-func HandleRegister(ctx context.Context, info RegisterInfo, onlineTTL time.Duration) error {
+// HandleRegister 处理注册成功:自动建档(upsert),记录心跳时间事实
+// keepaliveInterval = 该设备期望心跳周期(秒),用于后续在线判定
+func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval int) error {
 	now := time.Now()
+	var expireAt *time.Time
+	if info.Expires > 0 {
+		t := now.Add(time.Duration(info.Expires) * time.Second)
+		expireAt = &t
+	}
 	d := &gbmodels.GbDevice{
-		DeviceID:     info.DeviceID,
-		Transport:    info.Transport,
-		IP:           info.IP,
-		Port:         info.Port,
-		Expires:      info.Expires,
-		RegisterTime: &now,
-		Status:       gbmodels.DeviceStatusOnline,
+		DeviceID:          info.DeviceID,
+		Transport:         info.Transport,
+		IP:                info.IP,
+		Port:              info.Port,
+		Expires:           info.Expires,
+		RegisterTime:      &now,
+		RegisterExpireAt:  expireAt,
+		KeepaliveTime:     &now, // 注册也视为一次心跳事实
+		KeepaliveInterval: keepaliveInterval,
+		Status:            gbmodels.DeviceStatusOnline, // 物化缓存,顺手刷
 	}
 	if err := gbmodels.Upsert(ctx, d); err != nil {
 		return fmt.Errorf("自动建档失败: %w", err)
 	}
-	return markOnline(ctx, info.DeviceID, onlineTTL)
+	return nil
 }
 
-// HandleUnregister 处理注销(Expires=0):删在线态 + 落库离线
+// HandleUnregister 处理注销(Expires=0):即时置离线(事实上停止心跳 + 缓存翻转)
 func HandleUnregister(ctx context.Context, deviceID string) error {
-	if app.Cache != nil {
-		_ = app.Cache.Del(ctx, OnlineKey(deviceID))
-	}
-	return gbmodels.UpdateStatus(ctx, deviceID, gbmodels.DeviceStatusOffline)
+	return gbmodels.MarkOffline(ctx, deviceID)
 }
 
-// Keepalive 处理心跳:刷新 Redis 在线态 TTL + 更新 keepalive_time
-func Keepalive(ctx context.Context, deviceID string, onlineTTL time.Duration) error {
-	now := time.Now()
-	if err := app.DB().WithContext(ctx).Model(&gbmodels.GbDevice{}).
-		Where("device_id = ?", deviceID).
-		Updates(map[string]interface{}{"keepalive_time": now, "status": gbmodels.DeviceStatusOnline}).Error; err != nil {
-		return err
-	}
-	return markOnline(ctx, deviceID, onlineTTL)
-}
-
-// IsOnline 查 Redis 在线态
-func IsOnline(ctx context.Context, deviceID string) bool {
-	if app.Cache == nil {
-		return false
-	}
-	n, err := app.Cache.Exists(ctx, OnlineKey(deviceID))
-	return err == nil && n > 0
-}
-
-// markOnline 写 Redis 在线标记 + TTL
-func markOnline(ctx context.Context, deviceID string, ttl time.Duration) error {
-	if app.Cache == nil {
-		return nil
-	}
-	return app.Cache.Set(ctx, OnlineKey(deviceID), "1", ttl)
+// Keepalive 处理心跳:更新 keepalive_time 事实 + 刷新 status 缓存
+func Keepalive(ctx context.Context, deviceID string) error {
+	return gbmodels.TouchKeepalive(ctx, deviceID)
 }

@@ -19,17 +19,17 @@ import (
 
 // RegisterHandler 处理 REGISTER:401 挑战 → digest 校验(统一密码)→ 自动建档/注销
 type RegisterHandler struct {
-	cfg      gbconfig.Config
-	onlineTTL time.Duration
+	cfg               gbconfig.Config
+	keepaliveInterval int
 }
 
 // NewRegisterHandler 创建注册处理器
 func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
-	ttl := time.Duration(cfg.Device.KeepaliveInterval*cfg.Device.KeepaliveTimeoutCount) * time.Second
-	if ttl <= 0 {
-		ttl = 180 * time.Second
+	interval := cfg.Device.KeepaliveInterval
+	if interval <= 0 {
+		interval = 60
 	}
-	return &RegisterHandler{cfg: cfg, onlineTTL: ttl}
+	return &RegisterHandler{cfg: cfg, keepaliveInterval: interval}
 }
 
 // Handle 处理 REGISTER 请求
@@ -106,7 +106,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		Port:      port,
 		Expires:   expires,
 	}
-	if err := device.HandleRegister(ctx, info, h.onlineTTL); err != nil {
+	if err := device.HandleRegister(ctx, info, h.keepaliveInterval); err != nil {
 		app.ZapLog.Error("GB28181 自动建档失败", zap.String("deviceId", deviceID), zap.Error(err))
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Server error", nil))
 		return
