@@ -50,6 +50,7 @@ func setupEnv(t *testing.T) {
 		if err != nil {
 			t.Skipf("跳过(无法连接 MySQL): %v", err)
 		}
+		_ = db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", func(g *gorm.DB) { g.Statement.RaiseErrorOnNotFound = false })
 		app.GormDbMysql = db
 	}
 	if app.Cache == nil {

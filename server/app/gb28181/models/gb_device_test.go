@@ -37,6 +37,11 @@ func setupTestDB(t *testing.T) {
 		t.Skipf("跳过(无法连接测试库 %s:%d): %v", host, port, err)
 		return
 	}
+	// 复现底座全局 hook:查不到记录时不报 ErrRecordNotFound(与真机行为一致)
+	// 否则单测用裸连无法复现 Upsert 的存在性判断 bug
+	_ = db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", func(g *gorm.DB) {
+		g.Statement.RaiseErrorOnNotFound = false
+	})
 	app.GormDbMysql = db
 }
 

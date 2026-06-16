@@ -229,7 +229,7 @@ gb28181:
   enabled: true              # 是否启用国标 SIP 服务
   sip:
     ip: "0.0.0.0"            # SIP 监听 IP
-    port: 5060               # SIP 监听端口
+    port: 5061               # SIP 监听端口
     transport: ["udp", "tcp"] # 信令传输,双栈
     domain: "3402000000"     # SIP 域(前 10 位行政区划)
     serverid: "34020000002000000001" # 平台国标编码(20 位)

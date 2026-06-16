@@ -6,8 +6,6 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
-
-	"gorm.io/gorm"
 )
 
 // 设备在线状态
@@ -50,12 +48,14 @@ type GbDeviceList []*GbDevice
 // FindByDeviceID 按国标编码查询设备,未命中返回 (nil, nil)
 func FindByDeviceID(c context.Context, deviceID string) (*GbDevice, error) {
 	var d GbDevice
-	err := app.DB().WithContext(c).Where("device_id = ?", deviceID).First(&d).Error
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return nil, nil
-		}
-		return nil, err
+	// 注意:底座注册了全局 hook MaskNotDataError(RaiseErrorOnNotFound=false),
+	// 查不到时不会返回 ErrRecordNotFound,故用 RowsAffected 判断是否命中,不依赖 error
+	result := app.DB().WithContext(c).Where("device_id = ?", deviceID).Limit(1).Find(&d)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &d, nil
 }
