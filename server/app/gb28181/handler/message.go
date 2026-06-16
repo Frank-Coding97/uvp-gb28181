@@ -32,12 +32,18 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
-	if head.IsKeepalive() && head.DeviceID != "" {
+	if head.DeviceID != "" {
 		ctx := context.Background()
-		if err := device.Keepalive(ctx, head.DeviceID); err != nil {
-			app.ZapLog.Error("GB28181 心跳处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+		switch head.CmdType {
+		case manscdp.CmdKeepalive:
+			if err := device.Keepalive(ctx, head.DeviceID); err != nil {
+				app.ZapLog.Error("GB28181 心跳处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+			}
+		case manscdp.CmdCatalog:
+			// Catalog 应答(设备→平台),解析通道入库
+			HandleCatalogResponse(ctx, req.Body())
 		}
 	}
-	// 其它 CmdType(Catalog/DeviceInfo 等)本期不处理,统一回 200
+	// 其它 CmdType 本期不处理,统一回 200
 	_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 }
