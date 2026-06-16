@@ -9,8 +9,9 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
-// onlineKeyPrefix Redis 在线态 key 前缀(cachekeyprefix 由底座统一加,见 config)
-const onlineKeyPrefix = "gb28181:device:online:"
+// onlineKeyPrefix Redis 在线态 key 前缀
+// 底座 CacheInterf 不自动加前缀(cachekeyprefix 仅 token 模块用),故此处拼全
+const onlineKeyPrefix = "uvp-gb28181:device:online:"
 
 // OnlineKey 设备在线态 Redis key
 func OnlineKey(deviceID string) string {

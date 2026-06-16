@@ -5,6 +5,7 @@ import (
 	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
@@ -14,7 +15,10 @@ import (
 // sipServer 持有全局 SIP 服务实例,供优雅关闭引用
 var sipServer *gbsip.Server
 
-// Start 启动 GB28181 SIP 服务(在 HTTP 服务阻塞等待信号之前调用)
+// offlineScanner 离线扫描器
+var offlineScanner *device.OfflineScanner
+
+// Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过
 func Start() {
 	cfg := gbconfig.Load()
@@ -32,10 +36,18 @@ func Start() {
 		return
 	}
 	sipServer = srv
+
+	// 启动离线扫描器(TTL 兜底)
+	offlineScanner = device.NewOfflineScanner(cfg.Device.OfflineScanInterval)
+	offlineScanner.Start()
+	app.ZapLog.Info("GB28181 离线扫描器已启动", zap.Int("intervalSeconds", cfg.Device.OfflineScanInterval))
 }
 
-// Stop 优雅关闭 GB28181 SIP 服务(纳入主进程退出流程)
+// Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	if offlineScanner != nil {
+		offlineScanner.Stop()
+	}
 	if sipServer == nil {
 		return
 	}
