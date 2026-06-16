@@ -239,3 +239,15 @@ gb28181:
     keepalive_timeout_count: 3 # 连续丢失阈值,超过判离线
     keepalive_grace_seconds: 15 # 离线判定宽限缓冲(秒),避开边界误判
     offline_scan_interval: 30 # 离线扫描周期(秒)
+  # ZLMediaKit 媒体服务器(数据面)
+  zlm:
+    host: "127.0.0.1"             # ZLM 地址
+    httpport: 18080               # ZLM HTTP API 端口
+    secret: "CHANGE_ME"           # ZLM API secret(部署时填 ZLM 实际 secret)
+    rtpport: 40000                # RTP 单端口收流
+  # 媒体/Hook 配置
+  media:
+    hookhost: "127.0.0.1"         # ZLM Hook 回调可达的本机地址(跨机部署填本机局域网IP)
+    hookport: 8280                # 后端 HTTP 端口
+    streamnonereadertimeout: 20   # 无人观看多少秒后断流
+    rtpservertimeout: 15          # RTP 收流超时(秒)
