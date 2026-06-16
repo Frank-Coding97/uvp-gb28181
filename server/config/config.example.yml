@@ -223,3 +223,19 @@ scheduler:
     level: "info"                     # 日志级别: debug, info, warn, error, fatal
   # 任务结果通道缓冲大小
   job_results_buffer_size: 1000       # 任务结果通道缓冲大小，默认1000
+
+# GB28181 国标平台配置
+gb28181:
+  enabled: true              # 是否启用国标 SIP 服务
+  sip:
+    ip: "0.0.0.0"            # SIP 监听 IP
+    port: 5061               # SIP 监听端口
+    transport: ["udp", "tcp"] # 信令传输,双栈
+    domain: "3402000000"     # SIP 域(前 10 位行政区划)
+    serverid: "34020000002000000001" # 平台国标编码(20 位)
+    password: "CHANGE_ME"    # ⚠️ 统一接入密码,部署前改成项目专属
+  device:
+    keepalive_interval: 60   # 设备心跳周期(秒)
+    keepalive_timeout_count: 3 # 连续丢失阈值,超过判离线
+    keepalive_grace_seconds: 15 # 离线判定宽限缓冲(秒),避开边界误判
+    offline_scan_interval: 30 # 离线扫描周期(秒)

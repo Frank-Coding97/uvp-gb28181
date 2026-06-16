@@ -47,3 +47,7 @@ temp/
 .env
 .env.local
 .env.production
+
+# VS Code dlv 调试临时二进制
+server/__debug_bin*
+__debug_bin*

@@ -9,6 +9,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 )
@@ -409,6 +410,9 @@ func InitRoutes(engine *gin.Engine) {
 				// 删除定时任务执行结果
 				sysJobResults.DELETE("/delete", sysJobResultsControllers.Delete)
 			}
+
+			// GB28181 国标业务路由(设备管理等)
+			gbroutes.RegisterRoutes(protected)
 		}
 	}
 
