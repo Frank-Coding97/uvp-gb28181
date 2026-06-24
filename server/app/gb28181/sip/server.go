@@ -21,10 +21,14 @@ type Server struct {
 	ua      *sipgo.UserAgent
 	srv     *sipgo.Server
 	regH    *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
+	uac     *uac.UAC                 // 供 play service 等业务模块复用
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	started bool
 }
+
+// UAC 返回 SIP 服务内置的 UAC(可能为 nil,初始化失败时)
+func (s *Server) UAC() *uac.UAC { return s.uac }
 
 // NewServer 创建 SIP 服务
 func NewServer(cfg gbconfig.Config) (*Server, error) {
@@ -45,11 +49,12 @@ func NewServer(cfg gbconfig.Config) (*Server, error) {
 func (s *Server) registerHandlers() {
 	regHandler := handler.NewRegisterHandler(s.cfg)
 
-	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等)
-	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发
+	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
+	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
 	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.IP, s.cfg.SIP.Port); err != nil {
 		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
 	} else {
+		s.uac = u
 		regHandler.SetCatalogTrigger(handler.NewUACCatalogTrigger(u))
 	}
 

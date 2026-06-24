@@ -5,6 +5,7 @@ import (
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
 
@@ -18,15 +19,29 @@ func StreamNotifier() *stream.Notifier { return streamNotifier }
 
 var hookController = gbhandler.NewHookController(streamNotifier)
 
+// playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
+var playController = gbcontrollers.NewPlayController(nil)
+
+// SetPlayService 由 bootstrap 注入 play service(routes 包先于 service 实例化,故需后置注入)
+func SetPlayService(svc *gbplay.Service) {
+	playController = gbcontrollers.NewPlayController(svc)
+}
+
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
 // 在底座 routes.InitRoutes 的 protected 块中调用
 func RegisterRoutes(protected *gin.RouterGroup) {
 	gb := protected.Group("/gb28181")
 	{
-		device := gb.Group("/device")
+		dev := gb.Group("/device")
 		{
-			device.GET("/list", deviceController.List)
-			device.GET("/:deviceId", deviceController.GetByDeviceID)
+			dev.GET("/list", deviceController.List)
+			dev.GET("/:deviceId", deviceController.GetByDeviceID)
+		}
+		// 点播:用闭包间接调用,以便后置注入的 playController 也能命中
+		play := gb.Group("/play")
+		{
+			play.POST("/:deviceId/:channelId", func(c *gin.Context) { playController.Start(c) })
+			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })
 		}
 	}
 }
