@@ -21,6 +21,7 @@ import (
 type RegisterHandler struct {
 	cfg               gbconfig.Config
 	keepaliveInterval int
+	catalogTrigger    CatalogTrigger // 可选:首次注册成功后触发 Catalog 查询
 }
 
 // NewRegisterHandler 创建注册处理器
@@ -30,6 +31,11 @@ func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
 		interval = 60
 	}
 	return &RegisterHandler{cfg: cfg, keepaliveInterval: interval}
+}
+
+// SetCatalogTrigger 注入 Catalog 触发器(可选;不注入则不触发)
+func (h *RegisterHandler) SetCatalogTrigger(t CatalogTrigger) {
+	h.catalogTrigger = t
 }
 
 // Handle 处理 REGISTER 请求
@@ -106,13 +112,24 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		Port:      port,
 		Expires:   expires,
 	}
-	if err := device.HandleRegister(ctx, info, h.keepaliveInterval); err != nil {
+	isFirst, err := device.HandleRegister(ctx, info, h.keepaliveInterval)
+	if err != nil {
 		app.ZapLog.Error("GB28181 自动建档失败", zap.String("deviceId", deviceID), zap.Error(err))
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Server error", nil))
 		return
 	}
-	app.ZapLog.Info("GB28181 设备注册成功", zap.String("deviceId", deviceID), zap.String("transport", req.Transport()))
+	app.ZapLog.Info("GB28181 设备注册成功",
+		zap.String("deviceId", deviceID),
+		zap.String("transport", req.Transport()),
+		zap.Bool("isFirst", isFirst))
 	_ = tx.Respond(buildOKWithExpires(req, expires))
+
+	// 首次注册(或离线后重连)→ 触发一次 Catalog 查询拉通道树
+	// 放在响应之后:不阻塞 200 OK,失败仅记日志
+	if isFirst && h.catalogTrigger != nil {
+		dest := fmt.Sprintf("%s:%d", ip, port)
+		h.catalogTrigger.Trigger(ctx, deviceID, dest)
+	}
 }
 
 // buildOKWithExpires 构造 200 OK 并回带 Expires/Date

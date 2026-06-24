@@ -9,6 +9,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -19,6 +20,7 @@ type Server struct {
 	cfg     gbconfig.Config
 	ua      *sipgo.UserAgent
 	srv     *sipgo.Server
+	regH    *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
 	started bool
@@ -42,9 +44,26 @@ func NewServer(cfg gbconfig.Config) (*Server, error) {
 // registerHandlers 注册 SIP 方法处理器
 func (s *Server) registerHandlers() {
 	regHandler := handler.NewRegisterHandler(s.cfg)
+
+	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等)
+	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发
+	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.IP, s.cfg.SIP.Port); err != nil {
+		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
+	} else {
+		regHandler.SetCatalogTrigger(handler.NewUACCatalogTrigger(u))
+	}
+
+	s.regH = regHandler
 	s.srv.OnRegister(regHandler.Handle)
 	msgHandler := handler.NewMessageHandler(s.cfg)
 	s.srv.OnMessage(msgHandler.Handle)
+}
+
+// SetCatalogTrigger 替换默认 Catalog 触发器(主要给测试用,生产路径走 registerHandlers 自动注入)
+func (s *Server) SetCatalogTrigger(t handler.CatalogTrigger) {
+	if s.regH != nil {
+		s.regH.SetCatalogTrigger(t)
+	}
 }
 
 // Start 启动双栈监听(配置里声明的每个 transport 各起一个 goroutine)
