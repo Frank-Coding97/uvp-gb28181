@@ -55,3 +55,30 @@ func TestSetServerConfig(t *testing.T) {
 		t.Errorf("Hook 下发未生效: 期望 %s, 实际 %s", hookURL, conf["hook.on_stream_changed"])
 	}
 }
+
+// TestIsMediaOnlineNotExist T6.1-测1: 查询不存在的流 → online=false 且无错误
+func TestIsMediaOnlineNotExist(t *testing.T) {
+	c := NewClient(loadCfg(t))
+	online, err := c.IsMediaOnline(context.Background(), "rtp", "definitely-not-exist-stream-id")
+	if err != nil {
+		t.Skipf("跳过(ZLM 不可达): %v", err)
+	}
+	if online {
+		t.Error("不存在的流应返回 online=false")
+	}
+}
+
+// TestGetMediaInfoNotExist T6.1-测2: 查不存在的流 → online=false 且不报错
+func TestGetMediaInfoNotExist(t *testing.T) {
+	c := NewClient(loadCfg(t))
+	info, err := c.GetMediaInfo(context.Background(), "rtp", "definitely-not-exist-stream-id")
+	if err != nil {
+		t.Skipf("跳过(ZLM 不可达): %v", err)
+	}
+	if info == nil {
+		t.Fatal("info 不应为 nil")
+	}
+	if info.Online {
+		t.Error("不存在的流应返回 online=false")
+	}
+}

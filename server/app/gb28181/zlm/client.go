@@ -126,3 +126,67 @@ func (c *Client) CloseRtpServer(ctx context.Context, streamID string) error {
 	// code!=0 不一定是错误(可能流已关),仅记录
 	return nil
 }
+
+// MediaInfo 单路流元信息(getMediaInfo / isMediaOnline 部分字段)
+type MediaInfo struct {
+	Online      bool   // 是否已就绪(对应 ZLM online 字段)
+	Schema      string // 协议:rtmp/rtsp/hls/...
+	App         string // 应用名
+	Stream      string // 流 id
+	ReaderCount int    // 当前观众数
+}
+
+// IsMediaOnline 轻量探测一路流是否就绪(返回 online 标志)
+// 用于点播流就绪等待的轮询备份(hook + polling 双源)
+func (c *Client) IsMediaOnline(ctx context.Context, app, stream string) (bool, error) {
+	var r struct {
+		baseResp
+		Online bool `json:"online"`
+	}
+	params := map[string]string{
+		"vhost":  "__defaultVhost__",
+		"app":    app,
+		"stream": stream,
+		// schema 不传:rtp 接入后会自动产生 rtsp/rtmp/hls 多协议,任一就绪即可
+	}
+	if err := c.call(ctx, "isMediaOnline", params, &r); err != nil {
+		return false, err
+	}
+	// code != 0(如 -500 流不存在)视为未就绪,不视为错误
+	if r.Code != 0 {
+		return false, nil
+	}
+	return r.Online, nil
+}
+
+// GetMediaInfo 查询单路流详情(verify-after-hook 用)
+// 返回 online=false 表示流未就绪(包含"流不存在"和"流存在但暂无数据"两种情况)
+func (c *Client) GetMediaInfo(ctx context.Context, app, stream string) (*MediaInfo, error) {
+	var r struct {
+		baseResp
+		Online      bool   `json:"online"`
+		Schema      string `json:"schema"`
+		App         string `json:"app"`
+		Stream      string `json:"stream"`
+		ReaderCount int    `json:"readerCount"`
+	}
+	params := map[string]string{
+		"vhost":  "__defaultVhost__",
+		"app":    app,
+		"stream": stream,
+	}
+	if err := c.call(ctx, "getMediaInfo", params, &r); err != nil {
+		return nil, err
+	}
+	if r.Code != 0 {
+		// 流不存在:online=false,不报错
+		return &MediaInfo{App: app, Stream: stream}, nil
+	}
+	return &MediaInfo{
+		Online:      r.Online,
+		Schema:      r.Schema,
+		App:         r.App,
+		Stream:      r.Stream,
+		ReaderCount: r.ReaderCount,
+	}, nil
+}
