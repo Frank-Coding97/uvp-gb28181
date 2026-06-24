@@ -5,10 +5,18 @@ import (
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
-var hookController = gbhandler.NewHookController()
+
+// streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
+var streamNotifier = stream.NewNotifier()
+
+// StreamNotifier 暴露给点播 service 使用
+func StreamNotifier() *stream.Notifier { return streamNotifier }
+
+var hookController = gbhandler.NewHookController(streamNotifier)
 
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
 // 在底座 routes.InitRoutes 的 protected 块中调用

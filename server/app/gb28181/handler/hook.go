@@ -3,6 +3,7 @@ package handler
 import (
 	"github.com/gin-gonic/gin"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -10,10 +11,12 @@ import (
 
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
-type HookController struct{}
+type HookController struct {
+	notifier *stream.Notifier // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+}
 
-func NewHookController() *HookController {
-	return &HookController{}
+func NewHookController(notifier *stream.Notifier) *HookController {
+	return &HookController{notifier: notifier}
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -21,13 +24,28 @@ func hookOK(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "msg": "success"})
 }
 
+// onStreamChangedBody on_stream_changed 回调载荷(只取我们需要的字段)
+type onStreamChangedBody struct {
+	App    string `json:"app"`
+	Stream string `json:"stream"`
+	Regist bool   `json:"regist"`
+	Schema string `json:"schema"`
+}
+
 // OnStreamChanged 流注册/注销事件(regist=true 流就绪,false 流消失)
 func (h *HookController) OnStreamChanged(c *gin.Context) {
-	var body map[string]interface{}
+	var body onStreamChangedBody
 	_ = c.ShouldBindJSON(&body)
 	app.ZapLog.Info("ZLM Hook on_stream_changed",
-		zap.Any("app", body["app"]), zap.Any("stream", body["stream"]), zap.Any("regist", body["regist"]))
-	// 业务(流就绪通知点播会话)留 T6
+		zap.String("app", body.App),
+		zap.String("stream", body.Stream),
+		zap.String("schema", body.Schema),
+		zap.Bool("regist", body.Regist))
+
+	// 流就绪 → 通知正在 WaitReady 的点播 service
+	if body.Regist && h.notifier != nil && body.Stream != "" {
+		h.notifier.Publish(body.Stream)
+	}
 	hookOK(c)
 }
 
