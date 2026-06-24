@@ -23,8 +23,10 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 var playController = gbcontrollers.NewPlayController(nil)
 
 // SetPlayService 由 bootstrap 注入 play service(routes 包先于 service 实例化,故需后置注入)
+// 同时把 service 注入到 hookController(无人观看 / RTP 超时 自动断流)
 func SetPlayService(svc *gbplay.Service) {
 	playController = gbcontrollers.NewPlayController(svc)
+	hookController.SetPlayStopper(svc)
 }
 
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组

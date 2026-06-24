@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"context"
+	"time"
+
 	"github.com/gin-gonic/gin"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
@@ -9,14 +12,26 @@ import (
 	"go.uber.org/zap"
 )
 
+// PlayStopper 由点播 service 实现:停掉一路流(BYE + closeRtpServer)
+// 接口化便于 hook 端点接入,且让 handler 包不依赖 play 包(避免循环导入)
+type PlayStopper interface {
+	Stop(ctx context.Context, streamID string) error
+}
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
 	notifier *stream.Notifier // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper  PlayStopper      // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
 	return &HookController{notifier: notifier}
+}
+
+// SetPlayStopper 注入点播停止器(bootstrap 装配 play service 后调用)
+func (h *HookController) SetPlayStopper(s PlayStopper) {
+	h.stopper = s
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -49,20 +64,62 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 	hookOK(c)
 }
 
-// OnStreamNoneReader 无人观看 → 应断流(业务留 T7,本期先收)
-func (h *HookController) OnStreamNoneReader(c *gin.Context) {
-	var body map[string]interface{}
-	_ = c.ShouldBindJSON(&body)
-	app.ZapLog.Info("ZLM Hook on_stream_none_reader", zap.Any("stream", body["stream"]))
-	// 默认不立即关闭(close=false),T7 接入 BYE 逻辑后改 true
-	c.JSON(200, gin.H{"code": 0, "close": false})
+// onStreamNoneReaderBody on_stream_none_reader 回调载荷
+type onStreamNoneReaderBody struct {
+	App    string `json:"app"`
+	Stream string `json:"stream"`
+	Schema string `json:"schema"`
 }
 
-// OnRtpServerTimeout RTP 收流超时
-func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
-	var body map[string]interface{}
+// OnStreamNoneReader 无人观看 → ZLM 询问是否关流
+// 返回 close=true 让 ZLM 立即关流;同时异步向设备发 BYE 释放上行
+func (h *HookController) OnStreamNoneReader(c *gin.Context) {
+	var body onStreamNoneReaderBody
 	_ = c.ShouldBindJSON(&body)
-	app.ZapLog.Info("ZLM Hook on_rtp_server_timeout", zap.Any("stream_id", body["stream_id"]))
+	app.ZapLog.Info("ZLM Hook on_stream_none_reader",
+		zap.String("app", body.App), zap.String("stream", body.Stream))
+
+	// 异步停播:发 BYE + closeRtpServer。即便失败也告知 ZLM 关流,避免端口悬挂
+	if h.stopper != nil && body.Stream != "" {
+		go func(streamID string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := h.stopper.Stop(ctx, streamID); err != nil {
+				app.ZapLog.Warn("无人观看自动断流失败",
+					zap.String("stream", streamID), zap.Error(err))
+			} else {
+				app.ZapLog.Info("无人观看自动断流", zap.String("stream", streamID))
+			}
+		}(body.Stream)
+	}
+
+	c.JSON(200, gin.H{"code": 0, "close": true})
+}
+
+// onRtpServerTimeoutBody on_rtp_server_timeout 回调载荷
+type onRtpServerTimeoutBody struct {
+	StreamID string `json:"stream_id"`
+	App      string `json:"app"`
+	SSRC     string `json:"ssrc"`
+}
+
+// OnRtpServerTimeout RTP 收流超时 → 设备实际没推流,清理会话
+func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
+	var body onRtpServerTimeoutBody
+	_ = c.ShouldBindJSON(&body)
+	app.ZapLog.Info("ZLM Hook on_rtp_server_timeout",
+		zap.String("stream_id", body.StreamID), zap.String("ssrc", body.SSRC))
+
+	if h.stopper != nil && body.StreamID != "" {
+		go func(streamID string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := h.stopper.Stop(ctx, streamID); err != nil {
+				app.ZapLog.Warn("RTP 超时清理会话失败",
+					zap.String("stream", streamID), zap.Error(err))
+			}
+		}(body.StreamID)
+	}
 	hookOK(c)
 }
 
