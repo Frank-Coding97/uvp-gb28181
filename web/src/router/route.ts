@@ -43,18 +43,7 @@ export const staticRoutes = [
     name: "layout",
     redirect: HOME_PATH,
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
-    children: [
-      {
-        path: "/gb28181",
-        name: "gb28181",
-        component: () => import(/* webpackChunkName: "gb28181" */ "@/views/gb28181/index.vue"),
-        meta: {
-          title: "国标视频",
-          icon: "icon-video-camera",
-          keepAlive: false
-        }
-      }
-    ]
+    children: []
   }
   /**
    * 提示：写在这里的为全屏界面，不建议写在这里非全屏界面，请写在 layout.children 路由数组中
