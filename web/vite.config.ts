@@ -18,7 +18,8 @@ export default defineConfig(({ mode }) => {
         base: env.VITE_PUBLIC_PATH,
         server: {
             // host: "0.0.0.0",
-            open: false,
+            open: true,
+            port: 5177,
             // 为开发服务器配置自定义代理规则-用于开发时的代理
             proxy: {
                 "/api": {
