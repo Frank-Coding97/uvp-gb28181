@@ -38,6 +38,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			dev.GET("/list", deviceController.List)
 			dev.GET("/:deviceId", deviceController.GetByDeviceID)
+			dev.GET("/:deviceId/channels", deviceController.ListChannels)
 		}
 		// 点播:用闭包间接调用,以便后置注入的 playController 也能命中
 		play := gb.Group("/play")

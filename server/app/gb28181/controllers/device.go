@@ -77,3 +77,22 @@ func (dc *DeviceController) GetByDeviceID(c *gin.Context) {
 	}
 	dc.Success(c, toVO(d))
 }
+
+// ListChannels 列出某设备的通道(供前端拉通道树二级)
+// GET /api/gb28181/device/:deviceId/channels
+func (dc *DeviceController) ListChannels(c *gin.Context) {
+	deviceID := c.Param("deviceId")
+	if deviceID == "" {
+		dc.FailAndAbort(c, "deviceId 不能为空", nil)
+		return
+	}
+	list, err := gbmodels.ListChannelsByDevice(c, deviceID)
+	if err != nil {
+		dc.FailAndAbort(c, "查通道列表失败", err)
+		return
+	}
+	dc.Success(c, gin.H{
+		"list":  list,
+		"total": len(list),
+	})
+}
