@@ -110,15 +110,23 @@ func (m *SessionManager) remove(streamID string) {
 }
 
 // Invite 发起点播:INVITE → 等应答 → ACK,会话建立
-// 关键:sipgo v1.4 的 WaitAnswer 内部 select 不响应外部 ctx.Done(),
-// 这里用 channel + select 包一层强制超时,ctx 到期主动 Close dialog
+// 关键 1:sipgo v1.4 的 WaitAnswer 内部 select 不响应外部 ctx.Done(),
+//        这里用 channel + select 包一层强制超时,ctx 到期主动 Close dialog
+// 关键 2:Request-URI 的 host 是国标域(如 3402000000),不可路由;
+//        必须 SetDestination 显式指定设备真实 IP:port,否则 INVITE 发不出去
 func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody string) error {
 	s.State = StateInviting
 	s.createdAt = time.Now()
 
-	subject := sip.NewHeader("Subject", fmt.Sprintf("%s:%s,%s:0", s.ChannelID, s.SSRC, u.serverID))
-	ctype := sip.NewHeader("Content-Type", "application/sdp")
-	dialog, err := u.dialogUA.Invite(ctx, u.deviceURI(s.DeviceID), []byte(sdpBody), ctype, subject)
+	// 自己构造 INVITE request,显式 SetDestination(避免 sipgo 默认按 URI 域名解析)
+	req := sip.NewRequest(sip.INVITE, u.deviceURI(s.DeviceID))
+	req.SetBody([]byte(sdpBody))
+	req.AppendHeader(sip.NewHeader("Subject", fmt.Sprintf("%s:%s,%s:0", s.ChannelID, s.SSRC, u.serverID)))
+	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+	req.SetDestination(s.Dest)
+	req.SetTransport("UDP")
+
+	dialog, err := u.dialogUA.WriteInvite(ctx, req)
 	if err != nil {
 		s.State = StateIdle
 		return fmt.Errorf("INVITE 失败: %w", err)
