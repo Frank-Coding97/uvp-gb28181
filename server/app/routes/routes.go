@@ -44,6 +44,9 @@ func InitRoutes(engine *gin.Engine) {
 	// 静态文件
 	engine.Static(app.ConfigYml.GetString("httpserver.serverrootpath"), app.ConfigYml.GetString("httpserver.serverroot"))
 
+	// GB28181 ZLMediaKit Hook 回调端点(engine 根,无 /api 前缀,无鉴权)
+	gbroutes.RegisterHookRoutes(engine)
+
 	//	调试模式下注册Swagger路由、查看内存缓存项
 	if app.ConfigYml.GetBool("server.appdebug") {
 		// 注册Swagger路由

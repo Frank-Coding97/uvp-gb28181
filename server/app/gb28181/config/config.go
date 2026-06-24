@@ -7,6 +7,24 @@ type Config struct {
 	Enabled bool
 	SIP     SIPConfig
 	Device  DeviceConfig
+	ZLM     ZLMConfig
+	Media   MediaConfig
+}
+
+// ZLMConfig ZLMediaKit 媒体服务器配置(数据面)
+type ZLMConfig struct {
+	Host     string // ZLM 地址
+	HTTPPort int    // ZLM HTTP API 端口
+	Secret   string // API secret
+	RTPPort  int    // RTP 单端口收流
+}
+
+// MediaConfig 媒体/Hook 配置
+type MediaConfig struct {
+	HookHost                string // ZLM Hook 回调可达的本机地址
+	HookPort                int    // 后端 HTTP 端口(Hook 端点)
+	StreamNoneReaderTimeout int    // 无人观看断流秒数
+	RTPServerTimeout        int    // RTP 收流超时(秒)
 }
 
 // SIPConfig SIP 服务配置
@@ -45,6 +63,18 @@ func Load() Config {
 			KeepaliveTimeoutCount: c.GetInt("gb28181.device.keepalive_timeout_count"),
 			KeepaliveGraceSeconds: c.GetInt("gb28181.device.keepalive_grace_seconds"),
 			OfflineScanInterval:   c.GetInt("gb28181.device.offline_scan_interval"),
+		},
+		ZLM: ZLMConfig{
+			Host:     c.GetString("gb28181.zlm.host"),
+			HTTPPort: c.GetInt("gb28181.zlm.httpport"),
+			Secret:   c.GetString("gb28181.zlm.secret"),
+			RTPPort:  c.GetInt("gb28181.zlm.rtpport"),
+		},
+		Media: MediaConfig{
+			HookHost:                c.GetString("gb28181.media.hookhost"),
+			HookPort:                c.GetInt("gb28181.media.hookport"),
+			StreamNoneReaderTimeout: c.GetInt("gb28181.media.streamnonereadertimeout"),
+			RTPServerTimeout:        c.GetInt("gb28181.media.rtpservertimeout"),
 		},
 	}
 }
