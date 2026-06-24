@@ -118,13 +118,15 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	ssrc := sdp.GenRealtimeSSRC(s.cfg.SIP.Domain)
 	streamID := ssrc
 
-	// 3. openRtpServer(失败直接返回,无资源需回滚)
-	rtpRes, err := s.zlm.OpenRtpServer(ctx, streamID, s.cfg.ZLM.RTPPort, 0)
+	// 3. openRtpServer:port=0 让 ZLM 自选临时端口
+	// (cfg.ZLM.RTPPort 是 ZLM 自身的单端口收流端口,不能再开一路占用,会 address already in use)
+	rtpRes, err := s.zlm.OpenRtpServer(ctx, streamID, 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("申请 ZLM 收流端口失败: %w", err)
 	}
 	recvPort := rtpRes.Port
 	if recvPort == 0 {
+		// 极少数 ZLM 版本不在响应里回 port,只能 fallback 到配置端口(同时 SDP 也会失败,但至少错误明显)
 		recvPort = s.cfg.ZLM.RTPPort
 	}
 
