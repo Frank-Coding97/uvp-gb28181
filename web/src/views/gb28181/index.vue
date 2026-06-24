@@ -83,6 +83,22 @@ async function onLoadMore(node: TreeNode) {
 
 // ===== 点播 / 停播 =====
 
+async function onTreeSelect(selectedKeys: string[]) {
+    if (!selectedKeys || !selectedKeys.length) return;
+    const key = String(selectedKeys[0]);
+    if (!key.startsWith("ch:")) return; // 只处理通道叶子,设备节点交给展开
+    // key 格式: ch:<deviceId>:<channelId>
+    const parts = key.split(":");
+    if (parts.length < 3) return;
+    await onChannelClick({
+        key,
+        title: "",
+        isLeaf: true,
+        deviceId: parts[1],
+        channelId: parts[2]
+    } as TreeNode);
+}
+
 async function ensureStopCurrent() {
     if (!playing.value) return;
     try {
@@ -156,12 +172,7 @@ onMounted(loadDevices);
                     :data="treeData as any"
                     :load-more="onLoadMore as any"
                     :default-expanded-keys="[]"
-                    @select="
-                        (_keys: any, info: any) => {
-                            const node = info?.node?.dataRef as TreeNode;
-                            if (node?.isLeaf) onChannelClick(node);
-                        }
-                    "
+                    @select="onTreeSelect"
                 >
                     <template #title="nodeData">
                         <span :class="{ offline: nodeData.online === false }">{{ nodeData.title }}</span>
