@@ -19,12 +19,15 @@ type UAC struct {
 }
 
 // New 创建 UAC,复用 server 的 UserAgent
+// 关键:不要 WithClientPort 抢 server 已绑定的 5061,否则 client 走备选 socket
+// 设备应答会回到 server 端口但 client dialog 收不到 → WaitAnswer 永久阻塞
+// 让 sipgo 默认共享 server 的 transport;Contact 头我们手动写明 sipIP:sipPort
 func New(ua *sipgo.UserAgent, serverID, domain, sipIP string, sipPort int) (*UAC, error) {
-	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname(sipIP), sipgo.WithClientPort(sipPort))
+	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname(sipIP))
 	if err != nil {
 		return nil, fmt.Errorf("创建 UAC client 失败: %w", err)
 	}
-	// Contact 头:平台自身地址,设备回包/BYE 用
+	// Contact 头:平台自身地址,设备回包/BYE 用(端口写 server 监听端口,确保设备应答能回)
 	contact := sip.ContactHeader{
 		Address: sip.Uri{User: serverID, Host: sipIP, Port: sipPort},
 	}
@@ -107,6 +110,8 @@ func (m *SessionManager) remove(streamID string) {
 }
 
 // Invite 发起点播:INVITE → 等应答 → ACK,会话建立
+// 关键:sipgo v1.4 的 WaitAnswer 内部 select 不响应外部 ctx.Done(),
+// 这里用 channel + select 包一层强制超时,ctx 到期主动 Close dialog
 func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody string) error {
 	s.State = StateInviting
 	s.createdAt = time.Now()
@@ -118,11 +123,25 @@ func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody
 		s.State = StateIdle
 		return fmt.Errorf("INVITE 失败: %w", err)
 	}
-	if err := dialog.WaitAnswer(ctx, sipgo.AnswerOptions{}); err != nil {
+
+	// WaitAnswer 不听 ctx,自己加超时控制
+	answered := make(chan error, 1)
+	go func() {
+		answered <- dialog.WaitAnswer(ctx, sipgo.AnswerOptions{})
+	}()
+	select {
+	case waitErr := <-answered:
+		if waitErr != nil {
+			s.State = StateIdle
+			_ = dialog.Close()
+			return fmt.Errorf("等待 INVITE 应答失败: %w", waitErr)
+		}
+	case <-ctx.Done():
 		s.State = StateIdle
 		_ = dialog.Close()
-		return fmt.Errorf("等待 INVITE 应答失败: %w", err)
+		return fmt.Errorf("等待 INVITE 应答超时: %w", ctx.Err())
 	}
+
 	if err := dialog.Ack(ctx); err != nil {
 		s.State = StateIdle
 		return fmt.Errorf("发送 ACK 失败: %w", err)
