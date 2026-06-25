@@ -20,9 +20,9 @@ const themeConfig = () => {
   // 面包屑渲染
   const isBreadcrumb = ref<boolean>(true);
   // 标签栏渲染
-  const isTabs = ref<boolean>(true);
+  const isTabs = ref<boolean>(false);
   // 页脚渲染
-  const isFooter = ref<boolean>(true);
+  const isFooter = ref<boolean>(false);
   // 水印
   const watermark = ref<string>("");
   // 水印风格

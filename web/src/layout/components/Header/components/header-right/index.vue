@@ -317,41 +317,62 @@ const logOut = () => {
 .header_setting {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 4px;
     height: 100%;
-    background-color: $color-bg-2;
+    background-color: transparent;
 
     >.icon_btn {
         box-sizing: border-box;
         display: flex;
         align-items: center;
-        justify-content: space-around;
-        width: $icon-box;
-        height: $icon-box;
-        margin-left: $margin;
-        color: $color-text-1;
-        border-radius: $radius-box-1;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        margin-left: 0;
+        color: #666;
+        border-radius: 50%;
+        transition: background .15s, color .15s;
+
+        &:hover {
+            background: #f5f5f5;
+            color: #1890ff;
+        }
     }
 
     .my_setting {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        height: 32px;
-        margin-left: $margin;
+        height: 36px;
+        margin-left: 8px;
+        padding: 0 8px;
+        gap: 8px;
+        border-radius: 18px;
+        cursor: pointer;
+        transition: background .15s;
         overflow: hidden;
 
+        &:hover {
+            background: #f5f5f5;
+        }
+
+        :deep(.my_image),
         .my_image {
-            margin-right: 8px;
+            width: 28px !important;
+            height: 28px !important;
             border-radius: 50%;
+            overflow: hidden;
+            flex-shrink: 0;
         }
 
         .user-nickname {
             white-space: nowrap;
+            font-size: 14px;
+            color: #333;
         }
 
         .icon_down {
-            margin: 0 0 0 5px;
+            color: #bbb;
+            font-size: 12px;
             transform: rotate(0deg);
             transition: transform 0.2s;
         }
@@ -363,12 +384,12 @@ const logOut = () => {
 
     &::before {
         position: absolute;
-        top: -4px;
-        right: -2px;
+        top: 6px;
+        right: 6px;
         width: 6px;
         height: 6px;
         content: "";
-        background: $color-danger;
+        background: #ff4d4f;
         border: 2px solid #ffffff;
         border-radius: 50%;
     }

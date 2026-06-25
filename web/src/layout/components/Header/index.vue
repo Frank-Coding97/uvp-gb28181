@@ -15,8 +15,11 @@ import HeaderRight from "@/layout/components/Header/components/header-right/inde
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  height: 60px;
-  padding: 0 $padding;
-  border-bottom: $border-1 solid $color-border-2;
+  height: 56px;
+  padding: 0 24px;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+  z-index: 100;
+  flex-shrink: 0;
 }
 </style>

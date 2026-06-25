@@ -1,7 +1,6 @@
 <template>
   <a-watermark :content="watermark" v-bind="watermarkConfig">
     <a-layout-content class="layout-main-content">
-      <Tabs v-if="isTabs" />
       <router-view v-slot="{ Component, route }">
         <s-main-transition>
           <keep-alive :include="cacheRoutes">
@@ -14,12 +13,11 @@
 </template>
 
 <script setup lang="ts">
-import Tabs from "@/layout/components/Tabs/index.vue";
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 const themeStore = useThemeConfig();
-let { refreshPage, isTabs, watermark, watermarkStyle, watermarkRotate, watermarkGap } = storeToRefs(themeStore);
+let { refreshPage, watermark, watermarkStyle, watermarkRotate, watermarkGap } = storeToRefs(themeStore);
 const routerStore = useRouteConfigStore();
 const { cacheRoutes } = storeToRefs(routerStore);
 

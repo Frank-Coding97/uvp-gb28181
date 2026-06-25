@@ -1,3 +1,7 @@
+<!--
+  UVP Favicon — 32×32 极简版
+  浏览器 tab 用,不依赖描摹 path
+-->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="UVP">
   <rect width="32" height="32" rx="6" fill="#1890FF"/>
   <text x="16" y="22"

@@ -65,22 +65,24 @@ const isTitle = computed(() => {
     box-sizing: border-box;
     display: flex;
     align-items: center;
-    justify-content: space-around;
-    height: 60px;
-    border-right: $border-1 solid $color-border-2;
+    justify-content: flex-start;
+    height: 56px;
+    border-right: none;
+    border-bottom: 1px solid #e8e8e8;
+    background: #fff;
 
     .logo_box {
         display: flex;
-        // column-gap: $padding;
+        gap: 10px;
         align-items: center;
         width: 100%;
-        padding: 0 $padding;
+        padding: 0 16px;
         overflow: hidden;
     }
 
-    // 折叠或者是横向布局-去掉padding，logo居中
+    // 折叠或者是横向布局-去掉padding,logo居中
     .padding-unset {
-        justify-content: space-around;
+        justify-content: center;
         padding: unset;
     }
 
@@ -89,10 +91,12 @@ const isTitle = computed(() => {
         max-width: 140px;
         overflow: hidden;
         text-overflow: ellipsis;
-        font-size: $font-size-title-1;
-        font-weight: bold;
+        font-size: 15px;
+        font-weight: 600;
         text-align: left;
         white-space: nowrap;
+        color: #333;
+        letter-spacing: .3px;
     }
 
     .dark {
