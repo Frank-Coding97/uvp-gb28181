@@ -120,20 +120,9 @@ func checkRequiredFolders() {
 }
 
 // createZapFactory 创建zap日志工厂
+// 不再区分 debug/生产，统一走"文件 Core + 控制台彩色 Core(可关)"双 Tee
+// 调试粒度由 logs.level 控制（debug/info/warn/error/fatal/panic）
 func createZapFactory(entry func(zapcore.Entry) error) *zap.Logger {
-	// 获取程序所处的模式：  开发调试 、 生产
-	appDebug := app.ConfigYml.GetBool("server.appdebug")
-
-	// 判断程序当前所处的模式，调试模式直接返回一个便捷的zap日志管理器地址，所有的日志打印到控制台即可
-	if appDebug == true {
-		if logger, err := zap.NewDevelopment(zap.Hooks(entry)); err == nil {
-			return logger
-		} else {
-			log.Fatal("创建zap日志包失败，详情：" + err.Error())
-		}
-	}
-
-	// 以下才是 非调试（生产）模式所需要的代码
 	encoderConfig := zap.NewProductionEncoderConfig()
 
 	timePrecision := app.ConfigYml.GetString("logs.timeprecision")
@@ -153,14 +142,14 @@ func createZapFactory(entry func(zapcore.Entry) error) *zap.Logger {
 	encoderConfig.EncodeLevel = zapcore.CapitalLevelEncoder
 	encoderConfig.TimeKey = "created_at" // 生成json格式日志的时间键字段，默认为 ts,修改以后方便日志导入到 ELK 服务器
 
-	var encoder zapcore.Encoder
+	var fileEncoder zapcore.Encoder
 	switch app.ConfigYml.GetString("logs.textformat") {
 	case "console":
-		encoder = zapcore.NewConsoleEncoder(encoderConfig) // 普通模式
+		fileEncoder = zapcore.NewConsoleEncoder(encoderConfig) // 普通模式
 	case "json":
-		encoder = zapcore.NewJSONEncoder(encoderConfig) // json格式
+		fileEncoder = zapcore.NewJSONEncoder(encoderConfig) // json格式
 	default:
-		encoder = zapcore.NewConsoleEncoder(encoderConfig) // 普通模式
+		fileEncoder = zapcore.NewConsoleEncoder(encoderConfig) // 普通模式
 	}
 	// 写入器
 	fileName := app.BasePath + app.ConfigYml.GetString("logs.zaplogname")
@@ -171,11 +160,7 @@ func createZapFactory(entry func(zapcore.Entry) error) *zap.Logger {
 		MaxAge:     app.ConfigYml.GetInt("logs.maxage"),     //保留旧文件的最大天数
 		Compress:   app.ConfigYml.GetBool("logs.compress"),  //是否压缩/归档旧文件
 	}
-	writer := zapcore.AddSync(lumberJackLogger)
-	// 开始初始化zap日志核心参数，
-	//参数一：编码器
-	//参数二：写入器
-	//参数三：参数级别，debug级别支持后续调用的所有函数写日志，如果是 fatal 高级别，则级别>=fatal 才可以写日志
+	fileWriter := zapcore.AddSync(lumberJackLogger)
 
 	// 从配置文件读取日志等级
 	logLevelStr := app.ConfigYml.GetString("logs.level")
@@ -197,8 +182,68 @@ func createZapFactory(entry func(zapcore.Entry) error) *zap.Logger {
 		logLevel = zap.InfoLevel // 默认使用 info 级别
 	}
 
-	zapCore := zapcore.NewCore(encoder, writer, logLevel)
+	// 文件 Core：无 ANSI 颜色码，干净写入 lumberjack
+	cores := []zapcore.Core{
+		zapcore.NewCore(fileEncoder, fileWriter, logLevel),
+	}
+
+	// 控制台 Core：带 ANSI 多字段层次染色（time 灰/level 彩/caller 青/message 白）
+	// 对标 Java Spring Boot 默认 CONSOLE_LOG_PATTERN。logs.console=false 可关闭仅写文件。
+	if app.ConfigYml.GetString("logs.console") != "false" {
+		consoleCfg := encoderConfig
+		consoleCfg.ConsoleSeparator = " | "
+		consoleCfg.EncodeLevel = paddedColorLevelEncoder
+		consoleCfg.EncodeCaller = cyanCallerEncoder
+		consoleCfg.EncodeTime = dimTimeEncoder(recordTimeFormat)
+		consoleEncoder := zapcore.NewConsoleEncoder(consoleCfg)
+		cores = append(cores, zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), logLevel))
+	}
+
+	zapCore := zapcore.NewTee(cores...)
 	return zap.New(zapCore, zap.AddCaller(), zap.Hooks(entry), zap.AddStacktrace(zap.WarnLevel))
+}
+
+// ANSI 颜色辅助
+const (
+	ansiReset = "\x1b[0m"
+	ansiDim   = "\x1b[2m"  // 灰/暗淡（time）
+	ansiCyan  = "\x1b[36m" // 青色（caller）
+)
+
+// 级别名 → ANSI 颜色码（参考 zap 内部 _levelToColor，DEBUG 紫/INFO 蓝/WARN 黄/ERROR & 以上 红）
+var levelColorCode = map[zapcore.Level]string{
+	zapcore.DebugLevel:  "\x1b[35m",
+	zapcore.InfoLevel:   "\x1b[34m",
+	zapcore.WarnLevel:   "\x1b[33m",
+	zapcore.ErrorLevel:  "\x1b[31m",
+	zapcore.DPanicLevel: "\x1b[31m",
+	zapcore.PanicLevel:  "\x1b[31m",
+	zapcore.FatalLevel:  "\x1b[31m",
+}
+
+// paddedColorLevelEncoder 把级别填充到 5 字符宽再上色，让 INFO/WARN/ERROR/PANIC 视觉对齐。
+func paddedColorLevelEncoder(l zapcore.Level, enc zapcore.PrimitiveArrayEncoder) {
+	name := l.CapitalString()
+	if len(name) < 5 {
+		name = name + strings.Repeat(" ", 5-len(name))
+	}
+	if c, ok := levelColorCode[l]; ok {
+		enc.AppendString(c + name + ansiReset)
+		return
+	}
+	enc.AppendString(name)
+}
+
+// dimTimeEncoder 时间字段染暗淡灰，避免抢眼。
+func dimTimeEncoder(layout string) zapcore.TimeEncoder {
+	return func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
+		enc.AppendString(ansiDim + t.Format(layout) + ansiReset)
+	}
+}
+
+// cyanCallerEncoder caller 字段染青色，pkg/file.go:line 格式。
+func cyanCallerEncoder(c zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder) {
+	enc.AppendString(ansiCyan + c.TrimmedPath() + ansiReset)
 }
 
 // newCache 初始化缓存
