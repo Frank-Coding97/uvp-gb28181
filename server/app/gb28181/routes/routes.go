@@ -22,6 +22,15 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 // playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
 var playController = gbcontrollers.NewPlayController(nil)
 
+// dashboardController SIP 监控看板控制器
+// provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
+var dashboardController = gbcontrollers.NewDashboardController(nil)
+
+// SetMetricsProvider 由 bootstrap 注入聚合器获取函数,绕开循环依赖
+func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
+	dashboardController = gbcontrollers.NewDashboardController(p)
+}
+
 // SetPlayService 由 bootstrap 注入 play service(routes 包先于 service 实例化,故需后置注入)
 // 同时把 service 注入到 hookController(无人观看 / RTP 超时 自动断流)
 func SetPlayService(svc *gbplay.Service) {
@@ -45,6 +54,11 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			play.POST("/:deviceId/:channelId", func(c *gin.Context) { playController.Start(c) })
 			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })
+		}
+		// SIP 信令看板(只读快照接口,后续 T2.1 加 SSE /stream)
+		sipGroup := gb.Group("/sip/dashboard")
+		{
+			sipGroup.GET("/snapshot", func(c *gin.Context) { dashboardController.Snapshot(c) })
 		}
 	}
 }

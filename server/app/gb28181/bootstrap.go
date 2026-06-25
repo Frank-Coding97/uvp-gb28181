@@ -58,6 +58,9 @@ func Start() {
 	metricsCleanupStop = make(chan struct{})
 	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
 
+	// 把 provider 注入到 routes,让 dashboard controller 能拿到聚合器
+	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
+
 	srv, err := gbsip.NewServer(cfg)
 	if err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务创建失败", zap.Error(err))
