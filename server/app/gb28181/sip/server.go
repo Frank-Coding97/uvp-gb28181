@@ -9,6 +9,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
@@ -17,18 +18,35 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
-	cfg     gbconfig.Config
-	ua      *sipgo.UserAgent
-	srv     *sipgo.Server
-	regH    *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
-	uac     *uac.UAC                 // 供 play service 等业务模块复用
-	cancel  context.CancelFunc
-	wg      sync.WaitGroup
-	started bool
+	cfg      gbconfig.Config
+	ua       *sipgo.UserAgent
+	srv      *sipgo.Server
+	regH     *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
+	msgH     *handler.MessageHandler
+	uac      *uac.UAC // 供 play service 等业务模块复用
+	recorder metrics.Recorder
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
+	started  bool
 }
 
 // UAC 返回 SIP 服务内置的 UAC(可能为 nil,初始化失败时)
 func (s *Server) UAC() *uac.UAC { return s.uac }
+
+// SetRecorder 注入 metrics Recorder,会同时下发到 register/message handler 和 uac
+// 必须在 NewServer 之后、Start 之前调用
+func (s *Server) SetRecorder(r metrics.Recorder) {
+	s.recorder = r
+	if s.regH != nil {
+		s.regH.SetRecorder(r)
+	}
+	if s.msgH != nil {
+		s.msgH.SetRecorder(r)
+	}
+	if s.uac != nil {
+		s.uac.SetRecorder(r)
+	}
+}
 
 // NewServer 创建 SIP 服务
 func NewServer(cfg gbconfig.Config) (*Server, error) {
@@ -61,6 +79,7 @@ func (s *Server) registerHandlers() {
 	s.regH = regHandler
 	s.srv.OnRegister(regHandler.Handle)
 	msgHandler := handler.NewMessageHandler(s.cfg)
+	s.msgH = msgHandler
 	s.srv.OnMessage(msgHandler.Handle)
 }
 

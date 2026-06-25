@@ -1,13 +1,18 @@
 package uac
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 )
 
 // UAC 平台主叫客户端:向下级设备发起 SIP 请求(MESSAGE 查询 / INVITE 点播)
@@ -16,6 +21,11 @@ type UAC struct {
 	dialogUA *sipgo.DialogClientCache // 管理 INVITE 对话(Ack/Bye)
 	serverID string
 	domain   string
+	recorder metrics.Recorder // 可选:埋点出向事务
+
+	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
+	// 配合 generated Call-ID 用于 metrics 配对
+	outCSeq uint64
 }
 
 // New 创建 UAC,复用 server 的 UserAgent
@@ -35,10 +45,58 @@ func New(ua *sipgo.UserAgent, serverID, domain, sipIP string, sipPort int) (*UAC
 	return &UAC{client: client, dialogUA: dialogUA, serverID: serverID, domain: domain}, nil
 }
 
+// SetRecorder 注入指标 Recorder(可选)
+func (u *UAC) SetRecorder(r metrics.Recorder) {
+	u.recorder = r
+}
+
+// nextCSeq 生成单调递增 CSeq(metrics 配对 key 的一部分)
+func (u *UAC) nextCSeq() string {
+	return strconv.FormatUint(atomic.AddUint64(&u.outCSeq, 1), 10)
+}
+
+// detectMessageKind 通过 MANSCDP body 判断本次 MESSAGE 属于哪类事务
+// Catalog / RecordInfo / DeviceControl(PTZ) 三类我们主动发起
+func detectMessageKind(body []byte) metrics.TxKind {
+	if bytes.Contains(body, []byte("Catalog")) {
+		return metrics.TxCatalog
+	}
+	if bytes.Contains(body, []byte("RecordInfo")) {
+		return metrics.TxRecord
+	}
+	if bytes.Contains(body, []byte("DeviceControl")) || bytes.Contains(body, []byte("PTZCmd")) {
+		return metrics.TxPTZ
+	}
+	return metrics.TxUnknown
+}
+
 func (u *UAC) deviceURI(deviceID string) sip.Uri {
 	uri := sip.Uri{}
 	sip.ParseUri(fmt.Sprintf("sip:%s@%s", deviceID, u.domain), &uri)
 	return uri
+}
+
+// recordBegin / recordEnd 给 UAC 出向事务埋点
+// callID 由调用方传入(用真实 SIP Call-ID 头);若 recorder nil 则 no-op
+func (u *UAC) recordBegin(kind metrics.TxKind, callID, cseq, deviceID string) {
+	if u.recorder == nil || callID == "" {
+		return
+	}
+	u.recorder.Begin(metrics.Transaction{
+		Kind:      kind,
+		Direction: metrics.DirOut,
+		CallID:    callID,
+		CSeq:      cseq,
+		DeviceID:  deviceID,
+		StartedAt: time.Now(),
+	})
+}
+
+func (u *UAC) recordEnd(callID, cseq string, statusCode int, success bool) {
+	if u.recorder == nil || callID == "" {
+		return
+	}
+	u.recorder.End(callID, cseq, statusCode, success)
 }
 
 // SendMessage 向设备发 MESSAGE(承载 MANSCDP XML,如 Catalog 查询)
@@ -48,14 +106,43 @@ func (u *UAC) SendMessage(ctx context.Context, deviceID, dest string, body []byt
 	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
 	req.SetDestination(dest)
 	req.SetTransport("UDP")
+
+	kind := detectMessageKind(body)
+	callID, cseq := u.extractKeyFromRequest(req)
+	u.recordBegin(kind, callID, cseq, deviceID)
+
 	resp, err := u.client.Do(ctx, req)
 	if err != nil {
+		u.recordEnd(callID, cseq, 0, false)
 		return fmt.Errorf("发送 MESSAGE 失败: %w", err)
 	}
 	if resp.StatusCode != 200 {
+		u.recordEnd(callID, cseq, int(resp.StatusCode), false)
 		return fmt.Errorf("MESSAGE 应答非200: %d %s", resp.StatusCode, resp.Reason)
 	}
+	u.recordEnd(callID, cseq, int(resp.StatusCode), true)
 	return nil
+}
+
+// extractKeyFromRequest 从已构造的请求里取 Call-ID + CSeq 作为 metrics 配对 key
+// sipgo 在 client.Do 内部会补 Call-ID/CSeq,这里我们提前读;若不存在补一对
+func (u *UAC) extractKeyFromRequest(req *sip.Request) (string, string) {
+	var callID, cseq string
+	if h := req.CallID(); h != nil {
+		callID = string(*h)
+	}
+	if h := req.CSeq(); h != nil {
+		cseq = strconv.FormatUint(uint64(h.SeqNo), 10)
+	}
+	if callID == "" {
+		// 没有 Call-ID(请求还没被 sipgo 加工)→ 用时间戳生成一个临时 key,
+		// 仅为 metrics 配对用,不影响 SIP transport(transport 会补真实的)
+		callID = fmt.Sprintf("uac-%d", time.Now().UnixNano())
+	}
+	if cseq == "" {
+		cseq = u.nextCSeq()
+	}
+	return callID, cseq
 }
 
 // ===== 点播会话 =====
@@ -126,9 +213,13 @@ func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody
 	req.SetDestination(s.Dest)
 	req.SetTransport("UDP")
 
+	callID, cseq := u.extractKeyFromRequest(req)
+	u.recordBegin(metrics.TxInvite, callID, cseq, s.DeviceID)
+
 	dialog, err := u.dialogUA.WriteInvite(ctx, req)
 	if err != nil {
 		s.State = StateIdle
+		u.recordEnd(callID, cseq, 0, false)
 		return fmt.Errorf("INVITE 失败: %w", err)
 	}
 
@@ -142,21 +233,25 @@ func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody
 		if waitErr != nil {
 			s.State = StateIdle
 			_ = dialog.Close()
+			u.recordEnd(callID, cseq, 0, false)
 			return fmt.Errorf("等待 INVITE 应答失败: %w", waitErr)
 		}
 	case <-ctx.Done():
 		s.State = StateIdle
 		_ = dialog.Close()
+		u.recordEnd(callID, cseq, 0, false)
 		return fmt.Errorf("等待 INVITE 应答超时: %w", ctx.Err())
 	}
 
 	if err := dialog.Ack(ctx); err != nil {
 		s.State = StateIdle
+		u.recordEnd(callID, cseq, 0, false)
 		return fmt.Errorf("发送 ACK 失败: %w", err)
 	}
 	s.dialog = dialog
 	s.State = StateEstablished
 	m.put(s)
+	u.recordEnd(callID, cseq, 200, true)
 	return nil
 }
 
@@ -166,11 +261,18 @@ func (u *UAC) Bye(ctx context.Context, m *SessionManager, streamID string) error
 	if s == nil || s.dialog == nil {
 		return nil
 	}
+	// 为 BYE 单独记一次出向事务(用临时 key,跟 INVITE 的 dialog Call-ID 区分)
+	callID := fmt.Sprintf("bye-%s-%d", streamID, time.Now().UnixNano())
+	cseq := u.nextCSeq()
+	u.recordBegin(metrics.TxBye, callID, cseq, s.DeviceID)
+
 	err := s.dialog.Bye(ctx)
 	s.State = StateBye
 	m.remove(streamID)
 	if err != nil {
+		u.recordEnd(callID, cseq, 0, false)
 		return fmt.Errorf("BYE 失败: %w", err)
 	}
+	u.recordEnd(callID, cseq, 200, true)
 	return nil
 }

@@ -6,6 +6,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
@@ -31,8 +32,17 @@ var playSvc *play.Service
 // playSessions 全局点播会话管理(让 hook 端点 on_stream_none_reader/on_rtp_server_timeout 也能查到)
 var playSessions = uac.NewSessionManager()
 
+// metricsAgg 全局指标聚合器(供 controllers/dashboard 暴露,供 SIP 路径埋点)
+var metricsAgg *metrics.Aggregator
+
+// metricsCleanupStop 控制 TTL 清理 goroutine 退出
+var metricsCleanupStop chan struct{}
+
 // PlayService 返回点播 service(可能为 nil,gb28181 未启用 / UAC 初始化失败时)
 func PlayService() *play.Service { return playSvc }
+
+// MetricsAggregator 返回全局聚合器(controllers/dashboard 用)
+func MetricsAggregator() *metrics.Aggregator { return metricsAgg }
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过
@@ -42,11 +52,18 @@ func Start() {
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
+
+	// 先建聚合器,handler/UAC 拿到它做埋点
+	metricsAgg = metrics.NewAggregator()
+	metricsCleanupStop = make(chan struct{})
+	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
+
 	srv, err := gbsip.NewServer(cfg)
 	if err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务创建失败", zap.Error(err))
 		return
 	}
+	srv.SetRecorder(metricsAgg)
 	if err := srv.Start(); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
 		return
@@ -85,8 +102,28 @@ func Start() {
 	}
 }
 
+// runMetricsCleanup 周期清理过期配对(防内存泄漏);30s TTL
+func runMetricsCleanup(a *metrics.Aggregator, stop <-chan struct{}) {
+	tk := time.NewTicker(30 * time.Second)
+	defer tk.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tk.C:
+			if n := a.CleanupExpiredPairs(30 * time.Second); n > 0 {
+				app.ZapLog.Debug("GB28181 metrics 配对清理", zap.Int("cleaned", n))
+			}
+		}
+	}
+}
+
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	if metricsCleanupStop != nil {
+		close(metricsCleanupStop)
+		metricsCleanupStop = nil
+	}
 	if offlineScanner != nil {
 		offlineScanner.Stop()
 	}

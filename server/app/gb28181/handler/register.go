@@ -12,6 +12,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -21,7 +22,8 @@ import (
 type RegisterHandler struct {
 	cfg               gbconfig.Config
 	keepaliveInterval int
-	catalogTrigger    CatalogTrigger // 可选:首次注册成功后触发 Catalog 查询
+	catalogTrigger    CatalogTrigger    // 可选:首次注册成功后触发 Catalog 查询
+	recorder          metrics.Recorder  // 可选:埋点 SIP 事务
 }
 
 // NewRegisterHandler 创建注册处理器
@@ -38,14 +40,52 @@ func (h *RegisterHandler) SetCatalogTrigger(t CatalogTrigger) {
 	h.catalogTrigger = t
 }
 
+// SetRecorder 注入指标 Recorder(可选,nil 时所有埋点 no-op)
+func (h *RegisterHandler) SetRecorder(r metrics.Recorder) {
+	h.recorder = r
+}
+
+// recordBegin 安全调用 Recorder.Begin(nil 跳过)
+func (h *RegisterHandler) recordBegin(req *sip.Request, kind metrics.TxKind, deviceID string) {
+	if h.recorder == nil {
+		return
+	}
+	callID, cseq := sipPairKey(req)
+	if callID == "" {
+		return
+	}
+	h.recorder.Begin(metrics.Transaction{
+		Kind:      kind,
+		Direction: metrics.DirIn,
+		CallID:    callID,
+		CSeq:      cseq,
+		DeviceID:  deviceID,
+		StartedAt: time.Now(),
+	})
+}
+
+// recordEnd 安全调用 Recorder.End(nil 跳过)
+func (h *RegisterHandler) recordEnd(req *sip.Request, statusCode int, success bool) {
+	if h.recorder == nil {
+		return
+	}
+	callID, cseq := sipPairKey(req)
+	if callID == "" {
+		return
+	}
+	h.recorder.End(callID, cseq, statusCode, success)
+}
+
 // Handle 处理 REGISTER 请求
 func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	deviceID := ""
 	if from := req.From(); from != nil {
 		deviceID = from.Address.User
 	}
+	h.recordBegin(req, metrics.TxRegister, deviceID)
 	if deviceID == "" {
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 400, "Missing device id", nil))
+		h.recordEnd(req, 400, false)
 		return
 	}
 
@@ -60,6 +100,8 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		res := sip.NewResponseFromRequest(req, 401, "Unauthorized", nil)
 		res.AppendHeader(sip.NewHeader("WWW-Authenticate", chal.String()))
 		_ = tx.Respond(res)
+		// 401 挑战是正常协议握手,不算失败(后续 Authorization 重发会再走一遍 Handle)
+		h.recordEnd(req, 401, true)
 		return
 	}
 
@@ -67,6 +109,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	cred, err := digest.ParseCredentials(authHeader.Value())
 	if err != nil {
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 400, "Bad credentials", nil))
+		h.recordEnd(req, 400, false)
 		return
 	}
 	chal := digest.Challenge{
@@ -87,6 +130,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if err != nil || expected.Response != cred.Response {
 		app.ZapLog.Warn("GB28181 注册鉴权失败", zap.String("deviceId", deviceID))
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 401, "Unauthorized", nil))
+		h.recordEnd(req, 401, false)
 		return
 	}
 
@@ -100,6 +144,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		}
 		app.ZapLog.Info("GB28181 设备注销", zap.String("deviceId", deviceID))
 		_ = tx.Respond(buildOKWithExpires(req, 0))
+		h.recordEnd(req, 200, true)
 		return
 	}
 
@@ -116,6 +161,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if err != nil {
 		app.ZapLog.Error("GB28181 自动建档失败", zap.String("deviceId", deviceID), zap.Error(err))
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Server error", nil))
+		h.recordEnd(req, 500, false)
 		return
 	}
 	app.ZapLog.Info("GB28181 设备注册成功",
@@ -123,6 +169,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		zap.String("transport", req.Transport()),
 		zap.Bool("isFirst", isFirst))
 	_ = tx.Respond(buildOKWithExpires(req, expires))
+	h.recordEnd(req, 200, true)
 
 	// 首次注册(或离线后重连)→ 触发一次 Catalog 查询拉通道树
 	// 放在响应之后:不阻塞 200 OK,失败仅记日志
