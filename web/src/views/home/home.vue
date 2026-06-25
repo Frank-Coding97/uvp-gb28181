@@ -31,6 +31,9 @@
     <div class="waterfall">
       <!-- Left column (2/3) -->
       <div class="col-left">
+        <!-- SIP 信令监控看板(实时,体现协议层理解力) -->
+        <SipDashboardCard />
+
         <!-- 2 charts -->
         <div class="charts-row">
           <div class="panel">
@@ -236,6 +239,7 @@
 <script setup lang="ts">
 import LineChart from "./components/line-chart.vue";
 import DonutChart from "./components/donut-chart.vue";
+import SipDashboardCard from "./components/sip-dashboard/index.vue";
 
 import iconDevices from "@/assets/img/icon-devices.svg";
 import iconOnline from "@/assets/img/icon-online.svg";
