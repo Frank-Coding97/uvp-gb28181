@@ -59,6 +59,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		sipGroup := gb.Group("/sip/dashboard")
 		{
 			sipGroup.GET("/snapshot", func(c *gin.Context) { dashboardController.Snapshot(c) })
+			sipGroup.GET("/stream", func(c *gin.Context) { dashboardController.Stream(c) })
 		}
 	}
 }
