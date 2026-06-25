@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 登录 · 极简单卡片版</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --primary: #1890ff;
+  --primary-hover: #40a9ff;
+  --primary-active: #096dd9;
+  --success: #52c41a;
+  --warning: #fa8c16;
+  --danger: #ff4d4f;
+  --text: #333;
+  --text-secondary: #666;
+  --text-hint: #999;
+  --border: #e8e8e8;
+  --border-light: #f0f0f0;
+  --bg: #f0f2f5;
+  --white: #fff;
+}
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* === Top brand bar === */
+.brand-bar {
+  height: 56px;
+  background: var(--white);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  flex-shrink: 0;
+}
+.brand-bar .logo {
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+}
+.brand-bar .title {
+  margin-left: 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.brand-bar .meta {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-hint);
+}
+
+/* === Center stage === */
+.stage {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+.card {
+  width: 400px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  padding: 36px 32px 32px;
+}
+.card-head {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.card-head h1 {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.card-head p {
+  font-size: 13px;
+  color: var(--text-hint);
+}
+
+/* === Form === */
+.field {
+  margin-bottom: 16px;
+}
+.field-label {
+  display: block;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+.input-wrap {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 12px;
+  gap: 8px;
+  background: var(--white);
+  transition: border-color .15s;
+}
+.input-wrap:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+.input-wrap svg {
+  color: var(--text-hint);
+  flex-shrink: 0;
+}
+.input-wrap input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 14px;
+  color: var(--text);
+  font-family: inherit;
+}
+.input-wrap input::placeholder { color: var(--text-hint); }
+
+/* === captcha === */
+.captcha-row {
+  display: flex;
+  gap: 10px;
+}
+.captcha-row .input-wrap { flex: 1; }
+.captcha-img {
+  width: 110px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Courier New", monospace;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  background-image:
+    linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%),
+    repeating-linear-gradient(45deg, transparent 0, transparent 6px, rgba(24,144,255,.08) 6px, rgba(24,144,255,.08) 7px);
+}
+
+/* === Options row === */
+.options-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+  margin-bottom: 20px;
+}
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.checkbox input { accent-color: var(--primary); }
+.link {
+  font-size: 13px;
+  color: var(--primary);
+  cursor: pointer;
+}
+.link:hover { color: var(--primary-hover); }
+
+/* === Submit === */
+.submit-btn {
+  width: 100%;
+  height: 40px;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s;
+  font-family: inherit;
+}
+.submit-btn:hover { background: var(--primary-hover); }
+.submit-btn:active { background: var(--primary-active); }
+
+/* === Footer === */
+.footer {
+  text-align: center;
+  padding: 16px 24px;
+  font-size: 12px;
+  color: var(--text-hint);
+  border-top: 1px solid var(--border);
+  background: var(--white);
+}
+.footer .sep { margin: 0 8px; color: var(--border); }
+</style>
+</head>
+<body>
+
+<div class="brand-bar">
+  <span class="logo">UVP</span>
+  <span class="title">UVP 统一视频接入平台</span>
+  <span class="meta">v2.3.0</span>
+</div>
+
+<div class="stage">
+  <div class="card">
+    <div class="card-head">
+      <h1>账号登录</h1>
+      <p>欢迎使用 UVP · 国标视频接入平台</p>
+    </div>
+
+    <div class="field">
+      <label class="field-label">租户编码</label>
+      <div class="input-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>
+          <polyline points="9 22 9 12 15 12 15 22"/>
+        </svg>
+        <input type="text" placeholder="不填则使用账号默认租户" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">账号</label>
+      <div class="input-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <input type="text" placeholder="请输入账号" value="admin" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">密码</label>
+      <div class="input-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2"/>
+          <path d="M7 11V7a5 5 0 0110 0v4"/>
+        </svg>
+        <input type="password" placeholder="请输入密码" value="password" />
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">图形验证码</label>
+      <div class="captcha-row">
+        <div class="input-wrap">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M9 11l3 3L22 4"/>
+            <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+          </svg>
+          <input type="text" placeholder="请输入验证码" />
+        </div>
+        <div class="captcha-img" title="点击刷新">A4F9</div>
+      </div>
+    </div>
+
+    <div class="options-row">
+      <label class="checkbox">
+        <input type="checkbox" />
+        <span>记住账号</span>
+      </label>
+      <span class="link">忘记密码?</span>
+    </div>
+
+    <button class="submit-btn">登 录</button>
+  </div>
+</div>
+
+<div class="footer">
+  © 2026 UVP 统一视频接入平台
+  <span class="sep">·</span>
+  Powered by GB/T 28181-2022
+  <span class="sep">·</span>
+  皖 ICP 备 XXXXXXXX 号
+</div>
+
+</body>
+</html>

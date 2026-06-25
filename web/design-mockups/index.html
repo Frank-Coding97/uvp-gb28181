@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>UVP · 登录页方向选择</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+:root {
+  --primary: #1890ff;
+  --text: #333;
+  --text-secondary: #666;
+  --text-hint: #999;
+  --border: #e8e8e8;
+  --bg: #f0f2f5;
+  --white: #fff;
+}
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding: 40px 24px 64px; }
+
+.head { padding-bottom: 20px; border-bottom: 1px solid var(--border); margin-bottom: 28px; }
+.eyebrow {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .18em;
+  color: var(--text-hint);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+h1 { font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
+.lede {
+  margin-top: 12px;
+  max-width: 70ch;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.lede code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  background: rgba(0,0,0,.05);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  margin-top: 32px;
+}
+.card {
+  display: flex;
+  flex-direction: column;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: inherit;
+  overflow: hidden;
+  transition: box-shadow .18s, transform .18s;
+}
+.card:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,.08);
+  transform: translateY(-2px);
+}
+.card .preview {
+  aspect-ratio: 16 / 10;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+}
+.card iframe {
+  position: absolute;
+  inset: 0;
+  width: 200%;
+  height: 200%;
+  transform: scale(0.5);
+  transform-origin: top left;
+  border: 0;
+  pointer-events: none;
+}
+.card-body { padding: 20px 22px 22px; }
+.card-id {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  letter-spacing: .14em;
+  color: var(--text-hint);
+  margin-bottom: 6px;
+}
+.card h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+.tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: .08em;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 3px;
+}
+
+.foot {
+  margin-top: 48px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-hint);
+  display: flex;
+  justify-content: space-between;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="head">
+    <div class="eyebrow">Login · Direction Showcase · v2</div>
+    <h1>UVP 登录页 · 两个方向</h1>
+    <p class="lede">
+      调子从 <code>apps/uvp-ui-prototype/index.html</code> 锁定:
+      Ant 蓝主色 · 状态色专用 · 8px 圆角卡片 · 1px 硬边框 · PingFang/YaHei。
+      两个方向都保留同一组字段(<code>租户编码</code> · <code>账号</code> · <code>密码</code> · <code>图形验证码</code>),
+      区别在于"开屏要不要带产品门面"。
+    </p>
+  </div>
+
+  <div class="grid">
+    <a class="card" href="./login-03-floating.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./login-03-floating.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">03 / FLOATING — 深蓝静谧(基线)</div>
+        <h2>悬浮卡片版 · 深蓝静谧</h2>
+        <p>沉稳深蓝渐变 + 细网格,跟主控台调子最一致,商务气最克制。</p>
+        <div class="tags"><span class="tag">CALM-NAVY</span><span class="tag">GRID</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./login-03a-aurora.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./login-03a-aurora.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">03a / AURORA — 极光雾</div>
+        <h2>悬浮卡片版 · 极光雾</h2>
+        <p>多色斑点状柔渐变(蓝紫青绿互染),Stripe / Linear 那种 SaaS 高级感。</p>
+        <div class="tags"><span class="tag">AURORA</span><span class="tag">SAAS</span><span class="tag">SOFT</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./login-03b-mono-noise.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./login-03b-mono-noise.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">03b / MONO-NOISE — 单色磨砂</div>
+        <h2>悬浮卡片版 · 单色磨砂</h2>
+        <p>近黑石墨色 + SVG 噪点纹理,最克制最不抢戏,跟显示器自带颗粒融合。</p>
+        <div class="tags"><span class="tag">GRAPHITE</span><span class="tag">NOISE</span><span class="tag">QUIET</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./login-03c-topology.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./login-03c-topology.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">03c / TOPOLOGY — 拓扑线网</div>
+        <h2>悬浮卡片版 · 拓扑线网</h2>
+        <p>极淡 SVG 节点 + 连线作背景,暗喻"接入 / 级联",有业务故事但不喧宾。</p>
+        <div class="tags"><span class="tag">TOPOLOGY</span><span class="tag">BUSINESS</span><span class="tag">STORY</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./login-03d-device-dots.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./login-03d-device-dots.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">03d / DEVICE-DOTS — 设备点阵</div>
+        <h2>悬浮卡片版 · 设备点阵</h2>
+        <p>深底 + 规则点阵 + 几个高亮设备节点(蓝/绿/黄三状态),"星河"式分布。</p>
+        <div class="tags"><span class="tag">STARFIELD</span><span class="tag">STATUS</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./login-01-card.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./login-01-card.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">01 / SIMPLE CARD</div>
+        <h2>极简单卡片版</h2>
+        <p>顶部 brand bar + 居中白卡。跟主控台 prototype 完全是一套形状,
+        登录后无缝过渡到 dashboard。最稳、最快、商务气克制。</p>
+        <div class="tags">
+          <span class="tag">CLEAN</span>
+          <span class="tag">FAST</span>
+          <span class="tag">COHERENT</span>
+        </div>
+      </div>
+    </a>
+
+    <a class="card" href="./login-02-split.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./login-02-split.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">02 / SPLIT HERO</div>
+        <h2>双栏门面版</h2>
+        <p>左栏深蓝 hero(slogan + 接入设备/通道/流媒体三 KPI + 能力标签),
+        右栏白底表单。商务/政企 demo 时第一眼就有产品定位。</p>
+        <div class="tags">
+          <span class="tag">HERO</span>
+          <span class="tag">BRAND</span>
+          <span class="tag">DEMO-FRIENDLY</span>
+        </div>
+      </div>
+    </a>
+  </div>
+
+  <div class="foot">
+    <span>web/design-mockups/index.html</span>
+    <span>点卡片打开完整页</span>
+  </div>
+</div>
+</body>
+</html>
