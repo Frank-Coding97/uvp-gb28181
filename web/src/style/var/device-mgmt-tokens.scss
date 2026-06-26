@@ -1,0 +1,135 @@
+/* ============================================================
+   UVP · 设备管理页 token(plan §7 平移自 design-mockups/gb-device-mgmt/common.css)
+   1:1 平移规则:不允许实现侧再造一套
+   引入路径:web/src/style/var/index.scss
+   ============================================================ */
+
+:root {
+  /* ---------- 节点类型色(spec §8.6) ---------- */
+  --node-civil: #A78BFA;             /* 行政区划 — 淡紫 */
+  --node-biz: #06B6D4;               /* 业务分组 — 青色 */
+  --node-virtual: #FB923C;           /* 虚拟组织 — 橙色 */
+  --node-device: #3B82F6;            /* 设备 — 蓝(同主色) */
+  --node-channel-on: #10B981;        /* 通道在线 */
+  --node-channel-off: #6B7280;       /* 通道离线 */
+  --node-mount: #06B6D4;             /* 多挂载角标色(Q3 决议) */
+
+  /* ---------- 状态色(spec §8.2 — 与 Arco 主色解耦,专门给视频监控语义)---------- */
+  --status-online: #10B981;          /* 翡翠绿 */
+  --status-online-fade: rgba(16, 185, 129, 0.12);
+  --status-offline: #6B7280;         /* 中灰 */
+  --status-offline-fade: rgba(107, 114, 128, 0.12);
+  --status-warning: #F59E0B;         /* 琥珀 */
+  --status-warning-fade: rgba(245, 158, 11, 0.12);
+  --status-danger: #EF4444;          /* 朱红 */
+  --status-danger-fade: rgba(239, 68, 68, 0.12);
+
+  /* ---------- 间距(spec §8.3 · 8 倍数)---------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* ---------- 圆角(spec §8.3 — 与 Arco 默认圆角错开)---------- */
+  --dm-radius-1: 4px;                /* icon / mini 按钮 */
+  --dm-radius-2: 8px;                /* 中等按钮 / tag */
+  --dm-radius-3: 12px;               /* 卡片默认 */
+  --dm-radius-4: 16px;               /* 浮窗 / 弹层 */
+  --dm-radius-pill: 999px;           /* 全圆胶囊 */
+
+  /* ---------- 阴影(spec §8.4)---------- */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.20), 0 1px 2px rgba(0, 0, 0, 0.12);
+  --shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.32), 0 2px 4px rgba(0, 0, 0, 0.16);
+  --shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.48);
+
+  /* ---------- 缓动(spec §8.5)---------- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.32, 0, 0.67, 0);
+  --duration-fast: 150ms;            /* 微交互 */
+  --duration-mid: 200ms;             /* 中等转场 */
+  --duration-slow: 300ms;            /* 大区域转场 */
+
+  /* ---------- 字号(本期不覆盖已有 Arco 字号 token)---------- */
+  --font-12: 12px;
+  --font-13: 13px;
+  --font-14: 14px;
+  --font-16: 16px;
+  --font-20: 20px;
+  --font-24: 24px;
+  --font-32: 32px;
+
+  /* ---------- 行高 ---------- */
+  --line-tight: 1.2;
+  --line-normal: 1.5;
+  --line-relaxed: 1.7;
+
+  /* ---------- 字体栈 ---------- */
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+
+  /* ---------- 布局尺寸(设备管理页专用)---------- */
+  --topbar-height: 56px;
+  --aside-width: 280px;
+  --aside-collapsed-width: 24px;
+  --kpi-card-height: 120px;
+  --drawer-width: 40%;
+  --drawer-min-width: 480px;
+}
+
+/* ============================================================
+   等宽数字工具类 + 设备管理页全局类
+   ============================================================ */
+
+.dm-mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 整页 layout 根(plan §2.2 踩坑总结)
+   height:100vh + overflow:hidden,子区域各自 overflow:auto
+   防 sticky CTA / 分页 / 视野气泡被撑出视口 */
+.dm-page-root {
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: var(--topbar-height) 1fr;
+}
+
+/* 通用 SCSS 别名,业务组件 @use 时方便引用 */
+$dm-status-online: var(--status-online);
+$dm-status-offline: var(--status-offline);
+$dm-status-warning: var(--status-warning);
+$dm-status-danger: var(--status-danger);
+
+$dm-node-civil: var(--node-civil);
+$dm-node-biz: var(--node-biz);
+$dm-node-virtual: var(--node-virtual);
+$dm-node-device: var(--node-device);
+$dm-node-mount: var(--node-mount);
+
+$dm-space-1: 4px;
+$dm-space-2: 8px;
+$dm-space-3: 12px;
+$dm-space-4: 16px;
+$dm-space-6: 24px;
+$dm-space-8: 32px;
+$dm-space-12: 48px;
+
+$dm-radius-1: 4px;
+$dm-radius-2: 8px;
+$dm-radius-3: 12px;
+$dm-radius-4: 16px;
+$dm-radius-pill: 999px;
+
+$dm-shadow-card: 0 1px 3px rgba(0, 0, 0, 0.20), 0 1px 2px rgba(0, 0, 0, 0.12);
+$dm-shadow-card-hover: 0 8px 24px rgba(0, 0, 0, 0.32), 0 2px 4px rgba(0, 0, 0, 0.16);
+$dm-shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.48);
+
+$dm-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+$dm-ease-in: cubic-bezier(0.32, 0, 0.67, 0);
+$dm-duration-fast: 150ms;
+$dm-duration-mid: 200ms;
+$dm-duration-slow: 300ms;
