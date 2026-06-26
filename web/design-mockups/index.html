@@ -129,7 +129,63 @@ h1 { font-size: 28px; font-weight: 600; letter-spacing: -.3px; }
 </head>
 <body>
 <div class="wrap">
-  <div class="head">
+
+  <!-- ============ 设备管理页(本期产出)============ -->
+  <div class="head" style="border-bottom-color: #1890ff33;">
+    <div class="eyebrow" style="color:#1890ff;">Device Management · Visual Mockups · v1</div>
+    <h1>UVP 设备管理页 · 视觉原型</h1>
+    <p class="lede">
+      对应 <code>~/Documents/Atlas/wiki/projects/uvp/specs/gb-catalog-tree-and-device-mgmt.md</code>。
+      Phase 1 出效果四件套(列表 / 卡片 / 地图 / 详情抽屉),色板按 spec §8 数值化锁定,深色专业控台风。
+      <br>
+      点下面卡片或进 <a href="./gb-device-mgmt/index.html" style="color:#1890ff; text-decoration:underline; text-underline-offset:3px;">设备管理子索引</a> 看全部。
+    </p>
+  </div>
+
+  <div class="grid">
+    <a class="card" href="./gb-device-mgmt/list.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./gb-device-mgmt/list.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">DEVICE-MGMT · M5 / LIST</div>
+        <h2>列表视图(运维向)</h2>
+        <p>56px 行 · 缩略图 + 双行设备名 · 通道胶囊 · 在线率环形 · 相对时间 · 多挂载链状角标 · anomaly 异常徽章 · 批量条。</p>
+        <div class="tags"><span class="tag">LIST</span><span class="tag">OPS</span><span class="tag">TABLE</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./gb-device-mgmt/card.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./gb-device-mgmt/card.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">DEVICE-MGMT · M6 / CARD</div>
+        <h2>卡片视图(监控员向)</h2>
+        <p>16:9 快照 60s 刷新 · 渐变蒙层状态条 · 离线灰度滤镜 · PTZ / 报警 / anomaly 角标 · LIVE 实时呼吸点 · hover 抬升 4px。</p>
+        <div class="tags"><span class="tag">CARD</span><span class="tag">LIVE</span><span class="tag">PTZ</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./gb-device-mgmt/map.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./gb-device-mgmt/map.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">DEVICE-MGMT · M7 / MAP</div>
+        <h2>地图视图(地理空间)</h2>
+        <p>暗色济南底图 · 三行政区光晕 · 三档 Marker(呼吸圈)· Cluster 气泡 + 在线率弧 · hover 浮预览卡 · 视野统计气泡。</p>
+        <div class="tags"><span class="tag">DARK MAP</span><span class="tag">CLUSTER</span><span class="tag">AMAP v2</span></div>
+      </div>
+    </a>
+
+    <a class="card" href="./gb-device-mgmt/drawer.html" target="_blank" rel="noopener">
+      <div class="preview"><iframe src="./gb-device-mgmt/drawer.html" loading="lazy" tabindex="-1"></iframe></div>
+      <div class="card-body">
+        <div class="card-id">DEVICE-MGMT · M8 / DRAWER</div>
+        <h2>右侧详情抽屉</h2>
+        <p>占主区 40% · 大快照 + LIVE · 能力 chip · 国标 20 位编码逐段 · 多挂载位置(主/分组)· 24h 在线时序条 · sticky 点播 CTA。</p>
+        <div class="tags"><span class="tag">DRAWER</span><span class="tag">TIMELINE</span><span class="tag">STICKY</span></div>
+      </div>
+    </a>
+  </div>
+
+  <!-- ============ 登录页方向(既有)============ -->
+  <div class="head" style="margin-top: 64px;">
     <div class="eyebrow">Login · Direction Showcase · v2</div>
     <h1>UVP 登录页 · 两个方向</h1>
     <p class="lede">
