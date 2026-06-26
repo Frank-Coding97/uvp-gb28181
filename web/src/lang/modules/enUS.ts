@@ -20,7 +20,6 @@ export default {
         ["navigate mode"]: "navigate mode",
         ["personal-information"]: "personal information",
         ["change-password"]: "change password",
-        ["project-address"]: "project address",
         ["logout"]: "logout",
         ["notice"]: "Notice",
         ["message"]: "Message",

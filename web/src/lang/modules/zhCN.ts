@@ -20,7 +20,6 @@ export default {
         ["navigate mode"]: "导航模式",
         ["personal-information"]: "个人信息",
         ["change-password"]: "修改密码",
-        ["project-address"]: "项目地址",
         ["logout"]: "退出登录",
         ["notice"]: "通知",
         ["message"]: "消息",

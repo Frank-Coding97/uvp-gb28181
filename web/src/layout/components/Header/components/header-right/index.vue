@@ -105,14 +105,6 @@
                         </a-doption>
                     </template>
                 </a-dropdown>
-                <!-- 项目地址 -->
-                <a-doption @click="onProject">
-                    <template #default>
-                        <s-svg-icon :name="'gitee'" :size="18" />
-                        <span class="margin-left-text">{{ $t(`system.project-address`) }}</span>
-                    </template>
-                </a-doption>
-                <a-divider margin="0" />
                 <!-- 退出登录 -->
                 <a-doption @click="logOut">
                     <template #default>
@@ -268,11 +260,6 @@ const onPerson = (type: number) => {
             type
         }
     });
-};
-
-// 项目地址
-const onProject = () => {
-    window.open("https://github.com/qxkjsoft/ginfast-back", "_blank");
 };
 
 // 退出登录
