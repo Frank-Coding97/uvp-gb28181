@@ -11,23 +11,44 @@ import (
 	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 // Client ZLMediaKit HTTP API 客户端(控制面)
+// 一个 Client 绑一个 node;多节点场景每节点一个 Client(无连接池,Go http.Client 自带)。
 type Client struct {
+	node    *node.Node
 	baseURL string
 	secret  string
 	http    *http.Client
 }
 
-// NewClient 创建 ZLM 客户端
-func NewClient(cfg gbconfig.ZLMConfig) *Client {
+// NewClientForNode 基于 Node 构造 Client(M1 重构入口)
+func NewClientForNode(n *node.Node) *Client {
 	return &Client{
-		baseURL: fmt.Sprintf("http://%s:%d/index/api", cfg.Host, cfg.HTTPPort),
-		secret:  cfg.Secret,
+		node:    n,
+		baseURL: n.HTTPEndpoint(),
+		secret:  n.APISecret,
 		http:    &http.Client{Timeout: 10 * time.Second},
 	}
 }
+
+// NewClient 旧入口,从 yaml 单实例配置构造
+//
+// Deprecated: M1 过渡期保留,M3 TF.2 删除。新代码请用 NewClientForNode。
+// 内部把 cfg 包装成临时 node.Node(无 ID / UUID),仅用于 bootstrap 单实例兼容路径。
+func NewClient(cfg gbconfig.ZLMConfig) *Client {
+	n := &node.Node{
+		Host:      cfg.Host,
+		APIPort:   cfg.HTTPPort,
+		APISecret: cfg.Secret,
+	}
+	return NewClientForNode(n)
+}
+
+// Node 返回绑定节点(deprecated 路径下 Node 仅包含 host/port/secret,无 UUID)
+func (c *Client) Node() *node.Node { return c.node }
+
 
 // baseResp ZLM API 通用响应头
 type baseResp struct {
