@@ -7,9 +7,24 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
+// skipIfChannelSchemaStale 老 schema(无 capabilities 列)时跳过,提示先跑 migration
+//
+// 背景:A1 给 gb_channel 加了 capabilities JSON 列,既有 MySQL dev 库尚未升级
+// 不跑 migration 时这些测试会失败。Overnight 阶段不操作生产/dev 库,所以跳过。
+func skipIfChannelSchemaStale(t *testing.T) {
+	t.Helper()
+	if app.GormDbMysql == nil {
+		return
+	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "capabilities") {
+		t.Skipf("跳过(MySQL gb_channel 缺 capabilities 列,请先跑 migration 2026-06-26-catalog-b-plus.sql)")
+	}
+}
+
 // TestUpsertChannelInsert T2-测1: Upsert 新通道
 func TestUpsertChannelInsert(t *testing.T) {
 	setupTestDB(t)
+	skipIfChannelSchemaStale(t)
 	ctx := context.TODO()
 	const dev, ch = "34020000001320000018", "34020000001320000018"
 	cleanupChannel(dev, ch)
@@ -31,6 +46,7 @@ func TestUpsertChannelInsert(t *testing.T) {
 // TestUpsertChannelUpdate T2-测3: 重复 upsert 更新不重复插入
 func TestUpsertChannelUpdate(t *testing.T) {
 	setupTestDB(t)
+	skipIfChannelSchemaStale(t)
 	ctx := context.TODO()
 	const dev, ch = "34020000001320000018", "34020000001320000019"
 	cleanupChannel(dev, ch)
@@ -53,6 +69,7 @@ func TestUpsertChannelUpdate(t *testing.T) {
 // TestListChannelsByDevice T2-测2: 按设备列通道
 func TestListChannelsByDevice(t *testing.T) {
 	setupTestDB(t)
+	skipIfChannelSchemaStale(t)
 	ctx := context.TODO()
 	const dev = "34020000001320000099"
 	cleanupChannel(dev, "ch1")
