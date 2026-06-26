@@ -14,6 +14,18 @@ const (
 	DeviceStatusOnline  int8 = 1 // 在线
 )
 
+// SubscribeCapability 订阅能力(Q4 决议:智能升降级状态机)
+// unknown:首次注册,未尝试
+// subscribed:SUBSCRIBE Catalog 成功,等 NOTIFY 推送
+// fallback:SUBSCRIBE 不支持,降级到 30min 主动 Query 兜底
+type SubscribeCapability string
+
+const (
+	SubscribeUnknown    SubscribeCapability = "unknown"
+	SubscribeSubscribed SubscribeCapability = "subscribed"
+	SubscribeFallback   SubscribeCapability = "fallback"
+)
+
 // GbDevice 国标设备模型(注册/心跳主体)
 // 在线模型:keepalive_time + keepalive_interval 是事实真相,status 是物化缓存(由事实派生)
 type GbDevice struct {
@@ -36,6 +48,10 @@ type GbDevice struct {
 	OfflineAt         *time.Time `gorm:"column:offline_at;comment:最近被判离线的时刻" json:"offlineAt"`
 	CreatedBy         uint       `gorm:"column:created_by;comment:创建人" json:"createdBy"`
 	TenantID          uint       `gorm:"column:tenant_id;comment:租户ID" json:"tenantId"`
+	// Subscribe Catalog 智能升降级(Q4 决议) — A1 加,G1 状态机落地
+	SubscribeCapability SubscribeCapability `gorm:"column:subscribe_capability;size:16;default:unknown;index:idx_subscribe_capability,priority:1;comment:订阅能力 unknown/subscribed/fallback" json:"subscribeCapability"`
+	SubscribeLastTest   *time.Time          `gorm:"column:subscribe_last_test;index:idx_subscribe_capability,priority:2;comment:最近一次 SUBSCRIBE 尝试" json:"subscribeLastTest"`
+	SubscribeExpiresAt  *time.Time          `gorm:"column:subscribe_expires_at;comment:订阅过期时刻(提前续订)" json:"subscribeExpiresAt"`
 }
 
 // IsOnlineByFact 从事实(keepalive_time)派生在线状态,不依赖 status 缓存字段
