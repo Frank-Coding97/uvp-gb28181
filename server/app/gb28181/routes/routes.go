@@ -10,6 +10,10 @@ import (
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
+var catalogTreeController = gbcontrollers.NewCatalogTreeController()
+var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
+var mapController = gbcontrollers.NewMapController()
+var anomalyController = gbcontrollers.NewAnomalyController()
 
 // streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
 var streamNotifier = stream.NewNotifier()
@@ -91,6 +95,31 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			zlm.GET("/nodes/:id/config", zlmConfigRoute(func(ctrl *gbcontrollers.ZLMConfigController, c *gin.Context) { ctrl.Get(c) }))
 			zlm.PUT("/nodes/:id/config", zlmConfigRoute(func(ctrl *gbcontrollers.ZLMConfigController, c *gin.Context) { ctrl.Update(c) }))
 			zlm.POST("/nodes/:id/config/test-connection", zlmConfigRoute(func(ctrl *gbcontrollers.ZLMConfigController, c *gin.Context) { ctrl.TestConnection(c) }))
+		}
+		// 设备管理页(B1-B4 新建,plan §4.2)
+		dmgmt := gb.Group("/device-mgmt")
+		{
+			// B1 catalogtree:目录树
+			dmgmt.GET("/catalog/tree", catalogTreeController.Tree)
+			dmgmt.GET("/catalog/tree/:id", catalogTreeController.Node)
+			dmgmt.GET("/catalog/tree/:id/children", catalogTreeController.Children)
+			dmgmt.GET("/catalog/tree/:id/subtree", catalogTreeController.Subtree)
+			dmgmt.GET("/catalog/anomaly/count", catalogTreeController.AnomalyCount)
+			// B2 devicemgmt:设备列表 + 通道列表 + 详情 + 多挂载 + timeline
+			dmgmt.GET("/devices", deviceMgmtController.ListDevices)
+			dmgmt.GET("/device/:id", deviceMgmtController.GetDevice)
+			dmgmt.GET("/channels", deviceMgmtController.ListChannels)
+			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
+			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
+			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
+			// B3 map:地图视图
+			dmgmt.GET("/map/markers", mapController.Markers)
+			dmgmt.GET("/map/clusters", mapController.Clusters)
+			dmgmt.GET("/map/no-coord-count", mapController.NoCoordCount)
+			// B4 anomaly:异常治理
+			dmgmt.GET("/anomaly", anomalyController.List)
+			dmgmt.POST("/anomaly/:id/resolve", anomalyController.Resolve)
+			dmgmt.POST("/anomaly/batch-resolve", anomalyController.BatchResolve)
 		}
 	}
 }
