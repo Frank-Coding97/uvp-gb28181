@@ -62,27 +62,32 @@ function formatNumber(n: number): string {
 .summary-bar {
   display: flex;
   align-items: center;
-  gap: 20px;
-  padding: 14px 16px;
-  border-radius: 10px;
-  border: 1px solid rgba(61, 220, 132, 0.2);
-  background: rgba(61, 220, 132, 0.08);
+  gap: 24px;
+  padding: 14px 18px;
+  border-radius: 6px;
+  border: 1px solid #e8e8e8;
+  background: #fafafa;
   transition: all 0.3s ease;
 }
 
+.summary-bar--ok {
+  background: #f6ffed;
+  border-color: #b7eb8f;
+}
+
 .summary-bar--warn {
-  background: rgba(255, 181, 71, 0.08);
-  border-color: rgba(255, 181, 71, 0.25);
+  background: #fff7e6;
+  border-color: #ffd591;
 }
 
 .summary-bar--danger {
-  background: rgba(255, 90, 95, 0.08);
-  border-color: rgba(255, 90, 95, 0.25);
+  background: #fff1f0;
+  border-color: #ffa39e;
 }
 
 .summary-bar--idle {
-  background: rgba(90, 100, 120, 0.08);
-  border-color: rgba(90, 100, 120, 0.25);
+  background: #fafafa;
+  border-color: #e8e8e8;
 }
 
 .summary-bar__health {
@@ -94,37 +99,38 @@ function formatNumber(n: number): string {
 .summary-bar__num {
   font-size: 32px;
   font-weight: 700;
-  color: #3ddc84;
+  color: #52c41a;
   letter-spacing: -1px;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
   transition: color 0.3s;
 }
 
 .summary-bar--warn .summary-bar__num {
-  color: #ffb547;
+  color: #fa8c16;
 }
 .summary-bar--danger .summary-bar__num {
-  color: #ff5a5f;
+  color: #ff4d4f;
 }
 .summary-bar--idle .summary-bar__num {
-  color: #8b97ad;
+  color: #bfbfbf;
 }
 
 .summary-bar__label {
-  font-size: 11px;
-  color: #8b97ad;
+  font-size: 12px;
+  color: #999;
   letter-spacing: 0.5px;
 }
 
 .summary-bar__divider {
   width: 1px;
   height: 32px;
-  background: #1f2a40;
+  background: #e8e8e8;
 }
 
 .summary-bar__stats {
   display: flex;
-  gap: 24px;
+  gap: 32px;
   flex: 1;
 }
 
@@ -138,19 +144,19 @@ function formatNumber(n: number): string {
   font-size: 18px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #e6edf7;
+  color: #333;
 }
 
 .summary-bar__value--warn {
-  color: #ffb547;
+  color: #fa8c16;
 }
 
 .summary-bar__value--danger {
-  color: #ff5a5f;
+  color: #ff4d4f;
 }
 
 .summary-bar__caption {
-  font-size: 11px;
-  color: #5a6478;
+  font-size: 12px;
+  color: #999;
 }
 </style>

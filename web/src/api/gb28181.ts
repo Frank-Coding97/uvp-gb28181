@@ -1,6 +1,7 @@
 import { http } from "@/utils/http";
 import { baseUrlApi } from "./utils";
 import { BaseResult } from "./types";
+import { getAccessToken } from "@/utils/auth";
 
 // ===== 设备 =====
 
@@ -123,6 +124,13 @@ export type SnapshotResult = BaseResult<DashboardSnapshot>;
 export const fetchSipDashboardSnapshot = (params: { window?: string; precision?: string } = {}) =>
     http.request<SnapshotResult>("get", baseUrlApi("gb28181/sip/dashboard/snapshot"), { params });
 
-/** SIP 看板 SSE 流地址(EventSource 用) */
-export const sipDashboardStreamUrl = (window = "60m", precision = "1m"): string =>
-    `${import.meta.env.VITE_APP_BASE_URL}/api/gb28181/sip/dashboard/stream?window=${window}&precision=${precision}`;
+/** SIP 看板 SSE 流地址(EventSource 用)
+ *
+ * - URL 走 `/api/...` 相对路径让 vite proxy / nginx 同源代理,避开 CORS + EventSource 无法带 Authorization 头的限制
+ * - 通过 `?token=xxx` 查询参数兜底鉴权(后端 `common.GetAccessToken` 已支持此通道)
+ */
+export const sipDashboardStreamUrl = (window = "60m", precision = "1m"): string => {
+    const t = getAccessToken();
+    const tokenPart = t?.accessToken ? `&token=${encodeURIComponent(t.accessToken)}` : "";
+    return `/api/gb28181/sip/dashboard/stream?window=${window}&precision=${precision}${tokenPart}`;
+};

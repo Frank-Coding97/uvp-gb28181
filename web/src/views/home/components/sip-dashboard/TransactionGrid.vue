@@ -102,45 +102,46 @@ function rateClass(cell: TransactionStat): string {
 .tx-section {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .tx-section__title {
-  font-size: 11px;
-  color: #5a6478;
-  letter-spacing: 1px;
-  text-transform: uppercase;
+  font-size: 12px;
+  color: #999;
+  letter-spacing: 0.5px;
 }
 
 .tx-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: 10px;
 }
 
 .tx-cell {
-  background: #1a2235;
-  border: 1px solid #1f2a40;
-  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 6px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
   cursor: pointer;
-  transition: transform 0.1s, border-color 0.1s;
+  transition: all 0.15s ease;
   position: relative;
   overflow: hidden;
   min-height: 76px;
 }
 
 .tx-cell:hover:not(.tx-cell--placeholder) {
-  border-color: #4d8eff;
+  border-color: #1890ff;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(24, 144, 255, 0.1);
   transform: translateY(-1px);
 }
 
 .tx-cell--alert {
-  border-color: rgba(255, 90, 95, 0.4);
-  background: rgba(255, 90, 95, 0.08);
+  border-color: #ffa39e;
+  background: #fff1f0;
 }
 
 .tx-cell--alert::before {
@@ -150,12 +151,14 @@ function rateClass(cell: TransactionStat): string {
   left: 0;
   right: 0;
   height: 2px;
-  background: #ff5a5f;
+  background: #ff4d4f;
 }
 
 .tx-cell--placeholder {
   cursor: default;
-  background: rgba(26, 34, 53, 0.4);
+  background: #fafafa;
+  border-style: dashed;
+  border-color: #f0f0f0;
 }
 
 .tx-cell__head {
@@ -165,48 +168,49 @@ function rateClass(cell: TransactionStat): string {
 }
 
 .tx-cell__icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   border-radius: 4px;
-  background: rgba(77, 142, 255, 0.15);
-  color: #4d8eff;
+  background: rgba(24, 144, 255, 0.1);
+  color: #1890ff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 11px;
   font-weight: 600;
+  letter-spacing: 0.3px;
 }
 
 .tx-cell--alert .tx-cell__icon {
-  background: rgba(255, 90, 95, 0.15);
-  color: #ff5a5f;
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
 }
 
 .tx-cell__trend {
-  font-size: 10px;
-  color: #5a6478;
+  font-size: 11px;
+  color: #999;
 }
 
 .tx-cell__trend--up {
-  color: #3ddc84;
+  color: #52c41a;
 }
 
 .tx-cell__trend--down {
-  color: #ff5a5f;
+  color: #ff4d4f;
 }
 
 .tx-cell__trend--neutral {
-  color: #5a6478;
+  color: #bfbfbf;
 }
 
 .tx-cell__name {
-  font-size: 12px;
-  color: #e6edf7;
+  font-size: 13px;
+  color: #333;
   font-weight: 500;
 }
 
 .tx-cell__en {
-  color: #5a6478;
+  color: #bfbfbf;
   font-size: 10px;
   font-weight: 400;
   margin-left: 4px;
@@ -220,27 +224,27 @@ function rateClass(cell: TransactionStat): string {
 }
 
 .tx-cell__count {
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #e6edf7;
+  color: #333;
 }
 
 .tx-cell__rate {
-  font-size: 11px;
-  color: #3ddc84;
+  font-size: 12px;
+  color: #52c41a;
   font-variant-numeric: tabular-nums;
 }
 
 .tx-cell__rate--warn {
-  color: #ffb547;
+  color: #fa8c16;
 }
 
 .tx-cell__rate--bad {
-  color: #ff5a5f;
+  color: #ff4d4f;
 }
 
 .tx-cell__rate--idle {
-  color: #5a6478;
+  color: #bfbfbf;
 }
 </style>

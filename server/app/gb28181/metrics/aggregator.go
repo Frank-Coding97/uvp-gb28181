@@ -244,13 +244,10 @@ func (a *Aggregator) Snapshot(window time.Duration, precision time.Duration) *Da
 		if s.Msg > 0 {
 			failPct = int(s.Fail * 1000 / s.Msg)
 		}
-		precSec := int64(precision / time.Second)
-		if precSec <= 0 {
-			precSec = 1
-		}
-		mps := int(s.Msg / precSec)
+		// msgPerSec 实际是"该采样区间内的消息条数"(precision=1m 时 = 每分钟条数)
+		// 不做整数除法,否则 1m 精度下 < 60 条/分钟会全部归零,图表始终空白
 		pulseSamples = append(pulseSamples, PulseSample{
-			T: s.T, MsgPerSec: mps, FailPct: failPct,
+			T: s.T, MsgPerSec: int(s.Msg), FailPct: failPct,
 		})
 	}
 	abnormalWindows := detectAbnormalWindows(pulseSamples, 50) // 失败率 > 5% (50‰)

@@ -71,7 +71,8 @@ async function loadInitial(): Promise<void> {
 
 function openStream(): void {
   try {
-    evtSource = new EventSource(sipDashboardStreamUrl(), { withCredentials: true });
+    // 同源(走 vite proxy / nginx 反代),不需要 withCredentials
+    evtSource = new EventSource(sipDashboardStreamUrl());
     evtSource.addEventListener("snapshot", (ev: MessageEvent) => {
       try {
         snapshot.value = JSON.parse(ev.data) as DashboardSnapshot;
@@ -82,7 +83,6 @@ function openStream(): void {
     });
     evtSource.onerror = () => {
       connected.value = false;
-      // EventSource 自动重连,不主动 close
     };
   } catch {
     connected.value = false;
@@ -104,16 +104,15 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .sip-card {
-  background: linear-gradient(180deg, #131a2c 0%, #0f1424 100%);
-  border: 1px solid #1f2a40;
-  border-radius: 12px;
-  padding: 20px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px 20px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  color: #e6edf7;
-  font-family: -apple-system, "Helvetica Neue", "PingFang SC", sans-serif;
-  min-height: 380px;
+  gap: 14px;
+  color: #333;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .sip-card--loading {
@@ -123,7 +122,9 @@ onBeforeUnmount(() => {
 .sip-card__head {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #f0f0f0;
 }
 
 .sip-card__title {
@@ -132,38 +133,39 @@ onBeforeUnmount(() => {
   gap: 10px;
   font-size: 15px;
   font-weight: 600;
+  color: #333;
 }
 
 .sip-card__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #5a6478;
+  background: #d9d9d9;
   transition: all 0.3s ease;
 }
 
 .sip-card__dot--ok {
-  background: #3ddc84;
-  box-shadow: 0 0 8px #3ddc84;
+  background: #52c41a;
+  box-shadow: 0 0 6px rgba(82, 196, 26, 0.5);
   animation: sip-pulse 2s infinite;
 }
 
 .sip-card__dot--warn {
-  background: #ffb547;
-  box-shadow: 0 0 8px #ffb547;
+  background: #fa8c16;
+  box-shadow: 0 0 6px rgba(250, 140, 22, 0.5);
 }
 
 .sip-card__dot--danger {
-  background: #ff5a5f;
-  box-shadow: 0 0 8px #ff5a5f;
+  background: #ff4d4f;
+  box-shadow: 0 0 6px rgba(255, 77, 79, 0.5);
 }
 
 .sip-card__dot--idle {
-  background: #5a6478;
+  background: #d9d9d9;
 }
 
 .sip-card__sub {
-  color: #5a6478;
+  color: #999;
   font-size: 11px;
   letter-spacing: 0.5px;
 }
