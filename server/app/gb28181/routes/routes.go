@@ -26,6 +26,9 @@ var playController = gbcontrollers.NewPlayController(nil)
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
 var dashboardController = gbcontrollers.NewDashboardController(nil)
 
+// zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
+var zlmNodeController *gbcontrollers.ZLMNodeController
+
 // SetMetricsProvider 由 bootstrap 注入聚合器获取函数,绕开循环依赖
 func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 	dashboardController = gbcontrollers.NewDashboardController(p)
@@ -36,6 +39,11 @@ func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 func SetPlayService(svc *gbplay.Service) {
 	playController = gbcontrollers.NewPlayController(svc)
 	hookController.SetPlayStopper(svc)
+}
+
+// SetZLMNodeController 由 bootstrap M1.6 注入(同 SetPlayService 模式)
+func SetZLMNodeController(ctrl *gbcontrollers.ZLMNodeController) {
+	zlmNodeController = ctrl
 }
 
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
@@ -61,6 +69,28 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			sipGroup.GET("/snapshot", func(c *gin.Context) { dashboardController.Snapshot(c) })
 			sipGroup.GET("/stream", func(c *gin.Context) { dashboardController.Stream(c) })
 		}
+		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
+		zlm := gb.Group("/zlm")
+		{
+			zlm.GET("/nodes", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.List(c) }))
+			zlm.POST("/nodes", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Create(c) }))
+			zlm.GET("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Get(c) }))
+			zlm.PUT("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Update(c) }))
+			zlm.DELETE("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Delete(c) }))
+			zlm.POST("/nodes/:id/maintenance", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.SetMaintenance(c) }))
+			zlm.POST("/nodes/:id/activate", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Activate(c) }))
+		}
+	}
+}
+
+// zlmNodeRoute 包裹 handler,未注入时返 503(单节点过渡期 / 配置禁用容错)
+func zlmNodeRoute(fn func(*gbcontrollers.ZLMNodeController, *gin.Context)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if zlmNodeController == nil {
+			c.JSON(503, gin.H{"code": 503, "msg": "ZLM 节点服务尚未装配"})
+			return
+		}
+		fn(zlmNodeController, c)
 	}
 }
 
