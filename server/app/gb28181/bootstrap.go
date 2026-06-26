@@ -5,6 +5,7 @@ import (
 	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
@@ -12,8 +13,12 @@ import (
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
+	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
@@ -23,8 +28,11 @@ var sipServer *gbsip.Server
 // offlineScanner 离线扫描器
 var offlineScanner *device.OfflineScanner
 
-// zlmClient 全局 ZLM 客户端
+// zlmClient 全局 ZLM 客户端(deprecated M3 TF.2 删,M1 单节点过渡期保留)
 var zlmClient *gbzlm.Client
+
+// zlmRegistry 节点注册表(M1 新增)
+var zlmRegistry *node.Registry
 
 // playSvc 全局点播 service(routes 用 GetPlayService 取)
 var playSvc *play.Service
@@ -43,6 +51,9 @@ func PlayService() *play.Service { return playSvc }
 
 // MetricsAggregator 返回全局聚合器(controllers/dashboard 用)
 func MetricsAggregator() *metrics.Aggregator { return metricsAgg }
+
+// ZLMRegistry 返回全局节点注册表(M1 新增,供 controllers / test 用)
+func ZLMRegistry() *node.Registry { return zlmRegistry }
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过
@@ -82,17 +93,38 @@ func Start() {
 	offlineScanner.Start()
 	app.ZapLog.Info("GB28181 离线扫描器已启动", zap.Int("intervalSeconds", cfg.Device.OfflineScanInterval))
 
+	// 装配 ZLM 多节点 Registry(M1 新增)
+	// 启动若 meta_node 空表 → 用 yaml cfg.ZLM 自动 seed 第一节点(单节点过渡)
+	setupZLMRegistry(cfg)
+
+	// 装配 ZLM 节点 CRUD / 配置 controller(M1 新增)
+	if zlmRegistry != nil {
+		adapter := gbzlm.NewServiceAdapter(cfg.Media)
+		tuning := gbzlmsvc.MediaTuning{
+			HookHost:                cfg.Media.HookHost,
+			HookPort:                cfg.Media.HookPort,
+			StreamNoneReaderTimeout: cfg.Media.StreamNoneReaderTimeout,
+			RTPServerTimeout:        cfg.Media.RTPServerTimeout,
+		}
+		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
+		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
+		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
+		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
+		app.ZapLog.Info("GB28181 ZLM 节点/配置 controller 已装配")
+	}
+
 	// 向 ZLMediaKit 动态下发 Hook 配置(控制面,替代 config.ini 写死)
-	zlmClient = gbzlm.NewClient(cfg.ZLM)
-	go func() {
+	// M1 单节点过渡:取 Registry 首节点;若 Registry 空(seed 失败/db 不可达)走 yaml fallback
+	zlmClient = pickInitialClient(cfg)
+	go func(client *gbzlm.Client) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		if err := zlmClient.ApplyConfig(ctx, cfg.Media); err != nil {
+		if err := client.ApplyConfigForNode(ctx, cfg.Media); err != nil {
 			app.ZapLog.Warn("GB28181 ZLM 配置下发失败(ZLM 可能暂不可达,不影响启动)", zap.Error(err))
 		} else {
 			app.ZapLog.Info("GB28181 ZLM Hook 配置已下发", zap.String("hookHost", cfg.Media.HookHost))
 		}
-	}()
+	}(zlmClient)
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
 	if u := srv.UAC(); u != nil {
@@ -103,6 +135,56 @@ func Start() {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+}
+
+// setupZLMRegistry 启动时从 DB 加载所有节点;若空表,用 yaml cfg.ZLM seed 第一节点
+// DB 不可达则 registry 为 nil(继续走 deprecated 单节点路径,降级容错)
+func setupZLMRegistry(cfg gbconfig.Config) {
+	if app.DB() == nil {
+		app.ZapLog.Warn("GB28181 DB 不可用,跳过 ZLM Registry 装配(走 deprecated 单节点路径)")
+		return
+	}
+	repo := gbzlmrepo.NewMetaNodeRepo(app.DB())
+	reg := node.NewRegistry(repo)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := reg.LoadAll(ctx); err != nil {
+		app.ZapLog.Warn("GB28181 ZLM Registry LoadAll 失败,可能 meta_node 表未建", zap.Error(err))
+		return
+	}
+	if len(reg.List()) == 0 && cfg.ZLM.Host != "" {
+		// 空表 + yaml 有配置 → seed 第一节点(单节点过渡)
+		uuidStr := uuid.NewString()
+		_, err := reg.Add(ctx, node.Node{
+			Name:            "zlm-default",
+			Host:            cfg.ZLM.Host,
+			APIPort:         cfg.ZLM.HTTPPort,
+			APISecret:       cfg.ZLM.Secret,
+			MediaServerUUID: uuidStr,
+			Weight:          50,
+			State:           node.StateActive,
+			RTPPortStart:    30000,
+			RTPPortEnd:      35000,
+		})
+		if err != nil {
+			app.ZapLog.Warn("GB28181 ZLM 默认节点 seed 失败", zap.Error(err))
+		} else {
+			app.ZapLog.Info("GB28181 ZLM 已 seed 默认节点", zap.String("uuid", uuidStr), zap.String("host", cfg.ZLM.Host))
+		}
+	}
+	zlmRegistry = reg
+	app.ZapLog.Info("GB28181 ZLM Registry 已装配", zap.Int("nodes", len(reg.List())))
+}
+
+// pickInitialClient M1 单节点过渡期:优先取 Registry 首节点,失败 fallback yaml
+func pickInitialClient(cfg gbconfig.Config) *gbzlm.Client {
+	if zlmRegistry != nil {
+		if list := zlmRegistry.List(); len(list) > 0 {
+			return gbzlm.NewClientForNode(list[0])
+		}
+	}
+	// Deprecated: yaml fallback,M3 TF.2 删
+	return gbzlm.NewClient(cfg.ZLM)
 }
 
 // runMetricsCleanup 周期清理过期配对(防内存泄漏);30s TTL
