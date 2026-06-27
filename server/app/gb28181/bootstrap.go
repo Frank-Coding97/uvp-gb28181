@@ -11,6 +11,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
@@ -23,6 +24,19 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
+
+// schedulerPickerAdapter 把 scheduler.Manager 适配为 play.NodePicker(避免反向依赖 play 包)
+type schedulerPickerAdapter struct {
+	m *gbzlmsched.Manager
+}
+
+func (a schedulerPickerAdapter) Pick(ctx context.Context, inv play.PickContext) (*node.Node, error) {
+	return a.m.Pick(ctx, gbzlmsched.InviteContext{
+		DeviceID:  inv.DeviceID,
+		ChannelID: inv.ChannelID,
+		StreamID:  inv.StreamID,
+	})
+}
 
 // sipServer 持有全局 SIP 服务实例,供优雅关闭引用
 var sipServer *gbsip.Server
@@ -39,6 +53,9 @@ var zlmRegistry *node.Registry
 // zlmScheduler M2 新增,持有当前激活的调度算法(roundrobin / M3 weighted / leastload)
 // SIP play 改造(T2.4)从这里取节点。装配失败则为 nil,调用方自己降级。
 var zlmScheduler *gbzlmsched.Manager
+
+// zlmLocationMap M2.4 新增,streamID → nodeID 索引(给多节点 play/service + hook 端点用)
+var zlmLocationMap *stream.LocationMap
 
 // playSvc 全局点播 service(routes 用 GetPlayService 取)
 var playSvc *play.Service
@@ -159,9 +176,28 @@ func Start() {
 	}(zlmClient)
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
+	//
+	// 多节点路径:有 zlmRegistry + zlmScheduler → NewWithScheduler,流分配给 scheduler.Pick 出的节点
+	// 单节点路径(deprecated):走 play.New(cfg, zlmClient),M3 TF.2 删
 	if u := srv.UAC(); u != nil {
-		playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
-			play.NewDeviceRepo(), play.NewChannelRepo())
+		if zlmRegistry != nil && zlmScheduler != nil {
+			zlmLocationMap = stream.NewLocationMap()
+			playSvc = play.NewWithScheduler(cfg,
+				schedulerPickerAdapter{m: zlmScheduler},
+				zlmRegistry,
+				zlmLocationMap,
+				u, playSessions, gbroutes.StreamNotifier(),
+				play.NewDeviceRepo(), play.NewChannelRepo())
+			gbroutes.SetPlayService(playSvc)
+			// hook 端点 OnStreamChanged 反向 Bind 兜底
+			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
+			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)")
+		} else {
+			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
+				play.NewDeviceRepo(), play.NewChannelRepo())
+			gbroutes.SetPlayService(playSvc)
+			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated)")
+		}
 		gbroutes.SetPlayService(playSvc)
 		app.ZapLog.Info("GB28181 点播 service 已装配")
 	} else {

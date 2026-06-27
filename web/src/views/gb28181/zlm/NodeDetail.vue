@@ -2,7 +2,12 @@
 import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Message } from "@arco-design/web-vue";
-import { getZLMNode, type ZLMNode } from "@/api/gb28181-zlm";
+import {
+    getZLMNode,
+    testZLMNodeConnection,
+    activateZLMNode,
+    type ZLMNode
+} from "@/api/gb28181-zlm";
 import NodeStateBadge from "./components/NodeStateBadge.vue";
 import NodeConfig from "./NodeConfig.vue";
 
@@ -64,6 +69,37 @@ onUnmounted(() => {
     if (refreshTimer) clearInterval(refreshTimer);
 });
 
+const reprobing = ref(false);
+
+// 节点离线时:手工探测一次,若恢复 → 自动 activate 拉回调度池
+async function reprobe() {
+    if (!node.value) return;
+    reprobing.value = true;
+    try {
+        const res = await testZLMNodeConnection(node.value.id);
+        if (res.code === 0 && res.data?.online) {
+            // 节点已可达,尝试激活(若仍 offline 状态)
+            if (node.value.state === "offline") {
+                const act = await activateZLMNode(node.value.id);
+                if (act.code === 0) {
+                    Message.success("节点已恢复并重新加入调度池");
+                } else {
+                    Message.warning("探测可达,但激活失败,请手动激活");
+                }
+            } else {
+                Message.success(`节点在线,http.port=${res.data.httpPort || "?"}`);
+            }
+            await refresh();
+        } else {
+            Message.error(`节点仍不可达: ${res.data?.error || "未知"}`);
+        }
+    } catch (e: any) {
+        Message.error(e?.message || "探测失败");
+    } finally {
+        reprobing.value = false;
+    }
+}
+
 function fmtBytes(n: number): string {
     if (!n) return "0 B";
     const units = ["B", "KB", "MB", "GB", "TB"];
@@ -118,6 +154,14 @@ const cpuMaxPct = computed(() => {
         >
             <template #extra>
                 <a-space>
+                    <a-button
+                        v-if="node?.state === 'offline'"
+                        :loading="reprobing"
+                        type="primary"
+                        @click="reprobe"
+                    >
+                        重新探测
+                    </a-button>
                     <span class="refresh-hint">每 30 秒自动刷新</span>
                     <NodeStateBadge v-if="node" :state="node.state" />
                 </a-space>

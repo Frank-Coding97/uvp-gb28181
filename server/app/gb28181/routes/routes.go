@@ -60,6 +60,12 @@ func SetKeepaliveCollector(c gbhandler.KeepaliveCollector) {
 	hookController.SetKeepaliveCollector(c)
 }
 
+// SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
+// 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
+func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
+	hookController.SetMultiNode(resolver, binder)
+}
+
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
 // 在底座 routes.InitRoutes 的 protected 块中调用
 func RegisterRoutes(protected *gin.RouterGroup) {

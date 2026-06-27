@@ -4,7 +4,10 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // Clock 可注入的时钟抽象(便于测试用 FakeClock 推进时间)
@@ -50,8 +53,7 @@ func NewWatcher(reg *node.Registry, clock Clock, checkInterval, offlineThreshold
 
 // Tick 一次扫描:遍历 active 节点,LastHeartbeatAt 超阈值 → MarkOffline。
 //
-// 错误处理:MarkOffline 失败仅记 errs 计数返回(供调用方观测),不中断扫描。
-// 当前实现忽略错误(由调用方决定要不要打日志);可后续接 metrics。
+// 标记成功时 log info(给运维看哪个节点掉了);标记失败时 log warn,下 Tick 重试。
 func (w *Watcher) Tick() {
 	now := w.clock.Now()
 	for _, n := range w.registry.ListActive() {
@@ -59,9 +61,25 @@ func (w *Watcher) Tick() {
 		if n.Stats.LastHeartbeatAt.IsZero() {
 			continue
 		}
-		if now.Sub(n.Stats.LastHeartbeatAt) > w.offlineThreshold {
-			// MarkOffline 写 DB + 内存;失败暂忽略(下个 Tick 还会重试)
-			_ = w.registry.MarkOffline(context.Background(), n.ID)
+		gap := now.Sub(n.Stats.LastHeartbeatAt)
+		if gap <= w.offlineThreshold {
+			continue
+		}
+		if err := w.registry.MarkOffline(context.Background(), n.ID); err != nil {
+			if app.ZapLog != nil {
+				app.ZapLog.Warn("GB28181 ZLM 标节点离线失败",
+					zap.Int64("nodeId", n.ID),
+					zap.String("uuid", n.MediaServerUUID),
+					zap.Error(err))
+			}
+			continue
+		}
+		if app.ZapLog != nil {
+			app.ZapLog.Info("GB28181 ZLM 节点已标记离线",
+				zap.Int64("nodeId", n.ID),
+				zap.String("name", n.Name),
+				zap.String("uuid", n.MediaServerUUID),
+				zap.Duration("heartbeatGap", gap))
 		}
 	}
 }

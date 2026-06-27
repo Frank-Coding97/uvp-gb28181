@@ -25,12 +25,24 @@ type KeepaliveCollector interface {
 	Receive(payload []byte) error
 }
 
+// NodeUUIDResolver 把 mediaServerUUID 反查为 nodeID(由 node.Registry 实现)
+type NodeUUIDResolver interface {
+	IDForUUID(uuid string) (int64, bool)
+}
+
+// StreamLocationBinder 流位置表 Bind 端(由 stream.LocationMap 实现)
+type StreamLocationBinder interface {
+	Bind(streamID string, nodeID int64)
+}
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
 	notifier  *stream.Notifier   // 流就绪事件分发(由点播 service 订阅,T6 创新3)
 	stopper   PlayStopper        // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
 	collector KeepaliveCollector // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
+	resolver  NodeUUIDResolver   // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
+	binder    StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -47,6 +59,12 @@ func (h *HookController) SetKeepaliveCollector(c KeepaliveCollector) {
 	h.collector = c
 }
 
+// SetMultiNode 注入多节点路由能力(M2.4 bootstrap 多节点装配后调用)
+func (h *HookController) SetMultiNode(resolver NodeUUIDResolver, binder StreamLocationBinder) {
+	h.resolver = resolver
+	h.binder = binder
+}
+
 // hookOK ZLM 期望的标准成功响应
 func hookOK(c *gin.Context) {
 	c.JSON(200, gin.H{"code": 0, "msg": "success"})
@@ -54,13 +72,16 @@ func hookOK(c *gin.Context) {
 
 // onStreamChangedBody on_stream_changed 回调载荷(只取我们需要的字段)
 type onStreamChangedBody struct {
-	App    string `json:"app"`
-	Stream string `json:"stream"`
-	Regist bool   `json:"regist"`
-	Schema string `json:"schema"`
+	App             string `json:"app"`
+	Stream          string `json:"stream"`
+	Regist          bool   `json:"regist"`
+	Schema          string `json:"schema"`
+	MediaServerID   string `json:"mediaServerId"` // M2: ZLM 在 general.mediaServerId 配置的节点 UUID
 }
 
 // OnStreamChanged 流注册/注销事件(regist=true 流就绪,false 流消失)
+//
+// M2 行为:regist=true 时若 payload 含 mediaServerId 且能反查节点,则 Bind LocationMap(兜底)
 func (h *HookController) OnStreamChanged(c *gin.Context) {
 	var body onStreamChangedBody
 	_ = c.ShouldBindJSON(&body)
@@ -68,11 +89,19 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 		zap.String("app", body.App),
 		zap.String("stream", body.Stream),
 		zap.String("schema", body.Schema),
+		zap.String("mediaServerId", body.MediaServerID),
 		zap.Bool("regist", body.Regist))
 
 	// 流就绪 → 通知正在 WaitReady 的点播 service
 	if body.Regist && h.notifier != nil && body.Stream != "" {
 		h.notifier.Publish(body.Stream)
+
+		// M2: 兜底反向 Bind(防 service.Start 漏写 / ZLM 主动推流场景)
+		if h.resolver != nil && h.binder != nil && body.MediaServerID != "" {
+			if nodeID, ok := h.resolver.IDForUUID(body.MediaServerID); ok {
+				h.binder.Bind(body.Stream, nodeID)
+			}
+		}
 	}
 	hookOK(c)
 }
