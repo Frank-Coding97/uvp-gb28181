@@ -48,7 +48,7 @@ func loadOf(n *node.Node) float64 {
 //  3. 一轮扫描找出 minLoad 和 candidates(浮点容差 0.0001 内视为相等)
 //  4. 单候选直接返;多候选(平局)用 counter 轮询
 func (l *LeastLoad) Pick(_ context.Context, _ InviteContext) (*node.Node, error) {
-	active := l.reg.ListActive()
+	active := l.reg.ListSchedulable()
 	if len(active) == 0 {
 		return nil, ErrNoActiveNode
 	}

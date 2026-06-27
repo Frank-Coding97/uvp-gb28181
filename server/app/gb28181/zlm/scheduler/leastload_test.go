@@ -121,12 +121,14 @@ func TestLeastLoad_NoActiveNodes_ReturnsError(t *testing.T) {
 }
 
 // TestLeastLoad_SkipsOfflineAndMaintenance 3 节点 1 active + 1 maint + 1 offline,
-// Pick 100 次全到 active 节点(ListActive 自动过滤)。
+// Pick 100 次全到 active 节点(Registry.ListSchedulable 自动过滤)。
+//
+// 注:active 节点 CPU 调到 0.7(< T3.4 容量阈值 0.8),避免被容量预警一起摘除。
 func TestLeastLoad_SkipsOfflineAndMaintenance(t *testing.T) {
 	reg := buildRegistryWithStats(t,
 		[]node.State{node.StateActive, node.StateMaintenance, node.StateOffline},
 		[]node.Stats{
-			{NetThreadLoadAvg: 0.9, WorkThreadLoadAvg: 0.9}, // active 但负载高
+			{NetThreadLoadAvg: 0.7, WorkThreadLoadAvg: 0.7}, // active(< 0.8 cap)
 			{NetThreadLoadAvg: 0.1, WorkThreadLoadAvg: 0.1}, // maint 负载低也不能选
 			{NetThreadLoadAvg: 0.1, WorkThreadLoadAvg: 0.1}, // offline 负载低也不能选
 		},

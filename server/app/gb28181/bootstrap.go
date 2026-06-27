@@ -38,6 +38,53 @@ func (a schedulerPickerAdapter) Pick(ctx context.Context, inv play.PickContext) 
 	})
 }
 
+// schedulerLogRepoAdapter 把 repo.GormSchedulerLogRepo 适配为 scheduler.SchedulerLogRepo
+//
+// 两边各自定义同构 struct 避免 repo → scheduler 反向依赖,这里手工字段映射。
+type schedulerLogRepoAdapter struct {
+	inner *gbzlmrepo.GormSchedulerLogRepo
+}
+
+func (a schedulerLogRepoAdapter) Insert(ctx context.Context, l gbzlmsched.SchedulerLog) error {
+	return a.inner.Insert(ctx, gbzlmrepo.SchedulerLogRow{
+		ID:           l.ID,
+		HappenedAt:   l.HappenedAt,
+		Algorithm:    l.Algorithm,
+		NodeID:       l.NodeID,
+		NodeName:     l.NodeName,
+		StreamID:     l.StreamID,
+		DeviceID:     l.DeviceID,
+		ChannelID:    l.ChannelID,
+		ErrorMessage: l.ErrorMessage,
+	})
+}
+
+func (a schedulerLogRepoAdapter) List(ctx context.Context, limit int) ([]gbzlmsched.SchedulerLog, error) {
+	rows, err := a.inner.List(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]gbzlmsched.SchedulerLog, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, gbzlmsched.SchedulerLog{
+			ID:           r.ID,
+			HappenedAt:   r.HappenedAt,
+			Algorithm:    r.Algorithm,
+			NodeID:       r.NodeID,
+			NodeName:     r.NodeName,
+			StreamID:     r.StreamID,
+			DeviceID:     r.DeviceID,
+			ChannelID:    r.ChannelID,
+			ErrorMessage: r.ErrorMessage,
+		})
+	}
+	return out, nil
+}
+
+func (a schedulerLogRepoAdapter) PruneOlderThan(ctx context.Context, t time.Time) (int64, error) {
+	return a.inner.PruneOlderThan(ctx, t)
+}
+
 // sipServer 持有全局 SIP 服务实例,供优雅关闭引用
 var sipServer *gbsip.Server
 
@@ -71,6 +118,12 @@ var metricsCleanupStop chan struct{}
 
 // heartbeatCancel 控制 Watcher goroutine 退出(M2 新增)
 var heartbeatCancel context.CancelFunc
+
+// zlmSchedulerLog 调度日志服务(T3.3 新增,可为 nil 降级)
+var zlmSchedulerLog *gbzlmsched.LogService
+
+// schedulerLogCancel 控制调度日志 worker + prune ticker 退出
+var schedulerLogCancel context.CancelFunc
 
 // PlayService 返回点播 service(可能为 nil,gb28181 未启用 / UAC 初始化失败时)
 func PlayService() *play.Service { return playSvc }
@@ -129,6 +182,12 @@ func Start() {
 
 	// 装配 ZLM Scheduler(M2 新增)从 scheduler_setting 读 algorithm
 	setupZLMScheduler()
+
+	// 装配 ZLM 调度日志服务(M3 T3.3)异步采集 + 24h prune
+	setupZLMSchedulerLog()
+
+	// 装配 ZLM Scheduler Controller(M3 T3.3)算法切换 + 日志查询
+	setupZLMSchedulerController()
 
 	// 装配 ZLM 节点 CRUD / 配置 controller(M1 新增)
 	if zlmRegistry != nil {
@@ -286,6 +345,87 @@ func setupZLMScheduler() {
 	app.ZapLog.Info("GB28181 ZLM Scheduler 已装配", zap.String("algorithm", algorithm))
 }
 
+// setupZLMSchedulerLog 装配调度日志服务 + 启动 24h prune ticker(M3 T3.3)
+//
+// 流程:
+//  1. zlmScheduler 为 nil → 跳过(没 Manager 就没 Pick,没日志可写)
+//  2. app.DB() 为 nil → 跳过(无 DB 持久化能力)
+//  3. 起 LogService(buffer 1000)+ Manager.SetLogService 注入
+//  4. 起 24h ticker,跑 PruneOlderThan(now-7d),失败 zap.Warn
+//
+// 整套通过 schedulerLogCancel 控制退出。
+func setupZLMSchedulerLog() {
+	if zlmScheduler == nil {
+		app.ZapLog.Warn("GB28181 Scheduler 未装配,跳过调度日志服务")
+		return
+	}
+	if app.DB() == nil {
+		app.ZapLog.Warn("GB28181 DB 不可用,跳过调度日志服务")
+		return
+	}
+	inner := gbzlmrepo.NewGormSchedulerLogRepo(app.DB())
+	adapter := schedulerLogRepoAdapter{inner: inner}
+	svc := gbzlmsched.NewLogService(adapter, 1000)
+	ctx, cancel := context.WithCancel(context.Background())
+	svc.Start(ctx)
+
+	zlmScheduler.SetLogService(svc)
+	zlmSchedulerLog = svc
+	schedulerLogCancel = cancel
+
+	go pruneSchedulerLogDaily(ctx, svc)
+
+	app.ZapLog.Info("GB28181 ZLM 调度日志服务已启动(buffer=1000, retention=7d)")
+}
+
+// pruneSchedulerLogDaily 每 24h 跑一次 PruneOlderThan(now-7d)
+//
+// 启动时立即跑一次(冷启清遗留),之后每 24h 一次。
+// 失败 zap.Warn 不中断 ticker。
+func pruneSchedulerLogDaily(ctx context.Context, svc *gbzlmsched.LogService) {
+	prune := func() {
+		pCtx, pCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer pCancel()
+		n, err := svc.PruneOlderThan(pCtx, time.Now().Add(-7*24*time.Hour))
+		if err != nil {
+			app.ZapLog.Warn("GB28181 调度日志 prune 失败", zap.Error(err))
+			return
+		}
+		if n > 0 {
+			app.ZapLog.Info("GB28181 调度日志 prune 完成", zap.Int64("removed", n))
+		}
+	}
+	prune() // 启动时立即清一轮
+	tk := time.NewTicker(24 * time.Hour)
+	defer tk.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tk.C:
+			prune()
+		}
+	}
+}
+
+// setupZLMSchedulerController 装配算法切换 + 日志查询 controller(M3 T3.3)
+//
+// 依赖 zlmScheduler(必须)+ zlmSchedulerLog(可空)+ scheduler_setting repo(可空)。
+// 没 Manager 则跳过(没意义);DB 不可用则 SettingWriter 传 nil(切换仅内存)。
+func setupZLMSchedulerController() {
+	if zlmScheduler == nil {
+		app.ZapLog.Warn("GB28181 Scheduler 未装配,跳过 Scheduler Controller")
+		return
+	}
+	var settingWriter gbcontrollers.SchedulerSettingWriter
+	if app.DB() != nil {
+		settingWriter = gbzlmrepo.NewSchedulerSettingRepo(app.DB())
+	}
+	ctrl := gbcontrollers.NewZLMSchedulerController(zlmScheduler, zlmSchedulerLog, settingWriter)
+	gbroutes.SetZLMSchedulerController(ctrl)
+	app.ZapLog.Info("GB28181 ZLM Scheduler Controller 已装配")
+}
+
 // pickInitialClient M1 单节点过渡期:优先取 Registry 首节点,失败 fallback yaml
 func pickInitialClient(cfg gbconfig.Config) *gbzlm.Client {
 	if zlmRegistry != nil {
@@ -318,6 +458,14 @@ func Stop() {
 	if heartbeatCancel != nil {
 		heartbeatCancel()
 		heartbeatCancel = nil
+	}
+	if schedulerLogCancel != nil {
+		schedulerLogCancel() // 关 prune ticker 的 ctx
+		schedulerLogCancel = nil
+	}
+	if zlmSchedulerLog != nil {
+		zlmSchedulerLog.Stop() // drain pending,等 worker 退出
+		zlmSchedulerLog = nil
 	}
 	if metricsCleanupStop != nil {
 		close(metricsCleanupStop)

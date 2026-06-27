@@ -52,6 +52,7 @@ type NodeDTO struct {
 	RTPPortStart    int               `json:"rtpPortStart"`
 	RTPPortEnd      int               `json:"rtpPortEnd"`
 	Stats           node.Stats        `json:"stats"`
+	NearCapacity    bool              `json:"nearCapacity"` // T3.4: port_usage>=80% 或 cpu>=80%,UI 黄色高亮
 	CreatedAt       time.Time         `json:"createdAt"`
 	UpdatedAt       time.Time         `json:"updatedAt"`
 }
@@ -106,6 +107,7 @@ func toDTO(n *node.Node) *NodeDTO {
 		RTPPortStart:    n.RTPPortStart,
 		RTPPortEnd:      n.RTPPortEnd,
 		Stats:           n.Stats,
+		NearCapacity:    n.IsNearCapacity(),
 		CreatedAt:       n.CreatedAt,
 		UpdatedAt:       n.UpdatedAt,
 	}

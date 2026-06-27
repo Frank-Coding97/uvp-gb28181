@@ -86,9 +86,12 @@ function rowClass(record: ZLMNode): string {
             return "row-maintenance";
         case "offline":
             return "row-offline";
-        default:
-            return "";
     }
+    // active 节点接近容量(端口或 CPU 任一 >= 80%)→ 黄色高亮提示
+    if (record.nearCapacity) {
+        return "row-near-capacity";
+    }
+    return "";
 }
 
 function openCreate() {
@@ -260,6 +263,12 @@ onUnmounted(() => {
                                 >
                                     {{ offlineDuration(record) }}
                                 </div>
+                                <a-tooltip
+                                    v-if="record.state === 'active' && record.nearCapacity"
+                                    content="接近容量(端口或 CPU 已达 80%),已暂时从调度池摘除"
+                                >
+                                    <a-tag color="orange" size="small">近容量</a-tag>
+                                </a-tooltip>
                             </div>
                         </template>
                     </a-table-column>
@@ -402,6 +411,13 @@ onUnmounted(() => {
 :deep(tr.row-offline .arco-table-td) {
     background-color: #f7f8fa !important;
     color: #86909c;
+}
+
+/* T3.4 容量预警:active 节点 port_usage 或 cpu >= 80% 黄色高亮 */
+:deep(tr.row-near-capacity > td),
+:deep(.arco-table-tr.row-near-capacity > .arco-table-td),
+:deep(tr.row-near-capacity .arco-table-td) {
+    background-color: #fffbe6 !important;
 }
 
 /* 驱逐按钮:橙色,跟"隔离"(默认 warning 黄)区分开,语义上更接近"危险但非毁灭" */

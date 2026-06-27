@@ -194,6 +194,24 @@ func (r *Registry) ListActive() []*Node {
 	return out
 }
 
+// ListSchedulable 仅可调度节点(active + 非 NearCapacity)
+//
+// 比 ListActive 多一层容量过滤:port_usage >= 80% 或 cpu >= 80% 的节点
+// 暂时摘除调度池,等流自然结束或心跳下降。
+// scheduler.Pick 用此方法替代 ListActive,实现容量预警自动剔除。
+func (r *Registry) ListSchedulable() []*Node {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]*Node, 0, len(r.nodes))
+	for _, n := range r.nodes {
+		if n.IsActive() && !n.IsNearCapacity() {
+			copy := *n
+			out = append(out, &copy)
+		}
+	}
+	return out
+}
+
 // UpdateStats 心跳上报数据更新(不写 DB)
 // uuid 未知则静默忽略(节点可能刚删除)
 func (r *Registry) UpdateStats(uuid string, stats Stats) {
