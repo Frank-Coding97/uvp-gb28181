@@ -158,6 +158,16 @@ func (r *Registry) GetByUUID(uuid string) (*Node, bool) {
 	return &copy, true
 }
 
+// IDForUUID 按 ZLM mediaServerId 只反查 nodeID(轻量,不复制 Node)
+//
+// hook 端点用:OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind。
+func (r *Registry) IDForUUID(uuid string) (int64, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id, ok := r.uuids[uuid]
+	return id, ok
+}
+
 // List 返回全部节点拷贝
 func (r *Registry) List() []*Node {
 	r.mu.RLock()
