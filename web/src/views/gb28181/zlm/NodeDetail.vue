@@ -184,37 +184,44 @@ const cpuMaxPct = computed(() => {
                         </a-col>
                         <a-col :span="6">
                             <a-card>
-                                <a-statistic
-                                    title="网络线程负载"
-                                    :value="((node?.stats?.netThreadLoadAvg || 0) * 100).toFixed(1)"
-                                    suffix="%"
-                                />
+                                <div class="stat-card">
+                                    <div class="stat-title">网络线程负载</div>
+                                    <div class="stat-value">{{ ((node?.stats?.netThreadLoadAvg || 0) * 100).toFixed(1) }}<span class="stat-suffix">%</span></div>
+                                </div>
                             </a-card>
                         </a-col>
                         <a-col :span="6">
                             <a-card>
-                                <a-statistic
-                                    title="工作线程负载"
-                                    :value="((node?.stats?.workThreadLoadAvg || 0) * 100).toFixed(1)"
-                                    suffix="%"
-                                />
+                                <div class="stat-card">
+                                    <div class="stat-title">工作线程负载</div>
+                                    <div class="stat-value">{{ ((node?.stats?.workThreadLoadAvg || 0) * 100).toFixed(1) }}<span class="stat-suffix">%</span></div>
+                                </div>
                             </a-card>
                         </a-col>
                     </a-row>
                     <a-row :gutter="16" style="margin-top: 16px">
                         <a-col :span="8">
                             <a-card>
-                                <a-statistic title="内存占用" :value="fmtBytes(node?.stats?.memoryUsageBytes || 0)" />
+                                <div class="stat-card">
+                                    <div class="stat-title">内存占用</div>
+                                    <div class="stat-value">{{ fmtBytes(node?.stats?.memoryUsageBytes || 0) }}</div>
+                                </div>
                             </a-card>
                         </a-col>
                         <a-col :span="8">
                             <a-card>
-                                <a-statistic title="累计入流量" :value="fmtBytes(node?.stats?.totalBytesIn || 0)" />
+                                <div class="stat-card">
+                                    <div class="stat-title">累计入流量</div>
+                                    <div class="stat-value">{{ fmtBytes(node?.stats?.totalBytesIn || 0) }}</div>
+                                </div>
                             </a-card>
                         </a-col>
                         <a-col :span="8">
                             <a-card>
-                                <a-statistic title="累计出流量" :value="fmtBytes(node?.stats?.totalBytesOut || 0)" />
+                                <div class="stat-card">
+                                    <div class="stat-title">累计出流量</div>
+                                    <div class="stat-value">{{ fmtBytes(node?.stats?.totalBytesOut || 0) }}</div>
+                                </div>
                             </a-card>
                         </a-col>
                     </a-row>
@@ -292,6 +299,30 @@ const cpuMaxPct = computed(() => {
 .refresh-hint {
     color: #86909c;
     font-size: 12px;
+}
+
+.stat-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stat-title {
+    color: #86909c;
+    font-size: 13px;
+}
+
+.stat-value {
+    font-size: 26px;
+    font-weight: 500;
+    color: #1d2129;
+    line-height: 1.2;
+}
+
+.stat-suffix {
+    font-size: 14px;
+    color: #86909c;
+    margin-left: 4px;
 }
 
 .spark-header {
