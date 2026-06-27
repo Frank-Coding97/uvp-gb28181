@@ -16,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
+	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
@@ -34,6 +35,10 @@ var zlmClient *gbzlm.Client
 
 // zlmRegistry 节点注册表(M1 新增)
 var zlmRegistry *node.Registry
+
+// zlmScheduler M2 新增,持有当前激活的调度算法(roundrobin / M3 weighted / leastload)
+// SIP play 改造(T2.4)从这里取节点。装配失败则为 nil,调用方自己降级。
+var zlmScheduler *gbzlmsched.Manager
 
 // playSvc 全局点播 service(routes 用 GetPlayService 取)
 var playSvc *play.Service
@@ -58,6 +63,10 @@ func MetricsAggregator() *metrics.Aggregator { return metricsAgg }
 
 // ZLMRegistry 返回全局节点注册表(M1 新增,供 controllers / test 用)
 func ZLMRegistry() *node.Registry { return zlmRegistry }
+
+// ZLMScheduler 返回全局调度器 Manager(M2 新增,供 SIP play 改造 / test 用)
+// 可能为 nil:DB 不可达或 Switch 全部失败时
+func ZLMScheduler() *gbzlmsched.Manager { return zlmScheduler }
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过
@@ -100,6 +109,9 @@ func Start() {
 	// 装配 ZLM 多节点 Registry(M1 新增)
 	// 启动若 meta_node 空表 → 用 yaml cfg.ZLM 自动 seed 第一节点(单节点过渡)
 	setupZLMRegistry(cfg)
+
+	// 装配 ZLM Scheduler(M2 新增)从 scheduler_setting 读 algorithm
+	setupZLMScheduler()
 
 	// 装配 ZLM 节点 CRUD / 配置 controller(M1 新增)
 	if zlmRegistry != nil {
@@ -194,6 +206,50 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 	}
 	zlmRegistry = reg
 	app.ZapLog.Info("GB28181 ZLM Registry 已装配", zap.Int("nodes", len(reg.List())))
+}
+
+// setupZLMScheduler 装配调度器 Manager(M2 新增)
+//
+// 流程:
+//  1. zlmRegistry 为 nil → 跳过,Manager 留空(SIP play 改造侧自降级到首节点)
+//  2. 从 scheduler_setting 表读 algorithm 名(单行 id=1)
+//  3. Manager.Switch(algorithm);失败 fallback "roundrobin";再失败留 nil
+func setupZLMScheduler() {
+	if zlmRegistry == nil {
+		app.ZapLog.Warn("GB28181 ZLM Registry 未装配,跳过 Scheduler 装配")
+		return
+	}
+	factory := gbzlmsched.NewFactory(zlmRegistry)
+	manager := gbzlmsched.NewManager(factory)
+
+	algorithm := "roundrobin"
+	if app.DB() != nil {
+		settingRepo := gbzlmrepo.NewSchedulerSettingRepo(app.DB())
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s, err := settingRepo.GetCurrent(ctx)
+		switch {
+		case err != nil:
+			app.ZapLog.Warn("GB28181 scheduler_setting 读取失败,fallback roundrobin", zap.Error(err))
+		case s == nil:
+			app.ZapLog.Info("GB28181 scheduler_setting 表空,fallback roundrobin")
+		default:
+			algorithm = s.Algorithm
+		}
+	}
+
+	if err := manager.Switch(algorithm); err != nil {
+		app.ZapLog.Warn("GB28181 Scheduler.Switch 失败,fallback roundrobin",
+			zap.String("requested", algorithm), zap.Error(err))
+		if err2 := manager.Switch("roundrobin"); err2 != nil {
+			app.ZapLog.Error("GB28181 Scheduler 装配失败(roundrobin fallback 也失败,Manager 留空)",
+				zap.Error(err2))
+			return
+		}
+		algorithm = "roundrobin"
+	}
+	zlmScheduler = manager
+	app.ZapLog.Info("GB28181 ZLM Scheduler 已装配", zap.String("algorithm", algorithm))
 }
 
 // pickInitialClient M1 单节点过渡期:优先取 Registry 首节点,失败 fallback yaml
