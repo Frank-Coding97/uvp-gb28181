@@ -179,9 +179,11 @@ func TestFactory_Build(t *testing.T) {
 	require.NotNil(t, s)
 	require.Equal(t, "roundrobin", s.Name())
 
-	_, err = factory.Build("weighted")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "M3")
+	// weighted 已 M3 T3.1 实装
+	sw, err := factory.Build("weighted")
+	require.NoError(t, err)
+	require.NotNil(t, sw)
+	require.Equal(t, "weighted", sw.Name())
 
 	_, err = factory.Build("leastload")
 	require.Error(t, err)
