@@ -112,6 +112,16 @@ function fmtBytes(n: number): string {
     return `${v.toFixed(2)} ${units[i]}`;
 }
 
+function fmtTime(s: string | undefined | null): string {
+    if (!s) return "—";
+    // zero value 兜底
+    if (s.startsWith("0001-01-01")) return "—";
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return s;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 // SVG sparkline: viewBox 100x30
 const SVG_W = 100;
 const SVG_H = 30;
@@ -278,8 +288,8 @@ const cpuMaxPct = computed(() => {
                         <a-descriptions-item label="RTP 端口范围">
                             {{ node?.rtpPortStart }}-{{ node?.rtpPortEnd }}
                         </a-descriptions-item>
-                        <a-descriptions-item label="创建时间">{{ node?.createdAt }}</a-descriptions-item>
-                        <a-descriptions-item label="更新时间">{{ node?.updatedAt }}</a-descriptions-item>
+                        <a-descriptions-item label="创建时间">{{ fmtTime(node?.createdAt) }}</a-descriptions-item>
+                        <a-descriptions-item label="更新时间">{{ fmtTime(node?.updatedAt) }}</a-descriptions-item>
                     </a-descriptions>
                 </a-spin>
             </a-tab-pane>
