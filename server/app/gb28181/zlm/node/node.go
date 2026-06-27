@@ -34,14 +34,14 @@ type Node struct {
 
 // Stats 实时状态(由心跳更新,内存表)
 type Stats struct {
-	LastHeartbeatAt   time.Time
-	MediaSourceCount  int     // 当前媒体源数(流数)
-	SessionCount      int     // 当前会话数
-	NetThreadLoadAvg  float64 // 网络 I/O 线程负载平均 0-1
-	WorkThreadLoadAvg float64 // 工作线程负载平均 0-1
-	MemoryUsageBytes  int64   // 内存占用
-	TotalBytesIn      int64   // 累计入流量
-	TotalBytesOut     int64   // 累计出流量
+	LastHeartbeatAt   time.Time `json:"lastHeartbeatAt"`
+	MediaSourceCount  int       `json:"mediaSourceCount"`  // 当前媒体源数(流数)
+	SessionCount      int       `json:"sessionCount"`      // 当前会话数
+	NetThreadLoadAvg  float64   `json:"netThreadLoadAvg"`  // 网络 I/O 线程负载平均 0-1
+	WorkThreadLoadAvg float64   `json:"workThreadLoadAvg"` // 工作线程负载平均 0-1
+	MemoryUsageBytes  int64     `json:"memoryUsageBytes"`  // 内存占用
+	TotalBytesIn      int64     `json:"totalBytesIn"`      // 累计入流量
+	TotalBytesOut     int64     `json:"totalBytesOut"`     // 累计出流量
 }
 
 // HTTPEndpoint 返回 ZLM HTTP API 根地址
