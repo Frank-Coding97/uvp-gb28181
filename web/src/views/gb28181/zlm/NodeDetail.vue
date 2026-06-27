@@ -1,10 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, onMounted, onUnmounted, computed } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Message } from "@arco-design/web-vue";
 import { getZLMNode, type ZLMNode } from "@/api/gb28181-zlm";
 import NodeStateBadge from "./components/NodeStateBadge.vue";
 import NodeConfig from "./NodeConfig.vue";
+
+interface HistoryPoint {
+    time: number;
+    value: number;
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -13,7 +18,18 @@ const loading = ref(false);
 const activeTab = ref<"overview" | "config">("overview");
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
+// 历史采样:每 30s 推一条,最多保留 30 条(15 分钟窗口)
+const HISTORY_MAX = 30;
+const streamHistory = ref<HistoryPoint[]>([]);
+const cpuHistory = ref<HistoryPoint[]>([]);
+
 const nodeId = Number(route.params.id);
+
+function pushHistory(buf: HistoryPoint[], value: number): HistoryPoint[] {
+    const next = [...buf, { time: Date.now(), value }];
+    if (next.length > HISTORY_MAX) next.shift();
+    return next;
+}
 
 async function refresh() {
     loading.value = true;
@@ -21,6 +37,13 @@ async function refresh() {
         const res = await getZLMNode(nodeId);
         if (res.code === 0) {
             node.value = res.data;
+            const stats = res.data?.stats;
+            if (stats) {
+                streamHistory.value = pushHistory(streamHistory.value, stats.mediaSourceCount || 0);
+                // CPU 负载 = 网络 + 工作线程负载加权(各占 50%)
+                const cpu = ((stats.netThreadLoadAvg || 0) + (stats.workThreadLoadAvg || 0)) / 2;
+                cpuHistory.value = pushHistory(cpuHistory.value, cpu);
+            }
         }
     } catch (e: any) {
         Message.error(e?.message || "加载失败");
@@ -52,6 +75,38 @@ function fmtBytes(n: number): string {
     }
     return `${v.toFixed(2)} ${units[i]}`;
 }
+
+// SVG sparkline: viewBox 100x30
+const SVG_W = 100;
+const SVG_H = 30;
+
+function sparklinePoints(history: HistoryPoint[], explicitMax?: number): string {
+    if (history.length === 0) return "";
+    const values = history.map((p) => p.value);
+    const max = explicitMax !== undefined ? explicitMax : Math.max(...values, 1);
+    const safeMax = max === 0 ? 1 : max;
+    const step = history.length > 1 ? SVG_W / (history.length - 1) : 0;
+    return history
+        .map((p, i) => {
+            const x = i * step;
+            const y = SVG_H - (p.value / safeMax) * SVG_H;
+            return `${x.toFixed(2)},${y.toFixed(2)}`;
+        })
+        .join(" ");
+}
+
+const streamSparklinePoints = computed(() => sparklinePoints(streamHistory.value));
+// CPU 是 0-1 浮点,固定 max=1
+const cpuSparklinePoints = computed(() => sparklinePoints(cpuHistory.value, 1));
+
+const streamMax = computed(() =>
+    streamHistory.value.length === 0 ? 0 : Math.max(...streamHistory.value.map((p) => p.value))
+);
+const cpuMaxPct = computed(() => {
+    if (cpuHistory.value.length === 0) return "0";
+    const m = Math.max(...cpuHistory.value.map((p) => p.value));
+    return (m * 100).toFixed(1);
+});
 </script>
 
 <template>
@@ -62,7 +117,10 @@ function fmtBytes(n: number): string {
             @back="router.push('/gb28181/zlm/nodes')"
         >
             <template #extra>
-                <NodeStateBadge v-if="node" :state="node.state" />
+                <a-space>
+                    <span class="refresh-hint">每 30 秒自动刷新</span>
+                    <NodeStateBadge v-if="node" :state="node.state" />
+                </a-space>
             </template>
         </a-page-header>
 
@@ -116,6 +174,52 @@ function fmtBytes(n: number): string {
                             </a-card>
                         </a-col>
                     </a-row>
+
+                    <a-row :gutter="16" style="margin-top: 16px">
+                        <a-col :span="12">
+                            <a-card>
+                                <div class="spark-header">
+                                    <span class="spark-title">流数趋势(最近 15 分钟)</span>
+                                    <span class="spark-meta">峰值 {{ streamMax }} · 样本 {{ streamHistory.length }}/{{ HISTORY_MAX }}</span>
+                                </div>
+                                <svg
+                                    v-if="streamHistory.length > 1"
+                                    class="sparkline"
+                                    :viewBox="`0 0 ${SVG_W} ${SVG_H}`"
+                                    preserveAspectRatio="none"
+                                >
+                                    <polyline
+                                        class="spark-stream"
+                                        fill="none"
+                                        :points="streamSparklinePoints"
+                                    />
+                                </svg>
+                                <div v-else class="spark-empty">采样中...</div>
+                            </a-card>
+                        </a-col>
+                        <a-col :span="12">
+                            <a-card>
+                                <div class="spark-header">
+                                    <span class="spark-title">CPU 负载趋势(最近 15 分钟)</span>
+                                    <span class="spark-meta">峰值 {{ cpuMaxPct }}% · 样本 {{ cpuHistory.length }}/{{ HISTORY_MAX }}</span>
+                                </div>
+                                <svg
+                                    v-if="cpuHistory.length > 1"
+                                    class="sparkline"
+                                    :viewBox="`0 0 ${SVG_W} ${SVG_H}`"
+                                    preserveAspectRatio="none"
+                                >
+                                    <polyline
+                                        class="spark-cpu"
+                                        fill="none"
+                                        :points="cpuSparklinePoints"
+                                    />
+                                </svg>
+                                <div v-else class="spark-empty">采样中...</div>
+                            </a-card>
+                        </a-col>
+                    </a-row>
+
                     <a-descriptions style="margin-top: 16px" :column="2" title="节点信息" bordered>
                         <a-descriptions-item label="ID">{{ node?.id }}</a-descriptions-item>
                         <a-descriptions-item label="UUID">{{ node?.mediaServerUUID }}</a-descriptions-item>
@@ -139,5 +243,55 @@ function fmtBytes(n: number): string {
 .zlm-node-detail {
     height: 100%;
     overflow: auto;
+}
+
+.refresh-hint {
+    color: #86909c;
+    font-size: 12px;
+}
+
+.spark-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 8px;
+}
+
+.spark-title {
+    font-size: 14px;
+    color: #1d2129;
+    font-weight: 500;
+}
+
+.spark-meta {
+    font-size: 12px;
+    color: #86909c;
+}
+
+.sparkline {
+    width: 100%;
+    height: 60px;
+    display: block;
+}
+
+.spark-stream {
+    stroke: #165dff;
+    stroke-width: 1.2;
+    vector-effect: non-scaling-stroke;
+}
+
+.spark-cpu {
+    stroke: #f7ba1e;
+    stroke-width: 1.2;
+    vector-effect: non-scaling-stroke;
+}
+
+.spark-empty {
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #c9cdd4;
+    font-size: 12px;
 }
 </style>

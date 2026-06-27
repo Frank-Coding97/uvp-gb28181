@@ -17,10 +17,16 @@ const nodes = ref<ZLMNode[]>([]);
 const loading = ref(false);
 const drawerVisible = ref(false);
 
+const ZERO_TIME = "0001-01-01T00:00:00Z";
+
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 const totalStreams = computed(() =>
     nodes.value.reduce((sum, n) => sum + (n.stats?.mediaSourceCount || 0), 0)
+);
+
+const offlineCount = computed(() =>
+    nodes.value.filter((n) => n.state === "offline").length
 );
 
 async function refresh() {
@@ -34,6 +40,50 @@ async function refresh() {
         Message.error(e?.message || "加载失败");
     } finally {
         loading.value = false;
+    }
+}
+
+function isZeroTime(s?: string): boolean {
+    return !s || s === ZERO_TIME || s.startsWith("0001-01-01");
+}
+
+function pickReferenceTime(node: ZLMNode): string | null {
+    const heartbeat = node.stats?.lastHeartbeatAt;
+    if (heartbeat && !isZeroTime(heartbeat)) {
+        // 用心跳时间 / 更新时间二者较新
+        if (node.updatedAt && !isZeroTime(node.updatedAt)) {
+            const t1 = new Date(heartbeat).getTime();
+            const t2 = new Date(node.updatedAt).getTime();
+            return t1 >= t2 ? heartbeat : node.updatedAt;
+        }
+        return heartbeat;
+    }
+    if (node.updatedAt && !isZeroTime(node.updatedAt)) {
+        return node.updatedAt;
+    }
+    return null;
+}
+
+function offlineDuration(node: ZLMNode): string {
+    const ref = pickReferenceTime(node);
+    if (!ref) return "从未上报";
+    const refTs = new Date(ref).getTime();
+    if (Number.isNaN(refTs)) return "从未上报";
+    const diffSec = Math.floor((Date.now() - refTs) / 1000);
+    if (diffSec < 60) return "刚刚";
+    if (diffSec < 3600) return `离线 ${Math.floor(diffSec / 60)} 分钟`;
+    if (diffSec < 86400) return `离线 ${Math.floor(diffSec / 3600)} 小时`;
+    return `离线 ${Math.floor(diffSec / 86400)} 天`;
+}
+
+function rowClass(record: ZLMNode): string {
+    switch (record.state) {
+        case "maintenance":
+            return "row-maintenance";
+        case "offline":
+            return "row-offline";
+        default:
+            return "";
     }
 }
 
@@ -108,6 +158,7 @@ onUnmounted(() => {
             <template #extra>
                 <a-space>
                     <a-statistic title="节点数" :value="nodes.length" />
+                    <a-statistic title="离线节点" :value="offlineCount" :value-style="{ color: offlineCount > 0 ? '#f53f3f' : undefined }" />
                     <a-statistic title="当前流数(总)" :value="totalStreams" />
                     <a-button type="primary" @click="openCreate">+ 添加节点</a-button>
                 </a-space>
@@ -120,6 +171,7 @@ onUnmounted(() => {
                 :loading="loading"
                 row-key="id"
                 :pagination="false"
+                :row-class="rowClass"
             >
                 <template #columns>
                     <a-table-column title="名称" data-index="name" />
@@ -128,7 +180,15 @@ onUnmounted(() => {
                     </a-table-column>
                     <a-table-column title="状态">
                         <template #cell="{ record }">
-                            <NodeStateBadge :state="record.state" />
+                            <div class="state-cell">
+                                <NodeStateBadge :state="record.state" />
+                                <div
+                                    v-if="record.state === 'offline'"
+                                    class="offline-duration"
+                                >
+                                    {{ offlineDuration(record) }}
+                                </div>
+                            </div>
                         </template>
                     </a-table-column>
                     <a-table-column title="权重" data-index="weight" />
@@ -137,7 +197,7 @@ onUnmounted(() => {
                     </a-table-column>
                     <a-table-column title="心跳">
                         <template #cell="{ record }">
-                            <span v-if="record.stats?.lastHeartbeatAt && record.stats.lastHeartbeatAt !== '0001-01-01T00:00:00Z'">
+                            <span v-if="record.stats?.lastHeartbeatAt && !record.stats.lastHeartbeatAt.startsWith('0001-01-01')">
                                 {{ new Date(record.stats.lastHeartbeatAt).toLocaleString() }}
                             </span>
                             <span v-else style="color: #aaa">—</span>
@@ -185,5 +245,26 @@ onUnmounted(() => {
 .zlm-node-list {
     height: 100%;
     overflow: auto;
+}
+
+.state-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+.offline-duration {
+    font-size: 12px;
+    color: #86909c;
+    line-height: 1.2;
+}
+
+:deep(.arco-table-tr.row-maintenance > .arco-table-td) {
+    background-color: #fffbe6;
+}
+
+:deep(.arco-table-tr.row-offline > .arco-table-td) {
+    background-color: #f7f8fa;
 }
 </style>
