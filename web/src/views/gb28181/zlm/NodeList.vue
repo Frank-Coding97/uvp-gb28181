@@ -7,6 +7,7 @@ import {
     deleteZLMNode,
     setZLMNodeMaintenance,
     activateZLMNode,
+    testZLMNodeConnection,
     type ZLMNode
 } from "@/api/gb28181-zlm";
 import NodeForm from "./NodeForm.vue";
@@ -16,6 +17,7 @@ const router = useRouter();
 const nodes = ref<ZLMNode[]>([]);
 const loading = ref(false);
 const drawerVisible = ref(false);
+const reprobing = ref<Record<number, boolean>>({});
 
 const ZERO_TIME = "0001-01-01T00:00:00Z";
 
@@ -120,6 +122,28 @@ async function handleActivate(node: ZLMNode) {
     }
 }
 
+async function handleReprobe(node: ZLMNode) {
+    reprobing.value[node.id] = true;
+    try {
+        const res = await testZLMNodeConnection(node.id);
+        if (res.code === 0 && res.data?.online) {
+            const act = await activateZLMNode(node.id);
+            if (act.code === 0) {
+                Message.success("节点已恢复并重新加入调度池");
+            } else {
+                Message.warning("探测可达,但激活失败,请手动激活");
+            }
+        } else {
+            Message.error(`节点仍不可达: ${res.data?.error || "未知"}`);
+        }
+        refresh();
+    } catch (e: any) {
+        Message.error(e?.message || "探测失败");
+    } finally {
+        reprobing.value[node.id] = false;
+    }
+}
+
 async function handleDelete(node: ZLMNode) {
     Modal.warning({
         title: "删除节点?",
@@ -171,7 +195,7 @@ onUnmounted(() => {
                 :loading="loading"
                 row-key="id"
                 :pagination="false"
-                :row-class="rowClass"
+                :row-class-name="rowClass"
             >
                 <template #columns>
                     <a-table-column title="名称" data-index="name" />
@@ -193,7 +217,10 @@ onUnmounted(() => {
                     </a-table-column>
                     <a-table-column title="权重" data-index="weight" />
                     <a-table-column title="当前流">
-                        <template #cell="{ record }">{{ record.stats?.mediaSourceCount || 0 }}</template>
+                        <template #cell="{ record }">
+                            <span v-if="record.state === 'offline'" style="color: #aaa">—</span>
+                            <span v-else>{{ record.stats?.mediaSourceCount || 0 }}</span>
+                        </template>
                     </a-table-column>
                     <a-table-column title="心跳">
                         <template #cell="{ record }">
@@ -203,7 +230,7 @@ onUnmounted(() => {
                             <span v-else style="color: #aaa">—</span>
                         </template>
                     </a-table-column>
-                    <a-table-column title="操作" :width="280">
+                    <a-table-column title="操作" :width="320">
                         <template #cell="{ record }">
                             <a-space>
                                 <a-button size="small" @click="gotoDetail(record)">详情</a-button>
@@ -222,6 +249,15 @@ onUnmounted(() => {
                                     @click="handleActivate(record)"
                                 >
                                     激活
+                                </a-button>
+                                <a-button
+                                    v-if="record.state === 'offline'"
+                                    size="small"
+                                    type="primary"
+                                    :loading="reprobing[record.id]"
+                                    @click="handleReprobe(record)"
+                                >
+                                    重新探测
                                 </a-button>
                                 <a-button
                                     size="small"
@@ -260,11 +296,16 @@ onUnmounted(() => {
     line-height: 1.2;
 }
 
-:deep(.arco-table-tr.row-maintenance > .arco-table-td) {
-    background-color: #fffbe6;
+:deep(tr.row-maintenance > td),
+:deep(.arco-table-tr.row-maintenance > .arco-table-td),
+:deep(tr.row-maintenance .arco-table-td) {
+    background-color: #fffbe6 !important;
 }
 
-:deep(.arco-table-tr.row-offline > .arco-table-td) {
-    background-color: #f7f8fa;
+:deep(tr.row-offline > td),
+:deep(.arco-table-tr.row-offline > .arco-table-td),
+:deep(tr.row-offline .arco-table-td) {
+    background-color: #f7f8fa !important;
+    color: #86909c;
 }
 </style>
