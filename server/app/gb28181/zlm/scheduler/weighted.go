@@ -45,7 +45,7 @@ func (w *Weighted) Name() string { return "weighted" }
 //   - 无 active 节点
 //   - active 节点全部 weight=0
 func (w *Weighted) Pick(_ context.Context, _ InviteContext) (*node.Node, error) {
-	active := w.reg.ListActive()
+	active := w.reg.ListSchedulable()
 	if len(active) == 0 {
 		return nil, ErrNoActiveNode
 	}

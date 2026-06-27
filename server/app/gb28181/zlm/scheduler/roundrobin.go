@@ -34,7 +34,7 @@ func (r *RoundRobin) Name() string { return "roundrobin" }
 // 实现细节:Registry.ListActive 内部 map 遍历无固定顺序,
 // 这里按 ID 升序排序后再 modulo,保证轮询稳定。
 func (r *RoundRobin) Pick(_ context.Context, _ InviteContext) (*node.Node, error) {
-	active := r.reg.ListActive()
+	active := r.reg.ListSchedulable()
 	if len(active) == 0 {
 		return nil, ErrNoActiveNode
 	}

@@ -29,6 +29,7 @@ export interface ZLMNode {
     rtpPortStart: number;
     rtpPortEnd: number;
     stats: ZLMNodeStats;
+    nearCapacity?: boolean;  // T3.4: 后端给出的容量预警标志
     createdAt: string;
     updatedAt: string;
 }
