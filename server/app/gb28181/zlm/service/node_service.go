@@ -225,8 +225,23 @@ func (s *NodeService) SetMaintenance(ctx context.Context, id int64) error {
 }
 
 // Activate 切回 active
+//
+// 关键:同时把 LastHeartbeatAt 重置为 now,给 ZLM 一个 90s 宽限期
+// 让真实心跳上报。否则刚 Activate 完 Watcher 下一个 Tick 看到旧的
+// LastHeartbeatAt 又把它标回 offline。
 func (s *NodeService) Activate(ctx context.Context, id int64) error {
-	return s.setState(ctx, id, node.StateActive)
+	cur, ok := s.registry.Get(id)
+	if !ok {
+		return ErrNodeNotFound
+	}
+	cur.State = node.StateActive
+	cur.Stats.LastHeartbeatAt = time.Now()
+	if err := s.registry.Update(ctx, *cur); err != nil {
+		return err
+	}
+	// Update 不带 Stats(Stats 只在内存),需单独 reset 内存里的 LastHeartbeatAt
+	s.registry.UpdateStats(cur.MediaServerUUID, cur.Stats)
+	return nil
 }
 
 func (s *NodeService) setState(ctx context.Context, id int64, state node.State) error {
