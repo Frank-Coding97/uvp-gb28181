@@ -103,6 +103,7 @@ async function handleSubmit() {
             </a-form-item>
             <a-form-item label="权重(加权轮询用)">
                 <a-slider v-model="form.weight" :min="0" :max="100" show-input />
+                <div class="form-tip">权重影响加权轮询算法的分配比例;0 = 禁用调度;典型值 50</div>
             </a-form-item>
             <a-form-item label="RTP 端口范围">
                 <a-space>
@@ -119,3 +120,11 @@ async function handleSubmit() {
         </template>
     </a-drawer>
 </template>
+
+<style scoped>
+.form-tip {
+    font-size: 12px;
+    color: #86909c;
+    margin-top: 4px;
+}
+</style>

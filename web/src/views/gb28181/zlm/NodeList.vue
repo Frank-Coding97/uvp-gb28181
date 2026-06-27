@@ -215,7 +215,19 @@ onUnmounted(() => {
                             </div>
                         </template>
                     </a-table-column>
-                    <a-table-column title="权重" data-index="weight" />
+                    <a-table-column title="权重">
+                        <template #cell="{ record }">
+                            <div class="weight-cell">
+                                <span class="weight-num">{{ record.weight }}</span>
+                                <a-progress
+                                    :percent="record.weight / 100"
+                                    :show-text="false"
+                                    size="small"
+                                    class="weight-bar"
+                                />
+                            </div>
+                        </template>
+                    </a-table-column>
                     <a-table-column title="当前流">
                         <template #cell="{ record }">
                             <span v-if="record.state === 'offline'" style="color: #aaa">—</span>
@@ -294,6 +306,22 @@ onUnmounted(() => {
     font-size: 12px;
     color: #86909c;
     line-height: 1.2;
+}
+
+.weight-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.weight-num {
+    min-width: 24px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.weight-bar {
+    width: 80px;
 }
 
 :deep(tr.row-maintenance > td),
