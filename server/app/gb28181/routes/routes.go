@@ -54,6 +54,12 @@ func SetZLMConfigController(ctrl *gbcontrollers.ZLMConfigController) {
 	zlmConfigController = ctrl
 }
 
+// SetKeepaliveCollector 由 bootstrap M2.1 注入(同 SetPlayService 模式)
+// 把 heartbeat.Collector 通过 KeepaliveCollector 接口挂到 hookController
+func SetKeepaliveCollector(c gbhandler.KeepaliveCollector) {
+	hookController.SetKeepaliveCollector(c)
+}
+
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
 // 在底座 routes.InitRoutes 的 protected 块中调用
 func RegisterRoutes(protected *gin.RouterGroup) {
@@ -123,6 +129,7 @@ func RegisterHookRoutes(engine *gin.Engine) {
 	hook := engine.Group("/index/hook")
 	{
 		hook.POST("/on_server_started", hookController.OnServerStarted)
+		hook.POST("/on_server_keepalive", hookController.OnServerKeepalive)
 		hook.POST("/on_stream_changed", hookController.OnStreamChanged)
 		hook.POST("/on_stream_none_reader", hookController.OnStreamNoneReader)
 		hook.POST("/on_rtp_server_timeout", hookController.OnRtpServerTimeout)

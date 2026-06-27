@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -18,11 +19,18 @@ type PlayStopper interface {
 	Stop(ctx context.Context, streamID string) error
 }
 
+// KeepaliveCollector 由 heartbeat.Collector 实现:接收 ZLM on_server_keepalive 上报
+// 接口化避免 handler 包反向依赖 heartbeat 包
+type KeepaliveCollector interface {
+	Receive(payload []byte) error
+}
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
-	notifier *stream.Notifier // 流就绪事件分发(由点播 service 订阅,T6 创新3)
-	stopper  PlayStopper      // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	notifier  *stream.Notifier   // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper   PlayStopper        // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	collector KeepaliveCollector // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -32,6 +40,11 @@ func NewHookController(notifier *stream.Notifier) *HookController {
 // SetPlayStopper 注入点播停止器(bootstrap 装配 play service 后调用)
 func (h *HookController) SetPlayStopper(s PlayStopper) {
 	h.stopper = s
+}
+
+// SetKeepaliveCollector 注入心跳收集器(bootstrap M2.1 装配 heartbeat.Collector 后调用)
+func (h *HookController) SetKeepaliveCollector(c KeepaliveCollector) {
+	h.collector = c
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -136,5 +149,31 @@ func (h *HookController) OnPlay(c *gin.Context) {
 // OnServerStarted ZLM 启动事件
 func (h *HookController) OnServerStarted(c *gin.Context) {
 	app.ZapLog.Info("ZLM Hook on_server_started")
+	hookOK(c)
+}
+
+// OnServerKeepalive ZLM 节点心跳(每 hook.alive_interval 秒一次,默认 30s)
+//
+// payload 含 mediaServerId + data{MediaSource, Session, NetThreadLoad[], WorkThreadLoad[], ...}
+// 转交给 heartbeat.Collector 解析、写入 node.Registry 内存表。
+//
+// 失败处理(JSON 坏 / 未知 uuid / collector 未装配):log warn,仍返回 hookOK
+// — ZLM 收到非 0 会重试甚至打 onException,业务侧别让心跳路径打扰它。
+func (h *HookController) OnServerKeepalive(c *gin.Context) {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		app.ZapLog.Warn("ZLM Hook on_server_keepalive 读 body 失败", zap.Error(err))
+		hookOK(c)
+		return
+	}
+	if h.collector == nil {
+		app.ZapLog.Debug("ZLM Hook on_server_keepalive 收到但 Collector 未装配,忽略")
+		hookOK(c)
+		return
+	}
+	if err := h.collector.Receive(body); err != nil {
+		app.ZapLog.Warn("ZLM Hook on_server_keepalive 处理失败",
+			zap.Error(err), zap.Int("bodyLen", len(body)))
+	}
 	hookOK(c)
 }

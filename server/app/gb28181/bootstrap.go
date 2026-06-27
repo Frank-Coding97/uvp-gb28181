@@ -13,6 +13,7 @@ import (
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
@@ -45,6 +46,9 @@ var metricsAgg *metrics.Aggregator
 
 // metricsCleanupStop 控制 TTL 清理 goroutine 退出
 var metricsCleanupStop chan struct{}
+
+// heartbeatCancel 控制 Watcher goroutine 退出(M2 新增)
+var heartbeatCancel context.CancelFunc
 
 // PlayService 返回点播 service(可能为 nil,gb28181 未启用 / UAC 初始化失败时)
 func PlayService() *play.Service { return playSvc }
@@ -111,6 +115,22 @@ func Start() {
 		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
 		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
 		app.ZapLog.Info("GB28181 ZLM 节点/配置 controller 已装配")
+
+		// 装配心跳 Collector + Watcher(M2.1)
+		// Collector 接收 on_server_keepalive Hook,Watcher 周期扫描超时节点
+		collector := heartbeat.NewCollector(zlmRegistry)
+		gbroutes.SetKeepaliveCollector(collector)
+
+		watcher := heartbeat.NewWatcher(zlmRegistry, heartbeat.RealClock(),
+			30*time.Second, // checkInterval
+			90*time.Second, // offlineThreshold = 3 个 30s 心跳
+		)
+		var hbCtx context.Context
+		hbCtx, heartbeatCancel = context.WithCancel(context.Background())
+		watcher.Start(hbCtx)
+		app.ZapLog.Info("GB28181 ZLM 心跳 Collector / Watcher 已启动",
+			zap.Duration("checkInterval", 30*time.Second),
+			zap.Duration("offlineThreshold", 90*time.Second))
 	}
 
 	// 向 ZLMediaKit 动态下发 Hook 配置(控制面,替代 config.ini 写死)
@@ -205,6 +225,10 @@ func runMetricsCleanup(a *metrics.Aggregator, stop <-chan struct{}) {
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	if heartbeatCancel != nil {
+		heartbeatCancel()
+		heartbeatCancel = nil
+	}
 	if metricsCleanupStop != nil {
 		close(metricsCleanupStop)
 		metricsCleanupStop = nil
