@@ -79,6 +79,17 @@ func (m *mockProbe) ApplyConfigForNode(_ context.Context, n *node.Node, _ servic
 	return m.setServerConfigErr
 }
 
+// KickSessions / RestartServer:ZLMProbe 在 T3.5 扩了两方法,基础 mockProbe 给个 no-op 占位
+// 让现有用例继续编译;真正校验 Kick/Restart 行为的用例在 node_service_kick_test.go 用 kickProbe。
+func (m *mockProbe) KickSessions(_ context.Context, _ *node.Node) (int, error) {
+	m.calls = append(m.calls, "KickSessions")
+	return 0, nil
+}
+func (m *mockProbe) RestartServer(_ context.Context, _ *node.Node, _ int) error {
+	m.calls = append(m.calls, "RestartServer")
+	return nil
+}
+
 func newSvc(repo *memoryRepo, probe *mockProbe) *service.NodeService {
 	reg := node.NewRegistry(repo)
 	return service.NewNodeService(reg, probe, service.MediaTuning{})

@@ -211,3 +211,54 @@ func (c *Client) GetMediaInfo(ctx context.Context, app, stream string) (*MediaIn
 		ReaderCount: r.ReaderCount,
 	}, nil
 }
+
+// KickSessions 驱逐(可选 filter)会话,返回被踢的会话数
+//
+// filter 留空 → 踢全部;支持 ZLM 的 local_port / peer_ip / id 三种 filter。
+// 节点驱逐场景调用方一般传 nil。
+func (c *Client) KickSessions(ctx context.Context, filter map[string]string) (int, error) {
+	var r struct {
+		baseResp
+		Count int `json:"count"`
+	}
+	if err := c.call(ctx, "kick_sessions", filter, &r); err != nil {
+		return 0, err
+	}
+	if r.Code != 0 {
+		return 0, fmt.Errorf("kick_sessions code=%d msg=%s", r.Code, r.Msg)
+	}
+	return r.Count, nil
+}
+
+// CloseStreams 关闭(可选 filter)推流,返回被关闭的流数
+//
+// filter 支持 ZLM 的 schema / vhost / app / stream / force,留空踢全部。
+func (c *Client) CloseStreams(ctx context.Context, filter map[string]string) (int, error) {
+	var r struct {
+		baseResp
+		Count int `json:"count"`
+	}
+	if err := c.call(ctx, "close_streams", filter, &r); err != nil {
+		return 0, err
+	}
+	if r.Code != 0 {
+		return 0, fmt.Errorf("close_streams code=%d msg=%s", r.Code, r.Msg)
+	}
+	return r.Count, nil
+}
+
+// RestartServer 重启 ZLM 服务
+//
+// ZLM 的 /index/api/restartServer 接口不支持 grace 参数:接到请求即刻重启,所有流被强切,
+// 客户端依靠自身重连机制恢复。graceMS 当前为接口预留(对齐云原生 graceful shutdown 语义),
+// M3 阶段忽略,后续如 ZLM 支持再接入。
+func (c *Client) RestartServer(ctx context.Context, _graceMS int) error {
+	var r baseResp
+	if err := c.call(ctx, "restartServer", nil, &r); err != nil {
+		return err
+	}
+	if r.Code != 0 {
+		return fmt.Errorf("restartServer code=%d msg=%s", r.Code, r.Msg)
+	}
+	return nil
+}

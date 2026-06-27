@@ -49,3 +49,17 @@ func (a *ServiceAdapter) ApplyConfigForNode(ctx context.Context, n *node.Node, t
 	}
 	return NewClientForNode(n).ApplyConfigForNode(ctx, media)
 }
+
+// KickSessions 实现 service.ZLMProbe(T3.5)
+//
+// 节点驱逐场景:filter 传 nil 踢全部。后续如要细粒度驱逐可单独走 Client.KickSessions。
+func (a *ServiceAdapter) KickSessions(ctx context.Context, n *node.Node) (int, error) {
+	return NewClientForNode(n).KickSessions(ctx, nil)
+}
+
+// RestartServer 实现 service.ZLMProbe(T3.5)
+//
+// graceMS 透传给 Client(当前 ZLM 不支持 grace,接口预留)。
+func (a *ServiceAdapter) RestartServer(ctx context.Context, n *node.Node, graceMS int) error {
+	return NewClientForNode(n).RestartServer(ctx, graceMS)
+}

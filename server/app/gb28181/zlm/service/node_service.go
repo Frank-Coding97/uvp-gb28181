@@ -24,6 +24,10 @@ type ZLMProbe interface {
 	GetServerConfig(ctx context.Context, n *node.Node) (map[string]string, error)
 	// ApplyConfigForNode 写 Hook + mediaServerId 等
 	ApplyConfigForNode(ctx context.Context, n *node.Node, t MediaTuning) error
+	// KickSessions 驱逐节点全部会话(filter 留给 client 内部填 nil),返回被踢数
+	KickSessions(ctx context.Context, n *node.Node) (int, error)
+	// RestartServer 重启 ZLM 服务;graceMS 为接口预留,当前 ZLM 不支持,仍传透便于将来扩展
+	RestartServer(ctx context.Context, n *node.Node, graceMS int) error
 }
 
 // MediaTuning 平台级 hook / 媒体调优参数(从 yaml gb28181.media.* 来)
@@ -251,4 +255,28 @@ func (s *NodeService) setState(ctx context.Context, id int64, state node.State) 
 	}
 	cur.State = state
 	return s.registry.Update(ctx, *cur)
+}
+
+// KickAllSessions 驱逐节点全部会话,返回被踢的会话数
+//
+// 用于"节点隔离前清场"或"应急断流",不改节点状态(状态切换由 SetMaintenance 单独负责)。
+// 节点不存在 → ErrNodeNotFound;ZLM 不可达 → 透传错误。
+func (s *NodeService) KickAllSessions(ctx context.Context, id int64) (int, error) {
+	cur, ok := s.registry.Get(id)
+	if !ok {
+		return 0, ErrNodeNotFound
+	}
+	return s.probe.KickSessions(ctx, cur)
+}
+
+// Restart 重启 ZLM 服务
+//
+// graceMS:接口预留(当前 ZLM /restartServer 不支持 grace shutdown,立即重启);
+// 仍透传以便将来 ZLM 升级后直接接入。节点不存在 → ErrNodeNotFound。
+func (s *NodeService) Restart(ctx context.Context, id int64, graceMS int) error {
+	cur, ok := s.registry.Get(id)
+	if !ok {
+		return ErrNodeNotFound
+	}
+	return s.probe.RestartServer(ctx, cur, graceMS)
 }
