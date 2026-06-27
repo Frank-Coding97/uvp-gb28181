@@ -8,8 +8,8 @@ import (
 
 // Factory 按算法名构造 Scheduler
 //
-// 当前支持:roundrobin(M2 实装)。
-// weighted / leastload 占位返错,M3 实现。
+// 当前支持:roundrobin(M2 实装)、leastload(M3 实装)。
+// weighted 占位返错,M3 另一 sub-agent 实现。
 type Factory struct {
 	reg *node.Registry
 }
@@ -24,7 +24,7 @@ func NewFactory(reg *node.Registry) *Factory {
 // 算法名跟 scheduler_setting.algorithm DB 取值对齐:
 //   - "roundrobin" → RoundRobin(M2)
 //   - "weighted"   → M3 未实装,返错
-//   - "leastload"  → M3 未实装,返错
+//   - "leastload"  → LeastLoad(M3)
 //   - 其它         → 未知算法,返错
 func (f *Factory) Build(name string) (Scheduler, error) {
 	switch name {
@@ -33,7 +33,7 @@ func (f *Factory) Build(name string) (Scheduler, error) {
 	case "weighted":
 		return nil, fmt.Errorf("scheduler weighted not implemented yet (M3)")
 	case "leastload":
-		return nil, fmt.Errorf("scheduler leastload not implemented yet (M3)")
+		return NewLeastLoad(f.reg), nil
 	default:
 		return nil, fmt.Errorf("unknown scheduler algorithm: %q", name)
 	}

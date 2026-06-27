@@ -18,6 +18,10 @@ import (
 
 // buildRegistryWithStats 构造一个带指定 Stats 的 Registry。
 // states / stats 长度需一致;states[i] 是节点状态,stats[i] 是该节点 Stats。
+//
+// 注意:这里通过 Add 直接把 Stats 写进 Node,不走 UpdateStats —— 因为
+// UpdateStats 内部有"offline 收到心跳自动恢复 active"的副作用(registry.go),
+// 会让测试里的 offline 节点意外转 active。
 func buildRegistryWithStats(t *testing.T, states []node.State, stats []node.Stats) *node.Registry {
 	t.Helper()
 	require.Equal(t, len(states), len(stats), "states 和 stats 长度需一致")
@@ -28,10 +32,9 @@ func buildRegistryWithStats(t *testing.T, states []node.State, stats []node.Stat
 			Name:            string(rune('a' + i)),
 			MediaServerUUID: uuid,
 			State:           st,
+			Stats:           stats[i],
 		})
 		require.NoError(t, err)
-		// 心跳上报 Stats(UpdateStats 内部按 UUID 反查 nodeID)
-		reg.UpdateStats(uuid, stats[i])
 	}
 	return reg
 }

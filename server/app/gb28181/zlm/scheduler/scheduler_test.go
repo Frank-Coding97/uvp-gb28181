@@ -183,9 +183,7 @@ func TestFactory_Build(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "M3")
 
-	_, err = factory.Build("leastload")
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "M3")
+	// leastload 在 T3.2 已实装,详细测试见 leastload_test.go::TestLeastLoad_FactoryBuilds
 
 	_, err = factory.Build("unknown")
 	require.Error(t, err)
