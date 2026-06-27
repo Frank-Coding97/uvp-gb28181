@@ -8,6 +8,8 @@ import {
     setZLMNodeMaintenance,
     activateZLMNode,
     testZLMNodeConnection,
+    kickZLMNodeSessions,
+    restartZLMNode,
     type ZLMNode
 } from "@/api/gb28181-zlm";
 import NodeForm from "./NodeForm.vue";
@@ -163,6 +165,52 @@ async function handleDelete(node: ZLMNode) {
     });
 }
 
+// 驱逐节点全部会话(高危,Modal 二次确认),仅 active / maintenance 状态可用
+async function handleKick(node: ZLMNode) {
+    Modal.warning({
+        title: "驱逐全部会话?",
+        content: `将断开节点 ${node.name} 的所有连接,正在播放的客户端会立刻断流。请确认。`,
+        okText: "驱逐",
+        cancelText: "取消",
+        hideCancel: false,
+        onOk: async () => {
+            try {
+                const res = await kickZLMNodeSessions(node.id);
+                if (res.code === 0) {
+                    Message.success(`已驱逐 ${res.data?.count ?? 0} 路会话`);
+                } else {
+                    Message.error(res.message || "驱逐失败");
+                }
+                refresh();
+            } catch (e: any) {
+                Message.error(e?.message || "驱逐失败");
+            }
+        }
+    });
+}
+
+// 重启 ZLM 服务(高危,所有流中断)
+// ZLM 接到 restartServer 立刻重启,需要几秒才能恢复服务,延迟 5s 刷新让心跳重新上报
+async function handleRestart(node: ZLMNode) {
+    Modal.warning({
+        title: "重启 ZLM 服务?",
+        content: `将重启节点 ${node.name} 的 ZLM 进程,所有流将中断,客户端需自行重连。请确认。`,
+        okText: "重启",
+        cancelText: "取消",
+        hideCancel: false,
+        onOk: async () => {
+            try {
+                await restartZLMNode(node.id);
+                Message.success("已发出重启指令,等待 ZLM 重启完成...");
+                // ZLM 重启需要几秒,延迟 refresh 让心跳重新上报
+                setTimeout(refresh, 5000);
+            } catch (e: any) {
+                Message.error(e?.message || "重启失败");
+            }
+        }
+    });
+}
+
 function gotoDetail(node: ZLMNode) {
     router.push(`/gb28181/zlm/nodes/${node.id}`);
 }
@@ -230,7 +278,7 @@ onUnmounted(() => {
                             <span v-else style="color: #aaa">—</span>
                         </template>
                     </a-table-column>
-                    <a-table-column title="操作" :width="320">
+                    <a-table-column title="操作" :width="420">
                         <template #cell="{ record }">
                             <a-space>
                                 <a-button size="small" @click="gotoDetail(record)">详情</a-button>
@@ -258,6 +306,25 @@ onUnmounted(() => {
                                     @click="handleReprobe(record)"
                                 >
                                     重新探测
+                                </a-button>
+                                <!-- 驱逐:active/maintenance 状态可用,offline 时 ZLM 不可达不显示 -->
+                                <a-button
+                                    v-if="record.state !== 'offline'"
+                                    size="small"
+                                    status="warning"
+                                    class="btn-kick"
+                                    @click="handleKick(record)"
+                                >
+                                    驱逐
+                                </a-button>
+                                <!-- 重启:同上,offline 时 ZLM 已挂不需要重启 -->
+                                <a-button
+                                    v-if="record.state !== 'offline'"
+                                    size="small"
+                                    status="danger"
+                                    @click="handleRestart(record)"
+                                >
+                                    重启
                                 </a-button>
                                 <a-button
                                     size="small"
@@ -307,5 +374,16 @@ onUnmounted(() => {
 :deep(tr.row-offline .arco-table-td) {
     background-color: #f7f8fa !important;
     color: #86909c;
+}
+
+/* 驱逐按钮:橙色,跟"隔离"(默认 warning 黄)区分开,语义上更接近"危险但非毁灭" */
+.btn-kick :deep(.arco-btn) {
+    background-color: #ff7d00;
+    border-color: #ff7d00;
+    color: #fff;
+}
+.btn-kick :deep(.arco-btn:hover) {
+    background-color: #f77234;
+    border-color: #f77234;
 }
 </style>
