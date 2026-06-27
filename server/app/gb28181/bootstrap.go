@@ -198,8 +198,6 @@ func Start() {
 			gbroutes.SetPlayService(playSvc)
 			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated)")
 		}
-		gbroutes.SetPlayService(playSvc)
-		app.ZapLog.Info("GB28181 点播 service 已装配")
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
