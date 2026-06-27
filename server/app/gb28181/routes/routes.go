@@ -32,6 +32,9 @@ var zlmNodeController *gbcontrollers.ZLMNodeController
 // zlmConfigController ZLM 节点配置(注入式:同 ZLMNodeController)
 var zlmConfigController *gbcontrollers.ZLMConfigController
 
+// zlmSchedulerController ZLM 调度算法切换 + 日志查询(M3 T3.3,后置注入)
+var zlmSchedulerController *gbcontrollers.ZLMSchedulerController
+
 // SetMetricsProvider 由 bootstrap 注入聚合器获取函数,绕开循环依赖
 func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 	dashboardController = gbcontrollers.NewDashboardController(p)
@@ -52,6 +55,11 @@ func SetZLMNodeController(ctrl *gbcontrollers.ZLMNodeController) {
 // SetZLMConfigController 由 bootstrap M1.6 注入
 func SetZLMConfigController(ctrl *gbcontrollers.ZLMConfigController) {
 	zlmConfigController = ctrl
+}
+
+// SetZLMSchedulerController 由 bootstrap M3 T3.3 注入(算法切换 + 日志)
+func SetZLMSchedulerController(ctrl *gbcontrollers.ZLMSchedulerController) {
+	zlmSchedulerController = ctrl
 }
 
 // SetKeepaliveCollector 由 bootstrap M2.1 注入(同 SetPlayService 模式)
@@ -105,6 +113,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			zlm.GET("/nodes/:id/config", zlmConfigRoute(func(ctrl *gbcontrollers.ZLMConfigController, c *gin.Context) { ctrl.Get(c) }))
 			zlm.PUT("/nodes/:id/config", zlmConfigRoute(func(ctrl *gbcontrollers.ZLMConfigController, c *gin.Context) { ctrl.Update(c) }))
 			zlm.POST("/nodes/:id/config/test-connection", zlmConfigRoute(func(ctrl *gbcontrollers.ZLMConfigController, c *gin.Context) { ctrl.TestConnection(c) }))
+			// 调度算法 + 调度日志(M3 T3.3)
+			zlm.GET("/scheduler", zlmSchedulerRoute(func(ctrl *gbcontrollers.ZLMSchedulerController, c *gin.Context) { ctrl.GetScheduler(c) }))
+			zlm.PUT("/scheduler", zlmSchedulerRoute(func(ctrl *gbcontrollers.ZLMSchedulerController, c *gin.Context) { ctrl.SwitchScheduler(c) }))
+			zlm.GET("/scheduler/logs", zlmSchedulerRoute(func(ctrl *gbcontrollers.ZLMSchedulerController, c *gin.Context) { ctrl.ListSchedulerLogs(c) }))
 		}
 	}
 }
@@ -128,6 +140,17 @@ func zlmConfigRoute(fn func(*gbcontrollers.ZLMConfigController, *gin.Context)) g
 			return
 		}
 		fn(zlmConfigController, c)
+	}
+}
+
+// zlmSchedulerRoute 同上(M3 T3.3)
+func zlmSchedulerRoute(fn func(*gbcontrollers.ZLMSchedulerController, *gin.Context)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if zlmSchedulerController == nil {
+			c.JSON(503, gin.H{"code": 503, "msg": "ZLM Scheduler controller 尚未装配"})
+			return
+		}
+		fn(zlmSchedulerController, c)
 	}
 }
 

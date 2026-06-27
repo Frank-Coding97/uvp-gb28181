@@ -186,6 +186,9 @@ func Start() {
 	// 装配 ZLM 调度日志服务(M3 T3.3)异步采集 + 24h prune
 	setupZLMSchedulerLog()
 
+	// 装配 ZLM Scheduler Controller(M3 T3.3)算法切换 + 日志查询
+	setupZLMSchedulerController()
+
 	// 装配 ZLM 节点 CRUD / 配置 controller(M1 新增)
 	if zlmRegistry != nil {
 		adapter := gbzlm.NewServiceAdapter(cfg.Media)
@@ -404,6 +407,26 @@ func pruneSchedulerLogDaily(ctx context.Context, svc *gbzlmsched.LogService) {
 		}
 	}
 }
+
+// setupZLMSchedulerController 装配算法切换 + 日志查询 controller(M3 T3.3)
+//
+// 依赖 zlmScheduler(必须)+ zlmSchedulerLog(可空)+ scheduler_setting repo(可空)。
+// 没 Manager 则跳过(没意义);DB 不可用则 SettingWriter 传 nil(切换仅内存)。
+func setupZLMSchedulerController() {
+	if zlmScheduler == nil {
+		app.ZapLog.Warn("GB28181 Scheduler 未装配,跳过 Scheduler Controller")
+		return
+	}
+	var settingWriter gbcontrollers.SchedulerSettingWriter
+	if app.DB() != nil {
+		settingWriter = gbzlmrepo.NewSchedulerSettingRepo(app.DB())
+	}
+	ctrl := gbcontrollers.NewZLMSchedulerController(zlmScheduler, zlmSchedulerLog, settingWriter)
+	gbroutes.SetZLMSchedulerController(ctrl)
+	app.ZapLog.Info("GB28181 ZLM Scheduler Controller 已装配")
+}
+
+// pickInitialClient M1 单节点过渡期:优先取 Registry 首节点,失败 fallback yaml
 func pickInitialClient(cfg gbconfig.Config) *gbzlm.Client {
 	if zlmRegistry != nil {
 		if list := zlmRegistry.List(); len(list) > 0 {

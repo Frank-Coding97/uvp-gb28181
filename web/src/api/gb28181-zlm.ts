@@ -127,3 +127,44 @@ export const updateZLMNodeConfig = (id: number, changes: Record<string, string>)
 export const testZLMNodeConnection = (id: number) =>
     http.request<BaseResult<TestConnectionResult>>("post",
         baseUrlApi(`gb28181/zlm/nodes/${id}/config/test-connection`));
+
+// ===== ZLM Scheduler(M3 T3.3)算法切换 + 调度日志 =====
+
+export type SchedulerAlgorithm = "roundrobin" | "weighted" | "leastload";
+
+export interface SchedulerInfo {
+    algorithm: SchedulerAlgorithm | "";
+    available: SchedulerAlgorithm[];
+}
+
+// 一条调度决策日志(对应后端 scheduler.SchedulerLog)
+export interface SchedulerLogEntry {
+    id: number;
+    happenedAt: string;
+    algorithm: string;
+    nodeID: number;
+    nodeName: string;
+    streamID: string;
+    deviceID: string;
+    channelID: string;
+    errorMessage: string;
+}
+
+// 查询当前算法 + 可用列表
+export const getScheduler = () =>
+    http.request<BaseResult<SchedulerInfo>>("get", baseUrlApi("gb28181/zlm/scheduler"));
+
+// 切换算法(写 DB + Manager.Switch)
+export const switchScheduler = (algorithm: SchedulerAlgorithm) =>
+    http.request<BaseResult<{ algorithm: SchedulerAlgorithm }>>(
+        "put",
+        baseUrlApi("gb28181/zlm/scheduler"),
+        { data: { algorithm } }
+    );
+
+// 最近 N 条调度日志(默认 100,上限 1000)
+export const listSchedulerLogs = (limit = 100) =>
+    http.request<BaseResult<{ list: SchedulerLogEntry[]; limit: number }>>(
+        "get",
+        baseUrlApi(`gb28181/zlm/scheduler/logs?limit=${limit}`)
+    );

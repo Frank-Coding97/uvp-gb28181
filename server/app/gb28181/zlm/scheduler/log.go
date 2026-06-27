@@ -15,16 +15,18 @@ import (
 //
 // 每次 Manager.Pick 后(无论命中还是 ErrNoActiveNode)生成一条,
 // LogService 异步写入 scheduler_log 表。供运维事后审计 / 复盘负载分布。
+//
+// JSON tag 走 camelCase 跟 web/src/api 类型对齐。
 type SchedulerLog struct {
-	ID           int64
-	HappenedAt   time.Time
-	Algorithm    string
-	NodeID       int64
-	NodeName     string
-	StreamID     string
-	DeviceID     string
-	ChannelID    string
-	ErrorMessage string // 空表示成功,ErrNoActiveNode 等错误填这里
+	ID           int64     `json:"id"`
+	HappenedAt   time.Time `json:"happenedAt"`
+	Algorithm    string    `json:"algorithm"`
+	NodeID       int64     `json:"nodeID"`
+	NodeName     string    `json:"nodeName"`
+	StreamID     string    `json:"streamID"`
+	DeviceID     string    `json:"deviceID"`
+	ChannelID    string    `json:"channelID"`
+	ErrorMessage string    `json:"errorMessage"` // 空表示成功,ErrNoActiveNode 等错误填这里
 }
 
 // SchedulerLogRepo 持久化抽象
