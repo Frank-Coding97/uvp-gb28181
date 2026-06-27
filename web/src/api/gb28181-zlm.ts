@@ -74,6 +74,19 @@ export const setZLMNodeMaintenance = (id: number) =>
 export const activateZLMNode = (id: number) =>
     http.request<BaseResult<{ ok: boolean }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/activate`));
 
+// 驱逐节点全部会话(高危,UI 必须二次确认),返回被踢的会话数
+export const kickZLMNodeSessions = (id: number) =>
+    http.request<BaseResult<{ count: number }>>("post", baseUrlApi(`gb28181/zlm/nodes/${id}/kick`));
+
+// 重启 ZLM 服务(高危,所有流中断,UI 必须二次确认)
+// graceMS 当前接口预留(ZLM 不支持 grace shutdown),后端忽略
+export const restartZLMNode = (id: number, graceMS?: number) =>
+    http.request<BaseResult<{ ok: boolean }>>(
+        "post",
+        baseUrlApi(`gb28181/zlm/nodes/${id}/restart`),
+        { data: { graceMS: graceMS ?? 0 } }
+    );
+
 // ===== ZLM 节点配置 =====
 
 export interface ConfigItem {

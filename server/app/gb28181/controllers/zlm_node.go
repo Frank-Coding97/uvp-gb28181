@@ -146,6 +146,58 @@ func (zc *ZLMNodeController) Activate(c *gin.Context) {
 	zc.Success(c, gin.H{"ok": true})
 }
 
+// KickSessions POST /api/gb28181/zlm/nodes/:id/kick
+//
+// 驱逐节点全部会话(高危),返回被踢的会话数。
+// 节点不存在 → 404;ZLM 不可达 → 500。前端必须二次确认。
+func (zc *ZLMNodeController) KickSessions(c *gin.Context) {
+	id, err := zc.parseID(c)
+	if err != nil {
+		zc.FailAndAbort(c, "节点 ID 非法", err)
+		return
+	}
+	count, err := zc.svc.KickAllSessions(c, id)
+	if err != nil {
+		if errors.Is(err, service.ErrNodeNotFound) {
+			zc.FailAndAbort(c, "节点不存在", err)
+			return
+		}
+		zc.FailAndAbort(c, "驱逐会话失败", err)
+		return
+	}
+	zc.Success(c, gin.H{"count": count})
+}
+
+// restartReq Restart 端点 body
+type restartReq struct {
+	GraceMS int `json:"graceMS"`
+}
+
+// Restart POST /api/gb28181/zlm/nodes/:id/restart
+//
+// 重启 ZLM 服务(高危,所有流中断)。body {graceMS} 当前仅接口预留,M3 阶段忽略。
+// 节点不存在 → 404;ZLM 不可达 / 拒绝 → 500。前端必须二次确认。
+func (zc *ZLMNodeController) Restart(c *gin.Context) {
+	id, err := zc.parseID(c)
+	if err != nil {
+		zc.FailAndAbort(c, "节点 ID 非法", err)
+		return
+	}
+	// body 可选:空 body 也允许(默认 graceMS=0)
+	var req restartReq
+	_ = c.ShouldBindJSON(&req)
+
+	if err := zc.svc.Restart(c, id, req.GraceMS); err != nil {
+		if errors.Is(err, service.ErrNodeNotFound) {
+			zc.FailAndAbort(c, "节点不存在", err)
+			return
+		}
+		zc.FailAndAbort(c, "重启 ZLM 失败", err)
+		return
+	}
+	zc.Success(c, gin.H{"ok": true})
+}
+
 func (zc *ZLMNodeController) parseID(c *gin.Context) (int64, error) {
 	return strconv.ParseInt(c.Param("id"), 10, 64)
 }

@@ -105,6 +105,9 @@ func (fakeProbe) GetServerConfig(_ context.Context, _ *node.Node) (map[string]st
 func (fakeProbe) ApplyConfigForNode(_ context.Context, _ *node.Node, _ service.MediaTuning) error {
 	return nil
 }
+// T3.5 扩 ZLMProbe 接口 → 这里给 no-op 占位,本测试不验证 Kick/Restart 路径
+func (fakeProbe) KickSessions(_ context.Context, _ *node.Node) (int, error) { return 0, nil }
+func (fakeProbe) RestartServer(_ context.Context, _ *node.Node, _ int) error { return nil }
 
 func setupRouter(t *testing.T) (*gin.Engine, *service.NodeService) {
 	t.Helper()
