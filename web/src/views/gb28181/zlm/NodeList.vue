@@ -107,13 +107,6 @@ function cpuPctOf(n: ZLMNode): number {
     return Math.round((net * 0.6 + work * 0.4) * 100);
 }
 
-function rtpPortUsage(n: ZLMNode): { used: number; total: number; pct: number } {
-    const total = (n.rtpPortEnd || 0) - (n.rtpPortStart || 0);
-    const used = n.stats?.mediaSourceCount || 0;
-    const pct = total > 0 ? Math.round((used / total) * 100) : 0;
-    return { used, total, pct };
-}
-
 // ====== 加载 ======
 
 async function refresh() {
