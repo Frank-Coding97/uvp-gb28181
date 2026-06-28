@@ -3,7 +3,6 @@ import { ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import {
     createZLMNode,
-    testZLMNodeConnection,
     type CreateZLMNodeReq
 } from "@/api/gb28181-zlm";
 
@@ -25,8 +24,6 @@ const form = ref<CreateZLMNodeReq>({
     rtpPortEnd: 35000
 });
 const loading = ref(false);
-const testing = ref(false);
-const testResult = ref<{ ok: boolean; msg: string } | null>(null);
 
 watch(
     () => props.visible,
@@ -41,20 +38,9 @@ watch(
                 rtpPortStart: 30000,
                 rtpPortEnd: 35000
             };
-            testResult.value = null;
         }
     }
 );
-
-async function handleTest() {
-    // 试探:先创建临时节点跑 test-connection? 暂时只校验字段非空。
-    // T1.5 阶段简化:测试连通性在创建时由后端 Create 流程自动 probe。
-    if (!form.value.host || !form.value.apiPort) {
-        Message.warning("请填 host + apiPort");
-        return;
-    }
-    Message.info("保存时将自动探测连通性");
-}
 
 async function handleSubmit() {
     if (!form.value.name || !form.value.host || !form.value.apiSecret) {
@@ -87,7 +73,11 @@ async function handleSubmit() {
         :ok-loading="loading"
         @ok="handleSubmit"
         @cancel="emit('update:visible', false)"
+        class="zlm-node-form"
     >
+        <div class="form-hint">
+            保存时会自动探测 ZLM 连通性,可达后才写入注册表。
+        </div>
         <a-form :model="form" layout="vertical">
             <a-form-item label="节点名" required>
                 <a-input v-model="form.name" placeholder="如 zlm-bj-1" />
@@ -108,13 +98,13 @@ async function handleSubmit() {
             <a-form-item label="RTP 端口范围">
                 <a-space>
                     <a-input-number v-model="form.rtpPortStart" :min="1024" :max="65535" />
-                    <span>-</span>
+                    <span class="form-tip-inline">-</span>
                     <a-input-number v-model="form.rtpPortEnd" :min="1024" :max="65535" />
                 </a-space>
+                <div class="form-tip">ZLM 端口分配范围,默认 30000-35000</div>
             </a-form-item>
         </a-form>
         <template #footer>
-            <a-button :loading="testing" @click="handleTest">测试连通性</a-button>
             <a-button @click="emit('update:visible', false)">取消</a-button>
             <a-button type="primary" :loading="loading" @click="handleSubmit">保存</a-button>
         </template>
@@ -122,9 +112,35 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
+.zlm-node-form :deep(.arco-drawer-header) {
+    font-family: var(--zlm-font-body);
+}
+
+.zlm-node-form :deep(.arco-drawer-title) {
+    font-size: var(--zlm-fs-h2);
+    font-weight: var(--zlm-fw-semibold);
+    color: var(--zlm-text-1);
+}
+
+.form-hint {
+    margin-bottom: var(--zlm-space-4);
+    padding: var(--zlm-space-3) var(--zlm-space-4);
+    background: var(--zlm-brand-50);
+    color: var(--zlm-text-2);
+    border-radius: var(--zlm-radius-md);
+    border-left: 3px solid var(--zlm-brand-500);
+    font-size: var(--zlm-fs-caption);
+    line-height: var(--zlm-lh-normal);
+}
+
 .form-tip {
-    font-size: 12px;
-    color: #86909c;
+    font-size: var(--zlm-fs-caption);
+    color: var(--zlm-text-3);
     margin-top: 4px;
+}
+
+.form-tip-inline {
+    color: var(--zlm-text-3);
+    margin: 0 4px;
 }
 </style>
