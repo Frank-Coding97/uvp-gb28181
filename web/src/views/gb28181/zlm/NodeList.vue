@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import { useRouter } from "vue-router";
 import {
@@ -13,33 +13,114 @@ import {
     type ZLMNode
 } from "@/api/gb28181-zlm";
 import NodeForm from "./NodeForm.vue";
-import NodeStateBadge from "./components/NodeStateBadge.vue";
+import StatCard from "./components/StatCard.vue";
+import LifecycleDot from "./components/LifecycleDot.vue";
+import HealthBadge from "./components/HealthBadge.vue";
 
 const router = useRouter();
 const nodes = ref<ZLMNode[]>([]);
 const loading = ref(false);
 const drawerVisible = ref(false);
-const reprobing = ref<Record<number, boolean>>({});
+const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null);
 
-const ZERO_TIME = "0001-01-01T00:00:00Z";
+// 搜索 + 过滤
+const search = ref("");
+const filterStates = ref<string[]>([]);
+const filterHealth = ref<string[]>([]);
 
-let refreshTimer: ReturnType<typeof setInterval> | null = null;
+// 操作 loading(按节点 id 隔离,多节点并发不互相影响)
+const opLoading = ref<Record<number, string | null>>({});
 
+// 批量选中
+const selectedIds = ref<number[]>([]);
+
+// ====== 健康度推导(基于现有 nearCapacity / state 字段) ======
+
+function healthOf(n: ZLMNode): "healthy" | "warning" | "critical" | "unknown" {
+    if (n.state === "offline") return "critical";
+    if (n.state === "maintenance") return "unknown";
+    // active
+    return n.nearCapacity ? "warning" : "healthy";
+}
+
+function healthReason(n: ZLMNode): string {
+    if (n.state === "offline") return "节点离线";
+    if (n.state === "active" && n.nearCapacity) return "接近容量";
+    return "";
+}
+
+// ====== KPI 顶部数据 ======
+
+const totalNodes = computed(() => nodes.value.length);
+const onlineCount = computed(() => nodes.value.filter((n) => n.state === "active").length);
+const offlineCount = computed(() => nodes.value.filter((n) => n.state === "offline").length);
+const maintenanceCount = computed(() => nodes.value.filter((n) => n.state === "maintenance").length);
 const totalStreams = computed(() =>
     nodes.value.reduce((sum, n) => sum + (n.stats?.mediaSourceCount || 0), 0)
 );
-
-const offlineCount = computed(() =>
-    nodes.value.filter((n) => n.state === "offline").length
+const totalSessions = computed(() =>
+    nodes.value.reduce((sum, n) => sum + (n.stats?.sessionCount || 0), 0)
 );
+const healthRatio = computed(() => {
+    if (totalNodes.value === 0) return 0;
+    const healthy = nodes.value.filter((n) => healthOf(n) === "healthy").length;
+    return Math.round((healthy / totalNodes.value) * 100);
+});
+
+// 过滤后的列表
+const filteredNodes = computed(() => {
+    const q = search.value.trim().toLowerCase();
+    return nodes.value.filter((n) => {
+        if (q && !n.name.toLowerCase().includes(q) && !n.host.toLowerCase().includes(q)) return false;
+        if (filterStates.value.length && !filterStates.value.includes(n.state)) return false;
+        if (filterHealth.value.length && !filterHealth.value.includes(healthOf(n))) return false;
+        return true;
+    });
+});
+
+// 选中节点(给底部 toolbar 用)
+const selectedNodes = computed(() => nodes.value.filter((n) => selectedIds.value.includes(n.id)));
+
+// ====== 工具函数 ======
+
+const ZERO_TIME = "0001-01-01T00:00:00Z";
+
+function isZeroTime(s?: string): boolean {
+    return !s || s === ZERO_TIME || s.startsWith("0001-01-01");
+}
+
+function relTime(s?: string): string {
+    if (!s || isZeroTime(s)) return "—";
+    const ts = new Date(s).getTime();
+    if (Number.isNaN(ts)) return "—";
+    const diff = Math.floor((Date.now() - ts) / 1000);
+    if (diff < 5) return "刚刚";
+    if (diff < 60) return `${diff} 秒前`;
+    if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
+    return `${Math.floor(diff / 86400)} 天前`;
+}
+
+function cpuPctOf(n: ZLMNode): number {
+    const net = n.stats?.netThreadLoadAvg || 0;
+    const work = n.stats?.workThreadLoadAvg || 0;
+    return Math.round((net * 0.6 + work * 0.4) * 100);
+}
+
+function rtpPortUsage(n: ZLMNode): { used: number; total: number; pct: number } {
+    const total = (n.rtpPortEnd || 0) - (n.rtpPortStart || 0);
+    const used = n.stats?.mediaSourceCount || 0;
+    const pct = total > 0 ? Math.round((used / total) * 100) : 0;
+    return { used, total, pct };
+}
+
+// ====== 加载 ======
 
 async function refresh() {
     loading.value = true;
     try {
         const res = await listZLMNodes();
-        if (res.code === 0) {
-            nodes.value = res.data.list || [];
-        }
+        if (res.code === 0) nodes.value = res.data.list || [];
     } catch (e: any) {
         Message.error(e?.message || "加载失败");
     } finally {
@@ -47,106 +128,135 @@ async function refresh() {
     }
 }
 
-function isZeroTime(s?: string): boolean {
-    return !s || s === ZERO_TIME || s.startsWith("0001-01-01");
-}
+onMounted(() => {
+    refresh();
+    refreshTimer.value = setInterval(refresh, 30_000);
+});
+onUnmounted(() => {
+    if (refreshTimer.value) clearInterval(refreshTimer.value);
+});
 
-function pickReferenceTime(node: ZLMNode): string | null {
-    const heartbeat = node.stats?.lastHeartbeatAt;
-    if (heartbeat && !isZeroTime(heartbeat)) {
-        // 用心跳时间 / 更新时间二者较新
-        if (node.updatedAt && !isZeroTime(node.updatedAt)) {
-            const t1 = new Date(heartbeat).getTime();
-            const t2 = new Date(node.updatedAt).getTime();
-            return t1 >= t2 ? heartbeat : node.updatedAt;
-        }
-        return heartbeat;
-    }
-    if (node.updatedAt && !isZeroTime(node.updatedAt)) {
-        return node.updatedAt;
-    }
-    return null;
-}
+// ====== 操作 ======
 
-function offlineDuration(node: ZLMNode): string {
-    const ref = pickReferenceTime(node);
-    if (!ref) return "从未上报";
-    const refTs = new Date(ref).getTime();
-    if (Number.isNaN(refTs)) return "从未上报";
-    const diffSec = Math.floor((Date.now() - refTs) / 1000);
-    if (diffSec < 60) return "刚刚";
-    if (diffSec < 3600) return `离线 ${Math.floor(diffSec / 60)} 分钟`;
-    if (diffSec < 86400) return `离线 ${Math.floor(diffSec / 3600)} 小时`;
-    return `离线 ${Math.floor(diffSec / 86400)} 天`;
-}
-
-function rowClass(record: ZLMNode): string {
-    switch (record.state) {
-        case "maintenance":
-            return "row-maintenance";
-        case "offline":
-            return "row-offline";
-    }
-    // active 节点接近容量(端口或 CPU 任一 >= 80%)→ 黄色高亮提示
-    if (record.nearCapacity) {
-        return "row-near-capacity";
-    }
-    return "";
+function gotoDetail(node: ZLMNode) {
+    router.push(`/gb28181/zlm/nodes/${node.id}`);
 }
 
 function openCreate() {
     drawerVisible.value = true;
 }
 
+async function withOp<T>(node: ZLMNode, op: string, fn: () => Promise<T>) {
+    opLoading.value[node.id] = op;
+    try {
+        await fn();
+    } finally {
+        opLoading.value[node.id] = null;
+    }
+}
+
 async function handleMaintenance(node: ZLMNode) {
     Modal.warning({
         title: "切到维护态?",
-        content: `节点 ${node.name} 将不再接受新流,旧流自然结束`,
+        content: `节点 ${node.name} 将不再接受新流,旧流自然结束。`,
         okText: "确认",
         cancelText: "取消",
         hideCancel: false,
         onOk: async () => {
-            try {
-                await setZLMNodeMaintenance(node.id);
-                Message.success("已切到维护态");
-                refresh();
-            } catch (e: any) {
-                Message.error(e?.message || "操作失败");
-            }
+            await withOp(node, "maintenance", async () => {
+                try {
+                    await setZLMNodeMaintenance(node.id);
+                    Message.success("已切到维护态");
+                    refresh();
+                } catch (e: any) {
+                    Message.error(e?.message || "操作失败");
+                }
+            });
         }
     });
 }
 
 async function handleActivate(node: ZLMNode) {
-    try {
-        await activateZLMNode(node.id);
-        Message.success("已激活");
-        refresh();
-    } catch (e: any) {
-        Message.error(e?.message || "操作失败");
-    }
+    await withOp(node, "activate", async () => {
+        try {
+            await activateZLMNode(node.id);
+            Message.success("已激活");
+            refresh();
+        } catch (e: any) {
+            Message.error(e?.message || "操作失败");
+        }
+    });
 }
 
 async function handleReprobe(node: ZLMNode) {
-    reprobing.value[node.id] = true;
-    try {
-        const res = await testZLMNodeConnection(node.id);
-        if (res.code === 0 && res.data?.online) {
-            const act = await activateZLMNode(node.id);
-            if (act.code === 0) {
-                Message.success("节点已恢复并重新加入调度池");
+    await withOp(node, "reprobe", async () => {
+        try {
+            const res = await testZLMNodeConnection(node.id);
+            if (res.code === 0 && res.data?.online) {
+                const act = await activateZLMNode(node.id);
+                if (act.code === 0) {
+                    Message.success("节点已恢复并重新加入调度池");
+                } else {
+                    Message.warning("探测可达,但激活失败,请手动激活");
+                }
             } else {
-                Message.warning("探测可达,但激活失败,请手动激活");
+                Message.error(`节点仍不可达: ${res.data?.error || "未知"}`);
             }
-        } else {
-            Message.error(`节点仍不可达: ${res.data?.error || "未知"}`);
+            refresh();
+        } catch (e: any) {
+            Message.error(e?.message || "探测失败");
         }
-        refresh();
-    } catch (e: any) {
-        Message.error(e?.message || "探测失败");
-    } finally {
-        reprobing.value[node.id] = false;
-    }
+    });
+}
+
+async function handleKick(node: ZLMNode) {
+    Modal.warning({
+        title: "驱逐全部会话?",
+        content: `将断开节点 ${node.name} 的所有连接,正在播放的客户端会立刻断流。`,
+        okText: "驱逐",
+        cancelText: "取消",
+        hideCancel: false,
+        onOk: async () => {
+            await withOp(node, "kick", async () => {
+                try {
+                    const res = await kickZLMNodeSessions(node.id);
+                    if (res.code === 0) {
+                        Message.success(`已驱逐 ${res.data?.count ?? 0} 路会话`);
+                    } else {
+                        Message.error(res.message || "驱逐失败");
+                    }
+                    refresh();
+                } catch (e: any) {
+                    Message.error(e?.message || "驱逐失败");
+                }
+            });
+        }
+    });
+}
+
+async function handleRestart(node: ZLMNode) {
+    Modal.warning({
+        title: "重启 ZLM 服务?",
+        content: `将重启节点 ${node.name} 的 ZLM 进程,所有流将中断,客户端需自行重连。`,
+        okText: "重启",
+        cancelText: "取消",
+        hideCancel: false,
+        onOk: async () => {
+            await withOp(node, "restart", async () => {
+                try {
+                    const res = await restartZLMNode(node.id, 5000);
+                    if (res.code === 0) {
+                        Message.success("已发送重启指令,5 秒后刷新");
+                    } else {
+                        Message.error(res.message || "重启失败");
+                    }
+                    setTimeout(() => refresh(), 5000);
+                } catch (e: any) {
+                    Message.error(e?.message || "重启失败");
+                }
+            });
+        }
+    });
 }
 
 async function handleDelete(node: ZLMNode) {
@@ -157,156 +267,222 @@ async function handleDelete(node: ZLMNode) {
         cancelText: "取消",
         hideCancel: false,
         onOk: async () => {
-            try {
-                await deleteZLMNode(node.id);
-                Message.success("已删除");
-                refresh();
-            } catch (e: any) {
-                Message.error(e?.response?.data?.message || "删除失败,可能需要先切维护态");
-            }
-        }
-    });
-}
-
-// 驱逐节点全部会话(高危,Modal 二次确认),仅 active / maintenance 状态可用
-async function handleKick(node: ZLMNode) {
-    Modal.warning({
-        title: "驱逐全部会话?",
-        content: `将断开节点 ${node.name} 的所有连接,正在播放的客户端会立刻断流。请确认。`,
-        okText: "驱逐",
-        cancelText: "取消",
-        hideCancel: false,
-        onOk: async () => {
-            try {
-                const res = await kickZLMNodeSessions(node.id);
-                if (res.code === 0) {
-                    Message.success(`已驱逐 ${res.data?.count ?? 0} 路会话`);
-                } else {
-                    Message.error(res.message || "驱逐失败");
+            await withOp(node, "delete", async () => {
+                try {
+                    await deleteZLMNode(node.id);
+                    Message.success("已删除");
+                    refresh();
+                } catch (e: any) {
+                    Message.error(e?.response?.data?.message || "删除失败,可能需要先切维护态");
                 }
-                refresh();
-            } catch (e: any) {
-                Message.error(e?.message || "驱逐失败");
-            }
+            });
         }
     });
 }
 
-// 重启 ZLM 服务(高危,所有流中断)
-// ZLM 接到 restartServer 立刻重启,需要几秒才能恢复服务,延迟 5s 刷新让心跳重新上报
-async function handleRestart(node: ZLMNode) {
+// 批量操作
+async function handleBatchMaintenance() {
     Modal.warning({
-        title: "重启 ZLM 服务?",
-        content: `将重启节点 ${node.name} 的 ZLM 进程,所有流将中断,客户端需自行重连。请确认。`,
-        okText: "重启",
-        cancelText: "取消",
-        hideCancel: false,
+        title: `批量切维护态?`,
+        content: `将把 ${selectedNodes.value.length} 个节点切到维护态。`,
         onOk: async () => {
-            try {
-                await restartZLMNode(node.id);
-                Message.success("已发出重启指令,等待 ZLM 重启完成...");
-                // ZLM 重启需要几秒,延迟 refresh 让心跳重新上报
-                setTimeout(refresh, 5000);
-            } catch (e: any) {
-                Message.error(e?.message || "重启失败");
-            }
+            await Promise.all(selectedNodes.value.map((n) => setZLMNodeMaintenance(n.id).catch(() => null)));
+            Message.success(`已操作 ${selectedNodes.value.length} 个节点`);
+            selectedIds.value = [];
+            refresh();
         }
     });
 }
 
-function gotoDetail(node: ZLMNode) {
-    router.push(`/gb28181/zlm/nodes/${node.id}`);
-}
-
-onMounted(() => {
+async function handleBatchActivate() {
+    await Promise.all(selectedNodes.value.map((n) => activateZLMNode(n.id).catch(() => null)));
+    Message.success(`已激活 ${selectedNodes.value.length} 个节点`);
+    selectedIds.value = [];
     refresh();
-    refreshTimer = setInterval(refresh, 30_000);
-});
-onUnmounted(() => {
-    if (refreshTimer) clearInterval(refreshTimer);
-});
+}
 </script>
 
 <template>
     <div class="zlm-node-list">
-        <a-page-header title="流媒体节点" subtitle="ZLMediaKit 多节点集群管理" :show-back="false">
-            <template #extra>
-                <a-space>
-                    <a-statistic title="节点数" :value="nodes.length" />
-                    <a-statistic title="离线节点" :value="offlineCount" :value-style="{ color: offlineCount > 0 ? '#f53f3f' : undefined }" />
-                    <a-statistic title="当前流数(总)" :value="totalStreams" />
-                    <a-button type="primary" @click="openCreate">+ 添加节点</a-button>
-                </a-space>
-            </template>
-        </a-page-header>
+        <!-- 页面头 -->
+        <header class="page-header">
+            <div class="title-block">
+                <div class="breadcrumb">
+                    <span class="crumb">流媒体集群</span>
+                    <span class="sep">/</span>
+                    <span class="crumb-current">节点</span>
+                </div>
+                <h1 class="title">流媒体节点</h1>
+                <p class="subtitle">ZLMediaKit 多节点集群管理 · 实时心跳 · 自动调度</p>
+            </div>
+            <div class="actions">
+                <a-button @click="refresh" :loading="loading">
+                    <template #icon><icon-refresh /></template>
+                    刷新
+                </a-button>
+                <a-button type="primary" @click="openCreate">
+                    <template #icon><icon-plus /></template>
+                    添加节点
+                </a-button>
+            </div>
+        </header>
 
-        <a-card style="margin: 16px">
+        <!-- 顶部 KPI 条(4 卡阶梯式) -->
+        <section class="kpi-row">
+            <StatCard
+                title="节点总数"
+                :value="totalNodes"
+                :trend="offlineCount > 0 ? `${offlineCount} 离线 · ${maintenanceCount} 维护` : `全部在线`"
+                :trend-type="offlineCount > 0 ? 'danger' : 'up'"
+                accent="brand"
+            />
+            <StatCard
+                title="活跃流"
+                :value="totalStreams"
+                :trend="`${onlineCount} 个节点上`"
+                accent="accent"
+            />
+            <StatCard
+                title="会话数"
+                :value="totalSessions"
+                trend="TCP + UDP 累计"
+            />
+            <StatCard
+                title="健康度"
+                :value="healthRatio"
+                unit="%"
+                :trend="healthRatio === 100 ? '集群健康' : '存在告警'"
+                :trend-type="healthRatio === 100 ? 'up' : 'down'"
+                :accent="healthRatio === 100 ? 'accent' : 'warning'"
+            />
+        </section>
+
+        <!-- 过滤栏 -->
+        <section class="filter-bar">
+            <a-input-search
+                v-model="search"
+                placeholder="搜索节点名或 Host"
+                allow-clear
+                class="search"
+            />
+            <a-select
+                v-model="filterStates"
+                multiple
+                placeholder="状态"
+                allow-clear
+                class="filter-select"
+                :options="[
+                    { label: '活跃', value: 'active' },
+                    { label: '维护', value: 'maintenance' },
+                    { label: '离线', value: 'offline' }
+                ]"
+            />
+            <a-select
+                v-model="filterHealth"
+                multiple
+                placeholder="健康度"
+                allow-clear
+                class="filter-select"
+                :options="[
+                    { label: 'Healthy', value: 'healthy' },
+                    { label: 'Warning', value: 'warning' },
+                    { label: 'Critical', value: 'critical' },
+                    { label: 'Unknown', value: 'unknown' }
+                ]"
+            />
+            <span class="filter-meta">{{ filteredNodes.length }} / {{ nodes.length }} 节点</span>
+        </section>
+
+        <!-- 节点稀疏表 -->
+        <section class="node-table-wrap">
             <a-table
-                :data="nodes"
+                :data="filteredNodes"
                 :loading="loading"
                 row-key="id"
                 :pagination="false"
-                :row-class-name="rowClass"
+                :row-selection="{
+                    type: 'checkbox',
+                    showCheckedAll: true
+                }"
+                v-model:selected-keys="selectedIds"
+                class="node-table"
             >
                 <template #columns>
-                    <a-table-column title="名称" data-index="name" />
-                    <a-table-column title="Host:Port">
-                        <template #cell="{ record }">{{ record.host }}:{{ record.apiPort }}</template>
-                    </a-table-column>
-                    <a-table-column title="状态">
+                    <a-table-column title="节点" :width="220">
                         <template #cell="{ record }">
-                            <div class="state-cell">
-                                <NodeStateBadge :state="record.state" />
-                                <div
-                                    v-if="record.state === 'offline'"
-                                    class="offline-duration"
-                                >
-                                    {{ offlineDuration(record) }}
+                            <div class="cell-node" @click="gotoDetail(record)">
+                                <div class="cell-node-name">{{ record.name }}</div>
+                                <div class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</div>
+                            </div>
+                        </template>
+                    </a-table-column>
+                    <a-table-column title="状态" :width="100">
+                        <template #cell="{ record }">
+                            <LifecycleDot :state="record.state" />
+                        </template>
+                    </a-table-column>
+                    <a-table-column title="健康度" :width="160">
+                        <template #cell="{ record }">
+                            <HealthBadge :health="healthOf(record)" :reason="healthReason(record)" />
+                        </template>
+                    </a-table-column>
+                    <a-table-column title="权重" :width="160">
+                        <template #cell="{ record }">
+                            <div class="cell-weight">
+                                <span class="weight-num zlm-numeric">{{ record.weight }}</span>
+                                <div class="weight-bar">
+                                    <div class="weight-bar-fill" :style="{ width: `${record.weight}%` }" />
                                 </div>
-                                <a-tooltip
-                                    v-if="record.state === 'active' && record.nearCapacity"
-                                    content="接近容量(端口或 CPU 已达 80%),已暂时从调度池摘除"
-                                >
-                                    <a-tag color="orange" size="small">近容量</a-tag>
-                                </a-tooltip>
                             </div>
                         </template>
                     </a-table-column>
-                    <a-table-column title="权重">
+                    <a-table-column title="流 / 会话" :width="120">
                         <template #cell="{ record }">
-                            <div class="weight-cell">
-                                <span class="weight-num">{{ record.weight }}</span>
-                                <a-progress
-                                    :percent="record.weight / 100"
-                                    :show-text="false"
-                                    size="small"
-                                    class="weight-bar"
-                                />
+                            <div class="cell-numeric zlm-numeric">
+                                <span v-if="record.state === 'offline'" class="muted">—</span>
+                                <span v-else>
+                                    <strong>{{ record.stats?.mediaSourceCount || 0 }}</strong>
+                                    <span class="sep"> / </span>
+                                    <span class="dim">{{ record.stats?.sessionCount || 0 }}</span>
+                                </span>
                             </div>
                         </template>
                     </a-table-column>
-                    <a-table-column title="当前流">
+                    <a-table-column title="CPU" :width="100">
                         <template #cell="{ record }">
-                            <span v-if="record.state === 'offline'" style="color: #aaa">—</span>
-                            <span v-else>{{ record.stats?.mediaSourceCount || 0 }}</span>
+                            <span
+                                v-if="record.state === 'offline'"
+                                class="muted"
+                            >—</span>
+                            <span
+                                v-else
+                                class="cpu-pct zlm-numeric"
+                                :class="{
+                                    'cpu-high': cpuPctOf(record) >= 80,
+                                    'cpu-mid': cpuPctOf(record) >= 60 && cpuPctOf(record) < 80
+                                }"
+                            >{{ cpuPctOf(record) }}%</span>
                         </template>
                     </a-table-column>
-                    <a-table-column title="心跳">
+                    <a-table-column title="心跳" :width="120">
                         <template #cell="{ record }">
-                            <span v-if="record.stats?.lastHeartbeatAt && !record.stats.lastHeartbeatAt.startsWith('0001-01-01')">
-                                {{ new Date(record.stats.lastHeartbeatAt).toLocaleString() }}
-                            </span>
-                            <span v-else style="color: #aaa">—</span>
+                            <a-tooltip
+                                v-if="!isZeroTime(record.stats?.lastHeartbeatAt)"
+                                :content="record.stats?.lastHeartbeatAt"
+                            >
+                                <span class="rel-time">{{ relTime(record.stats?.lastHeartbeatAt) }}</span>
+                            </a-tooltip>
+                            <span v-else class="muted">从未上报</span>
                         </template>
                     </a-table-column>
-                    <a-table-column title="操作" :width="420">
+                    <a-table-column title="操作" :width="280">
                         <template #cell="{ record }">
-                            <a-space>
+                            <div class="cell-ops">
                                 <a-button size="small" @click="gotoDetail(record)">详情</a-button>
                                 <a-button
                                     v-if="record.state === 'active'"
                                     size="small"
-                                    status="warning"
+                                    :loading="opLoading[record.id] === 'maintenance'"
                                     @click="handleMaintenance(record)"
                                 >
                                     隔离
@@ -315,6 +491,7 @@ onUnmounted(() => {
                                     v-if="record.state === 'maintenance'"
                                     size="small"
                                     type="primary"
+                                    :loading="opLoading[record.id] === 'activate'"
                                     @click="handleActivate(record)"
                                 >
                                     激活
@@ -323,111 +500,357 @@ onUnmounted(() => {
                                     v-if="record.state === 'offline'"
                                     size="small"
                                     type="primary"
-                                    :loading="reprobing[record.id]"
+                                    :loading="opLoading[record.id] === 'reprobe'"
                                     @click="handleReprobe(record)"
                                 >
                                     重新探测
                                 </a-button>
-                                <!-- 驱逐:active/maintenance 状态可用,offline 时 ZLM 不可达不显示 -->
-                                <a-button
-                                    v-if="record.state !== 'offline'"
-                                    size="small"
-                                    status="warning"
-                                    class="btn-kick"
-                                    @click="handleKick(record)"
-                                >
-                                    驱逐
-                                </a-button>
-                                <!-- 重启:同上,offline 时 ZLM 已挂不需要重启 -->
-                                <a-button
-                                    v-if="record.state !== 'offline'"
-                                    size="small"
-                                    status="danger"
-                                    @click="handleRestart(record)"
-                                >
-                                    重启
-                                </a-button>
-                                <a-button
-                                    size="small"
-                                    status="danger"
-                                    @click="handleDelete(record)"
-                                >
-                                    删除
-                                </a-button>
-                            </a-space>
+                                <a-dropdown trigger="click" position="br">
+                                    <a-button size="small">
+                                        更多
+                                        <template #icon><icon-down /></template>
+                                    </a-button>
+                                    <template #content>
+                                        <a-doption
+                                            v-if="record.state !== 'offline'"
+                                            @click="handleKick(record)"
+                                        >驱逐全部会话</a-doption>
+                                        <a-doption
+                                            v-if="record.state !== 'offline'"
+                                            @click="handleRestart(record)"
+                                        >重启 ZLM</a-doption>
+                                        <a-doption
+                                            class="danger"
+                                            @click="handleDelete(record)"
+                                        >删除节点</a-doption>
+                                    </template>
+                                </a-dropdown>
+                            </div>
                         </template>
                     </a-table-column>
                 </template>
+
+                <template #empty>
+                    <div class="empty">
+                        <icon-cloud class="empty-icon" />
+                        <div class="empty-title">还没有 ZLM 节点</div>
+                        <div class="empty-sub">点右上角"添加节点"接入第一个 ZLMediaKit 实例</div>
+                    </div>
+                </template>
             </a-table>
-        </a-card>
+        </section>
+
+        <!-- 批量操作 toolbar(选中节点时浮起底部) -->
+        <transition name="slide-up">
+            <div v-if="selectedIds.length > 0" class="batch-bar">
+                <div class="batch-info">
+                    <span class="count">{{ selectedIds.length }}</span> 个节点已选中
+                </div>
+                <div class="batch-ops">
+                    <a-button @click="handleBatchMaintenance">批量切维护</a-button>
+                    <a-button type="primary" @click="handleBatchActivate">批量激活</a-button>
+                    <a-button @click="selectedIds = []">取消</a-button>
+                </div>
+            </div>
+        </transition>
 
         <NodeForm v-model:visible="drawerVisible" @created="refresh" />
     </div>
 </template>
 
 <style scoped>
+@import "@/styles/zlm-tokens.css";
+
 .zlm-node-list {
     height: 100%;
     overflow: auto;
+    background: var(--zlm-bg);
+    padding: var(--zlm-space-6);
+    font-family: var(--zlm-font-body);
+    color: var(--zlm-text-2);
 }
 
-.state-cell {
+/* === 页面头 === */
+.page-header {
     display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--zlm-space-4);
+    margin-bottom: var(--zlm-space-6);
 }
 
-.offline-duration {
-    font-size: 12px;
-    color: #86909c;
+.title-block {
+    flex: 1;
+    min-width: 0;
+}
+
+.breadcrumb {
+    font-size: var(--zlm-fs-caption);
+    color: var(--zlm-text-3);
+    margin-bottom: var(--zlm-space-2);
+}
+
+.breadcrumb .sep {
+    margin: 0 var(--zlm-space-2);
+    color: var(--zlm-text-4);
+}
+
+.breadcrumb .crumb-current {
+    color: var(--zlm-text-2);
+    font-weight: var(--zlm-fw-medium);
+}
+
+.title {
+    font-size: var(--zlm-fs-h1);
+    font-weight: var(--zlm-fw-semibold);
+    color: var(--zlm-text-1);
+    margin: 0;
     line-height: 1.2;
 }
 
-.weight-cell {
+.subtitle {
+    font-size: var(--zlm-fs-body);
+    color: var(--zlm-text-3);
+    margin: var(--zlm-space-1) 0 0;
+}
+
+.actions {
+    display: flex;
+    gap: var(--zlm-space-2);
+}
+
+/* === KPI 条 === */
+.kpi-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: var(--zlm-space-4);
+    margin-bottom: var(--zlm-space-6);
+}
+
+/* === 过滤栏 === */
+.filter-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--zlm-space-3);
+    margin-bottom: var(--zlm-space-4);
+    padding: var(--zlm-space-3) var(--zlm-space-4);
+    background: var(--zlm-card);
+    border-radius: var(--zlm-radius-lg);
+    border: 1px solid var(--zlm-border);
+}
+
+.search {
+    width: 280px;
+    flex-shrink: 0;
+}
+
+.filter-select {
+    width: 160px;
+}
+
+.filter-meta {
+    margin-left: auto;
+    font-size: var(--zlm-fs-caption);
+    color: var(--zlm-text-3);
+}
+
+/* === 节点表 === */
+.node-table-wrap {
+    background: var(--zlm-card);
+    border-radius: var(--zlm-radius-lg);
+    border: 1px solid var(--zlm-border);
+    overflow: hidden;
+}
+
+.node-table :deep(.arco-table-th) {
+    background: var(--zlm-bg);
+    font-weight: var(--zlm-fw-medium);
+    font-size: var(--zlm-fs-caption);
+    color: var(--zlm-text-3);
+    text-transform: none;
+    letter-spacing: 0.02em;
+}
+
+.node-table :deep(.arco-table-td) {
+    padding: 10px 16px !important;
+    height: 56px;
+    font-size: var(--zlm-fs-body);
+    color: var(--zlm-text-2);
+}
+
+.node-table :deep(.arco-table-tr:hover .arco-table-td) {
+    background: var(--zlm-card-hover);
+}
+
+/* 节点名 cell */
+.cell-node {
+    cursor: pointer;
+    line-height: 1.3;
+}
+
+.cell-node-name {
+    font-size: var(--zlm-fs-body);
+    font-weight: var(--zlm-fw-semibold);
+    color: var(--zlm-text-1);
+    transition: color var(--zlm-dur-fast) var(--zlm-ease-out);
+}
+
+.cell-node:hover .cell-node-name {
+    color: var(--zlm-brand-600);
+}
+
+.cell-node-host {
+    font-size: var(--zlm-fs-caption);
+    color: var(--zlm-text-3);
+    font-family: var(--zlm-font-mono);
+    margin-top: 2px;
+}
+
+/* 权重 cell */
+.cell-weight {
+    display: flex;
+    align-items: center;
+    gap: var(--zlm-space-2);
 }
 
 .weight-num {
-    min-width: 24px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    font-weight: var(--zlm-fw-semibold);
+    color: var(--zlm-text-1);
+    min-width: 28px;
 }
 
 .weight-bar {
-    width: 80px;
+    flex: 1;
+    height: 6px;
+    background: var(--zlm-divider);
+    border-radius: var(--zlm-radius-full);
+    overflow: hidden;
 }
 
-:deep(tr.row-maintenance > td),
-:deep(.arco-table-tr.row-maintenance > .arco-table-td),
-:deep(tr.row-maintenance .arco-table-td) {
-    background-color: #fffbe6 !important;
+.weight-bar-fill {
+    height: 100%;
+    background: var(--zlm-brand-500);
+    border-radius: var(--zlm-radius-full);
+    transition: width var(--zlm-dur-slow) var(--zlm-ease-out);
 }
 
-:deep(tr.row-offline > td),
-:deep(.arco-table-tr.row-offline > .arco-table-td),
-:deep(tr.row-offline .arco-table-td) {
-    background-color: #f7f8fa !important;
-    color: #86909c;
+/* 数字 cell */
+.cell-numeric strong {
+    color: var(--zlm-text-1);
+    font-weight: var(--zlm-fw-semibold);
+}
+.cell-numeric .sep {
+    color: var(--zlm-text-4);
+}
+.cell-numeric .dim {
+    color: var(--zlm-text-3);
 }
 
-/* T3.4 容量预警:active 节点 port_usage 或 cpu >= 80% 黄色高亮 */
-:deep(tr.row-near-capacity > td),
-:deep(.arco-table-tr.row-near-capacity > .arco-table-td),
-:deep(tr.row-near-capacity .arco-table-td) {
-    background-color: #fffbe6 !important;
+/* CPU pct */
+.cpu-pct {
+    font-weight: var(--zlm-fw-medium);
+    color: var(--zlm-text-2);
+}
+.cpu-pct.cpu-mid {
+    color: var(--zlm-warn-600);
+}
+.cpu-pct.cpu-high {
+    color: var(--zlm-danger-600);
+    font-weight: var(--zlm-fw-semibold);
 }
 
-/* 驱逐按钮:橙色,跟"隔离"(默认 warning 黄)区分开,语义上更接近"危险但非毁灭" */
-.btn-kick :deep(.arco-btn) {
-    background-color: #ff7d00;
-    border-color: #ff7d00;
-    color: #fff;
+.muted {
+    color: var(--zlm-text-4);
 }
-.btn-kick :deep(.arco-btn:hover) {
-    background-color: #f77234;
-    border-color: #f77234;
+
+.rel-time {
+    color: var(--zlm-text-3);
+    font-size: var(--zlm-fs-body);
+}
+
+/* 操作 cell */
+.cell-ops {
+    display: flex;
+    gap: var(--zlm-space-2);
+    align-items: center;
+}
+
+/* row offline / maintenance 行染色 */
+.node-table :deep(.arco-table-tr) {
+    transition: background var(--zlm-dur-fast) var(--zlm-ease-out);
+}
+
+/* 空状态 */
+.empty {
+    padding: var(--zlm-space-12) var(--zlm-space-6);
+    text-align: center;
+    color: var(--zlm-text-3);
+}
+
+.empty-icon {
+    font-size: 48px;
+    color: var(--zlm-text-4);
+    margin-bottom: var(--zlm-space-3);
+}
+
+.empty-title {
+    font-size: var(--zlm-fs-h2);
+    font-weight: var(--zlm-fw-semibold);
+    color: var(--zlm-text-2);
+    margin-bottom: var(--zlm-space-2);
+}
+
+.empty-sub {
+    font-size: var(--zlm-fs-body);
+    color: var(--zlm-text-3);
+}
+
+/* === 批量 toolbar(底部浮起) === */
+.batch-bar {
+    position: fixed;
+    bottom: var(--zlm-space-6);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: var(--zlm-space-4);
+    background: var(--zlm-text-1);
+    color: var(--zlm-text-inverse);
+    padding: var(--zlm-space-3) var(--zlm-space-4);
+    border-radius: var(--zlm-radius-full);
+    box-shadow: var(--zlm-shadow-lg);
+}
+
+.batch-info {
+    color: var(--zlm-text-inverse);
+    font-size: var(--zlm-fs-body);
+}
+
+.batch-info .count {
+    font-weight: var(--zlm-fw-bold);
+    color: var(--zlm-brand-500);
+    margin-right: 4px;
+}
+
+.batch-ops {
+    display: flex;
+    gap: var(--zlm-space-2);
+}
+
+/* 进出动画 */
+.slide-up-enter-active,
+.slide-up-leave-active {
+    transition: all var(--zlm-dur-base) var(--zlm-ease-out);
+}
+.slide-up-enter-from,
+.slide-up-leave-to {
+    transform: translate(-50%, 16px);
+    opacity: 0;
+}
+
+/* 危险下拉项 */
+:deep(.danger) {
+    color: var(--zlm-danger-600);
 }
 </style>
