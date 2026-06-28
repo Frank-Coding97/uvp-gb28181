@@ -182,7 +182,7 @@ onMounted(refresh);
                                         <span class="default-val mono">{{ record.default || "—" }}</span>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="生效方式" :width="100">
+                                <a-table-column title="生效方式" :width="120" align="center">
                                     <template #cell="{ record }">
                                         <span
                                             v-if="record.hotReloadable"
@@ -271,12 +271,44 @@ onMounted(refresh);
     background: var(--zlm-card);
     border-radius: var(--zlm-radius-lg) !important;
     border: 1px solid var(--zlm-border) !important;
-    margin-bottom: var(--zlm-space-3);
+    margin-bottom: var(--zlm-space-4);
     overflow: hidden;
+    transition: box-shadow var(--zlm-dur-base) var(--zlm-ease-out),
+        border-color var(--zlm-dur-base) var(--zlm-ease-out);
+}
+
+.config-collapse :deep(.arco-collapse-item:hover) {
+    box-shadow: var(--zlm-shadow-md);
+    border-color: var(--zlm-border-strong) !important;
+}
+
+.config-collapse :deep(.arco-collapse-item-active) {
+    box-shadow: var(--zlm-shadow-sm);
 }
 
 .config-collapse :deep(.arco-collapse-item-header) {
+    background: linear-gradient(to right, var(--zlm-brand-50) 0%, var(--zlm-card) 30%);
+    padding: 0;
+    border-bottom: 1px solid var(--zlm-divider);
+    position: relative;
+}
+
+.config-collapse :deep(.arco-collapse-item-header::before) {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--zlm-brand-500);
+}
+
+.config-collapse :deep(.arco-collapse-item-content) {
     background: var(--zlm-card);
+    padding: 0;
+}
+
+.config-collapse :deep(.arco-collapse-item-content-box) {
     padding: 0;
 }
 
@@ -284,18 +316,22 @@ onMounted(refresh);
     display: flex;
     align-items: center;
     gap: var(--zlm-space-3);
-    padding: var(--zlm-space-3) var(--zlm-space-4);
+    padding: var(--zlm-space-4) var(--zlm-space-6);
 }
 
 .group-name {
     font-size: var(--zlm-fs-h2);
     font-weight: var(--zlm-fw-semibold);
     color: var(--zlm-text-1);
+    letter-spacing: -0.01em;
 }
 
 .group-count {
     font-size: var(--zlm-fs-caption);
     color: var(--zlm-text-3);
+    padding: 2px 8px;
+    background: var(--zlm-divider);
+    border-radius: var(--zlm-radius-full);
 }
 
 /* === 表格 === */
@@ -358,11 +394,13 @@ onMounted(refresh);
 .hot-tag {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    padding: 2px 10px;
     border-radius: var(--zlm-radius-full);
     font-size: var(--zlm-fs-caption);
     font-weight: var(--zlm-fw-medium);
     border: 1px solid transparent;
+    white-space: nowrap;
+    line-height: 1.4;
 }
 
 .hot-tag-hot {
