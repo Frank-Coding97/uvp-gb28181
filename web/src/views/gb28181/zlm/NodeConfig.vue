@@ -270,6 +270,7 @@ onMounted(refresh);
 <style scoped>
 .node-config {
     font-family: var(--zlm-font-body);
+    width: 100%;
 }
 
 .config-toolbar {
@@ -330,9 +331,10 @@ onMounted(refresh);
 /* === 主体两栏 === */
 .config-body {
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: 220px minmax(0, 1fr);
     gap: var(--zlm-space-4);
     align-items: flex-start;
+    width: 100%;
 }
 
 /* === 左侧分类树 === */
