@@ -1,0 +1,173 @@
+/**
+ * UVP ZLM Console design tokens
+ *
+ * 来源:Atlas plan smooth-marinating-sundae(基于 ui-ux-pro-max + Cloudflare/AWS/Grafana 调研)
+ *
+ * 用法:在每个 zlm/ 子页面 vue 文件的 <style> 段顶部
+ *   @import '@/styles/zlm-tokens.css';
+ * 或在 app 入口 main.ts 全局 import(本文件暂不强制 main.ts 引入,避免污染其他页面)
+ *
+ * Dark mode tokens 预留但本期不启用(2026-06-28 老板决策)。
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+
+:root {
+    /* ========== Brand & accent ========== */
+    --zlm-brand-50: #EEF2FF;
+    --zlm-brand-100: #E0E7FF;
+    --zlm-brand-500: #6366F1;
+    --zlm-brand-600: #4F46E5;
+    --zlm-brand-700: #4338CA;
+
+    --zlm-accent-50: #ECFDF5;
+    --zlm-accent-500: #10B981;
+    --zlm-accent-600: #059669;
+
+    /* ========== Semantic ========== */
+    --zlm-info-50: #F0F9FF;
+    --zlm-info-500: #0EA5E9;
+    --zlm-info-600: #0284C7;
+
+    --zlm-warn-50: #FFFBEB;
+    --zlm-warn-500: #F59E0B;
+    --zlm-warn-600: #D97706;
+
+    --zlm-danger-50: #FEF2F2;
+    --zlm-danger-500: #EF4444;
+    --zlm-danger-600: #DC2626;
+
+    --zlm-success-50: #F0FDF4;
+    --zlm-success-500: #22C55E;
+    --zlm-success-600: #16A34A;
+
+    /* ========== Neutral / Surface ========== */
+    --zlm-bg: #F8FAFC;
+    --zlm-card: #FFFFFF;
+    --zlm-card-hover: #F8FAFC;
+    --zlm-border: #E2E8F0;
+    --zlm-border-strong: #CBD5E1;
+    --zlm-divider: #F1F5F9;
+
+    /* ========== Text ========== */
+    --zlm-text-1: #0F172A;
+    --zlm-text-2: #334155;
+    --zlm-text-3: #64748B;
+    --zlm-text-4: #94A3B8;
+    --zlm-text-inverse: #FFFFFF;
+
+    /* ========== Typography ========== */
+    --zlm-font-display: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --zlm-font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --zlm-font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+
+    --zlm-fs-display: 36px;
+    --zlm-fs-h1: 24px;
+    --zlm-fs-h2: 18px;
+    --zlm-fs-body: 14px;
+    --zlm-fs-caption: 12px;
+
+    --zlm-fw-regular: 400;
+    --zlm-fw-medium: 500;
+    --zlm-fw-semibold: 600;
+    --zlm-fw-bold: 700;
+
+    --zlm-lh-tight: 1.2;
+    --zlm-lh-normal: 1.55;
+    --zlm-lh-loose: 1.75;
+
+    /* ========== Spacing ========== */
+    --zlm-space-1: 4px;
+    --zlm-space-2: 8px;
+    --zlm-space-3: 12px;
+    --zlm-space-4: 16px;
+    --zlm-space-6: 24px;
+    --zlm-space-8: 32px;
+    --zlm-space-12: 48px;
+
+    /* ========== Radius ========== */
+    --zlm-radius-sm: 6px;
+    --zlm-radius-md: 8px;
+    --zlm-radius-lg: 12px;
+    --zlm-radius-full: 9999px;
+
+    /* ========== Shadow ========== */
+    --zlm-shadow-sm: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+    --zlm-shadow-md: 0 4px 12px -2px rgb(15 23 42 / 0.08);
+    --zlm-shadow-lg: 0 16px 32px -8px rgb(15 23 42 / 0.16);
+
+    /* ========== Motion ========== */
+    --zlm-ease-out: cubic-bezier(0.4, 0, 0.2, 1);
+    --zlm-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --zlm-dur-fast: 150ms;
+    --zlm-dur-base: 200ms;
+    --zlm-dur-slow: 300ms;
+
+    /* ========== Status semantic color (生命周期 + 健康度) ========== */
+    /* Lifecycle: 节点生命周期 */
+    --zlm-state-active: var(--zlm-accent-500);
+    --zlm-state-maintenance: var(--zlm-warn-500);
+    --zlm-state-offline: var(--zlm-text-3);
+
+    /* Health: 节点健康度 */
+    --zlm-health-healthy: var(--zlm-success-500);
+    --zlm-health-warning: var(--zlm-warn-500);
+    --zlm-health-critical: var(--zlm-danger-500);
+}
+
+/* Dark mode tokens(预留,本期不启用)*/
+[data-theme="dark"] {
+    --zlm-bg: #0F172A;
+    --zlm-card: #1E293B;
+    --zlm-card-hover: #243349;
+    --zlm-border: #334155;
+    --zlm-border-strong: #475569;
+    --zlm-divider: #1E293B;
+
+    --zlm-text-1: #F1F5F9;
+    --zlm-text-2: #CBD5E1;
+    --zlm-text-3: #94A3B8;
+    --zlm-text-4: #64748B;
+
+    --zlm-brand-500: #818CF8;
+    --zlm-accent-500: #34D399;
+    --zlm-warn-500: #FBBF24;
+    --zlm-danger-500: #F87171;
+
+    --zlm-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --zlm-shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.6);
+    --zlm-shadow-lg: 0 16px 32px -8px rgb(0 0 0 / 0.8);
+}
+
+/* 通用工具类(zlm 子页面共用)*/
+.zlm-numeric {
+    font-variant-numeric: tabular-nums;
+}
+
+.zlm-display {
+    font-size: var(--zlm-fs-display);
+    font-weight: var(--zlm-fw-semibold);
+    line-height: var(--zlm-lh-tight);
+    letter-spacing: -0.02em;
+    color: var(--zlm-text-1);
+}
+
+.zlm-h1 {
+    font-size: var(--zlm-fs-h1);
+    font-weight: var(--zlm-fw-semibold);
+    line-height: var(--zlm-lh-tight);
+    color: var(--zlm-text-1);
+}
+
+.zlm-h2 {
+    font-size: var(--zlm-fs-h2);
+    font-weight: var(--zlm-fw-semibold);
+    line-height: var(--zlm-lh-tight);
+    color: var(--zlm-text-1);
+}
+
+.zlm-caption {
+    font-size: var(--zlm-fs-caption);
+    color: var(--zlm-text-3);
+    line-height: var(--zlm-lh-normal);
+}
