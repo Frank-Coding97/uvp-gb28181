@@ -427,12 +427,14 @@ function fmtTime(s: string | undefined | null): string {
 
 <style scoped>
 .node-detail {
+    width: 100%;
     height: 100%;
     overflow: auto;
     background: var(--zlm-bg);
     padding: var(--zlm-space-6);
     font-family: var(--zlm-font-body);
     color: var(--zlm-text-2);
+    box-sizing: border-box;
 }
 
 /* === 页面头 === */
