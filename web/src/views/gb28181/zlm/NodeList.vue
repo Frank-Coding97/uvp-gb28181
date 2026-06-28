@@ -637,11 +637,14 @@ async function handleBatchActivate() {
 }
 
 .filter-select {
-    width: 160px;
+    width: 180px;
+    flex-shrink: 0;
 }
 
 .filter-meta {
     margin-left: auto;
+    flex-shrink: 0;
+    white-space: nowrap;
     font-size: var(--zlm-fs-caption);
     color: var(--zlm-text-3);
 }
