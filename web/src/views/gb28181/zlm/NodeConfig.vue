@@ -440,6 +440,7 @@ onMounted(refresh);
 /* === 右侧详情 === */
 .category-detail {
     min-width: 0;
+    width: 100%;
 }
 
 .detail-card {
@@ -447,6 +448,7 @@ onMounted(refresh);
     border-radius: var(--zlm-radius-lg);
     border: 1px solid var(--zlm-border);
     overflow: hidden;
+    width: 100%;
 }
 
 .detail-header {
@@ -488,6 +490,14 @@ onMounted(refresh);
     padding: 0;
 }
 
+.config-table {
+    width: 100%;
+}
+
+.config-table :deep(.arco-table) {
+    width: 100% !important;
+}
+
 .config-table :deep(.arco-table-th) {
     background: var(--zlm-bg);
     font-weight: var(--zlm-fw-medium);
@@ -520,10 +530,17 @@ onMounted(refresh);
     display: flex;
     align-items: center;
     gap: 6px;
+    width: 100%;
 }
 
 .cell-input :deep(.arco-input-wrapper) {
     transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out);
+    flex: 1;
+    min-width: 0;
+}
+
+.cell-input :deep(.arco-input) {
+    width: 100%;
 }
 
 .input-dirty :deep(.arco-input-wrapper) {
