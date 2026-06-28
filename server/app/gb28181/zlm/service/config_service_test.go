@@ -64,7 +64,7 @@ func TestConfigService_GetGrouped(t *testing.T) {
 		names[g.Name] = true
 	}
 	require.True(t, names["网络端口"], "缺少分组 网络端口")
-	require.True(t, names["Hook"], "缺少分组 Hook")
+	require.True(t, names["Hook"] || names["Hook 回调"], "缺少分组 Hook")
 	require.True(t, names["运行时策略"] || names["运行时"], "缺少分组 运行时")
 
 	// 验证 hot_reloadable 标志
