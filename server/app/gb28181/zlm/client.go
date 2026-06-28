@@ -262,3 +262,52 @@ func (c *Client) RestartServer(ctx context.Context, _graceMS int) error {
 	}
 	return nil
 }
+
+// threadLoadEntry getThreadsLoad / getWorkThreadsLoad 单条
+type threadLoadEntry struct {
+	Load int `json:"load"`
+}
+
+// avgLoad 取多线程负载平均(load 是 int 0-100,返 0-1 float)
+func avgLoad(entries []threadLoadEntry) float64 {
+	if len(entries) == 0 {
+		return 0
+	}
+	sum := 0
+	for _, e := range entries {
+		sum += e.Load
+	}
+	return float64(sum) / float64(len(entries)) / 100.0
+}
+
+// GetThreadsLoad 拉 event poller 网络 I/O 线程负载平均(0-1)
+//
+// ZLM `/index/api/getThreadsLoad` 返 `{"data":[{"load":0,"name":"event poller 0"},...]}`
+func (c *Client) GetThreadsLoad(ctx context.Context) (float64, error) {
+	var r struct {
+		baseResp
+		Data []threadLoadEntry `json:"data"`
+	}
+	if err := c.call(ctx, "getThreadsLoad", nil, &r); err != nil {
+		return 0, err
+	}
+	if r.Code != 0 {
+		return 0, fmt.Errorf("getThreadsLoad code=%d msg=%s", r.Code, r.Msg)
+	}
+	return avgLoad(r.Data), nil
+}
+
+// GetWorkThreadsLoad 拉 work poller 工作线程负载平均(0-1)
+func (c *Client) GetWorkThreadsLoad(ctx context.Context) (float64, error) {
+	var r struct {
+		baseResp
+		Data []threadLoadEntry `json:"data"`
+	}
+	if err := c.call(ctx, "getWorkThreadsLoad", nil, &r); err != nil {
+		return 0, err
+	}
+	if r.Code != 0 {
+		return 0, fmt.Errorf("getWorkThreadsLoad code=%d msg=%s", r.Code, r.Msg)
+	}
+	return avgLoad(r.Data), nil
+}

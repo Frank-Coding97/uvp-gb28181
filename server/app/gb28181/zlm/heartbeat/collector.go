@@ -32,50 +32,39 @@ func NewCollector(reg *node.Registry) *Collector {
 
 // keepalivePayload ZLM on_server_keepalive 回调载荷
 //
-// ZLM 实际字段(参考官方文档):
+// ZLM 真实字段(直接抓 ~/open-project/ZLMediaKit/server/WebApi.cpp::getStatisticJson 验证):
 //
 //	{
 //	  "mediaServerId": "<uuid>",
 //	  "data": {
-//	    "MediaSource":  3,           // 当前流数
-//	    "Session":      5,           // 当前会话数
-//	    "NetThreadLoad":  [ {"load": 0.2}, ... ],   // 每个网络 I/O 线程负载
-//	    "WorkThreadLoad": [ {"load": 0.1}, ... ],   // 每个工作线程负载
-//	    "memUsage":     123456,      // 进程内存(byte)
-//	    "totalBytesIn":  1000,        // 累计入流量
-//	    "totalBytesOut": 2000         // 累计出流量
+//	    "MediaSource":     7,          // 当前流数
+//	    "TcpSession":      1,          // TCP 会话数
+//	    "UdpSession":      0,          // UDP 会话数
+//	    "MultiMediaSourceMuxer": 7,    // 暂未用
+//	    "Socket":          130,        // 暂未用
+//	    "TcpServer":       96, "TcpClient": 1, "UdpServer": 32,
+//	    "FrameImp": 0, "Frame": 0,
+//	    "Buffer": 259, "BufferLikeString": 2, "BufferList": 0, "BufferRaw": 257,
+//	    "RtmpPacket": 0, "RtpPacket": 0
 //	  }
 //	}
+//
+// **ZLM keepalive 不含**:NetThreadLoad / WorkThreadLoad / memUsage / totalBytesIn / totalBytesOut。
+// 线程负载需单独调 REST `/index/api/getThreadsLoad` + `/getWorkThreadsLoad`(M3 由 Watcher 周期主动拉)。
+// 累计流量 ZLM 不直接提供(需 getMediaList 累加,代价大,M3 不实现)。
 type keepalivePayload struct {
 	MediaServerID string `json:"mediaServerId"`
 	Data          struct {
-		MediaSource    int          `json:"MediaSource"`
-		Session        int          `json:"Session"`
-		NetThreadLoad  []threadLoad `json:"NetThreadLoad"`
-		WorkThreadLoad []threadLoad `json:"WorkThreadLoad"`
-		MemUsage       int64        `json:"memUsage"`
-		TotalBytesIn   int64        `json:"totalBytesIn"`
-		TotalBytesOut  int64        `json:"totalBytesOut"`
+		MediaSource int `json:"MediaSource"`
+		TcpSession  int `json:"TcpSession"`
+		UdpSession  int `json:"UdpSession"`
 	} `json:"data"`
 }
 
-type threadLoad struct {
-	Load float64 `json:"load"`
-}
-
-// avg 计算线程负载平均;空数组返 0
-func avg(loads []threadLoad) float64 {
-	if len(loads) == 0 {
-		return 0
-	}
-	var sum float64
-	for _, l := range loads {
-		sum += l.Load
-	}
-	return sum / float64(len(loads))
-}
-
 // Receive 解析 ZLM keepalive payload,更新 Registry 内对应节点的 Stats。
+//
+// 只更新心跳直接含的字段:MediaSourceCount / SessionCount(=TcpSession+UdpSession)/ LastHeartbeatAt。
+// 线程负载由 ThreadLoadPoller 周期独立拉取(getThreadsLoad / getWorkThreadsLoad REST)。
 //
 // 错误场景:
 //   - JSON 解析失败 → 返回错误(由调用方记日志)
@@ -89,16 +78,16 @@ func (c *Collector) Receive(payload []byte) error {
 	if body.MediaServerID == "" {
 		return ErrEmptyMediaServerID
 	}
-	stats := node.Stats{
-		LastHeartbeatAt:   time.Now(),
-		MediaSourceCount:  body.Data.MediaSource,
-		SessionCount:      body.Data.Session,
-		NetThreadLoadAvg:  avg(body.Data.NetThreadLoad),
-		WorkThreadLoadAvg: avg(body.Data.WorkThreadLoad),
-		MemoryUsageBytes:  body.Data.MemUsage,
-		TotalBytesIn:      body.Data.TotalBytesIn,
-		TotalBytesOut:     body.Data.TotalBytesOut,
+	// 不覆盖 NetThread/WorkThread 等由 Poller 维护的字段:
+	// 先拿当前 Stats,只覆盖心跳字段
+	cur, _ := c.registry.GetByUUID(body.MediaServerID)
+	var stats node.Stats
+	if cur != nil {
+		stats = cur.Stats
 	}
+	stats.LastHeartbeatAt = time.Now()
+	stats.MediaSourceCount = body.Data.MediaSource
+	stats.SessionCount = body.Data.TcpSession + body.Data.UdpSession
 	c.registry.UpdateStats(body.MediaServerID, stats)
 	return nil
 }

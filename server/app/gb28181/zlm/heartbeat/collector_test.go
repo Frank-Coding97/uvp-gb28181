@@ -27,17 +27,17 @@ func TestCollector_ParsesKeepalivePayload(t *testing.T) {
 	reg, id := setupRegistry(t, "uuid-1")
 	coll := heartbeat.NewCollector(reg)
 
-	// 含 ZLM 风格的 data 字段:计数标量 + 线程负载数组
+	// ZLM 真实 keepalive payload(直接抓自 WebApi.cpp getStatisticJson):
+	// SessionCount = TcpSession + UdpSession;线程负载在 keepalive 里没有,
+	// 由 ThreadLoadPoller 周期独立拉。
 	payload := []byte(`{
 		"mediaServerId": "uuid-1",
 		"data": {
 			"MediaSource": 3,
-			"Session": 5,
-			"NetThreadLoad": [{"load": 0.2}, {"load": 0.4}],
-			"WorkThreadLoad": [{"load": 0.1}, {"load": 0.3}, {"load": 0.5}],
-			"memUsage": 12345678,
-			"totalBytesIn": 1000,
-			"totalBytesOut": 2000
+			"TcpSession": 2,
+			"UdpSession": 3,
+			"Socket": 130,
+			"TcpServer": 96
 		}
 	}`)
 
@@ -47,10 +47,25 @@ func TestCollector_ParsesKeepalivePayload(t *testing.T) {
 	got, ok := reg.Get(id)
 	require.True(t, ok)
 	require.Equal(t, 3, got.Stats.MediaSourceCount)
-	require.Equal(t, 5, got.Stats.SessionCount)
-	require.InDelta(t, 0.3, got.Stats.NetThreadLoadAvg, 0.001)
-	require.InDelta(t, 0.3, got.Stats.WorkThreadLoadAvg, 0.001)
+	require.Equal(t, 5, got.Stats.SessionCount, "SessionCount = TcpSession + UdpSession")
 	require.False(t, got.Stats.LastHeartbeatAt.IsZero(), "Collector 应填 LastHeartbeatAt")
+}
+
+func TestCollector_PreservesThreadLoad(t *testing.T) {
+	// Collector 不应覆盖 ThreadLoadPoller 已经写入的 NetThread/WorkThread 字段
+	reg, id := setupRegistry(t, "uuid-1")
+	reg.UpdateStats("uuid-1", node.Stats{
+		NetThreadLoadAvg:  0.5,
+		WorkThreadLoadAvg: 0.3,
+	})
+
+	coll := heartbeat.NewCollector(reg)
+	require.NoError(t, coll.Receive([]byte(`{"mediaServerId":"uuid-1","data":{"MediaSource":7,"TcpSession":1}}`)))
+
+	got, _ := reg.Get(id)
+	require.Equal(t, 7, got.Stats.MediaSourceCount)
+	require.InDelta(t, 0.5, got.Stats.NetThreadLoadAvg, 0.001, "Collector 不应覆盖 NetThread")
+	require.InDelta(t, 0.3, got.Stats.WorkThreadLoadAvg, 0.001, "Collector 不应覆盖 WorkThread")
 }
 
 func TestCollector_UnknownUUID_NoOp(t *testing.T) {

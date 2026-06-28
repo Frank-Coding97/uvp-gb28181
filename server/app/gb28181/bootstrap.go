@@ -219,6 +219,11 @@ func Start() {
 		app.ZapLog.Info("GB28181 ZLM 心跳 Collector / Watcher 已启动",
 			zap.Duration("checkInterval", 30*time.Second),
 			zap.Duration("offlineThreshold", 90*time.Second))
+
+		// 启动 ThreadLoadPoller 周期主动拉线程负载(ZLM keepalive 不含此字段)
+		threadPoller := heartbeat.NewThreadLoadPoller(zlmRegistry, adapter, 30*time.Second)
+		threadPoller.Start(hbCtx)
+		app.ZapLog.Info("GB28181 ZLM 线程负载 Poller 已启动", zap.Duration("interval", 30*time.Second))
 	}
 
 	// 向 ZLMediaKit 动态下发 Hook 配置(控制面,替代 config.ini 写死)

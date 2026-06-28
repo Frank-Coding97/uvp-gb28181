@@ -63,3 +63,13 @@ func (a *ServiceAdapter) KickSessions(ctx context.Context, n *node.Node) (int, e
 func (a *ServiceAdapter) RestartServer(ctx context.Context, n *node.Node, graceMS int) error {
 	return NewClientForNode(n).RestartServer(ctx, graceMS)
 }
+
+// GetThreadsLoad 实现 heartbeat.ThreadLoadFetcher(2026-06-28 Stats 字段 mismatch 修)
+func (a *ServiceAdapter) GetThreadsLoad(ctx context.Context, n *node.Node) (float64, error) {
+	return NewClientForNode(n).GetThreadsLoad(ctx)
+}
+
+// GetWorkThreadsLoad 实现 heartbeat.ThreadLoadFetcher
+func (a *ServiceAdapter) GetWorkThreadsLoad(ctx context.Context, n *node.Node) (float64, error) {
+	return NewClientForNode(n).GetWorkThreadsLoad(ctx)
+}
