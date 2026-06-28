@@ -40,7 +40,6 @@ const showText = computed(() => props.showText !== false);
 </template>
 
 <style scoped>
-@import "@/styles/zlm-tokens.css";
 
 .lifecycle-dot {
     display: inline-flex;

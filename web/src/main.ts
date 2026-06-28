@@ -1,6 +1,7 @@
 
 import { createApp } from "vue";
 import "@/style.css";
+import "@/styles/zlm-tokens.css"; // ZLM 控制台 design tokens(2026-06-28 重设计)
 import App from "@/App.vue";
 
 // vue-router

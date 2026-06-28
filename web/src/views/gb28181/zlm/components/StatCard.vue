@@ -88,7 +88,6 @@ const trendColor = computed(() => {
 </template>
 
 <style scoped>
-@import "@/styles/zlm-tokens.css";
 
 .stat-card {
     display: flex;

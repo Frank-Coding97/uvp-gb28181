@@ -59,7 +59,6 @@ const cfg = computed(() => {
 </template>
 
 <style scoped>
-@import "@/styles/zlm-tokens.css";
 
 .health-badge {
     display: inline-flex;

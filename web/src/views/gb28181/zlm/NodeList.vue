@@ -552,7 +552,6 @@ async function handleBatchActivate() {
 </template>
 
 <style scoped>
-@import "@/styles/zlm-tokens.css";
 
 .zlm-node-list {
     height: 100%;
