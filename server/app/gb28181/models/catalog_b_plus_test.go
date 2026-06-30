@@ -98,17 +98,19 @@ func TestChannel_CapabilitiesField(t *testing.T) {
 	mig := db.Migrator()
 	assert.True(t, mig.HasColumn(&gbmodels.GbChannel{}, "capabilities"))
 
+	caps := `{"audio":true,"h265":false}`
 	ch := &gbmodels.GbChannel{
 		DeviceID:     "34020000001320000001",
 		ChannelID:    "34020000001310000001",
 		Name:         "test ch",
-		Capabilities: `{"audio":true,"h265":false}`,
+		Capabilities: &caps,
 	}
 	require.NoError(t, db.Create(ch).Error)
 
 	var got gbmodels.GbChannel
 	require.NoError(t, db.First(&got, ch.ID).Error)
-	assert.Contains(t, got.Capabilities, "audio")
+	require.NotNil(t, got.Capabilities, "Capabilities 应回读非 nil")
+	assert.Contains(t, *got.Capabilities, "audio")
 }
 
 // TestCatalogNode_PathSubtreeQuery A1.1 RED-验证:物化路径子树 LIKE 查询

@@ -30,8 +30,9 @@ type GbChannel struct {
 	Status       int8       `gorm:"column:status;default:0;comment:通道在线" json:"status"`
 	StreamID     string     `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
 	// Capabilities A1 新增:通道能力 JSON {audio, h265, night_vision, alarm_io, recording}
-	// 取代散落的布尔字段,plan §3.3 字段表;序列化用 datatypes.JSON 或 string + json.Marshal
-	Capabilities string     `gorm:"column:capabilities;type:json;comment:通道能力 JSON" json:"capabilities"`
+	// 用 *string + 默认 NULL — MySQL JSON 列不接受空字符串("The document is empty"),
+	// nil 写入 NULL,前端拿到 null 即按"无能力上报"渲染
+	Capabilities *string    `gorm:"column:capabilities;type:json;comment:通道能力 JSON" json:"capabilities"`
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 	DeletedAt    *time.Time `gorm:"index" json:"deletedAt"`
