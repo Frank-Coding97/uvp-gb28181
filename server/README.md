@@ -1139,6 +1139,104 @@ func init() {
 }
 ```
 
+## ZLM 流媒体集群管理
+
+把 ZLMediaKit 接入 GB28181 平台并沉淀为可视化、多节点、可调度的流媒体集群。
+
+### 设计文档
+
+- spec:`~/Documents/Atlas/wiki/projects/uvp/specs/zlmediakit-module.md`
+- plan:`~/Documents/Atlas/wiki/projects/uvp/plans/zlmediakit-module.md`
+- tasks:`~/Documents/Atlas/wiki/projects/uvp/tasks/zlmediakit-module.md`
+
+### 节点接入
+
+打开"国标平台 → 流媒体节点 → 节点列表",点击"添加":
+
+| 字段 | 说明 |
+|---|---|
+| name | 显示名 |
+| host / api_port / api_secret | ZLM HTTP API 三件套(对应 `[api] secret` + `[http] port`) |
+| weight | 加权轮询权重 0-100,默认 50 |
+| rtp_port_start / rtp_port_end | RTP 收流端口范围;多 ZLM 同机部署时需错开避冲突 |
+| tags | JSON,业务侧自定义标签 |
+
+保存前先调 `/test-connection` 探测 ZLM 可达性,然后 `setServerConfig` 把业务侧生成的 UUID 写入 ZLM `[general] mediaServerId`,后续 Hook 回调凭此反查节点。
+
+> yaml `gb28181.zlm` 块只在 `meta_node` 表为空时作 seed 兜底,运行时由 UI 管理。
+
+### Hook 自动下发
+
+后端启动取 Registry 首节点构造 Client,通过 `setServerConfig` 一次性下发完整 Hook URL(`/index/hook/on_*` 七项)+ `hook.alive_interval=30`,不需要手工改 ZLM `config.ini`。
+
+Hook 列表:
+
+- `on_server_started` — ZLM 启动
+- `on_server_keepalive` — 心跳(节点 stats 来源)
+- `on_stream_changed` — 流注册/注销(LocationMap 维护)
+- `on_stream_none_reader` — 无人观看
+- `on_rtp_server_timeout` — RTP 超时
+- `on_publish` / `on_play` — 推/拉鉴权
+
+### 配置页(8 组 55 项)
+
+节点详情 → 配置 tab,按产品化分组展示:
+
+| 组 | 典型项 |
+|---|---|
+| 网络端口 | http.port / rtmp.port / rtsp.port(需重启) |
+| Hook | hook.enable / 各 on_* URL / alive_interval(运行时可改) |
+| 国标 | general.mediaServerId / rtp_proxy.port_range |
+| 协议 | rtmp.* / rtsp.* / hls.* |
+| 集群 | cluster.* |
+| 性能 | general.maxStreamWaitMS / threads |
+| 安全 | api.secret / hls.fileBufSize |
+| 录像 | record.* |
+
+保存时后端按"hot_reloadable / requires_restart"自动分流:可热改的调 `setServerConfig`;必重启的标红 + 弹窗提示。
+
+### 调度策略
+
+"流媒体节点 → 调度策略":
+
+| 算法 | 行为 | 文件 |
+|---|---|---|
+| roundrobin | 轮询 | `app/gb28181/zlm/scheduler/roundrobin.go` |
+| weighted | GCD 平滑加权(参考 nginx upstream) | `app/gb28181/zlm/scheduler/weighted.go` |
+| leastload | `NetThreadLoadAvg * 0.6 + WorkThreadLoadAvg * 0.4` 取最小 | `app/gb28181/zlm/scheduler/leastload.go` |
+
+UI 切换算法**热生效**,通过 `scheduler.Manager.Switch`,无需重启服务。当前算法存 `scheduler_setting` 表,启动从 DB 加载。
+
+### 调度日志
+
+每次 invite Pick 节点都异步落 `scheduler_log` 表(带缓冲 channel 1000,失败丢弃记 warn,不阻塞 Pick)。
+
+- "调度策略"页底部展示最近 200 条
+- bootstrap 每天 0:00 自动 prune 7 天前
+
+### 容量预警
+
+`scheduler.Manager.Pick` 之前调 `node/capacity.go IsCapacityAvailable` 自动过滤:
+
+- `port_usage >= 0.8`(rtp_port_range 用量,基于 keepalive 上报)
+- `cpu >= 0.8`(NetThreadLoadAvg 综合)
+
+被过滤节点在节点列表行黄色背景 + tooltip "接近容量,已暂时摘除调度池"。
+
+### 驱逐 / 重启
+
+节点操作列(需先隔离 / 维护态):
+
+- **驱逐**:批量 `kick_sessions`,断开该节点所有连接
+- **重启**:调 ZLM `restartServer`,所有流中断,UI 二次确认 + graceMS 默认 5000
+- **隔离 / 激活**:state=active ↔ maintenance,scheduler 自动跳过 maintenance / offline 节点
+
+### 离线检测
+
+`zlm/heartbeat/watcher.go` 每 60s 扫一次 Registry,LastHeartbeat > 90s 标 offline,scheduler 自动跳过。
+
+节点详情有"重新探测"按钮:手工调 `/test-connection`,若恢复则 state=active。
+
 ## 部署说明
 
 ### 编译项目
