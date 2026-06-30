@@ -162,6 +162,45 @@ func TestBuildPath(t *testing.T) {
 	assert.Equal(t, "/5/", catalog.BuildPath("", 5)) // 空 parentPath 兜底成 "/"
 }
 
+// TestIngest_DepthChain 回归 bug §2:civil_code 链不应跳级(2026-06-30 接口手验时发现)
+//
+// 期望:行政区 6 位级走 2/4/6 拆 → root=depth 0 / 4 位级=depth 1 / 6 位级=depth 2 / channel 节点=depth 3
+// 之前的 bug:DepthFromPath + 又 +1 → 0/2/3/4(每级多 1)
+func TestIngest_DepthChain(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+
+	require.NoError(t, p.Ingest(context.Background(),
+		catalog.Sender{TenantID: tenantID, SourceDeviceID: "34020000002000000001"},
+		[]catalog.CatalogItem{
+			{DeviceID: "37011200001310000001", Name: "通道", CivilCode: "370112", StatusOn: true},
+		}))
+
+	type row struct {
+		Code  string
+		Depth uint8
+	}
+	var rows []row
+	require.NoError(t, db.Model(&gbmodels.GbCatalogNode{}).
+		Select("code, depth").
+		Where("node_type = ? OR node_type = ?", gbmodels.NodeTypeCivilCode, gbmodels.NodeTypeChannel).
+		Order("depth, code").Find(&rows).Error)
+
+	want := map[string]uint8{
+		"37":                   0, // 根行政区
+		"3701":                 1,
+		"370112":               2,
+		"37011200001310000001": 3, // channel 挂在 370112 下
+	}
+	got := map[string]uint8{}
+	for _, r := range rows {
+		got[r.Code] = r.Depth
+	}
+	for code, exp := range want {
+		assert.Equal(t, exp, got[code], "节点 %s 期望 depth=%d 实际 %d", code, exp, got[code])
+	}
+}
+
 func TestDepthFromPath(t *testing.T) {
 	assert.Equal(t, uint8(0), catalog.DepthFromPath("/"))
 	assert.Equal(t, uint8(0), catalog.DepthFromPath(""))

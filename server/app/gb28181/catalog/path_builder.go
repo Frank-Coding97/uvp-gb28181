@@ -114,10 +114,14 @@ func findOrCreateNode(
 		return &existed, nil
 	}
 
+	// depth 取自 parentPath 段数:
+	//   parentPath="/"        → 新节点 depth=0(它就是根节点)
+	//   parentPath="/17/"     → 新节点 depth=1(parent 自身在 depth 0,新节点在 1)
+	//   parentPath="/17/18/"  → 新节点 depth=2
+	// DepthFromPath 数 "/" 分段返回的就是 "path 末端节点在哪一层",
+	// 所以对新节点(挂在 parentPath 末端下)来说,自己的 depth 就等于这个数。
+	// (历史 bug:之前还多 +1,把行政区链算成 0→2→3 跳级。)
 	depth := DepthFromPath(parentPath)
-	if parentID != nil {
-		depth++
-	}
 	n := &gbmodels.GbCatalogNode{
 		TenantID: tenantID,
 		NodeType: nodeType,
