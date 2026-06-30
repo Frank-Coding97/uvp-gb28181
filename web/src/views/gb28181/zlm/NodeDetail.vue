@@ -357,14 +357,16 @@ function fmtTime(s: string | undefined | null): string {
                             </div>
                             <div class="trend-canvas">
                                 <Sparkline
-                                    v-if="streamHistory.length >= 1"
+                                    v-if="streamHistory.length >= 2"
                                     :data="streamHistory"
                                     color="brand"
                                     :width="600"
                                     :height="120"
                                     fill
                                 />
-                                <div v-else class="trend-empty">采样中,等待 30s 后第一个数据点...</div>
+                                <div v-else class="trend-empty">
+                                    {{ streamHistory.length === 0 ? "采样中,等待 30s 后第一个数据点..." : "已采样 1 次,再等 30s 出现趋势曲线" }}
+                                </div>
                             </div>
                         </div>
                         <div class="trend-card">
@@ -374,14 +376,16 @@ function fmtTime(s: string | undefined | null): string {
                             </div>
                             <div class="trend-canvas">
                                 <Sparkline
-                                    v-if="cpuHistory.length >= 1"
+                                    v-if="cpuHistory.length >= 2"
                                     :data="cpuHistory"
                                     color="warning"
                                     :width="600"
                                     :height="120"
                                     fill
                                 />
-                                <div v-else class="trend-empty">采样中...</div>
+                                <div v-else class="trend-empty">
+                                    {{ cpuHistory.length === 0 ? "采样中..." : "已采样 1 次,再等 30s 出现趋势曲线" }}
+                                </div>
                             </div>
                         </div>
                     </div>
