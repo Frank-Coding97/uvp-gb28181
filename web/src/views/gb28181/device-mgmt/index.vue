@@ -18,6 +18,7 @@ import TopBar from "./components/TopBar.vue";
 import DirectoryAside from "./components/DirectoryAside.vue";
 import DeviceListView from "./components/list/DeviceListView.vue";
 import DeviceCardView from "./components/card/DeviceCardView.vue";
+import DeviceMapView from "./components/map/DeviceMapView.vue";
 import DetailDrawer from "./components/drawer/DetailDrawer.vue";
 
 const route = useRoute();
@@ -44,14 +45,7 @@ const drawerOpen = computed(() => !!route.query.node);
       <main class="dm-main">
         <DeviceListView v-if="currentView === 'list'" />
         <DeviceCardView v-else-if="currentView === 'card'" />
-        <div v-else class="dm-view-placeholder">
-          地图视图(D3 待实现)
-          <p class="hint">
-            选中左侧节点筛选 / 切换视图试试。当前过滤:
-            <code v-if="route.query.node">node={{ route.query.node }}</code>
-            <code v-else>全部</code>
-          </p>
-        </div>
+        <DeviceMapView v-else-if="currentView === 'map'" />
       </main>
 
       <aside v-if="drawerOpen" class="dm-drawer">
