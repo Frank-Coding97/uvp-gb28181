@@ -16,6 +16,7 @@ import { computed } from "vue";
 import { useRoute } from "vue-router";
 import TopBar from "./components/TopBar.vue";
 import DirectoryAside from "./components/DirectoryAside.vue";
+import DeviceListView from "./components/list/DeviceListView.vue";
 
 const route = useRoute();
 
@@ -39,8 +40,9 @@ const drawerOpen = computed(() => !!route.query.node);
       </aside>
 
       <main class="dm-main">
-        <div class="dm-view-placeholder">
-          {{ currentView === "list" ? "列表视图(C3 待实现)" : currentView === "card" ? "卡片视图(D1 待实现)" : "地图视图(D3 待实现)" }}
+        <DeviceListView v-if="currentView === 'list'" />
+        <div v-else class="dm-view-placeholder">
+          {{ currentView === "card" ? "卡片视图(D1 待实现)" : "地图视图(D3 待实现)" }}
           <p class="hint">
             选中左侧节点筛选 / 切换视图试试。当前过滤:
             <code v-if="route.query.node">node={{ route.query.node }}</code>
