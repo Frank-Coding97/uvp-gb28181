@@ -171,3 +171,23 @@
     color: var(--zlm-text-3);
     line-height: var(--zlm-lh-normal);
 }
+
+/* ============================================================
+ * Arco-Design 全局自适应兜底
+ * ============================================================
+ *
+ * Arco `<a-spin>` 默认 `display: inline-block`,按内容自适应而不撑满父容器。
+ * 当 a-spin 包裹布局容器(KPI grid / 表格 / 大区块)时,子元素会被锁在 spin
+ * 的内容尺寸,父容器右侧出现大面积空白。
+ *
+ * 已踩坑(2026-06-30):
+ * - NodeDetail.vue 概览 tab 内层 a-spin 902px / 父 1411px
+ * - gb28181/index.vue 之前手动加 style="display: block" 兜底
+ *
+ * 全局根治:任何 a-spin 都自动撑满父容器(对 inline 小图标场景也无害,
+ * Arco 自己加的 width 会被实际内容反推)。
+ */
+.arco-spin {
+    display: block;
+    width: 100%;
+}

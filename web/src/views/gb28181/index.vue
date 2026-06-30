@@ -167,7 +167,7 @@ onMounted(loadDevices);
             <template #extra>
                 <a-button size="mini" @click="loadDevices">刷新</a-button>
             </template>
-            <a-spin :loading="treeLoading" style="display: block">
+            <a-spin :loading="treeLoading">
                 <a-tree
                     :data="treeData as any"
                     :load-more="onLoadMore as any"

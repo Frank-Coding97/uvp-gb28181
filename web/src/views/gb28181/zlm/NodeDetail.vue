@@ -534,13 +534,6 @@ function fmtTime(s: string | undefined | null): string {
     width: 100%;
 }
 
-/* arco a-spin 默认 inline-block,按内容自适应而不拉满父容器,
-   导致内部 kpi-grid 锁死在内容尺寸、右侧大面积空白。 */
-.detail-tabs :deep(.arco-spin) {
-    display: block;
-    width: 100%;
-}
-
 .detail-tabs :deep(.arco-tabs-nav) {
     background: transparent;
     border-bottom: 1px solid var(--zlm-border);
