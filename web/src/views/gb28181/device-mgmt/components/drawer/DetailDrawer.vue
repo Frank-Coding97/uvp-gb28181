@@ -14,6 +14,7 @@
  */
 import { computed, onMounted, onUnmounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import ChannelDetail from "./ChannelDetail.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -66,10 +67,7 @@ onUnmounted(() => window.removeEventListener("keydown", onKey));
     </header>
 
     <section class="drawer-body">
-      <div v-if="drawerType === 'channel'" class="placeholder">
-        <h3>通道详情(E2 待实现)</h3>
-        <p class="muted">将渲染:大快照 + 能力 chips + 国标编码逐段 + 多挂载列表 + 24h 在线时序。</p>
-      </div>
+      <ChannelDetail v-if="drawerType === 'channel'" :channel-id="targetId" />
       <div v-else-if="drawerType === 'device'" class="placeholder">
         <h3>设备详情(E3 待实现)</h3>
         <p class="muted">将渲染:注册信息 + 订阅能力 + 该设备所有通道 mini 列表。</p>
