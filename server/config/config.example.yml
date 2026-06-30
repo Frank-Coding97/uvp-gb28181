@@ -240,7 +240,10 @@ gb28181:
     keepalive_timeout_count: 3 # 连续丢失阈值,超过判离线
     keepalive_grace_seconds: 15 # 离线判定宽限缓冲(秒),避开边界误判
     offline_scan_interval: 30 # 离线扫描周期(秒)
-  # ZLMediaKit 媒体服务器(数据面)
+  # ZLMediaKit 媒体服务器 — 首次部署 seed(数据面)
+  #
+  # 仅作 meta_node 表为空时的 seed 兜底:启动时若 DB 已存在节点,本配置忽略,
+  # 运行时通过"流媒体节点"UI 管理多节点。yaml 改值不会影响已 seed 节点。
   zlm:
     host: "127.0.0.1"             # ZLM 地址
     httpport: 18080               # ZLM HTTP API 端口
