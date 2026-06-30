@@ -18,6 +18,7 @@ import TopBar from "./components/TopBar.vue";
 import DirectoryAside from "./components/DirectoryAside.vue";
 import DeviceListView from "./components/list/DeviceListView.vue";
 import DeviceCardView from "./components/card/DeviceCardView.vue";
+import DetailDrawer from "./components/drawer/DetailDrawer.vue";
 
 const route = useRoute();
 
@@ -54,10 +55,7 @@ const drawerOpen = computed(() => !!route.query.node);
       </main>
 
       <aside v-if="drawerOpen" class="dm-drawer">
-        <div class="dm-drawer__placeholder">
-          详情抽屉(E1 待实现)
-          <p class="hint">node={{ route.query.node }}</p>
-        </div>
+        <DetailDrawer />
       </aside>
     </section>
   </div>
