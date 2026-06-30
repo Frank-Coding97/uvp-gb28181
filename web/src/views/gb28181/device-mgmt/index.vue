@@ -1,145 +1,65 @@
 <script setup lang="ts">
 /**
- * DeviceMgmtPage — 设备管理页顶层(tasks §3 C1)
+ * DeviceMgmtPage — 设备管理页顶层(tasks §3 C1+C2 集成)
  *
- * 布局根:`.dm-page-root` 已定义为 height:100vh + overflow:hidden + grid(rows: topbar / 1fr)
- * 见 plan §2.2:整页 `height:100vh + overflow:hidden`,workspace/main/drawer-body 各自内部
- *      overflow:auto,防 sticky CTA / 分页 / 视野气泡被撑出视口
+ * 布局根:`.dm-page-root` height:100vh + overflow:hidden + grid(rows: topbar / 1fr)
+ * (plan §2.2 踩坑)
  *
  * 三栏:
- *   - aside 280px(目录树,C2 实现)
- *   - main  1fr(视图切换器 + 列表/卡片/地图,C3/D1/D3 各自实现)
- *   - drawer(可选,详情抽屉,E1 实现;由 URL ?node= 控制)
+ *   - aside 280px  → DirectoryAside(C2)
+ *   - main  1fr    → 视图切换器 + 列表/卡片/地图(C3/D1/D3,各自实现)
+ *   - drawer 40%   → DetailDrawer(可选,E1)由 URL ?node= 控制
  *
- * 视图切换走 URL query `?view=list|card|map`,默认 list
+ * 视图切换:URL `?view=list|card|map`,默认 list
  */
-import { computed, KeepAlive } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { computed } from "vue";
+import { useRoute } from "vue-router";
+import TopBar from "./components/TopBar.vue";
+import DirectoryAside from "./components/DirectoryAside.vue";
 
 const route = useRoute();
-const router = useRouter();
 
 type ViewMode = "list" | "card" | "map";
-const ALLOWED_VIEWS: ViewMode[] = ["list", "card", "map"];
 
 const currentView = computed<ViewMode>(() => {
-  const v = route.query.view as string | undefined;
-  return ALLOWED_VIEWS.includes(v as ViewMode) ? (v as ViewMode) : "list";
+  const v = route.query.view;
+  return v === "card" || v === "map" ? v : "list";
 });
 
-function switchView(view: ViewMode) {
-  if (view === currentView.value) return;
-  router.push({ query: { ...route.query, view } });
-}
-
-// 抽屉:URL ?node= 决定是否打开;E1 实现具体内容
 const drawerOpen = computed(() => !!route.query.node);
 </script>
 
 <template>
   <div class="dm-page-root">
-    <!-- TopBar(C2 实现具体内容,此处先占位 chrome) -->
-    <header class="dm-topbar">
-      <div class="dm-topbar__left">
-        <span class="dm-topbar__logo">UVP 设备管理</span>
-      </div>
-      <div class="dm-topbar__center">
-        <div class="dm-view-switcher" role="tablist">
-          <button
-            v-for="v in ALLOWED_VIEWS"
-            :key="v"
-            role="tab"
-            :aria-selected="currentView === v"
-            :class="['dm-view-switcher__btn', { active: currentView === v }]"
-            @click="switchView(v)"
-          >
-            {{ v === "list" ? "列表" : v === "card" ? "卡片" : "地图" }}
-          </button>
-        </div>
-      </div>
-      <div class="dm-topbar__right">
-        <!-- 筛选 / 新建 / 设置 留 C2 / C4 -->
-      </div>
-    </header>
+    <TopBar />
 
-    <!-- 工作区:目录树 + 主视图 + 可选抽屉 -->
     <section :class="['dm-workspace', { 'with-drawer': drawerOpen }]">
       <aside class="dm-aside">
-        <!-- C2 DirectoryAside 进来这里 -->
-        <div class="dm-aside__placeholder">目录树(C2)</div>
+        <DirectoryAside />
       </aside>
 
       <main class="dm-main">
-        <KeepAlive>
-          <component :is="`view-${currentView}`">
-            <div class="dm-view-placeholder">{{ currentView }} 视图(C3/D1/D3)</div>
-          </component>
-        </KeepAlive>
+        <div class="dm-view-placeholder">
+          {{ currentView === "list" ? "列表视图(C3 待实现)" : currentView === "card" ? "卡片视图(D1 待实现)" : "地图视图(D3 待实现)" }}
+          <p class="hint">
+            选中左侧节点筛选 / 切换视图试试。当前过滤:
+            <code v-if="route.query.node">node={{ route.query.node }}</code>
+            <code v-else>全部</code>
+          </p>
+        </div>
       </main>
 
       <aside v-if="drawerOpen" class="dm-drawer">
-        <!-- E1 DetailDrawer 进来这里 -->
-        <div class="dm-drawer__placeholder">详情抽屉(E1)<br />node={{ route.query.node }}</div>
+        <div class="dm-drawer__placeholder">
+          详情抽屉(E1 待实现)
+          <p class="hint">node={{ route.query.node }}</p>
+        </div>
       </aside>
     </section>
   </div>
 </template>
 
 <style lang="scss" scoped>
-@use "@/style/var/index.scss" as *;
-
-.dm-topbar {
-  height: var(--topbar-height);
-  background: var(--color-bg-2);
-  border-bottom: 1px solid var(--color-border-2);
-  display: grid;
-  grid-template-columns: 280px 1fr 280px;
-  align-items: center;
-  padding: 0 var(--space-4);
-  overflow: hidden;
-
-  &__logo {
-    font-size: var(--font-16);
-    font-weight: 600;
-    color: var(--color-text-1);
-    letter-spacing: 0.02em;
-  }
-
-  &__center {
-    display: flex;
-    justify-content: center;
-  }
-}
-
-.dm-view-switcher {
-  display: inline-flex;
-  background: var(--color-bg-3);
-  border-radius: var(--dm-radius-2);
-  padding: 2px;
-
-  &__btn {
-    appearance: none;
-    border: 0;
-    background: transparent;
-    color: var(--color-text-3);
-    padding: 6px 14px;
-    font-size: var(--font-13);
-    border-radius: var(--dm-radius-1);
-    cursor: pointer;
-    transition: background var(--duration-fast) var(--ease-out),
-      color var(--duration-fast) var(--ease-out);
-
-    &:hover {
-      color: var(--color-text-1);
-    }
-
-    &.active {
-      background: var(--primary-fade-16);
-      color: var(--primary-5);
-    }
-  }
-}
-
 .dm-workspace {
   display: grid;
   grid-template-columns: var(--aside-width) 1fr;
@@ -156,18 +76,12 @@ const drawerOpen = computed(() => !!route.query.node);
 .dm-main,
 .dm-drawer {
   min-height: 0;
-  overflow: auto; // plan §2.2 子区域各自滚动
+  overflow: auto;
 }
 
 .dm-aside {
   background: var(--color-bg-2);
   border-right: 1px solid var(--color-border-2);
-
-  &__placeholder {
-    padding: var(--space-4);
-    color: var(--color-text-4);
-    font-size: var(--font-12);
-  }
 }
 
 .dm-main {
@@ -184,6 +98,12 @@ const drawerOpen = computed(() => !!route.query.node);
     padding: var(--space-4);
     color: var(--color-text-3);
     line-height: var(--line-relaxed);
+
+    .hint {
+      color: var(--color-text-4);
+      font-size: var(--font-12);
+      margin-top: var(--space-2);
+    }
   }
 }
 
@@ -192,5 +112,19 @@ const drawerOpen = computed(() => !!route.query.node);
   text-align: center;
   margin-top: 30vh;
   font-size: var(--font-16);
+
+  .hint {
+    margin-top: var(--space-3);
+    font-size: var(--font-13);
+
+    code {
+      background: var(--color-bg-3);
+      padding: 2px 6px;
+      border-radius: var(--dm-radius-1);
+      font-family: var(--font-mono);
+      color: var(--color-text-2);
+      margin-left: var(--space-1);
+    }
+  }
 }
 </style>

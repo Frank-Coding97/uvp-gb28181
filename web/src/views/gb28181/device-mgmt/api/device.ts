@@ -155,108 +155,82 @@ export type NodeTypeName = "civil_code" | "biz_group" | "virtual_org" | "device"
 // 接口 - 设备
 // ============================================================
 
-export function listDevices(params: ListDevicesParams = {}): Promise<BaseResult<PageResult<DeviceVO>>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/devices"),
-    method: "get",
-    params,
-  });
-}
+export const listDevices = (params: ListDevicesParams = {}) =>
+  http.request<BaseResult<PageResult<DeviceVO>>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/devices"),
+    { params }
+  );
 
-export function getDevice(id: number): Promise<BaseResult<DeviceVO>> {
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/device/${id}`),
-    method: "get",
-  });
-}
+export const getDevice = (id: number) =>
+  http.request<BaseResult<DeviceVO>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}`));
 
 // ============================================================
 // 接口 - 通道
 // ============================================================
 
-export function listChannels(params: ListChannelsParams = {}): Promise<BaseResult<PageResult<ChannelVO>>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/channels"),
-    method: "get",
-    params,
-  });
-}
+export const listChannels = (params: ListChannelsParams = {}) =>
+  http.request<BaseResult<PageResult<ChannelVO>>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/channels"),
+    { params }
+  );
 
-export function getChannel(id: number): Promise<BaseResult<ChannelVO>> {
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/channel/${id}`),
-    method: "get",
-  });
-}
+export const getChannel = (id: number) =>
+  http.request<BaseResult<ChannelVO>>("get", baseUrlApi(`gb28181/device-mgmt/channel/${id}`));
 
-export function getChannelMounts(id: number): Promise<BaseResult<{ list: ChannelMountVO[]; total: number }>> {
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/channel/${id}/mounts`),
-    method: "get",
-  });
-}
+export const getChannelMounts = (id: number) =>
+  http.request<BaseResult<{ list: ChannelMountVO[]; total: number }>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${id}/mounts`)
+  );
 
-export function getChannelTimeline(
-  id: number,
-  range: "24h" = "24h"
-): Promise<BaseResult<{ slots: TimelineSlot[]; range: string; channelId: number; phase1Simplified: boolean }>> {
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/channel/${id}/timeline`),
-    method: "get",
-    params: { range },
-  });
-}
+export const getChannelTimeline = (id: number, range: "24h" = "24h") =>
+  http.request<
+    BaseResult<{ slots: TimelineSlot[]; range: string; channelId: number; phase1Simplified: boolean }>
+  >("get", baseUrlApi(`gb28181/device-mgmt/channel/${id}/timeline`), { params: { range } });
 
 // ============================================================
 // 接口 - 地图
 // ============================================================
 
-export function getMapMarkers(bbox: Partial<MarkerBBox> = {}): Promise<BaseResult<{ list: MarkerVO[]; total: number }>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/map/markers"),
-    method: "get",
-    params: bbox,
-  });
-}
+export const getMapMarkers = (bbox: Partial<MarkerBBox> = {}) =>
+  http.request<BaseResult<{ list: MarkerVO[]; total: number }>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/map/markers"),
+    { params: bbox }
+  );
 
-export function getMapClusters(
-  params: Partial<MarkerBBox> & { zoom: number }
-): Promise<BaseResult<{ clusters: ClusterVO[]; zoom: number; gridSize: number }>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/map/clusters"),
-    method: "get",
-    params,
-  });
-}
+export const getMapClusters = (params: Partial<MarkerBBox> & { zoom: number }) =>
+  http.request<BaseResult<{ clusters: ClusterVO[]; zoom: number; gridSize: number }>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/map/clusters"),
+    { params }
+  );
 
-export function getMapNoCoordCount(): Promise<BaseResult<{ count: number }>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/map/no-coord-count"),
-    method: "get",
-  });
-}
+export const getMapNoCoordCount = () =>
+  http.request<BaseResult<{ count: number }>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/map/no-coord-count")
+  );
 
 // ============================================================
 // 接口 - 异常治理
 // ============================================================
 
-export function listAnomalies(
-  params: { resolved?: 0 | 1; page?: number; pageSize?: number } = {}
-): Promise<BaseResult<PageResult<AnomalyVO>>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/anomaly"),
-    method: "get",
-    params,
-  });
-}
+export const listAnomalies = (params: { resolved?: 0 | 1; page?: number; pageSize?: number } = {}) =>
+  http.request<BaseResult<PageResult<AnomalyVO>>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/anomaly"),
+    { params }
+  );
 
-export function resolveAnomaly(id: number, body: ResolveBody): Promise<BaseResult<{ id: number; ok: boolean }>> {
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/anomaly/${id}/resolve`),
-    method: "post",
-    data: body,
-  });
-}
+export const resolveAnomaly = (id: number, body: ResolveBody) =>
+  http.request<BaseResult<{ id: number; ok: boolean }>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/anomaly/${id}/resolve`),
+    { data: body }
+  );
 
 export interface BatchResolveBody {
   ids: number[];
@@ -265,12 +239,9 @@ export interface BatchResolveBody {
   targetParentId?: number;
 }
 
-export function batchResolveAnomaly(
-  body: BatchResolveBody
-): Promise<BaseResult<{ succeeded: number[]; failed: Array<{ id: number; error: string }> }>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/anomaly/batch-resolve"),
-    method: "post",
-    data: body,
-  });
-}
+export const batchResolveAnomaly = (body: BatchResolveBody) =>
+  http.request<BaseResult<{ succeeded: number[]; failed: Array<{ id: number; error: string }> }>>(
+    "post",
+    baseUrlApi("gb28181/device-mgmt/anomaly/batch-resolve"),
+    { data: body }
+  );

@@ -55,49 +55,39 @@ export interface CatalogSubtreeResult {
 // ============================================================
 
 /** 树根列表(parent_id IS NULL) */
-export function getCatalogTreeRoots(): Promise<BaseResult<CatalogListResult>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/catalog/tree"),
-    method: "get",
-  });
-}
+export const getCatalogTreeRoots = () =>
+  http.request<BaseResult<CatalogListResult>>("get", baseUrlApi("gb28181/device-mgmt/catalog/tree"));
 
 /** 单节点 */
-export function getCatalogNode(id: number): Promise<BaseResult<CatalogNode>> {
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/catalog/tree/${id}`),
-    method: "get",
-  });
-}
+export const getCatalogNode = (id: number) =>
+  http.request<BaseResult<CatalogNode>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/catalog/tree/${id}`)
+  );
 
 /** 子节点(可选挂载数派生) */
-export function getCatalogChildren(
-  parentId: number,
-  options?: { withMountCount?: boolean }
-): Promise<BaseResult<CatalogListResult>> {
+export const getCatalogChildren = (parentId: number, options?: { withMountCount?: boolean }) => {
   const params: Record<string, string | number> = {};
   if (options?.withMountCount) {
     params.withMountCount = 1;
   }
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/catalog/tree/${parentId}/children`),
-    method: "get",
-    params,
-  });
-}
+  return http.request<BaseResult<CatalogListResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/catalog/tree/${parentId}/children`),
+    { params }
+  );
+};
 
 /** 整子树(按物化路径 LIKE) */
-export function getCatalogSubtree(id: number): Promise<BaseResult<CatalogSubtreeResult>> {
-  return http.request({
-    url: baseUrlApi(`gb28181/device-mgmt/catalog/tree/${id}/subtree`),
-    method: "get",
-  });
-}
+export const getCatalogSubtree = (id: number) =>
+  http.request<BaseResult<CatalogSubtreeResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/catalog/tree/${id}/subtree`)
+  );
 
 /** 未处理 anomaly 数(左侧底部入口角标) */
-export function getAnomalyCount(): Promise<BaseResult<{ count: number }>> {
-  return http.request({
-    url: baseUrlApi("gb28181/device-mgmt/catalog/anomaly/count"),
-    method: "get",
-  });
-}
+export const getAnomalyCount = () =>
+  http.request<BaseResult<{ count: number }>>(
+    "get",
+    baseUrlApi("gb28181/device-mgmt/catalog/anomaly/count")
+  );
