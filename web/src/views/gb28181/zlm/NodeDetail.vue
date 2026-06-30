@@ -530,6 +530,18 @@ function fmtTime(s: string | undefined | null): string {
 }
 
 /* === Tabs === */
+.detail-tabs {
+    width: 100%;
+}
+
+.detail-tabs :deep(.arco-tabs-content),
+.detail-tabs :deep(.arco-tabs-content-list),
+.detail-tabs :deep(.arco-tabs-content-item),
+.detail-tabs :deep(.arco-tabs-pane) {
+    width: 100%;
+    box-sizing: border-box;
+}
+
 .detail-tabs :deep(.arco-tabs-nav) {
     background: transparent;
     border-bottom: 1px solid var(--zlm-border);
@@ -559,17 +571,17 @@ function fmtTime(s: string | undefined | null): string {
 }
 
 .kpi-grid-4 {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .kpi-grid-3 {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* === 趋势图 === */
 .trend-row {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--zlm-space-4);
     margin: var(--zlm-space-4) 0;
 }
@@ -635,7 +647,7 @@ function fmtTime(s: string | undefined | null): string {
 
 .info-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--zlm-space-3) var(--zlm-space-6);
 }
 
