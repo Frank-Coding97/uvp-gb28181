@@ -37,11 +37,3 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 	}
 	return c.SetServerConfig(ctx, params)
 }
-
-// ApplyConfig 旧入口,无 mediaServerId 注入
-//
-// Deprecated: M1 过渡期保留,M3 TF.2 删除。新代码请用 ApplyConfigForNode。
-func (c *Client) ApplyConfig(ctx context.Context, media gbconfig.MediaConfig) error {
-	return c.ApplyConfigForNode(ctx, media)
-}
-

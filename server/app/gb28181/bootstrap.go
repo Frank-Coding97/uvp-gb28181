@@ -227,17 +227,21 @@ func Start() {
 	}
 
 	// 向 ZLMediaKit 动态下发 Hook 配置(控制面,替代 config.ini 写死)
-	// M1 单节点过渡:取 Registry 首节点;若 Registry 空(seed 失败/db 不可达)走 yaml fallback
+	// 取 Registry 首节点(yaml→DB seed 后必然非空);Registry 空则降级跳过下发
 	zlmClient = pickInitialClient(cfg)
-	go func(client *gbzlm.Client) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := client.ApplyConfigForNode(ctx, cfg.Media); err != nil {
-			app.ZapLog.Warn("GB28181 ZLM 配置下发失败(ZLM 可能暂不可达,不影响启动)", zap.Error(err))
-		} else {
-			app.ZapLog.Info("GB28181 ZLM Hook 配置已下发", zap.String("hookHost", cfg.Media.HookHost))
-		}
-	}(zlmClient)
+	if zlmClient != nil {
+		go func(client *gbzlm.Client) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := client.ApplyConfigForNode(ctx, cfg.Media); err != nil {
+				app.ZapLog.Warn("GB28181 ZLM 配置下发失败(ZLM 可能暂不可达,不影响启动)", zap.Error(err))
+			} else {
+				app.ZapLog.Info("GB28181 ZLM Hook 配置已下发", zap.String("hookHost", cfg.Media.HookHost))
+			}
+		}(zlmClient)
+	} else {
+		app.ZapLog.Warn("GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发")
+	}
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
 	//
@@ -431,15 +435,18 @@ func setupZLMSchedulerController() {
 	app.ZapLog.Info("GB28181 ZLM Scheduler Controller 已装配")
 }
 
-// pickInitialClient M1 单节点过渡期:优先取 Registry 首节点,失败 fallback yaml
-func pickInitialClient(cfg gbconfig.Config) *gbzlm.Client {
-	if zlmRegistry != nil {
-		if list := zlmRegistry.List(); len(list) > 0 {
-			return gbzlm.NewClientForNode(list[0])
-		}
+// pickInitialClient 取 Registry 首节点构造 Client(Apply Hook 配置用)
+// Registry 在本函数之前已通过 setupZLMRegistry 加载并按需 yaml→DB seed,
+// 因此正常路径下 List() 必然非空;若 DB 不可达 / seed 失败则返回 nil,上层降级跳过下发。
+func pickInitialClient(_ gbconfig.Config) *gbzlm.Client {
+	if zlmRegistry == nil {
+		return nil
 	}
-	// Deprecated: yaml fallback,M3 TF.2 删
-	return gbzlm.NewClient(cfg.ZLM)
+	list := zlmRegistry.List()
+	if len(list) == 0 {
+		return nil
+	}
+	return gbzlm.NewClientForNode(list[0])
 }
 
 // runMetricsCleanup 周期清理过期配对(防内存泄漏);30s TTL

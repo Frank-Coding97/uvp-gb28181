@@ -14,8 +14,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 )
 
-// loadCfg 从 server/config 读真实 ZLM 配置(连 222)
-func loadCfg(t *testing.T) gbconfig.ZLMConfig {
+// loadNode 从 server/config 读 yaml,构造一个临时 Node 用于联通真机 ZLM 的 IT 测试
+func loadNode(t *testing.T) *node.Node {
 	_, thisFile, _, _ := runtime.Caller(0)
 	configDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "config")
 	if app.ConfigYml == nil {
@@ -25,12 +25,16 @@ func loadCfg(t *testing.T) gbconfig.ZLMConfig {
 	if cfg.Host == "" || cfg.Secret == "" {
 		t.Skip("跳过(ZLM 未配置)")
 	}
-	return cfg
+	return &node.Node{
+		Host:      cfg.Host,
+		APIPort:   cfg.HTTPPort,
+		APISecret: cfg.Secret,
+	}
 }
 
 // TestGetServerConfig T1-测1: 连通 uvp-zlm
 func TestGetServerConfig(t *testing.T) {
-	c := NewClient(loadCfg(t))
+	c := NewClientForNode(loadNode(t))
 	conf, err := c.GetServerConfig(context.Background())
 	if err != nil {
 		t.Skipf("跳过(无法连接 ZLM,可能不在内网): %v", err)
@@ -43,7 +47,7 @@ func TestGetServerConfig(t *testing.T) {
 
 // TestSetServerConfig T1-测2: 下发 Hook 地址,读回确认
 func TestSetServerConfig(t *testing.T) {
-	c := NewClient(loadCfg(t))
+	c := NewClientForNode(loadNode(t))
 	ctx := context.Background()
 	hookURL := "http://192.168.0.204:8280/index/hook/on_stream_changed"
 	err := c.SetServerConfig(ctx, map[string]string{"hook.on_stream_changed": hookURL})
@@ -61,7 +65,7 @@ func TestSetServerConfig(t *testing.T) {
 
 // TestIsMediaOnlineNotExist T6.1-测1: 查询不存在的流 → online=false 且无错误
 func TestIsMediaOnlineNotExist(t *testing.T) {
-	c := NewClient(loadCfg(t))
+	c := NewClientForNode(loadNode(t))
 	online, err := c.IsMediaOnline(context.Background(), "rtp", "definitely-not-exist-stream-id")
 	if err != nil {
 		t.Skipf("跳过(ZLM 不可达): %v", err)
@@ -73,7 +77,7 @@ func TestIsMediaOnlineNotExist(t *testing.T) {
 
 // TestGetMediaInfoNotExist T6.1-测2: 查不存在的流 → online=false 且不报错
 func TestGetMediaInfoNotExist(t *testing.T) {
-	c := NewClient(loadCfg(t))
+	c := NewClientForNode(loadNode(t))
 	info, err := c.GetMediaInfo(context.Background(), "rtp", "definitely-not-exist-stream-id")
 	if err != nil {
 		t.Skipf("跳过(ZLM 不可达): %v", err)

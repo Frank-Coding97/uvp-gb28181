@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"time"
 
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
@@ -23,7 +22,7 @@ type Client struct {
 	http    *http.Client
 }
 
-// NewClientForNode 基于 Node 构造 Client(M1 重构入口)
+// NewClientForNode 基于 Node 构造 Client
 func NewClientForNode(n *node.Node) *Client {
 	return &Client{
 		node:    n,
@@ -33,20 +32,7 @@ func NewClientForNode(n *node.Node) *Client {
 	}
 }
 
-// NewClient 旧入口,从 yaml 单实例配置构造
-//
-// Deprecated: M1 过渡期保留,M3 TF.2 删除。新代码请用 NewClientForNode。
-// 内部把 cfg 包装成临时 node.Node(无 ID / UUID),仅用于 bootstrap 单实例兼容路径。
-func NewClient(cfg gbconfig.ZLMConfig) *Client {
-	n := &node.Node{
-		Host:      cfg.Host,
-		APIPort:   cfg.HTTPPort,
-		APISecret: cfg.Secret,
-	}
-	return NewClientForNode(n)
-}
-
-// Node 返回绑定节点(deprecated 路径下 Node 仅包含 host/port/secret,无 UUID)
+// Node 返回绑定节点
 func (c *Client) Node() *node.Node { return c.node }
 
 
