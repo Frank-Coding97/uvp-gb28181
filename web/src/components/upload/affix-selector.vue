@@ -1,5 +1,6 @@
 <template>
     <a-modal
+        modal-class="uvp-system-dialog"
         :width="800"
         :visible="props.visible"
         :title="title"
@@ -258,16 +259,17 @@ watch(() => props.visible, (newVal) => {
 }
 
 .search-box {
-
-    background: var(--color-bg-2);
-    border-radius: 4px;
+    padding: 12px;
+    background: var(--uvp-list-toolbar-bg);
+    border-radius: 8px;
+    margin-bottom: 12px;
 }
 
 .footer-actions {
     margin-top: 16px;
     padding-top: 16px;
     padding-bottom: 16px;
-    border-top: 1px solid var(--color-border-2);
+    border-top: 1px solid var(--uvp-panel-border);
     text-align: right;
 }
 
@@ -275,9 +277,10 @@ watch(() => props.visible, (newVal) => {
     width: 80px;
     height: 60px;
     cursor: pointer;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
-    border: 1px solid var(--color-border-2);
+    border: 1px solid var(--uvp-panel-border);
+    transition: all 0.2s;
 }
 
 .image-preview img {
@@ -287,6 +290,7 @@ watch(() => props.visible, (newVal) => {
 }
 
 .image-preview:hover {
-    border-color: var(--color-primary);
+    border-color: var(--uvp-brand);
+    box-shadow: 0 0 0 2px rgb(37 99 235 / 8%);
 }
 </style>

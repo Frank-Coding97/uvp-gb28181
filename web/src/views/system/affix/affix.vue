@@ -106,7 +106,7 @@
         </a-modal>
 
         <!-- 大文件分片上传对话框 -->
-        <a-modal v-model:visible="chunkUploadVisible" title="大文件上传" :footer="false" :width="700" @close="onChunkUploadClose">
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="chunkUploadVisible" title="大文件上传" :footer="false" :width="700" @close="onChunkUploadClose">
             <chunk-upload
                 ref="chunkUploadRef"
                 :auto-start="true"
