@@ -503,10 +503,12 @@ body {
   overflow: hidden;
   border: 1px solid var(--uvp-list-panel-border);
   border-radius: 12px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 85%);
 }
 
 .uvp-data-table .arco-table-th {
   height: 44px;
+  font-weight: 620;
   color: var(--uvp-text-secondary);
   background: var(--uvp-table-header-bg);
   border-bottom: 1px solid var(--uvp-list-panel-border);
@@ -522,6 +524,24 @@ body {
   background: var(--uvp-table-row-hover-bg);
 }
 
+.uvp-data-table .arco-table-th.arco-table-col-fixed-right,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-right {
+  background: linear-gradient(180deg, rgb(255 255 255 / 97%) 0%, #ffffff 100%) !important;
+  box-shadow: -1px 0 0 #edf2f8 !important;
+}
+
+.uvp-data-table .arco-table-th.arco-table-col-fixed-right-first::before,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-right-first::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  width: 10px;
+  content: "";
+  pointer-events: none;
+  background: linear-gradient(90deg, rgb(241 245 249 / 0%) 0%, rgb(241 245 249 / 70%) 100%);
+}
+
 .uvp-data-table .arco-table-cell {
   font-size: 13px;
 }
@@ -535,12 +555,70 @@ body {
 }
 
 .uvp-data-table .arco-link {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
   font-size: 13px;
   font-weight: 560;
+  color: var(--uvp-text-secondary);
+  text-decoration: none;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.uvp-data-table .arco-link:hover {
+  opacity: 0.92;
+}
+
+.uvp-data-table .arco-link.arco-link-status-normal:hover {
+  color: var(--uvp-brand-strong);
+}
+
+.uvp-data-table .arco-link.arco-link-status-warning {
+  color: #b7791f;
+}
+
+.uvp-data-table .arco-link.arco-link-status-warning:hover {
+  color: #9a6b18;
+}
+
+.uvp-data-table .arco-link.arco-link-status-danger {
+  color: #d14343;
+}
+
+.uvp-data-table .arco-link.arco-link-status-danger:hover {
+  color: #ba2f2f;
+}
+
+.uvp-data-table .arco-link .arco-link-icon {
+  font-size: 13px;
+}
+
+.uvp-data-table .arco-space-item .arco-link + .arco-link {
+  margin-left: 0;
 }
 
 .uvp-data-table .arco-tag {
+  min-width: 48px;
+  justify-content: center;
+  font-weight: 560;
   border-radius: 999px;
+}
+
+.uvp-data-table .arco-tag.arco-tag-bordered {
+  border-width: 1px;
+}
+
+.uvp-data-table .arco-tag.arco-tag-arcoblue {
+  color: #2459d3 !important;
+  background: #edf4ff !important;
+  border-color: #cfe0ff !important;
+}
+
+.uvp-data-table .arco-tag.arco-tag-red,
+.uvp-data-table .arco-tag.arco-tag-danger {
+  color: #c24141 !important;
+  background: #fff1f1 !important;
+  border-color: #f5cccc !important;
 }
 
 @media (max-width: 768px) {
