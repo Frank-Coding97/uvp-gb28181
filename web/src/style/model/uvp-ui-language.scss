@@ -968,6 +968,45 @@ body {
   border-radius: 8px;
 }
 
+.uvp-system-tabs .arco-tabs-nav {
+  margin-bottom: 18px;
+}
+
+.uvp-system-tabs .arco-tabs-nav-tab {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  background: #f3f7fb;
+  border: 1px solid var(--uvp-dialog-border);
+  border-radius: 12px;
+}
+
+.uvp-system-tabs .arco-tabs-tab {
+  min-width: 92px;
+  justify-content: center;
+  padding: 7px 14px;
+  margin: 0;
+  color: var(--uvp-text-secondary);
+  font-weight: 580;
+  border-radius: 9px;
+  transition: color 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.uvp-system-tabs .arco-tabs-tab:hover {
+  color: var(--uvp-brand-strong);
+}
+
+.uvp-system-tabs .arco-tabs-tab-active,
+.uvp-system-tabs .arco-tabs-tab-active:hover {
+  color: var(--uvp-brand-strong);
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgb(37 99 235 / 10%);
+}
+
+.uvp-system-tabs .arco-tabs-nav-ink {
+  display: none;
+}
+
 @media (max-width: 768px) {
   .snow-page,
   .snow-fill {

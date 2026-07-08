@@ -2,7 +2,7 @@
     <a-drawer body-class="uvp-system-dialog__body" :visible="drawerVisible" @ok="handleEdit" @cancel="handleCancel" :ok-loading="editLoading"
         :width="layoutMode.width" :title="title">
         <a-form ref="editFormRef" auto-label-width :layout="layoutMode.layout" :model="editForm">
-            <a-tabs default-active-key="1">
+            <a-tabs class="uvp-system-tabs" default-active-key="1">
                 <a-tab-pane key="1" title="基本信息">
                     <a-card class="mb-4">
                         <a-row :gutter="24">

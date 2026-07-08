@@ -14,7 +14,7 @@
                 </template>
             </s-layout-tools>
 
-            <a-tabs v-model:active-key="activeTab" :animation="true">
+            <a-tabs class="uvp-system-tabs" v-model:active-key="activeTab" :animation="true">
                 <!-- 服务器配置 -->
                 <a-tab-pane key="server" title="服务器配置">
                     <a-card :bordered="false" class="mb-4">

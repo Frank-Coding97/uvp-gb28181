@@ -45,7 +45,7 @@
             <a-card class="margin-top" :bordered="false">
                 <a-row align="center">
                     <a-col :span="24">
-                        <a-tabs :type="type" :size="size" :active-key="activeTabs" @change="onChangeTab">
+                        <a-tabs class="uvp-system-tabs" :type="type" :size="size" :active-key="activeTabs" @change="onChangeTab">
                             <a-tab-pane key="1" title="基本信息">
                                 <BasicInfo v-model="userInfo" @refresh="refresh" />
                             </a-tab-pane>
