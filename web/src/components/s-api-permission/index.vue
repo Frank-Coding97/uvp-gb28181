@@ -3,8 +3,8 @@
         :ok-loading="loading">
         <div class="api-permission-container">
             <!-- 搜索区域 -->
-            <a-card class="search-card">
-                <a-form layout="inline" :model="searchForm"  auto-label-width>
+            <a-card class="search-card uvp-system-panel uvp-system-panel--dense">
+                <a-form class="uvp-system-form" layout="inline" :model="searchForm"  auto-label-width>
                     <a-form-item field="title" label="API标题">
                         <a-input v-model="searchForm.title" placeholder="请输入API标题" allow-clear style="width: 180px"
                             @keyup.enter="handleSearch" />
@@ -42,7 +42,7 @@
             </a-card>
 
             <!-- 操作区域 -->
-            <a-card class="actions-card">
+            <a-card class="actions-card uvp-system-panel uvp-system-panel--dense">
                 <a-row justify="space-between" align="center">
                     <a-col :span="12">
                         <a-space>

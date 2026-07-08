@@ -101,7 +101,7 @@
         <!-- 详情弹窗 -->
         <a-modal modal-class="uvp-system-dialog" v-model:visible="detailVisible" :width="layoutMode.width" :footer="false" @close="detailVisible = false">
             <template #title>操作日志详情</template>
-            <a-descriptions :column="1" bordered size="medium">
+            <a-descriptions class="uvp-system-description uvp-system-description--compact" :column="1" bordered size="medium">
                 <a-descriptions-item label="ID">{{ currentLog.id }}</a-descriptions-item>
                 <a-descriptions-item label="用户名">{{ currentLog.username }}</a-descriptions-item>
                 <a-descriptions-item label="操作模块">{{ currentLog.module }}</a-descriptions-item>
@@ -128,14 +128,13 @@
                 <a-descriptions-item label="部门">{{ currentLog.deptName }}</a-descriptions-item>
                 <a-descriptions-item label="操作时间">{{ formatTime(currentLog.createdAt) }}</a-descriptions-item>
                 <a-descriptions-item label="请求参数">
-                    <pre style="white-space: pre-wrap; word-wrap: break-word;">{{ currentLog.requestData }}</pre>
+                    <pre class="log-detail-block">{{ currentLog.requestData }}</pre>
                 </a-descriptions-item>
                 <a-descriptions-item label="响应数据">
-                    <pre style="white-space: pre-wrap; word-wrap: break-word;">{{ currentLog.responseData }}</pre>
+                    <pre class="log-detail-block">{{ currentLog.responseData }}</pre>
                 </a-descriptions-item>
                 <a-descriptions-item label="错误信息" v-if="currentLog.errorMsg">
-                    <pre
-                        style="white-space: pre-wrap; word-wrap: break-word; color: red;">{{ currentLog.errorMsg }}</pre>
+                    <pre class="log-detail-block log-detail-block--error">{{ currentLog.errorMsg }}</pre>
                 </a-descriptions-item>
             </a-descriptions>
         </a-modal>
@@ -328,6 +327,26 @@ onMounted(() => {
     getLogList();
 });
 </script>
+
+<style lang="scss" scoped>
+.log-detail-block {
+    padding: 10px 12px;
+    margin: 0;
+    overflow: auto;
+    color: var(--uvp-text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    background: #f8fbff;
+    border: 1px solid #e6edf7;
+    border-radius: 10px;
+}
+
+.log-detail-block--error {
+    color: var(--uvp-danger);
+    background: #fff7f7;
+    border-color: #f4d0d0;
+}
+</style>
 
 <style lang="scss" scoped>
 .text-right-gap {

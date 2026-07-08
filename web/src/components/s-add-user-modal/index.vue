@@ -10,8 +10,8 @@
   >
     <div class="add-user-container">
       <!-- 搜索区域 -->
-      <a-card class="search-card">
-        <a-form :model="searchForm" layout="inline" auto-label-width>
+      <a-card class="search-card uvp-system-panel uvp-system-panel--dense">
+        <a-form class="uvp-system-form" :model="searchForm" layout="inline" auto-label-width>
           <a-form-item field="name" label="用户名或昵称">
             <a-input
               v-model="searchForm.name"

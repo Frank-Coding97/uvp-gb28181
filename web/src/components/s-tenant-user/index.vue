@@ -12,7 +12,7 @@
   >
     <div class="tenant-user-container">
       <!-- 操作区域 -->
-      <a-card class="actions-card">
+      <a-card class="actions-card uvp-system-panel uvp-system-panel--dense">
         <a-row justify="space-between" align="center">
           <a-col :span="isMobile ? 24 : 12">
             <a-space>
@@ -112,7 +112,7 @@
     @cancel="handleRoleCancel"
     :ok-loading="roleModalLoading"
   >
-    <a-form :model="roleForm" :layout="layoutMode.layout" auto-label-width>
+    <a-form class="uvp-system-form" :model="roleForm" :layout="layoutMode.layout" auto-label-width>
       <a-form-item label="用户">
         {{ currentUserInfo.userName }} ({{ currentUserInfo.nickName }})
       </a-form-item>
