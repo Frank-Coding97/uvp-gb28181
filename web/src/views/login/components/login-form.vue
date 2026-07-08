@@ -23,7 +23,7 @@
                         </template>
                     </a-input-password>
                 </a-form-item>
-                <a-form-item v-if="isCaptchaEnabled" field="captchaValue" :hide-asterisk="true">
+                <a-form-item field="verifyCode" :hide-asterisk="true">
                     <div class="verifyCode">
                         <a-input style="width: 160px" v-model="form.captchaValue" allow-clear placeholder="请输入验证码" />
                         <!-- <s-verify-code :content-height="30" :font-size-max="30" :content-width="110"
@@ -51,7 +51,7 @@
 import { useRouter } from "vue-router";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useUserStoreHook } from "@/store/modules/user";
-import { computed, onMounted, ref, watch } from "vue";
+import { onMounted, ref, watch } from "vue";
 import { getVerifyImgString } from "@/api/user";
 import { useSystemStore } from "@/store/modules/system";
 import { useSysConfigStore } from "@/store/modules/sys-config";
@@ -59,7 +59,7 @@ import { useSysConfigStore } from "@/store/modules/sys-config";
 import { storeToRefs } from "pinia";
 // 获取系统配置
 const sysConfigStore = useSysConfigStore();
-const { systemConfig, captchaConfig } = storeToRefs(sysConfigStore);
+const { systemConfig } = storeToRefs(sysConfigStore);
 // 定义表单数据类型
 interface LoginForm {
     tenantCode: string;
@@ -85,34 +85,25 @@ const form = ref<LoginForm>({
 
 
 // 表单验证规则
-const isCaptchaEnabled = computed(() => captchaConfig.value.open);
-
-const rules = computed(() => {
-    const baseRules: Record<string, Array<{ required: boolean; message: string }>> = {
-        username: [
-            {
-                required: true,
-                message: "请输入账号"
-            }
-        ],
-        password: [
-            {
-                required: true,
-                message: "请输入密码"
-            }
-        ]
-    };
-
-    if (isCaptchaEnabled.value) {
-        baseRules.captchaValue = [
-            {
-                required: true,
-                message: "请输入验证码"
-            }
-        ];
-    }
-
-    return baseRules;
+const rules = ref({
+    username: [
+        {
+            required: true,
+            message: "请输入账号"
+        }
+    ],
+    password: [
+        {
+            required: true,
+            message: "请输入密码"
+        }
+    ],
+    captchaValue: [
+        {
+            required: true,
+            message: "请输入验证码"
+        }
+    ]
 });
 
 // 提交表单
@@ -128,13 +119,7 @@ const onLogin = async () => {
         loginLoading.value = true;
 
         // 执行登录
-        const loginData = {
-            ...form.value,
-            captchaId: isCaptchaEnabled.value ? form.value.captchaId : "",
-            captchaValue: isCaptchaEnabled.value ? form.value.captchaValue : null
-        };
-
-        await useUserStoreHook().loginByUsername(loginData);
+        await useUserStoreHook().loginByUsername(form.value);
 
         // 加载用户信息
         await useUserStoreHook().getUserInfo();
@@ -164,12 +149,6 @@ const onLogin = async () => {
 // 验证码
 const captchaImgUrl = ref("");
 const refreshCaptcha = () => {
-    if (!isCaptchaEnabled.value) {
-        form.value.captchaId = "";
-        form.value.captchaValue = null;
-        captchaImgUrl.value = "";
-        return;
-    }
     getVerifyImgString().then(res => {
         form.value.captchaId = res.data.captchaId;
         captchaImgUrl.value = res.data.image;
@@ -192,9 +171,6 @@ watch(systemConfig, (newConfig) => {
 
 // 组件挂载时的初始化
 onMounted(async () => {
-    await sysConfigStore.getConfig().catch((error: unknown) => {
-        console.warn("获取系统配置失败，将使用已缓存配置:", error);
-    });
     refreshCaptcha();
 });
 </script>

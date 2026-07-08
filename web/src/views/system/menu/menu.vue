@@ -42,17 +42,7 @@
                             <span>{{ expand ? "收起" : "展开" }}</span>
                         </a-button>
 
-                        <a-button @click="onExport" v-hasPerm="['system:menu:export']">
-                            <template #icon><icon-export /></template>
-                            <span>导出</span>
-                        </a-button>
-
-                        <a-button @click="onImport" v-hasPerm="['system:menu:import']">
-                            <template #icon><icon-import /></template>
-                            <span>导入</span>
-                        </a-button>
-
-                        <a-button status="danger" @click="onBatchDelete" v-hasPerm="['system:menu:delete']">
+                        <a-button type="outline" status="danger" @click="onBatchDelete" v-hasPerm="['system:menu:delete']">
                             <template #icon><icon-delete /></template>
                             <span>批量删除</span>
                         </a-button>
@@ -65,16 +55,11 @@
                 :bordered="false" show-empty-tree :pagination="false" size="medium"
                 :scroll="{ x: '100%', y: '100%' }">
                 <template #columns>
-                    <a-table-column title="菜单名称" :width="150" tooltip ellipsis>
+                    <a-table-column title="菜单名称" :width="180" tooltip ellipsis>
                         <template #cell="{ record }">
-                            <a-space>
-                                <div>{{ $t(`menu.${record.title}`) }}</div>
-                                <a-badge v-if="record.apis && record.apis.length > 0" :count="record.apis.length"
-                                    :max-count="99"></a-badge>
-                            </a-space>
+                            <span>{{ $t(`menu.${record.title}`) }}</span>
                         </template>
                     </a-table-column>
-                    <a-table-column title="ID" data-index="id" :width="75" tooltip ellipsis></a-table-column>
                     <a-table-column title="类型" align="center" :width="70">
                         <template #cell="{ record }">
                             <a-tag v-if="record.type == 1" bordered size="small" color="purple">目录</a-tag>
@@ -144,27 +129,24 @@
                             </a-space>
                         </template>
                     </a-table-column>
-                    <a-table-column title="操作" align="center" :width="280"  :fixed="isMobile ? '' : 'right'">
+                    <a-table-column title="操作" align="center" :width="300"  :fixed="isMobile ? '' : 'right'">
                         <template #cell="{ record }">
-                            <a-space>
-                                <a-link status="warning" @click="onAssignApi(record)"
+                            <a-space size="mini">
+                                <a-button size="mini" type="text" status="warning" @click="onAssignApi(record)"
                                     v-hasPerm="['system:menu:setMenuApis']">
-                                    <span>API权限</span>
-                                </a-link>
-                                <a-link v-if="record.type != 3" @click="onCurrentAdd(record)"
+                                    API权限
+                                </a-button>
+                                <a-button size="mini" type="text" v-if="record.type != 3" @click="onCurrentAdd(record)"
                                     v-hasPerm="['system:menu:add']">
-                                    <template #icon><icon-plus /></template>
-                                    <span>新增</span>
-                                </a-link>
-                                <a-link @click="onUpdate(record)" v-hasPerm="['system:menu:edit']">
-                                    <template #icon><icon-edit /></template>
-                                    <span>修改</span>
-                                </a-link>
+                                    新增
+                                </a-button>
+                                <a-button size="mini" type="text" @click="onUpdate(record)" v-hasPerm="['system:menu:edit']">
+                                    修改
+                                </a-button>
                                 <a-popconfirm type="warning" content="确定删除该项吗?" @ok="onDelete(record)">
-                                    <a-link status="danger" v-hasPerm="['system:menu:delete']">
-                                        <template #icon><icon-delete /></template>
-                                        <span>删除</span>
-                                    </a-link>
+                                    <a-button size="mini" type="text" status="danger" v-hasPerm="['system:menu:delete']">
+                                        删除
+                                    </a-button>
                                 </a-popconfirm>
                             </a-space>
                         </template>
