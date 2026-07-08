@@ -1,18 +1,21 @@
 <template>
     <div class="snow-fill">
-        <div class="snow-fill-inner container">
+        <div class="snow-fill-inner container uvp-split-list-page">
 
 
             <s-fold-page :width="280">
-                <template #sider> 
-                    <div class="left-box">
-                        <a-input v-model="deptSearchKeyword" placeholder="请输入部门名称" @input="onDeptSearch" @clear="onDeptSearch"
+                <template #sider>
+                    <div class="left-box uvp-tree-panel">
+                        <div class="uvp-tree-panel__head">
+                            <span class="uvp-tree-panel__title">组织部门</span>
+                        </div>
+                        <a-input class="uvp-tree-panel__search" v-model="deptSearchKeyword" placeholder="请输入部门名称" @input="onDeptSearch" @clear="onDeptSearch"
                             allow-clear>
                             <template #prefix>
                                 <icon-search />
                             </template>
                         </a-input>
-                        <div class="tree-box">
+                        <div class="tree-box uvp-tree-panel__body">
                             <a-tree ref="treeRef" :field-names="fieldNames" :data="filteredTreeData" show-line
                                 @select="onSelectTree">
                             </a-tree>
@@ -21,30 +24,38 @@
                 </template>
 
                 <template #content>
-                    <div class="right-box">
-                        <a-space wrap>
-                            <a-input v-model="form.name" placeholder="请输入用户名称" allow-clear />
-                            <a-input v-model="form.phone" placeholder="请输入手机号码" allow-clear />
-                            <a-select placeholder="用户状态" v-model="form.status" style="width: 120px" allow-clear>
-                                <a-option v-for="item in openState" :key="item.value" :value="item.value">{{ item.name
-                                }}</a-option>
-                            </a-select>
-                            <a-range-picker v-model="form.createTime" show-time format="YYYY-MM-DD HH:mm" allow-clear />
-                            <a-button type="primary" @click="search">
-                                <template #icon><icon-search /></template>
-                                <span>查询</span>
-                            </a-button>
-                            <a-button @click="reset">
-                                <template #icon><icon-refresh /></template>
-                                <span>重置</span>
-                            </a-button>
-                            <a-button type="primary" @click="onAdd" v-hasPerm="['system:account:add']">
-                                <template #icon><icon-plus /></template>
-                                <span>新增</span>
-                            </a-button>
-                        </a-space>
+                    <div class="right-box uvp-list-workspace">
+                        <div class="uvp-list-toolbar">
+                            <div class="uvp-list-toolbar__filters">
+                                <a-space wrap>
+                                    <a-input v-model="form.name" placeholder="请输入用户名称" style="width: 180px" allow-clear />
+                                    <a-input v-model="form.phone" placeholder="请输入手机号码" style="width: 180px" allow-clear />
+                                    <a-select placeholder="用户状态" v-model="form.status" style="width: 120px" allow-clear>
+                                        <a-option v-for="item in openState" :key="item.value" :value="item.value">{{ item.name
+                                        }}</a-option>
+                                    </a-select>
+                                    <a-range-picker v-model="form.createTime" style="width: 300px" show-time format="YYYY-MM-DD HH:mm" allow-clear />
+                                    <a-space class="account-filter-actions">
+                                        <a-button type="primary" @click="search">
+                                            <template #icon><icon-search /></template>
+                                            <span>查询</span>
+                                        </a-button>
+                                        <a-button @click="reset">
+                                            <template #icon><icon-refresh /></template>
+                                            <span>重置</span>
+                                        </a-button>
+                                    </a-space>
+                                </a-space>
+                            </div>
+                            <div class="uvp-list-toolbar__actions">
+                                <a-button type="primary" @click="onAdd" v-hasPerm="['system:account:add']">
+                                    <template #icon><icon-plus /></template>
+                                    <span>新增</span>
+                                </a-button>
+                            </div>
+                        </div>
 
-                        <a-table row-key="id" :data="accountList" :bordered="{ cell: true }" :loading="loading"
+                        <a-table class="uvp-data-table" row-key="id" :data="accountList" :bordered="false" :loading="loading"
                             :scroll="{ x: '120%', y: '85%' }" :pagination="pagination" :selected-keys="selectedKeys"
                             @select="select" @select-all="selectAll" @page-change="handlePageChange">
                             <template #columns>
@@ -575,18 +586,17 @@ onMounted(() => {
 <style lang="scss" scoped>
 .container {
     display: flex;
-    column-gap: $padding;
+    min-height: 0;
 
     .left-box {
         display: flex;
         flex-direction: column;
-        width: 250px;
+        width: 100%;
         height: 100%;
         flex-shrink: 0; // 防止被压缩
 
         .tree-box {
             flex: 1;
-            margin-top: $padding;
             overflow: auto;
         }
     }
@@ -595,5 +605,9 @@ onMounted(() => {
         flex: 1;
         min-width: 0; // 防止 flex 子元素溢出
     }
+}
+
+.account-filter-actions {
+    white-space: nowrap;
 }
 </style>
