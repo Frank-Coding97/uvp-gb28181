@@ -79,8 +79,8 @@ const isTitle = computed(() => {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    min-height: 102px;
-    padding: 24px 18px 18px 20px;
+    min-height: 90px;
+    padding: 16px 18px 14px 20px;
     background: transparent;
     border-bottom: 0;
 
