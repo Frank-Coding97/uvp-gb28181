@@ -70,20 +70,20 @@
                             {{ record['createdAt'] ? formatTime(record['createdAt']) : "" }}
                         </template>
                     </a-table-column>
-                    <a-table-column title="操作" :width="320" :fixed="isMobile ? '' : 'right'">
+                    <a-table-column title="操作" :width="300" :fixed="isMobile ? '' : 'right'">
                         <template #cell="{ record }">
-                            <a-space>
+                            <a-space size="mini">
                                 <a-button size="small" type="outline" @click="handleExecuteNow(record)" v-hasPerm="['system:sysjobs:executeNow']">
                                     执行一次
                                 </a-button>
-                                <a-button size="small" @click="handleViewLogs(record)">
+                                <a-button size="small" type="text" @click="handleViewLogs(record)">
                                     日志
                                 </a-button>
-                                <a-button size="small" @click="handleEdit(record)" v-hasPerm="['system:sysjobs:edit']">
+                                <a-button size="small" type="text" @click="handleEdit(record)" v-hasPerm="['system:sysjobs:edit']">
                                     编辑
                                 </a-button>
                                 <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
-                                    <a-button size="small" status="danger" v-hasPerm="['system:sysjobs:delete']">
+                                    <a-button size="small" type="text" status="danger" v-hasPerm="['system:sysjobs:delete']">
                                         删除
                                     </a-button>
                                 </a-popconfirm>
@@ -528,5 +528,48 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
+.uvp-list-toolbar {
+    margin-bottom: 16px;
+}
 
+:deep(.arco-table-cell) {
+    .arco-space {
+        gap: 2px;
+    }
+}
+
+:deep(.arco-btn-outline.arco-btn-size-small) {
+    border-color: var(--color-primary-light-3);
+    color: rgb(var(--primary-6));
+    background: transparent;
+
+    &:hover {
+        background: var(--color-primary-light-1);
+    }
+}
+
+:deep(.arco-btn-text.arco-btn-size-small) {
+    color: var(--color-text-2);
+
+    &:hover {
+        color: rgb(var(--primary-6));
+        background: var(--color-primary-light-1);
+    }
+
+    &.arco-btn-status-danger {
+        color: rgb(var(--danger-6));
+
+        &:hover {
+            background: var(--color-danger-light-1);
+        }
+    }
+}
+
+:deep(.arco-tag) {
+    cursor: pointer;
+
+    &:hover {
+        opacity: 0.8;
+    }
+}
 </style>

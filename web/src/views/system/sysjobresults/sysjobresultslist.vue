@@ -45,11 +45,13 @@
                     <a-table-column title="重试次数" data-index="retryCount"  :width="150"  ellipsis tooltip/>
                     <a-table-column title="操作" :width="150" :fixed="isMobile ? '' : 'right'">
                         <template #cell="{ record }">
-                            <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
-                                <a-button size="small" status="danger" v-hasPerm="['system:sysjobresults:delete']">
-                                    删除
-                                </a-button>
-                            </a-popconfirm>
+                            <a-space size="mini">
+                                <a-popconfirm content="确定要删除这条数据吗？" @ok="handleDelete(record.id)">
+                                    <a-button size="small" type="text" status="danger" v-hasPerm="['system:sysjobresults:delete']">
+                                        删除
+                                    </a-button>
+                                </a-popconfirm>
+                            </a-space>
                         </template>
                     </a-table-column>
                 </template>
@@ -178,5 +180,30 @@ onMounted(async () => {
 </script>
 
 <style scoped lang="scss">
+.uvp-list-toolbar {
+    margin-bottom: 16px;
+}
 
+:deep(.arco-table-cell) {
+    .arco-space {
+        gap: 2px;
+    }
+}
+
+:deep(.arco-btn-text.arco-btn-size-small) {
+    color: var(--color-text-2);
+
+    &:hover {
+        color: rgb(var(--primary-6));
+        background: var(--color-primary-light-1);
+    }
+
+    &.arco-btn-status-danger {
+        color: rgb(var(--danger-6));
+
+        &:hover {
+            background: var(--color-danger-light-1);
+        }
+    }
+}
 </style>
