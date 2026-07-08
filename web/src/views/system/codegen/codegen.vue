@@ -26,7 +26,7 @@
                 </template>
             </s-layout-tools>
 
-            <a-table row-key="id" :data="sysGenList" :bordered="{ cell: true }" :loading="loading"
+            <a-table class="uvp-data-table" row-key="id" :data="sysGenList" :bordered="false" :loading="loading"
                 :scroll="{ x: '100%', y: '100%', minWidth: 1200 }" :pagination="pagination">
                 <template #columns>
                     <a-table-column title="ID" data-index="id" :width="70" align="center"></a-table-column>
@@ -79,7 +79,7 @@
                     <a-alert type="info">
                         选择需要导入的表，系统将自动生成代码生成配置
                     </a-alert>
-                    <a-table row-key="tableName" :data="tableList" :bordered="{ cell: true }" :loading="tableLoading"
+                    <a-table class="uvp-data-table" row-key="tableName" :data="tableList" :bordered="false" :loading="tableLoading"
                         :pagination="false" :scroll="{ x: '100%', y: 400 }" v-model:selectedKeys="selectedTables"
                         :row-selection="{
                             type: 'checkbox',

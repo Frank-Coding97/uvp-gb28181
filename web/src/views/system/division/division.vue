@@ -28,7 +28,7 @@
                     </a-space>
                 </template>
             </s-layout-tools>
-            <a-table ref="tableRef" :data="displayDivisionList" default-expand-all-rows :bordered="{ cell: true }"
+            <a-table class="uvp-data-table" ref="tableRef" :data="displayDivisionList" default-expand-all-rows :bordered="false"
                 row-key="id" :pagination="false" :loading="loading">
                 <template #columns>
                     <a-table-column title="ID" data-index="id" :width="70" align="center"></a-table-column>

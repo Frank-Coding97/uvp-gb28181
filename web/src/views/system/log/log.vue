@@ -47,7 +47,7 @@
                 </template>
             </s-layout-tools>
 
-            <a-table row-key="id" :data="logList" :bordered="{ cell: true }" :loading="loading" :pagination="pagination"
+            <a-table class="uvp-data-table" row-key="id" :data="logList" :bordered="false" :loading="loading" :pagination="pagination"
                 :scroll="{ x: '100%', y: '100%', minWidth: 1200 }" v-model:selectedKeys="selectedKeys"
                 :row-selection="{ type: 'checkbox', showCheckedAll: true }" @page-change="handlePageChange"
                 @page-size-change="handlePageSizeChange">

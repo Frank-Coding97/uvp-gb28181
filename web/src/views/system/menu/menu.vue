@@ -60,9 +60,9 @@
                 </template>
             </s-layout-tools>
             <!-- 修改表格数据源为displayMenuList -->
-            <a-table ref="tableRef" :data="displayMenuList" :loading="loading" row-key="id" column-resizable
+            <a-table class="uvp-data-table" ref="tableRef" :data="displayMenuList" :loading="loading" row-key="id" column-resizable
                 :row-selection="{ type: 'checkbox', showCheckedAll: true }" v-model:selectedKeys="selectedKeys"
-                :bordered="{ cell: true }" show-empty-tree :pagination="false" size="medium"
+                :bordered="false" show-empty-tree :pagination="false" size="medium"
                 :scroll="{ x: '100%', y: '100%' }">
                 <template #columns>
                     <a-table-column title="菜单名称" :width="150" tooltip ellipsis>
@@ -362,10 +362,11 @@
                 <div v-if="importResult?.newMenus?.length" class="result-section">
                     <h4>新增菜单</h4>
                     <a-table
+                        class="uvp-data-table"
                         :data="importResult.newMenus"
                         :pagination="false"
                         size="small"
-                        :bordered="{ cell: true }"
+                        :bordered="false"
                     >
                         <template #columns>
                             <a-table-column title="ID" data-index="id" :width="60" />
@@ -387,10 +388,11 @@
                 <div v-if="importResult?.newApis?.length" class="result-section" style="margin-top: 16px;">
                     <h4>新增API</h4>
                     <a-table
+                        class="uvp-data-table"
                         :data="importResult.newApis"
                         :pagination="false"
                         size="small"
-                        :bordered="{ cell: true }"
+                        :bordered="false"
                     >
                         <template #columns>
                             <a-table-column title="ID" data-index="id" :width="60" />

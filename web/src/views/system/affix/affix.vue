@@ -1,7 +1,7 @@
 <template>
     <div class="snow-fill">
         <div class="snow-fill-inner container">
-            <a-space wrap class="search-box">
+            <a-space wrap class="search-box uvp-list-toolbar">
                 <a-input v-model="form.name" placeholder="请输入文件名" allow-clear />
                 <a-select placeholder="文件类型" v-model="form.ftype" style="width: 120px" allow-clear>
                     <a-option value="image">图片</a-option>
@@ -32,7 +32,7 @@
                     <span>大文件上传</span>
                 </a-button>
             </a-space>
-            <a-table row-key="id" :data="affixList" :bordered="{ cell: true }" :loading="loading"
+            <a-table class="uvp-data-table" row-key="id" :data="affixList" :bordered="false" :loading="loading"
                 :scroll="{ x: '100%', y: '75%' }" :pagination="pagination" @page-change="handlePageChange"
                 @page-size-change="handlePageSizeChange">
                 <template #columns>

@@ -438,9 +438,9 @@ body {
   justify-content: space-between;
   padding: 12px;
   margin-bottom: 12px;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-list-panel-border);
-  border-radius: 12px;
+  background: var(--uvp-list-toolbar-bg) !important;
+  border: 1px solid var(--uvp-list-panel-border) !important;
+  border-radius: 12px !important;
 }
 
 .uvp-list-toolbar__filters {

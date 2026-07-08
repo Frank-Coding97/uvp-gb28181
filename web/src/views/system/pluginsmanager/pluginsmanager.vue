@@ -72,7 +72,7 @@
              </a-space>
         </a-descriptions-item>
         <a-descriptions-item label="菜单项" v-if="currentPlugin.menus && currentPlugin.menus.length > 0">
-          <a-table :data="currentPlugin.menus" :pagination="false" :bordered="false" size="small">
+          <a-table class="uvp-data-table" :data="currentPlugin.menus" :pagination="false" :bordered="false" size="small">
             <template #columns>
               <a-table-column title="路径" data-index="path"></a-table-column>
               <a-table-column title="类型" data-index="type">

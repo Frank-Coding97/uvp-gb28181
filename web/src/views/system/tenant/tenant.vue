@@ -53,7 +53,7 @@
             </a-row>
             <a-row>
                 <a-col :span="24">
-                    <a-table row-key="id" :loading="loading" :data="renderData" :pagination="pagination"
+                    <a-table class="uvp-data-table" row-key="id" :loading="loading" :data="renderData" :pagination="pagination"
                         @page-change="pageChange" @page-size-change="pageSizeChange">
                         <template #columns>
                             <a-table-column title="ID" data-index="id" :width="70" align="center"></a-table-column>

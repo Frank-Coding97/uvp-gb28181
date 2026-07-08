@@ -105,7 +105,7 @@
                     </a-space>
                 </a-row>
 
-                <a-table row-key="id" :data="dictDetail.list" :bordered="{ cell: true }" :loading="detailLoading"
+                <a-table class="uvp-data-table" row-key="id" :data="dictDetail.list" :bordered="false" :loading="detailLoading"
                     :scroll="{ x: '100%', y: '100%' }" :pagination="false">
                     <template #columns>
                         <a-table-column title="序号" :width="64">

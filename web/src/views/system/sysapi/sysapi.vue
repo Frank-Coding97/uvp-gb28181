@@ -30,7 +30,7 @@
                     </a-space>
                 </template>
             </s-layout-tools>
-            <a-table row-key="id" :data="tableData" :bordered="{ cell: true }" :loading="loading" column-resizable
+            <a-table class="uvp-data-table" row-key="id" :data="tableData" :bordered="false" :loading="loading" column-resizable
                 :pagination="pagination" @page-change="onPageChange" @page-size-change="onPageSizeChange"
                 :scroll="{ x: '100%', y: '100%', minWidth: 1000 }">
                 <template #columns>

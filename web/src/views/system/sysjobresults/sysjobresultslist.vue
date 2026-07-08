@@ -2,7 +2,7 @@
  <div class="snow-page">
     <div class="snow-inner">
         <a-card :loading="loading" :bordered="false">
-            <a-space wrap>
+            <a-space wrap class="uvp-list-toolbar">
                 <!-- 查询表单-->
                 <!-- 任务ID精确查询 -->
                 <a-input v-model="searchForm.jobId" placeholder="请输入任务ID" style="width: 240px;" />
@@ -19,8 +19,8 @@
                 <a-button @click="handleReset">重置</a-button>
             </a-space>
 
-            <a-table :data="dataList" :loading="loading" :pagination="paginationConfig"
-                :bordered="{ wrapper: true, cell: true }" :scroll="{ x: '120%' }" @page-change="handlePageChange"
+            <a-table class="uvp-data-table" :data="dataList" :loading="loading" :pagination="paginationConfig"
+                :bordered="false" :scroll="{ x: '120%' }" @page-change="handlePageChange"
                 @page-size-change="handlePageSizeChange">
                 <template #columns>
                     <a-table-column title="ID" data-index="id"  :width="80"  ellipsis tooltip/>
