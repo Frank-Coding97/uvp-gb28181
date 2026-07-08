@@ -497,4 +497,28 @@ const afterCloseDetail = () => {
 getDict();
 </script>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+/* 表格密度统一 */
+:deep(.arco-table-th) {
+  background-color: var(--uvp-table-header-bg);
+  font-size: 13px;
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:deep(.arco-table-td) {
+  font-size: 13px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:deep(.arco-table-tr) {
+  height: 40px;
+}
+
+/* 字典详情弹窗内新增按钮区间距 */
+:deep(.arco-modal .arco-row) {
+  margin-bottom: 12px;
+}
+</style>

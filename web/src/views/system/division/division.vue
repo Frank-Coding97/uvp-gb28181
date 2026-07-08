@@ -391,4 +391,32 @@ onMounted(() => {
 });
 </script>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+/* 树表密度统一 */
+:deep(.arco-table-th) {
+  background-color: var(--uvp-table-header-bg);
+  font-size: 13px;
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:deep(.arco-table-td) {
+  font-size: 13px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:deep(.arco-table-tr) {
+  height: 40px;
+}
+
+/* 树形展开缩进对齐 */
+:deep(.arco-table-expand-icon-cell) {
+  vertical-align: middle;
+}
+
+:deep(.arco-table-indent) {
+  flex-shrink: 0;
+}
+</style>

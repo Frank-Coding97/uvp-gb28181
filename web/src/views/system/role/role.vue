@@ -483,3 +483,55 @@ const onDataScope = (row: any) => {
 getRole();
 getMenuList();
 </script>
+
+<style lang="scss" scoped>
+/* 主表格密度统一 */
+:deep(.arco-table-th) {
+  background-color: var(--uvp-table-header-bg);
+  font-size: 13px;
+  height: 40px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:deep(.arco-table-td) {
+  font-size: 13px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:deep(.arco-table-tr) {
+  height: 40px;
+}
+
+/* 分配权限抽屉：控制开关卡片紧凑 */
+:deep(.arco-drawer-body .arco-card) {
+  margin-bottom: 12px;
+}
+
+:deep(.arco-drawer-body .arco-card-body) {
+  padding: 12px 16px;
+}
+
+/* 权限树节点密度 */
+:deep(.arco-drawer-body .arco-tree-node) {
+  height: 30px;
+  line-height: 30px;
+  font-size: 13px;
+}
+
+:deep(.arco-drawer-body .arco-tree-node-title) {
+  font-size: 13px;
+}
+
+/* 数据权限 Modal：内嵌树区密度 */
+:deep(.arco-modal .arco-tree-node) {
+  height: 28px;
+  line-height: 28px;
+  font-size: 13px;
+}
+
+:deep(.arco-modal .arco-tree-node-title) {
+  font-size: 13px;
+}
+</style>
