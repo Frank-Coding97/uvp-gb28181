@@ -233,6 +233,7 @@ const {
 } = use{{.StructName}}PluginHook();
 
 const modalVisible = ref(false);
+const isEditMode = ref(false);
 const formRef = ref();
 const modalTitle = ref('');
 
@@ -340,6 +341,7 @@ const handleCreate = () => {
 {{- end}}
 {{- end}}
     });
+    isEditMode.value = false;
     modalTitle.value = '新增数据';
     modalVisible.value = true;
 };
@@ -360,6 +362,7 @@ const handleAddChild = (record: {{.StructName}}Data) => {
     // 设置父级ID为当前行的ID
     editingData.{{.ParentIdField.JsonTag}} = record.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}};
     {{- end}}
+    isEditMode.value = false;
     modalTitle.value = '新增子级数据';
     modalVisible.value = true;
 };
@@ -370,6 +373,7 @@ const handleEdit = async (record: {{.StructName}}Data) => {
     const detail = await getDetail(record.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}});
     // 赋值给编辑数据
     Object.assign(editingData, detail.data);
+    isEditMode.value = true;
     modalTitle.value = '编辑数据';
     modalVisible.value = true;
 };
@@ -394,7 +398,7 @@ const handleSave = async () => {
     if (isValid) return false;
     try {
         const dataToSave = JSON.parse(JSON.stringify(editingData));
-        if (editingData.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}}) {
+        if (isEditMode.value) {
             // 更新数据
             await updateData(dataToSave);
         } else {
@@ -412,6 +416,7 @@ const handleSave = async () => {
 
 // 取消操作
 const handleCancel = () => {
+    isEditMode.value = false;
     modalVisible.value = false;
 };
 

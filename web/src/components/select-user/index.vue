@@ -4,11 +4,7 @@
     <div class="selected-tags-wrapper">
       <a-space v-if="selectedUsers.length > 0" wrap :size="8">
         <a-tooltip v-for="user in selectedUsers" :key="user.id" :content="user.userName">
-          <a-tag
-            closable
-            :color="multiple ? 'arcoblue' : 'green'"
-            @close="handleRemoveUser(user.id)"
-          >
+          <a-tag closable :color="multiple ? 'arcoblue' : 'green'" @close="handleRemoveUser(user.id)">
             {{ truncateText(user.userName, maxLabelLength) }}
           </a-tag>
         </a-tooltip>
@@ -24,12 +20,7 @@
         </template>
         <span>选择用户</span>
       </a-button>
-      <a-button
-        v-if="selectedUsers.length > 0"
-        size="small"
-        :disabled="disabled"
-        @click="handleClear"
-      >
+      <a-button v-if="selectedUsers.length > 0" size="small" :disabled="disabled" @click="handleClear">
         <template #icon>
           <icon-delete />
         </template>
@@ -39,6 +30,7 @@
 
     <!-- 用户选择弹窗 -->
     <a-modal
+      modal-class="uvp-system-dialog"
       v-model:visible="modalVisible"
       title="选择用户"
       :width="800"
@@ -47,67 +39,60 @@
       @cancel="handleModalCancel"
     >
       <!-- 搜索区域 -->
-      <div class="search-area">
-        <a-input
-          v-model="searchKeyword"
-          placeholder="请输入用户名称或昵称搜索"
-          allow-clear
-          @input="handleSearch"
-        >
-          <template #prefix>
-            <icon-search />
-          </template>
-        </a-input>
-      </div>
+      <s-layout-search>
+        <template #fields>
+          <a-input
+            v-model="searchKeyword"
+            placeholder="请输入用户名称或昵称"
+            style="width: 260px"
+            allow-clear
+            @press-enter="handleSearch"
+          />
+        </template>
+        <template #actions>
+          <a-button type="primary" @click="handleSearch">
+            <template #icon><icon-search /></template>
+            <span>查询</span>
+          </a-button>
+          <a-button @click="handleSearchReset">
+            <template #icon><icon-refresh /></template>
+            <span>重置</span>
+          </a-button>
+        </template>
+      </s-layout-search>
 
       <!-- 用户列表表格 -->
       <div class="table-area">
         <a-table
+          class="uvp-data-table"
           row-key="id"
           :data="userList"
           :loading="loading"
           :pagination="false"
-          :bordered="{ cell: true }"
+          :bordered="false"
+          :scroll="tableScroll"
           :row-class-name="getRowClassName"
           @row-click="handleRowClick"
         >
           <template #columns>
-            <a-table-column title="ID" data-index="id" :width="70" align="center" />
             <a-table-column title="用户名称" data-index="userName" :width="120" />
             <a-table-column title="昵称" data-index="nickName" :width="120" />
-            <a-table-column title="部门" :width="150">
+            <a-table-column title="部门" :width="150" ellipsis tooltip>
               <template #cell="{ record }">
-                {{ record.department ? record.department.name : '-' }}
+                {{ record.department ? record.department.name : "-" }}
               </template>
             </a-table-column>
             <a-table-column title="手机号" data-index="phone" :width="130" />
             <a-table-column title="状态" :width="80" align="center">
               <template #cell="{ record }">
-                <a-tag
-                  bordered
-                  size="small"
-                  color="arcoblue"
-                  v-if="record.status === 1"
-                >
-                  启用
-                </a-tag>
-                <a-tag bordered size="small" color="red" v-else>
-                  禁用
-                </a-tag>
+                <a-tag bordered size="small" color="arcoblue" v-if="record.status === 1"> 启用 </a-tag>
+                <a-tag bordered size="small" color="red" v-else> 禁用 </a-tag>
               </template>
             </a-table-column>
-            <a-table-column title="操作" :width="80" align="center">
+            <a-table-column title="操作" :width="72" align="center">
               <template #cell="{ record }">
-                <a-tag
-                  v-if="isUserSelected(record.id)"
-                  color="green"
-                  bordered
-                >
-                  已选
-                </a-tag>
-                <a-tag v-else color="arcoblue" bordered>
-                  选择
-                </a-tag>
+                <a-tag v-if="isUserSelected(record.id)" color="green" bordered> 已选 </a-tag>
+                <a-tag v-else color="arcoblue" bordered> 选择 </a-tag>
               </template>
             </a-table-column>
           </template>
@@ -141,9 +126,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref,  watch } from 'vue';
-import { getAccountListAPI, getAccountDetailAPI } from '@/api/user';
-import type { AccountItem } from '@/api/user';
+import { computed, ref, watch } from "vue";
+import { getAccountListAPI, getAccountDetailAPI } from "@/api/user";
+import type { AccountItem } from "@/api/user";
 
 // 用户信息接口（用于已选用户）
 interface UserInfo {
@@ -168,14 +153,14 @@ interface Props {
 
 // Emits 定义
 interface Emits {
-  (e: 'update:modelValue', value: number | string | undefined): void;
+  (e: "update:modelValue", value: number | string | undefined): void;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   modelValue: undefined,
   multiple: false,
   disabled: false,
-  placeholder: '请选择用户',
+  placeholder: "请选择用户",
   maxLabelLength: 10
 });
 
@@ -185,7 +170,7 @@ const emit = defineEmits<Emits>();
 const modalVisible = ref(false);
 
 // 搜索关键字
-const searchKeyword = ref('');
+const searchKeyword = ref("");
 
 // 加载状态
 const loading = ref(false);
@@ -205,6 +190,10 @@ const pagination = ref({
   pageSize: 10,
   total: 0
 });
+const tableScroll = computed(() => ({
+  x: "100%",
+  ...(userList.value.length > 0 ? { y: 350 } : {})
+}));
 
 // 计算属性：判断用户是否已选中
 const isUserSelected = (userId: number): boolean => {
@@ -213,7 +202,7 @@ const isUserSelected = (userId: number): boolean => {
 
 // 计算属性：获取表格行样式
 const getRowClassName = (record: AccountItem): string => {
-  return isUserSelected(record.id) ? 'selected-row' : '';
+  return isUserSelected(record.id) ? "selected-row" : "";
 };
 
 // 截断文本函数
@@ -221,15 +210,15 @@ const truncateText = (text: string, maxLength: number): string => {
   if (!text || text.length <= maxLength) {
     return text;
   }
-  return text.substring(0, maxLength) + '...';
+  return text.substring(0, maxLength) + "...";
 };
 
 // 监听 modelValue 变化，同步更新 selectedUsers
 watch(
   () => props.modelValue,
-  (newValue) => {
+  newValue => {
     // 处理 undefined 或 null 或空值的情况
-    if (newValue === undefined || newValue === null || newValue === '') {
+    if (newValue === undefined || newValue === null || newValue === "") {
       selectedUsers.value = [];
       return;
     }
@@ -237,9 +226,9 @@ watch(
     if (props.multiple) {
       // 多选模式：从逗号分隔的字符串解析用户ID
       const ids = String(newValue)
-        .split(',')
-        .map((id) => parseInt(id.trim()))
-        .filter((id) => !isNaN(id));
+        .split(",")
+        .map(id => parseInt(id.trim()))
+        .filter(id => !isNaN(id));
       syncSelectedUsers(ids);
     } else {
       // 单选模式：直接使用数值
@@ -259,14 +248,14 @@ const syncSelectedUsers = async (userIds: number[]) => {
 
   try {
     // 获取用户详情信息
-    const promises = userIds.map((id) => getUserInfo(id));
+    const promises = userIds.map(id => getUserInfo(id));
     const results = await Promise.allSettled(promises);
     const users: UserInfo[] = results
-      .filter((r) => r.status === 'fulfilled' && r.value)
-      .map((r) => (r as PromiseFulfilledResult<UserInfo>).value);
+      .filter(r => r.status === "fulfilled" && r.value)
+      .map(r => (r as PromiseFulfilledResult<UserInfo>).value);
     selectedUsers.value = users;
   } catch (error) {
-    console.error('获取用户信息失败:', error);
+    console.error("获取用户信息失败:", error);
   }
 };
 
@@ -289,20 +278,20 @@ const getUserInfo = async (userId: number): Promise<UserInfo | null> => {
 const openModal = () => {
   modalVisible.value = true;
   // 初始化临时选中ID集合
-  if (props.modelValue === undefined || props.modelValue === null || props.modelValue === '') {
+  if (props.modelValue === undefined || props.modelValue === null || props.modelValue === "") {
     tempSelectedIds.value = new Set();
   } else if (props.multiple) {
     const ids = String(props.modelValue)
-      .split(',')
-      .map((id) => parseInt(id.trim()))
-      .filter((id) => !isNaN(id));
+      .split(",")
+      .map(id => parseInt(id.trim()))
+      .filter(id => !isNaN(id));
     tempSelectedIds.value = new Set(ids);
   } else {
     const id = Number(props.modelValue);
     tempSelectedIds.value = id > 0 ? new Set([id]) : new Set();
   }
   // 重置搜索和分页
-  searchKeyword.value = '';
+  searchKeyword.value = "";
   pagination.value.current = 1;
   // 加载用户列表
   loadUserList();
@@ -315,7 +304,7 @@ const loadUserList = async () => {
     const params: any = {
       pageNum: pagination.value.current,
       pageSize: pagination.value.pageSize,
-      order: 'id desc'
+      order: "id desc"
     };
 
     // 添加搜索条件
@@ -327,7 +316,7 @@ const loadUserList = async () => {
     userList.value = data.list;
     pagination.value.total = data.total;
   } catch (error) {
-    console.error('加载用户列表失败:', error);
+    console.error("加载用户列表失败:", error);
   } finally {
     loading.value = false;
   }
@@ -337,6 +326,11 @@ const loadUserList = async () => {
 const handleSearch = () => {
   pagination.value.current = 1;
   loadUserList();
+};
+
+const handleSearchReset = () => {
+  searchKeyword.value = "";
+  handleSearch();
 };
 
 // 分页变化
@@ -372,14 +366,14 @@ const handleRemoveUser = (userId: number) => {
   if (props.disabled) return;
 
   if (props.multiple) {
-    const currentValue = props.modelValue ?? '';
+    const currentValue = props.modelValue ?? "";
     const ids = String(currentValue)
-      .split(',')
-      .map((id) => parseInt(id.trim()))
-      .filter((id) => !isNaN(id) && id !== userId);
-    emit('update:modelValue', ids.join(','));
+      .split(",")
+      .map(id => parseInt(id.trim()))
+      .filter(id => !isNaN(id) && id !== userId);
+    emit("update:modelValue", ids.join(","));
   } else {
-    emit('update:modelValue', 0);
+    emit("update:modelValue", 0);
   }
 };
 
@@ -388,9 +382,9 @@ const handleClear = () => {
   if (props.disabled) return;
 
   if (props.multiple) {
-    emit('update:modelValue', '');
+    emit("update:modelValue", "");
   } else {
-    emit('update:modelValue', 0);
+    emit("update:modelValue", 0);
   }
 };
 
@@ -403,13 +397,13 @@ const handleModalCancel = () => {
 const handleModalConfirm = () => {
   if (props.multiple) {
     // 多选模式：输出逗号分隔的字符串，空时返回空字符串
-    const ids = Array.from(tempSelectedIds.value).join(',');
-    emit('update:modelValue', ids || '');
+    const ids = Array.from(tempSelectedIds.value).join(",");
+    emit("update:modelValue", ids || "");
   } else {
     // 单选模式：输出数值，空时返回 0
     const ids = Array.from(tempSelectedIds.value);
     const id = ids.length > 0 ? ids[0] : 0;
-    emit('update:modelValue', id);
+    emit("update:modelValue", id);
   }
   modalVisible.value = false;
 };
@@ -447,22 +441,10 @@ const handleModalConfirm = () => {
   }
 }
 
-// 弹窗样式
-.search-area {
-  margin-bottom: 16px;
-}
-
 .table-area {
   margin-bottom: 16px;
-  max-height: 400px;
-  overflow-y: auto;
 
   :deep(.arco-table) {
-    .arco-table-body {
-      max-height: 350px;
-      overflow-y: auto;
-    }
-
     // 已选行高亮样式
     .selected-row {
       background-color: var(--color-primary-light-1);

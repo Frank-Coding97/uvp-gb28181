@@ -90,8 +90,8 @@
                     <div class="brand-eyebrow">Unified Video Platform</div>
                     <div class="brand-title">把所有视频源<br />接入同一张控制台</div>
                     <p class="brand-lede">
-                        国标 SIP 接入 · 视频转发 · 录像点播 · 级联调度,
-                        一套平台覆盖从前端到上联的全链路。
+                        国标 SIP 接入 · 视频转发 · 录像点播 · 级联调度，
+                        一套平台覆盖从设备侧到平台侧的核心链路。
                     </p>
 
                     <div class="brand-features">
@@ -120,7 +120,7 @@
                                     <polyline points="20 6 9 17 4 12" />
                                 </svg>
                             </span>
-                            <span>ZLMediaKit 媒体集群 · p99 &lt; 200ms</span>
+                            <span>媒体服务编排 · 转发、回放与级联统一治理</span>
                         </div>
                     </div>
 
@@ -136,7 +136,7 @@
                 <section class="form-side">
                     <div class="form-head">
                         <h1>账号登录</h1>
-                        <p>欢迎回来,请输入您的账号信息</p>
+                        <p>请输入账号信息进入控制台</p>
                     </div>
                     <LoginForm />
                 </section>
@@ -145,12 +145,11 @@
 
         <!-- Page footer -->
         <footer class="page-foot">
-            <span v-if="systemCopyright">{{ systemCopyright }}</span>
-            <span v-else>© 2026 UVP 统一视频接入平台</span>
+            <span>{{ displayCopyright }}</span>
             <span class="sep">·</span>
             <span>Powered by GB/T 28181-2022</span>
-            <span v-if="systemRecordNo" class="sep">·</span>
-            <span v-if="systemRecordNo">{{ systemRecordNo }}</span>
+            <span v-if="displayRecordNo" class="sep">·</span>
+            <span v-if="displayRecordNo">{{ displayRecordNo }}</span>
         </footer>
     </div>
 </template>
@@ -160,12 +159,20 @@ import { computed } from "vue";
 import LoginForm from "@/views/login/components/login-form.vue";
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import { storeToRefs } from "pinia";
+import {
+    getDisplaySystemCopyright,
+    getDisplaySystemRecordNo
+} from "@/utils/system-footer";
 
 const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);
 
-const systemCopyright = computed(() => systemConfig.value?.systemCopyright || "");
-const systemRecordNo = computed(() => systemConfig.value?.systemRecordNo || "");
+const displayCopyright = computed(() => {
+    return getDisplaySystemCopyright(systemConfig.value?.systemCopyright);
+});
+const displayRecordNo = computed(() => {
+    return getDisplaySystemRecordNo(systemConfig.value?.systemRecordNo);
+});
 </script>
 
 <style lang="scss" scoped>
@@ -440,6 +447,16 @@ $primary-light: #69c0ff;
 
 /* Responsive */
 @media (max-width: 880px) {
+    .brand-bar {
+        height: 56px;
+        padding: 0 24px;
+    }
+    .brand-meta {
+        display: none;
+    }
+    .brand-logo-text {
+        font-size: 15px;
+    }
     .float-card {
         grid-template-columns: 1fr;
         width: 420px;

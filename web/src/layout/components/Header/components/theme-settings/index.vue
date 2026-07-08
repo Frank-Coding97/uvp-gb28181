@@ -28,6 +28,18 @@
           <a-switch :disabled="darkMode" v-model="asideDark" />
         </div>
         <div class="flex-row">
+          <div>暗色风格</div>
+          <a-select
+            v-model="darkModeStyle"
+            :disabled="!darkMode"
+            :style="{ width: '132px' }"
+            placeholder="请选择"
+            @change="onDarkModeStyleChange"
+          >
+            <a-option v-for="item in darkModeStyles" :key="item.value" :value="item.value" :label="item.label" />
+          </a-select>
+        </div>
+        <div class="flex-row">
           <div>页面过渡</div>
           <a-select v-model="transitionPage" :style="{ width: '120px' }" placeholder="请选择">
             <a-option v-for="item in transitions" :key="item.value" :value="item.value" :label="item.label" />
@@ -46,7 +58,12 @@ import { ColorPicker } from "vue-color-kit";
 import "vue-color-kit/dist/vue-color-kit.css";
 
 const themeStore = useThemeConfig();
-const { colorWeakMode, grayMode, darkMode, asideDark, transitionPage, themeColor, presetColors } = storeToRefs(themeStore);
+const { colorWeakMode, grayMode, darkMode, darkModeStyle, asideDark, transitionPage, themeColor, presetColors } = storeToRefs(themeStore);
+
+const darkModeStyles = ref([
+  { value: "nightOps", label: "夜间蓝灰" },
+  { value: "frostedBlack", label: "磨砂黑" }
+]);
 
 const transitions = ref([
   { value: "fadeInOut", label: "轻过渡" },
@@ -84,6 +101,11 @@ const onColorWeak = () => {
 const onGray = () => {
   const { setGray } = useThemeMethods();
   setGray();
+};
+
+const onDarkModeStyleChange = () => {
+  const { setDarkMode } = useThemeMethods();
+  setDarkMode();
 };
 
 const props = defineProps({

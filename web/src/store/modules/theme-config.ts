@@ -15,6 +15,8 @@ const themeConfig = () => {
   const language = ref<string>("zh-CN");
   // 黑暗模式
   const darkMode = ref<boolean>(false);
+  // 暗色风格：nightOps 夜间蓝灰，frostedBlack 磨砂黑
+  const darkModeStyle = ref<string>("nightOps");
   // 菜单手风琴
   const isAccordion = ref<boolean>(true);
   // 面包屑渲染
@@ -96,6 +98,7 @@ const themeConfig = () => {
     refreshPage,
     language,
     darkMode,
+    darkModeStyle,
     isAccordion,
     isBreadcrumb,
     isTabs,

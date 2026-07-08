@@ -109,7 +109,7 @@
                      </a-card>
 
                      <!-- 编辑/创建弹窗 -->
-                     <a-modal modal-class="uvp-system-dialog" v-model:visible="modalVisible" :title="editingData.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}} ? '编辑数据' : '新增数据'" :on-before-ok="handleSave"
+                     <a-modal modal-class="uvp-system-dialog" v-model:visible="modalVisible" :title="isEditMode ? '编辑数据' : '新增数据'" :on-before-ok="handleSave"
                          @cancel="handleCancel">
                          <a-form class="uvp-system-form" :model="editingData" :rules="rules" ref="formRef">
                              <a-form-item field="{{.RelationFieldJsonTag}}" label="{{.RelationFieldComment}}">
@@ -304,6 +304,7 @@ const {
 } = use{{.StructName}}PluginHook();
 
 const modalVisible = ref(false);
+const isEditMode = ref(false);
 const formRef = ref();
 
 // {{.RelationFieldComment}}编辑相关
@@ -438,13 +439,14 @@ const handleReset = () => {
 const handleCreate = () => {
     // 重置表单数据
     Object.assign(editingData, {
-        id: undefined,
+        {{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}}: undefined,
 {{- range .Columns}}
 {{- if and (not .IsPrimary) (not .Exclude) .FormShow}}
         {{.JsonTag}}: undefined,
 {{- end}}
 {{- end}}
     });
+    isEditMode.value = false;
     modalVisible.value = true;
 };
 
@@ -454,6 +456,7 @@ const handleEdit = async (record: {{.StructName}}Data) => {
     const detail = await getDetail(record.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}});
     // 赋值给编辑数据
     Object.assign(editingData, detail.data);
+    isEditMode.value = true;
     modalVisible.value = true;
 };
 
@@ -477,7 +480,7 @@ const handleSave = async () => {
     if (isValid) return false;
     try {
         const dataToSave = JSON.parse(JSON.stringify(editingData));
-        if (editingData.id) {
+        if (isEditMode.value) {
             // 更新数据
             await updateData(dataToSave);
         } else {
@@ -495,6 +498,7 @@ const handleSave = async () => {
 
 // 取消操作
 const handleCancel = () => {
+    isEditMode.value = false;
     modalVisible.value = false;
 };
 
