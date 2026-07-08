@@ -1,5 +1,5 @@
 :root {
-  --uvp-navigation-bg: #f5f8fb;
+  --uvp-navigation-bg: #f3f7fb;
   --uvp-shell-bg: var(--uvp-navigation-bg);
   --uvp-shell-muted: #eef4f8;
   --uvp-sidebar-bg: var(--uvp-navigation-bg);
@@ -28,16 +28,16 @@
   --uvp-brand-strong: #1d4ed8;
   --uvp-brand-cyan: #0faaa6;
   --uvp-brand-soft: #e8f2ff;
-  --uvp-sidebar-brand-mark-bg: rgb(255 255 255 / 58%);
-  --uvp-sidebar-hover-bg: rgb(255 255 255 / 48%);
-  --uvp-sidebar-active-bg: rgb(255 255 255 / 70%);
-  --uvp-sidebar-active-shadow: inset 0 0 0 1px rgb(37 99 235 / 8%);
-  --uvp-sidebar-active-line: #1d75ff;
+  --uvp-sidebar-brand-mark-bg: linear-gradient(145deg, #ffffff 0%, #eef7ff 100%);
+  --uvp-sidebar-hover-bg: rgb(255 255 255 / 42%);
+  --uvp-sidebar-active-bg: linear-gradient(90deg, rgb(37 99 235 / 10%) 0%, rgb(14 165 233 / 6%) 100%);
+  --uvp-sidebar-active-shadow: inset 0 0 0 1px rgb(37 99 235 / 10%);
+  --uvp-sidebar-active-line: #2563eb;
   --uvp-sidebar-module-bg: transparent;
   --uvp-sidebar-module-open-bg: rgb(255 255 255 / 32%);
   --uvp-sidebar-module-border: transparent;
-  --uvp-sidebar-tree-line: #d3dde8;
-  --uvp-sidebar-tree-dot: #aebdca;
+  --uvp-sidebar-tree-line: rgb(148 163 184 / 36%);
+  --uvp-sidebar-tree-dot: #7aa7e8;
 }
 
 @media (max-width: 1280px) {

@@ -36,7 +36,7 @@ const { routeTree } = storeToRefs(routerStore);
 .layout_side {
   flex: 1;
   overflow: hidden;
-  padding-top: 6px;
+  padding-top: 4px;
   .scrollbar {
     height: 100%;
   }
@@ -46,11 +46,11 @@ const { routeTree } = storeToRefs(routerStore);
   display: flex;
   align-items: center;
   height: 28px;
-  padding: 8px 22px 0;
-  color: var(--uvp-text-tertiary);
+  padding: 7px 22px 0;
+  color: rgb(100 116 139 / 86%);
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   line-height: 1;
 
   i {

@@ -79,8 +79,8 @@ const isTitle = computed(() => {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    min-height: 86px;
-    padding: 18px 18px 12px 20px;
+    min-height: 88px;
+    padding: 20px 18px 12px 20px;
     background: transparent;
     border-bottom: 0;
 
@@ -97,7 +97,7 @@ const isTitle = computed(() => {
     .logo_box {
         display: flex;
         align-items: center;
-        column-gap: 12px;
+        column-gap: 11px;
         width: 100%;
         padding: 0;
         overflow: hidden;
@@ -109,28 +109,28 @@ const isTitle = computed(() => {
 
     .logo_mark {
         display: grid;
-        flex: 0 0 38px;
-        width: 38px;
-        height: 38px;
+        flex: 0 0 40px;
+        width: 40px;
+        height: 40px;
         place-items: center;
         background: var(--uvp-sidebar-brand-mark-bg);
-        border: 1px solid rgb(255 255 255 / 66%);
-        border-radius: 10px;
-        box-shadow: none;
+        border: 1px solid rgb(190 213 236 / 58%);
+        border-radius: 12px;
+        box-shadow: inset 0 1px 0 rgb(255 255 255 / 86%), 0 10px 20px -18px rgb(37 99 235 / 34%);
     }
 
     .logo_text {
         display: flex;
         flex-direction: column;
         min-width: 0;
-        row-gap: 5px;
+        row-gap: 4px;
     }
 
     .logo_title_row {
         display: flex;
         align-items: center;
         min-width: 0;
-        column-gap: 8px;
+        column-gap: 7px;
     }
 
     // 折叠或者是横向布局-去掉padding，logo居中
@@ -142,11 +142,11 @@ const isTitle = computed(() => {
 
     .logo_title {
         box-sizing: border-box;
-        max-width: 86px;
+        max-width: 88px;
         overflow: hidden;
         text-overflow: ellipsis;
-        font-size: 17px;
-        font-weight: 800;
+        font-size: 18px;
+        font-weight: 780;
         color: var(--uvp-sidebar-title);
         text-align: left;
         white-space: nowrap;
@@ -155,13 +155,13 @@ const isTitle = computed(() => {
 
     .logo_badge {
         flex: 0 0 auto;
-        padding: 2px 7px;
+        padding: 2px 6px;
         font-size: 10px;
-        font-weight: 700;
+        font-weight: 720;
         line-height: 1.2;
         color: var(--uvp-brand-strong);
-        background: rgb(37 99 235 / 8%);
-        border: 1px solid rgb(37 99 235 / 14%);
+        background: rgb(37 99 235 / 7%);
+        border: 1px solid rgb(37 99 235 / 12%);
         border-radius: 999px;
     }
 
@@ -170,7 +170,7 @@ const isTitle = computed(() => {
         overflow: hidden;
         text-overflow: ellipsis;
         font-size: 12px;
-        font-weight: 500;
+        font-weight: 520;
         line-height: 1.2;
         color: var(--uvp-text-tertiary);
         white-space: nowrap;
