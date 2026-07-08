@@ -68,6 +68,16 @@ const themeConfig = () => {
     "#b1d391"
   ]);
 
+  watch(
+    layoutType,
+    value => {
+      if (value !== "layoutDefaults") {
+        layoutType.value = "layoutDefaults";
+      }
+    },
+    { immediate: true }
+  );
+
   // 折叠菜单
   function setCollapsed(data: boolean) {
     collapsed.value = data;

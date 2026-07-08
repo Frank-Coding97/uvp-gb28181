@@ -319,18 +319,24 @@ const logOut = () => {
     align-items: center;
     justify-content: space-between;
     height: 100%;
-    background-color: $color-bg-2;
+    background-color: transparent;
 
     >.icon_btn {
         box-sizing: border-box;
         display: flex;
         align-items: center;
         justify-content: space-around;
-        width: $icon-box;
-        height: $icon-box;
-        margin-left: $margin;
-        color: $color-text-1;
-        border-radius: $radius-box-1;
+        width: 32px;
+        height: 32px;
+        margin-left: 12px;
+        color: var(--uvp-text-secondary);
+        border-radius: 8px;
+        transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    >.icon_btn:hover {
+        color: var(--uvp-brand);
+        background: var(--uvp-brand-soft);
     }
 
     .my_setting {
@@ -338,8 +344,9 @@ const logOut = () => {
         align-items: center;
         justify-content: space-between;
         height: 32px;
-        margin-left: $margin;
+        margin-left: 12px;
         overflow: hidden;
+        color: var(--uvp-text-primary);
 
         .my_image {
             margin-right: 8px;

@@ -3,8 +3,16 @@
         <div class="logo_box" :class="(collapsed || layoutType == 'layoutHead') && 'padding-unset'">
             <!-- <img v-if="sysLogo" :src="sysLogo" alt="系统logo" style="width: 32px; height: 32px;" />
             <s-svg-icon v-else name="snow" :size="32" /> -->
-            <LogoSvg :imageUrl="sysLogo" :width="32" :height="32" />
-            <span :class="isDark ? 'logo_title dark' : 'logo_title'" v-if="isTitle">{{ bannerTitle }}</span>
+            <div class="logo_mark">
+                <LogoSvg :imageUrl="sysLogo" :width="26" :height="26" />
+            </div>
+            <div class="logo_text" v-if="isTitle">
+                <div class="logo_title_row">
+                    <span :class="isDark ? 'logo_title dark' : 'logo_title'">UVP</span>
+                    <span class="logo_badge">GB28181</span>
+                </div>
+                <span class="logo_subtitle">{{ subtitle }}</span>
+            </div>
         </div>
     </div>
 </template>
@@ -30,6 +38,10 @@ const title = import.meta.env.VITE_GLOB_APP_TITLE;
 // 从系统配置中获取标题
 const bannerTitle = computed(() => {
     return systemConfig.value?.systemName || title;
+});
+
+const subtitle = computed(() => {
+    return bannerTitle.value.replace(/^UVP\s*/, "") || "统一视频接入平台";
 });
 
 // 从系统配置中获取logo
@@ -62,36 +74,105 @@ const isTitle = computed(() => {
 <style lang="scss" scoped>
 // 头部
 .logo_head {
+    position: relative;
     box-sizing: border-box;
     display: flex;
     align-items: center;
-    justify-content: space-around;
-    height: 60px;
-    border-right: $border-1 solid $color-border-2;
+    justify-content: flex-start;
+    min-height: 88px;
+    padding: 18px 18px 14px 20px;
+    background: transparent;
+    border-bottom: 0;
+
+    &::after {
+        position: absolute;
+        right: 18px;
+        bottom: 0;
+        left: 20px;
+        height: 1px;
+        content: "";
+        background: linear-gradient(90deg, rgb(37 99 235 / 22%), rgb(15 170 166 / 12%), transparent);
+    }
 
     .logo_box {
         display: flex;
-        // column-gap: $padding;
         align-items: center;
+        column-gap: 12px;
         width: 100%;
-        padding: 0 $padding;
+        padding: 0;
         overflow: hidden;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    .logo_mark {
+        display: grid;
+        flex: 0 0 40px;
+        width: 40px;
+        height: 40px;
+        place-items: center;
+        background: var(--uvp-sidebar-brand-mark-bg);
+        border: 1px solid rgb(255 255 255 / 72%);
+        border-radius: 12px;
+        box-shadow: 0 10px 24px rgb(37 99 235 / 10%);
+    }
+
+    .logo_text {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        row-gap: 5px;
+    }
+
+    .logo_title_row {
+        display: flex;
+        align-items: center;
+        min-width: 0;
+        column-gap: 8px;
     }
 
     // 折叠或者是横向布局-去掉padding，logo居中
     .padding-unset {
-        justify-content: space-around;
-        padding: unset;
+        justify-content: center;
+        padding-right: 0;
+        padding-left: 0;
     }
 
     .logo_title {
         box-sizing: border-box;
-        max-width: 140px;
+        max-width: 86px;
         overflow: hidden;
         text-overflow: ellipsis;
-        font-size: $font-size-title-1;
-        font-weight: bold;
+        font-size: 18px;
+        font-weight: 800;
+        color: var(--uvp-sidebar-title);
         text-align: left;
+        white-space: nowrap;
+        line-height: 1.05;
+    }
+
+    .logo_badge {
+        flex: 0 0 auto;
+        padding: 2px 7px;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.2;
+        color: var(--uvp-brand-strong);
+        background: rgb(37 99 235 / 8%);
+        border: 1px solid rgb(37 99 235 / 14%);
+        border-radius: 999px;
+    }
+
+    .logo_subtitle {
+        max-width: 172px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1.2;
+        color: var(--uvp-text-tertiary);
         white-space: nowrap;
     }
 

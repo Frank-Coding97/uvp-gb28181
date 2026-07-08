@@ -1,7 +1,11 @@
 <template>
   <div :class="asideDark ? 'aside dark' : 'aside'">
     <Logo />
-    <a-layout-sider :collapsed="collapsed" breakpoint="xl" class="layout_side" :width="220">
+    <div v-if="!collapsed" class="aside_nav_heading">
+      <span>平台导航</span>
+      <i></i>
+    </div>
+    <a-layout-sider :collapsed="collapsed" breakpoint="xl" class="layout_side" :width="256">
       <a-scrollbar style="height: 100%; overflow: auto" outer-class="scrollbar"><Menu :route-tree="routeTree" /></a-scrollbar>
     </a-layout-sider>
   </div>
@@ -21,9 +25,10 @@ const { routeTree } = storeToRefs(routerStore);
 
 <style lang="scss" scoped>
 .aside {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
 }
 .dark {
   background: #232324;
@@ -31,20 +36,40 @@ const { routeTree } = storeToRefs(routerStore);
 .layout_side {
   flex: 1;
   overflow: hidden;
+  padding-top: 6px;
   .scrollbar {
     height: 100%;
+  }
+}
+
+.aside_nav_heading {
+  display: flex;
+  align-items: center;
+  column-gap: 10px;
+  height: 28px;
+  padding: 8px 20px 0;
+  color: var(--uvp-text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1;
+
+  i {
+    flex: 1;
+    height: 1px;
+    background: linear-gradient(90deg, rgb(138 164 184 / 36%), transparent);
   }
 }
 
 // 修改左侧滚动条宽度
 :deep(.arco-scrollbar-thumb-direction-vertical .arco-scrollbar-thumb-bar) {
   width: 4px;
-  margin-left: 8px;
+  margin-left: 10px;
 }
 
 // 去掉右侧阴影并替换为边线
 :deep(.arco-layout-sider-light) {
-  border-right: $border-1 solid $color-border-2;
+  border-right: 0;
   box-shadow: unset;
 }
 

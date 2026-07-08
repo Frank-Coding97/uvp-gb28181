@@ -29,9 +29,34 @@ const { isPc } = useDevicesSize();
 <style lang="scss" scoped>
 .layout {
   height: 100vh;
+  padding: var(--uvp-workspace-gap);
+  column-gap: var(--uvp-workspace-gap);
+  background: var(--uvp-shell-bg);
 }
+
 .layout-right {
   display: grid;
   grid-template-rows: auto 1fr auto;
+  min-width: 0;
+  height: calc(100vh - var(--uvp-workspace-gap) - var(--uvp-workspace-gap));
+  overflow: hidden;
+  background: var(--uvp-workspace-bg);
+  border: 1px solid var(--uvp-workspace-border);
+  border-radius: var(--uvp-workspace-radius);
+  box-shadow: var(--uvp-workspace-shadow);
+}
+
+@media (max-width: 1024px) {
+  .layout {
+    padding: 0;
+  }
+
+  .layout-right {
+    height: 100vh;
+    border-radius: 0;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+  }
 }
 </style>

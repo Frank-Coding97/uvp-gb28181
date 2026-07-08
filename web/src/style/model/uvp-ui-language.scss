@@ -1,0 +1,291 @@
+@use "@/style/var/index" as *;
+
+body {
+  background: var(--uvp-shell-bg);
+}
+
+#app {
+  background: var(--uvp-shell-bg);
+}
+
+.layout {
+  background: var(--uvp-shell-bg);
+}
+
+.aside {
+  position: relative;
+  box-sizing: border-box;
+  width: var(--uvp-sidebar-width);
+  background: var(--uvp-sidebar-bg);
+}
+
+.aside::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: var(--uvp-sidebar-panel-bg);
+  border-right: 1px solid var(--uvp-sidebar-panel-border);
+  border-radius: 0;
+  box-shadow: var(--uvp-sidebar-panel-shadow);
+  pointer-events: none;
+}
+
+.aside > * {
+  position: relative;
+  z-index: 1;
+}
+
+.aside .arco-layout-sider-trigger {
+  color: var(--uvp-text-tertiary);
+  background: transparent;
+  border-top: 1px solid rgb(215 227 242 / 90%);
+}
+
+.aside .arco-menu {
+  background: transparent;
+  padding-top: 0;
+}
+
+.aside .arco-menu-inner {
+  padding: 2px 14px 20px 16px;
+}
+
+.aside .arco-menu-item .arco-icon,
+.aside .arco-menu-inline-header .arco-icon,
+.aside .arco-menu-pop-header .arco-icon {
+  font-size: 17px;
+}
+
+.aside .arco-menu-item,
+.aside .arco-menu-inline-header,
+.aside .arco-menu-pop-header,
+.aside .arco-menu-light .arco-menu-inline-content {
+  border-radius: 12px;
+}
+
+.aside .arco-menu-light .arco-menu-item,
+.aside .arco-menu-light .arco-menu-inline-header,
+.aside .arco-menu-light .arco-menu-pop-header {
+  position: relative;
+  min-height: 40px;
+  margin-bottom: 4px;
+  padding-right: 12px;
+  padding-left: 10px;
+  color: var(--uvp-text-secondary);
+  background: transparent !important;
+  border: 1px solid transparent;
+  border-radius: 12px !important;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.aside .arco-menu-light .arco-menu-inline-header {
+  min-height: 42px;
+  color: var(--uvp-sidebar-title);
+  font-weight: 600;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item,
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline > .arco-menu-inline-header {
+  font-weight: 650;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item .arco-menu-icon,
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline > .arco-menu-inline-header .arco-menu-icon {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  margin-right: 10px;
+  color: #5d7284;
+  place-items: center;
+  background: rgb(255 255 255 / 48%);
+  border: 1px solid rgb(255 255 255 / 56%);
+  border-radius: 9px;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline > .arco-menu-inline-header {
+  background: var(--uvp-sidebar-module-bg) !important;
+  border: 1px solid transparent;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline.arco-menu-inline-open > .arco-menu-inline-header {
+  background: var(--uvp-sidebar-module-open-bg) !important;
+  border-color: rgb(255 255 255 / 48%);
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline:has(.arco-menu-selected) > .arco-menu-inline-header {
+  color: var(--uvp-brand-strong) !important;
+  background: rgb(255 255 255 / 34%) !important;
+  border-color: transparent;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline:has(.arco-menu-selected) > .arco-menu-inline-header .arco-menu-icon,
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline.arco-menu-inline-open > .arco-menu-inline-header .arco-menu-icon {
+  color: var(--uvp-brand-strong);
+  background: linear-gradient(135deg, rgb(37 99 235 / 12%), rgb(15 170 166 / 12%));
+  border-color: rgb(37 99 235 / 12%);
+}
+
+.aside .arco-menu-light .arco-menu-inline-content {
+  position: relative;
+  padding: 2px 0 8px 20px;
+  margin: -1px 0 4px 12px;
+  background: transparent !important;
+  border-radius: 0;
+}
+
+.aside .arco-menu-light .arco-menu-inline-content::before {
+  position: absolute;
+  top: 7px;
+  bottom: 12px;
+  left: 9px;
+  width: 1px;
+  content: "";
+  background: var(--uvp-sidebar-tree-line);
+}
+
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-item {
+  min-height: 34px;
+  margin-bottom: 2px;
+  padding-left: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--uvp-text-tertiary);
+  border-radius: 9px !important;
+  box-shadow: none !important;
+}
+
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-item::after {
+  position: absolute;
+  top: 50%;
+  left: -14px;
+  width: 7px;
+  height: 1px;
+  content: "";
+  background: var(--uvp-sidebar-tree-line);
+}
+
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-item .arco-menu-icon {
+  display: none;
+}
+
+.aside .arco-menu-light .arco-menu-item:hover,
+.aside .arco-menu-light .arco-menu-inline-header:hover,
+.aside .arco-menu-light .arco-menu-pop-header:hover {
+  background: var(--uvp-sidebar-hover-bg) !important;
+  color: var(--uvp-sidebar-title) !important;
+  border-color: rgb(255 255 255 / 52%);
+  transform: translateX(1px);
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected,
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected:hover,
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-selected,
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-selected:hover {
+  background: var(--uvp-sidebar-active-bg) !important;
+  color: var(--uvp-brand-strong) !important;
+  font-weight: 600 !important;
+  border-color: rgb(37 99 235 / 12%) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-sidebar-active-shadow) !important;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected::before,
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-selected::before {
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 3px;
+  width: 3px;
+  content: "";
+  background: var(--uvp-sidebar-active-line);
+  border-radius: 999px;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon,
+.aside .arco-menu-light .arco-menu-item:hover .arco-icon,
+.aside .arco-menu-light .arco-menu-inline-header:hover .arco-icon {
+  color: var(--uvp-brand-strong) !important;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon {
+  color: #ffffff !important;
+  background: linear-gradient(135deg, var(--uvp-brand), var(--uvp-brand-cyan));
+  border-color: transparent;
+  box-shadow: 0 8px 16px rgb(37 99 235 / 16%);
+}
+
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-selected,
+.aside .arco-menu-light .arco-menu-inline-content .arco-menu-selected:hover {
+  background: rgb(37 99 235 / 7%) !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.aside .arco-menu-inline-header .arco-menu-icon,
+.aside .arco-menu-item .arco-menu-icon {
+  margin-right: 10px;
+}
+
+.aside .arco-menu-inline-header .arco-icon-down,
+.aside .arco-menu-pop-header .arco-icon-down {
+  color: var(--uvp-text-tertiary);
+}
+
+.aside .arco-menu-collapsed .arco-menu-item,
+.aside .arco-menu-collapsed .arco-menu-inline-header {
+  margin-inline: 6px;
+}
+
+.aside .arco-menu-item-group-title,
+.aside .arco-menu-pop .arco-menu-pop-header,
+.aside .arco-menu-light .arco-menu-inline-header .arco-menu-title {
+  letter-spacing: 0;
+}
+
+.aside .arco-menu-light .arco-menu-selected .arco-menu-title,
+.aside .arco-menu-light .arco-menu-item:hover .arco-menu-title,
+.aside .arco-menu-light .arco-menu-inline-header:hover .arco-menu-title {
+  color: inherit;
+}
+
+.snow-page,
+.snow-fill {
+  box-sizing: border-box;
+  height: 100%;
+  padding: var(--uvp-main-padding);
+  overflow-x: hidden;
+  overflow-y: auto;
+  background: transparent;
+}
+
+.snow-fill {
+  overflow: hidden;
+}
+
+.snow-inner,
+.snow-fill-inner {
+  box-sizing: border-box;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: var(--uvp-panel-radius);
+  box-shadow: var(--uvp-panel-shadow);
+}
+
+.snow-inner {
+  min-height: 100%;
+  padding: var(--uvp-main-padding);
+}
+
+.snow-fill-inner {
+  height: 100%;
+  padding: var(--uvp-main-padding);
+}
+
+@media (max-width: 768px) {
+  .snow-page,
+  .snow-fill {
+    padding: 16px;
+  }
+}
