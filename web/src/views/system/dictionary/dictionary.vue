@@ -30,7 +30,7 @@
                 </template>
             </s-layout-tools>
 
-            <a-table row-key="id" :data="dictList" :bordered="{ cell: true }" :loading="loading"
+            <a-table class="uvp-data-table" row-key="id" :data="dictList" :bordered="false" :loading="loading"
                 :scroll="{ x: '100%', y: '100%', minWidth: 1000 }" :pagination="pagination">
                 <template #columns>
                     <a-table-column title="ID" data-index="id" :width="70" align="center"></a-table-column>

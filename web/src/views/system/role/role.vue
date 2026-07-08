@@ -28,7 +28,7 @@
                     </a-space>
                 </template>
             </s-layout-tools>
-            <a-table row-key="id" :data="displayRoleList" :bordered="{ cell: true }" :loading="loading"
+            <a-table class="uvp-data-table" row-key="id" :data="displayRoleList" :bordered="false" :loading="loading"
                 :pagination="false" :scroll="{ x: '100%', y: '100%', minWidth: 1000 }">
                 <template #columns>
                     <a-table-column title="角色名称" data-index="name" :width="150"></a-table-column>
