@@ -3,7 +3,7 @@
         <a-card class="general-card">
             <a-row>
                 <a-col :span="24">
-                    <a-form :model="formModel" :layout="layoutMode.layout" :label-col-props="{ span: 6 }" :wrapper-col-props="{ span: 18 }"
+                    <a-form class="uvp-system-form" :model="formModel" :layout="layoutMode.layout" :label-col-props="{ span: 6 }" :wrapper-col-props="{ span: 18 }"
                         label-align="left" auto-label-width>
                         <a-row :gutter="16">
                             <a-col :span="isMobile ? 24 : 6">
@@ -111,7 +111,7 @@
 
         <!-- 新增/编辑弹窗 -->
         <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="modalVisible" :title="modalTitle" @ok="handleOk" @cancel="handleCancel">
-            <a-form ref="formRef" :layout="layoutMode.layout" :model="modalFormModel" :rules="rules">
+            <a-form class="uvp-system-form" ref="formRef" :layout="layoutMode.layout" :model="modalFormModel" :rules="rules">
                 <a-form-item field="name" label="租户名称">
                     <a-input v-model="modalFormModel.name" placeholder="请输入租户名称" />
                 </a-form-item>

@@ -814,19 +814,22 @@ body {
 }
 
 .uvp-system-dialog .arco-form-item-label,
-.uvp-system-dialog__body .arco-form-item-label {
+.uvp-system-dialog__body .arco-form-item-label,
+.uvp-system-form .arco-form-item-label {
   color: var(--uvp-text-secondary);
   font-size: 13px;
   font-weight: 620;
 }
 
 .uvp-system-dialog .arco-form-item,
-.uvp-system-dialog__body .arco-form-item {
+.uvp-system-dialog__body .arco-form-item,
+.uvp-system-form .arco-form-item {
   margin-bottom: 18px;
 }
 
 .uvp-system-dialog .arco-form-item-extra,
-.uvp-system-dialog__body .arco-form-item-extra {
+.uvp-system-dialog__body .arco-form-item-extra,
+.uvp-system-form .arco-form-item-extra {
   margin-top: 6px;
   color: var(--uvp-text-tertiary);
   font-size: 12px;
@@ -844,7 +847,13 @@ body {
 .uvp-system-dialog__body .arco-select-view-multiple,
 .uvp-system-dialog__body .arco-tree-select-view,
 .uvp-system-dialog__body .arco-picker,
-.uvp-system-dialog__body .arco-textarea-wrapper {
+.uvp-system-dialog__body .arco-textarea-wrapper,
+.uvp-system-form .arco-input-wrapper,
+.uvp-system-form .arco-select-view-single,
+.uvp-system-form .arco-select-view-multiple,
+.uvp-system-form .arco-tree-select-view,
+.uvp-system-form .arco-picker,
+.uvp-system-form .arco-textarea-wrapper {
   background: var(--uvp-dialog-control-bg);
   border-color: transparent;
   border-radius: 9px;
@@ -863,7 +872,13 @@ body {
 .uvp-system-dialog__body .arco-select-view-multiple:hover,
 .uvp-system-dialog__body .arco-tree-select-view:hover,
 .uvp-system-dialog__body .arco-picker:hover,
-.uvp-system-dialog__body .arco-textarea-wrapper:hover {
+.uvp-system-dialog__body .arco-textarea-wrapper:hover,
+.uvp-system-form .arco-input-wrapper:hover,
+.uvp-system-form .arco-select-view-single:hover,
+.uvp-system-form .arco-select-view-multiple:hover,
+.uvp-system-form .arco-tree-select-view:hover,
+.uvp-system-form .arco-picker:hover,
+.uvp-system-form .arco-textarea-wrapper:hover {
   background: #ffffff;
   border-color: transparent;
   box-shadow: inset 0 0 0 1px rgb(37 99 235 / 24%);
@@ -878,7 +893,12 @@ body {
 .uvp-system-dialog__body .arco-select-view-focus,
 .uvp-system-dialog__body .arco-tree-select-view-focus,
 .uvp-system-dialog__body .arco-picker-focused,
-.uvp-system-dialog__body .arco-textarea-wrapper.arco-textarea-focus {
+.uvp-system-dialog__body .arco-textarea-wrapper.arco-textarea-focus,
+.uvp-system-form .arco-input-wrapper.arco-input-focus,
+.uvp-system-form .arco-select-view-focus,
+.uvp-system-form .arco-tree-select-view-focus,
+.uvp-system-form .arco-picker-focused,
+.uvp-system-form .arco-textarea-wrapper.arco-textarea-focus {
   background: #ffffff;
   border-color: transparent;
   box-shadow: inset 0 0 0 1px rgb(37 99 235 / 36%), 0 0 0 3px rgb(37 99 235 / 8%);
@@ -889,14 +909,18 @@ body {
 .uvp-system-dialog .arco-picker-disabled,
 .uvp-system-dialog__body .arco-input-wrapper.arco-input-disabled,
 .uvp-system-dialog__body .arco-select-view-disabled,
-.uvp-system-dialog__body .arco-picker-disabled {
+.uvp-system-dialog__body .arco-picker-disabled,
+.uvp-system-form .arco-input-wrapper.arco-input-disabled,
+.uvp-system-form .arco-select-view-disabled,
+.uvp-system-form .arco-picker-disabled {
   color: var(--uvp-text-tertiary);
   background: #f1f5f9;
   box-shadow: inset 0 0 0 1px rgb(148 163 184 / 12%);
 }
 
 .uvp-system-dialog .arco-radio-group-button,
-.uvp-system-dialog__body .arco-radio-group-button {
+.uvp-system-dialog__body .arco-radio-group-button,
+.uvp-system-form .arco-radio-group-button {
   padding: 3px;
   background: #f3f7fb;
   border: 1px solid var(--uvp-dialog-border);
@@ -904,25 +928,29 @@ body {
 }
 
 .uvp-system-dialog .arco-radio-button,
-.uvp-system-dialog__body .arco-radio-button {
+.uvp-system-dialog__body .arco-radio-button,
+.uvp-system-form .arco-radio-button {
   color: var(--uvp-text-secondary);
   border-radius: 8px;
 }
 
 .uvp-system-dialog .arco-radio-button.arco-radio-checked,
-.uvp-system-dialog__body .arco-radio-button.arco-radio-checked {
+.uvp-system-dialog__body .arco-radio-button.arco-radio-checked,
+.uvp-system-form .arco-radio-button.arco-radio-checked {
   color: var(--uvp-brand-strong);
   background: #ffffff;
   box-shadow: 0 4px 12px rgb(37 99 235 / 10%);
 }
 
 .uvp-system-dialog .arco-switch-checked,
-.uvp-system-dialog__body .arco-switch-checked {
+.uvp-system-dialog__body .arco-switch-checked,
+.uvp-system-form .arco-switch-checked {
   background-color: var(--uvp-brand);
 }
 
 .uvp-system-dialog .arco-card,
-.uvp-system-dialog__body .arco-card {
+.uvp-system-dialog__body .arco-card,
+.uvp-system-form .arco-card {
   background: #fbfdff;
   border: 1px solid var(--uvp-dialog-border);
   border-radius: 12px;
@@ -930,8 +958,14 @@ body {
 }
 
 .uvp-system-dialog .arco-tabs-nav-tab,
-.uvp-system-dialog__body .arco-tabs-nav-tab {
+.uvp-system-dialog__body .arco-tabs-nav-tab,
+.uvp-system-form .arco-tabs-nav-tab {
   gap: 8px;
+}
+
+.uvp-system-form .arco-btn {
+  min-width: 88px;
+  border-radius: 8px;
 }
 
 @media (max-width: 768px) {

@@ -18,7 +18,7 @@
                 <!-- 服务器配置 -->
                 <a-tab-pane key="server" title="服务器配置">
                     <a-card :bordered="false" class="mb-4">
-                        <a-form :layout="layoutMode.layout" :model="configData.system" auto-label-width>
+                        <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.system" auto-label-width>
                             <a-row :gutter="24">
                                 <a-col :span="24">
                                     <a-form-item field="systemLogo" label="系统Logo">
@@ -95,7 +95,7 @@
                 <!-- 验证码配置 -->
                 <a-tab-pane key="captcha" title="验证码配置">
                     <a-card :bordered="false" class="mb-4">
-                        <a-form  :layout="layoutMode.layout" :model="configData.captcha" auto-label-width>
+                        <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.captcha" auto-label-width>
                             <a-row :gutter="24">
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="open" label="启用验证码">
@@ -127,7 +127,7 @@
                 <!-- 安全配置 -->
                 <a-tab-pane key="safe" title="安全配置">
                     <a-card :bordered="false" class="mb-4">
-                        <a-form :layout="layoutMode.layout" :model="configData.safe" auto-label-width>
+                        <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.safe" auto-label-width>
                             <a-row :gutter="24">
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="loginLockThreshold" label="登录失败锁定阈值(次)">

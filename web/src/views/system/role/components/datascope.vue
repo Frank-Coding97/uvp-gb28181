@@ -1,6 +1,6 @@
 <template>
     <div class="data-scope-container">
-        <a-form :model="formModel" layout="vertical">
+        <a-form class="uvp-system-form" :model="formModel" layout="vertical">
             <a-form-item label="角色名称">
                 <a-input v-model="formModel.roleName" disabled />
             </a-form-item>
