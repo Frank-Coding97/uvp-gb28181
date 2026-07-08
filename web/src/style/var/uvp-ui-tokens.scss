@@ -1,16 +1,17 @@
 :root {
-  --uvp-shell-bg: #f4f8fb;
-  --uvp-shell-muted: #edf5fa;
-  --uvp-sidebar-bg: #eaf4f8;
-  --uvp-sidebar-panel-bg: linear-gradient(180deg, #f3f9fd 0%, #eaf4f8 52%, #e7f1f7 100%);
-  --uvp-sidebar-panel-border: #d4e3ee;
+  --uvp-navigation-bg: #f5f8fb;
+  --uvp-shell-bg: var(--uvp-navigation-bg);
+  --uvp-shell-muted: #eef4f8;
+  --uvp-sidebar-bg: var(--uvp-navigation-bg);
+  --uvp-sidebar-panel-bg: transparent;
+  --uvp-sidebar-panel-border: transparent;
   --uvp-sidebar-panel-shadow: none;
   --uvp-sidebar-width: 256px;
   --uvp-workspace-gap: 8px;
   --uvp-workspace-radius: 14px;
   --uvp-workspace-bg: #ffffff;
   --uvp-workspace-border: #e5eaf3;
-  --uvp-workspace-shadow: 0 10px 30px rgb(15 23 42 / 4%);
+  --uvp-workspace-shadow: 12px 12px 30px -24px rgb(15 23 42 / 16%);
   --uvp-header-height: 56px;
   --uvp-header-padding-x: 24px;
   --uvp-main-padding: 24px;
@@ -27,16 +28,16 @@
   --uvp-brand-strong: #1d4ed8;
   --uvp-brand-cyan: #0faaa6;
   --uvp-brand-soft: #e8f2ff;
-  --uvp-sidebar-brand-mark-bg: linear-gradient(135deg, #e8f2ff 0%, #dff9f5 100%);
-  --uvp-sidebar-hover-bg: rgb(255 255 255 / 58%);
-  --uvp-sidebar-active-bg: #dfeeff;
-  --uvp-sidebar-active-shadow: inset 0 0 0 1px rgb(37 99 235 / 12%);
+  --uvp-sidebar-brand-mark-bg: rgb(255 255 255 / 58%);
+  --uvp-sidebar-hover-bg: rgb(255 255 255 / 48%);
+  --uvp-sidebar-active-bg: rgb(255 255 255 / 70%);
+  --uvp-sidebar-active-shadow: inset 0 0 0 1px rgb(37 99 235 / 8%);
   --uvp-sidebar-active-line: #1d75ff;
   --uvp-sidebar-module-bg: transparent;
-  --uvp-sidebar-module-open-bg: rgb(255 255 255 / 42%);
+  --uvp-sidebar-module-open-bg: rgb(255 255 255 / 32%);
   --uvp-sidebar-module-border: transparent;
-  --uvp-sidebar-tree-line: #bfd1df;
-  --uvp-sidebar-tree-dot: #8aa4b8;
+  --uvp-sidebar-tree-line: #d3dde8;
+  --uvp-sidebar-tree-dot: #aebdca;
 }
 
 @media (max-width: 1280px) {

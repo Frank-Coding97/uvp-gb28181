@@ -1,15 +1,15 @@
 @use "@/style/var/index" as *;
 
 body {
-  background: var(--uvp-shell-bg);
+  background: var(--uvp-navigation-bg);
 }
 
 #app {
-  background: var(--uvp-shell-bg);
+  background: var(--uvp-navigation-bg);
 }
 
 .layout {
-  background: var(--uvp-shell-bg);
+  background: var(--uvp-navigation-bg);
 }
 
 .aside {
@@ -24,7 +24,7 @@ body {
   inset: 0;
   content: "";
   background: var(--uvp-sidebar-panel-bg);
-  border-right: 1px solid var(--uvp-sidebar-panel-border);
+  border-right: 0;
   border-radius: 0;
   box-shadow: var(--uvp-sidebar-panel-shadow);
   pointer-events: none;
@@ -47,7 +47,7 @@ body {
 }
 
 .aside .arco-menu-inner {
-  padding: 2px 14px 20px 16px;
+  padding: 2px 16px 20px 16px;
 }
 
 .aside .arco-menu-item .arco-icon,
@@ -68,15 +68,15 @@ body {
 .aside .arco-menu-light .arco-menu-pop-header {
   position: relative;
   min-height: 40px;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   padding-right: 12px;
-  padding-left: 10px;
+  padding-left: 8px;
   color: var(--uvp-text-secondary);
   background: transparent !important;
   border: 1px solid transparent;
-  border-radius: 12px !important;
+  border-radius: 9px !important;
   cursor: pointer;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: background-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .aside .arco-menu-light .arco-menu-inline-header {
@@ -93,15 +93,36 @@ body {
 .aside .arco-menu > .arco-menu-inner > .arco-menu-item .arco-menu-icon,
 .aside .arco-menu > .arco-menu-inner > .arco-menu-inline > .arco-menu-inline-header .arco-menu-icon {
   display: inline-grid;
-  width: 28px;
-  height: 28px;
-  margin-right: 10px;
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
   color: #5d7284;
   place-items: center;
-  background: rgb(255 255 255 / 48%);
-  border: 1px solid rgb(255 255 255 / 56%);
-  border-radius: 9px;
-  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  transition: color 0.2s ease;
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item .arco-menu-icon svg,
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline > .arco-menu-inline-header .arco-menu-icon svg {
+  width: 18px;
+  height: 18px;
+  opacity: 0.78;
+  filter: grayscale(1) saturate(0.15) contrast(0.92);
+}
+
+.aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon svg,
+.aside .arco-menu > .arco-menu-inner > .arco-menu-inline:has(.arco-menu-selected) > .arco-menu-inline-header .arco-menu-icon svg,
+.aside .arco-menu-light .arco-menu-item:hover .arco-menu-icon svg,
+.aside .arco-menu-light .arco-menu-inline-header:hover .arco-menu-icon svg {
+  opacity: 0.95;
+  filter: grayscale(0.35) saturate(0.9) contrast(0.98);
+}
+
+.aside .arco-menu .arco-menu-icon .uvp-lucide-menu-icon {
+  opacity: 1;
+  filter: none;
 }
 
 .aside .arco-menu > .arco-menu-inner > .arco-menu-inline > .arco-menu-inline-header {
@@ -110,27 +131,27 @@ body {
 }
 
 .aside .arco-menu > .arco-menu-inner > .arco-menu-inline.arco-menu-inline-open > .arco-menu-inline-header {
-  background: var(--uvp-sidebar-module-open-bg) !important;
-  border-color: rgb(255 255 255 / 48%);
+  background: transparent !important;
+  border-color: transparent;
 }
 
 .aside .arco-menu > .arco-menu-inner > .arco-menu-inline:has(.arco-menu-selected) > .arco-menu-inline-header {
   color: var(--uvp-brand-strong) !important;
-  background: rgb(255 255 255 / 34%) !important;
+  background: transparent !important;
   border-color: transparent;
 }
 
 .aside .arco-menu > .arco-menu-inner > .arco-menu-inline:has(.arco-menu-selected) > .arco-menu-inline-header .arco-menu-icon,
 .aside .arco-menu > .arco-menu-inner > .arco-menu-inline.arco-menu-inline-open > .arco-menu-inline-header .arco-menu-icon {
   color: var(--uvp-brand-strong);
-  background: linear-gradient(135deg, rgb(37 99 235 / 12%), rgb(15 170 166 / 12%));
-  border-color: rgb(37 99 235 / 12%);
+  background: transparent;
+  border-color: transparent;
 }
 
 .aside .arco-menu-light .arco-menu-inline-content {
   position: relative;
-  padding: 2px 0 8px 20px;
-  margin: -1px 0 4px 12px;
+  padding: 0 0 8px 20px;
+  margin: -1px 0 4px 10px;
   background: transparent !important;
   border-radius: 0;
 }
@@ -146,13 +167,13 @@ body {
 }
 
 .aside .arco-menu-light .arco-menu-inline-content .arco-menu-item {
-  min-height: 34px;
+  min-height: 33px;
   margin-bottom: 2px;
-  padding-left: 14px;
+  padding-left: 13px;
   font-size: 13px;
   font-weight: 500;
   color: var(--uvp-text-tertiary);
-  border-radius: 9px !important;
+  border-radius: 8px !important;
   box-shadow: none !important;
 }
 
@@ -175,8 +196,7 @@ body {
 .aside .arco-menu-light .arco-menu-pop-header:hover {
   background: var(--uvp-sidebar-hover-bg) !important;
   color: var(--uvp-sidebar-title) !important;
-  border-color: rgb(255 255 255 / 52%);
-  transform: translateX(1px);
+  border-color: transparent;
 }
 
 .aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected,
@@ -186,8 +206,8 @@ body {
   background: var(--uvp-sidebar-active-bg) !important;
   color: var(--uvp-brand-strong) !important;
   font-weight: 600 !important;
-  border-color: rgb(37 99 235 / 12%) !important;
-  border-radius: 10px !important;
+  border-color: transparent !important;
+  border-radius: 9px !important;
   box-shadow: var(--uvp-sidebar-active-shadow) !important;
 }
 
@@ -196,8 +216,8 @@ body {
   position: absolute;
   top: 9px;
   bottom: 9px;
-  left: 3px;
-  width: 3px;
+  left: 1px;
+  width: 2px;
   content: "";
   background: var(--uvp-sidebar-active-line);
   border-radius: 999px;
@@ -210,10 +230,10 @@ body {
 }
 
 .aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon {
-  color: #ffffff !important;
-  background: linear-gradient(135deg, var(--uvp-brand), var(--uvp-brand-cyan));
+  color: var(--uvp-brand-strong) !important;
+  background: transparent;
   border-color: transparent;
-  box-shadow: 0 8px 16px rgb(37 99 235 / 16%);
+  box-shadow: none;
 }
 
 .aside .arco-menu-light .arco-menu-inline-content .arco-menu-selected,
@@ -225,7 +245,7 @@ body {
 
 .aside .arco-menu-inline-header .arco-menu-icon,
 .aside .arco-menu-item .arco-menu-icon {
-  margin-right: 10px;
+  margin-right: 8px;
 }
 
 .aside .arco-menu-inline-header .arco-icon-down,

@@ -45,19 +45,16 @@ const { routeTree } = storeToRefs(routerStore);
 .aside_nav_heading {
   display: flex;
   align-items: center;
-  column-gap: 10px;
   height: 28px;
-  padding: 8px 20px 0;
+  padding: 8px 22px 0;
   color: var(--uvp-text-tertiary);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0;
+  letter-spacing: 0.08em;
   line-height: 1;
 
   i {
-    flex: 1;
-    height: 1px;
-    background: linear-gradient(90deg, rgb(138 164 184 / 36%), transparent);
+    display: none;
   }
 }
 
@@ -95,6 +92,6 @@ const { routeTree } = storeToRefs(routerStore);
 
 // 去掉sider背景
 .arco-layout-sider {
-  background: unset;
+  background: var(--uvp-navigation-bg);
 }
 </style>

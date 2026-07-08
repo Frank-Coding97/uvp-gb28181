@@ -206,7 +206,7 @@
                         </a-col>
                         <a-col :span="12">
                             <a-form-item field="icon" label="菜单图标" validate-trigger="blur">
-                                <s-select-icon type="arco" v-model="addFrom.icon" />
+                                <s-select-icon type="lucide" v-model="addFrom.icon" />
                             </a-form-item>
                         </a-col>
                     </a-row>

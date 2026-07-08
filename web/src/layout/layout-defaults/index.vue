@@ -31,7 +31,7 @@ const { isPc } = useDevicesSize();
   height: 100vh;
   padding: var(--uvp-workspace-gap);
   column-gap: var(--uvp-workspace-gap);
-  background: var(--uvp-shell-bg);
+  background: var(--uvp-navigation-bg);
 }
 
 .layout-right {
@@ -42,6 +42,7 @@ const { isPc } = useDevicesSize();
   overflow: hidden;
   background: var(--uvp-workspace-bg);
   border: 1px solid var(--uvp-workspace-border);
+  border-left-color: transparent;
   border-radius: var(--uvp-workspace-radius);
   box-shadow: var(--uvp-workspace-shadow);
 }

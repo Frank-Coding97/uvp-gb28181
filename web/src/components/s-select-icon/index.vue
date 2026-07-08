@@ -3,6 +3,13 @@
     <a-input ref="inputRef" :style="{ width: '100%' }" placeholder="请选择图标" v-model="modelValue" @focus="onFocus">
       <template #suffix v-if="modelValue">
         <s-svg-icon v-if="type == 'svg'" :name="modelValue" :size="size" />
+        <component
+          v-else-if="type == 'lucide' && selectedLucideIcon"
+          :is="selectedLucideIcon"
+          :size="size"
+          :stroke-width="2"
+          :absolute-stroke-width="true"
+        />
         <component v-else :is="modelValue" :size="size"></component>
       </template>
       <template #append>
@@ -28,8 +35,15 @@
         <div class="icon-grid">
           <div v-for="item in iconList" :key="item" class="grid-item" @click="onIcon(item)">
             <s-svg-icon v-if="type == 'svg'" :name="item" :size="25" />
+            <component
+              v-else-if="type == 'lucide'"
+              :is="getLucideIconComponent(item)"
+              :size="24"
+              :stroke-width="2"
+              :absolute-stroke-width="true"
+            />
             <component v-else :is="item" :size="25"></component>
-            <span>{{ item }}</span>
+            <span>{{ getIconLabel(item) }}</span>
           </div>
         </div>
         <div v-if="iconList.length === 0" class="empty-row">
@@ -47,6 +61,7 @@
 
 <script setup lang="ts">
 import * as ArcoIcons from "@arco-design/web-vue/es/icon";
+import { getLucideIconComponent, lucideMenuIconNames, toLucideIconValue } from "@/utils/lucide-menu-icons";
 interface Props {
   modelValue: string;
   type?: string;
@@ -77,6 +92,8 @@ const onFocus = () => {
 const SvgIconModules = import.meta.glob("@assets/svgs/*.svg");
 // 搜索关键字
 const searchName = ref<string>("");
+const selectedLucideIcon = computed(() => getLucideIconComponent(modelValue.value));
+
 // icon列表
 const iconList = computed(() => {
   let icons: string[] = [];
@@ -85,6 +102,8 @@ const iconList = computed(() => {
     for (let key in ArcoIcons) {
       if (key != "default") icons.push(key);
     }
+  } else if (type.value === "lucide") {
+    icons = lucideMenuIconNames.map(toLucideIconValue);
   } else {
     if (!SvgIconModules) return [];
     for (let path in SvgIconModules) {
@@ -93,11 +112,16 @@ const iconList = computed(() => {
   }
   // 若按照关键字搜索，则返回搜索结果
   if (searchName.value) {
-    return icons.filter(item => item.toLowerCase().includes(searchName.value.toLowerCase()));
+    return icons.filter(item => getIconLabel(item).toLowerCase().includes(searchName.value.toLowerCase()));
   }
   // 若关键字为空则返回全部列表
   return icons;
 });
+
+const getIconLabel = (name: string) => {
+  if (type.value === "lucide") return name.replace(/^lucide:/, "");
+  return name;
+};
 
 // 选择图标
 const onIcon = (name: string) => {

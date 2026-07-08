@@ -79,8 +79,8 @@ const isTitle = computed(() => {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    min-height: 88px;
-    padding: 18px 18px 14px 20px;
+    min-height: 86px;
+    padding: 18px 18px 12px 20px;
     background: transparent;
     border-bottom: 0;
 
@@ -89,9 +89,9 @@ const isTitle = computed(() => {
         right: 18px;
         bottom: 0;
         left: 20px;
-        height: 1px;
+        height: 0;
         content: "";
-        background: linear-gradient(90deg, rgb(37 99 235 / 22%), rgb(15 170 166 / 12%), transparent);
+        background: transparent;
     }
 
     .logo_box {
@@ -109,14 +109,14 @@ const isTitle = computed(() => {
 
     .logo_mark {
         display: grid;
-        flex: 0 0 40px;
-        width: 40px;
-        height: 40px;
+        flex: 0 0 38px;
+        width: 38px;
+        height: 38px;
         place-items: center;
         background: var(--uvp-sidebar-brand-mark-bg);
-        border: 1px solid rgb(255 255 255 / 72%);
-        border-radius: 12px;
-        box-shadow: 0 10px 24px rgb(37 99 235 / 10%);
+        border: 1px solid rgb(255 255 255 / 66%);
+        border-radius: 10px;
+        box-shadow: none;
     }
 
     .logo_text {
@@ -145,7 +145,7 @@ const isTitle = computed(() => {
         max-width: 86px;
         overflow: hidden;
         text-overflow: ellipsis;
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 800;
         color: var(--uvp-sidebar-title);
         text-align: left;
