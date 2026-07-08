@@ -524,21 +524,49 @@ body {
   background: var(--uvp-table-row-hover-bg);
 }
 
+.uvp-data-table .arco-table-th.arco-table-col-fixed-left,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-left,
 .uvp-data-table .arco-table-th.arco-table-col-fixed-right,
 .uvp-data-table .arco-table-td.arco-table-col-fixed-right {
   background: linear-gradient(180deg, rgb(255 255 255 / 97%) 0%, #ffffff 100%) !important;
+}
+
+.uvp-data-table .arco-table-th.arco-table-col-fixed-left,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-left {
+  box-shadow: 1px 0 0 #edf2f8 !important;
+}
+
+.uvp-data-table .arco-table-th.arco-table-col-fixed-right,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-right {
   box-shadow: -1px 0 0 #edf2f8 !important;
 }
 
+.uvp-data-table .arco-table-tr:hover .arco-table-td.arco-table-col-fixed-left,
+.uvp-data-table .arco-table-tr:hover .arco-table-td.arco-table-col-fixed-right {
+  background: linear-gradient(180deg, var(--uvp-table-row-hover-bg) 0%, #ffffff 120%) !important;
+}
+
+.uvp-data-table .arco-table-th.arco-table-col-fixed-left-last::before,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-left-last::before,
 .uvp-data-table .arco-table-th.arco-table-col-fixed-right-first::before,
 .uvp-data-table .arco-table-td.arco-table-col-fixed-right-first::before {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -10px;
   width: 10px;
   content: "";
   pointer-events: none;
+}
+
+.uvp-data-table .arco-table-th.arco-table-col-fixed-left-last::before,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-left-last::before {
+  right: -10px;
+  background: linear-gradient(90deg, rgb(241 245 249 / 70%) 0%, rgb(241 245 249 / 0%) 100%);
+}
+
+.uvp-data-table .arco-table-th.arco-table-col-fixed-right-first::before,
+.uvp-data-table .arco-table-td.arco-table-col-fixed-right-first::before {
+  left: -10px;
   background: linear-gradient(90deg, rgb(241 245 249 / 0%) 0%, rgb(241 245 249 / 70%) 100%);
 }
 
@@ -547,7 +575,55 @@ body {
 }
 
 .uvp-data-table .arco-table-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: flex-end;
   margin-top: 14px;
+}
+
+.uvp-data-table .arco-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  row-gap: 8px;
+}
+
+.uvp-data-table .arco-pagination-item {
+  min-width: 32px;
+  height: 32px;
+  color: var(--uvp-text-secondary);
+  background: #ffffff;
+  border-radius: 8px;
+}
+
+.uvp-data-table .arco-pagination-item:hover {
+  color: var(--uvp-brand-strong);
+  background: #f7fbff;
+}
+
+.uvp-data-table .arco-pagination-item-active,
+.uvp-data-table .arco-pagination-item-active:hover {
+  color: var(--uvp-brand-strong);
+  background: var(--uvp-brand-soft);
+  font-weight: 650;
+}
+
+.uvp-data-table .arco-pagination-total,
+.uvp-data-table .arco-pagination-jumper-text-goto,
+.uvp-data-table .arco-pagination-jumper-append {
+  color: var(--uvp-text-tertiary);
+}
+
+.uvp-data-table .arco-pagination-options .arco-select-view-single,
+.uvp-data-table .arco-pagination-jumper-input {
+  height: 32px;
+  background: #ffffff;
+  border-color: transparent;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgb(148 163 184 / 18%);
 }
 
 .uvp-data-table .arco-table-tbody .arco-table-tr:last-child .arco-table-td {
@@ -619,6 +695,53 @@ body {
   color: #c24141 !important;
   background: #fff1f1 !important;
   border-color: #f5cccc !important;
+}
+
+.uvp-data-table .arco-table-tr-empty .arco-table-td {
+  height: 220px;
+  border-bottom: 0;
+}
+
+.uvp-data-table .arco-empty {
+  padding: 32px 0 40px;
+}
+
+.uvp-data-table .arco-empty-description {
+  color: var(--uvp-text-tertiary);
+  font-size: 13px;
+}
+
+.uvp-data-table .arco-spin-mask {
+  background: rgb(255 255 255 / 68%);
+  border-radius: 12px;
+  backdrop-filter: blur(2px);
+}
+
+.uvp-data-table .arco-spin-icon,
+.uvp-data-table .arco-spin-tip {
+  color: var(--uvp-brand-strong);
+}
+
+.uvp-data-table .arco-table-body::-webkit-scrollbar,
+.uvp-data-table .arco-table-content::-webkit-scrollbar,
+.uvp-data-table .arco-table-header::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.uvp-data-table .arco-table-body::-webkit-scrollbar-thumb,
+.uvp-data-table .arco-table-content::-webkit-scrollbar-thumb,
+.uvp-data-table .arco-table-header::-webkit-scrollbar-thumb {
+  background: rgb(148 163 184 / 34%);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+
+.uvp-data-table .arco-table-body::-webkit-scrollbar-track,
+.uvp-data-table .arco-table-content::-webkit-scrollbar-track,
+.uvp-data-table .arco-table-header::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 @media (max-width: 768px) {
