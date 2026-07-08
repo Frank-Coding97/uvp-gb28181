@@ -96,7 +96,7 @@
         </a-card>
 
         <!-- 编辑/创建弹窗 -->
-        <a-modal v-model:visible="modalVisible" :title="editingData.id ? '编辑数据' : '新增数据'" :on-before-ok="handleSave"
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="modalVisible" :title="editingData.id ? '编辑数据' : '新增数据'" :on-before-ok="handleSave"
             @cancel="handleCancel" :width="layoutMode.width">
             <a-form :model="editingData" :rules="rules" ref="formRef" :layout="layoutMode.layout" auto-label-width>
                 <a-form-item field="group" label="任务分组名称">

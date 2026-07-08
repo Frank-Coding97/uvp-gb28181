@@ -121,7 +121,7 @@
             </s-fold-page>
         </div>
 
-        <a-modal :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose">
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose">
             <template #title> {{ title }} </template>
             <div>
                 <a-form ref="formRef" auto-label-width :layout="layoutMode.layout" :rules="dynamicRules" :model="addFrom">

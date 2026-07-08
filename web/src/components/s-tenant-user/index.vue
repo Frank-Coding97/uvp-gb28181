@@ -1,5 +1,6 @@
 <template>
   <a-drawer
+    body-class="uvp-system-dialog__body"
     :visible="visible"
     :width="layoutMode.width"
     :hide-cancel="true"
@@ -45,6 +46,7 @@
 
       <!-- 已关联用户列表表格 -->
       <a-table
+        class="uvp-data-table"
         row-key="userID"
         :data="tenantUserList"
         :loading="tableLoading"
@@ -102,6 +104,7 @@
 
   <!-- 角色分配弹窗 -->
   <a-modal
+    modal-class="uvp-system-dialog"
     :visible="roleModalVisible"
     :title="`为用户 ${currentUserInfo.userName} 分配角色`"
     :width="layoutMode.width"

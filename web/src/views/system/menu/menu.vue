@@ -173,7 +173,7 @@
             </a-table>
         </div>
 
-        <a-modal :width="layoutMode.width" v-model:visible="open" draggable @close="afterClose" :on-before-ok="handleOk"
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="open" draggable @close="afterClose" :on-before-ok="handleOk"
             @cancel="afterClose">
             <template #title> {{ title }} </template>
             <div>
@@ -333,7 +333,7 @@
             :showSelected="currentMenuRecord?.apis?.length > 0" />
 
         <!-- 导入模式选择对话框 -->
-        <a-modal v-model:visible="importModeVisible" title="选择导入模式" :footer="false" :mask-closable="false" :esc-to-close="false">
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="importModeVisible" title="选择导入模式" :footer="false" :mask-closable="false" :esc-to-close="false">
             <div class="import-mode-content">
                 <p>请选择菜单导入模式：覆盖导入只添加不存在的数据，普通导入全部新建。</p>
                 <a-space :size="20" class="import-mode-buttons">
@@ -345,6 +345,7 @@
 
         <!-- 导入结果展示弹窗 -->
         <a-modal
+            modal-class="uvp-system-dialog"
             v-model:visible="importResultVisible"
             title="导入结果"
             width="800px"

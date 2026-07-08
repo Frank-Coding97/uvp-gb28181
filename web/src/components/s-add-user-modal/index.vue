@@ -1,5 +1,6 @@
 <template>
   <a-modal
+    modal-class="uvp-system-dialog"
     v-model:visible="modalVisible"
     title="添加用户"
     :ok-loading="addUserLoading"
@@ -37,6 +38,7 @@
 
       <!-- 用户列表表格 -->
       <a-table
+        class="uvp-data-table"
         row-key="id"
         :data="userList"
         :loading="tableLoading"

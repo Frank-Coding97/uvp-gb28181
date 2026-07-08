@@ -70,7 +70,7 @@
             </a-table>
         </div>
 
-        <a-modal :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose">
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose">
             <template #title> {{ title }} </template>
             <div>
                 <a-form ref="formRef" :layout="layoutMode.layout" auto-label-width :rules="rules" :model="addFrom">
@@ -93,7 +93,7 @@
             </div>
         </a-modal>
 
-        <a-modal :width="layoutMode.width" v-model:visible="detailOpen" @ok="detailOk" ok-text="关闭" :hide-cancel="true">
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="detailOpen" @ok="detailOk" ok-text="关闭" :hide-cancel="true">
             <template #title> 字典详情 </template>
             <div>
                 <a-row>
@@ -140,7 +140,7 @@
             </div>
         </a-modal>
 
-        <a-modal :width="layoutMode.width" v-model:visible="detailCaseOpen" @close="afterCloseDetail" @ok="handleOkDetail"
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="detailCaseOpen" @close="afterCloseDetail" @ok="handleOkDetail"
             @cancel="afterCloseDetail">
             <template #title> {{ detailTitle }} </template>
             <div>

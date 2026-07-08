@@ -71,7 +71,7 @@
         </div>
 
         <!-- 导入表对话框 -->
-        <a-modal v-model:visible="importVisible" @ok="handleImport" @cancel="afterImportClose"
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="importVisible" @ok="handleImport" @cancel="afterImportClose"
             :ok-loading="importLoading" :width="layoutMode.width">
             <template #title> 导入表 </template>
             <div>

@@ -71,7 +71,7 @@
             </a-table>
         </div>
 
-        <a-modal :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk"
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk"
             @cancel="afterClose">
             <template #title> {{ title }} </template>
             <div>

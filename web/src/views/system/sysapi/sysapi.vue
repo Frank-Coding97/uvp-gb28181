@@ -73,7 +73,7 @@
             </a-table>
         </div>
 
-        <a-modal :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose" draggable>
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose" draggable>
             <template #title> {{ title }} </template>
             <div>
                 <a-form ref="formRef" :layout="layoutMode.layout" auto-label-width :rules="rules" :model="addFrom">

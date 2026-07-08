@@ -49,7 +49,7 @@
     </div>
 
     <!-- 详情弹窗 -->
-    <a-modal v-model:visible="detailVisible" :width="layoutMode.width" :footer="false" @close="detailVisible = false">
+    <a-modal modal-class="uvp-system-dialog" v-model:visible="detailVisible" :width="layoutMode.width" :footer="false" @close="detailVisible = false">
       <template #title>插件详情 - {{ currentPlugin.name }}</template>
       <a-descriptions :column="1" bordered size="medium">
         <a-descriptions-item label="插件名称">{{ currentPlugin.name }}</a-descriptions-item>

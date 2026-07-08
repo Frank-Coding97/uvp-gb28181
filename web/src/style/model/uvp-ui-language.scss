@@ -744,6 +744,196 @@ body {
   background: transparent;
 }
 
+.uvp-system-dialog,
+.arco-drawer:has(.uvp-system-dialog__body) {
+  background: var(--uvp-dialog-bg) !important;
+  border: 1px solid var(--uvp-dialog-border) !important;
+  box-shadow: var(--uvp-dialog-shadow) !important;
+}
+
+.uvp-system-dialog {
+  overflow: hidden;
+  border-radius: 16px !important;
+}
+
+.arco-drawer:has(.uvp-system-dialog__body) {
+  border-radius: 16px 0 0 16px !important;
+}
+
+.uvp-system-dialog .arco-modal-header,
+.arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-header {
+  min-height: 56px;
+  padding: 18px 24px 14px !important;
+  background: var(--uvp-dialog-header-bg) !important;
+  border-bottom: 1px solid var(--uvp-dialog-border) !important;
+}
+
+.uvp-system-dialog .arco-modal-title,
+.arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-title {
+  color: var(--uvp-text-primary);
+  font-size: 16px;
+  font-weight: 680;
+  line-height: 24px;
+  letter-spacing: 0;
+}
+
+.uvp-system-dialog .arco-modal-close-btn,
+.arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-close-btn {
+  color: var(--uvp-text-tertiary);
+  background: transparent;
+  border-radius: 8px;
+}
+
+.uvp-system-dialog .arco-modal-close-btn:hover,
+.arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-close-btn:hover {
+  color: var(--uvp-brand-strong);
+  background: var(--uvp-brand-soft);
+}
+
+.uvp-system-dialog .arco-modal-body,
+.arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-body {
+  padding: 22px 24px !important;
+  background: var(--uvp-dialog-bg) !important;
+}
+
+.uvp-system-dialog .arco-modal-footer,
+.arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 14px 24px 18px !important;
+  background: var(--uvp-dialog-footer-bg) !important;
+  border-top: 1px solid var(--uvp-dialog-border) !important;
+}
+
+.uvp-system-dialog .arco-modal-footer .arco-btn,
+.arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-footer .arco-btn {
+  min-width: 88px;
+  border-radius: 8px;
+}
+
+.uvp-system-dialog .arco-form-item-label,
+.uvp-system-dialog__body .arco-form-item-label {
+  color: var(--uvp-text-secondary);
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.uvp-system-dialog .arco-form-item,
+.uvp-system-dialog__body .arco-form-item {
+  margin-bottom: 18px;
+}
+
+.uvp-system-dialog .arco-form-item-extra,
+.uvp-system-dialog__body .arco-form-item-extra {
+  margin-top: 6px;
+  color: var(--uvp-text-tertiary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.uvp-system-dialog .arco-input-wrapper,
+.uvp-system-dialog .arco-select-view-single,
+.uvp-system-dialog .arco-select-view-multiple,
+.uvp-system-dialog .arco-tree-select-view,
+.uvp-system-dialog .arco-picker,
+.uvp-system-dialog .arco-textarea-wrapper,
+.uvp-system-dialog__body .arco-input-wrapper,
+.uvp-system-dialog__body .arco-select-view-single,
+.uvp-system-dialog__body .arco-select-view-multiple,
+.uvp-system-dialog__body .arco-tree-select-view,
+.uvp-system-dialog__body .arco-picker,
+.uvp-system-dialog__body .arco-textarea-wrapper {
+  background: var(--uvp-dialog-control-bg);
+  border-color: transparent;
+  border-radius: 9px;
+  box-shadow: inset 0 0 0 1px rgb(148 163 184 / 16%);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.uvp-system-dialog .arco-input-wrapper:hover,
+.uvp-system-dialog .arco-select-view-single:hover,
+.uvp-system-dialog .arco-select-view-multiple:hover,
+.uvp-system-dialog .arco-tree-select-view:hover,
+.uvp-system-dialog .arco-picker:hover,
+.uvp-system-dialog .arco-textarea-wrapper:hover,
+.uvp-system-dialog__body .arco-input-wrapper:hover,
+.uvp-system-dialog__body .arco-select-view-single:hover,
+.uvp-system-dialog__body .arco-select-view-multiple:hover,
+.uvp-system-dialog__body .arco-tree-select-view:hover,
+.uvp-system-dialog__body .arco-picker:hover,
+.uvp-system-dialog__body .arco-textarea-wrapper:hover {
+  background: #ffffff;
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px rgb(37 99 235 / 24%);
+}
+
+.uvp-system-dialog .arco-input-wrapper.arco-input-focus,
+.uvp-system-dialog .arco-select-view-focus,
+.uvp-system-dialog .arco-tree-select-view-focus,
+.uvp-system-dialog .arco-picker-focused,
+.uvp-system-dialog .arco-textarea-wrapper.arco-textarea-focus,
+.uvp-system-dialog__body .arco-input-wrapper.arco-input-focus,
+.uvp-system-dialog__body .arco-select-view-focus,
+.uvp-system-dialog__body .arco-tree-select-view-focus,
+.uvp-system-dialog__body .arco-picker-focused,
+.uvp-system-dialog__body .arco-textarea-wrapper.arco-textarea-focus {
+  background: #ffffff;
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px rgb(37 99 235 / 36%), 0 0 0 3px rgb(37 99 235 / 8%);
+}
+
+.uvp-system-dialog .arco-input-wrapper.arco-input-disabled,
+.uvp-system-dialog .arco-select-view-disabled,
+.uvp-system-dialog .arco-picker-disabled,
+.uvp-system-dialog__body .arco-input-wrapper.arco-input-disabled,
+.uvp-system-dialog__body .arco-select-view-disabled,
+.uvp-system-dialog__body .arco-picker-disabled {
+  color: var(--uvp-text-tertiary);
+  background: #f1f5f9;
+  box-shadow: inset 0 0 0 1px rgb(148 163 184 / 12%);
+}
+
+.uvp-system-dialog .arco-radio-group-button,
+.uvp-system-dialog__body .arco-radio-group-button {
+  padding: 3px;
+  background: #f3f7fb;
+  border: 1px solid var(--uvp-dialog-border);
+  border-radius: 10px;
+}
+
+.uvp-system-dialog .arco-radio-button,
+.uvp-system-dialog__body .arco-radio-button {
+  color: var(--uvp-text-secondary);
+  border-radius: 8px;
+}
+
+.uvp-system-dialog .arco-radio-button.arco-radio-checked,
+.uvp-system-dialog__body .arco-radio-button.arco-radio-checked {
+  color: var(--uvp-brand-strong);
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgb(37 99 235 / 10%);
+}
+
+.uvp-system-dialog .arco-switch-checked,
+.uvp-system-dialog__body .arco-switch-checked {
+  background-color: var(--uvp-brand);
+}
+
+.uvp-system-dialog .arco-card,
+.uvp-system-dialog__body .arco-card {
+  background: #fbfdff;
+  border: 1px solid var(--uvp-dialog-border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+
+.uvp-system-dialog .arco-tabs-nav-tab,
+.uvp-system-dialog__body .arco-tabs-nav-tab {
+  gap: 8px;
+}
+
 @media (max-width: 768px) {
   .snow-page,
   .snow-fill {
@@ -760,5 +950,24 @@ body {
 
   .uvp-list-toolbar__actions {
     justify-content: flex-start;
+  }
+
+  .uvp-system-dialog {
+    max-width: calc(100vw - 24px);
+    border-radius: 14px !important;
+  }
+
+  .arco-drawer:has(.uvp-system-dialog__body) {
+    border-radius: 14px 0 0 14px !important;
+  }
+
+  .uvp-system-dialog .arco-modal-header,
+  .arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-header,
+  .uvp-system-dialog .arco-modal-body,
+  .arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-body,
+  .uvp-system-dialog .arco-modal-footer,
+  .arco-drawer:has(.uvp-system-dialog__body) .arco-drawer-footer {
+    padding-right: 18px !important;
+    padding-left: 18px !important;
   }
 }

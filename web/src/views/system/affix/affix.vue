@@ -93,7 +93,7 @@
         </div>
 
         <!-- 重命名对话框 -->
-        <a-modal :width="layoutMode.width" v-model:visible="renameModalVisible" @close="afterRenameClose"
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="renameModalVisible" @close="afterRenameClose"
             :on-before-ok="handleRenameOk">
             <template #title> 重命名文件 </template>
             <div>

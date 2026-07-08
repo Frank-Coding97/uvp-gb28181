@@ -1,5 +1,5 @@
 <template>
-    <a-drawer :visible="drawerVisible" @ok="handleEdit" @cancel="handleCancel" :ok-loading="editLoading"
+    <a-drawer body-class="uvp-system-dialog__body" :visible="drawerVisible" @ok="handleEdit" @cancel="handleCancel" :ok-loading="editLoading"
         :width="layoutMode.width" :title="title">
         <a-form ref="editFormRef" auto-label-width :layout="layoutMode.layout" :model="editForm">
             <a-tabs default-active-key="1">

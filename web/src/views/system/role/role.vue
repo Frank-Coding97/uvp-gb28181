@@ -79,7 +79,7 @@
             </a-table>
         </div>
 
-        <a-modal :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose">
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="open" @close="afterClose" :on-before-ok="handleOk" @cancel="afterClose">
             <template #title> {{ title }} </template>
             <div>
                 <a-form ref="formRef" :layout="layoutMode.layout" auto-label-width :rules="rules" :model="addFrom">
@@ -113,7 +113,7 @@
             </div>
         </a-modal>
 
-        <a-drawer :visible="drawerOpen" :width="layoutMode.width" @ok="drawerOk" @cancel="drawerCancel">
+        <a-drawer body-class="uvp-system-dialog__body" :visible="drawerOpen" :width="layoutMode.width" @ok="drawerOk" @cancel="drawerCancel">
             <template #title> 分配权限 </template>
             <div>
                 <a-card>

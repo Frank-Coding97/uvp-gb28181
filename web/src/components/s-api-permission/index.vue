@@ -1,5 +1,5 @@
 <template>
-    <a-drawer :visible="visible" :width="layoutMode.width" @ok="handleOk" @cancel="handleCancel" :title="title"
+    <a-drawer body-class="uvp-system-dialog__body" :visible="visible" :width="layoutMode.width" @ok="handleOk" @cancel="handleCancel" :title="title"
         :ok-loading="loading">
         <div class="api-permission-container">
             <!-- 搜索区域 -->
@@ -66,7 +66,7 @@
             </a-card>
 
             <!-- API列表表格 -->
-            <a-table row-key="id" :data="apiList" :loading="tableLoading" :pagination="pagination"
+            <a-table class="uvp-data-table" row-key="id" :data="apiList" :loading="tableLoading" :pagination="pagination"
                 :row-selection="rowSelection" v-model:selected-keys="selectedApiIds" @page-change="handlePageChange"
                 @page-size-change="handlePageSizeChange" size="small" :bordered="{ cell: true }"
                 :scroll="{ y: '400px' }">

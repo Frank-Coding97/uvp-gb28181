@@ -110,7 +110,7 @@
         </a-card>
 
         <!-- 新增/编辑弹窗 -->
-        <a-modal :width="layoutMode.width" v-model:visible="modalVisible" :title="modalTitle" @ok="handleOk" @cancel="handleCancel">
+        <a-modal modal-class="uvp-system-dialog" :width="layoutMode.width" v-model:visible="modalVisible" :title="modalTitle" @ok="handleOk" @cancel="handleCancel">
             <a-form ref="formRef" :layout="layoutMode.layout" :model="modalFormModel" :rules="rules">
                 <a-form-item field="name" label="租户名称">
                     <a-input v-model="modalFormModel.name" placeholder="请输入租户名称" />

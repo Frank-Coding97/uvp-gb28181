@@ -99,7 +99,7 @@
         </div>
 
         <!-- 详情弹窗 -->
-        <a-modal v-model:visible="detailVisible" :width="layoutMode.width" :footer="false" @close="detailVisible = false">
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="detailVisible" :width="layoutMode.width" :footer="false" @close="detailVisible = false">
             <template #title>操作日志详情</template>
             <a-descriptions :column="1" bordered size="medium">
                 <a-descriptions-item label="ID">{{ currentLog.id }}</a-descriptions-item>
