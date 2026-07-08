@@ -697,6 +697,37 @@ body {
   border-color: #f5cccc !important;
 }
 
+.uvp-data-table .arco-tag.arco-tag-green,
+.uvp-data-table .arco-tag.arco-tag-success {
+  color: #14804a !important;
+  background: #ecfdf3 !important;
+  border-color: #c9f1d8 !important;
+}
+
+.uvp-data-table .arco-tag.arco-tag-blue {
+  color: #2368d6 !important;
+  background: #eef6ff !important;
+  border-color: #d3e6ff !important;
+}
+
+.uvp-data-table .arco-tag.arco-tag-purple {
+  color: #7652c8 !important;
+  background: #f4f0ff !important;
+  border-color: #ddd2ff !important;
+}
+
+.uvp-data-table .arco-tag.arco-tag-orange {
+  color: #b66b12 !important;
+  background: #fff7ed !important;
+  border-color: #fed7aa !important;
+}
+
+.uvp-data-table .arco-tag.arco-tag-gray {
+  color: #56606f !important;
+  background: #f4f7fb !important;
+  border-color: #e1e7ef !important;
+}
+
 .uvp-data-table .arco-table-tr-empty .arco-table-td {
   height: 220px;
   border-bottom: 0;
