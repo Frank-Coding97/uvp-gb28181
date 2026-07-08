@@ -2,7 +2,7 @@
     <div>
         <a-row align="center" :gutter="[0, 16]">
             <a-col :span="24">
-                <a-card title="安全设置">
+                <a-card class="uvp-system-panel" title="安全设置">
                     <a-form class="uvp-system-form" :model="form" :rules="rules" :style="{ width: layoutMode.width }" :layout="layoutMode.layout" @submit="onSubmit">
                         <a-form-item field="password" label="登录密码" :label-col-flex="isMobile ? '100px' : '80px'">
                             <a-input-password v-model="form.password" placeholder="请输入登录密码" allow-clear />

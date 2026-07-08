@@ -1,6 +1,6 @@
 <template>
     <div class="snow-page">
-        <a-card class="general-card">
+        <a-card class="general-card uvp-system-panel" :bordered="false">
             <a-row>
                 <a-col :span="24">
                     <a-form class="uvp-system-form" :model="formModel" :layout="layoutMode.layout" :label-col-props="{ span: 6 }" :wrapper-col-props="{ span: 18 }"
@@ -370,6 +370,6 @@ export default {
 
 <style scoped lang="scss">
 .general-card {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
 }
 </style>

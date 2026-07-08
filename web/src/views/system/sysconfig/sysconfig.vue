@@ -17,7 +17,7 @@
             <a-tabs class="uvp-system-tabs" v-model:active-key="activeTab" :animation="true">
                 <!-- 服务器配置 -->
                 <a-tab-pane key="server" title="服务器配置">
-                    <a-card :bordered="false" class="mb-4">
+                    <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
                         <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.system" auto-label-width>
                             <a-row :gutter="24">
                                 <a-col :span="24">
@@ -94,7 +94,7 @@
 
                 <!-- 验证码配置 -->
                 <a-tab-pane key="captcha" title="验证码配置">
-                    <a-card :bordered="false" class="mb-4">
+                    <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
                         <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.captcha" auto-label-width>
                             <a-row :gutter="24">
                                 <a-col :span="isMobile ? 24 : 12">
@@ -126,7 +126,7 @@
 
                 <!-- 安全配置 -->
                 <a-tab-pane key="safe" title="安全配置">
-                    <a-card :bordered="false" class="mb-4">
+                    <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
                         <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.safe" auto-label-width>
                             <a-row :gutter="24">
                                 <a-col :span="isMobile ? 24 : 12">
@@ -253,10 +253,6 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .mb-4 {
-    margin-bottom: 1rem;
-}
-
-:deep(.arco-card-body) {
-    padding: 20px;
+    margin-bottom: 16px;
 }
 </style>

@@ -996,7 +996,251 @@ body {
 
 .uvp-system-form .arco-btn {
   min-width: 88px;
+  min-height: 34px;
+  padding-inline: 14px;
   border-radius: 8px;
+  font-weight: 600;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease, color 0.18s ease;
+}
+
+.uvp-list-toolbar .arco-btn,
+.uvp-system-dialog .arco-btn,
+.uvp-system-dialog__body .arco-btn,
+.uvp-system-form .arco-btn {
+  min-height: 34px;
+  padding-inline: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.uvp-list-toolbar .arco-btn:hover,
+.uvp-system-dialog .arco-btn:hover,
+.uvp-system-dialog__body .arco-btn:hover,
+.uvp-system-form .arco-btn:hover {
+  transform: translateY(-1px);
+}
+
+.uvp-list-toolbar .arco-btn-primary,
+.uvp-system-dialog .arco-btn-primary,
+.uvp-system-dialog__body .arco-btn-primary,
+.uvp-system-form .arco-btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  border-color: transparent;
+  box-shadow: 0 10px 20px -16px rgb(37 99 235 / 70%);
+}
+
+.uvp-list-toolbar .arco-btn-primary:hover,
+.uvp-system-dialog .arco-btn-primary:hover,
+.uvp-system-dialog__body .arco-btn-primary:hover,
+.uvp-system-form .arco-btn-primary:hover {
+  box-shadow: 0 14px 24px -18px rgb(29 78 216 / 72%);
+}
+
+.uvp-list-toolbar .arco-btn-secondary,
+.uvp-list-toolbar .arco-btn-outline,
+.uvp-list-toolbar .arco-btn:not(.arco-btn-primary),
+.uvp-system-dialog .arco-btn-secondary,
+.uvp-system-dialog .arco-btn-outline,
+.uvp-system-dialog .arco-btn:not(.arco-btn-primary),
+.uvp-system-dialog__body .arco-btn-secondary,
+.uvp-system-dialog__body .arco-btn-outline,
+.uvp-system-dialog__body .arco-btn:not(.arco-btn-primary),
+.uvp-system-form .arco-btn-secondary,
+.uvp-system-form .arco-btn-outline,
+.uvp-system-form .arco-btn:not(.arco-btn-primary) {
+  color: var(--uvp-text-secondary);
+  background: #ffffff;
+  border-color: var(--uvp-dialog-border);
+}
+
+.uvp-list-toolbar .arco-btn-secondary:hover,
+.uvp-list-toolbar .arco-btn-outline:hover,
+.uvp-list-toolbar .arco-btn:not(.arco-btn-primary):hover,
+.uvp-system-dialog .arco-btn-secondary:hover,
+.uvp-system-dialog .arco-btn-outline:hover,
+.uvp-system-dialog .arco-btn:not(.arco-btn-primary):hover,
+.uvp-system-dialog__body .arco-btn-secondary:hover,
+.uvp-system-dialog__body .arco-btn-outline:hover,
+.uvp-system-dialog__body .arco-btn:not(.arco-btn-primary):hover,
+.uvp-system-form .arco-btn-secondary:hover,
+.uvp-system-form .arco-btn-outline:hover,
+.uvp-system-form .arco-btn:not(.arco-btn-primary):hover {
+  color: var(--uvp-brand-strong);
+  background: #f9fbff;
+  border-color: rgb(37 99 235 / 20%);
+  box-shadow: 0 8px 18px -18px rgb(37 99 235 / 60%);
+}
+
+.uvp-list-toolbar .arco-btn-status-danger,
+.uvp-system-dialog .arco-btn-status-danger,
+.uvp-system-dialog__body .arco-btn-status-danger,
+.uvp-system-form .arco-btn-status-danger {
+  color: var(--uvp-danger);
+  background: var(--uvp-danger-soft);
+  border-color: var(--uvp-danger-border);
+  box-shadow: none;
+}
+
+.uvp-list-toolbar .arco-btn-status-danger:hover,
+.uvp-system-dialog .arco-btn-status-danger:hover,
+.uvp-system-dialog__body .arco-btn-status-danger:hover,
+.uvp-system-form .arco-btn-status-danger:hover {
+  color: #c53030;
+  background: #ffe8e8;
+  border-color: #efb7b7;
+}
+
+.arco-trigger-popup .arco-popconfirm {
+  padding: 2px;
+  background: var(--uvp-popconfirm-bg);
+  border: 1px solid var(--uvp-popconfirm-border);
+  border-radius: 14px;
+  box-shadow: var(--uvp-popconfirm-shadow);
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-popconfirm-body {
+  padding: 14px 14px 10px;
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-popconfirm-icon {
+  color: var(--uvp-warning);
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-popconfirm-title {
+  color: var(--uvp-text-primary);
+  font-weight: 680;
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-popconfirm-content {
+  margin-top: 4px;
+  color: var(--uvp-text-secondary);
+  line-height: 20px;
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-popconfirm-footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 0 14px 14px;
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-popconfirm-footer .arco-btn {
+  min-width: 68px;
+  min-height: 32px;
+  padding-inline: 12px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-btn:not(.arco-btn-primary) {
+  color: var(--uvp-text-secondary);
+  background: #ffffff;
+  border-color: var(--uvp-dialog-border);
+}
+
+.arco-trigger-popup .arco-popconfirm .arco-btn-primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  border-color: transparent;
+  box-shadow: 0 10px 20px -18px rgb(37 99 235 / 68%);
+}
+
+.arco-trigger-popup .arco-trigger-arrow-fill {
+  fill: #ffffff;
+}
+
+.uvp-system-panel {
+  overflow: hidden;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 14px;
+  box-shadow: var(--uvp-panel-shadow);
+}
+
+.uvp-system-panel.arco-card {
+  box-shadow: var(--uvp-panel-shadow);
+}
+
+.uvp-system-panel .arco-card-header {
+  min-height: 54px;
+  padding: 16px 20px 12px;
+  background: linear-gradient(180deg, #fbfdff 0%, #ffffff 100%);
+  border-bottom: 1px solid #edf2f7;
+}
+
+.uvp-system-panel .arco-card-header-title {
+  color: var(--uvp-text-primary);
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.uvp-system-panel .arco-card-body {
+  padding: 18px 20px;
+}
+
+.uvp-system-panel--dense .arco-card-body {
+  padding: 16px 18px;
+}
+
+.uvp-system-panel__stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.uvp-system-summary {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 18px 20px;
+  background: linear-gradient(180deg, rgb(251 253 255 / 100%) 0%, rgb(248 251 255 / 92%) 100%);
+  border: 1px solid #edf2f8;
+  border-radius: 12px;
+}
+
+.uvp-system-summary__aside {
+  flex: none;
+}
+
+.uvp-system-summary__body {
+  flex: 1;
+  min-width: 0;
+}
+
+.uvp-system-description .arco-descriptions-title,
+.uvp-system-summary .arco-descriptions-title {
+  margin-bottom: 12px;
+  color: var(--uvp-text-primary);
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.uvp-system-description .arco-descriptions-table,
+.uvp-system-summary .arco-descriptions-table {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.uvp-system-description .arco-descriptions-item-label,
+.uvp-system-summary .arco-descriptions-item-label {
+  color: var(--uvp-text-tertiary);
+  font-weight: 580;
+  background: #f8fbff;
+}
+
+.uvp-system-description .arco-descriptions-item-value,
+.uvp-system-summary .arco-descriptions-item-value {
+  color: var(--uvp-text-primary);
+  background: #ffffff;
+}
+
+.uvp-system-description--compact .arco-descriptions-item-label,
+.uvp-system-description--compact .arco-descriptions-item-value {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.uvp-system-card-grid .arco-col {
+  display: flex;
 }
 
 .uvp-system-tabs .arco-tabs-nav {

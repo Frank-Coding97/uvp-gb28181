@@ -72,7 +72,7 @@
                              </a-button>
                          </a-space>
 
-                         <a-table :data="dataList" :loading="loading" :pagination="paginationConfig"
+                         <a-table class="uvp-data-table" :data="dataList" :loading="loading" :pagination="paginationConfig"
                              :bordered="{ wrapper: true, cell: true }" @page-change="handlePageChange"
                              @page-size-change="handlePageSizeChange">
                              <template #columns>
@@ -109,9 +109,9 @@
                      </a-card>
 
                      <!-- 编辑/创建弹窗 -->
-                     <a-modal v-model:visible="modalVisible" :title="editingData.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}} ? '编辑数据' : '新增数据'" :on-before-ok="handleSave"
+                     <a-modal modal-class="uvp-system-dialog" v-model:visible="modalVisible" :title="editingData.{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}} ? '编辑数据' : '新增数据'" :on-before-ok="handleSave"
                          @cancel="handleCancel">
-                         <a-form :model="editingData" :rules="rules" ref="formRef">
+                         <a-form class="uvp-system-form" :model="editingData" :rules="rules" ref="formRef">
                              <a-form-item field="{{.RelationFieldJsonTag}}" label="{{.RelationFieldComment}}">
                                  <a-tree-select
                                      v-model="editingData.{{.RelationFieldJsonTag}}"
@@ -209,9 +209,9 @@
                  </div>
 
                  <!-- {{.RelationFieldComment}}编辑弹窗 -->
-                 <a-modal v-model:visible="categoryModalVisible" :title="editingCategoryData.id ? '编辑{{.RelationFieldComment}}' : '新增{{.RelationFieldComment}}'" :on-before-ok="handleSaveCategory"
+                 <a-modal modal-class="uvp-system-dialog" v-model:visible="categoryModalVisible" :title="editingCategoryData.id ? '编辑{{.RelationFieldComment}}' : '新增{{.RelationFieldComment}}'" :on-before-ok="handleSaveCategory"
                      @cancel="handleCancelCategory">
-                     <a-form :model="editingCategoryData" :rules="categoryRules" ref="categoryFormRef">
+                     <a-form class="uvp-system-form" :model="editingCategoryData" :rules="categoryRules" ref="categoryFormRef">
                          <a-form-item field="parentId" label="父级">
                              <a-tree-select
                                  v-model="editingCategoryData.parentId"

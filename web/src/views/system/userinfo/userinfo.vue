@@ -1,9 +1,9 @@
 <template>
     <div class="snow-page">
         <a-spin :loading="loading" tip="loading...">
-            <a-card :bordered="false">
-                <a-row align="center">
-                    <a-col :span="isMobile ? 24 : 2">
+            <a-card class="uvp-system-panel" :bordered="false">
+                <div class="uvp-system-summary user-summary">
+                    <div class="uvp-system-summary__aside">
                         <div class="avatar-container" :class="{ 'mobile-avatar': isMobile }">
                             <a-avatar :size="isMobile ? 80 : 100" @click="showAvatarUpload" trigger-type="mask" :imageUrl="userInfo.avatar">
                                 <IconUser />
@@ -12,37 +12,35 @@
                                 </template>
                             </a-avatar>
                         </div>
-                    </a-col>
-                    <a-col :span="isMobile ? 24 : 22">
-                        <a-space direction="vertical" size="large">
-                            <a-descriptions :data="detail" :column="isMobile ? 1 : 4" title="用户资料" :align="{ label: isMobile ? 'left' : 'right' }">
-                                <template #value="{ value, data }">
-                                    <span v-if="data.key === 'roles'">
-                                        {{Array.isArray(value) && value.map((curr: any) => curr.name).join(",") || '-'}}
-                                    </span>
-                                    <span v-else-if="data.key == 'status'">
-                                        {{ value === 1 ? "启用" : "禁用" }}
-                                    </span>
-                                    <span v-else-if="data.key == 'sex'">
-                                        {{ getSexName(value) }}
-                                    </span>
-                                    <span v-else-if="data.key == 'createTime'">
-                                        {{ formatTime(value) }}
-                                    </span>
-                                    <span v-else-if="data.key == 'defaultTenant'">
-                                        {{ value }}
-                                    </span>
-                                    <span v-else-if="data.key == 'tenants'">
-                                        {{ value }}
-                                    </span>
-                                    <span v-else>{{ value }}</span>
-                                </template>
-                            </a-descriptions>
-                        </a-space>
-                    </a-col>
-                </a-row>
+                    </div>
+                    <div class="uvp-system-summary__body">
+                        <a-descriptions class="uvp-system-description uvp-system-description--compact" :data="detail" :column="isMobile ? 1 : 3" title="用户资料" :align="{ label: isMobile ? 'left' : 'right' }">
+                            <template #value="{ value, data }">
+                                <span v-if="data.key === 'roles'">
+                                    {{Array.isArray(value) && value.map((curr: any) => curr.name).join(",") || '-'}}
+                                </span>
+                                <span v-else-if="data.key == 'status'">
+                                    {{ value === 1 ? "启用" : "禁用" }}
+                                </span>
+                                <span v-else-if="data.key == 'sex'">
+                                    {{ getSexName(value) }}
+                                </span>
+                                <span v-else-if="data.key == 'createTime'">
+                                    {{ formatTime(value) }}
+                                </span>
+                                <span v-else-if="data.key == 'defaultTenant'">
+                                    {{ value }}
+                                </span>
+                                <span v-else-if="data.key == 'tenants'">
+                                    {{ value }}
+                                </span>
+                                <span v-else>{{ value }}</span>
+                            </template>
+                        </a-descriptions>
+                    </div>
+                </div>
             </a-card>
-            <a-card class="margin-top" :bordered="false">
+            <a-card class="uvp-system-panel margin-top" :bordered="false">
                 <a-row align="center">
                     <a-col :span="24">
                         <a-tabs class="uvp-system-tabs" :type="type" :size="size" :active-key="activeTabs" @change="onChangeTab">
@@ -59,7 +57,7 @@
         </a-spin>
 
         <!-- 头像裁剪模态框 -->
-        <a-modal v-model:visible="avatarModalVisible" title="上传头像" :width="isMobile ? '95%' : 600" :footer="false" draggable
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="avatarModalVisible" title="上传头像" :width="isMobile ? '95%' : 600" :footer="false" draggable
             @close="resetAvatarUpload">
             <a-row :gutter="isMobile ? 0 : 20">
                 <a-col :span="isMobile ? 24 : 14" :style="isMobile ? 'width: 100%; height: 200px' : 'width: 200px; height: 200px'">
@@ -349,7 +347,7 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
 
 <style lang="scss" scoped>
 .margin-top {
-    margin-top: $padding;
+    margin-top: 16px;
 }
 
 .avatar-container {
@@ -358,8 +356,12 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
     align-items: center;
     
     &.mobile-avatar {
-        margin-bottom: 16px;
+        margin-bottom: 12px;
     }
+}
+
+.user-summary {
+    align-items: center;
 }
 
 .avatar-preview {
@@ -395,6 +397,11 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
 
 // 移动端适配
 @media (max-width: 768px) {
+    .user-summary {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
     .avatar-preview {
         .preview-container {
             width: 120px;

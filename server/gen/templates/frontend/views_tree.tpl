@@ -16,7 +16,7 @@
                     </a-button>
                 </a-space>
 
-            <a-table :data="treeDataList" :loading="loading" :pagination="false"
+            <a-table class="uvp-data-table" :data="treeDataList" :loading="loading" :pagination="false"
                 :bordered="{ wrapper: true, cell: true }" :row-key="'{{if .PrimaryKey}}{{.PrimaryKey.JsonTag}}{{else}}id{{end}}'" :default-expand-all-rows="true">
                 <template #columns>
 {{- range .Columns}}
@@ -58,9 +58,9 @@
         </a-card>
 
         <!-- 编辑/创建弹窗 -->
-        <a-modal v-model:visible="modalVisible" :title="modalTitle" :on-before-ok="handleSave"
+        <a-modal modal-class="uvp-system-dialog" v-model:visible="modalVisible" :title="modalTitle" :on-before-ok="handleSave"
             @cancel="handleCancel">
-            <a-form :model="editingData" :rules="rules" ref="formRef">
+            <a-form class="uvp-system-form" :model="editingData" :rules="rules" ref="formRef">
                 {{- if .ParentIdField}}
                 <a-form-item field="{{.ParentIdField.JsonTag}}" label="父级">
                     <a-tree-select
