@@ -1,10 +1,6 @@
 <template>
   <div :class="asideDark ? 'aside dark' : 'aside'">
     <Logo />
-    <div v-if="!collapsed" class="aside_nav_heading">
-      <span>平台导航</span>
-      <i></i>
-    </div>
     <a-layout-sider :collapsed="collapsed" breakpoint="xl" class="layout_side" :width="256">
       <a-scrollbar style="height: 100%; overflow: auto" outer-class="scrollbar"><Menu :route-tree="routeTree" /></a-scrollbar>
     </a-layout-sider>
@@ -36,25 +32,9 @@ const { routeTree } = storeToRefs(routerStore);
 .layout_side {
   flex: 1;
   overflow: hidden;
-  padding-top: 4px;
+  padding-top: 10px;
   .scrollbar {
     height: 100%;
-  }
-}
-
-.aside_nav_heading {
-  display: flex;
-  align-items: center;
-  height: 28px;
-  padding: 7px 22px 0;
-  color: rgb(100 116 139 / 86%);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  line-height: 1;
-
-  i {
-    display: none;
   }
 }
 

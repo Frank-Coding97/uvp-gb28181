@@ -79,19 +79,19 @@ const isTitle = computed(() => {
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    min-height: 88px;
-    padding: 20px 18px 12px 20px;
+    min-height: 102px;
+    padding: 24px 18px 18px 20px;
     background: transparent;
     border-bottom: 0;
 
     &::after {
         position: absolute;
-        right: 18px;
+        right: 20px;
         bottom: 0;
-        left: 20px;
-        height: 0;
+        left: 28px;
+        height: 1px;
         content: "";
-        background: transparent;
+        background: linear-gradient(90deg, rgb(148 163 184 / 0%), rgb(148 163 184 / 24%) 18%, rgb(148 163 184 / 10%) 72%, rgb(148 163 184 / 0%));
     }
 
     .logo_box {
