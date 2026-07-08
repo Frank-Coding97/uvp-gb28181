@@ -35,24 +35,24 @@
                             <template #icon><icon-plus /></template>
                             <span>新增</span>
                         </a-button>
-                        <a-button type="primary" status="success" @click="onExpand">
+                        <a-button @click="onExpand">
                             <template #icon>
                                 <icon-swap />
                             </template>
                             <span>{{ expand ? "收起" : "展开" }}</span>
                         </a-button>
 
-                        <a-button type="primary" @click="onExport" v-hasPerm="['system:menu:export']">
+                        <a-button @click="onExport" v-hasPerm="['system:menu:export']">
                             <template #icon><icon-export /></template>
                             <span>导出</span>
                         </a-button>
 
-                        <a-button type="outline" status="success" @click="onImport" v-hasPerm="['system:menu:import']">
+                        <a-button @click="onImport" v-hasPerm="['system:menu:import']">
                             <template #icon><icon-import /></template>
                             <span>导入</span>
                         </a-button>
 
-                        <a-button type="primary" status="danger" @click="onBatchDelete" v-hasPerm="['system:menu:delete']">
+                        <a-button status="danger" @click="onBatchDelete" v-hasPerm="['system:menu:delete']">
                             <template #icon><icon-delete /></template>
                             <span>批量删除</span>
                         </a-button>
@@ -807,6 +807,7 @@ const onBatchDelete = () => {
         content: "注意：该操作为硬删除且会删除子级数据及关联的API数据",
         okText: "确认删除",
         cancelText: "取消",
+        modalClass: "uvp-system-dialog",
         okButtonProps: {
             status: "danger"
         },
@@ -972,30 +973,45 @@ onMounted(() => {
     font-size: 100%;
 }
 
+/* ── 操作列链接分隔线 ─────────────────────── */
+:deep(.arco-table-td .arco-space-item + .arco-space-item)::before {
+    display: inline-block;
+    width: 1px;
+    height: 12px;
+    margin-right: 8px;
+    content: "";
+    vertical-align: middle;
+    background: rgb(148 163 184 / 28%);
+}
+
+/* ── 导入模式弹窗 ─────────────────────────── */
 .import-mode-content {
-    padding: 20px 0;
+    padding: 16px 0 8px;
     text-align: center;
 
     p {
         margin-bottom: 20px;
-        color: var(--color-text-1);
-        font-size: 14px;
-        line-height: 1.6;
+        color: var(--uvp-text-secondary);
+        font-size: 13px;
+        line-height: 1.7;
     }
 
     .import-mode-buttons {
         display: flex;
+        gap: 12px;
         justify-content: center;
     }
 }
 
+/* ── 导入结果弹窗 ─────────────────────────── */
 .import-result-content {
     .result-section {
         h4 {
-            margin-bottom: 12px;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--color-text-1);
+            margin-bottom: 10px;
+            font-size: 13px;
+            font-weight: 650;
+            color: var(--uvp-text-secondary);
+            letter-spacing: 0;
         }
     }
 }
