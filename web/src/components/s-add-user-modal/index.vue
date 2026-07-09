@@ -1,5 +1,6 @@
 <template>
   <a-modal
+    modal-class="uvp-system-dialog"
     v-model:visible="modalVisible"
     title="添加用户"
     :ok-loading="addUserLoading"
@@ -8,35 +9,37 @@
     :width="props.width"
   >
     <div class="add-user-container">
-      <!-- 搜索区域 -->
-      <a-card class="search-card">
-        <a-form :model="searchForm" layout="inline" auto-label-width>
-          <a-form-item field="name" label="用户名或昵称">
-            <a-input
-              v-model="searchForm.name"
-              placeholder="请输入用户名或昵称"
-              allow-clear
-              style="width: 180px"
-              @keyup.enter="handleSearch"
-            />
-          </a-form-item>
-          <a-form-item>
-            <a-space>
-              <a-button type="primary" @click="handleSearch">
-                <template #icon><icon-search /></template>
-                查询
-              </a-button>
-              <a-button @click="handleReset">
-                <template #icon><icon-refresh /></template>
-                重置
-              </a-button>
-            </a-space>
-          </a-form-item>
-        </a-form>
-      </a-card>
+      <s-layout-search>
+        <template #fields>
+          <a-input
+            v-model="searchForm.name"
+            placeholder="请输入用户名或昵称"
+            allow-clear
+            style="width: 220px"
+            @press-enter="handleSearch"
+          />
+        </template>
+        <template #actions>
+          <a-button type="primary" @click="handleSearch">
+            <template #icon><icon-search /></template>
+            <span>查询</span>
+          </a-button>
+          <a-button @click="handleReset">
+            <template #icon><icon-refresh /></template>
+            <span>重置</span>
+          </a-button>
+        </template>
+      </s-layout-search>
 
-      <!-- 用户列表表格 -->
+      <div class="uvp-dialog-selection" v-if="selectedUserIds.length > 0">
+        <span class="uvp-dialog-selection__summary">
+          已选择 <a-tag color="arcoblue">{{ selectedUserIds.length }}</a-tag> 个用户
+        </span>
+        <a-button type="outline" size="mini" @click="selectedUserIds = []">清空选择</a-button>
+      </div>
+
       <a-table
+        class="uvp-data-table"
         row-key="id"
         :data="userList"
         :loading="tableLoading"
@@ -46,8 +49,8 @@
         @page-change="handlePageChange"
         @page-size-change="handlePageSizeChange"
         size="small"
-        :bordered="{ cell: true }"
-        :scroll="{ y: '300px' }"
+        :bordered="false"
+        :scroll="tableScroll"
       >
         <template #columns>
           <a-table-column title="ID" data-index="id" :width="80" align="center"></a-table-column>
@@ -66,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { computed, ref, watch } from "vue";
 import { type AccountItem } from "@/api/user";
 import { getAccountListAllAPI } from "@/api/sysusertenant";
 
@@ -101,6 +104,10 @@ const tableLoading = ref(false);
 
 // 用户列表
 const userList = ref<AccountItem[]>([]);
+const tableScroll = computed(() => ({
+  x: "100%",
+  ...(userList.value.length > 0 ? { y: 300 } : {})
+}));
 
 // 已选择的用户 ID 列表
 const selectedUserIds = ref<number[]>([]);
@@ -140,7 +147,7 @@ const loadUserList = async () => {
       pageNum: pagination.value.current,
       pageSize: pagination.value.pageSize,
       notTenantId: props.tenantId,
-      notGlobal: true,
+      notGlobal: true
     };
 
     const res = await getAccountListAllAPI(params);
@@ -237,14 +244,12 @@ watch(modalVisible, newVal => {
 
 <style lang="scss" scoped>
 .add-user-container {
-  .search-card {
-    margin-bottom: 16px;
-  }
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 
-  .search-card {
-    :deep(.arco-card-body) {
-      padding-bottom: 0;
-    }
+  :deep(.arco-form-item) {
+    margin-bottom: 0;
   }
 }
 </style>

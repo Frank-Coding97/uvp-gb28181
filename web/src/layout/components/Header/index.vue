@@ -15,11 +15,10 @@ import HeaderRight from "@/layout/components/Header/components/header-right/inde
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  height: 56px;
-  padding: 0 24px;
-  background: #fff;
-  border-bottom: 1px solid #e8e8e8;
-  z-index: 100;
-  flex-shrink: 0;
+  justify-content: space-between;
+  height: var(--uvp-header-height);
+  padding: 12px var(--uvp-header-padding-x);
+  background: var(--uvp-workspace-bg);
+  border-bottom: 1px solid var(--uvp-workspace-border);
 }
 </style>

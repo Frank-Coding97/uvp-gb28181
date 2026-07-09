@@ -1381,3 +1381,45 @@ CREATE TABLE `sys_param` (
   UNIQUE KEY `idx_sys_param_code` (`code`),
   KEY `idx_sys_param_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COMMENT='系统参数配置';
+
+-- UVP UI language: use Lucide icons for menu entries.
+UPDATE `sys_menu`
+SET
+  `svg_icon` = '',
+  `icon` = CASE `id`
+    WHEN 1 THEN 'lucide:House'
+    WHEN 10 THEN 'lucide:Settings'
+    WHEN 1001 THEN 'lucide:UserRound'
+    WHEN 1002 THEN 'lucide:Shield'
+    WHEN 1003 THEN 'lucide:Menu'
+    WHEN 1004 THEN 'lucide:Building2'
+    WHEN 1005 THEN 'lucide:BookOpen'
+    WHEN 1006 THEN 'lucide:FileText'
+    WHEN 1007 THEN 'lucide:UserCog'
+    WHEN 140213 THEN 'lucide:Network'
+    WHEN 140239 THEN 'lucide:Folder'
+    WHEN 140245 THEN 'lucide:SlidersHorizontal'
+    WHEN 140247 THEN 'lucide:Box'
+    WHEN 140248 THEN 'lucide:Box'
+    WHEN 140259 THEN 'lucide:Tags'
+    WHEN 140265 THEN 'lucide:CodeXml'
+    WHEN 140336 THEN 'lucide:Blocks'
+    WHEN 140341 THEN 'lucide:CalendarClock'
+    WHEN 140342 THEN 'lucide:ListTodo'
+    WHEN 140347 THEN 'lucide:History'
+    WHEN 140350 THEN 'lucide:Cctv'
+    WHEN 140351 THEN 'lucide:Server'
+    WHEN 140352 THEN 'lucide:Server'
+    WHEN 140353 THEN 'lucide:Workflow'
+    WHEN 140354 THEN 'lucide:History'
+    WHEN 140355 THEN 'lucide:RadioTower'
+    WHEN 140357 THEN 'lucide:Activity'
+    WHEN 140358 THEN 'lucide:MonitorPlay'
+    ELSE `icon`
+  END
+WHERE `id` IN (
+  1, 10, 1001, 1002, 1003, 1004, 1005, 1006, 1007,
+  140213, 140239, 140245, 140247, 140248, 140259, 140265,
+  140336, 140341, 140342, 140347, 140350, 140351, 140352,
+  140353, 140354, 140355, 140357, 140358
+);
