@@ -79,7 +79,7 @@ defineOptions({ name: "SLayoutSearch" });
 :deep(.arco-input-wrapper),
 :deep(.arco-select-view-single),
 :deep(.arco-picker) {
-  min-height: 44px;
+  min-height: 40px;
   background: var(--uvp-search-control-bg);
   border-color: transparent;
   border-radius: 10px;
@@ -98,7 +98,7 @@ defineOptions({ name: "SLayoutSearch" });
 
 :deep(.arco-btn) {
   min-width: 88px;
-  height: 44px;
+  height: 40px;
   border-radius: 8px;
   transition:
     background-color 0.18s ease,

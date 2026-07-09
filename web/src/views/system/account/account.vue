@@ -1,6 +1,6 @@
 <template>
   <div class="snow-fill">
-    <div class="snow-fill-inner container uvp-split-list-page">
+    <div class="snow-fill-inner uvp-page-shell-flat container uvp-split-list-page">
       <s-fold-page :width="280">
         <template #sider>
           <div class="left-box uvp-tree-panel">

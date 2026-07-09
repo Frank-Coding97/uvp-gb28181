@@ -1,21 +1,18 @@
 <template>
   <div class="snow-fill">
     <div class="snow-fill-inner">
-      <div class="uvp-list-toolbar sysconfig-toolbar">
-        <div class="uvp-list-toolbar__filters">
-          <span class="sysconfig-toolbar__label">{{ currentTabTitle }}</span>
-        </div>
-        <div class="uvp-list-toolbar__actions">
-          <a-button type="primary" @click="onSave" v-hasPerm="['system:config:update']">
-            <template #icon>
-              <icon-save />
-            </template>
-            <span>保存配置</span>
-          </a-button>
-        </div>
-      </div>
+      <a-tabs class="uvp-system-tabs sysconfig-tabs" v-model:active-key="activeTab" :animation="true">
+        <template #extra>
+          <div class="sysconfig-tabs__actions">
+            <a-button type="primary" @click="onSave" v-hasPerm="['system:config:update']">
+              <template #icon>
+                <icon-save />
+              </template>
+              <span>保存配置</span>
+            </a-button>
+          </div>
+        </template>
 
-      <a-tabs class="uvp-system-tabs" v-model:active-key="activeTab" :animation="true">
         <!-- 服务器配置 -->
         <a-tab-pane key="server" title="服务器配置">
           <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
@@ -223,14 +220,6 @@ const layoutMode = computed(() => {
 });
 
 const activeTab = ref("server");
-const currentTabTitle = computed(() => {
-  const titleMap: Record<string, string> = {
-    server: "服务器配置",
-    captcha: "验证码配置",
-    safe: "安全配置"
-  };
-  return titleMap[activeTab.value] || "系统配置";
-});
 
 // 使用系统配置 store
 const sysConfigStore = useSysConfigStore();
@@ -275,22 +264,28 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
-.sysconfig-toolbar {
-  margin-bottom: 12px;
+.sysconfig-tabs {
+  :deep(.arco-tabs-nav) {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  :deep(.arco-tabs-nav-tab) {
+    flex: 0 0 auto;
+  }
+
+  :deep(.arco-tabs-nav-extra) {
+    display: flex;
+    align-items: center;
+    padding-right: 0;
+    margin-left: auto;
+  }
 }
 
-.sysconfig-toolbar__label {
-  color: var(--uvp-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
-}
-</style>
-
-<style lang="scss" scoped>
-.sysconfig-toolbar {
+.sysconfig-tabs__actions {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 12px;
+  align-items: center;
 }
 
 .mb-4 {

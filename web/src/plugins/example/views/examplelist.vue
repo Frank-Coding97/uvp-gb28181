@@ -1,6 +1,6 @@
 <template>
   <div class="snow-page">
-    <div class="snow-inner">
+    <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
           <a-input

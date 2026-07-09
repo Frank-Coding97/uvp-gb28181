@@ -1,6 +1,6 @@
 <template>
   <div class="snow-page">
-    <div class="snow-inner">
+    <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
           <a-input v-model="form.username" placeholder="请输入用户名" style="width: 176px" allow-clear @press-enter="search" />

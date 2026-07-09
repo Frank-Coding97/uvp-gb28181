@@ -315,6 +315,20 @@ body {
   box-shadow: var(--uvp-panel-shadow);
 }
 
+.snow-inner.uvp-page-shell-flat,
+.snow-fill-inner.uvp-page-shell-flat,
+.arco-card.uvp-page-shell-flat {
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.arco-card.uvp-page-shell-flat > .arco-card-body {
+  padding: 0;
+}
+
 .snow-inner {
   min-height: 100%;
   padding: var(--uvp-main-padding);
@@ -586,6 +600,82 @@ body {
   color: var(--uvp-brand-strong);
   background: #f9fbff;
   border-color: rgb(37 99 235 / 22%);
+}
+
+.gb28181-page,
+.zlm-node-list,
+.node-detail,
+.node-config,
+.zlm-node-form {
+  --zlm-bg: transparent;
+  --zlm-card: var(--uvp-panel-bg);
+  --zlm-card-hover: var(--uvp-table-row-hover-bg);
+  --zlm-border: var(--uvp-panel-border);
+  --zlm-border-strong: #d7e2ef;
+  --zlm-divider: var(--uvp-border-subtle);
+  --zlm-brand-50: var(--uvp-brand-soft);
+  --zlm-brand-500: var(--uvp-brand);
+  --zlm-brand-600: var(--uvp-brand-strong);
+  --zlm-accent-500: var(--uvp-brand-cyan);
+  --zlm-accent-600: var(--uvp-brand-cyan);
+  --zlm-success-50: #edf9f2;
+  --zlm-success-500: #33a06f;
+  --zlm-success-600: #158052;
+  --zlm-warn-50: var(--uvp-warning-soft);
+  --zlm-warn-500: #f59e0b;
+  --zlm-warn-600: var(--uvp-warning);
+  --zlm-danger-50: var(--uvp-danger-soft);
+  --zlm-danger-500: #ef4444;
+  --zlm-danger-600: var(--uvp-danger);
+  --zlm-state-active: #18a058;
+  --zlm-state-maintenance: #f59e0b;
+  --zlm-state-offline: #ef4444;
+  --zlm-text-1: var(--uvp-text-primary);
+  --zlm-text-2: var(--uvp-text-secondary);
+  --zlm-text-3: var(--uvp-text-tertiary);
+  --zlm-text-4: #94a3b8;
+  --zlm-text-inverse: #ffffff;
+  --zlm-shadow-sm: var(--uvp-panel-shadow);
+  --zlm-shadow-lg: 0 22px 60px -28px rgb(15 23 42 / 36%);
+  --zlm-radius-md: 10px;
+  --zlm-radius-lg: var(--uvp-panel-radius);
+  --zlm-radius-full: 999px;
+  --zlm-space-1: 4px;
+  --zlm-space-2: 8px;
+  --zlm-space-3: 12px;
+  --zlm-space-4: 16px;
+  --zlm-space-6: var(--uvp-main-padding);
+  --zlm-space-12: 48px;
+  --zlm-fs-caption: 12px;
+  --zlm-fs-body: 13px;
+  --zlm-fs-h1: 24px;
+  --zlm-fs-h2: 16px;
+  --zlm-fs-display: 32px;
+  --zlm-fw-medium: 560;
+  --zlm-fw-semibold: 650;
+  --zlm-fw-bold: 720;
+  --zlm-font-body: inherit;
+  --zlm-font-display: inherit;
+  --zlm-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --zlm-dur-fast: 160ms;
+  --zlm-dur-base: 220ms;
+  --zlm-dur-slow: 300ms;
+  --zlm-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --zlm-lh-normal: 1.55;
+  --zlm-lh-tight: 1.25;
+}
+
+body[arco-theme="dark"] .gb28181-page,
+body[arco-theme="dark"] .zlm-node-list,
+body[arco-theme="dark"] .node-detail,
+body[arco-theme="dark"] .node-config,
+body[arco-theme="dark"] .zlm-node-form {
+  --zlm-border-strong: #34465b;
+  --zlm-text-4: #60758d;
+  --zlm-success-50: rgb(24 160 88 / 13%);
+  --zlm-success-500: #22c55e;
+  --zlm-success-600: #86efac;
+  --zlm-shadow-lg: 0 24px 64px -28px rgb(0 0 0 / 76%);
 }
 
 .uvp-data-table {

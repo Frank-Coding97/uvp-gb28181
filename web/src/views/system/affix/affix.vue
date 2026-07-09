@@ -1,6 +1,6 @@
 <template>
   <div class="snow-fill">
-    <div class="snow-fill-inner container">
+    <div class="snow-fill-inner uvp-page-shell-flat container">
       <s-layout-search>
         <template #fields>
           <a-input v-model="form.name" placeholder="请输入文件名" style="width: 176px" allow-clear @press-enter="search" />

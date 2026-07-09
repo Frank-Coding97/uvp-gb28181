@@ -1,6 +1,6 @@
 <template>
   <div class="snow-page">
-    <a-card class="general-card uvp-system-panel" :bordered="false">
+    <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
           <a-input v-model="formModel.name" placeholder="请输入租户名称" style="width: 176px" allow-clear @press-enter="search" />
@@ -33,17 +33,16 @@
           </a-button>
         </template>
       </s-layout-search>
-      <a-row>
-        <a-col :span="24">
-          <a-table
-            class="uvp-data-table"
-            row-key="id"
-            :loading="loading"
-            :data="renderData"
-            :pagination="pagination"
-            @page-change="pageChange"
-            @page-size-change="pageSizeChange"
-          >
+      <a-table
+        class="uvp-data-table"
+        row-key="id"
+        :loading="loading"
+        :data="renderData"
+        :pagination="pagination"
+        :bordered="false"
+        @page-change="pageChange"
+        @page-size-change="pageSizeChange"
+      >
             <template #columns>
               <a-table-column title="租户名称" data-index="name" :ellipsis="true" tooltip :width="150"></a-table-column>
               <a-table-column title="租户编码" data-index="code" :width="150"></a-table-column>
@@ -98,10 +97,8 @@
                 </template>
               </a-table-column>
             </template>
-          </a-table>
-        </a-col>
-      </a-row>
-    </a-card>
+      </a-table>
+    </div>
 
     <!-- 新增/编辑弹窗 -->
     <a-modal
@@ -378,8 +375,4 @@ export default {
 };
 </script>
 
-<style scoped lang="scss">
-.general-card {
-  overflow: hidden;
-}
-</style>
+<style scoped lang="scss"></style>
