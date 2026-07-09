@@ -19,6 +19,10 @@
 import { useSysConfigStore } from "@/store/modules/sys-config";
 import { storeToRefs } from "pinia";
 import { useUserStore } from "@/store/modules/user";
+import {
+    getDisplaySystemCopyright,
+    getDisplaySystemRecordNo
+} from "@/utils/system-footer";
 
 // 获取用户模块
 const userStore = useUserStore();
@@ -30,12 +34,12 @@ const { systemConfig } = storeToRefs(sysConfigStore);
 
 // 从系统配置中获取版权信息
 const systemCopyright = computed(() => {
-    return systemConfig.value?.systemCopyright || "";
+    return getDisplaySystemCopyright(systemConfig.value?.systemCopyright);
 });
 
 // 从系统配置中获取备案号
 const systemRecordNo = computed(() => {
-    return systemConfig.value?.systemRecordNo || "";
+    return getDisplaySystemRecordNo(systemConfig.value?.systemRecordNo);
 });
 
 

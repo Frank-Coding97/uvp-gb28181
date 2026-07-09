@@ -1,16 +1,18 @@
 <template>
-  <a-watermark :content="watermark" v-bind="watermarkConfig">
-    <a-layout-content class="layout-main-content">
-      <Tabs v-if="isTabs" />
-      <router-view v-slot="{ Component, route }">
-        <s-main-transition>
-          <keep-alive :include="cacheRoutes">
-            <component :is="createComponentWrapper(Component, route)" :key="route.fullPath" v-if="refreshPage" />
-          </keep-alive>
-        </s-main-transition>
-      </router-view>
-    </a-layout-content>
-  </a-watermark>
+  <div class="layout-main-shell">
+    <a-watermark :content="watermark" v-bind="watermarkConfig" class="layout-main-watermark">
+      <a-layout-content class="layout-main-content">
+        <Tabs v-if="isTabs" />
+        <router-view v-slot="{ Component, route }">
+          <s-main-transition>
+            <keep-alive :include="cacheRoutes">
+              <component :is="createComponentWrapper(Component, route)" :key="route.fullPath" v-if="refreshPage" />
+            </keep-alive>
+          </s-main-transition>
+        </router-view>
+      </a-layout-content>
+    </a-watermark>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -53,17 +55,29 @@ const watermarkConfig = computed(() => {
     gap: watermarkGap.value
   };
 });
-
-watch(watermarkConfig, newv => {
-  console.log(newv);
-});
 </script>
 
 <style lang="scss" scoped>
+.layout-main-shell {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+:deep(.layout-main-watermark) {
+  flex: 1;
+  height: 100%;
+}
+
 .layout-main-content {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 // 修改左侧滚动条宽度-主要针对main窗口内的滚动条
