@@ -28,8 +28,22 @@
         </template>
       </a-button>
     </a-tooltip>
+    <!-- 颜色模式 -->
+    <a-dropdown trigger="click" position="bottom" @select="onThemeModeSelect">
+      <a-button size="mini" type="text" class="icon_btn" id="system-dark">
+        <template #icon>
+          <icon-sun-fill :size="18" v-if="!darkMode" />
+          <icon-moon-fill :size="18" v-else />
+        </template>
+      </a-button>
+      <template #content>
+        <a-doption value="light" :disabled="!darkMode">明亮模式</a-doption>
+        <a-doption value="nightOps" :disabled="darkMode && darkModeStyle === 'nightOps'">夜间蓝灰</a-doption>
+        <a-doption value="frostedBlack" :disabled="darkMode && darkModeStyle === 'frostedBlack'">磨砂黑</a-doption>
+      </template>
+    </a-dropdown>
     <!-- 我的 -->
-    <a-dropdown trigger="click" :popup-max-height="false" popup-container=".header_setting">
+    <a-dropdown trigger="click" position="br" :popup-max-height="false">
       <div class="my_setting" id="system-my-setting">
         <a-image width="32" height="32" fit="cover" :src="account.avatar" class="my_image" />
         <span class="user-nickname">{{ account.nickName }}</span>
@@ -109,13 +123,18 @@ import SystemSettings from "@/layout/components/Header/components/system-setting
 import { useI18n } from "vue-i18n";
 import { Modal } from "@arco-design/web-vue";
 import { useRouter } from "vue-router";
+import { storeToRefs } from "pinia";
 //import { useUserInfoStore } from "@/store/modules/user-info";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { useRouteConfigStore } from "@/store/modules/route-config";
+import { useThemeConfig } from "@/store/modules/theme-config";
+import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { logout } from "@/api/user";
 const i18n = useI18n();
 const router = useRouter();
 const { isMobile } = useDevicesSize();
+const themeStore = useThemeConfig();
+const { darkMode, darkModeStyle } = storeToRefs(themeStore);
 //const userStore = useUserInfoStore();
 //const { account } = storeToRefs(userStore);
 import { useUserStoreHook } from "@/store/modules/user";
@@ -191,6 +210,16 @@ const onSystemSetting = () => {
   systemOpen.value = true;
 };
 
+// 颜色模式
+const onThemeModeSelect = (value: string) => {
+  darkMode.value = value !== "light";
+  if (darkMode.value) {
+    darkModeStyle.value = value;
+  }
+  const { setDarkMode } = useThemeMethods();
+  setDarkMode();
+};
+
 // 全屏
 const fullScreen = ref(true);
 const onFullScreen = () => {
@@ -219,7 +248,7 @@ const onPerson = (type: number) => {
 
 // 项目地址
 const onProject = () => {
-  window.open("https://github.com/qxkjsoft/ginfast-back", "_blank");
+  window.open("https://gitee.com/Frank-Coding/uvp-gb28181", "_blank");
 };
 
 // 退出登录
