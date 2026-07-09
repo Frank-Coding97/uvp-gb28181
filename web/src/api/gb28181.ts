@@ -77,6 +77,22 @@ export const startPlay = (deviceId: string, channelId: string) =>
 export const stopPlay = (streamId: string) =>
     http.request<BaseResult<unknown>>("delete", baseUrlApi(`gb28181/play/${streamId}`));
 
+// ===== SIP 平台接入信息 =====
+
+export interface SipPlatformInfo {
+    enabled: boolean;
+    serverId: string;
+    domain: string;
+    sipIp: string;
+    sipPort: number;
+    transport: string[];
+    passwordMasked: string;
+    registerUri: string;
+}
+
+export const fetchSipPlatformInfo = () =>
+    http.request<BaseResult<SipPlatformInfo>>("get", baseUrlApi("gb28181/sip/platform"));
+
 // ===== SIP 信令看板 =====
 
 export const HEALTH_EMPTY = -1; // 后端 sentinel,前端识别后渲染 "--"

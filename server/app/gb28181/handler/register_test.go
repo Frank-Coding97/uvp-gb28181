@@ -51,6 +51,11 @@ func setupEnv(t *testing.T) {
 		_ = db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", func(g *gorm.DB) { g.Statement.RaiseErrorOnNotFound = false })
 		app.GormDbMysql = db
 	}
+	// A1 加了 subscribe_* 列;dev MySQL 未跑新 migration 时跳过
+	// 跑了 server/resource/database/gb28181/migrations/2026-06-26-catalog-b-plus.sql 即可解除
+	if !app.GormDbMysql.Migrator().HasColumn(&gbmodels.GbDevice{}, "subscribe_capability") {
+		t.Skipf("跳过(MySQL gb_device 缺 subscribe_capability 列,请先跑 migration 2026-06-26-catalog-b-plus.sql)")
+	}
 }
 
 func testCfg() gbconfig.Config {

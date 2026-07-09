@@ -100,39 +100,70 @@ defineExpose({ stop: destroy });
 
 <style scoped>
 .play-window {
+    box-sizing: border-box;
     position: relative;
     width: 100%;
-    min-height: 540px;
-    background: #000;
-    border-radius: 4px;
+    min-height: 0;
+    aspect-ratio: 16 / 9;
+    background:
+        radial-gradient(circle at 50% 50%, rgb(30 41 59 / 32%) 0%, rgb(2 6 23 / 94%) 72%),
+        #020617;
+    border: 1px solid rgb(148 163 184 / 18%);
+    border-radius: 14px;
     overflow: hidden;
 }
 
 .player {
     width: 100%;
     height: 100%;
-    min-height: 540px;
+    min-height: 100%;
 }
 
 .err {
     position: absolute;
-    bottom: 8px;
-    left: 8px;
-    right: 8px;
-    color: #ff7d7d;
-    background: rgba(0, 0, 0, 0.6);
-    padding: 6px 8px;
-    border-radius: 4px;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    color: #fecaca;
+    background: rgb(127 29 29 / 78%);
+    padding: 10px 12px;
+    border: 1px solid rgb(248 113 113 / 34%);
+    border-radius: 10px;
     font-size: 12px;
     z-index: 5;
+    backdrop-filter: blur(10px);
 }
 
 .placeholder {
     position: absolute;
-    color: #888;
-    font-size: 14px;
     top: 50%;
     left: 50%;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    width: min(72%, 320px);
+    color: rgb(203 213 225 / 88%);
+    font-size: 14px;
+    line-height: 1.5;
+    text-align: center;
     transform: translate(-50%, -50%);
+}
+
+.placeholder::before {
+    width: 44px;
+    height: 44px;
+    content: "";
+    background:
+        radial-gradient(circle at 50% 50%, rgb(59 130 246 / 80%) 0%, rgb(59 130 246 / 12%) 64%, transparent 66%);
+    border-radius: 999px;
+    box-shadow: 0 0 0 1px rgb(148 163 184 / 18%);
+}
+
+@media (max-width: 768px) {
+    .play-window {
+        aspect-ratio: 4 / 3;
+    }
 }
 </style>

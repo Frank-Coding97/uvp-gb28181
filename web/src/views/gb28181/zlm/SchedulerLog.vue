@@ -70,32 +70,36 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="scheduler-log">
-        <a-page-header
-            title="调度日志"
-            subtitle="Scheduler.Pick 决策审计,保留 7 天,异步落库"
-            :show-back="false"
-        >
-            <template #extra>
-                <a-space>
+    <div class="snow-fill">
+        <div class="snow-fill-inner uvp-page-shell-flat scheduler-log-shell">
+            <div class="scheduler-log">
+                <s-layout-search class="scheduler-log-search">
+                    <template #fields>
                     <a-select
                         v-model="limit"
                         :options="limitOptions"
-                        :style="{ width: '110px' }"
+                        style="width: 126px"
+                        placeholder="日志条数"
                         @change="refresh"
                     />
+                        <span class="log-count">{{ logs.length }} 条日志</span>
+                    </template>
+                    <template #actions>
                     <a-switch
+                            class="auto-refresh"
                         :model-value="autoRefresh"
                         checked-text="自动 30s"
                         unchecked-text="手动"
                         @change="(v: boolean | string | number) => toggleAutoRefresh(Boolean(v))"
                     />
-                    <a-button @click="refresh">刷新</a-button>
-                </a-space>
-            </template>
-        </a-page-header>
+                        <a-button @click="refresh" :loading="loading">
+                            <template #icon><icon-refresh /></template>
+                            刷新
+                        </a-button>
+                    </template>
+                </s-layout-search>
 
-        <a-card style="margin: 16px">
+                <div class="scheduler-log-table">
             <a-table
                 :data="logs"
                 :loading="loading"
@@ -103,6 +107,7 @@ onUnmounted(() => {
                 :pagination="false"
                 :row-class-name="rowClass"
                 size="small"
+                        class="uvp-data-table"
             >
                 <template #columns>
                     <a-table-column title="时间" :width="180">
@@ -113,33 +118,33 @@ onUnmounted(() => {
                             <a-tag v-if="record.algorithm" size="small" color="arcoblue">
                                 {{ record.algorithm }}
                             </a-tag>
-                            <span v-else style="color: #aaa">—</span>
+                                    <span v-else class="muted">—</span>
                         </template>
                     </a-table-column>
                     <a-table-column title="命中节点">
                         <template #cell="{ record }">
                             <span v-if="record.nodeName">
                                 {{ record.nodeName }}
-                                <span style="color: #86909c">(id={{ record.nodeID }})</span>
+                                        <span class="muted">(id={{ record.nodeID }})</span>
                             </span>
-                            <span v-else style="color: #aaa">—</span>
+                                    <span v-else class="muted">—</span>
                         </template>
                     </a-table-column>
                     <a-table-column title="StreamID" :width="200">
                         <template #cell="{ record }">
                             <span v-if="record.streamID">{{ record.streamID }}</span>
-                            <span v-else style="color: #aaa">—</span>
+                                    <span v-else class="muted">—</span>
                         </template>
                     </a-table-column>
                     <a-table-column title="设备/通道" :width="220">
                         <template #cell="{ record }">
                             <span v-if="record.deviceID">
                                 {{ record.deviceID }}
-                                <span style="color: #86909c" v-if="record.channelID">
+                                        <span class="muted" v-if="record.channelID">
                                     / {{ record.channelID }}
                                 </span>
                             </span>
-                            <span v-else style="color: #aaa">—</span>
+                                    <span v-else class="muted">—</span>
                         </template>
                     </a-table-column>
                     <a-table-column title="错误">
@@ -147,24 +152,87 @@ onUnmounted(() => {
                             <a-tag v-if="record.errorMessage" color="red" size="small">
                                 {{ record.errorMessage }}
                             </a-tag>
-                            <span v-else style="color: #00b42a">成功</span>
+                                    <span v-else class="success-text">成功</span>
                         </template>
                     </a-table-column>
                 </template>
             </a-table>
-        </a-card>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
 <style scoped>
+.scheduler-log-shell {
+    padding: 4px 8px;
+    overflow: hidden;
+}
+
 .scheduler-log {
     height: 100%;
     overflow: auto;
 }
 
+.scheduler-log-search {
+    margin-bottom: 16px;
+}
+
+.scheduler-log-search :deep(.uvp-search-panel__fields) {
+    flex-wrap: nowrap;
+}
+
+.scheduler-log-search :deep(.uvp-search-panel__actions) {
+    gap: 10px;
+}
+
+.auto-refresh {
+    min-width: 92px;
+}
+
+.log-count {
+    display: inline-flex;
+    align-items: center;
+    height: 34px;
+    color: var(--uvp-text-tertiary);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.scheduler-log-table {
+    overflow: hidden;
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: var(--uvp-panel-radius);
+    box-shadow: var(--uvp-panel-shadow);
+}
+
+.scheduler-log-table :deep(.arco-table-container) {
+    border-radius: inherit;
+}
+
+.muted {
+    color: var(--uvp-text-tertiary);
+}
+
+.success-text {
+    color: #16845f;
+    font-weight: 500;
+}
+
 :deep(tr.row-error > td),
 :deep(.arco-table-tr.row-error > .arco-table-td),
 :deep(tr.row-error .arco-table-td) {
-    background-color: #ffece8 !important;
+    background-color: rgb(248 113 113 / 10%) !important;
+}
+
+@media (max-width: 768px) {
+    .scheduler-log-search :deep(.uvp-search-panel__fields) {
+        flex-wrap: wrap;
+    }
+
+    .scheduler-log-search :deep(.arco-select) {
+        width: 100% !important;
+    }
 }
 </style>

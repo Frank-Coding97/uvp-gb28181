@@ -12,13 +12,10 @@ import {
 } from "@/api/gb28181";
 import PlayWindow from "./components/PlayWindow.vue";
 
-// ===== 数据 =====
-
 const devices = ref<GbDevice[]>([]);
 const channelsCache = ref<Record<string, GbChannel[]>>({});
 const treeLoading = ref(false);
 const playLoading = ref(false);
-
 const playing = ref<{
     deviceId: string;
     channelId: string;
@@ -36,7 +33,6 @@ interface TreeNode {
     raw?: GbDevice | GbChannel;
 }
 
-// 树构建:第一层 = 设备,第二层 = 通道(懒加载)
 const treeData = computed<TreeNode[]>(() =>
     devices.value.map((d) => ({
         key: `dev:${d.deviceId}`,
@@ -56,7 +52,16 @@ const treeData = computed<TreeNode[]>(() =>
     }))
 );
 
-// ===== 拉数据 =====
+const deviceTotal = computed(() => devices.value.length);
+const onlineDeviceTotal = computed(() => devices.value.filter((item) => item.online).length);
+const loadedChannelTotal = computed(() =>
+    Object.values(channelsCache.value).reduce((total, list) => total + list.length, 0)
+);
+
+const currentStreamTitle = computed(() => {
+    if (!playing.value) return "未选择通道";
+    return `${playing.value.deviceId} / ${playing.value.channelId}`;
+});
 
 async function loadDevices() {
     treeLoading.value = true;
@@ -81,13 +86,10 @@ async function onLoadMore(node: TreeNode) {
     }
 }
 
-// ===== 点播 / 停播 =====
-
 async function onTreeSelect(selectedKeys: string[]) {
     if (!selectedKeys || !selectedKeys.length) return;
     const key = String(selectedKeys[0]);
-    if (!key.startsWith("ch:")) return; // 只处理通道叶子,设备节点交给展开
-    // key 格式: ch:<deviceId>:<channelId>
+    if (!key.startsWith("ch:")) return;
     const parts = key.split(":");
     if (parts.length < 3) return;
     await onChannelClick({
@@ -186,7 +188,7 @@ onMounted(loadDevices);
         <a-card class="right" :bordered="false">
             <template #title>
                 <span v-if="playing">
-                    正在播 {{ playing.channelId }}
+                    正在播 {{ currentStreamTitle }}
                     <a-tag color="blue" size="small" style="margin-left: 8px">{{ playing.result.streamId }}</a-tag>
                 </span>
                 <span v-else>播放</span>
@@ -202,6 +204,11 @@ onMounted(loadDevices);
                     停播
                 </a-button>
             </template>
+            <div class="stream-summary">
+                <span>设备 {{ deviceTotal }}</span>
+                <span>在线 {{ onlineDeviceTotal }}</span>
+                <span>通道 {{ loadedChannelTotal }}</span>
+            </div>
             <a-spin :loading="playLoading" style="display: block">
                 <PlayWindow
                     :url="playing?.result.httpFlvUrl || ''"
@@ -226,31 +233,16 @@ onMounted(loadDevices);
     padding: 12px;
     height: calc(100vh - 100px);
 }
-
-.left {
-    overflow: auto;
-}
-
-.right {
+.left { overflow: auto; }
+.right { display: flex; flex-direction: column; }
+.right :deep(.arco-card-body) { flex: 1; display: flex; flex-direction: column; }
+.stream-summary {
     display: flex;
-    flex-direction: column;
-}
-
-.right :deep(.arco-card-body) {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
-.play-meta {
-    margin-top: 12px;
-    font-size: 12px;
+    gap: 12px;
+    margin-bottom: 12px;
     color: #666;
-    line-height: 1.6;
-    word-break: break-all;
+    font-size: 12px;
 }
-
-.offline {
-    color: #999;
-}
+.play-meta { margin-top: 12px; font-size: 12px; color: #666; line-height: 1.6; word-break: break-all; }
+.offline { color: #999; }
 </style>

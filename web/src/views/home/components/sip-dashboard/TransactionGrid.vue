@@ -2,9 +2,10 @@
   <div class="tx-section">
     <div class="tx-section__title">协议事务 · 今日</div>
     <div class="tx-grid">
-      <div
+      <button
         v-for="cell in cells"
         :key="cell.kind"
+        type="button"
         class="tx-cell"
         :class="{ 'tx-cell--alert': cell.alert }"
         @click="emit('cell-click', cell.kind)"
@@ -25,7 +26,7 @@
             {{ rateText(cell) }}
           </div>
         </div>
-      </div>
+      </button>
       <!-- 不足 8 格补占位,布局稳定 -->
       <div v-for="i in placeholderCount" :key="`p${i}`" class="tx-cell tx-cell--placeholder" />
     </div>
@@ -107,7 +108,7 @@ function rateClass(cell: TransactionStat): string {
 
 .tx-section__title {
   font-size: 12px;
-  color: #999;
+  color: var(--uvp-text-tertiary);
   letter-spacing: 0.5px;
 }
 
@@ -118,14 +119,18 @@ function rateClass(cell: TransactionStat): string {
 }
 
 .tx-cell {
-  background: #fafafa;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  font: inherit;
+  color: inherit;
   cursor: pointer;
+  text-align: left;
+  appearance: none;
   transition: all 0.15s ease;
   position: relative;
   overflow: hidden;
@@ -133,15 +138,21 @@ function rateClass(cell: TransactionStat): string {
 }
 
 .tx-cell:hover:not(.tx-cell--placeholder) {
-  border-color: #1890ff;
-  background: #fff;
-  box-shadow: 0 2px 6px rgba(24, 144, 255, 0.1);
+  border-color: var(--uvp-brand);
+  background: var(--uvp-panel-bg);
+  box-shadow: 0 8px 18px rgb(37 99 235 / 10%);
   transform: translateY(-1px);
 }
 
+.tx-cell:focus-visible {
+  outline: none;
+  border-color: var(--uvp-brand);
+  box-shadow: 0 0 0 3px rgb(37 99 235 / 12%);
+}
+
 .tx-cell--alert {
-  border-color: #ffa39e;
-  background: #fff1f0;
+  border-color: var(--uvp-danger-border);
+  background: var(--uvp-danger-soft);
 }
 
 .tx-cell--alert::before {
@@ -151,14 +162,14 @@ function rateClass(cell: TransactionStat): string {
   left: 0;
   right: 0;
   height: 2px;
-  background: #ff4d4f;
+  background: var(--uvp-danger);
 }
 
 .tx-cell--placeholder {
   cursor: default;
-  background: #fafafa;
+  background: var(--uvp-list-toolbar-bg);
   border-style: dashed;
-  border-color: #f0f0f0;
+  border-color: var(--uvp-panel-border);
 }
 
 .tx-cell__head {
@@ -171,8 +182,8 @@ function rateClass(cell: TransactionStat): string {
   width: 22px;
   height: 22px;
   border-radius: 4px;
-  background: rgba(24, 144, 255, 0.1);
-  color: #1890ff;
+  background: var(--uvp-brand-soft);
+  color: var(--uvp-brand);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -182,35 +193,35 @@ function rateClass(cell: TransactionStat): string {
 }
 
 .tx-cell--alert .tx-cell__icon {
-  background: rgba(255, 77, 79, 0.1);
-  color: #ff4d4f;
+  background: var(--uvp-danger-soft);
+  color: var(--uvp-danger);
 }
 
 .tx-cell__trend {
   font-size: 11px;
-  color: #999;
+  color: var(--uvp-text-tertiary);
 }
 
 .tx-cell__trend--up {
-  color: #52c41a;
+  color: var(--uvp-brand-cyan);
 }
 
 .tx-cell__trend--down {
-  color: #ff4d4f;
+  color: var(--uvp-danger);
 }
 
 .tx-cell__trend--neutral {
-  color: #bfbfbf;
+  color: var(--uvp-text-tertiary);
 }
 
 .tx-cell__name {
   font-size: 13px;
-  color: #333;
+  color: var(--uvp-text-primary);
   font-weight: 500;
 }
 
 .tx-cell__en {
-  color: #bfbfbf;
+  color: var(--uvp-text-tertiary);
   font-size: 10px;
   font-weight: 400;
   margin-left: 4px;
@@ -227,24 +238,24 @@ function rateClass(cell: TransactionStat): string {
   font-size: 18px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
-  color: #333;
+  color: var(--uvp-text-primary);
 }
 
 .tx-cell__rate {
   font-size: 12px;
-  color: #52c41a;
+  color: var(--uvp-brand-cyan);
   font-variant-numeric: tabular-nums;
 }
 
 .tx-cell__rate--warn {
-  color: #fa8c16;
+  color: var(--uvp-warning);
 }
 
 .tx-cell__rate--bad {
-  color: #ff4d4f;
+  color: var(--uvp-danger);
 }
 
 .tx-cell__rate--idle {
-  color: #bfbfbf;
+  color: var(--uvp-text-tertiary);
 }
 </style>

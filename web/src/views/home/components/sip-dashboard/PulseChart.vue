@@ -27,8 +27,8 @@
         <!-- 顶蓝到底透明的渐变,给面积一点呼吸感 -->
         <defs>
           <linearGradient id="pulseMsgGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#1890ff" stop-opacity="0.28" />
-            <stop offset="100%" stop-color="#1890ff" stop-opacity="0.02" />
+            <stop offset="0%" stop-color="var(--uvp-brand)" stop-opacity="0.28" />
+            <stop offset="100%" stop-color="var(--uvp-brand)" stop-opacity="0.02" />
           </linearGradient>
         </defs>
 
@@ -40,7 +40,7 @@
           y="0"
           :width="win.w"
           :height="H"
-          fill="rgba(255, 77, 79, 0.08)"
+          fill="var(--uvp-danger-soft)"
         />
         <!-- 主脉搏面积(消息数/分钟) -->
         <polygon
@@ -52,7 +52,7 @@
         <polyline
           :points="msgLine"
           fill="none"
-          stroke="#1890ff"
+          stroke="var(--uvp-brand)"
           stroke-width="1.5"
           opacity="0.9"
           vector-effect="non-scaling-stroke"
@@ -61,7 +61,7 @@
         <polyline
           :points="failLine"
           fill="none"
-          stroke="#ff4d4f"
+          stroke="var(--uvp-danger)"
           stroke-width="1"
           stroke-dasharray="2,2"
           opacity="0.7"
@@ -73,8 +73,8 @@
           :cx="lastPt.x"
           :cy="lastPt.y"
           r="2.8"
-          fill="#1890ff"
-          stroke="#fff"
+          fill="var(--uvp-brand)"
+          stroke="var(--uvp-panel-bg)"
           stroke-width="1"
         />
         <!-- hover 竖辅助线 + 高亮圆点 -->
@@ -84,12 +84,12 @@
             y1="0"
             :x2="hoverPt.x"
             :y2="H"
-            stroke="#8c8c8c"
+            stroke="var(--uvp-text-tertiary)"
             stroke-width="1"
             stroke-dasharray="2,2"
             vector-effect="non-scaling-stroke"
           />
-          <circle :cx="hoverPt.x" :cy="hoverPt.y" r="3.2" fill="#1890ff" stroke="#fff" stroke-width="1.2" />
+          <circle :cx="hoverPt.x" :cy="hoverPt.y" r="3.2" fill="var(--uvp-brand)" stroke="var(--uvp-panel-bg)" stroke-width="1.2" />
         </template>
       </svg>
       <div v-else class="pulse__empty">暂无信令</div>
@@ -254,9 +254,9 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
 
 <style scoped lang="scss">
 .pulse {
-  background: #fafafa;
-  border: 1px solid #e8e8e8;
-  border-radius: 6px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -271,18 +271,18 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
 
 .pulse__title {
   font-size: 12px;
-  color: #666;
+  color: var(--uvp-text-secondary);
   letter-spacing: 0.5px;
 }
 
 .pulse__stats {
   margin-left: 12px;
-  color: #999;
+  color: var(--uvp-text-tertiary);
   font-size: 11px;
   letter-spacing: 0;
 
   b {
-    color: #1890ff;
+    color: var(--uvp-brand);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     margin: 0 1px;
@@ -293,7 +293,7 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   display: flex;
   gap: 14px;
   font-size: 11px;
-  color: #999;
+  color: var(--uvp-text-tertiary);
 }
 
 .pulse__legend-line {
@@ -302,11 +302,11 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   height: 2px;
   margin-right: 5px;
   vertical-align: middle;
-  background: #1890ff;
+  background: var(--uvp-brand);
 }
 
 .pulse__legend-line--red {
-  background: #ff4d4f;
+  background: var(--uvp-danger);
 }
 
 .pulse__chart {
@@ -326,7 +326,7 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #bfbfbf;
+  color: var(--uvp-text-tertiary);
   font-size: 12px;
 }
 
@@ -334,7 +334,7 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   position: absolute;
   top: 0;
   pointer-events: none;
-  background: rgba(0, 0, 0, 0.78);
+  background: rgb(15 23 42 / 88%);
   color: #fff;
   font-size: 11px;
   padding: 6px 8px;
@@ -369,16 +369,16 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #1890ff;
+  background: var(--uvp-brand);
 }
 
 .pulse__tip-dot--red {
-  background: #ff4d4f;
+  background: var(--uvp-danger);
 }
 
 .pulse__hint {
   font-size: 10px;
-  color: #bfbfbf;
+  color: var(--uvp-text-tertiary);
   text-align: right;
 }
 </style>

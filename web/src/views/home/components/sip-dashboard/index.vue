@@ -104,14 +104,15 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 .sip-card {
-  background: #fff;
-  border-radius: 8px;
+  background: var(--uvp-panel-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: var(--uvp-panel-radius);
   padding: 16px 20px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  box-shadow: var(--uvp-panel-shadow);
   display: flex;
   flex-direction: column;
   gap: 14px;
-  color: #333;
+  color: var(--uvp-text-primary);
   font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
@@ -124,7 +125,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   padding-bottom: 4px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--uvp-panel-border);
 }
 
 .sip-card__title {
@@ -133,39 +134,39 @@ onBeforeUnmount(() => {
   gap: 10px;
   font-size: 15px;
   font-weight: 600;
-  color: #333;
+  color: var(--uvp-text-primary);
 }
 
 .sip-card__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #d9d9d9;
+  background: var(--uvp-text-tertiary);
   transition: all 0.3s ease;
 }
 
 .sip-card__dot--ok {
-  background: #52c41a;
-  box-shadow: 0 0 6px rgba(82, 196, 26, 0.5);
+  background: var(--uvp-brand-cyan);
+  box-shadow: 0 0 6px rgb(15 170 166 / 48%);
   animation: sip-pulse 2s infinite;
 }
 
 .sip-card__dot--warn {
-  background: #fa8c16;
-  box-shadow: 0 0 6px rgba(250, 140, 22, 0.5);
+  background: var(--uvp-warning);
+  box-shadow: 0 0 6px rgb(182 107 18 / 36%);
 }
 
 .sip-card__dot--danger {
-  background: #ff4d4f;
-  box-shadow: 0 0 6px rgba(255, 77, 79, 0.5);
+  background: var(--uvp-danger);
+  box-shadow: 0 0 6px rgb(209 67 67 / 38%);
 }
 
 .sip-card__dot--idle {
-  background: #d9d9d9;
+  background: var(--uvp-text-tertiary);
 }
 
 .sip-card__sub {
-  color: #999;
+  color: var(--uvp-text-tertiary);
   font-size: 11px;
   letter-spacing: 0.5px;
 }

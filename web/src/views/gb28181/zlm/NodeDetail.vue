@@ -213,320 +213,306 @@ function fmtTime(s: string | undefined | null): string {
 </script>
 
 <template>
-    <div class="node-detail">
-        <!-- 页面头 -->
-        <header class="page-header">
-            <div class="title-row">
-                <button class="back-btn" @click="router.push('/gb28181/zlm/nodes')">
-                    <icon-left />
-                </button>
-                <div class="title-block">
-                    <div class="title-row-inline">
-                        <h1 class="title">{{ node?.name || "节点详情" }}</h1>
-                        <LifecycleDot v-if="node" :state="node.state" />
-                        <HealthBadge v-if="node" :health="healthOf(node)" :reason="healthReason(node)" />
+    <div class="snow-fill">
+        <div class="snow-fill-inner uvp-page-shell-flat zlm-detail-shell">
+            <div class="node-detail">
+                <div class="detail-toolbar">
+                    <div class="node-identity">
+                        <a-button class="back-btn" @click="router.push('/gb28181/zlm/nodes')">
+                            <template #icon><icon-left /></template>
+                        </a-button>
+                        <div class="identity-main">
+                            <div class="identity-title-row">
+                                <span class="identity-title">{{ node?.name || "节点详情" }}</span>
+                                <LifecycleDot v-if="node" :state="node.state" />
+                                <HealthBadge v-if="node" :health="healthOf(node)" :reason="healthReason(node)" />
+                            </div>
+                            <div class="identity-subtitle">
+                                <span class="mono">{{ node?.host }}:{{ node?.apiPort }}</span>
+                                <span v-if="node?.mediaServerUUID" class="uuid">UUID {{ node.mediaServerUUID }}</span>
+                            </div>
+                        </div>
                     </div>
-                    <p class="subtitle">
-                        <span class="mono">{{ node?.host }}:{{ node?.apiPort }}</span>
-                        <span class="dim"> · UUID {{ node?.mediaServerUUID }}</span>
-                    </p>
+                    <div class="detail-actions">
+                        <a-button
+                            v-if="node?.state === 'offline'"
+                            type="primary"
+                            :loading="opLoading.reprobe"
+                            @click="handleReprobe"
+                        >
+                            重新探测
+                        </a-button>
+                        <a-button
+                            v-if="node?.state === 'active'"
+                            :loading="opLoading.maintenance"
+                            @click="handleMaintenance"
+                        >
+                            隔离
+                        </a-button>
+                        <a-button
+                            v-if="node?.state === 'maintenance'"
+                            type="primary"
+                            :loading="opLoading.activate"
+                            @click="handleActivate"
+                        >
+                            激活
+                        </a-button>
+                        <a-dropdown
+                            v-if="node && node.state !== 'offline'"
+                            trigger="click"
+                            position="br"
+                        >
+                            <a-button>
+                                更多
+                                <template #icon><icon-down /></template>
+                            </a-button>
+                            <template #content>
+                                <a-doption :loading="opLoading.kick" @click="handleKick">驱逐全部会话</a-doption>
+                                <a-doption :loading="opLoading.restart" @click="handleRestart">重启 ZLM 服务</a-doption>
+                            </template>
+                        </a-dropdown>
+                        <span class="refresh-hint">每 30s 自动刷新</span>
+                    </div>
                 </div>
-            </div>
-            <div class="actions">
-                <a-button
-                    v-if="node?.state === 'offline'"
-                    type="primary"
-                    :loading="opLoading.reprobe"
-                    @click="handleReprobe"
-                >
-                    重新探测
-                </a-button>
-                <a-button
-                    v-if="node?.state === 'active'"
-                    :loading="opLoading.maintenance"
-                    @click="handleMaintenance"
-                >
-                    隔离
-                </a-button>
-                <a-button
-                    v-if="node?.state === 'maintenance'"
-                    type="primary"
-                    :loading="opLoading.activate"
-                    @click="handleActivate"
-                >
-                    激活
-                </a-button>
-                <a-dropdown
-                    v-if="node && node.state !== 'offline'"
-                    trigger="click"
-                    position="br"
-                >
-                    <a-button>
-                        更多
-                        <template #icon><icon-down /></template>
-                    </a-button>
-                    <template #content>
-                        <a-doption :loading="opLoading.kick" @click="handleKick">驱逐全部会话</a-doption>
-                        <a-doption :loading="opLoading.restart" @click="handleRestart">重启 ZLM 服务</a-doption>
-                    </template>
-                </a-dropdown>
-                <span class="refresh-hint">每 30s 自动刷新</span>
-            </div>
-        </header>
 
-        <a-tabs v-model:active-key="activeTab" class="detail-tabs">
-            <a-tab-pane key="overview" title="概览">
-                <a-spin :loading="loading">
-                    <!-- KPI 第一行(4 张主指标) -->
-                    <div class="kpi-grid kpi-grid-4">
-                        <StatCard
-                            title="活跃流"
-                            :value="node?.stats?.mediaSourceCount || 0"
-                            trend="MediaSource"
-                            accent="brand"
-                        >
-                            <template #spark>
-                                <Sparkline
-                                    :data="streamHistory"
-                                    color="brand"
-                                    :width="80"
-                                    :height="24"
-                                    fill
+                <a-tabs v-model:active-key="activeTab" class="detail-tabs">
+                    <a-tab-pane key="overview" title="概览">
+                        <a-spin :loading="loading">
+                            <div class="kpi-grid kpi-grid-4">
+                                <StatCard
+                                    title="活跃流"
+                                    :value="node?.stats?.mediaSourceCount || 0"
+                                    trend="MediaSource"
+                                    accent="brand"
+                                >
+                                    <template #spark>
+                                        <Sparkline :data="streamHistory" color="brand" :width="80" :height="24" fill />
+                                    </template>
+                                </StatCard>
+                                <StatCard
+                                    title="会话数"
+                                    :value="node?.stats?.sessionCount || 0"
+                                    trend="TCP + UDP"
+                                    accent="accent"
+                                >
+                                    <template #spark>
+                                        <Sparkline :data="sessionHistory" color="accent" :width="80" :height="24" fill />
+                                    </template>
+                                </StatCard>
+                                <StatCard
+                                    title="网络线程负载"
+                                    :value="node?.stats?.netThreadLoadAvg || 0"
+                                    :is-percent="true"
+                                    unit="%"
+                                    trend="event poller 平均"
                                 />
-                            </template>
-                        </StatCard>
-                        <StatCard
-                            title="会话数"
-                            :value="node?.stats?.sessionCount || 0"
-                            trend="TCP + UDP"
-                            accent="accent"
-                        >
-                            <template #spark>
-                                <Sparkline
-                                    :data="sessionHistory"
-                                    color="accent"
-                                    :width="80"
-                                    :height="24"
-                                    fill
+                                <StatCard
+                                    title="工作线程负载"
+                                    :value="node?.stats?.workThreadLoadAvg || 0"
+                                    :is-percent="true"
+                                    unit="%"
+                                    trend="work poller 平均"
                                 />
-                            </template>
-                        </StatCard>
-                        <StatCard
-                            title="网络线程负载"
-                            :value="(node?.stats?.netThreadLoadAvg || 0)"
-                            :is-percent="true"
-                            unit="%"
-                            trend="event poller 平均"
-                        />
-                        <StatCard
-                            title="工作线程负载"
-                            :value="(node?.stats?.workThreadLoadAvg || 0)"
-                            :is-percent="true"
-                            unit="%"
-                            trend="work poller 平均"
-                        />
-                    </div>
-
-                    <!-- KPI 第二行(3 张配额/容量) -->
-                    <div class="kpi-grid kpi-grid-3">
-                        <StatCard
-                            title="CPU 综合负载"
-                            :value="cpuPct"
-                            unit="%"
-                            trend="NetThread×0.6 + WorkThread×0.4"
-                            :accent="cpuPct >= 80 ? 'danger' : cpuPct >= 60 ? 'warning' : 'default'"
-                        />
-                        <StatCard
-                            title="RTP 端口使用"
-                            :value-text="`${rtpUsage.used} / ${rtpUsage.total}`"
-                            :trend="`${rtpUsage.pct}% · ${node?.rtpPortStart}-${node?.rtpPortEnd}`"
-                        />
-                        <StatCard
-                            title="权重"
-                            :value="node?.weight || 0"
-                            trend="加权轮询用"
-                        />
-                    </div>
-
-                    <!-- 趋势图 2 大卡 -->
-                    <div class="trend-row">
-                        <div class="trend-card">
-                            <div class="trend-header">
-                                <span class="trend-title">流数趋势</span>
-                                <span class="trend-meta">最近 15 分钟 · 样本 {{ streamHistory.length }}/{{ HISTORY_MAX }}</span>
                             </div>
-                            <div class="trend-canvas">
-                                <Sparkline
-                                    v-if="streamHistory.length >= 2"
-                                    :data="streamHistory"
-                                    color="brand"
-                                    :width="600"
-                                    :height="120"
-                                    fill
+
+                            <div class="kpi-grid kpi-grid-3">
+                                <StatCard
+                                    title="CPU 综合负载"
+                                    :value="cpuPct"
+                                    unit="%"
+                                    trend="NetThread×0.6 + WorkThread×0.4"
+                                    :accent="cpuPct >= 80 ? 'danger' : cpuPct >= 60 ? 'warning' : 'default'"
                                 />
-                                <div v-else class="trend-empty">
-                                    {{ streamHistory.length === 0 ? "采样中,等待 30s 后第一个数据点..." : "已采样 1 次,再等 30s 出现趋势曲线" }}
+                                <StatCard
+                                    title="RTP 端口使用"
+                                    :value-text="`${rtpUsage.used} / ${rtpUsage.total}`"
+                                    :trend="`${rtpUsage.pct}% · ${node?.rtpPortStart}-${node?.rtpPortEnd}`"
+                                />
+                                <StatCard title="权重" :value="node?.weight || 0" trend="加权轮询用" />
+                            </div>
+
+                            <div class="trend-row">
+                                <div class="trend-card">
+                                    <div class="trend-header">
+                                        <span class="trend-title">流数趋势</span>
+                                        <span class="trend-meta">最近 15 分钟 · 样本 {{ streamHistory.length }}/{{ HISTORY_MAX }}</span>
+                                    </div>
+                                    <div class="trend-canvas">
+                                        <Sparkline
+                                            v-if="streamHistory.length >= 2"
+                                            :data="streamHistory"
+                                            color="brand"
+                                            :width="600"
+                                            :height="120"
+                                            fill
+                                        />
+                                        <div v-else class="trend-empty">
+                                            {{ streamHistory.length === 0 ? "采样中,等待 30s 后第一个数据点..." : "已采样 1 次,再等 30s 出现趋势曲线" }}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="trend-card">
+                                    <div class="trend-header">
+                                        <span class="trend-title">CPU 负载趋势</span>
+                                        <span class="trend-meta">最近 15 分钟 · NetThread+WorkThread 加权</span>
+                                    </div>
+                                    <div class="trend-canvas">
+                                        <Sparkline
+                                            v-if="cpuHistory.length >= 2"
+                                            :data="cpuHistory"
+                                            color="warning"
+                                            :width="600"
+                                            :height="120"
+                                            fill
+                                        />
+                                        <div v-else class="trend-empty">
+                                            {{ cpuHistory.length === 0 ? "采样中..." : "已采样 1 次,再等 30s 出现趋势曲线" }}
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="trend-card">
-                            <div class="trend-header">
-                                <span class="trend-title">CPU 负载趋势</span>
-                                <span class="trend-meta">最近 15 分钟 · NetThread+WorkThread 加权</span>
-                            </div>
-                            <div class="trend-canvas">
-                                <Sparkline
-                                    v-if="cpuHistory.length >= 2"
-                                    :data="cpuHistory"
-                                    color="warning"
-                                    :width="600"
-                                    :height="120"
-                                    fill
-                                />
-                                <div v-else class="trend-empty">
-                                    {{ cpuHistory.length === 0 ? "采样中..." : "已采样 1 次,再等 30s 出现趋势曲线" }}
+
+                            <div class="info-block">
+                                <h2 class="info-title">节点信息</h2>
+                                <div class="info-grid">
+                                    <div class="info-item">
+                                        <div class="info-label">ID</div>
+                                        <div class="info-value">{{ node?.id }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">UUID</div>
+                                        <div class="info-value mono">{{ node?.mediaServerUUID }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">Host</div>
+                                        <div class="info-value mono">{{ node?.host }}:{{ node?.apiPort }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">RTP 端口范围</div>
+                                        <div class="info-value">{{ node?.rtpPortStart }} - {{ node?.rtpPortEnd }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">创建时间</div>
+                                        <div class="info-value">{{ fmtTime(node?.createdAt) }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">更新时间</div>
+                                        <div class="info-value">{{ fmtTime(node?.updatedAt) }}</div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-
-                    <!-- 节点信息 -->
-                    <div class="info-block">
-                        <h2 class="info-title">节点信息</h2>
-                        <div class="info-grid">
-                            <div class="info-item">
-                                <div class="info-label">ID</div>
-                                <div class="info-value">{{ node?.id }}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">UUID</div>
-                                <div class="info-value mono">{{ node?.mediaServerUUID }}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">Host</div>
-                                <div class="info-value mono">{{ node?.host }}:{{ node?.apiPort }}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">RTP 端口范围</div>
-                                <div class="info-value">{{ node?.rtpPortStart }} - {{ node?.rtpPortEnd }}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">创建时间</div>
-                                <div class="info-value">{{ fmtTime(node?.createdAt) }}</div>
-                            </div>
-                            <div class="info-item">
-                                <div class="info-label">更新时间</div>
-                                <div class="info-value">{{ fmtTime(node?.updatedAt) }}</div>
-                            </div>
-                        </div>
-                    </div>
-                </a-spin>
-            </a-tab-pane>
-            <a-tab-pane key="config" title="配置">
-                <NodeConfig v-if="nodeId" :node-id="nodeId" />
-            </a-tab-pane>
-        </a-tabs>
+                        </a-spin>
+                    </a-tab-pane>
+                    <a-tab-pane key="config" title="配置">
+                        <NodeConfig v-if="nodeId" :node-id="nodeId" />
+                    </a-tab-pane>
+                </a-tabs>
+            </div>
+        </div>
     </div>
 </template>
 
 <style scoped>
+.zlm-detail-shell {
+    padding: 4px 8px;
+    overflow: hidden;
+}
+
 .node-detail {
     width: 100%;
     height: 100%;
     overflow: auto;
-    background: var(--zlm-bg);
-    padding: var(--zlm-space-6);
+    background: transparent;
+    padding: 0;
     font-family: var(--zlm-font-body);
     color: var(--zlm-text-2);
     box-sizing: border-box;
 }
 
-/* === 页面头 === */
-.page-header {
+/* === 工具条 === */
+.detail-toolbar {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: var(--zlm-space-4);
-    margin-bottom: var(--zlm-space-6);
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 12px;
 }
 
-.title-row {
+.node-identity {
     display: flex;
-    align-items: flex-start;
-    gap: var(--zlm-space-3);
+    align-items: center;
+    gap: 12px;
     flex: 1;
     min-width: 0;
 }
 
 .back-btn {
     flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--zlm-radius-md);
-    border: 1px solid var(--zlm-border);
-    background: var(--zlm-card);
-    color: var(--zlm-text-2);
-    cursor: pointer;
-    transition: all var(--zlm-dur-fast) var(--zlm-ease-out);
-    font-size: 16px;
-    margin-top: 2px;
+    width: 40px;
+    min-width: 40px;
+    height: 40px;
+    padding: 0;
+    border-radius: 8px;
 }
 
-.back-btn:hover {
-    border-color: var(--zlm-brand-500);
-    color: var(--zlm-brand-500);
-}
-
-.title-block {
+.identity-main {
     flex: 1;
     min-width: 0;
 }
 
-.title-row-inline {
+.identity-title-row {
     display: flex;
     align-items: center;
-    gap: var(--zlm-space-3);
+    gap: 10px;
     flex-wrap: wrap;
 }
 
-.title {
-    font-size: var(--zlm-fs-h1);
+.identity-title {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 16px;
     font-weight: var(--zlm-fw-semibold);
-    color: var(--zlm-text-1);
-    margin: 0;
-    line-height: 1.2;
+    color: var(--uvp-text-primary);
+    line-height: 22px;
 }
 
-.subtitle {
-    margin: 6px 0 0;
-    font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
-    word-break: break-all;
-}
-
-.subtitle .mono {
-    font-family: var(--zlm-font-mono);
-    color: var(--zlm-text-2);
-}
-
-.subtitle .dim {
-    color: var(--zlm-text-4);
-}
-
-.actions {
+.identity-subtitle {
     display: flex;
     align-items: center;
-    gap: var(--zlm-space-2);
+    gap: 10px;
+    min-width: 0;
+    margin-top: 3px;
+    color: var(--uvp-text-tertiary);
+    font-size: var(--zlm-fs-caption);
+}
+
+.identity-subtitle .mono {
+    font-family: var(--zlm-font-mono);
+    color: var(--uvp-text-secondary);
+}
+
+.identity-subtitle .uuid {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
     flex-shrink: 0;
 }
 
 .refresh-hint {
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
     font-size: var(--zlm-fs-caption);
-    margin-left: var(--zlm-space-2);
+    margin-left: 2px;
+    white-space: nowrap;
 }
 
 /* === Tabs === */
@@ -536,9 +522,9 @@ function fmtTime(s: string | undefined | null): string {
 
 .detail-tabs :deep(.arco-tabs-nav) {
     background: transparent;
-    border-bottom: 1px solid var(--zlm-border);
+    border-bottom: 1px solid var(--uvp-panel-border);
     padding: 0;
-    margin-bottom: var(--zlm-space-6);
+    margin-bottom: 16px;
 }
 
 .detail-tabs :deep(.arco-tabs-tab) {
@@ -548,18 +534,18 @@ function fmtTime(s: string | undefined | null): string {
 }
 
 .detail-tabs :deep(.arco-tabs-tab-active) {
-    color: var(--zlm-brand-600);
+    color: var(--uvp-brand-strong);
 }
 
 .detail-tabs :deep(.arco-tabs-tab-active .arco-tabs-tab-title:after) {
-    background: var(--zlm-brand-500);
+    background: #2563eb;
 }
 
 /* === KPI 网格 === */
 .kpi-grid {
     display: grid;
-    gap: var(--zlm-space-4);
-    margin-bottom: var(--zlm-space-4);
+    gap: 16px;
+    margin-bottom: 16px;
 }
 
 .kpi-grid-4 {
@@ -574,34 +560,34 @@ function fmtTime(s: string | undefined | null): string {
 .trend-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: var(--zlm-space-4);
-    margin: var(--zlm-space-4) 0;
+    gap: 16px;
+    margin: 16px 0;
 }
 
 .trend-card {
-    background: var(--zlm-card);
-    border-radius: var(--zlm-radius-lg);
-    border: 1px solid var(--zlm-border);
-    padding: var(--zlm-space-4);
-    box-shadow: var(--zlm-shadow-sm);
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: var(--uvp-panel-radius);
+    box-shadow: var(--uvp-panel-shadow);
+    padding: 16px;
 }
 
 .trend-header {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin-bottom: var(--zlm-space-3);
+    margin-bottom: 12px;
 }
 
 .trend-title {
     font-size: var(--zlm-fs-body);
     font-weight: var(--zlm-fw-semibold);
-    color: var(--zlm-text-1);
+    color: var(--uvp-text-primary);
 }
 
 .trend-meta {
     font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
 }
 
 .trend-canvas {
@@ -617,48 +603,49 @@ function fmtTime(s: string | undefined | null): string {
 }
 
 .trend-empty {
-    color: var(--zlm-text-4);
+    color: var(--uvp-text-tertiary);
     font-size: var(--zlm-fs-caption);
 }
 
 /* === 节点信息 === */
 .info-block {
-    background: var(--zlm-card);
-    border-radius: var(--zlm-radius-lg);
-    border: 1px solid var(--zlm-border);
-    padding: var(--zlm-space-4) var(--zlm-space-6);
-    margin-top: var(--zlm-space-4);
+    margin-top: 16px;
+    padding: 16px 18px;
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: var(--uvp-panel-radius);
+    box-shadow: var(--uvp-panel-shadow);
 }
 
 .info-title {
-    font-size: var(--zlm-fs-h2);
+    font-size: 14px;
     font-weight: var(--zlm-fw-semibold);
-    color: var(--zlm-text-1);
-    margin: 0 0 var(--zlm-space-4);
+    color: var(--uvp-text-primary);
+    margin: 0 0 14px;
 }
 
 .info-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--zlm-space-3) var(--zlm-space-6);
+    gap: 0 28px;
 }
 
 .info-item {
     display: flex;
-    gap: var(--zlm-space-3);
-    padding: var(--zlm-space-2) 0;
-    border-bottom: 1px solid var(--zlm-divider);
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--uvp-divider);
 }
 
 .info-label {
     flex-shrink: 0;
     width: 120px;
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
     font-size: var(--zlm-fs-body);
 }
 
 .info-value {
-    color: var(--zlm-text-1);
+    color: var(--uvp-text-primary);
     font-size: var(--zlm-fs-body);
     word-break: break-all;
     flex: 1;
@@ -668,5 +655,46 @@ function fmtTime(s: string | undefined | null): string {
 .info-value.mono {
     font-family: var(--zlm-font-mono);
     font-size: 13px;
+}
+
+@media (max-width: 1180px) {
+    .kpi-grid-4,
+    .kpi-grid-3,
+    .trend-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 768px) {
+    .detail-toolbar,
+    .node-identity {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .detail-actions {
+        align-items: flex-start;
+        width: 100%;
+    }
+
+    .refresh-hint {
+        margin-left: 0;
+    }
+
+    .kpi-grid-4,
+    .kpi-grid-3,
+    .trend-row,
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .info-item {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .info-label {
+        width: auto;
+    }
 }
 </style>

@@ -135,26 +135,31 @@ onMounted(refresh);
 
 <template>
     <div class="node-config">
-        <!-- toolbar -->
-        <div class="config-toolbar">
-            <a-input-search
-                v-model="searchKey"
-                placeholder="搜索配置 key 或说明"
-                allow-clear
-                class="search"
-            />
-            <div class="toolbar-right">
+        <s-layout-search class="config-search-panel">
+            <template #fields>
+                <a-input-search
+                    v-model="searchKey"
+                    placeholder="搜索配置 key 或说明"
+                    allow-clear
+                    style="width: 280px"
+                    class="search"
+                />
                 <span v-if="dirtyCount > 0" class="dirty-pill">
                     <span class="dot" />
                     <span>{{ dirtyCount }} 项待保存</span>
                 </span>
+            </template>
+            <template #actions>
                 <a-button :loading="testing" @click="handleTest">测试连通性</a-button>
-                <a-button @click="refresh" :loading="loading">刷新</a-button>
+                <a-button @click="refresh" :loading="loading">
+                    <template #icon><icon-refresh /></template>
+                    刷新
+                </a-button>
                 <a-button type="primary" :loading="saving" :disabled="dirtyCount === 0" @click="handleSave">
                     保存改动
                 </a-button>
-            </div>
-        </div>
+            </template>
+        </s-layout-search>
 
         <a-spin :loading="loading">
             <div class="config-body">
@@ -206,7 +211,7 @@ onMounted(refresh);
                                 :data="currentGroup.items"
                                 :pagination="false"
                                 row-key="key"
-                                class="config-table"
+                                class="config-table uvp-data-table"
                             >
                                 <template #columns>
                                     <a-table-column title="配置项" :width="320">
@@ -273,41 +278,36 @@ onMounted(refresh);
     width: 100%;
 }
 
-.config-toolbar {
-    display: flex;
-    align-items: center;
-    gap: var(--zlm-space-3);
-    margin-bottom: var(--zlm-space-4);
-    padding: var(--zlm-space-3) var(--zlm-space-4);
-    background: var(--zlm-card);
-    border-radius: var(--zlm-radius-lg);
-    border: 1px solid var(--zlm-border);
+.config-search-panel {
+    margin-bottom: 16px;
+}
+
+.config-search-panel :deep(.uvp-search-panel__fields) {
+    flex-wrap: nowrap;
+}
+
+.config-search-panel :deep(.uvp-search-panel__actions) {
+    gap: 10px;
 }
 
 .search {
-    width: 320px;
+    width: 280px;
     flex-shrink: 0;
-}
-
-.toolbar-right {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: var(--zlm-space-2);
 }
 
 .dirty-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 10px;
+    height: 28px;
+    padding: 0 10px;
     background: var(--zlm-warn-50);
     color: var(--zlm-warn-600);
-    border: 1px solid var(--zlm-warn-500);
+    border: 1px solid rgb(245 158 11 / 32%);
     border-radius: var(--zlm-radius-full);
     font-size: var(--zlm-fs-caption);
     font-weight: var(--zlm-fw-medium);
-    margin-right: var(--zlm-space-2);
+    white-space: nowrap;
 }
 
 .dirty-pill .dot {
@@ -328,34 +328,41 @@ onMounted(refresh);
     }
 }
 
+@media (prefers-reduced-motion: reduce) {
+    .dirty-pill .dot {
+        animation: none;
+    }
+}
+
 /* === 主体两栏 === */
 .config-body {
     display: grid;
     grid-template-columns: 220px minmax(0, 1fr);
-    gap: var(--zlm-space-4);
+    gap: 16px;
     align-items: flex-start;
     width: 100%;
 }
 
 /* === 左侧分类树 === */
 .category-tree {
-    background: var(--zlm-card);
-    border-radius: var(--zlm-radius-lg);
-    border: 1px solid var(--zlm-border);
-    padding: var(--zlm-space-3) 0;
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: var(--uvp-panel-radius);
+    box-shadow: var(--uvp-panel-shadow);
+    padding: 10px 0;
     position: sticky;
-    top: var(--zlm-space-4);
+    top: 16px;
 }
 
 .tree-title {
-    padding: 0 var(--zlm-space-4) var(--zlm-space-3);
+    padding: 0 14px 10px;
     font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
     font-weight: var(--zlm-fw-medium);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    border-bottom: 1px solid var(--zlm-divider);
-    margin-bottom: var(--zlm-space-2);
+    letter-spacing: 0;
+    border-bottom: 1px solid var(--uvp-divider);
+    margin-bottom: 6px;
 }
 
 .tree-list {
@@ -368,26 +375,27 @@ onMounted(refresh);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: var(--zlm-space-2);
-    padding: 10px var(--zlm-space-4);
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 14px;
     cursor: pointer;
     font-size: var(--zlm-fs-body);
-    color: var(--zlm-text-2);
+    color: var(--uvp-text-secondary);
     transition: all var(--zlm-dur-fast) var(--zlm-ease-out);
     border-left: 3px solid transparent;
     position: relative;
 }
 
 .tree-item:hover {
-    background: var(--zlm-bg);
-    color: var(--zlm-text-1);
+    background: var(--uvp-table-row-hover-bg);
+    color: var(--uvp-text-primary);
 }
 
 .tree-item.active {
-    background: var(--zlm-brand-50);
-    color: var(--zlm-brand-600);
+    background: rgb(37 99 235 / 8%);
+    color: var(--uvp-brand-strong);
     font-weight: var(--zlm-fw-medium);
-    border-left-color: var(--zlm-brand-500);
+    border-left-color: #2563eb;
 }
 
 .tree-name {
@@ -414,7 +422,7 @@ onMounted(refresh);
 }
 
 .tree-item.active .tree-count {
-    color: var(--zlm-brand-500);
+    color: var(--uvp-brand-strong);
 }
 
 .tree-dirty-badge {
@@ -433,8 +441,8 @@ onMounted(refresh);
 }
 
 .tree-empty {
-    padding: var(--zlm-space-4);
-    color: var(--zlm-text-4);
+    padding: 16px;
+    color: var(--uvp-text-tertiary);
     font-size: var(--zlm-fs-caption);
     text-align: center;
 }
@@ -446,46 +454,47 @@ onMounted(refresh);
 }
 
 .detail-card {
-    background: var(--zlm-card);
-    border-radius: var(--zlm-radius-lg);
-    border: 1px solid var(--zlm-border);
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: var(--uvp-panel-radius);
+    box-shadow: var(--uvp-panel-shadow);
     overflow: hidden;
     width: 100%;
 }
 
 .detail-header {
-    padding: var(--zlm-space-4) var(--zlm-space-6);
-    border-bottom: 1px solid var(--zlm-divider);
-    background: linear-gradient(to right, var(--zlm-brand-50) 0%, var(--zlm-card) 40%);
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--uvp-divider);
+    background: var(--uvp-list-toolbar-bg);
     position: relative;
 }
 
 .detail-header::before {
-    content: '';
+    content: "";
     position: absolute;
     left: 0;
     top: 0;
     bottom: 0;
     width: 3px;
-    background: var(--zlm-brand-500);
+    background: #2563eb;
 }
 
 .detail-title {
-    font-size: var(--zlm-fs-h2);
+    font-size: 14px;
     font-weight: var(--zlm-fw-semibold);
-    color: var(--zlm-text-1);
+    color: var(--uvp-text-primary);
     margin: 0;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
 }
 
 .detail-subtitle {
     font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
     margin: 4px 0 0;
 }
 
 .detail-subtitle .dim {
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
 }
 
 .detail-table-wrap {
@@ -501,10 +510,9 @@ onMounted(refresh);
 }
 
 .config-table :deep(.arco-table-th) {
-    background: var(--zlm-bg);
     font-weight: var(--zlm-fw-medium);
     font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
 }
 
 .config-table :deep(.arco-table-td) {
@@ -518,13 +526,13 @@ onMounted(refresh);
 
 .key-name {
     font-size: var(--zlm-fs-body);
-    color: var(--zlm-text-1);
+    color: var(--uvp-text-primary);
     font-weight: var(--zlm-fw-medium);
 }
 
 .key-comment {
     font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
     margin-top: 2px;
 }
 
@@ -552,7 +560,7 @@ onMounted(refresh);
 
 .default-val {
     font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
+    color: var(--uvp-text-tertiary);
 }
 
 .mono {
@@ -584,12 +592,13 @@ onMounted(refresh);
 }
 
 .detail-empty {
-    padding: var(--zlm-space-12);
+    padding: 48px;
     text-align: center;
-    color: var(--zlm-text-3);
-    background: var(--zlm-card);
-    border-radius: var(--zlm-radius-lg);
-    border: 1px solid var(--zlm-border);
+    color: var(--uvp-text-tertiary);
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: var(--uvp-panel-radius);
+    box-shadow: var(--uvp-panel-shadow);
 }
 
 .empty-icon {
@@ -600,5 +609,25 @@ onMounted(refresh);
 
 .empty-text {
     font-size: var(--zlm-fs-body);
+}
+
+@media (max-width: 1024px) {
+    .config-body {
+        grid-template-columns: 1fr;
+    }
+
+    .category-tree {
+        position: static;
+    }
+}
+
+@media (max-width: 768px) {
+    .search {
+        width: 100%;
+    }
+
+    .config-search-panel :deep(.uvp-search-panel__fields) {
+        flex-wrap: wrap;
+    }
 }
 </style>

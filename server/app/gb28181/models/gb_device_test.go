@@ -74,9 +74,24 @@ func cleanup(deviceIDs ...string) {
 	}
 }
 
+// skipIfDeviceSchemaStale 老 schema(无 subscribe_capability 列)时跳过
+//
+// A1 加 subscribe_* 列后,既有 MySQL dev 库需先跑 migration
+// 2026-06-26-catalog-b-plus.sql 才能跑这些测试。
+func skipIfDeviceSchemaStale(t *testing.T) {
+	t.Helper()
+	if app.GormDbMysql == nil {
+		return
+	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbDevice{}, "subscribe_capability") {
+		t.Skipf("跳过(MySQL gb_device 缺 subscribe_capability 列,请先跑 migration 2026-06-26-catalog-b-plus.sql)")
+	}
+}
+
 // TestUpsertInsert T2-测1: Upsert 新设备 → 表里出现,字段正确
 func TestUpsertInsert(t *testing.T) {
 	setupTestDB(t)
+	skipIfDeviceSchemaStale(t)
 	ctx := context.TODO()
 	const did = "34020000001320000099"
 	cleanup(did)
@@ -98,6 +113,7 @@ func TestUpsertInsert(t *testing.T) {
 // TestUpsertUpdate T2-测2: Upsert 已存在 device_id → 更新而非重复插入
 func TestUpsertUpdate(t *testing.T) {
 	setupTestDB(t)
+	skipIfDeviceSchemaStale(t)
 	ctx := context.TODO()
 	const did = "34020000001320000098"
 	cleanup(did)
@@ -133,6 +149,7 @@ func TestFindByDeviceID(t *testing.T) {
 // TestUpdateStatus T2-测4: 更新在线状态
 func TestUpdateStatus(t *testing.T) {
 	setupTestDB(t)
+	skipIfDeviceSchemaStale(t)
 	ctx := context.TODO()
 	const did = "34020000001320000097"
 	cleanup(did)

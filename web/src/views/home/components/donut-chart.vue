@@ -58,12 +58,12 @@ const segments = computed(() => {
 .total {
   font-size: 24px;
   font-weight: 700;
-  fill: #333;
+  fill: var(--uvp-text-primary);
   font-family: -apple-system, "PingFang SC", sans-serif;
 }
 .label {
   font-size: 11px;
-  fill: #999;
+  fill: var(--uvp-text-tertiary);
   font-family: -apple-system, "PingFang SC", sans-serif;
 }
 </style>

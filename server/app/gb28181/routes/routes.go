@@ -10,6 +10,10 @@ import (
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
+var catalogTreeController = gbcontrollers.NewCatalogTreeController()
+var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
+var mapController = gbcontrollers.NewMapController()
+var anomalyController = gbcontrollers.NewAnomalyController()
 
 // streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
 var streamNotifier = stream.NewNotifier()
@@ -25,6 +29,9 @@ var playController = gbcontrollers.NewPlayController(nil)
 // dashboardController SIP 监控看板控制器
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
 var dashboardController = gbcontrollers.NewDashboardController(nil)
+
+// platformController 本级 SIP 平台接入信息(只读配置)
+var platformController = gbcontrollers.NewPlatformController()
 
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
 var zlmNodeController *gbcontrollers.ZLMNodeController
@@ -97,6 +104,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			sipGroup.GET("/snapshot", func(c *gin.Context) { dashboardController.Snapshot(c) })
 			sipGroup.GET("/stream", func(c *gin.Context) { dashboardController.Stream(c) })
 		}
+		gb.GET("/sip/platform", platformController.Info)
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
 		{
@@ -117,6 +125,31 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			zlm.GET("/scheduler", zlmSchedulerRoute(func(ctrl *gbcontrollers.ZLMSchedulerController, c *gin.Context) { ctrl.GetScheduler(c) }))
 			zlm.PUT("/scheduler", zlmSchedulerRoute(func(ctrl *gbcontrollers.ZLMSchedulerController, c *gin.Context) { ctrl.SwitchScheduler(c) }))
 			zlm.GET("/scheduler/logs", zlmSchedulerRoute(func(ctrl *gbcontrollers.ZLMSchedulerController, c *gin.Context) { ctrl.ListSchedulerLogs(c) }))
+		}
+		// 设备管理页(B1-B4 新建,plan §4.2)
+		dmgmt := gb.Group("/device-mgmt")
+		{
+			// B1 catalogtree:目录树
+			dmgmt.GET("/catalog/tree", catalogTreeController.Tree)
+			dmgmt.GET("/catalog/tree/:id", catalogTreeController.Node)
+			dmgmt.GET("/catalog/tree/:id/children", catalogTreeController.Children)
+			dmgmt.GET("/catalog/tree/:id/subtree", catalogTreeController.Subtree)
+			dmgmt.GET("/catalog/anomaly/count", catalogTreeController.AnomalyCount)
+			// B2 devicemgmt:设备列表 + 通道列表 + 详情 + 多挂载 + timeline
+			dmgmt.GET("/devices", deviceMgmtController.ListDevices)
+			dmgmt.GET("/device/:id", deviceMgmtController.GetDevice)
+			dmgmt.GET("/channels", deviceMgmtController.ListChannels)
+			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
+			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
+			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
+			// B3 map:地图视图
+			dmgmt.GET("/map/markers", mapController.Markers)
+			dmgmt.GET("/map/clusters", mapController.Clusters)
+			dmgmt.GET("/map/no-coord-count", mapController.NoCoordCount)
+			// B4 anomaly:异常治理
+			dmgmt.GET("/anomaly", anomalyController.List)
+			dmgmt.POST("/anomaly/:id/resolve", anomalyController.Resolve)
+			dmgmt.POST("/anomaly/batch-resolve", anomalyController.BatchResolve)
 		}
 	}
 }

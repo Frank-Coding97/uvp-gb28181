@@ -10,7 +10,7 @@
 
     <!-- y axis grid -->
     <g class="grid">
-      <line v-for="g in yGrid" :key="g.label" :x1="padL" :y1="g.y" :x2="W - padR" :y2="g.y" stroke="#f0f0f0" stroke-dasharray="4 4" />
+      <line v-for="g in yGrid" :key="g.label" :x1="padL" :y1="g.y" :x2="W - padR" :y2="g.y" stroke="var(--uvp-panel-border)" stroke-dasharray="4 4" />
       <text v-for="g in yGrid" :key="'t' + g.label" :x="padL - 6" :y="g.y + 3" class="axis-text" text-anchor="end">{{ g.label }}</text>
     </g>
 
@@ -83,18 +83,18 @@ const legendX = (i: number) => 50 + i * 80;
 }
 .legend-text {
   font-size: 11px;
-  fill: #666;
+  fill: var(--uvp-text-secondary);
   font-family: -apple-system, "PingFang SC", sans-serif;
   dominant-baseline: middle;
 }
 .axis-text {
   font-size: 10px;
-  fill: #999;
+  fill: var(--uvp-text-tertiary);
   font-family: -apple-system, "PingFang SC", sans-serif;
 }
 .axis-title {
   font-size: 11px;
-  fill: #999;
+  fill: var(--uvp-text-tertiary);
   font-family: -apple-system, "PingFang SC", sans-serif;
 }
 </style>
