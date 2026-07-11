@@ -58,6 +58,7 @@ func TestPipeline_DelIsScopedByOwnerDept(t *testing.T) {
 	p := catalog.New(db)
 
 	for _, deptID := range []uint{10, 20} {
+		parentID := deptID
 		channel := &gbmodels.GbChannel{
 			DeviceID:    "340200000020000000" + uintStr(deptID),
 			ChannelID:   "370112000013100000" + uintStr(deptID),
@@ -67,7 +68,7 @@ func TestPipeline_DelIsScopedByOwnerDept(t *testing.T) {
 		require.NoError(t, db.Create(&gbmodels.GbChannelMount{
 			OwnerDeptID:  deptID,
 			ChannelID:    channel.ID,
-			ParentNodeID: 0,
+			ParentNodeID: parentID,
 		}).Error)
 		require.NoError(t, db.Create(&gbmodels.GbCatalogNode{
 			OwnerDeptID: deptID,
@@ -75,6 +76,7 @@ func TestPipeline_DelIsScopedByOwnerDept(t *testing.T) {
 			Path:        "/",
 			Name:        "同编码节点",
 			Code:        "UVP-PRIVATE-X0001",
+			ParentID:    &parentID,
 			ChannelID:   &channel.ID,
 		}).Error)
 	}
@@ -97,6 +99,56 @@ func TestPipeline_DelIsScopedByOwnerDept(t *testing.T) {
 	require.NoError(t, db.Model(&gbmodels.GbChannelMount{}).Where("owner_dept_id = ?", 10).Count(&mountCount).Error)
 	assert.EqualValues(t, 0, channelCount)
 	assert.EqualValues(t, 0, mountCount)
+}
+
+func TestPipeline_DelKeepsMultiMountedChannel(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	parentA := uint(100)
+	parentB := uint(200)
+	channel := &gbmodels.GbChannel{
+		DeviceID:    "34020000002000000010",
+		ChannelID:   "37011200001310000010",
+		OwnerDeptID: 10,
+	}
+	require.NoError(t, db.Create(channel).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannelMount{
+		OwnerDeptID:  10,
+		ChannelID:    channel.ID,
+		ParentNodeID: parentA,
+		IsPrimary:    true,
+	}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannelMount{
+		OwnerDeptID:  10,
+		ChannelID:    channel.ID,
+		ParentNodeID: parentB,
+	}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbCatalogNode{
+		OwnerDeptID: 10,
+		NodeType:    gbmodels.NodeTypeChannel,
+		Path:        "/100/1/",
+		Name:        "主挂载节点",
+		Code:        "37011200001310000010",
+		ParentID:    &parentA,
+		ChannelID:   &channel.ID,
+	}).Error)
+
+	require.NoError(t, p.IngestDelta(
+		context.Background(),
+		catalog.Sender{OwnerDeptID: 10},
+		"DEL",
+		catalog.CatalogItem{DeviceID: "37011200001310000010"},
+	))
+
+	var channelCount, mountCount int64
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("id = ?", channel.ID).Count(&channelCount).Error)
+	require.NoError(t, db.Model(&gbmodels.GbChannelMount{}).Where("channel_id = ?", channel.ID).Count(&mountCount).Error)
+	assert.EqualValues(t, 1, channelCount)
+	assert.EqualValues(t, 1, mountCount)
+
+	var remaining gbmodels.GbChannelMount
+	require.NoError(t, db.Where("channel_id = ?", channel.ID).First(&remaining).Error)
+	assert.EqualValues(t, parentB, remaining.ParentNodeID)
 }
 
 func uintStr(value uint) string {

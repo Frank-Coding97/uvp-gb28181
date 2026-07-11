@@ -254,7 +254,7 @@ func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, id uint, 
 				childPath := strings.Replace(child.Path, oldPath, newPath, 1)
 				childDepth := gbcatalog.DepthFromPath(childPath)
 				if err := tx.Model(&gbmodels.GbCatalogNode{}).
-					Where("id = ?", child.ID).
+					Where("id = ? AND owner_dept_id = ?", child.ID, rec.OwnerDeptID).
 					Updates(map[string]any{
 						"path":  childPath,
 						"depth": childDepth,

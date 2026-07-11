@@ -192,13 +192,25 @@ func (p *Pipeline) softDelete(ctx context.Context, sender Sender, code string) e
 		}
 		for _, node := range nodes {
 			if node.ChannelID != nil {
-				if err := tx.Where("channel_id = ? AND owner_dept_id = ?", *node.ChannelID, sender.OwnerDeptID).
+				parentNodeID := uint(0)
+				if node.ParentID != nil {
+					parentNodeID = *node.ParentID
+				}
+				if err := tx.Where("channel_id = ? AND parent_node_id = ? AND owner_dept_id = ?", *node.ChannelID, parentNodeID, sender.OwnerDeptID).
 					Delete(&gbmodels.GbChannelMount{}).Error; err != nil {
 					return err
 				}
-				if err := tx.Where("id = ? AND owner_dept_id = ?", *node.ChannelID, sender.OwnerDeptID).
-					Delete(&gbmodels.GbChannel{}).Error; err != nil {
+				var remainingMounts int64
+				if err := tx.Model(&gbmodels.GbChannelMount{}).
+					Where("channel_id = ? AND owner_dept_id = ?", *node.ChannelID, sender.OwnerDeptID).
+					Count(&remainingMounts).Error; err != nil {
 					return err
+				}
+				if remainingMounts == 0 {
+					if err := tx.Where("id = ? AND owner_dept_id = ?", *node.ChannelID, sender.OwnerDeptID).
+						Delete(&gbmodels.GbChannel{}).Error; err != nil {
+						return err
+					}
 				}
 			}
 			if err := tx.Where("catalog_node_id = ? AND owner_dept_id = ?", node.ID, sender.OwnerDeptID).

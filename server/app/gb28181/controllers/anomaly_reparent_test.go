@@ -58,7 +58,17 @@ func TestAnomaly_ChangeMountRejectsOtherOwnerDept(t *testing.T) {
 
 	resp := unmarshal(t, w)
 	assert.EqualValues(t, 1, resp["code"])
-	assert.Contains(t, resp["message"], "resolve")
+	assert.Equal(t, "resolve 失败", resp["message"])
+
+	var unchangedRecord gbmodels.GbAnomalyRecord
+	require.NoError(t, db.First(&unchangedRecord, rec.ID).Error)
+	assert.False(t, unchangedRecord.Resolved)
+
+	var unchangedNode gbmodels.GbCatalogNode
+	require.NoError(t, db.First(&unchangedNode, node.ID).Error)
+	assert.Nil(t, unchangedNode.ParentID)
+	assert.Equal(t, "/1/2/", unchangedNode.Path)
+	assert.True(t, unchangedNode.Anomaly)
 }
 
 func TestAnomaly_ChangeMountRebuildsSubtreePath(t *testing.T) {

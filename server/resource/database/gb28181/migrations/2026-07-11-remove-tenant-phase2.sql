@@ -2,6 +2,7 @@
 -- 说明:
 -- 1. Phase 1 必须先完成 tenant_id -> owner_dept_id 回填。
 -- 2. 若任一 GB28181 行仍然 owner_dept_id=0,则直接阻断本阶段,避免删除唯一可恢复映射。
+-- 3. MySQL 5.7 普通脚本里不能直接 SIGNAL;这里故意查询不存在的 __owner_dept_* 表来中断迁移。
 
 SET @gb_owner_column_count := (
   SELECT COUNT(*)
