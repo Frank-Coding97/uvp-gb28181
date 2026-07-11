@@ -1,10 +1,10 @@
--- 2026-07-11 第一阶段兼容迁移:
--- 1) GB28181 相关表补 owner_dept_id,保留 tenant_id
--- 2) 下线租户管理菜单/API seed(tenant + sysUserTenant)
--- 说明:基于 MySQL 5.7+ 的 INFORMATION_SCHEMA + PREPARE,支持重复执行。
+-- 2026-07-11 Phase 1: 将 GB28181 运行时权限迁移到 owner_dept_id
+-- 说明: 保留历史 tenant_id, 只补部门归属字段/索引并下线租户菜单与 API seed。
+-- MySQL 5.7+ 可重复执行。
 
 SET @schema_name := DATABASE();
 
+-- ========= gb_device =========
 SELECT COUNT(*) INTO @exists
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @schema_name
@@ -12,7 +12,7 @@ WHERE TABLE_SCHEMA = @schema_name
   AND COLUMN_NAME = 'owner_dept_id';
 SET @sql := IF(
   @exists = 0,
-  'ALTER TABLE `gb_device` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID'' AFTER `tenant_id`',
+  'ALTER TABLE `gb_device` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID''',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;
@@ -33,6 +33,7 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- ========= gb_channel =========
 SELECT COUNT(*) INTO @exists
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @schema_name
@@ -40,7 +41,7 @@ WHERE TABLE_SCHEMA = @schema_name
   AND COLUMN_NAME = 'owner_dept_id';
 SET @sql := IF(
   @exists = 0,
-  'ALTER TABLE `gb_channel` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID'' AFTER `tenant_id`',
+  'ALTER TABLE `gb_channel` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID''',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;
@@ -61,6 +62,7 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- ========= gb_catalog_node =========
 SELECT COUNT(*) INTO @exists
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @schema_name
@@ -68,7 +70,7 @@ WHERE TABLE_SCHEMA = @schema_name
   AND COLUMN_NAME = 'owner_dept_id';
 SET @sql := IF(
   @exists = 0,
-  'ALTER TABLE `gb_catalog_node` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID'' AFTER `tenant_id`',
+  'ALTER TABLE `gb_catalog_node` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID''',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;
@@ -145,6 +147,7 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- ========= gb_channel_mount =========
 SELECT COUNT(*) INTO @exists
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @schema_name
@@ -152,7 +155,7 @@ WHERE TABLE_SCHEMA = @schema_name
   AND COLUMN_NAME = 'owner_dept_id';
 SET @sql := IF(
   @exists = 0,
-  'ALTER TABLE `gb_channel_mount` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID'' AFTER `tenant_id`',
+  'ALTER TABLE `gb_channel_mount` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID''',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;
@@ -173,6 +176,7 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- ========= gb_anomaly_record =========
 SELECT COUNT(*) INTO @exists
 FROM INFORMATION_SCHEMA.COLUMNS
 WHERE TABLE_SCHEMA = @schema_name
@@ -180,7 +184,7 @@ WHERE TABLE_SCHEMA = @schema_name
   AND COLUMN_NAME = 'owner_dept_id';
 SET @sql := IF(
   @exists = 0,
-  'ALTER TABLE `gb_anomaly_record` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID'' AFTER `tenant_id`',
+  'ALTER TABLE `gb_anomaly_record` ADD COLUMN `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT ''所属部门ID''',
   'SELECT 1'
 );
 PREPARE stmt FROM @sql;
@@ -201,6 +205,7 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- ========= 下线租户菜单/API 权限 seed =========
 DELETE FROM `sys_menu_api`
 WHERE `menu_id` IN (
   SELECT `id`
