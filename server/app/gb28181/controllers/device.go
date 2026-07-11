@@ -8,6 +8,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
@@ -67,16 +68,21 @@ func (dc *DeviceController) List(c *gin.Context) {
 // GET /api/gb28181/device/:deviceId
 func (dc *DeviceController) GetByDeviceID(c *gin.Context) {
 	deviceID := c.Param("deviceId")
-	d, err := gbmodels.FindByDeviceID(c, deviceID)
-	if err != nil {
-		dc.FailAndAbort(c, "查询设备失败", err)
+	var d gbmodels.GbDevice
+	result := app.DB().WithContext(c).
+		Scopes(datascope.OwnerDeptScope(c, "owner_dept_id")).
+		Where("device_id = ?", deviceID).
+		Limit(1).
+		Find(&d)
+	if result.Error != nil {
+		dc.FailAndAbort(c, "查询设备失败", result.Error)
 		return
 	}
-	if d == nil {
+	if result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "设备不存在", nil)
 		return
 	}
-	dc.Success(c, toVO(d))
+	dc.Success(c, toVO(&d))
 }
 
 // ListChannels 列出某设备的通道(供前端拉通道树二级)
@@ -87,7 +93,27 @@ func (dc *DeviceController) ListChannels(c *gin.Context) {
 		dc.FailAndAbort(c, "deviceId 不能为空", nil)
 		return
 	}
-	list, err := gbmodels.ListChannelsByDevice(c, deviceID)
+	var device gbmodels.GbDevice
+	deviceResult := app.DB().WithContext(c).
+		Scopes(datascope.OwnerDeptScope(c, "owner_dept_id")).
+		Where("device_id = ?", deviceID).
+		Limit(1).
+		Find(&device)
+	if deviceResult.Error != nil {
+		dc.FailAndAbort(c, "查询设备失败", deviceResult.Error)
+		return
+	}
+	if deviceResult.RowsAffected == 0 {
+		dc.FailAndAbort(c, "设备不存在", nil)
+		return
+	}
+
+	var list gbmodels.GbChannelList
+	err := app.DB().WithContext(c).
+		Scopes(datascope.OwnerDeptScope(c, "owner_dept_id")).
+		Where("device_id = ?", deviceID).
+		Order("channel_id").
+		Find(&list).Error
 	if err != nil {
 		dc.FailAndAbort(c, "查通道列表失败", err)
 		return

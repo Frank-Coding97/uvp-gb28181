@@ -153,12 +153,12 @@ func GetOwnerDeptIDsWithDB(c *gin.Context, db *gorm.DB) ([]uint, bool) {
 
 	roles, err := getUserRolesWithDB(db, userID)
 	if err != nil {
-		return []uint{0}, true
+		return []uint{}, true
 	}
 	userDeptID, _ := getUserDepartmentIDWithDB(db, userID)
 	if len(roles) == 0 {
 		if userDeptID == 0 {
-			return []uint{0}, true
+			return []uint{}, true
 		}
 		return []uint{userDeptID}, true
 	}
@@ -204,7 +204,7 @@ func GetOwnerDeptIDsWithDB(c *gin.Context, db *gorm.DB) ([]uint, bool) {
 
 	if len(allowedDeptIDs) == 0 {
 		if userDeptID == 0 {
-			return []uint{0}, true
+			return []uint{}, true
 		}
 		return []uint{userDeptID}, true
 	}

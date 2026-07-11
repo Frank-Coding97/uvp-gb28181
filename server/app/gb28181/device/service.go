@@ -6,6 +6,8 @@ import (
 	"time"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
 
 // RegisterInfo 注册时采集的信息
@@ -50,10 +52,26 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 	if existing != nil {
 		d.OwnerDeptID = existing.OwnerDeptID
 	}
+	if d.OwnerDeptID == 0 {
+		d.OwnerDeptID = defaultOwnerDeptID(ctx)
+	}
 	if err := gbmodels.Upsert(ctx, d); err != nil {
 		return false, fmt.Errorf("自动建档失败: %w", err)
 	}
 	return isFirst, nil
+}
+
+func defaultOwnerDeptID(ctx context.Context) uint {
+	var dept basemodels.SysDepartment
+	result := app.DB().WithContext(ctx).
+		Where("parent_id = 0 OR parent_id IS NULL").
+		Order("sort ASC, id ASC").
+		Limit(1).
+		Find(&dept)
+	if result.Error == nil && result.RowsAffected > 0 && dept.ID != 0 {
+		return dept.ID
+	}
+	return 1
 }
 
 // HandleUnregister 处理注销(Expires=0):即时置离线(事实上停止心跳 + 缓存翻转)
