@@ -66,35 +66,6 @@
             <span>{{ $t(`system.change-password`) }}</span>
           </template>
         </a-doption>
-        <!-- 全局租户 -->
-        <a-doption v-if="showGlobalTenant" class="uvp-user-menu-option" @click="switchToGlobalTenant">
-          <template #default>
-            <span class="uvp-user-menu-icon"><icon-home :size="16" /></span>
-            <span>{{ $t("system.global-tenant") }}</span>
-          </template>
-        </a-doption>
-        <!-- 切换租户 -->
-        <a-dropdown v-if="showTenantSwitch" trigger="hover" position="right">
-          <a-doption class="uvp-user-menu-option">
-            <template #default>
-              <span class="uvp-user-menu-icon"><icon-swap :size="16" /></span>
-              <span>{{ $t("system.switch-tenant") }}</span>
-              <icon-right class="uvp-user-menu-arrow" />
-            </template>
-          </a-doption>
-          <template #content>
-            <a-doption
-              v-for="tenant in switchableTenants"
-              :key="tenant.id"
-              class="uvp-user-menu-option"
-              @click="switchTenant(tenant)"
-            >
-              <template #default>
-                <span>{{ tenant.name }}</span>
-              </template>
-            </a-doption>
-          </template>
-        </a-dropdown>
         <!-- 项目地址 -->
         <a-doption class="uvp-user-menu-option" @click="onProject">
           <template #default>
@@ -120,7 +91,6 @@
 import Notice from "@/layout/components/Header/components/Notice/index.vue";
 import SystemSettings from "@/layout/components/Header/components/system-settings/index.vue";
 //import myImage from "@/assets/img/my-image.jpg";
-import { useI18n } from "vue-i18n";
 import { Modal } from "@arco-design/web-vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
@@ -130,7 +100,6 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { logout } from "@/api/user";
-const i18n = useI18n();
 const router = useRouter();
 const { isMobile } = useDevicesSize();
 const themeStore = useThemeConfig();
@@ -139,70 +108,6 @@ const { darkMode, darkModeStyle } = storeToRefs(themeStore);
 //const { account } = storeToRefs(userStore);
 import { useUserStoreHook } from "@/store/modules/user";
 const account = useUserStoreHook().account;
-
-// 判断是否显示切换租户按钮
-const showTenantSwitch = computed(() => {
-  return account.tenants && account.tenants.some((t: any) => t.id !== account.tenantID);
-});
-
-// 判断是否显示全局租户按钮
-const showGlobalTenant = computed(() => {
-  return (account.defaultTenant === null || account.defaultTenant === undefined) && account.tenantID > 0;
-});
-
-// 可切换的租户列表
-const switchableTenants = computed(() => {
-  if (!account.tenants) return [];
-  return account.tenants.filter((t: any) => t.id !== account.tenantID);
-});
-
-// 切换租户
-const switchTenant = async (tenant: any) => {
-  Modal.confirm({
-    title: i18n.t("system.switch-tenant-title"),
-    content: i18n.t("system.switch-tenant-confirm", { name: tenant.name }),
-    hideCancel: false,
-    closable: true,
-    onBeforeOk: async () => {
-      try {
-        // 调用切换租户 API
-        await useUserStoreHook().switchTenant(tenant.id);
-        // 重新获取用户信息
-        await useUserStoreHook().getUserInfo();
-        // 刷新页面
-        window.location.reload();
-        return true;
-      } catch (error: any) {
-        console.error("切换租户失败:", error);
-        return false;
-      }
-    }
-  });
-};
-
-// 切换到全局租户
-const switchToGlobalTenant = async () => {
-  Modal.confirm({
-    title: i18n.t("system.switch-tenant-title"),
-    content: i18n.t("system.switch-global-tenant-confirm"),
-    hideCancel: false,
-    closable: true,
-    onBeforeOk: async () => {
-      try {
-        // 调用切换租户 API，传入 0 表示全局租户
-        await useUserStoreHook().switchTenant(0);
-        // 重新获取用户信息
-        await useUserStoreHook().getUserInfo();
-        // 刷新页面
-        window.location.reload();
-        return true;
-      } catch (error: any) {
-        console.error("切换租户失败:", error);
-        return false;
-      }
-    }
-  });
-};
 
 // 系统设置
 const systemOpen = ref(false);

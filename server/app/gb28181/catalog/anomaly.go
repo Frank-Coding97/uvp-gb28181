@@ -16,6 +16,7 @@ func recordAnomaly(
 	ctx context.Context,
 	db *gorm.DB,
 	tenantID uint,
+	ownerDeptID uint,
 	node *gbmodels.GbCatalogNode,
 	cls Classification,
 	sourceDevID *uint,
@@ -25,6 +26,9 @@ func recordAnomaly(
 		"anomaly":        true,
 		"anomaly_reason": cls.Reason,
 		"raw_code":       cls.RawCode,
+	}
+	if ownerDeptID != 0 && node.OwnerDeptID == 0 {
+		updates["owner_dept_id"] = ownerDeptID
 	}
 	if err := db.WithContext(ctx).Model(node).Updates(updates).Error; err != nil {
 		return err
@@ -37,6 +41,7 @@ func recordAnomaly(
 	// 2. 写审计记录(每次入库都追加一条;后续 resolve 走 anomaly handler)
 	rec := &gbmodels.GbAnomalyRecord{
 		TenantID:       tenantID,
+		OwnerDeptID:    ownerDeptID,
 		CatalogNodeID:  node.ID,
 		RawCode:        cls.RawCode,
 		FallbackType:   gbmodels.FallbackTypeVirtualOrg,

@@ -12,10 +12,11 @@ import (
 // BuildPath 计算物化路径
 //
 // 规则(plan §3.4):
-//   根节点         path = "/"
-//   parent.path="/", id=12         → "/12/"
-//   parent.path="/12/", id=47       → "/12/47/"
-//   parent.path="/12/47/", id=189   → "/12/47/189/"
+//
+//	根节点         path = "/"
+//	parent.path="/", id=12         → "/12/"
+//	parent.path="/12/", id=47       → "/12/47/"
+//	parent.path="/12/47/", id=189   → "/12/47/189/"
 //
 // path 总是以 "/" 开头 + "/" 结尾;LIKE 'parentPath%' 查整棵子树
 func BuildPath(parentPath string, id uint) string {
@@ -53,7 +54,7 @@ func DepthFromPath(path string) uint8 {
 // 例:civilCode="370112" → 先找/建 "37"(省) → "3701"(市) → "370112"(区县)三级节点
 // 返回最末端节点。注:当前简化实现按 6 位级别(2+2+2)拆分,实际 GB/T 2260
 // 行政区码可能要按字典层级拆,Phase 2 可优化。
-func findOrCreateCivilCodeChain(db *gorm.DB, tenantID uint, civilCode string) (*gbmodels.GbCatalogNode, error) {
+func findOrCreateCivilCodeChain(db *gorm.DB, tenantID, ownerDeptID uint, civilCode string) (*gbmodels.GbCatalogNode, error) {
 	if civilCode == "" {
 		return nil, nil
 	}
@@ -77,7 +78,7 @@ func findOrCreateCivilCodeChain(db *gorm.DB, tenantID uint, civilCode string) (*
 			parentID = &prev.ID
 			parentPath = prev.Path
 		}
-		node, err := findOrCreateNode(db, tenantID, gbmodels.NodeTypeCivilCode, c, parentID, parentPath, civilCodeDisplayName(c))
+		node, err := findOrCreateNode(db, tenantID, ownerDeptID, gbmodels.NodeTypeCivilCode, c, parentID, parentPath, civilCodeDisplayName(c))
 		if err != nil {
 			return nil, err
 		}
@@ -93,6 +94,7 @@ func findOrCreateCivilCodeChain(db *gorm.DB, tenantID uint, civilCode string) (*
 func findOrCreateNode(
 	db *gorm.DB,
 	tenantID uint,
+	ownerDeptID uint,
 	nodeType gbmodels.NodeType,
 	code string,
 	parentID *uint,
@@ -111,6 +113,12 @@ func findOrCreateNode(
 		return nil, res.Error
 	}
 	if res.RowsAffected > 0 {
+		if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
+			if err := db.Model(&existed).Update("owner_dept_id", ownerDeptID).Error; err != nil {
+				return nil, err
+			}
+			existed.OwnerDeptID = ownerDeptID
+		}
 		return &existed, nil
 	}
 
@@ -123,14 +131,15 @@ func findOrCreateNode(
 	// (历史 bug:之前还多 +1,把行政区链算成 0→2→3 跳级。)
 	depth := DepthFromPath(parentPath)
 	n := &gbmodels.GbCatalogNode{
-		TenantID: tenantID,
-		NodeType: nodeType,
-		ParentID: parentID,
-		Path:     "/", // 创建后用 ID 回填
-		Depth:    depth,
-		Name:     name,
-		Code:     code,
-		Source:   gbmodels.NodeSourceCatalog,
+		TenantID:    tenantID,
+		OwnerDeptID: ownerDeptID,
+		NodeType:    nodeType,
+		ParentID:    parentID,
+		Path:        "/", // 创建后用 ID 回填
+		Depth:       depth,
+		Name:        name,
+		Code:        code,
+		Source:      gbmodels.NodeSourceCatalog,
 	}
 	if nodeType == gbmodels.NodeTypeCivilCode {
 		n.CivilCode = code

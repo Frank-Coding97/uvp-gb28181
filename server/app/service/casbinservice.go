@@ -4,7 +4,6 @@ import (
 	"context"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
 
 	"gorm.io/gorm"
 )
@@ -16,31 +15,18 @@ func NewPermissionService() *PermissionService {
 	return &PermissionService{}
 }
 
-// 获取当前租户的Casbin域
+// 获取当前Casbin域
 func (ps *PermissionService) GetDomain(c context.Context) []string {
-	tenantID := common.GetCurrentTenantID(common.TryConvertToGinContext(c))
-	if tenantID == 0 {
-		return nil
-	}
-	return []string{app.CasbinV2.PrefixDomain(tenantID)}
+	return nil
 }
 
 func (ps *PermissionService) PrefixDomain(tenantID uint) string {
 	return app.CasbinV2.PrefixDomain(tenantID)
 }
 
-// 处理租户ID，若未指定则使用当前登录用户所处的租户的ID，返回nil时代表全局租户
+// 处理Casbin域，去租户化后统一使用全局域
 func (ps *PermissionService) HandleTenantID(c context.Context, tenantID ...uint) []string {
-	var domain []string
-	if len(tenantID) > 0 {
-		if tenantID[0] == 0 {
-			return nil
-		}
-		domain = []string{ps.PrefixDomain(tenantID[0])}
-	} else {
-		domain = ps.GetDomain(c)
-	}
-	return domain
+	return nil
 }
 
 // 删除角色的所有权限

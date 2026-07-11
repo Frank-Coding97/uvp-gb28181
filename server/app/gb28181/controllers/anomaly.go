@@ -14,9 +14,9 @@ import (
 
 // AnomalyController 异常治理(plan §4.2 B4)
 //
-//   GET /anomaly?resolved=0&page=1
-//   POST /anomaly/:id/resolve
-//   POST /anomaly/batch-resolve
+//	GET /anomaly?resolved=0&page=1
+//	POST /anomaly/:id/resolve
+//	POST /anomaly/batch-resolve
 type AnomalyController struct {
 	controllers.Common
 	db func() *gorm.DB
@@ -51,7 +51,7 @@ func (ac *AnomalyController) List(c *gin.Context) {
 		pageSize = 20
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Where("tenant_id = ?", tid)
+	q := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Where("tenant_id = ?", tid).Scopes(ownerDeptScope(c))
 	if r := c.DefaultQuery("resolved", "0"); r == "0" {
 		q = q.Where("resolved = ?", false)
 	} else if r == "1" {
@@ -73,7 +73,7 @@ func (ac *AnomalyController) List(c *gin.Context) {
 	for i := range rs {
 		r := rs[i]
 		var n gbmodels.GbCatalogNode
-		db.WithContext(c).Select("id, name, path").Where("id = ?", r.CatalogNodeID).Limit(1).Find(&n)
+		db.WithContext(c).Scopes(ownerDeptScope(c)).Select("id, name, path").Where("id = ?", r.CatalogNodeID).Limit(1).Find(&n)
 		out = append(out, anomalyVO{
 			GbAnomalyRecord: &r,
 			NodeName:        n.Name,
@@ -85,9 +85,9 @@ func (ac *AnomalyController) List(c *gin.Context) {
 
 // resolveAction body
 type resolveAction struct {
-	Action         string `json:"action" binding:"required"`         // "change-type" / "change-mount" / "mark-resolved"
-	TargetType     string `json:"targetType"`                          // change-type 时:civil_code/biz_group/virtual_org
-	TargetParentID uint   `json:"targetParentId"`                       // change-mount 时:目标父节点
+	Action         string `json:"action" binding:"required"` // "change-type" / "change-mount" / "mark-resolved"
+	TargetType     string `json:"targetType"`                // change-type 时:civil_code/biz_group/virtual_org
+	TargetParentID uint   `json:"targetParentId"`            // change-mount 时:目标父节点
 	Note           string `json:"note"`
 }
 
@@ -159,7 +159,7 @@ func (ac *AnomalyController) BatchResolve(c *gin.Context) {
 func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, tid uint, id uint, body resolveAction) error {
 	return db.WithContext(c).Transaction(func(tx *gorm.DB) error {
 		var rec gbmodels.GbAnomalyRecord
-		res := tx.Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&rec)
+		res := tx.Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&rec)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -172,7 +172,7 @@ func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, tid uint,
 
 		// change-type:更新 catalog_node.node_type + 清 anomaly
 		if body.Action == "change-type" && body.TargetType != "" {
-			if err := tx.Model(&gbmodels.GbCatalogNode{}).
+			if err := tx.Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
 				Where("tenant_id = ? AND id = ?", tid, rec.CatalogNodeID).
 				Updates(map[string]any{
 					"node_type":      body.TargetType,
@@ -183,7 +183,7 @@ func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, tid uint,
 			}
 		}
 		if body.Action == "change-mount" && body.TargetParentID != 0 {
-			if err := tx.Model(&gbmodels.GbCatalogNode{}).
+			if err := tx.Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
 				Where("tenant_id = ? AND id = ?", tid, rec.CatalogNodeID).
 				Update("parent_id", body.TargetParentID).Error; err != nil {
 				return err

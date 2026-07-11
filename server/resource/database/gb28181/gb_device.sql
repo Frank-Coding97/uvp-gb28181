@@ -24,8 +24,10 @@ CREATE TABLE `gb_device` (
   `deleted_at` datetime DEFAULT NULL,
   `created_by` int unsigned DEFAULT '0' COMMENT '创建人',
   `tenant_id` int unsigned DEFAULT '0' COMMENT '租户ID',
+  `owner_dept_id` int unsigned NOT NULL DEFAULT '0' COMMENT '所属部门ID',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_id` (`device_id`) USING BTREE,
   KEY `idx_deleted_at` (`deleted_at`),
+  KEY `idx_owner_dept_deleted` (`owner_dept_id`, `deleted_at`),
   KEY `idx_status_keepalive` (`status`, `keepalive_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181国标设备表';

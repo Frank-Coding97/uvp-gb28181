@@ -24,5 +24,6 @@ type CatalogItem struct {
 // Sender 入库管道入参元数据
 type Sender struct {
 	TenantID       uint   // 多租户
+	OwnerDeptID    uint   // 业务归属部门
 	SourceDeviceID string // 来源设备(NVR / 下级平台)国标编码
 }

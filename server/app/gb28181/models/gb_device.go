@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 )
@@ -48,6 +49,7 @@ type GbDevice struct {
 	OfflineAt         *time.Time `gorm:"column:offline_at;comment:最近被判离线的时刻" json:"offlineAt"`
 	CreatedBy         uint       `gorm:"column:created_by;comment:创建人" json:"createdBy"`
 	TenantID          uint       `gorm:"column:tenant_id;comment:租户ID" json:"tenantId"`
+	OwnerDeptID       uint       `gorm:"column:owner_dept_id;comment:归属部门ID" json:"ownerDeptId"`
 	// Subscribe Catalog 智能升降级(Q4 决议) — A1 加,G1 状态机落地
 	SubscribeCapability SubscribeCapability `gorm:"column:subscribe_capability;size:16;default:unknown;index:idx_subscribe_capability,priority:1;comment:订阅能力 unknown/subscribed/fallback" json:"subscribeCapability"`
 	SubscribeLastTest   *time.Time          `gorm:"column:subscribe_last_test;index:idx_subscribe_capability,priority:2;comment:最近一次 SUBSCRIBE 尝试" json:"subscribeLastTest"`
@@ -158,13 +160,14 @@ func ListOnline(c context.Context) (GbDeviceList, error) {
 }
 
 // ListPaged 分页查询设备列表,返回当页数据与总数
-func ListPaged(c context.Context, page, pageSize int) (GbDeviceList, int64, error) {
+func ListPaged(c context.Context, page, pageSize int, scopes ...func(*gorm.DB) *gorm.DB) (GbDeviceList, int64, error) {
 	var list GbDeviceList
 	var total int64
-	if err := app.DB().WithContext(c).Model(&GbDevice{}).Count(&total).Error; err != nil {
+	q := app.DB().WithContext(c).Model(&GbDevice{}).Scopes(scopes...)
+	if err := q.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	err := app.DB().WithContext(c).
+	err := q.
 		Order("id DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).

@@ -1,10 +1,10 @@
 package gormhelper
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 	"reflect"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 
 	"gorm.io/gorm"
 )
@@ -28,13 +28,6 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 			for i := 0; i < inLen; i++ {
 				row := destValueOf.Index(i)
 				if row.Type().Kind() == reflect.Struct {
-					// 检查是否有TenantID字段，如果有则自动设置
-					if b, column := structHasSpecialField("TenantID", row); b {
-						// 从上下文中获取租户ID
-						if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-							destValueOf.Index(i).FieldByName(column).Set(reflect.ValueOf(tenantID))
-						}
-					}
 					// 检查是否有CreatedBy字段，如果有则自动设置
 					if b, column := structHasSpecialField("CreatedBy", row); b {
 						// 从上下文中获取用户ID
@@ -43,13 +36,6 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 						}
 					}
 				} else if row.Type().Kind() == reflect.Map {
-					// 检查是否有TenantID字段，如果有则自动设置
-					if b, column := structHasSpecialField("tenant_id", row); b {
-						// 从上下文中获取租户ID
-						if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-							row.SetMapIndex(reflect.ValueOf(column), reflect.ValueOf(tenantID))
-						}
-					}
 					// 检查是否有CreatedBy字段，如果有则自动设置
 					if b, column := structHasSpecialField("created_by", row); b {
 						// 从上下文中获取用户ID
@@ -60,13 +46,6 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 				}
 			}
 		} else if destValueOf.Type().Kind() == reflect.Struct {
-			// 检查是否有TenantID字段，如果有则自动设置
-			if b, column := structHasSpecialField("TenantID", gormDB.Statement.Dest); b {
-				// 从上下文中获取租户ID
-				if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-					gormDB.Statement.SetColumn(column, tenantID)
-				}
-			}
 			// 检查是否有CreatedBy字段，如果有则自动设置
 			if b, column := structHasSpecialField("CreatedBy", gormDB.Statement.Dest); b {
 				// 从上下文中获取用户ID
@@ -75,13 +54,6 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 				}
 			}
 		} else if destValueOf.Type().Kind() == reflect.Map {
-			// 检查是否有TenantID字段，如果有则自动设置
-			if b, column := structHasSpecialField("tenant_id", gormDB.Statement.Dest); b {
-				// 从上下文中获取租户ID
-				if tenantID := GetTenantIDFromContext(gormDB.Statement.Context); tenantID > 0 {
-					destValueOf.SetMapIndex(reflect.ValueOf(column), reflect.ValueOf(tenantID))
-				}
-			}
 			// 检查是否有CreatedBy字段，如果有则自动设置
 			if b, column := structHasSpecialField("created_by", gormDB.Statement.Dest); b {
 				// 从上下文中获取用户ID

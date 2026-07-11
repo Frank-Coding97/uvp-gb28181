@@ -3,9 +3,9 @@ package common
 import (
 	"context"
 	"errors"
+	"strings"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -59,28 +59,14 @@ func GetCurrentUserID(c *gin.Context) uint {
 	return claims.UserID
 }
 
-// 获取当前租户ID
+// 获取当前租户ID，去租户化后固定为空
 func GetCurrentTenantID(c *gin.Context) uint {
-	if c == nil {
-		return 0
-	}
-	claims := GetClaims(c)
-	if claims == nil {
-		return 0
-	}
-	return claims.TenantID
+	return 0
 }
 
-// 获取当前租户Code
+// 获取当前租户Code，去租户化后固定为空
 func GetCurrentTenantCode(c *gin.Context) string {
-	if c == nil {
-		return ""
-	}
-	claims := GetClaims(c)
-	if claims == nil {
-		return ""
-	}
-	return claims.TenantCode
+	return ""
 }
 
 // 尝试将context.Context转换成*gin.Context

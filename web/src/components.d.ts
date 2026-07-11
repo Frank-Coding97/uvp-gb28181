@@ -44,7 +44,6 @@ declare module 'vue' {
     AMenuItem: typeof import('@arco-design/web-vue')['MenuItem']
     AModal: typeof import('@arco-design/web-vue')['Modal']
     AOption: typeof import('@arco-design/web-vue')['Option']
-    APagination: typeof import('@arco-design/web-vue')['Pagination']
     APopconfirm: typeof import('@arco-design/web-vue')['Popconfirm']
     APopover: typeof import('@arco-design/web-vue')['Popover']
     AProgress: typeof import('@arco-design/web-vue')['Progress']
@@ -79,7 +78,6 @@ declare module 'vue' {
     Multiple: typeof import('./components/select-area/multiple.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    SAddUserModal: typeof import('./components/s-add-user-modal/index.vue')['default']
     SApiPermission: typeof import('./components/s-api-permission/index.vue')['default']
     SBarcodeDraw: typeof import('./components/s-barcode-draw/index.vue')['default']
     SCodeView: typeof import('./components/s-code-view/index.vue')['default']
@@ -103,7 +101,6 @@ declare module 'vue' {
     SSelectIcon: typeof import('./components/s-select-icon/index.vue')['default']
     SSvgAndIcon: typeof import('./components/s-svg-and-icon/index.vue')['default']
     SSvgIcon: typeof import('./components/s-svg-icon/index.vue')['default']
-    STenantUser: typeof import('./components/s-tenant-user/index.vue')['default']
     SVerifyCode: typeof import('./components/s-verify-code/index.vue')['default']
     WangEditor: typeof import('./components/wang-editor/index.vue')['default']
   }

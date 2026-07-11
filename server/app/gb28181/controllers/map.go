@@ -13,9 +13,9 @@ import (
 
 // MapController 地图视图相关接口(plan §4.2 B3)
 //
-//   GET /map/markers?minLat&maxLat&minLng&maxLng&limit
-//   GET /map/clusters?zoom&minLat&maxLat&minLng&maxLng
-//   GET /map/no-coord-count
+//	GET /map/markers?minLat&maxLat&minLng&maxLng&limit
+//	GET /map/clusters?zoom&minLat&maxLat&minLng&maxLng
+//	GET /map/no-coord-count
 type MapController struct {
 	controllers.Common
 	db func() *gorm.DB
@@ -55,7 +55,7 @@ func (mc *MapController) Markers(c *gin.Context) {
 		limit = 500
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND latitude != 0 AND longitude != 0", tid)
 	if maxLat > minLat {
 		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
@@ -112,7 +112,7 @@ func (mc *MapController) Clusters(c *gin.Context) {
 	minLng, _ := strconv.ParseFloat(c.Query("minLng"), 64)
 	maxLng, _ := strconv.ParseFloat(c.Query("maxLng"), 64)
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND latitude != 0 AND longitude != 0", tid)
 	if maxLat > minLat {
 		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
@@ -171,7 +171,7 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 	}
 	tid := tenantOf(c)
 	var count int64
-	if err := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+	if err := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND (latitude = 0 OR longitude = 0)", tid).
 		Count(&count).Error; err != nil {
 		mc.FailAndAbort(c, "查询失败", err)

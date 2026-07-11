@@ -3,14 +3,13 @@ package controllers
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"strconv"
+	"time"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -84,24 +83,10 @@ func (sm *SysMenuController) GetRouters(c *gin.Context) {
 		}
 	} else {
 
-		user := models.NewUser()
-		err := user.Find(c, func(db *gorm.DB) *gorm.DB {
-			return db.Select("id,tenant_id").Where("id = ?", claims.UserID)
-		})
-		if err != nil {
-			sm.FailAndAbort(c, "获取用户失败", err)
-			return
-		}
 		// 需要检查权限，按原有逻辑处理
 		sysUserRoleList := models.NewSysUserRoleList()
 		err = sysUserRoleList.Find(c, func(d *gorm.DB) *gorm.DB {
-			if user.TenantID == 0 {
-				return d.Where("user_id = ?", claims.UserID)
-			} else {
-				// 非全局租户，根据登录的租户ID筛选角色
-				subQuery := app.DB().WithContext(c).Table("sys_role").Where("tenant_id = ?", claims.TenantID).Select("id")
-				return d.Where("user_id = ? and role_id in (?)", claims.UserID, subQuery)
-			}
+			return d.Where("user_id = ?", claims.UserID)
 		})
 		if err != nil {
 			sm.FailAndAbort(c, "获取用户角色失败", err)
@@ -156,53 +141,9 @@ func (sm *SysMenuController) GetRouters(c *gin.Context) {
 func (sm *SysMenuController) GetMenuList(c *gin.Context) {
 
 	menuList := models.NewSysMenuList()
-	var err error
-
-	// 获取当前用户的租户ID
-	tenantID := common.GetCurrentTenantID(c)
-
-	// 如果有租户ID，则根据租户的菜单权限过滤
-	if tenantID > 0 {
-		// 查询租户信息，获取菜单权限
-		tenant := models.NewTenant()
-		err = tenant.Find(c, func(db *gorm.DB) *gorm.DB {
-			return db.Where("id = ?", tenantID)
-		})
-		if err != nil {
-			sm.FailAndAbort(c, "获取租户信息失败", err)
-			return
-		}
-
-		// 解析菜单权限（逗号分隔的菜单ID）
-		var menuIDs []uint
-		if tenant.MenuPermission != "" {
-			// 分割字符串并转换为uint类型
-			parts := strings.Split(tenant.MenuPermission, ",")
-			for _, part := range parts {
-				part = strings.TrimSpace(part)
-				if part != "" {
-					if id, err := strconv.ParseUint(part, 10, 32); err == nil {
-						menuIDs = append(menuIDs, uint(id))
-					}
-				}
-			}
-		}
-
-		// 如果有菜单权限，则只返回匹配的菜单
-		if len(menuIDs) > 0 {
-			err = menuList.Find(c, func(db *gorm.DB) *gorm.DB {
-				return db.Preload("Apis").Where("id in (?)", menuIDs)
-			})
-		} else {
-			// 如果没有菜单权限，返回空列表
-			err = nil
-		}
-	} else {
-		// 如果没有租户ID，返回所有菜单
-		err = menuList.Find(c, func(db *gorm.DB) *gorm.DB {
-			return db.Preload("Apis")
-		})
-	}
+	err := menuList.Find(c, func(db *gorm.DB) *gorm.DB {
+		return db.Preload("Apis")
+	})
 
 	if err != nil {
 		sm.FailAndAbort(c, "获取菜单失败", err)

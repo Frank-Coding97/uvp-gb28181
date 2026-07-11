@@ -111,7 +111,7 @@
                                     <polyline points="20 6 9 17 4 12" />
                                 </svg>
                             </span>
-                            <span>多租户隔离 · 设备权限粒度到通道</span>
+                            <span>部门数据权限 · 设备权限粒度到通道</span>
                         </div>
                         <div class="feature">
                             <span class="ic">
@@ -128,7 +128,7 @@
                         <span class="chip">SIP / RTP</span>
                         <span class="chip">级联</span>
                         <span class="chip">回放点播</span>
-                        <span class="chip">多租户</span>
+                        <span class="chip">部门权限</span>
                     </div>
                 </aside>
 

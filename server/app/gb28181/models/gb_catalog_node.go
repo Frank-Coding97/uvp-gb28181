@@ -32,6 +32,7 @@ const (
 type GbCatalogNode struct {
 	ID            uint           `gorm:"primarykey" json:"id"`
 	TenantID      uint           `gorm:"column:tenant_id;index:idx_tenant_parent,priority:1;index:idx_tenant_path,priority:1;index:idx_tenant_type,priority:1;index:idx_tenant_anomaly,priority:1;index:idx_civil_code,priority:1" json:"tenantId"`
+	OwnerDeptID   uint           `gorm:"column:owner_dept_id;index" json:"ownerDeptId"`
 	NodeType      NodeType       `gorm:"column:node_type;size:16;not null;index:idx_tenant_type,priority:2" json:"nodeType"`
 	ParentID      *uint          `gorm:"column:parent_id;index:idx_tenant_parent,priority:2" json:"parentId"`
 	Path          string         `gorm:"column:path;size:512;not null;index:idx_tenant_path,priority:2" json:"path"`

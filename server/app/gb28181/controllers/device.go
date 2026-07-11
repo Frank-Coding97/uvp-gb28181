@@ -8,6 +8,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
 // DeviceController 国标设备管理(最小:列表 + 详情,含实时在线态)
@@ -43,7 +44,7 @@ func (dc *DeviceController) List(c *gin.Context) {
 		pageSize = 20
 	}
 
-	list, total, err := gbmodels.ListPaged(c, page, pageSize)
+	list, total, err := gbmodels.ListPaged(c, page, pageSize, datascope.OwnerDeptScope(c, "owner_dept_id"))
 	if err != nil {
 		dc.FailAndAbort(c, "获取设备列表失败", err)
 		return

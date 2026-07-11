@@ -18,6 +18,7 @@ ALTER TABLE `gb_channel`
 CREATE TABLE IF NOT EXISTS `gb_catalog_node` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint unsigned NOT NULL DEFAULT 0 COMMENT '多租户',
+  `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT '所属部门ID',
   `node_type` varchar(16) NOT NULL COMMENT 'civil_code/biz_group/virtual_org/device/channel',
   `parent_id` bigint unsigned DEFAULT NULL COMMENT '父节点;根 NULL',
   `path` varchar(512) NOT NULL DEFAULT '/' COMMENT '物化路径 /12/47/189/',
@@ -41,6 +42,11 @@ CREATE TABLE IF NOT EXISTS `gb_catalog_node` (
   KEY `idx_tenant_type` (`tenant_id`, `node_type`),
   KEY `idx_tenant_anomaly` (`tenant_id`, `anomaly`),
   KEY `idx_civil_code` (`tenant_id`, `civil_code`),
+  KEY `idx_owner_dept_parent` (`owner_dept_id`, `parent_id`),
+  KEY `idx_owner_dept_path` (`owner_dept_id`, `path`(128)),
+  KEY `idx_owner_dept_type` (`owner_dept_id`, `node_type`),
+  KEY `idx_owner_dept_anomaly` (`owner_dept_id`, `anomaly`),
+  KEY `idx_owner_dept_civil_code` (`owner_dept_id`, `civil_code`),
   KEY `idx_code` (`code`),
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='国标多级目录树节点(思路 B+ 核心)';
@@ -49,6 +55,7 @@ CREATE TABLE IF NOT EXISTS `gb_catalog_node` (
 CREATE TABLE IF NOT EXISTS `gb_channel_mount` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint unsigned NOT NULL DEFAULT 0,
+  `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT '所属部门ID',
   `channel_id` bigint unsigned NOT NULL COMMENT '物理通道',
   `parent_node_id` bigint unsigned NOT NULL COMMENT '挂在哪个目录节点',
   `display_name` varchar(128) DEFAULT NULL COMMENT '挂载点别名,NULL=继承通道名',
@@ -60,13 +67,15 @@ CREATE TABLE IF NOT EXISTS `gb_channel_mount` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_channel_parent` (`channel_id`, `parent_node_id`),
   KEY `idx_parent_sort` (`parent_node_id`, `sort_order`),
-  KEY `idx_tenant` (`tenant_id`)
+  KEY `idx_tenant` (`tenant_id`),
+  KEY `idx_owner_dept` (`owner_dept_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='通道与目录树节点的 N:N 挂载关系';
 
 -- ========= 5. gb_anomaly_record 目录异常审计(Q1 治理) =========
 CREATE TABLE IF NOT EXISTS `gb_anomaly_record` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `tenant_id` bigint unsigned NOT NULL DEFAULT 0,
+  `owner_dept_id` int unsigned NOT NULL DEFAULT 0 COMMENT '所属部门ID',
   `catalog_node_id` bigint unsigned NOT NULL COMMENT '被兜底的节点',
   `raw_code` varchar(64) NOT NULL COMMENT '原始上报编码',
   `guessed_type` varchar(32) DEFAULT NULL COMMENT '推测类型',
@@ -80,6 +89,7 @@ CREATE TABLE IF NOT EXISTS `gb_anomaly_record` (
   `created_at` datetime NOT NULL,
   PRIMARY KEY (`id`),
   KEY `idx_tenant_resolved` (`tenant_id`, `resolved`, `created_at`),
+  KEY `idx_owner_dept_resolved` (`owner_dept_id`, `resolved`, `created_at`),
   KEY `idx_node` (`catalog_node_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='目录异常审计:Q1 决议';
 

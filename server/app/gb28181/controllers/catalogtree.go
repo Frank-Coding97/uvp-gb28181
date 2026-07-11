@@ -13,11 +13,11 @@ import (
 
 // CatalogTreeController 国标多级目录树 REST 接口(plan §4.2 B1)
 //
-//   GET /api/gb28181/device-mgmt/catalog/tree                  树根
-//   GET /api/gb28181/device-mgmt/catalog/tree/:id              单节点
-//   GET /api/gb28181/device-mgmt/catalog/tree/:id/children     子节点(支持 ?withMountCount=1)
-//   GET /api/gb28181/device-mgmt/catalog/tree/:id/subtree      整子树(按 path 前缀 LIKE)
-//   GET /api/gb28181/device-mgmt/catalog/anomaly/count         anomaly 未处理总数(左侧底部入口用)
+//	GET /api/gb28181/device-mgmt/catalog/tree                  树根
+//	GET /api/gb28181/device-mgmt/catalog/tree/:id              单节点
+//	GET /api/gb28181/device-mgmt/catalog/tree/:id/children     子节点(支持 ?withMountCount=1)
+//	GET /api/gb28181/device-mgmt/catalog/tree/:id/subtree      整子树(按 path 前缀 LIKE)
+//	GET /api/gb28181/device-mgmt/catalog/anomaly/count         anomaly 未处理总数(左侧底部入口用)
 type CatalogTreeController struct {
 	controllers.Common
 	db func() *gorm.DB // 注入,默认走 app.GormDbMysql,便于测试替换
@@ -38,8 +38,8 @@ func (cc *CatalogTreeController) SetDB(provider func() *gorm.DB) {
 // catalogNodeVO 单节点 VO,可附 mountCount / anomaly count
 type catalogNodeVO struct {
 	*gbmodels.GbCatalogNode
-	MountCount  int64 `json:"mountCount,omitempty"`
-	ChildCount  int64 `json:"childCount,omitempty"`
+	MountCount   int64 `json:"mountCount,omitempty"`
+	ChildCount   int64 `json:"childCount,omitempty"`
 	AnomalyCount int64 `json:"anomalyCount,omitempty"`
 }
 
@@ -71,7 +71,7 @@ func (cc *CatalogTreeController) Tree(c *gin.Context) {
 	tid := tenantOf(c)
 
 	var roots []gbmodels.GbCatalogNode
-	if err := db.WithContext(c).
+	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND parent_id IS NULL", tid).
 		Order("sort_order, id").
 		Find(&roots).Error; err != nil {
@@ -97,7 +97,7 @@ func (cc *CatalogTreeController) Children(c *gin.Context) {
 	}
 
 	var children []gbmodels.GbCatalogNode
-	if err := db.WithContext(c).
+	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND parent_id = ?", tid, parentID).
 		Order("sort_order, id").
 		Find(&children).Error; err != nil {
@@ -130,7 +130,7 @@ func (cc *CatalogTreeController) Subtree(c *gin.Context) {
 	}
 
 	var root gbmodels.GbCatalogNode
-	res := db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root)
+	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root)
 	if res.Error != nil {
 		cc.FailAndAbort(c, "查询节点失败", res.Error)
 		return
@@ -141,7 +141,7 @@ func (cc *CatalogTreeController) Subtree(c *gin.Context) {
 	}
 
 	var sub []gbmodels.GbCatalogNode
-	if err := db.WithContext(c).
+	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND path LIKE ?", tid, root.Path+"%").
 		Order("depth, sort_order, id").
 		Find(&sub).Error; err != nil {
@@ -167,7 +167,7 @@ func (cc *CatalogTreeController) Node(c *gin.Context) {
 	}
 
 	var n gbmodels.GbCatalogNode
-	res := db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&n)
+	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&n)
 	if res.Error != nil {
 		cc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -189,7 +189,7 @@ func (cc *CatalogTreeController) AnomalyCount(c *gin.Context) {
 	}
 	tid := tenantOf(c)
 	var count int64
-	if err := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).
+	if err := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND resolved = ?", tid, false).
 		Count(&count).Error; err != nil {
 		cc.FailAndAbort(c, "查 anomaly count 失败", err)
@@ -209,7 +209,7 @@ func (cc *CatalogTreeController) attachMountCount(c *gin.Context, db *gorm.DB, t
 		var cnt int64
 		// 节点子树下所有 channel 节点
 		_ = db.WithContext(c).
-			Model(&gbmodels.GbCatalogNode{}).
+			Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
 			Where("tenant_id = ? AND node_type = ? AND path LIKE ?", tid, gbmodels.NodeTypeChannel, n.Path+"%").
 			Count(&cnt).Error
 		out = append(out, catalogNodeVO{GbCatalogNode: &n, MountCount: cnt})

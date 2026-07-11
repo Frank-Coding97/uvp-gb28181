@@ -17,6 +17,7 @@ func upsertDevice(
 	ctx context.Context,
 	db *gorm.DB,
 	tenantID uint,
+	ownerDeptID uint,
 	item CatalogItem,
 	cls Classification,
 	parentNode *gbmodels.GbCatalogNode,
@@ -32,9 +33,10 @@ func upsertDevice(
 			DeviceID:            item.DeviceID,
 			Name:                fallbackName(item.Name, item.DeviceID),
 			Manufacturer:        item.Manufacturer,
-			Model:                item.Model,
-			TenantID:             tenantID,
-			SubscribeCapability:  gbmodels.SubscribeUnknown,
+			Model:               item.Model,
+			TenantID:            tenantID,
+			OwnerDeptID:         ownerDeptID,
+			SubscribeCapability: gbmodels.SubscribeUnknown,
 		}
 		if err := db.WithContext(ctx).Create(&dev).Error; err != nil {
 			return nil, nil, err
@@ -51,6 +53,10 @@ func upsertDevice(
 		if item.Model != "" && item.Model != dev.Model {
 			updates["model"] = item.Model
 		}
+		if ownerDeptID != 0 && dev.OwnerDeptID == 0 {
+			updates["owner_dept_id"] = ownerDeptID
+			dev.OwnerDeptID = ownerDeptID
+		}
 		if len(updates) > 0 {
 			if err := db.WithContext(ctx).Model(&dev).Updates(updates).Error; err != nil {
 				return nil, nil, err
@@ -66,7 +72,7 @@ func upsertDevice(
 		pid = &parentNode.ID
 		parentPath = parentNode.Path
 	}
-	node, err := findOrCreateNode(db.WithContext(ctx), tenantID, gbmodels.NodeTypeDevice, item.DeviceID, pid, parentPath, fallbackName(item.Name, item.DeviceID))
+	node, err := findOrCreateNode(db.WithContext(ctx), tenantID, dev.OwnerDeptID, gbmodels.NodeTypeDevice, item.DeviceID, pid, parentPath, fallbackName(item.Name, item.DeviceID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -89,6 +95,7 @@ func upsertChannel(
 	ctx context.Context,
 	db *gorm.DB,
 	tenantID uint,
+	ownerDeptID uint,
 	sourceDeviceID string,
 	item CatalogItem,
 	cls Classification,
@@ -119,6 +126,7 @@ func upsertChannel(
 			Latitude:     item.Latitude,
 			Status:       status,
 			TenantID:     tenantID,
+			OwnerDeptID:  ownerDeptID,
 		}
 		if err := db.WithContext(ctx).Create(&ch).Error; err != nil {
 			return nil, nil, err
@@ -136,6 +144,10 @@ func upsertChannel(
 			"latitude":     item.Latitude,
 			"status":       status,
 		}
+		if ownerDeptID != 0 && ch.OwnerDeptID == 0 {
+			updates["owner_dept_id"] = ownerDeptID
+			ch.OwnerDeptID = ownerDeptID
+		}
 		if err := db.WithContext(ctx).Model(&ch).Updates(updates).Error; err != nil {
 			return nil, nil, err
 		}
@@ -149,7 +161,7 @@ func upsertChannel(
 		pid = &parentNode.ID
 		parentPath = parentNode.Path
 	}
-	node, err := findOrCreateNode(db.WithContext(ctx), tenantID, gbmodels.NodeTypeChannel, item.DeviceID, pid, parentPath, fallbackName(item.Name, item.DeviceID))
+	node, err := findOrCreateNode(db.WithContext(ctx), tenantID, ch.OwnerDeptID, gbmodels.NodeTypeChannel, item.DeviceID, pid, parentPath, fallbackName(item.Name, item.DeviceID))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -162,7 +174,7 @@ func upsertChannel(
 
 	// 3. 主挂载 gb_channel_mount 建/找(parentNode = 该通道默认挂载点)
 	if parentNode != nil {
-		if err := ensurePrimaryMount(ctx, db, tenantID, ch.ID, parentNode.ID, item.Name); err != nil {
+		if err := ensurePrimaryMount(ctx, db, tenantID, ch.OwnerDeptID, ch.ID, parentNode.ID, item.Name); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -172,7 +184,7 @@ func upsertChannel(
 }
 
 // ensurePrimaryMount 保证主挂载存在
-func ensurePrimaryMount(ctx context.Context, db *gorm.DB, tenantID, channelID, parentNodeID uint, displayName string) error {
+func ensurePrimaryMount(ctx context.Context, db *gorm.DB, tenantID, ownerDeptID, channelID, parentNodeID uint, displayName string) error {
 	var existed gbmodels.GbChannelMount
 	res := db.WithContext(ctx).Where("channel_id = ? AND parent_node_id = ?", channelID, parentNodeID).Limit(1).Find(&existed)
 	if res.Error != nil {
@@ -187,7 +199,14 @@ func ensurePrimaryMount(ctx context.Context, db *gorm.DB, tenantID, channelID, p
 			return err
 		}
 		if primaryCount == 0 {
-			return db.WithContext(ctx).Model(&existed).Update("is_primary", true).Error
+			updates := map[string]any{"is_primary": true}
+			if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
+				updates["owner_dept_id"] = ownerDeptID
+			}
+			return db.WithContext(ctx).Model(&existed).Updates(updates).Error
+		}
+		if ownerDeptID != 0 && existed.OwnerDeptID == 0 {
+			return db.WithContext(ctx).Model(&existed).Update("owner_dept_id", ownerDeptID).Error
 		}
 		return nil
 	}
@@ -200,6 +219,7 @@ func ensurePrimaryMount(ctx context.Context, db *gorm.DB, tenantID, channelID, p
 	}
 	m := &gbmodels.GbChannelMount{
 		TenantID:     tenantID,
+		OwnerDeptID:  ownerDeptID,
 		ChannelID:    channelID,
 		ParentNodeID: parentNodeID,
 		DisplayName:  strings.TrimSpace(displayName),

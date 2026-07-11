@@ -19,8 +19,10 @@ CREATE TABLE `gb_channel` (
   `updated_at` datetime DEFAULT NULL,
   `deleted_at` datetime DEFAULT NULL,
   `tenant_id` int unsigned DEFAULT '0' COMMENT '租户ID',
+  `owner_dept_id` int unsigned NOT NULL DEFAULT '0' COMMENT '所属部门ID',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_channel` (`device_id`, `channel_id`) USING BTREE,
   KEY `idx_device_id` (`device_id`),
+  KEY `idx_owner_dept_deleted` (`owner_dept_id`, `deleted_at`),
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181国标通道表';

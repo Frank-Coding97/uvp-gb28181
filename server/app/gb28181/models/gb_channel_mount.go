@@ -16,6 +16,7 @@ const (
 type GbChannelMount struct {
 	ID           uint        `gorm:"primarykey" json:"id"`
 	TenantID     uint        `gorm:"column:tenant_id;index" json:"tenantId"`
+	OwnerDeptID  uint        `gorm:"column:owner_dept_id;index" json:"ownerDeptId"`
 	ChannelID    uint        `gorm:"column:channel_id;not null;uniqueIndex:uk_channel_parent,priority:1;index" json:"channelId"`
 	ParentNodeID uint        `gorm:"column:parent_node_id;not null;uniqueIndex:uk_channel_parent,priority:2;index:idx_parent_sort,priority:1" json:"parentNodeId"`
 	DisplayName  string      `gorm:"column:display_name;size:128" json:"displayName"`

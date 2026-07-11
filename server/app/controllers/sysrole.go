@@ -2,11 +2,10 @@ package controllers
 
 import (
 	"fmt"
+	"strconv"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -78,7 +77,7 @@ func (sc *SysRoleController) GetUserPermission(c *gin.Context) {
 // @Security ApiKeyAuth
 func (sc *SysRoleController) GetRoles(c *gin.Context) {
 	sysRoleList := models.NewSysRoleList()
-	err := sysRoleList.Find(c, tenanthelper.TenantScope(c))
+	err := sysRoleList.Find(c)
 	if err != nil {
 		sc.FailAndAbort(c, "获取角色列表失败", err)
 	}
@@ -115,11 +114,11 @@ func (sc *SysRoleController) List(c *gin.Context) {
 	// 统计总数
 	var count int64
 	var err error
-	count, err = sysRoleList.GetTotal(c, req.Handler(), tenanthelper.TenantScope(c))
+	count, err = sysRoleList.GetTotal(c, req.Handler())
 	if err != nil {
 		sc.FailAndAbort(c, "统计角色数量失败", err)
 	}
-	err = sysRoleList.Find(c, req.Paginate(), req.Handler(), tenanthelper.TenantScope(c))
+	err = sysRoleList.Find(c, req.Paginate(), req.Handler())
 	if err != nil {
 		sc.FailAndAbort(c, "获取角色列表失败", err)
 	}

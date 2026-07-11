@@ -5,8 +5,8 @@ import (
 	"crypto/md5"
 	"errors"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/golang-jwt/jwt/v5"
 )
@@ -27,8 +27,11 @@ type TokenService struct {
 **/
 // GenerateToken 生成JWT令牌
 func (s *TokenService) GenerateToken(user *app.ClaimsUser) (string, error) {
+	claimsUser := *user
+	claimsUser.TenantID = 0
+	claimsUser.TenantCode = ""
 	claims := &app.Claims{
-		ClaimsUser: *user,
+		ClaimsUser: claimsUser,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.TokenExpire * time.Second)), // 过期时间
 			IssuedAt:  jwt.NewNumericDate(time.Now()),                                  // 签发时间
@@ -135,12 +138,10 @@ func (s *TokenService) getTokenKeyWithCache(userID uint, tokenString string) str
 
 /*****************************************refreshToken管理****************************************************/
 // GenerateRefreshToken 生成Refresh Token
-func (s *TokenService) GenerateRefreshToken(userID uint, tenantID uint, tenantCode string) (string, error) {
+func (s *TokenService) GenerateRefreshToken(userID uint) (string, error) {
 	expirationTime := time.Now().Add(s.RefreshExpire * time.Second)
 	claims := &app.RefreshTokenClaims{
-		UserID:     userID,
-		TenantID:   tenantID,
-		TenantCode: tenantCode,
+		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
@@ -251,12 +252,10 @@ func (s *TokenService) RotateRefreshToken(oldRefreshToken string) (string, error
 		return "", fmt.Errorf("failed to revoke old refresh token: %w", err)
 	}
 
-	// 4. 生成新的refresh token，使用剩余的有效时间，保留租户信息
+	// 4. 生成新的refresh token，使用剩余的有效时间
 	expirationTime := now.Add(remainingDuration)
 	newClaims := &app.RefreshTokenClaims{
-		UserID:     claims.UserID,
-		TenantID:   claims.TenantID,
-		TenantCode: claims.TenantCode,
+		UserID: claims.UserID,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(expirationTime),
 			IssuedAt:  jwt.NewNumericDate(now),

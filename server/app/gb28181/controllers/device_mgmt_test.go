@@ -15,9 +15,12 @@ import (
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
 
-func newDeviceMgmtRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
+func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Engine, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
@@ -27,6 +30,10 @@ func newDeviceMgmtRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 		&gbmodels.GbAnomalyRecord{},
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDevice{},
+		&basemodels.SysDepartment{},
+		&basemodels.SysRole{},
+		&basemodels.SysUserRole{},
+		&basemodels.User{},
 	))
 
 	dmgmt := gbcontrollers.NewDeviceMgmtController()
@@ -38,6 +45,9 @@ func newDeviceMgmtRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	if len(middlewares) > 0 {
+		r.Use(middlewares...)
+	}
 	gr := r.Group("/api/gb28181/device-mgmt")
 	{
 		gr.GET("/devices", dmgmt.ListDevices)
@@ -54,6 +64,23 @@ func newDeviceMgmtRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 		gr.POST("/anomaly/batch-resolve", ac.BatchResolve)
 	}
 	return r, db
+}
+
+func seedDeptScopedUser(t *testing.T, db *gorm.DB, userID, deptID uint) {
+	t.Helper()
+	require.NoError(t, db.Create(&basemodels.SysDepartment{BaseModel: basemodels.BaseModel{ID: deptID}, Name: "dept"}).Error)
+	user := &basemodels.User{BaseModel: basemodels.BaseModel{ID: userID}, Username: "dept-user", Password: "x", DeptID: deptID}
+	require.NoError(t, db.Create(user).Error)
+	role := &basemodels.SysRole{Name: "dept-role", DataScope: 3}
+	require.NoError(t, db.Create(role).Error)
+	require.NoError(t, db.Create(&basemodels.SysUserRole{UserID: user.ID, RoleID: role.ID}).Error)
+}
+
+func withClaims(userID uint) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: userID}})
+		c.Next()
+	}
 }
 
 func seedDevicesAndChannels(t *testing.T, db *gorm.DB) (devID uint, chOnlineID, chOfflineID uint) {
@@ -86,6 +113,26 @@ func TestDeviceMgmt_ListDevices(t *testing.T) {
 	assert.Equal(t, "测试 NVR", d["name"])
 	assert.EqualValues(t, 2, d["channelCount"])
 	assert.EqualValues(t, 1, d["channelOnlineCount"])
+}
+
+func TestDeviceMgmt_ListDevices_FiltersByOwnerDept(t *testing.T) {
+	const userID = 100
+	r, db := newDeviceMgmtRouter(t, withClaims(userID))
+	seedDeptScopedUser(t, db, userID, 10)
+	require.NoError(t, db.Create(&gbmodels.GbDevice{TenantID: 1, OwnerDeptID: 10, DeviceID: "34020000002000000010", Name: "本部门 NVR", SubscribeCapability: gbmodels.SubscribeUnknown}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbDevice{TenantID: 1, OwnerDeptID: 20, DeviceID: "34020000002000000020", Name: "外部门 NVR", SubscribeCapability: gbmodels.SubscribeUnknown}).Error)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/devices", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := unmarshal(t, w)
+	data := resp["data"].(map[string]any)
+	list := data["list"].([]any)
+	require.Len(t, list, 1)
+	d := list[0].(map[string]any)
+	assert.Equal(t, "34020000002000000010", d["deviceId"])
 }
 
 func TestDeviceMgmt_ListDevices_FilterByCatalogNode(t *testing.T) {
@@ -194,6 +241,26 @@ func TestMap_Markers(t *testing.T) {
 	assert.EqualValues(t, 1, data["total"], "只有 1 个通道带坐标")
 }
 
+func TestMap_Markers_FiltersByOwnerDept(t *testing.T) {
+	const userID = 100
+	r, db := newDeviceMgmtRouter(t, withClaims(userID))
+	seedDeptScopedUser(t, db, userID, 10)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{TenantID: 1, OwnerDeptID: 10, DeviceID: "34020000002000000010", ChannelID: "37011200001310000010", Name: "本部门通道", Latitude: 36.1, Longitude: 117.1}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{TenantID: 1, OwnerDeptID: 20, DeviceID: "34020000002000000020", ChannelID: "37011200001310000020", Name: "外部门通道", Latitude: 36.2, Longitude: 117.2}).Error)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/map/markers", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	resp := unmarshal(t, w)
+	data := resp["data"].(map[string]any)
+	list := data["list"].([]any)
+	require.Len(t, list, 1)
+	marker := list[0].(map[string]any)
+	assert.Equal(t, "37011200001310000010", marker["channelId"])
+}
+
 func TestMap_NoCoordCount(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	seedDevicesAndChannels(t, db)
@@ -262,6 +329,31 @@ func TestAnomaly_Resolve_ChangeType(t *testing.T) {
 	require.NoError(t, db.First(&ur, rec.ID).Error)
 	assert.True(t, ur.Resolved)
 	assert.Equal(t, "change-type", ur.ResolvedAction)
+}
+
+func TestAnomaly_Resolve_RejectsOtherOwnerDept(t *testing.T) {
+	const userID = 100
+	r, db := newDeviceMgmtRouter(t, withClaims(userID))
+	seedDeptScopedUser(t, db, userID, 10)
+	node := &gbmodels.GbCatalogNode{TenantID: 1, OwnerDeptID: 20, NodeType: gbmodels.NodeTypeVirtualOrg, Path: "/1/", Name: "外部门异常节点", Anomaly: true}
+	require.NoError(t, db.Create(node).Error)
+	rec := &gbmodels.GbAnomalyRecord{TenantID: 1, OwnerDeptID: 20, CatalogNodeID: node.ID, RawCode: "XYZ", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
+	require.NoError(t, db.Create(rec).Error)
+
+	body, _ := json.Marshal(map[string]any{
+		"action":     "change-type",
+		"targetType": "biz_group",
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("POST", "/api/gb28181/device-mgmt/anomaly/"+uintStr(rec.ID)+"/resolve", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	resp := unmarshal(t, w)
+	assert.NotEqual(t, "success", resp["status"])
+	var ur gbmodels.GbAnomalyRecord
+	require.NoError(t, db.First(&ur, rec.ID).Error)
+	assert.False(t, ur.Resolved)
 }
 
 func TestAnomaly_BatchResolve(t *testing.T) {

@@ -1,11 +1,12 @@
 package datascope
 
 import (
+	"sort"
+	"strconv"
+	"strings"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -13,8 +14,13 @@ import (
 
 // 获取用户角色列表
 func getUserRoles(userID uint) ([]*models.SysRole, error) {
+	return getUserRolesWithDB(app.DB(), userID)
+}
+
+func getUserRolesWithDB(db *gorm.DB, userID uint) ([]*models.SysRole, error) {
+	db = db.Session(&gorm.Session{NewDB: true})
 	var user models.User
-	err := app.DB().Preload("Roles").Where("id = ?", userID).First(&user).Error
+	err := db.Model(&models.User{}).Preload("Roles").Where("id = ?", userID).First(&user).Error
 	if err != nil {
 		return nil, err
 	}
@@ -89,8 +95,13 @@ func stringToUintSlice(s string) ([]uint, error) {
 
 // 获取用户所属部门ID
 func getUserDepartmentID(userID uint) (uint, error) {
+	return getUserDepartmentIDWithDB(app.DB(), userID)
+}
+
+func getUserDepartmentIDWithDB(db *gorm.DB, userID uint) (uint, error) {
+	db = db.Session(&gorm.Session{NewDB: true})
 	var user models.User
-	err := app.DB().Select("dept_id").Where("id = ?", userID).First(&user).Error
+	err := db.Model(&models.User{}).Select("dept_id").Where("id = ?", userID).First(&user).Error
 	if err != nil {
 		return 0, err
 	}
@@ -114,6 +125,120 @@ func getUserIDsByDepartmentIDs(deptIDs []uint) ([]uint, error) {
 		userIDs = append(userIDs, user.ID)
 	}
 	return userIDs, nil
+}
+
+// GetOwnerDeptIDs 返回当前用户可见的部门 ID 集合。
+// 第二个返回值为 false 时表示无需加部门过滤(例如测试环境没有 claims,或用户拥有全量权限)。
+func GetOwnerDeptIDs(c *gin.Context) ([]uint, bool) {
+	return GetOwnerDeptIDsWithDB(c, nil)
+}
+
+// GetOwnerDeptIDsWithDB 返回当前用户可见的部门 ID 集合,使用传入 DB 查询用户/角色/部门。
+func GetOwnerDeptIDsWithDB(c *gin.Context, db *gorm.DB) ([]uint, bool) {
+	claims := common.GetClaims(c)
+	if claims == nil || claims.UserID == 0 {
+		return nil, false
+	}
+	if db == nil {
+		db = app.DB()
+	}
+	userID := claims.UserID
+	if app.ConfigYml != nil {
+		for _, notCheckUserID := range app.ConfigYml.GetUintSlice("server.notcheckuser") {
+			if notCheckUserID == userID {
+				return nil, false
+			}
+		}
+	}
+
+	roles, err := getUserRolesWithDB(db, userID)
+	if err != nil {
+		return []uint{0}, true
+	}
+	userDeptID, _ := getUserDepartmentIDWithDB(db, userID)
+	if len(roles) == 0 {
+		if userDeptID == 0 {
+			return []uint{0}, true
+		}
+		return []uint{userDeptID}, true
+	}
+
+	var allDepartments models.SysDepartmentList
+	departmentTree := models.SysDepartmentList{}
+	if err := db.Session(&gorm.Session{NewDB: true}).Model(&models.SysDepartment{}).Find(&allDepartments).Error; err == nil {
+		departmentTree = allDepartments.BuildTree()
+	}
+
+	allowedDeptIDs := make(map[uint]bool)
+	for _, role := range roles {
+		switch role.DataScope {
+		case 1:
+			return nil, false
+		case 2:
+			deptIDs, err := stringToUintSlice(role.CheckedDepts)
+			if err == nil {
+				for _, deptID := range deptIDs {
+					if deptID != 0 {
+						allowedDeptIDs[deptID] = true
+					}
+				}
+			}
+		case 3, 5:
+			if userDeptID != 0 {
+				allowedDeptIDs[userDeptID] = true
+			}
+		case 4:
+			if userDeptID != 0 {
+				deptIDs, err := getDepartmentAndChildrenIDs(departmentTree, userDeptID)
+				if err != nil || len(deptIDs) == 0 {
+					allowedDeptIDs[userDeptID] = true
+				}
+				for _, deptID := range deptIDs {
+					if deptID != 0 {
+						allowedDeptIDs[deptID] = true
+					}
+				}
+			}
+		}
+	}
+
+	if len(allowedDeptIDs) == 0 {
+		if userDeptID == 0 {
+			return []uint{0}, true
+		}
+		return []uint{userDeptID}, true
+	}
+	deptIDs := make([]uint, 0, len(allowedDeptIDs))
+	for deptID := range allowedDeptIDs {
+		deptIDs = append(deptIDs, deptID)
+	}
+	sort.Slice(deptIDs, func(i, j int) bool { return deptIDs[i] < deptIDs[j] })
+	return deptIDs, true
+}
+
+// OwnerDeptScope 按 owner_dept_id 过滤 GB28181 这类非人工创建数据。
+func OwnerDeptScope(c *gin.Context, column string) func(db *gorm.DB) *gorm.DB {
+	return OwnerDeptScopeWithDB(c, nil, column)
+}
+
+// OwnerDeptScopeWithDB 按 owner_dept_id 过滤,并用 lookupDB 查询当前用户的部门权限。
+func OwnerDeptScopeWithDB(c *gin.Context, lookupDB *gorm.DB, column string) func(db *gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if lookupDB == nil {
+			lookupDB = db
+		}
+		deptIDs, needFilter := GetOwnerDeptIDsWithDB(c, lookupDB)
+		if !needFilter {
+			return db
+		}
+		if column == "" {
+			column = "owner_dept_id"
+		}
+		if len(deptIDs) == 0 {
+			return db.Where("1 = 0")
+		}
+		return db.Where(column+" IN ?", deptIDs)
+	}
 }
 
 // 数据权限(默认可以查看自己创建的数据)

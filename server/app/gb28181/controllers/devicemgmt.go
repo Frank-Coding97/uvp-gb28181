@@ -64,25 +64,28 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		pageSize = 20
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Where("tenant_id = ?", tid)
+	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Where("tenant_id = ?", tid).Scopes(ownerDeptScope(c))
 	// nodeId 过滤:按目录子树内的设备节点 + 通道所属设备反查设备列表
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
 		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
 			var root gbmodels.GbCatalogNode
-			if db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root).RowsAffected > 0 {
+			if db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root).RowsAffected > 0 {
 				var deviceIDs []uint
 				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+					Scopes(ownerDeptScope(c)).
 					Where("tenant_id = ? AND node_type = ? AND path LIKE ? AND device_id IS NOT NULL", tid, gbmodels.NodeTypeDevice, root.Path+"%").
 					Pluck("device_id", &deviceIDs)
 
 				var channelIDs []uint
 				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+					Scopes(ownerDeptScope(c)).
 					Where("tenant_id = ? AND node_type = ? AND path LIKE ? AND channel_id IS NOT NULL", tid, gbmodels.NodeTypeChannel, root.Path+"%").
 					Pluck("channel_id", &channelIDs)
 
 				var channelDeviceCodes []string
 				if len(channelIDs) > 0 {
 					db.WithContext(c).Model(&gbmodels.GbChannel{}).
+						Scopes(ownerDeptScope(c)).
 						Where("tenant_id = ? AND id IN ?", tid, channelIDs).
 						Distinct().
 						Pluck("device_id", &channelDeviceCodes)
@@ -168,8 +171,8 @@ func (s chStats) rate() float64 {
 
 func (dc *DeviceMgmtController) channelAggregate(c *gin.Context, db *gorm.DB, deviceID string) chStats {
 	var total, online int64
-	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Where("device_id = ?", deviceID).Count(&total).Error
-	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Where("device_id = ? AND status = ?", deviceID, gbmodels.ChannelStatusOnline).Count(&online).Error
+	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Where("device_id = ?", deviceID).Count(&total).Error
+	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Where("device_id = ? AND status = ?", deviceID, gbmodels.ChannelStatusOnline).Count(&online).Error
 	return chStats{total: total, online: online}
 }
 
@@ -199,7 +202,7 @@ func (dc *DeviceMgmtController) GetDevice(c *gin.Context) {
 		return
 	}
 	var d gbmodels.GbDevice
-	res := db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&d)
+	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&d)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -236,16 +239,17 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		pageSize = 40
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Where("tenant_id = ?", tid)
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Where("tenant_id = ?", tid).Scopes(ownerDeptScope(c))
 
 	// nodeId 过滤:走子树 path LIKE
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
 		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
 			var root gbmodels.GbCatalogNode
-			if db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root).RowsAffected > 0 {
+			if db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root).RowsAffected > 0 {
 				// 子树下的所有 channel_id
 				var chIDs []uint
 				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+					Scopes(ownerDeptScope(c)).
 					Where("tenant_id = ? AND node_type = ? AND path LIKE ?", tid, gbmodels.NodeTypeChannel, root.Path+"%").
 					Pluck("channel_id", &chIDs)
 				if len(chIDs) > 0 {
@@ -298,7 +302,7 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 		return
 	}
 	var ch gbmodels.GbChannel
-	res := db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&ch)
+	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&ch)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -336,6 +340,7 @@ func (dc *DeviceMgmtController) attachChannelTransport(c *gin.Context, db *gorm.
 	if len(deviceIDs) > 0 {
 		var devices []gbmodels.GbDevice
 		if err := db.WithContext(c).
+			Scopes(ownerDeptScope(c)).
 			Where("device_id IN ?", deviceIDs).
 			Find(&devices).Error; err == nil {
 			for _, dev := range devices {
@@ -379,7 +384,7 @@ func (dc *DeviceMgmtController) ListChannelMounts(c *gin.Context) {
 	}
 
 	var mounts []gbmodels.GbChannelMount
-	if err := db.WithContext(c).
+	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
 		Where("tenant_id = ? AND channel_id = ?", tid, id).
 		Order("is_primary DESC, sort_order, id").
 		Find(&mounts).Error; err != nil {
@@ -390,7 +395,7 @@ func (dc *DeviceMgmtController) ListChannelMounts(c *gin.Context) {
 	out := make([]mountVO, 0, len(mounts))
 	for _, m := range mounts {
 		var node gbmodels.GbCatalogNode
-		db.WithContext(c).Select("id, name, path").Where("id = ?", m.ParentNodeID).Limit(1).Find(&node)
+		db.WithContext(c).Scopes(ownerDeptScope(c)).Select("id, name, path").Where("id = ?", m.ParentNodeID).Limit(1).Find(&node)
 		out = append(out, mountVO{
 			ID:           m.ID,
 			ParentNodeID: m.ParentNodeID,
@@ -422,7 +427,7 @@ func (dc *DeviceMgmtController) ChannelTimeline(c *gin.Context) {
 		return
 	}
 	var ch gbmodels.GbChannel
-	res := db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&ch)
+	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&ch)
 	if res.Error != nil {
 		dc.FailAndAbort(c, "查询失败", res.Error)
 		return

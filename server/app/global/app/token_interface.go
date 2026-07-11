@@ -27,7 +27,7 @@ type TokenServiceInterface interface {
 	RevokeTokenWithCache(tokenString string) error
 
 	// GenerateRefreshToken 生成Refresh Token
-	GenerateRefreshToken(userID uint, tenantID uint, tenantCode string) (string, error)
+	GenerateRefreshToken(userID uint) (string, error)
 
 	// ParseRefreshToken 解析Refresh Token
 	ParseRefreshToken(tokenString string) (*RefreshTokenClaims, error)
@@ -49,8 +49,8 @@ type TokenServiceInterface interface {
 type ClaimsUser struct {
 	UserID     uint   `json:"userId"`               // 用户ID
 	Username   string `json:"username"`             // 用户名
-	TenantID   uint   `json:"tenantId,omitempty"`   // 租户ID
-	TenantCode string `json:"tenantCode,omitempty"` // 租户编码
+	TenantID   uint   `json:"tenantId,omitempty"`   // Deprecated: 去租户化后不再写入新token
+	TenantCode string `json:"tenantCode,omitempty"` // Deprecated: 去租户化后不再写入新token
 }
 
 // Claims JWT声明结构
@@ -61,9 +61,7 @@ type Claims struct {
 
 // RefreshTokenClaims Refresh Token声明结构
 type RefreshTokenClaims struct {
-	UserID     uint   `json:"userId"`
-	TenantID   uint   `json:"tenantId,omitempty"`
-	TenantCode string `json:"tenantCode,omitempty"`
+	UserID uint `json:"userId"`
 	jwt.RegisteredClaims
 }
 

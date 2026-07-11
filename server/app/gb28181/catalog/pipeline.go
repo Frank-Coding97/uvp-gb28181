@@ -45,6 +45,9 @@ func (p *Pipeline) Ingest(ctx context.Context, sender Sender, items []CatalogIte
 		// 兼容:本期未严格落多租户,默认 tenant 1
 		sender.TenantID = 1
 	}
+	if sender.OwnerDeptID == 0 {
+		sender.OwnerDeptID = p.resolveOwnerDeptID(ctx, sender)
+	}
 
 	var firstErr error
 	for _, it := range items {
@@ -69,13 +72,13 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 		// 1. 行政区码节点链(始终建,即便没有 device/channel)
 		var civilNode *gbmodels.GbCatalogNode
 		if it.CivilCode != "" {
-			n, err := findOrCreateCivilCodeChain(tx, sender.TenantID, it.CivilCode)
+			n, err := findOrCreateCivilCodeChain(tx, sender.TenantID, sender.OwnerDeptID, it.CivilCode)
 			if err != nil {
 				return err
 			}
 			civilNode = n
 		} else if cls.CivilCode != "" {
-			n, err := findOrCreateCivilCodeChain(tx, sender.TenantID, cls.CivilCode)
+			n, err := findOrCreateCivilCodeChain(tx, sender.TenantID, sender.OwnerDeptID, cls.CivilCode)
 			if err != nil {
 				return err
 			}
@@ -89,7 +92,7 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 			switch pCls.NodeType {
 			case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
 				// 找/建 上级 biz_group / virtual_org 节点
-				pn, err := findOrCreateNode(tx, sender.TenantID, pCls.NodeType, it.ParentID, civilNodeID(civilNode), civilNodePath(civilNode), it.ParentID)
+				pn, err := findOrCreateNode(tx, sender.TenantID, sender.OwnerDeptID, pCls.NodeType, it.ParentID, civilNodeID(civilNode), civilNodePath(civilNode), it.ParentID)
 				if err != nil {
 					return err
 				}
@@ -104,28 +107,28 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 		// 3. 根据当前 item 类型走不同路径
 		switch cls.NodeType {
 		case gbmodels.NodeTypeChannel:
-			node, _, err := upsertChannel(ctx, tx, sender.TenantID, sender.SourceDeviceID, it, cls, parentNode)
+			node, _, err := upsertChannel(ctx, tx, sender.TenantID, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
 			if err != nil {
 				return err
 			}
 			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.TenantID, node, cls, lookupSourceDeviceID(tx, sender))
+				return recordAnomaly(ctx, tx, sender.TenantID, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
 			}
 		case gbmodels.NodeTypeDevice:
-			node, _, err := upsertDevice(ctx, tx, sender.TenantID, it, cls, parentNode)
+			node, _, err := upsertDevice(ctx, tx, sender.TenantID, sender.OwnerDeptID, it, cls, parentNode)
 			if err != nil {
 				return err
 			}
 			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.TenantID, node, cls, lookupSourceDeviceID(tx, sender))
+				return recordAnomaly(ctx, tx, sender.TenantID, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
 			}
 		case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
-			node, err := findOrCreateNode(tx, sender.TenantID, cls.NodeType, it.DeviceID, civilNodeID(parentNode), civilNodePath(parentNode), fallbackName(it.Name, it.DeviceID))
+			node, err := findOrCreateNode(tx, sender.TenantID, sender.OwnerDeptID, cls.NodeType, it.DeviceID, civilNodeID(parentNode), civilNodePath(parentNode), fallbackName(it.Name, it.DeviceID))
 			if err != nil {
 				return err
 			}
 			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.TenantID, node, cls, lookupSourceDeviceID(tx, sender))
+				return recordAnomaly(ctx, tx, sender.TenantID, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
 			}
 		case gbmodels.NodeTypeCivilCode:
 			// 已在第 1 步处理;跳过
@@ -191,4 +194,16 @@ func lookupSourceDeviceID(tx *gorm.DB, sender Sender) *uint {
 	}
 	id := dev.ID
 	return &id
+}
+
+func (p *Pipeline) resolveOwnerDeptID(ctx context.Context, sender Sender) uint {
+	if sender.SourceDeviceID == "" {
+		return 0
+	}
+	var dev gbmodels.GbDevice
+	res := p.db.WithContext(ctx).Where("device_id = ?", sender.SourceDeviceID).Limit(1).Find(&dev)
+	if res.Error != nil || res.RowsAffected == 0 {
+		return 0
+	}
+	return dev.OwnerDeptID
 }

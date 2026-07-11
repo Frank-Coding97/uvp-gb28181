@@ -48,6 +48,9 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		Status:            gbmodels.DeviceStatusOnline, // 物化缓存,顺手刷
 		TenantID:          1,                           // 当前 GB28181 未严格落租户,与 Catalog 管道默认租户保持一致
 	}
+	if existing != nil {
+		d.OwnerDeptID = existing.OwnerDeptID
+	}
 	if err := gbmodels.Upsert(ctx, d); err != nil {
 		return false, fmt.Errorf("自动建档失败: %w", err)
 	}

@@ -181,15 +181,6 @@ const buildDetail = (profile: ProfileItem): Detail[] => {
     { key: "description", label: "描述", value: profile.description || "-" }
   ];
 
-  if (profile.defaultTenant) {
-    details.push({ key: "defaultTenant", label: "默认租户", value: profile.defaultTenant?.name || "-" });
-    details.push({
-      key: "tenants",
-      label: "关联租户",
-      value: profile.tenants?.map((tenant: any) => tenant.name).join(", ") || "-"
-    });
-  }
-
   return details;
 };
 
