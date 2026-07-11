@@ -76,6 +76,7 @@ export interface ChannelVO {
     latitude: number;
     status: number;
     streamId: string;
+    transport?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -131,6 +132,7 @@ export interface AnomalyRecord {
 
 export interface DeviceQuery {
     q?: string;
+    nodeId?: number;
     status?: OnlineStatus;
     vendor?: string;
     page?: number;

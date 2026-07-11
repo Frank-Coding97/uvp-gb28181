@@ -58,7 +58,7 @@ func newDeviceMgmtRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 
 func seedDevicesAndChannels(t *testing.T, db *gorm.DB) (devID uint, chOnlineID, chOfflineID uint) {
 	t.Helper()
-	d := &gbmodels.GbDevice{TenantID: 1, DeviceID: "34020000002000000001", Name: "测试 NVR", Manufacturer: "Hikvision", Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
+	d := &gbmodels.GbDevice{TenantID: 1, DeviceID: "34020000002000000001", Name: "测试 NVR", Manufacturer: "Hikvision", Transport: "UDP", Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
 	require.NoError(t, db.Create(d).Error)
 	ch1 := &gbmodels.GbChannel{TenantID: 1, DeviceID: "34020000002000000001", ChannelID: "37011200001310000001", Name: "通道 在线", Status: gbmodels.ChannelStatusOnline, Latitude: 36.685, Longitude: 117.05, PTZType: 1}
 	ch2 := &gbmodels.GbChannel{TenantID: 1, DeviceID: "34020000002000000001", ChannelID: "37011200001310000002", Name: "通道 离线", Status: gbmodels.ChannelStatusOffline}
@@ -88,6 +88,37 @@ func TestDeviceMgmt_ListDevices(t *testing.T) {
 	assert.EqualValues(t, 1, d["channelOnlineCount"])
 }
 
+func TestDeviceMgmt_ListDevices_FilterByCatalogNode(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	_, chOnID, _ := seedDevicesAndChannels(t, db)
+	other := &gbmodels.GbDevice{TenantID: 1, DeviceID: "34020000002000000002", Name: "其他 NVR", Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
+	require.NoError(t, db.Create(other).Error)
+
+	root := &gbmodels.GbCatalogNode{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/", Name: "历城区", Code: "370112"}
+	require.NoError(t, db.Create(root).Error)
+	chNode := &gbmodels.GbCatalogNode{
+		TenantID:  1,
+		NodeType:  gbmodels.NodeTypeChannel,
+		ParentID:  &root.ID,
+		Path:      "/1/2/",
+		Name:      "通道 在线",
+		Code:      "37011200001310000001",
+		ChannelID: &chOnID,
+	}
+	require.NoError(t, db.Create(chNode).Error)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/devices?nodeId="+uintStr(root.ID), nil)
+	r.ServeHTTP(w, req)
+
+	resp := unmarshal(t, w)
+	data := resp["data"].(map[string]any)
+	list := data["list"].([]any)
+	require.Len(t, list, 1)
+	d := list[0].(map[string]any)
+	assert.Equal(t, "34020000002000000001", d["deviceId"])
+}
+
 func TestDeviceMgmt_ListChannels_FilterStatus(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	seedDevicesAndChannels(t, db)
@@ -111,6 +142,7 @@ func TestDeviceMgmt_GetChannel(t *testing.T) {
 	resp := unmarshal(t, w)
 	data := resp["data"].(map[string]any)
 	assert.Equal(t, "通道 在线", data["name"])
+	assert.Equal(t, "UDP", data["transport"])
 }
 
 func TestDeviceMgmt_ChannelMounts(t *testing.T) {

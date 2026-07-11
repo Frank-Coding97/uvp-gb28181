@@ -15,12 +15,12 @@ import (
 
 // DeviceMgmtController 设备管理页主查询(plan §4.2 B2)
 //
-//   GET /devices               设备列表(多过滤 + 分页 + 排序 + mountCount)
-//   GET /device/:id            设备详情
-//   GET /channels              通道列表
-//   GET /channel/:id           通道详情
-//   GET /channel/:id/mounts    通道多挂载位置
-//   GET /channel/:id/timeline  通道 24h 在线时序(Phase 1 简化:基于 last_status_at)
+//	GET /devices               设备列表(多过滤 + 分页 + 排序 + mountCount)
+//	GET /device/:id            设备详情
+//	GET /channels              通道列表
+//	GET /channel/:id           通道详情
+//	GET /channel/:id/mounts    通道多挂载位置
+//	GET /channel/:id/timeline  通道 24h 在线时序(Phase 1 简化:基于 last_status_at)
 type DeviceMgmtController struct {
 	controllers.Common
 	db func() *gorm.DB
@@ -35,10 +35,15 @@ func (dc *DeviceMgmtController) SetDB(p func() *gorm.DB) { dc.db = p }
 // channelStats 单个 channel 的派生聚合
 type deviceVOExtra struct {
 	*gbmodels.GbDevice
-	Online            bool `json:"online"`
-	ChannelCount      int64 `json:"channelCount"`
-	ChannelOnlineCount int64 `json:"channelOnlineCount"`
-	OnlineRate        float64 `json:"onlineRate"`
+	Online             bool    `json:"online"`
+	ChannelCount       int64   `json:"channelCount"`
+	ChannelOnlineCount int64   `json:"channelOnlineCount"`
+	OnlineRate         float64 `json:"onlineRate"`
+}
+
+type channelVOExtra struct {
+	*gbmodels.GbChannel
+	Transport string `json:"transport"`
 }
 
 // ListDevices 设备列表
@@ -60,6 +65,42 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 	}
 
 	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Where("tenant_id = ?", tid)
+	// nodeId 过滤:按目录子树内的设备节点 + 通道所属设备反查设备列表
+	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
+		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
+			var root gbmodels.GbCatalogNode
+			if db.WithContext(c).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root).RowsAffected > 0 {
+				var deviceIDs []uint
+				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+					Where("tenant_id = ? AND node_type = ? AND path LIKE ? AND device_id IS NOT NULL", tid, gbmodels.NodeTypeDevice, root.Path+"%").
+					Pluck("device_id", &deviceIDs)
+
+				var channelIDs []uint
+				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).
+					Where("tenant_id = ? AND node_type = ? AND path LIKE ? AND channel_id IS NOT NULL", tid, gbmodels.NodeTypeChannel, root.Path+"%").
+					Pluck("channel_id", &channelIDs)
+
+				var channelDeviceCodes []string
+				if len(channelIDs) > 0 {
+					db.WithContext(c).Model(&gbmodels.GbChannel{}).
+						Where("tenant_id = ? AND id IN ?", tid, channelIDs).
+						Distinct().
+						Pluck("device_id", &channelDeviceCodes)
+				}
+
+				switch {
+				case len(deviceIDs) > 0 && len(channelDeviceCodes) > 0:
+					q = q.Where("id IN ? OR device_id IN ?", deviceIDs, channelDeviceCodes)
+				case len(deviceIDs) > 0:
+					q = q.Where("id IN ?", deviceIDs)
+				case len(channelDeviceCodes) > 0:
+					q = q.Where("device_id IN ?", channelDeviceCodes)
+				default:
+					q = q.Where("1=0")
+				}
+			}
+		}
+	}
 	if s := c.Query("status"); s != "" {
 		switch s {
 		case "online":
@@ -240,7 +281,7 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		return
 	}
 
-	dc.Success(c, gin.H{"list": list, "total": total, "page": page, "pageSize": pageSize})
+	dc.Success(c, gin.H{"list": dc.attachChannelTransport(c, db, list), "total": total, "page": page, "pageSize": pageSize})
 }
 
 // GetChannel 通道详情
@@ -266,7 +307,51 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 		dc.FailAndAbort(c, "通道不存在", nil)
 		return
 	}
-	dc.Success(c, ch)
+	items := dc.attachChannelTransport(c, db, []gbmodels.GbChannel{ch})
+	if len(items) == 0 {
+		dc.Success(c, ch)
+		return
+	}
+	dc.Success(c, items[0])
+}
+
+func (dc *DeviceMgmtController) attachChannelTransport(c *gin.Context, db *gorm.DB, channels []gbmodels.GbChannel) []channelVOExtra {
+	if len(channels) == 0 {
+		return []channelVOExtra{}
+	}
+	deviceIDs := make([]string, 0, len(channels))
+	seen := map[string]struct{}{}
+	for _, ch := range channels {
+		if ch.DeviceID == "" {
+			continue
+		}
+		if _, ok := seen[ch.DeviceID]; ok {
+			continue
+		}
+		seen[ch.DeviceID] = struct{}{}
+		deviceIDs = append(deviceIDs, ch.DeviceID)
+	}
+
+	transportByDevice := map[string]string{}
+	if len(deviceIDs) > 0 {
+		var devices []gbmodels.GbDevice
+		if err := db.WithContext(c).
+			Where("device_id IN ?", deviceIDs).
+			Find(&devices).Error; err == nil {
+			for _, dev := range devices {
+				transportByDevice[dev.DeviceID] = dev.Transport
+			}
+		}
+	}
+
+	out := make([]channelVOExtra, 0, len(channels))
+	for i := range channels {
+		out = append(out, channelVOExtra{
+			GbChannel: &channels[i],
+			Transport: transportByDevice[channels[i].DeviceID],
+		})
+	}
+	return out
 }
 
 // ListChannelMounts 通道挂载位置列表(plan §3.5 多视图挂载)

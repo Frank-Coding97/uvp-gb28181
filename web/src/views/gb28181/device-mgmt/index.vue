@@ -16,11 +16,14 @@ import {
     MapPin,
     Monitor,
     Play,
+    MoreHorizontal,
+    Pencil,
     RadioTower,
     RefreshCcw,
     Search,
     Settings2,
     SlidersHorizontal,
+    Trash2,
     Video,
     Download,
     Plus
@@ -71,7 +74,7 @@ const rootLoading = ref(false);
 const rowsLoading = ref(false);
 const mapLoading = ref(false);
 const page = ref(1);
-const pageSize = ref(6);
+const pageSize = ref(10);
 const total = ref(0);
 const noCoordCount = ref(0);
 const selectedRowKeys = ref<number[]>([]);
@@ -119,6 +122,14 @@ const flatTree = computed<TreeRow[]>(() => {
 
 const hasFilters = computed(() => Boolean(keyword.value || statusFilter.value || selectedNode.value));
 const selectedCount = computed(() => selectedRowKeys.value.length);
+const tablePagination = computed(() => ({
+    current: page.value,
+    pageSize: pageSize.value,
+    total: total.value,
+    showPageSize: true,
+    showTotal: true,
+    showJumper: true
+}));
 
 watch([viewMode, assetKind], () => {
     selectedRowKeys.value = [];
@@ -141,12 +152,35 @@ function relTime(value?: string | null) {
     return `${Math.floor(diff / 86400)} 天前`;
 }
 function displayName(item: { name?: string; channelId?: string; deviceId?: string }) { return item.name || item.channelId || item.deviceId || "未命名"; }
+function deviceNameText(item: { name?: string | null }) { return item.name?.trim() || "-"; }
+function manufacturerAbbr(value?: string | null) {
+    const text = value?.trim();
+    if (!text) return "-";
+    const chars = Array.from(text.replace(/\s+/g, ""));
+    return (chars.length <= 2 ? chars : chars.slice(0, 2)).join("").toUpperCase();
+}
 function vendorText(item: { manufacturer?: string; model?: string }) { return [item.manufacturer, item.model].filter(Boolean).join(" / ") || "未上报"; }
 function locationText(item: ChannelVO | MapMarker) { return !item.latitude || !item.longitude ? "无坐标" : `${item.longitude.toFixed(5)}, ${item.latitude.toFixed(5)}`; }
+function dateTime(value?: string | null) { if (!value || value.startsWith("0001-01-01")) return "-"; const d = new Date(value); if (Number.isNaN(d.getTime())) return "-"; return d.toLocaleString("zh-CN", { hour12: false }); }
+function endpointText(item: { ip?: string; port?: number }) { if (!item.ip) return "-"; return item.port ? `${item.ip}:${item.port}` : item.ip; }
+function transportText(value?: string | null) { return value ? value.toUpperCase() : "-"; }
+function cameraTypeText(ptzType?: number) { return ptzType && ptzType > 0 ? "球机 / PTZ" : "枪机"; }
+function modelVersionText(item: { model?: string; firmware?: string }) {
+    return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
+}
+function channelUniqueId(record: ChannelVO) { return `${record.deviceId}_${record.channelId}`; }
 function canExpand(node: CatalogNode) { return node.nodeType !== "channel"; }
 function shortCode(v?: string) { return !v ? "-" : v.length <= 14 ? v : `${v.slice(0, 6)}...${v.slice(-6)}`; }
 function projectX(longitude: number) { const min = 73; const max = 136; return Math.min(96, Math.max(4, ((longitude - min) / (max - min)) * 100)); }
 function projectY(latitude: number) { const min = 18; const max = 54; return Math.min(94, Math.max(6, 100 - ((latitude - min) / (max - min)) * 100)); }
+function showDeviceChannels(record: DeviceVO) {
+    keyword.value = record.deviceId;
+    selectedNode.value = null;
+    statusFilter.value = undefined;
+    assetKind.value = "channel";
+    page.value = 1;
+    refreshMainData();
+}
 
 async function loadTree() {
     rootLoading.value = true;
@@ -226,6 +260,7 @@ async function loadDevicesData() {
     try {
         const res = await listDevices({
             q: keyword.value.trim() || undefined,
+            nodeId: selectedNode.value?.id,
             status: statusFilter.value,
             page: page.value,
             pageSize: pageSize.value,
@@ -428,24 +463,64 @@ onMounted(async () => {
                             v-model:selected-keys="selectedRowKeys"
                             :data="channels"
                             :loading="rowsLoading"
-                            :pagination="false"
+                            :pagination="tablePagination"
                             row-key="id"
+                            :scroll="{ x: 1480 }"
                             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
                             class="dm-table"
+                            @page-change="onPageChange"
+                            @page-size-change="onPageSizeChange"
                         >
                             <template #columns>
-                                <a-table-column title="缩略图" :width="90">
-                                    <template #cell="{ record }"><div class="thumb"><div class="placeholder">{{ (record.manufacturer || 'UV').slice(0, 2).toUpperCase() }}</div></div></template>
+                                <a-table-column title="通道编号" :width="210">
+                                    <template #cell="{ record }">
+                                        <div class="code-cell">
+                                            <span class="code-main">{{ record.channelId }}</span>
+                                            <span class="code-sub">{{ channelUniqueId(record) }}</span>
+                                        </div>
+                                    </template>
                                 </a-table-column>
-                                <a-table-column title="设备名 / 编码" :width="320">
-                                    <template #cell="{ record }"><div class="device-name"><span class="pri">{{ displayName(record) }}<span v-if="record.ptzType > 0" class="mount-badge">PTZ</span></span><span class="sec">{{ record.channelId }}</span></div></template>
+                                <a-table-column title="通道名称" :width="180">
+                                    <template #cell="{ record }">
+                                        <div class="device-name">
+                                            <span class="pri">{{ displayName(record) }}</span>
+                                            <span class="sec">{{ shortCode(record.deviceId) }}</span>
+                                        </div>
+                                    </template>
                                 </a-table-column>
-                                <a-table-column title="厂商 / 型号" :width="180"><template #cell="{ record }"><div class="vendor-cell"><span class="v">{{ record.manufacturer || '-' }}</span><span class="m">{{ record.model || '-' }}</span></div></template></a-table-column>
-                                <a-table-column title="设备编号" :width="180"><template #cell="{ record }">{{ shortCode(record.deviceId) }}</template></a-table-column>
-                                <a-table-column title="类型" :width="120"><template #cell="{ record }"><span class="tag">{{ record.ptzType > 0 ? '球机 / PTZ' : '枪机' }}</span></template></a-table-column>
-                                <a-table-column title="状态" :width="100"><template #cell="{ record }"><span class="status-pill" :class="{ online: record.status === 1 }">{{ record.status === 1 ? '在线' : '离线' }}</span></template></a-table-column>
-                                <a-table-column title="最近心跳" :width="140"><template #cell="{ record }"><span class="relative" :class="{ warn: record.status === 0 }">{{ relTime(record.updatedAt) }}</span></template></a-table-column>
-                                <a-table-column title="操作" :width="120" fixed="right"><template #cell="{ record }"><button class="play-cta" type="button" @click="openChannel(record)"><Play :size="12" /> 点播</button></template></a-table-column>
+                                <a-table-column title="快照" :width="92" align="center">
+                                    <template #cell="{ record }">
+                                        <div class="thumb small"><div class="placeholder">{{ (record.manufacturer || 'UV').slice(0, 2).toUpperCase() }}</div></div>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="状态" :width="92">
+                                    <template #cell="{ record }"><span class="status-pill" :class="{ online: record.status === 1 }">{{ record.status === 1 ? '在线' : '离线' }}</span></template>
+                                </a-table-column>
+                                <a-table-column title="摄像头类型" :width="120">
+                                    <template #cell="{ record }"><span class="tag">{{ cameraTypeText(record.ptzType) }}</span></template>
+                                </a-table-column>
+                                <a-table-column title="媒体传输" :width="110">
+                                    <template #cell="{ record }"><span class="tag muted">{{ transportText(record.transport) }}</span></template>
+                                </a-table-column>
+                                <a-table-column title="厂商 / 型号" :width="170"><template #cell="{ record }"><div class="vendor-cell"><span class="v">{{ record.manufacturer || '-' }}</span><span class="m">{{ record.model || '-' }}</span></div></template></a-table-column>
+                                <a-table-column title="位置信息" :width="180"><template #cell="{ record }"><span class="relative">{{ locationText(record) }}</span></template></a-table-column>
+                                <a-table-column title="更新 / 创建时间" :width="190">
+                                    <template #cell="{ record }">
+                                        <div class="time-cell">
+                                            <span>{{ dateTime(record.updatedAt) }}</span>
+                                            <span>{{ dateTime(record.createdAt) }}</span>
+                                        </div>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="操作" :width="180" fixed="right">
+                                    <template #cell="{ record }">
+                                        <div class="table-actions">
+                                            <button class="play-cta" type="button" @click="openChannel(record)"><Play :size="12" /> 播放</button>
+                                            <button class="icon-btn small framed" type="button" @click="Message.info('通道编辑待接入')"><Pencil :size="13" /></button>
+                                            <button class="icon-btn small framed" type="button" @click="Message.info('更多通道操作待接入')"><MoreHorizontal :size="14" /></button>
+                                        </div>
+                                    </template>
+                                </a-table-column>
                             </template>
                         </a-table>
 
@@ -454,27 +529,83 @@ onMounted(async () => {
                             v-model:selected-keys="selectedRowKeys"
                             :data="devices"
                             :loading="rowsLoading"
-                            :pagination="false"
+                            :pagination="tablePagination"
                             row-key="id"
+                            :scroll="{ x: 1820 }"
                             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
                             class="dm-table"
+                            @page-change="onPageChange"
+                            @page-size-change="onPageSizeChange"
                         >
                             <template #columns>
-                                <a-table-column title="缩略图" :width="90"><template #cell="{ record }"><div class="thumb"><div class="placeholder">{{ (record.manufacturer || 'UV').slice(0, 2).toUpperCase() }}</div></div></template></a-table-column>
-                                <a-table-column title="设备名 / 编码" :width="320"><template #cell="{ record }"><div class="device-name"><span class="pri">{{ displayName(record) }}</span><span class="sec">{{ record.deviceId }}</span></div></template></a-table-column>
-                                <a-table-column title="厂商 / 型号" :width="180"><template #cell="{ record }"><div class="vendor-cell"><span class="v">{{ record.manufacturer || '-' }}</span><span class="m">{{ record.model || '-' }}</span></div></template></a-table-column>
-                                <a-table-column title="IP : 端口" :width="180"><template #cell="{ record }">{{ record.ip || '-' }}{{ record.port ? `:${record.port}` : '' }}</template></a-table-column>
-                                <a-table-column title="通道" :width="140"><template #cell="{ record }"><span class="tag">{{ record.channelOnlineCount }}/{{ record.channelCount }}</span></template></a-table-column>
-                                <a-table-column title="状态" :width="100"><template #cell="{ record }"><span class="status-pill" :class="{ online: record.online }">{{ record.online ? '在线' : '离线' }}</span></template></a-table-column>
-                                <a-table-column title="最近心跳" :width="140"><template #cell="{ record }"><span class="relative" :class="{ warn: !record.online }">{{ relTime(record.keepaliveTime) }}</span></template></a-table-column>
-                                <a-table-column title="操作" :width="120" fixed="right"><template #cell="{ record }"><button class="play-cta" type="button" @click="openDevice(record)">详情</button></template></a-table-column>
+                                <a-table-column title="厂商" :width="180">
+                                    <template #cell="{ record }">
+                                        <div class="brand-cell">
+                                            <div class="thumb brand-thumb">
+                                                <span class="placeholder">{{ manufacturerAbbr(record.manufacturer) }}</span>
+                                            </div>
+                                            <span class="brand-name">{{ record.manufacturer || '-' }}</span>
+                                        </div>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="状态" :width="92">
+                                    <template #cell="{ record }">
+                                        <span class="status-inline" :class="{ online: record.online }">
+                                            <span class="status-dot"></span>
+                                            <span>{{ record.online ? '在线' : '离线' }}</span>
+                                        </span>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="设备名称" :width="170">
+                                    <template #cell="{ record }">
+                                        <div class="device-name">
+                                            <span class="pri">{{ deviceNameText(record) }}</span>
+                                        </div>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="设备编号" :width="190">
+                                    <template #cell="{ record }"><span class="code-main">{{ record.deviceId }}</span></template>
+                                </a-table-column>
+                                <a-table-column title="通道数" :width="100">
+                                    <template #cell="{ record }"><span class="tag">{{ record.channelOnlineCount }}/{{ record.channelCount }}</span></template>
+                                </a-table-column>
+                                <a-table-column title="传输模式" :width="110">
+                                    <template #cell="{ record }"><span class="tag">{{ transportText(record.transport) }}</span></template>
+                                </a-table-column>
+                                <a-table-column title="来源地址" :width="180">
+                                    <template #cell="{ record }"><span class="code-main mono">{{ endpointText(record) }}</span></template>
+                                </a-table-column>
+                                <a-table-column title="型号 / 版本" :width="160"><template #cell="{ record }"><span class="relative">{{ modelVersionText(record) }}</span></template></a-table-column>
+                                <a-table-column title="注册时间" :width="170">
+                                    <template #cell="{ record }">
+                                        <span class="relative">{{ dateTime(record.registerTime) }}</span>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="心跳时间" :width="170">
+                                    <template #cell="{ record }">
+                                        <span class="relative" :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="操作" :width="180" fixed="right">
+                                    <template #cell="{ record }">
+                                        <div class="table-actions">
+                                            <button class="play-cta" type="button" @click="showDeviceChannels(record)"><Folder :size="12" /> 通道</button>
+                                            <button class="btn-ghost compact" type="button" @click="openDevice(record)">详情</button>
+                                        </div>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="设备控制" :width="150" fixed="right">
+                                    <template #cell="{ record }">
+                                        <div class="table-actions">
+                                            <button class="icon-btn small framed" type="button" @click="Message.info(`准备刷新 ${record.deviceId} 目录`)"><RefreshCcw :size="13" /></button>
+                                            <button class="icon-btn small framed" type="button" @click="Message.info('设备编辑待接入')"><Pencil :size="13" /></button>
+                                            <button class="icon-btn small framed danger" type="button" @click="Message.info('设备删除待接入')"><Trash2 :size="13" /></button>
+                                        </div>
+                                    </template>
+                                </a-table-column>
                             </template>
                         </a-table>
 
-                        <div class="pagination-bar">
-                            <span>共 {{ total }} 项</span>
-                            <a-pagination :current="page" :page-size="pageSize" :total="total" show-total show-page-size @change="onPageChange" @page-size-change="onPageSizeChange" />
-                        </div>
                     </div>
 
                     <div v-else-if="viewMode === 'card'" class="view-body card-grid">
@@ -925,10 +1056,77 @@ onMounted(async () => {
     border-radius: 6px;
     background: linear-gradient(135deg, #0f172a, #1d4ed8);
 }
+.thumb.small {
+    width: 50px;
+    height: 32px;
+    margin: 0 auto;
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+}
+.thumb.small .placeholder {
+    color: var(--uvp-text-tertiary);
+}
+.thumb.brand-thumb {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--uvp-brand) 86%, #ffffff 14%), color-mix(in srgb, var(--uvp-brand-cyan) 82%, #0f172a 18%));
+}
 .placeholder { color: #fff; font-size: 10px; font-weight: 700; }
+.brand-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.brand-name {
+    overflow: hidden;
+    color: var(--uvp-text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .device-name { display: grid; gap: 2px; }
 .pri { display: inline-flex; align-items: center; gap: 6px; color: var(--uvp-text-primary); font-weight: 600; }
-.sec { color: var(--uvp-text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.pri.mono,
+.sec,
+.code-main,
+.code-sub {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.sec { color: var(--uvp-text-tertiary); font-size: 12px; }
+.code-cell,
+.time-cell {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+.code-main {
+    color: var(--uvp-text-primary);
+    font-size: 12px;
+    font-weight: 620;
+    white-space: nowrap;
+}
+.code-main.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.code-sub {
+    overflow: hidden;
+    color: var(--uvp-text-tertiary);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.time-cell span:first-child {
+    color: var(--uvp-text-secondary);
+    font-size: 12px;
+}
+.time-cell span:last-child {
+    color: var(--uvp-text-tertiary);
+    font-size: 12px;
+}
+.time-cell .warn {
+    color: var(--uvp-warning);
+}
 .mount-badge {
     display: inline-flex;
     align-items: center;
@@ -952,6 +1150,11 @@ onMounted(async () => {
     background: var(--uvp-brand-soft);
     font-size: 12px;
 }
+.tag.muted {
+    color: var(--uvp-text-secondary);
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+}
 .status-pill {
     display: inline-flex;
     align-items: center;
@@ -972,18 +1175,57 @@ onMounted(async () => {
 }
 .relative { color: var(--uvp-text-secondary); font-size: 12px; }
 .relative.warn { color: var(--uvp-warning); }
+.status-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--uvp-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+.status-inline .status-dot {
+    width: 8px;
+    height: 8px;
+    box-shadow: none;
+    background: #ef4444;
+}
+.status-inline.online {
+    color: var(--uvp-text-primary);
+}
+.status-inline.online .status-dot {
+    background: #10b981;
+}
 .play-cta {
     color: var(--uvp-brand);
     background: var(--uvp-brand-soft);
     border: 1px solid color-mix(in srgb, var(--uvp-brand) 24%, transparent);
     font-size: 12px;
 }
-.pagination-bar {
-    display: flex;
+.table-actions {
+    display: inline-flex;
     align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    color: var(--uvp-text-tertiary);
+    gap: 6px;
+    white-space: nowrap;
+}
+.btn-ghost.compact {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    font-size: 12px;
+}
+.icon-btn.framed {
+    color: var(--uvp-text-secondary);
+    background: var(--uvp-search-secondary-btn-bg);
+    border: 1px solid var(--uvp-search-secondary-btn-border);
+}
+.icon-btn.framed:hover {
+    color: var(--uvp-brand);
+    border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-search-secondary-btn-border));
+}
+.icon-btn.framed.danger:hover {
+    color: var(--uvp-danger, #ef4444);
+    background: color-mix(in srgb, var(--uvp-danger, #ef4444) 8%, transparent);
+    border-color: color-mix(in srgb, var(--uvp-danger, #ef4444) 30%, var(--uvp-search-secondary-btn-border));
 }
 .card-grid {
     display: grid;
