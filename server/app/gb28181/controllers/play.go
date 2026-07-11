@@ -27,7 +27,7 @@ func NewPlayController(svc *play.Service) *PlayController {
 }
 
 // Start 发起点播
-// @router POST /api/gb28181/play/:deviceId/:channelId
+// @Router /api/gb28181/play/{deviceId}/{channelId} [post]
 func (pc *PlayController) Start(c *gin.Context) {
 	if pc.svc == nil {
 		pc.FailAndAbort(c, "点播服务未启用(GB28181 disabled?)", nil)
@@ -51,7 +51,7 @@ func (pc *PlayController) Start(c *gin.Context) {
 }
 
 // Stop 停播
-// @router DELETE /api/gb28181/play/:streamId
+// @Router /api/gb28181/play/{streamId} [delete]
 func (pc *PlayController) Stop(c *gin.Context) {
 	if pc.svc == nil {
 		pc.FailAndAbort(c, "点播服务未启用", nil)

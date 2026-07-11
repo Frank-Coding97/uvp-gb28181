@@ -1,7 +1,6 @@
 package controllers_test
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -15,13 +14,10 @@ import (
 	"gorm.io/gorm"
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
-	gbdevice "uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/response"
 )
 
 func newScopedDeviceDB(t *testing.T) *gorm.DB {
@@ -40,19 +36,17 @@ func newScopedDeviceDB(t *testing.T) *gorm.DB {
 	prevDB := app.GormDbMysql
 	prevConfig := app.ConfigYml
 	prevResponse := app.Response
+	prevZapLog := app.ZapLog
 	t.Cleanup(func() {
 		app.GormDbMysql = prevDB
 		app.ConfigYml = prevConfig
 		app.Response = prevResponse
+		app.ZapLog = prevZapLog
 	})
 	app.GormDbMysql = db
 	app.ConfigYml = scopedTestConfig{}
-	if app.ZapLog == nil {
-		app.ZapLog = zap.NewNop()
-	}
-	if app.Response == nil {
-		app.Response = response.NewResponseHandler()
-	}
+	app.Response = mockResponse{}
+	app.ZapLog = zap.NewNop()
 	return db
 }
 
@@ -65,9 +59,7 @@ func newScopedDeviceRouter(t *testing.T, userID uint) (*gin.Engine, *gorm.DB) {
 	dc := gbcontrollers.NewDeviceController()
 	pc := gbcontrollers.NewPlayController(&play.Service{})
 	r := gin.New()
-	r.Use(gin.Recovery(), func(c *gin.Context) {
-		c.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: userID}})
-	})
+	r.Use(gin.Recovery(), withClaims(userID))
 	r.GET("/api/gb28181/device/:deviceId", dc.GetByDeviceID)
 	r.GET("/api/gb28181/device/:deviceId/channels", dc.ListChannels)
 	r.POST("/api/gb28181/play/:deviceId/:channelId", pc.Start)
@@ -111,9 +103,8 @@ func seedScopedDeviceRows(t *testing.T, db *gorm.DB) {
 
 func TestDeviceController_GetByDeviceID_FiltersOwnerDept(t *testing.T) {
 	r, _ := newScopedDeviceRouter(t, 100)
-
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/gb28181/device/34020000002000000020", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/gb28181/device/34020000002000000020", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -124,9 +115,8 @@ func TestDeviceController_GetByDeviceID_FiltersOwnerDept(t *testing.T) {
 
 func TestDeviceController_ListChannels_FiltersOwnerDept(t *testing.T) {
 	r, _ := newScopedDeviceRouter(t, 100)
-
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/gb28181/device/34020000002000000020/channels", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/api/gb28181/device/34020000002000000020/channels", nil)
 	r.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
@@ -135,18 +125,18 @@ func TestDeviceController_ListChannels_FiltersOwnerDept(t *testing.T) {
 	assert.Equal(t, "设备不存在", resp["message"])
 }
 
-func TestPlayController_StartStop_FilterOwnerDept(t *testing.T) {
+func TestPlayController_FiltersOwnerDept(t *testing.T) {
 	r, _ := newScopedDeviceRouter(t, 100)
 
 	start := httptest.NewRecorder()
-	startReq, _ := http.NewRequest("POST", "/api/gb28181/play/34020000002000000020/37011200001310000020", nil)
+	startReq, _ := http.NewRequest(http.MethodPost, "/api/gb28181/play/34020000002000000020/37011200001310000020", nil)
 	r.ServeHTTP(start, startReq)
 	startResp := unmarshal(t, start)
 	assert.EqualValues(t, 1, startResp["code"])
 	assert.Equal(t, "通道不存在", startResp["message"])
 
 	stop := httptest.NewRecorder()
-	stopReq, _ := http.NewRequest("DELETE", "/api/gb28181/play/dept20-stream", nil)
+	stopReq, _ := http.NewRequest(http.MethodDelete, "/api/gb28181/play/dept20-stream", nil)
 	r.ServeHTTP(stop, stopReq)
 	stopResp := unmarshal(t, stop)
 	assert.EqualValues(t, 1, stopResp["code"])
@@ -169,31 +159,7 @@ func (scopedTestConfig) Set(string, interface{})          {}
 func (scopedTestConfig) SaveConfig() error                { return nil }
 func (scopedTestConfig) GetString(keyName string) string {
 	if keyName == "gormv2.usedbtype" {
-		return consts.DbTypeMySql
+		return "mysql"
 	}
 	return ""
-}
-
-func TestHandleRegister_DefaultsOwnerDept(t *testing.T) {
-	db := newScopedDeviceDB(t)
-	rootID := uint(0)
-	require.NoError(t, db.Create(&basemodels.SysDepartment{
-		BaseModel: basemodels.BaseModel{ID: 9},
-		ParentID:  &rootID,
-		Name:      "总部",
-	}).Error)
-
-	isFirst, err := gbdevice.HandleRegister(context.Background(), gbdevice.RegisterInfo{
-		DeviceID:  "34020000002000000009",
-		Transport: "UDP",
-		IP:        "127.0.0.1",
-		Port:      5060,
-		Expires:   3600,
-	}, 60)
-	require.NoError(t, err)
-	assert.True(t, isFirst)
-
-	var got gbmodels.GbDevice
-	require.NoError(t, db.Where("device_id = ?", "34020000002000000009").First(&got).Error)
-	assert.EqualValues(t, 9, got.OwnerDeptID)
 }

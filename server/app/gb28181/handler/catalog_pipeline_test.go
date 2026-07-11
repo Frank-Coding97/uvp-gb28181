@@ -38,6 +38,11 @@ func TestHandleCatalogResponse_PipelineIntegration(t *testing.T) {
 		&gbmodels.GbDevice{},
 	))
 
+	require.NoError(t, db.Create(&gbmodels.GbDevice{
+		DeviceID:            "34020000002000000001",
+		OwnerDeptID:         1,
+		SubscribeCapability: gbmodels.SubscribeUnknown,
+	}).Error)
 	SetCatalogPipeline(catalog.New(db))
 	t.Cleanup(func() { SetCatalogPipeline(nil) })
 

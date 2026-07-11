@@ -1,22 +1,25 @@
 package controllers
 
 import (
+	"errors"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbcatalog "uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // AnomalyController 异常治理(plan §4.2 B4)
 //
-//	GET /anomaly?resolved=0&page=1
-//	POST /anomaly/:id/resolve
-//	POST /anomaly/batch-resolve
+// GET /anomaly?resolved=0&page=1
+// POST /anomaly/:id/resolve
+// POST /anomaly/batch-resolve
 type AnomalyController struct {
 	controllers.Common
 	db func() *gorm.DB
@@ -51,38 +54,49 @@ func (ac *AnomalyController) List(c *gin.Context) {
 	}
 
 	q := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c))
-	if r := c.DefaultQuery("resolved", "0"); r == "0" {
+	switch c.DefaultQuery("resolved", "0") {
+	case "0":
 		q = q.Where("resolved = ?", false)
-	} else if r == "1" {
+	case "1":
 		q = q.Where("resolved = ?", true)
 	}
 
 	var total int64
 	if err := q.Count(&total).Error; err != nil {
-		ac.FailAndAbort(c, "统计失败", err)
-		return
-	}
-	var rs []gbmodels.GbAnomalyRecord
-	if err := q.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rs).Error; err != nil {
-		ac.FailAndAbort(c, "查询失败", err)
+		ac.FailAndAbort(c, "统计 anomaly 失败", err)
 		return
 	}
 
-	out := make([]anomalyVO, 0, len(rs))
-	for i := range rs {
-		r := rs[i]
+	var list []gbmodels.GbAnomalyRecord
+	if err := q.Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
+		ac.FailAndAbort(c, "查询 anomaly 失败", err)
+		return
+	}
+
+	vos := make([]anomalyVO, 0, len(list))
+	for _, r := range list {
 		var n gbmodels.GbCatalogNode
-		db.WithContext(c).Scopes(ownerDeptScope(c)).Select("id, name, path").Where("id = ?", r.CatalogNodeID).Limit(1).Find(&n)
-		out = append(out, anomalyVO{
+		_ = db.WithContext(c).
+			Scopes(ownerDeptScope(c)).
+			Select("id, name, path").
+			Where("id = ?", r.CatalogNodeID).
+			Limit(1).
+			Find(&n).Error
+		vos = append(vos, anomalyVO{
 			GbAnomalyRecord: &r,
 			NodeName:        n.Name,
 			NodePath:        n.Path,
 		})
 	}
-	ac.Success(c, gin.H{"list": out, "total": total, "page": page, "pageSize": pageSize})
+
+	ac.Success(c, gin.H{
+		"list":     vos,
+		"total":    total,
+		"page":     page,
+		"pageSize": pageSize,
+	})
 }
 
-// resolveAction body
 type resolveAction struct {
 	Action         string `json:"action" binding:"required"` // "change-type" / "change-mount" / "mark-resolved"
 	TargetType     string `json:"targetType"`                // change-type 时:civil_code/biz_group/virtual_org
@@ -164,11 +178,25 @@ func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, id uint, 
 			return gorm.ErrRecordNotFound
 		}
 		if rec.Resolved {
-			return nil // 已处理:幂等,不报错
+			return nil
 		}
 
-		// change-type:更新 catalog_node.node_type + 清 anomaly
-		if body.Action == "change-type" && body.TargetType != "" {
+		var node gbmodels.GbCatalogNode
+		if body.Action != "mark-resolved" {
+			nodeRes := tx.Scopes(ownerDeptScope(c)).Where("id = ?", rec.CatalogNodeID).Limit(1).Find(&node)
+			if nodeRes.Error != nil {
+				return nodeRes.Error
+			}
+			if nodeRes.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+
+		switch body.Action {
+		case "change-type":
+			if body.TargetType == "" {
+				return errors.New("targetType 不能为空")
+			}
 			if err := tx.Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
 				Where("id = ?", rec.CatalogNodeID).
 				Updates(map[string]any{
@@ -178,16 +206,68 @@ func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, id uint, 
 				}).Error; err != nil {
 				return err
 			}
-		}
-		if body.Action == "change-mount" && body.TargetParentID != 0 {
+		case "change-mount":
+			if body.TargetParentID == 0 {
+				return errors.New("targetParentId 不能为空")
+			}
+			if body.TargetParentID == node.ID {
+				return errors.New("不能挂载到自身")
+			}
+
+			var target gbmodels.GbCatalogNode
+			targetRes := tx.Scopes(ownerDeptScope(c)).Where("id = ?", body.TargetParentID).Limit(1).Find(&target)
+			if targetRes.Error != nil {
+				return targetRes.Error
+			}
+			if targetRes.RowsAffected == 0 {
+				return errors.New("目标父节点不存在")
+			}
+			if target.OwnerDeptID != rec.OwnerDeptID || node.OwnerDeptID != rec.OwnerDeptID {
+				return errors.New("目标父节点不在当前归属部门")
+			}
+			if strings.HasPrefix(target.Path, node.Path) {
+				return errors.New("不能挂载到自己的子树下")
+			}
+
+			oldPath := node.Path
+			newPath := gbcatalog.BuildPath(target.Path, node.ID)
+			newDepth := gbcatalog.DepthFromPath(newPath)
 			if err := tx.Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
-				Where("id = ?", rec.CatalogNodeID).
-				Update("parent_id", body.TargetParentID).Error; err != nil {
+				Where("id = ?", node.ID).
+				Updates(map[string]any{
+					"parent_id":      body.TargetParentID,
+					"path":           newPath,
+					"depth":          newDepth,
+					"anomaly":        false,
+					"anomaly_reason": "",
+				}).Error; err != nil {
 				return err
 			}
+
+			var descendants []gbmodels.GbCatalogNode
+			if err := tx.Scopes(ownerDeptScope(c)).
+				Where("owner_dept_id = ? AND path LIKE ? AND id <> ?", rec.OwnerDeptID, oldPath+"%", node.ID).
+				Find(&descendants).Error; err != nil {
+				return err
+			}
+			for _, child := range descendants {
+				childPath := strings.Replace(child.Path, oldPath, newPath, 1)
+				childDepth := gbcatalog.DepthFromPath(childPath)
+				if err := tx.Model(&gbmodels.GbCatalogNode{}).
+					Where("id = ?", child.ID).
+					Updates(map[string]any{
+						"path":  childPath,
+						"depth": childDepth,
+					}).Error; err != nil {
+					return err
+				}
+			}
+		case "mark-resolved":
+			// 只标记记录已处理,不改节点结构
+		default:
+			return errors.New("不支持的 resolve action")
 		}
 
-		// 标 resolved
 		now := time.Now()
 		return tx.Model(&rec).Updates(map[string]any{
 			"resolved":        true,

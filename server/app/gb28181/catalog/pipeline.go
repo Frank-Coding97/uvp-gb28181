@@ -4,6 +4,7 @@ package catalog
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"gorm.io/gorm"
 
@@ -13,17 +14,19 @@ import (
 // Pipeline 入库管道(plan §3 / A3 核心)
 //
 // 责任:
-//   - Ingest      — 一批 CatalogItem 全量入库(manscdp 解析后调用)
-//   - IngestDelta — Subscribe NOTIFY 单条事件入库(Add / Update / Del)
+// - Ingest — 一批 CatalogItem 全量入库(manscdp 解析后调用)
+// - IngestDelta — Subscribe NOTIFY 单条事件入库(Add / Update / Del)
 //
 // 实现策略:
-//   - 单事务处理一批(失败回滚)
-//   - 节点未找到时 find-or-create(物化路径回填)
-//   - 多挂载通过 gb_channel_mount 表
-//   - anomaly 编码 → 兜底 virtual_org + 写审计
+// - 单事务处理一批(失败回滚)
+// - 节点未找到时 find-or-create(物化路径回填)
+// - 多挂载通过 gb_channel_mount 表
+// - anomaly 编码 -> 兜底 virtual_org + 写审计
 type Pipeline struct {
 	db *gorm.DB
 }
+
+var ErrOwnerDeptRequired = errors.New("catalog: owner dept required")
 
 // New 构造 Pipeline
 func New(db *gorm.DB) *Pipeline {
@@ -44,28 +47,27 @@ func (p *Pipeline) Ingest(ctx context.Context, sender Sender, items []CatalogIte
 	if sender.OwnerDeptID == 0 {
 		sender.OwnerDeptID = p.resolveOwnerDeptID(ctx, sender)
 	}
+	if sender.OwnerDeptID == 0 {
+		return fmt.Errorf("%w: sourceDeviceId=%s", ErrOwnerDeptRequired, sender.SourceDeviceID)
+	}
 
 	var firstErr error
 	for _, it := range items {
 		if it.DeviceID == "" {
 			continue
 		}
-		if err := p.ingestOne(ctx, sender, it); err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			// 继续,不停
+		if err := p.ingestOne(ctx, sender, it); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
 	return firstErr
 }
 
-// ingestOne 单条入库(独立事务,失败不影响其他)
 func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem) error {
 	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		cls := Classify(it.DeviceID)
 
-		// 1. 行政区码节点链(始终建,即便没有 device/channel)
+		// 1. 行政区链(优先 item.CivilCode,没有则回退 classify 结果)
 		var civilNode *gbmodels.GbCatalogNode
 		if it.CivilCode != "" {
 			n, err := findOrCreateCivilCodeChain(tx, sender.OwnerDeptID, it.CivilCode)
@@ -87,8 +89,15 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 			pCls := Classify(it.ParentID)
 			switch pCls.NodeType {
 			case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
-				// 找/建 上级 biz_group / virtual_org 节点
-				pn, err := findOrCreateNode(tx, sender.OwnerDeptID, pCls.NodeType, it.ParentID, civilNodeID(civilNode), civilNodePath(civilNode), it.ParentID)
+				pn, err := findOrCreateNode(
+					tx,
+					sender.OwnerDeptID,
+					pCls.NodeType,
+					it.ParentID,
+					civilNodeID(civilNode),
+					civilNodePath(civilNode),
+					it.ParentID,
+				)
 				if err != nil {
 					return err
 				}
@@ -119,7 +128,15 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
 			}
 		case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
-			node, err := findOrCreateNode(tx, sender.OwnerDeptID, cls.NodeType, it.DeviceID, civilNodeID(parentNode), civilNodePath(parentNode), fallbackName(it.Name, it.DeviceID))
+			node, err := findOrCreateNode(
+				tx,
+				sender.OwnerDeptID,
+				cls.NodeType,
+				it.DeviceID,
+				civilNodeID(parentNode),
+				civilNodePath(parentNode),
+				fallbackName(it.Name, it.DeviceID),
+			)
 			if err != nil {
 				return err
 			}
@@ -140,16 +157,24 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 // action:add / update / del(GB/T 28181 §11.5.3)
 // del:软删(deleted_at),不真删
 func (p *Pipeline) IngestDelta(ctx context.Context, sender Sender, action string, it CatalogItem) error {
+	if sender.OwnerDeptID == 0 {
+		sender.OwnerDeptID = p.resolveOwnerDeptID(ctx, sender)
+	}
+	if sender.OwnerDeptID == 0 {
+		return fmt.Errorf("%w: sourceDeviceId=%s", ErrOwnerDeptRequired, sender.SourceDeviceID)
+	}
+
 	switch action {
 	case "ADD", "add":
 		return p.Ingest(ctx, sender, []CatalogItem{it})
 	case "UPDATE", "update":
 		// 当前 ingestOne 自带 upsert 行为;UPDATE = ingest
 		return p.Ingest(ctx, sender, []CatalogItem{it})
-	case "DEL", "del":
+	case "DEL", "del", "DELETE", "delete":
 		return p.softDelete(ctx, sender, it.DeviceID)
+	default:
+		return errors.New("catalog: unknown delta action: " + action)
 	}
-	return errors.New("catalog: unknown delta action: " + action)
 }
 
 // softDelete 软删节点 + 关联(deleted_at)
@@ -157,9 +182,35 @@ func (p *Pipeline) softDelete(ctx context.Context, sender Sender, code string) e
 	if code == "" {
 		return nil
 	}
-	return p.db.WithContext(ctx).
-		Where("code = ?", code).
-		Delete(&gbmodels.GbCatalogNode{}).Error
+	if sender.OwnerDeptID == 0 {
+		return ErrOwnerDeptRequired
+	}
+	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var nodes []gbmodels.GbCatalogNode
+		if err := tx.Where("code = ? AND owner_dept_id = ?", code, sender.OwnerDeptID).Find(&nodes).Error; err != nil {
+			return err
+		}
+		for _, node := range nodes {
+			if node.ChannelID != nil {
+				if err := tx.Where("channel_id = ? AND owner_dept_id = ?", *node.ChannelID, sender.OwnerDeptID).
+					Delete(&gbmodels.GbChannelMount{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("id = ? AND owner_dept_id = ?", *node.ChannelID, sender.OwnerDeptID).
+					Delete(&gbmodels.GbChannel{}).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Where("catalog_node_id = ? AND owner_dept_id = ?", node.ID, sender.OwnerDeptID).
+				Delete(&gbmodels.GbAnomalyRecord{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&node).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // civilNodeID 返回 *uint(handle nil)

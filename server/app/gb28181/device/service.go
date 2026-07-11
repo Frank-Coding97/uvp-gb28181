@@ -7,7 +7,6 @@ import (
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
 
 // RegisterInfo 注册时采集的信息
@@ -53,7 +52,10 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		d.OwnerDeptID = existing.OwnerDeptID
 	}
 	if d.OwnerDeptID == 0 {
-		d.OwnerDeptID = defaultOwnerDeptID(ctx)
+		d.OwnerDeptID, err = defaultOwnerDeptID(ctx)
+		if err != nil {
+			return false, err
+		}
 	}
 	if err := gbmodels.Upsert(ctx, d); err != nil {
 		return false, fmt.Errorf("自动建档失败: %w", err)
@@ -61,17 +63,22 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 	return isFirst, nil
 }
 
-func defaultOwnerDeptID(ctx context.Context) uint {
-	var dept basemodels.SysDepartment
-	result := app.DB().WithContext(ctx).
-		Where("parent_id = 0 OR parent_id IS NULL").
-		Order("sort ASC, id ASC").
-		Limit(1).
-		Find(&dept)
-	if result.Error == nil && result.RowsAffected > 0 && dept.ID != 0 {
-		return dept.ID
+func defaultOwnerDeptID(ctx context.Context) (uint, error) {
+	if app.ConfigYml == nil {
+		return 0, fmt.Errorf("自动建档失败: 缺少配置,未设置 gb28181.device.default_owner_dept_id")
 	}
-	return 1
+	deptID := uint(app.ConfigYml.GetInt("gb28181.device.default_owner_dept_id"))
+	if deptID == 0 {
+		return 0, fmt.Errorf("自动建档失败: 未配置 gb28181.device.default_owner_dept_id")
+	}
+	var count int64
+	if err := app.DB().WithContext(ctx).Table("sys_department").Where("id = ?", deptID).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("自动建档失败: 校验默认部门失败: %w", err)
+	}
+	if count == 0 {
+		return 0, fmt.Errorf("自动建档失败: 默认部门 %d 不存在", deptID)
+	}
+	return deptID, nil
 }
 
 // HandleUnregister 处理注销(Expires=0):即时置离线(事实上停止心跳 + 缓存翻转)
