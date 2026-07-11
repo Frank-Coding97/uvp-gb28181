@@ -54,7 +54,7 @@ func DepthFromPath(path string) uint8 {
 // 例:civilCode="370112" → 先找/建 "37"(省) → "3701"(市) → "370112"(区县)三级节点
 // 返回最末端节点。注:当前简化实现按 6 位级别(2+2+2)拆分,实际 GB/T 2260
 // 行政区码可能要按字典层级拆,Phase 2 可优化。
-func findOrCreateCivilCodeChain(db *gorm.DB, tenantID, ownerDeptID uint, civilCode string) (*gbmodels.GbCatalogNode, error) {
+func findOrCreateCivilCodeChain(db *gorm.DB, ownerDeptID uint, civilCode string) (*gbmodels.GbCatalogNode, error) {
 	if civilCode == "" {
 		return nil, nil
 	}
@@ -78,7 +78,7 @@ func findOrCreateCivilCodeChain(db *gorm.DB, tenantID, ownerDeptID uint, civilCo
 			parentID = &prev.ID
 			parentPath = prev.Path
 		}
-		node, err := findOrCreateNode(db, tenantID, ownerDeptID, gbmodels.NodeTypeCivilCode, c, parentID, parentPath, civilCodeDisplayName(c))
+		node, err := findOrCreateNode(db, ownerDeptID, gbmodels.NodeTypeCivilCode, c, parentID, parentPath, civilCodeDisplayName(c))
 		if err != nil {
 			return nil, err
 		}
@@ -89,11 +89,10 @@ func findOrCreateCivilCodeChain(db *gorm.DB, tenantID, ownerDeptID uint, civilCo
 
 // findOrCreateNode 通用 find-or-create
 //
-// 用 (tenant_id, node_type, code) 联合查找,避免重复创建;
+// 用 (owner_dept_id, node_type, code, parent_id) 联合查找,避免重复创建;
 // 不存在时:Create + 用新 ID 回填 path,二次 Update。
 func findOrCreateNode(
 	db *gorm.DB,
-	tenantID uint,
 	ownerDeptID uint,
 	nodeType gbmodels.NodeType,
 	code string,
@@ -102,7 +101,7 @@ func findOrCreateNode(
 	name string,
 ) (*gbmodels.GbCatalogNode, error) {
 	var existed gbmodels.GbCatalogNode
-	q := db.Where("tenant_id = ? AND node_type = ? AND code = ?", tenantID, nodeType, code)
+	q := db.Where("owner_dept_id = ? AND node_type = ? AND code = ?", ownerDeptID, nodeType, code)
 	if parentID != nil {
 		q = q.Where("parent_id = ?", *parentID)
 	} else {
@@ -131,7 +130,6 @@ func findOrCreateNode(
 	// (历史 bug:之前还多 +1,把行政区链算成 0→2→3 跳级。)
 	depth := DepthFromPath(parentPath)
 	n := &gbmodels.GbCatalogNode{
-		TenantID:    tenantID,
 		OwnerDeptID: ownerDeptID,
 		NodeType:    nodeType,
 		ParentID:    parentID,

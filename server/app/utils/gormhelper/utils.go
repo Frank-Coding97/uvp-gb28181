@@ -7,11 +7,6 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// getTenantIDFromContext 去租户化后不再从上下文读取租户ID
-func GetTenantIDFromContext(ctx interface{}) uint {
-	return 0
-}
-
 // getCurrentUserIDFromContext 从上下文中获取当前用户ID
 func GetCurrentUserIDFromContext(ctx interface{}) uint {
 	// 检查context是否为gin.Context类型

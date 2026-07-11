@@ -56,6 +56,9 @@ func setupEnv(t *testing.T) {
 	if !app.GormDbMysql.Migrator().HasColumn(&gbmodels.GbDevice{}, "subscribe_capability") {
 		t.Skipf("跳过(MySQL gb_device 缺 subscribe_capability 列,请先跑 migration 2026-06-26-catalog-b-plus.sql)")
 	}
+	if !app.GormDbMysql.Migrator().HasColumn(&gbmodels.GbDevice{}, "owner_dept_id") {
+		t.Skipf("跳过(MySQL gb_device 缺 owner_dept_id 列,请先跑 Phase 1/2 去租户迁移)")
+	}
 }
 
 func testCfg() gbconfig.Config {

@@ -14,7 +14,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
-func TestHandleRegister_DefaultTenant(t *testing.T) {
+func TestHandleRegister_AutoCreatesDevice(t *testing.T) {
 	prevDB := app.GormDbMysql
 	prevConfig := app.ConfigYml
 	t.Cleanup(func() {
@@ -39,7 +39,6 @@ func TestHandleRegister_DefaultTenant(t *testing.T) {
 
 	var got gbmodels.GbDevice
 	require.NoError(t, db.Where("device_id = ?", "34020000002000000001").First(&got).Error)
-	assert.EqualValues(t, 1, got.TenantID)
 	assert.Equal(t, gbmodels.DeviceStatusOnline, got.Status)
 }
 

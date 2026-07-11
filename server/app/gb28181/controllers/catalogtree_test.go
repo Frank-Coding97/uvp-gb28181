@@ -59,17 +59,17 @@ func newCatalogTreeRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 
 func seedTree(t *testing.T, db *gorm.DB) (rootID, jinanID uint) {
 	t.Helper()
-	root := &gbmodels.GbCatalogNode{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, Path: "/", Depth: 0, Name: "山东省", Code: "37"}
+	root := &gbmodels.GbCatalogNode{NodeType: gbmodels.NodeTypeCivilCode, Path: "/", Depth: 0, Name: "山东省", Code: "37"}
 	require.NoError(t, db.Create(root).Error)
 	root.Path = "/" + uintStr(root.ID) + "/"
 	require.NoError(t, db.Model(root).Update("path", root.Path).Error)
 
-	jn := &gbmodels.GbCatalogNode{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, ParentID: &root.ID, Path: "", Depth: 1, Name: "济南", Code: "3701"}
+	jn := &gbmodels.GbCatalogNode{NodeType: gbmodels.NodeTypeCivilCode, ParentID: &root.ID, Path: "", Depth: 1, Name: "济南", Code: "3701"}
 	require.NoError(t, db.Create(jn).Error)
 	jn.Path = root.Path + uintStr(jn.ID) + "/"
 	require.NoError(t, db.Model(jn).Update("path", jn.Path).Error)
 
-	ch1 := &gbmodels.GbCatalogNode{TenantID: 1, NodeType: gbmodels.NodeTypeChannel, ParentID: &jn.ID, Path: "", Depth: 2, Name: "通道 1", Code: "37011200001310000001"}
+	ch1 := &gbmodels.GbCatalogNode{NodeType: gbmodels.NodeTypeChannel, ParentID: &jn.ID, Path: "", Depth: 2, Name: "通道 1", Code: "37011200001310000001"}
 	require.NoError(t, db.Create(ch1).Error)
 	ch1.Path = jn.Path + uintStr(ch1.ID) + "/"
 	require.NoError(t, db.Model(ch1).Update("path", ch1.Path).Error)
@@ -171,8 +171,8 @@ func TestCatalogTree_Node_NotFound(t *testing.T) {
 func TestCatalogTree_AnomalyCount(t *testing.T) {
 	r, db := newCatalogTreeRouter(t)
 	// 加 2 条 anomaly(1 已处理 / 1 未处理)
-	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{TenantID: 1, CatalogNodeID: 1, RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}).Error)
-	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{TenantID: 1, CatalogNodeID: 2, RawCode: "Y", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: true}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{CatalogNodeID: 1, RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{CatalogNodeID: 2, RawCode: "Y", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: true}).Error)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/catalog/anomaly/count", nil)

@@ -41,7 +41,6 @@ func (ac *AnomalyController) List(c *gin.Context) {
 		ac.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "20"))
 	if page <= 0 {
@@ -51,7 +50,7 @@ func (ac *AnomalyController) List(c *gin.Context) {
 		pageSize = 20
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Where("tenant_id = ?", tid).Scopes(ownerDeptScope(c))
+	q := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c))
 	if r := c.DefaultQuery("resolved", "0"); r == "0" {
 		q = q.Where("resolved = ?", false)
 	} else if r == "1" {
@@ -99,7 +98,6 @@ func (ac *AnomalyController) Resolve(c *gin.Context) {
 		ac.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		ac.FailAndAbort(c, "ID 不合法", err)
@@ -111,7 +109,7 @@ func (ac *AnomalyController) Resolve(c *gin.Context) {
 		return
 	}
 
-	if err := ac.applyResolve(c, db, tid, uint(id), body); err != nil {
+	if err := ac.applyResolve(c, db, uint(id), body); err != nil {
 		ac.FailAndAbort(c, "resolve 失败", err)
 		return
 	}
@@ -126,7 +124,6 @@ func (ac *AnomalyController) BatchResolve(c *gin.Context) {
 		ac.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	var body struct {
 		IDs            []uint `json:"ids" binding:"required"`
 		Action         string `json:"action" binding:"required"`
@@ -141,7 +138,7 @@ func (ac *AnomalyController) BatchResolve(c *gin.Context) {
 	succeeded := make([]uint, 0, len(body.IDs))
 	failed := make([]map[string]any, 0)
 	for _, id := range body.IDs {
-		err := ac.applyResolve(c, db, tid, id, resolveAction{
+		err := ac.applyResolve(c, db, id, resolveAction{
 			Action:         body.Action,
 			TargetType:     body.TargetType,
 			TargetParentID: body.TargetParentID,
@@ -156,10 +153,10 @@ func (ac *AnomalyController) BatchResolve(c *gin.Context) {
 }
 
 // applyResolve 实际执行 resolve(单条,事务内)
-func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, tid uint, id uint, body resolveAction) error {
+func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, id uint, body resolveAction) error {
 	return db.WithContext(c).Transaction(func(tx *gorm.DB) error {
 		var rec gbmodels.GbAnomalyRecord
-		res := tx.Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&rec)
+		res := tx.Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&rec)
 		if res.Error != nil {
 			return res.Error
 		}
@@ -173,7 +170,7 @@ func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, tid uint,
 		// change-type:更新 catalog_node.node_type + 清 anomaly
 		if body.Action == "change-type" && body.TargetType != "" {
 			if err := tx.Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
-				Where("tenant_id = ? AND id = ?", tid, rec.CatalogNodeID).
+				Where("id = ?", rec.CatalogNodeID).
 				Updates(map[string]any{
 					"node_type":      body.TargetType,
 					"anomaly":        false,
@@ -184,7 +181,7 @@ func (ac *AnomalyController) applyResolve(c *gin.Context, db *gorm.DB, tid uint,
 		}
 		if body.Action == "change-mount" && body.TargetParentID != 0 {
 			if err := tx.Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
-				Where("tenant_id = ? AND id = ?", tid, rec.CatalogNodeID).
+				Where("id = ?", rec.CatalogNodeID).
 				Update("parent_id", body.TargetParentID).Error; err != nil {
 				return err
 			}

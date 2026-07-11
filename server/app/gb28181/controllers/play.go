@@ -10,8 +10,9 @@ import (
 )
 
 // PlayController 国标点播 REST
-//   POST   /api/gb28181/play/:deviceId/:channelId   发起点播
-//   DELETE /api/gb28181/play/:streamId              停播
+//
+//	POST   /api/gb28181/play/:deviceId/:channelId   发起点播
+//	DELETE /api/gb28181/play/:streamId              停播
 type PlayController struct {
 	controllers.Common
 	svc *play.Service

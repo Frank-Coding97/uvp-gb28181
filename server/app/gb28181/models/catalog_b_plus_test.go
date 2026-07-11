@@ -40,25 +40,25 @@ func TestCatalogNode_AutoMigrate(t *testing.T) {
 	assert.True(t, mig.HasColumn(&gbmodels.GbCatalogNode{}, "node_type"))
 
 	// 索引存在(plan §3.4)
-	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_tenant_anomaly"))
-	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_tenant_path"))
-	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_tenant_type"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_owner_dept_anomaly"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_owner_dept_path"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_owner_dept_type"))
 }
 
 // TestChannelMount_UniqueConstraint A1.1 RED-验证 2:多挂载唯一约束 (channel_id, parent_node_id)
 func TestChannelMount_UniqueConstraint(t *testing.T) {
 	db := newCatalogTestDB(t)
 
-	m1 := &gbmodels.GbChannelMount{ChannelID: 1, ParentNodeID: 10, IsPrimary: true, TenantID: 1}
+	m1 := &gbmodels.GbChannelMount{ChannelID: 1, ParentNodeID: 10, IsPrimary: true}
 	require.NoError(t, db.Create(m1).Error)
 
 	// 同一 channel 挂同一 parent 第二次应失败(唯一约束)
-	m2 := &gbmodels.GbChannelMount{ChannelID: 1, ParentNodeID: 10, IsPrimary: false, TenantID: 1}
+	m2 := &gbmodels.GbChannelMount{ChannelID: 1, ParentNodeID: 10, IsPrimary: false}
 	err := db.Create(m2).Error
 	assert.Error(t, err, "重复挂载应被唯一约束拦截")
 
 	// 同一 channel 挂不同 parent 应允许(多挂载)
-	m3 := &gbmodels.GbChannelMount{ChannelID: 1, ParentNodeID: 20, IsPrimary: false, TenantID: 1}
+	m3 := &gbmodels.GbChannelMount{ChannelID: 1, ParentNodeID: 20, IsPrimary: false}
 	require.NoError(t, db.Create(m3).Error, "挂不同节点应允许")
 }
 
@@ -71,7 +71,7 @@ func TestAnomalyRecord_AutoMigrate(t *testing.T) {
 	assert.True(t, mig.HasColumn(&gbmodels.GbAnomalyRecord{}, "raw_code"))
 	assert.True(t, mig.HasColumn(&gbmodels.GbAnomalyRecord{}, "fallback_type"))
 	assert.True(t, mig.HasColumn(&gbmodels.GbAnomalyRecord{}, "resolved"))
-	assert.True(t, mig.HasIndex(&gbmodels.GbAnomalyRecord{}, "idx_tenant_resolved"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAnomalyRecord{}, "idx_owner_dept_resolved"))
 }
 
 // TestDevice_SubscribeFields A1.1 RED-验证 4:gb_device 加 subscribe_* 字段
@@ -118,10 +118,10 @@ func TestCatalogNode_PathSubtreeQuery(t *testing.T) {
 	db := newCatalogTestDB(t)
 
 	nodes := []*gbmodels.GbCatalogNode{
-		{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, Path: "/", Depth: 0, Name: "root", Code: "37"},
-		{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/", Depth: 1, Name: "济南", Code: "370100"},
-		{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/2/", Depth: 2, Name: "历城区", Code: "370105"},
-		{TenantID: 1, NodeType: gbmodels.NodeTypeChannel, Path: "/1/2/3/", Depth: 3, Name: "通道 1"},
+		{NodeType: gbmodels.NodeTypeCivilCode, Path: "/", Depth: 0, Name: "root", Code: "37"},
+		{NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/", Depth: 1, Name: "济南", Code: "370100"},
+		{NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/2/", Depth: 2, Name: "历城区", Code: "370105"},
+		{NodeType: gbmodels.NodeTypeChannel, Path: "/1/2/3/", Depth: 3, Name: "通道 1"},
 	}
 	for _, n := range nodes {
 		require.NoError(t, db.Create(n).Error)

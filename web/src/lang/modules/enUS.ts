@@ -141,7 +141,6 @@ export default {
         ["file-manager"]: "file manager",
         ["api-management"]: "api management",
         ["plugin-example"]: "plugin example",
-        ["tenant"]: "tenant management",
         ["codegen"]: "code generation",
         ["plugins-manager"]: "plugins manager",
         ["params-manager"]: "params manager",

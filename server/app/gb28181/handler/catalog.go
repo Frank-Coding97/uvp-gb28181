@@ -67,7 +67,7 @@ func getCatalogPipeline() *catalog.Pipeline {
 // A4 改造:
 //   - 旧路径:gbmodels.UpsertChannel(只写 gb_channel)
 //   - 新路径:catalog.Pipeline.Ingest(写 gb_channel + gb_catalog_node + gb_channel_mount
-//             + classify/anomaly 兜底)
+//   - classify/anomaly 兜底)
 //
 // pipeline 不可用时(db nil)回退到旧路径,保证生产兼容
 func HandleCatalogResponse(ctx context.Context, body []byte) {
@@ -88,7 +88,6 @@ func HandleCatalogResponse(ctx context.Context, body []byte) {
 			items = append(items, manscdpToCatalogItem(it))
 		}
 		if e := pipeline.Ingest(ctx, catalog.Sender{
-			TenantID:       0, // 兼容:未严格落多租户,pipeline 内部默认 tenant 1
 			SourceDeviceID: resp.DeviceID,
 		}, items); e != nil {
 			app.ZapLog.Error("Catalog Pipeline.Ingest 失败(部分通道未入库)",

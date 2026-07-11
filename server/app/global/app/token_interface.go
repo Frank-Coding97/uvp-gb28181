@@ -47,10 +47,8 @@ type TokenServiceInterface interface {
 
 // ClaimsUser 用户声明信息
 type ClaimsUser struct {
-	UserID     uint   `json:"userId"`               // 用户ID
-	Username   string `json:"username"`             // 用户名
-	TenantID   uint   `json:"tenantId,omitempty"`   // Deprecated: 去租户化后不再写入新token
-	TenantCode string `json:"tenantCode,omitempty"` // Deprecated: 去租户化后不再写入新token
+	UserID   uint   `json:"userId"`   // 用户ID
+	Username string `json:"username"` // 用户名
 }
 
 // Claims JWT声明结构

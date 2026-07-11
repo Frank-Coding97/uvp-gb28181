@@ -141,7 +141,6 @@ export default {
         ["file-manager"]: "文件管理",
         ["api-management"]: "接口管理",
         ["plugin-example"]: "插件示例",
-        ["tenant"]: "租户管理",
         ["codegen"]: "代码生成",
         ["plugins-manager"]: "插件管理",
         ["params-manager"]: "参数管理",

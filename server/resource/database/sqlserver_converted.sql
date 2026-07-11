@@ -19,7 +19,6 @@ CREATE TABLE [demo_students] (
     [updated_at] DATETIME,
     [deleted_at] DATETIME,
     [created_by] BIGINT DEFAULT 0,
-    [tenant_id] BIGINT DEFAULT 0,
     PRIMARY KEY ([student_id])
 );
 
@@ -58,28 +57,27 @@ CREATE TABLE [example] (
     [updated_at] DATETIME,
     [deleted_at] DATETIME,
     [created_by] INT,
-    [tenant_id] BIGINT DEFAULT 0,
     PRIMARY KEY ([id])
 );
 
 
 -- Records of example
 SET IDENTITY_INSERT [example] ON;
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (1, '项目管理系统', '用于管理项目进度和任务分配的系统', '2024-01-15 09:30:00', '2024-01-20 14:25:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (2, '客户关系管理', '帮助企业维护客户关系的软件平台', '2024-01-16 10:15:00', '2024-01-22 11:40:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (3, '财务分析工具', '提供财务报表和数据分析功能', '2024-01-17 14:20:00', '2024-01-25 16:30:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (4, '库存管理系统', '实时跟踪和管理库存水平', '2024-01-18 08:45:00', '2024-01-26 09:15:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (5, '人力资源平台', '员工信息管理和招聘流程优化', '2024-01-19 11:30:00', '2024-01-27 13:20:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (6, '在线学习系统', '提供课程管理和在线学习功能', '2024-01-20 15:10:00', '2024-01-28 17:05:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (7, '营销自动化', '自动化营销活动和客户跟进', '2024-01-21 09:00:00', '2024-01-29 10:45:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (8, '数据可视化', '将数据转化为直观的图表和报告', '2024-01-22 13:25:00', '2024-01-30 15:30:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (9, '移动应用开发', '跨平台移动应用开发框架', '2024-01-23 16:40:00', '2024-01-31 18:20:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (10, '云存储服务', '安全可靠的云端文件存储解决方案', '2024-01-24 10:50:00', '2024-02-01 12:35:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (11, '智能客服系统', '基于AI的智能客户服务助手', '2024-01-25 14:15:00', '2024-02-02 16:10:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (12, '供应链管理', '优化供应链流程和物流管理', '2024-01-26 08:30:00', '2024-02-03 10:25:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (13, '质量控制系统', '产品质量检测和流程监控', '2024-01-27 11:45:00', '2024-02-04 13:40:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (14, '企业门户网站', '企业信息发布和员工协作平台', '2024-01-28 15:20:00', '2024-02-05 17:15:00', NULL, 1, 1);
-INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (15, '数据分析平台', '大数据处理和分析工具集', '2024-01-29 09:35:00', '2024-02-06 11:30:00', NULL, 1, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (1, '项目管理系统', '用于管理项目进度和任务分配的系统', '2024-01-15 09:30:00', '2024-01-20 14:25:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (2, '客户关系管理', '帮助企业维护客户关系的软件平台', '2024-01-16 10:15:00', '2024-01-22 11:40:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (3, '财务分析工具', '提供财务报表和数据分析功能', '2024-01-17 14:20:00', '2024-01-25 16:30:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (4, '库存管理系统', '实时跟踪和管理库存水平', '2024-01-18 08:45:00', '2024-01-26 09:15:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (5, '人力资源平台', '员工信息管理和招聘流程优化', '2024-01-19 11:30:00', '2024-01-27 13:20:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (6, '在线学习系统', '提供课程管理和在线学习功能', '2024-01-20 15:10:00', '2024-01-28 17:05:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (7, '营销自动化', '自动化营销活动和客户跟进', '2024-01-21 09:00:00', '2024-01-29 10:45:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (8, '数据可视化', '将数据转化为直观的图表和报告', '2024-01-22 13:25:00', '2024-01-30 15:30:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (9, '移动应用开发', '跨平台移动应用开发框架', '2024-01-23 16:40:00', '2024-01-31 18:20:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (10, '云存储服务', '安全可靠的云端文件存储解决方案', '2024-01-24 10:50:00', '2024-02-01 12:35:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (11, '智能客服系统', '基于AI的智能客户服务助手', '2024-01-25 14:15:00', '2024-02-02 16:10:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (12, '供应链管理', '优化供应链流程和物流管理', '2024-01-26 08:30:00', '2024-02-03 10:25:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (13, '质量控制系统', '产品质量检测和流程监控', '2024-01-27 11:45:00', '2024-02-04 13:40:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (14, '企业门户网站', '企业信息发布和员工协作平台', '2024-01-28 15:20:00', '2024-02-05 17:15:00', NULL, 1);
+INSERT INTO [example] ([id], [name], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (15, '数据分析平台', '大数据处理和分析工具集', '2024-01-29 09:35:00', '2024-02-06 11:30:00', NULL, 1);
 -- Table structure for sys_affix
 SET IDENTITY_INSERT [example] OFF;
 IF OBJECT_ID('sys_affix', 'U') IS NOT NULL DROP TABLE [sys_affix];
@@ -96,7 +94,6 @@ CREATE TABLE [sys_affix] (
     [deleted_at] DATETIME,
     [created_by] INT,
     [suffix] NVARCHAR(100),
-    [tenant_id] BIGINT DEFAULT 0,
     [thumbnail_path] NVARCHAR(255),
     [thumbnail_name] NVARCHAR(255),
     [thumbnail_url] NVARCHAR(255),
@@ -122,7 +119,6 @@ CREATE TABLE [sys_affix_chunk] (
     [updated_at] DATETIME,
     [deleted_at] DATETIME,
     [created_by] INT,
-    [tenant_id] BIGINT DEFAULT 0,
     PRIMARY KEY ([id])
 );
 
@@ -497,14 +493,13 @@ CREATE TABLE [sys_department] (
     [updated_at] DATETIME,
     [deleted_at] DATETIME,
     [created_by] BIGINT,
-    [tenant_id] BIGINT DEFAULT 0,
     PRIMARY KEY ([id])
 );
 
 
 -- Records of sys_department
 SET IDENTITY_INSERT [sys_department] ON;
-INSERT INTO [sys_department] ([id], [parent_id], [name], [status], [leader], [phone], [email], [sort], [describe], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (1, 0, '总部', 1, '张明', '13800000001', 'headquarters@company.com', 1, '公司总部管理部门', '2023-01-15 09:00:00', '2025-10-31 17:05:24', NULL, 1, 0);
+INSERT INTO [sys_department] ([id], [parent_id], [name], [status], [leader], [phone], [email], [sort], [describe], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (1, 0, '总部', 1, '张明', '13800000001', 'headquarters@company.com', 1, '公司总部管理部门', '2023-01-15 09:00:00', '2025-10-31 17:05:24', NULL, 1);
 -- Table structure for sys_dict
 SET IDENTITY_INSERT [sys_department] OFF;
 IF OBJECT_ID('sys_dict', 'U') IS NOT NULL DROP TABLE [sys_dict];
@@ -628,7 +623,6 @@ INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_com
 INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_comment], [data_extra], [data_column_key], [data_unsigned], [is_primary], [go_type], [front_type], [custom_name], [require], [list_show], [form_show], [query_show], [query_type], [form_type], [dict_type], [gorm_tag]) VALUES (195, 23, 'updated_at', 'datetime', '更新时间', '', '', 0, 0, 'time.Time', 'string', 'updated_at', NULL, NULL, 1, NULL, '', '', '', 'column:updated_at');
 INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_comment], [data_extra], [data_column_key], [data_unsigned], [is_primary], [go_type], [front_type], [custom_name], [require], [list_show], [form_show], [query_show], [query_type], [form_type], [dict_type], [gorm_tag]) VALUES (196, 23, 'deleted_at', 'datetime', '删除时间', '', '', 0, 0, 'time.Time', 'string', 'deleted_at', NULL, NULL, 1, NULL, '', '', '', 'column:deleted_at');
 INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_comment], [data_extra], [data_column_key], [data_unsigned], [is_primary], [go_type], [front_type], [custom_name], [require], [list_show], [form_show], [query_show], [query_type], [form_type], [dict_type], [gorm_tag]) VALUES (197, 23, 'created_by', 'int', '创建人', '', '', 1, 0, 'uint', 'number', 'created_by', NULL, NULL, 1, NULL, '', '', '', 'column:created_by');
-INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_comment], [data_extra], [data_column_key], [data_unsigned], [is_primary], [go_type], [front_type], [custom_name], [require], [list_show], [form_show], [query_show], [query_type], [form_type], [dict_type], [gorm_tag]) VALUES (198, 23, 'tenant_id', 'int', '租户ID字段', '', '', 1, 0, 'uint', 'number', 'tenant_id', NULL, NULL, 1, 1, '', '', '', 'column:tenant_id');
 INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_comment], [data_extra], [data_column_key], [data_unsigned], [is_primary], [go_type], [front_type], [custom_name], [require], [list_show], [form_show], [query_show], [query_type], [form_type], [dict_type], [gorm_tag]) VALUES (199, 24, 'id', 'int', '主键ID', 'auto_increment', 'PRI', 1, 1, 'uint', 'number', 'tc_id', 1, 1, 1, 1, '', '', '', 'column:id;primaryKey;not NULL;autoIncrement');
 INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_comment], [data_extra], [data_column_key], [data_unsigned], [is_primary], [go_type], [front_type], [custom_name], [require], [list_show], [form_show], [query_show], [query_type], [form_type], [dict_type], [gorm_tag]) VALUES (200, 24, 'name', 'varchar', '教师姓名', '', '', 0, 0, 'string', 'string', 'tc_name', 1, 1, 1, 1, 'LIKE', 'input', '', 'column:name;not NULL');
 INSERT INTO [sys_gen_field] ([id], [gen_id], [data_name], [data_type], [data_comment], [data_extra], [data_column_key], [data_unsigned], [is_primary], [go_type], [front_type], [custom_name], [require], [list_show], [form_show], [query_show], [query_type], [form_type], [dict_type], [gorm_tag]) VALUES (201, 24, 'employee_id', 'varchar', '工号', '', '', 0, 0, 'string', 'string', 'employee_id', 1, 1, 1, 1, 'BETWEEN', '', '', 'column:employee_id');
@@ -929,7 +923,6 @@ CREATE TABLE [sys_operation_logs] (
     [duration] BIGINT,
     [error_msg] NVARCHAR(MAX),
     [location] NVARCHAR(100),
-    [tenant_id] BIGINT DEFAULT 0,
     PRIMARY KEY ([id])
 );
 
@@ -950,15 +943,14 @@ CREATE TABLE [sys_role] (
     [created_by] BIGINT,
     [data_scope] INT DEFAULT 0,
     [checked_depts] NVARCHAR(1000),
-    [tenant_id] BIGINT DEFAULT 0,
     PRIMARY KEY ([id])
 );
 
 
 -- Records of sys_role
 SET IDENTITY_INSERT [sys_role] ON;
-INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts], [tenant_id]) VALUES (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12', '2025-09-30 15:53:24', NULL, 1, 1, '', 0);
-INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts], [tenant_id]) VALUES (2, '演示', 0, 1, '', 0, '2025-10-14 15:12:09', '2025-10-17 15:34:47', NULL, 1, 0, '', 0);
+INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts]) VALUES (1, '系统管理员', 0, 1, '最高权限管理员角色', 0, '2025-09-01 17:32:12', '2025-09-30 15:53:24', NULL, 1, 1, '');
+INSERT INTO [sys_role] ([id], [name], [sort], [status], [description], [parent_id], [created_at], [updated_at], [deleted_at], [created_by], [data_scope], [checked_depts]) VALUES (2, '演示', 0, 1, '', 0, '2025-10-14 15:12:09', '2025-10-17 15:34:47', NULL, 1, 0, '');
 -- Table structure for sys_role_menu
 SET IDENTITY_INSERT [sys_role] OFF;
 IF OBJECT_ID('sys_role_menu', 'U') IS NOT NULL DROP TABLE [sys_role_menu];
@@ -1102,30 +1094,7 @@ INSERT INTO [sys_role_menu] VALUES (2, 140336);
 INSERT INTO [sys_role_menu] VALUES (2, 140338);
 INSERT INTO [sys_role_menu] VALUES (2, 140339);
 INSERT INTO [sys_role_menu] VALUES (2, 140340);
--- Table structure for sys_tenants
-IF OBJECT_ID('sys_tenants', 'U') IS NOT NULL DROP TABLE [sys_tenants];
-CREATE TABLE [sys_tenants] (
-    [id] BIGINT IDENTITY(1,1) NOT NULL,
-    [created_at] DATETIME,
-    [updated_at] DATETIME,
-    [deleted_at] DATETIME,
-    [created_by] BIGINT NOT NULL DEFAULT 0,
-    [name] NVARCHAR(100) NOT NULL,
-    [code] NVARCHAR(50) NOT NULL,
-    [description] NVARCHAR(500),
-    [status] TINYINT NOT NULL DEFAULT 1,
-    [domain] NVARCHAR(255),
-    [platform_domain] NVARCHAR(255),
-    [menu_permission] NVARCHAR(1000),
-    PRIMARY KEY ([id])
-);
-
-
--- Records of sys_tenants
-SET IDENTITY_INSERT [sys_tenants] ON;
-INSERT INTO [sys_tenants] ([id], [created_at], [updated_at], [deleted_at], [created_by], [name], [code], [description], [status], [domain], [platform_domain], [menu_permission]) VALUES (1, '2025-11-03 11:16:45', '2026-01-09 16:31:23', NULL, 1, '测试租户1', 'dom1', '', 1, '', '', '1,10,1001,140214,140215,140216,1002,140218,140219,140220,140221,140244,1003,140222,140223,140224,140225,140257,140258,1004,140229,140230,140231,1006,140255,140256,1007,140252,140264,140239,140240,140241,140242,140243,140254');
 -- Table structure for sys_users
-SET IDENTITY_INSERT [sys_tenants] OFF;
 IF OBJECT_ID('sys_users', 'U') IS NOT NULL DROP TABLE [sys_users];
 CREATE TABLE [sys_users] (
     [id] BIGINT IDENTITY(1,1) NOT NULL,
@@ -1143,15 +1112,14 @@ CREATE TABLE [sys_users] (
     [updated_at] DATETIME,
     [deleted_at] DATETIME,
     [created_by] BIGINT DEFAULT 0,
-    [tenant_id] BIGINT DEFAULT 0,
     PRIMARY KEY ([id])
 );
 
 
 -- Records of sys_users
 SET IDENTITY_INSERT [sys_users] ON;
-INSERT INTO [sys_users] ([id], [username], [password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (1, 'admin', '/PXiqzsBr7huy.Dqdwucyb795qiWcA6fsn0Lu.GLA.C', 'admin@example.com', 1, 1, '18800000006', '1', '超级管理员', '/public/uploads/2025-11-04/20251104_0945787a-8536-45fc-ba75-e94c8daaec06.jpeg', '超级管理员', '2025-08-18 14:55:05', '2025-11-17 17:38:01', NULL, 0, 0);
-INSERT INTO [sys_users] ([id], [username], [password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by], [tenant_id]) VALUES (4, 'demo', '/hhQYUffheRnDopYjiq1AKGdgrg1oatLha7tc/.Qe', '', 1, 1, '', '1', '演示账号', '', '演示账号', '2025-10-17 15:38:37', '2025-10-31 16:32:34', NULL, 1, 0);
+INSERT INTO [sys_users] ([id], [username], [password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (1, 'admin', '/PXiqzsBr7huy.Dqdwucyb795qiWcA6fsn0Lu.GLA.C', 'admin@example.com', 1, 1, '18800000006', '1', '超级管理员', '/public/uploads/2025-11-04/20251104_0945787a-8536-45fc-ba75-e94c8daaec06.jpeg', '超级管理员', '2025-08-18 14:55:05', '2025-11-17 17:38:01', NULL, 0);
+INSERT INTO [sys_users] ([id], [username], [password], [email], [status], [dept_id], [phone], [sex], [nick_name], [avatar], [description], [created_at], [updated_at], [deleted_at], [created_by]) VALUES (4, 'demo', '/hhQYUffheRnDopYjiq1AKGdgrg1oatLha7tc/.Qe', '', 1, 1, '', '1', '演示账号', '', '演示账号', '2025-10-17 15:38:37', '2025-10-31 16:32:34', NULL, 1);
 -- Table structure for sys_user_role
 SET IDENTITY_INSERT [sys_users] OFF;
 IF OBJECT_ID('sys_user_role', 'U') IS NOT NULL DROP TABLE [sys_user_role];
@@ -1165,18 +1133,7 @@ CREATE TABLE [sys_user_role] (
 -- Records of sys_user_role
 INSERT INTO [sys_user_role] VALUES (1, 1);
 INSERT INTO [sys_user_role] VALUES (4, 2);
--- Table structure for sys_user_tenant
-IF OBJECT_ID('sys_user_tenant', 'U') IS NOT NULL DROP TABLE [sys_user_tenant];
-CREATE TABLE [sys_user_tenant] (
-    [user_id] BIGINT NOT NULL DEFAULT 0,
-    [tenant_id] BIGINT NOT NULL DEFAULT 0,
-    [is_default] TINYINT DEFAULT 0,
-    [created_at] DATETIME,
-    PRIMARY KEY ([user_id], [tenant_id])
-);
 
-
--- Records of sys_user_tenant
 
 -- Table structure for sys_param
 IF OBJECT_ID('sys_param', 'U') IS NOT NULL DROP TABLE [sys_param];
@@ -1216,9 +1173,6 @@ CREATE INDEX [sys_affix_chunk_idx_file_md5] ON [sys_affix_chunk] ([file_md5]);
 CREATE INDEX [sys_menu_idx_parent_id] ON [sys_menu] ([parent_id]);
 CREATE INDEX [sys_menu_idx_sort] ON [sys_menu] ([sort]);
 CREATE INDEX [sys_menu_idx_type] ON [sys_menu] ([type]);
-CREATE UNIQUE INDEX [sys_tenants_code] ON [sys_tenants] ([code]);
-CREATE UNIQUE INDEX [sys_tenants_domain] ON [sys_tenants] ([domain]);
-CREATE INDEX [sys_tenants_idx_sys_tenants_deleted_at] ON [sys_tenants] ([deleted_at]);
 
 -- UVP UI language: use Lucide icons for menu entries.
 UPDATE [sys_menu]

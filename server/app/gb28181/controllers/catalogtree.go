@@ -43,23 +43,6 @@ type catalogNodeVO struct {
 	AnomalyCount int64 `json:"anomalyCount,omitempty"`
 }
 
-// tenantOf 当前请求租户 ID(本期未严格落多租户,从 header 取或 fallback 1)
-// 严格化由 P1.A 后期 golangci-linter 守护
-func tenantOf(c *gin.Context) uint {
-	if v, ok := c.Get("tenantId"); ok {
-		if id, ok2 := v.(uint); ok2 {
-			return id
-		}
-	}
-	// 兼容 dev:从 header 拿,无则默认 1
-	if h := c.GetHeader("X-Tenant-ID"); h != "" {
-		if id, err := strconv.ParseUint(h, 10, 64); err == nil {
-			return uint(id)
-		}
-	}
-	return 1
-}
-
 // Tree 根节点列表(parent_id IS NULL)
 // GET /api/gb28181/device-mgmt/catalog/tree
 func (cc *CatalogTreeController) Tree(c *gin.Context) {
@@ -68,11 +51,10 @@ func (cc *CatalogTreeController) Tree(c *gin.Context) {
 		cc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 
 	var roots []gbmodels.GbCatalogNode
 	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
-		Where("tenant_id = ? AND parent_id IS NULL", tid).
+		Where("parent_id IS NULL").
 		Order("sort_order, id").
 		Find(&roots).Error; err != nil {
 		cc.FailAndAbort(c, "查询根节点失败", err)
@@ -89,7 +71,6 @@ func (cc *CatalogTreeController) Children(c *gin.Context) {
 		cc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	parentID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		cc.FailAndAbort(c, "节点 ID 不合法", err)
@@ -98,7 +79,7 @@ func (cc *CatalogTreeController) Children(c *gin.Context) {
 
 	var children []gbmodels.GbCatalogNode
 	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
-		Where("tenant_id = ? AND parent_id = ?", tid, parentID).
+		Where("parent_id = ?", parentID).
 		Order("sort_order, id").
 		Find(&children).Error; err != nil {
 		cc.FailAndAbort(c, "查询子节点失败", err)
@@ -106,7 +87,7 @@ func (cc *CatalogTreeController) Children(c *gin.Context) {
 	}
 
 	if c.Query("withMountCount") == "1" && len(children) > 0 {
-		vos := cc.attachMountCount(c, db, tid, children)
+		vos := cc.attachMountCount(c, db, children)
 		cc.Success(c, gin.H{"list": vos, "total": len(vos)})
 		return
 	}
@@ -122,7 +103,6 @@ func (cc *CatalogTreeController) Subtree(c *gin.Context) {
 		cc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		cc.FailAndAbort(c, "节点 ID 不合法", err)
@@ -130,7 +110,7 @@ func (cc *CatalogTreeController) Subtree(c *gin.Context) {
 	}
 
 	var root gbmodels.GbCatalogNode
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&root)
+	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root)
 	if res.Error != nil {
 		cc.FailAndAbort(c, "查询节点失败", res.Error)
 		return
@@ -142,7 +122,7 @@ func (cc *CatalogTreeController) Subtree(c *gin.Context) {
 
 	var sub []gbmodels.GbCatalogNode
 	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
-		Where("tenant_id = ? AND path LIKE ?", tid, root.Path+"%").
+		Where("path LIKE ?", root.Path+"%").
 		Order("depth, sort_order, id").
 		Find(&sub).Error; err != nil {
 		cc.FailAndAbort(c, "查询子树失败", err)
@@ -159,7 +139,6 @@ func (cc *CatalogTreeController) Node(c *gin.Context) {
 		cc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
 		cc.FailAndAbort(c, "节点 ID 不合法", err)
@@ -167,7 +146,7 @@ func (cc *CatalogTreeController) Node(c *gin.Context) {
 	}
 
 	var n gbmodels.GbCatalogNode
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("tenant_id = ? AND id = ?", tid, id).Limit(1).Find(&n)
+	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&n)
 	if res.Error != nil {
 		cc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -187,10 +166,9 @@ func (cc *CatalogTreeController) AnomalyCount(c *gin.Context) {
 		cc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	var count int64
 	if err := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c)).
-		Where("tenant_id = ? AND resolved = ?", tid, false).
+		Where("resolved = ?", false).
 		Count(&count).Error; err != nil {
 		cc.FailAndAbort(c, "查 anomaly count 失败", err)
 		return
@@ -202,7 +180,7 @@ func (cc *CatalogTreeController) AnomalyCount(c *gin.Context) {
 //
 // 走子查询:对 node_type='channel' 直接看 mount.parent_node_id;
 // 对其他类型节点(civil_code/biz_group/virtual_org)用物化路径下属 channel 计数
-func (cc *CatalogTreeController) attachMountCount(c *gin.Context, db *gorm.DB, tid uint, nodes []gbmodels.GbCatalogNode) []catalogNodeVO {
+func (cc *CatalogTreeController) attachMountCount(c *gin.Context, db *gorm.DB, nodes []gbmodels.GbCatalogNode) []catalogNodeVO {
 	out := make([]catalogNodeVO, 0, len(nodes))
 	for i := range nodes {
 		n := nodes[i]
@@ -210,7 +188,7 @@ func (cc *CatalogTreeController) attachMountCount(c *gin.Context, db *gorm.DB, t
 		// 节点子树下所有 channel 节点
 		_ = db.WithContext(c).
 			Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
-			Where("tenant_id = ? AND node_type = ? AND path LIKE ?", tid, gbmodels.NodeTypeChannel, n.Path+"%").
+			Where("node_type = ? AND path LIKE ?", gbmodels.NodeTypeChannel, n.Path+"%").
 			Count(&cnt).Error
 		out = append(out, catalogNodeVO{GbCatalogNode: &n, MountCount: cnt})
 	}

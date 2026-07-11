@@ -4,7 +4,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -44,7 +43,7 @@ func (sc *SysDepartmentController) GetDivision(c *gin.Context) {
 	sysDepartmentList := models.NewSysDepartmentList()
 	err := sysDepartmentList.Find(c, func(db *gorm.DB) *gorm.DB {
 		return db.Where("status = ?", 1)
-	}, tenanthelper.TenantScope(c))
+	})
 	if err != nil {
 		sc.FailAndAbort(c, "获取部门列表失败", err)
 	}

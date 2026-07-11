@@ -171,7 +171,7 @@ func TestRotateRefreshToken_InvalidToken(t *testing.T) {
 	assert.Contains(t, err.Error(), "invalid")
 }
 
-func TestTokenDoesNotPersistTenantClaims(t *testing.T) {
+func TestTokenDoesNotIncludeTenantClaims(t *testing.T) {
 	mockCache := NewMockCacheInterf()
 	tokenService := &TokenService{
 		Ctx:            context.Background(),
@@ -183,17 +183,15 @@ func TestTokenDoesNotPersistTenantClaims(t *testing.T) {
 	}
 
 	accessToken, err := tokenService.GenerateToken(&app.ClaimsUser{
-		UserID:     1,
-		Username:   "admin",
-		TenantID:   10,
-		TenantCode: "legacy",
+		UserID:   1,
+		Username: "admin",
 	})
 	assert.NoError(t, err)
 
 	accessClaims, err := tokenService.ParseToken(accessToken)
 	assert.NoError(t, err)
-	assert.Equal(t, uint(0), accessClaims.TenantID)
-	assert.Empty(t, accessClaims.TenantCode)
+	assert.Equal(t, uint(1), accessClaims.UserID)
+	assert.Equal(t, "admin", accessClaims.Username)
 
 	refreshToken, err := tokenService.GenerateRefreshToken(1)
 	assert.NoError(t, err)

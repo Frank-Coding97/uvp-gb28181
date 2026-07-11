@@ -15,7 +15,6 @@ import (
 func recordAnomaly(
 	ctx context.Context,
 	db *gorm.DB,
-	tenantID uint,
 	ownerDeptID uint,
 	node *gbmodels.GbCatalogNode,
 	cls Classification,
@@ -40,7 +39,6 @@ func recordAnomaly(
 
 	// 2. 写审计记录(每次入库都追加一条;后续 resolve 走 anomaly handler)
 	rec := &gbmodels.GbAnomalyRecord{
-		TenantID:       tenantID,
 		OwnerDeptID:    ownerDeptID,
 		CatalogNodeID:  node.ID,
 		RawCode:        cls.RawCode,

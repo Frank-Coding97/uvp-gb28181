@@ -3,8 +3,8 @@ package models
 import (
 	"context"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"sort"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"gorm.io/gorm"
 )
@@ -22,7 +22,6 @@ type SysRole struct {
 	DataScope    int8        `gorm:"column:data_scope;default:0;comment:数据权限" json:"dataScope"`
 	CheckedDepts string      `gorm:"column:checked_depts;comment:已选择部门" json:"checkedDepts"`
 	Children     SysRoleList `gorm:"-" json:"children"`
-	TenantID     uint        `gorm:"type:int(11);column:tenant_id;comment:租户ID" json:"tenantID"`
 }
 
 // TableName 设置表名

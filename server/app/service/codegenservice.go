@@ -4,14 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -1027,7 +1027,6 @@ func (cgs *CodeGenService) generateServiceCode(ctx *models.CodeGenContext) strin
 		"Columns":         ctx.Columns,
 		"PrimaryKey":      ctx.PrimaryKey,
 		"HasCreatedBy":    ctx.HasCreatedBy,
-		"HasTenantID":     ctx.HasTenantID,
 	}
 
 	for key, value := range ctx.ExtraParams {
@@ -1149,7 +1148,6 @@ func (cgs *CodeGenService) generateServiceCodeTree(ctx *models.CodeGenContext) s
 		"Columns":         ctx.Columns,
 		"PrimaryKey":      ctx.PrimaryKey,
 		"HasCreatedBy":    ctx.HasCreatedBy,
-		"HasTenantID":     ctx.HasTenantID,
 	}
 
 	for key, value := range ctx.ExtraParams {

@@ -74,8 +74,3 @@ func (c Common) GetClaims(ctx *gin.Context) *app.Claims {
 func (c Common) GetCurrentUserID(ctx *gin.Context) uint {
 	return common.GetCurrentUserID(ctx)
 }
-
-// GetCurrentTenantID 获取当前租户ID
-func (c Common) GetCurrentTenantID(ctx *gin.Context) uint {
-	return common.GetCurrentTenantID(ctx)
-}

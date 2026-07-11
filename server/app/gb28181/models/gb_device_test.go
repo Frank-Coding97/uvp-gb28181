@@ -86,6 +86,12 @@ func skipIfDeviceSchemaStale(t *testing.T) {
 	if !app.GormDbMysql.Migrator().HasColumn(&GbDevice{}, "subscribe_capability") {
 		t.Skipf("跳过(MySQL gb_device 缺 subscribe_capability 列,请先跑 migration 2026-06-26-catalog-b-plus.sql)")
 	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbDevice{}, "owner_dept_id") {
+		t.Skipf("跳过(MySQL gb_device 缺 owner_dept_id 列,请先跑 migration 2026-07-11-owner-dept-phase1.sql)")
+	}
+	if app.GormDbMysql.Migrator().HasColumn(&GbDevice{}, "tenant_id") {
+		t.Skipf("跳过(MySQL gb_device 仍有 tenant_id 列,请先跑 Phase 2 去租户迁移)")
+	}
 }
 
 // TestUpsertInsert T2-测1: Upsert 新设备 → 表里出现,字段正确

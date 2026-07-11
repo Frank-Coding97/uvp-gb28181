@@ -48,7 +48,6 @@ type GbDevice struct {
 	Status            int8       `gorm:"column:status;default:0;comment:【物化缓存】在线状态 0离线 1在线" json:"status"`
 	OfflineAt         *time.Time `gorm:"column:offline_at;comment:最近被判离线的时刻" json:"offlineAt"`
 	CreatedBy         uint       `gorm:"column:created_by;comment:创建人" json:"createdBy"`
-	TenantID          uint       `gorm:"column:tenant_id;comment:租户ID" json:"tenantId"`
 	OwnerDeptID       uint       `gorm:"column:owner_dept_id;comment:归属部门ID" json:"ownerDeptId"`
 	// Subscribe Catalog 智能升降级(Q4 决议) — A1 加,G1 状态机落地
 	SubscribeCapability SubscribeCapability `gorm:"column:subscribe_capability;size:16;default:unknown;index:idx_subscribe_capability,priority:1;comment:订阅能力 unknown/subscribed/fallback" json:"subscribeCapability"`

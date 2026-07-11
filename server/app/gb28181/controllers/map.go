@@ -45,7 +45,6 @@ func (mc *MapController) Markers(c *gin.Context) {
 		mc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	minLat, _ := strconv.ParseFloat(c.Query("minLat"), 64)
 	maxLat, _ := strconv.ParseFloat(c.Query("maxLat"), 64)
 	minLng, _ := strconv.ParseFloat(c.Query("minLng"), 64)
@@ -56,7 +55,7 @@ func (mc *MapController) Markers(c *gin.Context) {
 	}
 
 	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
-		Where("tenant_id = ? AND latitude != 0 AND longitude != 0", tid)
+		Where("latitude != 0 AND longitude != 0")
 	if maxLat > minLat {
 		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
 	}
@@ -93,7 +92,6 @@ func (mc *MapController) Clusters(c *gin.Context) {
 		mc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	zoom, _ := strconv.Atoi(c.DefaultQuery("zoom", "10"))
 	if zoom <= 0 {
 		zoom = 10
@@ -113,7 +111,7 @@ func (mc *MapController) Clusters(c *gin.Context) {
 	maxLng, _ := strconv.ParseFloat(c.Query("maxLng"), 64)
 
 	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
-		Where("tenant_id = ? AND latitude != 0 AND longitude != 0", tid)
+		Where("latitude != 0 AND longitude != 0")
 	if maxLat > minLat {
 		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
 	}
@@ -169,10 +167,9 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 		mc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	tid := tenantOf(c)
 	var count int64
 	if err := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
-		Where("tenant_id = ? AND (latitude = 0 OR longitude = 0)", tid).
+		Where("(latitude = 0 OR longitude = 0)").
 		Count(&count).Error; err != nil {
 		mc.FailAndAbort(c, "查询失败", err)
 		return

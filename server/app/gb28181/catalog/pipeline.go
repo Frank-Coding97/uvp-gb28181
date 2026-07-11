@@ -32,7 +32,7 @@ func New(db *gorm.DB) *Pipeline {
 
 // Ingest 全量入库一批 CatalogItem(manscdp 解析后调用)
 //
-// sender:来源元数据(tenant_id + 上报设备国标编码)
+// sender:来源元数据(归属部门 + 上报设备国标编码)
 // items:本批通道/设备列表
 //
 // 错误返回:第一个失败的 item 错误;不全部停下(失败的跳过,继续后续)
@@ -40,10 +40,6 @@ func New(db *gorm.DB) *Pipeline {
 func (p *Pipeline) Ingest(ctx context.Context, sender Sender, items []CatalogItem) error {
 	if len(items) == 0 {
 		return nil
-	}
-	if sender.TenantID == 0 {
-		// 兼容:本期未严格落多租户,默认 tenant 1
-		sender.TenantID = 1
 	}
 	if sender.OwnerDeptID == 0 {
 		sender.OwnerDeptID = p.resolveOwnerDeptID(ctx, sender)
@@ -72,13 +68,13 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 		// 1. 行政区码节点链(始终建,即便没有 device/channel)
 		var civilNode *gbmodels.GbCatalogNode
 		if it.CivilCode != "" {
-			n, err := findOrCreateCivilCodeChain(tx, sender.TenantID, sender.OwnerDeptID, it.CivilCode)
+			n, err := findOrCreateCivilCodeChain(tx, sender.OwnerDeptID, it.CivilCode)
 			if err != nil {
 				return err
 			}
 			civilNode = n
 		} else if cls.CivilCode != "" {
-			n, err := findOrCreateCivilCodeChain(tx, sender.TenantID, sender.OwnerDeptID, cls.CivilCode)
+			n, err := findOrCreateCivilCodeChain(tx, sender.OwnerDeptID, cls.CivilCode)
 			if err != nil {
 				return err
 			}
@@ -92,7 +88,7 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 			switch pCls.NodeType {
 			case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
 				// 找/建 上级 biz_group / virtual_org 节点
-				pn, err := findOrCreateNode(tx, sender.TenantID, sender.OwnerDeptID, pCls.NodeType, it.ParentID, civilNodeID(civilNode), civilNodePath(civilNode), it.ParentID)
+				pn, err := findOrCreateNode(tx, sender.OwnerDeptID, pCls.NodeType, it.ParentID, civilNodeID(civilNode), civilNodePath(civilNode), it.ParentID)
 				if err != nil {
 					return err
 				}
@@ -107,28 +103,28 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 		// 3. 根据当前 item 类型走不同路径
 		switch cls.NodeType {
 		case gbmodels.NodeTypeChannel:
-			node, _, err := upsertChannel(ctx, tx, sender.TenantID, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
+			node, _, err := upsertChannel(ctx, tx, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
 			if err != nil {
 				return err
 			}
 			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.TenantID, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
 			}
 		case gbmodels.NodeTypeDevice:
-			node, _, err := upsertDevice(ctx, tx, sender.TenantID, sender.OwnerDeptID, it, cls, parentNode)
+			node, _, err := upsertDevice(ctx, tx, sender.OwnerDeptID, it, cls, parentNode)
 			if err != nil {
 				return err
 			}
 			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.TenantID, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
 			}
 		case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
-			node, err := findOrCreateNode(tx, sender.TenantID, sender.OwnerDeptID, cls.NodeType, it.DeviceID, civilNodeID(parentNode), civilNodePath(parentNode), fallbackName(it.Name, it.DeviceID))
+			node, err := findOrCreateNode(tx, sender.OwnerDeptID, cls.NodeType, it.DeviceID, civilNodeID(parentNode), civilNodePath(parentNode), fallbackName(it.Name, it.DeviceID))
 			if err != nil {
 				return err
 			}
 			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.TenantID, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
 			}
 		case gbmodels.NodeTypeCivilCode:
 			// 已在第 1 步处理;跳过
@@ -162,7 +158,7 @@ func (p *Pipeline) softDelete(ctx context.Context, sender Sender, code string) e
 		return nil
 	}
 	return p.db.WithContext(ctx).
-		Where("tenant_id = ? AND code = ?", sender.TenantID, code).
+		Where("code = ?", code).
 		Delete(&gbmodels.GbCatalogNode{}).Error
 }
 

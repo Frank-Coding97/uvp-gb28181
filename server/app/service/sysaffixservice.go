@@ -3,14 +3,14 @@ package service
 import (
 	"context"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/filehelper"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/filehelper"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -67,14 +67,14 @@ func (s *SysAffixService) ValidateChunkSize(chunkSize int64) error {
 }
 
 // InitChunkUpload 初始化分片上传（秒传检测 + 断点续传）
-func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.ChunkInitRequest, tenantID uint) (*models.ChunkInitResult, error) {
+func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.ChunkInitRequest) (*models.ChunkInitResult, error) {
 	// 验证分片上传的文件类型和大小
 	if err := s.ValidateChunkFile(req.FileName, req.FileSize); err != nil {
 		return nil, err
 	}
 
 	// 秒传检测：根据MD5查找是否已有相同文件
-	existAffix, _ := models.GetAffixByMd5(ctx, req.FileMd5, req.FileSize, tenantID)
+	existAffix, _ := models.GetAffixByMd5(ctx, req.FileMd5, req.FileSize)
 	if existAffix != nil && existAffix.ID > 0 {
 		return &models.ChunkInitResult{
 			UploadId:       "",
@@ -90,7 +90,7 @@ func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.Chunk
 	uploadedChunks := []int{}
 	existingChunks := models.NewSysAffixChunkList()
 	if err := app.DB().WithContext(ctx).
-		Where("file_md5 = ? AND status = 0 AND tenant_id = ?", req.FileMd5, tenantID).
+		Where("file_md5 = ? AND status = 0", req.FileMd5).
 		Find(existingChunks).Error; err == nil && len(*existingChunks) > 0 {
 		// 找到已有分片，复用第一个uploadId
 		first := (*existingChunks)[0]
@@ -108,7 +108,7 @@ func (s *SysAffixService) InitChunkUpload(ctx context.Context, req *models.Chunk
 }
 
 // SaveChunk 保存单个分片（文件I/O + 数据库记录）
-func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUploadRequest, userID, tenantID uint) error {
+func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUploadRequest, userID uint) error {
 	// 验证单个分片大小
 	if err := s.ValidateChunkSize(req.File.Size); err != nil {
 		return err
@@ -153,18 +153,17 @@ func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUpload
 	chunk.ChunkPath = chunkPath
 	chunk.Status = 0
 	chunk.CreatedBy = userID
-	chunk.TenantID = tenantID
 
 	// 检查是否已存在该分片记录（幂等处理）
 	var existingCount int64
 	app.DB().WithContext(ctx).Model(&models.SysAffixChunk{}).
-		Where("upload_id = ? AND chunk_index = ? AND tenant_id = ?", req.UploadId, req.ChunkIndex, tenantID).
+		Where("upload_id = ? AND chunk_index = ?", req.UploadId, req.ChunkIndex).
 		Count(&existingCount)
 
 	if existingCount > 0 {
 		// 更新已有记录
 		app.DB().WithContext(ctx).Model(&models.SysAffixChunk{}).
-			Where("upload_id = ? AND chunk_index = ? AND tenant_id = ?", req.UploadId, req.ChunkIndex, tenantID).
+			Where("upload_id = ? AND chunk_index = ?", req.UploadId, req.ChunkIndex).
 			Updates(map[string]interface{}{
 				"chunk_path": chunkPath,
 				"chunk_size": req.File.Size,
@@ -181,14 +180,14 @@ func (s *SysAffixService) SaveChunk(ctx context.Context, req *models.ChunkUpload
 }
 
 // MergeChunks 合并分片（文件合并 + 大小校验 + 附件记录 + 清理）
-func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMergeRequest, userID, tenantID uint) (*models.SysAffix, error) {
+func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMergeRequest, userID uint) (*models.SysAffix, error) {
 	// 验证分片上传的文件类型
 	if err := s.ValidateChunkFile(req.FileName, req.FileSize); err != nil {
 		return nil, err
 	}
 
 	// 获取所有分片记录
-	chunkList, err := models.GetChunksByUploadId(ctx, req.UploadId, tenantID)
+	chunkList, err := models.GetChunksByUploadId(ctx, req.UploadId)
 	if err != nil {
 		return nil, fmt.Errorf("获取分片记录失败: %v", err)
 	}
@@ -270,7 +269,6 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 	affix.Ftype = filehelper.GetFileTypeBySuffix(ext)
 	affix.FileMd5 = req.FileMd5
 	affix.CreatedBy = userID
-	affix.TenantID = tenantID
 
 	if err := affix.Create(ctx); err != nil {
 		os.Remove(finalPath)
@@ -278,19 +276,19 @@ func (s *SysAffixService) MergeChunks(ctx context.Context, req *models.ChunkMerg
 	}
 
 	// 更新分片记录状态为已合并
-	models.UpdateChunkStatus(ctx, req.UploadId, tenantID, 1)
+	models.UpdateChunkStatus(ctx, req.UploadId, 1)
 
 	// 异步清理临时分片文件
 	go func() {
 		os.RemoveAll(tmpDir)
-		models.DeleteChunksByUploadId(ctx, req.UploadId, tenantID)
+		models.DeleteChunksByUploadId(ctx, req.UploadId)
 	}()
 
 	return affix, nil
 }
 
 // CancelChunkUpload 取消分片上传（清理临时文件 + 更新状态）
-func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string, tenantID uint) error {
+func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string) error {
 	// 获取上传配置
 	uploadConfig := app.UploadService.GetUploadConfig()
 	localPath := uploadConfig.LocalPath
@@ -302,10 +300,10 @@ func (s *SysAffixService) CancelChunkUpload(ctx context.Context, uploadId string
 	}
 
 	// 更新分片记录状态为已取消
-	models.UpdateChunkStatus(ctx, uploadId, tenantID, 2)
+	models.UpdateChunkStatus(ctx, uploadId, 2)
 
 	// 删除分片记录
-	models.DeleteChunksByUploadId(ctx, uploadId, tenantID)
+	models.DeleteChunksByUploadId(ctx, uploadId)
 
 	return nil
 }

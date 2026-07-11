@@ -3,8 +3,8 @@ package models
 import (
 	"context"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"sort"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"gorm.io/gorm"
 )
@@ -22,7 +22,6 @@ type SysDepartment struct {
 	Describe  string            `gorm:"column:describe;size:255;comment:描述" json:"describe"`
 	CreatedBy uint              `gorm:"column:created_by;comment:创建人" json:"createdBy"`
 	Children  SysDepartmentList `gorm:"-" json:"children"`
-	TenantID  uint              `gorm:"type:int(11);column:tenant_id;comment:租户ID" json:"tenantID"`
 }
 
 // TableName 设置SysDepartment表名

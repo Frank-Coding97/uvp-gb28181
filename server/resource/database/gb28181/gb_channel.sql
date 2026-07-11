@@ -18,7 +18,6 @@ CREATE TABLE `gb_channel` (
   `created_at` datetime DEFAULT NULL,
   `updated_at` datetime DEFAULT NULL,
   `deleted_at` datetime DEFAULT NULL,
-  `tenant_id` int unsigned DEFAULT '0' COMMENT '租户ID',
   `owner_dept_id` int unsigned NOT NULL DEFAULT '0' COMMENT '所属部门ID',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_channel` (`device_id`, `channel_id`) USING BTREE,

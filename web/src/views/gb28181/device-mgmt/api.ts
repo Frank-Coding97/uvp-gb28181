@@ -14,7 +14,6 @@ export interface PageResult<T> {
 
 export interface CatalogNode {
     id: number;
-    tenantId: number;
     nodeType: "civil_code" | "biz_group" | "virtual_org" | "device" | "channel" | string;
     parentId?: number | null;
     path: string;

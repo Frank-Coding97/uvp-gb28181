@@ -2,11 +2,10 @@ package controllers
 
 import (
 	"encoding/csv"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
 	"strconv"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -50,14 +49,14 @@ func (c *SysOperationLogController) List(ctx *gin.Context) {
 	}
 
 	logList := models.NewSysOperationLogList()
-	total, err := logList.GetTotal(ctx, req.Handle(), tenanthelper.TenantScope(ctx))
+	total, err := logList.GetTotal(ctx, req.Handle())
 	if err != nil {
 		c.FailAndAbort(ctx, "获取日志总数失败", err)
 	}
 
 	err = logList.Find(ctx, req.Paginate(), req.Handle(), func(db *gorm.DB) *gorm.DB {
 		return db.Order("created_at DESC")
-	}, tenanthelper.TenantScope(ctx))
+	})
 	if err != nil {
 		c.FailAndAbort(ctx, "获取日志列表失败", err)
 	}

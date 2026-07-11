@@ -61,32 +61,21 @@ func (uc *UserController) GetProfile(c *gin.Context) {
 		uc.FailAndAbort(c, "获取用户信息失败", err)
 	}
 
-	tenantName := ""
-	tenantDomain := ""
-	tenantList := models.NewTenantList()
-	var defaultTenant *models.Tenant
-
 	uc.Success(c, gin.H{
-		"id":            user.ID,
-		"avatar":        user.Avatar,
-		"userName":      user.Username,
-		"nickName":      user.NickName,
-		"roleIDs":       user.Roles.GetRoleIDs(),
-		"permissions":   user.Permissions,
-		"sex":           user.Sex,
-		"status":        user.Status,
-		"email":         user.Email,
-		"phone":         user.Phone,
-		"createdAt":     user.CreatedAt,
-		"description":   user.Description,
-		"roles":         user.Roles,
-		"department":    user.Department,
-		"tenantID":      uint(0),
-		"tenantCode":    "",
-		"tenantName":    tenantName,
-		"tenantDomain":  tenantDomain,  // 完整的域名
-		"defaultTenant": defaultTenant, // 默认租户
-		"tenants":       tenantList,    // 关联的租户列表
+		"id":          user.ID,
+		"avatar":      user.Avatar,
+		"userName":    user.Username,
+		"nickName":    user.NickName,
+		"roleIDs":     user.Roles.GetRoleIDs(),
+		"permissions": user.Permissions,
+		"sex":         user.Sex,
+		"status":      user.Status,
+		"email":       user.Email,
+		"phone":       user.Phone,
+		"createdAt":   user.CreatedAt,
+		"description": user.Description,
+		"roles":       user.Roles,
+		"department":  user.Department,
 	})
 }
 
@@ -413,10 +402,6 @@ func (uc *UserController) Delete(c *gin.Context) {
 	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
 		// 删除用户角色关联
 		if err := tx.Where("user_id = ?", user.ID).Delete(&models.SysUserRole{}).Error; err != nil {
-			return err
-		}
-		// 删除用户租户关联
-		if err := tx.Where("user_id = ?", user.ID).Delete(&models.SysUserTenant{}).Error; err != nil {
 			return err
 		}
 		// 软删除用户

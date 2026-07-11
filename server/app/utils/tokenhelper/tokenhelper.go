@@ -27,11 +27,8 @@ type TokenService struct {
 **/
 // GenerateToken 生成JWT令牌
 func (s *TokenService) GenerateToken(user *app.ClaimsUser) (string, error) {
-	claimsUser := *user
-	claimsUser.TenantID = 0
-	claimsUser.TenantCode = ""
 	claims := &app.Claims{
-		ClaimsUser: claimsUser,
+		ClaimsUser: *user,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(s.TokenExpire * time.Second)), // 过期时间
 			IssuedAt:  jwt.NewNumericDate(time.Now()),                                  // 签发时间

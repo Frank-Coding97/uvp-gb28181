@@ -1,6 +1,9 @@
 package controllers
 
 import (
+	"path/filepath"
+	"strconv"
+	"strings"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/models"
@@ -8,10 +11,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 	"uvplatform.cn/uvp-gb28181/app/utils/filehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/imagehelper"
-	"uvplatform.cn/uvp-gb28181/app/utils/tenanthelper"
-	"path/filepath"
-	"strconv"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -249,7 +248,7 @@ func (ac *SysAffixController) List(c *gin.Context) {
 
 	// 获取总数
 	affixList := models.NewSysAffixList()
-	total, err := affixList.GetTotal(c, query, datascope.GetDataScope(c), tenanthelper.TenantScope(c))
+	total, err := affixList.GetTotal(c, query, datascope.GetDataScope(c))
 	if err != nil {
 		ac.FailAndAbort(c, "获取文件总数失败", err)
 	}
@@ -259,7 +258,7 @@ func (ac *SysAffixController) List(c *gin.Context) {
 		return d.Preload("User", func(d *gorm.DB) *gorm.DB {
 			return d.Preload("Department")
 		})
-	}, datascope.GetDataScope(c), tenanthelper.TenantScope(c))
+	}, datascope.GetDataScope(c))
 	if err != nil {
 		ac.FailAndAbort(c, "获取文件列表失败", err)
 	}
@@ -361,11 +360,8 @@ func (ac *SysAffixController) ChunkInit(c *gin.Context) {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
-	// 获取当前租户ID
-	tenantID := ac.GetCurrentTenantID(c)
-
 	// 调用 Service 处理初始化逻辑
-	result, err := ac.affixService.InitChunkUpload(c, &req, tenantID)
+	result, err := ac.affixService.InitChunkUpload(c, &req)
 	if err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
@@ -417,10 +413,9 @@ func (ac *SysAffixController) ChunkUpload(c *gin.Context) {
 
 	// 获取当前用户信息
 	userID := ac.GetCurrentUserID(c)
-	tenantID := ac.GetCurrentTenantID(c)
 
 	// 调用 Service 保存分片
-	if err := ac.affixService.SaveChunk(c, &req, userID, tenantID); err != nil {
+	if err := ac.affixService.SaveChunk(c, &req, userID); err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
@@ -448,10 +443,9 @@ func (ac *SysAffixController) ChunkMerge(c *gin.Context) {
 
 	// 获取当前用户信息
 	userID := ac.GetCurrentUserID(c)
-	tenantID := ac.GetCurrentTenantID(c)
 
 	// 调用 Service 合并分片
-	affix, err := ac.affixService.MergeChunks(c, &req, userID, tenantID)
+	affix, err := ac.affixService.MergeChunks(c, &req, userID)
 	if err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
@@ -483,11 +477,8 @@ func (ac *SysAffixController) ChunkCancel(c *gin.Context) {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
-	// 获取当前租户ID
-	tenantID := ac.GetCurrentTenantID(c)
-
 	// 调用 Service 取消上传
-	if err := ac.affixService.CancelChunkUpload(c, req.UploadId, tenantID); err != nil {
+	if err := ac.affixService.CancelChunkUpload(c, req.UploadId); err != nil {
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 

@@ -55,8 +55,8 @@ func TestDashboard_Snapshot_NilProvider(t *testing.T) {
 		t.Fatalf("status=%d, want 200", w.Code)
 	}
 	var resp struct {
-		Code int                        `json:"code"`
-		Data metrics.DashboardSnapshot  `json:"data"`
+		Code int                       `json:"code"`
+		Data metrics.DashboardSnapshot `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())
@@ -93,8 +93,8 @@ func TestDashboard_Snapshot_WithAggregator(t *testing.T) {
 		t.Fatalf("status=%d", w.Code)
 	}
 	var resp struct {
-		Code int                        `json:"code"`
-		Data metrics.DashboardSnapshot  `json:"data"`
+		Code int                       `json:"code"`
+		Data metrics.DashboardSnapshot `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v body=%s", err, w.Body.String())

@@ -49,9 +49,8 @@ func (r *UpdateRequest) Validate(c *gin.Context) error {
 
 type LoginRequest struct {
 	Validator
-	Username   string `form:"username" validate:"required" message:"用户名不能为空"`
-	Password   string `form:"password" validate:"required" message:"密码不能为空"`
-	TenantCode string `form:"tenantCode"`
+	Username string `form:"username" validate:"required" message:"用户名不能为空"`
+	Password string `form:"password" validate:"required" message:"密码不能为空"`
 }
 
 func (r *LoginRequest) Validate(c *gin.Context) error {

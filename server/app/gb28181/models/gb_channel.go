@@ -36,7 +36,6 @@ type GbChannel struct {
 	CreatedAt    time.Time  `json:"createdAt"`
 	UpdatedAt    time.Time  `json:"updatedAt"`
 	DeletedAt    *time.Time `gorm:"index" json:"deletedAt"`
-	TenantID     uint       `gorm:"column:tenant_id" json:"tenantId"`
 	OwnerDeptID  uint       `gorm:"column:owner_dept_id" json:"ownerDeptId"`
 }
 

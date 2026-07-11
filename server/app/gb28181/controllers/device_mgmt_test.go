@@ -85,10 +85,10 @@ func withClaims(userID uint) gin.HandlerFunc {
 
 func seedDevicesAndChannels(t *testing.T, db *gorm.DB) (devID uint, chOnlineID, chOfflineID uint) {
 	t.Helper()
-	d := &gbmodels.GbDevice{TenantID: 1, DeviceID: "34020000002000000001", Name: "测试 NVR", Manufacturer: "Hikvision", Transport: "UDP", Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
+	d := &gbmodels.GbDevice{DeviceID: "34020000002000000001", Name: "测试 NVR", Manufacturer: "Hikvision", Transport: "UDP", Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
 	require.NoError(t, db.Create(d).Error)
-	ch1 := &gbmodels.GbChannel{TenantID: 1, DeviceID: "34020000002000000001", ChannelID: "37011200001310000001", Name: "通道 在线", Status: gbmodels.ChannelStatusOnline, Latitude: 36.685, Longitude: 117.05, PTZType: 1}
-	ch2 := &gbmodels.GbChannel{TenantID: 1, DeviceID: "34020000002000000001", ChannelID: "37011200001310000002", Name: "通道 离线", Status: gbmodels.ChannelStatusOffline}
+	ch1 := &gbmodels.GbChannel{DeviceID: "34020000002000000001", ChannelID: "37011200001310000001", Name: "通道 在线", Status: gbmodels.ChannelStatusOnline, Latitude: 36.685, Longitude: 117.05, PTZType: 1}
+	ch2 := &gbmodels.GbChannel{DeviceID: "34020000002000000001", ChannelID: "37011200001310000002", Name: "通道 离线", Status: gbmodels.ChannelStatusOffline}
 	require.NoError(t, db.Create(ch1).Error)
 	require.NoError(t, db.Create(ch2).Error)
 	return d.ID, ch1.ID, ch2.ID
@@ -119,8 +119,8 @@ func TestDeviceMgmt_ListDevices_FiltersByOwnerDept(t *testing.T) {
 	const userID = 100
 	r, db := newDeviceMgmtRouter(t, withClaims(userID))
 	seedDeptScopedUser(t, db, userID, 10)
-	require.NoError(t, db.Create(&gbmodels.GbDevice{TenantID: 1, OwnerDeptID: 10, DeviceID: "34020000002000000010", Name: "本部门 NVR", SubscribeCapability: gbmodels.SubscribeUnknown}).Error)
-	require.NoError(t, db.Create(&gbmodels.GbDevice{TenantID: 1, OwnerDeptID: 20, DeviceID: "34020000002000000020", Name: "外部门 NVR", SubscribeCapability: gbmodels.SubscribeUnknown}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbDevice{OwnerDeptID: 10, DeviceID: "34020000002000000010", Name: "本部门 NVR", SubscribeCapability: gbmodels.SubscribeUnknown}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbDevice{OwnerDeptID: 20, DeviceID: "34020000002000000020", Name: "外部门 NVR", SubscribeCapability: gbmodels.SubscribeUnknown}).Error)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/devices", nil)
@@ -138,13 +138,12 @@ func TestDeviceMgmt_ListDevices_FiltersByOwnerDept(t *testing.T) {
 func TestDeviceMgmt_ListDevices_FilterByCatalogNode(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	_, chOnID, _ := seedDevicesAndChannels(t, db)
-	other := &gbmodels.GbDevice{TenantID: 1, DeviceID: "34020000002000000002", Name: "其他 NVR", Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
+	other := &gbmodels.GbDevice{DeviceID: "34020000002000000002", Name: "其他 NVR", Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
 	require.NoError(t, db.Create(other).Error)
 
-	root := &gbmodels.GbCatalogNode{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/", Name: "历城区", Code: "370112"}
+	root := &gbmodels.GbCatalogNode{NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/", Name: "历城区", Code: "370112"}
 	require.NoError(t, db.Create(root).Error)
 	chNode := &gbmodels.GbCatalogNode{
-		TenantID:  1,
 		NodeType:  gbmodels.NodeTypeChannel,
 		ParentID:  &root.ID,
 		Path:      "/1/2/",
@@ -196,9 +195,9 @@ func TestDeviceMgmt_ChannelMounts(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	_, chOnID, _ := seedDevicesAndChannels(t, db)
 	// 加一个主挂载
-	node := &gbmodels.GbCatalogNode{TenantID: 1, NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/", Name: "山东"}
+	node := &gbmodels.GbCatalogNode{NodeType: gbmodels.NodeTypeCivilCode, Path: "/1/", Name: "山东"}
 	require.NoError(t, db.Create(node).Error)
-	require.NoError(t, db.Create(&gbmodels.GbChannelMount{TenantID: 1, ChannelID: chOnID, ParentNodeID: node.ID, IsPrimary: true, MountSource: gbmodels.MountSourceCatalog}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannelMount{ChannelID: chOnID, ParentNodeID: node.ID, IsPrimary: true, MountSource: gbmodels.MountSourceCatalog}).Error)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/channel/"+uintStr(chOnID)+"/mounts", nil)
@@ -245,8 +244,8 @@ func TestMap_Markers_FiltersByOwnerDept(t *testing.T) {
 	const userID = 100
 	r, db := newDeviceMgmtRouter(t, withClaims(userID))
 	seedDeptScopedUser(t, db, userID, 10)
-	require.NoError(t, db.Create(&gbmodels.GbChannel{TenantID: 1, OwnerDeptID: 10, DeviceID: "34020000002000000010", ChannelID: "37011200001310000010", Name: "本部门通道", Latitude: 36.1, Longitude: 117.1}).Error)
-	require.NoError(t, db.Create(&gbmodels.GbChannel{TenantID: 1, OwnerDeptID: 20, DeviceID: "34020000002000000020", ChannelID: "37011200001310000020", Name: "外部门通道", Latitude: 36.2, Longitude: 117.2}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{OwnerDeptID: 10, DeviceID: "34020000002000000010", ChannelID: "37011200001310000010", Name: "本部门通道", Latitude: 36.1, Longitude: 117.1}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{OwnerDeptID: 20, DeviceID: "34020000002000000020", ChannelID: "37011200001310000020", Name: "外部门通道", Latitude: 36.2, Longitude: 117.2}).Error)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/map/markers", nil)
@@ -290,8 +289,8 @@ func TestMap_Clusters(t *testing.T) {
 func TestAnomaly_List(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	// 加 2 条 anomaly:1 未处理 + 1 已处理
-	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{TenantID: 1, CatalogNodeID: 1, RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}).Error)
-	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{TenantID: 1, CatalogNodeID: 2, RawCode: "Y", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: true}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{CatalogNodeID: 1, RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbAnomalyRecord{CatalogNodeID: 2, RawCode: "Y", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: true}).Error)
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/anomaly?resolved=0", nil)
@@ -303,9 +302,9 @@ func TestAnomaly_List(t *testing.T) {
 
 func TestAnomaly_Resolve_ChangeType(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
-	node := &gbmodels.GbCatalogNode{TenantID: 1, NodeType: gbmodels.NodeTypeVirtualOrg, Path: "/1/", Name: "异常节点", Anomaly: true}
+	node := &gbmodels.GbCatalogNode{NodeType: gbmodels.NodeTypeVirtualOrg, Path: "/1/", Name: "异常节点", Anomaly: true}
 	require.NoError(t, db.Create(node).Error)
-	rec := &gbmodels.GbAnomalyRecord{TenantID: 1, CatalogNodeID: node.ID, RawCode: "XYZ", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
+	rec := &gbmodels.GbAnomalyRecord{CatalogNodeID: node.ID, RawCode: "XYZ", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
 	require.NoError(t, db.Create(rec).Error)
 
 	body, _ := json.Marshal(map[string]any{
@@ -335,9 +334,9 @@ func TestAnomaly_Resolve_RejectsOtherOwnerDept(t *testing.T) {
 	const userID = 100
 	r, db := newDeviceMgmtRouter(t, withClaims(userID))
 	seedDeptScopedUser(t, db, userID, 10)
-	node := &gbmodels.GbCatalogNode{TenantID: 1, OwnerDeptID: 20, NodeType: gbmodels.NodeTypeVirtualOrg, Path: "/1/", Name: "外部门异常节点", Anomaly: true}
+	node := &gbmodels.GbCatalogNode{OwnerDeptID: 20, NodeType: gbmodels.NodeTypeVirtualOrg, Path: "/1/", Name: "外部门异常节点", Anomaly: true}
 	require.NoError(t, db.Create(node).Error)
-	rec := &gbmodels.GbAnomalyRecord{TenantID: 1, OwnerDeptID: 20, CatalogNodeID: node.ID, RawCode: "XYZ", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
+	rec := &gbmodels.GbAnomalyRecord{OwnerDeptID: 20, CatalogNodeID: node.ID, RawCode: "XYZ", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
 	require.NoError(t, db.Create(rec).Error)
 
 	body, _ := json.Marshal(map[string]any{
@@ -360,7 +359,7 @@ func TestAnomaly_BatchResolve(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	ids := []uint{}
 	for i := 0; i < 3; i++ {
-		rec := &gbmodels.GbAnomalyRecord{TenantID: 1, CatalogNodeID: uint(i + 1), RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
+		rec := &gbmodels.GbAnomalyRecord{CatalogNodeID: uint(i + 1), RawCode: "X", FallbackType: gbmodels.FallbackTypeVirtualOrg, Resolved: false}
 		require.NoError(t, db.Create(rec).Error)
 		ids = append(ids, rec.ID)
 	}

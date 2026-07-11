@@ -2,12 +2,12 @@ package casbinhelper
 
 import (
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 
 	"github.com/casbin/casbin/v2"
 	"github.com/casbin/casbin/v2/model"
@@ -102,7 +102,7 @@ func (s *CasbinHelper) PrefixRole(roleID uint) string {
 	return fmt.Sprintf("%s%d", RolePrefix, roleID)
 }
 
-// PrefixDomain 为租户ID添加域前缀
+// PrefixDomain 为域ID添加域前缀
 func (s *CasbinHelper) PrefixDomain(domainID uint) string {
 	return fmt.Sprintf("%s%d", DomainPrefix, domainID)
 }
@@ -156,22 +156,14 @@ func (s *CasbinHelper) CasbinMiddleware() gin.HandlerFunc {
 
 		// 使用带前缀的用户ID进行权限检查
 		userSubject := s.PrefixUser(userID)
-		// 获取租户ID（如果存在）
-		var domain string
-		claims := common.GetClaims(c)
-		if claims != nil && claims.TenantID > 0 {
-			domain = s.PrefixDomain(claims.TenantID)
-		}
+		domain := ""
 		var ok bool
 		var err error
 
-		// 带租户的权限检查
-		app.ZapLog.Info("Permission check with tenant",
+		app.ZapLog.Info("Permission check",
 			zap.String("uid", userSubject),
-			zap.String("domain", domain),
 			zap.String("path", path),
 			zap.String("method", method))
-		// domain为空时，代表全局权限
 		ok, err = s.Enforce(userSubject, path, method, domain)
 
 		if err != nil {

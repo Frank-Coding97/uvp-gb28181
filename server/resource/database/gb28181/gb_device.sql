@@ -1,5 +1,5 @@
 -- GB28181 国标设备表(注册/心跳主体)
--- 沿用 ginfast 公共字段约定(id/created_at/updated_at/deleted_at/created_by/tenant_id)
+-- 沿用 ginfast 公共字段约定(id/created_at/updated_at/deleted_at/created_by)
 DROP TABLE IF EXISTS `gb_device`;
 CREATE TABLE `gb_device` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
@@ -23,7 +23,6 @@ CREATE TABLE `gb_device` (
   `updated_at` datetime DEFAULT NULL,
   `deleted_at` datetime DEFAULT NULL,
   `created_by` int unsigned DEFAULT '0' COMMENT '创建人',
-  `tenant_id` int unsigned DEFAULT '0' COMMENT '租户ID',
   `owner_dept_id` int unsigned NOT NULL DEFAULT '0' COMMENT '所属部门ID',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_id` (`device_id`) USING BTREE,

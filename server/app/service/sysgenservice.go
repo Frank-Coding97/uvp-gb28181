@@ -3,10 +3,10 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
-	"strings"
 
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -174,13 +174,12 @@ func (sgs *SysGenService) insertTableFields(ctx context.Context, tx *gorm.DB, da
 			field.GoType = column.GoType()
 			field.FrontType = column.FrontendType()
 			field.GormTag = column.BuildGormTag()
-			// 添加逻辑：非created_at updated_at deleted_at created_by tenant_id 字段时 ，require  list_show form_show query_show 为1
+			// 添加逻辑：非created_at updated_at deleted_at created_by 字段时，require/list_show/form_show/query_show 为1
 			ignoreFields := map[string]bool{
 				"created_at": true,
 				"updated_at": true,
 				"deleted_at": true,
 				"created_by": true,
-				"tenant_id":  true,
 			}
 
 			if !ignoreFields[column.ColumnName] {

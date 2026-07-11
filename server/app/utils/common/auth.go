@@ -59,16 +59,6 @@ func GetCurrentUserID(c *gin.Context) uint {
 	return claims.UserID
 }
 
-// 获取当前租户ID，去租户化后固定为空
-func GetCurrentTenantID(c *gin.Context) uint {
-	return 0
-}
-
-// 获取当前租户Code，去租户化后固定为空
-func GetCurrentTenantCode(c *gin.Context) string {
-	return ""
-}
-
 // 尝试将context.Context转换成*gin.Context
 func TryConvertToGinContext(c context.Context) *gin.Context {
 	if c == nil {

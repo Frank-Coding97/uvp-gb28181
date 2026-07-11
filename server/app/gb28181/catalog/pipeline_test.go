@@ -46,7 +46,7 @@ func TestIngest_FiveLevelCatalog(t *testing.T) {
 		{DeviceID: "37011200001310000005", Name: "通道 5", CivilCode: "370112"},
 		{DeviceID: "37011200001310000006", Name: "通道 6", CivilCode: "370112"},
 	}
-	require.NoError(t, p.Ingest(context.Background(), catalog.Sender{TenantID: tenantID, SourceDeviceID: "34020000002000000001"}, items))
+	require.NoError(t, p.Ingest(context.Background(), catalog.Sender{SourceDeviceID: "34020000002000000001"}, items))
 
 	// catalog_node 应至少 6 个 channel 节点 + 3 级行政区链
 	var totalNodes int64
@@ -77,7 +77,7 @@ func TestIngest_FiveLevelCatalog(t *testing.T) {
 func TestIngest_Idempotent(t *testing.T) {
 	db := newPipelineTestDB(t)
 	p := catalog.New(db)
-	sender := catalog.Sender{TenantID: tenantID, SourceDeviceID: "34020000002000000001"}
+	sender := catalog.Sender{SourceDeviceID: "34020000002000000001"}
 
 	item := catalog.CatalogItem{DeviceID: "37011200001310000001", Name: "通道", CivilCode: "370112", StatusOn: true}
 	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{item}))
@@ -107,7 +107,7 @@ func TestIngest_AnomalyFallback(t *testing.T) {
 		// 长度不符 → 兜底
 		{DeviceID: "12345", Name: "短码节点"},
 	}
-	require.NoError(t, p.Ingest(context.Background(), catalog.Sender{TenantID: tenantID}, items))
+	require.NoError(t, p.Ingest(context.Background(), catalog.Sender{}, items))
 
 	// 应建 2 个 anomaly 节点(virtual_org)+ 2 条 anomaly_record
 	var anomalyNodes int64
@@ -130,7 +130,7 @@ func TestIngestDelta_AddUpdateDel(t *testing.T) {
 	db := newPipelineTestDB(t)
 	p := catalog.New(db)
 	ctx := context.Background()
-	sender := catalog.Sender{TenantID: tenantID, SourceDeviceID: "34020000002000000001"}
+	sender := catalog.Sender{SourceDeviceID: "34020000002000000001"}
 
 	it := catalog.CatalogItem{DeviceID: "37011200001310000001", Name: "原名", CivilCode: "370112", StatusOn: true}
 	require.NoError(t, p.IngestDelta(ctx, sender, "ADD", it))
@@ -171,7 +171,7 @@ func TestIngest_DepthChain(t *testing.T) {
 	p := catalog.New(db)
 
 	require.NoError(t, p.Ingest(context.Background(),
-		catalog.Sender{TenantID: tenantID, SourceDeviceID: "34020000002000000001"},
+		catalog.Sender{SourceDeviceID: "34020000002000000001"},
 		[]catalog.CatalogItem{
 			{DeviceID: "37011200001310000001", Name: "通道", CivilCode: "370112", StatusOn: true},
 		}))

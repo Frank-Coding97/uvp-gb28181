@@ -46,7 +46,6 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		KeepaliveTime:     &now, // 注册也视为一次心跳事实
 		KeepaliveInterval: keepaliveInterval,
 		Status:            gbmodels.DeviceStatusOnline, // 物化缓存,顺手刷
-		TenantID:          1,                           // 当前 GB28181 未严格落租户,与 Catalog 管道默认租户保持一致
 	}
 	if existing != nil {
 		d.OwnerDeptID = existing.OwnerDeptID

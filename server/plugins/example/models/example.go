@@ -14,7 +14,6 @@ type Example struct {
 	Name        string `gorm:"type:varchar(255);comment:名称" json:"name"`
 	Description string `gorm:"type:varchar(255);comment:描述" json:"description"`
 	CreatedBy   uint   `gorm:"type:int(11);comment:创建者ID" json:"createdBy"`
-	TenantID    uint   `gorm:"type:int(11);column:tenant_id;comment:租户ID" json:"tenantID"`
 }
 
 // ExampleList 示例列表
