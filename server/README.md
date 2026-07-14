@@ -1,6 +1,6 @@
-# GinFast 多租户版
+# UVP GB28181 后端
 
-开源、免费、轻量级 Gin 前后分离快速开发基础框架，基于主流技术，集成了 JWT 认证、权限控制、数据库操作等功能，帮助开发者快速搭建一个支持多租户的后台管理系统。
+开源、免费、轻量级 Gin 前后分离快速开发基础框架，基于主流技术，集成了 JWT 认证、权限控制、数据库操作等功能，用于快速搭建 GB28181 视频平台的后台管理系统。权限按部门(owner_dept_id)做数据隔离，非多租户模型。
 
 本项目由[Gfast](https://github.com/tiger1103/gfast)团队（[奇讯科技](https://www.qjit.cn)）开发，如果您愿意为GinFast贡献代码或提供建议以及商业合作，请加微信：qixun007(备注：ginfast)
 
@@ -13,10 +13,6 @@ github地址：[https://github.com/qxkjsoft/ginfast-ui](https://github.com/qxkjs
 [文档](docs/README.md)
 
 [安装使用视频](https://www.bilibili.com/video/BV14gsgzXEGM/)
-
-[多租户版的使用视频](https://www.bilibili.com/video/BV1Kk1wBaELb/)
-
-[多租户版的使用及开发视频](https://www.bilibili.com/video/BV199kaB9EdZ/)
 
 [ginfast宝塔部署教程](https://www.bilibili.com/video/BV1Wi6MBwEYL/)
 ## 演示地址
@@ -40,9 +36,7 @@ github地址：[https://github.com/qxkjsoft/ginfast-ui](https://github.com/qxkjs
 - 🔗 **菜单与API权限关联**：支持菜单与API权限的动态关联管理
 - 🏗️ **分层架构**：采用Controller-Service-Model分层架构，代码结构清晰
 - 📚 **API文档**：集成 Swagger API 文档，自动生成接口文档
-- 🏢 **多租户架构**：支持完整的租户管理、用户租户关联、数据隔离等功能
-- 🔒 **数据隔离**：基于GORM钩子函数实现自动租户数据隔离，确保各租户数据安全
-- 👥 **租户用户管理**：支持用户与租户的灵活关联，一个用户可关联多个租户
+- 🏢 **部门数据隔离**：GB28181 资产通过 `owner_dept_id` 归属到部门，按部门维度做数据隔离
 - 🤖 **代码生成**：强大的代码生成器，支持根据数据库表一键生成完整的后端和前端代码，包括模型、控制器、服务和视图层
 - 🔌 **插件管理**：完整的插件管理系统，支持插件打包、导入、导出、卸载等功能，支持版本管理和依赖检查
 - ⏰ **任务调度**：基于Cron表达式的任务调度系统，支持多种执行策略、阻塞策略、超时控制和自动重试机制
@@ -68,7 +62,7 @@ github地址：[https://github.com/qxkjsoft/ginfast-ui](https://github.com/qxkjs
 ## 项目结构
 
 ```
-ginfast-tenant/
+uvp-gb28181/
 ├── app/                    # 应用核心代码
 │   ├── controllers/        # 控制器层
 │   │   ├── auth.go         # 认证控制器
@@ -82,8 +76,6 @@ ginfast-tenant/
 │   │   ├── sysgen.go       # 代码生成配置控制器
 │   │   ├── sysmenu.go      # 菜单管理控制器
 │   │   ├── sysrole.go      # 角色管理控制器
-│   │   ├── systenant.go    # 租户管理控制器
-│   │   ├── sysusertenant.go # 用户租户关联控制器
 │   │   ├── sysjobs.go      # 任务调度管理控制器
 │   │   ├── sysjobresults.go # 任务执行结果控制器
 │   │   └── pluginsmanager.go # 插件管理控制器
@@ -111,8 +103,6 @@ ginfast-tenant/
 │   │   ├── sysmenu.go      # 菜单模型
 │   │   ├── sysmenuapi.go   # 菜单API关联模型
 │   │   ├── sysrole.go      # 角色模型
-│   │   ├── systenants.go   # 租户模型
-│   │   ├── sysusertenant.go # 用户租户关联模型
 │   │   ├── pluginexport.go # 插件导出配置模型
 │   │   └── *param.go       # 各种参数模型
 │   ├── routes/             # 路由配置
@@ -137,7 +127,6 @@ ginfast-tenant/
 │       ├── gormhelper/     # GORM助手
 │       ├── passwordhelper/ # 密码助手
 │       ├── response/       # 响应助手
-│       ├── tenanthelper/   # 租户助手
 │       ├── tokenhelper/    # Token助手
 │       └── ymlconfig/      # 配置助手
 ├── bootstrap/              # 应用初始化
@@ -154,7 +143,8 @@ ginfast-tenant/
 │   └── exampleinit.go      # 插件初始化文件
 ├── resource/               # 资源文件
 │   ├── database/           # 数据库脚本
-│   │   └── gin-fast-tenant.sql # 数据库初始化脚本
+│   │   ├── uvp-gb28181.sql # MySQL 全量初始化脚本
+│   │   └── gb28181/migrations/ # GB28181 增量迁移(含部门归属重构)
 │   ├── logs/               # 日志文件目录
 │   └── public/             # 静态资源
 ├── scripts/                # 脚本文件
@@ -187,7 +177,8 @@ go mod tidy
 
 3. 配置数据库
    - 修改 `config/config.yml` 中的数据库配置
-   - 导入数据库脚本 `resource/database/gin-fast.sql`
+   - 导入数据库脚本 `resource/database/uvp-gb28181.sql`
+   - 按顺序执行 `resource/database/gb28181/migrations/` 下的增量迁移
 
 4. 启动应用
 ```bash
@@ -267,58 +258,26 @@ Database:
   Loc: "Local"           # 时区
 ```
 
-## 多租户架构说明
+## 部门数据隔离说明
 
-本项目基于标准的多租户架构设计，支持数据隔离和租户管理功能：
-
-### 核心组件
-
-1. **租户管理 (Tenant Management)**
-   - 租户创建、更新、删除和查询
-   - 租户状态管理（启用/停用）
-   - 租户域名绑定
-
-2. **用户租户关联 (User-Tenant Association)**
-   - 用户与租户的多对多关系管理
-   - 支持用户关联多个租户
-   - 默认租户设置
-   - 批量关联和取消关联操作
-
-3. **数据隔离 (Data Isolation)**
-   - 基于GORM钩子函数自动实现数据隔离
-   - 通过TenantID字段实现行级数据隔离
-   - JWT中间件自动注入租户信息
+GB28181 资产(设备、通道、目录节点、挂载关系、异常记录)通过 `owner_dept_id` 归属到部门,按部门维度做数据隔离。历史多租户 schema 已通过迁移物理移除。
 
 ### 数据模型
 
-- `Tenant` - 租户模型，包含租户基本信息
-- `SysUserTenant` - 用户租户关联模型，管理用户与租户的关系
+- `gb_device / gb_channel / gb_catalog_node / gb_channel_mount / gb_anomaly_record` 均含 `owner_dept_id` 列并建有索引
+- 用户通过 `sys_user.dept_id` 关联部门,登录后 JWT claim 只携带用户信息,不再携带租户信息
 
-### 控制器
+### 数据访问约束
 
-- `TenantController` - 租户管理控制器
-- `SysUserTenantController` - 用户租户关联控制器
+- 查询/写入 GB28181 资产时以 `owner_dept_id` 作为数据作用域,由业务代码在 service 层显式携带
+- JWT 中不包含租户 claim(见 `tokenhelper` 相关回归测试),权限判定完全基于用户 + Casbin
 
-### 中间件和工具
+### 迁移链条
 
-- `tenanthelper` - 租户助手函数，提供租户数据隔离作用域
-- `gormhelper/hook.go` - GORM钩子函数，自动设置TenantID字段
-- `jwt.go` - JWT认证中间件，提取并验证租户信息
+- `2026-07-11-owner-dept-phase1.sql` — 补 `owner_dept_id` 字段/索引并从历史 `tenant_id` 回填
+- `2026-07-11-remove-tenant-phase2.sql` — 物理删除 `tenant_id` 列、相关索引与 `sys_user_tenant / sys_tenant` 等表
 
-### 多租户开发注意事项
-
-1. **数据隔离**
-   - 所有需要进行租户隔离的模型都必须包含 `TenantID uint` 字段
-   - GORM钩子函数会自动为创建和更新操作设置TenantID
-   - 查询时会自动应用租户数据隔离作用域
-
-2. **JWT认证与租户信息**
-   - JWT Token中包含租户信息
-   - 通过 `tenanthelper.TenantScope(c)` 可以获取当前用户的租户数据作用域
-
-3. **跨租户操作**
-   - 特殊管理接口可以绕过租户隔离，但需要谨慎使用
-   - 用户租户关联控制器提供了不进行租户过滤的用户和角色查询接口
+新环境执行完 Phase 2 后即已完全脱离多租户 schema。
 
 ## 代码生成功能说明
 
@@ -411,7 +370,7 @@ GET /api/codegen/preview?genId=<gen_id>
 ### 代码生成最佳实践
 
 1. **字段设计规范**
-   - 为所有需要隔离的字段添加 `TenantID` 字段
+   - 需要按部门隔离的表统一使用 `owner_dept_id` 字段
    - 为表和字段添加有意义的注释，便于代码文档生成
    - 使用标准的数据类型（VARCHAR、INT、DATETIME等）
 
@@ -732,14 +691,14 @@ plugins/
    - 继承 `models.BaseModel` 基础模型
    - 实现标准的 CRUD 方法（Create, Update, Delete, GetByID等）
    - 创建对应的参数验证模型（如 CreateRequest, UpdateRequest等）
-   - 注意添加TenantID字段以支持多租户数据隔离
+   - 需要按部门做数据隔离时,加 `OwnerDeptID` 字段并在 service 层显式过滤
 
    示例：
    ```go
    // plugins/example/models/example.go
    type Example struct {
        models.BaseModel
-       TenantID    uint   `gorm:"column:tenant_id;default:0;comment:租户ID" json:"tenantID"` // 添加租户ID字段
+       OwnerDeptID uint   `gorm:"column:owner_dept_id;default:0;comment:所属部门ID" json:"ownerDeptID"`
        Name        string `gorm:"type:varchar(255);comment:名称" json:"name"`
        Description string `gorm:"type:varchar(255);comment:描述" json:"description"`
        CreatedBy   uint   `gorm:"type:int(11);comment:创建者ID" json:"createdBy"`
@@ -881,7 +840,7 @@ plugins/
    - 使用 `app.DB()` 获取数据库连接
    - 遵循 GORM 的操作规范
    - 注意处理数据库错误
-   - 添加TenantID字段以支持多租户数据隔离
+   - 需要按部门做数据隔离时,加 `OwnerDeptID` 字段并在 service 层显式过滤
 
 6. **导出配置**
    - 在插件根目录创建plugin_export.json文件

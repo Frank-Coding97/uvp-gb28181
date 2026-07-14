@@ -1,9 +1,9 @@
 {
-  "name": "ginfast-tenant-ui",
+  "name": "uvp-gb28181-ui",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "ginfast-tenant-ui open source management system",
+  "description": "UVP GB28181 management UI",
   "author": {
     "name": "qixunkeji",
     "email": "396861557@qq.com",

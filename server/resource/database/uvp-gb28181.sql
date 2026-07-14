@@ -4,7 +4,7 @@ Navicat MySQL Data Transfer
 Source Server         : localhsot5.7
 Source Server Version : 50726
 Source Host           : localhost:3306
-Source Database       : gin-fast-tenant
+Source Database       : uvp-gb28181
 
 Target Server Type    : MYSQL
 Target Server Version : 50726
@@ -625,8 +625,8 @@ CREATE TABLE `sys_gen` (
 -- ----------------------------
 -- Records of sys_gen
 -- ----------------------------
-INSERT INTO `sys_gen` VALUES ('23', 'mysql', 'gin-fast-tenant', 'demo_students', 'test_school', 'demo_students', '学员管理', '2025-11-13 15:17:27', '2025-11-17 16:31:43', null, '1', '1', '1', null, '0', '0', '0');
-INSERT INTO `sys_gen` VALUES ('24', 'mysql', 'gin-fast-tenant', 'demo_teacher', 'test_school', 'demo_teacher', '教师表', '2025-11-13 15:17:27', '2025-11-17 17:29:28', null, '1', '1', '1', null, '0', '0', '0');
+INSERT INTO `sys_gen` VALUES ('23', 'mysql', 'uvp-gb28181', 'demo_students', 'test_school', 'demo_students', '学员管理', '2025-11-13 15:17:27', '2025-11-17 16:31:43', null, '1', '1', '1', null, '0', '0', '0');
+INSERT INTO `sys_gen` VALUES ('24', 'mysql', 'uvp-gb28181', 'demo_teacher', 'test_school', 'demo_teacher', '教师表', '2025-11-13 15:17:27', '2025-11-17 17:29:28', null, '1', '1', '1', null, '0', '0', '0');
 
 -- ----------------------------
 -- Table structure for sys_gen_field

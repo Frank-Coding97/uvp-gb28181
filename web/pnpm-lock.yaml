@@ -2735,7 +2735,7 @@ packages:
   gifuct-js@2.1.2:
     resolution: {integrity: sha512-rI2asw77u0mGgwhV3qA+OEgYqaDn5UNqgs+Bx0FGwSpuqfYn+Ir6RQY5ENNQ8SbIiG/m5gVa7CD5RriO4f4Lsg==}
 
-  'ginfast-tenant-ui@file:':
+  'uvp-gb28181-ui@file:':
     resolution: {directory: '', type: directory}
     engines: {node: '>= 18.12.0', pnpm: '>= 8.7.0'}
 
@@ -7816,7 +7816,7 @@ snapshots:
     dependencies:
       js-binary-schema-parser: 2.0.3
 
-  ginfast-tenant-ui@file:(@arco-design/web-vue@2.57.0(vue@3.5.15(typescript@5.8.3)))(@popperjs/core@2.11.8)(typescript@5.8.3):
+  uvp-gb28181-ui@file:(@arco-design/web-vue@2.57.0(vue@3.5.15(typescript@5.8.3)))(@popperjs/core@2.11.8)(typescript@5.8.3):
     dependencies:
       '@arco-design/color': 0.4.0
       '@arco-themes/vue-gi-demo': 0.0.51(@arco-design/web-vue@2.57.0(vue@3.5.15(typescript@5.8.3)))
@@ -10078,7 +10078,7 @@ snapshots:
       codemirror: 6.0.1
       style-mod: 4.1.2
       vue: 3.5.15(typescript@5.8.3)
-      vue-codemirror6: ginfast-tenant-ui@file:(@arco-design/web-vue@2.57.0(vue@3.5.15(typescript@5.8.3)))(@popperjs/core@2.11.8)(typescript@5.8.3)
+      vue-codemirror6: uvp-gb28181-ui@file:(@arco-design/web-vue@2.57.0(vue@3.5.15(typescript@5.8.3)))(@popperjs/core@2.11.8)(typescript@5.8.3)
       vue-demi: 0.14.10(vue@3.5.15(typescript@5.8.3))
     transitivePeerDependencies:
       - '@arco-design/web-vue'

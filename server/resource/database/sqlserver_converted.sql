@@ -578,8 +578,8 @@ CREATE TABLE [sys_gen] (
 
 -- Records of sys_gen
 SET IDENTITY_INSERT [sys_gen] ON;
-INSERT INTO [sys_gen] ([id], [db_type], [database], [name], [module_name], [file_name], [describe], [created_at], [updated_at], [deleted_at], [created_by], [is_cover], [is_menu], [is_tree], [is_relation_tree], [relation_tree_table], [relation_field]) VALUES (23, 'mysql', 'gin-fast-tenant', 'demo_students', 'test_school', 'demo_students', '学员管理', '2025-11-13 15:17:27', '2025-11-17 16:31:43', NULL, 1, 1, 1, NULL, 0, 0, 0);
-INSERT INTO [sys_gen] ([id], [db_type], [database], [name], [module_name], [file_name], [describe], [created_at], [updated_at], [deleted_at], [created_by], [is_cover], [is_menu], [is_tree], [is_relation_tree], [relation_tree_table], [relation_field]) VALUES (24, 'mysql', 'gin-fast-tenant', 'demo_teacher', 'test_school', 'demo_teacher', '教师表', '2025-11-13 15:17:27', '2025-11-17 17:29:28', NULL, 1, 1, 1, NULL, 0, 0, 0);
+INSERT INTO [sys_gen] ([id], [db_type], [database], [name], [module_name], [file_name], [describe], [created_at], [updated_at], [deleted_at], [created_by], [is_cover], [is_menu], [is_tree], [is_relation_tree], [relation_tree_table], [relation_field]) VALUES (23, 'mysql', 'uvp-gb28181', 'demo_students', 'test_school', 'demo_students', '学员管理', '2025-11-13 15:17:27', '2025-11-17 16:31:43', NULL, 1, 1, 1, NULL, 0, 0, 0);
+INSERT INTO [sys_gen] ([id], [db_type], [database], [name], [module_name], [file_name], [describe], [created_at], [updated_at], [deleted_at], [created_by], [is_cover], [is_menu], [is_tree], [is_relation_tree], [relation_tree_table], [relation_field]) VALUES (24, 'mysql', 'uvp-gb28181', 'demo_teacher', 'test_school', 'demo_teacher', '教师表', '2025-11-13 15:17:27', '2025-11-17 17:29:28', NULL, 1, 1, 1, NULL, 0, 0, 0);
 -- Table structure for sys_gen_field
 SET IDENTITY_INSERT [sys_gen] OFF;
 IF OBJECT_ID('sys_gen_field', 'U') IS NOT NULL DROP TABLE [sys_gen_field];
