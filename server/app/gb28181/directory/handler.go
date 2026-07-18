@@ -105,7 +105,9 @@ func createDimension(dimensionName string, db *gorm.DB, scope ScopeFunc) (Dimens
 	switch dimensionName {
 	case DimensionNative:
 		return NewNativeDimension(db, scope), nil
-	case DimensionBizGroup, DimensionCivilCode:
+	case DimensionBizGroup:
+		return NewBizGroupDimension(db, scope), nil
+	case DimensionCivilCode:
 		return nil, ErrDimensionNotImplemented
 	default:
 		return nil, ErrInvalidDimension

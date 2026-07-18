@@ -91,12 +91,23 @@ func TestDirectoryTree_InvalidDimension(t *testing.T) {
 func TestDirectoryTree_NotImplementedDimension(t *testing.T) {
 	router, _ := setupTestController(t)
 
-	// biz_group / civil_code 目前是 not-implemented stub
-	for _, dim := range []string{"biz_group", "civil_code"} {
+	// civil_code 目前是 not-implemented stub(T-1.5 待实现)
+	for _, dim := range []string{"civil_code"} {
 		w := httptest.NewRecorder()
 		req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension="+dim, nil)
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusBadRequest, w.Code, "dim=%s", dim)
 	}
+}
+
+func TestDirectoryTree_BizGroupNowAvailable(t *testing.T) {
+	router, _ := setupTestController(t)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension=biz_group", nil)
+	router.ServeHTTP(w, req)
+
+	// biz_group 空数据也返回 200(不再是 not implemented)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
