@@ -892,6 +892,7 @@ onUnmounted(() => {
                             <span>所属设备</span><strong>{{ channelDetail.deviceId }}</strong>
                             <span>厂商型号</span><strong>{{ vendorText(channelDetail) }}</strong>
                             <span>坐标</span><strong>{{ locationText(channelDetail) }}</strong>
+                            <span>流传输模式</span><strong>{{ streamTransportText(channelDetail.streamTransport) }}</strong>
                             <span>当前流</span><strong>{{ channelDetail.streamId || '未播放' }}</strong>
                         </div>
                         <div v-if="channelMounts.length" class="mount-list">
