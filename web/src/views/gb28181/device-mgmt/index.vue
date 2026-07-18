@@ -87,7 +87,15 @@ const rootLoading = ref(false);
 const rowsLoading = ref(false);
 const mapLoading = ref(false);
 const page = ref(1);
-const pageSize = ref(10);
+const listPageSize = ref(10);
+const cardPageSize = ref(12);
+const pageSize = computed({
+    get: () => viewMode.value === "card" ? cardPageSize.value : listPageSize.value,
+    set: (value: number) => {
+        if (viewMode.value === "card") cardPageSize.value = value;
+        else listPageSize.value = value;
+    }
+});
 const total = ref(0);
 const noCoordCount = ref(0);
 const selectedRowKeys = ref<number[]>([]);
@@ -292,7 +300,7 @@ function selectNode(node: CatalogNode) {
     refreshMainData();
 }
 function clearNode() { selectedNode.value = null; page.value = 1; refreshMainData(); }
-function setViewMode(mode: ViewMode) { viewMode.value = mode; if (mode !== "list") assetKind.value = "channel"; }
+function setViewMode(mode: ViewMode) { viewMode.value = mode; if (mode === "map") assetKind.value = "channel"; }
 function setAssetKind(kind: AssetKind) { assetKind.value = kind; }
 function onSearch() { page.value = 1; refreshMainData(); }
 function resetFilters() { keyword.value = ""; statusFilter.value = undefined; clearNode(); }
@@ -888,7 +896,7 @@ onUnmounted(() => {
                                         <a-option value="offline">离线</a-option>
                                     </a-select>
                                     <button class="icon-btn" type="button"><Download :size="14" /></button>
-                                    <div v-if="viewMode === 'list'" class="segmented">
+                                    <div v-if="viewMode !== 'map'" class="segmented">
                                         <button type="button" :class="{ active: assetKind === 'device' }" @click="setAssetKind('device')">设备</button>
                                         <button type="button" :class="{ active: assetKind === 'channel' }" @click="setAssetKind('channel')">通道</button>
                                     </div>
@@ -1130,30 +1138,98 @@ onUnmounted(() => {
 
                     </div>
 
-                    <div v-else-if="viewMode === 'card'" class="view-body card-grid">
-                        <article v-for="item in channels" :key="item.id" class="device-card" @dblclick="openChannel(item)">
-                            <div class="card-snap" :class="{ offline: item.status !== 1 }">
-                                <div class="snap-type"><Video :size="12" /> {{ cameraTypeText(item.ptzType) }}</div>
-                                <div class="snap-corner">
-                                    <div v-if="item.ptzType && item.ptzType > 0" class="corner-badge"><Camera :size="12" /></div>
-                                    <div v-if="item.streamId" class="corner-badge alarm"><Play :size="12" /></div>
+                    <div v-else-if="viewMode === 'card'" class="view-body card-view">
+                        <div class="card-grid">
+                            <template v-if="assetKind === 'device'">
+                        <article v-for="item in devices" :key="item.id" class="device-card device-summary-card" @dblclick="openDevice(item)">
+                            <div class="device-card-head">
+                                <span class="device-card-icon"><RadioTower :size="18" /></span>
+                                <div class="device-card-title">
+                                    <a-tooltip :content="deviceNameText(item)" position="top">
+                                        <strong class="text-ellipsis">{{ deviceNameText(item) }}</strong>
+                                    </a-tooltip>
+                                    <a-tooltip :content="item.deviceId" position="top">
+                                        <span class="code text-ellipsis">{{ item.deviceId }}</span>
+                                    </a-tooltip>
                                 </div>
-                                <div class="snap-overlay">
-                                    <span class="status-dot" :class="{ online: item.status === 1 }"></span>
-                                    <span class="status-text">{{ item.status === 1 ? '在线' : '离线' }}</span>
-                                    <span class="heart-text">{{ relTime(item.updatedAt) }}</span>
-                                </div>
+                                <span class="status-pill" :class="{ online: item.online }">{{ item.online ? '在线' : '离线' }}</span>
                             </div>
-                            <div class="card-info">
-                                <span class="title">{{ displayName(item) }}</span>
-                                <span class="code">{{ item.channelId }}</span>
-                                <span class="meta">{{ vendorText(item) }}</span>
-                                <div class="card-actions">
-                                    <button class="icon-btn small" type="button"><Layers :size="14" /></button>
-                                    <button class="play-cta" type="button" @click.stop="playChannel(item)"><Play :size="12" /> 点播</button>
+                            <div class="device-card-info">
+                                <div><span>设备 ID</span><a-tooltip :content="item.deviceId" position="top"><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip></div>
+                                <div><span>厂商</span><strong class="text-ellipsis">{{ item.manufacturer || '未上报' }}</strong></div>
+                                <div><span>型号</span><strong class="text-ellipsis">{{ item.model || '未上报' }}</strong></div>
+                                <div><span>地址</span><a-tooltip :content="endpointText(item)" position="top"><strong class="mono text-ellipsis">{{ endpointText(item) }}</strong></a-tooltip></div>
+                                <div><span>通道数量</span><strong>{{ item.channelCount }} 路 · 在线 {{ item.channelOnlineCount }} 路</strong></div>
+                                <div><span>最近心跳</span><strong :class="{ warn: !item.online }">{{ dateTime(item.keepaliveTime) }}</strong></div>
+                                <div><span>注册时间</span><strong>{{ dateTime(item.registerTime) }}</strong></div>
+                            </div>
+                            <div class="card-actions device-card-actions">
+                                <span class="device-transport">SIP / {{ transportText(item.transport) }}</span>
+                                <a-tooltip content="查看通道" position="top">
+                                    <button class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"><Camera :size="13" /></button>
+                                </a-tooltip>
+                                <a-tooltip content="查看详情" position="top">
+                                    <button class="icon-btn small framed" type="button" @click.stop="openDevice(item)"><Eye :size="13" /></button>
+                                </a-tooltip>
+                                <a-tooltip :content="item.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
+                                    <button class="icon-btn small framed info" :class="{ loading: refreshingCatalog[item.id] }" type="button" :disabled="refreshingCatalog[item.id] || !item.online" @click.stop="handleRefreshDeviceCatalog(item)">
+                                        <Loader2 v-if="refreshingCatalog[item.id]" :size="13" class="spin" />
+                                        <RefreshCcw v-else :size="13" />
+                                    </button>
+                                </a-tooltip>
+                                <a-tooltip content="编辑设备" position="top">
+                                    <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button>
+                                </a-tooltip>
+                                <a-tooltip content="删除设备" position="top">
+                                    <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click.stop="handleDeleteDevice(item)"><Trash2 :size="13" /></button>
+                                </a-tooltip>
+                            </div>
+                        </article>
+                            </template>
+                            <template v-else>
+                        <article v-for="item in channels" :key="item.id" class="device-card channel-summary-card" @dblclick="openChannel(item)">
+                            <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
+                                <div class="snapshot-empty">
+                                    <Video :size="30" />
+                                    <span>暂无快照</span>
+                                </div>
+                                <a-tooltip content="查看详情" position="top">
+                                    <button class="snapshot-detail" type="button" @click.stop="openChannel(item)"><Eye :size="15" /></button>
+                                </a-tooltip>
+                            </div>
+                            <div class="channel-card-body">
+                                <a-tooltip :content="displayName(item)" position="top"><strong class="channel-card-title text-ellipsis">{{ displayName(item) }}</strong></a-tooltip>
+                                <div class="channel-card-info">
+                                    <div><span>通道 ID</span><a-tooltip :content="item.channelId" position="top"><strong class="mono text-ellipsis">{{ item.channelId }}</strong></a-tooltip></div>
+                                    <div><span>所属设备</span><a-tooltip :content="item.deviceId" position="top"><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip></div>
+                                    <div><span>厂商 / 型号</span><strong class="text-ellipsis">{{ vendorText(item) }}</strong></div>
+                                    <div><span>位置</span><strong>{{ locationText(item) }}</strong></div>
+                                    <div><span>摄像头类型</span><strong>{{ cameraTypeText(item.ptzType) }}</strong></div>
+                                    <div><span>流传输模式</span><strong>{{ streamTransportText(item.streamTransport) }}</strong></div>
+                                </div>
+                                <div class="card-actions channel-card-actions">
+                                    <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
+                                    <a-tooltip content="点播" position="top"><button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)"><Play :size="13" /></button></a-tooltip>
+                                    <a-tooltip content="编辑通道" position="top"><button class="icon-btn small framed warning" type="button" @click.stop="openEditChannelModal(item)"><Pencil :size="13" /></button></a-tooltip>
+                                    <a-tooltip content="删除通道" position="top"><button class="icon-btn small framed danger" type="button" :disabled="deleting" @click.stop="handleDeleteChannel(item)"><Trash2 :size="13" /></button></a-tooltip>
                                 </div>
                             </div>
                         </article>
+                            </template>
+                        </div>
+                        <a-pagination
+                            v-if="total > 0"
+                            class="card-pagination"
+                            :current="page"
+                            :page-size="pageSize"
+                            :total="total"
+                            :page-size-options="[12, 24, 48]"
+                            show-page-size
+                            show-total
+                            show-jumper
+                            @change="onPageChange"
+                            @page-size-change="onPageSizeChange"
+                        />
                     </div>
 
                     <div v-else class="view-body map-view">
@@ -2171,63 +2247,37 @@ onUnmounted(() => {
     background: #ef4444;
     border-color: #ef4444;
 }
+.card-view {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    overflow: hidden;
+}
 .card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-auto-rows: max-content;
+    align-content: start;
+    align-items: start;
     gap: 12px;
-    overflow: auto;
+    min-height: 0;
+    flex: 1;
+    overflow-x: hidden;
+    overflow-y: auto;
     padding-right: 4px;
+}
+.card-pagination {
+    flex: 0 0 auto;
+    display: flex;
+    justify-content: flex-end;
+    padding: 2px 0 0;
 }
 .device-card {
     overflow: hidden;
     background: var(--uvp-panel-bg);
     border: 1px solid var(--uvp-panel-border);
     border-radius: 12px;
-}
-.card-snap {
-    position: relative;
-    aspect-ratio: 16 / 9;
-    background: linear-gradient(135deg, rgb(37 99 235 / 72%), rgb(15 170 166 / 62%));
-}
-.card-snap.offline { filter: grayscale(0.7) brightness(0.58); }
-.snap-type,
-.snap-corner,
-.snap-overlay { position: absolute; }
-.snap-type {
-    top: 8px;
-    left: 8px;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    height: 20px;
-    padding: 0 8px;
-    border-radius: 8px;
-    background: rgb(15 23 42 / 70%);
-    color: #fff;
-    font-size: 11px;
-}
-.snap-corner { top: 8px; right: 8px; display: flex; gap: 4px; }
-.corner-badge {
-    width: 22px;
-    height: 22px;
-    display: grid;
-    place-items: center;
-    border-radius: 8px;
-    background: rgb(15 23 42 / 70%);
-    color: #fff;
-}
-.corner-badge.alarm { color: var(--uvp-warning); }
-.snap-overlay {
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 10px;
-    background: linear-gradient(180deg, transparent, rgb(2 6 23 / 70%));
-    color: #fff;
-    font-size: 12px;
 }
 .status-dot {
     width: 10px;
@@ -2240,12 +2290,161 @@ onUnmounted(() => {
     background: #10b981;
     box-shadow: 0 0 0 3px rgb(16 185 129 / 14%);
 }
-.heart-text { margin-left: auto; color: rgb(255 255 255 / 86%); }
-.card-info { display: grid; gap: 4px; padding: 10px 11px; }
-.card-info .title { color: var(--uvp-text-primary); font-weight: 600; }
-.card-info .code,
-.card-info .meta { color: var(--uvp-text-tertiary); font-size: 12px; }
 .card-actions { display: flex; align-items: center; gap: 8px; }
+.device-summary-card {
+    position: relative;
+    display: grid;
+    gap: 10px;
+    align-self: start;
+    min-height: 250px;
+    padding: 12px;
+}
+.device-card-head {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+.device-card-icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-radius: 8px;
+}
+.device-card-title { min-width: 0; display: grid; gap: 3px; }
+.device-card-title strong { color: var(--uvp-text-primary); }
+.device-card-title .code { color: var(--uvp-text-tertiary); font-size: 12px; }
+.device-card-info {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    gap: 5px 8px;
+    font-size: 12px;
+}
+.device-card-info > div { display: contents; }
+.device-card-info span { color: var(--uvp-text-tertiary); }
+.device-card-info strong { min-width: 0; color: var(--uvp-text-primary); font-weight: 500; }
+.device-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.device-card-actions {
+    gap: 7px;
+    padding-top: 9px;
+    border-top: 1px solid var(--uvp-panel-border);
+}
+.device-transport {
+    margin-right: auto;
+    padding: 4px 8px;
+    color: var(--uvp-text-secondary);
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 6px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+.channel-summary-card { min-width: 0; }
+.channel-snapshot {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 148px;
+    overflow: hidden;
+    color: var(--uvp-text-tertiary);
+    background: var(--uvp-list-toolbar-bg);
+    border-bottom: 1px solid var(--uvp-panel-border);
+}
+.channel-snapshot::before {
+    position: absolute;
+    inset: 0;
+    content: "";
+    background-image:
+        linear-gradient(45deg, color-mix(in srgb, var(--uvp-panel-border) 42%, transparent) 25%, transparent 25%),
+        linear-gradient(-45deg, color-mix(in srgb, var(--uvp-panel-border) 42%, transparent) 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, color-mix(in srgb, var(--uvp-panel-border) 42%, transparent) 75%),
+        linear-gradient(-45deg, transparent 75%, color-mix(in srgb, var(--uvp-panel-border) 42%, transparent) 75%);
+    background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    background-size: 16px 16px;
+    opacity: 0.38;
+}
+.channel-snapshot.offline { color: var(--uvp-text-tertiary); opacity: 0.72; }
+.snapshot-empty {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    justify-items: center;
+    gap: 7px;
+    font-size: 12px;
+}
+.snapshot-empty svg { opacity: 0.7; }
+.snapshot-detail {
+    position: absolute;
+    z-index: 1;
+    top: 9px;
+    right: 9px;
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    color: #fff;
+    background: rgb(15 23 42 / 72%);
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s;
+}
+.snapshot-detail:hover {
+    background: var(--uvp-brand);
+    transform: translateY(-1px);
+}
+.channel-card-body {
+    display: grid;
+    gap: 10px;
+    padding: 11px 12px 12px;
+}
+.channel-card-title {
+    min-width: 0;
+    color: var(--uvp-text-primary);
+    font-size: 14px;
+    line-height: 20px;
+}
+.channel-card-info {
+    display: grid;
+    grid-template-columns: 68px minmax(0, 1fr);
+    gap: 5px 8px;
+    font-size: 12px;
+    line-height: 18px;
+}
+.channel-card-info > div { display: contents; }
+.channel-card-info span { color: var(--uvp-text-tertiary); }
+.channel-card-info strong {
+    min-width: 0;
+    color: var(--uvp-text-primary);
+    font-weight: 500;
+}
+.channel-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.channel-card-actions {
+    gap: 7px;
+    padding-top: 9px;
+    border-top: 1px solid var(--uvp-panel-border);
+}
+.channel-card-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-right: auto;
+    color: var(--uvp-text-tertiary);
+    font-size: 12px;
+}
+.channel-card-status::before {
+    width: 6px;
+    height: 6px;
+    content: "";
+    background: var(--uvp-text-tertiary);
+    border-radius: 50%;
+}
+.channel-card-status.online { color: var(--uvp-brand-cyan); }
+.channel-card-status.online::before { background: var(--uvp-brand-cyan); }
 .map-view { display: flex; flex-direction: column; gap: 10px; }
 .map-banner {
     display: inline-flex;
