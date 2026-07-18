@@ -1,14 +1,25 @@
 package directory
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
+
+// civilCodeSvcProvider 行政区划字典服务 provider(bootstrap 注入)
+var civilCodeSvcProvider func() *civilcode.Service
+
+// SetCivilCodeService 注入行政区划字典服务
+// bootstrap 在 civilcode.Service.WarmCache 完成后调用
+func SetCivilCodeService(svc *civilcode.Service) {
+	civilCodeSvcProvider = func() *civilcode.Service { return svc }
+}
 
 // DirectoryController 设备目录三维视图 REST 接口
 //
@@ -108,7 +119,10 @@ func createDimension(dimensionName string, db *gorm.DB, scope ScopeFunc) (Dimens
 	case DimensionBizGroup:
 		return NewBizGroupDimension(db, scope), nil
 	case DimensionCivilCode:
-		return nil, ErrDimensionNotImplemented
+		if civilCodeSvcProvider == nil {
+			return nil, fmt.Errorf("civilcode service not initialized")
+		}
+		return NewCivilCodeDimension(db, civilCodeSvcProvider(), scope), nil
 	default:
 		return nil, ErrInvalidDimension
 	}

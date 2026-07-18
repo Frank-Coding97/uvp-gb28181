@@ -7,6 +7,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
@@ -508,6 +509,7 @@ func setupCivilCodeService() {
 		return
 	}
 	catalog.SetCivilCodeLookup(&civilCodeServiceAdapter{svc: svc})
+	gbdirectory.SetCivilCodeService(svc)
 	app.ZapLog.Info("GB28181 CivilCode 字典服务已装配", zap.Int("count", svc.AllCount()))
 }
 

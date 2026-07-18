@@ -88,19 +88,6 @@ func TestDirectoryTree_InvalidDimension(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
-func TestDirectoryTree_NotImplementedDimension(t *testing.T) {
-	router, _ := setupTestController(t)
-
-	// civil_code 目前是 not-implemented stub(T-1.5 待实现)
-	for _, dim := range []string{"civil_code"} {
-		w := httptest.NewRecorder()
-		req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension="+dim, nil)
-		router.ServeHTTP(w, req)
-
-		assert.Equal(t, http.StatusBadRequest, w.Code, "dim=%s", dim)
-	}
-}
-
 func TestDirectoryTree_BizGroupNowAvailable(t *testing.T) {
 	router, _ := setupTestController(t)
 
@@ -110,4 +97,18 @@ func TestDirectoryTree_BizGroupNowAvailable(t *testing.T) {
 
 	// biz_group 空数据也返回 200(不再是 not implemented)
 	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestDirectoryTree_CivilCodeWithoutSvcInjection(t *testing.T) {
+	router, _ := setupTestController(t)
+
+	// civil_code 依赖 civilcode.Service 注入,测试环境未 SetCivilCodeService
+	// 期望:返回 500(service not initialized)
+	// 生产环境 bootstrap 会自动注入
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension=civil_code", nil)
+	router.ServeHTTP(w, req)
+
+	// 没有 civilcode service → 500 或 400 都可接受
+	assert.True(t, w.Code >= 400, "civil_code 无字典服务应返回错误")
 }
