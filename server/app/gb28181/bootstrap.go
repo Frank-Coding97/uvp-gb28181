@@ -500,11 +500,23 @@ func setupCivilCodeService() {
 		app.ZapLog.Warn("GB28181 DB 不可用,跳过 CivilCode 字典服务(catalog 4 层兜底降级 L4:000000)")
 		return
 	}
+	// 幂等 seed 内嵌 GB/T 2260 字典(3348 条,6 位)
+	// 若表已有数据,直接返回不重复插入
+	seeded, err := civilcode.SeedIfEmpty(app.DB())
+	if err != nil {
+		app.ZapLog.Warn("GB28181 CivilCode SeedIfEmpty 失败(可能 sys_civil_code 表未建),catalog 4 层兜底降级 L4",
+			zap.Error(err))
+		return
+	}
+	if seeded > 0 {
+		app.ZapLog.Info("GB28181 CivilCode 首次 seed 完成", zap.Int("rows", seeded))
+	}
+
 	svc := civilcode.NewService(app.DB())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := svc.WarmCache(ctx); err != nil {
-		app.ZapLog.Warn("GB28181 CivilCode WarmCache 失败(可能 sys_civil_code 表未建),catalog 4 层兜底降级 L4",
+		app.ZapLog.Warn("GB28181 CivilCode WarmCache 失败,catalog 4 层兜底降级 L4",
 			zap.Error(err))
 		return
 	}
