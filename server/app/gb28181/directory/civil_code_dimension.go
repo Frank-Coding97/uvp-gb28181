@@ -69,13 +69,9 @@ func (d *CivilCodeDimension) GetRoots(withCounts bool) ([]Node, error) {
 	nodes := make([]Node, 0, len(rows)+1)
 	for _, r := range rows {
 		// 尝试查字典拿名字(2 位省级 code 需要补 4 个 0)
+		// 优先 short_name(层级简洁),回退 name
 		provinceCode6 := r.Province + "0000"
-		var displayName string
-		if item := d.dictSvc.Lookup(provinceCode6); item != nil {
-			displayName = item.Name
-		} else {
-			displayName = "行政区 " + r.Province
-		}
+		displayName := d.lookupDisplayName(provinceCode6, "行政区 "+r.Province)
 
 		n := Node{
 			ID:          prefixProvince + r.Province,
@@ -158,13 +154,8 @@ func (d *CivilCodeDimension) getCities(provinceCode string, withCounts bool) ([]
 	provParent := prefixProvince + provinceCode
 	nodes := make([]Node, 0, len(rows))
 	for _, r := range rows {
-		var name string
 		city6 := r.City + "00"
-		if item := d.dictSvc.Lookup(city6); item != nil {
-			name = item.Name
-		} else {
-			name = "行政区 " + r.City
-		}
+		name := d.lookupDisplayName(city6, "行政区 "+r.City)
 		n := Node{
 			ID:          prefixCity + r.City,
 			Name:        name,
@@ -202,12 +193,7 @@ func (d *CivilCodeDimension) getDistricts(cityCode string, withCounts bool) ([]N
 	cityParent := prefixCity + cityCode
 	nodes := make([]Node, 0, len(rows))
 	for _, r := range rows {
-		var name string
-		if item := d.dictSvc.Lookup(r.District); item != nil {
-			name = item.Name
-		} else {
-			name = "行政区 " + r.District
-		}
+		name := d.lookupDisplayName(r.District, "行政区 "+r.District)
 		n := Node{
 			ID:          prefixDistrict + r.District,
 			Name:        name,
@@ -250,6 +236,24 @@ func (d *CivilCodeDimension) getUnassignedChannels(withCounts bool) ([]Node, err
 	}
 	un := UnassignedID
 	return d.buildChannelNodes(channels, &un), nil
+}
+
+// lookupDisplayName 从字典拿展示名(优先 short_name,回退 name,再回退 fallback)
+//
+// 用 ShortName 而不是 Name,因为 GB/T 2260 的 name 是全称(如"安徽省芜湖市"),
+// 层级树里显示会冗余重复;short_name 是简称(如"芜湖市"),更适合树节点
+func (d *CivilCodeDimension) lookupDisplayName(code6 string, fallback string) string {
+	if d.dictSvc == nil {
+		return fallback
+	}
+	item := d.dictSvc.Lookup(code6)
+	if item == nil {
+		return fallback
+	}
+	if item.ShortName != "" {
+		return item.ShortName
+	}
+	return item.Name
 }
 
 // buildChannelNodes 通用 channel → Node 转换
