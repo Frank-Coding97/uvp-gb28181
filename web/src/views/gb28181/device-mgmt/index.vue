@@ -161,6 +161,10 @@ watch(currentDimension, () => {
     Object.keys(childrenMap).forEach(k => delete childrenMap[k]);
     expandedKeys.value = [];
     selectedNode.value = null;
+    // civil_code 是通道级属性,设备无此字段 → 该维度下列表视图强制看通道
+    if (currentDimension.value === "civil_code" && viewMode.value === "list") {
+        assetKind.value = "channel";
+    }
     loadTree();
 });
 
@@ -267,13 +271,28 @@ async function refreshMainData() {
     return assetKind.value === "device" ? loadDevicesData() : loadChannelsData();
 }
 
+// 按当前维度把选中节点转成通道过滤参数
+// - civil_code 维度:用 civilCode 前缀过滤(unassigned 桶用 "unassigned")
+// - native / biz_group 维度:用数字 nodeId(走子树 path 过滤)
+function buildChannelScope(): { nodeId?: number; civilCode?: string } {
+    const node = selectedNode.value;
+    if (!node) return {};
+    if (currentDimension.value === "civil_code") {
+        if (node.id === "unassigned") return { civilCode: "unassigned" };
+        return node.civilCode ? { civilCode: node.civilCode } : {};
+    }
+    const n = Number(node.id);
+    return Number.isNaN(n) ? {} : { nodeId: n };
+}
+
 async function loadChannelsData() {
     rowsLoading.value = true;
     try {
-        const nodeId = selectedNode.value?.id ? Number(selectedNode.value.id) : undefined;
+        const scope = buildChannelScope();
         const res = await listChannels({
             q: keyword.value.trim() || undefined,
-            nodeId,
+            nodeId: scope.nodeId,
+            civilCode: scope.civilCode,
             status: statusFilter.value,
             page: page.value,
             pageSize: pageSize.value
@@ -292,10 +311,11 @@ async function loadChannelsData() {
 async function loadDevicesData() {
     rowsLoading.value = true;
     try {
-        const nodeId = selectedNode.value?.id ? Number(selectedNode.value.id) : undefined;
+        // 设备无 civil_code(通道级属性),civil_code 维度下不按节点过滤设备
+        const scope = buildChannelScope();
         const res = await listDevices({
             q: keyword.value.trim() || undefined,
-            nodeId,
+            nodeId: scope.nodeId,
             status: statusFilter.value,
             page: page.value,
             pageSize: pageSize.value,
