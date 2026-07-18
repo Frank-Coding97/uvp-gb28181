@@ -642,17 +642,18 @@ onUnmounted(() => {
                         <div class="head-title"><FolderTree :size="14" /> <span>目录</span></div>
                         <button class="icon-btn small" type="button" @click="loadTree"><RefreshCcw :size="12" /></button>
                     </div>
-                    <div class="dimension-tabs">
-                        <button
-                            v-for="opt in dimensionOptions"
-                            :key="opt.value"
-                            type="button"
-                            class="dim-tab"
-                            :class="{ active: currentDimension === opt.value }"
-                            @click="currentDimension = opt.value"
-                        >
-                            {{ opt.label }}
-                        </button>
+                    <div class="dimension-bar">
+                        <div class="segmented dimension-segmented">
+                            <button
+                                v-for="opt in dimensionOptions"
+                                :key="opt.value"
+                                type="button"
+                                :class="{ active: currentDimension === opt.value }"
+                                @click="currentDimension = opt.value"
+                            >
+                                {{ opt.label }}
+                            </button>
+                        </div>
                     </div>
                     <div class="aside-search"><input v-model="keyword" placeholder="筛选节点 ..." @keydown.enter.prevent="onSearch" /></div>
                     <a-spin :loading="rootLoading" class="tree-wrap">
@@ -1181,33 +1182,17 @@ onUnmounted(() => {
     border-bottom: 1px solid var(--uvp-panel-border);
 }
 .head-title { display: inline-flex; align-items: center; gap: 8px; color: var(--uvp-text-primary); font-weight: 620; }
-.dimension-tabs {
-    display: flex;
-    gap: 6px;
+.dimension-bar {
     padding: 10px 14px;
     border-bottom: 1px solid var(--uvp-panel-border);
 }
-.dim-tab {
+/* 复用现成 .segmented 组件,仅让它撑满目录栏宽度 + 三等分 */
+.dimension-segmented {
+    display: flex;
+    width: 100%;
+}
+.dimension-segmented button {
     flex: 1;
-    height: 32px;
-    padding: 0 10px;
-    font-size: 13px;
-    color: var(--uvp-text-secondary);
-    background: var(--uvp-search-control-bg);
-    border: 1px solid var(--uvp-search-secondary-btn-border);
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.15s;
-}
-.dim-tab:hover {
-    color: var(--uvp-text-primary);
-    border-color: var(--uvp-primary);
-}
-.dim-tab.active {
-    color: white;
-    background: var(--uvp-primary);
-    border-color: var(--uvp-primary);
-    font-weight: 500;
 }
 .aside-search { padding: 12px 14px 10px; }
 .aside-search input {
