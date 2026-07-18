@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
@@ -147,6 +149,9 @@ func Start() {
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
+
+	// 初始化行政区划字典服务(catalog 4 层兜底依赖,启动时 warm cache)
+	setupCivilCodeService()
 
 	// 先建聚合器,handler/UAC 拿到它做埋点
 	metricsAgg = metrics.NewAggregator()
@@ -470,6 +475,40 @@ func runMetricsCleanup(a *metrics.Aggregator, stop <-chan struct{}) {
 			}
 		}
 	}
+}
+
+// civilCodeServiceAdapter 适配 civilcode.Service 到 catalog.CivilCodeLookup 接口
+type civilCodeServiceAdapter struct {
+	svc *civilcode.Service
+}
+
+func (a *civilCodeServiceAdapter) Lookup(code string) interface{} {
+	return a.svc.Lookup(code) // *SysCivilCode → interface{}
+}
+
+// setupCivilCodeService 初始化行政区划字典服务 + warm cache + 注入到 catalog
+//
+// 流程:
+//  1. app.DB() 为 nil → 跳过(无 DB,catalog 4 层兜底降级到 L4:000000)
+//  2. 构造 civilcode.Service + WarmCache(~3500 行,~400KB)
+//  3. 注入到 catalog.SetCivilCodeLookup(L1/L2 校验字典存在性用)
+//
+// WarmCache 失败(表不存在 / 迁移未跑)→ zap.Warn + 跳过注入,catalog 降级 L4
+func setupCivilCodeService() {
+	if app.DB() == nil {
+		app.ZapLog.Warn("GB28181 DB 不可用,跳过 CivilCode 字典服务(catalog 4 层兜底降级 L4:000000)")
+		return
+	}
+	svc := civilcode.NewService(app.DB())
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := svc.WarmCache(ctx); err != nil {
+		app.ZapLog.Warn("GB28181 CivilCode WarmCache 失败(可能 sys_civil_code 表未建),catalog 4 层兜底降级 L4",
+			zap.Error(err))
+		return
+	}
+	catalog.SetCivilCodeLookup(&civilCodeServiceAdapter{svc: svc})
+	app.ZapLog.Info("GB28181 CivilCode 字典服务已装配", zap.Int("count", svc.AllCount()))
 }
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
