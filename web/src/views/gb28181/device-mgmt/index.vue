@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onMounted, reactive, ref, watch, onUnmounted } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import {
     Building2,
@@ -86,6 +86,8 @@ const selectedRowKeys = ref<number[]>([]);
 const mapZoom = ref(10);
 const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
+const autoRefresh = ref(true);
+const refreshInterval = ref<number | null>(null);
 
 const roots = ref<CatalogNode[]>([]);
 const childrenMap = reactive<Record<number, CatalogNode[]>>({});
@@ -489,8 +491,55 @@ async function handleBatchDelete() {
     });
 }
 
+function startAutoRefresh() {
+    if (refreshInterval.value) return;
+    refreshInterval.value = window.setInterval(() => {
+        if (autoRefresh.value) {
+            refreshMainData();
+            refreshDeviceStats();
+        }
+    }, 10000); // 每10秒刷新一次
+}
+
+function stopAutoRefresh() {
+    if (refreshInterval.value) {
+        clearInterval(refreshInterval.value);
+        refreshInterval.value = null;
+    }
+}
+
+function toggleAutoRefresh(checked: boolean) {
+    autoRefresh.value = checked;
+    if (checked) {
+        startAutoRefresh();
+    } else {
+        stopAutoRefresh();
+    }
+}
+
+function channelPercentage(record: DeviceVO): string {
+    if (!record.channelCount || record.channelCount === 0) return '0%';
+    const percentage = (record.channelOnlineCount / record.channelCount) * 100;
+    return `${percentage.toFixed(0)}%`;
+}
+
+function channelStatusClass(record: DeviceVO): string {
+    if (!record.channelCount || record.channelCount === 0) return 'empty';
+    const percentage = (record.channelOnlineCount / record.channelCount) * 100;
+    if (percentage === 0) return 'offline';
+    if (percentage < 50) return 'warning';
+    return 'healthy';
+}
+
 onMounted(async () => {
     await Promise.all([loadTree(), refreshMainData(), refreshDeviceStats()]);
+    if (autoRefresh.value) {
+        startAutoRefresh();
+    }
+});
+
+onUnmounted(() => {
+    stopAutoRefresh();
 });
 </script>
 
@@ -559,6 +608,17 @@ onMounted(async () => {
                         <s-layout-search class="device-filter-panel">
                             <template #extra>
                                 <div class="toolbar">
+                                    <div class="auto-refresh-control">
+                                        <span class="refresh-label">自动刷新</span>
+                                        <a-switch
+                                            v-model="autoRefresh"
+                                            @change="toggleAutoRefresh"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </div>
+                                    <button class="btn-ghost" type="button" @click="refreshMainData"><RefreshCcw :size="14" /> 刷新</button>
                                     <a-select
                                         v-model="statusFilter"
                                         allow-clear
@@ -569,7 +629,6 @@ onMounted(async () => {
                                         <a-option value="online">在线</a-option>
                                         <a-option value="offline">离线</a-option>
                                     </a-select>
-                                    <button class="btn-ghost" type="button" @click="refreshMainData"><RefreshCcw :size="14" /> 刷新</button>
                                     <button class="icon-btn" type="button"><Download :size="14" /></button>
                                     <div v-if="viewMode === 'list'" class="segmented">
                                         <button type="button" :class="{ active: assetKind === 'device' }" @click="setAssetKind('device')">设备</button>
@@ -674,14 +733,27 @@ onMounted(async () => {
                             @page-size-change="onPageSizeChange"
                         >
                             <template #columns>
-                                <a-table-column title="厂商" :width="180">
+                                <a-table-column title="设备名称" :width="130">
                                     <template #cell="{ record }">
-                                        <div class="brand-cell">
-                                            <div class="thumb brand-thumb">
-                                                <span class="placeholder">{{ manufacturerAbbr(record.manufacturer) }}</span>
+                                        <a-tooltip :content="deviceNameText(record)" position="top">
+                                            <div class="device-name text-ellipsis">
+                                                <span class="pri">{{ deviceNameText(record) }}</span>
                                             </div>
-                                            <span class="brand-name">{{ record.manufacturer || '-' }}</span>
-                                        </div>
+                                        </a-tooltip>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="设备编号" :width="190">
+                                    <template #cell="{ record }">
+                                        <a-tooltip :content="record.deviceId" position="top">
+                                            <span class="code-main text-ellipsis">{{ record.deviceId }}</span>
+                                        </a-tooltip>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="厂商" :width="120">
+                                    <template #cell="{ record }">
+                                        <a-tooltip :content="record.manufacturer || '-'" position="top">
+                                            <span class="text-ellipsis">{{ record.manufacturer || '-' }}</span>
+                                        </a-tooltip>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="状态" :width="92">
@@ -692,26 +764,33 @@ onMounted(async () => {
                                         </span>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="设备名称" :width="170">
+                                <a-table-column title="通道数" :width="140">
                                     <template #cell="{ record }">
-                                        <div class="device-name">
-                                            <span class="pri">{{ deviceNameText(record) }}</span>
+                                        <div class="channel-progress">
+                                            <div class="progress-bar" :class="channelStatusClass(record)">
+                                                <div class="progress-fill" :style="{ width: channelPercentage(record) }"></div>
+                                            </div>
+                                            <span class="channel-text">{{ record.channelOnlineCount }}/{{ record.channelCount }}</span>
                                         </div>
                                     </template>
-                                </a-table-column>
-                                <a-table-column title="设备编号" :width="190">
-                                    <template #cell="{ record }"><span class="code-main">{{ record.deviceId }}</span></template>
-                                </a-table-column>
-                                <a-table-column title="通道数" :width="100">
-                                    <template #cell="{ record }"><span class="tag">{{ record.channelOnlineCount }}/{{ record.channelCount }}</span></template>
                                 </a-table-column>
                                 <a-table-column title="传输模式" :width="110">
                                     <template #cell="{ record }"><span class="tag">{{ transportText(record.transport) }}</span></template>
                                 </a-table-column>
                                 <a-table-column title="来源地址" :width="180">
-                                    <template #cell="{ record }"><span class="code-main mono">{{ endpointText(record) }}</span></template>
+                                    <template #cell="{ record }">
+                                        <a-tooltip :content="endpointText(record)" position="top">
+                                            <span class="code-main mono text-ellipsis">{{ endpointText(record) }}</span>
+                                        </a-tooltip>
+                                    </template>
                                 </a-table-column>
-                                <a-table-column title="型号 / 版本" :width="160"><template #cell="{ record }"><span class="relative">{{ modelVersionText(record) }}</span></template></a-table-column>
+                                <a-table-column title="型号 / 版本" :width="160">
+                                    <template #cell="{ record }">
+                                        <a-tooltip :content="modelVersionText(record)" position="top">
+                                            <span class="relative text-ellipsis">{{ modelVersionText(record) }}</span>
+                                        </a-tooltip>
+                                    </template>
+                                </a-table-column>
                                 <a-table-column title="注册时间" :width="170">
                                     <template #cell="{ record }">
                                         <span class="relative">{{ dateTime(record.registerTime) }}</span>
@@ -1098,6 +1177,22 @@ onMounted(async () => {
     justify-content: flex-end;
     min-width: 0;
 }
+.auto-refresh-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    height: 36px;
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 10px;
+}
+.refresh-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--uvp-text-secondary);
+    white-space: nowrap;
+}
 .segmented {
     display: inline-flex;
     gap: 2px;
@@ -1339,6 +1434,55 @@ onMounted(async () => {
 }
 .status-inline.online .status-dot {
     background: #10b981;
+}
+.channel-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.progress-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--uvp-panel-border);
+    border-radius: 3px;
+    overflow: hidden;
+    position: relative;
+}
+.progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+.progress-bar.healthy .progress-fill {
+    background: #10b981;
+}
+.progress-bar.warning .progress-fill {
+    background: #f59e0b;
+}
+.progress-bar.offline .progress-fill {
+    background: #ef4444;
+}
+.progress-bar.empty .progress-fill {
+    background: #6b7280;
+}
+.channel-text {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--uvp-text-secondary);
+    white-space: nowrap;
+    min-width: 36px;
+}
+
+/* Text ellipsis for long content */
+.text-ellipsis {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+.device-name.text-ellipsis {
+    max-width: 100%;
 }
 .play-cta {
     color: var(--uvp-brand);
