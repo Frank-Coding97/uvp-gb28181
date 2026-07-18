@@ -258,6 +258,20 @@ export const batchDeleteChannels = (ids: number[]) =>
         { data: { ids } }
     );
 
+export interface CreateDeviceDTO {
+    deviceId: string;
+    name?: string;
+    password?: string;
+    transport?: "UDP" | "TCP";
+}
+
+export const createDevice = (data: CreateDeviceDTO) =>
+    http.request<BaseResult<{ id: number; deviceId: string }>>(
+        "post",
+        baseUrlApi("gb28181/device-mgmt/device"),
+        { data }
+    );
+
 export const refreshDeviceCatalog = (id: number) =>
     http.request<BaseResult<{ deviceId: string; dest: string; ok: boolean }>>(
         "post",

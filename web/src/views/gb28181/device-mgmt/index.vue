@@ -5,6 +5,7 @@ import {
     Building2,
     Camera,
     ChevronRight,
+    Eye,
     Folder,
     FolderTree,
     Grid2X2,
@@ -30,6 +31,7 @@ import {
 import {
     batchDeleteChannels,
     batchDeleteDevices,
+    createDevice,
     deleteChannel,
     deleteDevice,
     getChannel,
@@ -50,6 +52,7 @@ import {
     type CatalogNode,
     type ChannelMount,
     type ChannelVO,
+    type CreateDeviceDTO,
     type DeviceVO,
     type MapCluster,
     type MapMarker,
@@ -368,6 +371,23 @@ function playChannel(record: ChannelVO | MapMarker) {
 
 const deleting = ref(false);
 const refreshingCatalog = reactive<Record<number, boolean>>({});
+const createDeviceVisible = ref(false);
+const createDeviceForm = reactive<CreateDeviceDTO>({
+    deviceId: "",
+    name: "",
+    password: ""
+});
+const createDeviceFormRef = ref();
+const creatingDevice = ref(false);
+const createDeviceRules = {
+    deviceId: [
+        { required: true, message: "请输入设备国标 ID" },
+        {
+            match: /^\d{20}$/,
+            message: "设备国标 ID 必须为 20 位数字"
+        }
+    ]
+};
 
 function afterDeleteSuccess() {
     selectedRowKeys.value = [];
@@ -395,6 +415,39 @@ async function handleRefreshDeviceCatalog(record: DeviceVO) {
         Message.error(error?.message || "下发失败");
     } finally {
         refreshingCatalog[record.id] = false;
+    }
+}
+
+function openCreateDeviceModal() {
+    createDeviceForm.deviceId = "";
+    createDeviceForm.name = "";
+    createDeviceForm.password = "";
+    createDeviceVisible.value = true;
+    createDeviceFormRef.value?.clearValidate?.();
+}
+
+async function handleCreateDevice() {
+    const errors = await createDeviceFormRef.value?.validate?.();
+    if (errors) return;
+    creatingDevice.value = true;
+    try {
+        const res = await createDevice({
+            deviceId: createDeviceForm.deviceId.trim(),
+            name: createDeviceForm.name?.trim() || undefined,
+            password: createDeviceForm.password?.trim() || undefined
+        });
+        if (res.code === 0) {
+            Message.success("设备已创建");
+            createDeviceVisible.value = false;
+            refreshMainData();
+            refreshDeviceStats();
+        } else {
+            Message.error(res.message || "创建失败");
+        }
+    } catch (error: any) {
+        Message.error(error?.message || "创建失败");
+    } finally {
+        creatingDevice.value = false;
     }
 }
 
@@ -590,7 +643,7 @@ onUnmounted(() => {
                         </button>
                     </div>
                     <button class="icon-btn" type="button" @click="resetFilters"><SlidersHorizontal :size="16" /></button>
-                    <button class="btn-primary" type="button" @click="Message.info('设备录入表单待接入')"><Plus :size="14" /> 新建设备</button>
+                    <button class="btn-primary" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
                     <button class="icon-btn" type="button"><Settings2 :size="16" /></button>
                 </div>
             </div>
@@ -678,7 +731,7 @@ onUnmounted(() => {
                     <div v-if="selectedCount" class="batch-bar">
                         <div class="batch-info"><strong>{{ selectedCount }}</strong> 项已选</div>
                         <div class="batch-ops">
-                            <button class="btn-ghost" type="button" :disabled="deleting" @click="handleBatchDelete">批量删除</button>
+                            <button class="btn-danger" type="button" :disabled="deleting" @click="handleBatchDelete">批量删除</button>
                         </div>
                     </div>
 
@@ -751,9 +804,18 @@ onUnmounted(() => {
                                 <a-table-column title="操作" :width="180" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="table-actions">
-                                            <button class="play-cta" type="button" @click="openChannel(record)"><Play :size="12" /> 播放</button>
-                                            <button class="icon-btn small framed" type="button" @click="Message.info('通道编辑待接入')"><Pencil :size="13" /></button>
-                                            <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteChannel(record)"><Trash2 :size="13" /></button>
+                                            <a-tooltip content="播放" position="top">
+                                                <button class="icon-btn small framed primary" type="button" @click="openChannel(record)"><Play :size="13" /></button>
+                                            </a-tooltip>
+                                            <a-tooltip content="查看详情" position="top">
+                                                <button class="icon-btn small framed" type="button" @click="openChannel(record)"><Eye :size="13" /></button>
+                                            </a-tooltip>
+                                            <a-tooltip content="编辑通道" position="top">
+                                                <button class="icon-btn small framed warning" type="button" @click="Message.info('通道编辑待接入')"><Pencil :size="13" /></button>
+                                            </a-tooltip>
+                                            <a-tooltip content="删除通道" position="top">
+                                                <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteChannel(record)"><Trash2 :size="13" /></button>
+                                            </a-tooltip>
                                         </div>
                                     </template>
                                 </a-table-column>
@@ -767,7 +829,7 @@ onUnmounted(() => {
                             :loading="rowsLoading"
                             :pagination="tablePagination"
                             row-key="id"
-                            :scroll="{ x: 1820 }"
+                            :scroll="{ x: 1600 }"
                             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
                             class="dm-table"
                             @page-change="onPageChange"
@@ -842,26 +904,29 @@ onUnmounted(() => {
                                 <a-table-column title="操作" :width="180" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="table-actions">
-                                            <button class="play-cta" type="button" @click="showDeviceChannels(record)"><Folder :size="12" /> 通道</button>
-                                            <button class="btn-ghost compact" type="button" @click="openDevice(record)">详情</button>
-                                        </div>
-                                    </template>
-                                </a-table-column>
-                                <a-table-column title="设备控制" :width="150" fixed="right">
-                                    <template #cell="{ record }">
-                                        <div class="table-actions">
-                                            <button
-                                                class="icon-btn small framed"
-                                                type="button"
-                                                :disabled="refreshingCatalog[record.id] || !record.online"
-                                                :title="record.online ? '刷新通道目录' : '设备离线,无法刷新'"
-                                                @click="handleRefreshDeviceCatalog(record)"
-                                            >
-                                                <Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" />
-                                                <RefreshCcw v-else :size="13" />
-                                            </button>
-                                            <button class="icon-btn small framed" type="button" @click="Message.info('设备编辑待接入')"><Pencil :size="13" /></button>
-                                            <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteDevice(record)"><Trash2 :size="13" /></button>
+                                            <a-tooltip content="查看通道" position="top">
+                                                <button class="icon-btn small framed primary" type="button" @click="showDeviceChannels(record)"><Camera :size="13" /></button>
+                                            </a-tooltip>
+                                            <a-tooltip content="查看详情" position="top">
+                                                <button class="icon-btn small framed" type="button" @click="openDevice(record)"><Eye :size="13" /></button>
+                                            </a-tooltip>
+                                            <a-tooltip :content="record.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
+                                                <button
+                                                    class="icon-btn small framed info"
+                                                    type="button"
+                                                    :disabled="refreshingCatalog[record.id] || !record.online"
+                                                    @click="handleRefreshDeviceCatalog(record)"
+                                                >
+                                                    <Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" />
+                                                    <RefreshCcw v-else :size="13" />
+                                                </button>
+                                            </a-tooltip>
+                                            <a-tooltip content="编辑设备" position="top">
+                                                <button class="icon-btn small framed warning" type="button" @click="Message.info('设备编辑待接入')"><Pencil :size="13" /></button>
+                                            </a-tooltip>
+                                            <a-tooltip content="删除设备" position="top">
+                                                <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteDevice(record)"><Trash2 :size="13" /></button>
+                                            </a-tooltip>
                                         </div>
                                     </template>
                                 </a-table-column>
@@ -972,6 +1037,56 @@ onUnmounted(() => {
                     </div>
                 </a-spin>
             </a-drawer>
+
+            <a-modal
+                v-model:visible="createDeviceVisible"
+                modal-class="uvp-system-dialog"
+                title="新建设备"
+                :width="480"
+                :mask-closable="false"
+                unmount-on-close
+                @cancel="createDeviceVisible = false"
+            >
+                <a-form
+                    ref="createDeviceFormRef"
+                    :model="createDeviceForm"
+                    :rules="createDeviceRules"
+                    layout="vertical"
+                >
+                    <a-form-item field="deviceId" label="设备国标 ID" validate-trigger="blur">
+                        <a-input
+                            v-model="createDeviceForm.deviceId"
+                            placeholder="请输入 20 位国标设备 ID"
+                            :maxlength="20"
+                            allow-clear
+                        >
+                            <template #suffix>
+                                <span class="input-counter" :class="{ done: (createDeviceForm.deviceId?.length || 0) === 20 }">
+                                    {{ createDeviceForm.deviceId?.length || 0 }} / 20
+                                </span>
+                            </template>
+                        </a-input>
+                    </a-form-item>
+                    <a-form-item field="name" label="设备名称">
+                        <a-input
+                            v-model="createDeviceForm.name"
+                            placeholder="选填,方便识别"
+                            allow-clear
+                        />
+                    </a-form-item>
+                    <a-form-item field="password" label="设备密码">
+                        <a-input-password
+                            v-model="createDeviceForm.password"
+                            placeholder="选填,用于一设备一密码场景"
+                            allow-clear
+                        />
+                    </a-form-item>
+                </a-form>
+                <template #footer>
+                    <a-button @click="createDeviceVisible = false">取消</a-button>
+                    <a-button type="primary" :loading="creatingDevice" @click="handleCreateDevice">创建</a-button>
+                </template>
+            </a-modal>
         </div>
     </div>
 </template>
@@ -1071,6 +1186,7 @@ onUnmounted(() => {
 .icon-btn.small { width: 24px; height: 24px; }
 .btn-primary,
 .btn-ghost,
+.btn-danger,
 .play-cta {
     display: inline-flex;
     align-items: center;
@@ -1088,6 +1204,19 @@ onUnmounted(() => {
     font-weight: 600;
 }
 .btn-primary.long { width: 100%; }
+.btn-danger {
+    color: #fff;
+    background: #ef4444;
+    border: 0;
+    font-weight: 600;
+}
+.btn-danger:hover {
+    background: #dc2626;
+}
+.btn-danger:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 .btn-ghost {
     color: var(--uvp-text-secondary);
     background: var(--uvp-search-secondary-btn-bg);
@@ -1540,6 +1669,36 @@ onUnmounted(() => {
     border-radius: 8px;
     font-size: 12px;
 }
+.icon-btn.framed.primary {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 24%, transparent);
+}
+.icon-btn.framed.primary:hover {
+    color: #fff;
+    background: var(--uvp-brand);
+    border-color: var(--uvp-brand);
+}
+.icon-btn.framed.info {
+    color: var(--uvp-brand-cyan);
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 8%, transparent);
+    border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 20%, var(--uvp-search-secondary-btn-border));
+}
+.icon-btn.framed.info:hover {
+    color: #fff;
+    background: var(--uvp-brand-cyan);
+    border-color: var(--uvp-brand-cyan);
+}
+.icon-btn.framed.warning {
+    color: #f59e0b;
+    background: color-mix(in srgb, #f59e0b 8%, transparent);
+    border: 1px solid color-mix(in srgb, #f59e0b 20%, var(--uvp-search-secondary-btn-border));
+}
+.icon-btn.framed.warning:hover {
+    color: #fff;
+    background: #f59e0b;
+    border-color: #f59e0b;
+}
 .icon-btn.framed {
     color: var(--uvp-text-secondary);
     background: var(--uvp-search-secondary-btn-bg);
@@ -1549,10 +1708,15 @@ onUnmounted(() => {
     color: var(--uvp-brand);
     border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-search-secondary-btn-border));
 }
+.icon-btn.framed.danger {
+    color: #ef4444;
+    background: color-mix(in srgb, #ef4444 8%, transparent);
+    border: 1px solid color-mix(in srgb, #ef4444 20%, var(--uvp-search-secondary-btn-border));
+}
 .icon-btn.framed.danger:hover {
-    color: var(--uvp-danger, #ef4444);
-    background: color-mix(in srgb, var(--uvp-danger, #ef4444) 8%, transparent);
-    border-color: color-mix(in srgb, var(--uvp-danger, #ef4444) 30%, var(--uvp-search-secondary-btn-border));
+    color: #fff;
+    background: #ef4444;
+    border-color: #ef4444;
 }
 .card-grid {
     display: grid;
@@ -1735,6 +1899,26 @@ onUnmounted(() => {
     border-radius: 999px;
 }
 .timeline-strip span.online { background: var(--uvp-brand-cyan); }
+.input-counter {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    margin-right: -4px;
+    color: var(--uvp-text-tertiary);
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+    line-height: 1;
+    min-height: 22px;
+}
+.input-counter.done {
+    color: var(--uvp-brand-cyan);
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
+    border-color: color-mix(in srgb, var(--uvp-brand-cyan) 28%, transparent);
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1080px) {
     .workspace { grid-template-columns: 1fr; }
