@@ -1,0 +1,69 @@
+// Arco Design 组件全局样式覆盖
+// 目标：让 Arco 组件符合 UVP 系统设计风格
+
+// ========== Select 下拉框 ==========
+.arco-select-view {
+  border-radius: 8px !important;
+  border: 1px solid var(--uvp-panel-border) !important;
+  background: #ffffff !important;
+
+  &:hover {
+    border-color: var(--uvp-brand) !important;
+  }
+
+  &.arco-select-view-focus {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--uvp-brand) 12%, transparent) !important;
+  }
+}
+
+.arco-select-view-value {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--uvp-text-primary) !important;
+}
+
+.arco-select-view-suffix {
+  color: var(--uvp-text-tertiary) !important;
+}
+
+// 下拉面板
+.arco-select-dropdown {
+  border-radius: 10px !important;
+  border: 1px solid var(--uvp-panel-border) !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+}
+
+.arco-select-option {
+  font-size: 12px !important;
+  font-weight: 500 !important;
+  color: var(--uvp-text-secondary) !important;
+  border-radius: 6px !important;
+  margin: 2px 4px !important;
+
+  &:hover {
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  &.arco-select-option-selected {
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+    font-weight: 600 !important;
+  }
+}
+
+// 小尺寸 select
+.arco-select-size-small {
+  .arco-select-view {
+    height: 32px !important;
+    padding: 0 10px !important;
+  }
+
+  .arco-select-view-value {
+    font-size: 12px !important;
+  }
+}
+
+// ========== 其他 Arco 组件后续在这里扩展 ==========

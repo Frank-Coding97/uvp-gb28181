@@ -18,6 +18,7 @@ import ArcoVue from "@arco-design/web-vue";
 import ArcoVueIcon from "@arco-design/web-vue/es/icon";
 // import "@arco-design/web-vue/dist/arco.css"; // 默认样式
 import '@arco-themes/vue-gi-demo/css/arco.css'; // 自定义主题
+import "@/styles/arco-overrides.scss"; // UVP 全局样式覆盖
 import i18n from "@/lang/index";
 
 

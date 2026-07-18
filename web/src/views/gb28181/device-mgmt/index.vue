@@ -44,6 +44,7 @@ import {
     listMapClusters,
     listMapMarkers,
     refreshDeviceCatalog,
+    updateChannelStreamTransport,
     type AssetKind,
     type BatchDeleteResult,
     type CatalogNode,
@@ -465,6 +466,24 @@ async function handleDeleteChannel(record: ChannelVO) {
     });
 }
 
+async function handleStreamTransportChange(channelId: number, streamTransport: string) {
+    try {
+        const res = await updateChannelStreamTransport(channelId, streamTransport as any);
+        if (res.code === 0) {
+            Message.success("流传输模式已更新");
+            // 更新本地数据
+            if (assetKind.value === "channel") {
+                const item = channels.value.find(c => c.id === channelId);
+                if (item) item.streamTransport = streamTransport;
+            }
+        } else {
+            Message.error(res.message || "更新失败");
+        }
+    } catch (error: any) {
+        Message.error(error?.message || "更新失败");
+    }
+}
+
 async function handleBatchDelete() {
     const ids = [...selectedRowKeys.value];
     if (ids.length === 0) return;
@@ -705,8 +724,19 @@ onUnmounted(() => {
                                 <a-table-column title="摄像头类型" :width="120">
                                     <template #cell="{ record }"><span class="tag">{{ cameraTypeText(record.ptzType) }}</span></template>
                                 </a-table-column>
-                                <a-table-column title="流传输模式" :width="120">
-                                    <template #cell="{ record }"><span class="tag muted">{{ streamTransportText(record.streamTransport) }}</span></template>
+                                <a-table-column title="流传输模式" :width="150">
+                                    <template #cell="{ record }">
+                                        <a-select
+                                            :model-value="record.streamTransport || 'UDP'"
+                                            size="small"
+                                            style="width: 130px"
+                                            @change="(value) => handleStreamTransportChange(record.id, value)"
+                                        >
+                                            <a-option value="UDP">UDP</a-option>
+                                            <a-option value="TCP-Active">TCP-Active</a-option>
+                                            <a-option value="TCP-Passive">TCP-Passive</a-option>
+                                        </a-select>
+                                    </template>
                                 </a-table-column>
                                 <a-table-column title="厂商 / 型号" :width="170"><template #cell="{ record }"><div class="vendor-cell"><span class="v">{{ record.manufacturer || '-' }}</span><span class="m">{{ record.model || '-' }}</span></div></template></a-table-column>
                                 <a-table-column title="位置信息" :width="180"><template #cell="{ record }"><span class="relative">{{ locationText(record) }}</span></template></a-table-column>

@@ -148,6 +148,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
+			dmgmt.PATCH("/channel/:id/stream-transport", deviceMgmtController.UpdateChannelStreamTransport)
 			// 删除(单/批,硬 cascade — 用户主动删)
 			dmgmt.DELETE("/device/:id", deviceMgmtController.DeleteDevice)
 			dmgmt.POST("/device/batch-delete", deviceMgmtController.BatchDeleteDevices)

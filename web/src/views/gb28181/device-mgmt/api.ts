@@ -263,3 +263,12 @@ export const refreshDeviceCatalog = (id: number) =>
         "post",
         baseUrlApi(`gb28181/device-mgmt/device/${id}/catalog/refresh`)
     );
+
+export type StreamTransport = "UDP" | "TCP-Active" | "TCP-Passive";
+
+export const updateChannelStreamTransport = (id: number, streamTransport: StreamTransport) =>
+    http.request<BaseResult<{ id: number; streamTransport: string }>>(
+        "patch",
+        baseUrlApi(`gb28181/device-mgmt/channel/${id}/stream-transport`),
+        { data: { streamTransport } }
+    );

@@ -317,6 +317,47 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 	dc.Success(c, ch)
 }
 
+// UpdateChannelStreamTransport 更新通道流传输模式
+// PATCH /channel/:id/stream-transport  body: {streamTransport: "UDP" | "TCP-Active" | "TCP-Passive"}
+func (dc *DeviceMgmtController) UpdateChannelStreamTransport(c *gin.Context) {
+	db := dc.db()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		dc.FailAndAbort(c, "ID 不合法", err)
+		return
+	}
+	var body struct {
+		StreamTransport string `json:"streamTransport"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		dc.FailAndAbort(c, "请求体不合法", err)
+		return
+	}
+	// 校验流传输模式合法性
+	allowed := map[string]bool{"UDP": true, "TCP-Active": true, "TCP-Passive": true}
+	if !allowed[body.StreamTransport] {
+		dc.FailAndAbort(c, "流传输模式非法,仅支持 UDP/TCP-Active/TCP-Passive", nil)
+		return
+	}
+	res := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+		Scopes(ownerDeptScope(c)).
+		Where("id = ?", id).
+		Update("stream_transport", body.StreamTransport)
+	if res.Error != nil {
+		dc.FailAndAbort(c, "更新失败", res.Error)
+		return
+	}
+	if res.RowsAffected == 0 {
+		dc.FailAndAbort(c, "通道不存在", nil)
+		return
+	}
+	dc.Success(c, gin.H{"id": id, "streamTransport": body.StreamTransport})
+}
+
 // ListChannelMounts 通道挂载位置列表(plan §3.5 多视图挂载)
 func (dc *DeviceMgmtController) ListChannelMounts(c *gin.Context) {
 	db := dc.db()
