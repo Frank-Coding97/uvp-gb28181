@@ -191,9 +191,16 @@ func (d *CivilCodeDimension) getDistricts(cityCode string, withCounts bool) ([]N
 	}
 
 	cityParent := prefixCity + cityCode
+	// 拿父市级 short_name(用于检测重名,GB/T 2260 里 XX0200 常跟 XX02 同名)
+	parentCityName := d.lookupDisplayName(cityCode+"00", "")
+
 	nodes := make([]Node, 0, len(rows))
 	for _, r := range rows {
 		name := d.lookupDisplayName(r.District, "行政区 "+r.District)
+		// 区级跟父市级同名 → 追加"(市辖区)"消除歧义
+		if name == parentCityName && parentCityName != "" {
+			name = name + "(市辖区)"
+		}
 		n := Node{
 			ID:          prefixDistrict + r.District,
 			Name:        name,
