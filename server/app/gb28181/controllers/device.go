@@ -85,6 +85,67 @@ func (dc *DeviceController) GetByDeviceID(c *gin.Context) {
 	dc.Success(c, toVO(&d))
 }
 
+// Update 更新设备信息
+// PATCH /api/gb28181/device/:deviceId
+// 注意:alias 是用户自定义别名,不会被设备上报的 name 覆盖
+func (dc *DeviceController) Update(c *gin.Context) {
+	deviceID := c.Param("deviceId")
+	var body struct {
+		Alias        *string `json:"alias"`
+		Manufacturer *string `json:"manufacturer"`
+		Model        *string `json:"model"`
+		Firmware     *string `json:"firmware"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		dc.FailAndAbort(c, "请求体不合法", err)
+		return
+	}
+
+	// 查询设备（带权限）
+	var device gbmodels.GbDevice
+	result := app.DB().WithContext(c).
+		Scopes(datascope.OwnerDeptScope(c, "owner_dept_id")).
+		Where("device_id = ?", deviceID).
+		Limit(1).
+		Find(&device)
+	if result.Error != nil {
+		dc.FailAndAbort(c, "查询设备失败", result.Error)
+		return
+	}
+	if result.RowsAffected == 0 {
+		dc.FailAndAbort(c, "设备不存在", nil)
+		return
+	}
+
+	// 构造更新字段（只更新传入的字段）
+	updates := make(map[string]interface{})
+	if body.Alias != nil {
+		updates["alias"] = *body.Alias
+	}
+	if body.Manufacturer != nil {
+		updates["manufacturer"] = *body.Manufacturer
+	}
+	if body.Model != nil {
+		updates["model"] = *body.Model
+	}
+	if body.Firmware != nil {
+		updates["firmware"] = *body.Firmware
+	}
+
+	if len(updates) == 0 {
+		dc.FailAndAbort(c, "没有可更新的字段", nil)
+		return
+	}
+
+	// 执行更新
+	if err := app.DB().WithContext(c).Model(&device).Updates(updates).Error; err != nil {
+		dc.FailAndAbort(c, "更新失败", err)
+		return
+	}
+
+	dc.Success(c, gin.H{"deviceId": deviceID})
+}
+
 // ListChannels 列出某设备的通道(供前端拉通道树二级)
 // GET /api/gb28181/device/:deviceId/channels
 func (dc *DeviceController) ListChannels(c *gin.Context) {

@@ -96,6 +96,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			dev.GET("/list", deviceController.List)
 			dev.GET("/:deviceId", deviceController.GetByDeviceID)
+			dev.PATCH("/:deviceId", deviceController.Update)
 			dev.GET("/:deviceId/channels", deviceController.ListChannels)
 		}
 		// 点播:用闭包间接调用,以便后置注入的 playController 也能命中
@@ -147,6 +148,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/device/:id", deviceMgmtController.GetDevice)
 			dmgmt.GET("/channels", deviceMgmtController.ListChannels)
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
+			dmgmt.PATCH("/channel/:id", deviceMgmtController.UpdateChannel)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
 			dmgmt.PATCH("/channel/:id/stream-transport", deviceMgmtController.UpdateChannelStreamTransport)

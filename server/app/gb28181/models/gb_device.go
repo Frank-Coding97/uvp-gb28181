@@ -32,7 +32,8 @@ const (
 type GbDevice struct {
 	models.BaseModel
 	DeviceID          string     `gorm:"column:device_id;size:20;uniqueIndex;comment:20位国标编码" json:"deviceId"`
-	Name              string     `gorm:"column:name;size:255;comment:设备名称" json:"name"`
+	Name              string     `gorm:"column:name;size:255;comment:设备名称(设备自上报)" json:"name"`
+	Alias             string     `gorm:"column:alias;size:255;default:'';comment:用户自定义别名(不被上报覆盖)" json:"alias"`
 	Password          string     `gorm:"column:password;size:255;comment:按设备独立密码(本期用统一密码,留空)" json:"-"`
 	Transport         string     `gorm:"column:transport;size:8;comment:传输模式 UDP/TCP" json:"transport"`
 	Manufacturer      string     `gorm:"column:manufacturer;size:255;comment:厂商" json:"manufacturer"`

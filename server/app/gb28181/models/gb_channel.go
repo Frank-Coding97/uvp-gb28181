@@ -15,18 +15,19 @@ const (
 
 // GbChannel 国标通道(设备下的视频通道,Catalog 填充)
 type GbChannel struct {
-	ID           uint    `gorm:"primarykey" json:"id"`
-	ChannelID    string  `gorm:"column:channel_id;size:20;comment:通道国标编码" json:"channelId"`
-	DeviceID     string  `gorm:"column:device_id;size:20;comment:所属设备编码" json:"deviceId"`
-	Name         string  `gorm:"column:name;size:255;comment:通道名称" json:"name"`
-	Manufacturer string  `gorm:"column:manufacturer;size:255" json:"manufacturer"`
-	Model        string  `gorm:"column:model;size:255" json:"model"`
-	Owner        string  `gorm:"column:owner;size:64" json:"owner"`
-	CivilCode    string  `gorm:"column:civil_code;size:32;comment:行政区划" json:"civilCode"`
-	ParentID     string  `gorm:"column:parent_id;size:20;comment:父节点编码" json:"parentId"`
-	PTZType      int8    `gorm:"column:ptz_type;comment:云台类型" json:"ptzType"`
-	Longitude    float64 `gorm:"column:longitude;comment:经度" json:"longitude"`
-	Latitude     float64 `gorm:"column:latitude;comment:纬度" json:"latitude"`
+	ID              uint    `gorm:"primarykey" json:"id"`
+	ChannelID       string  `gorm:"column:channel_id;size:20;comment:通道国标编码" json:"channelId"`
+	DeviceID        string  `gorm:"column:device_id;size:20;comment:所属设备编码" json:"deviceId"`
+	Name            string  `gorm:"column:name;size:255;comment:通道名称" json:"name"`
+	Alias           string  `gorm:"column:alias;size:255;default:'';comment:用户自定义别名(不被上报覆盖)" json:"alias"`
+	Manufacturer    string  `gorm:"column:manufacturer;size:255" json:"manufacturer"`
+	Model           string  `gorm:"column:model;size:255" json:"model"`
+	Owner           string  `gorm:"column:owner;size:64" json:"owner"`
+	CivilCode       string  `gorm:"column:civil_code;size:32;comment:行政区划" json:"civilCode"`
+	ParentID        string  `gorm:"column:parent_id;size:20;comment:父节点编码" json:"parentId"`
+	PTZType         int8    `gorm:"column:ptz_type;comment:云台类型" json:"ptzType"`
+	Longitude       float64 `gorm:"column:longitude;comment:经度" json:"longitude"`
+	Latitude        float64 `gorm:"column:latitude;comment:纬度" json:"latitude"`
 	Status          int8    `gorm:"column:status;default:0;comment:通道在线" json:"status"`
 	StreamID        string  `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
 	StreamTransport string  `gorm:"column:stream_transport;size:16;default:TCP-Passive;comment:流传输模式 UDP/TCP-Active/TCP-Passive" json:"streamTransport"`

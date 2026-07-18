@@ -358,6 +358,58 @@ func (dc *DeviceMgmtController) UpdateChannelStreamTransport(c *gin.Context) {
 	dc.Success(c, gin.H{"id": id, "streamTransport": body.StreamTransport})
 }
 
+// UpdateChannel 更新通道可维护信息(别名、摄像头类型等)
+func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
+	db := dc.db()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		dc.FailAndAbort(c, "ID 不合法", err)
+		return
+	}
+	var body struct {
+		Alias   *string `json:"alias"`
+		PTZType *int8   `json:"ptzType"` // 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		dc.FailAndAbort(c, "请求体不合法", err)
+		return
+	}
+	// 校验 PTZType 合法性
+	if body.PTZType != nil && (*body.PTZType < 0 || *body.PTZType > 4) {
+		dc.FailAndAbort(c, "摄像头类型非法,仅支持 0-4", nil)
+		return
+	}
+	// 构建更新字段
+	updates := make(map[string]interface{})
+	if body.Alias != nil {
+		updates["alias"] = *body.Alias
+	}
+	if body.PTZType != nil {
+		updates["ptz_type"] = *body.PTZType
+	}
+	if len(updates) == 0 {
+		dc.FailAndAbort(c, "没有可更新的字段", nil)
+		return
+	}
+	res := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+		Scopes(ownerDeptScope(c)).
+		Where("id = ?", id).
+		Updates(updates)
+	if res.Error != nil {
+		dc.FailAndAbort(c, "更新失败", res.Error)
+		return
+	}
+	if res.RowsAffected == 0 {
+		dc.FailAndAbort(c, "通道不存在", nil)
+		return
+	}
+	dc.Success(c, gin.H{"id": id, "updates": updates})
+}
+
 // ListChannelMounts 通道挂载位置列表(plan §3.5 多视图挂载)
 func (dc *DeviceMgmtController) ListChannelMounts(c *gin.Context) {
 	db := dc.db()

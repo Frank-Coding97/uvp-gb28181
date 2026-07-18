@@ -5,6 +5,7 @@ import {
     Building2,
     Camera,
     ChevronRight,
+    Copy,
     Eye,
     Folder,
     FolderTree,
@@ -47,6 +48,8 @@ import {
     listMapMarkers,
     refreshDeviceCatalog,
     updateChannelStreamTransport,
+    updateChannel,
+    updateDevice,
     type AssetKind,
     type BatchDeleteResult,
     type CatalogNode,
@@ -59,6 +62,7 @@ import {
     type OnlineStatus,
     type TimelineSlot
 } from "./api";
+import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
@@ -105,6 +109,15 @@ const channelDetail = ref<ChannelVO | null>(null);
 const deviceDetail = ref<DeviceVO | null>(null);
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
+const editDeviceVisible = ref(false);
+const editDeviceForm = ref({ deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "" });
+const editingDevice = ref(false);
+const editingDeviceId = ref("");
+const editChannelVisible = ref(false);
+const editChannelForm = ref({ channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP" });
+const editingChannel = ref(false);
+const editingChannelId = ref(0);
+const ptzTypeOptions = ref<SystemDictItem[]>([]);
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -162,13 +175,11 @@ function relTime(value?: string | null) {
     if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
     return `${Math.floor(diff / 86400)} 天前`;
 }
-function displayName(item: { name?: string; channelId?: string; deviceId?: string }) { return item.name || item.channelId || item.deviceId || "未命名"; }
-function deviceNameText(item: { name?: string | null }) { return item.name?.trim() || "-"; }
-function manufacturerAbbr(value?: string | null) {
-    const text = value?.trim();
-    if (!text) return "-";
-    const chars = Array.from(text.replace(/\s+/g, ""));
-    return (chars.length <= 2 ? chars : chars.slice(0, 2)).join("").toUpperCase();
+function displayName(item: { alias?: string; name?: string; channelId?: string; deviceId?: string }) {
+    return item.alias?.trim() || item.name?.trim() || item.channelId || item.deviceId || "未命名";
+}
+function deviceNameText(item: { alias?: string | null; name?: string | null }) {
+    return item.alias?.trim() || item.name?.trim() || "-";
 }
 function vendorText(item: { manufacturer?: string; model?: string }) { return [item.manufacturer, item.model].filter(Boolean).join(" / ") || "未上报"; }
 function locationText(item: ChannelVO | MapMarker) { return !item.latitude || !item.longitude ? "无坐标" : `${item.longitude.toFixed(5)}, ${item.latitude.toFixed(5)}`; }
@@ -181,13 +192,44 @@ function endpointText(item: { ip?: string; port?: number; transport?: string }) 
 }
 function transportText(value?: string | null) { return value ? value.toUpperCase() : "-"; }
 function streamTransportText(value?: string | null) { return value ? value.toUpperCase() : "-"; }
-function cameraTypeText(ptzType?: number) { return ptzType && ptzType > 0 ? "球机 / PTZ" : "枪机"; }
+function cameraTypeText(ptzType?: number | null) {
+    if (ptzType === null || ptzType === undefined) return "未知";
+    const item = ptzTypeOptions.value.find(opt => Number(opt.value) === ptzType);
+    return item?.name || "未知";
+}
 function modelVersionText(item: { model?: string; firmware?: string }) {
     return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
 }
-function channelUniqueId(record: ChannelVO) { return `${record.deviceId}_${record.channelId}`; }
+function copyText(value?: string | null) {
+    const text = (value || "").trim();
+    if (!text) return;
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(
+            () => Message.success({ content: "已复制", duration: 1500 }),
+            () => Message.error({ content: "复制失败", duration: 1500 })
+        );
+    }
+}
+function parseCapability(source?: string): string[] {
+    if (!source) return [];
+    return source
+        .split(/[,;/\s]+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+}
+function onlineRatePercent(rate?: number) {
+    if (rate == null || Number.isNaN(rate)) return 0;
+    if (rate <= 1) return Math.round(rate * 100);
+    return Math.round(rate);
+}
+function keepaliveIntervalText(seconds?: number) {
+    if (!seconds || seconds <= 0) return "-";
+    if (seconds < 60) return `${seconds} 秒`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return s === 0 ? `${m} 分钟` : `${m} 分 ${s} 秒`;
+}
 function canExpand(node: CatalogNode) { return node.nodeType !== "channel"; }
-function shortCode(v?: string) { return !v ? "-" : v.length <= 14 ? v : `${v.slice(0, 6)}...${v.slice(-6)}`; }
 function projectX(longitude: number) { const min = 73; const max = 136; return Math.min(96, Math.max(4, ((longitude - min) / (max - min)) * 100)); }
 function projectY(latitude: number) { const min = 18; const max = 54; return Math.min(94, Math.max(6, 100 - ((latitude - min) / (max - min)) * 100)); }
 function showDeviceChannels(record: DeviceVO) {
@@ -208,6 +250,17 @@ async function loadTree() {
         Message.error(error?.message || "目录加载失败");
     } finally {
         rootLoading.value = false;
+    }
+}
+
+async function loadPtzTypeDict() {
+    try {
+        const res = await getDictItemsByDictCodeAPI("ptz_type");
+        if (res.code === 0) {
+            ptzTypeOptions.value = res.data?.list || [];
+        }
+    } catch (error: any) {
+        console.error("摄像头类型字典加载失败:", error);
     }
 }
 
@@ -451,6 +504,109 @@ async function handleCreateDevice() {
     }
 }
 
+function openEditDeviceModal(record: DeviceVO) {
+    editDeviceForm.value = {
+        deviceId: record.deviceId,
+        alias: record.alias || "",
+        name: record.name || "",
+        manufacturer: record.manufacturer || "",
+        model: record.model || "",
+        firmware: record.firmware || ""
+    };
+    editingDeviceId.value = record.deviceId;
+    editDeviceVisible.value = true;
+}
+
+function openEditChannelModal(record: ChannelVO) {
+    editChannelForm.value = {
+        channelId: record.channelId,
+        deviceId: record.deviceId,
+        alias: record.alias || "",
+        name: record.name || "",
+        manufacturer: record.manufacturer || "",
+        model: record.model || "",
+        ptzType: record.ptzType || 0,
+        streamTransport: record.streamTransport || "UDP"
+    };
+    editingChannelId.value = record.id;
+    editChannelVisible.value = true;
+}
+
+function cancelEditChannel() {
+    editChannelVisible.value = false;
+    editingChannelId.value = 0;
+    editChannelForm.value = { channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP" };
+}
+
+async function handleEditChannel() {
+    if (!editingChannelId.value) return;
+    editingChannel.value = true;
+    try {
+        const [ptzRes, transportRes] = await Promise.all([
+            updateChannel(editingChannelId.value, { alias: editChannelForm.value.alias, ptzType: editChannelForm.value.ptzType }),
+            updateChannelStreamTransport(editingChannelId.value, editChannelForm.value.streamTransport as any)
+        ]);
+        if (ptzRes.code !== 0 || transportRes.code !== 0) {
+            Message.error(ptzRes.code !== 0 ? ptzRes.message || "摄像头类型更新失败" : transportRes.message || "流传输模式更新失败");
+            return;
+        }
+        const item = channels.value.find(channel => channel.id === editingChannelId.value);
+        if (item) {
+            item.alias = editChannelForm.value.alias;
+            item.ptzType = editChannelForm.value.ptzType;
+            item.streamTransport = editChannelForm.value.streamTransport;
+        }
+        if (channelDetail.value?.id === editingChannelId.value) {
+            channelDetail.value = {
+                ...channelDetail.value,
+                alias: editChannelForm.value.alias,
+                ptzType: editChannelForm.value.ptzType,
+                streamTransport: editChannelForm.value.streamTransport
+            };
+        }
+        Message.success("通道信息已更新");
+        cancelEditChannel();
+    } catch (error: any) {
+        Message.error(error?.message || "通道信息更新失败");
+    } finally {
+        editingChannel.value = false;
+    }
+}
+
+function cancelEditDevice() {
+    editDeviceVisible.value = false;
+    editDeviceForm.value = { deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "" };
+    editingDeviceId.value = "";
+}
+
+async function handleEditDevice() {
+    if (!editingDeviceId.value) return;
+    editingDevice.value = true;
+    try {
+        const res = await updateDevice(editingDeviceId.value, {
+            alias: editDeviceForm.value.alias,
+            manufacturer: editDeviceForm.value.manufacturer,
+            model: editDeviceForm.value.model,
+            firmware: editDeviceForm.value.firmware
+        });
+        if (res.code === 0) {
+            Message.success("设备信息已更新");
+            editDeviceVisible.value = false;
+            refreshMainData();
+            // 如果抽屉打开着,同步更新抽屉内容
+            if (drawerVisible.value && deviceDetail.value?.deviceId === editingDeviceId.value) {
+                deviceDetail.value = { ...deviceDetail.value, ...editDeviceForm.value };
+            }
+        } else {
+            Message.error(res.message || "更新失败");
+        }
+    } catch (error: any) {
+        Message.error(error?.message || "更新失败");
+    } finally {
+        editingDevice.value = false;
+    }
+}
+
 function reportBatchResult(res: BatchDeleteResult, total: number) {
     const okCount = res.succeeded.length;
     const failCount = res.failed.length;
@@ -537,6 +693,25 @@ async function handleStreamTransportChange(channelId: number, streamTransport: s
     }
 }
 
+async function handlePtzTypeChange(channelId: number, ptzTypeValue: string) {
+    try {
+        const ptzType = Number(ptzTypeValue);
+        const res = await updateChannel(channelId, { ptzType });
+        if (res.code === 0) {
+            Message.success("摄像头类型已更新");
+            // 更新本地数据
+            if (assetKind.value === "channel") {
+                const item = channels.value.find(c => c.id === channelId);
+                if (item) item.ptzType = ptzType;
+            }
+        } else {
+            Message.error(res.message || "更新失败");
+        }
+    } catch (error: any) {
+        Message.error(error?.message || "更新失败");
+    }
+}
+
 async function handleBatchDelete() {
     const ids = [...selectedRowKeys.value];
     if (ids.length === 0) return;
@@ -612,7 +787,7 @@ function channelStatusClass(record: DeviceVO): string {
 }
 
 onMounted(async () => {
-    await Promise.all([loadTree(), refreshMainData(), refreshDeviceStats()]);
+    await Promise.all([loadTree(), refreshMainData(), refreshDeviceStats(), loadPtzTypeDict()]);
     if (autoRefresh.value) {
         startAutoRefresh();
     }
@@ -750,20 +925,18 @@ onUnmounted(() => {
                             @page-size-change="onPageSizeChange"
                         >
                             <template #columns>
-                                <a-table-column title="通道编号" :width="210">
-                                    <template #cell="{ record }">
-                                        <div class="code-cell">
-                                            <span class="code-main">{{ record.channelId }}</span>
-                                            <span class="code-sub">{{ channelUniqueId(record) }}</span>
-                                        </div>
-                                    </template>
-                                </a-table-column>
                                 <a-table-column title="通道名称" :width="180">
                                     <template #cell="{ record }">
-                                        <div class="device-name">
-                                            <span class="pri">{{ displayName(record) }}</span>
-                                            <span class="sec">{{ shortCode(record.deviceId) }}</span>
-                                        </div>
+                                        <a-tooltip :content="displayName(record)" position="top">
+                                            <div class="text-ellipsis">{{ displayName(record) }}</div>
+                                        </a-tooltip>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="通道编号" :width="210">
+                                    <template #cell="{ record }">
+                                        <a-tooltip :content="record.channelId" position="top">
+                                            <div class="text-ellipsis">{{ record.channelId }}</div>
+                                        </a-tooltip>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="快照" :width="92" align="center">
@@ -772,10 +945,26 @@ onUnmounted(() => {
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="状态" :width="92">
-                                    <template #cell="{ record }"><span class="status-pill" :class="{ online: record.status === 1 }">{{ record.status === 1 ? '在线' : '离线' }}</span></template>
+                                    <template #cell="{ record }">
+                                        <span class="status-inline" :class="{ online: record.status === 1 }">
+                                            <span class="status-dot"></span>
+                                            <span>{{ record.status === 1 ? '在线' : '离线' }}</span>
+                                        </span>
+                                    </template>
                                 </a-table-column>
-                                <a-table-column title="摄像头类型" :width="120">
-                                    <template #cell="{ record }"><span class="tag">{{ cameraTypeText(record.ptzType) }}</span></template>
+                                <a-table-column title="摄像头类型" :width="150">
+                                    <template #cell="{ record }">
+                                        <a-select
+                                            :model-value="String(record.ptzType || 0)"
+                                            size="small"
+                                            style="width: 130px"
+                                            @change="(value: string) => handlePtzTypeChange(record.id, value)"
+                                        >
+                                            <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
+                                                {{ opt.name }}
+                                            </a-option>
+                                        </a-select>
+                                    </template>
                                 </a-table-column>
                                 <a-table-column title="流传输模式" :width="150">
                                     <template #cell="{ record }">
@@ -783,7 +972,7 @@ onUnmounted(() => {
                                             :model-value="record.streamTransport || 'UDP'"
                                             size="small"
                                             style="width: 130px"
-                                            @change="(value) => handleStreamTransportChange(record.id, value)"
+                                            @change="(value: string) => handleStreamTransportChange(record.id, value)"
                                         >
                                             <a-option value="UDP">UDP</a-option>
                                             <a-option value="TCP-Active">TCP-Active</a-option>
@@ -791,8 +980,13 @@ onUnmounted(() => {
                                         </a-select>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="厂商 / 型号" :width="170"><template #cell="{ record }"><div class="vendor-cell"><span class="v">{{ record.manufacturer || '-' }}</span><span class="m">{{ record.model || '-' }}</span></div></template></a-table-column>
-                                <a-table-column title="位置信息" :width="180"><template #cell="{ record }"><span class="relative">{{ locationText(record) }}</span></template></a-table-column>
+                                <a-table-column title="位置信息" :width="180">
+                                    <template #cell="{ record }">
+                                        <a-tooltip :content="locationText(record)" position="top">
+                                            <span class="relative text-ellipsis">{{ locationText(record) }}</span>
+                                        </a-tooltip>
+                                    </template>
+                                </a-table-column>
                                 <a-table-column title="更新 / 创建时间" :width="190">
                                     <template #cell="{ record }">
                                         <div class="time-cell">
@@ -811,7 +1005,7 @@ onUnmounted(() => {
                                                 <button class="icon-btn small framed" type="button" @click="openChannel(record)"><Eye :size="13" /></button>
                                             </a-tooltip>
                                             <a-tooltip content="编辑通道" position="top">
-                                                <button class="icon-btn small framed warning" type="button" @click="Message.info('通道编辑待接入')"><Pencil :size="13" /></button>
+                                                <button class="icon-btn small framed warning" type="button" @click="openEditChannelModal(record)"><Pencil :size="13" /></button>
                                             </a-tooltip>
                                             <a-tooltip content="删除通道" position="top">
                                                 <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteChannel(record)"><Trash2 :size="13" /></button>
@@ -913,6 +1107,7 @@ onUnmounted(() => {
                                             <a-tooltip :content="record.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
                                                 <button
                                                     class="icon-btn small framed info"
+                                                    :class="{ loading: refreshingCatalog[record.id] }"
                                                     type="button"
                                                     :disabled="refreshingCatalog[record.id] || !record.online"
                                                     @click="handleRefreshDeviceCatalog(record)"
@@ -922,7 +1117,7 @@ onUnmounted(() => {
                                                 </button>
                                             </a-tooltip>
                                             <a-tooltip content="编辑设备" position="top">
-                                                <button class="icon-btn small framed warning" type="button" @click="Message.info('设备编辑待接入')"><Pencil :size="13" /></button>
+                                                <button class="icon-btn small framed warning" type="button" @click="openEditDeviceModal(record)"><Pencil :size="13" /></button>
                                             </a-tooltip>
                                             <a-tooltip content="删除设备" position="top">
                                                 <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteDevice(record)"><Trash2 :size="13" /></button>
@@ -938,9 +1133,9 @@ onUnmounted(() => {
                     <div v-else-if="viewMode === 'card'" class="view-body card-grid">
                         <article v-for="item in channels" :key="item.id" class="device-card" @dblclick="openChannel(item)">
                             <div class="card-snap" :class="{ offline: item.status !== 1 }">
-                                <div class="snap-type"><Video :size="12" /> {{ item.ptzType > 0 ? '球机' : '枪机' }}</div>
+                                <div class="snap-type"><Video :size="12" /> {{ cameraTypeText(item.ptzType) }}</div>
                                 <div class="snap-corner">
-                                    <div v-if="item.ptzType > 0" class="corner-badge"><Camera :size="12" /></div>
+                                    <div v-if="item.ptzType && item.ptzType > 0" class="corner-badge"><Camera :size="12" /></div>
                                     <div v-if="item.streamId" class="corner-badge alarm"><Play :size="12" /></div>
                                 </div>
                                 <div class="snap-overlay">
@@ -978,7 +1173,7 @@ onUnmounted(() => {
                 </main>
             </div>
 
-            <a-drawer v-model:visible="drawerVisible" :width="520" :footer="false" unmount-on-close>
+            <a-drawer v-model:visible="drawerVisible" :width="640" :footer="false" unmount-on-close>
                 <template #title>
                     <span v-if="drawerTarget?.type === 'channel'">通道详情</span>
                     <span v-else-if="drawerTarget?.type === 'device'">设备详情</span>
@@ -994,6 +1189,8 @@ onUnmounted(() => {
                         <div class="kv-grid">
                             <span>所属设备</span><strong>{{ channelDetail.deviceId }}</strong>
                             <span>厂商型号</span><strong>{{ vendorText(channelDetail) }}</strong>
+                            <span>摄像头类型</span><strong>{{ cameraTypeText(channelDetail.ptzType) }}</strong>
+                            <span>父级通道</span><strong>{{ channelDetail.parentId || '无' }}</strong>
                             <span>坐标</span><strong>{{ locationText(channelDetail) }}</strong>
                             <span>流传输模式</span><strong>{{ streamTransportText(channelDetail.streamTransport) }}</strong>
                             <span>当前流</span><strong>{{ channelDetail.streamId || '未播放' }}</strong>
@@ -1010,17 +1207,144 @@ onUnmounted(() => {
                         <div v-if="timeline.length" class="timeline-strip">
                             <span v-for="slot in timeline" :key="slot.start" :class="{ online: slot.status === 'online' }"></span>
                         </div>
+                        <section class="info-group meta-group">
+                            <div class="group-label">元数据</div>
+                            <div class="field-grid">
+                                <span class="k">创建时间</span>
+                                <span class="v mono">{{ dateTime(channelDetail.createdAt) }}</span>
+                                <span class="k">更新时间</span>
+                                <span class="v mono">{{ dateTime(channelDetail.updatedAt) }}</span>
+                            </div>
+                        </section>
+                        <div class="drawer-foot">
+                            <a-button type="primary" @click="openEditChannelModal(channelDetail)">
+                                <template #icon><Pencil :size="14" /></template>
+                                <template #default>编辑通道</template>
+                            </a-button>
+                            <a-button @click="copyText(channelDetail.channelId)">
+                                <template #icon><Copy :size="14" /></template>
+                                <template #default>复制编码</template>
+                            </a-button>
+                        </div>
                     </div>
                     <div v-else-if="drawerTarget?.type === 'device' && deviceDetail" class="drawer-body">
                         <div class="drawer-headline">
-                            <span class="drawer-icon"><RadioTower :size="18" /></span>
-                            <div><h3>{{ displayName(deviceDetail) }}</h3><p>{{ deviceDetail.deviceId }}</p></div>
-                            <span class="status-pill" :class="{ online: deviceDetail.online }">{{ deviceDetail.online ? '在线' : '离线' }}</span>
+                            <span class="drawer-icon"><RadioTower :size="20" /></span>
+                            <div class="headline-title">
+                                <h3>{{ displayName(deviceDetail) }}</h3>
+                                <p v-if="deviceDetail.alias && deviceDetail.name && deviceDetail.alias !== deviceDetail.name" class="headline-alt">
+                                    <span class="muted">设备上报:</span> {{ deviceDetail.name }}
+                                </p>
+                                <p class="mono">
+                                    {{ deviceDetail.deviceId }}
+                                    <button class="copy-btn" type="button" title="复制设备编码" @click="copyText(deviceDetail.deviceId)">
+                                        <Copy :size="12" />
+                                    </button>
+                                </p>
+                            </div>
+                            <span class="status-pill" :class="{ online: deviceDetail.online }">
+                                <span class="status-dot" />
+                                {{ deviceDetail.online ? '在线' : '离线' }}
+                            </span>
                         </div>
-                        <div class="kv-grid">
-                            <span>厂商型号</span><strong>{{ vendorText(deviceDetail) }}</strong>
-                            <span>来源地址</span><strong>{{ endpointText(deviceDetail) }}</strong>
-                            <span>通道在线</span><strong>{{ deviceDetail.channelOnlineCount }}/{{ deviceDetail.channelCount }}</strong>
+
+                        <section v-if="parseCapability(deviceDetail.subscribeCapability).length" class="info-group">
+                            <div class="group-label">订阅能力</div>
+                            <div class="capability-chips">
+                                <span v-for="cap in parseCapability(deviceDetail.subscribeCapability)" :key="cap" class="cap-chip on">{{ cap }}</span>
+                            </div>
+                        </section>
+
+                        <section class="info-group">
+                            <div class="group-label">国标 GB/T 28181</div>
+                            <div class="field-grid">
+                                <span class="k">设备编码</span>
+                                <span class="v mono">{{ deviceDetail.deviceId }}</span>
+                                <span class="k">传输协议</span>
+                                <span class="v">{{ transportText(deviceDetail.transport) }}</span>
+                                <span class="k">注册状态</span>
+                                <span class="v">
+                                    <span class="inline-dot" :class="{ online: deviceDetail.online }"></span>
+                                    {{ deviceDetail.online ? '已注册' : '未注册 / 已离线' }}
+                                    <span v-if="deviceDetail.registerTime" class="muted mono">· {{ dateTime(deviceDetail.registerTime) }}</span>
+                                </span>
+                                <span v-if="deviceDetail.online" class="k">注册过期</span>
+                                <span v-if="deviceDetail.online" class="v mono">{{ dateTime(deviceDetail.registerExpireAt) }}</span>
+                                <span class="k">最近心跳</span>
+                                <span class="v">
+                                    {{ relTime(deviceDetail.keepaliveTime) }}
+                                    <span v-if="deviceDetail.keepaliveTime" class="muted mono">· {{ dateTime(deviceDetail.keepaliveTime) }}</span>
+                                </span>
+                                <span class="k">心跳间隔</span>
+                                <span class="v">{{ keepaliveIntervalText(deviceDetail.keepaliveInterval) }}</span>
+                                <template v-if="!deviceDetail.online && deviceDetail.offlineAt">
+                                    <span class="k">离线时间</span>
+                                    <span class="v mono">{{ dateTime(deviceDetail.offlineAt) }} <span class="muted">({{ relTime(deviceDetail.offlineAt) }})</span></span>
+                                </template>
+                            </div>
+                        </section>
+
+                        <section class="info-group">
+                            <div class="group-label">网络与厂商</div>
+                            <div class="field-grid">
+                                <span class="k">网络地址</span>
+                                <span class="v mono">
+                                    {{ deviceDetail.ip || '-' }}<template v-if="deviceDetail.port">:{{ deviceDetail.port }}</template>
+                                    <span class="muted">SIP/{{ transportText(deviceDetail.transport) }}</span>
+                                </span>
+                                <span class="k">厂商 / 型号</span>
+                                <span class="v">{{ vendorText(deviceDetail) }}</span>
+                                <span class="k">固件版本</span>
+                                <span class="v mono">{{ deviceDetail.firmware || '未上报' }}</span>
+                            </div>
+                        </section>
+
+                        <section class="info-group">
+                            <div class="group-label">通道概览</div>
+                            <div class="channel-summary">
+                                <div class="channel-stats">
+                                    <div class="stat-item">
+                                        <span class="stat-num">{{ deviceDetail.channelOnlineCount }}</span>
+                                        <span class="stat-label">在线通道</span>
+                                    </div>
+                                    <div class="stat-divider"></div>
+                                    <div class="stat-item">
+                                        <span class="stat-num">{{ deviceDetail.channelCount }}</span>
+                                        <span class="stat-label">总通道</span>
+                                    </div>
+                                    <div class="stat-divider"></div>
+                                    <div class="stat-item">
+                                        <span class="stat-num">{{ onlineRatePercent(deviceDetail.onlineRate) }}%</span>
+                                        <span class="stat-label">在线率</span>
+                                    </div>
+                                </div>
+                                <div class="online-progress">
+                                    <div class="progress-track">
+                                        <div class="progress-fill" :style="{ width: `${onlineRatePercent(deviceDetail.onlineRate)}%` }"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section class="info-group meta-group">
+                            <div class="group-label">元数据</div>
+                            <div class="field-grid">
+                                <span class="k">创建时间</span>
+                                <span class="v mono">{{ dateTime(deviceDetail.createdAt) }}</span>
+                                <span class="k">更新时间</span>
+                                <span class="v mono">{{ dateTime(deviceDetail.updatedAt) }}</span>
+                            </div>
+                        </section>
+
+                        <div class="drawer-foot">
+                            <a-button type="primary" @click="handleRefreshDeviceCatalog(deviceDetail)">
+                                <template #icon><RefreshCcw :size="14" /></template>
+                                <template #default>刷新目录</template>
+                            </a-button>
+                            <a-button @click="copyText(deviceDetail.deviceId)">
+                                <template #icon><Copy :size="14" /></template>
+                                <template #default>复制编码</template>
+                            </a-button>
                         </div>
                     </div>
                     <div v-else-if="drawerTarget?.type === 'node'" class="drawer-body">
@@ -1085,6 +1409,124 @@ onUnmounted(() => {
                 <template #footer>
                     <a-button @click="createDeviceVisible = false">取消</a-button>
                     <a-button type="primary" :loading="creatingDevice" @click="handleCreateDevice">创建</a-button>
+                </template>
+            </a-modal>
+
+            <!-- 编辑设备 Modal -->
+            <a-modal
+                v-model:visible="editDeviceVisible"
+                modal-class="uvp-system-dialog"
+                title="编辑设备"
+                :width="480"
+                :mask-closable="false"
+                unmount-on-close
+                @cancel="cancelEditDevice"
+            >
+                <a-form
+                    ref="editDeviceFormRef"
+                    :model="editDeviceForm"
+                    layout="vertical"
+                >
+                    <a-form-item label="设备国标 ID">
+                        <a-input
+                            :model-value="editDeviceForm.deviceId"
+                            disabled
+                            class="code-main mono"
+                        />
+                    </a-form-item>
+                    <a-form-item label="设备上报名称">
+                        <a-input
+                            :model-value="editDeviceForm.name"
+                            disabled
+                            placeholder="设备未上报"
+                        />
+                        <template #extra>
+                            <span class="form-hint">来自设备 DeviceInfo 应答,不可编辑</span>
+                        </template>
+                    </a-form-item>
+                    <a-form-item field="alias" label="设备别名">
+                        <a-input
+                            v-model="editDeviceForm.alias"
+                            placeholder="选填,给设备起一个好记的名字"
+                            allow-clear
+                        />
+                        <template #extra>
+                            <span class="form-hint">优先展示,不会被设备重新注册覆盖</span>
+                        </template>
+                    </a-form-item>
+                    <a-form-item field="manufacturer" label="厂商">
+                        <a-input
+                            v-model="editDeviceForm.manufacturer"
+                            placeholder="选填"
+                            allow-clear
+                        />
+                    </a-form-item>
+                    <a-form-item field="model" label="型号">
+                        <a-input
+                            v-model="editDeviceForm.model"
+                            placeholder="选填"
+                            allow-clear
+                        />
+                    </a-form-item>
+                    <a-form-item field="firmware" label="固件版本">
+                        <a-input
+                            v-model="editDeviceForm.firmware"
+                            placeholder="选填"
+                            allow-clear
+                        />
+                    </a-form-item>
+                </a-form>
+                <template #footer>
+                    <a-button @click="cancelEditDevice">取消</a-button>
+                    <a-button type="primary" :loading="editingDevice" @click="handleEditDevice">保存</a-button>
+                </template>
+            </a-modal>
+
+            <!-- 编辑通道 Modal -->
+            <a-modal
+                v-model:visible="editChannelVisible"
+                modal-class="uvp-system-dialog"
+                title="编辑通道"
+                :width="480"
+                :mask-closable="false"
+                unmount-on-close
+                @cancel="cancelEditChannel"
+            >
+                <a-form :model="editChannelForm" layout="vertical">
+                    <a-form-item label="通道编号">
+                        <a-input :model-value="editChannelForm.channelId" disabled class="code-main mono" />
+                    </a-form-item>
+                    <a-form-item label="所属设备">
+                        <a-input :model-value="editChannelForm.deviceId" disabled class="code-main mono" />
+                    </a-form-item>
+                    <a-form-item label="通道名称">
+                        <a-input :model-value="editChannelForm.name" disabled placeholder="设备上报名称" />
+                        <template #extra><span class="form-hint">来自设备 Catalog 应答,不可编辑</span></template>
+                    </a-form-item>
+                    <a-form-item label="通道别名">
+                        <a-input v-model="editChannelForm.alias" placeholder="选填,给通道起一个好记的名称" allow-clear />
+                        <template #extra><span class="form-hint">优先展示,不会被设备 Catalog 上报覆盖</span></template>
+                    </a-form-item>
+                    <a-form-item label="厂商 / 型号">
+                        <a-input :model-value="vendorText(editChannelForm)" disabled />
+                        <template #extra><span class="form-hint">来自设备 Catalog 应答,不可编辑</span></template>
+                    </a-form-item>
+                    <a-form-item label="摄像头类型">
+                        <a-select v-model="editChannelForm.ptzType">
+                            <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="Number(opt.value)">{{ opt.name }}</a-option>
+                        </a-select>
+                    </a-form-item>
+                    <a-form-item label="流传输模式">
+                        <a-select v-model="editChannelForm.streamTransport">
+                            <a-option value="UDP">UDP</a-option>
+                            <a-option value="TCP-Active">TCP-Active</a-option>
+                            <a-option value="TCP-Passive">TCP-Passive</a-option>
+                        </a-select>
+                    </a-form-item>
+                </a-form>
+                <template #footer>
+                    <a-button @click="cancelEditChannel">取消</a-button>
+                    <a-button type="primary" :loading="editingChannel" @click="handleEditChannel">保存</a-button>
                 </template>
             </a-modal>
         </div>
@@ -1221,6 +1663,17 @@ onUnmounted(() => {
     color: var(--uvp-text-secondary);
     background: var(--uvp-search-secondary-btn-bg);
     border: 1px solid var(--uvp-search-secondary-btn-border);
+    cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.btn-ghost:hover {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent);
+}
+.btn-ghost:active {
+    transform: scale(0.96);
+    background: color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-brand-soft));
 }
 .btn-ghost.active {
     color: var(--uvp-brand);
@@ -1899,6 +2352,192 @@ onUnmounted(() => {
     border-radius: 999px;
 }
 .timeline-strip span.online { background: var(--uvp-brand-cyan); }
+
+/* ============ 详情抽屉 · 增强(2026-07-18) ============ */
+.drawer-body { padding-bottom: 8px; }
+.drawer-headline {
+    padding: 14px 16px;
+    background: linear-gradient(180deg, var(--uvp-list-panel-bg) 0%, var(--uvp-panel-bg) 100%);
+}
+.drawer-headline .drawer-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+}
+.drawer-headline .headline-title { min-width: 0; }
+.drawer-headline .headline-title h3 {
+    font-size: 15px;
+    font-weight: 650;
+    line-height: 1.35;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.drawer-headline .headline-title p {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--uvp-text-tertiary);
+}
+.drawer-headline .headline-title .headline-alt {
+    display: block;
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--uvp-text-tertiary);
+}
+.drawer-headline .headline-title .headline-alt .muted {
+    color: var(--uvp-text-tertiary);
+    opacity: 0.7;
+    margin-right: 2px;
+}
+.status-pill {
+    gap: 5px;
+    padding: 4px 10px;
+    min-width: 60px;
+}
+.status-pill .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.75;
+}
+.status-pill.online .status-dot {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand-cyan) 18%, transparent);
+    opacity: 1;
+}
+.info-group {
+    display: grid;
+    gap: 10px;
+    padding: 12px 14px 14px;
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 12px;
+}
+.info-group.meta-group {
+    background: var(--uvp-list-toolbar-bg);
+}
+.info-group .group-label {
+    font-size: 11px;
+    font-weight: 620;
+    letter-spacing: 0.04em;
+    color: var(--uvp-text-tertiary);
+    text-transform: uppercase;
+}
+.field-grid {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px 14px;
+    align-items: center;
+    font-size: 13px;
+}
+.field-grid .k { color: var(--uvp-text-tertiary); font-size: 12px; }
+.field-grid .v { color: var(--uvp-text-primary); overflow-wrap: anywhere; }
+.field-grid .v.mono { font-family: ui-monospace, SFMono-Regular, Menlo, "PingFang SC", monospace; }
+.field-grid .v .muted { color: var(--uvp-text-tertiary); font-size: 12px; margin-left: 4px; }
+.field-grid .v .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.inline-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 6px;
+    border-radius: 999px;
+    background: var(--uvp-text-tertiary);
+    vertical-align: middle;
+}
+.inline-dot.online {
+    background: var(--uvp-brand-cyan);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand-cyan) 18%, transparent);
+}
+.copy-btn {
+    display: inline-grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    margin-left: 2px;
+    background: transparent;
+    color: var(--uvp-text-tertiary);
+    border: 0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.copy-btn:hover {
+    color: var(--uvp-brand);
+    background: color-mix(in srgb, var(--uvp-brand) 10%, transparent);
+}
+.capability-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.cap-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 999px;
+    color: var(--uvp-text-tertiary);
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+}
+.cap-chip.on {
+    color: var(--uvp-brand-cyan);
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
+    border-color: color-mix(in srgb, var(--uvp-brand-cyan) 26%, transparent);
+}
+.channel-summary { display: grid; gap: 10px; }
+.channel-stats {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    align-items: center;
+    padding: 10px 4px;
+    background: var(--uvp-list-toolbar-bg);
+    border-radius: 10px;
+}
+.channel-stats .stat-item { display: grid; place-items: center; gap: 2px; }
+.channel-stats .stat-num {
+    font-size: 22px;
+    font-weight: 650;
+    color: var(--uvp-text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    line-height: 1.1;
+}
+.channel-stats .stat-label {
+    font-size: 11px;
+    color: var(--uvp-text-tertiary);
+}
+.channel-stats .stat-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--uvp-panel-border);
+}
+.online-progress .progress-track {
+    height: 6px;
+    background: var(--uvp-panel-border);
+    border-radius: 999px;
+    overflow: hidden;
+}
+.online-progress .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--uvp-brand) 0%, var(--uvp-brand-cyan) 100%);
+    border-radius: 999px;
+    transition: width 0.4s ease-out;
+}
+.drawer-foot {
+    display: flex;
+    gap: 8px;
+    padding: 12px 0 4px;
+    margin-top: 4px;
+    border-top: 1px solid var(--uvp-panel-border);
+}
+.drawer-foot .arco-btn { flex: 0 0 auto; }
+.drawer-foot .arco-btn-primary { flex: 1; }
+
 .input-counter {
     display: inline-flex;
     align-items: center;
@@ -1918,6 +2557,11 @@ onUnmounted(() => {
     color: var(--uvp-brand-cyan);
     background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
     border-color: color-mix(in srgb, var(--uvp-brand-cyan) 28%, transparent);
+}
+.form-hint {
+    font-size: 12px;
+    color: var(--uvp-text-tertiary);
+    line-height: 1.4;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1080px) {

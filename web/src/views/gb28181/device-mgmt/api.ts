@@ -39,6 +39,7 @@ export interface DeviceVO {
     id: number;
     deviceId: string;
     name: string;
+    alias: string;
     transport: string;
     manufacturer: string;
     model: string;
@@ -65,6 +66,7 @@ export interface ChannelVO {
     channelId: string;
     deviceId: string;
     name: string;
+    alias: string;
     manufacturer: string;
     model: string;
     owner: string;
@@ -285,4 +287,18 @@ export const updateChannelStreamTransport = (id: number, streamTransport: Stream
         "patch",
         baseUrlApi(`gb28181/device-mgmt/channel/${id}/stream-transport`),
         { data: { streamTransport } }
+    );
+
+export const updateChannel = (id: number, data: { alias?: string; ptzType?: number }) =>
+    http.request<BaseResult<{ id: number; updates: Record<string, unknown> }>>(
+        "patch",
+        baseUrlApi(`gb28181/device-mgmt/channel/${id}`),
+        { data }
+    );
+
+export const updateDevice = (deviceId: string, data: { alias?: string; manufacturer?: string; model?: string; firmware?: string }) =>
+    http.request<BaseResult<{ deviceId: string }>>(
+        "patch",
+        baseUrlApi(`gb28181/device/${deviceId}`),
+        { data }
     );

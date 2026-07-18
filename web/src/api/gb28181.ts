@@ -77,6 +77,10 @@ export const startPlay = (deviceId: string, channelId: string) =>
 export const stopPlay = (streamId: string) =>
     http.request<BaseResult<unknown>>("delete", baseUrlApi(`gb28181/play/${streamId}`));
 
+/** 更新设备信息 */
+export const updateDevice = (deviceId: string, data: { name?: string; manufacturer?: string; model?: string; firmware?: string }) =>
+    http.request<BaseResult<{ deviceId: string }>>("patch", baseUrlApi(`gb28181/device/${deviceId}`), { data });
+
 // ===== SIP 平台接入信息 =====
 
 export interface SipPlatformInfo {
