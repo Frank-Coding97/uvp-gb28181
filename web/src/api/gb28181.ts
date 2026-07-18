@@ -77,6 +77,58 @@ export const startPlay = (deviceId: string, channelId: string) =>
 export const stopPlay = (streamId: string) =>
     http.request<BaseResult<unknown>>("delete", baseUrlApi(`gb28181/play/${streamId}`));
 
+// ===== 目录树三维视图(Phase 1 后端 gb-directory-view-dimensions) =====
+
+/** 维度类型 */
+export type DirectoryDimension = "native" | "biz_group" | "civil_code";
+
+/** 节点类型 */
+export type DirectoryNodeType =
+    | "civil_code"     // 行政区划
+    | "device"         // 设备
+    | "channel"        // 通道
+    | "biz_group"      // 业务分组
+    | "virtual_org"    // 虚拟组织
+    | "unassigned";    // 未分配桶(civil_code 维度专用)
+
+/** 统一目录节点(跨维度) */
+export interface DirectoryNode {
+    id: string;                    // 节点唯一标识(格式由维度决定)
+    name: string;                  // 显示名称
+    nodeType: DirectoryNodeType;   // 节点类型
+    parentId?: string;             // 父节点 ID(根节点无)
+    channelId?: string;            // 通道 ID(通道类型才有,可能是国标编码)
+    deviceId?: string;             // 设备 ID(设备/通道类型才有)
+    civilCode?: string;            // 行政区划码(civil_code 维度使用)
+    mountCount?: number;           // 挂载数(withCounts=1 时返回)
+    channelCount?: number;         // 通道总数(withCounts=1 时返回)
+    hasChildren: boolean;          // 是否有子节点
+    isLeaf: boolean;               // 是否叶子节点
+}
+
+/** 目录树响应 */
+export interface DirectoryTreeResponse {
+    dimension: DirectoryDimension;
+    list: DirectoryNode[];
+    total: number;
+}
+
+export type DirectoryTreeResult = BaseResult<DirectoryTreeResponse>;
+
+/** 拉目录树(统一入口,dimension + parentId 分发) */
+export const fetchDirectoryTree = (params: {
+    dimension: DirectoryDimension;
+    parentId?: string;
+    withCounts?: boolean;
+}) => {
+    const query: Record<string, string> = { dimension: params.dimension };
+    if (params.parentId) query.parentId = params.parentId;
+    if (params.withCounts) query.withCounts = "1";
+    return http.request<DirectoryTreeResult>("get", baseUrlApi("gb28181/directory/tree"), {
+        params: query
+    });
+};
+
 // ===== SIP 平台接入信息 =====
 
 export interface SipPlatformInfo {
