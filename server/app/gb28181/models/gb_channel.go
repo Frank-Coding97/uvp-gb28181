@@ -27,8 +27,9 @@ type GbChannel struct {
 	PTZType      int8    `gorm:"column:ptz_type;comment:云台类型" json:"ptzType"`
 	Longitude    float64 `gorm:"column:longitude;comment:经度" json:"longitude"`
 	Latitude     float64 `gorm:"column:latitude;comment:纬度" json:"latitude"`
-	Status       int8    `gorm:"column:status;default:0;comment:通道在线" json:"status"`
-	StreamID     string  `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
+	Status          int8    `gorm:"column:status;default:0;comment:通道在线" json:"status"`
+	StreamID        string  `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
+	StreamTransport string  `gorm:"column:stream_transport;size:16;default:TCP-Passive;comment:流传输模式 UDP/TCP-Active/TCP-Passive" json:"streamTransport"`
 	// Capabilities A1 新增:通道能力 JSON {audio, h265, night_vision, alarm_io, recording}
 	// 用 *string + 默认 NULL — MySQL JSON 列不接受空字符串("The document is empty"),
 	// nil 写入 NULL,前端拿到 null 即按"无能力上报"渲染

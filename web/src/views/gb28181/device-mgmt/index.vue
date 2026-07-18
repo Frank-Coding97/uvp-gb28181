@@ -169,8 +169,14 @@ function manufacturerAbbr(value?: string | null) {
 function vendorText(item: { manufacturer?: string; model?: string }) { return [item.manufacturer, item.model].filter(Boolean).join(" / ") || "未上报"; }
 function locationText(item: ChannelVO | MapMarker) { return !item.latitude || !item.longitude ? "无坐标" : `${item.longitude.toFixed(5)}, ${item.latitude.toFixed(5)}`; }
 function dateTime(value?: string | null) { if (!value || value.startsWith("0001-01-01")) return "-"; const d = new Date(value); if (Number.isNaN(d.getTime())) return "-"; return d.toLocaleString("zh-CN", { hour12: false }); }
-function endpointText(item: { ip?: string; port?: number }) { if (!item.ip) return "-"; return item.port ? `${item.ip}:${item.port}` : item.ip; }
+function endpointText(item: { ip?: string; port?: number; transport?: string }) {
+    if (!item.ip) return "-";
+    const addr = item.port ? `${item.ip}:${item.port}` : item.ip;
+    const protocol = item.transport ? item.transport.toLowerCase() : "udp";
+    return `${protocol}://${addr}`;
+}
 function transportText(value?: string | null) { return value ? value.toUpperCase() : "-"; }
+function streamTransportText(value?: string | null) { return value ? value.toUpperCase() : "-"; }
 function cameraTypeText(ptzType?: number) { return ptzType && ptzType > 0 ? "球机 / PTZ" : "枪机"; }
 function modelVersionText(item: { model?: string; firmware?: string }) {
     return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
@@ -694,8 +700,8 @@ onUnmounted(() => {
                                 <a-table-column title="摄像头类型" :width="120">
                                     <template #cell="{ record }"><span class="tag">{{ cameraTypeText(record.ptzType) }}</span></template>
                                 </a-table-column>
-                                <a-table-column title="媒体传输" :width="110">
-                                    <template #cell="{ record }"><span class="tag muted">{{ transportText(record.transport) }}</span></template>
+                                <a-table-column title="流传输模式" :width="120">
+                                    <template #cell="{ record }"><span class="tag muted">{{ streamTransportText(record.streamTransport) }}</span></template>
                                 </a-table-column>
                                 <a-table-column title="厂商 / 型号" :width="170"><template #cell="{ record }"><div class="vendor-cell"><span class="v">{{ record.manufacturer || '-' }}</span><span class="m">{{ record.model || '-' }}</span></div></template></a-table-column>
                                 <a-table-column title="位置信息" :width="180"><template #cell="{ record }"><span class="relative">{{ locationText(record) }}</span></template></a-table-column>
@@ -774,10 +780,7 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="传输模式" :width="110">
-                                    <template #cell="{ record }"><span class="tag">{{ transportText(record.transport) }}</span></template>
-                                </a-table-column>
-                                <a-table-column title="来源地址" :width="180">
+                                <a-table-column title="来源地址" :width="220">
                                     <template #cell="{ record }">
                                         <a-tooltip :content="endpointText(record)" position="top">
                                             <span class="code-main mono text-ellipsis">{{ endpointText(record) }}</span>
@@ -892,6 +895,7 @@ onUnmounted(() => {
                             <span>所属设备</span><strong>{{ channelDetail.deviceId }}</strong>
                             <span>厂商型号</span><strong>{{ vendorText(channelDetail) }}</strong>
                             <span>坐标</span><strong>{{ locationText(channelDetail) }}</strong>
+                            <span>流传输模式</span><strong>{{ streamTransportText(channelDetail.streamTransport) }}</strong>
                             <span>当前流</span><strong>{{ channelDetail.streamId || '未播放' }}</strong>
                         </div>
                         <div v-if="channelMounts.length" class="mount-list">
@@ -915,8 +919,7 @@ onUnmounted(() => {
                         </div>
                         <div class="kv-grid">
                             <span>厂商型号</span><strong>{{ vendorText(deviceDetail) }}</strong>
-                            <span>网络地址</span><strong>{{ deviceDetail.ip || '-' }}{{ deviceDetail.port ? `:${deviceDetail.port}` : '' }}</strong>
-                            <span>传输协议</span><strong>{{ deviceDetail.transport || '-' }}</strong>
+                            <span>来源地址</span><strong>{{ endpointText(deviceDetail) }}</strong>
                             <span>通道在线</span><strong>{{ deviceDetail.channelOnlineCount }}/{{ deviceDetail.channelCount }}</strong>
                         </div>
                     </div>

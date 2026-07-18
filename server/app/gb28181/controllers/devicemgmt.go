@@ -53,11 +53,6 @@ type deviceVOExtra struct {
 	OnlineRate         float64 `json:"onlineRate"`
 }
 
-type channelVOExtra struct {
-	*gbmodels.GbChannel
-	Transport string `json:"transport"`
-}
-
 // ListDevices 设备列表
 // GET /devices?nodeId=&status=online&vendor=&q=&page=1&pageSize=20&sort=name:asc
 func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
@@ -294,7 +289,7 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		return
 	}
 
-	dc.Success(c, gin.H{"list": dc.attachChannelTransport(c, db, list), "total": total, "page": page, "pageSize": pageSize})
+	dc.Success(c, gin.H{"list": list, "total": total, "page": page, "pageSize": pageSize})
 }
 
 // GetChannel 通道详情
@@ -319,52 +314,7 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 		dc.FailAndAbort(c, "通道不存在", nil)
 		return
 	}
-	items := dc.attachChannelTransport(c, db, []gbmodels.GbChannel{ch})
-	if len(items) == 0 {
-		dc.Success(c, ch)
-		return
-	}
-	dc.Success(c, items[0])
-}
-
-func (dc *DeviceMgmtController) attachChannelTransport(c *gin.Context, db *gorm.DB, channels []gbmodels.GbChannel) []channelVOExtra {
-	if len(channels) == 0 {
-		return []channelVOExtra{}
-	}
-	deviceIDs := make([]string, 0, len(channels))
-	seen := map[string]struct{}{}
-	for _, ch := range channels {
-		if ch.DeviceID == "" {
-			continue
-		}
-		if _, ok := seen[ch.DeviceID]; ok {
-			continue
-		}
-		seen[ch.DeviceID] = struct{}{}
-		deviceIDs = append(deviceIDs, ch.DeviceID)
-	}
-
-	transportByDevice := map[string]string{}
-	if len(deviceIDs) > 0 {
-		var devices []gbmodels.GbDevice
-		if err := db.WithContext(c).
-			Scopes(ownerDeptScope(c)).
-			Where("device_id IN ?", deviceIDs).
-			Find(&devices).Error; err == nil {
-			for _, dev := range devices {
-				transportByDevice[dev.DeviceID] = dev.Transport
-			}
-		}
-	}
-
-	out := make([]channelVOExtra, 0, len(channels))
-	for i := range channels {
-		out = append(out, channelVOExtra{
-			GbChannel: &channels[i],
-			Transport: transportByDevice[channels[i].DeviceID],
-		})
-	}
-	return out
+	dc.Success(c, ch)
 }
 
 // ListChannelMounts 通道挂载位置列表(plan §3.5 多视图挂载)

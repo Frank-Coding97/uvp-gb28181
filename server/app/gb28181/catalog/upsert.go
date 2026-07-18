@@ -9,6 +9,20 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
+// CivilCodeLookup 行政区划字典查询接口(解耦 civilcode.Service)
+type CivilCodeLookup interface {
+	Lookup(code string) interface{} // 返回 *civilcode.SysCivilCode 或 nil
+}
+
+var (
+	civilCodeLookup CivilCodeLookup // 注入点,bootstrap 阶段注入
+)
+
+// SetCivilCodeLookup 注入行政区划字典服务(给 bootstrap / 测试用)
+func SetCivilCodeLookup(lookup CivilCodeLookup) {
+	civilCodeLookup = lookup
+}
+
 // upsertDevice 设备节点:gb_device upsert + 在 catalog tree 建/找节点
 //
 // 设备节点直接挂在 civil_code 链下;若 item.ParentID 是另一个 device/biz_group,
@@ -103,6 +117,14 @@ func upsertChannel(
 	if item.StatusOn {
 		status = gbmodels.ChannelStatusOnline
 	}
+
+	// 4 层兜底解析 CivilCode(L1:XML上报 → L2:DeviceID前6位 → L3:父节点 → L4:000000)
+	parentCivilCode := ""
+	if parentNode != nil {
+		parentCivilCode = parentNode.CivilCode
+	}
+	resolvedCivilCode := resolveCivilCode(item.CivilCode, cls.CivilCode, parentCivilCode)
+
 	var ch gbmodels.GbChannel
 	res := db.WithContext(ctx).Where("device_id = ? AND channel_id = ?", sourceDeviceID, item.DeviceID).Limit(1).Find(&ch)
 	if res.Error != nil {
@@ -110,19 +132,20 @@ func upsertChannel(
 	}
 	if res.RowsAffected == 0 {
 		ch = gbmodels.GbChannel{
-			ChannelID:    item.DeviceID,
-			DeviceID:     sourceDeviceID,
-			Name:         fallbackName(item.Name, item.DeviceID),
-			Manufacturer: item.Manufacturer,
-			Model:        item.Model,
-			Owner:        item.Owner,
-			CivilCode:    item.CivilCode,
-			ParentID:     item.ParentID,
-			PTZType:      int8(item.PTZType),
-			Longitude:    item.Longitude,
-			Latitude:     item.Latitude,
-			Status:       status,
-			OwnerDeptID:  ownerDeptID,
+			ChannelID:       item.DeviceID,
+			DeviceID:        sourceDeviceID,
+			Name:            fallbackName(item.Name, item.DeviceID),
+			Manufacturer:    item.Manufacturer,
+			Model:           item.Model,
+			Owner:           item.Owner,
+			CivilCode:       resolvedCivilCode,
+			ParentID:        item.ParentID,
+			PTZType:         int8(item.PTZType),
+			Longitude:       item.Longitude,
+			Latitude:        item.Latitude,
+			Status:          status,
+			OwnerDeptID:     ownerDeptID,
+			StreamTransport: "TCP-Passive",
 		}
 		if err := db.WithContext(ctx).Create(&ch).Error; err != nil {
 			return nil, nil, err
@@ -133,7 +156,7 @@ func upsertChannel(
 			"manufacturer": item.Manufacturer,
 			"model":        item.Model,
 			"owner":        item.Owner,
-			"civil_code":   item.CivilCode,
+			"civil_code":   resolvedCivilCode,
 			"parent_id":    item.ParentID,
 			"ptz_type":     int8(item.PTZType),
 			"longitude":    item.Longitude,
@@ -230,4 +253,45 @@ func fallbackName(name, fallback string) string {
 		return name
 	}
 	return fallback
+}
+
+// resolveCivilCode 4 层兜底策略解析行政区划码
+//
+// L1: XML 显式上报的 CivilCode(item.CivilCode)
+// L2: 从 20 位国标 DeviceID 前 6 位提取(cls.CivilCode,classifier 已算出)
+// L3: 从父节点继承(parentCivilCode,调用方传入父设备/父节点的 civil_code)
+// L4: 归"未分配"兜底桶(000000)
+//
+// L1/L2 结果需校验 sys_civil_code 字典存在性,查不到降级下一层
+func resolveCivilCode(
+	itemCivilCode string,        // L1: XML 上报
+	clsCivilCode string,          // L2: classifier 从 DeviceID 提取
+	parentCivilCode string,       // L3: 父节点
+) string {
+	const unassigned = "000000" // L4 兜底
+
+	// L1: XML 显式上报优先
+	if itemCivilCode != "" && len(itemCivilCode) == 6 && isAllDigit(itemCivilCode) {
+		if civilCodeLookup != nil && civilCodeLookup.Lookup(itemCivilCode) != nil {
+			return itemCivilCode
+		}
+		// 上报了但字典查不到(厂商私有编码/错误编码),降级 L2
+	}
+
+	// L2: DeviceID 前 6 位提取(classifier 已算出)
+	if clsCivilCode != "" && len(clsCivilCode) == 6 {
+		if civilCodeLookup != nil && civilCodeLookup.Lookup(clsCivilCode) != nil {
+			return clsCivilCode
+		}
+		// classifier 提取了但字典查不到,降级 L3
+	}
+
+	// L3: 父节点继承(父子同行政区大概率成立)
+	if parentCivilCode != "" && len(parentCivilCode) == 6 {
+		// 父节点已经过前 3 层兜底,直接信任(不再校验字典)
+		return parentCivilCode
+	}
+
+	// L4: 归"未分配"兜底桶
+	return unassigned
 }
