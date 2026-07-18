@@ -344,6 +344,7 @@ body {
 }
 
 .uvp-split-list-page #s-fold-page {
+  gap: 16px;
   background: transparent;
 }
 
@@ -354,6 +355,10 @@ body {
 
 .uvp-split-list-page #s-fold-page .layout-sider {
   border-right: 0;
+}
+
+.uvp-split-list-page #s-fold-page .sider-content {
+  padding: 0 !important;
 }
 
 .uvp-split-list-page #s-fold-page .packup-btn {
@@ -374,7 +379,7 @@ body {
 }
 
 .uvp-split-list-page #s-fold-page .content {
-  padding: 12px 12px 12px 16px;
+  padding: 0;
 }
 
 .uvp-tree-panel {
