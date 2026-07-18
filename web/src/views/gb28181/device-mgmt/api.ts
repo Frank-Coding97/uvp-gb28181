@@ -226,3 +226,40 @@ export const batchResolveAnomalies = (ids: number[]) =>
         baseUrlApi("gb28181/device-mgmt/anomaly/batch-resolve"),
         { data: { ids, action: "mark-resolved" } }
     );
+
+export interface BatchDeleteResult {
+    succeeded: number[];
+    failed: Array<{ id: number; error: string }>;
+}
+
+export const deleteDevice = (id: number) =>
+    http.request<BaseResult<{ id: number; ok: boolean }>>(
+        "delete",
+        baseUrlApi(`gb28181/device-mgmt/device/${id}`)
+    );
+
+export const batchDeleteDevices = (ids: number[]) =>
+    http.request<BaseResult<BatchDeleteResult>>(
+        "post",
+        baseUrlApi("gb28181/device-mgmt/device/batch-delete"),
+        { data: { ids } }
+    );
+
+export const deleteChannel = (id: number) =>
+    http.request<BaseResult<{ id: number; ok: boolean }>>(
+        "delete",
+        baseUrlApi(`gb28181/device-mgmt/channel/${id}`)
+    );
+
+export const batchDeleteChannels = (ids: number[]) =>
+    http.request<BaseResult<BatchDeleteResult>>(
+        "post",
+        baseUrlApi("gb28181/device-mgmt/channel/batch-delete"),
+        { data: { ids } }
+    );
+
+export const refreshDeviceCatalog = (id: number) =>
+    http.request<BaseResult<{ deviceId: string; dest: string; ok: boolean }>>(
+        "post",
+        baseUrlApi(`gb28181/device-mgmt/device/${id}/catalog/refresh`)
+    );

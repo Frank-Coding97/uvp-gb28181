@@ -7,6 +7,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
@@ -166,6 +167,12 @@ func Start() {
 		return
 	}
 	sipServer = srv
+
+	// 装配手动 Catalog 刷新(前端"通道刷新"按钮 → controllers.RefreshDeviceCatalog)
+	// UAC 若初始化失败(srv.UAC()==nil),handler 内部会 no-op
+	if u := srv.UAC(); u != nil {
+		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
+	}
 
 	// 启动离线扫描器(基于 keepalive_time 事实派生)
 	offlineScanner = device.NewOfflineScanner(

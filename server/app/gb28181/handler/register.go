@@ -23,6 +23,7 @@ type RegisterHandler struct {
 	cfg               gbconfig.Config
 	keepaliveInterval int
 	catalogTrigger    CatalogTrigger    // 可选:首次注册成功后触发 Catalog 查询
+	deviceInfoTrigger DeviceInfoTrigger // 可选:首次注册成功后触发 DeviceInfo 查询(拉设备本体元数据)
 	recorder          metrics.Recorder  // 可选:埋点 SIP 事务
 }
 
@@ -38,6 +39,11 @@ func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
 // SetCatalogTrigger 注入 Catalog 触发器(可选;不注入则不触发)
 func (h *RegisterHandler) SetCatalogTrigger(t CatalogTrigger) {
 	h.catalogTrigger = t
+}
+
+// SetDeviceInfoTrigger 注入 DeviceInfo 触发器(可选;不注入则不触发)
+func (h *RegisterHandler) SetDeviceInfoTrigger(t DeviceInfoTrigger) {
+	h.deviceInfoTrigger = t
 }
 
 // SetRecorder 注入指标 Recorder(可选,nil 时所有埋点 no-op)
@@ -171,11 +177,18 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	_ = tx.Respond(buildOKWithExpires(req, expires))
 	h.recordEnd(req, 200, true)
 
-	// 首次注册(或离线后重连)→ 触发一次 Catalog 查询拉通道树
-	// 放在响应之后:不阻塞 200 OK,失败仅记日志
-	if isFirst && h.catalogTrigger != nil {
+	// 首次注册(或离线后重连)→ 触发 Catalog / DeviceInfo 查询
+	// 放在响应之后:不阻塞 200 OK,失败仅记日志。两个查询独立并行,任一失败不影响另一个。
+	// transport 沿用本次 REGISTER 的传输协议,避免 TCP 注册的设备被 UDP 出站发不出去
+	if isFirst {
 		dest := fmt.Sprintf("%s:%d", ip, port)
-		h.catalogTrigger.Trigger(ctx, deviceID, dest)
+		transport := req.Transport()
+		if h.catalogTrigger != nil {
+			h.catalogTrigger.Trigger(ctx, deviceID, dest, transport)
+		}
+		if h.deviceInfoTrigger != nil {
+			h.deviceInfoTrigger.Trigger(ctx, deviceID, dest, transport)
+		}
 	}
 }
 

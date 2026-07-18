@@ -74,6 +74,7 @@ func (s *Server) registerHandlers() {
 	} else {
 		s.uac = u
 		regHandler.SetCatalogTrigger(handler.NewUACCatalogTrigger(u))
+		regHandler.SetDeviceInfoTrigger(handler.NewUACDeviceInfoTrigger(u))
 	}
 
 	s.regH = regHandler

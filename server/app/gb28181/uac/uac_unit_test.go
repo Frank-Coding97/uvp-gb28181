@@ -63,3 +63,46 @@ func TestUAC_NextCSeq(t *testing.T) {
 		t.Errorf("nextCSeq not monotonic: %s %s %s", a, b, c)
 	}
 }
+
+// platformFromHeader:GB28181 § 9.1.1 要求 From userpart = 平台 serverID
+// 之前不显式设置 From 时,sipgo 用 UserAgent 名字兜底,合规设备/模拟器会丢弃这类请求
+func TestPlatformFromHeader(t *testing.T) {
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	h := u.platformFromHeader()
+	if h == nil {
+		t.Fatal("platformFromHeader returned nil")
+	}
+	if h.Address.User != "34020000002000000001" {
+		t.Errorf("From User = %q, want %q", h.Address.User, "34020000002000000001")
+	}
+	if h.Address.Host != "3402000000" {
+		t.Errorf("From Host = %q, want %q", h.Address.Host, "3402000000")
+	}
+	// 必须带 tag,否则 SIP dialog 层校验会失败
+	if _, ok := h.Params.Get("tag"); !ok {
+		t.Error("From header missing tag param")
+	}
+}
+
+// normalizeTransport: 大小写混用 / 空值 / 非法值都应兜底到合法 SIP transport(UDP/TCP)
+func TestNormalizeTransport(t *testing.T) {
+	cases := map[string]string{
+		"":         "UDP",
+		"UDP":      "UDP",
+		"udp":      "UDP",
+		"Udp":      "UDP",
+		"  UDP ":   "UDP",
+		"TCP":      "TCP",
+		"tcp":      "TCP",
+		"Tcp":      "TCP",
+		"  tcp  ":  "TCP",
+		"WS":       "UDP", // 未支持的传输一律兜底
+		"sctp":     "UDP",
+		"garbage":  "UDP",
+	}
+	for in, want := range cases {
+		if got := normalizeTransport(in); got != want {
+			t.Errorf("normalizeTransport(%q)=%q, want %q", in, got, want)
+		}
+	}
+}

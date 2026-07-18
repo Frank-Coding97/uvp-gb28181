@@ -244,6 +244,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		SSRC:      ssrc,
 		StreamID:  streamID,
 		Dest:      fmt.Sprintf("%s:%d", dev.IP, dev.Port),
+		Transport: dev.Transport,
 	}
 
 	inviteCtx, inviteCancel := context.WithTimeout(ctx, 5*time.Second)

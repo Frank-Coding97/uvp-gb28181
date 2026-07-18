@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { Message } from "@arco-design/web-vue";
+import { Message, Modal } from "@arco-design/web-vue";
 import {
     Building2,
     Camera,
@@ -16,7 +16,6 @@ import {
     MapPin,
     Monitor,
     Play,
-    MoreHorizontal,
     Pencil,
     RadioTower,
     RefreshCcw,
@@ -29,6 +28,10 @@ import {
     Plus
 } from "@lucide/vue";
 import {
+    batchDeleteChannels,
+    batchDeleteDevices,
+    deleteChannel,
+    deleteDevice,
     getChannel,
     getChannelTimeline,
     getDevice,
@@ -40,7 +43,9 @@ import {
     listDevices,
     listMapClusters,
     listMapMarkers,
+    refreshDeviceCatalog,
     type AssetKind,
+    type BatchDeleteResult,
     type CatalogNode,
     type ChannelMount,
     type ChannelVO,
@@ -352,6 +357,138 @@ function playChannel(record: ChannelVO | MapMarker) {
     Message.info(`准备点播 ${record.channelId}`);
 }
 
+const deleting = ref(false);
+const refreshingCatalog = reactive<Record<number, boolean>>({});
+
+function afterDeleteSuccess() {
+    selectedRowKeys.value = [];
+    refreshMainData();
+    refreshDeviceStats();
+}
+
+async function handleRefreshDeviceCatalog(record: DeviceVO) {
+    if (refreshingCatalog[record.id]) return;
+    if (!record.online) {
+        Message.warning("设备离线,无法下发 Catalog 查询");
+        return;
+    }
+    refreshingCatalog[record.id] = true;
+    try {
+        const res = await refreshDeviceCatalog(record.id);
+        if (res.code === 0) {
+            Message.success(`已下发 Catalog 查询 · ${record.deviceId}`);
+            // 通道回执异步落库,延迟稍长一点再拉列表,避免空刷新
+            setTimeout(() => refreshMainData(), 1500);
+        } else {
+            Message.error(res.message || "下发失败");
+        }
+    } catch (error: any) {
+        Message.error(error?.message || "下发失败");
+    } finally {
+        refreshingCatalog[record.id] = false;
+    }
+}
+
+function reportBatchResult(res: BatchDeleteResult, total: number) {
+    const okCount = res.succeeded.length;
+    const failCount = res.failed.length;
+    if (failCount === 0) {
+        Message.success(`已删除 ${okCount} 项`);
+        return;
+    }
+    if (okCount === 0) {
+        Message.error(`全部失败:${res.failed[0]?.error || "未知错误"}`);
+        return;
+    }
+    Message.warning(`成功 ${okCount} / ${total},失败 ${failCount}:${res.failed[0]?.error || ""}`);
+}
+
+async function handleDeleteDevice(record: DeviceVO) {
+    Modal.warning({
+        title: "删除设备",
+        content: `即将删除设备「${deviceNameText(record)}(${record.deviceId})」及其所有通道、目录挂载。此操作不可恢复,是否继续?`,
+        hideCancel: false,
+        okText: "删除",
+        cancelText: "取消",
+        okButtonProps: { status: "danger" },
+        onOk: async () => {
+            deleting.value = true;
+            try {
+                const res = await deleteDevice(record.id);
+                if (res.code === 0) {
+                    Message.success("设备已删除");
+                    afterDeleteSuccess();
+                } else {
+                    Message.error(res.message || "删除失败");
+                }
+            } catch (error: any) {
+                Message.error(error?.message || "删除失败");
+            } finally {
+                deleting.value = false;
+            }
+        }
+    });
+}
+
+async function handleDeleteChannel(record: ChannelVO) {
+    Modal.warning({
+        title: "删除通道",
+        content: `即将删除通道「${displayName(record)}(${record.channelId})」及其所有目录挂载。此操作不可恢复,是否继续?`,
+        hideCancel: false,
+        okText: "删除",
+        cancelText: "取消",
+        okButtonProps: { status: "danger" },
+        onOk: async () => {
+            deleting.value = true;
+            try {
+                const res = await deleteChannel(record.id);
+                if (res.code === 0) {
+                    Message.success("通道已删除");
+                    afterDeleteSuccess();
+                } else {
+                    Message.error(res.message || "删除失败");
+                }
+            } catch (error: any) {
+                Message.error(error?.message || "删除失败");
+            } finally {
+                deleting.value = false;
+            }
+        }
+    });
+}
+
+async function handleBatchDelete() {
+    const ids = [...selectedRowKeys.value];
+    if (ids.length === 0) return;
+    const target = assetKind.value === "device" ? "设备" : "通道";
+    const cascade = assetKind.value === "device" ? "所属通道、目录挂载" : "所有目录挂载";
+    Modal.warning({
+        title: `批量删除${target}`,
+        content: `即将删除 ${ids.length} 个${target}及其${cascade}。此操作不可恢复,是否继续?`,
+        hideCancel: false,
+        okText: "全部删除",
+        cancelText: "取消",
+        okButtonProps: { status: "danger" },
+        onOk: async () => {
+            deleting.value = true;
+            try {
+                const call = assetKind.value === "device" ? batchDeleteDevices : batchDeleteChannels;
+                const res = await call(ids);
+                if (res.code === 0 && res.data) {
+                    reportBatchResult(res.data, ids.length);
+                    afterDeleteSuccess();
+                } else {
+                    Message.error(res.message || "批量删除失败");
+                }
+            } catch (error: any) {
+                Message.error(error?.message || "批量删除失败");
+            } finally {
+                deleting.value = false;
+            }
+        }
+    });
+}
+
 onMounted(async () => {
     await Promise.all([loadTree(), refreshMainData(), refreshDeviceStats()]);
 });
@@ -452,8 +589,7 @@ onMounted(async () => {
                     <div v-if="selectedCount" class="batch-bar">
                         <div class="batch-info"><strong>{{ selectedCount }}</strong> 项已选</div>
                         <div class="batch-ops">
-                            <button class="btn-ghost" type="button">批量重新注册</button>
-                            <button class="btn-ghost" type="button">批量删除</button>
+                            <button class="btn-ghost" type="button" :disabled="deleting" @click="handleBatchDelete">批量删除</button>
                         </div>
                     </div>
 
@@ -517,7 +653,7 @@ onMounted(async () => {
                                         <div class="table-actions">
                                             <button class="play-cta" type="button" @click="openChannel(record)"><Play :size="12" /> 播放</button>
                                             <button class="icon-btn small framed" type="button" @click="Message.info('通道编辑待接入')"><Pencil :size="13" /></button>
-                                            <button class="icon-btn small framed" type="button" @click="Message.info('更多通道操作待接入')"><MoreHorizontal :size="14" /></button>
+                                            <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteChannel(record)"><Trash2 :size="13" /></button>
                                         </div>
                                     </template>
                                 </a-table-column>
@@ -597,9 +733,18 @@ onMounted(async () => {
                                 <a-table-column title="设备控制" :width="150" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="table-actions">
-                                            <button class="icon-btn small framed" type="button" @click="Message.info(`准备刷新 ${record.deviceId} 目录`)"><RefreshCcw :size="13" /></button>
+                                            <button
+                                                class="icon-btn small framed"
+                                                type="button"
+                                                :disabled="refreshingCatalog[record.id] || !record.online"
+                                                :title="record.online ? '刷新通道目录' : '设备离线,无法刷新'"
+                                                @click="handleRefreshDeviceCatalog(record)"
+                                            >
+                                                <Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" />
+                                                <RefreshCcw v-else :size="13" />
+                                            </button>
                                             <button class="icon-btn small framed" type="button" @click="Message.info('设备编辑待接入')"><Pencil :size="13" /></button>
-                                            <button class="icon-btn small framed danger" type="button" @click="Message.info('设备删除待接入')"><Trash2 :size="13" /></button>
+                                            <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteDevice(record)"><Trash2 :size="13" /></button>
                                         </div>
                                     </template>
                                 </a-table-column>

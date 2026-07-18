@@ -13,8 +13,9 @@ import (
 )
 
 // CatalogTrigger 注册成功后触发 Catalog 查询的能力(便于注入与测试)
+// transport 需匹配设备注册时的传输协议(UDP/TCP),空值兜底 UDP
 type CatalogTrigger interface {
-	Trigger(ctx context.Context, deviceID, dest string)
+	Trigger(ctx context.Context, deviceID, dest, transport string)
 }
 
 // uacCatalogTrigger 默认实现:用 UAC 发 MESSAGE(承载 Catalog Query XML)
@@ -30,7 +31,7 @@ func NewUACCatalogTrigger(u *uac.UAC) CatalogTrigger {
 }
 
 // Trigger 异步向设备发 Catalog 查询(失败仅记日志,不阻塞注册响应)
-func (t *uacCatalogTrigger) Trigger(_ context.Context, deviceID, dest string) {
+func (t *uacCatalogTrigger) Trigger(_ context.Context, deviceID, dest, transport string) {
 	if t.uac == nil {
 		return
 	}
@@ -43,11 +44,13 @@ func (t *uacCatalogTrigger) Trigger(_ context.Context, deviceID, dest string) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), t.cmdTTL)
 		defer cancel()
-		if err := t.uac.SendMessage(ctx, deviceID, dest, body); err != nil {
+		if err := t.uac.SendMessage(ctx, deviceID, dest, transport, body); err != nil {
 			app.ZapLog.Warn("Catalog 查询发送失败",
-				zap.String("deviceId", deviceID), zap.String("dest", dest), zap.Error(err))
+				zap.String("deviceId", deviceID), zap.String("dest", dest),
+				zap.String("transport", transport), zap.Error(err))
 			return
 		}
-		app.ZapLog.Info("Catalog 查询已发出", zap.String("deviceId", deviceID), zap.Int("sn", sn))
+		app.ZapLog.Info("Catalog 查询已发出",
+			zap.String("deviceId", deviceID), zap.String("transport", transport), zap.Int("sn", sn))
 	}()
 }

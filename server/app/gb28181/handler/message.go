@@ -79,6 +79,9 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdCatalog:
 			// Catalog 应答(设备→平台),解析通道入库
 			HandleCatalogResponse(ctx, req.Body())
+		case manscdp.CmdDeviceInfo:
+			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
+			HandleDeviceInfoResponse(ctx, req.Body())
 		}
 	}
 	// 其它 CmdType 本期不处理,统一回 200

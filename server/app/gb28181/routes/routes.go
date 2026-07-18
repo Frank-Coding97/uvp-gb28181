@@ -75,6 +75,12 @@ func SetKeepaliveCollector(c gbhandler.KeepaliveCollector) {
 	hookController.SetKeepaliveCollector(c)
 }
 
+// SetDeviceMgmtCatalogTrigger 由 bootstrap 在 SIP UAC 就绪后注入
+// handler.CatalogTrigger 满足 controllers.CatalogTrigger 接口(duck typing)
+func SetDeviceMgmtCatalogTrigger(t gbhandler.CatalogTrigger) {
+	deviceMgmtController.SetCatalogTrigger(t)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
@@ -142,6 +148,13 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
+			// 删除(单/批,硬 cascade — 用户主动删)
+			dmgmt.DELETE("/device/:id", deviceMgmtController.DeleteDevice)
+			dmgmt.POST("/device/batch-delete", deviceMgmtController.BatchDeleteDevices)
+			dmgmt.DELETE("/channel/:id", deviceMgmtController.DeleteChannel)
+			dmgmt.POST("/channel/batch-delete", deviceMgmtController.BatchDeleteChannels)
+			// 手动 Catalog 刷新(bootstrap 未装配 CatalogTrigger 时,handler 内部返 503)
+			dmgmt.POST("/device/:id/catalog/refresh", deviceMgmtController.RefreshDeviceCatalog)
 			// B3 map:地图视图
 			dmgmt.GET("/map/markers", mapController.Markers)
 			dmgmt.GET("/map/clusters", mapController.Clusters)

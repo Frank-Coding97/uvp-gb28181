@@ -13,15 +13,17 @@ import (
 
 // fakeTrigger 计数版,验证调用次数(替代真实 UAC,绕开网络)
 type fakeTrigger struct {
-	calls    atomic.Int32
-	lastID   atomic.Value // string
-	lastDest atomic.Value // string
+	calls         atomic.Int32
+	lastID        atomic.Value // string
+	lastDest      atomic.Value // string
+	lastTransport atomic.Value // string
 }
 
-func (f *fakeTrigger) Trigger(_ context.Context, deviceID, dest string) {
+func (f *fakeTrigger) Trigger(_ context.Context, deviceID, dest, transport string) {
 	f.calls.Add(1)
 	f.lastID.Store(deviceID)
 	f.lastDest.Store(dest)
+	f.lastTransport.Store(transport)
 }
 
 // startServerWithTrigger 起一个 SIP server,并把 RegisterHandler 的 trigger 替换成测试用的

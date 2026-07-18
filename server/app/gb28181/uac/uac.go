@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,6 +77,19 @@ func (u *UAC) deviceURI(deviceID string) sip.Uri {
 	return uri
 }
 
+// platformFromHeader 构造平台端 From 头(GB28181 § 9.1.1 要求)
+// From URI userpart 必须是平台国标编码(serverID),设备端会据此校验上级平台身份。
+// 之前不显式设置时,sipgo client 会用 UserAgent 名(如 "UVP-GB28181")兜底填 User,
+// 结果被合规设备/模拟器判为"未授权来源"直接丢弃。
+func (u *UAC) platformFromHeader() *sip.FromHeader {
+	h := &sip.FromHeader{
+		Address: sip.Uri{User: u.serverID, Host: u.domain},
+		Params:  sip.NewParams(),
+	}
+	h.Params.Add("tag", sip.GenerateTagN(16))
+	return h
+}
+
 // recordBegin / recordEnd 给 UAC 出向事务埋点
 // callID 由调用方传入(用真实 SIP Call-ID 头);若 recorder nil 则 no-op
 func (u *UAC) recordBegin(kind metrics.TxKind, callID, cseq, deviceID string) {
@@ -99,13 +113,26 @@ func (u *UAC) recordEnd(callID, cseq string, statusCode int, success bool) {
 	u.recorder.End(callID, cseq, statusCode, success)
 }
 
+// normalizeTransport 归一化 transport,兜底 UDP
+// 允许空/大小写混用;非 UDP/TCP 一律按 UDP(sipgo 里 transport 头大小写敏感)
+func normalizeTransport(transport string) string {
+	switch strings.ToUpper(strings.TrimSpace(transport)) {
+	case "TCP":
+		return "TCP"
+	default:
+		return "UDP"
+	}
+}
+
 // SendMessage 向设备发 MESSAGE(承载 MANSCDP XML,如 Catalog 查询)
-func (u *UAC) SendMessage(ctx context.Context, deviceID, dest string, body []byte) error {
+// transport 从设备注册记录(gb_device.transport)读出来,避免硬编码 UDP 导致 TCP 设备发不出去
+func (u *UAC) SendMessage(ctx context.Context, deviceID, dest, transport string, body []byte) error {
 	req := sip.NewRequest(sip.MESSAGE, u.deviceURI(deviceID))
 	req.SetBody(body)
 	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
+	req.AppendHeader(u.platformFromHeader())
 	req.SetDestination(dest)
-	req.SetTransport("UDP")
+	req.SetTransport(normalizeTransport(transport))
 
 	kind := detectMessageKind(body)
 	callID, cseq := u.extractKeyFromRequest(req)
@@ -163,6 +190,7 @@ type Session struct {
 	SSRC      string
 	StreamID  string
 	Dest      string
+	Transport string // 传输协议(UDP/TCP),对应 gb_device.transport;空值兜底 UDP
 	State     SessionState
 	dialog    *sipgo.DialogClientSession
 	createdAt time.Time
@@ -210,8 +238,9 @@ func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody
 	req.SetBody([]byte(sdpBody))
 	req.AppendHeader(sip.NewHeader("Subject", fmt.Sprintf("%s:%s,%s:0", s.ChannelID, s.SSRC, u.serverID)))
 	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
+	req.AppendHeader(u.platformFromHeader())
 	req.SetDestination(s.Dest)
-	req.SetTransport("UDP")
+	req.SetTransport(normalizeTransport(s.Transport))
 
 	callID, cseq := u.extractKeyFromRequest(req)
 	u.recordBegin(metrics.TxInvite, callID, cseq, s.DeviceID)
