@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import type { DirectoryDimension } from "@/api/gb28181";
 
 /**

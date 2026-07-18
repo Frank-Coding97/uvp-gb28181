@@ -90,7 +90,7 @@ async function onLoadMore(node: DirectoryNode): Promise<void> {
 /**
  * 选中节点(a-tree select 事件)
  */
-function onSelect(selectedKeys: (string | number)[], data?: any) {
+function onSelect(selectedKeys: (string | number)[]) {
     if (!selectedKeys.length) return;
     const node = findNodeById(String(selectedKeys[0]));
     if (!node) return;
