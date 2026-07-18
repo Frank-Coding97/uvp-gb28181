@@ -63,6 +63,7 @@ import {
     type TimelineSlot
 } from "./api";
 import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
+import ControlConsole from "../components/ControlConsole.vue";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
@@ -126,6 +127,8 @@ const editChannelForm = ref({ channelId: "", deviceId: "", alias: "", name: "", 
 const editingChannel = ref(false);
 const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
+const controlConsoleVisible = ref(false);
+const controlConsoleChannel = ref<ChannelVO | null>(null);
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -426,8 +429,9 @@ function openNode(node: CatalogNode) {
     drawerVisible.value = true;
 }
 
-function playChannel(record: ChannelVO | MapMarker) {
-    Message.info(`准备点播 ${record.channelId}`);
+function playChannel(record: ChannelVO) {
+    controlConsoleChannel.value = record;
+    controlConsoleVisible.value = true;
 }
 
 const deleting = ref(false);
@@ -1007,7 +1011,7 @@ onUnmounted(() => {
                                     <template #cell="{ record }">
                                         <div class="table-actions">
                                             <a-tooltip content="播放" position="top">
-                                                <button class="icon-btn small framed primary" type="button" @click="openChannel(record)"><Play :size="13" /></button>
+                                                <button class="icon-btn small framed primary" type="button" @click="playChannel(record)"><Play :size="13" /></button>
                                             </a-tooltip>
                                             <a-tooltip content="查看详情" position="top">
                                                 <button class="icon-btn small framed" type="button" @click="openChannel(record)"><Eye :size="13" /></button>
@@ -1437,6 +1441,11 @@ onUnmounted(() => {
                     </div>
                 </a-spin>
             </a-drawer>
+
+            <ControlConsole
+                v-model:visible="controlConsoleVisible"
+                :channel="controlConsoleChannel"
+            />
 
             <a-modal
                 v-model:visible="createDeviceVisible"

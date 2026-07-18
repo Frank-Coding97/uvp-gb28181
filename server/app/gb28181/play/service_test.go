@@ -73,10 +73,36 @@ func (f fakeDevices) FindByDeviceID(ctx context.Context, deviceID string) (*gbmo
 	return f.d, nil
 }
 
-type fakeChannels struct{ c *gbmodels.GbChannel }
+type fakeChannels struct {
+	c               *gbmodels.GbChannel
+	updateErr       error
+	clearErr        error
+	clearedStreamID string
+}
 
-func (f fakeChannels) FindChannel(ctx context.Context, deviceID, channelID string) (*gbmodels.GbChannel, error) {
+func (f *fakeChannels) FindChannel(ctx context.Context, deviceID, channelID string) (*gbmodels.GbChannel, error) {
 	return f.c, nil
+}
+
+func (f *fakeChannels) UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	if f.c != nil {
+		f.c.StreamID = streamID
+	}
+	return nil
+}
+
+func (f *fakeChannels) ClearStream(ctx context.Context, streamID string) error {
+	f.clearedStreamID = streamID
+	if f.clearErr != nil {
+		return f.clearErr
+	}
+	if f.c != nil && f.c.StreamID == streamID {
+		f.c.StreamID = ""
+	}
+	return nil
 }
 
 // ===== fixtures =====
@@ -95,19 +121,20 @@ func aChannel() *gbmodels.GbChannel {
 
 func testCfg() gbconfig.Config {
 	return gbconfig.Config{
-		SIP: gbconfig.SIPConfig{ServerID: "34020000002000000001", Domain: "3402000000"},
-		ZLM: gbconfig.ZLMConfig{Host: "192.168.10.222", HTTPPort: 80, RTPPort: 40000},
+		SIP:   gbconfig.SIPConfig{ServerID: "34020000002000000001", Domain: "3402000000"},
+		ZLM:   gbconfig.ZLMConfig{Host: "192.168.10.222", HTTPPort: 80, RTPPort: 40000},
 		Media: gbconfig.MediaConfig{StreamNoneReaderTimeout: 20},
 	}
 }
 
-func newSvc(t *testing.T, z ZLM, inv Inviter, dev *gbmodels.GbDevice, ch *gbmodels.GbChannel) (*Service, *stream.Notifier) {
+func newSvc(t *testing.T, z ZLM, inv Inviter, dev *gbmodels.GbDevice, ch *gbmodels.GbChannel) (*Service, *stream.Notifier, *fakeChannels) {
 	t.Helper()
 	n := stream.NewNotifier()
 	sm := uac.NewSessionManager()
-	s := New(testCfg(), z, inv, sm, n, fakeDevices{dev}, fakeChannels{ch})
+	channels := &fakeChannels{c: ch}
+	s := New(testCfg(), z, inv, sm, n, fakeDevices{dev}, channels)
 	s.SetReadyTimings(800*time.Millisecond, 50*time.Millisecond)
-	return s, n
+	return s, n, channels
 }
 
 // ===== tests =====
@@ -116,7 +143,8 @@ func newSvc(t *testing.T, z ZLM, inv Inviter, dev *gbmodels.GbDevice, ch *gbmode
 func TestStartHappyPath(t *testing.T) {
 	z := &mockZLM{port: 40000} // online 始终 false,只能靠 hook
 	inv := &mockInviter{}
-	s, n := newSvc(t, z, inv, onlineDevice(), aChannel())
+	ch := aChannel()
+	s, n, _ := newSvc(t, z, inv, onlineDevice(), ch)
 
 	// INVITE 之后 100ms 让 hook 触发(以 session 里的 StreamID 为准)
 	inv.onInvite = func(sess *uac.Session) {
@@ -139,6 +167,9 @@ func TestStartHappyPath(t *testing.T) {
 	if z.closeCalls.Load() != 0 {
 		t.Errorf("happy path 不应回滚 closeRtpServer,实际 %d", z.closeCalls.Load())
 	}
+	if ch.StreamID != res.StreamID {
+		t.Errorf("点播成功应记录通道 stream_id, got %q want %q", ch.StreamID, res.StreamID)
+	}
 }
 
 // TestStartDeviceOffline T6.3-测2: 设备离线 → 直接拒绝,不开 RTP
@@ -147,7 +178,7 @@ func TestStartDeviceOffline(t *testing.T) {
 	inv := &mockInviter{}
 	dev := onlineDevice()
 	dev.Status = gbmodels.DeviceStatusOffline
-	s, _ := newSvc(t, z, inv, dev, aChannel())
+	s, _, _ := newSvc(t, z, inv, dev, aChannel())
 
 	_, err := s.Start(context.Background(), dev.DeviceID, "any-channel")
 	if !errors.Is(err, ErrDeviceOffline) {
@@ -165,7 +196,7 @@ func TestStartDeviceOffline(t *testing.T) {
 func TestStartChannelNotFound(t *testing.T) {
 	z := &mockZLM{}
 	inv := &mockInviter{}
-	s, _ := newSvc(t, z, inv, onlineDevice(), nil) // 没通道
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), nil) // 没通道
 
 	_, err := s.Start(context.Background(), "34020000001320000002", "no-such-channel")
 	if !errors.Is(err, ErrChannelNotFound) {
@@ -180,7 +211,7 @@ func TestStartChannelNotFound(t *testing.T) {
 func TestStartInviteFailRollsBackRtp(t *testing.T) {
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{inviteErr: errors.New("设备拒绝")}
-	s, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
 
 	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
 	if err == nil {
@@ -201,7 +232,7 @@ func TestStartInviteFailRollsBackRtp(t *testing.T) {
 func TestStartStreamNotReadyRollsBackAll(t *testing.T) {
 	z := &mockZLM{port: 40000} // online 永远 false
 	inv := &mockInviter{}
-	s, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
 	// hook 也永不来
 
 	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
@@ -220,7 +251,7 @@ func TestStartStreamNotReadyRollsBackAll(t *testing.T) {
 func TestStartReadyViaPolling(t *testing.T) {
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
-	s, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
 
 	// INVITE 后 150ms 让 ZLM "上线"
 	inv.onInvite = func(_ *uac.Session) {
@@ -246,11 +277,32 @@ func TestStartReadyViaPolling(t *testing.T) {
 func TestStop(t *testing.T) {
 	z := &mockZLM{}
 	inv := &mockInviter{}
-	s, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s, _, channels := newSvc(t, z, inv, onlineDevice(), aChannel())
 	if err := s.Stop(context.Background(), "fake-stream"); err != nil {
 		t.Fatalf("Stop 失败: %v", err)
 	}
 	if inv.byeCalls.Load() != 1 || z.closeCalls.Load() != 1 {
 		t.Errorf("应各调一次,bye=%d close=%d", inv.byeCalls.Load(), z.closeCalls.Load())
+	}
+	if channels.clearedStreamID != "fake-stream" {
+		t.Errorf("Stop 应清空通道 stream_id,实际 %q", channels.clearedStreamID)
+	}
+}
+
+func TestStartUpdateStreamFailRollsBackAll(t *testing.T) {
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	s, n, channels := newSvc(t, z, inv, onlineDevice(), aChannel())
+	channels.updateErr = errors.New("db unavailable")
+	inv.onInvite = func(sess *uac.Session) {
+		go n.Publish(sess.StreamID)
+	}
+
+	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	if err == nil {
+		t.Fatal("记录 stream_id 失败时应返回错误")
+	}
+	if inv.byeCalls.Load() != 1 || z.closeCalls.Load() != 1 {
+		t.Errorf("记录失败应回滚 BYE 和 RTP, bye=%d close=%d", inv.byeCalls.Load(), z.closeCalls.Load())
 	}
 }

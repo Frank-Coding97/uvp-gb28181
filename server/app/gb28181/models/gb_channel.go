@@ -89,3 +89,10 @@ func UpdateChannelStream(c context.Context, deviceID, channelID, streamID string
 		Where("device_id = ? AND channel_id = ?", deviceID, channelID).
 		Update("stream_id", streamID).Error
 }
+
+// ClearChannelStream 按当前流 ID 清空通道播放状态
+func ClearChannelStream(c context.Context, streamID string) error {
+	return app.DB().WithContext(c).Model(&GbChannel{}).
+		Where("stream_id = ?", streamID).
+		Update("stream_id", "").Error
+}

@@ -56,6 +56,8 @@ type Inviter interface {
 // ChannelRepo 通道查询(便于测试 mock)
 type ChannelRepo interface {
 	FindChannel(ctx context.Context, deviceID, channelID string) (*gbmodels.GbChannel, error)
+	UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error
+	ClearStream(ctx context.Context, streamID string) error
 }
 
 // DeviceRepo 设备查询(便于测试 mock)
@@ -65,13 +67,13 @@ type DeviceRepo interface {
 
 // Result 点播结果
 type Result struct {
-	StreamID  string `json:"streamId"`  // ZLM stream id(也是会话主键)
-	SSRC      string `json:"ssrc"`      // 媒体流 SSRC
-	App       string `json:"app"`       // ZLM app(固定 rtp)
-	WSFlvURL  string `json:"wsflvUrl"`  // ws-flv 播放地址(前端 avplayer 用)
-	HLSURL    string `json:"hlsUrl"`    // HLS 备用
+	StreamID   string `json:"streamId"`   // ZLM stream id(也是会话主键)
+	SSRC       string `json:"ssrc"`       // 媒体流 SSRC
+	App        string `json:"app"`        // ZLM app(固定 rtp)
+	WSFlvURL   string `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
+	HLSURL     string `json:"hlsUrl"`     // HLS 备用
 	HTTPFlvURL string `json:"httpFlvUrl"` // http-flv 备用
-	ExpireAt  int64  `json:"expireAt"`  // 预计无人观看断流时刻(秒,UTC)
+	ExpireAt   int64  `json:"expireAt"`   // 预计无人观看断流时刻(秒,UTC)
 }
 
 // 常量
@@ -97,13 +99,13 @@ var (
 //
 // 模式自动:NewWithScheduler 装载多节点;New 走单节点。
 type Service struct {
-	cfg       gbconfig.Config
-	zlm       ZLM // 单节点 client,deprecated 路径用
-	inviter   Inviter
-	sessions  *uac.SessionManager
-	notifier  *stream.Notifier
-	devices   DeviceRepo
-	channels  ChannelRepo
+	cfg      gbconfig.Config
+	zlm      ZLM // 单节点 client,deprecated 路径用
+	inviter  Inviter
+	sessions *uac.SessionManager
+	notifier *stream.Notifier
+	devices  DeviceRepo
+	channels ChannelRepo
 
 	// 多节点 — 都为 nil 表示走 deprecated 单节点路径
 	picker      NodePicker
@@ -274,6 +276,16 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		}
 		return nil, fmt.Errorf("%w: %v", ErrStreamNotReady, err)
 	}
+	if err := s.channels.UpdateStream(ctx, deviceID, channelID, streamID); err != nil {
+		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer byeCancel()
+		_ = s.inviter.Bye(byeCtx, s.sessions, streamID)
+		_ = client.CloseRtpServer(context.Background(), streamID)
+		if s.useMultiNode() {
+			s.locationMap.Unbind(streamID)
+		}
+		return nil, fmt.Errorf("记录通道播放流失败: %w", err)
+	}
 
 	// 7. 生成播放地址(多节点用 picked node 的 host;单节点用 cfg.ZLM.Host)
 	result := s.buildResultFor(streamID, ssrc, recvHost)
@@ -298,11 +310,15 @@ func (s *Service) Stop(ctx context.Context, streamID string) error {
 	if s.useMultiNode() {
 		s.locationMap.Unbind(streamID)
 	}
+	clearErr := s.channels.ClearStream(ctx, streamID)
 
 	if byeErr != nil {
 		return byeErr
 	}
-	return closeErr
+	if closeErr != nil {
+		return closeErr
+	}
+	return clearErr
 }
 
 // buildResultFor 构造播放地址,host 由 Start 传(多节点路径取选中 node host,单节点取 cfg.ZLM.Host)

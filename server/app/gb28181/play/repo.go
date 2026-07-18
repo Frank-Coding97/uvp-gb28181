@@ -23,5 +23,13 @@ func (gormChannelRepo) FindChannel(ctx context.Context, deviceID, channelID stri
 	return gbmodels.FindChannel(ctx, deviceID, channelID)
 }
 
+func (gormChannelRepo) UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error {
+	return gbmodels.UpdateChannelStream(ctx, deviceID, channelID, streamID)
+}
+
+func (gormChannelRepo) ClearStream(ctx context.Context, streamID string) error {
+	return gbmodels.ClearChannelStream(ctx, streamID)
+}
+
 // NewChannelRepo 默认通道仓库(生产路径)
 func NewChannelRepo() ChannelRepo { return gormChannelRepo{} }

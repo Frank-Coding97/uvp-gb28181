@@ -87,22 +87,47 @@ func TestPlatformFromHeader(t *testing.T) {
 // normalizeTransport: 大小写混用 / 空值 / 非法值都应兜底到合法 SIP transport(UDP/TCP)
 func TestNormalizeTransport(t *testing.T) {
 	cases := map[string]string{
-		"":         "UDP",
-		"UDP":      "UDP",
-		"udp":      "UDP",
-		"Udp":      "UDP",
-		"  UDP ":   "UDP",
-		"TCP":      "TCP",
-		"tcp":      "TCP",
-		"Tcp":      "TCP",
-		"  tcp  ":  "TCP",
-		"WS":       "UDP", // 未支持的传输一律兜底
-		"sctp":     "UDP",
-		"garbage":  "UDP",
+		"":        "UDP",
+		"UDP":     "UDP",
+		"udp":     "UDP",
+		"Udp":     "UDP",
+		"  UDP ":  "UDP",
+		"TCP":     "TCP",
+		"tcp":     "TCP",
+		"Tcp":     "TCP",
+		"  tcp  ": "TCP",
+		"WS":      "UDP", // 未支持的传输一律兜底
+		"sctp":    "UDP",
+		"garbage": "UDP",
 	}
 	for in, want := range cases {
 		if got := normalizeTransport(in); got != want {
 			t.Errorf("normalizeTransport(%q)=%q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestBuildInviteRequestTargetsChannel(t *testing.T) {
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	s := &Session{
+		DeviceID:  "34020000001320000001",
+		ChannelID: "34020000001320000020",
+		SSRC:      "0200000001",
+		Dest:      "192.168.10.108:5060",
+		Transport: "udp",
+	}
+
+	req := u.buildInviteRequest(s, "v=0\r\n")
+	if req.Recipient.User != s.ChannelID {
+		t.Fatalf("INVITE Request-URI user = %q, want channel %q", req.Recipient.User, s.ChannelID)
+	}
+	if req.Recipient.User == s.DeviceID {
+		t.Fatalf("INVITE Request-URI must not target device root %q", s.DeviceID)
+	}
+	if req.Destination() != s.Dest {
+		t.Errorf("INVITE destination = %q, want %q", req.Destination(), s.Dest)
+	}
+	if req.Transport() != "UDP" {
+		t.Errorf("INVITE transport = %q, want UDP", req.Transport())
 	}
 }
