@@ -265,6 +265,19 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		}
 	}
 
+	// civilCode 过滤:行政区划维度节点选中时,按前缀匹配(2 位省 / 4 位市 / 6 位区)
+	// 特殊值 000000 / unassigned → 未分配桶(civil_code 空或 000000)
+	if cc := strings.TrimSpace(c.Query("civilCode")); cc != "" {
+		if cc == "000000" || cc == "unassigned" {
+			q = q.Where("civil_code IS NULL OR civil_code = '' OR civil_code = '000000'")
+		} else if isAllDigits(cc) {
+			q = q.Where("civil_code LIKE ?", cc+"%")
+		} else {
+			// 非法 civilCode(非纯数字)→ 空结果,避免误查
+			q = q.Where("1=0")
+		}
+	}
+
 	if s := c.Query("status"); s == "online" {
 		q = q.Where("status = ?", gbmodels.ChannelStatusOnline)
 	} else if s == "offline" {
@@ -451,4 +464,18 @@ func (dc *DeviceMgmtController) ChannelTimeline(c *gin.Context) {
 		slots = append(slots, slot{Start: start, End: end, Status: state})
 	}
 	dc.Success(c, gin.H{"slots": slots, "range": "24h", "channelId": id, "phase1Simplified": true})
+}
+
+// isAllDigits 判断字符串是否全为数字(空串返回 false)
+// 用于 civilCode 前缀过滤前的合法性校验,避免非法输入拼进 LIKE
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
