@@ -110,10 +110,11 @@ const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "卡片", value: "card", icon: Grid2X2 },
     { label: "地图", value: "map", icon: Map }
 ];
+// 维度切换:当前保留两个。civil_code(行政区划)维度能力后端保留,
+// 前端暂不作为独立 tab 展示 —— 留给后续第三维度复用。
 const dimensionOptions: Array<{ label: string; value: DirectoryDimension }> = [
-    { label: "原生目录", value: "native" },
-    { label: "业务分组", value: "biz_group" },
-    { label: "行政区划", value: "civil_code" }
+    { label: "国标目录", value: "native" },
+    { label: "业务分组", value: "biz_group" }
 ];
 const nodeTypeMeta: Record<string, { className: string }> = {
     civil_code: { className: "civil" },
