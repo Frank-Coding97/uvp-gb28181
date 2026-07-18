@@ -518,8 +518,10 @@ function toggleAutoRefresh(checked: boolean) {
     autoRefresh.value = checked;
     if (checked) {
         startAutoRefresh();
+        Message.success("自动刷新已开启");
     } else {
         stopAutoRefresh();
+        Message.info("自动刷新已关闭");
     }
 }
 
@@ -624,7 +626,10 @@ onUnmounted(() => {
                                             <template #unchecked>关闭</template>
                                         </a-switch>
                                     </div>
-                                    <button class="btn-ghost" type="button" @click="refreshMainData"><RefreshCcw :size="14" /> 刷新</button>
+                                    <button class="btn-ghost" type="button" @click="refreshMainData">
+                                        <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
+                                        刷新
+                                    </button>
                                     <a-select
                                         v-model="statusFilter"
                                         allow-clear
