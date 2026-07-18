@@ -1,5 +1,12 @@
 package directory
 
+import "errors"
+
+var (
+	// ErrInvalidDimension 无效的维度名称
+	ErrInvalidDimension = errors.New("invalid dimension")
+)
+
 // NodeType 节点类型常量
 const (
 	NodeTypeCivilCode   = "civil_code"   // 行政区划节点
