@@ -1,4 +1,4 @@
-package directory_test
+package directory
 
 import (
 	"encoding/json"
@@ -11,11 +11,10 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
-func setupTestRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
+func setupTestController(t *testing.T) (*gin.Engine, *gorm.DB) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 
@@ -25,18 +24,21 @@ func setupTestRouter(t *testing.T) (*gin.Engine, *gorm.DB) {
 	err = db.AutoMigrate(&models.GbCatalogNode{})
 	assert.NoError(t, err)
 
-	// 注册路由
-	directory.RegisterRoutes(router.Group("/api/gb28181"), db)
+	ctrl := NewDirectoryController()
+	ctrl.SetDB(func() *gorm.DB { return db })
+
+	// 挂到 tree 路径(跟 spec 一致)
+	router.GET("/api/gb28181/directory/tree", ctrl.Tree)
 
 	return router, db
 }
 
-func TestGetRoots_Native(t *testing.T) {
-	router, db := setupTestRouter(t)
+func TestDirectoryTree_Native_Roots(t *testing.T) {
+	router, db := setupTestController(t)
 
-	// 准备测试数据
+	// 准备:根节点 + 子节点
 	rootNode := models.GbCatalogNode{
-		OwnerDeptID: 1,
+		OwnerDeptID: 0,
 		Name:        "根节点",
 		NodeType:    models.NodeTypeCivilCode,
 		CivilCode:   "110000",
@@ -45,31 +47,56 @@ func TestGetRoots_Native(t *testing.T) {
 
 	// 请求
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/gb28181/directory/native?withCounts=false", nil)
-	req.Header.Set("X-Owner-Dept-ID", "1")
+	req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension=native", nil)
 	router.ServeHTTP(w, req)
 
-	// 验证
 	assert.Equal(t, http.StatusOK, w.Code)
 
 	var response struct {
-		Code int                `json:"code"`
-		Data []directory.Node   `json:"data"`
+		Code int `json:"code"`
+		Data struct {
+			Dimension string `json:"dimension"`
+			List      []Node `json:"list"`
+			Total     int    `json:"total"`
+		} `json:"data"`
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, response.Code)
-	assert.Len(t, response.Data, 1)
-	assert.Equal(t, "根节点", response.Data[0].Name)
+	assert.Equal(t, "native", response.Data.Dimension)
+	assert.Equal(t, 1, response.Data.Total)
+	assert.Equal(t, "根节点", response.Data.List[0].Name)
 }
 
-func TestGetRoots_InvalidDimension(t *testing.T) {
-	router, _ := setupTestRouter(t)
+func TestDirectoryTree_MissingDimension(t *testing.T) {
+	router, _ := setupTestController(t)
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/gb28181/directory/invalid_dim?withCounts=false", nil)
-	req.Header.Set("X-Owner-Dept-ID", "1")
+	req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree", nil)
 	router.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDirectoryTree_InvalidDimension(t *testing.T) {
+	router, _ := setupTestController(t)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension=invalid_dim", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+
+func TestDirectoryTree_NotImplementedDimension(t *testing.T) {
+	router, _ := setupTestController(t)
+
+	// biz_group / civil_code 目前是 not-implemented stub
+	for _, dim := range []string{"biz_group", "civil_code"} {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension="+dim, nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code, "dim=%s", dim)
+	}
 }

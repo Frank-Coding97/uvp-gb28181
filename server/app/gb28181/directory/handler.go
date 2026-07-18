@@ -2,105 +2,100 @@ package directory
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
-const (
-	// HTTP 响应码
-	codeSuccess          = 0
-	codeBadRequest       = 400
-	codeInternalError    = 500
-
-	// 请求头
-	headerOwnerDeptID    = "X-Owner-Dept-ID"
-
-	// 查询参数
-	queryWithCounts      = "withCounts"
-	queryWithCountsDefault = "false"
-)
-
-// RegisterRoutes 注册目录视图路由
+// DirectoryController 设备目录三维视图 REST 接口
 //
-// 路由结构:
-//   GET /directory/:dimension              - 获取顶层节点
-//   GET /directory/:dimension/children/:parentID - 获取子节点
+//	GET /api/gb28181/directory/tree?dimension=X&parentId=Y&withCounts=1
 //
-// 支持的维度:
-//   - native: 国标自动注册维度(原始目录树)
-//
-// 查询参数:
-//   - withCounts: 是否返回统计数(mountCount/channelCount),默认 false
-func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB) {
-	rg.GET("/directory/:dimension", handleGetRoots(db))
-	rg.GET("/directory/:dimension/children/:parentID", handleGetChildren(db))
+// 支持的 dimension:
+//   - native      国标自动注册维度(gb_catalog_node 原始层级)
+//   - biz_group   业务分组维度(TODO T-1.4)
+//   - civil_code  行政区划维度(TODO T-1.5)
+type DirectoryController struct {
+	db func() *gorm.DB // 注入,默认走 app.GormDbMysql,便于测试替换
 }
 
-// handleGetRoots 获取指定维度的顶层节点
-func handleGetRoots(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		dimension := c.Param("dimension")
-		withCounts := c.DefaultQuery(queryWithCounts, queryWithCountsDefault) == "true"
-		ownerDeptID := getOwnerDeptID(c)
-
-		dim, err := createDimension(dimension, db, ownerDeptID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    codeBadRequest,
-				"message": err.Error(),
-			})
-			return
-		}
-
-		nodes, err := dim.GetRoots(withCounts)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    codeInternalError,
-				"message": err.Error(),
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"code": codeSuccess,
-			"data": nodes,
-		})
+// NewDirectoryController 默认 DB provider 用 app.GormDbMysql
+func NewDirectoryController() *DirectoryController {
+	return &DirectoryController{
+		db: func() *gorm.DB { return app.GormDbMysql },
 	}
 }
 
-// handleGetChildren 获取指定节点的子节点
-func handleGetChildren(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		dimension := c.Param("dimension")
-		parentID := c.Param("parentID")
-		withCounts := c.DefaultQuery(queryWithCounts, queryWithCountsDefault) == "true"
-		ownerDeptID := getOwnerDeptID(c)
+// SetDB 测试用注入点
+func (dc *DirectoryController) SetDB(provider func() *gorm.DB) {
+	dc.db = provider
+}
 
-		dim, err := createDimension(dimension, db, ownerDeptID)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{
-				"code":    codeBadRequest,
-				"message": err.Error(),
-			})
-			return
-		}
-
-		nodes, err := dim.GetChildren(parentID, withCounts)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"code":    codeInternalError,
-				"message": err.Error(),
-			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"code": codeSuccess,
-			"data": nodes,
+// Tree 三维视图统一入口
+// GET /api/gb28181/directory/tree?dimension=native&parentId=1&withCounts=1
+//
+// 参数:
+//   - dimension  必填,维度名(native / biz_group / civil_code)
+//   - parentId   可选,父节点 ID;不传则返回根节点列表
+//   - withCounts 可选,是否附加 mount_count / channel_count(1=是)
+func (dc *DirectoryController) Tree(c *gin.Context) {
+	db := dc.db()
+	if db == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    503,
+			"message": "database unavailable",
 		})
+		return
 	}
+
+	dimension := c.Query("dimension")
+	if dimension == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": "missing required parameter: dimension",
+		})
+		return
+	}
+
+	parentID := c.Query("parentId")
+	withCounts := c.Query("withCounts") == "1" || c.Query("withCounts") == "true"
+
+	ownerDeptID := getOwnerDeptID(c)
+
+	dim, err := createDimension(dimension, db, ownerDeptID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"code":    400,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	var nodes []Node
+	if parentID == "" {
+		nodes, err = dim.GetRoots(withCounts)
+	} else {
+		nodes, err = dim.GetChildren(parentID, withCounts)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"code":    500,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"code": 0,
+		"data": gin.H{
+			"dimension": dimension,
+			"list":      nodes,
+			"total":     len(nodes),
+		},
+	})
 }
 
 // createDimension 根据维度名称创建对应的维度实例
@@ -108,14 +103,21 @@ func createDimension(dimensionName string, db *gorm.DB, ownerDeptID uint) (Dimen
 	switch dimensionName {
 	case DimensionNative:
 		return NewNativeDimension(db, ownerDeptID), nil
+	case DimensionBizGroup, DimensionCivilCode:
+		return nil, ErrDimensionNotImplemented
 	default:
 		return nil, ErrInvalidDimension
 	}
 }
 
-// getOwnerDeptID 从请求头获取 owner_dept_id
+// getOwnerDeptID 从 gin.Context 拿 ownerDeptID
+// 从 JWT 中间件写入的 context 里读取(与 CatalogTreeController.Tree 保持一致)
+// FIXME T-1.6: 目前 stub 返回 0(测试用),Phase 2 前端集成时对齐 JWT 提取逻辑
 func getOwnerDeptID(c *gin.Context) uint {
-	ownerDeptIDStr := c.GetHeader(headerOwnerDeptID)
-	ownerDeptID, _ := strconv.ParseUint(ownerDeptIDStr, 10, 64)
-	return uint(ownerDeptID)
+	if v, ok := c.Get("ownerDeptId"); ok {
+		if id, ok := v.(uint); ok {
+			return id
+		}
+	}
+	return 0
 }

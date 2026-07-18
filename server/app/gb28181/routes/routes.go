@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
+	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
@@ -14,6 +15,7 @@ var catalogTreeController = gbcontrollers.NewCatalogTreeController()
 var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
 var mapController = gbcontrollers.NewMapController()
 var anomalyController = gbcontrollers.NewAnomalyController()
+var directoryController = gbdirectory.NewDirectoryController()
 
 // streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
 var streamNotifier = stream.NewNotifier()
@@ -111,6 +113,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			sipGroup.GET("/stream", func(c *gin.Context) { dashboardController.Stream(c) })
 		}
 		gb.GET("/sip/platform", platformController.Info)
+		// 设备目录三维视图(spec: gb-directory-view-dimensions)
+		// GET /api/gb28181/directory/tree?dimension=native|biz_group|civil_code
+		gb.GET("/directory/tree", directoryController.Tree)
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
 		{

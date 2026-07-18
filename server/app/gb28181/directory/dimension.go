@@ -5,6 +5,9 @@ import "errors"
 var (
 	// ErrInvalidDimension 无效的维度名称
 	ErrInvalidDimension = errors.New("invalid dimension")
+
+	// ErrDimensionNotImplemented 维度已定义但实现未落地(T-1.4/T-1.5 之前)
+	ErrDimensionNotImplemented = errors.New("dimension not implemented yet")
 )
 
 // NodeType 节点类型常量
