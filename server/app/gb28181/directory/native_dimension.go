@@ -14,6 +14,9 @@ const (
 	defaultOrderBy = "sort_order ASC, name ASC"
 )
 
+// ScopeFunc GORM Scope 函数类型(用于 dept 数据隔离)
+type ScopeFunc func(*gorm.DB) *gorm.DB
+
 // NativeDimension 国标自动注册维度(原始目录树)
 //
 // 直接复用 gb_catalog_node 表,按 parent_id 层级关系展示。
@@ -23,23 +26,30 @@ const (
 //   - 查看设备原始上报的目录结构
 //   - 排查国标注册问题时对照原始层级
 //   - 作为其他维度(业务分组/行政区划)的数据源
+//
+// 数据隔离:通过 scope 函数注入(项目统一用 datascope.OwnerDeptScope)
 type NativeDimension struct {
-	db          *gorm.DB
-	ownerDeptID uint
+	db    *gorm.DB
+	scope ScopeFunc // 数据隔离 scope(admin=全量,普通用户=按 dept 过滤)
 }
 
 // NewNativeDimension 构造函数
-func NewNativeDimension(db *gorm.DB, ownerDeptID uint) *NativeDimension {
+// scope 可以为 nil(测试时用 pass-through)
+func NewNativeDimension(db *gorm.DB, scope ScopeFunc) *NativeDimension {
+	if scope == nil {
+		scope = func(db *gorm.DB) *gorm.DB { return db }
+	}
 	return &NativeDimension{
-		db:          db,
-		ownerDeptID: ownerDeptID,
+		db:    db,
+		scope: scope,
 	}
 }
 
 // GetRoots 获取顶层节点(parent_id IS NULL)
 func (d *NativeDimension) GetRoots(withCounts bool) ([]Node, error) {
 	var dbNodes []models.GbCatalogNode
-	query := d.db.Where("owner_dept_id = ? AND parent_id IS NULL", d.ownerDeptID).
+	query := d.db.Scopes(d.scope).
+		Where("parent_id IS NULL").
 		Order(defaultOrderBy)
 
 	if err := query.Find(&dbNodes).Error; err != nil {
@@ -63,7 +73,8 @@ func (d *NativeDimension) GetChildren(parentID string, withCounts bool) ([]Node,
 	}
 
 	var dbNodes []models.GbCatalogNode
-	query := d.db.Where("owner_dept_id = ? AND parent_id = ?", d.ownerDeptID, uint(parentIDUint)).
+	query := d.db.Scopes(d.scope).
+		Where("parent_id = ?", uint(parentIDUint)).
 		Order(defaultOrderBy)
 
 	if err := query.Find(&dbNodes).Error; err != nil {
@@ -115,8 +126,9 @@ func (d *NativeDimension) convertToNode(dbNode models.GbCatalogNode, withCounts 
 		node.IsLeaf = true
 	} else {
 		var childCount int64
-		d.db.Model(&models.GbCatalogNode{}).
-			Where("owner_dept_id = ? AND parent_id = ?", d.ownerDeptID, dbNode.ID).
+		d.db.Scopes(d.scope).
+			Model(&models.GbCatalogNode{}).
+			Where("parent_id = ?", dbNode.ID).
 			Count(&childCount)
 		node.HasChildren = childCount > 0
 		node.IsLeaf = childCount == 0

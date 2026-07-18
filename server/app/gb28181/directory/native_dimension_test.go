@@ -22,7 +22,7 @@ func setupTestDB(t *testing.T) *gorm.DB {
 
 func TestNativeDimension_GetRoots(t *testing.T) {
 	db := setupTestDB(t)
-	dim := NewNativeDimension(db, 1)
+	dim := NewNativeDimension(db, nil)
 
 	// 插入测试数据:1 个根节点(设备) + 1 个子节点(通道)
 	rootNode := models.GbCatalogNode{
@@ -60,7 +60,7 @@ func TestNativeDimension_GetRoots(t *testing.T) {
 
 func TestNativeDimension_GetChildren(t *testing.T) {
 	db := setupTestDB(t)
-	dim := NewNativeDimension(db, 1)
+	dim := NewNativeDimension(db, nil)
 
 	// 插入测试数据
 	rootNode := models.GbCatalogNode{

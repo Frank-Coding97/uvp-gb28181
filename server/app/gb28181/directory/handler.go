@@ -7,6 +7,7 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
 // DirectoryController 设备目录三维视图 REST 接口
@@ -62,9 +63,10 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 	parentID := c.Query("parentId")
 	withCounts := c.Query("withCounts") == "1" || c.Query("withCounts") == "true"
 
-	ownerDeptID := getOwnerDeptID(c)
+	// dept scope(admin=全量,普通用户按 dept 过滤)
+	scope := datascope.OwnerDeptScope(c, "owner_dept_id")
 
-	dim, err := createDimension(dimension, db, ownerDeptID)
+	dim, err := createDimension(dimension, db, scope)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    400,
@@ -99,25 +101,13 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 }
 
 // createDimension 根据维度名称创建对应的维度实例
-func createDimension(dimensionName string, db *gorm.DB, ownerDeptID uint) (Dimension, error) {
+func createDimension(dimensionName string, db *gorm.DB, scope ScopeFunc) (Dimension, error) {
 	switch dimensionName {
 	case DimensionNative:
-		return NewNativeDimension(db, ownerDeptID), nil
+		return NewNativeDimension(db, scope), nil
 	case DimensionBizGroup, DimensionCivilCode:
 		return nil, ErrDimensionNotImplemented
 	default:
 		return nil, ErrInvalidDimension
 	}
-}
-
-// getOwnerDeptID 从 gin.Context 拿 ownerDeptID
-// 从 JWT 中间件写入的 context 里读取(与 CatalogTreeController.Tree 保持一致)
-// FIXME T-1.6: 目前 stub 返回 0(测试用),Phase 2 前端集成时对齐 JWT 提取逻辑
-func getOwnerDeptID(c *gin.Context) uint {
-	if v, ok := c.Get("ownerDeptId"); ok {
-		if id, ok := v.(uint); ok {
-			return id
-		}
-	}
-	return 0
 }
