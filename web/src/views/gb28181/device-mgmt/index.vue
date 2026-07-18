@@ -915,8 +915,7 @@ onUnmounted(() => {
                         </div>
                         <div class="kv-grid">
                             <span>厂商型号</span><strong>{{ vendorText(deviceDetail) }}</strong>
-                            <span>网络地址</span><strong>{{ deviceDetail.ip || '-' }}{{ deviceDetail.port ? `:${deviceDetail.port}` : '' }}</strong>
-                            <span>传输协议</span><strong>{{ deviceDetail.transport || '-' }}</strong>
+                            <span>来源地址</span><strong>{{ endpointText(deviceDetail) }}</strong>
                             <span>通道在线</span><strong>{{ deviceDetail.channelOnlineCount }}/{{ deviceDetail.channelCount }}</strong>
                         </div>
                     </div>

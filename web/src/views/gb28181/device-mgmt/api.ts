@@ -75,7 +75,7 @@ export interface ChannelVO {
     latitude: number;
     status: number;
     streamId: string;
-    transport?: string;
+    streamTransport: string; // 流传输模式: UDP / TCP-Active / TCP-Passive
     createdAt: string;
     updatedAt: string;
 }
