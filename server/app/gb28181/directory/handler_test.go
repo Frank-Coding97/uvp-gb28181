@@ -99,6 +99,37 @@ func TestDirectoryTree_BizGroupNowAvailable(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestNewDirectoryController_DefaultProvider(t *testing.T) {
+	// 覆盖默认构造分支(不 SetDB)
+	ctrl := NewDirectoryController()
+	assert.NotNil(t, ctrl)
+	assert.NotNil(t, ctrl.db)
+}
+
+func TestSetCivilCodeService(t *testing.T) {
+	// 覆盖 civilcode service 注入
+	svcBefore := civilCodeSvcProvider
+	defer func() { civilCodeSvcProvider = svcBefore }()
+
+	SetCivilCodeService(nil)
+	// provider 已注入(即使 svc 为 nil)
+	assert.NotNil(t, civilCodeSvcProvider)
+}
+
+func TestDirectoryTree_NilDB(t *testing.T) {
+	// 覆盖 DB 不可用分支
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	ctrl := NewDirectoryController()
+	ctrl.SetDB(func() *gorm.DB { return nil })
+	router.GET("/api/gb28181/directory/tree", ctrl.Tree)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/directory/tree?dimension=native", nil)
+	router.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+}
+
 func TestDirectoryTree_CivilCodeWithoutSvcInjection(t *testing.T) {
 	router, _ := setupTestController(t)
 
