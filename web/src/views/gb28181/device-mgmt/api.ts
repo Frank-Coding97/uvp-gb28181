@@ -35,6 +35,24 @@ export interface CatalogNode {
     updatedAt: string;
 }
 
+export type DirectoryDimension = "native" | "biz_group" | "civil_code";
+
+// 三维目录接口返回的统一节点(与后端 directory.Node 对齐)
+// 注意:id 是 string —— native/biz_group 为数字串,civil_code 为合成串(province:34 / city:3402 / district:340200 / unassigned)
+export interface DirectoryNode {
+    id: string;
+    name: string;
+    nodeType: string;
+    parentId?: string | null;
+    channelId?: string | null;
+    deviceId?: string | null;
+    civilCode?: string;
+    mountCount?: number;
+    channelCount?: number;
+    hasChildren: boolean;
+    isLeaf: boolean;
+}
+
 export interface DeviceVO {
     id: number;
     deviceId: string;
@@ -142,6 +160,7 @@ export interface DeviceQuery {
 export interface ChannelQuery {
     q?: string;
     nodeId?: number;
+    civilCode?: string;
     status?: OnlineStatus;
     ptz?: "1";
     page?: number;
@@ -166,6 +185,22 @@ export const getCatalogNode = (id: number) =>
 
 export const getAnomalyCount = () =>
     http.request<BaseResult<{ count: number }>>("get", baseUrlApi("gb28181/device-mgmt/catalog/anomaly/count"));
+
+// 三维目录树:顶层节点(dimension = native / biz_group / civil_code)
+export const listDirectoryRoots = (dimension: DirectoryDimension, withCounts = false) =>
+    http.request<BaseResult<{ dimension: string; list: DirectoryNode[]; total: number }>>(
+        "get",
+        baseUrlApi("gb28181/directory/tree"),
+        { params: { dimension, withCounts: withCounts ? 1 : 0 } }
+    );
+
+// 三维目录树:子节点
+export const listDirectoryChildren = (dimension: DirectoryDimension, parentId: string, withCounts = false) =>
+    http.request<BaseResult<{ dimension: string; list: DirectoryNode[]; total: number }>>(
+        "get",
+        baseUrlApi("gb28181/directory/tree"),
+        { params: { dimension, parentId, withCounts: withCounts ? 1 : 0 } }
+    );
 
 export const listDevices = (params: DeviceQuery) =>
     http.request<BaseResult<PageResult<DeviceVO>>>("get", baseUrlApi("gb28181/device-mgmt/devices"), { params });
