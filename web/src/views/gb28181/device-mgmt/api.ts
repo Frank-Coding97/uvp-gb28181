@@ -51,6 +51,12 @@ export interface DirectoryNode {
     channelCount?: number;
     hasChildren: boolean;
     isLeaf: boolean;
+    // 以下字段用于 drawer 节点详情展示(native 维度回填,其他维度可能为空)
+    anomaly?: boolean;
+    childCount?: number;
+    path?: string;
+    code?: string;
+    source?: string;
 }
 
 export interface DeviceVO {

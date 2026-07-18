@@ -36,8 +36,8 @@ import {
     getChannelTimeline,
     getDevice,
     getNoCoordCount,
-    listCatalogChildren,
-    listCatalogRoots,
+    listDirectoryChildren,
+    listDirectoryRoots,
     listChannelMounts,
     listChannels,
     listDevices,
@@ -47,10 +47,11 @@ import {
     updateChannelStreamTransport,
     type AssetKind,
     type BatchDeleteResult,
-    type CatalogNode,
     type ChannelMount,
     type ChannelVO,
     type DeviceVO,
+    type DirectoryDimension,
+    type DirectoryNode,
     type MapCluster,
     type MapMarker,
     type OnlineStatus,
@@ -61,10 +62,10 @@ type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
     | { type: "channel"; id: number }
     | { type: "device"; id: number }
-    | { type: "node"; node: CatalogNode };
+    | { type: "node"; node: DirectoryNode };
 
 interface TreeRow {
-    node: CatalogNode;
+    node: DirectoryNode;
     level: number;
 }
 
@@ -72,7 +73,8 @@ const viewMode = ref<ViewMode>("list");
 const assetKind = ref<AssetKind>("device");
 const keyword = ref("");
 const statusFilter = ref<OnlineStatus | undefined>();
-const selectedNode = ref<CatalogNode | null>(null);
+const selectedNode = ref<DirectoryNode | null>(null);
+const currentDimension = ref<DirectoryDimension>("native");
 const drawerVisible = ref(false);
 const drawerTarget = ref<DrawerTarget | null>(null);
 const drawerLoading = ref(false);
@@ -90,10 +92,10 @@ const offlineDeviceTotal = ref(0);
 const autoRefresh = ref(true);
 const refreshInterval = ref<number | null>(null);
 
-const roots = ref<CatalogNode[]>([]);
-const childrenMap = reactive<Record<number, CatalogNode[]>>({});
-const expandedKeys = ref<number[]>([]);
-const loadingChildren = reactive<Record<number, boolean>>({});
+const roots = ref<DirectoryNode[]>([]);
+const childrenMap = reactive<Record<string, DirectoryNode[]>>({});
+const expandedKeys = ref<string[]>([]);
+const loadingChildren = reactive<Record<string, boolean>>({});
 const channels = ref<ChannelVO[]>([]);
 const devices = ref<DeviceVO[]>([]);
 const markers = ref<MapMarker[]>([]);
@@ -108,6 +110,11 @@ const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "卡片", value: "card", icon: Grid2X2 },
     { label: "地图", value: "map", icon: Map }
 ];
+const dimensionOptions: Array<{ label: string; value: DirectoryDimension }> = [
+    { label: "原生目录", value: "native" },
+    { label: "业务分组", value: "biz_group" },
+    { label: "行政区划", value: "civil_code" }
+];
 const nodeTypeMeta: Record<string, { className: string }> = {
     civil_code: { className: "civil" },
     biz_group: { className: "biz" },
@@ -118,7 +125,7 @@ const nodeTypeMeta: Record<string, { className: string }> = {
 
 const flatTree = computed<TreeRow[]>(() => {
     const rows: TreeRow[] = [];
-    const walk = (nodes: CatalogNode[], level: number) => {
+    const walk = (nodes: DirectoryNode[], level: number) => {
         nodes.forEach((node) => {
             rows.push({ node, level });
             if (expandedKeys.value.includes(node.id)) walk(childrenMap[node.id] || [], level + 1);
@@ -147,6 +154,14 @@ watch([viewMode, assetKind], () => {
 watch(statusFilter, () => {
     page.value = 1;
     refreshMainData();
+});
+watch(currentDimension, () => {
+    // 切换维度时清空树状态，重新加载
+    roots.value = [];
+    Object.keys(childrenMap).forEach(k => delete childrenMap[k]);
+    expandedKeys.value = [];
+    selectedNode.value = null;
+    loadTree();
 });
 
 function relTime(value?: string | null) {
@@ -183,7 +198,7 @@ function modelVersionText(item: { model?: string; firmware?: string }) {
     return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
 }
 function channelUniqueId(record: ChannelVO) { return `${record.deviceId}_${record.channelId}`; }
-function canExpand(node: CatalogNode) { return node.nodeType !== "channel"; }
+function canExpand(node: DirectoryNode) { return node.nodeType !== "channel"; }
 function shortCode(v?: string) { return !v ? "-" : v.length <= 14 ? v : `${v.slice(0, 6)}...${v.slice(-6)}`; }
 function projectX(longitude: number) { const min = 73; const max = 136; return Math.min(96, Math.max(4, ((longitude - min) / (max - min)) * 100)); }
 function projectY(latitude: number) { const min = 18; const max = 54; return Math.min(94, Math.max(6, 100 - ((latitude - min) / (max - min)) * 100)); }
@@ -199,8 +214,10 @@ function showDeviceChannels(record: DeviceVO) {
 async function loadTree() {
     rootLoading.value = true;
     try {
-        const res = await listCatalogRoots();
-        if (res.code === 0) roots.value = res.data?.list || [];
+        const res = await listDirectoryRoots(currentDimension.value, true);
+        if (res.code === 0) {
+            roots.value = res.data?.list || [];
+        }
     } catch (error: any) {
         Message.error(error?.message || "目录加载失败");
     } finally {
@@ -208,11 +225,13 @@ async function loadTree() {
     }
 }
 
-async function loadChildren(id: number) {
+async function loadChildren(id: string) {
     loadingChildren[id] = true;
     try {
-        const res = await listCatalogChildren(id);
-        if (res.code === 0) childrenMap[id] = res.data?.list || [];
+        const res = await listDirectoryChildren(currentDimension.value, id, true);
+        if (res.code === 0) {
+            childrenMap[id] = res.data?.list || [];
+        }
     } catch (error: any) {
         Message.error(error?.message || "子目录加载失败");
     } finally {
@@ -220,7 +239,7 @@ async function loadChildren(id: number) {
     }
 }
 
-async function toggleNode(node: CatalogNode) {
+async function toggleNode(node: DirectoryNode) {
     if (!canExpand(node)) return selectNode(node);
     if (expandedKeys.value.includes(node.id)) {
         expandedKeys.value = expandedKeys.value.filter((id) => id !== node.id);
@@ -230,7 +249,7 @@ async function toggleNode(node: CatalogNode) {
     if (!childrenMap[node.id]) await loadChildren(node.id);
 }
 
-function selectNode(node: CatalogNode) {
+function selectNode(node: DirectoryNode) {
     selectedNode.value = node;
     page.value = 1;
     refreshMainData();
@@ -251,9 +270,10 @@ async function refreshMainData() {
 async function loadChannelsData() {
     rowsLoading.value = true;
     try {
+        const nodeId = selectedNode.value?.id ? Number(selectedNode.value.id) : undefined;
         const res = await listChannels({
             q: keyword.value.trim() || undefined,
-            nodeId: selectedNode.value?.id,
+            nodeId,
             status: statusFilter.value,
             page: page.value,
             pageSize: pageSize.value
@@ -272,9 +292,10 @@ async function loadChannelsData() {
 async function loadDevicesData() {
     rowsLoading.value = true;
     try {
+        const nodeId = selectedNode.value?.id ? Number(selectedNode.value.id) : undefined;
         const res = await listDevices({
             q: keyword.value.trim() || undefined,
-            nodeId: selectedNode.value?.id,
+            nodeId,
             status: statusFilter.value,
             page: page.value,
             pageSize: pageSize.value,
@@ -357,7 +378,7 @@ async function openDevice(record: DeviceVO) {
     }
 }
 
-function openNode(node: CatalogNode) {
+function openNode(node: DirectoryNode) {
     drawerTarget.value = { type: "node", node };
     drawerVisible.value = true;
 }
@@ -600,6 +621,18 @@ onUnmounted(() => {
                     <div class="pane-head">
                         <div class="head-title"><FolderTree :size="14" /> <span>目录</span></div>
                         <button class="icon-btn small" type="button" @click="loadTree"><RefreshCcw :size="12" /></button>
+                    </div>
+                    <div class="dimension-tabs">
+                        <button
+                            v-for="opt in dimensionOptions"
+                            :key="opt.value"
+                            type="button"
+                            class="dim-tab"
+                            :class="{ active: currentDimension === opt.value }"
+                            @click="currentDimension = opt.value"
+                        >
+                            {{ opt.label }}
+                        </button>
                     </div>
                     <div class="aside-search"><input v-model="keyword" placeholder="筛选节点 ..." @keydown.enter.prevent="onSearch" /></div>
                     <a-spin :loading="rootLoading" class="tree-wrap">
@@ -1128,6 +1161,34 @@ onUnmounted(() => {
     border-bottom: 1px solid var(--uvp-panel-border);
 }
 .head-title { display: inline-flex; align-items: center; gap: 8px; color: var(--uvp-text-primary); font-weight: 620; }
+.dimension-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--uvp-panel-border);
+}
+.dim-tab {
+    flex: 1;
+    height: 32px;
+    padding: 0 10px;
+    font-size: 13px;
+    color: var(--uvp-text-secondary);
+    background: var(--uvp-search-control-bg);
+    border: 1px solid var(--uvp-search-secondary-btn-border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.dim-tab:hover {
+    color: var(--uvp-text-primary);
+    border-color: var(--uvp-primary);
+}
+.dim-tab.active {
+    color: white;
+    background: var(--uvp-primary);
+    border-color: var(--uvp-primary);
+    font-weight: 500;
+}
 .aside-search { padding: 12px 14px 10px; }
 .aside-search input {
     box-sizing: border-box;
