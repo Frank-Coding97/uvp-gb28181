@@ -25,10 +25,15 @@ type Server struct {
 	msgH     *handler.MessageHandler
 	uac      *uac.UAC // 供 play service 等业务模块复用
 	recorder metrics.Recorder
+	onError  func(error)
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	started  bool
 }
+
+// SetErrorHandler registers a callback for asynchronous listener failures.
+// It must be set before Start.
+func (s *Server) SetErrorHandler(fn func(error)) { s.onError = fn }
 
 // UAC 返回 SIP 服务内置的 UAC(可能为 nil,初始化失败时)
 func (s *Server) UAC() *uac.UAC { return s.uac }
@@ -111,6 +116,9 @@ func (s *Server) Start() error {
 			app.ZapLog.Info("GB28181 SIP 监听启动", zap.String("transport", t), zap.String("addr", addr))
 			if err := s.srv.ListenAndServe(ctx, t, addr); err != nil && ctx.Err() == nil {
 				app.ZapLog.Error("GB28181 SIP 监听失败", zap.String("transport", t), zap.Error(err))
+				if s.onError != nil {
+					s.onError(err)
+				}
 			}
 		}()
 	}
