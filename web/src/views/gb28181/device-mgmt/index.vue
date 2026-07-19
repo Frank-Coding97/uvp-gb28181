@@ -2822,8 +2822,10 @@ onUnmounted(() => {
     border: 1px solid color-mix(in srgb, var(--uvp-brand) 24%, transparent);
     font-size: 12px;
 }
-.uvp-data-table :deep(.uvp-table-actions) { white-space: nowrap; }
-.uvp-data-table :deep(.uvp-table-action) { flex: 0 0 auto; }
+.uvp-data-table :deep(.uvp-table-actions) { gap: 1px; white-space: nowrap; }
+.uvp-data-table :deep(.uvp-table-action) { flex: 0 0 auto; gap: 3px; padding-inline: 4px; line-height: 1; }
+.uvp-data-table :deep(.uvp-table-action .arco-link-icon) { display: inline-flex; align-items: center; justify-content: center; margin-right: 0; line-height: 0; }
+.uvp-data-table :deep(.uvp-table-action .arco-link-icon svg) { display: block; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview) { color: #2563eb; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview:hover) { color: #1d4ed8; background: rgb(37 99 235 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail) { color: #0f7490; }
