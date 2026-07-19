@@ -73,3 +73,38 @@ func TestBuildPTZControlRejectsInvalidInput(t *testing.T) {
 		t.Fatal("speed > 255 should fail")
 	}
 }
+
+func TestBuildExtendedPTZControl_PresetAndAux(t *testing.T) {
+	tests := []struct {
+		name string
+		action PTZExtendedAction
+		id int
+		want string
+	}{
+		{"set preset", PTZActionSetPreset, 3, "A50F018103080041"},
+		{"call preset", PTZActionCallPreset, 3, "A50F018203080042"},
+		{"aux on", PTZActionAuxOn, 7, "A50F01890708004D"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := BuildExtendedPTZControl("C", 9, PTZExtendedCommand{Action: tt.action, ID: tt.id, Speed: 8})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var control struct{ PTZCmd string `xml:"PTZCmd"` }
+			if err := newDecoder(body).Decode(&control); err != nil {
+				t.Fatal(err)
+			}
+			if control.PTZCmd != tt.want {
+				t.Fatalf("PTZCmd=%s, want %s", control.PTZCmd, tt.want)
+			}
+		})
+	}
+}
+
+func TestBuildExtendedPTZControl_RequiresProfileForLens(t *testing.T) {
+	_, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: PTZActionFocusNear, Speed: 8})
+	if err == nil || !strings.Contains(err.Error(), "profile") {
+		t.Fatalf("expected profile error, got %v", err)
+	}
+}

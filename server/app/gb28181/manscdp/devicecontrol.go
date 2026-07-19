@@ -29,6 +29,45 @@ type PTZCommand struct {
 	Speed  int
 }
 
+// PTZExtendedAction covers standard device-control operations beyond the
+// directional A5 command. Lens operations require an explicit device profile.
+type PTZExtendedAction string
+
+const (
+	PTZActionFocusNear PTZExtendedAction = "focus_near"
+	PTZActionFocusFar  PTZExtendedAction = "focus_far"
+	PTZActionIrisOpen  PTZExtendedAction = "iris_open"
+	PTZActionIrisClose PTZExtendedAction = "iris_close"
+	PTZActionSetPreset PTZExtendedAction = "preset_set"
+	PTZActionCallPreset PTZExtendedAction = "preset_call"
+	PTZActionDeletePreset PTZExtendedAction = "preset_delete"
+	PTZActionCruiseStart PTZExtendedAction = "cruise_start"
+	PTZActionCruiseStop PTZExtendedAction = "cruise_stop"
+	PTZActionCruisePause PTZExtendedAction = "cruise_pause"
+	PTZActionCruiseResume PTZExtendedAction = "cruise_resume"
+	PTZActionCruiseDelete PTZExtendedAction = "cruise_delete"
+	PTZActionAuxOn PTZExtendedAction = "aux_on"
+	PTZActionAuxOff PTZExtendedAction = "aux_off"
+	PTZActionScanStart PTZExtendedAction = "scan_start"
+	PTZActionScanStop PTZExtendedAction = "scan_stop"
+)
+
+// PTZProfile supplies vendor-specific lens instruction bytes. A nil field
+// means the device has not declared that operation and it must be rejected.
+type PTZProfile struct {
+	FocusNearInstruction *byte
+	FocusFarInstruction  *byte
+	IrisOpenInstruction  *byte
+	IrisCloseInstruction *byte
+}
+
+type PTZExtendedCommand struct {
+	Action  PTZExtendedAction
+	ID      int
+	Speed   int
+	Profile *PTZProfile
+}
+
 type deviceControl struct {
 	XMLName  xml.Name    `xml:"Control"`
 	CmdType  string      `xml:"CmdType"`
@@ -98,6 +137,84 @@ func BuildPTZControl(channelID string, sn int, command PTZCommand) ([]byte, erro
 		PTZCmd:   ptz,
 		Info:     controlInfo{ControlPriority: 5},
 	})
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte("<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n"), body...), nil
+}
+
+// BuildExtendedPTZControl builds standard DeviceControl operations such as
+// preset, cruise, scan and auxiliary commands. Focus/iris use profile bytes
+// because their encoding is not interoperable across vendor families.
+func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedCommand) ([]byte, error) {
+	if strings.TrimSpace(channelID) == "" {
+		return nil, fmt.Errorf("通道编码不能为空")
+	}
+	if sn <= 0 {
+		return nil, fmt.Errorf("SN 必须为正数")
+	}
+	if command.Speed < 0 || command.Speed > 255 {
+		return nil, fmt.Errorf("PTZ 速度必须在 0-255 之间")
+	}
+	if command.ID < 0 || command.ID > 255 {
+		return nil, fmt.Errorf("PTZ 编号必须在 0-255 之间")
+	}
+
+	var instruction byte
+	switch command.Action {
+	case PTZActionSetPreset:
+		instruction = 0x81
+	case PTZActionCallPreset:
+		instruction = 0x82
+	case PTZActionDeletePreset:
+		instruction = 0x83
+	case PTZActionCruiseStart:
+		instruction = 0x84
+	case PTZActionCruiseStop:
+		instruction = 0x85
+	case PTZActionCruisePause:
+		instruction = 0x86
+	case PTZActionCruiseResume:
+		instruction = 0x87
+	case PTZActionCruiseDelete:
+		instruction = 0x88
+	case PTZActionAuxOn:
+		instruction = 0x89
+	case PTZActionAuxOff:
+		instruction = 0x8A
+	case PTZActionScanStart:
+		instruction = 0x8B
+	case PTZActionScanStop:
+		instruction = 0x8C
+	case PTZActionFocusNear, PTZActionFocusFar, PTZActionIrisOpen, PTZActionIrisClose:
+		if command.Profile == nil {
+			return nil, fmt.Errorf("PTZ lens operation requires profile")
+		}
+		var code *byte
+		switch command.Action {
+		case PTZActionFocusNear:
+			code = command.Profile.FocusNearInstruction
+		case PTZActionFocusFar:
+			code = command.Profile.FocusFarInstruction
+		case PTZActionIrisOpen:
+			code = command.Profile.IrisOpenInstruction
+		case PTZActionIrisClose:
+			code = command.Profile.IrisCloseInstruction
+		}
+		if code == nil {
+			return nil, fmt.Errorf("PTZ lens operation requires profile instruction")
+		}
+		instruction = *code
+	default:
+		return nil, fmt.Errorf("不支持的 PTZ 扩展动作: %q", command.Action)
+	}
+
+	bytes := [8]byte{0xA5, 0x0F, 0x01, instruction, byte(command.ID), byte(command.Speed), 0, 0}
+	for i := 0; i < len(bytes)-1; i++ {
+		bytes[7] += bytes[i]
+	}
+	ptz := fmt.Sprintf("%02X%02X%02X%02X%02X%02X%02X%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7])
+	body, err := xml.Marshal(deviceControl{CmdType: CmdDeviceControl, SN: sn, DeviceID: channelID, PTZCmd: ptz, Info: controlInfo{ControlPriority: 5}})
 	if err != nil {
 		return nil, err
 	}
