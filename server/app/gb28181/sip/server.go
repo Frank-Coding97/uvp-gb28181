@@ -52,6 +52,9 @@ func WithTraceFactory(factory TraceFactory) ServerOption {
 // UAC 返回 SIP 服务内置的 UAC(可能为 nil,初始化失败时)
 func (s *Server) UAC() *uac.UAC { return s.uac }
 
+// TraceRuntime returns the optional trace runtime for controller bootstrap wiring.
+func (s *Server) TraceRuntime() gbtrace.Runtime { return s.trace }
+
 // SetRecorder 注入 metrics Recorder,会同时下发到 register/message handler 和 uac
 // 必须在 NewServer 之后、Start 之前调用
 func (s *Server) SetRecorder(r metrics.Recorder) {

@@ -17,6 +17,7 @@ import (
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
+	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
@@ -172,6 +173,7 @@ func Start() {
 		app.ZapLog.Error("GB28181 SIP 服务创建失败", zap.Error(err))
 		return
 	}
+	setupTraceController(cfg, srv.TraceRuntime())
 	srv.SetRecorder(metricsAgg)
 	if err := srv.Start(); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
@@ -296,6 +298,19 @@ func Start() {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+}
+
+func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {
+	access := gbcontrollers.NewGormTraceAdminAccess(app.DB())
+	var query gbcontrollers.TraceQueryService
+	var capture gbcontrollers.TraceCaptureService
+	if cfg.Trace.Enabled {
+		query = gbtrace.QueryServiceFromRuntime(runtime)
+		if app.DB() != nil {
+			capture = gbtrace.NewCaptureService(app.DB(), access, time.Now)
+		}
+	}
+	gbroutes.SetTraceController(gbcontrollers.NewTraceController(query, capture, access))
 }
 
 // setupZLMRegistry 启动时从 DB 加载所有节点;若空表,用 yaml cfg.ZLM seed 第一节点

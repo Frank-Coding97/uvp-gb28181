@@ -42,25 +42,25 @@ type MessageCursor struct {
 }
 
 type MessageSummary struct {
-	EventID    string
-	OccurredAt time.Time
-	Direction  Direction
-	Transport  string
-	LocalAddr  string
-	RemoteAddr string
-	DeviceID   string
-	Method     string
-	StatusCode uint16
-	CallID     string
-	CSeq       uint32
-	CSeqMethod string
-	Malformed  bool
-	ParseError string
+	EventID    string    `json:"eventId"`
+	OccurredAt time.Time `json:"occurredAt"`
+	Direction  Direction `json:"direction"`
+	Transport  string    `json:"transport"`
+	LocalAddr  string    `json:"localAddr"`
+	RemoteAddr string    `json:"remoteAddr"`
+	DeviceID   string    `json:"deviceId"`
+	Method     string    `json:"method"`
+	StatusCode uint16    `json:"statusCode"`
+	CallID     string    `json:"callId"`
+	CSeq       uint32    `json:"cseq"`
+	CSeqMethod string    `json:"cseqMethod"`
+	Malformed  bool      `json:"malformed"`
+	ParseError string    `json:"parseError,omitempty"`
 }
 
 type MessagePage struct {
-	Items      []MessageSummary
-	NextCursor string
+	Items      []MessageSummary `json:"items"`
+	NextCursor string           `json:"nextCursor,omitempty"`
 }
 
 type StoredMessage struct {

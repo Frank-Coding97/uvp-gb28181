@@ -14,6 +14,16 @@ import (
 	"go.uber.org/zap"
 )
 
+const sensitiveOperationContextKey = "operation_log_sensitive_metadata"
+
+// MarkSensitiveOperation keeps response payloads out of the operation-log capture buffer.
+// Metadata must identify the resource and purpose without containing the sensitive value.
+func MarkSensitiveOperation(c *gin.Context, metadata map[string]any) {
+	if c != nil {
+		c.Set(sensitiveOperationContextKey, metadata)
+	}
+}
+
 // OperationLogMiddleware 操作日志中间件
 func OperationLogMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -33,7 +43,7 @@ func OperationLogMiddleware() gin.HandlerFunc {
 		}
 
 		// 创建自定义的ResponseWriter来捕获响应
-		writer := &responseWriter{body: bytes.NewBuffer(nil), ResponseWriter: c.Writer}
+		writer := &responseWriter{body: bytes.NewBuffer(nil), ResponseWriter: c.Writer, context: c}
 		c.Writer = writer
 
 		defer func() {
@@ -48,11 +58,14 @@ func OperationLogMiddleware() gin.HandlerFunc {
 // responseWriter 自定义ResponseWriter用于捕获响应数据
 type responseWriter struct {
 	gin.ResponseWriter
-	body *bytes.Buffer
+	body    *bytes.Buffer
+	context *gin.Context
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
-	w.body.Write(b)
+	if _, sensitive := w.context.Get(sensitiveOperationContextKey); !sensitive {
+		w.body.Write(b)
+	}
 	return w.ResponseWriter.Write(b)
 }
 
@@ -121,7 +134,7 @@ func recordOperationLog(c *gin.Context, startTime time.Time, requestBody, respon
 		Path:        c.Request.URL.Path,
 		IP:          c.ClientIP(),
 		UserAgent:   c.Request.UserAgent(),
-		RequestData: sanitizeRequestData(requestBody),
+		RequestData: operationLogRequestData(c, requestBody),
 		//ResponseData: sanitizeResponseData(responseBody),
 		StatusCode: c.Writer.Status(),
 		Duration:   duration,
@@ -135,6 +148,17 @@ func recordOperationLog(c *gin.Context, startTime time.Time, requestBody, respon
 			app.ZapLog.Error("记录操作日志失败", zap.Error(err))
 		}
 	}()
+}
+
+func operationLogRequestData(c *gin.Context, requestBody []byte) string {
+	if metadata, ok := c.Get(sensitiveOperationContextKey); ok {
+		encoded, err := json.Marshal(metadata)
+		if err == nil {
+			return string(encoded)
+		}
+		return "{\"sensitive\":true}"
+	}
+	return sanitizeRequestData(requestBody)
 }
 
 // getOperationModule 获取操作模块

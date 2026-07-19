@@ -33,6 +33,9 @@ var dashboardController = gbcontrollers.NewDashboardController(nil)
 // platformController 本级 SIP 平台接入信息(只读配置)
 var platformController = gbcontrollers.NewPlatformController()
 
+// traceController 由 bootstrap 按 Trace 开关后置注入。
+var traceController = gbcontrollers.NewTraceController(nil, nil, nil)
+
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
 var zlmNodeController *gbcontrollers.ZLMNodeController
 
@@ -45,6 +48,14 @@ var zlmSchedulerController *gbcontrollers.ZLMSchedulerController
 // SetMetricsProvider 由 bootstrap 注入聚合器获取函数,绕开循环依赖
 func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 	dashboardController = gbcontrollers.NewDashboardController(p)
+}
+
+func SetTraceController(ctrl *gbcontrollers.TraceController) {
+	if ctrl == nil {
+		traceController = gbcontrollers.NewTraceController(nil, nil, nil)
+		return
+	}
+	traceController = ctrl
 }
 
 // SetPlayService 由 bootstrap 注入 play service(routes 包先于 service 实例化,故需后置注入)
@@ -115,6 +126,15 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			sipGroup.GET("/snapshot", func(c *gin.Context) { dashboardController.Snapshot(c) })
 			sipGroup.GET("/stream", func(c *gin.Context) { dashboardController.Stream(c) })
 		}
+		traceGroup := gb.Group("/sip-traces")
+		{
+			traceGroup.GET("/health", func(c *gin.Context) { traceController.Health(c) })
+			traceGroup.GET("/messages", func(c *gin.Context) { traceController.ListMessages(c) })
+			traceGroup.GET("/messages/:id", func(c *gin.Context) { traceController.GetMessage(c) })
+			traceGroup.GET("/sessions", func(c *gin.Context) { traceController.ListSessions(c) })
+			traceGroup.GET("/sessions/:callId/messages", func(c *gin.Context) { traceController.ListSessionMessages(c) })
+			traceGroup.POST("/captures/:id/stop", func(c *gin.Context) { traceController.StopCapture(c) })
+		}
 		gb.GET("/sip/platform", platformController.Info)
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
@@ -168,6 +188,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/channel/batch-delete", deviceMgmtController.BatchDeleteChannels)
 			// 手动 Catalog 刷新(bootstrap 未装配 CatalogTrigger 时,handler 内部返 503)
 			dmgmt.POST("/device/:id/catalog/refresh", deviceMgmtController.RefreshDeviceCatalog)
+			dmgmt.GET("/device/:id/sip-trace-capture", func(c *gin.Context) { traceController.ActiveCapture(c) })
+			dmgmt.POST("/device/:id/sip-trace-captures", func(c *gin.Context) { traceController.StartCapture(c) })
 			// B3 map:地图视图
 			dmgmt.GET("/map/markers", mapController.Markers)
 			dmgmt.GET("/map/clusters", mapController.Clusters)

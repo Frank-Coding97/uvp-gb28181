@@ -24,25 +24,25 @@ type SessionFilter struct {
 }
 
 type SessionDerivedState struct {
-	OriginalAvailable bool
-	OriginalExpiresAt time.Time
-	MissingResponse   bool
-	Anomaly           bool
+	OriginalAvailable bool      `json:"originalAvailable"`
+	OriginalExpiresAt time.Time `json:"originalExpiresAt"`
+	MissingResponse   bool      `json:"missingResponse"`
+	Anomaly           bool      `json:"anomaly"`
 }
 
 type SessionSummary struct {
-	Day                time.Time
-	DeviceID           string
-	CallID             string
-	FirstAt            time.Time
-	LastAt             time.Time
-	MessageCount       uint64
-	InboundCount       uint64
-	OutboundCount      uint64
-	Methods            []string
-	FinalStatus        uint16
-	RequestCount       uint64
-	FinalResponseCount uint64
+	Day                time.Time `json:"day"`
+	DeviceID           string    `json:"deviceId"`
+	CallID             string    `json:"callId"`
+	FirstAt            time.Time `json:"firstAt"`
+	LastAt             time.Time `json:"lastAt"`
+	MessageCount       uint64    `json:"messageCount"`
+	InboundCount       uint64    `json:"inboundCount"`
+	OutboundCount      uint64    `json:"outboundCount"`
+	Methods            []string  `json:"methods"`
+	FinalStatus        uint16    `json:"finalStatus"`
+	RequestCount       uint64    `json:"requestCount"`
+	FinalResponseCount uint64    `json:"finalResponseCount"`
 	SessionDerivedState
 }
 
