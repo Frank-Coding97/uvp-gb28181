@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"gorm.io/gorm"
+
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
@@ -29,41 +31,66 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		expireAt = &t
 	}
 
-	existing, err := gbmodels.FindByDeviceID(ctx, info.DeviceID)
-	if err != nil {
-		return false, fmt.Errorf("查询设备失败: %w", err)
-	}
-	// 首次:不存在或上次为离线 → 视为新注册,需要触发 Catalog
-	isFirst := existing == nil || existing.Status != gbmodels.DeviceStatusOnline
-
-	d := &gbmodels.GbDevice{
-		DeviceID:          info.DeviceID,
-		Transport:         info.Transport,
-		IP:                info.IP,
-		Port:              info.Port,
-		Expires:           info.Expires,
-		RegisterTime:      &now,
-		RegisterExpireAt:  expireAt,
-		KeepaliveTime:     &now, // 注册也视为一次心跳事实
-		KeepaliveInterval: keepaliveInterval,
-		Status:            gbmodels.DeviceStatusOnline, // 物化缓存,顺手刷
-	}
-	if existing != nil {
-		d.OwnerDeptID = existing.OwnerDeptID
-	}
-	if d.OwnerDeptID == 0 {
-		d.OwnerDeptID, err = defaultOwnerDeptID(ctx)
+	var isFirst bool
+	err := app.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Lock the current row so a renewal, recovery, and timeout cannot all
+		// classify the same REGISTER from the same stale status.
+		existing, err := gbmodels.FindByDeviceIDWithDB(ctx, tx.Set("gorm:query_option", "FOR UPDATE"), info.DeviceID)
 		if err != nil {
-			return false, err
+			return fmt.Errorf("查询设备失败: %w", err)
 		}
-	}
-	if err := gbmodels.Upsert(ctx, d); err != nil {
-		return false, fmt.Errorf("自动建档失败: %w", err)
-	}
-	return isFirst, nil
+		isFirst = existing == nil || existing.Status != gbmodels.DeviceStatusOnline
+
+		d := &gbmodels.GbDevice{
+			DeviceID:          info.DeviceID,
+			Transport:         info.Transport,
+			IP:                info.IP,
+			Port:              info.Port,
+			Expires:           info.Expires,
+			RegisterTime:      &now,
+			RegisterExpireAt:  expireAt,
+			KeepaliveTime:     &now,
+			KeepaliveInterval: keepaliveInterval,
+			Status:            gbmodels.DeviceStatusOnline,
+		}
+		var fromStatus *int8
+		if existing != nil {
+			d.OwnerDeptID = existing.OwnerDeptID
+			from := existing.Status
+			fromStatus = &from
+		}
+		if d.OwnerDeptID == 0 {
+			d.OwnerDeptID, err = defaultOwnerDeptIDWithDB(ctx, tx)
+			if err != nil {
+				return err
+			}
+		}
+		if err := gbmodels.UpsertWithDB(ctx, tx, d); err != nil {
+			return fmt.Errorf("自动建档失败: %w", err)
+		}
+
+		eventType := gbmodels.DeviceEventRegisterRenewed
+		if isFirst {
+			eventType = gbmodels.DeviceEventRegisterOnline
+		}
+		expires := info.Expires
+		interval := keepaliveInterval
+		return gbmodels.RecordStatusEvent(tx, d, eventType, gbmodels.DeviceEventSourceRegister, fromStatus, gbmodels.DeviceStatusOnline, now, gbmodels.StatusEventMetadata{
+			RegisterExpires:   &expires,
+			KeepaliveInterval: &interval,
+			IP:                info.IP,
+			Port:              info.Port,
+			Transport:         info.Transport,
+		})
+	})
+	return isFirst, err
 }
 
 func defaultOwnerDeptID(ctx context.Context) (uint, error) {
+	return defaultOwnerDeptIDWithDB(ctx, app.DB())
+}
+
+func defaultOwnerDeptIDWithDB(ctx context.Context, db *gorm.DB) (uint, error) {
 	if app.ConfigYml == nil {
 		return 0, fmt.Errorf("自动建档失败: 缺少配置,未设置 gb28181.device.default_owner_dept_id")
 	}
@@ -72,7 +99,7 @@ func defaultOwnerDeptID(ctx context.Context) (uint, error) {
 		return 0, fmt.Errorf("自动建档失败: 未配置 gb28181.device.default_owner_dept_id")
 	}
 	var count int64
-	if err := app.DB().WithContext(ctx).Table("sys_department").Where("id = ?", deptID).Count(&count).Error; err != nil {
+	if err := db.WithContext(ctx).Table("sys_department").Where("id = ?", deptID).Count(&count).Error; err != nil {
 		return 0, fmt.Errorf("自动建档失败: 校验默认部门失败: %w", err)
 	}
 	if count == 0 {
@@ -83,7 +110,7 @@ func defaultOwnerDeptID(ctx context.Context) (uint, error) {
 
 // HandleUnregister 处理注销(Expires=0):即时置离线(事实上停止心跳 + 缓存翻转)
 func HandleUnregister(ctx context.Context, deviceID string) error {
-	return gbmodels.MarkOffline(ctx, deviceID)
+	return gbmodels.MarkOfflineWithReason(ctx, deviceID, gbmodels.DeviceEventUnregisterOffline, gbmodels.DeviceEventSourceUnregister)
 }
 
 // Keepalive 处理心跳:更新 keepalive_time 事实 + 刷新 status 缓存。

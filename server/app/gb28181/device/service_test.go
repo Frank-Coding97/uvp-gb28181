@@ -25,7 +25,7 @@ func TestHandleRegister_AutoCreatesDevice(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
 	app.GormDbMysql = db
 	app.ConfigYml = testConfig{}
 	require.NoError(t, db.Create(&basemodels.SysDepartment{
@@ -58,7 +58,7 @@ func TestHandleRegister_RejectsMissingDefaultOwnerDeptConfig(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &basemodels.SysDepartment{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
 	app.GormDbMysql = db
 	app.ConfigYml = testConfigWithoutDefaultDept{}
 

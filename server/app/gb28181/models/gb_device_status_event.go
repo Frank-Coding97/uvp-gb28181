@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -50,6 +51,40 @@ const (
 	DeviceEventSourceKeepalive      DeviceStatusEventSource = "keepalive"
 	DeviceEventSourceOfflineScanner DeviceStatusEventSource = "offline_scanner"
 )
+
+type StatusEventMetadata struct {
+	RegisterExpires   *int
+	KeepaliveInterval *int
+	IP                string
+	Port              int
+	Transport         string
+	Detail            string
+}
+
+// RecordStatusEvent appends an event inside the caller's transaction.
+func RecordStatusEvent(tx *gorm.DB, device *GbDevice, eventType DeviceStatusEventType, source DeviceStatusEventSource, fromStatus *int8, toStatus int8, occurredAt time.Time, metadata StatusEventMetadata) error {
+	if device == nil {
+		return fmt.Errorf("设备不能为空")
+	}
+	if !eventType.Valid() {
+		return fmt.Errorf("无效的设备状态事件类型: %s", eventType)
+	}
+	return tx.Create(&GbDeviceStatusEvent{
+		DeviceID:          device.ID,
+		DeviceCode:        device.DeviceID,
+		EventType:         eventType,
+		FromStatus:        fromStatus,
+		ToStatus:          toStatus,
+		OccurredAt:        occurredAt,
+		Source:            source,
+		RegisterExpires:   metadata.RegisterExpires,
+		KeepaliveInterval: metadata.KeepaliveInterval,
+		IP:                metadata.IP,
+		Port:              metadata.Port,
+		Transport:         metadata.Transport,
+		Detail:            metadata.Detail,
+	}).Error
+}
 
 // GbDeviceStatusEvent records meaningful device lifecycle transitions.
 type GbDeviceStatusEvent struct {

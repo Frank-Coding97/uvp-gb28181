@@ -84,10 +84,15 @@ type GbDeviceList []*GbDevice
 
 // FindByDeviceID 按国标编码查询设备,未命中返回 (nil, nil)
 func FindByDeviceID(c context.Context, deviceID string) (*GbDevice, error) {
+	return FindByDeviceIDWithDB(c, app.DB().WithContext(c), deviceID)
+}
+
+// FindByDeviceIDWithDB 查询设备，允许调用方把查询放进现有事务。
+func FindByDeviceIDWithDB(c context.Context, db *gorm.DB, deviceID string) (*GbDevice, error) {
 	var d GbDevice
 	// 注意:底座注册了全局 hook MaskNotDataError(RaiseErrorOnNotFound=false),
 	// 查不到时不会返回 ErrRecordNotFound,故用 RowsAffected 判断是否命中,不依赖 error
-	result := app.DB().WithContext(c).Where("device_id = ?", deviceID).Limit(1).Find(&d)
+	result := db.WithContext(c).Where("device_id = ?", deviceID).Limit(1).Find(&d)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -99,15 +104,20 @@ func FindByDeviceID(c context.Context, deviceID string) (*GbDevice, error) {
 
 // Upsert 自动建档:存在则更新,不存在则插入(以 device_id 为唯一键)
 func Upsert(c context.Context, d *GbDevice) error {
-	existing, err := FindByDeviceID(c, d.DeviceID)
+	return UpsertWithDB(c, app.DB().WithContext(c), d)
+}
+
+// UpsertWithDB 自动建档/更新，允许调用方把写入放进现有事务。
+func UpsertWithDB(c context.Context, db *gorm.DB, d *GbDevice) error {
+	existing, err := FindByDeviceIDWithDB(c, db, d.DeviceID)
 	if err != nil {
 		return err
 	}
 	if existing == nil {
-		return app.DB().WithContext(c).Create(d).Error
+		return db.WithContext(c).Create(d).Error
 	}
 	d.ID = existing.ID
-	return app.DB().WithContext(c).Model(&GbDevice{}).Where("id = ?", existing.ID).Updates(d).Error
+	return db.WithContext(c).Model(&GbDevice{}).Where("id = ?", existing.ID).Updates(d).Error
 }
 
 // UpdateStatus 更新设备在线状态(物化缓存)
@@ -122,36 +132,53 @@ func UpdateStatus(c context.Context, deviceID string, status int8) error {
 func TouchKeepalive(c context.Context, deviceID string) (bool, error) {
 	now := time.Now()
 	db := app.DB().WithContext(c)
-	restored := db.Model(&GbDevice{}).
-		Where("device_id = ? AND (status IS NULL OR status <> ?)", deviceID, DeviceStatusOnline).
-		Updates(map[string]interface{}{
-			"keepalive_time": now,
-			"status":         DeviceStatusOnline,
-		})
-	if restored.Error != nil {
-		return false, restored.Error
-	}
-	if restored.RowsAffected > 0 {
-		return true, nil
-	}
-	return false, db.Model(&GbDevice{}).
-		Where("device_id = ?", deviceID).
-		Update("keepalive_time", now).Error
+	var restored bool
+	err := db.Transaction(func(tx *gorm.DB) error {
+		var d GbDevice
+		result := tx.Set("gorm:query_option", "FOR UPDATE").Where("device_id = ?", deviceID).Limit(1).Find(&d)
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
+		}
+		metadata := StatusEventMetadata{IP: d.IP, Port: d.Port, Transport: d.Transport, KeepaliveInterval: intPtr(d.KeepaliveInterval)}
+		if d.Status != DeviceStatusOnline {
+			from := d.Status
+			if err := tx.Model(&GbDevice{}).Where("id = ?", d.ID).Updates(map[string]interface{}{"keepalive_time": now, "status": DeviceStatusOnline}).Error; err != nil {
+				return err
+			}
+			if err := RecordStatusEvent(tx, &d, DeviceEventHeartbeatRecovered, DeviceEventSourceKeepalive, &from, DeviceStatusOnline, now, metadata); err != nil {
+				return err
+			}
+			restored = true
+			return nil
+		}
+		return tx.Model(&GbDevice{}).Where("id = ?", d.ID).Update("keepalive_time", now).Error
+	})
+	return restored, err
 }
 
 // MarkOffline 置离线:设备与所属通道必须原子翻转,避免列表出现设备离线但通道在线。
 // 通道重新上线必须等待设备恢复后的 Catalog ON/OFF,不能凭设备上线直接推断。
 func MarkOffline(c context.Context, deviceID string) error {
+	return MarkOfflineWithReason(c, deviceID, DeviceEventHeartbeatTimeout, DeviceEventSourceOfflineScanner)
+}
+
+// MarkOfflineWithReason 置离线并记录具体离线原因。
+func MarkOfflineWithReason(c context.Context, deviceID string, eventType DeviceStatusEventType, source DeviceStatusEventSource) error {
 	now := time.Now()
 	return app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
-		deviceUpdate := tx.Model(&GbDevice{}).
-			Where("device_id = ?", deviceID).
-			Updates(map[string]interface{}{
-				"status":     DeviceStatusOffline,
-				"offline_at": now,
-			})
-		if deviceUpdate.Error != nil {
-			return deviceUpdate.Error
+		var d GbDevice
+		deviceQuery := tx.Set("gorm:query_option", "FOR UPDATE").Where("device_id = ?", deviceID).Limit(1).Find(&d)
+		if deviceQuery.Error != nil {
+			return deviceQuery.Error
+		}
+		if deviceQuery.RowsAffected == 0 {
+			return fmt.Errorf("设备 %s 不存在,注销未更新状态", deviceID)
+		}
+		if d.Status == DeviceStatusOffline {
+			return nil
+		}
+		if err := tx.Model(&GbDevice{}).Where("id = ?", d.ID).Updates(map[string]interface{}{"status": DeviceStatusOffline, "offline_at": now}).Error; err != nil {
+			return err
 		}
 		channelUpdate := tx.Model(&GbChannel{}).
 			Where("device_id = ? AND status <> ?", deviceID, ChannelStatusOffline).
@@ -159,12 +186,13 @@ func MarkOffline(c context.Context, deviceID string) error {
 		if channelUpdate.Error != nil {
 			return channelUpdate.Error
 		}
-		if deviceUpdate.RowsAffected == 0 {
-			return fmt.Errorf("设备 %s 不存在,注销未更新状态", deviceID)
-		}
-		return nil
+		metadata := StatusEventMetadata{IP: d.IP, Port: d.Port, Transport: d.Transport, KeepaliveInterval: intPtr(d.KeepaliveInterval)}
+		from := d.Status
+		return RecordStatusEvent(tx, &d, eventType, source, &from, DeviceStatusOffline, now, metadata)
 	})
 }
+
+func intPtr(value int) *int { return &value }
 
 // ListStaleOnline 查询 status=1(缓存在线)但心跳已超时的设备(扫描器用)
 // 注意:阈值按设备各自 keepalive_interval 计算,故在 SQL 里用字段表达式,不能用全局常量
