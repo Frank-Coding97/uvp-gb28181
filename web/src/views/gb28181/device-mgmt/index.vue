@@ -108,6 +108,10 @@ const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
 const autoRefresh = ref(true);
 const refreshInterval = ref<number | null>(null);
+const isMacPlatform = computed(() => typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform));
+
+let keywordSearchTimer: ReturnType<typeof setTimeout> | null = null;
+let suppressKeywordSearch = false;
 
 const roots = ref<CatalogNode[]>([]);
 const childrenMap = reactive<Record<number, CatalogNode[]>>({});
@@ -178,6 +182,17 @@ watch(statusFilter, () => {
     page.value = 1;
     refreshMainData();
 });
+watch(keyword, () => {
+    if (suppressKeywordSearch) {
+        suppressKeywordSearch = false;
+        return;
+    }
+    cancelKeywordSearch();
+    keywordSearchTimer = setTimeout(() => {
+        keywordSearchTimer = null;
+        onSearch();
+    }, 300);
+});
 
 function relTime(value?: string | null) {
     if (!value || value.startsWith("0001-01-01")) return "未上报";
@@ -247,7 +262,7 @@ function canExpand(node: CatalogNode) { return node.nodeType !== "channel"; }
 function projectX(longitude: number) { const min = 73; const max = 136; return Math.min(96, Math.max(4, ((longitude - min) / (max - min)) * 100)); }
 function projectY(latitude: number) { const min = 18; const max = 54; return Math.min(94, Math.max(6, 100 - ((latitude - min) / (max - min)) * 100)); }
 function showDeviceChannels(record: DeviceVO) {
-    keyword.value = "";
+    setKeywordWithoutSearch("");
     deviceIdFilter.value = record.deviceId;
     selectedNode.value = null;
     statusFilter.value = undefined;
@@ -311,11 +326,21 @@ function setAssetKind(kind: AssetKind) {
     if (kind === "device") deviceIdFilter.value = "";
     assetKind.value = kind;
 }
-function onSearch() { page.value = 1; refreshMainData(); }
+function cancelKeywordSearch() {
+    if (keywordSearchTimer !== null) {
+        clearTimeout(keywordSearchTimer);
+        keywordSearchTimer = null;
+    }
+}
+function setKeywordWithoutSearch(value: string) {
+    if (keyword.value === value) return;
+    suppressKeywordSearch = true;
+    keyword.value = value;
+}
+function onSearch() { cancelKeywordSearch(); page.value = 1; refreshMainData(); }
 function clearKeyword() {
-    keyword.value = "";
-    page.value = 1;
-    refreshMainData();
+    setKeywordWithoutSearch("");
+    onSearch();
     keywordInput.value?.focus();
 }
 function focusKeyword(event: KeyboardEvent) {
@@ -326,7 +351,7 @@ function focusKeyword(event: KeyboardEvent) {
     }
 }
 function clearDeviceFilter() { deviceIdFilter.value = ""; page.value = 1; refreshMainData(); }
-function resetFilters() { keyword.value = ""; deviceIdFilter.value = ""; statusFilter.value = undefined; clearNode(); }
+function resetFilters() { setKeywordWithoutSearch(""); deviceIdFilter.value = ""; statusFilter.value = undefined; clearNode(); }
 function onPageChange(next: number) { page.value = next; refreshMainData(); }
 function onPageSizeChange(next: number) { pageSize.value = next; page.value = 1; refreshMainData(); }
 
@@ -829,6 +854,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
     window.removeEventListener("keydown", focusKeyword);
+    cancelKeywordSearch();
     stopAutoRefresh();
 });
 </script>
@@ -848,8 +874,8 @@ onUnmounted(() => {
                         <a-tooltip v-if="keyword" content="清空搜索" position="bottom">
                             <button class="cmdk-clear" type="button" aria-label="清空搜索" @click="clearKeyword"><X :size="14" /></button>
                         </a-tooltip>
-                        <a-tooltip content="按 Command + K 或 Ctrl + K 聚焦搜索框" position="bottom">
-                            <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd></span>
+                        <a-tooltip :content="`按 ${isMacPlatform ? 'Command' : 'Ctrl'} + K 聚焦搜索框`" position="bottom">
+                            <span class="kbd"><kbd>{{ isMacPlatform ? '⌘' : 'Ctrl' }}</kbd><kbd>K</kbd></span>
                         </a-tooltip>
                     </div>
                     <div class="view-switch">
