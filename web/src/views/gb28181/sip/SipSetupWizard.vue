@@ -3,7 +3,9 @@ import { computed, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { ChevronLeft, ChevronRight, Save } from "lucide-vue-next";
 import DeploymentStep from "./steps/DeploymentStep.vue";
+import NetworkStep from "./steps/NetworkStep.vue";
 import { useSipSetup } from "./useSipSetup";
+import { networkCanContinue } from "./sipSetupRules";
 
 const props = withDefaults(defineProps<{
     modelValue: boolean;
@@ -19,7 +21,11 @@ const setup = useSipSetup();
 const step = ref(1);
 
 const title = computed(() => props.editing ? "编辑 SIP 配置" : "配置 SIP 服务");
-const canNext = computed(() => step.value !== 1 || setup.form.deploymentMode !== "");
+const canNext = computed(() => {
+    if (step.value === 1) return setup.form.deploymentMode !== "";
+    if (step.value === 2) return networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp);
+    return true;
+});
 
 watch(() => props.modelValue, async visible => {
     if (!visible) return;
@@ -78,7 +84,12 @@ async function skip() {
 
             <div class="wizard-body">
                 <DeploymentStep v-if="step === 1" v-model="setup.form.deploymentMode" />
-                <div v-else-if="step === 2" class="step-placeholder">网络地址</div>
+                <NetworkStep
+                    v-else-if="step === 2"
+                    :form="setup.form"
+                    :network="setup.network.value"
+                    @update="Object.assign(setup.form, $event)"
+                />
                 <div v-else-if="step === 3" class="step-placeholder">SIP 身份与安全</div>
                 <div v-else class="step-placeholder">确认配置</div>
             </div>
