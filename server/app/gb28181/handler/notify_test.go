@@ -14,6 +14,13 @@ import (
 
 type notifyRecorder struct{ values []subscribe.Notification }
 
+type ptzNotifyRecorder struct{ bodies [][]byte }
+
+func (r *ptzNotifyRecorder) OnPTZNotify(_ context.Context, _ string, _ string, _ string, body []byte) error {
+	r.bodies = append(r.bodies, body)
+	return nil
+}
+
 func (r *notifyRecorder) OnNotify(_ context.Context, value subscribe.Notification) error {
 	r.values = append(r.values, value)
 	return nil
@@ -60,6 +67,24 @@ func TestNotifyHandler_MalformedStillAcknowledged(t *testing.T) {
 	recorder := &notifyRecorder{}
 	NewNotifyHandler(recorder).Handle(req, tx)
 	require.Empty(t, recorder.values)
+	require.Len(t, tx.Result(), 1)
+	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
+}
+
+func TestNotifyHandler_PTZPreciseDispatchesAndAcknowledges(t *testing.T) {
+	req := sip.NewRequest(sip.NOTIFY, sip.Uri{User: "D", Host: "3402000000"})
+	prepareNotifyRequest(req)
+	req.SetBody([]byte(`<Notify><CmdType>PTZPrecisePosition</CmdType><SN>3</SN><DeviceID>C</DeviceID><Pan>12.5</Pan></Notify>`))
+	req.AppendHeader(sip.NewHeader("Event", "PTZPrecisePosition"))
+	callID := sip.CallIDHeader("ptz-notify")
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: 2, MethodName: sip.NOTIFY})
+	tx := siptest.NewServerTxRecorder(req)
+	recorder := &ptzNotifyRecorder{}
+	h := NewNotifyHandler(nil)
+	h.SetPTZProcessor(recorder)
+	h.Handle(req, tx)
+	require.Len(t, recorder.bodies, 1)
 	require.Len(t, tx.Result(), 1)
 	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
 }

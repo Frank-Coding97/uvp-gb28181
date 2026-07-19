@@ -21,10 +21,15 @@ type MessageHandler struct {
 	catalogTrigger    CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
 	subscriptionWaker SubscriptionWaker
 	alarmProcessor    AlarmMessageProcessor
+	ptzProcessor      PTZMessageProcessor
 }
 
 type AlarmMessageProcessor interface {
 	OnAlarmMessage(context.Context, string, string, string, []byte) error
+}
+
+type PTZMessageProcessor interface {
+	OnPTZMessage(context.Context, string, string, string, []byte) error
 }
 
 // NewMessageHandler 创建消息处理器
@@ -51,6 +56,10 @@ func (h *MessageHandler) SetAlarmProcessor(processor AlarmMessageProcessor) {
 	h.alarmProcessor = processor
 }
 
+func (h *MessageHandler) SetPTZProcessor(processor PTZMessageProcessor) {
+	h.ptzProcessor = processor
+}
+
 // txKindFromCmd 根据 MANSCDP CmdType 映射 metrics 事务类型
 func txKindFromCmd(cmd string) metrics.TxKind {
 	switch cmd {
@@ -59,6 +68,8 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 	case manscdp.CmdCatalog:
 		return metrics.TxCatalog
 	case manscdp.CmdDeviceControl:
+		return metrics.TxPTZ
+	case manscdp.CmdPTZPreciseCtrl, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
 		return metrics.TxPTZ
 	case "Alarm":
 		return metrics.TxAlarm
@@ -118,8 +129,17 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
 			HandleDeviceInfoResponse(ctx, req.Body())
 		case manscdp.CmdDeviceControl:
-			// DeviceControl 应答当前以 SIP 事务成功为准,入向消息纳入 PTZ 指标。
-			app.ZapLog.Info("GB28181 DeviceControl 应答收到", zap.String("deviceId", head.DeviceID))
+			if h.ptzProcessor != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
+					app.ZapLog.Warn("GB28181 PTZ DeviceControl 应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+				}
+			}
+		case manscdp.CmdPTZPreciseCtrl, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+			if h.ptzProcessor != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
+					app.ZapLog.Warn("GB28181 PTZ 查询应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+				}
+			}
 		case manscdp.CmdAlarm:
 			if h.alarmProcessor != nil {
 				if err := h.alarmProcessor.OnAlarmMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
