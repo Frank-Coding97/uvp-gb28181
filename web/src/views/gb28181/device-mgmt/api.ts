@@ -93,6 +93,20 @@ export interface DeviceStatusEventQuery {
     to?: string;
 }
 
+export type SubscriptionKind = "catalog" | "mobile_position" | "alarm";
+export type SubscriptionStatus = "disabled" | "pending" | "active" | "degraded" | "expired";
+
+export interface DeviceSubscription {
+    kind: SubscriptionKind;
+    enabled: boolean;
+    status: SubscriptionStatus;
+    expiresSeconds: number;
+    intervalSeconds: number;
+    expiresAt?: string | null;
+    lastNotifyAt?: string | null;
+    lastError: string;
+}
+
 export interface ChannelVO {
     id: number;
     channelId: string;
@@ -207,6 +221,15 @@ export const listDevices = (params: DeviceQuery) =>
 
 export const getDevice = (id: number) =>
     http.request<BaseResult<DeviceVO>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}`));
+
+export const listDeviceSubscriptions = (id: number) =>
+    http.request<BaseResult<{ list: DeviceSubscription[] }>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions`));
+
+export const updateDeviceSubscription = (id: number, kind: SubscriptionKind, enabled: boolean) =>
+    http.request<BaseResult<DeviceSubscription>>("patch", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions/${kind}`), { data: { enabled } });
+
+export const renewDeviceSubscription = (id: number, kind: SubscriptionKind) =>
+    http.request<BaseResult<DeviceSubscription>>("post", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions/${kind}/renew`));
 
 export const listDeviceStatusEvents = (id: number, params: DeviceStatusEventQuery = {}) =>
     http.request<BaseResult<PageResult<DeviceStatusEvent>>>(

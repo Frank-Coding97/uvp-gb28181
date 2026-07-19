@@ -72,6 +72,7 @@ import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { storeToRefs } from "pinia";
 import ControlConsole from "../components/ControlConsole.vue";
+import SubscriptionDialog from "./SubscriptionDialog.vue";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
@@ -112,6 +113,8 @@ const deviceIdFilter = ref("");
 const statusFilter = ref<OnlineStatus | undefined>();
 const selectedNode = ref<CatalogNode | null>(null);
 const drawerVisible = ref(false);
+const subscriptionDialogVisible = ref(false);
+const subscriptionDevice = ref<DeviceVO | null>(null);
 const drawerTarget = ref<DrawerTarget | null>(null);
 const drawerLoading = ref(false);
 const rootLoading = ref(false);
@@ -671,6 +674,11 @@ async function openDevice(record: DeviceVO) {
     } finally {
         drawerLoading.value = false;
     }
+}
+
+function openSubscriptionManager(record: DeviceVO) {
+    subscriptionDevice.value = record;
+    subscriptionDialogVisible.value = true;
 }
 
 async function loadStatusEvents(append = false) {
@@ -1522,7 +1530,7 @@ onUnmounted(() => {
                                         <span class="relative" :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="230" fixed="right">
+                                <a-table-column title="操作" :width="270" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
                                             <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">
@@ -1538,6 +1546,9 @@ onUnmounted(() => {
                                                 <template #icon><Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" /><RefreshCcw v-else :size="13" /></template>
                                                 <span>刷新</span>
                                             </a-link>
+                                            <a-tooltip content="订阅管理" position="top">
+                                                <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(record)"><RadioTower :size="13" /></button>
+                                            </a-tooltip>
                                             <a-dropdown trigger="click" position="br">
                                                 <a-link class="uvp-table-action uvp-table-action--more">
                                                     <span>更多</span>
@@ -1624,6 +1635,9 @@ onUnmounted(() => {
                                         <Loader2 v-if="refreshingCatalog[item.id]" :size="13" class="spin" />
                                         <RefreshCcw v-else :size="13" />
                                     </button>
+                                </a-tooltip>
+                                <a-tooltip content="订阅管理" position="top">
+                                    <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(item)"><RadioTower :size="13" /></button>
                                 </a-tooltip>
                                 <a-tooltip content="编辑设备" position="top">
                                     <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button>
@@ -1861,7 +1875,11 @@ onUnmounted(() => {
                         </section>
 
                         <div class="drawer-foot">
-                            <a-button type="primary" @click="handleRefreshDeviceCatalog(deviceDetail)">
+                            <a-button type="primary" @click="openSubscriptionManager(deviceDetail)">
+                                <template #icon><RadioTower :size="14" /></template>
+                                <template #default>管理订阅</template>
+                            </a-button>
+                            <a-button @click="handleRefreshDeviceCatalog(deviceDetail)">
                                 <template #icon><RefreshCcw :size="14" /></template>
                                 <template #default>刷新目录</template>
                             </a-button>
@@ -1885,6 +1903,13 @@ onUnmounted(() => {
                     </div>
                 </a-spin>
             </a-drawer>
+
+            <SubscriptionDialog
+                v-model:visible="subscriptionDialogVisible"
+                :device-id="subscriptionDevice?.id"
+                :device-name="subscriptionDevice ? displayName(subscriptionDevice) : ''"
+                @changed="loadDevicesData"
+            />
 
             <ControlConsole
                 v-model:visible="controlConsoleVisible"
