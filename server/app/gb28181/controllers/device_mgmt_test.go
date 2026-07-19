@@ -30,6 +30,7 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&gbmodels.GbAnomalyRecord{},
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDevice{},
+		&gbmodels.GbDeviceStatusEvent{},
 		&basemodels.SysDepartment{},
 		&basemodels.SysRole{},
 		&basemodels.SysUserRole{},
@@ -52,6 +53,9 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 	{
 		gr.GET("/devices", dmgmt.ListDevices)
 		gr.GET("/device/:id", dmgmt.GetDevice)
+		gr.GET("/device/:id/status-events", dmgmt.ListDeviceStatusEvents)
+		gr.DELETE("/device/:id", dmgmt.DeleteDevice)
+		gr.POST("/device/batch-delete", dmgmt.BatchDeleteDevices)
 		gr.GET("/channels", dmgmt.ListChannels)
 		gr.GET("/channel/:id", dmgmt.GetChannel)
 		gr.PATCH("/channel/:id", dmgmt.UpdateChannel)

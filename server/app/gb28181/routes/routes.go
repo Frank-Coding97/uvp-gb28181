@@ -146,6 +146,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/devices", deviceMgmtController.ListDevices)
 			dmgmt.POST("/device", deviceMgmtController.CreateDevice)
 			dmgmt.GET("/device/:id", deviceMgmtController.GetDevice)
+			dmgmt.GET("/device/:id/status-events", deviceMgmtController.ListDeviceStatusEvents)
 			dmgmt.GET("/channels", deviceMgmtController.ListChannels)
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
 			dmgmt.PATCH("/channel/:id", deviceMgmtController.UpdateChannel)
