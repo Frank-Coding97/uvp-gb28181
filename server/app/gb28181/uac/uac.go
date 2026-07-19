@@ -65,7 +65,9 @@ func detectMessageKind(body []byte) metrics.TxKind {
 	if bytes.Contains(body, []byte("RecordInfo")) {
 		return metrics.TxRecord
 	}
-	if bytes.Contains(body, []byte("DeviceControl")) || bytes.Contains(body, []byte("PTZCmd")) {
+	if bytes.Contains(body, []byte("DeviceControl")) || bytes.Contains(body, []byte("PTZCmd")) ||
+		bytes.Contains(body, []byte("PTZPrecise")) || bytes.Contains(body, []byte("HomePositionQuery")) ||
+		bytes.Contains(body, []byte("CruiseTrackQuery")) || bytes.Contains(body, []byte("PTZPreciseStatusQuery")) {
 		return metrics.TxPTZ
 	}
 	return metrics.TxUnknown
@@ -124,31 +126,84 @@ func normalizeTransport(transport string) string {
 	}
 }
 
+type TrackedMessageRequest struct {
+	DeviceID    string
+	Destination string
+	Transport   string
+	Body        []byte
+	CallID      string
+	CSeq        string
+}
+
+type TrackedMessageResult struct {
+	CallID       string
+	CSeq         string
+	StatusCode   int
+	ResponseBody []byte
+}
+
+func (u *UAC) buildTrackedMessageRequest(in TrackedMessageRequest) (*sip.Request, TrackedMessageResult, error) {
+	if u == nil {
+		return nil, TrackedMessageResult{}, fmt.Errorf("SIP UAC 未就绪")
+	}
+	if strings.TrimSpace(in.DeviceID) == "" || strings.TrimSpace(in.Destination) == "" {
+		return nil, TrackedMessageResult{}, fmt.Errorf("MESSAGE 缺少设备或目的地址")
+	}
+	req := sip.NewRequest(sip.MESSAGE, u.deviceURI(in.DeviceID))
+	req.SetBody(in.Body)
+	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
+	req.AppendHeader(u.platformFromHeader())
+	req.SetDestination(in.Destination)
+	req.SetTransport(normalizeTransport(in.Transport))
+	callID := strings.TrimSpace(in.CallID)
+	if callID == "" {
+		callID = fmt.Sprintf("message-%d", time.Now().UnixNano())
+	}
+	cseq := strings.TrimSpace(in.CSeq)
+	if cseq == "" {
+		cseq = u.nextCSeq()
+	}
+	seq, err := strconv.ParseUint(cseq, 10, 32)
+	if err != nil || seq == 0 {
+		return nil, TrackedMessageResult{}, fmt.Errorf("MESSAGE CSeq 不合法: %q", cseq)
+	}
+	callIDHeader := sip.CallIDHeader(callID)
+	req.AppendHeader(&callIDHeader)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: uint32(seq), MethodName: sip.MESSAGE})
+	return req, TrackedMessageResult{CallID: callID, CSeq: cseq}, nil
+}
+
+// SendMessageTracked sends a MESSAGE and returns SIP correlation metadata.
+func (u *UAC) SendMessageTracked(ctx context.Context, deviceID, dest, transport string, body []byte) (TrackedMessageResult, error) {
+	if u == nil || u.client == nil {
+		return TrackedMessageResult{}, fmt.Errorf("SIP UAC 未就绪")
+	}
+	req, result, err := u.buildTrackedMessageRequest(TrackedMessageRequest{DeviceID: deviceID, Destination: dest, Transport: transport, Body: body})
+	if err != nil {
+		return result, err
+	}
+	kind := detectMessageKind(body)
+	u.recordBegin(kind, result.CallID, result.CSeq, deviceID)
+	resp, err := u.client.Do(ctx, req)
+	if err != nil {
+		u.recordEnd(result.CallID, result.CSeq, 0, false)
+		return result, fmt.Errorf("发送 MESSAGE 失败: %w", err)
+	}
+	result.StatusCode = int(resp.StatusCode)
+	result.ResponseBody = append([]byte(nil), resp.Body()...)
+	if resp.StatusCode != 200 {
+		u.recordEnd(result.CallID, result.CSeq, int(resp.StatusCode), false)
+		return result, fmt.Errorf("MESSAGE 应答非200: %d %s", resp.StatusCode, resp.Reason)
+	}
+	u.recordEnd(result.CallID, result.CSeq, int(resp.StatusCode), true)
+	return result, nil
+}
+
 // SendMessage 向设备发 MESSAGE(承载 MANSCDP XML,如 Catalog 查询)
 // transport 从设备注册记录(gb_device.transport)读出来,避免硬编码 UDP 导致 TCP 设备发不出去
 func (u *UAC) SendMessage(ctx context.Context, deviceID, dest, transport string, body []byte) error {
-	req := sip.NewRequest(sip.MESSAGE, u.deviceURI(deviceID))
-	req.SetBody(body)
-	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
-	req.AppendHeader(u.platformFromHeader())
-	req.SetDestination(dest)
-	req.SetTransport(normalizeTransport(transport))
-
-	kind := detectMessageKind(body)
-	callID, cseq := u.extractKeyFromRequest(req)
-	u.recordBegin(kind, callID, cseq, deviceID)
-
-	resp, err := u.client.Do(ctx, req)
-	if err != nil {
-		u.recordEnd(callID, cseq, 0, false)
-		return fmt.Errorf("发送 MESSAGE 失败: %w", err)
-	}
-	if resp.StatusCode != 200 {
-		u.recordEnd(callID, cseq, int(resp.StatusCode), false)
-		return fmt.Errorf("MESSAGE 应答非200: %d %s", resp.StatusCode, resp.Reason)
-	}
-	u.recordEnd(callID, cseq, int(resp.StatusCode), true)
-	return nil
+	_, err := u.SendMessageTracked(ctx, deviceID, dest, transport, body)
+	return err
 }
 
 // SubscriptionRequest contains the durable dialog metadata needed to establish, renew, or cancel a SUBSCRIBE dialog.

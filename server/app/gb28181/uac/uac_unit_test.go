@@ -172,3 +172,22 @@ func TestBuildSubscribeRequest_ReusesDialogMetadata(t *testing.T) {
 		t.Fatal("CSeq must be preserved as SUBSCRIBE dialog metadata")
 	}
 }
+
+func TestBuildTrackedMessageRequest(t *testing.T) {
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	req, meta, err := u.buildTrackedMessageRequest(TrackedMessageRequest{
+		DeviceID: "34020000001320000001", Destination: "192.0.2.10:5060", Transport: "tcp", Body: []byte("<Control/>"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Method != sip.MESSAGE || req.Recipient.User != "34020000001320000001" || req.Destination() != "192.0.2.10:5060" || req.Transport() != "TCP" {
+		t.Fatalf("unexpected request: method=%s target=%s dest=%s transport=%s", req.Method, req.Recipient.User, req.Destination(), req.Transport())
+	}
+	if meta.CallID == "" || meta.CSeq == "" || req.CallID() == nil || req.CSeq() == nil {
+		t.Fatalf("tracked request missing key: meta=%+v", meta)
+	}
+	if string(*req.CallID()) != meta.CallID || req.CSeq().MethodName != sip.MESSAGE {
+		t.Fatalf("request metadata mismatch: meta=%+v", meta)
+	}
+}
