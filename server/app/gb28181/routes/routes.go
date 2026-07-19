@@ -170,6 +170,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
 			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
+			dmgmt.POST("/channel/:id/ptz/precise", deviceMgmtController.ControlPTZPrecise)
 			dmgmt.POST("/channel/:id/ptz/extended", deviceMgmtController.ControlPTZExtended)
 			dmgmt.POST("/channel/:id/ptz/presets", deviceMgmtController.ControlPTZExtended)
 			dmgmt.POST("/channel/:id/ptz/presets/:presetId/call", deviceMgmtController.ControlPTZExtended)

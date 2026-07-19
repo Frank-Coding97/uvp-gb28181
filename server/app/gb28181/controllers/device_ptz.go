@@ -25,6 +25,16 @@ type ptzExtendedRequest struct {
 	IdempotencyKey string `json:"idempotencyKey"`
 }
 
+type ptzPreciseRequest struct {
+	Pan            *float64 `json:"pan"`
+	Tilt           *float64 `json:"tilt"`
+	Zoom           *float64 `json:"zoom"`
+	Focus          *float64 `json:"focus"`
+	Iris           *float64 `json:"iris"`
+	Speed          int      `json:"speed"`
+	IdempotencyKey string   `json:"idempotencyKey"`
+}
+
 func parseExtendedAction(value string) (manscdp.PTZExtendedAction, error) {
 	switch value {
 	case string(manscdp.PTZActionSetPreset), string(manscdp.PTZActionCallPreset), string(manscdp.PTZActionDeletePreset),
@@ -226,4 +236,61 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 		return
 	}
 	c.JSON(200, gin.H{"code": 0, "data": gin.H{"operationId": op.OperationID, "channelId": channel.ChannelID, "action": action, "id": id, "sn": op.SN, "status": op.Status}})
+}
+
+func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
+	if dc.ptzService == nil {
+		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
+		return
+	}
+	var request ptzPreciseRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		dc.FailAndAbort(c, "请求体不合法", err)
+		return
+	}
+	if request.Speed < 0 || request.Speed > 255 {
+		dc.FailAndAbort(c, "PTZ 速度需在 0-255 之间", nil)
+		return
+	}
+	channelID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || channelID == 0 {
+		dc.FailAndAbort(c, "通道 ID 不合法", err)
+		return
+	}
+	db := dc.db()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	var channel gbmodels.GbChannel
+	result := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
+	if result.Error != nil || result.RowsAffected == 0 {
+		dc.FailAndAbort(c, "通道不存在或无权限", result.Error)
+		return
+	}
+	var device gbmodels.GbDevice
+	result = db.WithContext(c).Scopes(ownerDeptScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	if result.Error != nil || result.RowsAffected == 0 {
+		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
+		return
+	}
+	key := request.IdempotencyKey
+	if key == "" {
+		key = c.GetHeader("Idempotency-Key")
+	}
+	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
+		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
+		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType}
+	op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
+		CmdType: manscdp.CmdPTZPreciseCtrl, Action: "precise", IdempotencyKey: key,
+		Payload: map[string]interface{}{"pan": request.Pan, "tilt": request.Tilt, "zoom": request.Zoom, "focus": request.Focus, "iris": request.Iris, "speed": request.Speed},
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildPTZPreciseControl(channel.ChannelID, sn, manscdp.PTZPreciseControl{Pan: request.Pan, Tilt: request.Tilt, Zoom: request.Zoom, Focus: request.Focus, Iris: request.Iris, Speed: request.Speed})
+		},
+	})
+	if executeErr != nil {
+		dc.FailAndAbort(c, "下发精准云台控制失败", executeErr)
+		return
+	}
+	c.JSON(200, gin.H{"code": 0, "data": gin.H{"operationId": op.OperationID, "channelId": channel.ChannelID, "sn": op.SN, "status": op.Status}})
 }
