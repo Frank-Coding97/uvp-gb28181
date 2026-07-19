@@ -9,20 +9,20 @@ import (
 )
 
 const (
-	CmdPTZPreciseCtrl       = "PTZPreciseCtrl"
-	CmdHomePositionQuery    = "HomePositionQuery"
-	CmdCruiseTrackListQuery = "CruiseTrackListQuery"
-	CmdCruiseTrackQuery     = "CruiseTrackQuery"
+	CmdPTZPreciseCtrl        = "PTZPreciseCtrl"
+	CmdHomePositionQuery     = "HomePositionQuery"
+	CmdCruiseTrackListQuery  = "CruiseTrackListQuery"
+	CmdCruiseTrackQuery      = "CruiseTrackQuery"
 	CmdPTZPreciseStatusQuery = "PTZPreciseStatusQuery"
 )
 
 type PTZPreciseControl struct {
-	Pan    *float64
-	Tilt   *float64
-	Zoom   *float64
-	Focus  *float64
-	Iris   *float64
-	Speed  int
+	Pan   *float64
+	Tilt  *float64
+	Zoom  *float64
+	Focus *float64
+	Iris  *float64
+	Speed int
 }
 
 type preciseControlXML struct {
@@ -139,6 +139,29 @@ func ParsePTZPreciseStatusResponse(body []byte) (*PTZPreciseStatusResponse, erro
 	return &response, nil
 }
 
+type PTZPrecisePositionNotify struct {
+	CmdType  string   `xml:"CmdType"`
+	SN       int      `xml:"SN"`
+	DeviceID string   `xml:"DeviceID"`
+	Time     string   `xml:"Time"`
+	Pan      *float64 `xml:"Pan"`
+	Tilt     *float64 `xml:"Tilt"`
+	Zoom     *float64 `xml:"Zoom"`
+	Focus    *float64 `xml:"Focus"`
+	Iris     *float64 `xml:"Iris"`
+}
+
+func ParsePTZPrecisePositionNotify(body []byte) (*PTZPrecisePositionNotify, error) {
+	var notify PTZPrecisePositionNotify
+	if err := newDecoder(body).Decode(&notify); err != nil {
+		return nil, fmt.Errorf("解析 PTZ 精准位置通知失败: %w", err)
+	}
+	if (notify.CmdType != CmdPTZPrecisePosition && notify.CmdType != CmdPTZPreciseStatusQuery) || notify.DeviceID == "" || notify.SN <= 0 {
+		return nil, fmt.Errorf("非法 PTZ 精准位置通知")
+	}
+	return &notify, nil
+}
+
 type HomePositionResponse struct {
 	CmdType  string   `xml:"CmdType"`
 	SN       int      `xml:"SN"`
@@ -171,11 +194,11 @@ type CruiseTrack struct {
 }
 
 type CruiseTrackListResponse struct {
-	CmdType string `xml:"CmdType"`
-	SN int `xml:"SN"`
-	DeviceID string `xml:"DeviceID"`
-	Tracks []CruiseTrack `xml:"TrackList>Track"`
-	Raw []byte `xml:"-"`
+	CmdType  string        `xml:"CmdType"`
+	SN       int           `xml:"SN"`
+	DeviceID string        `xml:"DeviceID"`
+	Tracks   []CruiseTrack `xml:"TrackList>Track"`
+	Raw      []byte        `xml:"-"`
 }
 
 func ParseCruiseTrackListResponse(body []byte) (*CruiseTrackListResponse, error) {
@@ -191,11 +214,11 @@ func ParseCruiseTrackListResponse(body []byte) (*CruiseTrackListResponse, error)
 }
 
 type CruiseTrackResponse struct {
-	CmdType string `xml:"CmdType"`
-	SN int `xml:"SN"`
-	DeviceID string `xml:"DeviceID"`
-	Track CruiseTrack `xml:"Track"`
-	Raw []byte `xml:"-"`
+	CmdType  string      `xml:"CmdType"`
+	SN       int         `xml:"SN"`
+	DeviceID string      `xml:"DeviceID"`
+	Track    CruiseTrack `xml:"Track"`
+	Raw      []byte      `xml:"-"`
 }
 
 func ParseCruiseTrackResponse(body []byte) (*CruiseTrackResponse, error) {

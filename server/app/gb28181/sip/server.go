@@ -123,6 +123,18 @@ func (s *Server) SetAlarmMessageProcessor(processor handler.AlarmMessageProcesso
 	}
 }
 
+func (s *Server) SetPTZMessageProcessor(processor handler.PTZMessageProcessor) {
+	if s.msgH != nil {
+		s.msgH.SetPTZProcessor(processor)
+	}
+}
+
+func (s *Server) SetPTZNotifyProcessor(processor handler.PTZNotifyProcessor) {
+	if s.notifyH != nil {
+		s.notifyH.SetPTZProcessor(processor)
+	}
+}
+
 // Start 启动双栈监听(配置里声明的每个 transport 各起一个 goroutine)
 func (s *Server) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())

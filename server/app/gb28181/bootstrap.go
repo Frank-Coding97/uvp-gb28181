@@ -13,6 +13,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
@@ -96,6 +97,7 @@ var sipServer *gbsip.Server
 // subscriptionService and subscriptionScheduler share the SIP UAC lifecycle.
 var subscriptionService *subscribe.Service
 var subscriptionScheduler *subscribe.Scheduler
+var ptzService *ptz.Service
 var positionHistoryPruneCancel context.CancelFunc
 
 // offlineScanner 离线扫描器
@@ -185,6 +187,10 @@ func Start() {
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
 		gbroutes.SetDeviceMgmtPTZSender(u)
+		ptzService = ptz.NewService(app.DB(), u, time.Now)
+		gbroutes.SetDeviceMgmtPTZService(ptzService)
+		srv.SetPTZMessageProcessor(ptzService)
+		srv.SetPTZNotifyProcessor(ptzService)
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
 		gbroutes.SetDeviceMgmtSubscriptionManager(subscriptionService)
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
@@ -541,6 +547,7 @@ func Stop() {
 		subscriptionScheduler = nil
 	}
 	subscriptionService = nil
+	ptzService = nil
 	if heartbeatCancel != nil {
 		heartbeatCancel()
 		heartbeatCancel = nil

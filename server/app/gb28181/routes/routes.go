@@ -6,6 +6,7 @@ import (
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
 
@@ -89,6 +90,10 @@ func SetDeviceMgmtPTZSender(sender gbcontrollers.DeviceControlSender) {
 	deviceMgmtController.SetPTZSender(sender)
 }
 
+func SetDeviceMgmtPTZService(service *ptz.Service) {
+	deviceMgmtController.SetPTZService(service)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
@@ -165,6 +170,14 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
 			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
+			dmgmt.POST("/channel/:id/ptz/extended", deviceMgmtController.ControlPTZExtended)
+			dmgmt.POST("/channel/:id/ptz/presets", deviceMgmtController.ControlPTZExtended)
+			dmgmt.POST("/channel/:id/ptz/presets/:presetId/call", deviceMgmtController.ControlPTZExtended)
+			dmgmt.GET("/channel/:id/ptz/presets", deviceMgmtController.ListPTZPresets)
+			dmgmt.GET("/channel/:id/ptz/precise-status", deviceMgmtController.GetPTZState)
+			dmgmt.GET("/channel/:id/ptz/cruise-tracks", deviceMgmtController.ListCruiseTracks)
+			dmgmt.GET("/channel/:id/ptz/cruise-tracks/:trackId", deviceMgmtController.GetCruiseTrack)
+			dmgmt.GET("/channel/:id/ptz/operations/:operationId", deviceMgmtController.GetPTZOperation)
 			dmgmt.PATCH("/channel/:id/stream-transport", deviceMgmtController.UpdateChannelStreamTransport)
 			// 删除(单/批,硬 cascade — 用户主动删)
 			dmgmt.DELETE("/device/:id", deviceMgmtController.DeleteDevice)
