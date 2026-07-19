@@ -3,6 +3,7 @@ package controllers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 	"gorm.io/gorm"
 
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
@@ -27,6 +29,35 @@ func newSetupControllerDB(t *testing.T) *gorm.DB {
 		ID: gbsetup.SingletonID, OnboardingVersion: 1, SIPOnboardingStatus: gbsetup.OnboardingPending,
 	}).Error)
 	return db
+}
+
+func TestSetupController_AuditLogsNeverContainPassword(t *testing.T) {
+	db := newSetupControllerDB(t)
+	controller := NewSetupController(db, gbsetup.NewRuntimeStatus(), nil)
+	router := newSetupControllerRouter(controller)
+	core, observed := observer.New(zap.InfoLevel)
+	app.ZapLog = zap.New(core)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/skip", nil))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+
+	request := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Secret123"}`
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(request)))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+
+	encoded := ""
+	for _, entry := range observed.All() {
+		encoded += entry.Message
+		for key, value := range entry.ContextMap() {
+			encoded += key
+			encoded += fmt.Sprint(value)
+		}
+	}
+	require.Contains(t, encoded, "SIP 配置已保存")
+	require.Contains(t, encoded, "SIP 首次安装引导已暂缓")
+	require.NotContains(t, encoded, "Secret123")
 }
 
 func newSetupControllerRouter(controller *SetupController) *gin.Engine {
