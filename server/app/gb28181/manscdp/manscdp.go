@@ -4,10 +4,11 @@ import "encoding/xml"
 
 // MANSCDP 消息 CmdType 常量
 const (
-	CmdKeepalive = "Keepalive"
-	CmdCatalog   = "Catalog"
-	CmdDeviceInfo = "DeviceInfo"
-	CmdAlarm     = "Alarm"
+	CmdKeepalive      = "Keepalive"
+	CmdCatalog        = "Catalog"
+	CmdDeviceInfo     = "DeviceInfo"
+	CmdAlarm          = "Alarm"
+	CmdMobilePosition = "MobilePosition"
 )
 
 // Notify MANSCDP 通知/查询消息的通用结构(本期只关心 Keepalive)

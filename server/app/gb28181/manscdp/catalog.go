@@ -39,15 +39,16 @@ type CatalogItem struct {
 	Longitude    float64 `xml:"Longitude"`
 	Latitude     float64 `xml:"Latitude"`
 	Status       string  `xml:"Status"` // ON/OFF
+	Event        string  `xml:"Event"`  // ADD/UPDATE/DEL in Catalog NOTIFY
 }
 
 // CatalogResponse Catalog 应答(设备→平台,可能多条分包)
 type CatalogResponse struct {
-	XMLName  xml.Name `xml:"Response"`
-	CmdType  string   `xml:"CmdType"`
-	SN       int      `xml:"SN"`
-	DeviceID string   `xml:"DeviceID"`
-	SumNum   int      `xml:"SumNum"` // 通道总数(用于分包聚合判断)
+	XMLName    xml.Name `xml:"Response"`
+	CmdType    string   `xml:"CmdType"`
+	SN         int      `xml:"SN"`
+	DeviceID   string   `xml:"DeviceID"`
+	SumNum     int      `xml:"SumNum"` // 通道总数(用于分包聚合判断)
 	DeviceList struct {
 		Num   int           `xml:"Num,attr"`
 		Items []CatalogItem `xml:"Item"`

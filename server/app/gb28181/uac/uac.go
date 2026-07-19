@@ -151,6 +151,109 @@ func (u *UAC) SendMessage(ctx context.Context, deviceID, dest, transport string,
 	return nil
 }
 
+// SubscriptionRequest contains the durable dialog metadata needed to establish, renew, or cancel a SUBSCRIBE dialog.
+type SubscriptionRequest struct {
+	DeviceID    string
+	Destination string
+	Transport   string
+	Event       string
+	Body        []byte
+	Expires     int
+	CallID      string
+	LocalTag    string
+	RemoteTag   string
+	CSeq        uint
+}
+
+type SubscriptionResponse struct {
+	StatusCode int
+	Expires    int
+	CallID     string
+	LocalTag   string
+	RemoteTag  string
+	CSeq       uint
+}
+
+func (u *UAC) buildSubscribeRequest(in SubscriptionRequest) (*sip.Request, error) {
+	if strings.TrimSpace(in.DeviceID) == "" || strings.TrimSpace(in.Destination) == "" || strings.TrimSpace(in.Event) == "" {
+		return nil, fmt.Errorf("SUBSCRIBE 缺少设备、目的地址或 Event")
+	}
+	req := sip.NewRequest(sip.SUBSCRIBE, u.deviceURI(in.DeviceID))
+	req.SetBody(in.Body)
+	req.SetDestination(in.Destination)
+	req.SetTransport(normalizeTransport(in.Transport))
+	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
+	req.AppendHeader(sip.NewHeader("Event", in.Event))
+	req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(max(in.Expires, 0))))
+
+	from := u.platformFromHeader()
+	if in.LocalTag != "" {
+		from.Params.Add("tag", in.LocalTag)
+	}
+	to := &sip.ToHeader{Address: u.deviceURI(in.DeviceID), Params: sip.NewParams()}
+	if in.RemoteTag != "" {
+		to.Params.Add("tag", in.RemoteTag)
+	}
+	req.AppendHeader(from)
+	req.AppendHeader(to)
+
+	callID := in.CallID
+	if callID == "" {
+		callID = fmt.Sprintf("subscription-%d", time.Now().UnixNano())
+	}
+	callIDHeader := sip.CallIDHeader(callID)
+	req.AppendHeader(&callIDHeader)
+	cseq := in.CSeq
+	if cseq == 0 {
+		n, err := strconv.ParseUint(u.nextCSeq(), 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		cseq = uint(n)
+	}
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: uint32(cseq), MethodName: sip.SUBSCRIBE})
+	return req, nil
+}
+
+// SendSubscribe sends one SUBSCRIBE transaction and returns the dialog metadata needed for renew/cancel.
+func (u *UAC) SendSubscribe(ctx context.Context, in SubscriptionRequest) (SubscriptionResponse, error) {
+	if u == nil || u.client == nil {
+		return SubscriptionResponse{}, fmt.Errorf("SIP UAC 未就绪")
+	}
+	req, err := u.buildSubscribeRequest(in)
+	if err != nil {
+		return SubscriptionResponse{}, err
+	}
+	resp, err := u.client.Do(ctx, req)
+	if err != nil {
+		return SubscriptionResponse{}, fmt.Errorf("发送 SUBSCRIBE 失败: %w", err)
+	}
+	out := SubscriptionResponse{StatusCode: int(resp.StatusCode), Expires: in.Expires, CallID: in.CallID, LocalTag: in.LocalTag, RemoteTag: in.RemoteTag, CSeq: in.CSeq}
+	if h := resp.To(); h != nil {
+		if tag, ok := h.Params.Get("tag"); ok {
+			out.RemoteTag = tag
+		}
+	}
+	if h := req.CallID(); h != nil {
+		out.CallID = string(*h)
+	}
+	if h := req.From(); h != nil {
+		out.LocalTag, _ = h.Params.Get("tag")
+	}
+	if h := req.CSeq(); h != nil {
+		out.CSeq = uint(h.SeqNo)
+	}
+	if header := resp.GetHeaders("Expires"); len(header) > 0 {
+		if n, parseErr := strconv.Atoi(header[0].Value()); parseErr == nil && n >= 0 {
+			out.Expires = n
+		}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return out, fmt.Errorf("SUBSCRIBE 应答非2xx: %d %s", resp.StatusCode, resp.Reason)
+	}
+	return out, nil
+}
+
 // extractKeyFromRequest 从已构造的请求里取 Call-ID + CSeq 作为 metrics 配对 key
 // sipgo 在 client.Do 内部会补 Call-ID/CSeq,这里我们提前读;若不存在补一对
 func (u *UAC) extractKeyFromRequest(req *sip.Request) (string, string) {

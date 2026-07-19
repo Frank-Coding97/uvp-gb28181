@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -30,6 +31,7 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&gbmodels.GbAnomalyRecord{},
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDevice{},
+		&gbmodels.GbMobilePositionLatest{},
 		&gbmodels.GbDeviceStatusEvent{},
 		&basemodels.SysDepartment{},
 		&basemodels.SysRole{},
@@ -112,6 +114,21 @@ func TestMapMarkers_UsesViewportAndChannelFilters(t *testing.T) {
 	list := data["list"].([]any)
 	assert.Len(t, list, 1)
 	assert.Equal(t, "37011200001310000001", list[0].(map[string]any)["channelId"])
+}
+
+func TestMapMarkers_PrefersLatestPositionAndReportsStaleness(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	deviceID, channelID, _ := seedDevicesAndChannels(t, db)
+	old := time.Now().Add(-91 * time.Second)
+	require.NoError(t, db.Create(&gbmodels.GbMobilePositionLatest{DeviceID: deviceID, SourceCode: "37011200001310000001", ChannelID: &channelID, EventTime: old, ReceivedAt: old, Latitude: 35.1, Longitude: 118.2}).Error)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/map/markers", nil)
+	r.ServeHTTP(w, req)
+	data := unmarshal(t, w)["data"].(map[string]any)
+	marker := data["list"].([]any)[0].(map[string]any)
+	assert.Equal(t, 35.1, marker["latitude"])
+	assert.Equal(t, 118.2, marker["longitude"])
+	assert.Equal(t, true, marker["positionStale"])
 }
 
 // ---------- B2 devicemgmt ----------

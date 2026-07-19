@@ -3,6 +3,7 @@ package controllers
 import (
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -31,13 +32,13 @@ func (mc *MapController) SetDB(p func() *gorm.DB) { mc.db = p }
 // applyMapFilters keeps map results consistent with the channel list filters.
 func applyMapFilters(c *gin.Context, db *gorm.DB, q *gorm.DB) *gorm.DB {
 	if s := c.Query("status"); s == "online" {
-		q = q.Where("status = ?", gbmodels.ChannelStatusOnline)
+		q = q.Where("gb_channel.status = ?", gbmodels.ChannelStatusOnline)
 	} else if s == "offline" {
-		q = q.Where("status = ?", gbmodels.ChannelStatusOffline)
+		q = q.Where("gb_channel.status = ?", gbmodels.ChannelStatusOffline)
 	}
 	if kw := strings.TrimSpace(c.Query("q")); kw != "" {
 		like := "%" + kw + "%"
-		q = q.Where("name LIKE ? OR alias LIKE ? OR channel_id LIKE ?", like, like, like)
+		q = q.Where("gb_channel.name LIKE ? OR gb_channel.alias LIKE ? OR gb_channel.channel_id LIKE ?", like, like, like)
 	}
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
 		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
@@ -47,7 +48,7 @@ func applyMapFilters(c *gin.Context, db *gorm.DB, q *gorm.DB) *gorm.DB {
 				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
 					Where("node_type = ? AND path LIKE ?", gbmodels.NodeTypeChannel, root.Path+"%").Pluck("channel_id", &channelIDs)
 				if len(channelIDs) > 0 {
-					q = q.Where("id IN ?", channelIDs)
+					q = q.Where("gb_channel.id IN ?", channelIDs)
 				} else {
 					q = q.Where("1=0")
 				}
@@ -58,12 +59,33 @@ func applyMapFilters(c *gin.Context, db *gorm.DB, q *gorm.DB) *gorm.DB {
 }
 
 type markerVO struct {
-	ID        uint    `json:"id"`
-	ChannelID string  `json:"channelId"`
-	Name      string  `json:"name"`
-	Latitude  float64 `json:"latitude"`
-	Longitude float64 `json:"longitude"`
-	Status    int8    `json:"status"`
+	ID                uint       `json:"id"`
+	ChannelID         string     `json:"channelId"`
+	Name              string     `json:"name"`
+	Latitude          float64    `json:"latitude"`
+	Longitude         float64    `json:"longitude"`
+	Status            int8       `json:"status"`
+	PositionUpdatedAt *time.Time `json:"positionUpdatedAt,omitempty"`
+	PositionStale     bool       `json:"positionStale"`
+}
+
+const mapCoordinateJoin = "LEFT JOIN gb_mobile_position_latest AS position_latest ON position_latest.channel_id = gb_channel.id"
+
+func latestPositionByChannel(c *gin.Context, db *gorm.DB, ids []uint) map[uint]gbmodels.GbMobilePositionLatest {
+	if len(ids) == 0 {
+		return nil
+	}
+	var positions []gbmodels.GbMobilePositionLatest
+	if err := db.WithContext(c).Where("channel_id IN ?", ids).Find(&positions).Error; err != nil {
+		return nil
+	}
+	out := make(map[uint]gbmodels.GbMobilePositionLatest, len(positions))
+	for _, position := range positions {
+		if position.ChannelID != nil {
+			out[*position.ChannelID] = position
+		}
+	}
+	return out
 }
 
 // Markers 视野矩形内的 marker(plan §4.2 B3.1)
@@ -84,14 +106,15 @@ func (mc *MapController) Markers(c *gin.Context) {
 		limit = 500
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
-		Where("latitude != 0 AND longitude != 0")
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Joins(mapCoordinateJoin).
+		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
+		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
 	if maxLat > minLat {
-		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
+		q = q.Where("COALESCE(position_latest.latitude, gb_channel.latitude) BETWEEN ? AND ?", minLat, maxLat)
 	}
 	if maxLng > minLng {
-		q = q.Where("longitude BETWEEN ? AND ?", minLng, maxLng)
+		q = q.Where("COALESCE(position_latest.longitude, gb_channel.longitude) BETWEEN ? AND ?", minLng, maxLng)
 	}
 
 	var list []gbmodels.GbChannel
@@ -100,16 +123,27 @@ func (mc *MapController) Markers(c *gin.Context) {
 		return
 	}
 
+	ids := make([]uint, 0, len(list))
+	for _, channel := range list {
+		ids = append(ids, channel.ID)
+	}
+	positions := latestPositionByChannel(c, db, ids)
+	now := time.Now()
 	out := make([]markerVO, 0, len(list))
 	for _, ch := range list {
-		out = append(out, markerVO{
+		marker := markerVO{
 			ID:        ch.ID,
 			ChannelID: ch.ChannelID,
 			Name:      ch.Name,
 			Latitude:  ch.Latitude,
 			Longitude: ch.Longitude,
 			Status:    ch.Status,
-		})
+		}
+		if position, ok := positions[ch.ID]; ok {
+			marker.PositionUpdatedAt = &position.ReceivedAt
+			marker.PositionStale = position.ReceivedAt.Before(now.Add(-90 * time.Second))
+		}
+		out = append(out, marker)
 	}
 	mc.Success(c, gin.H{"list": out, "total": len(out)})
 }
@@ -141,14 +175,15 @@ func (mc *MapController) Clusters(c *gin.Context) {
 	minLng, _ := strconv.ParseFloat(c.Query("minLng"), 64)
 	maxLng, _ := strconv.ParseFloat(c.Query("maxLng"), 64)
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
-		Where("latitude != 0 AND longitude != 0")
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Joins(mapCoordinateJoin).
+		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
+		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
 	if maxLat > minLat {
-		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
+		q = q.Where("COALESCE(position_latest.latitude, gb_channel.latitude) BETWEEN ? AND ?", minLat, maxLat)
 	}
 	if maxLng > minLng {
-		q = q.Where("longitude BETWEEN ? AND ?", minLng, maxLng)
+		q = q.Where("COALESCE(position_latest.longitude, gb_channel.longitude) BETWEEN ? AND ?", minLng, maxLng)
 	}
 
 	var list []gbmodels.GbChannel
@@ -200,8 +235,8 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 		return
 	}
 	var count int64
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c))
-	q = applyMapFilters(c, db, q).Where("(latitude = 0 OR longitude = 0)")
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Joins(mapCoordinateJoin)
+	q = applyMapFilters(c, db, q).Where("(COALESCE(position_latest.latitude, gb_channel.latitude) = 0 OR COALESCE(position_latest.longitude, gb_channel.longitude) = 0)")
 	if err := q.Count(&count).Error; err != nil {
 		mc.FailAndAbort(c, "查询失败", err)
 		return
