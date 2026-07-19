@@ -92,6 +92,12 @@ export interface SipPlatformInfo {
     transport: string[];
     passwordMasked: string;
     registerUri: string;
+    listenIp: string;
+    advertiseIp: string;
+    deploymentMode?: SipDeploymentMode;
+    configStatus: "configured" | "unconfigured";
+    runtime: SipRuntimeStatus;
+    restartRequired: boolean;
 }
 
 export const fetchSipPlatformInfo = () =>
