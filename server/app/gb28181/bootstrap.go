@@ -11,6 +11,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
@@ -183,6 +184,7 @@ func Start() {
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
+		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
 		subscriptionScheduler = subscribe.NewScheduler(subscriptionService, 30*time.Second)
 		subscriptionScheduler.Start(context.Background())
 		srv.SetSubscriptionNotifier(subscriptionService)
