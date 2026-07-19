@@ -70,7 +70,7 @@ func (s *Server) registerHandlers() {
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
 	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
-	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.IP, s.cfg.SIP.Port); err != nil {
+	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port); err != nil {
 		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
 	} else {
 		s.uac = u
@@ -102,7 +102,7 @@ func (s *Server) Start() error {
 	s.cancel = cancel
 	s.started = true
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.SIP.IP, s.cfg.SIP.Port)
+	addr := fmt.Sprintf("%s:%d", s.cfg.SIP.ListenIP, s.cfg.SIP.Port)
 	for _, tran := range s.cfg.SIP.Transport {
 		t := tran
 		s.wg.Add(1)

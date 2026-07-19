@@ -33,17 +33,21 @@ type UAC struct {
 // 关键:不要 WithClientPort 抢 server 已绑定的 5061,否则 client 走备选 socket
 // 设备应答会回到 server 端口但 client dialog 收不到 → WaitAnswer 永久阻塞
 // 让 sipgo 默认共享 server 的 transport;Contact 头我们手动写明 sipIP:sipPort
-func New(ua *sipgo.UserAgent, serverID, domain, sipIP string, sipPort int) (*UAC, error) {
-	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname(sipIP))
+func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int) (*UAC, error) {
+	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname(advertiseIP))
 	if err != nil {
 		return nil, fmt.Errorf("创建 UAC client 失败: %w", err)
 	}
 	// Contact 头:平台自身地址,设备回包/BYE 用(端口写 server 监听端口,确保设备应答能回)
-	contact := sip.ContactHeader{
-		Address: sip.Uri{User: serverID, Host: sipIP, Port: sipPort},
-	}
+	contact := platformContact(serverID, advertiseIP, sipPort)
 	dialogUA := sipgo.NewDialogClientCache(client, contact)
 	return &UAC{client: client, dialogUA: dialogUA, serverID: serverID, domain: domain}, nil
+}
+
+func platformContact(serverID, advertiseIP string, sipPort int) sip.ContactHeader {
+	return sip.ContactHeader{
+		Address: sip.Uri{User: serverID, Host: advertiseIP, Port: sipPort},
+	}
 }
 
 // SetRecorder 注入指标 Recorder(可选)

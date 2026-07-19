@@ -38,11 +38,11 @@ func (pc *PlatformController) Info(c *gin.Context) {
 		Enabled:        cfg.Enabled,
 		ServerID:       cfg.SIP.ServerID,
 		Domain:         cfg.SIP.Domain,
-		SIPIP:          cfg.SIP.IP,
+		SIPIP:          cfg.SIP.AdvertiseIP,
 		SIPPort:        cfg.SIP.Port,
 		Transport:      cfg.SIP.Transport,
 		PasswordMasked: maskPassword(cfg.SIP.Password),
-		RegisterURI:    registerURI(cfg.SIP.ServerID, cfg.SIP.Domain, cfg.SIP.IP, cfg.SIP.Port),
+		RegisterURI:    registerURI(cfg.SIP.ServerID, cfg.SIP.Domain, cfg.SIP.AdvertiseIP, cfg.SIP.Port),
 	})
 }
 
