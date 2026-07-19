@@ -192,6 +192,8 @@ const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
 const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
+const snapshotPreviewVisible = ref(false);
+const snapshotPreviewChannel = ref<ChannelVO | null>(null);
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -799,6 +801,20 @@ function playChannel(record: ChannelVO) {
     controlConsoleChannel.value = record;
     controlConsoleVisible.value = true;
 }
+function openSnapshotPreview(record: ChannelVO) {
+    snapshotPreviewChannel.value = record;
+    snapshotPreviewVisible.value = true;
+}
+function isInteractiveDblclick(event: MouseEvent) {
+    const target = event.target;
+    return target instanceof Element && Boolean(target.closest("button, a, input, textarea, select, [role='button'], [role='combobox']"));
+}
+function onDeviceDblclick(record: DeviceVO, event: MouseEvent) {
+    if (!isInteractiveDblclick(event)) showDeviceChannels(record);
+}
+function onChannelDblclick(record: ChannelVO, event: MouseEvent) {
+    if (!isInteractiveDblclick(event)) playChannel(record);
+}
 
 const deleting = ref(false);
 const refreshingCatalog = reactive<Record<number, boolean>>({});
@@ -1325,6 +1341,7 @@ onUnmounted(() => {
                             class="uvp-data-table"
                             @page-change="onPageChange"
                             @page-size-change="onPageSizeChange"
+                            @row-dblclick="onChannelDblclick"
                         >
                             <template #columns>
                                 <a-table-column title="通道名称" :width="180">
@@ -1437,6 +1454,7 @@ onUnmounted(() => {
                             class="uvp-data-table device-data-table"
                             @page-change="onPageChange"
                             @page-size-change="onPageSizeChange"
+                            @row-dblclick="onDeviceDblclick"
                         >
                             <template #columns>
                                 <a-table-column title="设备名称" :width="150">
@@ -1551,7 +1569,7 @@ onUnmounted(() => {
                     <div v-else-if="viewMode === 'card'" class="view-body card-view">
                         <div class="card-grid">
                             <template v-if="assetKind === 'device'">
-                        <article v-for="item in devices" :key="item.id" class="device-card device-summary-card" @dblclick="openDevice(item)">
+                        <article v-for="item in devices" :key="item.id" class="device-card device-summary-card" @dblclick="onDeviceDblclick(item, $event)">
                             <div class="device-card-head">
                                 <span class="device-card-icon"><Camera :size="18" /></span>
                                 <div class="device-card-title">
@@ -1617,14 +1635,14 @@ onUnmounted(() => {
                         </article>
                             </template>
                             <template v-else>
-                        <article v-for="item in channels" :key="item.id" class="device-card channel-summary-card" @dblclick="openChannel(item)">
+                        <article v-for="item in channels" :key="item.id" class="device-card channel-summary-card" @dblclick="onChannelDblclick(item, $event)">
                             <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
                                 <div class="snapshot-empty">
                                     <Video :size="30" />
                                     <span>暂无快照</span>
                                 </div>
-                                <a-tooltip content="查看详情" position="top">
-                                    <button class="snapshot-detail" type="button" @click.stop="openChannel(item)"><Eye :size="15" /></button>
+                                <a-tooltip content="放大快照" position="top">
+                                    <button class="snapshot-detail" type="button" @click.stop="openSnapshotPreview(item)"><Eye :size="15" /></button>
                                 </a-tooltip>
                             </div>
                             <div class="channel-card-body">
@@ -1872,6 +1890,23 @@ onUnmounted(() => {
                 v-model:visible="controlConsoleVisible"
                 :channel="controlConsoleChannel"
             />
+
+            <a-modal
+                v-model:visible="snapshotPreviewVisible"
+                modal-class="uvp-system-dialog snapshot-preview-dialog"
+                title="通道快照"
+                :width="760"
+                :footer="false"
+                unmount-on-close
+            >
+                <div v-if="snapshotPreviewChannel" class="channel-snapshot snapshot-preview-stage">
+                    <div class="snapshot-empty">
+                        <Video :size="48" />
+                        <strong>{{ displayName(snapshotPreviewChannel) }}</strong>
+                        <span>暂无快照</span>
+                    </div>
+                </div>
+            </a-modal>
 
             <a-modal
                 v-model:visible="statusEventVisible"
@@ -3024,6 +3059,17 @@ onUnmounted(() => {
     font-size: 12px;
 }
 .snapshot-empty svg { opacity: 0.7; }
+.snapshot-preview-stage {
+    height: min(58vh, 520px);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 8px;
+}
+.snapshot-preview-stage .snapshot-empty { gap: 8px; }
+.snapshot-preview-stage .snapshot-empty strong {
+    color: var(--uvp-text-primary);
+    font-size: 15px;
+    font-weight: 600;
+}
 .snapshot-detail {
     position: absolute;
     z-index: 1;
