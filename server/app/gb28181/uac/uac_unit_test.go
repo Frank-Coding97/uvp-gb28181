@@ -133,6 +133,34 @@ func TestBuildInviteRequestTargetsChannel(t *testing.T) {
 	}
 }
 
+func TestBuildInfoRequestTargetsChannel(t *testing.T) {
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	s := &Session{
+		DeviceID: "34020000001320000001", ChannelID: "34020000001320000020",
+		Dest: "192.168.10.108:5060", Transport: "tcp",
+	}
+	req := u.buildInfoRequest(s, []byte("<Control/>"))
+	if req.Method != sip.INFO || req.Recipient.User != s.ChannelID {
+		t.Fatalf("INFO target = %s %s", req.Method, req.Recipient.User)
+	}
+	if req.Destination() != s.Dest || req.Transport() != "TCP" {
+		t.Fatalf("INFO transport target = %s %s", req.Destination(), req.Transport())
+	}
+	if got := string(req.Body()); got != "<Control/>" {
+		t.Fatalf("INFO body=%q", got)
+	}
+	if headers := req.GetHeaders("Content-Type"); len(headers) != 1 || headers[0].Value() != "Application/MANSCDP+xml" {
+		t.Fatal("INFO should carry MANSCDP content type")
+	}
+}
+
+func TestInfoRejectsUnknownSession(t *testing.T) {
+	u := &UAC{}
+	if err := u.Info(t.Context(), NewSessionManager(), "missing", []byte("<Control/>")); err == nil {
+		t.Fatal("Info should reject a missing session")
+	}
+}
+
 func TestBuildSubscribeRequest_ReusesDialogMetadata(t *testing.T) {
 	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
 	req, err := u.buildSubscribeRequest(SubscriptionRequest{

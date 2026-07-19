@@ -338,6 +338,37 @@ func (u *UAC) buildInviteRequest(s *Session, sdpBody string) *sip.Request {
 	return req
 }
 
+func (u *UAC) buildInfoRequest(s *Session, body []byte) *sip.Request {
+	req := sip.NewRequest(sip.INFO, u.deviceURI(s.ChannelID))
+	req.SetBody(body)
+	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
+	req.SetDestination(s.Dest)
+	req.SetTransport(normalizeTransport(s.Transport))
+	return req
+}
+
+// Info sends an in-dialog GB28181 playback control request.
+func (u *UAC) Info(ctx context.Context, m *SessionManager, streamID string, body []byte) error {
+	if m == nil || strings.TrimSpace(streamID) == "" {
+		return fmt.Errorf("回放会话不存在")
+	}
+	s := m.Get(streamID)
+	if s == nil || s.dialog == nil || s.State != StateEstablished {
+		return fmt.Errorf("回放会话不存在或已结束")
+	}
+	resp, err := s.dialog.Do(ctx, u.buildInfoRequest(s, body))
+	if err != nil {
+		return fmt.Errorf("发送 INFO 失败: %w", err)
+	}
+	if resp == nil || resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp == nil {
+			return fmt.Errorf("INFO 未收到应答")
+		}
+		return fmt.Errorf("INFO 应答非2xx: %d %s", resp.StatusCode, resp.Reason)
+	}
+	return nil
+}
+
 // Invite 发起点播:INVITE → 等应答 → ACK,会话建立
 // 关键 1:sipgo v1.4 的 WaitAnswer 内部 select 不响应外部 ctx.Done(),
 //
