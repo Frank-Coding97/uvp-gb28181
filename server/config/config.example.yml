@@ -235,6 +235,18 @@ gb28181:
     domain: "3402000000"     # SIP 域(前 10 位行政区划)
     serverid: "34020000002000000001" # 平台国标编码(20 位)
     password: "CHANGE_ME"    # ⚠️ 统一接入密码,部署前改成项目专属
+  # SIP 原始报文诊断模块。默认关闭；关闭时不连接 ClickHouse，也不启动采集 worker。
+  trace:
+    enabled: false
+    address: "127.0.0.1:9000"
+    database: "uvp_sip_trace"
+    username: "uvp_trace"
+    password_env: "UVP_SIP_TRACE_CLICKHOUSE_PASSWORD"
+    tls: false
+    queue_capacity: 8192
+    batch_size: 500
+    flush_interval_ms: 500
+    encryption_key_env: "UVP_SIP_TRACE_ENCRYPTION_KEY"
   device:
     default_owner_dept_id: 1 # 首次自动建档默认归属部门；建议改成"待分配/接入池"部门
     keepalive_interval: 60   # 设备心跳周期(秒)

@@ -6,9 +6,24 @@ import "uvplatform.cn/uvp-gb28181/app/global/app"
 type Config struct {
 	Enabled bool
 	SIP     SIPConfig
+	Trace   TraceConfig
 	Device  DeviceConfig
 	ZLM     ZLMConfig
 	Media   MediaConfig
+}
+
+// TraceConfig controls the optional SIP trace module.
+type TraceConfig struct {
+	Enabled          bool
+	Address          string
+	Database         string
+	Username         string
+	PasswordEnv      string
+	TLS              bool
+	QueueCapacity    int
+	BatchSize        int
+	FlushIntervalMS  int
+	EncryptionKeyEnv string
 }
 
 // ZLMConfig ZLMediaKit 媒体服务器配置(数据面)
@@ -46,8 +61,15 @@ type DeviceConfig struct {
 }
 
 // Load 从全局 ConfigYml 读取 gb28181 配置
-func Load() Config {
-	c := app.ConfigYml
+type valueSource interface {
+	GetBool(string) bool
+	GetString(string) string
+	GetInt(string) int
+	GetStringSlice(string) []string
+}
+
+// LoadFrom reads GB28181 settings from a Viper-compatible value source.
+func LoadFrom(c valueSource) Config {
 	return Config{
 		Enabled: c.GetBool("gb28181.enabled"),
 		SIP: SIPConfig{
@@ -57,6 +79,18 @@ func Load() Config {
 			Domain:    c.GetString("gb28181.sip.domain"),
 			ServerID:  c.GetString("gb28181.sip.serverid"),
 			Password:  c.GetString("gb28181.sip.password"),
+		},
+		Trace: TraceConfig{
+			Enabled:          c.GetBool("gb28181.trace.enabled"),
+			Address:          c.GetString("gb28181.trace.address"),
+			Database:         c.GetString("gb28181.trace.database"),
+			Username:         c.GetString("gb28181.trace.username"),
+			PasswordEnv:      c.GetString("gb28181.trace.password_env"),
+			TLS:              c.GetBool("gb28181.trace.tls"),
+			QueueCapacity:    c.GetInt("gb28181.trace.queue_capacity"),
+			BatchSize:        c.GetInt("gb28181.trace.batch_size"),
+			FlushIntervalMS:  c.GetInt("gb28181.trace.flush_interval_ms"),
+			EncryptionKeyEnv: c.GetString("gb28181.trace.encryption_key_env"),
 		},
 		Device: DeviceConfig{
 			KeepaliveInterval:     c.GetInt("gb28181.device.keepalive_interval"),
@@ -77,4 +111,9 @@ func Load() Config {
 			RTPServerTimeout:        c.GetInt("gb28181.media.rtpservertimeout"),
 		},
 	}
+}
+
+// Load reads GB28181 settings from the global application configuration.
+func Load() Config {
+	return LoadFrom(app.ConfigYml)
 }
