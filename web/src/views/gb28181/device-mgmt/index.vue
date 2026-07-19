@@ -4,6 +4,7 @@ import { Message, Modal } from "@arco-design/web-vue";
 import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
+    Bell,
     Building2,
     Camera,
     ChevronRight,
@@ -1546,9 +1547,10 @@ onUnmounted(() => {
                                                 <template #icon><Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" /><RefreshCcw v-else :size="13" /></template>
                                                 <span>刷新</span>
                                             </a-link>
-                                            <a-tooltip content="订阅管理" position="top">
-                                                <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(record)"><RadioTower :size="13" /></button>
-                                            </a-tooltip>
+                                            <a-link class="uvp-table-action uvp-table-action--subscribe" @click.stop="openSubscriptionManager(record)">
+                                                <template #icon><Bell :size="13" /></template>
+                                                <span>订阅</span>
+                                            </a-link>
                                             <a-dropdown trigger="click" position="br">
                                                 <a-link class="uvp-table-action uvp-table-action--more">
                                                     <span>更多</span>
@@ -1637,7 +1639,7 @@ onUnmounted(() => {
                                     </button>
                                 </a-tooltip>
                                 <a-tooltip content="订阅管理" position="top">
-                                    <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(item)"><RadioTower :size="13" /></button>
+                                    <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
                                 </a-tooltip>
                                 <a-tooltip content="编辑设备" position="top">
                                     <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button>
@@ -1876,7 +1878,7 @@ onUnmounted(() => {
 
                         <div class="drawer-foot">
                             <a-button type="primary" @click="openSubscriptionManager(deviceDetail)">
-                                <template #icon><RadioTower :size="14" /></template>
+                                <template #icon><Bell :size="14" /></template>
                                 <template #default>管理订阅</template>
                             </a-button>
                             <a-button @click="handleRefreshDeviceCatalog(deviceDetail)">
@@ -2828,6 +2830,8 @@ onUnmounted(() => {
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail:hover) { color: #0e7490; background: rgb(14 116 144 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync) { color: #0f766e; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync:hover) { color: #0f675f; background: rgb(15 118 110 / 8%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe) { color: var(--uvp-brand); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe:hover) { color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) { color: #b7791f; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) { color: #9a6b18; background: rgb(183 121 31 / 9%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more) { color: #6b4f9b; }
