@@ -2,6 +2,7 @@ package models
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -116,26 +117,53 @@ func UpdateStatus(c context.Context, deviceID string, status int8) error {
 		Update("status", status).Error
 }
 
-// TouchKeepalive 记录一次心跳:更新 keepalive_time 事实 + 刷新 status 缓存为在线
-func TouchKeepalive(c context.Context, deviceID string) error {
+// TouchKeepalive 记录一次心跳:更新 keepalive_time 事实 + 刷新 status 缓存为在线。
+// 返回 true 表示本次心跳让设备从离线恢复,在线恢复方据此重新拉取 Catalog。
+func TouchKeepalive(c context.Context, deviceID string) (bool, error) {
 	now := time.Now()
-	return app.DB().WithContext(c).Model(&GbDevice{}).
-		Where("device_id = ?", deviceID).
+	db := app.DB().WithContext(c)
+	restored := db.Model(&GbDevice{}).
+		Where("device_id = ? AND (status IS NULL OR status <> ?)", deviceID, DeviceStatusOnline).
 		Updates(map[string]interface{}{
 			"keepalive_time": now,
 			"status":         DeviceStatusOnline,
-		}).Error
+		})
+	if restored.Error != nil {
+		return false, restored.Error
+	}
+	if restored.RowsAffected > 0 {
+		return true, nil
+	}
+	return false, db.Model(&GbDevice{}).
+		Where("device_id = ?", deviceID).
+		Update("keepalive_time", now).Error
 }
 
-// MarkOffline 置离线:翻转 status 缓存 + 记录 offline_at(为离线事件铺路)
+// MarkOffline 置离线:设备与所属通道必须原子翻转,避免列表出现设备离线但通道在线。
+// 通道重新上线必须等待设备恢复后的 Catalog ON/OFF,不能凭设备上线直接推断。
 func MarkOffline(c context.Context, deviceID string) error {
 	now := time.Now()
-	return app.DB().WithContext(c).Model(&GbDevice{}).
-		Where("device_id = ?", deviceID).
-		Updates(map[string]interface{}{
-			"status":     DeviceStatusOffline,
-			"offline_at": now,
-		}).Error
+	return app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+		deviceUpdate := tx.Model(&GbDevice{}).
+			Where("device_id = ?", deviceID).
+			Updates(map[string]interface{}{
+				"status":     DeviceStatusOffline,
+				"offline_at": now,
+			})
+		if deviceUpdate.Error != nil {
+			return deviceUpdate.Error
+		}
+		channelUpdate := tx.Model(&GbChannel{}).
+			Where("device_id = ? AND status <> ?", deviceID, ChannelStatusOffline).
+			Update("status", ChannelStatusOffline)
+		if channelUpdate.Error != nil {
+			return channelUpdate.Error
+		}
+		if deviceUpdate.RowsAffected == 0 {
+			return fmt.Errorf("设备 %s 不存在,注销未更新状态", deviceID)
+		}
+		return nil
+	})
 }
 
 // ListStaleOnline 查询 status=1(缓存在线)但心跳已超时的设备(扫描器用)

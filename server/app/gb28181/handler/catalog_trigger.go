@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// CatalogTrigger 注册成功后触发 Catalog 查询的能力(便于注入与测试)
+// CatalogTrigger 设备首次注册或从离线恢复后触发 Catalog 查询的能力(便于注入与测试)
 // transport 需匹配设备注册时的传输协议(UDP/TCP),空值兜底 UDP
 type CatalogTrigger interface {
 	Trigger(ctx context.Context, deviceID, dest, transport string)

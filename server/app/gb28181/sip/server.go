@@ -66,6 +66,7 @@ func NewServer(cfg gbconfig.Config) (*Server, error) {
 // registerHandlers 注册 SIP 方法处理器
 func (s *Server) registerHandlers() {
 	regHandler := handler.NewRegisterHandler(s.cfg)
+	msgHandler := handler.NewMessageHandler(s.cfg)
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
 	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
@@ -73,21 +74,25 @@ func (s *Server) registerHandlers() {
 		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
 	} else {
 		s.uac = u
-		regHandler.SetCatalogTrigger(handler.NewUACCatalogTrigger(u))
+		catalogTrigger := handler.NewUACCatalogTrigger(u)
+		regHandler.SetCatalogTrigger(catalogTrigger)
+		msgHandler.SetCatalogTrigger(catalogTrigger)
 		regHandler.SetDeviceInfoTrigger(handler.NewUACDeviceInfoTrigger(u))
 	}
 
 	s.regH = regHandler
 	s.srv.OnRegister(regHandler.Handle)
-	msgHandler := handler.NewMessageHandler(s.cfg)
 	s.msgH = msgHandler
 	s.srv.OnMessage(msgHandler.Handle)
 }
 
-// SetCatalogTrigger 替换默认 Catalog 触发器(主要给测试用,生产路径走 registerHandlers 自动注入)
+// SetCatalogTrigger 替换默认 Catalog 触发器(主要给测试用),同时覆盖注册与心跳恢复路径。
 func (s *Server) SetCatalogTrigger(t handler.CatalogTrigger) {
 	if s.regH != nil {
 		s.regH.SetCatalogTrigger(t)
+	}
+	if s.msgH != nil {
+		s.msgH.SetCatalogTrigger(t)
 	}
 }
 

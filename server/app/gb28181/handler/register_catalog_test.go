@@ -9,6 +9,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // fakeTrigger 计数版,验证调用次数(替代真实 UAC,绕开网络)
@@ -120,6 +121,97 @@ func TestRegisterReOnlineTriggersCatalog(t *testing.T) {
 	}
 	if !waitCalls(&ft.calls, 2, 1500*time.Millisecond) {
 		t.Errorf("离线后再注册应再触发,期望 2 实际 %d", ft.calls.Load())
+	}
+}
+
+// TestKeepaliveReOnlineTriggersCatalog 离线设备仅靠 Keepalive 恢复在线时,
+// 也必须重新拉 Catalog,不能只恢复设备状态而让通道永远停在离线。
+func TestKeepaliveReOnlineTriggersCatalog(t *testing.T) {
+	setupEnv(t)
+	const did = "34020000001320000094"
+	cleanupDevice(did)
+	defer cleanupDevice(did)
+	defer app.GormDbMysql.Unscoped().Where("device_id = ?", did).Delete(&gbmodels.GbChannel{})
+
+	ft := &fakeTrigger{}
+	stop := startServerWithTrigger(t, ft)
+	defer stop()
+
+	if code := doRegister(t, did, testPassword, 3600); code != 200 {
+		t.Fatalf("第一次注册失败: %d", code)
+	}
+	if !waitCalls(&ft.calls, 1, 1500*time.Millisecond) {
+		t.Fatalf("首次应触发 1 次,实际 %d", ft.calls.Load())
+	}
+	if err := app.GormDbMysql.Create(&gbmodels.GbChannel{
+		DeviceID: did, ChannelID: "34020000001310000094", Name: "测试通道",
+		Status: gbmodels.ChannelStatusOnline,
+	}).Error; err != nil {
+		t.Fatalf("创建测试通道失败: %v", err)
+	}
+	if err := gbmodels.MarkOffline(context.Background(), did); err != nil {
+		t.Fatalf("模拟离线失败: %v", err)
+	}
+
+	var channel gbmodels.GbChannel
+	if err := app.GormDbMysql.Where("device_id = ?", did).First(&channel).Error; err != nil {
+		t.Fatalf("查询测试通道失败: %v", err)
+	}
+	if channel.Status != gbmodels.ChannelStatusOffline {
+		t.Fatalf("设备离线后通道应为离线,实际 status=%d", channel.Status)
+	}
+
+	if code := sendKeepalive(t, did); code != 200 {
+		t.Fatalf("离线后心跳期望 200,实际 %d", code)
+	}
+	if !waitCalls(&ft.calls, 2, 1500*time.Millisecond) {
+		t.Fatalf("离线后心跳恢复应再次触发 Catalog,实际 %d", ft.calls.Load())
+	}
+
+	if err := app.GormDbMysql.First(&channel, channel.ID).Error; err != nil {
+		t.Fatalf("重新查询测试通道失败: %v", err)
+	}
+	if channel.Status != gbmodels.ChannelStatusOffline {
+		t.Fatalf("Catalog 返回前不应凭设备上线直接恢复通道,实际 status=%d", channel.Status)
+	}
+}
+
+// TestRegisterUnregisterMarksDeviceOffline REGISTER Expires=0 后设备与通道都应立即离线。
+func TestRegisterUnregisterMarksDeviceOffline(t *testing.T) {
+	setupEnv(t)
+	const did = "34020000001320000095"
+	cleanupDevice(did)
+	defer cleanupDevice(did)
+	defer app.GormDbMysql.Unscoped().Where("device_id = ?", did).Delete(&gbmodels.GbChannel{})
+
+	stop := startTestServer(t, testCfg())
+	defer stop()
+	if code := doRegister(t, did, testPassword, 3600); code != 200 {
+		t.Fatalf("首次注册失败: %d", code)
+	}
+	if err := app.GormDbMysql.Create(&gbmodels.GbChannel{
+		DeviceID: did, ChannelID: "34020000001310000095", Name: "测试通道",
+		Status: gbmodels.ChannelStatusOnline,
+	}).Error; err != nil {
+		t.Fatalf("创建测试通道失败: %v", err)
+	}
+
+	if code := doRegister(t, did, testPassword, 0); code != 200 {
+		t.Fatalf("注销请求失败: %d", code)
+	}
+	d, err := gbmodels.FindByDeviceID(context.Background(), did)
+	if err != nil || d == nil {
+		t.Fatalf("查询注销后的设备失败: err=%v device=%v", err, d)
+	}
+	if d.Status != gbmodels.DeviceStatusOffline {
+		t.Fatalf("注销后设备应为离线,实际 status=%d", d.Status)
+	}
+	var channel gbmodels.GbChannel
+	if err := app.GormDbMysql.Where("device_id = ?", did).First(&channel).Error; err != nil {
+		t.Fatalf("查询注销后的通道失败: %v", err)
+	}
+	if channel.Status != gbmodels.ChannelStatusOffline {
+		t.Fatalf("注销后通道应为离线,实际 status=%d", channel.Status)
 	}
 }
 

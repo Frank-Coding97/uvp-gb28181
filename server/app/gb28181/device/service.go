@@ -86,7 +86,8 @@ func HandleUnregister(ctx context.Context, deviceID string) error {
 	return gbmodels.MarkOffline(ctx, deviceID)
 }
 
-// Keepalive 处理心跳:更新 keepalive_time 事实 + 刷新 status 缓存
-func Keepalive(ctx context.Context, deviceID string) error {
+// Keepalive 处理心跳:更新 keepalive_time 事实 + 刷新 status 缓存。
+// 返回 true 表示设备从离线恢复,调用方应重新查询 Catalog 恢复通道状态。
+func Keepalive(ctx context.Context, deviceID string) (bool, error) {
 	return gbmodels.TouchKeepalive(ctx, deviceID)
 }

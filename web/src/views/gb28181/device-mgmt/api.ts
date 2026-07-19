@@ -143,6 +143,7 @@ export interface DeviceQuery {
 
 export interface ChannelQuery {
     q?: string;
+    deviceId?: string;
     nodeId?: number;
     status?: OnlineStatus;
     ptz?: "1";

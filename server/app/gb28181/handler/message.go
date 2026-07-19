@@ -17,7 +17,8 @@ import (
 
 // MessageHandler 处理 MESSAGE(MANSCDP):本期处理 Keepalive 心跳
 type MessageHandler struct {
-	recorder metrics.Recorder // 可选:埋点 SIP 事务
+	recorder       metrics.Recorder // 可选:埋点 SIP 事务
+	catalogTrigger CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
 }
 
 // NewMessageHandler 创建消息处理器
@@ -28,6 +29,11 @@ func NewMessageHandler(cfg gbconfig.Config) *MessageHandler {
 // SetRecorder 注入指标 Recorder(可选)
 func (h *MessageHandler) SetRecorder(r metrics.Recorder) {
 	h.recorder = r
+}
+
+// SetCatalogTrigger 注入设备重新上线后的 Catalog 触发器。
+func (h *MessageHandler) SetCatalogTrigger(t CatalogTrigger) {
+	h.catalogTrigger = t
 }
 
 // txKindFromCmd 根据 MANSCDP CmdType 映射 metrics 事务类型
@@ -73,8 +79,13 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		ctx := context.Background()
 		switch head.CmdType {
 		case manscdp.CmdKeepalive:
-			if err := device.Keepalive(ctx, head.DeviceID); err != nil {
+			restored, err := device.Keepalive(ctx, head.DeviceID)
+			if err != nil {
 				app.ZapLog.Error("GB28181 心跳处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+			} else if restored && h.catalogTrigger != nil && req.Source() != "" {
+				// 离线时通道已统一置 OFF。设备恢复只证明 SIP 可达,
+				// 通道必须等待新的 Catalog ON/OFF 后再恢复。
+				h.catalogTrigger.Trigger(ctx, head.DeviceID, req.Source(), req.Transport())
 			}
 		case manscdp.CmdCatalog:
 			// Catalog 应答(设备→平台),解析通道入库

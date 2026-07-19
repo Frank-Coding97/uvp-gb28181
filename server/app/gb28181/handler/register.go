@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/emiago/sipgo/sip"
@@ -147,6 +148,9 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		// 注销
 		if err := device.HandleUnregister(ctx, deviceID); err != nil {
 			app.ZapLog.Error("GB28181 注销处理失败", zap.String("deviceId", deviceID), zap.Error(err))
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Server error", nil))
+			h.recordEnd(req, 500, false)
+			return
 		}
 		app.ZapLog.Info("GB28181 设备注销", zap.String("deviceId", deviceID))
 		_ = tx.Respond(buildOKWithExpires(req, 0))
@@ -200,10 +204,22 @@ func buildOKWithExpires(req *sip.Request, expires int) *sip.Response {
 	return res
 }
 
-// parseExpires 从请求取 Expires(优先 Expires 头)
+// parseExpires 解析 REGISTER 的有效期。
+// RFC 3261 允许把 expires 放在 Contact 参数中;该参数优先于全局 Expires 头,
+// 否则设备用 Contact: <sip:...>;expires=0 注销时会被误当成普通注册。
 func parseExpires(req *sip.Request) int {
+	if contact := req.Contact(); contact != nil {
+		for _, param := range contact.Params {
+			if !strings.EqualFold(strings.TrimSpace(param.K), "expires") {
+				continue
+			}
+			if v, err := strconv.Atoi(strings.TrimSpace(param.V)); err == nil {
+				return v
+			}
+		}
+	}
 	if h := req.GetHeader("Expires"); h != nil {
-		if v, err := strconv.Atoi(h.Value()); err == nil {
+		if v, err := strconv.Atoi(strings.TrimSpace(h.Value())); err == nil {
 			return v
 		}
 	}

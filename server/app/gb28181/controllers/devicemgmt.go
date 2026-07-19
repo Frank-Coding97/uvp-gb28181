@@ -227,7 +227,7 @@ func (dc *DeviceMgmtController) GetDevice(c *gin.Context) {
 }
 
 // ListChannels 通道列表(列表/卡片视图通用)
-// GET /channels?nodeId=&status=online&ptz=1&hasSnapshot=1&page=1&pageSize=40
+// GET /channels?deviceId=&nodeId=&status=online&ptz=1&hasSnapshot=1&page=1&pageSize=40
 func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 	db := dc.db()
 	if db == nil {
@@ -244,6 +244,9 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 	}
 
 	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c))
+	if deviceID := strings.TrimSpace(c.Query("deviceId")); deviceID != "" {
+		q = q.Where("device_id = ?", deviceID)
+	}
 
 	// nodeId 过滤:走子树 path LIKE
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {

@@ -26,6 +26,7 @@ import {
     SlidersHorizontal,
     Trash2,
     Video,
+    X,
     Download,
     Plus
 } from "@lucide/vue";
@@ -79,6 +80,8 @@ interface TreeRow {
 const viewMode = ref<ViewMode>("list");
 const assetKind = ref<AssetKind>("device");
 const keyword = ref("");
+const keywordInput = ref<HTMLInputElement | null>(null);
+const deviceIdFilter = ref("");
 const statusFilter = ref<OnlineStatus | undefined>();
 const selectedNode = ref<CatalogNode | null>(null);
 const drawerVisible = ref(false);
@@ -155,7 +158,7 @@ const flatTree = computed<TreeRow[]>(() => {
     return rows;
 });
 
-const hasFilters = computed(() => Boolean(keyword.value || statusFilter.value || selectedNode.value));
+const hasFilters = computed(() => Boolean(keyword.value || deviceIdFilter.value || statusFilter.value || selectedNode.value));
 const selectedCount = computed(() => selectedRowKeys.value.length);
 const tablePagination = computed(() => ({
     current: page.value,
@@ -244,12 +247,12 @@ function canExpand(node: CatalogNode) { return node.nodeType !== "channel"; }
 function projectX(longitude: number) { const min = 73; const max = 136; return Math.min(96, Math.max(4, ((longitude - min) / (max - min)) * 100)); }
 function projectY(latitude: number) { const min = 18; const max = 54; return Math.min(94, Math.max(6, 100 - ((latitude - min) / (max - min)) * 100)); }
 function showDeviceChannels(record: DeviceVO) {
-    keyword.value = record.deviceId;
+    keyword.value = "";
+    deviceIdFilter.value = record.deviceId;
     selectedNode.value = null;
     statusFilter.value = undefined;
     assetKind.value = "channel";
     page.value = 1;
-    refreshMainData();
 }
 
 async function loadTree() {
@@ -304,9 +307,26 @@ function selectNode(node: CatalogNode) {
 }
 function clearNode() { selectedNode.value = null; page.value = 1; refreshMainData(); }
 function setViewMode(mode: ViewMode) { viewMode.value = mode; if (mode === "map") assetKind.value = "channel"; }
-function setAssetKind(kind: AssetKind) { assetKind.value = kind; }
+function setAssetKind(kind: AssetKind) {
+    if (kind === "device") deviceIdFilter.value = "";
+    assetKind.value = kind;
+}
 function onSearch() { page.value = 1; refreshMainData(); }
-function resetFilters() { keyword.value = ""; statusFilter.value = undefined; clearNode(); }
+function clearKeyword() {
+    keyword.value = "";
+    page.value = 1;
+    refreshMainData();
+    keywordInput.value?.focus();
+}
+function focusKeyword(event: KeyboardEvent) {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        keywordInput.value?.focus();
+        keywordInput.value?.select();
+    }
+}
+function clearDeviceFilter() { deviceIdFilter.value = ""; page.value = 1; refreshMainData(); }
+function resetFilters() { keyword.value = ""; deviceIdFilter.value = ""; statusFilter.value = undefined; clearNode(); }
 function onPageChange(next: number) { page.value = next; refreshMainData(); }
 function onPageSizeChange(next: number) { pageSize.value = next; page.value = 1; refreshMainData(); }
 
@@ -320,6 +340,7 @@ async function loadChannelsData() {
     try {
         const res = await listChannels({
             q: keyword.value.trim() || undefined,
+            deviceId: deviceIdFilter.value || undefined,
             nodeId: selectedNode.value?.id,
             status: statusFilter.value,
             page: page.value,
@@ -799,6 +820,7 @@ function channelStatusClass(record: DeviceVO): string {
 }
 
 onMounted(async () => {
+    window.addEventListener("keydown", focusKeyword);
     await Promise.all([loadTree(), refreshMainData(), refreshDeviceStats(), loadPtzTypeDict()]);
     if (autoRefresh.value) {
         startAutoRefresh();
@@ -806,6 +828,7 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    window.removeEventListener("keydown", focusKeyword);
     stopAutoRefresh();
 });
 </script>
@@ -819,11 +842,16 @@ onUnmounted(() => {
                     <span class="stat offline">离线 {{ offlineDeviceTotal }}</span>
                 </div>
                 <div class="topbar-actions">
-                    <label class="cmdk">
+                    <div class="cmdk">
                         <Search :size="14" />
-                        <input v-model="keyword" type="text" placeholder="搜索设备 / 通道 / 编码 ..." @keydown.enter.prevent="onSearch" />
-                        <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd></span>
-                    </label>
+                        <input ref="keywordInput" v-model="keyword" type="text" aria-label="搜索设备、通道或编码" placeholder="搜索设备 / 通道 / 编码 ..." @keydown.enter.prevent="onSearch" />
+                        <a-tooltip v-if="keyword" content="清空搜索" position="bottom">
+                            <button class="cmdk-clear" type="button" aria-label="清空搜索" @click="clearKeyword"><X :size="14" /></button>
+                        </a-tooltip>
+                        <a-tooltip content="按 Command + K 或 Ctrl + K 聚焦搜索框" position="bottom">
+                            <span class="kbd"><kbd>⌘</kbd><kbd>K</kbd></span>
+                        </a-tooltip>
+                    </div>
                     <div class="view-switch">
                         <button v-for="item in viewOptions" :key="item.value" type="button" :class="{ active: viewMode === item.value }" @click="setViewMode(item.value)">
                             <component :is="item.icon" :size="14" />
@@ -910,6 +938,7 @@ onUnmounted(() => {
                     </div>
 
                     <div class="filter-chips">
+                        <span v-if="deviceIdFilter" class="filter-chip">所属设备: {{ deviceIdFilter }} <button class="close" @click="clearDeviceFilter">×</button></span>
                         <span v-if="statusFilter" class="filter-chip">状态: {{ statusFilter === 'online' ? '在线' : '离线' }} <button class="close" @click="statusFilter = undefined">×</button></span>
                         <span v-if="selectedNode" class="filter-chip">目录: {{ selectedNode.name }} <button class="close" @click="clearNode">×</button></span>
                         <button v-if="hasFilters" class="clear-all" type="button" @click="resetFilters">清除筛选</button>
@@ -1687,6 +1716,18 @@ onUnmounted(() => {
     border: 0;
     outline: none;
 }
+.cmdk-clear {
+    width: 22px;
+    height: 22px;
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    color: var(--uvp-text-tertiary);
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+}
+.cmdk-clear:hover { color: var(--uvp-text-primary); background: var(--uvp-brand-soft); }
 .cmdk .kbd { margin-left: auto; display: inline-flex; gap: 2px; font-size: 11px; }
 .cmdk kbd { padding: 1px 5px; border: 1px solid var(--uvp-panel-border); border-radius: 4px; }
 .view-switch {

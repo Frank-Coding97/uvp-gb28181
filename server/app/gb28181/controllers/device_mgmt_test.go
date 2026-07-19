@@ -179,6 +179,28 @@ func TestDeviceMgmt_ListChannels_FilterStatus(t *testing.T) {
 	assert.EqualValues(t, 1, data["total"])
 }
 
+func TestDeviceMgmt_ListChannels_FilterByDeviceID(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	seedDevicesAndChannels(t, db)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{
+		DeviceID:  "34020000002000000002",
+		ChannelID: "37011200001310000003",
+		Name:      "其他设备通道",
+	}).Error)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/channels?deviceId=34020000002000000001", nil)
+	r.ServeHTTP(w, req)
+
+	resp := unmarshal(t, w)
+	data := resp["data"].(map[string]any)
+	assert.EqualValues(t, 2, data["total"])
+	for _, item := range data["list"].([]any) {
+		channel := item.(map[string]any)
+		assert.Equal(t, "34020000002000000001", channel["deviceId"])
+	}
+}
+
 func TestDeviceMgmt_GetChannel(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	_, chOnID, _ := seedDevicesAndChannels(t, db)
