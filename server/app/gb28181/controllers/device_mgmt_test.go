@@ -2,6 +2,7 @@ package controllers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,23 @@ import (
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
 
+type fakeSubscriptionManager struct{ calls []string }
+
+func (f *fakeSubscriptionManager) Enable(_ context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
+	f.calls = append(f.calls, "enable:"+string(kind))
+	return &gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: kind, Enabled: true, Status: gbmodels.SubscriptionStatusActive, ExpiresSeconds: 3600}, nil
+}
+
+func (f *fakeSubscriptionManager) Disable(_ context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
+	f.calls = append(f.calls, "disable:"+string(kind))
+	return &gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: kind, Status: gbmodels.SubscriptionStatusDisabled, ExpiresSeconds: 3600}, nil
+}
+
+func (f *fakeSubscriptionManager) Renew(_ context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
+	f.calls = append(f.calls, "renew:"+string(kind))
+	return &gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: kind, Enabled: true, Status: gbmodels.SubscriptionStatusActive, ExpiresSeconds: 3600}, nil
+}
+
 func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Engine, *gorm.DB) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -32,6 +50,8 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDevice{},
 		&gbmodels.GbMobilePositionLatest{},
+		&gbmodels.GbDeviceSubscription{},
+		&gbmodels.GbAlarmEvent{},
 		&gbmodels.GbDeviceStatusEvent{},
 		&basemodels.SysDepartment{},
 		&basemodels.SysRole{},
@@ -56,6 +76,10 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		gr.GET("/devices", dmgmt.ListDevices)
 		gr.GET("/device/:id", dmgmt.GetDevice)
 		gr.GET("/device/:id/status-events", dmgmt.ListDeviceStatusEvents)
+		gr.GET("/device/:id/subscriptions", dmgmt.ListSubscriptions)
+		gr.PATCH("/device/:id/subscriptions/:kind", dmgmt.UpdateSubscription)
+		gr.POST("/device/:id/subscriptions/:kind/renew", dmgmt.RenewSubscription)
+		gr.GET("/device/:id/alarms", dmgmt.ListAlarms)
 		gr.DELETE("/device/:id", dmgmt.DeleteDevice)
 		gr.POST("/device/batch-delete", dmgmt.BatchDeleteDevices)
 		gr.GET("/channels", dmgmt.ListChannels)
@@ -71,6 +95,62 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		gr.POST("/anomaly/batch-resolve", ac.BatchResolve)
 	}
 	return r, db
+}
+
+func TestDeviceMgmt_SubscriptionUpdateAndRenew(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}))
+	device := &gbmodels.GbDevice{DeviceID: "D", Status: gbmodels.DeviceStatusOnline}
+	require.NoError(t, db.Create(device).Error)
+	manager := &fakeSubscriptionManager{}
+	controller := gbcontrollers.NewDeviceMgmtController()
+	controller.SetDB(func() *gorm.DB { return db })
+	controller.SetSubscriptionManager(manager)
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.PATCH("/device/:id/subscriptions/:kind", controller.UpdateSubscription)
+	r.POST("/device/:id/subscriptions/:kind/renew", controller.RenewSubscription)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PATCH", "/device/"+uintStr(device.ID)+"/subscriptions/catalog", bytes.NewBufferString(`{"enabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest("POST", "/device/"+uintStr(device.ID)+"/subscriptions/catalog/renew", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, []string{"enable:catalog", "renew:catalog"}, manager.calls)
+}
+
+func TestDeviceMgmt_SubscriptionsReturnsAllKinds(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	deviceID, _, _ := seedDevicesAndChannels(t, db)
+	require.NoError(t, db.Create(&gbmodels.GbDeviceSubscription{DeviceID: deviceID, Kind: gbmodels.SubscriptionKindCatalog, Enabled: true, Status: gbmodels.SubscriptionStatusActive, Event: "Catalog", ExpiresSeconds: 3600}).Error)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/device/"+uintStr(deviceID)+"/subscriptions", nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	list := unmarshal(t, w)["data"].(map[string]any)["list"].([]any)
+	require.Len(t, list, 3)
+}
+
+func TestDeviceMgmt_DeleteDeviceRemovesSubscriptionData(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	deviceID, channelID, _ := seedDevicesAndChannels(t, db)
+	now := time.Now()
+	require.NoError(t, db.Create(&gbmodels.GbDeviceSubscription{DeviceID: deviceID, Kind: gbmodels.SubscriptionKindAlarm, Event: "presence"}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbMobilePositionLatest{DeviceID: deviceID, SourceCode: "C", ChannelID: &channelID, EventTime: now, ReceivedAt: now, Latitude: 1, Longitude: 1}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbAlarmEvent{DeviceID: deviceID, ChannelID: &channelID, SourceCode: "C", DedupeKey: "delete-device", ReceivedAt: now}).Error)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("DELETE", "/api/gb28181/device-mgmt/device/"+uintStr(deviceID), nil)
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	for _, model := range []any{&gbmodels.GbDeviceSubscription{}, &gbmodels.GbMobilePositionLatest{}, &gbmodels.GbAlarmEvent{}} {
+		var count int64
+		require.NoError(t, db.Model(model).Where("device_id = ?", deviceID).Count(&count).Error)
+		require.Zero(t, count)
+	}
 }
 
 func seedDeptScopedUser(t *testing.T, db *gorm.DB, userID, deptID uint) {

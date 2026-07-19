@@ -24,8 +24,9 @@ import (
 //	GET /channel/:id/timeline  通道 24h 在线时序(Phase 1 简化:基于 last_status_at)
 type DeviceMgmtController struct {
 	controllers.Common
-	db             func() *gorm.DB
-	catalogTrigger CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
+	db                  func() *gorm.DB
+	catalogTrigger      CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
+	subscriptionManager SubscriptionManager
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询
@@ -43,6 +44,10 @@ func (dc *DeviceMgmtController) SetDB(p func() *gorm.DB) { dc.db = p }
 
 // SetCatalogTrigger 后置注入(bootstrap 里 SIP UAC 就绪后调用)
 func (dc *DeviceMgmtController) SetCatalogTrigger(t CatalogTrigger) { dc.catalogTrigger = t }
+
+func (dc *DeviceMgmtController) SetSubscriptionManager(manager SubscriptionManager) {
+	dc.subscriptionManager = manager
+}
 
 // channelStats 单个 channel 的派生聚合
 type deviceVOExtra struct {

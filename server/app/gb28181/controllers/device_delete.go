@@ -206,12 +206,23 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 			}
 		}
 
-		// 7. 删设备状态事件(事件表不带设备 FK,由删除事务显式级联)
+		// 7. 删订阅及其派生数据(设备删除不保留订阅、位置和报警)
+		if err := tx.Where("device_id = ?", dev.ID).Delete(&gbmodels.GbDeviceSubscription{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("device_id = ?", dev.ID).Delete(&gbmodels.GbMobilePositionLatest{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("device_id = ?", dev.ID).Delete(&gbmodels.GbAlarmEvent{}).Error; err != nil {
+			return err
+		}
+
+		// 8. 删设备状态事件(事件表不带设备 FK,由删除事务显式级联)
 		if err := tx.Unscoped().Where("device_id = ?", dev.ID).Delete(&gbmodels.GbDeviceStatusEvent{}).Error; err != nil {
 			return err
 		}
 
-		// 8. 删设备本身(gb_device 是软删模型,必须 Unscoped)
+		// 9. 删设备本身(gb_device 是软删模型,必须 Unscoped)
 		if err := tx.Unscoped().Scopes(ownerDeptScope(c)).
 			Where("id = ?", dev.ID).
 			Delete(&gbmodels.GbDevice{}).Error; err != nil {
@@ -264,7 +275,15 @@ func (dc *DeviceMgmtController) deleteChannelByID(c *gin.Context, db *gorm.DB, i
 			}
 		}
 
-		// 5. 删通道(gb_channel 软删模型,Unscoped)
+		// 5. 通道删除清 latest，报警保留审计事实但取消通道关联。
+		if err := tx.Where("channel_id = ?", ch.ID).Delete(&gbmodels.GbMobilePositionLatest{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&gbmodels.GbAlarmEvent{}).Where("channel_id = ?", ch.ID).Update("channel_id", nil).Error; err != nil {
+			return err
+		}
+
+		// 6. 删通道(gb_channel 软删模型,Unscoped)
 		if err := tx.Unscoped().Scopes(ownerDeptScope(c)).
 			Where("id = ?", ch.ID).
 			Delete(&gbmodels.GbChannel{}).Error; err != nil {

@@ -81,6 +81,10 @@ func SetDeviceMgmtCatalogTrigger(t gbhandler.CatalogTrigger) {
 	deviceMgmtController.SetCatalogTrigger(t)
 }
 
+func SetDeviceMgmtSubscriptionManager(manager gbcontrollers.SubscriptionManager) {
+	deviceMgmtController.SetSubscriptionManager(manager)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
@@ -147,6 +151,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/device", deviceMgmtController.CreateDevice)
 			dmgmt.GET("/device/:id", deviceMgmtController.GetDevice)
 			dmgmt.GET("/device/:id/status-events", deviceMgmtController.ListDeviceStatusEvents)
+			dmgmt.GET("/device/:id/subscriptions", deviceMgmtController.ListSubscriptions)
+			dmgmt.PATCH("/device/:id/subscriptions/:kind", deviceMgmtController.UpdateSubscription)
+			dmgmt.POST("/device/:id/subscriptions/:kind/renew", deviceMgmtController.RenewSubscription)
+			dmgmt.GET("/device/:id/alarms", deviceMgmtController.ListAlarms)
 			dmgmt.GET("/channels", deviceMgmtController.ListChannels)
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
 			dmgmt.PATCH("/channel/:id", deviceMgmtController.UpdateChannel)

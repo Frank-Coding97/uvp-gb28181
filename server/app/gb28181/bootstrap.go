@@ -184,6 +184,7 @@ func Start() {
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
+		gbroutes.SetDeviceMgmtSubscriptionManager(subscriptionService)
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindMobilePosition, subscribe.NewPositionProcessor(app.DB(), time.Now))
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindAlarm, subscribe.NewAlarmProcessor(app.DB(), time.Now))
