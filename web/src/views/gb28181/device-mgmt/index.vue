@@ -1343,7 +1343,10 @@ onUnmounted(() => {
                                 </a-table-column>
                                 <a-table-column title="快照" :width="92" align="center">
                                     <template #cell="{ record }">
-                                        <div class="thumb small"><div class="placeholder">{{ (record.manufacturer || 'UV').slice(0, 2).toUpperCase() }}</div></div>
+                                        <div class="thumb small list-snapshot-empty">
+                                            <Video :size="14" />
+                                            <span>暂无快照</span>
+                                        </div>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="状态" :width="92">
@@ -2498,6 +2501,14 @@ onUnmounted(() => {
 .thumb.small .placeholder {
     color: var(--uvp-text-tertiary);
 }
+.list-snapshot-empty {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 1px;
+    color: var(--uvp-text-tertiary);
+    font-size: 10px;
+    line-height: 12px;
+}
 .thumb.brand-thumb {
     width: 40px;
     height: 40px;
@@ -3066,22 +3077,50 @@ onUnmounted(() => {
     border-top: 1px solid var(--uvp-panel-border);
 }
 .channel-card-status {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 5px;
     margin-right: auto;
-    color: var(--uvp-text-tertiary);
+    color: #ef4444;
     font-size: 12px;
+    font-weight: 500;
 }
 .channel-card-status::before {
-    width: 6px;
-    height: 6px;
+    position: relative;
+    z-index: 1;
+    width: 10px;
+    height: 10px;
     content: "";
-    background: var(--uvp-text-tertiary);
+    background: #ef4444;
     border-radius: 50%;
+    box-shadow: 0 0 0 3px rgb(239 68 68 / 13%);
 }
-.channel-card-status.online { color: var(--uvp-brand-cyan); }
-.channel-card-status.online::before { background: var(--uvp-brand-cyan); }
+.channel-card-status::after {
+    position: absolute;
+    top: 50%;
+    left: -5px;
+    width: 20px;
+    height: 20px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    content: "";
+    opacity: 0.65;
+    transform: translateY(-50%) scale(0.55);
+    animation: channel-status-ripple 2s ease-out infinite;
+}
+.channel-card-status.online { color: #10b981; }
+.channel-card-status.online::before {
+    background: #10b981;
+    box-shadow: 0 0 0 3px rgb(16 185 129 / 14%);
+}
+@keyframes channel-status-ripple {
+    0% { opacity: 0.65; transform: translateY(-50%) scale(0.55); }
+    75%, 100% { opacity: 0; transform: translateY(-50%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .channel-card-status::after { animation: none; }
+}
 .map-view { display: flex; flex-direction: column; gap: 10px; }
 .map-banner {
     display: inline-flex;
