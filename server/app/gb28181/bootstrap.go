@@ -214,6 +214,10 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 
 func startControlPlane(cfg gbconfig.Config) {
 	setupCivilCodeService()
+	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil))
+	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
+		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
+	))
 
 	metricsAgg = metrics.NewAggregator()
 	metricsCleanupStop = make(chan struct{})

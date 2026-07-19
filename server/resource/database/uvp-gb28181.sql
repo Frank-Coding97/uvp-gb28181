@@ -1365,3 +1365,23 @@ WHERE `id` IN (
   140336, 140341, 140342, 140347, 140350, 140351, 140352,
   140353, 140354, 140355, 140357, 140358
 );
+
+-- SIP setup API, UI permissions and administrator policies.
+INSERT INTO `sys_api` (`id`,`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`deleted_at`,`created_by`) VALUES
+(217,'读取 SIP 配置状态','/api/gb28181/sip/setup/status','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(218,'读取本机网络接口','/api/gb28181/sip/setup/network-interfaces','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(219,'读取 SIP 平台信息','/api/gb28181/sip/platform','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(220,'保存 SIP 配置','/api/gb28181/sip/setup/config','PUT','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(221,'暂缓 SIP 配置','/api/gb28181/sip/setup/skip','POST','GB28181 SIP 配置',NOW(),NOW(),NULL,1);
+INSERT INTO `sys_menu` (`id`,`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`) VALUES
+(140359,140355,'','','','查看 SIP 配置',1,3,'gb28181:sip:config:view',NOW(),NOW(),1),
+(140360,140355,'','','','修改 SIP 配置',1,3,'gb28181:sip:config:update',NOW(),NOW(),1);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140359),(1,140360);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES
+(140359,217),(140359,218),(140359,219),(140360,220),(140360,221);
+INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUES
+(7561,'p','role_1','/api/gb28181/sip/setup/status','GET','*','',''),
+(7562,'p','role_1','/api/gb28181/sip/setup/network-interfaces','GET','*','',''),
+(7563,'p','role_1','/api/gb28181/sip/platform','GET','*','',''),
+(7564,'p','role_1','/api/gb28181/sip/setup/config','PUT','*','',''),
+(7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');
