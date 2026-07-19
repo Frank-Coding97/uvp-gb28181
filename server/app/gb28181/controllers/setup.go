@@ -34,6 +34,12 @@ type SetupStatusResponse struct {
 	RestartRequired   bool                     `json:"restartRequired"`
 }
 
+type NetworkInterfacesResponse struct {
+	Items      []gbsetup.NetworkAddress `json:"items"`
+	ScanStatus string                   `json:"scanStatus"`
+	Warning    string                   `json:"warning,omitempty"`
+}
+
 type SetupController struct {
 	controllers.Common
 	db         *gorm.DB
@@ -141,4 +147,17 @@ func (sc *SetupController) Skip(c *gin.Context) {
 		zap.Uint("operatorId", sc.GetCurrentUserID(c)),
 		zap.String("onboardingStatus", string(state.Status)))
 	sc.Success(c, gin.H{"onboardingStatus": state.Status})
+}
+
+// NetworkInterfaces GET /api/gb28181/sip/setup/network-interfaces
+func (sc *SetupController) NetworkInterfaces(c *gin.Context) {
+	items, err := gbsetup.EnumerateNetworkAddresses(sc.interfaces)
+	response := NetworkInterfacesResponse{Items: items, ScanStatus: "ok"}
+	if err != nil {
+		response.ScanStatus = "failed"
+		response.Warning = "本机网络接口读取失败，请手动填写接入地址"
+	} else if len(items) == 1 {
+		response.Warning = "未发现可用的本机 IPv4 地址，请手动填写接入地址"
+	}
+	sc.Success(c, response)
 }
