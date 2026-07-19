@@ -4,8 +4,9 @@ import { Message } from "@arco-design/web-vue";
 import { ChevronLeft, ChevronRight, Save } from "lucide-vue-next";
 import DeploymentStep from "./steps/DeploymentStep.vue";
 import NetworkStep from "./steps/NetworkStep.vue";
+import IdentityStep from "./steps/IdentityStep.vue";
 import { useSipSetup } from "./useSipSetup";
-import { networkCanContinue } from "./sipSetupRules";
+import { identityCanContinue, networkCanContinue } from "./sipSetupRules";
 
 const props = withDefaults(defineProps<{
     modelValue: boolean;
@@ -24,6 +25,13 @@ const title = computed(() => props.editing ? "编辑 SIP 配置" : "配置 SIP �
 const canNext = computed(() => {
     if (step.value === 1) return setup.form.deploymentMode !== "";
     if (step.value === 2) return networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp);
+    if (step.value === 3) return identityCanContinue(
+        setup.form.port,
+        setup.form.serverId,
+        setup.form.domain,
+        setup.form.password,
+        setup.hasExistingPassword.value
+    );
     return true;
 });
 
@@ -90,7 +98,12 @@ async function skip() {
                     :network="setup.network.value"
                     @update="Object.assign(setup.form, $event)"
                 />
-                <div v-else-if="step === 3" class="step-placeholder">SIP 身份与安全</div>
+                <IdentityStep
+                    v-else-if="step === 3"
+                    :form="setup.form"
+                    :has-existing-password="setup.hasExistingPassword.value"
+                    @update="Object.assign(setup.form, $event)"
+                />
                 <div v-else class="step-placeholder">确认配置</div>
             </div>
 

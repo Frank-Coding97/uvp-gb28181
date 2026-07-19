@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SipNetworkAddress } from "@/api/gb28181";
-import { deriveNetworkSelection, networkCanContinue, networkOptions } from "./sipSetupRules";
+import { deriveDomain, deriveNetworkSelection, identityCanContinue, networkCanContinue, networkOptions } from "./sipSetupRules";
 
 const items: SipNetworkAddress[] = [
     { ip: "0.0.0.0", cidr: "0.0.0.0/0", loopback: false, virtual: false, recommended: false, more: false, listenOnly: true },
@@ -31,5 +31,19 @@ describe("SIP network rules", () => {
     it("retains a saved address that disappeared from interfaces", () => {
         const options = networkOptions(items, "10.10.10.10");
         expect(options[0]).toMatchObject({ ip: "10.10.10.10", unavailable: true });
+    });
+});
+
+describe("SIP identity rules", () => {
+    it("derives the domain from the first ten ID digits", () => {
+        expect(deriveDomain("34020000002000000001")).toBe("3402000000");
+        expect(deriveDomain("340200000")).toBe("");
+    });
+
+    it("validates port, identity and password retention", () => {
+        expect(identityCanContinue(5061, "34020000002000000001", "3402000000", "Secret123", false)).toBe(true);
+        expect(identityCanContinue(0, "34020000002000000001", "3402000000", "Secret123", false)).toBe(false);
+        expect(identityCanContinue(5061, "34020000002000000001", "3402000000", "", true)).toBe(true);
+        expect(identityCanContinue(5061, "34020000002000000001", "3402000000", "", false)).toBe(false);
     });
 });

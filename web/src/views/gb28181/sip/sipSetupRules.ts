@@ -47,3 +47,14 @@ export function networkOptions(items: SipNetworkAddress[], currentIp: string): A
 export function deriveDomain(serverId: string): string {
     return /^\d{10,}$/.test(serverId) ? serverId.slice(0, 10) : "";
 }
+
+export function identityCanContinue(
+    port: number,
+    serverId: string,
+    domain: string,
+    password: string,
+    hasExistingPassword: boolean
+): boolean {
+    return port >= 1 && port <= 65535 && /^\d{20}$/.test(serverId) && /^\d{10}$/.test(domain) &&
+        (hasExistingPassword ? password === "" || password.length >= 6 : password.length >= 6);
+}
