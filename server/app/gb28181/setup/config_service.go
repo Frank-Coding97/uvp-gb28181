@@ -57,6 +57,9 @@ func (s *SIPConfigService) Save(ctx context.Context, req SaveSIPConfigRequest) (
 		if err != nil {
 			return err
 		}
+		if err := ValidateSIPConfigRequest(req, current != nil && current.Password != ""); err != nil {
+			return err
+		}
 
 		password := ""
 		if current != nil {
