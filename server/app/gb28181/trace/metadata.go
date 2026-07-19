@@ -44,11 +44,11 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 			metadata.StatusCode = uint16(typed.StatusCode)
 		}
 		if direction == DirectionOutbound {
-			if to := typed.To(); to != nil {
-				metadata.DeviceID = to.Address.User
+			if from := typed.From(); from != nil {
+				metadata.DeviceID = from.Address.User
 			}
-		} else if from := typed.From(); from != nil {
-			metadata.DeviceID = from.Address.User
+		} else if to := typed.To(); to != nil {
+			metadata.DeviceID = to.Address.User
 		}
 	default:
 		metadata.ParseError = fmt.Sprintf("unsupported SIP message type")

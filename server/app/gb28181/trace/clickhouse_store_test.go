@@ -169,7 +169,7 @@ func TestExtractSIPMetadataForRequestResponseAndMalformedPayload(t *testing.T) {
 		"From: <sip:34020000001320000001@3402000000>;tag=1\r\n" +
 		"To: <sip:34020000002000000001@3402000000>;tag=2\r\n" +
 		"Call-ID: response-call\r\nCSeq: 8 REGISTER\r\nContent-Length: 0\r\n\r\n")
-	metadata = extractSIPMetadata(response, DirectionInbound)
+	metadata = extractSIPMetadata(response, DirectionOutbound)
 	require.EqualValues(t, 401, metadata.StatusCode)
 	require.Equal(t, "34020000001320000001", metadata.DeviceID)
 	require.Equal(t, "REGISTER", metadata.Method)
@@ -178,6 +178,20 @@ func TestExtractSIPMetadataForRequestResponseAndMalformedPayload(t *testing.T) {
 	metadata = extractSIPMetadata([]byte("not SIP credentials=secret"), DirectionInbound)
 	require.NotEmpty(t, metadata.ParseError)
 	require.NotContains(t, metadata.ParseError, "credentials=secret")
+}
+
+func TestExtractSIPMetadataUsesRemoteDeviceForResponseDirection(t *testing.T) {
+	inbound := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:34020000002000000001@3402000000>;tag=platform\r\n" +
+		"To: <sip:34020000001320000001@3402000000>;tag=device\r\n" +
+		"Call-ID: inbound-response\r\nCSeq: 8 MESSAGE\r\nContent-Length: 0\r\n\r\n")
+	outbound := []byte("SIP/2.0 200 OK\r\n" +
+		"From: <sip:34020000001320000002@3402000000>;tag=device\r\n" +
+		"To: <sip:34020000002000000001@3402000000>;tag=platform\r\n" +
+		"Call-ID: outbound-response\r\nCSeq: 9 MESSAGE\r\nContent-Length: 0\r\n\r\n")
+
+	require.Equal(t, "34020000001320000001", extractSIPMetadata(inbound, DirectionInbound).DeviceID)
+	require.Equal(t, "34020000001320000002", extractSIPMetadata(outbound, DirectionOutbound).DeviceID)
 }
 
 func TestModuleShutdownClosesClickHouseStore(t *testing.T) {
