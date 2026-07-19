@@ -71,7 +71,7 @@ func TestClickHouseSchemaUsesDailyPartitionAndSevenDayTTL(t *testing.T) {
 	store, err := NewClickHouseStoreWithConn(conn, "uvp_sip_trace")
 	require.NoError(t, err)
 	require.NoError(t, store.EnsureSchema(context.Background()))
-	require.Len(t, conn.execQueries, 1)
+	require.NotEmpty(t, conn.execQueries)
 	ddl := conn.execQueries[0]
 	require.Contains(t, ddl, "uvp_sip_trace.sip_trace_message")
 	require.Contains(t, ddl, "PARTITION BY toYYYYMMDD(occurred_at)")

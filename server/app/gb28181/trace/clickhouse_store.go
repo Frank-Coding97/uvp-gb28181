@@ -151,6 +151,48 @@ TTL occurred_at + INTERVAL 7 DAY DELETE`, s.fullTable)
 	if err := s.conn.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("ensure ClickHouse SIP trace schema: %w", err)
 	}
+	summaryDDL := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.sip_trace_session_day (
+    day Date,
+    device_id String,
+    call_id String,
+    first_at SimpleAggregateFunction(min, DateTime64(6, 'UTC')),
+    last_at SimpleAggregateFunction(max, DateTime64(6, 'UTC')),
+    message_count SimpleAggregateFunction(sum, UInt64),
+    inbound_count SimpleAggregateFunction(sum, UInt64),
+    outbound_count SimpleAggregateFunction(sum, UInt64),
+    methods_state AggregateFunction(groupUniqArray, String),
+    final_status_state AggregateFunction(argMax, UInt16, DateTime64(6, 'UTC')),
+    request_count SimpleAggregateFunction(sum, UInt64),
+    final_response_count SimpleAggregateFunction(sum, UInt64)
+) ENGINE = AggregatingMergeTree
+ORDER BY (day, device_id, call_id)
+TTL day + INTERVAL 30 DAY DELETE`, s.database)
+	if err := s.conn.Exec(ctx, summaryDDL); err != nil {
+		return fmt.Errorf("ensure ClickHouse SIP trace session schema: %w", err)
+	}
+	viewDDL := fmt.Sprintf(`CREATE MATERIALIZED VIEW IF NOT EXISTS %s.sip_trace_session_day_mv
+TO %s.sip_trace_session_day AS
+SELECT
+    toDate(occurred_at) AS day,
+    device_id,
+    call_id,
+    min(occurred_at) AS first_at,
+    max(occurred_at) AS last_at,
+    count() AS message_count,
+    countIf(direction = 'inbound') AS inbound_count,
+    countIf(direction = 'outbound') AS outbound_count,
+    groupUniqArrayState(method) AS methods_state,
+    argMaxState(
+        if(status_code >= 200, status_code, toUInt16(0)),
+        if(status_code >= 200, occurred_at, toDateTime64(0, 6, 'UTC'))
+    ) AS final_status_state,
+    countIf(status_code = 0 AND method NOT IN ('', 'ACK')) AS request_count,
+    countIf(status_code >= 200) AS final_response_count
+FROM %s
+GROUP BY day, device_id, call_id`, s.database, s.database, s.fullTable)
+	if err := s.conn.Exec(ctx, viewDDL); err != nil {
+		return fmt.Errorf("ensure ClickHouse SIP trace session view: %w", err)
+	}
 	return nil
 }
 
