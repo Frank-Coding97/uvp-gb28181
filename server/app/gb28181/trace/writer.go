@@ -40,9 +40,19 @@ func (m *Module) runWriter(ctx context.Context) {
 			}
 		}
 
+		storedBatch, err := m.encryptBatch(batch)
+		if err != nil {
+			m.collector.Drop(uint64(len(batch)))
+			m.health.degraded(err.Error())
+			if !queueOpen {
+				return
+			}
+			continue
+		}
+
 		backoff := m.retryMin
 		for {
-			err := insertBatchSafely(ctx, m.store, batch)
+			err := insertBatchSafely(ctx, m.store, storedBatch)
 			if err == nil {
 				m.health.ready(m.now())
 				break
@@ -73,7 +83,28 @@ func receiveEvent(ctx context.Context, queue <-chan Event) (Event, bool) {
 	}
 }
 
-func insertBatchSafely(ctx context.Context, store Store, batch []Event) (err error) {
+func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
+	stored := make([]StoredEvent, 0, len(events))
+	for _, event := range events {
+		payload, err := m.cipher.Encrypt(event.Raw)
+		if err != nil {
+			return nil, fmt.Errorf("encrypt SIP trace payload: %w", err)
+		}
+		stored = append(stored, StoredEvent{
+			OccurredAt: event.OccurredAt,
+			Direction:  event.Direction,
+			Transport:  event.Transport,
+			LocalAddr:  event.LocalAddr,
+			RemoteAddr: event.RemoteAddr,
+			Malformed:  event.Malformed,
+			ParseError: event.ParseError,
+			Payload:    payload,
+		})
+	}
+	return stored, nil
+}
+
+func insertBatchSafely(ctx context.Context, store Store, batch []StoredEvent) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			err = fmt.Errorf("trace store panic: %v", recovered)
@@ -84,6 +115,6 @@ func insertBatchSafely(ctx context.Context, store Store, batch []Event) (err err
 
 type unavailableStore struct{}
 
-func (unavailableStore) InsertBatch(context.Context, []Event) error {
+func (unavailableStore) InsertBatch(context.Context, []StoredEvent) error {
 	return fmt.Errorf("trace store is not configured")
 }

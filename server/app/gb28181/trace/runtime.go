@@ -28,6 +28,7 @@ type Module struct {
 	onFrame       func(Frame)
 	collector     *Collector
 	store         Store
+	cipher        PayloadCipher
 	health        *healthTracker
 	batchSize     int
 	flushInterval time.Duration
@@ -40,14 +41,26 @@ type Module struct {
 }
 
 func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
-	module := NewModule(cfg, unavailableStore{})
-	module.health.degraded("trace store is not configured")
+	loadedCipher, err := LoadCipherFromEnv(cfg.EncryptionKeyEnv, "v1")
+	var payloadCipher PayloadCipher = loadedCipher
+	if err != nil {
+		payloadCipher = failingCipher{err: ErrInvalidEncryptionKey}
+	}
+	module := NewModule(cfg, unavailableStore{}, payloadCipher)
+	if err != nil {
+		module.health.degraded("trace encryption key is unavailable")
+	} else {
+		module.health.degraded("trace store is not configured")
+	}
 	return module
 }
 
-func NewModule(cfg gbconfig.TraceConfig, store Store) *Module {
+func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCipher) *Module {
 	if store == nil {
 		store = unavailableStore{}
+	}
+	if payloadCipher == nil {
+		payloadCipher = failingCipher{err: ErrInvalidEncryptionKey}
 	}
 	batchSize := cfg.BatchSize
 	if batchSize <= 0 {
@@ -60,6 +73,7 @@ func NewModule(cfg gbconfig.TraceConfig, store Store) *Module {
 	module := &Module{
 		framer:        NewFrameAssembler(DefaultMaxFrameBytes),
 		store:         store,
+		cipher:        payloadCipher,
 		health:        newHealthTracker(HealthReady, ""),
 		batchSize:     batchSize,
 		flushInterval: flushInterval,

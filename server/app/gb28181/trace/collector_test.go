@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -16,7 +17,7 @@ import (
 
 type recordingStore struct {
 	mu        sync.Mutex
-	events    []Event
+	events    []StoredEvent
 	err       error
 	started   chan struct{}
 	release   chan struct{}
@@ -24,7 +25,7 @@ type recordingStore struct {
 	panicOnce atomic.Bool
 }
 
-func (s *recordingStore) InsertBatch(ctx context.Context, events []Event) error {
+func (s *recordingStore) InsertBatch(ctx context.Context, events []StoredEvent) error {
 	if s.panicOnce.CompareAndSwap(true, false) {
 		panic("store panic")
 	}
@@ -42,23 +43,20 @@ func (s *recordingStore) InsertBatch(ctx context.Context, events []Event) error 
 		return s.err
 	}
 	s.mu.Lock()
-	for _, event := range events {
-		event.Raw = append([]byte(nil), event.Raw...)
-		s.events = append(s.events, event)
-	}
+	s.events = append(s.events, events...)
 	s.mu.Unlock()
 	return nil
 }
 
-func (s *recordingStore) snapshot() []Event {
+func (s *recordingStore) snapshot() []StoredEvent {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]Event(nil), s.events...)
+	return append([]StoredEvent(nil), s.events...)
 }
 
 func TestCollectorQueueFullNeverBlocksProducer(t *testing.T) {
 	store := &recordingStore{started: make(chan struct{}), release: make(chan struct{})}
-	module := NewModule(testTraceConfig(1, 1, 5), store)
+	module := NewModule(testTraceConfig(1, 1, 5), store, testPayloadCipher())
 
 	module.WriteObserver(testWriteProps(), []byte("first"))
 	select {
@@ -82,7 +80,7 @@ func TestCollectorQueueFullNeverBlocksProducer(t *testing.T) {
 func TestWriterRecoversStorePanicAndRetries(t *testing.T) {
 	store := &recordingStore{}
 	store.panicOnce.Store(true)
-	module := NewModule(testTraceConfig(4, 1, 5), store)
+	module := NewModule(testTraceConfig(4, 1, 5), store, testPayloadCipher())
 
 	module.WriteObserver(testWriteProps(), []byte("retry-me"))
 	require.Eventually(t, func() bool {
@@ -93,7 +91,7 @@ func TestWriterRecoversStorePanicAndRetries(t *testing.T) {
 
 func TestWriterFailureIsVisibleAndShutdownCancelsRetry(t *testing.T) {
 	store := &recordingStore{err: errors.New("clickhouse unavailable")}
-	module := NewModule(testTraceConfig(4, 1, 5), store)
+	module := NewModule(testTraceConfig(4, 1, 5), store, testPayloadCipher())
 	module.WriteObserver(testWriteProps(), []byte("fail"))
 
 	require.Eventually(t, func() bool {
@@ -112,7 +110,7 @@ func TestWriterFailureIsVisibleAndShutdownCancelsRetry(t *testing.T) {
 
 func TestShutdownDrainsPendingBatch(t *testing.T) {
 	store := &recordingStore{}
-	module := NewModule(testTraceConfig(8, 10, 60_000), store)
+	module := NewModule(testTraceConfig(8, 10, 60_000), store, testPayloadCipher())
 	module.WriteObserver(testWriteProps(), []byte("one"))
 	module.WriteObserver(testWriteProps(), []byte("two"))
 
@@ -124,7 +122,8 @@ func TestShutdownDrainsPendingBatch(t *testing.T) {
 
 func TestRuntimeEmitsInboundAndOutboundEvents(t *testing.T) {
 	store := &recordingStore{}
-	module := NewModule(testTraceConfig(8, 2, 5), store)
+	cipher := testPayloadCipher()
+	module := NewModule(testTraceConfig(8, 2, 5), store, cipher)
 	readProps := testReadProps("UDP", 5060, 15060)
 	rawIn := sipMessage("MESSAGE", "inbound", nil)
 	rawOut := []byte("SIP/2.0 200 OK\r\nContent-Length: 0\r\n\r\n")
@@ -137,9 +136,13 @@ func TestRuntimeEmitsInboundAndOutboundEvents(t *testing.T) {
 	require.Eventually(t, func() bool { return len(store.snapshot()) == 2 }, time.Second, 10*time.Millisecond)
 	events := store.snapshot()
 	require.Equal(t, DirectionInbound, events[0].Direction)
-	require.Equal(t, rawIn, events[0].Raw)
+	decrypted, err := cipher.Decrypt(events[0].Payload)
+	require.NoError(t, err)
+	require.Equal(t, rawIn, decrypted)
 	require.Equal(t, DirectionOutbound, events[1].Direction)
-	require.Equal(t, rawOut, events[1].Raw)
+	decrypted, err = cipher.Decrypt(events[1].Payload)
+	require.NoError(t, err)
+	require.Equal(t, rawOut, decrypted)
 	require.NoError(t, module.Shutdown(context.Background()))
 }
 
@@ -149,10 +152,18 @@ func TestHealthStatesCoverDisabledDegradedAndReady(t *testing.T) {
 	require.Equal(t, HealthDegraded, degraded.Health().State)
 	require.NoError(t, degraded.Shutdown(context.Background()))
 
-	ready := NewModule(testTraceConfig(4, 1, 5), &recordingStore{})
+	ready := NewModule(testTraceConfig(4, 1, 5), &recordingStore{}, testPayloadCipher())
 	ready.WriteObserver(testWriteProps(), []byte("ok"))
 	require.Eventually(t, func() bool { return ready.Health().State == HealthReady }, time.Second, 10*time.Millisecond)
 	require.NoError(t, ready.Shutdown(context.Background()))
+}
+
+func testPayloadCipher() *Cipher {
+	cipher, err := NewCipher([]byte(strings.Repeat("t", 32)), "test-v1")
+	if err != nil {
+		panic(err)
+	}
+	return cipher
 }
 
 func testTraceConfig(queueCapacity, batchSize, flushMS int) gbconfig.TraceConfig {

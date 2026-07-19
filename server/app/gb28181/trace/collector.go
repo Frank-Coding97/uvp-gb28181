@@ -25,8 +25,19 @@ type Event struct {
 	ParseError string
 }
 
+type StoredEvent struct {
+	OccurredAt time.Time
+	Direction  Direction
+	Transport  string
+	LocalAddr  string
+	RemoteAddr string
+	Malformed  bool
+	ParseError string
+	Payload    EncryptedPayload
+}
+
 type Store interface {
-	InsertBatch(context.Context, []Event) error
+	InsertBatch(context.Context, []StoredEvent) error
 }
 
 type Collector struct {
@@ -76,3 +87,7 @@ func (c *Collector) Close() {
 func (c *Collector) Dropped() uint64 { return c.dropped.Load() }
 func (c *Collector) Depth() int      { return len(c.queue) }
 func (c *Collector) Capacity() int   { return cap(c.queue) }
+
+func (c *Collector) Drop(count uint64) {
+	c.dropped.Add(count)
+}
