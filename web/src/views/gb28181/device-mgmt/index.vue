@@ -19,6 +19,7 @@ import {
     Loader2,
     Map as MapIcon,
     Monitor,
+    MoreHorizontal,
     Play,
     Pencil,
     RadioTower,
@@ -1277,7 +1278,7 @@ onUnmounted(() => {
                             :loading="rowsLoading"
                             :pagination="tablePagination"
                             row-key="id"
-                            :scroll="{ x: 1480, y: '85%' }"
+                            :scroll="{ x: 1580, y: '85%' }"
                             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
                             class="uvp-data-table"
                             @page-change="onPageChange"
@@ -1354,21 +1355,25 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="180" fixed="right">
+                                <a-table-column title="操作" :width="280" fixed="right">
                                     <template #cell="{ record }">
-                                        <div class="table-actions">
-                                            <a-tooltip content="播放" position="top">
-                                                <button class="icon-btn small framed primary" type="button" @click="playChannel(record)"><Play :size="13" /></button>
-                                            </a-tooltip>
-                                            <a-tooltip content="查看详情" position="top">
-                                                <button class="icon-btn small framed" type="button" @click="openChannel(record)"><Eye :size="13" /></button>
-                                            </a-tooltip>
-                                            <a-tooltip content="编辑通道" position="top">
-                                                <button class="icon-btn small framed warning" type="button" @click="openEditChannelModal(record)"><Pencil :size="13" /></button>
-                                            </a-tooltip>
-                                            <a-tooltip content="删除通道" position="top">
-                                                <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteChannel(record)"><Trash2 :size="13" /></button>
-                                            </a-tooltip>
+                                        <div class="uvp-table-actions">
+                                            <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
+                                                <template #icon><Play :size="13" /></template>
+                                                <span>播放</span>
+                                            </a-link>
+                                            <a-link class="uvp-table-action uvp-table-action--detail" @click="openChannel(record)">
+                                                <template #icon><Eye :size="13" /></template>
+                                                <span>详情</span>
+                                            </a-link>
+                                            <a-link class="uvp-table-action uvp-table-action--edit" @click="openEditChannelModal(record)">
+                                                <template #icon><Pencil :size="13" /></template>
+                                                <span>编辑</span>
+                                            </a-link>
+                                            <a-link class="uvp-table-action uvp-table-action--delete" :disabled="deleting" @click="handleDeleteChannel(record)">
+                                                <template #icon><Trash2 :size="13" /></template>
+                                                <span>删除</span>
+                                            </a-link>
                                         </div>
                                     </template>
                                 </a-table-column>
@@ -1382,7 +1387,7 @@ onUnmounted(() => {
                             :loading="rowsLoading"
                             :pagination="tablePagination"
                             row-key="id"
-                            :scroll="{ x: 1600, y: '85%' }"
+                            :scroll="{ x: 1650, y: '85%' }"
                             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
                             class="uvp-data-table device-data-table"
                             @page-change="onPageChange"
@@ -1454,33 +1459,42 @@ onUnmounted(() => {
                                         <span class="relative" :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="180" fixed="right">
+                                <a-table-column title="操作" :width="230" fixed="right">
                                     <template #cell="{ record }">
-                                        <div class="table-actions">
-                                            <a-tooltip content="查看通道" position="top">
-                                                <button class="icon-btn small framed primary" type="button" @click="showDeviceChannels(record)"><Camera :size="13" /></button>
-                                            </a-tooltip>
-                                            <a-tooltip content="查看详情" position="top">
-                                                <button class="icon-btn small framed" type="button" @click="openDevice(record)"><Eye :size="13" /></button>
-                                            </a-tooltip>
-                                            <a-tooltip :content="record.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
-                                                <button
-                                                    class="icon-btn small framed info"
-                                                    :class="{ loading: refreshingCatalog[record.id] }"
-                                                    type="button"
-                                                    :disabled="refreshingCatalog[record.id] || !record.online"
-                                                    @click="handleRefreshDeviceCatalog(record)"
-                                                >
-                                                    <Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" />
-                                                    <RefreshCcw v-else :size="13" />
-                                                </button>
-                                            </a-tooltip>
-                                            <a-tooltip content="编辑设备" position="top">
-                                                <button class="icon-btn small framed warning" type="button" @click="openEditDeviceModal(record)"><Pencil :size="13" /></button>
-                                            </a-tooltip>
-                                            <a-tooltip content="删除设备" position="top">
-                                                <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click="handleDeleteDevice(record)"><Trash2 :size="13" /></button>
-                                            </a-tooltip>
+                                        <div class="uvp-table-actions">
+                                            <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">
+                                                <template #icon><Camera :size="13" /></template>
+                                                <span>通道</span>
+                                            </a-link>
+                                            <a-link
+                                                class="uvp-table-action uvp-table-action--sync"
+                                                :disabled="refreshingCatalog[record.id] || !record.online"
+                                                :title="record.online ? '刷新通道目录' : '设备离线,无法刷新'"
+                                                @click="handleRefreshDeviceCatalog(record)"
+                                            >
+                                                <template #icon><Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" /><RefreshCcw v-else :size="13" /></template>
+                                                <span>刷新</span>
+                                            </a-link>
+                                            <a-dropdown trigger="click" position="br">
+                                                <a-link class="uvp-table-action uvp-table-action--more">
+                                                    <span>更多</span>
+                                                    <MoreHorizontal :size="13" />
+                                                </a-link>
+                                                <template #content>
+                                                    <a-doption class="device-action-menu-item" @click="openDevice(record)">
+                                                        <Eye :size="14" />
+                                                        <span>详情</span>
+                                                    </a-doption>
+                                                    <a-doption class="device-action-menu-item" @click="openEditDeviceModal(record)">
+                                                        <Pencil :size="14" />
+                                                        <span>编辑</span>
+                                                    </a-doption>
+                                                    <a-doption class="device-action-menu-item device-action-menu-item--danger" :disabled="deleting" @click="handleDeleteDevice(record)">
+                                                        <Trash2 :size="14" />
+                                                        <span>删除</span>
+                                                    </a-doption>
+                                                </template>
+                                            </a-dropdown>
                                         </div>
                                     </template>
                                 </a-table-column>
@@ -2673,11 +2687,50 @@ onUnmounted(() => {
     border: 1px solid color-mix(in srgb, var(--uvp-brand) 24%, transparent);
     font-size: 12px;
 }
-.table-actions {
-    display: inline-flex;
+.uvp-data-table :deep(.uvp-table-actions) { white-space: nowrap; }
+.uvp-data-table :deep(.uvp-table-action) { flex: 0 0 auto; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview) { color: #2563eb; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview:hover) { color: #1d4ed8; background: rgb(37 99 235 / 8%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail) { color: #0f7490; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail:hover) { color: #0e7490; background: rgb(14 116 144 / 8%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync) { color: #0f766e; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync:hover) { color: #0f675f; background: rgb(15 118 110 / 8%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) { color: #b7791f; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) { color: #9a6b18; background: rgb(183 121 31 / 9%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more) { color: #6b4f9b; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more:hover) { color: #5a3f89; background: rgb(107 79 155 / 8%); }
+:global(.arco-dropdown:has(.device-action-menu-item)) {
+    padding: 4px;
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 8px;
+    box-shadow: 0 12px 26px -16px rgb(15 23 42 / 40%);
+}
+:global(.arco-dropdown:has(.device-action-menu-item) .arco-dropdown-list) { padding: 0; }
+:global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item) {
+    display: flex;
     align-items: center;
-    gap: 6px;
-    white-space: nowrap;
+    gap: 8px;
+    min-width: 112px;
+    height: 32px;
+    padding: 0 9px;
+    border-radius: 6px;
+    color: var(--uvp-text-secondary);
+    font-size: 13px;
+}
+:global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item:hover) {
+    color: var(--uvp-brand-strong);
+    background: color-mix(in srgb, var(--uvp-brand) 7%, var(--uvp-list-toolbar-bg));
+}
+:global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item--danger) {
+    margin-top: 4px;
+    border-top: 1px solid var(--uvp-panel-border);
+    border-radius: 0 0 6px 6px;
+    color: #d14343;
+}
+:global(.arco-dropdown:has(.device-action-menu-item) .device-action-menu-item--danger:hover) {
+    color: #ba2f2f;
+    background: rgb(209 67 67 / 8%);
 }
 .btn-ghost.compact {
     height: 28px;
