@@ -3,6 +3,7 @@ package uac
 import (
 	"testing"
 
+	"github.com/emiago/sipgo/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 )
 
@@ -129,5 +130,45 @@ func TestBuildInviteRequestTargetsChannel(t *testing.T) {
 	}
 	if req.Transport() != "UDP" {
 		t.Errorf("INVITE transport = %q, want UDP", req.Transport())
+	}
+}
+
+func TestBuildSubscribeRequest_ReusesDialogMetadata(t *testing.T) {
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	req, err := u.buildSubscribeRequest(SubscriptionRequest{
+		DeviceID:    "34020000001320000001",
+		Destination: "192.168.10.108:5060",
+		Transport:   "tcp",
+		Event:       "presence",
+		Body:        []byte("<Query/>"),
+		Expires:     0,
+		CallID:      "subscription-call-id",
+		LocalTag:    "local-tag",
+		RemoteTag:   "remote-tag",
+		CSeq:        8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if req.Method != sip.SUBSCRIBE || req.Recipient.User != "34020000001320000001" {
+		t.Fatalf("unexpected SUBSCRIBE target: %s %s", req.Method, req.Recipient.User)
+	}
+	if req.Destination() != "192.168.10.108:5060" || req.Transport() != "TCP" {
+		t.Fatalf("unexpected transport target: %s %s", req.Destination(), req.Transport())
+	}
+	if req.GetHeaders("Event")[0].Value() != "presence" || req.GetHeaders("Expires")[0].Value() != "0" {
+		t.Fatal("missing Event or cancellation Expires headers")
+	}
+	if req.CallID() == nil || string(*req.CallID()) != "subscription-call-id" {
+		t.Fatal("Call-ID must be reused for renewal/cancel")
+	}
+	if tag, _ := req.From().Params.Get("tag"); tag != "local-tag" {
+		t.Fatalf("From tag=%q", tag)
+	}
+	if tag, _ := req.To().Params.Get("tag"); tag != "remote-tag" {
+		t.Fatalf("To tag=%q", tag)
+	}
+	if req.CSeq() == nil || req.CSeq().SeqNo != 8 || req.CSeq().MethodName != sip.SUBSCRIBE {
+		t.Fatal("CSeq must be preserved as SUBSCRIBE dialog metadata")
 	}
 }
