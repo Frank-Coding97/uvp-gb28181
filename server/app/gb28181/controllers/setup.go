@@ -116,3 +116,29 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		"runtime":         sc.runtime.Snapshot(),
 	})
 }
+
+// Skip POST /api/gb28181/sip/setup/skip
+func (sc *SetupController) Skip(c *gin.Context) {
+	service := gbsetup.NewInstallationService(sc.db)
+	err := service.Skip(c.Request.Context())
+	if errors.Is(err, gbsetup.ErrInvalidOnboardingTransition) {
+		state, currentErr := service.Current(c.Request.Context())
+		if currentErr == nil && (state.Status == gbsetup.OnboardingCompleted || state.Status == gbsetup.OnboardingSkipped) {
+			sc.Success(c, gin.H{"onboardingStatus": state.Status})
+			return
+		}
+	}
+	if err != nil {
+		sc.Fail(c, "暂缓 SIP 配置失败", err, http.StatusInternalServerError)
+		return
+	}
+	state, err := service.Current(c.Request.Context())
+	if err != nil {
+		sc.Fail(c, "读取 SIP 安装状态失败", err, http.StatusInternalServerError)
+		return
+	}
+	app.ZapLog.Info("SIP 首次安装引导已暂缓",
+		zap.Uint("operatorId", sc.GetCurrentUserID(c)),
+		zap.String("onboardingStatus", string(state.Status)))
+	sc.Success(c, gin.H{"onboardingStatus": state.Status})
+}

@@ -36,7 +36,35 @@ func newSetupControllerRouter(controller *SetupController) *gin.Engine {
 	router := gin.New()
 	router.GET("/status", controller.Status)
 	router.PUT("/config", controller.SaveConfig)
+	router.POST("/skip", controller.Skip)
 	return router
+}
+
+func TestSetupController_SkipIsIdempotentAndCannotRollBackCompleted(t *testing.T) {
+	db := newSetupControllerDB(t)
+	router := newSetupControllerRouter(NewSetupController(db, gbsetup.NewRuntimeStatus(), nil))
+
+	for i := 0; i < 2; i++ {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/skip", nil))
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	}
+	state, err := gbsetup.NewInstallationService(db).Current(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, gbsetup.OnboardingSkipped, state.Status)
+
+	password := "Secret123"
+	_, err = gbsetup.NewSIPConfigService(db).Save(t.Context(), gbsetup.SaveSIPConfigRequest{
+		DeploymentMode: gbsetup.DeploymentLAN, ListenIP: "0.0.0.0", AdvertiseIP: "192.168.1.10",
+		Port: 5061, Domain: "3402000000", ServerID: "34020000002000000001", Password: &password,
+	})
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/skip", nil))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	state, err = gbsetup.NewInstallationService(db).Current(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, gbsetup.OnboardingCompleted, state.Status)
 }
 
 func decodeSetupResponse(t *testing.T, recorder *httptest.ResponseRecorder) map[string]any {
