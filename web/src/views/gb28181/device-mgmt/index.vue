@@ -84,7 +84,27 @@ interface TreeRow {
     level: number;
 }
 
-const viewMode = ref<ViewMode>("list");
+const viewModeStorageKey = "uvp.gb28181.device-mgmt.view-mode";
+const autoRefreshStorageKey = "uvp.gb28181.device-mgmt.auto-refresh";
+function initialViewMode(): ViewMode {
+    if (typeof window === "undefined") return "list";
+    try {
+        const stored = window.localStorage.getItem(viewModeStorageKey);
+        return stored === "card" || stored === "map" ? stored : "list";
+    } catch {
+        return "list";
+    }
+}
+function initialAutoRefresh() {
+    if (typeof window === "undefined") return true;
+    try {
+        return window.localStorage.getItem(autoRefreshStorageKey) !== "false";
+    } catch {
+        return true;
+    }
+}
+
+const viewMode = ref<ViewMode>(initialViewMode());
 const assetKind = ref<AssetKind>("device");
 const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
@@ -124,7 +144,7 @@ const mapStyleUrls = {
 };
 const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
-const autoRefresh = ref(true);
+const autoRefresh = ref(initialAutoRefresh());
 const refreshInterval = ref<number | null>(null);
 const isMacPlatform = computed(() => typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform));
 
@@ -214,6 +234,20 @@ watch([viewMode, assetKind], async () => {
     page.value = 1;
     if (viewMode.value === "map") await nextTick(ensureMap);
     refreshMainData();
+});
+watch(viewMode, (mode) => {
+    try {
+        window.localStorage.setItem(viewModeStorageKey, mode);
+    } catch {
+        // Storage can be unavailable in privacy-restricted browser contexts.
+    }
+});
+watch(autoRefresh, (enabled) => {
+    try {
+        window.localStorage.setItem(autoRefreshStorageKey, String(enabled));
+    } catch {
+        // Storage can be unavailable in privacy-restricted browser contexts.
+    }
 });
 watch(darkMode, () => {
     if (!mapInstance) return;
@@ -1132,7 +1166,15 @@ function channelStatusClass(record: DeviceVO): string {
 
 onMounted(async () => {
     window.addEventListener("keydown", focusKeyword);
-    await Promise.all([loadTree(), refreshMainData(), refreshDeviceStats(), loadPtzTypeDict()]);
+    if (viewMode.value === "map") {
+        await nextTick(ensureMap);
+    }
+    await Promise.all([
+        loadTree(),
+        viewMode.value === "map" ? Promise.resolve() : refreshMainData(),
+        refreshDeviceStats(),
+        loadPtzTypeDict()
+    ]);
     if (autoRefresh.value) {
         startAutoRefresh();
     }
@@ -1508,7 +1550,7 @@ onUnmounted(() => {
                             <template v-if="assetKind === 'device'">
                         <article v-for="item in devices" :key="item.id" class="device-card device-summary-card" @dblclick="openDevice(item)">
                             <div class="device-card-head">
-                                <span class="device-card-icon"><RadioTower :size="18" /></span>
+                                <span class="device-card-icon"><Camera :size="18" /></span>
                                 <div class="device-card-title">
                                     <a-tooltip :content="deviceNameText(item)" position="top">
                                         <strong class="text-ellipsis">{{ deviceNameText(item) }}</strong>
@@ -1517,14 +1559,34 @@ onUnmounted(() => {
                                         <span class="code text-ellipsis">{{ item.deviceId }}</span>
                                     </a-tooltip>
                                 </div>
-                                <span class="status-pill" :class="{ online: item.online }">{{ item.online ? '在线' : '离线' }}</span>
                             </div>
+                            <a-tooltip content="查看状态轨迹" position="top">
+                                <button
+                                    class="device-status-ribbon"
+                                    :class="{ online: item.online }"
+                                    type="button"
+                                    :aria-label="`查看${item.online ? '在线' : '离线'}状态轨迹`"
+                                    @click.stop="openStatusEvents(item)"
+                                >
+                                    {{ item.online ? '在线' : '离线' }}
+                                </button>
+                            </a-tooltip>
                             <div class="device-card-info">
                                 <div><span>设备 ID</span><a-tooltip :content="item.deviceId" position="top"><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip></div>
                                 <div><span>厂商</span><strong class="text-ellipsis">{{ item.manufacturer || '未上报' }}</strong></div>
                                 <div><span>型号</span><strong class="text-ellipsis">{{ item.model || '未上报' }}</strong></div>
                                 <div><span>地址</span><a-tooltip :content="endpointText(item)" position="top"><strong class="mono text-ellipsis">{{ endpointText(item) }}</strong></a-tooltip></div>
-                                <div><span>通道数量</span><strong>{{ item.channelCount }} 路 · 在线 {{ item.channelOnlineCount }} 路</strong></div>
+                                <div class="device-card-channel">
+                                    <span>通道数量</span>
+                                    <div class="device-card-channel-value">
+                                        <div class="channel-progress">
+                                            <div class="progress-bar" :class="channelStatusClass(item)">
+                                                <div class="progress-fill" :style="{ width: channelPercentage(item) }"></div>
+                                            </div>
+                                            <span class="channel-text">{{ item.channelOnlineCount }}/{{ item.channelCount }}</span>
+                                        </div>
+                                    </div>
+                                </div>
                                 <div><span>最近心跳</span><strong :class="{ warn: !item.online }">{{ dateTime(item.keepaliveTime) }}</strong></div>
                                 <div><span>注册时间</span><strong>{{ dateTime(item.registerTime) }}</strong></div>
                             </div>
@@ -2841,9 +2903,10 @@ onUnmounted(() => {
 }
 .device-card-head {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 8px;
     align-items: center;
+    padding-right: 86px;
 }
 .device-card-icon {
     display: grid;
@@ -2857,16 +2920,50 @@ onUnmounted(() => {
 .device-card-title { min-width: 0; display: grid; gap: 3px; }
 .device-card-title strong { color: var(--uvp-text-primary); }
 .device-card-title .code { color: var(--uvp-text-tertiary); font-size: 12px; }
+.device-status-ribbon {
+    position: absolute;
+    top: 10px;
+    right: -34px;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 110px;
+    height: 26px;
+    color: #fff;
+    background: #ef4444;
+    transform: rotate(45deg);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    border: 0;
+    cursor: pointer;
+    transition: filter 0.16s ease, box-shadow 0.16s ease;
+}
+.device-status-ribbon:hover {
+    filter: brightness(0.94);
+    box-shadow: 0 4px 10px -7px rgb(15 23 42 / 55%);
+}
+.device-status-ribbon:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+.device-status-ribbon.online {
+    background: #10b981;
+}
 .device-card-info {
     display: grid;
     grid-template-columns: 68px minmax(0, 1fr);
-    gap: 5px 8px;
+    gap: 7px 10px;
     font-size: 12px;
 }
 .device-card-info > div { display: contents; }
 .device-card-info span { color: var(--uvp-text-tertiary); }
 .device-card-info strong { min-width: 0; color: var(--uvp-text-primary); font-weight: 500; }
 .device-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.device-card-channel-value { min-width: 0; }
+.device-card-channel-value .channel-progress { width: 100%; }
+.device-card-channel-value .channel-text { font-weight: 500; }
 .device-card-actions {
     gap: 7px;
     padding-top: 9px;
