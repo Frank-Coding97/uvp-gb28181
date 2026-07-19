@@ -19,6 +19,13 @@ type Sender interface {
 	SendSubscribe(context.Context, uac.SubscriptionRequest) (uac.SubscriptionResponse, error)
 }
 
+const (
+	minExpiresSeconds          = 60
+	maxExpiresSeconds          = 7 * 24 * 60 * 60
+	minPositionIntervalSeconds = 1
+	maxPositionIntervalSeconds = 24 * 60 * 60
+)
+
 // Service owns all durable subscription state transitions.
 type Service struct {
 	db         *gorm.DB
@@ -93,29 +100,8 @@ func (s *Service) findOrCreate(ctx context.Context, deviceID uint, kind gbmodels
 }
 
 func (s *Service) Enable(ctx context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
-	if s == nil || s.db == nil || s.sender == nil {
-		return nil, fmt.Errorf("订阅服务未就绪")
-	}
-	if device == nil || !kind.Valid() {
-		return nil, fmt.Errorf("设备或订阅类型无效")
-	}
-	if device.Status != gbmodels.DeviceStatusOnline {
-		return nil, fmt.Errorf("设备离线，无法启用订阅")
-	}
-	unlock := s.lock(device.ID, kind)
-	defer unlock()
-	sub, err := s.findOrCreate(ctx, device.ID, kind)
-	if err != nil {
-		return nil, err
-	}
-	now := s.now()
-	if err := s.db.WithContext(ctx).Model(sub).Updates(map[string]any{
-		"enabled": true, "status": gbmodels.SubscriptionStatusPending,
-		"last_subscribe_at": now, "last_error": "",
-	}).Error; err != nil {
-		return nil, err
-	}
-	return s.send(ctx, device, sub, sub.ExpiresSeconds)
+	enabled := true
+	return s.Configure(ctx, device, kind, &enabled, nil, nil)
 }
 
 func (s *Service) Renew(ctx context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
@@ -135,32 +121,82 @@ func (s *Service) Renew(ctx context.Context, device *gbmodels.GbDevice, kind gbm
 }
 
 func (s *Service) Disable(ctx context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
+	enabled := false
+	return s.Configure(ctx, device, kind, &enabled, nil, nil)
+}
+
+// Configure persists subscription policy and immediately applies it when the subscription is enabled.
+func (s *Service) Configure(ctx context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind, enabled *bool, expiresSeconds *int, intervalSeconds *int) (*gbmodels.GbDeviceSubscription, error) {
 	if s == nil || s.db == nil || device == nil || !kind.Valid() {
 		return nil, fmt.Errorf("设备或订阅类型无效")
 	}
+	if enabled == nil && expiresSeconds == nil && intervalSeconds == nil {
+		return nil, fmt.Errorf("未提供订阅配置")
+	}
+	if expiresSeconds != nil && (*expiresSeconds < minExpiresSeconds || *expiresSeconds > maxExpiresSeconds) {
+		return nil, fmt.Errorf("订阅有效期需在 %d-%d 秒之间", minExpiresSeconds, maxExpiresSeconds)
+	}
+	if intervalSeconds != nil {
+		if kind != gbmodels.SubscriptionKindMobilePosition {
+			return nil, fmt.Errorf("仅位置订阅支持上报间隔")
+		}
+		if *intervalSeconds < minPositionIntervalSeconds || *intervalSeconds > maxPositionIntervalSeconds {
+			return nil, fmt.Errorf("位置上报间隔需在 %d-%d 秒之间", minPositionIntervalSeconds, maxPositionIntervalSeconds)
+		}
+	}
+
 	unlock := s.lock(device.ID, kind)
 	defer unlock()
 	sub, err := s.findOrCreate(ctx, device.ID, kind)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.db.WithContext(ctx).Model(sub).Updates(map[string]any{
-		"enabled": false, "status": gbmodels.SubscriptionStatusDisabled, "next_action_at": nil,
-	}).Error; err != nil {
-		return nil, err
+
+	targetEnabled := sub.Enabled
+	if enabled != nil {
+		targetEnabled = *enabled
 	}
-	if sub.CallID == "" || device.Status != gbmodels.DeviceStatusOnline || s.sender == nil {
+	if targetEnabled && (device.Status != gbmodels.DeviceStatusOnline || s.sender == nil) {
+		return nil, fmt.Errorf("设备离线，无法启用或更新订阅")
+	}
+
+	updates := map[string]any{}
+	if expiresSeconds != nil {
+		updates["expires_seconds"] = *expiresSeconds
+		sub.ExpiresSeconds = *expiresSeconds
+	}
+	if intervalSeconds != nil {
+		updates["interval_seconds"] = *intervalSeconds
+		sub.IntervalSeconds = *intervalSeconds
+	}
+	if !targetEnabled {
+		updates["enabled"] = false
+		updates["status"] = gbmodels.SubscriptionStatusDisabled
+		updates["next_action_at"] = nil
+		if err := s.db.WithContext(ctx).Model(sub).Updates(updates).Error; err != nil {
+			return nil, err
+		}
+		if sub.CallID == "" || device.Status != gbmodels.DeviceStatusOnline || s.sender == nil {
+			_ = s.db.WithContext(ctx).First(sub, sub.ID).Error
+			return sub, nil
+		}
+		_, sendErr := s.sendRequest(ctx, device, sub, 0)
+		if sendErr != nil {
+			_ = s.db.WithContext(ctx).Model(sub).Update("last_error", sendErr.Error()).Error
+			_ = s.db.WithContext(ctx).First(sub, sub.ID).Error
+			return sub, sendErr
+		}
 		_ = s.db.WithContext(ctx).First(sub, sub.ID).Error
 		return sub, nil
 	}
-	_, sendErr := s.sendRequest(ctx, device, sub, 0)
-	if sendErr != nil {
-		_ = s.db.WithContext(ctx).Model(sub).Update("last_error", sendErr.Error()).Error
-		_ = s.db.WithContext(ctx).First(sub, sub.ID).Error
-		return sub, sendErr
+
+	updates["enabled"] = true
+	updates["status"] = gbmodels.SubscriptionStatusPending
+	updates["last_error"] = ""
+	if err := s.db.WithContext(ctx).Model(sub).Updates(updates).Error; err != nil {
+		return nil, err
 	}
-	_ = s.db.WithContext(ctx).First(sub, sub.ID).Error
-	return sub, nil
+	return s.send(ctx, device, sub, sub.ExpiresSeconds)
 }
 
 func (s *Service) send(ctx context.Context, device *gbmodels.GbDevice, sub *gbmodels.GbDeviceSubscription, expires int) (*gbmodels.GbDeviceSubscription, error) {
@@ -188,7 +224,7 @@ func (s *Service) send(ctx context.Context, device *gbmodels.GbDevice, sub *gbmo
 	next := renewalAt(now, actualExpires)
 	if err := s.db.WithContext(ctx).Model(sub).Updates(map[string]any{
 		"enabled": true, "status": gbmodels.SubscriptionStatusActive,
-		"expires_seconds": actualExpires, "call_id": response.CallID,
+		"call_id":   response.CallID,
 		"local_tag": response.LocalTag, "remote_tag": response.RemoteTag, "cseq": response.CSeq,
 		"expires_at": expiresAt, "next_action_at": next, "retry_count": 0,
 		"last_status_code": response.StatusCode, "last_error": "",

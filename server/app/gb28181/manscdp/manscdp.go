@@ -7,6 +7,7 @@ const (
 	CmdKeepalive      = "Keepalive"
 	CmdCatalog        = "Catalog"
 	CmdDeviceInfo     = "DeviceInfo"
+	CmdDeviceControl  = "DeviceControl"
 	CmdAlarm          = "Alarm"
 	CmdMobilePosition = "MobilePosition"
 )

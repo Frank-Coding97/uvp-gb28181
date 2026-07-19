@@ -14,8 +14,16 @@ import (
 type SubscriptionManager interface {
 	Enable(context.Context, *gbmodels.GbDevice, gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error)
 	Disable(context.Context, *gbmodels.GbDevice, gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error)
+	Configure(context.Context, *gbmodels.GbDevice, gbmodels.SubscriptionKind, *bool, *int, *int) (*gbmodels.GbDeviceSubscription, error)
 	Renew(context.Context, *gbmodels.GbDevice, gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error)
 }
+
+const (
+	minSubscriptionExpiresSeconds = 60
+	maxSubscriptionExpiresSeconds = 7 * 24 * 60 * 60
+	minPositionIntervalSeconds    = 1
+	maxPositionIntervalSeconds    = 24 * 60 * 60
+)
 
 type subscriptionVO struct {
 	Kind            gbmodels.SubscriptionKind   `json:"kind"`
@@ -126,25 +134,33 @@ func (dc *DeviceMgmtController) UpdateSubscription(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Enabled *bool `json:"enabled"`
+		Enabled         *bool `json:"enabled"`
+		ExpiresSeconds  *int  `json:"expiresSeconds"`
+		IntervalSeconds *int  `json:"intervalSeconds"`
 	}
-	if err := c.ShouldBindJSON(&body); err != nil || body.Enabled == nil {
+	if err := c.ShouldBindJSON(&body); err != nil || (body.Enabled == nil && body.ExpiresSeconds == nil && body.IntervalSeconds == nil) {
 		dc.FailAndAbort(c, "请求体不合法", err)
 		return
+	}
+	if body.ExpiresSeconds != nil && (*body.ExpiresSeconds < minSubscriptionExpiresSeconds || *body.ExpiresSeconds > maxSubscriptionExpiresSeconds) {
+		dc.FailAndAbort(c, "订阅有效期需在 60-604800 秒之间", nil)
+		return
+	}
+	if body.IntervalSeconds != nil {
+		if kind != gbmodels.SubscriptionKindMobilePosition {
+			dc.FailAndAbort(c, "仅位置订阅支持上报间隔", nil)
+			return
+		}
+		if *body.IntervalSeconds < minPositionIntervalSeconds || *body.IntervalSeconds > maxPositionIntervalSeconds {
+			dc.FailAndAbort(c, "位置上报间隔需在 1-86400 秒之间", nil)
+			return
+		}
 	}
 	if dc.subscriptionManager == nil {
 		c.JSON(503, gin.H{"code": 503, "message": "订阅服务未就绪"})
 		return
 	}
-	var (
-		sub *gbmodels.GbDeviceSubscription
-		err error
-	)
-	if *body.Enabled {
-		sub, err = dc.subscriptionManager.Enable(c, device, kind)
-	} else {
-		sub, err = dc.subscriptionManager.Disable(c, device, kind)
-	}
+	sub, err := dc.subscriptionManager.Configure(c, device, kind, body.Enabled, body.ExpiresSeconds, body.IntervalSeconds)
 	if err != nil || sub == nil {
 		if err == nil {
 			err = fmt.Errorf("订阅状态未返回")

@@ -84,3 +84,20 @@ func TestService_DisableStopsLocallyWhenRemoteCancelFails(t *testing.T) {
 	require.Len(t, sender.calls, 2)
 	require.Equal(t, 0, sender.calls[1].Expires)
 }
+
+func TestService_ConfigurePersistsPolicyAndResubscribes(t *testing.T) {
+	sender := &fakeSender{response: uac.SubscriptionResponse{StatusCode: 200, Expires: 3600, CallID: "call", CSeq: 1}}
+	svc, _, device := newServiceTest(t, sender)
+	initial, err := svc.Enable(context.Background(), device, gbmodels.SubscriptionKindMobilePosition)
+	require.NoError(t, err)
+	require.Equal(t, 30, initial.IntervalSeconds)
+
+	expires, interval := 7200, 15
+	sub, err := svc.Configure(context.Background(), device, gbmodels.SubscriptionKindMobilePosition, nil, &expires, &interval)
+	require.NoError(t, err)
+	require.Equal(t, 7200, sub.ExpiresSeconds)
+	require.Equal(t, 15, sub.IntervalSeconds)
+	require.Len(t, sender.calls, 2)
+	require.Equal(t, 7200, sender.calls[1].Expires)
+	require.Contains(t, string(sender.calls[1].Body), "<Interval>15</Interval>")
+}

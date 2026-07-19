@@ -17,9 +17,10 @@ import (
 
 // MessageHandler 处理 MESSAGE(MANSCDP):本期处理 Keepalive 心跳
 type MessageHandler struct {
-	recorder       metrics.Recorder // 可选:埋点 SIP 事务
-	catalogTrigger CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
-	alarmProcessor AlarmMessageProcessor
+	recorder          metrics.Recorder // 可选:埋点 SIP 事务
+	catalogTrigger    CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
+	subscriptionWaker SubscriptionWaker
+	alarmProcessor    AlarmMessageProcessor
 }
 
 type AlarmMessageProcessor interface {
@@ -41,6 +42,11 @@ func (h *MessageHandler) SetCatalogTrigger(t CatalogTrigger) {
 	h.catalogTrigger = t
 }
 
+// SetSubscriptionWaker 注入设备恢复在线后的订阅唤醒器。
+func (h *MessageHandler) SetSubscriptionWaker(w SubscriptionWaker) {
+	h.subscriptionWaker = w
+}
+
 func (h *MessageHandler) SetAlarmProcessor(processor AlarmMessageProcessor) {
 	h.alarmProcessor = processor
 }
@@ -52,6 +58,8 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 		return metrics.TxKeepalive
 	case manscdp.CmdCatalog:
 		return metrics.TxCatalog
+	case manscdp.CmdDeviceControl:
+		return metrics.TxPTZ
 	case "Alarm":
 		return metrics.TxAlarm
 	}
@@ -91,10 +99,17 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			restored, err := device.Keepalive(ctx, head.DeviceID)
 			if err != nil {
 				app.ZapLog.Error("GB28181 心跳处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
-			} else if restored && h.catalogTrigger != nil && req.Source() != "" {
-				// 离线时通道已统一置 OFF。设备恢复只证明 SIP 可达,
-				// 通道必须等待新的 Catalog ON/OFF 后再恢复。
-				h.catalogTrigger.Trigger(ctx, head.DeviceID, req.Source(), req.Transport())
+			} else if restored {
+				if h.subscriptionWaker != nil {
+					if err := h.subscriptionWaker.WakeDeviceByCode(ctx, head.DeviceID); err != nil {
+						app.ZapLog.Warn("GB28181 设备恢复订阅失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+					}
+				}
+				if h.catalogTrigger != nil && req.Source() != "" {
+					// 离线时通道已统一置 OFF。设备恢复只证明 SIP 可达,
+					// 通道必须等待新的 Catalog ON/OFF 后再恢复。
+					h.catalogTrigger.Trigger(ctx, head.DeviceID, req.Source(), req.Transport())
+				}
 			}
 		case manscdp.CmdCatalog:
 			// Catalog 应答(设备→平台),解析通道入库
@@ -102,6 +117,9 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdDeviceInfo:
 			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
 			HandleDeviceInfoResponse(ctx, req.Body())
+		case manscdp.CmdDeviceControl:
+			// DeviceControl 应答当前以 SIP 事务成功为准,入向消息纳入 PTZ 指标。
+			app.ZapLog.Info("GB28181 DeviceControl 应答收到", zap.String("deviceId", head.DeviceID))
 		case manscdp.CmdAlarm:
 			if h.alarmProcessor != nil {
 				if err := h.alarmProcessor.OnAlarmMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {

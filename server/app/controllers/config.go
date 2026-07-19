@@ -68,6 +68,17 @@ func (con ConfigController) GetConfig(ctx *gin.Context) {
 	captchaConfig["length"] = app.ConfigYml.GetInt("captcha.length") // 验证码字符长度
 	result["captcha"] = captchaConfig                                // 将验证码配置放入结果集
 
+	positionHistoryConfig := make(map[string]interface{})
+	positionHistoryConfig["enabled"] = true
+	positionHistoryConfig["retentionDays"] = 7
+	if app.ConfigYml.Get("gb28181.position_history.enabled") != nil {
+		positionHistoryConfig["enabled"] = app.ConfigYml.GetBool("gb28181.position_history.enabled")
+	}
+	if days := app.ConfigYml.GetInt("gb28181.position_history.retention_days"); days >= 1 && days <= 365 {
+		positionHistoryConfig["retentionDays"] = days
+	}
+	result["gb28181"] = map[string]interface{}{"positionHistory": positionHistoryConfig}
+
 	// 返回成功响应
 	con.Common.Success(ctx, result)
 }
@@ -110,6 +121,15 @@ func (con ConfigController) UpdateConfig(ctx *gin.Context) {
 	// 更新Captcha配置
 	app.ConfigYml.Set("captcha.open", req.Captcha.Open)
 	app.ConfigYml.Set("captcha.length", req.Captcha.Length)
+
+	if req.GB28181 != nil {
+		if req.GB28181.PositionHistory.RetentionDays < 1 || req.GB28181.PositionHistory.RetentionDays > 365 {
+			con.Common.FailAndAbort(ctx, "位置历史保留天数需在 1-365 天之间", nil)
+			return
+		}
+		app.ConfigYml.Set("gb28181.position_history.enabled", req.GB28181.PositionHistory.Enabled)
+		app.ConfigYml.Set("gb28181.position_history.retention_days", req.GB28181.PositionHistory.RetentionDays)
+	}
 
 	// 保存配置到文件
 	if err := app.ConfigYml.SaveConfig(); err != nil {

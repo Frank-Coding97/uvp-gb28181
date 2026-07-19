@@ -41,3 +41,19 @@ func TestWakeDevice_MarksEnabledRowsDue(t *testing.T) {
 	require.NoError(t, db.Where("device_id = ? AND kind = ?", device.ID, gbmodels.SubscriptionKindAlarm).First(&sub).Error)
 	require.WithinDuration(t, svc.now(), *sub.NextActionAt, time.Second)
 }
+
+func TestWakeDeviceByCode_OnlyMarksEnabledRowsDue(t *testing.T) {
+	sender := &fakeSender{}
+	svc, db, device := newServiceTest(t, sender)
+	future := svc.now().Add(time.Hour)
+	require.NoError(t, db.Create(&gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: gbmodels.SubscriptionKindCatalog, Enabled: true, Status: gbmodels.SubscriptionStatusExpired, Event: "Catalog", NextActionAt: &future}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: gbmodels.SubscriptionKindAlarm, Enabled: false, Status: gbmodels.SubscriptionStatusDisabled, Event: "presence"}).Error)
+
+	require.NoError(t, svc.WakeDeviceByCode(context.Background(), device.DeviceID))
+
+	var enabled, disabled gbmodels.GbDeviceSubscription
+	require.NoError(t, db.Where("device_id = ? AND kind = ?", device.ID, gbmodels.SubscriptionKindCatalog).First(&enabled).Error)
+	require.NoError(t, db.Where("device_id = ? AND kind = ?", device.ID, gbmodels.SubscriptionKindAlarm).First(&disabled).Error)
+	require.WithinDuration(t, svc.now(), *enabled.NextActionAt, time.Second)
+	require.Nil(t, disabled.NextActionAt)
+}

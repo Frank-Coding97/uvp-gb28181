@@ -34,6 +34,24 @@ func (f *fakeSubscriptionManager) Disable(_ context.Context, device *gbmodels.Gb
 	return &gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: kind, Status: gbmodels.SubscriptionStatusDisabled, ExpiresSeconds: 3600}, nil
 }
 
+func (f *fakeSubscriptionManager) Configure(_ context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind, enabled *bool, expiresSeconds *int, intervalSeconds *int) (*gbmodels.GbDeviceSubscription, error) {
+	f.calls = append(f.calls, "configure:"+string(kind))
+	sub := &gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: kind, Status: gbmodels.SubscriptionStatusDisabled, ExpiresSeconds: 3600}
+	if enabled != nil {
+		sub.Enabled = *enabled
+		if *enabled {
+			sub.Status = gbmodels.SubscriptionStatusActive
+		}
+	}
+	if expiresSeconds != nil {
+		sub.ExpiresSeconds = *expiresSeconds
+	}
+	if intervalSeconds != nil {
+		sub.IntervalSeconds = *intervalSeconds
+	}
+	return sub, nil
+}
+
 func (f *fakeSubscriptionManager) Renew(_ context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
 	f.calls = append(f.calls, "renew:"+string(kind))
 	return &gbmodels.GbDeviceSubscription{DeviceID: device.ID, Kind: kind, Enabled: true, Status: gbmodels.SubscriptionStatusActive, ExpiresSeconds: 3600}, nil
@@ -112,7 +130,7 @@ func TestDeviceMgmt_SubscriptionUpdateAndRenew(t *testing.T) {
 	r.PATCH("/device/:id/subscriptions/:kind", controller.UpdateSubscription)
 	r.POST("/device/:id/subscriptions/:kind/renew", controller.RenewSubscription)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("PATCH", "/device/"+uintStr(device.ID)+"/subscriptions/catalog", bytes.NewBufferString(`{"enabled":true}`))
+	req, _ := http.NewRequest("PATCH", "/device/"+uintStr(device.ID)+"/subscriptions/catalog", bytes.NewBufferString(`{"enabled":true,"expiresSeconds":7200}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
@@ -120,7 +138,7 @@ func TestDeviceMgmt_SubscriptionUpdateAndRenew(t *testing.T) {
 	req, _ = http.NewRequest("POST", "/device/"+uintStr(device.ID)+"/subscriptions/catalog/renew", nil)
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
-	require.Equal(t, []string{"enable:catalog", "renew:catalog"}, manager.calls)
+	require.Equal(t, []string{"configure:catalog", "renew:catalog"}, manager.calls)
 }
 
 func TestDeviceMgmt_SubscriptionsReturnsAllKinds(t *testing.T) {

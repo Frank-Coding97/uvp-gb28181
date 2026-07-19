@@ -96,6 +96,7 @@ var sipServer *gbsip.Server
 // subscriptionService and subscriptionScheduler share the SIP UAC lifecycle.
 var subscriptionService *subscribe.Service
 var subscriptionScheduler *subscribe.Scheduler
+var positionHistoryPruneCancel context.CancelFunc
 
 // offlineScanner 离线扫描器
 var offlineScanner *device.OfflineScanner
@@ -183,6 +184,7 @@ func Start() {
 	// UAC 若初始化失败(srv.UAC()==nil),handler 内部会 no-op
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
+		gbroutes.SetDeviceMgmtPTZSender(u)
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
 		gbroutes.SetDeviceMgmtSubscriptionManager(subscriptionService)
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
@@ -190,9 +192,11 @@ func Start() {
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindAlarm, subscribe.NewAlarmProcessor(app.DB(), time.Now))
 		subscriptionScheduler = subscribe.NewScheduler(subscriptionService, 30*time.Second)
 		subscriptionScheduler.Start(context.Background())
+		srv.SetSubscriptionWaker(subscriptionService)
 		srv.SetSubscriptionNotifier(subscriptionService)
 		srv.SetAlarmMessageProcessor(subscriptionService)
 	}
+	startPositionHistoryPruner()
 
 	// 启动离线扫描器(基于 keepalive_time 事实派生)
 	offlineScanner = device.NewOfflineScanner(
@@ -528,6 +532,10 @@ func setupCivilCodeService() {
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	if positionHistoryPruneCancel != nil {
+		positionHistoryPruneCancel()
+		positionHistoryPruneCancel = nil
+	}
 	if subscriptionScheduler != nil {
 		subscriptionScheduler.Stop()
 		subscriptionScheduler = nil
@@ -560,4 +568,35 @@ func Stop() {
 	if err := sipServer.Shutdown(ctx); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务关闭异常", zap.Error(err))
 	}
+}
+
+func startPositionHistoryPruner() {
+	if positionHistoryPruneCancel != nil || app.DB() == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	positionHistoryPruneCancel = cancel
+	go func() {
+		prune := func() {
+			deleted, err := subscribe.PrunePositionHistory(ctx, app.DB(), time.Now(), subscribe.PositionHistoryRetentionDays())
+			if err != nil {
+				app.ZapLog.Warn("清理位置历史失败", zap.Error(err))
+				return
+			}
+			if deleted > 0 {
+				app.ZapLog.Info("清理过期位置历史", zap.Int64("deleted", deleted))
+			}
+		}
+		prune()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				prune()
+			}
+		}
+	}()
 }

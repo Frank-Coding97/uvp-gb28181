@@ -14,15 +14,20 @@ import (
 )
 
 type PositionProcessor struct {
-	db  *gorm.DB
-	now func() time.Time
+	db             *gorm.DB
+	now            func() time.Time
+	historyEnabled func() bool
 }
 
-func NewPositionProcessor(db *gorm.DB, now func() time.Time) *PositionProcessor {
+func NewPositionProcessor(db *gorm.DB, now func() time.Time, historyEnabled ...func() bool) *PositionProcessor {
 	if now == nil {
 		now = time.Now
 	}
-	return &PositionProcessor{db: db, now: now}
+	enabled := PositionHistoryEnabled
+	if len(historyEnabled) > 0 && historyEnabled[0] != nil {
+		enabled = historyEnabled[0]
+	}
+	return &PositionProcessor{db: db, now: now, historyEnabled: enabled}
 }
 
 func (p *PositionProcessor) Process(ctx context.Context, device *gbmodels.GbDevice, notification Notification) error {
@@ -47,15 +52,31 @@ func (p *PositionProcessor) Process(ctx context.Context, device *gbmodels.GbDevi
 		channelID = &channel.ID
 	}
 	receivedAt := p.now()
-	row := gbmodels.GbMobilePositionLatest{
+	latest := gbmodels.GbMobilePositionLatest{
 		DeviceID: device.ID, SourceCode: position.DeviceID, ChannelID: channelID,
 		EventTime: eventTime, ReceivedAt: receivedAt, Longitude: position.Longitude, Latitude: position.Latitude,
 		Speed: floatPtr(position.Speed), Direction: floatPtr(position.Direction), Altitude: floatPtr(position.Altitude),
 	}
-	return p.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "device_id"}, {Name: "source_code"}},
-		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "event_time", "received_at", "longitude", "latitude", "speed", "direction", "altitude", "updated_at"}),
-	}).Create(&row).Error
+	upsertLatest := func(tx *gorm.DB) error {
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "device_id"}, {Name: "source_code"}},
+			DoUpdates: clause.AssignmentColumns([]string{"channel_id", "event_time", "received_at", "longitude", "latitude", "speed", "direction", "altitude", "updated_at"}),
+		}).Create(&latest).Error
+	}
+	if p.historyEnabled == nil || !p.historyEnabled() {
+		return upsertLatest(p.db.WithContext(ctx))
+	}
+	history := gbmodels.GbMobilePositionHistory{
+		DeviceID: device.ID, SourceCode: position.DeviceID, ChannelID: channelID,
+		EventTime: eventTime, ReceivedAt: receivedAt, Longitude: position.Longitude, Latitude: position.Latitude,
+		Speed: floatPtr(position.Speed), Direction: floatPtr(position.Direction), Altitude: floatPtr(position.Altitude),
+	}
+	return p.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := upsertLatest(tx); err != nil {
+			return err
+		}
+		return tx.Create(&history).Error
+	})
 }
 
 func parsePositionTime(value string) (time.Time, error) {

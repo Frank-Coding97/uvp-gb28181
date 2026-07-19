@@ -75,6 +75,25 @@ type GbMobilePositionLatest struct {
 
 func (GbMobilePositionLatest) TableName() string { return "gb_mobile_position_latest" }
 
+// GbMobilePositionHistory stores one accepted mobile-position notification for later trajectory queries.
+type GbMobilePositionHistory struct {
+	ID         uint64    `gorm:"primaryKey" json:"id"`
+	DeviceID   uint      `gorm:"column:device_id;not null;index:idx_position_history_device_source_time,priority:1" json:"deviceId"`
+	SourceCode string    `gorm:"column:source_code;size:20;not null;index:idx_position_history_device_source_time,priority:2" json:"sourceCode"`
+	ChannelID  *uint     `gorm:"column:channel_id;index:idx_position_history_channel_time,priority:1" json:"channelId"`
+	EventTime  time.Time `gorm:"column:event_time;not null;index:idx_position_history_device_source_time,priority:3;index:idx_position_history_channel_time,priority:2" json:"eventTime"`
+	ReceivedAt time.Time `gorm:"column:received_at;not null;index" json:"receivedAt"`
+	Longitude  float64   `gorm:"column:longitude;not null" json:"longitude"`
+	Latitude   float64   `gorm:"column:latitude;not null" json:"latitude"`
+	Speed      *float64  `gorm:"column:speed" json:"speed"`
+	Direction  *float64  `gorm:"column:direction" json:"direction"`
+	Altitude   *float64  `gorm:"column:altitude" json:"altitude"`
+	CreatedAt  time.Time `json:"createdAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+func (GbMobilePositionHistory) TableName() string { return "gb_mobile_position_history" }
+
 // GbAlarmEvent is an immutable alarm notification with a deterministic dedupe key.
 type GbAlarmEvent struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`

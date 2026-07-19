@@ -52,6 +52,7 @@ import {
     listDeviceStatusEvents,
     listMapClusters,
     listMapMarkers,
+    listDeviceSubscriptions,
     refreshDeviceCatalog,
     updateChannelStreamTransport,
     updateChannel,
@@ -64,6 +65,7 @@ import {
     type CreateDeviceDTO,
     type DeviceVO,
     type DeviceStatusEvent,
+    type DeviceSubscription,
     type MapCluster,
     type MapMarker,
     type OnlineStatus,
@@ -170,6 +172,7 @@ const markers = ref<MapMarker[]>([]);
 const clusters = ref<MapCluster[]>([]);
 const channelDetail = ref<ChannelVO | null>(null);
 const deviceDetail = ref<DeviceVO | null>(null);
+const deviceSubscriptions = ref<DeviceSubscription[]>([]);
 const statusEventVisible = ref(false);
 const statusEventDevice = ref<DeviceVO | null>(null);
 const statusEventList = ref<DeviceStatusEvent[]>([]);
@@ -325,12 +328,17 @@ function copyText(value?: string | null) {
         );
     }
 }
-function parseCapability(source?: string): string[] {
-    if (!source) return [];
-    return source
-        .split(/[,;/\s]+/)
-        .map(x => x.trim())
-        .filter(Boolean);
+const deviceSubscriptionSummary = computed(() => {
+    const byKind = new Map(deviceSubscriptions.value.map(subscription => [subscription.kind, subscription]));
+    return [
+        { kind: "catalog", label: "目录", status: byKind.get("catalog")?.status || "disabled" },
+        { kind: "mobile_position", label: "位置", status: byKind.get("mobile_position")?.status || "disabled" },
+        { kind: "alarm", label: "报警", status: byKind.get("alarm")?.status || "disabled" }
+    ];
+});
+
+function subscriptionStatusText(status: DeviceSubscription["status"] | "disabled") {
+    return { disabled: "未启用", pending: "建立中", active: "已启用", degraded: "异常", expired: "已过期" }[status];
 }
 function onlineRatePercent(rate?: number) {
     if (rate == null || Number.isNaN(rate)) return 0;
@@ -667,9 +675,14 @@ async function openDevice(record: DeviceVO) {
     drawerTarget.value = { type: "device", id: record.id };
     drawerVisible.value = true;
     drawerLoading.value = true;
+    deviceSubscriptions.value = [];
     try {
-        const detailRes = await getDevice(record.id);
+        const [detailRes, subscriptionsRes] = await Promise.all([
+            getDevice(record.id),
+            listDeviceSubscriptions(record.id)
+        ]);
         if (detailRes.code === 0) deviceDetail.value = detailRes.data;
+        if (subscriptionsRes.code === 0) deviceSubscriptions.value = subscriptionsRes.data?.list || [];
     } catch (error: any) {
         Message.error(error?.message || "详情加载失败");
     } finally {
@@ -680,6 +693,17 @@ async function openDevice(record: DeviceVO) {
 function openSubscriptionManager(record: DeviceVO) {
     subscriptionDevice.value = record;
     subscriptionDialogVisible.value = true;
+}
+
+async function handleSubscriptionChanged() {
+    loadDevicesData();
+    if (!deviceDetail.value || subscriptionDevice.value?.id !== deviceDetail.value.id) return;
+    try {
+        const res = await listDeviceSubscriptions(deviceDetail.value.id);
+        if (res.code === 0) deviceSubscriptions.value = res.data?.list || [];
+    } catch (error) {
+        console.warn("刷新设备订阅摘要失败", error);
+    }
 }
 
 async function loadStatusEvents(append = false) {
@@ -1368,7 +1392,7 @@ onUnmounted(() => {
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="快照" :width="92" align="center">
-                                    <template #cell="{ record }">
+                                    <template #cell>
                                         <div class="thumb small list-snapshot-empty">
                                             <Video :size="14" />
                                             <span>暂无快照</span>
@@ -1788,10 +1812,13 @@ onUnmounted(() => {
                             </span>
                         </div>
 
-                        <section v-if="parseCapability(deviceDetail.subscribeCapability).length" class="info-group">
-                            <div class="group-label">订阅能力</div>
-                            <div class="capability-chips">
-                                <span v-for="cap in parseCapability(deviceDetail.subscribeCapability)" :key="cap" class="cap-chip on">{{ cap }}</span>
+                        <section class="info-group">
+                            <div class="group-label">订阅状态</div>
+                            <div class="subscription-summary">
+                                <span v-for="subscription in deviceSubscriptionSummary" :key="subscription.kind" class="subscription-chip" :class="`status-${subscription.status}`">
+                                    <span>{{ subscription.label }}</span>
+                                    <strong>{{ subscriptionStatusText(subscription.status) }}</strong>
+                                </span>
                             </div>
                         </section>
 
@@ -1910,7 +1937,7 @@ onUnmounted(() => {
                 v-model:visible="subscriptionDialogVisible"
                 :device-id="subscriptionDevice?.id"
                 :device-name="subscriptionDevice ? displayName(subscriptionDevice) : ''"
-                @changed="loadDevicesData"
+                @changed="handleSubscriptionChanged"
             />
 
             <ControlConsole
@@ -3654,12 +3681,12 @@ onUnmounted(() => {
     color: var(--uvp-brand);
     background: color-mix(in srgb, var(--uvp-brand) 10%, transparent);
 }
-.capability-chips {
+.subscription-summary {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
 }
-.cap-chip {
+.subscription-chip {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -3671,11 +3698,14 @@ onUnmounted(() => {
     background: var(--uvp-list-toolbar-bg);
     border: 1px solid var(--uvp-panel-border);
 }
-.cap-chip.on {
+.subscription-chip strong { font-weight: 620; }
+.subscription-chip.status-active {
     color: var(--uvp-brand-cyan);
     background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
     border-color: color-mix(in srgb, var(--uvp-brand-cyan) 26%, transparent);
 }
+.subscription-chip.status-pending, .subscription-chip.status-expired { color: var(--uvp-warning); background: var(--uvp-warning-soft); border-color: var(--uvp-warning-border); }
+.subscription-chip.status-degraded { color: var(--uvp-danger); background: color-mix(in srgb, var(--uvp-danger) 8%, transparent); border-color: color-mix(in srgb, var(--uvp-danger) 24%, transparent); }
 .channel-summary { display: grid; gap: 10px; }
 .channel-stats {
     display: grid;

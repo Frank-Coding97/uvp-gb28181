@@ -225,8 +225,14 @@ export const getDevice = (id: number) =>
 export const listDeviceSubscriptions = (id: number) =>
     http.request<BaseResult<{ list: DeviceSubscription[] }>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions`));
 
-export const updateDeviceSubscription = (id: number, kind: SubscriptionKind, enabled: boolean) =>
-    http.request<BaseResult<DeviceSubscription>>("patch", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions/${kind}`), { data: { enabled } });
+export interface SubscriptionUpdate {
+    enabled?: boolean;
+    expiresSeconds?: number;
+    intervalSeconds?: number;
+}
+
+export const updateDeviceSubscription = (id: number, kind: SubscriptionKind, data: SubscriptionUpdate) =>
+    http.request<BaseResult<DeviceSubscription>>("patch", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions/${kind}`), { data });
 
 export const renewDeviceSubscription = (id: number, kind: SubscriptionKind) =>
     http.request<BaseResult<DeviceSubscription>>("post", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions/${kind}/renew`));

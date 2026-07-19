@@ -85,6 +85,10 @@ func SetDeviceMgmtSubscriptionManager(manager gbcontrollers.SubscriptionManager)
 	deviceMgmtController.SetSubscriptionManager(manager)
 }
 
+func SetDeviceMgmtPTZSender(sender gbcontrollers.DeviceControlSender) {
+	deviceMgmtController.SetPTZSender(sender)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
@@ -160,6 +164,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.PATCH("/channel/:id", deviceMgmtController.UpdateChannel)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
+			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
 			dmgmt.PATCH("/channel/:id/stream-transport", deviceMgmtController.UpdateChannelStreamTransport)
 			// 删除(单/批,硬 cascade — 用户主动删)
 			dmgmt.DELETE("/device/:id", deviceMgmtController.DeleteDevice)

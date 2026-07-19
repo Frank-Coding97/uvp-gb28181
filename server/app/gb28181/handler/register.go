@@ -25,6 +25,7 @@ type RegisterHandler struct {
 	keepaliveInterval int
 	catalogTrigger    CatalogTrigger    // 可选:首次注册成功后触发 Catalog 查询
 	deviceInfoTrigger DeviceInfoTrigger // 可选:首次注册成功后触发 DeviceInfo 查询(拉设备本体元数据)
+	subscriptionWaker SubscriptionWaker // 可选:设备恢复在线后恢复已启用订阅
 	recorder          metrics.Recorder  // 可选:埋点 SIP 事务
 }
 
@@ -45,6 +46,11 @@ func (h *RegisterHandler) SetCatalogTrigger(t CatalogTrigger) {
 // SetDeviceInfoTrigger 注入 DeviceInfo 触发器(可选;不注入则不触发)
 func (h *RegisterHandler) SetDeviceInfoTrigger(t DeviceInfoTrigger) {
 	h.deviceInfoTrigger = t
+}
+
+// SetSubscriptionWaker 注入设备恢复在线后的订阅唤醒器。
+func (h *RegisterHandler) SetSubscriptionWaker(w SubscriptionWaker) {
+	h.subscriptionWaker = w
 }
 
 // SetRecorder 注入指标 Recorder(可选,nil 时所有埋点 no-op)
@@ -187,6 +193,11 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if isFirst {
 		dest := fmt.Sprintf("%s:%d", ip, port)
 		transport := req.Transport()
+		if h.subscriptionWaker != nil {
+			if err := h.subscriptionWaker.WakeDeviceByCode(ctx, deviceID); err != nil {
+				app.ZapLog.Warn("GB28181 设备恢复订阅失败", zap.String("deviceId", deviceID), zap.Error(err))
+			}
+		}
 		if h.catalogTrigger != nil {
 			h.catalogTrigger.Trigger(ctx, deviceID, dest, transport)
 		}

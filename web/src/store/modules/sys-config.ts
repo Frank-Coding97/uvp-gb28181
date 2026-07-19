@@ -7,6 +7,7 @@ import type {
     SystemConfig,
     SafeConfig,
     CaptchaConfig,
+    PositionHistoryConfig,
     ConfigRequestData
 } from "@/api/sysconfig";
 import { handleUrl } from "@/utils/app"
@@ -42,6 +43,11 @@ const sysConfigStore = () => {
         length: 0
     });
 
+    const positionHistoryConfig = ref<PositionHistoryConfig>({
+        enabled: true,
+        retentionDays: 7
+    });
+
     // 配置加载状态
     const loading = ref(false);
 
@@ -65,6 +71,7 @@ const sysConfigStore = () => {
                 systemConfig.value = data.system || systemConfig.value;
                 safeConfig.value = data.safe || safeConfig.value;
                 captchaConfig.value = data.captcha || captchaConfig.value;
+                positionHistoryConfig.value = data.gb28181?.positionHistory || positionHistoryConfig.value;
             }
 
             return data;
@@ -92,6 +99,9 @@ const sysConfigStore = () => {
                 }
                 if (configData.captcha) {
                     captchaConfig.value = { ...captchaConfig.value, ...configData.captcha };
+                }
+                if (configData.gb28181?.positionHistory) {
+                    positionHistoryConfig.value = { ...positionHistoryConfig.value, ...configData.gb28181.positionHistory };
                 }
             }
 
@@ -128,12 +138,18 @@ const sysConfigStore = () => {
             open: false,
             length: 0
         };
+
+        positionHistoryConfig.value = {
+            enabled: true,
+            retentionDays: 7
+        };
     }
 
     return {
         systemConfig,
         safeConfig,
         captchaConfig,
+        positionHistoryConfig,
         loading,
         systemLogo,
         systemIcon,
@@ -147,6 +163,7 @@ export const useSysConfigStore = defineStore("sys-config", sysConfigStore, {
     persist: persistedstateConfig("sys-config", [
         "systemConfig",
         "safeConfig",
-        "captchaConfig"
+        "captchaConfig",
+        "positionHistoryConfig"
     ])
 });

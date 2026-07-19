@@ -92,3 +92,19 @@ func (s *Service) WakeDevice(ctx context.Context, deviceID uint) error {
 		Where("device_id = ? AND enabled = ?", deviceID, true).
 		Update("next_action_at", now).Error
 }
+
+// WakeDeviceByCode schedules enabled subscriptions after a device recovers online.
+func (s *Service) WakeDeviceByCode(ctx context.Context, deviceCode string) error {
+	if s == nil || s.db == nil || deviceCode == "" {
+		return nil
+	}
+	var device gbmodels.GbDevice
+	result := s.db.WithContext(ctx).Select("id").Where("device_id = ?", deviceCode).Limit(1).Find(&device)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil
+	}
+	return s.WakeDevice(ctx, device.ID)
+}

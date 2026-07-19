@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,8 @@ type DeviceMgmtController struct {
 	db                  func() *gorm.DB
 	catalogTrigger      CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
 	subscriptionManager SubscriptionManager
+	ptzSender           DeviceControlSender
+	ptzSN               atomic.Uint64
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询
@@ -47,6 +50,20 @@ func (dc *DeviceMgmtController) SetCatalogTrigger(t CatalogTrigger) { dc.catalog
 
 func (dc *DeviceMgmtController) SetSubscriptionManager(manager SubscriptionManager) {
 	dc.subscriptionManager = manager
+}
+
+// DeviceControlSender is implemented by the SIP UAC and kept as an interface
+// here so HTTP/controller tests do not need a live SIP stack.
+type DeviceControlSender interface {
+	SendMessage(context.Context, string, string, string, []byte) error
+}
+
+func (dc *DeviceMgmtController) SetPTZSender(sender DeviceControlSender) {
+	dc.ptzSender = sender
+}
+
+func (dc *DeviceMgmtController) nextPTZSN() int {
+	return int(dc.ptzSN.Add(1))
 }
 
 // channelStats 单个 channel 的派生聚合
@@ -322,7 +339,15 @@ func (dc *DeviceMgmtController) GetChannel(c *gin.Context) {
 		dc.FailAndAbort(c, "通道不存在", nil)
 		return
 	}
-	dc.Success(c, ch)
+	var device gbmodels.GbDevice
+	if err := db.WithContext(c).Select("transport").Where("device_id = ?", ch.DeviceID).Limit(1).Find(&device).Error; err != nil {
+		dc.FailAndAbort(c, "查询所属设备失败", err)
+		return
+	}
+	dc.Success(c, struct {
+		*gbmodels.GbChannel
+		Transport string `json:"transport"`
+	}{GbChannel: &ch, Transport: device.Transport})
 }
 
 // UpdateChannelStreamTransport 更新通道流传输模式

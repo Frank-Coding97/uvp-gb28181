@@ -99,6 +99,16 @@ func (s *Server) SetCatalogTrigger(t handler.CatalogTrigger) {
 	}
 }
 
+// SetSubscriptionWaker connects online recovery events to durable subscriptions.
+func (s *Server) SetSubscriptionWaker(w handler.SubscriptionWaker) {
+	if s.regH != nil {
+		s.regH.SetSubscriptionWaker(w)
+	}
+	if s.msgH != nil {
+		s.msgH.SetSubscriptionWaker(w)
+	}
+}
+
 // SetSubscriptionNotifier connects the durable subscription service to inbound NOTIFY requests.
 // It must be called before Start.
 func (s *Server) SetSubscriptionNotifier(notifier handler.SubscriptionNotifier) {
