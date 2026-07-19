@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, Save } from "lucide-vue-next";
 import DeploymentStep from "./steps/DeploymentStep.vue";
 import NetworkStep from "./steps/NetworkStep.vue";
 import IdentityStep from "./steps/IdentityStep.vue";
+import ConfirmStep from "./steps/ConfirmStep.vue";
 import { useSipSetup } from "./useSipSetup";
 import { identityCanContinue, networkCanContinue } from "./sipSetupRules";
 
@@ -50,6 +51,7 @@ function close() {
 }
 
 async function save() {
+    if (setup.saving.value) return;
     try {
         await setup.save();
         Message.success("SIP 配置已保存，重启服务后生效");
@@ -104,7 +106,11 @@ async function skip() {
                     :has-existing-password="setup.hasExistingPassword.value"
                     @update="Object.assign(setup.form, $event)"
                 />
-                <div v-else class="step-placeholder">确认配置</div>
+                <ConfirmStep
+                    v-else
+                    :form="setup.form"
+                    :has-password="setup.hasExistingPassword.value || setup.form.password !== ''"
+                />
             </div>
 
             <div class="wizard-footer">

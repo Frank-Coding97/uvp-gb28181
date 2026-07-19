@@ -63,4 +63,17 @@ describe("useSipSetup", () => {
         expect(setup.form.serverId).toBe("34020000002000000001");
         expect(setup.error.value).toBe("network down");
     });
+
+    it("exposes saving state so callers can suppress duplicate submits", async () => {
+        type SaveResponse = Awaited<ReturnType<SipSetupApi["save"]>>;
+        let resolveRequest!: (value: SaveResponse) => void;
+        const api = fakeApi({ save: vi.fn(() => new Promise<SaveResponse>(resolve => { resolveRequest = resolve; })) });
+        const setup = useSipSetup(api);
+        setup.form.deploymentMode = "lan";
+        const pending = setup.save();
+        expect(setup.saving.value).toBe(true);
+        resolveRequest({ code: 0, message: "", data: { config: configuredStatus.config, restartRequired: true, runtime: configuredStatus.runtime } });
+        await pending;
+        expect(setup.saving.value).toBe(false);
+    });
 });

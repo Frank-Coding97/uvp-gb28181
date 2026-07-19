@@ -58,3 +58,9 @@ export function identityCanContinue(
     return port >= 1 && port <= 65535 && /^\d{20}$/.test(serverId) && /^\d{10}$/.test(domain) &&
         (hasExistingPassword ? password === "" || password.length >= 6 : password.length >= 6);
 }
+
+export function formatRegisterUri(serverId: string, advertiseIp: string, port: number): string {
+    return serverId && isConcreteIPv4(advertiseIp) && port >= 1 && port <= 65535
+        ? `sip:${serverId}@${advertiseIp}:${port}`
+        : "";
+}

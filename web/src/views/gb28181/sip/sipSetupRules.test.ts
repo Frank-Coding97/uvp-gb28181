@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SipNetworkAddress } from "@/api/gb28181";
-import { deriveDomain, deriveNetworkSelection, identityCanContinue, networkCanContinue, networkOptions } from "./sipSetupRules";
+import { deriveDomain, deriveNetworkSelection, formatRegisterUri, identityCanContinue, networkCanContinue, networkOptions } from "./sipSetupRules";
 
 const items: SipNetworkAddress[] = [
     { ip: "0.0.0.0", cidr: "0.0.0.0/0", loopback: false, virtual: false, recommended: false, more: false, listenOnly: true },
@@ -45,5 +45,10 @@ describe("SIP identity rules", () => {
         expect(identityCanContinue(0, "34020000002000000001", "3402000000", "Secret123", false)).toBe(false);
         expect(identityCanContinue(5061, "34020000002000000001", "3402000000", "", true)).toBe(true);
         expect(identityCanContinue(5061, "34020000002000000001", "3402000000", "", false)).toBe(false);
+    });
+
+    it("formats the device registration URI from advertise IP only", () => {
+        expect(formatRegisterUri("34020000002000000001", "192.168.1.10", 5061)).toBe("sip:34020000002000000001@192.168.1.10:5061");
+        expect(formatRegisterUri("34020000002000000001", "0.0.0.0", 5061)).toBe("");
     });
 });
