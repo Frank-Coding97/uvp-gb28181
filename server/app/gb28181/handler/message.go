@@ -21,10 +21,17 @@ type MessageHandler struct {
 	catalogTrigger    CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
 	subscriptionWaker SubscriptionWaker
 	alarmProcessor    AlarmMessageProcessor
+	recordInfoSink    RecordInfoSink
 }
 
 type AlarmMessageProcessor interface {
 	OnAlarmMessage(context.Context, string, string, string, []byte) error
+}
+
+// RecordInfoSink receives one asynchronously delivered RecordInfo response segment.
+// It must return quickly because MESSAGE handling always acknowledges the device immediately.
+type RecordInfoSink interface {
+	OnRecordInfo(context.Context, *manscdp.RecordInfoResponse) error
 }
 
 // NewMessageHandler 创建消息处理器
@@ -51,6 +58,10 @@ func (h *MessageHandler) SetAlarmProcessor(processor AlarmMessageProcessor) {
 	h.alarmProcessor = processor
 }
 
+func (h *MessageHandler) SetRecordInfoSink(sink RecordInfoSink) {
+	h.recordInfoSink = sink
+}
+
 // txKindFromCmd 根据 MANSCDP CmdType 映射 metrics 事务类型
 func txKindFromCmd(cmd string) metrics.TxKind {
 	switch cmd {
@@ -58,6 +69,8 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 		return metrics.TxKeepalive
 	case manscdp.CmdCatalog:
 		return metrics.TxCatalog
+	case manscdp.CmdRecordInfo:
+		return metrics.TxRecord
 	case manscdp.CmdDeviceControl:
 		return metrics.TxPTZ
 	case "Alarm":
@@ -114,6 +127,19 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdCatalog:
 			// Catalog 应答(设备→平台),解析通道入库
 			HandleCatalogResponse(ctx, req.Body())
+		case manscdp.CmdRecordInfo:
+			if h.recordInfoSink == nil {
+				break
+			}
+			response, err := manscdp.ParseRecordInfoResponse(req.Body())
+			if err != nil {
+				app.ZapLog.Warn("GB28181 RecordInfo 响应解析失败", zap.Error(err))
+				break
+			}
+			if err := h.recordInfoSink.OnRecordInfo(ctx, response); err != nil {
+				app.ZapLog.Warn("GB28181 RecordInfo 响应投递失败",
+					zap.String("deviceId", response.DeviceID), zap.Int("sn", response.SN), zap.Error(err))
+			}
 		case manscdp.CmdDeviceInfo:
 			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
 			HandleDeviceInfoResponse(ctx, req.Body())
