@@ -43,6 +43,18 @@ type Command struct {
 	Build          func(sn int) ([]byte, error)
 }
 
+type Response struct {
+	OperationID  string
+	DeviceCode   string
+	ChannelCode  string
+	SN           int
+	CallID       string
+	CSeq         string
+	SIPStatus    int
+	DeviceResult string
+	DeviceError  string
+}
+
 type Service struct {
 	db     *gorm.DB
 	sender TrackedSender
@@ -164,4 +176,99 @@ func validateTarget(target Target) error {
 		return fmt.Errorf("设备来源地址缺失")
 	}
 	return nil
+}
+
+func terminalPTZStatus(status gbmodels.PTZOperationStatus) bool {
+	switch status {
+	case gbmodels.PTZOperationAccepted, gbmodels.PTZOperationRejected, gbmodels.PTZOperationTimeout, gbmodels.PTZOperationCancelled:
+		return true
+	default:
+		return false
+	}
+}
+
+// ApplyResponse correlates an application-level response and updates a
+// non-terminal operation exactly once. matched=false means the response was
+// valid but did not identify a unique local operation.
+func (s *Service) ApplyResponse(ctx context.Context, response Response) (gbmodels.GbPTZOperation, bool, error) {
+	if s == nil || s.db == nil {
+		return gbmodels.GbPTZOperation{}, false, fmt.Errorf("PTZ service 未就绪")
+	}
+	var operation gbmodels.GbPTZOperation
+	query := s.db.WithContext(ctx)
+	if response.OperationID != "" {
+		query = query.Where("operation_id = ?", response.OperationID)
+	} else if response.SN > 0 && response.DeviceCode != "" {
+		query = query.Where("sn = ? AND device_code = ?", response.SN, response.DeviceCode)
+		if response.ChannelCode != "" {
+			query = query.Where("channel_code = ?", response.ChannelCode)
+		}
+	} else if response.CallID != "" && response.CSeq != "" {
+		query = query.Where("call_id = ? AND cseq = ?", response.CallID, response.CSeq)
+	} else {
+		return gbmodels.GbPTZOperation{}, false, nil
+	}
+	if result := query.Order("id DESC").Limit(1).Find(&operation); result.Error != nil {
+		return gbmodels.GbPTZOperation{}, false, result.Error
+	} else if result.RowsAffected == 0 {
+		return gbmodels.GbPTZOperation{}, false, nil
+	}
+	if terminalPTZStatus(operation.Status) {
+		return operation, true, nil
+	}
+	status := gbmodels.PTZOperationUnknown
+	if response.SIPStatus >= 300 || strings.EqualFold(response.DeviceResult, "ERROR") {
+		status = gbmodels.PTZOperationRejected
+	} else if response.SIPStatus >= 200 && response.SIPStatus < 300 && strings.EqualFold(response.DeviceResult, "OK") {
+		status = gbmodels.PTZOperationAccepted
+	}
+	completedAt := s.now()
+	updates := map[string]interface{}{
+		"status": status, "sip_status": response.SIPStatus, "device_result": response.DeviceResult,
+		"device_error": response.DeviceError, "completed_at": completedAt,
+	}
+	if response.CallID != "" {
+		updates["call_id"] = response.CallID
+	}
+	if response.CSeq != "" {
+		updates["cseq"] = response.CSeq
+	}
+	if err := s.db.WithContext(ctx).Model(&operation).Updates(updates).Error; err != nil {
+		return operation, true, err
+	}
+	operation.Status, operation.SIPStatus, operation.DeviceResult, operation.DeviceError, operation.CompletedAt = status, response.SIPStatus, response.DeviceResult, response.DeviceError, &completedAt
+	return operation, true, nil
+}
+
+func (s *Service) MarkTimeout(ctx context.Context, operationID, message string) (gbmodels.GbPTZOperation, error) {
+	var operation gbmodels.GbPTZOperation
+	if result := s.db.WithContext(ctx).Where("operation_id = ?", operationID).Limit(1).Find(&operation); result.Error != nil {
+		return operation, result.Error
+	} else if result.RowsAffected == 0 {
+		return operation, fmt.Errorf("PTZ 操作不存在")
+	}
+	if terminalPTZStatus(operation.Status) {
+		return operation, nil
+	}
+	completedAt := s.now()
+	if err := s.db.WithContext(ctx).Model(&operation).Updates(map[string]interface{}{"status": gbmodels.PTZOperationTimeout, "error_message": message, "completed_at": completedAt}).Error; err != nil {
+		return operation, err
+	}
+	operation.Status, operation.ErrorMessage, operation.CompletedAt = gbmodels.PTZOperationTimeout, message, &completedAt
+	return operation, nil
+}
+
+func (s *Service) GetOperation(ctx context.Context, operationID string) (gbmodels.GbPTZOperation, error) {
+	var operation gbmodels.GbPTZOperation
+	if operationID == "" {
+		return operation, fmt.Errorf("操作编号不能为空")
+	}
+	result := s.db.WithContext(ctx).Where("operation_id = ?", operationID).Limit(1).Find(&operation)
+	if result.Error != nil {
+		return operation, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return operation, gorm.ErrRecordNotFound
+	}
+	return operation, nil
 }

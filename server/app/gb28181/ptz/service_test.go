@@ -82,3 +82,42 @@ func TestServiceExecute_SenderFailurePersistsStatus(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, gbmodels.PTZOperationRejected, op.Status)
 }
+
+func TestServiceApplyResponse_MapsAndProtectsTerminalState(t *testing.T) {
+	svc := newPTZTestService(t, &fakeTrackedSender{})
+	op, err := svc.Execute(context.Background(), testTarget(), testCommand())
+	require.NoError(t, err)
+	updated, matched, err := svc.ApplyResponse(context.Background(), Response{OperationID: op.OperationID, SIPStatus: 200, DeviceResult: "OK"})
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Equal(t, gbmodels.PTZOperationAccepted, updated.Status)
+	updated, matched, err = svc.ApplyResponse(context.Background(), Response{OperationID: op.OperationID, SIPStatus: 200, DeviceResult: "ERROR", DeviceError: "late"})
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Equal(t, gbmodels.PTZOperationAccepted, updated.Status)
+}
+
+func TestServiceApplyResponse_RejectAndTimeout(t *testing.T) {
+	svc := newPTZTestService(t, &fakeTrackedSender{})
+	op, err := svc.Execute(context.Background(), testTarget(), testCommand())
+	require.NoError(t, err)
+	updated, matched, err := svc.ApplyResponse(context.Background(), Response{OperationID: op.OperationID, SIPStatus: 486, DeviceResult: "ERROR", DeviceError: "busy"})
+	require.NoError(t, err)
+	require.True(t, matched)
+	require.Equal(t, gbmodels.PTZOperationRejected, updated.Status)
+
+	secondCommand := testCommand()
+	secondCommand.IdempotencyKey = "second"
+	second, err := svc.Execute(context.Background(), testTarget(), secondCommand)
+	require.NoError(t, err)
+	result, err := svc.MarkTimeout(context.Background(), second.OperationID, "deadline")
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.PTZOperationTimeout, result.Status)
+}
+
+func TestServiceApplyResponse_NoMatch(t *testing.T) {
+	svc := newPTZTestService(t, &fakeTrackedSender{})
+	_, matched, err := svc.ApplyResponse(context.Background(), Response{OperationID: "missing", SIPStatus: 200, DeviceResult: "OK"})
+	require.NoError(t, err)
+	require.False(t, matched)
+}
