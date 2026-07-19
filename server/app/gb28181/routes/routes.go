@@ -6,6 +6,7 @@ import (
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
 
@@ -25,6 +26,7 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 
 // playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
 var playController = gbcontrollers.NewPlayController(nil)
+var recordingController = gbcontrollers.NewRecordingController(nil)
 
 // dashboardController SIP 监控看板控制器
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
@@ -52,6 +54,10 @@ func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 func SetPlayService(svc *gbplay.Service) {
 	playController = gbcontrollers.NewPlayController(svc)
 	hookController.SetPlayStopper(svc)
+}
+
+func SetRecordingQueryService(svc *gbrecording.QueryService) {
+	recordingController = gbcontrollers.NewRecordingController(svc)
 }
 
 // SetZLMNodeController 由 bootstrap M1.6 注入(同 SetPlayService 模式)
@@ -112,6 +118,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			play.POST("/:deviceId/:channelId", func(c *gin.Context) { playController.Start(c) })
 			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })
+		}
+		record := gb.Group("/record")
+		{
+			record.POST("/query", func(c *gin.Context) { recordingController.Query(c) })
 		}
 		// SIP 信令看板(只读快照接口,后续 T2.1 加 SSE /stream)
 		sipGroup := gb.Group("/sip/dashboard")
