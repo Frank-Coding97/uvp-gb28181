@@ -61,6 +61,38 @@ export interface DeviceVO {
     updatedAt: string;
 }
 
+export type DeviceStatusEventType =
+    | "register_online"
+    | "unregister_offline"
+    | "heartbeat_timeout"
+    | "heartbeat_recovered"
+    | "register_renewed";
+
+export interface DeviceStatusEvent {
+    id: number;
+    deviceId: number;
+    deviceCode: string;
+    eventType: DeviceStatusEventType;
+    eventName: string;
+    fromStatus: number | null;
+    toStatus: number;
+    occurredAt: string;
+    source: "register" | "unregister" | "keepalive" | "offline_scanner";
+    registerExpires: number | null;
+    keepaliveInterval: number | null;
+    ip: string;
+    port: number;
+    transport: string;
+}
+
+export interface DeviceStatusEventQuery {
+    page?: number;
+    pageSize?: number;
+    eventType?: DeviceStatusEventType;
+    from?: string;
+    to?: string;
+}
+
 export interface ChannelVO {
     id: number;
     channelId: string;
@@ -175,6 +207,13 @@ export const listDevices = (params: DeviceQuery) =>
 
 export const getDevice = (id: number) =>
     http.request<BaseResult<DeviceVO>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}`));
+
+export const listDeviceStatusEvents = (id: number, params: DeviceStatusEventQuery = {}) =>
+    http.request<BaseResult<PageResult<DeviceStatusEvent>>>(
+        "get",
+        baseUrlApi(`gb28181/device-mgmt/device/${id}/status-events`),
+        { params }
+    );
 
 export const listChannels = (params: ChannelQuery) =>
     http.request<BaseResult<PageResult<ChannelVO>>>("get", baseUrlApi("gb28181/device-mgmt/channels"), { params });

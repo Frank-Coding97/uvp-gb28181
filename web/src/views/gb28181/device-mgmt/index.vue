@@ -10,6 +10,7 @@ import {
     Folder,
     FolderTree,
     Grid2X2,
+    History,
     Info,
     Layers,
     List,
@@ -45,6 +46,7 @@ import {
     listChannelMounts,
     listChannels,
     listDevices,
+    listDeviceStatusEvents,
     listMapClusters,
     listMapMarkers,
     refreshDeviceCatalog,
@@ -58,6 +60,7 @@ import {
     type ChannelVO,
     type CreateDeviceDTO,
     type DeviceVO,
+    type DeviceStatusEvent,
     type MapCluster,
     type MapMarker,
     type OnlineStatus,
@@ -123,6 +126,14 @@ const markers = ref<MapMarker[]>([]);
 const clusters = ref<MapCluster[]>([]);
 const channelDetail = ref<ChannelVO | null>(null);
 const deviceDetail = ref<DeviceVO | null>(null);
+const statusEventVisible = ref(false);
+const statusEventDevice = ref<DeviceVO | null>(null);
+const statusEventList = ref<DeviceStatusEvent[]>([]);
+const statusEventTotal = ref(0);
+const statusEventPage = ref(1);
+const statusEventPageSize = 50;
+const statusEventLoading = ref(false);
+const statusEventError = ref("");
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
 const editDeviceVisible = ref(false);
@@ -468,6 +479,67 @@ async function openDevice(record: DeviceVO) {
     } finally {
         drawerLoading.value = false;
     }
+}
+
+async function loadStatusEvents() {
+    if (!statusEventDevice.value) return;
+    statusEventLoading.value = true;
+    statusEventError.value = "";
+    try {
+        const res = await listDeviceStatusEvents(statusEventDevice.value.id, {
+            page: statusEventPage.value,
+            pageSize: statusEventPageSize
+        });
+        if (res.code !== 0) throw new Error(res.message || "状态轨迹加载失败");
+        statusEventList.value = res.data?.list || [];
+        statusEventTotal.value = res.data?.total || 0;
+    } catch (error: any) {
+        statusEventError.value = error?.message || "状态轨迹加载失败";
+        statusEventList.value = [];
+        statusEventTotal.value = 0;
+    } finally {
+        statusEventLoading.value = false;
+    }
+}
+
+function openStatusEvents(record: DeviceVO) {
+    statusEventDevice.value = record;
+    statusEventPage.value = 1;
+    statusEventVisible.value = true;
+    loadStatusEvents();
+}
+
+function changeStatusEventPage(next: number) {
+    statusEventPage.value = next;
+    loadStatusEvents();
+}
+
+function closeStatusEvents() {
+    statusEventDevice.value = null;
+    statusEventList.value = [];
+    statusEventError.value = "";
+    statusEventTotal.value = 0;
+}
+
+function eventStatusText(status?: number | null) {
+    if (status === null || status === undefined) return "未知";
+    return status === 1 ? "在线" : "离线";
+}
+
+function eventSourceText(source: DeviceStatusEvent["source"]) {
+    return ({
+        register: "REGISTER",
+        unregister: "REGISTER 注销",
+        keepalive: "Keepalive",
+        offline_scanner: "离线扫描器"
+    } as const)[source] || source;
+}
+
+function eventMetaText(event: DeviceStatusEvent) {
+    const parts: string[] = [eventSourceText(event.source)];
+    if (event.ip) parts.push(`${event.transport || "UDP"} ${event.ip}${event.port ? `:${event.port}` : ""}`);
+    if (event.registerExpires != null) parts.push(`有效期 ${event.registerExpires} 秒`);
+    return parts.join(" · ");
 }
 
 function openNode(node: CatalogNode) {
@@ -1122,10 +1194,10 @@ onUnmounted(() => {
                                 </a-table-column>
                                 <a-table-column title="状态" :width="92">
                                     <template #cell="{ record }">
-                                        <span class="status-inline" :class="{ online: record.online }">
+                                        <button class="status-inline status-trigger" :class="{ online: record.online }" type="button" title="查看状态轨迹" @click.stop="openStatusEvents(record)">
                                             <span class="status-dot"></span>
                                             <span>{{ record.online ? '在线' : '离线' }}</span>
-                                        </span>
+                                        </button>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="通道数" :width="140">
@@ -1501,6 +1573,66 @@ onUnmounted(() => {
                 v-model:visible="controlConsoleVisible"
                 :channel="controlConsoleChannel"
             />
+
+            <a-modal
+                v-model:visible="statusEventVisible"
+                modal-class="uvp-system-dialog status-event-dialog"
+                title="设备状态轨迹"
+                :width="720"
+                :footer="false"
+                unmount-on-close
+                @close="closeStatusEvents"
+            >
+                <div v-if="statusEventDevice" class="status-event-body">
+                    <header class="status-event-summary">
+                        <div class="status-event-device">
+                            <span class="summary-icon"><History :size="18" /></span>
+                            <div>
+                                <strong>{{ displayName(statusEventDevice) }}</strong>
+                                <span class="mono">{{ statusEventDevice.deviceId }}</span>
+                            </div>
+                        </div>
+                        <span class="status-pill" :class="{ online: statusEventDevice.online }">
+                            <span class="status-dot"></span>
+                            {{ statusEventDevice.online ? '在线' : '离线' }}
+                        </span>
+                    </header>
+                    <div class="status-event-facts">
+                        <div><span>最近注册</span><strong>{{ dateTime(statusEventDevice.registerTime) }}</strong></div>
+                        <div><span>最近心跳</span><strong>{{ dateTime(statusEventDevice.keepaliveTime) }}</strong></div>
+                        <div><span>来源地址</span><strong class="mono">{{ endpointText(statusEventDevice) }}</strong></div>
+                    </div>
+
+                    <a-spin :loading="statusEventLoading" class="status-event-content">
+                        <div v-if="statusEventError" class="status-event-state error">
+                            <strong>状态轨迹加载失败</strong>
+                            <span>{{ statusEventError }}</span>
+                            <a-button size="small" @click="loadStatusEvents">重试</a-button>
+                        </div>
+                        <a-empty v-else-if="!statusEventLoading && statusEventList.length === 0" description="暂无状态事件" />
+                        <a-timeline v-else class="status-event-timeline">
+                            <a-timeline-item v-for="event in statusEventList" :key="event.id" :label="dateTime(event.occurredAt)">
+                                <div class="status-event-item" :data-event="event.eventType">
+                                    <div class="event-title">
+                                        <strong>{{ event.eventName }}</strong>
+                                        <span>{{ eventStatusText(event.fromStatus) }} → {{ eventStatusText(event.toStatus) }}</span>
+                                    </div>
+                                    <p>{{ eventMetaText(event) }}</p>
+                                </div>
+                            </a-timeline-item>
+                        </a-timeline>
+                    </a-spin>
+
+                    <a-pagination
+                        v-if="statusEventTotal > statusEventPageSize"
+                        :current="statusEventPage"
+                        :page-size="statusEventPageSize"
+                        :total="statusEventTotal"
+                        simple
+                        @change="changeStatusEventPage"
+                    />
+                </div>
+            </a-modal>
 
             <a-modal
                 v-model:visible="createDeviceVisible"
@@ -2195,6 +2327,18 @@ onUnmounted(() => {
     font-size: 12px;
     font-weight: 600;
 }
+.status-trigger {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+    text-align: left;
+}
+.status-trigger:focus-visible {
+    outline: 2px solid var(--uvp-brand-cyan);
+    outline-offset: 3px;
+    border-radius: 4px;
+}
 .status-inline .status-dot {
     width: 8px;
     height: 8px;
@@ -2681,6 +2825,89 @@ onUnmounted(() => {
 .status-pill.online .status-dot {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand-cyan) 18%, transparent);
     opacity: 1;
+}
+.status-event-body {
+    display: grid;
+    gap: 16px;
+}
+.status-event-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 10px;
+    background: var(--uvp-list-toolbar-bg);
+}
+.status-event-device {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+.status-event-device > div {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+.status-event-device strong,
+.status-event-device span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.status-event-device strong { color: var(--uvp-text-primary); }
+.status-event-device span { color: var(--uvp-text-tertiary); font-size: 12px; }
+.summary-icon {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    color: var(--uvp-brand-cyan);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
+}
+.status-event-facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+.status-event-facts > div {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--uvp-panel-border);
+}
+.status-event-facts span { color: var(--uvp-text-tertiary); font-size: 12px; }
+.status-event-facts strong {
+    overflow: hidden;
+    color: var(--uvp-text-secondary);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.status-event-content { min-height: 180px; }
+.status-event-timeline { padding: 8px 12px 0; }
+.status-event-item { display: grid; gap: 4px; padding-bottom: 6px; }
+.status-event-item .event-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.status-event-item .event-title strong { color: var(--uvp-text-primary); font-size: 13px; }
+.status-event-item .event-title span,
+.status-event-item p { color: var(--uvp-text-tertiary); font-size: 12px; }
+.status-event-item p { margin: 0; }
+.status-event-state {
+    display: grid;
+    place-items: center;
+    gap: 8px;
+    min-height: 180px;
+    color: var(--uvp-text-tertiary);
+    text-align: center;
+}
+.status-event-state.error strong { color: var(--uvp-danger); }
+@media (max-width: 720px) {
+    .status-event-facts { grid-template-columns: 1fr; }
 }
 .info-group {
     display: grid;
