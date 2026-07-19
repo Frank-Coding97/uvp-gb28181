@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -26,6 +27,35 @@ func NewMapController() *MapController {
 }
 
 func (mc *MapController) SetDB(p func() *gorm.DB) { mc.db = p }
+
+// applyMapFilters keeps map results consistent with the channel list filters.
+func applyMapFilters(c *gin.Context, db *gorm.DB, q *gorm.DB) *gorm.DB {
+	if s := c.Query("status"); s == "online" {
+		q = q.Where("status = ?", gbmodels.ChannelStatusOnline)
+	} else if s == "offline" {
+		q = q.Where("status = ?", gbmodels.ChannelStatusOffline)
+	}
+	if kw := strings.TrimSpace(c.Query("q")); kw != "" {
+		like := "%" + kw + "%"
+		q = q.Where("name LIKE ? OR alias LIKE ? OR channel_id LIKE ?", like, like, like)
+	}
+	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
+		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
+			var root gbmodels.GbCatalogNode
+			if db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root).RowsAffected > 0 {
+				var channelIDs []uint
+				db.WithContext(c).Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
+					Where("node_type = ? AND path LIKE ?", gbmodels.NodeTypeChannel, root.Path+"%").Pluck("channel_id", &channelIDs)
+				if len(channelIDs) > 0 {
+					q = q.Where("id IN ?", channelIDs)
+				} else {
+					q = q.Where("1=0")
+				}
+			}
+		}
+	}
+	return q
+}
 
 type markerVO struct {
 	ID        uint    `json:"id"`
@@ -56,6 +86,7 @@ func (mc *MapController) Markers(c *gin.Context) {
 
 	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
 		Where("latitude != 0 AND longitude != 0")
+	q = applyMapFilters(c, db, q)
 	if maxLat > minLat {
 		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
 	}
@@ -112,6 +143,7 @@ func (mc *MapController) Clusters(c *gin.Context) {
 
 	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
 		Where("latitude != 0 AND longitude != 0")
+	q = applyMapFilters(c, db, q)
 	if maxLat > minLat {
 		q = q.Where("latitude BETWEEN ? AND ?", minLat, maxLat)
 	}
@@ -168,9 +200,9 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 		return
 	}
 	var count int64
-	if err := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).
-		Where("(latitude = 0 OR longitude = 0)").
-		Count(&count).Error; err != nil {
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c))
+	q = applyMapFilters(c, db, q).Where("(latitude = 0 OR longitude = 0)")
+	if err := q.Count(&count).Error; err != nil {
 		mc.FailAndAbort(c, "查询失败", err)
 		return
 	}

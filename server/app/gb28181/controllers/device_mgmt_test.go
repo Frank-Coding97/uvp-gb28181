@@ -99,6 +99,21 @@ func seedDevicesAndChannels(t *testing.T, db *gorm.DB) (devID uint, chOnlineID, 
 	return d.ID, ch1.ID, ch2.ID
 }
 
+func TestMapMarkers_UsesViewportAndChannelFilters(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	_, _, _ = seedDevicesAndChannels(t, db)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("GET", "/api/gb28181/device-mgmt/map/markers?status=online&q=%E5%9C%A8%E7%BA%BF&minLat=36&maxLat=37&minLng=117&maxLng=118", nil)
+	r.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	data := unmarshal(t, w)["data"].(map[string]any)
+	list := data["list"].([]any)
+	assert.Len(t, list, 1)
+	assert.Equal(t, "37011200001310000001", list[0].(map[string]any)["channelId"])
+}
+
 // ---------- B2 devicemgmt ----------
 
 func TestDeviceMgmt_ListDevices(t *testing.T) {

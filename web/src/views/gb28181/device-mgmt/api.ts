@@ -233,22 +233,34 @@ export const getChannelTimeline = (id: number) =>
         baseUrlApi(`gb28181/device-mgmt/channel/${id}/timeline`)
     );
 
-export const listMapMarkers = (params: { limit?: number } = {}) =>
+export interface MapQuery {
+    limit?: number;
+    zoom?: number;
+    minLat?: number;
+    maxLat?: number;
+    minLng?: number;
+    maxLng?: number;
+    q?: string;
+    nodeId?: number;
+    status?: OnlineStatus;
+}
+
+export const listMapMarkers = (params: MapQuery = {}) =>
     http.request<BaseResult<{ list: MapMarker[]; total: number }>>(
         "get",
         baseUrlApi("gb28181/device-mgmt/map/markers"),
         { params }
     );
 
-export const listMapClusters = (params: { zoom: number }) =>
+export const listMapClusters = (params: MapQuery & { zoom: number }) =>
     http.request<BaseResult<{ clusters: MapCluster[]; zoom: number; gridSize: number }>>(
         "get",
         baseUrlApi("gb28181/device-mgmt/map/clusters"),
         { params }
     );
 
-export const getNoCoordCount = () =>
-    http.request<BaseResult<{ count: number }>>("get", baseUrlApi("gb28181/device-mgmt/map/no-coord-count"));
+export const getNoCoordCount = (params: Pick<MapQuery, "q" | "nodeId" | "status"> = {}) =>
+    http.request<BaseResult<{ count: number }>>("get", baseUrlApi("gb28181/device-mgmt/map/no-coord-count"), { params });
 
 export const listAnomalies = (params: { resolved?: "0" | "1"; page?: number; pageSize?: number }) =>
     http.request<BaseResult<PageResult<AnomalyRecord>>>("get", baseUrlApi("gb28181/device-mgmt/anomaly"), {

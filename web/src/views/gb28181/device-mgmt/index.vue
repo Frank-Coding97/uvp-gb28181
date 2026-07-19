@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch, onUnmounted } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch, onUnmounted } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
+import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibreMap } from "maplibre-gl";
+import "maplibre-gl/dist/maplibre-gl.css";
 import {
     Building2,
     Camera,
@@ -15,8 +17,7 @@ import {
     Layers,
     List,
     Loader2,
-    Map,
-    MapPin,
+    Map as MapIcon,
     Monitor,
     Play,
     Pencil,
@@ -67,6 +68,8 @@ import {
     type TimelineSlot
 } from "./api";
 import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
+import { useThemeConfig } from "@/store/modules/theme-config";
+import { storeToRefs } from "pinia";
 import ControlConsole from "../components/ControlConsole.vue";
 
 type ViewMode = "list" | "card" | "map";
@@ -107,6 +110,17 @@ const total = ref(0);
 const noCoordCount = ref(0);
 const selectedRowKeys = ref<number[]>([]);
 const mapZoom = ref(10);
+const mapMinZoom = 5;
+const mapMaxZoom = 22;
+const mapContainer = ref<HTMLElement | null>(null);
+const mapReady = ref(false);
+const mapError = ref("");
+const themeStore = useThemeConfig();
+const { darkMode } = storeToRefs(themeStore);
+const mapStyleUrls = {
+    light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || "https://tiles.openfreemap.org/styles/bright",
+    dark: (import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined) || "https://tiles.openfreemap.org/styles/dark"
+};
 const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
 const autoRefresh = ref(true);
@@ -115,6 +129,11 @@ const isMacPlatform = computed(() => typeof navigator !== "undefined" && /Mac|iP
 
 let keywordSearchTimer: ReturnType<typeof setTimeout> | null = null;
 let suppressKeywordSearch = false;
+let mapInstance: MapLibreMap | null = null;
+let mapMoveHandler: (() => void) | null = null;
+let mapAutoFitPending = true;
+const mapMarkers = new Map<number, MapLibreMarker>();
+const mapClusters = new Map<string, MapLibreMarker>();
 
 const roots = ref<CatalogNode[]>([]);
 const childrenMap = reactive<Record<number, CatalogNode[]>>({});
@@ -131,9 +150,14 @@ const statusEventDevice = ref<DeviceVO | null>(null);
 const statusEventList = ref<DeviceStatusEvent[]>([]);
 const statusEventTotal = ref(0);
 const statusEventPage = ref(1);
-const statusEventPageSize = 50;
+const statusEventPageSize = 10;
 const statusEventLoading = ref(false);
+const statusEventLoadingMore = ref(false);
 const statusEventError = ref("");
+const statusEventLoadMoreError = ref("");
+const statusEventScroll = ref<HTMLElement | null>(null);
+const statusEventHasMore = computed(() => statusEventList.value.length < statusEventTotal.value);
+let statusEventRequestVersion = 0;
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
 const editDeviceVisible = ref(false);
@@ -151,7 +175,7 @@ const controlConsoleChannel = ref<ChannelVO | null>(null);
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
     { label: "卡片", value: "card", icon: Grid2X2 },
-    { label: "地图", value: "map", icon: Map }
+    { label: "地图", value: "map", icon: MapIcon }
 ];
 const nodeTypeMeta: Record<string, { className: string }> = {
     civil_code: { className: "civil" },
@@ -184,10 +208,20 @@ const tablePagination = computed(() => ({
     showJumper: true
 }));
 
-watch([viewMode, assetKind], () => {
+watch([viewMode, assetKind], async () => {
     selectedRowKeys.value = [];
     page.value = 1;
+    if (viewMode.value === "map") await nextTick(ensureMap);
     refreshMainData();
+});
+watch(darkMode, () => {
+    if (!mapInstance) return;
+    mapInstance.setStyle(currentMapStyleUrl());
+    mapReady.value = false;
+    mapInstance.once("style.load", () => {
+        mapReady.value = true;
+        renderMapOverlays();
+    });
 });
 watch(statusFilter, () => {
     page.value = 1;
@@ -270,8 +304,6 @@ function keepaliveIntervalText(seconds?: number) {
     return s === 0 ? `${m} 分钟` : `${m} 分 ${s} 秒`;
 }
 function canExpand(node: CatalogNode) { return node.nodeType !== "channel"; }
-function projectX(longitude: number) { const min = 73; const max = 136; return Math.min(96, Math.max(4, ((longitude - min) / (max - min)) * 100)); }
-function projectY(latitude: number) { const min = 18; const max = 54; return Math.min(94, Math.max(6, 100 - ((latitude - min) / (max - min)) * 100)); }
 function showDeviceChannels(record: DeviceVO) {
     setKeywordWithoutSearch("");
     deviceIdFilter.value = record.deviceId;
@@ -332,7 +364,13 @@ function selectNode(node: CatalogNode) {
     refreshMainData();
 }
 function clearNode() { selectedNode.value = null; page.value = 1; refreshMainData(); }
-function setViewMode(mode: ViewMode) { viewMode.value = mode; if (mode === "map") assetKind.value = "channel"; }
+function setViewMode(mode: ViewMode) {
+    viewMode.value = mode;
+    if (mode === "map") {
+        assetKind.value = "channel";
+        mapAutoFitPending = true;
+    }
+}
 function setAssetKind(kind: AssetKind) {
     if (kind === "device") deviceIdFilter.value = "";
     assetKind.value = kind;
@@ -369,6 +407,111 @@ function onPageSizeChange(next: number) { pageSize.value = next; page.value = 1;
 async function refreshMainData() {
     if (viewMode.value === "map") return loadMapData();
     return assetKind.value === "device" ? loadDevicesData() : loadChannelsData();
+}
+
+function mapBoundsParams() {
+    if (!mapInstance) return {};
+    const bounds = mapInstance.getBounds();
+    return {
+        minLat: bounds.getSouth(),
+        maxLat: bounds.getNorth(),
+        minLng: bounds.getWest(),
+        maxLng: bounds.getEast()
+    };
+}
+
+function currentMapStyleUrl() {
+    return darkMode.value ? mapStyleUrls.dark : mapStyleUrls.light;
+}
+
+function removeMapMarkers() {
+    mapMarkers.forEach(marker => marker.remove());
+    mapMarkers.clear();
+    mapClusters.forEach(marker => marker.remove());
+    mapClusters.clear();
+}
+
+function createClusterElement(cluster: MapCluster) {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.className = "map-cluster-marker";
+    element.textContent = String(cluster.count);
+    element.title = `${cluster.count} 路通道 · 在线 ${cluster.onlineCount}`;
+    element.style.setProperty("--cluster-rate", `${Math.round(cluster.onlineRate * 100)}%`);
+    element.addEventListener("click", () => {
+        mapInstance?.flyTo({
+            center: [cluster.centerLng, cluster.centerLat],
+            zoom: Math.min(16, Math.max(mapInstance.getZoom() + 2, 12)),
+            essential: true
+        });
+    });
+    return element;
+}
+
+function createMarkerElement(marker: MapMarker) {
+    const element = document.createElement("button");
+    element.type = "button";
+    element.className = `map-channel-marker${marker.status === 1 ? " online" : ""}`;
+    element.title = `${displayName(marker)} · ${marker.channelId}`;
+    element.innerHTML = '<span class="map-channel-pip"></span>';
+    element.addEventListener("click", () => openChannel(marker));
+    return element;
+}
+
+function renderMapOverlays() {
+    if (!mapInstance || !mapReady.value) return;
+    removeMapMarkers();
+    clusters.value.filter(cluster => cluster.count > 1).forEach((cluster) => {
+        const key = `${cluster.centerLat}:${cluster.centerLng}:${cluster.count}`;
+        mapClusters.set(key, new MapLibreMarker({ element: createClusterElement(cluster), anchor: "center" })
+            .setLngLat([cluster.centerLng, cluster.centerLat])
+            .addTo(mapInstance!));
+    });
+    if (mapZoom.value >= 14) {
+        markers.value.forEach(marker => {
+            mapMarkers.set(marker.id, new MapLibreMarker({ element: createMarkerElement(marker), anchor: "center" })
+                .setLngLat([marker.longitude, marker.latitude])
+                .addTo(mapInstance!));
+        });
+    }
+}
+
+function fitMapToData() {
+    if (!mapInstance || !markers.value.length) return;
+    const bounds = new LngLatBounds();
+    markers.value.forEach(marker => bounds.extend([marker.longitude, marker.latitude]));
+    mapInstance.fitBounds(bounds, { padding: 60, maxZoom: mapMaxZoom, duration: 500 });
+}
+
+function ensureMap() {
+    if (mapInstance || !mapContainer.value) return;
+    mapError.value = "";
+    mapInstance = new maplibregl.Map({
+        container: mapContainer.value,
+        style: currentMapStyleUrl(),
+        center: [116.3974, 39.9093],
+        zoom: mapZoom.value,
+        minZoom: mapMinZoom,
+        maxZoom: mapMaxZoom,
+        attributionControl: false,
+        hash: false
+    });
+    mapInstance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    mapInstance.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+    mapInstance.once("load", () => {
+        mapReady.value = true;
+        mapInstance?.resize();
+        loadMapData();
+    });
+    mapMoveHandler = () => {
+        if (!mapInstance) return;
+        mapZoom.value = Math.round(mapInstance.getZoom());
+        loadMapData();
+    };
+    mapInstance.on("moveend", mapMoveHandler);
+    mapInstance.on("error", () => {
+        if (!mapReady.value) mapError.value = "底图加载失败，请检查网络或配置 VITE_MAP_STYLE_URL";
+    });
 }
 
 async function loadChannelsData() {
@@ -416,17 +559,29 @@ async function loadDevicesData() {
 }
 
 async function loadMapData() {
+    if (viewMode.value !== "map") return;
     mapLoading.value = true;
     try {
+        const query = {
+            ...mapBoundsParams(),
+            q: keyword.value.trim() || undefined,
+            nodeId: selectedNode.value?.id,
+            status: statusFilter.value
+        };
         const [markerRes, clusterRes, noCoordRes] = await Promise.all([
-            listMapMarkers({ limit: 800 }),
-            listMapClusters({ zoom: mapZoom.value }),
-            getNoCoordCount()
+            listMapMarkers({ ...query, limit: 800 }),
+            listMapClusters({ ...query, zoom: mapZoom.value }),
+            getNoCoordCount(query)
         ]);
         if (markerRes.code === 0) markers.value = markerRes.data?.list || [];
         if (clusterRes.code === 0) clusters.value = clusterRes.data?.clusters || [];
         if (noCoordRes.code === 0) noCoordCount.value = noCoordRes.data?.count || 0;
         total.value = markerRes.data?.total || 0;
+        renderMapOverlays();
+        if (mapAutoFitPending && markers.value.length) {
+            mapAutoFitPending = false;
+            fitMapToData();
+        }
     } catch (error: any) {
         Message.error(error?.message || "地图数据加载失败");
     } finally {
@@ -481,49 +636,107 @@ async function openDevice(record: DeviceVO) {
     }
 }
 
-async function loadStatusEvents() {
-    if (!statusEventDevice.value) return;
-    statusEventLoading.value = true;
-    statusEventError.value = "";
+async function loadStatusEvents(append = false) {
+    const device = statusEventDevice.value;
+    if (!device || statusEventLoading.value || statusEventLoadingMore.value) return;
+    const requestVersion = statusEventRequestVersion;
+    const requestPage = append ? statusEventPage.value + 1 : 1;
+    if (append) {
+        statusEventLoadingMore.value = true;
+        statusEventLoadMoreError.value = "";
+    } else {
+        statusEventLoading.value = true;
+        statusEventError.value = "";
+        statusEventLoadMoreError.value = "";
+    }
     try {
-        const res = await listDeviceStatusEvents(statusEventDevice.value.id, {
-            page: statusEventPage.value,
+        const res = await listDeviceStatusEvents(device.id, {
+            page: requestPage,
             pageSize: statusEventPageSize
         });
         if (res.code !== 0) throw new Error(res.message || "状态轨迹加载失败");
-        statusEventList.value = res.data?.list || [];
+        if (requestVersion !== statusEventRequestVersion) return;
+        const nextList = res.data?.list || [];
+        if (append) {
+            const loadedIds = new Set(statusEventList.value.map(event => event.id));
+            statusEventList.value.push(...nextList.filter(event => !loadedIds.has(event.id)));
+            statusEventPage.value = requestPage;
+        } else {
+            statusEventList.value = nextList;
+            statusEventPage.value = 1;
+        }
         statusEventTotal.value = res.data?.total || 0;
     } catch (error: any) {
-        statusEventError.value = error?.message || "状态轨迹加载失败";
-        statusEventList.value = [];
-        statusEventTotal.value = 0;
+        if (requestVersion !== statusEventRequestVersion) return;
+        if (append) {
+            statusEventLoadMoreError.value = error?.message || "更多状态轨迹加载失败";
+        } else {
+            statusEventError.value = error?.message || "状态轨迹加载失败";
+            statusEventList.value = [];
+            statusEventTotal.value = 0;
+        }
     } finally {
-        statusEventLoading.value = false;
+        if (requestVersion === statusEventRequestVersion) {
+            if (append) statusEventLoadingMore.value = false;
+            else statusEventLoading.value = false;
+        }
     }
 }
 
 function openStatusEvents(record: DeviceVO) {
+    statusEventRequestVersion += 1;
     statusEventDevice.value = record;
     statusEventPage.value = 1;
+    statusEventList.value = [];
+    statusEventTotal.value = 0;
+    statusEventLoading.value = false;
+    statusEventLoadingMore.value = false;
     statusEventVisible.value = true;
     loadStatusEvents();
+    nextTick(() => {
+        if (statusEventScroll.value) statusEventScroll.value.scrollTop = 0;
+    });
 }
 
-function changeStatusEventPage(next: number) {
-    statusEventPage.value = next;
-    loadStatusEvents();
+function loadMoreStatusEvents() {
+    if (!statusEventHasMore.value || statusEventLoading.value || statusEventLoadingMore.value) return;
+    loadStatusEvents(true);
+}
+
+function onStatusEventScroll(event: Event) {
+    const target = event.currentTarget as HTMLElement;
+    const distanceToBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (distanceToBottom <= 80) loadMoreStatusEvents();
 }
 
 function closeStatusEvents() {
+    statusEventRequestVersion += 1;
     statusEventDevice.value = null;
     statusEventList.value = [];
     statusEventError.value = "";
+    statusEventLoadMoreError.value = "";
     statusEventTotal.value = 0;
+    statusEventPage.value = 1;
+    statusEventLoading.value = false;
+    statusEventLoadingMore.value = false;
 }
 
-function eventStatusText(status?: number | null) {
-    if (status === null || status === undefined) return "未知";
-    return status === 1 ? "在线" : "离线";
+function statusEventTime(value?: string | null) {
+    if (!value || value.startsWith("0001-01-01")) return "-";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "-";
+    const pad = (part: number) => String(part).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function eventColor(eventType: DeviceStatusEvent["eventType"]) {
+    return ({
+        register_online: "#10b981",
+        register_renewed: "var(--uvp-brand)",
+        heartbeat_recovered: "var(--uvp-brand-cyan)",
+        heartbeat_timeout: "var(--uvp-danger)",
+        unregister_offline: "var(--uvp-text-tertiary)"
+    } as const)[eventType];
 }
 
 function eventSourceText(source: DeviceStatusEvent["source"]) {
@@ -928,6 +1141,10 @@ onUnmounted(() => {
     window.removeEventListener("keydown", focusKeyword);
     cancelKeywordSearch();
     stopAutoRefresh();
+    if (mapInstance && mapMoveHandler) mapInstance.off("moveend", mapMoveHandler);
+    removeMapMarkers();
+    mapInstance?.remove();
+    mapInstance = null;
 });
 </script>
 
@@ -1001,6 +1218,9 @@ onUnmounted(() => {
                         <s-layout-search class="device-filter-panel">
                             <template #extra>
                                 <div class="toolbar">
+                                    <div v-if="viewMode === 'map' && noCoordCount" class="map-banner toolbar-map-banner">
+                                        <Info :size="14" /> 有 {{ noCoordCount }} 路通道缺少坐标，暂未显示在地图中。
+                                    </div>
                                     <div class="auto-refresh-control">
                                         <span class="refresh-label">自动刷新</span>
                                         <a-switch
@@ -1192,11 +1412,11 @@ onUnmounted(() => {
                                         </a-tooltip>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="状态" :width="92">
+                                <a-table-column title="状态" :width="100" align="center">
                                     <template #cell="{ record }">
-                                        <button class="status-inline status-trigger" :class="{ online: record.online }" type="button" title="查看状态轨迹" @click.stop="openStatusEvents(record)">
-                                            <span class="status-dot"></span>
-                                            <span>{{ record.online ? '在线' : '离线' }}</span>
+                                        <button class="status-inline status-trigger" :class="{ online: record.online }" type="button" title="查看状态轨迹" :aria-label="`查看${record.online ? '在线' : '离线'}状态轨迹`" @click.stop="openStatusEvents(record)">
+                                            <History class="status-trigger-icon" :size="13" aria-hidden="true" />
+                                            <span class="status-trigger-label">{{ record.online ? '在线' : '离线' }}</span>
                                         </button>
                                     </template>
                                 </a-table-column>
@@ -1364,16 +1584,16 @@ onUnmounted(() => {
                     </div>
 
                     <div v-else class="view-body map-view">
-                        <div v-if="noCoordCount" class="map-banner"><Info :size="14" /> 有 {{ noCoordCount }} 路通道缺少坐标，暂未显示在地图中。</div>
                         <div class="map-toolbar">
-                            <span>Zoom {{ mapZoom }}</span>
-                            <a-slider v-model="mapZoom" :min="5" :max="16" :style="{ width: '180px' }" @change="loadMapData" />
+                            <span>缩放 {{ mapZoom }}</span>
+                            <a-slider :model-value="mapZoom" :min="mapMinZoom" :max="mapMaxZoom" :style="{ width: '180px' }" @change="(value: number) => mapInstance?.setZoom(value)" />
+                            <button class="btn-ghost" type="button" @click="fitMapToData">定位点位</button>
                             <button class="btn-ghost" type="button" @click="loadMapData">刷新地图</button>
                         </div>
                         <div class="map-canvas">
-                            <div class="map-grid"></div>
-                            <button v-for="cluster in clusters" :key="`${cluster.centerLat}-${cluster.centerLng}-${cluster.count}`" class="cluster-dot" type="button" :style="{ left: `${projectX(cluster.centerLng)}%`, top: `${projectY(cluster.centerLat)}%` }">{{ cluster.count }}</button>
-                            <button v-for="marker in markers" :key="marker.id" class="marker-dot" :class="{ online: marker.status === 1 }" type="button" :style="{ left: `${projectX(marker.longitude)}%`, top: `${projectY(marker.latitude)}%` }" @click="openChannel(marker)"><MapPin :size="14" /></button>
+                            <div ref="mapContainer" class="map-container"></div>
+                            <div v-if="mapError" class="map-state map-state-error"><Info :size="16" /> {{ mapError }}</div>
+                            <div v-else-if="!mapReady" class="map-state"><Loader2 :size="16" class="spin" /> 正在加载地图</div>
                         </div>
                     </div>
 
@@ -1592,7 +1812,7 @@ onUnmounted(() => {
                                 <span class="mono">{{ statusEventDevice.deviceId }}</span>
                             </div>
                         </div>
-                        <span class="status-pill" :class="{ online: statusEventDevice.online }">
+                        <span class="status-pill status-event-current-status" :class="{ online: statusEventDevice.online }">
                             <span class="status-dot"></span>
                             {{ statusEventDevice.online ? '在线' : '离线' }}
                         </span>
@@ -1603,34 +1823,32 @@ onUnmounted(() => {
                         <div><span>来源地址</span><strong class="mono">{{ endpointText(statusEventDevice) }}</strong></div>
                     </div>
 
-                    <a-spin :loading="statusEventLoading" class="status-event-content">
-                        <div v-if="statusEventError" class="status-event-state error">
-                            <strong>状态轨迹加载失败</strong>
-                            <span>{{ statusEventError }}</span>
-                            <a-button size="small" @click="loadStatusEvents">重试</a-button>
-                        </div>
-                        <a-empty v-else-if="!statusEventLoading && statusEventList.length === 0" description="暂无状态事件" />
-                        <a-timeline v-else class="status-event-timeline">
-                            <a-timeline-item v-for="event in statusEventList" :key="event.id" :label="dateTime(event.occurredAt)">
-                                <div class="status-event-item" :data-event="event.eventType">
-                                    <div class="event-title">
+                    <div ref="statusEventScroll" class="status-event-scroll" @scroll.passive="onStatusEventScroll">
+                        <a-spin :loading="statusEventLoading" class="status-event-content">
+                            <div v-if="statusEventError" class="status-event-state error">
+                                <strong>状态轨迹加载失败</strong>
+                                <span>{{ statusEventError }}</span>
+                                <a-button size="small" @click="loadStatusEvents()">重试</a-button>
+                            </div>
+                            <a-empty v-else-if="!statusEventLoading && statusEventList.length === 0" description="暂无状态事件" />
+                            <a-timeline v-else class="status-event-timeline">
+                                <a-timeline-item v-for="event in statusEventList" :key="event.id" :label="statusEventTime(event.occurredAt)" :dot-color="eventColor(event.eventType)" dot-type="hollow">
+                                    <div class="status-event-item" :data-event="event.eventType" :title="eventMetaText(event)">
                                         <strong>{{ event.eventName }}</strong>
-                                        <span>{{ eventStatusText(event.fromStatus) }} → {{ eventStatusText(event.toStatus) }}</span>
                                     </div>
-                                    <p>{{ eventMetaText(event) }}</p>
-                                </div>
-                            </a-timeline-item>
-                        </a-timeline>
-                    </a-spin>
-
-                    <a-pagination
-                        v-if="statusEventTotal > statusEventPageSize"
-                        :current="statusEventPage"
-                        :page-size="statusEventPageSize"
-                        :total="statusEventTotal"
-                        simple
-                        @change="changeStatusEventPage"
-                    />
+                                </a-timeline-item>
+                            </a-timeline>
+                        </a-spin>
+                        <div v-if="statusEventList.length" class="status-event-load-more">
+                            <span v-if="statusEventLoadingMore"><Loader2 :size="14" class="spin" /> 正在加载更多</span>
+                            <span v-else-if="statusEventLoadMoreError" class="error">
+                                {{ statusEventLoadMoreError }}
+                                <button type="button" @click="loadMoreStatusEvents">重试</button>
+                            </span>
+                            <span v-else-if="!statusEventHasMore">已展示全部 {{ statusEventTotal }} 条</span>
+                            <span v-else>向下滚动加载更多 · 已加载 {{ statusEventList.length }}/{{ statusEventTotal }} 条</span>
+                        </div>
+                    </div>
                 </div>
             </a-modal>
 
@@ -2327,18 +2545,6 @@ onUnmounted(() => {
     font-size: 12px;
     font-weight: 600;
 }
-.status-trigger {
-    padding: 0;
-    border: 0;
-    background: transparent;
-    cursor: pointer;
-    text-align: left;
-}
-.status-trigger:focus-visible {
-    outline: 2px solid var(--uvp-brand-cyan);
-    outline-offset: 3px;
-    border-radius: 4px;
-}
 .status-inline .status-dot {
     width: 8px;
     height: 8px;
@@ -2350,6 +2556,57 @@ onUnmounted(() => {
 }
 .status-inline.online .status-dot {
     background: #10b981;
+}
+.status-trigger {
+    justify-content: center;
+    flex-wrap: nowrap;
+    width: 64px;
+    min-width: 64px;
+    height: 24px;
+    padding: 0 6px;
+    line-height: 1;
+    white-space: nowrap;
+    color: var(--uvp-danger);
+    background: var(--uvp-danger-soft);
+    border: 1px solid var(--uvp-danger-border);
+    border-radius: 6px;
+    box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 72%, transparent);
+    cursor: pointer;
+    transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+.status-trigger.online {
+    color: var(--uvp-brand-cyan);
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 9%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-brand-cyan) 34%, var(--uvp-panel-border));
+}
+.status-trigger:hover {
+    color: var(--uvp-danger);
+    background: color-mix(in srgb, var(--uvp-danger) 12%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-danger) 62%, var(--uvp-panel-border));
+    box-shadow: 0 4px 10px -6px color-mix(in srgb, var(--uvp-danger) 55%, transparent);
+    transform: translateY(-1px);
+}
+.status-trigger.online:hover {
+    color: var(--uvp-brand-cyan);
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 15%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-brand-cyan) 64%, var(--uvp-panel-border));
+    box-shadow: 0 4px 10px -6px color-mix(in srgb, var(--uvp-brand-cyan) 60%, transparent);
+}
+.status-trigger:active {
+    box-shadow: none;
+    transform: translateY(0);
+}
+.status-trigger:focus-visible {
+    outline: 2px solid currentColor;
+    outline-offset: 2px;
+}
+.status-trigger-icon {
+    flex: 0 0 auto;
+}
+.status-trigger-label {
+    display: block;
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 .channel-progress {
     display: flex;
@@ -2676,6 +2933,16 @@ onUnmounted(() => {
     border: 1px solid var(--uvp-warning-border);
     border-radius: 10px;
 }
+.toolbar-map-banner {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 10px;
+    height: 36px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.toolbar-map-banner svg { flex: 0 0 auto; }
 .map-toolbar {
     display: flex;
     align-items: center;
@@ -2683,50 +2950,92 @@ onUnmounted(() => {
     gap: 8px;
     color: var(--uvp-text-tertiary);
 }
+@media (max-width: 960px) {
+    .toolbar-map-banner {
+        max-width: 42%;
+    }
+}
 .map-canvas {
     position: relative;
     min-height: 460px;
     overflow: hidden;
-    background: linear-gradient(180deg, var(--uvp-search-panel-bg), var(--uvp-list-panel-bg));
     border: 1px solid var(--uvp-panel-border);
     border-radius: 12px;
 }
-.map-grid {
+.map-container {
     position: absolute;
     inset: 0;
-    background-image:
-        linear-gradient(color-mix(in srgb, var(--uvp-panel-border) 70%, transparent) 1px, transparent 1px),
-        linear-gradient(90deg, color-mix(in srgb, var(--uvp-panel-border) 70%, transparent) 1px, transparent 1px);
-    background-size: 42px 42px;
-    opacity: 0.55;
 }
-.cluster-dot,
-.marker-dot {
+.map-state {
     position: absolute;
-    transform: translate(-50%, -50%);
-    display: inline-grid;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--uvp-text-tertiary);
+    background: var(--uvp-list-panel-bg);
+}
+.map-state-error {
+    color: var(--uvp-danger);
+    text-align: center;
+    padding: 24px;
+}
+.map-cluster-marker,
+.map-channel-marker {
+    display: grid;
     place-items: center;
     border: 0;
     cursor: pointer;
+    font: inherit;
 }
-.cluster-dot {
-    min-width: 38px;
-    height: 38px;
-    padding: 0 8px;
+.map-cluster-marker {
+    width: 40px;
+    height: 40px;
     color: #fff;
-    background: color-mix(in srgb, var(--uvp-brand) 82%, #111827);
-    border-radius: 999px;
+    background: radial-gradient(circle at center, color-mix(in srgb, var(--uvp-brand-cyan) var(--cluster-rate), var(--uvp-brand) var(--cluster-rate)), var(--uvp-brand));
+    border: 3px solid color-mix(in srgb, #fff 75%, transparent);
+    border-radius: 50%;
+    box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
+    font-size: 12px;
     font-weight: 700;
 }
-.marker-dot {
-    width: 28px;
-    height: 28px;
-    color: var(--uvp-text-tertiary);
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 999px;
+.map-channel-marker {
+    width: 18px;
+    height: 18px;
+    background: var(--uvp-text-tertiary);
+    border: 3px solid rgb(255 255 255 / 85%);
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 35%);
 }
-.marker-dot.online { color: #fff; background: var(--uvp-brand-cyan); }
+.map-channel-marker.online { background: var(--uvp-brand-cyan); }
+.map-channel-pip {
+    width: 4px;
+    height: 4px;
+    background: #fff;
+    border-radius: 50%;
+}
+.maplibregl-ctrl-group {
+    overflow: hidden;
+    border: 1px solid rgb(255 255 255 / 14%);
+    background: rgb(13 19 28 / 88%);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 22%);
+}
+.maplibregl-ctrl-group button {
+    filter: invert(1) brightness(1.8);
+}
+.maplibregl-ctrl-attrib {
+    color: rgb(255 255 255 / 75%);
+    background: rgb(13 19 28 / 70%);
+}
+.maplibregl-ctrl-attrib a { color: rgb(255 255 255 / 82%); }
+/* Keep attribution readable on the dark basemap. */
+.maplibregl-ctrl-attrib a { text-decoration: none; }
+/* The map occupies the full content area; overlays are DOM markers. */
+.map-canvas > .map-container {
+    inset: 0;
+}
 .drawer-body { display: grid; gap: 14px; }
 .drawer-headline {
     display: grid;
@@ -2826,6 +3135,36 @@ onUnmounted(() => {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand-cyan) 18%, transparent);
     opacity: 1;
 }
+.status-event-current-status {
+    color: var(--uvp-danger);
+    background: var(--uvp-danger-soft);
+    border-color: var(--uvp-danger-border);
+}
+.status-event-current-status.online {
+    color: var(--uvp-brand-cyan);
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
+    border-color: color-mix(in srgb, var(--uvp-brand-cyan) 28%, transparent);
+}
+.status-event-current-status .status-dot {
+    position: relative;
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 14%, transparent);
+    opacity: 1;
+}
+.status-event-current-status .status-dot::after {
+    position: absolute;
+    inset: -1px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    content: "";
+    animation: status-event-ripple 1.8s cubic-bezier(0.2, 0.7, 0.3, 1) infinite;
+}
+@keyframes status-event-ripple {
+    0% { opacity: 0.55; transform: scale(0.8); }
+    72%, 100% { opacity: 0; transform: scale(3.2); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .status-event-current-status .status-dot::after { animation: none; }
+}
 .status-event-body {
     display: grid;
     gap: 16px;
@@ -2889,14 +3228,82 @@ onUnmounted(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.status-event-content { min-height: 180px; }
-.status-event-timeline { padding: 8px 12px 0; }
-.status-event-item { display: grid; gap: 4px; padding-bottom: 6px; }
-.status-event-item .event-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.status-event-item .event-title strong { color: var(--uvp-text-primary); font-size: 13px; }
-.status-event-item .event-title span,
-.status-event-item p { color: var(--uvp-text-tertiary); font-size: 12px; }
-.status-event-item p { margin: 0; }
+.status-event-scroll {
+    min-height: 180px;
+    max-height: clamp(180px, calc(100vh - 350px), 440px);
+    padding-right: 6px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+.status-event-content { display: block; min-height: 180px; }
+.status-event-timeline {
+    padding: 10px 12px 0;
+}
+.status-event-timeline :deep(.arco-timeline-item) {
+    min-height: 64px;
+    padding-left: 8px;
+}
+.status-event-timeline :deep(.arco-timeline-item-dot-wrapper .arco-timeline-item-dot-content) {
+    width: 10px;
+}
+.status-event-timeline :deep(.arco-timeline-item-dot) {
+    width: 10px;
+    height: 10px;
+    border-width: 2px;
+}
+.status-event-timeline :deep(.arco-timeline-item-dot-line) {
+    left: 5px;
+    border-color: var(--uvp-panel-border);
+    border-left-width: 1px;
+}
+.status-event-timeline :deep(.arco-timeline-item-content-wrapper) {
+    margin-left: 22px;
+}
+.status-event-timeline :deep(.arco-timeline-item-content) {
+    margin-bottom: 2px;
+    line-height: 20px;
+}
+.status-event-timeline :deep(.arco-timeline-item-label) {
+    color: color-mix(in srgb, var(--uvp-text-tertiary) 82%, var(--uvp-brand));
+    font-size: 12px;
+    line-height: 18px;
+}
+.status-event-item {
+    min-width: 0;
+    color: var(--uvp-text-primary);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 20px;
+    cursor: help;
+}
+.status-event-load-more {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 38px;
+    padding: 8px 12px;
+    color: var(--uvp-text-tertiary);
+    font-size: 12px;
+    text-align: center;
+    border-top: 1px solid var(--uvp-panel-border);
+}
+.status-event-load-more > span {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+}
+.status-event-load-more .error { color: var(--uvp-danger); }
+.status-event-load-more button {
+    padding: 0;
+    color: var(--uvp-brand);
+    font: inherit;
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+}
+.status-event-load-more button:hover { color: var(--uvp-brand-strong); }
 .status-event-state {
     display: grid;
     place-items: center;
@@ -2908,6 +3315,7 @@ onUnmounted(() => {
 .status-event-state.error strong { color: var(--uvp-danger); }
 @media (max-width: 720px) {
     .status-event-facts { grid-template-columns: 1fr; }
+    .status-event-scroll { max-height: clamp(180px, calc(100vh - 470px), 360px); }
 }
 .info-group {
     display: grid;
