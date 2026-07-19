@@ -29,6 +29,10 @@ func (r *lifecycleTraceRuntime) ConnectionClosed(siplib.TransportReadProps) {
 	r.connectionsClosed.Add(1)
 }
 
+func (r *lifecycleTraceRuntime) Health() gbtrace.HealthSnapshot {
+	return gbtrace.HealthSnapshot{State: gbtrace.HealthReady}
+}
+
 func (r *lifecycleTraceRuntime) Shutdown(context.Context) error {
 	r.closed.Add(1)
 	return nil
