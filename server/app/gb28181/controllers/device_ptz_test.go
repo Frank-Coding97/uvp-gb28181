@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -16,6 +17,8 @@ import (
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
 
 type fakePTZSender struct {
@@ -23,6 +26,12 @@ type fakePTZSender struct {
 	dest      string
 	transport string
 	body      []byte
+}
+
+type fakeTrackedPTZSender struct{}
+
+func (fakeTrackedPTZSender) SendMessageTracked(_ context.Context, _ string, _ string, _ string, _ []byte) (uac.TrackedMessageResult, error) {
+	return uac.TrackedMessageResult{CallID: "call-ptz", CSeq: "1", StatusCode: 200}, nil
 }
 
 func (f *fakePTZSender) SendMessage(_ context.Context, deviceID, dest, transport string, body []byte) error {
@@ -90,4 +99,26 @@ func TestDeviceMgmt_ControlPTZRejectsOfflineChannel(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz", strings.NewReader(`{"action":"left","speed":8}`)))
 	require.Empty(t, sender.body)
+}
+
+func TestDeviceMgmt_ControlPTZ_ServiceReturnsOperation(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{}))
+	device := &gbmodels.GbDevice{DeviceID: "D", IP: "192.0.2.10", Port: 5060, Status: gbmodels.DeviceStatusOnline}
+	require.NoError(t, db.Create(device).Error)
+	channel := &gbmodels.GbChannel{DeviceID: "D", ChannelID: "C", Status: gbmodels.ChannelStatusOnline, PTZType: 1}
+	require.NoError(t, db.Create(channel).Error)
+	service := ptz.NewService(db, fakeTrackedPTZSender{}, time.Now)
+	controller := gbcontrollers.NewDeviceMgmtController()
+	controller.SetDB(func() *gorm.DB { return db })
+	controller.SetPTZService(service)
+	r := gin.New()
+	r.POST("/channel/:id/ptz", controller.ControlPTZ)
+	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz", strings.NewReader(`{"action":"left","speed":8,"idempotencyKey":"op-key"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), "operationId")
 }

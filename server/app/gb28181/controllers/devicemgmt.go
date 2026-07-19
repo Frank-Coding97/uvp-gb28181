@@ -12,6 +12,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -29,6 +30,7 @@ type DeviceMgmtController struct {
 	catalogTrigger      CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
 	subscriptionManager SubscriptionManager
 	ptzSender           DeviceControlSender
+	ptzService          *ptz.Service
 	ptzSN               atomic.Uint64
 }
 
@@ -60,6 +62,10 @@ type DeviceControlSender interface {
 
 func (dc *DeviceMgmtController) SetPTZSender(sender DeviceControlSender) {
 	dc.ptzSender = sender
+}
+
+func (dc *DeviceMgmtController) SetPTZService(service *ptz.Service) {
+	dc.ptzService = service
 }
 
 func (dc *DeviceMgmtController) nextPTZSN() int {
