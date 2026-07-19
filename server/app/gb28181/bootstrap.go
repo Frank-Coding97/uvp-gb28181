@@ -185,6 +185,7 @@ func Start() {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
+		subscriptionService.SetProcessor(gbmodels.SubscriptionKindMobilePosition, subscribe.NewPositionProcessor(app.DB(), time.Now))
 		subscriptionScheduler = subscribe.NewScheduler(subscriptionService, 30*time.Second)
 		subscriptionScheduler.Start(context.Background())
 		srv.SetSubscriptionNotifier(subscriptionService)
