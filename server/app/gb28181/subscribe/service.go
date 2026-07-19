@@ -21,10 +21,11 @@ type Sender interface {
 
 // Service owns all durable subscription state transitions.
 type Service struct {
-	db     *gorm.DB
-	sender Sender
-	now    func() time.Time
-	locks  sync.Map // map[string]*sync.Mutex, key is deviceID/kind
+	db         *gorm.DB
+	sender     Sender
+	now        func() time.Time
+	locks      sync.Map // map[string]*sync.Mutex, key is deviceID/kind
+	processors sync.Map // map[SubscriptionKind]Processor
 }
 
 func NewService(db *gorm.DB, sender Sender, now func() time.Time) *Service {

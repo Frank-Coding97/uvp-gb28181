@@ -15,6 +15,7 @@ import (
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
@@ -90,6 +91,10 @@ func (a schedulerLogRepoAdapter) PruneOlderThan(ctx context.Context, t time.Time
 
 // sipServer 持有全局 SIP 服务实例,供优雅关闭引用
 var sipServer *gbsip.Server
+
+// subscriptionService and subscriptionScheduler share the SIP UAC lifecycle.
+var subscriptionService *subscribe.Service
+var subscriptionScheduler *subscribe.Scheduler
 
 // offlineScanner 离线扫描器
 var offlineScanner *device.OfflineScanner
@@ -177,6 +182,10 @@ func Start() {
 	// UAC 若初始化失败(srv.UAC()==nil),handler 内部会 no-op
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
+		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
+		subscriptionScheduler = subscribe.NewScheduler(subscriptionService, 30*time.Second)
+		subscriptionScheduler.Start(context.Background())
+		srv.SetSubscriptionNotifier(subscriptionService)
 	}
 
 	// 启动离线扫描器(基于 keepalive_time 事实派生)
@@ -513,6 +522,11 @@ func setupCivilCodeService() {
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	if subscriptionScheduler != nil {
+		subscriptionScheduler.Stop()
+		subscriptionScheduler = nil
+	}
+	subscriptionService = nil
 	if heartbeatCancel != nil {
 		heartbeatCancel()
 		heartbeatCancel = nil

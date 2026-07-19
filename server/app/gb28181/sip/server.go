@@ -23,6 +23,7 @@ type Server struct {
 	srv      *sipgo.Server
 	regH     *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
 	msgH     *handler.MessageHandler
+	notifyH  *handler.NotifyHandler
 	uac      *uac.UAC // 供 play service 等业务模块复用
 	recorder metrics.Recorder
 	cancel   context.CancelFunc
@@ -84,6 +85,8 @@ func (s *Server) registerHandlers() {
 	s.srv.OnRegister(regHandler.Handle)
 	s.msgH = msgHandler
 	s.srv.OnMessage(msgHandler.Handle)
+	s.notifyH = handler.NewNotifyHandler(nil)
+	s.srv.OnNotify(s.notifyH.Handle)
 }
 
 // SetCatalogTrigger 替换默认 Catalog 触发器(主要给测试用),同时覆盖注册与心跳恢复路径。
@@ -93,6 +96,14 @@ func (s *Server) SetCatalogTrigger(t handler.CatalogTrigger) {
 	}
 	if s.msgH != nil {
 		s.msgH.SetCatalogTrigger(t)
+	}
+}
+
+// SetSubscriptionNotifier connects the durable subscription service to inbound NOTIFY requests.
+// It must be called before Start.
+func (s *Server) SetSubscriptionNotifier(notifier handler.SubscriptionNotifier) {
+	if s.notifyH != nil {
+		s.notifyH.SetNotifier(notifier)
 	}
 }
 
