@@ -228,13 +228,17 @@ scheduler:
 # GB28181 国标平台配置
 gb28181:
   enabled: true              # 是否启用国标 SIP 服务
+  # SIP 配置可留空，HTTP 后台仍可启动，并在管理员首次登录后进入配置引导。
+  # 下列 YAML 字段只在 gb_sip_config 无记录时尝试一次性 seed；seed 后以数据库为运行时真身。
   sip:
-    ip: "0.0.0.0"            # SIP 监听 IP
+    deploymentmode: ""       # 可选 seed：lan / public
+    ip: ""                   # 可选 seed：SIP 监听 IP，0.0.0.0 表示监听全部本机 IPv4
+    advertiseip: ""          # 可选 seed：设备注册使用的具体 IPv4，不能为 0.0.0.0
     port: 5061               # SIP 监听端口
     transport: ["udp", "tcp"] # 信令传输,双栈
-    domain: "3402000000"     # SIP 域(前 10 位行政区划)
-    serverid: "34020000002000000001" # 平台国标编码(20 位)
-    password: "CHANGE_ME"    # ⚠️ 统一接入密码,部署前改成项目专属
+    domain: ""               # 可选 seed：SIP 域(平台 ID 前 10 位)
+    serverid: ""             # 可选 seed：平台国标编码(20 位)
+    password: ""             # 可选 seed：统一接入密码；不要提交真实密码
   device:
     default_owner_dept_id: 1 # 首次自动建档默认归属部门；建议改成"待分配/接入池"部门
     keepalive_interval: 60   # 设备心跳周期(秒)
