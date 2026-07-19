@@ -77,7 +77,7 @@ async function skip() {
     <a-modal
         :visible="modelValue"
         :title="title"
-        :width="720"
+        width="min(720px, calc(100vw - 24px))"
         :mask-closable="false"
         :esc-to-close="false"
         :footer="false"
@@ -138,9 +138,11 @@ async function skip() {
     display: grid;
     grid-template-rows: auto minmax(300px, 1fr) auto;
     min-height: 430px;
+    min-width: 0;
 }
 
 .wizard-steps {
+    min-width: 0;
     padding: 2px 8px 18px;
     border-bottom: 1px solid var(--uvp-divider);
 }
@@ -171,11 +173,26 @@ async function skip() {
 
 @media (max-width: 640px) {
     .wizard-shell {
-        min-height: min(560px, 76vh);
+        height: min(620px, calc(100vh - 140px));
+        min-height: 0;
     }
 
     .wizard-body {
+        min-width: 0;
         padding-top: 16px;
+        overflow-y: auto;
+    }
+
+    .wizard-steps :deep(.arco-steps-item) {
+        min-width: 0;
+    }
+
+    .wizard-steps :deep(.arco-steps-item-content) {
+        display: none;
+    }
+
+    .wizard-steps :deep(.arco-steps-item-active .arco-steps-item-content) {
+        display: block;
     }
 }
 </style>
