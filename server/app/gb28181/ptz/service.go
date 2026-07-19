@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net"
 	"strconv"
 	"strings"
@@ -53,6 +54,23 @@ type Response struct {
 	SIPStatus    int
 	DeviceResult string
 	DeviceError  string
+}
+
+type PreciseNotify struct {
+	DeviceID    uint
+	DeviceCode  string
+	ChannelID   uint
+	ChannelCode string
+	SN          int
+	Pan         *float64
+	Tilt        *float64
+	Zoom        *float64
+	Focus       *float64
+	Iris        *float64
+	DeviceTime  *time.Time
+	ReceivedAt  time.Time
+	DedupeKey   string
+	RawSummary  string
 }
 
 type Service struct {
@@ -271,4 +289,101 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (gbmodel
 		return operation, gorm.ErrRecordNotFound
 	}
 	return operation, nil
+}
+
+func validatePreciseValue(name string, value *float64) error {
+	if value == nil {
+		return nil
+	}
+	if math.IsNaN(*value) || math.IsInf(*value, 0) {
+		return fmt.Errorf("PTZ %s 数值非法", name)
+	}
+	switch name {
+	case "pan":
+		if *value < -360 || *value > 360 {
+			return fmt.Errorf("PTZ pan 超出范围")
+		}
+	case "tilt":
+		if *value < -180 || *value > 180 {
+			return fmt.Errorf("PTZ tilt 超出范围")
+		}
+	case "zoom", "focus", "iris":
+		if *value < 0 || *value > 100000 {
+			return fmt.Errorf("PTZ %s 超出范围", name)
+		}
+	}
+	return nil
+}
+
+// ApplyPreciseNotify applies one valid precise-position notification in a
+// transaction. Older device timestamps and duplicate dedupe keys never
+// overwrite the latest valid values.
+func (s *Service) ApplyPreciseNotify(ctx context.Context, notify PreciseNotify) (gbmodels.GbPTZState, error) {
+	if s == nil || s.db == nil {
+		return gbmodels.GbPTZState{}, fmt.Errorf("PTZ service 未就绪")
+	}
+	if notify.DeviceID == 0 || notify.ChannelID == 0 || notify.DeviceCode == "" || notify.ChannelCode == "" {
+		return gbmodels.GbPTZState{}, fmt.Errorf("精准通知目标不完整")
+	}
+	for name, value := range map[string]*float64{"pan": notify.Pan, "tilt": notify.Tilt, "zoom": notify.Zoom, "focus": notify.Focus, "iris": notify.Iris} {
+		if err := validatePreciseValue(name, value); err != nil {
+			return gbmodels.GbPTZState{}, err
+		}
+	}
+	if notify.ReceivedAt.IsZero() {
+		notify.ReceivedAt = s.now()
+	}
+	var state gbmodels.GbPTZState
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current gbmodels.GbPTZState
+		result := tx.Where("channel_id = ?", notify.ChannelID).Limit(1).Find(&current)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			state = current
+			if notify.DedupeKey != "" && current.DedupeKey == notify.DedupeKey {
+				return tx.Model(&current).Updates(map[string]interface{}{"received_at": notify.ReceivedAt}).Error
+			}
+			if notify.DeviceTime != nil && current.DeviceTime != nil && notify.DeviceTime.Before(*current.DeviceTime) {
+				return tx.Model(&current).Updates(map[string]interface{}{"received_at": notify.ReceivedAt, "dedupe_key": notify.DedupeKey}).Error
+			}
+			updates := map[string]interface{}{
+				"device_id": notify.DeviceID, "device_code": notify.DeviceCode, "received_at": notify.ReceivedAt,
+				"source_sn": notify.SN, "freshness": gbmodels.PTZFreshnessFresh, "dedupe_key": notify.DedupeKey,
+				"raw_summary": notify.RawSummary,
+			}
+			if notify.DeviceTime != nil {
+				updates["device_time"] = notify.DeviceTime
+			}
+			if notify.Pan != nil {
+				updates["pan"] = notify.Pan
+			}
+			if notify.Tilt != nil {
+				updates["tilt"] = notify.Tilt
+			}
+			if notify.Zoom != nil {
+				updates["zoom"] = notify.Zoom
+			}
+			if notify.Focus != nil {
+				updates["focus"] = notify.Focus
+			}
+			if notify.Iris != nil {
+				updates["iris"] = notify.Iris
+			}
+			return tx.Model(&current).Updates(updates).Error
+		}
+		state = gbmodels.GbPTZState{DeviceID: notify.DeviceID, ChannelID: notify.ChannelID, ChannelCode: notify.ChannelCode,
+			Pan: notify.Pan, Tilt: notify.Tilt, Zoom: notify.Zoom, Focus: notify.Focus, Iris: notify.Iris,
+			DeviceTime: notify.DeviceTime, ReceivedAt: notify.ReceivedAt, SourceSN: notify.SN,
+			Freshness: gbmodels.PTZFreshnessFresh, DedupeKey: notify.DedupeKey, RawSummary: notify.RawSummary}
+		return tx.Create(&state).Error
+	})
+	if err != nil {
+		return gbmodels.GbPTZState{}, err
+	}
+	if err := s.db.WithContext(ctx).Where("channel_id = ?", notify.ChannelID).Limit(1).Find(&state).Error; err != nil {
+		return gbmodels.GbPTZState{}, err
+	}
+	return state, nil
 }

@@ -121,3 +121,41 @@ func TestServiceApplyResponse_NoMatch(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, matched)
 }
+
+func TestServiceApplyPreciseNotify_UpdatesAndDeduplicates(t *testing.T) {
+	sender := &fakeTrackedSender{}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZState{}))
+	now := time.Date(2026, 7, 19, 20, 10, 0, 0, time.UTC)
+	svc := NewService(db, sender, func() time.Time { return now })
+	pan, tilt := 12.5, -3.25
+	deviceTime := now.Add(-time.Second)
+	state, err := svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", SN: 7, Pan: &pan, Tilt: &tilt, DeviceTime: &deviceTime, ReceivedAt: now, DedupeKey: "n1"})
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.PTZFreshnessFresh, state.Freshness)
+	require.Equal(t, 12.5, *state.Pan)
+	duplicate, err := svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", SN: 7, Pan: &pan, DeviceTime: &deviceTime, ReceivedAt: now.Add(time.Second), DedupeKey: "n1"})
+	require.NoError(t, err)
+	require.Equal(t, state.ID, duplicate.ID)
+}
+
+func TestServiceApplyPreciseNotify_RejectsOlderAndInvalid(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZState{}))
+	now := time.Date(2026, 7, 19, 20, 10, 0, 0, time.UTC)
+	svc := NewService(db, &fakeTrackedSender{}, func() time.Time { return now })
+	pan := 10.0
+	newTime := now.Add(-time.Minute)
+	_, err = svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", Pan: &pan, DeviceTime: &newTime, ReceivedAt: now, DedupeKey: "old"})
+	require.NoError(t, err)
+	olderPan := 99.0
+	older := now.Add(-2 * time.Minute)
+	state, err := svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", Pan: &olderPan, DeviceTime: &older, ReceivedAt: now, DedupeKey: "older"})
+	require.NoError(t, err)
+	require.Equal(t, 10.0, *state.Pan)
+	bad := 999.0
+	_, err = svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", Pan: &bad, ReceivedAt: now, DedupeKey: "bad"})
+	require.Error(t, err)
+}
