@@ -58,6 +58,9 @@ type TransportWriteProps struct {
 // immediately before the transport writes them to the socket.
 type TransportWriteObserver func(info TransportWriteProps, data []byte)
 
+// TransportConnectionCloseObserver is called after a reliable connection stops reading.
+type TransportConnectionCloseObserver func(info TransportReadProps)
+
 func observeTransportWrite(observer TransportWriteObserver, info TransportWriteProps, data []byte) {
 	if observer == nil {
 		return
@@ -68,6 +71,16 @@ func observeTransportWrite(observer TransportWriteObserver, info TransportWriteP
 			_ = recover()
 		}()
 		observer(info, copyOfData)
+	}()
+}
+
+func observeTransportConnectionClose(observer TransportConnectionCloseObserver, info TransportReadProps) {
+	if observer == nil {
+		return
+	}
+	func() {
+		defer func() { _ = recover() }()
+		observer(info)
 	}()
 }
 

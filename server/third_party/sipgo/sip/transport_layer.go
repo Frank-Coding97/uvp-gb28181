@@ -42,6 +42,7 @@ type TransportLayer struct {
 	connectionReuse bool
 	readFilter      TransportReadFilter
 	writeObserver   TransportWriteObserver
+	closeObserver   TransportConnectionCloseObserver
 
 	// dnsPreferSRV does always SRV lookup first
 	dnsPreferSRV bool
@@ -81,6 +82,13 @@ func WithTransportLayerReadFilter(f TransportReadFilter) TransportLayerOption {
 func WithTransportLayerWriteObserver(observer TransportWriteObserver) TransportLayerOption {
 	return func(l *TransportLayer) {
 		l.writeObserver = observer
+	}
+}
+
+// WithTransportLayerConnectionCloseObserver reports reliable connection cleanup.
+func WithTransportLayerConnectionCloseObserver(observer TransportConnectionCloseObserver) TransportLayerOption {
+	return func(l *TransportLayer) {
+		l.closeObserver = observer
 	}
 }
 
@@ -154,6 +162,7 @@ func NewTransportLayer(
 			connectionReuse: l.connectionReuse,
 			readFilter:      l.readFilter,
 			writeObserver:   l.writeObserver,
+			closeObserver:   l.closeObserver,
 		},
 		TLS: &TransportTLS{
 			TransportTCP: &TransportTCP{
@@ -161,6 +170,7 @@ func NewTransportLayer(
 				connectionReuse: l.connectionReuse,
 				readFilter:      l.readFilter,
 				writeObserver:   l.writeObserver,
+				closeObserver:   l.closeObserver,
 			},
 		},
 		WS: &TransportWS{
@@ -201,12 +211,14 @@ func (l *TransportLayer) withTransports(conf TransportsConfig) {
 		l.tcp.connectionReuse = l.connectionReuse
 		l.tcp.readFilter = l.readFilter
 		l.tcp.writeObserver = l.writeObserver
+		l.tcp.closeObserver = l.closeObserver
 	}
 	if conf.TLS != nil && l.tls == nil {
 		l.tls = conf.TLS
 		l.tls.connectionReuse = l.connectionReuse
 		l.tls.readFilter = l.readFilter
 		l.tls.writeObserver = l.writeObserver
+		l.tls.closeObserver = l.closeObserver
 	}
 	if conf.WS != nil && l.ws == nil {
 		l.ws = conf.WS

@@ -82,6 +82,7 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 			uaOptions = append(uaOptions, sipgo.WithUserAgentTransportLayerOptions(
 				siplib.WithTransportLayerReadFilter(traceRuntime.ReadFilter),
 				siplib.WithTransportLayerWriteObserver(traceRuntime.WriteObserver),
+				siplib.WithTransportLayerConnectionCloseObserver(traceRuntime.ConnectionClosed),
 			))
 		}
 	}

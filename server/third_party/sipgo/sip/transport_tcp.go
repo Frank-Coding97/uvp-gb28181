@@ -20,6 +20,7 @@ type TransportTCP struct {
 	connectionReuse bool
 	readFilter      TransportReadFilter
 	writeObserver   TransportWriteObserver
+	closeObserver   TransportConnectionCloseObserver
 
 	pool *connectionPool
 
@@ -154,6 +155,11 @@ func (t *TransportTCP) initConnection(conn net.Conn, raddr string, handler Messa
 
 // This should performe better to avoid any interface allocation
 func (t *TransportTCP) readConnection(conn *TCPConnection, laddr string, raddr string, handler MessageHandler) {
+	defer observeTransportConnectionClose(t.closeObserver, TransportReadProps{
+		Transport:  t.Network(),
+		LocalAddr:  conn.LocalAddr(),
+		RemoteAddr: conn.RemoteAddr(),
+	})
 	buf := make([]byte, TransportBufferReadSize)
 	defer t.pool.Delete(laddr)
 	defer func() {
