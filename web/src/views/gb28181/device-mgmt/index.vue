@@ -1277,9 +1277,9 @@ onUnmounted(() => {
                             :loading="rowsLoading"
                             :pagination="tablePagination"
                             row-key="id"
-                            :scroll="{ x: 1480 }"
+                            :scroll="{ x: 1480, y: '85%' }"
                             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
-                            class="dm-table"
+                            class="uvp-data-table"
                             @page-change="onPageChange"
                             @page-size-change="onPageSizeChange"
                         >
@@ -1382,18 +1382,18 @@ onUnmounted(() => {
                             :loading="rowsLoading"
                             :pagination="tablePagination"
                             row-key="id"
-                            :scroll="{ x: 1600 }"
+                            :scroll="{ x: 1600, y: '85%' }"
                             :row-selection="{ type: 'checkbox', showCheckedAll: true }"
-                            class="dm-table"
+                            class="uvp-data-table device-data-table"
                             @page-change="onPageChange"
                             @page-size-change="onPageSizeChange"
                         >
                             <template #columns>
-                                <a-table-column title="设备名称" :width="130">
+                                <a-table-column title="设备名称" :width="150">
                                     <template #cell="{ record }">
                                         <a-tooltip :content="deviceNameText(record)" position="top">
-                                            <div class="device-name text-ellipsis">
-                                                <span class="pri">{{ deviceNameText(record) }}</span>
+                                            <div class="device-name">
+                                                <span class="pri text-ellipsis">{{ deviceNameText(record) }}</span>
                                             </div>
                                         </a-tooltip>
                                     </template>
@@ -2402,13 +2402,7 @@ onUnmounted(() => {
 .batch-ops { display: flex; gap: 8px; }
 .view-body { min-width: 0; flex: 1; min-height: 0; }
 .table-view { display: flex; flex-direction: column; gap: 10px; }
-.dm-table { border-radius: 14px; overflow: hidden; }
-.dm-table :deep(.arco-table-container) { border-radius: 14px; overflow: hidden; }
-.dm-table :deep(.arco-table-th) { background: var(--uvp-table-header-bg); color: var(--uvp-text-secondary); }
-.dm-table :deep(.arco-table-td),
-.dm-table :deep(.arco-table-th) { border-color: var(--uvp-panel-border); }
-.dm-table :deep(.arco-table-tr:hover .arco-table-td) { background: var(--uvp-table-row-hover-bg); }
-.dm-table :deep(.arco-table-tr-selected .arco-table-td) { background: var(--uvp-table-row-checked-bg); }
+.uvp-data-table :deep(.arco-table-body.arco-scrollbar-container) { height: calc(100% - 15px); }
 .thumb {
     width: 48px;
     height: 27px;
@@ -2450,6 +2444,7 @@ onUnmounted(() => {
     white-space: nowrap;
 }
 .device-name { display: grid; gap: 2px; }
+.device-name .pri { min-width: 0; }
 .pri { display: inline-flex; align-items: center; gap: 6px; color: var(--uvp-text-primary); font-weight: 600; }
 .pri.mono,
 .sec,
@@ -2644,6 +2639,21 @@ onUnmounted(() => {
     color: var(--uvp-text-secondary);
     white-space: nowrap;
     min-width: 36px;
+}
+/* Device rows use the same relaxed density as the channel rows with their select controls. */
+.device-data-table :deep(.arco-table-td) {
+    height: 60px;
+    font-size: 13px;
+    font-weight: 400;
+}
+.device-data-table .pri,
+.device-data-table .code-main,
+.device-data-table .relative,
+.device-data-table .status-inline,
+.device-data-table .channel-text {
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 400;
 }
 
 /* Text ellipsis for long content */
