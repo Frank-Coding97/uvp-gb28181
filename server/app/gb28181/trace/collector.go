@@ -26,11 +26,18 @@ type Event struct {
 }
 
 type StoredEvent struct {
+	EventID    string
 	OccurredAt time.Time
 	Direction  Direction
 	Transport  string
 	LocalAddr  string
 	RemoteAddr string
+	DeviceID   string
+	Method     string
+	StatusCode uint16
+	CallID     string
+	CSeq       uint32
+	CSeqMethod string
 	Malformed  bool
 	ParseError string
 	Payload    EncryptedPayload

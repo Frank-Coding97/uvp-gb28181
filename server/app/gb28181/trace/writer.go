@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func (m *Module) runWriter(ctx context.Context) {
@@ -86,18 +88,29 @@ func receiveEvent(ctx context.Context, queue <-chan Event) (Event, bool) {
 func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
 	stored := make([]StoredEvent, 0, len(events))
 	for _, event := range events {
+		metadata := extractSIPMetadata(event.Raw, event.Direction)
+		if event.ParseError != "" {
+			metadata.ParseError = event.ParseError
+		}
 		payload, err := m.cipher.Encrypt(event.Raw)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt SIP trace payload: %w", err)
 		}
 		stored = append(stored, StoredEvent{
+			EventID:    uuid.NewString(),
 			OccurredAt: event.OccurredAt,
 			Direction:  event.Direction,
 			Transport:  event.Transport,
 			LocalAddr:  event.LocalAddr,
 			RemoteAddr: event.RemoteAddr,
+			DeviceID:   metadata.DeviceID,
+			Method:     metadata.Method,
+			StatusCode: metadata.StatusCode,
+			CallID:     metadata.CallID,
+			CSeq:       metadata.CSeq,
+			CSeqMethod: metadata.CSeqMethod,
 			Malformed:  event.Malformed,
-			ParseError: event.ParseError,
+			ParseError: metadata.ParseError,
 			Payload:    payload,
 		})
 	}
@@ -117,4 +130,12 @@ type unavailableStore struct{}
 
 func (unavailableStore) InsertBatch(context.Context, []StoredEvent) error {
 	return fmt.Errorf("trace store is not configured")
+}
+
+type errorStore struct {
+	err error
+}
+
+func (s errorStore) InsertBatch(context.Context, []StoredEvent) error {
+	return s.err
 }

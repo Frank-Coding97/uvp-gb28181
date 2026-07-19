@@ -23,21 +23,23 @@ type Runtime interface {
 
 // Module owns transport hooks, framing, the bounded queue, and the batch writer lifecycle.
 type Module struct {
-	closed        atomic.Bool
-	framer        *FrameAssembler
-	onFrame       func(Frame)
-	collector     *Collector
-	store         Store
-	cipher        PayloadCipher
-	health        *healthTracker
-	batchSize     int
-	flushInterval time.Duration
-	retryMin      time.Duration
-	retryMax      time.Duration
-	now           func() time.Time
-	cancel        context.CancelFunc
-	done          chan struct{}
-	shutdownOnce  sync.Once
+	closed         atomic.Bool
+	framer         *FrameAssembler
+	onFrame        func(Frame)
+	collector      *Collector
+	store          Store
+	cipher         PayloadCipher
+	health         *healthTracker
+	batchSize      int
+	flushInterval  time.Duration
+	retryMin       time.Duration
+	retryMax       time.Duration
+	now            func() time.Time
+	cancel         context.CancelFunc
+	done           chan struct{}
+	shutdownOnce   sync.Once
+	storeCloseOnce sync.Once
+	storeCloseErr  error
 }
 
 func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
@@ -46,11 +48,23 @@ func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
 	if err != nil {
 		payloadCipher = failingCipher{err: ErrInvalidEncryptionKey}
 	}
-	module := NewModule(cfg, unavailableStore{}, payloadCipher)
+	var store Store = unavailableStore{}
+	var storeErr error
+	if err == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		store, storeErr = OpenClickHouseStore(ctx, cfg)
+		cancel()
+		if storeErr != nil {
+			store = errorStore{err: storeErr}
+		}
+	}
+	module := NewModule(cfg, store, payloadCipher)
 	if err != nil {
 		module.health.degraded("trace encryption key is unavailable")
+	} else if storeErr != nil {
+		module.health.degraded(storeErr.Error())
 	} else {
-		module.health.degraded("trace store is not configured")
+		module.health.ready(time.Now())
 	}
 	return module
 }
@@ -165,12 +179,22 @@ func (m *Module) Shutdown(ctx context.Context) error {
 	})
 	select {
 	case <-m.done:
-		return nil
+		return m.closeStore()
 	case <-ctx.Done():
 		m.cancel()
 		<-m.done
+		_ = m.closeStore()
 		return ctx.Err()
 	}
+}
+
+func (m *Module) closeStore() error {
+	m.storeCloseOnce.Do(func() {
+		if closer, ok := m.store.(interface{ Close() error }); ok {
+			m.storeCloseErr = closer.Close()
+		}
+	})
+	return m.storeCloseErr
 }
 
 func addrString(addr net.Addr) string {
