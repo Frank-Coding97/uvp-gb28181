@@ -19,6 +19,11 @@ import (
 type MessageHandler struct {
 	recorder       metrics.Recorder // 可选:埋点 SIP 事务
 	catalogTrigger CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
+	alarmProcessor AlarmMessageProcessor
+}
+
+type AlarmMessageProcessor interface {
+	OnAlarmMessage(context.Context, string, string, string, []byte) error
 }
 
 // NewMessageHandler 创建消息处理器
@@ -34,6 +39,10 @@ func (h *MessageHandler) SetRecorder(r metrics.Recorder) {
 // SetCatalogTrigger 注入设备重新上线后的 Catalog 触发器。
 func (h *MessageHandler) SetCatalogTrigger(t CatalogTrigger) {
 	h.catalogTrigger = t
+}
+
+func (h *MessageHandler) SetAlarmProcessor(processor AlarmMessageProcessor) {
+	h.alarmProcessor = processor
 }
 
 // txKindFromCmd 根据 MANSCDP CmdType 映射 metrics 事务类型
@@ -93,6 +102,12 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		case manscdp.CmdDeviceInfo:
 			// DeviceInfo 应答(设备→平台),回写 gb_device 本体元数据
 			HandleDeviceInfoResponse(ctx, req.Body())
+		case manscdp.CmdAlarm:
+			if h.alarmProcessor != nil {
+				if err := h.alarmProcessor.OnAlarmMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
+					app.ZapLog.Warn("GB28181 MESSAGE 报警处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+				}
+			}
 		}
 	}
 	// 其它 CmdType 本期不处理,统一回 200

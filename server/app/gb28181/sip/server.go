@@ -107,6 +107,12 @@ func (s *Server) SetSubscriptionNotifier(notifier handler.SubscriptionNotifier) 
 	}
 }
 
+func (s *Server) SetAlarmMessageProcessor(processor handler.AlarmMessageProcessor) {
+	if s.msgH != nil {
+		s.msgH.SetAlarmProcessor(processor)
+	}
+}
+
 // Start 启动双栈监听(配置里声明的每个 transport 各起一个 goroutine)
 func (s *Server) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())

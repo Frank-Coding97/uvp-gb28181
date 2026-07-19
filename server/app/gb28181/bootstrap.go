@@ -186,9 +186,11 @@ func Start() {
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindMobilePosition, subscribe.NewPositionProcessor(app.DB(), time.Now))
+		subscriptionService.SetProcessor(gbmodels.SubscriptionKindAlarm, subscribe.NewAlarmProcessor(app.DB(), time.Now))
 		subscriptionScheduler = subscribe.NewScheduler(subscriptionService, 30*time.Second)
 		subscriptionScheduler.Start(context.Background())
 		srv.SetSubscriptionNotifier(subscriptionService)
+		srv.SetAlarmMessageProcessor(subscriptionService)
 	}
 
 	// 启动离线扫描器(基于 keepalive_time 事实派生)
