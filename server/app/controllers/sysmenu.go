@@ -120,11 +120,45 @@ func (sm *SysMenuController) GetRouters(c *gin.Context) {
 		}
 	}
 
+	disabledFeatures := map[string]bool{}
+	if !app.ConfigYml.GetBool("gb28181.trace.enabled") {
+		disabledFeatures["/gb28181/sip-traces"] = true
+	}
+	menuList = filterDisabledFeatureMenus(menuList, disabledFeatures)
 	if !menuList.IsEmpty() {
 		menuList = menuList.BuildTree().TreeSort()
 	}
 
 	sm.Success(c, menuList)
+}
+
+func filterDisabledFeatureMenus(menuList models.SysMenuList, disabledPaths map[string]bool) models.SysMenuList {
+	if len(menuList) == 0 || len(disabledPaths) == 0 {
+		return menuList
+	}
+	removedIDs := make(map[uint]bool)
+	for _, menu := range menuList {
+		if disabledPaths[menu.Path] {
+			removedIDs[menu.ID] = true
+		}
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, menu := range menuList {
+			if !removedIDs[menu.ID] && removedIDs[menu.ParentID] {
+				removedIDs[menu.ID] = true
+				changed = true
+			}
+		}
+	}
+	filtered := make(models.SysMenuList, 0, len(menuList)-len(removedIDs))
+	for _, menu := range menuList {
+		if !removedIDs[menu.ID] {
+			filtered = append(filtered, menu)
+		}
+	}
+	return filtered
 }
 
 // GetMenuList 获取完整的菜单列表

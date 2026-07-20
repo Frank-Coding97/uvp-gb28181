@@ -6,10 +6,12 @@ import (
 	"sync"
 
 	"github.com/emiago/sipgo"
+	siplib "github.com/emiago/sipgo/sip"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
@@ -18,18 +20,34 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
-	cfg      gbconfig.Config
-	ua       *sipgo.UserAgent
-	srv      *sipgo.Server
-	regH     *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
-	msgH     *handler.MessageHandler
-	notifyH  *handler.NotifyHandler
-	uac      *uac.UAC // 供 play service 等业务模块复用
-	recorder metrics.Recorder
-	onError  func(error)
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	started  bool
+	cfg       gbconfig.Config
+	ua        *sipgo.UserAgent
+	srv       *sipgo.Server
+	regH      *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
+	msgH      *handler.MessageHandler
+	notifyH   *handler.NotifyHandler
+	uac       *uac.UAC // 供 play service 等业务模块复用
+	recorder  metrics.Recorder
+	onError   func(error)
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	started   bool
+	trace     gbtrace.Runtime
+	traceOnce sync.Once
+}
+
+type TraceFactory func(gbconfig.TraceConfig) gbtrace.Runtime
+
+type ServerOption func(*serverOptions)
+
+type serverOptions struct {
+	traceFactory TraceFactory
+}
+
+func WithTraceFactory(factory TraceFactory) ServerOption {
+	return func(options *serverOptions) {
+		options.traceFactory = factory
+	}
 }
 
 // SetErrorHandler registers a callback for asynchronous listener failures.
@@ -38,6 +56,9 @@ func (s *Server) SetErrorHandler(fn func(error)) { s.onError = fn }
 
 // UAC 返回 SIP 服务内置的 UAC(可能为 nil,初始化失败时)
 func (s *Server) UAC() *uac.UAC { return s.uac }
+
+// TraceRuntime returns the optional trace runtime for controller bootstrap wiring.
+func (s *Server) TraceRuntime() gbtrace.Runtime { return s.trace }
 
 // SetRecorder 注入 metrics Recorder,会同时下发到 register/message handler 和 uac
 // 必须在 NewServer 之后、Start 之前调用
@@ -55,16 +76,37 @@ func (s *Server) SetRecorder(r metrics.Recorder) {
 }
 
 // NewServer 创建 SIP 服务
-func NewServer(cfg gbconfig.Config) (*Server, error) {
-	ua, err := sipgo.NewUA(sipgo.WithUserAgent("UVP-GB28181"))
+func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
+	opts := serverOptions{traceFactory: gbtrace.NewRuntime}
+	for _, option := range options {
+		option(&opts)
+	}
+
+	var traceRuntime gbtrace.Runtime
+	uaOptions := []sipgo.UserAgentOption{sipgo.WithUserAgent("UVP-GB28181")}
+	if cfg.Trace.Enabled && opts.traceFactory != nil {
+		traceRuntime = opts.traceFactory(cfg.Trace)
+		if traceRuntime != nil {
+			uaOptions = append(uaOptions, sipgo.WithUserAgentTransportLayerOptions(
+				siplib.WithTransportLayerReadFilter(traceRuntime.ReadFilter),
+				siplib.WithTransportLayerWriteObserver(traceRuntime.WriteObserver),
+				siplib.WithTransportLayerConnectionCloseObserver(traceRuntime.ConnectionClosed),
+			))
+		}
+	}
+
+	ua, err := sipgo.NewUA(uaOptions...)
 	if err != nil {
+		if traceRuntime != nil {
+			_ = traceRuntime.Shutdown(context.Background())
+		}
 		return nil, fmt.Errorf("创建 SIP UA 失败: %w", err)
 	}
 	srv, err := sipgo.NewServer(ua)
 	if err != nil {
 		return nil, fmt.Errorf("创建 SIP server 失败: %w", err)
 	}
-	s := &Server{cfg: cfg, ua: ua, srv: srv}
+	s := &Server{cfg: cfg, ua: ua, srv: srv, trace: traceRuntime}
 	s.registerHandlers()
 	return s, nil
 }
@@ -167,7 +209,7 @@ func (s *Server) Start() error {
 // Shutdown 优雅关闭
 func (s *Server) Shutdown(ctx context.Context) error {
 	if !s.started {
-		return nil
+		return s.shutdownTrace(ctx)
 	}
 	if s.cancel != nil {
 		s.cancel()
@@ -183,8 +225,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	select {
 	case <-done:
 		app.ZapLog.Info("GB28181 SIP 服务已优雅关闭")
-		return nil
+		return s.shutdownTrace(ctx)
 	case <-ctx.Done():
+		_ = s.shutdownTrace(ctx)
 		return ctx.Err()
 	}
+}
+
+func (s *Server) shutdownTrace(ctx context.Context) error {
+	var err error
+	s.traceOnce.Do(func() {
+		if s.trace != nil {
+			err = s.trace.Shutdown(ctx)
+		}
+	})
+	return err
 }

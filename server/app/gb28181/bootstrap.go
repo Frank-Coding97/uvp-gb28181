@@ -20,6 +20,7 @@ import (
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
+	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
@@ -237,7 +238,7 @@ func startControlPlane(cfg gbconfig.Config) {
 	metricsCleanupStop = make(chan struct{})
 	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
 	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
-
+	setupTraceController(cfg, nil)
 	setupZLMRegistry(cfg)
 	setupZLMScheduler()
 	setupZLMSchedulerLog()
@@ -325,6 +326,9 @@ func Start() {
 		return
 	}
 	sipServer = srv
+	if traceServer, ok := srv.(interface{ TraceRuntime() gbtrace.Runtime }); ok {
+		setupTraceController(cfg, traceServer.TraceRuntime())
+	}
 
 	// 装配手动 Catalog 刷新(前端"通道刷新"按钮 → controllers.RefreshDeviceCatalog)
 	// UAC 若初始化失败(srv.UAC()==nil),handler 内部会 no-op
@@ -383,6 +387,19 @@ func Start() {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+}
+
+func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {
+	access := gbcontrollers.NewGormTraceAdminAccess(app.DB())
+	var query gbcontrollers.TraceQueryService
+	var capture gbcontrollers.TraceCaptureService
+	if cfg.Trace.Enabled {
+		query = gbtrace.QueryServiceFromRuntime(runtime)
+		if app.DB() != nil {
+			capture = gbtrace.NewCaptureService(app.DB(), access, time.Now)
+		}
+	}
+	gbroutes.SetTraceController(gbcontrollers.NewTraceController(query, capture, access))
 }
 
 // setupZLMRegistry 启动时从 DB 加载所有节点;若空表,用 yaml cfg.ZLM seed 第一节点

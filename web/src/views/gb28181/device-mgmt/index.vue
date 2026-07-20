@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch, onUnmounted } from "vue";
+import { useRouter } from "vue-router";
 import { Message, Modal } from "@arco-design/web-vue";
 import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
+    Activity,
     Bell,
     Building2,
     Camera,
@@ -34,6 +36,7 @@ import {
     Download,
     Plus
 } from "@lucide/vue";
+import { startTraceCapture } from "@/api/gb28181-trace";
 import {
     batchDeleteChannels,
     batchDeleteDevices,
@@ -109,6 +112,7 @@ function initialAutoRefresh() {
 }
 
 const viewMode = ref<ViewMode>(initialViewMode());
+const router = useRouter();
 const assetKind = ref<AssetKind>("device");
 const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
@@ -201,6 +205,7 @@ const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
 const snapshotPreviewVisible = ref(false);
 const snapshotPreviewChannel = ref<ChannelVO | null>(null);
+const traceCaptureStarting = reactive<Record<number, boolean>>({});
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -703,6 +708,33 @@ async function handleSubscriptionChanged() {
         if (res.code === 0) deviceSubscriptions.value = res.data?.list || [];
     } catch (error) {
         console.warn("刷新设备订阅摘要失败", error);
+    }
+}
+
+async function startDeviceTraceCapture(record: DeviceVO) {
+    if (traceCaptureStarting[record.id]) return;
+    traceCaptureStarting[record.id] = true;
+    try {
+        const response = await startTraceCapture(record.id);
+        if (response.code !== 0 || !response.data?.filter) {
+            throw new Error(response.message || "诊断捕获启动失败");
+        }
+        const { filter, capture } = response.data;
+        await router.push({
+            path: "/gb28181/sip-traces",
+            query: {
+                view: "text",
+                deviceId: filter.deviceId,
+                from: filter.from,
+                to: filter.to,
+                captureId: filter.captureId,
+                captureEndsAt: capture?.plannedEndAt || filter.to
+            }
+        });
+    } catch (error: any) {
+        Message.error(error?.message || "诊断捕获启动失败");
+    } finally {
+        traceCaptureStarting[record.id] = false;
     }
 }
 
@@ -1555,7 +1587,7 @@ onUnmounted(() => {
                                         <span class="relative" :class="{ warn: !record.online }">{{ dateTime(record.keepaliveTime) }}</span>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="270" fixed="right">
+                                <a-table-column title="操作" :width="302" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
                                             <a-link class="uvp-table-action uvp-table-action--preview" @click="showDeviceChannels(record)">
@@ -1575,6 +1607,18 @@ onUnmounted(() => {
                                                 <template #icon><Bell :size="13" /></template>
                                                 <span>订阅</span>
                                             </a-link>
+                                            <a-tooltip content="SIP 诊断捕获" position="top">
+                                                <button
+                                                    class="trace-capture-action"
+                                                    type="button"
+                                                    :disabled="traceCaptureStarting[record.id]"
+                                                    :aria-label="`对设备 ${record.deviceId} 启动 SIP 诊断捕获`"
+                                                    @click.stop="startDeviceTraceCapture(record)"
+                                                >
+                                                    <Loader2 v-if="traceCaptureStarting[record.id]" :size="14" class="spin" />
+                                                    <Activity v-else :size="14" />
+                                                </button>
+                                            </a-tooltip>
                                             <a-dropdown trigger="click" position="br">
                                                 <a-link class="uvp-table-action uvp-table-action--more">
                                                     <span>更多</span>
@@ -1664,6 +1708,12 @@ onUnmounted(() => {
                                 </a-tooltip>
                                 <a-tooltip content="订阅管理" position="top">
                                     <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
+                                </a-tooltip>
+                                <a-tooltip content="SIP 诊断捕获" position="top">
+                                    <button class="icon-btn small framed trace-capture" type="button" :disabled="traceCaptureStarting[item.id]" @click.stop="startDeviceTraceCapture(item)">
+                                        <Loader2 v-if="traceCaptureStarting[item.id]" :size="13" class="spin" />
+                                        <Activity v-else :size="13" />
+                                    </button>
                                 </a-tooltip>
                                 <a-tooltip content="编辑设备" position="top">
                                     <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button>
@@ -2861,6 +2911,10 @@ onUnmounted(() => {
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync:hover) { color: #0f675f; background: rgb(15 118 110 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe) { color: var(--uvp-brand); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe:hover) { color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); }
+.trace-capture-action { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 0; color: #0f766e; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
+.trace-capture-action:hover { color: #0b5f59; background: rgb(15 118 110 / 8%); }
+.trace-capture-action:disabled { cursor: wait; opacity: 0.55; }
+.icon-btn.trace-capture { color: #0f766e; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) { color: #b7791f; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) { color: #9a6b18; background: rgb(183 121 31 / 9%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more) { color: #6b4f9b; }
