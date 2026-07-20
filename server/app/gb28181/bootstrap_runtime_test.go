@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -19,8 +20,13 @@ type fakeSIPRuntimeServer struct {
 	started  bool
 }
 
-func (f *fakeSIPRuntimeServer) SetRecorder(metrics.Recorder)   {}
-func (f *fakeSIPRuntimeServer) SetErrorHandler(fn func(error)) { f.onError = fn }
+func (f *fakeSIPRuntimeServer) SetRecorder(metrics.Recorder)                             {}
+func (f *fakeSIPRuntimeServer) SetErrorHandler(fn func(error))                           { f.onError = fn }
+func (f *fakeSIPRuntimeServer) SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)     {}
+func (f *fakeSIPRuntimeServer) SetPTZNotifyProcessor(gbhandler.PTZNotifyProcessor)       {}
+func (f *fakeSIPRuntimeServer) SetSubscriptionWaker(gbhandler.SubscriptionWaker)         {}
+func (f *fakeSIPRuntimeServer) SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)   {}
+func (f *fakeSIPRuntimeServer) SetAlarmMessageProcessor(gbhandler.AlarmMessageProcessor) {}
 func (f *fakeSIPRuntimeServer) Start() error {
 	f.started = true
 	return f.startErr

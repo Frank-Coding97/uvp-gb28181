@@ -98,6 +98,11 @@ var ErrSIPUnconfigured = errors.New("SIP configuration is missing")
 type sipRuntimeServer interface {
 	SetRecorder(metrics.Recorder)
 	SetErrorHandler(func(error))
+	SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)
+	SetPTZNotifyProcessor(gbhandler.PTZNotifyProcessor)
+	SetSubscriptionWaker(gbhandler.SubscriptionWaker)
+	SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)
+	SetAlarmMessageProcessor(gbhandler.AlarmMessageProcessor)
 	Start() error
 	UAC() *uac.UAC
 	Shutdown(context.Context) error
