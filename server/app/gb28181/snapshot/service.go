@@ -10,7 +10,7 @@ import (
 
 // ZLMClient 抓帧客户端接口(只包含 Service 需要的方法,方便单测 mock)
 type ZLMClient interface {
-	GetSnap(ctx context.Context, streamID string, timeoutSec, expireSec int) ([]byte, error)
+	GetSnap(ctx context.Context, streamURL string, timeoutSec, expireSec int) ([]byte, error)
 }
 
 // GetClientFunc 按 nodeID 拿到 ZLM 客户端(多节点场景下 play.Service 已把
@@ -68,8 +68,9 @@ func New(cfg Config) *Service {
 // FireAfterPlay 由 play.Service 在 WaitReady 之后 fire-and-forget 调。
 // 内部起 goroutine 异步抓帧,不阻塞调用方;任何失败都是 warn 级不 panic。
 //
+// streamURL: 完整流地址(如 http://host:port/app/stream.live.flv),ZLM getSnap 需要
 // s 为 nil 时安全跳过(方便 play.Service 未注入 snapshot 时零改动)。
-func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string) {
+func (s *Service) FireAfterPlay(ctx context.Context, streamURL, deviceID, channelID string) {
 	if s == nil {
 		return
 	}
@@ -87,7 +88,7 @@ func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID,
 					zap.String("device", deviceID), zap.String("channel", channelID))
 			}
 		}()
-		if err := s.doCapture(nodeID, streamID, deviceID, channelID); err != nil {
+		if err := s.doCapture(streamURL, deviceID, channelID); err != nil {
 			s.log.Warn("通道快照抓取失败",
 				zap.Error(err),
 				zap.String("device", deviceID), zap.String("channel", channelID))

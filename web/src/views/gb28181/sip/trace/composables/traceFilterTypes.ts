@@ -13,6 +13,7 @@ export interface TraceFiltersState {
     callId: string;
     captureId: string;
     captureEndsAt: string;
+    searchKeyword: string;
 }
 
 export interface TimeRange {
@@ -70,7 +71,8 @@ export function parseQuery(query: Record<string, unknown>, now = dayjs()): Trace
         statusCode: strFrom("statusCode"),
         callId: strFrom("callId"),
         captureId: strFrom("captureId"),
-        captureEndsAt: strFrom("captureEndsAt")
+        captureEndsAt: strFrom("captureEndsAt"),
+        searchKeyword: strFrom("searchKeyword")
     };
 }
 
@@ -85,5 +87,6 @@ export function toQuery(state: TraceFiltersState): Record<string, string> {
     if (state.callId) q.callId = state.callId;
     if (state.captureId) q.captureId = state.captureId;
     if (state.captureEndsAt) q.captureEndsAt = state.captureEndsAt;
+    if (state.searchKeyword) q.searchKeyword = state.searchKeyword;
     return q;
 }

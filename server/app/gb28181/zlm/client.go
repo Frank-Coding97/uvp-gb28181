@@ -303,14 +303,15 @@ func (c *Client) GetWorkThreadsLoad(ctx context.Context) (float64, error) {
 // 与其他 API 不同,getSnap 成功时直接返回 image/jpeg 二进制,失败时返回 JSON envelope,
 // 所以不复用 call()。
 //
+// streamURL:  完整流地址,如 http://host:port/app/stream.live.flv 或 rtsp://host:port/app/stream
 // timeoutSec: 单次抓帧的最长等待秒数(ZLM 侧),通常 5 秒
 // expireSec:  ZLM 本地缓存这张快照的秒数,建议跟 dedup TTL 对齐(30 秒)
 //
 // 返回 bytes 是完整 JPEG 内容(含 SOI 头 0xFF 0xD8 0xFF)。
-func (c *Client) GetSnap(ctx context.Context, streamID string, timeoutSec, expireSec int) ([]byte, error) {
+func (c *Client) GetSnap(ctx context.Context, streamURL string, timeoutSec, expireSec int) ([]byte, error) {
 	q := url.Values{}
 	q.Set("secret", c.secret)
-	q.Set("stream", streamID)
+	q.Set("url", streamURL)
 	q.Set("timeout_sec", strconv.Itoa(timeoutSec))
 	q.Set("expire_sec", strconv.Itoa(expireSec))
 

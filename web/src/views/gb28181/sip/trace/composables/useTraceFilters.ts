@@ -28,13 +28,18 @@ export function useTraceFilters() {
         state.view = view;
     }
 
+    function setSearchKeyword(keyword: string) {
+        state.searchKeyword = keyword;
+    }
+
     function reset() {
         state.deviceId = "";
         state.direction = "";
         state.method = "";
         state.statusCode = "";
         state.callId = "";
+        state.searchKeyword = "";
     }
 
-    return { state, setView, reset };
+    return { state, setView, setSearchKeyword, reset };
 }

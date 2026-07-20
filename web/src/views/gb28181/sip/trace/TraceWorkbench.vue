@@ -11,9 +11,10 @@ import TraceSessionView from "./views/TraceSessionView.vue";
 import TraceDetailPanel from "./components/TraceDetailPanel.vue";
 
 const router = useRouter();
-const { state, setView } = useTraceFilters();
+const { state, setView, setSearchKeyword } = useTraceFilters();
 const { health, loading: healthLoading, refresh: refreshHealth } = useTraceHealth();
 const selectedRecord = ref<TraceRecord | null>(null);
+const searchInput = ref("");
 
 const healthLabel = computed(
     () =>
@@ -45,6 +46,15 @@ function jumpDeviceMgmt() {
     router.push({ path: "/gb28181/device-mgmt" });
 }
 
+function handleSearch() {
+    setSearchKeyword(searchInput.value.trim());
+}
+
+function clearSearch() {
+    searchInput.value = "";
+    setSearchKeyword("");
+}
+
 onMounted(() => {
     // filter 状态已由 useTraceFilters 消费 URL 完成初始化
 });
@@ -72,6 +82,14 @@ onMounted(() => {
                     </span>
                     <span v-if="health.dropped" class="status-loss">已丢失 {{ health.dropped }}</span>
                 </div>
+                <a-input-search
+                    v-model="searchInput"
+                    placeholder="搜索方法/Call-ID/设备ID/消息体关键词"
+                    allow-clear
+                    style="width: 320px"
+                    @search="handleSearch"
+                    @clear="clearSearch"
+                />
                 <a-tooltip content="刷新">
                     <a-button class="icon-command" :loading="globalRefreshing || healthLoading" @click="refreshAll">
                         <template #icon><RefreshCw :size="16" /></template>
