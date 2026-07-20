@@ -715,7 +715,7 @@ async function startDeviceTraceCapture(record: DeviceVO) {
     try {
         const response = await startTraceCapture(record.id);
         if (response.code !== 0 || !response.data?.filter) {
-            throw new Error(response.message || "诊断捕获启动失败");
+            throw new Error(response.message || "诊断窗口启动失败");
         }
         const { filter, capture } = response.data;
         await router.push({
@@ -730,7 +730,7 @@ async function startDeviceTraceCapture(record: DeviceVO) {
             }
         });
     } catch (error: any) {
-        Message.error(error?.message || "诊断捕获启动失败");
+        Message.error(error?.message || "诊断窗口启动失败");
     } finally {
         traceCaptureStarting[record.id] = false;
     }
@@ -1610,12 +1610,12 @@ onUnmounted(() => {
                                                 <template #icon><Bell :size="13" /></template>
                                                 <span>订阅</span>
                                             </a-link>
-                                            <a-tooltip content="SIP 诊断捕获" position="top">
+                                            <a-tooltip content="启动 SIP 诊断窗口" position="top">
                                                 <button
                                                     class="trace-capture-action"
                                                     type="button"
                                                     :disabled="traceCaptureStarting[record.id]"
-                                                    :aria-label="`对设备 ${record.deviceId} 启动 SIP 诊断捕获`"
+                                                    :aria-label="`对设备 ${record.deviceId} 启动 SIP 诊断窗口`"
                                                     @click.stop="startDeviceTraceCapture(record)"
                                                 >
                                                     <Loader2 v-if="traceCaptureStarting[record.id]" :size="14" class="spin" />
@@ -1712,7 +1712,7 @@ onUnmounted(() => {
                                 <a-tooltip content="订阅管理" position="top">
                                     <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
                                 </a-tooltip>
-                                <a-tooltip content="SIP 诊断捕获" position="top">
+                                <a-tooltip content="启动 SIP 诊断窗口" position="top">
                                     <button class="icon-btn small framed trace-capture" type="button" :disabled="traceCaptureStarting[item.id]" @click.stop="startDeviceTraceCapture(item)">
                                         <Loader2 v-if="traceCaptureStarting[item.id]" :size="13" class="spin" />
                                         <Activity v-else :size="13" />

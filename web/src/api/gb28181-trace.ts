@@ -12,6 +12,15 @@ export interface TraceHealth {
     dropped: number;
     lastError?: string;
     lastSuccessAt?: string;
+    currentGap?: TraceGap;
+    lastGap?: TraceGap;
+}
+
+export interface TraceGap {
+    startedAt: string;
+    endedAt?: string;
+    reason: string;
+    eventCount: number;
 }
 
 export interface TraceMessageSummary {
@@ -45,10 +54,13 @@ export interface TraceMessageQuery {
     from: string;
     to: string;
     deviceId?: string;
+    deviceIds?: string;
     callId?: string;
     direction?: TraceDirection;
     method?: string;
     statusCode?: number;
+    statusMin?: number;
+    statusMax?: number;
     cursor?: string;
     limit?: number;
 }
@@ -76,6 +88,7 @@ export interface TraceSessionQuery {
     from: string;
     to: string;
     deviceId?: string;
+    deviceIds?: string;
     callId?: string;
     anomaly?: boolean;
     limit?: number;
@@ -114,8 +127,10 @@ export const fetchTraceHealth = () =>
 export const listTraceMessages = (params: TraceMessageQuery) =>
     http.request<BaseResult<TraceMessagePage>>("get", baseUrlApi("gb28181/sip-traces/messages"), { params });
 
-export const getTraceMessage = (id: string) =>
-    http.request<BaseResult<TraceMessageDetail>>("get", baseUrlApi(`gb28181/sip-traces/messages/${id}`));
+export const getTraceMessage = (id: string, options: { sensitive?: boolean; purpose?: string } = {}) =>
+    http.request<BaseResult<TraceMessageDetail>>("get", baseUrlApi(`gb28181/sip-traces/messages/${id}`), {
+        params: { sensitive: options.sensitive ? "true" : undefined, purpose: options.purpose || undefined }
+    });
 
 export const listTraceSessions = (params: TraceSessionQuery) =>
     http.request<BaseResult<{ items: TraceSessionSummary[] }>>("get", baseUrlApi("gb28181/sip-traces/sessions"), { params });
