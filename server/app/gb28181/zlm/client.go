@@ -334,15 +334,16 @@ func (c *Client) GetSnap(ctx context.Context, streamURL string, timeoutSec, expi
 		return nil, fmt.Errorf("ZLM getSnap 读取响应失败: %w", err)
 	}
 
-	// 成功时 Content-Type 是 image/jpeg;失败时是 application/json envelope
+	// 成功时 Content-Type 是 image/jpeg 或 image/png(ZLM 抓帧失败时返回 PNG 占位图);
+	// 失败时是 application/json envelope
 	ct := resp.Header.Get("Content-Type")
-	if !isJPEGContentType(ct) {
+	if !isImageContentType(ct) {
 		// 尝试解析错误 envelope 给一条可读消息
 		var errResp baseResp
 		if json.Unmarshal(body, &errResp) == nil && errResp.Code != 0 {
 			return nil, fmt.Errorf("ZLM getSnap 返回错误: code=%d msg=%s", errResp.Code, errResp.Msg)
 		}
-		return nil, fmt.Errorf("ZLM getSnap 返回非 JPEG 内容: content-type=%s body=%.200s", ct, string(body))
+		return nil, fmt.Errorf("ZLM getSnap 返回非图片内容: content-type=%s body=%.200s", ct, string(body))
 	}
 	if len(body) == 0 {
 		return nil, fmt.Errorf("ZLM getSnap 返回空 body")
@@ -350,10 +351,11 @@ func (c *Client) GetSnap(ctx context.Context, streamURL string, timeoutSec, expi
 	return body, nil
 }
 
-// isJPEGContentType 宽松匹配 image/jpeg(允许后缀 charset 等)
-func isJPEGContentType(ct string) bool {
-	if len(ct) < len("image/jpeg") {
+// isImageContentType 宽松匹配 image/*(ZLM 抓帧失败会返回默认 PNG 占位图,也需要接受)
+func isImageContentType(ct string) bool {
+	const prefix = "image/"
+	if len(ct) < len(prefix) {
 		return false
 	}
-	return ct[:len("image/jpeg")] == "image/jpeg"
+	return ct[:len(prefix)] == prefix
 }

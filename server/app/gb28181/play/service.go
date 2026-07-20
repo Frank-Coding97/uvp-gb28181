@@ -222,7 +222,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	var client ZLM
 	var recvHost string
 	var rtpFallback int
-	var pickedNodeID int64 // 通道快照需要在 UpdateStream 之后按 nodeID 抓 —— 单节点路径为 0
+	var pickedNodeID int64 // 通道快照要按 nodeID 拿 ZLM 端口配置 —— 单节点路径为 0
 
 	if s.useMultiNode() {
 		pickedNode, err := s.picker.Pick(ctx, PickContext{
@@ -312,7 +312,6 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	}
 
 	// 7. 通道快照(fire-and-forget,不阻塞返回,不影响主链路)
-	//    用 nodeID 而不是 streamID lookup —— 单节点路径 nodeID=0,SnapshotService 内部按需处理
 	if s.snapshotSvc != nil {
 		nodeIDStr := ""
 		if pickedNodeID != 0 {
@@ -372,6 +371,7 @@ func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 		ExpireAt:   time.Now().Add(time.Duration(s.cfg.Media.StreamNoneReaderTimeout) * time.Second).Unix(),
 	}
 }
+
 
 // buildResult 旧版,deprecated 单节点路径用
 //

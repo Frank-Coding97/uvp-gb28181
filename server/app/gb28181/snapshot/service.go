@@ -14,20 +14,28 @@ type ZLMClient interface {
 }
 
 // GetClientFunc 按 nodeID 拿到 ZLM 客户端(多节点场景下 play.Service 已把
-// streamID 绑定到具体 nodeID,快照必须调回同一节点)
+// streamID 绑定到具体 nodeID,快照必须调回同一节点)。
+// 单节点场景传空串,实现可返回默认节点。
 type GetClientFunc func(nodeID string) (ZLMClient, error)
+
+// BuildStreamURLFunc 构造 ZLM 内部可拉流的 URL(供 getSnap 的 FFmpeg 拉流用)。
+//
+// 由 bootstrap 装配时注入:内部一般走 rtsp(比 http-flv 更稳),端口从 ServerConfigCache
+// 按 nodeID 拉 ZLM /index/api/getServerConfig 拿到 rtsp.port 后构造。
+type BuildStreamURLFunc func(ctx context.Context, nodeID, streamID string) (string, error)
 
 // Config 装配参数
 type Config struct {
-	UploadRoot  string        // upload 根目录(如 ./resource/public/uploads)
-	URLPrefix   string        // 前端可访问 URL 前缀(如 /uploads)
-	DedupTTL    time.Duration // 30s
-	DelayBefore time.Duration // 2s,给 ZLM 收流稳画面用
-	ZLMTimeout  int           // ZLM 抓帧超时秒(推荐 5)
-	ZLMExpire   int           // ZLM 缓存快照秒(推荐 30,跟 DedupTTL 对齐)
-	GetClient   GetClientFunc
-	Repo        Repo
-	Logger      *zap.Logger
+	UploadRoot     string             // upload 根目录(如 ./resource/public/uploads)
+	URLPrefix      string             // 前端可访问 URL 前缀(如 /uploads)
+	DedupTTL       time.Duration      // 30s
+	DelayBefore    time.Duration      // 2s,给 ZLM 收流稳画面用
+	ZLMTimeout     int                // ZLM 抓帧超时秒(推荐 5)
+	ZLMExpire      int                // ZLM 缓存快照秒(推荐 30,跟 DedupTTL 对齐)
+	GetClient      GetClientFunc      // 按 nodeID 拿 ZLM client
+	BuildStreamURL BuildStreamURLFunc // 按 nodeID + streamID 拼 ZLM 内部拉流 URL
+	Repo           Repo
+	Logger         *zap.Logger
 }
 
 // Service 通道快照服务:播放触发,fire-and-forget 抓帧落盘 + 更新通道行
@@ -68,9 +76,10 @@ func New(cfg Config) *Service {
 // FireAfterPlay 由 play.Service 在 WaitReady 之后 fire-and-forget 调。
 // 内部起 goroutine 异步抓帧,不阻塞调用方;任何失败都是 warn 级不 panic。
 //
-// streamURL: 完整流地址(如 http://host:port/app/stream.live.flv),ZLM getSnap 需要
+// nodeID:   多节点场景传 pickedNode.ID.string(),单节点传空串
+// streamID: ZLM 内部 stream 标识(通常 = ssrc)
 // s 为 nil 时安全跳过(方便 play.Service 未注入 snapshot 时零改动)。
-func (s *Service) FireAfterPlay(ctx context.Context, streamURL, deviceID, channelID string) {
+func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string) {
 	if s == nil {
 		return
 	}
@@ -88,7 +97,7 @@ func (s *Service) FireAfterPlay(ctx context.Context, streamURL, deviceID, channe
 					zap.String("device", deviceID), zap.String("channel", channelID))
 			}
 		}()
-		if err := s.doCapture(streamURL, deviceID, channelID); err != nil {
+		if err := s.doCapture(nodeID, streamID, deviceID, channelID); err != nil {
 			s.log.Warn("通道快照抓取失败",
 				zap.Error(err),
 				zap.String("device", deviceID), zap.String("channel", channelID))
@@ -104,12 +113,15 @@ func (s *Service) doCapture(nodeID, streamID, deviceID, channelID string) error 
 	if s.cfg.GetClient == nil {
 		return fmt.Errorf("snapshot: GetClient 未配置")
 	}
+	if s.cfg.BuildStreamURL == nil {
+		return fmt.Errorf("snapshot: BuildStreamURL 未配置")
+	}
 	client, err := s.cfg.GetClient(nodeID)
 	if err != nil {
 		return fmt.Errorf("拿 ZLM 客户端失败: %w", err)
 	}
 	if client == nil {
-		return fmt.Errorf("ZLM 客户端为 nil,node=%s", nodeID)
+		return fmt.Errorf("ZLM 客户端为 nil")
 	}
 
 	// ZLM 抓帧本身超时 cfg.ZLMTimeout 秒,外层再加 2 秒兜底
@@ -117,12 +129,17 @@ func (s *Service) doCapture(nodeID, streamID, deviceID, channelID string) error 
 		time.Duration(s.cfg.ZLMTimeout+2)*time.Second)
 	defer cancel()
 
-	bytes, err := client.GetSnap(ctx, streamID, s.cfg.ZLMTimeout, s.cfg.ZLMExpire)
+	streamURL, err := s.cfg.BuildStreamURL(ctx, nodeID, streamID)
+	if err != nil {
+		return fmt.Errorf("构造流 URL 失败: %w", err)
+	}
+
+	bytes, err := client.GetSnap(ctx, streamURL, s.cfg.ZLMTimeout, s.cfg.ZLMExpire)
 	if err != nil {
 		return fmt.Errorf("ZLM getSnap 失败: %w", err)
 	}
 	if len(bytes) == 0 {
-		return fmt.Errorf("ZLM 返回空 JPEG")
+		return fmt.Errorf("ZLM 返回空图片")
 	}
 
 	now := time.Now()

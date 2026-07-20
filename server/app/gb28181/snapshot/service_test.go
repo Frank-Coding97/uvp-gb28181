@@ -53,7 +53,10 @@ func newServiceForTest(t *testing.T, tmpDir string, client *fakeZLMClient, repo 
 		ZLMTimeout:  5,
 		ZLMExpire:   30,
 		GetClient:   func(nodeID string) (ZLMClient, error) { return client, nil },
-		Repo:        repo,
+		BuildStreamURL: func(ctx context.Context, nodeID, streamID string) (string, error) {
+			return "rtsp://mock/" + streamID, nil
+		},
+		Repo: repo,
 	})
 }
 
@@ -151,9 +154,12 @@ func TestService_DoCapture_EmptyBytesRejected(t *testing.T) {
 func TestService_DoCapture_NilClientLookup(t *testing.T) {
 	tmp := t.TempDir()
 	svc := New(Config{
-		UploadRoot: tmp,
-		GetClient:  func(nodeID string) (ZLMClient, error) { return nil, nil },
-		Repo:       &fakeRepo{},
+		UploadRoot:  tmp,
+		GetClient:   func(nodeID string) (ZLMClient, error) { return nil, nil },
+		BuildStreamURL: func(ctx context.Context, nodeID, streamID string) (string, error) {
+			return "rtsp://mock/" + streamID, nil
+		},
+		Repo:        &fakeRepo{},
 		DelayBefore: 10 * time.Millisecond,
 	})
 	err := svc.doCapture("node-1", "stream-1", "did", "cid")

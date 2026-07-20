@@ -219,8 +219,8 @@ func TestGetSnap_Success(t *testing.T) {
 		if q.Get("secret") != "test-secret" {
 			t.Errorf("secret 未透传: %s", q.Get("secret"))
 		}
-		if q.Get("stream") != "test-stream" {
-			t.Errorf("stream 未透传: %s", q.Get("stream"))
+		if q.Get("url") != "rtsp://host/rtp/test-stream" {
+			t.Errorf("url 未透传: %s", q.Get("url"))
 		}
 		if q.Get("timeout_sec") != "5" || q.Get("expire_sec") != "30" {
 			t.Errorf("timeout/expire 未透传: t=%s e=%s", q.Get("timeout_sec"), q.Get("expire_sec"))
@@ -230,7 +230,7 @@ func TestGetSnap_Success(t *testing.T) {
 	})
 	defer srv.Close()
 
-	got, err := c.GetSnap(context.Background(), "test-stream", 5, 30)
+	got, err := c.GetSnap(context.Background(), "rtsp://host/rtp/test-stream", 5, 30)
 	if err != nil {
 		t.Fatalf("GetSnap 报错: %v", err)
 	}
