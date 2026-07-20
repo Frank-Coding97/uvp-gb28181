@@ -203,8 +203,6 @@ const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
 const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
-const snapshotPreviewVisible = ref(false);
-const snapshotPreviewChannel = ref<ChannelVO | null>(null);
 const traceCaptureStarting = reactive<Record<number, boolean>>({});
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
@@ -866,10 +864,6 @@ function playChannel(record: ChannelVO) {
     controlConsoleChannel.value = record;
     controlConsoleVisible.value = true;
 }
-function openSnapshotPreview(record: ChannelVO) {
-    snapshotPreviewChannel.value = record;
-    snapshotPreviewVisible.value = true;
-}
 function isInteractiveDblclick(event: MouseEvent) {
     const target = event.target;
     return target instanceof Element && Boolean(target.closest("button, a, input, textarea, select, [role='button'], [role='combobox']"));
@@ -1425,9 +1419,15 @@ onUnmounted(() => {
                                 </a-table-column>
                                 <a-table-column title="快照" :width="120" align="center">
                                     <template #cell="{ record }">
-                                        <div v-if="record.snapshotUrl" class="thumb small">
-                                            <a-image :src="record.snapshotUrl" :width="100" :height="60" fit="cover" :preview="true" />
-                                        </div>
+                                        <a-image
+                                            v-if="record.snapshotUrl"
+                                            :src="record.snapshotUrl"
+                                            :width="100"
+                                            :height="60"
+                                            fit="cover"
+                                            :preview="true"
+                                            class="snapshot-thumb"
+                                        />
                                         <div v-else class="thumb small list-snapshot-empty">
                                             <Video :size="14" />
                                             <span>暂无快照</span>
@@ -1730,14 +1730,17 @@ onUnmounted(() => {
                             <template v-else>
                         <article v-for="item in channels" :key="item.id" class="device-card channel-summary-card" @dblclick="onChannelDblclick(item, $event)">
                             <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
-                                <a-image v-if="item.snapshotUrl" :src="item.snapshotUrl" :width="240" :height="135" fit="cover" :preview="false" />
+                                <a-image
+                                    v-if="item.snapshotUrl"
+                                    :src="item.snapshotUrl"
+                                    fit="cover"
+                                    :preview="true"
+                                    class="channel-snapshot-image"
+                                />
                                 <div v-else class="snapshot-empty">
                                     <Video :size="30" />
                                     <span>暂无快照</span>
                                 </div>
-                                <a-tooltip content="放大快照" position="top">
-                                    <button class="snapshot-detail" type="button" @click.stop="openSnapshotPreview(item)"><Eye :size="15" /></button>
-                                </a-tooltip>
                             </div>
                             <div class="channel-card-body">
                                 <a-tooltip :content="displayName(item)" position="top"><strong class="channel-card-title text-ellipsis">{{ displayName(item) }}</strong></a-tooltip>
@@ -1998,24 +2001,6 @@ onUnmounted(() => {
                 v-model:visible="controlConsoleVisible"
                 :channel="controlConsoleChannel"
             />
-
-            <a-modal
-                v-model:visible="snapshotPreviewVisible"
-                modal-class="uvp-system-dialog snapshot-preview-dialog"
-                title="通道快照"
-                :width="760"
-                :footer="false"
-                unmount-on-close
-            >
-                <div v-if="snapshotPreviewChannel" class="channel-snapshot snapshot-preview-stage">
-                    <a-image v-if="snapshotPreviewChannel.snapshotUrl" :src="snapshotPreviewChannel.snapshotUrl" :width="720" :height="405" fit="contain" :preview="false" />
-                    <div v-else class="snapshot-empty">
-                        <Video :size="48" />
-                        <strong>{{ displayName(snapshotPreviewChannel) }}</strong>
-                        <span>暂无快照</span>
-                    </div>
-                </div>
-            </a-modal>
 
             <a-modal
                 v-model:visible="statusEventVisible"
@@ -2645,6 +2630,11 @@ onUnmounted(() => {
 .thumb.small .placeholder {
     color: var(--uvp-text-tertiary);
 }
+/* 表格快照缩略图:100x60,arco a-image 自带 preview 弹层 */
+.snapshot-thumb :deep(.arco-image-img) {
+    border-radius: 4px;
+    cursor: zoom-in;
+}
 .list-snapshot-empty {
     display: inline-flex;
     flex-direction: column;
@@ -3166,7 +3156,22 @@ onUnmounted(() => {
     background-size: 16px 16px;
     opacity: 0.38;
 }
+/* 通道卡片快照:a-image 铺满 148px 容器,点击走 arco 内置 preview 弹层 */
+.channel-snapshot-image {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100% !important;
+    height: 100% !important;
+}
+.channel-snapshot-image :deep(.arco-image-img) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: zoom-in;
+}
 .channel-snapshot.offline { color: var(--uvp-text-tertiary); opacity: 0.72; }
+.channel-snapshot.offline .channel-snapshot-image :deep(.arco-image-img) { filter: grayscale(1); opacity: 0.6; }
 .snapshot-empty {
     position: relative;
     z-index: 1;
@@ -3176,38 +3181,6 @@ onUnmounted(() => {
     font-size: 12px;
 }
 .snapshot-empty svg { opacity: 0.7; }
-.snapshot-preview-stage {
-    height: min(58vh, 520px);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 8px;
-}
-.snapshot-preview-stage .snapshot-empty { gap: 8px; }
-.snapshot-preview-stage .snapshot-empty strong {
-    color: var(--uvp-text-primary);
-    font-size: 15px;
-    font-weight: 600;
-}
-.snapshot-detail {
-    position: absolute;
-    z-index: 1;
-    top: 9px;
-    right: 9px;
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    color: #fff;
-    background: rgb(15 23 42 / 72%);
-    border: 0;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: background 0.15s, transform 0.15s;
-}
-.snapshot-detail:hover {
-    background: var(--uvp-brand);
-    transform: translateY(-1px);
-}
 .channel-card-body {
     display: grid;
     gap: 10px;
