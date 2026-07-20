@@ -1423,9 +1423,12 @@ onUnmounted(() => {
                                         </a-tooltip>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="快照" :width="92" align="center">
-                                    <template #cell>
-                                        <div class="thumb small list-snapshot-empty">
+                                <a-table-column title="快照" :width="120" align="center">
+                                    <template #cell="{ record }">
+                                        <div v-if="record.snapshotUrl" class="thumb small">
+                                            <a-image :src="record.snapshotUrl" :width="100" :height="60" fit="cover" :preview="true" />
+                                        </div>
+                                        <div v-else class="thumb small list-snapshot-empty">
                                             <Video :size="14" />
                                             <span>暂无快照</span>
                                         </div>
@@ -1727,7 +1730,8 @@ onUnmounted(() => {
                             <template v-else>
                         <article v-for="item in channels" :key="item.id" class="device-card channel-summary-card" @dblclick="onChannelDblclick(item, $event)">
                             <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
-                                <div class="snapshot-empty">
+                                <a-image v-if="item.snapshotUrl" :src="item.snapshotUrl" :width="240" :height="135" fit="cover" :preview="false" />
+                                <div v-else class="snapshot-empty">
                                     <Video :size="30" />
                                     <span>暂无快照</span>
                                 </div>
@@ -2004,7 +2008,8 @@ onUnmounted(() => {
                 unmount-on-close
             >
                 <div v-if="snapshotPreviewChannel" class="channel-snapshot snapshot-preview-stage">
-                    <div class="snapshot-empty">
+                    <a-image v-if="snapshotPreviewChannel.snapshotUrl" :src="snapshotPreviewChannel.snapshotUrl" :width="720" :height="405" fit="contain" :preview="false" />
+                    <div v-else class="snapshot-empty">
                         <Video :size="48" />
                         <strong>{{ displayName(snapshotPreviewChannel) }}</strong>
                         <span>暂无快照</span>

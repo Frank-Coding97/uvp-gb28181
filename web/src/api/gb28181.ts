@@ -31,6 +31,10 @@ export interface GbChannel {
     parentId: string;
     status: number;
     streamId: string;
+    /** 通道最新快照 URL(相对路径 /public/gb-channel-snapshot/...);无为空字符串或 null */
+    snapshotUrl?: string | null;
+    /** 通道最新快照抓拍时间(ISO 8601);无为 null */
+    snapshotAt?: string | null;
 }
 
 export type DeviceListResult = BaseResult<{

@@ -124,6 +124,8 @@ export interface ChannelVO {
     status: number;
     streamId: string;
     streamTransport: string; // 流传输模式: UDP / TCP-Active / TCP-Passive
+    snapshotUrl?: string | null; // 最新快照 URL(相对路径 /public/gb-channel-snapshot/...)
+    snapshotAt?: string | null; // 最新快照抓拍时间(ISO 8601)
     createdAt: string;
     updatedAt: string;
 }
