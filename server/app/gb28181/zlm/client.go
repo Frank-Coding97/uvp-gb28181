@@ -297,3 +297,62 @@ func (c *Client) GetWorkThreadsLoad(ctx context.Context) (float64, error) {
 	}
 	return avgLoad(r.Data), nil
 }
+
+// GetSnap 从 ZLM /index/api/getSnap 抓取指定流的 JPEG 快照。
+//
+// 与其他 API 不同,getSnap 成功时直接返回 image/jpeg 二进制,失败时返回 JSON envelope,
+// 所以不复用 call()。
+//
+// timeoutSec: 单次抓帧的最长等待秒数(ZLM 侧),通常 5 秒
+// expireSec:  ZLM 本地缓存这张快照的秒数,建议跟 dedup TTL 对齐(30 秒)
+//
+// 返回 bytes 是完整 JPEG 内容(含 SOI 头 0xFF 0xD8 0xFF)。
+func (c *Client) GetSnap(ctx context.Context, streamID string, timeoutSec, expireSec int) ([]byte, error) {
+	q := url.Values{}
+	q.Set("secret", c.secret)
+	q.Set("stream", streamID)
+	q.Set("timeout_sec", strconv.Itoa(timeoutSec))
+	q.Set("expire_sec", strconv.Itoa(expireSec))
+
+	reqURL := c.baseURL + "/getSnap?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// 单独的 http.Client,timeout = timeoutSec + 5s 兜底,不复用 c.http(默认 10s)
+	httpClient := &http.Client{Timeout: time.Duration(timeoutSec+5) * time.Second}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("ZLM getSnap 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("ZLM getSnap 读取响应失败: %w", err)
+	}
+
+	// 成功时 Content-Type 是 image/jpeg;失败时是 application/json envelope
+	ct := resp.Header.Get("Content-Type")
+	if !isJPEGContentType(ct) {
+		// 尝试解析错误 envelope 给一条可读消息
+		var errResp baseResp
+		if json.Unmarshal(body, &errResp) == nil && errResp.Code != 0 {
+			return nil, fmt.Errorf("ZLM getSnap 返回错误: code=%d msg=%s", errResp.Code, errResp.Msg)
+		}
+		return nil, fmt.Errorf("ZLM getSnap 返回非 JPEG 内容: content-type=%s body=%.200s", ct, string(body))
+	}
+	if len(body) == 0 {
+		return nil, fmt.Errorf("ZLM getSnap 返回空 body")
+	}
+	return body, nil
+}
+
+// isJPEGContentType 宽松匹配 image/jpeg(允许后缀 charset 等)
+func isJPEGContentType(ct string) bool {
+	if len(ct) < len("image/jpeg") {
+		return false
+	}
+	return ct[:len("image/jpeg")] == "image/jpeg"
+}
