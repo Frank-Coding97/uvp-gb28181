@@ -16,7 +16,10 @@ const timeRange = computed(() => parseTimeRange(state.range));
 
 const records = ref<TraceRecord[]>([]);
 const loading = ref(false);
+const loadingMore = ref(false);
 const total = ref(0);
+const pageSize = 50;
+const hasMore = computed(() => records.value.length < total.value);
 
 const rows = computed(() =>
     records.value.map((r) => {
@@ -30,8 +33,14 @@ const rows = computed(() =>
     })
 );
 
-async function loadRecords() {
-    loading.value = true;
+async function loadRecords(reset = false) {
+    if (reset) {
+        loading.value = true;
+        records.value = [];
+    } else {
+        loadingMore.value = true;
+    }
+
     try {
         const resp = await fetchTraceRecords({
             startTime: timeRange.value?.start,
@@ -40,16 +49,27 @@ async function loadRecords() {
             callId: state.callId || undefined,
             direction: state.direction || undefined,
             method: state.method || undefined,
-            limit: 50,
-            offset: 0
+            limit: pageSize,
+            offset: reset ? 0 : records.value.length
         });
-        records.value = resp.records;
+
+        if (reset) {
+            records.value = resp.records;
+        } else {
+            records.value.push(...resp.records);
+        }
         total.value = resp.total;
     } catch (err) {
         Message.error("加载 trace 失败: " + (err instanceof Error ? err.message : String(err)));
     } finally {
         loading.value = false;
+        loadingMore.value = false;
     }
+}
+
+async function loadMore() {
+    if (!hasMore.value || loadingMore.value) return;
+    await loadRecords(false);
 }
 
 function copyRaw(record: TraceRecord) {
@@ -61,13 +81,13 @@ function copyRaw(record: TraceRecord) {
 }
 
 onMounted(() => {
-    loadRecords();
+    loadRecords(true);
 });
 
 watch(
     () => [state.range, state.deviceId, state.callId, state.direction, state.method],
     () => {
-        loadRecords();
+        loadRecords(true);
     },
     { deep: true }
 );
@@ -93,6 +113,11 @@ watch(
                     <a-tag size="small" class="trace-label">{{ row.label }}</a-tag>
                     <span class="trace-peer">{{ row.from }} → {{ row.to }}</span>
                     <span class="trace-call-id">{{ row.callId }}</span>
+                </div>
+                <div v-if="hasMore && !loading" class="load-more-container">
+                    <a-button :loading="loadingMore" size="small" @click="loadMore">
+                        加载更多 ({{ records.length }}/{{ total }})
+                    </a-button>
                 </div>
             </div>
         </a-spin>
@@ -156,6 +181,11 @@ watch(
 .trace-call-id {
     color: #9ca3af;
     font-size: 12px;
+}
+.load-more-container {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
 }
 .trace-footer {
     padding: 8px 12px;

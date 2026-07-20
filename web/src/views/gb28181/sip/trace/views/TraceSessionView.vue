@@ -30,6 +30,11 @@
                     </div>
                 </div>
             </div>
+            <div v-if="hasMore && !loading" class="load-more-container">
+                <a-button :loading="loadingMore" size="small" @click="loadMore">
+                    加载更多 ({{ allRecords.length }}/{{ total }})
+                </a-button>
+            </div>
         </div>
     </div>
 </template>
@@ -54,9 +59,14 @@ const emit = defineEmits<{
 }>();
 
 const loading = ref(false);
+const loadingMore = ref(false);
 const error = ref("");
 const allRecords = ref<TraceRecord[]>([]);
+const total = ref(0);
+const pageSize = 50;
 const expandedSessions = ref(new Set<string>());
+
+const hasMore = computed(() => allRecords.value.length < total.value);
 
 const sessions = computed<SessionGroup[]>(() => {
     const map = new Map<string, TraceRecord[]>();
@@ -72,9 +82,15 @@ const sessions = computed<SessionGroup[]>(() => {
         .sort((a, b) => b.records[0].ts - a.records[0].ts);
 });
 
-async function loadRecords() {
-    loading.value = true;
+async function loadRecords(reset = false) {
+    if (reset) {
+        loading.value = true;
+        allRecords.value = [];
+    } else {
+        loadingMore.value = true;
+    }
     error.value = "";
+
     try {
         const timeRange = parseTimeRange(state.range);
         if (!timeRange) {
@@ -87,14 +103,28 @@ async function loadRecords() {
             deviceId: state.deviceId,
             callId: state.callId,
             direction: state.direction || undefined,
-            method: state.method
+            method: state.method,
+            limit: pageSize,
+            offset: reset ? 0 : allRecords.value.length
         });
-        allRecords.value = response.records;
+
+        if (reset) {
+            allRecords.value = response.records;
+        } else {
+            allRecords.value.push(...response.records);
+        }
+        total.value = response.total;
     } catch (err) {
         error.value = err instanceof Error ? err.message : "加载失败";
     } finally {
         loading.value = false;
+        loadingMore.value = false;
     }
+}
+
+async function loadMore() {
+    if (!hasMore.value || loadingMore.value) return;
+    await loadRecords(false);
 }
 
 function toggleSession(callId: string) {
@@ -143,13 +173,13 @@ function copyRaw(record: TraceRecord) {
 watch(
     () => [state.range, state.deviceId, state.callId, state.direction, state.method],
     () => {
-        loadRecords();
+        loadRecords(true);
     },
     { deep: true }
 );
 
 onMounted(() => {
-    loadRecords();
+    loadRecords(true);
 });
 </script>
 
@@ -351,5 +381,11 @@ body[arco-theme='dark'] {
             color: #9ca3af;
         }
     }
+}
+
+.load-more-container {
+    display: flex;
+    justify-content: center;
+    padding: 16px 0;
 }
 </style>
