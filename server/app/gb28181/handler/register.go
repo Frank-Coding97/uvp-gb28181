@@ -102,7 +102,32 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
-	// 第一步:无 Authorization → 回 401 挑战
+	// 严格校验:平台 ServerID。国标设备在两个位置标识"上级平台编码":
+	//   1. Request-URI 的 userpart(GB28181 行业惯例:sip:<serverID>@<host>)
+	//   2. To header 的 userpart(RFC 3261 § 10.2 要求 To.uri 就是 AOR)
+	// RFC 3261 允许 REGISTER 的 Request-URI 不带 userpart,只有 To 是可靠来源;
+	// 但反过来 GB28181 设备总会在 To 里带上级平台编码。因此策略:
+	//   - 若 Request-URI userpart 非空 → 必须等于 ServerID;
+	//   - 否则(标准 RFC 客户端)→ 回退到 To header userpart,要求等于 ServerID。
+	// 若设备侧配置错服务器 ID,即使 IP/端口/密码都对,放行会造成"假在线"
+	//(平台后续下行的 Catalog/DeviceInfo/INVITE 因 From userpart 不匹配全部被设备拒绝)。
+	claimedServerID := req.Recipient.User
+	if claimedServerID == "" {
+		if to := req.To(); to != nil {
+			claimedServerID = to.Address.User
+		}
+	}
+	if claimedServerID != h.cfg.SIP.ServerID {
+		app.ZapLog.Warn("GB28181 注册拒绝:上级平台编码与平台 ServerID 不匹配",
+			zap.String("deviceId", deviceID),
+			zap.String("gotServerId", claimedServerID),
+			zap.String("wantServerId", h.cfg.SIP.ServerID))
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Server ID mismatch", nil))
+		h.recordEnd(req, 403, false)
+		return
+	}
+
+	// 第二步:无 Authorization → 回 401 挑战 digest
 	authHeader := req.GetHeader("Authorization")
 	if authHeader == nil {
 		chal := digest.Challenge{
@@ -118,7 +143,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 
-	// 第二步:校验 digest(统一接入密码)
+	// 第三步:校验 digest(统一接入密码)
 	cred, err := digest.ParseCredentials(authHeader.Value())
 	if err != nil {
 		_ = tx.Respond(sip.NewResponseFromRequest(req, 400, "Bad credentials", nil))

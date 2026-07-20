@@ -89,9 +89,21 @@ func startTestServer(t *testing.T, cfg gbconfig.Config) func() {
 	}
 }
 
-// doRegister 模拟设备两步注册,返回最终状态码
-// password 错误可触发鉴权失败;expires=0 触发注销
+// 平台国标编码,和 testCfg().SIP.ServerID 保持一致。
+// 真实 GB28181 设备把 REGISTER 的 Request-URI userpart 设成"上级平台编码",
+// 测试也照此模拟,避免测试用例与协议行为脱节。
+const testServerID = "34020000002000000001"
+
+// doRegister 模拟设备两步注册,返回最终状态码。
+// Request-URI userpart 用平台 serverID(见 testServerID),模拟真实设备行为。
+// password 错误可触发鉴权失败;expires=0 触发注销。
 func doRegister(t *testing.T, deviceID, password string, expires int) int {
+	return doRegisterWithServerID(t, deviceID, testServerID, password, expires)
+}
+
+// doRegisterWithServerID 允许显式覆盖 Request-URI userpart(平台 serverID),
+// 用于验证"设备侧配置错服务器 ID"这类负面场景。
+func doRegisterWithServerID(t *testing.T, deviceID, serverID, password string, expires int) int {
 	// UA 名设为 deviceID,使 sipgo 构造的 From.user = 国标编码(模拟真实设备)
 	ua, _ := sipgo.NewUA(sipgo.WithUserAgent(deviceID))
 	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
@@ -101,7 +113,7 @@ func doRegister(t *testing.T, deviceID, password string, expires int) int {
 	defer client.Close()
 
 	recipient := sip.Uri{}
-	sip.ParseUri("sip:"+deviceID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	sip.ParseUri("sip:"+serverID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
 	req := sip.NewRequest(sip.REGISTER, recipient)
 	req.AppendHeader(sip.NewHeader("Contact", "<sip:"+deviceID+"@127.0.0.1>"))
 	req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
@@ -118,7 +130,7 @@ func doRegister(t *testing.T, deviceID, password string, expires int) int {
 		t.Fatal("首次无响应")
 	}
 	if res.StatusCode != 401 {
-		return int(res.StatusCode) // 未挑战,直接返回
+		return int(res.StatusCode) // 未挑战,直接返回(如 403 serverID 拒绝)
 	}
 
 	// 解析挑战,带 Authorization 重发
@@ -161,7 +173,7 @@ func TestRegisterChallenge(t *testing.T) {
 	client, _ := sipgo.NewClient(ua, sipgo.WithClientHostname("127.0.0.1"))
 	defer client.Close()
 	recipient := sip.Uri{}
-	sip.ParseUri("sip:"+testDeviceID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
+	sip.ParseUri("sip:"+testServerID+"@127.0.0.1:"+strconv.Itoa(testSIPPort), &recipient)
 	req := sip.NewRequest(sip.REGISTER, recipient)
 	req.AppendHeader(sip.NewHeader("Contact", "<sip:"+testDeviceID+"@127.0.0.1>"))
 	req.SetTransport("UDP")
@@ -173,6 +185,29 @@ func TestRegisterChallenge(t *testing.T) {
 	}
 	if res.GetHeader("WWW-Authenticate") == nil {
 		t.Error("401 响应缺少 WWW-Authenticate 头")
+	}
+}
+
+// TestRegisterWrongServerID 严格模式:Request-URI userpart 与平台 ServerID 不匹配
+// → 403 "Server ID mismatch",不发 401 挑战,不建档。
+// 覆盖"设备侧填错平台国标编码"这种排查困难的假在线场景。
+func TestRegisterWrongServerID(t *testing.T) {
+	setupEnv(t)
+	const did = "34020000001320000090"
+	cleanupDevice(did)
+	defer cleanupDevice(did)
+	stop := startTestServer(t, testCfg())
+	defer stop()
+
+	// 设备错把上级平台编码填成另一台平台的 serverID
+	const wrongServerID = "34020000002000000099"
+	code := doRegisterWithServerID(t, did, wrongServerID, testPassword, 3600)
+	if code != 403 {
+		t.Fatalf("错误 serverID 期望 403,实际 %d", code)
+	}
+	d, _ := gbmodels.FindByDeviceID(context.Background(), did)
+	if d != nil {
+		t.Errorf("serverID 不匹配不应建档,但查到 %+v", d)
 	}
 }
 
