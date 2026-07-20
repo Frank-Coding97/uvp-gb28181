@@ -16,6 +16,7 @@
                         v-for="record in session.records"
                         :key="record.id"
                         class="record-row"
+                        @click="emit('select', record)"
                         @contextmenu.prevent="copyRaw(record)"
                     >
                         <span class="timestamp">{{ formatTimestamp(record.ts) }}</span>
@@ -47,6 +48,10 @@ interface SessionGroup {
 }
 
 const { state } = useTraceFilters();
+
+const emit = defineEmits<{
+    select: [record: TraceRecord];
+}>();
 
 const loading = ref(false);
 const error = ref("");
@@ -229,11 +234,11 @@ onMounted(() => {
     padding: 8px 12px 8px 38px;
     border-top: 1px solid #f2f3f5;
     font-size: 13px;
-    cursor: context-menu;
+    cursor: pointer;
     transition: background 0.2s;
 
     &:hover {
-        background: #f7f8fa;
+        background: rgba(var(--primary-6), 0.08);
     }
 
     .timestamp {

@@ -5,12 +5,15 @@ import { RefreshCw } from "lucide-vue-next";
 import { useTraceFilters } from "./composables/useTraceFilters";
 import { useTraceHealth } from "./composables/useTraceHealth";
 import type { WorkbenchView } from "./composables/traceFilterTypes";
+import type { TraceRecord } from "./api/traceApi";
 import TraceTextView from "./views/TraceTextView.vue";
 import TraceSessionView from "./views/TraceSessionView.vue";
+import TraceDetailPanel from "./components/TraceDetailPanel.vue";
 
 const router = useRouter();
 const { state, setView } = useTraceFilters();
 const { health, loading: healthLoading, refresh: refreshHealth } = useTraceHealth();
+const selectedRecord = ref<TraceRecord | null>(null);
 
 const healthLabel = computed(
     () =>
@@ -90,12 +93,15 @@ onMounted(() => {
 
             <main v-if="canQuery" class="trace-workspace">
                 <section class="view-active" data-testid="active-view">
-                    <TraceTextView v-if="state.view === 'text'" />
-                    <TraceSessionView v-else-if="state.view === 'session'" />
+                    <TraceTextView v-if="state.view === 'text'" @select="selectedRecord = $event" />
+                    <TraceSessionView v-else-if="state.view === 'session'" @select="selectedRecord = $event" />
                     <template v-else-if="state.view === 'matrix'">
                         <a-empty description="通信矩阵视图(T-6 落地)" />
                     </template>
                 </section>
+                <aside class="detail-panel">
+                    <TraceDetailPanel :record="selectedRecord" />
+                </aside>
             </main>
             <main v-else class="trace-workspace">
                 <a-empty description="SIP Trace 未启用,查询暂不可用">
@@ -158,13 +164,19 @@ onMounted(() => {
     flex: 1;
     min-height: 0;
     display: flex;
-    flex-direction: column;
+    gap: 12px;
 }
 .view-active {
     flex: 1;
     min-height: 0;
     display: flex;
     flex-direction: column;
+}
+.detail-panel {
+    width: 400px;
+    flex-shrink: 0;
+    border-left: 1px solid #e5e6eb;
+    overflow: hidden;
 }
 .view-placeholder {
     flex: 1;

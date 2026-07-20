@@ -8,6 +8,10 @@ import { parseTimeRange } from "../composables/traceFilterTypes";
 
 const { state } = useTraceFilters();
 
+const emit = defineEmits<{
+    select: [record: TraceRecord];
+}>();
+
 const timeRange = computed(() => parseTimeRange(state.range));
 
 const records = ref<TraceRecord[]>([]);
@@ -73,7 +77,13 @@ watch(
     <div class="trace-text-view">
         <a-spin :loading="loading" class="trace-spin">
             <div class="trace-scroll-container">
-                <div v-for="row in rows" :key="row.id" class="trace-row" @contextmenu.prevent="copyRaw(row)">
+                <div
+                    v-for="row in rows"
+                    :key="row.id"
+                    class="trace-row"
+                    @click="emit('select', row)"
+                    @contextmenu.prevent="copyRaw(row)"
+                >
                     <span class="trace-ts">{{ row.timestamp }}</span>
                     <a-tag :color="row.direction === 'inbound' ? 'blue' : 'green'" size="small">
                         {{ row.direction === "inbound" ? "←" : "→" }}
@@ -116,10 +126,10 @@ watch(
     font-size: 13px;
     font-family: "SF Mono", Monaco, monospace;
     border-bottom: 1px solid #e5e7eb;
-    cursor: context-menu;
+    cursor: pointer;
 }
 .trace-row:hover {
-    background: rgba(var(--primary-6), 0.05);
+    background: rgba(var(--primary-6), 0.08);
 }
 .trace-ts {
     color: #6b7280;
