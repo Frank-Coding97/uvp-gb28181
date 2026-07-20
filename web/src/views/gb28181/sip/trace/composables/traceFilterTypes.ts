@@ -7,13 +7,16 @@ export interface TraceFiltersState {
     view: WorkbenchView;
     range: [string, string];
     deviceId: string;
+    deviceIds: string[];
     direction: Direction;
     method: string;
     statusCode: string;
+    statusCodeRange: string;
     callId: string;
     captureId: string;
     captureEndsAt: string;
     searchKeyword: string;
+    anomalyOnly: boolean;
 }
 
 export interface TimeRange {
@@ -62,17 +65,27 @@ export function parseQuery(query: Record<string, unknown>, now = dayjs()): Trace
 
     const strFrom = (key: string) => (typeof query[key] === "string" ? (query[key] as string) : "");
 
+    // Parse deviceIds from comma-separated string
+    const deviceIdsStr = strFrom("deviceIds");
+    const deviceIds = deviceIdsStr ? deviceIdsStr.split(",").filter(Boolean) : [];
+
+    // Parse anomalyOnly boolean
+    const anomalyOnly = query.anomalyOnly === "true" || query.anomalyOnly === true;
+
     return {
         view,
         range,
         deviceId: strFrom("deviceId"),
+        deviceIds,
         direction,
         method: strFrom("method"),
         statusCode: strFrom("statusCode"),
+        statusCodeRange: strFrom("statusCodeRange"),
         callId: strFrom("callId"),
         captureId: strFrom("captureId"),
         captureEndsAt: strFrom("captureEndsAt"),
-        searchKeyword: strFrom("searchKeyword")
+        searchKeyword: strFrom("searchKeyword"),
+        anomalyOnly
     };
 }
 
@@ -81,12 +94,15 @@ export function toQuery(state: TraceFiltersState): Record<string, string> {
     if (state.range[0]) q.from = state.range[0];
     if (state.range[1]) q.to = state.range[1];
     if (state.deviceId) q.deviceId = state.deviceId;
+    if (state.deviceIds && state.deviceIds.length > 0) q.deviceIds = state.deviceIds.join(",");
     if (state.direction) q.direction = state.direction;
     if (state.method) q.method = state.method;
     if (state.statusCode) q.statusCode = state.statusCode;
+    if (state.statusCodeRange) q.statusCodeRange = state.statusCodeRange;
     if (state.callId) q.callId = state.callId;
     if (state.captureId) q.captureId = state.captureId;
     if (state.captureEndsAt) q.captureEndsAt = state.captureEndsAt;
     if (state.searchKeyword) q.searchKeyword = state.searchKeyword;
+    if (state.anomalyOnly) q.anomalyOnly = "true";
     return q;
 }

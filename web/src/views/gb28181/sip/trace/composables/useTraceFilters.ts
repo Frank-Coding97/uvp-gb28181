@@ -1,6 +1,6 @@
 import { reactive, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { parseQuery, toQuery, type TraceFiltersState, type WorkbenchView } from "./traceFilterTypes";
+import { parseQuery, toQuery, type TraceFiltersState, type WorkbenchView, type Direction } from "./traceFilterTypes";
 
 /**
  * useTraceFilters
@@ -32,14 +32,37 @@ export function useTraceFilters() {
         state.searchKeyword = keyword;
     }
 
+    function setDeviceIds(deviceIds: string[]) {
+        state.deviceIds = deviceIds;
+    }
+
+    function setDirection(direction: string) {
+        state.direction = direction as Direction;
+    }
+
+    function setMethod(method: string) {
+        state.method = method;
+    }
+
+    function setStatusCodeRange(range: string) {
+        state.statusCodeRange = range;
+    }
+
+    function setAnomalyOnly(anomalyOnly: boolean) {
+        state.anomalyOnly = anomalyOnly;
+    }
+
     function reset() {
         state.deviceId = "";
+        state.deviceIds = [];
         state.direction = "";
         state.method = "";
         state.statusCode = "";
+        state.statusCodeRange = "";
         state.callId = "";
         state.searchKeyword = "";
+        state.anomalyOnly = false;
     }
 
-    return { state, setView, setSearchKeyword, reset };
+    return { state, setView, setSearchKeyword, setDeviceIds, setDirection, setMethod, setStatusCodeRange, setAnomalyOnly, reset };
 }

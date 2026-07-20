@@ -9,6 +9,7 @@ import type { TraceRecord } from "./api/traceApi";
 import TraceTextView from "./views/TraceTextView.vue";
 import TraceSessionView from "./views/TraceSessionView.vue";
 import TraceDetailPanel from "./components/TraceDetailPanel.vue";
+import TraceFiltersBar from "./TraceFiltersBar.vue";
 
 const router = useRouter();
 const { state, setView, setSearchKeyword } = useTraceFilters();
@@ -108,6 +109,8 @@ onMounted(() => {
                 <span>设备诊断捕获进行中</span>
                 <span v-if="state.captureEndsAt" class="status-detail">预计结束 {{ state.captureEndsAt }}</span>
             </div>
+
+            <TraceFiltersBar v-if="canQuery" />
 
             <main v-if="canQuery" class="trace-workspace">
                 <section class="view-active" data-testid="active-view">
