@@ -65,7 +65,7 @@ func testCfg() gbconfig.Config {
 	return gbconfig.Config{
 		Enabled: true,
 		SIP: gbconfig.SIPConfig{
-			IP: "127.0.0.1", Port: testSIPPort, Transport: []string{"udp"},
+			ListenIP: "127.0.0.1", AdvertiseIP: "127.0.0.1", Port: testSIPPort, Transport: []string{"udp"},
 			Domain: "3402000000", ServerID: "34020000002000000001", Password: testPassword,
 		},
 		Device: gbconfig.DeviceConfig{KeepaliveInterval: 60, KeepaliveTimeoutCount: 3, OfflineScanInterval: 30},

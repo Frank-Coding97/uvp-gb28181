@@ -1154,6 +1154,49 @@ CREATE TABLE [sys_param] (
 CREATE UNIQUE INDEX [idx_sys_param_code] ON [sys_param] ([code]);
 CREATE INDEX [idx_sys_param_deleted_at] ON [sys_param] ([deleted_at]);
 
+-- SIP first-install setup (full install: pending)
+IF OBJECT_ID('gb_sip_config', 'U') IS NOT NULL DROP TABLE [gb_sip_config];
+IF OBJECT_ID('system_installation', 'U') IS NOT NULL DROP TABLE [system_installation];
+
+CREATE TABLE [system_installation] (
+    [id] SMALLINT NOT NULL,
+    [instance_id] NVARCHAR(36) NOT NULL CONSTRAINT [df_system_installation_instance_id] DEFAULT '',
+    [onboarding_version] INT NOT NULL CONSTRAINT [df_system_installation_version] DEFAULT 1,
+    [sip_onboarding_status] NVARCHAR(16) NOT NULL CONSTRAINT [df_system_installation_status] DEFAULT 'pending',
+    [sip_onboarding_finished_at] DATETIME NULL,
+    [created_at] DATETIME NOT NULL CONSTRAINT [df_system_installation_created_at] DEFAULT GETDATE(),
+    [updated_at] DATETIME NOT NULL CONSTRAINT [df_system_installation_updated_at] DEFAULT GETDATE(),
+    CONSTRAINT [pk_system_installation] PRIMARY KEY ([id]),
+    CONSTRAINT [chk_system_installation_singleton] CHECK ([id] = 1),
+    CONSTRAINT [chk_system_installation_sip_status] CHECK (
+        [sip_onboarding_status] IN ('pending', 'completed', 'skipped', 'legacy')
+    )
+);
+
+CREATE TABLE [gb_sip_config] (
+    [id] SMALLINT NOT NULL,
+    [deployment_mode] NVARCHAR(8) NOT NULL,
+    [listen_ip] NVARCHAR(45) NOT NULL,
+    [advertise_ip] NVARCHAR(45) NOT NULL,
+    [advertise_ip_inferred] BIT NOT NULL CONSTRAINT [df_gb_sip_config_advertise_ip_inferred] DEFAULT 0,
+    [port] INT NOT NULL,
+    [domain] NVARCHAR(10) NOT NULL,
+    [server_id] NVARCHAR(20) NOT NULL,
+    [password] NVARCHAR(255) NOT NULL,
+    [created_at] DATETIME NOT NULL CONSTRAINT [df_gb_sip_config_created_at] DEFAULT GETDATE(),
+    [updated_at] DATETIME NOT NULL CONSTRAINT [df_gb_sip_config_updated_at] DEFAULT GETDATE(),
+    CONSTRAINT [pk_gb_sip_config] PRIMARY KEY ([id]),
+    CONSTRAINT [chk_gb_sip_config_singleton] CHECK ([id] = 1),
+    CONSTRAINT [chk_gb_sip_config_deployment_mode] CHECK ([deployment_mode] IN ('lan', 'public')),
+    CONSTRAINT [chk_gb_sip_config_port] CHECK ([port] BETWEEN 1 AND 65535)
+);
+
+INSERT INTO [system_installation] (
+    [id], [instance_id], [onboarding_version], [sip_onboarding_status],
+    [sip_onboarding_finished_at], [created_at], [updated_at]
+)
+VALUES (1, '', 1, 'pending', NULL, GETDATE(), GETDATE());
+
 -- 创建索引
 CREATE INDEX [sys_jobs_idx_group] ON [sys_jobs] ([group]);
 CREATE INDEX [sys_jobs_idx_status] ON [sys_jobs] ([status]);
@@ -1216,3 +1259,29 @@ WHERE [id] IN (
 );
 
 SET NOCOUNT OFF;
+
+-- SIP setup API, UI permissions and administrator policies.
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
+(217,N'读取 SIP 配置状态','/api/gb28181/sip/setup/status','GET',N'GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(218,N'读取本机网络接口','/api/gb28181/sip/setup/network-interfaces','GET',N'GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(219,N'读取 SIP 平台信息','/api/gb28181/sip/platform','GET',N'GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(220,N'保存 SIP 配置','/api/gb28181/sip/setup/config','PUT',N'GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(221,N'暂缓 SIP 配置','/api/gb28181/sip/setup/skip','POST',N'GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[type],[permission],[created_at],[updated_at],[created_by]) VALUES
+(140359,140355,'','','',N'查看 SIP 配置',1,3,'gb28181:sip:config:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
+(140360,140355,'','','',N'修改 SIP 配置',1,3,'gb28181:sip:config:update',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140359),(1,140360);
+INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES
+(140359,217),(140359,218),(140359,219),(140360,220),(140360,221);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
+(7561,'p','role_1','/api/gb28181/sip/setup/status','GET','*','',''),
+(7562,'p','role_1','/api/gb28181/sip/setup/network-interfaces','GET','*','',''),
+(7563,'p','role_1','/api/gb28181/sip/platform','GET','*','',''),
+(7564,'p','role_1','/api/gb28181/sip/setup/config','PUT','*','',''),
+(7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;

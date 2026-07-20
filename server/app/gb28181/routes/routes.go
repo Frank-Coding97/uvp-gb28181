@@ -34,6 +34,8 @@ var dashboardController = gbcontrollers.NewDashboardController(nil)
 // platformController 本级 SIP 平台接入信息(只读配置)
 var platformController = gbcontrollers.NewPlatformController()
 
+var setupController *gbcontrollers.SetupController
+
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
 var zlmNodeController *gbcontrollers.ZLMNodeController
 
@@ -46,6 +48,12 @@ var zlmSchedulerController *gbcontrollers.ZLMSchedulerController
 // SetMetricsProvider 由 bootstrap 注入聚合器获取函数,绕开循环依赖
 func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 	dashboardController = gbcontrollers.NewDashboardController(p)
+}
+
+func SetSetupController(controller *gbcontrollers.SetupController) { setupController = controller }
+
+func SetPlatformController(controller *gbcontrollers.PlatformController) {
+	platformController = controller
 }
 
 // SetPlayService 由 bootstrap 注入 play service(routes 包先于 service 实例化,故需后置注入)
@@ -124,7 +132,14 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			sipGroup.GET("/snapshot", func(c *gin.Context) { dashboardController.Snapshot(c) })
 			sipGroup.GET("/stream", func(c *gin.Context) { dashboardController.Stream(c) })
 		}
-		gb.GET("/sip/platform", platformController.Info)
+		gb.GET("/sip/platform", func(c *gin.Context) { platformController.Info(c) })
+		setup := gb.Group("/sip/setup")
+		{
+			setup.GET("/status", setupRoute(func(controller *gbcontrollers.SetupController, c *gin.Context) { controller.Status(c) }))
+			setup.GET("/network-interfaces", setupRoute(func(controller *gbcontrollers.SetupController, c *gin.Context) { controller.NetworkInterfaces(c) }))
+			setup.PUT("/config", setupRoute(func(controller *gbcontrollers.SetupController, c *gin.Context) { controller.SaveConfig(c) }))
+			setup.POST("/skip", setupRoute(func(controller *gbcontrollers.SetupController, c *gin.Context) { controller.Skip(c) }))
+		}
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
 		{
@@ -196,6 +211,16 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/anomaly/:id/resolve", anomalyController.Resolve)
 			dmgmt.POST("/anomaly/batch-resolve", anomalyController.BatchResolve)
 		}
+	}
+}
+
+func setupRoute(fn func(*gbcontrollers.SetupController, *gin.Context)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if setupController == nil {
+			c.JSON(503, gin.H{"code": 503, "msg": "SIP 配置服务尚未装配"})
+			return
+		}
+		fn(setupController, c)
 	}
 }
 

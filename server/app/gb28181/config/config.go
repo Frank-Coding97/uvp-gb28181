@@ -29,12 +29,13 @@ type MediaConfig struct {
 
 // SIPConfig SIP 服务配置
 type SIPConfig struct {
-	IP        string
-	Port      int
-	Transport []string // 信令传输: udp / tcp
-	Domain    string   // SIP 域(前 10 位行政区划)
-	ServerID  string   // 平台国标编码(20 位)
-	Password  string   // 统一接入密码
+	ListenIP    string
+	AdvertiseIP string
+	Port        int
+	Transport   []string // 信令传输: udp / tcp
+	Domain      string   // SIP 域(前 10 位行政区划)
+	ServerID    string   // 平台国标编码(20 位)
+	Password    string   // 统一接入密码
 }
 
 // DeviceConfig 设备相关配置
@@ -48,15 +49,21 @@ type DeviceConfig struct {
 // Load 从全局 ConfigYml 读取 gb28181 配置
 func Load() Config {
 	c := app.ConfigYml
+	listenIP := c.GetString("gb28181.sip.ip")
+	advertiseIP := c.GetString("gb28181.sip.advertiseip")
+	if advertiseIP == "" && listenIP != "0.0.0.0" {
+		advertiseIP = listenIP
+	}
 	return Config{
 		Enabled: c.GetBool("gb28181.enabled"),
 		SIP: SIPConfig{
-			IP:        c.GetString("gb28181.sip.ip"),
-			Port:      c.GetInt("gb28181.sip.port"),
-			Transport: c.GetStringSlice("gb28181.sip.transport"),
-			Domain:    c.GetString("gb28181.sip.domain"),
-			ServerID:  c.GetString("gb28181.sip.serverid"),
-			Password:  c.GetString("gb28181.sip.password"),
+			ListenIP:    listenIP,
+			AdvertiseIP: advertiseIP,
+			Port:        c.GetInt("gb28181.sip.port"),
+			Transport:   c.GetStringSlice("gb28181.sip.transport"),
+			Domain:      c.GetString("gb28181.sip.domain"),
+			ServerID:    c.GetString("gb28181.sip.serverid"),
+			Password:    c.GetString("gb28181.sip.password"),
 		},
 		Device: DeviceConfig{
 			KeepaliveInterval:     c.GetInt("gb28181.device.keepalive_interval"),

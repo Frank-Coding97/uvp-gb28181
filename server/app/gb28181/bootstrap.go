@@ -2,6 +2,7 @@ package gb28181
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
@@ -15,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
+	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
@@ -91,8 +93,25 @@ func (a schedulerLogRepoAdapter) PruneOlderThan(ctx context.Context, t time.Time
 	return a.inner.PruneOlderThan(ctx, t)
 }
 
+var ErrSIPUnconfigured = errors.New("SIP configuration is missing")
+
+type sipRuntimeServer interface {
+	SetRecorder(metrics.Recorder)
+	SetErrorHandler(func(error))
+	Start() error
+	UAC() *uac.UAC
+	Shutdown(context.Context) error
+}
+
+type sipRuntimeFactory func(gbconfig.Config) (sipRuntimeServer, error)
+
 // sipServer 持有全局 SIP 服务实例,供优雅关闭引用
-var sipServer *gbsip.Server
+var sipServer sipRuntimeServer
+
+var sipRuntimeStatus = gbsetup.NewRuntimeStatus()
+
+// SIPRuntimeStatus exposes the current SIP runtime state to setup controllers.
+func SIPRuntimeStatus() *gbsetup.RuntimeStatus { return sipRuntimeStatus }
 
 // subscriptionService and subscriptionScheduler share the SIP UAC lifecycle.
 var subscriptionService *subscribe.Service
@@ -150,33 +169,153 @@ func ZLMRegistry() *node.Registry { return zlmRegistry }
 // 可能为 nil:DB 不可达或 Switch 全部失败时
 func ZLMScheduler() *gbzlmsched.Manager { return zlmScheduler }
 
+func applyEffectiveSIPConfig(base gbconfig.Config, effective gbsetup.EffectiveSIPConfig) (gbconfig.Config, error) {
+	if effective.Source == gbsetup.ConfigSourceMissing {
+		return base, ErrSIPUnconfigured
+	}
+	password := effective.Password
+	request := gbsetup.SaveSIPConfigRequest{
+		DeploymentMode: effective.DeploymentMode,
+		ListenIP:       effective.ListenIP,
+		AdvertiseIP:    effective.AdvertiseIP,
+		Port:           effective.Port,
+		Domain:         effective.Domain,
+		ServerID:       effective.ServerID,
+		Password:       &password,
+	}
+	if err := gbsetup.ValidateSIPConfigRequest(request, false); err != nil {
+		return base, err
+	}
+	transports := effective.Transport
+	if len(transports) == 0 {
+		transports = []string{"udp", "tcp"}
+	}
+	base.SIP = gbconfig.SIPConfig{
+		ListenIP:    effective.ListenIP,
+		AdvertiseIP: effective.AdvertiseIP,
+		Port:        effective.Port,
+		Transport:   transports,
+		Domain:      effective.Domain,
+		ServerID:    effective.ServerID,
+		Password:    effective.Password,
+	}
+	return base, nil
+}
+
+func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbsetup.RuntimeStatus, factory sipRuntimeFactory) (sipRuntimeServer, error) {
+	status.MarkStarting()
+	server, err := factory(cfg)
+	if err != nil {
+		status.MarkFailed(err.Error())
+		return nil, err
+	}
+	server.SetRecorder(recorder)
+	server.SetErrorHandler(func(err error) {
+		status.MarkFailed(err.Error())
+	})
+	if err := server.Start(); err != nil {
+		status.MarkFailed(err.Error())
+		return nil, err
+	}
+	status.MarkRunning()
+	return server, nil
+}
+
+func startControlPlane(cfg gbconfig.Config) {
+	setupCivilCodeService()
+	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil))
+	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
+		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
+	))
+
+	metricsAgg = metrics.NewAggregator()
+	metricsCleanupStop = make(chan struct{})
+	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
+	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
+
+	setupZLMRegistry(cfg)
+	setupZLMScheduler()
+	setupZLMSchedulerLog()
+	setupZLMSchedulerController()
+
+	if zlmRegistry != nil {
+		adapter := gbzlm.NewServiceAdapter(cfg.Media)
+		tuning := gbzlmsvc.MediaTuning{
+			HookHost:                cfg.Media.HookHost,
+			HookPort:                cfg.Media.HookPort,
+			StreamNoneReaderTimeout: cfg.Media.StreamNoneReaderTimeout,
+			RTPServerTimeout:        cfg.Media.RTPServerTimeout,
+		}
+		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
+		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
+		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
+		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
+		app.ZapLog.Info("GB28181 ZLM 节点/配置 controller 已装配")
+
+		collector := heartbeat.NewCollector(zlmRegistry)
+		gbroutes.SetKeepaliveCollector(collector)
+		watcher := heartbeat.NewWatcher(zlmRegistry, heartbeat.RealClock(), 30*time.Second, 90*time.Second)
+		var hbCtx context.Context
+		hbCtx, heartbeatCancel = context.WithCancel(context.Background())
+		watcher.Start(hbCtx)
+		app.ZapLog.Info("GB28181 ZLM 心跳 Collector / Watcher 已启动",
+			zap.Duration("checkInterval", 30*time.Second),
+			zap.Duration("offlineThreshold", 90*time.Second))
+
+		threadPoller := heartbeat.NewThreadLoadPoller(zlmRegistry, adapter, 30*time.Second)
+		threadPoller.Start(hbCtx)
+		app.ZapLog.Info("GB28181 ZLM 线程负载 Poller 已启动", zap.Duration("interval", 30*time.Second))
+	}
+
+	zlmClient = pickInitialClient(cfg)
+	if zlmClient == nil {
+		app.ZapLog.Warn("GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发")
+		return
+	}
+	go func(client *gbzlm.Client) {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := client.ApplyConfigForNode(ctx, cfg.Media); err != nil {
+			app.ZapLog.Warn("GB28181 ZLM 配置下发失败(ZLM 可能暂不可达,不影响启动)", zap.Error(err))
+		} else {
+			app.ZapLog.Info("GB28181 ZLM Hook 配置已下发", zap.String("hookHost", cfg.Media.HookHost))
+		}
+	}(zlmClient)
+}
+
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过
 func Start() {
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
+		sipRuntimeStatus.MarkDisabled()
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
+	startControlPlane(cfg)
 
-	// 初始化行政区划字典服务(catalog 4 层兜底依赖,启动时 warm cache)
-	setupCivilCodeService()
-
-	// 先建聚合器,handler/UAC 拿到它做埋点
-	metricsAgg = metrics.NewAggregator()
-	metricsCleanupStop = make(chan struct{})
-	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
-
-	// 把 provider 注入到 routes,让 dashboard controller 能拿到聚合器
-	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
-
-	srv, err := gbsip.NewServer(cfg)
+	effective, err := gbsetup.NewEffectiveConfigLoader(app.DB(), app.ConfigYml, nil).Load(context.Background())
 	if err != nil {
-		app.ZapLog.Error("GB28181 SIP 服务创建失败", zap.Error(err))
+		sipRuntimeStatus.MarkFailed(err.Error())
+		app.ZapLog.Error("GB28181 SIP 有效配置加载失败,后台继续启动", zap.Error(err))
 		return
 	}
-	srv.SetRecorder(metricsAgg)
-	if err := srv.Start(); err != nil {
+	cfg, err = applyEffectiveSIPConfig(cfg, effective)
+	if errors.Is(err, ErrSIPUnconfigured) {
+		sipRuntimeStatus.MarkUnconfigured()
+		app.ZapLog.Warn("GB28181 SIP 尚未配置,跳过 SIP 依赖并继续启动后台")
+		return
+	}
+	if err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		app.ZapLog.Error("GB28181 SIP 配置非法,跳过 SIP 依赖并继续启动后台", zap.Error(err))
+		return
+	}
+
+	srv, err := startSIPRuntime(cfg, metricsAgg, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
+		return gbsip.NewServer(cfg)
+	})
+	if err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
 		return
 	}
@@ -212,73 +351,6 @@ func Start() {
 	)
 	offlineScanner.Start()
 	app.ZapLog.Info("GB28181 离线扫描器已启动", zap.Int("intervalSeconds", cfg.Device.OfflineScanInterval))
-
-	// 装配 ZLM 多节点 Registry(M1 新增)
-	// 启动若 meta_node 空表 → 用 yaml cfg.ZLM 自动 seed 第一节点(单节点过渡)
-	setupZLMRegistry(cfg)
-
-	// 装配 ZLM Scheduler(M2 新增)从 scheduler_setting 读 algorithm
-	setupZLMScheduler()
-
-	// 装配 ZLM 调度日志服务(M3 T3.3)异步采集 + 24h prune
-	setupZLMSchedulerLog()
-
-	// 装配 ZLM Scheduler Controller(M3 T3.3)算法切换 + 日志查询
-	setupZLMSchedulerController()
-
-	// 装配 ZLM 节点 CRUD / 配置 controller(M1 新增)
-	if zlmRegistry != nil {
-		adapter := gbzlm.NewServiceAdapter(cfg.Media)
-		tuning := gbzlmsvc.MediaTuning{
-			HookHost:                cfg.Media.HookHost,
-			HookPort:                cfg.Media.HookPort,
-			StreamNoneReaderTimeout: cfg.Media.StreamNoneReaderTimeout,
-			RTPServerTimeout:        cfg.Media.RTPServerTimeout,
-		}
-		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
-		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
-		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
-		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
-		app.ZapLog.Info("GB28181 ZLM 节点/配置 controller 已装配")
-
-		// 装配心跳 Collector + Watcher(M2.1)
-		// Collector 接收 on_server_keepalive Hook,Watcher 周期扫描超时节点
-		collector := heartbeat.NewCollector(zlmRegistry)
-		gbroutes.SetKeepaliveCollector(collector)
-
-		watcher := heartbeat.NewWatcher(zlmRegistry, heartbeat.RealClock(),
-			30*time.Second, // checkInterval
-			90*time.Second, // offlineThreshold = 3 个 30s 心跳
-		)
-		var hbCtx context.Context
-		hbCtx, heartbeatCancel = context.WithCancel(context.Background())
-		watcher.Start(hbCtx)
-		app.ZapLog.Info("GB28181 ZLM 心跳 Collector / Watcher 已启动",
-			zap.Duration("checkInterval", 30*time.Second),
-			zap.Duration("offlineThreshold", 90*time.Second))
-
-		// 启动 ThreadLoadPoller 周期主动拉线程负载(ZLM keepalive 不含此字段)
-		threadPoller := heartbeat.NewThreadLoadPoller(zlmRegistry, adapter, 30*time.Second)
-		threadPoller.Start(hbCtx)
-		app.ZapLog.Info("GB28181 ZLM 线程负载 Poller 已启动", zap.Duration("interval", 30*time.Second))
-	}
-
-	// 向 ZLMediaKit 动态下发 Hook 配置(控制面,替代 config.ini 写死)
-	// 取 Registry 首节点(yaml→DB seed 后必然非空);Registry 空则降级跳过下发
-	zlmClient = pickInitialClient(cfg)
-	if zlmClient != nil {
-		go func(client *gbzlm.Client) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if err := client.ApplyConfigForNode(ctx, cfg.Media); err != nil {
-				app.ZapLog.Warn("GB28181 ZLM 配置下发失败(ZLM 可能暂不可达,不影响启动)", zap.Error(err))
-			} else {
-				app.ZapLog.Info("GB28181 ZLM Hook 配置已下发", zap.String("hookHost", cfg.Media.HookHost))
-			}
-		}(zlmClient)
-	} else {
-		app.ZapLog.Warn("GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发")
-	}
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
 	//
@@ -566,6 +638,7 @@ func Stop() {
 	}
 	if offlineScanner != nil {
 		offlineScanner.Stop()
+		offlineScanner = nil
 	}
 	if sipServer == nil {
 		return
@@ -575,6 +648,7 @@ func Stop() {
 	if err := sipServer.Shutdown(ctx); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务关闭异常", zap.Error(err))
 	}
+	sipServer = nil
 }
 
 func startPositionHistoryPruner() {

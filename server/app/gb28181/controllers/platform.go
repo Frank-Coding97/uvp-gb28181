@@ -1,48 +1,82 @@
 package controllers
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
-	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 )
 
 // PlatformInfo 是本级 GB28181 平台对外接入参数。
 type PlatformInfo struct {
-	Enabled        bool     `json:"enabled"`
-	ServerID       string   `json:"serverId"`
-	Domain         string   `json:"domain"`
-	SIPIP          string   `json:"sipIp"`
-	SIPPort        int      `json:"sipPort"`
-	Transport      []string `json:"transport"`
-	PasswordMasked string   `json:"passwordMasked"`
-	RegisterURI    string   `json:"registerUri"`
+	Enabled         bool                    `json:"enabled"`
+	ServerID        string                  `json:"serverId"`
+	Domain          string                  `json:"domain"`
+	SIPIP           string                  `json:"sipIp"`
+	SIPPort         int                     `json:"sipPort"`
+	Transport       []string                `json:"transport"`
+	PasswordMasked  string                  `json:"passwordMasked"`
+	RegisterURI     string                  `json:"registerUri"`
+	ListenIP        string                  `json:"listenIp"`
+	AdvertiseIP     string                  `json:"advertiseIp"`
+	DeploymentMode  gbsetup.DeploymentMode  `json:"deploymentMode,omitempty"`
+	ConfigStatus    string                  `json:"configStatus"`
+	Runtime         gbsetup.RuntimeSnapshot `json:"runtime"`
+	RestartRequired bool                    `json:"restartRequired"`
 }
 
 // PlatformController 提供本级平台只读接入信息。
 type PlatformController struct {
 	controllers.Common
+	db        *gorm.DB
+	runtime   *gbsetup.RuntimeStatus
+	enabled   bool
+	transport []string
 }
 
 func NewPlatformController() *PlatformController {
-	return &PlatformController{}
+	return &PlatformController{runtime: gbsetup.NewRuntimeStatus()}
+}
+
+func NewConfiguredPlatformController(db *gorm.DB, runtime *gbsetup.RuntimeStatus, enabled bool, transport []string) *PlatformController {
+	if runtime == nil {
+		runtime = gbsetup.NewRuntimeStatus()
+	}
+	return &PlatformController{db: db, runtime: runtime, enabled: enabled, transport: transport}
 }
 
 // Info GET /api/gb28181/sip/platform
 func (pc *PlatformController) Info(c *gin.Context) {
-	cfg := gbconfig.Load()
+	if pc.db == nil {
+		pc.Fail(c, "SIP 平台信息服务尚未装配", nil, http.StatusServiceUnavailable)
+		return
+	}
+	config, err := gbsetup.NewSIPConfigService(pc.db).Get(c.Request.Context())
+	if err != nil {
+		pc.Fail(c, "读取 SIP 平台信息失败", err, http.StatusInternalServerError)
+		return
+	}
+	runtime := pc.runtime.Snapshot()
+	if config == nil {
+		pc.Success(c, PlatformInfo{
+			Enabled: pc.enabled, Transport: pc.transport, ConfigStatus: "unconfigured",
+			Runtime: runtime, RestartRequired: runtime.State == gbsetup.RuntimeRestartRequired,
+		})
+		return
+	}
 	pc.Success(c, PlatformInfo{
-		Enabled:        cfg.Enabled,
-		ServerID:       cfg.SIP.ServerID,
-		Domain:         cfg.SIP.Domain,
-		SIPIP:          cfg.SIP.IP,
-		SIPPort:        cfg.SIP.Port,
-		Transport:      cfg.SIP.Transport,
-		PasswordMasked: maskPassword(cfg.SIP.Password),
-		RegisterURI:    registerURI(cfg.SIP.ServerID, cfg.SIP.Domain, cfg.SIP.IP, cfg.SIP.Port),
+		Enabled: pc.enabled, ServerID: config.ServerID, Domain: config.Domain,
+		SIPIP: config.AdvertiseIP, SIPPort: config.Port, Transport: pc.transport,
+		PasswordMasked: maskStoredPassword(config.HasPassword),
+		RegisterURI:    registerURI(config.ServerID, config.Domain, config.AdvertiseIP, config.Port),
+		ListenIP:       config.ListenIP, AdvertiseIP: config.AdvertiseIP,
+		DeploymentMode: config.DeploymentMode, ConfigStatus: "configured",
+		Runtime: runtime, RestartRequired: runtime.State == gbsetup.RuntimeRestartRequired,
 	})
 }
 
@@ -51,6 +85,13 @@ func registerURI(serverID, domain, ip string, port int) string {
 		return ""
 	}
 	return "sip:" + serverID + "@" + ip + ":" + strconv.Itoa(port)
+}
+
+func maskStoredPassword(hasPassword bool) string {
+	if !hasPassword {
+		return ""
+	}
+	return "******"
 }
 
 func maskPassword(password string) string {

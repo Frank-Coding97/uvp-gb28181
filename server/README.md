@@ -187,6 +187,14 @@ go run main.go
 
 应用将在 `http://localhost:8080` 启动。
 
+### SIP 首次安装配置
+
+- 新建数据库应直接导入对应全量脚本：MySQL 使用 `resource/database/uvp-gb28181.sql`，PostgreSQL 使用 `resource/database/postgresql_converted.sql`，SQL Server 使用 `resource/database/sqlserver_converted.sql`。全量脚本把 SIP 引导状态初始化为 `pending`。
+- 已有数据库升级时，执行对应的 `resource/database/gb28181/migrations/2026-07-19-sip-first-install-setup*.sql` 和 `2026-07-19-sip-setup-permissions*.sql`。增量脚本把既有安装标记为 `legacy`，不会强制弹出首次引导。
+- `gb28181.sip` 可以不配置；缺失或非法 SIP 配置不会阻止 HTTP 后台启动。具有 `gb28181:sip:config:update` 权限的管理员可在登录后的引导或 SIP 平台信息页完成配置。
+- 数据库表 `gb_sip_config` 是运行时配置真身。YAML 只在该表无记录且字段完整时 seed 一次，之后修改 YAML 不会覆盖数据库配置。
+- V1 保存配置后运行状态为 `restart_required`，需重启服务才会重新绑定 SIP 监听端口。
+
 ## API文档
 
 本项目集成了 Swagger API 文档，可以自动生成接口文档。
@@ -231,6 +239,8 @@ swag init -g main.go -o docs/swagger
 ## 配置说明
 
 主要配置项位于 `config/config.yml` 文件中：
+
+SIP 可选 seed 的完整写法见 `config/config.example.yml`。公网部署应把 `ip` 设为本机监听地址，把 `advertiseip` 设为设备可访问的公网 IPv4；`0.0.0.0` 只能用于监听，不能用于设备注册地址。
 
 ### 服务器配置
 ```yaml

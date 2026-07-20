@@ -26,12 +26,13 @@ func testConfig() gbconfig.Config {
 	return gbconfig.Config{
 		Enabled: true,
 		SIP: gbconfig.SIPConfig{
-			IP:        "127.0.0.1",
-			Port:      15060, // 测试用高端口,避开 5060
-			Transport: []string{"udp", "tcp"},
-			Domain:    "3402000000",
-			ServerID:  "34020000002000000001",
-			Password:  "12345678",
+			ListenIP:    "127.0.0.1",
+			AdvertiseIP: "127.0.0.1",
+			Port:        15060, // 测试用高端口,避开 5060
+			Transport:   []string{"udp", "tcp"},
+			Domain:      "3402000000",
+			ServerID:    "34020000002000000001",
+			Password:    "12345678",
 		},
 		Device: gbconfig.DeviceConfig{
 			KeepaliveInterval:     60,

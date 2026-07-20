@@ -1246,6 +1246,85 @@ CREATE TABLE `sys_param` (
   KEY `idx_sys_param_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COMMENT='系统参数配置';
 
+-- ----------------------------
+-- SIP first-install setup (full install: pending)
+-- ----------------------------
+DROP TABLE IF EXISTS `gb_sip_config`;
+DROP TABLE IF EXISTS `system_installation`;
+
+CREATE TABLE `system_installation` (
+  `id` tinyint unsigned NOT NULL COMMENT '单例主键，固定为 1',
+  `instance_id` varchar(36) NOT NULL DEFAULT '' COMMENT '平台实例 UUID，首次启动时补齐',
+  `onboarding_version` int unsigned NOT NULL DEFAULT 1 COMMENT '引导协议版本',
+  `sip_onboarding_status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/completed/skipped/legacy',
+  `sip_onboarding_finished_at` datetime DEFAULT NULL COMMENT '完成或跳过时间',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_system_installation_singleton` CHECK (`id` = 1),
+  CONSTRAINT `chk_system_installation_sip_status` CHECK (`sip_onboarding_status` IN ('pending', 'completed', 'skipped', 'legacy'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='平台安装与引导状态';
+
+CREATE TABLE `gb_sip_config` (
+  `id` tinyint unsigned NOT NULL COMMENT '单例主键，固定为 1',
+  `deployment_mode` varchar(8) NOT NULL COMMENT 'lan/public',
+  `listen_ip` varchar(45) NOT NULL COMMENT 'SIP 监听地址',
+  `advertise_ip` varchar(45) NOT NULL COMMENT 'SIP 对外宣告地址',
+  `advertise_ip_inferred` tinyint(1) NOT NULL DEFAULT 0 COMMENT '宣告地址是否由系统推断',
+  `port` int unsigned NOT NULL COMMENT 'SIP 端口',
+  `domain` varchar(10) NOT NULL COMMENT 'SIP 域',
+  `server_id` varchar(20) NOT NULL COMMENT '平台国标编码',
+  `password` varchar(255) NOT NULL COMMENT 'SIP Digest 原始凭据',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  CONSTRAINT `chk_gb_sip_config_singleton` CHECK (`id` = 1),
+  CONSTRAINT `chk_gb_sip_config_deployment_mode` CHECK (`deployment_mode` IN ('lan', 'public')),
+  CONSTRAINT `chk_gb_sip_config_port` CHECK (`port` BETWEEN 1 AND 65535)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='GB28181 SIP 运行时配置';
+
+-- MySQL 5.7 解析但不执行 CHECK，触发器用于真正保证 id=1。
+DELIMITER $$
+CREATE TRIGGER `trg_system_installation_singleton_insert`
+BEFORE INSERT ON `system_installation`
+FOR EACH ROW
+BEGIN
+  IF NEW.`id` <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'system_installation only accepts id=1';
+  END IF;
+END$$
+CREATE TRIGGER `trg_system_installation_singleton_update`
+BEFORE UPDATE ON `system_installation`
+FOR EACH ROW
+BEGIN
+  IF NEW.`id` <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'system_installation only accepts id=1';
+  END IF;
+END$$
+CREATE TRIGGER `trg_gb_sip_config_singleton_insert`
+BEFORE INSERT ON `gb_sip_config`
+FOR EACH ROW
+BEGIN
+  IF NEW.`id` <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'gb_sip_config only accepts id=1';
+  END IF;
+END$$
+CREATE TRIGGER `trg_gb_sip_config_singleton_update`
+BEFORE UPDATE ON `gb_sip_config`
+FOR EACH ROW
+BEGIN
+  IF NEW.`id` <> 1 THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'gb_sip_config only accepts id=1';
+  END IF;
+END$$
+DELIMITER ;
+
+INSERT INTO `system_installation` (
+  `id`, `instance_id`, `onboarding_version`, `sip_onboarding_status`,
+  `sip_onboarding_finished_at`, `created_at`, `updated_at`
+)
+VALUES (1, '', 1, 'pending', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
 -- UVP UI language: use Lucide icons for menu entries.
 UPDATE `sys_menu`
 SET
@@ -1286,3 +1365,23 @@ WHERE `id` IN (
   140336, 140341, 140342, 140347, 140350, 140351, 140352,
   140353, 140354, 140355, 140357, 140358
 );
+
+-- SIP setup API, UI permissions and administrator policies.
+INSERT INTO `sys_api` (`id`,`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`deleted_at`,`created_by`) VALUES
+(217,'读取 SIP 配置状态','/api/gb28181/sip/setup/status','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(218,'读取本机网络接口','/api/gb28181/sip/setup/network-interfaces','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(219,'读取 SIP 平台信息','/api/gb28181/sip/platform','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(220,'保存 SIP 配置','/api/gb28181/sip/setup/config','PUT','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(221,'暂缓 SIP 配置','/api/gb28181/sip/setup/skip','POST','GB28181 SIP 配置',NOW(),NOW(),NULL,1);
+INSERT INTO `sys_menu` (`id`,`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`) VALUES
+(140359,140355,'','','','查看 SIP 配置',1,3,'gb28181:sip:config:view',NOW(),NOW(),1),
+(140360,140355,'','','','修改 SIP 配置',1,3,'gb28181:sip:config:update',NOW(),NOW(),1);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140359),(1,140360);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES
+(140359,217),(140359,218),(140359,219),(140360,220),(140360,221);
+INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUES
+(7561,'p','role_1','/api/gb28181/sip/setup/status','GET','*','',''),
+(7562,'p','role_1','/api/gb28181/sip/setup/network-interfaces','GET','*','',''),
+(7563,'p','role_1','/api/gb28181/sip/platform','GET','*','',''),
+(7564,'p','role_1','/api/gb28181/sip/setup/config','PUT','*','',''),
+(7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');

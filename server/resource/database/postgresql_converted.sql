@@ -1338,6 +1338,57 @@ COMMENT ON COLUMN sys_param.created_by IS '创建人';
 CREATE UNIQUE INDEX idx_sys_param_code ON sys_param (code);
 CREATE INDEX idx_sys_param_deleted_at ON sys_param (deleted_at);
 
+-- SIP first-install setup (full install: pending)
+DROP TABLE IF EXISTS gb_sip_config;
+DROP TABLE IF EXISTS system_installation;
+
+CREATE TABLE system_installation (
+    id SMALLINT NOT NULL,
+    instance_id VARCHAR(36) NOT NULL DEFAULT '',
+    onboarding_version INTEGER NOT NULL DEFAULT 1,
+    sip_onboarding_status VARCHAR(16) NOT NULL DEFAULT 'pending',
+    sip_onboarding_finished_at TIMESTAMP NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT chk_system_installation_singleton CHECK (id = 1),
+    CONSTRAINT chk_system_installation_sip_status CHECK (
+        sip_onboarding_status IN ('pending', 'completed', 'skipped', 'legacy')
+    )
+);
+
+COMMENT ON TABLE system_installation IS '平台安装与引导状态';
+COMMENT ON COLUMN system_installation.id IS '单例主键，固定为 1';
+COMMENT ON COLUMN system_installation.instance_id IS '平台实例 UUID，首次启动时补齐';
+
+CREATE TABLE gb_sip_config (
+    id SMALLINT NOT NULL,
+    deployment_mode VARCHAR(8) NOT NULL,
+    listen_ip VARCHAR(45) NOT NULL,
+    advertise_ip VARCHAR(45) NOT NULL,
+    advertise_ip_inferred BOOLEAN NOT NULL DEFAULT FALSE,
+    port INTEGER NOT NULL,
+    domain VARCHAR(10) NOT NULL,
+    server_id VARCHAR(20) NOT NULL,
+    password VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT chk_gb_sip_config_singleton CHECK (id = 1),
+    CONSTRAINT chk_gb_sip_config_deployment_mode CHECK (deployment_mode IN ('lan', 'public')),
+    CONSTRAINT chk_gb_sip_config_port CHECK (port BETWEEN 1 AND 65535)
+);
+
+COMMENT ON TABLE gb_sip_config IS 'GB28181 SIP 运行时配置';
+COMMENT ON COLUMN gb_sip_config.advertise_ip_inferred IS '宣告地址是否由系统推断';
+COMMENT ON COLUMN gb_sip_config.password IS 'SIP Digest 原始凭据';
+
+INSERT INTO system_installation (
+    id, instance_id, onboarding_version, sip_onboarding_status,
+    sip_onboarding_finished_at, created_at, updated_at
+)
+VALUES (1, '', 1, 'pending', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+
 -- 创建索引
 CREATE INDEX sys_jobs_idx_group ON sys_jobs ("group");
 CREATE INDEX sys_jobs_idx_status ON sys_jobs (status);
@@ -1423,3 +1474,26 @@ WHERE id IN (
 
 SET session_replication_role = DEFAULT;
 SET client_min_messages TO NOTICE;
+
+-- SIP setup API, UI permissions and administrator policies.
+INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
+(217,'读取 SIP 配置状态','/api/gb28181/sip/setup/status','GET','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(218,'读取本机网络接口','/api/gb28181/sip/setup/network-interfaces','GET','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(219,'读取 SIP 平台信息','/api/gb28181/sip/platform','GET','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(220,'保存 SIP 配置','/api/gb28181/sip/setup/config','PUT','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(221,'暂缓 SIP 配置','/api/gb28181/sip/setup/skip','POST','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
+(140359,140355,'','','','查看 SIP 配置',1,3,'gb28181:sip:config:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
+(140360,140355,'','','','修改 SIP 配置',1,3,'gb28181:sip:config:update',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140359),(1,140360);
+INSERT INTO sys_menu_api (menu_id,api_id) VALUES
+(140359,217),(140359,218),(140359,219),(140360,220),(140360,221);
+INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
+(7561,'p','role_1','/api/gb28181/sip/setup/status','GET','*','',''),
+(7562,'p','role_1','/api/gb28181/sip/setup/network-interfaces','GET','*','',''),
+(7563,'p','role_1','/api/gb28181/sip/platform','GET','*','',''),
+(7564,'p','role_1','/api/gb28181/sip/setup/config','PUT','*','',''),
+(7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');
+SELECT setval('sys_api_id_seq',221,true);
+SELECT setval('sys_menu_id_seq',140360,true);
+SELECT setval('sys_casbin_rule_id_seq',7565,true);

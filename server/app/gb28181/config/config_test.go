@@ -33,6 +33,12 @@ func TestLoad(t *testing.T) {
 	if cfg.SIP.Port <= 0 {
 		t.Errorf("期望 sip.port > 0, 实际 %d", cfg.SIP.Port)
 	}
+	if cfg.SIP.ListenIP == "" {
+		t.Errorf("期望 sip.listen ip 非空")
+	}
+	if cfg.SIP.ListenIP == "0.0.0.0" && cfg.SIP.AdvertiseIP == "0.0.0.0" {
+		t.Errorf("wildcard 监听地址不能同时作为 advertise ip")
+	}
 	if len(cfg.SIP.Transport) != 2 {
 		t.Errorf("期望 transport 双栈 2 项, 实际 %d 项", len(cfg.SIP.Transport))
 	}

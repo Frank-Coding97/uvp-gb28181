@@ -5,6 +5,7 @@
       <Header />
       <Main />
       <Footer v-if="isFooter" />
+      <SipSetupHost />
     </a-layout>
   </a-layout>
 </template>
@@ -14,6 +15,7 @@ import Aside from "@/layout/components/Aside/index.vue";
 import Header from "@/layout/components/Header/index.vue";
 import Main from "@/layout/components/Main/index.vue";
 import Footer from "@/layout/components/Footer/index.vue";
+import SipSetupHost from "@/layout/components/SipSetupHost.vue";
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useDevicesSize } from "@/hooks/useDevicesSize";

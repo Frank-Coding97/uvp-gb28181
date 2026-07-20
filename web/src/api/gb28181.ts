@@ -92,10 +92,91 @@ export interface SipPlatformInfo {
     transport: string[];
     passwordMasked: string;
     registerUri: string;
+    listenIp: string;
+    advertiseIp: string;
+    deploymentMode?: SipDeploymentMode;
+    configStatus: "configured" | "unconfigured";
+    runtime: SipRuntimeStatus;
+    restartRequired: boolean;
 }
 
 export const fetchSipPlatformInfo = () =>
     http.request<BaseResult<SipPlatformInfo>>("get", baseUrlApi("gb28181/sip/platform"));
+
+export type SipDeploymentMode = "lan" | "public";
+export type SipOnboardingStatus = "pending" | "completed" | "skipped" | "legacy";
+export type SipRuntimeState = "disabled" | "unconfigured" | "starting" | "running" | "failed" | "restart_required";
+
+export interface SipRuntimeStatus {
+    state: SipRuntimeState;
+    errorSummary?: string;
+    updatedAt: string;
+}
+
+export interface SipConfigSummary {
+    deploymentMode: SipDeploymentMode;
+    listenIp: string;
+    advertiseIp: string;
+    advertiseIpInferred: boolean;
+    port: number;
+    domain: string;
+    serverId: string;
+    hasPassword: boolean;
+}
+
+export interface SipSetupStatus {
+    onboardingStatus: SipOnboardingStatus;
+    onboardingVersion: number;
+    configStatus: "configured" | "unconfigured";
+    config?: SipConfigSummary;
+    runtime: SipRuntimeStatus;
+    canConfigure: boolean;
+    restartRequired: boolean;
+}
+
+export interface SipNetworkAddress {
+    ip: string;
+    interfaceName?: string;
+    cidr: string;
+    loopback: boolean;
+    virtual: boolean;
+    recommended: boolean;
+    more: boolean;
+    listenOnly: boolean;
+}
+
+export interface SipNetworkInterfaces {
+    items: SipNetworkAddress[];
+    scanStatus: "ok" | "failed";
+    warning?: string;
+}
+
+export interface SaveSipConfigPayload {
+    deploymentMode: SipDeploymentMode;
+    listenIp: string;
+    advertiseIp: string;
+    advertiseIpInferred: boolean;
+    port: number;
+    domain: string;
+    serverId: string;
+    password?: string;
+}
+
+export const fetchSipSetupStatus = () =>
+    http.request<BaseResult<SipSetupStatus>>("get", baseUrlApi("gb28181/sip/setup/status"));
+
+export const fetchSipNetworkInterfaces = () =>
+    http.request<BaseResult<SipNetworkInterfaces>>("get", baseUrlApi("gb28181/sip/setup/network-interfaces"));
+
+export const saveSipSetupConfig = (data: SaveSipConfigPayload) =>
+    http.request<BaseResult<{ config: SipConfigSummary; restartRequired: boolean; runtime: SipRuntimeStatus }>>(
+        "put",
+        baseUrlApi("gb28181/sip/setup/config"),
+        { data }
+    );
+
+export const skipSipSetup = () =>
+    http.request<BaseResult<{ onboardingStatus: SipOnboardingStatus }>>("post", baseUrlApi("gb28181/sip/setup/skip"));
 
 // ===== SIP 信令看板 =====
 

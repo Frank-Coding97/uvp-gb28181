@@ -7,6 +7,14 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 )
 
+func TestPlatformContactUsesAdvertiseIP(t *testing.T) {
+	contact := platformContact("34020000002000000001", "192.168.10.20", 5061)
+	want := sip.Uri{User: "34020000002000000001", Host: "192.168.10.20", Port: 5061}
+	if contact.Address.String() != want.String() {
+		t.Fatalf("Contact=%q, want %q", contact.Address.String(), want.String())
+	}
+}
+
 // T1.6-U1~U3: detectMessageKind 三类常见 MANSCDP body 识别
 func TestDetectMessageKind(t *testing.T) {
 	cases := []struct {

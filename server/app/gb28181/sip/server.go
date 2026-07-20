@@ -26,10 +26,15 @@ type Server struct {
 	notifyH  *handler.NotifyHandler
 	uac      *uac.UAC // 供 play service 等业务模块复用
 	recorder metrics.Recorder
+	onError  func(error)
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	started  bool
 }
+
+// SetErrorHandler registers a callback for asynchronous listener failures.
+// It must be set before Start.
+func (s *Server) SetErrorHandler(fn func(error)) { s.onError = fn }
 
 // UAC 返回 SIP 服务内置的 UAC(可能为 nil,初始化失败时)
 func (s *Server) UAC() *uac.UAC { return s.uac }
@@ -71,7 +76,7 @@ func (s *Server) registerHandlers() {
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
 	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
-	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.IP, s.cfg.SIP.Port); err != nil {
+	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port); err != nil {
 		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
 	} else {
 		s.uac = u
@@ -141,7 +146,7 @@ func (s *Server) Start() error {
 	s.cancel = cancel
 	s.started = true
 
-	addr := fmt.Sprintf("%s:%d", s.cfg.SIP.IP, s.cfg.SIP.Port)
+	addr := fmt.Sprintf("%s:%d", s.cfg.SIP.ListenIP, s.cfg.SIP.Port)
 	for _, tran := range s.cfg.SIP.Transport {
 		t := tran
 		s.wg.Add(1)
@@ -150,6 +155,9 @@ func (s *Server) Start() error {
 			app.ZapLog.Info("GB28181 SIP 监听启动", zap.String("transport", t), zap.String("addr", addr))
 			if err := s.srv.ListenAndServe(ctx, t, addr); err != nil && ctx.Err() == nil {
 				app.ZapLog.Error("GB28181 SIP 监听失败", zap.String("transport", t), zap.Error(err))
+				if s.onError != nil {
+					s.onError(err)
+				}
 			}
 		}()
 	}
