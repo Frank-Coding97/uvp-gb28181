@@ -15,12 +15,13 @@ const (
 )
 
 type SessionFilter struct {
-	From     time.Time
-	To       time.Time
-	DeviceID string
-	CallID   string
-	Anomaly  bool
-	Limit    int
+	From      time.Time
+	To        time.Time
+	DeviceID  string
+	DeviceIDs []string
+	CallID    string
+	Anomaly   bool
+	Limit     int
 }
 
 type SessionDerivedState struct {
@@ -70,6 +71,13 @@ func buildSessionListQuery(table string, filter SessionFilter) (string, []any, e
 	if filter.DeviceID != "" {
 		where = append(where, "device_id = ?")
 		args = append(args, filter.DeviceID)
+	} else if len(filter.DeviceIDs) > 0 {
+		placeholders := make([]string, len(filter.DeviceIDs))
+		for i, deviceID := range filter.DeviceIDs {
+			placeholders[i] = "?"
+			args = append(args, deviceID)
+		}
+		where = append(where, "device_id IN ("+strings.Join(placeholders, ", ")+")")
 	}
 	if filter.CallID != "" {
 		where = append(where, "call_id = ?")

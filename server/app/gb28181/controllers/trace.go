@@ -312,7 +312,17 @@ func parseMessageFilter(c *gin.Context) (gbtrace.MessageFilter, error) {
 		return gbtrace.MessageFilter{}, err
 	}
 	filter := gbtrace.MessageFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId")), Cursor: c.Query("cursor")}
-	if !validText(filter.DeviceID, 128, false) || !validText(filter.CallID, 255, false) {
+	deviceIDs := strings.TrimSpace(c.Query("deviceIds"))
+	if deviceIDs != "" {
+		for _, value := range strings.Split(deviceIDs, ",") {
+			value = strings.TrimSpace(value)
+			if !validText(value, 128, true) {
+				return gbtrace.MessageFilter{}, errors.New("设备编码或 Call-ID 非法")
+			}
+			filter.DeviceIDs = append(filter.DeviceIDs, value)
+		}
+	}
+	if (filter.DeviceID != "" && !validText(filter.DeviceID, 128, false)) || !validText(filter.CallID, 255, false) {
 		return gbtrace.MessageFilter{}, errors.New("设备编码或 Call-ID 非法")
 	}
 	if direction := c.Query("direction"); direction != "" {
@@ -335,6 +345,28 @@ func parseMessageFilter(c *gin.Context) (gbtrace.MessageFilter, error) {
 		}
 		filter.StatusCode = uint16(status)
 	}
+	parseStatus := func(key string) (uint16, error) {
+		value := c.Query(key)
+		if value == "" {
+			return 0, nil
+		}
+		status, parseErr := strconv.ParseUint(value, 10, 16)
+		if parseErr != nil || status < 100 || status > 699 {
+			return 0, errors.New("status code range parameter is invalid")
+		}
+		return uint16(status), nil
+	}
+	filter.StatusMin, err = parseStatus("statusMin")
+	if err != nil {
+		return gbtrace.MessageFilter{}, err
+	}
+	filter.StatusMax, err = parseStatus("statusMax")
+	if err != nil {
+		return gbtrace.MessageFilter{}, err
+	}
+	if filter.StatusMin != 0 && filter.StatusMax != 0 && filter.StatusMin > filter.StatusMax {
+		return gbtrace.MessageFilter{}, errors.New("status code range is invalid")
+	}
 	if value := c.Query("limit"); value != "" {
 		limit, parseErr := strconv.Atoi(value)
 		if parseErr != nil || limit <= 0 || limit > gbtrace.MaxMessagePageSize {
@@ -356,6 +388,15 @@ func parseSessionFilter(c *gin.Context) (gbtrace.SessionFilter, error) {
 		return gbtrace.SessionFilter{}, err
 	}
 	filter := gbtrace.SessionFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId"))}
+	if deviceIDs := strings.TrimSpace(c.Query("deviceIds")); deviceIDs != "" {
+		for _, value := range strings.Split(deviceIDs, ",") {
+			value = strings.TrimSpace(value)
+			if !validText(value, 128, true) {
+				return gbtrace.SessionFilter{}, errors.New("设备编码或 Call-ID 非法")
+			}
+			filter.DeviceIDs = append(filter.DeviceIDs, value)
+		}
+	}
 	if !validText(filter.DeviceID, 128, false) || !validText(filter.CallID, 255, false) {
 		return gbtrace.SessionFilter{}, errors.New("设备编码或 Call-ID 非法")
 	}

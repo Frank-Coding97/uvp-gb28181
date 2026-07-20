@@ -37,6 +37,9 @@ type Module struct {
 	now            func() time.Time
 	cancel         context.CancelFunc
 	done           chan struct{}
+	retryDone      chan struct{}
+	retryQueue     chan retryBatch
+	pendingRetries atomic.Int64
 	shutdownOnce   sync.Once
 	storeCloseOnce sync.Once
 	storeCloseErr  error
@@ -51,12 +54,10 @@ func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
 	var store Store = unavailableStore{}
 	var storeErr error
 	if err == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		store, storeErr = OpenClickHouseStore(ctx, cfg)
-		cancel()
-		if storeErr != nil {
-			store = errorStore{err: storeErr}
-		}
+		store = NewReconnectingStore(func(ctx context.Context) (Store, error) {
+			return OpenClickHouseStore(ctx, cfg)
+		}, 250*time.Millisecond, 30*time.Second)
+		storeErr = ErrTraceStoreUnavailable
 	}
 	module := NewModule(cfg, store, payloadCipher)
 	if err != nil {
@@ -95,6 +96,8 @@ func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCiphe
 		retryMax:      time.Second,
 		now:           time.Now,
 		done:          make(chan struct{}),
+		retryDone:     make(chan struct{}),
+		retryQueue:    make(chan retryBatch, 32),
 	}
 	module.collector = NewCollector(cfg.QueueCapacity, func() {
 		module.health.degraded("trace queue is full; events were dropped")
@@ -102,6 +105,7 @@ func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCiphe
 	ctx, cancel := context.WithCancel(context.Background())
 	module.cancel = cancel
 	go module.runWriter(ctx)
+	go module.runRetryWriter(ctx)
 	return module
 }
 
@@ -109,6 +113,7 @@ func (m *Module) ReadFilter(props sip.TransportReadProps, data []byte) ([]byte, 
 	if m.closed.Load() || m.framer == nil {
 		return data, nil
 	}
+	m.framer.SweepIdle(m.nowUTC())
 	frames := m.framer.Push(props, data)
 	for _, frame := range frames {
 		m.emitFrame(frame)
@@ -121,7 +126,7 @@ func (m *Module) WriteObserver(props sip.TransportWriteProps, data []byte) {
 		return
 	}
 	m.collector.Submit(Event{
-		OccurredAt: m.now().UTC(),
+		OccurredAt: m.nowUTC(),
 		Direction:  DirectionOutbound,
 		Transport:  props.Transport,
 		LocalAddr:  addrString(props.LocalAddr),
@@ -145,7 +150,7 @@ func (m *Module) emitFrame(frame Frame) {
 	}
 	if m.collector != nil {
 		m.collector.Submit(Event{
-			OccurredAt: m.now().UTC(),
+			OccurredAt: m.nowUTC(),
 			Direction:  DirectionInbound,
 			Transport:  frame.Props.Transport,
 			LocalAddr:  addrString(frame.Props.LocalAddr),
@@ -179,10 +184,19 @@ func (m *Module) Shutdown(ctx context.Context) error {
 	})
 	select {
 	case <-m.done:
-		return m.closeStore()
+		select {
+		case <-m.retryDone:
+			return m.closeStore()
+		case <-ctx.Done():
+			m.cancel()
+			<-m.retryDone
+			_ = m.closeStore()
+			return ctx.Err()
+		}
 	case <-ctx.Done():
 		m.cancel()
 		<-m.done
+		<-m.retryDone
 		_ = m.closeStore()
 		return ctx.Err()
 	}
@@ -202,4 +216,11 @@ func addrString(addr net.Addr) string {
 		return ""
 	}
 	return addr.String()
+}
+
+func (m *Module) nowUTC() time.Time {
+	if m.now == nil {
+		return time.Now().UTC()
+	}
+	return m.now().UTC()
 }

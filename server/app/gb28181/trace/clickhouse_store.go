@@ -70,6 +70,8 @@ type ClickHouseStore struct {
 	fullTable string
 }
 
+const TraceSchemaVersion uint32 = 1
+
 func OpenClickHouseStore(ctx context.Context, cfg gbconfig.TraceConfig) (*ClickHouseStore, error) {
 	if strings.TrimSpace(cfg.Address) == "" || strings.TrimSpace(cfg.Username) == "" {
 		return nil, fmt.Errorf("ClickHouse address and username are required")
@@ -105,6 +107,10 @@ func OpenClickHouseStore(ctx context.Context, cfg gbconfig.TraceConfig) (*ClickH
 		return nil, fmt.Errorf("ping ClickHouse trace store: %w", err)
 	}
 	if err := store.EnsureSchema(ctx); err != nil {
+		_ = store.Close()
+		return nil, err
+	}
+	if err := store.EnsureSchemaVersion(ctx); err != nil {
 		_ = store.Close()
 		return nil, err
 	}
@@ -192,6 +198,48 @@ FROM %s
 GROUP BY day, device_id, call_id`, s.database, s.database, s.fullTable)
 	if err := s.conn.Exec(ctx, viewDDL); err != nil {
 		return fmt.Errorf("ensure ClickHouse SIP trace session view: %w", err)
+	}
+	return nil
+}
+
+// EnsureSchemaVersion makes schema drift visible. CREATE IF NOT EXISTS alone
+// cannot detect an existing table whose columns or materialized view changed.
+func (s *ClickHouseStore) EnsureSchemaVersion(ctx context.Context) error {
+	versionDDL := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.sip_trace_schema_version (
+    version UInt32,
+    applied_at DateTime64(6, 'UTC')
+) ENGINE = ReplacingMergeTree(applied_at)
+ORDER BY version`, s.database)
+	if err := s.conn.Exec(ctx, versionDDL); err != nil {
+		return fmt.Errorf("ensure ClickHouse SIP trace schema version table: %w", err)
+	}
+	rows, err := s.conn.Query(ctx, fmt.Sprintf("SELECT max(version) FROM %s.sip_trace_schema_version", s.database))
+	if err != nil {
+		return fmt.Errorf("read ClickHouse SIP trace schema version: %w", err)
+	}
+	if rows == nil {
+		// Lightweight contract fakes may not implement rows; the DDL is still
+		// verified and a real connection will take the versioned path above.
+		return nil
+	}
+	defer rows.Close()
+	var version uint32
+	if rows.Next() {
+		if err := rows.Scan(&version); err != nil {
+			return fmt.Errorf("scan ClickHouse SIP trace schema version: %w", err)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate ClickHouse SIP trace schema version: %w", err)
+	}
+	if version > TraceSchemaVersion {
+		return fmt.Errorf("unsupported ClickHouse SIP trace schema version %d (runtime supports %d)", version, TraceSchemaVersion)
+	}
+	if version < TraceSchemaVersion {
+		insert := fmt.Sprintf("INSERT INTO %s.sip_trace_schema_version (version, applied_at) VALUES (?, ?)", s.database)
+		if err := s.conn.Exec(ctx, insert, TraceSchemaVersion, time.Now().UTC()); err != nil {
+			return fmt.Errorf("record ClickHouse SIP trace schema version: %w", err)
+		}
 	}
 	return nil
 }

@@ -28,10 +28,13 @@ type MessageFilter struct {
 	From       time.Time
 	To         time.Time
 	DeviceID   string
+	DeviceIDs  []string
 	CallID     string
 	Direction  Direction
 	Method     string
 	StatusCode uint16
+	StatusMin  uint16
+	StatusMax  uint16
 	Cursor     string
 	Limit      int
 }
@@ -105,11 +108,35 @@ func buildMessageListQuery(table string, filter MessageFilter) (string, []any, e
 			args = append(args, value)
 		}
 	}
-	appendFilter("device_id = ?", filter.DeviceID, filter.DeviceID != "")
+	deviceIDs := append([]string(nil), filter.DeviceIDs...)
+	if filter.DeviceID != "" && len(deviceIDs) == 0 {
+		appendFilter("device_id = ?", filter.DeviceID, true)
+	} else if len(deviceIDs) > 0 {
+		placeholders := make([]string, len(deviceIDs))
+		for i, deviceID := range deviceIDs {
+			placeholders[i] = "?"
+			args = append(args, deviceID)
+		}
+		clauses = append(clauses, "device_id IN ("+strings.Join(placeholders, ", ")+")")
+	}
 	appendFilter("call_id = ?", filter.CallID, filter.CallID != "")
 	appendFilter("direction = ?", string(filter.Direction), filter.Direction != "")
 	appendFilter("method = ?", filter.Method, filter.Method != "")
 	appendFilter("status_code = ?", filter.StatusCode, filter.StatusCode != 0)
+	if filter.StatusMin != 0 || filter.StatusMax != 0 {
+		min, max := filter.StatusMin, filter.StatusMax
+		if min == 0 {
+			min = 100
+		}
+		if max == 0 {
+			max = 699
+		}
+		if min > max || min < 100 || max > 699 {
+			return "", nil, errors.New("invalid SIP trace status code range")
+		}
+		clauses = append(clauses, "status_code >= ?", "status_code <= ?")
+		args = append(args, min, max)
+	}
 	if filter.Cursor != "" {
 		cursor, err := DecodeMessageCursor(filter.Cursor)
 		if err != nil {

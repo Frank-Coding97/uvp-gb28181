@@ -1,6 +1,8 @@
 package routes
 
 import (
+	"sync/atomic"
+
 	"github.com/gin-gonic/gin"
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
@@ -37,7 +39,11 @@ var platformController = gbcontrollers.NewPlatformController()
 var setupController *gbcontrollers.SetupController
 
 // traceController 由 bootstrap 按 Trace 开关后置注入。
-var traceController = gbcontrollers.NewTraceController(nil, nil, nil)
+var traceController atomic.Pointer[gbcontrollers.TraceController]
+
+func init() {
+	traceController.Store(gbcontrollers.NewTraceController(nil, nil, nil))
+}
 
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
 var zlmNodeController *gbcontrollers.ZLMNodeController
@@ -61,10 +67,19 @@ func SetPlatformController(controller *gbcontrollers.PlatformController) {
 
 func SetTraceController(ctrl *gbcontrollers.TraceController) {
 	if ctrl == nil {
-		traceController = gbcontrollers.NewTraceController(nil, nil, nil)
+		traceController.Store(gbcontrollers.NewTraceController(nil, nil, nil))
 		return
 	}
-	traceController = ctrl
+	traceController.Store(ctrl)
+}
+
+func currentTraceController() *gbcontrollers.TraceController {
+	ctrl := traceController.Load()
+	if ctrl == nil {
+		ctrl = gbcontrollers.NewTraceController(nil, nil, nil)
+		traceController.CompareAndSwap(nil, ctrl)
+	}
+	return ctrl
 }
 
 // SetPlayService 由 bootstrap 注入 play service(routes 包先于 service 实例化,故需后置注入)
@@ -153,12 +168,12 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		}
 		traceGroup := gb.Group("/sip-traces")
 		{
-			traceGroup.GET("/health", func(c *gin.Context) { traceController.Health(c) })
-			traceGroup.GET("/messages", func(c *gin.Context) { traceController.ListMessages(c) })
-			traceGroup.GET("/messages/:id", func(c *gin.Context) { traceController.GetMessage(c) })
-			traceGroup.GET("/sessions", func(c *gin.Context) { traceController.ListSessions(c) })
-			traceGroup.GET("/sessions/:callId/messages", func(c *gin.Context) { traceController.ListSessionMessages(c) })
-			traceGroup.POST("/captures/:id/stop", func(c *gin.Context) { traceController.StopCapture(c) })
+			traceGroup.GET("/health", func(c *gin.Context) { currentTraceController().Health(c) })
+			traceGroup.GET("/messages", func(c *gin.Context) { currentTraceController().ListMessages(c) })
+			traceGroup.GET("/messages/:id", func(c *gin.Context) { currentTraceController().GetMessage(c) })
+			traceGroup.GET("/sessions", func(c *gin.Context) { currentTraceController().ListSessions(c) })
+			traceGroup.GET("/sessions/:callId/messages", func(c *gin.Context) { currentTraceController().ListSessionMessages(c) })
+			traceGroup.POST("/captures/:id/stop", func(c *gin.Context) { currentTraceController().StopCapture(c) })
 		}
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
@@ -222,8 +237,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/channel/batch-delete", deviceMgmtController.BatchDeleteChannels)
 			// 手动 Catalog 刷新(bootstrap 未装配 CatalogTrigger 时,handler 内部返 503)
 			dmgmt.POST("/device/:id/catalog/refresh", deviceMgmtController.RefreshDeviceCatalog)
-			dmgmt.GET("/device/:id/sip-trace-capture", func(c *gin.Context) { traceController.ActiveCapture(c) })
-			dmgmt.POST("/device/:id/sip-trace-captures", func(c *gin.Context) { traceController.StartCapture(c) })
+			dmgmt.GET("/device/:id/sip-trace-capture", func(c *gin.Context) { currentTraceController().ActiveCapture(c) })
+			dmgmt.POST("/device/:id/sip-trace-captures", func(c *gin.Context) { currentTraceController().StartCapture(c) })
 			// B3 map:地图视图
 			dmgmt.GET("/map/markers", mapController.Markers)
 			dmgmt.GET("/map/clusters", mapController.Clusters)

@@ -3,6 +3,7 @@ package trace
 import (
 	"net"
 	"testing"
+	"time"
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
@@ -80,6 +81,17 @@ func TestFrameAssemblerForgetDropsPartialConnection(t *testing.T) {
 	frames := assembler.Push(props, raw[len(raw)/2:])
 	require.Len(t, frames, 1)
 	require.True(t, frames[0].Malformed)
+}
+
+func TestFrameAssemblerSweepsIdlePartialConnection(t *testing.T) {
+	assembler := NewFrameAssembler(4096)
+	assembler.idleTTL = time.Second
+	props := testReadProps("TCP", 5060, 15060)
+	raw := sipMessage("MESSAGE", "idle", []byte("body"))
+	require.Empty(t, assembler.Push(props, raw[:len(raw)/2]))
+	require.Equal(t, 1, assembler.StreamCount())
+	require.Equal(t, 1, assembler.SweepIdle(time.Now().Add(2*time.Second)))
+	require.Equal(t, 0, assembler.StreamCount())
 }
 
 func testReadProps(transport string, localPort, remotePort int) sip.TransportReadProps {

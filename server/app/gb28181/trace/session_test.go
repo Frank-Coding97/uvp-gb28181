@@ -24,6 +24,18 @@ func TestSessionSchemaUsesThirtyDayTTLAndCallIDGrouping(t *testing.T) {
 	require.Contains(t, viewDDL, "argMaxState")
 }
 
+func TestSessionQuerySupportsMultipleDevices(t *testing.T) {
+	query, args, err := buildSessionListQuery("uvp_sip_trace.sip_trace_session_day", SessionFilter{
+		From:      time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		To:        time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC),
+		DeviceIDs: []string{"device-a", "device-b"},
+	})
+	require.NoError(t, err)
+	require.Contains(t, query, "device_id IN (?, ?)")
+	require.Contains(t, args, "device-a")
+	require.Contains(t, args, "device-b")
+}
+
 func TestSessionQueryParameterizesCallIDAndBoundsTime(t *testing.T) {
 	_, _, err := buildSessionListQuery("uvp_sip_trace.sip_trace_session_day", SessionFilter{})
 	require.ErrorIs(t, err, ErrTraceTimeRangeRequired)

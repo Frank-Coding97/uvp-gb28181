@@ -39,12 +39,15 @@ func (s *recordingStore) InsertBatch(ctx context.Context, events []StoredEvent) 
 			return ctx.Err()
 		}
 	}
-	if s.err != nil {
-		return s.err
-	}
 	s.mu.Lock()
-	s.events = append(s.events, events...)
+	err := s.err
+	if err == nil {
+		s.events = append(s.events, events...)
+	}
 	s.mu.Unlock()
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -98,14 +101,46 @@ func TestWriterFailureIsVisibleAndShutdownCancelsRetry(t *testing.T) {
 		health := module.Health()
 		return health.State == HealthDegraded && health.LastError == "clickhouse unavailable"
 	}, time.Second, 10*time.Millisecond)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	require.ErrorIs(t, module.Shutdown(ctx), context.DeadlineExceeded)
+	require.NoError(t, module.Shutdown(ctx))
 	select {
 	case <-module.done:
 	case <-time.After(time.Second):
 		t.Fatal("writer goroutine did not stop after shutdown cancellation")
 	}
+}
+
+func TestWriterFailureDoesNotStopConsumingLaterEvents(t *testing.T) {
+	store := &recordingStore{err: errors.New("clickhouse unavailable")}
+	module := NewModule(testTraceConfig(16, 1, 1), store, testPayloadCipher())
+	for i := 0; i < 8; i++ {
+		module.WriteObserver(testWriteProps(), []byte("event"))
+	}
+	require.Eventually(t, func() bool {
+		health := module.Health()
+		return health.CurrentGap != nil && health.CurrentGap.EventCount >= 8
+	}, time.Second, 10*time.Millisecond)
+	require.Less(t, module.Health().QueueDepth, module.Health().QueueCapacity)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	require.NoError(t, module.Shutdown(ctx))
+}
+
+func TestHealthGapClosesAfterRetryRecovery(t *testing.T) {
+	store := &recordingStore{}
+	store.err = errors.New("temporary outage")
+	module := NewModule(testTraceConfig(8, 1, 1), store, testPayloadCipher())
+	module.WriteObserver(testWriteProps(), []byte("recover"))
+	require.Eventually(t, func() bool { return module.Health().CurrentGap != nil }, time.Second, 10*time.Millisecond)
+	store.mu.Lock()
+	store.err = nil
+	store.mu.Unlock()
+	require.Eventually(t, func() bool {
+		health := module.Health()
+		return health.State == HealthReady && health.CurrentGap == nil && health.LastGap != nil
+	}, time.Second, 10*time.Millisecond)
+	require.NoError(t, module.Shutdown(context.Background()))
 }
 
 func TestShutdownDrainsPendingBatch(t *testing.T) {
