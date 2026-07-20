@@ -246,3 +246,28 @@ func (r *Registry) MarkOffline(ctx context.Context, id int64) error {
 	r.mu.Unlock()
 	return r.repo.Update(ctx, snapshot)
 }
+
+// MarkActive 标记节点活跃(由启动探活 probe 调用,写 DB + 内存)
+//
+// 用于两类场景:
+//   - 进程启动时主动探活成功 → 从 DB 里读到的 offline 翻回 active,填 LastHeartbeatAt
+//     让 Watcher 90 秒窗口从此刻起算,而不是从进程启动起算
+//   - 运维手动拉回节点(maintenance → active 走 Update,不走本方法)
+//
+// 幂等:已经是 active 的节点再调只刷 LastHeartbeatAt + UpdatedAt,不 panic。
+// maintenance 节点由调用方判断跳过(本方法不做状态守卫)。
+func (r *Registry) MarkActive(ctx context.Context, id int64) error {
+	r.mu.Lock()
+	cur, ok := r.nodes[id]
+	if !ok {
+		r.mu.Unlock()
+		return ErrNotFound
+	}
+	now := time.Now()
+	cur.State = StateActive
+	cur.Stats.LastHeartbeatAt = now
+	cur.UpdatedAt = now
+	snapshot := *cur
+	r.mu.Unlock()
+	return r.repo.Update(ctx, snapshot)
+}
