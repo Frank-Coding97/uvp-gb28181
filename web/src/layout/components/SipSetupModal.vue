@@ -9,13 +9,18 @@ import ConfirmStep from "@/views/gb28181/sip/steps/ConfirmStep.vue";
 import { useSipSetup } from "@/views/gb28181/sip/useSipSetup";
 import { identityCanContinue, networkCanContinue } from "@/views/gb28181/sip/sipSetupRules";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     visible: boolean;
-}>();
+    // editing=true:从"编辑配置"入口进,标题/文案切换成编辑态,隐藏"稍后再配"按钮.
+    // editing=false(默认):首装引导,允许"稍后再配".
+    editing?: boolean;
+}>(), { editing: false });
 const emit = defineEmits<{
     close: [];
     saved: [];
 }>();
+
+const modalTitle = computed(() => (props.editing ? "编辑 SIP 配置" : "配置 SIP 服务"));
 
 const setup = useSipSetup();
 const step = ref(1);
@@ -76,15 +81,16 @@ function skipLater() {
 <template>
     <a-modal
         :visible="visible"
-        title="配置 SIP 服务"
+        :title="modalTitle"
         width="min(760px, calc(100vw - 24px))"
         :mask-closable="false"
         :esc-to-close="false"
-        :closable="false"
+        :closable="editing"
         modal-class="uvp-system-dialog sip-setup-dialog"
         unmount-on-close
+        @cancel="skipLater"
     >
-        <div class="sip-modal-intro">
+        <div v-if="!editing" class="sip-modal-intro">
             <span class="sip-modal-intro-badge">
                 <Bell :size="14" />
             </span>
@@ -135,7 +141,8 @@ function skipLater() {
         </div>
 
         <template #footer>
-            <a-button type="text" class="sip-modal-skip" @click="skipLater">稍后再配</a-button>
+            <a-button v-if="editing" type="text" class="sip-modal-skip" @click="skipLater">取消</a-button>
+            <a-button v-else type="text" class="sip-modal-skip" @click="skipLater">稍后再配</a-button>
             <span class="sip-modal-spacer" />
             <a-button v-if="step > 1" @click="step--">
                 <template #icon><ChevronLeft :size="16" /></template>
@@ -147,7 +154,7 @@ function skipLater() {
             </a-button>
             <a-button v-else type="primary" :loading="setup.saving.value" @click="save">
                 <template #icon><Save :size="16" /></template>
-                保存并启动
+                {{ editing ? "保存并应用" : "保存并启动" }}
             </a-button>
         </template>
     </a-modal>

@@ -121,6 +121,8 @@ export interface SipConfigSummary {
     port: number;
     domain: string;
     serverId: string;
+    // 明文密码.已认证 + 有 SIP 配置权限的调用方才能拿到 —— 用户抄给设备用.
+    password: string;
     hasPassword: boolean;
 }
 

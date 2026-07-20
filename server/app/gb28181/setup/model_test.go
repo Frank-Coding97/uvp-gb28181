@@ -32,8 +32,8 @@ func TestDeploymentMode_Valid(t *testing.T) {
 }
 
 func TestSIPConfig_PasswordIsNotSerialized(t *testing.T) {
-	b, err := json.Marshal(SIPConfig{ID: SingletonID, ServerID: "34020000002000000001", Password: "Secret123"})
+	b, err := json.Marshal(SIPConfig{ID: SingletonID, ServerID: "34020000002000000001", Password: "Sec12345Aa!!"})
 	require.NoError(t, err)
-	require.NotContains(t, string(b), "Secret123")
+	require.NotContains(t, string(b), "Sec12345Aa!!")
 	require.NotContains(t, string(b), "password")
 }

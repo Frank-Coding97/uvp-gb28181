@@ -40,7 +40,7 @@ func TestSetupController_AuditLogsNeverContainPassword(t *testing.T) {
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/skip", nil))
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 
-	request := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Secret123"}`
+	request := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Sec12345Aa!!"}`
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(request)))
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
@@ -55,7 +55,7 @@ func TestSetupController_AuditLogsNeverContainPassword(t *testing.T) {
 	}
 	require.Contains(t, encoded, "SIP 配置已保存")
 	require.Contains(t, encoded, "SIP 首次安装引导已暂缓")
-	require.NotContains(t, encoded, "Secret123")
+	require.NotContains(t, encoded, "Sec12345Aa!!")
 }
 
 func newSetupControllerRouter(controller *SetupController) *gin.Engine {
@@ -90,7 +90,7 @@ func decodeSetupResponse(t *testing.T, recorder *httptest.ResponseRecorder) map[
 
 func TestSetupController_StatusReflectsDBConfig(t *testing.T) {
 	db := newSetupControllerDB(t)
-	password := "Secret123"
+	password := "Sec12345Aa!!"
 	require.NoError(t, db.Create(&gbsetup.SIPConfig{
 		ID: gbsetup.SingletonID, DeploymentMode: gbsetup.DeploymentLAN,
 		ListenIP: "0.0.0.0", AdvertiseIP: "192.168.1.10", Port: 5061,
@@ -101,11 +101,14 @@ func TestSetupController_StatusReflectsDBConfig(t *testing.T) {
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", nil))
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.NotContains(t, recorder.Body.String(), password)
+	// 2026-07-20 起 status 接口返回明文密码 —— 用户需要抄到设备端;权限拦截在 gin middleware,
+	// 该 test 用无中间件的 router,直接验证 view 层字段展开.
+	require.Contains(t, recorder.Body.String(), password)
 	data := decodeSetupResponse(t, recorder)["data"].(map[string]any)
 	require.Equal(t, "configured", data["configStatus"])
 	config := data["config"].(map[string]any)
 	require.Equal(t, true, config["hasPassword"])
+	require.Equal(t, password, config["password"])
 	// runtime 字段一定存在,新架构下这是前端 gating 依据
 	_, ok := data["runtime"].(map[string]any)
 	require.True(t, ok, "runtime snapshot should always be present")
@@ -128,7 +131,7 @@ func TestSetupController_SaveConfigAndPreservePassword(t *testing.T) {
 	runtime := gbsetup.NewRuntimeStatus()
 	router := newSetupControllerRouter(NewSetupController(db, runtime, nil, nil))
 
-	request := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Secret123"}`
+	request := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Sec12345Aa!!"}`
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(request)))
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
@@ -143,7 +146,7 @@ func TestSetupController_SaveConfigAndPreservePassword(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	var row gbsetup.SIPConfig
 	require.NoError(t, db.First(&row, gbsetup.SingletonID).Error)
-	require.Equal(t, "Secret123", row.Password)
+	require.Equal(t, "Sec12345Aa!!", row.Password)
 	require.Equal(t, 5062, row.Port)
 }
 
@@ -157,7 +160,7 @@ func TestSetupController_SaveConfigTriggersReload(t *testing.T) {
 		return nil
 	}
 	router := newSetupControllerRouter(NewSetupController(db, runtime, nil, reload))
-	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Secret123"}`
+	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Sec12345Aa!!"}`
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(body)))
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
@@ -174,7 +177,7 @@ func TestSetupController_SaveConfigReloadFailurePropagates(t *testing.T) {
 		return errors.New("bind failed")
 	}
 	router := newSetupControllerRouter(NewSetupController(db, runtime, nil, reload))
-	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Secret123"}`
+	body := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"192.168.1.10","port":5061,"domain":"3402000000","serverId":"34020000002000000001","password":"Sec12345Aa!!"}`
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(body)))
 	// 保存动作本身成功(数据已落 DB),reload 失败通过响应体告知前端
@@ -187,7 +190,7 @@ func TestSetupController_SaveConfigReloadFailurePropagates(t *testing.T) {
 func TestSetupController_SaveConfigValidationAndDatabaseFailure(t *testing.T) {
 	db := newSetupControllerDB(t)
 	router := newSetupControllerRouter(NewSetupController(db, gbsetup.NewRuntimeStatus(), nil, nil))
-	invalid := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"0.0.0.0","port":5061,"domain":"bad","serverId":"bad","password":"Secret123"}`
+	invalid := `{"deploymentMode":"lan","listenIp":"0.0.0.0","advertiseIp":"0.0.0.0","port":5061,"domain":"bad","serverId":"bad","password":"Sec12345Aa!!"}`
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/config", bytes.NewBufferString(invalid)))
 	require.Equal(t, http.StatusBadRequest, recorder.Code)

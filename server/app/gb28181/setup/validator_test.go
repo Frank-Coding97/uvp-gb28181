@@ -7,7 +7,7 @@ import (
 )
 
 func TestValidateSIPConfigRequest_ValidLANWildcard(t *testing.T) {
-	password := "Secret123"
+	password := "Sec12345Aa!!"
 	err := ValidateSIPConfigRequest(validSaveRequest(&password), false)
 	require.NoError(t, err)
 }
@@ -34,7 +34,7 @@ func TestValidateSIPConfigRequest_FieldErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			password := "Secret123"
+			password := "Sec12345Aa!!"
 			req := validSaveRequest(&password)
 			tt.mutate(&req)
 			err := ValidateSIPConfigRequest(req, false)
@@ -58,8 +58,41 @@ func TestValidateSIPConfigRequest_PasswordEditingSemantics(t *testing.T) {
 	require.Contains(t, validationErr.Fields, "password")
 }
 
+func TestPasswordStrength(t *testing.T) {
+	weak := []struct {
+		name     string
+		password string
+	}{
+		{"too short", "Aa1!Aa1"},
+		{"only lower", "abcdefghijkl"},
+		{"only digits", "123456789012"},
+		{"upper+lower no digit no special", "AbcdefghijklAbc"},
+		{"common weak 12345678", "12345678"},
+		{"common weak password", "password"},
+		{"common weak admin123", "admin123"},
+		{"sequential ascending", "0123456789ab"},
+	}
+	for _, tt := range weak {
+		t.Run("reject "+tt.name, func(t *testing.T) {
+			require.NotEmpty(t, checkPasswordStrength(tt.password), "expected %q to be rejected", tt.password)
+		})
+	}
+
+	strong := []string{
+		"Sec12345Aa!!",
+		"MyP@ssw0rdX1",
+		"K9#nT2xQvL5m",
+		"S3cur3-Sip-Key!",
+	}
+	for _, pw := range strong {
+		t.Run("accept "+pw, func(t *testing.T) {
+			require.Empty(t, checkPasswordStrength(pw), "expected %q to be accepted", pw)
+		})
+	}
+}
+
 func TestValidateSIPConfigRequest_PortBoundaries(t *testing.T) {
-	password := "Secret123"
+	password := "Sec12345Aa!!"
 	for _, port := range []int{1, 65535} {
 		req := validSaveRequest(&password)
 		req.Port = port

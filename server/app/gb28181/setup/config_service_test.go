@@ -32,7 +32,7 @@ func validSaveRequest(password *string) SaveSIPConfigRequest {
 func TestSIPConfigService_SaveNewConfig(t *testing.T) {
 	db := newConfigTestDB(t)
 	svc := NewSIPConfigService(db)
-	password := "Secret123"
+	password := "Sec12345Aa!!"
 
 	view, err := svc.Save(context.Background(), validSaveRequest(&password))
 	require.NoError(t, err)
@@ -42,13 +42,13 @@ func TestSIPConfigService_SaveNewConfig(t *testing.T) {
 	row, err := NewSIPConfigRepository(db).Get(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, row)
-	require.Equal(t, "Secret123", row.Password)
+	require.Equal(t, "Sec12345Aa!!", row.Password)
 }
 
 func TestSIPConfigService_EditPreservesPassword(t *testing.T) {
 	db := newConfigTestDB(t)
 	svc := NewSIPConfigService(db)
-	password := "Secret123"
+	password := "Sec12345Aa!!"
 	_, err := svc.Save(context.Background(), validSaveRequest(&password))
 	require.NoError(t, err)
 
@@ -60,7 +60,7 @@ func TestSIPConfigService_EditPreservesPassword(t *testing.T) {
 
 	row, err := NewSIPConfigRepository(db).Get(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, "Secret123", row.Password)
+	require.Equal(t, "Sec12345Aa!!", row.Password)
 }
 
 func TestSIPConfigService_NewConfigRequiresPassword(t *testing.T) {
@@ -75,7 +75,7 @@ func TestSIPConfigService_NewConfigRequiresPassword(t *testing.T) {
 
 func TestSIPConfigService_ViewDoesNotExposePassword(t *testing.T) {
 	db := newConfigTestDB(t)
-	password := "Secret123"
+	password := "Sec12345Aa!!"
 	svc := NewSIPConfigService(db)
 	_, err := svc.Save(context.Background(), validSaveRequest(&password))
 	require.NoError(t, err)

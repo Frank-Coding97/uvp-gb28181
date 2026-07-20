@@ -52,7 +52,7 @@ func completeYAMLSource() fakeYAMLSource {
 		"gb28181.sip.port":           5061,
 		"gb28181.sip.domain":         "3402000000",
 		"gb28181.sip.serverid":       "34020000002000000001",
-		"gb28181.sip.password":       "Secret123",
+		"gb28181.sip.password":       "Sec12345Aa!!",
 	}
 }
 
@@ -66,7 +66,7 @@ func TestMigrateYAMLToDB_SeedsWhenLegacyDeviceExists(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, row)
 	require.Equal(t, "192.168.1.20", row.ListenIP)
-	require.Equal(t, "Secret123", row.Password)
+	require.Equal(t, "Sec12345Aa!!", row.Password)
 }
 
 func TestMigrateYAMLToDB_SkipsWhenNoLegacyDevice(t *testing.T) {

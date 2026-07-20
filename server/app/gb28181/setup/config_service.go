@@ -20,6 +20,9 @@ type SaveSIPConfigRequest struct {
 	Password            *string
 }
 
+// SIPConfigView 平台内部展示用视图.
+// Password 明文回传给已认证 + 有 SIP 配置权限的调用方 —— 用户需要抄给设备录入.
+// 认证/权限拦在 controller 层,该 view 本身不做过滤.
 type SIPConfigView struct {
 	DeploymentMode      DeploymentMode `json:"deploymentMode"`
 	ListenIP            string         `json:"listenIp"`
@@ -28,6 +31,7 @@ type SIPConfigView struct {
 	Port                int            `json:"port"`
 	Domain              string         `json:"domain"`
 	ServerID            string         `json:"serverId"`
+	Password            string         `json:"password"`
 	HasPassword         bool           `json:"hasPassword"`
 }
 
@@ -102,6 +106,7 @@ func sipConfigView(row *SIPConfig) SIPConfigView {
 		Port:                row.Port,
 		Domain:              row.Domain,
 		ServerID:            row.ServerID,
+		Password:            row.Password,
 		HasPassword:         row.Password != "",
 	}
 }

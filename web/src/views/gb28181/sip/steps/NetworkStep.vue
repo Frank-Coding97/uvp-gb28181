@@ -115,6 +115,7 @@ watch(
                 <a-input
                     :model-value="form.advertiseIp"
                     placeholder="例如 203.0.113.10"
+                    allow-clear
                     @update:model-value="onAdvertiseInputChange"
                 />
                 <template #extra>

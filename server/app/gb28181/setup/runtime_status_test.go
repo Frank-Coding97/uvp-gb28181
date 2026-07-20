@@ -35,9 +35,9 @@ func TestRuntimeStatus_ConfigSavedRequiresRestart(t *testing.T) {
 
 func TestRuntimeStatus_RedactsPasswordFromFailure(t *testing.T) {
 	status := NewRuntimeStatus()
-	status.MarkFailed("bind failed password=Secret123 address=0.0.0.0")
+	status.MarkFailed("bind failed password=Sec12345Aa!! address=0.0.0.0")
 	summary := status.Snapshot().ErrorSummary
-	require.NotContains(t, summary, "Secret123")
+	require.NotContains(t, summary, "Sec12345Aa!!")
 	require.Contains(t, summary, "password=[redacted]")
 }
 

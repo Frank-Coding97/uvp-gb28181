@@ -56,9 +56,9 @@ func TestStartSIPRuntime_TracksFailuresAndAsyncListenError(t *testing.T) {
 		require.True(t, server.started)
 		require.Equal(t, gbsetup.RuntimeRunning, status.Snapshot().State)
 
-		server.onError(errors.New("listen failed password=Secret123"))
+		server.onError(errors.New("listen failed password=Sec12345Aa!!"))
 		snapshot := status.Snapshot()
 		require.Equal(t, gbsetup.RuntimeFailed, snapshot.State)
-		require.NotContains(t, snapshot.ErrorSummary, "Secret123")
+		require.NotContains(t, snapshot.ErrorSummary, "Sec12345Aa!!")
 	})
 }

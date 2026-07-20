@@ -12,6 +12,7 @@ const configuredStatus = {
         port: 5061,
         domain: "3402000000",
         serverId: "34020000002000000001",
+        password: "Secret123",
         hasPassword: true
     }
 };
