@@ -306,3 +306,85 @@ func TestStartUpdateStreamFailRollsBackAll(t *testing.T) {
 		t.Errorf("记录失败应回滚 BYE 和 RTP, bye=%d close=%d", inv.byeCalls.Load(), z.closeCalls.Load())
 	}
 }
+
+// ===== 通道快照 T4 tests =====
+
+type fakeSnapshotSvc struct {
+	called    atomic.Int32
+	lastArgs  atomic.Value // snapshotArgs
+}
+
+type snapshotArgs struct {
+	nodeID, streamID, deviceID, channelID string
+}
+
+func (f *fakeSnapshotSvc) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string) {
+	f.called.Add(1)
+	f.lastArgs.Store(snapshotArgs{nodeID, streamID, deviceID, channelID})
+}
+
+// TestStartTriggersSnapshotAfterWaitReady 通道快照 T4:play 成功后应异步调 FireAfterPlay
+func TestStartTriggersSnapshotAfterWaitReady(t *testing.T) {
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	s, n, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	fake := &fakeSnapshotSvc{}
+	s.snapshotSvc = fake // 直接注入(WithSnapshotService 走 NewWithScheduler 路径)
+
+	inv.onInvite = func(sess *uac.Session) {
+		go func(sid string) {
+			time.Sleep(50 * time.Millisecond)
+			n.Publish(sid)
+		}(sess.StreamID)
+	}
+
+	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	if err != nil {
+		t.Fatalf("Start 应成功: %v", err)
+	}
+	if fake.called.Load() != 1 {
+		t.Errorf("FireAfterPlay 应被调 1 次,实际 %d", fake.called.Load())
+	}
+	got, _ := fake.lastArgs.Load().(snapshotArgs)
+	if got.deviceID != "34020000001320000002" || got.channelID != "12345678911116666661" {
+		t.Errorf("传参不对: %+v", got)
+	}
+	// 单节点路径下 nodeID 为空字符串
+	if got.nodeID != "" {
+		t.Errorf("单节点路径 nodeID 应为空,实际 %q", got.nodeID)
+	}
+}
+
+// TestStartNoSnapshotSvcStillWorks 通道快照 T4:未注入 snapshotSvc 时 Start 主链路不受影响
+func TestStartNoSnapshotSvcStillWorks(t *testing.T) {
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	s, n, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	// 故意不设 s.snapshotSvc
+
+	inv.onInvite = func(sess *uac.Session) {
+		go func(sid string) {
+			time.Sleep(50 * time.Millisecond)
+			n.Publish(sid)
+		}(sess.StreamID)
+	}
+
+	res, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	if err != nil {
+		t.Fatalf("nil snapshotSvc 时 Start 也应正常: %v", err)
+	}
+	if res.StreamID == "" {
+		t.Error("Start 结果应正常返回")
+	}
+}
+
+// TestWithSnapshotServiceOption 通道快照 T4:WithSnapshotService option 装配后可用
+func TestWithSnapshotServiceOption(t *testing.T) {
+	fake := &fakeSnapshotSvc{}
+	// 单独构造一个只走 New() 后手工注入 option 的 service —— 覆盖 Option 函数
+	s := &Service{}
+	WithSnapshotService(fake)(s)
+	if s.snapshotSvc != fake {
+		t.Error("WithSnapshotService 应把 fake 注入到 snapshotSvc")
+	}
+}
