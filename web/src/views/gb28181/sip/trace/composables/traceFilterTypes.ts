@@ -15,6 +15,18 @@ export interface TraceFiltersState {
     captureEndsAt: string;
 }
 
+export interface TimeRange {
+    start: number;
+    end: number;
+}
+
+export function parseTimeRange(range: [string, string]): TimeRange | undefined {
+    if (!range[0] || !range[1]) return undefined;
+    const start = dayjs(range[0]).valueOf();
+    const end = dayjs(range[1]).valueOf();
+    return { start, end };
+}
+
 export const DEFAULT_RANGE_MINUTES = 15;
 
 const DATE_FMT = "YYYY-MM-DD HH:mm:ss";

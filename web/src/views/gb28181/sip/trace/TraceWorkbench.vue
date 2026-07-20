@@ -5,6 +5,7 @@ import { RefreshCw } from "lucide-vue-next";
 import { useTraceFilters } from "./composables/useTraceFilters";
 import { useTraceHealth } from "./composables/useTraceHealth";
 import type { WorkbenchView } from "./composables/traceFilterTypes";
+import TraceTextView from "./views/TraceTextView.vue";
 
 const router = useRouter();
 const { state, setView } = useTraceFilters();
@@ -87,10 +88,8 @@ onMounted(() => {
             </div>
 
             <main v-if="canQuery" class="trace-workspace">
-                <section class="view-placeholder" data-testid="active-view">
-                    <template v-if="state.view === 'text'">
-                        <a-empty description="文本流视图(T-3.3 落地)" />
-                    </template>
+                <section class="view-active" data-testid="active-view">
+                    <TraceTextView v-if="state.view === 'text'" />
                     <template v-else-if="state.view === 'session'">
                         <a-empty description="时序图视图(T-5 落地)" />
                     </template>
@@ -157,6 +156,12 @@ onMounted(() => {
     border-radius: 6px;
 }
 .trace-workspace {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+}
+.view-active {
     flex: 1;
     min-height: 0;
     display: flex;

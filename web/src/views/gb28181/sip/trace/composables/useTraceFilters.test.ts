@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
-import { createRouter, createMemoryHistory, type Router } from "vue-router";
+import { createRouter, createMemoryHistory } from "vue-router";
 import { defineComponent, h } from "vue";
 import { useTraceFilters } from "./useTraceFilters";
 
@@ -13,7 +13,7 @@ const Probe = defineComponent({
 });
 
 function makeRouter(initial: string) {
-    const router: Router = createRouter({
+    const router = createRouter({
         history: createMemoryHistory(),
         routes: [
             { path: "/gb28181/sip-traces", component: Probe },
