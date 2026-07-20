@@ -6,6 +6,7 @@ import { useTraceFilters } from "./composables/useTraceFilters";
 import { useTraceHealth } from "./composables/useTraceHealth";
 import type { WorkbenchView } from "./composables/traceFilterTypes";
 import TraceTextView from "./views/TraceTextView.vue";
+import TraceSessionView from "./views/TraceSessionView.vue";
 
 const router = useRouter();
 const { state, setView } = useTraceFilters();
@@ -90,9 +91,7 @@ onMounted(() => {
             <main v-if="canQuery" class="trace-workspace">
                 <section class="view-active" data-testid="active-view">
                     <TraceTextView v-if="state.view === 'text'" />
-                    <template v-else-if="state.view === 'session'">
-                        <a-empty description="时序图视图(T-5 落地)" />
-                    </template>
+                    <TraceSessionView v-else-if="state.view === 'session'" />
                     <template v-else-if="state.view === 'matrix'">
                         <a-empty description="通信矩阵视图(T-6 落地)" />
                     </template>
