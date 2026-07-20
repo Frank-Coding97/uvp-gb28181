@@ -1,31 +1,30 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import { Eye, EyeOff, RotateCcw } from "lucide-vue-next";
+import { ref, watch } from "vue";
+import { Eye, EyeOff } from "lucide-vue-next";
 import type { SipSetupForm } from "../useSipSetup";
 import { deriveDomain } from "../sipSetupRules";
 
 const props = defineProps<{ form: SipSetupForm; hasExistingPassword: boolean }>();
 const emit = defineEmits<{ update: [patch: Partial<SipSetupForm>] }>();
-const domainMode = ref<"auto" | "custom">(
-    props.form.domain && props.form.domain !== deriveDomain(props.form.serverId) ? "custom" : "auto"
-);
-const passwordVisible = ref(false);
+// 引导页首次配置场景,默认让密码明文可见(新填的密码需要能看到自己在敲什么).
+// 用户点眼睛图标可切回遮罩.
+const passwordVisible = ref(true);
 
+// SIP 域按 GB/T 28181-2016 规定必然是平台 ID 前 10 位(行政区划码).
+// 用户不再手动编辑,serverId 变化时自动同步 domain.
 function updateServerId(value: string) {
-    const patch: Partial<SipSetupForm> = { serverId: value };
-    if (domainMode.value === "auto") patch.domain = deriveDomain(value);
-    emit("update", patch);
+    emit("update", { serverId: value, domain: deriveDomain(value) });
 }
 
-function updateDomain(value: string) {
-    domainMode.value = "custom";
-    emit("update", { domain: value });
-}
-
-function restoreAutomaticDomain() {
-    domainMode.value = "auto";
-    emit("update", { domain: deriveDomain(props.form.serverId) });
-}
+// 兜底:进入本步时若 domain 与 serverId 不一致(比如老配置或跨步骤回填)也同步一次.
+watch(
+    () => props.form.serverId,
+    serverId => {
+        const derived = deriveDomain(serverId);
+        if (derived && derived !== props.form.domain) emit("update", { domain: derived });
+    },
+    { immediate: true }
+);
 </script>
 
 <template>
@@ -49,26 +48,13 @@ function restoreAutomaticDomain() {
             </a-form-item>
         </div>
 
-        <a-form-item label="SIP 域" required>
+        <a-form-item label="SIP 域">
             <a-input
                 :model-value="form.domain"
-                :max-length="10"
-                placeholder="默认取平台 ID 前 10 位"
-                @update:model-value="updateDomain"
-            >
-                <template #suffix>
-                    <a-button
-                        v-if="domainMode === 'custom'"
-                        type="text"
-                        shape="circle"
-                        title="恢复自动推导"
-                        @click="restoreAutomaticDomain"
-                    >
-                        <RotateCcw :size="15" />
-                    </a-button>
-                </template>
-            </a-input>
-            <template #extra>{{ domainMode === "auto" ? "自动跟随平台 ID" : "自定义域" }}</template>
+                disabled
+                placeholder="填入平台 ID 后自动生成"
+            />
+            <template #extra>按 GB/T 28181-2016,SIP 域取平台 ID 前 10 位(行政区划码),无需手动填写。</template>
         </a-form-item>
 
         <a-form-item label="SIP 密码" :required="!hasExistingPassword">

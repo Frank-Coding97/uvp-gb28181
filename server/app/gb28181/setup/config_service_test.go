@@ -9,15 +9,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func newConfigTestDB(t *testing.T, withInstallation bool) *gorm.DB {
+func newConfigTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&SIPConfig{}))
-	if withInstallation {
-		require.NoError(t, db.AutoMigrate(&SystemInstallation{}))
-		require.NoError(t, db.Create(&SystemInstallation{ID: SingletonID, OnboardingVersion: 1, SIPOnboardingStatus: OnboardingPending}).Error)
-	}
 	return db
 }
 
@@ -33,8 +29,8 @@ func validSaveRequest(password *string) SaveSIPConfigRequest {
 	}
 }
 
-func TestSIPConfigService_SaveCompletesOnboarding(t *testing.T) {
-	db := newConfigTestDB(t, true)
+func TestSIPConfigService_SaveNewConfig(t *testing.T) {
+	db := newConfigTestDB(t)
 	svc := NewSIPConfigService(db)
 	password := "Secret123"
 
@@ -43,13 +39,14 @@ func TestSIPConfigService_SaveCompletesOnboarding(t *testing.T) {
 	require.True(t, view.HasPassword)
 	require.Equal(t, "192.168.1.10", view.AdvertiseIP)
 
-	state, err := NewInstallationService(db).Current(context.Background())
+	row, err := NewSIPConfigRepository(db).Get(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, OnboardingCompleted, state.Status)
+	require.NotNil(t, row)
+	require.Equal(t, "Secret123", row.Password)
 }
 
 func TestSIPConfigService_EditPreservesPassword(t *testing.T) {
-	db := newConfigTestDB(t, true)
+	db := newConfigTestDB(t)
 	svc := NewSIPConfigService(db)
 	password := "Secret123"
 	_, err := svc.Save(context.Background(), validSaveRequest(&password))
@@ -67,7 +64,7 @@ func TestSIPConfigService_EditPreservesPassword(t *testing.T) {
 }
 
 func TestSIPConfigService_NewConfigRequiresPassword(t *testing.T) {
-	db := newConfigTestDB(t, true)
+	db := newConfigTestDB(t)
 	_, err := NewSIPConfigService(db).Save(context.Background(), validSaveRequest(nil))
 	require.ErrorIs(t, err, ErrSIPPasswordRequired)
 
@@ -76,19 +73,8 @@ func TestSIPConfigService_NewConfigRequiresPassword(t *testing.T) {
 	require.Zero(t, count)
 }
 
-func TestSIPConfigService_RollsBackWhenOnboardingUpdateFails(t *testing.T) {
-	db := newConfigTestDB(t, false)
-	password := "Secret123"
-	_, err := NewSIPConfigService(db).Save(context.Background(), validSaveRequest(&password))
-	require.Error(t, err)
-
-	var count int64
-	require.NoError(t, db.Model(&SIPConfig{}).Count(&count).Error)
-	require.Zero(t, count)
-}
-
 func TestSIPConfigService_ViewDoesNotExposePassword(t *testing.T) {
-	db := newConfigTestDB(t, true)
+	db := newConfigTestDB(t)
 	password := "Secret123"
 	svc := NewSIPConfigService(db)
 	_, err := svc.Save(context.Background(), validSaveRequest(&password))

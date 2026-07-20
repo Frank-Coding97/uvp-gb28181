@@ -13,28 +13,22 @@ func newModelTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&SystemInstallation{}, &SIPConfig{}))
+	require.NoError(t, db.AutoMigrate(&SIPConfig{}))
 	return db
 }
 
-func TestSetupModels_AutoMigrateAndSingleton(t *testing.T) {
+func TestSetupModels_AutoMigrate(t *testing.T) {
 	db := newModelTestDB(t)
-	require.True(t, db.Migrator().HasTable("system_installation"))
 	require.True(t, db.Migrator().HasTable("gb_sip_config"))
-	require.True(t, db.Migrator().HasColumn(&SystemInstallation{}, "sip_onboarding_status"))
 	require.True(t, db.Migrator().HasColumn(&SIPConfig{}, "advertise_ip"))
-
-	first := SystemInstallation{ID: SingletonID, SIPOnboardingStatus: OnboardingPending, OnboardingVersion: 1}
-	require.NoError(t, db.Create(&first).Error)
-	second := SystemInstallation{ID: SingletonID, SIPOnboardingStatus: OnboardingLegacy, OnboardingVersion: 1}
-	require.Error(t, db.Create(&second).Error)
+	require.True(t, db.Migrator().HasColumn(&SIPConfig{}, "deployment_mode"))
 }
 
-func TestOnboardingStatus_Valid(t *testing.T) {
-	for _, status := range []OnboardingStatus{OnboardingPending, OnboardingCompleted, OnboardingSkipped, OnboardingLegacy} {
-		require.True(t, status.Valid(), status)
-	}
-	require.False(t, OnboardingStatus("unknown").Valid())
+func TestDeploymentMode_Valid(t *testing.T) {
+	require.True(t, DeploymentLAN.Valid())
+	require.True(t, DeploymentPublic.Valid())
+	require.False(t, DeploymentMode("unknown").Valid())
+	require.False(t, DeploymentMode("").Valid())
 }
 
 func TestSIPConfig_PasswordIsNotSerialized(t *testing.T) {

@@ -1247,23 +1247,10 @@ CREATE TABLE `sys_param` (
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COMMENT='系统参数配置';
 
 -- ----------------------------
--- SIP first-install setup (full install: pending)
+-- SIP 首次部署配置 (2026-07-20 起 gb_sip_config 是引导判据的唯一权威源;
+-- system_installation 状态机已废除,新装无需 seed 任何行,gb_sip_config 空即触发引导)
 -- ----------------------------
 DROP TABLE IF EXISTS `gb_sip_config`;
-DROP TABLE IF EXISTS `system_installation`;
-
-CREATE TABLE `system_installation` (
-  `id` tinyint unsigned NOT NULL COMMENT '单例主键，固定为 1',
-  `instance_id` varchar(36) NOT NULL DEFAULT '' COMMENT '平台实例 UUID，首次启动时补齐',
-  `onboarding_version` int unsigned NOT NULL DEFAULT 1 COMMENT '引导协议版本',
-  `sip_onboarding_status` varchar(16) NOT NULL DEFAULT 'pending' COMMENT 'pending/completed/skipped/legacy',
-  `sip_onboarding_finished_at` datetime DEFAULT NULL COMMENT '完成或跳过时间',
-  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-  PRIMARY KEY (`id`),
-  CONSTRAINT `chk_system_installation_singleton` CHECK (`id` = 1),
-  CONSTRAINT `chk_system_installation_sip_status` CHECK (`sip_onboarding_status` IN ('pending', 'completed', 'skipped', 'legacy'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='平台安装与引导状态';
 
 CREATE TABLE `gb_sip_config` (
   `id` tinyint unsigned NOT NULL COMMENT '单例主键，固定为 1',
@@ -1285,22 +1272,6 @@ CREATE TABLE `gb_sip_config` (
 
 -- MySQL 5.7 解析但不执行 CHECK，触发器用于真正保证 id=1。
 DELIMITER $$
-CREATE TRIGGER `trg_system_installation_singleton_insert`
-BEFORE INSERT ON `system_installation`
-FOR EACH ROW
-BEGIN
-  IF NEW.`id` <> 1 THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'system_installation only accepts id=1';
-  END IF;
-END$$
-CREATE TRIGGER `trg_system_installation_singleton_update`
-BEFORE UPDATE ON `system_installation`
-FOR EACH ROW
-BEGIN
-  IF NEW.`id` <> 1 THEN
-    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'system_installation only accepts id=1';
-  END IF;
-END$$
 CREATE TRIGGER `trg_gb_sip_config_singleton_insert`
 BEFORE INSERT ON `gb_sip_config`
 FOR EACH ROW
@@ -1319,11 +1290,8 @@ BEGIN
 END$$
 DELIMITER ;
 
-INSERT INTO `system_installation` (
-  `id`, `instance_id`, `onboarding_version`, `sip_onboarding_status`,
-  `sip_onboarding_finished_at`, `created_at`, `updated_at`
-)
-VALUES (1, '', 1, 'pending', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+-- 首装用户不 seed gb_sip_config,DB 为空触发引导页.
+-- 老 stack 升级由 setup.MigrateYAMLToDB 一次性从 config.yml 搬迁到本表.
 
 -- UVP UI language: use Lucide icons for menu entries.
 UPDATE `sys_menu`

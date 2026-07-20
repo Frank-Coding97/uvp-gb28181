@@ -109,7 +109,8 @@ async function skip() {
                 <ConfirmStep
                     v-else
                     :form="setup.form"
-                    :has-password="setup.hasExistingPassword.value || setup.form.password !== ''"
+                    :has-password="setup.hasExistingPassword.value"
+                    :network="setup.network.value"
                 />
             </div>
 

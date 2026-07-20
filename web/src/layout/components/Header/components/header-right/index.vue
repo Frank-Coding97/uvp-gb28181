@@ -1,5 +1,7 @@
 <template>
   <div class="header_setting" :class="isMobile && 'head-absolute-fix'">
+    <!-- SIP 引导提醒:未配置/启动失败时才显示 -->
+    <SipSetupBell />
     <!-- 通知 -->
     <a-popover position="bottom" trigger="click">
       <a-button size="mini" type="text" class="icon_btn notice" id="system-notice">
@@ -89,6 +91,7 @@
 
 <script setup lang="ts">
 import Notice from "@/layout/components/Header/components/Notice/index.vue";
+import SipSetupBell from "@/layout/components/Header/components/SipSetupBell.vue";
 import SystemSettings from "@/layout/components/Header/components/system-settings/index.vue";
 //import myImage from "@/assets/img/my-image.jpg";
 import { Modal } from "@arco-design/web-vue";

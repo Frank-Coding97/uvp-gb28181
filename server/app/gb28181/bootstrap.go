@@ -94,8 +94,6 @@ func (a schedulerLogRepoAdapter) PruneOlderThan(ctx context.Context, t time.Time
 	return a.inner.PruneOlderThan(ctx, t)
 }
 
-var ErrSIPUnconfigured = errors.New("SIP configuration is missing")
-
 type sipRuntimeServer interface {
 	SetRecorder(metrics.Recorder)
 	SetErrorHandler(func(error))
@@ -175,39 +173,6 @@ func ZLMRegistry() *node.Registry { return zlmRegistry }
 // 可能为 nil:DB 不可达或 Switch 全部失败时
 func ZLMScheduler() *gbzlmsched.Manager { return zlmScheduler }
 
-func applyEffectiveSIPConfig(base gbconfig.Config, effective gbsetup.EffectiveSIPConfig) (gbconfig.Config, error) {
-	if effective.Source == gbsetup.ConfigSourceMissing {
-		return base, ErrSIPUnconfigured
-	}
-	password := effective.Password
-	request := gbsetup.SaveSIPConfigRequest{
-		DeploymentMode: effective.DeploymentMode,
-		ListenIP:       effective.ListenIP,
-		AdvertiseIP:    effective.AdvertiseIP,
-		Port:           effective.Port,
-		Domain:         effective.Domain,
-		ServerID:       effective.ServerID,
-		Password:       &password,
-	}
-	if err := gbsetup.ValidateSIPConfigRequest(request, false); err != nil {
-		return base, err
-	}
-	transports := effective.Transport
-	if len(transports) == 0 {
-		transports = []string{"udp", "tcp"}
-	}
-	base.SIP = gbconfig.SIPConfig{
-		ListenIP:    effective.ListenIP,
-		AdvertiseIP: effective.AdvertiseIP,
-		Port:        effective.Port,
-		Transport:   transports,
-		Domain:      effective.Domain,
-		ServerID:    effective.ServerID,
-		Password:    effective.Password,
-	}
-	return base, nil
-}
-
 func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbsetup.RuntimeStatus, factory sipRuntimeFactory) (sipRuntimeServer, error) {
 	status.MarkStarting()
 	server, err := factory(cfg)
@@ -229,7 +194,7 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 
 func startControlPlane(cfg gbconfig.Config) {
 	setupCivilCodeService()
-	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil))
+	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
 	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
 		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
 	))
@@ -290,7 +255,7 @@ func startControlPlane(cfg gbconfig.Config) {
 }
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
-// 若 gb28181.enabled=false 则跳过
+// 若 gb28181.enabled=false 则跳过。SIP 未配置时不启 SIP 依赖,由前端引导页录入并触发热启动。
 func Start() {
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
@@ -300,38 +265,74 @@ func Start() {
 	}
 	startControlPlane(cfg)
 
-	effective, err := gbsetup.NewEffectiveConfigLoader(app.DB(), app.ConfigYml, nil).Load(context.Background())
+	// 老 stack 升级迁移:如果 DB 空 + YAML 有 SIP 段 + gb_device 有历史数据 → 一次性 seed.
+	// 幂等,首启后 DB 有数据下次调用直接 skip.
+	if migrated, err := gbsetup.MigrateYAMLToDB(context.Background(), app.DB(), app.ConfigYml); err != nil {
+		app.ZapLog.Warn("GB28181 SIP YAML 一次性迁移失败,忽略继续", zap.Error(err))
+	} else if migrated {
+		app.ZapLog.Info("GB28181 SIP 老 stack YAML 配置已迁移到 gb_sip_config,可在 config.yml 移除 gb28181.sip.* 段")
+	}
+
+	sipCfg, ok, err := loadSIPConfigFromDB(cfg)
 	if err != nil {
 		sipRuntimeStatus.MarkFailed(err.Error())
-		app.ZapLog.Error("GB28181 SIP 有效配置加载失败,后台继续启动", zap.Error(err))
+		app.ZapLog.Error("GB28181 SIP 配置加载失败,后台继续启动", zap.Error(err))
 		return
 	}
-	cfg, err = applyEffectiveSIPConfig(cfg, effective)
-	if errors.Is(err, ErrSIPUnconfigured) {
+	if !ok {
 		sipRuntimeStatus.MarkUnconfigured()
-		app.ZapLog.Warn("GB28181 SIP 尚未配置,跳过 SIP 依赖并继续启动后台")
-		return
-	}
-	if err != nil {
-		sipRuntimeStatus.MarkFailed(err.Error())
-		app.ZapLog.Error("GB28181 SIP 配置非法,跳过 SIP 依赖并继续启动后台", zap.Error(err))
+		app.ZapLog.Warn("GB28181 SIP 尚未配置,跳过 SIP 依赖并继续启动后台(等待引导页录入)")
 		return
 	}
 
+	if err := startSIPDependencies(sipCfg); err != nil {
+		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
+		return
+	}
+}
+
+// loadSIPConfigFromDB 是唯一的 SIP 配置来源:数据库 gb_sip_config.
+// 无记录 → (base, false, nil):走引导流程
+// 有记录且合法 → (fullCfg, true, nil)
+// 有记录但字段非法 → (base, false, err):记录到 runtime,不启 SIP
+func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
+	row, err := gbsetup.NewSIPConfigRepository(app.DB()).Get(context.Background())
+	if err != nil {
+		return base, false, err
+	}
+	if row == nil {
+		return base, false, nil
+	}
+	base.SIP = gbconfig.SIPConfig{
+		ListenIP:    row.ListenIP,
+		AdvertiseIP: row.AdvertiseIP,
+		Port:        row.Port,
+		Transport:   base.SIP.Transport,
+		Domain:      row.Domain,
+		ServerID:    row.ServerID,
+		Password:    row.Password,
+	}
+	if len(base.SIP.Transport) == 0 {
+		base.SIP.Transport = []string{"udp", "tcp"}
+	}
+	return base, true, nil
+}
+
+// startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
+// 幂等:reload 时可先 stopSIPDependencies 再调这里.
+func startSIPDependencies(cfg gbconfig.Config) error {
 	srv, err := startSIPRuntime(cfg, metricsAgg, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
 		return gbsip.NewServer(cfg)
 	})
 	if err != nil {
-		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
-		return
+		return err
 	}
 	sipServer = srv
 	if traceServer, ok := srv.(interface{ TraceRuntime() gbtrace.Runtime }); ok {
 		setupTraceController(cfg, traceServer.TraceRuntime())
 	}
 
-	// 装配手动 Catalog 刷新(前端"通道刷新"按钮 → controllers.RefreshDeviceCatalog)
-	// UAC 若初始化失败(srv.UAC()==nil),handler 内部会 no-op
+	// 装配依赖 UAC 的 processor(手动 catalog 刷新按钮、PTZ、订阅、告警)
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
 		gbroutes.SetDeviceMgmtPTZSender(u)
@@ -352,7 +353,6 @@ func Start() {
 	}
 	startPositionHistoryPruner()
 
-	// 启动离线扫描器(基于 keepalive_time 事实派生)
 	offlineScanner = device.NewOfflineScanner(
 		cfg.Device.OfflineScanInterval,
 		cfg.Device.KeepaliveTimeoutCount,
@@ -362,9 +362,6 @@ func Start() {
 	app.ZapLog.Info("GB28181 离线扫描器已启动", zap.Int("intervalSeconds", cfg.Device.OfflineScanInterval))
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
-	//
-	// 多节点路径:有 zlmRegistry + zlmScheduler → NewWithScheduler,流分配给 scheduler.Pick 出的节点
-	// 单节点路径(deprecated):走 play.New(cfg, zlmClient),M3 TF.2 删
 	if u := srv.UAC(); u != nil {
 		if zlmRegistry != nil && zlmScheduler != nil {
 			zlmLocationMap = stream.NewLocationMap()
@@ -375,7 +372,6 @@ func Start() {
 				u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo())
 			gbroutes.SetPlayService(playSvc)
-			// hook 端点 OnStreamChanged 反向 Bind 兜底
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
 			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)")
 		} else {
@@ -387,6 +383,61 @@ func Start() {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+	return nil
+}
+
+// stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
+// 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
+func stopSIPDependencies(ctx context.Context) {
+	if positionHistoryPruneCancel != nil {
+		positionHistoryPruneCancel()
+		positionHistoryPruneCancel = nil
+	}
+	if subscriptionScheduler != nil {
+		subscriptionScheduler.Stop()
+		subscriptionScheduler = nil
+	}
+	subscriptionService = nil
+	ptzService = nil
+	if offlineScanner != nil {
+		offlineScanner.Stop()
+		offlineScanner = nil
+	}
+	playSvc = nil
+	gbroutes.SetPlayService(nil)
+	gbroutes.SetDeviceMgmtCatalogTrigger(nil)
+	gbroutes.SetDeviceMgmtPTZSender(nil)
+	gbroutes.SetDeviceMgmtPTZService(nil)
+	gbroutes.SetDeviceMgmtSubscriptionManager(nil)
+	if sipServer != nil {
+		if err := sipServer.Shutdown(ctx); err != nil {
+			app.ZapLog.Warn("GB28181 SIP 服务优雅关闭失败,忽略继续", zap.Error(err))
+		}
+		sipServer = nil
+	}
+}
+
+// ReloadSIP 触发一次热重启:关旧 SIP 依赖 → 从 DB 重新读配置 → 启新的.
+// 由 SetupController.SaveConfig 保存后调用,让用户不需要重启进程.
+// 失败时 runtime state 会被 MarkFailed,不 panic.
+func ReloadSIP() error {
+	cfg := gbconfig.Load()
+	if !cfg.Enabled {
+		return errors.New("gb28181 未在 config.yml 启用,无法热启动")
+	}
+	sipCfg, ok, err := loadSIPConfigFromDB(cfg)
+	if err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		return err
+	}
+	if !ok {
+		sipRuntimeStatus.MarkUnconfigured()
+		return errors.New("DB 里没有 SIP 配置,无法热启动")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stopSIPDependencies(ctx)
+	return startSIPDependencies(sipCfg)
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {

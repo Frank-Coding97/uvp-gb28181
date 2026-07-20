@@ -32,12 +32,11 @@ type SIPConfigView struct {
 }
 
 type SIPConfigService struct {
-	db           *gorm.DB
-	installation *InstallationService
+	db *gorm.DB
 }
 
 func NewSIPConfigService(db *gorm.DB) *SIPConfigService {
-	return &SIPConfigService{db: db, installation: NewInstallationService(db)}
+	return &SIPConfigService{db: db}
 }
 
 func (s *SIPConfigService) Get(ctx context.Context) (*SIPConfigView, error) {
@@ -86,10 +85,7 @@ func (s *SIPConfigService) Save(ctx context.Context, req SaveSIPConfigRequest) (
 		if current != nil {
 			saved.CreatedAt = current.CreatedAt
 		}
-		if err := repo.Save(ctx, &saved); err != nil {
-			return err
-		}
-		return s.installation.completeWithDB(ctx, tx)
+		return repo.Save(ctx, &saved)
 	})
 	if err != nil {
 		return SIPConfigView{}, err

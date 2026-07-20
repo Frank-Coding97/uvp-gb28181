@@ -2,11 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useSipSetup, type SipSetupApi } from "./useSipSetup";
 
 const configuredStatus = {
-    onboardingStatus: "completed" as const,
-    onboardingVersion: 1,
     configStatus: "configured" as const,
-    canConfigure: true,
-    restartRequired: false,
     runtime: { state: "running" as const, updatedAt: "2026-07-19T12:00:00Z" },
     config: {
         deploymentMode: "public" as const,
@@ -24,8 +20,17 @@ function fakeApi(overrides: Partial<SipSetupApi> = {}): SipSetupApi {
     return {
         status: vi.fn().mockResolvedValue({ code: 0, message: "", data: configuredStatus }),
         interfaces: vi.fn().mockResolvedValue({ code: 0, message: "", data: { items: [], scanStatus: "ok" } }),
-        save: vi.fn().mockResolvedValue({ code: 0, message: "", data: { config: configuredStatus.config, restartRequired: true, runtime: { state: "restart_required", updatedAt: "" } } }),
-        skip: vi.fn().mockResolvedValue({ code: 0, message: "", data: { onboardingStatus: "skipped" } }),
+        save: vi.fn().mockResolvedValue({
+            code: 0,
+            message: "",
+            data: {
+                config: configuredStatus.config,
+                reloadedOk: true,
+                reloadError: "",
+                runtime: { state: "running", updatedAt: "" }
+            }
+        }),
+        skip: vi.fn().mockResolvedValue({ code: 0, message: "", data: { acknowledged: true } }),
         ...overrides
     };
 }
@@ -72,8 +77,37 @@ describe("useSipSetup", () => {
         setup.form.deploymentMode = "lan";
         const pending = setup.save();
         expect(setup.saving.value).toBe(true);
-        resolveRequest({ code: 0, message: "", data: { config: configuredStatus.config, restartRequired: true, runtime: configuredStatus.runtime } });
+        resolveRequest({
+            code: 0,
+            message: "",
+            data: {
+                config: configuredStatus.config,
+                reloadedOk: true,
+                reloadError: "",
+                runtime: configuredStatus.runtime
+            }
+        });
         await pending;
         expect(setup.saving.value).toBe(false);
+    });
+
+    it("reports reload failure via response payload", async () => {
+        const api = fakeApi({
+            save: vi.fn().mockResolvedValue({
+                code: 0,
+                message: "",
+                data: {
+                    config: configuredStatus.config,
+                    reloadedOk: false,
+                    reloadError: "bind failed on 192.168.1.20:5061",
+                    runtime: { state: "failed", updatedAt: "", errorSummary: "bind failed" }
+                }
+            })
+        });
+        const setup = useSipSetup(api);
+        setup.form.deploymentMode = "lan";
+        const result = await setup.save();
+        expect(result.reloadedOk).toBe(false);
+        expect(result.reloadError).toContain("bind failed");
     });
 });

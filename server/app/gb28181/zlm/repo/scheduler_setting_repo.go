@@ -37,14 +37,15 @@ func NewSchedulerSettingRepo(db *gorm.DB) *SchedulerSettingRepo {
 }
 
 // GetCurrent 取 id=1 的设置(未找到返 nil, nil)
+// 注意: 全局 gormhelper hook 关闭了 RaiseErrorOnNotFound,不能只靠 errors.Is 判空
 func (r *SchedulerSettingRepo) GetCurrent(ctx context.Context) (*SchedulerSetting, error) {
 	var s SchedulerSetting
-	err := r.db.WithContext(ctx).Where("id = ?", 1).Take(&s).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
+	result := r.db.WithContext(ctx).Where("id = ?", 1).Take(&s)
+	if err := result.Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &s, nil
 }

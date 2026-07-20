@@ -38,7 +38,7 @@ func TestSetupController_NetworkInterfacesStableResponse(t *testing.T) {
 		},
 		addresses: map[int][]net.Addr{1: {en0}, 2: {docker}},
 	}
-	controller := NewSetupController(newSetupControllerDB(t), gbsetup.NewRuntimeStatus(), provider)
+	controller := NewSetupController(newSetupControllerDB(t), gbsetup.NewRuntimeStatus(), provider, nil)
 	router := newSetupControllerRouter(controller)
 	router.GET("/network", controller.NetworkInterfaces)
 	recorder := httptest.NewRecorder()
@@ -55,7 +55,7 @@ func TestSetupController_NetworkInterfacesStableResponse(t *testing.T) {
 
 func TestSetupController_NetworkInterfacesFailureStillReturnsWildcard(t *testing.T) {
 	provider := &controllerInterfaceProvider{err: errors.New("secret operating system detail")}
-	controller := NewSetupController(newSetupControllerDB(t), gbsetup.NewRuntimeStatus(), provider)
+	controller := NewSetupController(newSetupControllerDB(t), gbsetup.NewRuntimeStatus(), provider, nil)
 	router := newSetupControllerRouter(controller)
 	router.GET("/network", controller.NetworkInterfaces)
 	recorder := httptest.NewRecorder()

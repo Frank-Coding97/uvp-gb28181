@@ -4,24 +4,6 @@ import "time"
 
 const SingletonID uint8 = 1
 
-type OnboardingStatus string
-
-const (
-	OnboardingPending   OnboardingStatus = "pending"
-	OnboardingCompleted OnboardingStatus = "completed"
-	OnboardingSkipped   OnboardingStatus = "skipped"
-	OnboardingLegacy    OnboardingStatus = "legacy"
-)
-
-func (s OnboardingStatus) Valid() bool {
-	switch s {
-	case OnboardingPending, OnboardingCompleted, OnboardingSkipped, OnboardingLegacy:
-		return true
-	default:
-		return false
-	}
-}
-
 type DeploymentMode string
 
 const (
@@ -32,19 +14,6 @@ const (
 func (m DeploymentMode) Valid() bool {
 	return m == DeploymentLAN || m == DeploymentPublic
 }
-
-// SystemInstallation is the single server-side source for onboarding state.
-type SystemInstallation struct {
-	ID                      uint8            `gorm:"column:id;primaryKey;autoIncrement:false" json:"-"`
-	InstanceID              string           `gorm:"column:instance_id;size:36;not null;default:''" json:"instanceId"`
-	OnboardingVersion       int              `gorm:"column:onboarding_version;not null;default:1" json:"onboardingVersion"`
-	SIPOnboardingStatus     OnboardingStatus `gorm:"column:sip_onboarding_status;size:16;not null" json:"sipOnboardingStatus"`
-	SIPOnboardingFinishedAt *time.Time       `gorm:"column:sip_onboarding_finished_at" json:"sipOnboardingFinishedAt"`
-	CreatedAt               time.Time        `gorm:"column:created_at" json:"createdAt"`
-	UpdatedAt               time.Time        `gorm:"column:updated_at" json:"updatedAt"`
-}
-
-func (SystemInstallation) TableName() string { return "system_installation" }
 
 // SIPConfig is the persisted runtime configuration. Password never crosses JSON boundaries.
 type SIPConfig struct {

@@ -17,7 +17,7 @@ const wizardVisible = ref(false);
 const status = ref<SipSetupStatus | null>(null);
 const platform = ref<SipPlatformInfo | null>(null);
 const permissions = computed(() => useUserStoreHook().account.permissions);
-const canEdit = computed(() => mayEditSipConfig(Boolean(status.value?.canConfigure), permissions.value));
+const canEdit = computed(() => mayEditSipConfig(permissions.value));
 
 const fields = computed(() => {
     const config = status.value?.config;

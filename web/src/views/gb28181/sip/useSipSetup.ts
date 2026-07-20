@@ -7,7 +7,6 @@ import {
     type SaveSipConfigPayload,
     type SipDeploymentMode,
     type SipNetworkInterfaces,
-    type SipOnboardingStatus,
     type SipRuntimeStatus,
     type SipSetupStatus
 } from "@/api/gb28181";
@@ -26,7 +25,8 @@ export interface SipSetupForm {
 
 type SaveResult = BaseResult<{
     config: NonNullable<SipSetupStatus["config"]>;
-    restartRequired: boolean;
+    reloadedOk: boolean;
+    reloadError: string;
     runtime: SipRuntimeStatus;
 }>;
 
@@ -34,7 +34,7 @@ export interface SipSetupApi {
     status: () => Promise<BaseResult<SipSetupStatus>>;
     interfaces: () => Promise<BaseResult<SipNetworkInterfaces>>;
     save: (payload: SaveSipConfigPayload) => Promise<SaveResult>;
-    skip: () => Promise<BaseResult<{ onboardingStatus: SipOnboardingStatus }>>;
+    skip: () => Promise<BaseResult<{ acknowledged: boolean }>>;
 }
 
 const defaultApi: SipSetupApi = {
@@ -45,9 +45,11 @@ const defaultApi: SipSetupApi = {
 };
 
 function initialForm(): SipSetupForm {
+    // listenIp 初始留空,NetworkStep 挂载后会根据"推荐网卡"自动填充,
+    // 避免出现"0.0.0.0(不可用)"这种误导选项.
     return {
         deploymentMode: "",
-        listenIp: "0.0.0.0",
+        listenIp: "",
         advertiseIp: "",
         advertiseIpInferred: false,
         port: 5061,
@@ -134,11 +136,9 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
             if (status.value) {
                 status.value = {
                     ...status.value,
-                    onboardingStatus: "completed",
                     configStatus: "configured",
                     config: response.data.config,
-                    runtime: response.data.runtime,
-                    restartRequired: response.data.restartRequired
+                    runtime: response.data.runtime
                 };
             }
             return response.data;
@@ -153,7 +153,6 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
     async function skip() {
         const response = await api.skip();
         if (response.code !== 0) throw new Error(response.message || "暂缓 SIP 配置失败");
-        if (status.value) status.value.onboardingStatus = response.data.onboardingStatus;
         return response.data;
     }
 

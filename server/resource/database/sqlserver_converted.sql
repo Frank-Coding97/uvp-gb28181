@@ -1154,24 +1154,8 @@ CREATE TABLE [sys_param] (
 CREATE UNIQUE INDEX [idx_sys_param_code] ON [sys_param] ([code]);
 CREATE INDEX [idx_sys_param_deleted_at] ON [sys_param] ([deleted_at]);
 
--- SIP first-install setup (full install: pending)
+-- SIP 首次部署配置 (2026-07-20 起 gb_sip_config 是引导判据的唯一权威源)
 IF OBJECT_ID('gb_sip_config', 'U') IS NOT NULL DROP TABLE [gb_sip_config];
-IF OBJECT_ID('system_installation', 'U') IS NOT NULL DROP TABLE [system_installation];
-
-CREATE TABLE [system_installation] (
-    [id] SMALLINT NOT NULL,
-    [instance_id] NVARCHAR(36) NOT NULL CONSTRAINT [df_system_installation_instance_id] DEFAULT '',
-    [onboarding_version] INT NOT NULL CONSTRAINT [df_system_installation_version] DEFAULT 1,
-    [sip_onboarding_status] NVARCHAR(16) NOT NULL CONSTRAINT [df_system_installation_status] DEFAULT 'pending',
-    [sip_onboarding_finished_at] DATETIME NULL,
-    [created_at] DATETIME NOT NULL CONSTRAINT [df_system_installation_created_at] DEFAULT GETDATE(),
-    [updated_at] DATETIME NOT NULL CONSTRAINT [df_system_installation_updated_at] DEFAULT GETDATE(),
-    CONSTRAINT [pk_system_installation] PRIMARY KEY ([id]),
-    CONSTRAINT [chk_system_installation_singleton] CHECK ([id] = 1),
-    CONSTRAINT [chk_system_installation_sip_status] CHECK (
-        [sip_onboarding_status] IN ('pending', 'completed', 'skipped', 'legacy')
-    )
-);
 
 CREATE TABLE [gb_sip_config] (
     [id] SMALLINT NOT NULL,
@@ -1191,11 +1175,8 @@ CREATE TABLE [gb_sip_config] (
     CONSTRAINT [chk_gb_sip_config_port] CHECK ([port] BETWEEN 1 AND 65535)
 );
 
-INSERT INTO [system_installation] (
-    [id], [instance_id], [onboarding_version], [sip_onboarding_status],
-    [sip_onboarding_finished_at], [created_at], [updated_at]
-)
-VALUES (1, '', 1, 'pending', NULL, GETDATE(), GETDATE());
+-- 首装用户不 seed gb_sip_config,DB 为空触发引导页.
+-- 老 stack 升级由 setup.MigrateYAMLToDB 一次性从 config.yml 搬迁到本表.
 
 -- 创建索引
 CREATE INDEX [sys_jobs_idx_group] ON [sys_jobs] ([group]);

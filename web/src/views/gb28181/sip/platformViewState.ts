@@ -18,6 +18,7 @@ export function runtimeColor(state: SipRuntimeState): string {
     return "gray";
 }
 
-export function mayEditSipConfig(canConfigure: boolean, permissions: string[]): boolean {
-    return canConfigure && (permissions.includes("*:*:*") || permissions.includes("gb28181:sip:config:update"));
+// 2026-07-20 起 canConfigure 语义废弃(后端硬编码 true 无意义),SIP 配置权限只看 permissions.
+export function mayEditSipConfig(permissions: string[]): boolean {
+    return permissions.includes("*:*:*") || permissions.includes("gb28181:sip:config:update");
 }

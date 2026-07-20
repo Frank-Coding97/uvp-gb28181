@@ -17,10 +17,11 @@ func serverConfigDir() string {
 	return filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "config")
 }
 
-// TestLoad 验证 gb28181 配置能从 config.yml 正确加载
-// 对应 tasks T1-测:读取 config 能拿到 gb28181.sip 配置
+// TestLoad 验证 gb28181 配置能从 config.yml 正确加载.
+// 2026-07-20 起 SIP 明文字段权威源是 gb_sip_config 表,YAML 层只留 enabled + 运行时元参数,
+// 因此测试只断言 enabled / device.keepalive 等仍在 YAML 里的字段.
+// SIP 具体字段是否合法由 bootstrap.loadSIPConfigFromDB + 引导页保证.
 func TestLoad(t *testing.T) {
-	// 初始化全局配置(指向 server/config 目录)
 	if app.ConfigYml == nil {
 		app.ConfigYml = ymlconfig.CreateYamlFactory(serverConfigDir())
 	}
@@ -30,22 +31,10 @@ func TestLoad(t *testing.T) {
 	if !cfg.Enabled {
 		t.Errorf("期望 gb28181.enabled=true, 实际 false")
 	}
-	if cfg.SIP.Port <= 0 {
-		t.Errorf("期望 sip.port > 0, 实际 %d", cfg.SIP.Port)
-	}
-	if cfg.SIP.ListenIP == "" {
-		t.Errorf("期望 sip.listen ip 非空")
-	}
-	if cfg.SIP.ListenIP == "0.0.0.0" && cfg.SIP.AdvertiseIP == "0.0.0.0" {
-		t.Errorf("wildcard 监听地址不能同时作为 advertise ip")
-	}
-	if len(cfg.SIP.Transport) != 2 {
-		t.Errorf("期望 transport 双栈 2 项, 实际 %d 项", len(cfg.SIP.Transport))
-	}
-	if cfg.SIP.ServerID == "" {
-		t.Errorf("期望 serverid 非空")
-	}
 	if cfg.Device.KeepaliveTimeoutCount <= 0 {
 		t.Errorf("期望 keepalive_timeout_count > 0, 实际 %d", cfg.Device.KeepaliveTimeoutCount)
+	}
+	if cfg.Device.OfflineScanInterval <= 0 {
+		t.Errorf("期望 offline_scan_interval > 0, 实际 %d", cfg.Device.OfflineScanInterval)
 	}
 }

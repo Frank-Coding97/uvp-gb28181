@@ -21,12 +21,12 @@ func (r *SIPConfigRepository) WithDB(db *gorm.DB) *SIPConfigRepository {
 
 func (r *SIPConfigRepository) Get(ctx context.Context) (*SIPConfig, error) {
 	var row SIPConfig
-	err := r.db.WithContext(ctx).Where("id = ?", SingletonID).Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
-	if err != nil {
+	result := r.db.WithContext(ctx).Where("id = ?", SingletonID).Take(&row)
+	if err := result.Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &row, nil
 }

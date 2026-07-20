@@ -24,14 +24,13 @@ type UpdateSIPConfigRequest struct {
 	Password            *string                `json:"password"`
 }
 
+// SetupStatusResponse 精简后的 SIP 引导状态响应.
+// 前端只依赖 Runtime.State 决定弹窗,不再有 onboardingStatus 四态.
+// configStatus 便于前端在"未配置" vs "已配置但未运行" 场景做不同 UI 提示.
 type SetupStatusResponse struct {
-	OnboardingStatus  gbsetup.OnboardingStatus `json:"onboardingStatus"`
-	OnboardingVersion int                      `json:"onboardingVersion"`
-	ConfigStatus      string                   `json:"configStatus"`
-	Config            *gbsetup.SIPConfigView   `json:"config,omitempty"`
-	Runtime           gbsetup.RuntimeSnapshot  `json:"runtime"`
-	CanConfigure      bool                     `json:"canConfigure"`
-	RestartRequired   bool                     `json:"restartRequired"`
+	ConfigStatus string                  `json:"configStatus"`
+	Config       *gbsetup.SIPConfigView  `json:"config,omitempty"`
+	Runtime      gbsetup.RuntimeSnapshot `json:"runtime"`
 }
 
 type NetworkInterfacesResponse struct {
@@ -40,27 +39,28 @@ type NetworkInterfacesResponse struct {
 	Warning    string                   `json:"warning,omitempty"`
 }
 
+// SIPReloader 抽象出保存后的热启动动作,由 bootstrap 层实现并注入,避免 controller → bootstrap 反向依赖.
+type SIPReloader func() error
+
 type SetupController struct {
 	controllers.Common
 	db         *gorm.DB
 	runtime    *gbsetup.RuntimeStatus
 	interfaces gbsetup.InterfaceProvider
+	reload     SIPReloader
 }
 
-func NewSetupController(db *gorm.DB, runtime *gbsetup.RuntimeStatus, interfaces gbsetup.InterfaceProvider) *SetupController {
+func NewSetupController(db *gorm.DB, runtime *gbsetup.RuntimeStatus, interfaces gbsetup.InterfaceProvider, reload SIPReloader) *SetupController {
 	if runtime == nil {
 		runtime = gbsetup.NewRuntimeStatus()
 	}
-	return &SetupController{db: db, runtime: runtime, interfaces: interfaces}
+	return &SetupController{db: db, runtime: runtime, interfaces: interfaces, reload: reload}
 }
 
 // Status GET /api/gb28181/sip/setup/status
+// 只返回配置存在性 + runtime 快照,不再有 onboarding 状态机.
+// 前端根据 runtime.state === "unconfigured" 决定是否弹引导框.
 func (sc *SetupController) Status(c *gin.Context) {
-	state, err := gbsetup.NewInstallationService(sc.db).Current(c.Request.Context())
-	if err != nil {
-		sc.Fail(c, "读取 SIP 安装状态失败", err, http.StatusInternalServerError)
-		return
-	}
 	config, err := gbsetup.NewSIPConfigService(sc.db).Get(c.Request.Context())
 	if err != nil {
 		sc.Fail(c, "读取 SIP 配置失败", err, http.StatusInternalServerError)
@@ -70,15 +70,10 @@ func (sc *SetupController) Status(c *gin.Context) {
 	if config != nil {
 		configStatus = "configured"
 	}
-	runtime := sc.runtime.Snapshot()
 	sc.Success(c, SetupStatusResponse{
-		OnboardingStatus:  state.Status,
-		OnboardingVersion: state.OnboardingVersion,
-		ConfigStatus:      configStatus,
-		Config:            config,
-		Runtime:           runtime,
-		CanConfigure:      true,
-		RestartRequired:   runtime.State == gbsetup.RuntimeRestartRequired,
+		ConfigStatus: configStatus,
+		Config:       config,
+		Runtime:      sc.runtime.Snapshot(),
 	})
 }
 
@@ -108,7 +103,6 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		sc.Fail(c, "保存 SIP 配置失败", err, http.StatusInternalServerError)
 		return
 	}
-	sc.runtime.MarkConfigSaved()
 	app.ZapLog.Info("SIP 配置已保存",
 		zap.Uint("operatorId", sc.GetCurrentUserID(c)),
 		zap.String("deploymentMode", string(view.DeploymentMode)),
@@ -116,37 +110,35 @@ func (sc *SetupController) SaveConfig(c *gin.Context) {
 		zap.String("advertiseIp", view.AdvertiseIP),
 		zap.Int("port", view.Port),
 		zap.String("serverId", view.ServerID))
+
+	// 保存后立即热启动 SIP 服务,让用户免于重启进程.
+	// 热启动失败时 runtime state 已经被 Reloader 内部置为 failed,原因通过 snapshot 返回给前端.
+	reloadOK := true
+	reloadErrText := ""
+	if sc.reload != nil {
+		if err := sc.reload(); err != nil {
+			reloadOK = false
+			reloadErrText = err.Error()
+			app.ZapLog.Error("SIP 保存后热启动失败", zap.Error(err))
+		}
+	}
+
 	sc.Success(c, gin.H{
-		"config":          view,
-		"restartRequired": true,
-		"runtime":         sc.runtime.Snapshot(),
+		"config":      view,
+		"reloadedOk":  reloadOK,
+		"reloadError": reloadErrText,
+		"runtime":     sc.runtime.Snapshot(),
 	})
 }
 
 // Skip POST /api/gb28181/sip/setup/skip
+// 新架构下 skip 是前端"暂缓弹窗"信号 —— 后端不保存 skip 状态(避免引入独立状态机).
+// 前端用 sessionStorage 记住"本次登录已跳过",下次登录会再次弹出提示.
+// 该端点保留,只是为了记录审计日志,让运维知道用户暂缓过引导.
 func (sc *SetupController) Skip(c *gin.Context) {
-	service := gbsetup.NewInstallationService(sc.db)
-	err := service.Skip(c.Request.Context())
-	if errors.Is(err, gbsetup.ErrInvalidOnboardingTransition) {
-		state, currentErr := service.Current(c.Request.Context())
-		if currentErr == nil && (state.Status == gbsetup.OnboardingCompleted || state.Status == gbsetup.OnboardingSkipped) {
-			sc.Success(c, gin.H{"onboardingStatus": state.Status})
-			return
-		}
-	}
-	if err != nil {
-		sc.Fail(c, "暂缓 SIP 配置失败", err, http.StatusInternalServerError)
-		return
-	}
-	state, err := service.Current(c.Request.Context())
-	if err != nil {
-		sc.Fail(c, "读取 SIP 安装状态失败", err, http.StatusInternalServerError)
-		return
-	}
-	app.ZapLog.Info("SIP 首次安装引导已暂缓",
-		zap.Uint("operatorId", sc.GetCurrentUserID(c)),
-		zap.String("onboardingStatus", string(state.Status)))
-	sc.Success(c, gin.H{"onboardingStatus": state.Status})
+	app.ZapLog.Info("SIP 首次安装引导已暂缓(前端行为,后端不持久化)",
+		zap.Uint("operatorId", sc.GetCurrentUserID(c)))
+	sc.Success(c, gin.H{"acknowledged": true})
 }
 
 // NetworkInterfaces GET /api/gb28181/sip/setup/network-interfaces

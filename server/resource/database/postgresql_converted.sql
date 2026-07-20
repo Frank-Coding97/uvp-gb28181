@@ -1338,28 +1338,8 @@ COMMENT ON COLUMN sys_param.created_by IS '创建人';
 CREATE UNIQUE INDEX idx_sys_param_code ON sys_param (code);
 CREATE INDEX idx_sys_param_deleted_at ON sys_param (deleted_at);
 
--- SIP first-install setup (full install: pending)
+-- SIP 首次部署配置 (2026-07-20 起 gb_sip_config 是引导判据的唯一权威源)
 DROP TABLE IF EXISTS gb_sip_config;
-DROP TABLE IF EXISTS system_installation;
-
-CREATE TABLE system_installation (
-    id SMALLINT NOT NULL,
-    instance_id VARCHAR(36) NOT NULL DEFAULT '',
-    onboarding_version INTEGER NOT NULL DEFAULT 1,
-    sip_onboarding_status VARCHAR(16) NOT NULL DEFAULT 'pending',
-    sip_onboarding_finished_at TIMESTAMP NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    CONSTRAINT chk_system_installation_singleton CHECK (id = 1),
-    CONSTRAINT chk_system_installation_sip_status CHECK (
-        sip_onboarding_status IN ('pending', 'completed', 'skipped', 'legacy')
-    )
-);
-
-COMMENT ON TABLE system_installation IS '平台安装与引导状态';
-COMMENT ON COLUMN system_installation.id IS '单例主键，固定为 1';
-COMMENT ON COLUMN system_installation.instance_id IS '平台实例 UUID，首次启动时补齐';
 
 CREATE TABLE gb_sip_config (
     id SMALLINT NOT NULL,
@@ -1383,11 +1363,8 @@ COMMENT ON TABLE gb_sip_config IS 'GB28181 SIP 运行时配置';
 COMMENT ON COLUMN gb_sip_config.advertise_ip_inferred IS '宣告地址是否由系统推断';
 COMMENT ON COLUMN gb_sip_config.password IS 'SIP Digest 原始凭据';
 
-INSERT INTO system_installation (
-    id, instance_id, onboarding_version, sip_onboarding_status,
-    sip_onboarding_finished_at, created_at, updated_at
-)
-VALUES (1, '', 1, 'pending', NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+-- 首装用户不 seed gb_sip_config,DB 为空触发引导页.
+-- 老 stack 升级由 setup.MigrateYAMLToDB 一次性从 config.yml 搬迁到本表.
 
 -- 创建索引
 CREATE INDEX sys_jobs_idx_group ON sys_jobs ("group");

@@ -34,34 +34,6 @@ func (f *fakeSIPRuntimeServer) Start() error {
 func (f *fakeSIPRuntimeServer) UAC() *uac.UAC                  { return nil }
 func (f *fakeSIPRuntimeServer) Shutdown(context.Context) error { return nil }
 
-func validEffectiveConfig() gbsetup.EffectiveSIPConfig {
-	return gbsetup.EffectiveSIPConfig{
-		DeploymentMode: gbsetup.DeploymentLAN,
-		ListenIP:       "0.0.0.0",
-		AdvertiseIP:    "192.168.1.10",
-		Port:           5061,
-		Domain:         "3402000000",
-		ServerID:       "34020000002000000001",
-		Password:       "Secret123",
-		Transport:      []string{"udp", "tcp"},
-		Source:         gbsetup.ConfigSourceDatabase,
-	}
-}
-
-func TestApplyEffectiveSIPConfig(t *testing.T) {
-	base := gbconfig.Config{Enabled: true}
-	got, err := applyEffectiveSIPConfig(base, validEffectiveConfig())
-	require.NoError(t, err)
-	require.Equal(t, "0.0.0.0", got.SIP.ListenIP)
-	require.Equal(t, "192.168.1.10", got.SIP.AdvertiseIP)
-	require.Equal(t, []string{"udp", "tcp"}, got.SIP.Transport)
-}
-
-func TestApplyEffectiveSIPConfig_MissingIsUnconfigured(t *testing.T) {
-	_, err := applyEffectiveSIPConfig(gbconfig.Config{Enabled: true}, gbsetup.EffectiveSIPConfig{Source: gbsetup.ConfigSourceMissing})
-	require.ErrorIs(t, err, ErrSIPUnconfigured)
-}
-
 func TestStartSIPRuntime_TracksFailuresAndAsyncListenError(t *testing.T) {
 	t.Run("start failure", func(t *testing.T) {
 		status := gbsetup.NewRuntimeStatus()

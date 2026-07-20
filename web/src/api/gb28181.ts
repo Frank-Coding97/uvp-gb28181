@@ -104,7 +104,7 @@ export const fetchSipPlatformInfo = () =>
     http.request<BaseResult<SipPlatformInfo>>("get", baseUrlApi("gb28181/sip/platform"));
 
 export type SipDeploymentMode = "lan" | "public";
-export type SipOnboardingStatus = "pending" | "completed" | "skipped" | "legacy";
+// 2026-07-20 后端简化:runtime state 仍是六态,restart_required 语义已废弃(保留兼容枚举,新代码不产生).
 export type SipRuntimeState = "disabled" | "unconfigured" | "starting" | "running" | "failed" | "restart_required";
 
 export interface SipRuntimeStatus {
@@ -124,14 +124,13 @@ export interface SipConfigSummary {
     hasPassword: boolean;
 }
 
+// SipSetupStatus 是 /api/gb28181/sip/setup/status 的响应.
+// 2026-07-20 起字段精简 —— 只保留 configStatus + config + runtime,不再有 onboardingStatus 四态.
+// 前端 gating 只看 runtime.state === "unconfigured".
 export interface SipSetupStatus {
-    onboardingStatus: SipOnboardingStatus;
-    onboardingVersion: number;
     configStatus: "configured" | "unconfigured";
     config?: SipConfigSummary;
     runtime: SipRuntimeStatus;
-    canConfigure: boolean;
-    restartRequired: boolean;
 }
 
 export interface SipNetworkAddress {
@@ -168,15 +167,17 @@ export const fetchSipSetupStatus = () =>
 export const fetchSipNetworkInterfaces = () =>
     http.request<BaseResult<SipNetworkInterfaces>>("get", baseUrlApi("gb28181/sip/setup/network-interfaces"));
 
+// 保存后端会立即热启动 SIP,响应体带 reloadedOk 表示是否成功,失败时 reloadError 是原因字符串.
 export const saveSipSetupConfig = (data: SaveSipConfigPayload) =>
-    http.request<BaseResult<{ config: SipConfigSummary; restartRequired: boolean; runtime: SipRuntimeStatus }>>(
+    http.request<BaseResult<{ config: SipConfigSummary; reloadedOk: boolean; reloadError: string; runtime: SipRuntimeStatus }>>(
         "put",
         baseUrlApi("gb28181/sip/setup/config"),
         { data }
     );
 
+// 2026-07-20 后端不再持久化 skip 状态,仅返回 acknowledged 用于审计. 暂缓由前端 sessionStorage 记住.
 export const skipSipSetup = () =>
-    http.request<BaseResult<{ onboardingStatus: SipOnboardingStatus }>>("post", baseUrlApi("gb28181/sip/setup/skip"));
+    http.request<BaseResult<{ acknowledged: boolean }>>("post", baseUrlApi("gb28181/sip/setup/skip"));
 
 // ===== SIP 信令看板 =====
 
