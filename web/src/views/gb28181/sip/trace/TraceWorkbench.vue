@@ -205,4 +205,17 @@ onMounted(() => {
     align-items: center;
     justify-content: center;
 }
+
+/* 深色模式适配 */
+body[arco-theme='dark'] {
+    .status-detail {
+        color: #9ca3af;
+    }
+    .capture-band {
+        background: rgba(56, 58, 64, 0.6);
+    }
+    .detail-panel {
+        border-left-color: #2e2e30;
+    }
+}
 </style>

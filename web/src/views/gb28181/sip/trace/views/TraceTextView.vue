@@ -163,4 +163,24 @@ watch(
     font-size: 12px;
     text-align: right;
 }
+
+/* 深色模式适配 */
+body[arco-theme='dark'] {
+    .trace-scroll-container {
+        background: #17171a;
+    }
+    .trace-row {
+        border-bottom-color: #2e2e30;
+    }
+    .trace-ts,
+    .trace-footer {
+        color: #9ca3af;
+    }
+    .trace-peer {
+        color: #d1d5db;
+    }
+    .trace-call-id {
+        color: #6b7280;
+    }
+}
 </style>

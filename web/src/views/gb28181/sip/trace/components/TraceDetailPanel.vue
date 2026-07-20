@@ -261,4 +261,61 @@ function copyBody() {
         word-break: break-all;
     }
 }
+
+/* 深色模式适配 */
+body[arco-theme='dark'] {
+    .trace-detail-panel {
+        background: #17171a;
+    }
+
+    .empty-state {
+        color: #9ca3af;
+    }
+
+    .header-row {
+        .label {
+            color: #9ca3af;
+        }
+
+        .value {
+            color: #e5e7eb;
+        }
+    }
+
+    .body-section,
+    .parsed-section {
+        border-top-color: #2e2e30;
+    }
+
+    .section-header {
+        color: #e5e7eb;
+    }
+
+    .body-content {
+        background: #1e1e20;
+        color: #e5e7eb;
+
+        &.xml {
+            color: #60a5fa;
+        }
+
+        &.sdp {
+            color: #34d399;
+        }
+    }
+
+    .parsed-content {
+        background: #1e1e20;
+    }
+
+    .parsed-row {
+        .parsed-key {
+            color: #9ca3af;
+        }
+
+        .parsed-value {
+            color: #e5e7eb;
+        }
+    }
+}
 </style>

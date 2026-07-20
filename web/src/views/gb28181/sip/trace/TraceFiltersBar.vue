@@ -162,4 +162,11 @@ function clearAllFilters() {
     gap: 12px;
     flex-wrap: wrap;
 }
+
+/* 深色模式适配 */
+body[arco-theme='dark'] {
+    .trace-filters-bar {
+        background: #1e1e20;
+    }
+}
 </style>

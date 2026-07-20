@@ -294,4 +294,62 @@ onMounted(() => {
         white-space: nowrap;
     }
 }
+
+/* 深色模式适配 */
+body[arco-theme='dark'] {
+    .loading,
+    .empty {
+        color: #9ca3af;
+    }
+
+    .session-group {
+        border-color: #2e2e30;
+    }
+
+    .session-header {
+        background: #1e1e20;
+
+        &:hover {
+            background: #252527;
+        }
+
+        .expand-icon {
+            color: #9ca3af;
+        }
+
+        .call-id {
+            color: #e5e7eb;
+        }
+
+        .count,
+        .time-range {
+            color: #9ca3af;
+        }
+    }
+
+    .session-records {
+        background: #17171a;
+    }
+
+    .record-row {
+        border-top-color: #2e2e30;
+
+        .method {
+            color: #e5e7eb;
+        }
+
+        .status {
+            color: #9ca3af;
+        }
+
+        .tag {
+            background: rgba(13, 110, 253, 0.2);
+            color: #60a5fa;
+        }
+
+        .endpoints {
+            color: #9ca3af;
+        }
+    }
+}
 </style>
