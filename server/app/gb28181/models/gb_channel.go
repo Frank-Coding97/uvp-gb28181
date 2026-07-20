@@ -34,11 +34,15 @@ type GbChannel struct {
 	// Capabilities A1 新增:通道能力 JSON {audio, h265, night_vision, alarm_io, recording}
 	// 用 *string + 默认 NULL — MySQL JSON 列不接受空字符串("The document is empty"),
 	// nil 写入 NULL,前端拿到 null 即按"无能力上报"渲染
-	Capabilities *string    `gorm:"column:capabilities;type:json;comment:通道能力 JSON" json:"capabilities"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
-	DeletedAt    *time.Time `gorm:"index" json:"deletedAt"`
-	OwnerDeptID  uint       `gorm:"column:owner_dept_id" json:"ownerDeptId"`
+	Capabilities *string `gorm:"column:capabilities;type:json;comment:通道能力 JSON" json:"capabilities"`
+	// SnapshotURL 通道最新快照 URL(相对路径,如 /uploads/gb-channel-snapshot/2026-07/xxx_yyy.jpg)
+	// 由 snapshot.Service 在播放触发后异步更新
+	SnapshotURL string     `gorm:"column:snapshot_url;size:500;default:'';comment:通道最新快照 URL" json:"snapshotUrl"`
+	SnapshotAt  *time.Time `gorm:"column:snapshot_at;comment:通道最新快照抓拍时间" json:"snapshotAt"`
+	CreatedAt   time.Time  `json:"createdAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+	DeletedAt   *time.Time `gorm:"index" json:"deletedAt"`
+	OwnerDeptID uint       `gorm:"column:owner_dept_id" json:"ownerDeptId"`
 }
 
 func (GbChannel) TableName() string { return "gb_channel" }

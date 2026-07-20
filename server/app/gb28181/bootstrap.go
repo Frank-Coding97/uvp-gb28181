@@ -3,6 +3,7 @@ package gb28181
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
@@ -18,6 +19,7 @@ import (
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/snapshot"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
@@ -365,12 +367,19 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	if u := srv.UAC(); u != nil {
 		if zlmRegistry != nil && zlmScheduler != nil {
 			zlmLocationMap = stream.NewLocationMap()
+			// 通道快照 service(播放触发)—— 优先尝试装配,失败/nil 都不影响主链路
+			snapshotSvc := buildSnapshotService()
+			opts := []play.Option{}
+			if snapshotSvc != nil {
+				opts = append(opts, play.WithSnapshotService(snapshotSvc))
+				app.ZapLog.Info("GB28181 通道快照 service 已装配")
+			}
 			playSvc = play.NewWithScheduler(cfg,
 				schedulerPickerAdapter{m: zlmScheduler},
 				zlmRegistry,
 				zlmLocationMap,
 				u, playSessions, gbroutes.StreamNotifier(),
-				play.NewDeviceRepo(), play.NewChannelRepo())
+				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
 			gbroutes.SetPlayService(playSvc)
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
 			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)")
@@ -378,7 +387,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo())
 			gbroutes.SetPlayService(playSvc)
-			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated)")
+			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)")
 		}
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
@@ -753,4 +762,55 @@ func startPositionHistoryPruner() {
 			}
 		}
 	}()
+}
+
+// buildSnapshotService 通道快照 service 装配。
+//
+// 依赖:
+//   - zlmRegistry:按 nodeID 查节点,构造 zlm.Client 走 getSnap
+//   - httpserver.serverroot / serverrootpath:落盘 & URL 前缀
+//
+// 装配失败返 nil,调用侧 opt-out(主链路不受影响)。
+func buildSnapshotService() *snapshot.Service {
+	if zlmRegistry == nil {
+		app.ZapLog.Info("GB28181 通道快照 skip:zlmRegistry 未初始化(单节点部署?)")
+		return nil
+	}
+
+	serverroot := app.ConfigYml.GetString("httpserver.serverroot")
+	serverrootpath := app.ConfigYml.GetString("httpserver.serverrootpath")
+	if serverroot == "" {
+		serverroot = "./resource/public"
+	}
+	if serverrootpath == "" {
+		serverrootpath = "/public"
+	}
+
+	getClient := func(nodeID string) (snapshot.ZLMClient, error) {
+		if nodeID == "" {
+			return nil, errors.New("nodeID 为空(单节点路径不支持快照)")
+		}
+		id, err := strconv.ParseInt(nodeID, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		n, ok := zlmRegistry.Get(id)
+		if !ok {
+			return nil, errors.New("node 不存在")
+		}
+		return gbzlm.NewClientForNode(n), nil
+	}
+
+	svc := snapshot.New(snapshot.Config{
+		UploadRoot:  serverroot,
+		URLPrefix:   serverrootpath,
+		DedupTTL:    30 * time.Second,
+		DelayBefore: 2 * time.Second,
+		ZLMTimeout:  5,
+		ZLMExpire:   30,
+		GetClient:   getClient,
+		Repo:        snapshot.NewGormRepo(app.DB()),
+		Logger:      app.ZapLog.Named("gb.snapshot"),
+	})
+	return svc
 }
