@@ -872,19 +872,23 @@ function isChannelPlaying(record: ChannelVO): boolean {
 // 通道级停止播放 loading 态,按 channel.id 单独存,防止用户点两下重复弹 Modal.
 const stoppingChannels = ref<Set<number>>(new Set());
 
+// 强制停止当前主流(管理员级动作).
+// 语义:多用户可各自点"播放"发起独立流,但此按钮会断掉 gb_channel.stream_id 记录的
+// 那一路"当前主流" —— 如果有其他人正在通过该流观看,他们会被同时断开.
+// Modal 里必须有明确警告让点击者知道副作用.
 async function handleStopChannel(record: ChannelVO) {
     if (!record.streamId) return;
     Modal.warning({
-        title: `确认停止通道 ${record.name} 的实时播放?`,
-        content: "停止后需要重新点击播放才能观看。",
-        okText: "确认停止",
+        title: `确认强制停止通道 ${record.name} 的当前直播?`,
+        content: "如果有其他人正在观看此通道,他们会被同时断开。停止后可重新点击播放。",
+        okText: "确认强制停止",
         cancelText: "取消",
         hideCancel: false,
         onOk: async () => {
             stoppingChannels.value.add(record.id);
             try {
                 await stopPlay(record.streamId);
-                Message.success("已停止播放");
+                Message.success("已停止当前直播");
                 refreshMainData();
             } catch (e: any) {
                 // stopPlay 失败不刷新列表 —— 避免把"实际还在播"错误清成"空闲"
@@ -1530,16 +1534,12 @@ onUnmounted(() => {
                                 <a-table-column title="操作" :width="280" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
-                                            <a-link
-                                                v-if="!isChannelPlaying(record)"
-                                                class="uvp-table-action uvp-table-action--preview"
-                                                @click="playChannel(record)"
-                                            >
+                                            <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
                                                 <template #icon><Play :size="13" /></template>
                                                 <span>播放</span>
                                             </a-link>
                                             <a-link
-                                                v-else
+                                                v-if="isChannelPlaying(record)"
                                                 class="uvp-table-action uvp-table-action--stop"
                                                 :loading="stoppingChannels.has(record.id)"
                                                 @click="handleStopChannel(record)"
@@ -1810,12 +1810,12 @@ onUnmounted(() => {
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
                                     <span v-if="isChannelPlaying(item)" class="channel-card-status playing">直播中</span>
-                                    <a-tooltip v-if="!isChannelPlaying(item)" content="点播" position="top">
+                                    <a-tooltip content="点播" position="top">
                                         <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
                                             <Play :size="13" />
                                         </button>
                                     </a-tooltip>
-                                    <a-tooltip v-else content="停止播放" position="top">
+                                    <a-tooltip v-if="isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
                                         <button
                                             class="icon-btn small framed stop"
                                             type="button"
