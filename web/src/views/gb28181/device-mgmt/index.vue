@@ -2999,8 +2999,8 @@ onUnmounted(() => {
 .icon-btn.trace-capture { color: #0f766e; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) { color: #b7791f; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) { color: #9a6b18; background: rgb(183 121 31 / 9%); }
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop) { color: #d97706; }
-.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop:hover) { color: #b45309; background: rgb(217 119 6 / 8%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop) { color: #dc2626; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop:hover) { color: #b91c1c; background: rgb(220 38 38 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more) { color: #6b4f9b; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more:hover) { color: #5a3f89; background: rgb(107 79 155 / 8%); }
 :global(.arco-dropdown:has(.device-action-menu-item)) {
@@ -3072,16 +3072,16 @@ onUnmounted(() => {
     background: #f59e0b;
     border-color: #f59e0b;
 }
-// 停止播放按钮:橙色 warning 系,跟"删除"红色区分开
+// 停止播放按钮:深红 #dc2626 warning-danger 系,比"删除"#ef4444 更沉,视觉可辨
 .icon-btn.framed.stop {
-    color: #d97706;
-    background: color-mix(in srgb, #d97706 8%, transparent);
-    border: 1px solid color-mix(in srgb, #d97706 24%, var(--uvp-search-secondary-btn-border));
+    color: #dc2626;
+    background: color-mix(in srgb, #dc2626 8%, transparent);
+    border: 1px solid color-mix(in srgb, #dc2626 24%, var(--uvp-search-secondary-btn-border));
 }
 .icon-btn.framed.stop:hover:not(:disabled) {
     color: #fff;
-    background: #d97706;
-    border-color: #d97706;
+    background: #dc2626;
+    border-color: #dc2626;
 }
 .icon-btn.framed.stop:disabled {
     opacity: 0.5;
