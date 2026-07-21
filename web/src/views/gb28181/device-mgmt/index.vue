@@ -30,6 +30,7 @@ import {
     Search,
     Settings2,
     SlidersHorizontal,
+    Square,
     Trash2,
     Video,
     X,
@@ -37,6 +38,7 @@ import {
     Plus
 } from "@lucide/vue";
 import { startTraceCapture } from "@/api/gb28181-trace";
+import { stopPlay } from "@/api/gb28181";
 import {
     batchDeleteChannels,
     batchDeleteDevices,
@@ -860,6 +862,40 @@ function openNode(node: CatalogNode) {
     drawerVisible.value = true;
 }
 
+// 通道播放状态判定:后端 gb_channel.stream_id 非空 = 当前正在播放.
+// 依赖 10s 自动轮询 refreshMainData() 天然刷新,进程重启 / hook 丢包场景由
+// 后端 play/reconciler 5min 兜底对账 goroutine 修正,前端不做额外核对.
+function isChannelPlaying(record: ChannelVO): boolean {
+    return !!record.streamId && record.streamId.trim() !== "";
+}
+
+// 通道级停止播放 loading 态,按 channel.id 单独存,防止用户点两下重复弹 Modal.
+const stoppingChannels = ref<Set<number>>(new Set());
+
+async function handleStopChannel(record: ChannelVO) {
+    if (!record.streamId) return;
+    Modal.warning({
+        title: `确认停止通道 ${record.name} 的实时播放?`,
+        content: "停止后需要重新点击播放才能观看。",
+        okText: "确认停止",
+        cancelText: "取消",
+        hideCancel: false,
+        onOk: async () => {
+            stoppingChannels.value.add(record.id);
+            try {
+                await stopPlay(record.streamId);
+                Message.success("已停止播放");
+                refreshMainData();
+            } catch (e: any) {
+                // stopPlay 失败不刷新列表 —— 避免把"实际还在播"错误清成"空闲"
+                Message.error(e?.message || "停止播放失败,请稍后重试");
+            } finally {
+                stoppingChannels.value.delete(record.id);
+            }
+        }
+    });
+}
+
 function playChannel(record: ChannelVO) {
     controlConsoleChannel.value = record;
     controlConsoleVisible.value = true;
@@ -1434,12 +1470,18 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="状态" :width="92">
+                                <a-table-column title="状态" :width="130">
                                     <template #cell="{ record }">
-                                        <span class="status-inline" :class="{ online: record.status === 1 }">
-                                            <span class="status-dot"></span>
-                                            <span>{{ record.status === 1 ? '在线' : '离线' }}</span>
-                                        </span>
+                                        <div class="status-cell">
+                                            <span class="status-inline" :class="{ online: record.status === 1 }">
+                                                <span class="status-dot"></span>
+                                                <span>{{ record.status === 1 ? '在线' : '离线' }}</span>
+                                            </span>
+                                            <span v-if="isChannelPlaying(record)" class="status-inline playing">
+                                                <span class="status-dot"></span>
+                                                <span>直播中</span>
+                                            </span>
+                                        </div>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="摄像头类型" :width="150">
@@ -1488,9 +1530,22 @@ onUnmounted(() => {
                                 <a-table-column title="操作" :width="280" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
-                                            <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
+                                            <a-link
+                                                v-if="!isChannelPlaying(record)"
+                                                class="uvp-table-action uvp-table-action--preview"
+                                                @click="playChannel(record)"
+                                            >
                                                 <template #icon><Play :size="13" /></template>
                                                 <span>播放</span>
+                                            </a-link>
+                                            <a-link
+                                                v-else
+                                                class="uvp-table-action uvp-table-action--stop"
+                                                :loading="stoppingChannels.has(record.id)"
+                                                @click="handleStopChannel(record)"
+                                            >
+                                                <template #icon><Square :size="13" /></template>
+                                                <span>停止</span>
                                             </a-link>
                                             <a-link class="uvp-table-action uvp-table-action--detail" @click="openChannel(record)">
                                                 <template #icon><Eye :size="13" /></template>
@@ -1754,7 +1809,22 @@ onUnmounted(() => {
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
-                                    <a-tooltip content="点播" position="top"><button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)"><Play :size="13" /></button></a-tooltip>
+                                    <span v-if="isChannelPlaying(item)" class="channel-card-status playing">直播中</span>
+                                    <a-tooltip v-if="!isChannelPlaying(item)" content="点播" position="top">
+                                        <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
+                                            <Play :size="13" />
+                                        </button>
+                                    </a-tooltip>
+                                    <a-tooltip v-else content="停止播放" position="top">
+                                        <button
+                                            class="icon-btn small framed stop"
+                                            type="button"
+                                            :disabled="stoppingChannels.has(item.id)"
+                                            @click.stop="handleStopChannel(item)"
+                                        >
+                                            <Square :size="13" />
+                                        </button>
+                                    </a-tooltip>
                                     <a-tooltip content="编辑通道" position="top"><button class="icon-btn small framed warning" type="button" @click.stop="openEditChannelModal(item)"><Pencil :size="13" /></button></a-tooltip>
                                     <a-tooltip content="删除通道" position="top"><button class="icon-btn small framed danger" type="button" :disabled="deleting" @click.stop="handleDeleteChannel(item)"><Trash2 :size="13" /></button></a-tooltip>
                                 </div>
@@ -2773,6 +2843,23 @@ onUnmounted(() => {
 .status-inline.online .status-dot {
     background: #10b981;
 }
+// 直播中徽章:红色 + 浅红底,跟"在线绿点"呼应
+.status-inline.playing {
+    color: #d14343;
+    background: rgb(209 67 67 / 8%);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.status-inline.playing .status-dot {
+    background: #d14343;
+}
+// 状态列容器:让"在线/离线"+ "直播中"两个徽章水平排列
+.status-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
 .status-trigger {
     justify-content: center;
     flex-wrap: nowrap;
@@ -2912,6 +2999,8 @@ onUnmounted(() => {
 .icon-btn.trace-capture { color: #0f766e; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) { color: #b7791f; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) { color: #9a6b18; background: rgb(183 121 31 / 9%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop) { color: #d97706; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop:hover) { color: #b45309; background: rgb(217 119 6 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more) { color: #6b4f9b; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more:hover) { color: #5a3f89; background: rgb(107 79 155 / 8%); }
 :global(.arco-dropdown:has(.device-action-menu-item)) {
@@ -2982,6 +3071,21 @@ onUnmounted(() => {
     color: #fff;
     background: #f59e0b;
     border-color: #f59e0b;
+}
+// 停止播放按钮:橙色 warning 系,跟"删除"红色区分开
+.icon-btn.framed.stop {
+    color: #d97706;
+    background: color-mix(in srgb, #d97706 8%, transparent);
+    border: 1px solid color-mix(in srgb, #d97706 24%, var(--uvp-search-secondary-btn-border));
+}
+.icon-btn.framed.stop:hover:not(:disabled) {
+    color: #fff;
+    background: #d97706;
+    border-color: #d97706;
+}
+.icon-btn.framed.stop:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 .icon-btn.framed {
     color: var(--uvp-text-secondary);
@@ -3249,6 +3353,11 @@ onUnmounted(() => {
 .channel-card-status.online::before {
     background: #10b981;
     box-shadow: 0 0 0 3px rgb(16 185 129 / 14%);
+}
+.channel-card-status.playing { color: #d14343; }
+.channel-card-status.playing::before {
+    background: #d14343;
+    box-shadow: 0 0 0 3px rgb(209 67 67 / 14%);
 }
 @keyframes channel-status-ripple {
     0% { opacity: 0.65; transform: translateY(-50%) scale(0.55); }
