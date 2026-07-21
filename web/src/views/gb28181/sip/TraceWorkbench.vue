@@ -74,16 +74,20 @@ const captureID = computed(() => typeof route.query.captureId === "string" ? rou
 const captureEndsAt = computed(() => typeof route.query.captureEndsAt === "string" ? route.query.captureEndsAt : "");
 
 function toISO(value: string) {
-    return dayjs(value).toISOString();
+    const parsed = dayjs(value);
+    return parsed.isValid() ? parsed.toISOString() : "";
 }
 
 function queryParams(cursor = "") {
     const statusBounds = statusRangeBounds(filters.statusRange);
+    // 多选 deviceIds 优先。URL 恢复得到的 filters.deviceId 是遗留兼容路径,
+    // 仅当 deviceIds 为空时才回退,防止两个参数同时下发造成后端解析行为跟 UI 意图不一致。
+    const hasMulti = filters.deviceIds.length > 0;
     return {
         from: toISO(filters.range[0]),
         to: toISO(filters.range[1]),
-        deviceId: filters.deviceId.trim() || undefined,
-        deviceIds: filters.deviceIds.length ? filters.deviceIds.join(",") : undefined,
+        deviceId: hasMulti ? undefined : filters.deviceId.trim() || undefined,
+        deviceIds: hasMulti ? filters.deviceIds.join(",") : undefined,
         direction: filters.direction || undefined,
         method: filters.method.trim().toUpperCase() || undefined,
         statusCode: filters.statusCode ? Number(filters.statusCode) : undefined,

@@ -143,8 +143,10 @@ func (tc *TraceController) GetMessage(c *gin.Context) {
 			"messageId": eventID, "purpose": purpose, "sensitive": true,
 		})
 	}
+	// authorize() 已确认调用者是系统管理员,IsAdmin 恒 true。
+	// sensitive 走独立参数,决定是否要脱敏,不再耦合到 IsAdmin。
 	detail, err := tc.query.GetMessage(c.Request.Context(), eventID, sensitive, gbtrace.DisclosureContext{
-		IsAdmin: sensitive, UserID: strconv.FormatUint(uint64(userID), 10), Purpose: purpose,
+		IsAdmin: true, UserID: strconv.FormatUint(uint64(userID), 10), Purpose: purpose,
 	})
 	if err != nil {
 		if errors.Is(err, gbtrace.ErrTraceMessageNotFound) {
@@ -340,7 +342,7 @@ func parseMessageFilter(c *gin.Context) (gbtrace.MessageFilter, error) {
 	}
 	if value := c.Query("statusCode"); value != "" {
 		status, parseErr := strconv.ParseUint(value, 10, 16)
-		if parseErr != nil || status < 100 || status > 699 {
+		if parseErr != nil || uint16(status) < gbtrace.SIPStatusMin || uint16(status) > gbtrace.SIPStatusMax {
 			return gbtrace.MessageFilter{}, errors.New("statusCode 参数非法")
 		}
 		filter.StatusCode = uint16(status)
@@ -351,7 +353,7 @@ func parseMessageFilter(c *gin.Context) (gbtrace.MessageFilter, error) {
 			return 0, nil
 		}
 		status, parseErr := strconv.ParseUint(value, 10, 16)
-		if parseErr != nil || status < 100 || status > 699 {
+		if parseErr != nil || uint16(status) < gbtrace.SIPStatusMin || uint16(status) > gbtrace.SIPStatusMax {
 			return 0, errors.New("status code range parameter is invalid")
 		}
 		return uint16(status), nil

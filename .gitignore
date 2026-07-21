@@ -54,6 +54,7 @@ __debug_bin*
 
 # 编译出的服务端二进制
 server/uvp-gb28181
+server/main
 
 # 本地 MCP / Playwright 调试配置(可能含密钥)
 .mcp.json

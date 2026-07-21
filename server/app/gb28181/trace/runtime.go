@@ -52,20 +52,19 @@ func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
 		payloadCipher = failingCipher{err: ErrInvalidEncryptionKey}
 	}
 	var store Store = unavailableStore{}
-	var storeErr error
 	if err == nil {
 		store = NewReconnectingStore(func(ctx context.Context) (Store, error) {
 			return OpenClickHouseStore(ctx, cfg)
 		}, 250*time.Millisecond, 30*time.Second)
-		storeErr = ErrTraceStoreUnavailable
 	}
 	module := NewModule(cfg, store, payloadCipher)
+	// ReconnectingStore is lazy: the first InsertBatch dials ClickHouse, so at
+	// boot we only know the pipeline is wired, not that storage is reachable.
+	// Start in degraded and let the first successful batch flip us to ready.
 	if err != nil {
 		module.health.degraded("trace encryption key is unavailable")
-	} else if storeErr != nil {
-		module.health.degraded(storeErr.Error())
 	} else {
-		module.health.ready(time.Now())
+		module.health.degraded(ErrTraceStoreUnavailable.Error())
 	}
 	return module
 }

@@ -17,8 +17,15 @@ type retryBatch struct {
 
 func (m *Module) runWriter(ctx context.Context) {
 	defer func() {
+		if r := recover(); r != nil {
+			m.health.degraded(fmt.Sprintf("trace writer crashed: %v", r))
+		}
 		close(m.done)
 		// Stop retry work once the live queue has drained during shutdown.
+		// NOTE: this cancels ctx for runRetryWriter too, so any batches still
+		// queued in retryQueue at shutdown are dropped. That's intentional —
+		// bounded shutdown time > unbounded retry — but callers relying on
+		// Shutdown() to flush should note the trade-off in Health().
 		m.cancel()
 	}()
 	queue := m.collector.queue
@@ -87,7 +94,12 @@ func (m *Module) runWriter(ctx context.Context) {
 // A storage outage therefore creates an explicit bounded gap instead of
 // stopping ingestion of later SIP frames.
 func (m *Module) runRetryWriter(ctx context.Context) {
-	defer close(m.retryDone)
+	defer func() {
+		if r := recover(); r != nil {
+			m.health.degraded(fmt.Sprintf("trace retry writer crashed: %v", r))
+		}
+		close(m.retryDone)
+	}()
 	pending := make([]retryBatch, 0, cap(m.retryQueue))
 	for {
 		var timer *time.Timer

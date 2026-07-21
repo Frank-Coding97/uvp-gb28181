@@ -16,6 +16,9 @@ const (
 	DefaultMessagePageSize = 100
 	MaxMessagePageSize     = 500
 	MaxTraceQueryRange     = 8 * 24 * time.Hour
+	// SIP status code 合法范围 (RFC 3261)
+	SIPStatusMin uint16 = 100
+	SIPStatusMax uint16 = 699
 )
 
 var (
@@ -126,12 +129,12 @@ func buildMessageListQuery(table string, filter MessageFilter) (string, []any, e
 	if filter.StatusMin != 0 || filter.StatusMax != 0 {
 		min, max := filter.StatusMin, filter.StatusMax
 		if min == 0 {
-			min = 100
+			min = SIPStatusMin
 		}
 		if max == 0 {
-			max = 699
+			max = SIPStatusMax
 		}
-		if min > max || min < 100 || max > 699 {
+		if min > max || min < SIPStatusMin || max > SIPStatusMax {
 			return "", nil, errors.New("invalid SIP trace status code range")
 		}
 		clauses = append(clauses, "status_code >= ?", "status_code <= ?")
