@@ -10,6 +10,7 @@ type Config struct {
 	Device  DeviceConfig
 	ZLM     ZLMConfig
 	Media   MediaConfig
+	Play    PlayConfig
 }
 
 // TraceConfig controls the optional SIP trace module.
@@ -40,6 +41,14 @@ type MediaConfig struct {
 	HookPort                int    // 后端 HTTP 端口(Hook 端点)
 	StreamNoneReaderTimeout int    // 无人观看断流秒数
 	RTPServerTimeout        int    // RTP 收流超时(秒)
+}
+
+// PlayConfig 点播运行时配置
+type PlayConfig struct {
+	// ReconcileIntervalSec 兜底对账 goroutine 扫描周期(秒).
+	// 0 = 禁用 reconciler(适合开发/调试场景).
+	// 默认 300(5 分钟).
+	ReconcileIntervalSec int
 }
 
 // SIPConfig SIP 服务配置
@@ -116,6 +125,9 @@ func LoadFrom(c valueSource) Config {
 			HookPort:                c.GetInt("gb28181.media.hookport"),
 			StreamNoneReaderTimeout: c.GetInt("gb28181.media.streamnonereadertimeout"),
 			RTPServerTimeout:        c.GetInt("gb28181.media.rtpservertimeout"),
+		},
+		Play: PlayConfig{
+			ReconcileIntervalSec: c.GetInt("gb28181.play.reconcile_interval_sec"),
 		},
 	}
 }

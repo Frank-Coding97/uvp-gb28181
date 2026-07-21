@@ -38,3 +38,45 @@ func TestLoad(t *testing.T) {
 		t.Errorf("期望 offline_scan_interval > 0, 实际 %d", cfg.Device.OfflineScanInterval)
 	}
 }
+
+// fakeSource 手写 valueSource 用于隔离测 LoadFrom.
+type fakeSource struct {
+	ints    map[string]int
+	strings map[string]string
+	bools   map[string]bool
+	slices  map[string][]string
+}
+
+func (f fakeSource) GetBool(k string) bool           { return f.bools[k] }
+func (f fakeSource) GetString(k string) string       { return f.strings[k] }
+func (f fakeSource) GetInt(k string) int             { return f.ints[k] }
+func (f fakeSource) GetStringSlice(k string) []string { return f.slices[k] }
+
+// TestLoadFromPlayConfig 断言 PlayConfig 能从 valueSource 正确加载.
+// 通道播放状态显示 T7 新增.
+func TestLoadFromPlayConfig(t *testing.T) {
+	cases := []struct {
+		name     string
+		yamlVal  int
+		expected int
+	}{
+		{"默认 0 = 禁用", 0, 0},
+		{"5 分钟 = 300 秒", 300, 300},
+		{"1 分钟 = 60 秒", 60, 60},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			src := fakeSource{
+				ints:    map[string]int{"gb28181.play.reconcile_interval_sec": c.yamlVal},
+				strings: map[string]string{},
+				bools:   map[string]bool{},
+				slices:  map[string][]string{},
+			}
+			cfg := LoadFrom(src)
+			if cfg.Play.ReconcileIntervalSec != c.expected {
+				t.Errorf("期望 ReconcileIntervalSec=%d, 实际 %d",
+					c.expected, cfg.Play.ReconcileIntervalSec)
+			}
+		})
+	}
+}

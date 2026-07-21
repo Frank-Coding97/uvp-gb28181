@@ -16,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/play/reconciler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
@@ -157,6 +158,9 @@ var metricsCleanupStop chan struct{}
 
 // heartbeatCancel 控制 Watcher goroutine 退出(M2 新增)
 var heartbeatCancel context.CancelFunc
+
+// playReconciler 兜底对账 goroutine(通道播放状态显示 T7 新增)
+var playReconciler *reconciler.Reconciler
 
 // zlmSchedulerLog 调度日志服务(T3.3 新增,可为 nil 降级)
 var zlmSchedulerLog *gbzlmsched.LogService
@@ -394,6 +398,27 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+
+	// 装配兜底对账 reconciler(通道播放状态显示 T7 新增)
+	// spec AC10-AC16: 5min 定期扫描 gb_channel.stream_id 跟 ZLM 真实流状态对齐,
+	// 消除 hook 丢包 / 进程重启导致的假阳性.
+	// 只在 playSvc 装配成功 + 配置未禁用 + 多节点路径下启用.
+	if playSvc != nil && cfg.Play.ReconcileIntervalSec > 0 {
+		if zlmRegistry != nil && zlmLocationMap != nil {
+			interval := time.Duration(cfg.Play.ReconcileIntervalSec) * time.Second
+			playReconciler = reconciler.New(interval, playSvc,
+				reconciler.WithRegistry(zlmRegistry),
+				reconciler.WithLocationMap(zlmLocationMap),
+			)
+			playReconciler.Start(context.Background())
+			app.ZapLog.Info("GB28181 点播对账 reconciler 已启动",
+				zap.Duration("interval", interval))
+		} else {
+			app.ZapLog.Info("GB28181 点播对账 reconciler 跳过装配(单节点路径 deprecated,无 registry/locationMap)")
+		}
+	} else if playSvc != nil {
+		app.ZapLog.Info("GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)")
+	}
 	return nil
 }
 
@@ -413,6 +438,10 @@ func stopSIPDependencies(ctx context.Context) {
 	if offlineScanner != nil {
 		offlineScanner.Stop()
 		offlineScanner = nil
+	}
+	if playReconciler != nil {
+		playReconciler.Stop()
+		playReconciler = nil
 	}
 	playSvc = nil
 	gbroutes.SetPlayService(nil)
