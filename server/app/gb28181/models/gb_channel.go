@@ -100,3 +100,14 @@ func ClearChannelStream(c context.Context, streamID string) error {
 		Where("stream_id = ?", streamID).
 		Update("stream_id", "").Error
 }
+
+// ListPlayingChannels 列出所有 DB 认为在播的通道(stream_id != '').
+// 用于 play/reconciler 对账扫描:只查关键字段避免拖慢,不 SELECT * 拉快照 URL 等大字段.
+func ListPlayingChannels(c context.Context) (GbChannelList, error) {
+	var list GbChannelList
+	err := app.DB().WithContext(c).
+		Select("id, device_id, channel_id, stream_id").
+		Where("stream_id != ''").
+		Find(&list).Error
+	return list, err
+}
