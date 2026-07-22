@@ -70,7 +70,7 @@ type ClickHouseStore struct {
 	fullTable string
 }
 
-const TraceSchemaVersion uint32 = 1
+const TraceSchemaVersion uint32 = 2
 
 func OpenClickHouseStore(ctx context.Context, cfg gbconfig.TraceConfig) (*ClickHouseStore, error) {
 	if strings.TrimSpace(cfg.Address) == "" || strings.TrimSpace(cfg.Username) == "" {
@@ -141,6 +141,9 @@ func (s *ClickHouseStore) EnsureSchema(ctx context.Context) error {
     call_id String,
     cseq UInt32,
     cseq_method LowCardinality(String),
+    from_uri String,
+    to_uri String,
+    user_agent String,
     malformed UInt8,
     parse_error String,
     nonce String,
@@ -154,8 +157,21 @@ func (s *ClickHouseStore) EnsureSchema(ctx context.Context) error {
 PARTITION BY toYYYYMMDD(occurred_at)
 ORDER BY (occurred_at, event_id)
 TTL occurred_at + INTERVAL 7 DAY DELETE`, s.fullTable)
+	// v2 迁移:对老 v1 表补列(如果表已存在但缺列)。IF NOT EXISTS 让重复运行安全。
+	migrations := []string{
+		fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS from_uri String AFTER cseq_method`, s.fullTable),
+		fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS to_uri String AFTER from_uri`, s.fullTable),
+		fmt.Sprintf(`ALTER TABLE %s ADD COLUMN IF NOT EXISTS user_agent String AFTER to_uri`, s.fullTable),
+	}
 	if err := s.conn.Exec(ctx, ddl); err != nil {
 		return fmt.Errorf("ensure ClickHouse SIP trace schema: %w", err)
+	}
+	for _, migration := range migrations {
+		if err := s.conn.Exec(ctx, migration); err != nil {
+			// 忽略"列已存在"以及旧 CH 版本不支持 IF NOT EXISTS 时的重复错误;
+			// 其他错误在 ping/insert 层会暴露,这里不中断启动。
+			continue
+		}
 	}
 	summaryDDL := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s.sip_trace_session_day (
     day Date,
@@ -168,6 +184,11 @@ TTL occurred_at + INTERVAL 7 DAY DELETE`, s.fullTable)
     outbound_count SimpleAggregateFunction(sum, UInt64),
     methods_state AggregateFunction(groupUniqArray, String),
     final_status_state AggregateFunction(argMax, UInt16, DateTime64(6, 'UTC')),
+    first_method_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')),
+    from_uri_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')),
+    to_uri_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')),
+    source_addr_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')),
+    destination_addr_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')),
     request_count SimpleAggregateFunction(sum, UInt64),
     final_response_count SimpleAggregateFunction(sum, UInt64)
 ) ENGINE = AggregatingMergeTree
@@ -175,6 +196,25 @@ ORDER BY (day, device_id, call_id)
 TTL day + INTERVAL 30 DAY DELETE`, s.database)
 	if err := s.conn.Exec(ctx, summaryDDL); err != nil {
 		return fmt.Errorf("ensure ClickHouse SIP trace session schema: %w", err)
+	}
+	// v2 迁移:老 session_day 表(v1)缺 first_method_state 等 5 个 argMin 聚合列,补齐
+	sessionMigrations := []string{
+		fmt.Sprintf(`ALTER TABLE %s.sip_trace_session_day ADD COLUMN IF NOT EXISTS first_method_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')) AFTER final_status_state`, s.database),
+		fmt.Sprintf(`ALTER TABLE %s.sip_trace_session_day ADD COLUMN IF NOT EXISTS from_uri_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')) AFTER first_method_state`, s.database),
+		fmt.Sprintf(`ALTER TABLE %s.sip_trace_session_day ADD COLUMN IF NOT EXISTS to_uri_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')) AFTER from_uri_state`, s.database),
+		fmt.Sprintf(`ALTER TABLE %s.sip_trace_session_day ADD COLUMN IF NOT EXISTS source_addr_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')) AFTER to_uri_state`, s.database),
+		fmt.Sprintf(`ALTER TABLE %s.sip_trace_session_day ADD COLUMN IF NOT EXISTS destination_addr_state AggregateFunction(argMin, String, DateTime64(6, 'UTC')) AFTER source_addr_state`, s.database),
+	}
+	for _, m := range sessionMigrations {
+		if err := s.conn.Exec(ctx, m); err != nil {
+			// 列已存在或老 CH 版本不支持 IF NOT EXISTS,忽略
+			continue
+		}
+	}
+	// 物化视图老版本(v1)不含 first_method/from_uri/to_uri/source/destination 聚合列;
+	// 先 DROP 再 CREATE 保证列对齐。DROP 只影响物化触发,不影响 sip_trace_session_day 已有数据。
+	if err := s.conn.Exec(ctx, fmt.Sprintf(`DROP VIEW IF EXISTS %s.sip_trace_session_day_mv`, s.database)); err != nil {
+		return fmt.Errorf("drop old ClickHouse SIP trace session view: %w", err)
 	}
 	viewDDL := fmt.Sprintf(`CREATE MATERIALIZED VIEW IF NOT EXISTS %s.sip_trace_session_day_mv
 TO %s.sip_trace_session_day AS
@@ -192,6 +232,17 @@ SELECT
         if(status_code >= 200, status_code, toUInt16(0)),
         if(status_code >= 200, occurred_at, toDateTime64(0, 6, 'UTC'))
     ) AS final_status_state,
+    argMinState(method, occurred_at) AS first_method_state,
+    argMinState(from_uri, occurred_at) AS from_uri_state,
+    argMinState(to_uri, occurred_at) AS to_uri_state,
+    argMinState(
+        if(direction = 'inbound', remote_addr, local_addr),
+        occurred_at
+    ) AS source_addr_state,
+    argMinState(
+        if(direction = 'inbound', local_addr, remote_addr),
+        occurred_at
+    ) AS destination_addr_state,
     countIf(status_code = 0 AND method NOT IN ('', 'ACK')) AS request_count,
     countIf(status_code >= 200) AS final_response_count
 FROM %s
@@ -251,6 +302,7 @@ func (s *ClickHouseStore) InsertBatch(ctx context.Context, events []StoredEvent)
 	query := fmt.Sprintf(`INSERT INTO %s (
 event_id, occurred_at, direction, transport, local_addr, remote_addr,
 device_id, method, status_code, call_id, cseq, cseq_method,
+from_uri, to_uri, user_agent,
 malformed, parse_error, nonce, ciphertext, algorithm, key_version, digest_sha256
 )`, s.fullTable)
 	batch, err := s.conn.PrepareBatch(ctx, query)
@@ -266,7 +318,9 @@ malformed, parse_error, nonce, ciphertext, algorithm, key_version, digest_sha256
 		if err := batch.Append(
 			eventID, event.OccurredAt.UTC(), string(event.Direction), event.Transport,
 			event.LocalAddr, event.RemoteAddr, event.DeviceID, event.Method, event.StatusCode,
-			event.CallID, event.CSeq, event.CSeqMethod, boolToUInt8(event.Malformed), event.ParseError,
+			event.CallID, event.CSeq, event.CSeqMethod,
+			event.FromURI, event.ToURI, event.UserAgent,
+			boolToUInt8(event.Malformed), event.ParseError,
 			event.Payload.Nonce, event.Payload.Ciphertext, event.Payload.Algorithm,
 			event.Payload.KeyVersion, event.Payload.DigestSHA256,
 		); err != nil {

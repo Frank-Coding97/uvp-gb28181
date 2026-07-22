@@ -20,6 +20,7 @@ type SessionFilter struct {
 	DeviceID  string
 	DeviceIDs []string
 	CallID    string
+	Keyword   string
 	Anomaly   bool
 	Limit     int
 }
@@ -42,6 +43,11 @@ type SessionSummary struct {
 	OutboundCount      uint64    `json:"outboundCount"`
 	Methods            []string  `json:"methods"`
 	FinalStatus        uint16    `json:"finalStatus"`
+	FirstMethod        string    `json:"firstMethod"`
+	FromURI            string    `json:"fromUri,omitempty"`
+	ToURI              string    `json:"toUri,omitempty"`
+	SourceAddr         string    `json:"sourceAddr,omitempty"`
+	DestinationAddr    string    `json:"destinationAddr,omitempty"`
 	RequestCount       uint64    `json:"requestCount"`
 	FinalResponseCount uint64    `json:"finalResponseCount"`
 	SessionDerivedState
@@ -83,6 +89,11 @@ func buildSessionListQuery(table string, filter SessionFilter) (string, []any, e
 		where = append(where, "call_id = ?")
 		args = append(args, filter.CallID)
 	}
+	if filter.Keyword != "" {
+		where = append(where,
+			"(positionCaseInsensitive(call_id, ?) > 0 OR positionCaseInsensitive(device_id, ?) > 0)")
+		args = append(args, filter.Keyword, filter.Keyword)
+	}
 	having := ""
 	if filter.Anomaly {
 		having = " HAVING (final_status >= 300 OR request_count > final_response_count)"
@@ -103,6 +114,11 @@ sum(inbound_count) AS inbound_count,
 sum(outbound_count) AS outbound_count,
 groupUniqArrayMerge(methods_state) AS methods,
 argMaxMerge(final_status_state) AS final_status,
+argMinMerge(first_method_state) AS first_method,
+argMinMerge(from_uri_state) AS from_uri,
+argMinMerge(to_uri_state) AS to_uri,
+argMinMerge(source_addr_state) AS source_addr,
+argMinMerge(destination_addr_state) AS destination_addr,
 sum(request_count) AS request_count,
 sum(final_response_count) AS final_response_count
 FROM %s WHERE %s
@@ -127,7 +143,9 @@ func (s *ClickHouseStore) ListSessions(ctx context.Context, filter SessionFilter
 		if err := rows.Scan(
 			&session.Day, &session.DeviceID, &session.CallID, &session.FirstAt, &session.LastAt,
 			&session.MessageCount, &session.InboundCount, &session.OutboundCount, &session.Methods,
-			&session.FinalStatus, &session.RequestCount, &session.FinalResponseCount,
+			&session.FinalStatus,
+			&session.FirstMethod, &session.FromURI, &session.ToURI, &session.SourceAddr, &session.DestinationAddr,
+			&session.RequestCount, &session.FinalResponseCount,
 		); err != nil {
 			return nil, fmt.Errorf("scan ClickHouse SIP trace session: %w", err)
 		}

@@ -87,6 +87,11 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 	if cfg.Trace.Enabled && opts.traceFactory != nil {
 		traceRuntime = opts.traceFactory(cfg.Trace)
 		if traceRuntime != nil {
+			// 采集拿到的 LocalAddr 是 [::]:port 通配符,注入平台实际 AdvertiseIP:Port
+			// 让 Source/Destination 显示真实端点
+			if setter, ok := traceRuntime.(interface{ SetPlatformAddr(string) }); ok && cfg.SIP.AdvertiseIP != "" && cfg.SIP.Port > 0 {
+				setter.SetPlatformAddr(fmt.Sprintf("%s:%d", cfg.SIP.AdvertiseIP, cfg.SIP.Port))
+			}
 			uaOptions = append(uaOptions, sipgo.WithUserAgentTransportLayerOptions(
 				siplib.WithTransportLayerReadFilter(traceRuntime.ReadFilter),
 				siplib.WithTransportLayerWriteObserver(traceRuntime.WriteObserver),

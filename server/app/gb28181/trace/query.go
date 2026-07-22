@@ -33,6 +33,7 @@ type MessageFilter struct {
 	DeviceID   string
 	DeviceIDs  []string
 	CallID     string
+	Keyword    string
 	Direction  Direction
 	Method     string
 	StatusCode uint16
@@ -60,6 +61,9 @@ type MessageSummary struct {
 	CallID     string    `json:"callId"`
 	CSeq       uint32    `json:"cseq"`
 	CSeqMethod string    `json:"cseqMethod"`
+	FromURI    string    `json:"fromUri,omitempty"`
+	ToURI      string    `json:"toUri,omitempty"`
+	UserAgent  string    `json:"userAgent,omitempty"`
 	Malformed  bool      `json:"malformed"`
 	ParseError string    `json:"parseError,omitempty"`
 }
@@ -126,6 +130,12 @@ func buildMessageListQuery(table string, filter MessageFilter) (string, []any, e
 	appendFilter("direction = ?", string(filter.Direction), filter.Direction != "")
 	appendFilter("method = ?", filter.Method, filter.Method != "")
 	appendFilter("status_code = ?", filter.StatusCode, filter.StatusCode != 0)
+	// 关键词全字段模糊匹配(Call-ID / 设备编号),用 positionCaseInsensitive 支持大小写不敏感
+	if filter.Keyword != "" {
+		clauses = append(clauses,
+			"(positionCaseInsensitive(call_id, ?) > 0 OR positionCaseInsensitive(device_id, ?) > 0)")
+		args = append(args, filter.Keyword, filter.Keyword)
+	}
 	if filter.StatusMin != 0 || filter.StatusMax != 0 {
 		min, max := filter.StatusMin, filter.StatusMax
 		if min == 0 {
@@ -158,7 +168,7 @@ func buildMessageListQuery(table string, filter MessageFilter) (string, []any, e
 	args = append(args, limit+1)
 	query := fmt.Sprintf(`SELECT toString(event_id), occurred_at, direction, transport,
 local_addr, remote_addr, device_id, method, status_code, call_id, cseq, cseq_method,
-malformed, parse_error FROM %s WHERE %s
+from_uri, to_uri, user_agent, malformed, parse_error FROM %s WHERE %s
 ORDER BY occurred_at DESC, event_id DESC LIMIT ?`, table, strings.Join(clauses, " AND "))
 	return query, args, nil
 }
@@ -188,7 +198,8 @@ func (s *ClickHouseStore) ListMessages(ctx context.Context, filter MessageFilter
 		if err := rows.Scan(
 			&item.EventID, &item.OccurredAt, &direction, &item.Transport, &item.LocalAddr,
 			&item.RemoteAddr, &item.DeviceID, &item.Method, &item.StatusCode, &item.CallID,
-			&item.CSeq, &item.CSeqMethod, &malformed, &item.ParseError,
+			&item.CSeq, &item.CSeqMethod, &item.FromURI, &item.ToURI, &item.UserAgent,
+			&malformed, &item.ParseError,
 		); err != nil {
 			return MessagePage{}, fmt.Errorf("scan ClickHouse SIP trace message: %w", err)
 		}
@@ -215,7 +226,7 @@ func (s *ClickHouseStore) GetMessage(ctx context.Context, eventID string) (Store
 	}
 	query := fmt.Sprintf(`SELECT toString(event_id), occurred_at, direction, transport,
 local_addr, remote_addr, device_id, method, status_code, call_id, cseq, cseq_method,
-malformed, parse_error, nonce, ciphertext, algorithm, key_version, digest_sha256
+from_uri, to_uri, user_agent, malformed, parse_error, nonce, ciphertext, algorithm, key_version, digest_sha256
 FROM %s WHERE event_id = toUUID(?) LIMIT 1`, s.fullTable)
 	rows, err := s.conn.Query(ctx, query, eventID)
 	if err != nil {
@@ -235,6 +246,7 @@ FROM %s WHERE event_id = toUUID(?) LIMIT 1`, s.fullTable)
 		&message.EventID, &message.OccurredAt, &direction, &message.Transport,
 		&message.LocalAddr, &message.RemoteAddr, &message.DeviceID, &message.Method,
 		&message.StatusCode, &message.CallID, &message.CSeq, &message.CSeqMethod,
+		&message.FromURI, &message.ToURI, &message.UserAgent,
 		&malformed, &message.ParseError, &message.Payload.Nonce, &message.Payload.Ciphertext,
 		&message.Payload.Algorithm, &message.Payload.KeyVersion, &message.Payload.DigestSHA256,
 	); err != nil {

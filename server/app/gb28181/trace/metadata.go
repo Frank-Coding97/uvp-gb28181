@@ -13,6 +13,9 @@ type SIPMetadata struct {
 	CallID     string
 	CSeq       uint32
 	CSeqMethod string
+	FromURI    string
+	ToURI      string
+	UserAgent  string
 	ParseError string
 }
 
@@ -28,6 +31,15 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 	if cseq := message.CSeq(); cseq != nil {
 		metadata.CSeq = cseq.SeqNo
 		metadata.CSeqMethod = cseq.MethodName.String()
+	}
+	if from := message.From(); from != nil {
+		metadata.FromURI = fromToString(from.Address)
+	}
+	if to := message.To(); to != nil {
+		metadata.ToURI = fromToString(to.Address)
+	}
+	if uas := message.GetHeaders("User-Agent"); len(uas) > 0 {
+		metadata.UserAgent = truncateHeader(uas[0].Value(), 256)
 	}
 
 	switch typed := message.(type) {
@@ -54,4 +66,17 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 		metadata.ParseError = fmt.Sprintf("unsupported SIP message type")
 	}
 	return metadata
+}
+
+// fromToString 序列化 From/To 头 URI 为 "user@host" 形式,超长截断避免 ClickHouse 存储压力
+func fromToString(addr sip.Uri) string {
+	s := addr.String()
+	return truncateHeader(s, 256)
+}
+
+func truncateHeader(value string, max int) string {
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
 }

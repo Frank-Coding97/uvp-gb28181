@@ -171,12 +171,38 @@ func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
 		if event.ParseError != "" {
 			metadata.ParseError = event.ParseError
 		}
+		eventID := uuid.NewString()
+		// SSE fanout:采集侧已解析元数据,趁 raw payload 明文尚在,分发一次。
+		// 之后再走 encrypt 存 ClickHouse。fanout 是非阻塞的,慢消费者不阻挡采集。
+		if m.streamHub != nil && m.streamHub.SubscriberCount() > 0 {
+			raw := StreamEvent{
+				EventID:    eventID,
+				OccurredAt: event.OccurredAt,
+				Direction:  event.Direction,
+				Transport:  event.Transport,
+				LocalAddr:  event.LocalAddr,
+				RemoteAddr: event.RemoteAddr,
+				DeviceID:   metadata.DeviceID,
+				Method:     metadata.Method,
+				StatusCode: metadata.StatusCode,
+				CallID:     metadata.CallID,
+				CSeq:       metadata.CSeq,
+				CSeqMethod: metadata.CSeqMethod,
+				FromURI:    metadata.FromURI,
+				ToURI:      metadata.ToURI,
+				UserAgent:  metadata.UserAgent,
+				Malformed:  event.Malformed,
+				Payload:    string(event.Raw),
+			}
+			redacted := string(RedactSIP(event.Raw))
+			m.streamHub.Broadcast(raw, redacted)
+		}
 		payload, err := m.cipher.Encrypt(event.Raw)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt SIP trace payload: %w", err)
 		}
 		stored = append(stored, StoredEvent{
-			EventID:    uuid.NewString(),
+			EventID:    eventID,
 			OccurredAt: event.OccurredAt,
 			Direction:  event.Direction,
 			Transport:  event.Transport,
@@ -188,6 +214,9 @@ func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
 			CallID:     metadata.CallID,
 			CSeq:       metadata.CSeq,
 			CSeqMethod: metadata.CSeqMethod,
+			FromURI:    metadata.FromURI,
+			ToURI:      metadata.ToURI,
+			UserAgent:  metadata.UserAgent,
 			Malformed:  event.Malformed,
 			ParseError: metadata.ParseError,
 			Payload:    payload,

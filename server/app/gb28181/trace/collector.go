@@ -38,6 +38,9 @@ type StoredEvent struct {
 	CallID     string
 	CSeq       uint32
 	CSeqMethod string
+	FromURI    string
+	ToURI      string
+	UserAgent  string
 	Malformed  bool
 	ParseError string
 	Payload    EncryptedPayload

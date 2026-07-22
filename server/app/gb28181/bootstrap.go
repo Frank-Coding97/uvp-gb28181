@@ -490,8 +490,20 @@ func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {
 			capture = gbtrace.NewCaptureService(app.DB(), access, time.Now)
 		}
 	}
-	gbroutes.SetTraceController(gbcontrollers.NewTraceController(query, capture, access))
+	traceCtrl := gbcontrollers.NewTraceController(query, capture, access)
+	// SSE stream hub 从 module 拿,给 TraceController.Stream 用
+	if streamer, ok := runtime.(interface{ StreamHub() *gbtrace.StreamHub }); ok && cfg.Trace.Enabled {
+		traceCtrl.SetStreamProvider(traceStreamProvider{hub: streamer.StreamHub()})
+	}
+	gbroutes.SetTraceController(traceCtrl)
 }
+
+// traceStreamProvider 适配 TraceStreamProvider 接口
+type traceStreamProvider struct {
+	hub *gbtrace.StreamHub
+}
+
+func (p traceStreamProvider) Hub() *gbtrace.StreamHub { return p.hub }
 
 // setupZLMRegistry 启动时从 DB 加载所有节点;若空表,用 yaml cfg.ZLM seed 第一节点
 // DB 不可达则 registry 为 nil(继续走 deprecated 单节点路径,降级容错)

@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -27,6 +29,13 @@ type TraceQueryService interface {
 	ListMessages(context.Context, gbtrace.MessageFilter) (gbtrace.MessagePage, error)
 	GetMessage(context.Context, string, bool, gbtrace.DisclosureContext) (gbtrace.MessageDetail, error)
 	ListSessions(context.Context, gbtrace.SessionFilter) ([]gbtrace.SessionSummary, error)
+	GetSessionStats(context.Context, gbtrace.SessionFilter) (gbtrace.SessionStats, error)
+}
+
+// TraceStreamProvider 独立于 query,直接暴露 StreamHub 给 SSE handler。
+// 由 bootstrap 用 module.StreamHub() 注入。
+type TraceStreamProvider interface {
+	Hub() *gbtrace.StreamHub
 }
 
 type TraceCaptureService interface {
@@ -64,10 +73,16 @@ type TraceController struct {
 	query   TraceQueryService
 	capture TraceCaptureService
 	access  TraceAdminAccess
+	stream  TraceStreamProvider
 }
 
 func NewTraceController(query TraceQueryService, capture TraceCaptureService, access TraceAdminAccess) *TraceController {
 	return &TraceController{query: query, capture: capture, access: access}
+}
+
+// SetStreamProvider bootstrap 装配 module 后注入 hub 给 SSE handler
+func (tc *TraceController) SetStreamProvider(provider TraceStreamProvider) {
+	tc.stream = provider
 }
 
 func (tc *TraceController) authorize(c *gin.Context) (uint, bool) {
@@ -157,6 +172,114 @@ func (tc *TraceController) GetMessage(c *gin.Context) {
 		return
 	}
 	tc.Success(c, detail)
+}
+
+// Stream GET /api/gb28181/sip-traces/stream  (SSE)
+// 每 15s ping 保活;支持 URL 参数 deviceId/callId/method 过滤;
+// sensitive=true 时前置 MarkSensitiveOperation 审计打点,响应体走明文。
+func (tc *TraceController) Stream(c *gin.Context) {
+	userID, ok := tc.authorize(c)
+	if !ok {
+		return
+	}
+	if tc.stream == nil || tc.stream.Hub() == nil {
+		app.Response.Fail(c, "SIP 实时日志未启用", http.StatusServiceUnavailable)
+		return
+	}
+	sensitive, err := parseOptionalBool(c.Query("sensitive"))
+	if err != nil {
+		app.Response.Fail(c, "sensitive 参数非法", http.StatusBadRequest)
+		return
+	}
+	purpose := strings.TrimSpace(c.Query("purpose"))
+	if sensitive && !validText(purpose, 200, true) {
+		app.Response.Fail(c, "敏感报文订阅必须填写 purpose", http.StatusBadRequest)
+		return
+	}
+	filter := gbtrace.StreamFilter{
+		DeviceID: strings.TrimSpace(c.Query("deviceId")),
+		CallID:   strings.TrimSpace(c.Query("callId")),
+		Method:   strings.ToUpper(strings.TrimSpace(c.Query("method"))),
+	}
+	if !validText(filter.DeviceID, 128, false) || !validText(filter.CallID, 255, false) {
+		app.Response.Fail(c, "设备编码或 Call-ID 非法", http.StatusBadRequest)
+		return
+	}
+	if filter.Method != "" && !sipMethodPattern.MatchString(filter.Method) {
+		app.Response.Fail(c, "method 参数非法", http.StatusBadRequest)
+		return
+	}
+	if sensitive {
+		middleware.MarkSensitiveOperation(c, map[string]any{
+			"streamFilter": filter,
+			"purpose":      purpose,
+			"sensitive":    true,
+			"userId":       userID,
+		})
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.WriteHeader(http.StatusOK)
+	c.Writer.Flush()
+
+	ctx := c.Request.Context()
+	sub := tc.stream.Hub().Subscribe(ctx, filter, sensitive)
+	defer tc.stream.Hub().Unsubscribe(sub.ID)
+
+	// 立刻发一次 ready 事件,让前端知道订阅已建立
+	fmt.Fprintf(c.Writer, "event: ready\ndata: {\"subscriptionId\":\"%s\"}\n\n", sub.ID)
+	c.Writer.Flush()
+
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, alive := <-sub.Events:
+			if !alive {
+				return
+			}
+			data, err := json.Marshal(event)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(c.Writer, "event: message\ndata: %s\n\n", data); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		case <-ping.C:
+			if _, err := fmt.Fprintf(c.Writer, "event: ping\ndata: {\"t\":%d}\n\n", time.Now().Unix()); err != nil {
+				return
+			}
+			c.Writer.Flush()
+		}
+	}
+}
+
+func (tc *TraceController) SessionStats(c *gin.Context) {
+	if _, ok := tc.authorize(c); !ok {
+		return
+	}
+	filter, err := parseSessionFilter(c)
+	if err != nil {
+		app.Response.Fail(c, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if tc.query == nil {
+		tc.Success(c, gbtrace.SessionStats{})
+		return
+	}
+	stats, err := tc.query.GetSessionStats(c.Request.Context(), filter)
+	if err != nil {
+		tc.queryFailure(c, err)
+		return
+	}
+	tc.Success(c, stats)
 }
 
 func (tc *TraceController) ListSessions(c *gin.Context) {
@@ -290,11 +413,20 @@ func (tc *TraceController) queryFailure(c *gin.Context, err error) {
 	if tc.query != nil {
 		health = tc.query.Health()
 	}
+	// 具体错误打到 gin 日志方便排查(nginx / 中间件不 buffer 它)
+	fmt.Fprintf(gin.DefaultErrorWriter, "[sip-trace] query failure: %v (health=%s lastError=%s)\n",
+		err, health.State, health.LastError)
+	// 其他错误(schema/权限/查询失败等)如实回 500 + err 消息,前端能看到根因
+	// unavailable 类错误也走这里但降级到 503 + 结构化提示
+	msg := "SIP 日志存储查询失败"
 	status := http.StatusInternalServerError
-	if health.State == gbtrace.HealthDegraded || errors.Is(err, gbtrace.ErrTraceQueryUnavailable) {
+	if errors.Is(err, gbtrace.ErrTraceStoreUnavailable) || errors.Is(err, gbtrace.ErrTraceQueryUnavailable) {
+		msg = "SIP 日志采集尚未启动或存储暂未就绪"
 		status = http.StatusServiceUnavailable
+	} else if err != nil {
+		msg = fmt.Sprintf("SIP 日志存储查询失败: %s", err.Error())
 	}
-	app.Response.Fail(c, "SIP 日志存储当前不可用", status, 1, health)
+	app.Response.Fail(c, msg, status, 1, health)
 }
 
 func (tc *TraceController) captureFailure(c *gin.Context, err error) {
@@ -313,7 +445,7 @@ func parseMessageFilter(c *gin.Context) (gbtrace.MessageFilter, error) {
 	if err != nil {
 		return gbtrace.MessageFilter{}, err
 	}
-	filter := gbtrace.MessageFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId")), Cursor: c.Query("cursor")}
+	filter := gbtrace.MessageFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId")), Keyword: strings.TrimSpace(c.Query("keyword")), Cursor: c.Query("cursor")}
 	deviceIDs := strings.TrimSpace(c.Query("deviceIds"))
 	if deviceIDs != "" {
 		for _, value := range strings.Split(deviceIDs, ",") {
@@ -326,6 +458,9 @@ func parseMessageFilter(c *gin.Context) (gbtrace.MessageFilter, error) {
 	}
 	if (filter.DeviceID != "" && !validText(filter.DeviceID, 128, false)) || !validText(filter.CallID, 255, false) {
 		return gbtrace.MessageFilter{}, errors.New("设备编码或 Call-ID 非法")
+	}
+	if !validText(filter.Keyword, 128, false) {
+		return gbtrace.MessageFilter{}, errors.New("关键词非法")
 	}
 	if direction := c.Query("direction"); direction != "" {
 		filter.Direction = gbtrace.Direction(direction)
@@ -389,7 +524,7 @@ func parseSessionFilter(c *gin.Context) (gbtrace.SessionFilter, error) {
 	if err != nil {
 		return gbtrace.SessionFilter{}, err
 	}
-	filter := gbtrace.SessionFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId"))}
+	filter := gbtrace.SessionFilter{From: from, To: to, DeviceID: strings.TrimSpace(c.Query("deviceId")), CallID: strings.TrimSpace(c.Query("callId")), Keyword: strings.TrimSpace(c.Query("keyword"))}
 	if deviceIDs := strings.TrimSpace(c.Query("deviceIds")); deviceIDs != "" {
 		for _, value := range strings.Split(deviceIDs, ",") {
 			value = strings.TrimSpace(value)
@@ -401,6 +536,9 @@ func parseSessionFilter(c *gin.Context) (gbtrace.SessionFilter, error) {
 	}
 	if !validText(filter.DeviceID, 128, false) || !validText(filter.CallID, 255, false) {
 		return gbtrace.SessionFilter{}, errors.New("设备编码或 Call-ID 非法")
+	}
+	if !validText(filter.Keyword, 128, false) {
+		return gbtrace.SessionFilter{}, errors.New("关键词非法")
 	}
 	filter.Anomaly, err = parseOptionalBool(c.Query("anomaly"))
 	if err != nil {

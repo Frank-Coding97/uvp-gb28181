@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -12,16 +13,27 @@ func TestSessionSchemaUsesThirtyDayTTLAndCallIDGrouping(t *testing.T) {
 	store, err := NewClickHouseStoreWithConn(conn, "uvp_sip_trace")
 	require.NoError(t, err)
 	require.NoError(t, store.EnsureSchema(t.Context()))
-	require.Len(t, conn.execQueries, 3)
-	summaryDDL := conn.execQueries[1]
-	viewDDL := conn.execQueries[2]
+	// v2 schema: message table + 3 alter migrations + drop view + summary table + MV
+	require.GreaterOrEqual(t, len(conn.execQueries), 3)
+
+	// 按内容匹配,不依赖具体顺序
+	var summaryDDL, viewDDL string
+	for _, q := range conn.execQueries {
+		if strings.Contains(q, "AggregatingMergeTree") {
+			summaryDDL = q
+		}
+		if strings.Contains(q, "MATERIALIZED VIEW") {
+			viewDDL = q
+		}
+	}
+	require.NotEmpty(t, summaryDDL, "summary DDL not found")
+	require.NotEmpty(t, viewDDL, "view DDL not found")
 	require.Contains(t, summaryDDL, "uvp_sip_trace.sip_trace_session_day")
-	require.Contains(t, summaryDDL, "AggregatingMergeTree")
 	require.Contains(t, summaryDDL, "TTL day + INTERVAL 30 DAY")
 	require.Contains(t, summaryDDL, "ORDER BY (day, device_id, call_id)")
-	require.Contains(t, viewDDL, "MATERIALIZED VIEW")
 	require.Contains(t, viewDDL, "GROUP BY day, device_id, call_id")
 	require.Contains(t, viewDDL, "argMaxState")
+	require.Contains(t, viewDDL, "first_method_state")
 }
 
 func TestSessionQuerySupportsMultipleDevices(t *testing.T) {

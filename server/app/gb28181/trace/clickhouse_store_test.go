@@ -108,7 +108,8 @@ func TestClickHouseInsertBatchWritesEncryptedColumns(t *testing.T) {
 	require.True(t, conn.batch.sent)
 	require.Len(t, conn.batch.rows, 1)
 	require.Contains(t, conn.batchQuery, "INSERT INTO uvp_sip_trace.sip_trace_message")
-	require.Equal(t, []byte{1, 2, 3}, conn.batch.rows[0][15])
+	// v2 schema: 前 15 列(0..14) + malformed(15) + parse_error(16) + nonce(17) + ciphertext(18)
+	require.Equal(t, []byte{1, 2, 3}, conn.batch.rows[0][18])
 	require.NotContains(t, conn.batchQuery, "call-1")
 }
 

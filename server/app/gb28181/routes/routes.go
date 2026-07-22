@@ -172,6 +172,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			traceGroup.GET("/messages", func(c *gin.Context) { currentTraceController().ListMessages(c) })
 			traceGroup.GET("/messages/:id", func(c *gin.Context) { currentTraceController().GetMessage(c) })
 			traceGroup.GET("/sessions", func(c *gin.Context) { currentTraceController().ListSessions(c) })
+			traceGroup.GET("/sessions/stats", func(c *gin.Context) { currentTraceController().SessionStats(c) })
+			traceGroup.GET("/stream", func(c *gin.Context) { currentTraceController().Stream(c) })
 			traceGroup.GET("/sessions/:callId/messages", func(c *gin.Context) { currentTraceController().ListSessionMessages(c) })
 			traceGroup.POST("/captures/:id/stop", func(c *gin.Context) { currentTraceController().StopCapture(c) })
 		}

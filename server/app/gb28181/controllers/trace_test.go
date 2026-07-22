@@ -46,6 +46,9 @@ func (s *fakeTraceQueryService) GetMessage(_ context.Context, _ string, sensitiv
 func (s *fakeTraceQueryService) ListSessions(context.Context, gbtrace.SessionFilter) ([]gbtrace.SessionSummary, error) {
 	return s.sessions, s.err
 }
+func (s *fakeTraceQueryService) GetSessionStats(context.Context, gbtrace.SessionFilter) (gbtrace.SessionStats, error) {
+	return gbtrace.SessionStats{}, s.err
+}
 
 func newTraceControllerRouter(service TraceQueryService, access TraceAdminAccess) *gin.Engine {
 	gin.SetMode(gin.TestMode)

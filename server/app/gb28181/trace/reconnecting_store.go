@@ -83,41 +83,70 @@ func (s *ReconnectingStore) InsertBatch(ctx context.Context, events []StoredEven
 	return nil
 }
 
-func (s *ReconnectingStore) repository() (QueryRepository, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if s.current == nil {
-		return nil, ErrTraceStoreUnavailable
+// repository 触发 lazy dial 后返回 QueryRepository。
+// 之前只在 InsertBatch 里 ensure,导致 SIP 未采集到任何报文前 UI 查询永远 503。
+func (s *ReconnectingStore) repository(ctx context.Context) (QueryRepository, error) {
+	store, err := s.ensure(ctx)
+	if err != nil {
+		return nil, err
 	}
-	repository, ok := s.current.(QueryRepository)
+	repository, ok := store.(QueryRepository)
 	if !ok {
 		return nil, ErrTraceStoreUnavailable
 	}
 	return repository, nil
 }
 
-func (s *ReconnectingStore) ListMessages(ctx context.Context, filter MessageFilter) (MessagePage, error) {
-	repository, err := s.repository()
+func (s *ReconnectingStore) callRepo(ctx context.Context, fn func(QueryRepository) error) error {
+	repository, err := s.repository(ctx)
 	if err != nil {
-		return MessagePage{}, err
+		return err
 	}
-	return repository.ListMessages(ctx, filter)
+	if err := fn(repository); err != nil {
+		s.markBroken(s.current)
+		return err
+	}
+	return nil
+}
+
+func (s *ReconnectingStore) ListMessages(ctx context.Context, filter MessageFilter) (MessagePage, error) {
+	var page MessagePage
+	err := s.callRepo(ctx, func(r QueryRepository) error {
+		var e error
+		page, e = r.ListMessages(ctx, filter)
+		return e
+	})
+	return page, err
 }
 
 func (s *ReconnectingStore) GetMessage(ctx context.Context, eventID string) (StoredMessage, error) {
-	repository, err := s.repository()
-	if err != nil {
-		return StoredMessage{}, err
-	}
-	return repository.GetMessage(ctx, eventID)
+	var msg StoredMessage
+	err := s.callRepo(ctx, func(r QueryRepository) error {
+		var e error
+		msg, e = r.GetMessage(ctx, eventID)
+		return e
+	})
+	return msg, err
 }
 
 func (s *ReconnectingStore) ListSessions(ctx context.Context, filter SessionFilter) ([]SessionSummary, error) {
-	repository, err := s.repository()
-	if err != nil {
-		return nil, err
-	}
-	return repository.ListSessions(ctx, filter)
+	var list []SessionSummary
+	err := s.callRepo(ctx, func(r QueryRepository) error {
+		var e error
+		list, e = r.ListSessions(ctx, filter)
+		return e
+	})
+	return list, err
+}
+
+func (s *ReconnectingStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
+	var stats SessionStats
+	err := s.callRepo(ctx, func(r QueryRepository) error {
+		var e error
+		stats, e = r.GetSessionStats(ctx, filter)
+		return e
+	})
+	return stats, err
 }
 
 func (s *ReconnectingStore) Close() error {
