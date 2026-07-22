@@ -18,11 +18,12 @@ import (
 
 // UAC 平台主叫客户端:向下级设备发起 SIP 请求(MESSAGE 查询 / INVITE 点播)
 type UAC struct {
-	client   *sipgo.Client
-	dialogUA *sipgo.DialogClientCache // 管理 INVITE 对话(Ack/Bye)
-	serverID string
-	domain   string
-	recorder metrics.Recorder // 可选:埋点出向事务
+	client      *sipgo.Client
+	dialogUA    *sipgo.DialogClientCache // 管理 INVITE 对话(Ack/Bye)
+	talkDialogs *talkDialogStore
+	serverID    string
+	domain      string
+	recorder    metrics.Recorder // 可选:埋点出向事务
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对
@@ -41,7 +42,12 @@ func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int)
 	// Contact 头:平台自身地址,设备回包/BYE 用(端口写 server 监听端口,确保设备应答能回)
 	contact := platformContact(serverID, advertiseIP, sipPort)
 	dialogUA := sipgo.NewDialogClientCache(client, contact)
-	return &UAC{client: client, dialogUA: dialogUA, serverID: serverID, domain: domain}, nil
+	talkDialogUA := sipgo.NewDialogClientCache(client, contact)
+	return &UAC{
+		client: client, dialogUA: dialogUA,
+		talkDialogs: newTalkDialogStore(&sipgoTalkDialogTransport{cache: talkDialogUA}),
+		serverID:    serverID, domain: domain,
+	}, nil
 }
 
 func platformContact(serverID, advertiseIP string, sipPort int) sip.ContactHeader {
