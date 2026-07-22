@@ -72,7 +72,7 @@ func (f *fakeRecorderClient) StopRecord(context.Context, string, string, string)
 	f.stopCalls.Add(1)
 	return f.stopErr
 }
-func (f *fakeRecorderClient) GetMediaInfo(context.Context, string, string) (*zlm.MediaInfo, error) {
+func (f *fakeRecorderClient) GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error) {
 	if f.mediaInfo == nil {
 		return &zlm.MediaInfo{}, nil
 	}

@@ -137,13 +137,46 @@ func (c *Client) CloseRtpServer(ctx context.Context, streamID string) error {
 	return nil
 }
 
-// MediaInfo 单路流元信息(getMediaInfo / isMediaOnline 部分字段)
+// MediaTrack is one audio or video track returned by getMediaInfo.
+type MediaTrack struct {
+	CodecID       int      `json:"codec_id"`
+	CodecIDName   string   `json:"codec_id_name"`
+	Ready         bool     `json:"ready"`
+	CodecType     int      `json:"codec_type"`
+	Frames        int64    `json:"frames"`
+	Duration      float64  `json:"duration"`
+	SampleRate    int      `json:"sample_rate"`
+	Channels      int      `json:"channels"`
+	SampleBit     int      `json:"sample_bit"`
+	Width         int      `json:"width"`
+	Height        int      `json:"height"`
+	FPS           int      `json:"fps"`
+	KeyFrames     int64    `json:"key_frames"`
+	GOPSize       int      `json:"gop_size"`
+	GOPIntervalMS int      `json:"gop_interval_ms"`
+	Loss          *float64 `json:"loss"`
+}
+
+// MediaInfo is the full single-stream snapshot returned by getMediaInfo.
 type MediaInfo struct {
-	Online      bool   // 是否已就绪(对应 ZLM online 字段)
-	Schema      string // 协议:rtmp/rtsp/hls/...
-	App         string // 应用名
-	Stream      string // 流 id
-	ReaderCount int    // 当前观众数
+	Online           bool         `json:"online"`
+	Schema           string       `json:"schema"`
+	VHost            string       `json:"vhost"`
+	App              string       `json:"app"`
+	Stream           string       `json:"stream"`
+	CreateStamp      uint64       `json:"createStamp"`
+	CurrentStamp     uint64       `json:"currentStamp"`
+	AliveSecond      uint64       `json:"aliveSecond"`
+	BytesSpeed       uint64       `json:"bytesSpeed"`
+	TotalBytes       uint64       `json:"totalBytes"`
+	ReaderCount      int          `json:"readerCount"`
+	TotalReaderCount int          `json:"totalReaderCount"`
+	OriginType       int          `json:"originType"`
+	OriginTypeStr    string       `json:"originTypeStr"`
+	OriginURL        string       `json:"originUrl"`
+	IsRecordingMP4   bool         `json:"isRecordingMP4"`
+	IsRecordingHLS   bool         `json:"isRecordingHLS"`
+	Tracks           []MediaTrack `json:"tracks"`
 }
 
 // IsMediaOnline 轻量探测一路流是否就绪(返回 online 标志)
@@ -252,17 +285,14 @@ func (c *Client) IsRecording(ctx context.Context, vhost, appName, stream string)
 
 // GetMediaInfo 查询单路流详情(verify-after-hook 用)
 // 返回 online=false 表示流未就绪(包含"流不存在"和"流存在但暂无数据"两种情况)
-func (c *Client) GetMediaInfo(ctx context.Context, app, stream string) (*MediaInfo, error) {
+func (c *Client) GetMediaInfo(ctx context.Context, schema, vhost, app, stream string) (*MediaInfo, error) {
 	var r struct {
 		baseResp
-		Online      bool   `json:"online"`
-		Schema      string `json:"schema"`
-		App         string `json:"app"`
-		Stream      string `json:"stream"`
-		ReaderCount int    `json:"readerCount"`
+		MediaInfo
 	}
 	params := map[string]string{
-		"vhost":  "__defaultVhost__",
+		"schema": schema,
+		"vhost":  vhost,
 		"app":    app,
 		"stream": stream,
 	}
@@ -271,15 +301,16 @@ func (c *Client) GetMediaInfo(ctx context.Context, app, stream string) (*MediaIn
 	}
 	if r.Code != 0 {
 		// 流不存在:online=false,不报错
-		return &MediaInfo{App: app, Stream: stream}, nil
+		return &MediaInfo{Schema: schema, VHost: vhost, App: app, Stream: stream}, nil
 	}
-	return &MediaInfo{
-		Online:      r.Online,
-		Schema:      r.Schema,
-		App:         r.App,
-		Stream:      r.Stream,
-		ReaderCount: r.ReaderCount,
-	}, nil
+	info := r.MediaInfo
+	info.Online = true
+	for i := range info.Tracks {
+		if info.Tracks[i].Loss != nil && *info.Tracks[i].Loss < 0 {
+			info.Tracks[i].Loss = nil
+		}
+	}
+	return &info, nil
 }
 
 // KickSessions 驱逐(可选 filter)会话,返回被踢的会话数

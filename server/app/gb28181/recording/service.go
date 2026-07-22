@@ -46,7 +46,7 @@ type RecorderClient interface {
 	IsRecording(context.Context, string, string, string) (bool, error)
 	StartRecord(context.Context, string, string, string, int) error
 	StopRecord(context.Context, string, string, string) error
-	GetMediaInfo(context.Context, string, string) (*zlm.MediaInfo, error)
+	GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error)
 }
 
 type ClientFactory func(*node.Node) RecorderClient
@@ -193,7 +193,7 @@ func (s *Service) disableLocked(ctx context.Context, channel *models.GbChannel) 
 		return s.markDisableFailure(ctx, channelID, session, "停止录像失败: "+err.Error())
 	}
 
-	mediaInfo, mediaErr := client.GetMediaInfo(ctx, session.App, session.Stream)
+	mediaInfo, mediaErr := client.GetMediaInfo(ctx, "rtsp", session.VHost, session.App, session.Stream)
 	if err := s.repo.MarkSessionStopped(ctx, session.ID, ""); err != nil {
 		return nil, err
 	}

@@ -91,7 +91,7 @@ func TestIsMediaOnlineNotExist(t *testing.T) {
 // TestGetMediaInfoNotExist T6.1-测2: 查不存在的流 → online=false 且不报错
 func TestGetMediaInfoNotExist(t *testing.T) {
 	c := NewClientForNode(loadNode(t))
-	info, err := c.GetMediaInfo(context.Background(), "rtp", "definitely-not-exist-stream-id")
+	info, err := c.GetMediaInfo(context.Background(), "rtsp", "__defaultVhost__", "rtp", "definitely-not-exist-stream-id")
 	if err != nil {
 		t.Skipf("跳过(ZLM 不可达): %v", err)
 	}
