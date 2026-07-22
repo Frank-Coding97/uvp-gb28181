@@ -16,6 +16,21 @@ export interface CloudRecordingStateMeta {
     tooltip: string;
 }
 
+export interface CloudRecordingSnapshot {
+    cloudRecordingEnabled: boolean;
+    cloudRecordingState: string;
+    cloudRecordingError: string;
+    cloudRecordingUpdatedAt?: string | null;
+}
+
+export function mergeCloudRecordingState<T extends CloudRecordingSnapshot>(target: T, source: CloudRecordingSnapshot): T {
+    target.cloudRecordingEnabled = source.cloudRecordingEnabled;
+    target.cloudRecordingState = source.cloudRecordingState;
+    target.cloudRecordingError = source.cloudRecordingError;
+    target.cloudRecordingUpdatedAt = source.cloudRecordingUpdatedAt;
+    return target;
+}
+
 export function cloudRecordingStateMeta(state: CloudRecordingState | null | undefined, error = ""): CloudRecordingStateMeta {
     switch (state) {
         case "disabled":

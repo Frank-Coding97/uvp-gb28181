@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cloudRecordingStateMeta } from "./cloudRecordingState";
+import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 
 describe("cloudRecordingStateMeta", () => {
     it.each([
@@ -22,5 +22,22 @@ describe("cloudRecordingStateMeta", () => {
 
     it("handles unknown state without throwing", () => {
         expect(cloudRecordingStateMeta("future-state")).toMatchObject({ label: "未知状态", tone: "neutral" });
+    });
+
+    it("merges only backend recording state after a successful request", () => {
+        const target = {
+            id: 1,
+            cloudRecordingEnabled: false,
+            cloudRecordingState: "disabled",
+            cloudRecordingError: "",
+            cloudRecordingUpdatedAt: null
+        };
+        mergeCloudRecordingState(target, {
+            cloudRecordingEnabled: true,
+            cloudRecordingState: "waiting",
+            cloudRecordingError: "设备离线",
+            cloudRecordingUpdatedAt: "2026-07-22T18:00:00+08:00"
+        });
+        expect(target).toMatchObject({ id: 1, cloudRecordingEnabled: true, cloudRecordingState: "waiting" });
     });
 });

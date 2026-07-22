@@ -58,6 +58,7 @@ import {
     listMapMarkers,
     listDeviceSubscriptions,
     refreshDeviceCatalog,
+    updateCloudRecording,
     updateChannelStreamTransport,
     updateChannel,
     updateDevice,
@@ -80,6 +81,7 @@ import { useThemeConfig } from "@/store/modules/theme-config";
 import { storeToRefs } from "pinia";
 import ControlConsole from "../components/ControlConsole.vue";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
+import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
@@ -205,6 +207,7 @@ const ptzTypeOptions = ref<SystemDictItem[]>([]);
 const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
 const traceCaptureStarting = reactive<Record<number, boolean>>({});
+const cloudRecordingLoading = ref<Set<number>>(new Set());
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -1234,6 +1237,46 @@ async function handleOnDemandLiveChange(channelId: number, onDemandLive: boolean
     }
 }
 
+function isCloudRecordingLoading(channelId: number) {
+    return cloudRecordingLoading.value.has(channelId);
+}
+
+function setCloudRecordingLoading(channelId: number, loading: boolean) {
+    const next = new Set(cloudRecordingLoading.value);
+    if (loading) next.add(channelId);
+    else next.delete(channelId);
+    cloudRecordingLoading.value = next;
+}
+
+function recordingMeta(record: ChannelVO) {
+    const meta = cloudRecordingStateMeta(record.cloudRecordingState, record.cloudRecordingError);
+    return { ...meta, loading: meta.loading || isCloudRecordingLoading(record.id) };
+}
+
+async function handleCloudRecordingChange(channelId: number, enabled: boolean) {
+    if (isCloudRecordingLoading(channelId)) return;
+    setCloudRecordingLoading(channelId, true);
+    try {
+        const res = await updateCloudRecording(channelId, enabled);
+        if (res.code !== 0) {
+            Message.error(res.message || "更新云端录像失败");
+            return;
+        }
+        const item = channels.value.find(channel => channel.id === channelId);
+        if (item) mergeCloudRecordingState(item, res.data);
+        if (channelDetail.value?.id === channelId) {
+            const detail = { ...channelDetail.value };
+            mergeCloudRecordingState(detail, res.data);
+            channelDetail.value = detail;
+        }
+        Message.success(enabled ? "云端录像已开启" : "云端录像已关闭");
+    } catch (error: any) {
+        Message.error(error?.message || "更新云端录像失败");
+    } finally {
+        setCloudRecordingLoading(channelId, false);
+    }
+}
+
 async function handleBatchDelete() {
     const ids = [...selectedRowKeys.value];
     if (ids.length === 0) return;
@@ -1554,6 +1597,25 @@ onUnmounted(() => {
                                             unchecked-text="关"
                                             @change="(value: boolean) => handleOnDemandLiveChange(record.id, value)"
                                         />
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="云端录像" :width="160">
+                                    <template #cell="{ record }">
+                                        <div class="cloud-recording-control">
+                                            <a-switch
+                                                :model-value="record.cloudRecordingEnabled"
+                                                :loading="recordingMeta(record).loading"
+                                                :disabled="recordingMeta(record).loading"
+                                                :aria-label="`云端录像:${recordingMeta(record).label}`"
+                                                size="small"
+                                                @change="(value: boolean) => handleCloudRecordingChange(record.id, value)"
+                                            />
+                                            <a-tooltip :content="recordingMeta(record).tooltip || recordingMeta(record).label" position="top">
+                                                <span class="cloud-recording-state" :class="`tone-${recordingMeta(record).tone}`">
+                                                    {{ recordingMeta(record).label }}
+                                                </span>
+                                            </a-tooltip>
+                                        </div>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="位置信息" :width="180">
@@ -1889,6 +1951,26 @@ onUnmounted(() => {
                                             @dblclick.stop
                                             @change="(value: boolean) => handleOnDemandLiveChange(item.id, value)"
                                         />
+                                    </div>
+                                    <div>
+                                        <span>云端录像</span>
+                                        <div class="cloud-recording-control">
+                                            <a-switch
+                                                :model-value="item.cloudRecordingEnabled"
+                                                :loading="recordingMeta(item).loading"
+                                                :disabled="recordingMeta(item).loading"
+                                                :aria-label="`云端录像:${recordingMeta(item).label}`"
+                                                size="small"
+                                                @click.stop
+                                                @dblclick.stop
+                                                @change="(value: boolean) => handleCloudRecordingChange(item.id, value)"
+                                            />
+                                            <a-tooltip :content="recordingMeta(item).tooltip || recordingMeta(item).label" position="top">
+                                                <span class="cloud-recording-state" :class="`tone-${recordingMeta(item).tone}`">
+                                                    {{ recordingMeta(item).label }}
+                                                </span>
+                                            </a-tooltip>
+                                        </div>
                                     </div>
                                 </div>
                                 <div class="card-actions channel-card-actions">
@@ -3411,6 +3493,17 @@ onUnmounted(() => {
     min-width: 0;
 }
 .channel-card-info :deep(.arco-switch) { justify-self: start; }
+.cloud-recording-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+}
+.cloud-recording-state { color: var(--uvp-text-tertiary); font-size: 12px; }
+.cloud-recording-state.tone-success { color: var(--uvp-success, #10b981); }
+.cloud-recording-state.tone-warning { color: var(--uvp-warning); }
+.cloud-recording-state.tone-danger { color: var(--uvp-danger); }
 .channel-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .channel-card-actions {
     gap: 7px;
