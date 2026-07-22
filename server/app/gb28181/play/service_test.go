@@ -96,6 +96,13 @@ func (f *fakeChannels) FindChannel(ctx context.Context, deviceID, channelID stri
 	return f.c, nil
 }
 
+func (f *fakeChannels) FindChannelByStream(ctx context.Context, streamID string) (*gbmodels.GbChannel, error) {
+	if f.c != nil && f.c.StreamID == streamID {
+		return f.c, nil
+	}
+	return nil, nil
+}
+
 func (f *fakeChannels) UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error {
 	if f.updateErr != nil {
 		return f.updateErr

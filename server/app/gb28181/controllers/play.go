@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 
 	"github.com/gin-gonic/gin"
@@ -18,12 +19,32 @@ import (
 //	DELETE /api/gb28181/play/:streamId              停播
 type PlayController struct {
 	controllers.Common
-	svc *play.Service
+	svc             PlayService
+	retentionPolicy StreamRetentionPolicy
+}
+
+type PlayService interface {
+	Start(context.Context, string, string) (*play.Result, error)
+	Stop(context.Context, string) error
+}
+
+type StreamRetentionPolicy interface {
+	ShouldKeepStream(context.Context, string) (bool, error)
+}
+
+type PlayControllerOption func(*PlayController)
+
+func WithStreamRetentionPolicy(policy StreamRetentionPolicy) PlayControllerOption {
+	return func(controller *PlayController) { controller.retentionPolicy = policy }
 }
 
 // NewPlayController 装配点播控制器(svc 由 bootstrap 注入)
-func NewPlayController(svc *play.Service) *PlayController {
-	return &PlayController{svc: svc}
+func NewPlayController(svc PlayService, opts ...PlayControllerOption) *PlayController {
+	controller := &PlayController{svc: svc}
+	for _, option := range opts {
+		option(controller)
+	}
+	return controller
 }
 
 // Start 发起点播
@@ -64,6 +85,17 @@ func (pc *PlayController) Stop(c *gin.Context) {
 	}
 	if !pc.streamVisible(c, streamID) {
 		return
+	}
+	if pc.retentionPolicy != nil {
+		keep, err := pc.retentionPolicy.ShouldKeepStream(c.Request.Context(), streamID)
+		if err != nil {
+			pc.FailAndAbort(c, "查询云端录像状态失败", err)
+			return
+		}
+		if keep {
+			pc.SuccessWithMessage(c, "已停止观看，云端录像继续")
+			return
+		}
 	}
 	if err := pc.svc.Stop(c.Request.Context(), streamID); err != nil {
 		pc.FailAndAbort(c, "停播失败", err)

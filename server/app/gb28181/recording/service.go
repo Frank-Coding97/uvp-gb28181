@@ -70,6 +70,14 @@ func NewService(repo Repository, starter StreamStarter, stopper StreamStopper, l
 	}
 }
 
+func (s *Service) ShouldKeepStream(ctx context.Context, streamID string) (bool, error) {
+	channel, err := s.repo.FindChannelByStream(ctx, streamID)
+	if err != nil || channel == nil {
+		return false, err
+	}
+	return channel.CloudRecordingEnabled, nil
+}
+
 func (s *Service) Enable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
 	unlock := s.locks.Lock(channelID)
 	defer unlock()

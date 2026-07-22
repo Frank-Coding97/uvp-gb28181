@@ -23,6 +23,10 @@ func (gormChannelRepo) FindChannel(ctx context.Context, deviceID, channelID stri
 	return gbmodels.FindChannel(ctx, deviceID, channelID)
 }
 
+func (gormChannelRepo) FindChannelByStream(ctx context.Context, streamID string) (*gbmodels.GbChannel, error) {
+	return gbmodels.FindChannelByStreamID(ctx, streamID)
+}
+
 func (gormChannelRepo) UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error {
 	return gbmodels.UpdateChannelStream(ctx, deviceID, channelID, streamID)
 }

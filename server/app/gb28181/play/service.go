@@ -61,6 +61,7 @@ type Inviter interface {
 // ChannelRepo 通道查询(便于测试 mock)
 type ChannelRepo interface {
 	FindChannel(ctx context.Context, deviceID, channelID string) (*gbmodels.GbChannel, error)
+	FindChannelByStream(ctx context.Context, streamID string) (*gbmodels.GbChannel, error)
 	UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error
 	ClearStream(ctx context.Context, streamID string) error
 }
@@ -479,14 +480,14 @@ func (s *Service) Stop(ctx context.Context, streamID string) error {
 // ShouldCloseOnNoneReader 返回通道无人观看时是否应关闭上行流。
 // 找不到通道时沿用历史默认行为,避免残留流长期占用设备和 RTP 资源。
 func (s *Service) ShouldCloseOnNoneReader(ctx context.Context, streamID string) (bool, error) {
-	ch, err := gbmodels.FindChannelByStreamID(ctx, streamID)
+	ch, err := s.channels.FindChannelByStream(ctx, streamID)
 	if err != nil {
 		return true, err
 	}
 	if ch == nil {
 		return true, nil
 	}
-	return ch.OnDemandLive, nil
+	return ch.OnDemandLive && !ch.CloudRecordingEnabled, nil
 }
 
 // buildResultFor 构造播放地址,host 由 Start 传(多节点路径取选中 node host,单节点取 cfg.ZLM.Host)
