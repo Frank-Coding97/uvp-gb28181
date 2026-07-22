@@ -3,8 +3,10 @@ package recording
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -232,4 +234,67 @@ func TestDisableRetainsSessionWhenStopRecordFails(t *testing.T) {
 	stored, err := repo.FindSessionByMedia(context.Background(), 2, session.VHost, session.App, session.Stream)
 	require.NoError(t, err)
 	require.NotEqual(t, models.RecordingSessionStateStopped, stored.State)
+}
+
+func TestConcurrentEnableStartsRecorderOnce(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	starter := &fakeStarter{result: &play.Result{StreamID: "stream-1"}}
+	client := &fakeRecorderClient{}
+	service := newRecordingService(repo, starter, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := service.Enable(context.Background(), channel.ID)
+			require.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+	require.EqualValues(t, 1, starter.calls.Load())
+	require.EqualValues(t, 1, client.startCalls.Load())
+}
+
+type parallelStarter struct {
+	active    atomic.Int32
+	maxActive atomic.Int32
+}
+
+func (p *parallelStarter) Start(_ context.Context, _, channelID string) (*play.Result, error) {
+	active := p.active.Add(1)
+	for {
+		current := p.maxActive.Load()
+		if active <= current || p.maxActive.CompareAndSwap(current, active) {
+			break
+		}
+	}
+	time.Sleep(40 * time.Millisecond)
+	p.active.Add(-1)
+	return &play.Result{StreamID: "stream-" + channelID}, nil
+}
+
+func TestDifferentChannelsCanReconcileConcurrently(t *testing.T) {
+	db := newRepoTestDB(t)
+	repo := NewGormRepo(db)
+	first := &models.GbChannel{DeviceID: "device", ChannelID: "first", Status: models.ChannelStatusOnline}
+	second := &models.GbChannel{DeviceID: "device", ChannelID: "second", Status: models.ChannelStatusOnline}
+	require.NoError(t, db.Create(first).Error)
+	require.NoError(t, db.Create(second).Error)
+	starter := &parallelStarter{}
+	service := NewService(repo, starter, &fakeStopper{}, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient {
+		return &fakeRecorderClient{}
+	})
+
+	var wg sync.WaitGroup
+	for _, id := range []uint{first.ID, second.ID} {
+		wg.Add(1)
+		go func(channelID uint) {
+			defer wg.Done()
+			_, err := service.Enable(context.Background(), channelID)
+			require.NoError(t, err)
+		}(id)
+	}
+	wg.Wait()
+	require.EqualValues(t, 2, starter.maxActive.Load())
 }

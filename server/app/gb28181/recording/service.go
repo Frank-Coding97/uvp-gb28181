@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -60,19 +59,28 @@ type Service struct {
 	registry NodeLookup
 	client   ClientFactory
 
-	mu sync.Mutex
+	locks *keyedLocker
 }
 
 func NewService(repo Repository, starter StreamStarter, stopper StreamStopper, location LocationLookup, registry NodeLookup, client ClientFactory) *Service {
 	return &Service{
 		repo: repo, starter: starter, stopper: stopper,
 		location: location, registry: registry, client: client,
+		locks: newKeyedLocker(),
 	}
 }
 
 func (s *Service) Enable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.locks.Lock(channelID)
+	defer unlock()
+
+	current, err := s.repo.GetChannel(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	if current.CloudRecordingEnabled && current.CloudRecordingState == models.CloudRecordingStateRecording {
+		return current, nil
+	}
 
 	channel, err := s.repo.SetDesired(ctx, channelID, true)
 	if err != nil {
@@ -82,8 +90,16 @@ func (s *Service) Enable(ctx context.Context, channelID uint) (*models.GbChannel
 }
 
 func (s *Service) Disable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	unlock := s.locks.Lock(channelID)
+	defer unlock()
+
+	current, err := s.repo.GetChannel(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	if !current.CloudRecordingEnabled && current.CloudRecordingState == models.CloudRecordingStateDisabled {
+		return current, nil
+	}
 
 	channel, err := s.repo.SetDesired(ctx, channelID, false)
 	if err != nil {
