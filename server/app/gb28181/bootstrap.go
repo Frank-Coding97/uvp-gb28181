@@ -379,7 +379,10 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			zlmLocationMap = stream.NewLocationMap()
 			// 通道快照 service(播放触发)—— 优先尝试装配,失败/nil 都不影响主链路
 			snapshotSvc := buildSnapshotService()
-			opts := []play.Option{}
+			opts := []play.Option{
+				play.WithURLResolver(play.NewURLResolver(
+					gbzlm.NewServerConfigCache(gbzlm.FetchViaRegistry(zlmRegistry)))),
+			}
 			if snapshotSvc != nil {
 				opts = append(opts, play.WithSnapshotService(snapshotSvc))
 				app.ZapLog.Info("GB28181 通道快照 service 已装配")

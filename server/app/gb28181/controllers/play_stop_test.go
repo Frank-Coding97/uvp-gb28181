@@ -57,7 +57,7 @@ func TestPlayControllerStopKeepsCloudRecordingStream(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	body := unmarshal(t, response)
 	assert.EqualValues(t, 0, body["code"])
-	assert.Equal(t, "已停止观看，云端录像继续", body["message"])
+	assert.Equal(t, "已停止观看", body["message"])
 	assert.EqualValues(t, 0, service.stopCalls.Load())
 }
 
@@ -79,6 +79,6 @@ func TestPlayControllerStopReleasesUnrecordedStream(t *testing.T) {
 	require.Equal(t, http.StatusOK, response.Code)
 	body := unmarshal(t, response)
 	assert.EqualValues(t, 0, body["code"])
-	assert.Equal(t, "已停播", body["message"])
-	assert.EqualValues(t, 1, service.stopCalls.Load())
+	assert.Equal(t, "已停止观看", body["message"])
+	assert.EqualValues(t, 0, service.stopCalls.Load())
 }

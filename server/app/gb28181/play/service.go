@@ -73,13 +73,24 @@ type DeviceRepo interface {
 
 // Result 点播结果
 type Result struct {
-	StreamID   string `json:"streamId"`   // ZLM stream id(也是会话主键)
-	SSRC       string `json:"ssrc"`       // 媒体流 SSRC
-	App        string `json:"app"`        // ZLM app(固定 rtp)
-	WSFlvURL   string `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
-	HLSURL     string `json:"hlsUrl"`     // HLS 备用
-	HTTPFlvURL string `json:"httpFlvUrl"` // http-flv 备用
-	ExpireAt   int64  `json:"expireAt"`   // 预计无人观看断流时刻(秒,UTC)
+	StreamID    string       `json:"streamId"` // ZLM stream id(也是会话主键)
+	SSRC        string       `json:"ssrc"`     // 媒体流 SSRC
+	App         string       `json:"app"`      // ZLM app(固定 rtp)
+	Reused      bool         `json:"reused"`
+	Status      string       `json:"status"`
+	Node        *ResultNode  `json:"node"`
+	URLs        PlaybackURLs `json:"urls"`
+	URLWarnings []string     `json:"urlWarnings"`
+	WSFlvURL    string       `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
+	HLSURL      string       `json:"hlsUrl"`     // HLS 备用
+	HTTPFlvURL  string       `json:"httpFlvUrl"` // http-flv 备用
+	ExpireAt    int64        `json:"expireAt"`   // 预计无人观看断流时刻(秒,UTC)
+}
+
+type ResultNode struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Host string `json:"host"`
 }
 
 // 常量
@@ -122,6 +133,7 @@ type Service struct {
 	pollEvery time.Duration // 轮询间隔,默认 200ms
 
 	snapshotSvc SnapshotService // 通道快照(播放触发),可为 nil
+	urlResolver *URLResolver
 }
 
 // SnapshotService 通道快照能力(播放成功后 fire-and-forget 抓帧)
@@ -137,6 +149,10 @@ type Option func(*Service)
 // WithSnapshotService 注入通道快照服务
 func WithSnapshotService(svc SnapshotService) Option {
 	return func(s *Service) { s.snapshotSvc = svc }
+}
+
+func WithURLResolver(resolver *URLResolver) Option {
+	return func(s *Service) { s.urlResolver = resolver }
 }
 
 // New 创建 service(deprecated 单节点路径,M1/test fixture 兼容)
@@ -225,7 +241,7 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 		if !online {
 			return nil, nil
 		}
-		return s.buildReuseResult(streamID, s.cfg.ZLM.Host), nil
+		return s.buildReuseResult(ctx, streamID, nil), nil
 	}
 
 	// 多节点路径:优先看 LocationMap
@@ -234,7 +250,7 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 			client := zlm.NewClientForNode(n)
 			online, err := client.IsMediaOnline(ctx, zlmApp, streamID)
 			if err == nil && online {
-				return s.buildReuseResult(streamID, n.Host), nil
+				return s.buildReuseResult(ctx, streamID, n), nil
 			}
 			app.ZapLog.Info("流复用绑定节点探测未在线",
 				zap.String("streamId", streamID),
@@ -271,19 +287,24 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 			app.ZapLog.Info("流复用兜底探测命中,恢复 LocationMap",
 				zap.String("streamId", streamID),
 				zap.Int64("nodeId", n.ID))
-			return s.buildReuseResult(streamID, n.Host), nil
+			return s.buildReuseResult(ctx, streamID, n), nil
 		}
 	}
 	return nil, nil
 }
 
 // buildReuseResult 构造复用返回值(从 session 取 SSRC,取不到用 streamID 兜底)
-func (s *Service) buildReuseResult(streamID, host string) *Result {
+func (s *Service) buildReuseResult(ctx context.Context, streamID string, mediaNode *node.Node) *Result {
 	ssrc := streamID
 	if sess := s.sessions.Get(streamID); sess != nil {
 		ssrc = sess.SSRC
 	}
-	return s.buildResultFor(streamID, ssrc, host)
+	if mediaNode != nil {
+		return s.buildNodeResult(ctx, streamID, ssrc, mediaNode, true)
+	}
+	result := s.buildResultFor(streamID, ssrc, s.cfg.ZLM.Host)
+	result.Reused = true
+	return result
 }
 
 // Start 发起点播
@@ -346,19 +367,21 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	var recvHost string
 	var rtpFallback int
 	var pickedNodeID int64 // 通道快照要按 nodeID 拿 ZLM 端口配置 —— 单节点路径为 0
+	var pickedNode *node.Node
 
 	if s.useMultiNode() {
-		pickedNode, err := s.picker.Pick(ctx, PickContext{
+		selectedNode, err := s.picker.Pick(ctx, PickContext{
 			DeviceID: deviceID, ChannelID: channelID, StreamID: streamID,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("无可用 ZLM 节点: %w", err)
 		}
-		client = zlm.NewClientForNode(pickedNode)
-		recvHost = pickedNode.Host
-		rtpFallback = pickedNode.RTPPortStart // 兜底端口
-		pickedNodeID = pickedNode.ID
-		s.locationMap.Bind(streamID, pickedNode.ID)
+		client = zlm.NewClientForNode(selectedNode)
+		recvHost = selectedNode.Host
+		rtpFallback = selectedNode.RTPPortStart // 兜底端口
+		pickedNodeID = selectedNode.ID
+		pickedNode = selectedNode
+		s.locationMap.Bind(streamID, selectedNode.ID)
 	} else {
 		// deprecated 单节点路径
 		client = s.zlm
@@ -444,7 +467,12 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	}
 
 	// 9. 生成播放地址(多节点用 picked node 的 host;单节点用 cfg.ZLM.Host)
-	result := s.buildResultFor(streamID, ssrc, recvHost)
+	var result *Result
+	if pickedNode != nil {
+		result = s.buildNodeResult(ctx, streamID, ssrc, pickedNode, false)
+	} else {
+		result = s.buildResultFor(streamID, ssrc, recvHost)
+	}
 	return result, nil
 }
 
@@ -501,6 +529,7 @@ func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 		StreamID:   streamID,
 		SSRC:       ssrc,
 		App:        zlmApp,
+		Status:     "online",
 		WSFlvURL:   "ws://" + base + ".live.flv",
 		HTTPFlvURL: "http://" + base + ".live.flv",
 		HLSURL:     "http://" + base + "/hls.m3u8",
@@ -508,6 +537,30 @@ func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 	}
 }
 
+func (s *Service) buildNodeResult(ctx context.Context, streamID, ssrc string, mediaNode *node.Node, reused bool) *Result {
+	urls, warnings := s.urlResolver.Resolve(ctx, mediaNode, zlmApp, streamID)
+	result := &Result{
+		StreamID:    streamID,
+		SSRC:        ssrc,
+		App:         zlmApp,
+		Reused:      reused,
+		Status:      "online",
+		Node:        &ResultNode{ID: mediaNode.ID, Name: mediaNode.Name, Host: mediaNode.Host},
+		URLs:        urls,
+		URLWarnings: warnings,
+		ExpireAt:    time.Now().Add(time.Duration(s.cfg.Media.StreamNoneReaderTimeout) * time.Second).Unix(),
+	}
+	if urls.WSFLV != nil {
+		result.WSFlvURL = *urls.WSFLV
+	}
+	if urls.HTTPFLV != nil {
+		result.HTTPFlvURL = *urls.HTTPFLV
+	}
+	if urls.HLS != nil {
+		result.HLSURL = *urls.HLS
+	}
+	return result
+}
 
 // buildResult 旧版,deprecated 单节点路径用
 //

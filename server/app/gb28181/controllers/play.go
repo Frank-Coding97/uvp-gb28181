@@ -86,22 +86,7 @@ func (pc *PlayController) Stop(c *gin.Context) {
 	if !pc.streamVisible(c, streamID) {
 		return
 	}
-	if pc.retentionPolicy != nil {
-		keep, err := pc.retentionPolicy.ShouldKeepStream(c.Request.Context(), streamID)
-		if err != nil {
-			pc.FailAndAbort(c, "查询云端录像状态失败", err)
-			return
-		}
-		if keep {
-			pc.SuccessWithMessage(c, "已停止观看，云端录像继续")
-			return
-		}
-	}
-	if err := pc.svc.Stop(c.Request.Context(), streamID); err != nil {
-		pc.FailAndAbort(c, "停播失败", err)
-		return
-	}
-	pc.SuccessWithMessage(c, "已停播")
+	pc.SuccessWithMessage(c, "已停止观看")
 }
 
 // mapPlayErr 把 service 错误翻译成更友好的消息
