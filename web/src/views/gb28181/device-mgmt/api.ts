@@ -125,6 +125,10 @@ export interface ChannelVO {
     streamId: string;
     onDemandLive: boolean; // 无人观看时是否自动关闭
     streamTransport: string; // 流传输模式: UDP / TCP-Active / TCP-Passive
+    cloudRecordingEnabled: boolean;
+    cloudRecordingState: string;
+    cloudRecordingError: string;
+    cloudRecordingUpdatedAt?: string | null;
     snapshotUrl?: string | null; // 最新快照 URL(相对路径 /public/gb-channel-snapshot/...)
     snapshotAt?: string | null; // 最新快照抓拍时间(ISO 8601)
     createdAt: string;
@@ -378,6 +382,13 @@ export const updateChannel = (id: number, data: { alias?: string; ptzType?: numb
         "patch",
         baseUrlApi(`gb28181/device-mgmt/channel/${id}`),
         { data }
+    );
+
+export const updateCloudRecording = (id: number, enabled: boolean) =>
+    http.request<BaseResult<ChannelVO>>(
+        "patch",
+        baseUrlApi(`gb28181/device-mgmt/channel/${id}/cloud-recording`),
+        { data: { enabled } }
     );
 
 export const updateDevice = (deviceId: string, data: { alias?: string; manufacturer?: string; model?: string; firmware?: string }) =>
