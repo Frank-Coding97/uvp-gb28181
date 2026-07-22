@@ -3347,7 +3347,13 @@ onUnmounted(() => {
     color: var(--uvp-text-primary);
     font-weight: 500;
 }
-.channel-card-inline-select { min-width: 0; width: 100%; }
+.channel-card-inline-select {
+    justify-self: start;
+    width: 148px;
+    max-width: 100%;
+    min-width: 0;
+}
+.channel-card-info :deep(.arco-switch) { justify-self: start; }
 .channel-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .channel-card-actions {
     gap: 7px;
