@@ -152,6 +152,27 @@ func (s *Service) Disable(ctx context.Context, channelID uint) (*models.GbChanne
 	if err != nil {
 		return nil, err
 	}
+	return s.disableLocked(ctx, channel)
+}
+
+func (s *Service) ReconcileChannel(ctx context.Context, channelID uint) error {
+	unlock := s.locks.Lock(channelID)
+	defer unlock()
+
+	channel, err := s.repo.GetChannel(ctx, channelID)
+	if err != nil {
+		return err
+	}
+	if channel.CloudRecordingEnabled {
+		_, err = s.reconcileEnabledLocked(ctx, channel)
+		return err
+	}
+	_, err = s.disableLocked(ctx, channel)
+	return err
+}
+
+func (s *Service) disableLocked(ctx context.Context, channel *models.GbChannel) (*models.GbChannel, error) {
+	channelID := channel.ID
 	session, err := s.repo.FindLatestSessionByChannel(ctx, channelID)
 	if err != nil {
 		return nil, err
