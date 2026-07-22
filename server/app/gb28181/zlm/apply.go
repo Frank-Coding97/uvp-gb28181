@@ -29,8 +29,8 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 		"hook.on_play":               base + "/on_play",
 		"hook.on_record_mp4":         base + "/on_record_mp4",
 		// 心跳周期(秒)
-		"hook.alive_interval":   "30.0",
-		"record.mp4_max_second": "3600",
+		"hook.alive_interval":     "30.0",
+		"protocol.mp4_max_second": "3600",
 		// 运行时策略
 		"general.streamNoneReaderDelayMS": strconv.Itoa(media.StreamNoneReaderTimeout * 1000),
 	}
