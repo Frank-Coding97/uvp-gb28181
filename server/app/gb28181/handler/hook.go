@@ -53,14 +53,15 @@ type StreamObserver interface {
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
-	notifier  *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
-	stopper   PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
-	policy    NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
-	collector KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
-	resolver  NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
-	binder    StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
-	recordMP4 RecordMP4Indexer
-	observer  StreamObserver
+	notifier       *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper        PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	policy         NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
+	collector      KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
+	resolver       NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
+	binder         StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
+	recordMP4      RecordMP4Indexer
+	recordResolver NodeUUIDResolver
+	observer       StreamObserver
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -89,7 +90,7 @@ func (h *HookController) SetMultiNode(resolver NodeUUIDResolver, binder StreamLo
 }
 
 func (h *HookController) SetRecordMP4Indexer(resolver NodeUUIDResolver, indexer RecordMP4Indexer) {
-	h.resolver = resolver
+	h.recordResolver = resolver
 	h.recordMP4 = indexer
 }
 
@@ -253,11 +254,11 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "invalid on_record_mp4 payload"})
 		return
 	}
-	if h.resolver == nil || h.recordMP4 == nil {
+	if h.recordResolver == nil || h.recordMP4 == nil {
 		hookOK(c)
 		return
 	}
-	nodeID, ok := h.resolver.IDForUUID(body.MediaServerID)
+	nodeID, ok := h.recordResolver.IDForUUID(body.MediaServerID)
 	if !ok {
 		app.ZapLog.Warn("忽略未知 ZLM 节点的录像文件", zap.String("mediaServerId", body.MediaServerID))
 		hookOK(c)

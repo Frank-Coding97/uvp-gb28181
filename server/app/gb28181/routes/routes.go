@@ -9,6 +9,7 @@ import (
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
 
@@ -28,6 +29,8 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 
 // playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
 var playController = gbcontrollers.NewPlayController(nil)
+var playService *gbplay.Service
+var recordingService *gbrecording.Service
 
 // dashboardController SIP 监控看板控制器
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
@@ -85,9 +88,24 @@ func currentTraceController() *gbcontrollers.TraceController {
 // SetPlayService 由 bootstrap 注入 play service(routes 包先于 service 实例化,故需后置注入)
 // 同时把 service 注入到 hookController(无人观看 / RTP 超时 自动断流)
 func SetPlayService(svc *gbplay.Service) {
-	playController = gbcontrollers.NewPlayController(svc)
+	playService = svc
+	rebuildPlayController()
+	if svc == nil {
+		hookController.SetPlayStopper(nil)
+		hookController.SetNoneReaderPolicy(nil)
+		return
+	}
 	hookController.SetPlayStopper(svc)
 	hookController.SetNoneReaderPolicy(svc)
+}
+
+func rebuildPlayController() {
+	if recordingService != nil {
+		playController = gbcontrollers.NewPlayController(playService,
+			gbcontrollers.WithStreamRetentionPolicy(recordingService))
+		return
+	}
+	playController = gbcontrollers.NewPlayController(playService)
 }
 
 // SetZLMNodeController 由 bootstrap M1.6 注入(同 SetPlayService 模式)
@@ -135,12 +153,15 @@ func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.Stre
 	hookController.SetMultiNode(resolver, binder)
 }
 
-func SetRecordMP4Indexer(resolver gbhandler.NodeUUIDResolver, indexer gbhandler.RecordMP4Indexer) {
+func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUUIDResolver, indexer gbhandler.RecordMP4Indexer) {
+	recordingService = service
+	rebuildPlayController()
 	hookController.SetRecordMP4Indexer(resolver, indexer)
-}
-
-func SetRecordingStreamObserver(observer gbhandler.StreamObserver) {
-	hookController.SetStreamObserver(observer)
+	if service == nil {
+		hookController.SetStreamObserver(nil)
+		return
+	}
+	hookController.SetStreamObserver(service)
 }
 
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组

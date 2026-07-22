@@ -268,3 +268,5 @@ gb28181:
     hookport: 8280                # 后端 HTTP 端口
     streamnonereadertimeout: 20   # 无人观看多少秒后断流
     rtpservertimeout: 15          # RTP 收流超时(秒)
+  recording:
+    reconcile_interval_sec: 30   # 云端录像对账周期(秒);0 仅禁用周期任务

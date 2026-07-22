@@ -4,13 +4,14 @@ import "uvplatform.cn/uvp-gb28181/app/global/app"
 
 // Config GB28181 国标平台配置
 type Config struct {
-	Enabled bool
-	SIP     SIPConfig
-	Trace   TraceConfig
-	Device  DeviceConfig
-	ZLM     ZLMConfig
-	Media   MediaConfig
-	Play    PlayConfig
+	Enabled   bool
+	SIP       SIPConfig
+	Trace     TraceConfig
+	Device    DeviceConfig
+	ZLM       ZLMConfig
+	Media     MediaConfig
+	Play      PlayConfig
+	Recording RecordingConfig
 }
 
 // TraceConfig controls the optional SIP trace module.
@@ -48,6 +49,11 @@ type PlayConfig struct {
 	// ReconcileIntervalSec 兜底对账 goroutine 扫描周期(秒).
 	// 0 = 禁用 reconciler(适合开发/调试场景).
 	// 默认 300(5 分钟).
+	ReconcileIntervalSec int
+}
+
+type RecordingConfig struct {
+	// ReconcileIntervalSec 云端录像状态对账周期。0 仅禁用周期任务，手动开关仍可用。
 	ReconcileIntervalSec int
 }
 
@@ -128,6 +134,9 @@ func LoadFrom(c valueSource) Config {
 		},
 		Play: PlayConfig{
 			ReconcileIntervalSec: c.GetInt("gb28181.play.reconcile_interval_sec"),
+		},
+		Recording: RecordingConfig{
+			ReconcileIntervalSec: c.GetInt("gb28181.recording.reconcile_interval_sec"),
 		},
 	}
 }

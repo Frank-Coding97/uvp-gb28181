@@ -18,6 +18,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play/reconciler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
@@ -161,6 +162,9 @@ var heartbeatCancel context.CancelFunc
 
 // playReconciler 兜底对账 goroutine(通道播放状态显示 T7 新增)
 var playReconciler *reconciler.Reconciler
+
+var recordingSvc *gbrecording.Service
+var recordingReconciler *gbrecording.Reconciler
 
 // zlmSchedulerLog 调度日志服务(T3.3 新增,可为 nil 降级)
 var zlmSchedulerLog *gbzlmsched.LogService
@@ -398,6 +402,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+	setupRecordingRuntime(cfg)
 
 	// 装配兜底对账 reconciler(通道播放状态显示 T7 新增)
 	// spec AC10-AC16: 5min 定期扫描 gb_channel.stream_id 跟 ZLM 真实流状态对齐,
@@ -425,6 +430,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) {
+	stopRecordingRuntime()
 	if positionHistoryPruneCancel != nil {
 		positionHistoryPruneCancel()
 		positionHistoryPruneCancel = nil
@@ -455,6 +461,38 @@ func stopSIPDependencies(ctx context.Context) {
 		}
 		sipServer = nil
 	}
+}
+
+func setupRecordingRuntime(cfg gbconfig.Config) {
+	if playSvc == nil || zlmRegistry == nil || zlmLocationMap == nil {
+		gbroutes.SetRecordingService(nil, nil, nil)
+		app.ZapLog.Info("GB28181 云端录像 service 跳过装配(play/registry/locationMap 未就绪)")
+		return
+	}
+	repo := gbrecording.NewGormRepo(app.DB())
+	recordingSvc = gbrecording.NewService(repo, playSvc, playSvc, zlmLocationMap, zlmRegistry,
+		func(n *node.Node) gbrecording.RecorderClient { return gbzlm.NewClientForNode(n) })
+	indexer := gbrecording.NewFileIndexer(repo)
+	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
+	app.ZapLog.Info("GB28181 云端录像 service / Hook 已装配")
+
+	if cfg.Recording.ReconcileIntervalSec <= 0 {
+		app.ZapLog.Info("GB28181 云端录像周期对账未启用(reconcile_interval_sec=0)")
+		return
+	}
+	interval := time.Duration(cfg.Recording.ReconcileIntervalSec) * time.Second
+	recordingReconciler = gbrecording.NewReconciler(repo, recordingSvc, interval, 10*time.Second)
+	recordingReconciler.Start(context.Background())
+	app.ZapLog.Info("GB28181 云端录像 reconciler 已启动", zap.Duration("interval", interval))
+}
+
+func stopRecordingRuntime() {
+	if recordingReconciler != nil {
+		recordingReconciler.Stop()
+		recordingReconciler = nil
+	}
+	recordingSvc = nil
+	gbroutes.SetRecordingService(nil, nil, nil)
 }
 
 // ReloadSIP 触发一次热重启:关旧 SIP 依赖 → 从 DB 重新读配置 → 启新的.
@@ -756,6 +794,7 @@ func setupCivilCodeService() {
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	stopRecordingRuntime()
 	if positionHistoryPruneCancel != nil {
 		positionHistoryPruneCancel()
 		positionHistoryPruneCancel = nil
@@ -786,6 +825,12 @@ func Stop() {
 		offlineScanner.Stop()
 		offlineScanner = nil
 	}
+	if playReconciler != nil {
+		playReconciler.Stop()
+		playReconciler = nil
+	}
+	playSvc = nil
+	gbroutes.SetPlayService(nil)
 	if sipServer == nil {
 		return
 	}

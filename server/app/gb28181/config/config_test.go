@@ -37,6 +37,9 @@ func TestLoad(t *testing.T) {
 	if cfg.Device.OfflineScanInterval <= 0 {
 		t.Errorf("期望 offline_scan_interval > 0, 实际 %d", cfg.Device.OfflineScanInterval)
 	}
+	if cfg.Recording.ReconcileIntervalSec != 30 {
+		t.Errorf("期望 recording.reconcile_interval_sec=30,实际 %d", cfg.Recording.ReconcileIntervalSec)
+	}
 }
 
 // fakeSource 手写 valueSource 用于隔离测 LoadFrom.
@@ -47,9 +50,9 @@ type fakeSource struct {
 	slices  map[string][]string
 }
 
-func (f fakeSource) GetBool(k string) bool           { return f.bools[k] }
-func (f fakeSource) GetString(k string) string       { return f.strings[k] }
-func (f fakeSource) GetInt(k string) int             { return f.ints[k] }
+func (f fakeSource) GetBool(k string) bool            { return f.bools[k] }
+func (f fakeSource) GetString(k string) string        { return f.strings[k] }
+func (f fakeSource) GetInt(k string) int              { return f.ints[k] }
 func (f fakeSource) GetStringSlice(k string) []string { return f.slices[k] }
 
 // TestLoadFromPlayConfig 断言 PlayConfig 能从 valueSource 正确加载.
@@ -78,5 +81,17 @@ func TestLoadFromPlayConfig(t *testing.T) {
 					c.expected, cfg.Play.ReconcileIntervalSec)
 			}
 		})
+	}
+}
+
+func TestLoadFromRecordingConfig(t *testing.T) {
+	for _, value := range []int{0, 30, 60} {
+		src := fakeSource{
+			ints: map[string]int{"gb28181.recording.reconcile_interval_sec": value},
+		}
+		cfg := LoadFrom(src)
+		if cfg.Recording.ReconcileIntervalSec != value {
+			t.Fatalf("期望录像对账周期 %d,实际 %d", value, cfg.Recording.ReconcileIntervalSec)
+		}
 	}
 }

@@ -30,4 +30,5 @@ func TestApplyConfigForNodeIncludesRecordMP4Hook(t *testing.T) {
 	err = client.ApplyConfigForNode(context.Background(), gbconfig.MediaConfig{HookHost: "platform", HookPort: 8280})
 	require.NoError(t, err)
 	require.Equal(t, "http://platform:8280/index/hook/on_record_mp4", query.Get("hook.on_record_mp4"))
+	require.Equal(t, "3600", query.Get("record.mp4_max_second"))
 }
