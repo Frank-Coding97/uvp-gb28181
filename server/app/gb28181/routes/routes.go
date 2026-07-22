@@ -35,7 +35,7 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 var playController = gbcontrollers.NewPlayController(nil)
 var streamMonitorController = gbcontrollers.NewStreamMonitorController(nil)
 var streamProbeController = gbcontrollers.NewStreamProbeController(nil)
-var talkController = gbcontrollers.NewTalkController(nil)
+var talkController atomic.Pointer[gbcontrollers.TalkController]
 var playService *gbplay.Service
 var recordingService *gbrecording.Service
 var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
@@ -54,6 +54,7 @@ var traceController atomic.Pointer[gbcontrollers.TraceController]
 
 func init() {
 	traceController.Store(gbcontrollers.NewTraceController(nil, nil, nil))
+	talkController.Store(gbcontrollers.NewTalkController(nil))
 }
 
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
@@ -132,11 +133,12 @@ func (a talkHookAdapter) ObserveTalkStream(ctx context.Context, nodeID int64, ap
 }
 
 func SetTalkService(service *talk.Service, resolver gbhandler.NodeUUIDResolver) {
-	talkController = gbcontrollers.NewTalkController(service)
 	if service == nil || resolver == nil {
+		talkController.Store(gbcontrollers.NewTalkController(nil))
 		hookController.SetTalk(nil, nil, nil)
 		return
 	}
+	talkController.Store(gbcontrollers.NewTalkController(service))
 	adapter := talkHookAdapter{service: service}
 	hookController.SetTalk(resolver, adapter, adapter)
 }
@@ -304,9 +306,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
 			dmgmt.GET("/channel/:id/control-capabilities", deviceMgmtController.GetControlCapabilities)
 			dmgmt.POST("/channel/:id/device-control", deviceMgmtController.ControlDevice)
-			dmgmt.POST("/channel/:id/talk-sessions", func(c *gin.Context) { talkController.Create(c) })
-			dmgmt.GET("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Get(c) })
-			dmgmt.DELETE("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Delete(c) })
+			dmgmt.POST("/channel/:id/talk-sessions", func(c *gin.Context) { talkController.Load().Create(c) })
+			dmgmt.GET("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Load().Get(c) })
+			dmgmt.DELETE("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Load().Delete(c) })
 			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
 			dmgmt.POST("/channel/:id/ptz/precise", deviceMgmtController.ControlPTZPrecise)
 			dmgmt.POST("/channel/:id/ptz/extended", deviceMgmtController.ControlPTZExtended)

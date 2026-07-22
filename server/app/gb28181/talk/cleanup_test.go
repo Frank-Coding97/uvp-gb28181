@@ -128,3 +128,14 @@ func TestCleanupWorkerExpiresLeaseAndStopsSynchronously(t *testing.T) {
 	worker.Stop()
 	worker.Stop()
 }
+
+func TestTalkServiceShutdownEndsEveryLiveSession(t *testing.T) {
+	service, repo, _ := newActivationService(t, &fakeActivationMedia{}, &fakeTalkInviter{})
+	session := activateSessionForCleanup(t, repo, "shutdown-active", 93, "call-shutdown", time.Now().Add(time.Minute))
+
+	require.NoError(t, service.Shutdown(context.Background()))
+	stored, err := repo.FindBySession(context.Background(), session.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionEnded, stored.State)
+	require.Nil(t, stored.LeaseKey)
+}

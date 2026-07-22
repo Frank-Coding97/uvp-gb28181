@@ -146,6 +146,17 @@ func (s *Service) Recover(ctx context.Context) error {
 	return s.cleanupSessions(ctx, sessions, models.TalkSessionExpired, "service restart recovery")
 }
 
+func (s *Service) Shutdown(ctx context.Context) error {
+	if s == nil || s.repo == nil {
+		return nil
+	}
+	sessions, err := s.repo.ListNonterminal(ctx)
+	if err != nil {
+		return err
+	}
+	return s.cleanupSessions(ctx, sessions, models.TalkSessionEnded, "service shutdown")
+}
+
 func (s *Service) cleanupSessions(ctx context.Context, sessions []models.GbTalkSession, terminal models.TalkSessionState, reason string) error {
 	var wg sync.WaitGroup
 	errs := make(chan error, len(sessions))

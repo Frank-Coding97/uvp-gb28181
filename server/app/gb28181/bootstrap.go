@@ -27,6 +27,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streamprobe"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
+	gbtalk "uvplatform.cn/uvp-gb28181/app/gb28181/talk"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
@@ -139,6 +140,7 @@ var zlmClient *gbzlm.Client
 
 // zlmRegistry 节点注册表(M1 新增)
 var zlmRegistry *node.Registry
+var zlmServerConfigCache *gbzlm.ServerConfigCache
 
 // zlmScheduler M2 新增,持有当前激活的调度算法(roundrobin / M3 weighted / leastload)
 // SIP play 改造(T2.4)从这里取节点。装配失败则为 nil,调用方自己降级。
@@ -167,6 +169,8 @@ var playReconciler *reconciler.Reconciler
 
 var recordingSvc *gbrecording.Service
 var recordingReconciler *gbrecording.Reconciler
+var talkSvc *gbtalk.Service
+var talkCleanupWorker *gbtalk.CleanupWorker
 
 // zlmSchedulerLog 调度日志服务(T3.3 新增,可为 nil 降级)
 var zlmSchedulerLog *gbzlmsched.LogService
@@ -382,8 +386,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			// 通道快照 service(播放触发)—— 优先尝试装配,失败/nil 都不影响主链路
 			snapshotSvc := buildSnapshotService()
 			opts := []play.Option{
-				play.WithURLResolver(play.NewURLResolver(
-					gbzlm.NewServerConfigCache(gbzlm.FetchViaRegistry(zlmRegistry)))),
+				play.WithURLResolver(play.NewURLResolver(zlmServerConfigCache)),
 			}
 			if snapshotSvc != nil {
 				opts = append(opts, play.WithSnapshotService(snapshotSvc))
@@ -409,6 +412,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+	setupTalkRuntime(cfg, srv.UAC())
 	setupRecordingRuntime(cfg)
 
 	// 装配兜底对账 reconciler(通道播放状态显示 T7 新增)
@@ -437,6 +441,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) {
+	stopTalkRuntime(ctx)
 	stopRecordingRuntime()
 	if positionHistoryPruneCancel != nil {
 		positionHistoryPruneCancel()
@@ -500,6 +505,68 @@ func stopRecordingRuntime() {
 	}
 	recordingSvc = nil
 	gbroutes.SetRecordingService(nil, nil, nil)
+}
+
+func setupTalkRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
+	if talkSvc != nil || talkCleanupWorker != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		stopTalkRuntime(ctx)
+		cancel()
+	}
+	if inviter == nil || app.DB() == nil || zlmRegistry == nil || zlmScheduler == nil || zlmLocationMap == nil || zlmServerConfigCache == nil {
+		gbroutes.SetTalkService(nil, nil)
+		app.ZapLog.Info("GB28181 语音对讲 service 跳过装配(依赖未就绪)")
+		return
+	}
+	if !app.DB().Migrator().HasTable(&gbmodels.GbTalkSession{}) {
+		gbroutes.SetTalkService(nil, nil)
+		app.ZapLog.Warn("GB28181 语音对讲表未迁移,service 跳过装配")
+		return
+	}
+	service := gbtalk.NewService(
+		gbtalk.NewGormRepo(app.DB()), zlmRegistry, zlmLocationMap,
+		schedulerPickerAdapter{m: zlmScheduler}, zlmServerConfigCache, time.Now,
+	)
+	service.ConfigureActivation(gbtalk.ActivationDependencies{
+		Inviter: inviter, Targets: gbtalk.NewGormTargetLoader(app.DB()),
+		Platform: gbtalk.ActivationPlatform{ServerID: cfg.SIP.ServerID},
+	})
+	recoveryCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	if err := service.Recover(recoveryCtx); err != nil {
+		app.ZapLog.Warn("GB28181 语音对讲启动恢复存在清理失败", zap.Error(err))
+	}
+	cancel()
+	talkSvc = service
+	gbroutes.SetTalkService(service, zlmRegistry)
+	inviter.SetTalkByeHandler(func(metadata uac.TalkDialogMetadata) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := service.OnRemoteBye(ctx, metadata.CallID); err != nil {
+				app.ZapLog.Warn("设备 TALK BYE 清理失败", zap.String("callId", metadata.CallID), zap.Error(err))
+			}
+		}()
+	})
+	talkCleanupWorker = service.StartCleanupWorker(time.Second)
+	app.ZapLog.Info("GB28181 语音对讲 service / Hook / 租约扫描已装配")
+}
+
+func stopTalkRuntime(ctx context.Context) {
+	if talkCleanupWorker != nil {
+		talkCleanupWorker.Stop()
+		talkCleanupWorker = nil
+	}
+	service := talkSvc
+	if service != nil {
+		if err := service.Shutdown(ctx); err != nil {
+			app.ZapLog.Warn("GB28181 语音对讲关闭清理存在失败", zap.Error(err))
+		}
+	}
+	if sipServer != nil && sipServer.UAC() != nil {
+		sipServer.UAC().SetTalkByeHandler(nil)
+	}
+	talkSvc = nil
+	gbroutes.SetTalkService(nil, nil)
 }
 
 // ReloadSIP 触发一次热重启:关旧 SIP 依赖 → 从 DB 重新读配置 → 启新的.
@@ -586,6 +653,7 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 		}
 	}
 	zlmRegistry = reg
+	zlmServerConfigCache = gbzlm.NewServerConfigCache(gbzlm.FetchViaRegistry(reg))
 	app.ZapLog.Info("GB28181 ZLM Registry 已装配", zap.Int("nodes", len(reg.List())))
 
 	// 启动主动探活:治"重启后 30 秒点播黑洞"(spec: zlm-startup-probe)
@@ -801,6 +869,9 @@ func setupCivilCodeService() {
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	stopTalkRuntime(ctx)
 	stopRecordingRuntime()
 	if positionHistoryPruneCancel != nil {
 		positionHistoryPruneCancel()
@@ -841,8 +912,6 @@ func Stop() {
 	if sipServer == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
 	if err := sipServer.Shutdown(ctx); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务关闭异常", zap.Error(err))
 	}
@@ -930,8 +999,9 @@ func buildSnapshotService() *snapshot.Service {
 		return gbzlm.NewClientForNode(n), nil
 	}
 
-	// ServerConfigCache:按 nodeID 缓存 ZLM 端口配置(rtsp/rtmp/http),避免每次快照都拉一次
-	serverConfigCache := gbzlm.NewServerConfigCache(gbzlm.FetchViaRegistry(zlmRegistry))
+	if zlmServerConfigCache == nil {
+		return nil
+	}
 
 	// BuildStreamURL:构造 ZLM 内部 rtsp 拉流 URL(比 http-flv 稳,让 FFmpeg 拉自己更可靠)
 	buildStreamURL := func(ctx context.Context, nodeID, streamID string) (string, error) {
@@ -939,7 +1009,7 @@ func buildSnapshotService() *snapshot.Service {
 		if err != nil {
 			return "", err
 		}
-		cfg, err := serverConfigCache.Get(ctx, n.ID)
+		cfg, err := zlmServerConfigCache.Get(ctx, n.ID)
 		if err != nil {
 			return "", fmt.Errorf("拉 ZLM 端口配置失败: %w", err)
 		}

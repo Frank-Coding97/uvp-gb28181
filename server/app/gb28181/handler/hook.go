@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -83,6 +84,7 @@ type HookController struct {
 	talkResolver   NodeUUIDResolver
 	talkAuthorizer TalkPublishAuthorizer
 	talkObserver   TalkStreamObserver
+	talkMu         sync.RWMutex
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -120,6 +122,8 @@ func (h *HookController) SetStreamObserver(observer StreamObserver) {
 }
 
 func (h *HookController) SetTalk(resolver NodeUUIDResolver, authorizer TalkPublishAuthorizer, observer TalkStreamObserver) {
+	h.talkMu.Lock()
+	defer h.talkMu.Unlock()
 	h.talkResolver = resolver
 	h.talkAuthorizer = authorizer
 	h.talkObserver = observer
@@ -172,12 +176,13 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 			}
 		}(body.Stream, body.Regist)
 	}
-	if body.App == "talk" && h.talkObserver != nil && h.talkResolver != nil && body.Stream != "" && body.MediaServerID != "" {
-		if nodeID, ok := h.talkResolver.IDForUUID(body.MediaServerID); ok {
+	talkResolver, _, talkObserver := h.talkDependencies()
+	if body.App == "talk" && talkObserver != nil && talkResolver != nil && body.Stream != "" && body.MediaServerID != "" {
+		if nodeID, ok := talkResolver.IDForUUID(body.MediaServerID); ok {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
-				if err := h.talkObserver.ObserveTalkStream(ctx, nodeID, body.App, body.Stream, body.Regist); err != nil {
+				if err := talkObserver.ObserveTalkStream(ctx, nodeID, body.App, body.Stream, body.Regist); err != nil {
 					app.ZapLog.Warn("对讲流状态联动失败", zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), zap.Error(err))
 				}
 			}()
@@ -272,11 +277,12 @@ func (h *HookController) OnPublish(c *gin.Context) {
 		hookOK(c)
 		return
 	}
-	if h.talkResolver == nil || h.talkAuthorizer == nil || body.MediaServerID == "" {
+	talkResolver, talkAuthorizer, _ := h.talkDependencies()
+	if talkResolver == nil || talkAuthorizer == nil || body.MediaServerID == "" {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "talk publish authorization unavailable"})
 		return
 	}
-	nodeID, ok := h.talkResolver.IDForUUID(body.MediaServerID)
+	nodeID, ok := talkResolver.IDForUUID(body.MediaServerID)
 	if !ok {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "unknown media server"})
 		return
@@ -286,7 +292,7 @@ func (h *HookController) OnPublish(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "invalid talk publish parameters"})
 		return
 	}
-	allowed, err := h.talkAuthorizer.AuthorizeTalkPublish(c.Request.Context(), TalkPublishRequest{
+	allowed, err := talkAuthorizer.AuthorizeTalkPublish(c.Request.Context(), TalkPublishRequest{
 		NodeID: nodeID, App: body.App, SourceStream: body.Stream,
 		PublishToken: params.Get("token"), PublishID: body.ID,
 	})
@@ -295,6 +301,12 @@ func (h *HookController) OnPublish(c *gin.Context) {
 		return
 	}
 	hookOK(c)
+}
+
+func (h *HookController) talkDependencies() (NodeUUIDResolver, TalkPublishAuthorizer, TalkStreamObserver) {
+	h.talkMu.RLock()
+	defer h.talkMu.RUnlock()
+	return h.talkResolver, h.talkAuthorizer, h.talkObserver
 }
 
 // OnPlay 播放鉴权(本期放行)
