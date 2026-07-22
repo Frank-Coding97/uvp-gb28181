@@ -179,6 +179,40 @@ type MediaInfo struct {
 	Tracks           []MediaTrack `json:"tracks"`
 }
 
+// ProbeFrame is one frame sampled by ZLM addProbe. Timestamps are milliseconds.
+type ProbeFrame struct {
+	Codec       string `json:"codec"`
+	TrackType   string `json:"track_type"`
+	DTS         int64  `json:"dts"`
+	PTS         int64  `json:"pts"`
+	RecvStamp   int64  `json:"recv_stamp"`
+	FrameSize   int64  `json:"frame_size"`
+	Index       int    `json:"index"`
+	KeyFrame    bool   `json:"key_frame"`
+	ConfigFrame bool   `json:"config_frame"`
+}
+
+// AddProbe samples frames from one media source for probeMS milliseconds.
+func (c *Client) AddProbe(ctx context.Context, vhost, appName, stream string, probeMS int) ([]ProbeFrame, error) {
+	var response struct {
+		baseResp
+		Data []ProbeFrame `json:"data"`
+	}
+	params := map[string]string{
+		"vhost":    vhost,
+		"app":      appName,
+		"stream":   stream,
+		"probe_ms": strconv.Itoa(probeMS),
+	}
+	if err := c.call(ctx, "addProbe", params, &response); err != nil {
+		return nil, err
+	}
+	if response.Code != 0 {
+		return nil, fmt.Errorf("addProbe code=%d msg=%s", response.Code, response.Msg)
+	}
+	return response.Data, nil
+}
+
 // IsMediaOnline 轻量探测一路流是否就绪(返回 online 标志)
 // 用于点播流就绪等待的轮询备份(hook + polling 双源)
 func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (bool, error) {
