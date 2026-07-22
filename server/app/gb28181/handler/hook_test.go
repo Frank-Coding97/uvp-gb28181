@@ -31,6 +31,21 @@ type mockNoneReaderPolicy struct {
 	err   error
 }
 
+type mockStreamObserver struct {
+	calls      atomic.Int32
+	registered atomic.Bool
+	received   chan struct{}
+	release    chan struct{}
+}
+
+func (m *mockStreamObserver) ObserveStream(context.Context, string, bool) error {
+	m.calls.Add(1)
+	m.registered.Store(true)
+	close(m.received)
+	<-m.release
+	return nil
+}
+
 func (m *mockNoneReaderPolicy) ShouldCloseOnNoneReader(context.Context, string) (bool, error) {
 	return m.close, m.err
 }
@@ -217,6 +232,30 @@ func TestHookOnStreamChangedRegistFalseNoPublish(t *testing.T) {
 		t.Error("regist=false 不应触发 Publish")
 	case <-time.After(150 * time.Millisecond):
 	}
+}
+
+func TestHookOnStreamChangedDispatchesObserverAsynchronously(t *testing.T) {
+	observer := &mockStreamObserver{received: make(chan struct{}), release: make(chan struct{})}
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetStreamObserver(observer)
+	e := newHookEngine(t, h)
+
+	start := time.Now()
+	rr := postJSON(t, e, "/index/hook/on_stream_changed", gin.H{
+		"app": "rtp", "stream": "stream-recording", "regist": true,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("hook 应 200,实际 %d", rr.Code)
+	}
+	if time.Since(start) > 100*time.Millisecond {
+		t.Fatal("hook 不应同步等待录像对账")
+	}
+	select {
+	case <-observer.received:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("应异步投递 stream observer")
+	}
+	close(observer.release)
 }
 
 func waitInt32(c *atomic.Int32, target int32, timeout time.Duration) bool {

@@ -46,6 +46,10 @@ type RecordMP4Indexer interface {
 	IndexRecordMP4(context.Context, int64, recording.RecordMP4Event) (bool, error)
 }
 
+type StreamObserver interface {
+	ObserveStream(context.Context, string, bool) error
+}
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
@@ -56,6 +60,7 @@ type HookController struct {
 	resolver  NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
 	binder    StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
 	recordMP4 RecordMP4Indexer
+	observer  StreamObserver
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -86,6 +91,10 @@ func (h *HookController) SetMultiNode(resolver NodeUUIDResolver, binder StreamLo
 func (h *HookController) SetRecordMP4Indexer(resolver NodeUUIDResolver, indexer RecordMP4Indexer) {
 	h.resolver = resolver
 	h.recordMP4 = indexer
+}
+
+func (h *HookController) SetStreamObserver(observer StreamObserver) {
+	h.observer = observer
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -125,6 +134,15 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 				h.binder.Bind(body.Stream, nodeID)
 			}
 		}
+	}
+	if h.observer != nil && body.Stream != "" {
+		go func(streamID string, registered bool) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := h.observer.ObserveStream(ctx, streamID, registered); err != nil {
+				app.ZapLog.Warn("录像流状态联动失败", zap.String("stream", streamID), zap.Bool("regist", registered), zap.Error(err))
+			}
+		}(body.Stream, body.Regist)
 	}
 	hookOK(c)
 }

@@ -139,6 +139,10 @@ func SetRecordMP4Indexer(resolver gbhandler.NodeUUIDResolver, indexer gbhandler.
 	hookController.SetRecordMP4Indexer(resolver, indexer)
 }
 
+func SetRecordingStreamObserver(observer gbhandler.StreamObserver) {
+	hookController.SetStreamObserver(observer)
+}
+
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
 // 在底座 routes.InitRoutes 的 protected 块中调用
 func RegisterRoutes(protected *gin.RouterGroup) {

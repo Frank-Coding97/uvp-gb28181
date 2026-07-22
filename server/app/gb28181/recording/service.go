@@ -78,6 +78,45 @@ func (s *Service) ShouldKeepStream(ctx context.Context, streamID string) (bool, 
 	return channel.CloudRecordingEnabled, nil
 }
 
+func (s *Service) ObserveStream(ctx context.Context, streamID string, registered bool) error {
+	channel, err := s.repo.FindChannelByStream(ctx, streamID)
+	if err != nil || channel == nil {
+		return err
+	}
+	unlock := s.locks.Lock(channel.ID)
+	defer unlock()
+
+	current, err := s.repo.GetChannel(ctx, channel.ID)
+	if err != nil {
+		return err
+	}
+	if registered {
+		if !current.CloudRecordingEnabled || current.CloudRecordingState == models.CloudRecordingStateRecording {
+			return nil
+		}
+		_, err = s.reconcileEnabledLocked(ctx, current)
+		return err
+	}
+
+	session, err := s.repo.FindLatestSessionByChannel(ctx, current.ID)
+	if err != nil {
+		return err
+	}
+	if session != nil && session.Stream == streamID && session.State != models.RecordingSessionStateStopped {
+		if err := s.repo.MarkSessionStopped(ctx, session.ID, "媒体流已注销"); err != nil {
+			return err
+		}
+	}
+	state := models.CloudRecordingStateDisabled
+	message := ""
+	if current.CloudRecordingEnabled {
+		state = models.CloudRecordingStateWaiting
+		message = "媒体流已中断,等待恢复"
+	}
+	_, err = s.repo.MarkState(ctx, current.ID, current.CloudRecordingEnabled, state, message)
+	return err
+}
+
 func (s *Service) Enable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
 	unlock := s.locks.Lock(channelID)
 	defer unlock()

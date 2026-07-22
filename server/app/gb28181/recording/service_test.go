@@ -298,3 +298,75 @@ func TestDifferentChannelsCanReconcileConcurrently(t *testing.T) {
 	wg.Wait()
 	require.EqualValues(t, 2, starter.maxActive.Load())
 }
+
+func TestObserveRegisteredStreamStartsEnabledRecordingOnce(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	channel.StreamID = "stream-observed"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
+	_, err := repo.SetDesired(context.Background(), channel.ID, true)
+	require.NoError(t, err)
+	starter := &fakeStarter{result: &play.Result{StreamID: channel.StreamID}}
+	client := &fakeRecorderClient{}
+	service := newRecordingService(repo, starter, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+
+	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
+	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
+	require.EqualValues(t, 1, client.startCalls.Load())
+	stored, err := repo.GetChannel(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CloudRecordingStateRecording, stored.CloudRecordingState)
+}
+
+func TestObserveRegisteredStreamIgnoresDisabledChannel(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	channel.StreamID = "stream-disabled"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
+	starter := &fakeStarter{result: &play.Result{StreamID: channel.StreamID}}
+	client := &fakeRecorderClient{}
+	service := newRecordingService(repo, starter, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+
+	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
+	require.Zero(t, starter.calls.Load())
+	require.Zero(t, client.startCalls.Load())
+}
+
+func TestObserveUnregisteredStreamMovesEnabledChannelToWaiting(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	channel.StreamID = "stream-lost"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
+	session := seedActiveSession(t, repo, channel)
+	session.Stream = channel.StreamID
+	require.NoError(t, repo.UpsertSession(context.Background(), session))
+	service := newRecordingService(repo, &fakeStarter{}, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+
+	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, false))
+	stored, err := repo.GetChannel(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.True(t, stored.CloudRecordingEnabled)
+	require.Equal(t, models.CloudRecordingStateWaiting, stored.CloudRecordingState)
+	storedSession, err := repo.FindSessionByMedia(context.Background(), session.NodeID, session.VHost, session.App, session.Stream)
+	require.NoError(t, err)
+	require.Equal(t, models.RecordingSessionStateStopped, storedSession.State)
+}
+
+func TestObserveUnregisteredStreamKeepsDisabledChannelDisabled(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	channel.StreamID = "stream-disabled-lost"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
+	session := &models.GbRecordingSession{
+		ChannelID: channel.ID, DeviceID: channel.DeviceID, NodeID: 2,
+		VHost: models.DefaultRecordingVHost, App: models.DefaultRecordingApp,
+		Stream: channel.StreamID, State: models.RecordingSessionStateRecording,
+	}
+	require.NoError(t, repo.UpsertSession(context.Background(), session))
+	service := newRecordingService(repo, &fakeStarter{}, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+
+	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, false))
+	stored, err := repo.GetChannel(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.False(t, stored.CloudRecordingEnabled)
+	require.Equal(t, models.CloudRecordingStateDisabled, stored.CloudRecordingState)
+	storedSession, err := repo.FindSessionByMedia(context.Background(), session.NodeID, session.VHost, session.App, session.Stream)
+	require.NoError(t, err)
+	require.Equal(t, models.RecordingSessionStateStopped, storedSession.State)
+}
