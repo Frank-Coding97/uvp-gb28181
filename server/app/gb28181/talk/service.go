@@ -33,6 +33,8 @@ type TalkRepo interface {
 	FindBySource(context.Context, int64, string, string) (*models.GbTalkSession, error)
 	ConsumeTokenForPublish(context.Context, string, string, string, time.Time) (bool, error)
 	Transition(context.Context, string, models.TalkSessionState, models.TalkSessionState, TransitionPatch) (bool, error)
+	RenewActive(context.Context, string, time.Time) (bool, error)
+	FinishAndReleaseLease(context.Context, string, models.TalkSessionState, string, time.Time) (bool, error)
 }
 
 type TalkNodeRegistry interface {
@@ -52,12 +54,13 @@ type TalkConfigProvider interface {
 }
 
 type Service struct {
-	repo      TalkRepo
-	nodes     TalkNodeRegistry
-	locations TalkLocationStore
-	picker    TalkNodePicker
-	configs   TalkConfigProvider
-	now       func() time.Time
+	repo       TalkRepo
+	nodes      TalkNodeRegistry
+	locations  TalkLocationStore
+	picker     TalkNodePicker
+	configs    TalkConfigProvider
+	now        func() time.Time
+	activation *activationRuntime
 }
 
 type CreateRequest struct {
@@ -175,6 +178,24 @@ func (s *Service) AuthorizePublish(ctx context.Context, request PublishAuthoriza
 	}
 	current, err = s.repo.FindBySession(ctx, session.SessionID)
 	return err == nil && current != nil && current.State == models.TalkSessionPublishing && current.PublishID == request.PublishID, err
+}
+
+func (s *Service) Get(ctx context.Context, sessionID string) (*models.GbTalkSession, error) {
+	if s == nil || s.repo == nil {
+		return nil, ErrTalkActivationUnavailable
+	}
+	return s.repo.FindBySession(ctx, sessionID)
+}
+
+func (s *Service) Renew(ctx context.Context, sessionID string) (*models.GbTalkSession, error) {
+	if s == nil || s.repo == nil {
+		return nil, ErrTalkActivationUnavailable
+	}
+	_, err := s.repo.RenewActive(ctx, sessionID, s.now().UTC().Add(defaultTalkLease))
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.FindBySession(ctx, sessionID)
 }
 
 func (s *Service) selectNode(ctx context.Context, channel *models.GbChannel, sessionID string) (*node.Node, error) {

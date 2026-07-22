@@ -188,6 +188,13 @@ func (r *GormRepo) ListExpired(ctx context.Context, now time.Time) ([]models.GbT
 	return sessions, err
 }
 
+func (r *GormRepo) RenewActive(ctx context.Context, sessionID string, expiresAt time.Time) (bool, error) {
+	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+		Where("session_id = ? AND state = ?", sessionID, models.TalkSessionActive).
+		Update("expires_at", expiresAt)
+	return result.RowsAffected > 0, result.Error
+}
+
 func (r *GormRepo) FinishAndReleaseLease(ctx context.Context, sessionID string, terminal models.TalkSessionState, message string, endedAt time.Time) (bool, error) {
 	if !terminal.IsTerminal() {
 		return false, fmt.Errorf("%w: %s", ErrInvalidTerminalState, terminal)
