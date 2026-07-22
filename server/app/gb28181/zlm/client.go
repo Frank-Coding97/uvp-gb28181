@@ -10,7 +10,10 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // Client ZLMediaKit HTTP API 客户端(控制面)
@@ -145,24 +148,40 @@ type MediaInfo struct {
 
 // IsMediaOnline 轻量探测一路流是否就绪(返回 online 标志)
 // 用于点播流就绪等待的轮询备份(hook + polling 双源)
-func (c *Client) IsMediaOnline(ctx context.Context, app, stream string) (bool, error) {
+func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (bool, error) {
 	var r struct {
 		baseResp
 		Online bool `json:"online"`
 	}
 	params := map[string]string{
 		"vhost":  "__defaultVhost__",
-		"app":    app,
+		"app":    appName,
 		"stream": stream,
-		// schema 不传:rtp 接入后会自动产生 rtsp/rtmp/hls 多协议,任一就绪即可
+		"schema": "rtsp", // rtp 推流后首先注册 rtsp,用 rtsp 探测即可
 	}
 	if err := c.call(ctx, "isMediaOnline", params, &r); err != nil {
+		app.ZapLog.Warn("IsMediaOnline 请求失败",
+			zap.String("host", c.node.Host),
+			zap.String("app", appName),
+			zap.String("stream", stream),
+			zap.Error(err))
 		return false, err
 	}
 	// code != 0(如 -500 流不存在)视为未就绪,不视为错误
 	if r.Code != 0 {
+		app.ZapLog.Info("IsMediaOnline 返回非0 code(流不存在或未就绪)",
+			zap.String("host", c.node.Host),
+			zap.String("app", appName),
+			zap.String("stream", stream),
+			zap.Int("code", r.Code),
+			zap.String("msg", r.Msg))
 		return false, nil
 	}
+	app.ZapLog.Debug("IsMediaOnline 成功",
+		zap.String("host", c.node.Host),
+		zap.String("app", appName),
+		zap.String("stream", stream),
+		zap.Bool("online", r.Online))
 	return r.Online, nil
 }
 

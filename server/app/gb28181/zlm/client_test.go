@@ -4,17 +4,28 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"go.uber.org/zap"
+
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 )
+
+// TestMain 初始化测试环境:app.ZapLog 必须非 nil
+func TestMain(m *testing.M) {
+	if app.ZapLog == nil {
+		app.ZapLog = zap.NewNop()
+	}
+	os.Exit(m.Run())
+}
 
 // loadNode 从 server/config 读 yaml,构造一个临时 Node 用于联通真机 ZLM 的 IT 测试
 func loadNode(t *testing.T) *node.Node {

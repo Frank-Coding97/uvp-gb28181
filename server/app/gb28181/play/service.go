@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
@@ -14,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // ZLM ZLM 客户端能力(便于测试 mock)
@@ -38,6 +41,8 @@ type PickContext struct {
 // NodeLookup 按 ID 取节点(由 node.Registry 实现)
 type NodeLookup interface {
 	Get(id int64) (*node.Node, bool)
+	// ListActive 返回所有活跃节点(用于流复用检测时,LocationMap 无 binding 的兜底探测)
+	ListActive() []*node.Node
 }
 
 // LocationStore 流位置表(由 stream.LocationMap 实现)
@@ -190,7 +195,98 @@ func (s *Service) clientForStream(streamID string) (ZLM, error) {
 // SetReadyTimings 给测试调小等待
 func (s *Service) SetReadyTimings(wait, poll time.Duration) { s.readyWait, s.pollEvery = wait, poll }
 
+// tryReuseStream 尝试复用通道现有流。
+//
+// 返回值:
+//   (nil, nil)  → 无法复用(流确实不在),调用方应清理残留后重新 INVITE
+//   (res, nil)  → 复用成功,直接返回给客户端
+//   (nil, err)  → 探测异常(不做清理,避免误杀正在播放的流)
+//
+// 探测策略:
+//  1. LocationMap 有 binding → 用绑定节点探测
+//  2. LocationMap 无 binding(多节点内存丢失等) → 遍历所有活跃节点探测并兜底 Bind
+//  3. 任一节点确认流在线 → 复用
+//  4. 所有节点都返回"不在线"→ 才判定流不存在
+func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*Result, error) {
+	streamID := ch.StreamID
+	if streamID == "" {
+		return nil, nil
+	}
+
+	// 单节点路径:直接用 s.zlm 探测
+	if !s.useMultiNode() {
+		online, err := s.zlm.IsMediaOnline(ctx, zlmApp, streamID)
+		if err != nil {
+			app.ZapLog.Warn("流复用探测失败(单节点)",
+				zap.String("streamId", streamID), zap.Error(err))
+			return nil, nil // 探测失败保守视为流不在,但记 warn
+		}
+		if !online {
+			return nil, nil
+		}
+		return s.buildReuseResult(streamID, s.cfg.ZLM.Host), nil
+	}
+
+	// 多节点路径:优先看 LocationMap
+	if nodeID, ok := s.locationMap.Lookup(streamID); ok {
+		if n, ok := s.registry.Get(nodeID); ok {
+			client := zlm.NewClientForNode(n)
+			online, err := client.IsMediaOnline(ctx, zlmApp, streamID)
+			if err == nil && online {
+				return s.buildReuseResult(streamID, n.Host), nil
+			}
+			app.ZapLog.Info("流复用绑定节点探测未在线",
+				zap.String("streamId", streamID),
+				zap.Int64("nodeId", nodeID),
+				zap.Bool("online", online),
+				zap.Error(err))
+			// 绑定节点上不在,不代表流真消失(比如 hook 尚未处理完毕);
+			// 但绝大多数情况绑定节点就是流的唯一节点,直接判为不在。
+			return nil, nil
+		}
+		app.ZapLog.Warn("流复用绑定节点不存在于 registry",
+			zap.String("streamId", streamID), zap.Int64("nodeId", nodeID))
+	}
+
+	// LocationMap 无 binding(多节点内存丢失/hook 兜底 Bind 尚未到达)
+	// 遍历所有活跃节点探测,任一命中即复用并兜底 Bind
+	activeNodes := s.registry.ListActive()
+	app.ZapLog.Info("流复用兜底探测(LocationMap 无 binding)",
+		zap.String("streamId", streamID),
+		zap.Int("activeNodes", len(activeNodes)))
+	for _, n := range activeNodes {
+		client := zlm.NewClientForNode(n)
+		online, err := client.IsMediaOnline(ctx, zlmApp, streamID)
+		if err != nil {
+			app.ZapLog.Debug("流复用兜底探测单节点失败",
+				zap.String("streamId", streamID),
+				zap.Int64("nodeId", n.ID),
+				zap.Error(err))
+			continue
+		}
+		if online {
+			// 找到了,兜底 Bind 回 LocationMap 恢复元数据
+			s.locationMap.Bind(streamID, n.ID)
+			app.ZapLog.Info("流复用兜底探测命中,恢复 LocationMap",
+				zap.String("streamId", streamID),
+				zap.Int64("nodeId", n.ID))
+			return s.buildReuseResult(streamID, n.Host), nil
+		}
+	}
+	return nil, nil
+}
+
+// buildReuseResult 构造复用返回值(从 session 取 SSRC,取不到用 streamID 兜底)
+func (s *Service) buildReuseResult(streamID, host string) *Result {
+	ssrc := streamID
+	if sess := s.sessions.Get(streamID); sess != nil {
+		ssrc = sess.SSRC
+	}
+	return s.buildResultFor(streamID, ssrc, host)
+}
+
 // Start 发起点播
+// 0) 检查通道是否已在播放，在线则直接返回现有地址
 // 1) 校验设备/通道  2) Pick 节点 + openRtpServer + Bind  3) 构造 SDP+SSRC
 // 4) UAC INVITE  5) WaitReady  6) 返地址
 // 任一中断都会回滚已开的 RTP 端口 + Unbind LocationMap
@@ -214,11 +310,37 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		return nil, ErrChannelNotFound
 	}
 
-	// 2. 生成 SSRC + StreamID(stream_id = ssrc,简化映射)
+	// 2. 检查通道是否已在播放 —— 尝试流复用
+	//
+	// 策略要点(避免误杀正在播放的流):
+	//   - IsMediaOnline 返回 true → 复用现有流,直接返回地址
+	//   - IsMediaOnline 明确返回 false 且 clientForStream 成功 → 流确实不在,清理残留
+	//   - clientForStream 失败(多节点 LocationMap 丢失 binding)或 IsMediaOnline 报错 →
+	//     不主动清理,尝试从 registry 里遍历所有节点探测 (兜底恢复 LocationMap)
+	//   - 所有节点都探测失败 → 才走清理路径(此时说明流真的不在了)
+	if ch.StreamID != "" {
+		if reused, err := s.tryReuseStream(ctx, ch); err != nil {
+			return nil, err
+		} else if reused != nil {
+			app.ZapLog.Info("点播复用现有流",
+				zap.String("deviceId", deviceID),
+				zap.String("channelId", channelID),
+				zap.String("streamId", ch.StreamID))
+			return reused, nil
+		}
+		// 复用失败(流确实不在),清理残留后走完整 INVITE 流程
+		app.ZapLog.Info("点播复用失败,清理残留后重新 INVITE",
+			zap.String("deviceId", deviceID),
+			zap.String("channelId", channelID),
+			zap.String("staleStreamId", ch.StreamID))
+		_ = s.Stop(context.Background(), ch.StreamID)
+	}
+
+	// 3. 生成 SSRC + StreamID(stream_id = ssrc,简化映射)
 	ssrc := sdp.GenRealtimeSSRC(s.cfg.SIP.Domain)
 	streamID := ssrc
 
-	// 3. 多节点路径:Pick + Bind;单节点路径:直接走 s.zlm
+	// 4. 多节点路径:Pick + Bind;单节点路径:直接走 s.zlm
 	var client ZLM
 	var recvHost string
 	var rtpFallback int
@@ -243,7 +365,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		rtpFallback = s.cfg.ZLM.RTPPort
 	}
 
-	// 4. openRtpServer:port=0 让 ZLM 自选临时端口
+	// 5. openRtpServer:port=0 让 ZLM 自选临时端口
 	rtpRes, err := client.OpenRtpServer(ctx, streamID, 0, 0)
 	if err != nil {
 		if s.useMultiNode() {
@@ -256,7 +378,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		recvPort = rtpFallback
 	}
 
-	// 5. 构造 SDP + 发 INVITE(任何失败要回滚 RTP 端口 + Unbind)
+	// 6. 构造 SDP + 发 INVITE(任何失败要回滚 RTP 端口 + Unbind)
 	body := sdp.BuildPlaySDP(sdp.PlayParams{
 		ServerID: s.cfg.SIP.ServerID,
 		RecvIP:   recvHost,
@@ -283,7 +405,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		return nil, fmt.Errorf("发 INVITE 失败: %w", err)
 	}
 
-	// 6. WaitReady:hook + 轮询双源(ADR-002 创新 3)
+	// 7. WaitReady:hook + 轮询双源(ADR-002 创新 3)
 	readyCtx, readyCancel := context.WithTimeout(ctx, s.readyWait)
 	defer readyCancel()
 	poll := func(ctx context.Context) (bool, error) {
@@ -311,7 +433,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		return nil, fmt.Errorf("记录通道播放流失败: %w", err)
 	}
 
-	// 7. 通道快照(fire-and-forget,不阻塞返回,不影响主链路)
+	// 8. 通道快照(fire-and-forget,不阻塞返回,不影响主链路)
 	if s.snapshotSvc != nil {
 		nodeIDStr := ""
 		if pickedNodeID != 0 {
@@ -320,7 +442,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		s.snapshotSvc.FireAfterPlay(context.Background(), nodeIDStr, streamID, deviceID, channelID)
 	}
 
-	// 8. 生成播放地址(多节点用 picked node 的 host;单节点用 cfg.ZLM.Host)
+	// 9. 生成播放地址(多节点用 picked node 的 host;单节点用 cfg.ZLM.Host)
 	result := s.buildResultFor(streamID, ssrc, recvHost)
 	return result, nil
 }

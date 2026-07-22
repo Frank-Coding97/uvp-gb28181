@@ -3,16 +3,28 @@ package play
 import (
 	"context"
 	"errors"
+	"os"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.uber.org/zap"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+// TestMain 初始化测试环境:app.ZapLog 必须非 nil 才能安全调用 Info/Warn
+func TestMain(m *testing.M) {
+	if app.ZapLog == nil {
+		app.ZapLog = zap.NewNop()
+	}
+	os.Exit(m.Run())
+}
 
 // ===== mocks =====
 
@@ -388,3 +400,118 @@ func TestWithSnapshotServiceOption(t *testing.T) {
 		t.Error("WithSnapshotService 应把 fake 注入到 snapshotSvc")
 	}
 }
+
+// TestStartReuseExistingStream 流复用 T1:通道已在播放且流在线 → 直接返回现有地址,不发 INVITE
+func TestStartReuseExistingStream(t *testing.T) {
+	z := &mockZLM{port: 40000}
+	z.online.Store(true) // 流在线
+	inv := &mockInviter{}
+	ch := aChannel()
+	ch.StreamID = "existing-stream-id" // 通道已有 streamID
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), ch)
+
+	// 第一次调用应复用,不应发 INVITE
+	res, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	if err != nil {
+		t.Fatalf("复用流应成功: %v", err)
+	}
+	if res.StreamID != "existing-stream-id" {
+		t.Errorf("应返回现有 streamID,got %q", res.StreamID)
+	}
+	if inv.inviteCalls.Load() != 0 {
+		t.Errorf("复用流不应发 INVITE,实际调用 %d 次", inv.inviteCalls.Load())
+	}
+	if z.openCalls.Load() != 0 {
+		t.Errorf("复用流不应 openRtpServer,实际调用 %d 次", z.openCalls.Load())
+	}
+	if z.onlineCalls.Load() != 1 {
+		t.Errorf("应检查流是否在线,实际调用 %d 次", z.onlineCalls.Load())
+	}
+	// UpdateStream 不应被调用(因为没发新 INVITE)
+	if ch.StreamID != "existing-stream-id" {
+		t.Errorf("复用流不应修改通道 streamID,got %q", ch.StreamID)
+	}
+}
+
+// TestStartReuseStreamOffline 流复用 T2:通道有 streamID 但流已下线 → 清理残留后重新 INVITE
+func TestStartReuseStreamOffline(t *testing.T) {
+	z := &mockZLM{port: 40000}
+	z.online.Store(false) // 流已下线
+	inv := &mockInviter{}
+	ch := aChannel()
+	ch.StreamID = "stale-stream-id" // 通道有残留 streamID
+	s, n, channels := newSvc(t, z, inv, onlineDevice(), ch)
+
+	inv.onInvite = func(sess *uac.Session) {
+		go func(streamID string) {
+			time.Sleep(50 * time.Millisecond)
+			n.Publish(streamID)
+		}(sess.StreamID)
+	}
+
+	res, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	if err != nil {
+		t.Fatalf("清理残留后应成功: %v", err)
+	}
+	// 应生成新 streamID
+	if res.StreamID == "stale-stream-id" {
+		t.Errorf("应生成新 streamID,不应复用残留 %q", res.StreamID)
+	}
+	// 应发新 INVITE
+	if inv.inviteCalls.Load() != 1 {
+		t.Errorf("应发 INVITE,实际调用 %d 次", inv.inviteCalls.Load())
+	}
+	// 应调用 Stop 清理残留(包含 Bye + CloseRtpServer)
+	if inv.byeCalls.Load() != 1 {
+		t.Errorf("应发 BYE 清理残留,实际调用 %d 次", inv.byeCalls.Load())
+	}
+	if channels.clearedStreamID != "stale-stream-id" {
+		t.Errorf("应清理残留 streamID,实际清理 %q", channels.clearedStreamID)
+	}
+	// 最终通道应记录新 streamID
+	if ch.StreamID != res.StreamID {
+		t.Errorf("通道应记录新 streamID,got %q want %q", ch.StreamID, res.StreamID)
+	}
+}
+
+// TestStartReuseMultipleClients 流复用 T3:多个客户端同时点播同一通道 → 第二个请求复用第一个的流
+func TestStartReuseMultipleClients(t *testing.T) {
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	ch := aChannel()
+	s, n, _ := newSvc(t, z, inv, onlineDevice(), ch)
+
+	// 第一个客户端点播
+	inv.onInvite = func(sess *uac.Session) {
+		z.online.Store(true) // INVITE 后流变在线
+		go func(streamID string) {
+			time.Sleep(50 * time.Millisecond)
+			n.Publish(streamID)
+		}(sess.StreamID)
+	}
+
+	res1, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	if err != nil {
+		t.Fatalf("第一次点播应成功: %v", err)
+	}
+
+	// 第二个客户端点播同一通道
+	res2, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+	if err != nil {
+		t.Fatalf("第二次点播应成功(复用): %v", err)
+	}
+
+	// 应返回相同 streamID
+	if res1.StreamID != res2.StreamID {
+		t.Errorf("第二次点播应复用第一次的流,got %q want %q", res2.StreamID, res1.StreamID)
+	}
+	// 只应发一次 INVITE
+	if inv.inviteCalls.Load() != 1 {
+		t.Errorf("应只发一次 INVITE,实际调用 %d 次", inv.inviteCalls.Load())
+	}
+	// 只应开一次 RTP 端口
+	if z.openCalls.Load() != 1 {
+		t.Errorf("应只开一次 RTP 端口,实际调用 %d 次", z.openCalls.Load())
+	}
+}
+
