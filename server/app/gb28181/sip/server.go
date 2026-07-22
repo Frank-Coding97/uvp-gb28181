@@ -3,6 +3,7 @@ package sip
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/emiago/sipgo"
@@ -139,6 +140,23 @@ func (s *Server) registerHandlers() {
 	s.srv.OnMessage(msgHandler.Handle)
 	s.notifyH = handler.NewNotifyHandler(nil)
 	s.srv.OnNotify(s.notifyH.Handle)
+	s.srv.OnBye(s.handleBye)
+}
+
+func (s *Server) handleBye(req *siplib.Request, tx siplib.ServerTransaction) {
+	callID := ""
+	if req != nil && req.CallID() != nil {
+		callID = string(*req.CallID())
+	}
+	if strings.HasPrefix(callID, "talk-") && s.uac != nil {
+		if _, err := s.uac.HandleTalkBye(req, tx); err != nil {
+			app.ZapLog.Warn("处理设备 TALK BYE 失败", zap.String("callId", callID), zap.Error(err))
+		}
+		return
+	}
+	if req != nil && tx != nil {
+		_ = tx.Respond(siplib.NewResponseFromRequest(req, siplib.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist", nil))
+	}
 }
 
 // SetCatalogTrigger 替换默认 Catalog 触发器(主要给测试用),同时覆盖注册与心跳恢复路径。

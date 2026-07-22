@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -50,6 +52,22 @@ type StreamObserver interface {
 	ObserveStream(context.Context, string, bool) error
 }
 
+type TalkPublishRequest struct {
+	NodeID       int64
+	App          string
+	SourceStream string
+	PublishToken string
+	PublishID    string
+}
+
+type TalkPublishAuthorizer interface {
+	AuthorizeTalkPublish(context.Context, TalkPublishRequest) (bool, error)
+}
+
+type TalkStreamObserver interface {
+	ObserveTalkStream(context.Context, int64, string, string, bool) error
+}
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
@@ -62,6 +80,9 @@ type HookController struct {
 	recordMP4      RecordMP4Indexer
 	recordResolver NodeUUIDResolver
 	observer       StreamObserver
+	talkResolver   NodeUUIDResolver
+	talkAuthorizer TalkPublishAuthorizer
+	talkObserver   TalkStreamObserver
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -96,6 +117,12 @@ func (h *HookController) SetRecordMP4Indexer(resolver NodeUUIDResolver, indexer 
 
 func (h *HookController) SetStreamObserver(observer StreamObserver) {
 	h.observer = observer
+}
+
+func (h *HookController) SetTalk(resolver NodeUUIDResolver, authorizer TalkPublishAuthorizer, observer TalkStreamObserver) {
+	h.talkResolver = resolver
+	h.talkAuthorizer = authorizer
+	h.talkObserver = observer
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -136,7 +163,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 			}
 		}
 	}
-	if h.observer != nil && body.Stream != "" {
+	if body.App != "talk" && h.observer != nil && body.Stream != "" {
 		go func(streamID string, registered bool) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
@@ -144,6 +171,17 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 				app.ZapLog.Warn("录像流状态联动失败", zap.String("stream", streamID), zap.Bool("regist", registered), zap.Error(err))
 			}
 		}(body.Stream, body.Regist)
+	}
+	if body.App == "talk" && h.talkObserver != nil && h.talkResolver != nil && body.Stream != "" && body.MediaServerID != "" {
+		if nodeID, ok := h.talkResolver.IDForUUID(body.MediaServerID); ok {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				if err := h.talkObserver.ObserveTalkStream(ctx, nodeID, body.App, body.Stream, body.Regist); err != nil {
+					app.ZapLog.Warn("对讲流状态联动失败", zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), zap.Error(err))
+				}
+			}()
+		}
 	}
 	hookOK(c)
 }
@@ -218,8 +256,44 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 	hookOK(c)
 }
 
-// OnPublish 推流鉴权(本期放行)
+type onPublishBody struct {
+	App           string `json:"app"`
+	Stream        string `json:"stream"`
+	Params        string `json:"params"`
+	ID            string `json:"id"`
+	MediaServerID string `json:"mediaServerId"`
+}
+
+// OnPublish 普通推流保持放行；talk app 必须通过一次性会话授权。
 func (h *HookController) OnPublish(c *gin.Context) {
+	var body onPublishBody
+	_ = c.ShouldBindJSON(&body)
+	if body.App != "talk" {
+		hookOK(c)
+		return
+	}
+	if h.talkResolver == nil || h.talkAuthorizer == nil || body.MediaServerID == "" {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "talk publish authorization unavailable"})
+		return
+	}
+	nodeID, ok := h.talkResolver.IDForUUID(body.MediaServerID)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "unknown media server"})
+		return
+	}
+	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "invalid talk publish parameters"})
+		return
+	}
+	allowed, err := h.talkAuthorizer.AuthorizeTalkPublish(c.Request.Context(), TalkPublishRequest{
+		NodeID: nodeID, App: body.App, SourceStream: body.Stream,
+		PublishToken: params.Get("token"), PublishID: body.ID,
+	})
+	if err != nil || !allowed {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "talk publish denied"})
+		return
+	}
 	hookOK(c)
 }
 

@@ -31,6 +31,7 @@ type TalkRepo interface {
 	Create(context.Context, *models.GbTalkSession, string) error
 	FindBySession(context.Context, string) (*models.GbTalkSession, error)
 	FindBySource(context.Context, int64, string, string) (*models.GbTalkSession, error)
+	FindByCallID(context.Context, string) (*models.GbTalkSession, error)
 	ConsumeTokenForPublish(context.Context, string, string, string, time.Time) (bool, error)
 	Transition(context.Context, string, models.TalkSessionState, models.TalkSessionState, TransitionPatch) (bool, error)
 	RenewActive(context.Context, string, time.Time) (bool, error)
@@ -202,6 +203,28 @@ func (s *Service) Renew(ctx context.Context, sessionID string) (*models.GbTalkSe
 		return nil, err
 	}
 	return s.repo.FindBySession(ctx, sessionID)
+}
+
+func (s *Service) OnUnpublished(ctx context.Context, nodeID int64, appName, sourceStream string) error {
+	if s == nil || s.repo == nil {
+		return ErrTalkActivationUnavailable
+	}
+	session, err := s.repo.FindBySource(ctx, nodeID, appName, sourceStream)
+	if err != nil || session == nil || session.State.IsTerminal() {
+		return err
+	}
+	return s.Cleanup(ctx, session.SessionID, models.TalkSessionEnded, "talk source unpublished")
+}
+
+func (s *Service) OnRemoteBye(ctx context.Context, callID string) error {
+	if s == nil || s.repo == nil {
+		return ErrTalkActivationUnavailable
+	}
+	session, err := s.repo.FindByCallID(ctx, callID)
+	if err != nil || session == nil || session.State.IsTerminal() {
+		return err
+	}
+	return s.Cleanup(ctx, session.SessionID, models.TalkSessionEnded, "device sent TALK BYE")
 }
 
 func (s *Service) selectNode(ctx context.Context, channel *models.GbChannel, sessionID string) (*node.Node, error) {

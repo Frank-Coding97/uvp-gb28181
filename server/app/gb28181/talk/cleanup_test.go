@@ -96,6 +96,22 @@ func TestRecoverCleansEveryNonterminalSession(t *testing.T) {
 	}
 }
 
+func TestTalkStreamUnpublishAndRemoteByeReuseCleanup(t *testing.T) {
+	media := &fakeActivationMedia{}
+	service, repo, _ := newActivationService(t, media, &fakeTalkInviter{})
+	unpublished := activateSessionForCleanup(t, repo, "unpublished", 91, "call-unpublished", time.Now().Add(time.Minute))
+	require.NoError(t, service.OnUnpublished(context.Background(), unpublished.NodeID, unpublished.App, unpublished.SourceStream))
+	stored, err := repo.FindBySession(context.Background(), unpublished.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionEnded, stored.State)
+
+	remoteBye := activateSessionForCleanup(t, repo, "remote-bye", 92, "call-remote", time.Now().Add(time.Minute))
+	require.NoError(t, service.OnRemoteBye(context.Background(), "call-remote"))
+	stored, err = repo.FindBySession(context.Background(), remoteBye.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionEnded, stored.State)
+}
+
 func TestCleanupWorkerExpiresLeaseAndStopsSynchronously(t *testing.T) {
 	media := &fakeActivationMedia{}
 	service, repo, _ := newActivationService(t, media, &fakeTalkInviter{})

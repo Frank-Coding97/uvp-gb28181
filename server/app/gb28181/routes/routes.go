@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"context"
 	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +14,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streamprobe"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/talk"
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
@@ -33,6 +35,7 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 var playController = gbcontrollers.NewPlayController(nil)
 var streamMonitorController = gbcontrollers.NewStreamMonitorController(nil)
 var streamProbeController = gbcontrollers.NewStreamProbeController(nil)
+var talkController = gbcontrollers.NewTalkController(nil)
 var playService *gbplay.Service
 var recordingService *gbrecording.Service
 var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
@@ -110,6 +113,32 @@ func SetStreamMonitorService(service *streammonitor.Service) {
 
 func SetStreamProbeService(service *streamprobe.Service) {
 	streamProbeController = gbcontrollers.NewStreamProbeController(service)
+}
+
+type talkHookAdapter struct{ service *talk.Service }
+
+func (a talkHookAdapter) AuthorizeTalkPublish(ctx context.Context, request gbhandler.TalkPublishRequest) (bool, error) {
+	return a.service.AuthorizePublish(ctx, talk.PublishAuthorization{
+		NodeID: request.NodeID, App: request.App, SourceStream: request.SourceStream,
+		PublishToken: request.PublishToken, PublishID: request.PublishID,
+	})
+}
+
+func (a talkHookAdapter) ObserveTalkStream(ctx context.Context, nodeID int64, appName, sourceStream string, registered bool) error {
+	if registered {
+		return a.service.OnPublished(ctx, nodeID, appName, sourceStream)
+	}
+	return a.service.OnUnpublished(ctx, nodeID, appName, sourceStream)
+}
+
+func SetTalkService(service *talk.Service, resolver gbhandler.NodeUUIDResolver) {
+	talkController = gbcontrollers.NewTalkController(service)
+	if service == nil || resolver == nil {
+		hookController.SetTalk(nil, nil, nil)
+		return
+	}
+	adapter := talkHookAdapter{service: service}
+	hookController.SetTalk(resolver, adapter, adapter)
 }
 
 func rebuildPlayController() {
@@ -275,6 +304,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
 			dmgmt.GET("/channel/:id/control-capabilities", deviceMgmtController.GetControlCapabilities)
 			dmgmt.POST("/channel/:id/device-control", deviceMgmtController.ControlDevice)
+			dmgmt.POST("/channel/:id/talk-sessions", func(c *gin.Context) { talkController.Create(c) })
+			dmgmt.GET("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Get(c) })
+			dmgmt.DELETE("/channel/:id/talk-sessions/:sessionId", func(c *gin.Context) { talkController.Delete(c) })
 			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
 			dmgmt.POST("/channel/:id/ptz/precise", deviceMgmtController.ControlPTZPrecise)
 			dmgmt.POST("/channel/:id/ptz/extended", deviceMgmtController.ControlPTZExtended)
