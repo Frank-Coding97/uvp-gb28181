@@ -12,6 +12,7 @@ import (
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/streamprobe"
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
@@ -31,6 +32,7 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 // playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
 var playController = gbcontrollers.NewPlayController(nil)
 var streamMonitorController = gbcontrollers.NewStreamMonitorController(nil)
+var streamProbeController = gbcontrollers.NewStreamProbeController(nil)
 var playService *gbplay.Service
 var recordingService *gbrecording.Service
 var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
@@ -104,6 +106,10 @@ func SetPlayService(svc *gbplay.Service) {
 
 func SetStreamMonitorService(service *streammonitor.Service) {
 	streamMonitorController = gbcontrollers.NewStreamMonitorController(service)
+}
+
+func SetStreamProbeService(service *streamprobe.Service) {
+	streamProbeController = gbcontrollers.NewStreamProbeController(service)
 }
 
 func rebuildPlayController() {
@@ -194,6 +200,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			play.POST("/:deviceId/:channelId", func(c *gin.Context) { playController.Start(c) })
 			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })
 			play.GET("/:streamId/monitor", func(c *gin.Context) { streamMonitorController.Get(c) })
+			// Gin requires wildcard names at the same path depth to match the start-play route.
+			play.POST("/:deviceId/probe", func(c *gin.Context) { streamProbeController.Run(c) })
 		}
 		// SIP 信令看板(只读快照接口,后续 T2.1 加 SSE /stream)
 		sipGroup := gb.Group("/sip/dashboard")
