@@ -123,6 +123,7 @@ export interface ChannelVO {
     latitude: number;
     status: number;
     streamId: string;
+    onDemandLive: boolean; // 无人观看时是否自动关闭
     streamTransport: string; // 流传输模式: UDP / TCP-Active / TCP-Passive
     snapshotUrl?: string | null; // 最新快照 URL(相对路径 /public/gb-channel-snapshot/...)
     snapshotAt?: string | null; // 最新快照抓拍时间(ISO 8601)
@@ -372,7 +373,7 @@ export const updateChannelStreamTransport = (id: number, streamTransport: Stream
         { data: { streamTransport } }
     );
 
-export const updateChannel = (id: number, data: { alias?: string; ptzType?: number }) =>
+export const updateChannel = (id: number, data: { alias?: string; ptzType?: number; onDemandLive?: boolean }) =>
     http.request<BaseResult<{ id: number; updates: Record<string, unknown> }>>(
         "patch",
         baseUrlApi(`gb28181/device-mgmt/channel/${id}`),

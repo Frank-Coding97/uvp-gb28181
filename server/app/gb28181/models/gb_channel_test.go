@@ -21,6 +21,9 @@ func skipIfChannelSchemaStale(t *testing.T) {
 	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "snapshot_url") {
 		t.Skipf("跳过(MySQL gb_channel 缺 snapshot_url 列,请先跑 migration 2026-07-20-channel-snapshot.sql)")
 	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "on_demand_live") {
+		t.Skipf("跳过(MySQL gb_channel 缺 on_demand_live 列,请先跑 migration 2026-07-22-channel-on-demand-live.sql)")
+	}
 	if app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "tenant_id") {
 		t.Skipf("跳过(MySQL gb_channel 仍有 tenant_id 列,请先跑 Phase 2 去租户迁移)")
 	}

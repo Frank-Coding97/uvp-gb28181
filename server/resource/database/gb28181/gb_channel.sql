@@ -15,6 +15,7 @@ CREATE TABLE `gb_channel` (
   `latitude` decimal(10,6) DEFAULT '0.000000' COMMENT '纬度',
   `status` tinyint(1) DEFAULT '0' COMMENT '通道在线 0离线 1在线',
   `stream_id` varchar(64) NOT NULL DEFAULT '' COMMENT '当前播放流ID(ZLM app/stream),空=未点播',
+  `on_demand_live` tinyint(1) NOT NULL DEFAULT '1' COMMENT '按需直播 1=无人观看自动关闭',
   `created_at` datetime DEFAULT NULL,
   `updated_at` datetime DEFAULT NULL,
   `deleted_at` datetime DEFAULT NULL,
@@ -22,6 +23,7 @@ CREATE TABLE `gb_channel` (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_channel` (`device_id`, `channel_id`) USING BTREE,
   KEY `idx_device_id` (`device_id`),
+  KEY `idx_stream_id` (`stream_id`),
   KEY `idx_owner_dept_deleted` (`owner_dept_id`, `deleted_at`),
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181国标通道表';

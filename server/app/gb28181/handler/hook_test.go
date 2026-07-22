@@ -26,6 +26,15 @@ type mockStopper struct {
 	err   error
 }
 
+type mockNoneReaderPolicy struct {
+	close bool
+	err   error
+}
+
+func (m *mockNoneReaderPolicy) ShouldCloseOnNoneReader(context.Context, string) (bool, error) {
+	return m.close, m.err
+}
+
 func (m *mockStopper) Stop(ctx context.Context, streamID string) error {
 	m.calls.Add(1)
 	m.last.Store(streamID)
@@ -99,6 +108,43 @@ func TestHookOnStreamNoneReaderNoStopper(t *testing.T) {
 	rr := postJSON(t, e, "/index/hook/on_stream_none_reader", gin.H{"stream": "any"})
 	if rr.Code != 200 {
 		t.Fatalf("hook 应 200,实际 %d", rr.Code)
+	}
+}
+
+func TestHookOnStreamNoneReaderDisabledPolicyKeepsStream(t *testing.T) {
+	n := stream.NewNotifier()
+	stopper := &mockStopper{}
+	h := handler.NewHookController(n)
+	h.SetPlayStopper(stopper)
+	h.SetNoneReaderPolicy(&mockNoneReaderPolicy{close: false})
+	e := newHookEngine(t, h)
+
+	rr := postJSON(t, e, "/index/hook/on_stream_none_reader", gin.H{"stream": "stream-keep"})
+	if rr.Code != 200 {
+		t.Fatalf("hook 应 200,实际 %d", rr.Code)
+	}
+	var body map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if close, ok := body["close"].(bool); !ok || close {
+		t.Errorf("关闭按需直播时应返 close=false,实际 %v", body["close"])
+	}
+	time.Sleep(50 * time.Millisecond)
+	if got := stopper.calls.Load(); got != 0 {
+		t.Errorf("关闭按需直播时不应触发 Stop,实际 %d", got)
+	}
+}
+
+func TestHookOnStreamNoneReaderPolicyErrorKeepsLegacyClose(t *testing.T) {
+	n := stream.NewNotifier()
+	h := handler.NewHookController(n)
+	h.SetNoneReaderPolicy(&mockNoneReaderPolicy{err: context.Canceled})
+	e := newHookEngine(t, h)
+
+	rr := postJSON(t, e, "/index/hook/on_stream_none_reader", gin.H{"stream": "stream-error"})
+	var body map[string]interface{}
+	_ = json.Unmarshal(rr.Body.Bytes(), &body)
+	if close, ok := body["close"].(bool); !ok || !close {
+		t.Errorf("策略查询失败时应保持 close=true,实际 %v", body["close"])
 	}
 }
 

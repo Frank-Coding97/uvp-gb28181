@@ -198,7 +198,7 @@ const editDeviceForm = ref({ deviceId: "", alias: "", name: "", manufacturer: ""
 const editingDevice = ref(false);
 const editingDeviceId = ref("");
 const editChannelVisible = ref(false);
-const editChannelForm = ref({ channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP" });
+const editChannelForm = ref({ channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP", onDemandLive: true });
 const editingChannel = ref(false);
 const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
@@ -1025,7 +1025,8 @@ function openEditChannelModal(record: ChannelVO) {
         manufacturer: record.manufacturer || "",
         model: record.model || "",
         ptzType: record.ptzType || 0,
-        streamTransport: record.streamTransport || "UDP"
+        streamTransport: record.streamTransport || "UDP",
+        onDemandLive: record.onDemandLive !== false
     };
     editingChannelId.value = record.id;
     editChannelVisible.value = true;
@@ -1034,7 +1035,7 @@ function openEditChannelModal(record: ChannelVO) {
 function cancelEditChannel() {
     editChannelVisible.value = false;
     editingChannelId.value = 0;
-    editChannelForm.value = { channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP" };
+    editChannelForm.value = { channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP", onDemandLive: true };
 }
 
 async function handleEditChannel() {
@@ -1042,7 +1043,7 @@ async function handleEditChannel() {
     editingChannel.value = true;
     try {
         const [ptzRes, transportRes] = await Promise.all([
-            updateChannel(editingChannelId.value, { alias: editChannelForm.value.alias, ptzType: editChannelForm.value.ptzType }),
+            updateChannel(editingChannelId.value, { alias: editChannelForm.value.alias, ptzType: editChannelForm.value.ptzType, onDemandLive: editChannelForm.value.onDemandLive }),
             updateChannelStreamTransport(editingChannelId.value, editChannelForm.value.streamTransport as any)
         ]);
         if (ptzRes.code !== 0 || transportRes.code !== 0) {
@@ -1054,13 +1055,15 @@ async function handleEditChannel() {
             item.alias = editChannelForm.value.alias;
             item.ptzType = editChannelForm.value.ptzType;
             item.streamTransport = editChannelForm.value.streamTransport;
+            item.onDemandLive = editChannelForm.value.onDemandLive;
         }
         if (channelDetail.value?.id === editingChannelId.value) {
             channelDetail.value = {
                 ...channelDetail.value,
                 alias: editChannelForm.value.alias,
                 ptzType: editChannelForm.value.ptzType,
-                streamTransport: editChannelForm.value.streamTransport
+                streamTransport: editChannelForm.value.streamTransport,
+                onDemandLive: editChannelForm.value.onDemandLive
             };
         }
         Message.success("通道信息已更新");
@@ -1202,6 +1205,26 @@ async function handlePtzTypeChange(channelId: number, ptzTypeValue: string) {
             if (assetKind.value === "channel") {
                 const item = channels.value.find(c => c.id === channelId);
                 if (item) item.ptzType = ptzType;
+            }
+        } else {
+            Message.error(res.message || "更新失败");
+        }
+    } catch (error: any) {
+        Message.error(error?.message || "更新失败");
+    }
+}
+
+async function handleOnDemandLiveChange(channelId: number, onDemandLive: boolean) {
+    try {
+        const res = await updateChannel(channelId, { onDemandLive });
+        if (res.code === 0) {
+            Message.success(onDemandLive ? "已开启按需直播" : "已关闭按需直播");
+            if (assetKind.value === "channel") {
+                const item = channels.value.find(c => c.id === channelId);
+                if (item) item.onDemandLive = onDemandLive;
+            }
+            if (channelDetail.value?.id === channelId) {
+                channelDetail.value = { ...channelDetail.value, onDemandLive };
             }
         } else {
             Message.error(res.message || "更新失败");
@@ -1520,6 +1543,17 @@ onUnmounted(() => {
                                             <a-option value="TCP-Active">TCP-Active</a-option>
                                             <a-option value="TCP-Passive">TCP-Passive</a-option>
                                         </a-select>
+                                    </template>
+                                </a-table-column>
+                                <a-table-column title="按需直播" :width="110" align="center">
+                                    <template #cell="{ record }">
+                                        <a-switch
+                                            :model-value="record.onDemandLive !== false"
+                                            size="small"
+                                            checked-text="开"
+                                            unchecked-text="关"
+                                            @change="(value: boolean) => handleOnDemandLiveChange(record.id, value)"
+                                        />
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="位置信息" :width="180">
@@ -1844,6 +1878,18 @@ onUnmounted(() => {
                                             <a-option value="TCP-Passive">TCP-Passive</a-option>
                                         </a-select>
                                     </div>
+                                    <div>
+                                        <span>按需直播</span>
+                                        <a-switch
+                                            :model-value="item.onDemandLive !== false"
+                                            size="small"
+                                            checked-text="开"
+                                            unchecked-text="关"
+                                            @click.stop
+                                            @dblclick.stop
+                                            @change="(value: boolean) => handleOnDemandLiveChange(item.id, value)"
+                                        />
+                                    </div>
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
@@ -1921,6 +1967,14 @@ onUnmounted(() => {
                             <span>父级通道</span><strong>{{ channelDetail.parentId || '无' }}</strong>
                             <span>坐标</span><strong>{{ locationText(channelDetail) }}</strong>
                             <span>流传输模式</span><strong>{{ streamTransportText(channelDetail.streamTransport) }}</strong>
+                            <span>按需直播</span>
+                            <a-switch
+                                :model-value="channelDetail.onDemandLive !== false"
+                                size="small"
+                                checked-text="开"
+                                unchecked-text="关"
+                                @change="(value: boolean) => channelDetail && handleOnDemandLiveChange(channelDetail.id, value)"
+                            />
                             <span>当前流</span><strong>{{ channelDetail.streamId || '未播放' }}</strong>
                         </div>
                         <div v-if="channelMounts.length" class="mount-list">
@@ -2327,6 +2381,9 @@ onUnmounted(() => {
                             <a-option value="TCP-Active">TCP-Active</a-option>
                             <a-option value="TCP-Passive">TCP-Passive</a-option>
                         </a-select>
+                    </a-form-item>
+                    <a-form-item label="按需直播">
+                        <a-switch v-model="editChannelForm.onDemandLive" checked-text="无人观看自动关闭" unchecked-text="持续保持直播" />
                     </a-form-item>
                 </a-form>
                 <template #footer>

@@ -19,6 +19,11 @@ type PlayStopper interface {
 	Stop(ctx context.Context, streamID string) error
 }
 
+// NoneReaderPolicy 查询流对应通道的无人观看断流策略。
+type NoneReaderPolicy interface {
+	ShouldCloseOnNoneReader(ctx context.Context, streamID string) (bool, error)
+}
+
 // KeepaliveCollector 由 heartbeat.Collector 实现:接收 ZLM on_server_keepalive 上报
 // 接口化避免 handler 包反向依赖 heartbeat 包
 type KeepaliveCollector interface {
@@ -38,10 +43,11 @@ type StreamLocationBinder interface {
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
-	notifier  *stream.Notifier   // 流就绪事件分发(由点播 service 订阅,T6 创新3)
-	stopper   PlayStopper        // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
-	collector KeepaliveCollector // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
-	resolver  NodeUUIDResolver   // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
+	notifier  *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper   PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	policy    NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
+	collector KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
+	resolver  NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
 	binder    StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
 }
 
@@ -52,6 +58,11 @@ func NewHookController(notifier *stream.Notifier) *HookController {
 // SetPlayStopper 注入点播停止器(bootstrap 装配 play service 后调用)
 func (h *HookController) SetPlayStopper(s PlayStopper) {
 	h.stopper = s
+}
+
+// SetNoneReaderPolicy 注入通道级无人观看断流策略。
+func (h *HookController) SetNoneReaderPolicy(p NoneReaderPolicy) {
+	h.policy = p
 }
 
 // SetKeepaliveCollector 注入心跳收集器(bootstrap M2.1 装配 heartbeat.Collector 后调用)
@@ -72,11 +83,11 @@ func hookOK(c *gin.Context) {
 
 // onStreamChangedBody on_stream_changed 回调载荷(只取我们需要的字段)
 type onStreamChangedBody struct {
-	App             string `json:"app"`
-	Stream          string `json:"stream"`
-	Regist          bool   `json:"regist"`
-	Schema          string `json:"schema"`
-	MediaServerID   string `json:"mediaServerId"` // M2: ZLM 在 general.mediaServerId 配置的节点 UUID
+	App           string `json:"app"`
+	Stream        string `json:"stream"`
+	Regist        bool   `json:"regist"`
+	Schema        string `json:"schema"`
+	MediaServerID string `json:"mediaServerId"` // M2: ZLM 在 general.mediaServerId 配置的节点 UUID
 }
 
 // OnStreamChanged 流注册/注销事件(regist=true 流就绪,false 流消失)
@@ -121,8 +132,19 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 	app.ZapLog.Info("ZLM Hook on_stream_none_reader",
 		zap.String("app", body.App), zap.String("stream", body.Stream))
 
+	closeStream := true
+	if h.policy != nil && body.Stream != "" {
+		var err error
+		closeStream, err = h.policy.ShouldCloseOnNoneReader(c.Request.Context(), body.Stream)
+		if err != nil {
+			app.ZapLog.Warn("查询无人观看断流策略失败,沿用默认关闭策略",
+				zap.String("stream", body.Stream), zap.Error(err))
+			closeStream = true
+		}
+	}
+
 	// 异步停播:发 BYE + closeRtpServer。即便失败也告知 ZLM 关流,避免端口悬挂
-	if h.stopper != nil && body.Stream != "" {
+	if closeStream && h.stopper != nil && body.Stream != "" {
 		go func(streamID string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -135,7 +157,7 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		}(body.Stream)
 	}
 
-	c.JSON(200, gin.H{"code": 0, "close": true})
+	c.JSON(200, gin.H{"code": 0, "close": closeStream})
 }
 
 // onRtpServerTimeoutBody on_rtp_server_timeout 回调载荷

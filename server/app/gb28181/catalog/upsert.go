@@ -144,6 +144,7 @@ func upsertChannel(
 			Longitude:       item.Longitude,
 			Latitude:        item.Latitude,
 			Status:          status,
+			OnDemandLive:    true,
 			OwnerDeptID:     ownerDeptID,
 			StreamTransport: "TCP-Passive",
 		}

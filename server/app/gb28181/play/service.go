@@ -476,6 +476,19 @@ func (s *Service) Stop(ctx context.Context, streamID string) error {
 	return clearErr
 }
 
+// ShouldCloseOnNoneReader 返回通道无人观看时是否应关闭上行流。
+// 找不到通道时沿用历史默认行为,避免残留流长期占用设备和 RTP 资源。
+func (s *Service) ShouldCloseOnNoneReader(ctx context.Context, streamID string) (bool, error) {
+	ch, err := gbmodels.FindChannelByStreamID(ctx, streamID)
+	if err != nil {
+		return true, err
+	}
+	if ch == nil {
+		return true, nil
+	}
+	return ch.OnDemandLive, nil
+}
+
 // buildResultFor 构造播放地址,host 由 Start 传(多节点路径取选中 node host,单节点取 cfg.ZLM.Host)
 //
 // 简化:ws-flv 走 ZLM 默认 http 端口(80)即可;HTTPPort 是 API 端口不是 web 服务端口,

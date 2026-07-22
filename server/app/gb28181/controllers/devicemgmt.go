@@ -410,8 +410,9 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 		return
 	}
 	var body struct {
-		Alias   *string `json:"alias"`
-		PTZType *int8   `json:"ptzType"` // 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机
+		Alias        *string `json:"alias"`
+		PTZType      *int8   `json:"ptzType"` // 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机
+		OnDemandLive *bool   `json:"onDemandLive"` // 无人观看时是否自动关闭
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
@@ -429,6 +430,9 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 	}
 	if body.PTZType != nil {
 		updates["ptz_type"] = *body.PTZType
+	}
+	if body.OnDemandLive != nil {
+		updates["on_demand_live"] = *body.OnDemandLive
 	}
 	if len(updates) == 0 {
 		dc.FailAndAbort(c, "没有可更新的字段", nil)

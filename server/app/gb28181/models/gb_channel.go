@@ -30,6 +30,7 @@ type GbChannel struct {
 	Latitude        float64 `gorm:"column:latitude;comment:纬度" json:"latitude"`
 	Status          int8    `gorm:"column:status;default:0;comment:通道在线" json:"status"`
 	StreamID        string  `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
+	OnDemandLive    bool    `gorm:"column:on_demand_live;default:true;comment:按需直播,无人观看自动关闭" json:"onDemandLive"`
 	StreamTransport string  `gorm:"column:stream_transport;size:16;default:TCP-Passive;comment:流传输模式 UDP/TCP-Active/TCP-Passive" json:"streamTransport"`
 	// Capabilities A1 新增:通道能力 JSON {audio, h265, night_vision, alarm_io, recording}
 	// 用 *string + 默认 NULL — MySQL JSON 列不接受空字符串("The document is empty"),
@@ -99,6 +100,21 @@ func ClearChannelStream(c context.Context, streamID string) error {
 	return app.DB().WithContext(c).Model(&GbChannel{}).
 		Where("stream_id = ?", streamID).
 		Update("stream_id", "").Error
+}
+
+// FindChannelByStreamID 按当前播放流 ID 查询通道。
+func FindChannelByStreamID(c context.Context, streamID string) (*GbChannel, error) {
+	var ch GbChannel
+	result := app.DB().WithContext(c).
+		Where("stream_id = ?", streamID).
+		Limit(1).Find(&ch)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return &ch, nil
 }
 
 // ListPlayingChannels 列出所有 DB 认为在播的通道(stream_id != '').

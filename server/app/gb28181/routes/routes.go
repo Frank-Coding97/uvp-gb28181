@@ -87,6 +87,7 @@ func currentTraceController() *gbcontrollers.TraceController {
 func SetPlayService(svc *gbplay.Service) {
 	playController = gbcontrollers.NewPlayController(svc)
 	hookController.SetPlayStopper(svc)
+	hookController.SetNoneReaderPolicy(svc)
 }
 
 // SetZLMNodeController 由 bootstrap M1.6 注入(同 SetPlayService 模式)
