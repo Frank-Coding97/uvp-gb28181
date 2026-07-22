@@ -3,6 +3,7 @@ package talk
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -37,6 +38,8 @@ type TransitionPatch struct {
 	RecvStream   *string
 	SSRC         *string
 	CallID       *string
+	PublishID    *string
+	LocalPort    *int
 	LocalTag     *string
 	RemoteTag    *string
 	RemoteURI    *string
@@ -139,6 +142,34 @@ func (r *GormRepo) ConsumeToken(ctx context.Context, sessionID, publishToken str
 	return result.RowsAffected > 0, result.Error
 }
 
+func (r *GormRepo) ConsumeTokenForPublish(ctx context.Context, sessionID, publishToken, publishID string, now time.Time) (bool, error) {
+	if strings.TrimSpace(publishToken) == "" || strings.TrimSpace(publishID) == "" {
+		return false, nil
+	}
+	session, err := r.FindBySession(ctx, sessionID)
+	if err != nil || session == nil || session.ExpiresAt.Compare(now) <= 0 || !isNonterminal(session.State) {
+		return false, err
+	}
+	want := hashPublishToken(publishToken)
+	if subtle.ConstantTimeCompare([]byte(session.PublishTokenHash), []byte(want)) != 1 {
+		return false, nil
+	}
+	if session.TokenConsumedAt != nil {
+		return session.PublishID == publishID, nil
+	}
+	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+		Where("session_id = ? AND token_consumed_at IS NULL AND publish_id = '' AND expires_at > ? AND state IN ?", sessionID, now, nonterminalStates).
+		Updates(map[string]any{"token_consumed_at": now, "publish_id": publishID})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return true, nil
+	}
+	session, err = r.FindBySession(ctx, sessionID)
+	return err == nil && session != nil && session.PublishID == publishID, err
+}
+
 func (r *GormRepo) ListNonterminal(ctx context.Context) ([]models.GbTalkSession, error) {
 	var sessions []models.GbTalkSession
 	err := r.db.WithContext(ctx).
@@ -225,6 +256,12 @@ func transitionUpdates(to models.TalkSessionState, patch TransitionPatch) map[st
 	}
 	if patch.CallID != nil {
 		updates["call_id"] = *patch.CallID
+	}
+	if patch.PublishID != nil {
+		updates["publish_id"] = *patch.PublishID
+	}
+	if patch.LocalPort != nil {
+		updates["local_port"] = *patch.LocalPort
 	}
 	if patch.LocalTag != nil {
 		updates["dialog_local_tag"] = *patch.LocalTag

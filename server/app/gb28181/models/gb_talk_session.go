@@ -42,6 +42,8 @@ type GbTalkSession struct {
 	ExpiresAt        time.Time        `gorm:"column:expires_at;not null;index:idx_talk_session_state_expires,priority:2" json:"expiresAt"`
 	PublishTokenHash string           `gorm:"column:publish_token_hash;type:char(64);not null" json:"-"`
 	TokenConsumedAt  *time.Time       `gorm:"column:token_consumed_at" json:"-"`
+	PublishID        string           `gorm:"column:publish_id;size:255;not null;default:''" json:"-"`
+	LocalPort        int              `gorm:"column:local_port;not null;default:0" json:"-"`
 	CallID           string           `gorm:"column:call_id;size:255;not null;default:'';index:idx_talk_session_call_id" json:"-"`
 	DialogLocalTag   string           `gorm:"column:dialog_local_tag;size:128;not null;default:''" json:"-"`
 	DialogRemoteTag  string           `gorm:"column:dialog_remote_tag;size:128;not null;default:''" json:"-"`

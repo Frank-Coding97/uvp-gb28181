@@ -18,6 +18,8 @@ CREATE TABLE `gb_talk_session` (
   `expires_at` datetime NOT NULL,
   `publish_token_hash` char(64) NOT NULL,
   `token_consumed_at` datetime DEFAULT NULL,
+  `publish_id` varchar(255) NOT NULL DEFAULT '',
+  `local_port` int NOT NULL DEFAULT '0',
   `call_id` varchar(255) NOT NULL DEFAULT '',
   `dialog_local_tag` varchar(128) NOT NULL DEFAULT '',
   `dialog_remote_tag` varchar(128) NOT NULL DEFAULT '',
