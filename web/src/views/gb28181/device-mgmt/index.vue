@@ -37,7 +37,6 @@ import {
     Download,
     Plus
 } from "@lucide/vue";
-import { startTraceCapture } from "@/api/gb28181-trace";
 import { stopPlay } from "@/api/gb28181";
 import {
     batchDeleteChannels,
@@ -715,24 +714,31 @@ async function startDeviceTraceCapture(record: DeviceVO) {
     if (traceCaptureStarting[record.id]) return;
     traceCaptureStarting[record.id] = true;
     try {
-        const response = await startTraceCapture(record.id);
-        if (response.code !== 0 || !response.data?.filter) {
-            throw new Error(response.message || "诊断窗口启动失败");
-        }
-        const { filter, capture } = response.data;
+        // 直接跳转到 sip-traces,预填设备 + 最近 15 分钟时间范围
+        const now = new Date();
+        const from = new Date(now.getTime() - 15 * 60 * 1000);
+
+        // 格式化为本地时间 YYYY-MM-DD HH:mm:ss
+        const formatLocalTime = (date: Date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, "0");
+            const day = String(date.getDate()).padStart(2, "0");
+            const hours = String(date.getHours()).padStart(2, "0");
+            const minutes = String(date.getMinutes()).padStart(2, "0");
+            const seconds = String(date.getSeconds()).padStart(2, "0");
+            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        };
+
         await router.push({
             path: "/gb28181/sip-traces",
             query: {
-                view: "text",
-                deviceId: filter.deviceId,
-                from: filter.from,
-                to: filter.to,
-                captureId: filter.captureId,
-                captureEndsAt: capture?.plannedEndAt || filter.to
+                deviceIds: record.deviceId,
+                from: formatLocalTime(from),
+                to: formatLocalTime(now)
             }
         });
     } catch (error: any) {
-        Message.error(error?.message || "诊断窗口启动失败");
+        Message.error(error?.message || "跳转 SIP 日志失败");
     } finally {
         traceCaptureStarting[record.id] = false;
     }

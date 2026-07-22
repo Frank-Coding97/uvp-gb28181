@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import dayjs from "dayjs";
 import { Message } from "@arco-design/web-vue";
 import { AlertTriangle, Clock, ListChecks, RefreshCcw, Search, ShieldAlert, Table2, TerminalSquare, Wifi } from "lucide-vue-next";
@@ -25,6 +26,8 @@ import {
 
 type FilterScope = "all" | "anomaly";
 type ViewMode = "table" | "terminal";
+
+const route = useRoute();
 
 const filters = ref({
     range: [dayjs().subtract(15, "minute").format("YYYY-MM-DD HH:mm:ss"), dayjs().format("YYYY-MM-DD HH:mm:ss")] as string[],
@@ -255,6 +258,15 @@ watch([viewMode, drillCallId, liveEnabled], () => {
 }, { immediate: false });
 
 onMounted(async () => {
+    // 从 URL 读取预填参数(来自设备管理页的诊断按钮)
+    const { deviceIds, from, to } = route.query;
+    if (deviceIds && typeof deviceIds === "string") {
+        filters.value.deviceIds = [deviceIds];
+    }
+    if (from && typeof from === "string" && to && typeof to === "string") {
+        filters.value.range = [from, to];
+    }
+
     await Promise.all([loadDevices(), loadHealth(), loadSessions(), loadStats()]);
     // 初始进入表格视图,启动实时订阅
     if (viewMode.value === "table" && liveEnabled.value) {
