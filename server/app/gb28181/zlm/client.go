@@ -185,6 +185,71 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 	return r.Online, nil
 }
 
+const recorderTypeMP4 = 1
+
+func recordingParams(vhost, appName, stream string) map[string]string {
+	return map[string]string{
+		"type":   strconv.Itoa(recorderTypeMP4),
+		"vhost":  vhost,
+		"app":    appName,
+		"stream": stream,
+	}
+}
+
+// StartRecord starts MP4 recording for an existing ZLM media source.
+// maxSecond=0 delegates the slice duration to ZLM's mp4_max_second setting.
+func (c *Client) StartRecord(ctx context.Context, vhost, appName, stream string, maxSecond int) error {
+	var response struct {
+		baseResp
+		Result bool `json:"result"`
+	}
+	params := recordingParams(vhost, appName, stream)
+	params["max_second"] = strconv.Itoa(maxSecond)
+	if err := c.call(ctx, "startRecord", params, &response); err != nil {
+		return err
+	}
+	if response.Code != 0 || !response.Result {
+		return fmt.Errorf("startRecord code=%d msg=%s", response.Code, response.Msg)
+	}
+	return nil
+}
+
+// StopRecord stops MP4 recording. Missing streams are treated as already stopped.
+func (c *Client) StopRecord(ctx context.Context, vhost, appName, stream string) error {
+	var response struct {
+		baseResp
+		Result bool `json:"result"`
+	}
+	if err := c.call(ctx, "stopRecord", recordingParams(vhost, appName, stream), &response); err != nil {
+		return err
+	}
+	if response.Code == -500 {
+		return nil
+	}
+	if response.Code != 0 || !response.Result {
+		return fmt.Errorf("stopRecord code=%d msg=%s", response.Code, response.Msg)
+	}
+	return nil
+}
+
+// IsRecording reports ZLM's actual MP4 recorder state for a media source.
+func (c *Client) IsRecording(ctx context.Context, vhost, appName, stream string) (bool, error) {
+	var response struct {
+		baseResp
+		Status bool `json:"status"`
+	}
+	if err := c.call(ctx, "isRecording", recordingParams(vhost, appName, stream), &response); err != nil {
+		return false, err
+	}
+	if response.Code == -500 {
+		return false, nil
+	}
+	if response.Code != 0 {
+		return false, fmt.Errorf("isRecording code=%d msg=%s", response.Code, response.Msg)
+	}
+	return response.Status, nil
+}
+
 // GetMediaInfo 查询单路流详情(verify-after-hook 用)
 // 返回 online=false 表示流未就绪(包含"流不存在"和"流存在但暂无数据"两种情况)
 func (c *Client) GetMediaInfo(ctx context.Context, app, stream string) (*MediaInfo, error) {
