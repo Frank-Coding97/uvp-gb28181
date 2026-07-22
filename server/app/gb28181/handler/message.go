@@ -69,7 +69,7 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 		return metrics.TxCatalog
 	case manscdp.CmdDeviceControl:
 		return metrics.TxPTZ
-	case manscdp.CmdPTZPreciseCtrl, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+	case manscdp.CmdPTZPreciseCtrl, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
 		return metrics.TxPTZ
 	case "Alarm":
 		return metrics.TxAlarm
@@ -130,13 +130,13 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			HandleDeviceInfoResponse(ctx, req.Body())
 		case manscdp.CmdDeviceControl:
 			if h.ptzProcessor != nil {
-				if err := h.ptzProcessor.OnPTZMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
 					app.ZapLog.Warn("GB28181 PTZ DeviceControl 应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
 				}
 			}
-		case manscdp.CmdPTZPreciseCtrl, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+		case manscdp.CmdPTZPreciseCtrl, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
 			if h.ptzProcessor != nil {
-				if err := h.ptzProcessor.OnPTZMessage(ctx, head.DeviceID, callID, cseq, req.Body()); err != nil {
+				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
 					app.ZapLog.Warn("GB28181 PTZ 查询应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
 				}
 			}
@@ -154,4 +154,13 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
 		h.recorder.End(callID, cseq, 200, true)
 	}
+}
+
+func ptzDeviceCode(req *sip.Request, fallback string) string {
+	if req != nil {
+		if from := req.From(); from != nil && from.Address.User != "" {
+			return from.Address.User
+		}
+	}
+	return fallback
 }

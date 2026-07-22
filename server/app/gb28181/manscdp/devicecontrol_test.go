@@ -74,16 +74,19 @@ func TestBuildPTZControlRejectsInvalidInput(t *testing.T) {
 	}
 }
 
-func TestBuildExtendedPTZControl_PresetAndAux(t *testing.T) {
+func TestBuildExtendedPTZControl_UsesStandardInstructionAndParameterLayout(t *testing.T) {
 	tests := []struct {
-		name string
+		name   string
 		action PTZExtendedAction
-		id int
-		want string
+		id     int
+		want   string
 	}{
-		{"set preset", PTZActionSetPreset, 3, "A50F018103080041"},
-		{"call preset", PTZActionCallPreset, 3, "A50F018203080042"},
-		{"aux on", PTZActionAuxOn, 7, "A50F01890708004D"},
+		{"set preset", PTZActionSetPreset, 3, "A50F018100030039"},
+		{"call preset", PTZActionCallPreset, 3, "A50F01820003003A"},
+		{"start cruise", PTZActionCruiseStart, 4, "A50F018804000041"},
+		{"start scan", PTZActionScanStart, 5, "A50F018905000043"},
+		{"aux on", PTZActionAuxOn, 7, "A50F018C07000048"},
+		{"aux off", PTZActionAuxOff, 7, "A50F018D07000049"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -91,7 +94,9 @@ func TestBuildExtendedPTZControl_PresetAndAux(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var control struct{ PTZCmd string `xml:"PTZCmd"` }
+			var control struct {
+				PTZCmd string `xml:"PTZCmd"`
+			}
 			if err := newDecoder(body).Decode(&control); err != nil {
 				t.Fatal(err)
 			}
@@ -99,6 +104,14 @@ func TestBuildExtendedPTZControl_PresetAndAux(t *testing.T) {
 				t.Fatalf("PTZCmd=%s, want %s", control.PTZCmd, tt.want)
 			}
 		})
+	}
+}
+
+func TestBuildExtendedPTZControl_RejectsNonStandardCruiseActions(t *testing.T) {
+	for _, action := range []PTZExtendedAction{PTZActionCruisePause, PTZActionCruiseResume, PTZActionCruiseDelete} {
+		if _, err := BuildExtendedPTZControl("C", 1, PTZExtendedCommand{Action: action, ID: 1}); err == nil {
+			t.Fatalf("action %s should be rejected instead of sending a guessed instruction", action)
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 const (
 	CmdPTZPreciseCtrl        = "PTZPreciseCtrl"
+	CmdPresetQuery           = "PresetQuery"
 	CmdHomePositionQuery     = "HomePositionQuery"
 	CmdCruiseTrackListQuery  = "CruiseTrackListQuery"
 	CmdCruiseTrackQuery      = "CruiseTrackQuery"
@@ -46,6 +47,26 @@ type ptzQueryXML struct {
 	TrackID  int      `xml:"TrackID,omitempty"`
 }
 
+type HomePositionControl struct {
+	Enabled   bool
+	ResetTime int
+	PresetID  int
+}
+
+type homePositionControlXML struct {
+	XMLName      xml.Name        `xml:"Control"`
+	CmdType      string          `xml:"CmdType"`
+	SN           int             `xml:"SN"`
+	DeviceID     string          `xml:"DeviceID"`
+	HomePosition homePositionXML `xml:"HomePosition"`
+}
+
+type homePositionXML struct {
+	Enabled     int `xml:"Enabled"`
+	ResetTime   int `xml:"ResetTime,omitempty"`
+	PresetIndex int `xml:"PresetIndex,omitempty"`
+}
+
 func BuildPTZPreciseControl(channelID string, sn int, command PTZPreciseControl) ([]byte, error) {
 	if err := validatePTZQueryTarget(channelID, sn); err != nil {
 		return nil, err
@@ -77,6 +98,37 @@ func BuildPTZPreciseControl(channelID string, sn int, command PTZPreciseControl)
 
 func BuildHomePositionQuery(deviceID string, sn int) ([]byte, error) {
 	return buildPTZQuery(CmdHomePositionQuery, deviceID, sn, 0)
+}
+
+func BuildPresetQuery(deviceID string, sn int) ([]byte, error) {
+	return buildPTZQuery(CmdPresetQuery, deviceID, sn, 0)
+}
+
+func BuildHomePositionControl(deviceID string, sn int, command HomePositionControl) ([]byte, error) {
+	if err := validatePTZQueryTarget(deviceID, sn); err != nil {
+		return nil, err
+	}
+	if command.Enabled {
+		if command.ResetTime <= 0 {
+			return nil, fmt.Errorf("看守位自动归位时间必须为正数")
+		}
+		if command.PresetID <= 0 || command.PresetID > 255 {
+			return nil, fmt.Errorf("看守位预置位编号必须在 1-255 之间")
+		}
+	}
+	home := homePositionXML{}
+	if command.Enabled {
+		home.Enabled = 1
+		home.ResetTime = command.ResetTime
+		home.PresetIndex = command.PresetID
+	}
+	body, err := xml.Marshal(homePositionControlXML{
+		CmdType: CmdDeviceControl, SN: sn, DeviceID: deviceID, HomePosition: home,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append([]byte("<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n"), body...), nil
 }
 
 func BuildCruiseTrackListQuery(deviceID string, sn int) ([]byte, error) {
@@ -173,6 +225,37 @@ type HomePositionResponse struct {
 	Focus    *float64 `xml:"Focus"`
 	Iris     *float64 `xml:"Iris"`
 	Raw      []byte   `xml:"-"`
+}
+
+type Preset struct {
+	ID   int    `xml:"PresetID" json:"presetId"`
+	Name string `xml:"PresetName" json:"name"`
+}
+
+type PresetResponse struct {
+	CmdType  string   `xml:"CmdType"`
+	SN       int      `xml:"SN"`
+	DeviceID string   `xml:"DeviceID"`
+	SumNum   int      `xml:"SumNum"`
+	Presets  []Preset `xml:"PresetList>Item"`
+	Raw      []byte   `xml:"-"`
+}
+
+func ParsePresetResponse(body []byte) (*PresetResponse, error) {
+	var response PresetResponse
+	if err := newDecoder(body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("解析预置位响应失败: %w", err)
+	}
+	if response.CmdType != CmdPresetQuery || response.DeviceID == "" || response.SN <= 0 {
+		return nil, fmt.Errorf("非法预置位响应")
+	}
+	for _, preset := range response.Presets {
+		if preset.ID <= 0 || preset.ID > 255 {
+			return nil, fmt.Errorf("预置位编号超出 1-255 范围")
+		}
+	}
+	response.Raw = append([]byte(nil), body...)
+	return &response, nil
 }
 
 func ParseHomePositionResponse(body []byte) (*HomePositionResponse, error) {

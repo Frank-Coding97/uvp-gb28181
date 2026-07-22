@@ -1,12 +1,60 @@
 package controllers
 
 import (
+	"errors"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 )
+
+const ptzCacheFreshFor = time.Minute
+
+func ptzFreshness(updatedAt time.Time, exists bool) gbmodels.PTZFreshness {
+	if !exists || updatedAt.IsZero() {
+		return gbmodels.PTZFreshnessUnknown
+	}
+	if time.Since(updatedAt) > ptzCacheFreshFor {
+		return gbmodels.PTZFreshnessStale
+	}
+	return gbmodels.PTZFreshnessFresh
+}
+
+func (dc *DeviceMgmtController) refreshPTZ(c *gin.Context, channel *gbmodels.GbChannel, kind ptz.QueryKind, trackID int) (string, string, error) {
+	if c.Query("refresh") != "true" {
+		return "", "", nil
+	}
+	if dc.ptzService == nil {
+		return "", "", errors.New("PTZ Service 未就绪")
+	}
+	target, ok := dc.loadPTZTarget(c, channel)
+	if !ok {
+		return "", "", errors.New("PTZ 目标不可用")
+	}
+	op, err := dc.ptzService.Refresh(c, target, kind, trackID, c.GetHeader("Idempotency-Key"))
+	if err != nil {
+		return op.OperationID, "刷新请求未发送成功", err
+	}
+	return op.OperationID, "", nil
+}
+
+func (dc *DeviceMgmtController) addPTZRefresh(c *gin.Context, data gin.H, channel *gbmodels.GbChannel, kind ptz.QueryKind, trackID int) bool {
+	operationID, refreshError, err := dc.refreshPTZ(c, channel, kind, trackID)
+	if operationID != "" {
+		data["refreshOperationId"] = operationID
+	}
+	if refreshError != "" {
+		data["refreshError"] = refreshError
+	}
+	if err != nil && operationID == "" {
+		dc.FailAndAbort(c, "刷新 PTZ 设备资源失败", err)
+		return false
+	}
+	return true
+}
 
 func (dc *DeviceMgmtController) ptzChannel(c *gin.Context) (*gbmodels.GbChannel, bool) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
@@ -42,7 +90,17 @@ func (dc *DeviceMgmtController) ListPTZPresets(c *gin.Context) {
 		dc.FailAndAbort(c, "查询预置位失败", err)
 		return
 	}
-	c.JSON(200, gin.H{"code": 0, "data": gin.H{"list": list}})
+	latest := time.Time{}
+	for _, item := range list {
+		if item.UpdatedAt.After(latest) {
+			latest = item.UpdatedAt
+		}
+	}
+	data := gin.H{"list": list, "freshness": ptzFreshness(latest, len(list) > 0)}
+	if !dc.addPTZRefresh(c, data, channel, ptz.QueryPreset, 0) {
+		return
+	}
+	dc.Success(c, data)
 }
 
 func (dc *DeviceMgmtController) GetPTZState(c *gin.Context) {
@@ -57,10 +115,40 @@ func (dc *DeviceMgmtController) GetPTZState(c *gin.Context) {
 		return
 	}
 	if result.RowsAffected == 0 {
-		c.JSON(200, gin.H{"code": 0, "data": nil})
+		data := gin.H{"state": nil, "freshness": gbmodels.PTZFreshnessUnknown}
+		if !dc.addPTZRefresh(c, data, channel, ptz.QueryPreciseStatus, 0) {
+			return
+		}
+		dc.Success(c, data)
 		return
 	}
-	c.JSON(200, gin.H{"code": 0, "data": state})
+	data := gin.H{"state": state, "freshness": ptzFreshness(state.ReceivedAt, true)}
+	if !dc.addPTZRefresh(c, data, channel, ptz.QueryPreciseStatus, 0) {
+		return
+	}
+	dc.Success(c, data)
+}
+
+func (dc *DeviceMgmtController) GetPTZHomePosition(c *gin.Context) {
+	channel, ok := dc.ptzChannel(c)
+	if !ok {
+		return
+	}
+	var state gbmodels.GbPTZState
+	result := dc.db().WithContext(c).Where("channel_id = ?", channel.ID).Limit(1).Find(&state)
+	if result.Error != nil {
+		dc.FailAndAbort(c, "查询看守位失败", result.Error)
+		return
+	}
+	data := gin.H{"homePosition": nil, "freshness": gbmodels.PTZFreshnessUnknown}
+	if result.RowsAffected > 0 {
+		data["homePosition"] = state
+		data["freshness"] = ptzFreshness(state.ReceivedAt, true)
+	}
+	if !dc.addPTZRefresh(c, data, channel, ptz.QueryHomePosition, 0) {
+		return
+	}
+	dc.Success(c, data)
 }
 
 func (dc *DeviceMgmtController) ListCruiseTracks(c *gin.Context) {
@@ -73,7 +161,17 @@ func (dc *DeviceMgmtController) ListCruiseTracks(c *gin.Context) {
 		dc.FailAndAbort(c, "查询巡航轨迹失败", err)
 		return
 	}
-	c.JSON(200, gin.H{"code": 0, "data": gin.H{"list": list}})
+	latest := time.Time{}
+	for _, item := range list {
+		if item.UpdatedAt.After(latest) {
+			latest = item.UpdatedAt
+		}
+	}
+	data := gin.H{"list": list, "freshness": ptzFreshness(latest, len(list) > 0)}
+	if !dc.addPTZRefresh(c, data, channel, ptz.QueryCruiseTrackList, 0) {
+		return
+	}
+	dc.Success(c, data)
 }
 
 func (dc *DeviceMgmtController) GetCruiseTrack(c *gin.Context) {
@@ -96,7 +194,11 @@ func (dc *DeviceMgmtController) GetCruiseTrack(c *gin.Context) {
 		dc.FailAndAbort(c, "巡航轨迹不存在", nil)
 		return
 	}
-	c.JSON(200, gin.H{"code": 0, "data": track})
+	data := gin.H{"track": track, "freshness": ptzFreshness(track.UpdatedAt, true)}
+	if !dc.addPTZRefresh(c, data, channel, ptz.QueryCruiseTrack, trackID) {
+		return
+	}
+	dc.Success(c, data)
 }
 
 func (dc *DeviceMgmtController) GetPTZOperation(c *gin.Context) {
