@@ -8,8 +8,26 @@ import (
 	"github.com/google/uuid"
 )
 
+type retryBatch struct {
+	events     []StoredEvent
+	nextTry    time.Time
+	backoff    time.Duration
+	lastReason string
+}
+
 func (m *Module) runWriter(ctx context.Context) {
-	defer close(m.done)
+	defer func() {
+		if r := recover(); r != nil {
+			m.health.degraded(fmt.Sprintf("trace writer crashed: %v", r))
+		}
+		close(m.done)
+		// Stop retry work once the live queue has drained during shutdown.
+		// NOTE: this cancels ctx for runRetryWriter too, so any batches still
+		// queued in retryQueue at shutdown are dropped. That's intentional —
+		// bounded shutdown time > unbounded retry — but callers relying on
+		// Shutdown() to flush should note the trade-off in Health().
+		m.cancel()
+	}()
 	queue := m.collector.queue
 	for {
 		first, ok := receiveEvent(ctx, queue)
@@ -46,33 +64,94 @@ func (m *Module) runWriter(ctx context.Context) {
 		if err != nil {
 			m.collector.Drop(uint64(len(batch)))
 			m.health.degraded(err.Error())
+			m.health.gapStart(m.nowUTC(), err.Error(), uint64(len(batch)))
 			if !queueOpen {
 				return
 			}
 			continue
 		}
 
-		backoff := m.retryMin
-		for {
-			err := insertBatchSafely(ctx, m.store, storedBatch)
-			if err == nil {
-				m.health.ready(m.now())
-				break
-			}
+		if err := insertBatchSafely(ctx, m.store, storedBatch); err != nil {
 			m.health.degraded(err.Error())
+			m.health.gapStart(m.nowUTC(), err.Error(), uint64(len(storedBatch)))
 			select {
-			case <-time.After(backoff):
-				backoff *= 2
-				if backoff > m.retryMax {
-					backoff = m.retryMax
-				}
-			case <-ctx.Done():
-				return
+			case m.retryQueue <- retryBatch{events: storedBatch, nextTry: m.nowUTC().Add(m.retryMin), backoff: m.retryMin, lastReason: err.Error()}:
+				m.pendingRetries.Add(1)
+			default:
+				m.collector.Drop(uint64(len(storedBatch)))
+				m.health.gapAdd(uint64(len(storedBatch)))
 			}
+		} else {
+			m.markStoreReady()
 		}
 		if !queueOpen {
 			return
 		}
+	}
+}
+
+// runRetryWriter retries failed batches independently of the live collector.
+// A storage outage therefore creates an explicit bounded gap instead of
+// stopping ingestion of later SIP frames.
+func (m *Module) runRetryWriter(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			m.health.degraded(fmt.Sprintf("trace retry writer crashed: %v", r))
+		}
+		close(m.retryDone)
+	}()
+	pending := make([]retryBatch, 0, cap(m.retryQueue))
+	for {
+		var timer *time.Timer
+		var timerC <-chan time.Time
+		if len(pending) > 0 {
+			delay := time.Until(pending[0].nextTry)
+			if delay < 0 {
+				delay = 0
+			}
+			timer = time.NewTimer(delay)
+			timerC = timer.C
+		}
+		select {
+		case batch, ok := <-m.retryQueue:
+			if timer != nil {
+				timer.Stop()
+			}
+			if !ok {
+				return
+			}
+			pending = append(pending, batch)
+		case <-timerC:
+			batch := pending[0]
+			pending = pending[1:]
+			err := insertBatchSafely(ctx, m.store, batch.events)
+			if err != nil {
+				batch.lastReason = err.Error()
+				batch.backoff *= 2
+				if batch.backoff > m.retryMax {
+					batch.backoff = m.retryMax
+				}
+				batch.nextTry = m.nowUTC().Add(batch.backoff)
+				m.health.degraded(err.Error())
+				m.health.gapAdd(uint64(len(batch.events)))
+				pending = append(pending, batch)
+			} else {
+				m.pendingRetries.Add(-1)
+				m.markStoreReady()
+			}
+		case <-ctx.Done():
+			if timer != nil {
+				timer.Stop()
+			}
+			return
+		}
+	}
+}
+
+func (m *Module) markStoreReady() {
+	m.health.ready(m.nowUTC())
+	if m.pendingRetries.Load() == 0 {
+		m.health.gapEnd(m.nowUTC())
 	}
 }
 
@@ -92,12 +171,38 @@ func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
 		if event.ParseError != "" {
 			metadata.ParseError = event.ParseError
 		}
+		eventID := uuid.NewString()
+		// SSE fanout:采集侧已解析元数据,趁 raw payload 明文尚在,分发一次。
+		// 之后再走 encrypt 存 ClickHouse。fanout 是非阻塞的,慢消费者不阻挡采集。
+		if m.streamHub != nil && m.streamHub.SubscriberCount() > 0 {
+			raw := StreamEvent{
+				EventID:    eventID,
+				OccurredAt: event.OccurredAt,
+				Direction:  event.Direction,
+				Transport:  event.Transport,
+				LocalAddr:  event.LocalAddr,
+				RemoteAddr: event.RemoteAddr,
+				DeviceID:   metadata.DeviceID,
+				Method:     metadata.Method,
+				StatusCode: metadata.StatusCode,
+				CallID:     metadata.CallID,
+				CSeq:       metadata.CSeq,
+				CSeqMethod: metadata.CSeqMethod,
+				FromURI:    metadata.FromURI,
+				ToURI:      metadata.ToURI,
+				UserAgent:  metadata.UserAgent,
+				Malformed:  event.Malformed,
+				Payload:    string(event.Raw),
+			}
+			redacted := string(RedactSIP(event.Raw))
+			m.streamHub.Broadcast(raw, redacted)
+		}
 		payload, err := m.cipher.Encrypt(event.Raw)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt SIP trace payload: %w", err)
 		}
 		stored = append(stored, StoredEvent{
-			EventID:    uuid.NewString(),
+			EventID:    eventID,
 			OccurredAt: event.OccurredAt,
 			Direction:  event.Direction,
 			Transport:  event.Transport,
@@ -109,6 +214,9 @@ func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
 			CallID:     metadata.CallID,
 			CSeq:       metadata.CSeq,
 			CSeqMethod: metadata.CSeqMethod,
+			FromURI:    metadata.FromURI,
+			ToURI:      metadata.ToURI,
+			UserAgent:  metadata.UserAgent,
 			Malformed:  event.Malformed,
 			ParseError: metadata.ParseError,
 			Payload:    payload,

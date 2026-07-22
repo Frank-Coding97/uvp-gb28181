@@ -114,6 +114,23 @@ type Service struct {
 
 	readyWait time.Duration // 流就绪等待上限,默认 8s
 	pollEvery time.Duration // 轮询间隔,默认 200ms
+
+	snapshotSvc SnapshotService // 通道快照(播放触发),可为 nil
+}
+
+// SnapshotService 通道快照能力(播放成功后 fire-and-forget 抓帧)
+//
+// 由 snapshot.Service 实现;为 nil 时 Start 静默跳过,主链路零影响。
+type SnapshotService interface {
+	FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string)
+}
+
+// Option 装配可选能力
+type Option func(*Service)
+
+// WithSnapshotService 注入通道快照服务
+func WithSnapshotService(svc SnapshotService) Option {
+	return func(s *Service) { s.snapshotSvc = svc }
 }
 
 // New 创建 service(deprecated 单节点路径,M1/test fixture 兼容)
@@ -131,15 +148,20 @@ func New(cfg gbconfig.Config, z ZLM, inv Inviter, sm *uac.SessionManager, n *str
 // NewWithScheduler 创建多节点版 service
 //
 // picker / registry / locationMap 必须都非 nil;否则退化到单节点 New。
+// opts 允许附加可选能力(如通道快照 WithSnapshotService)。
 func NewWithScheduler(cfg gbconfig.Config, picker NodePicker, registry NodeLookup, locationMap LocationStore,
 	inv Inviter, sm *uac.SessionManager, n *stream.Notifier,
-	devices DeviceRepo, channels ChannelRepo) *Service {
-	return &Service{
+	devices DeviceRepo, channels ChannelRepo, opts ...Option) *Service {
+	s := &Service{
 		cfg: cfg, inviter: inv, sessions: sm, notifier: n,
 		devices: devices, channels: channels,
 		picker: picker, registry: registry, locationMap: locationMap,
 		readyWait: defaultReadyWait, pollEvery: defaultPollEvery,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // useMultiNode 是否走多节点路径
@@ -200,6 +222,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	var client ZLM
 	var recvHost string
 	var rtpFallback int
+	var pickedNodeID int64 // 通道快照要按 nodeID 拿 ZLM 端口配置 —— 单节点路径为 0
 
 	if s.useMultiNode() {
 		pickedNode, err := s.picker.Pick(ctx, PickContext{
@@ -211,6 +234,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		client = zlm.NewClientForNode(pickedNode)
 		recvHost = pickedNode.Host
 		rtpFallback = pickedNode.RTPPortStart // 兜底端口
+		pickedNodeID = pickedNode.ID
 		s.locationMap.Bind(streamID, pickedNode.ID)
 	} else {
 		// deprecated 单节点路径
@@ -287,7 +311,16 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		return nil, fmt.Errorf("记录通道播放流失败: %w", err)
 	}
 
-	// 7. 生成播放地址(多节点用 picked node 的 host;单节点用 cfg.ZLM.Host)
+	// 7. 通道快照(fire-and-forget,不阻塞返回,不影响主链路)
+	if s.snapshotSvc != nil {
+		nodeIDStr := ""
+		if pickedNodeID != 0 {
+			nodeIDStr = fmt.Sprintf("%d", pickedNodeID)
+		}
+		s.snapshotSvc.FireAfterPlay(context.Background(), nodeIDStr, streamID, deviceID, channelID)
+	}
+
+	// 8. 生成播放地址(多节点用 picked node 的 host;单节点用 cfg.ZLM.Host)
 	result := s.buildResultFor(streamID, ssrc, recvHost)
 	return result, nil
 }
@@ -338,6 +371,7 @@ func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 		ExpireAt:   time.Now().Add(time.Duration(s.cfg.Media.StreamNoneReaderTimeout) * time.Second).Unix(),
 	}
 }
+
 
 // buildResult 旧版,deprecated 单节点路径用
 //

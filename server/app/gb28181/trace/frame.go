@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/emiago/sipgo/sip"
 )
@@ -20,13 +21,15 @@ type Frame struct {
 }
 
 type frameStream struct {
-	buffer []byte
-	resync bool
+	buffer       []byte
+	resync       bool
+	lastActivity time.Time
 }
 
 type FrameAssembler struct {
 	mu      sync.Mutex
 	maxSize int
+	idleTTL time.Duration
 	streams map[string]*frameStream
 }
 
@@ -34,7 +37,7 @@ func NewFrameAssembler(maxSize int) *FrameAssembler {
 	if maxSize <= 0 {
 		maxSize = DefaultMaxFrameBytes
 	}
-	return &FrameAssembler{maxSize: maxSize, streams: make(map[string]*frameStream)}
+	return &FrameAssembler{maxSize: maxSize, idleTTL: 2 * time.Minute, streams: make(map[string]*frameStream)}
 }
 
 func (a *FrameAssembler) Push(props sip.TransportReadProps, data []byte) []Frame {
@@ -48,9 +51,10 @@ func (a *FrameAssembler) Push(props sip.TransportReadProps, data []byte) []Frame
 	key := connectionKey(props)
 	stream := a.streams[key]
 	if stream == nil {
-		stream = &frameStream{}
+		stream = &frameStream{lastActivity: time.Now()}
 		a.streams[key] = stream
 	}
+	stream.lastActivity = time.Now()
 	stream.buffer = append(stream.buffer, data...)
 	frames := make([]Frame, 0, 2)
 
@@ -126,6 +130,27 @@ func (a *FrameAssembler) Forget(props sip.TransportReadProps) {
 	a.mu.Lock()
 	delete(a.streams, connectionKey(props))
 	a.mu.Unlock()
+}
+
+// SweepIdle removes incomplete streams that stopped sending data. It is
+// explicit so callers can use a lifecycle ticker or deterministic test clock.
+func (a *FrameAssembler) SweepIdle(now time.Time) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	removed := 0
+	for key, stream := range a.streams {
+		if a.idleTTL > 0 && now.Sub(stream.lastActivity) >= a.idleTTL {
+			delete(a.streams, key)
+			removed++
+		}
+	}
+	return removed
+}
+
+func (a *FrameAssembler) StreamCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.streams)
 }
 
 func connectionKey(props sip.TransportReadProps) string {

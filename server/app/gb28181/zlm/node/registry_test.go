@@ -125,6 +125,44 @@ func TestRegistry_MarkOffline(t *testing.T) {
 	require.Equal(t, node.StateOffline, got.State)
 }
 
+func TestRegistry_MarkActive_FlipsOfflineToActive(t *testing.T) {
+	r := node.NewRegistry(newMemoryRepo())
+	added := mustAdd(t, r, node.Node{Name: "a", MediaServerUUID: "ua", State: node.StateOffline})
+	before := time.Now()
+	require.NoError(t, r.MarkActive(context.Background(), added.ID))
+	got, _ := r.Get(added.ID)
+	require.Equal(t, node.StateActive, got.State)
+	require.False(t, got.Stats.LastHeartbeatAt.Before(before), "LastHeartbeatAt 应刷到当前")
+}
+
+func TestRegistry_MarkActive_IdempotentOnActive(t *testing.T) {
+	r := node.NewRegistry(newMemoryRepo())
+	added := mustAdd(t, r, node.Node{Name: "a", MediaServerUUID: "ua", State: node.StateActive})
+	require.NoError(t, r.MarkActive(context.Background(), added.ID))
+	require.NoError(t, r.MarkActive(context.Background(), added.ID))
+	got, _ := r.Get(added.ID)
+	require.Equal(t, node.StateActive, got.State)
+	require.False(t, got.Stats.LastHeartbeatAt.IsZero())
+}
+
+func TestRegistry_MarkActive_UnknownID(t *testing.T) {
+	r := node.NewRegistry(newMemoryRepo())
+	err := r.MarkActive(context.Background(), 9999)
+	require.ErrorIs(t, err, node.ErrNotFound)
+}
+
+func TestRegistry_MarkActive_PersistsToRepo(t *testing.T) {
+	repo := newMemoryRepo()
+	r := node.NewRegistry(repo)
+	added := mustAdd(t, r, node.Node{Name: "a", MediaServerUUID: "ua", State: node.StateOffline})
+	require.NoError(t, r.MarkActive(context.Background(), added.ID))
+
+	row, err := repo.Get(context.Background(), added.ID)
+	require.NoError(t, err)
+	require.NotNil(t, row)
+	require.Equal(t, node.StateActive, row.State, "DB 层也应翻到 active")
+}
+
 func TestRegistry_UpdateStats_Concurrent(t *testing.T) {
 	r := node.NewRegistry(newMemoryRepo())
 	added := mustAdd(t, r, node.Node{Name: "a", MediaServerUUID: "ua", State: node.StateActive})

@@ -108,7 +108,8 @@ func TestClickHouseInsertBatchWritesEncryptedColumns(t *testing.T) {
 	require.True(t, conn.batch.sent)
 	require.Len(t, conn.batch.rows, 1)
 	require.Contains(t, conn.batchQuery, "INSERT INTO uvp_sip_trace.sip_trace_message")
-	require.Equal(t, []byte{1, 2, 3}, conn.batch.rows[0][15])
+	// v2 schema: 前 15 列(0..14) + malformed(15) + parse_error(16) + nonce(17) + ciphertext(18)
+	require.Equal(t, []byte{1, 2, 3}, conn.batch.rows[0][18])
 	require.NotContains(t, conn.batchQuery, "call-1")
 }
 
@@ -138,6 +139,23 @@ func TestMessageQueryRequiresBoundedTimeAndParameterizesFilters(t *testing.T) {
 	require.Contains(t, query, "LIMIT ?")
 	require.Contains(t, args, maliciousCallID)
 	require.Equal(t, MaxMessagePageSize+1, args[len(args)-1])
+}
+
+func TestMessageQuerySupportsMultipleDevicesAndStatusRange(t *testing.T) {
+	filter := MessageFilter{
+		From:      time.Date(2026, 7, 19, 0, 0, 0, 0, time.UTC),
+		To:        time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC),
+		DeviceIDs: []string{"device-a", "device-b"}, StatusMin: 400, StatusMax: 499, Limit: 10,
+	}
+	query, args, err := buildMessageListQuery("uvp_sip_trace.sip_trace_message", filter)
+	require.NoError(t, err)
+	require.Contains(t, query, "device_id IN (?, ?)")
+	require.Contains(t, query, "status_code >= ?")
+	require.Contains(t, query, "status_code <= ?")
+	require.Contains(t, args, "device-a")
+	require.Contains(t, args, "device-b")
+	require.Contains(t, args, uint16(400))
+	require.Contains(t, args, uint16(499))
 }
 
 func TestMessageCursorRoundTripAndRejectsInvalidInput(t *testing.T) {

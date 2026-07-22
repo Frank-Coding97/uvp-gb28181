@@ -182,7 +182,17 @@ func TestRegisterReOnlineWakesSubscriptions(t *testing.T) {
 
 // TestKeepaliveReOnlineTriggersCatalog 离线设备仅靠 Keepalive 恢复在线时,
 // 也必须重新拉 Catalog,不能只恢复设备状态而让通道永远停在离线。
+// skipIfChannelSnapshotStale 通道快照 T5 加:测试库缺 snapshot_url 列时 skip
+// (共享测试库 schema 落后代码时的兜底,pending 跑 migration 2026-07-20-channel-snapshot.sql)
+func skipIfChannelSnapshotStale(t *testing.T) {
+	t.Helper()
+	if app.GormDbMysql != nil && !app.GormDbMysql.Migrator().HasColumn(&gbmodels.GbChannel{}, "snapshot_url") {
+		t.Skip("跳过(MySQL gb_channel 缺 snapshot_url 列,请先跑 migration 2026-07-20-channel-snapshot.sql)")
+	}
+}
+
 func TestKeepaliveReOnlineTriggersCatalog(t *testing.T) {
+	skipIfChannelSnapshotStale(t)
 	setupEnv(t)
 	const did = "34020000001320000094"
 	cleanupDevice(did)
@@ -271,6 +281,7 @@ func TestKeepaliveReOnlineWakesSubscriptions(t *testing.T) {
 
 // TestRegisterUnregisterMarksDeviceOffline REGISTER Expires=0 后设备与通道都应立即离线。
 func TestRegisterUnregisterMarksDeviceOffline(t *testing.T) {
+	skipIfChannelSnapshotStale(t)
 	setupEnv(t)
 	const did = "34020000001320000095"
 	cleanupDevice(did)

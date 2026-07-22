@@ -3,6 +3,8 @@ package gb28181
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strconv"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
@@ -14,10 +16,12 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/play/reconciler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/snapshot"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
@@ -25,6 +29,7 @@ import (
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	gbzlmprobe "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/probe"
 	gbzlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
@@ -153,6 +158,9 @@ var metricsCleanupStop chan struct{}
 
 // heartbeatCancel 控制 Watcher goroutine 退出(M2 新增)
 var heartbeatCancel context.CancelFunc
+
+// playReconciler 兜底对账 goroutine(通道播放状态显示 T7 新增)
+var playReconciler *reconciler.Reconciler
 
 // zlmSchedulerLog 调度日志服务(T3.3 新增,可为 nil 降级)
 var zlmSchedulerLog *gbzlmsched.LogService
@@ -365,12 +373,19 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	if u := srv.UAC(); u != nil {
 		if zlmRegistry != nil && zlmScheduler != nil {
 			zlmLocationMap = stream.NewLocationMap()
+			// 通道快照 service(播放触发)—— 优先尝试装配,失败/nil 都不影响主链路
+			snapshotSvc := buildSnapshotService()
+			opts := []play.Option{}
+			if snapshotSvc != nil {
+				opts = append(opts, play.WithSnapshotService(snapshotSvc))
+				app.ZapLog.Info("GB28181 通道快照 service 已装配")
+			}
 			playSvc = play.NewWithScheduler(cfg,
 				schedulerPickerAdapter{m: zlmScheduler},
 				zlmRegistry,
 				zlmLocationMap,
 				u, playSessions, gbroutes.StreamNotifier(),
-				play.NewDeviceRepo(), play.NewChannelRepo())
+				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
 			gbroutes.SetPlayService(playSvc)
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
 			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)")
@@ -378,10 +393,31 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo())
 			gbroutes.SetPlayService(playSvc)
-			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated)")
+			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)")
 		}
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
+	}
+
+	// 装配兜底对账 reconciler(通道播放状态显示 T7 新增)
+	// spec AC10-AC16: 5min 定期扫描 gb_channel.stream_id 跟 ZLM 真实流状态对齐,
+	// 消除 hook 丢包 / 进程重启导致的假阳性.
+	// 只在 playSvc 装配成功 + 配置未禁用 + 多节点路径下启用.
+	if playSvc != nil && cfg.Play.ReconcileIntervalSec > 0 {
+		if zlmRegistry != nil && zlmLocationMap != nil {
+			interval := time.Duration(cfg.Play.ReconcileIntervalSec) * time.Second
+			playReconciler = reconciler.New(interval, playSvc,
+				reconciler.WithRegistry(zlmRegistry),
+				reconciler.WithLocationMap(zlmLocationMap),
+			)
+			playReconciler.Start(context.Background())
+			app.ZapLog.Info("GB28181 点播对账 reconciler 已启动",
+				zap.Duration("interval", interval))
+		} else {
+			app.ZapLog.Info("GB28181 点播对账 reconciler 跳过装配(单节点路径 deprecated,无 registry/locationMap)")
+		}
+	} else if playSvc != nil {
+		app.ZapLog.Info("GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)")
 	}
 	return nil
 }
@@ -402,6 +438,10 @@ func stopSIPDependencies(ctx context.Context) {
 	if offlineScanner != nil {
 		offlineScanner.Stop()
 		offlineScanner = nil
+	}
+	if playReconciler != nil {
+		playReconciler.Stop()
+		playReconciler = nil
 	}
 	playSvc = nil
 	gbroutes.SetPlayService(nil)
@@ -450,8 +490,20 @@ func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {
 			capture = gbtrace.NewCaptureService(app.DB(), access, time.Now)
 		}
 	}
-	gbroutes.SetTraceController(gbcontrollers.NewTraceController(query, capture, access))
+	traceCtrl := gbcontrollers.NewTraceController(query, capture, access)
+	// SSE stream hub 从 module 拿,给 TraceController.Stream 用
+	if streamer, ok := runtime.(interface{ StreamHub() *gbtrace.StreamHub }); ok && cfg.Trace.Enabled {
+		traceCtrl.SetStreamProvider(traceStreamProvider{hub: streamer.StreamHub()})
+	}
+	gbroutes.SetTraceController(traceCtrl)
 }
+
+// traceStreamProvider 适配 TraceStreamProvider 接口
+type traceStreamProvider struct {
+	hub *gbtrace.StreamHub
+}
+
+func (p traceStreamProvider) Hub() *gbtrace.StreamHub { return p.hub }
 
 // setupZLMRegistry 启动时从 DB 加载所有节点;若空表,用 yaml cfg.ZLM seed 第一节点
 // DB 不可达则 registry 为 nil(继续走 deprecated 单节点路径,降级容错)
@@ -490,6 +542,27 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 	}
 	zlmRegistry = reg
 	app.ZapLog.Info("GB28181 ZLM Registry 已装配", zap.Int("nodes", len(reg.List())))
+
+	// 启动主动探活:治"重启后 30 秒点播黑洞"(spec: zlm-startup-probe)
+	// 独立 goroutine 不阻塞主流程;失败降级 = 当前行为(等 ZLM 下次心跳翻转)
+	runStartupProbe(reg)
+}
+
+// runStartupProbe 对 Registry 中所有节点跑一次主动探活。
+//
+// 独立 goroutine 内执行,3 秒超时,不阻塞 bootstrap。
+// 探活成功 → registry.MarkActive(节点 State 从 offline 翻回 active,内存+DB)
+// 探活失败 → 保持 State 不动(下次 ZLM 心跳到达时 Collector 会自愈)
+func runStartupProbe(reg *node.Registry) {
+	factory := func(n *node.Node) gbzlmprobe.Client { return gbzlm.NewClientForNode(n) }
+	prober := gbzlmprobe.New(reg, factory, 3*time.Second, app.ZapLog)
+	go func() {
+		// 独立 background ctx:探活是一次性任务,不跟 heartbeat 生命周期绑定
+		// (heartbeatCancel 此时还没建;单节点探活最多 3s 就退,不会泄漏)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		prober.Run(ctx)
+	}()
 }
 
 // setupZLMScheduler 装配调度器 Manager(M2 新增)
@@ -753,4 +826,89 @@ func startPositionHistoryPruner() {
 			}
 		}
 	}()
+}
+
+// buildSnapshotService 通道快照 service 装配。
+//
+// 依赖:
+//   - zlmRegistry:按 nodeID 查节点,构造 zlm.Client 走 getSnap
+//   - httpserver.serverroot / serverrootpath:落盘 & URL 前缀
+//
+// 装配失败返 nil,调用侧 opt-out(主链路不受影响)。
+func buildSnapshotService() *snapshot.Service {
+	if zlmRegistry == nil {
+		app.ZapLog.Info("GB28181 通道快照 skip:zlmRegistry 未初始化(单节点部署?)")
+		return nil
+	}
+
+	serverroot := app.ConfigYml.GetString("httpserver.serverroot")
+	serverrootpath := app.ConfigYml.GetString("httpserver.serverrootpath")
+	if serverroot == "" {
+		serverroot = "./resource/public"
+	}
+	if serverrootpath == "" {
+		serverrootpath = "/public"
+	}
+
+	// resolveNode 从 nodeID(字符串)解析出对应 Node;单节点场景空串取首个 active
+	resolveNode := func(nodeID string) (*node.Node, error) {
+		if nodeID == "" {
+			nodes := zlmRegistry.ListActive()
+			if len(nodes) == 0 {
+				return nil, errors.New("无可用 ZLM 节点")
+			}
+			return nodes[0], nil
+		}
+		id, err := strconv.ParseInt(nodeID, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		n, ok := zlmRegistry.Get(id)
+		if !ok {
+			return nil, errors.New("node 不存在")
+		}
+		return n, nil
+	}
+
+	getClient := func(nodeID string) (snapshot.ZLMClient, error) {
+		n, err := resolveNode(nodeID)
+		if err != nil {
+			return nil, err
+		}
+		return gbzlm.NewClientForNode(n), nil
+	}
+
+	// ServerConfigCache:按 nodeID 缓存 ZLM 端口配置(rtsp/rtmp/http),避免每次快照都拉一次
+	serverConfigCache := gbzlm.NewServerConfigCache(gbzlm.FetchViaRegistry(zlmRegistry))
+
+	// BuildStreamURL:构造 ZLM 内部 rtsp 拉流 URL(比 http-flv 稳,让 FFmpeg 拉自己更可靠)
+	buildStreamURL := func(ctx context.Context, nodeID, streamID string) (string, error) {
+		n, err := resolveNode(nodeID)
+		if err != nil {
+			return "", err
+		}
+		cfg, err := serverConfigCache.Get(ctx, n.ID)
+		if err != nil {
+			return "", fmt.Errorf("拉 ZLM 端口配置失败: %w", err)
+		}
+		if cfg.RTSPPort == 0 {
+			return "", fmt.Errorf("ZLM node %d 未暴露 rtsp.port", n.ID)
+		}
+		// ZLM 单端口收流后 stream 落在 rtp app 下(见 play.Service zlmApp 常量)
+		return fmt.Sprintf("rtsp://%s:%d/rtp/%s", n.Host, cfg.RTSPPort, streamID), nil
+	}
+
+	svc := snapshot.New(snapshot.Config{
+		UploadRoot:     serverroot,
+		URLPrefix:      serverrootpath,
+		DedupTTL:       30 * time.Second,
+		DelayBefore:    2 * time.Second,
+		ZLMTimeout:     5,
+		ZLMExpire:      30,
+		GetClient:      getClient,
+		BuildStreamURL: buildStreamURL,
+		Repo:           snapshot.NewGormRepo(app.DB()),
+		Logger:         app.ZapLog.Named("gb.snapshot"),
+	})
+	return svc
 }

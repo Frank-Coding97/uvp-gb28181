@@ -150,16 +150,15 @@ function clearTimer() {
     timer = null;
 }
 
+// cleanupSession 只做本地清理(销毁播放器 / 清 UI 状态),不调后端 stopPlay.
+//
+// 为什么不调 stopPlay:多用户共享观看场景下,A 关闭弹窗时如果调 stopPlay 会断掉整
+// 路 SIP 会话,B 正在看的画面也会中断. 依赖 ZLM 的 on_stream_none_reader hook 兜底
+// —— 最后一个观看者离开时 ZLM 自然通知后端清理,前端不主动管.
+//
+// 例外:startSession 里"点了播放 -> 后端返 streamID -> 但用户已关闭弹窗"这种边缘
+// case, startSession 内部 catch 里会主动调 stopPlay 清孤儿流,不走本函数.
 async function cleanupSession(expectedToken: number) {
-    const current = result.value;
-    if (current?.streamId) {
-        phase.value = "stopping";
-        try {
-            await stopPlay(current.streamId);
-        } catch (error: any) {
-            console.warn("停播请求异常", error);
-        }
-    }
     if (expectedToken !== sessionToken.value) return;
     result.value = null;
     startedAt.value = null;

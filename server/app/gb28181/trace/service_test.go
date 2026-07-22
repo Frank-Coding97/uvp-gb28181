@@ -15,6 +15,9 @@ func (r queryRepositoryStub) ListMessages(context.Context, MessageFilter) (Messa
 func (r queryRepositoryStub) GetMessage(context.Context, string) (StoredMessage, error) {
 	return r.message, nil
 }
+func (r queryRepositoryStub) GetSessionStats(context.Context, SessionFilter) (SessionStats, error) {
+	return SessionStats{}, nil
+}
 func (r queryRepositoryStub) ListSessions(context.Context, SessionFilter) ([]SessionSummary, error) {
 	return []SessionSummary{}, nil
 }

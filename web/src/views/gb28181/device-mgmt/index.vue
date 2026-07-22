@@ -30,6 +30,7 @@ import {
     Search,
     Settings2,
     SlidersHorizontal,
+    Square,
     Trash2,
     Video,
     X,
@@ -37,6 +38,7 @@ import {
     Plus
 } from "@lucide/vue";
 import { startTraceCapture } from "@/api/gb28181-trace";
+import { stopPlay } from "@/api/gb28181";
 import {
     batchDeleteChannels,
     batchDeleteDevices,
@@ -203,8 +205,6 @@ const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
 const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
-const snapshotPreviewVisible = ref(false);
-const snapshotPreviewChannel = ref<ChannelVO | null>(null);
 const traceCaptureStarting = reactive<Record<number, boolean>>({});
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
@@ -717,7 +717,7 @@ async function startDeviceTraceCapture(record: DeviceVO) {
     try {
         const response = await startTraceCapture(record.id);
         if (response.code !== 0 || !response.data?.filter) {
-            throw new Error(response.message || "诊断捕获启动失败");
+            throw new Error(response.message || "诊断窗口启动失败");
         }
         const { filter, capture } = response.data;
         await router.push({
@@ -732,7 +732,7 @@ async function startDeviceTraceCapture(record: DeviceVO) {
             }
         });
     } catch (error: any) {
-        Message.error(error?.message || "诊断捕获启动失败");
+        Message.error(error?.message || "诊断窗口启动失败");
     } finally {
         traceCaptureStarting[record.id] = false;
     }
@@ -862,13 +862,47 @@ function openNode(node: CatalogNode) {
     drawerVisible.value = true;
 }
 
+// 通道播放状态判定:后端 gb_channel.stream_id 非空 = 当前正在播放.
+// 依赖 10s 自动轮询 refreshMainData() 天然刷新,进程重启 / hook 丢包场景由
+// 后端 play/reconciler 5min 兜底对账 goroutine 修正,前端不做额外核对.
+function isChannelPlaying(record: ChannelVO): boolean {
+    return !!record.streamId && record.streamId.trim() !== "";
+}
+
+// 通道级停止播放 loading 态,按 channel.id 单独存,防止用户点两下重复弹 Modal.
+const stoppingChannels = ref<Set<number>>(new Set());
+
+// 强制停止当前主流(管理员级动作).
+// 语义:多用户可各自点"播放"发起独立流,但此按钮会断掉 gb_channel.stream_id 记录的
+// 那一路"当前主流" —— 如果有其他人正在通过该流观看,他们会被同时断开.
+// Modal 里必须有明确警告让点击者知道副作用.
+async function handleStopChannel(record: ChannelVO) {
+    if (!record.streamId) return;
+    Modal.warning({
+        title: `确认强制停止通道 ${record.name} 的当前直播?`,
+        content: "如果有其他人正在观看此通道,他们会被同时断开。停止后可重新点击播放。",
+        okText: "确认强制停止",
+        cancelText: "取消",
+        hideCancel: false,
+        onOk: async () => {
+            stoppingChannels.value.add(record.id);
+            try {
+                await stopPlay(record.streamId);
+                Message.success("已停止当前直播");
+                refreshMainData();
+            } catch (e: any) {
+                // stopPlay 失败不刷新列表 —— 避免把"实际还在播"错误清成"空闲"
+                Message.error(e?.message || "停止播放失败,请稍后重试");
+            } finally {
+                stoppingChannels.value.delete(record.id);
+            }
+        }
+    });
+}
+
 function playChannel(record: ChannelVO) {
     controlConsoleChannel.value = record;
     controlConsoleVisible.value = true;
-}
-function openSnapshotPreview(record: ChannelVO) {
-    snapshotPreviewChannel.value = record;
-    snapshotPreviewVisible.value = true;
 }
 function isInteractiveDblclick(event: MouseEvent) {
     const target = event.target;
@@ -1423,20 +1457,35 @@ onUnmounted(() => {
                                         </a-tooltip>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="快照" :width="92" align="center">
-                                    <template #cell>
-                                        <div class="thumb small list-snapshot-empty">
+                                <a-table-column title="快照" :width="120" align="center">
+                                    <template #cell="{ record }">
+                                        <a-image
+                                            v-if="record.snapshotUrl"
+                                            :src="record.snapshotUrl"
+                                            :width="100"
+                                            :height="60"
+                                            fit="cover"
+                                            :preview="true"
+                                            class="snapshot-thumb"
+                                        />
+                                        <div v-else class="thumb small list-snapshot-empty">
                                             <Video :size="14" />
                                             <span>暂无快照</span>
                                         </div>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="状态" :width="92">
+                                <a-table-column title="状态" :width="130">
                                     <template #cell="{ record }">
-                                        <span class="status-inline" :class="{ online: record.status === 1 }">
-                                            <span class="status-dot"></span>
-                                            <span>{{ record.status === 1 ? '在线' : '离线' }}</span>
-                                        </span>
+                                        <div class="status-cell">
+                                            <span class="status-inline" :class="{ online: record.status === 1 }">
+                                                <span class="status-dot"></span>
+                                                <span>{{ record.status === 1 ? '在线' : '离线' }}</span>
+                                            </span>
+                                            <span v-if="isChannelPlaying(record)" class="status-inline playing">
+                                                <span class="status-dot"></span>
+                                                <span>直播中</span>
+                                            </span>
+                                        </div>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="摄像头类型" :width="150">
@@ -1488,6 +1537,15 @@ onUnmounted(() => {
                                             <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
                                                 <template #icon><Play :size="13" /></template>
                                                 <span>播放</span>
+                                            </a-link>
+                                            <a-link
+                                                v-if="isChannelPlaying(record)"
+                                                class="uvp-table-action uvp-table-action--stop"
+                                                :loading="stoppingChannels.has(record.id)"
+                                                @click="handleStopChannel(record)"
+                                            >
+                                                <template #icon><Square :size="13" /></template>
+                                                <span>停止</span>
                                             </a-link>
                                             <a-link class="uvp-table-action uvp-table-action--detail" @click="openChannel(record)">
                                                 <template #icon><Eye :size="13" /></template>
@@ -1607,12 +1665,12 @@ onUnmounted(() => {
                                                 <template #icon><Bell :size="13" /></template>
                                                 <span>订阅</span>
                                             </a-link>
-                                            <a-tooltip content="SIP 诊断捕获" position="top">
+                                            <a-tooltip content="启动 SIP 诊断窗口" position="top">
                                                 <button
                                                     class="trace-capture-action"
                                                     type="button"
                                                     :disabled="traceCaptureStarting[record.id]"
-                                                    :aria-label="`对设备 ${record.deviceId} 启动 SIP 诊断捕获`"
+                                                    :aria-label="`对设备 ${record.deviceId} 启动 SIP 诊断窗口`"
                                                     @click.stop="startDeviceTraceCapture(record)"
                                                 >
                                                     <Loader2 v-if="traceCaptureStarting[record.id]" :size="14" class="spin" />
@@ -1709,7 +1767,7 @@ onUnmounted(() => {
                                 <a-tooltip content="订阅管理" position="top">
                                     <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
                                 </a-tooltip>
-                                <a-tooltip content="SIP 诊断捕获" position="top">
+                                <a-tooltip content="启动 SIP 诊断窗口" position="top">
                                     <button class="icon-btn small framed trace-capture" type="button" :disabled="traceCaptureStarting[item.id]" @click.stop="startDeviceTraceCapture(item)">
                                         <Loader2 v-if="traceCaptureStarting[item.id]" :size="13" class="spin" />
                                         <Activity v-else :size="13" />
@@ -1727,13 +1785,21 @@ onUnmounted(() => {
                             <template v-else>
                         <article v-for="item in channels" :key="item.id" class="device-card channel-summary-card" @dblclick="onChannelDblclick(item, $event)">
                             <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
-                                <div class="snapshot-empty">
+                                <a-image
+                                    v-if="item.snapshotUrl"
+                                    :src="item.snapshotUrl"
+                                    fit="cover"
+                                    :preview="true"
+                                    class="channel-snapshot-image"
+                                />
+                                <div v-else class="snapshot-empty">
                                     <Video :size="30" />
                                     <span>暂无快照</span>
                                 </div>
-                                <a-tooltip content="放大快照" position="top">
-                                    <button class="snapshot-detail" type="button" @click.stop="openSnapshotPreview(item)"><Eye :size="15" /></button>
-                                </a-tooltip>
+                                <span v-if="isChannelPlaying(item)" class="channel-snapshot-live-badge">
+                                    <span class="live-dot"></span>
+                                    <span>直播中</span>
+                                </span>
                             </div>
                             <div class="channel-card-body">
                                 <a-tooltip :content="displayName(item)" position="top"><strong class="channel-card-title text-ellipsis">{{ displayName(item) }}</strong></a-tooltip>
@@ -1747,7 +1813,21 @@ onUnmounted(() => {
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
-                                    <a-tooltip content="点播" position="top"><button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)"><Play :size="13" /></button></a-tooltip>
+                                    <a-tooltip content="点播" position="top">
+                                        <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
+                                            <Play :size="13" />
+                                        </button>
+                                    </a-tooltip>
+                                    <a-tooltip v-if="isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
+                                        <button
+                                            class="icon-btn small framed stop"
+                                            type="button"
+                                            :disabled="stoppingChannels.has(item.id)"
+                                            @click.stop="handleStopChannel(item)"
+                                        >
+                                            <Square :size="13" />
+                                        </button>
+                                    </a-tooltip>
                                     <a-tooltip content="编辑通道" position="top"><button class="icon-btn small framed warning" type="button" @click.stop="openEditChannelModal(item)"><Pencil :size="13" /></button></a-tooltip>
                                     <a-tooltip content="删除通道" position="top"><button class="icon-btn small framed danger" type="button" :disabled="deleting" @click.stop="handleDeleteChannel(item)"><Trash2 :size="13" /></button></a-tooltip>
                                 </div>
@@ -1994,23 +2074,6 @@ onUnmounted(() => {
                 v-model:visible="controlConsoleVisible"
                 :channel="controlConsoleChannel"
             />
-
-            <a-modal
-                v-model:visible="snapshotPreviewVisible"
-                modal-class="uvp-system-dialog snapshot-preview-dialog"
-                title="通道快照"
-                :width="760"
-                :footer="false"
-                unmount-on-close
-            >
-                <div v-if="snapshotPreviewChannel" class="channel-snapshot snapshot-preview-stage">
-                    <div class="snapshot-empty">
-                        <Video :size="48" />
-                        <strong>{{ displayName(snapshotPreviewChannel) }}</strong>
-                        <span>暂无快照</span>
-                    </div>
-                </div>
-            </a-modal>
 
             <a-modal
                 v-model:visible="statusEventVisible"
@@ -2640,6 +2703,11 @@ onUnmounted(() => {
 .thumb.small .placeholder {
     color: var(--uvp-text-tertiary);
 }
+/* 表格快照缩略图:100x60,arco a-image 自带 preview 弹层 */
+.snapshot-thumb :deep(.arco-image-img) {
+    border-radius: 4px;
+    cursor: zoom-in;
+}
 .list-snapshot-empty {
     display: inline-flex;
     flex-direction: column;
@@ -2777,6 +2845,23 @@ onUnmounted(() => {
 }
 .status-inline.online .status-dot {
     background: #10b981;
+}
+// 直播中徽章:红色 + 浅红底,跟"在线绿点"呼应
+.status-inline.playing {
+    color: #d14343;
+    background: rgb(209 67 67 / 8%);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+.status-inline.playing .status-dot {
+    background: #d14343;
+}
+// 状态列容器:让"在线/离线"+ "直播中"两个徽章水平排列
+.status-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
 }
 .status-trigger {
     justify-content: center;
@@ -2917,6 +3002,8 @@ onUnmounted(() => {
 .icon-btn.trace-capture { color: #0f766e; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) { color: #b7791f; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) { color: #9a6b18; background: rgb(183 121 31 / 9%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop) { color: #dc2626; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop:hover) { color: #b91c1c; background: rgb(220 38 38 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more) { color: #6b4f9b; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--more:hover) { color: #5a3f89; background: rgb(107 79 155 / 8%); }
 :global(.arco-dropdown:has(.device-action-menu-item)) {
@@ -2987,6 +3074,21 @@ onUnmounted(() => {
     color: #fff;
     background: #f59e0b;
     border-color: #f59e0b;
+}
+// 停止播放按钮:深红 #dc2626 warning-danger 系,比"删除"#ef4444 更沉,视觉可辨
+.icon-btn.framed.stop {
+    color: #dc2626;
+    background: color-mix(in srgb, #dc2626 8%, transparent);
+    border: 1px solid color-mix(in srgb, #dc2626 24%, var(--uvp-search-secondary-btn-border));
+}
+.icon-btn.framed.stop:hover:not(:disabled) {
+    color: #fff;
+    background: #dc2626;
+    border-color: #dc2626;
+}
+.icon-btn.framed.stop:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 .icon-btn.framed {
     color: var(--uvp-text-secondary);
@@ -3161,7 +3263,22 @@ onUnmounted(() => {
     background-size: 16px 16px;
     opacity: 0.38;
 }
+/* 通道卡片快照:a-image 铺满 148px 容器,点击走 arco 内置 preview 弹层 */
+.channel-snapshot-image {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100% !important;
+    height: 100% !important;
+}
+.channel-snapshot-image :deep(.arco-image-img) {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: zoom-in;
+}
 .channel-snapshot.offline { color: var(--uvp-text-tertiary); opacity: 0.72; }
+.channel-snapshot.offline .channel-snapshot-image :deep(.arco-image-img) { filter: grayscale(1); opacity: 0.6; }
 .snapshot-empty {
     position: relative;
     z-index: 1;
@@ -3171,38 +3288,6 @@ onUnmounted(() => {
     font-size: 12px;
 }
 .snapshot-empty svg { opacity: 0.7; }
-.snapshot-preview-stage {
-    height: min(58vh, 520px);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 8px;
-}
-.snapshot-preview-stage .snapshot-empty { gap: 8px; }
-.snapshot-preview-stage .snapshot-empty strong {
-    color: var(--uvp-text-primary);
-    font-size: 15px;
-    font-weight: 600;
-}
-.snapshot-detail {
-    position: absolute;
-    z-index: 1;
-    top: 9px;
-    right: 9px;
-    display: grid;
-    place-items: center;
-    width: 30px;
-    height: 30px;
-    padding: 0;
-    color: #fff;
-    background: rgb(15 23 42 / 72%);
-    border: 0;
-    border-radius: 50%;
-    cursor: pointer;
-    transition: background 0.15s, transform 0.15s;
-}
-.snapshot-detail:hover {
-    background: var(--uvp-brand);
-    transform: translateY(-1px);
-}
 .channel-card-body {
     display: grid;
     gap: 10px;
@@ -3271,6 +3356,41 @@ onUnmounted(() => {
 .channel-card-status.online::before {
     background: #10b981;
     box-shadow: 0 0 0 3px rgb(16 185 129 / 14%);
+}
+// 卡片右上角直播中徽章:absolute 定位在快照上,深色底 + 白字保证快照亮暗背景下都可读
+.channel-snapshot-live-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: rgb(220 38 38 / 92%);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgb(0 0 0 / 20%);
+    letter-spacing: 0.5px;
+    pointer-events: none;
+}
+.channel-snapshot-live-badge .live-dot {
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px rgb(255 255 255 / 30%);
+    animation: live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .channel-snapshot-live-badge .live-dot { animation: none; }
 }
 @keyframes channel-status-ripple {
     0% { opacity: 0.65; transform: translateY(-50%) scale(0.55); }

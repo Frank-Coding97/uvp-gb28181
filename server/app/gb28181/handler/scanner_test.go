@@ -42,6 +42,9 @@ func TestOfflineScan_TimeoutToOffline(t *testing.T) {
 // 等重新收到 Catalog 的 ON/OFF 后再恢复各自状态。
 func TestOfflineScan_CascadesChannels(t *testing.T) {
 	setupEnv(t)
+	if app.GormDbMysql != nil && !app.GormDbMysql.Migrator().HasColumn(&gbmodels.GbChannel{}, "snapshot_url") {
+		t.Skip("跳过(MySQL gb_channel 缺 snapshot_url 列,请先跑 migration 2026-07-20-channel-snapshot.sql)")
+	}
 	const did = "34020000001320000078"
 	cleanupDevice(did)
 	defer cleanupDevice(did)

@@ -3,7 +3,8 @@ import { computed, onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import dayjs from "dayjs";
 import { Message } from "@arco-design/web-vue";
-import { Copy, RefreshCw, Search, X } from "lucide-vue-next";
+import { Copy, Eye, RefreshCw, Search, ShieldCheck, X } from "lucide-vue-next";
+import { listDevices, type DeviceVO } from "@/views/gb28181/device-mgmt/api";
 import {
     fetchTraceHealth,
     getTraceMessage,
@@ -35,6 +36,13 @@ const selectedId = ref("");
 const detail = ref<TraceMessageDetail | null>(null);
 const viewMode = ref<WorkbenchView>(route.query.view === "session" ? "session" : "text");
 const stoppingCapture = ref(false);
+const mobileDetailOpen = ref(false);
+const detailTab = ref("raw");
+const sensitiveDialogOpen = ref(false);
+const sensitiveLoading = ref(false);
+const sensitivePurpose = ref("");
+const deviceOptions = ref<DeviceVO[]>([]);
+let requestGeneration = 0;
 const messageColumns = [
     { title: "时间", dataIndex: "occurredAt", width: 166, slotName: "occurredAt" },
     { title: "方向", dataIndex: "direction", width: 68, slotName: "direction" },
@@ -47,12 +55,14 @@ const messageColumns = [
 const now = dayjs();
 const filters = reactive({
     range: [
-        typeof route.query.from === "string" ? dayjs(route.query.from).format("YYYY-MM-DD HH:mm:ss") : now.subtract(30, "minute").format("YYYY-MM-DD HH:mm:ss"),
+        typeof route.query.from === "string" ? dayjs(route.query.from).format("YYYY-MM-DD HH:mm:ss") : now.subtract(15, "minute").format("YYYY-MM-DD HH:mm:ss"),
         typeof route.query.to === "string" ? dayjs(route.query.to).format("YYYY-MM-DD HH:mm:ss") : now.format("YYYY-MM-DD HH:mm:ss")
     ] as string[],
     deviceId: typeof route.query.deviceId === "string" ? route.query.deviceId : "",
+    deviceIds: typeof route.query.deviceIds === "string" ? route.query.deviceIds.split(",").filter(Boolean) : [],
     direction: (typeof route.query.direction === "string" ? route.query.direction : "") as TraceDirection | "",
     method: typeof route.query.method === "string" ? route.query.method : "",
+    statusRange: typeof route.query.statusRange === "string" ? route.query.statusRange : "",
     statusCode: typeof route.query.statusCode === "string" ? route.query.statusCode : "",
     callId: typeof route.query.callId === "string" ? route.query.callId : ""
 });
@@ -64,21 +74,35 @@ const captureID = computed(() => typeof route.query.captureId === "string" ? rou
 const captureEndsAt = computed(() => typeof route.query.captureEndsAt === "string" ? route.query.captureEndsAt : "");
 
 function toISO(value: string) {
-    return dayjs(value).toISOString();
+    const parsed = dayjs(value);
+    return parsed.isValid() ? parsed.toISOString() : "";
 }
 
 function queryParams(cursor = "") {
+    const statusBounds = statusRangeBounds(filters.statusRange);
+    // 多选 deviceIds 优先。URL 恢复得到的 filters.deviceId 是遗留兼容路径,
+    // 仅当 deviceIds 为空时才回退,防止两个参数同时下发造成后端解析行为跟 UI 意图不一致。
+    const hasMulti = filters.deviceIds.length > 0;
     return {
         from: toISO(filters.range[0]),
         to: toISO(filters.range[1]),
-        deviceId: filters.deviceId.trim() || undefined,
+        deviceId: hasMulti ? undefined : filters.deviceId.trim() || undefined,
+        deviceIds: hasMulti ? filters.deviceIds.join(",") : undefined,
         direction: filters.direction || undefined,
         method: filters.method.trim().toUpperCase() || undefined,
         statusCode: filters.statusCode ? Number(filters.statusCode) : undefined,
+        statusMin: statusBounds?.[0],
+        statusMax: statusBounds?.[1],
         callId: filters.callId.trim() || undefined,
         cursor: cursor || undefined,
         limit: 100
     };
+}
+
+function statusRangeBounds(value: string): [number, number] | undefined {
+    if (!value) return undefined;
+    const code = Number(value.slice(0, 1));
+    return Number.isInteger(code) && code >= 1 && code <= 6 ? [code * 100, code * 100 + 99] : undefined;
 }
 
 async function syncURL() {
@@ -90,12 +114,23 @@ async function syncURL() {
             from: params.from,
             to: params.to,
             deviceId: params.deviceId,
+            deviceIds: params.deviceIds,
             direction: params.direction,
             method: params.method,
             statusCode: params.statusCode?.toString(),
+            statusRange: filters.statusRange || undefined,
             callId: params.callId
         }
     });
+}
+
+async function loadDevices() {
+    try {
+        const response = await listDevices({ page: 1, pageSize: 200 });
+        if (response.code === 0) deviceOptions.value = response.data?.list || [];
+    } catch {
+        deviceOptions.value = [];
+    }
 }
 
 async function loadHealth() {
@@ -113,6 +148,7 @@ async function search(reset = true) {
         return;
     }
     if (!canQuery.value) return;
+    const generation = ++requestGeneration;
     loading.value = true;
     try {
         if (reset) {
@@ -131,16 +167,19 @@ async function search(reset = true) {
                 from: params.from,
                 to: params.to,
                 deviceId: params.deviceId,
+                deviceIds: params.deviceIds,
                 callId: params.callId,
                 limit: 200
             });
             if (response.code !== 0) throw new Error(response.message || "查询失败");
+            if (generation !== requestGeneration) return;
             sessions.value = response.data.items || [];
             selectedSession.value = null;
             sessionMessages.value = [];
         } else {
             const response = await listTraceMessages(queryParams(reset ? "" : nextCursor.value));
             if (response.code !== 0) throw new Error(response.message || "查询失败");
+            if (generation !== requestGeneration) return;
             const page = response.data;
             messages.value = reset ? page.items : [...messages.value, ...page.items];
             nextCursor.value = page.nextCursor || "";
@@ -163,6 +202,7 @@ async function switchView(value: WorkbenchView) {
 
 async function selectSession(session: TraceSessionSummary) {
     selectedSession.value = session;
+    mobileDetailOpen.value = true;
     detail.value = null;
     sessionMessages.value = [];
     if (!session.originalAvailable) return;
@@ -193,9 +233,9 @@ async function stopCaptureWindow() {
         delete query.captureId;
         delete query.captureEndsAt;
         await router.replace({ query });
-        Message.success("诊断捕获已停止");
+        Message.success("诊断窗口已停止");
     } catch (error: any) {
-        Message.error(error?.message || "停止诊断捕获失败");
+        Message.error(error?.message || "停止诊断窗口失败");
     } finally {
         stoppingCapture.value = false;
     }
@@ -208,6 +248,8 @@ async function refreshAll() {
 
 async function selectMessage(record: TraceMessageSummary) {
     selectedId.value = record.eventId;
+    mobileDetailOpen.value = true;
+    detailTab.value = "raw";
     detailLoading.value = true;
     try {
         const response = await getTraceMessage(record.eventId);
@@ -223,13 +265,35 @@ async function selectMessage(record: TraceMessageSummary) {
 
 function resetFilters() {
     const current = dayjs();
-    filters.range = [current.subtract(30, "minute").format("YYYY-MM-DD HH:mm:ss"), current.format("YYYY-MM-DD HH:mm:ss")];
+    filters.range = [current.subtract(15, "minute").format("YYYY-MM-DD HH:mm:ss"), current.format("YYYY-MM-DD HH:mm:ss")];
     filters.deviceId = "";
+    filters.deviceIds = [];
     filters.direction = "";
     filters.method = "";
+    filters.statusRange = "";
     filters.statusCode = "";
     filters.callId = "";
     void search();
+}
+
+async function loadSensitiveDetail() {
+    const purpose = sensitivePurpose.value.trim();
+    if (!purpose || !selectedId.value) {
+        Message.warning("请填写敏感报文查看用途");
+        return;
+    }
+    sensitiveLoading.value = true;
+    try {
+        const response = await getTraceMessage(selectedId.value, { sensitive: true, purpose });
+        if (response.code !== 0) throw new Error(response.message || "敏感报文读取失败");
+        detail.value = response.data;
+        sensitiveDialogOpen.value = false;
+        Message.success("敏感报文已按用途授权查看");
+    } catch (error: any) {
+        Message.error(error?.message || "敏感报文读取失败");
+    } finally {
+        sensitiveLoading.value = false;
+    }
 }
 
 async function copyPayload() {
@@ -257,7 +321,16 @@ function sessionStateLabel(session: TraceSessionSummary) {
     return session.finalStatus ? `完成 ${session.finalStatus}` : "进行中";
 }
 
+const detailContent = computed(() => {
+    const payload = detail.value?.payload || "";
+    if (detailTab.value === "headers") return payload.split("\r\n\r\n", 1)[0] || "未检测到 SIP 头部";
+    if (detailTab.value === "sdp") return payload.includes("v=0") ? payload.slice(payload.indexOf("v=0")) : "未检测到 SDP 内容";
+    if (detailTab.value === "xml") return payload.includes("<") ? payload.slice(payload.indexOf("<")) : "未检测到 XML 内容";
+    return payload;
+});
+
 onMounted(async () => {
+    await loadDevices();
     await loadHealth();
     if (canQuery.value) await search(false);
 });
@@ -276,6 +349,7 @@ onMounted(async () => {
                     <a-tag :color="healthColor" bordered>{{ healthLabel }}</a-tag>
                     <span v-if="health.queueCapacity" class="status-detail">队列 {{ health.queueDepth }}/{{ health.queueCapacity }}</span>
                     <span v-if="health.dropped" class="status-loss">已丢失 {{ health.dropped }}</span>
+                    <span v-if="health.currentGap" class="status-loss">缺口 {{ health.currentGap.eventCount }} 条</span>
                 </div>
                 <a-tooltip content="刷新">
                     <a-button class="icon-command" :loading="loading" @click="refreshAll">
@@ -287,11 +361,13 @@ onMounted(async () => {
             <a-alert v-if="health.state === 'disabled'" type="info" class="trace-alert">SIP Trace 功能未启用</a-alert>
             <a-alert v-else-if="health.state === 'degraded'" type="warning" class="trace-alert">
                 {{ health.lastError || "ClickHouse 当前不可用，日志可能存在缺口" }}
+                <span v-if="health.currentGap">；缺口自 {{ formatTime(health.currentGap.startedAt) }} 起累计 {{ health.currentGap.eventCount }} 条</span>
             </a-alert>
-            <div v-if="captureID" class="capture-band">
-                <span>设备诊断捕获进行中</span>
+            <div v-if="captureID" class="capture-band" role="status">
+                <ShieldCheck :size="16" aria-hidden="true" />
+                <span>诊断窗口进行中</span>
                 <span v-if="captureEndsAt" class="status-detail">预计结束 {{ formatTime(captureEndsAt) }}</span>
-                <a-button size="small" status="danger" :loading="stoppingCapture" @click="stopCaptureWindow">停止</a-button>
+                <a-button size="small" status="danger" :loading="stoppingCapture" @click="stopCaptureWindow">停止窗口</a-button>
             </div>
 
             <section class="filter-band" :class="{ 'session-filter': viewMode === 'session' }" aria-label="SIP 日志筛选">
@@ -302,13 +378,32 @@ onMounted(async () => {
                     format="YYYY-MM-DD HH:mm:ss"
                     class="range-control"
                 />
-                <a-input v-model="filters.deviceId" allow-clear placeholder="设备编码" class="filter-control" @press-enter="search()" />
+                <a-select
+                    v-model="filters.deviceIds"
+                    multiple
+                    allow-clear
+                    allow-search
+                    :max-tag-count="2"
+                    placeholder="设备（可多选）"
+                    class="filter-control"
+                >
+                    <a-option v-for="device in deviceOptions" :key="device.id" :value="device.deviceId">
+                        {{ device.name || device.alias || device.deviceId }}
+                    </a-option>
+                </a-select>
                 <a-select v-if="viewMode === 'text'" v-model="filters.direction" allow-clear placeholder="方向" class="short-control">
                     <a-option value="inbound">接收</a-option>
                     <a-option value="outbound">发送</a-option>
                 </a-select>
                 <a-input v-if="viewMode === 'text'" v-model="filters.method" allow-clear placeholder="方法" class="short-control" @press-enter="search()" />
-                <a-input v-if="viewMode === 'text'" v-model="filters.statusCode" allow-clear placeholder="状态码" class="short-control" @press-enter="search()" />
+                <a-select v-if="viewMode === 'text'" v-model="filters.statusRange" allow-clear placeholder="状态范围" class="short-control">
+                    <a-option value="1xx">1xx 临时</a-option>
+                    <a-option value="2xx">2xx 成功</a-option>
+                    <a-option value="3xx">3xx 重定向</a-option>
+                    <a-option value="4xx">4xx 客户端错误</a-option>
+                    <a-option value="5xx">5xx 服务端错误</a-option>
+                    <a-option value="6xx">6xx 全局失败</a-option>
+                </a-select>
                 <a-input v-model="filters.callId" allow-clear placeholder="Call-ID" class="call-id-control" @press-enter="search()" />
                 <a-button type="primary" :disabled="!canQuery" :loading="loading" @click="search()">
                     <template #icon><Search :size="15" /></template>
@@ -374,7 +469,7 @@ onMounted(async () => {
                     </div>
                 </section>
 
-                <aside class="detail-pane" aria-label="SIP 报文详情">
+                <aside :class="['detail-pane', { 'mobile-open': mobileDetailOpen }]" aria-label="SIP 报文详情">
                     <section v-if="viewMode === 'session'" class="session-flow" aria-label="SIP 会话时序">
                         <div class="session-flow-head">
                             <div>
@@ -408,20 +503,44 @@ onMounted(async () => {
                             <span>报文详情</span>
                             <a-tag v-if="detail" size="small" bordered>{{ messageLabel(detail) }}</a-tag>
                         </div>
-                        <a-tooltip content="复制完整报文">
-                            <a-button class="icon-command" :disabled="!detail" @click="copyPayload">
-                                <template #icon><Copy :size="16" /></template>
+                        <div class="detail-actions">
+                            <a-tooltip content="按用途查看敏感字段">
+                                <a-button class="icon-command" :disabled="!detail" aria-label="查看敏感报文" @click="sensitiveDialogOpen = true">
+                                    <template #icon><Eye :size="16" /></template>
+                                </a-button>
+                            </a-tooltip>
+                            <a-tooltip content="复制当前报文">
+                                <a-button class="icon-command" :disabled="!detail" aria-label="复制报文" @click="copyPayload">
+                                    <template #icon><Copy :size="16" /></template>
+                                </a-button>
+                            </a-tooltip>
+                            <a-button class="mobile-close" aria-label="关闭详情" @click="mobileDetailOpen = false">
+                                <template #icon><X :size="16" /></template>
                             </a-button>
-                        </a-tooltip>
+                        </div>
                     </div>
                     <a-spin :loading="detailLoading" class="detail-body">
-                        <pre v-if="detail" class="sip-payload">{{ detail.payload }}</pre>
+                        <template v-if="detail">
+                            <a-tabs v-model:active-key="detailTab" class="detail-tabs" size="small">
+                                <a-tab-pane key="raw" title="Raw" />
+                                <a-tab-pane key="headers" title="Headers" />
+                                <a-tab-pane key="sdp" title="SDP" />
+                                <a-tab-pane key="xml" title="XML" />
+                            </a-tabs>
+                            <pre class="sip-payload">{{ detailContent }}</pre>
+                        </template>
                         <a-empty v-else description="选择一条报文查看详情" />
                     </a-spin>
                 </aside>
             </main>
         </div>
     </div>
+    <a-modal v-model:visible="sensitiveDialogOpen" title="敏感报文查看" :confirm-loading="sensitiveLoading" @ok="loadSensitiveDetail">
+        <a-alert type="warning" class="sensitive-warning">敏感字段仅用于当前诊断，不会写入列表或浏览器历史。</a-alert>
+        <a-form-item label="查看用途" required>
+            <a-textarea v-model="sensitivePurpose" :max-length="200" show-word-limit placeholder="例如：定位设备注册失败" />
+        </a-form-item>
+    </a-modal>
 </template>
 
 <style scoped>
@@ -432,7 +551,7 @@ onMounted(async () => {
 .status-detail { color: var(--uvp-text-tertiary); font-size: 12px; }
 .status-loss { color: rgb(var(--warning-6)); font-size: 12px; font-weight: 500; }
 .trace-alert { margin: 0 8px 8px; }
-.capture-band { display: flex; align-items: center; gap: 12px; min-height: 38px; margin: 0 8px 8px; padding: 4px 10px 4px 12px; color: var(--uvp-text-secondary); font-size: 12px; background: color-mix(in srgb, #14b8a6 7%, var(--uvp-panel-bg)); border: 1px solid color-mix(in srgb, #14b8a6 24%, var(--uvp-panel-border)); }
+.capture-band { display: flex; align-items: center; gap: 10px; min-height: 38px; margin: 0 8px 8px; padding: 4px 10px 4px 12px; color: var(--uvp-text-secondary); font-size: 12px; background: color-mix(in srgb, var(--uvp-brand-cyan) 9%, var(--uvp-panel-bg)); border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 30%, var(--uvp-panel-border)); }
 .filter-band { display: grid; grid-template-columns: 310px 160px 96px 96px 96px minmax(170px, 1fr) auto auto; align-items: center; gap: 8px; padding: 10px 8px; background: var(--uvp-list-toolbar-bg); border-block: 1px solid var(--uvp-divider); }
 .filter-band.session-filter { grid-template-columns: 310px 180px minmax(200px, 1fr) auto auto; }
 .range-control, .filter-control, .short-control, .call-id-control { width: 100%; min-width: 0; }
@@ -447,10 +566,10 @@ onMounted(async () => {
 .time-cell { color: var(--uvp-text-secondary); font-size: 12px; }
 .direction-mark { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
 .direction-mark::before { width: 6px; height: 6px; content: ""; border-radius: 50%; }
-.direction-mark.inbound { color: #0f766e; }
-.direction-mark.inbound::before { background: #14b8a6; }
-.direction-mark.outbound { color: #1d4ed8; }
-.direction-mark.outbound::before { background: #3b82f6; }
+.direction-mark.inbound { color: var(--uvp-brand-cyan); }
+.direction-mark.inbound::before { background: var(--uvp-brand-cyan); }
+.direction-mark.outbound { color: var(--uvp-brand); }
+.direction-mark.outbound::before { background: var(--uvp-brand); }
 .message-method { color: var(--uvp-text-primary); font-size: 12px; }
 .list-footer { display: flex; align-items: center; justify-content: space-between; min-height: 38px; padding: 4px 10px; color: var(--uvp-text-tertiary); font-size: 12px; border-top: 1px solid var(--uvp-divider); }
 .session-list { display: flex; flex: 1; min-height: 0; overflow: auto; }
@@ -465,6 +584,11 @@ onMounted(async () => {
 .session-call-id { overflow: hidden; color: var(--uvp-text-primary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .session-methods { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .detail-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.detail-actions { display: inline-flex; align-items: center; gap: 4px; }
+.mobile-close { display: none; }
+.detail-tabs { flex: 0 0 auto; padding: 0 12px; }
+.detail-tabs :deep(.arco-tabs-content) { display: none; }
+.sensitive-warning { margin-bottom: 14px; }
 .session-flow { display: flex; flex: 1 1 58%; flex-direction: column; min-height: 220px; overflow: hidden; border-bottom: 1px solid var(--uvp-divider); }
 .session-flow-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 6px 12px; border-bottom: 1px solid var(--uvp-divider); }
 .session-flow-head > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -488,8 +612,8 @@ onMounted(async () => {
 .flow-node.outbound .flow-line { grid-column: 2; grid-row: 1; }
 .flow-node.outbound strong { grid-column: 1; grid-row: 1; text-align: right; }
 .flow-node.inbound strong { text-align: left; }
-.flow-line { position: relative; display: flex; align-items: center; justify-content: center; height: 1px; background: #94a3b8; }
-.flow-arrow { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #475569; font-size: 15px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-divider); border-radius: 50%; }
+.flow-line { position: relative; display: flex; align-items: center; justify-content: center; height: 1px; background: var(--uvp-panel-border); }
+.flow-arrow { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: var(--uvp-text-secondary); font-size: 15px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-divider); border-radius: 50%; }
 .flow-cseq { display: none; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 44px; padding: 5px 10px 5px 14px; border-bottom: 1px solid var(--uvp-divider); }
 .detail-heading { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--uvp-text-primary); font-size: 13px; font-weight: 600; }
@@ -497,6 +621,7 @@ onMounted(async () => {
 .detail-body :deep(.arco-spin-children) { display: flex; flex: 1; min-width: 0; min-height: 0; }
 .detail-body :deep(.arco-empty) { margin: auto; }
 .sip-payload { width: 100%; min-width: 0; min-height: 0; box-sizing: border-box; margin: 0; padding: 14px 16px 24px; overflow: auto; color: var(--uvp-text-primary); background: var(--color-fill-1); font: 12px/1.65 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; white-space: pre; tab-size: 4; }
+.trace-shell :deep(button:focus-visible), .trace-shell :deep(input:focus-visible), .trace-shell :deep(.arco-select-view:focus-visible) { outline: 2px solid var(--uvp-brand); outline-offset: 2px; }
 
 @media (max-width: 1080px) {
     .filter-band { grid-template-columns: minmax(280px, 1.5fr) repeat(3, minmax(96px, 0.5fr)); }
@@ -513,5 +638,13 @@ onMounted(async () => {
     .range-control, .filter-control, .call-id-control { grid-column: 1 / -1; }
     .trace-workspace { margin: 6px 0 0; border-inline: 0; }
     .trace-status { flex-wrap: wrap; }
+    .detail-pane { position: fixed; z-index: 40; inset: 0; width: 100%; min-height: 100%; background: var(--uvp-panel-bg); transform: translateX(100%); transition: transform 180ms ease; }
+    .detail-pane.mobile-open { transform: translateX(0); }
+    .mobile-close { display: inline-flex; }
+    .detail-head { padding-inline: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .detail-pane { transition: none; }
 }
 </style>

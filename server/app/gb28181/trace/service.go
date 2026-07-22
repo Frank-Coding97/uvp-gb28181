@@ -11,6 +11,7 @@ type QueryRepository interface {
 	ListMessages(context.Context, MessageFilter) (MessagePage, error)
 	GetMessage(context.Context, string) (StoredMessage, error)
 	ListSessions(context.Context, SessionFilter) ([]SessionSummary, error)
+	GetSessionStats(context.Context, SessionFilter) (SessionStats, error)
 }
 
 type PayloadDecryptor interface {
@@ -88,4 +89,11 @@ func (s *QueryService) ListSessions(ctx context.Context, filter SessionFilter) (
 		return nil, ErrTraceQueryUnavailable
 	}
 	return s.repository.ListSessions(ctx, filter)
+}
+
+func (s *QueryService) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
+	if s == nil || s.repository == nil {
+		return SessionStats{}, ErrTraceQueryUnavailable
+	}
+	return s.repository.GetSessionStats(ctx, filter)
 }

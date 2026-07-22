@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -205,3 +207,78 @@ func TestCloseStreams_MockedZLM(t *testing.T) {
 		t.Errorf("期望 count=7 实际=%d", n)
 	}
 }
+
+// TestGetSnap_Success 通道快照 T2:成功场景返回 JPEG bytes
+func TestGetSnap_Success(t *testing.T) {
+	fakeJPEG := []byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'}
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/getSnap" {
+			t.Errorf("调错路径: %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if q.Get("secret") != "test-secret" {
+			t.Errorf("secret 未透传: %s", q.Get("secret"))
+		}
+		if q.Get("url") != "rtsp://host/rtp/test-stream" {
+			t.Errorf("url 未透传: %s", q.Get("url"))
+		}
+		if q.Get("timeout_sec") != "5" || q.Get("expire_sec") != "30" {
+			t.Errorf("timeout/expire 未透传: t=%s e=%s", q.Get("timeout_sec"), q.Get("expire_sec"))
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write(fakeJPEG)
+	})
+	defer srv.Close()
+
+	got, err := c.GetSnap(context.Background(), "rtsp://host/rtp/test-stream", 5, 30)
+	if err != nil {
+		t.Fatalf("GetSnap 报错: %v", err)
+	}
+	if len(got) != len(fakeJPEG) || got[0] != 0xFF || got[1] != 0xD8 || got[2] != 0xFF {
+		t.Errorf("期望 JPEG SOI 头,实际 %x", got)
+	}
+}
+
+// TestGetSnap_JSONErrorResponse 通道快照 T2:ZLM 返回错误 envelope 时报错
+func TestGetSnap_JSONErrorResponse(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"code":-500,"msg":"stream not found"}`))
+	})
+	defer srv.Close()
+
+	_, err := c.GetSnap(context.Background(), "missing-stream", 5, 30)
+	if err == nil {
+		t.Fatal("期望报错,实际 nil")
+	}
+	if !strings.Contains(err.Error(), "code=-500") {
+		t.Errorf("错误消息应含 code=-500,实际: %v", err)
+	}
+}
+
+// TestGetSnap_TimeoutRespected 通道快照 T2:server sleep 超过 timeout+5s 兜底,应快速失败
+func TestGetSnap_TimeoutRespected(t *testing.T) {
+	// server 慢速响应
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte{0xFF, 0xD8, 0xFF})
+	})
+	defer srv.Close()
+
+	// timeoutSec=0 → httpClient.Timeout = 5s,server sleep 3s 应该能拿到
+	// timeoutSec=-5 → httpClient.Timeout = 0s(禁用),但用 ctx 兜底
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.GetSnap(ctx, "slow-stream", 5, 30)
+	dur := time.Since(start)
+	if err == nil {
+		t.Fatal("期望超时报错,实际 nil")
+	}
+	// 应该在 ctx timeout 附近报错,而不是等到 server sleep 结束(3s)
+	if dur > 2*time.Second {
+		t.Errorf("超时未在 ctx 触发范围内(应 <2s),实际耗时 %v", dur)
+	}
+}
+
