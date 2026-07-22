@@ -19,6 +19,8 @@ type fakeActivationMedia struct {
 	mu        sync.Mutex
 	info      *zlm.MediaInfo
 	startErr  error
+	stopErr   error
+	closeErr  error
 	localPort int
 	starts    int
 	stops     int
@@ -43,20 +45,21 @@ func (f *fakeActivationMedia) StopSendRtp(context.Context, string, string, strin
 	f.mu.Lock()
 	f.stops++
 	f.mu.Unlock()
-	return nil
+	return f.stopErr
 }
 
 func (f *fakeActivationMedia) CloseTalkSource(context.Context, string, string, string) error {
 	f.mu.Lock()
 	f.closes++
 	f.mu.Unlock()
-	return nil
+	return f.closeErr
 }
 
 type fakeTalkInviter struct {
 	started chan struct{}
 	release chan struct{}
 	err     error
+	byeErr  error
 	invites int
 	byes    int
 }
@@ -72,7 +75,7 @@ func (f *fakeTalkInviter) InviteTalk(context.Context, uac.TalkInviteRequest) (ua
 
 func (f *fakeTalkInviter) ByeTalk(context.Context, string) error {
 	f.byes++
-	return nil
+	return f.byeErr
 }
 
 type fakeTalkTargetLoader struct {

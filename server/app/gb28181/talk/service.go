@@ -34,6 +34,8 @@ type TalkRepo interface {
 	ConsumeTokenForPublish(context.Context, string, string, string, time.Time) (bool, error)
 	Transition(context.Context, string, models.TalkSessionState, models.TalkSessionState, TransitionPatch) (bool, error)
 	RenewActive(context.Context, string, time.Time) (bool, error)
+	ListNonterminal(context.Context) ([]models.GbTalkSession, error)
+	ListExpired(context.Context, time.Time) ([]models.GbTalkSession, error)
 	FinishAndReleaseLease(context.Context, string, models.TalkSessionState, string, time.Time) (bool, error)
 }
 
@@ -61,6 +63,7 @@ type Service struct {
 	configs    TalkConfigProvider
 	now        func() time.Time
 	activation *activationRuntime
+	cleanup    *cleanupRuntime
 }
 
 type CreateRequest struct {
@@ -95,7 +98,10 @@ func NewService(repo TalkRepo, nodes TalkNodeRegistry, locations TalkLocationSto
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{repo: repo, nodes: nodes, locations: locations, picker: picker, configs: configs, now: now}
+	return &Service{
+		repo: repo, nodes: nodes, locations: locations, picker: picker, configs: configs, now: now,
+		cleanup: newCleanupRuntime(),
+	}
 }
 
 func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateResult, error) {

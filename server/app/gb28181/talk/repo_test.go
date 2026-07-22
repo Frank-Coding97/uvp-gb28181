@@ -24,7 +24,7 @@ import (
 
 func newTalkRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:talk_repo_%d?mode=memory&cache=shared&_pragma=busy_timeout(5000)", time.Now().UnixNano())
+	dsn := fmt.Sprintf("file:talk_repo_%d?mode=memory&cache=shared&_pragma=busy_timeout(5000)", talkRepoDBSequence.Add(1))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{SkipDefaultTransaction: true})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
@@ -34,6 +34,8 @@ func newTalkRepoTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(&models.GbTalkSession{}))
 	return db
 }
+
+var talkRepoDBSequence atomic.Uint64
 
 func newReservedSession(id string, channelID uint, expiresAt time.Time) *models.GbTalkSession {
 	return &models.GbTalkSession{
