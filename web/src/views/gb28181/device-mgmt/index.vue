@@ -1814,8 +1814,36 @@ onUnmounted(() => {
                                     <div><span>所属设备</span><a-tooltip :content="item.deviceId" position="top"><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip></div>
                                     <div><span>厂商 / 型号</span><strong class="text-ellipsis">{{ vendorText(item) }}</strong></div>
                                     <div><span>位置</span><strong>{{ locationText(item) }}</strong></div>
-                                    <div><span>摄像头类型</span><strong>{{ cameraTypeText(item.ptzType) }}</strong></div>
-                                    <div><span>流传输模式</span><strong>{{ streamTransportText(item.streamTransport) }}</strong></div>
+                                    <div>
+                                        <span>摄像头类型</span>
+                                        <a-select
+                                            :model-value="String(item.ptzType || 0)"
+                                            size="small"
+                                            class="channel-card-inline-select"
+                                            @click.stop
+                                            @dblclick.stop
+                                            @change="(value: string) => handlePtzTypeChange(item.id, value)"
+                                        >
+                                            <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
+                                                {{ opt.name }}
+                                            </a-option>
+                                        </a-select>
+                                    </div>
+                                    <div>
+                                        <span>流传输模式</span>
+                                        <a-select
+                                            :model-value="item.streamTransport || 'UDP'"
+                                            size="small"
+                                            class="channel-card-inline-select"
+                                            @click.stop
+                                            @dblclick.stop
+                                            @change="(value: string) => handleStreamTransportChange(item.id, value)"
+                                        >
+                                            <a-option value="UDP">UDP</a-option>
+                                            <a-option value="TCP-Active">TCP-Active</a-option>
+                                            <a-option value="TCP-Passive">TCP-Passive</a-option>
+                                        </a-select>
+                                    </div>
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
@@ -3319,6 +3347,7 @@ onUnmounted(() => {
     color: var(--uvp-text-primary);
     font-weight: 500;
 }
+.channel-card-inline-select { min-width: 0; width: 100%; }
 .channel-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .channel-card-actions {
     gap: 7px;
