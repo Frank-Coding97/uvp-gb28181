@@ -34,6 +34,7 @@ type Target struct {
 	DeviceOnline  bool
 	ChannelOnline bool
 	PTZType       int8
+	AllowNoPTZ    bool
 }
 
 type Command struct {
@@ -189,7 +190,7 @@ func validateTarget(target Target) error {
 	if !target.DeviceOnline || !target.ChannelOnline {
 		return fmt.Errorf("设备或通道离线")
 	}
-	if target.PTZType == 0 {
+	if target.PTZType == 0 && !target.AllowNoPTZ {
 		return fmt.Errorf("通道未上报可用云台能力")
 	}
 	if strings.TrimSpace(target.IP) == "" || target.Port <= 0 {

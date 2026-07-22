@@ -273,6 +273,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.PATCH("/channel/:id/cloud-recording", cloudRecordingController.Update)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
+			dmgmt.GET("/channel/:id/control-capabilities", deviceMgmtController.GetControlCapabilities)
+			dmgmt.POST("/channel/:id/device-control", deviceMgmtController.ControlDevice)
 			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
 			dmgmt.POST("/channel/:id/ptz/precise", deviceMgmtController.ControlPTZPrecise)
 			dmgmt.POST("/channel/:id/ptz/extended", deviceMgmtController.ControlPTZExtended)

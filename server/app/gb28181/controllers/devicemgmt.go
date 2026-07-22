@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -32,6 +33,7 @@ type DeviceMgmtController struct {
 	ptzSender           DeviceControlSender
 	ptzService          *ptz.Service
 	ptzSN               atomic.Uint64
+	deviceControlLocks  sync.Map
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询
