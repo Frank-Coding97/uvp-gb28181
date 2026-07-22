@@ -81,6 +81,52 @@ func (s *Service) Enable(ctx context.Context, channelID uint) (*models.GbChannel
 	return s.reconcileEnabledLocked(ctx, channel)
 }
 
+func (s *Service) Disable(ctx context.Context, channelID uint) (*models.GbChannel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	channel, err := s.repo.SetDesired(ctx, channelID, false)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.repo.FindLatestSessionByChannel(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || session.State == models.RecordingSessionStateStopped {
+		if _, err := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateDisabled, ""); err != nil {
+			return nil, err
+		}
+		return s.repo.GetChannel(ctx, channelID)
+	}
+
+	mediaNode, ok := s.registry.Get(session.NodeID)
+	if !ok {
+		return s.markDisableFailure(ctx, channelID, session, fmt.Sprintf("ZLM 节点 %d 不可用", session.NodeID))
+	}
+	client := s.client(mediaNode)
+	if err := client.StopRecord(ctx, session.VHost, session.App, session.Stream); err != nil {
+		return s.markDisableFailure(ctx, channelID, session, "停止录像失败: "+err.Error())
+	}
+
+	mediaInfo, mediaErr := client.GetMediaInfo(ctx, session.App, session.Stream)
+	if err := s.repo.MarkSessionStopped(ctx, session.ID, ""); err != nil {
+		return nil, err
+	}
+	if mediaErr == nil && mediaInfo.ReaderCount == 0 && channel.OnDemandLive && s.stopper != nil {
+		if err := s.stopper.Stop(ctx, session.Stream); err != nil {
+			if _, markErr := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateFailed, "停止空闲流失败: "+err.Error()); markErr != nil {
+				return nil, markErr
+			}
+			return s.repo.GetChannel(ctx, channelID)
+		}
+	}
+	if _, err := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateDisabled, ""); err != nil {
+		return nil, err
+	}
+	return s.repo.GetChannel(ctx, channelID)
+}
+
 func (s *Service) reconcileEnabledLocked(ctx context.Context, channel *models.GbChannel) (*models.GbChannel, error) {
 	result, err := s.starter.Start(ctx, channel.DeviceID, channel.ChannelID)
 	if err != nil {
@@ -152,6 +198,16 @@ func (s *Service) markEnableFailure(ctx context.Context, channelID uint, session
 	session.LastError = message
 	_ = s.repo.UpsertSession(ctx, session)
 	if _, err := s.repo.MarkState(ctx, channelID, true, models.CloudRecordingStateFailed, message); err != nil {
+		return nil, err
+	}
+	return s.repo.GetChannel(ctx, channelID)
+}
+
+func (s *Service) markDisableFailure(ctx context.Context, channelID uint, session *models.GbRecordingSession, message string) (*models.GbChannel, error) {
+	session.State = models.RecordingSessionStateFailed
+	session.LastError = message
+	_ = s.repo.UpsertSession(ctx, session)
+	if _, err := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateFailed, message); err != nil {
 		return nil, err
 	}
 	return s.repo.GetChannel(ctx, channelID)

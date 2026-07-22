@@ -152,3 +152,84 @@ func TestEnableKeepsDesiredStateWhenStartRecordFails(t *testing.T) {
 	require.Equal(t, models.CloudRecordingStateFailed, got.CloudRecordingState)
 	require.Contains(t, got.CloudRecordingError, "启动录像失败")
 }
+
+func seedActiveSession(t *testing.T, repo *GormRepo, channel *models.GbChannel) *models.GbRecordingSession {
+	t.Helper()
+	_, err := repo.SetDesired(context.Background(), channel.ID, true)
+	require.NoError(t, err)
+	session := &models.GbRecordingSession{
+		ChannelID: channel.ID, DeviceID: channel.DeviceID, NodeID: 2,
+		VHost: models.DefaultRecordingVHost, App: models.DefaultRecordingApp,
+		Stream: "stream-1", State: models.RecordingSessionStateRecording,
+	}
+	require.NoError(t, repo.UpsertSession(context.Background(), session))
+	return session
+}
+
+func TestDisableStopsRecordingButKeepsStreamWithReaders(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	session := seedActiveSession(t, repo, channel)
+	client := &fakeRecorderClient{mediaInfo: &zlm.MediaInfo{Online: true, ReaderCount: 2}}
+	stopper := &fakeStopper{}
+	service := NewService(repo, &fakeStarter{}, stopper, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
+
+	got, err := service.Disable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.False(t, got.CloudRecordingEnabled)
+	require.Equal(t, models.CloudRecordingStateDisabled, got.CloudRecordingState)
+	require.EqualValues(t, 1, client.stopCalls.Load())
+	require.Zero(t, stopper.calls.Load())
+	stored, err := repo.FindSessionByMedia(context.Background(), 2, session.VHost, session.App, session.Stream)
+	require.NoError(t, err)
+	require.Equal(t, models.RecordingSessionStateStopped, stored.State)
+}
+
+func TestDisableStopsIdleOnDemandStream(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	seedActiveSession(t, repo, channel)
+	client := &fakeRecorderClient{mediaInfo: &zlm.MediaInfo{Online: true, ReaderCount: 0}}
+	stopper := &fakeStopper{}
+	service := NewService(repo, &fakeStarter{}, stopper, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
+
+	_, err := service.Disable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, stopper.calls.Load())
+}
+
+func TestDisableKeepsAlwaysOnStreamWithoutReaders(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	channel.OnDemandLive = false
+	require.NoError(t, repo.db.Model(channel).Update("on_demand_live", false).Error)
+	seedActiveSession(t, repo, channel)
+	client := &fakeRecorderClient{mediaInfo: &zlm.MediaInfo{Online: true, ReaderCount: 0}}
+	stopper := &fakeStopper{}
+	service := NewService(repo, &fakeStarter{}, stopper, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
+
+	_, err := service.Disable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.Zero(t, stopper.calls.Load())
+}
+
+func TestDisableIsIdempotentWithoutSession(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	service := newRecordingService(repo, &fakeStarter{}, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+
+	got, err := service.Disable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.CloudRecordingStateDisabled, got.CloudRecordingState)
+}
+
+func TestDisableRetainsSessionWhenStopRecordFails(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	session := seedActiveSession(t, repo, channel)
+	client := &fakeRecorderClient{stopErr: errors.New("zlm unavailable")}
+	service := NewService(repo, &fakeStarter{}, &fakeStopper{}, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
+
+	got, err := service.Disable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.False(t, got.CloudRecordingEnabled)
+	require.Equal(t, models.CloudRecordingStateFailed, got.CloudRecordingState)
+	stored, err := repo.FindSessionByMedia(context.Background(), 2, session.VHost, session.App, session.Stream)
+	require.NoError(t, err)
+	require.NotEqual(t, models.RecordingSessionStateStopped, stored.State)
+}
