@@ -160,7 +160,9 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 			status = gbmodels.PTZOperationTimeout
 		}
 		message := sendErr.Error()
-		_ = s.db.WithContext(ctx).Model(&op).Updates(map[string]interface{}{
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancel()
+		_ = s.db.WithContext(persistCtx).Model(&op).Updates(map[string]interface{}{
 			"status": status, "error_message": message, "completed_at": s.now(),
 		}).Error
 		op.Status = status

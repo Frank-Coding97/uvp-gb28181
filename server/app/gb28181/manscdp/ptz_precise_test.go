@@ -1,6 +1,7 @@
 package manscdp
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -23,14 +24,15 @@ func TestBuildPTZPreciseControl(t *testing.T) {
 
 func TestBuildPTZQueries(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		build func() ([]byte, error)
-		cmd string
+		cmd   string
 	}{
 		{"home", func() ([]byte, error) { return BuildHomePositionQuery("C", 1) }, CmdHomePositionQuery},
 		{"track list", func() ([]byte, error) { return BuildCruiseTrackListQuery("C", 2) }, CmdCruiseTrackListQuery},
 		{"track", func() ([]byte, error) { return BuildCruiseTrackQuery("C", 3, 7) }, CmdCruiseTrackQuery},
 		{"status", func() ([]byte, error) { return BuildPTZPreciseStatusQuery("C", 4) }, CmdPTZPreciseStatusQuery},
+		{"preset", func() ([]byte, error) { return BuildPresetQuery("C", 5) }, CmdPresetQuery},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -43,6 +45,27 @@ func TestBuildPTZQueries(t *testing.T) {
 				t.Fatalf("unexpected query: %s", text)
 			}
 		})
+	}
+}
+
+func TestBuildHomePositionControl(t *testing.T) {
+	body, err := BuildHomePositionControl("C", 6, HomePositionControl{Enabled: true, ResetTime: 30, PresetID: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{"<CmdType>DeviceControl</CmdType>", "<HomePosition>", "<Enabled>1</Enabled>", "<ResetTime>30</ResetTime>", "<PresetIndex>4</PresetIndex>"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("body missing %q: %s", want, text)
+		}
+	}
+
+	body, err = BuildHomePositionControl("C", 7, HomePositionControl{Enabled: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "ResetTime") || strings.Contains(string(body), "PresetIndex") {
+		t.Fatalf("disabled home position must omit enable-only fields: %s", body)
 	}
 }
 
@@ -78,5 +101,20 @@ func TestParseHomeAndCruiseResponses(t *testing.T) {
 	detail, err := ParseCruiseTrackResponse([]byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>3</SN><DeviceID>C</DeviceID><Track><TrackID>7</TrackID><Name>巡航一</Name></Track></Response>`))
 	if err != nil || detail.Track.ID != 7 {
 		t.Fatalf("unexpected track detail: %+v, err=%v", detail, err)
+	}
+}
+
+func TestParsePresetResponse_PreservesCompleteList(t *testing.T) {
+	var items strings.Builder
+	for i := 1; i <= 20; i++ {
+		items.WriteString("<Item><PresetID>" + strconv.Itoa(i) + "</PresetID><PresetName>P" + strconv.Itoa(i) + "</PresetName></Item>")
+	}
+	body := []byte(`<Response><CmdType>PresetQuery</CmdType><SN>5</SN><DeviceID>C</DeviceID><SumNum>20</SumNum><PresetList Num="20">` + items.String() + `</PresetList></Response>`)
+	response, err := ParsePresetResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Presets) != 20 || response.Presets[19].ID != 20 {
+		t.Fatalf("unexpected preset response: %+v", response)
 	}
 }

@@ -24,3 +24,22 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		require.True(t, got[route], route)
 	}
 }
+
+func TestRegisterRoutes_IncludesPTZResourceEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	RegisterRoutes(engine.Group("/api"))
+	got := make(map[string]bool)
+	for _, route := range engine.Routes() {
+		got[route.Method+" "+route.Path] = true
+	}
+	for _, route := range []string{
+		"DELETE /api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId",
+		"POST /api/gb28181/device-mgmt/channel/:id/ptz/cruise",
+		"POST /api/gb28181/device-mgmt/channel/:id/ptz/aux",
+		"GET /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
+		"PATCH /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
+	} {
+		require.True(t, got[route], route)
+	}
+}

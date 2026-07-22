@@ -2,6 +2,7 @@ package ptz
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,6 +18,10 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 	if err != nil {
 		return err
 	}
+	switch head.CmdType {
+	case manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+		return s.applyQueryResponse(ctx, deviceCode, callID, cseq, *head, body)
+	}
 	sn, _ := strconv.Atoi(head.SN)
 	result := ""
 	if strings.Contains(string(body), "<Result>OK</Result>") {
@@ -24,8 +29,45 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 	} else if strings.Contains(string(body), "<Result>ERROR</Result>") {
 		result = "ERROR"
 	}
-	_, _, err = s.ApplyResponse(ctx, Response{DeviceCode: deviceCode, ChannelCode: head.DeviceID, SN: sn, CallID: callID, CSeq: cseq, SIPStatus: 200, DeviceResult: result})
-	return err
+	operation, matched, err := s.ApplyResponse(ctx, Response{DeviceCode: deviceCode, ChannelCode: head.DeviceID, SN: sn, CallID: callID, CSeq: cseq, SIPStatus: 200, DeviceResult: result})
+	if err != nil || !matched || operation.Status != gbmodels.PTZOperationAccepted {
+		return err
+	}
+	return s.applyConfirmedControl(ctx, operation)
+}
+
+func (s *Service) applyConfirmedControl(ctx context.Context, operation gbmodels.GbPTZOperation) error {
+	if operation.Action != string(manscdp.PTZActionSetPreset) && operation.Action != string(manscdp.PTZActionDeletePreset) {
+		return nil
+	}
+	var payload struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil || payload.ID <= 0 {
+		return fmt.Errorf("解析预置位操作参数失败")
+	}
+	status := gbmodels.PTZPresetActive
+	if operation.Action == string(manscdp.PTZActionDeletePreset) {
+		status = gbmodels.PTZPresetDeleted
+	}
+	preset := gbmodels.GbPTZPreset{
+		DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, PresetID: payload.ID,
+		Name: payload.Name, Status: status, LastOperationID: operation.OperationID,
+	}
+	var existing gbmodels.GbPTZPreset
+	result := s.db.WithContext(ctx).Where("channel_id = ? AND preset_id = ?", operation.ChannelID, payload.ID).Limit(1).Find(&existing)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return s.db.WithContext(ctx).Create(&preset).Error
+	}
+	updates := map[string]interface{}{"status": status, "last_operation_id": operation.OperationID, "updated_at": s.now()}
+	if payload.Name != "" {
+		updates["name"] = payload.Name
+	}
+	return s.db.WithContext(ctx).Model(&existing).Updates(updates).Error
 }
 
 // OnPTZNotify resolves a channel code to platform IDs and persists a precise

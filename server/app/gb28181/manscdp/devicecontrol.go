@@ -34,22 +34,22 @@ type PTZCommand struct {
 type PTZExtendedAction string
 
 const (
-	PTZActionFocusNear PTZExtendedAction = "focus_near"
-	PTZActionFocusFar  PTZExtendedAction = "focus_far"
-	PTZActionIrisOpen  PTZExtendedAction = "iris_open"
-	PTZActionIrisClose PTZExtendedAction = "iris_close"
-	PTZActionSetPreset PTZExtendedAction = "preset_set"
-	PTZActionCallPreset PTZExtendedAction = "preset_call"
+	PTZActionFocusNear    PTZExtendedAction = "focus_near"
+	PTZActionFocusFar     PTZExtendedAction = "focus_far"
+	PTZActionIrisOpen     PTZExtendedAction = "iris_open"
+	PTZActionIrisClose    PTZExtendedAction = "iris_close"
+	PTZActionSetPreset    PTZExtendedAction = "preset_set"
+	PTZActionCallPreset   PTZExtendedAction = "preset_call"
 	PTZActionDeletePreset PTZExtendedAction = "preset_delete"
-	PTZActionCruiseStart PTZExtendedAction = "cruise_start"
-	PTZActionCruiseStop PTZExtendedAction = "cruise_stop"
-	PTZActionCruisePause PTZExtendedAction = "cruise_pause"
+	PTZActionCruiseStart  PTZExtendedAction = "cruise_start"
+	PTZActionCruiseStop   PTZExtendedAction = "cruise_stop"
+	PTZActionCruisePause  PTZExtendedAction = "cruise_pause"
 	PTZActionCruiseResume PTZExtendedAction = "cruise_resume"
 	PTZActionCruiseDelete PTZExtendedAction = "cruise_delete"
-	PTZActionAuxOn PTZExtendedAction = "aux_on"
-	PTZActionAuxOff PTZExtendedAction = "aux_off"
-	PTZActionScanStart PTZExtendedAction = "scan_start"
-	PTZActionScanStop PTZExtendedAction = "scan_stop"
+	PTZActionAuxOn        PTZExtendedAction = "aux_on"
+	PTZActionAuxOff       PTZExtendedAction = "aux_off"
+	PTZActionScanStart    PTZExtendedAction = "scan_start"
+	PTZActionScanStop     PTZExtendedAction = "scan_stop"
 )
 
 // PTZProfile supplies vendor-specific lens instruction bytes. A nil field
@@ -160,32 +160,36 @@ func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedComman
 		return nil, fmt.Errorf("PTZ 编号必须在 0-255 之间")
 	}
 
-	var instruction byte
+	var instruction, parameter1, parameter2, parameter3 byte
 	switch command.Action {
 	case PTZActionSetPreset:
 		instruction = 0x81
+		parameter2 = byte(command.ID)
 	case PTZActionCallPreset:
 		instruction = 0x82
+		parameter2 = byte(command.ID)
 	case PTZActionDeletePreset:
 		instruction = 0x83
+		parameter2 = byte(command.ID)
 	case PTZActionCruiseStart:
-		instruction = 0x84
-	case PTZActionCruiseStop:
-		instruction = 0x85
-	case PTZActionCruisePause:
-		instruction = 0x86
-	case PTZActionCruiseResume:
-		instruction = 0x87
-	case PTZActionCruiseDelete:
 		instruction = 0x88
+		parameter1 = byte(command.ID)
+	case PTZActionCruiseStop:
+		// GB/T 28181 defines no dedicated cruise-stop instruction. The
+		// standard front-end stop command is the all-zero instruction.
+	case PTZActionCruisePause, PTZActionCruiseResume, PTZActionCruiseDelete:
+		return nil, fmt.Errorf("PTZ action %q has no standard front-end instruction", command.Action)
 	case PTZActionAuxOn:
-		instruction = 0x89
-	case PTZActionAuxOff:
-		instruction = 0x8A
-	case PTZActionScanStart:
-		instruction = 0x8B
-	case PTZActionScanStop:
 		instruction = 0x8C
+		parameter1 = byte(command.ID)
+	case PTZActionAuxOff:
+		instruction = 0x8D
+		parameter1 = byte(command.ID)
+	case PTZActionScanStart:
+		instruction = 0x89
+		parameter1 = byte(command.ID)
+	case PTZActionScanStop:
+		// As with cruise stop, stop scanning uses the standard stop command.
 	case PTZActionFocusNear, PTZActionFocusFar, PTZActionIrisOpen, PTZActionIrisClose:
 		if command.Profile == nil {
 			return nil, fmt.Errorf("PTZ lens operation requires profile")
@@ -205,11 +209,13 @@ func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedComman
 			return nil, fmt.Errorf("PTZ lens operation requires profile instruction")
 		}
 		instruction = *code
+		parameter1 = byte(command.Speed)
+		parameter2 = byte(command.Speed)
 	default:
 		return nil, fmt.Errorf("不支持的 PTZ 扩展动作: %q", command.Action)
 	}
 
-	bytes := [8]byte{0xA5, 0x0F, 0x01, instruction, byte(command.ID), byte(command.Speed), 0, 0}
+	bytes := [8]byte{0xA5, 0x0F, 0x01, instruction, parameter1, parameter2, parameter3, 0}
 	for i := 0; i < len(bytes)-1; i++ {
 		bytes[7] += bytes[i]
 	}
