@@ -31,6 +31,7 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 var playController = gbcontrollers.NewPlayController(nil)
 var playService *gbplay.Service
 var recordingService *gbrecording.Service
+var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
 
 // dashboardController SIP 监控看板控制器
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
@@ -155,6 +156,11 @@ func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.Stre
 
 func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUUIDResolver, indexer gbhandler.RecordMP4Indexer) {
 	recordingService = service
+	if service == nil {
+		cloudRecordingController.SetManager(nil)
+	} else {
+		cloudRecordingController.SetManager(service)
+	}
 	rebuildPlayController()
 	hookController.SetRecordMP4Indexer(resolver, indexer)
 	if service == nil {
@@ -249,6 +255,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channels", deviceMgmtController.ListChannels)
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
 			dmgmt.PATCH("/channel/:id", deviceMgmtController.UpdateChannel)
+			dmgmt.PATCH("/channel/:id/cloud-recording", cloudRecordingController.Update)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)
 			dmgmt.GET("/channel/:id/timeline", deviceMgmtController.ChannelTimeline)
 			dmgmt.POST("/channel/:id/ptz", deviceMgmtController.ControlPTZ)
