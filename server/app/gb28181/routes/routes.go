@@ -135,6 +135,10 @@ func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.Stre
 	hookController.SetMultiNode(resolver, binder)
 }
 
+func SetRecordMP4Indexer(resolver gbhandler.NodeUUIDResolver, indexer gbhandler.RecordMP4Indexer) {
+	hookController.SetRecordMP4Indexer(resolver, indexer)
+}
+
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
 // 在底座 routes.InitRoutes 的 protected 块中调用
 func RegisterRoutes(protected *gin.RouterGroup) {
@@ -309,5 +313,6 @@ func RegisterHookRoutes(engine *gin.Engine) {
 		hook.POST("/on_rtp_server_timeout", hookController.OnRtpServerTimeout)
 		hook.POST("/on_publish", hookController.OnPublish)
 		hook.POST("/on_play", hookController.OnPlay)
+		hook.POST("/on_record_mp4", hookController.OnRecordMP4)
 	}
 }

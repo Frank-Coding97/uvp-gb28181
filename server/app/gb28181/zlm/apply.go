@@ -27,6 +27,7 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 		"hook.on_rtp_server_timeout": base + "/on_rtp_server_timeout",
 		"hook.on_publish":            base + "/on_publish",
 		"hook.on_play":               base + "/on_play",
+		"hook.on_record_mp4":         base + "/on_record_mp4",
 		// 心跳周期(秒)
 		"hook.alive_interval": "30.0",
 		// 运行时策略

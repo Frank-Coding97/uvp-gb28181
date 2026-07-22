@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
@@ -40,6 +42,10 @@ type StreamLocationBinder interface {
 	Bind(streamID string, nodeID int64)
 }
 
+type RecordMP4Indexer interface {
+	IndexRecordMP4(context.Context, int64, recording.RecordMP4Event) (bool, error)
+}
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
@@ -49,6 +55,7 @@ type HookController struct {
 	collector KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
 	resolver  NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
 	binder    StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
+	recordMP4 RecordMP4Indexer
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -74,6 +81,11 @@ func (h *HookController) SetKeepaliveCollector(c KeepaliveCollector) {
 func (h *HookController) SetMultiNode(resolver NodeUUIDResolver, binder StreamLocationBinder) {
 	h.resolver = resolver
 	h.binder = binder
+}
+
+func (h *HookController) SetRecordMP4Indexer(resolver NodeUUIDResolver, indexer RecordMP4Indexer) {
+	h.resolver = resolver
+	h.recordMP4 = indexer
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -200,6 +212,52 @@ func (h *HookController) OnPlay(c *gin.Context) {
 // OnServerStarted ZLM 启动事件
 func (h *HookController) OnServerStarted(c *gin.Context) {
 	app.ZapLog.Info("ZLM Hook on_server_started")
+	hookOK(c)
+}
+
+type onRecordMP4Body struct {
+	MediaServerID string  `json:"mediaServerId" binding:"required"`
+	VHost         string  `json:"vhost" binding:"required"`
+	App           string  `json:"app" binding:"required"`
+	Stream        string  `json:"stream" binding:"required"`
+	StartTime     int64   `json:"start_time" binding:"required"`
+	FileSize      uint64  `json:"file_size"`
+	TimeLen       float64 `json:"time_len"`
+	FilePath      string  `json:"file_path" binding:"required"`
+	FileName      string  `json:"file_name" binding:"required"`
+	Folder        string  `json:"folder"`
+	URL           string  `json:"url"`
+}
+
+func (h *HookController) OnRecordMP4(c *gin.Context) {
+	var body onRecordMP4Body
+	if err := c.ShouldBindJSON(&body); err != nil || body.StartTime <= 0 || body.TimeLen < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "invalid on_record_mp4 payload"})
+		return
+	}
+	if h.resolver == nil || h.recordMP4 == nil {
+		hookOK(c)
+		return
+	}
+	nodeID, ok := h.resolver.IDForUUID(body.MediaServerID)
+	if !ok {
+		app.ZapLog.Warn("忽略未知 ZLM 节点的录像文件", zap.String("mediaServerId", body.MediaServerID))
+		hookOK(c)
+		return
+	}
+	indexed, err := h.recordMP4.IndexRecordMP4(c.Request.Context(), nodeID, recording.RecordMP4Event{
+		VHost: body.VHost, App: body.App, Stream: body.Stream,
+		FileName: body.FileName, FilePath: body.FilePath, Folder: body.Folder, URL: body.URL,
+		StartTime: time.Unix(body.StartTime, 0), TimeLen: body.TimeLen, FileSize: body.FileSize,
+	})
+	if err != nil {
+		app.ZapLog.Error("写入 ZLM 录像文件索引失败", zap.Error(err), zap.String("filePath", body.FilePath))
+		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "persist recording file failed"})
+		return
+	}
+	if !indexed {
+		app.ZapLog.Warn("忽略未关联录像会话的 MP4 文件", zap.Int64("nodeId", nodeID), zap.String("stream", body.Stream))
+	}
 	hookOK(c)
 }
 
