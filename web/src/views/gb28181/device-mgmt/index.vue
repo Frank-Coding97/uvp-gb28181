@@ -1796,6 +1796,10 @@ onUnmounted(() => {
                                     <Video :size="30" />
                                     <span>暂无快照</span>
                                 </div>
+                                <span v-if="isChannelPlaying(item)" class="channel-snapshot-live-badge">
+                                    <span class="live-dot"></span>
+                                    <span>直播中</span>
+                                </span>
                             </div>
                             <div class="channel-card-body">
                                 <a-tooltip :content="displayName(item)" position="top"><strong class="channel-card-title text-ellipsis">{{ displayName(item) }}</strong></a-tooltip>
@@ -1809,7 +1813,6 @@ onUnmounted(() => {
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
-                                    <span v-if="isChannelPlaying(item)" class="channel-card-status playing">直播中</span>
                                     <a-tooltip content="点播" position="top">
                                         <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
                                             <Play :size="13" />
@@ -3354,10 +3357,40 @@ onUnmounted(() => {
     background: #10b981;
     box-shadow: 0 0 0 3px rgb(16 185 129 / 14%);
 }
-.channel-card-status.playing { color: #d14343; }
-.channel-card-status.playing::before {
-    background: #d14343;
-    box-shadow: 0 0 0 3px rgb(209 67 67 / 14%);
+// 卡片右上角直播中徽章:absolute 定位在快照上,深色底 + 白字保证快照亮暗背景下都可读
+.channel-snapshot-live-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: rgb(220 38 38 / 92%);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+    border-radius: 4px;
+    box-shadow: 0 2px 6px rgb(0 0 0 / 20%);
+    letter-spacing: 0.5px;
+    pointer-events: none;
+}
+.channel-snapshot-live-badge .live-dot {
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px rgb(255 255 255 / 30%);
+    animation: live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes live-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.4; transform: scale(0.85); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .channel-snapshot-live-badge .live-dot { animation: none; }
 }
 @keyframes channel-status-ripple {
     0% { opacity: 0.65; transform: translateY(-50%) scale(0.55); }
