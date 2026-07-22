@@ -24,6 +24,7 @@ import (
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/snapshot"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -394,6 +395,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
 			gbroutes.SetPlayService(playSvc)
+			gbroutes.SetStreamMonitorService(streammonitor.NewService(zlmRegistry, zlmLocationMap, nil, time.Now))
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
 			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)")
 		} else {
