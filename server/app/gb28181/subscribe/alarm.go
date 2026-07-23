@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -85,8 +86,13 @@ func intPtr(value int) *int { return &value }
 
 func truncateRaw(body []byte) string {
 	const limit = 2048
-	if len(body) > limit {
-		return string(body[:limit])
+	utf8Body := manscdp.DecodeToUTF8(body)
+	if len(utf8Body) <= limit {
+		return string(utf8Body)
 	}
-	return string(body)
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(utf8Body[cut]) {
+		cut--
+	}
+	return string(utf8Body[:cut])
 }
