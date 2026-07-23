@@ -14,10 +14,9 @@ import (
 )
 
 const (
-	StatusOnline  = "online"
-	defaultVHost  = "__defaultVhost__"
-	defaultApp    = "rtp"
-	defaultSchema = "rtsp"
+	StatusOnline = "online"
+	defaultVHost = "__defaultVhost__"
+	defaultApp   = "rtp"
 )
 
 var (
@@ -36,7 +35,7 @@ type NodeRegistry interface {
 }
 
 type MediaClient interface {
-	GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error)
+	GetMediaList(context.Context, string, string, string) ([]zlm.MediaInfo, error)
 }
 
 type ClientFactory func(*node.Node) MediaClient
@@ -76,16 +75,16 @@ func (s *Service) Get(ctx context.Context, streamID string) (*Snapshot, error) {
 	}
 	failed := 0
 	for _, mediaNode := range active {
-		info, err := s.clientFor(mediaNode).GetMediaInfo(ctx, defaultSchema, defaultVHost, defaultApp, streamID)
+		list, err := s.clientFor(mediaNode).GetMediaList(ctx, defaultVHost, defaultApp, streamID)
 		if err != nil {
 			failed++
 			continue
 		}
-		if !info.Online {
+		if len(list) == 0 {
 			continue
 		}
 		s.locations.Bind(streamID, mediaNode.ID)
-		return s.snapshot(streamID, mediaNode, info), nil
+		return s.snapshot(streamID, mediaNode, list), nil
 	}
 	if failed == len(active) {
 		return nil, fmt.Errorf("%w: all active nodes failed", ErrNodeUnavailable)
@@ -94,7 +93,7 @@ func (s *Service) Get(ctx context.Context, streamID string) (*Snapshot, error) {
 }
 
 func (s *Service) read(ctx context.Context, streamID string, mediaNode *node.Node) (*Snapshot, error) {
-	info, err := s.clientFor(mediaNode).GetMediaInfo(ctx, defaultSchema, defaultVHost, defaultApp, streamID)
+	list, err := s.clientFor(mediaNode).GetMediaList(ctx, defaultVHost, defaultApp, streamID)
 	if err != nil {
 		if app.ZapLog != nil {
 			app.ZapLog.Warn("读取 ZLM 流概况失败",
@@ -106,15 +105,46 @@ func (s *Service) read(ctx context.Context, streamID string, mediaNode *node.Nod
 		}
 		return nil, fmt.Errorf("%w: %v", ErrNodeUnavailable, err)
 	}
-	if !info.Online {
+	if len(list) == 0 {
 		return nil, ErrStreamOffline
 	}
-	return s.snapshot(streamID, mediaNode, info), nil
+	return s.snapshot(streamID, mediaNode, list), nil
 }
 
-func (s *Service) snapshot(streamID string, mediaNode *node.Node, info *zlm.MediaInfo) *Snapshot {
-	tracks := make([]Track, 0, len(info.Tracks))
-	for _, source := range info.Tracks {
+// snapshot 把同一路流在 ZLM 里的多个 schema 副本聚合成一个视图:
+//   - reader 相关字段跨 schema 求和(浏览器走 rtmp/flv,rtsp 客户端走 rtsp,分别计数)
+//   - 码率、字节数、存活时间跨 schema 取最大值(各 schema 独立打包,原始上行速率相同)
+//   - 轨道元数据、录制标志取第一个副本即可(同源不会不一致)
+func (s *Service) snapshot(streamID string, mediaNode *node.Node, list []zlm.MediaInfo) *Snapshot {
+	base := list[0]
+	var (
+		readerSum      int
+		totalReaderMax int
+		bytesSpeedMax  uint64
+		totalBytesMax  uint64
+		aliveMax       uint64
+		recordingMP4   bool
+		recordingHLS   bool
+	)
+	for _, item := range list {
+		readerSum += item.ReaderCount
+		if item.TotalReaderCount > totalReaderMax {
+			totalReaderMax = item.TotalReaderCount
+		}
+		if item.BytesSpeed > bytesSpeedMax {
+			bytesSpeedMax = item.BytesSpeed
+		}
+		if item.TotalBytes > totalBytesMax {
+			totalBytesMax = item.TotalBytes
+		}
+		if item.AliveSecond > aliveMax {
+			aliveMax = item.AliveSecond
+		}
+		recordingMP4 = recordingMP4 || item.IsRecordingMP4
+		recordingHLS = recordingHLS || item.IsRecordingHLS
+	}
+	tracks := make([]Track, 0, len(base.Tracks))
+	for _, source := range base.Tracks {
 		kind := "unknown"
 		switch source.CodecType {
 		case 0:
@@ -135,14 +165,14 @@ func (s *Service) snapshot(streamID string, mediaNode *node.Node, info *zlm.Medi
 		CollectedAt: s.now().UTC(),
 		Status:      StatusOnline,
 		Node:        NodeInfo{ID: mediaNode.ID, Name: mediaNode.Name, Host: mediaNode.Host},
-		Quality:     Quality{BitrateKbps: float64(info.BytesSpeed) * 8 / 1000},
+		Quality:     Quality{BitrateKbps: float64(bytesSpeedMax) * 8 / 1000},
 		Network: Network{
-			BytesSpeed: info.BytesSpeed, TotalBytes: info.TotalBytes,
-			ReaderCount: info.ReaderCount, TotalReaderCount: info.TotalReaderCount,
-			AliveSecond: info.AliveSecond,
+			BytesSpeed: bytesSpeedMax, TotalBytes: totalBytesMax,
+			ReaderCount: readerSum, TotalReaderCount: totalReaderMax,
+			AliveSecond: aliveMax,
 		},
 		Tracks:    tracks,
-		Recording: Recording{MP4: info.IsRecordingMP4, HLS: info.IsRecordingHLS},
+		Recording: Recording{MP4: recordingMP4, HLS: recordingHLS},
 	}
 }
 

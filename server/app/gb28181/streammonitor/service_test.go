@@ -37,26 +37,29 @@ func (f fakeNodes) ListActive() []*node.Node {
 }
 
 type fakeMediaClient struct {
-	info *zlm.MediaInfo
+	list []zlm.MediaInfo
 	err  error
 }
 
-func (f fakeMediaClient) GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error) {
-	return f.info, f.err
+func (f fakeMediaClient) GetMediaList(context.Context, string, string, string) ([]zlm.MediaInfo, error) {
+	return f.list, f.err
 }
 
 func TestServiceReturnsRealMediaSnapshot(t *testing.T) {
 	loss := 0.025
 	locations := &fakeLocations{bindings: map[string]int64{"stream-1": 1}}
 	nodes := fakeNodes{items: map[int64]*node.Node{1: {ID: 1, Name: "edge-1", Host: "10.0.0.1"}}}
+	tracks := []zlm.MediaTrack{
+		{CodecType: 0, CodecIDName: "H264", Width: 1920, Height: 1080, FPS: 25, Frames: 100, KeyFrames: 4, GOPSize: 25, GOPIntervalMS: 1000, Loss: &loss},
+		{CodecType: 1, CodecIDName: "PCMA", SampleRate: 8000, Channels: 1, SampleBit: 16, Frames: 200},
+	}
+	// 同一路流会拆成多 schema:rtsp 端 0 观众,rtmp/flv 端 2 观众,聚合后应为 2;
+	// 码率取各 schema 的最大值(浏览器 flv 拉流带宽最高)。
 	service := NewService(nodes, locations, func(*node.Node) MediaClient {
-		return fakeMediaClient{info: &zlm.MediaInfo{
-			Online: true, AliveSecond: 42, BytesSpeed: 250000, TotalBytes: 9000000,
-			ReaderCount: 3, TotalReaderCount: 7, IsRecordingMP4: true,
-			Tracks: []zlm.MediaTrack{
-				{CodecType: 0, CodecIDName: "H264", Width: 1920, Height: 1080, FPS: 25, Frames: 100, KeyFrames: 4, GOPSize: 25, GOPIntervalMS: 1000, Loss: &loss},
-				{CodecType: 1, CodecIDName: "PCMA", SampleRate: 8000, Channels: 1, SampleBit: 16, Frames: 200},
-			},
+		return fakeMediaClient{list: []zlm.MediaInfo{
+			{Online: true, Schema: "rtsp", AliveSecond: 42, BytesSpeed: 220000, TotalBytes: 9000000, ReaderCount: 0, TotalReaderCount: 5, Tracks: tracks},
+			{Online: true, Schema: "rtmp", AliveSecond: 42, BytesSpeed: 250000, TotalBytes: 9200000, ReaderCount: 2, TotalReaderCount: 7, IsRecordingMP4: true, Tracks: tracks},
+			{Online: true, Schema: "hls", AliveSecond: 42, BytesSpeed: 180000, TotalBytes: 8500000, ReaderCount: 1, TotalReaderCount: 3, Tracks: tracks},
 		}}
 	}, func() time.Time { return time.Unix(1700000000, 0) })
 
@@ -66,6 +69,12 @@ func TestServiceReturnsRealMediaSnapshot(t *testing.T) {
 	}
 	if snapshot.Status != StatusOnline || snapshot.Quality.BitrateKbps != 2000 || snapshot.Network.ReaderCount != 3 || snapshot.Network.AliveSecond != 42 {
 		t.Fatalf("unexpected snapshot: %+v", snapshot)
+	}
+	if snapshot.Network.TotalReaderCount != 7 || snapshot.Network.BytesSpeed != 250000 || snapshot.Network.TotalBytes != 9200000 {
+		t.Fatalf("unexpected network aggregation: %+v", snapshot.Network)
+	}
+	if !snapshot.Recording.MP4 {
+		t.Fatalf("recording flag should merge across schemas: %+v", snapshot.Recording)
 	}
 	if snapshot.CollectedAt.Unix() != 1700000000 || snapshot.Node.ID != 1 || len(snapshot.Tracks) != 2 {
 		t.Fatalf("unexpected metadata: %+v", snapshot)
@@ -79,7 +88,7 @@ func TestServiceRecoversMissingLocationBinding(t *testing.T) {
 	locations := &fakeLocations{bindings: map[string]int64{}}
 	nodes := fakeNodes{items: map[int64]*node.Node{7: {ID: 7, Name: "edge-7"}}}
 	service := NewService(nodes, locations, func(*node.Node) MediaClient {
-		return fakeMediaClient{info: &zlm.MediaInfo{Online: true}}
+		return fakeMediaClient{list: []zlm.MediaInfo{{Online: true, Schema: "rtsp"}}}
 	}, time.Now)
 
 	if _, err := service.Get(context.Background(), "stream-7"); err != nil {
@@ -97,7 +106,7 @@ func TestServiceDistinguishesNodeUnavailableAndStreamOffline(t *testing.T) {
 		if n.ID == 1 {
 			return fakeMediaClient{err: errors.New("dial failed")}
 		}
-		return fakeMediaClient{info: &zlm.MediaInfo{Online: false}}
+		return fakeMediaClient{list: nil}
 	}, time.Now)
 
 	if _, err := service.Get(context.Background(), "broken"); !errors.Is(err, ErrNodeUnavailable) {

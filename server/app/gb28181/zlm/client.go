@@ -348,6 +348,41 @@ func (c *Client) GetMediaInfo(ctx context.Context, schema, vhost, app, stream st
 	return &info, nil
 }
 
+// GetMediaList 查询节点上所有活跃媒体的列表,按 (vhost, app, stream) 过滤(留空则不过滤)。
+// 同一路流在 ZLM 内部会拆成多个 schema(rtsp/rtmp/hls/ts/fmp4 等),每个 schema 独立计数,
+// 想要聚合观众数、码率等指标必须走这个 API,单查 getMediaInfo 会漏统计其他 schema 的下游。
+func (c *Client) GetMediaList(ctx context.Context, vhost, app, stream string) ([]MediaInfo, error) {
+	var r struct {
+		baseResp
+		Data []MediaInfo `json:"data"`
+	}
+	params := map[string]string{}
+	if vhost != "" {
+		params["vhost"] = vhost
+	}
+	if app != "" {
+		params["app"] = app
+	}
+	if stream != "" {
+		params["stream"] = stream
+	}
+	if err := c.call(ctx, "getMediaList", params, &r); err != nil {
+		return nil, err
+	}
+	if r.Code != 0 {
+		return nil, nil
+	}
+	for i := range r.Data {
+		r.Data[i].Online = true
+		for j := range r.Data[i].Tracks {
+			if r.Data[i].Tracks[j].Loss != nil && *r.Data[i].Tracks[j].Loss < 0 {
+				r.Data[i].Tracks[j].Loss = nil
+			}
+		}
+	}
+	return r.Data, nil
+}
+
 // KickSessions 驱逐(可选 filter)会话,返回被踢的会话数
 //
 // filter 留空 → 踢全部;支持 ZLM 的 local_port / peer_ip / id 三种 filter。
