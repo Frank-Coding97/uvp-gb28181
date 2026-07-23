@@ -125,6 +125,7 @@ export interface ChannelVO {
     streamId: string;
     onDemandLive: boolean; // 无人观看时是否自动关闭
     streamTransport: string; // 流传输模式: UDP / TCP-Active / TCP-Passive
+    audioEnabled: boolean; // 点播是否接收音频
     cloudRecordingEnabled: boolean;
     cloudRecordingState: string;
     cloudRecordingError: string;
@@ -377,7 +378,7 @@ export const updateChannelStreamTransport = (id: number, streamTransport: Stream
         { data: { streamTransport } }
     );
 
-export const updateChannel = (id: number, data: { alias?: string; ptzType?: number; onDemandLive?: boolean }) =>
+export const updateChannel = (id: number, data: { alias?: string; ptzType?: number; audioEnabled?: boolean; onDemandLive?: boolean }) =>
     http.request<BaseResult<{ id: number; updates: Record<string, unknown> }>>(
         "patch",
         baseUrlApi(`gb28181/device-mgmt/channel/${id}`),

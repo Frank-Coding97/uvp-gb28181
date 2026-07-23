@@ -24,6 +24,9 @@ func skipIfChannelSchemaStale(t *testing.T) {
 	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "on_demand_live") {
 		t.Skipf("跳过(MySQL gb_channel 缺 on_demand_live 列,请先跑 migration 2026-07-22-channel-on-demand-live.sql)")
 	}
+	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "audio_enabled") {
+		t.Skipf("跳过(MySQL gb_channel 缺 audio_enabled 列,请先跑 migration 2026-07-22-channel-audio.sql)")
+	}
 	if !app.GormDbMysql.Migrator().HasColumn(&GbChannel{}, "cloud_recording_enabled") {
 		t.Skipf("跳过(MySQL gb_channel 缺 cloud_recording_enabled 列,请先跑 migration 2026-07-22-channel-cloud-recording.sql)")
 	}

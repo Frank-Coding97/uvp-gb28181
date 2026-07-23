@@ -51,6 +51,7 @@ func TestPipeline_IngestWithOwnerDept(t *testing.T) {
 	var channel gbmodels.GbChannel
 	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&channel).Error)
 	assert.EqualValues(t, 10, channel.OwnerDeptID)
+	assert.True(t, channel.AudioEnabled, "新建通道默认应开启音频")
 }
 
 func TestPipeline_DelIsScopedByOwnerDept(t *testing.T) {

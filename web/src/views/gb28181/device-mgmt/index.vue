@@ -1217,6 +1217,26 @@ async function handlePtzTypeChange(channelId: number, ptzTypeValue: string) {
     }
 }
 
+async function handleAudioEnabledChange(channelId: number, audioEnabled: boolean) {
+    try {
+        const res = await updateChannel(channelId, { audioEnabled });
+        if (res.code === 0) {
+            Message.success(audioEnabled ? "已开启音频,下次点播生效" : "已关闭音频,下次点播生效");
+            if (assetKind.value === "channel") {
+                const item = channels.value.find(c => c.id === channelId);
+                if (item) item.audioEnabled = audioEnabled;
+            }
+            if (channelDetail.value?.id === channelId) {
+                channelDetail.value = { ...channelDetail.value, audioEnabled };
+            }
+        } else {
+            Message.error(res.message || "更新失败");
+        }
+    } catch (error: any) {
+        Message.error(error?.message || "更新失败");
+    }
+}
+
 async function handleOnDemandLiveChange(channelId: number, onDemandLive: boolean) {
     try {
         const res = await updateChannel(channelId, { onDemandLive });
@@ -1588,6 +1608,17 @@ onUnmounted(() => {
                                         </a-select>
                                     </template>
                                 </a-table-column>
+                                <a-table-column title="音频" :width="90" align="center">
+                                    <template #cell="{ record }">
+                                        <a-switch
+                                            :model-value="record.audioEnabled"
+                                            size="small"
+                                            checked-text="开"
+                                            unchecked-text="关"
+                                            @change="(value: boolean) => handleAudioEnabledChange(record.id, value)"
+                                        />
+                                    </template>
+                                </a-table-column>
                                 <a-table-column title="按需直播" :width="110" align="center">
                                     <template #cell="{ record }">
                                         <a-switch
@@ -1939,6 +1970,18 @@ onUnmounted(() => {
                                             <a-option value="TCP-Active">TCP-Active</a-option>
                                             <a-option value="TCP-Passive">TCP-Passive</a-option>
                                         </a-select>
+                                    </div>
+                                    <div>
+                                        <span>音频</span>
+                                        <a-switch
+                                            :model-value="item.audioEnabled"
+                                            size="small"
+                                            checked-text="开"
+                                            unchecked-text="关"
+                                            @click.stop
+                                            @dblclick.stop
+                                            @change="(value: boolean) => handleAudioEnabledChange(item.id, value)"
+                                        />
                                     </div>
                                     <div>
                                         <span>按需直播</span>

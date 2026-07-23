@@ -364,6 +364,21 @@ func TestDeviceMgmt_UpdateChannelAlias(t *testing.T) {
 	assert.Equal(t, "通道 在线", channel.Name)
 }
 
+func TestDeviceMgmt_UpdateChannelAudio(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	_, chOnID, _ := seedDevicesAndChannels(t, db)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest("PATCH", "/api/gb28181/device-mgmt/channel/"+uintStr(chOnID), bytes.NewBufferString(`{"audioEnabled":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+
+	var channel gbmodels.GbChannel
+	require.NoError(t, db.First(&channel, chOnID).Error)
+	assert.True(t, channel.AudioEnabled)
+}
+
 func TestDeviceMgmt_ChannelMounts(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	_, chOnID, _ := seedDevicesAndChannels(t, db)

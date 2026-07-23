@@ -414,6 +414,7 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 	var body struct {
 		Alias        *string `json:"alias"`
 		PTZType      *int8   `json:"ptzType"` // 云台类型 0未知 1球机 2半球 3固定枪机 4遥控枪机
+		AudioEnabled *bool   `json:"audioEnabled"`
 		OnDemandLive *bool   `json:"onDemandLive"` // 无人观看时是否自动关闭
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -432,6 +433,9 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 	}
 	if body.PTZType != nil {
 		updates["ptz_type"] = *body.PTZType
+	}
+	if body.AudioEnabled != nil {
+		updates["audio_enabled"] = *body.AudioEnabled
 	}
 	if body.OnDemandLive != nil {
 		updates["on_demand_live"] = *body.OnDemandLive

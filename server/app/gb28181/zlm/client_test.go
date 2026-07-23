@@ -148,6 +148,27 @@ func TestKickSessions_MockedZLM(t *testing.T) {
 	}
 }
 
+func TestOpenRtpServerOnlyTrack_MockedZLM(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/openRtpServer" {
+			t.Errorf("调错路径: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("only_track"); got != "2" {
+			t.Errorf("only_track 没透传: %s", got)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"port":40000}`))
+	})
+	defer srv.Close()
+
+	result, err := c.OpenRtpServer(context.Background(), "stream-1", 0, 0, 2)
+	if err != nil {
+		t.Fatalf("OpenRtpServer 报错: %v", err)
+	}
+	if result.Port != 40000 {
+		t.Fatalf("期望端口40000,实际%d", result.Port)
+	}
+}
+
 // TestKickSessions_WithFilter T3.5-R: filter 应该作为 query 参数透传
 func TestKickSessions_WithFilter(t *testing.T) {
 	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {

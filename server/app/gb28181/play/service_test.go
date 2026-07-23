@@ -29,18 +29,20 @@ func TestMain(m *testing.M) {
 // ===== mocks =====
 
 type mockZLM struct {
-	openCalls   atomic.Int32
-	closeCalls  atomic.Int32
-	openErr     error
-	closeErr    error
-	port        int
-	online      atomic.Bool
-	onlineCalls atomic.Int32
-	onlineErr   error
+	openCalls     atomic.Int32
+	lastOnlyTrack atomic.Int32
+	closeCalls    atomic.Int32
+	openErr       error
+	closeErr      error
+	port          int
+	online        atomic.Bool
+	onlineCalls   atomic.Int32
+	onlineErr     error
 }
 
-func (m *mockZLM) OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int) (*zlm.OpenRtpServerResult, error) {
+func (m *mockZLM) OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int, onlyTrack int) (*zlm.OpenRtpServerResult, error) {
 	m.openCalls.Add(1)
+	m.lastOnlyTrack.Store(int32(onlyTrack))
 	if m.openErr != nil {
 		return nil, m.openErr
 	}
@@ -191,6 +193,23 @@ func TestStartHappyPath(t *testing.T) {
 	}
 }
 
+func TestStartDisablesAudioPerChannel(t *testing.T) {
+	dev := &gbmodels.GbDevice{DeviceID: "34020000001320000002", Status: gbmodels.DeviceStatusOnline, IP: "127.0.0.1", Port: 5060}
+	ch := &gbmodels.GbChannel{DeviceID: dev.DeviceID, ChannelID: "12345678911116666661", AudioEnabled: false}
+	z := &mockZLM{}
+	inv := &mockInviter{}
+	s, notifier, _ := newSvc(t, z, inv, dev, ch)
+	inv.onInvite = func(sess *uac.Session) { notifier.Publish(sess.StreamID) }
+	z.online.Store(true)
+
+	if _, err := s.Start(context.Background(), dev.DeviceID, ch.ChannelID); err != nil {
+		t.Fatalf("Start 应成功: %v", err)
+	}
+	if got := z.lastOnlyTrack.Load(); got != 2 {
+		t.Fatalf("关闭音频时 only_track 应为2,实际%d", got)
+	}
+}
+
 // TestStartDeviceOffline T6.3-测2: 设备离线 → 直接拒绝,不开 RTP
 func TestStartDeviceOffline(t *testing.T) {
 	z := &mockZLM{}
@@ -329,10 +348,9 @@ func TestStartUpdateStreamFailRollsBackAll(t *testing.T) {
 // ===== 通道快照 T4 tests =====
 
 type fakeSnapshotSvc struct {
-	called    atomic.Int32
-	lastArgs  atomic.Value // snapshotArgs
+	called   atomic.Int32
+	lastArgs atomic.Value // snapshotArgs
 }
-
 type snapshotArgs struct {
 	nodeID, streamID, deviceID, channelID string
 }
@@ -521,4 +539,3 @@ func TestStartReuseMultipleClients(t *testing.T) {
 		t.Errorf("应只开一次 RTP 端口,实际调用 %d 次", z.openCalls.Load())
 	}
 }
-

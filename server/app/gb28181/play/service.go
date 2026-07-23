@@ -21,7 +21,7 @@ import (
 
 // ZLM ZLM 客户端能力(便于测试 mock)
 type ZLM interface {
-	OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int) (*zlm.OpenRtpServerResult, error)
+	OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int, onlyTrack int) (*zlm.OpenRtpServerResult, error)
 	CloseRtpServer(ctx context.Context, streamID string) error
 	IsMediaOnline(ctx context.Context, app, stream string) (bool, error)
 }
@@ -215,9 +215,10 @@ func (s *Service) SetReadyTimings(wait, poll time.Duration) { s.readyWait, s.pol
 // tryReuseStream 尝试复用通道现有流。
 //
 // 返回值:
-//   (nil, nil)  → 无法复用(流确实不在),调用方应清理残留后重新 INVITE
-//   (res, nil)  → 复用成功,直接返回给客户端
-//   (nil, err)  → 探测异常(不做清理,避免误杀正在播放的流)
+//
+//	(nil, nil)  → 无法复用(流确实不在),调用方应清理残留后重新 INVITE
+//	(res, nil)  → 复用成功,直接返回给客户端
+//	(nil, err)  → 探测异常(不做清理,避免误杀正在播放的流)
 //
 // 探测策略:
 //  1. LocationMap 有 binding → 用绑定节点探测
@@ -390,7 +391,11 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	}
 
 	// 5. openRtpServer:port=0 让 ZLM 自选临时端口
-	rtpRes, err := client.OpenRtpServer(ctx, streamID, 0, 0)
+	onlyTrack := 2 // ZLM: 2=仅视频,关闭音频
+	if ch.AudioEnabled {
+		onlyTrack = 0 // ZLM: 0=音视频
+	}
+	rtpRes, err := client.OpenRtpServer(ctx, streamID, 0, 0, onlyTrack)
 	if err != nil {
 		if s.useMultiNode() {
 			s.locationMap.Unbind(streamID)

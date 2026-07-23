@@ -108,15 +108,16 @@ type OpenRtpServerResult struct {
 
 // OpenRtpServer 申请一个 RTP 收流端口
 // streamID = ZLM 内 stream 标识;ssrc 用于单端口模式按 SSRC 分流(传 "" 则不限);port=0 让 ZLM 自选
-func (c *Client) OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int) (*OpenRtpServerResult, error) {
+func (c *Client) OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int, onlyTrack int) (*OpenRtpServerResult, error) {
 	var r struct {
 		baseResp
 		Port int `json:"port"`
 	}
 	params := map[string]string{
-		"stream_id": streamID,
-		"port":      strconv.Itoa(port),
-		"tcp_mode":  strconv.Itoa(tcpMode), // 0=UDP 1=TCP被动
+		"stream_id":  streamID,
+		"port":       strconv.Itoa(port),
+		"tcp_mode":   strconv.Itoa(tcpMode),   // 0=UDP 1=TCP被动
+		"only_track": strconv.Itoa(onlyTrack), // 0=音视频 2=仅视频
 	}
 	if err := c.call(ctx, "openRtpServer", params, &r); err != nil {
 		return nil, err
