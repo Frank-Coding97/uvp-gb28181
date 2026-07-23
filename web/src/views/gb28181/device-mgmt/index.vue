@@ -896,9 +896,14 @@ async function handleStopChannel(record: ChannelVO) {
         onOk: async () => {
             stoppingChannels.value.add(record.id);
             try {
-                await stopPlay(record.streamId);
-                Message.success("已停止当前直播");
-                refreshMainData();
+                const response = await stopPlay(record.streamId);
+                // released=true 通道级真停,列表需刷新清"直播中";released=false 说明流被云端录制保留,状态不变
+                if (response.data?.released) {
+                    Message.success(response.message || "已停止当前直播");
+                    refreshMainData();
+                } else {
+                    Message.info(response.message || "已停止观看,通道云端录制仍在继续");
+                }
             } catch (e: any) {
                 // stopPlay 失败不刷新列表 —— 避免把"实际还在播"错误清成"空闲"
                 Message.error(e?.message || "停止播放失败,请稍后重试");
