@@ -10,7 +10,7 @@
  * 视觉语言:深色为主,青色作强调,毛玻璃卡片,状态用色带 + 脉冲呼吸
  * 布局:右侧保留高频操作,播放器下方随 Tab 联动展示详情
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import PlayWindow from "./PlayWindow.vue";
 import {
@@ -71,6 +71,7 @@ import {
     Navigation,
     Pause,
     Play,
+    Plus,
     RadioTower,
     RefreshCcw,
     Route,
@@ -78,7 +79,6 @@ import {
     Settings,
     ShieldCheck,
     Signal,
-    SlidersHorizontal,
     Square,
     Sun,
     Target,
@@ -181,18 +181,23 @@ const phaseHint = computed(() => {
 
 const sessionStatusText = computed(() => {
     if (phase.value === "requesting") return "建立中";
-    if (phase.value === "playing") return "播放中";
     if (phase.value === "paused") return "已暂停";
     if (phase.value === "stopping") return "停播中";
     if (phase.value === "error") return "异常";
+    if (phase.value === "playing") {
+        if (monitorState.value === "offline") return "媒体流已离线";
+        if (monitorState.value === "stale") return "监控数据过期";
+        return "播放中";
+    }
     return "待播放";
 });
 
 const sessionStatusClass = computed(() => ({
-    active: phase.value === "playing",
+    active: phase.value === "playing" && monitorState.value !== "offline" && monitorState.value !== "stale",
     loading: phase.value === "requesting" || phase.value === "stopping",
-    error: phase.value === "error",
+    error: phase.value === "error" || (phase.value === "playing" && monitorState.value === "offline"),
     paused: phase.value === "paused",
+    warn: phase.value === "playing" && monitorState.value === "stale",
 }));
 
 const monitorAlive = ref<{ seconds: number; receivedAt: number } | null>(null);
@@ -242,8 +247,13 @@ const preciseZoom = ref(1);    // 1-32x
 type Preset = { id: number; name: string; setAt?: string };
 const presets = ref<Preset[]>([]);
 const activePresetId = ref<number | null>(null);
-const newPresetName = ref("");
+// 弹窗内「保存当前位置」的草稿态:点主按钮后出现顶部草稿行,让用户先确认命名再落库
+const presetDraft = ref<{ id: number; name: string; submitting: boolean } | null>(null);
+const presetDraftInputRef = ref<HTMLInputElement | null>(null);
 const visiblePresets = computed(() => presets.value.slice(0, 4));
+function nextPresetId(): number {
+    return presets.value.length ? Math.max(...presets.value.map((p) => p.id)) + 1 : 1;
+}
 
 // 巡航轨迹(2022 CruiseTrackListQuery)
 type CruiseTrack = { id: number; name: string; enabled: boolean; presets: number[]; dwellSec: number };
@@ -522,6 +532,7 @@ function resetSessionState() {
     errorMessage.value = "";
     assetManagerVisible.value = false;
     assetSearch.value = "";
+    presetDraft.value = null;
     probeToken++;
     clearProbeTimers();
     probeState.value = "idle";
@@ -670,18 +681,34 @@ async function callPreset(id: number) {
         activePresetId.value = id;
     } catch (error: any) { Message.error(error?.message || "调用预置位失败"); }
 }
-async function setPreset() {
-    if (!newPresetName.value.trim()) {
-        Message.warning("请输入预置位名称");
-        return;
-    }
+function startPresetDraft() {
+    if (!props.channel || !isPtzCapable.value) return;
+    const nextId = nextPresetId();
+    presetDraft.value = { id: nextId, name: `预置位 ${nextId}`, submitting: false };
+    nextTick(() => {
+        presetDraftInputRef.value?.focus();
+        presetDraftInputRef.value?.select();
+    });
+}
+function cancelPresetDraft() {
+    presetDraft.value = null;
+}
+async function commitPresetDraft() {
+    if (!presetDraft.value || presetDraft.value.submitting) return;
     if (!props.channel) return;
-    const nextId = presets.value.length ? Math.max(...presets.value.map((p) => p.id)) + 1 : 1;
+    const name = presetDraft.value.name.trim() || `预置位 ${presetDraft.value.id}`;
+    const presetId = presetDraft.value.id;
+    presetDraft.value.submitting = true;
     try {
-        const response = await createPtzPreset(props.channel.id, { presetId: nextId, name: newPresetName.value.trim() });
+        const response = await createPtzPreset(props.channel.id, { presetId, name });
         if (response.code !== 0) throw new Error(response.message || "设置预置位失败");
-        Message.success(`预置位 #${nextId} 请求已受理`); newPresetName.value = ""; await loadPresets();
-    } catch (error: any) { Message.error(error?.message || "设置预置位失败"); }
+        Message.success(`预置位 #${presetId} 请求已受理`);
+        presetDraft.value = null;
+        await loadPresets();
+    } catch (error: any) {
+        Message.error(error?.message || "设置预置位失败");
+        if (presetDraft.value) presetDraft.value.submitting = false;
+    }
 }
 async function deletePreset(id: number) {
     if (!props.channel) return;
@@ -717,20 +744,25 @@ async function stopCruise() {
     } catch (error: any) { Message.error(error?.message || "停止巡航失败"); }
 }
 
-function openAssetManager(tab: AssetManagerTab) {
+function openAssetManager(tab: AssetManagerTab, options: { startDraft?: boolean } = {}) {
     assetManagerTab.value = tab;
     assetSearch.value = "";
     assetManagerVisible.value = true;
+    if (options.startDraft && tab === "preset") {
+        nextTick(() => startPresetDraft());
+    }
 }
 
 function switchAssetManagerTab(tab: AssetManagerTab) {
     assetManagerTab.value = tab;
     assetSearch.value = "";
+    if (tab !== "preset") cancelPresetDraft();
 }
 
 function closeAssetManager() {
     assetManagerVisible.value = false;
     assetSearch.value = "";
+    cancelPresetDraft();
 }
 
 const auxiliaryIds: Partial<Record<keyof typeof auxSwitches.value, number>> = {};
@@ -1058,6 +1090,7 @@ onBeforeUnmount(() => {
                 </div>
                 <span class="session-badge" :class="sessionStatusClass">
                     <span class="dot"></span>{{ sessionStatusText }}
+                    <em v-if="phase === 'playing'" class="session-elapsed mono">{{ elapsedText }}</em>
                 </span>
             </div>
         </template>
@@ -1169,32 +1202,36 @@ onBeforeUnmount(() => {
                 <!-- 双区联动详情:所有 Tab 共用下方详情区，保持结构与高度稳定 -->
                 <div v-if="phase === 'playing'" class="stream-info-bar linked-info-bar">
                     <div v-show="activeTab === 'stream'" class="linked-detail" data-testid="linked-detail-stream">
-                        <div class="linked-detail-title">
-                            <div><Signal :size="15" /><strong>实时流状态</strong></div>
-                            <span>{{ monitorState === "fresh" ? "ZLM 监控数据实时更新" : monitorState === "stale" ? "最近一次数据已过期" : monitorState === "offline" ? "媒体流已离线" : "等待 ZLM 监控数据" }}</span>
-                        </div>
+                        <p class="linked-detail-hint">2 秒刷新 · 最近采集 {{ monitorCollectedAtText }}</p>
                         <div class="linked-stream-metrics">
-                            <div class="stream-live-metric"><span>观众人数</span><strong>{{ readerCount }}</strong><small>当前连接 · 累计 {{ totalReaderCount }}</small></div>
-                            <div class="stream-live-metric"><span>网络码率</span><strong>{{ liveMetrics.bitrate ? `${liveMetrics.bitrate} kbps` : "—" }}</strong><small>ZLM 输出速率</small></div>
-                            <div class="stream-live-metric"><span>持续时间</span><strong class="mono">{{ elapsedText }}</strong><small>ZLM 存活时长</small></div>
-                            <div class="stream-live-metric"><span>视频丢包</span><strong :class="{ warn: (liveMetrics.videoLoss ?? 0) > 0.02, err: (liveMetrics.videoLoss ?? 0) > 0.05 }">{{ formatLoss(liveMetrics.videoLoss) }}</strong><small>视频轨道统计</small></div>
-                            <div class="stream-live-metric"><span>音频丢包</span><strong :class="{ warn: (liveMetrics.audioLoss ?? 0) > 0.02, err: (liveMetrics.audioLoss ?? 0) > 0.05 }">{{ formatLoss(liveMetrics.audioLoss) }}</strong><small>音频轨道统计</small></div>
-                            <div class="stream-live-metric"><span>数据状态</span><strong :class="`state-${monitorState}`">{{ monitorState === "fresh" ? "实时" : monitorState === "stale" ? "已过期" : monitorState === "offline" ? "已离线" : "等待数据" }}</strong><small>刷新频率 2 秒</small></div>
+                            <div class="stream-live-metric"><span>输出码率</span><strong>{{ liveMetrics.bitrate ? `${liveMetrics.bitrate} kbps` : "—" }}</strong><small>ZLM 到浏览器</small></div>
+                            <div class="stream-live-metric"><span>视频接收丢包</span><strong :class="{ warn: (liveMetrics.videoLoss ?? 0) > 0.005, err: (liveMetrics.videoLoss ?? 0) > 0.02 }">{{ formatLoss(liveMetrics.videoLoss) }}</strong><small>设备到 ZLM · 局域网常为 0</small></div>
+                            <div class="stream-live-metric"><span>音频接收丢包</span><strong :class="{ warn: (liveMetrics.audioLoss ?? 0) > 0.005, err: (liveMetrics.audioLoss ?? 0) > 0.02 }">{{ formatLoss(liveMetrics.audioLoss) }}</strong><small>设备到 ZLM · 局域网常为 0</small></div>
+                            <div class="stream-live-metric"><span>当前观看</span><strong>{{ readerCount }}</strong><small>包含本会话 · 累计 {{ totalReaderCount }}</small></div>
                         </div>
                     </div>
 
                     <div v-show="activeTab === 'ptz'" class="linked-detail" data-testid="linked-detail-ptz">
-                        <div class="linked-detail-title">
-                            <div><Compass :size="15" /><strong>云台资源与自动化</strong></div>
-                            <span>高频控制在右侧，配置与列表在此管理</span>
-                        </div>
                         <div class="linked-ptz-layout">
                             <section class="linked-section">
                                 <div class="section-hd first">
                                     <span class="section-title"><Hash :size="13" />预置位</span>
-                                    <span class="section-meta">{{ visiblePresets.length }} / {{ presets.length }}</span>
+                                    <span v-if="presets.length" class="section-meta">已保存 {{ presets.length }} 个</span>
                                 </div>
-                                <div class="preset-grid">
+                                <div v-if="presets.length === 0" class="preset-empty" data-testid="preset-empty">
+                                    <div class="preset-empty-icon"><Target :size="18" /></div>
+                                    <p class="preset-empty-title">保存常用视角</p>
+                                    <p class="preset-empty-hint">把云台转到想看的画面,一键收藏后可秒切</p>
+                                    <button
+                                        class="preset-empty-action"
+                                        data-testid="manage-presets"
+                                        :disabled="!isPtzCapable"
+                                        @click="openAssetManager('preset', { startDraft: true })"
+                                    >
+                                        <Plus :size="12" />保存当前位置
+                                    </button>
+                                </div>
+                                <div v-else class="preset-grid">
                                     <button
                                         v-for="p in visiblePresets"
                                         :key="p.id"
@@ -1208,7 +1245,7 @@ onBeforeUnmount(() => {
                                         <span class="preset-go"><ChevronRight :size="11" /></span>
                                     </button>
                                     <button class="resource-summary-action" data-testid="manage-presets" @click="openAssetManager('preset')">
-                                        <span>查看全部 {{ presets.length }} 个</span><ChevronRight :size="12" />
+                                        <span>{{ presets.length > visiblePresets.length ? `管理全部 ${presets.length} 个` : '管理预置位' }}</span><ChevronRight :size="12" />
                                     </button>
                                 </div>
                             </section>
@@ -1285,10 +1322,7 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-show="activeTab === 'probe'" class="linked-detail" data-testid="linked-detail-probe">
-                        <div class="linked-detail-title">
-                            <div><Activity :size="15" /><strong>逐帧检测结果</strong></div>
-                            <span>{{ probeState === "complete" ? `最近检测完成于 ${probeFinishedAt}` : "右侧启动检测后在此查看逐帧结果" }}</span>
-                        </div>
+                        <p class="linked-detail-hint">{{ probeState === "complete" ? `最近检测完成于 ${probeFinishedAt}` : "右侧启动检测后在此查看逐帧结果" }}</p>
                         <div class="linked-probe-layout">
                             <section class="linked-section">
                                 <div class="section-hd first">
@@ -1335,10 +1369,7 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-show="activeTab === 'advanced'" class="linked-detail" data-testid="linked-detail-advanced">
-                        <div class="linked-detail-title">
-                            <div><SlidersHorizontal :size="15" /><strong>图像参数</strong></div>
-                            <span>本地占位 · ConfigDownload 接口待接入</span>
-                        </div>
+                        <p class="linked-detail-hint">本地占位 · ConfigDownload 接口待接入</p>
                         <div class="linked-image-layout">
                             <div class="image-adjust linked-image-adjust">
                                 <label><span>亮度</span><input v-model.number="imageParams.brightness" type="range" min="0" max="255" /><em>{{ imageParams.brightness }}</em></label>
@@ -1376,43 +1407,16 @@ onBeforeUnmount(() => {
                     <!-- ═══════════ 流信息 ═══════════ -->
                     <div v-show="activeTab === 'stream'" class="panel stream-panel" data-testid="linked-side-stream">
                         <div class="stream-panel-header">
-                            <div>
-                                <span class="section-title"><Signal :size="13" />媒体参数</span>
-                                <small :class="`state-${monitorState}`">{{ monitorState === "fresh" ? "实时" : monitorState === "stale" ? "数据已过期" : monitorState === "offline" ? "流已离线" : "等待数据" }}</small>
-                            </div>
+                            <span class="section-title"><Signal :size="13" />媒体参数</span>
                             <button class="stream-refresh" title="刷新流状态" :disabled="phase !== 'playing'" @click="refreshMonitor"><RefreshCcw :size="13" /></button>
                         </div>
                         <div class="stream-metrics-grid">
                             <div><span>媒体节点</span><strong>{{ streamInfo.nodeName }}</strong><small>{{ streamInfo.nodeHost }}</small></div>
-                            <div><span>流 ID</span><strong class="mono">{{ streamInfo.streamId || "—" }}</strong><small>SSRC {{ streamInfo.ssrc || "—" }}</small></div>
+                            <div><span>流 ID</span><strong class="mono">{{ streamInfo.streamId || "—" }}</strong><small>SSRC {{ streamInfo.ssrc || "—" }} · APP {{ playResult?.app || "—" }}</small></div>
                             <div><span>视频</span><strong>{{ streamInfo.videoCodec }}</strong><small>{{ streamInfo.resolution }} · {{ streamInfo.videoFps || "—" }} fps · {{ monitorVideoTrack?.frames ?? "—" }} 帧</small></div>
                             <div><span>音频</span><strong>{{ streamInfo.audioCodec }}</strong><small>{{ streamInfo.audioSampleRate ? `${streamInfo.audioSampleRate} Hz` : "—" }} · {{ monitorAudioTrack?.channels || "—" }} 声道 · {{ monitorAudioTrack?.frames ?? "—" }} 帧</small></div>
-                            <div><span>接入应用</span><strong class="mono">{{ playResult?.app || "—" }}</strong><small>媒体服务应用</small></div>
-                            <div><span>播放协议</span><strong>{{ protocol.toUpperCase() }}</strong><small>浏览器当前选择</small></div>
-                        </div>
-                        <div class="stream-side-health">
-                            <div class="stream-side-health-header">
-                                <span class="section-title"><Activity :size="13" />链路状态</span>
-                                <span class="stream-health-badge" :class="`state-${monitorState}`">
-                                    <span class="dot"></span>{{ monitorState === "fresh" ? "媒体链路正常" : monitorState === "stale" ? "监控数据过期" : monitorState === "offline" ? "媒体流已离线" : "等待监控" }}
-                                </span>
-                            </div>
-                            <div class="stream-health-state">
-                                <div class="stream-health-pulse" :class="`state-${monitorState}`"><Signal :size="18" /></div>
-                                <div>
-                                    <strong>{{ monitorState === "fresh" ? "ZLM 正在持续上报媒体状态" : monitorState === "stale" ? "暂未收到最新媒体状态" : monitorState === "offline" ? "ZLM 未发现当前媒体流" : "等待媒体监控建立" }}</strong>
-                                    <small>{{ phase === "playing" ? "播放会话已建立，可继续查看下方实时指标" : phaseHint }}</small>
-                                </div>
-                            </div>
-                            <div class="stream-health-grid">
-                                <div><span>监控节点</span><strong>{{ streamInfo.nodeName }}</strong></div>
-                                <div><span>最近采集</span><strong class="mono">{{ monitorCollectedAtText }}</strong></div>
-                                <div><span>会话存活</span><strong class="mono">{{ elapsedText }}</strong></div>
-                                <div><span>读者连接</span><strong>{{ readerCount }} / {{ totalReaderCount }}</strong></div>
-                                <div><span>数据速率</span><strong>{{ monitorBytesSpeedText }}</strong></div>
-                                <div><span>累计流量</span><strong>{{ monitorTotalBytesText }}</strong></div>
-                                <div><span>录制状态</span><strong>{{ recordingText }}</strong></div>
-                            </div>
+                            <div><span>数据速率</span><strong>{{ monitorBytesSpeedText }}</strong><small>累计 {{ monitorTotalBytesText }}</small></div>
+                            <div><span>录制状态</span><strong>{{ recordingText }}</strong><small>播放协议 {{ protocol.toUpperCase() }}</small></div>
                         </div>
                     </div>
 
@@ -1683,11 +1687,46 @@ onBeforeUnmount(() => {
                             <input v-model="assetSearch" type="search" :placeholder="assetManagerTab === 'preset' ? '搜索预置位名称或编号' : '搜索巡航名称或编号'" />
                         </label>
 
-                        <div v-if="assetManagerTab === 'preset'" class="asset-manager-create">
-                            <input v-model="newPresetName" type="text" placeholder="新预置位名称" maxlength="16" />
-                            <button class="btn-primary sm" :disabled="!isPtzCapable" @click="setPreset">
-                                <Target :size="12" />保存当前位置
+                        <div v-if="assetManagerTab === 'preset'" class="preset-primary-cta">
+                            <button
+                                v-if="!presetDraft"
+                                class="preset-primary-btn"
+                                data-testid="preset-save-current"
+                                :disabled="!isPtzCapable"
+                                @click="startPresetDraft"
+                            >
+                                <div class="preset-primary-icon"><Target :size="16" /></div>
+                                <div class="preset-primary-text">
+                                    <strong>保存当前位置</strong>
+                                    <small>把摄像头当前画面收藏为预置位</small>
+                                </div>
+                                <Plus :size="14" />
                             </button>
+                            <div v-else class="preset-draft" data-testid="preset-draft">
+                                <span class="preset-draft-index">#{{ presetDraft.id }}</span>
+                                <input
+                                    ref="presetDraftInputRef"
+                                    v-model="presetDraft.name"
+                                    class="preset-draft-input"
+                                    type="text"
+                                    maxlength="16"
+                                    :disabled="presetDraft.submitting"
+                                    :placeholder="`预置位 ${presetDraft.id}`"
+                                    data-testid="preset-draft-input"
+                                    @keydown.enter.prevent="commitPresetDraft"
+                                    @keydown.esc.prevent="cancelPresetDraft"
+                                />
+                                <div class="preset-draft-actions">
+                                    <button class="preset-draft-cancel" :disabled="presetDraft.submitting" data-testid="preset-draft-cancel" @click="cancelPresetDraft">
+                                        取消
+                                    </button>
+                                    <button class="preset-draft-confirm" :disabled="presetDraft.submitting" data-testid="preset-draft-confirm" @click="commitPresetDraft">
+                                        <Loader2 v-if="presetDraft.submitting" :size="12" class="spin" />
+                                        <CheckCircle2 v-else :size="12" />
+                                        确认保存
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
                         <div class="asset-manager-list">
@@ -1711,7 +1750,13 @@ onBeforeUnmount(() => {
                                         <button class="asset-manager-delete" title="删除预置位" @click="deletePreset(p.id)"><Trash2 :size="12" /></button>
                                     </div>
                                 </div>
-                                <div v-if="filteredPresets.length === 0" class="asset-manager-empty">没有匹配的预置位</div>
+                                <div v-if="filteredPresets.length === 0 && !presetDraft" class="asset-manager-empty preset-empty-large" data-testid="asset-manager-preset-empty">
+                                    <div class="preset-empty-illustration"><Target :size="26" /></div>
+                                    <p class="preset-empty-line-primary">{{ assetSearch ? "没有匹配的预置位" : "还没有预置位" }}</p>
+                                    <p class="preset-empty-line-secondary">
+                                        {{ assetSearch ? "换个关键词试试,或清除搜索查看全部" : "把云台转到想看的画面,点上方「保存当前位置」" }}
+                                    </p>
+                                </div>
                             </template>
 
                             <template v-else>
@@ -1782,6 +1827,14 @@ onBeforeUnmount(() => {
 .session-badge.error { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border); }
 .session-badge.error .dot { background: var(--uvp-danger); }
 .session-badge.paused { color: #a78bfa; background: rgb(167 139 250 / 12%); border-color: rgb(167 139 250 / 28%); }
+.session-badge.warn { color: var(--uvp-warning); background: var(--uvp-warning-soft); border-color: var(--uvp-warning-border); }
+.session-badge.warn .dot { background: var(--uvp-warning); }
+.session-elapsed {
+    padding-left: 8px; margin-left: 2px;
+    color: color-mix(in srgb, currentcolor 70%, transparent);
+    border-left: 1px solid color-mix(in srgb, currentcolor 24%, transparent);
+    font-size: 10.5px; font-style: normal; font-weight: 600;
+}
 
 .console-body {
     position: relative; isolation: isolate;
@@ -1845,14 +1898,69 @@ onBeforeUnmount(() => {
 .asset-manager-create input {
     min-width: 0; color: var(--uvp-text-primary); background: transparent; border: 0; outline: none; font-size: 11px;
 }
-.asset-manager-search input::placeholder,
-.asset-manager-create input::placeholder { color: var(--uvp-text-tertiary); }
-.asset-manager-create {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px;
-    margin: 8px 16px 0; padding: 7px 8px 7px 10px;
-    background: color-mix(in srgb, var(--uvp-brand) 5%, var(--uvp-panel-bg));
-    border: 1px dashed color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); border-radius: 7px;
+.asset-manager-search input::placeholder { color: var(--uvp-text-tertiary); }
+
+/* 预置位主 CTA:未处于草稿态时是「大按钮」,处于草稿态时切换为「命名+确认」内联行 */
+.preset-primary-cta { margin: 10px 16px 0; }
+.preset-primary-btn {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center;
+    width: 100%; padding: 12px 14px;
+    color: #fff; background: linear-gradient(135deg, var(--uvp-brand) 0%, color-mix(in srgb, var(--uvp-brand) 82%, #4c6cff) 100%);
+    border: 0; border-radius: 10px; box-shadow: 0 4px 16px color-mix(in srgb, var(--uvp-brand) 22%, transparent);
+    cursor: pointer; text-align: left; transition: transform 0.12s ease, box-shadow 0.12s ease;
 }
+.preset-primary-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px color-mix(in srgb, var(--uvp-brand) 30%, transparent); }
+.preset-primary-btn:active:not(:disabled) { transform: translateY(0); }
+.preset-primary-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.preset-primary-icon {
+    display: grid; place-items: center; width: 34px; height: 34px;
+    background: rgb(255 255 255 / 18%); border-radius: 8px;
+}
+.preset-primary-text { display: grid; gap: 2px; min-width: 0; }
+.preset-primary-text strong { font-size: 13px; font-weight: 600; }
+.preset-primary-text small { color: rgb(255 255 255 / 82%); font-size: 10.5px; }
+
+.preset-draft {
+    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center;
+    padding: 10px 12px;
+    background: color-mix(in srgb, var(--uvp-brand) 6%, var(--uvp-panel-bg));
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 34%, var(--uvp-panel-border)); border-radius: 9px;
+}
+.preset-draft-index {
+    display: inline-grid; place-items: center; min-width: 34px; padding: 4px 8px;
+    color: var(--uvp-brand); background: var(--uvp-brand-soft);
+    border-radius: 5px; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; font-weight: 600;
+}
+.preset-draft-input {
+    width: 100%; padding: 6px 8px;
+    color: var(--uvp-text-primary); background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border); border-radius: 6px;
+    outline: none; font-size: 12px; transition: border-color 0.15s ease;
+}
+.preset-draft-input:focus { border-color: var(--uvp-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand) 16%, transparent); }
+.preset-draft-actions {
+    grid-column: 1 / -1;
+    display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px;
+}
+.preset-draft-cancel,
+.preset-draft-confirm {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 5px 12px; border-radius: 6px; cursor: pointer;
+    font-size: 11px; transition: background 0.12s ease;
+}
+.preset-draft-cancel {
+    color: var(--uvp-text-secondary); background: transparent;
+    border: 1px solid var(--uvp-panel-border);
+}
+.preset-draft-cancel:hover:not(:disabled) { background: var(--uvp-list-toolbar-bg); }
+.preset-draft-confirm {
+    color: #fff; background: var(--uvp-brand); border: 1px solid var(--uvp-brand);
+}
+.preset-draft-confirm:hover:not(:disabled) { background: color-mix(in srgb, var(--uvp-brand) 90%, #000); }
+.preset-draft-cancel:disabled,
+.preset-draft-confirm:disabled { opacity: 0.55; cursor: not-allowed; }
+.spin { animation: preset-draft-spin 0.8s linear infinite; }
+@keyframes preset-draft-spin { to { transform: rotate(360deg); } }
 .asset-manager-list {
     min-height: 0; overflow-y: auto; margin-top: 10px; padding: 0 16px;
     scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--uvp-text-tertiary) 28%, transparent) transparent;
@@ -1875,6 +1983,14 @@ onBeforeUnmount(() => {
 }
 .asset-manager-delete:hover { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border); }
 .asset-manager-empty { padding: 40px 12px; color: var(--uvp-text-tertiary); font-size: 11px; text-align: center; }
+.asset-manager-empty.preset-empty-large { padding: 44px 16px 28px; }
+.preset-empty-illustration {
+    display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto 12px;
+    color: var(--uvp-brand); background: var(--uvp-brand-soft);
+    border-radius: 50%;
+}
+.preset-empty-line-primary { margin: 0 0 4px; color: var(--uvp-text-primary); font-size: 12.5px; font-weight: 600; }
+.preset-empty-line-secondary { max-width: 240px; margin: 0 auto; color: var(--uvp-text-tertiary); font-size: 11px; line-height: 1.55; }
 .asset-manager-footer {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     min-height: 42px; padding: 8px 16px; color: var(--uvp-text-tertiary);
@@ -2070,18 +2186,18 @@ onBeforeUnmount(() => {
     box-sizing: border-box; height: var(--linked-detail-height); overflow: hidden;
     padding: 8px 15px;
 }
-.linked-detail-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.linked-detail-title > div { display: inline-flex; align-items: center; gap: 6px; color: var(--uvp-brand); }
-.linked-detail-title strong { color: var(--uvp-text-primary); font-size: 12px; }
-.linked-detail-title > span { color: var(--uvp-text-tertiary); font-size: 9.5px; text-align: right; }
-.linked-stream-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); min-height: 0; }
+.linked-detail-hint {
+    margin: 0 0 8px; padding: 0;
+    color: var(--uvp-text-tertiary); font-size: 10.5px; line-height: 1.4;
+}
+.linked-stream-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-height: 0; }
 .stream-live-metric { display: grid; align-content: center; gap: 3px; min-width: 0; padding: 0 14px; }
 .stream-live-metric + .stream-live-metric { border-left: 1px solid var(--uvp-panel-border); }
 .stream-live-metric:first-child { padding-left: 0; }
 .stream-live-metric:last-child { padding-right: 0; }
 .stream-live-metric span,
-.stream-live-metric small { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
-.stream-live-metric strong { overflow: hidden; color: var(--uvp-text-primary); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.stream-live-metric small { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.stream-live-metric strong { overflow: hidden; color: var(--uvp-text-primary); font-size: 15px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .stream-live-metric strong.mono { font-family: 'SF Mono', 'Consolas', monospace; }
 .stream-live-metric strong.warn,
 .stream-live-metric strong.state-stale { color: var(--uvp-warning); }
@@ -2098,6 +2214,28 @@ onBeforeUnmount(() => {
 .linked-section .preset-add { grid-column: 1 / -1; }
 .linked-detail .preset-item { padding: 5px 8px; }
 .preset-go { display: inline-grid; place-items: center; color: var(--uvp-text-tertiary); }
+.preset-empty {
+    display: grid; gap: 6px; padding: 10px 12px 12px;
+    text-align: center;
+    background: color-mix(in srgb, var(--uvp-brand) 4%, var(--uvp-panel-bg));
+    border: 1px dashed color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
+    border-radius: 8px;
+}
+.preset-empty-icon {
+    display: grid; place-items: center; width: 30px; height: 30px; margin: 2px auto 2px;
+    color: var(--uvp-brand); background: var(--uvp-brand-soft); border-radius: 50%;
+}
+.preset-empty-title { margin: 0; color: var(--uvp-text-primary); font-size: 11.5px; font-weight: 600; }
+.preset-empty-hint { margin: 0; color: var(--uvp-text-tertiary); font-size: 10px; line-height: 1.5; }
+.preset-empty-action {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    padding: 6px 10px; margin-top: 4px;
+    color: #fff; background: var(--uvp-brand);
+    border: 0; border-radius: 6px; cursor: pointer;
+    font-size: 10.5px; font-weight: 500;
+}
+.preset-empty-action:hover:not(:disabled) { background: color-mix(in srgb, var(--uvp-brand) 90%, #000); }
+.preset-empty-action:disabled { opacity: 0.55; cursor: not-allowed; }
 .resource-summary-action {
     display: flex; align-items: center; justify-content: space-between; gap: 6px;
     min-height: 22px; padding: 2px 7px;
@@ -2126,8 +2264,7 @@ onBeforeUnmount(() => {
 @media (max-width: 720px) {
     .stream-overview-metrics,
     .stream-detail-columns { grid-template-columns: 1fr; gap: 14px; }
-    .linked-detail-title { align-items: flex-start; flex-direction: column; gap: 4px; }
-    .linked-detail-title > span { text-align: left; }
+    .linked-detail-hint { margin-bottom: 6px; }
     .linked-detail { height: auto; overflow: visible; }
     .linked-ptz-layout,
     .linked-probe-layout,
@@ -2182,11 +2319,6 @@ onBeforeUnmount(() => {
 .sidebar .panels { padding: 12px 14px; }
 .panel { display: grid; gap: 10px; }
 .stream-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.stream-panel-header > div { display: grid; gap: 3px; }
-.stream-panel-header small { color: var(--uvp-text-tertiary); font-size: 9.5px; }
-.stream-panel-header small.state-fresh { color: var(--uvp-brand-cyan); }
-.stream-panel-header small.state-stale { color: var(--uvp-warning); }
-.stream-panel-header small.state-offline { color: var(--uvp-danger); }
 .stream-metrics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .stream-metrics-grid > div {
     display: grid; gap: 4px; min-width: 0; padding: 10px 11px;
@@ -2198,36 +2330,9 @@ onBeforeUnmount(() => {
 .stream-metrics-grid strong.err { color: var(--uvp-danger); }
 .stream-metrics-grid small { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-stream .panels { height: 100%; min-height: 0; box-sizing: border-box; }
-.sidebar-stream .stream-panel { grid-template-rows: auto auto minmax(0, 1fr); height: 100%; min-height: 0; }
-.stream-side-health {
-    display: grid; align-content: space-between; gap: 14px; min-height: 0; margin-top: 2px; padding: 13px 12px;
-    background: color-mix(in srgb, var(--uvp-brand) 3%, var(--uvp-panel-bg));
-    border: 1px solid var(--uvp-panel-border); border-radius: 9px;
-}
-.stream-side-health-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.stream-health-badge {
-    display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-tertiary); font-size: 9.5px; white-space: nowrap;
-}
-.stream-health-badge .dot { width: 6px; height: 6px; background: currentcolor; border-radius: 50%; }
-.stream-health-badge.state-fresh { color: var(--uvp-brand-cyan); }
-.stream-health-badge.state-stale { color: var(--uvp-warning); }
-.stream-health-badge.state-offline { color: var(--uvp-danger); }
-.stream-health-state { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 9px; align-items: center; }
-.stream-health-pulse {
-    display: grid; place-items: center; width: 34px; height: 34px; color: var(--uvp-text-tertiary);
-    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 9px;
-}
-.stream-health-pulse.state-fresh { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent); border-color: color-mix(in srgb, var(--uvp-brand-cyan) 28%, var(--uvp-panel-border)); }
-.stream-health-pulse.state-stale { color: var(--uvp-warning); background: var(--uvp-warning-soft); border-color: var(--uvp-warning-border); }
-.stream-health-pulse.state-offline { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border); }
-.stream-health-state > div:last-child { display: grid; gap: 3px; min-width: 0; }
-.stream-health-state strong { overflow: hidden; color: var(--uvp-text-primary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.stream-health-state small { color: var(--uvp-text-tertiary); font-size: 9.5px; line-height: 1.45; }
-.stream-health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
-.stream-health-grid > div { display: grid; gap: 3px; min-width: 0; }
-.stream-health-grid span { color: var(--uvp-text-tertiary); font-size: 9px; }
-.stream-health-grid strong { overflow: hidden; color: var(--uvp-text-secondary); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-.stream-health-grid strong.mono { font-family: 'SF Mono', 'Consolas', monospace; font-size: 10px; }
+.sidebar-stream .stream-panel { grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; }
+.sidebar-stream .stream-metrics-grid { min-height: 0; }
+.sidebar-stream .stream-metrics-grid > div { align-content: center; }
 .section-hd {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     margin-top: 10px;

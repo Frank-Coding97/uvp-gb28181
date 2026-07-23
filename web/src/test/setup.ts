@@ -5,7 +5,7 @@ config.global.stubs = {
     "a-input": { template: "<input />" },
     "a-input-password": { template: "<input type='password' />" },
     "a-input-number": { template: "<input type='number' />" },
-    "a-modal": { template: "<div><slot /></div>" },
+    "a-modal": { template: "<div><slot name='title' /><slot /></div>" },
     "a-select": { template: "<select><slot /></select>" },
     "a-option": { template: "<option><slot /></option>" },
     "a-tag": { template: "<span><slot /></span>" }

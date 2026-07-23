@@ -239,7 +239,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(side).toContain("1280×720 · 30 fps · 2070 帧");
     expect(side).toContain("8000 Hz · 1 声道 · 3453 帧");
     expect(side).toContain("132.4 KB/s");
-    expect(side).toContain("8.26 MB");
+    expect(side).toContain("累计 8.26 MB");
     expect(side).toContain("HLS");
     expect(detail).toContain("1084.3 kbps");
     expect(detail).toContain("0.0%");
@@ -283,20 +283,22 @@ describe("PlayConsoleLinked 双区联动", () => {
     const advancedSide = wrapper.get("[data-testid='linked-side-advanced']");
     const advancedDetail = wrapper.get("[data-testid='linked-detail-advanced']");
     expect(advancedSide.text()).toContain("设备控制");
-    expect(advancedSide.text()).not.toContain("图像参数");
-    expect(advancedDetail.text()).toContain("图像参数");
+    expect(advancedSide.text()).not.toContain("亮度");
+    expect(advancedDetail.text()).toContain("亮度");
+    expect(advancedDetail.text()).toContain("接口待接入");
 
     await wrapper.get("[data-testid='linked-tab-stream']").trigger("click");
     const streamSide = wrapper.get("[data-testid='linked-side-stream']");
     const streamDetail = wrapper.get("[data-testid='linked-detail-stream']");
     expect(streamSide.text()).toContain("媒体节点");
-    expect(streamSide.text()).toContain("播放协议");
-    expect(streamSide.text()).toContain("链路状态");
-    expect(streamSide.text()).toContain("媒体链路正常");
-    expect(streamSide.text()).not.toContain("观众人数");
-    expect(streamDetail.text()).toContain("观众人数");
-    expect(streamDetail.text()).toContain("网络码率");
-    expect(streamDetail.text()).toContain("视频丢包");
+    expect(streamSide.text()).toContain("媒体参数");
+    expect(streamSide.text()).toContain("数据速率");
+    expect(streamSide.text()).toContain("录制状态");
+    expect(streamSide.text()).not.toContain("当前观看");
+    expect(streamDetail.text()).toContain("当前观看");
+    expect(streamDetail.text()).toContain("输出码率");
+    expect(streamDetail.text()).toContain("视频接收丢包");
+    expect(streamDetail.text()).toContain("音频接收丢包");
 
     wrapper.unmount();
   });
@@ -309,11 +311,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toContain('width="min(1280px, calc(100vw - 32px))"');
     expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+336px/s);
     expect(source).toContain("sidebar-stream");
-    expect(source).toContain("stream-side-health");
     expect(source).toContain('data-testid="linked-detail-stream"');
     expect(source).not.toContain("phase === 'playing' && activeTab !== 'stream'");
     expect(source).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
-    expect(source).toMatch(/\.linked-stream-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)/s);
+    expect(source).toMatch(/\.linked-stream-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/\.aux-grid\.linked-aux-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(
@@ -333,7 +334,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     const ptzDetail = wrapper.get("[data-testid='linked-detail-ptz']");
     expect(ptzDetail.findAll(".preset-item")).toHaveLength(4);
     expect(ptzDetail.findAll(".cruise-item")).toHaveLength(2);
-    expect(ptzDetail.text()).toContain("4 / 20");
+    expect(ptzDetail.text()).toContain("已保存 20 个");
+    expect(ptzDetail.text()).toContain("管理全部 20 个");
     expect(ptzDetail.text()).toContain("2 / 20");
 
     await wrapper.get("[data-testid='manage-presets']").trigger("click");
@@ -360,11 +362,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     await wrapper.get("[data-testid='linked-tab-stream']").trigger("click");
-    expect(wrapper.get("[data-testid='linked-detail-stream']").text()).toContain("00:10");
+    expect(wrapper.get(".session-badge").text()).toContain("00:10");
     api.getStreamMonitor.mockRejectedValueOnce(new Error("node unavailable"));
     await vi.advanceTimersByTimeAsync(2000);
     await flushPromises();
-    expect(wrapper.get("[data-testid='linked-detail-stream']").text()).toContain("最近一次数据已过期");
+    expect(wrapper.find(".session-badge.warn").text()).toContain("监控数据过期");
     wrapper.unmount();
   });
 
@@ -514,6 +516,40 @@ describe("PlayConsoleLinked 双区联动", () => {
       action: "drag_zoom_in",
       region: { length: 1920, width: 1080, midPointX: 960, midPointY: 480, lengthX: 960, lengthY: 480 }
     }));
+    wrapper.unmount();
+  });
+
+  it("预置位为空时面板展示引导卡片,点击后开抽屉并自动进入草稿态", async () => {
+    api.listPtzPresets.mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const emptyCard = wrapper.get("[data-testid='preset-empty']");
+    expect(emptyCard.text()).toContain("保存常用视角");
+    expect(emptyCard.text()).toContain("保存当前位置");
+
+    await wrapper.get("[data-testid='manage-presets']").trigger("click");
+    await flushPromises();
+
+    const draft = wrapper.get("[data-testid='preset-draft']");
+    const input = draft.get<HTMLInputElement>("[data-testid='preset-draft-input']");
+    expect(input.element.value).toBe("预置位 1");
+    wrapper.unmount();
+  });
+
+  it("草稿确认按钮以自动生成的默认名调用 createPtzPreset,Enter 键等效", async () => {
+    api.listPtzPresets.mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } });
+    api.createPtzPreset.mockResolvedValue({ code: 0, message: "", data: { action: "set_preset" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.get("[data-testid='manage-presets']").trigger("click");
+    await flushPromises();
+
+    await wrapper.get("[data-testid='preset-draft-confirm']").trigger("click");
+    await flushPromises();
+
+    expect(api.createPtzPreset).toHaveBeenCalledWith(channel.id, { presetId: 1, name: "预置位 1" });
     wrapper.unmount();
   });
 });
