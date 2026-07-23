@@ -58,7 +58,6 @@ func (dc *DeviceMgmtController) ControlDevice(c *gin.Context) {
 	if !ok {
 		return
 	}
-	target.AllowNoPTZ = true
 
 	if request.Action == "teleboot" {
 		lock := dc.deviceControlLock(channel.ID)

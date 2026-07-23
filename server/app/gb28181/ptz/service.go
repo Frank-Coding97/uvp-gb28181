@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 type TrackedSender interface {
@@ -180,6 +182,11 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 	}
 	op.Status = gbmodels.PTZOperationSent
 	op.CallID, op.CSeq, op.SIPStatus, op.SentAt = result.CallID, result.CSeq, result.StatusCode, &sentAt
+	// 预置位设/删属于单向控制,设备很多情况下不回 Response——SIP 200 就乐观落库,
+	// 让用户立即在列表看到自己的操作;设备如果稍后回 accepted 会再对账一次(幂等)。
+	if syncErr := s.SyncPresetOperation(ctx, op); syncErr != nil && app.ZapLog != nil {
+		app.ZapLog.Warn("预置位乐观入库失败", zap.String("operationId", op.OperationID), zap.Error(syncErr))
+	}
 	return op, nil
 }
 
@@ -189,6 +196,9 @@ func validateTarget(target Target) error {
 	}
 	if !target.DeviceOnline || !target.ChannelOnline {
 		return fmt.Errorf("设备或通道离线")
+	}
+	if target.PTZType == 3 {
+		return fmt.Errorf("通道为固定枪机,不支持云台")
 	}
 	if target.PTZType == 0 && !target.AllowNoPTZ {
 		return fmt.Errorf("通道未上报可用云台能力")

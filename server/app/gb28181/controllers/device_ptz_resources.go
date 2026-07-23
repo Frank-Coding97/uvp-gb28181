@@ -1,14 +1,19 @@
 package controllers
 
 import (
+	"context"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 type presetResourceRequest struct {
@@ -50,7 +55,7 @@ func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.
 		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
-		PTZType: channel.PTZType,
+		PTZType: channel.PTZType, AllowNoPTZ: true,
 	}, true
 }
 
@@ -89,10 +94,36 @@ func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, actio
 		dc.FailAndAbort(c, "下发 PTZ 资源控制失败", err)
 		return
 	}
+	// 预置位设/删属于国标里"设备权威"的资源变更:主流程乐观入库让 UI 立即响应后,
+	// 后台异步下发一次 PresetQuery,把设备真实状态同步过来。persistQueryCache 会 UPSERT
+	// gb_ptz_preset 并按 SumNum 对账——设备端实际没存住或已删除的会被自动纠正。
+	if action == manscdp.PTZActionSetPreset || action == manscdp.PTZActionDeletePreset {
+		dc.reconcilePresetsAsync(target)
+	}
 	dc.Success(c, gin.H{
 		"operationId": op.OperationID, "channelId": channel.ChannelID, "action": action,
 		"id": id, "sn": op.SN, "status": op.Status,
 	})
+}
+
+// reconcilePresetsAsync 用独立 context 后台下发 PresetQuery,不阻塞主响应。
+// 独立 idempotency_key 保证多次调用能各自建 operation 记录,不会跟主操作冲突。
+func (dc *DeviceMgmtController) reconcilePresetsAsync(target ptz.Target) {
+	if dc.ptzService == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := dc.ptzService.Refresh(ctx, target, ptz.QueryPreset, 0, "reconcile-"+uuid.NewString()); err != nil {
+			if app.ZapLog != nil {
+				app.ZapLog.Warn("预置位对账查询下发失败",
+					zap.Uint("channelId", target.ChannelID),
+					zap.String("channelCode", target.ChannelCode),
+					zap.Error(err))
+			}
+		}
+	}()
 }
 
 func (dc *DeviceMgmtController) CreatePTZPreset(c *gin.Context) {

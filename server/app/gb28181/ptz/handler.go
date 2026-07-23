@@ -30,13 +30,21 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		result = "ERROR"
 	}
 	operation, matched, err := s.ApplyResponse(ctx, Response{DeviceCode: deviceCode, ChannelCode: head.DeviceID, SN: sn, CallID: callID, CSeq: cseq, SIPStatus: 200, DeviceResult: result})
-	if err != nil || !matched || operation.Status != gbmodels.PTZOperationAccepted {
+	if err != nil || !matched {
 		return err
 	}
-	return s.applyConfirmedControl(ctx, operation)
+	// 设备回 accepted 后再同步一次预置位状态,作为 Execute 时乐观入库的对账(幂等)。
+	// 设备明确回错的情况下不推翻本地记录,保留 active/deleted 标记等运营处理。
+	if operation.Status != gbmodels.PTZOperationAccepted {
+		return nil
+	}
+	return s.SyncPresetOperation(ctx, operation)
 }
 
-func (s *Service) applyConfirmedControl(ctx context.Context, operation gbmodels.GbPTZOperation) error {
+// SyncPresetOperation 把一次预置位设/删操作的效果写入 gb_ptz_preset 表。
+// 与 op.Status 无关:Execute 在 SIP 200 后乐观调用,ApplyResponse 在 accepted 后再校准一次。
+// GB/T 28181 里 preset_set 属于单向控制,大量设备不回 Response,依赖 accepted 会永远等不到。
+func (s *Service) SyncPresetOperation(ctx context.Context, operation gbmodels.GbPTZOperation) error {
 	if operation.Action != string(manscdp.PTZActionSetPreset) && operation.Action != string(manscdp.PTZActionDeletePreset) {
 		return nil
 	}

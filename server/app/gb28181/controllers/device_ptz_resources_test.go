@@ -50,6 +50,11 @@ func newPTZResourceController(t *testing.T) (*gbcontrollers.DeviceMgmtController
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	// sqlite in-memory 每个连接独立 db,goroutine 拿新 conn 会看不到已迁移的表;
+	// 限制单连接让主流程和异步对账共用同一 db 视图。
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{},
 		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{}, &gbmodels.GbPTZState{},
@@ -63,6 +68,68 @@ func newPTZResourceController(t *testing.T) (*gbcontrollers.DeviceMgmtController
 	controller.SetDB(func() *gorm.DB { return db })
 	controller.SetPTZService(ptz.NewService(db, sender, time.Now))
 	return controller, db, channel, sender
+}
+
+func TestDeviceMgmt_CreatePTZPreset_TriggersPresetQueryReconcile(t *testing.T) {
+	// 老板选的落库策略:乐观入库 + 保存后自动查一次。
+	// 断言 preset_set SIP 下发后,后台会异步下发一次 PresetQuery 对账。
+	controller, _, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.POST("/channel/:id/ptz/presets", controller.CreatePTZPreset)
+
+	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/presets",
+		strings.NewReader(`{"name":"入口","presetId":2}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	// 等一小会让 async goroutine 触发,再对 sender.bodies 快照。
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		sender.mu.Lock()
+		count := len(sender.bodies)
+		sender.mu.Unlock()
+		if count >= 2 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	sender.mu.Lock()
+	bodies := append([]string(nil), sender.bodies...)
+	sender.mu.Unlock()
+	require.GreaterOrEqual(t, len(bodies), 2, "应包含 preset_set + 异步 PresetQuery")
+	foundSet, foundQuery := false, false
+	for _, body := range bodies {
+		if strings.Contains(body, "<PTZCmd>") {
+			foundSet = true
+		}
+		if strings.Contains(body, "<CmdType>PresetQuery</CmdType>") {
+			foundQuery = true
+		}
+	}
+	require.True(t, foundSet, "缺少 preset_set 主命令 SIP")
+	require.True(t, foundQuery, "缺少异步 PresetQuery 对账 SIP")
+}
+
+func TestDeviceMgmt_CreatePTZPreset_AllowsUnreportedPTZType(t *testing.T) {
+	// 回归:预置位/巡航/辅助/看守位这些资源类命令共享 loadPTZTarget 工厂;
+	// 上一轮修 ControlPTZ 时漏了这条路径,PTZType=0(未上报)仍被 service 层 validateTarget 拦
+	controller, db, channel, sender := newPTZResourceController(t)
+	channel.PTZType = 0
+	require.NoError(t, db.Save(channel).Error)
+
+	router := gin.New()
+	router.POST("/channel/:id/ptz/presets", controller.CreatePTZPreset)
+
+	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/presets",
+		strings.NewReader(`{"name":"入口","presetId":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), "未上报")
+	require.NotEmpty(t, sender.bodies, "SIP 应下发到设备")
 }
 
 func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
@@ -84,7 +151,7 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/aux", `{"action":"on","auxiliaryId":7}`, "A50F018C07000048"},
 		{http.MethodPatch, "/channel/" + uintStr(channel.ID) + "/ptz/home-position", `{"enabled":true,"resetTime":30,"presetId":3}`, "<HomePosition>"},
 	}
-	for i, tt := range tests {
+	for _, tt := range tests {
 		req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 		if tt.body != "" {
 			req.Header.Set("Content-Type", "application/json")
@@ -93,7 +160,18 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 		router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code, tt.path+": "+w.Body.String())
 		require.Contains(t, w.Body.String(), "operationId")
-		require.Contains(t, sender.bodies[i], tt.want)
+		// 预置位改动会异步下发 PresetQuery 对账,顺序不定;检查任一 body 匹配即可。
+		sender.mu.Lock()
+		bodies := append([]string(nil), sender.bodies...)
+		sender.mu.Unlock()
+		found := false
+		for _, b := range bodies {
+			if strings.Contains(b, tt.want) {
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "%s: want %q in sent bodies", tt.path, tt.want)
 	}
 }
 

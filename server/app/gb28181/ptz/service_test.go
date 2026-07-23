@@ -61,6 +61,55 @@ func TestServiceExecute_IdempotentAndTracked(t *testing.T) {
 	require.Equal(t, 1, sender.calls)
 }
 
+func TestServiceExecute_PresetSetPersistsOptimistically(t *testing.T) {
+	// 国标 preset_set 是单向控制,很多国产 IPC 不回 MANSCDP Response。
+	// SIP 200 后 Execute 应乐观把预置位写进 gb_ptz_preset,让 UI 列表立即可见。
+	sender := &fakeTrackedSender{}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZPreset{}))
+	svc := NewService(db, sender, func() time.Time { return time.Date(2026, 7, 19, 20, 0, 0, 0, time.UTC) })
+
+	cmd := Command{
+		CmdType: "DeviceControl", Action: "preset_set", IdempotencyKey: "preset-1",
+		Payload: map[string]interface{}{"action": "preset_set", "id": 3, "name": "大门朝向"},
+		Build:   func(int) ([]byte, error) { return []byte("<Control/>"), nil },
+	}
+	op, err := svc.Execute(context.Background(), testTarget(), cmd)
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.PTZOperationSent, op.Status)
+
+	// 断言:此时设备没回任何响应,但库里已经有一条 active 预置位。
+	var preset gbmodels.GbPTZPreset
+	require.NoError(t, db.Where("channel_id = ? AND preset_id = ?", op.ChannelID, 3).First(&preset).Error)
+	require.Equal(t, "大门朝向", preset.Name)
+	require.Equal(t, gbmodels.PTZPresetActive, preset.Status)
+	require.Equal(t, op.OperationID, preset.LastOperationID)
+}
+
+func TestServiceExecute_PTZTypeGating(t *testing.T) {
+	sender := &fakeTrackedSender{}
+	svc := newPTZTestService(t, sender)
+
+	// PTZType=3(固定枪机):无论 AllowNoPTZ 都拒
+	target := testTarget()
+	target.PTZType = 3
+	_, err := svc.Execute(context.Background(), target, testCommand())
+	require.ErrorContains(t, err, "固定枪机")
+	target.AllowNoPTZ = true
+	_, err = svc.Execute(context.Background(), target, testCommand())
+	require.ErrorContains(t, err, "固定枪机")
+
+	// PTZType=0(未上报):默认拒,AllowNoPTZ=true 时放行
+	target = testTarget()
+	target.PTZType = 0
+	_, err = svc.Execute(context.Background(), target, testCommand())
+	require.ErrorContains(t, err, "未上报")
+	target.AllowNoPTZ = true
+	_, err = svc.Execute(context.Background(), target, testCommand())
+	require.NoError(t, err)
+}
+
 func TestServiceExecute_RejectsOfflineOrMissingAddress(t *testing.T) {
 	sender := &fakeTrackedSender{}
 	svc := newPTZTestService(t, sender)

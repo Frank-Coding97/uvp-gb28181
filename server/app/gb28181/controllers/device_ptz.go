@@ -93,10 +93,6 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 		dc.FailAndAbort(c, "通道离线,无法下发云台控制", nil)
 		return
 	}
-	if channel.PTZType != 1 && channel.PTZType != 2 && channel.PTZType != 4 {
-		dc.FailAndAbort(c, "通道未上报可用云台能力", nil)
-		return
-	}
 
 	var device gbmodels.GbDevice
 	result = db.WithContext(c).Scopes(ownerDeptScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
@@ -129,6 +125,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			IP: device.IP, Port: device.Port, Transport: device.Transport,
 			DeviceOnline:  device.Status == gbmodels.DeviceStatusOnline,
 			ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType,
+			AllowNoPTZ: true,
 		}
 		op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
 			CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
@@ -219,7 +216,7 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	}
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
-		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType}
+		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType, AllowNoPTZ: true}
 	key := request.IdempotencyKey
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
@@ -280,7 +277,7 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 	}
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
-		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType}
+		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType, AllowNoPTZ: true}
 	op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
 		CmdType: manscdp.CmdPTZPreciseCtrl, Action: "precise", IdempotencyKey: key,
 		Payload: map[string]interface{}{"pan": request.Pan, "tilt": request.Tilt, "zoom": request.Zoom, "focus": request.Focus, "iris": request.Iris, "speed": request.Speed},
