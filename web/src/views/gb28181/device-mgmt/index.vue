@@ -1889,7 +1889,6 @@ onUnmounted(() => {
                                 <div><span>注册时间</span><strong>{{ dateTime(item.registerTime) }}</strong></div>
                             </div>
                             <div class="card-actions device-card-actions">
-                                <span class="device-transport">SIP / {{ transportText(item.transport) }}</span>
                                 <a-tooltip content="查看通道" position="top">
                                     <button class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"><Camera :size="13" /></button>
                                 </a-tooltip>
@@ -3446,19 +3445,10 @@ onUnmounted(() => {
 .device-card-channel-value .channel-progress { width: 100%; }
 .device-card-channel-value .channel-text { font-weight: 500; }
 .device-card-actions {
+    justify-content: flex-end;
     gap: 7px;
     padding-top: 9px;
     border-top: 1px solid var(--uvp-panel-border);
-}
-.device-transport {
-    margin-right: auto;
-    padding: 4px 8px;
-    color: var(--uvp-text-secondary);
-    background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 6px;
-    font-size: 11px;
-    white-space: nowrap;
 }
 .channel-summary-card { min-width: 0; }
 .channel-snapshot {
