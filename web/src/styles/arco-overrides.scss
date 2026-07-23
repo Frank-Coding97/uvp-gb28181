@@ -35,12 +35,16 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
 }
 
+.arco-select-dropdown-list-wrapper {
+  padding: 0 4px !important;
+}
+
 .arco-select-option {
   font-size: 12px !important;
   font-weight: 500 !important;
   color: var(--uvp-text-secondary) !important;
   border-radius: 6px !important;
-  margin: 2px 4px !important;
+  margin: 2px 0 !important;
 
   &:hover {
     color: var(--uvp-brand) !important;
