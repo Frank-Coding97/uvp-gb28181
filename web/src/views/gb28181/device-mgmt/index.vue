@@ -1975,7 +1975,9 @@ onUnmounted(() => {
                                             <a-option value="TCP-Passive">TCP-Passive</a-option>
                                         </a-select>
                                     </div>
-                                    <div>
+                                </div>
+                                <div class="channel-card-switches">
+                                    <div class="switch-item">
                                         <span>音频</span>
                                         <a-switch
                                             :model-value="item.audioEnabled"
@@ -1987,7 +1989,7 @@ onUnmounted(() => {
                                             @change="(value: boolean) => handleAudioEnabledChange(item.id, value)"
                                         />
                                     </div>
-                                    <div>
+                                    <div class="switch-item">
                                         <span>按需直播</span>
                                         <a-switch
                                             :model-value="item.onDemandLive !== false"
@@ -1999,25 +2001,20 @@ onUnmounted(() => {
                                             @change="(value: boolean) => handleOnDemandLiveChange(item.id, value)"
                                         />
                                     </div>
-                                    <div>
-                                        <span>云端录像</span>
-                                        <div class="cloud-recording-control">
-                                            <a-switch
-                                                :model-value="item.cloudRecordingEnabled"
-                                                :loading="recordingMeta(item).loading"
-                                                :disabled="recordingMeta(item).loading"
-                                                :aria-label="`云端录像:${recordingMeta(item).label}`"
-                                                size="small"
-                                                @click.stop
-                                                @dblclick.stop
-                                                @change="(value: boolean) => handleCloudRecordingChange(item.id, value)"
-                                            />
-                                            <a-tooltip :content="recordingMeta(item).tooltip || recordingMeta(item).label" position="top">
-                                                <span class="cloud-recording-state" :class="`tone-${recordingMeta(item).tone}`">
-                                                    {{ recordingMeta(item).label }}
-                                                </span>
-                                            </a-tooltip>
-                                        </div>
+                                    <div class="switch-item">
+                                        <a-tooltip :content="recordingMeta(item).tooltip || recordingMeta(item).label" position="top">
+                                            <span :class="`tone-${recordingMeta(item).tone}`">云端录像</span>
+                                        </a-tooltip>
+                                        <a-switch
+                                            :model-value="item.cloudRecordingEnabled"
+                                            :loading="recordingMeta(item).loading"
+                                            :disabled="recordingMeta(item).loading"
+                                            :aria-label="`云端录像:${recordingMeta(item).label}`"
+                                            size="small"
+                                            @click.stop
+                                            @dblclick.stop
+                                            @change="(value: boolean) => handleCloudRecordingChange(item.id, value)"
+                                        />
                                     </div>
                                 </div>
                                 <div class="card-actions channel-card-actions">
@@ -3527,19 +3524,30 @@ onUnmounted(() => {
 :deep(.channel-card-inline-select.arco-select-view-single) {
     width: 130px !important;
 }
-.channel-card-info :deep(.arco-switch) { justify-self: start; }
-.cloud-recording-control {
+.channel-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.channel-card-switches {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding-top: 2px;
+    font-size: 12px;
+    line-height: 18px;
+}
+.channel-card-switches .switch-item {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     min-width: 0;
     white-space: nowrap;
 }
-.cloud-recording-state { color: var(--uvp-text-tertiary); font-size: 12px; }
-.cloud-recording-state.tone-success { color: var(--uvp-success, #10b981); }
-.cloud-recording-state.tone-warning { color: var(--uvp-warning); }
-.cloud-recording-state.tone-danger { color: var(--uvp-danger); }
-.channel-card-info .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.channel-card-switches .switch-item > span,
+.channel-card-switches .switch-item :deep(.arco-tooltip) > span {
+    color: var(--uvp-text-tertiary);
+}
+.channel-card-switches .switch-item .tone-success { color: var(--uvp-success, #10b981); }
+.channel-card-switches .switch-item .tone-warning { color: var(--uvp-warning); }
+.channel-card-switches .switch-item .tone-danger { color: var(--uvp-danger); }
 .channel-card-actions {
     gap: 7px;
     padding-top: 9px;
