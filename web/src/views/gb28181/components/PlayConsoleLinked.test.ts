@@ -307,13 +307,15 @@ describe("PlayConsoleLinked 双区联动", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
 
     expect(source).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
-    expect(source).toContain("--linked-detail-height: 168px");
+    expect(source).toContain("--linked-detail-height: 148px");
     expect(source).toContain('width="min(1280px, calc(100vw - 32px))"');
     expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+336px/s);
     expect(source).toContain("sidebar-stream");
     expect(source).toContain('data-testid="linked-detail-stream"');
     expect(source).not.toContain("phase === 'playing' && activeTab !== 'stream'");
     expect(source).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
+    expect(source).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
+    expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(/\.linked-stream-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/\.aux-grid\.linked-aux-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
@@ -332,18 +334,20 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     const ptzDetail = wrapper.get("[data-testid='linked-detail-ptz']");
-    expect(ptzDetail.findAll(".preset-item")).toHaveLength(4);
+    expect(ptzDetail.findAll(".preset-item")).toHaveLength(8);
     expect(ptzDetail.findAll(".cruise-item")).toHaveLength(2);
-    expect(ptzDetail.text()).toContain("已保存 20 个");
-    expect(ptzDetail.text()).toContain("管理全部 20 个");
+    expect(ptzDetail.text()).toContain("更多 · 20");
     expect(ptzDetail.text()).toContain("2 / 20");
 
-    await wrapper.get("[data-testid='manage-presets']").trigger("click");
-    const manager = wrapper.get("[data-testid='asset-manager']");
-    expect(manager.text()).toContain("预置位管理");
-    expect(manager.findAll("[data-testid='asset-manager-row']")).toHaveLength(20);
+    // 预置位「更多」按钮存在(内容 slot 通过 a-popover teleport,不在 wrapper 内)
+    const moreButton = wrapper.get("[data-testid='preset-more-btn']");
+    expect(moreButton.text()).toContain("更多 · 20");
+    const presetGrid = ptzDetail.get(".preset-grid");
+    expect(presetGrid.element.lastElementChild?.querySelector("[data-testid='preset-more-btn']")).not.toBeNull();
 
-    await wrapper.get("[data-testid='asset-manager-tab-cruise']").trigger("click");
+    // 巡航轨迹仍走抽屉
+    await wrapper.get("[data-testid='manage-cruises']").trigger("click");
+    const manager = wrapper.get("[data-testid='asset-manager']");
     expect(manager.text()).toContain("巡航轨迹管理");
     expect(manager.findAll("[data-testid='asset-manager-row']")).toHaveLength(20);
 
@@ -519,37 +523,36 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("预置位为空时面板展示引导卡片,点击后开抽屉并自动进入草稿态", async () => {
+  it("预置位为空时展示 arco 风空态,顶部保存按钮打开 dialog", async () => {
     api.listPtzPresets.mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
     const emptyCard = wrapper.get("[data-testid='preset-empty']");
-    expect(emptyCard.text()).toContain("保存常用视角");
-    expect(emptyCard.text()).toContain("保存当前位置");
+    expect(emptyCard.text()).toContain("暂无预置位");
 
-    await wrapper.get("[data-testid='manage-presets']").trigger("click");
+    const saveBtn = wrapper.get("[data-testid='preset-save-btn']");
+    expect(saveBtn.text()).toContain("添加");
+
+    await saveBtn.trigger("click");
     await flushPromises();
 
-    const draft = wrapper.get("[data-testid='preset-draft']");
-    const input = draft.get<HTMLInputElement>("[data-testid='preset-draft-input']");
-    expect(input.element.value).toBe("预置位 1");
+    const dialog = wrapper.get("[data-testid='preset-save-dialog']");
+    expect(dialog.text()).toContain("#1");
+    const input = dialog.get("[data-testid='preset-save-name-input']");
+    expect(input.attributes("modelvalue")).toBe("预置位 1");
     wrapper.unmount();
   });
 
-  it("草稿确认按钮以自动生成的默认名调用 createPtzPreset,Enter 键等效", async () => {
-    api.listPtzPresets.mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } });
-    api.createPtzPreset.mockResolvedValue({ code: 0, message: "", data: { action: "set_preset" } });
+  it("有数据时顶部保存按钮同样打开 dialog(下一个可用编号)", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
-    await wrapper.get("[data-testid='manage-presets']").trigger("click");
+    await wrapper.get("[data-testid='preset-save-btn']").trigger("click");
     await flushPromises();
 
-    await wrapper.get("[data-testid='preset-draft-confirm']").trigger("click");
-    await flushPromises();
-
-    expect(api.createPtzPreset).toHaveBeenCalledWith(channel.id, { presetId: 1, name: "预置位 1" });
+    const dialog = wrapper.get("[data-testid='preset-save-dialog']");
+    expect(dialog.text()).toContain("#21");
     wrapper.unmount();
   });
 });

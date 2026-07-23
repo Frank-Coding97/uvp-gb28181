@@ -10,7 +10,7 @@
  * 视觉语言:深色为主,青色作强调,毛玻璃卡片,状态用色带 + 脉冲呼吸
  * 布局:右侧保留高频操作,播放器下方随 Tab 联动展示详情
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import PlayWindow from "./PlayWindow.vue";
 import {
@@ -54,6 +54,7 @@ import {
     ArrowUpLeft,
     ArrowUpRight,
     CheckCircle2,
+    ChevronDown,
     ChevronRight,
     Circle,
     Compass,
@@ -69,6 +70,7 @@ import {
     Mic,
     Move3d,
     Navigation,
+    Inbox,
     Pause,
     Play,
     Plus,
@@ -247,10 +249,19 @@ const preciseZoom = ref(1);    // 1-32x
 type Preset = { id: number; name: string; setAt?: string };
 const presets = ref<Preset[]>([]);
 const activePresetId = ref<number | null>(null);
-// 弹窗内「保存当前位置」的草稿态:点主按钮后出现顶部草稿行,让用户先确认命名再落库
+// 「保存当前位置」小对话框的草稿态:自动生成默认名,用户可改可不改
 const presetDraft = ref<{ id: number; name: string; submitting: boolean } | null>(null);
-const presetDraftInputRef = ref<HTMLInputElement | null>(null);
-const visiblePresets = computed(() => presets.value.slice(0, 4));
+const savePresetDialogVisible = ref(false);
+const presetNameTouched = ref(false);
+// 详情区固定为紧凑三行九格;溢出时保留八个预置位,将“更多”放在最后一格。
+// 不按网格自身高度反推数量,避免内容撑高网格后又放入更多项的反馈回路。
+const PRESET_GRID_SLOTS = 9;
+const maxVisibleTiles = PRESET_GRID_SLOTS;
+const hasMorePresets = computed(() => presets.value.length > maxVisibleTiles);
+const visiblePresets = computed(() =>
+    hasMorePresets.value ? presets.value.slice(0, maxVisibleTiles - 1) : presets.value,
+);
+const presetMoreVisible = ref(false);
 function nextPresetId(): number {
     return presets.value.length ? Math.max(...presets.value.map((p) => p.id)) + 1 : 1;
 }
@@ -681,21 +692,29 @@ async function callPreset(id: number) {
         activePresetId.value = id;
     } catch (error: any) { Message.error(error?.message || "调用预置位失败"); }
 }
-function startPresetDraft() {
+function openSavePresetDialog() {
     if (!props.channel || !isPtzCapable.value) return;
     const nextId = nextPresetId();
     presetDraft.value = { id: nextId, name: `预置位 ${nextId}`, submitting: false };
-    nextTick(() => {
-        presetDraftInputRef.value?.focus();
-        presetDraftInputRef.value?.select();
-    });
+    presetNameTouched.value = false;
+    savePresetDialogVisible.value = true;
 }
-function cancelPresetDraft() {
+function closeSavePresetDialog() {
+    savePresetDialogVisible.value = false;
     presetDraft.value = null;
+    presetNameTouched.value = false;
 }
-async function commitPresetDraft() {
-    if (!presetDraft.value || presetDraft.value.submitting) return;
-    if (!props.channel) return;
+const presetNameError = computed(() => {
+    if (!presetNameTouched.value || !presetDraft.value) return "";
+    const name = presetDraft.value.name.trim();
+    if (!name) return "请填写预置位名称";
+    if (name.length > 16) return "名称最多 16 个字符";
+    return "";
+});
+async function handleSavePresetBeforeOk(done: (closable?: boolean) => void) {
+    if (!presetDraft.value || !props.channel) { done(false); return; }
+    presetNameTouched.value = true;
+    if (presetNameError.value) { done(false); return; }
     const name = presetDraft.value.name.trim() || `预置位 ${presetDraft.value.id}`;
     const presetId = presetDraft.value.id;
     presetDraft.value.submitting = true;
@@ -704,10 +723,13 @@ async function commitPresetDraft() {
         if (response.code !== 0) throw new Error(response.message || "设置预置位失败");
         Message.success(`预置位 #${presetId} 请求已受理`);
         presetDraft.value = null;
+        presetNameTouched.value = false;
         await loadPresets();
+        done(true);
     } catch (error: any) {
         Message.error(error?.message || "设置预置位失败");
         if (presetDraft.value) presetDraft.value.submitting = false;
+        done(false);
     }
 }
 async function deletePreset(id: number) {
@@ -744,25 +766,20 @@ async function stopCruise() {
     } catch (error: any) { Message.error(error?.message || "停止巡航失败"); }
 }
 
-function openAssetManager(tab: AssetManagerTab, options: { startDraft?: boolean } = {}) {
+function openAssetManager(tab: AssetManagerTab) {
     assetManagerTab.value = tab;
     assetSearch.value = "";
     assetManagerVisible.value = true;
-    if (options.startDraft && tab === "preset") {
-        nextTick(() => startPresetDraft());
-    }
 }
 
 function switchAssetManagerTab(tab: AssetManagerTab) {
     assetManagerTab.value = tab;
     assetSearch.value = "";
-    if (tab !== "preset") cancelPresetDraft();
 }
 
 function closeAssetManager() {
     assetManagerVisible.value = false;
     assetSearch.value = "";
-    cancelPresetDraft();
 }
 
 const auxiliaryIds: Partial<Record<keyof typeof auxSwitches.value, number>> = {};
@@ -1213,44 +1230,101 @@ onBeforeUnmount(() => {
 
                     <div v-show="activeTab === 'ptz'" class="linked-detail" data-testid="linked-detail-ptz">
                         <div class="linked-ptz-layout">
-                            <section class="linked-section">
-                                <div class="section-hd first">
-                                    <span class="section-title"><Hash :size="13" />预置位</span>
-                                    <span v-if="presets.length" class="section-meta">已保存 {{ presets.length }} 个</span>
-                                </div>
-                                <div v-if="presets.length === 0" class="preset-empty" data-testid="preset-empty">
-                                    <div class="preset-empty-icon"><Target :size="18" /></div>
-                                    <p class="preset-empty-title">保存常用视角</p>
-                                    <p class="preset-empty-hint">把云台转到想看的画面,一键收藏后可秒切</p>
+                            <section class="linked-section linked-card">
+                                <header class="linked-card-hd">
+                                    <span class="section-title"><Hash :size="13" />预置位<em v-if="presets.length" class="preset-count">{{ presets.length }}</em></span>
                                     <button
-                                        class="preset-empty-action"
-                                        data-testid="manage-presets"
+                                        class="preset-save-btn"
+                                        data-testid="preset-save-btn"
                                         :disabled="!isPtzCapable"
-                                        @click="openAssetManager('preset', { startDraft: true })"
+                                        @click="openSavePresetDialog"
                                     >
-                                        <Plus :size="12" />保存当前位置
+                                        <Plus :size="12" /><span>添加</span>
                                     </button>
-                                </div>
-                                <div v-else class="preset-grid">
-                                    <button
-                                        v-for="p in visiblePresets"
-                                        :key="p.id"
-                                        class="preset-item"
-                                        :class="{ active: activePresetId === p.id }"
-                                        :disabled="!isPtzCapable"
-                                        @click="callPreset(p.id)"
-                                    >
-                                        <span class="preset-idx">#{{ p.id }}</span>
-                                        <span class="preset-name">{{ p.name }}</span>
-                                        <span class="preset-go"><ChevronRight :size="11" /></span>
-                                    </button>
-                                    <button class="resource-summary-action" data-testid="manage-presets" @click="openAssetManager('preset')">
-                                        <span>{{ presets.length > visiblePresets.length ? `管理全部 ${presets.length} 个` : '管理预置位' }}</span><ChevronRight :size="12" />
-                                    </button>
-                                </div>
+                                </header>
+                                    <div v-if="presets.length === 0" class="preset-empty" data-testid="preset-empty">
+                                        <Inbox :size="24" class="preset-empty-glyph" />
+                                        <p class="preset-empty-line">暂无预置位</p>
+                                    </div>
+                                    <div v-else class="preset-grid">
+                                        <div
+                                            v-for="p in visiblePresets"
+                                            :key="p.id"
+                                            class="preset-tile"
+                                            :class="{ active: activePresetId === p.id, disabled: !isPtzCapable }"
+                                        >
+                                            <button
+                                                class="preset-tile-hit preset-item"
+                                                :disabled="!isPtzCapable"
+                                                :title="`#${p.id} ${p.name}`"
+                                                @click="callPreset(p.id)"
+                                            >
+                                                <span class="preset-idx">#{{ p.id }}</span>
+                                                <span class="preset-name">{{ p.name }}</span>
+                                            </button>
+                                            <button
+                                                class="preset-tile-del"
+                                                :disabled="!isPtzCapable"
+                                                :title="`删除 #${p.id}`"
+                                                @click.stop="deletePreset(p.id)"
+                                            >
+                                                <X :size="11" />
+                                            </button>
+                                        </div>
+                                        <a-popover
+                                            v-if="hasMorePresets"
+                                            v-model:popup-visible="presetMoreVisible"
+                                            trigger="click"
+                                            position="bottom"
+                                            :content-style="{ padding: 0 }"
+                                            class="preset-more-popover-trigger"
+                                        >
+                                            <button class="preset-tile-more" data-testid="preset-more-btn">
+                                                <span>更多 · {{ presets.length }}</span>
+                                                <ChevronDown :size="11" />
+                                            </button>
+                                            <template #content>
+                                                <div class="preset-popover" data-testid="preset-popover">
+                                                    <header class="preset-popover-hd">
+                                                        <span><Hash :size="12" />全部预置位<em class="preset-count">{{ presets.length }}</em></span>
+                                                    </header>
+                                                    <div class="preset-popover-list">
+                                                        <div
+                                                            v-for="p in presets"
+                                                            :key="p.id"
+                                                            class="preset-popover-row"
+                                                            :class="{ active: activePresetId === p.id }"
+                                                            data-testid="preset-popover-row"
+                                                        >
+                                                            <span class="preset-popover-idx">#{{ p.id }}</span>
+                                                            <span class="preset-popover-name" :title="p.name">{{ p.name }}</span>
+                                                            <div class="preset-popover-actions">
+                                                                <button
+                                                                    class="preset-popover-call"
+                                                                    :disabled="!isPtzCapable"
+                                                                    title="调用此预置位"
+                                                                    @click="callPreset(p.id)"
+                                                                >
+                                                                    <Navigation :size="11" />
+                                                                </button>
+                                                                <button
+                                                                    class="preset-popover-del"
+                                                                    :disabled="!isPtzCapable"
+                                                                    title="删除此预置位"
+                                                                    @click="deletePreset(p.id)"
+                                                                >
+                                                                    <Trash2 :size="11" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </a-popover>
+                                    </div>
                             </section>
 
-                            <section class="linked-section">
+                            <section class="linked-section linked-card">
                                 <div class="section-hd first">
                                     <span class="section-title"><Route :size="13" />巡航轨迹<span class="tag-2022">2022</span></span>
                                     <span class="section-meta">{{ visibleCruiseTracks.length }} / {{ cruiseTracks.length }}</span>
@@ -1277,7 +1351,7 @@ onBeforeUnmount(() => {
                                 </div>
                             </section>
 
-                            <section class="linked-section">
+                            <section class="linked-section linked-card">
                                 <div class="section-hd first">
                                     <span class="section-title"><Home :size="13" />看守位<span class="tag-2022">2022</span></span>
                                     <label class="toggle">
@@ -1302,7 +1376,7 @@ onBeforeUnmount(() => {
                                 </div>
                             </section>
 
-                            <section class="linked-section">
+                            <section class="linked-section linked-card">
                                 <div class="section-hd first">
                                     <span class="section-title"><Lightbulb :size="13" />辅助开关</span>
                                     <span class="section-meta">设备扩展</span>
@@ -1687,46 +1761,15 @@ onBeforeUnmount(() => {
                             <input v-model="assetSearch" type="search" :placeholder="assetManagerTab === 'preset' ? '搜索预置位名称或编号' : '搜索巡航名称或编号'" />
                         </label>
 
-                        <div v-if="assetManagerTab === 'preset'" class="preset-primary-cta">
+                        <div v-if="assetManagerTab === 'preset'" class="asset-manager-inline-actions">
                             <button
-                                v-if="!presetDraft"
-                                class="preset-primary-btn"
-                                data-testid="preset-save-current"
+                                class="asset-manager-add"
+                                data-testid="asset-manager-add-preset"
                                 :disabled="!isPtzCapable"
-                                @click="startPresetDraft"
+                                @click="openSavePresetDialog"
                             >
-                                <div class="preset-primary-icon"><Target :size="16" /></div>
-                                <div class="preset-primary-text">
-                                    <strong>保存当前位置</strong>
-                                    <small>把摄像头当前画面收藏为预置位</small>
-                                </div>
-                                <Plus :size="14" />
+                                <Plus :size="12" /><span>添加预置位</span>
                             </button>
-                            <div v-else class="preset-draft" data-testid="preset-draft">
-                                <span class="preset-draft-index">#{{ presetDraft.id }}</span>
-                                <input
-                                    ref="presetDraftInputRef"
-                                    v-model="presetDraft.name"
-                                    class="preset-draft-input"
-                                    type="text"
-                                    maxlength="16"
-                                    :disabled="presetDraft.submitting"
-                                    :placeholder="`预置位 ${presetDraft.id}`"
-                                    data-testid="preset-draft-input"
-                                    @keydown.enter.prevent="commitPresetDraft"
-                                    @keydown.esc.prevent="cancelPresetDraft"
-                                />
-                                <div class="preset-draft-actions">
-                                    <button class="preset-draft-cancel" :disabled="presetDraft.submitting" data-testid="preset-draft-cancel" @click="cancelPresetDraft">
-                                        取消
-                                    </button>
-                                    <button class="preset-draft-confirm" :disabled="presetDraft.submitting" data-testid="preset-draft-confirm" @click="commitPresetDraft">
-                                        <Loader2 v-if="presetDraft.submitting" :size="12" class="spin" />
-                                        <CheckCircle2 v-else :size="12" />
-                                        确认保存
-                                    </button>
-                                </div>
-                            </div>
                         </div>
 
                         <div class="asset-manager-list">
@@ -1750,12 +1793,9 @@ onBeforeUnmount(() => {
                                         <button class="asset-manager-delete" title="删除预置位" @click="deletePreset(p.id)"><Trash2 :size="12" /></button>
                                     </div>
                                 </div>
-                                <div v-if="filteredPresets.length === 0 && !presetDraft" class="asset-manager-empty preset-empty-large" data-testid="asset-manager-preset-empty">
-                                    <div class="preset-empty-illustration"><Target :size="26" /></div>
-                                    <p class="preset-empty-line-primary">{{ assetSearch ? "没有匹配的预置位" : "还没有预置位" }}</p>
-                                    <p class="preset-empty-line-secondary">
-                                        {{ assetSearch ? "换个关键词试试,或清除搜索查看全部" : "把云台转到想看的画面,点上方「保存当前位置」" }}
-                                    </p>
+                                <div v-if="filteredPresets.length === 0" class="asset-manager-empty preset-empty-large" data-testid="asset-manager-preset-empty">
+                                    <Inbox :size="28" class="preset-empty-glyph" />
+                                    <p class="preset-empty-line-primary">{{ assetSearch ? "没有匹配的预置位" : "暂无预置位" }}</p>
                                 </div>
                             </template>
 
@@ -1791,13 +1831,63 @@ onBeforeUnmount(() => {
                     </aside>
                 </div>
             </Transition>
+
+            <a-modal
+                v-model:visible="savePresetDialogVisible"
+                title="保存预置位"
+                ok-text="保存"
+                cancel-text="取消"
+                modal-class="uvp-system-dialog preset-save-modal"
+                :width="380"
+                :mask-closable="false"
+                :ok-loading="presetDraft?.submitting || false"
+                :on-before-ok="handleSavePresetBeforeOk"
+                unmount-on-close
+                @cancel="closeSavePresetDialog"
+                @close="closeSavePresetDialog"
+            >
+                <div v-if="presetDraft" class="preset-save-form" data-testid="preset-save-dialog">
+                    <div class="preset-save-row">
+                        <label class="preset-save-label">编号</label>
+                        <span class="preset-save-index">#{{ presetDraft.id }}</span>
+                    </div>
+                    <div class="preset-save-row">
+                        <label class="preset-save-label">名称</label>
+                        <div class="preset-save-field">
+                            <a-input
+                                v-model="presetDraft.name"
+                                allow-clear
+                                :max-length="16"
+                                :placeholder="`预置位 ${presetDraft.id}`"
+                                :disabled="presetDraft.submitting"
+                                :error="!!presetNameError"
+                                data-testid="preset-save-name-input"
+                                @blur="presetNameTouched = true"
+                                @press-enter="presetNameTouched = true"
+                            >
+                                <template #suffix>
+                                    <span class="preset-save-count" :class="{ ok: presetDraft.name.trim().length > 0 && presetDraft.name.trim().length <= 16 }">
+                                        {{ presetDraft.name.length }}/16
+                                    </span>
+                                </template>
+                            </a-input>
+                            <p v-if="presetNameError" class="preset-save-error">{{ presetNameError }}</p>
+                            <p v-else class="preset-save-hint">留空将使用默认名「预置位 {{ presetDraft.id }}」</p>
+                        </div>
+                    </div>
+                </div>
+            </a-modal>
         </div>
     </a-modal>
 </template>
 
 <style scoped lang="scss">
 /* 主体壳子 —— 具体面板样式在后续 chunk 中追加 */
-.play-console-modal :deep(.arco-modal-body) { padding: 14px 18px 18px; }
+.play-console-modal :deep(.arco-modal-body) {
+    padding: 14px 18px 18px;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
+}
 
 .console-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .title-icon {
@@ -1900,67 +1990,33 @@ onBeforeUnmount(() => {
 }
 .asset-manager-search input::placeholder { color: var(--uvp-text-tertiary); }
 
-/* 预置位主 CTA:未处于草稿态时是「大按钮」,处于草稿态时切换为「命名+确认」内联行 */
-.preset-primary-cta { margin: 10px 16px 0; }
-.preset-primary-btn {
-    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center;
-    width: 100%; padding: 12px 14px;
-    color: #fff; background: linear-gradient(135deg, var(--uvp-brand) 0%, color-mix(in srgb, var(--uvp-brand) 82%, #4c6cff) 100%);
-    border: 0; border-radius: 10px; box-shadow: 0 4px 16px color-mix(in srgb, var(--uvp-brand) 22%, transparent);
-    cursor: pointer; text-align: left; transition: transform 0.12s ease, box-shadow 0.12s ease;
-}
-.preset-primary-btn:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 20px color-mix(in srgb, var(--uvp-brand) 30%, transparent); }
-.preset-primary-btn:active:not(:disabled) { transform: translateY(0); }
-.preset-primary-btn:disabled { opacity: 0.55; cursor: not-allowed; }
-.preset-primary-icon {
-    display: grid; place-items: center; width: 34px; height: 34px;
-    background: rgb(255 255 255 / 18%); border-radius: 8px;
-}
-.preset-primary-text { display: grid; gap: 2px; min-width: 0; }
-.preset-primary-text strong { font-size: 13px; font-weight: 600; }
-.preset-primary-text small { color: rgb(255 255 255 / 82%); font-size: 10.5px; }
-
-.preset-draft {
-    display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px; align-items: center;
-    padding: 10px 12px;
-    background: color-mix(in srgb, var(--uvp-brand) 6%, var(--uvp-panel-bg));
-    border: 1px solid color-mix(in srgb, var(--uvp-brand) 34%, var(--uvp-panel-border)); border-radius: 9px;
-}
-.preset-draft-index {
-    display: inline-grid; place-items: center; min-width: 34px; padding: 4px 8px;
-    color: var(--uvp-brand); background: var(--uvp-brand-soft);
-    border-radius: 5px; font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; font-weight: 600;
-}
-.preset-draft-input {
-    width: 100%; padding: 6px 8px;
-    color: var(--uvp-text-primary); background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 6px;
-    outline: none; font-size: 12px; transition: border-color 0.15s ease;
-}
-.preset-draft-input:focus { border-color: var(--uvp-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand) 16%, transparent); }
-.preset-draft-actions {
-    grid-column: 1 / -1;
-    display: flex; justify-content: flex-end; gap: 6px; margin-top: 2px;
-}
-.preset-draft-cancel,
-.preset-draft-confirm {
+/* 抽屉内「保存当前位置」按钮,弹弹窗提交 */
+.asset-manager-inline-actions { display: flex; justify-content: flex-end; margin: 10px 16px 0; }
+.asset-manager-add {
     display: inline-flex; align-items: center; gap: 4px;
-    padding: 5px 12px; border-radius: 6px; cursor: pointer;
+    padding: 5px 12px;
+    color: #fff; background: var(--uvp-brand);
+    border: 0; border-radius: 6px; cursor: pointer;
     font-size: 11px; transition: background 0.12s ease;
 }
-.preset-draft-cancel {
-    color: var(--uvp-text-secondary); background: transparent;
-    border: 1px solid var(--uvp-panel-border);
+.asset-manager-add:hover:not(:disabled) { background: color-mix(in srgb, var(--uvp-brand) 90%, #000); }
+.asset-manager-add:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* 保存预置位对话框 */
+.preset-save-form { display: grid; gap: 14px; padding: 4px 2px 0; }
+.preset-save-row { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 12px; align-items: start; }
+.preset-save-label { padding-top: 6px; color: var(--uvp-text-secondary); font-size: 12px; }
+.preset-save-index {
+    display: inline-flex; align-items: center;
+    padding: 4px 10px;
+    color: var(--uvp-brand); background: var(--uvp-brand-soft);
+    border-radius: 5px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; font-weight: 600;
 }
-.preset-draft-cancel:hover:not(:disabled) { background: var(--uvp-list-toolbar-bg); }
-.preset-draft-confirm {
-    color: #fff; background: var(--uvp-brand); border: 1px solid var(--uvp-brand);
-}
-.preset-draft-confirm:hover:not(:disabled) { background: color-mix(in srgb, var(--uvp-brand) 90%, #000); }
-.preset-draft-cancel:disabled,
-.preset-draft-confirm:disabled { opacity: 0.55; cursor: not-allowed; }
-.spin { animation: preset-draft-spin 0.8s linear infinite; }
-@keyframes preset-draft-spin { to { transform: rotate(360deg); } }
+.preset-save-field { display: grid; gap: 4px; }
+.preset-save-count { color: var(--uvp-text-tertiary); font-size: 11px; }
+.preset-save-count.ok { color: #059669; font-weight: 600; }
+.preset-save-hint { margin: 0; color: var(--uvp-text-tertiary); font-size: 11px; }
+.preset-save-error { margin: 0; color: var(--uvp-danger); font-size: 11px; }
 .asset-manager-list {
     min-height: 0; overflow-y: auto; margin-top: 10px; padding: 0 16px;
     scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--uvp-text-tertiary) 28%, transparent) transparent;
@@ -1984,13 +2040,8 @@ onBeforeUnmount(() => {
 .asset-manager-delete:hover { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border); }
 .asset-manager-empty { padding: 40px 12px; color: var(--uvp-text-tertiary); font-size: 11px; text-align: center; }
 .asset-manager-empty.preset-empty-large { padding: 44px 16px 28px; }
-.preset-empty-illustration {
-    display: grid; place-items: center; width: 56px; height: 56px; margin: 0 auto 12px;
-    color: var(--uvp-brand); background: var(--uvp-brand-soft);
-    border-radius: 50%;
-}
-.preset-empty-line-primary { margin: 0 0 4px; color: var(--uvp-text-primary); font-size: 12.5px; font-weight: 600; }
-.preset-empty-line-secondary { max-width: 240px; margin: 0 auto; color: var(--uvp-text-tertiary); font-size: 11px; line-height: 1.55; }
+.preset-empty-glyph { display: block; margin: 0 auto 6px; color: var(--uvp-text-tertiary); opacity: 0.55; }
+.preset-empty-line-primary { margin: 0; color: var(--uvp-text-tertiary); font-size: 12px; }
 .asset-manager-footer {
     display: flex; align-items: center; justify-content: space-between; gap: 10px;
     min-height: 42px; padding: 8px 16px; color: var(--uvp-text-tertiary);
@@ -2175,17 +2226,23 @@ onBeforeUnmount(() => {
 .stream-info-bar .stream-value.warn { color: #fbbf24; }
 .stream-info-bar .stream-value.err { color: #f87171; }
 
-/* 双区联动版:随 Tab 切换的全宽等高详情 */
+/* 双区联动版:随 Tab 切换的全宽等高详情 —— 干掉外层白面板,4 张卡片直接躺在 tab 里 */
 .linked-info-bar {
-    --linked-detail-height: 168px;
+    --linked-detail-height: 148px;
     grid-column: 1 / -1; grid-row: 2;
-    gap: 0; overflow: hidden; padding: 0;
+    gap: 0; overflow: hidden;
+    padding: 0;
+    background: transparent; border: 0; border-radius: 0; box-shadow: none;
 }
 .linked-detail {
-    display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 6px;
+    display: flex; flex-direction: column; gap: 6px;
     box-sizing: border-box; height: var(--linked-detail-height); overflow: hidden;
-    padding: 8px 15px;
+    padding: 0;
 }
+.linked-detail > .linked-ptz-layout,
+.linked-detail > .linked-probe-layout,
+.linked-detail > .linked-image-layout,
+.linked-detail > .linked-advanced-empty { flex: 1 1 0; min-height: 0; }
 .linked-detail-hint {
     margin: 0 0 8px; padding: 0;
     color: var(--uvp-text-tertiary); font-size: 10.5px; line-height: 1.4;
@@ -2204,38 +2261,157 @@ onBeforeUnmount(() => {
 .stream-live-metric strong.err,
 .stream-live-metric strong.state-offline { color: var(--uvp-danger); }
 .stream-live-metric strong.state-fresh { color: var(--uvp-brand-cyan); }
-.linked-ptz-layout { display: grid; grid-template-columns: 1.12fr 1fr 1fr 0.78fr; gap: 0; min-height: 0; align-items: center; }
-.linked-section { min-width: 0; padding: 0 14px; }
-.linked-section:first-child { padding-left: 0; }
-.linked-section:last-child { padding-right: 0; }
-.linked-section + .linked-section { border-left: 1px solid var(--uvp-panel-border); }
+.linked-ptz-layout {
+    box-sizing: border-box;
+    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-rows: minmax(0, 1fr);
+    gap: 10px; min-height: 0; height: 100%; align-items: stretch;
+}
+.linked-section { min-width: 0; padding: 0; }
 .linked-section .section-hd.compact { margin-top: 12px; }
-.linked-section .preset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.linked-section .preset-add { grid-column: 1 / -1; }
-.linked-detail .preset-item { padding: 5px 8px; }
-.preset-go { display: inline-grid; place-items: center; color: var(--uvp-text-tertiary); }
-.preset-empty {
-    display: grid; gap: 6px; padding: 10px 12px 12px;
-    text-align: center;
-    background: color-mix(in srgb, var(--uvp-brand) 4%, var(--uvp-panel-bg));
-    border: 1px dashed color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
+
+/* 4 张 PTZ 卡片统一容器:实线淡蓝框 + 微蓝底,header 定高 + 主体 flex-1 填充,主体 overflow: hidden 保护 */
+.linked-card {
+    box-sizing: border-box;
+    display: flex; flex-direction: column; gap: 8px;
+    padding: 8px 10px 10px;
+    background: color-mix(in srgb, var(--uvp-brand) 3%, var(--uvp-panel-bg));
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
     border-radius: 8px;
+    min-width: 0; min-height: 0; height: 100%;
+    overflow: hidden;
 }
-.preset-empty-icon {
-    display: grid; place-items: center; width: 30px; height: 30px; margin: 2px auto 2px;
-    color: var(--uvp-brand); background: var(--uvp-brand-soft); border-radius: 50%;
+.linked-card > .linked-card-hd,
+.linked-card > .section-hd { flex: 0 0 auto; margin: 0; }
+.linked-card > .section-hd.first { margin-top: 0; }
+.linked-section .preset-grid {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-rows: min-content;
+    gap: 5px;
+    flex: 1 1 auto; min-height: 0; overflow: hidden;
+    align-content: start;
 }
-.preset-empty-title { margin: 0; color: var(--uvp-text-primary); font-size: 11.5px; font-weight: 600; }
-.preset-empty-hint { margin: 0; color: var(--uvp-text-tertiary); font-size: 10px; line-height: 1.5; }
-.preset-empty-action {
-    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-    padding: 6px 10px; margin-top: 4px;
-    color: #fff; background: var(--uvp-brand);
-    border: 0; border-radius: 6px; cursor: pointer;
-    font-size: 10.5px; font-weight: 500;
+.linked-section .preset-add { grid-column: 1 / -1; }
+.preset-go { display: inline-grid; place-items: center; color: var(--uvp-text-tertiary); }
+
+/* 紧凑胶囊 tile:名字省略 + 右侧红色 X 删除 */
+.preset-tile {
+    box-sizing: border-box;
+    display: inline-flex; align-items: stretch; max-width: 100%; min-width: 0;
+    background: var(--uvp-panel-bg);
+    border: 1px solid var(--uvp-panel-border); border-radius: 5px; overflow: hidden;
+    transition: border-color 0.12s ease;
 }
-.preset-empty-action:hover:not(:disabled) { background: color-mix(in srgb, var(--uvp-brand) 90%, #000); }
-.preset-empty-action:disabled { opacity: 0.55; cursor: not-allowed; }
+.preset-tile:hover:not(.disabled) { border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border)); }
+.preset-tile.active { background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border)); }
+.preset-tile.disabled { opacity: 0.5; }
+.preset-tile .preset-tile-hit,
+.preset-tile > .preset-tile-hit.preset-item {
+    display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: none;
+    flex: 1 1 auto;
+    padding: 3px 6px;
+    color: var(--uvp-text-primary); background: transparent;
+    border: 0; border-radius: 0; cursor: pointer; font-size: 10.5px; line-height: 1.4;
+    grid-template-columns: unset;
+    transition: none;
+}
+.preset-tile > .preset-tile-hit.preset-item:hover:not(:disabled) { border-color: transparent; background: transparent; }
+.preset-tile > .preset-tile-hit.preset-item:disabled { opacity: 1; cursor: not-allowed; }
+.preset-tile.active .preset-tile-hit { color: var(--uvp-brand); }
+.preset-tile .preset-idx { color: var(--uvp-text-tertiary); font-family: ui-monospace, Menlo, monospace; font-size: 10px; flex-shrink: 0; }
+.preset-tile.active .preset-idx { color: var(--uvp-brand); }
+.preset-tile .preset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.preset-tile-del {
+    display: inline-grid; place-items: center; width: 20px; padding: 0;
+    color: color-mix(in srgb, var(--uvp-danger) 65%, var(--uvp-text-tertiary));
+    background: transparent;
+    border: 0; border-left: 1px solid var(--uvp-panel-border);
+    cursor: pointer; transition: color 0.12s ease, background 0.12s ease;
+}
+.preset-tile-del:hover:not(:disabled) { color: var(--uvp-danger); background: var(--uvp-danger-soft); }
+.preset-tile-del:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 「更多」chip:作为 preset-grid 的最后一个 cell,只在预置位溢出(> 9)时出现 */
+.preset-more-popover-trigger {
+    display: block; width: 100%; min-width: 0; box-sizing: border-box;
+}
+.preset-tile-more {
+    box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    width: 100%; padding: 3px 6px;
+    color: var(--uvp-brand); background: var(--uvp-brand-soft);
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border)); border-radius: 5px;
+    cursor: pointer; font-size: 10.5px; line-height: 1.4;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+.preset-tile-more:hover { border-color: var(--uvp-brand); }
+.preset-popover {
+    display: grid; grid-template-rows: auto minmax(0, 1fr);
+    min-width: 240px; max-width: 320px;
+}
+.preset-popover-hd {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 8px 12px; color: var(--uvp-text-primary);
+    background: var(--uvp-list-toolbar-bg);
+    border-bottom: 1px solid var(--uvp-panel-border);
+    font-size: 11.5px; font-weight: 600;
+}
+.preset-popover-hd > span { display: inline-flex; align-items: center; gap: 5px; }
+.preset-popover-list {
+    max-height: 280px; overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--uvp-text-tertiary) 28%, transparent) transparent;
+}
+.preset-popover-row {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--uvp-panel-border);
+    transition: background 0.12s ease;
+}
+.preset-popover-row:last-child { border-bottom: 0; }
+.preset-popover-row:hover { background: color-mix(in srgb, var(--uvp-brand) 4%, transparent); }
+.preset-popover-row.active { background: color-mix(in srgb, var(--uvp-brand) 8%, transparent); }
+.preset-popover-idx { color: var(--uvp-text-tertiary); font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
+.preset-popover-name { overflow: hidden; color: var(--uvp-text-primary); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.preset-popover-actions { display: inline-flex; gap: 4px; }
+.preset-popover-call,
+.preset-popover-del {
+    display: inline-grid; place-items: center; width: 24px; height: 24px;
+    background: transparent;
+    border: 1px solid transparent; border-radius: 5px; cursor: pointer;
+    transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.preset-popover-call { color: var(--uvp-brand); }
+.preset-popover-call:hover:not(:disabled) { background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 30%, transparent); }
+.preset-popover-del { color: color-mix(in srgb, var(--uvp-danger) 65%, var(--uvp-text-tertiary)); }
+.preset-popover-del:hover:not(:disabled) { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border); }
+.preset-popover-call:disabled,
+.preset-popover-del:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* 预置位卡片头部行(标题 + 保存按钮),复用 .linked-card 提供的实线蓝框容器 */
+.linked-card-hd {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.linked-card-hd .section-title { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-primary); font-size: 11.5px; font-weight: 600; }
+.preset-count {
+    display: inline-flex; align-items: center; padding: 1px 6px; margin-left: 4px;
+    color: var(--uvp-brand); background: var(--uvp-brand-soft);
+    border-radius: 999px; font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-weight: 600; font-style: normal;
+}
+.preset-save-btn {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 9px;
+    color: var(--uvp-brand); background: transparent;
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border)); border-radius: 5px;
+    cursor: pointer; font-size: 10.5px; font-weight: 500;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+.preset-save-btn:hover:not(:disabled) { color: #fff; background: var(--uvp-brand); border-color: var(--uvp-brand); }
+.preset-save-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.preset-empty {
+    display: grid; place-items: center; gap: 2px;
+    padding: 18px 12px 14px;
+}
 .resource-summary-action {
     display: flex; align-items: center; justify-content: space-between; gap: 6px;
     min-height: 22px; padding: 2px 7px;
@@ -2735,6 +2911,6 @@ onBeforeUnmount(() => {
     .tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .probe-data-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .lens-grid { grid-template-columns: 1fr; }
-    .preset-grid { grid-template-columns: 1fr; }
+    .linked-section .preset-grid { grid-template-columns: 1fr; }
 }
 </style>
