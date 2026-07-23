@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 const (
@@ -93,6 +96,14 @@ func (s *Service) Get(ctx context.Context, streamID string) (*Snapshot, error) {
 func (s *Service) read(ctx context.Context, streamID string, mediaNode *node.Node) (*Snapshot, error) {
 	info, err := s.clientFor(mediaNode).GetMediaInfo(ctx, defaultSchema, defaultVHost, defaultApp, streamID)
 	if err != nil {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("读取 ZLM 流概况失败",
+				zap.String("streamId", streamID),
+				zap.Int64("nodeId", mediaNode.ID),
+				zap.String("host", mediaNode.Host),
+				zap.Int("apiPort", mediaNode.APIPort),
+				zap.Error(err))
+		}
 		return nil, fmt.Errorf("%w: %v", ErrNodeUnavailable, err)
 	}
 	if !info.Online {
@@ -173,7 +184,7 @@ type Track struct {
 	Loss          *float64 `json:"loss"`
 	Width         int      `json:"width"`
 	Height        int      `json:"height"`
-	FPS           int      `json:"fps"`
+	FPS           float64  `json:"fps"`
 	KeyFrames     int64    `json:"keyFrames"`
 	GOPSize       int      `json:"gopSize"`
 	GOPIntervalMS int      `json:"gopIntervalMs"`

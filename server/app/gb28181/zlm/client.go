@@ -151,7 +151,7 @@ type MediaTrack struct {
 	SampleBit     int      `json:"sample_bit"`
 	Width         int      `json:"width"`
 	Height        int      `json:"height"`
-	FPS           int      `json:"fps"`
+	FPS           float64  `json:"fps"`
 	KeyFrames     int64    `json:"key_frames"`
 	GOPSize       int      `json:"gop_size"`
 	GOPIntervalMS int      `json:"gop_interval_ms"`

@@ -20,7 +20,7 @@ func TestGetMediaInfoParsesFullResponse(t *testing.T) {
 			"totalBytes":9000000,"readerCount":3,"totalReaderCount":7,"originType":3,
 			"originTypeStr":"rtp_push","originUrl":"","isRecordingMP4":true,"isRecordingHLS":false,
 			"tracks":[
-				{"codec_id":0,"codec_id_name":"H264","ready":true,"codec_type":0,"frames":100,"duration":4.0,"width":1920,"height":1080,"fps":25,"key_frames":4,"gop_size":25,"gop_interval_ms":1000,"loss":0.0125},
+				{"codec_id":0,"codec_id_name":"H264","ready":true,"codec_type":0,"frames":100,"duration":4.0,"width":1920,"height":1080,"fps":25.0,"key_frames":4,"gop_size":25,"gop_interval_ms":1000,"loss":0.0125},
 				{"codec_id":3,"codec_id_name":"PCMA","ready":true,"codec_type":1,"frames":200,"duration":4.0,"sample_rate":8000,"channels":1,"sample_bit":16,"loss":-1}
 			]
 		}`))
