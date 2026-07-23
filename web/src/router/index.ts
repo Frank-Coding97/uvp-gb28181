@@ -41,6 +41,9 @@ const router = createRouter({
  */
 router.beforeEach(async (to: any, _: any, next: any) => {
     NProgress.start(); // 开启进度条
+    // 免登录路由白名单(用于原型/demo 页面)
+    const publicRoutes = ["/play-console-demo", "/play-console-linked-demo"];
+    if (publicRoutes.includes(to.path)) return next();
     // 新的登录逻辑
     const tokenExist = hasRefreshToken();
     // 1、去登录页，无token，放行

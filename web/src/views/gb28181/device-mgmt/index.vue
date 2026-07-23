@@ -79,7 +79,7 @@ import {
 import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { storeToRefs } from "pinia";
-import ControlConsole from "../components/ControlConsole.vue";
+import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 
@@ -2283,7 +2283,7 @@ onUnmounted(() => {
                 @changed="handleSubscriptionChanged"
             />
 
-            <ControlConsole
+            <PlayConsoleLinked
                 v-model:visible="controlConsoleVisible"
                 :channel="controlConsoleChannel"
             />

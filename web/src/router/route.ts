@@ -44,6 +44,24 @@ export const staticRoutes = [
     redirect: HOME_PATH,
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
     children: []
+  },
+  {
+    path: "/play-console-demo",
+    name: "play-console-demo",
+    component: () => import(/* webpackChunkName: "play-console-demo" */ "@/views/gb28181/PlayConsoleDemo.vue"),
+    meta: {
+      title: "播放控制台原型演示",
+      hide: true
+    }
+  },
+  {
+    path: "/play-console-linked-demo",
+    name: "play-console-linked-demo",
+    component: () => import(/* webpackChunkName: "play-console-linked-demo" */ "@/views/gb28181/PlayConsoleLinkedDemo.vue"),
+    meta: {
+      title: "播放控制台联动原型",
+      hide: true
+    }
   }
   /**
    * 提示：写在这里的为全屏界面，不建议写在这里非全屏界面，请写在 layout.children 路由数组中
