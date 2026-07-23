@@ -3524,11 +3524,8 @@ onUnmounted(() => {
     color: var(--uvp-text-primary);
     font-weight: 500;
 }
-.channel-card-inline-select {
-    justify-self: start;
-    width: 148px;
-    max-width: 100%;
-    min-width: 0;
+:deep(.channel-card-inline-select.arco-select-view-single) {
+    width: 130px !important;
 }
 .channel-card-info :deep(.arco-switch) { justify-self: start; }
 .cloud-recording-control {
