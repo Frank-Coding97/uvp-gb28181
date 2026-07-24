@@ -164,8 +164,33 @@ function homeResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function operationResponse(
+  status: "queued" | "sent" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled",
+  operationId: string,
+  deadlineAt: string | null,
+  errorCode: string | null = null
+) {
+  return {
+    code: 0,
+    message: "",
+    data: {
+      operationId,
+      status,
+      errorCode,
+      errorMessage: errorCode,
+      completedAt: ["accepted", "rejected", "timeout", "unknown", "cancelled"].includes(status)
+        ? "2026-07-22T10:00:05Z"
+        : null,
+      deadlineAt
+    }
+  };
+}
+
 describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
+    api.getHomePosition.mockReset();
+    api.getPtzOperation.mockReset();
+    api.updateHomePosition.mockReset();
     api.startPlay.mockResolvedValue({
       code: 0,
       message: "",
@@ -200,6 +225,13 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.controlDevice.mockResolvedValue({ code: 0, message: "", data: { operationId: "op-1", action: "accepted", status: "accepted" } });
     api.controlPtz.mockResolvedValue({ code: 0, message: "", data: { action: "accepted", status: "sent" } });
     api.controlPtzWiper.mockResolvedValue({ code: 0, message: "", data: { operationId: "wiper-1", action: "accepted", status: "sent" } });
+    api.getHomePosition.mockResolvedValue(homeResponse());
+    api.getPtzOperation.mockResolvedValue(operationResponse("accepted", "home-default", null));
+    api.updateHomePosition.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { operationId: "home-default", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
+    });
   });
 
   afterEach(() => {
@@ -1181,6 +1213,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("恢复控制 pending 与 unknown，但 T10 不启动 operation 轮询", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime("2026-07-22T10:00:00.000Z");
       api.getHomePosition.mockResolvedValueOnce(homeResponse({
         control: {
           status: "pending",
@@ -1221,6 +1255,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
 
     it("恢复查询 pending 且不重新发 refresh", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime("2026-07-22T10:00:00.000Z");
       api.getHomePosition.mockResolvedValueOnce(homeResponse({
         homePosition: {
           enabled: true,
@@ -1269,6 +1305,736 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
   });
 
+  describe("home position operations", () => {
+    const nowIso = "2026-07-22T10:00:00.000Z";
+    const deadline = (seconds: number) => new Date(Date.parse(nowIso) + seconds * 1000).toISOString();
+
+    it("启用保留 #0 边界，非法启用零请求，关闭只发送 enabled=false", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: {
+          enabled: false,
+          resetTime: null,
+          presetId: null,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      }));
+      const enableWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await enableWrapper.get("[data-testid='home-toggle']").setValue(true);
+      await enableWrapper.get("[data-testid='home-preset']").setValue("0");
+      await enableWrapper.get("[data-testid='home-reset-time']").setValue("10");
+      await enableWrapper.get("[data-testid='home-save']").trigger("click");
+      await flushPromises();
+
+      expect(api.updateHomePosition).toHaveBeenCalledWith(
+        channel.id,
+        { enabled: true, resetTime: 10, presetId: 0 },
+        expect.stringMatching(/^home-control-/)
+      );
+      enableWrapper.unmount();
+
+      api.updateHomePosition.mockClear();
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: {
+          enabled: true,
+          resetTime: 9,
+          presetId: 0,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      }));
+      const closeWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(closeWrapper.get("[data-testid='home-save']").attributes("disabled")).toBeDefined();
+      await closeWrapper.get("[data-testid='home-save']").trigger("click");
+      expect(api.updateHomePosition).not.toHaveBeenCalled();
+
+      await closeWrapper.get("[data-testid='home-toggle']").setValue(false);
+      await closeWrapper.get("[data-testid='home-save']").trigger("click");
+      await flushPromises();
+      expect(api.updateHomePosition).toHaveBeenCalledWith(
+        channel.id,
+        { enabled: false },
+        expect.stringMatching(/^home-control-/)
+      );
+      closeWrapper.unmount();
+    });
+
+    it("deferred PATCH 与 refresh 均防双击", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      let resolvePatch!: (value: any) => void;
+      api.updateHomePosition.mockReturnValueOnce(new Promise(resolve => { resolvePatch = resolve; }));
+      const patchWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await patchWrapper.get("[data-testid='home-save']").trigger("click");
+      await patchWrapper.get("[data-testid='home-save']").trigger("click");
+      expect(api.updateHomePosition).toHaveBeenCalledTimes(1);
+      expect(patchWrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("true");
+      resolvePatch({
+        code: 0,
+        message: "",
+        data: { operationId: "patch-once", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
+      });
+      await flushPromises();
+      expect(patchWrapper.get("[data-testid='home-operation-id']").text()).toContain("patch-once");
+      patchWrapper.unmount();
+
+      let resolveRefresh!: (value: any) => void;
+      api.getHomePosition
+        .mockResolvedValueOnce(homeResponse())
+        .mockReturnValueOnce(new Promise(resolve => { resolveRefresh = resolve; }));
+      const refreshWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+      api.getHomePosition.mockClear();
+
+      await refreshWrapper.get("[data-testid='home-refresh']").trigger("click");
+      await refreshWrapper.get("[data-testid='home-refresh']").trigger("click");
+      expect(api.getHomePosition).toHaveBeenCalledTimes(1);
+      resolveRefresh(homeResponse({
+        refresh: { status: "pending", operationId: "refresh-once", errorCode: null, deadlineAt: deadline(10) }
+      }));
+      await flushPromises();
+      expect(refreshWrapper.get("[data-testid='home-operation-id']").text()).toContain("refresh-once");
+      refreshWrapper.unmount();
+    });
+
+    it("PATCH queued 无 deadline 时首轮 hung operation 由临时保险截止收敛且迟到结果不复活", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.updateHomePosition.mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "queued-without-deadline", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
+      });
+      let resolveOperation!: (value: any) => void;
+      api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOperation = resolve; }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-save']").trigger("click");
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(6000);
+      await flushPromises();
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("queued-without-deadline");
+
+      resolveOperation(operationResponse("accepted", "queued-without-deadline", null));
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+      expect(api.getHomePosition).toHaveBeenCalledTimes(1);
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      wrapper.unmount();
+    });
+
+    it("PATCH 临时保险截止会被 operation 最新 deadline 覆盖且合法响应清除网络错误", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.updateHomePosition.mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "queued-then-sent", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
+      });
+      api.getHomePosition.mockResolvedValueOnce(homeResponse()).mockResolvedValueOnce(homeResponse());
+      api.getPtzOperation
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockResolvedValueOnce(operationResponse("sent", "queued-then-sent", deadline(10)))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockResolvedValueOnce(operationResponse("accepted", "queued-then-sent", null));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-save']").trigger("click");
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(wrapper.get("[data-testid='home-error']").text()).toContain("temporary network error");
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(wrapper.find("[data-testid='home-error']").exists()).toBe(false);
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("等待设备确认");
+
+      for (let second = 3; second <= 8; second += 1) {
+        await vi.advanceTimersByTimeAsync(1000);
+        await flushPromises();
+      }
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(8);
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      wrapper.unmount();
+    });
+
+    it.each(["accepted", "unknown", "rejected", "timeout", "cancelled"] as const)(
+      "PATCH 同步返回 %s 时不显示等待设备确认提示",
+      async status => {
+        const info = vi.spyOn(Message, "info");
+        api.updateHomePosition.mockResolvedValueOnce({
+          code: 0,
+          message: "",
+          data: { operationId: `sync-${status}`, sn: 1, channelId: channel.channelId, action: "home_position", status }
+        });
+        const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+        await flushPromises();
+        info.mockClear();
+
+        await wrapper.get("[data-testid='home-save']").trigger("click");
+        await flushPromises();
+        expect(info).not.toHaveBeenCalled();
+
+        wrapper.unmount();
+        info.mockRestore();
+      }
+    );
+
+    it("显式刷新只发一次 refresh=true，之后精确轮询 operation", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.getHomePosition
+        .mockResolvedValueOnce(homeResponse())
+        .mockResolvedValueOnce(homeResponse({
+          refresh: { status: "pending", operationId: "refresh-op", errorCode: null, deadlineAt: deadline(10) }
+        }))
+        .mockResolvedValueOnce(homeResponse({
+          freshness: "stale",
+          refresh: { status: "succeeded_no_data", operationId: "refresh-op", errorCode: null, deadlineAt: null }
+        }));
+      api.getPtzOperation.mockResolvedValueOnce(operationResponse("accepted", "refresh-op", null));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-refresh']").trigger("click");
+      await flushPromises();
+      expect(api.getHomePosition).toHaveBeenNthCalledWith(2, channel.id, true, expect.stringMatching(/^home-refresh-/));
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+      expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "refresh-op");
+      expect(api.getHomePosition).toHaveBeenNthCalledWith(3, channel.id);
+      expect(api.getHomePosition.mock.calls.filter((call: any[]) => call[1] === true)).toHaveLength(1);
+      expect(wrapper.get("[data-testid='home-freshness']").text()).toContain("缓存已过期");
+      wrapper.unmount();
+    });
+
+    it("页面重载恢复精确 operation，并按 queued -> sent 的最新 deadline 延长保险截止", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.getHomePosition
+        .mockResolvedValueOnce(homeResponse({
+          control: {
+            status: "pending",
+            operationId: "reload-control",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: deadline(2)
+          }
+        }))
+        .mockResolvedValueOnce(homeResponse());
+      api.getPtzOperation
+        .mockResolvedValueOnce(operationResponse("sent", "reload-control", deadline(10)))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockRejectedValueOnce(new Error("temporary network error"))
+        .mockResolvedValueOnce(operationResponse("accepted", "reload-control", null));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(api.updateHomePosition).not.toHaveBeenCalled();
+      for (let second = 1; second <= 5; second += 1) {
+        await vi.advanceTimersByTimeAsync(1000);
+        await flushPromises();
+      }
+
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(5);
+      expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "reload-control");
+      expect(api.getHomePosition.mock.calls.filter((call: any[]) => call[1] === true)).toHaveLength(0);
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      wrapper.unmount();
+    });
+
+    it("持续网络失败只重试到服务端 deadline+2s，随后停止为 unknown", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        control: {
+          status: "pending",
+          operationId: "network-timeout",
+          action: "home_position",
+          errorCode: null,
+          deadlineAt: deadline(2)
+        }
+      }));
+      api.getPtzOperation.mockRejectedValue(new Error("network unavailable"));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await vi.advanceTimersByTimeAsync(4000);
+      await flushPromises();
+      const callsAtCutoff = api.getPtzOperation.mock.calls.length;
+      expect(callsAtCutoff).toBeGreaterThan(0);
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("network-timeout");
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(callsAtCutoff);
+      wrapper.unmount();
+    });
+
+    it("单个 operation 请求卡住时由 deadline watchdog 收敛且迟到结果不复活", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        control: {
+          status: "pending",
+          operationId: "hung-operation",
+          action: "home_position",
+          errorCode: null,
+          deadlineAt: deadline(2)
+        }
+      }));
+      let resolveOperation!: (value: any) => void;
+      api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOperation = resolve; }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(3000);
+      await flushPromises();
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+
+      resolveOperation(operationResponse("accepted", "hung-operation", null));
+      await flushPromises();
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(api.getHomePosition).toHaveBeenCalledTimes(1);
+      wrapper.unmount();
+    });
+
+    it.each([
+      ["缺失", null],
+      ["已过期", "2026-07-22T09:59:59.000Z"]
+    ])("pending operation 的%s deadline 重读一次后仍非法即停止", async (_label, invalidDeadline) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      const invalid = homeResponse({
+        control: {
+          status: "pending",
+          operationId: "invalid-deadline",
+          action: "home_position",
+          errorCode: null,
+          deadlineAt: invalidDeadline
+        }
+      });
+      api.getHomePosition.mockResolvedValueOnce(invalid).mockResolvedValueOnce(invalid);
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(api.getHomePosition).toHaveBeenCalledTimes(2);
+      expect(api.getPtzOperation).not.toHaveBeenCalled();
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-error']").text()).toContain("截止时间");
+      expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+      wrapper.unmount();
+    });
+
+    it.each([
+      ["rejected", "DEVICE_REJECTED"],
+      ["timeout", "APPLICATION_TIMEOUT"]
+    ] as const)("控制 %s 回滚草稿到最后确认值并保留 operation ID", async (status, errorCode) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.updateHomePosition.mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: `control-${status}`, sn: 2, channelId: channel.channelId, action: "home_position", status: "queued" }
+      });
+      api.getPtzOperation.mockResolvedValueOnce(
+        operationResponse(status, `control-${status}`, null, errorCode)
+      );
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-toggle']").setValue(false);
+      await wrapper.get("[data-testid='home-save']").trigger("click");
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+
+      expect((wrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(true);
+      expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("操作失败");
+      expect(wrapper.get("[data-testid='home-error']").text()).toContain(errorCode);
+      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain(`control-${status}`);
+      wrapper.unmount();
+    });
+
+    it("控制 accepted 后确认状态读取失败时保留提交草稿和 accepted operation", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.getHomePosition
+        .mockResolvedValueOnce(homeResponse({
+          homePosition: {
+            enabled: false,
+            resetTime: null,
+            presetId: null,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          }
+        }))
+        .mockRejectedValueOnce(new Error("read model unavailable"));
+      api.updateHomePosition.mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "accepted-read-failed", sn: 3, channelId: channel.channelId, action: "home_position", status: "queued" }
+      });
+      api.getPtzOperation.mockResolvedValueOnce(operationResponse("accepted", "accepted-read-failed", null));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-toggle']").setValue(true);
+      await wrapper.get("[data-testid='home-preset']").setValue("0");
+      await wrapper.get("[data-testid='home-reset-time']").setValue("30");
+      await wrapper.get("[data-testid='home-save']").trigger("click");
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("设备已确认，状态待读取");
+      expect(wrapper.get("[data-testid='home-error']").text()).toContain("设备已确认，但确认状态读取失败，可重试");
+      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("accepted-read-failed");
+      expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+      expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
+      expect((wrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(true);
+      expect((wrapper.get("[data-testid='home-preset']").element as HTMLSelectElement).value).toBe("0");
+      expect((wrapper.get("[data-testid='home-reset-time']").element as HTMLInputElement).value).toBe("30");
+      expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已关闭");
+      wrapper.unmount();
+    });
+
+    it("控制 accepted 后观察后端 reconcile，并用设备实际值覆盖草稿及展示 mismatch", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      const disabled = {
+        enabled: false,
+        resetTime: null,
+        presetId: null,
+        confirmedAt: "2026-07-22T10:00:00Z",
+        source: "device_query",
+        verification: "verified"
+      };
+      api.getHomePosition
+        .mockResolvedValueOnce(homeResponse({ homePosition: disabled }))
+        .mockResolvedValueOnce(homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime: 30,
+            presetId: 0,
+            confirmedAt: "2026-07-22T10:00:01Z",
+            source: "control_ack",
+            verification: "unverified"
+          },
+          control: {
+            status: "accepted",
+            operationId: "control-accepted",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: null
+          },
+          refresh: {
+            status: "pending",
+            operationId: "reconcile-op",
+            errorCode: null,
+            deadlineAt: deadline(12)
+          }
+        }))
+        .mockResolvedValueOnce(homeResponse({
+          homePosition: {
+            enabled: true,
+            resetTime: 45,
+            presetId: 2,
+            confirmedAt: "2026-07-22T10:00:02Z",
+            source: "device_query",
+            verification: "verified"
+          },
+          control: {
+            status: "accepted",
+            operationId: "control-accepted",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: null
+          },
+          refresh: {
+            status: "failed",
+            operationId: "reconcile-op",
+            errorCode: "HOME_POSITION_RECONCILE_MISMATCH",
+            deadlineAt: null
+          }
+        }));
+      api.updateHomePosition.mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "control-accepted", sn: 3, channelId: channel.channelId, action: "home_position", status: "queued" }
+      });
+      api.getPtzOperation
+        .mockResolvedValueOnce(operationResponse("accepted", "control-accepted", null))
+        .mockResolvedValueOnce(operationResponse("accepted", "reconcile-op", null));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-toggle']").setValue(true);
+      await wrapper.get("[data-testid='home-preset']").setValue("0");
+      await wrapper.get("[data-testid='home-reset-time']").setValue("30");
+      await wrapper.get("[data-testid='home-save']").trigger("click");
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("reconcile-op");
+      expect(wrapper.get("[data-testid='home-verification']").text()).toContain("查询未验证");
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(api.getPtzOperation).toHaveBeenNthCalledWith(1, channel.id, "control-accepted");
+      expect(api.getPtzOperation).toHaveBeenNthCalledWith(2, channel.id, "reconcile-op");
+      expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("#2");
+      expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("45 秒");
+      expect((wrapper.get("[data-testid='home-preset']").element as HTMLSelectElement).value).toBe("2");
+      expect(wrapper.get("[data-testid='home-mismatch']").text()).toContain("设备未按请求应用配置");
+      wrapper.unmount();
+    });
+
+    it.each([
+      ["timeout", "timeout"],
+      ["no-data", "accepted"]
+    ] as const)("control_ack/unverified 后 reconcile %s 保留配置并标记 stale", async (outcome, operationStatus) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      const disabled = {
+        enabled: false,
+        resetTime: null,
+        presetId: null,
+        confirmedAt: "2026-07-22T10:00:00Z",
+        source: "device_query",
+        verification: "verified"
+      };
+      const unverified = {
+        enabled: true,
+        resetTime: 30,
+        presetId: 0,
+        confirmedAt: "2026-07-22T10:00:01Z",
+        source: "control_ack",
+        verification: "unverified"
+      };
+      api.getHomePosition
+        .mockResolvedValueOnce(homeResponse({ homePosition: disabled }))
+        .mockResolvedValueOnce(homeResponse({
+          homePosition: unverified,
+          control: {
+            status: "accepted",
+            operationId: "control-unverified",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: null
+          },
+          refresh: {
+            status: "pending",
+            operationId: `reconcile-${outcome}`,
+            errorCode: null,
+            deadlineAt: deadline(10)
+          }
+        }));
+      if (outcome === "no-data") {
+        api.getHomePosition.mockResolvedValueOnce(homeResponse({
+          homePosition: unverified,
+          freshness: "stale",
+          control: {
+            status: "accepted",
+            operationId: "control-unverified",
+            action: "home_position",
+            errorCode: null,
+            deadlineAt: null
+          },
+          refresh: {
+            status: "succeeded_no_data",
+            operationId: "reconcile-no-data",
+            errorCode: null,
+            deadlineAt: null
+          }
+        }));
+      }
+      api.updateHomePosition.mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { operationId: "control-unverified", sn: 3, channelId: channel.channelId, action: "home_position", status: "queued" }
+      });
+      api.getPtzOperation
+        .mockResolvedValueOnce(operationResponse("accepted", "control-unverified", null))
+        .mockResolvedValueOnce(operationResponse(
+          operationStatus,
+          `reconcile-${outcome}`,
+          null,
+          outcome === "timeout" ? "APPLICATION_TIMEOUT" : null
+        ));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-toggle']").setValue(true);
+      await wrapper.get("[data-testid='home-preset']").setValue("0");
+      await wrapper.get("[data-testid='home-reset-time']").setValue("30");
+      await wrapper.get("[data-testid='home-save']").trigger("click");
+      await vi.advanceTimersByTimeAsync(2000);
+      await flushPromises();
+
+      expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("#0");
+      expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("30 秒");
+      expect(wrapper.get("[data-testid='home-verification']").text()).toContain("查询未验证");
+      expect(wrapper.get("[data-testid='home-freshness']").text()).toContain("缓存已过期");
+      if (outcome === "timeout") {
+        expect(wrapper.get("[data-testid='home-error']").text()).toContain("APPLICATION_TIMEOUT");
+      } else {
+        expect(wrapper.find("[data-testid='home-error']").exists()).toBe(false);
+      }
+      wrapper.unmount();
+    });
+
+    it.each([
+      ["有缓存", true],
+      ["无缓存", false]
+    ])("refresh timeout 时%s都结束 pending 并保留重试入口", async (_label, hasCache) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      const initial = homeResponse({ homePosition: hasCache ? homeResponse().data.homePosition : null, freshness: hasCache ? "fresh" : "unknown" });
+      const pending = homeResponse({
+        homePosition: hasCache ? homeResponse().data.homePosition : null,
+        refresh: { status: "pending", operationId: "refresh-timeout", errorCode: null, deadlineAt: deadline(10) }
+      });
+      api.getHomePosition.mockResolvedValueOnce(initial).mockResolvedValueOnce(pending);
+      api.getPtzOperation.mockResolvedValueOnce(
+        operationResponse("timeout", "refresh-timeout", null, "APPLICATION_TIMEOUT")
+      );
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await wrapper.get("[data-testid='home-refresh']").trigger("click");
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+
+      expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+      expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
+      if (hasCache) {
+        expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+        expect(wrapper.get("[data-testid='home-freshness']").text()).toContain("缓存已过期");
+      } else {
+        expect(wrapper.get("[data-testid='home-phase']").text()).toContain("操作失败");
+        expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("尚无设备确认配置");
+      }
+      wrapper.unmount();
+    });
+
+    it("operation unknown 立即停止且不自动重发控制", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        control: {
+          status: "pending",
+          operationId: "explicit-unknown",
+          action: "home_position",
+          errorCode: null,
+          deadlineAt: deadline(10)
+        }
+      }));
+      api.getPtzOperation.mockResolvedValueOnce(
+        operationResponse("unknown", "explicit-unknown", null, "TRANSPORT_UNKNOWN")
+      );
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("explicit-unknown");
+      expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+      expect(api.updateHomePosition).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+      wrapper.unmount();
+    });
+
+    it.each(["切换通道", "关闭弹窗", "卸载"])("operation 请求重叠时%s会隔离迟到 promise 和 timer", async action => {
+      vi.useFakeTimers();
+      vi.setSystemTime(nowIso);
+      const oldPending = homeResponse({
+        control: {
+          status: "pending",
+          operationId: "late-operation",
+          action: "home_position",
+          errorCode: null,
+          deadlineAt: deadline(20)
+        }
+      });
+      const nextChannel = { ...channel, id: 2, channelId: "0411212756", name: "园区南门" };
+      api.getHomePosition.mockImplementation((channelId: number) =>
+        Promise.resolve(channelId === channel.id
+          ? oldPending
+          : homeResponse({
+              homePosition: {
+                enabled: false,
+                resetTime: null,
+                presetId: null,
+                confirmedAt: "2026-07-22T10:00:00Z",
+                source: "device_query",
+                verification: "verified"
+              }
+            }))
+      );
+      let resolveOperation!: (value: any) => void;
+      api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOperation = resolve; }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      await vi.advanceTimersByTimeAsync(1000);
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+
+      if (action === "切换通道") {
+        await wrapper.setProps({ channel: nextChannel });
+        await flushPromises();
+      } else if (action === "关闭弹窗") {
+        await wrapper.setProps({ visible: false });
+      } else {
+        wrapper.unmount();
+      }
+
+      resolveOperation(operationResponse("accepted", "late-operation", null));
+      await flushPromises();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+      if (action === "切换通道") {
+        expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已关闭");
+        expect(wrapper.text()).not.toContain("late-operation");
+      }
+      if (action !== "卸载") wrapper.unmount();
+    });
+  });
+
   it("关闭看守位时无需预置位和等待时间即可保存", async () => {
     api.updateHomePosition.mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "home-off" } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
@@ -1283,7 +2049,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     await saveButton.trigger("click");
     await flushPromises();
 
-    expect(api.updateHomePosition).toHaveBeenCalledWith(channel.id, { enabled: false });
+    expect(api.updateHomePosition).toHaveBeenCalledWith(
+      channel.id,
+      { enabled: false },
+      expect.stringMatching(/^home-control-/)
+    );
     wrapper.unmount();
   });
 
@@ -1319,7 +2089,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     await saveButton.trigger("click");
     await flushPromises();
 
-    expect(api.updateHomePosition).toHaveBeenCalledWith(channel.id, { enabled: true, resetTime: 10, presetId: 1 });
+    expect(api.updateHomePosition).toHaveBeenCalledWith(
+      channel.id,
+      { enabled: true, resetTime: 10, presetId: 1 },
+      expect.stringMatching(/^home-control-/)
+    );
     wrapper.unmount();
   });
 

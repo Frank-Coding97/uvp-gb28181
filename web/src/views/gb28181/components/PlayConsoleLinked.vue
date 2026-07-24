@@ -27,6 +27,7 @@ import {
     deleteTalkSession,
     getControlCapabilities,
     getHomePosition,
+    getPtzOperation,
     getPtzPreciseStatus,
     getTalkSession,
     getStreamMonitor,
@@ -42,10 +43,12 @@ import {
     type DeviceControlCapabilities,
     type HomePositionConfig,
     type HomePositionFreshness,
+    type HomePositionPatch,
     type HomePositionResult,
     type HomePositionSupport,
     type PlayResult,
     type ProbeSnapshot,
+    type PTZOperation,
     type PTZResourceFreshness,
     type StreamMonitorSnapshot,
     type TalkCreateResult,
@@ -564,8 +567,8 @@ const filteredCruiseTracks = computed(() => {
 });
 
 // 看守位(2022 HomePositionQuery):设备确认值与用户草稿必须独立。
-type HomePositionPhase = "unknown" | "loading" | "pending" | "enabled" | "disabled" | "error";
-type HomePositionPending = { kind: "control" | "refresh"; operationId: string; deadlineAt: string | null };
+type HomePositionPhase = "unknown" | "loading" | "pending" | "accepted" | "enabled" | "disabled" | "error";
+type HomePositionPending = { kind: "control" | "refresh"; operationId: string | null; deadlineAt: string | null };
 type HomePositionDraft = { enabled: boolean; presetId: number | null; resetTime: number | null };
 
 const unknownHomeSupport = (): HomePositionSupport => ({ status: "unknown", reason: "能力尚未确认" });
@@ -579,6 +582,7 @@ const homePending = ref<HomePositionPending | null>(null);
 const homeOperationId = ref<string | null>(null);
 const homeError = ref("");
 const homeMismatch = ref("");
+const homeFailureLabel = ref("加载失败");
 
 const homePositionCanSave = computed(() => {
     if (!homeDraft.value.enabled) return true;
@@ -591,18 +595,18 @@ const homePositionCanSave = computed(() => {
         && Number(resetTime) <= 3600;
 });
 const homeControlPending = computed(() => homePending.value?.kind === "control");
-const homeRefreshPending = computed(() => homePending.value?.kind === "refresh");
-const homeCanSubmit = computed(() => props.channel?.status === 1 && !homeControlPending.value && homePositionCanSave.value);
-const homeCanRefresh = computed(() => props.channel?.status === 1 && !homeRefreshPending.value);
+const homeCanSubmit = computed(() => props.channel?.status === 1 && homePending.value === null && homePositionCanSave.value);
+const homeCanRefresh = computed(() => props.channel?.status === 1 && homePending.value === null);
 const homeIsBusy = computed(() => homePhase.value === "loading" || homePending.value !== null);
 const homePhaseText = computed(() => {
     if (homePhase.value === "unknown") return homeOperationId.value ? "结果未知" : "待查询";
     return ({
         loading: "正在加载",
         pending: "等待设备确认",
+        accepted: "设备已确认，状态待读取",
         enabled: "已启用",
         disabled: "已关闭",
-        error: "加载失败",
+        error: homeFailureLabel.value,
     } as const)[homePhase.value];
 });
 const homeFreshnessText = computed(() => ({ fresh: "数据新鲜", stale: "缓存已过期", unknown: "新鲜度未知" })[homeFreshness.value]);
@@ -639,6 +643,7 @@ const homeVerificationText = computed(() => {
 });
 
 function resetHomePositionState() {
+    clearHomePositionPolling(true);
     homeConfirmed.value = null;
     homeDraft.value = { enabled: false, presetId: null, resetTime: 300 };
     homePhase.value = "unknown";
@@ -649,6 +654,7 @@ function resetHomePositionState() {
     homeOperationId.value = null;
     homeError.value = "";
     homeMismatch.value = "";
+    homeFailureLabel.value = "加载失败";
 }
 
 function applyHomePositionResult(result: HomePositionResult) {
@@ -661,6 +667,7 @@ function applyHomePositionResult(result: HomePositionResult) {
     homeQuerySupport.value = result.querySupport;
     homeError.value = "";
     homeMismatch.value = "";
+    homeFailureLabel.value = "操作失败";
 
     if (result.control.status === "pending" && result.control.operationId) {
         homePending.value = { kind: "control", operationId: result.control.operationId, deadlineAt: result.control.deadlineAt };
@@ -693,6 +700,297 @@ function applyHomePositionResult(result: HomePositionResult) {
         homePhase.value = result.homePosition.enabled ? "enabled" : "disabled";
     } else {
         homePhase.value = "unknown";
+    }
+}
+
+const HOME_POSITION_POLL_INTERVAL_MS = 1000;
+const HOME_POSITION_INITIAL_QUEUE_MS = 5000;
+const HOME_POSITION_DEADLINE_GRACE_MS = 2000;
+let homePositionPollTimer: number | null = null;
+let homePositionRequestDeadlineTimer: number | null = null;
+let homePositionGeneration = 0;
+let homePositionInsuranceDeadlineMs: number | null = null;
+let homePositionDeadlineRecheckUsed = false;
+let homePositionTrackedOperationId: string | null = null;
+let homePositionIdempotencySequence = 0;
+
+function clearHomePositionPolling(invalidate = false) {
+    if (homePositionPollTimer !== null) window.clearTimeout(homePositionPollTimer);
+    if (homePositionRequestDeadlineTimer !== null) window.clearTimeout(homePositionRequestDeadlineTimer);
+    homePositionPollTimer = null;
+    homePositionRequestDeadlineTimer = null;
+    homePositionInsuranceDeadlineMs = null;
+    homePositionDeadlineRecheckUsed = false;
+    homePositionTrackedOperationId = null;
+    if (invalidate) homePositionGeneration += 1;
+}
+
+function getHomePositionOperationWithDeadline(channelId: number, operationId: string) {
+    const request = getPtzOperation(channelId, operationId);
+    if (homePositionInsuranceDeadlineMs === null) return request;
+    const remainingMs = homePositionInsuranceDeadlineMs - Date.now();
+    if (remainingMs <= 0) return Promise.reject(new Error("操作状态请求超过服务端截止时间"));
+    return new Promise<Awaited<ReturnType<typeof getPtzOperation>>>((resolve, reject) => {
+        let settled = false;
+        const deadlineTimer = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            if (homePositionRequestDeadlineTimer === deadlineTimer) homePositionRequestDeadlineTimer = null;
+            reject(new Error("操作状态请求超过服务端截止时间"));
+        }, remainingMs);
+        homePositionRequestDeadlineTimer = deadlineTimer;
+        request.then(
+            (response) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(deadlineTimer);
+                if (homePositionRequestDeadlineTimer === deadlineTimer) homePositionRequestDeadlineTimer = null;
+                resolve(response);
+            },
+            (error) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(deadlineTimer);
+                if (homePositionRequestDeadlineTimer === deadlineTimer) homePositionRequestDeadlineTimer = null;
+                reject(error);
+            },
+        );
+    });
+}
+
+function beginHomePositionOperation() {
+    clearHomePositionPolling(false);
+    homePositionGeneration += 1;
+    return homePositionGeneration;
+}
+
+function isCurrentHomePositionContext(channelId: number, token: number, generation: number) {
+    return props.visible
+        && token === sessionToken
+        && generation === homePositionGeneration
+        && props.channel?.id === channelId;
+}
+
+function nextHomePositionIdempotencyKey(kind: "control" | "refresh", channelId: number) {
+    homePositionIdempotencySequence += 1;
+    const nonce = globalThis.crypto?.randomUUID?.()
+        ?? `${Date.now()}-${homePositionIdempotencySequence}-${Math.random().toString(36).slice(2)}`;
+    return `home-${kind}-${channelId}-${nonce}`;
+}
+
+function restoreHomeDraftFromConfirmed() {
+    const confirmed = homeConfirmed.value;
+    homeDraft.value = confirmed
+        ? { enabled: confirmed.enabled, presetId: confirmed.presetId, resetTime: confirmed.resetTime }
+        : { enabled: false, presetId: null, resetTime: 300 };
+}
+
+function prepareHomePositionOperation(operationId: string) {
+    if (homePositionTrackedOperationId === operationId) return;
+    homePositionTrackedOperationId = operationId;
+    homePositionInsuranceDeadlineMs = null;
+    homePositionDeadlineRecheckUsed = false;
+}
+
+function updateHomePositionDeadline(deadlineAt: string | null) {
+    if (!deadlineAt) return false;
+    const deadlineMs = Date.parse(deadlineAt);
+    if (!Number.isFinite(deadlineMs) || deadlineMs <= Date.now()) return false;
+    homePositionInsuranceDeadlineMs = deadlineMs + HOME_POSITION_DEADLINE_GRACE_MS;
+    return true;
+}
+
+function markHomePositionUnknown(pending: HomePositionPending, message: string) {
+    const operationId = pending.operationId;
+    clearHomePositionPolling(false);
+    homePending.value = null;
+    homeOperationId.value = operationId;
+    homeFailureLabel.value = "操作结果未知";
+    homePhase.value = "unknown";
+    homeError.value = message;
+    homeMismatch.value = "";
+    if (pending.kind === "control") restoreHomeDraftFromConfirmed();
+    if (pending.kind === "refresh" && homeConfirmed.value) homeFreshness.value = "stale";
+}
+
+function finishHomePositionAcceptedReadFailure(pending: HomePositionPending, message: string) {
+    const operationId = pending.operationId;
+    clearHomePositionPolling(false);
+    homePending.value = null;
+    homeOperationId.value = operationId;
+    homeFailureLabel.value = "确认状态读取失败";
+    homePhase.value = "accepted";
+    homeFreshness.value = homeConfirmed.value ? "stale" : "unknown";
+    homeError.value = `设备已确认，但确认状态读取失败，可重试${message ? `：${message}` : ""}`;
+    homeMismatch.value = "";
+}
+
+function finishHomePositionFailure(pending: HomePositionPending, operation: PTZOperation) {
+    clearHomePositionPolling(false);
+    homePending.value = null;
+    homeOperationId.value = operation.operationId;
+    homeFailureLabel.value = "操作失败";
+    homeError.value = operation.errorCode || operation.errorMessage || `操作状态: ${operation.status}`;
+    homeMismatch.value = "";
+    if (pending.kind === "control") {
+        restoreHomeDraftFromConfirmed();
+        homePhase.value = "error";
+        return;
+    }
+    homeFreshness.value = "stale";
+    homePhase.value = homeConfirmed.value
+        ? (homeConfirmed.value.enabled ? "enabled" : "disabled")
+        : "error";
+}
+
+function scheduleHomePositionPoll(channelId: number, token: number, generation: number) {
+    if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+    if (homePositionPollTimer !== null) window.clearTimeout(homePositionPollTimer);
+    const pending = homePending.value;
+    if (!pending?.operationId) return;
+    const nowMs = Date.now();
+    if (homePositionInsuranceDeadlineMs !== null && nowMs >= homePositionInsuranceDeadlineMs) {
+        markHomePositionUnknown(pending, "操作超过服务端截止时间，结果未知，可重试");
+        return;
+    }
+    const delay = homePositionInsuranceDeadlineMs === null
+        ? HOME_POSITION_POLL_INTERVAL_MS
+        : Math.min(HOME_POSITION_POLL_INTERVAL_MS, homePositionInsuranceDeadlineMs - nowMs);
+    homePositionPollTimer = window.setTimeout(() => {
+        homePositionPollTimer = null;
+        void pollHomePositionOperation(channelId, token, generation);
+    }, delay);
+}
+
+async function recheckHomePositionDeadline(channelId: number, token: number, generation: number) {
+    const pending = homePending.value;
+    if (!pending?.operationId || !isCurrentHomePositionContext(channelId, token, generation)) return;
+    if (homePositionDeadlineRecheckUsed) {
+        markHomePositionUnknown(pending, "服务端未返回有效操作截止时间，结果未知，可重试");
+        return;
+    }
+    homePositionDeadlineRecheckUsed = true;
+    try {
+        const response = await getHomePosition(channelId);
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "重读看守位状态失败");
+        applyHomePositionResult(response.data);
+        const latest = homePending.value;
+        if (!latest?.operationId) {
+            clearHomePositionPolling(false);
+            return;
+        }
+        prepareHomePositionOperation(latest.operationId);
+        if (!updateHomePositionDeadline(latest.deadlineAt)) {
+            markHomePositionUnknown(latest, "服务端未返回有效操作截止时间，结果未知，可重试");
+            return;
+        }
+        scheduleHomePositionPoll(channelId, token, generation);
+    } catch (error: any) {
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        const latest = homePending.value;
+        if (!latest) return;
+        if (homePositionInsuranceDeadlineMs !== null && Date.now() < homePositionInsuranceDeadlineMs) {
+            scheduleHomePositionPoll(channelId, token, generation);
+            return;
+        }
+        markHomePositionUnknown(latest, error?.message || "无法读取操作截止时间，结果未知，可重试");
+    }
+}
+
+function resumeHomePositionPending(channelId: number, token: number, generation: number) {
+    const pending = homePending.value;
+    if (!pending?.operationId || !isCurrentHomePositionContext(channelId, token, generation)) {
+        if (!pending) clearHomePositionPolling(false);
+        return;
+    }
+    prepareHomePositionOperation(pending.operationId);
+    if (!updateHomePositionDeadline(pending.deadlineAt)) {
+        void recheckHomePositionDeadline(channelId, token, generation);
+        return;
+    }
+    scheduleHomePositionPoll(channelId, token, generation);
+}
+
+async function refreshHomePositionAfterAccepted(channelId: number, token: number, generation: number) {
+    const completedPending = homePending.value;
+    if (!completedPending || !isCurrentHomePositionContext(channelId, token, generation)) return;
+    try {
+        const response = await getHomePosition(channelId);
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "读取确认状态失败");
+        applyHomePositionResult(response.data);
+        resumeHomePositionPending(channelId, token, generation);
+    } catch (error: any) {
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        if (completedPending.kind === "refresh" && homeConfirmed.value) {
+            clearHomePositionPolling(false);
+            homePending.value = null;
+            homeFreshness.value = "stale";
+            homePhase.value = homeConfirmed.value.enabled ? "enabled" : "disabled";
+            homeFailureLabel.value = "操作失败";
+            homeError.value = error?.message || "读取刷新结果失败";
+            return;
+        }
+        if (completedPending.kind === "control") {
+            finishHomePositionAcceptedReadFailure(completedPending, error?.message || "请重试");
+            return;
+        }
+        markHomePositionUnknown(completedPending, error?.message || "设备已应答，但确认状态读取失败");
+    }
+}
+
+async function pollHomePositionOperation(channelId: number, token: number, generation: number) {
+    const pending = homePending.value;
+    if (!pending?.operationId || !isCurrentHomePositionContext(channelId, token, generation)) return;
+    if (homePositionInsuranceDeadlineMs !== null && Date.now() >= homePositionInsuranceDeadlineMs) {
+        markHomePositionUnknown(pending, "操作超过服务端截止时间，结果未知，可重试");
+        return;
+    }
+    try {
+        const response = await getHomePositionOperationWithDeadline(channelId, pending.operationId);
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "查询操作状态失败");
+        const operation = response.data;
+        if (operation.operationId !== pending.operationId) {
+            markHomePositionUnknown(pending, "服务端返回了不匹配的 operation ID");
+            return;
+        }
+        homeOperationId.value = operation.operationId;
+        homeError.value = "";
+        if (operation.status === "queued" || operation.status === "sent") {
+            homePending.value = { ...pending, deadlineAt: operation.deadlineAt };
+            prepareHomePositionOperation(operation.operationId);
+            if (!updateHomePositionDeadline(operation.deadlineAt)) {
+                void recheckHomePositionDeadline(channelId, token, generation);
+                return;
+            }
+            scheduleHomePositionPoll(channelId, token, generation);
+            return;
+        }
+        if (operation.status === "accepted") {
+            await refreshHomePositionAfterAccepted(channelId, token, generation);
+            return;
+        }
+        if (operation.status === "unknown") {
+            markHomePositionUnknown(pending, operation.errorCode || operation.errorMessage || "操作结果未知，可重试");
+            return;
+        }
+        finishHomePositionFailure(pending, operation);
+    } catch (error: any) {
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        const latest = homePending.value;
+        if (!latest) return;
+        if (homePositionInsuranceDeadlineMs === null) {
+            void recheckHomePositionDeadline(channelId, token, generation);
+            return;
+        }
+        if (Date.now() >= homePositionInsuranceDeadlineMs) {
+            markHomePositionUnknown(latest, "网络持续失败至服务端截止时间，结果未知，可重试");
+            return;
+        }
+        homeError.value = error?.message || "操作状态暂时不可用，正在重试";
+        scheduleHomePositionPoll(channelId, token, generation);
     }
 }
 
@@ -1087,19 +1385,23 @@ async function loadCruises(channelId = props.channel?.id, token = sessionToken, 
 
 async function loadHomePosition(channelId = props.channel?.id, token = sessionToken) {
     if (!channelId) return;
-    if (token === sessionToken && props.channel?.id === channelId) {
+    const generation = homePositionGeneration;
+    if (token === sessionToken && generation === homePositionGeneration && props.channel?.id === channelId) {
         homePhase.value = "loading";
         homeError.value = "";
     }
     try {
         const response = await getHomePosition(channelId);
-        if (token !== sessionToken || props.channel?.id !== channelId) return;
+        if (token !== sessionToken || generation !== homePositionGeneration || props.channel?.id !== channelId) return;
         if (response.code !== 0 || !response.data) throw new Error(response.message || "加载看守位失败");
         applyHomePositionResult(response.data);
+        resumeHomePositionPending(channelId, token, generation);
     } catch (error: any) {
-        if (token === sessionToken && props.channel?.id === channelId) {
+        if (token === sessionToken && generation === homePositionGeneration && props.channel?.id === channelId) {
+            clearHomePositionPolling(false);
             homePending.value = null;
             homePhase.value = "error";
+            homeFailureLabel.value = "加载失败";
             homeError.value = error?.message || "加载看守位失败";
         }
     }
@@ -1309,14 +1611,87 @@ async function sendWiperCommand(action: "on" | "off") {
 
 async function saveHomePosition() {
     if (!props.channel || !homeCanSubmit.value) return;
-    const data = homeDraft.value.enabled
+    const channelId = props.channel.id;
+    const token = sessionToken;
+    const generation = beginHomePositionOperation();
+    const data: HomePositionPatch = homeDraft.value.enabled
         ? { enabled: true as const, resetTime: homeDraft.value.resetTime!, presetId: homeDraft.value.presetId! }
         : { enabled: false as const };
+    const idempotencyKey = nextHomePositionIdempotencyKey("control", channelId);
+    homePending.value = { kind: "control", operationId: null, deadlineAt: null };
+    homeOperationId.value = null;
+    homePhase.value = "pending";
+    homeError.value = "";
+    homeMismatch.value = "";
     try {
-        const response = await updateHomePosition(props.channel.id, data);
-        if (response.code !== 0) throw new Error(response.message || "保存看守位失败");
-        Message.success("看守位请求已受理");
-    } catch (error: any) { Message.error(error?.message || "保存看守位失败"); }
+        const response = await updateHomePosition(channelId, data, idempotencyKey);
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        if (response.code !== 0 || !response.data?.operationId) throw new Error(response.message || "保存看守位失败");
+        const operationId = response.data.operationId;
+        homePending.value = { kind: "control", operationId, deadlineAt: null };
+        homeOperationId.value = operationId;
+        prepareHomePositionOperation(operationId);
+        if (response.data.status === "accepted") {
+            await refreshHomePositionAfterAccepted(channelId, token, generation);
+        } else if (response.data.status === "unknown") {
+            markHomePositionUnknown(homePending.value, "操作结果未知，可重试");
+        } else if (["rejected", "timeout", "cancelled"].includes(response.data.status)) {
+            finishHomePositionFailure(homePending.value, {
+                operationId,
+                status: response.data.status,
+                errorCode: null,
+                errorMessage: response.message || null,
+                completedAt: null,
+                deadlineAt: null,
+            });
+        } else {
+            homePositionInsuranceDeadlineMs = Date.now()
+                + HOME_POSITION_INITIAL_QUEUE_MS
+                + HOME_POSITION_DEADLINE_GRACE_MS;
+            Message.info("看守位请求已受理，等待设备确认");
+            scheduleHomePositionPoll(channelId, token, generation);
+        }
+    } catch (error: any) {
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        clearHomePositionPolling(false);
+        homePending.value = null;
+        homePhase.value = "error";
+        homeFailureLabel.value = "操作失败";
+        homeError.value = error?.message || "保存看守位失败";
+        restoreHomeDraftFromConfirmed();
+        Message.error(homeError.value);
+    }
+}
+
+async function refreshHomePosition() {
+    if (!props.channel || !homeCanRefresh.value) return;
+    const channelId = props.channel.id;
+    const token = sessionToken;
+    const generation = beginHomePositionOperation();
+    const idempotencyKey = nextHomePositionIdempotencyKey("refresh", channelId);
+    homePending.value = { kind: "refresh", operationId: null, deadlineAt: null };
+    homeOperationId.value = null;
+    homePhase.value = "pending";
+    homeError.value = "";
+    homeMismatch.value = "";
+    try {
+        const response = await getHomePosition(channelId, true, idempotencyKey);
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "刷新看守位失败");
+        applyHomePositionResult(response.data);
+        resumeHomePositionPending(channelId, token, generation);
+    } catch (error: any) {
+        if (!isCurrentHomePositionContext(channelId, token, generation)) return;
+        clearHomePositionPolling(false);
+        homePending.value = null;
+        homeFailureLabel.value = "操作失败";
+        homeError.value = error?.message || "刷新看守位失败";
+        homeFreshness.value = homeConfirmed.value ? "stale" : "unknown";
+        homePhase.value = homeConfirmed.value
+            ? (homeConfirmed.value.enabled ? "enabled" : "disabled")
+            : "error";
+        Message.error(homeError.value);
+    }
 }
 
 async function readPreciseStatus() {
@@ -1987,7 +2362,7 @@ onBeforeUnmount(() => {
                                 >
                                     <div class="home-status-line">
                                         <strong data-testid="home-phase">{{ homePhaseText }}</strong>
-                                        <span>{{ homeFreshnessText }}</span>
+                                        <span data-testid="home-freshness">{{ homeFreshnessText }}</span>
                                     </div>
                                     <div class="home-confirmed">
                                         <strong data-testid="home-confirmed-status">{{ homeConfirmedStatusText }}</strong>
@@ -2041,7 +2416,7 @@ onBeforeUnmount(() => {
                                         <button class="btn-primary sm" data-testid="home-save" :disabled="!homeCanSubmit" @click="saveHomePosition">
                                             <ShieldCheck :size="12" />{{ homeDraft.enabled ? "保存看守位" : "关闭看守位" }}
                                         </button>
-                                        <button class="btn-ghost sm" data-testid="home-refresh" :disabled="!homeCanRefresh">
+                                        <button class="btn-ghost sm" data-testid="home-refresh" :disabled="!homeCanRefresh" @click="refreshHomePosition">
                                             <RefreshCcw :size="12" />刷新设备状态
                                         </button>
                                     </div>
