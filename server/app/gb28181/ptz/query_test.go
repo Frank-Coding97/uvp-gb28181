@@ -29,7 +29,7 @@ func newPTZQueryTestService(t *testing.T, sender TrackedSender) (*Service, *gorm
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZState{},
-		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{},
+		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{}, &gbmodels.GbPTZHomePosition{}, &gbmodels.GbChannel{},
 	))
 	now := func() time.Time { return time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC) }
 	service, err := NewService(db, sender, now)
@@ -140,14 +140,20 @@ func TestServiceOnPTZMessage_PersistsHomeCruiseAndPreciseCaches(t *testing.T) {
 		{
 			name: "home", kind: QueryHomePosition,
 			body: func(sn int) []byte {
-				return []byte(`<Response><CmdType>HomePositionQuery</CmdType><SN>` + strconv.Itoa(sn) + `</SN><DeviceID>C</DeviceID><Enabled>true</Enabled><Pan>1.5</Pan></Response>`)
+				return []byte(`<Response><CmdType>HomePositionQuery</CmdType><SN>` + strconv.Itoa(sn) + `</SN><DeviceID>C</DeviceID><HomePosition><Enabled>0</Enabled><ResetTime>0</ResetTime><PresetIndex>0</PresetIndex></HomePosition></Response>`)
 			},
 			check: func(t *testing.T, db *gorm.DB) {
-				var state gbmodels.GbPTZState
-				require.NoError(t, db.First(&state).Error)
-				require.NotNil(t, state.HomeEnabled)
-				require.True(t, *state.HomeEnabled)
-				require.Equal(t, gbmodels.PTZFreshnessFresh, state.Freshness)
+				var home gbmodels.GbPTZHomePosition
+				require.NoError(t, db.First(&home).Error)
+				require.False(t, home.Enabled)
+				require.NotNil(t, home.ResetTime)
+				require.Zero(t, *home.ResetTime)
+				require.NotNil(t, home.PresetID)
+				require.Zero(t, *home.PresetID)
+				require.Equal(t, gbmodels.PTZHomePositionVerificationVerified, home.Verification)
+				var preciseCount int64
+				require.NoError(t, db.Model(&gbmodels.GbPTZState{}).Count(&preciseCount).Error)
+				require.Zero(t, preciseCount)
 			},
 		},
 		{
