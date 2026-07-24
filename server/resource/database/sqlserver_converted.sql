@@ -478,6 +478,168 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]) VALUES (2965, 'p', 'role_4', '/api/users/uploadAvatar', 'POST', '*', '', '');
 -- Table structure for sys_department
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
+-- GB28181 PTZ / home-position tables (2026-07-24).
+IF OBJECT_ID(N'gb_ptz_home_position', N'U') IS NOT NULL DROP TABLE [gb_ptz_home_position];
+IF OBJECT_ID(N'gb_ptz_operation_attempt', N'U') IS NOT NULL DROP TABLE [gb_ptz_operation_attempt];
+IF OBJECT_ID(N'gb_ptz_cruise_track', N'U') IS NOT NULL DROP TABLE [gb_ptz_cruise_track];
+IF OBJECT_ID(N'gb_ptz_preset', N'U') IS NOT NULL DROP TABLE [gb_ptz_preset];
+IF OBJECT_ID(N'gb_ptz_state', N'U') IS NOT NULL DROP TABLE [gb_ptz_state];
+IF OBJECT_ID(N'gb_ptz_operation', N'U') IS NOT NULL DROP TABLE [gb_ptz_operation];
+
+CREATE TABLE [gb_ptz_operation] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [operation_id] NVARCHAR(64) NOT NULL,
+    [idempotency_key] NVARCHAR(128) NOT NULL,
+    [device_id] BIGINT NOT NULL,
+    [device_code] NVARCHAR(20) NOT NULL,
+    [channel_id] BIGINT NOT NULL,
+    [channel_code] NVARCHAR(20) NOT NULL,
+    [cmd_type] NVARCHAR(64) NOT NULL,
+    [action] NVARCHAR(64),
+    [payload_json] NVARCHAR(MAX),
+    [sn] INT NOT NULL,
+    [call_id] NVARCHAR(255),
+    [cseq] NVARCHAR(64),
+    [sip_status] INT NOT NULL CONSTRAINT [df_ptz_operation_sip_status] DEFAULT 0,
+    [device_result] NVARCHAR(32),
+    [device_error] NVARCHAR(MAX),
+    [status] NVARCHAR(16) NOT NULL,
+    [attempt] INT NOT NULL CONSTRAINT [df_ptz_operation_attempt] DEFAULT 1,
+    [response_required] BIT NOT NULL CONSTRAINT [df_ptz_operation_response_required] DEFAULT 0,
+    [max_attempts] INT NOT NULL CONSTRAINT [df_ptz_operation_max_attempts] DEFAULT 1,
+    [error_code] NVARCHAR(64),
+    [error_message] NVARCHAR(MAX),
+    [actor_id] BIGINT NOT NULL CONSTRAINT [df_ptz_operation_actor_id] DEFAULT 0,
+    [actor_dept_id] BIGINT NOT NULL CONSTRAINT [df_ptz_operation_actor_dept_id] DEFAULT 0,
+    [created_at] DATETIME2(3) NOT NULL,
+    [sent_at] DATETIME2(3),
+    [completed_at] DATETIME2(3),
+    [queue_deadline_at] DATETIME2(3),
+    [dispatch_started_at] DATETIME2(3),
+    [transport_deadline_at] DATETIME2(3),
+    [deadline_at] DATETIME2(3),
+    [next_attempt_at] DATETIME2(3),
+    [response_call_id] NVARCHAR(255),
+    [response_cseq] NVARCHAR(64),
+    [response_at] DATETIME2(3),
+    [response_has_data] BIT,
+    [trigger_operation_id] NVARCHAR(64),
+    [reconcile_operation_id] NVARCHAR(64),
+    CONSTRAINT [pk_ptz_operation] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_ptz_operation_id] UNIQUE ([operation_id]),
+    CONSTRAINT [uk_ptz_operation_idempotency] UNIQUE ([channel_id], [idempotency_key])
+);
+
+CREATE TABLE [gb_ptz_state] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [device_id] BIGINT NOT NULL,
+    [channel_id] BIGINT NOT NULL,
+    [channel_code] NVARCHAR(20) NOT NULL,
+    [pan] DECIMAL(18,6),
+    [tilt] DECIMAL(18,6),
+    [zoom] DECIMAL(18,6),
+    [focus] DECIMAL(18,6),
+    [iris] DECIMAL(18,6),
+    [device_time] DATETIME2(3),
+    [received_at] DATETIME2(3) NOT NULL,
+    [source_sn] INT NOT NULL CONSTRAINT [df_ptz_state_source_sn] DEFAULT 0,
+    [freshness] NVARCHAR(16) NOT NULL CONSTRAINT [df_ptz_state_freshness] DEFAULT 'unknown',
+    [dedupe_key] NVARCHAR(128),
+    [raw_summary] NVARCHAR(MAX),
+    [created_at] DATETIME2(3) NOT NULL,
+    [updated_at] DATETIME2(3) NOT NULL,
+    CONSTRAINT [pk_ptz_state] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_ptz_state_channel] UNIQUE ([channel_id])
+);
+
+CREATE TABLE [gb_ptz_preset] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [device_id] BIGINT NOT NULL,
+    [channel_id] BIGINT NOT NULL,
+    [preset_id] INT NOT NULL,
+    [name] NVARCHAR(255),
+    [status] NVARCHAR(16) NOT NULL CONSTRAINT [df_ptz_preset_status] DEFAULT 'unknown',
+    [last_operation_id] NVARCHAR(64),
+    [created_at] DATETIME2(3) NOT NULL,
+    [updated_at] DATETIME2(3) NOT NULL,
+    CONSTRAINT [pk_ptz_preset] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_ptz_preset_channel_number] UNIQUE ([channel_id], [preset_id])
+);
+
+CREATE TABLE [gb_ptz_cruise_track] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [device_id] BIGINT NOT NULL,
+    [channel_id] BIGINT NOT NULL,
+    [track_id] INT NOT NULL,
+    [name] NVARCHAR(255),
+    [enabled] BIT,
+    [detail_json] NVARCHAR(MAX),
+    [raw_summary] NVARCHAR(MAX),
+    [device_time] DATETIME2(3),
+    [created_at] DATETIME2(3) NOT NULL,
+    [updated_at] DATETIME2(3) NOT NULL,
+    CONSTRAINT [pk_ptz_cruise_track] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_ptz_cruise_channel_track] UNIQUE ([channel_id], [track_id])
+);
+
+CREATE TABLE [gb_ptz_operation_attempt] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [operation_id] BIGINT NOT NULL,
+    [attempt_no] INT NOT NULL,
+    [sn] INT NOT NULL,
+    [status] NVARCHAR(16) NOT NULL,
+    [call_id] NVARCHAR(255),
+    [cseq] NVARCHAR(64),
+    [sip_status] INT NOT NULL CONSTRAINT [df_ptz_attempt_sip_status] DEFAULT 0,
+    [started_at] DATETIME2(3) NOT NULL,
+    [lease_until] DATETIME2(3) NOT NULL,
+    [sent_at] DATETIME2(3),
+    [completed_at] DATETIME2(3),
+    [error_code] NVARCHAR(64),
+    [error_message] NVARCHAR(MAX),
+    [created_at] DATETIME2(3) NOT NULL,
+    CONSTRAINT [pk_ptz_operation_attempt] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_ptz_operation_attempt] UNIQUE ([operation_id], [attempt_no])
+);
+
+CREATE TABLE [gb_ptz_home_position] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [device_id] BIGINT NOT NULL,
+    [channel_id] BIGINT NOT NULL,
+    [channel_code] NVARCHAR(20) NOT NULL,
+    [enabled] BIT NOT NULL,
+    [reset_time] INT,
+    [preset_id] INT,
+    [enabled_encoding] NVARCHAR(32) NOT NULL CONSTRAINT [df_ptz_home_enabled_encoding] DEFAULT 'numeric',
+    [confirmed_at] DATETIME2(3) NOT NULL,
+    [source] NVARCHAR(32) NOT NULL,
+    [verification] NVARCHAR(16) NOT NULL,
+    [source_sn] INT NOT NULL CONSTRAINT [df_ptz_home_source_sn] DEFAULT 0,
+    [source_operation_id] NVARCHAR(64),
+    [source_operation_seq] BIGINT NOT NULL CONSTRAINT [df_ptz_home_source_seq] DEFAULT 0,
+    [raw_summary] NVARCHAR(MAX),
+    [created_at] DATETIME2(3) NOT NULL,
+    [updated_at] DATETIME2(3) NOT NULL,
+    CONSTRAINT [pk_ptz_home_position] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_ptz_home_position_channel] UNIQUE ([channel_id])
+);
+
+CREATE INDEX [idx_ptz_operation_channel_time] ON [gb_ptz_operation] ([channel_id], [created_at]);
+CREATE INDEX [idx_ptz_operation_channel_cmd_id] ON [gb_ptz_operation] ([channel_id], [cmd_type], [id]);
+CREATE INDEX [idx_ptz_operation_device_sn] ON [gb_ptz_operation] ([device_id], [sn]);
+CREATE INDEX [idx_ptz_operation_status_time] ON [gb_ptz_operation] ([status], [created_at]);
+CREATE INDEX [idx_ptz_operation_status_next_attempt] ON [gb_ptz_operation] ([status], [next_attempt_at]);
+CREATE INDEX [idx_ptz_operation_status_queue_deadline] ON [gb_ptz_operation] ([status], [queue_deadline_at]);
+CREATE INDEX [idx_ptz_operation_status_transport_deadline] ON [gb_ptz_operation] ([status], [transport_deadline_at]);
+CREATE INDEX [idx_ptz_operation_status_deadline] ON [gb_ptz_operation] ([status], [deadline_at]);
+CREATE INDEX [idx_ptz_operation_call_id] ON [gb_ptz_operation] ([call_id]);
+CREATE INDEX [idx_ptz_state_device] ON [gb_ptz_state] ([device_id]);
+CREATE INDEX [idx_ptz_state_received] ON [gb_ptz_state] ([received_at]);
+CREATE INDEX [idx_ptz_preset_device] ON [gb_ptz_preset] ([device_id]);
+CREATE INDEX [idx_ptz_cruise_device] ON [gb_ptz_cruise_track] ([device_id]);
+CREATE INDEX [idx_ptz_attempt_status_lease] ON [gb_ptz_operation_attempt] ([status], [lease_until]);
+CREATE INDEX [idx_ptz_home_position_device] ON [gb_ptz_home_position] ([device_id]);
 IF OBJECT_ID('sys_department', 'U') IS NOT NULL DROP TABLE [sys_department];
 CREATE TABLE [sys_department] (
     [id] BIGINT IDENTITY(1,1) NOT NULL,

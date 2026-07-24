@@ -1474,3 +1474,165 @@ INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
 SELECT setval('sys_api_id_seq',221,true);
 SELECT setval('sys_menu_id_seq',140360,true);
 SELECT setval('sys_casbin_rule_id_seq',7565,true);
+
+-- GB28181 PTZ / home-position tables (2026-07-24).
+DROP TABLE IF EXISTS gb_ptz_home_position;
+DROP TABLE IF EXISTS gb_ptz_operation_attempt;
+DROP TABLE IF EXISTS gb_ptz_cruise_track;
+DROP TABLE IF EXISTS gb_ptz_preset;
+DROP TABLE IF EXISTS gb_ptz_state;
+DROP TABLE IF EXISTS gb_ptz_operation;
+
+CREATE TABLE gb_ptz_operation (
+    id BIGSERIAL,
+    operation_id VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    device_id BIGINT NOT NULL,
+    device_code VARCHAR(20) NOT NULL,
+    channel_id BIGINT NOT NULL,
+    channel_code VARCHAR(20) NOT NULL,
+    cmd_type VARCHAR(64) NOT NULL,
+    action VARCHAR(64),
+    payload_json TEXT,
+    sn INTEGER NOT NULL,
+    call_id VARCHAR(255),
+    cseq VARCHAR(64),
+    sip_status INTEGER NOT NULL DEFAULT 0,
+    device_result VARCHAR(32),
+    device_error TEXT,
+    status VARCHAR(16) NOT NULL,
+    attempt INTEGER NOT NULL DEFAULT 1,
+    response_required BOOLEAN NOT NULL DEFAULT FALSE,
+    max_attempts INTEGER NOT NULL DEFAULT 1,
+    error_code VARCHAR(64),
+    error_message TEXT,
+    actor_id BIGINT NOT NULL DEFAULT 0,
+    actor_dept_id BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP(3) NOT NULL,
+    sent_at TIMESTAMP(3),
+    completed_at TIMESTAMP(3),
+    queue_deadline_at TIMESTAMP(3),
+    dispatch_started_at TIMESTAMP(3),
+    transport_deadline_at TIMESTAMP(3),
+    deadline_at TIMESTAMP(3),
+    next_attempt_at TIMESTAMP(3),
+    response_call_id VARCHAR(255),
+    response_cseq VARCHAR(64),
+    response_at TIMESTAMP(3),
+    response_has_data BOOLEAN,
+    trigger_operation_id VARCHAR(64),
+    reconcile_operation_id VARCHAR(64),
+    PRIMARY KEY (id),
+    CONSTRAINT uk_ptz_operation_id UNIQUE (operation_id),
+    CONSTRAINT uk_ptz_operation_idempotency UNIQUE (channel_id, idempotency_key)
+);
+
+CREATE TABLE gb_ptz_state (
+    id BIGSERIAL,
+    device_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    channel_code VARCHAR(20) NOT NULL,
+    pan NUMERIC(18,6),
+    tilt NUMERIC(18,6),
+    zoom NUMERIC(18,6),
+    focus NUMERIC(18,6),
+    iris NUMERIC(18,6),
+    device_time TIMESTAMP(3),
+    received_at TIMESTAMP(3) NOT NULL,
+    source_sn INTEGER NOT NULL DEFAULT 0,
+    freshness VARCHAR(16) NOT NULL DEFAULT 'unknown',
+    dedupe_key VARCHAR(128),
+    raw_summary TEXT,
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_ptz_state_channel UNIQUE (channel_id)
+);
+
+CREATE TABLE gb_ptz_preset (
+    id BIGSERIAL,
+    device_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    preset_id INTEGER NOT NULL,
+    name VARCHAR(255),
+    status VARCHAR(16) NOT NULL DEFAULT 'unknown',
+    last_operation_id VARCHAR(64),
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_ptz_preset_channel_number UNIQUE (channel_id, preset_id)
+);
+
+CREATE TABLE gb_ptz_cruise_track (
+    id BIGSERIAL,
+    device_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    track_id INTEGER NOT NULL,
+    name VARCHAR(255),
+    enabled BOOLEAN,
+    detail_json TEXT,
+    raw_summary TEXT,
+    device_time TIMESTAMP(3),
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_ptz_cruise_channel_track UNIQUE (channel_id, track_id)
+);
+
+CREATE TABLE gb_ptz_operation_attempt (
+    id BIGSERIAL,
+    operation_id BIGINT NOT NULL,
+    attempt_no INTEGER NOT NULL,
+    sn INTEGER NOT NULL,
+    status VARCHAR(16) NOT NULL,
+    call_id VARCHAR(255),
+    cseq VARCHAR(64),
+    sip_status INTEGER NOT NULL DEFAULT 0,
+    started_at TIMESTAMP(3) NOT NULL,
+    lease_until TIMESTAMP(3) NOT NULL,
+    sent_at TIMESTAMP(3),
+    completed_at TIMESTAMP(3),
+    error_code VARCHAR(64),
+    error_message TEXT,
+    created_at TIMESTAMP(3) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_ptz_operation_attempt UNIQUE (operation_id, attempt_no)
+);
+
+CREATE TABLE gb_ptz_home_position (
+    id BIGSERIAL,
+    device_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL,
+    channel_code VARCHAR(20) NOT NULL,
+    enabled BOOLEAN NOT NULL,
+    reset_time INTEGER,
+    preset_id INTEGER,
+    enabled_encoding VARCHAR(32) NOT NULL DEFAULT 'numeric',
+    confirmed_at TIMESTAMP(3) NOT NULL,
+    source VARCHAR(32) NOT NULL,
+    verification VARCHAR(16) NOT NULL,
+    source_sn INTEGER NOT NULL DEFAULT 0,
+    source_operation_id VARCHAR(64),
+    source_operation_seq BIGINT NOT NULL DEFAULT 0,
+    raw_summary TEXT,
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_ptz_home_position_channel UNIQUE (channel_id)
+);
+
+CREATE INDEX idx_ptz_operation_channel_time ON gb_ptz_operation (channel_id, created_at);
+CREATE INDEX idx_ptz_operation_channel_cmd_id ON gb_ptz_operation (channel_id, cmd_type, id);
+CREATE INDEX idx_ptz_operation_device_sn ON gb_ptz_operation (device_id, sn);
+CREATE INDEX idx_ptz_operation_status_time ON gb_ptz_operation (status, created_at);
+CREATE INDEX idx_ptz_operation_status_next_attempt ON gb_ptz_operation (status, next_attempt_at);
+CREATE INDEX idx_ptz_operation_status_queue_deadline ON gb_ptz_operation (status, queue_deadline_at);
+CREATE INDEX idx_ptz_operation_status_transport_deadline ON gb_ptz_operation (status, transport_deadline_at);
+CREATE INDEX idx_ptz_operation_status_deadline ON gb_ptz_operation (status, deadline_at);
+CREATE INDEX idx_ptz_operation_call_id ON gb_ptz_operation (call_id);
+CREATE INDEX idx_ptz_state_device ON gb_ptz_state (device_id);
+CREATE INDEX idx_ptz_state_received ON gb_ptz_state (received_at);
+CREATE INDEX idx_ptz_preset_device ON gb_ptz_preset (device_id);
+CREATE INDEX idx_ptz_cruise_device ON gb_ptz_cruise_track (device_id);
+CREATE INDEX idx_ptz_attempt_status_lease ON gb_ptz_operation_attempt (status, lease_until);
+CREATE INDEX idx_ptz_home_position_device ON gb_ptz_home_position (device_id);
