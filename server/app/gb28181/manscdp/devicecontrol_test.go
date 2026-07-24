@@ -1,9 +1,93 @@
 package manscdp
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
+
+func TestParseDeviceControlResponse(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		charset string
+		result  string
+		want    DeviceControlResult
+	}{
+		{"UTF-8 OK", "UTF-8", " OK ", DeviceControlResultOK},
+		{"GB2312 ERROR", "GB2312", "ERROR", DeviceControlResultError},
+		{"GB18030 OK", "GB18030", "OK", DeviceControlResultOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := encodeDeviceControlResponseXML(t, test.charset, test.result)
+			response, err := ParseDeviceControlResponse(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.XMLName.Local != "Response" || response.CmdType != CmdDeviceControl || response.SN != 7 || response.DeviceID != "C" || response.Result != test.want {
+				t.Fatalf("unexpected response: %+v", response)
+			}
+		})
+	}
+
+	t.Run("namespace and extensions", func(t *testing.T) {
+		body := []byte(`<gb:Response xmlns:gb="urn:gb28181"><gb:CmdType>DeviceControl</gb:CmdType><gb:SN>8</gb:SN><gb:DeviceID>C</gb:DeviceID><gb:Result>OK</gb:Result><gb:VendorField>ignored</gb:VendorField></gb:Response>`)
+		response, err := ParseDeviceControlResponse(body)
+		if err != nil || response.Result != DeviceControlResultOK {
+			t.Fatalf("namespace response did not parse by local name: %+v, err=%v", response, err)
+		}
+	})
+}
+
+func TestParseDeviceControlResponseRejectsInvalid(t *testing.T) {
+	tests := map[string]string{
+		"wrong root":       `<Notify><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID>C</DeviceID><Result>OK</Result></Notify>`,
+		"wrong root case":  `<response><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID>C</DeviceID><Result>OK</Result></response>`,
+		"wrong CmdType":    `<Response><CmdType>HomePositionQuery</CmdType><SN>1</SN><DeviceID>C</DeviceID><Result>OK</Result></Response>`,
+		"zero SN":          `<Response><CmdType>DeviceControl</CmdType><SN>0</SN><DeviceID>C</DeviceID><Result>OK</Result></Response>`,
+		"invalid SN":       `<Response><CmdType>DeviceControl</CmdType><SN>x</SN><DeviceID>C</DeviceID><Result>OK</Result></Response>`,
+		"empty DeviceID":   `<Response><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID> </DeviceID><Result>OK</Result></Response>`,
+		"missing Result":   `<Response><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID>C</DeviceID></Response>`,
+		"empty Result":     `<Response><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID>C</DeviceID><Result> </Result></Response>`,
+		"unknown Result":   `<Response><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID>C</DeviceID><Result>UNKNOWN</Result></Response>`,
+		"substring Result": `<Response><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID>C</DeviceID><Result>NOT OK</Result></Response>`,
+		"lowercase Result": `<Response><CmdType>DeviceControl</CmdType><SN>1</SN><DeviceID>C</DeviceID><Result>ok</Result></Response>`,
+		"malformed XML":    `<Response><CmdType>DeviceControl</CmdType>`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			response, err := ParseDeviceControlResponse([]byte(body))
+			if err == nil || response != nil {
+				t.Fatalf("invalid response must fail: %+v, err=%v", response, err)
+			}
+			if !errors.Is(err, ErrInvalidResponse) {
+				t.Fatalf("error must match ErrInvalidResponse: %v", err)
+			}
+			var parseError *ParseError
+			if !errors.As(err, &parseError) {
+				t.Fatalf("error must expose *ParseError: %T %v", err, err)
+			}
+		})
+	}
+}
+
+func encodeDeviceControlResponseXML(t *testing.T, charset, result string) []byte {
+	t.Helper()
+	source := `<?xml version="1.0" encoding="` + charset + `"?><Response><CmdType>DeviceControl</CmdType><SN>7</SN><DeviceID>C</DeviceID><Result>` + result + `</Result><VendorName>中文</VendorName></Response>`
+	if charset == "UTF-8" {
+		return []byte(source)
+	}
+	encoder := simplifiedchinese.GBK.NewEncoder()
+	if charset == "GB18030" {
+		encoder = simplifiedchinese.GB18030.NewEncoder()
+	}
+	body, err := encoder.Bytes([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
 
 func TestBuildPTZControl_LeftUp(t *testing.T) {
 	body, err := BuildPTZControl("37011200001310000001", 7, PTZCommand{

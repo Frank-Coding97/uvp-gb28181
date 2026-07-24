@@ -91,6 +91,64 @@ type controlInfo struct {
 	ControlPriority int `xml:"ControlPriority"`
 }
 
+type DeviceControlResult string
+
+const (
+	DeviceControlResultOK    DeviceControlResult = "OK"
+	DeviceControlResultError DeviceControlResult = "ERROR"
+)
+
+type DeviceControlResponse struct {
+	XMLName  xml.Name
+	CmdType  string
+	SN       int
+	DeviceID string
+	Result   DeviceControlResult
+	Raw      []byte
+}
+
+type deviceControlResponseXML struct {
+	XMLName  xml.Name `xml:"Response"`
+	CmdType  string   `xml:"CmdType"`
+	SN       int      `xml:"SN"`
+	DeviceID string   `xml:"DeviceID"`
+	Result   *string  `xml:"Result"`
+}
+
+func ParseDeviceControlResponse(body []byte) (*DeviceControlResponse, error) {
+	var wire deviceControlResponseXML
+	if err := newDecoder(body).Decode(&wire); err != nil {
+		return nil, invalidResponse("XML", "", "decode failed", err)
+	}
+	if wire.XMLName.Local != "Response" {
+		return nil, invalidResponse("XMLName", wire.XMLName.Local, "root element must be Response", nil)
+	}
+	if wire.CmdType != CmdDeviceControl {
+		return nil, invalidResponse("CmdType", wire.CmdType, "must be DeviceControl", nil)
+	}
+	if wire.SN <= 0 {
+		return nil, invalidResponse("SN", fmt.Sprint(wire.SN), "must be positive", nil)
+	}
+	if strings.TrimSpace(wire.DeviceID) == "" {
+		return nil, invalidResponse("DeviceID", wire.DeviceID, "must not be empty", nil)
+	}
+	if wire.Result == nil {
+		return nil, invalidResponse("Result", "", "field is required", nil)
+	}
+	result := DeviceControlResult(strings.TrimSpace(*wire.Result))
+	if result != DeviceControlResultOK && result != DeviceControlResultError {
+		return nil, invalidResponse("Result", string(result), "must be OK or ERROR", nil)
+	}
+	return &DeviceControlResponse{
+		XMLName:  wire.XMLName,
+		CmdType:  wire.CmdType,
+		SN:       wire.SN,
+		DeviceID: wire.DeviceID,
+		Result:   result,
+		Raw:      append([]byte(nil), body...),
+	}, nil
+}
+
 // ParsePTZAction accepts canonical API names plus common UI spellings.
 func ParsePTZAction(value string) (PTZAction, error) {
 	normalized := strings.ToLower(strings.TrimSpace(value))
