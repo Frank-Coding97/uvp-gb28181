@@ -51,6 +51,26 @@ func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, tr
 	return s.Execute(ctx, target, command)
 }
 
+// RefreshHomePosition is the audited manual HomePosition query path. It is
+// deliberately separate from Refresh so existing resource queries keep their
+// legacy actor semantics while the home-position endpoint records the actual
+// user who initiated the query.
+func (s *Service) RefreshHomePosition(ctx context.Context, target Target, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	return s.Execute(ctx, target, Command{
+		CmdType:          manscdp.CmdHomePositionQuery,
+		Action:           "refresh_home_position",
+		IdempotencyKey:   idempotencyKey,
+		Payload:          map[string]interface{}{},
+		ResponseRequired: true,
+		MaxAttempts:      3,
+		ActorID:          actorID,
+		ActorDeptID:      actorDeptID,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildHomePositionQuery(target.ChannelCode, sn)
+		},
+	})
+}
+
 func (s *Service) applyQueryResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte) error {
 	if head.CmdType == manscdp.CmdHomePositionQuery {
 		return s.applyHomePositionQueryResponse(ctx, operation, callID, cseq, body)

@@ -2,10 +2,12 @@ package controllers
 
 import (
 	"errors"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/plugin/dbresolver"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
@@ -131,25 +133,49 @@ func (dc *DeviceMgmtController) GetPTZState(c *gin.Context) {
 }
 
 func (dc *DeviceMgmtController) GetPTZHomePosition(c *gin.Context) {
-	channel, ok := dc.ptzChannel(c)
-	if !ok {
+	channel, failure := dc.loadHomePositionChannel(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
 		return
 	}
-	var state gbmodels.GbPTZState
-	result := dc.db().WithContext(c).Where("channel_id = ?", channel.ID).Limit(1).Find(&state)
-	if result.Error != nil {
-		dc.FailAndAbort(c, "查询看守位失败", result.Error)
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
+		writeHomePositionFailure(c, homePositionFailure(http.StatusServiceUnavailable, ptz.ErrorCodeHomePositionUnavailable, "PTZ Service 未就绪", nil))
 		return
 	}
-	data := gin.H{"homePosition": nil, "freshness": gbmodels.PTZFreshnessUnknown}
-	if result.RowsAffected > 0 {
-		data["homePosition"] = state
-		data["freshness"] = ptzFreshness(state.ReceivedAt, true)
+
+	var operationID string
+	if c.Query("refresh") == "true" {
+		target, targetFailure := dc.loadHomePositionTarget(c, channel)
+		if targetFailure != nil {
+			writeHomePositionFailure(c, targetFailure)
+			return
+		}
+		actorID, actorDeptID, actorFailure := dc.loadHomePositionActor(c)
+		if actorFailure != nil {
+			writeHomePositionFailure(c, actorFailure)
+			return
+		}
+		operation, err := service.RefreshHomePosition(c.Request.Context(), target, actorID, actorDeptID, c.GetHeader("Idempotency-Key"))
+		if err != nil {
+			writeHomePositionFailure(c, homePositionOperationFailure(err))
+			return
+		}
+		operationID = operation.OperationID
 	}
-	if !dc.addPTZRefresh(c, data, channel, ptz.QueryHomePosition, 0) {
+
+	var model ptz.HomePositionReadModel
+	var err error
+	if operationID != "" {
+		model, err = service.GetHomePositionReadModelForRefresh(c.Request.Context(), channel.ID, channel.Capabilities, operationID)
+	} else {
+		model, err = service.GetHomePositionReadModel(c.Request.Context(), channel.ID, channel.Capabilities)
+	}
+	if err != nil {
+		writeHomePositionFailure(c, homePositionReadFailure(err))
 		return
 	}
-	dc.Success(c, data)
+	dc.Success(c, model)
 }
 
 func (dc *DeviceMgmtController) ListCruiseTracks(c *gin.Context) {
@@ -205,24 +231,32 @@ func (dc *DeviceMgmtController) GetCruiseTrack(c *gin.Context) {
 func (dc *DeviceMgmtController) GetPTZOperation(c *gin.Context) {
 	operationID := c.Param("operationId")
 	if operationID == "" {
-		dc.FailAndAbort(c, "操作编号不能为空", nil)
+		writeHomePositionFailure(c, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "PTZ 操作不存在", nil))
+		return
+	}
+	channel, failure := dc.loadHomePositionChannel(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
 		return
 	}
 	var operation gbmodels.GbPTZOperation
-	result := dc.db().WithContext(c).Where("operation_id = ?", operationID).Limit(1).Find(&operation)
+	result := dc.db().WithContext(c).Clauses(dbresolver.Write).
+		Where("operation_id = ? AND channel_id = ?", operationID, channel.ID).Limit(1).Find(&operation)
 	if result.Error != nil {
-		dc.FailAndAbort(c, "查询 PTZ 操作失败", result.Error)
+		writeHomePositionFailure(c, homePositionReadFailure(result.Error))
 		return
 	}
 	if result.RowsAffected == 0 {
-		dc.FailAndAbort(c, "PTZ 操作不存在", nil)
+		writeHomePositionFailure(c, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "PTZ 操作不存在", nil))
 		return
 	}
-	var channel gbmodels.GbChannel
-	channelResult := dc.db().WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", operation.ChannelID).Limit(1).Find(&channel)
-	if channelResult.Error != nil || channelResult.RowsAffected == 0 {
-		dc.FailAndAbort(c, "PTZ 操作不存在", channelResult.Error)
-		return
+	dc.Success(c, ptz.BuildPTZOperationReadModel(operation))
+}
+
+func homePositionReadFailure(err error) *homePositionHTTPFailure {
+	var operationError *ptz.OperationError
+	if errors.As(err, &operationError) && operationError.Code == ptz.ErrorCodeHomePositionUnavailable {
+		return homePositionFailure(http.StatusServiceUnavailable, operationError.Code, operationError.Message, err)
 	}
-	c.JSON(200, gin.H{"code": 0, "data": operation})
+	return homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "查询看守位状态失败", err)
 }

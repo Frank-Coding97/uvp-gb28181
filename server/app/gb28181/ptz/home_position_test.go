@@ -218,3 +218,27 @@ func TestHomePositionReadModelUsesExactReconcileOperation(t *testing.T) {
 	require.Equal(t, reconcileID, *model.Refresh.OperationID)
 	require.Equal(t, HomePositionRefreshSucceeded, model.Refresh.Status)
 }
+
+func TestBuildPTZOperationReadModelUsesDynamicDeadlinePriority(t *testing.T) {
+	queue := time.Date(2026, 7, 24, 11, 0, 5, 0, time.UTC)
+	transport := queue.Add(10 * time.Second)
+	application := transport.Add(15 * time.Second)
+	tests := []struct {
+		name      string
+		operation gbmodels.GbPTZOperation
+		want      *time.Time
+	}{
+		{name: "none", operation: gbmodels.GbPTZOperation{}, want: nil},
+		{name: "queue", operation: gbmodels.GbPTZOperation{QueueDeadlineAt: &queue}, want: &queue},
+		{name: "transport", operation: gbmodels.GbPTZOperation{QueueDeadlineAt: &queue, TransportDeadlineAt: &transport}, want: &transport},
+		{name: "application", operation: gbmodels.GbPTZOperation{QueueDeadlineAt: &queue, TransportDeadlineAt: &transport, DeadlineAt: &application}, want: &application},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			model := BuildPTZOperationReadModel(test.operation)
+			require.Equal(t, test.want, model.DeadlineAt)
+			require.Nil(t, model.ErrorCode)
+			require.Nil(t, model.ErrorMessage)
+		})
+	}
+}

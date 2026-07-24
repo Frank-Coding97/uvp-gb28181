@@ -106,6 +106,17 @@ type HomePositionReadModel struct {
 	Refresh        HomePositionRefreshState `json:"refresh"`
 }
 
+// PTZOperationReadModel is the intentionally small operation contract used
+// by UI polling. Transport correlation and audit fields stay server-side.
+type PTZOperationReadModel struct {
+	OperationID  string                      `json:"operationId"`
+	Status       gbmodels.PTZOperationStatus `json:"status"`
+	ErrorCode    *string                     `json:"errorCode"`
+	ErrorMessage *string                     `json:"errorMessage"`
+	CompletedAt  *time.Time                  `json:"completedAt"`
+	DeadlineAt   *time.Time                  `json:"deadlineAt"`
+}
+
 // ApplyHomePosition accepts only a strictly newer source operation. Equal and
 // older responses return the current row without renewing ConfirmedAt.
 func (s *Service) ApplyHomePosition(ctx context.Context, update HomePositionUpdate) (gbmodels.GbPTZHomePosition, bool, error) {
@@ -303,6 +314,17 @@ func operationDeadline(operation gbmodels.GbPTZOperation) *time.Time {
 	return operation.QueueDeadlineAt
 }
 
+func BuildPTZOperationReadModel(operation gbmodels.GbPTZOperation) PTZOperationReadModel {
+	return PTZOperationReadModel{
+		OperationID:  operation.OperationID,
+		Status:       operation.Status,
+		ErrorCode:    operationString(operation.ErrorCode),
+		ErrorMessage: operationString(operation.ErrorMessage),
+		CompletedAt:  operation.CompletedAt,
+		DeadlineAt:   operationDeadline(operation),
+	}
+}
+
 func controlReadState(operation *gbmodels.GbPTZOperation) HomePositionControlState {
 	if operation == nil {
 		return HomePositionControlState{Status: HomePositionControlIdle}
@@ -420,6 +442,27 @@ func (s *Service) GetHomePositionReadModel(ctx context.Context, channelID uint, 
 			Enabled: home.Enabled, ResetTime: home.ResetTime, PresetID: home.PresetID,
 			ConfirmedAt: home.ConfirmedAt, Source: home.Source, Verification: home.Verification,
 		}
+	}
+	return model, nil
+}
+
+// GetHomePositionReadModelForRefresh keeps a manual refresh response tied to
+// the operation returned by that request. A newer unrelated query must not
+// replace an idempotent replay's operation in the same HTTP response.
+func (s *Service) GetHomePositionReadModelForRefresh(ctx context.Context, channelID uint, rawCapabilities *string, operationID string) (HomePositionReadModel, error) {
+	model, err := s.GetHomePositionReadModel(ctx, channelID, rawCapabilities)
+	if err != nil || strings.TrimSpace(operationID) == "" {
+		return model, err
+	}
+	var operation gbmodels.GbPTZOperation
+	result := ptzWriter(s.db).WithContext(ctx).
+		Where("operation_id = ? AND channel_id = ? AND cmd_type = ? AND action = ?", operationID, channelID, manscdp.CmdHomePositionQuery, "refresh_home_position").
+		Limit(1).Find(&operation)
+	if result.Error != nil {
+		return HomePositionReadModel{}, result.Error
+	}
+	if result.RowsAffected == 1 {
+		model.Refresh = refreshReadState(&operation)
 	}
 	return model, nil
 }
