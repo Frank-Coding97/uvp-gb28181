@@ -28,6 +28,13 @@ type fakePTZSender struct {
 	body      []byte
 }
 
+func mustPTZService(t *testing.T, db *gorm.DB, sender ptz.TrackedSender) *ptz.Service {
+	t.Helper()
+	service, err := ptz.NewService(db, sender, time.Now)
+	require.NoError(t, err)
+	return service
+}
+
 type fakeTrackedPTZSender struct{}
 
 func (fakeTrackedPTZSender) SendMessageTracked(_ context.Context, _ string, _ string, _ string, _ []byte) (uac.TrackedMessageResult, error) {
@@ -112,7 +119,7 @@ func TestDeviceMgmt_ControlPTZ_AllowsUnreportedPTZType(t *testing.T) {
 	require.NoError(t, db.Create(channel).Error)
 	controller := gbcontrollers.NewDeviceMgmtController()
 	controller.SetDB(func() *gorm.DB { return db })
-	controller.SetPTZService(ptz.NewService(db, fakeTrackedPTZSender{}, time.Now))
+	controller.SetPTZService(mustPTZService(t, db, fakeTrackedPTZSender{}))
 	r := gin.New()
 	r.POST("/channel/:id/ptz", controller.ControlPTZ)
 	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz", strings.NewReader(`{"action":"left","speed":8}`))
@@ -134,7 +141,7 @@ func TestDeviceMgmt_ControlPTZ_AllowsReportedFixedCameraType(t *testing.T) {
 	require.NoError(t, db.Create(channel).Error)
 	controller := gbcontrollers.NewDeviceMgmtController()
 	controller.SetDB(func() *gorm.DB { return db })
-	controller.SetPTZService(ptz.NewService(db, fakeTrackedPTZSender{}, time.Now))
+	controller.SetPTZService(mustPTZService(t, db, fakeTrackedPTZSender{}))
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.POST("/channel/:id/ptz", controller.ControlPTZ)
@@ -154,7 +161,7 @@ func TestDeviceMgmt_ControlPTZ_ServiceReturnsOperation(t *testing.T) {
 	require.NoError(t, db.Create(device).Error)
 	channel := &gbmodels.GbChannel{DeviceID: "D", ChannelID: "C", Status: gbmodels.ChannelStatusOnline, PTZType: 1}
 	require.NoError(t, db.Create(channel).Error)
-	service := ptz.NewService(db, fakeTrackedPTZSender{}, time.Now)
+	service := mustPTZService(t, db, fakeTrackedPTZSender{})
 	controller := gbcontrollers.NewDeviceMgmtController()
 	controller.SetDB(func() *gorm.DB { return db })
 	controller.SetPTZService(service)
@@ -178,7 +185,7 @@ func TestDeviceMgmt_ControlPTZPrecise_ServiceReturnsOperation(t *testing.T) {
 	require.NoError(t, db.Create(channel).Error)
 	controller := gbcontrollers.NewDeviceMgmtController()
 	controller.SetDB(func() *gorm.DB { return db })
-	controller.SetPTZService(ptz.NewService(db, fakeTrackedPTZSender{}, time.Now))
+	controller.SetPTZService(mustPTZService(t, db, fakeTrackedPTZSender{}))
 	r := gin.New()
 	r.POST("/channel/:id/ptz/precise", controller.ControlPTZPrecise)
 	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/precise", strings.NewReader(`{"pan":12.5,"tilt":-3.25,"speed":4}`))

@@ -66,7 +66,7 @@ func newPTZResourceController(t *testing.T) (*gbcontrollers.DeviceMgmtController
 	sender := &resourcePTZSender{}
 	controller := gbcontrollers.NewDeviceMgmtController()
 	controller.SetDB(func() *gorm.DB { return db })
-	controller.SetPTZService(ptz.NewService(db, sender, time.Now))
+	controller.SetPTZService(mustPTZService(t, db, sender))
 	return controller, db, channel, sender
 }
 
@@ -327,7 +327,7 @@ func TestDeviceMgmt_PTZRefreshTimeoutKeepsOldCacheStale(t *testing.T) {
 	controller, db, channel, _ := newPTZResourceController(t)
 	require.NoError(t, db.Create(&gbmodels.GbPTZPreset{ChannelID: channel.ID, DeviceID: 1, PresetID: 1, Status: gbmodels.PTZPresetActive, UpdatedAt: time.Now().Add(-2 * time.Minute)}).Error)
 	ctx, cancel := context.WithCancel(context.Background())
-	controller.SetPTZService(ptz.NewService(db, cancellingResourcePTZSender{cancel: cancel}, time.Now))
+	controller.SetPTZService(mustPTZService(t, db, cancellingResourcePTZSender{cancel: cancel}))
 	router := gin.New()
 	router.GET("/channel/:id/ptz/presets", controller.ListPTZPresets)
 	req := httptest.NewRequest(http.MethodGet, "/channel/"+uintStr(channel.ID)+"/ptz/presets?refresh=true", nil).WithContext(ctx)
@@ -433,7 +433,7 @@ func TestDeviceMgmt_CreateCruiseTrack_ReturnsPartialWhenMidStopFails(t *testing.
 	// 前 1 次通过(第 1 个 add_stop),第 2 次开始报错。期望 status=add_stop_failed, completedStops=1
 	controller, db, channel, _ := newPTZResourceController(t)
 	failSender := &failAfterNSender{failAfter: 1, failErr: context.DeadlineExceeded}
-	controller.SetPTZService(ptz.NewService(db, failSender, time.Now))
+	controller.SetPTZService(mustPTZService(t, db, failSender))
 	router := gin.New()
 	router.POST("/channel/:id/ptz/cruise/tracks", controller.CreateCruiseTrack)
 
@@ -543,7 +543,7 @@ func (s *blockingFirstCruiseSender) SendMessageTracked(_ context.Context, _, _, 
 func TestDeviceMgmt_CreateCruiseTrack_SerializesWholeBatchPerChannel(t *testing.T) {
 	controller, db, channel, _ := newPTZResourceController(t)
 	sender := &blockingFirstCruiseSender{firstEntered: make(chan struct{}), releaseFirst: make(chan struct{})}
-	controller.SetPTZService(ptz.NewService(db, sender, time.Now))
+	controller.SetPTZService(mustPTZService(t, db, sender))
 	router := gin.New()
 	router.POST("/channel/:id/ptz/cruise/tracks", controller.CreateCruiseTrack)
 

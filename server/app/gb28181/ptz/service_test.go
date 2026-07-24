@@ -36,7 +36,9 @@ func newPTZTestService(t *testing.T, sender TrackedSender) *Service {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}))
-	return NewService(db, sender, func() time.Time { return time.Date(2026, 7, 19, 20, 0, 0, 0, time.UTC) })
+	service, err := NewService(db, sender, func() time.Time { return time.Date(2026, 7, 19, 20, 0, 0, 0, time.UTC) })
+	require.NoError(t, err)
+	return service
 }
 
 func testTarget() Target {
@@ -68,7 +70,8 @@ func TestServiceExecute_PresetSetPersistsOptimistically(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZPreset{}))
-	svc := NewService(db, sender, func() time.Time { return time.Date(2026, 7, 19, 20, 0, 0, 0, time.UTC) })
+	svc, err := NewService(db, sender, func() time.Time { return time.Date(2026, 7, 19, 20, 0, 0, 0, time.UTC) })
+	require.NoError(t, err)
 
 	cmd := Command{
 		CmdType: "DeviceControl", Action: "preset_set", IdempotencyKey: "preset-1",
@@ -116,10 +119,10 @@ func TestServiceExecute_SenderFailurePersistsStatus(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, gbmodels.PTZOperationRejected, op.Status)
 
-	// 失败终态不能被同一幂等键伪装成一次成功重放。调用方必须换键后显式重试。
+	// 同一规范请求始终返回原 operation，包括失败终态；重试必须换幂等键。
 	sender.err = nil
 	replayed, err := svc.Execute(context.Background(), testTarget(), testCommand())
-	require.ErrorContains(t, err, "rejected")
+	require.NoError(t, err)
 	require.Equal(t, op.OperationID, replayed.OperationID)
 	require.Equal(t, 1, sender.calls)
 }
@@ -156,7 +159,7 @@ func TestServiceApplyResponse_RejectAndTimeout(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, gbmodels.PTZOperationTimeout, result.Status)
 	replayed, err := svc.Execute(context.Background(), testTarget(), secondCommand)
-	require.ErrorContains(t, err, "timeout")
+	require.NoError(t, err)
 	require.Equal(t, second.OperationID, replayed.OperationID)
 	require.Equal(t, 2, sender.calls)
 }
@@ -172,9 +175,10 @@ func TestServiceApplyPreciseNotify_UpdatesAndDeduplicates(t *testing.T) {
 	sender := &fakeTrackedSender{}
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZState{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZState{}))
 	now := time.Date(2026, 7, 19, 20, 10, 0, 0, time.UTC)
-	svc := NewService(db, sender, func() time.Time { return now })
+	svc, err := NewService(db, sender, func() time.Time { return now })
+	require.NoError(t, err)
 	pan, tilt := 12.5, -3.25
 	deviceTime := now.Add(-time.Second)
 	state, err := svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", SN: 7, Pan: &pan, Tilt: &tilt, DeviceTime: &deviceTime, ReceivedAt: now, DedupeKey: "n1"})
@@ -189,9 +193,10 @@ func TestServiceApplyPreciseNotify_UpdatesAndDeduplicates(t *testing.T) {
 func TestServiceApplyPreciseNotify_RejectsOlderAndInvalid(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZState{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZState{}))
 	now := time.Date(2026, 7, 19, 20, 10, 0, 0, time.UTC)
-	svc := NewService(db, &fakeTrackedSender{}, func() time.Time { return now })
+	svc, err := NewService(db, &fakeTrackedSender{}, func() time.Time { return now })
+	require.NoError(t, err)
 	pan := 10.0
 	newTime := now.Add(-time.Minute)
 	_, err = svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", Pan: &pan, DeviceTime: &newTime, ReceivedAt: now, DedupeKey: "old"})

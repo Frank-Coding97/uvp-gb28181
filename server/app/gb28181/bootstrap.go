@@ -354,7 +354,10 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
 		gbroutes.SetDeviceMgmtPTZSender(u)
-		ptzService = ptz.NewService(app.DB(), u, time.Now)
+		ptzService, err = ptz.NewService(app.DB(), u, time.Now)
+		if err != nil {
+			return fmt.Errorf("装配 PTZ service 失败: %w", err)
+		}
 		gbroutes.SetDeviceMgmtPTZService(ptzService)
 		srv.SetPTZMessageProcessor(ptzService)
 		srv.SetPTZNotifyProcessor(ptzService)
