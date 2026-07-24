@@ -74,7 +74,7 @@ func idempotencyConflict(existing gbmodels.GbPTZOperation) error {
 
 func (s *Service) findIdempotentOperation(ctx context.Context, channelID uint, key string) (gbmodels.GbPTZOperation, bool, error) {
 	var operation gbmodels.GbPTZOperation
-	result := s.db.WithContext(ctx).
+	result := ptzWriter(s.db).WithContext(ctx).
 		Where("channel_id = ? AND idempotency_key = ?", channelID, key).
 		Limit(1).Find(&operation)
 	return operation, result.RowsAffected > 0, result.Error
@@ -129,7 +129,7 @@ func (s *Service) createOperation(
 	}); err != nil {
 		return gbmodels.GbPTZOperation{}, err
 	}
-	if err := s.db.WithContext(ctx).Where("operation_id = ?", operation.OperationID).First(&operation).Error; err != nil {
+	if err := ptzWriter(s.db).WithContext(ctx).Where("operation_id = ?", operation.OperationID).First(&operation).Error; err != nil {
 		return gbmodels.GbPTZOperation{}, err
 	}
 	return operation, nil
@@ -141,6 +141,11 @@ func (s *Service) createOperation(
 func (s *Service) Execute(ctx context.Context, target Target, command Command) (gbmodels.GbPTZOperation, error) {
 	if s == nil || s.db == nil {
 		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 未就绪", nil)
+	}
+	s.lifecycleMu.RLock()
+	defer s.lifecycleMu.RUnlock()
+	if s.retired {
+		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 已卸载", nil)
 	}
 	if s.sender == nil {
 		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "SIP UAC 未就绪", nil)
@@ -216,14 +221,14 @@ func (s *Service) sendLegacyOperation(ctx context.Context, target Target, operat
 			Where("id = ? AND status = ?", operation.ID, gbmodels.PTZOperationQueued).
 			Updates(updates).Error
 		_ = s.persistFirstOutboundMetadata(persistCtx, operation.ID, result, observedAt)
-		_ = s.db.WithContext(persistCtx).First(&operation, operation.ID).Error
+		_ = ptzWriter(s.db).WithContext(persistCtx).First(&operation, operation.ID).Error
 		return operation, sendErr
 	}
 
 	if _, err := s.MarkSent(persistCtx, operation.OperationID, result, observedAt); err != nil {
 		return operation, err
 	}
-	if err := s.db.WithContext(persistCtx).First(&operation, operation.ID).Error; err != nil {
+	if err := ptzWriter(s.db).WithContext(persistCtx).First(&operation, operation.ID).Error; err != nil {
 		return operation, err
 	}
 	if syncErr := s.SyncPresetOperation(persistCtx, operation); syncErr != nil && app.ZapLog != nil {
@@ -279,7 +284,7 @@ func terminalPTZStatus(status gbmodels.PTZOperationStatus) bool {
 }
 
 func (s *Service) findResponseOperation(ctx context.Context, response Response) (gbmodels.GbPTZOperation, bool, error) {
-	query := s.db.WithContext(ctx)
+	query := ptzWriter(s.db).WithContext(ctx)
 	if response.OperationID != "" {
 		var operation gbmodels.GbPTZOperation
 		result := query.Where("operation_id = ?", response.OperationID).Limit(1).Find(&operation)
@@ -344,13 +349,32 @@ func (s *Service) ApplyResponse(ctx context.Context, response Response) (gbmodel
 	if status == gbmodels.PTZOperationAccepted || status == gbmodels.PTZOperationRejected {
 		allowed = append(allowed, gbmodels.PTZOperationUnknown)
 	}
-	result := s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-		Where("id = ? AND status IN ?", operation.ID, allowed).
-		Updates(updates)
-	if result.Error != nil {
-		return operation, true, result.Error
+	applied := false
+	if err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+		update := tx.Model(&gbmodels.GbPTZOperation{}).
+			Where("id = ? AND status IN ?", operation.ID, allowed)
+		if operation.ResponseRequired {
+			update = update.Where(`
+				(status = ?)
+				OR (status = ? AND deadline_at IS NOT NULL AND deadline_at > ?)
+				OR (status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at > ?)
+				OR (status = ? AND attempt > 0 AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
+				gbmodels.PTZOperationUnknown,
+				gbmodels.PTZOperationSent, completedAt,
+				gbmodels.PTZOperationQueued, completedAt,
+				gbmodels.PTZOperationQueued, completedAt,
+			)
+		}
+		result := update.Updates(updates)
+		applied = result.RowsAffected == 1
+		return result.Error
+	}); err != nil {
+		return operation, true, err
 	}
 	updated, err := s.GetOperation(ctx, operation.OperationID)
+	if !applied {
+		return updated, true, err
+	}
 	return updated, true, err
 }
 
@@ -373,7 +397,7 @@ func (s *Service) GetOperation(ctx context.Context, operationID string) (gbmodel
 	if strings.TrimSpace(operationID) == "" {
 		return operation, fmt.Errorf("操作编号不能为空")
 	}
-	result := s.db.WithContext(ctx).Where("operation_id = ?", operationID).Limit(1).Find(&operation)
+	result := ptzWriter(s.db).WithContext(ctx).Where("operation_id = ?", operationID).Limit(1).Find(&operation)
 	if result.Error != nil {
 		return operation, result.Error
 	}

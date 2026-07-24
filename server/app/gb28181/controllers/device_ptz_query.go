@@ -27,14 +27,15 @@ func (dc *DeviceMgmtController) refreshPTZ(c *gin.Context, channel *gbmodels.GbC
 	if c.Query("refresh") != "true" {
 		return "", "", nil
 	}
-	if dc.ptzService == nil {
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
 		return "", "", errors.New("PTZ Service 未就绪")
 	}
 	target, ok := dc.loadPTZTarget(c, channel)
 	if !ok {
 		return "", "", errors.New("PTZ 目标不可用")
 	}
-	op, err := dc.ptzService.Refresh(c, target, kind, trackID, c.GetHeader("Idempotency-Key"))
+	op, err := service.Refresh(c, target, kind, trackID, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		return op.OperationID, "刷新请求未发送成功", err
 	}

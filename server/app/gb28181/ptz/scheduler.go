@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -300,7 +301,7 @@ func (s *Scheduler) expireApplication(ctx context.Context, now time.Time) error 
 
 func (s *Scheduler) recoverExpiredLeases(ctx context.Context, now time.Time) error {
 	var attempts []gbmodels.GbPTZOperationAttempt
-	if err := s.db.WithContext(ctx).Table("gb_ptz_operation_attempt AS attempt").
+	if err := ptzWriter(s.db).WithContext(ctx).Table("gb_ptz_operation_attempt AS attempt").
 		Select("attempt.*").
 		Joins("JOIN gb_ptz_operation AS operation ON operation.id = attempt.operation_id").
 		Where("operation.response_required = ? AND attempt.status = ? AND attempt.lease_until <= ?", true, gbmodels.PTZOperationAttemptDispatching, now).
@@ -309,7 +310,7 @@ func (s *Scheduler) recoverExpiredLeases(ctx context.Context, now time.Time) err
 	}
 	for _, attempt := range attempts {
 		s.cancelAttempt(attempt.ID)
-		if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
 			result := tx.Model(&gbmodels.GbPTZOperationAttempt{}).
 				Where("id = ? AND status = ? AND lease_until <= ?", attempt.ID, gbmodels.PTZOperationAttemptDispatching, now).
 				Updates(map[string]interface{}{
@@ -341,7 +342,7 @@ func (s *Scheduler) recoverExpiredLeases(ctx context.Context, now time.Time) err
 
 func (s *Scheduler) claimDue(ctx context.Context, now time.Time) error {
 	var candidates []gbmodels.GbPTZOperation
-	if err := s.db.WithContext(ctx).
+	if err := ptzWriter(s.db).WithContext(ctx).
 		Where("response_required = ? AND status IN ? AND attempt < max_attempts", true, []gbmodels.PTZOperationStatus{gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent}).
 		Where(`(attempt = 0 AND dispatch_started_at IS NULL AND queue_deadline_at > ?)
 			OR (attempt > 0 AND next_attempt_at IS NOT NULL AND next_attempt_at <= ? AND transport_deadline_at > ?)`, now, now, now).
@@ -371,7 +372,8 @@ func (s *Scheduler) claimDue(ctx context.Context, now time.Time) error {
 
 func (s *Scheduler) claimAttempt(ctx context.Context, operationID uint, now time.Time) (gbmodels.GbPTZOperationAttempt, bool, error) {
 	var claimed gbmodels.GbPTZOperationAttempt
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+		claimed = gbmodels.GbPTZOperationAttempt{}
 		var operation gbmodels.GbPTZOperation
 		if result := tx.First(&operation, operationID); result.Error != nil {
 			return result.Error
@@ -476,7 +478,7 @@ func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodel
 
 	var operation gbmodels.GbPTZOperation
 	var result uac.TrackedMessageResult
-	err := s.db.WithContext(ctx).First(&operation, attempt.OperationID).Error
+	err := ptzWriter(s.db).WithContext(ctx).First(&operation, attempt.OperationID).Error
 	if err == nil {
 		var destination, transport string
 		destination, transport, err = s.schedulerTarget(ctx, operation)
@@ -488,9 +490,6 @@ func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodel
 			}
 		}
 	}
-	if ctx.Err() != nil && !result.Attempted {
-		result.Attempted = true
-	}
 	observedAt := s.service.now()
 	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(dispatchCtx), 2*time.Second)
 	defer persistCancel()
@@ -499,7 +498,7 @@ func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodel
 
 func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPTZOperation) (string, string, error) {
 	var device gbmodels.GbDevice
-	result := s.db.WithContext(ctx).Where("id = ? AND device_id = ?", operation.DeviceID, operation.DeviceCode).Limit(1).Find(&device)
+	result := ptzWriter(s.db).WithContext(ctx).Where("id = ? AND device_id = ?", operation.DeviceID, operation.DeviceCode).Limit(1).Find(&device)
 	if result.Error != nil {
 		return "", "", result.Error
 	}
@@ -548,12 +547,17 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 }
 
 func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.GbPTZOperationAttempt, result uac.TrackedMessageResult, sendErr error, observedAt time.Time) error {
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
 		var currentAttempt gbmodels.GbPTZOperationAttempt
 		if err := tx.First(&currentAttempt, attempt.ID).Error; err != nil {
 			return err
 		}
-		if currentAttempt.Status != gbmodels.PTZOperationAttemptDispatching {
+		success := sendErr == nil && result.StatusCode >= 200 && result.StatusCode < 300
+		recoveredBeforeWriteback := success &&
+			currentAttempt.Status == gbmodels.PTZOperationAttemptUnknown &&
+			currentAttempt.ErrorCode == schedulerErrorTransportUnknown &&
+			currentAttempt.LeaseUntil.After(observedAt)
+		if currentAttempt.Status != gbmodels.PTZOperationAttemptDispatching && !recoveredBeforeWriteback {
 			return nil
 		}
 		var operation gbmodels.GbPTZOperation
@@ -561,27 +565,39 @@ func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.G
 			return err
 		}
 		if !currentAttempt.LeaseUntil.After(observedAt) || operation.TransportDeadlineAt == nil || !operation.TransportDeadlineAt.After(observedAt) {
-			return updateLateAttempt(tx, currentAttempt.ID, result, sendErr, observedAt)
+			if currentAttempt.Status == gbmodels.PTZOperationAttemptDispatching {
+				return updateLateAttempt(tx, currentAttempt.ID, result, sendErr, observedAt)
+			}
+			return nil
 		}
 
-		success := sendErr == nil && result.StatusCode >= 200 && result.StatusCode < 300
 		uncertain := result.Attempted && result.StatusCode == 0
 		switch {
 		case success:
 			updates := schedulerAttemptResultUpdates(gbmodels.PTZOperationAttemptSent, result, sendErr, observedAt)
 			updates["sent_at"] = observedAt
-			if changed, err := updateDispatchingAttempt(tx, currentAttempt.ID, updates); err != nil || !changed {
+			updates["error_code"] = ""
+			if changed, err := updateAttemptFromStatus(tx, currentAttempt.ID, currentAttempt.Status, updates); err != nil || !changed {
 				return err
 			}
-			if err := persistScheduledOutboundMetadata(tx, operation.ID, result, observedAt); err != nil {
+			if err := persistScheduledOutboundMetadata(tx, operation.ID, result, observedAt, true); err != nil {
 				return err
 			}
 			deadline := observedAt.Add(schedulerApplicationWindow)
 			return tx.Model(&gbmodels.GbPTZOperation{}).
-				Where("id = ? AND response_required = ? AND status = ?", operation.ID, true, gbmodels.PTZOperationQueued).
-				Updates(map[string]interface{}{"status": gbmodels.PTZOperationSent, "deadline_at": deadline}).Error
+				Where("id = ? AND response_required = ?", operation.ID, true).
+				Where("status = ? OR (status = ? AND error_code = ?)", gbmodels.PTZOperationQueued, gbmodels.PTZOperationUnknown, schedulerErrorTransportUnknown).
+				Updates(map[string]interface{}{
+					"status": gbmodels.PTZOperationSent, "deadline_at": deadline,
+					"error_code": "", "error_message": "", "completed_at": nil,
+				}).Error
 		case uncertain:
-			if changed, err := updateDispatchingAttempt(tx, currentAttempt.ID, schedulerAttemptResultUpdates(gbmodels.PTZOperationAttemptUnknown, result, sendErr, observedAt)); err != nil || !changed {
+			updates := schedulerAttemptResultUpdates(gbmodels.PTZOperationAttemptUnknown, result, sendErr, observedAt)
+			updates["error_code"] = schedulerErrorTransportUnknown
+			if changed, err := updateAttemptFromStatus(tx, currentAttempt.ID, currentAttempt.Status, updates); err != nil || !changed {
+				return err
+			}
+			if err := persistScheduledOutboundMetadata(tx, operation.ID, result, observedAt, false); err != nil {
 				return err
 			}
 			if operation.MaxAttempts <= 1 {
@@ -594,7 +610,12 @@ func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.G
 			}
 			return nil
 		default:
-			if changed, err := updateDispatchingAttempt(tx, currentAttempt.ID, schedulerAttemptResultUpdates(gbmodels.PTZOperationAttemptFailed, result, sendErr, observedAt)); err != nil || !changed {
+			updates := schedulerAttemptResultUpdates(gbmodels.PTZOperationAttemptFailed, result, sendErr, observedAt)
+			updates["error_code"] = schedulerErrorHomePositionUnavailable
+			if changed, err := updateAttemptFromStatus(tx, currentAttempt.ID, currentAttempt.Status, updates); err != nil || !changed {
+				return err
+			}
+			if err := persistScheduledOutboundMetadata(tx, operation.ID, result, observedAt, false); err != nil {
 				return err
 			}
 			var uncertainOrSent int64
@@ -616,6 +637,30 @@ func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.G
 	})
 }
 
+func schedulerTransaction(ctx context.Context, db *gorm.DB, operation func(*gorm.DB) error) error {
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+		err = ptzWriter(db).WithContext(ctx).Transaction(operation)
+		if err == nil || !schedulerRetryableDBError(err) {
+			return err
+		}
+		runtime.Gosched()
+	}
+	return err
+}
+
+func schedulerRetryableDBError(err error) bool {
+	var codeErr interface{ Code() int }
+	if !errors.As(err, &codeErr) {
+		return false
+	}
+	primaryCode := codeErr.Code() & 0xff
+	return primaryCode == 5 || primaryCode == 6 // SQLITE_BUSY / SQLITE_LOCKED
+}
+
 func schedulerAttemptResultUpdates(status gbmodels.PTZOperationAttemptStatus, result uac.TrackedMessageResult, sendErr error, observedAt time.Time) map[string]interface{} {
 	return map[string]interface{}{
 		"status": status, "call_id": result.CallID, "cseq": result.CSeq, "sip_status": result.StatusCode,
@@ -630,9 +675,9 @@ func schedulerSendError(err error) string {
 	return err.Error()
 }
 
-func updateDispatchingAttempt(tx *gorm.DB, attemptID uint, updates map[string]interface{}) (bool, error) {
+func updateAttemptFromStatus(tx *gorm.DB, attemptID uint, expected gbmodels.PTZOperationAttemptStatus, updates map[string]interface{}) (bool, error) {
 	result := tx.Model(&gbmodels.GbPTZOperationAttempt{}).
-		Where("id = ? AND status = ?", attemptID, gbmodels.PTZOperationAttemptDispatching).
+		Where("id = ? AND status = ?", attemptID, expected).
 		Updates(updates)
 	return result.RowsAffected == 1, result.Error
 }
@@ -643,14 +688,21 @@ func updateLateAttempt(tx *gorm.DB, attemptID uint, result uac.TrackedMessageRes
 	if sendErr == nil {
 		updates["error_message"] = "sender result observed after lease/deadline"
 	}
-	_, err := updateDispatchingAttempt(tx, attemptID, updates)
+	_, err := updateAttemptFromStatus(tx, attemptID, gbmodels.PTZOperationAttemptDispatching, updates)
 	return err
 }
 
-func persistScheduledOutboundMetadata(tx *gorm.DB, operationID uint, result uac.TrackedMessageResult, observedAt time.Time) error {
+func persistScheduledOutboundMetadata(tx *gorm.DB, operationID uint, result uac.TrackedMessageResult, observedAt time.Time, sent bool) error {
+	if !result.Attempted {
+		return nil
+	}
+	updates := map[string]interface{}{
+		"call_id": result.CallID, "cseq": result.CSeq, "sip_status": result.StatusCode,
+	}
+	if sent {
+		updates["sent_at"] = observedAt
+	}
 	return tx.Model(&gbmodels.GbPTZOperation{}).
 		Where("id = ? AND (call_id = '' OR call_id IS NULL)", operationID).
-		Updates(map[string]interface{}{
-			"call_id": result.CallID, "cseq": result.CSeq, "sip_status": result.StatusCode, "sent_at": observedAt,
-		}).Error
+		Updates(updates).Error
 }

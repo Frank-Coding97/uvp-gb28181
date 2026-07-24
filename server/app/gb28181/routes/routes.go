@@ -191,6 +191,10 @@ func SetDeviceMgmtPTZService(service *ptz.Service) {
 	deviceMgmtController.SetPTZService(service)
 }
 
+func SetDeviceMgmtPTZRuntime(sender gbcontrollers.DeviceControlSender, service *ptz.Service) {
+	deviceMgmtController.SetPTZRuntime(sender, service)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {

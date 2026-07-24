@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/plugin/dbresolver"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -74,11 +75,13 @@ type PreciseNotify struct {
 }
 
 type Service struct {
-	db     *gorm.DB
-	sender TrackedSender
-	now    func() time.Time
-	sn     atomic.Uint64
-	locks  sync.Map
+	db          *gorm.DB
+	sender      TrackedSender
+	now         func() time.Time
+	sn          atomic.Uint64
+	locks       sync.Map
+	lifecycleMu sync.RWMutex
+	retired     bool
 }
 
 func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Service, error) {
@@ -89,7 +92,7 @@ func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Servi
 		now = time.Now
 	}
 	var maxSN int64
-	if err := db.Model(&gbmodels.GbPTZOperation{}).Select("COALESCE(MAX(sn), 0)").Scan(&maxSN).Error; err != nil {
+	if err := ptzWriter(db).Model(&gbmodels.GbPTZOperation{}).Select("COALESCE(MAX(sn), 0)").Scan(&maxSN).Error; err != nil {
 		return nil, operationError(ErrorCodeHomePositionUnavailable, "读取 PTZ operation SN 失败", err)
 	}
 	if maxSN < 0 || uint64(maxSN) >= uint64(^uint(0)>>1) {
@@ -100,6 +103,10 @@ func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Servi
 	return service, nil
 }
 
+func ptzWriter(db *gorm.DB) *gorm.DB {
+	return db.Clauses(dbresolver.Write)
+}
+
 func (s *Service) lockFor(channelID uint) *sync.Mutex {
 	value, _ := s.locks.LoadOrStore(channelID, &sync.Mutex{})
 	return value.(*sync.Mutex)
@@ -107,6 +114,18 @@ func (s *Service) lockFor(channelID uint) *sync.Mutex {
 
 func (s *Service) nextSN() int {
 	return int(s.sn.Add(1))
+}
+
+// Retire prevents future operation creation and waits for every Execute that
+// already entered the old runtime. Reload calls it before a new Service reads
+// MAX(sn), so two generations cannot allocate the same sequence number.
+func (s *Service) Retire() {
+	if s == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	s.retired = true
+	s.lifecycleMu.Unlock()
 }
 
 func validateTarget(target Target) error {

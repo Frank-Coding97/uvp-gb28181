@@ -50,7 +50,8 @@ func parseExtendedAction(value string) (manscdp.PTZExtendedAction, error) {
 // ControlPTZ sends one GB28181 DeviceControl/PTZCmd to a channel's device.
 // POST /device-mgmt/channel/:id/ptz
 func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
-	if dc.ptzSender == nil && dc.ptzService == nil {
+	sender, service := dc.ptzRuntimeSnapshot()
+	if sender == nil && service == nil {
 		c.JSON(503, gin.H{"code": 503, "message": "SIP UAC 未就绪,无法下发云台控制"})
 		return
 	}
@@ -114,7 +115,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 	}
 
 	sn := dc.nextPTZSN()
-	if dc.ptzService != nil {
+	if service != nil {
 		key := request.IdempotencyKey
 		if key == "" {
 			key = c.GetHeader("Idempotency-Key")
@@ -126,7 +127,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			DeviceOnline:  device.Status == gbmodels.DeviceStatusOnline,
 			ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		}
-		op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
+		op, executeErr := service.Execute(c, target, ptz.Command{
 			CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
 			Payload: map[string]interface{}{"action": action, "speed": request.Speed},
 			Build: func(operationSN int) ([]byte, error) {
@@ -149,7 +150,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 		return
 	}
 	dest := net.JoinHostPort(device.IP, strconv.Itoa(device.Port))
-	if err := dc.ptzSender.SendMessage(c, device.DeviceID, dest, device.Transport, body); err != nil {
+	if err := sender.SendMessage(c, device.DeviceID, dest, device.Transport, body); err != nil {
 		dc.FailAndAbort(c, "下发云台控制失败", fmt.Errorf("%w: %v", err, dest))
 		return
 	}
@@ -165,7 +166,8 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 
 // ControlPTZExtended handles preset, cruise and scan commands.
 func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
-	if dc.ptzService == nil {
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
 		return
 	}
@@ -220,7 +222,7 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
 	}
-	op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
+	op, executeErr := service.Execute(c, target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
 		Payload: map[string]interface{}{"action": action, "id": id, "speed": request.Speed},
 		Build: func(sn int) ([]byte, error) {
@@ -235,7 +237,8 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 }
 
 func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
-	if dc.ptzService == nil {
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
 		return
 	}
@@ -277,7 +280,7 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
 		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline}
-	op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
+	op, executeErr := service.Execute(c, target, ptz.Command{
 		CmdType: manscdp.CmdPTZPreciseCtrl, Action: "precise", IdempotencyKey: key,
 		Payload: map[string]interface{}{"pan": request.Pan, "tilt": request.Tilt, "zoom": request.Zoom, "focus": request.Focus, "iris": request.Iris, "speed": request.Speed},
 		Build: func(sn int) ([]byte, error) {
