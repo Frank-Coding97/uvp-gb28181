@@ -32,7 +32,9 @@ func newPTZQueryTestService(t *testing.T, sender TrackedSender) (*Service, *gorm
 		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{},
 	))
 	now := func() time.Time { return time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC) }
-	return NewService(db, sender, now), db
+	service, err := NewService(db, sender, now)
+	require.NoError(t, err)
+	return service, db
 }
 
 func TestServiceRefresh_CreatesTrackedQueryOperation(t *testing.T) {
