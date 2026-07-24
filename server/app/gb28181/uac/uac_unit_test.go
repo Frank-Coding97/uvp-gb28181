@@ -1,11 +1,40 @@
 package uac
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/emiago/sipgo/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 )
+
+const (
+	testPlatformID = "34020000002000000001"
+	testDeviceID   = "34020000001320000001"
+)
+
+type trackedMessageRecorder struct {
+	endStatus  int
+	endSuccess bool
+}
+
+func (*trackedMessageRecorder) Begin(metrics.Transaction) {}
+
+func (r *trackedMessageRecorder) End(_, _ string, statusCode int, success bool) {
+	r.endStatus = statusCode
+	r.endSuccess = success
+}
+
+func trackedMessageTestUAC(doMessage func(context.Context, *sip.Request) (*sip.Response, error)) *UAC {
+	return &UAC{
+		serverID:  testPlatformID,
+		domain:    "3402000000",
+		doMessage: doMessage,
+	}
+}
 
 func TestPlatformContactUsesAdvertiseIP(t *testing.T) {
 	contact := platformContact("34020000002000000001", "192.168.10.20", 5061)
@@ -197,5 +226,137 @@ func TestBuildTrackedMessageRequest(t *testing.T) {
 	}
 	if string(*req.CallID()) != meta.CallID || req.CSeq().MethodName != sip.MESSAGE {
 		t.Fatalf("request metadata mismatch: meta=%+v", meta)
+	}
+}
+
+func TestSendMessageTrackedAcceptsOnlyFinal2xx(t *testing.T) {
+	cases := []struct {
+		status  int
+		success bool
+	}{
+		{status: 199},
+		{status: 200, success: true},
+		{status: 202, success: true},
+		{status: 299, success: true},
+		{status: 300},
+		{status: 400},
+		{status: 403},
+		{status: 500},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("status_%d", tc.status), func(t *testing.T) {
+			responseBody := []byte(fmt.Sprintf("<Response><Status>%d</Status></Response>", tc.status))
+			var sentRequest *sip.Request
+			recorder := &trackedMessageRecorder{}
+			u := trackedMessageTestUAC(func(_ context.Context, req *sip.Request) (*sip.Response, error) {
+				sentRequest = req
+				return sip.NewResponseFromRequest(req, tc.status, "test response", responseBody), nil
+			})
+			u.SetRecorder(recorder)
+
+			result, err := u.SendMessageTracked(context.Background(), testDeviceID, "192.0.2.10:5060", "udp", []byte("<Query/>"))
+
+			if tc.success && err != nil {
+				t.Fatalf("status %d should succeed: %v", tc.status, err)
+			}
+			if !tc.success && err == nil {
+				t.Fatalf("status %d should fail", tc.status)
+			}
+			if !result.Attempted {
+				t.Fatal("transport call should be marked attempted")
+			}
+			if result.CallID == "" || result.CSeq == "" || result.StatusCode != tc.status {
+				t.Fatalf("correlation metadata not preserved: %+v", result)
+			}
+			if sentRequest == nil || sentRequest.CallID() == nil || string(*sentRequest.CallID()) != result.CallID || sentRequest.CSeq() == nil || fmt.Sprint(sentRequest.CSeq().SeqNo) != result.CSeq {
+				t.Fatalf("request/result correlation mismatch: request=%v result=%+v", sentRequest, result)
+			}
+			if string(result.ResponseBody) != string(responseBody) {
+				t.Fatalf("response summary=%q, want %q", result.ResponseBody, responseBody)
+			}
+			if tc.success && result.ErrorSummary != "" {
+				t.Fatalf("successful result has error summary %q", result.ErrorSummary)
+			}
+			if !tc.success && result.ErrorSummary == "" {
+				t.Fatal("failed result should retain an error summary")
+			}
+			if recorder.endStatus != tc.status || recorder.endSuccess != tc.success {
+				t.Fatalf("recorder end=(%d,%v), want (%d,%v)", recorder.endStatus, recorder.endSuccess, tc.status, tc.success)
+			}
+		})
+	}
+}
+
+func TestSendMessageTrackedTransportErrorRetainsCorrelation(t *testing.T) {
+	transportErr := errors.New("UDP transaction timed out")
+	u := trackedMessageTestUAC(func(context.Context, *sip.Request) (*sip.Response, error) {
+		return nil, transportErr
+	})
+
+	result, err := u.SendMessageTracked(context.Background(), testDeviceID, "192.0.2.10:5060", "udp", []byte("<Query/>"))
+
+	if !errors.Is(err, transportErr) {
+		t.Fatalf("error=%v, want transport error", err)
+	}
+	if !result.Attempted || result.CallID == "" || result.CSeq == "" {
+		t.Fatalf("transport uncertainty lost attempt correlation: %+v", result)
+	}
+	if result.StatusCode != 0 || len(result.ResponseBody) != 0 || !strings.Contains(result.ErrorSummary, transportErr.Error()) {
+		t.Fatalf("unexpected transport result: %+v", result)
+	}
+}
+
+func TestSendMessageTrackedConstructionFailureIsNotAttempted(t *testing.T) {
+	called := false
+	u := trackedMessageTestUAC(func(context.Context, *sip.Request) (*sip.Response, error) {
+		called = true
+		return nil, nil
+	})
+
+	result, err := u.SendMessageTracked(context.Background(), testDeviceID, "", "udp", []byte("<Query/>"))
+
+	if err == nil {
+		t.Fatal("missing destination should fail before transport")
+	}
+	if called || result.Attempted || result.CallID != "" || result.CSeq != "" || result.StatusCode != 0 {
+		t.Fatalf("construction failure must be explicitly unsent: called=%v result=%+v", called, result)
+	}
+	if result.ErrorSummary == "" {
+		t.Fatal("construction failure should retain an error summary")
+	}
+}
+
+func TestSendMessageTrackedResponseSummaryIsRedactedAndBounded(t *testing.T) {
+	secret := "do-not-persist-this"
+	body := []byte("<Response><Password>" + secret + "</Password><Data>" + strings.Repeat("x", 8192) + "</Data></Response>")
+	u := trackedMessageTestUAC(func(_ context.Context, req *sip.Request) (*sip.Response, error) {
+		return sip.NewResponseFromRequest(req, 403, "Forbidden", body), nil
+	})
+
+	result, err := u.SendMessageTracked(context.Background(), testDeviceID, "192.0.2.10:5060", "udp", []byte("<Query/>"))
+
+	if err == nil {
+		t.Fatal("403 should fail")
+	}
+	if len(result.ResponseBody) > 4*1024 {
+		t.Fatalf("response summary length=%d, want <=4096", len(result.ResponseBody))
+	}
+	if strings.Contains(string(result.ResponseBody), secret) || !strings.Contains(string(result.ResponseBody), "[REDACTED]") {
+		t.Fatalf("response summary was not redacted: %q", result.ResponseBody)
+	}
+}
+
+func TestSendMessageCompatibilityInherits2xxContract(t *testing.T) {
+	status := 202
+	u := trackedMessageTestUAC(func(_ context.Context, req *sip.Request) (*sip.Response, error) {
+		return sip.NewResponseFromRequest(req, status, "test response", nil), nil
+	})
+
+	if err := u.SendMessage(context.Background(), testDeviceID, "192.0.2.10:5060", "tcp", []byte("<Query/>")); err != nil {
+		t.Fatalf("legacy SendMessage should accept 202: %v", err)
+	}
+	status = 300
+	if err := u.SendMessage(context.Background(), testDeviceID, "192.0.2.10:5060", "tcp", []byte("<Query/>")); err == nil {
+		t.Fatal("legacy SendMessage should keep rejecting non-2xx")
 	}
 }

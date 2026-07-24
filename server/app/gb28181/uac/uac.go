@@ -14,7 +14,12 @@ import (
 	"github.com/emiago/sipgo/sip"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 )
+
+const trackedMessageSummaryLimit = 4 * 1024
+
+type messageDoFunc func(context.Context, *sip.Request) (*sip.Response, error)
 
 // UAC 平台主叫客户端:向下级设备发起 SIP 请求(MESSAGE 查询 / INVITE 点播)
 type UAC struct {
@@ -24,6 +29,7 @@ type UAC struct {
 	serverID    string
 	domain      string
 	recorder    metrics.Recorder // 可选:埋点出向事务
+	doMessage   messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对
@@ -43,11 +49,15 @@ func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int)
 	contact := platformContact(serverID, advertiseIP, sipPort)
 	dialogUA := sipgo.NewDialogClientCache(client, contact)
 	talkDialogUA := sipgo.NewDialogClientCache(client, contact)
-	return &UAC{
+	u := &UAC{
 		client: client, dialogUA: dialogUA,
 		talkDialogs: newTalkDialogStore(&sipgoTalkDialogTransport{cache: talkDialogUA}),
 		serverID:    serverID, domain: domain,
-	}, nil
+	}
+	u.doMessage = func(ctx context.Context, req *sip.Request) (*sip.Response, error) {
+		return client.Do(ctx, req)
+	}
+	return u, nil
 }
 
 func platformContact(serverID, advertiseIP string, sipPort int) sip.ContactHeader {
@@ -150,6 +160,27 @@ type TrackedMessageResult struct {
 	CSeq         string
 	StatusCode   int
 	ResponseBody []byte
+	Attempted    bool
+	ErrorSummary string
+}
+
+func is2xx(statusCode int) bool {
+	return statusCode >= 200 && statusCode < 300
+}
+
+func trackedMessageResponseSummary(body []byte) []byte {
+	summary := gbtrace.RedactSIP(body)
+	if len(summary) > trackedMessageSummaryLimit {
+		summary = summary[:trackedMessageSummaryLimit]
+	}
+	return append([]byte(nil), summary...)
+}
+
+func trackedMessageErrorSummary(err error) string {
+	if err == nil {
+		return ""
+	}
+	return string(trackedMessageResponseSummary([]byte(err.Error())))
 }
 
 func (u *UAC) buildTrackedMessageRequest(in TrackedMessageRequest) (*sip.Request, TrackedMessageResult, error) {
@@ -185,25 +216,32 @@ func (u *UAC) buildTrackedMessageRequest(in TrackedMessageRequest) (*sip.Request
 
 // SendMessageTracked sends a MESSAGE and returns SIP correlation metadata.
 func (u *UAC) SendMessageTracked(ctx context.Context, deviceID, dest, transport string, body []byte) (TrackedMessageResult, error) {
-	if u == nil || u.client == nil {
-		return TrackedMessageResult{}, fmt.Errorf("SIP UAC 未就绪")
+	if u == nil || u.doMessage == nil {
+		err := fmt.Errorf("SIP UAC 未就绪")
+		return TrackedMessageResult{ErrorSummary: trackedMessageErrorSummary(err)}, err
 	}
 	req, result, err := u.buildTrackedMessageRequest(TrackedMessageRequest{DeviceID: deviceID, Destination: dest, Transport: transport, Body: body})
 	if err != nil {
+		result.ErrorSummary = trackedMessageErrorSummary(err)
 		return result, err
 	}
 	kind := detectMessageKind(body)
 	u.recordBegin(kind, result.CallID, result.CSeq, deviceID)
-	resp, err := u.client.Do(ctx, req)
+	result.Attempted = true
+	resp, err := u.doMessage(ctx, req)
 	if err != nil {
 		u.recordEnd(result.CallID, result.CSeq, 0, false)
-		return result, fmt.Errorf("发送 MESSAGE 失败: %w", err)
+		err = fmt.Errorf("发送 MESSAGE 失败: %w", err)
+		result.ErrorSummary = trackedMessageErrorSummary(err)
+		return result, err
 	}
 	result.StatusCode = int(resp.StatusCode)
-	result.ResponseBody = append([]byte(nil), resp.Body()...)
-	if resp.StatusCode != 200 {
+	result.ResponseBody = trackedMessageResponseSummary(resp.Body())
+	if !is2xx(resp.StatusCode) {
 		u.recordEnd(result.CallID, result.CSeq, int(resp.StatusCode), false)
-		return result, fmt.Errorf("MESSAGE 应答非200: %d %s", resp.StatusCode, resp.Reason)
+		err = fmt.Errorf("MESSAGE 应答非2xx: %d %s", resp.StatusCode, resp.Reason)
+		result.ErrorSummary = trackedMessageErrorSummary(err)
+		return result, err
 	}
 	u.recordEnd(result.CallID, result.CSeq, int(resp.StatusCode), true)
 	return result, nil
@@ -313,7 +351,7 @@ func (u *UAC) SendSubscribe(ctx context.Context, in SubscriptionRequest) (Subscr
 			out.Expires = n
 		}
 	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	if !is2xx(resp.StatusCode) {
 		return out, fmt.Errorf("SUBSCRIBE 应答非2xx: %d %s", resp.StatusCode, resp.Reason)
 	}
 	return out, nil
