@@ -1353,3 +1353,164 @@ INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUE
 (7563,'p','role_1','/api/gb28181/sip/platform','GET','*','',''),
 (7564,'p','role_1','/api/gb28181/sip/setup/config','PUT','*','',''),
 (7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');
+
+-- GB28181 PTZ / home-position tables (2026-07-24).
+DROP TABLE IF EXISTS `gb_ptz_home_position`;
+DROP TABLE IF EXISTS `gb_ptz_operation_attempt`;
+DROP TABLE IF EXISTS `gb_ptz_cruise_track`;
+DROP TABLE IF EXISTS `gb_ptz_preset`;
+DROP TABLE IF EXISTS `gb_ptz_state`;
+DROP TABLE IF EXISTS `gb_ptz_operation`;
+
+CREATE TABLE `gb_ptz_operation` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `operation_id` varchar(64) NOT NULL,
+  `idempotency_key` varchar(128) NOT NULL,
+  `device_id` bigint unsigned NOT NULL,
+  `device_code` varchar(20) NOT NULL,
+  `channel_id` bigint unsigned NOT NULL,
+  `channel_code` varchar(20) NOT NULL,
+  `cmd_type` varchar(64) NOT NULL,
+  `action` varchar(64) DEFAULT NULL,
+  `payload_json` text,
+  `sn` int NOT NULL,
+  `call_id` varchar(255) DEFAULT NULL,
+  `cseq` varchar(64) DEFAULT NULL,
+  `sip_status` int NOT NULL DEFAULT 0,
+  `device_result` varchar(32) DEFAULT NULL,
+  `device_error` text,
+  `status` varchar(16) NOT NULL,
+  `attempt` int NOT NULL DEFAULT 1,
+  `response_required` tinyint(1) NOT NULL DEFAULT 0,
+  `max_attempts` int NOT NULL DEFAULT 1,
+  `error_code` varchar(64) DEFAULT NULL,
+  `error_message` text,
+  `actor_id` bigint unsigned NOT NULL DEFAULT 0,
+  `actor_dept_id` bigint unsigned NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL,
+  `sent_at` datetime(3) DEFAULT NULL,
+  `completed_at` datetime(3) DEFAULT NULL,
+  `queue_deadline_at` datetime(3) DEFAULT NULL,
+  `dispatch_started_at` datetime(3) DEFAULT NULL,
+  `transport_deadline_at` datetime(3) DEFAULT NULL,
+  `deadline_at` datetime(3) DEFAULT NULL,
+  `next_attempt_at` datetime(3) DEFAULT NULL,
+  `response_call_id` varchar(255) DEFAULT NULL,
+  `response_cseq` varchar(64) DEFAULT NULL,
+  `response_at` datetime(3) DEFAULT NULL,
+  `response_has_data` tinyint(1) DEFAULT NULL,
+  `trigger_operation_id` varchar(64) DEFAULT NULL,
+  `reconcile_operation_id` varchar(64) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ptz_operation_id` (`operation_id`),
+  UNIQUE KEY `uk_ptz_operation_idempotency` (`channel_id`,`idempotency_key`),
+  KEY `idx_ptz_operation_channel_time` (`channel_id`,`created_at`),
+  KEY `idx_ptz_operation_channel_cmd_id` (`channel_id`,`cmd_type`,`id`),
+  KEY `idx_ptz_operation_device_sn` (`device_id`,`sn`),
+  KEY `idx_ptz_operation_status_time` (`status`,`created_at`),
+  KEY `idx_ptz_operation_status_next_attempt` (`status`,`next_attempt_at`),
+  KEY `idx_ptz_operation_status_queue_deadline` (`status`,`queue_deadline_at`),
+  KEY `idx_ptz_operation_status_transport_deadline` (`status`,`transport_deadline_at`),
+  KEY `idx_ptz_operation_status_deadline` (`status`,`deadline_at`),
+  KEY `idx_ptz_operation_call_id` (`call_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 PTZ operation audit';
+
+CREATE TABLE `gb_ptz_state` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_id` bigint unsigned NOT NULL,
+  `channel_code` varchar(20) NOT NULL,
+  `pan` decimal(18,6) DEFAULT NULL,
+  `tilt` decimal(18,6) DEFAULT NULL,
+  `zoom` decimal(18,6) DEFAULT NULL,
+  `focus` decimal(18,6) DEFAULT NULL,
+  `iris` decimal(18,6) DEFAULT NULL,
+  `device_time` datetime(3) DEFAULT NULL,
+  `received_at` datetime(3) NOT NULL,
+  `source_sn` int NOT NULL DEFAULT 0,
+  `freshness` varchar(16) NOT NULL DEFAULT 'unknown',
+  `dedupe_key` varchar(128) DEFAULT NULL,
+  `raw_summary` text,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ptz_state_channel` (`channel_id`),
+  KEY `idx_ptz_state_device` (`device_id`),
+  KEY `idx_ptz_state_received` (`received_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 latest PTZ state';
+
+CREATE TABLE `gb_ptz_preset` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_id` bigint unsigned NOT NULL,
+  `preset_id` int NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `status` varchar(16) NOT NULL DEFAULT 'unknown',
+  `last_operation_id` varchar(64) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ptz_preset_channel_number` (`channel_id`,`preset_id`),
+  KEY `idx_ptz_preset_device` (`device_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 PTZ presets';
+
+CREATE TABLE `gb_ptz_cruise_track` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_id` bigint unsigned NOT NULL,
+  `track_id` int NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  `enabled` tinyint(1) DEFAULT NULL,
+  `detail_json` text,
+  `raw_summary` text,
+  `device_time` datetime(3) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ptz_cruise_channel_track` (`channel_id`,`track_id`),
+  KEY `idx_ptz_cruise_device` (`device_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 PTZ cruise tracks';
+
+CREATE TABLE `gb_ptz_operation_attempt` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `operation_id` bigint unsigned NOT NULL,
+  `attempt_no` int NOT NULL,
+  `sn` int NOT NULL,
+  `status` varchar(16) NOT NULL,
+  `call_id` varchar(255) DEFAULT NULL,
+  `cseq` varchar(64) DEFAULT NULL,
+  `sip_status` int NOT NULL DEFAULT 0,
+  `started_at` datetime(3) NOT NULL,
+  `lease_until` datetime(3) NOT NULL,
+  `sent_at` datetime(3) DEFAULT NULL,
+  `completed_at` datetime(3) DEFAULT NULL,
+  `error_code` varchar(64) DEFAULT NULL,
+  `error_message` text,
+  `created_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ptz_operation_attempt` (`operation_id`,`attempt_no`),
+  KEY `idx_ptz_attempt_status_lease` (`status`,`lease_until`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 PTZ operation attempts';
+
+CREATE TABLE `gb_ptz_home_position` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_id` bigint unsigned NOT NULL,
+  `channel_code` varchar(20) NOT NULL,
+  `enabled` tinyint(1) NOT NULL,
+  `reset_time` int DEFAULT NULL,
+  `preset_id` int DEFAULT NULL,
+  `enabled_encoding` varchar(32) NOT NULL DEFAULT 'numeric',
+  `confirmed_at` datetime(3) NOT NULL,
+  `source` varchar(32) NOT NULL,
+  `verification` varchar(16) NOT NULL,
+  `source_sn` int NOT NULL DEFAULT 0,
+  `source_operation_id` varchar(64) DEFAULT NULL,
+  `source_operation_seq` bigint unsigned NOT NULL DEFAULT 0,
+  `raw_summary` text,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_ptz_home_position_channel` (`channel_id`),
+  KEY `idx_ptz_home_position_device` (`device_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 confirmed home position';
