@@ -40,6 +40,10 @@ import {
     type CruiseTrackDetailResource,
     type CruiseTrackPointResource,
     type DeviceControlCapabilities,
+    type HomePositionConfig,
+    type HomePositionFreshness,
+    type HomePositionResult,
+    type HomePositionSupport,
     type PlayResult,
     type ProbeSnapshot,
     type PTZResourceFreshness,
@@ -559,13 +563,138 @@ const filteredCruiseTracks = computed(() => {
     return cruiseTracks.value.filter((item) => item.name.toLowerCase().includes(keyword) || String(item.id).includes(keyword));
 });
 
-// 看守位(2022 HomePositionQuery)
-const homePosition = ref<{ enabled: boolean; presetId?: number; delaySec: number }>({ enabled: false, presetId: undefined, delaySec: 300 });
+// 看守位(2022 HomePositionQuery):设备确认值与用户草稿必须独立。
+type HomePositionPhase = "unknown" | "loading" | "pending" | "enabled" | "disabled" | "error";
+type HomePositionPending = { kind: "control" | "refresh"; operationId: string; deadlineAt: string | null };
+type HomePositionDraft = { enabled: boolean; presetId: number | null; resetTime: number | null };
+
+const unknownHomeSupport = (): HomePositionSupport => ({ status: "unknown", reason: "能力尚未确认" });
+const homeConfirmed = ref<HomePositionConfig | null>(null);
+const homeDraft = ref<HomePositionDraft>({ enabled: false, presetId: null, resetTime: 300 });
+const homePhase = ref<HomePositionPhase>("unknown");
+const homeFreshness = ref<HomePositionFreshness>("unknown");
+const homeControlSupport = ref<HomePositionSupport>(unknownHomeSupport());
+const homeQuerySupport = ref<HomePositionSupport>(unknownHomeSupport());
+const homePending = ref<HomePositionPending | null>(null);
+const homeOperationId = ref<string | null>(null);
+const homeError = ref("");
+const homeMismatch = ref("");
+
 const homePositionCanSave = computed(() => {
-    if (!homePosition.value.enabled) return true;
-    const { presetId, delaySec } = homePosition.value;
-    return Number.isInteger(presetId) && Number(presetId) > 0 && Number.isFinite(delaySec) && delaySec >= 10 && delaySec <= 3600;
+    if (!homeDraft.value.enabled) return true;
+    const { presetId, resetTime } = homeDraft.value;
+    return Number.isInteger(presetId)
+        && Number(presetId) >= 0
+        && Number(presetId) <= 255
+        && Number.isInteger(resetTime)
+        && Number(resetTime) >= 10
+        && Number(resetTime) <= 3600;
 });
+const homeControlPending = computed(() => homePending.value?.kind === "control");
+const homeRefreshPending = computed(() => homePending.value?.kind === "refresh");
+const homeCanSubmit = computed(() => props.channel?.status === 1 && !homeControlPending.value && homePositionCanSave.value);
+const homeCanRefresh = computed(() => props.channel?.status === 1 && !homeRefreshPending.value);
+const homeIsBusy = computed(() => homePhase.value === "loading" || homePending.value !== null);
+const homePhaseText = computed(() => {
+    if (homePhase.value === "unknown") return homeOperationId.value ? "结果未知" : "待查询";
+    return ({
+        loading: "正在加载",
+        pending: "等待设备确认",
+        enabled: "已启用",
+        disabled: "已关闭",
+        error: "加载失败",
+    } as const)[homePhase.value];
+});
+const homeFreshnessText = computed(() => ({ fresh: "数据新鲜", stale: "缓存已过期", unknown: "新鲜度未知" })[homeFreshness.value]);
+const homeConfirmedStatusText = computed(() => {
+    if (!homeConfirmed.value) return "尚无设备确认配置";
+    return homeConfirmed.value.enabled ? "设备确认已启用" : "设备确认已关闭";
+});
+const homeConfirmedValuesText = computed(() => {
+    const confirmed = homeConfirmed.value;
+    if (!confirmed) return "预置位 未返回 · 等待时间 未返回";
+    const preset = confirmed.presetId == null ? "未返回" : `#${confirmed.presetId}`;
+    const resetTime = confirmed.resetTime == null ? "未返回" : `${confirmed.resetTime} 秒`;
+    return `预置位 ${preset} · 等待时间 ${resetTime}`;
+});
+const homeConfirmedOutsideEditableRange = computed(() => {
+    const confirmed = homeConfirmed.value;
+    if (!confirmed?.enabled) return false;
+    return confirmed.presetId == null
+        || !Number.isInteger(confirmed.presetId)
+        || confirmed.presetId < 0
+        || confirmed.presetId > 255
+        || confirmed.resetTime == null
+        || !Number.isInteger(confirmed.resetTime)
+        || confirmed.resetTime < 10
+        || confirmed.resetTime > 3600;
+});
+const homeSupportHasRisk = computed(() =>
+    homeControlSupport.value.status !== "supported" || homeQuerySupport.value.status !== "supported",
+);
+const homeVerificationText = computed(() => {
+    if (homeConfirmed.value?.verification === "unverified") return "设备已确认，查询未验证";
+    if (homeConfirmed.value?.verification === "verified") return "设备查询已验证";
+    return "尚未验证";
+});
+
+function resetHomePositionState() {
+    homeConfirmed.value = null;
+    homeDraft.value = { enabled: false, presetId: null, resetTime: 300 };
+    homePhase.value = "unknown";
+    homeFreshness.value = "unknown";
+    homeControlSupport.value = unknownHomeSupport();
+    homeQuerySupport.value = unknownHomeSupport();
+    homePending.value = null;
+    homeOperationId.value = null;
+    homeError.value = "";
+    homeMismatch.value = "";
+}
+
+function applyHomePositionResult(result: HomePositionResult) {
+    homeConfirmed.value = result.homePosition ? { ...result.homePosition } : null;
+    homeDraft.value = result.homePosition
+        ? { enabled: result.homePosition.enabled, presetId: result.homePosition.presetId, resetTime: result.homePosition.resetTime }
+        : { enabled: false, presetId: null, resetTime: 300 };
+    homeFreshness.value = result.freshness;
+    homeControlSupport.value = result.controlSupport;
+    homeQuerySupport.value = result.querySupport;
+    homeError.value = "";
+    homeMismatch.value = "";
+
+    if (result.control.status === "pending" && result.control.operationId) {
+        homePending.value = { kind: "control", operationId: result.control.operationId, deadlineAt: result.control.deadlineAt };
+    } else if (result.refresh.status === "pending" && result.refresh.operationId) {
+        homePending.value = { kind: "refresh", operationId: result.refresh.operationId, deadlineAt: result.refresh.deadlineAt };
+    } else {
+        homePending.value = null;
+    }
+
+    homeOperationId.value = homePending.value?.operationId
+        ?? result.control.operationId
+        ?? result.refresh.operationId;
+
+    const terminalError = result.control.errorCode ?? result.refresh.errorCode;
+    if (terminalError === "HOME_POSITION_RECONCILE_MISMATCH") {
+        homeMismatch.value = "设备未按请求应用配置";
+    } else if (terminalError) {
+        homeError.value = terminalError;
+    }
+
+    if (homePending.value) {
+        homePhase.value = "pending";
+    } else if (result.control.status === "unknown") {
+        homePhase.value = "unknown";
+    } else if (["rejected", "timeout", "cancelled"].includes(result.control.status)) {
+        homePhase.value = "error";
+    } else if (!result.homePosition && ["failed", "timeout"].includes(result.refresh.status)) {
+        homePhase.value = "error";
+    } else if (result.homePosition) {
+        homePhase.value = result.homePosition.enabled ? "enabled" : "disabled";
+    } else {
+        homePhase.value = "unknown";
+    }
+}
 
 const wiperPending = ref<"on" | "off" | null>(null);
 let wiperRequestToken = 0;
@@ -846,7 +975,7 @@ function resetSessionState() {
     capabilities.value = null;
     presets.value = [];
     cruiseTracks.value = [];
-    homePosition.value = { enabled: false, presetId: undefined, delaySec: 300 };
+    resetHomePositionState();
     wiperRequestToken++;
     wiperPending.value = null;
     deviceRecording.value = false;
@@ -958,18 +1087,21 @@ async function loadCruises(channelId = props.channel?.id, token = sessionToken, 
 
 async function loadHomePosition(channelId = props.channel?.id, token = sessionToken) {
     if (!channelId) return;
+    if (token === sessionToken && props.channel?.id === channelId) {
+        homePhase.value = "loading";
+        homeError.value = "";
+    }
     try {
         const response = await getHomePosition(channelId);
-        const item = response.data?.homePosition;
-        if (token === sessionToken && props.channel?.id === channelId && response.code === 0 && item) {
-            homePosition.value = {
-                enabled: item.enabled,
-                presetId: item.presetId ?? undefined,
-                delaySec: item.resetTime ?? 300,
-            };
+        if (token !== sessionToken || props.channel?.id !== channelId) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "加载看守位失败");
+        applyHomePositionResult(response.data);
+    } catch (error: any) {
+        if (token === sessionToken && props.channel?.id === channelId) {
+            homePending.value = null;
+            homePhase.value = "error";
+            homeError.value = error?.message || "加载看守位失败";
         }
-    } catch {
-        if (token === sessionToken) homePosition.value = { enabled: false, presetId: undefined, delaySec: 300 };
     }
 }
 
@@ -1176,9 +1308,9 @@ async function sendWiperCommand(action: "on" | "off") {
 }
 
 async function saveHomePosition() {
-    if (!props.channel || !homePositionCanSave.value) return;
-    const data = homePosition.value.enabled
-        ? { enabled: true as const, resetTime: homePosition.value.delaySec, presetId: homePosition.value.presetId! }
+    if (!props.channel || !homeCanSubmit.value) return;
+    const data = homeDraft.value.enabled
+        ? { enabled: true as const, resetTime: homeDraft.value.resetTime!, presetId: homeDraft.value.presetId! }
         : { enabled: false as const };
     try {
         const response = await updateHomePosition(props.channel.id, data);
@@ -1834,30 +1966,85 @@ onBeforeUnmount(() => {
                                 </div>
                             </section>
 
-                            <section class="linked-section linked-card">
+                            <section class="linked-section linked-card" data-testid="home-card">
                                 <div class="section-hd first">
                                     <span class="section-title"><Home :size="13" />看守位<span class="tag-2022">2022</span></span>
                                     <label class="toggle">
-                                        <input v-model="homePosition.enabled" type="checkbox" />
+                                        <input
+                                            v-model="homeDraft.enabled"
+                                            data-testid="home-toggle"
+                                            type="checkbox"
+                                            :disabled="props.channel?.status !== 1 || homeControlPending"
+                                        />
                                         <span></span>
                                     </label>
                                 </div>
-                                <div class="home-config">
-                                    <div class="home-fields" :class="{ disabled: !homePosition.enabled }">
+                                <div
+                                    class="home-config"
+                                    data-testid="home-status"
+                                    aria-live="polite"
+                                    :aria-busy="homeIsBusy"
+                                >
+                                    <div class="home-status-line">
+                                        <strong data-testid="home-phase">{{ homePhaseText }}</strong>
+                                        <span>{{ homeFreshnessText }}</span>
+                                    </div>
+                                    <div class="home-confirmed">
+                                        <strong data-testid="home-confirmed-status">{{ homeConfirmedStatusText }}</strong>
+                                        <span data-testid="home-confirmed-values">{{ homeConfirmedValuesText }}</span>
+                                        <span data-testid="home-verification">{{ homeVerificationText }}</span>
+                                    </div>
+                                    <p v-if="homeConfirmedOutsideEditableRange" class="home-warning" data-testid="home-range-warning">
+                                        设备原值缺失或超出平台可编辑范围；关闭仍可下发，再次启用前请修改。
+                                    </p>
+                                    <div class="home-supports">
+                                        <span data-testid="home-control-support">控制 {{ homeControlSupport.status }} · {{ homeControlSupport.reason }}</span>
+                                        <span data-testid="home-query-support">查询 {{ homeQuerySupport.status }} · {{ homeQuerySupport.reason }}</span>
+                                    </div>
+                                    <p v-if="homeSupportHasRisk" class="home-warning" data-testid="home-support-risk">
+                                        能力信息仅作风险提示，仍可尝试下发，以设备应答为准。
+                                    </p>
+                                    <p v-if="homeOperationId" class="home-operation" data-testid="home-operation-id">
+                                        Operation {{ homeOperationId }}
+                                    </p>
+                                    <p v-if="homeMismatch" class="home-error" data-testid="home-mismatch">{{ homeMismatch }}</p>
+                                    <p v-else-if="homeError" class="home-error" data-testid="home-error">{{ homeError }}</p>
+                                    <div class="home-fields" :class="{ disabled: !homeDraft.enabled }">
                                         <div class="home-row">
                                             <span>回位预置位</span>
-                                            <select v-model.number="homePosition.presetId" :disabled="!homePosition.enabled">
+                                            <select
+                                                v-model.number="homeDraft.presetId"
+                                                data-testid="home-preset"
+                                                :disabled="!homeDraft.enabled || props.channel?.status !== 1 || homeControlPending"
+                                            >
+                                                <option disabled :value="null">请选择预置位</option>
+                                                <option :value="0">#0 · 标准预置位 0</option>
                                                 <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
                                             </select>
                                         </div>
                                         <div class="home-row">
                                             <span>空闲触发</span>
-                                            <input v-model.number="homePosition.delaySec" type="number" min="10" max="3600" :disabled="!homePosition.enabled" />
+                                            <input
+                                                v-model.number="homeDraft.resetTime"
+                                                data-testid="home-reset-time"
+                                                type="number"
+                                                min="10"
+                                                max="3600"
+                                                :disabled="!homeDraft.enabled || props.channel?.status !== 1 || homeControlPending"
+                                            />
                                         </div>
                                     </div>
-                                    <button class="btn-primary sm block" :disabled="!homePositionCanSave" @click="saveHomePosition">
-                                        <ShieldCheck :size="12" />保存看守位
-                                    </button>
+                                    <p v-if="homeDraft.enabled && !homePositionCanSave" class="home-error" data-testid="home-validation">
+                                        启用需要预置位 #0..#255，等待时间为 10..3600 秒整数。
+                                    </p>
+                                    <div class="home-actions">
+                                        <button class="btn-primary sm" data-testid="home-save" :disabled="!homeCanSubmit" @click="saveHomePosition">
+                                            <ShieldCheck :size="12" />{{ homeDraft.enabled ? "保存看守位" : "关闭看守位" }}
+                                        </button>
+                                        <button class="btn-ghost sm" data-testid="home-refresh" :disabled="!homeCanRefresh">
+                                            <RefreshCcw :size="12" />刷新设备状态
+                                        </button>
+                                    </div>
                                 </div>
                             </section>
 
@@ -3484,6 +3671,16 @@ onBeforeUnmount(() => {
 
 /* 看守位 */
 .home-config { display: grid; gap: 8px; padding-top: 4px; }
+.home-status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.home-status-line strong { color: var(--uvp-text-primary); font-size: 11px; }
+.home-status-line span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.home-confirmed { display: grid; gap: 2px; color: var(--uvp-text-tertiary); font-size: 9.5px; line-height: 1.5; }
+.home-confirmed strong { color: var(--uvp-text-secondary); font-size: 10.5px; }
+.home-supports { display: grid; gap: 3px; color: var(--uvp-text-tertiary); font-size: 9.5px; line-height: 1.45; }
+.home-warning, .home-error, .home-operation { margin: 0; font-size: 9.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.home-warning { color: var(--uvp-warning); }
+.home-error { color: var(--uvp-danger); }
+.home-operation { color: var(--uvp-text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .home-fields { display: grid; gap: 8px; }
 .home-fields.disabled { opacity: 0.42; pointer-events: none; }
 .home-row {
@@ -3510,6 +3707,9 @@ onBeforeUnmount(() => {
 }
 .toggle input:checked + span { background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border)); }
 .toggle input:checked + span::before { transform: translateX(16px); background: var(--uvp-brand); }
+.toggle input:disabled + span { cursor: not-allowed; opacity: 0.5; }
+.home-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.home-actions button { min-width: 0; }
 
 /* ═══════════ 探针面板 ═══════════ */
 .probe-panel { gap: 12px; }
