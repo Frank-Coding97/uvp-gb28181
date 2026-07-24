@@ -124,6 +124,9 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 	if result := s.db.WithContext(ctx).Where("channel_id = ? AND idempotency_key = ?", target.ChannelID, command.IdempotencyKey).Limit(1).Find(&existing); result.Error != nil {
 		return gbmodels.GbPTZOperation{}, result.Error
 	} else if result.RowsAffected > 0 {
+		if existing.Status == gbmodels.PTZOperationRejected || existing.Status == gbmodels.PTZOperationTimeout || existing.Status == gbmodels.PTZOperationCancelled {
+			return existing, fmt.Errorf("PTZ 操作已结束且状态为 %s,不能用同一幂等键重放", existing.Status)
+		}
 		return existing, nil
 	}
 

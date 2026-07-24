@@ -10,7 +10,7 @@
  * 视觉语言:深色为主,青色作强调,毛玻璃卡片,状态用色带 + 脉冲呼吸
  * 布局:右侧保留高频操作,播放器下方随 Tab 联动展示详情
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import PlayWindow from "./PlayWindow.vue";
 import {
@@ -18,6 +18,7 @@ import {
     controlPtz,
     controlPtzAux,
     controlPtzCruise,
+    createCruiseTrack,
     controlPtzPrecise,
     callPtzPreset,
     createTalkSession,
@@ -36,9 +37,12 @@ import {
     stopPlay,
     updateHomePosition,
     type ControlCapability,
+    type CruiseTrackDetailResource,
+    type CruiseTrackPointResource,
     type DeviceControlCapabilities,
     type PlayResult,
     type ProbeSnapshot,
+    type PTZResourceFreshness,
     type StreamMonitorSnapshot,
     type TalkCreateResult,
 } from "@/api/gb28181";
@@ -55,7 +59,6 @@ import {
     ArrowUpRight,
     CheckCircle2,
     ChevronDown,
-    ChevronRight,
     Circle,
     Compass,
     Copy,
@@ -124,6 +127,8 @@ const playResult = ref<PlayResult | null>(null);
 let timer: number | null = null;
 let monitorTimer: number | null = null;
 let sessionToken = 0;
+// 关闭弹窗只做本地清理;记录阈值,阻止迟到的点播响应补发 stopPlay。
+let localCleanupThroughToken = 0;
 
 /* ────────────────────────── Tab 切换 ────────────────────────── */
 
@@ -266,12 +271,284 @@ function nextPresetId(): number {
     return presets.value.length ? Math.max(...presets.value.map((p) => p.id)) + 1 : 1;
 }
 
-// 巡航轨迹(2022 CruiseTrackListQuery)
-type CruiseTrack = { id: number; name: string; enabled: boolean; presets: number[]; dwellSec: number };
+// 巡航轨迹(2022 CruiseTrackListQuery / CruiseTrackQuery)
+type CruisePoint = { presetId: number; speed: number | null; dwellSec: number | null };
+type CruiseTrack = {
+    id: number;
+    name: string;
+    enabled: boolean;
+    pending: boolean;
+    points: CruisePoint[] | null;
+    source: string;
+};
 const cruiseTracks = ref<CruiseTrack[]>([]);
 const activeCruiseId = ref<number | null>(null);
-const cruiseState = ref<"stopped" | "running" | "paused">("stopped");
-const visibleCruiseTracks = computed(() => cruiseTracks.value.slice(0, 2));
+// HTTP 成功只表示控制指令已发送，不能据此宣称设备正在运行。
+const cruiseState = ref<"stopped" | "start-sent">("stopped");
+const cruiseFreshness = ref<PTZResourceFreshness>("unknown");
+const cruiseRefreshPending = ref(false);
+const cruiseLoadError = ref("");
+const cruiseRefreshError = ref("");
+const unconfirmedCruiseCount = computed(() => cruiseTracks.value.filter((track) => track.pending).length);
+const cruiseSyncLabel = computed(() => {
+    if (cruiseLoadError.value) return "加载失败";
+    if (cruiseRefreshError.value) return "同步失败";
+    if (unconfirmedCruiseCount.value > 0) return `${unconfirmedCruiseCount.value} 条未验证`;
+    if (cruiseRefreshPending.value) return "正在同步";
+    if (cruiseFreshness.value === "fresh") return "设备数据已同步";
+    if (cruiseFreshness.value === "stale") return "缓存数据已过期";
+    return "设备状态待查询";
+});
+const CRUISE_RECONCILE_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
+let cruiseReconcileTimer: number | null = null;
+let cruiseReconcileAttempt = 0;
+function clearCruiseReconcilePolling() {
+    if (cruiseReconcileTimer !== null) window.clearTimeout(cruiseReconcileTimer);
+    cruiseReconcileTimer = null;
+    cruiseReconcileAttempt = 0;
+}
+function scheduleCruiseReconcilePolling(channelId: number, token: number) {
+    clearCruiseReconcilePolling();
+    const pollNext = () => {
+        if (cruiseReconcileAttempt >= CRUISE_RECONCILE_DELAYS_MS.length) return;
+        const delay = CRUISE_RECONCILE_DELAYS_MS[cruiseReconcileAttempt];
+        cruiseReconcileTimer = window.setTimeout(async () => {
+            cruiseReconcileTimer = null;
+            if (token !== sessionToken || props.channel?.id !== channelId) return;
+            await loadCruises(channelId, token, false);
+            if (token !== sessionToken || props.channel?.id !== channelId) return;
+            cruiseReconcileAttempt += 1;
+            pollNext();
+        }, delay);
+    };
+    pollNext();
+}
+// 巡航卡片布局 1:1 复刻预置位 —— 3 列 × 3 行 = 9 格,溢出保留 8 条 tile + 1 「更多」chip
+const CRUISE_GRID_SLOTS = 9;
+const RESOURCE_TOOLTIP_ENTER_DELAY_MS = 80;
+const maxVisibleCruiseTracks = CRUISE_GRID_SLOTS;
+const hasMoreCruises = computed(() => cruiseTracks.value.length > maxVisibleCruiseTracks);
+const visibleCruiseTracks = computed(() =>
+    hasMoreCruises.value ? cruiseTracks.value.slice(0, maxVisibleCruiseTracks - 1) : cruiseTracks.value,
+);
+const cruiseMoreVisible = ref(false);
+function cruiseTileState(c: { id: number; enabled: boolean; pending: boolean }): "stop" | "idle" | "disabled" | "pending" {
+    if (activeCruiseId.value === c.id && cruiseState.value === "start-sent") return "stop";
+    if (c.pending) return "pending";
+    if (!c.enabled) return "disabled";
+    return "idle";
+}
+function cruiseTileTitle(c: { id: number; name: string; enabled: boolean; pending: boolean }): string {
+    const state = cruiseTileState(c);
+    if (state === "pending") return `#${c.id} ${c.name} · 配置指令已发送，但设备尚未返回 GB/T 28181-2022 巡航轨迹查询结果；点击试运行验证`;
+    if (state === "disabled") return `#${c.id} ${c.name} · 已禁用`;
+    if (state === "stop") return `#${c.id} ${c.name} · 启动指令已发送,点击停止`;
+    return `#${c.id} ${c.name} · 点击开始巡航`;
+}
+
+function parseCruiseDetail(raw: string | CruiseTrackDetailResource | null | undefined): {
+    points: CruisePoint[] | null;
+    source: string;
+} {
+    let detail: CruiseTrackDetailResource | null = null;
+    if (typeof raw === "string" && raw.trim()) {
+        try {
+            detail = JSON.parse(raw) as CruiseTrackDetailResource;
+        } catch {
+            detail = null;
+        }
+    } else if (raw && typeof raw === "object") {
+        detail = raw;
+    }
+    if (!detail) return { points: null, source: "" };
+
+    const rawPoints = Array.isArray(detail.cruisePoints)
+        ? detail.cruisePoints
+        : Array.isArray(detail.stops)
+            ? detail.stops
+            : null;
+    if (!rawPoints) return { points: null, source: detail.source || "" };
+
+    const globalSpeed = Number.isFinite(Number(detail.speed)) ? Number(detail.speed) : null;
+    const globalDwell = Number.isFinite(Number(detail.dwellSec)) ? Number(detail.dwellSec) : null;
+    const points = rawPoints.flatMap((item: CruiseTrackPointResource) => {
+        const presetId = Number(item.presetIndex ?? item.presetId);
+        if (!Number.isInteger(presetId) || presetId < 1 || presetId > 255) return [];
+        const speed = Number.isFinite(Number(item.speed)) ? Number(item.speed) : globalSpeed;
+        const dwell = Number.isFinite(Number(item.stayTime ?? item.dwellSec))
+            ? Number(item.stayTime ?? item.dwellSec)
+            : globalDwell;
+        return [{ presetId, speed, dwellSec: dwell }];
+    });
+    return { points, source: detail.source || "" };
+}
+
+function cruiseTrackDetailText(track: CruiseTrack): string {
+    if (track.points === null) return "详情待查询";
+    if (track.points.length === 0) return "暂无点位";
+    const dwellValues = [...new Set(track.points.map((point) => point.dwellSec).filter((value): value is number => value !== null))];
+    const dwellText = dwellValues.length === 1 ? ` · 停留 ${dwellValues[0]}s` : dwellValues.length > 1 ? " · 按点位停留" : "";
+    return `${track.points.length} 个点位${dwellText}`;
+}
+
+function cruiseTrackMeta(track: CruiseTrack): string {
+    const detail = cruiseTrackDetailText(track);
+    return track.pending ? `${detail} · 已下发,未验证` : detail;
+}
+
+// 建立巡航 modal:trackId 使用国标 0-255，stops 按顺序引用已有预置位。
+type CruiseDraftStop = { key: string; presetId: number };
+type CruiseDraft = {
+    trackId: number;
+    name: string;
+    speed: number;
+    dwellSec: number;
+    sendSpeed: boolean;
+    sendDwell: boolean;
+    stops: CruiseDraftStop[];
+    replaceExisting: boolean;
+    submitting: boolean;
+    idempotencyKey: string;
+};
+const saveCruiseDialogVisible = ref(false);
+const cruiseDraft = ref<CruiseDraft | null>(null);
+const cruiseDraftTouched = ref(false);
+const cruiseDraftSubmitError = ref("");
+const cruiseStopsListEl = ref<HTMLElement | null>(null);
+function nextCruiseTrackId(): number {
+    if (cruiseTracks.value.length === 0) return 1;
+    const used = new Set(cruiseTracks.value.map((track) => track.id));
+    const afterMax = Math.max(...used) + 1;
+    if (afterMax <= 255) return afterMax;
+    for (let id = 0; id <= 255; id++) {
+        if (!used.has(id)) return id;
+    }
+    return 0;
+}
+function newCruiseStop(presetId: number): CruiseDraftStop {
+    return { key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, presetId };
+}
+function newCruiseIdempotencyKey(): string {
+    return `cruise-create-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+const cruiseDraftError = computed(() => {
+    if (!cruiseDraftTouched.value || !cruiseDraft.value) return "";
+    const draft = cruiseDraft.value;
+    if (!Number.isInteger(draft.trackId) || draft.trackId < 0 || draft.trackId > 255) return "巡航编号必须在 0-255 之间";
+    if (!draft.replaceExisting && cruiseTracks.value.some((c) => c.id === draft.trackId)) return `巡航编号 #${draft.trackId} 已存在,请换一个或勾选清空重建`;
+    if (draft.name.length > 32) return "名称最多 32 个字符";
+    if (draft.stops.length === 0) return "至少选择 1 个站点";
+    if (draft.stops.length > 32) return "站点数量最多 32 个";
+    if (draft.stops.some((s) => !presets.value.some((p) => p.id === s.presetId))) return "存在无效的预置位站点";
+    if (draft.sendSpeed && (!Number.isInteger(draft.speed) || draft.speed < 1 || draft.speed > 4095)) return "速度必须在 1-4095 之间";
+    if (draft.sendDwell && (!Number.isInteger(draft.dwellSec) || draft.dwellSec < 1 || draft.dwellSec > 4095)) return "停留时间必须在 1-4095 秒之间";
+    return "";
+});
+function openSaveCruiseDialog() {
+    if (!props.channel || !isPtzCapable.value || presets.value.length === 0) return;
+    const firstPreset = presets.value[0].id;
+    cruiseDraft.value = {
+        trackId: nextCruiseTrackId(),
+        name: `巡航 ${nextCruiseTrackId()}`,
+        speed: 128,
+        dwellSec: 5,
+        sendSpeed: true,
+        sendDwell: true,
+        stops: [newCruiseStop(firstPreset)],
+        replaceExisting: false,
+        submitting: false,
+        idempotencyKey: newCruiseIdempotencyKey(),
+    };
+    cruiseDraftTouched.value = false;
+    cruiseDraftSubmitError.value = "";
+    saveCruiseDialogVisible.value = true;
+}
+function closeSaveCruiseDialog() {
+    if (cruiseDraft.value?.submitting) return;
+    saveCruiseDialogVisible.value = false;
+    cruiseDraft.value = null;
+    cruiseDraftTouched.value = false;
+    cruiseDraftSubmitError.value = "";
+}
+function canCloseSaveCruiseDialog() {
+    return !cruiseDraft.value?.submitting;
+}
+async function addCruiseStop() {
+    if (!cruiseDraft.value || cruiseDraft.value.submitting || cruiseDraft.value.stops.length >= 32) return;
+    const usedPresetIds = new Set(cruiseDraft.value.stops.map((stop) => stop.presetId));
+    const fallback = presets.value.find((preset) => !usedPresetIds.has(preset.id))?.id ?? presets.value[0]?.id;
+    if (!fallback) return;
+    cruiseDraft.value.stops.push(newCruiseStop(fallback));
+    await nextTick();
+    if (cruiseStopsListEl.value) cruiseStopsListEl.value.scrollTop = cruiseStopsListEl.value.scrollHeight;
+}
+function removeCruiseStop(index: number) {
+    if (!cruiseDraft.value || cruiseDraft.value.submitting) return;
+    cruiseDraft.value.stops.splice(index, 1);
+}
+function moveCruiseStop(index: number, delta: number) {
+    if (!cruiseDraft.value || cruiseDraft.value.submitting) return;
+    const stops = cruiseDraft.value.stops;
+    const target = index + delta;
+    if (target < 0 || target >= stops.length) return;
+    const [item] = stops.splice(index, 1);
+    stops.splice(target, 0, item);
+}
+async function handleSaveCruiseBeforeOk(done: (closable?: boolean) => void) {
+    if (!cruiseDraft.value || !props.channel) { done(false); return; }
+    if (cruiseDraft.value.submitting) { done(false); return; }
+    cruiseDraftTouched.value = true;
+    if (cruiseDraftError.value) { done(false); return; }
+    const draft = cruiseDraft.value;
+    const channelId = props.channel.id;
+    const token = sessionToken;
+    draft.submitting = true;
+    cruiseDraftSubmitError.value = "";
+    try {
+        const response = await createCruiseTrack(channelId, {
+            trackId: draft.trackId,
+            name: draft.name.trim(),
+            speed: draft.sendSpeed ? draft.speed : 0,
+            dwellSec: draft.sendDwell ? draft.dwellSec : 0,
+            stops: draft.stops.map((s) => ({ presetId: s.presetId })),
+            replaceExisting: draft.replaceExisting,
+            idempotencyKey: draft.idempotencyKey,
+        });
+        if (token !== sessionToken || props.channel?.id !== channelId || cruiseDraft.value !== draft) {
+            done(false);
+            return;
+        }
+        if (response.code === 0) {
+            Message.info(`巡航 #${draft.trackId} 配置指令已发送,待设备对账 (${response.data?.completedStops ?? 0}/${response.data?.totalStops ?? 0} 站)`);
+            await loadCruises(channelId, token, false);
+            if (token !== sessionToken || props.channel?.id !== channelId || cruiseDraft.value !== draft) {
+                done(false);
+                return;
+            }
+            scheduleCruiseReconcilePolling(channelId, token);
+            done(true);
+            cruiseDraft.value = null;
+            cruiseDraftTouched.value = false;
+            cruiseDraftSubmitError.value = "";
+            return;
+        }
+        const data = response.data;
+        const completed = data?.completedStops ?? 0;
+        const total = data?.totalStops ?? draft.stops.length;
+        cruiseDraftSubmitError.value = `已有 ${completed}/${total} 站指令发送,请关闭后刷新设备状态再重建:${response.message || data?.error || "未知原因"}`;
+        Message.warning(`巡航 #${draft.trackId} 配置指令部分发送 (${completed}/${total} 站),请先核对设备状态`);
+        scheduleCruiseReconcilePolling(channelId, token);
+        done(false);
+    } catch (error: any) {
+        if (token === sessionToken && props.channel?.id === channelId && cruiseDraft.value === draft) {
+            cruiseDraftSubmitError.value = error?.message || "建立巡航失败";
+            Message.error(cruiseDraftSubmitError.value);
+        }
+        done(false);
+    } finally {
+        if (cruiseDraft.value === draft) draft.submitting = false;
+    }
+}
 
 type AssetManagerTab = "preset" | "cruise";
 const assetManagerVisible = ref(false);
@@ -513,7 +790,9 @@ async function startSession() {
     try {
         const response = await startPlay(channel.deviceId, channel.channelId);
         if (token !== sessionToken || !props.visible) {
-            if (response.data?.streamId) await stopPlay(response.data.streamId).catch(() => undefined);
+            if (token > localCleanupThroughToken && response.data?.streamId) {
+                await stopPlay(response.data.streamId).catch(() => undefined);
+            }
             return;
         }
         if (response.code !== 0 || !response.data) throw new Error(response.message || "点播失败");
@@ -544,6 +823,20 @@ function resetSessionState() {
     assetManagerVisible.value = false;
     assetSearch.value = "";
     presetDraft.value = null;
+    savePresetDialogVisible.value = false;
+    activePresetId.value = null;
+    saveCruiseDialogVisible.value = false;
+    cruiseDraft.value = null;
+    cruiseDraftTouched.value = false;
+    cruiseDraftSubmitError.value = "";
+    activeCruiseId.value = null;
+    cruiseState.value = "stopped";
+    cruiseFreshness.value = "unknown";
+    cruiseRefreshPending.value = false;
+    cruiseLoadError.value = "";
+    cruiseRefreshError.value = "";
+    cruiseMoreVisible.value = false;
+    clearCruiseReconcilePolling();
     probeToken++;
     clearProbeTimers();
     probeState.value = "idle";
@@ -564,11 +857,10 @@ function resetSessionState() {
     dragZoomCurrent.value = null;
 }
 
-async function stopSession(release = true) {
-    const streamId = playResult.value?.streamId;
+function cleanupSessionLocally() {
+    localCleanupThroughToken = Math.max(localCleanupThroughToken, sessionToken);
     sessionToken++;
     resetSessionState();
-    if (release && streamId) await stopPlay(streamId).catch(() => undefined);
 }
 
 function reconnect() {
@@ -576,8 +868,8 @@ function reconnect() {
 }
 
 function handleClose() {
-    void stopTalk();
-    void stopSession();
+    cleanupTalkLocally();
+    cleanupSessionLocally();
     emit("update:visible", false);
 }
 
@@ -620,17 +912,46 @@ async function loadPresets(channelId = props.channel?.id, token = sessionToken) 
     }
 }
 
-async function loadCruises(channelId = props.channel?.id, token = sessionToken) {
-    if (!channelId) return;
+async function loadCruises(channelId = props.channel?.id, token = sessionToken, refresh = true) {
+    if (!channelId || token !== sessionToken || props.channel?.id !== channelId) return;
+    cruiseRefreshPending.value = false;
+    cruiseLoadError.value = "";
+    cruiseRefreshError.value = "";
     try {
-        const response = await listCruiseTracks(channelId);
-        if (token === sessionToken && props.channel?.id === channelId && response.code === 0 && response.data) {
-            cruiseTracks.value = response.data.list.map((item) => ({
-                id: Number(item.trackId ?? item.id), name: String(item.name || `巡航轨迹 ${item.trackId ?? item.id}`), enabled: item.enabled !== false, presets: [], dwellSec: 0,
-            })).filter((item) => item.id > 0);
+        const response = await listCruiseTracks(channelId, refresh);
+        if (token !== sessionToken || props.channel?.id !== channelId) return;
+        if (response.code !== 0 || !response.data) {
+            cruiseLoadError.value = response.message || "加载巡航轨迹失败,请重试";
+            return;
         }
+        if (!Array.isArray(response.data.list)) {
+            cruiseLoadError.value = "巡航轨迹数据格式错误,请重试";
+            return;
+        }
+        cruiseFreshness.value = response.data.freshness || "unknown";
+        cruiseRefreshPending.value = Boolean(response.data.refreshOperationId);
+        cruiseRefreshError.value = response.data.refreshError || "";
+        cruiseTracks.value = response.data.list.map((item) => {
+            const detail = parseCruiseDetail(item.detail);
+            // 待对账标记必须同时仍是未知/禁用状态;标准列表确认存在后 enabled=true,
+            // 即使详情 JSON 保留旧 source 也不能把设备已确认的轨迹继续锁死。
+            const pending = item.enabled !== true && (detail.source === "reconcile-pending" || detail.source === "optimistic-pending");
+            return {
+                id: Number(item.trackId ?? item.id),
+                name: String(item.name || `巡航轨迹 ${item.trackId ?? item.id}`),
+                enabled: item.enabled !== false && !pending,
+                pending,
+                points: detail.points,
+                source: detail.source,
+            };
+        }).filter((item) => Number.isInteger(item.id) && item.id >= 0 && item.id <= 255);
+        if (refresh && response.data.refreshOperationId) scheduleCruiseReconcilePolling(channelId, token);
     } catch {
-        if (token === sessionToken) cruiseTracks.value = [];
+        if (token === sessionToken && props.channel?.id === channelId) {
+            cruiseLoadError.value = "加载巡航轨迹失败,请重试";
+            cruiseRefreshPending.value = false;
+            cruiseRefreshError.value = "";
+        }
     }
 }
 
@@ -744,33 +1065,86 @@ async function deletePreset(id: number) {
     } });
 }
 
-async function toggleCruise(id: number) {
+async function executeCruiseToggle(id: number) {
     if (!props.channel) return;
     const isCurrent = activeCruiseId.value === id;
-    const action = isCurrent && cruiseState.value === "running" ? "pause" : isCurrent && cruiseState.value === "paused" ? "resume" : "start";
+    const action = isCurrent && cruiseState.value === "start-sent" ? "stop" : "start";
+    const unconfirmed = cruiseTracks.value.some((track) => track.id === id && track.pending);
+    const channelId = props.channel.id;
+    const token = sessionToken;
     try {
-        const response = await controlPtzCruise(props.channel.id, { action, trackId: id });
+        const response = await controlPtzCruise(channelId, { action, trackId: id });
+        if (token !== sessionToken || props.channel?.id !== channelId) return;
         if (response.code !== 0) throw new Error(response.message || "巡航指令失败");
-        activeCruiseId.value = id;
-        cruiseState.value = action === "pause" ? "paused" : "running";
+        if (["rejected", "timeout", "cancelled"].includes(String(response.data?.status))) {
+            throw new Error(response.message || `巡航${action === "stop" ? "停止" : "启动"}未被设备接受`);
+        }
+        if (action === "stop") {
+            cruiseState.value = "stopped";
+            activeCruiseId.value = null;
+            Message.info(`巡航 #${id} 停止指令已发送`);
+        } else {
+            activeCruiseId.value = id;
+            cruiseState.value = "start-sent";
+            Message.info(unconfirmed
+                ? `巡航 #${id} 试运行指令已发送,请观察设备是否开始巡航`
+                : `巡航 #${id} 启动指令已发送,待设备确认`);
+        }
     } catch (error: any) { Message.error(error?.message || "巡航指令失败"); }
+}
+function toggleCruise(id: number) {
+    const isCurrent = activeCruiseId.value === id && cruiseState.value === "start-sent";
+    const unconfirmed = cruiseTracks.value.some((track) => track.id === id && track.pending);
+    if (!isCurrent && unconfirmed) {
+        Modal.warning({
+            title: "试运行未验证轨迹",
+            content: `轨迹 #${id} 尚未收到设备确认。试运行可能调用设备中原有的同编号轨迹,请确认现场允许云台移动。`,
+            hideCancel: false,
+            okText: "继续试运行",
+            cancelText: "取消",
+            onOk: () => executeCruiseToggle(id),
+        });
+        return;
+    }
+    return executeCruiseToggle(id);
 }
 async function stopCruise() {
     const trackId = activeCruiseId.value;
-    if (!props.channel || !trackId) return;
+    if (!props.channel || trackId === null) return;
+    const channelId = props.channel.id;
+    const token = sessionToken;
     try {
-        const response = await controlPtzCruise(props.channel.id, { action: "stop", trackId });
+        const response = await controlPtzCruise(channelId, { action: "stop", trackId });
+        if (token !== sessionToken || props.channel?.id !== channelId) return;
         if (response.code !== 0) throw new Error(response.message || "停止巡航失败");
         cruiseState.value = "stopped";
         activeCruiseId.value = null;
+        Message.info(`巡航 #${trackId} 停止指令已发送`);
     } catch (error: any) { Message.error(error?.message || "停止巡航失败"); }
 }
+async function deleteCruise(id: number) {
+    if (!props.channel) return;
+    const channelId = props.channel.id;
+    const token = sessionToken;
+    Modal.warning({ title: "删除巡航轨迹", content: `确认删除巡航轨迹 #${id}?此操作会下发到设备,不可撤销。`, hideCancel: false, okText: "删除", cancelText: "取消", onOk: async () => {
+        try {
+            const response = await controlPtzCruise(channelId, { action: "delete", trackId: id });
+            if (token !== sessionToken || props.channel?.id !== channelId) return;
+            if (response.code !== 0) throw new Error(response.message || "删除巡航失败");
+            if (activeCruiseId.value === id) { activeCruiseId.value = null; cruiseState.value = "stopped"; }
+            Message.info(`巡航 #${id} 删除指令已发送,待设备对账`);
+            await loadCruises(channelId, token, false);
+        } catch (error: any) { Message.error(error?.message || "删除巡航失败"); }
+    } });
+}
 
+// 抽屉打开入口暂时被 tile grid + 更多 popover 替代,函数保留供未来管理面板复用
 function openAssetManager(tab: AssetManagerTab) {
     assetManagerTab.value = tab;
     assetSearch.value = "";
     assetManagerVisible.value = true;
 }
+void openAssetManager;
 
 function switchAssetManagerTab(tab: AssetManagerTab) {
     assetManagerTab.value = tab;
@@ -944,6 +1318,8 @@ let talkConnection: RTCPeerConnection | null = null;
 let talkStream: MediaStream | null = null;
 let talkPollTimer: number | null = null;
 let talkToken = 0;
+// 关闭弹窗只销毁本地对讲资源,阻止迟到的创建响应补发 deleteTalkSession。
+let localTalkCleanupThroughToken = 0;
 
 function clearTalkPoll() {
     if (talkPollTimer) window.clearInterval(talkPollTimer);
@@ -954,6 +1330,7 @@ async function waitTalkActive(channelId: number, sessionId: string, token: numbe
     for (let attempt = 0; attempt < 17; attempt++) {
         if (token !== talkToken) return false;
         const response = await getTalkSession(channelId, sessionId);
+        if (token !== talkToken) return false;
         const state = response.data?.state;
         if (state === "active") return true;
         if (["failed", "expired", "ended"].includes(String(state))) throw new Error(response.data?.error || `对讲会话已${state}`);
@@ -987,7 +1364,9 @@ async function startTalk() {
         const response = await createTalkSession(props.channel.id, talkMode.value);
         if (response.code !== 0 || !response.data) throw new Error(response.message || "对讲会话创建失败");
         if (token !== talkToken) {
-            await deleteTalkSession(props.channel.id, response.data.sessionId).catch(() => undefined);
+            if (token > localTalkCleanupThroughToken) {
+                await deleteTalkSession(props.channel.id, response.data.sessionId).catch(() => undefined);
+            }
             return;
         }
         talkSession.value = response.data;
@@ -1014,17 +1393,23 @@ async function startTalk() {
     }
 }
 
-async function stopTalk() {
+function cleanupTalkLocally(suppressBackendCleanup = true) {
+    if (suppressBackendCleanup) {
+        localTalkCleanupThroughToken = Math.max(localTalkCleanupThroughToken, talkToken);
+    }
     talkToken++;
     clearTalkPoll();
-    if (talkState.value === "idle" && !talkSession.value) return;
     if (talkStream) talkStream.getTracks().forEach((track) => track.stop());
     talkStream = null;
     talkConnection?.close();
     talkConnection = null;
-    const session = talkSession.value;
     talkSession.value = null;
     talkState.value = "idle";
+}
+
+async function stopTalk() {
+    const session = talkSession.value;
+    cleanupTalkLocally(false);
     if (props.channel && session?.sessionId) await deleteTalkSession(props.channel.id, session.sessionId).catch(() => undefined);
 }
 
@@ -1067,7 +1452,7 @@ watch(
     [() => props.visible, () => props.channel?.id],
     ([visible]) => {
         if (visible && props.channel) void startSession();
-        else { void stopTalk(); void stopSession(); }
+        else { cleanupTalkLocally(); cleanupSessionLocally(); }
     },
     { immediate: true },
 );
@@ -1083,8 +1468,8 @@ onBeforeUnmount(() => {
     clearProbeTimers();
     clearTimer();
     clearMonitor();
-    void stopTalk();
-    void stopSession();
+    cleanupTalkLocally();
+    cleanupSessionLocally();
 });
 </script>
 
@@ -1253,15 +1638,21 @@ onBeforeUnmount(() => {
                                             class="preset-tile"
                                             :class="{ active: activePresetId === p.id, disabled: !isPtzCapable }"
                                         >
-                                            <button
-                                                class="preset-tile-hit preset-item"
-                                                :disabled="!isPtzCapable"
-                                                :title="`#${p.id} ${p.name}`"
-                                                @click="callPreset(p.id)"
+                                            <a-tooltip
+                                                :content="`#${p.id} ${p.name}`"
+                                                position="top"
+                                                :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+                                                :data-testid="`preset-tile-tooltip-${p.id}`"
                                             >
-                                                <span class="preset-idx">#{{ p.id }}</span>
-                                                <span class="preset-name">{{ p.name }}</span>
-                                            </button>
+                                                <button
+                                                    class="preset-tile-hit preset-item"
+                                                    :disabled="!isPtzCapable"
+                                                    @click="callPreset(p.id)"
+                                                >
+                                                    <span class="preset-idx">#{{ p.id }}</span>
+                                                    <span class="preset-name">{{ p.name }}</span>
+                                                </button>
+                                            </a-tooltip>
                                             <button
                                                 class="preset-tile-del"
                                                 :disabled="!isPtzCapable"
@@ -1297,7 +1688,14 @@ onBeforeUnmount(() => {
                                                             data-testid="preset-popover-row"
                                                         >
                                                             <span class="preset-popover-idx">#{{ p.id }}</span>
-                                                            <span class="preset-popover-name" :title="p.name">{{ p.name }}</span>
+                                                            <a-tooltip
+                                                                :content="`#${p.id} ${p.name}`"
+                                                                position="top"
+                                                                :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+                                                                :data-testid="`preset-popover-tooltip-${p.id}`"
+                                                            >
+                                                                <span class="preset-popover-name">{{ p.name }}</span>
+                                                            </a-tooltip>
                                                             <div class="preset-popover-actions">
                                                                 <button
                                                                     class="preset-popover-call"
@@ -1325,29 +1723,135 @@ onBeforeUnmount(() => {
                             </section>
 
                             <section class="linked-section linked-card">
-                                <div class="section-hd first">
-                                    <span class="section-title"><Route :size="13" />巡航轨迹<span class="tag-2022">2022</span></span>
-                                    <span class="section-meta">{{ visibleCruiseTracks.length }} / {{ cruiseTracks.length }}</span>
+                                <header class="linked-card-hd">
+                                    <span class="section-title">
+                                        <Route :size="13" />巡航轨迹<em v-if="cruiseTracks.length" class="preset-count">{{ cruiseTracks.length }}</em>
+                                        <small class="cruise-freshness" data-testid="cruise-freshness">{{ cruiseSyncLabel }}</small>
+                                        <button
+                                            v-if="activeCruiseId !== null && cruiseState !== 'stopped'"
+                                            class="cruise-running-chip"
+                                            data-testid="cruise-running-chip"
+                                            :title="`巡航 #${activeCruiseId} 启动指令已发送,点击停止`"
+                                            @click="stopCruise"
+                                        >
+                                            <span class="cruise-running-dot" :class="cruiseState" />
+                                            启动已下发
+                                            <Square :size="10" />
+                                        </button>
+                                    </span>
+                                    <button
+                                        class="preset-save-btn"
+                                        data-testid="cruise-add-btn"
+                                        :disabled="!isPtzCapable || presets.length === 0"
+                                        :title="presets.length === 0 ? '需要先添加预置位才能新建巡航轨迹' : '新建巡航轨迹(按顺序串联多个预置位)'"
+                                        @click="openSaveCruiseDialog"
+                                    >
+                                        <Plus :size="12" /><span>添加</span>
+                                    </button>
+                                </header>
+                                <div v-if="cruiseLoadError" class="preset-empty" data-testid="cruise-load-error">
+                                    <AlertTriangle :size="24" class="preset-empty-glyph" />
+                                    <p class="preset-empty-line">{{ cruiseLoadError }}</p>
                                 </div>
-                                <div class="cruise-list">
-                                    <div v-for="c in visibleCruiseTracks" :key="c.id" class="cruise-item" :class="{ active: activeCruiseId === c.id, disabled: !c.enabled }">
-                                        <div class="cruise-info">
-                                            <strong>#{{ c.id }} · {{ c.name }}</strong>
-                                            <small>{{ c.presets.length }} 个点位 · 停留 {{ c.dwellSec }}s · {{ c.enabled ? '已启用' : '已禁用' }}</small>
-                                        </div>
-                                        <div class="cruise-actions">
-                                            <button class="btn-ghost sm" :disabled="!isPtzCapable || !c.enabled" @click="toggleCruise(c.id)">
-                                                <Play v-if="cruiseState !== 'running' || activeCruiseId !== c.id" :size="12" />
-                                                <Pause v-else :size="12" />
+                                <div v-else-if="cruiseTracks.length === 0" class="preset-empty" data-testid="cruise-empty">
+                                    <Inbox :size="24" class="preset-empty-glyph" />
+                                    <p class="preset-empty-line">暂无巡航轨迹</p>
+                                </div>
+                                <div v-else class="preset-grid">
+                                    <a-tooltip
+                                        v-for="c in visibleCruiseTracks"
+                                        :key="c.id"
+                                        :content="cruiseTileTitle(c)"
+                                        position="top"
+                                        :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+                                        :data-testid="`cruise-tile-tooltip-${c.id}`"
+                                    >
+                                        <div
+                                            class="preset-tile cruise-tile"
+                                            :class="{
+                                                active: activeCruiseId === c.id && cruiseState !== 'stopped',
+                                                disabled: (!c.enabled && !c.pending) || !isPtzCapable,
+                                                pending: c.pending,
+                                            }"
+                                            :data-testid="`cruise-tile-${c.id}`"
+                                        >
+                                            <button
+                                                class="preset-tile-hit cruise-item"
+                                                :disabled="!isPtzCapable || (!c.enabled && !c.pending)"
+                                                @click="toggleCruise(c.id)"
+                                            >
+                                                <Square v-if="cruiseTileState(c) === 'stop'" :size="10" class="cruise-tile-icon" />
+                                                <Play v-else :size="10" class="cruise-tile-icon" />
+                                                <span class="preset-name">{{ c.name }}</span>
+                                                <span v-if="c.pending" class="cruise-status-badge">未验证</span>
+                                            </button>
+                                            <button
+                                                class="preset-tile-del"
+                                                :disabled="!isPtzCapable"
+                                                :title="`删除巡航 #${c.id}`"
+                                                @click.stop="deleteCruise(c.id)"
+                                            >
+                                                <X :size="11" />
                                             </button>
                                         </div>
-                                    </div>
-                                    <button v-if="cruiseState !== 'stopped'" class="btn-ghost sm block" @click="stopCruise">
-                                        <Square :size="12" />停止全部巡航
-                                    </button>
-                                    <button class="resource-summary-action" data-testid="manage-cruises" @click="openAssetManager('cruise')">
-                                        <span>管理全部 {{ cruiseTracks.length }} 条</span><ChevronRight :size="12" />
-                                    </button>
+                                    </a-tooltip>
+                                    <a-popover
+                                        v-if="hasMoreCruises"
+                                        v-model:popup-visible="cruiseMoreVisible"
+                                        trigger="click"
+                                        position="bottom"
+                                        :content-style="{ padding: 0 }"
+                                        class="preset-more-popover-trigger"
+                                    >
+                                        <button class="preset-tile-more" data-testid="cruise-more-btn">
+                                            <span>更多 · {{ cruiseTracks.length }}</span>
+                                            <ChevronDown :size="11" />
+                                        </button>
+                                        <template #content>
+                                            <div class="preset-popover" data-testid="cruise-popover">
+                                                <header class="preset-popover-hd">
+                                                    <span><Route :size="12" />全部巡航轨迹<em class="preset-count">{{ cruiseTracks.length }}</em></span>
+                                                </header>
+                                                <div class="preset-popover-list">
+                                                    <a-tooltip
+                                                        v-for="c in cruiseTracks"
+                                                        :key="c.id"
+                                                        :content="cruiseTileTitle(c)"
+                                                        position="top"
+                                                        :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+                                                        :data-testid="`cruise-popover-tooltip-${c.id}`"
+                                                    >
+                                                        <div
+                                                            class="preset-popover-row"
+                                                            :class="{ active: activeCruiseId === c.id && cruiseState !== 'stopped' }"
+                                                            data-testid="cruise-popover-row"
+                                                        >
+                                                            <span class="preset-popover-idx">#{{ c.id }}</span>
+                                                            <span class="preset-popover-name">{{ c.name }}</span>
+                                                            <div class="preset-popover-actions">
+                                                                <button
+                                                                    class="preset-popover-call"
+                                                                    :disabled="!isPtzCapable || (!c.enabled && !c.pending)"
+                                                                    @click="toggleCruise(c.id)"
+                                                                >
+                                                                    <Square v-if="cruiseTileState(c) === 'stop'" :size="11" />
+                                                                    <Play v-else :size="11" />
+                                                                </button>
+                                                                <button
+                                                                    class="preset-popover-del"
+                                                                    :disabled="!isPtzCapable"
+                                                                    title="删除此巡航轨迹"
+                                                                    @click="deleteCruise(c.id)"
+                                                                >
+                                                                    <Trash2 :size="11" />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </a-tooltip>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </a-popover>
                                 </div>
                             </section>
 
@@ -1782,10 +2286,17 @@ onBeforeUnmount(() => {
                                     data-testid="asset-manager-row"
                                 >
                                     <span class="asset-manager-index">#{{ p.id }}</span>
-                                    <div class="asset-manager-info">
-                                        <strong>{{ p.name }}</strong>
-                                        <small>{{ p.setAt || "尚未记录更新时间" }}</small>
-                                    </div>
+                                    <a-tooltip
+                                        :content="`#${p.id} ${p.name}`"
+                                        position="top"
+                                        :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+                                        :data-testid="`preset-manager-tooltip-${p.id}`"
+                                    >
+                                        <div class="asset-manager-info">
+                                            <strong>{{ p.name }}</strong>
+                                            <small>{{ p.setAt || "尚未记录更新时间" }}</small>
+                                        </div>
+                                    </a-tooltip>
                                     <div class="asset-manager-actions">
                                         <button class="btn-ghost xs" :disabled="!isPtzCapable" @click="callPreset(p.id)">
                                             <Navigation :size="11" />调用
@@ -1800,31 +2311,38 @@ onBeforeUnmount(() => {
                             </template>
 
                             <template v-else>
-                                <div
+                                <a-tooltip
                                     v-for="c in filteredCruiseTracks"
                                     :key="c.id"
-                                    class="asset-manager-row"
-                                    :class="{ active: activeCruiseId === c.id, disabled: !c.enabled }"
-                                    data-testid="asset-manager-row"
+                                    :content="cruiseTileTitle(c)"
+                                    position="top"
+                                    :mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"
+                                    :data-testid="`cruise-manager-tooltip-${c.id}`"
                                 >
-                                    <span class="asset-manager-index">#{{ c.id }}</span>
-                                    <div class="asset-manager-info">
-                                        <strong>{{ c.name }}</strong>
-                                        <small>{{ c.presets.length }} 个点位 · 停留 {{ c.dwellSec }}s · {{ c.enabled ? "已启用" : "已禁用" }}</small>
+                                    <div
+                                        class="asset-manager-row"
+                                        :class="{ active: activeCruiseId === c.id, disabled: !c.enabled && !c.pending, pending: c.pending }"
+                                        data-testid="asset-manager-row"
+                                    >
+                                        <span class="asset-manager-index">#{{ c.id }}</span>
+                                        <div class="asset-manager-info">
+                                            <strong>{{ c.name }}</strong>
+                                            <small>{{ cruiseTrackMeta(c) }} · {{ c.pending ? "可试运行" : c.enabled ? "可调用" : "已禁用" }}</small>
+                                        </div>
+                                        <button class="btn-ghost xs" :disabled="!isPtzCapable || (!c.enabled && !c.pending)" @click="toggleCruise(c.id)">
+                                            <Square v-if="activeCruiseId === c.id && cruiseState === 'start-sent'" :size="11" />
+                                            <Play v-else :size="11" />
+                                            {{ activeCruiseId === c.id && cruiseState === "start-sent" ? "停止" : c.pending ? "试运行" : "启动" }}
+                                        </button>
                                     </div>
-                                    <button class="btn-ghost xs" :disabled="!isPtzCapable || !c.enabled" @click="toggleCruise(c.id)">
-                                        <Pause v-if="activeCruiseId === c.id && cruiseState === 'running'" :size="11" />
-                                        <Play v-else :size="11" />
-                                        {{ activeCruiseId === c.id && cruiseState === "running" ? "暂停" : "启动" }}
-                                    </button>
-                                </div>
+                                </a-tooltip>
                                 <div v-if="filteredCruiseTracks.length === 0" class="asset-manager-empty">没有匹配的巡航轨迹</div>
                             </template>
                         </div>
 
                         <footer class="asset-manager-footer">
-                            <span>{{ assetManagerTab === "preset" ? `${filteredPresets.length} 个预置位` : `${filteredCruiseTracks.length} 条巡航轨迹` }}</span>
-                            <button v-if="assetManagerTab === 'cruise' && cruiseState !== 'stopped'" class="btn-ghost xs" @click="stopCruise">
+                            <span>{{ assetManagerTab === "preset" ? `${filteredPresets.length} 个预置位` : `${filteredCruiseTracks.length} 条巡航轨迹 · ${cruiseSyncLabel}` }}</span>
+                            <button v-if="assetManagerTab === 'cruise' && activeCruiseId !== null && cruiseState !== 'stopped'" class="btn-ghost xs" @click="stopCruise">
                                 <Square :size="11" />停止全部
                             </button>
                         </footer>
@@ -1875,6 +2393,185 @@ onBeforeUnmount(() => {
                             <p v-else class="preset-save-hint">留空将使用默认名「预置位 {{ presetDraft.id }}」</p>
                         </div>
                     </div>
+                </div>
+            </a-modal>
+
+            <a-modal
+                v-model:visible="saveCruiseDialogVisible"
+                title="新建巡航轨迹"
+                ok-text="创建并下发"
+                cancel-text="取消"
+                modal-class="uvp-system-dialog cruise-save-modal"
+                :width="480"
+                :mask-closable="false"
+                :closable="!cruiseDraft?.submitting"
+                :esc-to-close="!cruiseDraft?.submitting"
+                :cancel-button-props="{ disabled: cruiseDraft?.submitting || false }"
+                :ok-loading="cruiseDraft?.submitting || false"
+                :on-before-ok="handleSaveCruiseBeforeOk"
+                :on-before-cancel="canCloseSaveCruiseDialog"
+                unmount-on-close
+                @cancel="closeSaveCruiseDialog"
+                @close="closeSaveCruiseDialog"
+            >
+                <div v-if="cruiseDraft" class="cruise-save-form" data-testid="cruise-save-dialog">
+                    <div class="cruise-save-notice">
+                        <Info :size="14" />
+                        <span>配置会直接下发到设备。部分旧版设备无法回传确认,下发后可通过“试运行”验证。</span>
+                    </div>
+                    <div class="cruise-save-row">
+                        <label class="cruise-save-label">名称</label>
+                        <div class="cruise-save-field">
+                            <a-input
+                                v-model="cruiseDraft.name"
+                                allow-clear
+                                :max-length="32"
+                                :placeholder="`巡航 ${cruiseDraft.trackId}`"
+                                :disabled="cruiseDraft.submitting"
+                                data-testid="cruise-save-name-input"
+                                @blur="cruiseDraftTouched = true"
+                            >
+                                <template #suffix>
+                                    <span class="preset-save-count" :class="{ ok: cruiseDraft.name.trim().length > 0 && cruiseDraft.name.trim().length <= 32 }">
+                                        {{ cruiseDraft.name.length }}/32
+                                    </span>
+                                </template>
+                            </a-input>
+                            <p class="preset-save-hint">名称仅在本平台显示,不会同步到设备。</p>
+                        </div>
+                    </div>
+                    <div class="cruise-save-row">
+                        <label class="cruise-save-label">站点</label>
+                        <div class="cruise-save-field">
+                            <div ref="cruiseStopsListEl" class="cruise-stops-list" data-testid="cruise-stops-list">
+                                <div v-for="(stop, index) in cruiseDraft.stops" :key="stop.key" class="cruise-stop-row" data-testid="cruise-stop-row">
+                                    <span class="cruise-stop-idx">{{ index + 1 }}</span>
+                                    <a-select
+                                        v-model="stop.presetId"
+                                        :style="{ flex: '1 1 auto', minWidth: '0' }"
+                                        :disabled="cruiseDraft.submitting"
+                                        data-testid="cruise-stop-select"
+                                        placeholder="选择预置位"
+                                    >
+                                        <a-option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</a-option>
+                                    </a-select>
+                                    <button class="cruise-stop-move" :disabled="cruiseDraft.submitting || index === 0" title="上移" aria-label="上移巡航点" @click="moveCruiseStop(index, -1)">↑</button>
+                                    <button class="cruise-stop-move" :disabled="cruiseDraft.submitting || index === cruiseDraft.stops.length - 1" title="下移" aria-label="下移巡航点" @click="moveCruiseStop(index, 1)">↓</button>
+                                    <button class="cruise-stop-del" :disabled="cruiseDraft.submitting || cruiseDraft.stops.length <= 1" title="删除该站点" aria-label="删除巡航点" @click="removeCruiseStop(index)">
+                                        <X :size="11" />
+                                    </button>
+                                </div>
+                            </div>
+                            <button
+                                class="cruise-stop-add"
+                                data-testid="cruise-stop-add-btn"
+                                :disabled="cruiseDraft.submitting || cruiseDraft.stops.length >= 32"
+                                @click="addCruiseStop"
+                            >
+                                <Plus v-if="cruiseDraft.stops.length < 32" :size="14" />
+                                <span>{{ cruiseDraft.stops.length >= 32 ? "已达到 32 站上限" : "添加巡航点" }}</span>
+                                <small v-if="cruiseDraft.stops.length < 32" class="cruise-stop-add-count">还可添加 {{ 32 - cruiseDraft.stops.length }} 个</small>
+                            </button>
+                            <p class="preset-save-hint">已选择 {{ cruiseDraft.stops.length }} 个巡航点,设备将按列表顺序循环执行。</p>
+                        </div>
+                    </div>
+                    <div class="cruise-save-row">
+                        <label class="cruise-save-label">巡航速度</label>
+                        <div class="cruise-save-field">
+                            <div class="cruise-param-line">
+                                <a-input-number
+                                    v-model="cruiseDraft.speed"
+                                    :min="1"
+                                    :max="4095"
+                                    :step="1"
+                                    :style="{ width: '112px' }"
+                                    :disabled="cruiseDraft.submitting || !cruiseDraft.sendSpeed"
+                                    data-testid="cruise-save-speed"
+                                    @blur="cruiseDraftTouched = true"
+                                />
+                                <span class="cruise-param-mode">
+                                    <a-switch
+                                        v-model="cruiseDraft.sendSpeed"
+                                        size="small"
+                                        :disabled="cruiseDraft.submitting"
+                                        aria-label="是否下发巡航速度设置"
+                                        data-testid="cruise-send-speed"
+                                    />
+                                    <span>{{ cruiseDraft.sendSpeed ? "下发设置" : "不下发" }}</span>
+                                </span>
+                            </div>
+                            <p class="preset-save-hint">
+                                {{ cruiseDraft.sendSpeed
+                                    ? "国标 12 位协议值,范围 1-4095;无统一物理单位,实际快慢由设备决定。"
+                                    : "本次不下发速度设置,设备保持当前设置。" }}
+                            </p>
+                        </div>
+                    </div>
+                    <div class="cruise-save-row">
+                        <label class="cruise-save-label">每站停留</label>
+                        <div class="cruise-save-field">
+                            <div class="cruise-param-line">
+                                <a-input-number
+                                    v-model="cruiseDraft.dwellSec"
+                                    :min="1"
+                                    :max="4095"
+                                    :step="1"
+                                    :style="{ width: '112px' }"
+                                    :disabled="cruiseDraft.submitting || !cruiseDraft.sendDwell"
+                                    data-testid="cruise-save-dwell"
+                                    @blur="cruiseDraftTouched = true"
+                                />
+                                <span class="cruise-save-unit">秒</span>
+                                <span class="cruise-param-mode">
+                                    <a-switch
+                                        v-model="cruiseDraft.sendDwell"
+                                        size="small"
+                                        :disabled="cruiseDraft.submitting"
+                                        aria-label="是否下发巡航停留时间设置"
+                                        data-testid="cruise-send-dwell"
+                                    />
+                                    <span>{{ cruiseDraft.sendDwell ? "下发设置" : "不下发" }}</span>
+                                </span>
+                            </div>
+                            <p class="preset-save-hint">
+                                {{ cruiseDraft.sendDwell
+                                    ? "国标单位为秒,范围 1-4095 秒,最长 68 分 15 秒。"
+                                    : "本次不下发停留时间设置,设备保持当前设置。" }}
+                            </p>
+                        </div>
+                    </div>
+                    <details class="cruise-save-advanced">
+                        <summary><Settings :size="13" />高级设置</summary>
+                        <div class="cruise-save-advanced-body">
+                            <div class="cruise-save-row">
+                                <label class="cruise-save-label">编号</label>
+                                <div class="cruise-save-field">
+                                    <a-input-number
+                                        v-model="cruiseDraft.trackId"
+                                        :min="0"
+                                        :max="255"
+                                        :step="1"
+                                        :style="{ width: '96px' }"
+                                        :disabled="cruiseDraft.submitting"
+                                        data-testid="cruise-save-track-id"
+                                        @blur="cruiseDraftTouched = true"
+                                    />
+                                    <p class="preset-save-hint">轨迹编号由平台自动分配,通常无需修改。</p>
+                                </div>
+                            </div>
+                            <div class="cruise-save-row">
+                                <label class="cruise-save-label">覆盖</label>
+                                <div class="cruise-save-field">
+                                    <label class="cruise-save-replace">
+                                        <input v-model="cruiseDraft.replaceExisting" type="checkbox" :disabled="cruiseDraft.submitting" data-testid="cruise-save-replace" />
+                                        <span>覆盖同编号轨迹</span>
+                                    </label>
+                                    <p class="preset-save-hint">启用后会先清空设备中的同编号轨迹,此操作不可撤销。</p>
+                                </div>
+                            </div>
+                        </div>
+                    </details>
+                    <p v-if="cruiseDraftError || cruiseDraftSubmitError" class="preset-save-error" data-testid="cruise-save-error">{{ cruiseDraftError || cruiseDraftSubmitError }}</p>
                 </div>
             </a-modal>
         </div>
@@ -2017,6 +2714,88 @@ onBeforeUnmount(() => {
 .preset-save-count.ok { color: #059669; font-weight: 600; }
 .preset-save-hint { margin: 0; color: var(--uvp-text-tertiary); font-size: 11px; }
 .preset-save-error { margin: 0; color: var(--uvp-danger); font-size: 11px; }
+
+/* 新建巡航轨迹对话框 */
+.cruise-save-form {
+    display: grid; gap: 14px;
+    max-height: calc(100dvh - 180px); padding: 4px 6px 2px 2px;
+    overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+}
+.cruise-save-notice {
+    display: flex; align-items: flex-start; gap: 8px;
+    padding: 9px 10px;
+    color: var(--uvp-text-secondary); background: var(--uvp-warning-soft);
+    border: 1px solid var(--uvp-warning-border); border-radius: 6px;
+    font-size: 11.5px; line-height: 1.5;
+}
+.cruise-save-notice > svg { flex: 0 0 auto; margin-top: 1px; color: var(--uvp-warning); }
+.cruise-save-row { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: 12px; align-items: start; }
+.cruise-save-label { padding-top: 6px; color: var(--uvp-text-secondary); font-size: 12px; }
+.cruise-save-field { display: grid; gap: 4px; min-width: 0; }
+.cruise-param-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 32px; }
+.cruise-param-mode { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; color: var(--uvp-text-secondary); font-size: 11.5px; white-space: nowrap; }
+.cruise-save-field > .preset-save-hint { line-height: 1.45; }
+.cruise-save-unit { color: var(--uvp-text-secondary); font-size: 11.5px; }
+.cruise-save-replace { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-secondary); font-size: 11.5px; cursor: pointer; }
+.cruise-save-replace input { accent-color: var(--uvp-brand-cyan); }
+.cruise-stops-list {
+    display: grid; gap: 5px;
+    max-height: clamp(168px, 30vh, 260px); padding-right: 3px;
+    overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable;
+}
+.cruise-stop-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 6px;
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 3%, var(--uvp-panel-bg));
+    border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 16%, var(--uvp-panel-border));
+    border-radius: 6px;
+}
+.cruise-stop-idx {
+    display: inline-grid; place-items: center; width: 22px; height: 22px;
+    color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
+    border-radius: 50%;
+    font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 600;
+}
+.cruise-stop-move,
+.cruise-stop-del {
+    display: inline-grid; place-items: center; width: 24px; height: 24px;
+    background: transparent; border: 1px solid transparent;
+    border-radius: 5px; cursor: pointer;
+    color: var(--uvp-text-tertiary); font-size: 12px; font-weight: 600;
+    transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+.cruise-stop-move:hover:not(:disabled) { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent); }
+.cruise-stop-del:hover:not(:disabled) { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border); }
+.cruise-stop-move:disabled,
+.cruise-stop-del:disabled { opacity: 0.35; cursor: not-allowed; }
+.cruise-stop-add {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; min-height: 44px; padding: 8px 12px; margin-top: 3px;
+    color: var(--uvp-brand); background: var(--uvp-brand-soft);
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 44%, var(--uvp-panel-border));
+    border-radius: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+    transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+.cruise-stop-add:hover:not(:disabled) { color: #fff; background: var(--uvp-brand); border-color: var(--uvp-brand); }
+.cruise-stop-add:focus-visible { outline: 2px solid color-mix(in srgb, var(--uvp-brand) 52%, transparent); outline-offset: 2px; }
+.cruise-stop-add:disabled { opacity: 0.65; cursor: not-allowed; }
+.cruise-stop-add-count { margin-left: auto; color: currentColor; font-size: 10px; font-weight: 400; opacity: 0.72; }
+.cruise-save-advanced {
+    padding-top: 8px; border-top: 1px solid var(--uvp-panel-border);
+}
+.cruise-save-advanced > summary {
+    display: inline-flex; align-items: center; gap: 5px;
+    color: var(--uvp-text-secondary); cursor: pointer;
+    font-size: 11.5px; font-weight: 600;
+}
+.cruise-save-advanced > summary::marker { display: none; }
+.cruise-save-advanced-body { display: grid; gap: 12px; padding-top: 12px; }
+@media (max-width: 560px) {
+    .cruise-save-form { max-height: calc(100dvh - 210px); }
+    .cruise-save-row { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+    .cruise-save-label { padding-top: 0; }
+}
 .asset-manager-list {
     min-height: 0; overflow-y: auto; margin-top: 10px; padding: 0 16px;
     scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--uvp-text-tertiary) 28%, transparent) transparent;
@@ -2306,7 +3085,8 @@ onBeforeUnmount(() => {
 .preset-tile.active { background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border)); }
 .preset-tile.disabled { opacity: 0.5; }
 .preset-tile .preset-tile-hit,
-.preset-tile > .preset-tile-hit.preset-item {
+.preset-tile > .preset-tile-hit.preset-item,
+.preset-tile > .preset-tile-hit.cruise-item {
     display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: none;
     flex: 1 1 auto;
     padding: 3px 6px;
@@ -2315,8 +3095,10 @@ onBeforeUnmount(() => {
     grid-template-columns: unset;
     transition: none;
 }
-.preset-tile > .preset-tile-hit.preset-item:hover:not(:disabled) { border-color: transparent; background: transparent; }
-.preset-tile > .preset-tile-hit.preset-item:disabled { opacity: 1; cursor: not-allowed; }
+.preset-tile > .preset-tile-hit.preset-item:hover:not(:disabled),
+.preset-tile > .preset-tile-hit.cruise-item:hover:not(:disabled) { border-color: transparent; background: transparent; }
+.preset-tile > .preset-tile-hit.preset-item:disabled,
+.preset-tile > .preset-tile-hit.cruise-item:disabled { opacity: 1; cursor: not-allowed; }
 .preset-tile.active .preset-tile-hit { color: var(--uvp-brand); }
 .preset-tile .preset-idx { color: var(--uvp-text-tertiary); font-family: ui-monospace, Menlo, monospace; font-size: 10px; flex-shrink: 0; }
 .preset-tile.active .preset-idx { color: var(--uvp-brand); }
@@ -2421,8 +3203,6 @@ onBeforeUnmount(() => {
 }
 .preset-grid > .resource-summary-action { grid-column: 1 / -1; }
 .resource-summary-action:hover { border-color: var(--uvp-brand); }
-.linked-detail .cruise-item { padding: 2px 7px; }
-.linked-detail .cruise-info small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .linked-detail .home-config { gap: 5px; padding-top: 2px; }
 .linked-detail .home-row select,
 .linked-detail .home-row input { height: 26px; }
@@ -2712,20 +3492,42 @@ onBeforeUnmount(() => {
 .preset-add input:focus { outline: none; border-color: var(--uvp-brand); }
 
 /* 巡航 */
-.cruise-list { display: grid; gap: 5px; }
-.cruise-item {
-    display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
-    padding: 8px 10px;
-    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border);
-    border-radius: 7px;
-    transition: all 0.15s ease;
+/* 巡航 tile:复用 .preset-tile 尺寸/结构,active 用 brand-cyan 与预置位区分 */
+.preset-tile.cruise-tile.active { background: color-mix(in srgb, var(--uvp-brand-cyan) 8%, var(--uvp-panel-bg)); border-color: color-mix(in srgb, var(--uvp-brand-cyan) 45%, var(--uvp-panel-border)); }
+.preset-tile.cruise-tile.active .preset-tile-hit { color: var(--uvp-brand-cyan); }
+.preset-tile.cruise-tile.active .cruise-tile-icon { color: var(--uvp-brand-cyan); }
+.preset-tile.cruise-tile:hover:not(.disabled) { border-color: color-mix(in srgb, var(--uvp-brand-cyan) 40%, var(--uvp-panel-border)); }
+.preset-tile.cruise-tile.pending { background: var(--uvp-warning-soft); border-color: var(--uvp-warning-border); }
+.cruise-tile-icon { color: var(--uvp-text-tertiary); flex-shrink: 0; }
+.cruise-freshness { color: var(--uvp-text-tertiary); font-size: 9.5px; font-weight: 500; white-space: nowrap; }
+.cruise-status-badge {
+    flex: 0 0 auto; padding: 0 4px;
+    color: var(--uvp-warning); background: var(--uvp-warning-soft);
+    border: 1px solid var(--uvp-warning-border); border-radius: 3px;
+    font-size: 8.5px; font-weight: 600; line-height: 1.5;
 }
-.cruise-item.active { border-color: color-mix(in srgb, var(--uvp-brand-cyan) 40%, var(--uvp-panel-border)); background: color-mix(in srgb, var(--uvp-brand-cyan) 6%, transparent); }
-.cruise-item.disabled { opacity: 0.5; }
-.cruise-info { display: grid; gap: 2px; min-width: 0; }
-.cruise-info strong { color: var(--uvp-text-primary); font-size: 11.5px; font-weight: 500; }
-.cruise-info small { color: var(--uvp-text-tertiary); font-size: 10px; }
-.cruise-actions { display: flex; gap: 4px; }
+
+/* 卡片头运行中标签:brand-cyan chip + 呼吸点,点击停止全部巡航 */
+.cruise-running-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 1px 7px 1px 6px; margin-left: 6px;
+    color: var(--uvp-brand-cyan);
+    background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 32%, transparent);
+    border-radius: 999px; cursor: pointer;
+    font-size: 10px; font-weight: 600; line-height: 1.5;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+.cruise-running-chip:hover { background: color-mix(in srgb, var(--uvp-brand-cyan) 18%, transparent); border-color: var(--uvp-brand-cyan); }
+.cruise-running-dot {
+    display: inline-block; width: 6px; height: 6px;
+    background: var(--uvp-brand-cyan); border-radius: 50%;
+}
+.cruise-running-dot.start-sent { animation: cruise-pulse 1.4s ease-in-out infinite; }
+@keyframes cruise-pulse {
+    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--uvp-brand-cyan) 50%, transparent); }
+    50% { opacity: 0.55; box-shadow: 0 0 0 4px color-mix(in srgb, var(--uvp-brand-cyan) 0%, transparent); }
+}
 
 /* 看守位 */
 .home-config { display: grid; gap: 8px; padding-top: 4px; }

@@ -180,8 +180,8 @@ func (dc *DeviceMgmtController) GetCruiseTrack(c *gin.Context) {
 		return
 	}
 	trackID, err := strconv.Atoi(c.Param("trackId"))
-	if err != nil || trackID <= 0 {
-		dc.FailAndAbort(c, "巡航轨迹编号不合法", err)
+	if err != nil || trackID < 0 || trackID > 255 {
+		dc.FailAndAbort(c, "巡航轨迹编号必须在 0-255 之间", err)
 		return
 	}
 	var track gbmodels.GbPTZCruiseTrack

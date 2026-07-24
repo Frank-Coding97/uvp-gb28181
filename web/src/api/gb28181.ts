@@ -265,11 +265,78 @@ export const deletePtzPreset = (channelId: number, presetId: number) =>
 
 export const controlPtzCruise = (
   channelId: number,
-  data: { action: "start" | "pause" | "resume" | "stop" | "delete"; trackId: number; idempotencyKey?: string }
+  data: { action: "start" | "stop" | "delete"; trackId: number; idempotencyKey?: string }
 ) =>
   http.request<BaseResult<DeviceOperationResult>>(
     "post",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise`),
+    { data }
+  );
+
+export interface CruiseTrackCreateResult {
+  channelId: string;
+  trackId: number;
+  totalStops: number;
+  completedStops: number;
+  status: string;
+  steps: Array<Record<string, unknown>>;
+  reconciled?: boolean;
+  reconcileScheduled?: boolean;
+  error?: string;
+}
+
+export type PTZResourceFreshness = "fresh" | "stale" | "unknown" | string;
+
+export interface CruiseTrackPointResource {
+  presetIndex?: number;
+  presetId?: number;
+  stayTime?: number;
+  dwellSec?: number;
+  speed?: number;
+}
+
+export interface CruiseTrackDetailResource {
+  trackId?: number;
+  name?: string;
+  sumNum?: number;
+  cruisePoints?: CruiseTrackPointResource[];
+  stops?: CruiseTrackPointResource[];
+  speed?: number;
+  dwellSec?: number;
+  source?: string;
+}
+
+export interface CruiseTrackResource {
+  id?: number;
+  trackId: number;
+  name?: string;
+  enabled?: boolean | null;
+  detail?: string | CruiseTrackDetailResource | null;
+  updatedAt?: string;
+}
+
+export interface CruiseTrackListResult {
+  list: CruiseTrackResource[];
+  freshness: PTZResourceFreshness;
+  refreshOperationId?: string;
+  refreshError?: string;
+}
+
+export const createCruiseTrack = (
+  channelId: number,
+  data: {
+    trackId: number;
+    name?: string;
+    speed?: number;
+    dwellSec?: number;
+    stops: Array<{ presetId: number }>;
+    replaceExisting?: boolean;
+    idempotencyKey?: string;
+  }
+) =>
+  http.request<BaseResult<CruiseTrackCreateResult>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise/tracks`),
     { data }
   );
 
@@ -291,7 +358,7 @@ export const listPtzPresets = (channelId: number, refresh = false) =>
   );
 
 export const listCruiseTracks = (channelId: number, refresh = false) =>
-  http.request<BaseResult<{ list: Array<Record<string, unknown>>; freshness: string }>>(
+  http.request<BaseResult<CruiseTrackListResult>>(
     "get",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise-tracks`),
     { params: refresh ? { refresh: true } : undefined }

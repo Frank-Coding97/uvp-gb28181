@@ -130,6 +130,13 @@ func TestServiceExecute_SenderFailurePersistsStatus(t *testing.T) {
 	op, err := svc.Execute(context.Background(), testTarget(), testCommand())
 	require.Error(t, err)
 	require.Equal(t, gbmodels.PTZOperationRejected, op.Status)
+
+	// 失败终态不能被同一幂等键伪装成一次成功重放。调用方必须换键后显式重试。
+	sender.err = nil
+	replayed, err := svc.Execute(context.Background(), testTarget(), testCommand())
+	require.ErrorContains(t, err, "rejected")
+	require.Equal(t, op.OperationID, replayed.OperationID)
+	require.Equal(t, 1, sender.calls)
 }
 
 func TestServiceApplyResponse_MapsAndProtectsTerminalState(t *testing.T) {
@@ -147,7 +154,8 @@ func TestServiceApplyResponse_MapsAndProtectsTerminalState(t *testing.T) {
 }
 
 func TestServiceApplyResponse_RejectAndTimeout(t *testing.T) {
-	svc := newPTZTestService(t, &fakeTrackedSender{})
+	sender := &fakeTrackedSender{}
+	svc := newPTZTestService(t, sender)
 	op, err := svc.Execute(context.Background(), testTarget(), testCommand())
 	require.NoError(t, err)
 	updated, matched, err := svc.ApplyResponse(context.Background(), Response{OperationID: op.OperationID, SIPStatus: 486, DeviceResult: "ERROR", DeviceError: "busy"})
@@ -162,6 +170,10 @@ func TestServiceApplyResponse_RejectAndTimeout(t *testing.T) {
 	result, err := svc.MarkTimeout(context.Background(), second.OperationID, "deadline")
 	require.NoError(t, err)
 	require.Equal(t, gbmodels.PTZOperationTimeout, result.Status)
+	replayed, err := svc.Execute(context.Background(), testTarget(), secondCommand)
+	require.ErrorContains(t, err, "timeout")
+	require.Equal(t, second.OperationID, replayed.OperationID)
+	require.Equal(t, 2, sender.calls)
 }
 
 func TestServiceApplyResponse_NoMatch(t *testing.T) {

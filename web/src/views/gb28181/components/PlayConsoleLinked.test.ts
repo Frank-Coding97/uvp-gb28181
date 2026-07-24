@@ -1,4 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { Modal } from "@arco-design/web-vue";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -97,6 +98,7 @@ const api = vi.hoisted(() => {
     callPtzPreset: vi.fn(),
     deletePtzPreset: vi.fn(),
     controlPtzCruise: vi.fn(),
+    createCruiseTrack: vi.fn(),
     controlPtzAux: vi.fn(),
     controlDevice: vi.fn(),
     createTalkSession: vi.fn(),
@@ -165,7 +167,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     vi.clearAllMocks();
   });
 
-  it("建立真实点播、读取概况、执行探针并在关闭时释放观看", async () => {
+  it("建立真实点播、读取概况、执行探针并在关闭时仅销毁本地播放器", async () => {
     api.runStreamProbe.mockResolvedValueOnce({
       code: 0,
       message: "",
@@ -208,7 +210,27 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     await wrapper.setProps({ visible: false });
     await flushPromises();
-    expect(api.stopPlay).toHaveBeenCalledWith("stream-1");
+    expect(wrapper.find("[data-testid='play-window']").exists()).toBe(false);
+    expect(api.stopPlay).not.toHaveBeenCalled();
+    expect(api.deleteTalkSession).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
+  it("点播请求尚未返回时关闭弹窗也不补发停播请求", async () => {
+    let resolveStart!: (value: any) => void;
+    api.startPlay.mockReturnValueOnce(new Promise(resolve => { resolveStart = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.setProps({ visible: false });
+    resolveStart({
+      code: 0,
+      message: "",
+      data: { streamId: "stream-late", ssrc: "late", app: "rtp", wsflvUrl: "ws://zlm/late.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+    });
+    await flushPromises();
+
+    expect(api.stopPlay).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -335,26 +357,14 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const ptzDetail = wrapper.get("[data-testid='linked-detail-ptz']");
     expect(ptzDetail.findAll(".preset-item")).toHaveLength(8);
-    expect(ptzDetail.findAll(".cruise-item")).toHaveLength(2);
-    expect(ptzDetail.text()).toContain("更多 · 20");
-    expect(ptzDetail.text()).toContain("2 / 20");
+    // 巡航轨迹也走 3×3 grid,20 条同样折叠为 8 tile + 1 「更多」chip
+    expect(ptzDetail.findAll(".cruise-item")).toHaveLength(8);
+    expect(ptzDetail.findAll("[data-testid='preset-more-btn']")).toHaveLength(1);
+    expect(ptzDetail.findAll("[data-testid='cruise-more-btn']")).toHaveLength(1);
 
-    // 预置位「更多」按钮存在(内容 slot 通过 a-popover teleport,不在 wrapper 内)
-    const moreButton = wrapper.get("[data-testid='preset-more-btn']");
-    expect(moreButton.text()).toContain("更多 · 20");
-    const presetGrid = ptzDetail.get(".preset-grid");
-    expect(presetGrid.element.lastElementChild?.querySelector("[data-testid='preset-more-btn']")).not.toBeNull();
-
-    // 巡航轨迹仍走抽屉
-    await wrapper.get("[data-testid='manage-cruises']").trigger("click");
-    const manager = wrapper.get("[data-testid='asset-manager']");
-    expect(manager.text()).toContain("巡航轨迹管理");
-    expect(manager.findAll("[data-testid='asset-manager-row']")).toHaveLength(20);
-
-    await wrapper.get("[data-testid='asset-manager-close']").trigger("click");
-    await vi.advanceTimersByTimeAsync(200);
-    await flushPromises();
-    expect(wrapper.find("[data-testid='asset-manager']").exists()).toBe(false);
+    // 预置位与巡航「更多」按钮同款文案
+    expect(wrapper.get("[data-testid='preset-more-btn']").text()).toContain("更多 · 20");
+    expect(wrapper.get("[data-testid='cruise-more-btn']").text()).toContain("更多 · 20");
 
     wrapper.unmount();
   });
@@ -419,6 +429,26 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("对讲建立阶段关闭弹窗不会补发删除会话请求", async () => {
+    let resolveCreate!: (value: any) => void;
+    api.createTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    wrapper.get("[data-testid='talk-button']").element.dispatchEvent(new Event("pointerdown"));
+    await flushPromises();
+    await wrapper.setProps({ visible: false });
+    resolveCreate({
+      code: 0,
+      message: "",
+      data: { sessionId: "talk-after-close", state: "reserved", nodeId: 1, nodeName: "ZLM", sourceStream: "talk", recvStream: "recv", ssrc: "1", publishUrl: "https://zlm/whip", publishToken: "secret", expiresAt: "" }
+    });
+    await flushPromises();
+
+    expect(api.deleteTalkSession).not.toHaveBeenCalled();
+    wrapper.unmount();
+  });
+
   it("未知 PTZ 能力仍允许尝试，未映射的辅助设备继续禁用", async () => {
     api.getControlCapabilities.mockResolvedValueOnce({
       code: 0,
@@ -469,14 +499,18 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("预置位和巡航使用后端专用资源接口", async () => {
     api.callPtzPreset.mockResolvedValueOnce({ code: 0, message: "", data: { action: "call_preset" } });
-    api.controlPtzCruise.mockResolvedValueOnce({ code: 0, message: "", data: { action: "cruise_start" } });
+    api.controlPtzCruise.mockResolvedValue({ code: 0, message: "", data: { action: "cruise_start", status: "sent" } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
     await wrapper.get(".preset-item").trigger("click");
-    await wrapper.get(".cruise-actions button").trigger("click");
+    await wrapper.get(".cruise-item").trigger("click");
+    await flushPromises();
+    await wrapper.get(".cruise-item").trigger("click");
     await flushPromises();
     expect(api.callPtzPreset).toHaveBeenCalledWith(channel.id, 1);
-    expect(api.controlPtzCruise).toHaveBeenCalledWith(channel.id, { action: "start", trackId: 1 });
+    expect(api.controlPtzCruise).toHaveBeenNthCalledWith(1, channel.id, { action: "start", trackId: 1 });
+    expect(api.controlPtzCruise).toHaveBeenNthCalledWith(2, channel.id, { action: "stop", trackId: 1 });
+    expect(api.controlPtzCruise.mock.calls.flatMap(([, body]) => [body.action])).not.toEqual(expect.arrayContaining(["pause", "resume"]));
     wrapper.unmount();
   });
 
@@ -553,6 +587,421 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const dialog = wrapper.get("[data-testid='preset-save-dialog']");
     expect(dialog.text()).toContain("#21");
+    wrapper.unmount();
+  });
+
+  it("巡航「添加」按钮:空预置位时 disabled,有预置位时可打开 modal", async () => {
+    // 空预置位场景:按钮 disabled + title 提示
+    api.listPtzPresets.mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } });
+    const emptyWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const addBtn = emptyWrapper.get("[data-testid='cruise-add-btn']");
+    expect(addBtn.attributes("disabled")).toBeDefined();
+    expect(addBtn.attributes("title")).toContain("需要先添加预置位");
+    emptyWrapper.unmount();
+
+    // 有预置位场景:按钮 enabled + 点击打开 modal + 默认 trackId = nextCruiseTrackId (20 条巡航 → 21)
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const enabledBtn = wrapper.get("[data-testid='cruise-add-btn']");
+    expect(enabledBtn.attributes("disabled")).toBeUndefined();
+    await enabledBtn.trigger("click");
+    await flushPromises();
+    const dialog = wrapper.get("[data-testid='cruise-save-dialog']");
+    expect(dialog).toBeTruthy();
+    const trackIdInput = dialog.get("[data-testid='cruise-save-track-id']");
+    expect(trackIdInput.attributes("modelvalue")).toBe("21");
+    const nameInput = dialog.get("[data-testid='cruise-save-name-input']");
+    expect(nameInput.attributes("modelvalue")).toBe("巡航 21");
+    // 默认 1 个站点(预置位 1)
+    expect(dialog.findAll("[data-testid='cruise-stop-row']")).toHaveLength(1);
+    expect(dialog.get("[data-testid='cruise-stop-add-btn']").text()).toContain("添加巡航点");
+    expect(dialog.get("[data-testid='cruise-save-speed']").attributes("min")).toBe("1");
+    expect(dialog.get("[data-testid='cruise-save-dwell']").attributes("min")).toBe("1");
+    expect(dialog.text()).toContain("无统一物理单位");
+    expect(dialog.text()).toContain("国标单位为秒");
+    expect(dialog.text()).not.toContain("0 表示");
+    expect(dialog.text()).toContain("最长 68 分 15 秒");
+    wrapper.unmount();
+  });
+
+  it("巡航站点最多 32 个且列表内部滚动,添加入口保持醒目", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
+    await flushPromises();
+
+    const addStop = wrapper.get("[data-testid='cruise-stop-add-btn']");
+    for (let index = 1; index < 32; index += 1) await addStop.trigger("click");
+
+    const dialog = wrapper.get("[data-testid='cruise-save-dialog']");
+    expect(dialog.findAll("[data-testid='cruise-stop-row']")).toHaveLength(32);
+    expect(addStop.attributes("disabled")).toBeDefined();
+    expect(addStop.text()).toContain("已达到 32 站上限");
+
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    expect(source).toMatch(/\.cruise-stops-list\s*\{[^}]*max-height:\s*clamp\(168px,\s*30vh,\s*260px\)[^}]*overflow-y:\s*auto/s);
+    expect(source).toMatch(/\.cruise-stop-add\s*\{[^}]*width:\s*100%[^}]*min-height:\s*44px/s);
+    expect(source).toMatch(/@media \(max-width:\s*560px\)\s*\{[^}]*\.cruise-save-form\s*\{[^}]*max-height:\s*calc\(100dvh - 210px\)/s);
+    wrapper.unmount();
+  });
+
+  it("巡航新建 dialog 提交调 createCruiseTrack 并按选中的预置位顺序透传", async () => {
+    api.createCruiseTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { channelId: "C", trackId: 21, totalStops: 1, completedStops: 1, status: "accepted", steps: [] }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
+    await flushPromises();
+
+    // 直接触发 beforeOk(a-modal 底部按钮在测试 stub 下不便点击)
+    const vm = wrapper.vm as unknown as {
+      handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
+      cruiseDraft: { trackId: number; replaceExisting: boolean };
+    };
+    expect(typeof vm.handleSaveCruiseBeforeOk).toBe("function");
+    await new Promise<void>((resolve) => {
+      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    });
+    await flushPromises();
+    expect(api.createCruiseTrack).toHaveBeenCalledWith(channel.id, expect.objectContaining({
+      trackId: 21,
+      stops: [{ presetId: 1 }],
+      speed: 128,
+      dwellSec: 5,
+      replaceExisting: false,
+    }));
+    wrapper.unmount();
+  });
+
+  it("速度和停留关闭下发后由前端映射为接口哨兵值 0", async () => {
+    api.createCruiseTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { channelId: "C", trackId: 21, totalStops: 1, completedStops: 1, status: "accepted", steps: [] }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
+    await flushPromises();
+
+    const vm = wrapper.vm as unknown as {
+      handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
+      cruiseDraft: { sendSpeed: boolean; sendDwell: boolean };
+    };
+    vm.cruiseDraft.sendSpeed = false;
+    vm.cruiseDraft.sendDwell = false;
+    await new Promise<void>((resolve) => {
+      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    });
+    await flushPromises();
+
+    expect(api.createCruiseTrack).toHaveBeenCalledWith(channel.id, expect.objectContaining({ speed: 0, dwellSec: 0 }));
+    wrapper.unmount();
+  });
+
+  it("创建后短轮询本地缓存,设备确认后自动解除未验证状态", async () => {
+    vi.useFakeTimers();
+    api.listCruiseTracks
+      .mockResolvedValueOnce({ code: 0, message: "", data: { list: [], freshness: "fresh" } })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          list: [{ trackId: 1, name: "巡航 1", enabled: false, detail: JSON.stringify({ source: "reconcile-pending", stops: [{ presetId: 1 }] }) }],
+          freshness: "stale"
+        }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { list: [{ trackId: 1, name: "巡航 1", enabled: true, detail: JSON.stringify({ source: "device-query", stops: [{ presetId: 1 }] }) }], freshness: "fresh" }
+      });
+    api.createCruiseTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { channelId: "C", trackId: 1, totalStops: 1, completedStops: 1, status: "sent", steps: [] }
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
+    const vm = wrapper.vm as unknown as {
+      handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
+    };
+    await new Promise<void>((resolve) => {
+      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='cruise-tile-1']").text()).toContain("未验证");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    const confirmedTile = wrapper.get("[data-testid='cruise-tile-1']");
+    expect(confirmedTile.text()).not.toContain("未验证");
+    expect(confirmedTile.get(".cruise-item").attributes("disabled")).toBeUndefined();
+    expect(api.listCruiseTracks).toHaveBeenLastCalledWith(channel.id, false);
+    wrapper.unmount();
+  });
+
+  it("巡航配置下发期间锁定整个弹窗且不能取消关闭", async () => {
+    let resolveCreate!: (value: any) => void;
+    api.createCruiseTrack.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
+
+    const vm = wrapper.vm as unknown as {
+      handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
+      closeSaveCruiseDialog: () => void;
+    };
+    const submission = vm.handleSaveCruiseBeforeOk(() => undefined);
+    await wrapper.vm.$nextTick();
+
+    const dialog = wrapper.get("[data-testid='cruise-save-dialog']");
+    expect(dialog.get("[data-testid='cruise-save-track-id']").attributes("disabled")).toBeDefined();
+    expect(dialog.get("[data-testid='cruise-save-name-input']").attributes("disabled")).toBeDefined();
+    expect(dialog.get("[data-testid='cruise-stop-add-btn']").attributes("disabled")).toBeDefined();
+    expect(dialog.get("[data-testid='cruise-save-speed']").attributes("disabled")).toBeDefined();
+    expect(dialog.get("[data-testid='cruise-save-dwell']").attributes("disabled")).toBeDefined();
+    expect(dialog.get("[data-testid='cruise-send-speed']").attributes("disabled")).toBeDefined();
+    expect(dialog.get("[data-testid='cruise-send-dwell']").attributes("disabled")).toBeDefined();
+    vm.closeSaveCruiseDialog();
+    await wrapper.vm.$nextTick();
+    expect(wrapper.find("[data-testid='cruise-save-dialog']").exists()).toBe(true);
+
+    resolveCreate({
+      code: 0,
+      message: "",
+      data: { channelId: "C", trackId: 21, totalStops: 1, completedStops: 1, status: "sent", steps: [] }
+    });
+    await submission;
+    wrapper.unmount();
+  });
+
+  it("巡航允许标准轨迹号 0", async () => {
+    api.createCruiseTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { channelId: "C", trackId: 0, totalStops: 1, completedStops: 1, status: "sent", steps: [] }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
+    await flushPromises();
+
+    const vm = wrapper.vm as unknown as {
+      cruiseDraft: { trackId: number };
+      handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
+    };
+    vm.cruiseDraft.trackId = 0;
+    await new Promise<void>((resolve) => {
+      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    });
+    expect(api.createCruiseTrack).toHaveBeenCalledWith(channel.id, expect.objectContaining({ trackId: 0 }));
+    wrapper.unmount();
+  });
+
+  it("轨迹号 0 可展示、启动和停止", async () => {
+    api.listCruiseTracks.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { list: [{ trackId: 0, name: "零号巡航", enabled: true }], freshness: "fresh" }
+    });
+    api.controlPtzCruise.mockResolvedValue({ code: 0, message: "", data: { action: "cruise_start", status: "sent" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='cruise-tile-0']").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='cruise-tile-0'] .cruise-item").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='cruise-running-chip']").exists()).toBe(true);
+    await wrapper.get("[data-testid='cruise-tile-0'] .cruise-item").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzCruise).toHaveBeenNthCalledWith(1, channel.id, { action: "start", trackId: 0 });
+    expect(api.controlPtzCruise).toHaveBeenNthCalledWith(2, channel.id, { action: "stop", trackId: 0 });
+    wrapper.unmount();
+  });
+
+  it("设备列表确认存在后解除旧的待对账 source", async () => {
+    api.listCruiseTracks.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        list: [{
+          trackId: 0,
+          name: "已确认零号巡航",
+          enabled: true,
+          detail: JSON.stringify({ source: "reconcile-pending", stops: [{ presetId: 1 }] })
+        }],
+        freshness: "fresh"
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const tile = wrapper.get("[data-testid='cruise-tile-0']");
+    const tooltip = wrapper.get("[data-testid='cruise-tile-tooltip-0']");
+    expect(tile.classes()).not.toContain("disabled");
+    expect(tile.get(".cruise-item").attributes("disabled")).toBeUndefined();
+    expect(tooltip.attributes("content")).not.toContain("待设备对账");
+    expect(tile.get(".cruise-item").attributes("title")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("replaceExisting=true 时允许用已有轨迹号重建", async () => {
+    api.createCruiseTrack.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { channelId: "C", trackId: 1, totalStops: 1, completedStops: 1, status: "sent", steps: [] }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='cruise-add-btn']").trigger("click");
+    await flushPromises();
+
+    const vm = wrapper.vm as unknown as {
+      cruiseDraft: { trackId: number; replaceExisting: boolean };
+      handleSaveCruiseBeforeOk: (done: (ok: boolean) => void) => Promise<void>;
+    };
+    vm.cruiseDraft.trackId = 1;
+    vm.cruiseDraft.replaceExisting = true;
+    await new Promise<void>((resolve) => {
+      vm.handleSaveCruiseBeforeOk((ok) => { expect(ok).toBe(true); resolve(); });
+    });
+    expect(api.createCruiseTrack).toHaveBeenCalledWith(channel.id, expect.objectContaining({ trackId: 1, replaceExisting: true }));
+    wrapper.unmount();
+  });
+
+  it("切换通道会清除巡航运行态", async () => {
+    api.controlPtzCruise.mockResolvedValue({ code: 0, message: "", data: { action: "cruise_start", status: "sent" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get(".cruise-item").trigger("click");
+    await flushPromises();
+    expect(wrapper.find("[data-testid='cruise-running-chip']").exists()).toBe(true);
+
+    const nextChannel = { ...channel, id: 2, channelId: "0411212756", name: "园区南门" };
+    await wrapper.setProps({ channel: nextChannel });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='cruise-running-chip']").exists()).toBe(false);
+
+    await wrapper.get(".cruise-item").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzCruise).toHaveBeenLastCalledWith(nextChannel.id, { action: "start", trackId: 1 });
+    wrapper.unmount();
+  });
+
+  it("忽略切换通道后迟到的巡航响应", async () => {
+    let resolveCruise!: (value: any) => void;
+    api.controlPtzCruise.mockReturnValueOnce(new Promise(resolve => { resolveCruise = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get(".cruise-item").trigger("click");
+
+    const nextChannel = { ...channel, id: 2, channelId: "0411212756", name: "园区南门" };
+    await wrapper.setProps({ channel: nextChannel });
+    await flushPromises();
+    resolveCruise({ code: 0, message: "", data: { action: "cruise_start", status: "sent" } });
+    await flushPromises();
+    expect(wrapper.find("[data-testid='cruise-running-chip']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("解析标准巡航详情并保留 freshness,加载失败不伪装成空列表", async () => {
+    api.listCruiseTracks.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        list: [{
+          trackId: 7,
+          name: "标准巡航",
+          enabled: false,
+          detail: JSON.stringify({ trackId: 7, sumNum: 1, source: "reconcile-pending", cruisePoints: [{ presetIndex: 3, stayTime: 5, speed: 8 }] })
+        }],
+        freshness: "stale",
+        refreshOperationId: "refresh-1"
+      }
+    });
+    api.controlPtzCruise.mockResolvedValueOnce({ code: 0, message: "", data: { action: "cruise_start", status: "sent" } });
+    const warning = vi.spyOn(Modal, "warning").mockImplementation((config: any) => {
+      void config.onOk?.();
+      return {} as any;
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    expect(api.listCruiseTracks).toHaveBeenCalledWith(channel.id, true);
+
+    const pendingTooltip = wrapper.get("[data-testid='cruise-tile-tooltip-7']");
+    const pendingTile = wrapper.get("[data-testid='cruise-tile-7']");
+    expect(pendingTooltip.attributes("content")).toContain("配置指令已发送");
+    expect(pendingTooltip.attributes("content")).toContain("GB/T 28181-2022");
+    expect(pendingTooltip.attributes("mouse-enter-delay")).toBe("80");
+    expect(pendingTile.attributes("title")).toBeUndefined();
+    expect(pendingTile.get(".cruise-item").attributes("title")).toBeUndefined();
+    expect(pendingTile.text()).toContain("未验证");
+    expect(pendingTile.get(".cruise-item").attributes("disabled")).toBeUndefined();
+    await pendingTile.get(".cruise-item").trigger("click");
+    await flushPromises();
+    expect(warning).toHaveBeenCalledWith(expect.objectContaining({ title: "试运行未验证轨迹" }));
+    expect(api.controlPtzCruise).toHaveBeenCalledWith(channel.id, { action: "start", trackId: 7 });
+
+    const vm = wrapper.vm as unknown as { openAssetManager: (tab: "cruise") => void };
+    vm.openAssetManager("cruise");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.get("[data-testid='asset-manager']").text()).toContain("1 个点位");
+    expect(wrapper.get("[data-testid='asset-manager']").text()).toContain("停留 5s");
+    expect(wrapper.get("[data-testid='asset-manager']").text()).toContain("未验证");
+    expect(wrapper.get("[data-testid='cruise-manager-tooltip-7']").attributes("mouse-enter-delay")).toBe("80");
+
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    expect(source).toContain("const RESOURCE_TOOLTIP_ENTER_DELAY_MS = 80;");
+    expect(source.match(/:mouse-enter-delay="RESOURCE_TOOLTIP_ENTER_DELAY_MS"/g)).toHaveLength(6);
+    wrapper.unmount();
+    warning.mockRestore();
+
+    api.listCruiseTracks.mockRejectedValueOnce(new Error("device unavailable"));
+    const failedWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    expect(failedWrapper.get("[data-testid='cruise-load-error']").text()).toContain("加载巡航轨迹失败");
+    expect(failedWrapper.find("[data-testid='cruise-empty']").exists()).toBe(false);
+    failedWrapper.unmount();
+  });
+
+  it("预置位主卡片、更多列表和资源管理统一使用快速提示", async () => {
+    const wrapper = mount(PlayConsoleLinked, {
+      props: { visible: true, channel },
+      global: {
+        stubs: {
+          "a-popover": { template: "<div><slot /><slot name='content' /></div>" }
+        }
+      }
+    });
+    await flushPromises();
+
+    const tileTooltip = wrapper.get("[data-testid='preset-tile-tooltip-1']");
+    expect(tileTooltip.attributes("mouse-enter-delay")).toBe("80");
+    expect(tileTooltip.attributes("content")).toContain("#1 预置位 1");
+    expect(tileTooltip.get(".preset-item").attributes("title")).toBeUndefined();
+    expect(wrapper.get(".preset-tile .preset-tile-del").attributes("title")).toBe("删除 #1");
+
+    const popoverTooltip = wrapper.get("[data-testid='preset-popover-tooltip-1']");
+    expect(popoverTooltip.attributes("mouse-enter-delay")).toBe("80");
+    expect(popoverTooltip.get(".preset-popover-name").attributes("title")).toBeUndefined();
+    expect(wrapper.get(".preset-popover-call").attributes("title")).toBe("调用此预置位");
+    expect(wrapper.get(".preset-popover-del").attributes("title")).toBe("删除此预置位");
+
+    const vm = wrapper.vm as unknown as { openAssetManager: (tab: "preset") => void };
+    vm.openAssetManager("preset");
+    await wrapper.vm.$nextTick();
+    const managerTooltip = wrapper.get("[data-testid='preset-manager-tooltip-1']");
+    expect(managerTooltip.attributes("mouse-enter-delay")).toBe("80");
+    expect(managerTooltip.attributes("content")).toContain("#1 预置位 1");
+    expect(wrapper.get(".asset-manager-delete").attributes("title")).toBe("删除预置位");
+
     wrapper.unmount();
   });
 });

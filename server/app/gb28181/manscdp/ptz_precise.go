@@ -44,7 +44,7 @@ type ptzQueryXML struct {
 	CmdType  string   `xml:"CmdType"`
 	SN       int      `xml:"SN"`
 	DeviceID string   `xml:"DeviceID"`
-	TrackID  int      `xml:"TrackID,omitempty"`
+	Number   *int     `xml:"Number,omitempty"`
 }
 
 type HomePositionControl struct {
@@ -97,11 +97,11 @@ func BuildPTZPreciseControl(channelID string, sn int, command PTZPreciseControl)
 }
 
 func BuildHomePositionQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdHomePositionQuery, deviceID, sn, 0)
+	return buildPTZQuery(CmdHomePositionQuery, deviceID, sn, nil)
 }
 
 func BuildPresetQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdPresetQuery, deviceID, sn, 0)
+	return buildPTZQuery(CmdPresetQuery, deviceID, sn, nil)
 }
 
 func BuildHomePositionControl(deviceID string, sn int, command HomePositionControl) ([]byte, error) {
@@ -132,25 +132,25 @@ func BuildHomePositionControl(deviceID string, sn int, command HomePositionContr
 }
 
 func BuildCruiseTrackListQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdCruiseTrackListQuery, deviceID, sn, 0)
+	return buildPTZQuery(CmdCruiseTrackListQuery, deviceID, sn, nil)
 }
 
 func BuildCruiseTrackQuery(deviceID string, sn, trackID int) ([]byte, error) {
-	if trackID <= 0 {
-		return nil, fmt.Errorf("巡航轨迹编号必须为正数")
+	if trackID < 0 || trackID > 255 {
+		return nil, fmt.Errorf("巡航轨迹编号必须在 0-255 之间")
 	}
-	return buildPTZQuery(CmdCruiseTrackQuery, deviceID, sn, trackID)
+	return buildPTZQuery(CmdCruiseTrackQuery, deviceID, sn, &trackID)
 }
 
 func BuildPTZPreciseStatusQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdPTZPreciseStatusQuery, deviceID, sn, 0)
+	return buildPTZQuery(CmdPTZPreciseStatusQuery, deviceID, sn, nil)
 }
 
-func buildPTZQuery(cmd, deviceID string, sn, trackID int) ([]byte, error) {
+func buildPTZQuery(cmd, deviceID string, sn int, number *int) ([]byte, error) {
 	if err := validatePTZQueryTarget(deviceID, sn); err != nil {
 		return nil, err
 	}
-	body, err := xml.Marshal(ptzQueryXML{CmdType: cmd, SN: sn, DeviceID: deviceID, TrackID: trackID})
+	body, err := xml.Marshal(ptzQueryXML{CmdType: cmd, SN: sn, DeviceID: deviceID, Number: number})
 	if err != nil {
 		return nil, err
 	}
@@ -271,17 +271,36 @@ func ParseHomePositionResponse(body []byte) (*HomePositionResponse, error) {
 }
 
 type CruiseTrack struct {
-	ID      int    `xml:"TrackID" json:"trackId"`
-	Name    string `xml:"Name" json:"name"`
-	Enabled *bool  `xml:"Enabled" json:"enabled"`
+	ID        int             `xml:"Number" json:"trackId"`
+	Name      string          `xml:"Name" json:"name"`
+	Enabled   *bool           `xml:"Enabled" json:"enabled,omitempty"`
+	SumNum    int             `xml:"SumNum" json:"sumNum,omitempty"`
+	PointList CruisePointList `xml:"CruisePointList" json:"-"`
+}
+
+type CruisePointList struct {
+	Num    int           `xml:"Num,attr" json:"num"`
+	Points []CruisePoint `xml:"CruisePoint" json:"cruisePoints"`
+}
+
+type CruisePoint struct {
+	PresetIndex int `xml:"PresetIndex" json:"presetIndex"`
+	StayTime    int `xml:"StayTime" json:"stayTime"`
+	Speed       int `xml:"Speed" json:"speed"`
+}
+
+type CruiseTrackList struct {
+	Num    int           `xml:"Num,attr"`
+	Tracks []CruiseTrack `xml:"CruiseTrack"`
 }
 
 type CruiseTrackListResponse struct {
-	CmdType  string        `xml:"CmdType"`
-	SN       int           `xml:"SN"`
-	DeviceID string        `xml:"DeviceID"`
-	Tracks   []CruiseTrack `xml:"TrackList>Track"`
-	Raw      []byte        `xml:"-"`
+	CmdType  string          `xml:"CmdType"`
+	SN       int             `xml:"SN"`
+	DeviceID string          `xml:"DeviceID"`
+	SumNum   int             `xml:"SumNum"`
+	List     CruiseTrackList `xml:"CruiseTrackList"`
+	Raw      []byte          `xml:"-"`
 }
 
 func ParseCruiseTrackListResponse(body []byte) (*CruiseTrackListResponse, error) {
@@ -292,16 +311,24 @@ func ParseCruiseTrackListResponse(body []byte) (*CruiseTrackListResponse, error)
 	if response.CmdType != CmdCruiseTrackListQuery || response.DeviceID == "" || response.SN <= 0 {
 		return nil, fmt.Errorf("非法巡航轨迹列表响应")
 	}
+	if response.SumNum < 0 || response.List.Num != len(response.List.Tracks) || response.SumNum < response.List.Num {
+		return nil, fmt.Errorf("巡航轨迹列表数量不一致")
+	}
+	for _, track := range response.List.Tracks {
+		if track.ID < 0 || track.ID > 255 {
+			return nil, fmt.Errorf("巡航轨迹编号超出 0-255 范围")
+		}
+	}
 	response.Raw = append([]byte(nil), body...)
 	return &response, nil
 }
 
 type CruiseTrackResponse struct {
-	CmdType  string      `xml:"CmdType"`
-	SN       int         `xml:"SN"`
-	DeviceID string      `xml:"DeviceID"`
-	Track    CruiseTrack `xml:"Track"`
-	Raw      []byte      `xml:"-"`
+	CmdType  string `xml:"CmdType"`
+	SN       int    `xml:"SN"`
+	DeviceID string `xml:"DeviceID"`
+	CruiseTrack
+	Raw []byte `xml:"-"`
 }
 
 func ParseCruiseTrackResponse(body []byte) (*CruiseTrackResponse, error) {
@@ -311,6 +338,16 @@ func ParseCruiseTrackResponse(body []byte) (*CruiseTrackResponse, error) {
 	}
 	if response.CmdType != CmdCruiseTrackQuery || response.DeviceID == "" || response.SN <= 0 {
 		return nil, fmt.Errorf("非法巡航轨迹响应")
+	}
+	if response.CruiseTrack.ID < 0 || response.CruiseTrack.ID > 255 || response.CruiseTrack.SumNum < 0 ||
+		response.CruiseTrack.PointList.Num != len(response.CruiseTrack.PointList.Points) ||
+		response.CruiseTrack.SumNum < response.CruiseTrack.PointList.Num {
+		return nil, fmt.Errorf("巡航轨迹详情不合法")
+	}
+	for _, point := range response.CruiseTrack.PointList.Points {
+		if point.PresetIndex <= 0 || point.PresetIndex > 255 || point.StayTime < 0 || point.StayTime > 4095 || point.Speed < 0 || point.Speed > 4095 {
+			return nil, fmt.Errorf("巡航点参数不合法")
+		}
 	}
 	response.Raw = append([]byte(nil), body...)
 	return &response, nil

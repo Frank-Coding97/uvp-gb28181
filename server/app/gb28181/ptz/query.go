@@ -130,11 +130,33 @@ func (s *Service) persistQueryCache(ctx context.Context, operation gbmodels.GbPT
 			return err
 		}
 		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := tx.Where("channel_id = ?", operation.ChannelID).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
-				return err
+			// 只有 SumNum=0 或者已收到完整列表时才能删除缓存中的缺失项。
+			// 设备可能分页/截断返回列表;此时保留未出现在本批响应中的旧记录。
+			if response.SumNum == 0 {
+				if err := tx.Where("channel_id = ?", operation.ChannelID).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
+					return err
+				}
+			} else if response.SumNum == response.List.Num {
+				presentIDs := make([]int, 0, len(response.List.Tracks))
+				for _, item := range response.List.Tracks {
+					presentIDs = append(presentIDs, item.ID)
+				}
+				deleteQuery := tx.Where("channel_id = ?", operation.ChannelID)
+				if len(presentIDs) == 0 {
+					deleteQuery = deleteQuery.Where("1 = 1")
+				} else {
+					deleteQuery = deleteQuery.Where("track_id NOT IN ?", presentIDs)
+				}
+				if err := deleteQuery.Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
+					return err
+				}
 			}
-			for _, item := range response.Tracks {
-				if err := upsertCruiseTrack(tx, operation, item, body, now); err != nil {
+			for _, item := range response.List.Tracks {
+				if item.Enabled == nil {
+					enabled := true
+					item.Enabled = &enabled
+				}
+				if err := upsertCruiseTrack(tx, operation, item, body, now, false); err != nil {
 					return err
 				}
 			}
@@ -145,7 +167,11 @@ func (s *Service) persistQueryCache(ctx context.Context, operation gbmodels.GbPT
 		if err != nil {
 			return err
 		}
-		return upsertCruiseTrack(s.db.WithContext(ctx), operation, response.Track, body, now)
+		if response.CruiseTrack.Enabled == nil {
+			enabled := true
+			response.CruiseTrack.Enabled = &enabled
+		}
+		return upsertCruiseTrack(s.db.WithContext(ctx), operation, response.CruiseTrack, body, now, true)
 	case manscdp.CmdPTZPreciseStatusQuery:
 		response, err := manscdp.ParsePTZPreciseStatusResponse(body)
 		if err != nil {
@@ -162,15 +188,28 @@ func (s *Service) persistQueryCache(ctx context.Context, operation gbmodels.GbPT
 	}
 }
 
-func upsertCruiseTrack(db *gorm.DB, operation gbmodels.GbPTZOperation, item manscdp.CruiseTrack, body []byte, now time.Time) error {
-	detail, _ := json.Marshal(item)
+func upsertCruiseTrack(db *gorm.DB, operation gbmodels.GbPTZOperation, item manscdp.CruiseTrack, body []byte, now time.Time, includePoints bool) error {
+	detailPayload := map[string]interface{}{"trackId": item.ID, "name": item.Name}
+	if includePoints {
+		points := item.PointList.Points
+		if points == nil {
+			points = []manscdp.CruisePoint{}
+		}
+		detailPayload["sumNum"] = item.SumNum
+		detailPayload["cruisePoints"] = points
+	}
+	detail, _ := json.Marshal(detailPayload)
 	track := gbmodels.GbPTZCruiseTrack{
 		DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, TrackID: item.ID,
 		Name: item.Name, Enabled: item.Enabled, DetailJSON: string(detail), RawSummary: summarizePTZBody(body), UpdatedAt: now,
 	}
+	updateColumns := []string{"device_id", "name", "enabled", "raw_summary", "updated_at"}
+	if includePoints {
+		updateColumns = append(updateColumns, "detail_json")
+	}
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "channel_id"}, {Name: "track_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "enabled", "detail_json", "raw_summary", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns(updateColumns),
 	}).Create(&track).Error
 }
 

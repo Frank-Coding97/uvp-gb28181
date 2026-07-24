@@ -155,23 +155,24 @@ func TestServiceOnPTZMessage_PersistsHomeCruiseAndPreciseCaches(t *testing.T) {
 		{
 			name: "cruise list", kind: QueryCruiseTrackList,
 			body: func(sn int) []byte {
-				return []byte(`<Response><CmdType>CruiseTrackListQuery</CmdType><SN>` + strconv.Itoa(sn) + `</SN><DeviceID>C</DeviceID><TrackList><Track><TrackID>7</TrackID><Name>T7</Name></Track></TrackList></Response>`)
+				return []byte(`<Response><CmdType>CruiseTrackListQuery</CmdType><SN>` + strconv.Itoa(sn) + `</SN><DeviceID>C</DeviceID><SumNum>1</SumNum><CruiseTrackList Num="1"><CruiseTrack><Number>0</Number><Name>T0</Name></CruiseTrack></CruiseTrackList></Response>`)
 			},
 			check: func(t *testing.T, db *gorm.DB) {
 				var track gbmodels.GbPTZCruiseTrack
-				require.NoError(t, db.Where("track_id = ?", 7).First(&track).Error)
-				require.Equal(t, "T7", track.Name)
+				require.NoError(t, db.Where("track_id = ?", 0).First(&track).Error)
+				require.Equal(t, "T0", track.Name)
 			},
 		},
 		{
-			name: "cruise detail", kind: QueryCruiseTrack, track: 7,
+			name: "cruise detail", kind: QueryCruiseTrack, track: 0,
 			body: func(sn int) []byte {
-				return []byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>` + strconv.Itoa(sn) + `</SN><DeviceID>C</DeviceID><Track><TrackID>7</TrackID><Name>Detail</Name></Track></Response>`)
+				return []byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>` + strconv.Itoa(sn) + `</SN><DeviceID>C</DeviceID><Number>0</Number><Name>T0</Name><SumNum>1</SumNum><CruisePointList Num="1"><CruisePoint><PresetIndex>3</PresetIndex><StayTime>5</StayTime><Speed>8</Speed></CruisePoint></CruisePointList></Response>`)
 			},
 			check: func(t *testing.T, db *gorm.DB) {
 				var track gbmodels.GbPTZCruiseTrack
-				require.NoError(t, db.Where("track_id = ?", 7).First(&track).Error)
-				require.Equal(t, "Detail", track.Name)
+				require.NoError(t, db.Where("track_id = ?", 0).First(&track).Error)
+				require.Equal(t, "T0", track.Name)
+				require.JSONEq(t, `{"trackId":0,"name":"T0","sumNum":1,"cruisePoints":[{"presetIndex":3,"stayTime":5,"speed":8}]}`, track.DetailJSON)
 			},
 		},
 		{
@@ -196,4 +197,51 @@ func TestServiceOnPTZMessage_PersistsHomeCruiseAndPreciseCaches(t *testing.T) {
 			tt.check(t, db)
 		})
 	}
+}
+
+func TestServiceOnPTZMessage_CruiseListPreservesDetailAndRemovesMissing(t *testing.T) {
+	svc, db := newPTZQueryTestService(t, &fakeTrackedSender{})
+	enabled := true
+	receivedDetail := `{"trackId":0,"name":"old","sumNum":1,"cruisePoints":[{"presetIndex":3,"stayTime":5,"speed":8}]}`
+	require.NoError(t, db.Create(&gbmodels.GbPTZCruiseTrack{
+		DeviceID: 2, ChannelID: 1, TrackID: 0, Name: "old", Enabled: &enabled, DetailJSON: receivedDetail,
+	}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbPTZCruiseTrack{
+		DeviceID: 2, ChannelID: 1, TrackID: 1, Name: "missing",
+	}).Error)
+
+	op, err := svc.Refresh(context.Background(), testTarget(), QueryCruiseTrackList, 0, "refresh-cruise-list")
+	require.NoError(t, err)
+	body := []byte(`<Response><CmdType>CruiseTrackListQuery</CmdType><SN>` + strconv.Itoa(op.SN) + `</SN><DeviceID>C</DeviceID><SumNum>1</SumNum><CruiseTrackList Num="1"><CruiseTrack><Number>0</Number><Name>T0</Name></CruiseTrack></CruiseTrackList></Response>`)
+	require.NoError(t, svc.OnPTZMessage(context.Background(), "D", "reply", "2", body))
+
+	var kept gbmodels.GbPTZCruiseTrack
+	require.NoError(t, db.Where("channel_id = ? AND track_id = ?", 1, 0).First(&kept).Error)
+	require.Equal(t, "T0", kept.Name)
+	require.Equal(t, receivedDetail, kept.DetailJSON)
+	require.NotNil(t, kept.Enabled)
+	require.True(t, *kept.Enabled)
+
+	var missingCount int64
+	require.NoError(t, db.Model(&gbmodels.GbPTZCruiseTrack{}).Where("channel_id = ? AND track_id = ?", 1, 1).Count(&missingCount).Error)
+	require.Zero(t, missingCount)
+}
+
+func TestServiceOnPTZMessage_CruisePartialListPreservesUnreturnedTracks(t *testing.T) {
+	svc, db := newPTZQueryTestService(t, &fakeTrackedSender{})
+	enabled := true
+	for _, trackID := range []int{0, 1} {
+		require.NoError(t, db.Create(&gbmodels.GbPTZCruiseTrack{
+			DeviceID: 2, ChannelID: 1, TrackID: trackID, Name: "cached", Enabled: &enabled,
+		}).Error)
+	}
+
+	op, err := svc.Refresh(context.Background(), testTarget(), QueryCruiseTrackList, 0, "refresh-partial-cruise-list")
+	require.NoError(t, err)
+	body := []byte(`<Response><CmdType>CruiseTrackListQuery</CmdType><SN>` + strconv.Itoa(op.SN) + `</SN><DeviceID>C</DeviceID><SumNum>2</SumNum><CruiseTrackList Num="1"><CruiseTrack><Number>0</Number><Name>T0</Name></CruiseTrack></CruiseTrackList></Response>`)
+	require.NoError(t, svc.OnPTZMessage(context.Background(), "D", "reply", "2", body))
+
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbPTZCruiseTrack{}).Where("channel_id = ?", 1).Count(&count).Error)
+	require.EqualValues(t, 2, count, "部分列表不能删除本批未返回的缓存轨迹")
 }

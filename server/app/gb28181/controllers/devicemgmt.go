@@ -27,13 +27,13 @@ import (
 //	GET /channel/:id/timeline  通道 24h 在线时序(Phase 1 简化:基于 last_status_at)
 type DeviceMgmtController struct {
 	controllers.Common
-	db                  func() *gorm.DB
-	catalogTrigger      CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
-	subscriptionManager SubscriptionManager
-	ptzSender           DeviceControlSender
-	ptzService          *ptz.Service
-	ptzSN               atomic.Uint64
-	deviceControlLocks  sync.Map
+	db                     func() *gorm.DB
+	catalogTrigger         CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
+	subscriptionManager    SubscriptionManager
+	ptzSender              DeviceControlSender
+	ptzService             *ptz.Service
+	ptzSN                  atomic.Uint64
+	deviceControlLocks     sync.Map
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询

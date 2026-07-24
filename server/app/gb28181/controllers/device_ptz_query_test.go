@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -39,4 +40,28 @@ func TestDeviceMgmt_GetPTZStateAndOperation(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/channel/"+uintStr(channel.ID)+"/ptz/operations/op-1", nil))
 	require.Equal(t, http.StatusOK, w.Code)
 	require.True(t, strings.Contains(w.Body.String(), "op-1"))
+}
+
+func TestDeviceMgmt_GetCruiseTrackAcceptsNumberZero(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZCruiseTrack{}))
+	device := &gbmodels.GbDevice{DeviceID: "D", Status: gbmodels.DeviceStatusOnline}
+	require.NoError(t, db.Create(device).Error)
+	channel := &gbmodels.GbChannel{DeviceID: "D", ChannelID: "C", Status: gbmodels.ChannelStatusOnline, PTZType: 1}
+	require.NoError(t, db.Create(channel).Error)
+	enabled := true
+	require.NoError(t, db.Create(&gbmodels.GbPTZCruiseTrack{
+		DeviceID: device.ID, ChannelID: channel.ID, TrackID: 0, Name: "第一条轨迹", Enabled: &enabled, UpdatedAt: time.Now(),
+	}).Error)
+
+	controller := gbcontrollers.NewDeviceMgmtController()
+	controller.SetDB(func() *gorm.DB { return db })
+	router := gin.New()
+	router.GET("/channel/:id/ptz/cruise-tracks/:trackId", controller.GetCruiseTrack)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
+		"/channel/"+uintStr(channel.ID)+"/ptz/cruise-tracks/0", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"trackId":0`)
 }

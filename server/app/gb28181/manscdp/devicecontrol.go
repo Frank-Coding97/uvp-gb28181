@@ -34,22 +34,27 @@ type PTZCommand struct {
 type PTZExtendedAction string
 
 const (
-	PTZActionFocusNear    PTZExtendedAction = "focus_near"
-	PTZActionFocusFar     PTZExtendedAction = "focus_far"
-	PTZActionIrisOpen     PTZExtendedAction = "iris_open"
-	PTZActionIrisClose    PTZExtendedAction = "iris_close"
-	PTZActionSetPreset    PTZExtendedAction = "preset_set"
-	PTZActionCallPreset   PTZExtendedAction = "preset_call"
-	PTZActionDeletePreset PTZExtendedAction = "preset_delete"
-	PTZActionCruiseStart  PTZExtendedAction = "cruise_start"
-	PTZActionCruiseStop   PTZExtendedAction = "cruise_stop"
-	PTZActionCruisePause  PTZExtendedAction = "cruise_pause"
-	PTZActionCruiseResume PTZExtendedAction = "cruise_resume"
-	PTZActionCruiseDelete PTZExtendedAction = "cruise_delete"
-	PTZActionAuxOn        PTZExtendedAction = "aux_on"
-	PTZActionAuxOff       PTZExtendedAction = "aux_off"
-	PTZActionScanStart    PTZExtendedAction = "scan_start"
-	PTZActionScanStop     PTZExtendedAction = "scan_stop"
+	PTZActionFocusNear        PTZExtendedAction = "focus_near"
+	PTZActionFocusFar         PTZExtendedAction = "focus_far"
+	PTZActionIrisOpen         PTZExtendedAction = "iris_open"
+	PTZActionIrisClose        PTZExtendedAction = "iris_close"
+	PTZActionSetPreset        PTZExtendedAction = "preset_set"
+	PTZActionCallPreset       PTZExtendedAction = "preset_call"
+	PTZActionDeletePreset     PTZExtendedAction = "preset_delete"
+	PTZActionCruiseStart      PTZExtendedAction = "cruise_start"
+	PTZActionCruiseStop       PTZExtendedAction = "cruise_stop"
+	PTZActionCruisePause      PTZExtendedAction = "cruise_pause"
+	PTZActionCruiseResume     PTZExtendedAction = "cruise_resume"
+	PTZActionCruiseDelete     PTZExtendedAction = "cruise_delete"
+	PTZActionCruiseAddStop    PTZExtendedAction = "cruise_add_stop"
+	PTZActionCruiseDeleteStop PTZExtendedAction = "cruise_delete_stop"
+	PTZActionCruiseSetSpeed   PTZExtendedAction = "cruise_set_speed"
+	PTZActionCruiseSetDwell   PTZExtendedAction = "cruise_set_dwell"
+	PTZActionCruiseDeletePath PTZExtendedAction = "cruise_delete_path"
+	PTZActionAuxOn            PTZExtendedAction = "aux_on"
+	PTZActionAuxOff           PTZExtendedAction = "aux_off"
+	PTZActionScanStart        PTZExtendedAction = "scan_start"
+	PTZActionScanStop         PTZExtendedAction = "scan_stop"
 )
 
 // PTZProfile supplies vendor-specific lens instruction bytes. A nil field
@@ -65,6 +70,8 @@ type PTZExtendedCommand struct {
 	Action  PTZExtendedAction
 	ID      int
 	Speed   int
+	SubID   int // 0x84/0x85 的预置位号;0x85 中为 0 表示删除整条巡航
+	Value16 int // 0x86/0x87 的 12 bit 值:低 8 位放 P2,高 4 位放 P3 高半字节
 	Profile *PTZProfile
 }
 
@@ -177,8 +184,41 @@ func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedComman
 	case PTZActionCruiseStop:
 		// GB/T 28181 defines no dedicated cruise-stop instruction. The
 		// standard front-end stop command is the all-zero instruction.
-	case PTZActionCruisePause, PTZActionCruiseResume, PTZActionCruiseDelete:
+	case PTZActionCruisePause, PTZActionCruiseResume:
 		return nil, fmt.Errorf("PTZ action %q has no standard front-end instruction", command.Action)
+	case PTZActionCruiseAddStop:
+		if command.SubID <= 0 || command.SubID > 255 {
+			return nil, fmt.Errorf("巡航加站的预置位号必须在 1-255 之间")
+		}
+		instruction = 0x84
+		parameter1 = byte(command.ID)
+		parameter2 = byte(command.SubID)
+	case PTZActionCruiseDeleteStop:
+		if command.SubID < 0 || command.SubID > 255 {
+			return nil, fmt.Errorf("巡航删点的预置位号必须在 0-255 之间")
+		}
+		instruction = 0x85
+		parameter1 = byte(command.ID)
+		parameter2 = byte(command.SubID)
+	case PTZActionCruiseSetSpeed:
+		if command.Value16 <= 0 || command.Value16 > 4095 {
+			return nil, fmt.Errorf("巡航速度必须在 1-4095 之间")
+		}
+		instruction = 0x86
+		parameter1 = byte(command.ID)
+		parameter2 = byte(command.Value16 & 0xFF)
+		parameter3 = byte((command.Value16>>8)&0x0F) << 4
+	case PTZActionCruiseSetDwell:
+		if command.Value16 <= 0 || command.Value16 > 4095 {
+			return nil, fmt.Errorf("巡航停留时间必须在 1-4095 秒之间")
+		}
+		instruction = 0x87
+		parameter1 = byte(command.ID)
+		parameter2 = byte(command.Value16 & 0xFF)
+		parameter3 = byte((command.Value16>>8)&0x0F) << 4
+	case PTZActionCruiseDelete, PTZActionCruiseDeletePath:
+		instruction = 0x85
+		parameter1 = byte(command.ID)
 	case PTZActionAuxOn:
 		instruction = 0x8C
 		parameter1 = byte(command.ID)

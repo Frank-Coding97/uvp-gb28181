@@ -44,6 +44,9 @@ func TestBuildPTZQueries(t *testing.T) {
 			if !strings.Contains(text, "<CmdType>"+tt.cmd+"</CmdType>") || !strings.Contains(text, "<DeviceID>C</DeviceID>") {
 				t.Fatalf("unexpected query: %s", text)
 			}
+			if tt.cmd == CmdCruiseTrackQuery && (!strings.Contains(text, "<Number>7</Number>") || strings.Contains(text, "<TrackID>")) {
+				t.Fatalf("cruise track query must use Number: %s", text)
+			}
 		})
 	}
 }
@@ -94,12 +97,12 @@ func TestParseHomeAndCruiseResponses(t *testing.T) {
 	if err != nil || home.Enabled == nil || !*home.Enabled {
 		t.Fatalf("unexpected home response: %+v, err=%v", home, err)
 	}
-	list, err := ParseCruiseTrackListResponse([]byte(`<Response><CmdType>CruiseTrackListQuery</CmdType><SN>2</SN><DeviceID>C</DeviceID><TrackList><Track><TrackID>7</TrackID><Name>巡航一</Name></Track></TrackList></Response>`))
-	if err != nil || len(list.Tracks) != 1 || list.Tracks[0].ID != 7 {
+	list, err := ParseCruiseTrackListResponse([]byte(`<Response><CmdType>CruiseTrackListQuery</CmdType><SN>2</SN><DeviceID>C</DeviceID><SumNum>1</SumNum><CruiseTrackList Num="1"><CruiseTrack><Number>0</Number><Name>T0</Name></CruiseTrack></CruiseTrackList></Response>`))
+	if err != nil || list.SumNum != 1 || list.List.Num != 1 || len(list.List.Tracks) != 1 || list.List.Tracks[0].ID != 0 {
 		t.Fatalf("unexpected track list: %+v, err=%v", list, err)
 	}
-	detail, err := ParseCruiseTrackResponse([]byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>3</SN><DeviceID>C</DeviceID><Track><TrackID>7</TrackID><Name>巡航一</Name></Track></Response>`))
-	if err != nil || detail.Track.ID != 7 {
+	detail, err := ParseCruiseTrackResponse([]byte(`<Response><CmdType>CruiseTrackQuery</CmdType><SN>3</SN><DeviceID>C</DeviceID><Number>0</Number><Name>T0</Name><SumNum>1</SumNum><CruisePointList Num="1"><CruisePoint><PresetIndex>3</PresetIndex><StayTime>5</StayTime><Speed>8</Speed></CruisePoint></CruisePointList></Response>`))
+	if err != nil || detail.CruiseTrack.ID != 0 || detail.CruiseTrack.PointList.Num != 1 || len(detail.CruiseTrack.PointList.Points) != 1 || detail.CruiseTrack.PointList.Points[0].PresetIndex != 3 {
 		t.Fatalf("unexpected track detail: %+v, err=%v", detail, err)
 	}
 }
