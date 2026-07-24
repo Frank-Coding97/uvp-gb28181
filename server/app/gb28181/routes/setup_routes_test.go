@@ -36,10 +36,11 @@ func TestRegisterRoutes_IncludesPTZResourceEndpoints(t *testing.T) {
 	for _, route := range []string{
 		"DELETE /api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId",
 		"POST /api/gb28181/device-mgmt/channel/:id/ptz/cruise",
-		"POST /api/gb28181/device-mgmt/channel/:id/ptz/aux",
+		"POST /api/gb28181/device-mgmt/channel/:id/ptz/wiper",
 		"GET /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
 		"PATCH /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
 	} {
 		require.True(t, got[route], route)
 	}
+	require.False(t, got["POST /api/gb28181/device-mgmt/channel/:id/ptz/aux"], "旧的通用辅助开关路由不应继续暴露")
 }

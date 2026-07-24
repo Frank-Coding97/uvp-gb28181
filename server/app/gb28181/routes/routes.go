@@ -317,7 +317,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.DELETE("/channel/:id/ptz/presets/:presetId", deviceMgmtController.DeletePTZPreset)
 			dmgmt.POST("/channel/:id/ptz/cruise", deviceMgmtController.ControlPTZCruise)
 			dmgmt.POST("/channel/:id/ptz/cruise/tracks", deviceMgmtController.CreateCruiseTrack)
-			dmgmt.POST("/channel/:id/ptz/aux", deviceMgmtController.ControlPTZAux)
+			dmgmt.POST("/channel/:id/ptz/wiper", deviceMgmtController.ControlPTZWiper)
 			dmgmt.GET("/channel/:id/ptz/home-position", deviceMgmtController.GetPTZHomePosition)
 			dmgmt.PATCH("/channel/:id/ptz/home-position", deviceMgmtController.UpdatePTZHomePosition)
 			dmgmt.GET("/channel/:id/ptz/presets", deviceMgmtController.ListPTZPresets)

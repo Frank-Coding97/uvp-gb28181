@@ -47,16 +47,12 @@ func TestServiceRefresh_CreatesTrackedQueryOperation(t *testing.T) {
 	require.Equal(t, 1, sender.calls)
 }
 
-func TestServiceRefresh_RejectsOfflineAndUnknownCapabilityBeforeSending(t *testing.T) {
+func TestServiceRefresh_RejectsOfflineBeforeSending(t *testing.T) {
 	sender := &fakeTrackedSender{}
 	svc, _ := newPTZQueryTestService(t, sender)
 	target := testTarget()
 	target.ChannelOnline = false
 	_, err := svc.Refresh(context.Background(), target, QueryPreset, 0, "offline")
-	require.Error(t, err)
-	target = testTarget()
-	target.PTZType = 0
-	_, err = svc.Refresh(context.Background(), target, QueryPreset, 0, "unknown-capability")
 	require.Error(t, err)
 	require.Zero(t, sender.calls)
 }

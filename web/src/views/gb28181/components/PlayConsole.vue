@@ -36,7 +36,6 @@ import {
     Hash,
     Home,
     Info,
-    Lightbulb,
     Loader2,
     Mic,
     Move3d,
@@ -51,11 +50,9 @@ import {
     Signal,
     SlidersHorizontal,
     Square,
-    Sun,
     Target,
     Trash2,
     Video,
-    ZapOff,
     ZoomIn,
     ZoomOut,
 } from "@lucide/vue";
@@ -176,8 +173,6 @@ const elapsedText = computed(() =>
 
 /* ────────────────────────── 云台状态(mock) ────────────────────────── */
 
-const isPtzCapable = computed(() => [1, 2, 4].includes(Number(props.channel?.ptzType || 0)));
-
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
 const moveSpeed = ref(6); // 1-10 步进,转发时 * 25 得 GB28181 1-255
 const focusMode = ref<"auto" | "manual">("auto");
@@ -213,14 +208,6 @@ const homePosition = ref<{ enabled: boolean; presetId?: number; delaySec: number
     enabled: true,
     presetId: 1,
     delaySec: 300,
-});
-
-// 辅助开关(灯/雨刷/红外/加热)
-const auxSwitches = ref({
-    light: false,
-    wiper: false,
-    infrared: true,
-    heater: false,
 });
 
 /* ────────────────────────── 流信息(mock) ────────────────────────── */
@@ -358,12 +345,10 @@ function handleClose() {
 /* ────────────────────────── 云台指令(mock) ────────────────────────── */
 
 function sendPtz(action: string) {
-    if (!isPtzCapable.value) return;
     Message.info(`[Mock] 云台指令:${action} · 速度 ${moveSpeed.value}`);
 }
 
 function sendPrecise() {
-    if (!isPtzCapable.value) return;
     Message.success(
         `[Mock] 精准 PTZ · Pan=${precisePan.value}° Tilt=${preciseTilt.value}° Zoom=${preciseZoom.value}×`,
     );
@@ -404,12 +389,15 @@ function stopCruise() {
     Message.info("[Mock] 巡航已停止");
 }
 
-function toggleAux(key: keyof typeof auxSwitches.value) {
-    auxSwitches.value[key] = !auxSwitches.value[key];
-    Message.info(`[Mock] 辅助开关 ${key} → ${auxSwitches.value[key] ? "ON" : "OFF"}`);
+function sendWiperCommand(action: "on" | "off") {
+    Message.info(`[Mock] 雨刷${action === "on" ? "开启" : "关闭"}指令已发送`);
 }
 
 function saveHomePosition() {
+    if (!homePosition.value.enabled) {
+        Message.success("[Mock] 看守位已关闭");
+        return;
+    }
     Message.success(`[Mock] 看守位已保存 · 预置位 #${homePosition.value.presetId} · ${homePosition.value.delaySec}s 后回位`);
 }
 
@@ -651,16 +639,16 @@ onBeforeUnmount(() => {
 
                         <!-- 速度模式:方向盘 + 变倍 + 速度 -->
                         <div v-show="ptzMode === 'speed'" class="ptz-speed">
-                            <div class="ptz-pad" :class="{ disabled: !isPtzCapable }">
-                                <button title="左上" :disabled="!isPtzCapable" @mousedown="sendPtz('左上')" @mouseup="sendPtz('停止')"><ArrowUpLeft :size="17" /></button>
-                                <button title="上" :disabled="!isPtzCapable" @mousedown="sendPtz('上')" @mouseup="sendPtz('停止')"><ArrowUp :size="17" /></button>
-                                <button title="右上" :disabled="!isPtzCapable" @mousedown="sendPtz('右上')" @mouseup="sendPtz('停止')"><ArrowUpRight :size="17" /></button>
-                                <button title="左" :disabled="!isPtzCapable" @mousedown="sendPtz('左')" @mouseup="sendPtz('停止')"><ArrowLeft :size="17" /></button>
-                                <button class="ptz-stop" title="停止" :disabled="!isPtzCapable" @click="sendPtz('停止')"><span></span></button>
-                                <button title="右" :disabled="!isPtzCapable" @mousedown="sendPtz('右')" @mouseup="sendPtz('停止')"><ArrowRight :size="17" /></button>
-                                <button title="左下" :disabled="!isPtzCapable" @mousedown="sendPtz('左下')" @mouseup="sendPtz('停止')"><ArrowDownLeft :size="17" /></button>
-                                <button title="下" :disabled="!isPtzCapable" @mousedown="sendPtz('下')" @mouseup="sendPtz('停止')"><ArrowDown :size="17" /></button>
-                                <button title="右下" :disabled="!isPtzCapable" @mousedown="sendPtz('右下')" @mouseup="sendPtz('停止')"><ArrowDownRight :size="17" /></button>
+                            <div class="ptz-pad">
+                                <button title="左上" @mousedown="sendPtz('左上')" @mouseup="sendPtz('停止')"><ArrowUpLeft :size="17" /></button>
+                                <button title="上" @mousedown="sendPtz('上')" @mouseup="sendPtz('停止')"><ArrowUp :size="17" /></button>
+                                <button title="右上" @mousedown="sendPtz('右上')" @mouseup="sendPtz('停止')"><ArrowUpRight :size="17" /></button>
+                                <button title="左" @mousedown="sendPtz('左')" @mouseup="sendPtz('停止')"><ArrowLeft :size="17" /></button>
+                                <button class="ptz-stop" title="停止" @click="sendPtz('停止')"><span></span></button>
+                                <button title="右" @mousedown="sendPtz('右')" @mouseup="sendPtz('停止')"><ArrowRight :size="17" /></button>
+                                <button title="左下" @mousedown="sendPtz('左下')" @mouseup="sendPtz('停止')"><ArrowDownLeft :size="17" /></button>
+                                <button title="下" @mousedown="sendPtz('下')" @mouseup="sendPtz('停止')"><ArrowDown :size="17" /></button>
+                                <button title="右下" @mousedown="sendPtz('右下')" @mouseup="sendPtz('停止')"><ArrowDownRight :size="17" /></button>
                             </div>
 
                             <button
@@ -680,51 +668,43 @@ onBeforeUnmount(() => {
                             <div class="speed-row">
                                 <label>
                                     <span><Gauge :size="12" />移动速度</span>
-                                    <input v-model.number="moveSpeed" type="range" min="1" max="10" :disabled="!isPtzCapable" />
+                                    <input v-model.number="moveSpeed" type="range" min="1" max="10" />
                                     <em>{{ moveSpeed }}</em>
                                 </label>
                             </div>
 
-                            <div class="lens-grid" :class="{ disabled: !isPtzCapable }">
+                            <div class="lens-grid">
                                 <div class="lens-item">
                                     <span class="lens-label"><ZoomIn :size="12" />变倍</span>
                                     <div class="lens-btns">
-                                        <button title="放大" :disabled="!isPtzCapable" @mousedown="sendPtz('放大')" @mouseup="sendPtz('停止')"><ZoomIn :size="14" /></button>
-                                        <button title="缩小" :disabled="!isPtzCapable" @mousedown="sendPtz('缩小')" @mouseup="sendPtz('停止')"><ZoomOut :size="14" /></button>
+                                        <button title="放大" @mousedown="sendPtz('放大')" @mouseup="sendPtz('停止')"><ZoomIn :size="14" /></button>
+                                        <button title="缩小" @mousedown="sendPtz('缩小')" @mouseup="sendPtz('停止')"><ZoomOut :size="14" /></button>
                                     </div>
                                 </div>
                                 <div class="lens-item">
                                     <span class="lens-label"><FocusIcon :size="12" />聚焦</span>
                                     <div class="lens-btns">
-                                        <button title="远焦" :disabled="!isPtzCapable" @click="sendPtz('远焦')">远</button>
-                                        <button title="近焦" :disabled="!isPtzCapable" @click="sendPtz('近焦')">近</button>
-                                        <button :class="{ toggled: focusMode === 'auto' }" title="自动聚焦" :disabled="!isPtzCapable" @click="focusMode = focusMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="远焦" @click="sendPtz('远焦')">远</button>
+                                        <button title="近焦" @click="sendPtz('近焦')">近</button>
+                                        <button :class="{ toggled: focusMode === 'auto' }" title="自动聚焦" @click="focusMode = focusMode === 'auto' ? 'manual' : 'auto'">A</button>
                                     </div>
                                 </div>
                                 <div class="lens-item">
                                     <span class="lens-label"><Circle :size="12" />光圈</span>
                                     <div class="lens-btns">
-                                        <button title="开大" :disabled="!isPtzCapable" @click="sendPtz('光圈+')">+</button>
-                                        <button title="缩小" :disabled="!isPtzCapable" @click="sendPtz('光圈-')">−</button>
-                                        <button :class="{ toggled: irisMode === 'auto' }" title="自动光圈" :disabled="!isPtzCapable" @click="irisMode = irisMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="开大" @click="sendPtz('光圈+')">+</button>
+                                        <button title="缩小" @click="sendPtz('光圈-')">−</button>
+                                        <button :class="{ toggled: irisMode === 'auto' }" title="自动光圈" @click="irisMode = irisMode === 'auto' ? 'manual' : 'auto'">A</button>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- 辅助开关:雨刷 / 红外 / 灯光 / 加热 -->
-                            <div class="aux-grid">
-                                <button class="aux-btn" :class="{ active: auxSwitches.light }" :disabled="!isPtzCapable" @click="toggleAux('light')">
-                                    <Lightbulb :size="14" /><span>灯光</span>
-                                </button>
-                                <button class="aux-btn" :class="{ active: auxSwitches.wiper }" :disabled="!isPtzCapable" @click="toggleAux('wiper')">
-                                    <ZapOff :size="14" /><span>雨刷</span>
-                                </button>
-                                <button class="aux-btn" :class="{ active: auxSwitches.infrared }" :disabled="!isPtzCapable" @click="toggleAux('infrared')">
-                                    <Sun :size="14" /><span>红外</span>
-                                </button>
-                                <button class="aux-btn" :class="{ active: auxSwitches.heater }" :disabled="!isPtzCapable" @click="toggleAux('heater')">
-                                    <Signal :size="14" /><span>加热</span>
-                                </button>
+                            <div class="wiper-control" data-testid="demo-wiper-control">
+                                <span class="section-title"><RefreshCcw :size="13" />雨刷控制</span>
+                                <div class="wiper-actions">
+                                    <button class="btn-ghost sm" data-testid="demo-wiper-on" @click="sendWiperCommand('on')">开启</button>
+                                    <button class="btn-ghost sm" data-testid="demo-wiper-off" @click="sendWiperCommand('off')">关闭</button>
+                                </div>
                             </div>
                         </div>
 
@@ -762,10 +742,10 @@ onBeforeUnmount(() => {
                                 </label>
                             </div>
                             <div class="precise-actions">
-                                <button class="btn-primary sm" :disabled="!isPtzCapable" @click="sendPrecise">
+                                <button class="btn-primary sm" @click="sendPrecise">
                                     <Target :size="13" />应用定位
                                 </button>
-                                <button class="btn-ghost sm" :disabled="!isPtzCapable" @click="Message.info('[Mock] 查询精准状态')">
+                                <button class="btn-ghost sm" @click="Message.info('[Mock] 查询精准状态')">
                                     <Navigation :size="13" />读取当前位置
                                 </button>
                             </div>
@@ -782,7 +762,6 @@ onBeforeUnmount(() => {
                                 :key="p.id"
                                 class="preset-item"
                                 :class="{ active: activePresetId === p.id }"
-                                :disabled="!isPtzCapable"
                                 @click="callPreset(p.id)"
                             >
                                 <span class="preset-idx">#{{ p.id }}</span>
@@ -791,7 +770,7 @@ onBeforeUnmount(() => {
                             </button>
                             <div class="preset-add">
                                 <input v-model="newPresetName" type="text" placeholder="新预置位名称" maxlength="16" />
-                                <button class="btn-primary sm" :disabled="!isPtzCapable" @click="setPreset">
+                                <button class="btn-primary sm" @click="setPreset">
                                     <Target :size="12" />保存当前位置
                                 </button>
                             </div>
@@ -809,7 +788,7 @@ onBeforeUnmount(() => {
                                     <small>途经 {{ c.presets.length }} 个点位 · 停留 {{ c.dwellSec }}s · {{ c.enabled ? '已启用' : '已禁用' }}</small>
                                 </div>
                                 <div class="cruise-actions">
-                                    <button class="btn-ghost sm" :disabled="!isPtzCapable || !c.enabled" @click="toggleCruise(c.id)">
+                                    <button class="btn-ghost sm" :disabled="!c.enabled" @click="toggleCruise(c.id)">
                                         <Play v-if="cruiseState !== 'running' || activeCruiseId !== c.id" :size="12" />
                                         <Pause v-else :size="12" />
                                     </button>
@@ -824,29 +803,26 @@ onBeforeUnmount(() => {
                         <div class="section-hd">
                             <span class="section-title"><Home :size="13" />看守位<span class="tag-2022">2022</span></span>
                             <label class="toggle">
-                                <input v-model="homePosition.enabled" type="checkbox" :disabled="!isPtzCapable" />
+                                <input v-model="homePosition.enabled" type="checkbox" />
                                 <span></span>
                             </label>
                         </div>
-                        <div class="home-config" :class="{ disabled: !homePosition.enabled || !isPtzCapable }">
-                            <div class="home-row">
-                                <span>回位预置位</span>
-                                <select v-model.number="homePosition.presetId">
-                                    <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
-                                </select>
+                        <div class="home-config">
+                            <div class="home-fields" :class="{ disabled: !homePosition.enabled }">
+                                <div class="home-row">
+                                    <span>回位预置位</span>
+                                    <select v-model.number="homePosition.presetId">
+                                        <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
+                                    </select>
+                                </div>
+                                <div class="home-row">
+                                    <span>空闲触发(秒)</span>
+                                    <input v-model.number="homePosition.delaySec" type="number" min="10" max="3600" />
+                                </div>
                             </div>
-                            <div class="home-row">
-                                <span>空闲触发(秒)</span>
-                                <input v-model.number="homePosition.delaySec" type="number" min="10" max="3600" />
-                            </div>
-                            <button class="btn-primary sm" :disabled="!isPtzCapable || !homePosition.enabled" @click="saveHomePosition">
-                                <ShieldCheck :size="12" />保存看守位
+                            <button class="btn-primary sm" @click="saveHomePosition">
+                                <ShieldCheck :size="12" />{{ homePosition.enabled ? "保存看守位" : "关闭看守位" }}
                             </button>
-                        </div>
-
-                        <div v-if="!isPtzCapable" class="capability-warn">
-                            <AlertTriangle :size="13" />
-                            <span>当前通道未上报可动云台能力(PTZType=0),控制面板仅作静态占位。</span>
                         </div>
                     </div>
                     <!-- ═══════════ 视频探针 ═══════════ -->
@@ -1295,14 +1271,6 @@ onBeforeUnmount(() => {
 .section-meta { color: var(--uvp-text-tertiary); font-size: 10.5px; display: inline-flex; align-items: center; gap: 4px; }
 .section-meta .dot { width: 6px; height: 6px; background: var(--uvp-text-tertiary); border-radius: 50%; }
 
-.capability-warn {
-    display: flex; align-items: flex-start; gap: 6px;
-    padding: 8px 10px; margin-top: 8px;
-    color: var(--uvp-warning); background: var(--uvp-warning-soft);
-    border: 1px solid var(--uvp-warning-border); border-radius: 8px;
-    font-size: 10.5px; line-height: 1.5;
-}
-
 /* ═══════════ 云台面板 ═══════════ */
 .mode-switch {
     display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
@@ -1330,7 +1298,6 @@ onBeforeUnmount(() => {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
     max-width: 200px; margin: 8px auto 4px;
 }
-.ptz-pad.disabled { opacity: 0.42; pointer-events: none; }
 .ptz-pad button {
     display: grid; place-items: center; height: 40px;
     color: var(--uvp-text-secondary); background: var(--uvp-list-toolbar-bg);
@@ -1369,7 +1336,6 @@ onBeforeUnmount(() => {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
     margin-top: 6px;
 }
-.lens-grid.disabled { opacity: 0.42; pointer-events: none; }
 .lens-item {
     display: grid; gap: 6px;
     padding: 8px;
@@ -1387,22 +1353,9 @@ onBeforeUnmount(() => {
 .lens-btns button:hover:not(:disabled) { color: var(--uvp-brand); border-color: var(--uvp-brand); }
 .lens-btns button.toggled { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
 
-/* 辅助开关 */
-.aux-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
-    margin-top: 6px;
-}
-.aux-btn {
-    display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: 8px 4px;
-    color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 8px;
-    cursor: pointer; font-size: 10.5px;
-    transition: all 0.15s ease;
-}
-.aux-btn:hover:not(:disabled) { color: var(--uvp-text-secondary); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
-.aux-btn.active { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent); border-color: color-mix(in srgb, var(--uvp-brand-cyan) 32%, transparent); }
-.aux-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.wiper-control { display: grid; gap: 6px; margin-top: 6px; }
+.wiper-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.wiper-actions button { width: 100%; justify-content: center; }
 
 /* 精准 PTZ */
 .ptz-precise { display: grid; gap: 10px; }
@@ -1484,7 +1437,8 @@ onBeforeUnmount(() => {
 
 /* 看守位 */
 .home-config { display: grid; gap: 8px; padding-top: 4px; }
-.home-config.disabled { opacity: 0.42; pointer-events: none; }
+.home-fields { display: grid; gap: 8px; }
+.home-fields.disabled { opacity: 0.42; pointer-events: none; }
 .home-row {
     display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: center;
     color: var(--uvp-text-tertiary); font-size: 11px;

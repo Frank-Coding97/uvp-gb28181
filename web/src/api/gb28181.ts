@@ -340,13 +340,13 @@ export const createCruiseTrack = (
     { data }
   );
 
-export const controlPtzAux = (
+export const controlPtzWiper = (
   channelId: number,
-  data: { action: "on" | "off"; auxiliaryId: number; idempotencyKey?: string }
+  data: { action: "on" | "off"; idempotencyKey?: string }
 ) =>
   http.request<BaseResult<DeviceOperationResult>>(
     "post",
-    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/aux`),
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/wiper`),
     { data }
   );
 
@@ -371,7 +371,10 @@ export const getHomePosition = (channelId: number, refresh = false) =>
     { params: refresh ? { refresh: true } : undefined }
   );
 
-export const updateHomePosition = (channelId: number, data: { enabled: boolean; resetTime: number; presetId: number }) =>
+export const updateHomePosition = (
+  channelId: number,
+  data: { enabled: false } | { enabled: true; resetTime: number; presetId: number }
+) =>
   http.request<BaseResult<DeviceOperationResult>>(
     "patch",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/home-position`),

@@ -123,8 +123,8 @@ func TestDeviceMgmt_ControlPTZ_AllowsUnreportedPTZType(t *testing.T) {
 	require.NotContains(t, w.Body.String(), "未上报")
 }
 
-func TestDeviceMgmt_ControlPTZ_RejectsFixedCamera(t *testing.T) {
-	// PTZType=3 是国标"固定枪机",物理上无法云台,任何 action 都要拒
+func TestDeviceMgmt_ControlPTZ_AllowsReportedFixedCameraType(t *testing.T) {
+	// PTZType 仅作为设备描述信息；厂商上报不可靠，控制指令仍应交给设备决定是否执行。
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{}))
@@ -132,11 +132,9 @@ func TestDeviceMgmt_ControlPTZ_RejectsFixedCamera(t *testing.T) {
 	require.NoError(t, db.Create(device).Error)
 	channel := &gbmodels.GbChannel{DeviceID: "D", ChannelID: "C", Status: gbmodels.ChannelStatusOnline, PTZType: 3}
 	require.NoError(t, db.Create(channel).Error)
-	sender := &fakePTZSender{}
 	controller := gbcontrollers.NewDeviceMgmtController()
 	controller.SetDB(func() *gorm.DB { return db })
 	controller.SetPTZService(ptz.NewService(db, fakeTrackedPTZSender{}, time.Now))
-	controller.SetPTZSender(sender)
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.POST("/channel/:id/ptz", controller.ControlPTZ)
@@ -144,8 +142,8 @@ func TestDeviceMgmt_ControlPTZ_RejectsFixedCamera(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	// PTZType=3 应该在 service 层被拒,SIP 报文不下发到设备
-	require.Empty(t, sender.body)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "operationId")
 }
 
 func TestDeviceMgmt_ControlPTZ_ServiceReturnsOperation(t *testing.T) {

@@ -46,9 +46,8 @@ type cruiseTrackStopInput struct {
 	PresetID int `json:"presetId" binding:"required"`
 }
 
-type auxiliaryResourceRequest struct {
+type wiperControlRequest struct {
 	Action         string `json:"action" binding:"required"`
-	AuxiliaryID    int    `json:"auxiliaryId" binding:"required"`
 	IdempotencyKey string `json:"idempotencyKey"`
 }
 
@@ -73,11 +72,14 @@ func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.
 		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
-		PTZType: channel.PTZType, AllowNoPTZ: true,
 	}, true
 }
 
 func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, action manscdp.PTZExtendedAction, id int, name, idempotencyKey string) {
+	dc.executePTZExtendedResourceAs(c, action, string(action), id, name, idempotencyKey)
+}
+
+func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, protocolAction manscdp.PTZExtendedAction, operationAction string, id int, name, idempotencyKey string) {
 	if dc.ptzService == nil {
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
 		return
@@ -90,7 +92,7 @@ func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, actio
 	if !ok {
 		return
 	}
-	allowZero := action == manscdp.PTZActionCruiseStart || action == manscdp.PTZActionCruiseStop || action == manscdp.PTZActionCruiseDelete || action == manscdp.PTZActionCruiseDeletePath
+	allowZero := protocolAction == manscdp.PTZActionCruiseStart || protocolAction == manscdp.PTZActionCruiseStop || protocolAction == manscdp.PTZActionCruiseDelete || protocolAction == manscdp.PTZActionCruiseDeletePath
 	if id < 0 || id > 255 || (!allowZero && id == 0) {
 		if allowZero {
 			dc.FailAndAbort(c, "巡航组号必须在 0-255 之间", nil)
@@ -102,7 +104,10 @@ func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, actio
 	if idempotencyKey == "" {
 		idempotencyKey = c.GetHeader("Idempotency-Key")
 	}
-	payload := map[string]interface{}{"action": action, "id": id}
+	payload := map[string]interface{}{"action": operationAction, "id": id}
+	if operationAction != string(protocolAction) {
+		payload["protocolAction"] = protocolAction
+	}
 	if name != "" {
 		payload["name"] = name
 	}
@@ -110,10 +115,10 @@ func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, actio
 	lock.Lock()
 	defer lock.Unlock()
 	op, err := dc.ptzService.Execute(c, target, ptz.Command{
-		CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: idempotencyKey,
+		CmdType: manscdp.CmdDeviceControl, Action: operationAction, IdempotencyKey: idempotencyKey,
 		Payload: payload,
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildExtendedPTZControl(channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: action, ID: id})
+			return manscdp.BuildExtendedPTZControl(channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: protocolAction, ID: id})
 		},
 	})
 	if err != nil {
@@ -123,10 +128,10 @@ func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, actio
 	// 预置位设/删属于国标里"设备权威"的资源变更:主流程乐观入库让 UI 立即响应后,
 	// 后台异步下发一次 PresetQuery,把设备真实状态同步过来。persistQueryCache 会 UPSERT
 	// gb_ptz_preset 并按 SumNum 对账——设备端实际没存住或已删除的会被自动纠正。
-	if action == manscdp.PTZActionSetPreset || action == manscdp.PTZActionDeletePreset {
+	if protocolAction == manscdp.PTZActionSetPreset || protocolAction == manscdp.PTZActionDeletePreset {
 		dc.reconcilePresetsAsync(target)
 	}
-	if action == manscdp.PTZActionCruiseDelete || action == manscdp.PTZActionCruiseDeletePath {
+	if protocolAction == manscdp.PTZActionCruiseDelete || protocolAction == manscdp.PTZActionCruiseDeletePath {
 		if db := dc.db(); db != nil {
 			if err := db.WithContext(c).Where("channel_id = ? AND track_id = ?", channel.ID, id).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil && app.ZapLog != nil {
 				app.ZapLog.Warn("删除巡航本地缓存失败",
@@ -138,7 +143,7 @@ func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, actio
 		dc.reconcileCruiseAsync(target, id, false)
 	}
 	dc.Success(c, gin.H{
-		"operationId": op.OperationID, "channelId": channel.ChannelID, "action": action,
+		"operationId": op.OperationID, "channelId": channel.ChannelID, "action": operationAction,
 		"id": id, "sn": op.SN, "status": op.Status,
 	})
 }
@@ -215,23 +220,26 @@ func (dc *DeviceMgmtController) ControlPTZCruise(c *gin.Context) {
 	dc.executePTZExtendedResource(c, action, *request.TrackID, "", request.IdempotencyKey)
 }
 
-func (dc *DeviceMgmtController) ControlPTZAux(c *gin.Context) {
-	var request auxiliaryResourceRequest
+func (dc *DeviceMgmtController) ControlPTZWiper(c *gin.Context) {
+	var request wiperControlRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		dc.FailAndAbort(c, "辅助开关参数不合法", err)
+		dc.FailAndAbort(c, "雨刷控制参数不合法", err)
 		return
 	}
 	var action manscdp.PTZExtendedAction
+	var operationAction string
 	switch strings.ToLower(strings.TrimSpace(request.Action)) {
 	case "on", "open", "enable":
 		action = manscdp.PTZActionAuxOn
+		operationAction = "wiper_on"
 	case "off", "close", "disable":
 		action = manscdp.PTZActionAuxOff
+		operationAction = "wiper_off"
 	default:
-		dc.FailAndAbort(c, "辅助开关动作不合法", nil)
+		dc.FailAndAbort(c, "雨刷控制动作不合法", nil)
 		return
 	}
-	dc.executePTZExtendedResource(c, action, request.AuxiliaryID, "", request.IdempotencyKey)
+	dc.executePTZExtendedResourceAs(c, action, operationAction, manscdp.PTZAuxiliaryIDWiper, "", request.IdempotencyKey)
 }
 
 // CreateCruiseTrack 按顺序下发 GB/T 28181 附录 A.3 巡航配置指令建立一条巡航路径。

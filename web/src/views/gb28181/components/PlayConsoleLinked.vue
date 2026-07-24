@@ -16,8 +16,8 @@ import PlayWindow from "./PlayWindow.vue";
 import {
     controlDevice,
     controlPtz,
-    controlPtzAux,
     controlPtzCruise,
+    controlPtzWiper,
     createCruiseTrack,
     controlPtzPrecise,
     callPtzPreset,
@@ -68,7 +68,6 @@ import {
     Hash,
     Home,
     Info,
-    Lightbulb,
     Loader2,
     Mic,
     Move3d,
@@ -85,12 +84,10 @@ import {
     ShieldCheck,
     Signal,
     Square,
-    Sun,
     Target,
     Trash2,
     Video,
     X,
-    ZapOff,
     ZoomIn,
     ZoomOut,
 } from "@lucide/vue";
@@ -229,9 +226,6 @@ function capability(key: keyof DeviceControlCapabilities): ControlCapability {
     const value = capabilities.value?.[key];
     return value || { state: "unknown", reason: "能力尚未读取" };
 }
-const ptzCapability = computed(() => capability("basicPtz"));
-// 未知表示设备未上报能力，仍允许尝试；只有明确不支持才禁用。
-const isPtzCapable = computed(() => ptzCapability.value.state !== "unsupported");
 const isAudioCapable = computed(() => {
     const broadcast = capability("broadcast").state;
     const talk = capability("talk").state;
@@ -445,7 +439,7 @@ const cruiseDraftError = computed(() => {
     return "";
 });
 function openSaveCruiseDialog() {
-    if (!props.channel || !isPtzCapable.value || presets.value.length === 0) return;
+    if (!props.channel || presets.value.length === 0) return;
     const firstPreset = presets.value[0].id;
     cruiseDraft.value = {
         trackId: nextCruiseTrackId(),
@@ -567,9 +561,14 @@ const filteredCruiseTracks = computed(() => {
 
 // 看守位(2022 HomePositionQuery)
 const homePosition = ref<{ enabled: boolean; presetId?: number; delaySec: number }>({ enabled: false, presetId: undefined, delaySec: 300 });
+const homePositionCanSave = computed(() => {
+    if (!homePosition.value.enabled) return true;
+    const { presetId, delaySec } = homePosition.value;
+    return Number.isInteger(presetId) && Number(presetId) > 0 && Number.isFinite(delaySec) && delaySec >= 10 && delaySec <= 3600;
+});
 
-// 辅助开关(灯/雨刷/红外/加热)
-const auxSwitches = ref({ light: false, wiper: false, infrared: false, heater: false });
+const wiperPending = ref<"on" | "off" | null>(null);
+let wiperRequestToken = 0;
 const imageParams = ref({ brightness: 128, contrast: 128, saturation: 128, hue: 128 });
 
 const deviceRecording = ref(false);
@@ -848,6 +847,8 @@ function resetSessionState() {
     presets.value = [];
     cruiseTracks.value = [];
     homePosition.value = { enabled: false, presetId: undefined, delaySec: 300 };
+    wiperRequestToken++;
+    wiperPending.value = null;
     deviceRecording.value = false;
     guardArmed.value = false;
     advancedPending.value = new Set();
@@ -981,7 +982,6 @@ const ptzActions: Record<string, string> = {
 let activePtzAction = "";
 
 async function sendPtz(action: string) {
-    if (!isPtzCapable.value) return;
     if (!props.channel) return;
     if (action === "停止") activePtzAction = "";
     else activePtzAction = action;
@@ -994,7 +994,6 @@ async function sendPtz(action: string) {
 }
 
 async function sendPrecise() {
-    if (!isPtzCapable.value) return;
     if (!props.channel) return;
     try {
         const response = await controlPtzPrecise(props.channel.id, { pan: precisePan.value, tilt: preciseTilt.value, zoom: preciseZoom.value, speed: moveSpeed.value * 25 });
@@ -1014,7 +1013,7 @@ async function callPreset(id: number) {
     } catch (error: any) { Message.error(error?.message || "调用预置位失败"); }
 }
 function openSavePresetDialog() {
-    if (!props.channel || !isPtzCapable.value) return;
+    if (!props.channel) return;
     const nextId = nextPresetId();
     presetDraft.value = { id: nextId, name: `预置位 ${nextId}`, submitting: false };
     presetNameTouched.value = false;
@@ -1156,30 +1155,33 @@ function closeAssetManager() {
     assetSearch.value = "";
 }
 
-const auxiliaryIds: Partial<Record<keyof typeof auxSwitches.value, number>> = {};
-function hasAuxiliaryMapping(key: keyof typeof auxSwitches.value) {
-    return Boolean(auxiliaryIds[key]);
-}
-
-async function toggleAux(key: keyof typeof auxSwitches.value) {
-    const auxiliaryId = auxiliaryIds[key];
-    if (!auxiliaryId) {
-        Message.warning("设备未提供该辅助开关的编号映射");
-        return;
-    }
-    const next = !auxSwitches.value[key];
-    if (!props.channel) return;
+async function sendWiperCommand(action: "on" | "off") {
+    if (!props.channel || wiperPending.value !== null) return;
+    const channelId = props.channel.id;
+    const session = sessionToken;
+    const requestToken = ++wiperRequestToken;
+    const isCurrentRequest = () => requestToken === wiperRequestToken && session === sessionToken && props.channel?.id === channelId;
+    wiperPending.value = action;
     try {
-        const response = await controlPtzAux(props.channel.id, { action: next ? "on" : "off", auxiliaryId });
-        if (response.code !== 0) throw new Error(response.message || "辅助开关指令失败");
-        auxSwitches.value[key] = next;
-    } catch (error: any) { Message.error(error?.message || "辅助开关指令失败"); }
+        const response = await controlPtzWiper(channelId, { action });
+        if (!isCurrentRequest()) return;
+        if (response.code !== 0) throw new Error(response.message || "雨刷控制指令失败");
+        Message.success(`雨刷${action === "on" ? "开启" : "关闭"}指令已发送`);
+    } catch (error: any) {
+        if (!isCurrentRequest()) return;
+        Message.error(error?.message || "雨刷控制指令失败");
+    } finally {
+        if (isCurrentRequest()) wiperPending.value = null;
+    }
 }
 
 async function saveHomePosition() {
-    if (!props.channel || !homePosition.value.presetId) return;
+    if (!props.channel || !homePositionCanSave.value) return;
+    const data = homePosition.value.enabled
+        ? { enabled: true as const, resetTime: homePosition.value.delaySec, presetId: homePosition.value.presetId! }
+        : { enabled: false as const };
     try {
-        const response = await updateHomePosition(props.channel.id, { enabled: homePosition.value.enabled, resetTime: homePosition.value.delaySec, presetId: homePosition.value.presetId });
+        const response = await updateHomePosition(props.channel.id, data);
         if (response.code !== 0) throw new Error(response.message || "保存看守位失败");
         Message.success("看守位请求已受理");
     } catch (error: any) { Message.error(error?.message || "保存看守位失败"); }
@@ -1196,10 +1198,6 @@ async function readPreciseStatus() {
         if (state.tilt != null) preciseTilt.value = Number(state.tilt);
         if (state.zoom != null) preciseZoom.value = Number(state.zoom);
     } catch (error: any) { Message.error(error?.message || "读取当前位置失败"); }
-}
-
-function capabilitySupported(key: keyof DeviceControlCapabilities) {
-    return capability(key).state === "supported";
 }
 
 function setAdvancedPending(action: string, pending: boolean) {
@@ -1219,10 +1217,6 @@ function pointInDragLayer(event: PointerEvent) {
 }
 
 function toggleDragZoomMode() {
-    if (!capabilitySupported("dragZoom")) {
-        Message.warning(capability("dragZoom").reason);
-        return;
-    }
     dragZoomMode.value = !dragZoomMode.value;
     dragZoomStart.value = null;
     dragZoomCurrent.value = null;
@@ -1273,14 +1267,6 @@ async function finishDragZoom(event: PointerEvent) {
 
 async function runAdvancedAction(action: string, region?: Record<string, number>) {
     if (!props.channel) return;
-    const keyByAction: Record<string, keyof DeviceControlCapabilities> = {
-        iframe: "iFrame", record_start: "record", record_stop: "record", guard_set: "guard", guard_reset: "guard", alarm_reset: "alarmReset", teleboot: "teleBoot", drag_zoom_in: "dragZoom",
-    };
-    const capabilityKey = keyByAction[action];
-    if (!capabilityKey || !capabilitySupported(capabilityKey)) {
-        Message.warning(capabilityKey ? capability(capabilityKey).reason : "设备未明确支持该动作");
-        return;
-    }
     if (advancedPending.value.has(action)) return;
     const execute = async () => {
         setAdvancedPending(action, true);
@@ -1621,7 +1607,6 @@ onBeforeUnmount(() => {
                                     <button
                                         class="preset-save-btn"
                                         data-testid="preset-save-btn"
-                                        :disabled="!isPtzCapable"
                                         @click="openSavePresetDialog"
                                     >
                                         <Plus :size="12" /><span>添加</span>
@@ -1636,7 +1621,7 @@ onBeforeUnmount(() => {
                                             v-for="p in visiblePresets"
                                             :key="p.id"
                                             class="preset-tile"
-                                            :class="{ active: activePresetId === p.id, disabled: !isPtzCapable }"
+                                            :class="{ active: activePresetId === p.id }"
                                         >
                                             <a-tooltip
                                                 :content="`#${p.id} ${p.name}`"
@@ -1646,7 +1631,6 @@ onBeforeUnmount(() => {
                                             >
                                                 <button
                                                     class="preset-tile-hit preset-item"
-                                                    :disabled="!isPtzCapable"
                                                     @click="callPreset(p.id)"
                                                 >
                                                     <span class="preset-idx">#{{ p.id }}</span>
@@ -1655,7 +1639,6 @@ onBeforeUnmount(() => {
                                             </a-tooltip>
                                             <button
                                                 class="preset-tile-del"
-                                                :disabled="!isPtzCapable"
                                                 :title="`删除 #${p.id}`"
                                                 @click.stop="deletePreset(p.id)"
                                             >
@@ -1699,7 +1682,6 @@ onBeforeUnmount(() => {
                                                             <div class="preset-popover-actions">
                                                                 <button
                                                                     class="preset-popover-call"
-                                                                    :disabled="!isPtzCapable"
                                                                     title="调用此预置位"
                                                                     @click="callPreset(p.id)"
                                                                 >
@@ -1707,7 +1689,6 @@ onBeforeUnmount(() => {
                                                                 </button>
                                                                 <button
                                                                     class="preset-popover-del"
-                                                                    :disabled="!isPtzCapable"
                                                                     title="删除此预置位"
                                                                     @click="deletePreset(p.id)"
                                                                 >
@@ -1742,7 +1723,7 @@ onBeforeUnmount(() => {
                                     <button
                                         class="preset-save-btn"
                                         data-testid="cruise-add-btn"
-                                        :disabled="!isPtzCapable || presets.length === 0"
+                                        :disabled="presets.length === 0"
                                         :title="presets.length === 0 ? '需要先添加预置位才能新建巡航轨迹' : '新建巡航轨迹(按顺序串联多个预置位)'"
                                         @click="openSaveCruiseDialog"
                                     >
@@ -1770,14 +1751,14 @@ onBeforeUnmount(() => {
                                             class="preset-tile cruise-tile"
                                             :class="{
                                                 active: activeCruiseId === c.id && cruiseState !== 'stopped',
-                                                disabled: (!c.enabled && !c.pending) || !isPtzCapable,
+                                                disabled: !c.enabled && !c.pending,
                                                 pending: c.pending,
                                             }"
                                             :data-testid="`cruise-tile-${c.id}`"
                                         >
                                             <button
                                                 class="preset-tile-hit cruise-item"
-                                                :disabled="!isPtzCapable || (!c.enabled && !c.pending)"
+                                                :disabled="!c.enabled && !c.pending"
                                                 @click="toggleCruise(c.id)"
                                             >
                                                 <Square v-if="cruiseTileState(c) === 'stop'" :size="10" class="cruise-tile-icon" />
@@ -1787,7 +1768,6 @@ onBeforeUnmount(() => {
                                             </button>
                                             <button
                                                 class="preset-tile-del"
-                                                :disabled="!isPtzCapable"
                                                 :title="`删除巡航 #${c.id}`"
                                                 @click.stop="deleteCruise(c.id)"
                                             >
@@ -1831,7 +1811,7 @@ onBeforeUnmount(() => {
                                                             <div class="preset-popover-actions">
                                                                 <button
                                                                     class="preset-popover-call"
-                                                                    :disabled="!isPtzCapable || (!c.enabled && !c.pending)"
+                                                                    :disabled="!c.enabled && !c.pending"
                                                                     @click="toggleCruise(c.id)"
                                                                 >
                                                                     <Square v-if="cruiseTileState(c) === 'stop'" :size="11" />
@@ -1839,7 +1819,6 @@ onBeforeUnmount(() => {
                                                                 </button>
                                                                 <button
                                                                     class="preset-popover-del"
-                                                                    :disabled="!isPtzCapable"
                                                                     title="删除此巡航轨迹"
                                                                     @click="deleteCruise(c.id)"
                                                                 >
@@ -1859,43 +1838,43 @@ onBeforeUnmount(() => {
                                 <div class="section-hd first">
                                     <span class="section-title"><Home :size="13" />看守位<span class="tag-2022">2022</span></span>
                                     <label class="toggle">
-                                        <input v-model="homePosition.enabled" type="checkbox" :disabled="!isPtzCapable" />
+                                        <input v-model="homePosition.enabled" type="checkbox" />
                                         <span></span>
                                     </label>
                                 </div>
-                                <div class="home-config" :class="{ disabled: !homePosition.enabled || !isPtzCapable }">
-                                    <div class="home-row">
-                                        <span>回位预置位</span>
-                                        <select v-model.number="homePosition.presetId">
-                                            <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
-                                        </select>
+                                <div class="home-config">
+                                    <div class="home-fields" :class="{ disabled: !homePosition.enabled }">
+                                        <div class="home-row">
+                                            <span>回位预置位</span>
+                                            <select v-model.number="homePosition.presetId" :disabled="!homePosition.enabled">
+                                                <option v-for="p in presets" :key="p.id" :value="p.id">#{{ p.id }} · {{ p.name }}</option>
+                                            </select>
+                                        </div>
+                                        <div class="home-row">
+                                            <span>空闲触发</span>
+                                            <input v-model.number="homePosition.delaySec" type="number" min="10" max="3600" :disabled="!homePosition.enabled" />
+                                        </div>
                                     </div>
-                                    <div class="home-row">
-                                        <span>空闲触发</span>
-                                        <input v-model.number="homePosition.delaySec" type="number" min="10" max="3600" />
-                                    </div>
-                                    <button class="btn-primary sm block" :disabled="!isPtzCapable || !homePosition.enabled" @click="saveHomePosition">
+                                    <button class="btn-primary sm block" :disabled="!homePositionCanSave" @click="saveHomePosition">
                                         <ShieldCheck :size="12" />保存看守位
                                     </button>
                                 </div>
                             </section>
 
-                            <section class="linked-section linked-card">
+                            <section class="linked-section linked-card" data-testid="wiper-control">
                                 <div class="section-hd first">
-                                    <span class="section-title"><Lightbulb :size="13" />辅助开关</span>
-                                    <span class="section-meta">设备扩展</span>
+                                    <span class="section-title"><RefreshCcw :size="13" />雨刷控制</span>
+                                    <span class="section-meta">国标辅助编号 1</span>
                                 </div>
-                                <div class="aux-grid linked-aux-grid">
-                                    <button class="aux-btn" :class="{ active: auxSwitches.light }" :disabled="!isPtzCapable || !hasAuxiliaryMapping('light')" title="设备未提供辅助开关编号映射" @click="toggleAux('light')"><Lightbulb :size="14" /><span>灯光</span></button>
-                                    <button class="aux-btn" :class="{ active: auxSwitches.wiper }" :disabled="!isPtzCapable || !hasAuxiliaryMapping('wiper')" title="设备未提供辅助开关编号映射" @click="toggleAux('wiper')"><ZapOff :size="14" /><span>雨刷</span></button>
-                                    <button class="aux-btn" :class="{ active: auxSwitches.infrared }" :disabled="!isPtzCapable || !hasAuxiliaryMapping('infrared')" title="设备未提供辅助开关编号映射" @click="toggleAux('infrared')"><Sun :size="14" /><span>红外</span></button>
-                                    <button class="aux-btn" :class="{ active: auxSwitches.heater }" :disabled="!isPtzCapable || !hasAuxiliaryMapping('heater')" title="设备未提供辅助开关编号映射" @click="toggleAux('heater')"><Signal :size="14" /><span>加热</span></button>
+                                <div class="wiper-actions">
+                                    <button class="btn-ghost sm" data-testid="wiper-on" :disabled="wiperPending !== null" @click="sendWiperCommand('on')">
+                                        <Play :size="12" />开启
+                                    </button>
+                                    <button class="btn-ghost sm" data-testid="wiper-off" :disabled="wiperPending !== null" @click="sendWiperCommand('off')">
+                                        <Square :size="12" />关闭
+                                    </button>
                                 </div>
                             </section>
-                        </div>
-                        <div v-if="!isPtzCapable" class="capability-warn">
-                            <AlertTriangle :size="13" />
-                            <span>{{ ptzCapability.state === 'unsupported' ? '当前通道明确不支持云台控制。' : `${ptzCapability.reason}，控制命令已禁用。` }}</span>
                         </div>
                     </div>
 
@@ -2012,16 +1991,16 @@ onBeforeUnmount(() => {
 
                         <!-- 速度模式:方向盘 + 变倍 + 速度 -->
                         <div v-show="ptzMode === 'speed'" class="ptz-speed">
-                            <div class="ptz-pad" :class="{ disabled: !isPtzCapable }">
-                                <button title="左上" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('左上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUpLeft :size="17" /></button>
-                                <button title="上" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUp :size="17" /></button>
-                                <button title="右上" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('右上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUpRight :size="17" /></button>
-                                <button title="左" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('左')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowLeft :size="17" /></button>
-                                <button class="ptz-stop" title="停止" :disabled="!isPtzCapable" @click="sendPtz('停止')"><span></span></button>
-                                <button title="右" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('右')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowRight :size="17" /></button>
-                                <button title="左下" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('左下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDownLeft :size="17" /></button>
-                                <button title="下" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDown :size="17" /></button>
-                                <button title="右下" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('右下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDownRight :size="17" /></button>
+                            <div class="ptz-pad">
+                                <button title="左上" @pointerdown.prevent="sendPtz('左上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUpLeft :size="17" /></button>
+                                <button title="上" @pointerdown.prevent="sendPtz('上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUp :size="17" /></button>
+                                <button title="右上" @pointerdown.prevent="sendPtz('右上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUpRight :size="17" /></button>
+                                <button title="左" @pointerdown.prevent="sendPtz('左')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowLeft :size="17" /></button>
+                                <button class="ptz-stop" title="停止" @click="sendPtz('停止')"><span></span></button>
+                                <button title="右" @pointerdown.prevent="sendPtz('右')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowRight :size="17" /></button>
+                                <button title="左下" @pointerdown.prevent="sendPtz('左下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDownLeft :size="17" /></button>
+                                <button title="下" @pointerdown.prevent="sendPtz('下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDown :size="17" /></button>
+                                <button title="右下" @pointerdown.prevent="sendPtz('右下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDownRight :size="17" /></button>
                             </div>
 
                             <div class="talk-mode-switch" aria-label="对讲模式">
@@ -2046,33 +2025,33 @@ onBeforeUnmount(() => {
                             <div class="speed-row">
                                 <label>
                                     <span><Gauge :size="12" />移动速度</span>
-                                    <input v-model.number="moveSpeed" type="range" min="1" max="10" :disabled="!isPtzCapable" />
+                                    <input v-model.number="moveSpeed" type="range" min="1" max="10" />
                                     <em>{{ moveSpeed }}</em>
                                 </label>
                             </div>
 
-                            <div class="lens-grid" :class="{ disabled: !isPtzCapable }">
+                            <div class="lens-grid">
                                 <div class="lens-item">
                                     <span class="lens-label"><ZoomIn :size="12" />变倍</span>
                                     <div class="lens-btns">
-                                        <button title="放大" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('放大')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ZoomIn :size="14" /></button>
-                                        <button title="缩小" :disabled="!isPtzCapable" @pointerdown.prevent="sendPtz('缩小')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ZoomOut :size="14" /></button>
+                                        <button title="放大" @pointerdown.prevent="sendPtz('放大')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ZoomIn :size="14" /></button>
+                                        <button title="缩小" @pointerdown.prevent="sendPtz('缩小')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ZoomOut :size="14" /></button>
                                     </div>
                                 </div>
                                 <div class="lens-item">
                                     <span class="lens-label"><FocusIcon :size="12" />聚焦</span>
                                     <div class="lens-btns">
-                                        <button title="远焦" :disabled="!isPtzCapable" @click="sendPtz('远焦')">远</button>
-                                        <button title="近焦" :disabled="!isPtzCapable" @click="sendPtz('近焦')">近</button>
-                                        <button :class="{ toggled: focusMode === 'auto' }" title="自动聚焦" :disabled="!isPtzCapable" @click="focusMode = focusMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="远焦" @click="sendPtz('远焦')">远</button>
+                                        <button title="近焦" @click="sendPtz('近焦')">近</button>
+                                        <button :class="{ toggled: focusMode === 'auto' }" title="自动聚焦" @click="focusMode = focusMode === 'auto' ? 'manual' : 'auto'">A</button>
                                     </div>
                                 </div>
                                 <div class="lens-item">
                                     <span class="lens-label"><Circle :size="12" />光圈</span>
                                     <div class="lens-btns">
-                                        <button title="开大" :disabled="!isPtzCapable" @click="sendPtz('光圈+')">+</button>
-                                        <button title="缩小" :disabled="!isPtzCapable" @click="sendPtz('光圈-')">−</button>
-                                        <button :class="{ toggled: irisMode === 'auto' }" title="自动光圈" :disabled="!isPtzCapable" @click="irisMode = irisMode === 'auto' ? 'manual' : 'auto'">A</button>
+                                        <button title="开大" @click="sendPtz('光圈+')">+</button>
+                                        <button title="缩小" @click="sendPtz('光圈-')">−</button>
+                                        <button :class="{ toggled: irisMode === 'auto' }" title="自动光圈" @click="irisMode = irisMode === 'auto' ? 'manual' : 'auto'">A</button>
                                     </div>
                                 </div>
                             </div>
@@ -2113,10 +2092,10 @@ onBeforeUnmount(() => {
                                 </label>
                             </div>
                             <div class="precise-actions">
-                                <button class="btn-primary sm" :disabled="!isPtzCapable" @click="sendPrecise">
+                                <button class="btn-primary sm" @click="sendPrecise">
                                     <Target :size="13" />应用定位
                                 </button>
-                                <button class="btn-ghost sm" :disabled="!isPtzCapable" @click="readPreciseStatus">
+                                <button class="btn-ghost sm" @click="readPreciseStatus">
                                     <Navigation :size="13" />读取当前位置
                                 </button>
                             </div>
@@ -2201,27 +2180,27 @@ onBeforeUnmount(() => {
                             <span class="section-meta">GB28181 DeviceControl</span>
                         </div>
                         <div class="adv-actions">
-                            <button class="adv-btn" :disabled="!capabilitySupported('iFrame')" :title="capability('iFrame').reason" @click="runAdvancedAction('iframe')">
+                            <button class="adv-btn" @click="runAdvancedAction('iframe')">
                                 <Video :size="14" />
                                 <div><strong>强制关键帧</strong><small>IFrameCmd · 快速刷新画面</small></div>
                             </button>
-                            <button class="adv-btn" data-testid="advanced-record" :disabled="!capabilitySupported('record') || advancedPending.has(deviceRecording ? 'record_stop' : 'record_start')" :title="capability('record').reason" @click="runAdvancedAction(deviceRecording ? 'record_stop' : 'record_start')">
+                            <button class="adv-btn" data-testid="advanced-record" :disabled="advancedPending.has(deviceRecording ? 'record_stop' : 'record_start')" @click="runAdvancedAction(deviceRecording ? 'record_stop' : 'record_start')">
                                 <Circle :size="14" />
                                 <div><strong>{{ deviceRecording ? '停止设备录制' : '开始设备端录制' }}</strong><small>{{ (deviceRecording ? advancedOperationStatus.record_start : advancedOperationStatus.record_stop) || 'RecordCmd · SD 卡录制' }}</small></div>
                             </button>
-                            <button class="adv-btn" data-testid="advanced-guard" :disabled="!capabilitySupported('guard') || advancedPending.has(guardArmed ? 'guard_reset' : 'guard_set')" :title="capability('guard').reason" @click="runAdvancedAction(guardArmed ? 'guard_reset' : 'guard_set')">
+                            <button class="adv-btn" data-testid="advanced-guard" :disabled="advancedPending.has(guardArmed ? 'guard_reset' : 'guard_set')" @click="runAdvancedAction(guardArmed ? 'guard_reset' : 'guard_set')">
                                 <ShieldCheck :size="14" />
                                 <div><strong>{{ guardArmed ? '撤防' : '布防' }}</strong><small>{{ (guardArmed ? advancedOperationStatus.guard_set : advancedOperationStatus.guard_reset) || 'GuardCmd · 触发告警' }}</small></div>
                             </button>
-                            <button class="adv-btn" :disabled="!capabilitySupported('alarmReset')" :title="capability('alarmReset').reason" @click="runAdvancedAction('alarm_reset')">
+                            <button class="adv-btn" @click="runAdvancedAction('alarm_reset')">
                                 <AlertTriangle :size="14" />
                                 <div><strong>报警复位</strong><small>AlarmCmd · 清除告警</small></div>
                             </button>
-                            <button class="adv-btn" :disabled="!capabilitySupported('teleBoot')" :title="capability('teleBoot').reason" @click="runAdvancedAction('teleboot')">
+                            <button class="adv-btn" @click="runAdvancedAction('teleboot')">
                                 <RefreshCcw :size="14" />
                                 <div><strong>远程重启</strong><small>TeleBootCmd · 重启设备</small></div>
                             </button>
-                            <button class="adv-btn" data-testid="advanced-drag-zoom" :disabled="!capabilitySupported('dragZoom')" :title="capability('dragZoom').reason" @click="toggleDragZoomMode">
+                            <button class="adv-btn" data-testid="advanced-drag-zoom" @click="toggleDragZoomMode">
                                 <Move3d :size="14" />
                                 <div><strong>{{ dragZoomMode ? '取消 3D 定位' : '3D 定位' }}</strong><small>2022 · {{ dragZoomMode ? '在画面拖框后下发' : '拖框区域放大' }}</small></div>
                             </button>
@@ -2269,7 +2248,6 @@ onBeforeUnmount(() => {
                             <button
                                 class="asset-manager-add"
                                 data-testid="asset-manager-add-preset"
-                                :disabled="!isPtzCapable"
                                 @click="openSavePresetDialog"
                             >
                                 <Plus :size="12" /><span>添加预置位</span>
@@ -2298,7 +2276,7 @@ onBeforeUnmount(() => {
                                         </div>
                                     </a-tooltip>
                                     <div class="asset-manager-actions">
-                                        <button class="btn-ghost xs" :disabled="!isPtzCapable" @click="callPreset(p.id)">
+                                        <button class="btn-ghost xs" @click="callPreset(p.id)">
                                             <Navigation :size="11" />调用
                                         </button>
                                         <button class="asset-manager-delete" title="删除预置位" @click="deletePreset(p.id)"><Trash2 :size="12" /></button>
@@ -2329,7 +2307,7 @@ onBeforeUnmount(() => {
                                             <strong>{{ c.name }}</strong>
                                             <small>{{ cruiseTrackMeta(c) }} · {{ c.pending ? "可试运行" : c.enabled ? "可调用" : "已禁用" }}</small>
                                         </div>
-                                        <button class="btn-ghost xs" :disabled="!isPtzCapable || (!c.enabled && !c.pending)" @click="toggleCruise(c.id)">
+                                        <button class="btn-ghost xs" :disabled="!c.enabled && !c.pending" @click="toggleCruise(c.id)">
                                             <Square v-if="activeCruiseId === c.id && cruiseState === 'start-sent'" :size="11" />
                                             <Play v-else :size="11" />
                                             {{ activeCruiseId === c.id && cruiseState === "start-sent" ? "停止" : c.pending ? "试运行" : "启动" }}
@@ -3206,8 +3184,8 @@ onBeforeUnmount(() => {
 .linked-detail .home-config { gap: 5px; padding-top: 2px; }
 .linked-detail .home-row select,
 .linked-detail .home-row input { height: 26px; }
-.linked-detail .aux-btn { padding: 6px 3px; }
-.aux-grid.linked-aux-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wiper-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.wiper-actions button { width: 100%; justify-content: center; }
 .linked-probe-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; min-height: 0; align-items: center; }
 .linked-probe-tracks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .linked-timeline .frame-bars { height: 46px; }
@@ -3307,14 +3285,6 @@ onBeforeUnmount(() => {
 .section-meta { color: var(--uvp-text-tertiary); font-size: 10.5px; display: inline-flex; align-items: center; gap: 4px; }
 .section-meta .dot { width: 6px; height: 6px; background: var(--uvp-text-tertiary); border-radius: 50%; }
 
-.capability-warn {
-    display: flex; align-items: flex-start; gap: 6px;
-    padding: 8px 10px; margin-top: 8px;
-    color: var(--uvp-warning); background: var(--uvp-warning-soft);
-    border: 1px solid var(--uvp-warning-border); border-radius: 8px;
-    font-size: 10.5px; line-height: 1.5;
-}
-
 /* ═══════════ 云台面板 ═══════════ */
 .mode-switch {
     display: grid; grid-template-columns: 1fr 1fr; gap: 4px;
@@ -3411,23 +3381,6 @@ onBeforeUnmount(() => {
 }
 .lens-btns button:hover:not(:disabled) { color: var(--uvp-brand); border-color: var(--uvp-brand); }
 .lens-btns button.toggled { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
-
-/* 辅助开关 */
-.aux-grid {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px;
-    margin-top: 6px;
-}
-.aux-btn {
-    display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
-    padding: 8px 4px;
-    color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 8px;
-    cursor: pointer; font-size: 10.5px;
-    transition: all 0.15s ease;
-}
-.aux-btn:hover:not(:disabled) { color: var(--uvp-text-secondary); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
-.aux-btn.active { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent); border-color: color-mix(in srgb, var(--uvp-brand-cyan) 32%, transparent); }
-.aux-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 精准 PTZ */
 .ptz-precise { display: grid; gap: 10px; }
@@ -3531,7 +3484,8 @@ onBeforeUnmount(() => {
 
 /* 看守位 */
 .home-config { display: grid; gap: 8px; padding-top: 4px; }
-.home-config.disabled { opacity: 0.42; pointer-events: none; }
+.home-fields { display: grid; gap: 8px; }
+.home-fields.disabled { opacity: 0.42; pointer-events: none; }
 .home-row {
     display: grid; grid-template-columns: 90px 1fr; gap: 8px; align-items: center;
     color: var(--uvp-text-tertiary); font-size: 11px;

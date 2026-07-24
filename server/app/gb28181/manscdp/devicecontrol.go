@@ -23,6 +23,9 @@ const (
 	PTZActionZoomOut   PTZAction = "zoom_out"
 )
 
+// PTZAuxiliaryIDWiper is the auxiliary switch number used by the public wiper endpoint.
+const PTZAuxiliaryIDWiper = 1
+
 // PTZCommand is encoded as the GB28181 front-end PTZ command string.
 type PTZCommand struct {
 	Action PTZAction

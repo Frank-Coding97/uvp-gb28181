@@ -137,7 +137,7 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 	router := gin.New()
 	router.DELETE("/channel/:id/ptz/presets/:presetId", controller.DeletePTZPreset)
 	router.POST("/channel/:id/ptz/cruise", controller.ControlPTZCruise)
-	router.POST("/channel/:id/ptz/aux", controller.ControlPTZAux)
+	router.POST("/channel/:id/ptz/wiper", controller.ControlPTZWiper)
 	router.PATCH("/channel/:id/ptz/home-position", controller.UpdatePTZHomePosition)
 
 	tests := []struct {
@@ -151,10 +151,16 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/cruise", `{"action":"start","trackId":0}`, "A50F01880000003D"},
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/cruise", `{"action":"stop","trackId":0}`, "A50F0100000000B5"},
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/cruise", `{"action":"delete","trackId":0}`, "A50F01850000003A"},
-		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/aux", `{"action":"on","auxiliaryId":7}`, "A50F018C07000048"},
+		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"on"}`, "A50F018C01000042"},
+		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"off"}`, "A50F018D01000043"},
+		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"on","auxiliaryId":7}`, "A50F018C01000042"},
 		{http.MethodPatch, "/channel/" + uintStr(channel.ID) + "/ptz/home-position", `{"enabled":true,"resetTime":30,"presetId":3}`, "<HomePosition>"},
 	}
 	for _, tt := range tests {
+		sender.mu.Lock()
+		before := len(sender.bodies)
+		sender.mu.Unlock()
+
 		req := httptest.NewRequest(tt.method, tt.path, strings.NewReader(tt.body))
 		if tt.body != "" {
 			req.Header.Set("Content-Type", "application/json")
@@ -163,9 +169,10 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 		router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusOK, w.Code, tt.path+": "+w.Body.String())
 		require.Contains(t, w.Body.String(), "operationId")
-		// 预置位改动会异步下发 PresetQuery 对账,顺序不定;检查任一 body 匹配即可。
+		// 预置位改动会异步下发 PresetQuery 对账,顺序不定;只检查本次请求新增的报文,
+		// 避免前面用例的历史报文掩盖当前请求实际下发的参数。
 		sender.mu.Lock()
-		bodies := append([]string(nil), sender.bodies...)
+		bodies := append([]string(nil), sender.bodies[before:]...)
 		sender.mu.Unlock()
 		found := false
 		for _, b := range bodies {
@@ -175,6 +182,53 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 			}
 		}
 		require.True(t, found, "%s: want %q in sent bodies", tt.path, tt.want)
+	}
+}
+
+func TestDeviceMgmt_ControlPTZWiperUsesWiperSemanticAction(t *testing.T) {
+	controller, db, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/channel/:id/ptz/wiper", controller.ControlPTZWiper)
+
+	request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/wiper", strings.NewReader(`{"action":"on"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"action":"wiper_on"`)
+	require.Len(t, sender.bodies, 1)
+	require.Contains(t, sender.bodies[0], "A50F018C01000042", "底层仍应编码国标辅助开关编号 1")
+	var operation gbmodels.GbPTZOperation
+	require.NoError(t, db.Where("channel_id = ?", channel.ID).Order("id DESC").First(&operation).Error)
+	require.Equal(t, "wiper_on", operation.Action)
+	require.Contains(t, operation.PayloadJSON, `"action":"wiper_on"`)
+	require.Contains(t, operation.PayloadJSON, `"protocolAction":"aux_on"`)
+	require.Contains(t, operation.PayloadJSON, `"id":1`)
+}
+
+func TestDeviceMgmt_ControlPTZExtendedRejectsAuxiliaryActions(t *testing.T) {
+	controller, _, channel, sender := newPTZResourceController(t)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.POST("/channel/:id/ptz/extended", controller.ControlPTZExtended)
+
+	for _, action := range []string{"aux_on", "aux_off"} {
+		t.Run(action, func(t *testing.T) {
+			sender.mu.Lock()
+			before := len(sender.bodies)
+			sender.mu.Unlock()
+			request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/extended",
+				strings.NewReader(`{"action":"`+action+`","id":7}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			require.Contains(t, response.Body.String(), `"code":1`)
+			sender.mu.Lock()
+			require.Len(t, sender.bodies, before)
+			sender.mu.Unlock()
+		})
 	}
 }
 

@@ -39,8 +39,8 @@ func parseExtendedAction(value string) (manscdp.PTZExtendedAction, error) {
 	switch value {
 	case string(manscdp.PTZActionSetPreset), string(manscdp.PTZActionCallPreset), string(manscdp.PTZActionDeletePreset),
 		string(manscdp.PTZActionCruiseStart), string(manscdp.PTZActionCruiseStop), string(manscdp.PTZActionCruisePause),
-		string(manscdp.PTZActionCruiseResume), string(manscdp.PTZActionCruiseDelete), string(manscdp.PTZActionAuxOn),
-		string(manscdp.PTZActionAuxOff), string(manscdp.PTZActionScanStart), string(manscdp.PTZActionScanStop):
+		string(manscdp.PTZActionCruiseResume), string(manscdp.PTZActionCruiseDelete),
+		string(manscdp.PTZActionScanStart), string(manscdp.PTZActionScanStop):
 		return manscdp.PTZExtendedAction(value), nil
 	default:
 		return "", fmt.Errorf("不支持的 PTZ 扩展动作: %q", value)
@@ -124,8 +124,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 			IP: device.IP, Port: device.Port, Transport: device.Transport,
 			DeviceOnline:  device.Status == gbmodels.DeviceStatusOnline,
-			ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType,
-			AllowNoPTZ: true,
+			ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
 		}
 		op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
 			CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
@@ -164,7 +163,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 	})
 }
 
-// ControlPTZExtended handles preset, cruise, scan and auxiliary commands.
+// ControlPTZExtended handles preset, cruise and scan commands.
 func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	if dc.ptzService == nil {
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
@@ -216,7 +215,7 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	}
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
-		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType, AllowNoPTZ: true}
+		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline}
 	key := request.IdempotencyKey
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
@@ -277,7 +276,7 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 	}
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
-		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, PTZType: channel.PTZType, AllowNoPTZ: true}
+		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline}
 	op, executeErr := dc.ptzService.Execute(c, target, ptz.Command{
 		CmdType: manscdp.CmdPTZPreciseCtrl, Action: "precise", IdempotencyKey: key,
 		Payload: map[string]interface{}{"pan": request.Pan, "tilt": request.Tilt, "zoom": request.Zoom, "focus": request.Focus, "iris": request.Iris, "speed": request.Speed},

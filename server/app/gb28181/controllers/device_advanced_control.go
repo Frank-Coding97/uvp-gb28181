@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -44,14 +45,8 @@ func (dc *DeviceMgmtController) ControlDevice(c *gin.Context) {
 	if !ok {
 		return
 	}
-	capabilities := manscdp.ParseControlCapabilities(channel.Capabilities, channel.PTZType)
-	capability, ok := advancedCapabilityForAction(capabilities, request.Action)
-	if !ok {
+	if !isAdvancedControlAction(request.Action) {
 		dc.FailAndAbort(c, "设备控制动作不合法", nil)
-		return
-	}
-	if capability.State != manscdp.CapabilitySupported {
-		dc.FailAndAbort(c, "设备未明确声明支持该控制能力", nil)
 		return
 	}
 	target, ok := dc.loadPTZTarget(c, channel)
@@ -95,22 +90,12 @@ func (dc *DeviceMgmtController) deviceControlLock(channelID uint) *sync.Mutex {
 	return value.(*sync.Mutex)
 }
 
-func advancedCapabilityForAction(capabilities manscdp.ControlCapabilities, action string) (manscdp.ControlCapability, bool) {
+func isAdvancedControlAction(action string) bool {
 	switch action {
-	case "iframe":
-		return capabilities.IFrame, true
-	case "record_start", "record_stop":
-		return capabilities.Record, true
-	case "guard_set", "guard_reset":
-		return capabilities.Guard, true
-	case "alarm_reset":
-		return capabilities.AlarmReset, true
-	case "teleboot":
-		return capabilities.TeleBoot, true
-	case "drag_zoom_in", "drag_zoom_out":
-		return capabilities.DragZoom, true
+	case "iframe", "record_start", "record_stop", "guard_set", "guard_reset", "alarm_reset", "teleboot", "drag_zoom_in", "drag_zoom_out":
+		return true
 	default:
-		return manscdp.ControlCapability{}, false
+		return false
 	}
 }
 
@@ -137,7 +122,7 @@ func buildAdvancedControl(channelID string, sn int, request deviceControlRequest
 		}
 		return manscdp.BuildDragZoomControl(channelID, sn, manscdp.DragZoomCommand{Direction: direction, Region: request.Region}, manscdp.XMLCharsetGB2312)
 	default:
-		return nil, nil
+		return nil, fmt.Errorf("不支持的设备控制动作: %q", request.Action)
 	}
 }
 

@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { Modal } from "@arco-design/web-vue";
+import { Message, Modal } from "@arco-design/web-vue";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -99,7 +99,7 @@ const api = vi.hoisted(() => {
     deletePtzPreset: vi.fn(),
     controlPtzCruise: vi.fn(),
     createCruiseTrack: vi.fn(),
-    controlPtzAux: vi.fn(),
+    controlPtzWiper: vi.fn(),
     controlDevice: vi.fn(),
     createTalkSession: vi.fn(),
     deleteTalkSession: vi.fn()
@@ -160,6 +160,8 @@ describe("PlayConsoleLinked 双区联动", () => {
       }
     });
     api.controlDevice.mockResolvedValue({ code: 0, message: "", data: { operationId: "op-1", action: "accepted", status: "accepted" } });
+    api.controlPtz.mockResolvedValue({ code: 0, message: "", data: { action: "accepted", status: "sent" } });
+    api.controlPtzWiper.mockResolvedValue({ code: 0, message: "", data: { operationId: "wiper-1", action: "accepted", status: "sent" } });
   });
 
   afterEach(() => {
@@ -340,7 +342,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(/\.linked-stream-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(/\.aux-grid\.linked-aux-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+    expect(source).toMatch(/\.wiper-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(
       /\.sidebar\s+\[data-testid="linked-side-advanced"\]\s+\.adv-actions\s*\{[^}]*grid-template-columns:\s*1fr/s
     );
@@ -449,25 +451,41 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("未知 PTZ 能力仍允许尝试，未映射的辅助设备继续禁用", async () => {
+  it("设备明确上报不支持时仍允许尝试控制，由设备响应决定结果", async () => {
     api.getControlCapabilities.mockResolvedValueOnce({
       code: 0,
       message: "",
       data: {
-        basicPtz: { state: "unknown", reason: "设备未上报" },
-        iFrame: { state: "unknown", reason: "设备未上报" },
-        record: { state: "unknown", reason: "设备未上报" },
-        guard: { state: "unknown", reason: "设备未上报" },
-        alarmReset: { state: "unknown", reason: "设备未上报" },
-        teleBoot: { state: "unknown", reason: "设备未上报" },
-        dragZoom: { state: "unknown", reason: "设备未上报" }
+        basicPtz: { state: "unsupported", reason: "厂商上报不支持" },
+        iFrame: { state: "unsupported", reason: "厂商上报不支持" },
+        record: { state: "unsupported", reason: "厂商上报不支持" },
+        guard: { state: "unsupported", reason: "厂商上报不支持" },
+        alarmReset: { state: "unsupported", reason: "厂商上报不支持" },
+        teleBoot: { state: "unsupported", reason: "厂商上报不支持" },
+        dragZoom: { state: "unsupported", reason: "厂商上报不支持" },
+        broadcast: { state: "unsupported", reason: "厂商上报不支持" },
+        talk: { state: "unsupported", reason: "厂商上报不支持" }
       }
     });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    expect(wrapper.get("button[title='上']").attributes("disabled")).toBeUndefined();
+
+    const up = wrapper.get("button[title='上']");
+    expect(up.attributes("disabled")).toBeUndefined();
+    await up.trigger("pointerdown");
+    await flushPromises();
+    expect(api.controlPtz).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "up" }));
+
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    const record = wrapper.get("[data-testid='advanced-record']");
+    expect(record.attributes("disabled")).toBeUndefined();
+    await record.trigger("click");
+    await flushPromises();
+    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "record_start" }));
+
+    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeUndefined();
     expect(wrapper.get("[data-testid='talk-button']").attributes("disabled")).toBeDefined();
-    expect(wrapper.findAll(".linked-aux-grid .aux-btn").every(button => button.attributes("disabled") !== undefined)).toBe(true);
+    expect(wrapper.find(".capability-warn").exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -1002,6 +1020,119 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(managerTooltip.attributes("content")).toContain("#1 预置位 1");
     expect(wrapper.get(".asset-manager-delete").attributes("title")).toBe("删除预置位");
 
+    wrapper.unmount();
+  });
+
+  it("仅保留国标编号 1 的雨刷开启和关闭命令", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.find(".linked-aux-grid").exists()).toBe(false);
+    expect(wrapper.text()).not.toContain("灯光");
+    expect(wrapper.text()).not.toContain("红外");
+    expect(wrapper.text()).not.toContain("加热");
+    expect(wrapper.get("[data-testid='wiper-control']").text()).toContain("国标辅助编号 1");
+    expect(wrapper.get("[data-testid='wiper-on']").classes()).toContain("btn-ghost");
+    expect(wrapper.get("[data-testid='wiper-off']").classes()).toContain("btn-ghost");
+    expect(wrapper.find("[data-testid='wiper-control'] .btn-primary").exists()).toBe(false);
+
+    await wrapper.get("[data-testid='wiper-on']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzWiper).toHaveBeenNthCalledWith(1, channel.id, { action: "on" });
+
+    await wrapper.get("[data-testid='wiper-off']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzWiper).toHaveBeenNthCalledWith(2, channel.id, { action: "off" });
+
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    expect(source).not.toContain("controlPtzAux");
+    expect(source).not.toContain("auxSwitches");
+    expect(source).not.toContain("auxiliaryIds");
+    expect(source).not.toContain(".capability-warn");
+
+    wrapper.unmount();
+  });
+
+  it("关闭看守位时无需预置位和等待时间即可保存", async () => {
+    api.updateHomePosition.mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "home-off" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const homeCard = wrapper.findAll(".linked-card").find(card => card.text().includes("看守位"));
+    expect(homeCard).toBeDefined();
+    await homeCard!.get("input[type='checkbox']").setValue(false);
+
+    const saveButton = homeCard!.get("button");
+    expect(saveButton.attributes("disabled")).toBeUndefined();
+    await saveButton.trigger("click");
+    await flushPromises();
+
+    expect(api.updateHomePosition).toHaveBeenCalledWith(channel.id, { enabled: false });
+    wrapper.unmount();
+  });
+
+  it("开启看守位时校验预置位和等待时间", async () => {
+    api.getHomePosition.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { homePosition: { homeEnabled: false }, freshness: "fresh" }
+    });
+    api.updateHomePosition.mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "home-on" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const homeCard = wrapper.findAll(".linked-card").find(card => card.text().includes("看守位"));
+    expect(homeCard).toBeDefined();
+    await homeCard!.get("input[type='checkbox']").setValue(true);
+    const saveButton = homeCard!.get("button");
+    expect(saveButton.attributes("disabled")).toBeDefined();
+
+    await homeCard!.get("select").setValue("1");
+    await homeCard!.get("input[type='number']").setValue(9);
+    expect(saveButton.attributes("disabled")).toBeDefined();
+
+    await homeCard!.get("input[type='number']").setValue(10);
+    expect(saveButton.attributes("disabled")).toBeUndefined();
+    await saveButton.trigger("click");
+    await flushPromises();
+
+    expect(api.updateHomePosition).toHaveBeenCalledWith(channel.id, { enabled: true, resetTime: 10, presetId: 1 });
+    wrapper.unmount();
+  });
+
+  it("切换设备后隔离新旧雨刷请求状态和结果提示", async () => {
+    let resolveOld!: (value: any) => void;
+    let resolveCurrent!: (value: any) => void;
+    api.controlPtzWiper
+      .mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveCurrent = resolve; }));
+    const successSpy = vi.spyOn(Message, "success");
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.get("[data-testid='wiper-on']").trigger("click");
+    expect(wrapper.get("[data-testid='wiper-off']").attributes("disabled")).toBeDefined();
+
+    const nextChannel = { ...channel, id: 2, channelId: "0411212756", name: "园区南门" };
+    await wrapper.setProps({ channel: nextChannel });
+    await flushPromises();
+    expect(wrapper.get("[data-testid='wiper-off']").attributes("disabled")).toBeUndefined();
+
+    await wrapper.get("[data-testid='wiper-off']").trigger("click");
+    expect(api.controlPtzWiper).toHaveBeenNthCalledWith(2, nextChannel.id, { action: "off" });
+    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeDefined();
+
+    resolveOld({ code: 0, message: "", data: { operationId: "old-wiper" } });
+    await flushPromises();
+    expect(successSpy).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeDefined();
+
+    resolveCurrent({ code: 0, message: "", data: { operationId: "current-wiper" } });
+    await flushPromises();
+    expect(successSpy).toHaveBeenCalledTimes(1);
+    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeUndefined();
+
+    successSpy.mockRestore();
     wrapper.unmount();
   });
 });

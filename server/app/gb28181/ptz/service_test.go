@@ -40,7 +40,7 @@ func newPTZTestService(t *testing.T, sender TrackedSender) *Service {
 }
 
 func testTarget() Target {
-	return Target{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", IP: "192.0.2.10", Port: 5060, Transport: "UDP", DeviceOnline: true, ChannelOnline: true, PTZType: 1}
+	return Target{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", IP: "192.0.2.10", Port: 5060, Transport: "UDP", DeviceOnline: true, ChannelOnline: true}
 }
 
 func testCommand() Command {
@@ -87,27 +87,12 @@ func TestServiceExecute_PresetSetPersistsOptimistically(t *testing.T) {
 	require.Equal(t, op.OperationID, preset.LastOperationID)
 }
 
-func TestServiceExecute_PTZTypeGating(t *testing.T) {
+func TestServiceExecute_DoesNotRequireCapabilityMetadata(t *testing.T) {
 	sender := &fakeTrackedSender{}
 	svc := newPTZTestService(t, sender)
-
-	// PTZType=3(固定枪机):无论 AllowNoPTZ 都拒
-	target := testTarget()
-	target.PTZType = 3
-	_, err := svc.Execute(context.Background(), target, testCommand())
-	require.ErrorContains(t, err, "固定枪机")
-	target.AllowNoPTZ = true
-	_, err = svc.Execute(context.Background(), target, testCommand())
-	require.ErrorContains(t, err, "固定枪机")
-
-	// PTZType=0(未上报):默认拒,AllowNoPTZ=true 时放行
-	target = testTarget()
-	target.PTZType = 0
-	_, err = svc.Execute(context.Background(), target, testCommand())
-	require.ErrorContains(t, err, "未上报")
-	target.AllowNoPTZ = true
-	_, err = svc.Execute(context.Background(), target, testCommand())
+	_, err := svc.Execute(context.Background(), testTarget(), testCommand())
 	require.NoError(t, err)
+	require.Equal(t, 1, sender.calls)
 }
 
 func TestServiceExecute_RejectsOfflineOrMissingAddress(t *testing.T) {
