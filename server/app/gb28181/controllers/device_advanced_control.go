@@ -31,7 +31,8 @@ func (dc *DeviceMgmtController) GetControlCapabilities(c *gin.Context) {
 }
 
 func (dc *DeviceMgmtController) ControlDevice(c *gin.Context) {
-	if dc.ptzService == nil {
+	service := dc.ptzServiceSnapshot()
+	if service == nil {
 		c.JSON(503, gin.H{"code": 503, "message": "设备控制服务未就绪"})
 		return
 	}
@@ -71,7 +72,7 @@ func (dc *DeviceMgmtController) ControlDevice(c *gin.Context) {
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
 	}
-	op, err := dc.ptzService.Execute(c.Request.Context(), target, ptz.Command{
+	op, err := service.Execute(c.Request.Context(), target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: request.Action, IdempotencyKey: key,
 		Payload: map[string]interface{}{"action": request.Action},
 		Build: func(sn int) ([]byte, error) {

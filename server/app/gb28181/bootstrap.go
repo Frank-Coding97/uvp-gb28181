@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
@@ -120,6 +121,7 @@ type sipRuntimeFactory func(gbconfig.Config) (sipRuntimeServer, error)
 
 // sipServer 持有全局 SIP 服务实例,供优雅关闭引用
 var sipServer sipRuntimeServer
+var sipLifecycleMu sync.Mutex
 
 var sipRuntimeStatus = gbsetup.NewRuntimeStatus()
 
@@ -130,7 +132,13 @@ func SIPRuntimeStatus() *gbsetup.RuntimeStatus { return sipRuntimeStatus }
 var subscriptionService *subscribe.Service
 var subscriptionScheduler *subscribe.Scheduler
 var ptzService *ptz.Service
+var ptzScheduler ptzSchedulerLifecycle
 var positionHistoryPruneCancel context.CancelFunc
+
+type ptzSchedulerLifecycle interface {
+	Start(context.Context)
+	Stop()
+}
 
 // offlineScanner 离线扫描器
 var offlineScanner *device.OfflineScanner
@@ -275,6 +283,9 @@ func startControlPlane(cfg gbconfig.Config) {
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
 // 若 gb28181.enabled=false 则跳过。SIP 未配置时不启 SIP 依赖,由前端引导页录入并触发热启动。
 func Start() {
+	sipLifecycleMu.Lock()
+	defer sipLifecycleMu.Unlock()
+
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
 		sipRuntimeStatus.MarkDisabled()
@@ -345,6 +356,21 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	if err != nil {
 		return err
 	}
+	var newPTZService *ptz.Service
+	var newPTZScheduler ptzSchedulerLifecycle
+	if u := srv.UAC(); u != nil {
+		newPTZService, err = ptz.NewService(app.DB(), u, time.Now)
+		if err != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = srv.Shutdown(shutdownCtx)
+			cancel()
+			sipRuntimeStatus.MarkFailed(err.Error())
+			return fmt.Errorf("装配 PTZ service 失败: %w", err)
+		}
+		newPTZScheduler = ptz.NewScheduler(newPTZService)
+		srv.SetPTZMessageProcessor(newPTZService)
+		srv.SetPTZNotifyProcessor(newPTZService)
+	}
 	sipServer = srv
 	if traceServer, ok := srv.(interface{ TraceRuntime() gbtrace.Runtime }); ok {
 		setupTraceController(cfg, traceServer.TraceRuntime())
@@ -353,14 +379,10 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	// 装配依赖 UAC 的 processor(手动 catalog 刷新按钮、PTZ、订阅、告警)
 	if u := srv.UAC(); u != nil {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
-		gbroutes.SetDeviceMgmtPTZSender(u)
-		ptzService, err = ptz.NewService(app.DB(), u, time.Now)
-		if err != nil {
-			return fmt.Errorf("装配 PTZ service 失败: %w", err)
-		}
-		gbroutes.SetDeviceMgmtPTZService(ptzService)
-		srv.SetPTZMessageProcessor(ptzService)
-		srv.SetPTZNotifyProcessor(ptzService)
+		ptzService = newPTZService
+		ptzScheduler = newPTZScheduler
+		gbroutes.SetDeviceMgmtPTZRuntime(u, ptzService)
+		ptzScheduler.Start(context.Background())
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
 		gbroutes.SetDeviceMgmtSubscriptionManager(subscriptionService)
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
@@ -444,6 +466,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) {
+	stopPTZRuntime()
 	stopTalkRuntime(ctx)
 	stopRecordingRuntime()
 	if positionHistoryPruneCancel != nil {
@@ -455,7 +478,6 @@ func stopSIPDependencies(ctx context.Context) {
 		subscriptionScheduler = nil
 	}
 	subscriptionService = nil
-	ptzService = nil
 	if offlineScanner != nil {
 		offlineScanner.Stop()
 		offlineScanner = nil
@@ -467,8 +489,6 @@ func stopSIPDependencies(ctx context.Context) {
 	playSvc = nil
 	gbroutes.SetPlayService(nil)
 	gbroutes.SetDeviceMgmtCatalogTrigger(nil)
-	gbroutes.SetDeviceMgmtPTZSender(nil)
-	gbroutes.SetDeviceMgmtPTZService(nil)
 	gbroutes.SetDeviceMgmtSubscriptionManager(nil)
 	if sipServer != nil {
 		if err := sipServer.Shutdown(ctx); err != nil {
@@ -476,6 +496,18 @@ func stopSIPDependencies(ctx context.Context) {
 		}
 		sipServer = nil
 	}
+}
+
+func stopPTZRuntime() {
+	if ptzScheduler != nil {
+		ptzScheduler.Stop()
+		ptzScheduler = nil
+	}
+	if ptzService != nil {
+		ptzService.Retire()
+	}
+	ptzService = nil
+	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
 }
 
 func setupRecordingRuntime(cfg gbconfig.Config) {
@@ -576,6 +608,9 @@ func stopTalkRuntime(ctx context.Context) {
 // 由 SetupController.SaveConfig 保存后调用,让用户不需要重启进程.
 // 失败时 runtime state 会被 MarkFailed,不 panic.
 func ReloadSIP() error {
+	sipLifecycleMu.Lock()
+	defer sipLifecycleMu.Unlock()
+
 	cfg := gbconfig.Load()
 	if !cfg.Enabled {
 		return errors.New("gb28181 未在 config.yml 启用,无法热启动")
@@ -872,20 +907,12 @@ func setupCivilCodeService() {
 
 // Stop 优雅关闭 GB28181 SIP 服务 + 离线扫描器(纳入主进程退出流程)
 func Stop() {
+	sipLifecycleMu.Lock()
+	defer sipLifecycleMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	stopTalkRuntime(ctx)
-	stopRecordingRuntime()
-	if positionHistoryPruneCancel != nil {
-		positionHistoryPruneCancel()
-		positionHistoryPruneCancel = nil
-	}
-	if subscriptionScheduler != nil {
-		subscriptionScheduler.Stop()
-		subscriptionScheduler = nil
-	}
-	subscriptionService = nil
-	ptzService = nil
+	stopSIPDependencies(ctx)
 	if heartbeatCancel != nil {
 		heartbeatCancel()
 		heartbeatCancel = nil
@@ -902,23 +929,6 @@ func Stop() {
 		close(metricsCleanupStop)
 		metricsCleanupStop = nil
 	}
-	if offlineScanner != nil {
-		offlineScanner.Stop()
-		offlineScanner = nil
-	}
-	if playReconciler != nil {
-		playReconciler.Stop()
-		playReconciler = nil
-	}
-	playSvc = nil
-	gbroutes.SetPlayService(nil)
-	if sipServer == nil {
-		return
-	}
-	if err := sipServer.Shutdown(ctx); err != nil {
-		app.ZapLog.Error("GB28181 SIP 服务关闭异常", zap.Error(err))
-	}
-	sipServer = nil
 }
 
 func startPositionHistoryPruner() {

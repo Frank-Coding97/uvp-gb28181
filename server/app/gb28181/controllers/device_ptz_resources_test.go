@@ -18,7 +18,6 @@ import (
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
@@ -31,9 +30,67 @@ type resourcePTZSender struct {
 
 type cancellingResourcePTZSender struct{ cancel context.CancelFunc }
 
+type runtimeDeviceControlSender struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (s *runtimeDeviceControlSender) SendMessage(context.Context, string, string, string, []byte) error {
+	s.mu.Lock()
+	s.calls++
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *runtimeDeviceControlSender) Calls() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
+}
+
 func (s cancellingResourcePTZSender) SendMessageTracked(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
 	s.cancel()
 	return uac.TrackedMessageResult{}, context.DeadlineExceeded
+}
+
+func TestPTZServiceReloadAccessorAndSenderAreRaceFree(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	controller, db, channel, trackedSender := newPTZResourceController(t)
+	service := mustPTZService(t, db, trackedSender)
+	fallbackSender := &runtimeDeviceControlSender{}
+	controller.SetPTZRuntime(fallbackSender, service)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for i := 0; i < 200; i++ {
+			controller.SetPTZRuntime(nil, nil)
+			controller.SetPTZRuntime(fallbackSender, service)
+		}
+	}()
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for i := 0; i < 100; i++ {
+				func() {
+					defer func() { _ = recover() }() // Common.FailAndAbort uses panic as control flow.
+					ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+					ctx.Params = gin.Params{{Key: "id", Value: uintStr(channel.ID)}}
+					ctx.Request = httptest.NewRequest(http.MethodPost, "/device-mgmt/channel/"+uintStr(channel.ID)+"/ptz", strings.NewReader(`{"action":"left","speed":1}`))
+					ctx.Request.Header.Set("Content-Type", "application/json")
+					controller.ControlPTZ(ctx)
+				}()
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	require.Zero(t, fallbackSender.Calls(), "原子 runtime 快照不得暴露 sender-only 代际")
 }
 
 func (s *resourcePTZSender) SendMessageTracked(_ context.Context, _, _, _ string, body []byte) (uac.TrackedMessageResult, error) {
