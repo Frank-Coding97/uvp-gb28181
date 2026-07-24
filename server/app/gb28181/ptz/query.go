@@ -32,6 +32,7 @@ func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, tr
 		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildPresetQuery(target.ChannelCode, sn) }
 	case QueryHomePosition:
 		command.CmdType, command.Action = manscdp.CmdHomePositionQuery, "refresh_home_position"
+		command.ResponseRequired, command.MaxAttempts = true, 3
 		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildHomePositionQuery(target.ChannelCode, sn) }
 	case QueryCruiseTrackList:
 		command.CmdType, command.Action = manscdp.CmdCruiseTrackListQuery, "refresh_cruise_tracks"
@@ -111,19 +112,35 @@ func (s *Service) persistQueryCache(ctx context.Context, operation gbmodels.GbPT
 			return nil
 		})
 	case manscdp.CmdHomePositionQuery:
-		response, err := manscdp.ParseHomePositionResponse(body)
+		options, err := s.homePositionParseOptions(ctx, operation.ChannelID)
 		if err != nil {
 			return err
 		}
-		state := gbmodels.GbPTZState{
-			DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, ChannelCode: operation.ChannelCode,
-			HomeEnabled: response.Enabled, HomePan: response.Pan, HomeTilt: response.Tilt, HomeZoom: response.Zoom,
-			Focus: response.Focus, Iris: response.Iris, ReceivedAt: now, SourceSN: response.SN, Freshness: gbmodels.PTZFreshnessFresh,
+		response, err := manscdp.ParseHomePositionResponse(body, options)
+		if err != nil {
+			return err
 		}
-		return s.db.WithContext(ctx).Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "channel_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"device_id", "channel_code", "home_enabled", "home_pan", "home_tilt", "home_zoom", "focus", "iris", "received_at", "source_sn", "freshness", "updated_at"}),
-		}).Create(&state).Error
+		hasData := response.HomePosition != nil
+		if !hasData {
+			return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
+				Where("id = ?", operation.ID).Update("response_has_data", false).Error
+		}
+		encoding := gbmodels.PTZHomePositionEnabledNumeric
+		if response.HomePosition.EnabledEncoding == manscdp.HomePositionEnabledEncodingCompatBooleanText {
+			encoding = gbmodels.PTZHomePositionEnabledCompatBooleanText
+		}
+		if _, _, err := s.ApplyHomePosition(ctx, HomePositionUpdate{
+			DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, ChannelCode: operation.ChannelCode,
+			Enabled: response.HomePosition.Enabled, ResetTime: response.HomePosition.ResetTime, PresetID: response.HomePosition.PresetIndex,
+			EnabledEncoding: encoding, ConfirmedAt: now,
+			Source: gbmodels.PTZHomePositionSourceDeviceQuery, Verification: gbmodels.PTZHomePositionVerificationVerified,
+			SourceSN: response.SN, SourceOperationID: operation.OperationID, SourceOperationSeq: operation.ID,
+			RawSummary: summarizePTZBody(body),
+		}); err != nil {
+			return err
+		}
+		return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
+			Where("id = ?", operation.ID).Update("response_has_data", true).Error
 	case manscdp.CmdCruiseTrackListQuery:
 		response, err := manscdp.ParseCruiseTrackListResponse(body)
 		if err != nil {
