@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -135,6 +136,105 @@ func TestOperationIdempotencyReturnsOriginalForEveryStatus(t *testing.T) {
 			require.Zero(t, sender.calls)
 		})
 	}
+}
+
+func TestOperationIdempotencyReplayIgnoresCurrentSendability(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*Service, *Target)
+	}{
+		{
+			name: "channel offline",
+			mutate: func(_ *Service, target *Target) {
+				target.ChannelOnline = false
+			},
+		},
+		{
+			name: "source address missing",
+			mutate: func(_ *Service, target *Target) {
+				target.IP = ""
+			},
+		},
+		{
+			name: "sender unavailable",
+			mutate: func(service *Service, _ *Target) {
+				service.sender = nil
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := newOperationTestDB(t, false)
+			sender := &fakeTrackedSender{}
+			service := newOperationService(t, db, sender, time.Now)
+			command := responseRequiredCommand("replay-after-runtime-change")
+			target := testTarget()
+
+			created, err := service.Execute(context.Background(), target, command)
+			require.NoError(t, err)
+			test.mutate(service, &target)
+
+			replayed, err := service.Execute(context.Background(), target, command)
+			require.NoError(t, err)
+			require.Equal(t, created.OperationID, replayed.OperationID)
+			require.Zero(t, sender.calls)
+		})
+	}
+}
+
+func TestOperationIdempotencyReplayStillRequiresTargetIdentity(t *testing.T) {
+	db := newOperationTestDB(t, false)
+	service := newOperationService(t, db, &fakeTrackedSender{}, time.Now)
+	command := responseRequiredCommand("identity-required")
+	target := testTarget()
+	_, err := service.Execute(context.Background(), target, command)
+	require.NoError(t, err)
+
+	target.ChannelCode = ""
+	_, err = service.Execute(context.Background(), target, command)
+	var operationErr *OperationError
+	require.ErrorAs(t, err, &operationErr)
+	require.Equal(t, ErrorCodeHomePositionUnavailable, operationErr.Code)
+}
+
+func TestOperationRejectsUnsafeIdempotencyKeysWithoutSideEffects(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{name: "more than 128 bytes", key: strings.Repeat("k", 129)},
+		{name: "nul", key: "key\x00value"},
+		{name: "control character", key: "key\x1fvalue"},
+		{name: "invalid utf8", key: string([]byte{'k', 0xff})},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db := newOperationTestDB(t, false)
+			sender := &fakeTrackedSender{}
+			service := newOperationService(t, db, sender, time.Now)
+			command := responseRequiredCommand(test.key)
+
+			_, err := service.Execute(context.Background(), testTarget(), command)
+			var operationErr *OperationError
+			require.ErrorAs(t, err, &operationErr)
+			require.Equal(t, ErrorCodeHomePositionInvalidArgument, operationErr.Code)
+
+			var operationCount int64
+			require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Count(&operationCount).Error)
+			require.Zero(t, operationCount)
+			require.Zero(t, sender.calls)
+		})
+	}
+}
+
+func TestOperationAcceptsMaximumLengthIdempotencyKey(t *testing.T) {
+	db := newOperationTestDB(t, false)
+	service := newOperationService(t, db, &fakeTrackedSender{}, time.Now)
+	command := responseRequiredCommand(strings.Repeat("k", 128))
+
+	operation, err := service.Execute(context.Background(), testTarget(), command)
+	require.NoError(t, err)
+	require.Len(t, operation.IdempotencyKey, 128)
 }
 
 func TestOperationIdempotencyRejectsCanonicalPayloadConflict(t *testing.T) {

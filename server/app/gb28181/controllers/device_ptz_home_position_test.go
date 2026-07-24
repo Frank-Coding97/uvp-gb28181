@@ -48,6 +48,8 @@ func newHomePositionPatchFixture(t *testing.T, actorMode string) homePositionPat
 	switch actorMode {
 	case "dept":
 		seedDeptScopedUser(t, db, 100, 10)
+	case "other-dept":
+		seedDeptScopedUser(t, db, 100, 20)
 	case "zero":
 		app.ConfigYml = homePositionSkipUserConfig{}
 		require.NoError(t, db.Create(&basemodels.User{
@@ -111,6 +113,25 @@ func homePositionOperationCount(t *testing.T, db *gorm.DB) int64 {
 	var count int64
 	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Count(&count).Error)
 	return count
+}
+
+func homePositionAttemptCount(t *testing.T, db *gorm.DB) int64 {
+	t.Helper()
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperationAttempt{}).Count(&count).Error)
+	return count
+}
+
+func homePositionOperationID(t *testing.T, recorder *httptest.ResponseRecorder) string {
+	t.Helper()
+	var envelope struct {
+		Data struct {
+			OperationID string `json:"operationId"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope), recorder.Body.String())
+	require.NotEmpty(t, envelope.Data.OperationID, recorder.Body.String())
+	return envelope.Data.OperationID
 }
 
 func sentHomePositionMessages(sender *resourcePTZSender) int {
@@ -198,6 +219,72 @@ func TestDeviceMgmtHomePositionPatchRejectsHeaderBodyKeyConflict(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, result.Code, result.Body.String())
 	require.Equal(t, "HOME_POSITION_INVALID_ARGUMENT", homePositionErrorCode(t, result))
 	require.Zero(t, homePositionOperationCount(t, fixture.db))
+}
+
+func TestDeviceMgmtHomePositionPatchRejectsUnsafeIdempotencyKeys(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      string
+		headerKey string
+	}{
+		{
+			name:      "header more than 128 bytes",
+			body:      `{"enabled":false}`,
+			headerKey: strings.Repeat("h", 129),
+		},
+		{
+			name: "body more than 128 bytes",
+			body: `{"enabled":false,"idempotencyKey":"` + strings.Repeat("b", 129) + `"}`,
+		},
+		{
+			name: "body nul",
+			body: `{"enabled":false,"idempotencyKey":"\u0000"}`,
+		},
+		{
+			name: "body invalid utf8",
+			body: `{"enabled":false,"idempotencyKey":"` + string([]byte{0xff}) + `"}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newHomePositionPatchFixture(t, "dept")
+			result := patchHomePosition(t, fixture, test.body, test.headerKey)
+
+			require.Equal(t, http.StatusUnprocessableEntity, result.Code, result.Body.String())
+			require.Equal(t, "HOME_POSITION_INVALID_ARGUMENT", homePositionErrorCode(t, result))
+			require.Zero(t, homePositionOperationCount(t, fixture.db))
+			require.Zero(t, homePositionAttemptCount(t, fixture.db))
+			require.Zero(t, sentHomePositionMessages(fixture.sender))
+		})
+	}
+}
+
+func TestDeviceMgmtHomePositionPatchReplaysOriginalAfterChannelGoesOffline(t *testing.T) {
+	fixture := newHomePositionPatchFixture(t, "dept")
+	first := patchHomePosition(t, fixture, `{"enabled":false}`, "offline-replay")
+	require.Equal(t, http.StatusOK, first.Code, first.Body.String())
+	firstOperationID := homePositionOperationID(t, first)
+
+	fixture.channel.Status = gbmodels.ChannelStatusOffline
+	require.NoError(t, fixture.db.Save(fixture.channel).Error)
+	second := patchHomePosition(t, fixture, `{"enabled":false}`, "offline-replay")
+
+	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
+	require.Equal(t, firstOperationID, homePositionOperationID(t, second))
+	require.EqualValues(t, 1, homePositionOperationCount(t, fixture.db))
+	require.Zero(t, homePositionAttemptCount(t, fixture.db))
+	require.Zero(t, sentHomePositionMessages(fixture.sender))
+}
+
+func TestDeviceMgmtHomePositionPatchHidesCrossDepartmentChannel(t *testing.T) {
+	fixture := newHomePositionPatchFixture(t, "other-dept")
+	result := patchHomePosition(t, fixture, `{"enabled":false}`, "cross-dept")
+
+	require.Equal(t, http.StatusNotFound, result.Code, result.Body.String())
+	require.Equal(t, "HOME_POSITION_NOT_FOUND", homePositionErrorCode(t, result))
+	require.Zero(t, homePositionOperationCount(t, fixture.db))
+	require.Zero(t, homePositionAttemptCount(t, fixture.db))
+	require.Zero(t, sentHomePositionMessages(fixture.sender))
 }
 
 func TestDeviceMgmtHomePositionPatchCapabilitiesAreHintsOnly(t *testing.T) {

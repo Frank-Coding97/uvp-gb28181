@@ -128,10 +128,14 @@ func (s *Service) Retire() {
 	s.lifecycleMu.Unlock()
 }
 
-func validateTarget(target Target) error {
+func validateTargetIdentity(target Target) error {
 	if target.DeviceID == 0 || target.ChannelID == 0 || strings.TrimSpace(target.DeviceCode) == "" || strings.TrimSpace(target.ChannelCode) == "" {
 		return operationError(ErrorCodeHomePositionUnavailable, "PTZ 目标不完整", nil)
 	}
+	return nil
+}
+
+func validateTargetAvailability(target Target) error {
 	if !target.DeviceOnline || !target.ChannelOnline {
 		return operationError(ErrorCodeHomePositionDeviceOffline, "设备或通道离线", nil)
 	}

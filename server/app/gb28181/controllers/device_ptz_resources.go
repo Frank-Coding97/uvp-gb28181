@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -76,7 +78,14 @@ func homePositionFailure(status int, code ptz.ErrorCode, message string, err err
 
 func decodeHomePositionResourceRequest(c *gin.Context) (homePositionResourceRequest, *homePositionHTTPFailure) {
 	var request homePositionResourceRequest
-	decoder := json.NewDecoder(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", err)
+	}
+	if !utf8.Valid(body) {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", errors.New("请求体不是有效 UTF-8"))
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", err)
@@ -185,6 +194,8 @@ func homePositionOperationFailure(err error) *homePositionHTTPFailure {
 	var operationError *ptz.OperationError
 	if errors.As(err, &operationError) {
 		switch operationError.Code {
+		case ptz.ErrorCodeHomePositionInvalidArgument:
+			return homePositionFailure(http.StatusUnprocessableEntity, operationError.Code, operationError.Message, err)
 		case ptz.ErrorCodeHomePositionDeviceOffline:
 			return homePositionFailure(http.StatusConflict, operationError.Code, operationError.Message, err)
 		case ptz.ErrorCodeHomePositionIdempotencyConflict:

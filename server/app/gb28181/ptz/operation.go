@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -52,6 +54,25 @@ func canonicalPayloadJSON(payload string) (string, error) {
 		return "", err
 	}
 	return string(encoded), nil
+}
+
+func normalizeIdempotencyKey(key string) (string, error) {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return uuid.NewString(), nil
+	}
+	if !utf8.ValidString(key) {
+		return "", operationError(ErrorCodeHomePositionInvalidArgument, "幂等键必须是有效 UTF-8", nil)
+	}
+	if len(key) > 128 {
+		return "", operationError(ErrorCodeHomePositionInvalidArgument, "幂等键长度不能超过 128 字节", nil)
+	}
+	for _, char := range key {
+		if unicode.IsControl(char) {
+			return "", operationError(ErrorCodeHomePositionInvalidArgument, "幂等键不能包含控制字符", nil)
+		}
+	}
+	return key, nil
 }
 
 func operationMatches(existing gbmodels.GbPTZOperation, command Command, payloadJSON string) bool {
@@ -147,19 +168,17 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 	if s.retired {
 		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 已卸载", nil)
 	}
-	if s.sender == nil {
-		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "SIP UAC 未就绪", nil)
-	}
-	if err := validateTarget(target); err != nil {
+	if err := validateTargetIdentity(target); err != nil {
 		return gbmodels.GbPTZOperation{}, err
 	}
 	if strings.TrimSpace(command.CmdType) == "" || command.Build == nil {
 		return gbmodels.GbPTZOperation{}, fmt.Errorf("PTZ 命令不完整")
 	}
-	if strings.TrimSpace(command.IdempotencyKey) == "" {
-		command.IdempotencyKey = uuid.NewString()
+	idempotencyKey, err := normalizeIdempotencyKey(command.IdempotencyKey)
+	if err != nil {
+		return gbmodels.GbPTZOperation{}, err
 	}
-	command.IdempotencyKey = strings.TrimSpace(command.IdempotencyKey)
+	command.IdempotencyKey = idempotencyKey
 	payloadJSON, err := canonicalPayload(command.Payload)
 	if err != nil {
 		return gbmodels.GbPTZOperation{}, err
@@ -178,6 +197,12 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 			return existing, idempotencyConflict(existing)
 		}
 		return existing, nil
+	}
+	if s.sender == nil {
+		return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionUnavailable, "SIP UAC 未就绪", nil)
+	}
+	if err := validateTargetAvailability(target); err != nil {
+		return gbmodels.GbPTZOperation{}, err
 	}
 
 	sn := s.nextSN()
