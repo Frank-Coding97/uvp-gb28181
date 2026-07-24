@@ -3,6 +3,9 @@ package controllers
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -11,11 +14,13 @@ import (
 	"github.com/google/uuid"
 	"go.uber.org/zap"
 	"gorm.io/gorm/clause"
+	"gorm.io/plugin/dbresolver"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
 
 type presetResourceRequest struct {
@@ -52,10 +57,143 @@ type wiperControlRequest struct {
 }
 
 type homePositionResourceRequest struct {
-	Enabled        bool   `json:"enabled"`
-	ResetTime      int    `json:"resetTime"`
-	PresetID       int    `json:"presetId"`
-	IdempotencyKey string `json:"idempotencyKey"`
+	Enabled        *bool   `json:"enabled"`
+	ResetTime      *int    `json:"resetTime"`
+	PresetID       *int    `json:"presetId"`
+	IdempotencyKey *string `json:"idempotencyKey"`
+}
+
+type homePositionHTTPFailure struct {
+	status  int
+	code    ptz.ErrorCode
+	message string
+	err     error
+}
+
+func homePositionFailure(status int, code ptz.ErrorCode, message string, err error) *homePositionHTTPFailure {
+	return &homePositionHTTPFailure{status: status, code: code, message: message, err: err}
+}
+
+func decodeHomePositionResourceRequest(c *gin.Context) (homePositionResourceRequest, *homePositionHTTPFailure) {
+	var request homePositionResourceRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", err)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = errors.New("请求体包含多个 JSON 值")
+		}
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "看守位参数不合法", err)
+	}
+	if request.Enabled == nil {
+		return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "enabled 必须显式提供", nil)
+	}
+	if *request.Enabled {
+		if request.ResetTime == nil || *request.ResetTime < 10 || *request.ResetTime > 3600 {
+			return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "启用看守位时 resetTime 必须在 10-3600 之间", nil)
+		}
+		if request.PresetID == nil || *request.PresetID < 0 || *request.PresetID > 255 {
+			return request, homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "启用看守位时 presetId 必须在 0-255 之间", nil)
+		}
+	}
+	return request, nil
+}
+
+func homePositionIdempotencyKey(request homePositionResourceRequest, headerValue string) (string, *homePositionHTTPFailure) {
+	headerValue = strings.TrimSpace(headerValue)
+	bodyValue := ""
+	if request.IdempotencyKey != nil {
+		bodyValue = strings.TrimSpace(*request.IdempotencyKey)
+	}
+	if headerValue != "" && bodyValue != "" && headerValue != bodyValue {
+		return "", homePositionFailure(http.StatusUnprocessableEntity, ptz.ErrorCodeHomePositionInvalidArgument, "Header 与请求体的幂等键不一致", nil)
+	}
+	if headerValue != "" {
+		return headerValue, nil
+	}
+	return bodyValue, nil
+}
+
+func writeHomePositionFailure(c *gin.Context, failure *homePositionHTTPFailure) {
+	if failure == nil {
+		return
+	}
+	if failure.err != nil && app.ZapLog != nil {
+		app.ZapLog.Warn(failure.message, zap.String("errorCode", string(failure.code)), zap.Error(failure.err))
+	}
+	data := gin.H{"errorCode": string(failure.code)}
+	if app.Response != nil {
+		app.Response.Fail(c, failure.message, failure.status, 1, data)
+		return
+	}
+	c.AbortWithStatusJSON(failure.status, gin.H{"code": 1, "message": failure.message, "data": data})
+}
+
+func (dc *DeviceMgmtController) loadHomePositionChannel(c *gin.Context) (*gbmodels.GbChannel, *homePositionHTTPFailure) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		return nil, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "通道不存在或无权限", err)
+	}
+	db := dc.db()
+	if db == nil {
+		return nil, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "数据库未就绪", nil)
+	}
+	var channel gbmodels.GbChannel
+	result := db.WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
+	if result.Error != nil {
+		return nil, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "查询通道失败", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return nil, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "通道不存在或无权限", nil)
+	}
+	return &channel, nil
+}
+
+func (dc *DeviceMgmtController) loadHomePositionTarget(c *gin.Context, channel *gbmodels.GbChannel) (ptz.Target, *homePositionHTTPFailure) {
+	var device gbmodels.GbDevice
+	result := dc.db().WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(ownerDeptScope(c)).
+		Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	if result.Error != nil {
+		return ptz.Target{}, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "查询所属设备失败", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ptz.Target{}, homePositionFailure(http.StatusNotFound, ptz.ErrorCodeHomePositionNotFound, "所属设备不存在或无权限", nil)
+	}
+	return ptz.Target{
+		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
+		IP: device.IP, Port: device.Port, Transport: device.Transport,
+		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
+	}, nil
+}
+
+func (dc *DeviceMgmtController) loadHomePositionActor(c *gin.Context) (uint, uint, *homePositionHTTPFailure) {
+	actorID := dc.GetCurrentUserID(c)
+	if actorID == 0 {
+		return 0, 0, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "无法识别看守位操作者", nil)
+	}
+	var user basemodels.User
+	result := dc.db().WithContext(c.Request.Context()).Clauses(dbresolver.Write).Select("id", "dept_id").Where("id = ?", actorID).Limit(1).Find(&user)
+	if result.Error != nil || result.RowsAffected != 1 {
+		return 0, 0, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "读取看守位操作者部门失败", result.Error)
+	}
+	return actorID, user.DeptID, nil
+}
+
+func homePositionOperationFailure(err error) *homePositionHTTPFailure {
+	var operationError *ptz.OperationError
+	if errors.As(err, &operationError) {
+		switch operationError.Code {
+		case ptz.ErrorCodeHomePositionDeviceOffline:
+			return homePositionFailure(http.StatusConflict, operationError.Code, operationError.Message, err)
+		case ptz.ErrorCodeHomePositionIdempotencyConflict:
+			return homePositionFailure(http.StatusConflict, operationError.Code, operationError.Message, err)
+		case ptz.ErrorCodeHomePositionUnavailable:
+			return homePositionFailure(http.StatusServiceUnavailable, operationError.Code, operationError.Message, err)
+		}
+	}
+	return homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "看守位服务处理失败", err)
 }
 
 func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.GbChannel) (ptz.Target, bool) {
@@ -455,39 +593,57 @@ func (dc *DeviceMgmtController) respondCruiseCreate(c *gin.Context, channel *gbm
 }
 
 func (dc *DeviceMgmtController) UpdatePTZHomePosition(c *gin.Context) {
+	request, failure := decodeHomePositionResourceRequest(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	idempotencyKey, failure := homePositionIdempotencyKey(request, c.GetHeader("Idempotency-Key"))
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	channel, failure := dc.loadHomePositionChannel(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	target, failure := dc.loadHomePositionTarget(c, channel)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
+	actorID, actorDeptID, failure := dc.loadHomePositionActor(c)
+	if failure != nil {
+		writeHomePositionFailure(c, failure)
+		return
+	}
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
-		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
+		writeHomePositionFailure(c, homePositionFailure(http.StatusServiceUnavailable, ptz.ErrorCodeHomePositionUnavailable, "PTZ Service 未就绪", nil))
 		return
 	}
-	var request homePositionResourceRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		dc.FailAndAbort(c, "看守位参数不合法", err)
-		return
+
+	enabled := *request.Enabled
+	payload := map[string]interface{}{"enabled": enabled}
+	var resetTime, presetID *int
+	if enabled {
+		resetTime, presetID = request.ResetTime, request.PresetID
+		payload["resetTime"] = *resetTime
+		payload["presetId"] = *presetID
 	}
-	channel, ok := dc.ptzChannel(c)
-	if !ok {
-		return
-	}
-	target, ok := dc.loadPTZTarget(c, channel)
-	if !ok {
-		return
-	}
-	key := request.IdempotencyKey
-	if key == "" {
-		key = c.GetHeader("Idempotency-Key")
-	}
-	op, err := service.Execute(c, target, ptz.Command{
-		CmdType: manscdp.CmdDeviceControl, Action: "home_position", IdempotencyKey: key,
-		Payload: map[string]interface{}{"enabled": request.Enabled, "resetTime": request.ResetTime, "presetId": request.PresetID},
+	op, err := service.Execute(c.Request.Context(), target, ptz.Command{
+		CmdType: manscdp.CmdDeviceControl, Action: "home_position", IdempotencyKey: idempotencyKey,
+		Payload: payload, ResponseRequired: true, MaxAttempts: 1,
+		ActorID: actorID, ActorDeptID: actorDeptID,
 		Build: func(sn int) ([]byte, error) {
 			return manscdp.BuildHomePositionControl(channel.ChannelID, sn, manscdp.HomePositionControl{
-				Enabled: request.Enabled, ResetTime: &request.ResetTime, PresetIndex: &request.PresetID,
+				Enabled: enabled, ResetTime: resetTime, PresetIndex: presetID,
 			})
 		},
 	})
 	if err != nil {
-		dc.FailAndAbort(c, "下发看守位控制失败", err)
+		writeHomePositionFailure(c, homePositionOperationFailure(err))
 		return
 	}
 	dc.Success(c, gin.H{

@@ -211,7 +211,6 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"on"}`, "A50F018C01000042"},
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"off"}`, "A50F018D01000043"},
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"on","auxiliaryId":7}`, "A50F018C01000042"},
-		{http.MethodPatch, "/channel/" + uintStr(channel.ID) + "/ptz/home-position", `{"enabled":true,"resetTime":30,"presetId":3}`, "<HomePosition>"},
 	}
 	for _, tt := range tests {
 		sender.mu.Lock()

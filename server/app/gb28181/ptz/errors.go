@@ -5,9 +5,12 @@ import "fmt"
 type ErrorCode string
 
 const (
+	ErrorCodeHomePositionInvalidArgument     ErrorCode = "HOME_POSITION_INVALID_ARGUMENT"
+	ErrorCodeHomePositionNotFound            ErrorCode = "HOME_POSITION_NOT_FOUND"
 	ErrorCodeHomePositionDeviceOffline       ErrorCode = "HOME_POSITION_DEVICE_OFFLINE"
 	ErrorCodeHomePositionIdempotencyConflict ErrorCode = "HOME_POSITION_IDEMPOTENCY_CONFLICT"
 	ErrorCodeHomePositionUnavailable         ErrorCode = "HOME_POSITION_UNAVAILABLE"
+	ErrorCodeHomePositionInternal            ErrorCode = "HOME_POSITION_INTERNAL_ERROR"
 )
 
 type OperationError struct {
