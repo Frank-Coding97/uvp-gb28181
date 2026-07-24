@@ -18,6 +18,7 @@ type fakeSIPRuntimeServer struct {
 	startErr error
 	onError  func(error)
 	started  bool
+	events   *[]string
 }
 
 func (f *fakeSIPRuntimeServer) SetRecorder(metrics.Recorder)                             {}
@@ -31,8 +32,25 @@ func (f *fakeSIPRuntimeServer) Start() error {
 	f.started = true
 	return f.startErr
 }
-func (f *fakeSIPRuntimeServer) UAC() *uac.UAC                  { return nil }
-func (f *fakeSIPRuntimeServer) Shutdown(context.Context) error { return nil }
+func (f *fakeSIPRuntimeServer) UAC() *uac.UAC { return nil }
+func (f *fakeSIPRuntimeServer) Shutdown(context.Context) error {
+	if f.events != nil {
+		*f.events = append(*f.events, "sip.shutdown")
+	}
+	return nil
+}
+
+type fakePTZSchedulerLifecycle struct {
+	events *[]string
+}
+
+func (f *fakePTZSchedulerLifecycle) Start(context.Context) {
+	*f.events = append(*f.events, "scheduler.start")
+}
+
+func (f *fakePTZSchedulerLifecycle) Stop() {
+	*f.events = append(*f.events, "scheduler.stop")
+}
 
 func TestStartSIPRuntime_TracksFailuresAndAsyncListenError(t *testing.T) {
 	t.Run("start failure", func(t *testing.T) {
@@ -61,4 +79,22 @@ func TestStartSIPRuntime_TracksFailuresAndAsyncListenError(t *testing.T) {
 		require.Equal(t, gbsetup.RuntimeFailed, snapshot.State)
 		require.NotContains(t, snapshot.ErrorSummary, "Sec12345Aa!!")
 	})
+}
+
+func TestPTZServiceReloadStopsSchedulerBeforeSIP(t *testing.T) {
+	events := []string{}
+	previousServer, previousScheduler, previousService := sipServer, ptzScheduler, ptzService
+	defer func() {
+		sipServer, ptzScheduler, ptzService = previousServer, previousScheduler, previousService
+	}()
+
+	sipServer = &fakeSIPRuntimeServer{events: &events}
+	ptzScheduler = &fakePTZSchedulerLifecycle{events: &events}
+	ptzService = nil
+	stopSIPDependencies(context.Background())
+
+	require.Equal(t, []string{"scheduler.stop", "sip.shutdown"}, events)
+	require.Nil(t, ptzScheduler)
+	require.Nil(t, ptzService)
+	require.Nil(t, sipServer)
 }

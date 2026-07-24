@@ -2,6 +2,7 @@ package ptz
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -275,12 +276,38 @@ func TestSchedulerControlTransportUncertainDoesNotRetry(t *testing.T) {
 	updated := loadSchedulerOperation(t, f.db, op.ID)
 	require.Equal(t, gbmodels.PTZOperationUnknown, updated.Status)
 	require.Equal(t, schedulerErrorTransportUnknown, updated.ErrorCode)
+	require.Equal(t, "uncertain", updated.CallID)
+	require.Equal(t, "1", updated.CSeq)
+	require.Zero(t, updated.SIPStatus)
+	require.Nil(t, updated.SentAt)
+	require.Nil(t, updated.DeadlineAt)
 
 	f.clock.Set(t0.Add(15 * time.Second))
 	require.NoError(t, f.scheduler.RunDue(f.clock.Now()))
 	f.dispatcher.Drain()
 	require.Len(t, f.sender.Calls(), 1)
 	require.Len(t, loadSchedulerAttempts(t, f.db, op.ID), 1)
+}
+
+func TestSchedulerNon2xxPersistsFirstOutboundAuditWithoutSentAt(t *testing.T) {
+	f := newSchedulerFixture(t, 1)
+	f.sender.results = []uac.TrackedMessageResult{{CallID: "rejected-call", CSeq: "7", StatusCode: 486, Attempted: true}}
+	f.sender.errors = []error{errors.New("MESSAGE response 486")}
+	op := f.createOperation(t, 1)
+	op.CmdType = manscdp.CmdDeviceControl
+	op.Action = "home_position"
+	op.PayloadJSON = `{"enabled":false}`
+	require.NoError(t, f.db.Save(&op).Error)
+
+	require.NoError(t, f.scheduler.RunDue(f.clock.Now()))
+	f.dispatcher.Drain()
+	updated := loadSchedulerOperation(t, f.db, op.ID)
+	require.Equal(t, gbmodels.PTZOperationRejected, updated.Status)
+	require.Equal(t, "rejected-call", updated.CallID)
+	require.Equal(t, "7", updated.CSeq)
+	require.Equal(t, 486, updated.SIPStatus)
+	require.Nil(t, updated.SentAt)
+	require.Nil(t, updated.DeadlineAt)
 }
 
 func TestSchedulerLateSenderCannotAdvanceParent(t *testing.T) {

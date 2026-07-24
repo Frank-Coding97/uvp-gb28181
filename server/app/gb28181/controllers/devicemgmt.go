@@ -27,13 +27,14 @@ import (
 //	GET /channel/:id/timeline  通道 24h 在线时序(Phase 1 简化:基于 last_status_at)
 type DeviceMgmtController struct {
 	controllers.Common
-	db                     func() *gorm.DB
-	catalogTrigger         CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
-	subscriptionManager    SubscriptionManager
-	ptzSender              DeviceControlSender
-	ptzService             *ptz.Service
-	ptzSN                  atomic.Uint64
-	deviceControlLocks     sync.Map
+	db                  func() *gorm.DB
+	catalogTrigger      CatalogTrigger // 手动 Catalog 刷新(bootstrap 装配后置注入,可能为 nil)
+	subscriptionManager SubscriptionManager
+	ptzRuntimeMu        sync.RWMutex
+	ptzSender           DeviceControlSender
+	ptzService          *ptz.Service
+	ptzSN               atomic.Uint64
+	deviceControlLocks  sync.Map
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询
@@ -63,11 +64,36 @@ type DeviceControlSender interface {
 }
 
 func (dc *DeviceMgmtController) SetPTZSender(sender DeviceControlSender) {
+	dc.ptzRuntimeMu.Lock()
 	dc.ptzSender = sender
+	dc.ptzRuntimeMu.Unlock()
 }
 
 func (dc *DeviceMgmtController) SetPTZService(service *ptz.Service) {
+	dc.ptzRuntimeMu.Lock()
 	dc.ptzService = service
+	dc.ptzRuntimeMu.Unlock()
+}
+
+// SetPTZRuntime publishes or removes one coherent SIP generation. Bootstrap
+// uses this instead of exposing a sender-only fallback window during reload.
+func (dc *DeviceMgmtController) SetPTZRuntime(sender DeviceControlSender, service *ptz.Service) {
+	dc.ptzRuntimeMu.Lock()
+	dc.ptzSender = sender
+	dc.ptzService = service
+	dc.ptzRuntimeMu.Unlock()
+}
+
+func (dc *DeviceMgmtController) ptzServiceSnapshot() *ptz.Service {
+	dc.ptzRuntimeMu.RLock()
+	defer dc.ptzRuntimeMu.RUnlock()
+	return dc.ptzService
+}
+
+func (dc *DeviceMgmtController) ptzRuntimeSnapshot() (DeviceControlSender, *ptz.Service) {
+	dc.ptzRuntimeMu.RLock()
+	defer dc.ptzRuntimeMu.RUnlock()
+	return dc.ptzSender, dc.ptzService
 }
 
 func (dc *DeviceMgmtController) nextPTZSN() int {
