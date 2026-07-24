@@ -28,7 +28,7 @@ func newPTZQueryTestService(t *testing.T, sender TrackedSender) (*Service, *gorm
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
-		&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZState{},
+		&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}, &gbmodels.GbPTZState{},
 		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{}, &gbmodels.GbPTZHomePosition{}, &gbmodels.GbChannel{},
 	))
 	now := func() time.Time { return time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC) }
