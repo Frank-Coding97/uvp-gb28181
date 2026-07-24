@@ -87,8 +87,23 @@ const api = vi.hoisted(() => {
       .mockResolvedValue({
         code: 0,
         message: "",
-        data: { homePosition: { homeEnabled: true, homePresetId: 1, resetTime: 300 }, freshness: "fresh" }
+        data: {
+          homePosition: {
+            enabled: true,
+            resetTime: 300,
+            presetId: 1,
+            confirmedAt: "2026-07-22T10:00:00Z",
+            source: "device_query",
+            verification: "verified"
+          },
+          controlSupport: { status: "supported", reason: "设备已确认控制能力" },
+          querySupport: { status: "supported", reason: "设备已确认查询能力" },
+          freshness: "fresh",
+          control: { status: "idle", operationId: null, action: null, errorCode: null, deadlineAt: null },
+          refresh: { status: "idle", operationId: null, errorCode: null, deadlineAt: null }
+        }
       }),
+    getPtzOperation: vi.fn(),
     getPtzPreciseStatus: vi.fn(),
     updateHomePosition: vi.fn(),
     controlPtz: vi.fn(),
@@ -125,6 +140,29 @@ const channel = {
   ptzType: 1,
   status: 1
 };
+
+function homeResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    code: 0,
+    message: "",
+    data: {
+      homePosition: {
+        enabled: true,
+        resetTime: 300,
+        presetId: 1,
+        confirmedAt: "2026-07-22T10:00:00Z",
+        source: "device_query",
+        verification: "verified"
+      },
+      controlSupport: { status: "supported", reason: "设备已确认控制能力" },
+      querySupport: { status: "supported", reason: "设备已确认查询能力" },
+      freshness: "fresh",
+      control: { status: "idle", operationId: null, action: null, errorCode: null, deadlineAt: null },
+      refresh: { status: "idle", operationId: null, errorCode: null, deadlineAt: null },
+      ...overrides
+    }
+  };
+}
 
 describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
@@ -1053,6 +1091,184 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  describe("home position state", () => {
+    it("空配置和加载失败都不会伪造成设备已关闭", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({ homePosition: null, freshness: "unknown" }));
+      const emptyWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(emptyWrapper.get("[data-testid='home-phase']").text()).toContain("待查询");
+      expect(emptyWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("尚无设备确认配置");
+      expect(emptyWrapper.get("[data-testid='home-confirmed-status']").text()).not.toContain("已关闭");
+      emptyWrapper.unmount();
+
+      api.getHomePosition.mockRejectedValueOnce(new Error("network unavailable"));
+      const failedWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(failedWrapper.get("[data-testid='home-phase']").text()).toContain("加载失败");
+      expect(failedWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("尚无设备确认配置");
+      expect(failedWrapper.get("[data-testid='home-confirmed-status']").text()).not.toContain("已关闭");
+      failedWrapper.unmount();
+    });
+
+    it("Toggle 只修改草稿，明确启用和关闭都保留最后确认值", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: {
+          enabled: true,
+          resetTime: 300,
+          presetId: 0,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      }));
+      const enabledWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(enabledWrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(enabledWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+      expect((enabledWrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(true);
+      await enabledWrapper.get("[data-testid='home-toggle']").setValue(false);
+      expect(enabledWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+      expect(enabledWrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      enabledWrapper.unmount();
+
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: {
+          enabled: false,
+          resetTime: null,
+          presetId: null,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      }));
+      const disabledWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(disabledWrapper.get("[data-testid='home-phase']").text()).toContain("已关闭");
+      expect(disabledWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已关闭");
+      expect((disabledWrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(false);
+      disabledWrapper.unmount();
+    });
+
+    it.each([
+      { resetTime: 0, expected: "0 秒" },
+      { resetTime: 9, expected: "9 秒" },
+      { resetTime: 3601, expected: "3601 秒" },
+      { resetTime: null, expected: "未返回" }
+    ])("无损展示 #0 和入向等待时间 $resetTime", async ({ resetTime, expected }) => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: {
+          enabled: true,
+          resetTime,
+          presetId: 0,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      const confirmed = wrapper.get("[data-testid='home-confirmed-values']").text();
+      expect(confirmed).toContain("#0");
+      expect(confirmed).toContain(expected);
+      expect(wrapper.find("[data-testid='home-preset'] option[value='0']").exists()).toBe(true);
+      expect(wrapper.get("[data-testid='home-range-warning']").text()).toContain("超出平台可编辑范围");
+      wrapper.unmount();
+    });
+
+    it("恢复控制 pending 与 unknown，但 T10 不启动 operation 轮询", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        control: {
+          status: "pending",
+          operationId: "control-pending",
+          action: "home_position",
+          errorCode: null,
+          deadlineAt: "2026-07-22T10:00:15Z"
+        }
+      }));
+      const pendingWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(pendingWrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("true");
+      expect(pendingWrapper.get("[data-testid='home-operation-id']").text()).toContain("control-pending");
+      expect(pendingWrapper.get("[data-testid='home-save']").attributes("disabled")).toBeDefined();
+      expect(api.getPtzOperation).not.toHaveBeenCalled();
+      pendingWrapper.unmount();
+
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        control: {
+          status: "unknown",
+          operationId: "control-unknown",
+          action: "home_position",
+          errorCode: "TRANSPORT_UNKNOWN",
+          deadlineAt: null
+        }
+      }));
+      const unknownWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(unknownWrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
+      expect(unknownWrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(unknownWrapper.get("[data-testid='home-operation-id']").text()).toContain("control-unknown");
+      expect(unknownWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+      expect(unknownWrapper.get("[data-testid='home-save']").attributes("disabled")).toBeUndefined();
+      expect(api.getPtzOperation).not.toHaveBeenCalled();
+      unknownWrapper.unmount();
+    });
+
+    it("恢复查询 pending 且不重新发 refresh", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: {
+          enabled: true,
+          resetTime: 60,
+          presetId: 0,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "control_ack",
+          verification: "unverified"
+        },
+        refresh: {
+          status: "pending",
+          operationId: "reconcile-pending",
+          errorCode: null,
+          deadlineAt: "2026-07-22T10:00:15Z"
+        }
+      }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("reconcile-pending");
+      expect(wrapper.get("[data-testid='home-verification']").text()).toContain("设备已确认，查询未验证");
+      expect(api.getHomePosition).toHaveBeenCalledWith(channel.id);
+      expect(api.getHomePosition).toHaveBeenCalledTimes(1);
+      expect(api.getPtzOperation).not.toHaveBeenCalled();
+      wrapper.unmount();
+    });
+
+    it("能力 unknown/unsupported 仅提示，离线才禁用人工操作", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        controlSupport: { status: "unsupported", reason: "厂商 profile 未声明控制" },
+        querySupport: { status: "unknown", reason: "尚未收到合法查询应答" }
+      }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      expect(wrapper.get("[data-testid='home-control-support']").text()).toContain("厂商 profile 未声明控制");
+      expect(wrapper.get("[data-testid='home-query-support']").text()).toContain("尚未收到合法查询应答");
+      expect(wrapper.get("[data-testid='home-support-risk']").text()).toContain("仍可尝试下发");
+      expect(wrapper.get("[data-testid='home-save']").attributes("disabled")).toBeUndefined();
+      expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
+
+      await wrapper.setProps({ channel: { ...channel, status: 0 } });
+      expect(wrapper.get("[data-testid='home-save']").attributes("disabled")).toBeDefined();
+      expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeDefined();
+      wrapper.unmount();
+    });
+  });
+
   it("关闭看守位时无需预置位和等待时间即可保存", async () => {
     api.updateHomePosition.mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "home-off" } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
@@ -1073,9 +1289,16 @@ describe("PlayConsoleLinked 双区联动", () => {
 
   it("开启看守位时校验预置位和等待时间", async () => {
     api.getHomePosition.mockResolvedValueOnce({
-      code: 0,
-      message: "",
-      data: { homePosition: { homeEnabled: false }, freshness: "fresh" }
+      ...homeResponse({
+        homePosition: {
+          enabled: false,
+          resetTime: null,
+          presetId: null,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      })
     });
     api.updateHomePosition.mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "home-on" } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
