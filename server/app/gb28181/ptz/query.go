@@ -12,6 +12,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 )
 
 type QueryKind string
@@ -50,18 +51,10 @@ func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, tr
 	return s.Execute(ctx, target, command)
 }
 
-func (s *Service) applyQueryResponse(ctx context.Context, deviceCode, callID, cseq string, head manscdp.MessageHead, body []byte) error {
-	var operation gbmodels.GbPTZOperation
-	result := s.db.WithContext(ctx).
-		Where("device_code = ? AND channel_code = ? AND sn = ? AND cmd_type = ?", deviceCode, head.DeviceID, headSN(head), head.CmdType).
-		Order("id DESC").Limit(1).Find(&operation)
-	if result.Error != nil {
-		return result.Error
+func (s *Service) applyQueryResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte) error {
+	if head.CmdType == manscdp.CmdHomePositionQuery {
+		return s.applyHomePositionQueryResponse(ctx, operation, callID, cseq, body)
 	}
-	if result.RowsAffected == 0 {
-		return nil
-	}
-
 	if err := s.persistQueryCache(ctx, operation, head.CmdType, body); err != nil {
 		_, _, _ = s.ApplyResponse(ctx, Response{OperationID: operation.OperationID, CallID: callID, CSeq: cseq, SIPStatus: 200, DeviceResult: "ERROR", DeviceError: err.Error()})
 		return err
@@ -74,6 +67,113 @@ func headSN(head manscdp.MessageHead) int {
 	var sn int
 	fmt.Sscanf(head.SN, "%d", &sn)
 	return sn
+}
+
+func (s *Service) applyHomePositionQueryResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, body []byte) error {
+	options, err := s.homePositionParseOptions(ctx, operation.ChannelID)
+	if err != nil {
+		return err
+	}
+	response, parseErr := manscdp.ParseHomePositionResponse(body, options)
+	if parseErr != nil || response.SN != operation.SN || response.DeviceID != operation.ChannelCode {
+		if parseErr == nil {
+			parseErr = fmt.Errorf("HomePositionQuery 应答标识与 operation 不一致")
+		}
+		completedAt := s.now()
+		return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+			_, err := applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
+				Status:      gbmodels.PTZOperationRejected,
+				DeviceError: parseErr.Error(), ErrorCode: ptzErrorProtocolInvalid, ErrorMessage: parseErr.Error(),
+			}, completedAt)
+			return err
+		})
+	}
+
+	mutex := s.lockFor(operation.ChannelID)
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	completedAt := s.now()
+	hasData := response.HomePosition != nil
+	rawSummary := summarizePTZBody(body)
+	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+		applied, err := applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
+			Status: gbmodels.PTZOperationAccepted, DeviceResult: "OK", ResponseHasData: &hasData,
+		}, completedAt)
+		if err != nil || !applied {
+			return err
+		}
+		if !hasData {
+			return nil
+		}
+
+		encoding := gbmodels.PTZHomePositionEnabledNumeric
+		if response.HomePosition.EnabledEncoding == manscdp.HomePositionEnabledEncodingCompatBooleanText {
+			encoding = gbmodels.PTZHomePositionEnabledCompatBooleanText
+		}
+		if _, _, err := s.applyHomePositionDB(tx, HomePositionUpdate{
+			DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, ChannelCode: operation.ChannelCode,
+			Enabled: response.HomePosition.Enabled, ResetTime: response.HomePosition.ResetTime, PresetID: response.HomePosition.PresetIndex,
+			EnabledEncoding: encoding, ConfirmedAt: completedAt,
+			Source: gbmodels.PTZHomePositionSourceDeviceQuery, Verification: gbmodels.PTZHomePositionVerificationVerified,
+			SourceSN: response.SN, SourceOperationID: operation.OperationID, SourceOperationSeq: operation.ID,
+			RawSummary: rawSummary,
+		}); err != nil {
+			return err
+		}
+
+		mismatch, err := homePositionReconcileMismatch(tx, operation, response.HomePosition)
+		if err != nil || !mismatch {
+			return err
+		}
+		result := tx.Model(&gbmodels.GbPTZOperation{}).
+			Where("id = ? AND status = ?", operation.ID, gbmodels.PTZOperationAccepted).
+			Updates(map[string]interface{}{
+				"error_code":    ptzErrorReconcileMismatch,
+				"error_message": "设备查询值与看守位控制意图不一致",
+			})
+		return result.Error
+	})
+}
+
+func homePositionReconcileMismatch(tx *gorm.DB, query gbmodels.GbPTZOperation, actual *manscdp.HomePositionConfig) (bool, error) {
+	if query.CmdType != manscdp.CmdHomePositionQuery || query.Action != "refresh_home_position" ||
+		query.TriggerOperationID == nil || strings.TrimSpace(*query.TriggerOperationID) == "" || actual == nil {
+		return false, nil
+	}
+	var parent gbmodels.GbPTZOperation
+	result := tx.Where("operation_id = ?", *query.TriggerOperationID).Limit(1).Find(&parent)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return false, nil
+	}
+	if parent.DeviceID != query.DeviceID || parent.DeviceCode != query.DeviceCode ||
+		parent.ChannelID != query.ChannelID || parent.ChannelCode != query.ChannelCode ||
+		parent.Status != gbmodels.PTZOperationAccepted ||
+		parent.CmdType != manscdp.CmdDeviceControl || parent.Action != "home_position" ||
+		parent.ReconcileOperationID == nil || *parent.ReconcileOperationID != query.OperationID {
+		return false, nil
+	}
+	expected, err := decodeHomePositionControlPayload(parent.PayloadJSON)
+	if err != nil {
+		return false, err
+	}
+	if expected.Enabled != actual.Enabled {
+		return true, nil
+	}
+	if !expected.Enabled {
+		return false, nil
+	}
+	return !sameOptionalInt(expected.ResetTime, actual.ResetTime) || !sameOptionalInt(expected.PresetID, actual.PresetIndex), nil
+}
+
+func sameOptionalInt(left, right *int) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func (s *Service) persistQueryCache(ctx context.Context, operation gbmodels.GbPTZOperation, cmdType string, body []byte) error {
@@ -111,36 +211,6 @@ func (s *Service) persistQueryCache(ctx context.Context, operation gbmodels.GbPT
 			}
 			return nil
 		})
-	case manscdp.CmdHomePositionQuery:
-		options, err := s.homePositionParseOptions(ctx, operation.ChannelID)
-		if err != nil {
-			return err
-		}
-		response, err := manscdp.ParseHomePositionResponse(body, options)
-		if err != nil {
-			return err
-		}
-		hasData := response.HomePosition != nil
-		if !hasData {
-			return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-				Where("id = ?", operation.ID).Update("response_has_data", false).Error
-		}
-		encoding := gbmodels.PTZHomePositionEnabledNumeric
-		if response.HomePosition.EnabledEncoding == manscdp.HomePositionEnabledEncodingCompatBooleanText {
-			encoding = gbmodels.PTZHomePositionEnabledCompatBooleanText
-		}
-		if _, _, err := s.ApplyHomePosition(ctx, HomePositionUpdate{
-			DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, ChannelCode: operation.ChannelCode,
-			Enabled: response.HomePosition.Enabled, ResetTime: response.HomePosition.ResetTime, PresetID: response.HomePosition.PresetIndex,
-			EnabledEncoding: encoding, ConfirmedAt: now,
-			Source: gbmodels.PTZHomePositionSourceDeviceQuery, Verification: gbmodels.PTZHomePositionVerificationVerified,
-			SourceSN: response.SN, SourceOperationID: operation.OperationID, SourceOperationSeq: operation.ID,
-			RawSummary: summarizePTZBody(body),
-		}); err != nil {
-			return err
-		}
-		return s.db.WithContext(ctx).Model(&gbmodels.GbPTZOperation{}).
-			Where("id = ?", operation.ID).Update("response_has_data", true).Error
 	case manscdp.CmdCruiseTrackListQuery:
 		response, err := manscdp.ParseCruiseTrackListResponse(body)
 		if err != nil {
@@ -231,7 +301,7 @@ func upsertCruiseTrack(db *gorm.DB, operation gbmodels.GbPTZOperation, item mans
 }
 
 func summarizePTZBody(body []byte) string {
-	text := strings.TrimSpace(string(body))
+	text := strings.TrimSpace(string(gbtrace.RedactSIP(body)))
 	if len(text) > 4096 {
 		return text[:4096]
 	}

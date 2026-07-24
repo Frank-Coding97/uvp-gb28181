@@ -112,6 +112,15 @@ func (s *Service) ApplyHomePosition(ctx context.Context, update HomePositionUpda
 	if s == nil || s.db == nil {
 		return gbmodels.GbPTZHomePosition{}, false, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 未就绪", nil)
 	}
+	mutex := s.lockFor(update.ChannelID)
+	mutex.Lock()
+	defer mutex.Unlock()
+	return s.applyHomePositionDB(ptzWriter(s.db).WithContext(ctx), update)
+}
+
+// Callers must hold the channel lock so the initial insert remains portable
+// across all supported database dialects.
+func (s *Service) applyHomePositionDB(db *gorm.DB, update HomePositionUpdate) (gbmodels.GbPTZHomePosition, bool, error) {
 	if update.DeviceID == 0 || update.ChannelID == 0 || strings.TrimSpace(update.ChannelCode) == "" {
 		return gbmodels.GbPTZHomePosition{}, false, fmt.Errorf("看守位缓存目标不完整")
 	}
@@ -131,18 +140,18 @@ func (s *Service) ApplyHomePosition(ctx context.Context, update HomePositionUpda
 		"source_operation_id": operationID, "source_operation_seq": update.SourceOperationSeq,
 		"raw_summary": update.RawSummary, "updated_at": updatedAt,
 	}
-	result := s.db.WithContext(ctx).Model(&gbmodels.GbPTZHomePosition{}).
+	result := db.Model(&gbmodels.GbPTZHomePosition{}).
 		Where("channel_id = ? AND source_operation_seq < ?", update.ChannelID, update.SourceOperationSeq).
 		Updates(updates)
 	if result.Error != nil {
 		return gbmodels.GbPTZHomePosition{}, false, result.Error
 	}
 	if result.RowsAffected > 0 {
-		home, err := s.getHomePosition(ctx, update.ChannelID)
+		home, err := getHomePositionDB(db, update.ChannelID)
 		return home, true, err
 	}
 
-	current, found, err := s.findHomePosition(ctx, update.ChannelID)
+	current, found, err := findHomePositionDB(db, update.ChannelID)
 	if err != nil {
 		return gbmodels.GbPTZHomePosition{}, false, err
 	}
@@ -157,27 +166,10 @@ func (s *Service) ApplyHomePosition(ctx context.Context, update HomePositionUpda
 		SourceOperationID: operationID, SourceOperationSeq: update.SourceOperationSeq,
 		RawSummary: update.RawSummary, CreatedAt: updatedAt, UpdatedAt: updatedAt,
 	}
-	if err := s.db.WithContext(ctx).Create(&row).Error; err == nil {
-		return row, true, nil
-	} else {
-		// A concurrent insert may win after the initial lookup. Retry the same
-		// causal CAS before surfacing the insert error.
-		retry := s.db.WithContext(ctx).Model(&gbmodels.GbPTZHomePosition{}).
-			Where("channel_id = ? AND source_operation_seq < ?", update.ChannelID, update.SourceOperationSeq).
-			Updates(updates)
-		if retry.Error != nil {
-			return gbmodels.GbPTZHomePosition{}, false, retry.Error
-		}
-		if retry.RowsAffected > 0 {
-			home, readErr := s.getHomePosition(ctx, update.ChannelID)
-			return home, true, readErr
-		}
-		current, found, readErr := s.findHomePosition(ctx, update.ChannelID)
-		if readErr == nil && found {
-			return current, false, nil
-		}
+	if err := db.Create(&row).Error; err != nil {
 		return gbmodels.GbPTZHomePosition{}, false, err
 	}
+	return row, true, nil
 }
 
 func nullableString(value string) *string {
@@ -189,13 +181,21 @@ func nullableString(value string) *string {
 }
 
 func (s *Service) findHomePosition(ctx context.Context, channelID uint) (gbmodels.GbPTZHomePosition, bool, error) {
+	return findHomePositionDB(ptzWriter(s.db).WithContext(ctx), channelID)
+}
+
+func findHomePositionDB(db *gorm.DB, channelID uint) (gbmodels.GbPTZHomePosition, bool, error) {
 	var home gbmodels.GbPTZHomePosition
-	result := s.db.WithContext(ctx).Where("channel_id = ?", channelID).Limit(1).Find(&home)
+	result := db.Where("channel_id = ?", channelID).Limit(1).Find(&home)
 	return home, result.RowsAffected > 0, result.Error
 }
 
 func (s *Service) getHomePosition(ctx context.Context, channelID uint) (gbmodels.GbPTZHomePosition, error) {
-	home, found, err := s.findHomePosition(ctx, channelID)
+	return getHomePositionDB(ptzWriter(s.db).WithContext(ctx), channelID)
+}
+
+func getHomePositionDB(db *gorm.DB, channelID uint) (gbmodels.GbPTZHomePosition, error) {
+	home, found, err := findHomePositionDB(db, channelID)
 	if err != nil {
 		return home, err
 	}
