@@ -963,9 +963,9 @@ async function loadHomePosition(channelId = props.channel?.id, token = sessionTo
         const item = response.data?.homePosition;
         if (token === sessionToken && props.channel?.id === channelId && response.code === 0 && item) {
             homePosition.value = {
-                enabled: Boolean(item.homeEnabled ?? item.enabled),
-                presetId: item.homePresetId ? Number(item.homePresetId) : undefined,
-                delaySec: Number(item.resetTime || 300),
+                enabled: item.enabled,
+                presetId: item.presetId ?? undefined,
+                delaySec: item.resetTime ?? 300,
             };
         }
     } catch {

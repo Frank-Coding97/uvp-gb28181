@@ -364,21 +364,95 @@ export const listCruiseTracks = (channelId: number, refresh = false) =>
     { params: refresh ? { refresh: true } : undefined }
   );
 
-export const getHomePosition = (channelId: number, refresh = false) =>
-  http.request<BaseResult<{ homePosition: Record<string, unknown> | null; freshness: string }>>(
+export type HomePositionSource = "device_query" | "control_ack" | "legacy_profile";
+export type HomePositionVerification = "verified" | "unverified";
+export type HomePositionFreshness = "fresh" | "stale" | "unknown";
+export type HomePositionSupportStatus = "supported" | "unsupported" | "unknown";
+export type PTZOperationStatus = "queued" | "sent" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
+
+export interface HomePositionConfig {
+  enabled: boolean;
+  resetTime: number | null;
+  presetId: number | null;
+  confirmedAt: string;
+  source: HomePositionSource;
+  verification: HomePositionVerification;
+}
+
+export interface HomePositionSupport {
+  status: HomePositionSupportStatus;
+  reason: string;
+}
+
+export interface HomePositionControl {
+  status: "idle" | "pending" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
+  operationId: string | null;
+  action: string | null;
+  errorCode: string | null;
+  deadlineAt: string | null;
+}
+
+export interface HomePositionRefresh {
+  status: "idle" | "pending" | "succeeded" | "succeeded_no_data" | "timeout" | "failed";
+  operationId: string | null;
+  errorCode: string | null;
+  deadlineAt: string | null;
+}
+
+export interface HomePositionResult {
+  homePosition: HomePositionConfig | null;
+  controlSupport: HomePositionSupport;
+  querySupport: HomePositionSupport;
+  freshness: HomePositionFreshness;
+  control: HomePositionControl;
+  refresh: HomePositionRefresh;
+}
+
+export interface PTZOperation {
+  operationId: string;
+  status: PTZOperationStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  completedAt: string | null;
+  deadlineAt: string | null;
+}
+
+export type HomePositionPatch =
+  | { enabled: false }
+  | { enabled: true; resetTime: number; presetId: number };
+
+export interface HomePositionUpdateResult {
+  operationId: string;
+  sn: number;
+  channelId: string;
+  action: "home_position";
+  status: PTZOperationStatus;
+}
+
+export const getHomePosition = (channelId: number, refresh = false, idempotencyKey?: string) =>
+  http.request<BaseResult<HomePositionResult>>(
     "get",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/home-position`),
-    { params: refresh ? { refresh: true } : undefined }
+    {
+      params: refresh ? { refresh: true } : undefined,
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
+    }
   );
 
-export const updateHomePosition = (
-  channelId: number,
-  data: { enabled: false } | { enabled: true; resetTime: number; presetId: number }
-) =>
-  http.request<BaseResult<DeviceOperationResult>>(
+export const updateHomePosition = (channelId: number, data: HomePositionPatch, idempotencyKey?: string) =>
+  http.request<BaseResult<HomePositionUpdateResult>>(
     "patch",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/home-position`),
-    { data }
+    {
+      data,
+      ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
+    }
+  );
+
+export const getPtzOperation = (channelId: number, operationId: string) =>
+  http.request<BaseResult<PTZOperation>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/operations/${operationId}`)
   );
 
 export const getPtzPreciseStatus = (channelId: number, refresh = false) =>
