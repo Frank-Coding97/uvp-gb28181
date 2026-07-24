@@ -2,6 +2,7 @@ package manscdp
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -48,9 +49,9 @@ type ptzQueryXML struct {
 }
 
 type HomePositionControl struct {
-	Enabled   bool
-	ResetTime int
-	PresetID  int
+	Enabled     bool
+	ResetTime   *int
+	PresetIndex *int
 }
 
 type homePositionControlXML struct {
@@ -62,9 +63,9 @@ type homePositionControlXML struct {
 }
 
 type homePositionXML struct {
-	Enabled     int `xml:"Enabled"`
-	ResetTime   int `xml:"ResetTime,omitempty"`
-	PresetIndex int `xml:"PresetIndex,omitempty"`
+	Enabled     int  `xml:"Enabled"`
+	ResetTime   *int `xml:"ResetTime,omitempty"`
+	PresetIndex *int `xml:"PresetIndex,omitempty"`
 }
 
 func BuildPTZPreciseControl(channelID string, sn int, command PTZPreciseControl) ([]byte, error) {
@@ -109,18 +110,18 @@ func BuildHomePositionControl(deviceID string, sn int, command HomePositionContr
 		return nil, err
 	}
 	if command.Enabled {
-		if command.ResetTime <= 0 {
-			return nil, fmt.Errorf("看守位自动归位时间必须为正数")
+		if command.ResetTime != nil && *command.ResetTime < 0 {
+			return nil, fmt.Errorf("看守位自动归位时间不能为负数")
 		}
-		if command.PresetID <= 0 || command.PresetID > 255 {
-			return nil, fmt.Errorf("看守位预置位编号必须在 1-255 之间")
+		if command.PresetIndex != nil && (*command.PresetIndex < 0 || *command.PresetIndex > 255) {
+			return nil, fmt.Errorf("看守位预置位编号必须在 0-255 之间")
 		}
 	}
-	home := homePositionXML{}
+	home := homePositionXML{Enabled: 0}
 	if command.Enabled {
 		home.Enabled = 1
 		home.ResetTime = command.ResetTime
-		home.PresetIndex = command.PresetID
+		home.PresetIndex = command.PresetIndex
 	}
 	body, err := xml.Marshal(homePositionControlXML{
 		CmdType: CmdDeviceControl, SN: sn, DeviceID: deviceID, HomePosition: home,
@@ -214,17 +215,84 @@ func ParsePTZPrecisePositionNotify(body []byte) (*PTZPrecisePositionNotify, erro
 	return &notify, nil
 }
 
+var ErrInvalidResponse = errors.New("manscdp: invalid response")
+
+// ParseError identifies a syntactically or semantically invalid MANSCDP response.
+type ParseError struct {
+	Field  string
+	Value  string
+	Reason string
+	Err    error
+}
+
+func (e *ParseError) Error() string {
+	message := "manscdp: invalid response"
+	if e.Field != "" {
+		message += " field " + e.Field
+	}
+	if e.Value != "" {
+		message += "=" + strconv.Quote(e.Value)
+	}
+	if e.Reason != "" {
+		message += ": " + e.Reason
+	}
+	if e.Err != nil {
+		message += ": " + e.Err.Error()
+	}
+	return message
+}
+
+func (e *ParseError) Unwrap() error {
+	return e.Err
+}
+
+func (e *ParseError) Is(target error) bool {
+	return target == ErrInvalidResponse
+}
+
+func invalidResponse(field, value, reason string, err error) error {
+	return &ParseError{Field: field, Value: value, Reason: reason, Err: err}
+}
+
+type HomePositionEnabledEncoding string
+
+const (
+	HomePositionEnabledEncodingNumeric           HomePositionEnabledEncoding = "numeric"
+	HomePositionEnabledEncodingCompatBooleanText HomePositionEnabledEncoding = "compat_boolean_text"
+)
+
+type HomePositionParseOptions struct {
+	AllowBooleanEnabled bool
+}
+
+type HomePositionConfig struct {
+	Enabled         bool
+	ResetTime       *int
+	PresetIndex     *int
+	EnabledEncoding HomePositionEnabledEncoding
+}
+
 type HomePositionResponse struct {
-	CmdType  string   `xml:"CmdType"`
-	SN       int      `xml:"SN"`
-	DeviceID string   `xml:"DeviceID"`
-	Enabled  *bool    `xml:"Enabled"`
-	Pan      *float64 `xml:"Pan"`
-	Tilt     *float64 `xml:"Tilt"`
-	Zoom     *float64 `xml:"Zoom"`
-	Focus    *float64 `xml:"Focus"`
-	Iris     *float64 `xml:"Iris"`
-	Raw      []byte   `xml:"-"`
+	XMLName      xml.Name
+	CmdType      string
+	SN           int
+	DeviceID     string
+	HomePosition *HomePositionConfig
+	Raw          []byte
+}
+
+type homePositionResponseXML struct {
+	XMLName      xml.Name               `xml:"Response"`
+	CmdType      string                 `xml:"CmdType"`
+	SN           int                    `xml:"SN"`
+	DeviceID     string                 `xml:"DeviceID"`
+	HomePosition *homePositionConfigXML `xml:"HomePosition"`
+}
+
+type homePositionConfigXML struct {
+	Enabled     *string `xml:"Enabled"`
+	ResetTime   *string `xml:"ResetTime"`
+	PresetIndex *string `xml:"PresetIndex"`
 }
 
 type Preset struct {
@@ -258,16 +326,98 @@ func ParsePresetResponse(body []byte) (*PresetResponse, error) {
 	return &response, nil
 }
 
-func ParseHomePositionResponse(body []byte) (*HomePositionResponse, error) {
-	var response HomePositionResponse
-	if err := newDecoder(body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("解析看守位响应失败: %w", err)
+func ParseHomePositionResponse(body []byte, options HomePositionParseOptions) (*HomePositionResponse, error) {
+	var wire homePositionResponseXML
+	if err := newDecoder(body).Decode(&wire); err != nil {
+		return nil, invalidResponse("XML", "", "decode failed", err)
 	}
-	if response.CmdType != CmdHomePositionQuery || response.DeviceID == "" || response.SN <= 0 {
-		return nil, fmt.Errorf("非法看守位响应")
+	if wire.XMLName.Local != "Response" {
+		return nil, invalidResponse("XMLName", wire.XMLName.Local, "root element must be Response", nil)
 	}
-	response.Raw = append([]byte(nil), body...)
-	return &response, nil
+	if wire.CmdType != CmdHomePositionQuery {
+		return nil, invalidResponse("CmdType", wire.CmdType, "must be HomePositionQuery", nil)
+	}
+	if wire.SN <= 0 {
+		return nil, invalidResponse("SN", strconv.Itoa(wire.SN), "must be positive", nil)
+	}
+	if strings.TrimSpace(wire.DeviceID) == "" {
+		return nil, invalidResponse("DeviceID", wire.DeviceID, "must not be empty", nil)
+	}
+
+	response := &HomePositionResponse{
+		XMLName:  wire.XMLName,
+		CmdType:  wire.CmdType,
+		SN:       wire.SN,
+		DeviceID: wire.DeviceID,
+		Raw:      append([]byte(nil), body...),
+	}
+	if wire.HomePosition == nil {
+		return response, nil
+	}
+
+	config, err := parseHomePositionConfig(wire.HomePosition, options)
+	if err != nil {
+		return nil, err
+	}
+	response.HomePosition = config
+	return response, nil
+}
+
+func parseHomePositionConfig(wire *homePositionConfigXML, options HomePositionParseOptions) (*HomePositionConfig, error) {
+	if wire.Enabled == nil {
+		return nil, invalidResponse("HomePosition.Enabled", "", "field is required", nil)
+	}
+	enabledText := strings.TrimSpace(*wire.Enabled)
+	config := &HomePositionConfig{EnabledEncoding: HomePositionEnabledEncodingNumeric}
+	switch enabledText {
+	case "0":
+		config.Enabled = false
+	case "1":
+		config.Enabled = true
+	case "false":
+		if !options.AllowBooleanEnabled {
+			return nil, invalidResponse("HomePosition.Enabled", enabledText, "boolean text requires an explicit compatibility option", nil)
+		}
+		config.EnabledEncoding = HomePositionEnabledEncodingCompatBooleanText
+	case "true":
+		if !options.AllowBooleanEnabled {
+			return nil, invalidResponse("HomePosition.Enabled", enabledText, "boolean text requires an explicit compatibility option", nil)
+		}
+		config.Enabled = true
+		config.EnabledEncoding = HomePositionEnabledEncodingCompatBooleanText
+	default:
+		return nil, invalidResponse("HomePosition.Enabled", enabledText, "must be 0 or 1", nil)
+	}
+
+	var err error
+	config.ResetTime, err = parseOptionalNonNegativeInt("HomePosition.ResetTime", wire.ResetTime, -1)
+	if err != nil {
+		return nil, err
+	}
+	config.PresetIndex, err = parseOptionalNonNegativeInt("HomePosition.PresetIndex", wire.PresetIndex, 255)
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+func parseOptionalNonNegativeInt(field string, raw *string, max int) (*int, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	text := strings.TrimSpace(*raw)
+	value, err := strconv.Atoi(text)
+	if err != nil {
+		return nil, invalidResponse(field, text, "must be an integer", err)
+	}
+	if value < 0 || (max >= 0 && value > max) {
+		reason := "must be non-negative"
+		if max >= 0 {
+			reason = fmt.Sprintf("must be between 0 and %d", max)
+		}
+		return nil, invalidResponse(field, text, reason, nil)
+	}
+	return &value, nil
 }
 
 type CruiseTrack struct {
