@@ -118,8 +118,29 @@ type deviceControlResponseXML struct {
 }
 
 func ParseDeviceControlResponse(body []byte) (*DeviceControlResponse, error) {
+	return ParseDeviceControlResponseWithProfile(protocol.ProfileFor(protocol.Version2016), body)
+}
+
+// ParseAdvancedControlResponse is the semantic alias used by the advanced
+// control scheduler. DeviceControl responses share the same strict wire
+// envelope as PTZ DeviceControl responses.
+func ParseAdvancedControlResponse(body []byte) (*DeviceControlResponse, error) {
+	return ParseDeviceControlResponse(body)
+}
+
+// ParseAdvancedControlResponseWithProfile decodes a response using the
+// operation's profile and validates every correlation field. A declaration in
+// the XML takes precedence over the profile charset, while the profile still
+// handles devices that omit the declaration.
+func ParseAdvancedControlResponseWithProfile(profile protocol.Profile, body []byte) (*DeviceControlResponse, error) {
+	return ParseDeviceControlResponseWithProfile(profile, body)
+}
+
+// ParseDeviceControlResponseWithProfile is the profile-aware implementation
+// shared by advanced and ordinary DeviceControl response consumers.
+func ParseDeviceControlResponseWithProfile(profile protocol.Profile, body []byte) (*DeviceControlResponse, error) {
 	var wire deviceControlResponseXML
-	if err := newDecoder(body).Decode(&wire); err != nil {
+	if err := DecodeProfiledXML(profile, body, &wire); err != nil {
 		return nil, invalidResponse("XML", "", "decode failed", err)
 	}
 	if wire.XMLName.Local != "Response" {
