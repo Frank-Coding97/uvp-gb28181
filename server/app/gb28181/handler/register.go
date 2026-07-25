@@ -14,6 +14,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -23,6 +24,7 @@ import (
 type RegisterHandler struct {
 	cfg               gbconfig.Config
 	keepaliveInterval int
+	platformVersion   string            // X-GB-Ver returned by the platform
 	catalogTrigger    CatalogTrigger    // 可选:首次注册成功后触发 Catalog 查询
 	deviceInfoTrigger DeviceInfoTrigger // 可选:首次注册成功后触发 DeviceInfo 查询(拉设备本体元数据)
 	subscriptionWaker SubscriptionWaker // 可选:设备恢复在线后恢复已启用订阅
@@ -35,7 +37,7 @@ func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
 	if interval <= 0 {
 		interval = 60
 	}
-	return &RegisterHandler{cfg: cfg, keepaliveInterval: interval}
+	return &RegisterHandler{cfg: cfg, keepaliveInterval: interval, platformVersion: platformXGBVersion(cfg)}
 }
 
 // SetCatalogTrigger 注入 Catalog 触发器(可选;不注入则不触发)
@@ -96,8 +98,9 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		deviceID = from.Address.User
 	}
 	h.recordBegin(req, metrics.TxRegister, deviceID)
+	advertised := advertisedRegisterVersion(req)
 	if deviceID == "" {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 400, "Missing device id", nil))
+		_ = tx.Respond(h.newResponse(req, 400, "Missing device id", nil))
 		h.recordEnd(req, 400, false)
 		return
 	}
@@ -122,7 +125,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			zap.String("deviceId", deviceID),
 			zap.String("gotServerId", claimedServerID),
 			zap.String("wantServerId", h.cfg.SIP.ServerID))
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 403, "Server ID mismatch", nil))
+		_ = tx.Respond(h.newResponse(req, 403, "Server ID mismatch", nil))
 		h.recordEnd(req, 403, false)
 		return
 	}
@@ -135,7 +138,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			Nonce:     fmt.Sprintf("%d", time.Now().UnixMicro()),
 			Algorithm: "MD5",
 		}
-		res := sip.NewResponseFromRequest(req, 401, "Unauthorized", nil)
+		res := h.newResponse(req, 401, "Unauthorized", nil)
 		res.AppendHeader(sip.NewHeader("WWW-Authenticate", chal.String()))
 		_ = tx.Respond(res)
 		// 401 挑战是正常协议握手,不算失败(后续 Authorization 重发会再走一遍 Handle)
@@ -146,7 +149,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	// 第三步:校验 digest(统一接入密码)
 	cred, err := digest.ParseCredentials(authHeader.Value())
 	if err != nil {
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 400, "Bad credentials", nil))
+		_ = tx.Respond(h.newResponse(req, 400, "Bad credentials", nil))
 		h.recordEnd(req, 400, false)
 		return
 	}
@@ -167,7 +170,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	})
 	if err != nil || expected.Response != cred.Response {
 		app.ZapLog.Warn("GB28181 注册鉴权失败", zap.String("deviceId", deviceID))
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 401, "Unauthorized", nil))
+		_ = tx.Respond(h.newResponse(req, 401, "Unauthorized", nil))
 		h.recordEnd(req, 401, false)
 		return
 	}
@@ -179,12 +182,12 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		// 注销
 		if err := device.HandleUnregister(ctx, deviceID); err != nil {
 			app.ZapLog.Error("GB28181 注销处理失败", zap.String("deviceId", deviceID), zap.Error(err))
-			_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Server error", nil))
+			_ = tx.Respond(h.newResponse(req, 500, "Server error", nil))
 			h.recordEnd(req, 500, false)
 			return
 		}
 		app.ZapLog.Info("GB28181 设备注销", zap.String("deviceId", deviceID))
-		_ = tx.Respond(buildOKWithExpires(req, 0))
+		_ = tx.Respond(h.buildOKWithExpires(req, 0))
 		h.recordEnd(req, 200, true)
 		return
 	}
@@ -192,16 +195,17 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	// 自动建档 + 在线态
 	ip, port := splitHostPort(req.Source())
 	info := device.RegisterInfo{
-		DeviceID:  deviceID,
-		Transport: req.Transport(),
-		IP:        ip,
-		Port:      port,
-		Expires:   expires,
+		DeviceID:        deviceID,
+		Transport:       req.Transport(),
+		IP:              ip,
+		Port:            port,
+		Expires:         expires,
+		ReportedVersion: advertised.Raw,
 	}
 	isFirst, err := device.HandleRegister(ctx, info, h.keepaliveInterval)
 	if err != nil {
 		app.ZapLog.Error("GB28181 自动建档失败", zap.String("deviceId", deviceID), zap.Error(err))
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 500, "Server error", nil))
+		_ = tx.Respond(h.newResponse(req, 500, "Server error", nil))
 		h.recordEnd(req, 500, false)
 		return
 	}
@@ -209,7 +213,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		zap.String("deviceId", deviceID),
 		zap.String("transport", req.Transport()),
 		zap.Bool("isFirst", isFirst))
-	_ = tx.Respond(buildOKWithExpires(req, expires))
+	_ = tx.Respond(h.buildOKWithExpires(req, expires))
 	h.recordEnd(req, 200, true)
 
 	// 首次注册(或离线后重连)→ 触发 Catalog / DeviceInfo 查询
@@ -234,7 +238,73 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 
 // buildOKWithExpires 构造 200 OK 并回带 Expires/Date
 func buildOKWithExpires(req *sip.Request, expires int) *sip.Response {
-	res := sip.NewResponseFromRequest(req, 200, "OK", nil)
+	res := newRegisterResponse(req, 200, "OK", nil, defaultPlatformXGBVersion)
+	res.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
+	res.AppendHeader(sip.NewHeader("Date", time.Now().Format("2006-01-02T15:04:05")))
+	return res
+}
+
+const defaultPlatformXGBVersion = "3.0"
+
+// registerVersion carries both the value received from the wire and the
+// resolver decision used for a successful device archive update.
+type registerVersion struct {
+	Raw        string
+	Resolution protocol.Resolution
+}
+
+func advertisedRegisterVersion(req *sip.Request) registerVersion {
+	raw := ""
+	if req != nil {
+		if header := req.GetHeader("X-GB-Ver"); header != nil {
+			raw = header.Value()
+		}
+	}
+	return registerVersion{
+		Raw:        raw,
+		Resolution: protocol.Resolve(protocol.ResolveInput{Register: raw}),
+	}
+}
+
+func platformXGBVersion(cfg gbconfig.Config) string {
+	version := strings.TrimSpace(cfg.SIP.XGBVersion)
+	if version == "" {
+		return defaultPlatformXGBVersion
+	}
+	// Allow the normalized profile names in configuration while keeping the
+	// wire header in the version notation used by GB/T 28181 REGISTER.
+	switch version {
+	case "2016":
+		return "2.0"
+	case "2022":
+		return "3.0"
+	case "1.0", "1.1", "2.0", "3.0":
+		return version
+	default:
+		return defaultPlatformXGBVersion
+	}
+}
+
+func newRegisterResponse(req *sip.Request, status int, reason string, body []byte, platformVersion string) *sip.Response {
+	res := sip.NewResponseFromRequest(req, status, reason, body)
+	version := strings.TrimSpace(platformVersion)
+	if version == "" {
+		version = defaultPlatformXGBVersion
+	}
+	res.AppendHeader(sip.NewHeader("X-GB-Ver", version))
+	return res
+}
+
+func (h *RegisterHandler) newResponse(req *sip.Request, status int, reason string, body []byte) *sip.Response {
+	version := h.platformVersion
+	if version == "" {
+		version = platformXGBVersion(h.cfg)
+	}
+	return newRegisterResponse(req, status, reason, body, version)
+}
+
+func (h *RegisterHandler) buildOKWithExpires(req *sip.Request, expires int) *sip.Response {
+	res := h.newResponse(req, 200, "OK", nil)
 	res.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
 	res.AppendHeader(sip.NewHeader("Date", time.Now().Format("2006-01-02T15:04:05")))
 	return res

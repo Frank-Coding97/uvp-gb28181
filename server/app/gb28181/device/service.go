@@ -3,11 +3,13 @@ package device
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -18,6 +20,10 @@ type RegisterInfo struct {
 	IP        string
 	Port      int
 	Expires   int
+	// ReportedVersion is the raw X-GB-Ver value supplied by the device.
+	// It is persisted only after authentication and a successful register
+	// transaction; failed REGISTER attempts never reach HandleRegister.
+	ReportedVersion string
 }
 
 // HandleRegister 处理注册成功:自动建档(upsert),记录心跳时间事实
@@ -40,18 +46,25 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 			return fmt.Errorf("查询设备失败: %w", err)
 		}
 		isFirst = existing == nil || existing.Status != gbmodels.DeviceStatusOnline
+		profile := resolveRegisterProfile(existing, info.ReportedVersion)
 
 		d := &gbmodels.GbDevice{
-			DeviceID:          info.DeviceID,
-			Transport:         info.Transport,
-			IP:                info.IP,
-			Port:              info.Port,
-			Expires:           info.Expires,
-			RegisterTime:      &now,
-			RegisterExpireAt:  expireAt,
-			KeepaliveTime:     &now,
-			KeepaliveInterval: keepaliveInterval,
-			Status:            gbmodels.DeviceStatusOnline,
+			DeviceID:               info.DeviceID,
+			Transport:              info.Transport,
+			IP:                     info.IP,
+			Port:                   info.Port,
+			Expires:                info.Expires,
+			RegisterTime:           &now,
+			RegisterExpireAt:       expireAt,
+			KeepaliveTime:          &now,
+			KeepaliveInterval:      keepaliveInterval,
+			Status:                 gbmodels.DeviceStatusOnline,
+			ReportedVersion:        profile.reportedVersion,
+			ReportedVersionAt:      profile.reportedVersionAt,
+			ProtocolOverride:       profile.protocolOverride,
+			EffectiveVersion:       profile.effectiveVersion,
+			EffectiveVersionSource: profile.effectiveVersionSource,
+			EffectiveVersionAt:     profile.effectiveVersionAt,
 		}
 		var fromStatus *int8
 		if existing != nil {
@@ -84,6 +97,51 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		})
 	})
 	return isFirst, err
+}
+
+type resolvedRegisterProfile struct {
+	reportedVersion        string
+	reportedVersionAt      *time.Time
+	protocolOverride       string
+	effectiveVersion       string
+	effectiveVersionSource string
+	effectiveVersionAt     *time.Time
+}
+
+// resolveRegisterProfile applies the immutable resolver policy to a successful
+// REGISTER. The existing effective profile is supplied as history, while an
+// administrator override remains authoritative and is never changed by a
+// device declaration.
+func resolveRegisterProfile(existing *gbmodels.GbDevice, reported string) resolvedRegisterProfile {
+	override := ""
+	history := ""
+	if existing != nil {
+		override = strings.TrimSpace(existing.ProtocolOverride)
+		history = strings.TrimSpace(existing.EffectiveVersion)
+	}
+	if override == "" {
+		override = gbmodels.ProtocolOverrideAuto
+	}
+
+	resolution := protocol.Resolve(protocol.ResolveInput{
+		Override: override,
+		Register: reported,
+		History:  history,
+	})
+	now := time.Now()
+	trimmedReported := strings.TrimSpace(reported)
+	var reportedAt *time.Time
+	if trimmedReported != "" {
+		reportedAt = &now
+	}
+	return resolvedRegisterProfile{
+		reportedVersion:        reported,
+		reportedVersionAt:      reportedAt,
+		protocolOverride:       override,
+		effectiveVersion:       string(resolution.Profile.Version),
+		effectiveVersionSource: string(resolution.Source),
+		effectiveVersionAt:     &now,
+	}
 }
 
 func defaultOwnerDeptID(ctx context.Context) (uint, error) {

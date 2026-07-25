@@ -66,6 +66,7 @@ type SIPConfig struct {
 	Domain      string   // SIP 域(前 10 位行政区划)
 	ServerID    string   // 平台国标编码(20 位)
 	Password    string   // 统一接入密码
+	XGBVersion  string   // 平台 REGISTER 响应声明的 X-GB-Ver,为空时默认 3.0
 }
 
 // DeviceConfig 设备相关配置
@@ -101,6 +102,7 @@ func LoadFrom(c valueSource) Config {
 			Domain:      c.GetString("gb28181.sip.domain"),
 			ServerID:    c.GetString("gb28181.sip.serverid"),
 			Password:    c.GetString("gb28181.sip.password"),
+			XGBVersion:  c.GetString("gb28181.sip.x_gb_ver"),
 		},
 		Trace: TraceConfig{
 			Enabled:          c.GetBool("gb28181.trace.enabled"),
