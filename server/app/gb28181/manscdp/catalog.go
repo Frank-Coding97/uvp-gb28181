@@ -3,6 +3,8 @@ package manscdp
 import (
 	"encoding/xml"
 	"fmt"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
 
 // CatalogQuery Catalog 目录查询请求(平台→设备)
@@ -17,13 +19,14 @@ type CatalogQuery struct {
 // BuildCatalogQuery 构造 Catalog 查询 XML(国标格式,GB2312 声明)
 // deviceID = 目标设备国标编码;sn = 查询序列号
 func BuildCatalogQuery(deviceID string, sn int) ([]byte, error) {
+	return BuildCatalogQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn)
+}
+
+// BuildCatalogQueryWithProfile builds a Catalog query using the profile's
+// actual XML charset and declaration.
+func BuildCatalogQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
 	q := CatalogQuery{CmdType: CmdCatalog, SN: sn, DeviceID: deviceID}
-	body, err := xml.Marshal(q)
-	if err != nil {
-		return nil, err
-	}
-	// 国标要求 XML 声明,设备多用 GB2312
-	return append([]byte(`<?xml version="1.0" encoding="GB2312"?>`+"\n"), body...), nil
+	return MarshalProfiledXML(profile, q)
 }
 
 // CatalogItem Catalog 应答里的单个通道项

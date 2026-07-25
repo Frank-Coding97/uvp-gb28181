@@ -4,6 +4,8 @@ import (
 	"encoding/xml"
 	"fmt"
 	"strings"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
 
 // PTZAction is the small, stable action vocabulary exposed by the HTTP API.
@@ -185,6 +187,12 @@ func ParsePTZAction(value string) (PTZAction, error) {
 // BuildPTZControl builds a GB28181 DeviceControl MESSAGE body.
 // The PTZ command is the standard 8-byte A5 front-end command with a modulo-256 checksum.
 func BuildPTZControl(channelID string, sn int, command PTZCommand) ([]byte, error) {
+	return BuildPTZControlWithProfile(protocol.ProfileFor(protocol.Version2016), channelID, sn, command)
+}
+
+// BuildPTZControlWithProfile builds a directional PTZ DeviceControl body
+// using the profile's actual XML charset and declaration.
+func BuildPTZControlWithProfile(profile protocol.Profile, channelID string, sn int, command PTZCommand) ([]byte, error) {
 	if strings.TrimSpace(channelID) == "" {
 		return nil, fmt.Errorf("通道编码不能为空")
 	}
@@ -198,23 +206,25 @@ func BuildPTZControl(channelID string, sn int, command PTZCommand) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	body, err := xml.Marshal(deviceControl{
+	return MarshalProfiledXML(profile, deviceControl{
 		CmdType:  CmdDeviceControl,
 		SN:       sn,
 		DeviceID: channelID,
 		PTZCmd:   ptz,
 		Info:     controlInfo{ControlPriority: 5},
 	})
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte("<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n"), body...), nil
 }
 
 // BuildExtendedPTZControl builds standard DeviceControl operations such as
 // preset, cruise, scan and auxiliary commands. Focus/iris use profile bytes
 // because their encoding is not interoperable across vendor families.
 func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedCommand) ([]byte, error) {
+	return BuildExtendedPTZControlWithProfile(protocol.ProfileFor(protocol.Version2016), channelID, sn, command)
+}
+
+// BuildExtendedPTZControlWithProfile builds an extended PTZ DeviceControl
+// body using the profile's actual XML charset and declaration.
+func BuildExtendedPTZControlWithProfile(profile protocol.Profile, channelID string, sn int, command PTZExtendedCommand) ([]byte, error) {
 	if strings.TrimSpace(channelID) == "" {
 		return nil, fmt.Errorf("通道编码不能为空")
 	}
@@ -321,11 +331,7 @@ func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedComman
 		bytes[7] += bytes[i]
 	}
 	ptz := fmt.Sprintf("%02X%02X%02X%02X%02X%02X%02X%02X", bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7])
-	body, err := xml.Marshal(deviceControl{CmdType: CmdDeviceControl, SN: sn, DeviceID: channelID, PTZCmd: ptz, Info: controlInfo{ControlPriority: 5}})
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte("<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n"), body...), nil
+	return MarshalProfiledXML(profile, deviceControl{CmdType: CmdDeviceControl, SN: sn, DeviceID: channelID, PTZCmd: ptz, Info: controlInfo{ControlPriority: 5}})
 }
 
 func encodePTZ(command PTZCommand) (string, error) {

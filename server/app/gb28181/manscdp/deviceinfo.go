@@ -3,6 +3,8 @@ package manscdp
 import (
 	"encoding/xml"
 	"fmt"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
 
 // DeviceInfoQuery DeviceInfo 查询请求(平台→设备)
@@ -17,12 +19,14 @@ type DeviceInfoQuery struct {
 // BuildDeviceInfoQuery 构造 DeviceInfo 查询 XML(国标格式,GB2312 声明)
 // deviceID = 目标设备国标编码(20 位设备编码);sn = 查询序列号
 func BuildDeviceInfoQuery(deviceID string, sn int) ([]byte, error) {
+	return BuildDeviceInfoQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn)
+}
+
+// BuildDeviceInfoQueryWithProfile builds a DeviceInfo query using the
+// profile's actual XML charset and declaration.
+func BuildDeviceInfoQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
 	q := DeviceInfoQuery{CmdType: CmdDeviceInfo, SN: sn, DeviceID: deviceID}
-	body, err := xml.Marshal(q)
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte(`<?xml version="1.0" encoding="GB2312"?>`+"\n"), body...), nil
+	return MarshalProfiledXML(profile, q)
 }
 
 // DeviceInfoResponse DeviceInfo 应答(设备→平台)

@@ -7,6 +7,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
 
 const (
@@ -69,6 +71,12 @@ type homePositionXML struct {
 }
 
 func BuildPTZPreciseControl(channelID string, sn int, command PTZPreciseControl) ([]byte, error) {
+	return BuildPTZPreciseControlWithProfile(protocol.ProfileFor(protocol.Version2016), channelID, sn, command)
+}
+
+// BuildPTZPreciseControlWithProfile builds a precise PTZ control body using
+// the profile's actual XML charset and declaration.
+func BuildPTZPreciseControlWithProfile(profile protocol.Profile, channelID string, sn int, command PTZPreciseControl) ([]byte, error) {
 	if err := validatePTZQueryTarget(channelID, sn); err != nil {
 		return nil, err
 	}
@@ -86,26 +94,34 @@ func BuildPTZPreciseControl(channelID string, sn int, command PTZPreciseControl)
 	if command.Speed < 0 || command.Speed > 255 {
 		return nil, fmt.Errorf("PTZ 速度必须在 0-255 之间")
 	}
-	body, err := xml.Marshal(preciseControlXML{
+	return MarshalProfiledXML(profile, preciseControlXML{
 		CmdType: CmdPTZPreciseCtrl, SN: sn, DeviceID: channelID,
 		Pan: command.Pan, Tilt: command.Tilt, Zoom: command.Zoom,
 		Focus: command.Focus, Iris: command.Iris, Speed: command.Speed,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte("<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n"), body...), nil
 }
 
 func BuildHomePositionQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdHomePositionQuery, deviceID, sn, nil)
+	return BuildHomePositionQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn)
+}
+
+func BuildHomePositionQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
+	return buildPTZQuery(profile, CmdHomePositionQuery, deviceID, sn, nil)
 }
 
 func BuildPresetQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdPresetQuery, deviceID, sn, nil)
+	return BuildPresetQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn)
+}
+
+func BuildPresetQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
+	return buildPTZQuery(profile, CmdPresetQuery, deviceID, sn, nil)
 }
 
 func BuildHomePositionControl(deviceID string, sn int, command HomePositionControl) ([]byte, error) {
+	return BuildHomePositionControlWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn, command)
+}
+
+func BuildHomePositionControlWithProfile(profile protocol.Profile, deviceID string, sn int, command HomePositionControl) ([]byte, error) {
 	if err := validatePTZQueryTarget(deviceID, sn); err != nil {
 		return nil, err
 	}
@@ -123,39 +139,43 @@ func BuildHomePositionControl(deviceID string, sn int, command HomePositionContr
 		home.ResetTime = command.ResetTime
 		home.PresetIndex = command.PresetIndex
 	}
-	body, err := xml.Marshal(homePositionControlXML{
+	return MarshalProfiledXML(profile, homePositionControlXML{
 		CmdType: CmdDeviceControl, SN: sn, DeviceID: deviceID, HomePosition: home,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte("<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n"), body...), nil
 }
 
 func BuildCruiseTrackListQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdCruiseTrackListQuery, deviceID, sn, nil)
+	return BuildCruiseTrackListQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn)
+}
+
+func BuildCruiseTrackListQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
+	return buildPTZQuery(profile, CmdCruiseTrackListQuery, deviceID, sn, nil)
 }
 
 func BuildCruiseTrackQuery(deviceID string, sn, trackID int) ([]byte, error) {
+	return BuildCruiseTrackQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn, trackID)
+}
+
+func BuildCruiseTrackQueryWithProfile(profile protocol.Profile, deviceID string, sn, trackID int) ([]byte, error) {
 	if trackID < 0 || trackID > 255 {
 		return nil, fmt.Errorf("巡航轨迹编号必须在 0-255 之间")
 	}
-	return buildPTZQuery(CmdCruiseTrackQuery, deviceID, sn, &trackID)
+	return buildPTZQuery(profile, CmdCruiseTrackQuery, deviceID, sn, &trackID)
 }
 
 func BuildPTZPreciseStatusQuery(deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(CmdPTZPreciseStatusQuery, deviceID, sn, nil)
+	return BuildPTZPreciseStatusQueryWithProfile(protocol.ProfileFor(protocol.Version2016), deviceID, sn)
 }
 
-func buildPTZQuery(cmd, deviceID string, sn int, number *int) ([]byte, error) {
+func BuildPTZPreciseStatusQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
+	return buildPTZQuery(profile, CmdPTZPreciseStatusQuery, deviceID, sn, nil)
+}
+
+func buildPTZQuery(profile protocol.Profile, cmd, deviceID string, sn int, number *int) ([]byte, error) {
 	if err := validatePTZQueryTarget(deviceID, sn); err != nil {
 		return nil, err
 	}
-	body, err := xml.Marshal(ptzQueryXML{CmdType: cmd, SN: sn, DeviceID: deviceID, Number: number})
-	if err != nil {
-		return nil, err
-	}
-	return append([]byte("<?xml version=\"1.0\" encoding=\"GB2312\"?>\r\n"), body...), nil
+	return MarshalProfiledXML(profile, ptzQueryXML{CmdType: cmd, SN: sn, DeviceID: deviceID, Number: number})
 }
 
 func validatePTZQueryTarget(deviceID string, sn int) error {

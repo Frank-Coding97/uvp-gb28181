@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
 
 type subscriptionQuery struct {
@@ -18,6 +19,12 @@ type subscriptionQuery struct {
 
 // BuildSubscriptionQuery returns the MANSCDP body and SIP Event header for one device-level subscription.
 func BuildSubscriptionQuery(kind gbmodels.SubscriptionKind, deviceID string, sn, interval int) ([]byte, string, error) {
+	return BuildSubscriptionQueryWithProfile(protocol.ProfileFor(protocol.Version2016), kind, deviceID, sn, interval)
+}
+
+// BuildSubscriptionQueryWithProfile builds a subscription query using the
+// profile's actual XML charset and declaration.
+func BuildSubscriptionQueryWithProfile(profile protocol.Profile, kind gbmodels.SubscriptionKind, deviceID string, sn, interval int) ([]byte, string, error) {
 	if !kind.Valid() {
 		return nil, "", fmt.Errorf("不支持的订阅类型: %s", kind)
 	}
@@ -38,11 +45,11 @@ func BuildSubscriptionQuery(kind gbmodels.SubscriptionKind, deviceID string, sn,
 	case gbmodels.SubscriptionKindAlarm:
 		q.CmdType, event = CmdAlarm, "presence"
 	}
-	body, err := xml.Marshal(q)
+	body, err := MarshalProfiledXML(profile, q)
 	if err != nil {
 		return nil, "", err
 	}
-	return append([]byte(`<?xml version="1.0" encoding="GB2312"?>`+"\n"), body...), event, nil
+	return body, event, nil
 }
 
 // ResolveSubscriptionKind accepts standard and common vendor Event-header variants.
