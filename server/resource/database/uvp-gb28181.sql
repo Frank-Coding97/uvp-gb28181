@@ -1514,3 +1514,38 @@ CREATE TABLE `gb_ptz_home_position` (
   UNIQUE KEY `uk_ptz_home_position_channel` (`channel_id`),
   KEY `idx_ptz_home_position_device` (`device_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 confirmed home position';
+
+-- Dual-version profile and DeviceStatus fact cache.
+ALTER TABLE `gb_device`
+  ADD COLUMN `reported_version` varchar(8) NOT NULL DEFAULT '',
+  ADD COLUMN `reported_version_at` datetime(3) DEFAULT NULL,
+  ADD COLUMN `protocol_override` varchar(8) NOT NULL DEFAULT 'auto',
+  ADD COLUMN `effective_version` varchar(8) NOT NULL DEFAULT '2016',
+  ADD COLUMN `effective_version_source` varchar(16) NOT NULL DEFAULT 'default',
+  ADD COLUMN `effective_version_at` datetime(3) DEFAULT NULL;
+ALTER TABLE `gb_ptz_operation`
+  ADD COLUMN `profile_version` varchar(8) DEFAULT NULL,
+  ADD COLUMN `profile_charset` varchar(16) DEFAULT NULL,
+  ADD COLUMN `target_scope` varchar(16) DEFAULT NULL,
+  ADD COLUMN `target_code` varchar(20) DEFAULT NULL;
+CREATE TABLE `gb_device_control_state` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_id` bigint unsigned NOT NULL DEFAULT 0,
+  `target_scope` varchar(16) NOT NULL,
+  `target_code` varchar(20) NOT NULL,
+  `record_state` varchar(8) NOT NULL DEFAULT 'unknown',
+  `guard_state` varchar(8) NOT NULL DEFAULT 'unknown',
+  `freshness` varchar(8) NOT NULL DEFAULT 'unknown',
+  `observed_at` datetime(3) NOT NULL,
+  `source` varchar(32) NOT NULL DEFAULT 'device_status',
+  `source_sn` int NOT NULL DEFAULT 0,
+  `source_operation_id` varchar(64) DEFAULT NULL,
+  `raw_summary` text,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_control_state_target` (`target_scope`, `target_code`),
+  KEY `idx_control_state_device_target` (`device_id`, `target_scope`, `target_code`),
+  KEY `idx_control_state_channel` (`channel_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

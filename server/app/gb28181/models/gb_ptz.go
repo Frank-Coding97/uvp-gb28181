@@ -16,16 +16,22 @@ const (
 
 // GbPTZOperation is the immutable command audit and correlation record.
 type GbPTZOperation struct {
-	ID                   uint               `gorm:"primaryKey;index:idx_ptz_operation_channel_cmd_id,priority:3" json:"id"`
-	OperationID          string             `gorm:"column:operation_id;size:64;not null;uniqueIndex:uk_ptz_operation_id" json:"operationId"`
-	IdempotencyKey       string             `gorm:"column:idempotency_key;size:128;not null;uniqueIndex:uk_ptz_operation_idempotency,priority:2" json:"-"`
-	DeviceID             uint               `gorm:"column:device_id;not null;index:idx_ptz_operation_device_sn,priority:1" json:"deviceId"`
-	DeviceCode           string             `gorm:"column:device_code;size:20;not null" json:"deviceCode"`
-	ChannelID            uint               `gorm:"column:channel_id;not null;uniqueIndex:uk_ptz_operation_idempotency,priority:1;index:idx_ptz_operation_channel_time,priority:1;index:idx_ptz_operation_channel_cmd_id,priority:1" json:"channelId"`
-	ChannelCode          string             `gorm:"column:channel_code;size:20;not null" json:"channelCode"`
-	CmdType              string             `gorm:"column:cmd_type;size:64;not null;index:idx_ptz_operation_channel_cmd_id,priority:2" json:"cmdType"`
-	Action               string             `gorm:"column:action;size:64" json:"action"`
-	PayloadJSON          string             `gorm:"column:payload_json;type:text" json:"-"`
+	ID             uint   `gorm:"primaryKey;index:idx_ptz_operation_channel_cmd_id,priority:3" json:"id"`
+	OperationID    string `gorm:"column:operation_id;size:64;not null;uniqueIndex:uk_ptz_operation_id" json:"operationId"`
+	IdempotencyKey string `gorm:"column:idempotency_key;size:128;not null;uniqueIndex:uk_ptz_operation_idempotency,priority:2" json:"-"`
+	DeviceID       uint   `gorm:"column:device_id;not null;index:idx_ptz_operation_device_sn,priority:1" json:"deviceId"`
+	DeviceCode     string `gorm:"column:device_code;size:20;not null" json:"deviceCode"`
+	ChannelID      uint   `gorm:"column:channel_id;not null;uniqueIndex:uk_ptz_operation_idempotency,priority:1;index:idx_ptz_operation_channel_time,priority:1;index:idx_ptz_operation_channel_cmd_id,priority:1" json:"channelId"`
+	ChannelCode    string `gorm:"column:channel_code;size:20;not null" json:"channelCode"`
+	CmdType        string `gorm:"column:cmd_type;size:64;not null;index:idx_ptz_operation_channel_cmd_id,priority:2" json:"cmdType"`
+	Action         string `gorm:"column:action;size:64" json:"action"`
+	PayloadJSON    string `gorm:"column:payload_json;type:text" json:"-"`
+	// Profile and target are immutable snapshots. They make retries and
+	// scheduler recovery deterministic even if the device override changes.
+	ProfileVersion       string             `gorm:"column:profile_version;size:8" json:"profileVersion"`
+	ProfileCharset       string             `gorm:"column:profile_charset;size:16" json:"profileCharset"`
+	TargetScope          string             `gorm:"column:target_scope;size:16" json:"targetScope"`
+	TargetCode           string             `gorm:"column:target_code;size:20" json:"targetCode"`
 	SN                   int                `gorm:"column:sn;not null;index:idx_ptz_operation_device_sn,priority:2" json:"sn"`
 	CallID               string             `gorm:"column:call_id;size:255;index:idx_ptz_operation_call_id" json:"-"`
 	CSeq                 string             `gorm:"column:cseq;size:64" json:"-"`
@@ -57,6 +63,55 @@ type GbPTZOperation struct {
 }
 
 func (GbPTZOperation) TableName() string { return "gb_ptz_operation" }
+
+// ControlTargetScope identifies the object whose DeviceID is sent on the
+// wire. Page channel and parent device codes are intentionally distinct.
+const (
+	ControlTargetScopeChannel = "channel"
+	ControlTargetScopeDevice  = "device"
+	ControlTargetScopeAlarm   = "alarm"
+)
+
+// ControlStateValue is tri-state by design: no DeviceStatus response is not
+// equivalent to an OFF response.
+type ControlStateValue = string
+
+const (
+	ControlStateOn      = "on"
+	ControlStateOff     = "off"
+	ControlStateUnknown = "unknown"
+)
+
+type ControlStateFreshness = string
+
+const (
+	ControlStateFresh            = "fresh"
+	ControlStateStale            = "stale"
+	ControlStateUnknownFreshness = "unknown"
+)
+
+// GbDeviceControlState stores the last valid DeviceStatus facts per target.
+// RecordState and GuardState remain unknown until a matching device response
+// is parsed; the row is therefore safe to expose to a UI as a fact cache.
+type GbDeviceControlState struct {
+	ID                uint                  `gorm:"primaryKey" json:"id"`
+	DeviceID          uint                  `gorm:"column:device_id;not null;index:idx_control_state_device_target" json:"deviceId"`
+	ChannelID         uint                  `gorm:"column:channel_id;index:idx_control_state_channel" json:"channelId"`
+	TargetScope       string                `gorm:"column:target_scope;size:16;not null;uniqueIndex:uk_control_state_target,priority:1" json:"targetScope"`
+	TargetCode        string                `gorm:"column:target_code;size:20;not null;uniqueIndex:uk_control_state_target,priority:2" json:"targetCode"`
+	RecordState       ControlStateValue     `gorm:"column:record_state;size:8;not null;default:unknown" json:"recordState"`
+	GuardState        ControlStateValue     `gorm:"column:guard_state;size:8;not null;default:unknown" json:"guardState"`
+	Freshness         ControlStateFreshness `gorm:"column:freshness;size:8;not null;default:unknown" json:"freshness"`
+	ObservedAt        time.Time             `gorm:"column:observed_at;not null" json:"observedAt"`
+	Source            string                `gorm:"column:source;size:32;not null;default:device_status" json:"source"`
+	SourceSN          int                   `gorm:"column:source_sn;not null;default:0" json:"sourceSn"`
+	SourceOperationID *string               `gorm:"column:source_operation_id;size:64" json:"sourceOperationId"`
+	RawSummary        string                `gorm:"column:raw_summary;type:text" json:"-"`
+	CreatedAt         time.Time             `gorm:"column:created_at;not null" json:"createdAt"`
+	UpdatedAt         time.Time             `gorm:"column:updated_at;not null" json:"updatedAt"`
+}
+
+func (GbDeviceControlState) TableName() string { return "gb_device_control_state" }
 
 type PTZFreshness string
 

@@ -9,6 +9,10 @@ CREATE TABLE IF NOT EXISTS `gb_ptz_operation` (
   `cmd_type` varchar(64) NOT NULL,
   `action` varchar(64) DEFAULT NULL,
   `payload_json` text,
+  `profile_version` varchar(8) DEFAULT NULL,
+  `profile_charset` varchar(16) DEFAULT NULL,
+  `target_scope` varchar(16) DEFAULT NULL,
+  `target_code` varchar(20) DEFAULT NULL,
   `sn` int NOT NULL,
   `call_id` varchar(255) DEFAULT NULL,
   `cseq` varchar(64) DEFAULT NULL,
@@ -150,3 +154,25 @@ CREATE TABLE IF NOT EXISTS `gb_ptz_cruise_track` (
   UNIQUE KEY `uk_ptz_cruise_channel_track` (`channel_id`,`track_id`),
   KEY `idx_ptz_cruise_device` (`device_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 PTZ cruise tracks';
+
+CREATE TABLE IF NOT EXISTS `gb_device_control_state` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_id` bigint unsigned NOT NULL DEFAULT 0,
+  `target_scope` varchar(16) NOT NULL,
+  `target_code` varchar(20) NOT NULL,
+  `record_state` varchar(8) NOT NULL DEFAULT 'unknown',
+  `guard_state` varchar(8) NOT NULL DEFAULT 'unknown',
+  `freshness` varchar(8) NOT NULL DEFAULT 'unknown',
+  `observed_at` datetime(3) NOT NULL,
+  `source` varchar(32) NOT NULL DEFAULT 'device_status',
+  `source_sn` int NOT NULL DEFAULT 0,
+  `source_operation_id` varchar(64) DEFAULT NULL,
+  `raw_summary` text,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_control_state_target` (`target_scope`, `target_code`),
+  KEY `idx_control_state_device_target` (`device_id`, `target_scope`, `target_code`),
+  KEY `idx_control_state_channel` (`channel_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

@@ -1636,3 +1636,37 @@ CREATE INDEX idx_ptz_preset_device ON gb_ptz_preset (device_id);
 CREATE INDEX idx_ptz_cruise_device ON gb_ptz_cruise_track (device_id);
 CREATE INDEX idx_ptz_attempt_status_lease ON gb_ptz_operation_attempt (status, lease_until);
 CREATE INDEX idx_ptz_home_position_device ON gb_ptz_home_position (device_id);
+
+ALTER TABLE gb_device
+    ADD COLUMN reported_version VARCHAR(8) NOT NULL DEFAULT '',
+    ADD COLUMN reported_version_at TIMESTAMP(3),
+    ADD COLUMN protocol_override VARCHAR(8) NOT NULL DEFAULT 'auto',
+    ADD COLUMN effective_version VARCHAR(8) NOT NULL DEFAULT '2016',
+    ADD COLUMN effective_version_source VARCHAR(16) NOT NULL DEFAULT 'default',
+    ADD COLUMN effective_version_at TIMESTAMP(3);
+ALTER TABLE gb_ptz_operation
+    ADD COLUMN profile_version VARCHAR(8),
+    ADD COLUMN profile_charset VARCHAR(16),
+    ADD COLUMN target_scope VARCHAR(16),
+    ADD COLUMN target_code VARCHAR(20);
+CREATE TABLE gb_device_control_state (
+    id BIGSERIAL PRIMARY KEY,
+    device_id BIGINT NOT NULL,
+    channel_id BIGINT NOT NULL DEFAULT 0,
+    target_scope VARCHAR(16) NOT NULL,
+    target_code VARCHAR(20) NOT NULL,
+    record_state VARCHAR(8) NOT NULL DEFAULT 'unknown',
+    guard_state VARCHAR(8) NOT NULL DEFAULT 'unknown',
+    freshness VARCHAR(8) NOT NULL DEFAULT 'unknown',
+    observed_at TIMESTAMP(3) NOT NULL,
+    source VARCHAR(32) NOT NULL DEFAULT 'device_status',
+    source_sn INTEGER NOT NULL DEFAULT 0,
+    source_operation_id VARCHAR(64),
+    raw_summary TEXT,
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    CONSTRAINT uk_control_state_target UNIQUE (target_scope, target_code)
+);
+CREATE INDEX idx_control_state_device_target ON gb_device_control_state (device_id, target_scope, target_code);
+CREATE INDEX idx_control_state_channel ON gb_device_control_state (channel_id);
+CREATE INDEX idx_ptz_operation_target ON gb_ptz_operation (device_code, target_scope, target_code, status);

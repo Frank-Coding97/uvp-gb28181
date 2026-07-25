@@ -28,6 +28,19 @@ const (
 	SubscribeFallback   SubscribeCapability = "fallback"
 )
 
+// ProtocolVersion is the normalized wire profile used by a new operation.
+// The values intentionally match the public device API and the protocol
+// resolver so database rows can be inspected without decoding XML.
+const (
+	ProtocolVersion2016           = "2016"
+	ProtocolVersion2022           = "2022"
+	ProtocolOverrideAuto          = "auto"
+	ProtocolVersionSourceRegister = "register"
+	ProtocolVersionSourceOverride = "override"
+	ProtocolVersionSourceHistory  = "history"
+	ProtocolVersionSourceDefault  = "default"
+)
+
 // GbDevice 国标设备模型(注册/心跳主体)
 // 在线模型:keepalive_time + keepalive_interval 是事实真相,status 是物化缓存(由事实派生)
 type GbDevice struct {
@@ -55,6 +68,14 @@ type GbDevice struct {
 	SubscribeCapability SubscribeCapability `gorm:"column:subscribe_capability;size:16;default:unknown;index:idx_subscribe_capability,priority:1;comment:订阅能力 unknown/subscribed/fallback" json:"subscribeCapability"`
 	SubscribeLastTest   *time.Time          `gorm:"column:subscribe_last_test;index:idx_subscribe_capability,priority:2;comment:最近一次 SUBSCRIBE 尝试" json:"subscribeLastTest"`
 	SubscribeExpiresAt  *time.Time          `gorm:"column:subscribe_expires_at;comment:订阅过期时刻(提前续订)" json:"subscribeExpiresAt"`
+	// Dual-version profile archive. These fields are nullable/loosely typed so
+	// legacy device rows can be upgraded without inventing a 2022 declaration.
+	ReportedVersion        string     `gorm:"column:reported_version;size:8;default:'';comment:最近一次 X-GB-Ver 原始版本" json:"reportedVersion"`
+	ReportedVersionAt      *time.Time `gorm:"column:reported_version_at;comment:最近一次 X-GB-Ver 时间" json:"reportedVersionAt"`
+	ProtocolOverride       string     `gorm:"column:protocol_override;size:8;not null;default:auto;comment:协议版本覆盖 auto/2016/2022" json:"protocolOverride"`
+	EffectiveVersion       string     `gorm:"column:effective_version;size:8;not null;default:2016;comment:当前生效协议版本" json:"effectiveVersion"`
+	EffectiveVersionSource string     `gorm:"column:effective_version_source;size:16;not null;default:default;comment:生效版本来源" json:"effectiveVersionSource"`
+	EffectiveVersionAt     *time.Time `gorm:"column:effective_version_at;comment:生效版本更新时间" json:"effectiveVersionAt"`
 }
 
 // IsOnlineByFact 从事实(keepalive_time)派生在线状态,不依赖 status 缓存字段
