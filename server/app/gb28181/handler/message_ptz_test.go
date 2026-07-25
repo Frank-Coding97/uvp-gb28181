@@ -22,7 +22,7 @@ func (r *messagePTZRecorder) OnPTZMessage(_ context.Context, _, _, _ string, bod
 }
 
 func TestTxKindFromCmd_PTZ2022(t *testing.T) {
-	for _, cmd := range []string{manscdp.CmdDeviceControl, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery} {
+	for _, cmd := range []string{manscdp.CmdDeviceControl, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery} {
 		require.Equal(t, metrics.TxPTZ, txKindFromCmd(cmd), cmd)
 	}
 }
@@ -38,6 +38,24 @@ func TestMessageHandlerPTZResponseDispatchesAndAcknowledges(t *testing.T) {
 	prepareNotifyRequest(req)
 	req.SetBody([]byte(`<Response><CmdType>DeviceControl</CmdType><SN>7</SN><DeviceID>C</DeviceID><Result>OK</Result></Response>`))
 	callID := sip.CallIDHeader("ptz-message")
+	req.AppendHeader(&callID)
+	req.AppendHeader(&sip.CSeqHeader{SeqNo: 3, MethodName: sip.MESSAGE})
+	tx := siptest.NewServerTxRecorder(req)
+	recorder := &messagePTZRecorder{}
+	handler := NewMessageHandler(gbconfig.Config{})
+	handler.SetPTZProcessor(recorder)
+	handler.Handle(req, tx)
+
+	require.Len(t, recorder.bodies, 1)
+	require.Len(t, tx.Result(), 1)
+	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
+}
+
+func TestMessageHandlerPTZPositionDispatchesAndAcknowledges(t *testing.T) {
+	req := sip.NewRequest(sip.MESSAGE, sip.Uri{User: "platform", Host: "3402000000"})
+	prepareNotifyRequest(req)
+	req.SetBody([]byte("<Response><CmdType>PTZPosition</CmdType><SN>7</SN><DeviceID>C</DeviceID><Pan>1</Pan></Response>"))
+	callID := sip.CallIDHeader("ptz-position-message")
 	req.AppendHeader(&callID)
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 3, MethodName: sip.MESSAGE})
 	tx := siptest.NewServerTxRecorder(req)

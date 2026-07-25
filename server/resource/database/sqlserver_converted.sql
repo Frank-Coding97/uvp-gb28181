@@ -479,6 +479,44 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 -- Table structure for sys_department
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
+-- GB28181 device registry and dual-version profile archive.
+IF OBJECT_ID(N'gb_device', N'U') IS NOT NULL DROP TABLE [gb_device];
+CREATE TABLE [gb_device] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [device_id] NVARCHAR(20) NOT NULL CONSTRAINT [df_gb_device_device_id] DEFAULT N'',
+    [name] NVARCHAR(255) NOT NULL CONSTRAINT [df_gb_device_name] DEFAULT N'',
+    [password] NVARCHAR(255) NOT NULL CONSTRAINT [df_gb_device_password] DEFAULT N'',
+    [transport] NVARCHAR(8) NOT NULL CONSTRAINT [df_gb_device_transport] DEFAULT N'',
+    [manufacturer] NVARCHAR(255) NOT NULL CONSTRAINT [df_gb_device_manufacturer] DEFAULT N'',
+    [model] NVARCHAR(255) NOT NULL CONSTRAINT [df_gb_device_model] DEFAULT N'',
+    [firmware] NVARCHAR(255) NOT NULL CONSTRAINT [df_gb_device_firmware] DEFAULT N'',
+    [ip] NVARCHAR(64) NOT NULL CONSTRAINT [df_gb_device_ip] DEFAULT N'',
+    [port] INT NULL CONSTRAINT [df_gb_device_port] DEFAULT 0,
+    [register_time] DATETIME2(3) NULL,
+    [register_expire_at] DATETIME2(3) NULL,
+    [keepalive_time] DATETIME2(3) NULL,
+    [keepalive_interval] INT NULL CONSTRAINT [df_gb_device_keepalive_interval] DEFAULT 60,
+    [expires] INT NULL CONSTRAINT [df_gb_device_expires] DEFAULT 0,
+    [status] TINYINT NULL CONSTRAINT [df_gb_device_status] DEFAULT 0,
+    [offline_at] DATETIME2(3) NULL,
+    [created_at] DATETIME2(3) NULL,
+    [updated_at] DATETIME2(3) NULL,
+    [deleted_at] DATETIME2(3) NULL,
+    [created_by] BIGINT NULL CONSTRAINT [df_gb_device_created_by] DEFAULT 0,
+    [owner_dept_id] BIGINT NOT NULL CONSTRAINT [df_gb_device_owner_dept_id] DEFAULT 0,
+    [reported_version] NVARCHAR(8) NOT NULL CONSTRAINT [df_gb_device_reported_version] DEFAULT N'',
+    [reported_version_at] DATETIME2(3) NULL,
+    [protocol_override] NVARCHAR(8) NOT NULL CONSTRAINT [df_gb_device_protocol_override] DEFAULT N'auto',
+    [effective_version] NVARCHAR(8) NOT NULL CONSTRAINT [df_gb_device_effective_version] DEFAULT N'2016',
+    [effective_version_source] NVARCHAR(16) NOT NULL CONSTRAINT [df_gb_device_effective_source] DEFAULT N'default',
+    [effective_version_at] DATETIME2(3) NULL,
+    CONSTRAINT [pk_gb_device] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_gb_device_id] UNIQUE ([device_id])
+);
+CREATE INDEX [idx_gb_device_deleted_at] ON [gb_device] ([deleted_at]);
+CREATE INDEX [idx_gb_device_owner_dept_deleted] ON [gb_device] ([owner_dept_id], [deleted_at]);
+CREATE INDEX [idx_gb_device_status_keepalive] ON [gb_device] ([status], [keepalive_time]);
+
 -- GB28181 PTZ / home-position tables (2026-07-24).
 IF OBJECT_ID(N'gb_ptz_home_position', N'U') IS NOT NULL DROP TABLE [gb_ptz_home_position];
 IF OBJECT_ID(N'gb_ptz_operation_attempt', N'U') IS NOT NULL DROP TABLE [gb_ptz_operation_attempt];
@@ -534,6 +572,7 @@ CREATE TABLE [gb_ptz_operation] (
 CREATE TABLE [gb_ptz_state] (
     [id] BIGINT IDENTITY(1,1) NOT NULL,
     [device_id] BIGINT NOT NULL,
+    [device_code] NVARCHAR(20) NOT NULL,
     [channel_id] BIGINT NOT NULL,
     [channel_code] NVARCHAR(20) NOT NULL,
     [pan] DECIMAL(18,6),
@@ -575,6 +614,7 @@ CREATE TABLE [gb_ptz_cruise_track] (
     [name] NVARCHAR(255),
     [enabled] BIT,
     [detail_json] NVARCHAR(MAX),
+    [last_operation_id] NVARCHAR(64),
     [raw_summary] NVARCHAR(MAX),
     [device_time] DATETIME2(3),
     [created_at] DATETIME2(3) NOT NULL,
@@ -1429,16 +1469,11 @@ INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUE
 (7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
-IF COL_LENGTH(N'gb_device', N'reported_version') IS NULL ALTER TABLE [gb_device] ADD [reported_version] NVARCHAR(8) NOT NULL CONSTRAINT [df_full_gb_device_reported_version] DEFAULT N'';
-IF COL_LENGTH(N'gb_device', N'reported_version_at') IS NULL ALTER TABLE [gb_device] ADD [reported_version_at] DATETIME2(3) NULL;
-IF COL_LENGTH(N'gb_device', N'protocol_override') IS NULL ALTER TABLE [gb_device] ADD [protocol_override] NVARCHAR(8) NOT NULL CONSTRAINT [df_full_gb_device_protocol_override] DEFAULT N'auto';
-IF COL_LENGTH(N'gb_device', N'effective_version') IS NULL ALTER TABLE [gb_device] ADD [effective_version] NVARCHAR(8) NOT NULL CONSTRAINT [df_full_gb_device_effective_version] DEFAULT N'2016';
-IF COL_LENGTH(N'gb_device', N'effective_version_source') IS NULL ALTER TABLE [gb_device] ADD [effective_version_source] NVARCHAR(16) NOT NULL CONSTRAINT [df_full_gb_device_effective_source] DEFAULT N'default';
-IF COL_LENGTH(N'gb_device', N'effective_version_at') IS NULL ALTER TABLE [gb_device] ADD [effective_version_at] DATETIME2(3) NULL;
 IF COL_LENGTH(N'gb_ptz_operation', N'profile_version') IS NULL ALTER TABLE [gb_ptz_operation] ADD [profile_version] NVARCHAR(8) NULL;
 IF COL_LENGTH(N'gb_ptz_operation', N'profile_charset') IS NULL ALTER TABLE [gb_ptz_operation] ADD [profile_charset] NVARCHAR(16) NULL;
 IF COL_LENGTH(N'gb_ptz_operation', N'target_scope') IS NULL ALTER TABLE [gb_ptz_operation] ADD [target_scope] NVARCHAR(16) NULL;
 IF COL_LENGTH(N'gb_ptz_operation', N'target_code') IS NULL ALTER TABLE [gb_ptz_operation] ADD [target_code] NVARCHAR(20) NULL;
+IF COL_LENGTH(N'gb_ptz_operation', N'scope_key') IS NULL ALTER TABLE [gb_ptz_operation] ADD [scope_key] NVARCHAR(64) NULL;
 IF OBJECT_ID(N'gb_device_control_state', N'U') IS NULL
 BEGIN
     CREATE TABLE [gb_device_control_state] (
@@ -1454,16 +1489,86 @@ BEGIN
         [source] NVARCHAR(32) NOT NULL CONSTRAINT [df_full_control_state_source] DEFAULT N'device_status',
         [source_sn] INT NOT NULL CONSTRAINT [df_full_control_state_source_sn] DEFAULT 0,
         [source_operation_id] NVARCHAR(64) NULL,
+        [source_operation_seq] BIGINT NOT NULL CONSTRAINT [df_full_control_state_source_operation_seq] DEFAULT 0,
         [raw_summary] NVARCHAR(MAX) NULL,
         [created_at] DATETIME2(3) NOT NULL,
         [updated_at] DATETIME2(3) NOT NULL,
         CONSTRAINT [pk_full_gb_device_control_state] PRIMARY KEY ([id]),
-        CONSTRAINT [uk_full_control_state_target] UNIQUE ([target_scope], [target_code])
+        CONSTRAINT [uk_control_state_target] UNIQUE ([device_id], [target_scope], [target_code])
     );
 END;
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_control_state') AND name = N'idx_full_control_state_device_target')
-    CREATE INDEX [idx_full_control_state_device_target] ON [gb_device_control_state] ([device_id], [target_scope], [target_code]);
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_control_state') AND name = N'idx_full_control_state_channel')
-    CREATE INDEX [idx_full_control_state_channel] ON [gb_device_control_state] ([channel_id]);
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_ptz_operation') AND name = N'idx_full_ptz_operation_target')
-    CREATE INDEX [idx_full_ptz_operation_target] ON [gb_ptz_operation] ([device_code], [target_scope], [target_code], [status]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_control_state') AND name = N'idx_control_state_device_target')
+    CREATE INDEX [idx_control_state_device_target] ON [gb_device_control_state] ([device_id], [target_scope], [target_code]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_control_state') AND name = N'idx_control_state_channel')
+    CREATE INDEX [idx_control_state_channel] ON [gb_device_control_state] ([channel_id]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_ptz_operation') AND name = N'idx_ptz_operation_target')
+    CREATE INDEX [idx_ptz_operation_target] ON [gb_ptz_operation] ([device_code], [target_scope], [target_code], [status]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_ptz_operation') AND name = N'idx_ptz_operation_device_scope_time')
+    CREATE INDEX [idx_ptz_operation_device_scope_time] ON [gb_ptz_operation] ([device_id], [scope_key], [created_at]);
+
+IF OBJECT_ID(N'gb_alarm_resource', N'U') IS NULL
+BEGIN
+    CREATE TABLE [gb_alarm_resource] (
+        [id] BIGINT IDENTITY(1,1) NOT NULL,
+        [owner_dept_id] BIGINT NOT NULL,
+        [device_id] BIGINT NOT NULL CONSTRAINT [df_full_alarm_resource_device_id] DEFAULT 0,
+        [device_code] NVARCHAR(20) NOT NULL,
+        [alarm_code] NVARCHAR(20) NOT NULL,
+        [resource_type] NVARCHAR(16) NOT NULL,
+        [type_code] NVARCHAR(3) NOT NULL,
+        [name] NVARCHAR(255) NOT NULL,
+        [raw_parent_ids] NVARCHAR(512) NOT NULL CONSTRAINT [df_full_alarm_resource_parents] DEFAULT N'',
+        [status] SMALLINT NOT NULL CONSTRAINT [df_full_alarm_resource_status] DEFAULT 0,
+        [created_at] DATETIME2(3) NOT NULL,
+        [updated_at] DATETIME2(3) NOT NULL,
+        [deleted_at] DATETIME2(3) NULL,
+        CONSTRAINT [pk_full_gb_alarm_resource] PRIMARY KEY ([id]),
+        CONSTRAINT [uk_alarm_resource_code] UNIQUE ([owner_dept_id], [device_code], [alarm_code])
+    );
+END;
+
+IF OBJECT_ID(N'gb_alarm_resource_parent', N'U') IS NULL
+BEGIN
+    CREATE TABLE [gb_alarm_resource_parent] (
+        [id] BIGINT IDENTITY(1,1) NOT NULL,
+        [alarm_resource_id] BIGINT NOT NULL,
+        [parent_code] NVARCHAR(20) NOT NULL,
+        [created_at] DATETIME2(3) NOT NULL,
+        CONSTRAINT [pk_full_gb_alarm_resource_parent] PRIMARY KEY ([id]),
+        CONSTRAINT [uk_alarm_resource_parent] UNIQUE ([alarm_resource_id], [parent_code])
+    );
+END;
+
+IF OBJECT_ID(N'gb_alarm_binding', N'U') IS NULL
+BEGIN
+    CREATE TABLE [gb_alarm_binding] (
+        [id] BIGINT IDENTITY(1,1) NOT NULL,
+        [device_id] BIGINT NOT NULL,
+        [channel_code] NVARCHAR(20) NOT NULL,
+        [alarm_resource_id] BIGINT NOT NULL,
+        [source] NVARCHAR(16) NOT NULL CONSTRAINT [df_full_alarm_binding_source] DEFAULT N'manual',
+        [created_at] DATETIME2(3) NOT NULL,
+        [updated_at] DATETIME2(3) NOT NULL,
+        CONSTRAINT [pk_full_gb_alarm_binding] PRIMARY KEY ([id]),
+        CONSTRAINT [uk_alarm_binding_channel] UNIQUE ([device_id], [channel_code])
+    );
+END;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_resource') AND name = N'idx_alarm_resource_device')
+    CREATE INDEX [idx_alarm_resource_device] ON [gb_alarm_resource] ([owner_dept_id], [device_code]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_resource') AND name = N'idx_alarm_resource_device_id')
+    CREATE INDEX [idx_alarm_resource_device_id] ON [gb_alarm_resource] ([device_id]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_resource') AND name = N'idx_alarm_resource_alarm_code')
+    CREATE INDEX [idx_alarm_resource_alarm_code] ON [gb_alarm_resource] ([alarm_code]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_resource') AND name = N'idx_alarm_resource_type')
+    CREATE INDEX [idx_alarm_resource_type] ON [gb_alarm_resource] ([resource_type]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_resource') AND name = N'idx_alarm_resource_deleted_at')
+    CREATE INDEX [idx_alarm_resource_deleted_at] ON [gb_alarm_resource] ([deleted_at]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_resource_parent') AND name = N'idx_alarm_parent_resource')
+    CREATE INDEX [idx_alarm_parent_resource] ON [gb_alarm_resource_parent] ([alarm_resource_id]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_resource_parent') AND name = N'idx_alarm_parent_code')
+    CREATE INDEX [idx_alarm_parent_code] ON [gb_alarm_resource_parent] ([parent_code]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_binding') AND name = N'idx_alarm_binding_device')
+    CREATE INDEX [idx_alarm_binding_device] ON [gb_alarm_binding] ([device_id]);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_alarm_binding') AND name = N'idx_alarm_binding_resource')
+    CREATE INDEX [idx_alarm_binding_resource] ON [gb_alarm_binding] ([alarm_resource_id]);

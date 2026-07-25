@@ -64,6 +64,9 @@ func (r *GormRepo) Create(ctx context.Context, session *models.GbTalkSession, pu
 	}
 	row := *session
 	row.ID = 0
+	if row.Mode == "" {
+		row.Mode = models.TalkSessionModeTalk
+	}
 	row.PublishTokenHash = hashPublishToken(publishToken)
 	row.TokenConsumedAt = nil
 	setActiveKeys(&row)

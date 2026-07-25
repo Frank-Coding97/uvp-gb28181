@@ -70,7 +70,7 @@ type GbDevice struct {
 	SubscribeExpiresAt  *time.Time          `gorm:"column:subscribe_expires_at;comment:订阅过期时刻(提前续订)" json:"subscribeExpiresAt"`
 	// Dual-version profile archive. These fields are nullable/loosely typed so
 	// legacy device rows can be upgraded without inventing a 2022 declaration.
-	ReportedVersion        string     `gorm:"column:reported_version;size:8;default:'';comment:最近一次 X-GB-Ver 原始版本" json:"reportedVersion"`
+	ReportedVersion        string     `gorm:"column:reported_version;size:8;not null;default:'';comment:最近一次 X-GB-Ver 原始版本" json:"reportedVersion"`
 	ReportedVersionAt      *time.Time `gorm:"column:reported_version_at;comment:最近一次 X-GB-Ver 时间" json:"reportedVersionAt"`
 	ProtocolOverride       string     `gorm:"column:protocol_override;size:8;not null;default:auto;comment:协议版本覆盖 auto/2016/2022" json:"protocolOverride"`
 	EffectiveVersion       string     `gorm:"column:effective_version;size:8;not null;default:2016;comment:当前生效协议版本" json:"effectiveVersion"`

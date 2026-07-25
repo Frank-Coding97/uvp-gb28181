@@ -11,8 +11,9 @@ func TestResolveVersionMapping(t *testing.T) {
 		wantWarning WarningCode
 	}{
 		{name: "missing", raw: "", wantVersion: Version2016, wantSource: SourceDefault, wantWarning: WarningMissingVersion},
-		{name: "2011-1.0", raw: "1.0", wantVersion: Version2016, wantSource: SourceRegister},
-		{name: "2011-1.1", raw: "1.1", wantVersion: Version2016, wantSource: SourceRegister},
+		{name: "2011-1.0", raw: "1.0", wantVersion: Version2016, wantSource: SourceRegister, wantWarning: WarningLegacyVersion},
+		{name: "2011-1.1", raw: "1.1", wantVersion: Version2016, wantSource: SourceRegister, wantWarning: WarningLegacyVersion},
+		{name: "unknown-1.x", raw: "1.2", wantVersion: Version2016, wantSource: SourceRegister, wantWarning: WarningUnknownVersion},
 		{name: "2016", raw: "2.0", wantVersion: Version2016, wantSource: SourceRegister},
 		{name: "2022", raw: "3.0", wantVersion: Version2022, wantSource: SourceRegister},
 		{name: "invalid", raw: "not-a-version", wantVersion: Version2016, wantSource: SourceRegister, wantWarning: WarningInvalidVersion},

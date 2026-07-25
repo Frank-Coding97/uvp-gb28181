@@ -72,6 +72,11 @@ func TestDetectMessageKind(t *testing.T) {
 			want: metrics.TxPTZ,
 		},
 		{
+			name: "PTZPosition query",
+			body: []byte("<Query><CmdType>PTZPosition</CmdType><SN>1</SN><DeviceID>C</DeviceID></Query>"),
+			want: metrics.TxPTZ,
+		},
+		{
 			name: "Unknown body",
 			body: []byte(`<random/>`),
 			want: metrics.TxUnknown,

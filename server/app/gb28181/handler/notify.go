@@ -91,7 +91,8 @@ func (h *NotifyHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	callID, cseq := sipPairKey(req)
 	event := strings.ToLower(strings.TrimSpace(strings.Split(headerValue(req, "Event"), ";")[0]))
-	if ptzProcessor != nil && (head.CmdType == manscdp.CmdPTZPrecisePosition || strings.Contains(event, "ptzprecise")) {
+	if ptzProcessor != nil && (head.CmdType == manscdp.CmdPTZPrecisePosition || head.CmdType == manscdp.CmdPTZPosition ||
+		strings.Contains(event, "ptzprecise") || strings.Contains(event, "ptzposition")) {
 		if err := ptzProcessor.OnPTZNotify(context.Background(), head.DeviceID, callID, cseq, req.Body()); err != nil {
 			app.ZapLog.Warn("GB28181 PTZ 精准通知处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
 		}

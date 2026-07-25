@@ -38,6 +38,17 @@ func TestParseDeviceStatusResponseTriStateAndNumVariants(t *testing.T) {
 	}
 }
 
+func TestParseDeviceStatusResponseReadsAlarmListNum(t *testing.T) {
+	body := []byte(`<Response><CmdType>DeviceStatus</CmdType><SN>8</SN><DeviceID>D</DeviceID><Result>OK</Result><Alarmstatus Num="2"><Item><DeviceID>A</DeviceID><DutyStatus>ONDUTY</DutyStatus></Item><Item><DeviceID>B</DeviceID><DutyStatus>ALARM</DutyStatus></Item></Alarmstatus></Response>`)
+
+	got, err := ParseDeviceStatusResponseFor(body, DeviceStatusExpectation{SN: 8, DeviceID: "D"})
+	require.NoError(t, err)
+	require.Equal(t, 2, got.AlarmNum)
+	require.Len(t, got.AlarmItems, 2)
+	require.Zero(t, got.AlarmItems[0].Num)
+	require.Zero(t, got.AlarmItems[1].Num)
+}
+
 func TestParseDeviceStatusMissingFieldsRemainUnknown(t *testing.T) {
 	body := []byte(`<Response><CmdType>DeviceStatus</CmdType><SN>1</SN><DeviceID>D</DeviceID><Result>OK</Result><Alarmstatus><Item><DeviceID>A</DeviceID></Item></Alarmstatus></Response>`)
 	got, err := ParseDeviceStatusResponse(body)

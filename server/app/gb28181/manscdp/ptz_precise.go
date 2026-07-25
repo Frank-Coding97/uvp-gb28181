@@ -13,6 +13,7 @@ import (
 
 const (
 	CmdPTZPreciseCtrl        = "PTZPreciseCtrl"
+	CmdPTZPosition           = "PTZPosition"
 	CmdPresetQuery           = "PresetQuery"
 	CmdHomePositionQuery     = "HomePositionQuery"
 	CmdCruiseTrackListQuery  = "CruiseTrackListQuery"
@@ -40,6 +41,20 @@ type preciseControlXML struct {
 	Focus    *float64 `xml:"Focus,omitempty"`
 	Iris     *float64 `xml:"Iris,omitempty"`
 	Speed    int      `xml:"Speed,omitempty"`
+}
+
+type preciseDeviceControlXML struct {
+	XMLName        xml.Name             `xml:"Control"`
+	CmdType        string               `xml:"CmdType"`
+	SN             int                  `xml:"SN"`
+	DeviceID       string               `xml:"DeviceID"`
+	PTZPreciseCtrl preciseControlValues `xml:"PTZPreciseCtrl"`
+}
+
+type preciseControlValues struct {
+	Pan  *float64 `xml:"Pan,omitempty"`
+	Tilt *float64 `xml:"Tilt,omitempty"`
+	Zoom *float64 `xml:"Zoom,omitempty"`
 }
 
 type ptzQueryXML struct {
@@ -77,6 +92,9 @@ func BuildPTZPreciseControl(channelID string, sn int, command PTZPreciseControl)
 // BuildPTZPreciseControlWithProfile builds a precise PTZ control body using
 // the profile's actual XML charset and declaration.
 func BuildPTZPreciseControlWithProfile(profile protocol.Profile, channelID string, sn int, command PTZPreciseControl) ([]byte, error) {
+	if profile.SupportsPrecisePTZ() {
+		return BuildPTZPreciseDeviceControlWithProfile(profile, channelID, sn, command)
+	}
 	if err := validatePTZQueryTarget(channelID, sn); err != nil {
 		return nil, err
 	}
@@ -98,6 +116,41 @@ func BuildPTZPreciseControlWithProfile(profile protocol.Profile, channelID strin
 		CmdType: CmdPTZPreciseCtrl, SN: sn, DeviceID: channelID,
 		Pan: command.Pan, Tilt: command.Tilt, Zoom: command.Zoom,
 		Focus: command.Focus, Iris: command.Iris, Speed: command.Speed,
+	})
+}
+
+// BuildPTZPreciseDeviceControlWithProfile is the GB/T 28181-2022 precise
+// position form: DeviceControl wraps PTZPreciseCtrl and only Pan/Tilt/Zoom are
+// standard fields. Focus, iris and speed remain vendor extensions and are
+// rejected instead of being silently placed on the wire.
+func BuildPTZPreciseDeviceControlWithProfile(profile protocol.Profile, channelID string, sn int, command PTZPreciseControl) ([]byte, error) {
+	if !profile.SupportsPrecisePTZ() {
+		return nil, fmt.Errorf("当前协议版本不支持精准 PTZ")
+	}
+	if err := validatePTZQueryTarget(channelID, sn); err != nil {
+		return nil, err
+	}
+	if command.Focus != nil || command.Iris != nil || command.Speed != 0 {
+		return nil, fmt.Errorf("2022 精准 PTZ 仅支持 Pan/Tilt/Zoom")
+	}
+	if command.Pan == nil && command.Tilt == nil && command.Zoom == nil {
+		return nil, errors.New("2022 精准 PTZ 至少需要 Pan/Tilt/Zoom 之一")
+	}
+	for name, value := range map[string]*float64{"Pan": command.Pan, "Tilt": command.Tilt, "Zoom": command.Zoom} {
+		if value == nil {
+			continue
+		}
+		if math.IsNaN(*value) || math.IsInf(*value, 0) {
+			return nil, fmt.Errorf("%s 数值非法", name)
+		}
+		text := strconv.FormatFloat(*value, 'f', -1, 64)
+		if dot := strings.IndexByte(text, '.'); dot >= 0 && len(text)-dot-1 > 6 {
+			return nil, fmt.Errorf("%s 精度超过 6 位", name)
+		}
+	}
+	return MarshalProfiledXML(profile, preciseDeviceControlXML{
+		CmdType: CmdDeviceControl, SN: sn, DeviceID: channelID,
+		PTZPreciseCtrl: preciseControlValues{Pan: command.Pan, Tilt: command.Tilt, Zoom: command.Zoom},
 	})
 }
 
@@ -168,7 +221,11 @@ func BuildPTZPreciseStatusQuery(deviceID string, sn int) ([]byte, error) {
 }
 
 func BuildPTZPreciseStatusQueryWithProfile(profile protocol.Profile, deviceID string, sn int) ([]byte, error) {
-	return buildPTZQuery(profile, CmdPTZPreciseStatusQuery, deviceID, sn, nil)
+	cmd := CmdPTZPreciseStatusQuery
+	if profile.SupportsPrecisePTZ() {
+		cmd = CmdPTZPosition
+	}
+	return buildPTZQuery(profile, cmd, deviceID, sn, nil)
 }
 
 func buildPTZQuery(profile protocol.Profile, cmd, deviceID string, sn int, number *int) ([]byte, error) {
@@ -201,11 +258,30 @@ type PTZPreciseStatusResponse struct {
 }
 
 func ParsePTZPreciseStatusResponse(body []byte) (*PTZPreciseStatusResponse, error) {
+	return parsePTZPreciseStatusResponse(body, "")
+}
+
+// ParsePTZPreciseStatusResponseWithProfile validates the response command
+// against the protocol generation captured on the operation. The unqualified
+// parser remains permissive for legacy callers that do not have a profile.
+func ParsePTZPreciseStatusResponseWithProfile(profile protocol.Profile, body []byte) (*PTZPreciseStatusResponse, error) {
+	expected := CmdPTZPreciseStatusQuery
+	if profile.SupportsPrecisePTZ() {
+		expected = CmdPTZPosition
+	}
+	return parsePTZPreciseStatusResponse(body, expected)
+}
+
+func parsePTZPreciseStatusResponse(body []byte, expectedCmdType string) (*PTZPreciseStatusResponse, error) {
 	var response PTZPreciseStatusResponse
 	if err := newDecoder(body).Decode(&response); err != nil {
 		return nil, fmt.Errorf("解析 PTZ 精准状态失败: %w", err)
 	}
-	if response.CmdType != CmdPTZPreciseStatusQuery || response.DeviceID == "" || response.SN <= 0 {
+	validCmdType := response.CmdType == CmdPTZPreciseStatusQuery || response.CmdType == CmdPTZPosition
+	if expectedCmdType != "" {
+		validCmdType = response.CmdType == expectedCmdType
+	}
+	if !validCmdType || response.DeviceID == "" || response.SN <= 0 {
 		return nil, fmt.Errorf("非法 PTZ 精准状态响应")
 	}
 	response.Raw = append([]byte(nil), body...)
@@ -229,7 +305,7 @@ func ParsePTZPrecisePositionNotify(body []byte) (*PTZPrecisePositionNotify, erro
 	if err := newDecoder(body).Decode(&notify); err != nil {
 		return nil, fmt.Errorf("解析 PTZ 精准位置通知失败: %w", err)
 	}
-	if (notify.CmdType != CmdPTZPrecisePosition && notify.CmdType != CmdPTZPreciseStatusQuery) || notify.DeviceID == "" || notify.SN <= 0 {
+	if (notify.CmdType != CmdPTZPrecisePosition && notify.CmdType != CmdPTZPreciseStatusQuery && notify.CmdType != CmdPTZPosition) || notify.DeviceID == "" || notify.SN <= 0 {
 		return nil, fmt.Errorf("非法 PTZ 精准位置通知")
 	}
 	return &notify, nil
@@ -449,19 +525,87 @@ type CruiseTrack struct {
 }
 
 type CruisePointList struct {
-	Num    int           `xml:"Num,attr" json:"num"`
-	Points []CruisePoint `xml:"CruisePoint" json:"cruisePoints"`
+	Num      int           `xml:"-" json:"num"`
+	NumLower int           `xml:"num,attr" json:"-"`
+	NumUpper int           `xml:"Num,attr" json:"-"`
+	Points   []CruisePoint `xml:"CruisePoint" json:"cruisePoints"`
+}
+
+func (list *CruisePointList) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error {
+	var wire struct {
+		NumLower int           `xml:"num,attr"`
+		NumUpper int           `xml:"Num,attr"`
+		Points   []CruisePoint `xml:"CruisePoint"`
+	}
+	if err := decoder.DecodeElement(&wire, &start); err != nil {
+		return err
+	}
+	list.NumLower, list.NumUpper, list.Points = wire.NumLower, wire.NumUpper, wire.Points
+	list.Num = wire.NumUpper
+	if list.Num == 0 {
+		list.Num = wire.NumLower
+	}
+	return nil
 }
 
 type CruisePoint struct {
 	PresetIndex int `xml:"PresetIndex" json:"presetIndex"`
 	StayTime    int `xml:"StayTime" json:"stayTime"`
 	Speed       int `xml:"Speed" json:"speed"`
+	stayTimeSet bool
+	speedSet    bool
+}
+
+// UnmarshalXML keeps presence separate from the integer value. A missing
+// StayTime/Speed must not silently become a valid zero-speed point.
+func (p *CruisePoint) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error {
+	var wire struct {
+		PresetIndex *int `xml:"PresetIndex"`
+		StayTime    *int `xml:"StayTime"`
+		Speed       *int `xml:"Speed"`
+	}
+	if err := decoder.DecodeElement(&wire, &start); err != nil {
+		return err
+	}
+	p.PresetIndex = 0
+	p.StayTime = 0
+	p.Speed = 0
+	p.stayTimeSet = wire.StayTime != nil
+	p.speedSet = wire.Speed != nil
+	if wire.PresetIndex != nil {
+		p.PresetIndex = *wire.PresetIndex
+	}
+	if wire.StayTime != nil {
+		p.StayTime = *wire.StayTime
+	}
+	if wire.Speed != nil {
+		p.Speed = *wire.Speed
+	}
+	return nil
 }
 
 type CruiseTrackList struct {
-	Num    int           `xml:"Num,attr"`
-	Tracks []CruiseTrack `xml:"CruiseTrack"`
+	Num      int           `xml:"-"`
+	NumLower int           `xml:"num,attr"`
+	NumUpper int           `xml:"Num,attr"`
+	Tracks   []CruiseTrack `xml:"CruiseTrack"`
+}
+
+func (list *CruiseTrackList) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error {
+	var wire struct {
+		NumLower int           `xml:"num,attr"`
+		NumUpper int           `xml:"Num,attr"`
+		Tracks   []CruiseTrack `xml:"CruiseTrack"`
+	}
+	if err := decoder.DecodeElement(&wire, &start); err != nil {
+		return err
+	}
+	list.NumLower, list.NumUpper, list.Tracks = wire.NumLower, wire.NumUpper, wire.Tracks
+	list.Num = wire.NumUpper
+	if list.Num == 0 {
+		list.Num = wire.NumLower
+	}
+	return nil
 }
 
 type CruiseTrackListResponse struct {
@@ -515,7 +659,10 @@ func ParseCruiseTrackResponse(body []byte) (*CruiseTrackResponse, error) {
 		return nil, fmt.Errorf("巡航轨迹详情不合法")
 	}
 	for _, point := range response.CruiseTrack.PointList.Points {
-		if point.PresetIndex <= 0 || point.PresetIndex > 255 || point.StayTime < 0 || point.StayTime > 4095 || point.Speed < 0 || point.Speed > 4095 {
+		if !point.stayTimeSet || !point.speedSet {
+			return nil, fmt.Errorf("巡航点停留时间和设备速度不能为空")
+		}
+		if point.PresetIndex <= 0 || point.PresetIndex > 255 || point.StayTime < 0 || point.StayTime > 4095 || point.Speed < 1 || point.Speed > 15 {
 			return nil, fmt.Errorf("巡航点参数不合法")
 		}
 	}

@@ -348,7 +348,10 @@ func TestOperationTerminalCASAndUnknownLateResponse(t *testing.T) {
 
 	unknown, err := service.Execute(context.Background(), testTarget(), responseRequiredCommand("unknown"))
 	require.NoError(t, err)
-	require.NoError(t, db.Model(&unknown).Update("status", gbmodels.PTZOperationUnknown).Error)
+	transportDeadline := time.Now().Add(time.Minute)
+	require.NoError(t, db.Model(&unknown).Updates(map[string]interface{}{
+		"status": gbmodels.PTZOperationUnknown, "transport_deadline_at": transportDeadline,
+	}).Error)
 	unknown, matched, err := service.ApplyResponse(context.Background(), Response{OperationID: unknown.OperationID, CallID: "late", CSeq: "7", DeviceResult: "OK"})
 	require.NoError(t, err)
 	require.True(t, matched)

@@ -1,5 +1,7 @@
 package catalog
 
+import "strings"
+
 // CatalogItem 入库管道的标准 DTO(plan §3 / A3-A4 通用)
 //
 // 屏蔽 manscdp.CatalogItem 与底层协议差异,handler 层做适配即可。
@@ -19,6 +21,26 @@ type CatalogItem struct {
 	Address      string  // 物理地址
 	Secrecy      int8    // 涉密
 	RegisterWay  int8    // 注册方式
+}
+
+// SplitParentIDs normalizes the GB/T 28181-2022 multi-parent form A/B while
+// preserving declaration order and removing empty/duplicate entries.
+func SplitParentIDs(raw string) []string {
+	parts := strings.Split(raw, "/")
+	out := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		code := strings.TrimSpace(part)
+		if code == "" {
+			continue
+		}
+		if _, exists := seen[code]; exists {
+			continue
+		}
+		seen[code] = struct{}{}
+		out = append(out, code)
+	}
+	return out
 }
 
 // Sender 入库管道入参元数据

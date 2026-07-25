@@ -19,6 +19,12 @@ export interface GbDevice {
   online: boolean; // 从事实派生
   keepaliveTime: string | null;
   registerTime: string | null;
+  reportedVersion?: string | null;
+  reportedVersionAt?: string | null;
+  protocolOverride?: "auto" | "2016" | "2022" | string;
+  effectiveVersion?: "2016" | "2022" | string;
+  effectiveVersionSource?: "register" | "override" | "history" | "default" | string;
+  effectiveVersionAt?: string | null;
 }
 
 export interface GbChannel {
@@ -217,13 +223,93 @@ export const getControlCapabilities = (channelId: number) =>
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/control-capabilities`)
   );
 
+export type DeviceFactState = "on" | "off" | "armed" | "disarmed" | "alarm" | "unknown" | string;
+export type DeviceStatusFreshness = "fresh" | "stale" | "unknown" | string;
+export type AlarmTargetResolutionStatus = "resolved" | "ambiguous" | "unavailable" | string;
+
+export interface DeviceControlState {
+  recordState?: DeviceFactState;
+  guardState?: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  observedAt?: string | null;
+  source?: string;
+  sourceSn?: number;
+  sourceOperationId?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+}
+
+export interface DeviceStatusFact {
+  state: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+}
+
+export interface DeviceAlarmResolution {
+  status: AlarmTargetResolutionStatus;
+  source?: string;
+  targetCode?: string | null;
+  state: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  candidates: Array<{ code: string; name?: string }>;
+}
+
+export interface DeviceAlarmFact {
+  targetCode: string;
+  guardState: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  observedAt?: string | null;
+}
+
+export interface DeviceStatusRefreshOperationIds {
+  record?: string | null;
+  alarm?: string | null;
+}
+
+export interface DeviceStatusResult {
+  state?: DeviceControlState | null;
+  recordState?: DeviceFactState;
+  guardState?: DeviceFactState;
+  freshness: DeviceStatusFreshness;
+  completeness?: "complete" | "partial" | string;
+  record?: DeviceStatusFact | null;
+  alarmResolution?: DeviceAlarmResolution | null;
+  alarmFacts?: DeviceAlarmFact[];
+  refreshOperationId?: string | null;
+  recordRefreshOperationId?: string | null;
+  alarmRefreshOperationId?: string | null;
+  refreshOperationIds?: DeviceStatusRefreshOperationIds | null;
+  refreshError?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+}
+
+/** DeviceStatus refresh is asynchronous on the SIP side; refresh=true only starts it. */
+export const getDeviceStatus = (channelId: number, refresh = false) =>
+  http.request<BaseResult<DeviceStatusResult>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/device-status`),
+    { params: refresh ? { refresh: true } : undefined }
+  );
+
 export interface DeviceOperationResult {
   operationId?: string;
   channelId?: string;
   action: string;
   id?: number;
   sn?: number;
-  status?: string;
+  status?: PTZOperationStatus | string;
+  responseRequired?: boolean;
+  deadlineAt?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  deviceResult?: string | null;
+  completedAt?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+  deduplicated?: boolean;
+  profileVersion?: "2016" | "2022" | string;
 }
 
 export const controlDevice = (channelId: number, data: Record<string, unknown>) =>
@@ -292,7 +378,22 @@ export interface CruiseTrackPointResource {
   presetId?: number;
   stayTime?: number;
   dwellSec?: number;
+  /** Query-side business speed. The standard query range is 1..15. */
+  speed?: number | null;
+}
+
+/** Explicit query DTO. Do not validate this with the create/control range. */
+export type CruiseTrackQueryPoint = CruiseTrackPointResource;
+
+/** Create/control input uses the 12-bit value (1..4095) when present. */
+export interface CruiseTrackControlInput {
+  trackId: number;
+  name?: string;
   speed?: number;
+  dwellSec?: number;
+  stops: Array<{ presetId: number }>;
+  replaceExisting?: boolean;
+  idempotencyKey?: string;
 }
 
 export interface CruiseTrackDetailResource {
@@ -301,8 +402,9 @@ export interface CruiseTrackDetailResource {
   sumNum?: number;
   cruisePoints?: CruiseTrackPointResource[];
   stops?: CruiseTrackPointResource[];
-  speed?: number;
-  dwellSec?: number;
+  /** Query-side values are separate from the create/control 12-bit value. */
+  speed?: number | null;
+  dwellSec?: number | null;
   source?: string;
 }
 
@@ -324,29 +426,11 @@ export interface CruiseTrackListResult {
 
 export const createCruiseTrack = (
   channelId: number,
-  data: {
-    trackId: number;
-    name?: string;
-    speed?: number;
-    dwellSec?: number;
-    stops: Array<{ presetId: number }>;
-    replaceExisting?: boolean;
-    idempotencyKey?: string;
-  }
+  data: CruiseTrackControlInput
 ) =>
   http.request<BaseResult<CruiseTrackCreateResult>>(
     "post",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise/tracks`),
-    { data }
-  );
-
-export const controlPtzWiper = (
-  channelId: number,
-  data: { action: "on" | "off"; idempotencyKey?: string }
-) =>
-  http.request<BaseResult<DeviceOperationResult>>(
-    "post",
-    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/wiper`),
     { data }
   );
 
@@ -413,6 +497,11 @@ export interface PTZOperation {
   status: PTZOperationStatus;
   errorCode: string | null;
   errorMessage: string | null;
+  responseRequired?: boolean;
+  deviceResult?: string | null;
+  targetScope?: "channel" | "device" | "alarm" | string;
+  targetCode?: string | null;
+  deduplicated?: boolean;
   completedAt: string | null;
   deadlineAt: string | null;
 }
@@ -464,7 +553,7 @@ export const getPtzPreciseStatus = (channelId: number, refresh = false) =>
 
 export interface TalkCreateResult {
   sessionId: string;
-  mode?: "broadcast" | "talk";
+  mode: "broadcast" | "talk";
   state: string;
   phase?: string;
   nodeId: number;
@@ -479,7 +568,7 @@ export interface TalkCreateResult {
 
 export interface TalkSessionView {
   sessionId: string;
-  mode?: "broadcast" | "talk";
+  mode: "broadcast" | "talk";
   state: string;
   phase?: string;
   expiresAt: string;

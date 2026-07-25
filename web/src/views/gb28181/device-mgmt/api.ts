@@ -4,6 +4,8 @@ import type { BaseResult } from "@/api/types";
 
 export type OnlineStatus = "online" | "offline";
 export type AssetKind = "channel" | "device";
+export type ProtocolOverride = "auto" | "2016" | "2022";
+export type ProtocolVersionSource = "register" | "override" | "history" | "default" | string;
 
 export interface PageResult<T> {
     list: T[];
@@ -59,6 +61,14 @@ export interface DeviceVO {
     onlineRate: number;
     createdAt: string;
     updatedAt: string;
+    /** Raw X-GB-Ver reported by the device, if any. */
+    reportedVersion?: string | null;
+    reportedVersionAt?: string | null;
+    /** Manual override or auto resolution mode. */
+    protocolOverride?: ProtocolOverride | string;
+    effectiveVersion?: "2016" | "2022" | string;
+    effectiveVersionSource?: ProtocolVersionSource;
+    effectiveVersionAt?: string | null;
 }
 
 export type DeviceStatusEventType =
@@ -392,8 +402,17 @@ export const updateCloudRecording = (id: number, enabled: boolean) =>
         { data: { enabled } }
     );
 
-export const updateDevice = (deviceId: string, data: { alias?: string; manufacturer?: string; model?: string; firmware?: string }) =>
-    http.request<BaseResult<{ deviceId: string }>>(
+export const updateDevice = (
+    deviceId: string,
+    data: {
+        alias?: string;
+        manufacturer?: string;
+        model?: string;
+        firmware?: string;
+        protocolOverride?: ProtocolOverride;
+    }
+) =>
+    http.request<BaseResult<Partial<DeviceVO> & { deviceId: string }>>(
         "patch",
         baseUrlApi(`gb28181/device/${deviceId}`),
         { data }

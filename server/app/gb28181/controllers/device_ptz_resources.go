@@ -53,11 +53,6 @@ type cruiseTrackStopInput struct {
 	PresetID int `json:"presetId" binding:"required"`
 }
 
-type wiperControlRequest struct {
-	Action         string `json:"action" binding:"required"`
-	IdempotencyKey string `json:"idempotencyKey"`
-}
-
 type homePositionResourceRequest struct {
 	Enabled        *bool   `json:"enabled"`
 	ResetTime      *int    `json:"resetTime"`
@@ -174,6 +169,7 @@ func (dc *DeviceMgmtController) loadHomePositionTarget(c *gin.Context, channel *
 		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
+		Profile: profileForDevice(&device),
 	}, nil
 }
 
@@ -221,6 +217,7 @@ func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.
 		DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport,
 		DeviceOnline: device.Status == gbmodels.DeviceStatusOnline, ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
+		Profile: profileForDevice(&device),
 	}, true
 }
 
@@ -266,9 +263,9 @@ func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, pro
 	defer lock.Unlock()
 	op, err := service.Execute(c, target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: operationAction, IdempotencyKey: idempotencyKey,
-		Payload: payload,
+		Profile: target.Profile, Payload: payload,
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildExtendedPTZControl(channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: protocolAction, ID: id})
+			return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: protocolAction, ID: id})
 		},
 	})
 	if err != nil {
@@ -371,28 +368,6 @@ func (dc *DeviceMgmtController) ControlPTZCruise(c *gin.Context) {
 	dc.executePTZExtendedResource(c, action, *request.TrackID, "", request.IdempotencyKey)
 }
 
-func (dc *DeviceMgmtController) ControlPTZWiper(c *gin.Context) {
-	var request wiperControlRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		dc.FailAndAbort(c, "雨刷控制参数不合法", err)
-		return
-	}
-	var action manscdp.PTZExtendedAction
-	var operationAction string
-	switch strings.ToLower(strings.TrimSpace(request.Action)) {
-	case "on", "open", "enable":
-		action = manscdp.PTZActionAuxOn
-		operationAction = "wiper_on"
-	case "off", "close", "disable":
-		action = manscdp.PTZActionAuxOff
-		operationAction = "wiper_off"
-	default:
-		dc.FailAndAbort(c, "雨刷控制动作不合法", nil)
-		return
-	}
-	dc.executePTZExtendedResourceAs(c, action, operationAction, manscdp.PTZAuxiliaryIDWiper, "", request.IdempotencyKey)
-}
-
 // CreateCruiseTrack 按顺序下发 GB/T 28181 附录 A.3 巡航配置指令建立一条巡航路径。
 // 每条子指令都走 ptzService.Execute,写各自的 gb_ptz_operation 记录 —— 中间失败时
 // 返回已成功的 stop 数,不做设备端回滚(0x85 删除整轨的设备行为需由后续对账确认)。
@@ -456,10 +431,11 @@ func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 			CmdType:        manscdp.CmdDeviceControl,
 			Action:         string(action),
 			IdempotencyKey: baseKey + "-" + step + "-" + strconv.Itoa(seq),
+			Profile:        target.Profile,
 			Payload:        map[string]interface{}{"action": action, "trackId": cmd.ID, "presetId": cmd.SubID, "value16": cmd.Value16, "step": step, "seq": seq},
 			Build: func(sn int) ([]byte, error) {
 				cmd.Action = action
-				return manscdp.BuildExtendedPTZControl(channel.ChannelID, sn, cmd)
+				return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn, cmd)
 			},
 		})
 	}

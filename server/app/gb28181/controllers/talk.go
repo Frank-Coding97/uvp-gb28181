@@ -33,6 +33,7 @@ type TalkController struct {
 
 type TalkSessionView struct {
 	SessionID string                    `json:"sessionId"`
+	Mode      gbmodels.TalkSessionMode  `json:"mode"`
 	State     gbmodels.TalkSessionState `json:"state"`
 	ExpiresAt time.Time                 `json:"expiresAt"`
 	StartedAt *time.Time                `json:"startedAt,omitempty"`
@@ -50,6 +51,13 @@ func (c *TalkController) Create(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
+	var request struct {
+		Mode gbmodels.TalkSessionMode `json:"mode"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil || !request.Mode.Valid() {
+		response.Fail(ctx, "mode 仅支持 broadcast 或 talk", http.StatusBadRequest)
+		return
+	}
 	channel, device, ok := c.loadTarget(ctx)
 	if !ok {
 		return
@@ -57,6 +65,7 @@ func (c *TalkController) Create(ctx *gin.Context) {
 	actorID := c.GetCurrentUserID(ctx)
 	result, err := c.service.Create(ctx.Request.Context(), talk.CreateRequest{
 		Channel: channel, Device: device, ActorID: actorID, ActorDeptID: c.actorDeptID(ctx, actorID),
+		Mode: request.Mode,
 	})
 	if err != nil {
 		c.writeServiceError(ctx, err)
@@ -176,8 +185,10 @@ func (c *TalkController) writeServiceError(ctx *gin.Context, err error) {
 	switch {
 	case errors.Is(err, talk.ErrLeaseConflict):
 		response.Fail(ctx, "通道正在对讲中", http.StatusConflict)
-	case errors.Is(err, talk.ErrTalkCapabilityUnknown), errors.Is(err, talk.ErrTalkUnsupported):
-		response.Fail(ctx, "设备未明确支持语音对讲", http.StatusUnprocessableEntity)
+	case errors.Is(err, talk.ErrBroadcastNotImplemented):
+		response.Fail(ctx, "标准语音广播尚未实现", http.StatusNotImplemented)
+	case errors.Is(err, talk.ErrInvalidTalkSessionMode):
+		response.Fail(ctx, "mode 仅支持 broadcast 或 talk", http.StatusBadRequest)
 	case errors.Is(err, talk.ErrTalkTargetOffline):
 		response.Fail(ctx, "设备或通道离线", http.StatusConflict)
 	case errors.Is(err, talk.ErrTalkNodeUnavailable), errors.Is(err, talk.ErrSecurePublishUnavailable), errors.Is(err, talk.ErrTalkActivationUnavailable):
@@ -191,7 +202,7 @@ func (c *TalkController) writeServiceError(ctx *gin.Context, err error) {
 
 func talkSessionView(session *gbmodels.GbTalkSession) TalkSessionView {
 	return TalkSessionView{
-		SessionID: session.SessionID, State: session.State, ExpiresAt: session.ExpiresAt,
+		SessionID: session.SessionID, Mode: session.Mode, State: session.State, ExpiresAt: session.ExpiresAt,
 		StartedAt: session.StartedAt, EndedAt: session.EndedAt, Error: session.Error,
 	}
 }

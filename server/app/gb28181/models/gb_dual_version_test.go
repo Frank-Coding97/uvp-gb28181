@@ -26,13 +26,31 @@ func TestDualVersionModelsExposeProfileSnapshotAndControlState(t *testing.T) {
 	} {
 		require.Truef(t, db.Migrator().HasColumn(&gbmodels.GbDevice{}, column), "missing gb_device column %s", column)
 	}
-	for _, column := range []string{"profile_version", "profile_charset", "target_scope", "target_code"} {
+	for _, column := range []string{"profile_version", "profile_charset", "target_scope", "target_code", "scope_key"} {
 		require.Truef(t, db.Migrator().HasColumn(&gbmodels.GbPTZOperation{}, column), "missing operation snapshot column %s", column)
 	}
 	require.True(t, db.Migrator().HasTable(&gbmodels.GbDeviceControlState{}))
-	for _, column := range []string{"device_id", "target_scope", "target_code", "record_state", "guard_state", "freshness", "observed_at", "source"} {
+	for _, column := range []string{"device_id", "target_scope", "target_code", "record_state", "guard_state", "freshness", "observed_at", "source", "source_operation_seq"} {
 		require.Truef(t, db.Migrator().HasColumn(&gbmodels.GbDeviceControlState{}, column), "missing state column %s", column)
 	}
+	requirePTZIndexColumns(t, db, &gbmodels.GbDeviceControlState{}, "idx_control_state_device_target", []string{"device_id", "target_scope", "target_code"})
+}
+
+func TestControlStateUniqueKeyIncludesDevice(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDeviceControlState{}))
+
+	now := time.Now().UTC()
+	for _, deviceID := range []uint{1, 2} {
+		require.NoError(t, db.Create(&gbmodels.GbDeviceControlState{
+			DeviceID: deviceID, TargetScope: gbmodels.ControlTargetScopeChannel,
+			TargetCode: "same-target", ObservedAt: now,
+		}).Error)
+	}
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbDeviceControlState{}).Count(&count).Error)
+	require.EqualValues(t, 2, count)
 }
 
 func TestDualVersionModelDefaultsPreserveUnknownState(t *testing.T) {

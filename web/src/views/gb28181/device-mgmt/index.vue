@@ -74,6 +74,7 @@ import {
     type MapCluster,
     type MapMarker,
     type OnlineStatus,
+    type ProtocolOverride,
     type TimelineSlot
 } from "./api";
 import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
@@ -82,6 +83,7 @@ import { storeToRefs } from "pinia";
 import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
+import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
@@ -196,9 +198,12 @@ let statusEventRequestVersion = 0;
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
 const editDeviceVisible = ref(false);
-const editDeviceForm = ref({ deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "" });
+const editDeviceForm = ref<{ deviceId: string; alias: string; name: string; manufacturer: string; model: string; firmware: string; protocolOverride: ProtocolOverride }>({
+    deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "", protocolOverride: "auto"
+});
 const editingDevice = ref(false);
 const editingDeviceId = ref("");
+let originalProtocolOverride: ProtocolOverride = "auto";
 const editChannelVisible = ref(false);
 const editChannelForm = ref({ channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP", onDemandLive: true });
 const editingChannel = ref(false);
@@ -324,6 +329,14 @@ function cameraTypeText(ptzType?: number | null) {
 }
 function modelVersionText(item: { model?: string; firmware?: string }) {
     return [item.model, item.firmware].filter(Boolean).join(" / ") || "-";
+}
+function protocolVersionText(value?: string | null) {
+    if (value === "2022") return "GB/T 28181-2022";
+    if (value === "2016") return "GB/T 28181-2016";
+    return "未知 / 默认 2016";
+}
+function protocolSourceText(value?: string | null) {
+    return ({ register: "设备注册上报", override: "手动覆盖", history: "历史档案", default: "平台默认" } as Record<string, string>)[value || ""] || "未说明";
 }
 function copyText(value?: string | null) {
     const text = (value || "").trim();
@@ -1012,13 +1025,15 @@ async function handleCreateDevice() {
 }
 
 function openEditDeviceModal(record: DeviceVO) {
+    originalProtocolOverride = normalizeProtocolOverride(record.protocolOverride);
     editDeviceForm.value = {
         deviceId: record.deviceId,
         alias: record.alias || "",
         name: record.name || "",
         manufacturer: record.manufacturer || "",
         model: record.model || "",
-        firmware: record.firmware || ""
+        firmware: record.firmware || "",
+        protocolOverride: originalProtocolOverride
     };
     editingDeviceId.value = record.deviceId;
     editDeviceVisible.value = true;
@@ -1085,8 +1100,17 @@ async function handleEditChannel() {
 
 function cancelEditDevice() {
     editDeviceVisible.value = false;
-    editDeviceForm.value = { deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "" };
+    editDeviceForm.value = { deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "", protocolOverride: "auto" };
     editingDeviceId.value = "";
+    originalProtocolOverride = "auto";
+}
+
+function rollbackProtocolOverride() {
+    editDeviceForm.value.protocolOverride = protocolOverrideAfterSave(
+        originalProtocolOverride,
+        editDeviceForm.value.protocolOverride,
+        false,
+    );
 }
 
 async function handleEditDevice() {
@@ -1097,20 +1121,35 @@ async function handleEditDevice() {
             alias: editDeviceForm.value.alias,
             manufacturer: editDeviceForm.value.manufacturer,
             model: editDeviceForm.value.model,
-            firmware: editDeviceForm.value.firmware
+            firmware: editDeviceForm.value.firmware,
+            protocolOverride: editDeviceForm.value.protocolOverride
         });
         if (res.code === 0) {
+            originalProtocolOverride = protocolOverrideAfterSave(
+                originalProtocolOverride,
+                editDeviceForm.value.protocolOverride,
+                true,
+            );
             Message.success("设备信息已更新");
             editDeviceVisible.value = false;
             refreshMainData();
             // 如果抽屉打开着,同步更新抽屉内容
             if (drawerVisible.value && deviceDetail.value?.deviceId === editingDeviceId.value) {
-                deviceDetail.value = { ...deviceDetail.value, ...editDeviceForm.value };
+                // Do not optimistically display a protocol override as effective before the server re-reads it.
+                deviceDetail.value = {
+                    ...deviceDetail.value,
+                    alias: editDeviceForm.value.alias,
+                    manufacturer: editDeviceForm.value.manufacturer,
+                    model: editDeviceForm.value.model,
+                    firmware: editDeviceForm.value.firmware
+                };
             }
         } else {
+            rollbackProtocolOverride();
             Message.error(res.message || "更新失败");
         }
     } catch (error: any) {
+        rollbackProtocolOverride();
         Message.error(error?.message || "更新失败");
     } finally {
         editingDevice.value = false;
@@ -2173,6 +2212,12 @@ onUnmounted(() => {
                                 <span class="v mono">{{ deviceDetail.deviceId }}</span>
                                 <span class="k">传输协议</span>
                                 <span class="v">{{ transportText(deviceDetail.transport) }}</span>
+                                <span class="k">协议版本</span>
+                                <span class="v">
+                                    {{ protocolVersionText(deviceDetail.effectiveVersion) }}
+                                    <span class="muted">· {{ protocolSourceText(deviceDetail.effectiveVersionSource) }}</span>
+                                    <span v-if="deviceDetail.reportedVersion" class="muted mono">· X-GB-Ver {{ deviceDetail.reportedVersion }}</span>
+                                </span>
                                 <span class="k">注册状态</span>
                                 <span class="v">
                                     <span class="inline-dot" :class="{ online: deviceDetail.online }"></span>
@@ -2459,6 +2504,16 @@ onUnmounted(() => {
                             placeholder="选填"
                             allow-clear
                         />
+                    </a-form-item>
+                    <a-form-item field="protocolOverride" label="协议版本覆盖">
+                        <a-select v-model="editDeviceForm.protocolOverride" :options="[
+                            { label: '自动（按设备上报）', value: 'auto' },
+                            { label: 'GB/T 28181-2016', value: '2016' },
+                            { label: 'GB/T 28181-2022', value: '2022' }
+                        ]" />
+                        <template #extra>
+                            <span class="form-hint">仅影响后续新操作；自动模式优先使用设备 X-GB-Ver，缺失时默认 2016。</span>
+                        </template>
                     </a-form-item>
                 </a-form>
                 <template #footer>

@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
 
 func TestHomePositionProtocol(t *testing.T) {
@@ -85,6 +87,66 @@ func TestBuildPTZPreciseControl(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("body missing %q: %s", want, text)
 		}
+	}
+}
+
+func TestBuildPTZPreciseDeviceControl2022(t *testing.T) {
+	profile := protocol.ProfileFor(protocol.Version2022)
+	pan, tilt, zoom := 12.5, -3.25, 4.0
+	body, err := BuildPTZPreciseDeviceControlWithProfile(profile, "C", 10, PTZPreciseControl{
+		Pan: &pan, Tilt: &tilt, Zoom: &zoom,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"encoding=\"GB18030\"",
+		"<CmdType>DeviceControl</CmdType>",
+		"<SN>10</SN>",
+		"<DeviceID>C</DeviceID>",
+		"<PTZPreciseCtrl>",
+		"<Pan>12.5</Pan>",
+		"<Tilt>-3.25</Tilt>",
+		"<Zoom>4</Zoom>",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("body missing %q: %s", want, text)
+		}
+	}
+	if strings.Contains(text, "<Focus>") || strings.Contains(text, "<Iris>") || strings.Contains(text, "<Speed>") {
+		t.Fatalf("2022 precise control must contain only Pan/Tilt/Zoom: %s", text)
+	}
+
+	focus := 1.0
+	if _, err := BuildPTZPreciseDeviceControlWithProfile(profile, "C", 11, PTZPreciseControl{Focus: &focus}); err == nil {
+		t.Fatal("2022 precise control must reject Focus")
+	}
+	if _, err := BuildPTZPreciseDeviceControlWithProfile(profile, "C", 12, PTZPreciseControl{Speed: 1}); err == nil {
+		t.Fatal("2022 precise control must reject Speed")
+	}
+	if _, err := BuildPTZPreciseDeviceControlWithProfile(profile, "C", 13, PTZPreciseControl{}); err == nil {
+		t.Fatal("2022 precise control must require at least one of Pan/Tilt/Zoom")
+	}
+}
+
+func TestPTZPreciseStatusProfile2022(t *testing.T) {
+	profile := protocol.ProfileFor(protocol.Version2022)
+	body, err := BuildPTZPreciseStatusQueryWithProfile(profile, "C", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "<CmdType>PTZPosition</CmdType>") {
+		t.Fatalf("2022 precise status query must use PTZPosition: %s", body)
+	}
+
+	valid := []byte("<Response><CmdType>PTZPosition</CmdType><SN>4</SN><DeviceID>C</DeviceID><Pan>1</Pan></Response>")
+	if _, err := ParsePTZPreciseStatusResponseWithProfile(profile, valid); err != nil {
+		t.Fatalf("2022 PTZPosition response should parse: %v", err)
+	}
+	legacy := []byte("<Response><CmdType>PTZPreciseStatusQuery</CmdType><SN>4</SN><DeviceID>C</DeviceID><Pan>1</Pan></Response>")
+	if _, err := ParsePTZPreciseStatusResponseWithProfile(profile, legacy); err == nil {
+		t.Fatal("2022 parser must reject the legacy precise-status command")
 	}
 }
 

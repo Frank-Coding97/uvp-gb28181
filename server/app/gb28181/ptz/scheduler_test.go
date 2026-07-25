@@ -16,6 +16,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
 
@@ -346,4 +347,62 @@ func TestSchedulerRebuildsCanonicalHomePositionBody(t *testing.T) {
 	require.True(t, strings.Contains(calls[0].body, "<Enabled>1</Enabled>"))
 	require.True(t, strings.Contains(calls[0].body, "<ResetTime>0</ResetTime>"))
 	require.True(t, strings.Contains(calls[0].body, "<PresetIndex>0</PresetIndex>"))
+}
+
+func TestBuildScheduledPTZBodyPrecise2022(t *testing.T) {
+	operation := gbmodels.GbPTZOperation{
+		DeviceCode: "D", ChannelCode: "C", TargetCode: "C",
+		CmdType: manscdp.CmdDeviceControl, Action: "precise",
+		ProfileVersion: string(protocol.Version2022), SN: 41,
+		PayloadJSON: "{\"pan\":12.5,\"tilt\":-3.25,\"zoom\":4}",
+	}
+	body, err := buildScheduledPTZBody(operation)
+	require.NoError(t, err)
+	text := string(body)
+	require.Contains(t, text, "<CmdType>DeviceControl</CmdType>")
+	require.Contains(t, text, "<PTZPreciseCtrl>")
+	require.Contains(t, text, "<Pan>12.5</Pan>")
+	require.Contains(t, text, "<Tilt>-3.25</Tilt>")
+	require.Contains(t, text, "<Zoom>4</Zoom>")
+}
+
+func TestBuildScheduledPTZBodyRecordUsesOperationProfileStreamNumber(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		profileVersion   string
+		action           string
+		wantStreamNumber bool
+	}{
+		{name: "2016 start", profileVersion: string(protocol.Version2016), action: "record_start"},
+		{name: "2016 stop", profileVersion: string(protocol.Version2016), action: "record_stop"},
+		{name: "2022 start", profileVersion: string(protocol.Version2022), action: "record_start", wantStreamNumber: true},
+		{name: "2022 stop", profileVersion: string(protocol.Version2022), action: "record_stop", wantStreamNumber: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			operation := gbmodels.GbPTZOperation{
+				DeviceCode: "D", ChannelCode: "C", TargetCode: "C",
+				CmdType: manscdp.CmdDeviceControl, Action: test.action,
+				ProfileVersion: test.profileVersion, SN: 41,
+				PayloadJSON: `{"action":"` + test.action + `"}`,
+			}
+			body, err := buildScheduledPTZBody(operation)
+			require.NoError(t, err)
+			hasStreamNumber := strings.Contains(string(body), "<StreamNumber>0</StreamNumber>")
+			require.Equal(t, test.wantStreamNumber, hasStreamNumber, string(body))
+		})
+	}
+}
+
+func TestBuildScheduledPTZBodyUsesPersistedProfileCharset(t *testing.T) {
+	operation := gbmodels.GbPTZOperation{
+		DeviceCode: "D", ChannelCode: "C", TargetCode: "C",
+		CmdType: manscdp.CmdDeviceControl, Action: "iframe",
+		ProfileVersion: string(protocol.Version2016), ProfileCharset: string(protocol.CharsetUTF8), SN: 42,
+		PayloadJSON: `{"action":"iframe"}`,
+	}
+
+	body, err := buildScheduledPTZBody(operation)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `encoding="UTF-8"`)
+	require.Contains(t, string(body), "<IFameCmd>Send</IFameCmd>")
 }

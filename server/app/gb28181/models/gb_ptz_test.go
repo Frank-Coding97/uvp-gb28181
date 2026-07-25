@@ -53,6 +53,7 @@ func TestPTZModels_AutoMigrateAndIndexes(t *testing.T) {
 		"idx_ptz_operation_status_transport_deadline",
 		"idx_ptz_operation_status_deadline",
 		"idx_ptz_operation_call_id",
+		"idx_ptz_operation_target",
 	} {
 		require.Truef(t, db.Migrator().HasIndex(&gbmodels.GbPTZOperation{}, index), "missing operation index %s", index)
 	}
@@ -66,6 +67,7 @@ func TestPTZModels_AutoMigrateAndIndexes(t *testing.T) {
 		"idx_ptz_operation_status_queue_deadline":     {"status", "queue_deadline_at"},
 		"idx_ptz_operation_status_transport_deadline": {"status", "transport_deadline_at"},
 		"idx_ptz_operation_status_deadline":           {"status", "deadline_at"},
+		"idx_ptz_operation_target":                    {"device_code", "target_scope", "target_code", "status"},
 	} {
 		requirePTZIndexColumns(t, db, &gbmodels.GbPTZOperation{}, index, columns)
 	}
@@ -76,6 +78,7 @@ func TestPTZModels_AutoMigrateAndIndexes(t *testing.T) {
 	require.True(t, db.Migrator().HasIndex(&gbmodels.GbPTZState{}, "uk_ptz_state_channel"))
 	require.True(t, db.Migrator().HasIndex(&gbmodels.GbPTZState{}, "idx_ptz_state_device"))
 	require.True(t, db.Migrator().HasIndex(&gbmodels.GbPTZState{}, "idx_ptz_state_received"))
+	require.True(t, db.Migrator().HasColumn(&gbmodels.GbPTZState{}, "device_code"))
 	require.True(t, db.Migrator().HasIndex(&gbmodels.GbPTZPreset{}, "uk_ptz_preset_channel_number"))
 	require.True(t, db.Migrator().HasIndex(&gbmodels.GbPTZPreset{}, "idx_ptz_preset_device"))
 	require.True(t, db.Migrator().HasIndex(&gbmodels.GbPTZCruiseTrack{}, "uk_ptz_cruise_channel_track"))
@@ -245,10 +248,15 @@ func TestPTZState_StoresDeviceTimeAndReceiveTime(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZState{}))
 	deviceTime := time.Date(2026, 7, 19, 20, 0, 0, 0, time.UTC)
 	received := deviceTime.Add(time.Second)
-	state := &gbmodels.GbPTZState{ChannelID: 1, DeviceTime: &deviceTime, ReceivedAt: received, Freshness: gbmodels.PTZFreshnessFresh}
+	state := &gbmodels.GbPTZState{
+		DeviceID: 2, DeviceCode: "34020000002000000001", ChannelID: 1,
+		ChannelCode: "34020000001320000001", DeviceTime: &deviceTime,
+		ReceivedAt: received, Freshness: gbmodels.PTZFreshnessFresh,
+	}
 	require.NoError(t, db.Create(state).Error)
 	var got gbmodels.GbPTZState
 	require.NoError(t, db.First(&got, state.ID).Error)
 	require.Equal(t, gbmodels.PTZFreshnessFresh, got.Freshness)
+	require.Equal(t, state.DeviceCode, got.DeviceCode)
 	require.Equal(t, received.Unix(), got.ReceivedAt.Unix())
 }

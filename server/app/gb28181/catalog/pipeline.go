@@ -83,25 +83,40 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 			civilNode = n
 		}
 
-		// 2. 业务父节点(ParentID hint;若是 biz_group / virtual_org 走另外建)
+		// 2. 业务父节点。2022 ParentID 可为 A/B；目录树只能选择一个
+		// 展示父节点，完整关系由资源关系表保留。
 		var parentNode *gbmodels.GbCatalogNode = civilNode
-		if it.ParentID != "" && it.ParentID != it.DeviceID {
-			pCls := Classify(it.ParentID)
+		for _, parentCode := range SplitParentIDs(it.ParentID) {
+			if parentCode == it.DeviceID {
+				continue
+			}
+			var existingParent gbmodels.GbCatalogNode
+			found := tx.Where("owner_dept_id = ? AND code = ?", sender.OwnerDeptID, parentCode).
+				Order("id").Limit(1).Find(&existingParent)
+			if found.Error != nil {
+				return found.Error
+			}
+			if found.RowsAffected == 1 {
+				parentNode = &existingParent
+				break
+			}
+			pCls := Classify(parentCode)
 			switch pCls.NodeType {
 			case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
 				pn, err := findOrCreateNode(
 					tx,
 					sender.OwnerDeptID,
 					pCls.NodeType,
-					it.ParentID,
+					parentCode,
 					civilNodeID(civilNode),
 					civilNodePath(civilNode),
-					it.ParentID,
+					parentCode,
 				)
 				if err != nil {
 					return err
 				}
 				parentNode = pn
+				break
 			case gbmodels.NodeTypeDevice:
 				// device 父:让通道挂在设备节点下(NVR 下的子通道)
 				// 但本期为简化,通道直接挂行政区,设备节点单独建
@@ -121,6 +136,14 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 			}
 		case gbmodels.NodeTypeDevice:
 			node, _, err := upsertDevice(ctx, tx, sender.OwnerDeptID, it, cls, parentNode)
+			if err != nil {
+				return err
+			}
+			if cls.Anomaly {
+				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+			}
+		case gbmodels.NodeTypeAlarmInput, gbmodels.NodeTypeAlarmOutput:
+			node, _, err := upsertAlarmResource(ctx, tx, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
 			if err != nil {
 				return err
 			}
@@ -211,6 +234,20 @@ func (p *Pipeline) softDelete(ctx context.Context, sender Sender, code string) e
 						Delete(&gbmodels.GbChannel{}).Error; err != nil {
 						return err
 					}
+				}
+			}
+			if node.AlarmResourceID != nil {
+				if err := tx.Where("alarm_resource_id = ?", *node.AlarmResourceID).
+					Delete(&gbmodels.GbAlarmResourceParent{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("alarm_resource_id = ?", *node.AlarmResourceID).
+					Delete(&gbmodels.GbAlarmBinding{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("id = ?", *node.AlarmResourceID).
+					Delete(&gbmodels.GbAlarmResource{}).Error; err != nil {
+					return err
 				}
 			}
 			if err := tx.Where("catalog_node_id = ? AND owner_dept_id = ?", node.ID, sender.OwnerDeptID).

@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
@@ -117,10 +118,33 @@ func (s *Service) createOperation(
 	sn int,
 	createdAt time.Time,
 ) (gbmodels.GbPTZOperation, error) {
+	profile := command.Profile
+	if profile.Version == "" {
+		profile = target.Profile
+		if profile.Version == "" {
+			profile = protocol.ProfileFor(protocol.Version2016)
+		}
+	}
+	targetScope := strings.TrimSpace(command.TargetScope)
+	if targetScope == "" {
+		targetScope = gbmodels.ControlTargetScopeChannel
+	}
+	targetCode := strings.TrimSpace(command.TargetCode)
+	if targetCode == "" {
+		if targetScope != gbmodels.ControlTargetScopeChannel {
+			return gbmodels.GbPTZOperation{}, operationError(ErrorCodeHomePositionInvalidArgument, "PTZ 非通道目标编码不能为空", nil)
+		}
+		targetCode = strings.TrimSpace(target.ChannelCode)
+	}
+	scopeKey, err := controlScopeKey(targetScope, targetCode)
+	if err != nil {
+		return gbmodels.GbPTZOperation{}, err
+	}
 	operation := gbmodels.GbPTZOperation{
 		OperationID: uuid.NewString(), IdempotencyKey: command.IdempotencyKey,
 		DeviceID: target.DeviceID, DeviceCode: target.DeviceCode, ChannelID: target.ChannelID, ChannelCode: target.ChannelCode,
 		CmdType: strings.TrimSpace(command.CmdType), Action: strings.TrimSpace(command.Action), PayloadJSON: payloadJSON, SN: sn,
+		ProfileVersion: string(profile.Version), ProfileCharset: string(profile.Charset), TargetScope: targetScope, TargetCode: targetCode, ScopeKey: scopeKey,
 		Status: gbmodels.PTZOperationQueued, Attempt: 1, MaxAttempts: 1,
 		ActorID: command.ActorID, ActorDeptID: command.ActorDeptID,
 		TriggerOperationID: triggerOperationPointer(command.TriggerOperationID), CreatedAt: createdAt,
@@ -139,6 +163,8 @@ func (s *Service) createOperation(
 		"device_id": operation.DeviceID, "device_code": operation.DeviceCode,
 		"channel_id": operation.ChannelID, "channel_code": operation.ChannelCode,
 		"cmd_type": operation.CmdType, "action": operation.Action, "payload_json": operation.PayloadJSON,
+		"profile_version": operation.ProfileVersion, "profile_charset": operation.ProfileCharset,
+		"target_scope": operation.TargetScope, "target_code": operation.TargetCode, "scope_key": operation.ScopeKey,
 		"sn": operation.SN, "status": operation.Status, "attempt": 0,
 		"response_required": true, "max_attempts": maxAttempts,
 		"actor_id": operation.ActorID, "actor_dept_id": operation.ActorDeptID,
@@ -154,6 +180,20 @@ func (s *Service) createOperation(
 		return gbmodels.GbPTZOperation{}, err
 	}
 	return operation, nil
+}
+
+func controlScopeKey(scope, code string) (string, error) {
+	scope = strings.TrimSpace(scope)
+	code = strings.TrimSpace(code)
+	switch scope {
+	case gbmodels.ControlTargetScopeChannel, gbmodels.ControlTargetScopeDevice, gbmodels.ControlTargetScopeAlarm:
+	default:
+		return "", operationError(ErrorCodeHomePositionInvalidArgument, "PTZ 目标 scope 不合法", nil)
+	}
+	if code == "" {
+		return "", operationError(ErrorCodeHomePositionInvalidArgument, "PTZ 目标编码不能为空", nil)
+	}
+	return scope + ":" + code, nil
 }
 
 // Execute creates one immutable operation. Response-required operations are
@@ -346,6 +386,7 @@ func (s *Service) ApplyResponse(ctx context.Context, response Response) (gbmodel
 		return operation, matched, err
 	}
 	if terminalPTZStatus(operation.Status) {
+		s.discardQueryStage(operation.OperationID)
 		return operation, true, nil
 	}
 
@@ -374,31 +415,29 @@ func (s *Service) ApplyResponse(ctx context.Context, response Response) (gbmodel
 	if status == gbmodels.PTZOperationAccepted || status == gbmodels.PTZOperationRejected {
 		allowed = append(allowed, gbmodels.PTZOperationUnknown)
 	}
-	applied := false
 	if err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
 		update := tx.Model(&gbmodels.GbPTZOperation{}).
 			Where("id = ? AND status IN ?", operation.ID, allowed)
 		if operation.ResponseRequired {
 			update = update.Where(`
-				(status = ?)
+				(status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)
 				OR (status = ? AND deadline_at IS NOT NULL AND deadline_at > ?)
 				OR (status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at > ?)
 				OR (status = ? AND attempt > 0 AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
-				gbmodels.PTZOperationUnknown,
+				gbmodels.PTZOperationUnknown, completedAt,
 				gbmodels.PTZOperationSent, completedAt,
 				gbmodels.PTZOperationQueued, completedAt,
 				gbmodels.PTZOperationQueued, completedAt,
 			)
 		}
 		result := update.Updates(updates)
-		applied = result.RowsAffected == 1
 		return result.Error
 	}); err != nil {
 		return operation, true, err
 	}
 	updated, err := s.GetOperation(ctx, operation.OperationID)
-	if !applied {
-		return updated, true, err
+	if err == nil && terminalPTZStatus(updated.Status) {
+		s.discardQueryStage(updated.OperationID)
 	}
 	return updated, true, err
 }
@@ -414,7 +453,11 @@ func (s *Service) MarkTimeout(ctx context.Context, operationID, message string) 
 		Updates(map[string]interface{}{"status": gbmodels.PTZOperationTimeout, "error_message": message, "completed_at": completedAt}).Error; err != nil {
 		return operation, err
 	}
-	return s.GetOperation(ctx, operationID)
+	updated, err := s.GetOperation(ctx, operationID)
+	if err == nil && terminalPTZStatus(updated.Status) {
+		s.discardQueryStage(updated.OperationID)
+	}
+	return updated, err
 }
 
 func (s *Service) GetOperation(ctx context.Context, operationID string) (gbmodels.GbPTZOperation, error) {

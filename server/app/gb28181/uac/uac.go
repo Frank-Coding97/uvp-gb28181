@@ -87,7 +87,8 @@ func detectMessageKind(body []byte) metrics.TxKind {
 	}
 	if bytes.Contains(body, []byte("DeviceControl")) || bytes.Contains(body, []byte("PTZCmd")) ||
 		bytes.Contains(body, []byte("PTZPrecise")) || bytes.Contains(body, []byte("HomePositionQuery")) ||
-		bytes.Contains(body, []byte("CruiseTrackQuery")) || bytes.Contains(body, []byte("PTZPreciseStatusQuery")) {
+		bytes.Contains(body, []byte("CruiseTrackQuery")) || bytes.Contains(body, []byte("PTZPreciseStatusQuery")) ||
+		bytes.Contains(body, []byte("PTZPosition")) {
 		return metrics.TxPTZ
 	}
 	return metrics.TxUnknown

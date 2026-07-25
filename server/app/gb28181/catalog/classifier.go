@@ -30,7 +30,8 @@ type Classification struct {
 //	位 1-8   省 4 + 市 4(GB/T 2260 行政区划)
 //	位 9-10  行业码(00=通用)
 //	位 11-13 类型码:
-//	    131 视频通道 / 130 报警通道 / 132 摄像设备
+//	    117 报警控制器 / 130 HVR / 131 摄像机 / 132 IPC
+//	    134 报警输入设备 / 135、140 报警输出设备
 //	    111 / 112 / 113 / 114 系列设备
 //	    200 国标设备
 //	    215 业务分组(逻辑分组)
@@ -71,13 +72,15 @@ func Classify(code string) Classification {
 	// 类型码 11-13 位(0-indexed: [10:13])
 	typeCode := trimmed[10:13]
 	switch typeCode {
-	case "131", "130":
+	case "131", "132":
 		out.NodeType = gbmodels.NodeTypeChannel
-	case "132":
-		// 132 通常是摄像设备(物理 IPC),但 GB/T 28181 也允许通道用
-		// 项目按"设备"语义处理,真识别哪种由后续上下文(是否有下属通道)决定
-		out.NodeType = gbmodels.NodeTypeChannel
-	case "111", "112", "113", "114", "115", "116", "117", "118", "119", "120", "121":
+	case "117", "130":
+		out.NodeType = gbmodels.NodeTypeDevice
+	case "134":
+		out.NodeType = gbmodels.NodeTypeAlarmInput
+	case "135", "140":
+		out.NodeType = gbmodels.NodeTypeAlarmOutput
+	case "111", "112", "113", "114", "115", "116", "118", "119", "120", "121":
 		// 系列编码 → 视为通道(部分厂商把 IPC 当通道挂在 NVR 下)
 		out.NodeType = gbmodels.NodeTypeChannel
 	case "200":

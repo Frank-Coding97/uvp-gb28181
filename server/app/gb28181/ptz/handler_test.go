@@ -13,6 +13,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 )
 
 func newPTZHandlerTestService(t *testing.T, capabilities *string) (*Service, *gorm.DB, *fakeTrackedSender, *time.Time) {
@@ -24,6 +25,7 @@ func newPTZHandlerTestService(t *testing.T, capabilities *string) (*Service, *go
 		&gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{},
 		&gbmodels.GbPTZHomePosition{}, &gbmodels.GbPTZState{},
 		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{},
+		&gbmodels.GbDeviceControlState{},
 		&gbmodels.GbChannel{},
 	))
 	require.NoError(t, db.Create(&gbmodels.GbChannel{ID: 1, DeviceID: "D", ChannelID: "C", Capabilities: capabilities}).Error)
@@ -66,6 +68,87 @@ func createHandlerHomeQuery(t *testing.T, service *Service, key string, trigger 
 
 func deviceControlResponse(sn int, result string) []byte {
 	return deviceControlResponseWithHead(manscdp.CmdDeviceControl, sn, "C", result)
+}
+
+func TestHandlerPreciseDeviceControl2022Response(t *testing.T) {
+	service, db, _, _ := newPTZHandlerTestService(t, nil)
+	target := testTarget()
+	target.Profile = protocol.ProfileFor(protocol.Version2022)
+	pan, tilt, zoom := 12.5, -3.25, 4.0
+	operation, err := service.Execute(context.Background(), target, Command{
+		CmdType: manscdp.CmdDeviceControl, Action: "precise", IdempotencyKey: "precise-2022-handler",
+		Profile:          protocol.ProfileFor(protocol.Version2022),
+		Payload:          map[string]interface{}{"pan": pan, "tilt": tilt, "zoom": zoom},
+		ResponseRequired: true, MaxAttempts: 1,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildPTZPreciseDeviceControlWithProfile(protocol.ProfileFor(protocol.Version2022), "C", sn, manscdp.PTZPreciseControl{
+				Pan: &pan, Tilt: &tilt, Zoom: &zoom,
+			})
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.PTZOperationQueued, operation.Status)
+	body := deviceControlResponse(operation.SN, "OK")
+	require.NoError(t, service.OnPTZMessage(context.Background(), "D", "precise-2022-response", "1", body))
+	stored := storedOperation(t, db, operation.OperationID)
+	require.Equal(t, gbmodels.PTZOperationAccepted, stored.Status)
+}
+
+func TestHandlerDeviceControlResponseDoesNotAcceptOneWayOperation(t *testing.T) {
+	service, db, _, _ := newPTZHandlerTestService(t, nil)
+	operation, err := service.Execute(context.Background(), testTarget(), Command{
+		CmdType: manscdp.CmdDeviceControl, Action: "iframe", IdempotencyKey: "one-way-iframe",
+		Payload: map[string]interface{}{"action": "iframe"}, ResponseRequired: false,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildIFrameControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", sn)
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, gbmodels.PTZOperationSent, operation.Status)
+
+	body := deviceControlResponse(operation.SN, "OK")
+	require.NoError(t, service.OnPTZMessage(context.Background(), "D", "unexpected-response", "1", body))
+
+	stored := storedOperation(t, db, operation.OperationID)
+	require.Equal(t, gbmodels.PTZOperationSent, stored.Status)
+	require.Empty(t, stored.DeviceResult)
+}
+
+func TestHandlerDeviceControlAckPersistsConfirmedFacts(t *testing.T) {
+	service, db, _, _ := newPTZHandlerTestService(t, nil)
+	target := testTarget()
+
+	record, err := service.Execute(context.Background(), target, Command{
+		CmdType: manscdp.CmdDeviceControl, Action: "record_start", IdempotencyKey: "record-ack-fact",
+		ResponseRequired: true, MaxAttempts: 1,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildRecordControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", sn, manscdp.RecordStart)
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.OnPTZMessage(context.Background(), "D", "record-ack", "1", deviceControlResponse(record.SN, "OK")))
+	var recordFact gbmodels.GbDeviceControlState
+	require.NoError(t, db.Where("device_id = ? AND target_scope = ? AND target_code = ?", target.DeviceID, gbmodels.ControlTargetScopeChannel, target.ChannelCode).First(&recordFact).Error)
+	require.Equal(t, gbmodels.ControlStateOn, recordFact.RecordState)
+	require.Equal(t, "control_ack", recordFact.Source)
+	require.Equal(t, record.OperationID, *recordFact.SourceOperationID)
+	require.Equal(t, record.ID, recordFact.SourceOperationSeq)
+
+	guard, err := service.Execute(context.Background(), target, Command{
+		CmdType: manscdp.CmdDeviceControl, Action: "guard_set", IdempotencyKey: "guard-ack-fact",
+		TargetScope: gbmodels.ControlTargetScopeAlarm, TargetCode: "A",
+		ResponseRequired: true, MaxAttempts: 1,
+		Build: func(sn int) ([]byte, error) {
+			return manscdp.BuildGuardControlWithProfile(protocol.ProfileFor(protocol.Version2016), "A", sn, manscdp.GuardSet)
+		},
+	})
+	require.NoError(t, err)
+	require.NoError(t, service.OnPTZMessage(context.Background(), "D", "guard-ack", "2", deviceControlResponseWithHead(manscdp.CmdDeviceControl, guard.SN, "A", "OK")))
+	var guardFact gbmodels.GbDeviceControlState
+	require.NoError(t, db.Where("device_id = ? AND target_scope = ? AND target_code = ?", target.DeviceID, gbmodels.ControlTargetScopeAlarm, "A").First(&guardFact).Error)
+	require.Equal(t, gbmodels.ControlStateOn, guardFact.GuardState)
+	require.Equal(t, "control_ack", guardFact.Source)
+	require.Equal(t, guard.ID, guardFact.SourceOperationSeq)
 }
 
 func homePositionResponse(sn int, home string) []byte {
@@ -199,6 +282,150 @@ func TestHandlerHomePositionProtocolFallbackDoesNotMatchTerminalOperation(t *tes
 	require.Equal(t, "no_candidate", reason)
 }
 
+func TestHandlerQueryProtocolFallbackOnlyMatchesNonTerminalOperation(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    QueryKind
+		profile protocol.Profile
+		body    func(sn int) []byte
+	}{
+		{
+			name: "preset",
+			kind: QueryPreset,
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdPresetQuery, sn))
+			},
+		},
+		{
+			name: "cruise list",
+			kind: QueryCruiseTrackList,
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdCruiseTrackListQuery, sn))
+			},
+		},
+		{
+			name: "cruise detail",
+			kind: QueryCruiseTrack,
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdCruiseTrackQuery, sn))
+			},
+		},
+		{
+			name:    "ptz position",
+			kind:    QueryPreciseStatus,
+			profile: protocol.ProfileFor(protocol.Version2022),
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdPTZPosition, sn))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, db, _, _ := newPTZHandlerTestService(t, nil)
+			target := testTarget()
+			target.Profile = tt.profile
+			terminal, err := service.Refresh(context.Background(), target, tt.kind, 0, "fallback-terminal-"+tt.name)
+			require.NoError(t, err)
+			active, err := service.Refresh(context.Background(), target, tt.kind, 0, "fallback-active-"+tt.name)
+			require.NoError(t, err)
+			require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("id = ?", terminal.ID).Updates(map[string]interface{}{
+				"sn": 777, "status": gbmodels.PTZOperationAccepted,
+			}).Error)
+			require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("id = ?", active.ID).Update("sn", 777).Error)
+
+			head, err := manscdp.ParseHead(tt.body(777))
+			require.NoError(t, err)
+			matched, found, candidates, reason, err := service.findPTZMessageOperation(context.Background(), "D", "", "", *head)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, active.OperationID, matched.OperationID)
+			require.Equal(t, []string{active.OperationID}, candidates)
+			require.Equal(t, "protocol_key", reason)
+		})
+	}
+}
+
+func TestHandlerQueryAttemptCorrelationSkipsTerminalOperation(t *testing.T) {
+	tests := []struct {
+		name    string
+		kind    QueryKind
+		profile protocol.Profile
+		body    func(sn int) []byte
+	}{
+		{
+			name: "preset",
+			kind: QueryPreset,
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdPresetQuery, sn))
+			},
+		},
+		{
+			name: "cruise list",
+			kind: QueryCruiseTrackList,
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdCruiseTrackListQuery, sn))
+			},
+		},
+		{
+			name: "cruise detail",
+			kind: QueryCruiseTrack,
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdCruiseTrackQuery, sn))
+			},
+		},
+		{
+			name:    "ptz position",
+			kind:    QueryPreciseStatus,
+			profile: protocol.ProfileFor(protocol.Version2022),
+			body: func(sn int) []byte {
+				return []byte(fmt.Sprintf(`<Response><CmdType>%s</CmdType><SN>%d</SN><DeviceID>C</DeviceID></Response>`, manscdp.CmdPTZPosition, sn))
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service, db, _, now := newPTZHandlerTestService(t, nil)
+			target := testTarget()
+			target.Profile = tt.profile
+			operation, err := service.Refresh(context.Background(), target, tt.kind, 0, "attempt-terminal-"+tt.name)
+			require.NoError(t, err)
+			createHandlerAttempt(t, db, operation, *now, "late-attempt", "42")
+			require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("id = ?", operation.ID).
+				Update("status", gbmodels.PTZOperationTimeout).Error)
+
+			head, err := manscdp.ParseHead(tt.body(operation.SN))
+			require.NoError(t, err)
+			_, found, candidates, reason, err := service.findPTZMessageOperation(context.Background(), "D", "late-attempt", "42", *head)
+			require.NoError(t, err)
+			require.False(t, found)
+			require.Empty(t, candidates)
+			require.Equal(t, "attempt_terminal", reason)
+		})
+	}
+}
+
+func TestHandlerAttemptCorrelationDoesNotFallbackAfterTerminalMatch(t *testing.T) {
+	service, db, _, now := newPTZHandlerTestService(t, nil)
+	terminal, err := service.Refresh(context.Background(), testTarget(), QueryPreset, 0, "authoritative-terminal")
+	require.NoError(t, err)
+	active, err := service.Refresh(context.Background(), testTarget(), QueryPreset, 0, "authoritative-active")
+	require.NoError(t, err)
+	createHandlerAttempt(t, db, terminal, *now, "terminal-call", "42")
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("id = ?", terminal.ID).
+		Updates(map[string]interface{}{"sn": 777, "status": gbmodels.PTZOperationTimeout}).Error)
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("id = ?", active.ID).Update("sn", 777).Error)
+	head, err := manscdp.ParseHead([]byte(`<Response><CmdType>PresetQuery</CmdType><SN>777</SN><DeviceID>C</DeviceID></Response>`))
+	require.NoError(t, err)
+
+	_, found, candidates, reason, err := service.findPTZMessageOperation(context.Background(), "D", "terminal-call", "42", *head)
+	require.NoError(t, err)
+	require.False(t, found)
+	require.Empty(t, candidates)
+	require.Equal(t, "attempt_terminal", reason)
+}
+
 func TestHandlerAttemptMatchedHomeControlRejectsMismatchedBodyMetadata(t *testing.T) {
 	tests := []struct {
 		name string
@@ -314,6 +541,12 @@ func TestHandlerHomeControlOKWritesCacheAndLinkedReconcile(t *testing.T) {
 	service, db, sender, _ := newPTZHandlerTestService(t, nil)
 	resetTime, presetID := 30, 0
 	control := createHandlerHomeControl(t, service, "control-ok", true, &resetTime, &presetID)
+	// The reconcile operation must inherit the immutable profile/target snapshot
+	// used by the parent operation, including the 2022 scheduler path.
+	require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Where("operation_id = ?", control.OperationID).Updates(map[string]interface{}{
+		"profile_version": "2022", "profile_charset": "GB18030",
+		"target_scope": gbmodels.ControlTargetScopeChannel, "target_code": "C",
+	}).Error)
 	require.NoError(t, service.OnPTZMessage(context.Background(), "D", "control-response", "8", deviceControlResponse(control.SN, "OK")))
 
 	storedControl := storedOperation(t, db, control.OperationID)
@@ -340,6 +573,10 @@ func TestHandlerHomeControlOKWritesCacheAndLinkedReconcile(t *testing.T) {
 	require.Equal(t, control.OperationID, *child.TriggerOperationID)
 	require.Equal(t, control.ActorID, child.ActorID)
 	require.Equal(t, control.ActorDeptID, child.ActorDeptID)
+	require.Equal(t, "2022", child.ProfileVersion)
+	require.Equal(t, "GB18030", child.ProfileCharset)
+	require.Equal(t, gbmodels.ControlTargetScopeChannel, child.TargetScope)
+	require.Equal(t, "C", child.TargetCode)
 	require.Equal(t, "home-reconcile:"+control.OperationID, child.IdempotencyKey)
 	require.Contains(t, child.PayloadJSON, control.OperationID)
 	require.Zero(t, sender.calls, "ACK transaction must only queue reconcile")

@@ -266,10 +266,12 @@ func resolveRawVersion(raw string, allowCanonical bool) AdvertisedVersion {
 	}
 
 	switch {
-	case major == 1:
+	case major == 1 && (minor == 0 || minor == 1):
 		return AdvertisedVersion{
-			Version: Version(Version2016),
-			Raw:     trimmed,
+			Version:     Version(Version2016),
+			Raw:         trimmed,
+			WarningCode: WarningLegacyVersion,
+			Warning:     warningText(WarningLegacyVersion, trimmed),
 		}
 	case major == 2 && minor == 0:
 		return AdvertisedVersion{Version: Version(Version2016), Raw: trimmed}

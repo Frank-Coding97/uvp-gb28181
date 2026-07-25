@@ -51,6 +51,20 @@ func setupEnv(t *testing.T) {
 		_ = db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", func(g *gorm.DB) { g.Statement.RaiseErrorOnNotFound = false })
 		app.GormDbMysql = db
 	}
+	// Keep this package independently runnable against the shared development
+	// database. The handler tests use a real legacy schema and do not execute
+	// the feature migration as part of package setup.
+	for _, field := range []string{
+		"ReportedVersion", "ReportedVersionAt", "ProtocolOverride",
+		"EffectiveVersion", "EffectiveVersionSource", "EffectiveVersionAt",
+	} {
+		if app.GormDbMysql.Migrator().HasColumn(&gbmodels.GbDevice{}, field) {
+			continue
+		}
+		if err := app.GormDbMysql.Migrator().AddColumn(&gbmodels.GbDevice{}, field); err != nil {
+			t.Fatalf("测试库补充 GbDevice.%s 失败: %v", field, err)
+		}
+	}
 	// A1 加了 subscribe_* 列;dev MySQL 未跑新 migration 时跳过
 	// 跑了 server/resource/database/gb28181/migrations/2026-06-26-catalog-b-plus.sql 即可解除
 	if !app.GormDbMysql.Migrator().HasColumn(&gbmodels.GbDevice{}, "subscribe_capability") {

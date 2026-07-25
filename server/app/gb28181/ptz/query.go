@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,10 +13,23 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 )
 
 type QueryKind string
+
+type stagedCruiseTrack struct {
+	item manscdp.CruiseTrack
+	body []byte
+}
+
+type queryResponseStage struct {
+	cmdType  string
+	expected int
+	presets  map[int]manscdp.Preset
+	tracks   map[int]stagedCruiseTrack
+}
 
 const (
 	QueryPreset          QueryKind = "preset"
@@ -26,25 +40,45 @@ const (
 )
 
 func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, trackID int, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
-	command := Command{IdempotencyKey: idempotencyKey, Payload: map[string]interface{}{}}
+	command := Command{IdempotencyKey: idempotencyKey, Payload: map[string]interface{}{}, Profile: target.Profile}
+	profile := target.Profile
+	if profile.Version == "" {
+		profile = protocol.ProfileFor(protocol.Version2016)
+	}
+	targetCode := target.ChannelCode
 	switch kind {
 	case QueryPreset:
 		command.CmdType, command.Action = manscdp.CmdPresetQuery, "refresh_presets"
-		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildPresetQuery(target.ChannelCode, sn) }
+		command.ResponseRequired, command.MaxAttempts = true, 3
+		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildPresetQueryWithProfile(profile, targetCode, sn) }
 	case QueryHomePosition:
 		command.CmdType, command.Action = manscdp.CmdHomePositionQuery, "refresh_home_position"
 		command.ResponseRequired, command.MaxAttempts = true, 3
-		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildHomePositionQuery(target.ChannelCode, sn) }
+		command.Build = func(sn int) ([]byte, error) {
+			return manscdp.BuildHomePositionQueryWithProfile(profile, targetCode, sn)
+		}
 	case QueryCruiseTrackList:
 		command.CmdType, command.Action = manscdp.CmdCruiseTrackListQuery, "refresh_cruise_tracks"
-		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildCruiseTrackListQuery(target.ChannelCode, sn) }
+		command.ResponseRequired, command.MaxAttempts = true, 3
+		command.Build = func(sn int) ([]byte, error) {
+			return manscdp.BuildCruiseTrackListQueryWithProfile(profile, targetCode, sn)
+		}
 	case QueryCruiseTrack:
 		command.CmdType, command.Action = manscdp.CmdCruiseTrackQuery, "refresh_cruise_track"
+		command.ResponseRequired, command.MaxAttempts = true, 3
 		command.Payload["trackId"] = trackID
-		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildCruiseTrackQuery(target.ChannelCode, sn, trackID) }
+		command.Build = func(sn int) ([]byte, error) {
+			return manscdp.BuildCruiseTrackQueryWithProfile(profile, targetCode, sn, trackID)
+		}
 	case QueryPreciseStatus:
 		command.CmdType, command.Action = manscdp.CmdPTZPreciseStatusQuery, "refresh_precise_status"
-		command.Build = func(sn int) ([]byte, error) { return manscdp.BuildPTZPreciseStatusQuery(target.ChannelCode, sn) }
+		if profile.SupportsPrecisePTZ() {
+			command.CmdType = manscdp.CmdPTZPosition
+		}
+		command.ResponseRequired, command.MaxAttempts = true, 3
+		command.Build = func(sn int) ([]byte, error) {
+			return manscdp.BuildPTZPreciseStatusQueryWithProfile(profile, targetCode, sn)
+		}
 	default:
 		return gbmodels.GbPTZOperation{}, fmt.Errorf("未知 PTZ 查询类型: %q", kind)
 	}
@@ -56,6 +90,10 @@ func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, tr
 // legacy actor semantics while the home-position endpoint records the actual
 // user who initiated the query.
 func (s *Service) RefreshHomePosition(ctx context.Context, target Target, actorID, actorDeptID uint, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
+	profile := target.Profile
+	if profile.Version == "" {
+		profile = protocol.ProfileFor(protocol.Version2016)
+	}
 	return s.Execute(ctx, target, Command{
 		CmdType:          manscdp.CmdHomePositionQuery,
 		Action:           "refresh_home_position",
@@ -66,8 +104,9 @@ func (s *Service) RefreshHomePosition(ctx context.Context, target Target, actorI
 		ActorID:          actorID,
 		ActorDeptID:      actorDeptID,
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildHomePositionQuery(target.ChannelCode, sn)
+			return manscdp.BuildHomePositionQueryWithProfile(profile, target.ChannelCode, sn)
 		},
+		Profile: profile,
 	})
 }
 
@@ -75,12 +114,95 @@ func (s *Service) applyQueryResponse(ctx context.Context, operation gbmodels.GbP
 	if head.CmdType == manscdp.CmdHomePositionQuery {
 		return s.applyHomePositionQueryResponse(ctx, operation, callID, cseq, body)
 	}
-	if err := s.persistQueryCache(ctx, operation, head.CmdType, body); err != nil {
-		_, _, _ = s.ApplyResponse(ctx, Response{OperationID: operation.OperationID, CallID: callID, CSeq: cseq, SIPStatus: 200, DeviceResult: "ERROR", DeviceError: err.Error()})
+	if err := validateQueryResponse(operation, head.CmdType, body); err != nil {
+		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "ERROR", ptzErrorProtocolInvalid, err.Error())
+	}
+
+	completedAt := s.now()
+	s.queryStageMu.Lock()
+	defer s.queryStageMu.Unlock()
+
+	stage, stagedComplete, err := s.accumulateQueryStage(operation, head.CmdType, body)
+	if err != nil {
 		return err
 	}
-	_, _, err := s.ApplyResponse(ctx, Response{OperationID: operation.OperationID, CallID: callID, CSeq: cseq, SIPStatus: 200, DeviceResult: "OK"})
-	return err
+	applied := false
+	terminalApplied := false
+	err = schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+		applied = false
+		terminalApplied = false
+		// First reserve this response with a status/deadline CAS. A terminal or
+		// expired operation therefore cannot reach any cache write below.
+		var err error
+		applied, err = applyPTZResponseObservation(tx, operation, callID, cseq, completedAt)
+		if err != nil || !applied {
+			if !applied && err == nil {
+				logIgnoredPTZResponse(operation, callID, cseq, head, body)
+			}
+			return err
+		}
+
+		newer, err := newerAcceptedQueryExists(tx, operation)
+		if err != nil {
+			return err
+		}
+		complete := newer
+		if !newer {
+			if stage != nil {
+				complete = stagedComplete
+				if complete {
+					err = s.finalizeQueryStageTx(ctx, tx, operation, *stage, completedAt)
+				}
+			} else {
+				complete, err = s.persistQueryCacheTx(ctx, tx, operation, head.CmdType, body)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		if !complete {
+			return nil
+		}
+		terminalApplied, err = applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
+			Status: gbmodels.PTZOperationAccepted, DeviceResult: "OK",
+		}, completedAt)
+		if err != nil {
+			return err
+		}
+		if !terminalApplied {
+			logIgnoredPTZResponse(operation, callID, cseq, head, body)
+			return fmt.Errorf("PTZ 查询响应 operation 状态推进失败")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if !applied || terminalApplied {
+		delete(s.queryStages, operation.OperationID)
+	} else if stage != nil {
+		s.queryStages[operation.OperationID] = *stage
+	}
+	return nil
+}
+
+func validateQueryResponse(operation gbmodels.GbPTZOperation, cmdType string, body []byte) error {
+	switch cmdType {
+	case manscdp.CmdPresetQuery:
+		_, err := manscdp.ParsePresetResponse(body)
+		return err
+	case manscdp.CmdCruiseTrackListQuery:
+		_, err := manscdp.ParseCruiseTrackListResponse(body)
+		return err
+	case manscdp.CmdCruiseTrackQuery:
+		_, err := manscdp.ParseCruiseTrackResponse(body)
+		return err
+	case manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdPTZPosition:
+		_, err := manscdp.ParsePTZPreciseStatusResponseWithProfile(operationProtocolProfile(operation), body)
+		return err
+	default:
+		return fmt.Errorf("不支持的 PTZ 查询响应: %s", cmdType)
+	}
 }
 
 func headSN(head manscdp.MessageHead) int {
@@ -95,7 +217,7 @@ func (s *Service) applyHomePositionQueryResponse(ctx context.Context, operation 
 		return err
 	}
 	response, parseErr := manscdp.ParseHomePositionResponse(body, options)
-	if parseErr != nil || response.SN != operation.SN || response.DeviceID != operation.ChannelCode {
+	if parseErr != nil || response.SN != operation.SN || response.DeviceID != operationTargetCode(operation) {
 		if parseErr == nil {
 			parseErr = fmt.Errorf("HomePositionQuery 应答标识与 operation 不一致")
 		}
@@ -196,102 +318,248 @@ func sameOptionalInt(left, right *int) bool {
 	return *left == *right
 }
 
-func (s *Service) persistQueryCache(ctx context.Context, operation gbmodels.GbPTZOperation, cmdType string, body []byte) error {
+// persistQueryCacheTx writes one query response using the caller's transaction
+// and reports whether the response completed the query. Keeping this inside
+// the operation CAS transaction prevents a timed-out response from creating
+// or replacing any cache row.
+func (s *Service) persistQueryCacheTx(ctx context.Context, tx *gorm.DB, operation gbmodels.GbPTZOperation, cmdType string, body []byte) (bool, error) {
 	now := s.now()
+	tx = tx.WithContext(ctx)
 	switch cmdType {
-	case manscdp.CmdPresetQuery:
-		response, err := manscdp.ParsePresetResponse(body)
-		if err != nil {
-			return err
-		}
-		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			for _, item := range response.Presets {
-				preset := gbmodels.GbPTZPreset{DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, PresetID: item.ID, Name: item.Name, Status: gbmodels.PTZPresetActive, LastOperationID: operation.OperationID, UpdatedAt: now}
-				if err := tx.Clauses(clause.OnConflict{
-					Columns:   []clause.Column{{Name: "channel_id"}, {Name: "preset_id"}},
-					DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "status", "last_operation_id", "updated_at"}),
-				}).Create(&preset).Error; err != nil {
-					return err
-				}
-			}
-			expected := response.SumNum
-			if expected <= 0 {
-				expected = len(response.Presets)
-			}
-			var received int64
-			if err := tx.Model(&gbmodels.GbPTZPreset{}).
-				Where("channel_id = ? AND last_operation_id = ?", operation.ChannelID, operation.OperationID).
-				Count(&received).Error; err != nil {
-				return err
-			}
-			if received >= int64(expected) {
-				return tx.Model(&gbmodels.GbPTZPreset{}).
-					Where("channel_id = ? AND last_operation_id <> ?", operation.ChannelID, operation.OperationID).
-					Update("status", gbmodels.PTZPresetDeleted).Error
-			}
-			return nil
-		})
-	case manscdp.CmdCruiseTrackListQuery:
-		response, err := manscdp.ParseCruiseTrackListResponse(body)
-		if err != nil {
-			return err
-		}
-		return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			// 只有 SumNum=0 或者已收到完整列表时才能删除缓存中的缺失项。
-			// 设备可能分页/截断返回列表;此时保留未出现在本批响应中的旧记录。
-			if response.SumNum == 0 {
-				if err := tx.Where("channel_id = ?", operation.ChannelID).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
-					return err
-				}
-			} else if response.SumNum == response.List.Num {
-				presentIDs := make([]int, 0, len(response.List.Tracks))
-				for _, item := range response.List.Tracks {
-					presentIDs = append(presentIDs, item.ID)
-				}
-				deleteQuery := tx.Where("channel_id = ?", operation.ChannelID)
-				if len(presentIDs) == 0 {
-					deleteQuery = deleteQuery.Where("1 = 1")
-				} else {
-					deleteQuery = deleteQuery.Where("track_id NOT IN ?", presentIDs)
-				}
-				if err := deleteQuery.Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
-					return err
-				}
-			}
-			for _, item := range response.List.Tracks {
-				if item.Enabled == nil {
-					enabled := true
-					item.Enabled = &enabled
-				}
-				if err := upsertCruiseTrack(tx, operation, item, body, now, false); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
 	case manscdp.CmdCruiseTrackQuery:
 		response, err := manscdp.ParseCruiseTrackResponse(body)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if response.CruiseTrack.Enabled == nil {
 			enabled := true
 			response.CruiseTrack.Enabled = &enabled
 		}
-		return upsertCruiseTrack(s.db.WithContext(ctx), operation, response.CruiseTrack, body, now, true)
-	case manscdp.CmdPTZPreciseStatusQuery:
-		response, err := manscdp.ParsePTZPreciseStatusResponse(body)
-		if err != nil {
-			return err
+		if err := upsertCruiseTrack(tx, operation, response.CruiseTrack, body, now, true); err != nil {
+			return false, err
 		}
-		_, err = s.ApplyPreciseNotify(ctx, PreciseNotify{
+		return true, nil
+
+	case manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdPTZPosition:
+		response, err := manscdp.ParsePTZPreciseStatusResponseWithProfile(operationProtocolProfile(operation), body)
+		if err != nil {
+			return false, err
+		}
+		// ApplyPreciseNotify already owns the precise-state freshness/dedupe
+		// rules. Binding its DB handle to tx keeps those writes in this CAS.
+		cacheService := &Service{db: tx, now: s.now}
+		_, err = cacheService.ApplyPreciseNotify(ctx, PreciseNotify{
 			DeviceID: operation.DeviceID, DeviceCode: operation.DeviceCode, ChannelID: operation.ChannelID, ChannelCode: operation.ChannelCode,
 			SN: response.SN, Pan: response.Pan, Tilt: response.Tilt, Zoom: response.Zoom, Focus: response.Focus, Iris: response.Iris,
 			ReceivedAt: now, DedupeKey: operation.OperationID, RawSummary: summarizePTZBody(body),
 		})
-		return err
+		return true, err
 	default:
-		return fmt.Errorf("不支持的 PTZ 查询响应: %s", cmdType)
+		return false, fmt.Errorf("不支持的 PTZ 查询响应: %s", cmdType)
+	}
+}
+
+func (s *Service) accumulateQueryStage(operation gbmodels.GbPTZOperation, cmdType string, body []byte) (*queryResponseStage, bool, error) {
+	if cmdType != manscdp.CmdPresetQuery && cmdType != manscdp.CmdCruiseTrackListQuery {
+		return nil, false, nil
+	}
+	stage := cloneQueryResponseStage(s.queryStages[operation.OperationID])
+	if stage.cmdType != "" && stage.cmdType != cmdType {
+		return nil, false, fmt.Errorf("PTZ 查询暂存类型不一致: %s", cmdType)
+	}
+	stage.cmdType = cmdType
+
+	switch cmdType {
+	case manscdp.CmdPresetQuery:
+		response, err := manscdp.ParsePresetResponse(body)
+		if err != nil {
+			return nil, false, err
+		}
+		if stage.presets == nil {
+			stage.presets = make(map[int]manscdp.Preset)
+		}
+		for _, item := range response.Presets {
+			stage.presets[item.ID] = item
+		}
+		stage.expected = maxQueryStageExpected(stage.expected, response.SumNum, len(stage.presets))
+		return &stage, len(stage.presets) >= stage.expected, nil
+
+	case manscdp.CmdCruiseTrackListQuery:
+		response, err := manscdp.ParseCruiseTrackListResponse(body)
+		if err != nil {
+			return nil, false, err
+		}
+		if stage.tracks == nil {
+			stage.tracks = make(map[int]stagedCruiseTrack)
+		}
+		for _, item := range response.List.Tracks {
+			stage.tracks[item.ID] = stagedCruiseTrack{item: item, body: append([]byte(nil), body...)}
+		}
+		stage.expected = maxQueryStageExpected(stage.expected, response.SumNum, len(stage.tracks))
+		return &stage, len(stage.tracks) >= stage.expected, nil
+	}
+	return nil, false, nil
+}
+
+func cloneQueryResponseStage(source queryResponseStage) queryResponseStage {
+	clone := queryResponseStage{cmdType: source.cmdType, expected: source.expected}
+	if source.presets != nil {
+		clone.presets = make(map[int]manscdp.Preset, len(source.presets))
+		for id, item := range source.presets {
+			clone.presets[id] = item
+		}
+	}
+	if source.tracks != nil {
+		clone.tracks = make(map[int]stagedCruiseTrack, len(source.tracks))
+		for id, item := range source.tracks {
+			item.body = append([]byte(nil), item.body...)
+			clone.tracks[id] = item
+		}
+	}
+	return clone
+}
+
+func maxQueryStageExpected(current, reported, received int) int {
+	if reported > current {
+		current = reported
+	}
+	if received > current {
+		current = received
+	}
+	return current
+}
+
+func (s *Service) finalizeQueryStageTx(ctx context.Context, tx *gorm.DB, operation gbmodels.GbPTZOperation, stage queryResponseStage, now time.Time) error {
+	tx = tx.WithContext(ctx)
+	switch stage.cmdType {
+	case manscdp.CmdPresetQuery:
+		ids := sortedPresetIDs(stage.presets)
+		for _, id := range ids {
+			item := stage.presets[id]
+			preset := gbmodels.GbPTZPreset{
+				DeviceID: operation.DeviceID, ChannelID: operation.ChannelID, PresetID: item.ID,
+				Name: item.Name, Status: gbmodels.PTZPresetActive, LastOperationID: operation.OperationID, UpdatedAt: now,
+			}
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "channel_id"}, {Name: "preset_id"}},
+				DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "status", "last_operation_id", "updated_at"}),
+			}).Create(&preset).Error; err != nil {
+				return err
+			}
+		}
+		missing := tx.Model(&gbmodels.GbPTZPreset{}).Where("channel_id = ?", operation.ChannelID)
+		if len(ids) > 0 {
+			missing = missing.Where("preset_id NOT IN ?", ids)
+		}
+		return missing.Update("status", gbmodels.PTZPresetDeleted).Error
+
+	case manscdp.CmdCruiseTrackListQuery:
+		ids := sortedCruiseTrackIDs(stage.tracks)
+		for _, id := range ids {
+			staged := stage.tracks[id]
+			item := staged.item
+			if item.Enabled == nil {
+				enabled := true
+				item.Enabled = &enabled
+			}
+			if err := upsertCruiseTrack(tx, operation, item, staged.body, now, false); err != nil {
+				return err
+			}
+		}
+		missing := tx.Where("channel_id = ?", operation.ChannelID)
+		if len(ids) > 0 {
+			missing = missing.Where("track_id NOT IN ?", ids)
+		}
+		return missing.Delete(&gbmodels.GbPTZCruiseTrack{}).Error
+	}
+	return fmt.Errorf("不支持的 PTZ 查询暂存类型: %s", stage.cmdType)
+}
+
+func sortedPresetIDs(items map[int]manscdp.Preset) []int {
+	ids := make([]int, 0, len(items))
+	for id := range items {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
+}
+
+func sortedCruiseTrackIDs(items map[int]stagedCruiseTrack) []int {
+	ids := make([]int, 0, len(items))
+	for id := range items {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	return ids
+}
+
+func (s *Service) discardQueryStage(operationID string) {
+	if s == nil || strings.TrimSpace(operationID) == "" {
+		return
+	}
+	s.queryStageMu.Lock()
+	delete(s.queryStages, operationID)
+	s.queryStageMu.Unlock()
+}
+
+func (s *Service) clearQueryStages() {
+	if s == nil {
+		return
+	}
+	s.queryStageMu.Lock()
+	s.queryStages = make(map[string]queryResponseStage)
+	s.queryStageMu.Unlock()
+}
+
+func (s *Service) cleanupQueryStages(ctx context.Context, now time.Time) error {
+	if s == nil || s.db == nil {
+		return nil
+	}
+	s.queryStageMu.Lock()
+	operationIDs := make([]string, 0, len(s.queryStages))
+	for operationID := range s.queryStages {
+		operationIDs = append(operationIDs, operationID)
+	}
+	s.queryStageMu.Unlock()
+	if len(operationIDs) == 0 {
+		return nil
+	}
+
+	var operations []gbmodels.GbPTZOperation
+	if err := ptzWriter(s.db).WithContext(ctx).
+		Select("operation_id", "status", "attempt", "queue_deadline_at", "transport_deadline_at", "deadline_at").
+		Where("operation_id IN ?", operationIDs).Find(&operations).Error; err != nil {
+		return err
+	}
+	keep := make(map[string]struct{}, len(operations))
+	for _, operation := range operations {
+		if queryOperationCanStillRespond(operation, now) {
+			keep[operation.OperationID] = struct{}{}
+		}
+	}
+	s.queryStageMu.Lock()
+	for _, operationID := range operationIDs {
+		if _, ok := keep[operationID]; !ok {
+			delete(s.queryStages, operationID)
+		}
+	}
+	s.queryStageMu.Unlock()
+	return nil
+}
+
+func queryOperationCanStillRespond(operation gbmodels.GbPTZOperation, now time.Time) bool {
+	switch operation.Status {
+	case gbmodels.PTZOperationUnknown:
+		return operation.TransportDeadlineAt != nil && operation.TransportDeadlineAt.After(now)
+	case gbmodels.PTZOperationSent:
+		return operation.DeadlineAt != nil && operation.DeadlineAt.After(now)
+	case gbmodels.PTZOperationQueued:
+		if operation.Attempt == 0 {
+			return operation.QueueDeadlineAt != nil && operation.QueueDeadlineAt.After(now)
+		}
+		return operation.TransportDeadlineAt != nil && operation.TransportDeadlineAt.After(now)
+	default:
+		return false
 	}
 }
 
@@ -313,11 +581,23 @@ func upsertCruiseTrack(db *gorm.DB, operation gbmodels.GbPTZOperation, item mans
 	updateColumns := []string{"device_id", "name", "enabled", "raw_summary", "updated_at"}
 	if includePoints {
 		updateColumns = append(updateColumns, "detail_json")
+	} else {
+		track.LastOperationID = operation.OperationID
+		updateColumns = append(updateColumns, "last_operation_id")
 	}
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "channel_id"}, {Name: "track_id"}},
 		DoUpdates: clause.AssignmentColumns(updateColumns),
 	}).Create(&track).Error
+}
+
+func newerAcceptedQueryExists(tx *gorm.DB, operation gbmodels.GbPTZOperation) (bool, error) {
+	var count int64
+	result := tx.Model(&gbmodels.GbPTZOperation{}).
+		Where("channel_id = ? AND cmd_type = ? AND action = ? AND payload_json = ? AND id > ? AND status = ?",
+			operation.ChannelID, operation.CmdType, operation.Action, operation.PayloadJSON, operation.ID, gbmodels.PTZOperationAccepted).
+		Count(&count)
+	return count > 0, result.Error
 }
 
 func summarizePTZBody(body []byte) string {

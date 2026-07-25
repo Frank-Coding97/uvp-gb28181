@@ -262,14 +262,17 @@ func (s *Scheduler) runDue(ctx context.Context, now time.Time) error {
 		return errors.New("PTZ scheduler 未就绪")
 	}
 	steps := []func(context.Context, time.Time) error{
-		s.expireQueued, s.expireTransport, s.expireApplication, s.recoverExpiredLeases, s.claimDue,
+		s.expireQueued, s.expireTransport, s.expireApplication, s.recoverExpiredLeases,
 	}
 	for _, step := range steps {
 		if err := step(ctx, now); err != nil {
 			return err
 		}
 	}
-	return nil
+	if err := s.service.cleanupQueryStages(ctx, now); err != nil {
+		return err
+	}
+	return s.claimDue(ctx, now)
 }
 
 func (s *Scheduler) expireQueued(ctx context.Context, now time.Time) error {
@@ -509,13 +512,41 @@ func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPT
 }
 
 func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
+	profile := operationProtocolProfile(operation)
+	targetCode := strings.TrimSpace(operation.TargetCode)
+	if targetCode == "" {
+		targetCode = operation.ChannelCode
+	}
+	buildPrecise := func() ([]byte, error) {
+		var payload struct {
+			Pan   *float64
+			Tilt  *float64
+			Zoom  *float64
+			Focus *float64
+			Iris  *float64
+			Speed int
+		}
+		if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
+			return nil, err
+		}
+		command := manscdp.PTZPreciseControl{
+			Pan: payload.Pan, Tilt: payload.Tilt, Zoom: payload.Zoom,
+			Focus: payload.Focus, Iris: payload.Iris, Speed: payload.Speed,
+		}
+		if profile.SupportsPrecisePTZ() {
+			return manscdp.BuildPTZPreciseDeviceControlWithProfile(profile, targetCode, operation.SN, command)
+		}
+		return manscdp.BuildPTZPreciseControlWithProfile(profile, targetCode, operation.SN, command)
+	}
 	switch operation.CmdType {
+	case manscdp.CmdDeviceStatus:
+		return manscdp.BuildDeviceStatusQueryWithProfile(profile, targetCode, operation.SN)
 	case manscdp.CmdHomePositionQuery:
-		return manscdp.BuildHomePositionQuery(operation.ChannelCode, operation.SN)
+		return manscdp.BuildHomePositionQueryWithProfile(profile, targetCode, operation.SN)
 	case manscdp.CmdPresetQuery:
-		return manscdp.BuildPresetQuery(operation.ChannelCode, operation.SN)
+		return manscdp.BuildPresetQueryWithProfile(profile, targetCode, operation.SN)
 	case manscdp.CmdCruiseTrackListQuery:
-		return manscdp.BuildCruiseTrackListQuery(operation.ChannelCode, operation.SN)
+		return manscdp.BuildCruiseTrackListQueryWithProfile(profile, targetCode, operation.SN)
 	case manscdp.CmdCruiseTrackQuery:
 		var payload struct {
 			TrackID int `json:"trackId"`
@@ -523,10 +554,49 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 		if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
 			return nil, err
 		}
-		return manscdp.BuildCruiseTrackQuery(operation.ChannelCode, operation.SN, payload.TrackID)
-	case manscdp.CmdPTZPreciseStatusQuery:
-		return manscdp.BuildPTZPreciseStatusQuery(operation.ChannelCode, operation.SN)
+		return manscdp.BuildCruiseTrackQueryWithProfile(profile, targetCode, operation.SN, payload.TrackID)
+	case manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdPTZPosition:
+		return manscdp.BuildPTZPreciseStatusQueryWithProfile(profile, targetCode, operation.SN)
+	case manscdp.CmdPTZPreciseCtrl:
+		return buildPrecise()
 	case manscdp.CmdDeviceControl:
+		if operation.Action == "precise" {
+			return buildPrecise()
+		}
+		if operation.Action == "record_start" || operation.Action == "record_stop" || operation.Action == "guard_set" || operation.Action == "guard_reset" || operation.Action == "alarm_reset" || operation.Action == "teleboot" || operation.Action == "iframe" || operation.Action == "drag_zoom_in" || operation.Action == "drag_zoom_out" {
+			var payload struct {
+				Action      string                 `json:"action"`
+				AlarmMethod string                 `json:"alarmMethod"`
+				AlarmType   string                 `json:"alarmType"`
+				Region      manscdp.DragZoomRegion `json:"region"`
+			}
+			if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
+				return nil, err
+			}
+			request := manscdp.AlarmResetOptions{AlarmMethod: payload.AlarmMethod, AlarmType: payload.AlarmType}
+			switch operation.Action {
+			case "iframe":
+				return manscdp.BuildIFrameControlWithProfile(profile, targetCode, operation.SN)
+			case "record_start":
+				return manscdp.BuildRecordControlWithProfile(profile, targetCode, operation.SN, manscdp.RecordStart)
+			case "record_stop":
+				return manscdp.BuildRecordControlWithProfile(profile, targetCode, operation.SN, manscdp.RecordStop)
+			case "guard_set":
+				return manscdp.BuildGuardControlWithProfile(profile, targetCode, operation.SN, manscdp.GuardSet)
+			case "guard_reset":
+				return manscdp.BuildGuardControlWithProfile(profile, targetCode, operation.SN, manscdp.GuardReset)
+			case "alarm_reset":
+				return manscdp.BuildAlarmResetControlWithProfile(profile, targetCode, operation.SN, request)
+			case "teleboot":
+				return manscdp.BuildTeleBootControlWithProfile(profile, targetCode, operation.SN, true)
+			case "drag_zoom_in", "drag_zoom_out":
+				direction := manscdp.DragZoomIn
+				if operation.Action == "drag_zoom_out" {
+					direction = manscdp.DragZoomOut
+				}
+				return manscdp.BuildDragZoomControlWithProfile(profile, targetCode, operation.SN, manscdp.DragZoomCommand{Direction: direction, Region: payload.Region})
+			}
+		}
 		if operation.Action != "home_position" {
 			return nil, fmt.Errorf("不支持持久化调度的 PTZ control: %s", operation.Action)
 		}
@@ -538,7 +608,7 @@ func buildScheduledPTZBody(operation gbmodels.GbPTZOperation) ([]byte, error) {
 		if err := json.Unmarshal([]byte(operation.PayloadJSON), &payload); err != nil {
 			return nil, err
 		}
-		return manscdp.BuildHomePositionControl(operation.ChannelCode, operation.SN, manscdp.HomePositionControl{
+		return manscdp.BuildHomePositionControlWithProfile(profile, targetCode, operation.SN, manscdp.HomePositionControl{
 			Enabled: payload.Enabled, ResetTime: payload.ResetTime, PresetIndex: payload.PresetID,
 		})
 	default:

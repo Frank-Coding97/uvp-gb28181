@@ -42,6 +42,7 @@ func talkCreateRequest(channelID uint) CreateRequest {
 		Channel: &models.GbChannel{ID: channelID, DeviceID: "D", ChannelID: "C", Status: models.ChannelStatusOnline, StreamID: "live", Capabilities: &caps},
 		Device:  &models.GbDevice{DeviceID: "D", Status: models.DeviceStatusOnline},
 		ActorID: 7, ActorDeptID: 9,
+		Mode: models.TalkSessionModeTalk,
 	}
 }
 
@@ -78,7 +79,78 @@ func TestTalkServiceCreatePrefersPlaybackNodeAndStoresOnlyTokenHash(t *testing.T
 	require.Equal(t, result.SSRC, stored.SSRC)
 }
 
-func TestTalkServiceRejectsUnknownCapabilityAndInsecureNode(t *testing.T) {
+func TestTalkServiceDoesNotGateCreateOnCapabilityMetadata(t *testing.T) {
+	for _, capabilities := range []*string{
+		nil,
+		stringPointer(`{"talk":false}`),
+		stringPointer(`{"broadcast":false,"talk":false}`),
+		stringPointer(`{not-json}`),
+	} {
+		db := newTalkRepoTestDB(t)
+		repo := NewGormRepo(db)
+		n := &node.Node{ID: 1, Host: "node", State: node.StateActive}
+		service := NewService(repo, fakeTalkNodes{items: map[int64]*node.Node{1: n}}, stream.NewLocationMap(), &fakeTalkPicker{node: n},
+			fakeTalkConfigs{configs: map[int64]node.ServerConfig{1: {HTTPSPort: 443}}}, time.Now)
+
+		request := talkCreateRequest(1)
+		request.Channel.Capabilities = capabilities
+		created, err := service.Create(context.Background(), request)
+		require.NoError(t, err)
+		require.NotEmpty(t, created.SessionID)
+	}
+}
+
+func TestTalkServicePersistsAndReturnsTalkMode(t *testing.T) {
+	db := newTalkRepoTestDB(t)
+	repo := NewGormRepo(db)
+	n := &node.Node{ID: 1, Host: "node", State: node.StateActive}
+	service := NewService(repo, fakeTalkNodes{items: map[int64]*node.Node{1: n}}, stream.NewLocationMap(), &fakeTalkPicker{node: n},
+		fakeTalkConfigs{configs: map[int64]node.ServerConfig{1: {HTTPSPort: 443}}}, time.Now)
+
+	created, err := service.Create(context.Background(), talkCreateRequest(1))
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionModeTalk, created.Mode)
+
+	stored, err := repo.FindBySession(context.Background(), created.SessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionModeTalk, stored.Mode)
+}
+
+func TestTalkServiceRejectsInvalidModeWithoutCreatingLease(t *testing.T) {
+	db := newTalkRepoTestDB(t)
+	repo := NewGormRepo(db)
+	n := &node.Node{ID: 1, Host: "node", State: node.StateActive}
+	service := NewService(repo, fakeTalkNodes{items: map[int64]*node.Node{1: n}}, stream.NewLocationMap(), &fakeTalkPicker{node: n},
+		fakeTalkConfigs{configs: map[int64]node.ServerConfig{1: {HTTPSPort: 443}}}, time.Now)
+
+	request := talkCreateRequest(1)
+	request.Mode = "invalid"
+	_, err := service.Create(context.Background(), request)
+	require.ErrorIs(t, err, ErrInvalidTalkSessionMode)
+	sessions, err := repo.ListNonterminal(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, sessions)
+}
+
+func TestTalkServiceRejectsBroadcastWithoutCreatingLease(t *testing.T) {
+	db := newTalkRepoTestDB(t)
+	repo := NewGormRepo(db)
+	n := &node.Node{ID: 1, Host: "node", State: node.StateActive}
+	picker := &fakeTalkPicker{node: n}
+	service := NewService(repo, fakeTalkNodes{items: map[int64]*node.Node{1: n}}, stream.NewLocationMap(), picker,
+		fakeTalkConfigs{configs: map[int64]node.ServerConfig{1: {HTTPSPort: 443}}}, time.Now)
+
+	request := talkCreateRequest(1)
+	request.Mode = models.TalkSessionModeBroadcast
+	_, err := service.Create(context.Background(), request)
+	require.ErrorIs(t, err, ErrBroadcastNotImplemented)
+	require.Zero(t, picker.calls.Load())
+	sessions, err := repo.ListNonterminal(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, sessions)
+}
+
+func TestTalkServiceRejectsInsecureNodeWithoutCreatingLease(t *testing.T) {
 	db := newTalkRepoTestDB(t)
 	repo := NewGormRepo(db)
 	n := &node.Node{ID: 1, Host: "node", State: node.StateActive}
@@ -86,18 +158,14 @@ func TestTalkServiceRejectsUnknownCapabilityAndInsecureNode(t *testing.T) {
 	service := NewService(repo, fakeTalkNodes{items: map[int64]*node.Node{1: n}}, stream.NewLocationMap(), picker,
 		fakeTalkConfigs{configs: map[int64]node.ServerConfig{1: {HTTPPort: 18080}}}, time.Now)
 
-	request := talkCreateRequest(1)
-	request.Channel.Capabilities = nil
-	_, err := service.Create(context.Background(), request)
-	require.ErrorIs(t, err, ErrTalkCapabilityUnknown)
-	caps := `{"talk":true}`
-	request.Channel.Capabilities = &caps
-	_, err = service.Create(context.Background(), request)
+	_, err := service.Create(context.Background(), talkCreateRequest(1))
 	require.ErrorIs(t, err, ErrSecurePublishUnavailable)
 	sessions, err := repo.ListNonterminal(context.Background())
 	require.NoError(t, err)
 	require.Empty(t, sessions)
 }
+
+func stringPointer(value string) *string { return &value }
 
 func TestTalkServiceRejectsOfflineTargetWithoutCreatingLease(t *testing.T) {
 	db := newTalkRepoTestDB(t)

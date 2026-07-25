@@ -41,6 +41,15 @@ func (fakeTrackedPTZSender) SendMessageTracked(_ context.Context, _ string, _ st
 	return uac.TrackedMessageResult{CallID: "call-ptz", CSeq: "1", StatusCode: 200}, nil
 }
 
+type recordingTrackedPTZSender struct {
+	bodies [][]byte
+}
+
+func (s *recordingTrackedPTZSender) SendMessageTracked(_ context.Context, _ string, _ string, _ string, body []byte) (uac.TrackedMessageResult, error) {
+	s.bodies = append(s.bodies, append([]byte(nil), body...))
+	return uac.TrackedMessageResult{CallID: "call-ptz", CSeq: "1", StatusCode: 200}, nil
+}
+
 func (f *fakePTZSender) SendMessage(_ context.Context, deviceID, dest, transport string, body []byte) error {
 	f.deviceID, f.dest, f.transport, f.body = deviceID, dest, transport, body
 	return nil
@@ -179,7 +188,10 @@ func TestDeviceMgmt_ControlPTZPrecise_ServiceReturnsOperation(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{}))
-	device := &gbmodels.GbDevice{DeviceID: "D", IP: "192.0.2.10", Port: 5060, Status: gbmodels.DeviceStatusOnline}
+	device := &gbmodels.GbDevice{
+		DeviceID: "D", IP: "192.0.2.10", Port: 5060, Status: gbmodels.DeviceStatusOnline,
+		EffectiveVersion: gbmodels.ProtocolVersion2022,
+	}
 	require.NoError(t, db.Create(device).Error)
 	channel := &gbmodels.GbChannel{DeviceID: device.DeviceID, ChannelID: "C", Status: gbmodels.ChannelStatusOnline, PTZType: 1}
 	require.NoError(t, db.Create(channel).Error)
@@ -188,10 +200,87 @@ func TestDeviceMgmt_ControlPTZPrecise_ServiceReturnsOperation(t *testing.T) {
 	controller.SetPTZService(mustPTZService(t, db, fakeTrackedPTZSender{}))
 	r := gin.New()
 	r.POST("/channel/:id/ptz/precise", controller.ControlPTZPrecise)
-	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/precise", strings.NewReader(`{"pan":12.5,"tilt":-3.25,"speed":4}`))
+	req := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/precise", strings.NewReader(`{"pan":12.5,"tilt":-3.25}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), "operationId")
+}
+
+func TestDeviceMgmt_ControlPTZPreciseRejectsNon2022ProfileBeforeDispatch(t *testing.T) {
+	tests := []struct {
+		name             string
+		effectiveVersion string
+	}{
+		{name: "effective 2016", effectiveVersion: gbmodels.ProtocolVersion2016},
+		{name: "default profile", effectiveVersion: ""},
+		{name: "unknown profile", effectiveVersion: "unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+			require.NoError(t, err)
+			require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{}))
+			device := &gbmodels.GbDevice{
+				DeviceID: "D", IP: "192.0.2.10", Port: 5060, Status: gbmodels.DeviceStatusOnline,
+				EffectiveVersion: tt.effectiveVersion,
+			}
+			require.NoError(t, db.Create(device).Error)
+			channel := &gbmodels.GbChannel{DeviceID: device.DeviceID, ChannelID: "C", Status: gbmodels.ChannelStatusOnline}
+			require.NoError(t, db.Create(channel).Error)
+			sender := &recordingTrackedPTZSender{}
+			controller := gbcontrollers.NewDeviceMgmtController()
+			controller.SetDB(func() *gorm.DB { return db })
+			controller.SetPTZService(mustPTZService(t, db, sender))
+			router := gin.New()
+			router.POST("/channel/:id/ptz/precise", controller.ControlPTZPrecise)
+
+			request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/precise", strings.NewReader(`{"pan":12.5}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+
+			require.Equal(t, http.StatusUnprocessableEntity, response.Code, response.Body.String())
+			require.Contains(t, response.Body.String(), "protocol-not-applicable")
+			require.Empty(t, sender.bodies, "不适用协议不得发送 SIP")
+			var operationCount int64
+			require.NoError(t, db.Model(&gbmodels.GbPTZOperation{}).Count(&operationCount).Error)
+			require.Zero(t, operationCount, "不适用协议不得创建 PTZ operation")
+		})
+	}
+}
+
+func TestDeviceMgmt_ControlPTZPrecise2022DoesNotGateOnCapabilityMetadata(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{}))
+	device := &gbmodels.GbDevice{
+		DeviceID: "D", IP: "192.0.2.10", Port: 5060, Status: gbmodels.DeviceStatusOnline,
+		EffectiveVersion: gbmodels.ProtocolVersion2022,
+	}
+	require.NoError(t, db.Create(device).Error)
+	capabilities := `{"precisePtz":false}`
+	channel := &gbmodels.GbChannel{
+		DeviceID: device.DeviceID, ChannelID: "C", Status: gbmodels.ChannelStatusOnline,
+		Capabilities: &capabilities,
+	}
+	require.NoError(t, db.Create(channel).Error)
+	sender := &recordingTrackedPTZSender{}
+	controller := gbcontrollers.NewDeviceMgmtController()
+	controller.SetDB(func() *gorm.DB { return db })
+	controller.SetPTZService(mustPTZService(t, db, sender))
+	router := gin.New()
+	router.POST("/channel/:id/ptz/precise", controller.ControlPTZPrecise)
+
+	request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/precise", strings.NewReader(`{"pan":12.5,"tilt":-3.25}`))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Len(t, sender.bodies, 1)
+	require.Contains(t, string(sender.bodies[0]), "<CmdType>DeviceControl</CmdType>")
+	require.Contains(t, string(sender.bodies[0]), "<PTZPreciseCtrl>")
 }

@@ -1475,6 +1475,44 @@ SELECT setval('sys_api_id_seq',221,true);
 SELECT setval('sys_menu_id_seq',140360,true);
 SELECT setval('sys_casbin_rule_id_seq',7565,true);
 
+-- GB28181 device registry and dual-version profile archive.
+DROP TABLE IF EXISTS gb_device;
+CREATE TABLE gb_device (
+    id BIGSERIAL,
+    device_id VARCHAR(20) NOT NULL DEFAULT '',
+    name VARCHAR(255) NOT NULL DEFAULT '',
+    password VARCHAR(255) NOT NULL DEFAULT '',
+    transport VARCHAR(8) NOT NULL DEFAULT '',
+    manufacturer VARCHAR(255) NOT NULL DEFAULT '',
+    model VARCHAR(255) NOT NULL DEFAULT '',
+    firmware VARCHAR(255) NOT NULL DEFAULT '',
+    ip VARCHAR(64) NOT NULL DEFAULT '',
+    port INTEGER DEFAULT 0,
+    register_time TIMESTAMP,
+    register_expire_at TIMESTAMP,
+    keepalive_time TIMESTAMP,
+    keepalive_interval INTEGER DEFAULT 60,
+    expires INTEGER DEFAULT 0,
+    status SMALLINT DEFAULT 0,
+    offline_at TIMESTAMP,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    deleted_at TIMESTAMP,
+    created_by BIGINT DEFAULT 0,
+    owner_dept_id BIGINT NOT NULL DEFAULT 0,
+    reported_version VARCHAR(8) NOT NULL DEFAULT '',
+    reported_version_at TIMESTAMP(3),
+    protocol_override VARCHAR(8) NOT NULL DEFAULT 'auto',
+    effective_version VARCHAR(8) NOT NULL DEFAULT '2016',
+    effective_version_source VARCHAR(16) NOT NULL DEFAULT 'default',
+    effective_version_at TIMESTAMP(3),
+    PRIMARY KEY (id),
+    CONSTRAINT uk_gb_device_id UNIQUE (device_id)
+);
+CREATE INDEX idx_gb_device_deleted_at ON gb_device (deleted_at);
+CREATE INDEX idx_gb_device_owner_dept_deleted ON gb_device (owner_dept_id, deleted_at);
+CREATE INDEX idx_gb_device_status_keepalive ON gb_device (status, keepalive_time);
+
 -- GB28181 PTZ / home-position tables (2026-07-24).
 DROP TABLE IF EXISTS gb_ptz_home_position;
 DROP TABLE IF EXISTS gb_ptz_operation_attempt;
@@ -1530,6 +1568,7 @@ CREATE TABLE gb_ptz_operation (
 CREATE TABLE gb_ptz_state (
     id BIGSERIAL,
     device_id BIGINT NOT NULL,
+    device_code VARCHAR(20) NOT NULL,
     channel_id BIGINT NOT NULL,
     channel_code VARCHAR(20) NOT NULL,
     pan NUMERIC(18,6),
@@ -1571,6 +1610,7 @@ CREATE TABLE gb_ptz_cruise_track (
     name VARCHAR(255),
     enabled BOOLEAN,
     detail_json TEXT,
+    last_operation_id VARCHAR(64),
     raw_summary TEXT,
     device_time TIMESTAMP(3),
     created_at TIMESTAMP(3) NOT NULL,
@@ -1637,18 +1677,12 @@ CREATE INDEX idx_ptz_cruise_device ON gb_ptz_cruise_track (device_id);
 CREATE INDEX idx_ptz_attempt_status_lease ON gb_ptz_operation_attempt (status, lease_until);
 CREATE INDEX idx_ptz_home_position_device ON gb_ptz_home_position (device_id);
 
-ALTER TABLE gb_device
-    ADD COLUMN reported_version VARCHAR(8) NOT NULL DEFAULT '',
-    ADD COLUMN reported_version_at TIMESTAMP(3),
-    ADD COLUMN protocol_override VARCHAR(8) NOT NULL DEFAULT 'auto',
-    ADD COLUMN effective_version VARCHAR(8) NOT NULL DEFAULT '2016',
-    ADD COLUMN effective_version_source VARCHAR(16) NOT NULL DEFAULT 'default',
-    ADD COLUMN effective_version_at TIMESTAMP(3);
 ALTER TABLE gb_ptz_operation
     ADD COLUMN profile_version VARCHAR(8),
     ADD COLUMN profile_charset VARCHAR(16),
     ADD COLUMN target_scope VARCHAR(16),
-    ADD COLUMN target_code VARCHAR(20);
+    ADD COLUMN target_code VARCHAR(20),
+    ADD COLUMN scope_key VARCHAR(64);
 CREATE TABLE gb_device_control_state (
     id BIGSERIAL PRIMARY KEY,
     device_id BIGINT NOT NULL,
@@ -1662,11 +1696,59 @@ CREATE TABLE gb_device_control_state (
     source VARCHAR(32) NOT NULL DEFAULT 'device_status',
     source_sn INTEGER NOT NULL DEFAULT 0,
     source_operation_id VARCHAR(64),
+    source_operation_seq BIGINT NOT NULL DEFAULT 0,
     raw_summary TEXT,
     created_at TIMESTAMP(3) NOT NULL,
     updated_at TIMESTAMP(3) NOT NULL,
-    CONSTRAINT uk_control_state_target UNIQUE (target_scope, target_code)
+    CONSTRAINT uk_control_state_target UNIQUE (device_id, target_scope, target_code)
 );
 CREATE INDEX idx_control_state_device_target ON gb_device_control_state (device_id, target_scope, target_code);
 CREATE INDEX idx_control_state_channel ON gb_device_control_state (channel_id);
 CREATE INDEX idx_ptz_operation_target ON gb_ptz_operation (device_code, target_scope, target_code, status);
+CREATE INDEX idx_ptz_operation_device_scope_time ON gb_ptz_operation (device_id, scope_key, created_at);
+
+CREATE TABLE gb_alarm_resource (
+    id BIGSERIAL PRIMARY KEY,
+    owner_dept_id BIGINT NOT NULL,
+    device_id BIGINT NOT NULL DEFAULT 0,
+    device_code VARCHAR(20) NOT NULL,
+    alarm_code VARCHAR(20) NOT NULL,
+    resource_type VARCHAR(16) NOT NULL,
+    type_code VARCHAR(3) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    raw_parent_ids VARCHAR(512) NOT NULL DEFAULT '',
+    status SMALLINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    deleted_at TIMESTAMP(3),
+    CONSTRAINT uk_alarm_resource_code UNIQUE (owner_dept_id, device_code, alarm_code)
+);
+
+CREATE TABLE gb_alarm_resource_parent (
+    id BIGSERIAL PRIMARY KEY,
+    alarm_resource_id BIGINT NOT NULL,
+    parent_code VARCHAR(20) NOT NULL,
+    created_at TIMESTAMP(3) NOT NULL,
+    CONSTRAINT uk_alarm_resource_parent UNIQUE (alarm_resource_id, parent_code)
+);
+
+CREATE TABLE gb_alarm_binding (
+    id BIGSERIAL PRIMARY KEY,
+    device_id BIGINT NOT NULL,
+    channel_code VARCHAR(20) NOT NULL,
+    alarm_resource_id BIGINT NOT NULL,
+    source VARCHAR(16) NOT NULL DEFAULT 'manual',
+    created_at TIMESTAMP(3) NOT NULL,
+    updated_at TIMESTAMP(3) NOT NULL,
+    CONSTRAINT uk_alarm_binding_channel UNIQUE (device_id, channel_code)
+);
+
+CREATE INDEX idx_alarm_resource_device ON gb_alarm_resource (owner_dept_id, device_code);
+CREATE INDEX idx_alarm_resource_device_id ON gb_alarm_resource (device_id);
+CREATE INDEX idx_alarm_resource_alarm_code ON gb_alarm_resource (alarm_code);
+CREATE INDEX idx_alarm_resource_type ON gb_alarm_resource (resource_type);
+CREATE INDEX idx_alarm_resource_deleted_at ON gb_alarm_resource (deleted_at);
+CREATE INDEX idx_alarm_parent_resource ON gb_alarm_resource_parent (alarm_resource_id);
+CREATE INDEX idx_alarm_parent_code ON gb_alarm_resource_parent (parent_code);
+CREATE INDEX idx_alarm_binding_device ON gb_alarm_binding (device_id);
+CREATE INDEX idx_alarm_binding_resource ON gb_alarm_binding (alarm_resource_id);

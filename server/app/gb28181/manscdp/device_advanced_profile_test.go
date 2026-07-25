@@ -53,7 +53,7 @@ func TestAdvancedControlBuildersWithProfileShareCodecAndTarget(t *testing.T) {
 			return BuildGuardControlWithProfile(profile, "C", 3, GuardReset)
 		}, "<GuardCmd>ResetGuard</GuardCmd>"},
 		{"alarm", func() ([]byte, error) {
-			return BuildAlarmResetControlWithProfile(profile, "C", 4, AlarmResetOptions{AlarmMethod: "1/5", AlarmType: "1"})
+			return BuildAlarmResetControlWithProfile(profile, "C", 4, AlarmResetOptions{AlarmMethod: "5", AlarmType: "1"})
 		}, "<AlarmCmd>ResetAlarm</AlarmCmd>"},
 		{"teleboot", func() ([]byte, error) {
 			return BuildTeleBootControlWithProfile(profile, "C", 5, true)
@@ -79,17 +79,53 @@ func TestAdvancedControlBuildersWithProfileShareCodecAndTarget(t *testing.T) {
 	}
 }
 
+func TestRecordControlWithProfileUsesVersionedStreamNumber(t *testing.T) {
+	for _, test := range []struct {
+		name             string
+		profile          protocol.Profile
+		action           RecordAction
+		wantStreamNumber bool
+	}{
+		{name: "2016 start", profile: protocol.ProfileFor(protocol.Version2016), action: RecordStart},
+		{name: "2016 stop", profile: protocol.ProfileFor(protocol.Version2016), action: RecordStop},
+		{name: "2022 start", profile: protocol.ProfileFor(protocol.Version2022), action: RecordStart, wantStreamNumber: true},
+		{name: "2022 stop", profile: protocol.ProfileFor(protocol.Version2022), action: RecordStop, wantStreamNumber: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body, err := BuildRecordControlWithProfile(test.profile, "C", 1, test.action)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hasStreamNumber := strings.Contains(string(body), "<StreamNumber>0</StreamNumber>")
+			if hasStreamNumber != test.wantStreamNumber {
+				t.Fatalf("StreamNumber presence=%t, want %t: %s", hasStreamNumber, test.wantStreamNumber, body)
+			}
+		})
+	}
+}
+
 func TestAlarmResetBuilderValidatesStandardEnums(t *testing.T) {
-	valid := []AlarmResetOptions{
+	valid2022 := []AlarmResetOptions{
 		{},
 		{AlarmMethod: "0"},
-		{AlarmMethod: "1/5/7", AlarmType: "1"},
-		{AlarmMethod: "4", AlarmType: "5"},
+		{AlarmMethod: "2"},
+		{AlarmMethod: "2", AlarmType: "1"},
+		{AlarmMethod: "2", AlarmType: "5"},
+		{AlarmMethod: "5"},
+		{AlarmMethod: "5", AlarmType: "1"},
+		{AlarmMethod: "5", AlarmType: "13"},
+		{AlarmMethod: "6"},
+		{AlarmMethod: "6", AlarmType: "1"},
+		{AlarmMethod: "6", AlarmType: "2"},
+		{AlarmMethod: "2/5/6", AlarmType: "1"},
 	}
-	for _, options := range valid {
-		if _, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", 1, options); err != nil {
-			t.Errorf("valid options %+v rejected: %v", options, err)
+	for _, options := range valid2022 {
+		if _, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2022), "C", 1, options); err != nil {
+			t.Errorf("valid 2022 options %+v rejected: %v", options, err)
 		}
+	}
+	if _, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", 1, AlarmResetOptions{}); err != nil {
+		t.Fatalf("empty 2016 options rejected: %v", err)
 	}
 	invalid := []AlarmResetOptions{
 		{AlarmMethod: "8"},
@@ -97,14 +133,51 @@ func TestAlarmResetBuilderValidatesStandardEnums(t *testing.T) {
 		{AlarmMethod: "1/1"},
 		{AlarmMethod: "1//2"},
 		{AlarmMethod: "abc"},
+		{AlarmMethod: "0", AlarmType: "1"},
+		{AlarmMethod: "1", AlarmType: "1"},
+		{AlarmMethod: "3", AlarmType: "1"},
+		{AlarmMethod: "4", AlarmType: "1"},
+		{AlarmMethod: "7", AlarmType: "1"},
+		{AlarmMethod: "2", AlarmType: "6"},
+		{AlarmMethod: "5", AlarmType: "14"},
+		{AlarmMethod: "6", AlarmType: "3"},
+		{AlarmMethod: "1/5", AlarmType: "1"},
+		{AlarmMethod: "2/5", AlarmType: "13"},
+		{AlarmType: "1"},
 		{AlarmType: "0"},
-		{AlarmType: "6"},
-		{AlarmMethod: "1", AlarmType: "x"},
+		{AlarmType: "14"},
+		{AlarmMethod: "5", AlarmType: "x"},
 	}
 	for _, options := range invalid {
-		if body, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", 1, options); err == nil || body != nil {
-			t.Errorf("invalid options %+v generated body=%q err=%v", options, body, err)
+		if body, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2022), "C", 1, options); err == nil || body != nil {
+			t.Errorf("invalid 2022 options %+v generated body=%q err=%v", options, body, err)
 		}
+		if body, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", 1, options); err == nil || body != nil {
+			t.Errorf("invalid 2016 options %+v generated body=%q err=%v", options, body, err)
+		}
+	}
+}
+
+func TestAlarmResetBuilderEmitsInfoOnlyFor2022Selectors(t *testing.T) {
+	legacy, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", 1, AlarmResetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(legacy), "<Info>") {
+		t.Fatalf("empty 2016 reset unexpectedly emitted Info: %s", legacy)
+	}
+
+	modern, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2022), "C", 1, AlarmResetOptions{AlarmMethod: "5", AlarmType: "13"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(modern)
+	if !strings.Contains(text, "<Info>") || !strings.Contains(text, "<AlarmMethod>5</AlarmMethod>") || !strings.Contains(text, "<AlarmType>13</AlarmType>") {
+		t.Fatalf("2022 reset did not emit selector Info: %s", modern)
+	}
+
+	if body, err := BuildAlarmResetControlWithProfile(protocol.ProfileFor(protocol.Version2016), "C", 1, AlarmResetOptions{AlarmMethod: "5", AlarmType: "13"}); err == nil || body != nil {
+		t.Fatalf("2016 selectors must be rejected, body=%q err=%v", body, err)
 	}
 }
 

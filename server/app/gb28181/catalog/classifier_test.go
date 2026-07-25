@@ -18,8 +18,12 @@ func TestClassify(t *testing.T) {
 		wantAnom bool
 	}{
 		{"视频通道 131", "34010500001310000001", gbmodels.NodeTypeChannel, false},
-		{"报警通道 130", "34010500001300000001", gbmodels.NodeTypeChannel, false},
+		{"HVR 130", "34010500001300000001", gbmodels.NodeTypeDevice, false},
 		{"摄像设备 132", "34010500001320000001", gbmodels.NodeTypeChannel, false},
+		{"报警控制器 117", "34010500001170000001", gbmodels.NodeTypeDevice, false},
+		{"报警输入设备 134", "34010500001340000001", gbmodels.NodeType("alarm_input"), false},
+		{"报警输出设备 135", "34010500001350000001", gbmodels.NodeType("alarm_output"), false},
+		{"报警输出设备 140", "34010500001400000001", gbmodels.NodeType("alarm_output"), false},
 		{"国标设备 200", "34010500002000000001", gbmodels.NodeTypeDevice, false},
 		{"业务分组 215", "34010500002150000001", gbmodels.NodeTypeBizGroup, false},
 		{"虚拟组织 216", "34010500002160000001", gbmodels.NodeTypeVirtualOrg, false},

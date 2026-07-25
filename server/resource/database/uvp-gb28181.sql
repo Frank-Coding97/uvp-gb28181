@@ -1354,6 +1354,44 @@ INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUE
 (7564,'p','role_1','/api/gb28181/sip/setup/config','PUT','*','',''),
 (7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');
 
+-- GB28181 device registry and dual-version profile archive.
+DROP TABLE IF EXISTS `gb_device`;
+CREATE TABLE `gb_device` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` varchar(20) NOT NULL DEFAULT '' COMMENT '20位国标编码',
+  `name` varchar(255) NOT NULL DEFAULT '' COMMENT '设备名称',
+  `password` varchar(255) NOT NULL DEFAULT '' COMMENT '按设备独立密码(本期用统一密码,留空)',
+  `transport` varchar(8) NOT NULL DEFAULT '' COMMENT '传输模式 UDP/TCP',
+  `manufacturer` varchar(255) NOT NULL DEFAULT '' COMMENT '厂商',
+  `model` varchar(255) NOT NULL DEFAULT '' COMMENT '型号',
+  `firmware` varchar(255) NOT NULL DEFAULT '' COMMENT '固件版本',
+  `ip` varchar(64) NOT NULL DEFAULT '' COMMENT '设备来源IP',
+  `port` int DEFAULT '0' COMMENT '设备来源端口',
+  `register_time` datetime DEFAULT NULL COMMENT '最近注册成功时间',
+  `register_expire_at` datetime DEFAULT NULL COMMENT '注册到期时刻',
+  `keepalive_time` datetime DEFAULT NULL COMMENT '【事实】最后心跳时间=在线判定唯一真相',
+  `keepalive_interval` int DEFAULT '60' COMMENT '【事实】该设备期望心跳周期(秒)',
+  `expires` int DEFAULT '0' COMMENT '注册有效期(秒)',
+  `status` tinyint(1) DEFAULT '0' COMMENT '【物化缓存】在线状态 0离线 1在线,由事实派生',
+  `offline_at` datetime DEFAULT NULL COMMENT '最近被判离线的时刻',
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  `deleted_at` datetime DEFAULT NULL,
+  `created_by` int unsigned DEFAULT '0' COMMENT '创建人',
+  `owner_dept_id` int unsigned NOT NULL DEFAULT '0' COMMENT '所属部门ID',
+  `reported_version` varchar(8) NOT NULL DEFAULT '' COMMENT '最近一次 X-GB-Ver',
+  `reported_version_at` datetime(3) DEFAULT NULL,
+  `protocol_override` varchar(8) NOT NULL DEFAULT 'auto' COMMENT '协议版本覆盖 auto/2016/2022',
+  `effective_version` varchar(8) NOT NULL DEFAULT '2016' COMMENT '当前生效协议版本',
+  `effective_version_source` varchar(16) NOT NULL DEFAULT 'default' COMMENT '生效版本来源',
+  `effective_version_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`) USING BTREE,
+  UNIQUE KEY `uk_device_id` (`device_id`) USING BTREE,
+  KEY `idx_deleted_at` (`deleted_at`),
+  KEY `idx_owner_dept_deleted` (`owner_dept_id`, `deleted_at`),
+  KEY `idx_status_keepalive` (`status`, `keepalive_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181国标设备表';
+
 -- GB28181 PTZ / home-position tables (2026-07-24).
 DROP TABLE IF EXISTS `gb_ptz_home_position`;
 DROP TABLE IF EXISTS `gb_ptz_operation_attempt`;
@@ -1418,6 +1456,7 @@ CREATE TABLE `gb_ptz_operation` (
 CREATE TABLE `gb_ptz_state` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `device_id` bigint unsigned NOT NULL,
+  `device_code` varchar(20) NOT NULL,
   `channel_id` bigint unsigned NOT NULL,
   `channel_code` varchar(20) NOT NULL,
   `pan` decimal(18,6) DEFAULT NULL,
@@ -1462,6 +1501,7 @@ CREATE TABLE `gb_ptz_cruise_track` (
   `name` varchar(255) DEFAULT NULL,
   `enabled` tinyint(1) DEFAULT NULL,
   `detail_json` text,
+  `last_operation_id` varchar(64) DEFAULT NULL,
   `raw_summary` text,
   `device_time` datetime(3) DEFAULT NULL,
   `created_at` datetime(3) NOT NULL,
@@ -1515,19 +1555,15 @@ CREATE TABLE `gb_ptz_home_position` (
   KEY `idx_ptz_home_position_device` (`device_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 confirmed home position';
 
--- Dual-version profile and DeviceStatus fact cache.
-ALTER TABLE `gb_device`
-  ADD COLUMN `reported_version` varchar(8) NOT NULL DEFAULT '',
-  ADD COLUMN `reported_version_at` datetime(3) DEFAULT NULL,
-  ADD COLUMN `protocol_override` varchar(8) NOT NULL DEFAULT 'auto',
-  ADD COLUMN `effective_version` varchar(8) NOT NULL DEFAULT '2016',
-  ADD COLUMN `effective_version_source` varchar(16) NOT NULL DEFAULT 'default',
-  ADD COLUMN `effective_version_at` datetime(3) DEFAULT NULL;
+-- Dual-version operation profile and DeviceStatus fact cache.
 ALTER TABLE `gb_ptz_operation`
   ADD COLUMN `profile_version` varchar(8) DEFAULT NULL,
   ADD COLUMN `profile_charset` varchar(16) DEFAULT NULL,
   ADD COLUMN `target_scope` varchar(16) DEFAULT NULL,
-  ADD COLUMN `target_code` varchar(20) DEFAULT NULL;
+  ADD COLUMN `target_code` varchar(20) DEFAULT NULL,
+  ADD COLUMN `scope_key` varchar(64) DEFAULT NULL,
+  ADD INDEX `idx_ptz_operation_device_scope_time` (`device_id`, `scope_key`, `created_at`),
+  ADD INDEX `idx_ptz_operation_target` (`device_code`, `target_scope`, `target_code`, `status`);
 CREATE TABLE `gb_device_control_state` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `device_id` bigint unsigned NOT NULL,
@@ -1541,11 +1577,60 @@ CREATE TABLE `gb_device_control_state` (
   `source` varchar(32) NOT NULL DEFAULT 'device_status',
   `source_sn` int NOT NULL DEFAULT 0,
   `source_operation_id` varchar(64) DEFAULT NULL,
+  `source_operation_seq` bigint unsigned NOT NULL DEFAULT 0,
   `raw_summary` text,
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_control_state_target` (`target_scope`, `target_code`),
+  UNIQUE KEY `uk_control_state_target` (`device_id`, `target_scope`, `target_code`),
   KEY `idx_control_state_device_target` (`device_id`, `target_scope`, `target_code`),
   KEY `idx_control_state_channel` (`channel_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `gb_alarm_resource` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `owner_dept_id` bigint unsigned NOT NULL,
+  `device_id` bigint unsigned NOT NULL DEFAULT 0,
+  `device_code` varchar(20) NOT NULL,
+  `alarm_code` varchar(20) NOT NULL,
+  `resource_type` varchar(16) NOT NULL,
+  `type_code` varchar(3) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `raw_parent_ids` varchar(512) NOT NULL DEFAULT '',
+  `status` tinyint NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_alarm_resource_code` (`owner_dept_id`, `device_code`, `alarm_code`),
+  KEY `idx_alarm_resource_device` (`owner_dept_id`, `device_code`),
+  KEY `idx_alarm_resource_device_id` (`device_id`),
+  KEY `idx_alarm_resource_alarm_code` (`alarm_code`),
+  KEY `idx_alarm_resource_type` (`resource_type`),
+  KEY `idx_alarm_resource_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `gb_alarm_resource_parent` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `alarm_resource_id` bigint unsigned NOT NULL,
+  `parent_code` varchar(20) NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_alarm_resource_parent` (`alarm_resource_id`, `parent_code`),
+  KEY `idx_alarm_parent_resource` (`alarm_resource_id`),
+  KEY `idx_alarm_parent_code` (`parent_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `gb_alarm_binding` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_code` varchar(20) NOT NULL,
+  `alarm_resource_id` bigint unsigned NOT NULL,
+  `source` varchar(16) NOT NULL DEFAULT 'manual',
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_alarm_binding_channel` (`device_id`, `channel_code`),
+  KEY `idx_alarm_binding_device` (`device_id`),
+  KEY `idx_alarm_binding_resource` (`alarm_resource_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

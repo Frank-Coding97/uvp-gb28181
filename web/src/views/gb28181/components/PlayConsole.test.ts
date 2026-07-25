@@ -50,7 +50,7 @@ describe("PlayConsole 视频探针", () => {
         wrapper.unmount();
     });
 
-    it("静态演示页不按 PTZType 禁用控制且仅保留雨刷命令", () => {
+    it("静态演示页不按 PTZType 禁用基础控制且不展示已删除辅助区域", () => {
         const wrapper = mount(PlayConsole, {
             props: { visible: true, channel: { ...channel, ptzType: 3 } },
         });
@@ -59,12 +59,8 @@ describe("PlayConsole 视频探针", () => {
         expect(wrapper.text()).not.toContain("灯光");
         expect(wrapper.text()).not.toContain("红外");
         expect(wrapper.text()).not.toContain("加热");
-        expect(wrapper.get("[data-testid='demo-wiper-control']").text()).toContain("雨刷控制");
-        expect(wrapper.get("[data-testid='demo-wiper-on']").attributes("disabled")).toBeUndefined();
-        expect(wrapper.get("[data-testid='demo-wiper-off']").attributes("disabled")).toBeUndefined();
-        expect(wrapper.get("[data-testid='demo-wiper-on']").classes()).toContain("btn-ghost");
-        expect(wrapper.get("[data-testid='demo-wiper-off']").classes()).toContain("btn-ghost");
-        expect(wrapper.find("[data-testid='demo-wiper-control'] .btn-primary").exists()).toBe(false);
+        expect(wrapper.text()).not.toContain("雨刷");
+        expect(wrapper.find("[data-testid='demo-wiper-control']").exists()).toBe(false);
 
         wrapper.unmount();
     });

@@ -69,7 +69,7 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 		return metrics.TxCatalog
 	case manscdp.CmdDeviceControl:
 		return metrics.TxPTZ
-	case manscdp.CmdPTZPreciseCtrl, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+	case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
 		return metrics.TxPTZ
 	case "Alarm":
 		return metrics.TxAlarm
@@ -134,7 +134,7 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 					app.ZapLog.Warn("GB28181 PTZ DeviceControl 应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
 				}
 			}
-		case manscdp.CmdPTZPreciseCtrl, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+		case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
 			if h.ptzProcessor != nil {
 				if err := h.ptzProcessor.OnPTZMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body()); err != nil {
 					app.ZapLog.Warn("GB28181 PTZ 查询应答处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))

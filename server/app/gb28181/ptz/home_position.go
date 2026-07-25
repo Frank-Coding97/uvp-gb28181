@@ -109,12 +109,17 @@ type HomePositionReadModel struct {
 // PTZOperationReadModel is the intentionally small operation contract used
 // by UI polling. Transport correlation and audit fields stay server-side.
 type PTZOperationReadModel struct {
-	OperationID  string                      `json:"operationId"`
-	Status       gbmodels.PTZOperationStatus `json:"status"`
-	ErrorCode    *string                     `json:"errorCode"`
-	ErrorMessage *string                     `json:"errorMessage"`
-	CompletedAt  *time.Time                  `json:"completedAt"`
-	DeadlineAt   *time.Time                  `json:"deadlineAt"`
+	OperationID      string                      `json:"operationId"`
+	Status           gbmodels.PTZOperationStatus `json:"status"`
+	ErrorCode        *string                     `json:"errorCode"`
+	ErrorMessage     *string                     `json:"errorMessage"`
+	CompletedAt      *time.Time                  `json:"completedAt"`
+	DeadlineAt       *time.Time                  `json:"deadlineAt"`
+	ResponseRequired bool                        `json:"responseRequired,omitempty"`
+	DeviceResult     *string                     `json:"deviceResult,omitempty"`
+	TargetScope      string                      `json:"targetScope,omitempty"`
+	TargetCode       string                      `json:"targetCode,omitempty"`
+	ProfileVersion   string                      `json:"profileVersion,omitempty"`
 }
 
 // ApplyHomePosition accepts only a strictly newer source operation. Equal and
@@ -316,12 +321,17 @@ func operationDeadline(operation gbmodels.GbPTZOperation) *time.Time {
 
 func BuildPTZOperationReadModel(operation gbmodels.GbPTZOperation) PTZOperationReadModel {
 	return PTZOperationReadModel{
-		OperationID:  operation.OperationID,
-		Status:       operation.Status,
-		ErrorCode:    operationString(operation.ErrorCode),
-		ErrorMessage: operationString(operation.ErrorMessage),
-		CompletedAt:  operation.CompletedAt,
-		DeadlineAt:   operationDeadline(operation),
+		OperationID:      operation.OperationID,
+		Status:           operation.Status,
+		ErrorCode:        operationString(operation.ErrorCode),
+		ErrorMessage:     operationString(operation.ErrorMessage),
+		CompletedAt:      operation.CompletedAt,
+		DeadlineAt:       operationDeadline(operation),
+		ResponseRequired: operation.ResponseRequired,
+		DeviceResult:     operationString(operation.DeviceResult),
+		TargetScope:      operation.TargetScope,
+		TargetCode:       operation.TargetCode,
+		ProfileVersion:   operation.ProfileVersion,
 	}
 }
 

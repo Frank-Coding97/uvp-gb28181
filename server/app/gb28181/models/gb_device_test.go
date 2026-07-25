@@ -17,6 +17,7 @@ import (
 // 用轻量裸连,避开底座 ZapLog/BasePath 全局初始化的 cwd 依赖
 func setupTestDB(t *testing.T) {
 	if app.GormDbMysql != nil {
+		migrateDualVersionTestColumns(t, app.GormDbMysql)
 		return
 	}
 	_, thisFile, _, _ := runtime.Caller(0)
@@ -43,6 +44,22 @@ func setupTestDB(t *testing.T) {
 		g.Statement.RaiseErrorOnNotFound = false
 	})
 	app.GormDbMysql = db
+	migrateDualVersionTestColumns(t, db)
+}
+
+func migrateDualVersionTestColumns(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, field := range []string{
+		"ReportedVersion", "ReportedVersionAt", "ProtocolOverride",
+		"EffectiveVersion", "EffectiveVersionSource", "EffectiveVersionAt",
+	} {
+		if db.Migrator().HasColumn(&GbDevice{}, field) {
+			continue
+		}
+		if err := db.Migrator().AddColumn(&GbDevice{}, field); err != nil {
+			t.Fatalf("测试库补充 GbDevice.%s 失败: %v", field, err)
+		}
+	}
 }
 
 func itoa(i int) string {

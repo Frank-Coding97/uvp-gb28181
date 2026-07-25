@@ -25,9 +25,6 @@ const (
 	PTZActionZoomOut   PTZAction = "zoom_out"
 )
 
-// PTZAuxiliaryIDWiper is the auxiliary switch number used by the public wiper endpoint.
-const PTZAuxiliaryIDWiper = 1
-
 // PTZCommand is encoded as the GB28181 front-end PTZ command string.
 type PTZCommand struct {
 	Action PTZAction
@@ -56,8 +53,6 @@ const (
 	PTZActionCruiseSetSpeed   PTZExtendedAction = "cruise_set_speed"
 	PTZActionCruiseSetDwell   PTZExtendedAction = "cruise_set_dwell"
 	PTZActionCruiseDeletePath PTZExtendedAction = "cruise_delete_path"
-	PTZActionAuxOn            PTZExtendedAction = "aux_on"
-	PTZActionAuxOff           PTZExtendedAction = "aux_off"
 	PTZActionScanStart        PTZExtendedAction = "scan_start"
 	PTZActionScanStop         PTZExtendedAction = "scan_stop"
 )
@@ -237,7 +232,7 @@ func BuildPTZControlWithProfile(profile protocol.Profile, channelID string, sn i
 }
 
 // BuildExtendedPTZControl builds standard DeviceControl operations such as
-// preset, cruise, scan and auxiliary commands. Focus/iris use profile bytes
+// preset, cruise and scan commands. Focus/iris use profile bytes
 // because their encoding is not interoperable across vendor families.
 func BuildExtendedPTZControl(channelID string, sn int, command PTZExtendedCommand) ([]byte, error) {
 	return BuildExtendedPTZControlWithProfile(protocol.ProfileFor(protocol.Version2016), channelID, sn, command)
@@ -310,12 +305,6 @@ func BuildExtendedPTZControlWithProfile(profile protocol.Profile, channelID stri
 		parameter3 = byte((command.Value16>>8)&0x0F) << 4
 	case PTZActionCruiseDelete, PTZActionCruiseDeletePath:
 		instruction = 0x85
-		parameter1 = byte(command.ID)
-	case PTZActionAuxOn:
-		instruction = 0x8C
-		parameter1 = byte(command.ID)
-	case PTZActionAuxOff:
-		instruction = 0x8D
 		parameter1 = byte(command.ID)
 	case PTZActionScanStart:
 		instruction = 0x89

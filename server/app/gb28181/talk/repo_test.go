@@ -65,6 +65,7 @@ func TestTalkModelIndexesMatchMigration(t *testing.T) {
 		require.True(t, db.Migrator().HasIndex(&models.GbTalkSession{}, index), index)
 	}
 	require.True(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "publish_token_hash"))
+	require.True(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "mode"))
 	require.False(t, db.Migrator().HasColumn(&models.GbTalkSession{}, "publish_token"))
 }
 
@@ -364,4 +365,42 @@ func TestTalkMigrationMatchesModelAndHasDown(t *testing.T) {
 	}
 	require.NotContains(t, strings.ToLower(ddl), "publish_token`", "迁移不得定义令牌明文字段")
 	require.Contains(t, string(down), "DROP TABLE IF EXISTS `gb_talk_session`")
+}
+
+func TestTalkModeMigrationsAreIdempotentAcrossDialects(t *testing.T) {
+	_, sourceFile, _, _ := runtime.Caller(0)
+	serverRoot := filepath.Join(filepath.Dir(sourceFile), "..", "..", "..")
+	migrations := []struct {
+		name   string
+		path   string
+		guards []string
+	}{
+		{
+			name: "mysql", path: "resource/database/gb28181/migrations/2026-07-25-talk-session-mode.sql",
+			guards: []string{"information_schema.columns", "table_name = 'gb_talk_session'", "column_name = 'mode'"},
+		},
+		{
+			name: "postgresql", path: "resource/database/gb28181/migrations/2026-07-25-talk-session-mode-postgresql.sql",
+			guards: []string{"alter table if exists gb_talk_session", "add column if not exists mode", "to_regclass('gb_talk_session')"},
+		},
+		{
+			name: "sqlserver", path: "resource/database/gb28181/migrations/2026-07-25-talk-session-mode-sqlserver.sql",
+			guards: []string{"object_id(n'gb_talk_session', n'u') is not null", "col_length(n'gb_talk_session', n'mode') is null"},
+		},
+	}
+	for _, migration := range migrations {
+		migration := migration
+		t.Run(migration.name, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join(serverRoot, migration.path))
+			require.NoError(t, err)
+			text := strings.ToLower(string(body))
+			require.Contains(t, text, "gb_talk_session")
+			require.Contains(t, text, "mode")
+			require.Contains(t, text, "broadcast")
+			require.Contains(t, text, "talk")
+			for _, guard := range migration.guards {
+				require.Contains(t, text, guard)
+			}
+		})
+	}
 }

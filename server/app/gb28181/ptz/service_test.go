@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
 
@@ -49,6 +50,26 @@ func testCommand() Command {
 	return Command{CmdType: "DeviceControl", Action: "left", IdempotencyKey: "same", Build: func(sn int) ([]byte, error) {
 		return []byte("<Control><SN>" + string(rune('0'+sn)) + "</SN></Control>"), nil
 	}}
+}
+
+func TestServiceExecutePersistsProfileAndTargetSnapshot(t *testing.T) {
+	sender := &fakeTrackedSender{}
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}))
+	service, err := NewService(db, sender, time.Now)
+	require.NoError(t, err)
+	command := testCommand()
+	command.IdempotencyKey = "snapshot"
+	command.Profile = protocol.ProfileFor(protocol.Version2022)
+	command.TargetScope = gbmodels.ControlTargetScopeDevice
+	command.TargetCode = "PARENT"
+	operation, err := service.Execute(context.Background(), testTarget(), command)
+	require.NoError(t, err)
+	require.Equal(t, string(protocol.Version2022), operation.ProfileVersion)
+	require.Equal(t, string(protocol.CharsetGB18030), operation.ProfileCharset)
+	require.Equal(t, gbmodels.ControlTargetScopeDevice, operation.TargetScope)
+	require.Equal(t, "PARENT", operation.TargetCode)
 }
 
 func TestServiceExecute_IdempotentAndTracked(t *testing.T) {

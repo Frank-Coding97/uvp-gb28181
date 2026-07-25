@@ -23,8 +23,42 @@ func newCatalogTestDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbAnomalyRecord{},
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDevice{},
+		&gbmodels.GbAlarmResource{},
+		&gbmodels.GbAlarmResourceParent{},
+		&gbmodels.GbAlarmBinding{},
 	))
 	return db
+}
+
+func TestAlarmResource_AutoMigrateAndRelations(t *testing.T) {
+	db := newCatalogTestDB(t)
+	mig := db.Migrator()
+
+	require.True(t, mig.HasTable(&gbmodels.GbAlarmResource{}))
+	require.True(t, mig.HasTable(&gbmodels.GbAlarmResourceParent{}))
+	require.True(t, mig.HasTable(&gbmodels.GbAlarmBinding{}))
+	assert.True(t, mig.HasColumn(&gbmodels.GbCatalogNode{}, "alarm_resource_id"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResource{}, "uk_alarm_resource_code"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResource{}, "idx_alarm_resource_device_id"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResource{}, "idx_alarm_resource_alarm_code"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResource{}, "idx_alarm_resource_type"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResource{}, "idx_alarm_resource_deleted_at"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResourceParent{}, "uk_alarm_resource_parent"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResourceParent{}, "idx_alarm_parent_resource"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmResourceParent{}, "idx_alarm_parent_code"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmBinding{}, "uk_alarm_binding_channel"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmBinding{}, "idx_alarm_binding_device"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbAlarmBinding{}, "idx_alarm_binding_resource"))
+	assert.True(t, mig.HasIndex(&gbmodels.GbCatalogNode{}, "idx_catalog_alarm_resource"))
+
+	resource := &gbmodels.GbAlarmResource{
+		OwnerDeptID: 1, DeviceID: 7, DeviceCode: "34020000001180000001",
+		AlarmCode: "34020000001340000001", ResourceType: gbmodels.AlarmResourceInput,
+	}
+	require.NoError(t, db.Create(resource).Error)
+	require.NoError(t, db.Create(&gbmodels.GbAlarmResourceParent{AlarmResourceID: resource.ID, ParentCode: "34020000001310000001"}).Error)
+	err := db.Create(&gbmodels.GbAlarmResourceParent{AlarmResourceID: resource.ID, ParentCode: "34020000001310000001"}).Error
+	assert.Error(t, err, "同一报警资源的父编码必须去重")
 }
 
 // TestCatalogNode_AutoMigrate A1.1 RED-验证 1+3:GbCatalogNode 字段/索引就位

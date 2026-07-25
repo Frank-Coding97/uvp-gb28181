@@ -13,6 +13,7 @@ import (
 	"gorm.io/plugin/dbresolver"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
 
@@ -30,6 +31,9 @@ type Target struct {
 	Transport     string
 	DeviceOnline  bool
 	ChannelOnline bool
+	// Profile is the device's effective protocol profile at dispatch time. It
+	// is copied into each operation by Execute so retries remain deterministic.
+	Profile protocol.Profile
 }
 
 type Command struct {
@@ -42,7 +46,12 @@ type Command struct {
 	ActorID            uint
 	ActorDeptID        uint
 	TriggerOperationID string
-	Build              func(sn int) ([]byte, error)
+	// Profile and target are captured on the operation. A zero profile keeps
+	// existing callers on the 2016 compatibility path.
+	Profile     protocol.Profile
+	TargetScope string
+	TargetCode  string
+	Build       func(sn int) ([]byte, error)
 }
 
 type Response struct {
@@ -75,13 +84,15 @@ type PreciseNotify struct {
 }
 
 type Service struct {
-	db          *gorm.DB
-	sender      TrackedSender
-	now         func() time.Time
-	sn          atomic.Uint64
-	locks       sync.Map
-	lifecycleMu sync.RWMutex
-	retired     bool
+	db           *gorm.DB
+	sender       TrackedSender
+	now          func() time.Time
+	sn           atomic.Uint64
+	locks        sync.Map
+	queryStageMu sync.Mutex
+	queryStages  map[string]queryResponseStage
+	lifecycleMu  sync.RWMutex
+	retired      bool
 }
 
 func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Service, error) {
@@ -98,7 +109,7 @@ func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Servi
 	if maxSN < 0 || uint64(maxSN) >= uint64(^uint(0)>>1) {
 		return nil, operationError(ErrorCodeHomePositionUnavailable, "PTZ operation SN 非法", nil)
 	}
-	service := &Service{db: db, sender: sender, now: now}
+	service := &Service{db: db, sender: sender, now: now, queryStages: make(map[string]queryResponseStage)}
 	service.sn.Store(uint64(maxSN))
 	return service, nil
 }
@@ -126,6 +137,7 @@ func (s *Service) Retire() {
 	s.lifecycleMu.Lock()
 	s.retired = true
 	s.lifecycleMu.Unlock()
+	s.clearQueryStages()
 }
 
 func validateTargetIdentity(target Target) error {
@@ -227,7 +239,7 @@ func (s *Service) ApplyPreciseNotify(ctx context.Context, notify PreciseNotify) 
 			}
 			return tx.Model(&current).Updates(updates).Error
 		}
-		state = gbmodels.GbPTZState{DeviceID: notify.DeviceID, ChannelID: notify.ChannelID, ChannelCode: notify.ChannelCode,
+		state = gbmodels.GbPTZState{DeviceID: notify.DeviceID, DeviceCode: notify.DeviceCode, ChannelID: notify.ChannelID, ChannelCode: notify.ChannelCode,
 			Pan: notify.Pan, Tilt: notify.Tilt, Zoom: notify.Zoom, Focus: notify.Focus, Iris: notify.Iris,
 			DeviceTime: notify.DeviceTime, ReceivedAt: notify.ReceivedAt, SourceSN: notify.SN,
 			Freshness: gbmodels.PTZFreshnessFresh, DedupeKey: notify.DedupeKey, RawSummary: notify.RawSummary}

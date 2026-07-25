@@ -14,6 +14,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -59,14 +60,26 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		logUnmatchedPTZResponse(deviceCode, callID, cseq, *head, candidates, reason, body)
 		return nil
 	}
-	if reason == "attempt" && (operation.DeviceCode != deviceCode || operation.ChannelCode != head.DeviceID ||
+	if operation.CmdType == manscdp.CmdDeviceControl && !operation.ResponseRequired {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("GB28181 单向操作收到非预期业务应答，保持 sent",
+				zap.String("operationId", operation.OperationID),
+				zap.String("action", operation.Action),
+				zap.String("bodySummary", summarizePTZBody(body)),
+			)
+		}
+		return nil
+	}
+	if reason == "attempt" && (operation.DeviceCode != deviceCode || operationTargetCode(operation) != head.DeviceID ||
 		operation.SN != headSN(*head) || operation.CmdType != head.CmdType) {
 		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "", ptzErrorProtocolInvalid,
 			"PTZ 应答标识与 operation 不一致")
 	}
 
 	switch head.CmdType {
-	case manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
+	case manscdp.CmdDeviceStatus:
+		return s.applyDeviceStatusResponse(ctx, operation, callID, cseq, body)
+	case manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery, manscdp.CmdPTZPosition:
 		return s.applyQueryResponse(ctx, operation, callID, cseq, *head, body)
 	case manscdp.CmdDeviceControl:
 		return s.applyDeviceControlResponse(ctx, operation, callID, cseq, body)
@@ -103,15 +116,23 @@ func (s *Service) findPTZMessageOperation(ctx context.Context, deviceCode, callI
 			return gbmodels.GbPTZOperation{}, false, nil, "attempt_lookup_failed", err
 		}
 		if len(operationIDs) > 0 {
+			if len(operationIDs) > 1 {
+				return gbmodels.GbPTZOperation{}, false, nil, "ambiguous_attempt", nil
+			}
 			var candidates []gbmodels.GbPTZOperation
-			if err := db.Where("id IN ?", operationIDs).Order("id DESC").Limit(2).Find(&candidates).Error; err != nil {
+			if err := db.Where("id IN ? AND status IN ?", operationIDs, []gbmodels.PTZOperationStatus{
+				gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationUnknown,
+			}).Order("id DESC").Limit(2).Find(&candidates).Error; err != nil {
 				return gbmodels.GbPTZOperation{}, false, nil, "attempt_operation_lookup_failed", err
 			}
 			candidateIDs := ptzOperationIDs(candidates)
-			if len(candidates) != 1 {
+			if len(candidates) > 1 {
 				return gbmodels.GbPTZOperation{}, false, candidateIDs, "ambiguous_attempt", nil
 			}
-			return candidates[0], true, candidateIDs, "attempt", nil
+			if len(candidates) == 1 {
+				return candidates[0], true, candidateIDs, "attempt", nil
+			}
+			return gbmodels.GbPTZOperation{}, false, nil, "attempt_terminal", nil
 		}
 	}
 
@@ -120,8 +141,11 @@ func (s *Service) findPTZMessageOperation(ctx context.Context, deviceCode, callI
 		return gbmodels.GbPTZOperation{}, false, nil, "invalid_correlation_key", nil
 	}
 	var candidates []gbmodels.GbPTZOperation
-	query := db.Where("device_code = ? AND channel_code = ? AND sn = ? AND cmd_type = ?", deviceCode, head.DeviceID, sn, head.CmdType)
-	if head.CmdType == manscdp.CmdHomePositionQuery || head.CmdType == manscdp.CmdDeviceControl {
+	query := db.Where("device_code = ? AND (target_code = ? OR (target_code IS NULL AND channel_code = ?)) AND sn = ? AND cmd_type = ?", deviceCode, head.DeviceID, head.DeviceID, sn, head.CmdType)
+	if head.CmdType == manscdp.CmdDeviceStatus || head.CmdType == manscdp.CmdPresetQuery ||
+		head.CmdType == manscdp.CmdHomePositionQuery || head.CmdType == manscdp.CmdCruiseTrackListQuery ||
+		head.CmdType == manscdp.CmdCruiseTrackQuery || head.CmdType == manscdp.CmdDeviceControl ||
+		head.CmdType == manscdp.CmdPTZPreciseStatusQuery || head.CmdType == manscdp.CmdPTZPosition {
 		query = query.Where("status IN ?", []gbmodels.PTZOperationStatus{
 			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationUnknown,
 		})
@@ -147,6 +171,25 @@ func ptzOperationIDs(operations []gbmodels.GbPTZOperation) []string {
 	return ids
 }
 
+func operationTargetCode(operation gbmodels.GbPTZOperation) string {
+	if value := strings.TrimSpace(operation.TargetCode); value != "" {
+		return value
+	}
+	return strings.TrimSpace(operation.ChannelCode)
+}
+
+func operationProtocolProfile(operation gbmodels.GbPTZOperation) protocol.Profile {
+	profile := protocol.ProfileFor(protocol.Version2016)
+	if strings.TrimSpace(operation.ProfileVersion) == string(protocol.Version2022) {
+		profile = protocol.ProfileFor(protocol.Version2022)
+	}
+	charset := protocol.Charset(strings.TrimSpace(operation.ProfileCharset))
+	if protocol.IsSupportedCharset(charset) {
+		profile.Charset = charset
+	}
+	return profile
+}
+
 func logUnmatchedPTZResponse(deviceCode, callID, cseq string, head manscdp.MessageHead, candidateIDs []string, reason string, body []byte) {
 	if app.ZapLog == nil {
 		return
@@ -162,6 +205,57 @@ func logUnmatchedPTZResponse(deviceCode, callID, cseq string, head manscdp.Messa
 		zap.String("reason", reason),
 		zap.String("bodySummary", summarizePTZBody(body)),
 	)
+}
+
+func logIgnoredPTZResponse(operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte) {
+	if app.ZapLog == nil {
+		return
+	}
+	app.ZapLog.Warn("GB28181 PTZ 应答已关联但 operation 未推进，忽略事实写入",
+		zap.String("operationId", operation.OperationID),
+		zap.String("cmdType", head.CmdType),
+		zap.String("responseCallId", callID),
+		zap.String("responseCseq", cseq),
+		zap.String("status", string(operation.Status)),
+		zap.String("bodySummary", summarizePTZBody(body)),
+	)
+}
+
+func ptzResponseOperationUpdate(tx *gorm.DB, operation gbmodels.GbPTZOperation, observedAt time.Time) *gorm.DB {
+	update := tx.Model(&gbmodels.GbPTZOperation{}).
+		Where("id = ? AND status IN ?", operation.ID, []gbmodels.PTZOperationStatus{
+			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationUnknown,
+		})
+	if operation.ResponseRequired {
+		update = update.Where(`
+			(status = ? AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)
+			OR (status = ? AND deadline_at IS NOT NULL AND deadline_at > ?)
+			OR (status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at > ?)
+			OR (status = ? AND attempt > 0 AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
+			gbmodels.PTZOperationUnknown, observedAt,
+			gbmodels.PTZOperationSent, observedAt,
+			gbmodels.PTZOperationQueued, observedAt,
+			gbmodels.PTZOperationQueued, observedAt,
+		)
+	}
+	return update
+}
+
+// applyPTZResponseObservation records a valid response while keeping the
+// operation active. This is used for paginated query responses: each page is
+// a state-guarded observation, and the final page performs the terminal CAS.
+func applyPTZResponseObservation(tx *gorm.DB, operation gbmodels.GbPTZOperation, callID, cseq string, observedAt time.Time) (bool, error) {
+	updates := map[string]interface{}{
+		"response_at": observedAt, "next_attempt_at": nil,
+	}
+	if callID != "" {
+		updates["response_call_id"] = callID
+	}
+	if cseq != "" {
+		updates["response_cseq"] = cseq
+	}
+	result := ptzResponseOperationUpdate(tx, operation, observedAt).Updates(updates)
+	return result.RowsAffected == 1, result.Error
 }
 
 func applyPTZResponseTransition(tx *gorm.DB, operation gbmodels.GbPTZOperation, callID, cseq string, transition ptzResponseTransition, completedAt time.Time) (bool, error) {
@@ -184,29 +278,13 @@ func applyPTZResponseTransition(tx *gorm.DB, operation gbmodels.GbPTZOperation, 
 		updates["response_has_data"] = *transition.ResponseHasData
 	}
 
-	update := tx.Model(&gbmodels.GbPTZOperation{}).
-		Where("id = ? AND status IN ?", operation.ID, []gbmodels.PTZOperationStatus{
-			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationUnknown,
-		})
-	if operation.ResponseRequired {
-		update = update.Where(`
-			(status = ?)
-			OR (status = ? AND deadline_at IS NOT NULL AND deadline_at > ?)
-			OR (status = ? AND attempt = 0 AND queue_deadline_at IS NOT NULL AND queue_deadline_at > ?)
-			OR (status = ? AND attempt > 0 AND transport_deadline_at IS NOT NULL AND transport_deadline_at > ?)`,
-			gbmodels.PTZOperationUnknown,
-			gbmodels.PTZOperationSent, completedAt,
-			gbmodels.PTZOperationQueued, completedAt,
-			gbmodels.PTZOperationQueued, completedAt,
-		)
-	}
-	result := update.Updates(updates)
+	result := ptzResponseOperationUpdate(tx, operation, completedAt).Updates(updates)
 	return result.RowsAffected == 1, result.Error
 }
 
 func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, body []byte) error {
-	response, parseErr := manscdp.ParseDeviceControlResponse(body)
-	if parseErr != nil || response.SN != operation.SN || response.DeviceID != operation.ChannelCode {
+	response, parseErr := manscdp.ParseDeviceControlResponseWithProfile(operationProtocolProfile(operation), body)
+	if parseErr != nil || response.SN != operation.SN || response.DeviceID != operationTargetCode(operation) {
 		if parseErr == nil {
 			parseErr = fmt.Errorf("DeviceControl 应答标识与 operation 不一致")
 		}
@@ -234,6 +312,9 @@ func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmo
 		applied, err = applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
 			Status: gbmodels.PTZOperationAccepted, DeviceResult: string(response.Result),
 		}, completedAt)
+		if err == nil && applied {
+			err = s.persistDeviceControlAck(ctx, tx, operation, body)
+		}
 		return err
 	}); err != nil {
 		return err
@@ -246,13 +327,19 @@ func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmo
 
 func (s *Service) applyRejectedPTZResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq, deviceResult, errorCode, message string) error {
 	completedAt := s.now()
-	return schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
-		_, err := applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
+	applied := false
+	err := schedulerTransaction(ctx, s.db, func(tx *gorm.DB) error {
+		var err error
+		applied, err = applyPTZResponseTransition(tx, operation, callID, cseq, ptzResponseTransition{
 			Status: gbmodels.PTZOperationRejected, DeviceResult: deviceResult,
 			DeviceError: message, ErrorCode: errorCode, ErrorMessage: message,
 		}, completedAt)
 		return err
 	})
+	if err == nil && applied {
+		s.discardQueryStage(operation.OperationID)
+	}
+	return err
 }
 
 func (s *Service) applyAcceptedHomePositionControl(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, body []byte) error {
@@ -331,6 +418,8 @@ func (s *Service) createHomePositionReconcile(tx *gorm.DB, parent gbmodels.GbPTZ
 		"device_id": parent.DeviceID, "device_code": parent.DeviceCode,
 		"channel_id": parent.ChannelID, "channel_code": parent.ChannelCode,
 		"cmd_type": manscdp.CmdHomePositionQuery, "action": "refresh_home_position",
+		"profile_version": parent.ProfileVersion, "profile_charset": parent.ProfileCharset,
+		"target_scope": parent.TargetScope, "target_code": parent.TargetCode,
 		"payload_json": payloadJSON, "sn": s.nextSN(), "status": gbmodels.PTZOperationQueued,
 		"attempt": 0, "response_required": true, "max_attempts": homePositionReconcileAttempts,
 		"actor_id": parent.ActorID, "actor_dept_id": parent.ActorDeptID,

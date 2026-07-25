@@ -45,6 +45,7 @@ type DeviceStatus struct {
 	DeviceID   string
 	Result     string
 	Record     ControlState
+	AlarmNum   int
 	AlarmItems []DeviceStatusAlarmItem
 }
 
@@ -88,7 +89,9 @@ type deviceStatusWire struct {
 }
 
 type deviceStatusListWire struct {
-	Items []deviceStatusItemWire `xml:"Item"`
+	NumLower string                 `xml:"num,attr"`
+	NumUpper string                 `xml:"Num,attr"`
+	Items    []deviceStatusItemWire `xml:"Item"`
 }
 
 type deviceStatusItemWire struct {
@@ -138,6 +141,13 @@ func ParseDeviceStatusResponse(body []byte) (DeviceStatus, error) {
 	for _, list := range []*deviceStatusListWire{wire.Alarmstatus, wire.AlarmStatus} {
 		if list == nil {
 			continue
+		}
+		listNum := parseNum(list.NumUpper)
+		if listNum == 0 {
+			listNum = parseNum(list.NumLower)
+		}
+		if listNum > 0 && status.AlarmNum == 0 {
+			status.AlarmNum = listNum
 		}
 		for _, item := range list.Items {
 			num := parseNum(item.NumLower)

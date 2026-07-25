@@ -5,7 +5,7 @@
  * 设计定位:平台核心功能弹窗,承担点播 + 云台 + 探针 + 诊断 + 录制的一体化操作台
  *
  * 数据来源:点播、概况、探针、PTZ、能力、高级控制和对讲均走受保护后端接口。
- * 图像参数四个滑杆按产品决定保留为本地占位，不伪报设备下发成功。
+ * 图像参数不属于 GB28181 标准 DeviceControl/ConfigDownload,不在此面板伪造控制入口。
  *
  * 视觉语言:深色为主,青色作强调,毛玻璃卡片,状态用色带 + 脉冲呼吸
  * 布局:右侧保留高频操作,播放器下方随 Tab 联动展示详情
@@ -17,7 +17,6 @@ import {
     controlDevice,
     controlPtz,
     controlPtzCruise,
-    controlPtzWiper,
     createCruiseTrack,
     controlPtzPrecise,
     callPtzPreset,
@@ -26,6 +25,7 @@ import {
     deletePtzPreset,
     deleteTalkSession,
     getControlCapabilities,
+    getDeviceStatus,
     getHomePosition,
     getPtzOperation,
     getPtzPreciseStatus,
@@ -40,7 +40,11 @@ import {
     type ControlCapability,
     type CruiseTrackDetailResource,
     type CruiseTrackPointResource,
+    type DeviceAlarmFact,
+    type DeviceAlarmResolution,
     type DeviceControlCapabilities,
+    type DeviceStatusResult,
+    type DeviceFactState,
     type HomePositionConfig,
     type HomePositionFreshness,
     type HomePositionPatch,
@@ -133,6 +137,18 @@ let monitorTimer: number | null = null;
 let sessionToken = 0;
 // 关闭弹窗只做本地清理;记录阈值,阻止迟到的点播响应补发 stopPlay。
 let localCleanupThroughToken = 0;
+
+function channelContextKey(channel: PlaybackChannel | null = props.channel) {
+    if (!channel) return "";
+    return `${channel.id}:${channel.deviceId}:${channel.channelId}`;
+}
+
+function isCurrentChannelContext(channelId: number, token: number, contextKey: string) {
+    return token === sessionToken
+        && props.visible
+        && props.channel?.id === channelId
+        && channelContextKey() === contextKey;
+}
 
 /* ────────────────────────── Tab 切换 ────────────────────────── */
 
@@ -233,13 +249,15 @@ function capability(key: keyof DeviceControlCapabilities): ControlCapability {
     const value = capabilities.value?.[key];
     return value || { state: "unknown", reason: "能力尚未读取" };
 }
-const isAudioCapable = computed(() => {
-    const broadcast = capability("broadcast").state;
-    const talk = capability("talk").state;
-    return props.channel?.status === 1 && (broadcast === "supported" || talk === "supported");
-});
-const broadcastAvailable = computed(() => capability("broadcast").state === "supported");
-const talkAvailable = computed(() => capability("talk").state === "supported");
+function capabilityActionTitle(key: keyof DeviceControlCapabilities, action: string) {
+    const value = capability(key);
+    if (value.state === "supported") return action;
+    const stateText = value.state === "unsupported" ? "设备上报不支持" : "设备未明确声明支持";
+    return `${action} · ${stateText}${value.reason ? ` (${value.reason})` : ""},仍可尝试,以设备响应为准`;
+}
+const isAudioCapable = computed(() => props.channel?.status === 1);
+const talkAvailable = computed(() => props.channel?.status === 1);
+const broadcastUnavailableTitle = "平台暂未实现国标语音广播信令链路，无法建立广播会话";
 
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
 const moveSpeed = ref(6); // 1-10 步进,转发时 * 25 得 GB28181 1-255
@@ -370,12 +388,16 @@ function parseCruiseDetail(raw: string | CruiseTrackDetailResource | null | unde
             : null;
     if (!rawPoints) return { points: null, source: detail.source || "" };
 
-    const globalSpeed = Number.isFinite(Number(detail.speed)) ? Number(detail.speed) : null;
+    const normalizeQuerySpeed = (value: unknown): number | null => {
+        const speed = Number(value);
+        return Number.isInteger(speed) && speed >= 1 && speed <= 15 ? speed : null;
+    };
+    const globalSpeed = normalizeQuerySpeed(detail.speed);
     const globalDwell = Number.isFinite(Number(detail.dwellSec)) ? Number(detail.dwellSec) : null;
     const points = rawPoints.flatMap((item: CruiseTrackPointResource) => {
         const presetId = Number(item.presetIndex ?? item.presetId);
         if (!Number.isInteger(presetId) || presetId < 1 || presetId > 255) return [];
-        const speed = Number.isFinite(Number(item.speed)) ? Number(item.speed) : globalSpeed;
+        const speed = normalizeQuerySpeed(item.speed) ?? globalSpeed;
         const dwell = Number.isFinite(Number(item.stayTime ?? item.dwellSec))
             ? Number(item.stayTime ?? item.dwellSec)
             : globalDwell;
@@ -388,8 +410,14 @@ function cruiseTrackDetailText(track: CruiseTrack): string {
     if (track.points === null) return "详情待查询";
     if (track.points.length === 0) return "暂无点位";
     const dwellValues = [...new Set(track.points.map((point) => point.dwellSec).filter((value): value is number => value !== null))];
+    const speedValues = [...new Set(track.points.map((point) => point.speed).filter((value): value is number => value !== null))];
+    const speedText = speedValues.length === 1
+        ? ` · 设备速度 ${speedValues[0]}`
+        : speedValues.length > 1
+            ? " · 按点位设置设备速度"
+            : " · 设备速度未知";
     const dwellText = dwellValues.length === 1 ? ` · 停留 ${dwellValues[0]}s` : dwellValues.length > 1 ? " · 按点位停留" : "";
-    return `${track.points.length} 个点位${dwellText}`;
+    return `${track.points.length} 个点位${speedText}${dwellText}`;
 }
 
 function cruiseTrackMeta(track: CruiseTrack): string {
@@ -994,17 +1022,35 @@ async function pollHomePositionOperation(channelId: number, token: number, gener
     }
 }
 
-const wiperPending = ref<"on" | "off" | null>(null);
-let wiperRequestToken = 0;
-const imageParams = ref({ brightness: 128, contrast: 128, saturation: 128, hue: 128 });
-
-const deviceRecording = ref(false);
-const guardArmed = ref(false);
+type RecordState = "on" | "off" | "unknown";
+type GuardState = "armed" | "disarmed" | "alarm" | "unknown";
+type AdvancedOperationPhase = "idle" | "queued" | "sent" | "accepted" | "rejected" | "timeout" | "unknown" | "cancelled";
+const recordState = ref<RecordState>("unknown");
+const guardState = ref<GuardState>("unknown");
+const alarmResolution = ref<DeviceAlarmResolution | null>(null);
+const alarmFacts = ref<DeviceAlarmFact[]>([]);
+const deviceStatusFreshness = ref<PTZResourceFreshness>("unknown");
+const deviceStatusError = ref("");
+const deviceStatusPending = ref(false);
+const deviceStatusOperationId = ref<string | null>(null);
+const advancedOperationPhase = ref<Record<string, AdvancedOperationPhase>>({});
+const advancedOperationIds = ref<Record<string, string | null>>({});
+const advancedOperationDeadline = ref<Record<string, string | null>>({});
+const advancedOperationTimers = new Map<string, number>();
+const advancedOperationRequestTimers = new Map<string, number>();
+interface AdvancedOperationPollContext {
+    operationId: string;
+    deadlineMs: number | null;
+}
+const advancedOperationPollContexts = new Map<string, AdvancedOperationPollContext>();
+const advancedStatusToken = ref(0);
 const advancedPending = ref(new Set<string>());
 const advancedOperationStatus = ref<Record<string, string>>({});
 const dragZoomMode = ref(false);
+const dragZoomAction = ref<"drag_zoom_in" | "drag_zoom_out">("drag_zoom_in");
 const dragZoomStart = ref<{ x: number; y: number } | null>(null);
 const dragZoomCurrent = ref<{ x: number; y: number } | null>(null);
+let dragZoomPointerId: number | null = null;
 const dragZoomBoxStyle = computed(() => {
     if (!dragZoomStart.value || !dragZoomCurrent.value) return {};
     const left = Math.min(dragZoomStart.value.x, dragZoomCurrent.value.x);
@@ -1013,6 +1059,86 @@ const dragZoomBoxStyle = computed(() => {
     const height = Math.abs(dragZoomCurrent.value.y - dragZoomStart.value.y);
     return { left: `${left * 100}%`, top: `${top * 100}%`, width: `${width * 100}%`, height: `${height * 100}%` };
 });
+
+function normalizeRecordState(value: DeviceFactState | boolean | number | null | undefined): RecordState {
+    if (value === true || value === 1) return "on";
+    if (value === false || value === 0) return "off";
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (["on", "1", "true", "record", "recording", "start", "started"].includes(normalized)) return "on";
+    if (["off", "0", "false", "stop", "stopped", "idle"].includes(normalized)) return "off";
+    return "unknown";
+}
+
+function normalizeGuardState(value: DeviceFactState | boolean | number | null | undefined): GuardState {
+    if (value === true || value === 1) return "armed";
+    if (value === false || value === 0) return "disarmed";
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (normalized === "alarm") return "alarm";
+    if (["armed", "on", "1", "true", "guard", "set", "defended"].includes(normalized)) return "armed";
+    if (["disarmed", "off", "0", "false", "reset", "unset"].includes(normalized)) return "disarmed";
+    return "unknown";
+}
+
+function applyDeviceStatusResult(result: DeviceStatusResult, preserveUnknownFacts = false) {
+    const state = result.state || null;
+    const nextRecordState = normalizeRecordState(state?.recordState ?? result.recordState);
+    const nextGuardState = normalizeGuardState(result.alarmResolution?.state ?? state?.guardState ?? result.guardState);
+    if (!preserveUnknownFacts || nextRecordState !== "unknown") recordState.value = nextRecordState;
+    if (!preserveUnknownFacts || nextGuardState !== "unknown") guardState.value = nextGuardState;
+    alarmResolution.value = result.alarmResolution || null;
+    alarmFacts.value = Array.isArray(result.alarmFacts) ? result.alarmFacts : [];
+    deviceStatusFreshness.value = result.freshness || state?.freshness || "unknown";
+    deviceStatusError.value = result.refreshError || "";
+    deviceStatusOperationId.value = result.refreshOperationId || result.recordRefreshOperationId || result.alarmRefreshOperationId || null;
+}
+
+function clearDeviceStatusState() {
+    recordState.value = "unknown";
+    guardState.value = "unknown";
+    alarmResolution.value = null;
+    alarmFacts.value = [];
+    deviceStatusFreshness.value = "unknown";
+    deviceStatusError.value = "";
+    deviceStatusPending.value = false;
+    deviceStatusOperationId.value = null;
+}
+
+function deviceStatusText() {
+    if (deviceStatusError.value) return "状态读取失败";
+    if (deviceStatusPending.value) return "正在查询设备状态";
+    if (deviceStatusFreshness.value === "fresh") return "设备状态已同步";
+    if (deviceStatusFreshness.value === "stale") return "设备状态已过期";
+    return "设备状态未知";
+}
+
+function recordStateText(state: RecordState) {
+    return state === "on" ? "设备录制中" : state === "off" ? "设备未录制" : "未知";
+}
+
+function guardStateText(state: GuardState) {
+    if (state === "alarm") return "ALARM 报警中";
+    return state === "armed" ? "已布防" : state === "disarmed" ? "已撤防" : "未知";
+}
+
+function alarmResolutionWarning() {
+    if (alarmResolution.value?.status === "ambiguous") {
+        const candidates = alarmResolution.value.candidates.map((candidate) => candidate.code).filter(Boolean).join("、");
+        return `报警目标不明确${candidates ? ` (${candidates})` : ""},布防、撤防和复位操作将由服务端拒绝`;
+    }
+    if (alarmResolution.value?.status === "unavailable") {
+        return "未找到可用的 134 报警输入,布防、撤防和复位将按注册父设备编码发送,以设备应答为准";
+    }
+    return "";
+}
+
+function alarmResolutionTargetText() {
+    if (alarmResolution.value?.status !== "resolved" || !alarmResolution.value.targetCode) return "";
+    return `报警目标 ${alarmResolution.value.targetCode}`;
+}
+
+function alarmFactText(fact: DeviceAlarmFact) {
+    return `${fact.targetCode} ${guardStateText(normalizeGuardState(fact.guardState))}`;
+}
 
 /* ────────────────────────── 流信息 ────────────────────────── */
 
@@ -1263,6 +1389,8 @@ function resetSessionState() {
     cruiseRefreshError.value = "";
     cruiseMoreVisible.value = false;
     clearCruiseReconcilePolling();
+    clearDeviceStatusPolling();
+    clearDeviceStatusState();
     probeToken++;
     clearProbeTimers();
     probeState.value = "idle";
@@ -1274,15 +1402,12 @@ function resetSessionState() {
     presets.value = [];
     cruiseTracks.value = [];
     resetHomePositionState();
-    wiperRequestToken++;
-    wiperPending.value = null;
-    deviceRecording.value = false;
-    guardArmed.value = false;
-    advancedPending.value = new Set();
+    clearAdvancedPolling();
     advancedOperationStatus.value = {};
     dragZoomMode.value = false;
     dragZoomStart.value = null;
     dragZoomCurrent.value = null;
+    dragZoomPointerId = null;
 }
 
 function cleanupSessionLocally() {
@@ -1309,6 +1434,227 @@ function handlePlayerError(message: string) {
     clearTimer();
 }
 
+const DEVICE_STATUS_POLL_DELAYS_MS = [1000, 2000, 4000, 8000] as const;
+const DEVICE_STATUS_DEFAULT_DEADLINE_MS = DEVICE_STATUS_POLL_DELAYS_MS.reduce((total, delay) => total + delay, 0);
+const DEVICE_STATUS_FACT_READ_INSURANCE_MS = 5000;
+const DEVICE_STATUS_TERMINAL_PHASES = new Set(["accepted", "rejected", "timeout", "unknown", "cancelled"]);
+interface DeviceStatusPollOperation {
+    operationId: string;
+    terminal: boolean;
+    deadlineAt: number;
+    error: string;
+}
+let deviceStatusPollTimer: number | null = null;
+let deviceStatusPollAttempt = 0;
+let deviceStatusPollGeneration = 0;
+let deviceStatusPollOperations = new Map<string, DeviceStatusPollOperation>();
+let deviceStatusOperationRequestTimers = new Map<string, number>();
+
+function clearDeviceStatusPolling(invalidate = true) {
+    if (deviceStatusPollTimer !== null) window.clearTimeout(deviceStatusPollTimer);
+    for (const timer of deviceStatusOperationRequestTimers.values()) window.clearTimeout(timer);
+    deviceStatusPollTimer = null;
+    deviceStatusPollAttempt = 0;
+    if (invalidate) deviceStatusPollGeneration += 1;
+    deviceStatusPollOperations.clear();
+    deviceStatusOperationRequestTimers.clear();
+    deviceStatusPending.value = false;
+}
+
+function deviceStatusRefreshOperationIds(result: DeviceStatusResult) {
+    const ids = [
+        result.refreshOperationIds?.record,
+        result.refreshOperationIds?.alarm,
+        result.recordRefreshOperationId,
+        result.alarmRefreshOperationId,
+        result.refreshOperationId,
+    ];
+    return [...new Set(ids.filter((id): id is string => typeof id === "string" && id.trim().length > 0))];
+}
+
+function deviceStatusOperationErrors() {
+    return [...deviceStatusPollOperations.values()].map((operation) => operation.error).filter(Boolean).join("; ");
+}
+
+function getDeviceStatusOperationWithInsurance(channelId: number, tracked: DeviceStatusPollOperation) {
+    const remainingMs = tracked.deadlineAt - Date.now();
+    if (remainingMs <= 0) return Promise.reject(new Error("设备状态查询超时,结果未知"));
+    const request = getPtzOperation(channelId, tracked.operationId);
+    return new Promise<Awaited<ReturnType<typeof getPtzOperation>>>((resolve, reject) => {
+        let settled = false;
+        const deadlineTimer = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            if (deviceStatusOperationRequestTimers.get(tracked.operationId) === deadlineTimer) {
+                deviceStatusOperationRequestTimers.delete(tracked.operationId);
+            }
+            reject(new Error("设备状态查询超时,结果未知"));
+        }, remainingMs);
+        deviceStatusOperationRequestTimers.set(tracked.operationId, deadlineTimer);
+        request.then(
+            (response) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(deadlineTimer);
+                if (deviceStatusOperationRequestTimers.get(tracked.operationId) === deadlineTimer) {
+                    deviceStatusOperationRequestTimers.delete(tracked.operationId);
+                }
+                resolve(response);
+            },
+            (error) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(deadlineTimer);
+                if (deviceStatusOperationRequestTimers.get(tracked.operationId) === deadlineTimer) {
+                    deviceStatusOperationRequestTimers.delete(tracked.operationId);
+                }
+                reject(error);
+            },
+        );
+    });
+}
+
+function getDeviceStatusFactWithInsurance(channelId: number) {
+    const request = getDeviceStatus(channelId, false);
+    return new Promise<Awaited<ReturnType<typeof getDeviceStatus>>>((resolve, reject) => {
+        let settled = false;
+        const deadlineTimer = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            reject(new Error("设备状态最终补读超时,结果未知"));
+        }, DEVICE_STATUS_FACT_READ_INSURANCE_MS);
+        request.then(
+            (response) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(deadlineTimer);
+                resolve(response);
+            },
+            (error) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(deadlineTimer);
+                reject(error);
+            },
+        );
+    });
+}
+
+async function finishDeviceStatusRefresh(channelId: number, token: number, contextKey: string, generation: number, preserveUnknownFacts: boolean) {
+    const operationError = deviceStatusOperationErrors();
+    if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
+
+    // The operation deadline is authoritative for the pending UI state. The
+    // final fact read is best effort and must not keep the panel busy.
+    clearDeviceStatusPolling(false);
+    deviceStatusFreshness.value = "unknown";
+    deviceStatusError.value = operationError;
+    try {
+        const response = await getDeviceStatusFactWithInsurance(channelId);
+        if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "读取设备状态失败");
+        applyDeviceStatusResult(response.data, preserveUnknownFacts);
+        const refreshError = deviceStatusError.value;
+        deviceStatusError.value = [refreshError, operationError].filter(Boolean).join("; ");
+    } catch (error: any) {
+        if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
+        deviceStatusError.value = [operationError, error?.message || "读取设备状态失败"].filter(Boolean).join("; ");
+    }
+}
+
+function scheduleDeviceStatusRefresh(channelId: number, token: number, contextKey: string, generation: number, preserveUnknownFacts = false) {
+    const pendingOperations = [...deviceStatusPollOperations.values()].filter((operation) => !operation.terminal);
+    if (pendingOperations.length === 0) {
+        void finishDeviceStatusRefresh(channelId, token, contextKey, generation, preserveUnknownFacts);
+        return;
+    }
+    if (deviceStatusPollTimer !== null) window.clearTimeout(deviceStatusPollTimer);
+    const baseDelay = DEVICE_STATUS_POLL_DELAYS_MS[Math.min(deviceStatusPollAttempt, DEVICE_STATUS_POLL_DELAYS_MS.length - 1)];
+    const nearestDeadline = Math.min(...pendingOperations.map((operation) => operation.deadlineAt));
+    const delay = Math.max(0, Math.min(baseDelay, nearestDeadline - Date.now()));
+    deviceStatusPollTimer = window.setTimeout(async () => {
+        deviceStatusPollTimer = null;
+        if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
+        const activeOperations = [...deviceStatusPollOperations.values()].filter((operation) => !operation.terminal);
+        const results = await Promise.all(activeOperations.map(async (tracked) => {
+            try {
+                const response = await getDeviceStatusOperationWithInsurance(channelId, tracked);
+                if (response.code !== 0 || !response.data || response.data.operationId !== tracked.operationId) {
+                    throw new Error(response.message || "设备状态查询结果不匹配");
+                }
+                return { tracked, operation: response.data, error: null };
+            } catch (error: unknown) {
+                return { tracked, operation: null, error };
+            }
+        }));
+        if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
+
+        const now = Date.now();
+        for (const result of results) {
+            const tracked = result.tracked;
+            if (result.operation) {
+                const operation = result.operation;
+                const serverDeadline = operation.deadlineAt ? Date.parse(operation.deadlineAt) : Number.NaN;
+                if (Number.isFinite(serverDeadline)) tracked.deadlineAt = serverDeadline;
+                tracked.terminal = DEVICE_STATUS_TERMINAL_PHASES.has(operation.status);
+                tracked.error = tracked.terminal && operation.status !== "accepted"
+                    ? operation.errorCode || operation.errorMessage || `设备状态查询${operation.status}`
+                    : "";
+            } else {
+                tracked.error = result.error instanceof Error ? result.error.message : "设备状态查询暂时不可用";
+            }
+            if (!tracked.terminal && now >= tracked.deadlineAt) {
+                tracked.terminal = true;
+                tracked.error = tracked.error || "设备状态查询超时,结果未知";
+            }
+        }
+
+        deviceStatusPollAttempt += 1;
+        scheduleDeviceStatusRefresh(channelId, token, contextKey, generation, preserveUnknownFacts);
+    }, delay);
+}
+
+async function loadDeviceStatus(
+    channelId = props.channel?.id,
+    token = sessionToken,
+    preserveUnknownFacts = false,
+    contextKey = channelContextKey(),
+) {
+    if (!channelId || !isCurrentChannelContext(channelId, token, contextKey)) return;
+    clearDeviceStatusPolling();
+    const generation = deviceStatusPollGeneration;
+    deviceStatusPending.value = true;
+    deviceStatusError.value = "";
+    try {
+        const response = await getDeviceStatus(channelId, true);
+        if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
+        if (response.code !== 0 || !response.data) throw new Error(response.message || "查询设备状态失败");
+        applyDeviceStatusResult(response.data, preserveUnknownFacts);
+        const operationIds = deviceStatusRefreshOperationIds(response.data);
+        if (operationIds.length > 0) {
+            const fallbackDeadline = Date.now() + DEVICE_STATUS_DEFAULT_DEADLINE_MS;
+            deviceStatusPollOperations = new Map(operationIds.map((operationId) => [operationId, {
+                operationId,
+                terminal: false,
+                deadlineAt: fallbackDeadline,
+                error: "",
+            }]));
+            deviceStatusPending.value = true;
+            deviceStatusPollAttempt = 0;
+            scheduleDeviceStatusRefresh(channelId, token, contextKey, generation, preserveUnknownFacts);
+        } else {
+            deviceStatusPending.value = false;
+        }
+    } catch (error: any) {
+        if (!isCurrentChannelContext(channelId, token, contextKey) || generation !== deviceStatusPollGeneration) return;
+        deviceStatusPending.value = false;
+        deviceStatusError.value = error?.message || "查询设备状态失败";
+        deviceStatusFreshness.value = "unknown";
+        // Missing DeviceStatus support must remain unknown initially, but a read
+        // failure after an ACK must preserve the last confirmed fact.
+    }
+}
+
 async function loadPanelData() {
     const channel = props.channel;
     if (!channel) return;
@@ -1317,13 +1663,16 @@ async function loadPanelData() {
         const response = await getControlCapabilities(channel.id);
         if (token === sessionToken && props.channel?.id === channel.id && response.code === 0 && response.data) {
             capabilities.value = response.data;
-            if (!broadcastAvailable.value && talkAvailable.value) talkMode.value = "talk";
-            else if (broadcastAvailable.value) talkMode.value = "broadcast";
         }
     } catch {
         if (token === sessionToken) capabilities.value = null;
     }
-    await Promise.all([loadPresets(channel.id, token), loadCruises(channel.id, token), loadHomePosition(channel.id, token)]);
+    await Promise.all([
+        loadPresets(channel.id, token),
+        loadCruises(channel.id, token),
+        loadHomePosition(channel.id, token),
+        loadDeviceStatus(channel.id, token),
+    ]);
 }
 
 async function loadPresets(channelId = props.channel?.id, token = sessionToken) {
@@ -1430,7 +1779,7 @@ async function sendPtz(action: string) {
 async function sendPrecise() {
     if (!props.channel) return;
     try {
-        const response = await controlPtzPrecise(props.channel.id, { pan: precisePan.value, tilt: preciseTilt.value, zoom: preciseZoom.value, speed: moveSpeed.value * 25 });
+        const response = await controlPtzPrecise(props.channel.id, { pan: precisePan.value, tilt: preciseTilt.value, zoom: preciseZoom.value });
         if (response.code !== 0) throw new Error(response.message || "精准定位失败");
         Message.success("精准定位请求已受理");
     } catch (error: any) {
@@ -1589,26 +1938,6 @@ function closeAssetManager() {
     assetSearch.value = "";
 }
 
-async function sendWiperCommand(action: "on" | "off") {
-    if (!props.channel || wiperPending.value !== null) return;
-    const channelId = props.channel.id;
-    const session = sessionToken;
-    const requestToken = ++wiperRequestToken;
-    const isCurrentRequest = () => requestToken === wiperRequestToken && session === sessionToken && props.channel?.id === channelId;
-    wiperPending.value = action;
-    try {
-        const response = await controlPtzWiper(channelId, { action });
-        if (!isCurrentRequest()) return;
-        if (response.code !== 0) throw new Error(response.message || "雨刷控制指令失败");
-        Message.success(`雨刷${action === "on" ? "开启" : "关闭"}指令已发送`);
-    } catch (error: any) {
-        if (!isCurrentRequest()) return;
-        Message.error(error?.message || "雨刷控制指令失败");
-    } finally {
-        if (isCurrentRequest()) wiperPending.value = null;
-    }
-}
-
 async function saveHomePosition() {
     if (!props.channel || !homeCanSubmit.value) return;
     const channelId = props.channel.id;
@@ -1707,49 +2036,292 @@ async function readPreciseStatus() {
     } catch (error: any) { Message.error(error?.message || "读取当前位置失败"); }
 }
 
+function advancedPendingKey(action: string) {
+    if (action === "record_start" || action === "record_stop") return "record";
+    if (action === "guard_set" || action === "guard_reset") return "guard";
+    return action;
+}
+
+function isAdvancedPending(action: string) {
+    return advancedPending.value.has(advancedPendingKey(action));
+}
+
 function setAdvancedPending(action: string, pending: boolean) {
     const next = new Set(advancedPending.value);
-    if (pending) next.add(action);
-    else next.delete(action);
+    const key = advancedPendingKey(action);
+    if (pending) next.add(key);
+    else next.delete(key);
     advancedPending.value = next;
+}
+
+function clearAdvancedPolling() {
+    for (const timerId of advancedOperationTimers.values()) window.clearTimeout(timerId);
+    for (const timerId of advancedOperationRequestTimers.values()) window.clearTimeout(timerId);
+    advancedOperationTimers.clear();
+    advancedOperationRequestTimers.clear();
+    advancedOperationPollContexts.clear();
+    advancedStatusToken.value += 1;
+    advancedOperationIds.value = {};
+    advancedOperationDeadline.value = {};
+    advancedOperationPhase.value = {};
+    advancedPending.value = new Set();
+}
+
+function setAdvancedPhase(action: string, phase: AdvancedOperationPhase, message?: string) {
+    advancedOperationPhase.value = { ...advancedOperationPhase.value, [action]: phase };
+    if (message) advancedOperationStatus.value = { ...advancedOperationStatus.value, [action]: message };
+}
+
+function applyAdvancedAccepted(action: string) {
+    if (action === "record_start") recordState.value = "on";
+    if (action === "record_stop") recordState.value = "off";
+    if (action === "guard_set") guardState.value = "armed";
+    if (action === "guard_reset") guardState.value = "disarmed";
+    setAdvancedPhase(action, "accepted", "设备已确认");
+    if (action === "record_start" || action === "record_stop" || action === "guard_set" || action === "guard_reset") {
+        // Re-read facts after an ACK; the ACK is not allowed to overwrite the other fact.
+        void loadDeviceStatus(props.channel?.id, sessionToken, true);
+    }
+}
+
+function advancedOperationError(action: string, status: AdvancedOperationPhase, operation: PTZOperation) {
+    setAdvancedPhase(action, status, operation.errorCode || operation.errorMessage || `操作${status}`);
+    if (status === "unknown") Message.warning(`${action} 操作结果未知,请刷新设备状态后确认`);
+    else Message.error(operation.errorCode || operation.errorMessage || `${action} 操作未被设备接受`);
+}
+
+const ADVANCED_OPERATION_POLL_INTERVAL_MS = 1000;
+const ADVANCED_OPERATION_FINAL_READ_GRACE_MS = 250;
+const ADVANCED_OPERATION_NO_DEADLINE_READ_TIMEOUT_MS = 5000;
+
+function parseAdvancedOperationDeadline(deadlineAt?: string | null) {
+    const deadlineMs = deadlineAt ? Date.parse(deadlineAt) : Number.NaN;
+    return Number.isFinite(deadlineMs) ? deadlineMs : null;
+}
+
+function clearAdvancedOperationPoll(action: string) {
+    const pollTimer = advancedOperationTimers.get(action);
+    if (pollTimer !== undefined) window.clearTimeout(pollTimer);
+    const requestTimer = advancedOperationRequestTimers.get(action);
+    if (requestTimer !== undefined) window.clearTimeout(requestTimer);
+    advancedOperationTimers.delete(action);
+    advancedOperationRequestTimers.delete(action);
+    advancedOperationPollContexts.delete(action);
+}
+
+function hasCurrentAdvancedOperationPoll(action: string, operationId: string) {
+    return advancedOperationPollContexts.get(action)?.operationId === operationId;
+}
+
+function beginAdvancedOperationPoll(action: string, operationId: string, deadlineAt?: string | null) {
+    clearAdvancedOperationPoll(action);
+    advancedOperationPollContexts.set(action, {
+        operationId,
+        deadlineMs: parseAdvancedOperationDeadline(deadlineAt),
+    });
+}
+
+function updateAdvancedOperationPollDeadline(action: string, operationId: string, deadlineAt?: string | null) {
+    const context = advancedOperationPollContexts.get(action);
+    if (!context || context.operationId !== operationId) return null;
+    const deadlineMs = parseAdvancedOperationDeadline(deadlineAt);
+    if (deadlineMs !== null) context.deadlineMs = deadlineMs;
+    return context.deadlineMs;
+}
+
+function advancedOperationUnknown(action: string, message: string) {
+    clearAdvancedOperationPoll(action);
+    setAdvancedPending(action, false);
+    setAdvancedPhase(action, "unknown", message);
+}
+
+function getAdvancedOperationWithInsurance(action: string, channelId: number, operationId: string) {
+    const context = advancedOperationPollContexts.get(action);
+    if (!context || context.operationId !== operationId) {
+        return Promise.reject(new Error("操作轮询已失效"));
+    }
+    const timeoutMs = context.deadlineMs === null
+        ? ADVANCED_OPERATION_NO_DEADLINE_READ_TIMEOUT_MS
+        : Math.max(ADVANCED_OPERATION_FINAL_READ_GRACE_MS, context.deadlineMs - Date.now() + ADVANCED_OPERATION_FINAL_READ_GRACE_MS);
+    const request = getPtzOperation(channelId, operationId);
+    return new Promise<Awaited<ReturnType<typeof getPtzOperation>>>((resolve, reject) => {
+        let settled = false;
+        const timeout = window.setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            if (advancedOperationRequestTimers.get(action) === timeout) advancedOperationRequestTimers.delete(action);
+            reject(new Error(context.deadlineMs === null
+                ? "服务端未返回操作截止时间，补读一次后结果未知"
+                : "操作状态读取超过服务端截止时间，结果未知"));
+        }, timeoutMs);
+        advancedOperationRequestTimers.set(action, timeout);
+        request.then(
+            (response) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timeout);
+                if (advancedOperationRequestTimers.get(action) === timeout) advancedOperationRequestTimers.delete(action);
+                resolve(response);
+            },
+            (error) => {
+                if (settled) return;
+                settled = true;
+                window.clearTimeout(timeout);
+                if (advancedOperationRequestTimers.get(action) === timeout) advancedOperationRequestTimers.delete(action);
+                reject(error);
+            },
+        );
+    });
+}
+
+function scheduleAdvancedOperationPoll(
+    action: string,
+    operationId: string,
+    channelId: number,
+    token: number,
+    contextKey: string,
+) {
+    const context = advancedOperationPollContexts.get(action);
+    if (!context || context.operationId !== operationId) return;
+    const existing = advancedOperationTimers.get(action);
+    if (existing !== undefined) window.clearTimeout(existing);
+    const delay = context.deadlineMs === null
+        ? ADVANCED_OPERATION_POLL_INTERVAL_MS
+        : Math.max(0, Math.min(ADVANCED_OPERATION_POLL_INTERVAL_MS, context.deadlineMs - Date.now()));
+    const timerId = window.setTimeout(() => {
+        advancedOperationTimers.delete(action);
+        void pollAdvancedOperation(action, operationId, channelId, token, contextKey);
+    }, delay);
+    advancedOperationTimers.set(action, timerId);
+}
+
+async function pollAdvancedOperation(action: string, operationId: string, channelId: number, token: number, contextKey: string) {
+    if (!isCurrentChannelContext(channelId, token, contextKey) || !hasCurrentAdvancedOperationPoll(action, operationId)) return;
+    const activeToken = advancedStatusToken.value;
+    try {
+        const response = await getAdvancedOperationWithInsurance(action, channelId, operationId);
+        if (!isCurrentChannelContext(channelId, token, contextKey)
+            || activeToken !== advancedStatusToken.value
+            || !hasCurrentAdvancedOperationPoll(action, operationId)) return;
+        if (response.code !== 0 || !response.data || response.data.operationId !== operationId) {
+            advancedOperationUnknown(action, "操作状态不匹配,结果未知");
+            return;
+        }
+        const operation = response.data;
+        advancedOperationPhase.value = { ...advancedOperationPhase.value, [action]: operation.status };
+        const deadlineMs = updateAdvancedOperationPollDeadline(action, operationId, operation.deadlineAt);
+        if (deadlineMs !== null) {
+            advancedOperationDeadline.value = { ...advancedOperationDeadline.value, [action]: new Date(deadlineMs).toISOString() };
+        }
+        if (operation.status === "sent" && !advancedActionRequiresDeviceResult(action, operation.responseRequired)) {
+            clearAdvancedOperationPoll(action);
+            setAdvancedPending(action, false);
+            setAdvancedPhase(action, "sent", "请求已发送,设备执行结果未回传");
+            return;
+        }
+        if (operation.status === "queued" || operation.status === "sent") {
+            if (deadlineMs === null) {
+                advancedOperationUnknown(action, "服务端未返回操作截止时间，补读一次后结果未知");
+                return;
+            }
+            if (Date.now() >= deadlineMs) {
+                advancedOperationUnknown(action, "操作超过服务端截止时间，结果未知");
+                return;
+            }
+            setAdvancedPending(action, true);
+            scheduleAdvancedOperationPoll(action, operationId, channelId, token, contextKey);
+            return;
+        }
+        clearAdvancedOperationPoll(action);
+        setAdvancedPending(action, false);
+        if (operation.status === "accepted") {
+            if (!advancedActionRequiresDeviceResult(action, operation.responseRequired)) {
+                setAdvancedPhase(action, "sent", "设备已收到发送请求,未返回执行结果");
+                return;
+            }
+            applyAdvancedAccepted(action);
+            return;
+        }
+        advancedOperationError(action, operation.status, operation);
+    } catch (error: any) {
+        if (!isCurrentChannelContext(channelId, token, contextKey)
+            || activeToken !== advancedStatusToken.value
+            || !hasCurrentAdvancedOperationPoll(action, operationId)) return;
+        advancedOperationUnknown(action, error?.message || "操作状态读取失败,结果未知");
+    }
+}
+
+function advancedActionLabel(action: "record" | "guard") {
+    if (action === "record") return recordState.value === "on" ? "停止设备端录制" : "开始设备端录制";
+    return guardState.value === "armed" ? "撤防" : "布防";
+}
+
+function advancedActionRequiresDeviceResult(action: string, responseRequired?: boolean) {
+    if (typeof responseRequired === "boolean") return responseRequired;
+    return ["record_start", "record_stop", "guard_set", "guard_reset", "alarm_reset"].includes(action);
+}
+
+function dragZoomPlaybackRect(layer: HTMLElement) {
+    const playbackElement = layer.parentElement?.querySelector<HTMLElement>(".play-window");
+    const playbackRect = playbackElement?.getBoundingClientRect();
+    if (playbackRect && playbackRect.width > 0 && playbackRect.height > 0) return playbackRect;
+    return layer.getBoundingClientRect();
 }
 
 function pointInDragLayer(event: PointerEvent) {
     const layer = event.currentTarget as HTMLElement;
-    const rect = layer.getBoundingClientRect();
+    const rect = dragZoomPlaybackRect(layer);
     return {
         x: Math.max(0, Math.min(1, (event.clientX - rect.left) / Math.max(rect.width, 1))),
         y: Math.max(0, Math.min(1, (event.clientY - rect.top) / Math.max(rect.height, 1))),
     };
 }
 
-function toggleDragZoomMode() {
-    dragZoomMode.value = !dragZoomMode.value;
+function toggleDragZoomMode(action: "drag_zoom_in" | "drag_zoom_out") {
+    if (dragZoomMode.value && dragZoomAction.value === action) {
+        dragZoomMode.value = false;
+    } else {
+        dragZoomAction.value = action;
+        dragZoomMode.value = true;
+    }
     dragZoomStart.value = null;
     dragZoomCurrent.value = null;
+    dragZoomPointerId = null;
 }
 
 function beginDragZoom(event: PointerEvent) {
     if (!dragZoomMode.value || event.button !== 0) return;
+    if (dragZoomPointerId !== null && dragZoomPointerId !== event.pointerId) return;
     const layer = event.currentTarget as HTMLElement;
     const point = pointInDragLayer(event);
+    dragZoomPointerId = event.pointerId;
     dragZoomStart.value = point;
     dragZoomCurrent.value = point;
     layer.setPointerCapture?.(event.pointerId);
 }
 
 function updateDragZoom(event: PointerEvent) {
-    if (!dragZoomStart.value) return;
+    if (!dragZoomStart.value || dragZoomPointerId !== event.pointerId) return;
     dragZoomCurrent.value = pointInDragLayer(event);
 }
 
+function cancelDragZoom(event?: PointerEvent) {
+    if (event && dragZoomPointerId !== null && dragZoomPointerId !== event.pointerId) return;
+    dragZoomStart.value = null;
+    dragZoomCurrent.value = null;
+    dragZoomPointerId = null;
+}
+
 async function finishDragZoom(event: PointerEvent) {
-    if (!dragZoomStart.value) return;
+    if (!dragZoomStart.value || dragZoomPointerId !== event.pointerId) return;
     updateDragZoom(event);
+    const layer = event.currentTarget as HTMLElement;
+    const rect = dragZoomPlaybackRect(layer);
     const start = dragZoomStart.value;
     const current = dragZoomCurrent.value || start;
     dragZoomStart.value = null;
     dragZoomCurrent.value = null;
+    dragZoomPointerId = null;
     const left = Math.min(start.x, current.x);
     const top = Math.min(start.y, current.y);
     const width = Math.abs(current.x - start.x);
@@ -1758,10 +2330,11 @@ async function finishDragZoom(event: PointerEvent) {
         Message.warning("拖框范围太小,请重新选择");
         return;
     }
-    const video = monitorSnapshot.value?.tracks.find((track) => track.kind === "video");
-    const length = video?.width || 1000;
-    const windowWidth = video?.height || 1000;
-    await runAdvancedAction("drag_zoom_in", {
+    // DragZoom coordinates are defined in the actual displayed window, not source video metadata.
+    const length = Math.max(1, Math.round(rect.width));
+    const windowWidth = Math.max(1, Math.round(rect.height));
+    const action = dragZoomAction.value;
+    await runAdvancedAction(action, {
         length,
         width: windowWidth,
         midPointX: Math.round((left + width / 2) * length),
@@ -1774,25 +2347,78 @@ async function finishDragZoom(event: PointerEvent) {
 
 async function runAdvancedAction(action: string, region?: Record<string, number>) {
     if (!props.channel) return;
-    if (advancedPending.value.has(action)) return;
+    if (isAdvancedPending(action)) return;
     const execute = async () => {
+        const channelId = props.channel!.id;
+        const token = sessionToken;
+        const contextKey = channelContextKey();
+        const statusToken = advancedStatusToken.value;
         setAdvancedPending(action, true);
+        setAdvancedPhase(action, "queued", "正在发送");
         try {
-            const response = await controlDevice(props.channel!.id, {
+            const response = await controlDevice(channelId, {
                 action,
                 confirmed: action === "teleboot",
-                idempotencyKey: `${props.channel!.id}-${action}-${Date.now()}`,
-                ...(action === "drag_zoom_in" && region ? { region } : {}),
+                idempotencyKey: `${channelId}-${action}-${Date.now()}`,
+                ...((action === "drag_zoom_in" || action === "drag_zoom_out") && region ? { region } : {}),
             });
+            if (!isCurrentChannelContext(channelId, token, contextKey) || statusToken !== advancedStatusToken.value) return;
             if (response.code !== 0) throw new Error(response.message || "设备控制失败");
-            if (action === "record_start") deviceRecording.value = true;
-            if (action === "record_stop") deviceRecording.value = false;
-            if (action === "guard_set") guardArmed.value = true;
-            if (action === "guard_reset") guardArmed.value = false;
-            advancedOperationStatus.value = { ...advancedOperationStatus.value, [action]: response.data?.operationId ? `已受理 · ${response.data.operationId}` : "已受理" };
-            Message.success(`请求已受理${response.data?.operationId ? ` · ${response.data.operationId}` : ""}`);
-        } catch (error: any) { Message.error(error?.message || "设备控制失败"); }
-        finally { setAdvancedPending(action, false); }
+            const operation = response.data;
+            const operationId = operation?.operationId;
+            const operationStatus = String(operation?.status || "sent") as AdvancedOperationPhase;
+            advancedOperationIds.value = { ...advancedOperationIds.value, [action]: operationId || null };
+            advancedOperationDeadline.value = { ...advancedOperationDeadline.value, [action]: operation?.deadlineAt || null };
+            setAdvancedPhase(action, operationStatus, operationId ? `已受理 · ${operationId}` : "已发送,等待设备应答");
+            if (operationStatus === "accepted") {
+                setAdvancedPending(action, false);
+                // Only a device-confirmed result may change the local fact state.
+                if (advancedActionRequiresDeviceResult(action, operation?.responseRequired)) {
+                    applyAdvancedAccepted(action);
+                } else {
+                    setAdvancedPhase(action, "sent", "请求已发送,设备执行结果未回传");
+                    Message.info("请求已发送,设备执行结果未回传");
+                }
+                return;
+            }
+            if (["rejected", "timeout", "unknown", "cancelled"].includes(operationStatus)) {
+                setAdvancedPending(action, false);
+                if (operation) advancedOperationError(action, operationStatus, {
+                    operationId: operationId || "",
+                    status: operationStatus as PTZOperation["status"],
+                    errorCode: operation.errorCode || null,
+                    errorMessage: operation.errorMessage || response.message || null,
+                    completedAt: operation.completedAt || null,
+                    deadlineAt: operation.deadlineAt || null,
+                    deviceResult: operation.deviceResult || null,
+                });
+                return;
+            }
+            if (operationStatus === "sent" && !advancedActionRequiresDeviceResult(action, operation?.responseRequired)) {
+                setAdvancedPending(action, false);
+                setAdvancedPhase(action, "sent", "请求已发送,设备执行结果未回传");
+                Message.info(operation?.deduplicated ? "请求已合并到设备级操作" : "请求已发送,设备执行结果未回传");
+                return;
+            }
+            if (operationId) {
+                if (operationStatus === "queued" || operationStatus === "sent") {
+                    setAdvancedPending(action, true);
+                    beginAdvancedOperationPoll(action, operationId, operation?.deadlineAt);
+                    scheduleAdvancedOperationPoll(action, operationId, channelId, token, contextKey);
+                } else {
+                    setAdvancedPending(action, false);
+                }
+            } else {
+                // Key-frame, TeleBoot and DragZoom are SIP-delivery operations; no fake accepted state.
+                setAdvancedPending(action, false);
+                Message.info(operation?.deduplicated ? "请求已合并到设备级操作" : "请求已发送,设备执行结果未回传");
+            }
+        } catch (error: any) {
+            if (!isCurrentChannelContext(channelId, token, contextKey) || statusToken !== advancedStatusToken.value) return;
+            setAdvancedPending(action, false);
+            setAdvancedPhase(action, "unknown", error?.message || "设备控制失败");
+            Message.error(error?.message || "设备控制失败");
+        }
     };
     if (action === "teleboot") {
         Modal.warning({ title: "确认远程重启设备?", content: "设备会短暂离线，正在观看的画面将中断。", okText: "确认重启", cancelText: "取消", onOk: execute });
@@ -1805,7 +2431,7 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
 
 type TalkState = "idle" | "connecting" | "talking";
 const talkState = ref<TalkState>("idle");
-const talkMode = ref<"broadcast" | "talk">("broadcast");
+const talkMode = ref<"broadcast" | "talk">("talk");
 const talkSession = ref<TalkCreateResult | null>(null);
 let talkConnection: RTCPeerConnection | null = null;
 let talkStream: MediaStream | null = null;
@@ -1846,8 +2472,12 @@ function beginTalkPoll(channelId: number, sessionId: string) {
 
 async function startTalk() {
     if (talkState.value !== "idle") return;
+    if (talkMode.value === "broadcast") {
+        Message.warning(broadcastUnavailableTitle);
+        return;
+    }
     if (!isAudioCapable.value) {
-        Message.warning("设备离线或不支持语音对讲");
+        Message.warning("设备离线，无法建立语音对讲");
         return;
     }
     if (!props.channel) return;
@@ -1942,7 +2572,7 @@ function handleVisibilityChange() {
 /* ────────────────────────── 生命周期 ────────────────────────── */
 
 watch(
-    [() => props.visible, () => props.channel?.id],
+    [() => props.visible, () => channelContextKey()],
     ([visible]) => {
         if (visible && props.channel) void startSession();
         else { cleanupTalkLocally(); cleanupSessionLocally(); }
@@ -2004,10 +2634,10 @@ onBeforeUnmount(() => {
                             @pointerdown="beginDragZoom"
                             @pointermove="updateDragZoom"
                             @pointerup="finishDragZoom"
-                            @pointercancel="finishDragZoom"
+                            @pointercancel="cancelDragZoom"
                         >
                             <span class="drag-zoom-box" :style="dragZoomBoxStyle"></span>
-                            <span class="drag-zoom-hint">拖动选择 3D 定位区域</span>
+                            <span class="drag-zoom-hint">拖动选择 3D {{ dragZoomAction === 'drag_zoom_out' ? '缩小' : '放大' }}区域</span>
                         </div>
                         <template v-if="phase === 'playing' || phase === 'paused'">
                             <PlayWindow :url="currentProtocolUrl" @error="handlePlayerError" />
@@ -2423,20 +3053,6 @@ onBeforeUnmount(() => {
                                 </div>
                             </section>
 
-                            <section class="linked-section linked-card" data-testid="wiper-control">
-                                <div class="section-hd first">
-                                    <span class="section-title"><RefreshCcw :size="13" />雨刷控制</span>
-                                    <span class="section-meta">国标辅助编号 1</span>
-                                </div>
-                                <div class="wiper-actions">
-                                    <button class="btn-ghost sm" data-testid="wiper-on" :disabled="wiperPending !== null" @click="sendWiperCommand('on')">
-                                        <Play :size="12" />开启
-                                    </button>
-                                    <button class="btn-ghost sm" data-testid="wiper-off" :disabled="wiperPending !== null" @click="sendWiperCommand('off')">
-                                        <Square :size="12" />关闭
-                                    </button>
-                                </div>
-                            </section>
                         </div>
                     </div>
 
@@ -2488,17 +3104,12 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-show="activeTab === 'advanced'" class="linked-detail" data-testid="linked-detail-advanced">
-                        <p class="linked-detail-hint">本地占位 · ConfigDownload 接口待接入</p>
-                        <div class="linked-image-layout">
-                            <div class="image-adjust linked-image-adjust">
-                                <label><span>亮度</span><input v-model.number="imageParams.brightness" type="range" min="0" max="255" /><em>{{ imageParams.brightness }}</em></label>
-                                <label><span>对比度</span><input v-model.number="imageParams.contrast" type="range" min="0" max="255" /><em>{{ imageParams.contrast }}</em></label>
-                                <label><span>饱和度</span><input v-model.number="imageParams.saturation" type="range" min="0" max="255" /><em>{{ imageParams.saturation }}</em></label>
-                                <label><span>色度</span><input v-model.number="imageParams.hue" type="range" min="0" max="255" /><em>{{ imageParams.hue }}</em></label>
+                        <div class="linked-standard-note">
+                            <Info :size="14" />
+                            <div>
+                                <strong>高级控制按设备应答显示结果</strong>
+                                <span>图像调节不属于 GB/T 28181 标准控制字段，本面板不提供未接入的伪控制滑杆。</span>
                             </div>
-                            <button class="btn-primary sm linked-apply" disabled title="图像参数接口待接入">
-                                <CheckCircle2 :size="12" />接口待接入
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -2546,7 +3157,7 @@ onBeforeUnmount(() => {
                             <button :class="{ active: ptzMode === 'speed' }" @click="ptzMode = 'speed'">
                                 <Compass :size="13" />速度控制
                             </button>
-                            <button :class="{ active: ptzMode === 'precise' }" @click="ptzMode = 'precise'">
+                            <button data-testid="ptz-mode-precise" :class="{ active: ptzMode === 'precise' }" @click="ptzMode = 'precise'">
                                 <Crosshair :size="13" />精准定位<span class="tag-2022">2022</span>
                             </button>
                         </div>
@@ -2566,14 +3177,15 @@ onBeforeUnmount(() => {
                             </div>
 
                             <div class="talk-mode-switch" aria-label="对讲模式">
-                                <button :class="{ active: talkMode === 'broadcast' }" :disabled="talkState !== 'idle' || !broadcastAvailable" :title="capability('broadcast').reason" @click="talkMode = 'broadcast'">广播</button>
-                                <button :class="{ active: talkMode === 'talk' }" :disabled="talkState !== 'idle' || !talkAvailable" :title="capability('talk').reason" @click="talkMode = 'talk'">Talk</button>
+                                <button :class="{ active: talkMode === 'broadcast' }" disabled :title="broadcastUnavailableTitle">广播</button>
+                                <button :class="{ active: talkMode === 'talk' }" :disabled="talkState !== 'idle' || !talkAvailable" :title="capabilityActionTitle('talk', 'Talk')" @click="talkMode = 'talk'">Talk</button>
                             </div>
                             <button
                                 class="talk-button"
                                 data-testid="talk-button"
                                 :class="{ active: talkState !== 'idle' }"
                                 :disabled="!isAudioCapable"
+                                :title="capabilityActionTitle(talkMode, talkMode === 'broadcast' ? '广播对讲' : '双向对讲')"
                                 :aria-pressed="talkState === 'talking'"
                                 @pointerdown.prevent="startTalk"
                                 @pointerup.prevent="stopTalk"
@@ -2654,7 +3266,7 @@ onBeforeUnmount(() => {
                                 </label>
                             </div>
                             <div class="precise-actions">
-                                <button class="btn-primary sm" @click="sendPrecise">
+                                <button class="btn-primary sm" data-testid="ptz-precise-apply" @click="sendPrecise">
                                     <Target :size="13" />应用定位
                                 </button>
                                 <button class="btn-ghost sm" @click="readPreciseStatus">
@@ -2741,30 +3353,61 @@ onBeforeUnmount(() => {
                             <span class="section-title"><Settings :size="13" />设备控制</span>
                             <span class="section-meta">GB28181 DeviceControl</span>
                         </div>
+                        <div class="advanced-fact-status" data-testid="advanced-fact-status" aria-live="polite">
+                            <div class="advanced-fact-heading">
+                                <span>DeviceStatus 事实</span>
+                                <span :class="{ pending: deviceStatusPending, error: !!deviceStatusError }">{{ deviceStatusText() }}</span>
+                            </div>
+                            <div class="advanced-fact-grid">
+                                <span>录像</span><strong :class="`fact-${recordState}`">{{ recordStateText(recordState) }}</strong>
+                                <span>报警输入</span><strong :class="`fact-${guardState}`">{{ guardStateText(guardState) }}</strong>
+                            </div>
+                            <p v-if="alarmResolutionTargetText()" class="advanced-alarm-target">{{ alarmResolutionTargetText() }}</p>
+                            <p v-if="alarmResolutionWarning()" class="advanced-alarm-warning" data-testid="alarm-resolution-warning">{{ alarmResolutionWarning() }}</p>
+                            <div v-if="alarmFacts.length > 0" class="advanced-alarm-facts" data-testid="alarm-facts">
+                                <span v-for="fact in alarmFacts" :key="fact.targetCode" :class="`fact-${normalizeGuardState(fact.guardState)}`">{{ alarmFactText(fact) }}</span>
+                            </div>
+                            <p v-if="deviceStatusError" class="advanced-fact-error">{{ deviceStatusError }}</p>
+                            <button class="btn-ghost xs advanced-status-refresh" :disabled="deviceStatusPending || props.channel?.status !== 1" @click="loadDeviceStatus(props.channel?.id, sessionToken)">
+                                <RefreshCcw :size="11" />刷新事实状态
+                            </button>
+                        </div>
                         <div class="adv-actions">
-                            <button class="adv-btn" @click="runAdvancedAction('iframe')">
+                            <button class="adv-btn" data-testid="advanced-iframe" :title="capabilityActionTitle('iFrame', '请求关键帧')" :disabled="isAdvancedPending('iframe')" @click="runAdvancedAction('iframe')">
                                 <Video :size="14" />
-                                <div><strong>强制关键帧</strong><small>IFrameCmd · 快速刷新画面</small></div>
+                                <div><strong>请求关键帧</strong><small>发送到设备,执行结果不回传</small></div>
                             </button>
-                            <button class="adv-btn" data-testid="advanced-record" :disabled="advancedPending.has(deviceRecording ? 'record_stop' : 'record_start')" @click="runAdvancedAction(deviceRecording ? 'record_stop' : 'record_start')">
+                            <button class="adv-btn" data-testid="advanced-record" :title="capabilityActionTitle('record', advancedActionLabel('record'))" :disabled="isAdvancedPending(recordState === 'on' ? 'record_stop' : 'record_start')" @click="runAdvancedAction(recordState === 'on' ? 'record_stop' : 'record_start')">
                                 <Circle :size="14" />
-                                <div><strong>{{ deviceRecording ? '停止设备录制' : '开始设备端录制' }}</strong><small>{{ (deviceRecording ? advancedOperationStatus.record_start : advancedOperationStatus.record_stop) || 'RecordCmd · SD 卡录制' }}</small></div>
+                                <div><strong>{{ advancedActionLabel('record') }}</strong><small>{{ advancedOperationStatus[recordState === 'on' ? 'record_stop' : 'record_start'] || '以设备应答为准' }}</small></div>
                             </button>
-                            <button class="adv-btn" data-testid="advanced-guard" :disabled="advancedPending.has(guardArmed ? 'guard_reset' : 'guard_set')" @click="runAdvancedAction(guardArmed ? 'guard_reset' : 'guard_set')">
+                            <button v-if="recordState === 'unknown'" class="adv-btn adv-btn-secondary" data-testid="advanced-record-stop" :title="capabilityActionTitle('record', '请求停止设备录制')" :disabled="isAdvancedPending('record_stop')" @click="runAdvancedAction('record_stop')">
+                                <Square :size="14" />
+                                <div><strong>请求停止设备录制</strong><small>当前状态未知,按需显式选择</small></div>
+                            </button>
+                            <button class="adv-btn" data-testid="advanced-guard" :title="capabilityActionTitle('guard', advancedActionLabel('guard'))" :disabled="isAdvancedPending(guardState === 'armed' ? 'guard_reset' : 'guard_set')" @click="runAdvancedAction(guardState === 'armed' ? 'guard_reset' : 'guard_set')">
                                 <ShieldCheck :size="14" />
-                                <div><strong>{{ guardArmed ? '撤防' : '布防' }}</strong><small>{{ (guardArmed ? advancedOperationStatus.guard_set : advancedOperationStatus.guard_reset) || 'GuardCmd · 触发告警' }}</small></div>
+                                <div><strong>{{ advancedActionLabel('guard') }}</strong><small>{{ advancedOperationStatus[guardState === 'armed' ? 'guard_reset' : 'guard_set'] || '以设备应答为准' }}</small></div>
                             </button>
-                            <button class="adv-btn" @click="runAdvancedAction('alarm_reset')">
+                            <button v-if="guardState === 'unknown'" class="adv-btn adv-btn-secondary" data-testid="advanced-guard-reset" :title="capabilityActionTitle('guard', '请求撤防')" :disabled="isAdvancedPending('guard_reset')" @click="runAdvancedAction('guard_reset')">
+                                <ShieldCheck :size="14" />
+                                <div><strong>请求撤防</strong><small>当前状态未知,按需显式选择</small></div>
+                            </button>
+                            <button class="adv-btn" :title="capabilityActionTitle('alarmReset', '报警复位')" :disabled="isAdvancedPending('alarm_reset')" @click="runAdvancedAction('alarm_reset')">
                                 <AlertTriangle :size="14" />
-                                <div><strong>报警复位</strong><small>AlarmCmd · 清除告警</small></div>
+                                <div><strong>报警复位</strong><small>等待设备业务应答</small></div>
                             </button>
-                            <button class="adv-btn" @click="runAdvancedAction('teleboot')">
+                            <button class="adv-btn" :title="capabilityActionTitle('teleBoot', '远程重启父设备')" :disabled="isAdvancedPending('teleboot')" @click="runAdvancedAction('teleboot')">
                                 <RefreshCcw :size="14" />
-                                <div><strong>远程重启</strong><small>TeleBootCmd · 重启设备</small></div>
+                                <div><strong>远程重启父设备</strong><small>设备级发送,结果不回传</small></div>
                             </button>
-                            <button class="adv-btn" data-testid="advanced-drag-zoom" @click="toggleDragZoomMode">
+                            <button class="adv-btn" data-testid="advanced-drag-zoom" :title="capabilityActionTitle('dragZoom', '3D 放大')" :disabled="isAdvancedPending('drag_zoom_in')" @click="toggleDragZoomMode('drag_zoom_in')">
                                 <Move3d :size="14" />
-                                <div><strong>{{ dragZoomMode ? '取消 3D 定位' : '3D 定位' }}</strong><small>2022 · {{ dragZoomMode ? '在画面拖框后下发' : '拖框区域放大' }}</small></div>
+                                <div><strong>{{ dragZoomMode && dragZoomAction === 'drag_zoom_in' ? '取消 3D 放大' : '3D 放大' }}</strong><small>按显示窗口像素拖框</small></div>
+                            </button>
+                            <button class="adv-btn" data-testid="advanced-drag-zoom-out" :title="capabilityActionTitle('dragZoom', '3D 缩小')" :disabled="isAdvancedPending('drag_zoom_out')" @click="toggleDragZoomMode('drag_zoom_out')">
+                                <ZoomOut :size="14" />
+                                <div><strong>{{ dragZoomMode && dragZoomAction === 'drag_zoom_out' ? '取消 3D 缩小' : '3D 缩小' }}</strong><small>按显示窗口像素拖框</small></div>
                             </button>
                         </div>
 
@@ -3016,7 +3659,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                     <div class="cruise-save-row">
-                        <label class="cruise-save-label">巡航速度</label>
+                        <label class="cruise-save-label">控制编码速度</label>
                         <div class="cruise-save-field">
                             <div class="cruise-param-line">
                                 <a-input-number
@@ -3042,7 +3685,7 @@ onBeforeUnmount(() => {
                             </div>
                             <p class="preset-save-hint">
                                 {{ cruiseDraft.sendSpeed
-                                    ? "国标 12 位协议值,范围 1-4095;无统一物理单位,实际快慢由设备决定。"
+                                    ? "下发端控制编码范围 1-4095;查询端设备速度独立显示为 1-15。无统一物理单位,实际快慢由设备决定。"
                                     : "本次不下发速度设置,设备保持当前设置。" }}
                             </p>
                         </div>
@@ -3075,7 +3718,7 @@ onBeforeUnmount(() => {
                             </div>
                             <p class="preset-save-hint">
                                 {{ cruiseDraft.sendDwell
-                                    ? "国标单位为秒,范围 1-4095 秒,最长 68 分 15 秒。"
+                                    ? "控制端停留时间单位为秒,范围 1-4095 秒,最长 68 分 15 秒。查询结果缺失时不伪造默认值。"
                                     : "本次不下发停留时间设置,设备保持当前设置。" }}
                             </p>
                         </div>
@@ -3746,16 +4389,18 @@ onBeforeUnmount(() => {
 .linked-detail .home-config { gap: 5px; padding-top: 2px; }
 .linked-detail .home-row select,
 .linked-detail .home-row input { height: 26px; }
-.wiper-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
-.wiper-actions button { width: 100%; justify-content: center; }
 .linked-probe-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; min-height: 0; align-items: center; }
 .linked-probe-tracks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .linked-timeline .frame-bars { height: 46px; }
-.linked-image-layout { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 18px; align-items: center; }
-.linked-image-adjust { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px; margin: 0; }
-.linked-image-adjust label { grid-template-columns: 48px minmax(0, 1fr) 28px; }
-.linked-image-adjust em { color: var(--uvp-text-secondary); font-family: ui-monospace, Menlo, monospace; font-size: 10px; font-style: normal; text-align: right; }
-.linked-apply { min-width: 120px; }
+.linked-standard-note {
+    display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start;
+    padding: 12px; color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border); border-radius: 8px; line-height: 1.6;
+}
+.linked-standard-note > svg { color: var(--uvp-warning); margin-top: 2px; }
+.linked-standard-note > div { display: grid; gap: 3px; }
+.linked-standard-note strong { color: var(--uvp-text-secondary); font-size: 11px; }
+.linked-standard-note span { font-size: 10px; }
 
 @media (max-width: 720px) {
     .stream-overview-metrics,
@@ -3764,8 +4409,7 @@ onBeforeUnmount(() => {
     .linked-detail { height: auto; overflow: visible; }
     .linked-ptz-layout,
     .linked-probe-layout,
-    .linked-probe-tracks,
-    .linked-image-layout { grid-template-columns: 1fr; }
+    .linked-probe-tracks { grid-template-columns: 1fr; }
     .linked-stream-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .stream-live-metric { padding: 7px 12px; }
     .stream-live-metric:first-child { padding-left: 0; }
@@ -3774,8 +4418,6 @@ onBeforeUnmount(() => {
     .linked-section:first-child { padding-top: 0; }
     .linked-section:last-child { padding-bottom: 0; }
     .linked-section + .linked-section { border-top: 1px solid var(--uvp-panel-border); border-left: 0; }
-    .linked-image-adjust { grid-template-columns: 1fr; }
-    .linked-apply { width: 100%; }
     .asset-manager-layer { position: fixed; inset: 12px; border: 1px solid var(--uvp-panel-border); }
     .asset-manager-drawer { width: 100%; border-left: 0; }
 }
@@ -4186,6 +4828,24 @@ onBeforeUnmount(() => {
 .empty { padding: 24px; color: var(--uvp-text-tertiary); text-align: center; font-size: 11px; }
 
 /* ═══════════ 高级面板 ═══════════ */
+.advanced-fact-status {
+    display: grid; gap: 7px; margin-bottom: 8px; padding: 9px 10px;
+    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 8px;
+}
+.advanced-fact-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--uvp-text-secondary); font-size: 10px; }
+.advanced-fact-heading > span:last-child { color: var(--uvp-text-tertiary); font-size: 9px; }
+.advanced-fact-heading > span.pending { color: var(--uvp-warning); }
+.advanced-fact-heading > span.error { color: var(--uvp-danger); }
+.advanced-fact-grid { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 5px 8px; align-items: center; color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.advanced-fact-grid strong { color: var(--uvp-text-secondary); font-size: 10px; font-weight: 600; }
+.advanced-fact-grid strong.fact-on, .advanced-fact-grid strong.fact-armed { color: var(--uvp-brand-cyan); }
+.advanced-fact-grid strong.fact-alarm, .advanced-alarm-facts .fact-alarm { color: var(--uvp-danger); }
+.advanced-fact-grid strong.fact-unknown { color: var(--uvp-warning); }
+.advanced-alarm-target { margin: 0; color: var(--uvp-text-tertiary); font-size: 9px; }
+.advanced-alarm-warning { margin: 0; padding: 6px 7px; color: var(--uvp-warning); background: color-mix(in srgb, var(--uvp-warning) 8%, transparent); border: 1px solid color-mix(in srgb, var(--uvp-warning) 25%, transparent); border-radius: 5px; font-size: 9px; line-height: 1.45; }
+.advanced-alarm-facts { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--uvp-text-secondary); font-size: 9px; }
+.advanced-fact-error { margin: 0; color: var(--uvp-danger); font-size: 9px; line-height: 1.4; }
+.advanced-status-refresh { justify-self: start; }
 .adv-actions { display: grid; gap: 6px; }
 .sidebar [data-testid="linked-side-advanced"] .adv-actions { grid-template-columns: 1fr; }
 .sidebar [data-testid="linked-side-advanced"] .adv-btn { gap: 7px; padding: 8px; }

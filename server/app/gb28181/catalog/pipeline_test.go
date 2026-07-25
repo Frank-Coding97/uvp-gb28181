@@ -25,6 +25,9 @@ func newPipelineTestDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbAnomalyRecord{},
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDevice{},
+		&gbmodels.GbAlarmResource{},
+		&gbmodels.GbAlarmResourceParent{},
+		&gbmodels.GbAlarmBinding{},
 	))
 	return db
 }
@@ -52,6 +55,57 @@ func TestPipeline_IngestWithOwnerDept(t *testing.T) {
 	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&channel).Error)
 	assert.EqualValues(t, 10, channel.OwnerDeptID)
 	assert.True(t, channel.AudioEnabled, "新建通道默认应开启音频")
+}
+
+func TestPipeline_IngestPersistsAlarmResourceAndMultipleParents(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	deviceCode := "34020000001180000001"
+	channelCode := "34020000001310000001"
+	alarmCode := "34020000001340000001"
+	device := &gbmodels.GbDevice{DeviceID: deviceCode, OwnerDeptID: 10}
+	require.NoError(t, db.Create(device).Error)
+
+	require.NoError(t, p.Ingest(context.Background(), catalog.Sender{OwnerDeptID: 10, SourceDeviceID: deviceCode}, []catalog.CatalogItem{
+		{DeviceID: channelCode, Name: "录像通道", ParentID: deviceCode, StatusOn: true},
+		{DeviceID: alarmCode, Name: "门磁报警", ParentID: channelCode + "/" + deviceCode, StatusOn: true},
+	}))
+
+	var resource gbmodels.GbAlarmResource
+	require.NoError(t, db.Where("device_id = ? AND alarm_code = ?", device.ID, alarmCode).First(&resource).Error)
+	assert.Equal(t, gbmodels.AlarmResourceInput, resource.ResourceType)
+	assert.Equal(t, channelCode+"/"+deviceCode, resource.RawParentIDs)
+
+	var parents []gbmodels.GbAlarmResourceParent
+	require.NoError(t, db.Where("alarm_resource_id = ?", resource.ID).Order("id").Find(&parents).Error)
+	require.Len(t, parents, 2)
+	assert.Equal(t, channelCode, parents[0].ParentCode)
+	assert.Equal(t, deviceCode, parents[1].ParentCode)
+
+	var alarmChannelCount int64
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", alarmCode).Count(&alarmChannelCount).Error)
+	assert.Zero(t, alarmChannelCount, "报警输入不能伪装成可播放通道")
+
+	var node gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", alarmCode).First(&node).Error)
+	assert.Equal(t, gbmodels.NodeTypeAlarmInput, node.NodeType)
+	require.NotNil(t, node.AlarmResourceID)
+	assert.Equal(t, resource.ID, *node.AlarmResourceID)
+	assert.False(t, node.Anomaly)
+}
+
+func TestPipeline_IngestHVRAsDeviceNotChannel(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	hvrCode := "34020000001300000001"
+
+	require.NoError(t, p.Ingest(context.Background(), catalog.Sender{OwnerDeptID: 10}, []catalog.CatalogItem{{DeviceID: hvrCode, Name: "HVR"}}))
+
+	var deviceCount, channelCount int64
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", hvrCode).Count(&deviceCount).Error)
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Where("channel_id = ?", hvrCode).Count(&channelCount).Error)
+	assert.EqualValues(t, 1, deviceCount)
+	assert.Zero(t, channelCount)
 }
 
 func TestPipeline_DelIsScopedByOwnerDept(t *testing.T) {

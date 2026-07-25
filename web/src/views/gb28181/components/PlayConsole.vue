@@ -389,10 +389,6 @@ function stopCruise() {
     Message.info("[Mock] 巡航已停止");
 }
 
-function sendWiperCommand(action: "on" | "off") {
-    Message.info(`[Mock] 雨刷${action === "on" ? "开启" : "关闭"}指令已发送`);
-}
-
 function saveHomePosition() {
     if (!homePosition.value.enabled) {
         Message.success("[Mock] 看守位已关闭");
@@ -699,13 +695,6 @@ onBeforeUnmount(() => {
                                 </div>
                             </div>
 
-                            <div class="wiper-control" data-testid="demo-wiper-control">
-                                <span class="section-title"><RefreshCcw :size="13" />雨刷控制</span>
-                                <div class="wiper-actions">
-                                    <button class="btn-ghost sm" data-testid="demo-wiper-on" @click="sendWiperCommand('on')">开启</button>
-                                    <button class="btn-ghost sm" data-testid="demo-wiper-off" @click="sendWiperCommand('off')">关闭</button>
-                                </div>
-                            </div>
                         </div>
 
                         <!-- 精准控制模式(2022 新增):Pan/Tilt/Zoom 绝对定位 -->
@@ -1353,9 +1342,6 @@ onBeforeUnmount(() => {
 .lens-btns button:hover:not(:disabled) { color: var(--uvp-brand); border-color: var(--uvp-brand); }
 .lens-btns button.toggled { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
 
-.wiper-control { display: grid; gap: 6px; margin-top: 6px; }
-.wiper-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-.wiper-actions button { width: 100%; justify-content: center; }
 
 /* 精准 PTZ */
 .ptz-precise { display: grid; gap: 10px; }

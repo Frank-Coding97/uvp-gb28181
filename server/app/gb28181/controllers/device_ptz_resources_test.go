@@ -28,8 +28,6 @@ type resourcePTZSender struct {
 	err    error
 }
 
-type cancellingResourcePTZSender struct{ cancel context.CancelFunc }
-
 type runtimeDeviceControlSender struct {
 	mu    sync.Mutex
 	calls int
@@ -46,11 +44,6 @@ func (s *runtimeDeviceControlSender) Calls() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.calls
-}
-
-func (s cancellingResourcePTZSender) SendMessageTracked(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
-	s.cancel()
-	return uac.TrackedMessageResult{}, context.DeadlineExceeded
 }
 
 func TestPTZServiceReloadAccessorAndSenderAreRaceFree(t *testing.T) {
@@ -115,6 +108,7 @@ func newPTZResourceController(t *testing.T) (*gbcontrollers.DeviceMgmtController
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{},
 		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{}, &gbmodels.GbPTZState{},
+		&gbmodels.GbAlarmResource{}, &gbmodels.GbAlarmResourceParent{}, &gbmodels.GbAlarmBinding{},
 	))
 	device := &gbmodels.GbDevice{DeviceID: "D", IP: "192.0.2.10", Port: 5060, Transport: "UDP", Status: gbmodels.DeviceStatusOnline}
 	require.NoError(t, db.Create(device).Error)
@@ -129,8 +123,8 @@ func newPTZResourceController(t *testing.T) (*gbcontrollers.DeviceMgmtController
 
 func TestDeviceMgmt_CreatePTZPreset_TriggersPresetQueryReconcile(t *testing.T) {
 	// 老板选的落库策略:乐观入库 + 保存后自动查一次。
-	// 断言 preset_set SIP 下发后,后台会异步下发一次 PresetQuery 对账。
-	controller, _, channel, sender := newPTZResourceController(t)
+	// 查询属于 durable operation,由生产 scheduler 负责后续 SIP 下发。
+	controller, db, channel, sender := newPTZResourceController(t)
 	router := gin.New()
 	router.POST("/channel/:id/ptz/presets", controller.CreatePTZPreset)
 
@@ -141,32 +135,24 @@ func TestDeviceMgmt_CreatePTZPreset_TriggersPresetQueryReconcile(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
-	// 等一小会让 async goroutine 触发,再对 sender.bodies 快照。
+	// 等后台 goroutine 创建 queued PresetQuery operation。
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		sender.mu.Lock()
-		count := len(sender.bodies)
-		sender.mu.Unlock()
-		if count >= 2 {
+		var count int64
+		_ = db.Model(&gbmodels.GbPTZOperation{}).Where("action = ?", "refresh_presets").Count(&count).Error
+		if count == 1 {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	var reconcile gbmodels.GbPTZOperation
+	require.NoError(t, db.Where("action = ?", "refresh_presets").First(&reconcile).Error)
+	require.True(t, reconcile.ResponseRequired)
+	require.Equal(t, 3, reconcile.MaxAttempts)
+	require.Equal(t, gbmodels.PTZOperationQueued, reconcile.Status)
 	sender.mu.Lock()
-	bodies := append([]string(nil), sender.bodies...)
+	require.Len(t, sender.bodies, 1, "主 preset_set 仍应立即发送,查询由 scheduler 发送")
 	sender.mu.Unlock()
-	require.GreaterOrEqual(t, len(bodies), 2, "应包含 preset_set + 异步 PresetQuery")
-	foundSet, foundQuery := false, false
-	for _, body := range bodies {
-		if strings.Contains(body, "<PTZCmd>") {
-			foundSet = true
-		}
-		if strings.Contains(body, "<CmdType>PresetQuery</CmdType>") {
-			foundQuery = true
-		}
-	}
-	require.True(t, foundSet, "缺少 preset_set 主命令 SIP")
-	require.True(t, foundQuery, "缺少异步 PresetQuery 对账 SIP")
 }
 
 func TestDeviceMgmt_CreatePTZPreset_AllowsUnreportedPTZType(t *testing.T) {
@@ -194,7 +180,6 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 	router := gin.New()
 	router.DELETE("/channel/:id/ptz/presets/:presetId", controller.DeletePTZPreset)
 	router.POST("/channel/:id/ptz/cruise", controller.ControlPTZCruise)
-	router.POST("/channel/:id/ptz/wiper", controller.ControlPTZWiper)
 	router.PATCH("/channel/:id/ptz/home-position", controller.UpdatePTZHomePosition)
 
 	tests := []struct {
@@ -208,9 +193,6 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/cruise", `{"action":"start","trackId":0}`, "A50F01880000003D"},
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/cruise", `{"action":"stop","trackId":0}`, "A50F0100000000B5"},
 		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/cruise", `{"action":"delete","trackId":0}`, "A50F01850000003A"},
-		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"on"}`, "A50F018C01000042"},
-		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"off"}`, "A50F018D01000043"},
-		{http.MethodPost, "/channel/" + uintStr(channel.ID) + "/ptz/wiper", `{"action":"on","auxiliaryId":7}`, "A50F018C01000042"},
 	}
 	for _, tt := range tests {
 		sender.mu.Lock()
@@ -239,29 +221,6 @@ func TestDeviceMgmt_PTZResourceWriteEndpointsReturnOperations(t *testing.T) {
 		}
 		require.True(t, found, "%s: want %q in sent bodies", tt.path, tt.want)
 	}
-}
-
-func TestDeviceMgmt_ControlPTZWiperUsesWiperSemanticAction(t *testing.T) {
-	controller, db, channel, sender := newPTZResourceController(t)
-	router := gin.New()
-	router.Use(gin.Recovery())
-	router.POST("/channel/:id/ptz/wiper", controller.ControlPTZWiper)
-
-	request := httptest.NewRequest(http.MethodPost, "/channel/"+uintStr(channel.ID)+"/ptz/wiper", strings.NewReader(`{"action":"on"}`))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-
-	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
-	require.Contains(t, response.Body.String(), `"action":"wiper_on"`)
-	require.Len(t, sender.bodies, 1)
-	require.Contains(t, sender.bodies[0], "A50F018C01000042", "底层仍应编码国标辅助开关编号 1")
-	var operation gbmodels.GbPTZOperation
-	require.NoError(t, db.Where("channel_id = ?", channel.ID).Order("id DESC").First(&operation).Error)
-	require.Equal(t, "wiper_on", operation.Action)
-	require.Contains(t, operation.PayloadJSON, `"action":"wiper_on"`)
-	require.Contains(t, operation.PayloadJSON, `"protocolAction":"aux_on"`)
-	require.Contains(t, operation.PayloadJSON, `"id":1`)
 }
 
 func TestDeviceMgmt_ControlPTZExtendedRejectsAuxiliaryActions(t *testing.T) {
@@ -309,7 +268,7 @@ func TestDeviceMgmt_ControlPTZCruiseRejectsNonStandardPauseAndResume(t *testing.
 }
 
 func TestDeviceMgmt_DeleteCruiseZeroClearsCacheAndSchedulesReconcile(t *testing.T) {
-	controller, db, channel, sender := newPTZResourceController(t)
+	controller, db, channel, _ := newPTZResourceController(t)
 	enabled := true
 	require.NoError(t, db.Create(&gbmodels.GbPTZCruiseTrack{
 		DeviceID: 1, ChannelID: channel.ID, TrackID: 0, Name: "零号轨迹", Enabled: &enabled,
@@ -330,17 +289,13 @@ func TestDeviceMgmt_DeleteCruiseZeroClearsCacheAndSchedulesReconcile(t *testing.
 		Where("channel_id = ? AND track_id = ?", channel.ID, 0).Count(&count).Error)
 	require.Zero(t, count)
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		sender.mu.Lock()
-		joined := strings.Join(sender.bodies, "\n")
-		sender.mu.Unlock()
-		if strings.Contains(joined, "<CmdType>CruiseTrackListQuery</CmdType>") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	require.Fail(t, "删除巡航后应调度 CruiseTrackListQuery 对账")
+	var reconcile gbmodels.GbPTZOperation
+	require.Eventually(t, func() bool {
+		return db.Where("action = ?", "refresh_cruise_tracks").First(&reconcile).Error == nil
+	}, 500*time.Millisecond, 10*time.Millisecond)
+	require.True(t, reconcile.ResponseRequired)
+	require.Equal(t, 3, reconcile.MaxAttempts)
+	require.Equal(t, gbmodels.PTZOperationQueued, reconcile.Status)
 }
 
 func TestDeviceMgmt_ListPTZPresetsRefreshReturnsFullStaleCacheAndOperation(t *testing.T) {
@@ -379,20 +334,24 @@ func TestDeviceMgmt_PTZRefreshWithoutCacheIsUnknown(t *testing.T) {
 	require.Contains(t, w.Body.String(), "refreshOperationId")
 }
 
-func TestDeviceMgmt_PTZRefreshTimeoutKeepsOldCacheStale(t *testing.T) {
+func TestDeviceMgmt_PTZRefreshQueuesOperationAndKeepsOldCacheStale(t *testing.T) {
 	controller, db, channel, _ := newPTZResourceController(t)
 	require.NoError(t, db.Create(&gbmodels.GbPTZPreset{ChannelID: channel.ID, DeviceID: 1, PresetID: 1, Status: gbmodels.PTZPresetActive, UpdatedAt: time.Now().Add(-2 * time.Minute)}).Error)
-	ctx, cancel := context.WithCancel(context.Background())
-	controller.SetPTZService(mustPTZService(t, db, cancellingResourcePTZSender{cancel: cancel}))
 	router := gin.New()
 	router.GET("/channel/:id/ptz/presets", controller.ListPTZPresets)
-	req := httptest.NewRequest(http.MethodGet, "/channel/"+uintStr(channel.ID)+"/ptz/presets?refresh=true", nil).WithContext(ctx)
+	req := httptest.NewRequest(http.MethodGet, "/channel/"+uintStr(channel.ID)+"/ptz/presets?refresh=true", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Contains(t, w.Body.String(), `"freshness":"stale"`)
 	require.Contains(t, w.Body.String(), "refreshOperationId")
-	require.Contains(t, w.Body.String(), "refreshError")
+	require.NotContains(t, w.Body.String(), "refreshError")
+	var operation gbmodels.GbPTZOperation
+	require.Eventually(t, func() bool {
+		return db.Where("action = ?", "refresh_presets").First(&operation).Error == nil
+	}, 500*time.Millisecond, 10*time.Millisecond)
+	require.Equal(t, gbmodels.PTZOperationQueued, operation.Status)
+	require.Equal(t, 3, operation.MaxAttempts)
 }
 
 func TestDeviceMgmt_PTZRefreshRejectsOtherDepartment(t *testing.T) {
@@ -458,21 +417,18 @@ func TestDeviceMgmt_CreateCruiseTrack_DispatchesAddStopSpeedDwellAndReconciles(t
 	require.Contains(t, track.DetailJSON, `"speed":256`)
 	require.Contains(t, track.DetailJSON, `"dwellSec":5`)
 
-	// 等异步 CruiseTrackListQuery 触发
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		sender.mu.Lock()
-		n := len(sender.bodies)
-		sender.mu.Unlock()
-		if n >= 6 { // 3 加站 + 1 速度 + 1 停留 + 1 CruiseTrackListQuery
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// 列表查询由 durable scheduler 发送,主流程只需保证 operation 已入队。
+	var reconcile gbmodels.GbPTZOperation
+	require.Eventually(t, func() bool {
+		return db.Where("action = ?", "refresh_cruise_tracks").First(&reconcile).Error == nil
+	}, 500*time.Millisecond, 10*time.Millisecond)
+	require.True(t, reconcile.ResponseRequired)
+	require.Equal(t, 3, reconcile.MaxAttempts)
+	require.Equal(t, gbmodels.PTZOperationQueued, reconcile.Status)
 	sender.mu.Lock()
 	bodies := append([]string(nil), sender.bodies...)
 	sender.mu.Unlock()
-	require.GreaterOrEqual(t, len(bodies), 6, "should dispatch 3 add_stop + speed + dwell + reconcile query")
+	require.Len(t, bodies, 5, "should dispatch 3 add_stop + speed + dwell; query由scheduler发送")
 
 	// SIP body 是 GB2312 声明的 XML,直接判 hex 子串比走 charset-aware decoder 更简
 	joined := strings.Join(bodies, "\n")
@@ -482,7 +438,6 @@ func TestDeviceMgmt_CreateCruiseTrack_DispatchesAddStopSpeedDwellAndReconciles(t
 	require.Contains(t, joined, "A50F018402050040", "缺少 0x84 加站 preset=5")
 	require.Contains(t, joined, "A50F01860200104D", "缺少 0x86 速度 256")
 	require.Contains(t, joined, "A50F018702050043", "缺少 0x87 停留 5 秒")
-	require.Contains(t, joined, "<CmdType>CruiseTrackListQuery</CmdType>", "缺少异步 CruiseTrackListQuery 对账")
 }
 
 func TestDeviceMgmt_CreateCruiseTrack_ReturnsPartialWhenMidStopFails(t *testing.T) {
@@ -510,17 +465,12 @@ func TestDeviceMgmt_CreateCruiseTrack_ReturnsPartialWhenMidStopFails(t *testing.
 		Where("channel_id = ? AND track_id = ?", channel.ID, 2).Count(&count).Error)
 	require.Zero(t, count, "失败批次不能留下 enabled/pending 幽灵轨迹")
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		failSender.mu.Lock()
-		joined := strings.Join(failSender.bodies, "\n")
-		failSender.mu.Unlock()
-		if strings.Contains(joined, "<CmdType>CruiseTrackListQuery</CmdType>") {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	require.Fail(t, "失败批次也应调度 CruiseTrackListQuery 对账")
+	var reconcile gbmodels.GbPTZOperation
+	require.Eventually(t, func() bool {
+		return db.Where("action = ?", "refresh_cruise_tracks").First(&reconcile).Error == nil
+	}, 500*time.Millisecond, 10*time.Millisecond)
+	require.True(t, reconcile.ResponseRequired)
+	require.Equal(t, gbmodels.PTZOperationQueued, reconcile.Status)
 }
 
 func TestDeviceMgmt_CreateCruiseTrack_SuccessStoresDisabledPendingRecord(t *testing.T) {

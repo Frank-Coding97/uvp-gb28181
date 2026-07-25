@@ -170,8 +170,6 @@ func TestBuildExtendedPTZControl_UsesStandardInstructionAndParameterLayout(t *te
 		{"start cruise", PTZActionCruiseStart, 4, "A50F018804000041"},
 		{"delete cruise path", PTZActionCruiseDeletePath, 2, "A50F01850200003C"},
 		{"start scan", PTZActionScanStart, 5, "A50F018905000043"},
-		{"aux on", PTZActionAuxOn, 7, "A50F018C07000048"},
-		{"aux off", PTZActionAuxOff, 7, "A50F018D07000049"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

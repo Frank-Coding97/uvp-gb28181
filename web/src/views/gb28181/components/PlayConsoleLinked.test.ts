@@ -80,6 +80,16 @@ const api = vi.hoisted(() => {
           talk: { state: "supported", reason: "" }
         }
       }),
+    getDeviceStatus: vi.fn().mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+        freshness: "unknown",
+        refreshOperationId: null,
+        refreshError: null
+      }
+    }),
     listPtzPresets: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: presets, freshness: "fresh" } }),
     listCruiseTracks: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: cruises, freshness: "fresh" } }),
     getHomePosition: vi
@@ -114,7 +124,6 @@ const api = vi.hoisted(() => {
     deletePtzPreset: vi.fn(),
     controlPtzCruise: vi.fn(),
     createCruiseTrack: vi.fn(),
-    controlPtzWiper: vi.fn(),
     controlDevice: vi.fn(),
     createTalkSession: vi.fn(),
     deleteTalkSession: vi.fn()
@@ -126,7 +135,7 @@ vi.mock("./PlayWindow.vue", () => ({
   default: {
     props: ["url"],
     emits: ["error"],
-    template: "<button data-testid='play-window' :data-url='url' @click=\"$emit('error', '拉流超时')\" />"
+    template: "<button class='play-window' data-testid='play-window' :data-url='url' @click=\"$emit('error', '拉流超时')\" />"
   }
 }));
 
@@ -190,6 +199,7 @@ describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
     api.getHomePosition.mockReset();
     api.getPtzOperation.mockReset();
+    api.getDeviceStatus.mockReset();
     api.updateHomePosition.mockReset();
     api.startPlay.mockResolvedValue({
       code: 0,
@@ -224,8 +234,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
     api.controlDevice.mockResolvedValue({ code: 0, message: "", data: { operationId: "op-1", action: "accepted", status: "accepted" } });
     api.controlPtz.mockResolvedValue({ code: 0, message: "", data: { action: "accepted", status: "sent" } });
-    api.controlPtzWiper.mockResolvedValue({ code: 0, message: "", data: { operationId: "wiper-1", action: "accepted", status: "sent" } });
     api.getHomePosition.mockResolvedValue(homeResponse());
+    api.getDeviceStatus.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+        freshness: "unknown",
+        refreshOperationId: null,
+        refreshError: null
+      }
+    });
     api.getPtzOperation.mockResolvedValue(operationResponse("accepted", "home-default", null));
     api.updateHomePosition.mockResolvedValue({
       code: 0,
@@ -378,8 +397,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     const advancedDetail = wrapper.get("[data-testid='linked-detail-advanced']");
     expect(advancedSide.text()).toContain("设备控制");
     expect(advancedSide.text()).not.toContain("亮度");
-    expect(advancedDetail.text()).toContain("亮度");
-    expect(advancedDetail.text()).toContain("接口待接入");
+    expect(advancedDetail.text()).not.toContain("亮度");
+    expect(advancedDetail.text()).not.toContain("接口待接入");
+    expect(advancedDetail.text()).toContain("标准控制字段");
 
     await wrapper.get("[data-testid='linked-tab-stream']").trigger("click");
     const streamSide = wrapper.get("[data-testid='linked-side-stream']");
@@ -412,7 +432,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(/\.linked-stream-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(/\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(/\.wiper-actions\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
     expect(source).toMatch(
       /\.sidebar\s+\[data-testid="linked-side-advanced"\]\s+\.adv-actions\s*\{[^}]*grid-template-columns:\s*1fr/s
     );
@@ -488,6 +507,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     const talkButton = wrapper.get("[data-testid='talk-button']");
     talkButton.element.dispatchEvent(new Event("pointerdown"));
     await flushPromises();
+    expect(api.createTalkSession).toHaveBeenCalledWith(channel.id, "talk");
     await talkButton.trigger("pointerup");
     resolveCreate({
       code: 0,
@@ -549,12 +569,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
     const record = wrapper.get("[data-testid='advanced-record']");
     expect(record.attributes("disabled")).toBeUndefined();
+    expect(record.attributes("title")).toContain("设备上报不支持");
+    expect(record.attributes("title")).toContain("仍可尝试");
     await record.trigger("click");
     await flushPromises();
     expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "record_start" }));
 
-    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeUndefined();
-    expect(wrapper.get("[data-testid='talk-button']").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("[data-testid='talk-button']").attributes("disabled")).toBeUndefined();
+    const [broadcastMode, talkMode] = wrapper.findAll(".talk-mode-switch button");
+    expect(broadcastMode.attributes("disabled")).toBeDefined();
+    expect(broadcastMode.attributes("title")).toContain("平台暂未实现");
+    expect(talkMode.attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-testid='talk-button']").attributes("title")).toContain("设备上报不支持");
     expect(wrapper.find(".capability-warn").exists()).toBe(false);
     wrapper.unmount();
   });
@@ -585,6 +611,91 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("设备与通道编码变化时即使数据库 ID 相同也丢弃迟到的 DeviceStatus", async () => {
+    let resolveOldStatus!: (value: any) => void;
+    api.getDeviceStatus
+      .mockReturnValueOnce(new Promise(resolve => { resolveOldStatus = resolve; }))
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { state: { recordState: "off", guardState: "armed", freshness: "fresh" }, freshness: "fresh" }
+      });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const nextChannel = {
+      ...channel,
+      deviceId: "34020000001320000002",
+      channelId: "0411212999",
+      name: "园区南门"
+    };
+    await wrapper.setProps({ channel: nextChannel });
+    await flushPromises();
+
+    expect(api.startPlay).toHaveBeenLastCalledWith(nextChannel.deviceId, nextChannel.channelId);
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+
+    resolveOldStatus({
+      code: 0,
+      message: "",
+      data: { state: { recordState: "on", guardState: "disarmed", freshness: "fresh" }, freshness: "fresh" }
+    });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+
+    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
+    expect(facts).toContain("设备未录制");
+    expect(facts).toContain("已布防");
+    expect(facts).not.toContain("设备录制中");
+    wrapper.unmount();
+  });
+
+  it("切换设备后丢弃旧 DeviceStatus operation 的迟到轮询结果", async () => {
+    vi.useFakeTimers();
+    let resolveOldOperation!: (value: any) => void;
+    api.getDeviceStatus
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown",
+          refreshOperationId: "old-device-status-op"
+        }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { state: { recordState: "off", guardState: "armed", freshness: "fresh" }, freshness: "fresh" }
+      });
+    api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOldOperation = resolve; }));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "old-device-status-op");
+
+    const nextChannel = {
+      ...channel,
+      deviceId: "34020000001320000003",
+      channelId: "0411212888",
+      name: "园区西门"
+    };
+    await wrapper.setProps({ channel: nextChannel });
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+
+    resolveOldOperation(operationResponse("accepted", "old-device-status-op", null));
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    const facts = wrapper.get("[data-testid='advanced-fact-status']").text();
+    expect(facts).toContain("设备未录制");
+    expect(facts).toContain("已布防");
+    wrapper.unmount();
+  });
+
   it("预置位和巡航使用后端专用资源接口", async () => {
     api.callPtzPreset.mockResolvedValueOnce({ code: 0, message: "", data: { action: "call_preset" } });
     api.controlPtzCruise.mockResolvedValue({ code: 0, message: "", data: { action: "cruise_start", status: "sent" } });
@@ -611,7 +722,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await recordButton.trigger("click");
     await flushPromises();
     expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({ action: "record_start" }));
-    expect(recordButton.text()).toContain("停止设备录制");
+    expect(recordButton.text()).toContain("停止设备端录制");
 
     await recordButton.trigger("click");
     await flushPromises();
@@ -625,6 +736,171 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("录像与布防的正反动作共享 pending 锁", async () => {
+    let resolveControl!: (value: { code: number; message: string; data: Record<string, unknown> }) => void;
+    api.controlDevice.mockReturnValueOnce(new Promise(resolve => { resolveControl = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+
+    await wrapper.get("[data-testid='advanced-record']").trigger("click");
+    await wrapper.get("[data-testid='advanced-record-stop']").trigger("click");
+    expect(api.controlDevice).toHaveBeenCalledTimes(1);
+    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("[data-testid='advanced-record-stop']").attributes("disabled")).toBeDefined();
+
+    resolveControl({ code: 0, message: "", data: { operationId: "record-op", status: "queued", responseRequired: true } });
+    await flushPromises();
+    wrapper.unmount();
+  });
+
+  it("录像 operation 等待设备应答时不锁住其他高级控制", async () => {
+    api.controlDevice
+      .mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "record-op", status: "queued", responseRequired: true } })
+      .mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "iframe-op", status: "sent", responseRequired: false } })
+      .mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "guard-op", status: "queued", responseRequired: true } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+
+    await wrapper.get("[data-testid='advanced-record']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeDefined();
+    expect(wrapper.get("[data-testid='advanced-iframe']").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-testid='advanced-guard']").attributes("disabled")).toBeUndefined();
+
+    await wrapper.get("[data-testid='advanced-iframe']").trigger("click");
+    await wrapper.get("[data-testid='advanced-guard']").trigger("click");
+    await flushPromises();
+    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "iframe" }));
+    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "guard_set" }));
+    wrapper.unmount();
+  });
+
+  it("切换设备后高级控制 operation 的迟到应答不能改写新设备事实", async () => {
+    vi.useFakeTimers();
+    let resolveOldOperation!: (value: any) => void;
+    api.controlDevice.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { operationId: "old-record-op", status: "queued", responseRequired: true }
+    });
+    api.getPtzOperation.mockReturnValueOnce(new Promise(resolve => { resolveOldOperation = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await wrapper.get("[data-testid='advanced-record']").trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "old-record-op");
+
+    await wrapper.setProps({
+      channel: {
+        ...channel,
+        deviceId: "34020000001320000004",
+        channelId: "0411212777",
+        name: "园区东门"
+      }
+    });
+    await flushPromises();
+
+    resolveOldOperation(operationResponse("accepted", "old-record-op", null));
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("未知");
+    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("开始设备端录制");
+    wrapper.unmount();
+  });
+
+  it("单向高级命令 sent 后不轮询业务应答", async () => {
+    vi.useFakeTimers();
+    api.controlDevice.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { operationId: "iframe-op", status: "sent", responseRequired: false }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await wrapper.get("[data-testid='advanced-iframe']").trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(api.getPtzOperation).not.toHaveBeenCalled();
+    expect(wrapper.get("[data-testid='advanced-iframe']").attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("高级 operation 缺少 deadline 时只补读一次并收敛为 unknown", async () => {
+    vi.useFakeTimers();
+    api.controlDevice.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { operationId: "record-no-deadline", status: "queued", responseRequired: true, deadlineAt: null }
+    });
+    api.getPtzOperation.mockResolvedValue(operationResponse("sent", "record-no-deadline", null));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await wrapper.get("[data-testid='advanced-record']").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeDefined();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("开始设备端录制");
+    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("补读一次后结果未知");
+
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it("高级 operation 到 deadline 仍未终态时只做一次截止补读并收敛", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
+    const deadline = "2026-07-25T03:00:01.500Z";
+    api.controlDevice.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { operationId: "record-expired", status: "queued", responseRequired: true, deadlineAt: deadline }
+    });
+    api.getPtzOperation.mockResolvedValue(operationResponse("sent", "record-expired", deadline));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await wrapper.get("[data-testid='advanced-record']").trigger("click");
+    await flushPromises();
+
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(500);
+    await flushPromises();
+    expect(api.getPtzOperation).toHaveBeenCalledTimes(2);
+    expect(wrapper.get("[data-testid='advanced-record']").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("操作超过服务端截止时间");
+
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(api.getPtzOperation).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it("2022 精准定位只发送 Pan Tilt Zoom", async () => {
+    api.controlPtzPrecise.mockResolvedValueOnce({ code: 0, message: "", data: { operationId: "precise-op", status: "sent" } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-ptz']").trigger("click");
+    await wrapper.get("[data-testid='ptz-mode-precise']").trigger("click");
+    await wrapper.get("[data-testid='ptz-precise-apply']").trigger("click");
+    await flushPromises();
+    expect(api.controlPtzPrecise).toHaveBeenCalledWith(channel.id, { pan: 180, tilt: 0, zoom: 1 });
+    wrapper.unmount();
+  });
+
   it("3D 定位使用画面拖框换算后的真实坐标", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -632,6 +908,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='advanced-drag-zoom']").trigger("click");
     const layer = wrapper.get("[data-testid='drag-zoom-layer']");
     vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 1000, bottom: 1000, width: 1000, height: 1000, toJSON: () => ({})
+    } as DOMRect);
+    vi.spyOn(wrapper.get("[data-testid='play-window']").element, "getBoundingClientRect").mockReturnValue({
       x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, toJSON: () => ({})
     } as DOMRect);
     await layer.trigger("pointerdown", { clientX: 200, clientY: 100, pointerId: 1, button: 0 });
@@ -640,8 +919,393 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
     expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({
       action: "drag_zoom_in",
-      region: { length: 1920, width: 1080, midPointX: 960, midPointY: 480, lengthX: 960, lengthY: 480 }
+      region: { length: 800, width: 450, midPointX: 400, midPointY: 200, lengthX: 400, lengthY: 200 }
     }));
+    wrapper.unmount();
+  });
+
+  it("3D 缩小同样先拖框并携带实际画面坐标", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await wrapper.get("[data-testid='advanced-drag-zoom-out']").trigger("click");
+    const layer = wrapper.get("[data-testid='drag-zoom-layer']");
+    vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, toJSON: () => ({})
+    } as DOMRect);
+    await layer.trigger("pointerdown", { clientX: 200, clientY: 100, pointerId: 2, button: 0 });
+    await layer.trigger("pointermove", { clientX: 600, clientY: 300, pointerId: 2 });
+    await layer.trigger("pointerup", { clientX: 600, clientY: 300, pointerId: 2 });
+    await flushPromises();
+    expect(api.controlDevice).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({
+      action: "drag_zoom_out",
+      region: { length: 800, width: 450, midPointX: 400, midPointY: 200, lengthX: 400, lengthY: 200 }
+    }));
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 缺失时保持 unknown,且 pointercancel 不下发拖框命令", async () => {
+    api.getDeviceStatus.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { state: { freshness: "fresh" }, freshness: "fresh" }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("未知");
+    expect(wrapper.get("[data-testid='advanced-record-stop']").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-testid='advanced-guard-reset']").attributes("disabled")).toBeUndefined();
+
+    await wrapper.get("[data-testid='advanced-drag-zoom']").trigger("click");
+    const layer = wrapper.get("[data-testid='drag-zoom-layer']");
+    vi.spyOn(layer.element, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 800, bottom: 450, width: 800, height: 450, toJSON: () => ({})
+    } as DOMRect);
+    await layer.trigger("pointerdown", { clientX: 200, clientY: 100, pointerId: 4, button: 0 });
+    await layer.trigger("pointercancel", { clientX: 600, clientY: 300, pointerId: 4 });
+    await flushPromises();
+    expect(api.controlDevice).not.toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "drag_zoom_in" }));
+    wrapper.unmount();
+  });
+
+  it("录像与布防状态 unknown 时分别提供明确的正反动作", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+
+    expect(wrapper.get("[data-testid='advanced-record']").text()).toContain("开始设备端录制");
+    expect(wrapper.get("[data-testid='advanced-record-stop']").text()).toContain("请求停止设备录制");
+    expect(wrapper.get("[data-testid='advanced-guard']").text()).toContain("布防");
+    expect(wrapper.get("[data-testid='advanced-guard-reset']").text()).toContain("请求撤防");
+
+    await wrapper.get("[data-testid='advanced-record-stop']").trigger("click");
+    await flushPromises();
+    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "record_stop" }));
+
+    await wrapper.get("[data-testid='advanced-guard-reset']").trigger("click");
+    await flushPromises();
+    expect(api.controlDevice).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "guard_reset" }));
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 按 operation 等待慢应答后再读取设备事实", async () => {
+    vi.useFakeTimers();
+    api.getDeviceStatus
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown",
+          refreshOperationId: "device-status-op"
+        }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "on", guardState: "on", freshness: "fresh" },
+          freshness: "fresh"
+        }
+      });
+    api.getPtzOperation
+      .mockResolvedValueOnce(operationResponse("sent", "device-status-op", null))
+      .mockResolvedValueOnce(operationResponse("accepted", "device-status-op", null));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushPromises();
+    expect(api.getPtzOperation).toHaveBeenCalledTimes(2);
+    expect(api.getPtzOperation).toHaveBeenLastCalledWith(channel.id, "device-status-op");
+    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("设备录制中");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("已布防");
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 等待录像与报警 operation 全部终态后只读取一次合并事实", async () => {
+    vi.useFakeTimers();
+    api.getDeviceStatus
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown",
+          refreshOperationId: "record-status-op",
+          recordRefreshOperationId: "record-status-op",
+          alarmRefreshOperationId: "alarm-status-op",
+          refreshOperationIds: { record: "record-status-op", alarm: "alarm-status-op" }
+        }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "on", guardState: "alarm", freshness: "fresh" },
+          recordState: "on",
+          guardState: "alarm",
+          freshness: "fresh",
+          alarmResolution: {
+            status: "resolved",
+            source: "direct_parent",
+            targetCode: "A1",
+            state: "alarm",
+            freshness: "fresh",
+            candidates: [{ code: "A1", name: "门磁" }]
+          },
+          alarmFacts: [{ targetCode: "A1", guardState: "alarm", freshness: "fresh" }]
+        }
+      });
+    let alarmPolls = 0;
+    api.getPtzOperation.mockImplementation((_channelId: number, operationId: string) => {
+      if (operationId === "record-status-op") return Promise.resolve(operationResponse("accepted", operationId, null));
+      alarmPolls += 1;
+      return Promise.resolve(operationResponse(alarmPolls === 1 ? "sent" : "accepted", operationId, null));
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "record-status-op");
+    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "alarm-status-op");
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2000);
+    await flushPromises();
+    expect(api.getPtzOperation.mock.calls.filter(([, id]) => id === "record-status-op")).toHaveLength(1);
+    expect(api.getPtzOperation.mock.calls.filter(([, id]) => id === "alarm-status-op")).toHaveLength(2);
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
+
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    const factStatus = wrapper.get("[data-testid='advanced-fact-status']");
+    expect(factStatus.text()).toContain("设备录制中");
+    expect(factStatus.text()).toContain("ALARM 报警中");
+    expect(factStatus.text()).toContain("A1");
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 非终态 operation 到 deadline 后才读取合并事实", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
+    const alarmDeadline = "2026-07-25T03:00:01.500Z";
+    api.getDeviceStatus
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown",
+          refreshOperationIds: { record: "record-deadline-op", alarm: "alarm-deadline-op" }
+        }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "on", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown"
+        }
+      });
+    api.getPtzOperation.mockImplementation((_channelId: number, operationId: string) => {
+      if (operationId === "record-deadline-op") return Promise.resolve(operationResponse("accepted", operationId, null));
+      return Promise.resolve(operationResponse("sent", operationId, alarmDeadline));
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(499);
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus operation 查询卡住时在截止时间结束为未知并补读事实", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
+    let resolveHungOperation!: (value: ReturnType<typeof operationResponse>) => void;
+    api.getDeviceStatus
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown",
+          refreshOperationId: "hung-device-status-op"
+        }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown"
+        }
+      });
+    api.getPtzOperation.mockImplementation(() => new Promise<ReturnType<typeof operationResponse>>((resolve) => {
+      resolveHungOperation = resolve;
+    }));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "hung-device-status-op");
+
+    await vi.advanceTimersByTimeAsync(14000);
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+    expect(api.getDeviceStatus).toHaveBeenLastCalledWith(channel.id, false);
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("状态读取失败");
+    resolveHungOperation(operationResponse("accepted", "hung-device-status-op", null));
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 最终补读卡住时不会在 operation 截止后一直保持查询中", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-25T03:00:00.000Z"));
+    api.getDeviceStatus
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: {
+          state: { recordState: "unknown", guardState: "unknown", freshness: "unknown" },
+          freshness: "unknown",
+          refreshOperationId: "hung-final-read-op"
+        }
+      })
+      .mockImplementationOnce(() => new Promise(() => {}));
+    api.getPtzOperation.mockImplementation(() => new Promise(() => {}));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(15000);
+    await flushPromises();
+    expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
+
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).not.toContain("正在查询设备状态");
+    expect(wrapper.get(".advanced-status-refresh").attributes("disabled")).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await flushPromises();
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("状态读取失败");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("最终补读超时");
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 明示报警目标歧义与各报警事实且不封禁控制", async () => {
+    api.getDeviceStatus.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        state: { recordState: "off", guardState: "unknown", freshness: "unknown" },
+        recordState: "off",
+        guardState: "unknown",
+        freshness: "unknown",
+        completeness: "partial",
+        alarmResolution: {
+          status: "ambiguous",
+          source: "direct_parent",
+          targetCode: "",
+          state: "unknown",
+          freshness: "unknown",
+          candidates: [{ code: "A1", name: "门磁 1" }, { code: "A2", name: "门磁 2" }]
+        },
+        alarmFacts: [
+          { targetCode: "A1", guardState: "on", freshness: "fresh" },
+          { targetCode: "A2", guardState: "alarm", freshness: "fresh" }
+        ]
+      }
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+
+    const warning = wrapper.get("[data-testid='alarm-resolution-warning']");
+    expect(warning.text()).toContain("报警目标不明确");
+    expect(warning.text()).toContain("A1");
+    expect(warning.text()).toContain("A2");
+    const facts = wrapper.get("[data-testid='alarm-facts']");
+    expect(facts.text()).toContain("A1 已布防");
+    expect(facts.text()).toContain("A2 ALARM 报警中");
+    expect(wrapper.get("[data-testid='advanced-guard']").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get("[data-testid='advanced-guard-reset']").attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 明示没有可用的 134 报警输入", async () => {
+    api.getDeviceStatus.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        state: { recordState: "off", guardState: "unknown", freshness: "unknown" },
+        recordState: "off",
+        guardState: "unknown",
+        freshness: "unknown",
+        alarmResolution: {
+          status: "unavailable",
+          source: "",
+          targetCode: "",
+          state: "unknown",
+          freshness: "unknown",
+          candidates: []
+        },
+        alarmFacts: []
+      }
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("未找到可用的 134 报警输入");
+    expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("按注册父设备编码发送");
+    expect(wrapper.get("[data-testid='advanced-guard']").attributes("disabled")).toBeUndefined();
+    wrapper.unmount();
+  });
+
+  it("DeviceStatus 合法响应缺字段时不保留旧事实", async () => {
+    api.getDeviceStatus
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { state: { recordState: "on", guardState: "on", freshness: "fresh" }, freshness: "fresh" }
+      })
+      .mockResolvedValueOnce({
+        code: 0,
+        message: "",
+        data: { state: { freshness: "fresh" }, freshness: "fresh" }
+      });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("设备录制中");
+
+    await wrapper.get(".advanced-status-refresh").trigger("click");
+    await flushPromises();
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).not.toContain("设备录制中");
+    expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("未知");
     wrapper.unmount();
   });
 
@@ -707,7 +1371,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(dialog.get("[data-testid='cruise-save-speed']").attributes("min")).toBe("1");
     expect(dialog.get("[data-testid='cruise-save-dwell']").attributes("min")).toBe("1");
     expect(dialog.text()).toContain("无统一物理单位");
-    expect(dialog.text()).toContain("国标单位为秒");
+    expect(dialog.text()).toContain("单位为秒");
     expect(dialog.text()).not.toContain("0 表示");
     expect(dialog.text()).toContain("最长 68 分 15 秒");
     wrapper.unmount();
@@ -1089,36 +1753,6 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(managerTooltip.attributes("mouse-enter-delay")).toBe("80");
     expect(managerTooltip.attributes("content")).toContain("#1 预置位 1");
     expect(wrapper.get(".asset-manager-delete").attributes("title")).toBe("删除预置位");
-
-    wrapper.unmount();
-  });
-
-  it("仅保留国标编号 1 的雨刷开启和关闭命令", async () => {
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-
-    expect(wrapper.find(".linked-aux-grid").exists()).toBe(false);
-    expect(wrapper.text()).not.toContain("灯光");
-    expect(wrapper.text()).not.toContain("红外");
-    expect(wrapper.text()).not.toContain("加热");
-    expect(wrapper.get("[data-testid='wiper-control']").text()).toContain("国标辅助编号 1");
-    expect(wrapper.get("[data-testid='wiper-on']").classes()).toContain("btn-ghost");
-    expect(wrapper.get("[data-testid='wiper-off']").classes()).toContain("btn-ghost");
-    expect(wrapper.find("[data-testid='wiper-control'] .btn-primary").exists()).toBe(false);
-
-    await wrapper.get("[data-testid='wiper-on']").trigger("click");
-    await flushPromises();
-    expect(api.controlPtzWiper).toHaveBeenNthCalledWith(1, channel.id, { action: "on" });
-
-    await wrapper.get("[data-testid='wiper-off']").trigger("click");
-    await flushPromises();
-    expect(api.controlPtzWiper).toHaveBeenNthCalledWith(2, channel.id, { action: "off" });
-
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
-    expect(source).not.toContain("controlPtzAux");
-    expect(source).not.toContain("auxSwitches");
-    expect(source).not.toContain("auxiliaryIds");
-    expect(source).not.toContain(".capability-warn");
 
     wrapper.unmount();
   });
@@ -2097,39 +2731,4 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("切换设备后隔离新旧雨刷请求状态和结果提示", async () => {
-    let resolveOld!: (value: any) => void;
-    let resolveCurrent!: (value: any) => void;
-    api.controlPtzWiper
-      .mockReturnValueOnce(new Promise(resolve => { resolveOld = resolve; }))
-      .mockReturnValueOnce(new Promise(resolve => { resolveCurrent = resolve; }));
-    const successSpy = vi.spyOn(Message, "success");
-    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
-    await flushPromises();
-
-    await wrapper.get("[data-testid='wiper-on']").trigger("click");
-    expect(wrapper.get("[data-testid='wiper-off']").attributes("disabled")).toBeDefined();
-
-    const nextChannel = { ...channel, id: 2, channelId: "0411212756", name: "园区南门" };
-    await wrapper.setProps({ channel: nextChannel });
-    await flushPromises();
-    expect(wrapper.get("[data-testid='wiper-off']").attributes("disabled")).toBeUndefined();
-
-    await wrapper.get("[data-testid='wiper-off']").trigger("click");
-    expect(api.controlPtzWiper).toHaveBeenNthCalledWith(2, nextChannel.id, { action: "off" });
-    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeDefined();
-
-    resolveOld({ code: 0, message: "", data: { operationId: "old-wiper" } });
-    await flushPromises();
-    expect(successSpy).not.toHaveBeenCalled();
-    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeDefined();
-
-    resolveCurrent({ code: 0, message: "", data: { operationId: "current-wiper" } });
-    await flushPromises();
-    expect(successSpy).toHaveBeenCalledTimes(1);
-    expect(wrapper.get("[data-testid='wiper-on']").attributes("disabled")).toBeUndefined();
-
-    successSpy.mockRestore();
-    wrapper.unmount();
-  });
 });

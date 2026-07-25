@@ -74,6 +74,10 @@ const (
 	AlarmTypeStorageFull  AlarmType = 3
 	AlarmTypeDeviceFault  AlarmType = 4
 	AlarmTypeOther        AlarmType = 5
+	// AlarmTypeVideoMax is the highest video-alarm subtype defined by the
+	// 2022 profile. AlarmType values are method-specific, so the numeric
+	// aliases above remain useful for the device-alarm method.
+	AlarmTypeVideoMax AlarmType = 13
 )
 
 // DragZoomRegion uses the six integer fields defined by GB28181. Length and
@@ -93,19 +97,20 @@ type DragZoomCommand struct {
 }
 
 type advancedDeviceControl struct {
-	XMLName     xml.Name           `xml:"Control"`
-	CmdType     string             `xml:"CmdType"`
-	SN          int                `xml:"SN"`
-	DeviceID    string             `xml:"DeviceID"`
-	IFameCmd    string             `xml:"IFameCmd,omitempty"`
-	IFrameCmd   string             `xml:"IFrameCmd,omitempty"`
-	RecordCmd   string             `xml:"RecordCmd,omitempty"`
-	GuardCmd    string             `xml:"GuardCmd,omitempty"`
-	AlarmCmd    string             `xml:"AlarmCmd,omitempty"`
-	TeleBoot    string             `xml:"TeleBoot,omitempty"`
-	Info        *AlarmResetOptions `xml:"Info,omitempty"`
-	DragZoomIn  *DragZoomRegion    `xml:"DragZoomIn,omitempty"`
-	DragZoomOut *DragZoomRegion    `xml:"DragZoomOut,omitempty"`
+	XMLName      xml.Name           `xml:"Control"`
+	CmdType      string             `xml:"CmdType"`
+	SN           int                `xml:"SN"`
+	DeviceID     string             `xml:"DeviceID"`
+	IFameCmd     string             `xml:"IFameCmd,omitempty"`
+	IFrameCmd    string             `xml:"IFrameCmd,omitempty"`
+	RecordCmd    string             `xml:"RecordCmd,omitempty"`
+	StreamNumber *int               `xml:"StreamNumber,omitempty"`
+	GuardCmd     string             `xml:"GuardCmd,omitempty"`
+	AlarmCmd     string             `xml:"AlarmCmd,omitempty"`
+	TeleBoot     string             `xml:"TeleBoot,omitempty"`
+	Info         *AlarmResetOptions `xml:"Info,omitempty"`
+	DragZoomIn   *DragZoomRegion    `xml:"DragZoomIn,omitempty"`
+	DragZoomOut  *DragZoomRegion    `xml:"DragZoomOut,omitempty"`
 }
 
 func BuildIFrameControl(deviceID string, sn int, charset XMLCharset) ([]byte, error) {
@@ -191,7 +196,12 @@ func BuildRecordControlWithProfile(profile protocol.Profile, deviceID string, sn
 	if action != RecordStart && action != RecordStop {
 		return nil, fmt.Errorf("不支持的设备录像动作: %q", action)
 	}
-	return marshalAdvancedControlWithProfile(profile, deviceID, sn, advancedDeviceControl{RecordCmd: string(action)})
+	control := advancedDeviceControl{RecordCmd: string(action)}
+	if profile.Version == protocol.Version2022 {
+		streamNumber := 0
+		control.StreamNumber = &streamNumber
+	}
+	return marshalAdvancedControlWithProfile(profile, deviceID, sn, control)
 }
 
 // BuildGuardControlWithProfile builds a guard/unguard command.
@@ -208,6 +218,9 @@ func BuildGuardControlWithProfile(profile protocol.Profile, deviceID string, sn 
 func BuildAlarmResetControlWithProfile(profile protocol.Profile, deviceID string, sn int, options AlarmResetOptions) ([]byte, error) {
 	options.AlarmMethod = strings.TrimSpace(options.AlarmMethod)
 	options.AlarmType = strings.TrimSpace(options.AlarmType)
+	if profile.Version != protocol.Version2022 && (options.AlarmMethod != "" || options.AlarmType != "") {
+		return nil, fmt.Errorf("2016 AlarmCmd 不支持 AlarmMethod/AlarmType selectors")
+	}
 	if err := ValidateAlarmResetOptions(options); err != nil {
 		return nil, err
 	}
@@ -331,8 +344,8 @@ func ParseAlarmType(raw string) (AlarmType, error) {
 		return 0, nil
 	}
 	value, err := strconv.Atoi(raw)
-	if err != nil || value < int(AlarmTypeVideoLost) || value > int(AlarmTypeOther) {
-		return 0, fmt.Errorf("AlarmType %q 不在 1-5 标准范围内", raw)
+	if err != nil || value < int(AlarmTypeVideoLost) || value > int(AlarmTypeVideoMax) {
+		return 0, fmt.Errorf("AlarmType %q 不在 1-13 标准范围内", raw)
 	}
 	return AlarmType(value), nil
 }
@@ -340,13 +353,43 @@ func ParseAlarmType(raw string) (AlarmType, error) {
 // ValidateAlarmResetOptions validates both optional selectors before XML is
 // built. This keeps malformed alarm combinations out of persisted operations.
 func ValidateAlarmResetOptions(options AlarmResetOptions) error {
-	if _, err := ParseAlarmMethod(options.AlarmMethod); err != nil {
+	methods, err := ParseAlarmMethod(options.AlarmMethod)
+	if err != nil {
 		return err
 	}
-	if _, err := ParseAlarmType(options.AlarmType); err != nil {
+	alarmType, err := ParseAlarmType(options.AlarmType)
+	if err != nil {
 		return err
+	}
+	if options.AlarmType == "" {
+		return nil
+	}
+	if len(methods) == 0 {
+		return fmt.Errorf("AlarmType 必须与 AlarmMethod=2/5/6 一起提供")
+	}
+	for _, method := range methods {
+		min, max, ok := alarmTypeRange(method)
+		if !ok {
+			return fmt.Errorf("AlarmMethod=%d 不支持携带 AlarmType", method)
+		}
+		if alarmType < min || alarmType > max {
+			return fmt.Errorf("AlarmMethod=%d 的 AlarmType 必须在 %d-%d 范围内", method, min, max)
+		}
 	}
 	return nil
+}
+
+func alarmTypeRange(method AlarmMethod) (AlarmType, AlarmType, bool) {
+	switch method {
+	case AlarmMethodDevice:
+		return AlarmTypeVideoLost, AlarmTypeOther, true
+	case AlarmMethodVideo:
+		return AlarmTypeVideoLost, AlarmTypeVideoMax, true
+	case AlarmMethodDeviceFault:
+		return AlarmTypeVideoLost, AlarmTypeDeviceTamper, true
+	default:
+		return 0, 0, false
+	}
 }
 
 func validateDragZoomRegion(region DragZoomRegion) error {

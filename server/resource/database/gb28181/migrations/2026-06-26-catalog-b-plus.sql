@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS `gb_catalog_node` (
   `civil_code` varchar(6) DEFAULT NULL COMMENT '关联行政区(冗余加速过滤)',
   `device_id` bigint unsigned DEFAULT NULL COMMENT 'node_type=device 时引用',
   `channel_id` bigint unsigned DEFAULT NULL COMMENT 'node_type=channel 主挂载时引用',
+  `alarm_resource_id` bigint unsigned DEFAULT NULL COMMENT 'node_type=alarm_* 时引用',
   `source` varchar(16) NOT NULL DEFAULT 'catalog' COMMENT 'catalog/manual/auto',
   `sort_order` int NOT NULL DEFAULT 0 COMMENT '同级排序',
   `anomaly` tinyint(1) NOT NULL DEFAULT 0 COMMENT 'Q1:1=识别失败被兜底',
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS `gb_catalog_node` (
   KEY `idx_owner_dept_anomaly` (`owner_dept_id`, `anomaly`),
   KEY `idx_owner_dept_civil_code` (`owner_dept_id`, `civil_code`),
   KEY `idx_code` (`code`),
+  KEY `idx_catalog_alarm_resource` (`alarm_resource_id`),
   KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='国标多级目录树节点(思路 B+ 核心)';
 

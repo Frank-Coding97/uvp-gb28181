@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `gb_ptz_operation` (
   `profile_charset` varchar(16) DEFAULT NULL,
   `target_scope` varchar(16) DEFAULT NULL,
   `target_code` varchar(20) DEFAULT NULL,
+  `scope_key` varchar(64) DEFAULT NULL,
   `sn` int NOT NULL,
   `call_id` varchar(255) DEFAULT NULL,
   `cseq` varchar(64) DEFAULT NULL,
@@ -47,6 +48,8 @@ CREATE TABLE IF NOT EXISTS `gb_ptz_operation` (
   KEY `idx_ptz_operation_channel_time` (`channel_id`,`created_at`),
   KEY `idx_ptz_operation_channel_cmd_id` (`channel_id`,`cmd_type`,`id`),
   KEY `idx_ptz_operation_device_sn` (`device_id`,`sn`),
+  KEY `idx_ptz_operation_device_scope_time` (`device_id`,`scope_key`,`created_at`),
+  KEY `idx_ptz_operation_target` (`device_code`,`target_scope`,`target_code`,`status`),
   KEY `idx_ptz_operation_status_time` (`status`,`created_at`),
   KEY `idx_ptz_operation_status_next_attempt` (`status`,`next_attempt_at`),
   KEY `idx_ptz_operation_status_queue_deadline` (`status`,`queue_deadline_at`),
@@ -79,6 +82,7 @@ CREATE TABLE IF NOT EXISTS `gb_ptz_operation_attempt` (
 CREATE TABLE IF NOT EXISTS `gb_ptz_state` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `device_id` bigint unsigned NOT NULL,
+  `device_code` varchar(20) NOT NULL,
   `channel_id` bigint unsigned NOT NULL,
   `channel_code` varchar(20) NOT NULL,
   `pan` decimal(18,6) DEFAULT NULL,
@@ -146,6 +150,7 @@ CREATE TABLE IF NOT EXISTS `gb_ptz_cruise_track` (
   `name` varchar(255) DEFAULT NULL,
   `enabled` tinyint(1) DEFAULT NULL,
   `detail_json` text,
+  `last_operation_id` varchar(64) DEFAULT NULL,
   `raw_summary` text,
   `device_time` datetime(3) DEFAULT NULL,
   `created_at` datetime(3) NOT NULL,
@@ -168,11 +173,60 @@ CREATE TABLE IF NOT EXISTS `gb_device_control_state` (
   `source` varchar(32) NOT NULL DEFAULT 'device_status',
   `source_sn` int NOT NULL DEFAULT 0,
   `source_operation_id` varchar(64) DEFAULT NULL,
+  `source_operation_seq` bigint unsigned NOT NULL DEFAULT 0,
   `raw_summary` text,
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_control_state_target` (`target_scope`, `target_code`),
+  UNIQUE KEY `uk_control_state_target` (`device_id`, `target_scope`, `target_code`),
   KEY `idx_control_state_device_target` (`device_id`, `target_scope`, `target_code`),
   KEY `idx_control_state_channel` (`channel_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `gb_alarm_resource` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `owner_dept_id` bigint unsigned NOT NULL,
+  `device_id` bigint unsigned NOT NULL DEFAULT 0,
+  `device_code` varchar(20) NOT NULL,
+  `alarm_code` varchar(20) NOT NULL,
+  `resource_type` varchar(16) NOT NULL,
+  `type_code` varchar(3) NOT NULL,
+  `name` varchar(255) NOT NULL,
+  `raw_parent_ids` varchar(512) NOT NULL DEFAULT '',
+  `status` tinyint NOT NULL DEFAULT 0,
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  `deleted_at` datetime(3) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_alarm_resource_code` (`owner_dept_id`, `device_code`, `alarm_code`),
+  KEY `idx_alarm_resource_device` (`owner_dept_id`, `device_code`),
+  KEY `idx_alarm_resource_device_id` (`device_id`),
+  KEY `idx_alarm_resource_alarm_code` (`alarm_code`),
+  KEY `idx_alarm_resource_type` (`resource_type`),
+  KEY `idx_alarm_resource_deleted_at` (`deleted_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `gb_alarm_resource_parent` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `alarm_resource_id` bigint unsigned NOT NULL,
+  `parent_code` varchar(20) NOT NULL,
+  `created_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_alarm_resource_parent` (`alarm_resource_id`, `parent_code`),
+  KEY `idx_alarm_parent_resource` (`alarm_resource_id`),
+  KEY `idx_alarm_parent_code` (`parent_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE IF NOT EXISTS `gb_alarm_binding` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `device_id` bigint unsigned NOT NULL,
+  `channel_code` varchar(20) NOT NULL,
+  `alarm_resource_id` bigint unsigned NOT NULL,
+  `source` varchar(16) NOT NULL DEFAULT 'manual',
+  `created_at` datetime(3) NOT NULL,
+  `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_alarm_binding_channel` (`device_id`, `channel_code`),
+  KEY `idx_alarm_binding_device` (`device_id`),
+  KEY `idx_alarm_binding_resource` (`alarm_resource_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

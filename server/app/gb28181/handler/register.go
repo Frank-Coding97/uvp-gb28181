@@ -236,14 +236,6 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 }
 
-// buildOKWithExpires 构造 200 OK 并回带 Expires/Date
-func buildOKWithExpires(req *sip.Request, expires int) *sip.Response {
-	res := newRegisterResponse(req, 200, "OK", nil, defaultPlatformXGBVersion)
-	res.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
-	res.AppendHeader(sip.NewHeader("Date", time.Now().Format("2006-01-02T15:04:05")))
-	return res
-}
-
 const defaultPlatformXGBVersion = "3.0"
 
 // registerVersion carries both the value received from the wire and the

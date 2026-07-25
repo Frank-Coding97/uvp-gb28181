@@ -3,6 +3,7 @@ package controllers
 import (
 	"fmt"
 	"net"
+	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -126,12 +127,14 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 			IP: device.IP, Port: device.Port, Transport: device.Transport,
 			DeviceOnline:  device.Status == gbmodels.DeviceStatusOnline,
 			ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline,
+			Profile:       profileForDevice(&device),
 		}
+		profile := target.Profile
 		op, executeErr := service.Execute(c, target, ptz.Command{
 			CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
-			Payload: map[string]interface{}{"action": action, "speed": request.Speed},
+			Profile: profile, Payload: map[string]interface{}{"action": action, "speed": request.Speed},
 			Build: func(operationSN int) ([]byte, error) {
-				return manscdp.BuildPTZControl(channel.ChannelID, operationSN, manscdp.PTZCommand{Action: action, Speed: request.Speed})
+				return manscdp.BuildPTZControlWithProfile(profile, channel.ChannelID, operationSN, manscdp.PTZCommand{Action: action, Speed: request.Speed})
 			},
 		})
 		if executeErr != nil {
@@ -144,7 +147,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 		}})
 		return
 	}
-	body, err := manscdp.BuildPTZControl(channel.ChannelID, sn, manscdp.PTZCommand{Action: action, Speed: request.Speed})
+	body, err := manscdp.BuildPTZControlWithProfile(profileForDevice(&device), channel.ChannelID, sn, manscdp.PTZCommand{Action: action, Speed: request.Speed})
 	if err != nil {
 		dc.FailAndAbort(c, "构造云台控制命令失败", err)
 		return
@@ -217,16 +220,17 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 	}
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
-		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline}
+		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, Profile: profileForDevice(&device)}
 	key := request.IdempotencyKey
 	if key == "" {
 		key = c.GetHeader("Idempotency-Key")
 	}
 	op, executeErr := service.Execute(c, target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: string(action), IdempotencyKey: key,
+		Profile: target.Profile,
 		Payload: map[string]interface{}{"action": action, "id": id, "speed": request.Speed},
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildExtendedPTZControl(channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: action, ID: id, Speed: request.Speed})
+			return manscdp.BuildExtendedPTZControlWithProfile(target.Profile, channel.ChannelID, sn, manscdp.PTZExtendedCommand{Action: action, ID: id, Speed: request.Speed})
 		},
 	})
 	if executeErr != nil {
@@ -279,12 +283,22 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 	}
 	target := ptz.Target{DeviceID: uint(device.ID), DeviceCode: device.DeviceID, ChannelID: uint(channel.ID), ChannelCode: channel.ChannelID,
 		IP: device.IP, Port: device.Port, Transport: device.Transport, DeviceOnline: device.Status == gbmodels.DeviceStatusOnline,
-		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline}
+		ChannelOnline: channel.Status == gbmodels.ChannelStatusOnline, Profile: profileForDevice(&device)}
+	profile := target.Profile
+	if !profile.SupportsPrecisePTZ() {
+		c.AbortWithStatusJSON(http.StatusUnprocessableEntity, gin.H{
+			"code":    1,
+			"message": "当前有效国标协议不支持标准精准云台控制",
+			"data":    gin.H{"errorCode": "protocol-not-applicable"},
+		})
+		return
+	}
 	op, executeErr := service.Execute(c, target, ptz.Command{
-		CmdType: manscdp.CmdPTZPreciseCtrl, Action: "precise", IdempotencyKey: key,
+		CmdType: manscdp.CmdDeviceControl, Action: "precise", IdempotencyKey: key, Profile: profile,
 		Payload: map[string]interface{}{"pan": request.Pan, "tilt": request.Tilt, "zoom": request.Zoom, "focus": request.Focus, "iris": request.Iris, "speed": request.Speed},
 		Build: func(sn int) ([]byte, error) {
-			return manscdp.BuildPTZPreciseControl(channel.ChannelID, sn, manscdp.PTZPreciseControl{Pan: request.Pan, Tilt: request.Tilt, Zoom: request.Zoom, Focus: request.Focus, Iris: request.Iris, Speed: request.Speed})
+			command := manscdp.PTZPreciseControl{Pan: request.Pan, Tilt: request.Tilt, Zoom: request.Zoom, Focus: request.Focus, Iris: request.Iris, Speed: request.Speed}
+			return manscdp.BuildPTZPreciseDeviceControlWithProfile(profile, channel.ChannelID, sn, command)
 		},
 	})
 	if executeErr != nil {

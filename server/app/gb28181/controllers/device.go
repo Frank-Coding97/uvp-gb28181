@@ -1,13 +1,17 @@
 package controllers
 
 import (
+	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
@@ -91,10 +95,11 @@ func (dc *DeviceController) GetByDeviceID(c *gin.Context) {
 func (dc *DeviceController) Update(c *gin.Context) {
 	deviceID := c.Param("deviceId")
 	var body struct {
-		Alias        *string `json:"alias"`
-		Manufacturer *string `json:"manufacturer"`
-		Model        *string `json:"model"`
-		Firmware     *string `json:"firmware"`
+		Alias            *string `json:"alias"`
+		Manufacturer     *string `json:"manufacturer"`
+		Model            *string `json:"model"`
+		Firmware         *string `json:"firmware"`
+		ProtocolOverride *string `json:"protocolOverride"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
@@ -130,6 +135,27 @@ func (dc *DeviceController) Update(c *gin.Context) {
 	}
 	if body.Firmware != nil {
 		updates["firmware"] = *body.Firmware
+	}
+	if body.ProtocolOverride != nil {
+		override := strings.ToLower(strings.TrimSpace(*body.ProtocolOverride))
+		if override != gbmodels.ProtocolOverrideAuto && override != gbmodels.ProtocolVersion2016 && override != gbmodels.ProtocolVersion2022 {
+			app.Response.Fail(c, "协议版本覆盖只能是 auto、2016 或 2022", http.StatusUnprocessableEntity)
+			return
+		}
+		history := ""
+		if device.EffectiveVersionSource == gbmodels.ProtocolVersionSourceRegister || device.EffectiveVersionSource == gbmodels.ProtocolVersionSourceHistory {
+			history = device.EffectiveVersion
+		}
+		resolution := protocol.Resolve(protocol.ResolveInput{
+			Override: override,
+			Register: device.ReportedVersion,
+			History:  history,
+		})
+		now := time.Now()
+		updates["protocol_override"] = override
+		updates["effective_version"] = string(resolution.Profile.Version)
+		updates["effective_version_source"] = string(resolution.Source)
+		updates["effective_version_at"] = &now
 	}
 
 	if len(updates) == 0 {

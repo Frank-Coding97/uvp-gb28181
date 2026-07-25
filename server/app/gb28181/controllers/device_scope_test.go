@@ -1,6 +1,7 @@
 package controllers_test
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -62,6 +63,7 @@ func newScopedDeviceRouter(t *testing.T, userID uint) (*gin.Engine, *gorm.DB) {
 	r.Use(gin.Recovery(), withClaims(userID))
 	r.GET("/api/gb28181/device/:deviceId", dc.GetByDeviceID)
 	r.GET("/api/gb28181/device/:deviceId/channels", dc.ListChannels)
+	r.PATCH("/api/gb28181/device/:deviceId", dc.Update)
 	r.POST("/api/gb28181/play/:deviceId/:channelId", pc.Start)
 	r.DELETE("/api/gb28181/play/:streamId", pc.Stop)
 	return r, db
@@ -123,6 +125,27 @@ func TestDeviceController_ListChannels_FiltersOwnerDept(t *testing.T) {
 	resp := unmarshal(t, w)
 	assert.EqualValues(t, 1, resp["code"])
 	assert.Equal(t, "设备不存在", resp["message"])
+}
+
+func TestDeviceController_UpdateAutoDefaultsTo2016AfterOverrideWithoutReportedVersion(t *testing.T) {
+	r, db := newScopedDeviceRouter(t, 100)
+	const deviceID = "34020000002000000010"
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", deviceID).Updates(map[string]interface{}{
+		"reported_version": "", "protocol_override": gbmodels.ProtocolVersion2022,
+		"effective_version": gbmodels.ProtocolVersion2022, "effective_version_source": gbmodels.ProtocolVersionSourceOverride,
+	}).Error)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPatch, "/api/gb28181/device/"+deviceID, bytes.NewBufferString(`{"protocolOverride":"auto"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var stored gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", deviceID).First(&stored).Error)
+	require.Equal(t, gbmodels.ProtocolOverrideAuto, stored.ProtocolOverride)
+	require.Equal(t, gbmodels.ProtocolVersion2016, stored.EffectiveVersion)
+	require.Equal(t, gbmodels.ProtocolVersionSourceDefault, stored.EffectiveVersionSource)
 }
 
 func TestPlayController_FiltersOwnerDept(t *testing.T) {

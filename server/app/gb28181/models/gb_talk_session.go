@@ -4,6 +4,17 @@ import "time"
 
 type TalkSessionState string
 
+type TalkSessionMode string
+
+const (
+	TalkSessionModeBroadcast TalkSessionMode = "broadcast"
+	TalkSessionModeTalk      TalkSessionMode = "talk"
+)
+
+func (m TalkSessionMode) Valid() bool {
+	return m == TalkSessionModeBroadcast || m == TalkSessionModeTalk
+}
+
 const (
 	TalkSessionReserved   TalkSessionState = "reserved"
 	TalkSessionPublishing TalkSessionState = "publishing"
@@ -29,6 +40,7 @@ type GbTalkSession struct {
 	DeviceID         string           `gorm:"column:device_id;size:20;not null" json:"deviceId"`
 	ActorID          uint             `gorm:"column:actor_id;not null;default:0" json:"actorId"`
 	ActorDeptID      uint             `gorm:"column:actor_dept_id;not null;default:0" json:"actorDeptId"`
+	Mode             TalkSessionMode  `gorm:"column:mode;size:16;not null;default:talk" json:"mode"`
 	NodeID           int64            `gorm:"column:node_id;not null;default:0;index:idx_talk_session_source,priority:1;index:idx_talk_session_recv,priority:1" json:"nodeId"`
 	App              string           `gorm:"column:app;size:64;not null;default:talk;index:idx_talk_session_source,priority:2" json:"app"`
 	SourceStream     string           `gorm:"column:source_stream;size:128;not null;index:idx_talk_session_source,priority:3" json:"sourceStream"`

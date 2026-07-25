@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -20,8 +19,8 @@ import (
 )
 
 var (
-	ErrTalkCapabilityUnknown    = errors.New("设备未上报对讲能力")
-	ErrTalkUnsupported          = errors.New("设备明确不支持对讲")
+	ErrInvalidTalkSessionMode   = errors.New("对讲模式不合法")
+	ErrBroadcastNotImplemented  = errors.New("标准语音广播尚未实现")
 	ErrTalkTargetOffline        = errors.New("设备或通道离线")
 	ErrTalkNodeUnavailable      = errors.New("无可用对讲媒体节点")
 	ErrSecurePublishUnavailable = errors.New("媒体节点未提供安全发布端口")
@@ -72,19 +71,21 @@ type CreateRequest struct {
 	Device      *models.GbDevice
 	ActorID     uint
 	ActorDeptID uint
+	Mode        models.TalkSessionMode
 }
 
 type CreateResult struct {
-	SessionID    string    `json:"sessionId"`
-	State        string    `json:"state"`
-	NodeID       int64     `json:"nodeId"`
-	NodeName     string    `json:"nodeName"`
-	SourceStream string    `json:"sourceStream"`
-	RecvStream   string    `json:"recvStream"`
-	SSRC         string    `json:"ssrc"`
-	PublishURL   string    `json:"publishUrl"`
-	PublishToken string    `json:"publishToken"`
-	ExpiresAt    time.Time `json:"expiresAt"`
+	SessionID    string                 `json:"sessionId"`
+	Mode         models.TalkSessionMode `json:"mode"`
+	State        string                 `json:"state"`
+	NodeID       int64                  `json:"nodeId"`
+	NodeName     string                 `json:"nodeName"`
+	SourceStream string                 `json:"sourceStream"`
+	RecvStream   string                 `json:"recvStream"`
+	SSRC         string                 `json:"ssrc"`
+	PublishURL   string                 `json:"publishUrl"`
+	PublishToken string                 `json:"publishToken"`
+	ExpiresAt    time.Time              `json:"expiresAt"`
 }
 
 type PublishAuthorization struct {
@@ -106,11 +107,14 @@ func NewService(repo TalkRepo, nodes TalkNodeRegistry, locations TalkLocationSto
 }
 
 func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateResult, error) {
+	if !request.Mode.Valid() {
+		return nil, ErrInvalidTalkSessionMode
+	}
+	if request.Mode == models.TalkSessionModeBroadcast {
+		return nil, ErrBroadcastNotImplemented
+	}
 	if request.Channel == nil || request.Device == nil || request.Channel.Status != models.ChannelStatusOnline || request.Device.Status != models.DeviceStatusOnline {
 		return nil, ErrTalkTargetOffline
-	}
-	if err := requireTalkCapability(request.Channel.Capabilities); err != nil {
-		return nil, err
 	}
 	sessionID := uuid.NewString()
 	mediaNode, err := s.selectNode(ctx, request.Channel, sessionID)
@@ -139,6 +143,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	session := &models.GbTalkSession{
 		SessionID: sessionID, ChannelID: request.Channel.ID, DeviceID: request.Device.DeviceID,
 		ActorID: request.ActorID, ActorDeptID: request.ActorDeptID,
+		Mode:   request.Mode,
 		NodeID: mediaNode.ID, App: "talk", SourceStream: sourceStream, RecvStream: recvStream, SSRC: ssrc,
 		State: models.TalkSessionReserved, ExpiresAt: expiresAt,
 	}
@@ -148,7 +153,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	query := url.Values{"app": {"talk"}, "stream": {sourceStream}, "token": {token}}
 	publishURL := fmt.Sprintf("https://%s:%d/index/api/whip?%s", mediaNode.Host, config.HTTPSPort, query.Encode())
 	return &CreateResult{
-		SessionID: sessionID, State: string(session.State), NodeID: mediaNode.ID, NodeName: mediaNode.Name,
+		SessionID: sessionID, Mode: session.Mode, State: string(session.State), NodeID: mediaNode.ID, NodeName: mediaNode.Name,
 		SourceStream: sourceStream, RecvStream: recvStream, SSRC: ssrc,
 		PublishURL: publishURL, PublishToken: token, ExpiresAt: expiresAt,
 	}, nil
@@ -243,31 +248,6 @@ func (s *Service) selectNode(ctx context.Context, channel *models.GbChannel, ses
 		return nil, fmt.Errorf("%w: %v", ErrTalkNodeUnavailable, err)
 	}
 	return mediaNode, nil
-}
-
-func requireTalkCapability(raw *string) error {
-	if raw == nil || strings.TrimSpace(*raw) == "" {
-		return ErrTalkCapabilityUnknown
-	}
-	var values map[string]json.RawMessage
-	if json.Unmarshal([]byte(*raw), &values) != nil {
-		return ErrTalkCapabilityUnknown
-	}
-	for _, key := range []string{"talk", "voice_talk", "audio_talk"} {
-		value, exists := values[key]
-		if !exists {
-			continue
-		}
-		var supported bool
-		if json.Unmarshal(value, &supported) != nil {
-			return ErrTalkCapabilityUnknown
-		}
-		if supported {
-			return nil
-		}
-		return ErrTalkUnsupported
-	}
-	return ErrTalkCapabilityUnknown
 }
 
 func randomToken() (string, error) {

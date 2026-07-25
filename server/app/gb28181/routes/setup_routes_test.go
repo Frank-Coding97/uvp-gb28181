@@ -36,7 +36,6 @@ func TestRegisterRoutes_IncludesPTZResourceEndpoints(t *testing.T) {
 	for _, route := range []string{
 		"DELETE /api/gb28181/device-mgmt/channel/:id/ptz/presets/:presetId",
 		"POST /api/gb28181/device-mgmt/channel/:id/ptz/cruise",
-		"POST /api/gb28181/device-mgmt/channel/:id/ptz/wiper",
 		"GET /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
 		"PATCH /api/gb28181/device-mgmt/channel/:id/ptz/home-position",
 	} {

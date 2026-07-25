@@ -49,12 +49,12 @@ func TestAdvancedControlBuilders(t *testing.T) {
 			},
 		},
 		{
-			name: "reset alarm with selectors",
+			name: "reset alarm without selectors",
 			build: func() ([]byte, error) {
-				return BuildAlarmResetControl("C", 5, AlarmResetOptions{AlarmMethod: "4", AlarmType: "1"}, XMLCharsetGB2312)
+				return BuildAlarmResetControl("C", 5, AlarmResetOptions{}, XMLCharsetGB2312)
 			},
 			check: func(t *testing.T, control decodedAdvancedControl) {
-				if control.AlarmCmd != "ResetAlarm" || control.Info == nil || control.Info.AlarmMethod != "4" || control.Info.AlarmType != "1" {
+				if control.AlarmCmd != "ResetAlarm" || control.Info != nil {
 					t.Fatalf("unexpected alarm control: %+v", control)
 				}
 			},
@@ -130,6 +130,13 @@ func TestAdvancedControlBuilders(t *testing.T) {
 			}
 			tt.check(t, control)
 		})
+	}
+}
+
+func TestLegacyAlarmResetBuilderRejectsSelectors(t *testing.T) {
+	body, err := BuildAlarmResetControl("C", 5, AlarmResetOptions{AlarmMethod: "4", AlarmType: "1"}, XMLCharsetGB2312)
+	if err == nil || body != nil {
+		t.Fatalf("2016 charset-only builder must reject selectors, body=%q err=%v", body, err)
 	}
 }
 
