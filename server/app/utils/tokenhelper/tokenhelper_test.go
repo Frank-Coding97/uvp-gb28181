@@ -41,6 +41,15 @@ func (m *MockCacheInterf) Del(ctx context.Context, keys ...string) error {
 	return nil
 }
 
+func (m *MockCacheInterf) GetDel(ctx context.Context, key string) (string, error) {
+	value, exists := m.storage[key]
+	if !exists {
+		return "", app.ErrKeyNotFound
+	}
+	delete(m.storage, key)
+	return value, nil
+}
+
 func (m *MockCacheInterf) Exists(ctx context.Context, keys ...string) (int64, error) {
 	count := int64(0)
 	for _, key := range keys {

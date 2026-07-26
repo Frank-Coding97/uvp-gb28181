@@ -3,6 +3,7 @@ package cachehelper
 import (
 	"context"
 	"errors"
+	"strings"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"time"
 
@@ -54,6 +55,52 @@ func (r *redisHelper) Get(ctx context.Context, key string) (string, error) {
 // Del 删除键
 func (r *redisHelper) Del(ctx context.Context, keys ...string) error {
 	return r.client.Del(ctx, keys...).Err()
+}
+
+// getDelScript 是 GETDEL 的 Lua 等价实现，用于 Redis < 6.2 的兜底。
+// 单个 Lua 脚本在 Redis 中原子执行，与原生 GETDEL 语义一致。
+var getDelScript = redis.NewScript(`
+local v = redis.call('GET', KEYS[1])
+if v then
+  redis.call('DEL', KEYS[1])
+end
+return v
+`)
+
+// GetDel 原子地取出并删除键
+// 键不存在时返回 ("", app.ErrKeyNotFound)
+//
+// 优先用原生 GETDEL（Redis 6.2+）；服务端版本过低时自动退回等价的 Lua 脚本。
+// 二者都是单命令原子操作，因此并发调用只有一个调用方能拿到值 —— 这是一次性
+// 凭据（扫码接入 token）的安全前提，Get + Del 两步做不到。
+func (r *redisHelper) GetDel(ctx context.Context, key string) (string, error) {
+	val, err := r.client.GetDel(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", app.ErrKeyNotFound
+	}
+	if err != nil && isUnknownCommand(err) {
+		// Redis < 6.2 不认识 GETDEL，退回 Lua
+		return r.getDelViaScript(ctx, key)
+	}
+	return val, err
+}
+
+// getDelViaScript 用 Lua 脚本实现 GETDEL，供旧版 Redis 使用
+func (r *redisHelper) getDelViaScript(ctx context.Context, key string) (string, error) {
+	val, err := getDelScript.Run(ctx, r.client, []string{key}).Text()
+	if errors.Is(err, redis.Nil) {
+		return "", app.ErrKeyNotFound
+	}
+	return val, err
+}
+
+// isUnknownCommand 判断错误是否为 Redis "unknown command"（服务端版本过低）
+func isUnknownCommand(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "UNKNOWN COMMAND")
 }
 
 // Exists 检查键是否存在
