@@ -44,6 +44,8 @@ func InitRoutes(engine *gin.Engine) {
 
 	// GB28181 ZLMediaKit Hook 回调端点(engine 根,无 /api 前缀,无鉴权)
 	gbroutes.RegisterHookRoutes(engine)
+	// 扫码接入引导页(普通扫码 App 打开二维码 URL 时看到的页面)
+	gbroutes.RegisterQRLandingRoute(engine)
 
 	//	调试模式下注册Swagger路由、查看内存缓存项
 	if app.ConfigYml.GetBool("server.appdebug") {
@@ -81,6 +83,8 @@ func InitRoutes(engine *gin.Engine) {
 		public.GET("/captcha/verify", authControllers.GetVerifyImgString)
 		// 获取配置信息
 		public.GET("/config/get", configControllers.GetConfig)
+		// GB28181 免鉴权端点(设备端无登录态,靠一次性 token 鉴别)
+		gbroutes.RegisterPublicRoutes(public)
 		// 受保护的路由
 		protected := api.Group("")
 		protected.Use(middleware.JWTAuthMiddleware())

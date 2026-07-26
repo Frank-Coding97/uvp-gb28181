@@ -224,6 +224,9 @@ func startControlPlane(cfg gbconfig.Config) {
 	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
 		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
 	))
+	gbroutes.SetQRController(gbcontrollers.NewConfiguredQRController(
+		app.DB(), app.Cache, cfg.SIP.Transport,
+	))
 
 	metricsAgg = metrics.NewAggregator()
 	metricsCleanupStop = make(chan struct{})

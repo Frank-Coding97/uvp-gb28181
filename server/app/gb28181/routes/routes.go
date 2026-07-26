@@ -49,6 +49,9 @@ var platformController = gbcontrollers.NewPlatformController()
 
 var setupController *gbcontrollers.SetupController
 
+// qrController 扫码接入二维码(token 生成 + 免鉴权兑换),由 bootstrap 后置注入
+var qrController = gbcontrollers.NewQRController()
+
 // traceController 由 bootstrap 按 Trace 开关后置注入。
 var traceController atomic.Pointer[gbcontrollers.TraceController]
 
@@ -76,6 +79,8 @@ func SetSetupController(controller *gbcontrollers.SetupController) { setupContro
 func SetPlatformController(controller *gbcontrollers.PlatformController) {
 	platformController = controller
 }
+
+func SetQRController(controller *gbcontrollers.QRController) { qrController = controller }
 
 func SetTraceController(ctrl *gbcontrollers.TraceController) {
 	if ctrl == nil {
@@ -252,6 +257,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			setup.PUT("/config", setupRoute(func(controller *gbcontrollers.SetupController, c *gin.Context) { controller.SaveConfig(c) }))
 			setup.POST("/skip", setupRoute(func(controller *gbcontrollers.SetupController, c *gin.Context) { controller.Skip(c) }))
 		}
+		// 扫码接入:生成一次性 token(兑换端点在 RegisterPublicRoutes,免鉴权)
+		gb.POST("/sip/qr/token", func(c *gin.Context) { qrController.GenerateToken(c) })
 		traceGroup := gb.Group("/sip-traces")
 		{
 			traceGroup.GET("/health", func(c *gin.Context) { currentTraceController().Health(c) })
@@ -408,4 +415,21 @@ func RegisterHookRoutes(engine *gin.Engine) {
 		hook.POST("/on_play", hookController.OnPlay)
 		hook.POST("/on_record_mp4", hookController.OnRecordMP4)
 	}
+}
+
+// RegisterPublicRoutes 注册免鉴权的 GB28181 端点到 /api 下的 public 组.
+//
+// Gin 的中间件按**组**挂载而非路径前缀匹配 —— public 与 protected 同为
+// api.Group("") 的子组,所以这里既能保留 /api/gb28181/... 路径,又不经过
+// JWT / Casbin.设备端没有登录态,一次性 token 是唯一凭据.
+func RegisterPublicRoutes(public *gin.RouterGroup) {
+	public.POST("/gb28181/sip/qr/exchange", func(c *gin.Context) { qrController.Exchange(c) })
+}
+
+// RegisterQRLandingRoute 注册扫码引导页到 engine 根(无 /api 前缀,无鉴权).
+//
+// 二维码把 token 放在 fragment(#t=...),fragment 不会发给服务端,所以通用扫码
+// App 打开这个 URL 只会看到一句引导文案,既不会消费 token 也拿不到密码.
+func RegisterQRLandingRoute(engine *gin.Engine) {
+	engine.GET("/gb28181/qr", func(c *gin.Context) { qrController.Landing(c) })
 }
