@@ -698,6 +698,18 @@ export const saveSipSetupConfig = (data: SaveSipConfigPayload) =>
 export const skipSipSetup = () =>
   http.request<BaseResult<{ acknowledged: boolean }>>("post", baseUrlApi("gb28181/sip/setup/skip"));
 
+// ===== 扫码回填 SIP 接入信息 =====
+
+export interface SipQrToken {
+  token: string;
+  // 相对秒数而非绝对时间戳:前端以响应到达时刻起算倒计时,免受客户端时钟偏移影响.
+  expiresInSeconds: number;
+}
+
+/** 生成一次性接入 token(权限点 gb28181:sip:config:view) */
+export const generateSipQrToken = () =>
+  http.request<BaseResult<SipQrToken>>("post", baseUrlApi("gb28181/sip/qr/token"));
+
 // ===== SIP 信令看板 =====
 
 export const HEALTH_EMPTY = -1; // 后端 sentinel,前端识别后渲染 "--"

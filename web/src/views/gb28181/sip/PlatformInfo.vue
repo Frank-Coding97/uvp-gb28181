@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { BookOpen, Check, Copy, Eye, EyeOff, RefreshCw, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
+import { BookOpen, Check, Copy, Eye, EyeOff, QrCode, RefreshCw, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
 import {
     fetchSipPlatformInfo,
     fetchSipSetupStatus,
@@ -10,14 +10,18 @@ import {
 } from "@/api/gb28181";
 import { useUserStoreHook } from "@/store/modules/user";
 import SipSetupModal from "@/layout/components/SipSetupModal.vue";
+import QrProvisionModal from "./QrProvisionModal.vue";
 import { mayEditSipConfig, runtimeColor, runtimeLabel } from "./platformViewState";
+import { mayGenerateQr } from "./qrProvisionState";
 
 const loading = ref(false);
 const wizardVisible = ref(false);
+const qrVisible = ref(false);
 const status = ref<SipSetupStatus | null>(null);
 const platform = ref<SipPlatformInfo | null>(null);
 const permissions = computed(() => useUserStoreHook().account.permissions);
 const canEdit = computed(() => mayEditSipConfig(permissions.value));
+const canGenerateQr = computed(() => mayGenerateQr(permissions.value));
 const copiedKey = ref<string>("");
 // 密码默认遮罩,用户点眼睛才展开明文.
 // 复制按钮无论遮罩 / 明文都直接复制真值,避免"要先展开才能复制"的多余步骤.
@@ -145,6 +149,11 @@ onMounted(refresh);
                         <a-button v-if="config" @click="copyAll">
                             <template #icon><Copy :size="15" /></template>
                             复制全部
+                        </a-button>
+                        <!-- SIP 未配置时后端拿不到六元组,不发码 -->
+                        <a-button v-if="canGenerateQr && config" @click="qrVisible = true">
+                            <template #icon><QrCode :size="15" /></template>
+                            扫码接入
                         </a-button>
                         <a-tooltip content="刷新状态">
                             <a-button shape="circle" :loading="loading" @click="refresh">
@@ -327,6 +336,7 @@ onMounted(refresh);
             @close="wizardVisible = false"
             @saved="refresh"
         />
+        <QrProvisionModal v-model:visible="qrVisible" />
     </div>
 </template>
 
