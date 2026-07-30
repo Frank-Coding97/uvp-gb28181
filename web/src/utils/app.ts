@@ -51,9 +51,7 @@ export function handleUrl(url: string, baseUrl = '') {
         return url
     }
 
-    if (!baseUrl) {
-        baseUrl = import.meta.env.VITE_APP_BASE_URL
-    }
+    baseUrl = baseUrl || import.meta.env.VITE_APP_BASE_URL || "";
 
     // 规范化基础URL和路径
     const normalizedBase = baseUrl.replace(/\/$/, '');
