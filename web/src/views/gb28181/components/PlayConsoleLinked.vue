@@ -152,14 +152,15 @@ function isCurrentChannelContext(channelId: number, token: number, contextKey: s
 
 /* ────────────────────────── Tab 切换 ────────────────────────── */
 
-type TabKey = "stream" | "ptz" | "probe" | "advanced";
+/* "流信息"tab 已并入"视频探针":概览卡承担全部实时监视信息(媒体节点/流 ID/视频音频参数/
+ * 数据速率/丢包/当前观看)。删掉独立 tab 让侧栏窄一档、层级也更清爽。 */
+type TabKey = "ptz" | "probe" | "advanced";
 const activeTab = ref<TabKey>("ptz");
 const sideCollapsed = ref(false);
 
 const tabs: Array<{ key: TabKey; label: string; icon: any; description: string }> = [
-    { key: "stream", label: "流信息", icon: Signal, description: "实时媒体与会话指标" },
     { key: "ptz", label: "云台控制", icon: Compass, description: "GB28181-2022 全能力" },
-    { key: "probe", label: "视频探针", icon: Activity, description: "逐帧采样 · 时间戳" },
+    { key: "probe", label: "视频探针", icon: Activity, description: "实时监视 + 逐帧采样" },
     { key: "advanced", label: "高级", icon: Settings, description: "关键帧 · 布防 · 重启" },
 ];
 
@@ -1154,7 +1155,8 @@ const liveMetrics = ref<{ bitrate: number; videoLoss: number | null; audioLoss: 
 const readerCount = ref(0);
 const monitorSnapshot = ref<StreamMonitorSnapshot | null>(null);
 const monitorState = ref<MonitorState>("idle");
-const monitorVideoTrack = computed(() => monitorSnapshot.value?.tracks.find((track) => track.kind === "video"));
+/* monitorVideoTrack 曾在 stream tab 展示"视频帧数",tab 删除后失去引用;
+ * monitorAudioTrack 探针概览卡音频栏"声道"仍在使用,保留。 */
 const monitorAudioTrack = computed(() => monitorSnapshot.value?.tracks.find((track) => track.kind === "audio"));
 const totalReaderCount = computed(() => monitorSnapshot.value?.network.totalReaderCount ?? 0);
 
@@ -1167,12 +1169,6 @@ function formatBytes(value: number | undefined, suffix = "") {
 
 const monitorBytesSpeedText = computed(() => formatBytes(monitorSnapshot.value?.network.bytesSpeed, "/s"));
 const monitorTotalBytesText = computed(() => formatBytes(monitorSnapshot.value?.network.totalBytes));
-const recordingText = computed(() => {
-    const recording = monitorSnapshot.value?.recording;
-    if (!recording) return "—";
-    const formats = [recording.mp4 ? "MP4" : "", recording.hls ? "HLS" : ""].filter(Boolean);
-    return formats.length ? formats.join(" / ") : "未录制";
-});
 
 type ProbeState = "idle" | "sampling" | "complete";
 const probeState = ref<ProbeState>("idle");
@@ -1194,6 +1190,7 @@ const probeButtonText = computed(() => {
     return "开始 3 秒检测";
 });
 const probeResult = computed(() => probeSnapshot.value);
+
 const probeTimeline = computed(() => (probeResult.value?.timeline || []).map((frame) => ({
     type: frame.trackType,
     keyFrame: frame.keyFrame,
@@ -2726,16 +2723,6 @@ onBeforeUnmount(() => {
 
                 <!-- 双区联动详情:所有 Tab 共用下方详情区，保持结构与高度稳定 -->
                 <div v-if="phase === 'playing'" class="stream-info-bar linked-info-bar">
-                    <div v-show="activeTab === 'stream'" class="linked-detail" data-testid="linked-detail-stream">
-                        <p class="linked-detail-hint">2 秒刷新 · 最近采集 {{ monitorCollectedAtText }}</p>
-                        <div class="linked-stream-metrics">
-                            <div class="stream-live-metric"><span>输出码率</span><strong>{{ liveMetrics.bitrate ? `${liveMetrics.bitrate} kbps` : "—" }}</strong><small>ZLM 到浏览器</small></div>
-                            <div class="stream-live-metric"><span>视频接收丢包</span><strong :class="{ warn: (liveMetrics.videoLoss ?? 0) > 0.005, err: (liveMetrics.videoLoss ?? 0) > 0.02 }">{{ formatLoss(liveMetrics.videoLoss) }}</strong><small>设备到 ZLM · 局域网常为 0</small></div>
-                            <div class="stream-live-metric"><span>音频接收丢包</span><strong :class="{ warn: (liveMetrics.audioLoss ?? 0) > 0.005, err: (liveMetrics.audioLoss ?? 0) > 0.02 }">{{ formatLoss(liveMetrics.audioLoss) }}</strong><small>设备到 ZLM · 局域网常为 0</small></div>
-                            <div class="stream-live-metric"><span>当前观看</span><strong>{{ readerCount }}</strong><small>包含本会话 · 累计 {{ totalReaderCount }}</small></div>
-                        </div>
-                    </div>
-
                     <div v-show="activeTab === 'ptz'" class="linked-detail" data-testid="linked-detail-ptz">
                         <div class="linked-ptz-layout">
                             <section class="linked-section linked-card">
@@ -3057,43 +3044,74 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-show="activeTab === 'probe'" class="linked-detail" data-testid="linked-detail-probe">
-                        <p class="linked-detail-hint">{{ probeState === "complete" ? `最近检测完成于 ${probeFinishedAt}` : "右侧启动检测后在此查看逐帧结果" }}</p>
                         <div class="linked-probe-layout">
-                            <section class="linked-section">
+                            <!-- 轨道明细:视频音频合成一张卡。
+                                 音频原来的「采样率」「声道」是从 monitorSnapshot 借来的、不是探针数据,
+                                 现在流信息块的音频栏已经在显示,这里删掉;codec 同理(流信息已有编码)。
+                                 去重后音频只剩 2 项,再单独占半个详情条就太空了,所以合并。 -->
+                            <section class="linked-section probe-detail-card">
                                 <div class="section-hd first">
-                                    <span class="section-title"><Video :size="13" />视频探针详情</span>
+                                    <span class="section-title"><Video :size="13" />轨道明细</span>
                                     <span class="section-meta">{{ probeResult ? `${[probeResult.video, probeResult.audio].filter(Boolean).length} 条轨道` : "待采样" }}</span>
                                 </div>
-                                <div class="probe-tracks linked-probe-tracks">
-                                    <section class="probe-track video">
-                                        <div class="probe-track-head"><span><Video :size="13" />视频轨</span><strong>{{ probeResult?.video?.codec || "—" }}</strong></div>
-                                        <div class="probe-data-grid">
+                                <div class="probe-track-merged">
+                                    <div class="probe-track-row video">
+                                        <span class="probe-track-kind"><Video :size="12" />视频</span>
+                                        <div class="probe-track-cells">
                                             <div><span>精确 FPS</span><strong>{{ probeResult?.video?.fps == null ? "—" : probeResult.video.fps.toFixed(1) }}</strong></div>
                                             <div><span>采样帧</span><strong>{{ probeResult?.video?.frameCount ?? "—" }}</strong></div>
                                             <div><span>关键帧</span><strong>{{ probeResult?.video?.keyFrameCount ?? "—" }}</strong></div>
                                             <div><span>GOP</span><strong>{{ probeResult?.video?.gop == null ? "—" : `${probeResult.video.gop.toFixed(1)} 帧` }}</strong></div>
                                         </div>
-                                    </section>
-                                    <section class="probe-track audio">
-                                        <div class="probe-track-head"><span><Activity :size="13" />音频轨</span><strong>{{ probeResult?.audio?.codec || "—" }}</strong></div>
-                                        <div class="probe-data-grid">
-                                            <div><span>采样率</span><strong>{{ monitorSnapshot?.tracks.find(track => track.kind === 'audio')?.sampleRate ? `${monitorSnapshot.tracks.find(track => track.kind === 'audio')?.sampleRate} Hz` : "—" }}</strong></div>
+                                    </div>
+                                    <div class="probe-track-row audio">
+                                        <span class="probe-track-kind"><Activity :size="12" />音频</span>
+                                        <div class="probe-track-cells">
                                             <div><span>采样帧</span><strong>{{ probeResult?.audio?.frameCount ?? "—" }}</strong></div>
                                             <div><span>帧间隔</span><strong>{{ probeResult?.audio?.averageIntervalMs == null ? "—" : `${probeResult.audio.averageIntervalMs.toFixed(1)} ms` }}</strong></div>
-                                            <div><span>声道</span><strong>{{ monitorSnapshot?.tracks.find(track => track.kind === 'audio')?.channels || "—" }}</strong></div>
                                         </div>
-                                    </section>
+                                    </div>
                                 </div>
                             </section>
 
-                            <section class="linked-section">
+                            <!-- 时间戳监控:从侧栏移到这里。它是采样结果而不是操作器,
+                                 按"侧栏放操作、详情条放结果"的分工本来就该在下面。 -->
+                            <section class="linked-section probe-detail-card">
+                                <div class="section-hd first">
+                                    <span class="section-title"><Gauge :size="13" />时间戳监控</span>
+                                    <span class="section-meta" :class="{ good: probeResult?.health.status === 'ok' }">
+                                        {{ probeResult ? (probeResult.health.status === 'ok' ? '平稳' : '需关注') : "待检测" }}
+                                    </span>
+                                </div>
+                                <div class="probe-health-grid">
+                                    <div><span>视频 DTS 间隔</span><strong>{{ probeResult?.timestamps.videoDtsIntervalMeanMs == null ? "—" : `${probeResult.timestamps.videoDtsIntervalMeanMs.toFixed(1)} ms` }}</strong><em>均值</em></div>
+                                    <div><span>帧到达抖动</span><strong>{{ probeResult?.timestamps.arrivalJitterMs == null ? "—" : `${probeResult.timestamps.arrivalJitterMs.toFixed(1)} ms` }}</strong><em>标准差</em></div>
+                                    <div><span>PTS-DTS</span><strong>{{ probeResult?.timestamps.ptsDtsMaxMs == null ? "—" : `${probeResult.timestamps.ptsDtsMaxMs.toFixed(1)} ms` }}</strong><em>最大值</em></div>
+                                    <div><span>音视频交织</span><strong>{{ probeResult?.timestamps.avArrivalSkewMaxMs == null ? "—" : `${probeResult.timestamps.avArrivalSkewMaxMs.toFixed(1)} ms` }}</strong><em>最大偏差</em></div>
+                                </div>
+                            </section>
+
+                            <section class="linked-section probe-detail-card">
                                 <div class="section-hd first">
                                     <span class="section-title"><Signal :size="13" />帧到达时间线</span>
                                     <span class="section-meta">{{ probeState === "complete" ? "最近 32 帧" : "无数据" }}</span>
                                 </div>
                                 <div class="frame-timeline linked-timeline" :class="{ muted: probeState !== 'complete' }">
                                     <div class="frame-bars">
-                                        <span v-for="(frame, index) in probeTimeline" :key="index" :class="[frame.type, { keyframe: frame.keyFrame }]" :style="{ height: probeState === 'complete' ? `${frame.height}%` : '8%' }"></span>
+                                        <template v-if="probeState === 'complete' && probeTimeline.length">
+                                            <span v-for="(frame, index) in probeTimeline" :key="index" :class="[frame.type, { keyframe: frame.keyFrame }]" :style="{ height: `${frame.height}%` }"></span>
+                                        </template>
+                                        <!-- 空态与采样中态:柱状区中央的引导层。图例保持在底部,让用户提前认色。 -->
+                                        <div v-else class="frame-bars-empty">
+                                            <template v-if="probeState === 'sampling'">
+                                                <Loader2 :size="18" class="spin" />
+                                                <span>正在采集帧到达数据</span>
+                                            </template>
+                                            <template v-else>
+                                                <Activity :size="18" />
+                                                <span>启动检测后展示最近 32 帧的到达序列</span>
+                                            </template>
+                                        </div>
                                     </div>
                                     <div class="frame-legend">
                                         <span><i class="key"></i>关键帧</span><span><i class="video"></i>视频帧</span><span><i class="audio"></i>音频帧</span>
@@ -3116,7 +3134,11 @@ onBeforeUnmount(() => {
 
             </section>
             <!-- 右侧功能栏 -->
-            <aside v-if="!sideCollapsed" class="sidebar" :class="{ 'sidebar-stream': activeTab === 'stream' }">
+            <aside
+                v-if="!sideCollapsed"
+                class="sidebar"
+                :class="{ 'sidebar-probe': activeTab === 'probe' }"
+            >
                 <!-- Tabs -->
                 <div class="tabs">
                     <button
@@ -3134,22 +3156,6 @@ onBeforeUnmount(() => {
 
                 <!-- Tab 面板容器 -->
                 <div class="panels">
-                    <!-- ═══════════ 流信息 ═══════════ -->
-                    <div v-show="activeTab === 'stream'" class="panel stream-panel" data-testid="linked-side-stream">
-                        <div class="stream-panel-header">
-                            <span class="section-title"><Signal :size="13" />媒体参数</span>
-                            <button class="stream-refresh" title="刷新流状态" :disabled="phase !== 'playing'" @click="refreshMonitor"><RefreshCcw :size="13" /></button>
-                        </div>
-                        <div class="stream-metrics-grid">
-                            <div><span>媒体节点</span><strong>{{ streamInfo.nodeName }}</strong><small>{{ streamInfo.nodeHost }}</small></div>
-                            <div><span>流 ID</span><strong class="mono">{{ streamInfo.streamId || "—" }}</strong><small>SSRC {{ streamInfo.ssrc || "—" }} · APP {{ playResult?.app || "—" }}</small></div>
-                            <div><span>视频</span><strong>{{ streamInfo.videoCodec }}</strong><small>{{ streamInfo.resolution }} · {{ streamInfo.videoFps || "—" }} fps · {{ monitorVideoTrack?.frames ?? "—" }} 帧</small></div>
-                            <div><span>音频</span><strong>{{ streamInfo.audioCodec }}</strong><small>{{ streamInfo.audioSampleRate ? `${streamInfo.audioSampleRate} Hz` : "—" }} · {{ monitorAudioTrack?.channels || "—" }} 声道 · {{ monitorAudioTrack?.frames ?? "—" }} 帧</small></div>
-                            <div><span>数据速率</span><strong>{{ monitorBytesSpeedText }}</strong><small>累计 {{ monitorTotalBytesText }}</small></div>
-                            <div><span>录制状态</span><strong>{{ recordingText }}</strong><small>播放协议 {{ protocol.toUpperCase() }}</small></div>
-                        </div>
-                    </div>
-
                     <!-- ═══════════ 云台控制 ═══════════ -->
                     <div v-show="activeTab === 'ptz'" class="panel" data-testid="linked-side-ptz">
                         <!-- 模式切换:速度控制 / 精准控制(2022) -->
@@ -3278,71 +3284,121 @@ onBeforeUnmount(() => {
                     </div>
                     <!-- ═══════════ 视频探针 ═══════════ -->
                     <div v-show="activeTab === 'probe'" class="panel probe-panel" data-testid="linked-side-probe">
-                        <div class="probe-header">
-                            <div class="probe-heading">
-                                <span class="probe-heading-icon"><Activity :size="15" /></span>
+                        <!-- 流信息:2 秒轮询的实时指标。和探针放同一个面板 —— 两者回答的是同一个问题
+                             ("这路流健康吗"),区别只在一个持续刷新、一个手动采样。所以两块的标题上
+                             都写明刷新语义,免得把十分钟前那次采样的数字当成当下的值。 -->
+                        <section class="stream-brief probe-card" data-testid="stream-brief">
+                            <div class="section-hd first">
+                                <span class="section-title"><Signal :size="13" />概览</span>
+                                <span class="section-meta">2 秒刷新 · {{ monitorCollectedAtText }}</span>
+                            </div>
+                            <div class="stream-brief-overview">
                                 <div>
-                                    <strong>逐帧健康检测</strong>
-                                    <span>ZLM addProbe · 3 秒采样窗口</span>
+                                    <span>当前观看</span>
+                                    <strong>{{ readerCount }}</strong>
+                                    <small>累计 {{ totalReaderCount }}</small>
+                                </div>
+                                <div>
+                                    <span>数据速率</span>
+                                    <strong>{{ monitorBytesSpeedText }}</strong>
+                                    <small>累计 {{ monitorTotalBytesText }}</small>
+                                </div>
+                                <div>
+                                    <span>媒体节点</span>
+                                    <strong :title="streamInfo.nodeName">{{ streamInfo.nodeName }}</strong>
+                                    <small :title="streamInfo.nodeHost">{{ streamInfo.nodeHost }}</small>
+                                </div>
+                                <div>
+                                    <span>流 ID</span>
+                                    <strong :title="streamInfo.streamId || '—'">{{ streamInfo.streamId || "—" }}</strong>
+                                    <small :title="`SSRC ${streamInfo.ssrc || '—'} · APP ${playResult?.app || '—'}`">
+                                        SSRC {{ streamInfo.ssrc || "—" }} · APP {{ playResult?.app || "—" }}
+                                    </small>
                                 </div>
                             </div>
-                            <span class="probe-status" :class="probeState">
-                                <span class="dot"></span>{{ probeStatusText }}
-                            </span>
-                        </div>
 
-                        <button
-                            class="probe-action"
-                            data-testid="probe-start"
-                            :disabled="phase !== 'playing' || probeState === 'sampling'"
-                            @click="startProbe"
-                        >
-                            <Loader2 v-if="probeState === 'sampling'" :size="14" class="spin" />
-                            <Play v-else :size="14" />
-                            <span>{{ probeButtonText }}</span>
-                        </button>
+                            <div class="stream-brief-split">
+                                <section class="stream-brief-kind video">
+                                    <header><Video :size="12" />视频</header>
+                                    <div class="stream-brief-rows">
+                                        <div><span>编码</span><strong>{{ streamInfo.videoCodec }}</strong></div>
+                                        <div><span>分辨率</span><strong>{{ streamInfo.resolution }}</strong></div>
+                                        <div><span>帧率</span><strong>{{ streamInfo.videoFps || "—" }}</strong></div>
+                                        <div>
+                                            <span>丢包</span>
+                                            <strong :class="{ warn: (liveMetrics.videoLoss ?? 0) > 0.005, err: (liveMetrics.videoLoss ?? 0) > 0.02 }">{{ formatLoss(liveMetrics.videoLoss) }}</strong>
+                                        </div>
+                                    </div>
+                                </section>
+                                <section class="stream-brief-kind audio">
+                                    <header><Activity :size="12" />音频</header>
+                                    <div class="stream-brief-rows">
+                                        <div><span>编码</span><strong>{{ streamInfo.audioCodec }}</strong></div>
+                                        <div><span>采样率</span><strong>{{ streamInfo.audioSampleRate ? `${streamInfo.audioSampleRate} Hz` : "—" }}</strong></div>
+                                        <div><span>声道</span><strong>{{ monitorAudioTrack?.channels || "—" }}</strong></div>
+                                        <div>
+                                            <span>丢包</span>
+                                            <strong :class="{ warn: (liveMetrics.audioLoss ?? 0) > 0.005, err: (liveMetrics.audioLoss ?? 0) > 0.02 }">{{ formatLoss(liveMetrics.audioLoss) }}</strong>
+                                        </div>
+                                    </div>
+                                </section>
+                            </div>
+                        </section>
 
-                        <div class="probe-summary" :class="{ muted: probeState !== 'complete' }">
-                            <div>
-                                <span>采样时长</span>
-                                <strong>{{ probeResult ? (probeResult.summary.sampleDurationMs / 1000).toFixed(2) : "—" }}<em>s</em></strong>
-                            </div>
-                            <div>
-                                <span>采集帧数</span>
-                                <strong>{{ probeResult?.summary.frameCount ?? "—" }}<em>帧</em></strong>
-                            </div>
-                            <div>
-                                <span>采样流量</span>
-                                <strong>{{ probeResult ? Math.round(probeResult.summary.totalBytes / 1024) : "—" }}<em>KB</em></strong>
-                            </div>
-                        </div>
-
-                        <div v-if="probeState === 'complete'" class="probe-verdict" :class="{ warning: probeResult?.health.status === 'warning', error: probeResult?.health.status === 'error' }">
-                            <CheckCircle2 v-if="probeResult?.health.status === 'ok'" :size="15" />
-                            <AlertTriangle v-else :size="15" />
-                            <div>
-                                <strong>{{ probeResult?.health.status === 'ok' ? '流健康，帧序与时间戳连续' : '检测发现需要关注的问题' }}</strong>
-                                <span>完成于 {{ probeFinishedAt }} · {{ probeResult?.health.issues?.[0]?.message || '未发现异常帧间隔' }}</span>
-                            </div>
-                        </div>
-                        <div v-else class="probe-verdict pending">
-                            <Activity :size="15" />
-                            <div>
-                                <strong>{{ probeState === "sampling" ? "正在采集音视频帧" : "尚未执行深度检测" }}</strong>
-                                <span>{{ probeState === "sampling" ? "结果将在采样结束后生成" : "当前仅展示检测项目" }}</span>
-                            </div>
-                        </div>
-
-                        <section class="side-probe-health">
+                        <section class="probe-card" data-testid="probe-check">
                             <div class="section-hd first">
-                                <span class="section-title"><Gauge :size="13" />时间戳监控</span>
-                                <span class="section-meta good">{{ probeResult ? (probeResult.health.status === 'ok' ? '平稳' : '需关注') : "待检测" }}</span>
+                                <span class="section-title"><Activity :size="13" />逐帧健康检测</span>
+                                <span class="probe-status" :class="probeState">
+                                    <span class="dot"></span>{{ probeStatusText }}
+                                </span>
                             </div>
-                            <div class="probe-health-grid">
-                                <div><span>视频 DTS 间隔</span><strong>{{ probeResult?.timestamps.videoDtsIntervalMeanMs == null ? "—" : `${probeResult.timestamps.videoDtsIntervalMeanMs.toFixed(1)} ms` }}</strong><em>均值</em></div>
-                                <div><span>帧到达抖动</span><strong>{{ probeResult?.timestamps.arrivalJitterMs == null ? "—" : `${probeResult.timestamps.arrivalJitterMs.toFixed(1)} ms` }}</strong><em>标准差</em></div>
-                                <div><span>PTS-DTS</span><strong>{{ probeResult?.timestamps.ptsDtsMaxMs == null ? "—" : `${probeResult.timestamps.ptsDtsMaxMs.toFixed(1)} ms` }}</strong><em>最大值</em></div>
-                                <div><span>音视频交织</span><strong>{{ probeResult?.timestamps.avArrivalSkewMaxMs == null ? "—" : `${probeResult.timestamps.avArrivalSkewMaxMs.toFixed(1)} ms` }}</strong><em>最大偏差</em></div>
+
+                            <button
+                                class="probe-action"
+                                data-testid="probe-start"
+                                :disabled="phase !== 'playing' || probeState === 'sampling'"
+                                @click="startProbe"
+                            >
+                                <Loader2 v-if="probeState === 'sampling'" :size="14" class="spin" />
+                                <Play v-else :size="14" />
+                                <span>{{ probeButtonText }}</span>
+                            </button>
+
+                            <div class="probe-summary" :class="{ muted: probeState !== 'complete' }">
+                                <div>
+                                    <span>采样时长</span>
+                                    <strong>{{ probeResult ? (probeResult.summary.sampleDurationMs / 1000).toFixed(2) : "—" }}<em>s</em></strong>
+                                </div>
+                                <div>
+                                    <span>采集帧数</span>
+                                    <strong>{{ probeResult?.summary.frameCount ?? "—" }}<em>帧</em></strong>
+                                </div>
+                                <div>
+                                    <span>采样流量</span>
+                                    <strong>{{ probeResult ? Math.round(probeResult.summary.totalBytes / 1024) : "—" }}<em>KB</em></strong>
+                                </div>
+                            </div>
+
+                            <!-- 结论条压成单行:采样完成时它是唯一新增内容,原来两行 + padding 约 45px,
+                                 完成态一到就把整个侧栏撑破画面高度。副信息(完成时间/具体问题)挪到 title。 -->
+                            <div
+                                v-if="probeState === 'complete'"
+                                class="probe-verdict"
+                                :class="{ warning: probeResult?.health.status === 'warning', error: probeResult?.health.status === 'error' }"
+                                :title="`完成于 ${probeFinishedAt} · ${probeResult?.health.issues?.[0]?.message || '未发现异常帧间隔'}`"
+                            >
+                                <CheckCircle2 v-if="probeResult?.health.status === 'ok'" :size="14" />
+                                <AlertTriangle v-else :size="14" />
+                                <strong>{{ probeResult?.health.status === 'ok' ? '流健康，帧序与时间戳连续' : '检测发现需要关注的问题' }}</strong>
+                            </div>
+                            <!-- 只在采样中出现。未检测时这里原本是一句"尚未执行深度检测",
+                                 跟右上角状态角标和按钮文案说的是同一件事,纯占位,腾给流信息。 -->
+                            <div v-else-if="probeState === 'sampling'" class="probe-verdict pending">
+                                <Activity :size="15" />
+                                <div>
+                                    <strong>正在采集音视频帧</strong>
+                                    <span>结果将在采样结束后生成</span>
+                                </div>
                             </div>
                         </section>
 
@@ -4084,11 +4140,17 @@ onBeforeUnmount(() => {
 .btn-primary:hover { background: var(--uvp-brand-strong); }
 
 /* 多协议切换器 */
+/* 底部两角要自己写,不能只靠父级 .video-frame 的 border-radius + overflow: hidden:
+ * 本元素带 backdrop-filter,会自建 backdrop root,它绘制的背景在 Chromium/WebKit 下
+ * 会逃出祖先的圆角裁剪 —— 表现就是画面顶部是圆角、这条栏底部却是直角。
+ * 13px = 父级 14px 圆角减去 1px 边框,和外框严丝合缝。 */
 .protocol-switcher {
     display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
     padding: 10px 14px;
     background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(12px);
     border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-bottom-right-radius: 13px;
+    border-bottom-left-radius: 13px;
 }
 .switcher-left { display: flex; align-items: center; gap: 10px; }
 .switcher-left .kicker { color: rgba(203, 213, 225, 0.72); font-size: 11px; letter-spacing: 0.03em; white-space: nowrap; }
@@ -4132,62 +4194,6 @@ onBeforeUnmount(() => {
     box-shadow: 0 8px 24px -18px rgb(0 0 0 / 45%);
     font-size: 11px;
 }
-.stream-overview-header {
-    display: flex; align-items: center; justify-content: space-between;
-}
-.stream-overview-header strong {
-    color: var(--uvp-text-primary); font-size: 13px; font-weight: 700;
-}
-.stream-refresh {
-    display: inline-grid; place-items: center; width: 28px; height: 28px;
-    color: var(--uvp-text-tertiary); background: transparent;
-    border: 1px solid var(--uvp-panel-border); border-radius: 50%; cursor: pointer;
-    transition: all 0.15s ease;
-}
-.stream-refresh:hover {
-    color: var(--uvp-brand); border-color: var(--uvp-brand);
-    background: var(--uvp-brand-soft);
-}
-.stream-overview-metrics {
-    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px;
-}
-.overview-metric {
-    display: flex; align-items: baseline; gap: 8px; min-width: 0;
-}
-.overview-metric .stream-label { flex-shrink: 0; }
-.overview-metric .stream-value { font-size: 12px; }
-.stream-detail-columns {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px;
-}
-.stream-detail { min-width: 0; }
-.stream-detail h4 {
-    display: flex; align-items: center; gap: 6px; margin: 0 0 12px;
-    color: var(--uvp-text-primary); font-size: 12px; font-weight: 700;
-}
-.stream-detail h4 svg { color: var(--uvp-brand); }
-.stream-detail-grid {
-    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px;
-}
-.stream-detail-grid > div {
-    display: flex; align-items: baseline; gap: 8px; min-width: 0;
-}
-.stream-info-bar .stream-label {
-    color: var(--uvp-text-tertiary);
-    font-size: 10.5px;
-    white-space: nowrap;
-}
-.stream-info-bar .stream-value {
-    overflow: hidden; color: var(--uvp-text-secondary);
-    text-overflow: ellipsis; white-space: nowrap;
-    font-weight: 500;
-}
-.stream-info-bar .stream-value.mono {
-    font-family: 'SF Mono', 'Consolas', monospace;
-    font-size: 10px;
-}
-.stream-info-bar .stream-value.warn { color: #fbbf24; }
-.stream-info-bar .stream-value.err { color: #f87171; }
-
 /* 双区联动版:随 Tab 切换的全宽等高详情 —— 干掉外层白面板,4 张卡片直接躺在 tab 里 */
 .linked-info-bar {
     --linked-detail-height: 148px;
@@ -4209,30 +4215,18 @@ onBeforeUnmount(() => {
     margin: 0 0 8px; padding: 0;
     color: var(--uvp-text-tertiary); font-size: 10.5px; line-height: 1.4;
 }
-.linked-stream-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-height: 0; }
-.stream-live-metric { display: grid; align-content: center; gap: 3px; min-width: 0; padding: 0 14px; }
-.stream-live-metric + .stream-live-metric { border-left: 1px solid var(--uvp-panel-border); }
-.stream-live-metric:first-child { padding-left: 0; }
-.stream-live-metric:last-child { padding-right: 0; }
-.stream-live-metric span,
-.stream-live-metric small { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.stream-live-metric strong { overflow: hidden; color: var(--uvp-text-primary); font-size: 15px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.stream-live-metric strong.mono { font-family: 'SF Mono', 'Consolas', monospace; }
-.stream-live-metric strong.warn,
-.stream-live-metric strong.state-stale { color: var(--uvp-warning); }
-.stream-live-metric strong.err,
-.stream-live-metric strong.state-offline { color: var(--uvp-danger); }
-.stream-live-metric strong.state-fresh { color: var(--uvp-brand-cyan); }
+/* 列数必须跟实际渲染的卡片数一致(预置位 / 巡航轨迹 / 看守位 = 3 张)。
+ * 之前写的是 4 列,多出来的那一列空着,卡片只占满 3/4 宽度,右侧留一条空白。 */
 .linked-ptz-layout {
     box-sizing: border-box;
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-template-rows: minmax(0, 1fr);
     gap: 10px; min-height: 0; height: 100%; align-items: stretch;
 }
 .linked-section { min-width: 0; padding: 0; }
 .linked-section .section-hd.compact { margin-top: 12px; }
 
-/* 4 张 PTZ 卡片统一容器:实线淡蓝框 + 微蓝底,header 定高 + 主体 flex-1 填充,主体 overflow: hidden 保护 */
+/* 3 张 PTZ 卡片统一容器:实线淡蓝框 + 微蓝底,header 定高 + 主体 flex-1 填充,主体 overflow: hidden 保护 */
 .linked-card {
     box-sizing: border-box;
     display: flex; flex-direction: column; gap: 8px;
@@ -4389,9 +4383,47 @@ onBeforeUnmount(() => {
 .linked-detail .home-config { gap: 5px; padding-top: 2px; }
 .linked-detail .home-row select,
 .linked-detail .home-row input { height: 26px; }
-.linked-probe-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; min-height: 0; align-items: center; }
-.linked-probe-tracks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.linked-timeline .frame-bars { height: 46px; }
+/* stretch 而不是 center:两栏撑满详情条高度,跟 .linked-ptz-layout 保持一致。
+ * 用 center 的话,删掉提示行让出来的高度只会变成上下留白,内容一点没多。 */
+/* 三栏:轨道明细 / 时间戳监控 / 帧到达时间线。
+ * 不等分 —— 时间线是横向柱状图,32 根柱子三等分只剩约 285px(每根不到 9px),
+ * 帧间隔异常会看不出来。给它 1.4fr(约 357px,每根约 11px)。 */
+.linked-probe-layout {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: 12px; min-height: 0; align-items: stretch;
+}
+/* 每栏各自纵向撑满,内部再把余量交给主体(轨道 / 指标网格 / 柱状图) */
+.linked-probe-layout > .linked-section {
+    display: flex; flex-direction: column; min-height: 0;
+}
+.linked-probe-layout > .linked-section > .section-hd { flex: 0 0 auto; }
+.linked-probe-layout > .linked-section > .probe-track-merged,
+.linked-probe-layout > .linked-section > .probe-health-grid,
+.linked-probe-layout > .linked-section > .frame-timeline { flex: 1 1 0; min-height: 0; }
+
+/* 底部三块套上跟侧栏 .probe-card 同款卡片外壳(浅底 + 描边 + 圆角)。
+ * 加了外壳后,内部原来那层 .probe-track-merged / .probe-health-grid / .frame-timeline 的
+ * 独立底色和边框会跟卡片形成"套框",逐一去掉,只留骨架。
+ * 相邻两卡之间的分隔线也一并去掉 —— 卡片本身的间距和边框已经足够表达"这是三块"。 */
+.probe-detail-card {
+    padding: 8px 12px 10px;
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 10px;
+}
+.probe-detail-card > .section-hd.first { margin-top: 0; }
+.probe-detail-card > .probe-track-merged,
+.probe-detail-card > .probe-health-grid,
+.probe-detail-card > .frame-timeline {
+    padding: 0;
+    background: transparent;
+    border: 0;
+}
+/* 轨道明细里的"视频/音频"分割线原来是靠 border-top,套进卡片后保留就好,
+ * 因为它是"两条轨道之间的分隔"而不是"跟卡片外的分隔"。 */
+/* 不再写死 46px:交给 .linked-timeline 的 1fr 行按剩余空间分配,
+ * 同时留一个下限,避免详情条被压缩时波形糊成一条线。 */
+.linked-timeline .frame-bars { height: auto; min-height: 46px; }
 .linked-standard-note {
     display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start;
     padding: 12px; color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg);
@@ -4403,17 +4435,11 @@ onBeforeUnmount(() => {
 .linked-standard-note span { font-size: 10px; }
 
 @media (max-width: 720px) {
-    .stream-overview-metrics,
-    .stream-detail-columns { grid-template-columns: 1fr; gap: 14px; }
     .linked-detail-hint { margin-bottom: 6px; }
     .linked-detail { height: auto; overflow: visible; }
+    /* 窄屏堆成单列。三栏的探针详情条在 720px 下横向排不开,柱状图会糊掉。 */
     .linked-ptz-layout,
-    .linked-probe-layout,
-    .linked-probe-tracks { grid-template-columns: 1fr; }
-    .linked-stream-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .stream-live-metric { padding: 7px 12px; }
-    .stream-live-metric:first-child { padding-left: 0; }
-    .stream-live-metric:nth-child(odd) { border-left: 0; }
+    .linked-probe-layout { grid-template-columns: 1fr; }
     .linked-section { padding: 12px 0; }
     .linked-section:first-child { padding-top: 0; }
     .linked-section:last-child { padding-bottom: 0; }
@@ -4423,17 +4449,24 @@ onBeforeUnmount(() => {
 }
 
 /* ═══════════ 右侧栏 ═══════════ */
+/* 两行:tab 条按内容高,面板盒吃掉剩余的全部高度,底边和画面区对齐。
+ * align-content: stretch 是关键,不然面板盒只按内容撑开,底部会留一块空白。 */
+/* overflow: hidden 是兜底 —— CSS Grid 规范下,子内容超出 track 时默认 visible,
+ * 会一路撑到 body,进而撑大 modal。设 hidden 后 grid item 的 min-content 收敛到 0,
+ * 侧栏高度严格按画面 aspect-ratio 决定的行高走,内部超出交给 .panels 的 overflow-y: auto 滚动。 */
 .sidebar {
-    display: grid; grid-column: 2; grid-row: 1; gap: 10px; align-content: start;
-    max-height: none; overflow: visible; padding-right: 2px;
+    display: grid; grid-column: 2; grid-row: 1; gap: 10px;
+    grid-template-rows: auto minmax(0, 1fr); align-content: stretch;
+    min-height: 0; max-height: none; overflow: hidden; padding-right: 2px;
 }
-.sidebar.sidebar-stream { grid-template-rows: auto minmax(0, 1fr); align-content: stretch; }
 .sidebar::-webkit-scrollbar { width: 6px; }
 .sidebar::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--uvp-text-tertiary) 30%, transparent); border-radius: 3px; }
 
-/* Tab 切换 */
+/* Tab 切换。auto-fit + minmax(0, 1fr) 会按 tabs 数组实际条数平分整行宽度,
+ * 不用再跟 v-for 长度绑死。以后要加/减 tab 只改数组、不用回头调 CSS。 */
 .tabs {
-    display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px;
+    display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr);
+    gap: 4px;
     padding: 4px;
     background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border);
     border-radius: 10px;
@@ -4454,23 +4487,22 @@ onBeforeUnmount(() => {
     background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border);
     border-radius: 12px;
 }
-.sidebar .panels { padding: 12px 14px; }
-.panel { display: grid; gap: 10px; }
-.stream-panel-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.stream-metrics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.stream-metrics-grid > div {
-    display: grid; gap: 4px; min-width: 0; padding: 10px 11px;
-    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 8px;
+/* 高度吃满后内容可能反过来超出(比如高级面板 9 个按钮遇上矮屏),
+ * 给一个纵向滚动兜底,不要顶破面板。 */
+.sidebar .panels {
+    padding: 12px 14px;
+    height: 100%; min-height: 0; box-sizing: border-box; overflow-y: auto;
 }
-.stream-metrics-grid span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
-.stream-metrics-grid strong { overflow: hidden; color: var(--uvp-text-secondary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.stream-metrics-grid strong.warn { color: var(--uvp-warning); }
-.stream-metrics-grid strong.err { color: var(--uvp-danger); }
-.stream-metrics-grid small { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-stream .panels { height: 100%; min-height: 0; box-sizing: border-box; }
-.sidebar-stream .stream-panel { grid-template-rows: auto minmax(0, 1fr); height: 100%; min-height: 0; }
-.sidebar-stream .stream-metrics-grid { min-height: 0; }
-.sidebar-stream .stream-metrics-grid > div { align-content: center; }
+/* 探针 tab 已经用两张独立 .probe-card 分块了,外层大卡片显得多余(卡里套卡)。
+ * 用 activeTab 联动的 .sidebar-probe class 精确关掉,不动其他 tab 共用的样式。 */
+.sidebar-probe .panels {
+    padding: 0;
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+.panel { display: grid; gap: 10px; }
+
 .section-hd {
     display: flex; align-items: center; justify-content: space-between; gap: 8px;
     margin-top: 10px;
@@ -4512,9 +4544,14 @@ onBeforeUnmount(() => {
 }
 
 /* 方向盘 */
+/* width: 100% 不能省。父级 .ptz-speed 是 grid 容器,而 grid 规范规定:
+ * 格子项在行内方向带 auto 外边距时,justify-self 的 stretch 行为失效、改用内容自动尺寸,
+ * 空间全被 auto 边距吃掉。那样三列 1fr 会塌成图标宽度,方向盘直接变形。
+ * 显式给宽度后 auto 边距只负责居中,不再决定尺寸 —— 同文件的
+ * .talk-mode-switch / .talk-button 也是这个写法。 */
 .ptz-pad {
     display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-    max-width: 200px; margin: 8px auto 4px;
+    width: 100%; max-width: 200px; margin: 8px auto 4px;
 }
 .ptz-pad.disabled { opacity: 0.42; pointer-events: none; }
 .ptz-pad button {
@@ -4587,7 +4624,37 @@ onBeforeUnmount(() => {
 .lens-btns button.toggled { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border)); }
 
 /* 精准 PTZ */
-.ptz-precise { display: grid; gap: 10px; }
+/* 面板盒填满高度后,内容若仍挤在顶部就会留出一块空腔。让当前模式的内容块
+ * 占满面板并把纵向余量平均匀到各组之间(方向盘、对讲、速度、镜头),
+ * 而不是把某一块拉长 —— 方向盘按钮拉高会很怪。
+ * 余量为负(内容比盒子高)时 space-between 退化为顶部对齐,由 .panels 滚动兜底。 */
+/* 云台面板是"模式切换 + 当前模式内容"两行:模式切换按内容高,内容块吃掉剩余高度。 */
+[data-testid="linked-side-ptz"] { height: 100%; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
+.ptz-speed,
+.ptz-precise { display: grid; gap: 10px; align-content: space-between; min-height: 0; }
+
+/* 探针 tab 两张卡:概览拿余量,检测按内容自然高。
+ * 概览内容多(2×2 指标 + 视频/音频块),检测卡内容少(按钮 + 摘要 + 结论),
+ * 让检测卡按 auto 收敛,不再被 1fr 拉平 —— 那样会让检测卡显得空、同时把整个侧栏顶高。 */
+[data-testid="linked-side-probe"] {
+    height: 100%; min-height: 0;
+    grid-template-rows: minmax(0, 1fr) auto;
+}
+/* 卡片拉伸后,内部子块也要跟着分空间,否则内容挤顶部、卡里冒出新的空白。
+ *
+ * 概览卡:标题 auto,概览指标 auto,视频/音频分栏拿余量。
+ * 检测卡:标题 / 按钮 / 结论 auto,采样摘要三格拿余量 —— 而不是按钮或标题拉高,
+ * 那样会显得整卡在"注水"。 */
+/* 概览卡:标题 / 概览指标 auto,视频/音频分栏拿余量 —— 但只是外壳拉伸,
+ * 内部行距保持紧凑。之前用 flex:1 1 auto 让 stream-brief-rows 吸收余量,
+ * 结果把编码/分辨率/帧率/丢包之间的间距顶得太大。改成外壳等高、内容顶到上方。 */
+.probe-card.stream-brief { min-height: 0; grid-template-rows: auto auto minmax(0, 1fr); }
+.stream-brief-split { min-height: 0; align-items: stretch; }
+.stream-brief-kind { display: flex; flex-direction: column; min-height: 0; }
+
+[data-testid="probe-check"] { min-height: 0; grid-auto-rows: min-content; }
+[data-testid="probe-check"] .probe-summary { align-self: stretch; }
+[data-testid="probe-check"] .probe-summary > div { align-content: center; }
 .precise-hint {
     display: flex; align-items: flex-start; gap: 6px;
     padding: 8px 10px;
@@ -4731,15 +4798,71 @@ onBeforeUnmount(() => {
 /* ═══════════ 探针面板 ═══════════ */
 .probe-panel { gap: 12px; }
 .probe-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.probe-heading { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.probe-heading-icon {
-    display: inline-grid; place-items: center; flex: 0 0 30px; width: 30px; height: 30px;
-    color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 10%, transparent);
-    border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 26%, transparent); border-radius: 7px;
+
+/* 探针面板里的独立卡片:概览 / 逐帧健康检测。
+ * 各自有底色和边框,两卡之间靠 .probe-panel 的 gap(12px) 拉开距离。
+ * 底色用 list-toolbar-bg(比 panel-bg 略深),这样即使外层 .panels 是白底,
+ * 两张卡的边界仍然一眼可辨,不至于糊成一片。 */
+.probe-card {
+    display: grid; gap: 7px;
+    padding: 9px 11px;
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 10px;
 }
-.probe-heading > div { display: grid; gap: 2px; min-width: 0; }
-.probe-heading strong { color: var(--uvp-text-primary); font-size: 12px; font-weight: 650; }
-.probe-heading span { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+/* 概览卡自身已经用 .stream-brief 的 gap 排版了,不必再叠一层内边距 gap */
+.probe-card.stream-brief { gap: 7px; }
+/* 卡内的 section-hd.first 不再需要 margin-top:0 的特殊值,顶部内边距已经交给 .probe-card 处理 */
+.probe-card .section-hd.first { margin-top: 0; }
+
+/* ═══════════ 流信息(探针面板顶部) ═══════════ */
+.stream-brief { display: grid; gap: 7px; }
+.stream-brief-overview {
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border); border-radius: 8px;
+}
+.stream-brief-overview > div { display: grid; gap: 2px; min-width: 0; padding: 7px 9px; }
+/* 2×2 网格的十字分隔线:偶数列(2n)加左线,第 3 格起(n+3)加顶线。
+ * 这样布局与格子数解耦 —— 以后要加"码率"「延迟」等,自动流入下一行也照样有线。 */
+.stream-brief-overview > div:nth-child(2n) { border-left: 1px solid var(--uvp-panel-border); }
+.stream-brief-overview > div:nth-child(n+3) { border-top: 1px solid var(--uvp-panel-border); }
+.stream-brief-overview span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.stream-brief-overview strong {
+    overflow: hidden;
+    color: var(--uvp-text-primary); font-family: ui-monospace, Menlo, monospace;
+    font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap;
+}
+.stream-brief-overview small {
+    overflow: hidden;
+    color: var(--uvp-text-tertiary); font-size: 9px;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 音频在左、视频在右。左侧色条沿用探针轨道卡的配色(视频=品牌蓝、音频=青),
+ * 同一种媒体在面板里始终是同一个颜色,不用读标题也能对上。 */
+.stream-brief-split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.stream-brief-kind {
+    min-width: 0; padding: 7px 9px;
+    background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border); border-radius: 8px;
+}
+.stream-brief-kind.audio { border-left: 2px solid var(--uvp-brand-cyan); }
+.stream-brief-kind.video { border-left: 2px solid var(--uvp-brand); }
+.stream-brief-kind header {
+    display: inline-flex; align-items: center; gap: 4px; margin-bottom: 5px;
+    color: var(--uvp-text-secondary); font-size: 10px; font-weight: 600;
+}
+.stream-brief-rows { display: grid; gap: 3px; }
+.stream-brief-rows > div { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
+.stream-brief-rows span { flex-shrink: 0; color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.stream-brief-rows strong {
+    overflow: hidden;
+    color: var(--uvp-text-primary); font-family: ui-monospace, Menlo, monospace;
+    font-size: 10.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap;
+}
+.stream-brief-rows strong.warn { color: var(--uvp-warning); }
+.stream-brief-rows strong.err { color: var(--uvp-danger); }
 .probe-status {
     display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0;
     padding: 3px 7px; color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg);
@@ -4750,7 +4873,7 @@ onBeforeUnmount(() => {
 .probe-status.sampling .dot { animation: pulse 1s ease-in-out infinite; }
 .probe-status.complete { color: var(--uvp-brand-cyan); border-color: color-mix(in srgb, var(--uvp-brand-cyan) 30%, var(--uvp-panel-border)); }
 .probe-action {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 34px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 30px;
     color: #fff; background: var(--uvp-brand); border: 0; border-radius: 7px;
     cursor: pointer; font-size: 11.5px; font-weight: 600; transition: all 0.15s ease;
 }
@@ -4762,43 +4885,71 @@ onBeforeUnmount(() => {
 }
 .probe-summary > div { display: grid; gap: 3px; min-width: 0; padding: 9px 10px; }
 .probe-summary > div + div { border-left: 1px solid var(--uvp-panel-border); }
-.probe-summary span, .probe-data-grid span, .probe-health-grid span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.probe-summary span, .probe-health-grid span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
 .probe-summary strong {
     color: var(--uvp-text-primary); font-family: ui-monospace, Menlo, monospace;
     font-size: 15px; font-weight: 650; white-space: nowrap;
 }
 .probe-summary em { margin-left: 2px; color: var(--uvp-text-tertiary); font-size: 9px; font-style: normal; font-weight: 400; }
 .probe-summary.muted { opacity: 0.56; }
+/* 结论条单行紧凑:高度从两行 45px 降到单行约 26px,完成态不再撑破侧栏。
+ * 副信息(完成时间/具体问题)通过 title 承载,鼠标悬停可查。 */
 .probe-verdict {
-    display: grid; grid-template-columns: 18px 1fr; gap: 7px; align-items: start;
-    padding: 9px 10px; color: var(--uvp-brand-cyan);
+    display: flex; align-items: center; gap: 6px;
+    padding: 5px 10px; color: var(--uvp-brand-cyan);
     background: color-mix(in srgb, var(--uvp-brand-cyan) 7%, transparent);
     border: 1px solid color-mix(in srgb, var(--uvp-brand-cyan) 24%, var(--uvp-panel-border)); border-radius: 8px;
 }
 .probe-verdict.pending { color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg); border-color: var(--uvp-panel-border); }
-.probe-verdict > div { display: grid; gap: 2px; }
-.probe-verdict strong { color: var(--uvp-text-primary); font-size: 10.5px; font-weight: 600; }
-.probe-verdict span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.probe-verdict > svg { flex-shrink: 0; }
+.probe-verdict strong {
+    overflow: hidden;
+    color: var(--uvp-text-primary); font-size: 10.5px; font-weight: 600;
+    text-overflow: ellipsis; white-space: nowrap;
+}
+/* pending 态仍有内部两行(主+副),用旧的 grid 结构:保持采样中的清晰引导 */
+.probe-verdict.pending { display: grid; grid-template-columns: 18px 1fr; gap: 7px; align-items: start; padding: 7px 10px; }
+.probe-verdict.pending > div { display: grid; gap: 2px; }
+.probe-verdict.pending span { color: var(--uvp-text-tertiary); font-size: 9.5px; }
 .section-meta.good { color: var(--uvp-brand-cyan); }
 .sidebar .probe-panel { gap: 8px; }
-.sidebar .probe-summary > div { padding: 7px 8px; }
-.sidebar .probe-verdict { padding: 7px 8px; }
-.side-probe-health { display: grid; gap: 6px; padding-top: 2px; }
-.side-probe-health .probe-health-grid { gap: 5px; }
-.side-probe-health .probe-health-grid > div { padding: 5px 7px; }
-.probe-tracks { display: grid; gap: 6px; }
-.probe-track {
-    padding: 9px 10px; background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 8px;
+/* 检测卡三格摘要:紧凑内边距,让概览卡有更多空间放 2×2 指标。
+ * 采样数字降一档(13px),避开跟概览"当前观看"「数据速率」14px 的主视觉。 */
+.sidebar .probe-summary > div { padding: 5px 8px; }
+.sidebar .probe-summary strong { font-size: 13px; }
+.sidebar .probe-verdict { padding: 7px 10px; }
+
+/* 轨道明细(视频 + 音频合并卡)。左侧类型条沿用全局配色约定:视频=品牌蓝、音频=青,
+ * 跟流信息块的两栏一致,同一种媒体在整个面板里始终是同一个颜色。
+ *
+ * 两行改为等分并 stretch,单元格垂直居中:轨道明细内容天生比"时间戳监控/时间线"少
+ * (视频 4 + 音频 2 = 6 单元格),按内容 auto 会在卡片下方堆一大片空白。
+ * 让两行拉伸吃满卡高度,视频/音频块内部单元格垂直居中,空白变成两行之间的自然呼吸。 */
+.probe-track-merged {
+    display: grid; grid-template-rows: 1fr 1fr; gap: 6px;
+    min-height: 0;
 }
-.probe-track.video { border-left: 2px solid var(--uvp-brand); }
-.probe-track.audio { border-left: 2px solid var(--uvp-brand-cyan); }
-.probe-track-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-.probe-track-head span { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-secondary); font-size: 10.5px; }
-.probe-track-head strong { color: var(--uvp-text-primary); font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; }
-.probe-data-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
-.probe-data-grid > div { display: grid; gap: 2px; min-width: 0; }
-.probe-data-grid strong { overflow: hidden; color: var(--uvp-text-secondary); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.probe-track-row {
+    display: grid; grid-template-columns: auto minmax(0, 1fr);
+    gap: 8px; align-items: center; align-content: center;
+    min-height: 0;
+}
+.probe-track-row + .probe-track-row { padding-top: 6px; border-top: 1px solid var(--uvp-panel-border); }
+.probe-track-kind {
+    display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+    padding-left: 6px; border-left: 2px solid var(--uvp-panel-border);
+    color: var(--uvp-text-secondary); font-size: 10px; font-weight: 600; white-space: nowrap;
+}
+.probe-track-row.video .probe-track-kind { border-left-color: var(--uvp-brand); }
+.probe-track-row.audio .probe-track-kind { border-left-color: var(--uvp-brand-cyan); }
+.probe-track-cells { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 10px; min-width: 0; }
+.probe-track-cells > div { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; min-width: 0; }
+.probe-track-cells span { flex-shrink: 0; color: var(--uvp-text-tertiary); font-size: 9.5px; }
+.probe-track-cells strong {
+    overflow: hidden;
+    color: var(--uvp-text-primary); font-family: ui-monospace, Menlo, monospace;
+    font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap;
+}
 .probe-health-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .probe-health-grid > div {
     display: grid; grid-template-columns: 1fr auto; gap: 2px 6px; align-items: baseline;
@@ -4813,7 +4964,19 @@ onBeforeUnmount(() => {
 }
 .frame-timeline.muted { opacity: 0.46; }
 .frame-bars { display: flex; align-items: end; gap: 3px; height: 46px; border-bottom: 1px solid var(--uvp-panel-border); }
+/* 详情条里的时间线:柱状区吃掉剩余高度,波形越高越容易看出帧间隔异常。
+ * 图例按内容高,不参与分配。 */
+.linked-timeline { grid-template-rows: minmax(0, 1fr) auto; }
+.linked-timeline .frame-legend { align-self: end; }
 .frame-bars > span { flex: 1; min-width: 2px; border-radius: 2px 2px 0 0; transition: height 0.2s ease; }
+/* 空态引导:柱状区中央的图标 + 一句说明。muted 状态下父级 .frame-timeline 会整体
+ * opacity 0.46,让引导条自身颜色不用再淡化;font-size 跟其他 meta 一档保持层级一致。 */
+.frame-bars-empty {
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; height: 100%;
+    color: var(--uvp-text-tertiary); font-size: 10.5px;
+}
+.frame-bars-empty > svg { color: var(--uvp-text-tertiary); }
 .frame-bars > span.video { background: color-mix(in srgb, var(--uvp-brand) 68%, transparent); }
 .frame-bars > span.audio { background: color-mix(in srgb, var(--uvp-brand-cyan) 68%, transparent); }
 .frame-bars > span.keyframe { background: var(--uvp-warning); box-shadow: 0 0 5px color-mix(in srgb, var(--uvp-warning) 44%, transparent); }
@@ -4892,15 +5055,11 @@ onBeforeUnmount(() => {
     .console-body { grid-template-columns: 1fr; }
     .video-frame { grid-column: 1; grid-row: 1; }
     .sidebar { grid-column: 1; grid-row: 2; max-height: none; }
-    .sidebar.sidebar-stream { grid-template-rows: auto auto; }
-    .sidebar-stream .panels,
-    .sidebar-stream .stream-panel { height: auto; }
     .linked-info-bar { grid-column: 1; grid-row: 3; }
 }
 @media (max-width: 640px) {
     .console-title { flex-wrap: wrap; }
-    .tabs { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .probe-data-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* 窄屏保持等分行为,不再硬编码列数(3 个 tab 也可能变);grid-auto-columns 会按 tabs 数量平分。 */
     .lens-grid { grid-template-columns: 1fr; }
     .linked-section .preset-grid { grid-template-columns: 1fr; }
 }

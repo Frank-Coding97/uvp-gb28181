@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
         // 生产环境服务的公共基础路径-用于生出环境的代理的路径
         base: env.VITE_PUBLIC_PATH,
         server: {
-            // host: "0.0.0.0",
+             host: "192.168.10.106",
             open: false,
             port: 5177,
             // 为开发服务器配置自定义代理规则-用于开发时的代理

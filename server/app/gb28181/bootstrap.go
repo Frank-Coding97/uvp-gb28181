@@ -897,6 +897,12 @@ func setupCivilCodeService() {
 		app.ZapLog.Warn("GB28181 DB 不可用,跳过 CivilCode 字典服务(catalog 4 层兜底降级 L4:000000)")
 		return
 	}
+	if seeded, err := civilcode.SeedIfEmpty(app.DB()); err != nil {
+		app.ZapLog.Warn("GB28181 CivilCode 字典 seed 失败,catalog 4 层兜底可能降级 L4",
+			zap.Error(err))
+	} else if seeded > 0 {
+		app.ZapLog.Info("GB28181 CivilCode 字典 seed 完成", zap.Int("count", seeded))
+	}
 	svc := civilcode.NewService(app.DB())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

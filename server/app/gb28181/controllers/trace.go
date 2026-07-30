@@ -420,7 +420,7 @@ func (tc *TraceController) queryFailure(c *gin.Context, err error) {
 	// unavailable 类错误也走这里但降级到 503 + 结构化提示
 	msg := "SIP 日志存储查询失败"
 	status := http.StatusInternalServerError
-	if errors.Is(err, gbtrace.ErrTraceStoreUnavailable) || errors.Is(err, gbtrace.ErrTraceQueryUnavailable) {
+	if errors.Is(err, gbtrace.ErrTraceStoreUnavailable) || errors.Is(err, gbtrace.ErrTraceQueryUnavailable) || health.State == gbtrace.HealthDegraded {
 		msg = "SIP 日志采集尚未启动或存储暂未就绪"
 		status = http.StatusServiceUnavailable
 	} else if err != nil {

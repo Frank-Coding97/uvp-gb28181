@@ -1,3 +1,5 @@
+//go:build ignore
+
 // 临时迁移执行器 - 合并 SIP 日志菜单
 // 用法: go run run-merge-sip-log.go
 package main
@@ -14,7 +16,10 @@ import (
 
 func main() {
 	// 连接数据库
-	dsn := "root:root@tcp(127.0.0.1:3306)/uvp_gb28181?charset=utf8mb4&parseTime=True&loc=Local"
+	dsn := os.Getenv("UVP_DATABASE_DSN")
+	if dsn == "" {
+		log.Fatal("UVP_DATABASE_DSN 环境变量未设置")
+	}
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)

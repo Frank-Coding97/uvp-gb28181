@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -43,11 +45,17 @@ func NewJobScheduler(opts ...Option) *JobScheduler {
 		opt(s)
 	}
 
-	// 如果没有设置日志记录器，使用默认配置
+	// 如果没有设置日志记录器，优先使用容器持久化目录；本地/CI 无权
+	// 创建根目录时回退到系统临时目录，避免构造器直接终止进程。
 	if s.logger == nil {
 		logger, err := NewFileJobLogger("/resource/logs/scheduler", LevelInfo)
 		if err != nil {
-			log.Fatalf("Failed to create logger: %v", err)
+			fallbackDir := filepath.Join(os.TempDir(), "uvp-gb28181", "scheduler")
+			log.Printf("Scheduler log directory unavailable, falling back to %s: %v", fallbackDir, err)
+			logger, err = NewFileJobLogger(fallbackDir, LevelInfo)
+			if err != nil {
+				panic(fmt.Sprintf("failed to create scheduler logger: %v", err))
+			}
 		}
 		s.logger = logger
 	}

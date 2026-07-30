@@ -1,0 +1,196 @@
+name: CI and Deploy Test
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: Deploy the selected revision to the test environment
+        required: true
+        type: boolean
+        default: false
+      allow_database_changes:
+        description: Database changes were reviewed and applied separately
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uvp-ci-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: 1.25.6
+  NODE_VERSION: 24.13.0
+  PNPM_VERSION: 10.28.1
+  DEPLOY_ENABLED: ${{ github.event_name == 'push' || inputs.deploy }}
+
+jobs:
+  build-test-deploy:
+    name: Build, test, and deploy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: test
+      url: https://www.uvplatform.cn
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: server/go.sum
+
+      - name: Test backend
+        working-directory: server
+        run: go test ./... -count=1
+
+      - name: Build Linux backend
+        working-directory: server
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o bin/uvp-gb28181-linux-amd64 main.go
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check and build frontend
+        working-directory: web
+        run: pnpm run build:prod
+
+      - name: Block automatic deployment of unreviewed database changes
+        if: env.DEPLOY_ENABLED == 'true' && github.event_name == 'push'
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            exit 0
+          fi
+          if ! git diff --quiet "$BEFORE_SHA" "$GITHUB_SHA" -- server/resource/database; then
+            echo "::error::Database files changed. Apply and review migrations separately, then use workflow_dispatch with allow_database_changes enabled."
+            exit 1
+          fi
+
+      - name: Require acknowledgement for manual database-change deployment
+        if: env.DEPLOY_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.allow_database_changes != true
+        run: |
+          if git diff --name-only "origin/${{ github.event.repository.default_branch }}...$GITHUB_SHA" -- server/resource/database | grep -q .; then
+            echo "::error::Database files differ from the default branch. Enable allow_database_changes only after applying reviewed migrations."
+            exit 1
+          fi
+
+      - name: Assemble immutable release bundle
+        if: env.DEPLOY_ENABLED == 'true'
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/uvp-release"
+          archive="$RUNNER_TEMP/uvp-release-$GITHUB_SHA.tar.gz"
+          rm -rf "$release_dir"
+          mkdir -p "$release_dir/backend/resource" "$release_dir/frontend"
+
+          install -m 0755 server/bin/uvp-gb28181-linux-amd64 "$release_dir/backend/uvp-gb28181"
+          cp -a server/resource/database "$release_dir/backend/resource/database"
+          cp -a server/resource/public "$release_dir/backend/resource/public"
+          cp deploy/test/backend.Dockerfile "$release_dir/backend/Dockerfile"
+
+          cp -a web/dist "$release_dir/frontend/dist"
+          cp deploy/test/frontend.Dockerfile "$release_dir/frontend/Dockerfile"
+          cp deploy/test/nginx.conf "$release_dir/frontend/nginx.conf"
+          cp deploy/test/compose.yml "$release_dir/compose.yml"
+
+          tar -czf "$archive" -C "$release_dir" .
+          echo "RELEASE_ARCHIVE=$archive" >> "$GITHUB_ENV"
+          echo "RELEASE_SHA256=$(sha256sum "$archive" | awk '{print $1}')" >> "$GITHUB_ENV"
+
+      - name: Configure deployment SSH identity
+        if: env.DEPLOY_ENABLED == 'true'
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.TEST_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/uvp_test_deploy"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/uvp_test_deploy" "$HOME/.ssh/known_hosts"
+
+      - name: Upload release bundle
+        if: env.DEPLOY_ENABLED == 'true'
+        env:
+          TEST_HOST: ${{ vars.TEST_HOST }}
+        run: |
+          set -euo pipefail
+          test -n "$TEST_HOST"
+          scp \
+            -i "$HOME/.ssh/uvp_test_deploy" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "$RELEASE_ARCHIVE" \
+            "uvp-deploy@$TEST_HOST:/home/uvp-deploy/incoming/uvp-release-$GITHUB_SHA.tar.gz"
+
+      - name: Deploy and verify test environment
+        if: env.DEPLOY_ENABLED == 'true'
+        env:
+          TEST_HOST: ${{ vars.TEST_HOST }}
+        run: |
+          set -euo pipefail
+          remote_archive="/home/uvp-deploy/incoming/uvp-release-$GITHUB_SHA.tar.gz"
+          set +e
+          ssh \
+            -i "$HOME/.ssh/uvp_test_deploy" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "uvp-deploy@$TEST_HOST" \
+            "sudo /usr/local/sbin/deploy-uvp '$GITHUB_SHA' '$remote_archive' '$RELEASE_SHA256'"
+          deploy_status=$?
+          set -e
+          ssh \
+            -i "$HOME/.ssh/uvp_test_deploy" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            "uvp-deploy@$TEST_HOST" \
+            "rm -f '$remote_archive'" || true
+          exit "$deploy_status"
+
+      - name: Publish deployment summary
+        if: env.DEPLOY_ENABLED == 'true'
+        run: |
+          {
+            echo "### Test deployment"
+            echo "- Revision: \`$GITHUB_SHA\`"
+            echo "- URL: https://www.uvplatform.cn"
+            echo "- Result: healthy"
+          } >> "$GITHUB_STEP_SUMMARY"

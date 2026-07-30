@@ -289,15 +289,16 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     expect(api.startPlay).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
     expect(api.getStreamMonitor).toHaveBeenCalledWith("stream-1");
-    await wrapper.get("[data-testid='linked-tab-stream']").trigger("click");
-    expect(wrapper.get("[data-testid='linked-detail-stream']").text()).toContain("2048 kbps");
-
+    // 流信息 tab 已并入探针 tab,原来的"累计 X 观看"现在在探针概览卡里
     await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
+    expect(wrapper.get("[data-testid='stream-brief']").text()).toContain("累计 3");
     await wrapper.get("[data-testid='probe-start']").trigger("click");
     await flushPromises();
     expect(api.runStreamProbe).toHaveBeenCalledWith("stream-1");
+    // 轨道明细里不再重复 codec(流信息块已有编码),改断言探针独有的采样帧与精确 FPS
     expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("76");
-    expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("H264");
+    expect(wrapper.get("[data-testid='linked-detail-probe']").text()).toContain("精确 FPS");
+    expect(wrapper.get("[data-testid='linked-detail-probe']").text()).not.toContain("H264");
 
     await wrapper.setProps({ visible: false });
     await flushPromises();
@@ -345,22 +346,29 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-stream']").trigger("click");
+    // 流信息 tab 已删,监控快照映射改到探针 tab 的概览卡里断言
+    await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
 
-    const side = wrapper.get("[data-testid='linked-side-stream']").text();
-    const detail = wrapper.get("[data-testid='linked-detail-stream']").text();
-    expect(side).toContain("1280×720 · 30 fps · 2070 帧");
-    expect(side).toContain("8000 Hz · 1 声道 · 3453 帧");
-    expect(side).toContain("132.4 KB/s");
-    expect(side).toContain("累计 8.26 MB");
-    expect(side).toContain("HLS");
-    expect(detail).toContain("1084.3 kbps");
-    expect(detail).toContain("0.0%");
-    expect(detail).toContain("累计 1");
+    const brief = wrapper.get("[data-testid='stream-brief']").text();
+    // 视频信息
+    expect(brief).toContain("1280×720");
+    expect(brief).toContain("30");
+    expect(brief).toContain("H264");
+    // 音频信息(声道字段仍在探针概览卡)
+    expect(brief).toContain("8000 Hz");
+    expect(brief).toContain("PCMA");
+    // 网络指标
+    expect(brief).toContain("132.4 KB/s");
+    expect(brief).toContain("累计 8.26 MB");
+    // 「录制状态」和「输出码率」都已移除;后者跟"数据速率"同源
+    expect(brief).not.toContain("录制状态");
+    expect(brief).not.toContain("1084.3 kbps");
+    // 累计观看数
+    expect(brief).toContain("累计 1");
     wrapper.unmount();
   });
 
-  it("右侧保留高频操作，流信息也使用统一的底部详情区", async () => {
+  it("侧栏与详情条按 tab 分工，云台/探针/高级各司其职", async () => {
     vi.useFakeTimers();
     const wrapper = mount(PlayConsoleLinked, {
       props: { visible: true, channel }
@@ -383,14 +391,17 @@ describe("PlayConsoleLinked 双区联动", () => {
     await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
     const probeSide = wrapper.get("[data-testid='linked-side-probe']");
     const probeDetail = wrapper.get("[data-testid='linked-detail-probe']");
+    // 侧栏留"实时信息 + 触发/摘要",采样结果全部下移到详情条
     expect(probeSide.text()).toContain("开始 3 秒检测");
-    expect(probeSide.text()).toContain("时间戳监控");
-    expect(probeSide.text()).toContain("帧到达抖动");
-    expect(probeSide.text()).not.toContain("轨道详情");
-    expect(probeDetail.text()).toContain("视频探针详情");
+    expect(probeSide.text()).toContain("概览");
+    expect(probeSide.text()).not.toContain("时间戳监控");
+    expect(probeSide.text()).not.toContain("帧到达抖动");
+    // 详情条三栏:轨道明细 / 时间戳监控 / 帧到达时间线
+    expect(probeDetail.text()).toContain("轨道明细");
+    expect(probeDetail.text()).toContain("时间戳监控");
+    expect(probeDetail.text()).toContain("视频 DTS 间隔");
     expect(probeDetail.text()).toContain("帧到达时间线");
-    expect(probeDetail.text()).not.toContain("时间戳监控");
-    expect(probeDetail.text()).not.toContain("视频 DTS 间隔");
+    expect(probeDetail.findAll(".linked-probe-layout > .linked-section")).toHaveLength(3);
 
     await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
     const advancedSide = wrapper.get("[data-testid='linked-side-advanced']");
@@ -401,18 +412,38 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(advancedDetail.text()).not.toContain("接口待接入");
     expect(advancedDetail.text()).toContain("标准控制字段");
 
-    await wrapper.get("[data-testid='linked-tab-stream']").trigger("click");
-    const streamSide = wrapper.get("[data-testid='linked-side-stream']");
-    const streamDetail = wrapper.get("[data-testid='linked-detail-stream']");
-    expect(streamSide.text()).toContain("媒体节点");
-    expect(streamSide.text()).toContain("媒体参数");
-    expect(streamSide.text()).toContain("数据速率");
-    expect(streamSide.text()).toContain("录制状态");
-    expect(streamSide.text()).not.toContain("当前观看");
-    expect(streamDetail.text()).toContain("当前观看");
-    expect(streamDetail.text()).toContain("输出码率");
-    expect(streamDetail.text()).toContain("视频接收丢包");
-    expect(streamDetail.text()).toContain("音频接收丢包");
+    wrapper.unmount();
+  });
+
+  it("探针面板顶部的流信息按概览 + 音频左/视频右分栏，丢包各归各类", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+
+    await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
+    const brief = wrapper.get("[data-testid='stream-brief']");
+
+    // 概览只放这两项持续变化的指标
+    expect(brief.get(".stream-brief-overview").text()).toContain("当前观看");
+    expect(brief.get(".stream-brief-overview").text()).toContain("数据速率");
+
+    // 左视频、右音频,顺序由 DOM 决定
+    const kinds = brief.findAll(".stream-brief-kind");
+    expect(kinds).toHaveLength(2);
+    expect(kinds[0].classes()).toContain("video");
+    expect(kinds[1].classes()).toContain("audio");
+
+    // 丢包跟着各自的媒体类型,不再单独占格
+    expect(kinds[0].text()).toContain("分辨率");
+    expect(kinds[0].text()).toContain("帧率");
+    expect(kinds[0].text()).toContain("丢包");
+    expect(kinds[1].text()).toContain("采样率");
+    expect(kinds[1].text()).toContain("声道");
+    expect(kinds[1].text()).toContain("丢包");
+
+    // 未检测时不再显示"尚未执行深度检测"那块占位
+    expect(wrapper.text()).not.toContain("尚未执行深度检测");
 
     wrapper.unmount();
   });
@@ -424,14 +455,19 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toContain("--linked-detail-height: 148px");
     expect(source).toContain('width="min(1280px, calc(100vw - 32px))"');
     expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+336px/s);
-    expect(source).toContain("sidebar-stream");
-    expect(source).toContain('data-testid="linked-detail-stream"');
+    // 流信息 tab 已并入探针 tab,原来的 sidebar-stream / linked-detail-stream / linked-stream-metrics
+    // 全都退出历史舞台
+    expect(source).not.toContain("sidebar-stream");
+    expect(source).not.toContain('data-testid="linked-detail-stream"');
+    expect(source).not.toContain(".linked-stream-metrics");
     expect(source).not.toContain("phase === 'playing' && activeTab !== 'stream'");
     expect(source).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
     expect(source).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
-    expect(source).toMatch(/\.linked-stream-metrics\s*\{[^}]*grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(source).toMatch(/\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s);
+    // 探针详情条三栏不等分:时间线是横向柱状图,等分会把 32 根柱子挤到每根不足 9px
+    expect(source).toMatch(
+      /\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.4fr\)/s
+    );
     expect(source).toMatch(
       /\.sidebar\s+\[data-testid="linked-side-advanced"\]\s+\.adv-actions\s*\{[^}]*grid-template-columns:\s*1fr/s
     );
@@ -466,7 +502,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await vi.advanceTimersByTimeAsync(10);
     await flushPromises();
 
-    await wrapper.get("[data-testid='linked-tab-stream']").trigger("click");
+    // session-badge 在标题栏,不用切 tab 也能读到
     expect(wrapper.get(".session-badge").text()).toContain("00:10");
     api.getStreamMonitor.mockRejectedValueOnce(new Error("node unavailable"));
     await vi.advanceTimersByTimeAsync(2000);

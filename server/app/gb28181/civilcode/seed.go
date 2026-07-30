@@ -55,7 +55,7 @@ func SeedIfEmpty(db *gorm.DB) (seeded int, err error) {
 	}
 
 	const batch = 500
-	if err = db.CreateInBatches(rows, batch).Error; err != nil {
+	if err = db.CreateInBatches(&rows, batch).Error; err != nil {
 		return 0, fmt.Errorf("civilcode: insert batches: %w", err)
 	}
 	return len(rows), nil
