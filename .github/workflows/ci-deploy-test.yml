@@ -131,7 +131,7 @@ jobs:
     needs: build-test
     if: github.event_name == 'push' || inputs.deploy == true
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     environment:
       name: test
       url: https://www.uvplatform.cn
@@ -218,6 +218,8 @@ jobs:
             -i "$HOME/.ssh/uvp_test_deploy" \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
             "$RELEASE_ARCHIVE" \
             "uvp-deploy@$TEST_HOST:/home/uvp-deploy/incoming/uvp-release-$GITHUB_SHA.tar.gz"
 
@@ -232,6 +234,8 @@ jobs:
             -i "$HOME/.ssh/uvp_test_deploy" \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
             "uvp-deploy@$TEST_HOST" \
             "sudo /usr/local/sbin/deploy-uvp '$GITHUB_SHA' '$remote_archive' '$RELEASE_SHA256'"
           deploy_status=$?
@@ -240,6 +244,8 @@ jobs:
             -i "$HOME/.ssh/uvp_test_deploy" \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=20 \
             "uvp-deploy@$TEST_HOST" \
             "rm -f '$remote_archive'" || true
           exit "$deploy_status"
