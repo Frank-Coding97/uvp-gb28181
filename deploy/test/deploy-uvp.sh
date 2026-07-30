@@ -105,10 +105,20 @@ log "Activating release $SHA"
 ACTIVATION_STARTED=1
 compose_for "$SHA" up -d --wait --wait-timeout 180
 
-curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-  --max-time 15 http://127.0.0.1:56000/healthz >/dev/null
-curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
-  --max-time 20 https://www.uvplatform.cn/healthz >/dev/null
+for url in \
+  http://127.0.0.1:56000/healthz \
+  http://127.0.0.1:56000/system/ \
+  http://127.0.0.1:56000/system/account \
+  http://127.0.0.1:56000/system/css/loading.css; do
+  curl --fail --location --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+    --max-redirs 5 --max-time 15 "$url" >/dev/null
+done
+for url in \
+  https://www.uvplatform.cn/healthz \
+  https://www.uvplatform.cn/system/; do
+  curl --fail --location --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+    --max-redirs 5 --max-time 20 "$url" >/dev/null
+done
 
 printf '%s\n' "$SHA" > "$CURRENT_FILE.tmp"
 mv "$CURRENT_FILE.tmp" "$CURRENT_FILE"
