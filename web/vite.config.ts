@@ -15,7 +15,7 @@ export default defineConfig(({ mode }) => {
     const env: any = loadEnv(mode, root);
     return {
         // 生产环境服务的公共基础路径-用于生出环境的代理的路径
-        base: env.VITE_PUBLIC_PATH,
+        base: "/",
         server: {
              host: "192.168.10.106",
             open: false,

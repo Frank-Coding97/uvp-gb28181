@@ -107,14 +107,16 @@ compose_for "$SHA" up -d --wait --wait-timeout 180
 
 for url in \
   http://127.0.0.1:56000/healthz \
-  http://127.0.0.1:56000/system/ \
-  http://127.0.0.1:56000/system/account \
-  http://127.0.0.1:56000/system/css/loading.css; do
+  http://127.0.0.1:56000/ \
+  http://127.0.0.1:56000/account \
+  http://127.0.0.1:56000/css/loading.css \
+  http://127.0.0.1:56000/system/; do
   curl --fail --location --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
     --max-redirs 5 --max-time 15 "$url" >/dev/null
 done
 for url in \
   https://www.uvplatform.cn/healthz \
+  https://www.uvplatform.cn/ \
   https://www.uvplatform.cn/system/; do
   curl --fail --location --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
     --max-redirs 5 --max-time 20 "$url" >/dev/null
