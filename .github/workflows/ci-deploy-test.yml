@@ -97,11 +97,16 @@ jobs:
           output_dir="$RUNNER_TEMP/release-output"
           archive="$output_dir/uvp-release-$GITHUB_SHA.tar.gz"
           rm -rf "$release_dir" "$output_dir"
-          mkdir -p "$release_dir/backend/resource" "$release_dir/frontend" "$output_dir"
+          mkdir -p \
+            "$release_dir/backend/resource/public" \
+            "$release_dir/frontend" \
+            "$output_dir"
 
           install -m 0755 server/bin/uvp-gb28181-linux-amd64 "$release_dir/backend/uvp-gb28181"
           cp -a server/resource/database "$release_dir/backend/resource/database"
-          cp -a server/resource/public "$release_dir/backend/resource/public"
+          if [[ -d server/resource/public ]]; then
+            cp -a server/resource/public/. "$release_dir/backend/resource/public/"
+          fi
           cp deploy/test/backend.Dockerfile "$release_dir/backend/Dockerfile"
 
           cp -a web/dist "$release_dir/frontend/dist"
