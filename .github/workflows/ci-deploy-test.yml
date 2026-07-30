@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  deployments: read
 
 concurrency:
   group: uvp-ci-${{ github.ref }}
@@ -95,14 +96,31 @@ jobs:
       - name: Block automatic deployment of unreviewed database changes
         if: env.DEPLOY_ENABLED == 'true' && github.event_name == 'push'
         env:
-          BEFORE_SHA: ${{ github.event.before }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
-            exit 0
+          baseline_sha=""
+          while IFS=$'\t' read -r deployment_id deployment_sha; do
+            state=$(gh api \
+              "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" \
+              --jq '.[0].state // ""')
+            if [[ "$state" == "success" ]]; then
+              baseline_sha="$deployment_sha"
+              break
+            fi
+          done < <(
+            gh api \
+              "repos/$GITHUB_REPOSITORY/deployments?environment=test&per_page=100" \
+              --jq '.[] | [.id, .sha] | @tsv'
+          )
+
+          if [[ -z "$baseline_sha" ]]; then
+            echo "::error::No successful test deployment baseline exists. Run workflow_dispatch with deploy and allow_database_changes enabled for the first deployment."
+            exit 1
           fi
-          if ! git diff --quiet "$BEFORE_SHA" "$GITHUB_SHA" -- server/resource/database; then
-            echo "::error::Database files changed. Apply and review migrations separately, then use workflow_dispatch with allow_database_changes enabled."
+          git cat-file -e "$baseline_sha^{commit}"
+          if ! git diff --quiet "$baseline_sha" "$GITHUB_SHA" -- server/resource/database; then
+            echo "::error::Database files changed since the last successful deployment. Apply and review migrations separately, then use workflow_dispatch with allow_database_changes enabled."
             exit 1
           fi
 
