@@ -33,16 +33,12 @@ env:
   GO_VERSION: 1.25.6
   NODE_VERSION: 24.13.0
   PNPM_VERSION: 10.28.1
-  DEPLOY_ENABLED: ${{ github.event_name == 'push' || inputs.deploy }}
 
 jobs:
-  build-test-deploy:
-    name: Build, test, and deploy
+  build-test:
+    name: Build and test
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    environment:
-      name: test
-      url: https://www.uvplatform.cn
+    timeout-minutes: 40
 
     steps:
       - name: Check out source
@@ -93,8 +89,56 @@ jobs:
         working-directory: web
         run: pnpm run build:prod
 
+      - name: Assemble immutable release bundle
+        if: github.event_name == 'push' || inputs.deploy == true
+        run: |
+          set -euo pipefail
+          release_dir="$RUNNER_TEMP/uvp-release"
+          output_dir="$RUNNER_TEMP/release-output"
+          archive="$output_dir/uvp-release-$GITHUB_SHA.tar.gz"
+          rm -rf "$release_dir" "$output_dir"
+          mkdir -p "$release_dir/backend/resource" "$release_dir/frontend" "$output_dir"
+
+          install -m 0755 server/bin/uvp-gb28181-linux-amd64 "$release_dir/backend/uvp-gb28181"
+          cp -a server/resource/database "$release_dir/backend/resource/database"
+          cp -a server/resource/public "$release_dir/backend/resource/public"
+          cp deploy/test/backend.Dockerfile "$release_dir/backend/Dockerfile"
+
+          cp -a web/dist "$release_dir/frontend/dist"
+          cp deploy/test/frontend.Dockerfile "$release_dir/frontend/Dockerfile"
+          cp deploy/test/nginx.conf "$release_dir/frontend/nginx.conf"
+          cp deploy/test/compose.yml "$release_dir/compose.yml"
+
+          tar -czf "$archive" -C "$release_dir" .
+
+      - name: Upload immutable release artifact
+        if: github.event_name == 'push' || inputs.deploy == true
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: uvp-release-${{ github.sha }}
+          path: ${{ runner.temp }}/release-output/uvp-release-${{ github.sha }}.tar.gz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  deploy-test:
+    name: Deploy test
+    needs: build-test
+    if: github.event_name == 'push' || inputs.deploy == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: test
+      url: https://www.uvplatform.cn
+
+    steps:
+      - name: Check out deployment metadata
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
       - name: Block automatic deployment of unreviewed database changes
-        if: env.DEPLOY_ENABLED == 'true' && github.event_name == 'push'
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -125,38 +169,28 @@ jobs:
           fi
 
       - name: Require acknowledgement for manual database-change deployment
-        if: env.DEPLOY_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.allow_database_changes != true
+        if: github.event_name == 'workflow_dispatch' && inputs.allow_database_changes != true
         run: |
           if git diff --name-only "origin/${{ github.event.repository.default_branch }}...$GITHUB_SHA" -- server/resource/database | grep -q .; then
             echo "::error::Database files differ from the default branch. Enable allow_database_changes only after applying reviewed migrations."
             exit 1
           fi
 
-      - name: Assemble immutable release bundle
-        if: env.DEPLOY_ENABLED == 'true'
+      - name: Download immutable release artifact
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: uvp-release-${{ github.sha }}
+          path: ${{ runner.temp }}/release-output
+
+      - name: Verify release artifact
         run: |
           set -euo pipefail
-          release_dir="$RUNNER_TEMP/uvp-release"
-          archive="$RUNNER_TEMP/uvp-release-$GITHUB_SHA.tar.gz"
-          rm -rf "$release_dir"
-          mkdir -p "$release_dir/backend/resource" "$release_dir/frontend"
-
-          install -m 0755 server/bin/uvp-gb28181-linux-amd64 "$release_dir/backend/uvp-gb28181"
-          cp -a server/resource/database "$release_dir/backend/resource/database"
-          cp -a server/resource/public "$release_dir/backend/resource/public"
-          cp deploy/test/backend.Dockerfile "$release_dir/backend/Dockerfile"
-
-          cp -a web/dist "$release_dir/frontend/dist"
-          cp deploy/test/frontend.Dockerfile "$release_dir/frontend/Dockerfile"
-          cp deploy/test/nginx.conf "$release_dir/frontend/nginx.conf"
-          cp deploy/test/compose.yml "$release_dir/compose.yml"
-
-          tar -czf "$archive" -C "$release_dir" .
+          archive="$RUNNER_TEMP/release-output/uvp-release-$GITHUB_SHA.tar.gz"
+          test -f "$archive"
           echo "RELEASE_ARCHIVE=$archive" >> "$GITHUB_ENV"
           echo "RELEASE_SHA256=$(sha256sum "$archive" | awk '{print $1}')" >> "$GITHUB_ENV"
 
       - name: Configure deployment SSH identity
-        if: env.DEPLOY_ENABLED == 'true'
         env:
           SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.TEST_SSH_KNOWN_HOSTS }}
@@ -170,7 +204,6 @@ jobs:
           chmod 0600 "$HOME/.ssh/uvp_test_deploy" "$HOME/.ssh/known_hosts"
 
       - name: Upload release bundle
-        if: env.DEPLOY_ENABLED == 'true'
         env:
           TEST_HOST: ${{ vars.TEST_HOST }}
         run: |
@@ -184,7 +217,6 @@ jobs:
             "uvp-deploy@$TEST_HOST:/home/uvp-deploy/incoming/uvp-release-$GITHUB_SHA.tar.gz"
 
       - name: Deploy and verify test environment
-        if: env.DEPLOY_ENABLED == 'true'
         env:
           TEST_HOST: ${{ vars.TEST_HOST }}
         run: |
@@ -208,7 +240,6 @@ jobs:
           exit "$deploy_status"
 
       - name: Publish deployment summary
-        if: env.DEPLOY_ENABLED == 'true'
         run: |
           {
             echo "### Test deployment"
