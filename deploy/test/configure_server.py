@@ -53,6 +53,8 @@ def yaml_scalar(value: object) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
+    if isinstance(value, list):
+        return json.dumps(value, ensure_ascii=False)
     return json.dumps(str(value), ensure_ascii=False)
 
 
@@ -131,6 +133,7 @@ def main() -> None:
     replacements: dict[tuple[str, ...], object] = {
         ("server", "appdebug"): True,
         ("server", "cachetype"): "redis",
+        ("server", "notcheckuser"): [1],
         ("system", "systemname"): "UVP GB28181",
         ("httpserver", "port"): ":18978",
         ("token", "jwttokensignkey"): jwt_secret,
