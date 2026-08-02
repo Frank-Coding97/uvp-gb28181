@@ -126,8 +126,8 @@ function nodeTitle(node: DirectoryNode) {
     return node.depth >= 3 ? `${detail}。目录层级较深，建议后续整理。` : detail;
 }
 
-async function refresh() {
-    await load(props.modelValue.view, true);
+async function refresh(view: DirectoryView = props.modelValue.view) {
+    await load(view, true);
 }
 
 defineExpose({ refresh });
@@ -145,7 +145,7 @@ onMounted(() => load(props.modelValue.view));
                     </button>
                 </a-tooltip>
                 <a-tooltip content="刷新目录">
-                    <button class="icon-button" type="button" aria-label="刷新目录" @click="refresh">
+                    <button class="icon-button" type="button" aria-label="刷新目录" @click="refresh()">
                         <RefreshCcw :size="13" :class="{ spin: loading }" />
                     </button>
                 </a-tooltip>

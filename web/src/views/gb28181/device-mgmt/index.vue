@@ -30,12 +30,15 @@ import {
     Video,
     X,
     Download,
-    Plus
+    Plus,
+    FolderPlus,
+    FolderMinus
 } from "@lucide/vue";
 import { stopPlay } from "@/api/gb28181";
 import {
     batchDeleteChannels,
     batchDeleteDevices,
+    removeDevicesFromGroup,
     createDevice,
     deleteChannel,
     deleteDevice,
@@ -78,8 +81,9 @@ import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
+import AddToGroupDialog from "./components/AddToGroupDialog.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
-import { createDirectoryState, directoryQuery, selectDirectory } from "./directoryState";
+import { createDirectoryState, customGroupBatchActions, directoryQuery, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 
 type ViewMode = "list" | "card" | "map";
@@ -122,6 +126,8 @@ const customTree = ref<DirectoryNode[]>([]);
 const groupEditorVisible = ref(false);
 const groupEditorMode = ref<CustomGroupEditorMode>("create");
 const groupEditorNode = ref<DirectoryNode | null>(null);
+const addToGroupVisible = ref(false);
+const memberMutationLoading = ref(false);
 const drawerVisible = ref(false);
 const subscriptionDialogVisible = ref(false);
 const subscriptionDevice = ref<DeviceVO | null>(null);
@@ -216,6 +222,11 @@ const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
 ];
 const hasFilters = computed(() => Boolean(keyword.value || deviceIdFilter.value || statusFilter.value || directoryState.value.selectedKey[directoryState.value.view]));
 const selectedCount = computed(() => selectedRowKeys.value.length);
+const groupBatchActions = computed(() => customGroupBatchActions(
+    assetKind.value,
+    selectedCount.value,
+    directoryState.value.selectedKey[directoryState.value.view]
+));
 const tablePagination = computed(() => ({
     current: page.value,
     pageSize: pageSize.value,
@@ -444,6 +455,46 @@ async function onGroupSaved(result: {
     page.value = 1;
     selectedRowKeys.value = [];
     refreshMainData();
+}
+async function refreshAfterMemberMutation() {
+    selectedRowKeys.value = [];
+    await directoryPanelRef.value?.refresh("custom");
+    refreshMainData();
+}
+async function onDevicesAdded(result: { addedCount: number; skippedCount: number }) {
+    Message.success(result.skippedCount
+        ? `已添加 ${result.addedCount} 台，${result.skippedCount} 台已在分组中`
+        : `已添加 ${result.addedCount} 台设备`);
+    await refreshAfterMemberMutation();
+}
+function removeSelectedFromCurrentGroup() {
+    const groupId = groupBatchActions.value.removeGroupId;
+    const ids = [...selectedRowKeys.value];
+    if (!groupId || ids.length === 0 || memberMutationLoading.value) return;
+    Modal.warning({
+        title: "从当前分组移除设备?",
+        content: `将移除 ${ids.length} 台设备与当前分组的关系，不会删除设备。`,
+        okText: "确认移除",
+        cancelText: "取消",
+        hideCancel: false,
+        onOk: async () => {
+            memberMutationLoading.value = true;
+            try {
+                const response = await removeDevicesFromGroup(groupId, ids);
+                if (response.code !== 0) throw new Error(response.message || "移除失败");
+                const result = response.data;
+                Message.success(result.skippedCount
+                    ? `已移除 ${result.removedCount} 台，${result.skippedCount} 台原本不在当前分组`
+                    : `已从当前分组移除 ${result.removedCount} 台设备`);
+                await refreshAfterMemberMutation();
+            } catch (error: any) {
+                Message.error(error?.message || "移除失败，已保留当前选择");
+                throw error;
+            } finally {
+                memberMutationLoading.value = false;
+            }
+        }
+    });
 }
 function setViewMode(mode: ViewMode) {
     viewMode.value = mode;
@@ -1546,6 +1597,24 @@ onUnmounted(() => {
                     <div v-if="selectedCount" class="batch-bar">
                         <div class="batch-info"><strong>{{ selectedCount }}</strong> 项已选</div>
                         <div class="batch-ops">
+                            <button
+                                v-if="canManageGroups && groupBatchActions.canAdd"
+                                class="btn-group"
+                                type="button"
+                                :disabled="memberMutationLoading"
+                                @click="addToGroupVisible = true"
+                            >
+                                <FolderPlus :size="14" /> 添加到分组
+                            </button>
+                            <button
+                                v-if="canManageGroups && groupBatchActions.removeGroupId"
+                                class="btn-group"
+                                type="button"
+                                :disabled="memberMutationLoading"
+                                @click="removeSelectedFromCurrentGroup"
+                            >
+                                <FolderMinus :size="14" /> 从当前分组移除
+                            </button>
                             <button class="btn-danger" type="button" :disabled="deleting" @click="handleBatchDelete">批量删除</button>
                         </div>
                     </div>
@@ -2313,6 +2382,12 @@ onUnmounted(() => {
                 @saved="onGroupSaved"
             />
 
+            <AddToGroupDialog
+                v-model:visible="addToGroupVisible"
+                :device-ids="selectedRowKeys"
+                @saved="onDevicesAdded"
+            />
+
             <PlayConsoleLinked
                 v-model:visible="controlConsoleVisible"
                 :channel="controlConsoleChannel"
@@ -2667,6 +2742,7 @@ onUnmounted(() => {
 .icon-btn.small { width: 24px; height: 24px; }
 .btn-primary,
 .btn-ghost,
+.btn-group,
 .btn-danger,
 .play-cta {
     display: inline-flex;
@@ -2685,6 +2761,14 @@ onUnmounted(() => {
     font-weight: 600;
 }
 .btn-primary.long { width: 100%; }
+.btn-group {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 26%, transparent);
+    font-weight: 600;
+}
+.btn-group:hover { background: color-mix(in srgb, var(--uvp-brand) 16%, var(--uvp-panel-bg)); }
+.btn-group:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-danger {
     color: #fff;
     background: #ef4444;
@@ -2877,7 +2961,7 @@ onUnmounted(() => {
     border-radius: 12px;
 }
 .batch-info strong { color: var(--uvp-brand); }
-.batch-ops { display: flex; gap: 8px; }
+.batch-ops { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .view-body { min-width: 0; flex: 1; min-height: 0; }
 .table-view { display: flex; flex-direction: column; gap: 10px; }
 .uvp-data-table :deep(.arco-table-body.arco-scrollbar-container) { height: calc(100% - 15px); }

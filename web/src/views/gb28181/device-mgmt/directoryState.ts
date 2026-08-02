@@ -34,3 +34,10 @@ export function directoryQuery(state: DirectoryState): { directoryView?: Directo
     const key = state.selectedKey[state.view];
     return key ? { directoryView: state.view, directoryKey: key } : {};
 }
+
+export function customGroupBatchActions(assetKind: "device" | "channel", selectedCount: number, selectedKey: string | null) {
+    const canAdd = assetKind === "device" && selectedCount > 0;
+    if (!canAdd) return { canAdd: false, removeGroupId: null };
+    const match = selectedKey?.match(/^custom:group:([1-9]\d*)$/);
+    return { canAdd: true, removeGroupId: match ? Number(match[1]) : null };
+}

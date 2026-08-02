@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createDirectoryState, directoryQuery, selectDirectory, switchDirectoryView } from "./directoryState";
+import { createDirectoryState, customGroupBatchActions, directoryQuery, selectDirectory, switchDirectoryView } from "./directoryState";
 
 describe("directoryState", () => {
     it("defaults to national and keeps view state separately", () => {
@@ -22,5 +22,13 @@ describe("directoryState", () => {
         const result = switchDirectoryView(createDirectoryState(), "custom");
         expect(result.listReset).toEqual({ page: 1, clearSelection: true });
         expect(result).not.toHaveProperty("playing");
+    });
+
+    it("shows member actions only for selected devices and real custom groups", () => {
+        expect(customGroupBatchActions("device", 2, "national:area:370112")).toEqual({ canAdd: true, removeGroupId: null });
+        expect(customGroupBatchActions("device", 2, "custom:group:12")).toEqual({ canAdd: true, removeGroupId: 12 });
+        expect(customGroupBatchActions("device", 2, "custom:ungrouped")).toEqual({ canAdd: true, removeGroupId: null });
+        expect(customGroupBatchActions("channel", 2, "custom:group:12")).toEqual({ canAdd: false, removeGroupId: null });
+        expect(customGroupBatchActions("device", 0, "custom:group:12")).toEqual({ canAdd: false, removeGroupId: null });
     });
 });
