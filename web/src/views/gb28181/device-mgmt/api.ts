@@ -6,6 +6,24 @@ export type OnlineStatus = "online" | "offline";
 export type AssetKind = "channel" | "device";
 export type ProtocolOverride = "auto" | "2016" | "2022";
 export type ProtocolVersionSource = "register" | "override" | "history" | "default" | string;
+export type DirectoryView = "national" | "custom";
+
+export interface DirectoryNode {
+    key: string;
+    name: string;
+    type: "area" | "organization" | "unknown" | "group" | "ungrouped" | string;
+    code?: string;
+    readOnly: boolean;
+    count: number;
+    onlineCount: number;
+    depth: number;
+    children?: DirectoryNode[];
+}
+
+export interface DirectoryQuery {
+    directoryView?: DirectoryView;
+    directoryKey?: string;
+}
 
 export interface PageResult<T> {
     list: T[];
@@ -195,7 +213,7 @@ export interface AnomalyRecord {
     nodePath: string;
 }
 
-export interface DeviceQuery {
+export interface DeviceQuery extends DirectoryQuery {
     q?: string;
     nodeId?: number;
     status?: OnlineStatus;
@@ -205,7 +223,7 @@ export interface DeviceQuery {
     sort?: string;
 }
 
-export interface ChannelQuery {
+export interface ChannelQuery extends DirectoryQuery {
     q?: string;
     deviceId?: string;
     nodeId?: number;
@@ -220,6 +238,27 @@ export const listCatalogRoots = () =>
         "get",
         baseUrlApi("gb28181/device-mgmt/catalog/tree")
     );
+
+export const listDirectoryTree = (view: DirectoryView) =>
+    http.request<BaseResult<{ list: DirectoryNode[] }>>("get", baseUrlApi("gb28181/device-mgmt/directory/tree"), { params: { view } });
+
+export const createCustomGroup = (data: { name: string; parentId?: number | null }) =>
+    http.request<BaseResult<DirectoryNode>>("post", baseUrlApi("gb28181/device-mgmt/custom-groups"), { data });
+
+export const renameCustomGroup = (id: number, name: string) =>
+    http.request<BaseResult<{ id: number; name: string }>>("patch", baseUrlApi(`gb28181/device-mgmt/custom-groups/${id}`), { data: { name } });
+
+export const moveCustomGroup = (id: number, targetParentId: number | null) =>
+    http.request<BaseResult<{ id: number; parentId: number }>>("post", baseUrlApi(`gb28181/device-mgmt/custom-groups/${id}/move`), { data: { targetParentId } });
+
+export const deleteCustomGroup = (id: number) =>
+    http.request<BaseResult<{ removedDeviceCount: number }>>("delete", baseUrlApi(`gb28181/device-mgmt/custom-groups/${id}`));
+
+export const addDevicesToGroup = (id: number, deviceIds: number[]) =>
+    http.request<BaseResult<{ requestedCount: number; addedCount: number; skippedCount: number }>>("post", baseUrlApi(`gb28181/device-mgmt/custom-groups/${id}/devices`), { data: { deviceIds } });
+
+export const removeDevicesFromGroup = (id: number, deviceIds: number[]) =>
+    http.request<BaseResult<{ requestedCount: number; removedCount: number; skippedCount: number }>>("post", baseUrlApi(`gb28181/device-mgmt/custom-groups/${id}/devices/remove`), { data: { deviceIds } });
 
 export const listCatalogChildren = (id: number) =>
     http.request<BaseResult<{ list: CatalogNode[]; total: number }>>(
@@ -280,7 +319,7 @@ export const getChannelTimeline = (id: number) =>
         baseUrlApi(`gb28181/device-mgmt/channel/${id}/timeline`)
     );
 
-export interface MapQuery {
+export interface MapQuery extends DirectoryQuery {
     limit?: number;
     zoom?: number;
     minLat?: number;
@@ -306,7 +345,7 @@ export const listMapClusters = (params: MapQuery & { zoom: number }) =>
         { params }
     );
 
-export const getNoCoordCount = (params: Pick<MapQuery, "q" | "nodeId" | "status"> = {}) =>
+export const getNoCoordCount = (params: Pick<MapQuery, "q" | "nodeId" | "status" | "directoryView" | "directoryKey"> = {}) =>
     http.request<BaseResult<{ count: number }>>("get", baseUrlApi("gb28181/device-mgmt/map/no-coord-count"), { params });
 
 export const listAnomalies = (params: { resolved?: "0" | "1"; page?: number; pageSize?: number }) =>
