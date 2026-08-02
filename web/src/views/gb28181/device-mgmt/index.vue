@@ -83,7 +83,7 @@ import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
 import AddToGroupDialog from "./components/AddToGroupDialog.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
-import { createDirectoryState, customGroupBatchActions, directoryQuery, selectDirectory } from "./directoryState";
+import { createDirectoryState, customGroupBatchActions, directoryQuery, findDirectoryNode, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 
 type ViewMode = "list" | "card" | "map";
@@ -225,7 +225,7 @@ const selectedCount = computed(() => selectedRowKeys.value.length);
 const groupBatchActions = computed(() => customGroupBatchActions(
     assetKind.value,
     selectedCount.value,
-    directoryState.value.selectedKey[directoryState.value.view]
+    selectedDirectory.value
 ));
 const tablePagination = computed(() => ({
     current: page.value,
@@ -400,20 +400,18 @@ function clearDirectorySelection(refresh = true) {
 }
 function onDirectoryTreeLoaded(view: "national" | "custom", tree: DirectoryNode[]) {
     if (view === "custom") customTree.value = tree;
+    const selectedKey = directoryState.value.selectedKey[view];
+    if (selectedKey) {
+        selectedDirectories.value = {
+            ...selectedDirectories.value,
+            [view]: findDirectoryNode(tree, selectedKey)
+        };
+    }
 }
 function openGroupEditor(mode: CustomGroupEditorMode, node: DirectoryNode | null) {
     groupEditorMode.value = mode;
     groupEditorNode.value = node;
     groupEditorVisible.value = true;
-}
-function findDirectoryNode(nodes: DirectoryNode[], key: string | null): DirectoryNode | null {
-    if (!key) return null;
-    for (const node of nodes) {
-        if (node.key === key) return node;
-        const child = findDirectoryNode(node.children || [], key);
-        if (child) return child;
-    }
-    return null;
 }
 async function onGroupSaved(result: {
     action: CustomGroupEditorMode;

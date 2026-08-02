@@ -35,7 +35,7 @@ function mountEditor(props: Record<string, unknown>) {
         global: {
             stubs: {
                 "a-modal": { props: ["visible"], template: "<div v-if='visible'><slot /><slot name='footer' /></div>" },
-                "a-form": { template: "<form @submit.prevent><slot /></form>" },
+                "a-form": { props: ["model"], template: "<form :data-has-model='Boolean(model)' @submit.prevent><slot /></form>" },
                 "a-form-item": { props: ["help"], template: "<label><slot /><span>{{ help }}</span></label>" },
                 "a-input": {
                     props: ["modelValue"],
@@ -115,5 +115,10 @@ describe("CustomGroupEditor", () => {
     it("renders nothing when management permission is absent", () => {
         const wrapper = mountEditor({ canManage: false });
         expect(wrapper.html()).toBe("<!--v-if-->");
+    });
+
+    it("passes a model to the Arco form", () => {
+        const wrapper = mountEditor({ mode: "create", node: null });
+        expect(wrapper.get("form").attributes("data-has-model")).toBe("true");
     });
 });

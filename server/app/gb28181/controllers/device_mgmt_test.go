@@ -345,6 +345,20 @@ func TestDeviceMgmt_CustomDirectoryFiltersDevicesChannelsAndMap(t *testing.T) {
 	require.EqualValues(t, 1, unmarshal(t, w)["data"].(map[string]any)["count"])
 }
 
+func TestDeviceMgmt_CustomUngroupedFilterIsDeptScoped(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	require.NoError(t, db.Create(&[]gbmodels.GbDevice{
+		{DeviceID: "D10", OwnerDeptID: 10, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "D20", OwnerDeptID: 20, SubscribeCapability: gbmodels.SubscribeUnknown},
+	}).Error)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices?directoryView=custom&directoryKey=custom:ungrouped:10", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	data := unmarshal(t, w)["data"].(map[string]any)
+	require.EqualValues(t, 1, data["total"])
+	require.Equal(t, "D10", data["list"].([]any)[0].(map[string]any)["deviceId"])
+}
+
 func TestDeviceMgmt_RejectsMixedDirectoryParameters(t *testing.T) {
 	r, _ := newDeviceMgmtRouter(t)
 	for _, path := range []string{"devices", "channels", "map/markers", "map/clusters", "map/no-coord-count"} {

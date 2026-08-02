@@ -1,3 +1,5 @@
+import type { DirectoryNode } from "./api";
+
 export type DirectoryView = "national" | "custom";
 
 export interface DirectoryState {
@@ -35,9 +37,19 @@ export function directoryQuery(state: DirectoryState): { directoryView?: Directo
     return key ? { directoryView: state.view, directoryKey: key } : {};
 }
 
-export function customGroupBatchActions(assetKind: "device" | "channel", selectedCount: number, selectedKey: string | null) {
+export function findDirectoryNode(nodes: DirectoryNode[], key: string | null): DirectoryNode | null {
+    if (!key) return null;
+    for (const node of nodes) {
+        if (node.key === key) return node;
+        const child = findDirectoryNode(node.children || [], key);
+        if (child) return child;
+    }
+    return null;
+}
+
+export function customGroupBatchActions(assetKind: "device" | "channel", selectedCount: number, selectedNode: DirectoryNode | null) {
     const canAdd = assetKind === "device" && selectedCount > 0;
     if (!canAdd) return { canAdd: false, removeGroupId: null };
-    const match = selectedKey?.match(/^custom:group:([1-9]\d*)$/);
+    const match = selectedNode?.children?.length ? null : selectedNode?.key.match(/^custom:group:([1-9]\d*)$/);
     return { canAdd: true, removeGroupId: match ? Number(match[1]) : null };
 }

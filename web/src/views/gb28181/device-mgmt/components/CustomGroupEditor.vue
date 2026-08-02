@@ -176,7 +176,7 @@ async function submit() {
         @cancel="close"
         @update:visible="emit('update:visible', $event)"
     >
-        <a-form v-if="mode === 'create' || mode === 'rename'" layout="vertical">
+        <a-form v-if="mode === 'create' || mode === 'rename'" :model="{ name }" layout="vertical">
             <a-form-item label="分组名称" :validate-status="errorMessage ? 'error' : undefined" :help="errorMessage || undefined">
                 <a-input
                     v-model="name"

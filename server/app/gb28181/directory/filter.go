@@ -19,12 +19,14 @@ const (
 )
 
 type Filter struct {
-	View    string
-	Key     string
-	Kind    FilterKind
-	Code    string
-	GroupID uint
-	NodeID  uint
+	View            string
+	Key             string
+	Kind            FilterKind
+	Code            string
+	GroupID         uint
+	NodeID          uint
+	OwnerDeptID     uint
+	OwnerDeptScoped bool
 }
 
 func ParseFilter(view, key, legacyNodeID string) (*Filter, error) {
@@ -63,6 +65,14 @@ func ParseFilter(view, key, legacyNodeID string) (*Filter, error) {
 		f.NodeID = uint(id)
 	case view == "custom" && key == "custom:ungrouped":
 		f.Kind = FilterCustomUngrouped
+	case view == "custom" && strings.HasPrefix(key, "custom:ungrouped:"):
+		f.Kind = FilterCustomUngrouped
+		id, err := strconv.ParseUint(strings.TrimPrefix(key, "custom:ungrouped:"), 10, 64)
+		if err != nil {
+			return nil, ErrDirectoryFilterInvalid
+		}
+		f.OwnerDeptID = uint(id)
+		f.OwnerDeptScoped = true
 	case view == "custom" && strings.HasPrefix(key, "custom:group:"):
 		f.Kind = FilterCustomGroup
 		id, err := strconv.ParseUint(strings.TrimPrefix(key, "custom:group:"), 10, 64)

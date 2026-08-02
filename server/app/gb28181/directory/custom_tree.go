@@ -59,7 +59,14 @@ func BuildCustomTree(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]Dire
 		return nil, err
 	}
 	if ungrouped > 0 {
-		tree = append(tree, DirectoryNodeVO{Key: "custom:ungrouped", Name: "未分组", Type: "ungrouped", ReadOnly: true, Count: int(ungrouped)})
+		tree = append(tree, DirectoryNodeVO{
+			Key:      fmt.Sprintf("custom:ungrouped:%d", ownerDeptID),
+			Name:     "未分组",
+			Type:     "ungrouped",
+			ReadOnly: true,
+			Count:    int(ungrouped),
+			Meta:     map[string]string{"ownerDeptId": fmt.Sprintf("%d", ownerDeptID)},
+		})
 	}
 	return tree, nil
 }

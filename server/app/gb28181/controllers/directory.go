@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sort"
 
@@ -13,6 +14,7 @@ import (
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
 
 type DirectoryController struct {
@@ -62,11 +64,21 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 			tree = mergeDirectoryNodes(tree, part)
 		}
 	} else {
+		deptNames, nameErr := directoryDeptNames(c.Request.Context(), db, deptIDs)
+		if nameErr != nil {
+			dc.Fail(c, "读取部门名称失败", nameErr, http.StatusInternalServerError)
+			return
+		}
 		for _, deptID := range deptIDs {
 			part, buildErr := gbdirectory.BuildCustomTree(c.Request.Context(), db, deptID)
 			if buildErr != nil {
 				dc.Fail(c, "生成自定义分组失败", buildErr, http.StatusInternalServerError)
 				return
+			}
+			for i := range part {
+				if part[i].Type == "ungrouped" {
+					part[i].Name = fmt.Sprintf("未分组（%s）", deptNames[deptID])
+				}
 			}
 			tree = append(tree, part...)
 		}
@@ -75,6 +87,27 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 		tree = []gbdirectory.DirectoryNodeVO{}
 	}
 	dc.Success(c, gin.H{"list": tree})
+}
+
+func directoryDeptNames(ctx context.Context, db *gorm.DB, ids []uint) (map[uint]string, error) {
+	names := make(map[uint]string, len(ids))
+	var departments []basemodels.SysDepartment
+	if err := db.WithContext(ctx).Select("id", "name").Where("id IN ?", ids).Find(&departments).Error; err != nil {
+		return nil, err
+	}
+	for _, department := range departments {
+		names[department.ID] = department.Name
+	}
+	for _, id := range ids {
+		if names[id] == "" {
+			if id == 0 {
+				names[id] = "默认部门"
+			} else {
+				names[id] = fmt.Sprintf("部门 %d", id)
+			}
+		}
+	}
+	return names, nil
 }
 
 func visibleDirectoryDeptIDs(c *gin.Context, db *gorm.DB) ([]uint, error) {

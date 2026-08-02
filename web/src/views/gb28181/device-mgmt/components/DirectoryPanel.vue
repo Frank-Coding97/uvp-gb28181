@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { ChevronRight, Folder, FolderPlus, FolderTree, MapPin, MoreHorizontal, RefreshCcw, Search } from "@lucide/vue";
 import { Message } from "@arco-design/web-vue";
 import { listDirectoryTree, type DirectoryNode, type DirectoryView } from "../api";
@@ -24,6 +24,11 @@ const emit = defineEmits<{
 const loading = ref(false);
 const trees = ref<Record<DirectoryView, DirectoryNode[]>>({ national: [], custom: [] });
 const loaded = ref<Record<DirectoryView, boolean>>({ national: false, custom: false });
+const requestTokens: Record<DirectoryView, number> = { national: 0, custom: 0 };
+let loadingToken = 0;
+let activeView = props.modelValue.view;
+
+watch(() => props.modelValue.view, (view) => { activeView = view; });
 
 const currentTree = computed(() => trees.value[props.modelValue.view]);
 const selectedKey = computed(() => props.modelValue.selectedKey[props.modelValue.view]);
@@ -77,9 +82,12 @@ function setExpanded(keys: string[]) {
 
 async function load(view: DirectoryView, force = false) {
     if (loaded.value[view] && !force) return;
+    const requestToken = ++requestTokens[view];
+    const currentLoadingToken = ++loadingToken;
     loading.value = true;
     try {
         const response = await listDirectoryTree(view);
+        if (requestToken !== requestTokens[view]) return;
         if (response.code !== 0) throw new Error(response.message || "目录加载失败");
         const list = response.data?.list || [];
         trees.value = { ...trees.value, [view]: list };
@@ -88,19 +96,20 @@ async function load(view: DirectoryView, force = false) {
         if (props.modelValue.expandedKeys[view].length === 0) {
             updateState({
                 ...props.modelValue,
-                view,
+                view: activeView,
                 expandedKeys: { ...props.modelValue.expandedKeys, [view]: collectExpandableKeys(list) }
             });
         }
     } catch (error: any) {
-        Message.error(error?.message || "目录加载失败");
+        if (requestToken === requestTokens[view]) Message.error(error?.message || "目录加载失败");
     } finally {
-        loading.value = false;
+        if (currentLoadingToken === loadingToken) loading.value = false;
     }
 }
 
 async function changeView(view: DirectoryView) {
     if (view === props.modelValue.view) return;
+    activeView = view;
     updateState(switchDirectoryView(props.modelValue, view));
     emit("viewChange", view);
     await load(view);

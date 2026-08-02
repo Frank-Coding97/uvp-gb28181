@@ -41,7 +41,11 @@ func resolveDirectoryDeviceScope(c *gin.Context, db *gorm.DB) (*directoryDeviceS
 			return nil, err
 		}
 	case gbdirectory.FilterCustomUngrouped:
-		if err := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(ownerDeptScope(c)).Where("NOT EXISTS (?)", db.Model(&gbmodels.GbCustomGroupDevice{}).Select("1").Where("gb_custom_group_device.device_id = gb_device.id")).Pluck("id", &ids).Error; err != nil {
+		query := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(ownerDeptScope(c))
+		if filter.OwnerDeptScoped {
+			query = query.Where("owner_dept_id = ?", filter.OwnerDeptID)
+		}
+		if err := query.Where("NOT EXISTS (?)", db.Model(&gbmodels.GbCustomGroupDevice{}).Select("1").Where("gb_custom_group_device.device_id = gb_device.id")).Pluck("id", &ids).Error; err != nil {
 			return nil, err
 		}
 	case gbdirectory.FilterNationalCatalog:
