@@ -25,6 +25,18 @@ export interface DirectoryQuery {
     directoryKey?: string;
 }
 
+export interface CustomGroup {
+    id: number;
+    ownerDeptId: number;
+    parentId: number;
+    path: string;
+    depth: number;
+    name: string;
+    createdBy: number;
+    createdAt: string;
+    updatedAt: string;
+}
+
 export interface PageResult<T> {
     list: T[];
     total: number;
@@ -243,7 +255,7 @@ export const listDirectoryTree = (view: DirectoryView) =>
     http.request<BaseResult<{ list: DirectoryNode[] }>>("get", baseUrlApi("gb28181/device-mgmt/directory/tree"), { params: { view } });
 
 export const createCustomGroup = (data: { name: string; parentId?: number | null }) =>
-    http.request<BaseResult<DirectoryNode>>("post", baseUrlApi("gb28181/device-mgmt/custom-groups"), { data });
+    http.request<BaseResult<CustomGroup>>("post", baseUrlApi("gb28181/device-mgmt/custom-groups"), { data });
 
 export const renameCustomGroup = (id: number, name: string) =>
     http.request<BaseResult<{ id: number; name: string }>>("patch", baseUrlApi(`gb28181/device-mgmt/custom-groups/${id}`), { data: { name } });

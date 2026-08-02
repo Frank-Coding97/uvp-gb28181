@@ -13,11 +13,12 @@ const props = defineProps<{
 const emit = defineEmits<{
     "update:modelValue": [value: DirectoryState];
     select: [node: DirectoryNode];
-    "view-change": [view: DirectoryView];
+    viewChange: [view: DirectoryView];
     create: [parent: DirectoryNode | null];
     rename: [node: DirectoryNode];
     move: [node: DirectoryNode];
     delete: [node: DirectoryNode];
+    treeLoaded: [view: DirectoryView, tree: DirectoryNode[]];
 }>();
 
 const loading = ref(false);
@@ -83,6 +84,7 @@ async function load(view: DirectoryView, force = false) {
         const list = response.data?.list || [];
         trees.value = { ...trees.value, [view]: list };
         loaded.value = { ...loaded.value, [view]: true };
+        emit("treeLoaded", view, list);
         if (props.modelValue.expandedKeys[view].length === 0) {
             updateState({
                 ...props.modelValue,
@@ -100,7 +102,7 @@ async function load(view: DirectoryView, force = false) {
 async function changeView(view: DirectoryView) {
     if (view === props.modelValue.view) return;
     updateState(switchDirectoryView(props.modelValue, view));
-    emit("view-change", view);
+    emit("viewChange", view);
     await load(view);
 }
 

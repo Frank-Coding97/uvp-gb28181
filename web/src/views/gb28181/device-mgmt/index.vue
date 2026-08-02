@@ -77,6 +77,7 @@ import { storeToRefs } from "pinia";
 import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
+import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 import { createDirectoryState, directoryQuery, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
@@ -116,6 +117,11 @@ const statusFilter = ref<OnlineStatus | undefined>();
 const directoryState = ref(createDirectoryState());
 const selectedDirectories = ref<Record<"national" | "custom", DirectoryNode | null>>({ national: null, custom: null });
 const selectedDirectory = computed(() => selectedDirectories.value[directoryState.value.view]);
+const directoryPanelRef = ref<InstanceType<typeof DirectoryPanel> | null>(null);
+const customTree = ref<DirectoryNode[]>([]);
+const groupEditorVisible = ref(false);
+const groupEditorMode = ref<CustomGroupEditorMode>("create");
+const groupEditorNode = ref<DirectoryNode | null>(null);
 const drawerVisible = ref(false);
 const subscriptionDialogVisible = ref(false);
 const subscriptionDevice = ref<DeviceVO | null>(null);
@@ -367,9 +373,10 @@ function onDirectorySelect(node: DirectoryNode) {
     selectedRowKeys.value = [];
     refreshMainData();
 }
-function onDirectoryViewChange() {
+async function onDirectoryViewChange() {
     page.value = 1;
     selectedRowKeys.value = [];
+    await nextTick();
     refreshMainData();
 }
 function clearDirectorySelection(refresh = true) {
@@ -379,6 +386,64 @@ function clearDirectorySelection(refresh = true) {
     page.value = 1;
     selectedRowKeys.value = [];
     if (refresh) refreshMainData();
+}
+function onDirectoryTreeLoaded(view: "national" | "custom", tree: DirectoryNode[]) {
+    if (view === "custom") customTree.value = tree;
+}
+function openGroupEditor(mode: CustomGroupEditorMode, node: DirectoryNode | null) {
+    groupEditorMode.value = mode;
+    groupEditorNode.value = node;
+    groupEditorVisible.value = true;
+}
+function findDirectoryNode(nodes: DirectoryNode[], key: string | null): DirectoryNode | null {
+    if (!key) return null;
+    for (const node of nodes) {
+        if (node.key === key) return node;
+        const child = findDirectoryNode(node.children || [], key);
+        if (child) return child;
+    }
+    return null;
+}
+async function onGroupSaved(result: {
+    action: CustomGroupEditorMode;
+    node: DirectoryNode | null;
+    group?: { id: number; name: string };
+    parentKey: string | null;
+    removedDeviceCount?: number;
+}) {
+    const currentKey = directoryState.value.selectedKey.custom;
+    if (result.action === "create" && result.group) {
+        const created: DirectoryNode = {
+            key: `custom:group:${result.group.id}`,
+            name: result.group.name,
+            type: "group",
+            readOnly: false,
+            count: 0,
+            onlineCount: 0,
+            depth: (result.node?.depth ?? -1) + 1,
+            children: []
+        };
+        directoryState.value = selectDirectory({ ...directoryState.value, view: "custom" }, created.key);
+        selectedDirectories.value = { ...selectedDirectories.value, custom: created };
+        Message.success("分组创建成功");
+    } else if (result.action === "delete") {
+        if (currentKey === result.node?.key) {
+            directoryState.value = selectDirectory({ ...directoryState.value, view: "custom" }, result.parentKey);
+            selectedDirectories.value = {
+                ...selectedDirectories.value,
+                custom: findDirectoryNode(customTree.value, result.parentKey)
+            };
+        }
+        Message.success(result.removedDeviceCount
+            ? `分组已删除，已解除 ${result.removedDeviceCount} 台设备的分组关系`
+            : "分组已删除");
+    } else {
+        Message.success(result.action === "rename" ? "分组名称已更新" : "分组已移动");
+    }
+    await directoryPanelRef.value?.refresh();
+    page.value = 1;
+    selectedRowKeys.value = [];
+    refreshMainData();
 }
 function setViewMode(mode: ViewMode) {
     viewMode.value = mode;
@@ -1416,10 +1481,16 @@ onUnmounted(() => {
             <div class="workspace">
                 <aside class="catalog-pane">
                     <DirectoryPanel
+                        ref="directoryPanelRef"
                         v-model="directoryState"
                         :can-manage="canManageGroups"
                         @select="onDirectorySelect"
                         @view-change="onDirectoryViewChange"
+                        @tree-loaded="onDirectoryTreeLoaded"
+                        @create="openGroupEditor('create', $event)"
+                        @rename="openGroupEditor('rename', $event)"
+                        @move="openGroupEditor('move', $event)"
+                        @delete="openGroupEditor('delete', $event)"
                     />
                 </aside>
 
@@ -2231,6 +2302,15 @@ onUnmounted(() => {
                 :device-id="subscriptionDevice?.id"
                 :device-name="subscriptionDevice ? displayName(subscriptionDevice) : ''"
                 @changed="handleSubscriptionChanged"
+            />
+
+            <CustomGroupEditor
+                v-model:visible="groupEditorVisible"
+                :can-manage="canManageGroups"
+                :mode="groupEditorMode"
+                :node="groupEditorNode"
+                :tree="customTree"
+                @saved="onGroupSaved"
             />
 
             <PlayConsoleLinked
