@@ -13,6 +13,7 @@ type CustomMemberService struct{ db *gorm.DB }
 
 type MemberMutationResult struct {
 	Added   int `json:"added"`
+	Removed int `json:"removed"`
 	Skipped int `json:"skipped"`
 }
 
@@ -54,20 +55,28 @@ func (s *CustomMemberService) Add(ctx context.Context, ownerDeptID, actorID, gro
 	return result, err
 }
 
-func (s *CustomMemberService) Remove(ctx context.Context, ownerDeptID, groupID uint, rawDeviceIDs []uint) error {
+func (s *CustomMemberService) Remove(ctx context.Context, ownerDeptID, groupID uint, rawDeviceIDs []uint) (*MemberMutationResult, error) {
 	deviceIDs, err := normalizeDeviceIDs(rawDeviceIDs)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	result := &MemberMutationResult{}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if _, err := findGroup(tx, ownerDeptID, groupID); err != nil {
 			return err
 		}
 		if err := validateDevices(tx, ownerDeptID, deviceIDs); err != nil {
 			return err
 		}
-		return tx.Where("group_id = ? AND device_id IN ?", groupID, deviceIDs).Delete(&gbmodels.GbCustomGroupDevice{}).Error
+		deleted := tx.Where("group_id = ? AND device_id IN ?", groupID, deviceIDs).Delete(&gbmodels.GbCustomGroupDevice{})
+		if deleted.Error != nil {
+			return deleted.Error
+		}
+		result.Removed = int(deleted.RowsAffected)
+		result.Skipped = len(deviceIDs) - result.Removed
+		return nil
 	})
+	return result, err
 }
 
 func (s *CustomMemberService) DeviceIDsForGroup(ctx context.Context, ownerDeptID, groupID uint) ([]uint, error) {

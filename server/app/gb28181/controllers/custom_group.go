@@ -150,12 +150,13 @@ func (cc *CustomGroupController) mutateDevices(c *gin.Context, remove bool) {
 	svc := gbdirectory.NewCustomMemberService(cc.db())
 	requested := len(body.DeviceIDs)
 	if remove {
-		if err := svc.Remove(c, group.OwnerDeptID, id, body.DeviceIDs); err != nil {
+		result, err := svc.Remove(c, group.OwnerDeptID, id, body.DeviceIDs)
+		if err != nil {
 			cc.writeError(c, err)
 			return
 		}
-		cc.audit("从自定义分组移除设备", cc.GetCurrentUserID(c), id, zap.Int("requested", requested))
-		cc.Success(c, gin.H{"requestedCount": requested, "removedCount": requested, "skippedCount": 0})
+		cc.audit("从自定义分组移除设备", cc.GetCurrentUserID(c), id, zap.Int("requested", requested), zap.Int("removed", result.Removed), zap.Int("skipped", result.Skipped))
+		cc.Success(c, gin.H{"requestedCount": requested, "removedCount": result.Removed, "skippedCount": result.Skipped})
 		return
 	}
 	result, err := svc.Add(c, group.OwnerDeptID, cc.GetCurrentUserID(c), id, body.DeviceIDs)

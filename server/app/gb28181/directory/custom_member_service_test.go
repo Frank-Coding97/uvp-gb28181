@@ -53,7 +53,10 @@ func TestCustomMemberSubtreeAndUngrouped(t *testing.T) {
 	ungrouped, err := members.UngroupedDeviceIDs(context.Background(), 10)
 	require.NoError(t, err)
 	require.Equal(t, []uint{devices[1].ID}, ungrouped)
-	require.NoError(t, members.Remove(context.Background(), 10, a.ID, []uint{devices[0].ID}))
+	removed, err := members.Remove(context.Background(), 10, a.ID, []uint{devices[0].ID, devices[1].ID})
+	require.NoError(t, err)
+	require.Equal(t, 1, removed.Removed)
+	require.Equal(t, 1, removed.Skipped)
 	ids, _ = members.DeviceIDsForGroup(context.Background(), 10, b.ID)
 	require.Equal(t, []uint{devices[0].ID}, ids)
 }

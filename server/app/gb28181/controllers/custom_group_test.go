@@ -68,6 +68,16 @@ func TestCustomGroupControllerContract(t *testing.T) {
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Contains(t, w.Body.String(), `"addedCount":1`)
 
+	deviceWithoutMembership := gbmodels.GbDevice{DeviceID: "D2", OwnerDeptID: 10}
+	require.NoError(t, db.Create(&deviceWithoutMembership).Error)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/groups/"+strconv.Itoa(int(root.ID))+"/devices/remove", bytes.NewBufferString(fmt.Sprintf(`{"deviceIds":[%d,%d]}`, device.ID, deviceWithoutMembership.ID)))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Contains(t, w.Body.String(), `"removedCount":1`)
+	require.Contains(t, w.Body.String(), `"skippedCount":1`)
+
 	child := gbmodels.GbCustomGroup{OwnerDeptID: 10, ParentID: root.ID, Path: root.Path + "99/", Depth: 1, Name: "入口"}
 	require.NoError(t, db.Create(&child).Error)
 	w = httptest.NewRecorder()
