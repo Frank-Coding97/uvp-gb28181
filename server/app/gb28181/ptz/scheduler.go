@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,10 +23,11 @@ const (
 	schedulerErrorTransportUnknown        = "TRANSPORT_UNKNOWN"
 	schedulerErrorHomePositionUnavailable = "HOME_POSITION_UNAVAILABLE"
 
-	defaultSchedulerInterval   = 250 * time.Millisecond
-	defaultSchedulerCapacity   = 16
-	schedulerTransportWindow   = 15 * time.Second
-	schedulerApplicationWindow = 15 * time.Second
+	defaultSchedulerInterval     = 250 * time.Millisecond
+	defaultSchedulerCapacity     = 16
+	schedulerTransactionAttempts = 8
+	schedulerTransportWindow     = 15 * time.Second
+	schedulerApplicationWindow   = 15 * time.Second
 )
 
 type schedulerDispatchReservation interface {
@@ -709,7 +709,7 @@ func (s *Scheduler) persistAttemptResult(ctx context.Context, attempt gbmodels.G
 
 func schedulerTransaction(ctx context.Context, db *gorm.DB, operation func(*gorm.DB) error) error {
 	var err error
-	for attempt := 0; attempt < 5; attempt++ {
+	for attempt := 0; attempt < schedulerTransactionAttempts; attempt++ {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
@@ -717,7 +717,20 @@ func schedulerTransaction(ctx context.Context, db *gorm.DB, operation func(*gorm
 		if err == nil || !schedulerRetryableDBError(err) {
 			return err
 		}
-		runtime.Gosched()
+		if attempt+1 == schedulerTransactionAttempts {
+			break
+		}
+		delay := time.Millisecond << attempt
+		if delay > 20*time.Millisecond {
+			delay = 20 * time.Millisecond
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return err
 }
