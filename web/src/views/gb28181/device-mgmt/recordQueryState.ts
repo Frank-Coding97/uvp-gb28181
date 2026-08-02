@@ -8,7 +8,7 @@ import type {
 
 export type RecordQueryUiState = "idle" | "querying" | "complete" | "empty" | "partial" | "timeout" | "offline" | "error";
 
-export interface RecordQueryForm extends RecordQueryRequest {}
+export type RecordQueryForm = RecordQueryRequest;
 
 export interface RecordQueryValidationErrors {
     startTime?: string;
