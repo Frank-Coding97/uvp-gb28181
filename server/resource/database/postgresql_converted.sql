@@ -1491,9 +1491,30 @@ INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
 (7563,'p','role_1','/api/gb28181/sip/platform','GET','*','',''),
 (7564,'p','role_1','/api/gb28181/sip/setup/config','PUT','*','',''),
 (7565,'p','role_1','/api/gb28181/sip/setup/skip','POST','*','','');
-SELECT setval('sys_api_id_seq',221,true);
-SELECT setval('sys_menu_id_seq',140360,true);
-SELECT setval('sys_casbin_rule_id_seq',7565,true);
+
+-- Custom device groups reuse the device management page and expose one hidden permission.
+INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
+(222,'创建自定义分组','/api/gb28181/device-mgmt/custom-groups','POST','GB28181 设备管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(223,'修改自定义分组','/api/gb28181/device-mgmt/custom-groups/:id','PATCH','GB28181 设备管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(224,'移动自定义分组','/api/gb28181/device-mgmt/custom-groups/:id/move','POST','GB28181 设备管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(225,'删除自定义分组','/api/gb28181/device-mgmt/custom-groups/:id','DELETE','GB28181 设备管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(226,'添加分组设备','/api/gb28181/device-mgmt/custom-groups/:id/devices','POST','GB28181 设备管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(227,'移除分组设备','/api/gb28181/device-mgmt/custom-groups/:id/devices/remove','POST','GB28181 设备管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
+(140361,140355,'','','','管理自定义分组',1,3,'gb28181:device-group:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140361);
+INSERT INTO sys_menu_api (menu_id,api_id) VALUES
+(140361,222),(140361,223),(140361,224),(140361,225),(140361,226),(140361,227);
+INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
+(7566,'p','role_1','/api/gb28181/device-mgmt/custom-groups','POST','*','',''),
+(7567,'p','role_1','/api/gb28181/device-mgmt/custom-groups/:id','PATCH','*','',''),
+(7568,'p','role_1','/api/gb28181/device-mgmt/custom-groups/:id/move','POST','*','',''),
+(7569,'p','role_1','/api/gb28181/device-mgmt/custom-groups/:id','DELETE','*','',''),
+(7570,'p','role_1','/api/gb28181/device-mgmt/custom-groups/:id/devices','POST','*','',''),
+(7571,'p','role_1','/api/gb28181/device-mgmt/custom-groups/:id/devices/remove','POST','*','','');
+SELECT setval('sys_api_id_seq',227,true);
+SELECT setval('sys_menu_id_seq',140361,true);
+SELECT setval('sys_casbin_rule_id_seq',7571,true);
 
 -- GB28181 device registry and dual-version profile archive.
 DROP TABLE IF EXISTS gb_device;
