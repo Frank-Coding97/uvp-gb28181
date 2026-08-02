@@ -160,6 +160,11 @@ func TestDeviceMgmt_SubscriptionsReturnsAllKinds(t *testing.T) {
 func TestDeviceMgmt_DeleteDeviceRemovesSubscriptionData(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	deviceID, channelID, _ := seedDevicesAndChannels(t, db)
+	other := &gbmodels.GbDevice{DeviceID: "other-delete", SubscribeCapability: gbmodels.SubscribeUnknown}
+	require.NoError(t, db.Create(other).Error)
+	group := &gbmodels.GbCustomGroup{Path: "/1/", Name: "delete-group"}
+	require.NoError(t, db.Create(group).Error)
+	require.NoError(t, db.Create(&[]gbmodels.GbCustomGroupDevice{{GroupID: group.ID, DeviceID: deviceID}, {GroupID: group.ID, DeviceID: other.ID}}).Error)
 	now := time.Now()
 	require.NoError(t, db.Create(&gbmodels.GbDeviceSubscription{DeviceID: deviceID, Kind: gbmodels.SubscriptionKindAlarm, Event: "presence"}).Error)
 	require.NoError(t, db.Create(&gbmodels.GbMobilePositionLatest{DeviceID: deviceID, SourceCode: "C", ChannelID: &channelID, EventTime: now, ReceivedAt: now, Latitude: 1, Longitude: 1}).Error)
@@ -173,6 +178,11 @@ func TestDeviceMgmt_DeleteDeviceRemovesSubscriptionData(t *testing.T) {
 		require.NoError(t, db.Model(model).Where("device_id = ?", deviceID).Count(&count).Error)
 		require.Zero(t, count)
 	}
+	var targetMembership, otherMembership int64
+	require.NoError(t, db.Model(&gbmodels.GbCustomGroupDevice{}).Where("device_id = ?", deviceID).Count(&targetMembership).Error)
+	require.NoError(t, db.Model(&gbmodels.GbCustomGroupDevice{}).Where("device_id = ?", other.ID).Count(&otherMembership).Error)
+	require.Zero(t, targetMembership)
+	require.EqualValues(t, 1, otherMembership)
 }
 
 func seedDeptScopedUser(t *testing.T, db *gorm.DB, userID, deptID uint) {

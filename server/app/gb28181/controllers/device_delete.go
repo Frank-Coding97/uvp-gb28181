@@ -222,7 +222,12 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 			return err
 		}
 
-		// 9. 删设备本身(gb_device 是软删模型,必须 Unscoped)
+		// 9. 仅平台硬删除设备时清理用户分组关系。离线和 Catalog 生命周期不走此路径。
+		if err := tx.Where("device_id = ?", dev.ID).Delete(&gbmodels.GbCustomGroupDevice{}).Error; err != nil {
+			return err
+		}
+
+		// 10. 删设备本身(gb_device 是软删模型,必须 Unscoped)
 		if err := tx.Unscoped().Scopes(ownerDeptScope(c)).
 			Where("id = ?", dev.ID).
 			Delete(&gbmodels.GbDevice{}).Error; err != nil {
