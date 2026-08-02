@@ -19,12 +19,13 @@ export function resolveRecordQueryMockScenario(_location?: Pick<Location, "searc
 }
 
 export async function mockRecordQueryOptions(_channelId: number): Promise<BaseResult<RecordQueryOptions>> {
+    const channel = mockChannel(_channelId);
     return {
         code: 0,
         message: "ok",
         data: {
             device: { id: 7, code: "34020000002000000001", name: "园区 NVR-A", online: true },
-            channel: { id: _channelId, code: "34020000001320000001", name: "东门出入口" },
+            channel,
             timezone: "Asia/Shanghai",
             serverNow: "2026-08-02T19:40:20+08:00",
             maxRangeHours: 24,
@@ -48,7 +49,7 @@ export async function mockQueryDeviceRecords(
     } as const;
     if (_scenario in errors) throw errors[_scenario as keyof typeof errors];
 
-    const allItems = mockItems();
+    const allItems = mockItems(mockChannel(_channelId).code);
     const list = _scenario === "empty" ? [] : _scenario === "partial" ? allItems.slice(0, 3) : allItems;
     const status = _scenario === "empty" ? "empty" : _scenario === "partial" ? "partial" : "complete";
     return {
@@ -81,7 +82,12 @@ function waitForMock(delay: number, signal?: AbortSignal) {
     });
 }
 
-function mockItems() {
+function mockChannel(channelId: number) {
+    if (channelId === 32) return { id: channelId, code: "34020000001320000002", name: "停车场通道" };
+    return { id: channelId, code: "34020000001320000001", name: "东门出入口" };
+}
+
+function mockItems(channelCode: string) {
     const rows = [
         ["园区东门-上午巡检", "08:10:00", "08:42:16", "time", 248635904],
         ["园区东门-移动侦测", "09:03:25", "09:08:44", "alarm", 48902144],
@@ -91,7 +97,7 @@ function mockItems() {
         ["园区东门-下午巡检", "16:00:00", "16:42:13", "time", 356515840]
     ] as const;
     return rows.map(([name, start, end, type, fileSize], index) => ({
-        deviceId: "34020000001320000001",
+        deviceId: channelCode,
         name,
         filePath: `/record/20260802/${String(index + 1).padStart(3, "0")}.dav`,
         address: "园区东门",

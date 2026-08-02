@@ -32,6 +32,17 @@ describe("record query development mock", () => {
         });
     });
 
+    it("keeps the selected channel identity in the options fixture", async () => {
+        const response = await mockRecordQueryOptions(32);
+        expect(response.data.channel).toEqual({
+            id: 32,
+            code: "34020000001320000002",
+            name: "停车场通道"
+        });
+        const result = await mockQueryDeviceRecords(32, {} as never, "complete");
+        expect(result.data.list[0].deviceId).toBe("34020000001320000002");
+    });
+
     it.each([
         ["complete", "complete", 6],
         ["empty", "empty", 0],

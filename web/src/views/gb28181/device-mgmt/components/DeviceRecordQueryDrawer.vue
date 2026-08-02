@@ -294,14 +294,16 @@ function fileSizeText(value: number | null) {
 
                     <div v-if="hasResults" class="result-table-wrap">
                         <a-table :data="visibleItems" :pagination="false" row-key="filePath" data-testid="result-table" class="record-result-table">
-                            <a-table-column title="录像名称" :width="190"><template #cell="{ record }"><a-tooltip :content="record.name || '未知'"><span class="ellipsis">{{ record.name || '未知' }}</span></a-tooltip></template></a-table-column>
-                            <a-table-column title="开始时间" :width="170"><template #cell="{ record }"><span class="mono">{{ displayDateTime(record.startTime) }}</span></template></a-table-column>
-                            <a-table-column title="结束时间" :width="170"><template #cell="{ record }"><span class="mono">{{ displayDateTime(record.endTime) }}</span></template></a-table-column>
-                            <a-table-column title="时长" :width="100"><template #cell="{ record }">{{ durationText(record.startTime, record.endTime) }}</template></a-table-column>
-                            <a-table-column title="类型" :width="100"><template #cell="{ record }"><span class="type-badge">{{ recordQueryTypeText(record.type) }}</span></template></a-table-column>
-                            <a-table-column title="大小" :width="100"><template #cell="{ record }">{{ fileSizeText(record.fileSize) }}</template></a-table-column>
-                            <a-table-column title="文件路径" :width="230"><template #cell="{ record }"><a-tooltip :content="record.filePath || '未知'"><code class="ellipsis">{{ record.filePath || '未知' }}</code></a-tooltip></template></a-table-column>
-                            <a-table-column title="存储位置" :width="210"><template #cell="{ record }"><a-tooltip :content="record.recordLocation || '未知'"><code class="ellipsis">{{ record.recordLocation || '未知' }}</code></a-tooltip></template></a-table-column>
+                            <template #columns>
+                                <a-table-column title="录像名称" :width="190"><template #cell="{ record }"><a-tooltip :content="record.name || '未知'"><span class="ellipsis">{{ record.name || '未知' }}</span></a-tooltip></template></a-table-column>
+                                <a-table-column title="开始时间" :width="170"><template #cell="{ record }"><span class="mono">{{ displayDateTime(record.startTime) }}</span></template></a-table-column>
+                                <a-table-column title="结束时间" :width="170"><template #cell="{ record }"><span class="mono">{{ displayDateTime(record.endTime) }}</span></template></a-table-column>
+                                <a-table-column title="时长" :width="100"><template #cell="{ record }">{{ durationText(record.startTime, record.endTime) }}</template></a-table-column>
+                                <a-table-column title="类型" :width="100"><template #cell="{ record }"><span class="type-badge">{{ recordQueryTypeText(record.type) }}</span></template></a-table-column>
+                                <a-table-column title="大小" :width="100"><template #cell="{ record }">{{ fileSizeText(record.fileSize) }}</template></a-table-column>
+                                <a-table-column title="文件路径" :width="230"><template #cell="{ record }"><a-tooltip :content="record.filePath || '未知'"><code class="ellipsis">{{ record.filePath || '未知' }}</code></a-tooltip></template></a-table-column>
+                                <a-table-column title="存储位置" :width="210"><template #cell="{ record }"><a-tooltip :content="record.recordLocation || '未知'"><code class="ellipsis">{{ record.recordLocation || '未知' }}</code></a-tooltip></template></a-table-column>
+                            </template>
                         </a-table>
                     </div>
                     <div v-else-if="state !== 'querying'" class="result-placeholder">

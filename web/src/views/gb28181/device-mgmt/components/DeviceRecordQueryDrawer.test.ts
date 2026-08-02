@@ -86,8 +86,8 @@ function mountDrawer() {
                 "a-option": { template: "<option><slot /></option>" },
                 "a-input": { template: "<input />" },
                 "a-input-number": { template: "<input type='number' />" },
-                "a-table": { template: "<div data-testid='result-table'><slot /></div>" },
-                "a-table-column": { template: "<div><slot name='cell' :record='{}' /></div>" },
+                "a-table": { template: "<div data-testid='result-table'><slot name='columns' /></div>" },
+                "a-table-column": { props: ["title"], template: "<div>{{ title }}<slot name='cell' :record='{}' /></div>" },
                 "a-pagination": { template: "<div data-testid='result-pagination' />" },
                 "a-tooltip": { template: "<span><slot /></span>" },
                 "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
@@ -126,6 +126,7 @@ describe("DeviceRecordQueryDrawer", () => {
         await flushPromises();
         expect(wrapper.text()).toContain(expectedText);
         expect(wrapper.find('[data-testid="result-table"]').exists()).toBe(status !== "empty");
+        if (status !== "empty") expect(wrapper.text()).toContain("录像名称");
     });
 
     it("keeps conditions and shows a distinct timeout state", async () => {
