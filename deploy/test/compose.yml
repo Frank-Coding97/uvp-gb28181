@@ -6,6 +6,8 @@ services:
     image: "uvp-gb28181-backend:${IMAGE_TAG:-test}"
     container_name: wvp-backend
     restart: unless-stopped
+    env_file:
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/config/sip-trace-backend.env
     environment:
       TZ: Asia/Shanghai
     ports:
@@ -24,6 +26,34 @@ services:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 18978"]
       interval: 10s
       timeout: 3s
+      retries: 12
+      start_period: 20s
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3.17.4
+    container_name: uvp-clickhouse
+    restart: unless-stopped
+    env_file:
+      - ${UVP_ROOT:-/opt/uvp-gb28181}/config/sip-trace-clickhouse.env
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+      - ./clickhouse/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      wvp-network:
+        aliases:
+          - uvp-clickhouse
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          clickhouse-client --user "$${CLICKHOUSE_USER}"
+          --password "$${CLICKHOUSE_PASSWORD}" --query "SELECT 1"
+      interval: 10s
+      timeout: 5s
       retries: 12
       start_period: 20s
 
@@ -52,3 +82,7 @@ networks:
   wvp-network:
     external: true
     name: wvp_docker_compose_wvp-network
+
+volumes:
+  clickhouse-data:
+  clickhouse-logs:

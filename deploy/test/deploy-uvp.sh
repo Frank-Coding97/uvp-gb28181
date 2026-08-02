@@ -85,6 +85,7 @@ for required in \
   backend/Dockerfile \
   backend/uvp-gb28181 \
   backend/resource/database/uvp-gb28181.sql \
+  clickhouse/init/01-sip-trace.sh \
   frontend/Dockerfile \
   frontend/nginx.conf \
   frontend/dist/index.html; do

@@ -41,3 +41,30 @@ func TestOptionalClickHouseDeploymentContract(t *testing.T) {
 		require.Contains(t, documentation, required)
 	}
 }
+
+func TestTestEnvironmentClickHouseDeploymentContract(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "deploy", "test")
+	read := func(name string) string {
+		content, err := os.ReadFile(filepath.Join(root, name))
+		require.NoError(t, err, name)
+		return string(content)
+	}
+
+	compose := read("compose.yml")
+	require.Contains(t, compose, "sip-trace-backend.env")
+	require.Contains(t, compose, "clickhouse/clickhouse-server:26.3.17.4")
+	require.Contains(t, compose, "sip-trace-clickhouse.env")
+	require.Contains(t, compose, "./clickhouse/init:/docker-entrypoint-initdb.d:ro")
+	require.Contains(t, compose, "clickhouse-data:/var/lib/clickhouse")
+	require.NotContains(t, compose, "8123:8123")
+	require.NotContains(t, compose, "9000:9000")
+
+	configure := read("configure_server.py")
+	require.Contains(t, configure, "UVP_SIP_TRACE_CLICKHOUSE_PASSWORD")
+	require.Contains(t, configure, "UVP_SIP_TRACE_ENCRYPTION_KEY")
+	require.Contains(t, configure, `("gb28181", "trace", "enabled"): True`)
+	require.Contains(t, configure, `("gb28181", "trace", "address"): "uvp-clickhouse:9000"`)
+
+	deploy := read("deploy-uvp.sh")
+	require.Contains(t, deploy, "clickhouse/init/01-sip-trace.sh")
+}

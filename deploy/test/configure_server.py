@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import base64
 import json
 import os
 import re
@@ -9,6 +10,8 @@ from pathlib import Path
 BASE = Path("/opt/uvp-gb28181")
 CONFIG_TEMPLATE = BASE / "config" / "config.example.yml"
 CONFIG_PATH = BASE / "config" / "config.yml"
+TRACE_BACKEND_ENV_PATH = BASE / "config" / "sip-trace-backend.env"
+TRACE_CLICKHOUSE_ENV_PATH = BASE / "config" / "sip-trace-clickhouse.env"
 DATABASE_NAME = "uvp_gb28181"
 DATABASE_USER = "uvp_gb28181"
 
@@ -92,9 +95,64 @@ def render_config(template: str, replacements: dict[tuple[str, ...], object]) ->
     return "\n".join(rendered) + "\n"
 
 
+def read_env(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def write_private_env(path: Path, values: dict[str, str]) -> None:
+    for key, value in values.items():
+        if not key or "\n" in value or "\r" in value:
+            raise RuntimeError(f"Invalid environment value for {key}")
+    temporary_path = path.with_suffix(path.suffix + ".tmp")
+    temporary_path.write_text(
+        "".join(f"{key}={value}\n" for key, value in values.items()),
+        encoding="utf-8",
+    )
+    os.chmod(temporary_path, 0o600)
+    temporary_path.replace(path)
+    os.chmod(path, 0o600)
+
+
+def ensure_trace_env() -> None:
+    backend = read_env(TRACE_BACKEND_ENV_PATH)
+    clickhouse = read_env(TRACE_CLICKHOUSE_ENV_PATH)
+    backend_password = backend.get("UVP_SIP_TRACE_CLICKHOUSE_PASSWORD", "")
+    clickhouse_password = clickhouse.get("UVP_SIP_TRACE_CLICKHOUSE_PASSWORD", "")
+    if backend_password and clickhouse_password and backend_password != clickhouse_password:
+        raise RuntimeError("SIP Trace application passwords do not match")
+
+    application_password = backend_password or clickhouse_password or secrets.token_urlsafe(32)
+    encryption_key = backend.get("UVP_SIP_TRACE_ENCRYPTION_KEY") or base64.b64encode(
+        secrets.token_bytes(32)
+    ).decode("ascii")
+    bootstrap_password = clickhouse.get("CLICKHOUSE_PASSWORD") or secrets.token_urlsafe(32)
+
+    write_private_env(TRACE_BACKEND_ENV_PATH, {
+        "UVP_SIP_TRACE_CLICKHOUSE_PASSWORD": application_password,
+        "UVP_SIP_TRACE_ENCRYPTION_KEY": encryption_key,
+    })
+    write_private_env(TRACE_CLICKHOUSE_ENV_PATH, {
+        "CLICKHOUSE_USER": clickhouse.get("CLICKHOUSE_USER", "uvp_bootstrap"),
+        "CLICKHOUSE_PASSWORD": bootstrap_password,
+        "UVP_SIP_TRACE_DATABASE": "uvp_sip_trace",
+        "UVP_SIP_TRACE_USER": "uvp_trace",
+        "UVP_SIP_TRACE_CLICKHOUSE_PASSWORD": application_password,
+    })
+
+
 def main() -> None:
     BASE.joinpath("data", "logs").mkdir(parents=True, exist_ok=True)
     BASE.joinpath("data", "uploads").mkdir(parents=True, exist_ok=True)
+    ensure_trace_env()
 
     mysql_env = container_env("wvp-mysql")
     redis_env = container_env("wvp-redis")
@@ -157,7 +215,8 @@ def main() -> None:
         ("upload", "local_path"): "./resource/public/uploads",
         ("scheduler", "log", "dir"): "./resource/logs/scheduler",
         ("gb28181", "enabled"): True,
-        ("gb28181", "trace", "enabled"): False,
+        ("gb28181", "trace", "enabled"): True,
+        ("gb28181", "trace", "address"): "uvp-clickhouse:9000",
         ("gb28181", "zlm", "host"): "wvp-zlmediakit",
         ("gb28181", "zlm", "httpport"): 80,
         ("gb28181", "zlm", "secret"): zlm_secret,
@@ -176,6 +235,7 @@ def main() -> None:
 
     print(f"Database: {DATABASE_NAME} ({'initialized' if initialized else 'preserved'})")
     print(f"Config: {CONFIG_PATH} mode=600")
+    print(f"SIP Trace env: {TRACE_BACKEND_ENV_PATH}, {TRACE_CLICKHOUSE_ENV_PATH} mode=600")
     print(f"ZLMediaKit: wvp-zlmediakit:80 RTP={zlm_rtp_port}")
 
 
