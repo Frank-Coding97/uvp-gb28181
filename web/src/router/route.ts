@@ -1,5 +1,14 @@
 import { HOME_PATH } from "@/config/index";
 //import Layout from "@/layout/index.vue";
+
+const recordQueryDemoRoutes = import.meta.env.DEV && import.meta.env.VITE_RECORD_QUERY_MOCK === "true"
+  ? [{
+      path: "/device-record-query-demo",
+      name: "device-record-query-demo",
+      component: () => import(/* @vite-ignore */ "/src/dev-previews/DeviceRecordQueryDemo.vue"),
+      meta: { title: "设备录像查询预览", hide: true }
+    }]
+  : [];
 /**
  * 路由path路径与文件夹名称相同，找文件可以浏览器地址快速查找，方便定位文件
  *
@@ -62,7 +71,8 @@ export const staticRoutes = [
       title: "播放控制台联动原型",
       hide: true
     }
-  }
+  },
+  ...recordQueryDemoRoutes
   /**
    * 提示：写在这里的为全屏界面，不建议写在这里非全屏界面，请写在 layout.children 路由数组中
    *

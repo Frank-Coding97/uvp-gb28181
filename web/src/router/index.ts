@@ -42,7 +42,11 @@ const router = createRouter({
 router.beforeEach(async (to: any, _: any, next: any) => {
     NProgress.start(); // 开启进度条
     // 免登录路由白名单(用于原型/demo 页面)
-    const publicRoutes = ["/play-console-demo", "/play-console-linked-demo"];
+    const publicRoutes = [
+        "/play-console-demo",
+        "/play-console-linked-demo",
+        ...(import.meta.env.DEV && import.meta.env.VITE_RECORD_QUERY_MOCK === "true" ? ["/device-record-query-demo"] : [])
+    ];
     if (publicRoutes.includes(to.path)) return next();
     // 新的登录逻辑
     const tokenExist = hasRefreshToken();
