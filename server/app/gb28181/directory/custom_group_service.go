@@ -37,6 +37,10 @@ var (
 
 type CustomGroupService struct{ db *gorm.DB }
 
+type DeleteGroupResult struct {
+	RemovedDeviceCount int `json:"removedDeviceCount"`
+}
+
 func NewCustomGroupService(db *gorm.DB) *CustomGroupService { return &CustomGroupService{db: db} }
 
 func (s *CustomGroupService) Create(ctx context.Context, ownerDeptID, actorID, parentID uint, rawName string) (*gbmodels.GbCustomGroup, error) {
@@ -88,6 +92,87 @@ func (s *CustomGroupService) Rename(ctx context.Context, ownerDeptID, groupID ui
 		return err
 	}
 	return nil
+}
+
+func (s *CustomGroupService) Move(ctx context.Context, ownerDeptID, groupID, targetParentID uint) error {
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		group, err := findGroup(tx, ownerDeptID, groupID)
+		if err != nil {
+			return err
+		}
+		if targetParentID == groupID {
+			return ErrGroupCycle
+		}
+		parentPath := "/"
+		newDepth := uint8(0)
+		if targetParentID != 0 {
+			parent, findErr := findGroup(tx, ownerDeptID, targetParentID)
+			if findErr != nil {
+				return findErr
+			}
+			if strings.HasPrefix(parent.Path, group.Path) {
+				return ErrGroupCycle
+			}
+			parentPath = parent.Path
+			newDepth = parent.Depth + 1
+		}
+		if group.ParentID == targetParentID {
+			return nil
+		}
+		oldPath := group.Path
+		newPath := parentPath + strconv.FormatUint(uint64(group.ID), 10) + "/"
+		var subtree []gbmodels.GbCustomGroup
+		if err := tx.Where("owner_dept_id = ? AND path LIKE ?", ownerDeptID, oldPath+"%").Order("depth, id").Find(&subtree).Error; err != nil {
+			return err
+		}
+		depthDelta := int(newDepth) - int(group.Depth)
+		for _, item := range subtree {
+			updates := map[string]any{
+				"path":  newPath + strings.TrimPrefix(item.Path, oldPath),
+				"depth": uint8(int(item.Depth) + depthDelta),
+			}
+			if item.ID == group.ID {
+				updates["parent_id"] = targetParentID
+			}
+			if err := tx.Model(&gbmodels.GbCustomGroup{}).Where("id = ? AND owner_dept_id = ?", item.ID, ownerDeptID).Updates(updates).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (s *CustomGroupService) Delete(ctx context.Context, ownerDeptID, groupID uint) (*DeleteGroupResult, error) {
+	result := &DeleteGroupResult{}
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, err := findGroup(tx, ownerDeptID, groupID); err != nil {
+			return err
+		}
+		var childCount int64
+		if err := tx.Model(&gbmodels.GbCustomGroup{}).Where("owner_dept_id = ? AND parent_id = ?", ownerDeptID, groupID).Count(&childCount).Error; err != nil {
+			return err
+		}
+		if childCount > 0 {
+			return errorWithCount(ErrGroupHasChildren, "childCount", int(childCount))
+		}
+		var memberCount int64
+		if err := tx.Model(&gbmodels.GbCustomGroupDevice{}).Where("group_id = ?", groupID).Count(&memberCount).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("group_id = ?", groupID).Delete(&gbmodels.GbCustomGroupDevice{}).Error; err != nil {
+			return err
+		}
+		deleteResult := tx.Where("id = ? AND owner_dept_id = ?", groupID, ownerDeptID).Delete(&gbmodels.GbCustomGroup{})
+		if deleteResult.Error != nil {
+			return deleteResult.Error
+		}
+		if deleteResult.RowsAffected == 0 {
+			return ErrGroupNotFound
+		}
+		result.RemovedDeviceCount = int(memberCount)
+		return nil
+	})
+	return result, err
 }
 
 func normalizeGroupName(raw string) (string, error) {
