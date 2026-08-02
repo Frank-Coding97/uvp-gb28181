@@ -1,6 +1,8 @@
 import { http } from "@/utils/http";
 import { baseUrlApi } from "@/api/utils";
 import type { BaseResult } from "@/api/types";
+import { mockQueryDeviceRecords, mockRecordQueryOptions, resolveRecordQueryMockScenario, shouldUseRecordQueryMock } from "./recordQueryMock";
+import { recordQueryOptionsPath, recordQueryPath } from "./recordQueryState";
 
 export type OnlineStatus = "online" | "offline";
 export type AssetKind = "channel" | "device";
@@ -176,6 +178,62 @@ export interface ChannelVO {
     updatedAt: string;
 }
 
+export type RecordQueryRequestType = "all" | "manual" | "alarm";
+export type RecordQueryResultStatus = "complete" | "empty" | "partial";
+export type RecordQueryPartialReason = "deadline" | "capacity";
+export type RecordQueryErrorCode =
+    | "record_query_target_not_found"
+    | "record_query_device_offline"
+    | "record_query_invalid_argument"
+    | "record_query_busy"
+    | "record_query_send_failed"
+    | "record_query_unavailable"
+    | "record_query_timeout";
+
+export interface RecordQueryOptions {
+    device: { id: number; code: string; name: string; online: boolean };
+    channel: { id: number; code: string; name: string };
+    timezone: string;
+    serverNow: string;
+    maxRangeHours: number;
+    timeoutSeconds: number;
+    supportedTypes: RecordQueryRequestType[];
+}
+
+export interface RecordQueryRequest {
+    startTime: string;
+    endTime: string;
+    type: RecordQueryRequestType;
+    secrecy: number;
+    recorderId: string;
+}
+
+export interface RecordQueryItem {
+    deviceId: string;
+    name: string | null;
+    filePath: string | null;
+    address: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    secrecy: number | null;
+    type: string | null;
+    recorderId: string | null;
+    fileSize: number | null;
+    recordLocation: string | null;
+    streamNumber: number | null;
+}
+
+export interface RecordQueryResult {
+    status: RecordQueryResultStatus;
+    partialReason?: RecordQueryPartialReason | null;
+    declaredTotal: number;
+    receivedCount: number;
+    incomplete: boolean;
+    timezone: string;
+    elapsedMs: number;
+    list: RecordQueryItem[];
+}
+
 export interface ChannelMount {
     id: number;
     parentNodeId: number;
@@ -318,6 +376,18 @@ export const listChannels = (params: ChannelQuery) =>
 
 export const getChannel = (id: number) =>
     http.request<BaseResult<ChannelVO>>("get", baseUrlApi(`gb28181/device-mgmt/channel/${id}`));
+
+export const getRecordQueryOptions = (id: number) => {
+    if (shouldUseRecordQueryMock(import.meta.env)) return mockRecordQueryOptions(id);
+    return http.request<BaseResult<RecordQueryOptions>>("get", baseUrlApi(recordQueryOptionsPath(id)));
+};
+
+export const queryDeviceRecords = (id: number, data: RecordQueryRequest, signal?: AbortSignal) => {
+    if (shouldUseRecordQueryMock(import.meta.env)) {
+        return mockQueryDeviceRecords(id, data, resolveRecordQueryMockScenario(), signal);
+    }
+    return http.request<BaseResult<RecordQueryResult>>("post", baseUrlApi(recordQueryPath(id)), { data, signal });
+};
 
 export const listChannelMounts = (id: number) =>
     http.request<BaseResult<{ list: ChannelMount[]; total: number }>>(
