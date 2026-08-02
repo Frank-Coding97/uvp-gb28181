@@ -7,13 +7,9 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import {
     Activity,
     Bell,
-    Building2,
     Camera,
-    ChevronRight,
     Copy,
     Eye,
-    Folder,
-    FolderTree,
     Grid2X2,
     History,
     Info,
@@ -21,7 +17,6 @@ import {
     List,
     Loader2,
     Map as MapIcon,
-    Monitor,
     MoreHorizontal,
     Play,
     Pencil,
@@ -48,8 +43,6 @@ import {
     getChannelTimeline,
     getDevice,
     getNoCoordCount,
-    listCatalogChildren,
-    listCatalogRoots,
     listChannelMounts,
     listChannels,
     listDevices,
@@ -64,13 +57,13 @@ import {
     updateDevice,
     type AssetKind,
     type BatchDeleteResult,
-    type CatalogNode,
     type ChannelMount,
     type ChannelVO,
     type CreateDeviceDTO,
     type DeviceVO,
     type DeviceStatusEvent,
     type DeviceSubscription,
+    type DirectoryNode,
     type MapCluster,
     type MapMarker,
     type OnlineStatus,
@@ -79,22 +72,19 @@ import {
 } from "./api";
 import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
 import { useThemeConfig } from "@/store/modules/theme-config";
+import { useUserStoreHook } from "@/store/modules/user";
 import { storeToRefs } from "pinia";
 import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
+import DirectoryPanel from "./components/DirectoryPanel.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
+import { createDirectoryState, directoryQuery, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
     | { type: "channel"; id: number }
-    | { type: "device"; id: number }
-    | { type: "node"; node: CatalogNode };
-
-interface TreeRow {
-    node: CatalogNode;
-    level: number;
-}
+    | { type: "device"; id: number };
 
 const viewModeStorageKey = "uvp.gb28181.device-mgmt.view-mode";
 const autoRefreshStorageKey = "uvp.gb28181.device-mgmt.auto-refresh";
@@ -123,13 +113,14 @@ const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
 const deviceIdFilter = ref("");
 const statusFilter = ref<OnlineStatus | undefined>();
-const selectedNode = ref<CatalogNode | null>(null);
+const directoryState = ref(createDirectoryState());
+const selectedDirectories = ref<Record<"national" | "custom", DirectoryNode | null>>({ national: null, custom: null });
+const selectedDirectory = computed(() => selectedDirectories.value[directoryState.value.view]);
 const drawerVisible = ref(false);
 const subscriptionDialogVisible = ref(false);
 const subscriptionDevice = ref<DeviceVO | null>(null);
 const drawerTarget = ref<DrawerTarget | null>(null);
 const drawerLoading = ref(false);
-const rootLoading = ref(false);
 const rowsLoading = ref(false);
 const mapLoading = ref(false);
 const page = ref(1);
@@ -153,6 +144,8 @@ const mapReady = ref(false);
 const mapError = ref("");
 const themeStore = useThemeConfig();
 const { darkMode } = storeToRefs(themeStore);
+const permissions = computed(() => useUserStoreHook().account.permissions);
+const canManageGroups = computed(() => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:device-group:manage"));
 const mapStyleUrls = {
     light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || "https://tiles.openfreemap.org/styles/bright",
     dark: (import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined) || "https://tiles.openfreemap.org/styles/dark"
@@ -171,10 +164,6 @@ let mapAutoFitPending = true;
 const mapMarkers = new Map<number, MapLibreMarker>();
 const mapClusters = new Map<string, MapLibreMarker>();
 
-const roots = ref<CatalogNode[]>([]);
-const childrenMap = reactive<Record<number, CatalogNode[]>>({});
-const expandedKeys = ref<number[]>([]);
-const loadingChildren = reactive<Record<number, boolean>>({});
 const channels = ref<ChannelVO[]>([]);
 const devices = ref<DeviceVO[]>([]);
 const markers = ref<MapMarker[]>([]);
@@ -219,27 +208,7 @@ const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "卡片", value: "card", icon: Grid2X2 },
     { label: "地图", value: "map", icon: MapIcon }
 ];
-const nodeTypeMeta: Record<string, { className: string }> = {
-    civil_code: { className: "civil" },
-    biz_group: { className: "biz" },
-    virtual_org: { className: "virtual" },
-    device: { className: "device" },
-    channel: { className: "channel" }
-};
-
-const flatTree = computed<TreeRow[]>(() => {
-    const rows: TreeRow[] = [];
-    const walk = (nodes: CatalogNode[], level: number) => {
-        nodes.forEach((node) => {
-            rows.push({ node, level });
-            if (expandedKeys.value.includes(node.id)) walk(childrenMap[node.id] || [], level + 1);
-        });
-    };
-    walk(roots.value, 0);
-    return rows;
-});
-
-const hasFilters = computed(() => Boolean(keyword.value || deviceIdFilter.value || statusFilter.value || selectedNode.value));
+const hasFilters = computed(() => Boolean(keyword.value || deviceIdFilter.value || statusFilter.value || directoryState.value.selectedKey[directoryState.value.view]));
 const selectedCount = computed(() => selectedRowKeys.value.length);
 const tablePagination = computed(() => ({
     current: page.value,
@@ -372,26 +341,13 @@ function keepaliveIntervalText(seconds?: number) {
     const s = seconds % 60;
     return s === 0 ? `${m} 分钟` : `${m} 分 ${s} 秒`;
 }
-function canExpand(node: CatalogNode) { return node.nodeType !== "channel"; }
 function showDeviceChannels(record: DeviceVO) {
     setKeywordWithoutSearch("");
     deviceIdFilter.value = record.deviceId;
-    selectedNode.value = null;
+    clearDirectorySelection(false);
     statusFilter.value = undefined;
     assetKind.value = "channel";
     page.value = 1;
-}
-
-async function loadTree() {
-    rootLoading.value = true;
-    try {
-        const res = await listCatalogRoots();
-        if (res.code === 0) roots.value = res.data?.list || [];
-    } catch (error: any) {
-        Message.error(error?.message || "目录加载失败");
-    } finally {
-        rootLoading.value = false;
-    }
 }
 
 async function loadPtzTypeDict() {
@@ -405,34 +361,25 @@ async function loadPtzTypeDict() {
     }
 }
 
-async function loadChildren(id: number) {
-    loadingChildren[id] = true;
-    try {
-        const res = await listCatalogChildren(id);
-        if (res.code === 0) childrenMap[id] = res.data?.list || [];
-    } catch (error: any) {
-        Message.error(error?.message || "子目录加载失败");
-    } finally {
-        loadingChildren[id] = false;
-    }
-}
-
-async function toggleNode(node: CatalogNode) {
-    if (!canExpand(node)) return selectNode(node);
-    if (expandedKeys.value.includes(node.id)) {
-        expandedKeys.value = expandedKeys.value.filter((id) => id !== node.id);
-        return;
-    }
-    expandedKeys.value = [...expandedKeys.value, node.id];
-    if (!childrenMap[node.id]) await loadChildren(node.id);
-}
-
-function selectNode(node: CatalogNode) {
-    selectedNode.value = node;
+function onDirectorySelect(node: DirectoryNode) {
+    selectedDirectories.value = { ...selectedDirectories.value, [directoryState.value.view]: node };
     page.value = 1;
+    selectedRowKeys.value = [];
     refreshMainData();
 }
-function clearNode() { selectedNode.value = null; page.value = 1; refreshMainData(); }
+function onDirectoryViewChange() {
+    page.value = 1;
+    selectedRowKeys.value = [];
+    refreshMainData();
+}
+function clearDirectorySelection(refresh = true) {
+    const view = directoryState.value.view;
+    directoryState.value = selectDirectory(directoryState.value, null);
+    selectedDirectories.value = { ...selectedDirectories.value, [view]: null };
+    page.value = 1;
+    selectedRowKeys.value = [];
+    if (refresh) refreshMainData();
+}
 function setViewMode(mode: ViewMode) {
     viewMode.value = mode;
     if (mode === "map") {
@@ -469,7 +416,7 @@ function focusKeyword(event: KeyboardEvent) {
     }
 }
 function clearDeviceFilter() { deviceIdFilter.value = ""; page.value = 1; refreshMainData(); }
-function resetFilters() { setKeywordWithoutSearch(""); deviceIdFilter.value = ""; statusFilter.value = undefined; clearNode(); }
+function resetFilters() { setKeywordWithoutSearch(""); deviceIdFilter.value = ""; statusFilter.value = undefined; clearDirectorySelection(); }
 function onPageChange(next: number) { page.value = next; refreshMainData(); }
 function onPageSizeChange(next: number) { pageSize.value = next; page.value = 1; refreshMainData(); }
 
@@ -589,7 +536,7 @@ async function loadChannelsData() {
         const res = await listChannels({
             q: keyword.value.trim() || undefined,
             deviceId: deviceIdFilter.value || undefined,
-            nodeId: selectedNode.value?.id,
+            ...directoryQuery(directoryState.value),
             status: statusFilter.value,
             page: page.value,
             pageSize: pageSize.value
@@ -610,7 +557,7 @@ async function loadDevicesData() {
     try {
         const res = await listDevices({
             q: keyword.value.trim() || undefined,
-            nodeId: selectedNode.value?.id,
+            ...directoryQuery(directoryState.value),
             status: statusFilter.value,
             page: page.value,
             pageSize: pageSize.value,
@@ -634,7 +581,7 @@ async function loadMapData() {
         const query = {
             ...mapBoundsParams(),
             q: keyword.value.trim() || undefined,
-            nodeId: selectedNode.value?.id,
+            ...directoryQuery(directoryState.value),
             status: statusFilter.value
         };
         const [markerRes, clusterRes, noCoordRes] = await Promise.all([
@@ -877,11 +824,6 @@ function eventMetaText(event: DeviceStatusEvent) {
     if (event.ip) parts.push(`${event.transport || "UDP"} ${event.ip}${event.port ? `:${event.port}` : ""}`);
     if (event.registerExpires != null) parts.push(`有效期 ${event.registerExpires} 秒`);
     return parts.join(" · ");
-}
-
-function openNode(node: CatalogNode) {
-    drawerTarget.value = { type: "node", node };
-    drawerVisible.value = true;
 }
 
 // 通道播放状态判定:后端 gb_channel.stream_id 非空 = 当前正在播放.
@@ -1421,7 +1363,6 @@ onMounted(async () => {
         await nextTick(ensureMap);
     }
     await Promise.all([
-        loadTree(),
         viewMode.value === "map" ? Promise.resolve() : refreshMainData(),
         refreshDeviceStats(),
         loadPtzTypeDict()
@@ -1474,37 +1415,12 @@ onUnmounted(() => {
 
             <div class="workspace">
                 <aside class="catalog-pane">
-                    <div class="pane-head">
-                        <div class="head-title"><FolderTree :size="14" /> <span>目录</span></div>
-                        <button class="icon-btn small" type="button" @click="loadTree"><RefreshCcw :size="12" /></button>
-                    </div>
-                    <div class="aside-search"><input v-model="keyword" placeholder="筛选节点 ..." @keydown.enter.prevent="onSearch" /></div>
-                    <a-spin :loading="rootLoading" class="tree-wrap">
-                        <div class="tree">
-                            <div
-                                v-for="{ node, level } in flatTree"
-                                :key="node.id"
-                                class="tree-row"
-                                :class="{ active: selectedNode?.id === node.id, anomaly: node.anomaly }"
-                                :style="{ paddingLeft: `${8 + level * 14}px` }"
-                            >
-                                <button class="twist" type="button" :class="{ hidden: !canExpand(node) }" :disabled="!canExpand(node)" @click.stop="toggleNode(node)">
-                                    <Loader2 v-if="loadingChildren[node.id]" :size="12" class="spin" />
-                                    <ChevronRight v-else :size="12" />
-                                </button>
-                                <button class="tree-node-btn" type="button" @click="selectNode(node)" @dblclick="openNode(node)">
-                                    <span class="node-chip" :class="nodeTypeMeta[node.nodeType]?.className || 'civil'">
-                                        <Building2 v-if="node.nodeType === 'civil_code'" :size="12" />
-                                        <Folder v-else-if="node.nodeType === 'biz_group' || node.nodeType === 'virtual_org'" :size="12" />
-                                        <Monitor v-else-if="node.nodeType === 'device'" :size="12" />
-                                        <Camera v-else :size="12" />
-                                    </span>
-                                    <span class="label">{{ node.name }}</span>
-                                    <span class="count">{{ node.mountCount ?? node.childCount ?? '' }}</span>
-                                </button>
-                            </div>
-                        </div>
-                    </a-spin>
+                    <DirectoryPanel
+                        v-model="directoryState"
+                        :can-manage="canManageGroups"
+                        @select="onDirectorySelect"
+                        @view-change="onDirectoryViewChange"
+                    />
                 </aside>
 
                 <main class="content-pane">
@@ -1552,7 +1468,7 @@ onUnmounted(() => {
                     <div class="filter-chips">
                         <span v-if="deviceIdFilter" class="filter-chip">所属设备: {{ deviceIdFilter }} <button class="close" @click="clearDeviceFilter">×</button></span>
                         <span v-if="statusFilter" class="filter-chip">状态: {{ statusFilter === 'online' ? '在线' : '离线' }} <button class="close" @click="statusFilter = undefined">×</button></span>
-                        <span v-if="selectedNode" class="filter-chip">目录: {{ selectedNode.name }} <button class="close" @click="clearNode">×</button></span>
+                        <span v-if="selectedDirectory" class="filter-chip">目录: {{ selectedDirectory.name }} <button class="close" @click="clearDirectorySelection()">×</button></span>
                         <button v-if="hasFilters" class="clear-all" type="button" @click="resetFilters">清除筛选</button>
                     </div>
 
@@ -2307,18 +2223,6 @@ onUnmounted(() => {
                             </a-button>
                         </div>
                     </div>
-                    <div v-else-if="drawerTarget?.type === 'node'" class="drawer-body">
-                        <div class="drawer-headline">
-                            <span class="drawer-icon"><FolderTree :size="18" /></span>
-                            <div><h3>{{ drawerTarget.node.name }}</h3><p>{{ drawerTarget.node.path }}</p></div>
-                        </div>
-                        <div class="kv-grid">
-                            <span>编码</span><strong>{{ drawerTarget.node.code || '-' }}</strong>
-                            <span>行政区划</span><strong>{{ drawerTarget.node.civilCode || '-' }}</strong>
-                            <span>来源</span><strong>{{ drawerTarget.node.source }}</strong>
-                            <span>挂载数</span><strong>{{ drawerTarget.node.mountCount || 0 }}</strong>
-                        </div>
-                    </div>
                 </a-spin>
             </a-drawer>
 
@@ -2737,7 +2641,7 @@ onUnmounted(() => {
 }
 .workspace {
     display: grid;
-    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr);
     gap: 16px;
     min-height: 0;
     flex: 1;
@@ -2756,63 +2660,7 @@ onUnmounted(() => {
     flex-direction: column;
     overflow: hidden;
 }
-.pane-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    min-height: 48px;
-    padding: 0 14px;
-    border-bottom: 1px solid var(--uvp-panel-border);
-}
-.head-title { display: inline-flex; align-items: center; gap: 8px; color: var(--uvp-text-primary); font-weight: 620; }
-.aside-search { padding: 12px 14px 10px; }
-.aside-search input {
-    box-sizing: border-box;
-    width: 100%;
-    height: 32px;
-    padding: 0 10px;
-    color: var(--uvp-text-primary);
-    background: var(--uvp-search-control-bg);
-    border: 1px solid var(--uvp-search-secondary-btn-border);
-    border-radius: 10px;
-}
-.tree-wrap { flex: 1; min-height: 0; }
-.tree { padding: 0 8px 12px; }
-.tree-row {
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    border-radius: 10px;
-    color: var(--uvp-text-secondary);
-}
-.tree-row.active,
-.tree-row:hover { background: var(--uvp-sidebar-active-bg); color: var(--uvp-text-primary); }
-.tree-row.anomaly { box-shadow: inset 3px 0 0 var(--uvp-warning); }
-.twist {
-    width: 22px;
-    height: 22px;
-    display: inline-grid;
-    place-items: center;
-    color: var(--uvp-text-tertiary);
-    background: transparent;
-    border: 0;
-}
-.twist.hidden { visibility: hidden; }
 .spin { animation: spin 0.8s linear infinite; }
-.tree-node-btn {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex: 1;
-    min-width: 0;
-    height: 30px;
-    padding: 0 8px 0 0;
-    text-align: left;
-    color: inherit;
-    background: transparent;
-    border: 0;
-}
-.node-chip,
 .drawer-icon {
     width: 22px;
     height: 22px;
@@ -2823,10 +2671,7 @@ onUnmounted(() => {
     background: var(--uvp-brand-soft);
     flex: 0 0 auto;
 }
-.node-chip.biz { color: var(--uvp-brand-cyan); }
-.node-chip.virtual { color: var(--uvp-warning); background: var(--uvp-warning-soft); }
-.label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.count { margin-left: auto; color: var(--uvp-text-tertiary); font-size: 12px; }
+.catalog-pane :deep(.directory-panel) { width: 100%; min-width: 0; height: 100%; border-right: 0; }
 .content-pane {
     display: flex;
     flex-direction: column;
