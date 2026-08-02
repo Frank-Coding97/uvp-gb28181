@@ -4,6 +4,26 @@
 SET session_replication_role = replica;
 SET client_min_messages TO WARNING;
 
+DROP TABLE IF EXISTS gb_custom_group_device;
+CREATE TABLE gb_custom_group_device (
+    id BIGSERIAL PRIMARY KEY, group_id BIGINT NOT NULL, device_id BIGINT NOT NULL,
+    created_by BIGINT NOT NULL, created_at TIMESTAMP(3) NOT NULL,
+    CONSTRAINT uk_custom_group_device UNIQUE (group_id, device_id)
+);
+CREATE INDEX idx_custom_group_device_group ON gb_custom_group_device (group_id);
+CREATE INDEX idx_custom_group_device_device ON gb_custom_group_device (device_id);
+
+DROP TABLE IF EXISTS gb_custom_group;
+CREATE TABLE gb_custom_group (
+    id BIGSERIAL PRIMARY KEY, owner_dept_id BIGINT NOT NULL,
+    parent_id BIGINT NOT NULL DEFAULT 0, path VARCHAR(1024) NOT NULL,
+    depth SMALLINT NOT NULL DEFAULT 0, name VARCHAR(64) NOT NULL,
+    created_by BIGINT NOT NULL, created_at TIMESTAMP(3) NOT NULL, updated_at TIMESTAMP(3) NOT NULL,
+    CONSTRAINT uk_custom_group_sibling_name UNIQUE (owner_dept_id, parent_id, name)
+);
+CREATE INDEX idx_custom_group_parent ON gb_custom_group (parent_id);
+CREATE INDEX idx_custom_group_dept_path ON gb_custom_group (owner_dept_id, path);
+
 -- Table structure for demo_students
 DROP TABLE IF EXISTS demo_students;
 CREATE TABLE demo_students (
