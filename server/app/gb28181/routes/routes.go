@@ -19,6 +19,7 @@ import (
 
 var deviceController = gbcontrollers.NewDeviceController()
 var catalogTreeController = gbcontrollers.NewCatalogTreeController()
+var directoryController = gbcontrollers.NewDirectoryController()
 var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
 var mapController = gbcontrollers.NewMapController()
 var anomalyController = gbcontrollers.NewAnomalyController()
@@ -296,6 +297,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			// B1 catalogtree:目录树
 			dmgmt.GET("/catalog/tree", catalogTreeController.Tree)
+			dmgmt.GET("/directory/tree", directoryController.Tree)
 			dmgmt.GET("/catalog/tree/:id", catalogTreeController.Node)
 			dmgmt.GET("/catalog/tree/:id/children", catalogTreeController.Children)
 			dmgmt.GET("/catalog/tree/:id/subtree", catalogTreeController.Subtree)
