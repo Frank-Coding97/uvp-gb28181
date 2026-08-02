@@ -82,9 +82,11 @@ import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
 import AddToGroupDialog from "./components/AddToGroupDialog.vue";
+import DeviceRecordQueryDrawer from "./components/DeviceRecordQueryDrawer.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 import { createDirectoryState, customGroupBatchActions, directoryQuery, findDirectoryNode, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
+import { closeRecordQueryEntry, createRecordQueryEntryState, openRecordQueryEntry } from "./recordQueryEntryState";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
@@ -214,6 +216,7 @@ const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
 const traceCaptureStarting = reactive<Record<number, boolean>>({});
 const cloudRecordingLoading = ref<Set<number>>(new Set());
+const recordQueryEntry = ref(createRecordQueryEntryState());
 
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -986,6 +989,14 @@ async function handleStopChannel(record: ChannelVO) {
 function playChannel(record: ChannelVO) {
     controlConsoleChannel.value = record;
     controlConsoleVisible.value = true;
+}
+
+function openRecordQuery(record: ChannelVO) {
+    recordQueryEntry.value = openRecordQueryEntry(recordQueryEntry.value, record);
+}
+
+function handleRecordQueryVisible(visible: boolean) {
+    if (!visible) recordQueryEntry.value = closeRecordQueryEntry(recordQueryEntry.value);
 }
 function isInteractiveDblclick(event: MouseEvent) {
     const target = event.target;
@@ -1762,12 +1773,16 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="280" fixed="right">
+                                <a-table-column title="操作" :width="338" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
                                             <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
                                                 <template #icon><Play :size="13" /></template>
                                                 <span>播放</span>
+                                            </a-link>
+                                            <a-link class="uvp-table-action uvp-table-action--record" @click="openRecordQuery(record)">
+                                                <template #icon><History :size="13" /></template>
+                                                <span>录像</span>
                                             </a-link>
                                             <a-link
                                                 v-if="isChannelPlaying(record)"
@@ -2112,11 +2127,22 @@ onUnmounted(() => {
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
-                                    <a-tooltip content="点播" position="top">
+                                <a-tooltip content="点播" position="top">
                                         <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
                                             <Play :size="13" />
                                         </button>
-                                    </a-tooltip>
+                                </a-tooltip>
+                                <a-tooltip content="查询设备录像" position="top">
+                                    <button
+                                        class="icon-btn small framed record-query-entry"
+                                        type="button"
+                                        aria-label="查询设备录像"
+                                        @click.stop="openRecordQuery(item)"
+                                        @dblclick.stop
+                                    >
+                                        <History :size="13" />
+                                    </button>
+                                </a-tooltip>
                                     <a-tooltip v-if="isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
                                         <button
                                             class="icon-btn small framed stop"
@@ -2165,6 +2191,13 @@ onUnmounted(() => {
 
                 </main>
             </div>
+
+            <DeviceRecordQueryDrawer
+                :key="recordQueryEntry.token"
+                :visible="recordQueryEntry.visible"
+                :channel="recordQueryEntry.target"
+                @update:visible="handleRecordQueryVisible"
+            />
 
             <a-drawer v-model:visible="drawerVisible" :width="640" :footer="false" unmount-on-close>
                 <template #title>
@@ -3269,6 +3302,8 @@ onUnmounted(() => {
 .uvp-data-table :deep(.uvp-table-action .arco-link-icon svg) { display: block; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview) { color: #2563eb; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--preview:hover) { color: #1d4ed8; background: rgb(37 99 235 / 8%); }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--record) { color: #6b4f9b; }
+.device-mgmt-page :deep(.uvp-data-table .uvp-table-action--record:hover) { color: #5a3f89; background: rgb(107 79 155 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail) { color: #0f7490; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--detail:hover) { color: #0e7490; background: rgb(14 116 144 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync) { color: #0f766e; }
@@ -3333,6 +3368,16 @@ onUnmounted(() => {
     color: #fff;
     background: var(--uvp-brand);
     border-color: var(--uvp-brand);
+}
+.icon-btn.framed.record-query-entry {
+    color: #6b4f9b;
+    background: rgb(107 79 155 / 8%);
+    border: 1px solid rgb(107 79 155 / 22%);
+}
+.icon-btn.framed.record-query-entry:hover {
+    color: #fff;
+    background: #6b4f9b;
+    border-color: #6b4f9b;
 }
 .icon-btn.framed.info {
     color: var(--uvp-brand-cyan);
