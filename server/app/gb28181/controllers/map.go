@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
@@ -56,6 +57,23 @@ func applyMapFilters(c *gin.Context, db *gorm.DB, q *gorm.DB) *gorm.DB {
 		}
 	}
 	return q
+}
+
+func applyMapDirectoryFilter(c *gin.Context, db *gorm.DB, q *gorm.DB) (*gorm.DB, error) {
+	if c.Query("directoryView") == "" && c.Query("directoryKey") == "" {
+		return q, nil
+	}
+	if c.Query("nodeId") != "" {
+		return q, gbdirectory.ErrDirectoryFilterInvalid
+	}
+	scope, err := resolveDirectoryDeviceScope(c, db)
+	if err != nil {
+		return q, err
+	}
+	if len(scope.Codes) == 0 {
+		return q.Where("1=0"), nil
+	}
+	return q.Where("gb_channel.device_id IN ?", scope.Codes), nil
 }
 
 type markerVO struct {
@@ -110,6 +128,11 @@ func (mc *MapController) Markers(c *gin.Context) {
 		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
 		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
+	q, err := applyMapDirectoryFilter(c, db, q)
+	if err != nil {
+		mc.Fail(c, "目录筛选参数错误", err, 400)
+		return
+	}
 	if maxLat > minLat {
 		q = q.Where("COALESCE(position_latest.latitude, gb_channel.latitude) BETWEEN ? AND ?", minLat, maxLat)
 	}
@@ -179,6 +202,11 @@ func (mc *MapController) Clusters(c *gin.Context) {
 		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
 		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
+	q, err := applyMapDirectoryFilter(c, db, q)
+	if err != nil {
+		mc.Fail(c, "目录筛选参数错误", err, 400)
+		return
+	}
 	if maxLat > minLat {
 		q = q.Where("COALESCE(position_latest.latitude, gb_channel.latitude) BETWEEN ? AND ?", minLat, maxLat)
 	}
@@ -237,6 +265,11 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 	var count int64
 	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Joins(mapCoordinateJoin)
 	q = applyMapFilters(c, db, q).Where("(COALESCE(position_latest.latitude, gb_channel.latitude) = 0 OR COALESCE(position_latest.longitude, gb_channel.longitude) = 0)")
+	q, err := applyMapDirectoryFilter(c, db, q)
+	if err != nil {
+		mc.Fail(c, "目录筛选参数错误", err, 400)
+		return
+	}
 	if err := q.Count(&count).Error; err != nil {
 		mc.FailAndAbort(c, "查询失败", err)
 		return

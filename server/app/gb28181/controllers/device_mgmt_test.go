@@ -20,6 +20,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 )
 
 type fakeSubscriptionManager struct{ calls []string }
@@ -59,6 +60,7 @@ func (f *fakeSubscriptionManager) Renew(_ context.Context, device *gbmodels.GbDe
 
 func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Engine, *gorm.DB) {
 	t.Helper()
+	app.Response = response.NewResponseHandler()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
@@ -71,6 +73,8 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&gbmodels.GbDeviceSubscription{},
 		&gbmodels.GbAlarmEvent{},
 		&gbmodels.GbDeviceStatusEvent{},
+		&gbmodels.GbCustomGroup{},
+		&gbmodels.GbCustomGroupDevice{},
 		&basemodels.SysDepartment{},
 		&basemodels.SysRole{},
 		&basemodels.SysUserRole{},
@@ -298,6 +302,46 @@ func TestDeviceMgmt_ListDevices_FilterByCatalogNode(t *testing.T) {
 	require.Len(t, list, 1)
 	d := list[0].(map[string]any)
 	assert.Equal(t, "34020000002000000001", d["deviceId"])
+}
+
+func TestDeviceMgmt_CustomDirectoryFiltersDevicesChannelsAndMap(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	deviceID, _, _ := seedDevicesAndChannels(t, db)
+	other := &gbmodels.GbDevice{DeviceID: "34020000002000000002", Name: "other", SubscribeCapability: gbmodels.SubscribeUnknown}
+	require.NoError(t, db.Create(other).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{DeviceID: other.DeviceID, ChannelID: "C-other", Latitude: 35, Longitude: 116}).Error)
+	root := &gbmodels.GbCustomGroup{OwnerDeptID: 0, ParentID: 0, Path: "/", Name: "A"}
+	require.NoError(t, db.Create(root).Error)
+	root.Path = "/" + uintStr(root.ID) + "/"
+	require.NoError(t, db.Model(root).Update("path", root.Path).Error)
+	child := &gbmodels.GbCustomGroup{OwnerDeptID: 0, ParentID: root.ID, Path: root.Path, Depth: 1, Name: "B"}
+	require.NoError(t, db.Create(child).Error)
+	child.Path += uintStr(child.ID) + "/"
+	require.NoError(t, db.Model(child).Update("path", child.Path).Error)
+	require.NoError(t, db.Create(&gbmodels.GbCustomGroupDevice{GroupID: child.ID, DeviceID: deviceID}).Error)
+	query := "?directoryView=custom&directoryKey=custom:group:" + uintStr(root.ID)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices"+query, nil))
+	require.EqualValues(t, 1, unmarshal(t, w)["data"].(map[string]any)["total"])
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/channels"+query, nil))
+	require.EqualValues(t, 2, unmarshal(t, w)["data"].(map[string]any)["total"])
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/markers"+query, nil))
+	require.EqualValues(t, 1, unmarshal(t, w)["data"].(map[string]any)["total"])
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/map/no-coord-count"+query, nil))
+	require.EqualValues(t, 1, unmarshal(t, w)["data"].(map[string]any)["count"])
+}
+
+func TestDeviceMgmt_RejectsMixedDirectoryParameters(t *testing.T) {
+	r, _ := newDeviceMgmtRouter(t)
+	for _, path := range []string{"devices", "channels", "map/markers", "map/clusters", "map/no-coord-count"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/"+path+"?nodeId=1&directoryView=custom&directoryKey=custom:ungrouped", nil))
+		require.Equal(t, http.StatusBadRequest, w.Code, path+": "+w.Body.String())
+	}
 }
 
 func TestDeviceMgmt_ListChannels_FilterStatus(t *testing.T) {

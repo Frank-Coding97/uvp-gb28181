@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -127,6 +130,26 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 	}
 
 	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(ownerDeptScope(c))
+	if c.Query("directoryView") != "" || c.Query("directoryKey") != "" {
+		if c.Query("nodeId") != "" {
+			dc.Fail(c, "新旧目录参数不能同时使用", nil, http.StatusBadRequest)
+			return
+		}
+		scope, err := resolveDirectoryDeviceScope(c, db)
+		if err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, gbdirectory.ErrGroupNotFound) {
+				status = http.StatusNotFound
+			}
+			dc.Fail(c, "目录筛选参数错误", err, status)
+			return
+		}
+		if len(scope.IDs) == 0 {
+			q = q.Where("1=0")
+		} else {
+			q = q.Where("id IN ?", scope.IDs)
+		}
+	}
 	// nodeId 过滤:按目录子树内的设备节点 + 通道所属设备反查设备列表
 	if nodeIDStr := c.Query("nodeId"); nodeIDStr != "" {
 		if id, err := strconv.ParseUint(nodeIDStr, 10, 64); err == nil {
@@ -300,6 +323,22 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 	}
 
 	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c))
+	if c.Query("directoryView") != "" || c.Query("directoryKey") != "" {
+		if c.Query("nodeId") != "" {
+			dc.Fail(c, "新旧目录参数不能同时使用", nil, http.StatusBadRequest)
+			return
+		}
+		scope, err := resolveDirectoryDeviceScope(c, db)
+		if err != nil {
+			dc.Fail(c, "目录筛选参数错误", err, http.StatusBadRequest)
+			return
+		}
+		if len(scope.Codes) == 0 {
+			q = q.Where("1=0")
+		} else {
+			q = q.Where("device_id IN ?", scope.Codes)
+		}
+	}
 	if deviceID := strings.TrimSpace(c.Query("deviceId")); deviceID != "" {
 		q = q.Where("device_id = ?", deviceID)
 	}
