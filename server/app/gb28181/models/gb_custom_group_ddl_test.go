@@ -33,6 +33,9 @@ func TestCustomGroupMigrationContracts(t *testing.T) {
 			require.NotContains(t, text, "deleted_at")
 		})
 	}
+	mysqlBody, err := os.ReadFile(filepath.Join(root, "resource/database/gb28181/migrations/2026-08-02-device-directory-custom-groups.sql"))
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(string(mysqlBody)), "`path`(191)", "utf8mb4 path index must stay below MySQL's 3072-byte key limit")
 }
 
 func TestCustomGroupDownMigrationsProtectData(t *testing.T) {
@@ -72,4 +75,7 @@ func TestCustomGroupFreshSchemasMatchMigration(t *testing.T) {
 			require.Contains(t, member, token, path)
 		}
 	}
+	mysqlBody, err := os.ReadFile(filepath.Join(root, "resource/database/uvp-gb28181.sql"))
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(string(mysqlBody)), "`path`(191)", "fresh MySQL schema must use the same bounded path index")
 }

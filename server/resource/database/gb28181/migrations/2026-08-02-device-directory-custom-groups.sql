@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS `gb_custom_group` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_custom_group_sibling_name` (`owner_dept_id`,`parent_id`,`name`),
   KEY `idx_custom_group_parent` (`parent_id`),
-  KEY `idx_custom_group_dept_path` (`owner_dept_id`,`path`)
+  KEY `idx_custom_group_dept_path` (`owner_dept_id`,`path`(191))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `gb_custom_group_device` (
