@@ -99,6 +99,7 @@ jobs:
           rm -rf "$release_dir" "$output_dir"
           mkdir -p \
             "$release_dir/backend/resource/public" \
+            "$release_dir/clickhouse/init" \
             "$release_dir/frontend" \
             "$output_dir"
 
@@ -108,6 +109,8 @@ jobs:
             cp -a server/resource/public/. "$release_dir/backend/resource/public/"
           fi
           cp deploy/test/backend.Dockerfile "$release_dir/backend/Dockerfile"
+          install -m 0755 server/deploy/sip-trace-clickhouse/init/01-sip-trace.sh \
+            "$release_dir/clickhouse/init/01-sip-trace.sh"
 
           cp -a web/dist "$release_dir/frontend/dist"
           cp deploy/test/frontend.Dockerfile "$release_dir/frontend/Dockerfile"
