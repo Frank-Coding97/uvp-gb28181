@@ -78,13 +78,26 @@
           </template>
         </s-layout-search>
 
+        <div v-if="canDelete" class="alarm-batch-bar" aria-live="polite">
+          <span>已选择 <strong>{{ selectedKeys.length }}</strong> 条当前页告警</span>
+          <a-button
+            data-testid="batch-delete"
+            status="danger"
+            :disabled="selectedKeys.length === 0 || batchDeleting"
+            :loading="batchDeleting"
+            @click="requestBatchDelete"
+          >
+            <template #icon><Trash2 :size="14" /></template>
+            删除已选 {{ selectedKeys.length }} 条
+          </a-button>
+        </div>
+
         <a-alert v-if="errorMessage && !loading" class="alarm-state" type="error" closable @close="errorMessage = ''">
           {{ errorMessage }}
         </a-alert>
 
         <a-table
           v-else
-          v-model:selected-keys="selectedKeys"
           class="uvp-data-table"
           data-testid="alarm-table"
           row-key="id"
@@ -92,10 +105,12 @@
           :bordered="false"
           :loading="loading"
           :pagination="pagination"
-          :row-selection="{ type: 'checkbox', showCheckedAll: true }"
+          :selected-keys="selectedKeys"
+          :row-selection="canDelete ? { type: 'checkbox', showCheckedAll: true } : undefined"
           :scroll="tableScroll"
           @page-change="handlePageChange"
           @page-size-change="handlePageSizeChange"
+          @update:selected-keys="handleSelectionChange"
         >
           <template #columns>
             <a-table-column title="平台接收时间" :width="176">
@@ -184,9 +199,10 @@ import {
   mayDeleteAlarms,
   mayViewAlarms,
   normalizeAlarmQuery,
+  normalizeCurrentPageSelection,
   pageAfterAlarmDeletion
 } from "./alarmState";
-import { deleteAlarm, listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
+import { batchDeleteAlarms, deleteAlarm, listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
 
 interface DeviceOption {
   id: number;
@@ -217,6 +233,7 @@ const deviceOptions = ref<DeviceOption[]>([]);
 const detailVisible = ref(false);
 const detailAlarmId = ref<string | null>(null);
 const deletingIds = ref(new Set<string>());
+const batchDeleting = ref(false);
 const pagination = reactive({
   current: 1,
   pageSize: 20,
@@ -266,6 +283,7 @@ async function loadAlarms() {
     const response = await listAlarms(currentQuery());
     if (token !== listRequestToken) return;
     alarms.value = response.data.list ?? [];
+    selectedKeys.value = normalizeCurrentPageSelection(selectedKeys.value, alarms.value.map(alarm => alarm.id));
     pagination.total = response.data.total ?? 0;
     pagination.current = response.data.page ?? pagination.current;
     pagination.pageSize = response.data.pageSize ?? pagination.pageSize;
@@ -348,6 +366,50 @@ async function performSingleDelete(id: string) {
   }
 }
 
+function requestBatchDelete() {
+  if (!canDelete.value || batchDeleting.value || selectedKeys.value.length === 0) return;
+  if (selectedKeys.value.length > 100) {
+    proxy.$message.warning("单次最多删除 100 条告警，请减少选择数量");
+    return;
+  }
+  const count = selectedKeys.value.length;
+  Modal.warning({
+    title: "批量物理删除告警",
+    content: `将物理删除当前页明确勾选的 ${count} 条告警，删除后不可恢复；任一记录校验失败时一条也不会删除。`,
+    okText: "删除",
+    cancelText: "取消",
+    hideCancel: false,
+    okButtonProps: { status: "danger" },
+    onOk: performBatchDelete
+  });
+}
+
+async function performBatchDelete() {
+  if (batchDeleting.value || selectedKeys.value.length === 0) return;
+  const ids = [...selectedKeys.value];
+  if (ids.length > 100) {
+    proxy.$message.warning("单次最多删除 100 条告警，请减少选择数量");
+    return;
+  }
+  batchDeleting.value = true;
+  try {
+    const response = await batchDeleteAlarms(ids);
+    const deletedCount = response.data.deletedCount;
+    pagination.current = pageAfterAlarmDeletion(pagination.current, pagination.pageSize, pagination.total, deletedCount);
+    selectedKeys.value = [];
+    if (detailAlarmId.value && ids.includes(detailAlarmId.value)) {
+      detailVisible.value = false;
+      detailAlarmId.value = null;
+    }
+    proxy.$message.success(`已物理删除 ${deletedCount} 条告警`);
+    await loadAlarms();
+  } catch (error) {
+    proxy.$message.error(`批量删除失败，一条未删除：${errorMessageOf(error, "请刷新后重试")}`);
+  } finally {
+    batchDeleting.value = false;
+  }
+}
+
 function errorMessageOf(error: unknown, fallback: string): string {
   if (typeof error === "string" && error) return error;
   if (error && typeof error === "object") {
@@ -368,6 +430,10 @@ function handlePageSizeChange(pageSize: number) {
   pagination.pageSize = pageSize;
   selectedKeys.value = [];
   loadAlarms();
+}
+
+function handleSelectionChange(ids: string[]) {
+  selectedKeys.value = normalizeCurrentPageSelection(ids, alarms.value.map(alarm => alarm.id));
 }
 
 async function searchDevices(keyword: string) {
@@ -432,6 +498,25 @@ onMounted(() => {
 
 .alarm-state {
   margin-bottom: 12px;
+}
+
+.alarm-batch-bar {
+  display: flex;
+  min-height: 44px;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px 7px 14px;
+  margin-bottom: 10px;
+  color: var(--uvp-text-secondary);
+  font-size: 13px;
+  background: color-mix(in srgb, var(--uvp-danger) 5%, var(--uvp-bg-secondary));
+  border: 1px solid color-mix(in srgb, var(--uvp-danger) 22%, var(--uvp-border));
+  border-radius: 6px;
+}
+
+.alarm-batch-bar strong {
+  color: var(--uvp-text-primary);
 }
 
 .alarm-entity-cell {
