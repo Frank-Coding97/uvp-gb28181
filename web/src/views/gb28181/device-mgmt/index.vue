@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch, onUnmounted } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { Message, Modal } from "@arco-design/web-vue";
 import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -82,11 +82,10 @@ import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
 import AddToGroupDialog from "./components/AddToGroupDialog.vue";
-import DeviceRecordQueryDrawer from "./components/DeviceRecordQueryDrawer.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 import { createDirectoryState, customGroupBatchActions, directoryQuery, findDirectoryNode, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
-import { closeRecordQueryEntry, createRecordQueryEntryState, openRecordQueryEntry } from "./recordQueryEntryState";
+import { consumeDeviceMgmtReturnSnapshot, saveDeviceMgmtReturnSnapshot } from "../device-record-playback/returnSnapshot";
 
 type ViewMode = "list" | "card" | "map";
 type DrawerTarget =
@@ -115,6 +114,7 @@ function initialAutoRefresh() {
 
 const viewMode = ref<ViewMode>(initialViewMode());
 const router = useRouter();
+const route = useRoute();
 const assetKind = ref<AssetKind>("device");
 const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
@@ -140,6 +140,25 @@ const mapLoading = ref(false);
 const page = ref(1);
 const listPageSize = ref(10);
 const cardPageSize = ref(12);
+const returnSnapshot = consumeDeviceMgmtReturnSnapshot(typeof route.query.returnKey === "string" ? route.query.returnKey : null);
+if (returnSnapshot) {
+    viewMode.value = returnSnapshot.viewMode;
+    assetKind.value = returnSnapshot.assetKind;
+    keyword.value = returnSnapshot.keyword;
+    deviceIdFilter.value = returnSnapshot.deviceIdFilter;
+    statusFilter.value = returnSnapshot.statusFilter;
+    directoryState.value = {
+        ...directoryState.value,
+        view: returnSnapshot.directoryView === "custom" ? "custom" : "national",
+        selectedKey: {
+            ...directoryState.value.selectedKey,
+            [returnSnapshot.directoryView === "custom" ? "custom" : "national"]: returnSnapshot.directorySelectedKey
+        }
+    };
+    page.value = returnSnapshot.page;
+    listPageSize.value = returnSnapshot.listPageSize;
+    cardPageSize.value = returnSnapshot.cardPageSize;
+}
 const pageSize = computed({
     get: () => viewMode.value === "card" ? cardPageSize.value : listPageSize.value,
     set: (value: number) => {
@@ -216,8 +235,6 @@ const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
 const traceCaptureStarting = reactive<Record<number, boolean>>({});
 const cloudRecordingLoading = ref<Set<number>>(new Set());
-const recordQueryEntry = ref(createRecordQueryEntryState());
-
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
     { label: "卡片", value: "card", icon: Grid2X2 },
@@ -992,11 +1009,20 @@ function playChannel(record: ChannelVO) {
 }
 
 function openRecordQuery(record: ChannelVO) {
-    recordQueryEntry.value = openRecordQueryEntry(recordQueryEntry.value, record);
-}
-
-function handleRecordQueryVisible(visible: boolean) {
-    if (!visible) recordQueryEntry.value = closeRecordQueryEntry(recordQueryEntry.value);
+    const returnKey = saveDeviceMgmtReturnSnapshot({
+        version: 1,
+        viewMode: viewMode.value,
+        assetKind: assetKind.value,
+        keyword: keyword.value,
+        deviceIdFilter: deviceIdFilter.value,
+        statusFilter: statusFilter.value,
+        directoryView: directoryState.value.view,
+        directorySelectedKey: directoryState.value.selectedKey[directoryState.value.view],
+        page: page.value,
+        listPageSize: listPageSize.value,
+        cardPageSize: cardPageSize.value
+    });
+    router.push({ name: "gb28181-device-record-playback", params: { channelId: record.id }, query: { returnKey } });
 }
 function isInteractiveDblclick(event: MouseEvent) {
     const target = event.target;
@@ -2191,13 +2217,6 @@ onUnmounted(() => {
 
                 </main>
             </div>
-
-            <DeviceRecordQueryDrawer
-                :key="recordQueryEntry.token"
-                :visible="recordQueryEntry.visible"
-                :channel="recordQueryEntry.target"
-                @update:visible="handleRecordQueryVisible"
-            />
 
             <a-drawer v-model:visible="drawerVisible" :width="640" :footer="false" unmount-on-close>
                 <template #title>

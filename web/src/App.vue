@@ -104,7 +104,12 @@ watch(
     { immediate: true }
 );
 
-initSysConfig();
+const isDeviceRecordPreview = import.meta.env.DEV
+    && import.meta.env.VITE_RECORD_QUERY_MOCK === "true"
+    && window.location.hash.startsWith("#/device-record-query-demo");
+
+if (isDeviceRecordPreview) setTitle("设备录像回放预览");
+else initSysConfig();
 </script>
 
 <style lang="scss" scoped></style>

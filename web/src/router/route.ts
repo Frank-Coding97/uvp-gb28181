@@ -5,8 +5,8 @@ const recordQueryDemoRoutes = import.meta.env.DEV && import.meta.env.VITE_RECORD
   ? [{
       path: "/device-record-query-demo",
       name: "device-record-query-demo",
-      component: () => import(/* @vite-ignore */ "/src/dev-previews/DeviceRecordQueryDemo.vue"),
-      meta: { title: "设备录像查询预览", hide: true }
+      component: () => import(/* @vite-ignore */ "/src/views/gb28181/device-record-playback/index.vue"),
+      meta: { title: "设备录像回放预览", hide: true }
     }]
   : [];
 /**
@@ -53,6 +53,16 @@ export const staticRoutes = [
     redirect: HOME_PATH,
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
     children: []
+  },
+  {
+    path: "/gb28181/device-record-playback/:channelId",
+    name: "gb28181-device-record-playback",
+    component: () => import(/* webpackChunkName: "device-record-playback" */ "@/views/gb28181/device-record-playback/index.vue"),
+    meta: {
+      title: "设备录像回放",
+      hide: true,
+      keepAlive: false
+    }
   },
   {
     path: "/play-console-demo",
