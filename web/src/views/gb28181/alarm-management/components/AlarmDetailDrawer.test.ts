@@ -31,8 +31,8 @@ const detail = (id = "9007199254740993", description = "移动目标") => ({
 
 const stubs = {
   "a-drawer": {
-    props: ["visible"],
-    template: "<aside v-if='visible' data-testid='alarm-detail-drawer'><slot name='title' /><slot /></aside>"
+    props: ["visible", "escToClose"],
+    template: "<aside v-if='visible' data-testid='alarm-detail-drawer' :data-esc-to-close='escToClose'><slot name='title' /><slot /></aside>"
   },
   "a-spin": { props: ["loading"], template: "<div :data-loading='loading'><slot /></div>" },
   "a-descriptions": { template: "<dl><slot /></dl>" },
@@ -69,6 +69,7 @@ describe("AlarmDetailDrawer", () => {
     expect(wrapper.text()).toContain("<Notify><Description>有人 & 移动</Description></Notify>");
     expect(wrapper.find("script").exists()).toBe(false);
     expect(wrapper.find("[data-testid='detail-delete']").exists()).toBe(false);
+    expect(wrapper.get("[data-testid='alarm-detail-drawer']").attributes("data-esc-to-close")).toBe("true");
   });
 
   it("clears the previous detail while a new alarm is loading", async () => {

@@ -3,6 +3,7 @@
     :visible="visible"
     width="min(840px, 94vw)"
     :footer="false"
+    :esc-to-close="true"
     unmount-on-close
     class="alarm-detail-drawer"
     @update:visible="emit('update:visible', $event)"
@@ -182,6 +183,7 @@ watch(
   .alarm-detail-spin,
   .alarm-detail-content { min-height: 420px; }
   .alarm-detail-context { grid-template-columns: 1fr; gap: 10px; padding: 12px; }
+  .alarm-detail-context :deep(.arco-btn) { min-height: 44px; }
   .alarm-detail-section { padding: 14px 12px 0; }
 }
 @media (prefers-reduced-motion: reduce) { .alarm-detail-loading-icon { animation: none; } }

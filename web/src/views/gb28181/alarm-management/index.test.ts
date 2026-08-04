@@ -101,7 +101,10 @@ const stubs = {
   "a-tooltip": { template: "<span><slot /></span>" },
   "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
   "a-alert": { template: "<div><slot /></div>" },
-  AlarmDetailDrawer: { template: "<div />" }
+  AlarmDetailDrawer: {
+    props: ["visible"],
+    template: "<div data-testid='alarm-detail-drawer-stub' :data-visible='visible' />"
+  }
 };
 
 function mountPage() {
@@ -203,6 +206,7 @@ describe("AlarmManagement", () => {
     expect(String(options.content)).toContain("不可恢复");
     expect(String(options.content)).toContain("一号机房");
     expect(String(options.content)).toContain("东门");
+    expect(options.escToClose).toBe(true);
 
     const deleting = options.onOk();
     await button.trigger("click");
@@ -213,6 +217,13 @@ describe("AlarmManagement", () => {
     await flushPromises();
     expect(alarmApi.deleteAlarm).toHaveBeenCalledWith("9007199254740993");
     expect(messages.success).toHaveBeenCalledWith("已物理删除 1 条告警");
+  });
+
+  it("opens alarm detail from the keyboard", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get(".uvp-table-action--detail").trigger("keydown", { key: "Enter" });
+    expect(wrapper.get("[data-testid='alarm-detail-drawer-stub']").attributes("data-visible")).toBe("true");
   });
 
   it("keeps the row on delete failure and surfaces the backend message", async () => {
