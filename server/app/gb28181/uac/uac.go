@@ -23,13 +23,14 @@ type messageDoFunc func(context.Context, *sip.Request) (*sip.Response, error)
 
 // UAC 平台主叫客户端:向下级设备发起 SIP 请求(MESSAGE 查询 / INVITE 点播)
 type UAC struct {
-	client      *sipgo.Client
-	dialogUA    *sipgo.DialogClientCache // 管理 INVITE 对话(Ack/Bye)
-	talkDialogs *talkDialogStore
-	serverID    string
-	domain      string
-	recorder    metrics.Recorder // 可选:埋点出向事务
-	doMessage   messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
+	client          *sipgo.Client
+	dialogUA        *sipgo.DialogClientCache // 管理 INVITE 对话(Ack/Bye)
+	talkDialogs     *talkDialogStore
+	playbackDialogs *PlaybackDialogStore
+	serverID        string
+	domain          string
+	recorder        metrics.Recorder // 可选:埋点出向事务
+	doMessage       messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对
@@ -49,10 +50,12 @@ func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int)
 	contact := platformContact(serverID, advertiseIP, sipPort)
 	dialogUA := sipgo.NewDialogClientCache(client, contact)
 	talkDialogUA := sipgo.NewDialogClientCache(client, contact)
+	playbackDialogUA := sipgo.NewDialogClientCache(client, contact)
 	u := &UAC{
 		client: client, dialogUA: dialogUA,
-		talkDialogs: newTalkDialogStore(&sipgoTalkDialogTransport{cache: talkDialogUA}),
-		serverID:    serverID, domain: domain,
+		talkDialogs:     newTalkDialogStore(&sipgoTalkDialogTransport{cache: talkDialogUA}),
+		playbackDialogs: NewPlaybackDialogStore(&sipgoPlaybackDialogTransport{cache: playbackDialogUA}),
+		serverID:        serverID, domain: domain,
 	}
 	u.doMessage = func(ctx context.Context, req *sip.Request) (*sip.Response, error) {
 		return client.Do(ctx, req)
