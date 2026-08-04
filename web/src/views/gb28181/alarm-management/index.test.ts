@@ -1,7 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn(), deleteAlarm: vi.fn() }));
+const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn(), deleteAlarm: vi.fn(), batchDeleteAlarms: vi.fn() }));
 const deviceApi = vi.hoisted(() => ({ listDevices: vi.fn() }));
 const account = vi.hoisted(() => ({ permissions: ["gb28181:alarm:view"] as string[] }));
 const modal = vi.hoisted(() => ({ warning: vi.fn() }));
@@ -51,6 +51,18 @@ const listResult = (id = "9007199254740993") => ({
   }
 });
 
+const batchListResult = (count: number) => {
+  const seed = listResult("1");
+  return {
+    ...seed,
+    data: {
+      ...seed.data,
+      list: Array.from({ length: count }, (_, index) => ({ ...seed.data.list[0], id: String(index + 1) })),
+      total: count
+    }
+  };
+};
+
 const stubs = {
   "s-layout-search": { template: "<section><slot name='fields' /><slot name='actions' /><slot name='extra' /></section>" },
   "a-input": {
@@ -77,7 +89,7 @@ const stubs = {
       return { alarmTable: this };
     },
     template:
-      "<div data-testid='alarm-table' :data-count='data.length' :data-total='pagination.total' :data-ids='data.map(item => item.id).join(`,`)'><slot name='columns' /><button data-testid='page-three' @click='$emit(`pageChange`, 3)'>3</button></div>"
+      "<div data-testid='alarm-table' :data-count='data.length' :data-total='pagination.total' :data-ids='data.map(item => item.id).join(`,`)'><slot name='columns' /><button data-testid='select-three' @click='$emit(`update:selectedKeys`, data.slice(0, 3).map(item => item.id))'>选三条</button><button data-testid='select-all-test-data' @click='$emit(`update:selectedKeys`, data.map(item => item.id))'>选择测试数据</button><button data-testid='page-three' @click='$emit(`pageChange`, 3)'>3</button></div>"
   },
   "a-table-column": {
     props: ["title"],
@@ -103,6 +115,8 @@ describe("AlarmManagement", () => {
     alarmApi.listAlarms.mockResolvedValue(listResult());
     alarmApi.deleteAlarm.mockReset();
     alarmApi.deleteAlarm.mockResolvedValue({ code: 0, message: "ok", data: { deletedIds: ["9007199254740993"], deletedCount: 1 } });
+    alarmApi.batchDeleteAlarms.mockReset();
+    alarmApi.batchDeleteAlarms.mockResolvedValue({ code: 0, message: "ok", data: { deletedIds: ["1", "2", "3"], deletedCount: 3 } });
     modal.warning.mockReset();
     messages.error.mockReset();
     messages.success.mockReset();
@@ -228,5 +242,58 @@ describe("AlarmManagement", () => {
     await modal.warning.mock.calls[0][0].onOk();
     await flushPromises();
     expect(alarmApi.listAlarms).toHaveBeenLastCalledWith({ page: 2, pageSize: 20 });
+  });
+
+  it("batch delete uses only the current-page selection and confirms the exact count", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    alarmApi.listAlarms.mockResolvedValue(batchListResult(3));
+    const wrapper = mountPage();
+    await flushPromises();
+    const batchButton = wrapper.get("[data-testid='batch-delete']");
+    expect(batchButton.attributes("disabled")).toBeDefined();
+    await wrapper.get("[data-testid='select-three']").trigger("click");
+    expect(wrapper.text()).toContain("删除已选 3 条");
+    await batchButton.trigger("click");
+    const options = modal.warning.mock.calls[0][0];
+    expect(String(options.content)).toContain("3 条");
+    expect(String(options.content)).toContain("物理删除");
+    expect(String(options.content)).toContain("不可恢复");
+    await options.onOk();
+    await flushPromises();
+    expect(alarmApi.batchDeleteAlarms).toHaveBeenCalledWith(["1", "2", "3"]);
+    expect(messages.success).toHaveBeenCalledWith("已物理删除 3 条告警");
+    expect(wrapper.text()).not.toContain("删除已选 3 条");
+  });
+
+  it("keeps all selections when an atomic batch fails", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    alarmApi.listAlarms.mockResolvedValue(batchListResult(3));
+    alarmApi.batchDeleteAlarms.mockRejectedValueOnce({ response: { data: { message: "告警不存在或无权访问" } } });
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-testid='select-three']").trigger("click");
+    await wrapper.get("[data-testid='batch-delete']").trigger("click");
+    await modal.warning.mock.calls[0][0].onOk();
+    await flushPromises();
+    expect(wrapper.text()).toContain("删除已选 3 条");
+    expect(messages.error).toHaveBeenCalledWith("批量删除失败，一条未删除：告警不存在或无权访问");
+  });
+
+  it("hides batch controls without permission and rejects more than 100 IDs", async () => {
+    const viewOnly = mountPage();
+    await flushPromises();
+    expect(viewOnly.find("[data-testid='batch-delete']").exists()).toBe(false);
+
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    alarmApi.listAlarms.mockResolvedValue(batchListResult(101));
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-testid='select-all-test-data']").trigger("click");
+    await wrapper.get("[data-testid='batch-delete']").trigger("click");
+    expect(alarmApi.batchDeleteAlarms).not.toHaveBeenCalled();
+    expect(modal.warning).not.toHaveBeenCalled();
+    expect(messages.warning).toHaveBeenCalledWith("单次最多删除 100 条告警，请减少选择数量");
+    expect(wrapper.text()).not.toContain("清空全部");
+    expect(wrapper.text()).not.toContain("选择全部筛选结果");
   });
 });
