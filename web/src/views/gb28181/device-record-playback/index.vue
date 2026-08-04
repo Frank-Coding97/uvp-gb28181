@@ -38,10 +38,16 @@ import {
 import { createPlaybackState, reducePlaybackState } from "./playbackState";
 import { positionToTime } from "./timeline";
 import RecordTimeline, { type TimelineLocateEvent } from "./components/RecordTimeline.vue";
-
-interface RecordEntry extends RecordQueryItem {
-    recordKey: string;
-}
+import PlayWindow from "../components/PlayWindow.vue";
+import {
+    actionPlaybackSession,
+    createPlaybackSession,
+    deletePlaybackSession,
+    getPlaybackSession,
+    selectPlaybackMediaUrl,
+    type PlaybackActionRequest,
+    type PlaybackSession
+} from "./api";
 
 const route = useRoute();
 const router = useRouter();
@@ -51,13 +57,17 @@ const form = ref<RecordQueryForm | null>(null);
 const queryState = ref<RecordQueryUiState>("idle");
 const queryMessage = ref("");
 const result = ref<RecordQueryResult | null>(null);
-const records = ref<RecordEntry[]>([]);
+const records = ref<RecordQueryItem[]>([]);
 const playback = ref(createPlaybackState());
+const playbackMediaUrl = ref("");
+const playbackHasAudio = ref(false);
+const controlPending = ref(false);
 const downloadNotice = ref("");
 const queryToken = ref(0);
 const viewport = ref<HTMLElement | null>(null);
 let queryAbort: AbortController | null = null;
-let playbackTimer: number | null = null;
+let sessionToken = 0;
+let sessionPollTimer: number | null = null;
 let progressTimer: number | null = null;
 let downloadTimer: number | null = null;
 let restorePreviewTheme: (() => void) | null = null;
@@ -68,7 +78,7 @@ const queryRange = computed(() => ({
     endTime: form.value?.endTime || options.value?.serverNow || ""
 }));
 const isPlaying = computed(() => playback.value.status === "playing");
-const canPlay = computed(() => Boolean(selectedRecord.value) && !["creating", "buffering", "stopping"].includes(playback.value.status));
+const canPlay = computed(() => Boolean(selectedRecord.value) && !controlPending.value && !["creating", "buffering", "stopping"].includes(playback.value.status));
 const statusText = computed(() => ({
     unselected: "请选择录像段",
     selected: "已选择，等待播放",
@@ -88,10 +98,6 @@ const querySummary = computed(() => {
     if (queryState.value === "empty") return "所选时段没有设备录像";
     return queryMessage.value || "设置条件后查询设备录像";
 });
-
-function recordKey(item: RecordQueryItem, index: number) {
-    return [item.filePath, item.startTime, item.endTime, index].join("|");
-}
 
 function localDateTime(value: string | null | undefined) {
     if (!value) return "--";
@@ -133,7 +139,7 @@ async function runQuery() {
         queryMessage.value = firstError;
         return;
     }
-    stopPlayback(false);
+    await stopPlayback(false);
     queryAbort?.abort();
     const token = ++queryToken.value;
     queryAbort = new AbortController();
@@ -143,7 +149,7 @@ async function runQuery() {
         const response = await queryDeviceRecords(channelId.value, serializeRecordQueryForm(form.value), queryAbort.signal);
         if (token !== queryToken.value) return;
         result.value = response.data;
-        records.value = response.data.list.map((item, index) => ({ ...item, recordKey: recordKey(item, index) }));
+        records.value = response.data.list;
         queryState.value = response.data.status;
         if (records.value.length) selectRecord(records.value[0]);
     } catch (error) {
@@ -157,21 +163,21 @@ async function runQuery() {
     }
 }
 
-function selectRecord(record: RecordEntry) {
+async function selectRecord(record: RecordQueryItem) {
     if (["creating", "buffering", "playing", "paused", "stopping"].includes(playback.value.status) && playback.value.recordKey !== record.recordKey) {
-        stopPlayback(false);
+        await stopPlayback(false);
     }
     playback.value = reducePlaybackState(playback.value, { type: "select", recordKey: record.recordKey });
 }
 
 function clearPlaybackTimers() {
-    if (playbackTimer !== null) window.clearTimeout(playbackTimer);
+    if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
     if (progressTimer !== null) window.clearInterval(progressTimer);
-    playbackTimer = null;
+    sessionPollTimer = null;
     progressTimer = null;
 }
 
-function queueDownload(record: RecordEntry | null = selectedRecord.value) {
+function queueDownload(record: RecordQueryItem | null = selectedRecord.value) {
     if (!record) return;
     if (downloadTimer !== null) window.clearTimeout(downloadTimer);
     downloadNotice.value = `已创建下载任务 · ${record.name || "未命名录像"}`;
@@ -182,7 +188,7 @@ function queueDownload(record: RecordEntry | null = selectedRecord.value) {
 }
 
 function startProgress() {
-    if (progressTimer !== null) window.clearInterval(progressTimer);
+    if (progressTimer !== null) return;
     progressTimer = window.setInterval(() => {
         if (playback.value.status !== "playing" || !selectedRecord.value) return;
         const current = Date.parse(playback.value.currentTime || selectedRecord.value.startTime || "");
@@ -206,53 +212,160 @@ function startProgress() {
     }, 1000);
 }
 
-function startPlayback() {
+function createIdempotencyKey() {
+    return globalThis.crypto?.randomUUID?.() || `playback-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function playbackErrorMessage(error: unknown) {
+    const value = error as { message?: string; response?: { data?: { message?: string } } };
+    return value?.response?.data?.message || value?.message || "设备录像回放失败";
+}
+
+function sessionTime(session: PlaybackSession) {
+    const durationSeconds = Math.max(0, (Date.parse(session.segmentEnd) - Date.parse(session.segmentStart)) / 1000);
+    return positionToTime(
+        { startTime: session.segmentStart, endTime: session.segmentEnd },
+        session.positionSeconds,
+        durationSeconds
+    );
+}
+
+function scheduleSessionPoll(sessionId: string, token: number) {
+    if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
+    sessionPollTimer = window.setTimeout(async () => {
+        try {
+            const response = await getPlaybackSession(channelId.value, sessionId);
+            if (token !== sessionToken) return;
+            applySession(response.data, token);
+        } catch (error) {
+            if (token !== sessionToken) return;
+            playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
+            playbackMediaUrl.value = "";
+            clearPlaybackTimers();
+        }
+    }, 800);
+}
+
+function applySession(session: PlaybackSession, token: number, syncPosition = false) {
+    if (token !== sessionToken) return;
+    const shouldSyncPosition = syncPosition || !playback.value.currentTime;
+    playback.value = reducePlaybackState(playback.value, {
+        type: "session",
+        sessionId: session.sessionId,
+        status: session.state,
+        currentTime: shouldSyncPosition ? sessionTime(session) : undefined,
+        message: session.errorCode || undefined
+    });
+    playback.value = reducePlaybackState(playback.value, { type: "scale", scale: session.scale || 1 });
+    playbackHasAudio.value = session.hasAudio;
+    playbackMediaUrl.value = selectPlaybackMediaUrl(session.media?.urls);
+
+    if (session.state === "playing") startProgress();
+    else if (progressTimer !== null) {
+        window.clearInterval(progressTimer);
+        progressTimer = null;
+    }
+
+    if (["ended", "failed", "stopped"].includes(session.state)) {
+        if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
+        sessionPollTimer = null;
+        playbackMediaUrl.value = "";
+        return;
+    }
+    scheduleSessionPoll(session.sessionId, token);
+}
+
+async function startPlayback() {
     if (!selectedRecord.value || !canPlay.value) return;
-    if (playback.value.status === "paused") {
-        playback.value = reducePlaybackState(playback.value, { type: "resume" });
-        startProgress();
+    if (playback.value.status === "paused" && playback.value.sessionId) {
+        await sendPlaybackAction({ action: "resume" });
         return;
     }
     clearPlaybackTimers();
+    playbackMediaUrl.value = "";
     playback.value = reducePlaybackState(playback.value, { type: "creating" });
-    const sessionId = `mock-${Date.now()}`;
-    playbackTimer = window.setTimeout(() => {
-        playback.value = reducePlaybackState(playback.value, { type: "session", sessionId, status: "buffering", currentTime: selectedRecord.value?.startTime || undefined });
-        playbackTimer = window.setTimeout(() => {
-            playback.value = reducePlaybackState(playback.value, { type: "session", sessionId, status: "playing", currentTime: selectedRecord.value?.startTime || undefined });
-            startProgress();
-        }, 320);
-    }, 220);
+    const token = ++sessionToken;
+    const record = selectedRecord.value;
+    try {
+        const response = await createPlaybackSession(channelId.value, {
+            recordKey: record.recordKey,
+            playFrom: playback.value.currentTime || record.startTime || ""
+        }, createIdempotencyKey());
+        applySession(response.data, token, true);
+    } catch (error) {
+        if (token !== sessionToken) return;
+        playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
+        playbackMediaUrl.value = "";
+    }
 }
 
-function pausePlayback() {
-    playback.value = reducePlaybackState(playback.value, { type: "pause" });
-    if (progressTimer !== null) window.clearInterval(progressTimer);
-    progressTimer = null;
+async function sendPlaybackAction(action: PlaybackActionRequest, syncPosition = false) {
+    const sessionId = playback.value.sessionId;
+    if (!sessionId || controlPending.value) return;
+    const token = sessionToken;
+    controlPending.value = true;
+    try {
+        const response = await actionPlaybackSession(channelId.value, sessionId, action);
+        applySession(response.data, token, syncPosition);
+    } catch (error) {
+        if (token === sessionToken) playback.value = { ...playback.value, error: playbackErrorMessage(error) };
+    } finally {
+        controlPending.value = false;
+    }
 }
 
-function stopPlayback(keepSelection = true) {
+async function pausePlayback() {
+    await sendPlaybackAction({ action: "pause" });
+}
+
+async function stopPlayback(keepSelection = true) {
+    const sessionId = playback.value.sessionId;
+    const selectedKey = playback.value.recordKey;
+    ++sessionToken;
     clearPlaybackTimers();
-    if (!playback.value.recordKey) return;
-    playback.value = reducePlaybackState(playback.value, { type: "stopped" });
-    if (!keepSelection) playback.value = createPlaybackState();
+    playbackMediaUrl.value = "";
+    if (sessionId) {
+        playback.value = reducePlaybackState(playback.value, { type: "stopping" });
+        try {
+            await deletePlaybackSession(channelId.value, sessionId);
+        } catch (error) {
+            console.warn("停止设备录像回放会话失败", error);
+        }
+    }
+    if (keepSelection && selectedKey) {
+        playback.value = reducePlaybackState(playback.value, { type: "stopped" });
+    } else {
+        playback.value = createPlaybackState();
+    }
 }
 
-function setScale(scale: number) {
+async function setScale(scale: number) {
+    if (playback.value.sessionId && ["playing", "paused"].includes(playback.value.status)) {
+        await sendPlaybackAction({ action: "scale", scale });
+        return;
+    }
     playback.value = reducePlaybackState(playback.value, { type: "scale", scale });
 }
 
-function handleTimelineSelect(recordKey: string) {
+async function handleTimelineSelect(recordKey: string) {
     const record = records.value.find(item => item.recordKey === recordKey);
-    if (record && playback.value.recordKey !== recordKey) selectRecord(record);
+    if (record && playback.value.recordKey !== recordKey) await selectRecord(record);
 }
 
-function handleTimelineLocate(event: TimelineLocateEvent) {
+async function handleTimelineLocate(event: TimelineLocateEvent) {
     if (!event.recordKey) return;
     const record = records.value.find(item => item.recordKey === event.recordKey);
     if (!record) return;
-    if (playback.value.recordKey !== event.recordKey) selectRecord(record);
+    if (playback.value.recordKey !== event.recordKey) await selectRecord(record);
     playback.value = { ...playback.value, currentTime: event.time };
+    if (!playback.value.sessionId || !record.startTime || !record.endTime) return;
+    const duration = Math.max(0, (Date.parse(record.endTime) - Date.parse(record.startTime)) / 1000);
+    const positionSeconds = Math.min(Math.max(0, duration - 0.001), Math.max(0, (Date.parse(event.time) - Date.parse(record.startTime)) / 1000));
+    await sendPlaybackAction({ action: "seek", positionSeconds }, true);
+}
+
+function handlePlayerError(message: string) {
+    playback.value = { ...playback.value, status: "failed", error: message };
 }
 
 async function toggleFullscreen() {
@@ -300,7 +413,10 @@ onMounted(() => {
 });
 onUnmounted(() => {
     queryAbort?.abort();
+    const sessionId = playback.value.sessionId;
+    ++sessionToken;
     clearPlaybackTimers();
+    if (sessionId) void deletePlaybackSession(channelId.value, sessionId).catch(() => undefined);
     if (downloadTimer !== null) window.clearTimeout(downloadTimer);
     restorePreviewTheme?.();
 });
@@ -353,18 +469,21 @@ onUnmounted(() => {
             <main class="playback-main">
                 <section class="player-column">
                     <div ref="viewport" class="playback-viewport" data-testid="playback-viewport">
-                        <div v-if="isPlaying" class="camera-scene active" aria-hidden="true">
-                            <div class="scene-sky"></div>
-                            <div class="scene-building"><span></span><span></span><span></span><span></span></div>
-                            <div class="scene-road"><i></i><i></i><i></i></div>
-                            <div class="scene-gate"><b></b><b></b></div>
-                        </div>
-                        <div v-if="isPlaying" class="video-overlay top-overlay">
+                        <PlayWindow
+                            v-if="playbackMediaUrl"
+                            data-testid="playback-player"
+                            :data-media-url="playbackMediaUrl"
+                            :url="playbackMediaUrl"
+                            :has-audio="playbackHasAudio"
+                            playback
+                            @error="handlePlayerError"
+                        />
+                        <div v-if="playbackMediaUrl" class="video-overlay top-overlay">
                             <span>CH-01 {{ options?.channel.name || "东门出入口" }}</span>
                             <span>{{ localDateTime(playback.currentTime || selectedRecord?.startTime || options?.serverNow) }}</span>
                         </div>
-                        <div v-if="isPlaying" class="video-overlay bottom-overlay">
-                            <span class="stream-badge">设备录像 MOCK · <b>{{ statusText }}</b></span>
+                        <div v-if="playbackMediaUrl" class="video-overlay bottom-overlay">
+                            <span class="stream-badge">设备录像 · <b>{{ statusText }}</b></span>
                             <span>{{ options?.device.code }}</span>
                         </div>
                         <div v-else class="playback-idle-cover" data-testid="playback-idle-cover" role="img" aria-label="录像未播放">
@@ -495,21 +614,6 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .playback-idle-cover { position: absolute; inset: 0; display: grid; place-items: center; color: #89939d; background: #000; }
 .playback-idle-cover .lucide-circle-alert { color: #e05d5d; }
 .playback-status-sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; white-space: nowrap; border: 0; clip: rect(0, 0, 0, 0); clip-path: inset(50%); }
-.camera-scene { position: absolute; inset: 0; overflow: hidden; background: #243542; filter: saturate(.62) brightness(.68); }
-.camera-scene::after { position: absolute; inset: 0; background-image: linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px); background-size: 4px 4px; content: ""; }
-.camera-scene.active { filter: saturate(.82) brightness(.82); }
-.scene-sky { position: absolute; inset: 0 0 48%; background: #647680; }
-.scene-building { position: absolute; top: 23%; left: 8%; width: 54%; height: 29%; background: #929995; border-top: 5px solid #5b6667; box-shadow: 0 18px 34px rgb(0 0 0 / 34%); transform: perspective(420px) rotateY(5deg); }
-.scene-building::before { position: absolute; top: -19px; left: 4%; width: 74%; height: 16px; background: #596568; content: ""; }
-.scene-building span { display: inline-block; width: 13%; height: 44%; margin: 9% 4% 0; background: #344751; border: 2px solid #bac6c7; }
-.scene-road { position: absolute; right: -7%; bottom: -15%; left: -7%; height: 63%; background: #364047; transform: perspective(410px) rotateX(54deg); transform-origin: bottom; }
-.scene-road::before { position: absolute; top: 0; bottom: 0; left: 54%; width: 4px; background: repeating-linear-gradient(to bottom, #d9d4b9 0 28px, transparent 28px 54px); content: ""; }
-.scene-road i { position: absolute; bottom: 31%; width: 82px; height: 38px; background: #59636b; border-radius: 5px 9px 3px 3px; box-shadow: 0 8px 14px rgb(0 0 0 / 32%); }
-.scene-road i::before { position: absolute; top: -13px; left: 14px; width: 42px; height: 15px; background: #74828a; border-radius: 5px 6px 0 0; content: ""; }
-.scene-road i:nth-child(1) { right: 14%; }.scene-road i:nth-child(2) { right: 41%; bottom: 63%; transform: scale(.72); }.scene-road i:nth-child(3) { right: 68%; bottom: 17%; transform: scale(.9); }
-.scene-gate { position: absolute; right: 10%; bottom: 28%; width: 24%; height: 38%; border-right: 5px solid #bbc5c7; border-left: 5px solid #bbc5c7; }
-.scene-gate::before { position: absolute; top: 0; left: -8%; width: 116%; height: 8px; background: #c7d0d1; content: ""; }
-.scene-gate b { position: absolute; top: 7px; width: 46%; height: 60%; background: rgb(26 38 45 / 76%); border: 2px solid #7d8d91; }.scene-gate b:last-child { right: 0; }
 .video-overlay { position: absolute; z-index: 2; right: 14px; left: 14px; display: flex; justify-content: space-between; gap: 12px; color: rgb(239 246 255 / 86%); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; text-shadow: 0 1px 3px #000; }
 .top-overlay { top: 12px; }.bottom-overlay { bottom: 12px; align-items: flex-end; }
 .stream-badge { padding: 3px 6px; color: #fff; background: rgb(10 15 20 / 64%); border: 1px solid rgb(255 255 255 / 20%); border-radius: 3px; }

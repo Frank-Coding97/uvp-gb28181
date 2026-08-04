@@ -58,6 +58,7 @@ const result = (status: RecordQueryResult["status"]): RecordQueryResult => ({
     timezone: "Asia/Shanghai",
     elapsedMs: 800,
     list: status === "empty" ? [] : [{
+        recordKey: "opaque-record-key",
         deviceId: channel().channelId,
         name: "上午巡检录像",
         filePath: "/record/001.dav",

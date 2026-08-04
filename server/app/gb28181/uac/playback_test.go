@@ -96,7 +96,7 @@ func validPlaybackInvite() PlaybackInviteRequest {
 }
 
 func acceptedMANSRTSP(cseq uint32) []byte {
-	return []byte(fmt.Sprintf("MANSRTSP/1.0 200 OK\r\nCSeq: %d\r\n\r\n", cseq))
+	return []byte(fmt.Sprintf("RTSP/1.0 200 OK\r\nCSeq: %d\r\n\r\n", cseq))
 }
 
 func establishedPlaybackDialog() *fakePlaybackDialog {
@@ -257,6 +257,39 @@ func TestSendPlaybackInfoReturnsRejectedProtocolAndTimeoutErrors(t *testing.T) {
 	_, err = u.SendPlaybackInfo(context.Background(), metadata.CallID, PlaybackInfoRequest{Action: PlaybackInfoResume})
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestSendPlaybackInfoAcceptsEmptySIP2xxBody(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	dialog.responseBody = nil
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := u.SendPlaybackInfo(context.Background(), metadata.CallID, PlaybackInfoRequest{Action: PlaybackInfoPause})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != mansrtsp.ResultAccepted || result.StatusCode != sip.StatusOK || result.CSeq != metadata.CSeq+1 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestTeardownPlaybackAcceptsEmptySIP2xxBody(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	dialog.responseBody = nil
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := u.TeardownPlayback(context.Background(), metadata.CallID); err != nil {
+		t.Fatal(err)
+	}
+	if dialog.byeCalls != 1 || dialog.closeCalls != 1 {
+		t.Fatalf("bye=%d close=%d", dialog.byeCalls, dialog.closeCalls)
 	}
 }
 

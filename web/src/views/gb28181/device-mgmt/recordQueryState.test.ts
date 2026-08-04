@@ -91,6 +91,7 @@ describe("record query contract helpers", () => {
 
 describe("record query result helpers", () => {
     const item = (name: string, startTime: string | null): RecordQueryItem => ({
+        recordKey: `record-${name}`,
         deviceId: "34020000001320000001",
         name,
         filePath: null,

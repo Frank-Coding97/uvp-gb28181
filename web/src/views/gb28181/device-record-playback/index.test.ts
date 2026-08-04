@@ -2,10 +2,15 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DeviceRecordPlayback from "./index.vue";
 import playbackPageSource from "./index.vue?raw";
+import RecordTimeline from "./components/RecordTimeline.vue";
 
 const api = vi.hoisted(() => ({
     getRecordQueryOptions: vi.fn(),
     queryDeviceRecords: vi.fn(),
+    createPlaybackSession: vi.fn(),
+    getPlaybackSession: vi.fn(),
+    actionPlaybackSession: vi.fn(),
+    deletePlaybackSession: vi.fn(),
     routerPush: vi.fn(),
     routerGetRoutes: vi.fn(() => [
         { name: "device-mgmt-list", path: "/gb28181/device-mgmt/index" }
@@ -17,6 +22,22 @@ vi.mock("../device-mgmt/api", async importOriginal => ({
     ...api
 }));
 
+vi.mock("./api", async importOriginal => ({
+    ...await importOriginal<typeof import("./api")>(),
+    createPlaybackSession: api.createPlaybackSession,
+    getPlaybackSession: api.getPlaybackSession,
+    actionPlaybackSession: api.actionPlaybackSession,
+    deletePlaybackSession: api.deletePlaybackSession
+}));
+
+vi.mock("../components/PlayWindow.vue", () => ({
+    default: {
+        name: "PlayWindow",
+        props: ["url", "playback", "hasAudio"],
+        template: '<div data-testid="playback-player" :data-media-url="url" />'
+    }
+}));
+
 vi.mock("vue-router", async importOriginal => ({
     ...await importOriginal<typeof import("vue-router")>(),
     useRoute: () => ({ params: { channelId: "31" }, query: { recordQueryMock: "complete", returnKey: "return-key" } }),
@@ -25,6 +46,7 @@ vi.mock("vue-router", async importOriginal => ({
 
 describe("device record playback workspace", () => {
     beforeEach(() => {
+        vi.useRealTimers();
         api.routerPush.mockReset();
         api.getRecordQueryOptions.mockResolvedValue({ code: 0, data: {
             device: { id: 7, code: "34020000002000000001", name: "园区 NVR-A", online: true },
@@ -43,6 +65,7 @@ describe("device record playback workspace", () => {
             timezone: "Asia/Shanghai",
             elapsedMs: 842,
             list: [{
+                recordKey: "opaque-record-key",
                 deviceId: "34020000001320000001",
                 name: "上午巡检录像",
                 filePath: "/record/001.dav",
@@ -57,6 +80,49 @@ describe("device record playback workspace", () => {
                 streamNumber: 0
             }]
         }});
+        api.createPlaybackSession.mockResolvedValue({ code: 0, data: {
+            sessionId: "session-1",
+            state: "playing",
+            channelId: "31",
+            recordKey: "opaque-record-key",
+            segmentStart: "2026-08-02T08:10:00+08:00",
+            segmentEnd: "2026-08-02T08:42:16+08:00",
+            positionSeconds: 0,
+            scale: 1,
+            hasAudio: false,
+            media: { urls: { wsFlv: "ws://zlm/playback/session-1.live.flv" } },
+            expiresAt: "2026-08-02T09:10:00+08:00",
+            errorStage: "",
+            errorCode: ""
+        }});
+        api.getPlaybackSession.mockResolvedValue({ code: 0, data: {
+            sessionId: "session-1",
+            state: "playing",
+            channelId: "31",
+            recordKey: "opaque-record-key",
+            segmentStart: "2026-08-02T08:10:00+08:00",
+            segmentEnd: "2026-08-02T08:42:16+08:00",
+            positionSeconds: 0,
+            scale: 1,
+            hasAudio: false,
+            media: { urls: { wsFlv: "ws://zlm/playback/session-1.live.flv" } },
+            expiresAt: "2026-08-02T09:10:00+08:00",
+            errorStage: "",
+            errorCode: ""
+        }});
+        api.actionPlaybackSession.mockImplementation((_channelId, _sessionId, action) => Promise.resolve({ code: 0, data: {
+            ...(api.createPlaybackSession.mock.results[0]?.value?.data || {}),
+            sessionId: "session-1",
+            state: action.action === "pause" ? "paused" : "playing",
+            recordKey: "opaque-record-key",
+            segmentStart: "2026-08-02T08:10:00+08:00",
+            segmentEnd: "2026-08-02T08:42:16+08:00",
+            positionSeconds: action.positionSeconds || 0,
+            scale: action.scale || 1,
+            hasAudio: false,
+            media: { urls: { wsFlv: "ws://zlm/playback/session-1.live.flv" } }
+        }}));
+        api.deletePlaybackSession.mockResolvedValue({ code: 0, data: { state: "stopped" } });
     });
 
     it("fits the playback workspace into its layout host instead of the browser viewport", () => {
@@ -132,7 +198,7 @@ describe("device record playback workspace", () => {
         expect(wrapper.find('[aria-label="音量"]').exists()).toBe(false);
     });
 
-    it("selects first, then starts mock playback explicitly", async () => {
+    it("creates a real playback session and renders its media URL", async () => {
         vi.useFakeTimers();
         const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
         await flushPromises();
@@ -141,11 +207,46 @@ describe("device record playback workspace", () => {
         await wrapper.get('[data-testid="record-segment-0"]').trigger("click");
         expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("已选择");
         await wrapper.get('[data-testid="playback-primary-action"]').trigger("click");
-        await vi.advanceTimersByTimeAsync(650);
+        await flushPromises();
+        expect(api.createPlaybackSession).toHaveBeenCalledWith(
+            31,
+            { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00" },
+            expect.any(String)
+        );
         expect(wrapper.get('[data-testid="playback-status"]').text()).toContain("正在回放");
+        expect(wrapper.get('[data-testid="playback-player"]').attributes("data-media-url")).toBe("ws://zlm/playback/session-1.live.flv");
         await vi.advanceTimersByTimeAsync(1000);
         expect(wrapper.get('[data-testid="playback-time"]').text()).toContain("08:10:01");
-        vi.useRealTimers();
+    });
+
+    it("sends playback controls and stops the active session", async () => {
+        const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await flushPromises();
+        await wrapper.get('[data-testid="playback-primary-action"]').trigger("click");
+        await flushPromises();
+
+        await wrapper.get('[data-testid="playback-primary-action"]').trigger("click");
+        await flushPromises();
+        expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "pause" });
+
+        await wrapper.get('[data-testid="playback-primary-action"]').trigger("click");
+        await flushPromises();
+        expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "resume" });
+
+        await wrapper.get(".scale-select select").setValue("2");
+        await flushPromises();
+        expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "scale", scale: 2 });
+
+        wrapper.findComponent(RecordTimeline).vm.$emit("locate", {
+            recordKey: "opaque-record-key",
+            time: "2026-08-02T08:10:42+08:00"
+        });
+        await flushPromises();
+        expect(api.actionPlaybackSession).toHaveBeenCalledWith(31, "session-1", { action: "seek", positionSeconds: 42 });
+
+        await wrapper.get('[aria-label="停止"]').trigger("click");
+        await flushPromises();
+        expect(api.deletePlaybackSession).toHaveBeenCalledWith(31, "session-1");
     });
 
     it("offers a download entry for the selected recording", async () => {

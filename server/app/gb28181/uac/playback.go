@@ -315,6 +315,9 @@ func (u *UAC) SendPlaybackInfo(ctx context.Context, callID string, request Playb
 		return PlaybackControlResult{Status: mansrtsp.ResultRejected, StatusCode: int(response.StatusCode), Reason: response.Reason, CSeq: cseq},
 			fmt.Errorf("%w: SIP %d %s", ErrPlaybackRejected, response.StatusCode, response.Reason)
 	}
+	if len(response.Body()) == 0 {
+		return PlaybackControlResult{Status: mansrtsp.ResultAccepted, StatusCode: int(response.StatusCode), Reason: response.Reason, CSeq: cseq}, nil
+	}
 	result, err := mansrtsp.ParseResponse(response.Body())
 	if err != nil {
 		return PlaybackControlResult{}, err
@@ -372,6 +375,8 @@ func (u *UAC) TeardownPlayback(ctx context.Context, callID string) error {
 			controlErr = fmt.Errorf("发送 PLAYBACK TEARDOWN 失败: %w", err)
 		} else if !is2xx(response.StatusCode) {
 			controlErr = fmt.Errorf("%w: SIP %d %s", ErrPlaybackRejected, response.StatusCode, response.Reason)
+		} else if len(response.Body()) == 0 {
+			// GB/T 28181-2016 9.8.3.2 permits a SIP 200 response without a MANSRTSP body.
 		} else if result, err := mansrtsp.ParseResponse(response.Body()); err != nil {
 			controlErr = err
 		} else if result.Status != mansrtsp.ResultAccepted {

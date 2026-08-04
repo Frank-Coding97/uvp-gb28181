@@ -209,6 +209,7 @@ export interface RecordQueryRequest {
 }
 
 export interface RecordQueryItem {
+    recordKey: string;
     deviceId: string;
     name: string | null;
     filePath: string | null;

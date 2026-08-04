@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-const ContentType = "Application/MANSRTSP"
+const (
+	ContentType     = "Application/MANSRTSP"
+	protocolVersion = "RTSP/1.0"
+)
 
 var (
 	ErrInvalidArgument = errors.New("mansrtsp: invalid argument")
@@ -98,7 +101,9 @@ func buildCommand(method string, cseq uint32, headers ...string) ([]byte, error)
 	}
 	var body strings.Builder
 	body.WriteString(method)
-	body.WriteString(" MANSRTSP/1.0\r\nCSeq: ")
+	body.WriteString(" ")
+	body.WriteString(protocolVersion)
+	body.WriteString("\r\nCSeq: ")
 	body.WriteString(strconv.FormatUint(uint64(cseq), 10))
 	body.WriteString("\r\n")
 	for _, header := range headers {
@@ -136,7 +141,7 @@ func ParseResponse(body []byte) (Result, error) {
 
 	statusLine := strings.TrimSpace(lines[0])
 	statusParts := strings.Fields(statusLine)
-	if len(statusParts) < 2 || statusParts[0] != "MANSRTSP/1.0" {
+	if len(statusParts) < 2 || statusParts[0] != protocolVersion {
 		return Result{}, protocolError(statusLine, "invalid status line")
 	}
 	statusCode, err := strconv.Atoi(statusParts[1])

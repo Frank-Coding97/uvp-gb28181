@@ -15,32 +15,32 @@ func TestMANSRTSPCommandBuilders(t *testing.T) {
 		{
 			name:  "play",
 			build: func() ([]byte, error) { return BuildPlay(1) },
-			want:  "PLAY MANSRTSP/1.0\r\nCSeq: 1\r\n\r\n",
+			want:  "PLAY RTSP/1.0\r\nCSeq: 1\r\n\r\n",
 		},
 		{
 			name:  "resume",
 			build: func() ([]byte, error) { return BuildResume(2) },
-			want:  "PLAY MANSRTSP/1.0\r\nCSeq: 2\r\nRange: npt=now-\r\n\r\n",
+			want:  "PLAY RTSP/1.0\r\nCSeq: 2\r\nRange: npt=now-\r\n\r\n",
 		},
 		{
 			name:  "pause",
 			build: func() ([]byte, error) { return BuildPause(3) },
-			want:  "PAUSE MANSRTSP/1.0\r\nCSeq: 3\r\nPauseTime: now\r\n\r\n",
+			want:  "PAUSE RTSP/1.0\r\nCSeq: 3\r\nPauseTime: now\r\n\r\n",
 		},
 		{
 			name:  "seek",
 			build: func() ([]byte, error) { return BuildSeek(4, 90*time.Second+500*time.Millisecond, 10*time.Minute) },
-			want:  "PLAY MANSRTSP/1.0\r\nCSeq: 4\r\nRange: npt=90.5-\r\n\r\n",
+			want:  "PLAY RTSP/1.0\r\nCSeq: 4\r\nRange: npt=90.5-\r\n\r\n",
 		},
 		{
 			name:  "scale",
 			build: func() ([]byte, error) { return BuildScale(5, 0.25) },
-			want:  "PLAY MANSRTSP/1.0\r\nCSeq: 5\r\nScale: 0.25\r\n\r\n",
+			want:  "PLAY RTSP/1.0\r\nCSeq: 5\r\nScale: 0.25\r\n\r\n",
 		},
 		{
 			name:  "teardown",
 			build: func() ([]byte, error) { return BuildTeardown(6) },
-			want:  "TEARDOWN MANSRTSP/1.0\r\nCSeq: 6\r\n\r\n",
+			want:  "TEARDOWN RTSP/1.0\r\nCSeq: 6\r\n\r\n",
 		},
 	}
 
@@ -95,7 +95,7 @@ func TestMANSRTSPScaleAllowsOnlyProductRates(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BuildScale(%g) error = %v", scale, err)
 		}
-		want := "PLAY MANSRTSP/1.0\r\nCSeq: 1\r\nScale: " + wire + "\r\n\r\n"
+		want := "PLAY RTSP/1.0\r\nCSeq: 1\r\nScale: " + wire + "\r\n\r\n"
 		if string(body) != want {
 			t.Fatalf("BuildScale(%g) = %q, want %q", scale, body, want)
 		}
@@ -128,17 +128,17 @@ func TestParseMANSRTSPResponse(t *testing.T) {
 	}{
 		{
 			name:       "accepted",
-			body:       "MANSRTSP/1.0 200 OK\r\nCSeq: 12\r\n\r\n",
+			body:       "RTSP/1.0 200 OK\r\nCSeq: 12\r\n\r\n",
 			wantStatus: ResultAccepted, wantCode: 200, wantReason: "OK", wantCSeq: 12,
 		},
 		{
 			name:       "accepted without reason",
-			body:       "MANSRTSP/1.0 204\r\nCSeq: 13\r\n\r\n",
+			body:       "RTSP/1.0 204\r\nCSeq: 13\r\n\r\n",
 			wantStatus: ResultAccepted, wantCode: 204, wantCSeq: 13,
 		},
 		{
 			name:       "rejected",
-			body:       "MANSRTSP/1.0 455 Method Not Valid in This State\r\nCSeq: 14\r\n\r\n",
+			body:       "RTSP/1.0 455 Method Not Valid in This State\r\nCSeq: 14\r\n\r\n",
 			wantStatus: ResultRejected, wantCode: 455, wantReason: "Method Not Valid in This State", wantCSeq: 14,
 		},
 	}
@@ -158,10 +158,10 @@ func TestParseMANSRTSPResponse(t *testing.T) {
 func TestParseMANSRTSPResponseRejectsMalformedBody(t *testing.T) {
 	for _, body := range []string{
 		"",
-		"MANSRTSP/1.0 OK\r\nCSeq: 1\r\n\r\n",
-		"RTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n",
-		"MANSRTSP/1.0 200 OK\r\n\r\n",
-		"MANSRTSP/1.0 200 OK\r\nCSeq: nope\r\n\r\n",
+		"RTSP/1.0 OK\r\nCSeq: 1\r\n\r\n",
+		"MANSRTSP/1.0 200 OK\r\nCSeq: 1\r\n\r\n",
+		"RTSP/1.0 200 OK\r\n\r\n",
+		"RTSP/1.0 200 OK\r\nCSeq: nope\r\n\r\n",
 	} {
 		t.Run(body, func(t *testing.T) {
 			got, err := ParseResponse([]byte(body))

@@ -4,6 +4,9 @@ import { ref, watch, onBeforeUnmount, shallowRef, nextTick } from "vue";
 interface Props {
     /** 流地址(http-flv / ws-flv / hls 等),传空字符串关闭播放器 */
     url: string;
+    /** 录像回放页嵌入模式：填满父容器，由外层提供业务控制栏。 */
+    playback?: boolean;
+    hasAudio?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -46,7 +49,7 @@ async function play(u: string) {
             isLive: true,
             bufferTime: 0.2,
             // 国标 IPC 默认 PCMA(G.711),EasyPlayer wasm 路径支持解码 G711
-            hasAudio: true,
+            hasAudio: props.hasAudio ?? true,
             isMute: true,         // 默认静音(浏览器自动播放策略友好)
             stretch: true,
             // 解码模式优先级:MSE > WCS > WASM。打开 WASM 兜底,确保 G711/H265 也能放
@@ -91,7 +94,7 @@ defineExpose({ stop: destroy });
 </script>
 
 <template>
-    <div class="play-window">
+    <div :class="['play-window', { playback }]">
         <div ref="containerRef" class="player" />
         <div v-if="errorMsg" class="err">{{ errorMsg }}</div>
         <div v-else-if="!url" class="placeholder">点击左侧通道开始播放</div>
@@ -111,6 +114,23 @@ defineExpose({ stop: destroy });
     border: 1px solid rgb(148 163 184 / 18%);
     border-radius: 14px;
     overflow: hidden;
+}
+
+.play-window.playback {
+    height: 100%;
+    aspect-ratio: auto;
+    background: #000;
+    border: 0;
+    border-radius: 0;
+}
+
+.play-window.playback .placeholder {
+    display: none;
+}
+
+.play-window.playback :deep(.easyplayer-controls),
+.play-window.playback :deep(.easyplayer-zoom-controls) {
+    display: none !important;
 }
 
 .player {

@@ -97,6 +97,7 @@ function mockItems(channelCode: string) {
         ["园区东门-下午巡检", "16:00:00", "16:42:13", "time", 356515840]
     ] as const;
     return rows.map(([name, start, end, type, fileSize], index) => ({
+        recordKey: `mock-record-${channelCode}-${index + 1}`,
         deviceId: channelCode,
         name,
         filePath: `/record/20260802/${String(index + 1).padStart(3, "0")}.dav`,
