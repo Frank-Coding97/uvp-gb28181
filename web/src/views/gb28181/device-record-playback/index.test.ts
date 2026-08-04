@@ -67,6 +67,13 @@ describe("device record playback workspace", () => {
         expect(playbackPageSource).not.toContain("min-height: 100vh");
     });
 
+    it("uses the device-list search panel language for the query area", () => {
+        expect(playbackPageSource).toContain("background: var(--uvp-search-panel-bg);");
+        expect(playbackPageSource).toContain("border: 1px solid var(--uvp-list-panel-border);");
+        expect(playbackPageSource).toContain("border-radius: var(--uvp-panel-radius);");
+        expect(playbackPageSource).toContain("box-shadow: var(--uvp-search-panel-shadow);");
+    });
+
     it("returns to the dynamic device management route with its saved state key", async () => {
         const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
         await wrapper.get('[aria-label="返回设备管理"]').trigger("click");
