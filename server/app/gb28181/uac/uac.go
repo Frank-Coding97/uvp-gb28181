@@ -31,6 +31,8 @@ type UAC struct {
 	domain          string
 	recorder        metrics.Recorder // 可选:埋点出向事务
 	doMessage       messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
+	playbackEndMu   sync.RWMutex
+	playbackEndHook func(context.Context, PlaybackDialogMetadata, string) error
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对
@@ -72,6 +74,22 @@ func platformContact(serverID, advertiseIP string, sipPort int) sip.ContactHeade
 // SetRecorder 注入指标 Recorder(可选)
 func (u *UAC) SetRecorder(r metrics.Recorder) {
 	u.recorder = r
+}
+
+func (u *UAC) SetPlaybackEndHook(hook func(context.Context, PlaybackDialogMetadata, string) error) {
+	u.playbackEndMu.Lock()
+	u.playbackEndHook = hook
+	u.playbackEndMu.Unlock()
+}
+
+func (u *UAC) playbackEnded(ctx context.Context, metadata PlaybackDialogMetadata, reason string) error {
+	u.playbackEndMu.RLock()
+	hook := u.playbackEndHook
+	u.playbackEndMu.RUnlock()
+	if hook == nil {
+		return nil
+	}
+	return hook(ctx, metadata, reason)
 }
 
 // nextCSeq 生成单调递增 CSeq(metrics 配对 key 的一部分)

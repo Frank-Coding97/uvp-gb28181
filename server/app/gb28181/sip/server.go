@@ -205,6 +205,12 @@ func (s *Server) SetRecordInfoSink(sink handler.RecordInfoSink) {
 	}
 }
 
+func (s *Server) SetPlaybackEndSink(sink handler.PlaybackEndSink) {
+	if s.msgH != nil {
+		s.msgH.SetPlaybackEndSink(sink)
+	}
+}
+
 func (s *Server) SetPTZNotifyProcessor(processor handler.PTZNotifyProcessor) {
 	if s.notifyH != nil {
 		s.notifyH.SetPTZProcessor(processor)

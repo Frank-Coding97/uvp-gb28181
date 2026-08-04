@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,6 +26,8 @@ type MessageHandler struct {
 	ptzProcessor      PTZMessageProcessor
 	recordInfoMu      sync.RWMutex
 	recordInfoSink    RecordInfoSink
+	playbackEndMu     sync.RWMutex
+	playbackEndSink   PlaybackEndSink
 }
 
 type AlarmMessageProcessor interface {
@@ -39,6 +42,10 @@ type PTZMessageProcessor interface {
 // already been acknowledged. Implementations must keep their own work bounded.
 type RecordInfoSink interface {
 	OnRecordInfoMessage(context.Context, string, []byte) error
+}
+
+type PlaybackEndSink interface {
+	OnPlaybackFileToEnd(context.Context, string, string, []byte) error
 }
 
 // NewMessageHandler 创建消息处理器
@@ -79,6 +86,25 @@ func (h *MessageHandler) getRecordInfoSink() RecordInfoSink {
 	h.recordInfoMu.RLock()
 	defer h.recordInfoMu.RUnlock()
 	return h.recordInfoSink
+}
+
+func (h *MessageHandler) SetPlaybackEndSink(sink PlaybackEndSink) {
+	h.playbackEndMu.Lock()
+	h.playbackEndSink = sink
+	h.playbackEndMu.Unlock()
+}
+
+func (h *MessageHandler) getPlaybackEndSink() PlaybackEndSink {
+	h.playbackEndMu.RLock()
+	defer h.playbackEndMu.RUnlock()
+	return h.playbackEndSink
+}
+
+func isPlaybackFileToEnd(body []byte) bool {
+	normalized := strings.ToLower(strings.Join(strings.Fields(string(body)), ""))
+	return strings.Contains(normalized, "filetoend") ||
+		strings.Contains(normalized, "file-end") ||
+		strings.Contains(normalized, "file_end")
 }
 
 // txKindFromCmd 根据 MANSCDP CmdType 映射 metrics 事务类型
@@ -128,6 +154,18 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 
 	if head.DeviceID != "" {
 		ctx := context.Background()
+		if isPlaybackFileToEnd(req.Body()) {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+				h.recorder.End(callID, cseq, 200, true)
+			}
+			if sink := h.getPlaybackEndSink(); sink != nil {
+				if err := sink.OnPlaybackFileToEnd(ctx, callID, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					app.ZapLog.Warn("GB28181 回放自然结束处理失败", zap.String("callId", callID), zap.Error(err))
+				}
+			}
+			return
+		}
 		if head.CmdType == manscdp.CmdRecordInfo {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {

@@ -17,6 +17,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -44,6 +45,9 @@ type DeviceMgmtController struct {
 	recordQueryService  RecordQueryService
 	recordQueryConfig   gbconfig.RecordQueryConfig
 	recordQueryMetrics  *recordquery.Metrics
+	playbackRuntimeMu   sync.RWMutex
+	playbackService     PlaybackSessionService
+	playbackSnapshots   PlaybackSnapshotResolver
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询
@@ -58,6 +62,30 @@ func NewDeviceMgmtController() *DeviceMgmtController {
 }
 
 func (dc *DeviceMgmtController) SetDB(p func() *gorm.DB) { dc.db = p }
+
+type PlaybackSessionService interface {
+	Create(context.Context, gbplayback.CreateRequest) (gbplayback.CreateResult, error)
+	GetForOwner(string, string) (*gbplayback.Session, bool)
+	Action(context.Context, string, string, gbplayback.ActionRequest) (*gbplayback.Session, error)
+	StopForOwner(context.Context, string, string, string) error
+}
+
+type PlaybackSnapshotResolver interface {
+	Resolve(recordquery.ResolveRequest) (recordquery.Snapshot, error)
+}
+
+func (dc *DeviceMgmtController) SetPlaybackRuntime(service PlaybackSessionService, snapshots PlaybackSnapshotResolver) {
+	dc.playbackRuntimeMu.Lock()
+	dc.playbackService = service
+	dc.playbackSnapshots = snapshots
+	dc.playbackRuntimeMu.Unlock()
+}
+
+func (dc *DeviceMgmtController) playbackRuntime() (PlaybackSessionService, PlaybackSnapshotResolver) {
+	dc.playbackRuntimeMu.RLock()
+	defer dc.playbackRuntimeMu.RUnlock()
+	return dc.playbackService, dc.playbackSnapshots
+}
 
 // SetCatalogTrigger 后置注入(bootstrap 里 SIP UAC 就绪后调用)
 func (dc *DeviceMgmtController) SetCatalogTrigger(t CatalogTrigger) { dc.catalogTrigger = t }

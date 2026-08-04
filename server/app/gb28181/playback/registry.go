@@ -34,6 +34,8 @@ type Registry struct {
 	activeByScope   map[string]string
 	idempotentByKey map[string]string
 	cleanup         CleanupRunner
+	closeDone       chan struct{}
+	closeErr        error
 }
 
 func NewRegistry(config RegistryConfig) *Registry {
@@ -143,6 +145,50 @@ func (r *Registry) GetForOwner(id, ownerID string) (*Session, bool) {
 	return session, true
 }
 
+func (r *Registry) GetByCallID(callID string) (*Session, bool) {
+	if strings.TrimSpace(callID) == "" {
+		return nil, false
+	}
+	r.mu.RLock()
+	records := make([]*sessionRecord, 0, len(r.sessions))
+	for _, record := range r.sessions {
+		records = append(records, record)
+	}
+	r.mu.RUnlock()
+	for _, record := range records {
+		record.mu.Lock()
+		match := record.session.CallID == callID
+		session := record.session.clone()
+		record.mu.Unlock()
+		if match {
+			return session, true
+		}
+	}
+	return nil, false
+}
+
+func (r *Registry) GetByStreamID(streamID string) (*Session, bool) {
+	if strings.TrimSpace(streamID) == "" {
+		return nil, false
+	}
+	r.mu.RLock()
+	records := make([]*sessionRecord, 0, len(r.sessions))
+	for _, record := range r.sessions {
+		records = append(records, record)
+	}
+	r.mu.RUnlock()
+	for _, record := range records {
+		record.mu.Lock()
+		match := record.session.StreamID == streamID
+		session := record.session.clone()
+		record.mu.Unlock()
+		if match {
+			return session, true
+		}
+	}
+	return nil, false
+}
+
 func (r *Registry) MustGet(id string) *Session {
 	session, ok := r.Get(id)
 	if !ok {
@@ -215,23 +261,23 @@ func (r *Registry) Transition(id string, to State) error {
 }
 
 func (r *Registry) Finalize(id string, terminal State, reason string) error {
+	return r.FinalizeContext(context.Background(), id, terminal, reason)
+}
+
+func (r *Registry) FinalizeContext(ctx context.Context, id string, terminal State, reason string) error {
+	_, err := r.FinalizeContextOnce(ctx, id, terminal, reason)
+	return err
+}
+
+func (r *Registry) FinalizeContextOnce(ctx context.Context, id string, terminal State, reason string) (bool, error) {
 	if !terminal.IsTerminal() {
-		return fmt.Errorf("%w: %s is not terminal", ErrInvalidTransition, terminal)
+		return false, fmt.Errorf("%w: %s is not terminal", ErrInvalidTransition, terminal)
 	}
 	record, ok := r.record(id)
 	if !ok {
-		return ErrPlaybackNotFound
+		return false, ErrPlaybackNotFound
 	}
-	record.mu.Lock()
-	if record.session.State.IsTerminal() {
-		record.mu.Unlock()
-		return nil
-	}
-	record.session.State, record.session.EndReason = terminal, reason
-	session := record.session
-	record.mu.Unlock()
-	r.removeActive(session)
-	return nil
+	return r.stopRecord(ctx, record, reason, terminal)
 }
 
 func (r *Registry) removeActive(session Session) {
@@ -242,24 +288,24 @@ func (r *Registry) removeActive(session Session) {
 	}
 }
 
-func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason string) error {
+func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason string, terminal State) (bool, error) {
 	record.mu.Lock()
 	if record.session.State.IsTerminal() {
 		err := record.stopErr
 		record.mu.Unlock()
-		return err
+		return false, err
 	}
 	if record.stopStarted {
 		done := record.stopDone
 		record.mu.Unlock()
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return false, ctx.Err()
 		case <-done:
 			record.mu.Lock()
 			err := record.stopErr
 			record.mu.Unlock()
-			return err
+			return false, err
 		}
 	}
 	record.stopStarted, record.stopDone = true, make(chan struct{})
@@ -271,7 +317,7 @@ func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason
 
 	err := r.cleanup.Run(ctx, resources)
 	record.mu.Lock()
-	record.session.State = StateStopped
+	record.session.State = terminal
 	record.session.EndReason = reason
 	if err != nil {
 		record.session.Error, record.session.EndReason = err, reason+": "+err.Error()
@@ -280,32 +326,47 @@ func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason
 	close(done)
 	record.mu.Unlock()
 	r.removeActive(session)
-	return err
+	return true, err
 }
 
 func (r *Registry) Stop(ctx context.Context, id, reason string) error {
+	_, err := r.StopOnce(ctx, id, reason)
+	return err
+}
+
+func (r *Registry) StopOnce(ctx context.Context, id, reason string) (bool, error) {
 	record, ok := r.record(id)
 	if !ok {
-		return ErrPlaybackNotFound
+		return false, ErrPlaybackNotFound
 	}
-	return r.stopRecord(ctx, record, reason)
+	return r.stopRecord(ctx, record, reason, StateStopped)
 }
 
 func (r *Registry) StopForOwner(ctx context.Context, id, ownerID, reason string) error {
+	_, err := r.StopForOwnerOnce(ctx, id, ownerID, reason)
+	return err
+}
+
+func (r *Registry) StopForOwnerOnce(ctx context.Context, id, ownerID, reason string) (bool, error) {
 	record, ok := r.record(id)
 	if !ok {
-		return ErrPlaybackNotFound
+		return false, ErrPlaybackNotFound
 	}
 	record.mu.Lock()
 	ownerMatches := record.session.OwnerID == ownerID
 	record.mu.Unlock()
 	if !ownerMatches {
-		return ErrPlaybackNotFound
+		return false, ErrPlaybackNotFound
 	}
-	return r.stopRecord(ctx, record, reason)
+	return r.stopRecord(ctx, record, reason, StateStopped)
 }
 
 func (r *Registry) Sweep(ctx context.Context, at time.Time) error {
+	_, err := r.SweepOnce(ctx, at)
+	return err
+}
+
+func (r *Registry) SweepOnce(ctx context.Context, at time.Time) (int, error) {
 	if at.IsZero() {
 		at = r.now()
 	}
@@ -325,34 +386,63 @@ func (r *Registry) Sweep(ctx context.Context, at time.Time) error {
 		}
 	}
 	var result error
+	cleaned := 0
 	for _, record := range records {
-		result = errors.Join(result, r.stopRecord(ctx, record, "playback session expired"))
+		started, err := r.stopRecord(ctx, record, "playback session expired", StateStopped)
+		if started {
+			cleaned++
+		}
+		result = errors.Join(result, err)
 	}
-	return result
+	return cleaned, result
 }
 
 func (r *Registry) Close(ctx context.Context) error {
+	_, err := r.CloseOnce(ctx)
+	return err
+}
+
+func (r *Registry) CloseOnce(ctx context.Context) (int, error) {
 	r.mu.Lock()
 	if r.closed {
+		done := r.closeDone
 		r.mu.Unlock()
-		return nil
+		if done != nil {
+			select {
+			case <-ctx.Done():
+				return 0, ctx.Err()
+			case <-done:
+			}
+		}
+		r.mu.RLock()
+		err := r.closeErr
+		r.mu.RUnlock()
+		return 0, err
 	}
 	r.closed = true
+	r.closeDone = make(chan struct{})
 	records := make([]*sessionRecord, 0, len(r.sessions))
 	for _, record := range r.sessions {
 		records = append(records, record)
 	}
 	r.mu.Unlock()
 	var result error
+	cleaned := 0
 	for _, record := range records {
-		result = errors.Join(result, r.stopRecord(ctx, record, "playback registry closed"))
+		started, err := r.stopRecord(ctx, record, "playback registry closed", StateStopped)
+		if started {
+			cleaned++
+		}
+		result = errors.Join(result, err)
 	}
 	r.mu.Lock()
 	r.sessions = make(map[string]*sessionRecord)
 	r.activeByScope = make(map[string]string)
 	r.idempotentByKey = make(map[string]string)
+	r.closeErr = result
+	close(r.closeDone)
 	r.mu.Unlock()
-	return result
+	return cleaned, result
 }
 
 func (r *Registry) ActiveCount() int {

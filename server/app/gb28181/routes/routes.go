@@ -208,10 +208,18 @@ func SetDeviceMgmtRecordQueryRuntime(service gbcontrollers.RecordQueryService, c
 	deviceMgmtController.SetRecordQueryRuntime(service, cfg, metrics)
 }
 
+func SetDeviceMgmtPlaybackRuntime(service gbcontrollers.PlaybackSessionService, snapshots gbcontrollers.PlaybackSnapshotResolver) {
+	deviceMgmtController.SetPlaybackRuntime(service, snapshots)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
 	hookController.SetMultiNode(resolver, binder)
+}
+
+func SetPlaybackMediaSink(sink gbhandler.PlaybackMediaSink) {
+	hookController.SetPlaybackMediaSink(sink)
 }
 
 func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUUIDResolver, indexer gbhandler.RecordMP4Indexer) {
@@ -328,6 +336,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
 			dmgmt.GET("/channel/:id/record-query/options", deviceMgmtController.GetRecordQueryOptions)
 			dmgmt.POST("/channel/:id/record-query", deviceMgmtController.QueryDeviceRecords)
+			dmgmt.POST("/channel/:id/playback-sessions", deviceMgmtController.CreatePlaybackSession)
+			dmgmt.GET("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.GetPlaybackSession)
+			dmgmt.POST("/channel/:id/playback-sessions/:sessionId/actions", deviceMgmtController.ActionPlaybackSession)
+			dmgmt.DELETE("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.DeletePlaybackSession)
 			dmgmt.PATCH("/channel/:id", deviceMgmtController.UpdateChannel)
 			dmgmt.PATCH("/channel/:id/cloud-recording", cloudRecordingController.Update)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)

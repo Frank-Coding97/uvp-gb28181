@@ -15,6 +15,29 @@ var (
 	ErrInvalidSession    = errors.New("invalid playback session")
 )
 
+type ServiceError struct {
+	Stage string
+	Code  string
+	Err   error
+}
+
+func (e *ServiceError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Err == nil {
+		return e.Stage + ": " + e.Code
+	}
+	return e.Stage + ": " + e.Err.Error()
+}
+
+func (e *ServiceError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
 type State string
 
 const (
@@ -69,16 +92,24 @@ type Session struct {
 }
 
 type CreateRequest struct {
-	OwnerID, DeviceID, ChannelID, RecordKey, IdempotencyKey string
-	SegmentStart, SegmentEnd                                time.Time
-	PlayFrom                                                time.Time
-	Now                                                     time.Time
-	Resources                                               CleanupResources
+	OwnerID, DeviceID, ChannelID, SIPChannelID        string
+	RecordKey, IdempotencyKey, Destination, Transport string
+	SegmentStart, SegmentEnd                          time.Time
+	PlayFrom                                          time.Time
+	TCPMode                                           bool
+	Now                                               time.Time
+	Resources                                         CleanupResources
 }
 
 type CreateResult struct {
 	Session  *Session
 	Existing bool
+}
+
+type ActionRequest struct {
+	Action          string
+	PositionSeconds float64
+	Scale           float64
 }
 
 type RegistryConfig struct {

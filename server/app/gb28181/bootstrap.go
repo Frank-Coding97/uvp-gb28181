@@ -18,6 +18,7 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play/reconciler"
+	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
@@ -110,6 +111,7 @@ type sipRuntimeServer interface {
 	SetErrorHandler(func(error))
 	SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)
 	SetRecordInfoSink(gbhandler.RecordInfoSink)
+	SetPlaybackEndSink(gbhandler.PlaybackEndSink)
 	SetPTZNotifyProcessor(gbhandler.PTZNotifyProcessor)
 	SetSubscriptionWaker(gbhandler.SubscriptionWaker)
 	SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)
@@ -117,6 +119,33 @@ type sipRuntimeServer interface {
 	Start() error
 	UAC() *uac.UAC
 	Shutdown(context.Context) error
+}
+
+var playbackService *gbplayback.Service
+
+func SetPlaybackService(service *gbplayback.Service, snapshots gbcontrollers.PlaybackSnapshotResolver) {
+	playbackService = service
+	if service == nil {
+		gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
+		gbroutes.SetPlaybackMediaSink(nil)
+		if sipServer != nil {
+			sipServer.SetPlaybackEndSink(nil)
+			if u := sipServer.UAC(); u != nil {
+				u.SetPlaybackEndHook(nil)
+			}
+		}
+		return
+	}
+	gbroutes.SetDeviceMgmtPlaybackRuntime(service, snapshots)
+	gbroutes.SetPlaybackMediaSink(service)
+	if sipServer != nil {
+		sipServer.SetPlaybackEndSink(service)
+		if u := sipServer.UAC(); u != nil {
+			u.SetPlaybackEndHook(func(ctx context.Context, metadata uac.PlaybackDialogMetadata, reason string) error {
+				return service.OnPlaybackMediaEnded(ctx, metadata.CallID, metadata.DeviceID, reason)
+			})
+		}
+	}
 }
 
 type sipRuntimeFactory func(gbconfig.Config) (sipRuntimeServer, error)
@@ -137,6 +166,7 @@ var ptzService *ptz.Service
 var ptzScheduler ptzSchedulerLifecycle
 var recordQueryService *recordquery.Service
 var recordQueryMetrics *recordquery.Metrics
+var playbackMetrics *gbplayback.Metrics
 var positionHistoryPruneCancel context.CancelFunc
 
 type ptzSchedulerLifecycle interface {
@@ -468,6 +498,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
+	setupPlaybackRuntime(cfg, srv.UAC())
 	setupTalkRuntime(cfg, srv.UAC())
 	setupRecordingRuntime(cfg)
 
@@ -497,6 +528,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) {
+	stopPlaybackRuntime(ctx)
 	stopRecordQueryRuntime()
 	stopPTZRuntime()
 	stopTalkRuntime(ctx)
@@ -528,6 +560,48 @@ func stopSIPDependencies(ctx context.Context) {
 		}
 		sipServer = nil
 	}
+}
+
+func stopPlaybackRuntime(ctx context.Context) {
+	if playbackService != nil {
+		_ = playbackService.Close(ctx)
+		playbackService = nil
+	}
+	playbackMetrics = nil
+	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
+	gbroutes.SetPlaybackMediaSink(nil)
+	if sipServer != nil {
+		sipServer.SetPlaybackEndSink(nil)
+		if u := sipServer.UAC(); u != nil {
+			u.SetPlaybackEndHook(nil)
+		}
+	}
+}
+
+func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
+	if inviter == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
+		zlmLocationMap == nil || zlmServerConfigCache == nil {
+		SetPlaybackService(nil, nil)
+		playbackMetrics = nil
+		app.ZapLog.Info("GB28181 设备录像回放 service 跳过装配(UAC/RecordInfo/ZLM 依赖未就绪)")
+		return
+	}
+	registry := gbplayback.NewRegistry(gbplayback.RegistryConfig{
+		IdleTimeout: cfg.Playback.IdleTimeout(),
+		MaxSession:  cfg.Playback.MaxSession(),
+	})
+	playbackMetrics = &gbplayback.Metrics{}
+	service := gbplayback.NewService(
+		registry,
+		gbplayback.NewZLMNodePicker(zlmScheduler, cfg.SIP.ServerID),
+		gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil),
+		uac.NewPlaybackAdapter(inviter),
+		gbplayback.NewZLMMediaWaiter(zlmRegistry, zlmLocationMap, gbroutes.StreamNotifier(), zlmServerConfigCache, nil),
+		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics},
+	)
+	service.StartSweeper(context.Background(), time.Second)
+	SetPlaybackService(service, recordQueryService.Snapshots())
+	app.ZapLog.Info("GB28181 设备录像回放 service 已装配(ZLM scheduler + Playback UAC)")
 }
 
 func stopRecordQueryRuntime() {

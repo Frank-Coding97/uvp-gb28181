@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -53,6 +54,10 @@ type StreamObserver interface {
 	ObserveStream(context.Context, string, bool) error
 }
 
+type PlaybackMediaSink interface {
+	OnPlaybackStreamEnded(context.Context, string, string) error
+}
+
 type TalkPublishRequest struct {
 	NodeID       int64
 	App          string
@@ -81,6 +86,7 @@ type HookController struct {
 	recordMP4      RecordMP4Indexer
 	recordResolver NodeUUIDResolver
 	observer       StreamObserver
+	playbackMedia  PlaybackMediaSink
 	talkResolver   NodeUUIDResolver
 	talkAuthorizer TalkPublishAuthorizer
 	talkObserver   TalkStreamObserver
@@ -119,6 +125,10 @@ func (h *HookController) SetRecordMP4Indexer(resolver NodeUUIDResolver, indexer 
 
 func (h *HookController) SetStreamObserver(observer StreamObserver) {
 	h.observer = observer
+}
+
+func (h *HookController) SetPlaybackMediaSink(sink PlaybackMediaSink) {
+	h.playbackMedia = sink
 }
 
 func (h *HookController) SetTalk(resolver NodeUUIDResolver, authorizer TalkPublishAuthorizer, observer TalkStreamObserver) {
@@ -175,6 +185,9 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 				app.ZapLog.Warn("录像流状态联动失败", zap.String("stream", streamID), zap.Bool("regist", registered), zap.Error(err))
 			}
 		}(body.Stream, body.Regist)
+	}
+	if !body.Regist && h.playbackMedia != nil && body.Stream != "" {
+		h.notifyPlaybackEnded(body.Stream, "media-offline")
 	}
 	talkResolver, _, talkObserver := h.talkDependencies()
 	if body.App == "talk" && talkObserver != nil && talkResolver != nil && body.Stream != "" && body.MediaServerID != "" {
@@ -258,7 +271,20 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 			}
 		}(body.StreamID)
 	}
+	if h.playbackMedia != nil && body.StreamID != "" {
+		h.notifyPlaybackEnded(body.StreamID, "rtp-timeout")
+	}
 	hookOK(c)
+}
+
+func (h *HookController) notifyPlaybackEnded(streamID, reason string) {
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.playbackMedia.OnPlaybackStreamEnded(ctx, streamID, reason); err != nil && !errors.Is(err, context.Canceled) {
+			app.ZapLog.Debug("回放媒体终态未命中活动会话", zap.String("stream", streamID), zap.String("reason", reason), zap.Error(err))
+		}
+	}()
 }
 
 type onPublishBody struct {

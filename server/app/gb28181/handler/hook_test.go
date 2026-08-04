@@ -38,6 +38,17 @@ type mockStreamObserver struct {
 	release    chan struct{}
 }
 
+type mockPlaybackMediaSink struct {
+	calls atomic.Int32
+	last  atomic.Value
+}
+
+func (m *mockPlaybackMediaSink) OnPlaybackStreamEnded(_ context.Context, streamID, reason string) error {
+	m.calls.Add(1)
+	m.last.Store(streamID + ":" + reason)
+	return nil
+}
+
 func (m *mockStreamObserver) ObserveStream(context.Context, string, bool) error {
 	m.calls.Add(1)
 	m.registered.Store(true)
@@ -112,6 +123,18 @@ func TestHookOnStreamNoneReaderTriggersStop(t *testing.T) {
 	}
 	if got, _ := stopper.last.Load().(string); got != "0123456781" {
 		t.Errorf("Stop 收到 streamID 不符: %q", got)
+	}
+}
+
+func TestHookStreamOfflineAndRTPTimeoutNotifyPlaybackFinalizer(t *testing.T) {
+	h := handler.NewHookController(stream.NewNotifier())
+	sink := &mockPlaybackMediaSink{}
+	h.SetPlaybackMediaSink(sink)
+	e := newHookEngine(t, h)
+	postJSON(t, e, "/index/hook/on_stream_changed", gin.H{"app": "rtp", "stream": "pb-1", "regist": false})
+	postJSON(t, e, "/index/hook/on_rtp_server_timeout", gin.H{"app": "rtp", "stream_id": "pb-2"})
+	if !waitInt32(&sink.calls, 2, 500*time.Millisecond) {
+		t.Fatalf("playback finalizer calls=%d", sink.calls.Load())
 	}
 }
 

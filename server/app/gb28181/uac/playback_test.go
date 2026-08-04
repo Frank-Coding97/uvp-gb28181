@@ -284,6 +284,14 @@ func TestTeardownPlaybackAlwaysBYEsAndIsIdempotent(t *testing.T) {
 func TestHandlePlaybackByeUsesExactCallIDAndIsIdempotent(t *testing.T) {
 	dialog := establishedPlaybackDialog()
 	u, _ := newPlaybackTestUAC(dialog)
+	var ended int
+	u.SetPlaybackEndHook(func(_ context.Context, got PlaybackDialogMetadata, reason string) error {
+		if got.CallID == "" || reason != "bye" {
+			t.Fatalf("metadata=%+v reason=%q", got, reason)
+		}
+		ended++
+		return nil
+	})
 	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
 	if err != nil {
 		t.Fatal(err)
@@ -294,9 +302,15 @@ func TestHandlePlaybackByeUsesExactCallIDAndIsIdempotent(t *testing.T) {
 	if err != nil || !handled || tx.Result()[0].StatusCode != sip.StatusOK {
 		t.Fatalf("handled=%v err=%v", handled, err)
 	}
+	if ended != 1 {
+		t.Fatalf("end hook calls=%d", ended)
+	}
 	repeated := siptest.NewServerTxRecorder(request)
 	handled, err = u.HandlePlaybackBye(request, repeated)
 	if err != nil || handled || repeated.Result()[0].StatusCode != sip.StatusCallTransactionDoesNotExists {
 		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if ended != 1 {
+		t.Fatalf("late BYE called end hook again: %d", ended)
 	}
 }

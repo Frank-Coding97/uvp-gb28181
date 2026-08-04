@@ -328,6 +328,19 @@ func (u *UAC) SendPlaybackInfo(ctx context.Context, callID string, request Playb
 	return result, nil
 }
 
+// Action implements the narrow playback.PlaybackActioner contract without
+// coupling the UAC package to the playback registry's domain types.
+func (u *UAC) Action(ctx context.Context, callID, action string, positionSeconds, scale float64, segmentDuration time.Duration) (float64, float64, error) {
+	request := PlaybackInfoRequest{Action: PlaybackInfoAction(action), Position: time.Duration(positionSeconds * float64(time.Second)), Scale: scale, SegmentDuration: segmentDuration}
+	if action == string(PlaybackInfoSeek) {
+		request.Position = time.Duration(positionSeconds * float64(time.Second))
+	}
+	if _, err := u.SendPlaybackInfo(ctx, callID, request); err != nil {
+		return 0, 0, err
+	}
+	return positionSeconds, scale, nil
+}
+
 func (u *UAC) TeardownPlayback(ctx context.Context, callID string) error {
 	if u == nil || u.playbackDialogs == nil {
 		return nil
@@ -388,16 +401,22 @@ func (u *UAC) HandlePlaybackBye(req *sip.Request, tx sip.ServerTransaction) (boo
 		return false, err
 	}
 	record.mu.Lock()
-	defer record.mu.Unlock()
 	if record.closed {
+		record.mu.Unlock()
 		err := tx.Respond(sip.NewResponseFromRequest(req, sip.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist", nil))
 		return false, err
 	}
 	record.closed = true
+	metadata := record.metadata
 	u.playbackDialogs.remove(callID, record)
 	if err := record.dialog.ReadBye(req, tx); err != nil {
+		record.mu.Unlock()
 		return true, err
 	}
 	_ = record.dialog.Close()
+	record.mu.Unlock()
+	if err := u.playbackEnded(context.Background(), metadata, "bye"); err != nil {
+		return true, err
+	}
 	return true, nil
 }

@@ -25,6 +25,18 @@ type blockingRecordInfoSink struct {
 	err     error
 }
 
+type playbackEndSink struct {
+	started chan struct{}
+	device  string
+	callID  string
+}
+
+func (s *playbackEndSink) OnPlaybackFileToEnd(_ context.Context, callID, device string, _ []byte) error {
+	s.callID, s.device = callID, device
+	close(s.started)
+	return nil
+}
+
 func (s *blockingRecordInfoSink) OnRecordInfoMessage(_ context.Context, sender string, body []byte) error {
 	s.mu.Lock()
 	s.sender = sender
@@ -118,6 +130,24 @@ func TestMalformedRecordInfoDoesNotReachSink(t *testing.T) {
 		t.Fatal("malformed XML must not reach RecordInfo sink")
 	default:
 	}
+}
+
+func TestMessageHandlerAcknowledgesPlaybackFileToEndBeforeFinalizer(t *testing.T) {
+	req := recordInfoRequest([]byte(`<Notify><CmdType>MediaStatus</CmdType><DeviceID>34020000001320000002</DeviceID><Status>File to End</Status></Notify>`))
+	tx := siptest.NewServerTxRecorder(req)
+	sink := &playbackEndSink{started: make(chan struct{})}
+	h := NewMessageHandler(gbconfig.Config{})
+	h.SetPlaybackEndSink(sink)
+	h.Handle(req, tx)
+	require.Len(t, tx.Result(), 1)
+	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
+	select {
+	case <-sink.started:
+	default:
+		t.Fatal("playback end sink was not called")
+	}
+	require.Equal(t, "record-info-message", sink.callID)
+	require.Equal(t, "34020000001320000001", sink.device)
 }
 
 func closedSignal() chan struct{} {
