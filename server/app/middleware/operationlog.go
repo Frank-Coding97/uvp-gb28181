@@ -15,12 +15,20 @@ import (
 )
 
 const sensitiveOperationContextKey = "operation_log_sensitive_metadata"
+const operationTypeContextKey = "operation_log_type"
 
 // MarkSensitiveOperation keeps response payloads out of the operation-log capture buffer.
 // Metadata must identify the resource and purpose without containing the sensitive value.
 func MarkSensitiveOperation(c *gin.Context, metadata map[string]any) {
 	if c != nil {
 		c.Set(sensitiveOperationContextKey, metadata)
+	}
+}
+
+// MarkDeleteOperation records a POST-based batch endpoint as a delete action.
+func MarkDeleteOperation(c *gin.Context) {
+	if c != nil {
+		c.Set(operationTypeContextKey, models.OperationDelete)
 	}
 }
 
@@ -164,7 +172,9 @@ func operationLogRequestData(c *gin.Context, requestBody []byte) string {
 // getOperationModule 获取操作模块
 func getOperationModule(c *gin.Context) string {
 	path := c.Request.URL.Path
-	if strings.Contains(path, "/users") {
+	if strings.Contains(path, "/gb28181/alarms") {
+		return "GB28181告警管理"
+	} else if strings.Contains(path, "/users") {
 		return "用户管理"
 	} else if strings.Contains(path, "/sysMenu") {
 		return "菜单管理"
@@ -188,6 +198,11 @@ func getOperationModule(c *gin.Context) string {
 
 // getOperationType 获取操作类型
 func getOperationType(c *gin.Context) string {
+	if operationType, ok := c.Get(operationTypeContextKey); ok {
+		if value, valid := operationType.(string); valid && value != "" {
+			return value
+		}
+	}
 	method := c.Request.Method
 	switch method {
 	case "POST":

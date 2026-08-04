@@ -26,6 +26,7 @@ var customGroupController = gbcontrollers.NewCustomGroupController()
 var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
 var mapController = gbcontrollers.NewMapController()
 var anomalyController = gbcontrollers.NewAnomalyController()
+var alarmController = gbcontrollers.NewAlarmController()
 
 // streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
 var streamNotifier = stream.NewNotifier()
@@ -243,6 +244,13 @@ func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUU
 func RegisterRoutes(protected *gin.RouterGroup) {
 	gb := protected.Group("/gb28181")
 	{
+		alarms := gb.Group("/alarms")
+		{
+			alarms.GET("", alarmController.List)
+			alarms.POST("/batch-delete", alarmController.BatchDelete)
+			alarms.GET("/:id", alarmController.Detail)
+			alarms.DELETE("/:id", alarmController.Delete)
+		}
 		dev := gb.Group("/device")
 		{
 			dev.GET("/list", deviceController.List)
