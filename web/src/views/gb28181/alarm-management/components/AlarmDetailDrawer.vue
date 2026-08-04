@@ -28,6 +28,17 @@
           <section class="alarm-detail-context" aria-label="告警对象">
             <div><span>设备</span><strong>{{ displayAlarmEntityName(detail.device) }}</strong><code>{{ detail.device.code }}</code></div>
             <div><span>来源</span><strong>{{ displayAlarmEntityName(detail.channel, detail.sourceCode || "未知来源") }}</strong><code>{{ detail.sourceCode || "—" }}</code></div>
+            <a-button
+              v-if="canDelete"
+              data-testid="detail-delete"
+              status="danger"
+              :loading="deleting"
+              :disabled="deleting"
+              @click="emit('delete', detail)"
+            >
+              <template #icon><Trash2 :size="14" /></template>
+              物理删除
+            </a-button>
           </section>
 
           <section class="alarm-detail-section" aria-labelledby="alarm-detail-event">
@@ -72,7 +83,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { BellRing, LoaderCircle } from "@lucide/vue";
+import { BellRing, LoaderCircle, Trash2 } from "@lucide/vue";
 import { displayAlarmEntityName } from "../alarmState";
 import { getAlarmDetail, type AlarmDetail } from "../api";
 
@@ -80,10 +91,12 @@ const props = defineProps<{
   visible: boolean;
   alarmId: string | null;
   canDelete: boolean;
+  deleting?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: "update:visible", value: boolean): void;
+  (event: "delete", value: AlarmDetail): void;
 }>();
 
 const detail = ref<AlarmDetail | null>(null);
@@ -150,7 +163,7 @@ watch(
 .alarm-detail-title > div { display: flex; flex-direction: column; min-width: 0; }
 .alarm-detail-title strong { font-size: 15px; }
 .alarm-detail-title span:last-child { color: var(--uvp-text-tertiary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
-.alarm-detail-context { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 14px 18px; background: var(--uvp-bg-secondary); border-bottom: 1px solid var(--uvp-border); }
+.alarm-detail-context { display: grid; grid-template-columns: 1fr 1fr auto; gap: 16px; align-items: center; padding: 14px 18px; background: var(--uvp-bg-secondary); border-bottom: 1px solid var(--uvp-border); }
 .alarm-detail-context > div { display: flex; flex-direction: column; min-width: 0; }
 .alarm-detail-context span { color: var(--uvp-text-tertiary); font-size: 11px; }
 .alarm-detail-context strong,

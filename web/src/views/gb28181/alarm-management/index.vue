@@ -136,6 +136,19 @@
               <template #cell="{ record }">
                 <div class="uvp-table-actions">
                   <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record.id)">详情</a-link>
+                  <a-tooltip v-if="canDelete" content="物理删除告警，不可恢复">
+                    <a-button
+                      :data-testid="`single-delete-${record.id}`"
+                      type="text"
+                      status="danger"
+                      :loading="deletingIds.has(record.id)"
+                      :disabled="deletingIds.has(record.id)"
+                      :aria-label="`物理删除告警 ${record.id}`"
+                      @click="requestSingleDelete(record)"
+                    >
+                      <template #icon><Trash2 :size="14" /></template>
+                    </a-button>
+                  </a-tooltip>
                 </div>
               </template>
             </a-table-column>
@@ -152,19 +165,28 @@
     v-model:visible="detailVisible"
     :alarm-id="detailAlarmId"
     :can-delete="canDelete"
+    :deleting="detailAlarmId ? deletingIds.has(detailAlarmId) : false"
+    @delete="requestSingleDelete"
   />
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { RefreshCw, RotateCcw, Search } from "@lucide/vue";
+import { RefreshCw, RotateCcw, Search, Trash2 } from "@lucide/vue";
+import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
 import { listDevices, type DeviceVO } from "../device-mgmt/api";
 import AlarmDetailDrawer from "./components/AlarmDetailDrawer.vue";
-import { displayAlarmEntityName, mayDeleteAlarms, mayViewAlarms, normalizeAlarmQuery } from "./alarmState";
-import { listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
+import {
+  displayAlarmEntityName,
+  mayDeleteAlarms,
+  mayViewAlarms,
+  normalizeAlarmQuery,
+  pageAfterAlarmDeletion
+} from "./alarmState";
+import { deleteAlarm, listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
 
 interface DeviceOption {
   id: number;
@@ -194,6 +216,7 @@ const deviceLoading = ref(false);
 const deviceOptions = ref<DeviceOption[]>([]);
 const detailVisible = ref(false);
 const detailAlarmId = ref<string | null>(null);
+const deletingIds = ref(new Set<string>());
 const pagination = reactive({
   current: 1,
   pageSize: 20,
@@ -285,6 +308,53 @@ function refresh() {
 function openDetail(id: string) {
   detailAlarmId.value = id;
   detailVisible.value = true;
+}
+
+function requestSingleDelete(alarm: AlarmListItem) {
+  if (!canDelete.value || deletingIds.value.has(alarm.id)) return;
+  const deviceName = displayAlarmEntityName(alarm.device);
+  const sourceName = displayAlarmEntityName(alarm.channel, alarm.sourceCode || "未知来源");
+  Modal.warning({
+    title: "物理删除告警",
+    content: `将物理删除 ${deviceName} / ${sourceName} 在 ${formatDateTime(alarm.alarmTime)} 的告警记录，删除后不可恢复。`,
+    okText: "删除",
+    cancelText: "取消",
+    hideCancel: false,
+    okButtonProps: { status: "danger" },
+    onOk: () => performSingleDelete(alarm.id)
+  });
+}
+
+async function performSingleDelete(id: string) {
+  if (deletingIds.value.has(id)) return;
+  deletingIds.value = new Set([...deletingIds.value, id]);
+  try {
+    const response = await deleteAlarm(id);
+    const deletedCount = response.data.deletedCount || 1;
+    pagination.current = pageAfterAlarmDeletion(pagination.current, pagination.pageSize, pagination.total, deletedCount);
+    selectedKeys.value = selectedKeys.value.filter(selectedId => selectedId !== id);
+    if (detailAlarmId.value === id) {
+      detailVisible.value = false;
+      detailAlarmId.value = null;
+    }
+    proxy.$message.success(`已物理删除 ${deletedCount} 条告警`);
+    await loadAlarms();
+  } catch (error) {
+    proxy.$message.error(errorMessageOf(error, "删除告警失败，请刷新后重试"));
+  } finally {
+    const next = new Set(deletingIds.value);
+    next.delete(id);
+    deletingIds.value = next;
+  }
+}
+
+function errorMessageOf(error: unknown, fallback: string): string {
+  if (typeof error === "string" && error) return error;
+  if (error && typeof error === "object") {
+    const candidate = error as { message?: string; data?: { message?: string }; response?: { data?: { message?: string } } };
+    return candidate.response?.data?.message || candidate.data?.message || candidate.message || fallback;
+  }
+  return fallback;
 }
 
 function handlePageChange(page: number) {
