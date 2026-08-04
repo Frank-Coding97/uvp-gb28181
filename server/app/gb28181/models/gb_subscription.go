@@ -94,7 +94,7 @@ type GbMobilePositionHistory struct {
 
 func (GbMobilePositionHistory) TableName() string { return "gb_mobile_position_history" }
 
-// GbAlarmEvent is an immutable alarm notification with a deterministic dedupe key.
+// GbAlarmEvent is append-only on ingestion and may be physically deleted by an authorized operator.
 type GbAlarmEvent struct {
 	ID             uint64     `gorm:"primaryKey" json:"id"`
 	DeviceID       uint       `gorm:"column:device_id;not null;index:idx_alarm_device_time,priority:1" json:"deviceId"`
