@@ -260,7 +260,7 @@ async function toggleFullscreen() {
 }
 
 function goBack() {
-    router.push({ path: "/gb28181/device-mgmt", query: route.query.returnKey ? { returnKey: String(route.query.returnKey) } : undefined });
+    router.push({ name: "device-mgmt", query: route.query.returnKey ? { returnKey: String(route.query.returnKey) } : undefined });
 }
 
 function applyDemoPreviewTheme() {

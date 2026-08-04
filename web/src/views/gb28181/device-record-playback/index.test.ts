@@ -4,7 +4,8 @@ import DeviceRecordPlayback from "./index.vue";
 
 const api = vi.hoisted(() => ({
     getRecordQueryOptions: vi.fn(),
-    queryDeviceRecords: vi.fn()
+    queryDeviceRecords: vi.fn(),
+    routerPush: vi.fn()
 }));
 
 vi.mock("../device-mgmt/api", async importOriginal => ({
@@ -15,11 +16,12 @@ vi.mock("../device-mgmt/api", async importOriginal => ({
 vi.mock("vue-router", async importOriginal => ({
     ...await importOriginal<typeof import("vue-router")>(),
     useRoute: () => ({ params: { channelId: "31" }, query: { recordQueryMock: "complete", returnKey: "return-key" } }),
-    useRouter: () => ({ push: vi.fn() })
+    useRouter: () => ({ push: api.routerPush })
 }));
 
 describe("device record playback workspace", () => {
     beforeEach(() => {
+        api.routerPush.mockReset();
         api.getRecordQueryOptions.mockResolvedValue({ code: 0, data: {
             device: { id: 7, code: "34020000002000000001", name: "园区 NVR-A", online: true },
             channel: { id: 31, code: "34020000001320000001", name: "东门出入口" },
@@ -51,6 +53,15 @@ describe("device record playback workspace", () => {
                 streamNumber: 0
             }]
         }});
+    });
+
+    it("returns to the dynamic device management route with its saved state key", async () => {
+        const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await wrapper.get('[aria-label="返回设备管理"]').trigger("click");
+        expect(api.routerPush).toHaveBeenCalledWith({
+            name: "device-mgmt",
+            query: { returnKey: "return-key" }
+        });
     });
 
     it("renders the five-zone playback workspace and query result", async () => {
