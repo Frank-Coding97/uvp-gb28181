@@ -268,5 +268,17 @@ gb28181:
     hookport: 8280                # 后端 HTTP 端口
     streamnonereadertimeout: 20   # 无人观看多少秒后断流
     rtpservertimeout: 15          # RTP 收流超时(秒)
+  # 设备/NVR 本地录像查询。时间输入按平台时区墙钟解释，不按浏览器时区转换。
+  record_query:
+    timezone: "Asia/Shanghai"     # 显式 IANA 时区；非法值会阻止查询/回放 runtime 装配
+    timeout_sec: 15               # 必须小于 httpserver.handler_timeout
+    max_range_hours: 24
+    max_active_queries: 128
+    max_records_per_query: 20000
+    result_ttl_sec: 1800
+  playback:
+    media_wait_sec: 10            # SIP 成功后等待回放媒体上线
+    idle_timeout_sec: 60          # 无控制/读取活动后的回收时间
+    max_session_sec: 86400        # 单会话绝对上限，不超过 24 小时
   recording:
     reconcile_interval_sec: 30   # 云端录像对账周期(秒);0 仅禁用周期任务
