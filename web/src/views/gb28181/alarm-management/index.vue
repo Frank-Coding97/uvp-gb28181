@@ -96,22 +96,22 @@
           {{ errorMessage }}
         </a-alert>
 
-        <a-table
-          v-else
-          class="uvp-data-table"
-          data-testid="alarm-table"
-          row-key="id"
-          :data="alarms"
-          :bordered="false"
-          :loading="loading"
-          :pagination="pagination"
-          :selected-keys="selectedKeys"
-          :row-selection="canDelete ? { type: 'checkbox', showCheckedAll: true } : undefined"
-          :scroll="tableScroll"
-          @page-change="handlePageChange"
-          @page-size-change="handlePageSizeChange"
-          @update:selected-keys="handleSelectionChange"
-        >
+        <div v-else class="alarm-table-wrap">
+          <a-table
+            class="uvp-data-table"
+            data-testid="alarm-table"
+            row-key="id"
+            :data="alarms"
+            :bordered="false"
+            :loading="loading"
+            :pagination="pagination"
+            :selected-keys="selectedKeys"
+            :row-selection="canDelete ? { type: 'checkbox', showCheckedAll: true } : undefined"
+            :scroll="tableScroll"
+            @page-change="handlePageChange"
+            @page-size-change="handlePageSizeChange"
+            @update:selected-keys="handleSelectionChange"
+          >
           <template #columns>
             <a-table-column title="平台接收时间" :width="176">
               <template #cell="{ record }">{{ formatDateTime(record.receivedAt) }}</template>
@@ -150,7 +150,16 @@
             <a-table-column title="操作" :width="104" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions">
-                  <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record.id)">详情</a-link>
+                  <a-link
+                    class="uvp-table-action uvp-table-action--detail"
+                    role="button"
+                    tabindex="0"
+                    @click="openDetail(record.id)"
+                    @keydown.enter.prevent="openDetail(record.id)"
+                    @keydown.space.prevent="openDetail(record.id)"
+                  >
+                    详情
+                  </a-link>
                   <a-tooltip v-if="canDelete" content="物理删除告警，不可恢复">
                     <a-button
                       :data-testid="`single-delete-${record.id}`"
@@ -171,7 +180,8 @@
           <template #empty>
             <a-empty description="当前筛选条件下暂无告警" />
           </template>
-        </a-table>
+          </a-table>
+        </div>
       </template>
     </div>
   </div>
@@ -338,6 +348,7 @@ function requestSingleDelete(alarm: AlarmListItem) {
     okText: "删除",
     cancelText: "取消",
     hideCancel: false,
+    escToClose: true,
     okButtonProps: { status: "danger" },
     onOk: () => performSingleDelete(alarm.id)
   });
@@ -379,6 +390,7 @@ function requestBatchDelete() {
     okText: "删除",
     cancelText: "取消",
     hideCancel: false,
+    escToClose: true,
     okButtonProps: { status: "danger" },
     onOk: performBatchDelete
   });
@@ -473,7 +485,20 @@ onMounted(() => {
 
 <style scoped lang="scss">
 .alarm-management-page {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100vw;
+  min-width: 0;
+  overflow-x: hidden;
+  contain: inline-size;
   color: var(--uvp-text-primary);
+}
+
+.alarm-management-page > .snow-inner {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .alarm-page-header {
@@ -519,6 +544,14 @@ onMounted(() => {
   color: var(--uvp-text-primary);
 }
 
+.alarm-table-wrap {
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  contain: inline-size;
+  border-radius: 6px;
+}
+
 .alarm-entity-cell {
   display: flex;
   flex-direction: column;
@@ -546,6 +579,31 @@ onMounted(() => {
 
   .alarm-page-header p {
     display: none;
+  }
+
+  .alarm-batch-bar {
+    flex-wrap: wrap;
+  }
+
+  .alarm-page-header :deep(.arco-btn),
+  .alarm-batch-bar :deep(.arco-btn),
+  :deep(.uvp-table-actions .arco-btn),
+  :deep(.uvp-table-action) {
+    min-height: 44px;
+  }
+
+  :deep(.uvp-table-actions) {
+    gap: 8px;
+  }
+
+  :deep(.uvp-table-action) {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 8px;
+  }
+
+  :deep([data-testid^="single-delete-"]) {
+    min-width: 44px;
   }
 }
 
