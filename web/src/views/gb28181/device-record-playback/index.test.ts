@@ -72,6 +72,7 @@ describe("device record playback workspace", () => {
         expect(playbackPageSource).toContain("border: 1px solid var(--uvp-list-panel-border);");
         expect(playbackPageSource).toContain("border-radius: var(--uvp-panel-radius);");
         expect(playbackPageSource).toContain("box-shadow: var(--uvp-search-panel-shadow);");
+        expect(playbackPageSource).toContain(".channel-context { display: flex; align-items: center; gap: 9px; min-width: 260px; }");
     });
 
     it("aligns and rounds the query, playback, and timeline regions", () => {
