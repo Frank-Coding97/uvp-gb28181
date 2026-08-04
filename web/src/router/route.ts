@@ -55,16 +55,6 @@ export const staticRoutes = [
     children: []
   },
   {
-    path: "/gb28181/device-record-playback/:channelId",
-    name: "gb28181-device-record-playback",
-    component: () => import(/* webpackChunkName: "device-record-playback" */ "@/views/gb28181/device-record-playback/index.vue"),
-    meta: {
-      title: "设备录像回放",
-      hide: true,
-      keepAlive: false
-    }
-  },
-  {
     path: "/play-console-demo",
     name: "play-console-demo",
     component: () => import(/* webpackChunkName: "play-console-demo" */ "@/views/gb28181/PlayConsoleDemo.vue"),

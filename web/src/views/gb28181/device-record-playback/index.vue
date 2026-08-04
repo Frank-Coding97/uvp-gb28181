@@ -260,7 +260,14 @@ async function toggleFullscreen() {
 }
 
 function goBack() {
-    router.push({ name: "device-mgmt", query: route.query.returnKey ? { returnKey: String(route.query.returnKey) } : undefined });
+    const registeredRoutes = router.getRoutes();
+    const target = registeredRoutes.find((item: { name?: string | symbol }) => item.name === "device-mgmt-list")
+        ?? registeredRoutes.find((item: { name?: string | symbol }) => item.name === "device-mgmt");
+    if (!target?.name) {
+        router.back();
+        return;
+    }
+    router.push({ name: target.name, query: route.query.returnKey ? { returnKey: String(route.query.returnKey) } : undefined });
 }
 
 function applyDemoPreviewTheme() {

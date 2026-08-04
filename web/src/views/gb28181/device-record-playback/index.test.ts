@@ -5,7 +5,10 @@ import DeviceRecordPlayback from "./index.vue";
 const api = vi.hoisted(() => ({
     getRecordQueryOptions: vi.fn(),
     queryDeviceRecords: vi.fn(),
-    routerPush: vi.fn()
+    routerPush: vi.fn(),
+    routerGetRoutes: vi.fn(() => [
+        { name: "device-mgmt-list", path: "/gb28181/device-mgmt/index" }
+    ])
 }));
 
 vi.mock("../device-mgmt/api", async importOriginal => ({
@@ -16,7 +19,7 @@ vi.mock("../device-mgmt/api", async importOriginal => ({
 vi.mock("vue-router", async importOriginal => ({
     ...await importOriginal<typeof import("vue-router")>(),
     useRoute: () => ({ params: { channelId: "31" }, query: { recordQueryMock: "complete", returnKey: "return-key" } }),
-    useRouter: () => ({ push: api.routerPush })
+    useRouter: () => ({ push: api.routerPush, getRoutes: api.routerGetRoutes })
 }));
 
 describe("device record playback workspace", () => {
@@ -59,7 +62,7 @@ describe("device record playback workspace", () => {
         const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
         await wrapper.get('[aria-label="返回设备管理"]').trigger("click");
         expect(api.routerPush).toHaveBeenCalledWith({
-            name: "device-mgmt",
+            name: "device-mgmt-list",
             query: { returnKey: "return-key" }
         });
     });
