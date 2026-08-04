@@ -30,9 +30,11 @@ func (r *trackedMessageRecorder) End(_, _ string, statusCode int, success bool) 
 
 func trackedMessageTestUAC(doMessage func(context.Context, *sip.Request) (*sip.Response, error)) *UAC {
 	return &UAC{
-		serverID:  testPlatformID,
-		domain:    "3402000000",
-		doMessage: doMessage,
+		serverID:    testPlatformID,
+		domain:      "3402000000",
+		sipPort:     5061,
+		advertiseIP: "192.0.2.1",
+		doMessage:   doMessage,
 	}
 }
 
@@ -110,7 +112,7 @@ func TestUAC_NextCSeq(t *testing.T) {
 // platformFromHeader:GB28181 § 9.1.1 要求 From userpart = 平台 serverID
 // 之前不显式设置 From 时,sipgo 用 UserAgent 名字兜底,合规设备/模拟器会丢弃这类请求
 func TestPlatformFromHeader(t *testing.T) {
-	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000", sipPort: 5061, advertiseIP: "192.0.2.1"}
 	h := u.platformFromHeader()
 	if h == nil {
 		t.Fatal("platformFromHeader returned nil")
@@ -151,7 +153,18 @@ func TestNormalizeTransport(t *testing.T) {
 }
 
 func TestBuildInviteRequestTargetsChannel(t *testing.T) {
-	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	u := &UAC{
+		serverID:         testPlatformID,
+		domain:           "3402000000",
+		sipPort:          5061,
+		dynamicAdvertise: true,
+		resolveLocalIP: func(destination string) (string, error) {
+			if destination != "192.168.10.108:5060" {
+				t.Fatalf("unexpected destination %q", destination)
+			}
+			return "192.168.126.126", nil
+		},
+	}
 	s := &Session{
 		DeviceID:  "34020000001320000001",
 		ChannelID: "34020000001320000020",
@@ -160,7 +173,10 @@ func TestBuildInviteRequestTargetsChannel(t *testing.T) {
 		Transport: "udp",
 	}
 
-	req := u.buildInviteRequest(s, "v=0\r\n")
+	req, err := u.buildInviteRequest(s, "v=0\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if req.Recipient.User != s.ChannelID {
 		t.Fatalf("INVITE Request-URI user = %q, want channel %q", req.Recipient.User, s.ChannelID)
 	}
@@ -173,10 +189,70 @@ func TestBuildInviteRequestTargetsChannel(t *testing.T) {
 	if req.Transport() != "UDP" {
 		t.Errorf("INVITE transport = %q, want UDP", req.Transport())
 	}
+	if req.Via() == nil || req.Via().Host != "192.168.126.126" || req.Via().Port != 5061 {
+		t.Fatalf("INVITE Via=%v, want 192.168.126.126:5061", req.Via())
+	}
+	if req.Contact() == nil || req.Contact().Address.Host != "192.168.126.126" {
+		t.Fatalf("INVITE Contact=%v, want dynamic local IP", req.Contact())
+	}
+}
+
+func TestDynamicAdvertiseUsesRoutePerDestination(t *testing.T) {
+	routes := map[string]string{
+		"192.168.126.10:5060": "192.168.126.126",
+		"10.8.0.8:5060":       "10.8.0.3",
+	}
+	u := &UAC{
+		serverID:         testPlatformID,
+		domain:           "3402000000",
+		sipPort:          5061,
+		dynamicAdvertise: true,
+		resolveLocalIP: func(destination string) (string, error) {
+			return routes[destination], nil
+		},
+	}
+
+	for destination, want := range routes {
+		req, _, err := u.buildTrackedMessageRequest(TrackedMessageRequest{
+			DeviceID:    testDeviceID,
+			Destination: destination,
+			Transport:   "udp",
+			Body:        []byte("<Query/>"),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if req.Via() == nil || req.Via().Host != want {
+			t.Fatalf("destination %s Via=%v, want %s", destination, req.Via(), want)
+		}
+	}
+}
+
+func TestDynamicAdvertiseDoesNotFallbackToStaleAddress(t *testing.T) {
+	u := &UAC{
+		serverID:         testPlatformID,
+		domain:           "3402000000",
+		sipPort:          5061,
+		advertiseIP:      "192.168.10.106",
+		dynamicAdvertise: true,
+		resolveLocalIP: func(string) (string, error) {
+			return "", errors.New("no route")
+		},
+	}
+
+	_, _, err := u.buildTrackedMessageRequest(TrackedMessageRequest{
+		DeviceID:    testDeviceID,
+		Destination: "192.0.2.10:5060",
+		Transport:   "udp",
+		Body:        []byte("<Query/>"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "no route") {
+		t.Fatalf("error=%v, want route error without stale fallback", err)
+	}
 }
 
 func TestBuildSubscribeRequest_ReusesDialogMetadata(t *testing.T) {
-	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000", sipPort: 5061, advertiseIP: "192.0.2.1"}
 	req, err := u.buildSubscribeRequest(SubscriptionRequest{
 		DeviceID:    "34020000001320000001",
 		Destination: "192.168.10.108:5060",
@@ -216,7 +292,7 @@ func TestBuildSubscribeRequest_ReusesDialogMetadata(t *testing.T) {
 }
 
 func TestBuildTrackedMessageRequest(t *testing.T) {
-	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000", sipPort: 5061, advertiseIP: "192.0.2.1"}
 	req, meta, err := u.buildTrackedMessageRequest(TrackedMessageRequest{
 		DeviceID: "34020000001320000001", Destination: "192.0.2.10:5060", Transport: "tcp", Body: []byte("<Control/>"),
 	})

@@ -78,8 +78,12 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
         Object.assign(form, {
             deploymentMode: next.config.deploymentMode,
             listenIp: next.config.listenIp,
-            advertiseIp: next.config.advertiseIp,
-            advertiseIpInferred: next.config.advertiseIpInferred,
+            advertiseIp: next.config.deploymentMode === "lan" && next.config.listenIp === "0.0.0.0"
+                ? ""
+                : next.config.advertiseIp,
+            advertiseIpInferred: next.config.deploymentMode === "lan" && next.config.listenIp === "0.0.0.0"
+                ? false
+                : next.config.advertiseIpInferred,
             port: next.config.port,
             domain: next.config.domain,
             serverId: next.config.serverId,
@@ -112,11 +116,12 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
     }
 
     function payload(): SaveSipConfigPayload {
+        const wildcardLAN = form.deploymentMode === "lan" && form.listenIp === "0.0.0.0";
         const result: SaveSipConfigPayload = {
             deploymentMode: form.deploymentMode as SipDeploymentMode,
             listenIp: form.listenIp,
-            advertiseIp: form.advertiseIp,
-            advertiseIpInferred: form.advertiseIpInferred,
+            advertiseIp: wildcardLAN ? "" : form.advertiseIp,
+            advertiseIpInferred: wildcardLAN ? false : form.advertiseIpInferred,
             port: form.port,
             domain: form.domain,
             serverId: form.serverId

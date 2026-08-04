@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { SipNetworkAddress } from "@/api/gb28181";
 import {
-    deriveDomain, deriveNetworkSelection, evaluatePasswordStrength, formatRegisterUri,
+    activeSipAddresses, deriveDomain, deriveNetworkSelection, evaluatePasswordStrength, formatRegisterUri,
     identityCanContinue, networkCanContinue, networkOptions, passwordAcceptable
 } from "./sipSetupRules";
 
@@ -15,25 +15,39 @@ describe("SIP network rules", () => {
         expect(deriveNetworkSelection("lan", "192.168.1.10", "", items).advertiseIp).toBe("192.168.1.10");
     });
 
-    it("chooses the recommended address for wildcard LAN listener", () => {
-        const result = deriveNetworkSelection("lan", "0.0.0.0", "", items);
-        expect(result.advertiseIp).toBe("192.168.1.10");
-        expect(result.advertiseIpInferred).toBe(true);
+    it("does not persist a recommended address for wildcard LAN listener", () => {
+        const result = deriveNetworkSelection("lan", "0.0.0.0", "10.10.10.10", items);
+        expect(result.advertiseIp).toBe("");
+        expect(result.advertiseIpInferred).toBe(false);
     });
 
     it("keeps public listen and advertise addresses independent", () => {
         expect(deriveNetworkSelection("public", "192.168.1.10", "203.0.113.10", items).advertiseIp).toBe("203.0.113.10");
     });
 
-    it("rejects wildcard and loopback advertise addresses", () => {
-        expect(networkCanContinue("lan", "0.0.0.0", "0.0.0.0")).toBe(false);
-        expect(networkCanContinue("lan", "0.0.0.0", "127.0.0.1")).toBe(false);
-        expect(networkCanContinue("lan", "0.0.0.0", "192.168.1.10")).toBe(true);
+    it("allows wildcard LAN without a single advertise address", () => {
+        expect(networkCanContinue("lan", "0.0.0.0", "")).toBe(true);
+        expect(networkCanContinue("public", "0.0.0.0", "")).toBe(false);
+        expect(networkCanContinue("public", "0.0.0.0", "203.0.113.10")).toBe(true);
     });
 
-    it("retains a saved address that disappeared from interfaces", () => {
+    it("does not retain a saved address that disappeared from interfaces", () => {
         const options = networkOptions(items, "10.10.10.10");
-        expect(options[0]).toMatchObject({ ip: "10.10.10.10", unavailable: true });
+        expect(options.map(item => item.ip)).not.toContain("10.10.10.10");
+    });
+
+    it("lists only currently scanned addresses for wildcard LAN", () => {
+        const currentItems: SipNetworkAddress[] = [
+            ...items,
+            { ip: "10.8.0.3", interfaceName: "utun4", cidr: "10.8.0.3/32", loopback: false, virtual: true, recommended: false, more: true, listenOnly: false },
+            { ip: "127.0.0.1", interfaceName: "lo0", cidr: "127.0.0.1/8", loopback: true, virtual: false, recommended: false, more: true, listenOnly: false }
+        ];
+        expect(activeSipAddresses("lan", "0.0.0.0", "192.168.10.106", currentItems)).toEqual([
+            "192.168.1.10",
+            "10.8.0.3"
+        ]);
+        expect(activeSipAddresses("lan", "192.168.1.10", "192.168.10.106", currentItems)).toEqual(["192.168.1.10"]);
+        expect(activeSipAddresses("public", "0.0.0.0", "203.0.113.10", currentItems)).toEqual(["203.0.113.10"]);
     });
 });
 

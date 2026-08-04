@@ -29,18 +29,17 @@ const nicOptions = computed(() => {
     return all;
 });
 
-// 局域网 → listen = advertise = 选中网卡 IP.
-//         选中 0.0.0.0 时:listen=0.0.0.0,advertise 落到推荐网卡 IP(必须是具体 IP).
+// 局域网 → 具体网卡时 listen = advertise = 选中 IP.
+//         选中 0.0.0.0 时不持久化单一 advertise IP,运行时按设备路由选择本地地址.
 // 公网 → listen = 选中的网卡 IP(可能是 0.0.0.0),advertise 是用户手填的公网 IP.
 function onNicChange(nicIp: string) {
     if (!props.form.deploymentMode) return;
     if (props.form.deploymentMode === "lan") {
         if (nicIp === "0.0.0.0") {
-            const recommended = usableNics.value.find(i => i.recommended) || usableNics.value[0];
             emit("update", {
                 listenIp: "0.0.0.0",
-                advertiseIp: recommended?.ip || "",
-                advertiseIpInferred: Boolean(recommended)
+                advertiseIp: "",
+                advertiseIpInferred: false
             });
         } else {
             emit("update", { listenIp: nicIp, advertiseIp: nicIp, advertiseIpInferred: false });
@@ -91,8 +90,7 @@ watch(
                     >
                         <span>{{ item.ip }}</span>
                         <span v-if="item.interfaceName" class="option-meta"> · {{ item.interfaceName }}</span>
-                        <a-tag v-if="item.recommended" size="small" color="green">推荐</a-tag>
-                        <a-tag v-else-if="item.virtual" size="small">虚拟网卡</a-tag>
+                        <a-tag v-if="item.virtual" size="small">虚拟网卡</a-tag>
                         <a-tag v-else-if="item.isAll" size="small">多网卡</a-tag>
                     </a-option>
                 </a-select>

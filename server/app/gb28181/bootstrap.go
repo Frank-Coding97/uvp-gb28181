@@ -370,14 +370,15 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 		return base, false, nil
 	}
 	base.SIP = gbconfig.SIPConfig{
-		ListenIP:    row.ListenIP,
-		AdvertiseIP: row.AdvertiseIP,
-		Port:        row.Port,
-		Transport:   base.SIP.Transport,
-		Domain:      row.Domain,
-		ServerID:    row.ServerID,
-		Password:    row.Password,
-		XGBVersion:  base.SIP.XGBVersion,
+		ListenIP:         row.ListenIP,
+		AdvertiseIP:      row.AdvertiseIP,
+		DynamicAdvertise: row.DeploymentMode == gbsetup.DeploymentLAN && row.ListenIP == "0.0.0.0",
+		Port:             row.Port,
+		Transport:        base.SIP.Transport,
+		Domain:           row.Domain,
+		ServerID:         row.ServerID,
+		Password:         row.Password,
+		XGBVersion:       base.SIP.XGBVersion,
 	}
 	if len(base.SIP.Transport) == 0 {
 		base.SIP.Transport = []string{"udp", "tcp"}

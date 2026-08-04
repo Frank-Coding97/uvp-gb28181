@@ -18,6 +18,7 @@ type PlatformInfo struct {
 	ServerID        string                  `json:"serverId"`
 	Domain          string                  `json:"domain"`
 	SIPIP           string                  `json:"sipIp"`
+	SIPIPs          []string                `json:"sipIps"`
 	SIPPort         int                     `json:"sipPort"`
 	Transport       []string                `json:"transport"`
 	PasswordMasked  string                  `json:"passwordMasked"`
@@ -33,10 +34,11 @@ type PlatformInfo struct {
 // PlatformController 提供本级平台只读接入信息。
 type PlatformController struct {
 	controllers.Common
-	db        *gorm.DB
-	runtime   *gbsetup.RuntimeStatus
-	enabled   bool
-	transport []string
+	db              *gorm.DB
+	runtime         *gbsetup.RuntimeStatus
+	enabled         bool
+	transport       []string
+	networkProvider gbsetup.InterfaceProvider
 }
 
 func NewPlatformController() *PlatformController {
@@ -69,11 +71,16 @@ func (pc *PlatformController) Info(c *gin.Context) {
 		})
 		return
 	}
+	addresses, _ := gbsetup.ActiveSIPAddresses(*config, pc.networkProvider)
+	sipIP := ""
+	if len(addresses) > 0 {
+		sipIP = addresses[0]
+	}
 	pc.Success(c, PlatformInfo{
 		Enabled: pc.enabled, ServerID: config.ServerID, Domain: config.Domain,
-		SIPIP: config.AdvertiseIP, SIPPort: config.Port, Transport: pc.transport,
+		SIPIP: sipIP, SIPIPs: addresses, SIPPort: config.Port, Transport: pc.transport,
 		PasswordMasked: maskStoredPassword(config.HasPassword),
-		RegisterURI:    registerURI(config.ServerID, config.Domain, config.AdvertiseIP, config.Port),
+		RegisterURI:    registerURI(config.ServerID, config.Domain, sipIP, config.Port),
 		ListenIP:       config.ListenIP, AdvertiseIP: config.AdvertiseIP,
 		DeploymentMode: config.DeploymentMode, ConfigStatus: "configured",
 		Runtime: runtime, RestartRequired: runtime.State == gbsetup.RuntimeRestartRequired,

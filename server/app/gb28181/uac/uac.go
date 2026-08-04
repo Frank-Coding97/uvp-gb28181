@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -20,19 +21,23 @@ import (
 const trackedMessageSummaryLimit = 4 * 1024
 
 type messageDoFunc func(context.Context, *sip.Request) (*sip.Response, error)
+type localIPResolver func(destination string) (string, error)
 
 // UAC 平台主叫客户端:向下级设备发起 SIP 请求(MESSAGE 查询 / INVITE 点播)
 type UAC struct {
-	client          *sipgo.Client
-	dialogUA        *sipgo.DialogClientCache // 管理 INVITE 对话(Ack/Bye)
-	talkDialogs     *talkDialogStore
-	playbackDialogs *PlaybackDialogStore
-	serverID        string
-	domain          string
-	recorder        metrics.Recorder // 可选:埋点出向事务
-	doMessage       messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
-	playbackEndMu   sync.RWMutex
-	playbackEndHook func(context.Context, PlaybackDialogMetadata, string) error
+	client           *sipgo.Client
+	talkDialogs      *talkDialogStore
+	playbackDialogs  *PlaybackDialogStore
+	serverID         string
+	domain           string
+	sipPort          int
+	advertiseIP      string
+	dynamicAdvertise bool
+	resolveLocalIP   localIPResolver
+	recorder         metrics.Recorder // 可选:埋点出向事务
+	doMessage        messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
+	playbackEndMu    sync.RWMutex
+	playbackEndHook  func(context.Context, PlaybackDialogMetadata, string) error
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对
@@ -43,26 +48,89 @@ type UAC struct {
 // 关键:不要 WithClientPort 抢 server 已绑定的 5061,否则 client 走备选 socket
 // 设备应答会回到 server 端口但 client dialog 收不到 → WaitAnswer 永久阻塞
 // 让 sipgo 默认共享 server 的 transport;Contact 头我们手动写明 sipIP:sipPort
-func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int) (*UAC, error) {
-	client, err := sipgo.NewClient(ua, sipgo.WithClientHostname(advertiseIP))
+func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int, dynamicAdvertise bool) (*UAC, error) {
+	clientOptions := make([]sipgo.ClientOption, 0, 1)
+	if !dynamicAdvertise {
+		clientOptions = append(clientOptions, sipgo.WithClientHostname(advertiseIP))
+	}
+	client, err := sipgo.NewClient(ua, clientOptions...)
 	if err != nil {
 		return nil, fmt.Errorf("创建 UAC client 失败: %w", err)
 	}
-	// Contact 头:平台自身地址,设备回包/BYE 用(端口写 server 监听端口,确保设备应答能回)
-	contact := platformContact(serverID, advertiseIP, sipPort)
-	dialogUA := sipgo.NewDialogClientCache(client, contact)
-	talkDialogUA := sipgo.NewDialogClientCache(client, contact)
-	playbackDialogUA := sipgo.NewDialogClientCache(client, contact)
 	u := &UAC{
-		client: client, dialogUA: dialogUA,
-		talkDialogs:     newTalkDialogStore(&sipgoTalkDialogTransport{cache: talkDialogUA}),
-		playbackDialogs: NewPlaybackDialogStore(&sipgoPlaybackDialogTransport{cache: playbackDialogUA}),
-		serverID:        serverID, domain: domain,
+		client:           client,
+		talkDialogs:      newTalkDialogStore(&sipgoTalkDialogTransport{client: client}),
+		playbackDialogs:  NewPlaybackDialogStore(&sipgoPlaybackDialogTransport{client: client}),
+		serverID:         serverID,
+		domain:           domain,
+		sipPort:          sipPort,
+		advertiseIP:      advertiseIP,
+		dynamicAdvertise: dynamicAdvertise,
+		resolveLocalIP:   resolveRouteLocalIP,
 	}
 	u.doMessage = func(ctx context.Context, req *sip.Request) (*sip.Response, error) {
 		return client.Do(ctx, req)
 	}
 	return u, nil
+}
+
+func resolveRouteLocalIP(destination string) (string, error) {
+	connection, err := net.DialTimeout("udp", destination, time.Second)
+	if err != nil {
+		return "", fmt.Errorf("解析 SIP 目的地址路由失败: %w", err)
+	}
+	defer connection.Close()
+	host, _, err := net.SplitHostPort(connection.LocalAddr().String())
+	if err != nil {
+		return "", fmt.Errorf("解析 SIP 本地路由地址失败: %w", err)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsLoopback() {
+		return "", fmt.Errorf("SIP 本地路由没有可用 IPv4 地址: %s", host)
+	}
+	return ip.To4().String(), nil
+}
+
+func (u *UAC) outboundIP(destination string) (string, error) {
+	if !u.dynamicAdvertise {
+		ip := net.ParseIP(u.advertiseIP)
+		if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsLoopback() {
+			return "", fmt.Errorf("SIP 宣告地址不可用: %q", u.advertiseIP)
+		}
+		return ip.To4().String(), nil
+	}
+	if u.resolveLocalIP == nil {
+		return "", fmt.Errorf("SIP 本地路由解析器未配置")
+	}
+	ipText, err := u.resolveLocalIP(destination)
+	if err != nil {
+		return "", err
+	}
+	ip := net.ParseIP(ipText)
+	if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsLoopback() {
+		return "", fmt.Errorf("SIP 本地路由返回不可用 IPv4 地址: %q", ipText)
+	}
+	return ip.To4().String(), nil
+}
+
+func (u *UAC) prepareOutboundRequest(req *sip.Request, destination, transport string, includeContact bool) error {
+	req.SetDestination(destination)
+	req.SetTransport(normalizeTransport(transport))
+	localIP, err := u.outboundIP(destination)
+	if err != nil {
+		return err
+	}
+	params := sip.NewParams()
+	params.Add("branch", sip.GenerateBranchN(16))
+	req.AppendHeader(&sip.ViaHeader{
+		ProtocolName: "SIP", ProtocolVersion: "2.0", Transport: req.Transport(),
+		Host: localIP, Port: u.sipPort, Params: params,
+	})
+	if includeContact {
+		contact := platformContact(u.serverID, localIP, u.sipPort)
+		req.AppendHeader(&contact)
+	}
+	return nil
 }
 
 func platformContact(serverID, advertiseIP string, sipPort int) sip.ContactHeader {
@@ -216,8 +284,9 @@ func (u *UAC) buildTrackedMessageRequest(in TrackedMessageRequest) (*sip.Request
 	req.SetBody(in.Body)
 	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
 	req.AppendHeader(u.platformFromHeader())
-	req.SetDestination(in.Destination)
-	req.SetTransport(normalizeTransport(in.Transport))
+	if err := u.prepareOutboundRequest(req, in.Destination, in.Transport, false); err != nil {
+		return nil, TrackedMessageResult{}, err
+	}
 	callID := strings.TrimSpace(in.CallID)
 	if callID == "" {
 		callID = fmt.Sprintf("message-%d", time.Now().UnixNano())
@@ -305,8 +374,9 @@ func (u *UAC) buildSubscribeRequest(in SubscriptionRequest) (*sip.Request, error
 	}
 	req := sip.NewRequest(sip.SUBSCRIBE, u.deviceURI(in.DeviceID))
 	req.SetBody(in.Body)
-	req.SetDestination(in.Destination)
-	req.SetTransport(normalizeTransport(in.Transport))
+	if err := u.prepareOutboundRequest(req, in.Destination, in.Transport, false); err != nil {
+		return nil, err
+	}
 	req.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
 	req.AppendHeader(sip.NewHeader("Event", in.Event))
 	req.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(max(in.Expires, 0))))
@@ -452,15 +522,16 @@ func (m *SessionManager) remove(streamID string) {
 	m.mu.Unlock()
 }
 
-func (u *UAC) buildInviteRequest(s *Session, sdpBody string) *sip.Request {
+func (u *UAC) buildInviteRequest(s *Session, sdpBody string) (*sip.Request, error) {
 	req := sip.NewRequest(sip.INVITE, u.deviceURI(s.ChannelID))
 	req.SetBody([]byte(sdpBody))
 	req.AppendHeader(sip.NewHeader("Subject", fmt.Sprintf("%s:%s,%s:0", s.ChannelID, s.SSRC, u.serverID)))
 	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	req.AppendHeader(u.platformFromHeader())
-	req.SetDestination(s.Dest)
-	req.SetTransport(normalizeTransport(s.Transport))
-	return req
+	if err := u.prepareOutboundRequest(req, s.Dest, s.Transport, true); err != nil {
+		return nil, err
+	}
+	return req, nil
 }
 
 // Invite 发起点播:INVITE → 等应答 → ACK,会话建立
@@ -476,12 +547,17 @@ func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody
 	s.createdAt = time.Now()
 
 	// 自己构造 INVITE request,显式 SetDestination(避免 sipgo 默认按 URI 域名解析)
-	req := u.buildInviteRequest(s, sdpBody)
+	req, err := u.buildInviteRequest(s, sdpBody)
+	if err != nil {
+		s.State = StateIdle
+		return fmt.Errorf("构造 INVITE 失败: %w", err)
+	}
 
 	callID, cseq := u.extractKeyFromRequest(req)
 	u.recordBegin(metrics.TxInvite, callID, cseq, s.DeviceID)
 
-	dialog, err := u.dialogUA.WriteInvite(ctx, req)
+	dialogCache := sipgo.NewDialogClientCache(u.client, *req.Contact())
+	dialog, err := dialogCache.WriteInvite(ctx, req)
 	if err != nil {
 		s.State = StateIdle
 		u.recordEnd(callID, cseq, 0, false)

@@ -3,6 +3,7 @@ package controllers_test
 import (
 	"bytes"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -18,6 +19,16 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 )
+
+type qrInterfaceProvider struct{}
+
+func (qrInterfaceProvider) Interfaces() ([]net.Interface, error) {
+	return []net.Interface{{Index: 1, Name: "en0", Flags: net.FlagUp}}, nil
+}
+
+func (qrInterfaceProvider) Addrs(net.Interface) ([]net.Addr, error) {
+	return []net.Addr{&net.IPNet{IP: net.ParseIP("192.168.1.10"), Mask: net.CIDRMask(24, 32)}}, nil
+}
 
 // T2 — QRController HTTP 契约.
 // 前端(T5/T6)与模拟器(T7)都依赖这里定下的请求/响应形状.
@@ -60,7 +71,7 @@ func newQRRouter(t *testing.T, seedConfig bool, transport []string) (*gin.Engine
 	cache := cachehelper.NewMemoryHelper()
 	t.Cleanup(func() { _ = cache.Close() })
 
-	ctrl := gbcontrollers.NewConfiguredQRController(db, cache, transport)
+	ctrl := gbcontrollers.NewConfiguredQRController(db, cache, transport, qrInterfaceProvider{})
 
 	r := gin.New()
 	r.Use(gin.Recovery())

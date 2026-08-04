@@ -90,7 +90,7 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 		if traceRuntime != nil {
 			// 采集拿到的 LocalAddr 是 [::]:port 通配符,注入平台实际 AdvertiseIP:Port
 			// 让 Source/Destination 显示真实端点
-			if setter, ok := traceRuntime.(interface{ SetPlatformAddr(string) }); ok && cfg.SIP.AdvertiseIP != "" && cfg.SIP.Port > 0 {
+			if setter, ok := traceRuntime.(interface{ SetPlatformAddr(string) }); ok && !cfg.SIP.DynamicAdvertise && cfg.SIP.AdvertiseIP != "" && cfg.SIP.Port > 0 {
 				setter.SetPlatformAddr(fmt.Sprintf("%s:%d", cfg.SIP.AdvertiseIP, cfg.SIP.Port))
 			}
 			uaOptions = append(uaOptions, sipgo.WithUserAgentTransportLayerOptions(
@@ -124,7 +124,7 @@ func (s *Server) registerHandlers() {
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
 	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
-	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port); err != nil {
+	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port, s.cfg.SIP.DynamicAdvertise); err != nil {
 		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
 	} else {
 		s.uac = u

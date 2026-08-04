@@ -164,6 +164,31 @@ func TestEnumerateNetworkAddressesReturnsWildcardWhenAddressLookupFails(t *testi
 	}}, got)
 }
 
+func TestActiveSIPAddressesWildcardLANIgnoresStaleAdvertiseIP(t *testing.T) {
+	provider := fakeInterfaceProvider{
+		interfaces: []net.Interface{
+			{Index: 1, Name: "en0", Flags: net.FlagUp},
+			{Index: 2, Name: "utun4", Flags: net.FlagUp},
+			{Index: 3, Name: "lo0", Flags: net.FlagUp | net.FlagLoopback},
+		},
+		addresses: map[int][]net.Addr{
+			1: {mustCIDR(t, "192.168.126.126/24")},
+			2: {mustCIDR(t, "10.8.0.3/32")},
+			3: {mustCIDR(t, "127.0.0.1/8")},
+		},
+	}
+	config := SIPConfigView{
+		DeploymentMode: DeploymentLAN,
+		ListenIP:       wildcardIPv4,
+		AdvertiseIP:    "192.168.10.106",
+	}
+
+	addresses, err := ActiveSIPAddresses(config, provider)
+
+	require.NoError(t, err)
+	assert.Equal(t, []string{"192.168.126.126", "10.8.0.3"}, addresses)
+}
+
 func mustCIDR(t *testing.T, cidr string) *net.IPNet {
 	t.Helper()
 	ip, network, err := net.ParseCIDR(cidr)

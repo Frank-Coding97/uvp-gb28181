@@ -82,7 +82,7 @@ func (t *fakePlaybackTransport) WriteInvite(_ context.Context, req *sip.Request)
 
 func newPlaybackTestUAC(dialog *fakePlaybackDialog) (*UAC, *fakePlaybackTransport) {
 	transport := &fakePlaybackTransport{dialog: dialog}
-	u := &UAC{serverID: "34020000002000000001", domain: "3402000000"}
+	u := &UAC{serverID: "34020000002000000001", domain: "3402000000", sipPort: 5061, advertiseIP: "192.0.2.1"}
 	u.playbackDialogs = NewPlaybackDialogStore(transport)
 	return u, transport
 }
@@ -131,9 +131,6 @@ func TestInvitePlaybackStoresIndependentDialogMetadataAndACKs(t *testing.T) {
 	}
 	if dialog.ackCalls != 1 {
 		t.Fatalf("ackCalls=%d", dialog.ackCalls)
-	}
-	if u.dialogUA != nil {
-		t.Fatal("playback must not populate live dialog cache")
 	}
 }
 

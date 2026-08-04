@@ -7,9 +7,25 @@ import (
 )
 
 func TestValidateSIPConfigRequest_ValidLANWildcard(t *testing.T) {
-	password := "Sec12345Aa!!"
-	err := ValidateSIPConfigRequest(validSaveRequest(&password), false)
-	require.NoError(t, err)
+    password := "Sec12345Aa!!"
+    request := validSaveRequest(&password)
+    request.AdvertiseIP = ""
+    err := ValidateSIPConfigRequest(request, false)
+    require.NoError(t, err)
+}
+
+func TestValidateSIPConfigRequest_EmptyAdvertiseOnlyAllowedForLANWildcard(t *testing.T) {
+    password := "Sec12345Aa!!"
+
+    concreteLAN := validSaveRequest(&password)
+    concreteLAN.ListenIP = "192.168.1.10"
+    concreteLAN.AdvertiseIP = ""
+    require.Error(t, ValidateSIPConfigRequest(concreteLAN, false))
+
+    public := validSaveRequest(&password)
+    public.DeploymentMode = DeploymentPublic
+    public.AdvertiseIP = ""
+    require.Error(t, ValidateSIPConfigRequest(public, false))
 }
 
 func TestValidateSIPConfigRequest_FieldErrors(t *testing.T) {

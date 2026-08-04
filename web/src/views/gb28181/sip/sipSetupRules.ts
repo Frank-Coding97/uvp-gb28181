@@ -10,38 +10,42 @@ export function deriveNetworkSelection(
     mode: SipDeploymentMode,
     listenIp: string,
     advertiseIp: string,
-    items: SipNetworkAddress[]
+    _items: SipNetworkAddress[]
 ): { listenIp: string; advertiseIp: string; advertiseIpInferred: boolean } {
     if (mode === "public") return { listenIp, advertiseIp, advertiseIpInferred: false };
     if (listenIp !== "0.0.0.0") return { listenIp, advertiseIp: listenIp, advertiseIpInferred: false };
-    if (isConcreteIPv4(advertiseIp)) return { listenIp, advertiseIp, advertiseIpInferred: false };
-    const recommended = items.find(item => item.recommended && isConcreteIPv4(item.ip));
-    return {
-        listenIp,
-        advertiseIp: recommended?.ip || "",
-        advertiseIpInferred: Boolean(recommended)
-    };
+    return { listenIp, advertiseIp: "", advertiseIpInferred: false };
 }
 
 export function networkCanContinue(mode: SipDeploymentMode | "", listenIp: string, advertiseIp: string): boolean {
     if (!mode) return false;
     const listenValid = listenIp === "0.0.0.0" || isConcreteIPv4(listenIp);
-    return listenValid && isConcreteIPv4(advertiseIp);
+    if (!listenValid) return false;
+    if (mode === "lan") return true;
+    return isConcreteIPv4(advertiseIp);
 }
 
-export function networkOptions(items: SipNetworkAddress[], currentIp: string): Array<SipNetworkAddress & { unavailable?: boolean }> {
-    if (!currentIp || items.some(item => item.ip === currentIp)) return items;
-    return [{
-        ip: currentIp,
-        interfaceName: "当前配置（不可用）",
-        cidr: "",
-        loopback: false,
-        virtual: false,
-        recommended: false,
-        more: true,
-        listenOnly: false,
-        unavailable: true
-    }, ...items];
+export function networkOptions(items: SipNetworkAddress[], _currentIp: string): Array<SipNetworkAddress & { unavailable?: boolean }> {
+    return items;
+}
+
+export function activeSipAddresses(
+    mode: SipDeploymentMode | "",
+    listenIp: string,
+    advertiseIp: string,
+    items: SipNetworkAddress[]
+): string[] {
+    if (mode === "public") return isConcreteIPv4(advertiseIp) ? [advertiseIp] : [];
+    if (listenIp !== "0.0.0.0") return isConcreteIPv4(listenIp) ? [listenIp] : [];
+
+    const addresses: string[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+        if (item.loopback || item.listenOnly || !isConcreteIPv4(item.ip) || seen.has(item.ip)) continue;
+        seen.add(item.ip);
+        addresses.push(item.ip);
+    }
+    return addresses;
 }
 
 export function deriveDomain(serverId: string): string {

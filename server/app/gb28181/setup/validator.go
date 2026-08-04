@@ -24,7 +24,8 @@ func ValidateSIPConfigRequest(req SaveSIPConfigRequest, hasExistingPassword bool
 	if !validIPv4(req.ListenIP, true) {
 		fields["listenIp"] = "must be a valid IPv4 address"
 	}
-	if !validIPv4(req.AdvertiseIP, false) {
+	allowDynamicAdvertise := req.DeploymentMode == DeploymentLAN && req.ListenIP == wildcardIPv4 && req.AdvertiseIP == ""
+	if !allowDynamicAdvertise && !validIPv4(req.AdvertiseIP, false) {
 		fields["advertiseIp"] = "must be a concrete non-loopback IPv4 address"
 	}
 	if req.Port < 1 || req.Port > 65535 {

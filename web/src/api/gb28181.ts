@@ -607,6 +607,7 @@ export interface SipPlatformInfo {
   serverId: string;
   domain: string;
   sipIp: string;
+  sipIps: string[];
   sipPort: number;
   transport: string[];
   passwordMasked: string;

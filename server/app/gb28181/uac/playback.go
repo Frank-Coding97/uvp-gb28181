@@ -69,11 +69,16 @@ type playbackDialogTransport interface {
 }
 
 type sipgoPlaybackDialogTransport struct {
-	cache *sipgo.DialogClientCache
+	client *sipgo.Client
 }
 
 func (t *sipgoPlaybackDialogTransport) WriteInvite(ctx context.Context, req *sip.Request) (playbackDialog, error) {
-	dialog, err := t.cache.WriteInvite(ctx, req)
+	contact := req.Contact()
+	if contact == nil {
+		return nil, fmt.Errorf("PLAYBACK INVITE 缺少 Contact")
+	}
+	cache := sipgo.NewDialogClientCache(t.client, *contact)
+	dialog, err := cache.WriteInvite(ctx, req)
 	if err != nil {
 		return nil, err
 	}
@@ -182,8 +187,9 @@ func (u *UAC) buildPlaybackInviteRequest(in PlaybackInviteRequest) (*sip.Request
 	req.AppendHeader(sip.NewHeader("Subject", fmt.Sprintf("%s:%s,%s:0", in.ChannelID, in.SSRC, u.serverID)))
 	req.AppendHeader(sip.NewHeader("Content-Type", "application/sdp"))
 	req.AppendHeader(u.platformFromHeader())
-	req.SetDestination(in.Destination)
-	req.SetTransport(normalizeTransport(in.Transport))
+	if err := u.prepareOutboundRequest(req, in.Destination, in.Transport, true); err != nil {
+		return nil, PlaybackDialogMetadata{}, err
+	}
 
 	cseqText := u.nextCSeq()
 	cseq, err := strconv.ParseUint(cseqText, 10, 32)

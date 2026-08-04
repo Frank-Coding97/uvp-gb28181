@@ -13,6 +13,7 @@ import SipSetupModal from "@/layout/components/SipSetupModal.vue";
 import QrProvisionModal from "./QrProvisionModal.vue";
 import { mayEditSipConfig, runtimeColor, runtimeLabel } from "./platformViewState";
 import { mayGenerateQr } from "./qrProvisionState";
+import { activeSipAddresses } from "./sipSetupRules";
 
 const loading = ref(false);
 const wizardVisible = ref(false);
@@ -32,12 +33,11 @@ const deploymentLabel = computed(() =>
     config.value?.deploymentMode === "public" ? "公网部署" : "局域网部署"
 );
 
-const serverAddress = computed(() => {
+const serverAddresses = computed(() => {
     const c = config.value;
-    if (!c) return "";
-    if (c.deploymentMode === "public") return c.advertiseIp;
-    if (c.listenIp !== "0.0.0.0") return c.listenIp;
-    return c.advertiseIp || c.listenIp;
+    if (!c) return [];
+    if (c.deploymentMode === "lan" && c.listenIp === "0.0.0.0") return platform.value?.sipIps || [];
+    return activeSipAddresses(c.deploymentMode, c.listenIp, c.advertiseIp, []);
 });
 
 // 前 3 个字段走通用循环渲染;密码字段因为需要眼睛切换 + 遮罩显示,单独在模板里处理.
@@ -45,7 +45,11 @@ const infoFields = computed(() => {
     const c = config.value;
     if (!c) return [];
     return [
-        { key: "server", label: "SIP 服务器地址", value: serverAddress.value },
+        ...(serverAddresses.value.length ? serverAddresses.value : [""]).map((value, index) => ({
+            key: `server-${index}`,
+            label: index === 0 ? "SIP 服务器地址" : "",
+            value
+        })),
         { key: "port", label: "SIP 端口", value: String(c.port) },
         { key: "serverId", label: "平台 ID", value: c.serverId }
     ];
@@ -64,7 +68,10 @@ const setupSteps = computed(() => [
         title: "填写服务器信息",
         desc: '在设备 "SIP 服务器 / 平台设置" 里填入平台的服务器地址和端口。',
         highlights: [
-            { label: "SIP 服务器地址", value: serverAddress.value },
+            ...serverAddresses.value.map((value, index) => ({
+                label: index === 0 ? "SIP 服务器地址" : "可用地址",
+                value
+            })),
             { label: "SIP 端口", value: config.value ? String(config.value.port) : "" }
         ]
     },
@@ -88,7 +95,10 @@ const setupSteps = computed(() => [
 async function refresh() {
     loading.value = true;
     try {
-        const [statusResponse, platformResponse] = await Promise.all([fetchSipSetupStatus(), fetchSipPlatformInfo()]);
+        const [statusResponse, platformResponse] = await Promise.all([
+            fetchSipSetupStatus(),
+            fetchSipPlatformInfo()
+        ]);
         if (statusResponse.code !== 0) throw new Error(statusResponse.message || "加载失败");
         status.value = statusResponse.data;
         if (platformResponse.code === 0) platform.value = platformResponse.data;
@@ -116,7 +126,9 @@ async function copyAll() {
     if (!config.value) return;
     const c = config.value;
     const text = [
-        `SIP 服务器地址: ${serverAddress.value}`,
+        ...(serverAddresses.value.length
+            ? serverAddresses.value.map(value => `SIP 服务器地址: ${value}`)
+            : ["SIP 服务器地址: (当前无可用地址)"]),
         `SIP 端口: ${c.port}`,
         `平台 ID: ${c.serverId}`,
         `SIP 域: ${c.domain}`,
@@ -314,7 +326,7 @@ onMounted(refresh);
                                             >
                                                 <div
                                                     v-for="hi in step.highlights"
-                                                    :key="hi.label"
+                                                    :key="`${hi.label}-${hi.value}`"
                                                     class="guide-step__highlight"
                                                 >
                                                     <span class="guide-step__hl-label">{{ hi.label }}</span>

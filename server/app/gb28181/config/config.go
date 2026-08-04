@@ -132,14 +132,15 @@ type RecordingConfig struct {
 
 // SIPConfig SIP 服务配置
 type SIPConfig struct {
-	ListenIP    string
-	AdvertiseIP string
-	Port        int
-	Transport   []string // 信令传输: udp / tcp
-	Domain      string   // SIP 域(前 10 位行政区划)
-	ServerID    string   // 平台国标编码(20 位)
-	Password    string   // 统一接入密码
-	XGBVersion  string   // 平台 REGISTER 响应声明的 X-GB-Ver,为空时默认 3.0
+	ListenIP         string
+	AdvertiseIP      string
+	DynamicAdvertise bool
+	Port             int
+	Transport        []string // 信令传输: udp / tcp
+	Domain           string   // SIP 域(前 10 位行政区划)
+	ServerID         string   // 平台国标编码(20 位)
+	Password         string   // 统一接入密码
+	XGBVersion       string   // 平台 REGISTER 响应声明的 X-GB-Ver,为空时默认 3.0
 }
 
 // DeviceConfig 设备相关配置

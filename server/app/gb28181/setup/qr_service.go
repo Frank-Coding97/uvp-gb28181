@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -62,10 +63,11 @@ type QRPayload struct {
 //     持有二维码截图的人与合法扫码者并发抢兑成功.
 //   - 兑换路径不碰数据库,快照自足.
 type QRService struct {
-	cache       app.CacheInterf
-	config      *SIPConfigService
-	transportFn func() []string
-	ttl         time.Duration
+	cache           app.CacheInterf
+	config          *SIPConfigService
+	transportFn     func() []string
+	networkProvider InterfaceProvider
+	ttl             time.Duration
 }
 
 // NewQRService 构造 QRService.
@@ -78,6 +80,10 @@ func NewQRService(cache app.CacheInterf, config *SIPConfigService, transportFn f
 		transportFn: transportFn,
 		ttl:         qrTokenTTL,
 	}
+}
+
+func (s *QRService) SetNetworkProvider(provider InterfaceProvider) {
+	s.networkProvider = provider
 }
 
 // GenerateToken 生成一次性接入 token,并把当前 SIP 六元组快照写入缓存.
@@ -93,11 +99,15 @@ func (s *QRService) GenerateToken(ctx context.Context) (string, int, error) {
 	if view == nil {
 		return "", 0, ErrSIPNotConfigured
 	}
+	addresses, err := ActiveSIPAddresses(*view, s.networkProvider)
+	if err != nil || len(addresses) == 0 {
+		return "", 0, fmt.Errorf("%w: %v", ErrSIPNotConfigured, err)
+	}
 
 	payload := QRPayload{
 		ServerID:  view.ServerID,
 		Domain:    view.Domain,
-		IP:        view.AdvertiseIP,
+		IP:        addresses[0],
 		Port:      view.Port,
 		Transport: s.firstTransport(),
 		Password:  view.Password,

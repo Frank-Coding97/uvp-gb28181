@@ -45,7 +45,7 @@ describe("useSipSetup", () => {
         expect(setup.hasExistingPassword.value).toBe(true);
     });
 
-    it("builds LAN payload and omits an empty retained password", async () => {
+    it("clears a stale advertise address for wildcard LAN and omits an empty retained password", async () => {
         const api = fakeApi();
         const setup = useSipSetup(api);
         await setup.loadStatus();
@@ -56,7 +56,8 @@ describe("useSipSetup", () => {
         expect(api.save).toHaveBeenCalledWith(expect.objectContaining({
             deploymentMode: "lan",
             listenIp: "0.0.0.0",
-            advertiseIp: "192.168.1.20"
+            advertiseIp: "",
+            advertiseIpInferred: false
         }));
         expect(api.save).toHaveBeenCalledWith(expect.not.objectContaining({ password: expect.anything() }));
     });

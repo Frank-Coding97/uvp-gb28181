@@ -45,14 +45,16 @@ func NewQRController() *QRController {
 
 // NewConfiguredQRController 装配 QRController.
 // cache 由 bootstrap 传入(app.Cache)而非在此直接读全局变量 —— 便于测试注入内存实现.
-func NewConfiguredQRController(db *gorm.DB, cache app.CacheInterf, transport []string) *QRController {
-	return &QRController{
-		svc: gbsetup.NewQRService(
-			cache,
-			gbsetup.NewSIPConfigService(db),
-			func() []string { return transport },
-		),
+func NewConfiguredQRController(db *gorm.DB, cache app.CacheInterf, transport []string, providers ...gbsetup.InterfaceProvider) *QRController {
+	service := gbsetup.NewQRService(
+		cache,
+		gbsetup.NewSIPConfigService(db),
+		func() []string { return transport },
+	)
+	if len(providers) > 0 {
+		service.SetNetworkProvider(providers[0])
 	}
+	return &QRController{svc: service}
 }
 
 // GenerateToken POST /api/gb28181/sip/qr/token

@@ -4,6 +4,7 @@ import { Message } from "@arco-design/web-vue";
 import { Check, Copy, Rocket, Server } from "lucide-vue-next";
 import type { SipNetworkInterfaces } from "@/api/gb28181";
 import type { SipSetupForm } from "../useSipSetup";
+import { activeSipAddresses } from "../sipSetupRules";
 
 const props = defineProps<{
     form: SipSetupForm;
@@ -15,22 +16,12 @@ const copiedKey = ref<string>("");
 
 const deploymentLabel = computed(() => props.form.deploymentMode === "public" ? "公网部署" : "局域网部署");
 
-// SIP 服务器地址:
-// - 公网 → advertiseIp
-// - 局域网 + 具体网卡 → listenIp
-// - 局域网 + 0.0.0.0 → 所有可接入网卡 IP,逗号分隔(advertiseIp 打头)
-const serverAddress = computed(() => {
-    if (props.form.deploymentMode === "public") return props.form.advertiseIp;
-    if (props.form.listenIp !== "0.0.0.0") return props.form.listenIp;
-    const usable = (props.network?.items || [])
-        .filter(item => !item.loopback && !item.listenOnly)
-        .map(item => item.ip);
-    if (props.form.advertiseIp) {
-        const rest = usable.filter(ip => ip !== props.form.advertiseIp);
-        return [props.form.advertiseIp, ...rest].join(", ");
-    }
-    return usable.join(", ");
-});
+const serverAddresses = computed(() => activeSipAddresses(
+    props.form.deploymentMode,
+    props.form.listenIp,
+    props.form.advertiseIp,
+    props.network?.items || []
+));
 
 const passwordDisplay = computed(() => {
     if (props.form.password) return props.form.password;
@@ -52,7 +43,11 @@ async function copyValue(key: string, value: string) {
 }
 
 const fields = computed(() => [
-    { key: "server", label: "SIP 服务器地址", value: serverAddress.value },
+    ...(serverAddresses.value.length ? serverAddresses.value : [""]).map((value, index) => ({
+        key: `server-${index}`,
+        label: index === 0 ? "SIP 服务器地址" : "",
+        value
+    })),
     { key: "port", label: "SIP 端口", value: String(props.form.port) },
     { key: "serverId", label: "平台 ID", value: props.form.serverId },
     { key: "password", label: "SIP 密码", value: passwordDisplay.value }

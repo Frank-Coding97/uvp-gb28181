@@ -3,6 +3,7 @@ package setup
 import (
 	"context"
 	"encoding/base64"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +47,12 @@ func newQRService(t *testing.T, db *gorm.DB, transport []string) *QRService {
 	t.Helper()
 	cache := cachehelper.NewMemoryHelper()
 	t.Cleanup(func() { _ = cache.Close() })
-	return NewQRService(cache, NewSIPConfigService(db), func() []string { return transport })
+	service := NewQRService(cache, NewSIPConfigService(db), func() []string { return transport })
+	service.networkProvider = fakeInterfaceProvider{
+		interfaces: []net.Interface{{Index: 1, Name: "en0", Flags: net.FlagUp}},
+		addresses:  map[int][]net.Addr{1: {mustCIDR(t, "192.168.1.10/24")}},
+	}
+	return service
 }
 
 // 1.1 token 长度与字符集
