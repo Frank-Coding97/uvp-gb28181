@@ -20,6 +20,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play/reconciler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
@@ -108,6 +109,7 @@ type sipRuntimeServer interface {
 	SetRecorder(metrics.Recorder)
 	SetErrorHandler(func(error))
 	SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)
+	SetRecordInfoSink(gbhandler.RecordInfoSink)
 	SetPTZNotifyProcessor(gbhandler.PTZNotifyProcessor)
 	SetSubscriptionWaker(gbhandler.SubscriptionWaker)
 	SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)
@@ -133,6 +135,7 @@ var subscriptionService *subscribe.Service
 var subscriptionScheduler *subscribe.Scheduler
 var ptzService *ptz.Service
 var ptzScheduler ptzSchedulerLifecycle
+var recordQueryService *recordquery.Service
 var positionHistoryPruneCancel context.CancelFunc
 
 type ptzSchedulerLifecycle interface {
@@ -363,8 +366,27 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	var newPTZService *ptz.Service
 	var newPTZScheduler ptzSchedulerLifecycle
 	if u := srv.UAC(); u != nil {
+		newRecordQueryService, queryErr := recordquery.NewService(u, recordquery.Options{
+			Timeout:            cfg.RecordQuery.Timeout(),
+			MaxActiveQueries:   cfg.RecordQuery.MaxActiveQueries,
+			MaxRecordsPerQuery: cfg.RecordQuery.MaxRecordsPerQuery,
+			ResultTTL:          cfg.RecordQuery.ResultTTL(),
+			Location:           cfg.RecordQuery.Location,
+		})
+		if queryErr != nil {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = srv.Shutdown(shutdownCtx)
+			cancel()
+			sipRuntimeStatus.MarkFailed(queryErr.Error())
+			return fmt.Errorf("装配设备录像查询 service 失败: %w", queryErr)
+		}
+		recordQueryService = newRecordQueryService
+		srv.SetRecordInfoSink(newRecordQueryService)
 		newPTZService, err = ptz.NewService(app.DB(), u, time.Now)
 		if err != nil {
+			newRecordQueryService.Close()
+			recordQueryService = nil
+			srv.SetRecordInfoSink(nil)
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = srv.Shutdown(shutdownCtx)
 			cancel()
@@ -470,6 +492,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) {
+	stopRecordQueryRuntime()
 	stopPTZRuntime()
 	stopTalkRuntime(ctx)
 	stopRecordingRuntime()
@@ -500,6 +523,16 @@ func stopSIPDependencies(ctx context.Context) {
 		}
 		sipServer = nil
 	}
+}
+
+func stopRecordQueryRuntime() {
+	if recordQueryService != nil {
+		recordQueryService.Close()
+	}
+	if sipServer != nil {
+		sipServer.SetRecordInfoSink(nil)
+	}
+	recordQueryService = nil
 }
 
 func stopPTZRuntime() {

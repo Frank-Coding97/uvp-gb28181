@@ -173,6 +173,16 @@ func (s *Service) OnRecordInfo(_ context.Context, senderDeviceCode string, respo
 	return nil
 }
 
+// OnRecordInfoMessage parses the acknowledged SIP MESSAGE outside the handler
+// and then hands the typed response to the correlation registry.
+func (s *Service) OnRecordInfoMessage(ctx context.Context, senderDeviceCode string, body []byte) error {
+	response, err := manscdp.ParseRecordInfoResponse(body)
+	if err != nil {
+		return err
+	}
+	return s.OnRecordInfo(ctx, senderDeviceCode, response)
+}
+
 func (s *Service) Active() int {
 	if s == nil {
 		return 0

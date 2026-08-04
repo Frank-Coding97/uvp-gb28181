@@ -199,6 +199,12 @@ func (s *Server) SetPTZMessageProcessor(processor handler.PTZMessageProcessor) {
 	}
 }
 
+func (s *Server) SetRecordInfoSink(sink handler.RecordInfoSink) {
+	if s.msgH != nil {
+		s.msgH.SetRecordInfoSink(sink)
+	}
+}
+
 func (s *Server) SetPTZNotifyProcessor(processor handler.PTZNotifyProcessor) {
 	if s.notifyH != nil {
 		s.notifyH.SetPTZProcessor(processor)

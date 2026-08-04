@@ -4,26 +4,37 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
 
 type fakeSIPRuntimeServer struct {
-	startErr error
-	onError  func(error)
-	started  bool
-	events   *[]string
+	startErr                error
+	onError                 func(error)
+	started                 bool
+	events                  *[]string
+	activeAtRecordSinkClear *int
 }
 
-func (f *fakeSIPRuntimeServer) SetRecorder(metrics.Recorder)                             {}
-func (f *fakeSIPRuntimeServer) SetErrorHandler(fn func(error))                           { f.onError = fn }
-func (f *fakeSIPRuntimeServer) SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)     {}
+func (f *fakeSIPRuntimeServer) SetRecorder(metrics.Recorder)                         {}
+func (f *fakeSIPRuntimeServer) SetErrorHandler(fn func(error))                       { f.onError = fn }
+func (f *fakeSIPRuntimeServer) SetPTZMessageProcessor(gbhandler.PTZMessageProcessor) {}
+func (f *fakeSIPRuntimeServer) SetRecordInfoSink(sink gbhandler.RecordInfoSink) {
+	if sink == nil && f.events != nil {
+		if f.activeAtRecordSinkClear != nil && recordQueryService != nil {
+			*f.activeAtRecordSinkClear = recordQueryService.Active()
+		}
+		*f.events = append(*f.events, "record.sink.clear")
+	}
+}
 func (f *fakeSIPRuntimeServer) SetPTZNotifyProcessor(gbhandler.PTZNotifyProcessor)       {}
 func (f *fakeSIPRuntimeServer) SetSubscriptionWaker(gbhandler.SubscriptionWaker)         {}
 func (f *fakeSIPRuntimeServer) SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)   {}
@@ -93,8 +104,37 @@ func TestPTZServiceReloadStopsSchedulerBeforeSIP(t *testing.T) {
 	ptzService = nil
 	stopSIPDependencies(context.Background())
 
-	require.Equal(t, []string{"scheduler.stop", "sip.shutdown"}, events)
+	require.Equal(t, []string{"record.sink.clear", "scheduler.stop", "sip.shutdown"}, events)
 	require.Nil(t, ptzScheduler)
 	require.Nil(t, ptzService)
+	require.Nil(t, sipServer)
+}
+
+type recordQueryRuntimeSender struct{}
+
+func (recordQueryRuntimeSender) SendMessageTracked(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error) {
+	return uac.TrackedMessageResult{StatusCode: 200}, nil
+}
+
+func TestRecordQueryReloadClosesRegistryBeforeSinkAndSIP(t *testing.T) {
+	events := []string{}
+	activeAtSinkClear := -1
+	previousServer, previousQueryService := sipServer, recordQueryService
+	defer func() {
+		sipServer, recordQueryService = previousServer, previousQueryService
+	}()
+
+	service, err := recordquery.NewService(recordQueryRuntimeSender{}, recordquery.Options{
+		Timeout: time.Second, MaxActiveQueries: 2, MaxRecordsPerQuery: 10,
+		ResultTTL: time.Minute, Location: time.UTC,
+	})
+	require.NoError(t, err)
+	recordQueryService = service
+	sipServer = &fakeSIPRuntimeServer{events: &events, activeAtRecordSinkClear: &activeAtSinkClear}
+	stopSIPDependencies(context.Background())
+
+	require.Equal(t, 0, activeAtSinkClear)
+	require.Equal(t, []string{"record.sink.clear", "sip.shutdown"}, events)
+	require.Nil(t, recordQueryService)
 	require.Nil(t, sipServer)
 }

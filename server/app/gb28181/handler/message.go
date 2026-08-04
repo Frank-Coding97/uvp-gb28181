@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/emiago/sipgo/sip"
@@ -22,6 +23,8 @@ type MessageHandler struct {
 	subscriptionWaker SubscriptionWaker
 	alarmProcessor    AlarmMessageProcessor
 	ptzProcessor      PTZMessageProcessor
+	recordInfoMu      sync.RWMutex
+	recordInfoSink    RecordInfoSink
 }
 
 type AlarmMessageProcessor interface {
@@ -30,6 +33,12 @@ type AlarmMessageProcessor interface {
 
 type PTZMessageProcessor interface {
 	OnPTZMessage(context.Context, string, string, string, []byte) error
+}
+
+// RecordInfoSink receives the original payload after the SIP transaction has
+// already been acknowledged. Implementations must keep their own work bounded.
+type RecordInfoSink interface {
+	OnRecordInfoMessage(context.Context, string, []byte) error
 }
 
 // NewMessageHandler 创建消息处理器
@@ -60,6 +69,18 @@ func (h *MessageHandler) SetPTZProcessor(processor PTZMessageProcessor) {
 	h.ptzProcessor = processor
 }
 
+func (h *MessageHandler) SetRecordInfoSink(sink RecordInfoSink) {
+	h.recordInfoMu.Lock()
+	h.recordInfoSink = sink
+	h.recordInfoMu.Unlock()
+}
+
+func (h *MessageHandler) getRecordInfoSink() RecordInfoSink {
+	h.recordInfoMu.RLock()
+	defer h.recordInfoMu.RUnlock()
+	return h.recordInfoSink
+}
+
 // txKindFromCmd 根据 MANSCDP CmdType 映射 metrics 事务类型
 func txKindFromCmd(cmd string) metrics.TxKind {
 	switch cmd {
@@ -67,6 +88,8 @@ func txKindFromCmd(cmd string) metrics.TxKind {
 		return metrics.TxKeepalive
 	case manscdp.CmdCatalog:
 		return metrics.TxCatalog
+	case manscdp.CmdRecordInfo:
+		return metrics.TxRecord
 	case manscdp.CmdDeviceControl:
 		return metrics.TxPTZ
 	case manscdp.CmdDeviceStatus, manscdp.CmdPTZPreciseCtrl, manscdp.CmdPTZPosition, manscdp.CmdPresetQuery, manscdp.CmdHomePositionQuery, manscdp.CmdCruiseTrackListQuery, manscdp.CmdCruiseTrackQuery, manscdp.CmdPTZPreciseStatusQuery:
@@ -105,6 +128,23 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 
 	if head.DeviceID != "" {
 		ctx := context.Background()
+		if head.CmdType == manscdp.CmdRecordInfo {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+				h.recorder.End(callID, cseq, 200, true)
+			}
+			sink := h.getRecordInfoSink()
+			if sink == nil {
+				app.ZapLog.Warn("GB28181 RecordInfo sink 未装配,忽略响应",
+					zap.String("senderDeviceCode", ptzDeviceCode(req, "")))
+				return
+			}
+			if err := sink.OnRecordInfoMessage(ctx, ptzDeviceCode(req, ""), req.Body()); err != nil {
+				app.ZapLog.Warn("GB28181 RecordInfo 响应处理失败",
+					zap.String("senderDeviceCode", ptzDeviceCode(req, "")), zap.Error(err))
+			}
+			return
+		}
 		switch head.CmdType {
 		case manscdp.CmdKeepalive:
 			restored, err := device.Keepalive(ctx, head.DeviceID)
