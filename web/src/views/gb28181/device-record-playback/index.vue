@@ -466,7 +466,7 @@ onUnmounted(() => {
 <style scoped>
 .record-playback-page { height: 100%; min-height: 0; color: var(--uvp-text-primary); overflow: hidden; }
 .playback-workspace { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 0; overflow: hidden; }
-.query-bar { display: flex; flex: none; align-items: center; gap: 14px; min-height: 72px; margin: 0 12px 10px; padding: 10px 16px; background: var(--uvp-search-panel-bg); border: 1px solid var(--uvp-list-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-search-panel-shadow); }
+.query-bar { display: flex; flex: none; align-items: center; gap: 14px; min-height: 72px; margin: 0 8px 10px; padding: 10px 16px; background: var(--uvp-search-panel-bg); border: 1px solid var(--uvp-list-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-search-panel-shadow); }
 .icon-command, .control-icon, .segment-header button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; color: var(--uvp-text-secondary); background: var(--uvp-search-secondary-btn-bg); border: 1px solid var(--uvp-search-secondary-btn-border); border-radius: 6px; cursor: pointer; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease; }
 .icon-command:hover, .control-icon:hover, .segment-header button:hover { color: var(--uvp-brand); background: var(--uvp-search-secondary-btn-hover-bg); border-color: var(--uvp-brand); }
 .channel-context { display: flex; align-items: center; gap: 9px; min-width: 260px; padding-right: 14px; border-right: 1px solid var(--uvp-panel-border); }
@@ -489,7 +489,7 @@ onUnmounted(() => {
 .query-submit { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; color: #fff; font-size: 12px; font-weight: 600; background: var(--uvp-brand); border: 0; border-radius: 6px; cursor: pointer; transition: background-color 180ms ease; }
 .query-submit:hover { background: var(--uvp-brand-strong); }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .55; }
-.playback-main { display: grid; grid-template-columns: minmax(0, 1fr) 312px; flex: 1; min-height: 0; margin: 0 12px; padding: 12px; background: var(--uvp-shell-muted); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); overflow: hidden; }
+.playback-main { display: grid; grid-template-columns: minmax(0, 1fr) 312px; flex: 1; min-height: 0; margin: 0 8px; padding: 12px; background: var(--uvp-shell-muted); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); overflow: hidden; }
 .player-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .playback-viewport { position: relative; flex: 1; min-height: clamp(220px, 30vh, 340px); overflow: hidden; color: #e8eef5; background: #000; }
 .playback-idle-cover { position: absolute; inset: 0; display: grid; place-items: center; color: #89939d; background: #000; }
@@ -534,7 +534,7 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .segment-download { position: absolute; z-index: 2; top: 23px; right: 8px; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 1px solid transparent; border-radius: 5px; cursor: pointer; transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }.segment-download:hover, .segment-download:focus-visible, .segment-row.selected .segment-download { color: var(--uvp-brand); background: var(--uvp-search-secondary-btn-bg); border-color: var(--uvp-search-secondary-btn-border); outline: none; }
 .segment-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--uvp-text-tertiary); text-align: center; }.segment-empty strong { font-size: 12px; }.segment-empty span { font-size: 11px; }
 .segment-footer { display: flex; justify-content: space-between; padding: 8px 11px; color: var(--uvp-text-tertiary); font-size: 10px; background: var(--uvp-list-toolbar-bg); border-top: 1px solid var(--uvp-list-panel-border); }
-.timeline-panel { flex: none; margin: 10px 12px 12px; border-radius: var(--uvp-panel-radius); overflow: hidden; }
+.timeline-panel { flex: none; margin: 10px 8px 12px; border-radius: var(--uvp-panel-radius); overflow: hidden; }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1180px) {

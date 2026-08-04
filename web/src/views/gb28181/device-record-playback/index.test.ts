@@ -75,9 +75,10 @@ describe("device record playback workspace", () => {
     });
 
     it("aligns and rounds the query, playback, and timeline regions", () => {
-        expect(playbackPageSource).toContain(".playback-main { display: grid; grid-template-columns: minmax(0, 1fr) 312px; flex: 1; min-height: 0; margin: 0 12px;");
+        expect(playbackPageSource).toContain("min-height: 72px; margin: 0 8px 10px;");
+        expect(playbackPageSource).toContain(".playback-main { display: grid; grid-template-columns: minmax(0, 1fr) 312px; flex: 1; min-height: 0; margin: 0 8px;");
         expect(playbackPageSource).toContain("background: var(--uvp-shell-muted); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); overflow: hidden; }");
-        expect(playbackPageSource).toContain(".timeline-panel { flex: none; margin: 10px 12px 12px; border-radius: var(--uvp-panel-radius); overflow: hidden; }");
+        expect(playbackPageSource).toContain(".timeline-panel { flex: none; margin: 10px 8px 12px; border-radius: var(--uvp-panel-radius); overflow: hidden; }");
         expect(playbackPageSource).toContain(".playback-main { display: flex; flex: none; flex-direction: column; margin: 0 8px;");
     });
 
