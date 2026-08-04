@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DeviceRecordPlayback from "./index.vue";
+import playbackPageSource from "./index.vue?raw";
 
 const api = vi.hoisted(() => ({
     getRecordQueryOptions: vi.fn(),
@@ -56,6 +57,13 @@ describe("device record playback workspace", () => {
                 streamNumber: 0
             }]
         }});
+    });
+
+    it("fits the playback workspace into its layout host instead of the browser viewport", () => {
+        expect(playbackPageSource).toContain(".record-playback-page { height: 100%; min-height: 0;");
+        expect(playbackPageSource).toContain(".playback-workspace { display: flex; flex-direction: column; height: 100%; min-height: 0;");
+        expect(playbackPageSource).toContain(".timeline-panel { flex: none;");
+        expect(playbackPageSource).not.toContain("min-height: 100vh");
     });
 
     it("returns to the dynamic device management route with its saved state key", async () => {
