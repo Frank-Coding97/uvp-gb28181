@@ -91,6 +91,7 @@ CREATE TABLE `gb_alarm_event` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_dedupe_key` (`dedupe_key`),
   KEY `idx_alarm_device_time` (`device_id`, `alarm_time`),
+  KEY `idx_alarm_time` (`alarm_time`),
   KEY `idx_channel_id` (`channel_id`),
   KEY `idx_received_at` (`received_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 alarm events';

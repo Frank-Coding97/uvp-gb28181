@@ -101,7 +101,7 @@ type GbAlarmEvent struct {
 	ChannelID      *uint      `gorm:"column:channel_id;index" json:"channelId"`
 	SourceCode     string     `gorm:"column:source_code;size:20;not null" json:"sourceCode"`
 	SN             string     `gorm:"column:sn;size:64" json:"sn"`
-	AlarmTime      *time.Time `gorm:"column:alarm_time;index:idx_alarm_device_time,priority:2" json:"alarmTime"`
+	AlarmTime      *time.Time `gorm:"column:alarm_time;index:idx_alarm_device_time,priority:2;index:idx_alarm_time" json:"alarmTime"`
 	Priority       *int       `gorm:"column:priority" json:"priority"`
 	Method         *int       `gorm:"column:method" json:"method"`
 	AlarmType      *int       `gorm:"column:alarm_type" json:"alarmType"`
