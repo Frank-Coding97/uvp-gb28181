@@ -67,6 +67,30 @@ describe("device record playback workspace", () => {
         });
     });
 
+    it("queries recordings automatically after loading the channel options", async () => {
+        mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await flushPromises();
+
+        expect(api.getRecordQueryOptions).toHaveBeenCalledTimes(1);
+        expect(api.queryDeviceRecords).toHaveBeenCalledTimes(1);
+        expect(api.queryDeviceRecords).toHaveBeenCalledWith(
+            31,
+            expect.objectContaining({ type: "all" }),
+            expect.any(AbortSignal)
+        );
+    });
+
+    it("uses a clean recording cover before playback starts", async () => {
+        const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await flushPromises();
+
+        const viewport = wrapper.get('[data-testid="playback-viewport"]');
+        expect(viewport.find('[data-testid="playback-idle-cover"]').attributes("aria-label")).toBe("录像未播放");
+        expect(viewport.find(".camera-scene").exists()).toBe(false);
+        expect(viewport.text()).not.toContain("设备录像 MOCK");
+        expect(viewport.text()).not.toContain("从右侧录像段或下方时间轴选择一段录像");
+    });
+
     it("renders the five-zone playback workspace and query result", async () => {
         const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
         await flushPromises();

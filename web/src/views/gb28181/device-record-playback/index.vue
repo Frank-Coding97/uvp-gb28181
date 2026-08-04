@@ -15,7 +15,8 @@ import {
     RotateCcw,
     Search,
     Square,
-    Video
+    Video,
+    Videotape
 } from "@lucide/vue";
 import {
     getRecordQueryOptions,
@@ -115,7 +116,8 @@ async function loadOptions() {
         const response = await getRecordQueryOptions(channelId.value);
         options.value = response.data;
         form.value = createDefaultRecordQueryForm(response.data);
-        if (route.name === "device-record-query-demo") await nextTick(runQuery);
+        await nextTick();
+        await runQuery();
     } catch (error) {
         queryState.value = "error";
         queryMessage.value = (error as Error)?.message || "无法加载通道录像查询配置";
@@ -351,28 +353,26 @@ onUnmounted(() => {
             <main class="playback-main">
                 <section class="player-column">
                     <div ref="viewport" class="playback-viewport" data-testid="playback-viewport">
-                        <div class="camera-scene" :class="{ active: isPlaying }" aria-hidden="true">
+                        <div v-if="isPlaying" class="camera-scene active" aria-hidden="true">
                             <div class="scene-sky"></div>
                             <div class="scene-building"><span></span><span></span><span></span><span></span></div>
                             <div class="scene-road"><i></i><i></i><i></i></div>
                             <div class="scene-gate"><b></b><b></b></div>
                         </div>
-                        <div class="video-overlay top-overlay">
+                        <div v-if="isPlaying" class="video-overlay top-overlay">
                             <span>CH-01 {{ options?.channel.name || "东门出入口" }}</span>
                             <span>{{ localDateTime(playback.currentTime || selectedRecord?.startTime || options?.serverNow) }}</span>
                         </div>
-                        <div class="video-overlay bottom-overlay">
-                            <span class="stream-badge">设备录像 MOCK · <b data-testid="playback-status">{{ statusText }}</b></span>
+                        <div v-if="isPlaying" class="video-overlay bottom-overlay">
+                            <span class="stream-badge">设备录像 MOCK · <b>{{ statusText }}</b></span>
                             <span>{{ options?.device.code }}</span>
                         </div>
-                        <div v-if="!isPlaying" class="viewport-state">
-                            <LoaderCircle v-if="['creating', 'buffering'].includes(playback.status)" :size="34" class="spin" />
-                            <CircleAlert v-else-if="playback.status === 'failed'" :size="34" />
-                            <Play v-else :size="38" />
-                            <strong>{{ statusText }}</strong>
-                            <span v-if="selectedRecord">{{ selectedRecord.name || '未命名录像' }} · {{ shortTime(selectedRecord.startTime) }} - {{ shortTime(selectedRecord.endTime) }}</span>
-                            <span v-else>从右侧录像段或下方时间轴选择一段录像</span>
+                        <div v-else class="playback-idle-cover" data-testid="playback-idle-cover" role="img" aria-label="录像未播放">
+                            <LoaderCircle v-if="['creating', 'buffering'].includes(playback.status)" :size="48" class="spin" aria-hidden="true" />
+                            <CircleAlert v-else-if="playback.status === 'failed'" :size="48" aria-hidden="true" />
+                            <Videotape v-else :size="64" :stroke-width="1.35" aria-hidden="true" />
                         </div>
+                        <span class="playback-status-sr" data-testid="playback-status" aria-live="polite">{{ statusText }}</span>
                         <div v-if="downloadNotice" class="download-notice" data-testid="download-notice"><Download :size="14" />{{ downloadNotice }}</div>
                     </div>
 
@@ -491,7 +491,10 @@ onUnmounted(() => {
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .55; }
 .playback-main { display: grid; grid-template-columns: minmax(0, 1fr) 312px; flex: 1; min-height: 0; padding: 12px 12px 0; background: var(--uvp-shell-muted); }
 .player-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.playback-viewport { position: relative; flex: 1; min-height: 340px; overflow: hidden; color: #e8eef5; background: #090d12; }
+.playback-viewport { position: relative; flex: 1; min-height: 340px; overflow: hidden; color: #e8eef5; background: #000; }
+.playback-idle-cover { position: absolute; inset: 0; display: grid; place-items: center; color: #89939d; background: #000; }
+.playback-idle-cover .lucide-circle-alert { color: #e05d5d; }
+.playback-status-sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; white-space: nowrap; border: 0; clip: rect(0, 0, 0, 0); clip-path: inset(50%); }
 .camera-scene { position: absolute; inset: 0; overflow: hidden; background: #243542; filter: saturate(.62) brightness(.68); }
 .camera-scene::after { position: absolute; inset: 0; background-image: linear-gradient(rgb(255 255 255 / 2%) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 2%) 1px, transparent 1px); background-size: 4px 4px; content: ""; }
 .camera-scene.active { filter: saturate(.82) brightness(.82); }
@@ -511,8 +514,6 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .top-overlay { top: 12px; }.bottom-overlay { bottom: 12px; align-items: flex-end; }
 .stream-badge { padding: 3px 6px; color: #fff; background: rgb(10 15 20 / 64%); border: 1px solid rgb(255 255 255 / 20%); border-radius: 3px; }
 .stream-badge b { font-weight: 500; }
-.viewport-state { position: absolute; z-index: 3; top: 50%; left: 50%; display: flex; flex-direction: column; align-items: center; gap: 8px; min-width: 240px; padding: 18px 24px; background: rgb(5 9 13 / 72%); border: 1px solid rgb(255 255 255 / 12%); border-radius: 6px; backdrop-filter: blur(5px); transform: translate(-50%, -50%); }
-.viewport-state strong { font-size: 14px; }.viewport-state span { color: #aab8c7; font-size: 11px; }
 .download-notice { position: absolute; z-index: 5; top: 42px; right: 14px; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 28px); padding: 7px 10px; overflow: hidden; color: #fff; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; background: rgb(10 15 20 / 82%); border: 1px solid rgb(255 255 255 / 18%); border-radius: 4px; box-shadow: 0 4px 14px rgb(0 0 0 / 24%); }
 .playback-controls { display: flex; align-items: center; gap: 7px; height: 48px; padding: 0 10px; color: var(--uvp-text-secondary); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-top: 0; }
 .control-primary { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; color: #fff; background: var(--uvp-brand); border: 0; border-radius: 50%; cursor: pointer; }
@@ -543,7 +544,7 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
     .playback-workspace { min-height: 100vh; border-radius: 0; }.query-bar { align-items: flex-start; padding: 10px 12px; }.channel-context { min-width: 0; }.online-indicator { display: none; }.query-fields { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }.query-field input { width: 100%; }.range-separator { display: none; }.type-field, .query-submit { width: 100%; }.type-field select { width: 100%; }.playback-main { display: flex; flex: none; flex-direction: column; padding: 8px 8px 0; }.playback-viewport { flex: none; min-height: 0; aspect-ratio: 16 / 9; }.segment-panel { height: 280px; margin: 8px 0 0; }.timeline-panel { margin: 8px; }
 }
 @media (max-width: 430px) {
-    .back-command { width: 36px; height: 36px; }.channel-context span:not(.channel-icon) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }.query-fields { grid-template-columns: 1fr; }.query-field input, .query-field select, .query-submit { height: 44px; }.playback-controls { height: 52px; }.control-icon, .control-primary { width: 36px; height: 36px; }.control-time { min-width: 0; font-size: 9px; }.control-spacer { display: none; }.scale-select { display: none; }.segment-panel { height: 306px; }.viewport-state { min-width: 0; width: 76%; padding: 14px; }.viewport-state span { max-width: 100%; text-align: center; }
+    .back-command { width: 36px; height: 36px; }.channel-context span:not(.channel-icon) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }.query-fields { grid-template-columns: 1fr; }.query-field input, .query-field select, .query-submit { height: 44px; }.playback-controls { height: 52px; }.control-icon, .control-primary { width: 36px; height: 36px; }.control-time { min-width: 0; font-size: 9px; }.control-spacer { display: none; }.scale-select { display: none; }.segment-panel { height: 306px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
 </style>
