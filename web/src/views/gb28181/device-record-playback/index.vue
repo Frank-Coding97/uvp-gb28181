@@ -308,7 +308,7 @@ onUnmounted(() => {
 
 <template>
     <div class="snow-fill record-playback-page">
-        <div class="snow-fill-inner playback-workspace">
+        <div class="snow-fill-inner uvp-page-shell-flat playback-workspace">
             <header class="query-bar" data-testid="playback-query-bar">
                 <button class="icon-command back-command" type="button" aria-label="返回设备管理" title="返回设备管理" @click="goBack">
                     <ArrowLeft :size="18" />

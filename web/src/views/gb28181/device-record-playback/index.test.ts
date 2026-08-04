@@ -60,6 +60,7 @@ describe("device record playback workspace", () => {
     });
 
     it("fits the playback workspace into its layout host instead of the browser viewport", () => {
+        expect(playbackPageSource).toContain('class="snow-fill-inner uvp-page-shell-flat playback-workspace"');
         expect(playbackPageSource).toContain(".record-playback-page { height: 100%; min-height: 0;");
         expect(playbackPageSource).toContain(".playback-workspace { display: flex; flex-direction: column; height: 100%; min-height: 0;");
         expect(playbackPageSource).toContain(".timeline-panel { flex: none;");
