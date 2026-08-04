@@ -1,6 +1,7 @@
 import type { Component } from "vue";
 import {
   Activity,
+  BellRing,
   Blocks,
   BookOpen,
   Box,
@@ -40,6 +41,7 @@ export const LUCIDE_ICON_PREFIX = "lucide:";
 
 export const lucideMenuIcons: Record<string, Component> = {
   Activity,
+  BellRing,
   Blocks,
   BookOpen,
   Box,
