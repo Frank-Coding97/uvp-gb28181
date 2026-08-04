@@ -15,6 +15,7 @@ import (
 	basecontrollers "uvplatform.cn/uvp-gb28181/app/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/middleware"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
@@ -202,6 +203,7 @@ func (controller *AlarmController) Delete(c *gin.Context) {
 }
 
 func (controller *AlarmController) BatchDelete(c *gin.Context) {
+	middleware.MarkDeleteOperation(c)
 	var request struct {
 		IDs []string `json:"ids"`
 	}
