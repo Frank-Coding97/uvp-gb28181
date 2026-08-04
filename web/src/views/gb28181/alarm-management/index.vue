@@ -133,9 +133,9 @@
               <template #cell="{ record }">{{ record.description || "—" }}</template>
             </a-table-column>
             <a-table-column title="操作" :width="104" align="center" :fixed="isMobile ? '' : 'right'">
-              <template #cell>
+              <template #cell="{ record }">
                 <div class="uvp-table-actions">
-                  <a-link class="uvp-table-action uvp-table-action--detail">详情</a-link>
+                  <a-link class="uvp-table-action uvp-table-action--detail" @click="openDetail(record.id)">详情</a-link>
                 </div>
               </template>
             </a-table-column>
@@ -147,6 +147,12 @@
       </template>
     </div>
   </div>
+
+  <AlarmDetailDrawer
+    v-model:visible="detailVisible"
+    :alarm-id="detailAlarmId"
+    :can-delete="canDelete"
+  />
 </template>
 
 <script setup lang="ts">
@@ -156,7 +162,8 @@ import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
 import { listDevices, type DeviceVO } from "../device-mgmt/api";
-import { displayAlarmEntityName, mayViewAlarms, normalizeAlarmQuery } from "./alarmState";
+import AlarmDetailDrawer from "./components/AlarmDetailDrawer.vue";
+import { displayAlarmEntityName, mayDeleteAlarms, mayViewAlarms, normalizeAlarmQuery } from "./alarmState";
 import { listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
 
 interface DeviceOption {
@@ -168,6 +175,7 @@ const { isMobile } = useDevicesSize();
 const proxy = useGlobalProperties();
 const userStore = useUserStoreHook();
 const canView = computed(() => mayViewAlarms(userStore.account.permissions));
+const canDelete = computed(() => mayDeleteAlarms(userStore.account.permissions));
 
 const form = reactive({
   deviceId: undefined as number | undefined,
@@ -184,6 +192,8 @@ const loading = ref(false);
 const errorMessage = ref("");
 const deviceLoading = ref(false);
 const deviceOptions = ref<DeviceOption[]>([]);
+const detailVisible = ref(false);
+const detailAlarmId = ref<string | null>(null);
 const pagination = reactive({
   current: 1,
   pageSize: 20,
@@ -270,6 +280,11 @@ function reset() {
 
 function refresh() {
   loadAlarms();
+}
+
+function openDetail(id: string) {
+  detailAlarmId.value = id;
+  detailVisible.value = true;
 }
 
 function handlePageChange(page: number) {
