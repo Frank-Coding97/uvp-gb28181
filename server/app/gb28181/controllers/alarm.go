@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -12,11 +13,17 @@ import (
 	"gorm.io/gorm"
 
 	basecontrollers "uvplatform.cn/uvp-gb28181/app/controllers"
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
 const maxAlarmDeleteBatch = 100
+
+var (
+	errAlarmNotFound       = errors.New("alarm not found")
+	errAlarmDeleteConflict = errors.New("alarm delete conflict")
+)
 
 type alarmListItem struct {
 	ID          string               `json:"id"`
@@ -183,6 +190,73 @@ func (controller *AlarmController) Detail(c *gin.Context) {
 		Longitude: row.Longitude, Latitude: row.Latitude, RawDigest: row.RawDigest,
 		RawSummary: row.RawSummary, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	})
+}
+
+func (controller *AlarmController) Delete(c *gin.Context) {
+	id, err := parseAlarmID(c.Param("id"))
+	if err != nil {
+		alarmHTTPError(c, http.StatusBadRequest, "INVALID_ALARM_ID", err.Error())
+		return
+	}
+	controller.deleteAndRespond(c, []uint64{id}, []string{formatAlarmID(id)})
+}
+
+func (controller *AlarmController) BatchDelete(c *gin.Context) {
+	var request struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		alarmHTTPError(c, http.StatusBadRequest, "INVALID_ALARM_IDS", "ids 必须是字符串数组")
+		return
+	}
+	ids, normalized, err := normalizeAlarmIDs(request.IDs)
+	if err != nil {
+		alarmHTTPError(c, http.StatusBadRequest, "INVALID_ALARM_IDS", err.Error())
+		return
+	}
+	controller.deleteAndRespond(c, ids, normalized)
+}
+
+func (controller *AlarmController) deleteAndRespond(c *gin.Context, ids []uint64, normalized []string) {
+	db := controller.database()
+	if db == nil {
+		alarmHTTPError(c, http.StatusServiceUnavailable, "ALARM_DB_UNAVAILABLE", "告警服务未就绪")
+		return
+	}
+	err := db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+		var visible int64
+		if err := controller.scopedQuery(c, tx, alarmQuery{Page: 1, PageSize: 20}).Where("alarm.id IN ?", ids).Count(&visible).Error; err != nil {
+			return err
+		}
+		if visible != int64(len(ids)) {
+			return errAlarmNotFound
+		}
+		deviceScope := tx.Model(&gbmodels.GbDevice{}).
+			Select("id").
+			Scopes(datascope.OwnerDeptScopeWithDB(c, tx, "owner_dept_id"))
+		result := tx.Where("id IN ?", ids).
+			Where("device_id IN (?)", deviceScope).
+			Delete(&gbmodels.GbAlarmEvent{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != int64(len(ids)) {
+			return errAlarmDeleteConflict
+		}
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, errAlarmNotFound):
+			alarmHTTPError(c, http.StatusNotFound, "ALARM_NOT_FOUND", "告警不存在或无权访问")
+		case errors.Is(err, errAlarmDeleteConflict):
+			alarmHTTPError(c, http.StatusConflict, "ALARM_DELETE_CONFLICT", "告警已发生变化，未删除任何记录")
+		default:
+			alarmHTTPError(c, http.StatusInternalServerError, "ALARM_DELETE_FAILED", "删除告警失败")
+		}
+		return
+	}
+	alarmHTTPSuccess(c, gin.H{"deletedIds": normalized, "deletedCount": len(normalized)})
 }
 
 func (controller *AlarmController) database() *gorm.DB {

@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -118,7 +119,7 @@ func newAlarmHTTPFixture(t *testing.T, scoped bool) *alarmHTTPFixture {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
-		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbAlarmEvent{},
+		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbAlarmEvent{}, &gbmodels.GbDeviceSubscription{},
 		&basemodels.SysDepartment{}, &basemodels.SysRole{}, &basemodels.SysUserRole{}, &basemodels.User{},
 	))
 
@@ -152,6 +153,8 @@ func newAlarmHTTPFixture(t *testing.T, scoped bool) *alarmHTTPFixture {
 	}
 	router.GET("/api/gb28181/alarms", controller.List)
 	router.GET("/api/gb28181/alarms/:id", controller.Detail)
+	router.DELETE("/api/gb28181/alarms/:id", controller.Delete)
+	router.POST("/api/gb28181/alarms/batch-delete", controller.BatchDelete)
 	return &alarmHTTPFixture{router: router, db: db, deviceA: deviceA, deviceB: deviceB, channelA: channelA, alarmOld: alarmOld, alarmNew: alarmNew, alarmOther: alarmOther}
 }
 
@@ -201,6 +204,87 @@ func TestAlarmListAndDetailAreDepartmentScoped(t *testing.T) {
 	require.Equal(t, "ALARM_NOT_FOUND", body["data"].(map[string]any)["errorCode"])
 }
 
+func TestAlarmDeletePhysicallyRemovesRowAndKeepsSubscription(t *testing.T) {
+	fixture := newAlarmHTTPFixture(t, true)
+	subscription := &gbmodels.GbDeviceSubscription{DeviceID: fixture.deviceA.ID, Kind: gbmodels.SubscriptionKindAlarm, Enabled: true, Status: gbmodels.SubscriptionStatusActive, Event: "Alarm", ExpiresSeconds: 3600}
+	require.NoError(t, fixture.db.Create(subscription).Error)
+
+	response := alarmRequest(t, fixture.router, http.MethodDelete, "/api/gb28181/alarms/"+formatAlarmID(fixture.alarmNew.ID))
+	data := response["data"].(map[string]any)
+	require.EqualValues(t, 1, data["deletedCount"])
+	require.Equal(t, []any{formatAlarmID(fixture.alarmNew.ID)}, data["deletedIds"])
+
+	var count int64
+	require.NoError(t, fixture.db.Unscoped().Model(&gbmodels.GbAlarmEvent{}).Where("id = ?", fixture.alarmNew.ID).Count(&count).Error)
+	require.Zero(t, count, "告警必须物理删除，不得留下软删除行")
+	var current gbmodels.GbDeviceSubscription
+	require.NoError(t, fixture.db.First(&current, subscription.ID).Error)
+	require.True(t, current.Enabled)
+	require.Equal(t, gbmodels.SubscriptionStatusActive, current.Status)
+
+	replayed := *fixture.alarmNew
+	replayed.ID = 0
+	replayed.CreatedAt = time.Time{}
+	replayed.UpdatedAt = time.Time{}
+	require.NoError(t, fixture.db.Create(&replayed).Error, "物理删除 dedupe_key 后允许同通知迟到重传重新入库")
+}
+
+func TestAlarmBatchDeleteIsAtomicForUnauthorizedOrMissingIDs(t *testing.T) {
+	fixture := newAlarmHTTPFixture(t, true)
+	request := []string{formatAlarmID(fixture.alarmOld.ID), formatAlarmID(fixture.alarmOther.ID)}
+	w := alarmJSONRequest(t, fixture.router, http.MethodPost, "/api/gb28181/alarms/batch-delete", gin.H{"ids": request})
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.EqualValues(t, 3, countAlarmRows(t, fixture.db), "混入外部门 ID 时一条也不能删除")
+
+	request = []string{formatAlarmID(fixture.alarmOld.ID), "999999999999"}
+	w = alarmJSONRequest(t, fixture.router, http.MethodPost, "/api/gb28181/alarms/batch-delete", gin.H{"ids": request})
+	require.Equal(t, http.StatusNotFound, w.Code)
+	require.EqualValues(t, 3, countAlarmRows(t, fixture.db), "混入不存在 ID 时一条也不能删除")
+}
+
+func TestAlarmBatchDeleteDeduplicatesAndDeletesInOneTransaction(t *testing.T) {
+	fixture := newAlarmHTTPFixture(t, true)
+	request := []string{formatAlarmID(fixture.alarmOld.ID), formatAlarmID(fixture.alarmOld.ID), formatAlarmID(fixture.alarmNew.ID)}
+	w := alarmJSONRequest(t, fixture.router, http.MethodPost, "/api/gb28181/alarms/batch-delete", gin.H{"ids": request})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	data := response["data"].(map[string]any)
+	require.EqualValues(t, 2, data["deletedCount"])
+	require.Equal(t, []any{formatAlarmID(fixture.alarmOld.ID), formatAlarmID(fixture.alarmNew.ID)}, data["deletedIds"])
+	require.EqualValues(t, 1, countAlarmRows(t, fixture.db))
+}
+
+func TestAlarmBatchDeleteRollsBackWhenRowsAffectedChanges(t *testing.T) {
+	fixture := newAlarmHTTPFixture(t, true)
+	require.NoError(t, fixture.db.Callback().Delete().Before("gorm:delete").Register("test:alarm-delete-race", func(tx *gorm.DB) {
+		if tx.Statement.Table == "gb_alarm_event" {
+			tx.Exec("DELETE FROM gb_alarm_event WHERE id = ?", fixture.alarmOld.ID)
+		}
+	}))
+	request := []string{formatAlarmID(fixture.alarmOld.ID), formatAlarmID(fixture.alarmNew.ID)}
+	w := alarmJSONRequest(t, fixture.router, http.MethodPost, "/api/gb28181/alarms/batch-delete", gin.H{"ids": request})
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Equal(t, "ALARM_DELETE_CONFLICT", response["data"].(map[string]any)["errorCode"])
+	require.EqualValues(t, 3, countAlarmRows(t, fixture.db), "行数竞态必须回滚预删和本次删除")
+}
+
+func TestAlarmSingleDeleteUnauthorizedMatchesMissing(t *testing.T) {
+	fixture := newAlarmHTTPFixture(t, true)
+	for _, id := range []string{formatAlarmID(fixture.alarmOther.ID), "999999999999"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodDelete, "/api/gb28181/alarms/"+id, nil)
+		fixture.router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code)
+		var response map[string]any
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		require.Equal(t, "ALARM_NOT_FOUND", response["data"].(map[string]any)["errorCode"])
+	}
+	require.EqualValues(t, 3, countAlarmRows(t, fixture.db))
+}
+
 func alarmRequest(t *testing.T, router *gin.Engine, method, path string) map[string]any {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -210,6 +294,24 @@ func alarmRequest(t *testing.T, router *gin.Engine, method, path string) map[str
 	var response map[string]any
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
 	return response
+}
+
+func alarmJSONRequest(t *testing.T, router *gin.Engine, method, path string, body any) *httptest.ResponseRecorder {
+	t.Helper()
+	encoded, err := json.Marshal(body)
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, bytes.NewReader(encoded))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	return w
+}
+
+func countAlarmRows(t *testing.T, db *gorm.DB) int64 {
+	t.Helper()
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbAlarmEvent{}).Count(&count).Error)
+	return count
 }
 
 func seedAlarmDeptUser(t *testing.T, db *gorm.DB, userID, deptID uint) {
