@@ -104,9 +104,10 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 	if err != nil {
 		return CreateResult{}, fmt.Errorf("generate playback session id: %w", err)
 	}
-	session := Session{ID: id, OwnerID: request.OwnerID, ChannelID: request.ChannelID, RecordKey: request.RecordKey,
+	session := Session{ID: id, OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID, RecordKey: request.RecordKey,
 		IdempotencyKey: request.IdempotencyKey, SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd,
-		State: StateCreating, Scale: 1, CreatedAt: now, LastActivityAt: now,
+		PlayFrom: request.PlayFrom,
+		State:    StateCreating, Scale: 1, CreatedAt: now, LastActivityAt: now,
 		IdleDeadline: now.Add(r.idleTimeout), Deadline: now.Add(r.maxSession), Resources: request.Resources}
 	record := &sessionRecord{session: session}
 	r.sessions[id] = record
@@ -163,6 +164,22 @@ func (r *Registry) Touch(id string, at time.Time) error {
 	record.session.LastActivityAt = at
 	record.session.IdleDeadline = at.Add(r.idleTimeout)
 	return nil
+}
+
+func (r *Registry) Update(id string, update func(*Session) error) error {
+	if update == nil {
+		return nil
+	}
+	record, ok := r.record(id)
+	if !ok {
+		return ErrPlaybackNotFound
+	}
+	record.mu.Lock()
+	defer record.mu.Unlock()
+	if record.session.State.IsTerminal() {
+		return ErrPlaybackNotFound
+	}
+	return update(&record.session)
 }
 
 func validTransition(from, to State) bool {

@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"maps"
 	"time"
 )
 
@@ -40,16 +41,26 @@ type CleanupResources interface {
 type Session struct {
 	ID              string
 	OwnerID         string
+	DeviceID        string
 	ChannelID       string
 	RecordKey       string
 	IdempotencyKey  string
+	NodeID          string
+	StreamID        string
+	SSRC            string
+	CallID          string
+	MediaURLs       map[string]string
+	HasAudio        bool
 	SegmentStart    time.Time
 	SegmentEnd      time.Time
+	PlayFrom        time.Time
 	PositionSeconds float64
 	Scale           float64
 	State           State
 	EndReason       string
 	Error           error
+	ErrorStage      string
+	ErrorCode       string
 	CreatedAt       time.Time
 	LastActivityAt  time.Time
 	IdleDeadline    time.Time
@@ -58,10 +69,11 @@ type Session struct {
 }
 
 type CreateRequest struct {
-	OwnerID, ChannelID, RecordKey, IdempotencyKey string
-	SegmentStart, SegmentEnd                      time.Time
-	Now                                           time.Time
-	Resources                                     CleanupResources
+	OwnerID, DeviceID, ChannelID, RecordKey, IdempotencyKey string
+	SegmentStart, SegmentEnd                                time.Time
+	PlayFrom                                                time.Time
+	Now                                                     time.Time
+	Resources                                               CleanupResources
 }
 
 type CreateResult struct {
@@ -76,5 +88,8 @@ type RegistryConfig struct {
 }
 
 func (s Session) clone() *Session {
+	if s.MediaURLs != nil {
+		s.MediaURLs = maps.Clone(s.MediaURLs)
+	}
 	return &s
 }
