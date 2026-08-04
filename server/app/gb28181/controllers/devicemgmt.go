@@ -14,9 +14,11 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -38,6 +40,10 @@ type DeviceMgmtController struct {
 	ptzService          *ptz.Service
 	ptzSN               atomic.Uint64
 	deviceControlLocks  sync.Map
+	recordQueryMu       sync.RWMutex
+	recordQueryService  RecordQueryService
+	recordQueryConfig   gbconfig.RecordQueryConfig
+	recordQueryMetrics  *recordquery.Metrics
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询

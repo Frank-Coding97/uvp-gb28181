@@ -6,11 +6,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streamprobe"
@@ -202,6 +204,10 @@ func SetDeviceMgmtPTZRuntime(sender gbcontrollers.DeviceControlSender, service *
 	deviceMgmtController.SetPTZRuntime(sender, service)
 }
 
+func SetDeviceMgmtRecordQueryRuntime(service gbcontrollers.RecordQueryService, cfg gbconfig.RecordQueryConfig, metrics *recordquery.Metrics) {
+	deviceMgmtController.SetRecordQueryRuntime(service, cfg, metrics)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
@@ -320,6 +326,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/device/:id/alarms", deviceMgmtController.ListAlarms)
 			dmgmt.GET("/channels", deviceMgmtController.ListChannels)
 			dmgmt.GET("/channel/:id", deviceMgmtController.GetChannel)
+			dmgmt.GET("/channel/:id/record-query/options", deviceMgmtController.GetRecordQueryOptions)
+			dmgmt.POST("/channel/:id/record-query", deviceMgmtController.QueryDeviceRecords)
 			dmgmt.PATCH("/channel/:id", deviceMgmtController.UpdateChannel)
 			dmgmt.PATCH("/channel/:id/cloud-recording", cloudRecordingController.Update)
 			dmgmt.GET("/channel/:id/mounts", deviceMgmtController.ListChannelMounts)

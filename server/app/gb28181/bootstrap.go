@@ -136,6 +136,7 @@ var subscriptionScheduler *subscribe.Scheduler
 var ptzService *ptz.Service
 var ptzScheduler ptzSchedulerLifecycle
 var recordQueryService *recordquery.Service
+var recordQueryMetrics *recordquery.Metrics
 var positionHistoryPruneCancel context.CancelFunc
 
 type ptzSchedulerLifecycle interface {
@@ -381,11 +382,15 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			return fmt.Errorf("装配设备录像查询 service 失败: %w", queryErr)
 		}
 		recordQueryService = newRecordQueryService
+		recordQueryMetrics = recordquery.NewMetrics()
 		srv.SetRecordInfoSink(newRecordQueryService)
+		gbroutes.SetDeviceMgmtRecordQueryRuntime(newRecordQueryService, cfg.RecordQuery, recordQueryMetrics)
 		newPTZService, err = ptz.NewService(app.DB(), u, time.Now)
 		if err != nil {
 			newRecordQueryService.Close()
 			recordQueryService = nil
+			recordQueryMetrics = nil
+			gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 			srv.SetRecordInfoSink(nil)
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			_ = srv.Shutdown(shutdownCtx)
@@ -529,10 +534,12 @@ func stopRecordQueryRuntime() {
 	if recordQueryService != nil {
 		recordQueryService.Close()
 	}
+	gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
 	if sipServer != nil {
 		sipServer.SetRecordInfoSink(nil)
 	}
 	recordQueryService = nil
+	recordQueryMetrics = nil
 }
 
 func stopPTZRuntime() {
