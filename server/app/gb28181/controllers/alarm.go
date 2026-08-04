@@ -2,15 +2,317 @@ package controllers
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+
+	basecontrollers "uvplatform.cn/uvp-gb28181/app/controllers"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
 const maxAlarmDeleteBatch = 100
 
 type alarmListItem struct {
-	ID string `json:"id"`
+	ID          string               `json:"id"`
+	ReceivedAt  time.Time            `json:"receivedAt"`
+	AlarmTime   *time.Time           `json:"alarmTime"`
+	Device      alarmDeviceSummary   `json:"device"`
+	Channel     *alarmChannelSummary `json:"channel"`
+	SourceCode  string               `json:"sourceCode"`
+	Priority    alarmEnumValue       `json:"priority"`
+	Method      alarmEnumValue       `json:"method"`
+	AlarmType   alarmEnumValue       `json:"alarmType"`
+	Description string               `json:"description"`
+}
+
+type alarmDeviceSummary struct {
+	ID    uint   `json:"id"`
+	Code  string `json:"code"`
+	Name  string `json:"name"`
+	Alias string `json:"alias"`
+}
+
+type alarmChannelSummary struct {
+	ID    uint   `json:"id"`
+	Code  string `json:"code"`
+	Name  string `json:"name"`
+	Alias string `json:"alias"`
+}
+
+type alarmDetail struct {
+	alarmListItem
+	AlarmTypeParam string    `json:"alarmTypeParam"`
+	Longitude      *float64  `json:"longitude"`
+	Latitude       *float64  `json:"latitude"`
+	RawDigest      string    `json:"rawDigest"`
+	RawSummary     string    `json:"rawSummary"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
+}
+
+type alarmQuery struct {
+	Page       int
+	PageSize   int
+	DeviceID   *uint64
+	SourceCode string
+	AlarmFrom  *time.Time
+	AlarmTo    *time.Time
+	Priority   *int
+	Method     *int
+	AlarmType  *int
+	Keyword    string
+}
+
+type alarmRow struct {
+	ID             uint64
+	DeviceID       uint
+	DeviceCode     string
+	DeviceName     string
+	DeviceAlias    string
+	ChannelID      *uint
+	ChannelCode    *string
+	ChannelName    *string
+	ChannelAlias   *string
+	SourceCode     string
+	AlarmTime      *time.Time
+	Priority       *int
+	Method         *int
+	AlarmType      *int
+	AlarmTypeParam string
+	Description    string
+	Longitude      *float64
+	Latitude       *float64
+	RawDigest      string
+	RawSummary     string
+	ReceivedAt     time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type AlarmController struct {
+	basecontrollers.Common
+	db func() *gorm.DB
+}
+
+func NewAlarmController() *AlarmController {
+	return &AlarmController{db: func() *gorm.DB { return app.GormDbMysql }}
+}
+
+func (controller *AlarmController) SetDB(provider func() *gorm.DB) {
+	controller.db = provider
+}
+
+func (controller *AlarmController) List(c *gin.Context) {
+	db := controller.database()
+	if db == nil {
+		alarmHTTPError(c, http.StatusServiceUnavailable, "ALARM_DB_UNAVAILABLE", "告警服务未就绪")
+		return
+	}
+	queryParams, err := parseAlarmQuery(c)
+	if err != nil {
+		alarmHTTPError(c, http.StatusBadRequest, "INVALID_ALARM_QUERY", err.Error())
+		return
+	}
+	var total int64
+	if err := controller.scopedQuery(c, db, queryParams).Count(&total).Error; err != nil {
+		alarmHTTPError(c, http.StatusInternalServerError, "ALARM_QUERY_FAILED", "查询告警失败")
+		return
+	}
+	rows := make([]alarmRow, 0)
+	selectColumns := strings.Join([]string{
+		"alarm.id", "alarm.received_at", "alarm.alarm_time", "alarm.source_code",
+		"alarm.priority", "alarm.method", "alarm.alarm_type", "alarm.description",
+		"device.id AS device_id", "device.device_id AS device_code", "device.name AS device_name", "device.alias AS device_alias",
+		"channel.id AS channel_id", "channel.channel_id AS channel_code", "channel.name AS channel_name", "channel.alias AS channel_alias",
+	}, ", ")
+	if err := controller.scopedQuery(c, db, queryParams).
+		Select(selectColumns).
+		Order("alarm.received_at DESC, alarm.id DESC").
+		Offset((queryParams.Page - 1) * queryParams.PageSize).
+		Limit(queryParams.PageSize).
+		Scan(&rows).Error; err != nil {
+		alarmHTTPError(c, http.StatusInternalServerError, "ALARM_QUERY_FAILED", "查询告警失败")
+		return
+	}
+	list := make([]alarmListItem, 0, len(rows))
+	for _, row := range rows {
+		list = append(list, row.listItem())
+	}
+	alarmHTTPSuccess(c, gin.H{"list": list, "total": total, "page": queryParams.Page, "pageSize": queryParams.PageSize})
+}
+
+func (controller *AlarmController) Detail(c *gin.Context) {
+	db := controller.database()
+	if db == nil {
+		alarmHTTPError(c, http.StatusServiceUnavailable, "ALARM_DB_UNAVAILABLE", "告警服务未就绪")
+		return
+	}
+	id, err := parseAlarmID(c.Param("id"))
+	if err != nil {
+		alarmHTTPError(c, http.StatusBadRequest, "INVALID_ALARM_ID", err.Error())
+		return
+	}
+	var row alarmRow
+	result := controller.scopedQuery(c, db, alarmQuery{Page: 1, PageSize: 20}).
+		Where("alarm.id = ?", id).
+		Select(strings.Join([]string{
+			"alarm.id", "alarm.received_at", "alarm.alarm_time", "alarm.source_code",
+			"alarm.priority", "alarm.method", "alarm.alarm_type", "alarm.alarm_type_param", "alarm.description",
+			"alarm.longitude", "alarm.latitude", "alarm.raw_digest", "alarm.raw_summary", "alarm.created_at", "alarm.updated_at",
+			"device.id AS device_id", "device.device_id AS device_code", "device.name AS device_name", "device.alias AS device_alias",
+			"channel.id AS channel_id", "channel.channel_id AS channel_code", "channel.name AS channel_name", "channel.alias AS channel_alias",
+		}, ", ")).
+		Limit(1).Scan(&row)
+	if result.Error != nil {
+		alarmHTTPError(c, http.StatusInternalServerError, "ALARM_QUERY_FAILED", "查询告警详情失败")
+		return
+	}
+	if result.RowsAffected == 0 {
+		alarmHTTPError(c, http.StatusNotFound, "ALARM_NOT_FOUND", "告警不存在或无权访问")
+		return
+	}
+	item := row.listItem()
+	alarmHTTPSuccess(c, alarmDetail{
+		alarmListItem: item, AlarmTypeParam: row.AlarmTypeParam,
+		Longitude: row.Longitude, Latitude: row.Latitude, RawDigest: row.RawDigest,
+		RawSummary: row.RawSummary, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	})
+}
+
+func (controller *AlarmController) database() *gorm.DB {
+	if controller == nil || controller.db == nil {
+		return nil
+	}
+	return controller.db()
+}
+
+func (controller *AlarmController) scopedQuery(c *gin.Context, db *gorm.DB, queryParams alarmQuery) *gorm.DB {
+	query := db.WithContext(c).Table("gb_alarm_event AS alarm").
+		Joins("JOIN gb_device AS device ON device.id = alarm.device_id AND device.deleted_at IS NULL").
+		Joins("LEFT JOIN gb_channel AS channel ON channel.id = alarm.channel_id").
+		Scopes(datascope.OwnerDeptScopeWithDB(c, db, "device.owner_dept_id"))
+	if queryParams.DeviceID != nil {
+		query = query.Where("alarm.device_id = ?", *queryParams.DeviceID)
+	}
+	if queryParams.SourceCode != "" {
+		query = query.Where("alarm.source_code LIKE ? ESCAPE '\\'", containsLikePattern(queryParams.SourceCode))
+	}
+	if queryParams.AlarmFrom != nil {
+		query = query.Where("alarm.alarm_time >= ? AND alarm.alarm_time <= ?", *queryParams.AlarmFrom, *queryParams.AlarmTo)
+	}
+	if queryParams.Priority != nil {
+		query = query.Where("alarm.priority = ?", *queryParams.Priority)
+	}
+	if queryParams.Method != nil {
+		query = query.Where("alarm.method = ?", *queryParams.Method)
+	}
+	if queryParams.AlarmType != nil {
+		query = query.Where("alarm.alarm_type = ?", *queryParams.AlarmType)
+	}
+	if queryParams.Keyword != "" {
+		pattern := containsLikePattern(queryParams.Keyword)
+		query = query.Where(`(
+			alarm.description LIKE ? ESCAPE '\' OR alarm.source_code LIKE ? ESCAPE '\' OR
+			device.device_id LIKE ? ESCAPE '\' OR device.name LIKE ? ESCAPE '\' OR device.alias LIKE ? ESCAPE '\' OR
+			channel.channel_id LIKE ? ESCAPE '\' OR channel.name LIKE ? ESCAPE '\' OR channel.alias LIKE ? ESCAPE '\'
+		)`, pattern, pattern, pattern, pattern, pattern, pattern, pattern, pattern)
+	}
+	return query
+}
+
+func parseAlarmQuery(c *gin.Context) (alarmQuery, error) {
+	query := alarmQuery{Page: 1, PageSize: 20}
+	var err error
+	if raw := c.Query("page"); raw != "" {
+		query.Page, err = strconv.Atoi(raw)
+		if err != nil || query.Page < 1 {
+			return query, fmt.Errorf("page 必须是正整数")
+		}
+	}
+	if raw := c.Query("pageSize"); raw != "" {
+		query.PageSize, err = strconv.Atoi(raw)
+		if err != nil || !validAlarmPageSize(query.PageSize) {
+			return query, fmt.Errorf("pageSize 仅支持 10、20、50、100")
+		}
+	}
+	if raw := c.Query("deviceId"); raw != "" {
+		value, parseErr := strconv.ParseUint(raw, 10, 64)
+		if parseErr != nil || value == 0 {
+			return query, fmt.Errorf("deviceId 必须是正整数")
+		}
+		query.DeviceID = &value
+	}
+	query.SourceCode = strings.TrimSpace(c.Query("sourceCode"))
+	if utf8.RuneCountInString(query.SourceCode) > 20 {
+		return query, fmt.Errorf("sourceCode 最多 20 个字符")
+	}
+	query.Keyword = strings.TrimSpace(c.Query("keyword"))
+	if utf8.RuneCountInString(query.Keyword) > 100 {
+		return query, fmt.Errorf("keyword 最多 100 个字符")
+	}
+	query.AlarmFrom, query.AlarmTo, err = parseAlarmTimeRange(c.Query("alarmFrom"), c.Query("alarmTo"))
+	if err != nil {
+		return query, err
+	}
+	if query.Priority, err = parseOptionalAlarmInt(c.Query("priority"), "priority"); err != nil {
+		return query, err
+	}
+	if query.Method, err = parseOptionalAlarmInt(c.Query("method"), "method"); err != nil {
+		return query, err
+	}
+	if query.AlarmType, err = parseOptionalAlarmInt(c.Query("alarmType"), "alarmType"); err != nil {
+		return query, err
+	}
+	return query, nil
+}
+
+func parseOptionalAlarmInt(raw, name string) (*int, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s 必须是整数", name)
+	}
+	return &value, nil
+}
+
+func validAlarmPageSize(value int) bool {
+	return value == 10 || value == 20 || value == 50 || value == 100
+}
+
+func (row alarmRow) listItem() alarmListItem {
+	item := alarmListItem{
+		ID: formatAlarmID(row.ID), ReceivedAt: row.ReceivedAt, AlarmTime: row.AlarmTime,
+		Device:     alarmDeviceSummary{ID: row.DeviceID, Code: row.DeviceCode, Name: row.DeviceName, Alias: row.DeviceAlias},
+		SourceCode: row.SourceCode, Priority: alarmPriority(row.Priority), Method: alarmMethod(row.Method),
+		AlarmType: alarmType(row.Method, row.AlarmType), Description: row.Description,
+	}
+	if row.ChannelID != nil {
+		item.Channel = &alarmChannelSummary{ID: *row.ChannelID, Code: derefString(row.ChannelCode), Name: derefString(row.ChannelName), Alias: derefString(row.ChannelAlias)}
+	}
+	return item
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func alarmHTTPSuccess(c *gin.Context, data any) {
+	c.JSON(http.StatusOK, gin.H{"code": 0, "message": "操作成功", "data": data})
+}
+
+func alarmHTTPError(c *gin.Context, status int, errorCode, message string) {
+	c.JSON(status, gin.H{"code": status, "message": message, "data": gin.H{"errorCode": errorCode}})
 }
 
 type alarmEnumValue struct {
