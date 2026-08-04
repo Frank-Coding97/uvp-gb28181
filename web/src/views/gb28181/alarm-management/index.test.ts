@@ -1,9 +1,11 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn() }));
+const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn(), deleteAlarm: vi.fn() }));
 const deviceApi = vi.hoisted(() => ({ listDevices: vi.fn() }));
 const account = vi.hoisted(() => ({ permissions: ["gb28181:alarm:view"] as string[] }));
+const modal = vi.hoisted(() => ({ warning: vi.fn() }));
+const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
 
 vi.mock("./api", async importOriginal => ({
   ...(await importOriginal<typeof import("./api")>()),
@@ -14,8 +16,12 @@ vi.mock("../device-mgmt/api", async importOriginal => ({
   ...deviceApi
 }));
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
+vi.mock("@arco-design/web-vue", async importOriginal => ({
+  ...(await importOriginal<typeof import("@arco-design/web-vue")>()),
+  Modal: modal
+}));
 vi.mock("@/hooks/useGlobalProperties", () => ({
-  default: () => ({ $message: { error: vi.fn(), warning: vi.fn(), success: vi.fn() } })
+  default: () => ({ $message: messages })
 }));
 
 import { getLucideIconComponent } from "@/utils/lucide-menu-icons";
@@ -67,15 +73,23 @@ const stubs = {
   "a-table": {
     props: ["data", "pagination", "loading", "selectedKeys"],
     emits: ["pageChange", "pageSizeChange", "update:selectedKeys"],
+    provide() {
+      return { alarmTable: this };
+    },
     template:
-      "<div data-testid='alarm-table' :data-count='data.length' :data-total='pagination.total' :data-ids='data.map(item => item.id).join(`,`)'><slot name='columns' /></div>"
+      "<div data-testid='alarm-table' :data-count='data.length' :data-total='pagination.total' :data-ids='data.map(item => item.id).join(`,`)'><slot name='columns' /><button data-testid='page-three' @click='$emit(`pageChange`, 3)'>3</button></div>"
   },
-  "a-table-column": { props: ["title"], template: "<span>{{ title }}</span>" },
-  "a-link": { template: "<a><slot /></a>" },
+  "a-table-column": {
+    props: ["title"],
+    inject: ["alarmTable"],
+    template: "<span>{{ title }}<template v-for='record in alarmTable.data'><slot name='cell' :record='record' /></template></span>"
+  },
+  "a-link": { emits: ["click"], template: "<a @click='$emit(`click`)'><slot /></a>" },
   "a-tag": { template: "<span><slot /></span>" },
   "a-tooltip": { template: "<span><slot /></span>" },
   "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
-  "a-alert": { template: "<div><slot /></div>" }
+  "a-alert": { template: "<div><slot /></div>" },
+  AlarmDetailDrawer: { template: "<div />" }
 };
 
 function mountPage() {
@@ -87,6 +101,12 @@ describe("AlarmManagement", () => {
     account.permissions = ["gb28181:alarm:view"];
     alarmApi.listAlarms.mockReset();
     alarmApi.listAlarms.mockResolvedValue(listResult());
+    alarmApi.deleteAlarm.mockReset();
+    alarmApi.deleteAlarm.mockResolvedValue({ code: 0, message: "ok", data: { deletedIds: ["9007199254740993"], deletedCount: 1 } });
+    modal.warning.mockReset();
+    messages.error.mockReset();
+    messages.success.mockReset();
+    messages.warning.mockReset();
     deviceApi.listDevices.mockReset();
     deviceApi.listDevices.mockResolvedValue({ code: 0, message: "ok", data: { list: [], total: 0, page: 1, pageSize: 20 } });
   });
@@ -148,5 +168,65 @@ describe("AlarmManagement", () => {
 
   it("registers the alarm menu icon", () => {
     expect(getLucideIconComponent("lucide:BellRing")).toBeTruthy();
+  });
+
+  it("single delete requires permission, warns physical deletion and locks duplicate requests", async () => {
+    const viewOnly = mountPage();
+    await flushPromises();
+    expect(viewOnly.find("[data-testid='single-delete-9007199254740993']").exists()).toBe(false);
+
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    let resolveDelete!: (value: unknown) => void;
+    alarmApi.deleteAlarm.mockImplementationOnce(() => new Promise(resolve => (resolveDelete = resolve)));
+    const wrapper = mountPage();
+    await flushPromises();
+    const button = wrapper.get("[data-testid='single-delete-9007199254740993']");
+    await button.trigger("click");
+    expect(modal.warning).toHaveBeenCalledTimes(1);
+    const options = modal.warning.mock.calls[0][0];
+    expect(options.okText).toBe("删除");
+    expect(String(options.content)).toContain("物理删除");
+    expect(String(options.content)).toContain("不可恢复");
+    expect(String(options.content)).toContain("一号机房");
+    expect(String(options.content)).toContain("东门");
+
+    const deleting = options.onOk();
+    await button.trigger("click");
+    expect(modal.warning).toHaveBeenCalledTimes(1);
+    expect(alarmApi.deleteAlarm).toHaveBeenCalledTimes(1);
+    resolveDelete({ code: 0, message: "ok", data: { deletedIds: ["9007199254740993"], deletedCount: 1 } });
+    await deleting;
+    await flushPromises();
+    expect(alarmApi.deleteAlarm).toHaveBeenCalledWith("9007199254740993");
+    expect(messages.success).toHaveBeenCalledWith("已物理删除 1 条告警");
+  });
+
+  it("keeps the row on delete failure and surfaces the backend message", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    alarmApi.deleteAlarm.mockRejectedValueOnce({ response: { data: { message: "告警已发生变化，未删除任何记录" } } });
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-testid='single-delete-9007199254740993']").trigger("click");
+    await modal.warning.mock.calls[0][0].onOk();
+    await flushPromises();
+    expect(wrapper.get("[data-testid='alarm-table']").attributes("data-count")).toBe("1");
+    expect(messages.error).toHaveBeenCalledWith("告警已发生变化，未删除任何记录");
+    expect(alarmApi.listAlarms).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves back before reloading when the last row on a later page is deleted", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    alarmApi.listAlarms
+      .mockResolvedValueOnce(listResult())
+      .mockResolvedValueOnce({ ...listResult(), data: { ...listResult().data, page: 3, total: 41 } })
+      .mockResolvedValueOnce({ ...listResult("40"), data: { ...listResult("40").data, page: 2, total: 40 } });
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-testid='page-three']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='single-delete-9007199254740993']").trigger("click");
+    await modal.warning.mock.calls[0][0].onOk();
+    await flushPromises();
+    expect(alarmApi.listAlarms).toHaveBeenLastCalledWith({ page: 2, pageSize: 20 });
   });
 });

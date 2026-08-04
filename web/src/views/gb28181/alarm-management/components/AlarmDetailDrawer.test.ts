@@ -109,4 +109,18 @@ describe("AlarmDetailDrawer", () => {
     expect(wrapper.text()).toContain("第二条");
     expect(wrapper.text()).not.toContain("第一条");
   });
+
+  it("emits the same single-delete intent only when delete permission is present", async () => {
+    const withoutPermission = mountDrawer();
+    await flushPromises();
+    expect(withoutPermission.find("[data-testid='detail-delete']").exists()).toBe(false);
+
+    const wrapper = mount(AlarmDetailDrawer, {
+      props: { visible: true, alarmId: "9007199254740993", canDelete: true },
+      global: { stubs }
+    });
+    await flushPromises();
+    await wrapper.get("[data-testid='detail-delete']").trigger("click");
+    expect(wrapper.emitted("delete")?.[0]?.[0]).toEqual(detail());
+  });
 });
