@@ -1,9 +1,11 @@
 package config
 
 import (
+	"errors"
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
@@ -44,12 +46,14 @@ func TestLoad(t *testing.T) {
 
 // fakeSource 手写 valueSource 用于隔离测 LoadFrom.
 type fakeSource struct {
+	values  map[string]interface{}
 	ints    map[string]int
 	strings map[string]string
 	bools   map[string]bool
 	slices  map[string][]string
 }
 
+func (f fakeSource) Get(k string) interface{}         { return f.values[k] }
 func (f fakeSource) GetBool(k string) bool            { return f.bools[k] }
 func (f fakeSource) GetString(k string) string        { return f.strings[k] }
 func (f fakeSource) GetInt(k string) int              { return f.ints[k] }
@@ -81,6 +85,143 @@ func TestLoadFromPlayConfig(t *testing.T) {
 					c.expected, cfg.Play.ReconcileIntervalSec)
 			}
 		})
+	}
+}
+
+func TestRecordRuntimeConfigDefaults(t *testing.T) {
+	cfg, err := LoadValidatedFrom(fakeSource{})
+	if err != nil {
+		t.Fatalf("加载默认配置失败: %v", err)
+	}
+
+	if cfg.RecordQuery.Timezone != "Asia/Shanghai" || cfg.RecordQuery.TimeoutSec != 15 ||
+		cfg.RecordQuery.MaxRangeHours != 24 || cfg.RecordQuery.MaxActiveQueries != 128 ||
+		cfg.RecordQuery.MaxRecordsPerQuery != 20000 || cfg.RecordQuery.ResultTTLSec != 1800 {
+		t.Fatalf("查询默认值不正确: %+v", cfg.RecordQuery)
+	}
+	if cfg.RecordQuery.Location == nil || cfg.RecordQuery.Location.String() != "Asia/Shanghai" {
+		t.Fatalf("查询时区未装配: %v", cfg.RecordQuery.Location)
+	}
+	if cfg.Playback.MediaWaitSec != 10 || cfg.Playback.IdleTimeoutSec != 60 || cfg.Playback.MaxSessionSec != 86400 {
+		t.Fatalf("回放默认值不正确: %+v", cfg.Playback)
+	}
+}
+
+func TestRecordRuntimeConfigCustomValues(t *testing.T) {
+	values := map[string]interface{}{
+		"gb28181.record_query.timezone":              "UTC",
+		"gb28181.record_query.timeout_sec":           20,
+		"gb28181.record_query.max_range_hours":       12,
+		"gb28181.record_query.max_active_queries":    32,
+		"gb28181.record_query.max_records_per_query": 5000,
+		"gb28181.record_query.result_ttl_sec":        600,
+		"gb28181.playback.media_wait_sec":            5,
+		"gb28181.playback.idle_timeout_sec":          30,
+		"gb28181.playback.max_session_sec":           3600,
+		"httpserver.handler_timeout":                 30,
+	}
+	ints := make(map[string]int, len(values))
+	for key, value := range values {
+		if intValue, ok := value.(int); ok {
+			ints[key] = intValue
+		}
+	}
+	src := fakeSource{values: values, ints: ints, strings: map[string]string{"gb28181.record_query.timezone": "UTC"}}
+
+	cfg, err := LoadValidatedFrom(src)
+	if err != nil {
+		t.Fatalf("加载合法覆盖配置失败: %v", err)
+	}
+	if cfg.RecordQuery.TimeoutSec != 20 || cfg.RecordQuery.MaxRangeHours != 12 ||
+		cfg.RecordQuery.MaxActiveQueries != 32 || cfg.RecordQuery.MaxRecordsPerQuery != 5000 ||
+		cfg.RecordQuery.ResultTTLSec != 600 {
+		t.Fatalf("查询覆盖值未保留: %+v", cfg.RecordQuery)
+	}
+	if cfg.RecordQuery.Location.String() != "UTC" {
+		t.Fatalf("时区覆盖值未保留: %v", cfg.RecordQuery.Location)
+	}
+	if cfg.Playback.MediaWaitSec != 5 || cfg.Playback.IdleTimeoutSec != 30 || cfg.Playback.MaxSessionSec != 3600 {
+		t.Fatalf("回放覆盖值未保留: %+v", cfg.Playback)
+	}
+}
+
+func TestRecordRuntimeConfigRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value interface{}
+	}{
+		{name: "非法时区", key: "gb28181.record_query.timezone", value: "Mars/Base"},
+		{name: "本地时区别名", key: "gb28181.record_query.timezone", value: "Local"},
+		{name: "TTL 为零", key: "gb28181.record_query.result_ttl_sec", value: 0},
+		{name: "TTL 超限", key: "gb28181.record_query.result_ttl_sec", value: MaxResultTTLSec + 1},
+		{name: "媒体等待超限", key: "gb28181.playback.media_wait_sec", value: MaxMediaWaitSec + 1},
+		{name: "空闲超时为零", key: "gb28181.playback.idle_timeout_sec", value: 0},
+		{name: "空闲超时超限", key: "gb28181.playback.idle_timeout_sec", value: MaxPlaybackIdleSec + 1},
+		{name: "会话上限为零", key: "gb28181.playback.max_session_sec", value: 0},
+		{name: "会话时长超限", key: "gb28181.playback.max_session_sec", value: MaxPlaybackSessionSec + 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			values := map[string]interface{}{tt.key: tt.value}
+			src := fakeSource{values: values, ints: map[string]int{}, strings: map[string]string{}}
+			switch value := tt.value.(type) {
+			case int:
+				src.ints[tt.key] = value
+			case string:
+				src.strings[tt.key] = value
+			}
+
+			_, err := LoadValidatedFrom(src)
+			if err == nil {
+				t.Fatal("期望配置校验失败")
+			}
+			var configErr *ValidationError
+			if !errors.As(err, &configErr) {
+				t.Fatalf("期望 typed ValidationError, 实际 %T: %v", err, err)
+			}
+			if configErr.Field != tt.key {
+				t.Fatalf("错误字段=%q,期望 %q", configErr.Field, tt.key)
+			}
+		})
+	}
+}
+
+func TestRecordQueryTimeoutMustBeBelowHTTPHandlerTimeout(t *testing.T) {
+	for _, queryTimeout := range []int{30, 31} {
+		values := map[string]interface{}{
+			"gb28181.record_query.timeout_sec": queryTimeout,
+			"httpserver.handler_timeout":       30,
+		}
+		_, err := LoadValidatedFrom(fakeSource{values: values, ints: map[string]int{
+			"gb28181.record_query.timeout_sec": queryTimeout,
+			"httpserver.handler_timeout":       30,
+		}})
+		if err == nil {
+			t.Fatalf("query timeout=%d 时期望校验失败", queryTimeout)
+		}
+		var configErr *ValidationError
+		if !errors.As(err, &configErr) || configErr.Field != "gb28181.record_query.timeout_sec" {
+			t.Fatalf("期望 timeout typed error, 实际 %T: %v", err, err)
+		}
+	}
+}
+
+func TestRecordQueryTimeoutBelowHTTPHandlerTimeout(t *testing.T) {
+	values := map[string]interface{}{
+		"gb28181.record_query.timeout_sec": 29,
+		"httpserver.handler_timeout":       30,
+	}
+	cfg, err := LoadValidatedFrom(fakeSource{values: values, ints: map[string]int{
+		"gb28181.record_query.timeout_sec": 29,
+		"httpserver.handler_timeout":       30,
+	}})
+	if err != nil {
+		t.Fatalf("合法超时关系被拒绝: %v", err)
+	}
+	if cfg.RecordQuery.Timeout() != 29*time.Second {
+		t.Fatalf("查询超时=%s,期望 29s", cfg.RecordQuery.Timeout())
 	}
 }
 
