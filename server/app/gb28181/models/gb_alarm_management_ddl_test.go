@@ -62,6 +62,28 @@ func TestAlarmManagementBaselinesDeclareAlarmTimeIndex(t *testing.T) {
 	require.Contains(t, baseline, "alarm_time")
 }
 
+func TestAlarmInfoBackfillMigrationsAreBoundedAndIdempotent(t *testing.T) {
+	root := dualVersionDDLRoot(t)
+	paths := []string{
+		"resource/database/gb28181/migrations/2026-08-05-alarm-info-backfill.sql",
+		"resource/database/gb28181/migrations/2026-08-05-alarm-info-backfill-postgresql.sql",
+		"resource/database/gb28181/migrations/2026-08-05-alarm-info-backfill-sqlserver.sql",
+	}
+	for _, path := range paths {
+		body := readNormalizedAlarmManagementDDL(t, root, path)
+		for _, token := range []string{
+			"update", "gb_alarm_event", "alarm_type = 0", "raw_summary",
+			"<info>", "<alarmtype>", "</alarmtype>",
+			"method = 2", "between 1 and 5",
+			"method = 5", "between 1 and 13",
+			"method = 6", "between 1 and 2",
+		} {
+			require.Contains(t, body, token, path)
+		}
+		require.NotContains(t, body, "delete from gb_alarm_event", path)
+	}
+}
+
 func readNormalizedAlarmManagementDDL(t *testing.T, root, path string) string {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join(root, path))

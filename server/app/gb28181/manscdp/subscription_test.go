@@ -72,3 +72,23 @@ func TestParseSubscriptionNotifications(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, strings.Contains(err.Error(), "经纬度"))
 }
+
+func TestParseAlarmNotify_ParsesStandardNestedInfo(t *testing.T) {
+	alarm, err := ParseAlarmNotify([]byte(`<?xml version="1.0" encoding="GB2312"?>
+<Notify>
+<CmdType>Alarm</CmdType>
+<SN>1260</SN>
+<DeviceID>37010301021320000111</DeviceID>
+<AlarmPriority>4</AlarmPriority>
+<AlarmMethod>5</AlarmMethod>
+<AlarmTime>2026-08-04T17:52:23</AlarmTime>
+<Info>
+<AlarmType>2</AlarmType>
+<AlarmTypeParam><EventType>1</EventType></AlarmTypeParam>
+</Info>
+</Notify>`))
+	require.NoError(t, err)
+	require.NotNil(t, alarm.AlarmType)
+	require.Equal(t, 2, *alarm.AlarmType)
+	require.Equal(t, "EventType=1", alarm.AlarmTypeParam)
+}

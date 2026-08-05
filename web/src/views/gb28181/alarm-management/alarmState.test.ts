@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  alarmTypeOptionsForMethod,
   displayAlarmEntityName,
   mayDeleteAlarms,
   mayViewAlarms,
@@ -8,6 +9,16 @@ import {
   normalizeCurrentPageSelection,
   pageAfterAlarmDeletion
 } from "./alarmState";
+
+describe("alarm type labels", () => {
+  it("uses method-specific GB/T 28181 alarm type meanings", () => {
+    expect(alarmTypeOptionsForMethod(2)).toContainEqual({ value: 2, label: "设备防拆报警" });
+    expect(alarmTypeOptionsForMethod(5)).toContainEqual({ value: 2, label: "运动目标检测报警" });
+    expect(alarmTypeOptionsForMethod(6)).toContainEqual({ value: 2, label: "存储设备风扇故障报警" });
+    expect(alarmTypeOptionsForMethod(1)).toEqual([]);
+    expect(alarmTypeOptionsForMethod(undefined)).toEqual([]);
+  });
+});
 
 describe("alarm permissions", () => {
   it("keeps view and physical-delete permissions separate", () => {

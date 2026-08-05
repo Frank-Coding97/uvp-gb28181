@@ -51,11 +51,18 @@
             <a-select v-model="form.priority" placeholder="告警级别" allow-clear style="width: 126px">
               <a-option v-for="option in priorityOptions" :key="option.value" :value="option.value">{{ option.label }}</a-option>
             </a-select>
-            <a-select v-model="form.method" placeholder="告警方法" allow-clear style="width: 138px">
+            <a-select v-model="form.method" data-testid="alarm-method" placeholder="告警方法" allow-clear style="width: 138px">
               <a-option v-for="option in methodOptions" :key="option.value" :value="option.value">{{ option.label }}</a-option>
             </a-select>
-            <a-select v-model="form.alarmType" placeholder="告警类型" allow-clear style="width: 126px">
-              <a-option v-for="value in alarmTypeOptions" :key="value" :value="value">类型 {{ value }}</a-option>
+            <a-select
+              v-model="form.alarmType"
+              data-testid="alarm-type"
+              :placeholder="alarmTypePlaceholder"
+              :disabled="alarmTypeOptions.length === 0"
+              allow-clear
+              style="width: 190px"
+            >
+              <a-option v-for="option in alarmTypeOptions" :key="option.value" :value="option.value">{{ option.label }}</a-option>
             </a-select>
             <a-input
               v-model="form.keyword"
@@ -196,7 +203,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { RefreshCw, RotateCcw, Search, Trash2 } from "@lucide/vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
@@ -205,6 +212,7 @@ import { useUserStoreHook } from "@/store/modules/user";
 import { listDevices, type DeviceVO } from "../device-mgmt/api";
 import AlarmDetailDrawer from "./components/AlarmDetailDrawer.vue";
 import {
+  alarmTypeOptionsForMethod,
   displayAlarmEntityName,
   mayDeleteAlarms,
   mayViewAlarms,
@@ -265,7 +273,17 @@ const methodOptions = [
   { value: 6, label: "设备故障" },
   { value: 7, label: "其他报警" }
 ];
-const alarmTypeOptions = Array.from({ length: 13 }, (_, index) => index + 1);
+const alarmTypeOptions = computed(() => alarmTypeOptionsForMethod(form.method));
+const alarmTypePlaceholder = computed(() =>
+  form.method === undefined ? "请先选择报警方法" : alarmTypeOptions.value.length ? "告警类型" : "该报警方法无类型"
+);
+
+watch(
+  () => form.method,
+  () => {
+    form.alarmType = undefined;
+  }
+);
 
 let listRequestToken = 0;
 let deviceRequestToken = 0;

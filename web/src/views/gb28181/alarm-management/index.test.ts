@@ -72,9 +72,10 @@ const stubs = {
       "<input :data-testid='$attrs[`data-testid`]' :value='modelValue' @input='$emit(`update:modelValue`, $event.target.value)' @keyup.enter='$emit(`pressEnter`)' />"
   },
   "a-select": {
-    props: ["modelValue"],
+    props: ["modelValue", "disabled", "placeholder"],
     emits: ["update:modelValue", "search"],
-    template: "<select :data-testid='$attrs[`data-testid`]' :value='modelValue' @change='$emit(`update:modelValue`, $event.target.value)'><slot /></select>"
+    template:
+      "<select :data-testid='$attrs[`data-testid`]' :data-placeholder='placeholder' :value='modelValue' :disabled='disabled' @change='$emit(`update:modelValue`, $event.target.value === `` ? undefined : Number($event.target.value))'><slot /></select>"
   },
   "a-option": { template: "<option><slot /></option>" },
   "a-range-picker": { template: "<div data-testid='alarm-range' />" },
@@ -94,7 +95,8 @@ const stubs = {
   "a-table-column": {
     props: ["title"],
     inject: ["alarmTable"],
-    template: "<span>{{ title }}<template v-for='record in alarmTable.data'><slot name='cell' :record='record' /></template></span>"
+    template:
+      "<span>{{ title }}<template v-for='record in alarmTable.data'><slot name='cell' :record='record' /></template></span>"
   },
   "a-link": { emits: ["click"], template: "<a @click='$emit(`click`)'><slot /></a>" },
   "a-tag": { template: "<span><slot /></span>" },
@@ -117,9 +119,17 @@ describe("AlarmManagement", () => {
     alarmApi.listAlarms.mockReset();
     alarmApi.listAlarms.mockResolvedValue(listResult());
     alarmApi.deleteAlarm.mockReset();
-    alarmApi.deleteAlarm.mockResolvedValue({ code: 0, message: "ok", data: { deletedIds: ["9007199254740993"], deletedCount: 1 } });
+    alarmApi.deleteAlarm.mockResolvedValue({
+      code: 0,
+      message: "ok",
+      data: { deletedIds: ["9007199254740993"], deletedCount: 1 }
+    });
     alarmApi.batchDeleteAlarms.mockReset();
-    alarmApi.batchDeleteAlarms.mockResolvedValue({ code: 0, message: "ok", data: { deletedIds: ["1", "2", "3"], deletedCount: 3 } });
+    alarmApi.batchDeleteAlarms.mockResolvedValue({
+      code: 0,
+      message: "ok",
+      data: { deletedIds: ["1", "2", "3"], deletedCount: 3 }
+    });
     modal.warning.mockReset();
     messages.error.mockReset();
     messages.success.mockReset();
@@ -136,6 +146,25 @@ describe("AlarmManagement", () => {
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-total")).toBe("41");
     expect(wrapper.text()).toContain("平台接收时间");
     expect(wrapper.text()).toContain("设备告警时间");
+  });
+
+  it("links alarm type options to the selected alarm method", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const typeSelect = wrapper.get("[data-testid='alarm-type']");
+    expect(typeSelect.attributes()).toHaveProperty("disabled");
+
+    await wrapper.get("[data-testid='alarm-method']").setValue("5");
+    await flushPromises();
+    expect(typeSelect.attributes()).not.toHaveProperty("disabled");
+    expect(typeSelect.attributes("data-placeholder")).toBe("告警类型");
+    expect(typeSelect.text()).toContain("运动目标检测报警");
+    expect(typeSelect.text()).not.toContain("类型 2");
+
+    await wrapper.get("[data-testid='alarm-method']").setValue("2");
+    await flushPromises();
+    expect(typeSelect.text()).toContain("设备防拆报警");
+    expect(typeSelect.text()).not.toContain("运动目标检测报警");
   });
 
   it("does not query when the account lacks view permission", async () => {

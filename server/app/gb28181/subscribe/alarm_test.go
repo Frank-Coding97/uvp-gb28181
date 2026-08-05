@@ -56,3 +56,25 @@ func TestAlarmProcessor_RawSummaryIsUTF8ForGB2312Body(t *testing.T) {
 	require.True(t, utf8.ValidString(events[0].RawSummary), "raw_summary 应为合法 UTF-8,实际=%q", events[0].RawSummary)
 	require.True(t, strings.Contains(events[0].RawSummary, "视频动检"), "raw_summary 应含转码后的中文,实际=%q", events[0].RawSummary)
 }
+
+func TestAlarmProcessor_PersistsNestedTypeAndLeavesMissingTypeNull(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbAlarmEvent{}))
+	device := &gbmodels.GbDevice{DeviceID: "37010301021320000111"}
+	require.NoError(t, db.Create(device).Error)
+	p := NewAlarmProcessor(db, func() time.Time { return time.Date(2026, 8, 4, 17, 53, 0, 0, time.Local) })
+
+	withType := []byte(`<Notify><CmdType>Alarm</CmdType><SN>1260</SN><DeviceID>37010301021320000111</DeviceID><AlarmPriority>4</AlarmPriority><AlarmMethod>5</AlarmMethod><AlarmTime>2026-08-04T17:52:23</AlarmTime><Info><AlarmType>2</AlarmType></Info></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{CallID: "nested", CSeq: "1", Body: withType}))
+	withoutType := []byte(`<Notify><CmdType>Alarm</CmdType><SN>1261</SN><DeviceID>37010301021320000111</DeviceID><AlarmPriority>4</AlarmPriority><AlarmMethod>5</AlarmMethod><AlarmTime>2026-08-04T17:53:23</AlarmTime></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{CallID: "missing", CSeq: "2", Body: withoutType}))
+
+	var nested gbmodels.GbAlarmEvent
+	require.NoError(t, db.Where("sn = ?", "1260").First(&nested).Error)
+	require.NotNil(t, nested.AlarmType)
+	require.Equal(t, 2, *nested.AlarmType)
+	var missing gbmodels.GbAlarmEvent
+	require.NoError(t, db.Where("sn = ?", "1261").First(&missing).Error)
+	require.Nil(t, missing.AlarmType)
+}

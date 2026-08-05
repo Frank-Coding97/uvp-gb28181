@@ -129,12 +129,18 @@ type AlarmNotify struct {
 	DeviceID       string  `xml:"DeviceID"`
 	Priority       int     `xml:"AlarmPriority"`
 	Method         int     `xml:"AlarmMethod"`
-	AlarmType      int     `xml:"AlarmType"`
+	AlarmType      *int    `xml:"AlarmType"`
 	AlarmTypeParam string  `xml:"AlarmTypeParam"`
 	AlarmTime      string  `xml:"AlarmTime"`
 	Description    string  `xml:"AlarmDescription"`
 	Longitude      float64 `xml:"Longitude"`
 	Latitude       float64 `xml:"Latitude"`
+	Info           struct {
+		AlarmType      *int `xml:"AlarmType"`
+		AlarmTypeParam struct {
+			EventType *int `xml:"EventType"`
+		} `xml:"AlarmTypeParam"`
+	} `xml:"Info"`
 }
 
 func ParseAlarmNotify(body []byte) (*AlarmNotify, error) {
@@ -144,6 +150,14 @@ func ParseAlarmNotify(body []byte) (*AlarmNotify, error) {
 	}
 	if notify.CmdType != CmdAlarm || notify.DeviceID == "" {
 		return nil, fmt.Errorf("非法 Alarm NOTIFY")
+	}
+	// GB/T 28181-2022 A.2.5.3 puts AlarmType and AlarmTypeParam inside Info.
+	// Keep the root fields for compatibility with legacy vendor notifications.
+	if notify.Info.AlarmType != nil {
+		notify.AlarmType = notify.Info.AlarmType
+	}
+	if notify.Info.AlarmTypeParam.EventType != nil {
+		notify.AlarmTypeParam = fmt.Sprintf("EventType=%d", *notify.Info.AlarmTypeParam.EventType)
 	}
 	return &notify, nil
 }

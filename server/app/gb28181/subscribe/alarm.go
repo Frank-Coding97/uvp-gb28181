@@ -49,7 +49,7 @@ func (p *AlarmProcessor) Process(ctx context.Context, device *gbmodels.GbDevice,
 	now := p.now()
 	row := gbmodels.GbAlarmEvent{
 		DeviceID: device.ID, ChannelID: channelID, SourceCode: alarm.DeviceID, SN: alarm.SN,
-		Priority: intPtr(alarm.Priority), Method: intPtr(alarm.Method), AlarmType: intPtr(alarm.AlarmType),
+		Priority: intPtr(alarm.Priority), Method: intPtr(alarm.Method), AlarmType: alarm.AlarmType,
 		AlarmTypeParam: alarm.AlarmTypeParam, Description: alarm.Description, CallID: notification.CallID, CSeq: notification.CSeq,
 		DedupeKey: dedupe, RawDigest: fmt.Sprintf("%x", digest), RawSummary: truncateRaw(notification.Body), ReceivedAt: now,
 	}
