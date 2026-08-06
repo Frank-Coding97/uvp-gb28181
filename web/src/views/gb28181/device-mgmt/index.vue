@@ -6,6 +6,7 @@ import maplibregl, { LngLatBounds, Marker as MapLibreMarker, type Map as MapLibr
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
     Activity,
+    ArrowLeft,
     Bell,
     Camera,
     Copy,
@@ -23,13 +24,10 @@ import {
     RadioTower,
     RefreshCcw,
     Search,
-    Settings2,
-    SlidersHorizontal,
     Square,
     Trash2,
     Video,
     X,
-    Download,
     Plus,
     FolderPlus,
     FolderMinus
@@ -116,6 +114,7 @@ const viewMode = ref<ViewMode>(initialViewMode());
 const router = useRouter();
 const route = useRoute();
 const assetKind = ref<AssetKind>("device");
+const channelEntrySource = ref<"device-drilldown" | "manual">("manual");
 const keyword = ref("");
 const keywordInput = ref<HTMLInputElement | null>(null);
 const deviceIdFilter = ref("");
@@ -158,6 +157,7 @@ if (returnSnapshot) {
     page.value = returnSnapshot.page;
     listPageSize.value = returnSnapshot.listPageSize;
     cardPageSize.value = returnSnapshot.cardPageSize;
+    if (returnSnapshot.assetKind === "channel" && returnSnapshot.deviceIdFilter) channelEntrySource.value = "device-drilldown";
 }
 const pageSize = computed({
     get: () => viewMode.value === "card" ? cardPageSize.value : listPageSize.value,
@@ -381,6 +381,7 @@ function keepaliveIntervalText(seconds?: number) {
 function showDeviceChannels(record: DeviceVO) {
     setKeywordWithoutSearch("");
     deviceIdFilter.value = record.deviceId;
+    channelEntrySource.value = "device-drilldown";
     clearDirectorySelection(false);
     statusFilter.value = undefined;
     assetKind.value = "channel";
@@ -522,7 +523,12 @@ function setViewMode(mode: ViewMode) {
     }
 }
 function setAssetKind(kind: AssetKind) {
-    if (kind === "device") deviceIdFilter.value = "";
+    if (kind === "device") {
+        deviceIdFilter.value = "";
+        channelEntrySource.value = "manual";
+    } else {
+        channelEntrySource.value = "manual";
+    }
     assetKind.value = kind;
 }
 function cancelKeywordSearch() {
@@ -549,8 +555,25 @@ function focusKeyword(event: KeyboardEvent) {
         keywordInput.value?.select();
     }
 }
-function clearDeviceFilter() { deviceIdFilter.value = ""; page.value = 1; refreshMainData(); }
-function resetFilters() { setKeywordWithoutSearch(""); deviceIdFilter.value = ""; statusFilter.value = undefined; clearDirectorySelection(); }
+function clearDeviceFilter() {
+    deviceIdFilter.value = "";
+    page.value = 1;
+    if (assetKind.value === "channel" && channelEntrySource.value === "device-drilldown") {
+        channelEntrySource.value = "manual";
+        assetKind.value = "device";
+    }
+    refreshMainData();
+}
+function resetFilters() {
+    setKeywordWithoutSearch("");
+    deviceIdFilter.value = "";
+    statusFilter.value = undefined;
+    if (assetKind.value === "channel" && channelEntrySource.value === "device-drilldown") {
+        channelEntrySource.value = "manual";
+        assetKind.value = "device";
+    }
+    clearDirectorySelection();
+}
 function onPageChange(next: number) { page.value = next; refreshMainData(); }
 function onPageSizeChange(next: number) { pageSize.value = next; page.value = 1; refreshMainData(); }
 
@@ -1535,36 +1558,78 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="snow-fill">
-        <div class="snow-fill-inner device-mgmt-page">
-            <div class="content-topbar">
-                <div class="device-stats">
-                    <span class="stat online">在线 {{ onlineDeviceTotal }}</span>
-                    <span class="stat offline">离线 {{ offlineDeviceTotal }}</span>
-                </div>
-                <div class="topbar-actions">
-                    <div class="cmdk">
-                        <Search :size="14" />
-                        <input ref="keywordInput" v-model="keyword" type="text" aria-label="搜索设备、通道或编码" placeholder="搜索设备 / 通道 / 编码 ..." @keydown.enter.prevent="onSearch" />
-                        <a-tooltip v-if="keyword" content="清空搜索" position="bottom">
-                            <button class="cmdk-clear" type="button" aria-label="清空搜索" @click="clearKeyword"><X :size="14" /></button>
-                        </a-tooltip>
-                        <a-tooltip :content="`按 ${isMacPlatform ? 'Command' : 'Ctrl'} + K 聚焦搜索框`" position="bottom">
-                            <span class="kbd"><kbd>{{ isMacPlatform ? '⌘' : 'Ctrl' }}</kbd><kbd>K</kbd></span>
-                        </a-tooltip>
-                    </div>
-                    <div class="view-switch">
-                        <button v-for="item in viewOptions" :key="item.value" type="button" :class="{ active: viewMode === item.value }" @click="setViewMode(item.value)">
-                            <component :is="item.icon" :size="14" />
-                        </button>
-                    </div>
-                    <button class="icon-btn" type="button" @click="resetFilters"><SlidersHorizontal :size="16" /></button>
-                    <button class="btn-primary" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
-                    <button class="icon-btn" type="button"><Settings2 :size="16" /></button>
-                </div>
-            </div>
+    <div class="device-mgmt-page">
+        <div class="workspace">
+                <s-layout-search class="workspace-toolbar">
+                    <template #fields>
+                        <div class="workspace-toolbar-row">
+                            <div class="device-stats">
+                                <span class="stat online">在线 {{ onlineDeviceTotal }}</span>
+                                <span class="stat offline">离线 {{ offlineDeviceTotal }}</span>
+                            </div>
+                            <div class="toolbar-actions">
+                                <div v-if="viewMode !== 'map'" class="segmented">
+                                    <button type="button" :class="{ active: assetKind === 'device' }" @click="setAssetKind('device')">设备</button>
+                                    <button type="button" :class="{ active: assetKind === 'channel' }" @click="setAssetKind('channel')">通道</button>
+                                </div>
+                                <div class="view-switch" aria-label="展示形态">
+                                    <button
+                                        v-for="item in viewOptions"
+                                        :key="item.value"
+                                        type="button"
+                                        :class="{ active: viewMode === item.value }"
+                                        :aria-label="`${item.label}视图`"
+                                        :aria-pressed="viewMode === item.value"
+                                        :title="`${item.label}视图`"
+                                        @click="setViewMode(item.value)"
+                                    >
+                                        <component :is="item.icon" :size="14" />
+                                    </button>
+                                </div>
+                                <div v-if="viewMode === 'map' && noCoordCount" class="map-banner toolbar-map-banner">
+                                    <Info :size="14" /> 有 {{ noCoordCount }} 路通道缺少坐标，暂未显示在地图中。
+                                </div>
+                                <div class="cmdk">
+                                    <Search :size="14" />
+                                    <input ref="keywordInput" v-model="keyword" type="text" aria-label="搜索设备、通道或编码" placeholder="搜索设备 / 通道 / 编码 ..." @keydown.enter.prevent="onSearch" />
+                                    <a-tooltip v-if="keyword" content="清空搜索" position="bottom">
+                                        <button class="cmdk-clear" type="button" aria-label="清空搜索" @click="clearKeyword"><X :size="14" /></button>
+                                    </a-tooltip>
+                                    <a-tooltip :content="`按 ${isMacPlatform ? 'Command' : 'Ctrl'} + K 聚焦搜索框`" position="bottom">
+                                        <span class="kbd"><kbd>{{ isMacPlatform ? '⌘' : 'Ctrl' }}</kbd><kbd>K</kbd></span>
+                                    </a-tooltip>
+                                </div>
+                                <a-select
+                                    v-model="statusFilter"
+                                    allow-clear
+                                    class="toolbar-select status-select"
+                                    placeholder="状态"
+                                    :style="{ width: '126px' }"
+                                >
+                                    <a-option value="online">在线</a-option>
+                                    <a-option value="offline">离线</a-option>
+                                </a-select>
+                                <button class="btn-ghost" type="button" @click="refreshMainData">
+                                    <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
+                                    刷新
+                                </button>
+                                <div class="auto-refresh-control">
+                                    <span class="refresh-label">自动刷新</span>
+                                    <a-switch
+                                        v-model="autoRefresh"
+                                        aria-label="自动刷新"
+                                        @change="toggleAutoRefresh"
+                                    >
+                                        <template #checked>开启</template>
+                                        <template #unchecked>关闭</template>
+                                    </a-switch>
+                                </div>
+                                <button class="btn-primary create-device-btn" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
+                            </div>
+                        </div>
+                    </template>
+                </s-layout-search>
 
-            <div class="workspace">
                 <aside class="catalog-pane">
                     <DirectoryPanel
                         ref="directoryPanelRef"
@@ -1581,49 +1646,28 @@ onUnmounted(() => {
                 </aside>
 
                 <main class="content-pane">
-                    <div class="main-head">
-                        <s-layout-search class="device-filter-panel">
-                            <template #extra>
-                                <div class="toolbar">
-                                    <div v-if="viewMode === 'map' && noCoordCount" class="map-banner toolbar-map-banner">
-                                        <Info :size="14" /> 有 {{ noCoordCount }} 路通道缺少坐标，暂未显示在地图中。
-                                    </div>
-                                    <div class="auto-refresh-control">
-                                        <span class="refresh-label">自动刷新</span>
-                                        <a-switch
-                                            v-model="autoRefresh"
-                                            @change="toggleAutoRefresh"
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                    </div>
-                                    <button class="btn-ghost" type="button" @click="refreshMainData">
-                                        <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
-                                        刷新
-                                    </button>
-                                    <a-select
-                                        v-model="statusFilter"
-                                        allow-clear
-                                        class="toolbar-select status-select"
-                                        placeholder="状态"
-                                        :style="{ width: '126px' }"
-                                    >
-                                        <a-option value="online">在线</a-option>
-                                        <a-option value="offline">离线</a-option>
-                                    </a-select>
-                                    <button class="icon-btn" type="button"><Download :size="14" /></button>
-                                    <div v-if="viewMode !== 'map'" class="segmented">
-                                        <button type="button" :class="{ active: assetKind === 'device' }" @click="setAssetKind('device')">设备</button>
-                                        <button type="button" :class="{ active: assetKind === 'channel' }" @click="setAssetKind('channel')">通道</button>
-                                    </div>
-                                </div>
-                            </template>
-                        </s-layout-search>
-                    </div>
-
                     <div class="filter-chips">
-                        <span v-if="deviceIdFilter" class="filter-chip">所属设备: {{ deviceIdFilter }} <button class="close" @click="clearDeviceFilter">×</button></span>
+                        <button
+                            v-if="deviceIdFilter && channelEntrySource === 'device-drilldown'"
+                            class="filter-chip device-drilldown-chip"
+                            type="button"
+                            aria-label="返回设备列表"
+                            @click="clearDeviceFilter"
+                        >
+                            <span>设备通道: {{ deviceIdFilter }}</span>
+                            <ArrowLeft :size="12" aria-hidden="true" />
+                        </button>
+                        <span v-else-if="deviceIdFilter" class="filter-chip">
+                            <span>所属设备: {{ deviceIdFilter }}</span>
+                            <button
+                                class="close"
+                                type="button"
+                                aria-label="清除所属设备筛选"
+                                @click="clearDeviceFilter"
+                            >
+                                <X :size="12" />
+                            </button>
+                        </span>
                         <span v-if="statusFilter" class="filter-chip">状态: {{ statusFilter === 'online' ? '在线' : '离线' }} <button class="close" @click="statusFilter = undefined">×</button></span>
                         <span v-if="selectedDirectory" class="filter-chip">目录: {{ selectedDirectory.name }} <button class="close" @click="clearDirectorySelection()">×</button></span>
                         <button v-if="hasFilters" class="clear-all" type="button" @click="resetFilters">清除筛选</button>
@@ -2682,7 +2726,6 @@ onUnmounted(() => {
                 </template>
             </a-modal>
         </div>
-    </div>
 </template>
 
 <style scoped lang="scss">
@@ -2690,17 +2733,10 @@ onUnmounted(() => {
     height: 100%;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    min-width: 0;
+    min-height: 0;
     padding: 0;
-    background: var(--uvp-navigation-bg);
-}
-.content-topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    min-height: 52px;
-    padding: 0 4px;
+    overflow: hidden;
 }
 .device-stats {
     display: inline-flex;
@@ -2725,26 +2761,41 @@ onUnmounted(() => {
 .device-stats .offline {
     color: var(--uvp-text-tertiary);
 }
-.topbar-actions {
+.workspace-toolbar-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    width: 100%;
+    min-width: 0;
+}
+.toolbar-actions {
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    flex: 1 1 auto;
+    flex-wrap: wrap;
     gap: 10px;
-    flex: 1;
     min-width: 0;
+    margin-left: auto;
 }
 .cmdk {
     display: flex;
     align-items: center;
     gap: 8px;
-    width: min(520px, 100%);
-    max-width: 42vw;
-    height: 36px;
+    flex: 1 1 210px;
+    width: min(360px, 100%);
+    min-width: 210px;
+    max-width: 360px;
+    height: 40px;
     padding: 0 12px;
     color: var(--uvp-text-tertiary);
     background: var(--uvp-search-control-bg);
     border: 1px solid var(--uvp-search-secondary-btn-border);
     border-radius: 10px;
+}
+.cmdk:focus-within {
+    border-color: color-mix(in srgb, var(--uvp-brand) 40%, transparent);
+    box-shadow: var(--uvp-search-control-focus-shadow);
 }
 .cmdk input {
     flex: 1;
@@ -2789,6 +2840,12 @@ onUnmounted(() => {
 }
 .view-switch button.active,
 .icon-btn:hover { color: var(--uvp-brand); background: var(--uvp-brand-soft); }
+.view-switch button:focus-visible,
+.btn-primary:focus-visible,
+.btn-ghost:focus-visible {
+    outline: 2px solid var(--uvp-brand);
+    outline-offset: 2px;
+}
 .icon-btn.small { width: 24px; height: 24px; }
 .btn-primary,
 .btn-ghost,
@@ -2856,23 +2913,43 @@ onUnmounted(() => {
 .workspace {
     display: grid;
     grid-template-columns: 240px minmax(0, 1fr);
-    gap: 16px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0;
     min-height: 0;
     flex: 1;
+}
+.workspace-toolbar {
+    grid-column: 1 / -1;
+    min-width: 0;
+    margin-bottom: 0;
+}
+.workspace-toolbar :deep(.uvp-search-panel__surface) {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+    background: transparent;
+    border: 0;
+    border-bottom: 1px solid var(--uvp-panel-border);
+    border-radius: 0;
+    box-shadow: none;
+}
+.workspace-toolbar :deep(.uvp-search-panel__fields) {
+    flex: 1 1 100%;
+    width: 100%;
+}
+.workspace-toolbar .create-device-btn {
+    height: 40px;
+    border-radius: 8px;
 }
 .catalog-pane,
 .content-pane {
     min-width: 0;
     min-height: 0;
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 14px;
-    box-shadow: var(--uvp-panel-shadow);
 }
 .catalog-pane {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    border-right: 1px solid var(--uvp-panel-border);
 }
 .spin { animation: spin 0.8s linear infinite; }
 .drawer-icon {
@@ -2885,38 +2962,18 @@ onUnmounted(() => {
     background: var(--uvp-brand-soft);
     flex: 0 0 auto;
 }
-.catalog-pane :deep(.directory-panel) { width: 100%; min-width: 0; height: 100%; border-right: 0; }
+.catalog-pane :deep(.directory-panel) { width: 100%; min-width: 0; height: 100%; background: transparent; border-right: 0; }
 .content-pane {
     display: flex;
     flex-direction: column;
     padding: 14px 14px 12px;
-}
-.main-head {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    gap: 12px;
-    min-height: 64px;
-}
-.device-filter-panel {
-    width: 100%;
-    margin-bottom: 0;
-}
-.toolbar {
-    display: flex;
-    align-items: center;
-    flex-wrap: nowrap;
-    gap: 10px;
-    width: 100%;
-    justify-content: flex-end;
-    min-width: 0;
 }
 .auto-refresh-control {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     padding: 0 12px;
-    height: 36px;
+    height: 40px;
     background: var(--uvp-list-toolbar-bg);
     border: 1px solid var(--uvp-panel-border);
     border-radius: 10px;
@@ -2931,7 +2988,6 @@ onUnmounted(() => {
     display: inline-flex;
     gap: 2px;
     flex: 0 0 auto;
-    order: 10;
     padding: 3px;
     background: var(--uvp-list-toolbar-bg);
     border: 1px solid var(--uvp-panel-border);
@@ -2961,15 +3017,9 @@ onUnmounted(() => {
 .status-select {
     min-width: 126px;
 }
-.toolbar > .btn-ghost {
+.toolbar-actions > .btn-ghost {
     flex: 0 0 auto;
     min-width: 84px;
-    height: 40px;
-    border-radius: 8px;
-}
-.toolbar > .icon-btn {
-    flex: 0 0 auto;
-    width: 40px;
     height: 40px;
     border-radius: 8px;
 }
@@ -2995,6 +3045,16 @@ onUnmounted(() => {
     color: var(--uvp-brand);
     background: var(--uvp-brand-soft);
     border: 1px solid color-mix(in srgb, var(--uvp-brand) 24%, transparent);
+}
+.device-drilldown-chip {
+    cursor: pointer;
+}
+.device-drilldown-chip:hover {
+    background: color-mix(in srgb, var(--uvp-brand-soft) 78%, var(--uvp-brand));
+}
+.device-drilldown-chip:focus-visible {
+    outline: 2px solid var(--uvp-brand);
+    outline-offset: 2px;
 }
 .filter-chip .close { background: transparent; border: 0; color: inherit; }
 .clear-all { color: var(--uvp-text-secondary); background: transparent; border: 0; }
@@ -4315,15 +4375,29 @@ onUnmounted(() => {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1080px) {
-    .workspace { grid-template-columns: 1fr; }
-    .content-topbar,
-    .main-head {
-        align-items: stretch;
-        flex-direction: column;
+    .workspace {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
     }
-    .topbar-actions,
-    .toolbar {
+    .toolbar-actions {
         flex-wrap: wrap;
+    }
+}
+@media (max-width: 768px) {
+    .workspace-toolbar-row {
+        flex-wrap: wrap;
+    }
+    .toolbar-actions {
+        flex-basis: 100%;
+    }
+    .cmdk {
+        flex-basis: 100%;
+        width: 100%;
+        max-width: none;
+        order: -1;
+    }
+    .cmdk .kbd {
+        display: none;
     }
 }
 </style>
