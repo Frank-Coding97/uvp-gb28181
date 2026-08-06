@@ -264,6 +264,32 @@ describe("PlayConsoleLinked 双区联动", () => {
     vi.clearAllMocks();
   });
 
+  it("拖拽摇杆按八方向发送云台指令，松手停止且不展示绝对角度", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const joystick = wrapper.get(".joystick-stage");
+    vi.spyOn(joystick.element, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 176, bottom: 176, width: 176, height: 176, toJSON: () => ({}),
+    } as DOMRect);
+    const pointerDown = new MouseEvent("pointerdown", { bubbles: true, clientX: 88, clientY: 20 });
+    Object.defineProperty(pointerDown, "pointerId", { value: 1 });
+    joystick.element.dispatchEvent(pointerDown);
+    await flushPromises();
+
+    expect(api.controlPtz).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "up" }));
+    expect(joystick.text()).not.toContain("Pan");
+    expect(joystick.text()).not.toContain("Tilt");
+
+    const pointerUp = new MouseEvent("pointerup", { bubbles: true, clientX: 88, clientY: 20 });
+    Object.defineProperty(pointerUp, "pointerId", { value: 1 });
+    joystick.element.dispatchEvent(pointerUp);
+    await flushPromises();
+
+    expect(api.controlPtz).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({ action: "stop" }));
+    wrapper.unmount();
+  });
+
   it("建立真实点播、读取概况、执行探针并在关闭时仅销毁本地播放器", async () => {
     api.runStreamProbe.mockResolvedValueOnce({
       code: 0,
@@ -536,8 +562,8 @@ describe("PlayConsoleLinked 双区联动", () => {
   it("窗口失焦会停止正在执行的连续云台动作", async () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    const up = wrapper.get("button[title='上']");
-    await up.trigger("pointerdown");
+    const joystick = wrapper.get("[aria-label='云台方向摇杆']");
+    await joystick.trigger("keydown", { key: "ArrowUp" });
     window.dispatchEvent(new Event("blur"));
     await flushPromises();
     expect(api.controlPtz).toHaveBeenNthCalledWith(1, channel.id, expect.objectContaining({ action: "up" }));
@@ -609,9 +635,9 @@ describe("PlayConsoleLinked 双区联动", () => {
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
-    const up = wrapper.get("button[title='上']");
-    expect(up.attributes("disabled")).toBeUndefined();
-    await up.trigger("pointerdown");
+    const joystick = wrapper.get("[aria-label='云台方向摇杆']");
+    expect(joystick.attributes("tabindex")).toBe("0");
+    await joystick.trigger("keydown", { key: "ArrowUp" });
     await flushPromises();
     expect(api.controlPtz).toHaveBeenCalledWith(channel.id, expect.objectContaining({ action: "up" }));
 

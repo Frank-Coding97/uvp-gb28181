@@ -59,14 +59,6 @@ import {
 import {
     Activity,
     AlertTriangle,
-    ArrowDown,
-    ArrowDownLeft,
-    ArrowDownRight,
-    ArrowLeft,
-    ArrowRight,
-    ArrowUp,
-    ArrowUpLeft,
-    ArrowUpRight,
     CheckCircle2,
     ChevronDown,
     Circle,
@@ -3334,16 +3326,31 @@ onBeforeUnmount(() => {
 
                         <!-- 速度模式:方向盘 + 变倍 + 速度 -->
                         <div v-show="ptzMode === 'speed'" class="ptz-speed">
-                            <div class="ptz-pad">
-                                <button title="左上" @pointerdown.prevent="sendPtz('左上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUpLeft :size="17" /></button>
-                                <button title="上" @pointerdown.prevent="sendPtz('上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUp :size="17" /></button>
-                                <button title="右上" @pointerdown.prevent="sendPtz('右上')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowUpRight :size="17" /></button>
-                                <button title="左" @pointerdown.prevent="sendPtz('左')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowLeft :size="17" /></button>
-                                <button class="ptz-stop" title="停止" @click="sendPtz('停止')"><span></span></button>
-                                <button title="右" @pointerdown.prevent="sendPtz('右')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowRight :size="17" /></button>
-                                <button title="左下" @pointerdown.prevent="sendPtz('左下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDownLeft :size="17" /></button>
-                                <button title="下" @pointerdown.prevent="sendPtz('下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDown :size="17" /></button>
-                                <button title="右下" @pointerdown.prevent="sendPtz('右下')" @pointerup.prevent="sendPtz('停止')" @pointerleave="sendPtz('停止')" @pointercancel="sendPtz('停止')"><ArrowDownRight :size="17" /></button>
+                            <div
+                                class="joystick-stage"
+                                :class="{ active: joystickDragging }"
+                                role="group"
+                                tabindex="0"
+                                aria-label="云台方向摇杆"
+                                @pointerdown.prevent="startJoystick"
+                                @pointermove.prevent="moveJoystick"
+                                @pointerup.prevent="endJoystick"
+                                @pointercancel.prevent="endJoystick"
+                                @keydown="handleJoystickKeydown"
+                                @keyup="handleJoystickKeyup"
+                            >
+                                <div class="joystick-base"></div>
+                                <span class="joystick-label top">上</span>
+                                <span class="joystick-label top-right">右上</span>
+                                <span class="joystick-label right">右</span>
+                                <span class="joystick-label bottom-right">右下</span>
+                                <span class="joystick-label bottom">下</span>
+                                <span class="joystick-label bottom-left">左下</span>
+                                <span class="joystick-label left">左</span>
+                                <span class="joystick-label top-left">左上</span>
+                                <div class="joystick-handle" :style="joystickHandleStyle" aria-hidden="true">
+                                    <span></span>
+                                </div>
                             </div>
 
                             <div class="talk-mode-switch" aria-label="对讲模式">
@@ -4715,28 +4722,46 @@ onBeforeUnmount(() => {
     font-size: 8.5px; font-weight: 700; letter-spacing: 0.05em;
 }
 
-/* 方向盘 */
-/* width: 100% 不能省。父级 .ptz-speed 是 grid 容器,而 grid 规范规定:
- * 格子项在行内方向带 auto 外边距时,justify-self 的 stretch 行为失效、改用内容自动尺寸,
- * 空间全被 auto 边距吃掉。那样三列 1fr 会塌成图标宽度,方向盘直接变形。
- * 显式给宽度后 auto 边距只负责居中,不再决定尺寸 —— 同文件的
- * .talk-mode-switch / .talk-button 也是这个写法。 */
-.ptz-pad {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-    width: 100%; max-width: 200px; margin: 8px auto 4px;
+/* 拖拽摇杆 */
+.joystick-stage {
+    position: relative;
+    width: min(176px, 100%); aspect-ratio: 1; margin: 10px auto 6px;
+    border-radius: 50%; cursor: grab; touch-action: none; user-select: none;
 }
-.ptz-pad.disabled { opacity: 0.42; pointer-events: none; }
-.ptz-pad button {
-    display: grid; place-items: center; height: 40px;
-    color: var(--uvp-text-secondary); background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 8px;
-    cursor: pointer; transition: all 0.12s ease;
-    user-select: none;
+.joystick-stage.active { cursor: grabbing; }
+.joystick-stage:focus-visible { outline: 2px solid var(--uvp-brand); outline-offset: 3px; }
+.joystick-base {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: color-mix(in srgb, var(--uvp-brand-soft) 48%, var(--uvp-list-toolbar-bg));
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
+    box-shadow: inset 0 0 0 18px color-mix(in srgb, var(--uvp-list-toolbar-bg) 82%, transparent), inset 0 2px 7px color-mix(in srgb, var(--uvp-text-primary) 12%, transparent), 0 4px 12px color-mix(in srgb, var(--uvp-brand) 8%, transparent);
 }
-.ptz-pad button:hover:not(:disabled) { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border)); }
-.ptz-pad button:active:not(:disabled) { transform: scale(0.94); }
-.ptz-stop { background: transparent !important; border-color: transparent !important; }
-.ptz-stop span { width: 10px; height: 10px; background: var(--uvp-danger); border-radius: 2px; }
+.joystick-base::before {
+    content: ""; position: absolute; inset: 38px; border-radius: 50%;
+    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border);
+}
+.joystick-label {
+    position: absolute; z-index: 2; color: var(--uvp-text-tertiary);
+    font-size: 9px; line-height: 1; pointer-events: none;
+}
+.joystick-label.top { top: 9px; left: 50%; transform: translateX(-50%); }
+.joystick-label.top-right { top: 19px; right: 19px; }
+.joystick-label.right { top: 50%; right: 9px; transform: translateY(-50%); }
+.joystick-label.bottom-right { right: 19px; bottom: 19px; }
+.joystick-label.bottom { bottom: 9px; left: 50%; transform: translateX(-50%); }
+.joystick-label.bottom-left { bottom: 19px; left: 19px; }
+.joystick-label.left { top: 50%; left: 9px; transform: translateY(-50%); }
+.joystick-label.top-left { top: 19px; left: 19px; }
+.joystick-handle {
+    position: absolute; top: 50%; left: 50%; z-index: 3;
+    display: grid; place-items: center; width: 52px; height: 52px;
+    background: var(--uvp-brand); border: 6px solid color-mix(in srgb, white 76%, var(--uvp-brand));
+    border-radius: 50%; box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 30%, transparent);
+    transition: transform 0.22s cubic-bezier(.2, .8, .2, 1);
+    pointer-events: none;
+}
+.joystick-stage.active .joystick-handle { transition: none; }
+.joystick-handle span { width: 9px; height: 9px; background: color-mix(in srgb, white 88%, var(--uvp-brand)); border-radius: 50%; }
 
 .talk-mode-switch {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -18,14 +18,6 @@ import { Message } from "@arco-design/web-vue";
 import {
     Activity,
     AlertTriangle,
-    ArrowDown,
-    ArrowDownLeft,
-    ArrowDownRight,
-    ArrowLeft,
-    ArrowRight,
-    ArrowUp,
-    ArrowUpLeft,
-    ArrowUpRight,
     CheckCircle2,
     Circle,
     Compass,
@@ -177,6 +169,15 @@ const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模�
 const moveSpeed = ref(6); // 1-10 步进,转发时 * 25 得 GB28181 1-255
 const focusMode = ref<"auto" | "manual">("auto");
 const irisMode = ref<"auto" | "manual">("auto");
+type JoystickDirection = "左上" | "上" | "右上" | "左" | "右" | "左下" | "下" | "右下";
+const joystickDragging = ref(false);
+const joystickPointerId = ref<number | null>(null);
+const joystickDirection = ref<JoystickDirection | "">("");
+const joystickOffsetX = ref(0);
+const joystickOffsetY = ref(0);
+const joystickHandleStyle = computed(() => ({
+    transform: `translate(calc(-50% + ${joystickOffsetX.value}px), calc(-50% + ${joystickOffsetY.value}px))`,
+}));
 
 // 精准 PTZ(2022)
 const precisePan = ref(180);   // 0-360
@@ -348,6 +349,94 @@ function sendPtz(action: string) {
     Message.info(`[Mock] 云台指令:${action} · 速度 ${moveSpeed.value}`);
 }
 
+const joystickDirectionMap: Record<string, JoystickDirection> = {
+    ArrowUp: "上",
+    ArrowRight: "右",
+    ArrowDown: "下",
+    ArrowLeft: "左",
+};
+const joystickDiagonalDirection = (dx: number, dy: number): JoystickDirection => {
+    const angle = (Math.atan2(dx, -dy) * 180 / Math.PI + 360) % 360;
+    if (angle < 22.5 || angle >= 337.5) return "上";
+    if (angle < 67.5) return "右上";
+    if (angle < 112.5) return "右";
+    if (angle < 157.5) return "右下";
+    if (angle < 202.5) return "下";
+    if (angle < 247.5) return "左下";
+    if (angle < 292.5) return "左";
+    return "左上";
+};
+function stopJoystickMotion() {
+    if (joystickDirection.value) sendPtz("停止");
+    joystickDirection.value = "";
+}
+function resetJoystickPosition() {
+    joystickDragging.value = false;
+    joystickPointerId.value = null;
+    joystickOffsetX.value = 0;
+    joystickOffsetY.value = 0;
+}
+function updateJoystick(event: PointerEvent, stage: HTMLElement) {
+    const rect = stage.getBoundingClientRect();
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const maxRadius = Math.max(12, Math.min(rect.width, rect.height) / 2 - 36);
+    let dx = event.clientX - centerX;
+    let dy = event.clientY - centerY;
+    const distance = Math.hypot(dx, dy);
+    const clampedDistance = Math.min(distance, maxRadius);
+    if (distance > maxRadius) {
+        dx = dx / distance * maxRadius;
+        dy = dy / distance * maxRadius;
+    }
+    joystickOffsetX.value = dx;
+    joystickOffsetY.value = dy;
+    if (clampedDistance < 8) {
+        stopJoystickMotion();
+        return;
+    }
+    const direction = joystickDiagonalDirection(dx, dy);
+    if (direction !== joystickDirection.value) {
+        joystickDirection.value = direction;
+        sendPtz(direction);
+    }
+}
+function startJoystick(event: PointerEvent) {
+    const stage = event.currentTarget as HTMLElement;
+    joystickDragging.value = true;
+    joystickPointerId.value = event.pointerId;
+    stage.setPointerCapture?.(event.pointerId);
+    updateJoystick(event, stage);
+}
+function moveJoystick(event: PointerEvent) {
+    if (!joystickDragging.value || joystickPointerId.value !== event.pointerId) return;
+    updateJoystick(event, event.currentTarget as HTMLElement);
+}
+function endJoystick(event?: PointerEvent) {
+    if (event && joystickPointerId.value !== event.pointerId) return;
+    stopJoystickMotion();
+    if (event) {
+        const stage = event.currentTarget as HTMLElement;
+        if (stage.hasPointerCapture?.(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+    }
+    resetJoystickPosition();
+}
+function handleJoystickKeydown(event: KeyboardEvent) {
+    const direction = joystickDirectionMap[event.key];
+    if (!direction) return;
+    event.preventDefault();
+    joystickDragging.value = true;
+    if (direction !== joystickDirection.value) {
+        joystickDirection.value = direction;
+        sendPtz(direction);
+    }
+}
+function handleJoystickKeyup(event: KeyboardEvent) {
+    if (!joystickDirectionMap[event.key]) return;
+    event.preventDefault();
+    endJoystick();
+}
+
 function sendPrecise() {
     Message.success(
         `[Mock] 精准 PTZ · Pan=${precisePan.value}° Tilt=${preciseTilt.value}° Zoom=${preciseZoom.value}×`,
@@ -443,6 +532,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
+    endJoystick();
     clearProbeTimers();
     clearTimer();
     stopSession();
@@ -635,16 +725,31 @@ onBeforeUnmount(() => {
 
                         <!-- 速度模式:方向盘 + 变倍 + 速度 -->
                         <div v-show="ptzMode === 'speed'" class="ptz-speed">
-                            <div class="ptz-pad">
-                                <button title="左上" @mousedown="sendPtz('左上')" @mouseup="sendPtz('停止')"><ArrowUpLeft :size="17" /></button>
-                                <button title="上" @mousedown="sendPtz('上')" @mouseup="sendPtz('停止')"><ArrowUp :size="17" /></button>
-                                <button title="右上" @mousedown="sendPtz('右上')" @mouseup="sendPtz('停止')"><ArrowUpRight :size="17" /></button>
-                                <button title="左" @mousedown="sendPtz('左')" @mouseup="sendPtz('停止')"><ArrowLeft :size="17" /></button>
-                                <button class="ptz-stop" title="停止" @click="sendPtz('停止')"><span></span></button>
-                                <button title="右" @mousedown="sendPtz('右')" @mouseup="sendPtz('停止')"><ArrowRight :size="17" /></button>
-                                <button title="左下" @mousedown="sendPtz('左下')" @mouseup="sendPtz('停止')"><ArrowDownLeft :size="17" /></button>
-                                <button title="下" @mousedown="sendPtz('下')" @mouseup="sendPtz('停止')"><ArrowDown :size="17" /></button>
-                                <button title="右下" @mousedown="sendPtz('右下')" @mouseup="sendPtz('停止')"><ArrowDownRight :size="17" /></button>
+                            <div
+                                class="joystick-stage"
+                                :class="{ active: joystickDragging }"
+                                role="group"
+                                tabindex="0"
+                                aria-label="云台方向摇杆"
+                                @pointerdown.prevent="startJoystick"
+                                @pointermove.prevent="moveJoystick"
+                                @pointerup.prevent="endJoystick"
+                                @pointercancel.prevent="endJoystick"
+                                @keydown="handleJoystickKeydown"
+                                @keyup="handleJoystickKeyup"
+                            >
+                                <div class="joystick-base"></div>
+                                <span class="joystick-label top">上</span>
+                                <span class="joystick-label top-right">右上</span>
+                                <span class="joystick-label right">右</span>
+                                <span class="joystick-label bottom-right">右下</span>
+                                <span class="joystick-label bottom">下</span>
+                                <span class="joystick-label bottom-left">左下</span>
+                                <span class="joystick-label left">左</span>
+                                <span class="joystick-label top-left">左上</span>
+                                <div class="joystick-handle" :style="joystickHandleStyle" aria-hidden="true">
+                                    <span></span>
+                                </div>
                             </div>
 
                             <button
@@ -1282,22 +1387,46 @@ onBeforeUnmount(() => {
     font-size: 8.5px; font-weight: 700; letter-spacing: 0.05em;
 }
 
-/* 方向盘 */
-.ptz-pad {
-    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px;
-    max-width: 200px; margin: 8px auto 4px;
+/* 拖拽摇杆 */
+.joystick-stage {
+    position: relative;
+    width: min(176px, 100%); aspect-ratio: 1; margin: 10px auto 6px;
+    border-radius: 50%; cursor: grab; touch-action: none; user-select: none;
 }
-.ptz-pad button {
-    display: grid; place-items: center; height: 40px;
-    color: var(--uvp-text-secondary); background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border); border-radius: 8px;
-    cursor: pointer; transition: all 0.12s ease;
-    user-select: none;
+.joystick-stage.active { cursor: grabbing; }
+.joystick-stage:focus-visible { outline: 2px solid var(--uvp-brand); outline-offset: 3px; }
+.joystick-base {
+    position: absolute; inset: 0; border-radius: 50%;
+    background: color-mix(in srgb, var(--uvp-brand-soft) 48%, var(--uvp-list-toolbar-bg));
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
+    box-shadow: inset 0 0 0 18px color-mix(in srgb, var(--uvp-list-toolbar-bg) 82%, transparent), inset 0 2px 7px color-mix(in srgb, var(--uvp-text-primary) 12%, transparent), 0 4px 12px color-mix(in srgb, var(--uvp-brand) 8%, transparent);
 }
-.ptz-pad button:hover:not(:disabled) { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 40%, var(--uvp-panel-border)); }
-.ptz-pad button:active:not(:disabled) { transform: scale(0.94); }
-.ptz-stop { background: transparent !important; border-color: transparent !important; }
-.ptz-stop span { width: 10px; height: 10px; background: var(--uvp-danger); border-radius: 2px; }
+.joystick-base::before {
+    content: ""; position: absolute; inset: 38px; border-radius: 50%;
+    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border);
+}
+.joystick-label {
+    position: absolute; z-index: 2; color: var(--uvp-text-tertiary);
+    font-size: 9px; line-height: 1; pointer-events: none;
+}
+.joystick-label.top { top: 9px; left: 50%; transform: translateX(-50%); }
+.joystick-label.top-right { top: 19px; right: 19px; }
+.joystick-label.right { top: 50%; right: 9px; transform: translateY(-50%); }
+.joystick-label.bottom-right { right: 19px; bottom: 19px; }
+.joystick-label.bottom { bottom: 9px; left: 50%; transform: translateX(-50%); }
+.joystick-label.bottom-left { bottom: 19px; left: 19px; }
+.joystick-label.left { top: 50%; left: 9px; transform: translateY(-50%); }
+.joystick-label.top-left { top: 19px; left: 19px; }
+.joystick-handle {
+    position: absolute; top: 50%; left: 50%; z-index: 3;
+    display: grid; place-items: center; width: 52px; height: 52px;
+    background: var(--uvp-brand); border: 6px solid color-mix(in srgb, white 76%, var(--uvp-brand));
+    border-radius: 50%; box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 30%, transparent);
+    transition: transform 0.22s cubic-bezier(.2, .8, .2, 1);
+    pointer-events: none;
+}
+.joystick-stage.active .joystick-handle { transition: none; }
+.joystick-handle span { width: 9px; height: 9px; background: color-mix(in srgb, white 88%, var(--uvp-brand)); border-radius: 50%; }
 
 .talk-button {
     display: flex; align-items: center; justify-content: center; gap: 7px;

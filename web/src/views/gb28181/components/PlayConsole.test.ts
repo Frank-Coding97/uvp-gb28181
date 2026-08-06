@@ -55,7 +55,7 @@ describe("PlayConsole 视频探针", () => {
             props: { visible: true, channel: { ...channel, ptzType: 3 } },
         });
 
-        expect(wrapper.get("button[title='上']").attributes("disabled")).toBeUndefined();
+        expect(wrapper.get("[aria-label='云台方向摇杆']").attributes("tabindex")).toBe("0");
         expect(wrapper.text()).not.toContain("灯光");
         expect(wrapper.text()).not.toContain("红外");
         expect(wrapper.text()).not.toContain("加热");
