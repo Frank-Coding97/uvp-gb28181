@@ -64,6 +64,22 @@ func (c *ServerConfigCache) Get(ctx context.Context, nodeID int64) (node.ServerC
 	return cfg, nil
 }
 
+// Refresh 绕过缓存重新拉取指定节点配置,成功后替换该节点的缓存值。
+func (c *ServerConfigCache) Refresh(ctx context.Context, nodeID int64) (node.ServerConfig, error) {
+	if c == nil || c.fetch == nil {
+		return node.ServerConfig{}, fmt.Errorf("ServerConfigCache: fetch 未配置")
+	}
+	cfg, err := c.fetch(ctx, nodeID)
+	if err != nil {
+		return node.ServerConfig{}, err
+	}
+
+	c.mu.Lock()
+	c.data[nodeID] = cachedEntry{cfg: cfg, fetchedAt: time.Now()}
+	c.mu.Unlock()
+	return cfg, nil
+}
+
 // Invalidate 手动失效指定节点缓存(节点重启 / 配置热更后调)
 func (c *ServerConfigCache) Invalidate(nodeID int64) {
 	c.mu.Lock()
