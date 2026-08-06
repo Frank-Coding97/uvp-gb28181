@@ -55,4 +55,31 @@ describe("PlayWindow playback embedding", () => {
         expect(wrapper.emitted("timeupdate")).toEqual([[1234]]);
         expect(wrapper.emitted("loading")).toEqual([[true]]);
     });
+
+    it("reuses the EasyPlayer instance when the stream protocol URL changes", async () => {
+        const instances: FakeEasyPlayer[] = [];
+        class FakeEasyPlayer {
+            on = vi.fn();
+            play = vi.fn();
+            destroy = vi.fn();
+
+            constructor(_element: HTMLElement, _value: Record<string, unknown>) {
+                instances.push(this);
+            }
+        }
+        (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+        const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv" } });
+        await flushPromises();
+        await wrapper.setProps({ url: "http://zlm/live.flv" });
+        await flushPromises();
+
+        expect(instances).toHaveLength(1);
+        expect(instances[0].play).toHaveBeenNthCalledWith(1, "ws://zlm/live.flv");
+        expect(instances[0].play).toHaveBeenNthCalledWith(2, "http://zlm/live.flv");
+        expect(instances[0].destroy).not.toHaveBeenCalled();
+
+        wrapper.unmount();
+        expect(instances[0].destroy).toHaveBeenCalledTimes(1);
+    });
 });

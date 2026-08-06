@@ -35,13 +35,25 @@ function destroy() {
 }
 
 async function play(u: string) {
-    destroy();
     errorMsg.value = "";
-    if (!u) return;
+    if (!u) {
+        destroy();
+        return;
+    }
 
     if (typeof EasyPlayerPro === "undefined") {
         errorMsg.value = "EasyPlayer 未加载,请检查 /easyplayer/EasyPlayer-pro.js";
         emit("error", errorMsg.value);
+        return;
+    }
+
+    if (player.value) {
+        try {
+            await player.value.play(u);
+        } catch (e) {
+            errorMsg.value = `切换播放地址失败: ${(e as Error).message || e}`;
+            emit("error", errorMsg.value);
+        }
         return;
     }
 
@@ -87,8 +99,8 @@ async function play(u: string) {
         });
         p.on("loading", (value: unknown) => emit("loading", Boolean(value)));
 
-        p.play(u);
         player.value = p;
+        await p.play(u);
     } catch (e) {
         errorMsg.value = `初始化失败: ${(e as Error).message || e}`;
         emit("error", errorMsg.value);
