@@ -55,7 +55,10 @@ describe("PlayConsole 视频探针", () => {
             props: { visible: true, channel: { ...channel, ptzType: 3 } },
         });
 
-        expect(wrapper.get("[aria-label='云台方向摇杆']").attributes("tabindex")).toBe("0");
+        const joystick = wrapper.get("[aria-label='云台方向摇杆']");
+        expect(joystick.attributes("tabindex")).toBe("0");
+        expect(joystick.findAll(".joystick-dot")).toHaveLength(8);
+        expect(joystick.findAll(".joystick-label.diagonal")).toHaveLength(4);
         expect(wrapper.text()).not.toContain("灯光");
         expect(wrapper.text()).not.toContain("红外");
         expect(wrapper.text()).not.toContain("加热");

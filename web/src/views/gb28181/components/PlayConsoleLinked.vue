@@ -1447,6 +1447,7 @@ function reconnect() {
 }
 
 function handleClose() {
+    releasePtzControl();
     cleanupTalkLocally();
     cleanupSessionLocally();
     emit("update:visible", false);
@@ -1887,6 +1888,10 @@ function handleJoystickKeyup(event: KeyboardEvent) {
     if (!joystickDirectionMap[event.key]) return;
     event.preventDefault();
     endJoystick();
+}
+function releasePtzControl() {
+    if (joystickDragging.value || joystickDirection.value) endJoystick();
+    else if (activePtzAction) void sendPtz("停止");
 }
 
 async function sendPrecise() {
@@ -2670,8 +2675,7 @@ function copyProtocolUrl(proto: StreamProtocol) {
 }
 
 function releaseContinuousControls() {
-    if (activePtzAction) void sendPtz("停止");
-    if (joystickDragging.value || joystickDirection.value) endJoystick();
+    releasePtzControl();
     void stopTalk();
 }
 
@@ -2686,7 +2690,7 @@ watch(
     [() => props.visible, () => channelContextKey()],
     ([visible]) => {
         if (visible && props.channel) void startSession();
-        else { cleanupTalkLocally(); cleanupSessionLocally(); }
+        else { releasePtzControl(); cleanupTalkLocally(); cleanupSessionLocally(); }
     },
     { immediate: true },
 );
@@ -3324,7 +3328,7 @@ onBeforeUnmount(() => {
                             </button>
                         </div>
 
-                        <!-- 速度模式:方向盘 + 变倍 + 速度 -->
+                        <!-- 速度模式:拖拽摇杆 + 变倍 + 速度 -->
                         <div v-show="ptzMode === 'speed'" class="ptz-speed">
                             <div
                                 class="joystick-stage"
@@ -3340,14 +3344,24 @@ onBeforeUnmount(() => {
                                 @keyup="handleJoystickKeyup"
                             >
                                 <div class="joystick-base"></div>
+                                <div class="joystick-dots" aria-hidden="true">
+                                    <span class="joystick-dot dot-top"></span>
+                                    <span class="joystick-dot dot-top-right"></span>
+                                    <span class="joystick-dot dot-right"></span>
+                                    <span class="joystick-dot dot-bottom-right"></span>
+                                    <span class="joystick-dot dot-bottom"></span>
+                                    <span class="joystick-dot dot-bottom-left"></span>
+                                    <span class="joystick-dot dot-left"></span>
+                                    <span class="joystick-dot dot-top-left"></span>
+                                </div>
                                 <span class="joystick-label top">上</span>
-                                <span class="joystick-label top-right">右上</span>
+                                <span class="joystick-label diagonal top-right">右上</span>
                                 <span class="joystick-label right">右</span>
-                                <span class="joystick-label bottom-right">右下</span>
+                                <span class="joystick-label diagonal bottom-right">右下</span>
                                 <span class="joystick-label bottom">下</span>
-                                <span class="joystick-label bottom-left">左下</span>
+                                <span class="joystick-label diagonal bottom-left">左下</span>
                                 <span class="joystick-label left">左</span>
-                                <span class="joystick-label top-left">左上</span>
+                                <span class="joystick-label diagonal top-left">左上</span>
                                 <div class="joystick-handle" :style="joystickHandleStyle" aria-hidden="true">
                                     <span></span>
                                 </div>
@@ -4732,36 +4746,70 @@ onBeforeUnmount(() => {
 .joystick-stage:focus-visible { outline: 2px solid var(--uvp-brand); outline-offset: 3px; }
 .joystick-base {
     position: absolute; inset: 0; border-radius: 50%;
-    background: color-mix(in srgb, var(--uvp-brand-soft) 48%, var(--uvp-list-toolbar-bg));
-    border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, var(--uvp-panel-border));
-    box-shadow: inset 0 0 0 18px color-mix(in srgb, var(--uvp-list-toolbar-bg) 82%, transparent), inset 0 2px 7px color-mix(in srgb, var(--uvp-text-primary) 12%, transparent), 0 4px 12px color-mix(in srgb, var(--uvp-brand) 8%, transparent);
+    background: radial-gradient(circle at 36% 28%, color-mix(in srgb, white 18%, var(--uvp-brand-soft)) 0%, var(--uvp-brand-soft) 46%, color-mix(in srgb, var(--uvp-text-primary) 12%, var(--uvp-list-toolbar-bg)) 100%);
+    border: 2px solid color-mix(in srgb, var(--uvp-brand) 30%, var(--uvp-panel-border));
+    box-shadow: inset 0 3px 4px color-mix(in srgb, white 14%, transparent), inset 0 -8px 14px color-mix(in srgb, var(--uvp-text-primary) 14%, transparent), 0 8px 18px color-mix(in srgb, var(--uvp-brand) 15%, transparent), 0 2px 4px color-mix(in srgb, var(--uvp-text-primary) 15%, transparent);
 }
 .joystick-base::before {
-    content: ""; position: absolute; inset: 38px; border-radius: 50%;
-    background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border);
+    content: ""; position: absolute; inset: 25px; border-radius: 50%;
+    background: radial-gradient(circle at 44% 38%, color-mix(in srgb, var(--uvp-brand-soft) 30%, var(--uvp-list-toolbar-bg)) 0%, var(--uvp-list-toolbar-bg) 62%, color-mix(in srgb, var(--uvp-text-primary) 8%, var(--uvp-list-toolbar-bg)) 100%);
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 18%, var(--uvp-panel-border));
+    box-shadow: inset 0 5px 10px color-mix(in srgb, var(--uvp-text-primary) 11%, transparent), inset 0 -2px 4px color-mix(in srgb, white 8%, transparent), 0 1px 0 color-mix(in srgb, white 10%, transparent);
 }
+.joystick-base::after {
+    content: ""; position: absolute; inset: 31px; border-radius: 50%;
+    border: 1px solid color-mix(in srgb, var(--uvp-brand) 14%, var(--uvp-panel-border));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--uvp-text-primary) 4%, transparent);
+}
+.joystick-dots { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.joystick-dot {
+    position: absolute; width: 7px; height: 7px; border-radius: 50%;
+    background: radial-gradient(circle at 34% 28%, color-mix(in srgb, white 42%, var(--uvp-text-tertiary)) 0 18%, var(--uvp-text-tertiary) 58%, color-mix(in srgb, var(--uvp-text-primary) 35%, var(--uvp-text-tertiary)) 100%);
+    border: 1px solid color-mix(in srgb, var(--uvp-text-primary) 12%, transparent);
+    box-shadow: inset 0 1px 1px color-mix(in srgb, white 26%, transparent), 0 1px 2px color-mix(in srgb, var(--uvp-text-primary) 24%, transparent);
+}
+.joystick-dot.dot-top { top: 22px; left: 50%; transform: translateX(-50%); }
+.joystick-dot.dot-top-right { top: 38px; right: 38px; }
+.joystick-dot.dot-right { top: 50%; right: 22px; transform: translateY(-50%); }
+.joystick-dot.dot-bottom-right { right: 38px; bottom: 38px; }
+.joystick-dot.dot-bottom { bottom: 22px; left: 50%; transform: translateX(-50%); }
+.joystick-dot.dot-bottom-left { bottom: 38px; left: 38px; }
+.joystick-dot.dot-left { top: 50%; left: 22px; transform: translateY(-50%); }
+.joystick-dot.dot-top-left { top: 38px; left: 38px; }
 .joystick-label {
-    position: absolute; z-index: 2; color: var(--uvp-text-tertiary);
+    position: absolute; z-index: 3; color: var(--uvp-text-tertiary);
     font-size: 9px; line-height: 1; pointer-events: none;
 }
 .joystick-label.top { top: 9px; left: 50%; transform: translateX(-50%); }
-.joystick-label.top-right { top: 19px; right: 19px; }
+.joystick-label.top-right { top: 8px; right: 8px; }
 .joystick-label.right { top: 50%; right: 9px; transform: translateY(-50%); }
-.joystick-label.bottom-right { right: 19px; bottom: 19px; }
+.joystick-label.bottom-right { right: 8px; bottom: 8px; }
 .joystick-label.bottom { bottom: 9px; left: 50%; transform: translateX(-50%); }
-.joystick-label.bottom-left { bottom: 19px; left: 19px; }
+.joystick-label.bottom-left { bottom: 8px; left: 8px; }
 .joystick-label.left { top: 50%; left: 9px; transform: translateY(-50%); }
-.joystick-label.top-left { top: 19px; left: 19px; }
+.joystick-label.top-left { top: 8px; left: 8px; }
 .joystick-handle {
-    position: absolute; top: 50%; left: 50%; z-index: 3;
+    position: absolute; top: 50%; left: 50%; z-index: 4;
     display: grid; place-items: center; width: 52px; height: 52px;
-    background: var(--uvp-brand); border: 6px solid color-mix(in srgb, white 76%, var(--uvp-brand));
-    border-radius: 50%; box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 30%, transparent);
+    background: radial-gradient(circle at 34% 26%, color-mix(in srgb, white 88%, var(--uvp-brand)) 0 6%, color-mix(in srgb, white 30%, var(--uvp-brand)) 20%, var(--uvp-brand) 56%, var(--uvp-brand-strong) 100%);
+    border: 5px solid color-mix(in srgb, white 58%, var(--uvp-brand));
+    border-radius: 50%;
+    box-shadow: inset 4px 4px 8px color-mix(in srgb, white 34%, transparent), inset -6px -8px 11px color-mix(in srgb, black 24%, transparent), 0 9px 16px color-mix(in srgb, var(--uvp-brand) 34%, transparent), 0 3px 4px color-mix(in srgb, black 28%, transparent), 0 0 0 4px var(--uvp-brand-soft), 0 0 0 5px color-mix(in srgb, var(--uvp-brand) 30%, transparent);
     transition: transform 0.22s cubic-bezier(.2, .8, .2, 1);
     pointer-events: none;
 }
-.joystick-stage.active .joystick-handle { transition: none; }
-.joystick-handle span { width: 9px; height: 9px; background: color-mix(in srgb, white 88%, var(--uvp-brand)); border-radius: 50%; }
+.joystick-stage.active .joystick-handle {
+    box-shadow: inset 3px 3px 7px color-mix(in srgb, white 28%, transparent), inset -5px -6px 9px color-mix(in srgb, black 28%, transparent), 0 5px 10px color-mix(in srgb, var(--uvp-brand) 28%, transparent), 0 2px 3px color-mix(in srgb, black 24%, transparent), 0 0 0 4px var(--uvp-brand-soft), 0 0 0 5px color-mix(in srgb, var(--uvp-brand) 38%, transparent);
+    transition: none;
+}
+.joystick-handle span {
+    position: absolute; top: 9px; left: 11px; width: 17px; height: 9px;
+    background: linear-gradient(145deg, color-mix(in srgb, white 74%, transparent), transparent);
+    border-radius: 50%; filter: blur(.2px); opacity: .82;
+}
+@media (prefers-reduced-motion: reduce) {
+    .joystick-handle { transition: none; }
+}
 
 .talk-mode-switch {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));

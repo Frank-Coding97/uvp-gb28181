@@ -269,6 +269,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     const joystick = wrapper.get(".joystick-stage");
+    expect(joystick.findAll(".joystick-dot")).toHaveLength(8);
+    expect(joystick.findAll(".joystick-label.diagonal")).toHaveLength(4);
     vi.spyOn(joystick.element, "getBoundingClientRect").mockReturnValue({
       x: 0, y: 0, top: 0, left: 0, right: 176, bottom: 176, width: 176, height: 176, toJSON: () => ({}),
     } as DOMRect);
@@ -287,6 +289,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     expect(api.controlPtz).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({ action: "stop" }));
+    expect(api.controlPtz).toHaveBeenCalledTimes(2);
     wrapper.unmount();
   });
 
