@@ -10,7 +10,11 @@ interface Props {
 }
 
 const props = defineProps<Props>();
-const emit = defineEmits<{ (e: "error", msg: string): void }>();
+const emit = defineEmits<{
+    (e: "error", msg: string): void;
+    (e: "timeupdate", timestamp: number): void;
+    (e: "loading", value: boolean): void;
+}>();
 
 // EasyPlayerPro 由 index.html 静态引入(public/easyplayer/EasyPlayer-pro.js),挂在 window
 declare const EasyPlayerPro: any;
@@ -78,6 +82,10 @@ async function play(u: string) {
             errorMsg.value = "拉流超时";
             emit("error", errorMsg.value);
         });
+        p.on("timeUpdate", (timestamp: unknown) => {
+            if (typeof timestamp === "number" && Number.isFinite(timestamp)) emit("timeupdate", timestamp);
+        });
+        p.on("loading", (value: unknown) => emit("loading", Boolean(value)));
 
         p.play(u);
         player.value = p;
@@ -126,11 +134,6 @@ defineExpose({ stop: destroy });
 
 .play-window.playback .placeholder {
     display: none;
-}
-
-.play-window.playback :deep(.easyplayer-controls),
-.play-window.playback :deep(.easyplayer-zoom-controls) {
-    display: none !important;
 }
 
 .player {

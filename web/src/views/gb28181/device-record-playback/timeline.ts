@@ -110,12 +110,14 @@ export function panTimelineViewport(range: TimelineRange, viewport: TimelineView
 function tickSteps(durationMs: number) {
     const minute = 60_000;
     const hour = 60 * minute;
-    if (durationMs > 8 * hour) return { major: 2 * hour, minor: 30 * minute };
-    if (durationMs > 2 * hour) return { major: hour, minor: 15 * minute };
-    if (durationMs > hour) return { major: 30 * minute, minor: 10 * minute };
-    if (durationMs > 45 * minute) return { major: 15 * minute, minor: 5 * minute };
+    if (durationMs > 12 * hour) return { major: 2 * hour, minor: 30 * minute };
+    if (durationMs > 6 * hour) return { major: hour, minor: 15 * minute };
+    if (durationMs > 3 * hour) return { major: 30 * minute, minor: 10 * minute };
+    if (durationMs > 90 * minute) return { major: 15 * minute, minor: 5 * minute };
+    if (durationMs > 45 * minute) return { major: 10 * minute, minor: 2 * minute };
     if (durationMs > 15 * minute) return { major: 5 * minute, minor: minute };
-    return { major: 2 * minute, minor: 30_000 };
+    if (durationMs > 5 * minute) return { major: minute, minor: 10_000 };
+    return { major: 30_000, minor: 5_000 };
 }
 
 export function buildTimelineTicks(viewport: TimelineRange): TimelineTick[] {

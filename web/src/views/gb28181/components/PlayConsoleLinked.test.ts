@@ -1,4 +1,4 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { Message, Modal } from "@arco-design/web-vue";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -195,6 +195,12 @@ function operationResponse(
   };
 }
 
+async function requestDeviceStatus(wrapper: VueWrapper) {
+  await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+  await wrapper.get(".advanced-status-refresh").trigger("click");
+  await flushPromises();
+}
+
 describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
     api.getHomePosition.mockReset();
@@ -289,6 +295,9 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     expect(api.startPlay).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
     expect(api.getStreamMonitor).toHaveBeenCalledWith("stream-1");
+    expect(api.getDeviceStatus).not.toHaveBeenCalled();
+    expect(api.listCruiseTracks).toHaveBeenCalledWith(channel.id, false);
+    expect(api.listCruiseTracks).not.toHaveBeenCalledWith(channel.id, true);
     // 流信息 tab 已并入探针 tab,原来的"累计 X 观看"现在在探针概览卡里
     await wrapper.get("[data-testid='linked-tab-probe']").trigger("click");
     expect(wrapper.get("[data-testid='stream-brief']").text()).toContain("累计 3");
@@ -464,6 +473,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(source).toMatch(/\.linked-detail\s*\{[^}]*height:\s*var\(--linked-detail-height\)/s);
     expect(source).toMatch(/\.linked-card\s*\{[^}]*box-sizing:\s*border-box/s);
     expect(source).toMatch(/\.preset-tile-more\s*\{[^}]*box-sizing:\s*border-box/s);
+    expect(source).toMatch(
+      /@media \(max-width: 720px\)[\s\S]*?\.linked-detail\s*>\s*\.linked-ptz-layout\s*\{[^}]*flex:\s*0 0 auto;[^}]*grid-template-rows:\s*none;[^}]*height:\s*auto/s
+    );
+    expect(source).toContain("@container (max-width: 340px)");
     // 探针详情条三栏不等分:时间线是横向柱状图,等分会把 32 根柱子挤到每根不足 9px
     expect(source).toMatch(
       /\.linked-probe-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+minmax\(0,\s*1fr\)\s+minmax\(0,\s*1\.4fr\)/s
@@ -658,6 +671,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
 
     const nextChannel = {
       ...channel,
@@ -667,6 +681,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     };
     await wrapper.setProps({ channel: nextChannel });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
 
     expect(api.startPlay).toHaveBeenLastCalledWith(nextChannel.deviceId, nextChannel.channelId);
     expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
@@ -708,6 +723,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
     await vi.advanceTimersByTimeAsync(1000);
     expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "old-device-status-op");
 
@@ -719,6 +735,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     };
     await wrapper.setProps({ channel: nextChannel });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
     expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
 
     resolveOldOperation(operationResponse("accepted", "old-device-status-op", null));
@@ -1051,6 +1068,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
     await vi.advanceTimersByTimeAsync(1000);
     expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
     expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
@@ -1109,6 +1127,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
     expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "record-status-op");
@@ -1159,6 +1178,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
     await vi.advanceTimersByTimeAsync(1000);
     await flushPromises();
     expect(api.getDeviceStatus).toHaveBeenCalledTimes(1);
@@ -1202,6 +1222,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
     await vi.advanceTimersByTimeAsync(1000);
     expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "hung-device-status-op");
 
@@ -1235,6 +1256,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
+    await requestDeviceStatus(wrapper);
     await vi.advanceTimersByTimeAsync(15000);
     await flushPromises();
     expect(api.getDeviceStatus).toHaveBeenCalledTimes(2);
@@ -1277,7 +1299,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await requestDeviceStatus(wrapper);
 
     const warning = wrapper.get("[data-testid='alarm-resolution-warning']");
     expect(warning.text()).toContain("报警目标不明确");
@@ -1314,7 +1336,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await requestDeviceStatus(wrapper);
     expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("未找到可用的 134 报警输入");
     expect(wrapper.get("[data-testid='alarm-resolution-warning']").text()).toContain("按注册父设备编码发送");
     expect(wrapper.get("[data-testid='advanced-guard']").attributes("disabled")).toBeUndefined();
@@ -1335,7 +1357,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await requestDeviceStatus(wrapper);
     expect(wrapper.get("[data-testid='advanced-fact-status']").text()).toContain("设备录制中");
 
     await wrapper.get(".advanced-status-refresh").trigger("click");
@@ -1721,7 +1743,7 @@ describe("PlayConsoleLinked 双区联动", () => {
     });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
-    expect(api.listCruiseTracks).toHaveBeenCalledWith(channel.id, true);
+    expect(api.listCruiseTracks).toHaveBeenCalledWith(channel.id, false);
 
     const pendingTooltip = wrapper.get("[data-testid='cruise-tile-tooltip-7']");
     const pendingTile = wrapper.get("[data-testid='cruise-tile-7']");
@@ -1794,23 +1816,82 @@ describe("PlayConsoleLinked 双区联动", () => {
   });
 
   describe("home position state", () => {
-    it("空配置和加载失败都不会伪造成设备已关闭", async () => {
-      api.getHomePosition.mockResolvedValueOnce(homeResponse({ homePosition: null, freshness: "unknown" }));
+    it("能力尚未确认时只提供查询入口，不渲染误导性的开关和技术枚举", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: null,
+        freshness: "unknown",
+        controlSupport: { status: "unknown", reason: "能力尚未确认" },
+        querySupport: { status: "unknown", reason: "能力尚未确认" }
+      }));
       const emptyWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
-      expect(emptyWrapper.get("[data-testid='home-phase']").text()).toContain("待查询");
-      expect(emptyWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("尚无设备确认配置");
-      expect(emptyWrapper.get("[data-testid='home-confirmed-status']").text()).not.toContain("已关闭");
+      const card = emptyWrapper.get("[data-testid='home-card']");
+      expect(emptyWrapper.get("[data-testid='home-phase']").text()).toContain("尚未确认设备能力");
+      expect(card.text()).not.toContain("unknown");
+      expect(card.text()).not.toContain("新鲜度");
+      expect(emptyWrapper.find("[data-testid='home-toggle']").exists()).toBe(false);
+      expect(emptyWrapper.find("[data-testid='home-fields']").exists()).toBe(false);
+      expect(emptyWrapper.get("[data-testid='home-refresh']").text()).toContain("查询设备");
       emptyWrapper.unmount();
+    });
+
+    it("设备明确不支持控制和查询时收敛为单一不支持状态", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: null,
+        freshness: "unknown",
+        controlSupport: { status: "unsupported", reason: "设备未上报控制能力" },
+        querySupport: { status: "unsupported", reason: "设备未上报查询能力" }
+      }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      const card = wrapper.get("[data-testid='home-card']");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("设备不支持看守位");
+      expect(wrapper.get("[data-testid='home-state-icon']").attributes("data-icon")).toBe("unsupported");
+      expect(card.text()).not.toContain("unsupported");
+      expect(card.text()).not.toContain("设备未上报控制能力");
+      expect(wrapper.find("[data-testid='home-toggle']").exists()).toBe(false);
+      expect(wrapper.find("[data-testid='home-fields']").exists()).toBe(false);
+      expect(wrapper.find("[data-testid='home-save']").exists()).toBe(false);
+      wrapper.unmount();
+    });
+
+    it("已启用时只展示产品状态和紧凑配置摘要", async () => {
+      api.getHomePosition.mockResolvedValueOnce(homeResponse({
+        homePosition: {
+          enabled: true,
+          resetTime: 300,
+          presetId: 3,
+          confirmedAt: "2026-07-22T10:00:00Z",
+          source: "device_query",
+          verification: "verified"
+        }
+      }));
+      const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+      await flushPromises();
+
+      const card = wrapper.get("[data-testid='home-card']");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("回位 #3 · 空闲 300 秒");
+      expect(card.text()).not.toContain("新鲜度");
+      expect(card.text()).not.toContain("查询已验证");
+      expect(card.text()).not.toContain("Operation");
+      expect(wrapper.find("[data-testid='home-toggle']").exists()).toBe(true);
+      expect(wrapper.find("[data-testid='home-fields']").exists()).toBe(true);
+      wrapper.unmount();
+    });
+
+    it("首次查询失败时显示可重试的用户态，不泄露底层错误", async () => {
 
       api.getHomePosition.mockRejectedValueOnce(new Error("network unavailable"));
       const failedWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
-      expect(failedWrapper.get("[data-testid='home-phase']").text()).toContain("加载失败");
-      expect(failedWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("尚无设备确认配置");
-      expect(failedWrapper.get("[data-testid='home-confirmed-status']").text()).not.toContain("已关闭");
+      expect(failedWrapper.get("[data-testid='home-phase']").text()).toContain("暂时无法确认设备状态");
+      expect(failedWrapper.get("[data-testid='home-refresh']").text()).toContain("重试");
+      expect(failedWrapper.get("[data-testid='home-card']").text()).not.toContain("network unavailable");
+      expect(failedWrapper.find("[data-testid='home-toggle']").exists()).toBe(false);
       failedWrapper.unmount();
     });
 
@@ -1829,10 +1910,8 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       expect(enabledWrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
-      expect(enabledWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
       expect((enabledWrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(true);
       await enabledWrapper.get("[data-testid='home-toggle']").setValue(false);
-      expect(enabledWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
       expect(enabledWrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
       enabledWrapper.unmount();
 
@@ -1850,7 +1929,6 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       expect(disabledWrapper.get("[data-testid='home-phase']").text()).toContain("已关闭");
-      expect(disabledWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已关闭");
       expect((disabledWrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(false);
       disabledWrapper.unmount();
     });
@@ -1898,7 +1976,8 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       expect(pendingWrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("true");
-      expect(pendingWrapper.get("[data-testid='home-operation-id']").text()).toContain("control-pending");
+      expect(pendingWrapper.get("[data-testid='home-phase']").text()).toContain("等待设备确认");
+      expect(pendingWrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("control-pending");
       expect(pendingWrapper.get("[data-testid='home-save']").attributes("disabled")).toBeDefined();
       expect(api.getPtzOperation).not.toHaveBeenCalled();
       pendingWrapper.unmount();
@@ -1916,9 +1995,9 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       expect(unknownWrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
-      expect(unknownWrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
-      expect(unknownWrapper.get("[data-testid='home-operation-id']").text()).toContain("control-unknown");
-      expect(unknownWrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+      expect(unknownWrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(unknownWrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
+      expect(unknownWrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("control-unknown");
       expect(unknownWrapper.get("[data-testid='home-save']").attributes("disabled")).toBeUndefined();
       expect(api.getPtzOperation).not.toHaveBeenCalled();
       unknownWrapper.unmount();
@@ -1946,15 +2025,15 @@ describe("PlayConsoleLinked 双区联动", () => {
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
-      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("reconcile-pending");
-      expect(wrapper.get("[data-testid='home-verification']").text()).toContain("设备已确认，查询未验证");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("正在查询设备");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("reconcile-pending");
       expect(api.getHomePosition).toHaveBeenCalledWith(channel.id);
       expect(api.getHomePosition).toHaveBeenCalledTimes(1);
       expect(api.getPtzOperation).not.toHaveBeenCalled();
       wrapper.unmount();
     });
 
-    it("能力 unknown/unsupported 仅提示，离线才禁用人工操作", async () => {
+    it("混合能力收进诊断提示，离线时保留最后配置并禁用操作", async () => {
       api.getHomePosition.mockResolvedValueOnce(homeResponse({
         controlSupport: { status: "unsupported", reason: "厂商 profile 未声明控制" },
         querySupport: { status: "unknown", reason: "尚未收到合法查询应答" }
@@ -1962,15 +2041,18 @@ describe("PlayConsoleLinked 双区联动", () => {
       const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
       await flushPromises();
 
-      expect(wrapper.get("[data-testid='home-control-support']").text()).toContain("厂商 profile 未声明控制");
-      expect(wrapper.get("[data-testid='home-query-support']").text()).toContain("尚未收到合法查询应答");
-      expect(wrapper.get("[data-testid='home-support-risk']").text()).toContain("仍可尝试下发");
+      expect(wrapper.get("[data-testid='home-card']").text()).not.toContain("厂商 profile 未声明控制");
+      expect(wrapper.get("[data-testid='home-card']").text()).not.toContain("尚未收到合法查询应答");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("厂商 profile 未声明控制");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("尚未收到合法查询应答");
       expect(wrapper.get("[data-testid='home-save']").attributes("disabled")).toBeUndefined();
       expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
 
       await wrapper.setProps({ channel: { ...channel, status: 0 } });
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("设备离线");
+      expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("上次确认：已启用");
       expect(wrapper.get("[data-testid='home-save']").attributes("disabled")).toBeDefined();
-      expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeDefined();
+      expect(wrapper.find("[data-testid='home-refresh']").exists()).toBe(false);
       wrapper.unmount();
     });
   });
@@ -2053,7 +2135,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         data: { operationId: "patch-once", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
       });
       await flushPromises();
-      expect(patchWrapper.get("[data-testid='home-operation-id']").text()).toContain("patch-once");
+      expect(patchWrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("patch-once");
       patchWrapper.unmount();
 
       let resolveRefresh!: (value: any) => void;
@@ -2071,7 +2153,7 @@ describe("PlayConsoleLinked 双区联动", () => {
         refresh: { status: "pending", operationId: "refresh-once", errorCode: null, deadlineAt: deadline(10) }
       }));
       await flushPromises();
-      expect(refreshWrapper.get("[data-testid='home-operation-id']").text()).toContain("refresh-once");
+      expect(refreshWrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("refresh-once");
       refreshWrapper.unmount();
     });
 
@@ -2095,16 +2177,17 @@ describe("PlayConsoleLinked 双区联动", () => {
 
       await vi.advanceTimersByTimeAsync(6000);
       await flushPromises();
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
       expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
-      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("queued-without-deadline");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("queued-without-deadline");
 
       resolveOperation(operationResponse("accepted", "queued-without-deadline", null));
       await flushPromises();
       await vi.advanceTimersByTimeAsync(5000);
       expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
       expect(api.getHomePosition).toHaveBeenCalledTimes(1);
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
       wrapper.unmount();
     });
 
@@ -2133,11 +2216,12 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
       await vi.advanceTimersByTimeAsync(1000);
       await flushPromises();
-      expect(wrapper.get("[data-testid='home-error']").text()).toContain("temporary network error");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("temporary network error");
 
       await vi.advanceTimersByTimeAsync(1000);
       await flushPromises();
-      expect(wrapper.find("[data-testid='home-error']").exists()).toBe(false);
+      expect(wrapper.find("[data-testid='home-notice']").exists()).toBe(false);
       expect(wrapper.get("[data-testid='home-phase']").text()).toContain("等待设备确认");
 
       for (let second = 3; second <= 8; second += 1) {
@@ -2197,7 +2281,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(api.getPtzOperation).toHaveBeenCalledWith(channel.id, "refresh-op");
       expect(api.getHomePosition).toHaveBeenNthCalledWith(3, channel.id);
       expect(api.getHomePosition.mock.calls.filter((call: any[]) => call[1] === true)).toHaveLength(1);
-      expect(wrapper.get("[data-testid='home-freshness']").text()).toContain("缓存已过期");
+      expect(wrapper.get("[data-testid='home-card']").text()).not.toContain("缓存已过期");
       wrapper.unmount();
     });
 
@@ -2257,9 +2341,10 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
       const callsAtCutoff = api.getPtzOperation.mock.calls.length;
       expect(callsAtCutoff).toBeGreaterThan(0);
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
       expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
-      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("network-timeout");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("network-timeout");
 
       await vi.advanceTimersByTimeAsync(5000);
       expect(api.getPtzOperation).toHaveBeenCalledTimes(callsAtCutoff);
@@ -2287,12 +2372,13 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(3000);
       await flushPromises();
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
       expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
 
       resolveOperation(operationResponse("accepted", "hung-operation", null));
       await flushPromises();
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
       expect(api.getHomePosition).toHaveBeenCalledTimes(1);
       wrapper.unmount();
     });
@@ -2318,8 +2404,9 @@ describe("PlayConsoleLinked 双区联动", () => {
 
       expect(api.getHomePosition).toHaveBeenCalledTimes(2);
       expect(api.getPtzOperation).not.toHaveBeenCalled();
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
-      expect(wrapper.get("[data-testid='home-error']").text()).toContain("截止时间");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("截止时间");
       expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
       wrapper.unmount();
     });
@@ -2347,10 +2434,10 @@ describe("PlayConsoleLinked 双区联动", () => {
       await flushPromises();
 
       expect((wrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(true);
-      expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("操作失败");
-      expect(wrapper.get("[data-testid='home-error']").text()).toContain(errorCode);
-      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain(`control-${status}`);
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain(errorCode);
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain(`control-${status}`);
       wrapper.unmount();
     });
 
@@ -2385,15 +2472,16 @@ describe("PlayConsoleLinked 双区联动", () => {
       await vi.advanceTimersByTimeAsync(1000);
       await flushPromises();
 
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("设备已确认，状态待读取");
-      expect(wrapper.get("[data-testid='home-error']").text()).toContain("设备已确认，但确认状态读取失败，可重试");
-      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("accepted-read-failed");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已关闭");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("确认状态读取失败");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("accepted-read-failed");
       expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
       expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
       expect((wrapper.get("[data-testid='home-toggle']").element as HTMLInputElement).checked).toBe(true);
       expect((wrapper.get("[data-testid='home-preset']").element as HTMLSelectElement).value).toBe("0");
       expect((wrapper.get("[data-testid='home-reset-time']").element as HTMLInputElement).value).toBe("30");
-      expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已关闭");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已关闭");
       wrapper.unmount();
     });
 
@@ -2473,8 +2561,8 @@ describe("PlayConsoleLinked 双区联动", () => {
       await wrapper.get("[data-testid='home-save']").trigger("click");
       await vi.advanceTimersByTimeAsync(1000);
       await flushPromises();
-      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("reconcile-op");
-      expect(wrapper.get("[data-testid='home-verification']").text()).toContain("查询未验证");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("reconcile-op");
+      expect(wrapper.get("[data-testid='home-card']").text()).not.toContain("查询未验证");
 
       await vi.advanceTimersByTimeAsync(1000);
       await flushPromises();
@@ -2483,7 +2571,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("#2");
       expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("45 秒");
       expect((wrapper.get("[data-testid='home-preset']").element as HTMLSelectElement).value).toBe("2");
-      expect(wrapper.get("[data-testid='home-mismatch']").text()).toContain("设备未按请求应用配置");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备未按请求应用配置");
       wrapper.unmount();
     });
 
@@ -2573,12 +2661,13 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
       expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("#0");
       expect(wrapper.get("[data-testid='home-confirmed-values']").text()).toContain("30 秒");
-      expect(wrapper.get("[data-testid='home-verification']").text()).toContain("查询未验证");
-      expect(wrapper.get("[data-testid='home-freshness']").text()).toContain("缓存已过期");
+      expect(wrapper.get("[data-testid='home-card']").text()).not.toContain("查询未验证");
+      expect(wrapper.get("[data-testid='home-card']").text()).not.toContain("缓存已过期");
       if (outcome === "timeout") {
-        expect(wrapper.get("[data-testid='home-error']").text()).toContain("APPLICATION_TIMEOUT");
+        expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
+        expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("APPLICATION_TIMEOUT");
       } else {
-        expect(wrapper.find("[data-testid='home-error']").exists()).toBe(false);
+        expect(wrapper.find("[data-testid='home-notice']").exists()).toBe(false);
       }
       wrapper.unmount();
     });
@@ -2608,11 +2697,12 @@ describe("PlayConsoleLinked 双区联动", () => {
       expect(wrapper.get("[data-testid='home-status']").attributes("aria-busy")).toBe("false");
       expect(wrapper.get("[data-testid='home-refresh']").attributes("disabled")).toBeUndefined();
       if (hasCache) {
-        expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
-        expect(wrapper.get("[data-testid='home-freshness']").text()).toContain("缓存已过期");
+        expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+        expect(wrapper.get("[data-testid='home-card']").text()).not.toContain("缓存已过期");
+        expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
       } else {
-        expect(wrapper.get("[data-testid='home-phase']").text()).toContain("操作失败");
-        expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("尚无设备确认配置");
+        expect(wrapper.get("[data-testid='home-phase']").text()).toContain("暂时无法确认设备状态");
+        expect(wrapper.get("[data-testid='home-refresh']").text()).toContain("重试");
       }
       wrapper.unmount();
     });
@@ -2637,9 +2727,9 @@ describe("PlayConsoleLinked 双区联动", () => {
 
       await vi.advanceTimersByTimeAsync(1000);
       await flushPromises();
-      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("结果未知");
-      expect(wrapper.get("[data-testid='home-operation-id']").text()).toContain("explicit-unknown");
-      expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已启用");
+      expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已启用");
+      expect(wrapper.get("[data-testid='home-notice']").text()).toContain("设备状态可能已变化");
+      expect(wrapper.get("[data-testid='home-diagnostics']").attributes("title")).toContain("explicit-unknown");
       expect(api.updateHomePosition).not.toHaveBeenCalled();
 
       await vi.advanceTimersByTimeAsync(5000);
@@ -2698,7 +2788,7 @@ describe("PlayConsoleLinked 双区联动", () => {
       await vi.advanceTimersByTimeAsync(5000);
       expect(api.getPtzOperation).toHaveBeenCalledTimes(1);
       if (action === "切换通道") {
-        expect(wrapper.get("[data-testid='home-confirmed-status']").text()).toContain("设备确认已关闭");
+        expect(wrapper.get("[data-testid='home-phase']").text()).toContain("已关闭");
         expect(wrapper.text()).not.toContain("late-operation");
       }
       if (action !== "卸载") wrapper.unmount();

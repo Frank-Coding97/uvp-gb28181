@@ -27,12 +27,30 @@ func TestRegistryCreateIsIdempotentAndScopesActiveSession(t *testing.T) {
 	if err != nil || !repeat.Existing || repeat.Session.ID != first.Session.ID {
 		t.Fatalf("repeat=%+v err=%v", repeat, err)
 	}
-	if _, err := r.Create(context.Background(), playbackRequest(now, "u1", "c1", "r2")); !errors.Is(err, ErrPlaybackBusy) {
+	busyRequest := playbackRequest(now.Add(time.Minute), "u1", "c1", "r2")
+	if _, err := r.Create(context.Background(), busyRequest); !errors.Is(err, ErrPlaybackBusy) {
 		t.Fatalf("different idempotency err=%v", err)
 	}
 	other, err := r.Create(context.Background(), playbackRequest(now, "u2", "c1", "r2"))
 	if err != nil || other.Session.ID == first.Session.ID {
 		t.Fatalf("other owner=%+v err=%v", other, err)
+	}
+}
+
+func TestRegistryReusesIdempotencyKeyAfterTerminalSession(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	r := NewRegistry(RegistryConfig{Now: func() time.Time { return now }})
+	request := playbackRequest(now, "u1", "c1", "r1")
+	first, err := r.Create(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Stop(context.Background(), first.Session.ID, "user stop"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.Create(context.Background(), request)
+	if err != nil || second.Existing || second.Session.ID == first.Session.ID {
+		t.Fatalf("second=%+v err=%v", second, err)
 	}
 }
 

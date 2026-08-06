@@ -17,6 +17,7 @@ import (
 type fakePlaybackDialog struct {
 	waitErr, ackErr, byeErr, doErr error
 	waitBlock                      <-chan struct{}
+	doWaitForContext               bool
 	statusCode                     int
 	metadata                       PlaybackDialogMetadata
 	responseStatus                 int
@@ -51,10 +52,14 @@ func (d *fakePlaybackDialog) Metadata() PlaybackDialogMetadata { return d.metada
 func (d *fakePlaybackDialog) ReadBye(req *sip.Request, tx sip.ServerTransaction) error {
 	return tx.Respond(sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil))
 }
-func (d *fakePlaybackDialog) Do(_ context.Context, req *sip.Request) (*sip.Response, error) {
+func (d *fakePlaybackDialog) Do(ctx context.Context, req *sip.Request) (*sip.Response, error) {
 	d.mu.Lock()
 	d.requests = append(d.requests, req.Clone())
 	d.mu.Unlock()
+	if d.doWaitForContext {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if d.doErr != nil {
 		return nil, d.doErr
 	}
@@ -308,6 +313,24 @@ func TestTeardownPlaybackAlwaysBYEsAndIsIdempotent(t *testing.T) {
 	_, err = u.SendPlaybackInfo(context.Background(), metadata.CallID, PlaybackInfoRequest{Action: PlaybackInfoResume})
 	if !errors.Is(err, ErrPlaybackClosed) {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestTeardownPlaybackUnansweredInfoStillBYEsAndSucceeds(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dialog.doWaitForContext = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := u.TeardownPlayback(ctx, metadata.CallID); err != nil {
+		t.Fatalf("teardown err=%v", err)
+	}
+	if dialog.byeCalls != 1 || dialog.closeCalls != 1 {
+		t.Fatalf("bye=%d close=%d", dialog.byeCalls, dialog.closeCalls)
 	}
 }
 

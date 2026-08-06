@@ -6,9 +6,13 @@ vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
+  getControlCapabilities,
   getDeviceStatus,
   getHomePosition,
   getPtzOperation,
+  getStreamMonitor,
+  listCruiseTracks,
+  listPtzPresets,
   updateHomePosition,
   type DeviceStatusResult,
   type HomePositionPatch
@@ -24,7 +28,8 @@ describe("gb28181 home position API", () => {
     expect(request).toHaveBeenLastCalledWith(
       "get",
       "/api/gb28181/device-mgmt/channel/12/ptz/home-position",
-      { params: undefined }
+      { params: undefined },
+      { showErrorMessage: false }
     );
 
     await getHomePosition(12, true, "refresh-key");
@@ -34,7 +39,8 @@ describe("gb28181 home position API", () => {
       {
         params: { refresh: true },
         headers: { "Idempotency-Key": "refresh-key" }
-      }
+      },
+      { showErrorMessage: false }
     );
   });
 
@@ -73,7 +79,9 @@ describe("gb28181 home position API", () => {
 
     expect(request).toHaveBeenCalledWith(
       "get",
-      "/api/gb28181/device-mgmt/channel/12/ptz/operations/home-op-1"
+      "/api/gb28181/device-mgmt/channel/12/ptz/operations/home-op-1",
+      undefined,
+      { showErrorMessage: false }
     );
   });
 
@@ -106,14 +114,52 @@ describe("gb28181 device status API", () => {
     expect(request).toHaveBeenLastCalledWith(
       "get",
       "/api/gb28181/device-mgmt/channel/12/device-status",
-      { params: undefined }
+      { params: undefined },
+      { showErrorMessage: false }
     );
 
     await getDeviceStatus(12, true);
     expect(request).toHaveBeenLastCalledWith(
       "get",
       "/api/gb28181/device-mgmt/channel/12/device-status",
-      { params: { refresh: true } }
+      { params: { refresh: true } },
+      { showErrorMessage: false }
+    );
+  });
+
+  it("silences all auxiliary reads started by the playback panel", async () => {
+    await getStreamMonitor("stream-1");
+    await getControlCapabilities(12);
+    await listPtzPresets(12);
+    await listCruiseTracks(12, true);
+
+    expect(request).toHaveBeenNthCalledWith(
+      1,
+      "get",
+      "/api/gb28181/play/stream-1/monitor",
+      undefined,
+      { showErrorMessage: false }
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      2,
+      "get",
+      "/api/gb28181/device-mgmt/channel/12/control-capabilities",
+      undefined,
+      { showErrorMessage: false }
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      "get",
+      "/api/gb28181/device-mgmt/channel/12/ptz/presets",
+      { params: undefined },
+      { showErrorMessage: false }
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      4,
+      "get",
+      "/api/gb28181/device-mgmt/channel/12/ptz/cruise-tracks",
+      { params: { refresh: true } },
+      { showErrorMessage: false }
     );
   });
 

@@ -75,9 +75,14 @@ describe("record playback timeline", () => {
     it("builds readable major labels and denser minor ticks after zooming", () => {
         const fullTicks = buildTimelineTicks(createTimelineViewport(range));
         const zoomedTicks = buildTimelineTicks(zoomTimelineViewport(range, createTimelineViewport(range), 4, "2026-08-02T10:00:00+08:00"));
-        expect(fullTicks.filter(tick => tick.major).map(tick => tick.label)).toEqual(["08:00", "09:00", "10:00", "11:00", "12:00"]);
-        expect(zoomedTicks.filter(tick => tick.major).map(tick => tick.label)).toEqual(["09:30", "09:45", "10:00", "10:15", "10:30"]);
+        expect(fullTicks.filter(tick => tick.major).map(tick => tick.label)).toEqual([
+            "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00"
+        ]);
+        expect(zoomedTicks.filter(tick => tick.major).map(tick => tick.label)).toEqual([
+            "09:30", "09:40", "09:50", "10:00", "10:10", "10:20", "10:30"
+        ]);
         expect(zoomedTicks.length).toBeGreaterThan(zoomedTicks.filter(tick => tick.major).length);
+        expect(Date.parse(zoomedTicks[1].time) - Date.parse(zoomedTicks[0].time)).toBe(2 * 60_000);
     });
 
     it("uses five-minute labels and one-minute minor ticks for a high-zoom window", () => {
@@ -98,7 +103,7 @@ describe("record playback timeline", () => {
             endTime: "2026-08-02T04:00:00"
         };
         const labels = buildTimelineTicks(localRange).filter(tick => tick.major).map(tick => tick.label);
-        expect(labels).toEqual(["00:00", "01:00", "02:00", "03:00", "04:00"]);
+        expect(labels).toEqual(["00:00", "00:30", "01:00", "01:30", "02:00", "02:30", "03:00", "03:30", "04:00"]);
         expect(positionToTime(localRange, 100, 200)).toContain("02:00:00");
     });
 });

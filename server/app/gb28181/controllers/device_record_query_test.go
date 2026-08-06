@@ -79,7 +79,7 @@ func newRecordQueryFixture(t *testing.T, ownerDept uint) recordQueryFixture {
 		Records: []recordquery.Record{{RecordKey: "opaque-key", RecordInfoItem: manscdp.RecordInfoItem{
 			DeviceID: channel.ChannelID, Name: "敏感名称", FilePath: "/private/record/001.dav", Address: "机房地址",
 			StartTime: "2026-08-04T08:00:00", EndTime: "2026-08-04T08:30:00", Secrecy: 0,
-			Type: "time", RecorderID: "NVR-A", RecordLocation: "local",
+			Type: "time", RecorderID: "NVR-A", FileSize: int64Ptr(248635904), RecordLocation: "local", StreamNumber: intPtr(0),
 		}}},
 	}}
 	controller := gbcontrollers.NewDeviceMgmtController()
@@ -124,6 +124,14 @@ func recordQueryErrorCode(t *testing.T, result *httptest.ResponseRecorder) strin
 	return envelope.Data.ErrorCode
 }
 
+func int64Ptr(value int64) *int64 {
+	return &value
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
 func TestDeviceRecordQueryOptionsAndQueryContract(t *testing.T) {
 	fixture := newRecordQueryFixture(t, 10)
 	path := "/channel/" + uintStr(fixture.channel.ID) + "/record-query"
@@ -139,6 +147,8 @@ func TestDeviceRecordQueryOptionsAndQueryContract(t *testing.T) {
 	require.Contains(t, query.Body.String(), `"queryId":"query-1"`)
 	require.Contains(t, query.Body.String(), `"recordKey":"opaque-key"`)
 	require.Contains(t, query.Body.String(), `"startTime":"2026-08-04T08:00:00+08:00"`)
+	require.Contains(t, query.Body.String(), `"fileSize":248635904`)
+	require.Contains(t, query.Body.String(), `"streamNumber":0`)
 	require.Equal(t, 1, fixture.service.callCount())
 	require.Equal(t, uint(100), fixture.service.request.OwnerUserID)
 	require.Equal(t, fixture.device.DeviceID, fixture.service.request.DeviceCode)

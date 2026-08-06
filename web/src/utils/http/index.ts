@@ -214,6 +214,10 @@ class Http {
                 .catch(async error => {
                     console.error("http.error:", error);
                     const { response } = error;
+                    if (config.showErrorMessage === false) {
+                        reject(error);
+                        return;
+                    }
                     if (response && response.data instanceof Blob) {
                         try {
                             const text = await response.data.text();

@@ -3,6 +3,7 @@ package playback
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -29,12 +30,12 @@ type fakeRTP struct {
 	bound       bool
 }
 
-func (f *fakeRTP) Open(context.Context, RTPRequest) (RTPAllocation, error) {
+func (f *fakeRTP) Open(_ context.Context, request RTPRequest) (RTPAllocation, error) {
 	f.openCalls.Add(1)
 	if f.openErr != nil {
 		return RTPAllocation{}, f.openErr
 	}
-	return RTPAllocation{StreamID: "pb-stream-1", SSRC: "1000000001", Port: 30000,
+	return RTPAllocation{StreamID: "pb-stream-1", SSRC: request.SSRC, Port: 30000,
 		Close:  func(context.Context) error { f.closeCalls.Add(1); return nil },
 		Bind:   func() error { f.bindCalls.Add(1); f.bound = true; return nil },
 		Unbind: func() error { f.unbindCalls.Add(1); f.bound = false; return nil }}, nil
@@ -114,6 +115,10 @@ func TestPlaybackServiceCreateOpensRTPBeforeInviteAndWaitsForMedia(t *testing.T)
 	if invite.last.ChannelID != request.SIPChannelID {
 		t.Fatalf("invite channel=%q want=%q", invite.last.ChannelID, request.SIPChannelID)
 	}
+	assertValidPlaybackSSRC(t, invite.last.SSRC)
+	if want := "\r\ny=" + invite.last.SSRC + "\r\n"; !strings.Contains(invite.last.SDP, want) {
+		t.Fatalf("sdp=%q, want SSRC line %q", invite.last.SDP, want)
+	}
 }
 
 func TestPlaybackServiceIdempotentCreateReportsExisting(t *testing.T) {
@@ -128,6 +133,26 @@ func TestPlaybackServiceIdempotentCreateReportsExisting(t *testing.T) {
 	repeat, err := service.Create(context.Background(), validCreate(now))
 	if err != nil || !repeat.Existing || repeat.Session.ID != first.Session.ID {
 		t.Fatalf("repeat=%+v err=%v", repeat, err)
+	}
+}
+
+func TestPlaybackServiceIdempotentCreateSurvivesFreshRecordSnapshot(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	service := NewService(NewRegistry(RegistryConfig{Now: func() time.Time { return now }}),
+		&fakeNodePicker{node: NodeInfo{ID: "node-1", ServerID: "34020000002000000001", Destination: "192.0.2.20:5060", RecvIP: "192.0.2.10"}},
+		&fakeRTP{}, &fakeInvite{}, &fakeMedia{ready: MediaReady{URLs: map[string]string{"wsFlv": "ws://node/live.flv"}}}, ServiceConfig{})
+	firstRequest := validCreate(now)
+	firstRequest.IdempotencyKey = "playback-31-stable-segment"
+	first, err := service.Create(context.Background(), firstRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRequest := firstRequest
+	secondRequest.RecordKey = "fresh-query-snapshot-key"
+	secondRequest.IdempotencyKey = "playback-31-new-client-key"
+	second, err := service.Create(context.Background(), secondRequest)
+	if err != nil || !second.Existing || second.Session.ID != first.Session.ID || second.Session.MediaURLs["wsFlv"] == "" {
+		t.Fatalf("second=%+v err=%v", second, err)
 	}
 }
 
@@ -163,6 +188,24 @@ func TestPlaybackServiceNodeOrRTPFailureDoesNotInvite(t *testing.T) {
 	}
 	if invite.calls.Load() != 0 {
 		t.Fatalf("invite=%d", invite.calls.Load())
+	}
+}
+
+func TestRandomPlaybackSSRCAlwaysUsesTenDecimalDigits(t *testing.T) {
+	for range 1000 {
+		assertValidPlaybackSSRC(t, randomPlaybackSSRC())
+	}
+}
+
+func assertValidPlaybackSSRC(t *testing.T, ssrc string) {
+	t.Helper()
+	if len(ssrc) != 10 || ssrc[0] != '1' {
+		t.Fatalf("SSRC = %q, want 10 digits starting with 1", ssrc)
+	}
+	for _, digit := range ssrc {
+		if digit < '0' || digit > '9' {
+			t.Fatalf("SSRC = %q, want decimal digits only", ssrc)
+		}
 	}
 }
 

@@ -52,6 +52,7 @@ import {
 const route = useRoute();
 const router = useRouter();
 const channelId = computed(() => Number(route.params.channelId || 31));
+const playbackChannelId = channelId.value;
 const options = ref<RecordQueryOptions | null>(null);
 const form = ref<RecordQueryForm | null>(null);
 const queryState = ref<RecordQueryUiState>("idle");
@@ -61,6 +62,7 @@ const records = ref<RecordQueryItem[]>([]);
 const playback = ref(createPlaybackState());
 const playbackMediaUrl = ref("");
 const playbackHasAudio = ref(false);
+const playbackBuffering = ref(false);
 const controlPending = ref(false);
 const downloadNotice = ref("");
 const queryToken = ref(0);
@@ -68,9 +70,13 @@ const viewport = ref<HTMLElement | null>(null);
 let queryAbort: AbortController | null = null;
 let sessionToken = 0;
 let sessionPollTimer: number | null = null;
-let progressTimer: number | null = null;
 let downloadTimer: number | null = null;
 let restorePreviewTheme: (() => void) | null = null;
+let playerClock: { sessionId: string | null; sourceTimestamp: number | null; recordTimestamp: number | null } = {
+    sessionId: null,
+    sourceTimestamp: null,
+    recordTimestamp: null
+};
 
 const selectedRecord = computed(() => records.value.find(item => item.recordKey === playback.value.recordKey) || null);
 const queryRange = computed(() => ({
@@ -78,6 +84,7 @@ const queryRange = computed(() => ({
     endTime: form.value?.endTime || options.value?.serverNow || ""
 }));
 const isPlaying = computed(() => playback.value.status === "playing");
+const isPlaybackLoading = computed(() => ["creating", "buffering", "stopping"].includes(playback.value.status));
 const canPlay = computed(() => Boolean(selectedRecord.value) && !controlPending.value && !["creating", "buffering", "stopping"].includes(playback.value.status));
 const statusText = computed(() => ({
     unselected: "请选择录像段",
@@ -117,9 +124,37 @@ function durationText(record: RecordQueryItem) {
     return [hours, minutes, remain].map(value => String(value).padStart(2, "0")).join(":");
 }
 
+function fileSizeText(value: number) {
+    if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(2)} GB`;
+    if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`;
+    if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+    return `${value} B`;
+}
+
+function defaultRecord(records: RecordQueryItem[]) {
+    return records.find(record => {
+        const duration = Date.parse(record.endTime || "") - Date.parse(record.startTime || "");
+        return Number.isFinite(duration) && duration > 1000;
+    }) || records[0];
+}
+
+function recordIdentity(record: Pick<RecordQueryItem, "startTime" | "endTime">) {
+    return `${record.startTime || ""}|${record.endTime || ""}`;
+}
+
+function readLastRecordIdentity() {
+    if (typeof window === "undefined") return "";
+    return window.sessionStorage.getItem(`uvp:gb28181:playback:${playbackChannelId}`) || "";
+}
+
+function saveLastRecordIdentity(record: RecordQueryItem) {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(`uvp:gb28181:playback:${playbackChannelId}`, recordIdentity(record));
+}
+
 async function loadOptions() {
     try {
-        const response = await getRecordQueryOptions(channelId.value);
+        const response = await getRecordQueryOptions(playbackChannelId);
         options.value = response.data;
         form.value = createDefaultRecordQueryForm(response.data);
         await nextTick();
@@ -146,12 +181,14 @@ async function runQuery() {
     queryState.value = "querying";
     queryMessage.value = "";
     try {
-        const response = await queryDeviceRecords(channelId.value, serializeRecordQueryForm(form.value), queryAbort.signal);
+        const response = await queryDeviceRecords(playbackChannelId, serializeRecordQueryForm(form.value), queryAbort.signal);
         if (token !== queryToken.value) return;
         result.value = response.data;
         records.value = response.data.list;
         queryState.value = response.data.status;
-        if (records.value.length) selectRecord(records.value[0]);
+        const lastIdentity = readLastRecordIdentity();
+        const record = records.value.find(item => recordIdentity(item) === lastIdentity) || defaultRecord(records.value);
+        if (record) await playRecord(record);
     } catch (error) {
         if ((error as Error)?.name === "AbortError" || token !== queryToken.value) return;
         const mapped = mapRecordQueryError(error);
@@ -164,17 +201,23 @@ async function runQuery() {
 }
 
 async function selectRecord(record: RecordQueryItem) {
+    if (playback.value.recordKey === record.recordKey) return true;
     if (["creating", "buffering", "playing", "paused", "stopping"].includes(playback.value.status) && playback.value.recordKey !== record.recordKey) {
-        await stopPlayback(false);
+        if (!await stopPlayback(false)) return false;
     }
     playback.value = reducePlaybackState(playback.value, { type: "select", recordKey: record.recordKey });
+    return true;
+}
+
+async function playRecord(record: RecordQueryItem) {
+    if (playback.value.recordKey === record.recordKey && ["creating", "buffering", "playing"].includes(playback.value.status)) return;
+    if (!await selectRecord(record)) return;
+    await startPlayback();
 }
 
 function clearPlaybackTimers() {
     if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
-    if (progressTimer !== null) window.clearInterval(progressTimer);
     sessionPollTimer = null;
-    progressTimer = null;
 }
 
 function queueDownload(record: RecordQueryItem | null = selectedRecord.value) {
@@ -187,33 +230,8 @@ function queueDownload(record: RecordQueryItem | null = selectedRecord.value) {
     }, 2600);
 }
 
-function startProgress() {
-    if (progressTimer !== null) return;
-    progressTimer = window.setInterval(() => {
-        if (playback.value.status !== "playing" || !selectedRecord.value) return;
-        const current = Date.parse(playback.value.currentTime || selectedRecord.value.startTime || "");
-        const end = Date.parse(selectedRecord.value.endTime || "");
-        if (!Number.isFinite(current) || !Number.isFinite(end) || current >= end) {
-            playback.value = { ...playback.value, status: "ended", currentTime: selectedRecord.value.endTime };
-            clearPlaybackTimers();
-            return;
-        }
-        const start = Date.parse(selectedRecord.value.startTime || "");
-        const duration = end - start;
-        const next = current + 1000 * playback.value.scale;
-        playback.value = {
-            ...playback.value,
-            currentTime: positionToTime(
-                { startTime: selectedRecord.value.startTime!, endTime: selectedRecord.value.endTime! },
-                next - start,
-                duration
-            )
-        };
-    }, 1000);
-}
-
-function createIdempotencyKey() {
-    return globalThis.crypto?.randomUUID?.() || `playback-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function createIdempotencyKey(record: RecordQueryItem) {
+    return `playback-${encodeURIComponent(`${playbackChannelId}|${recordIdentity(record)}`)}`;
 }
 
 function playbackErrorMessage(error: unknown) {
@@ -230,11 +248,50 @@ function sessionTime(session: PlaybackSession) {
     );
 }
 
+function resetPlayerClock() {
+    playerClock = { sessionId: null, sourceTimestamp: null, recordTimestamp: null };
+}
+
+function handlePlayerLoading(value: boolean) {
+    playbackBuffering.value = value;
+}
+
+function handlePlayerTimeUpdate(timestamp: number) {
+    if (playbackBuffering.value) return;
+    const record = selectedRecord.value;
+    const currentTime = playback.value.currentTime;
+    const start = Date.parse(record?.startTime || "");
+    const end = Date.parse(record?.endTime || "");
+    const current = Date.parse(currentTime || "");
+    if (!record || !currentTime || !Number.isFinite(start) || !Number.isFinite(end) || !Number.isFinite(current)) return;
+
+    if (
+        playerClock.sessionId !== playback.value.sessionId
+        || playerClock.sourceTimestamp === null
+        || playerClock.recordTimestamp === null
+        || timestamp < playerClock.sourceTimestamp
+    ) {
+        playerClock = {
+            sessionId: playback.value.sessionId,
+            sourceTimestamp: timestamp,
+            recordTimestamp: current
+        };
+        return;
+    }
+
+    const duration = end - start;
+    const elapsed = Math.min(duration, Math.max(0, playerClock.recordTimestamp - start + timestamp - playerClock.sourceTimestamp));
+    playback.value = {
+        ...playback.value,
+        currentTime: positionToTime({ startTime: record.startTime!, endTime: record.endTime! }, elapsed, duration)
+    };
+}
+
 function scheduleSessionPoll(sessionId: string, token: number) {
     if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
     sessionPollTimer = window.setTimeout(async () => {
         try {
-            const response = await getPlaybackSession(channelId.value, sessionId);
+            const response = await getPlaybackSession(playbackChannelId, sessionId);
             if (token !== sessionToken) return;
             applySession(response.data, token);
         } catch (error) {
@@ -248,6 +305,7 @@ function scheduleSessionPoll(sessionId: string, token: number) {
 
 function applySession(session: PlaybackSession, token: number, syncPosition = false) {
     if (token !== sessionToken) return;
+    const previousSessionId = playback.value.sessionId;
     const shouldSyncPosition = syncPosition || !playback.value.currentTime;
     playback.value = reducePlaybackState(playback.value, {
         type: "session",
@@ -257,19 +315,16 @@ function applySession(session: PlaybackSession, token: number, syncPosition = fa
         message: session.errorCode || undefined
     });
     playback.value = reducePlaybackState(playback.value, { type: "scale", scale: session.scale || 1 });
+    if (previousSessionId !== session.sessionId || shouldSyncPosition) resetPlayerClock();
     playbackHasAudio.value = session.hasAudio;
     playbackMediaUrl.value = selectPlaybackMediaUrl(session.media?.urls);
-
-    if (session.state === "playing") startProgress();
-    else if (progressTimer !== null) {
-        window.clearInterval(progressTimer);
-        progressTimer = null;
-    }
+    playbackBuffering.value = false;
 
     if (["ended", "failed", "stopped"].includes(session.state)) {
         if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
         sessionPollTimer = null;
         playbackMediaUrl.value = "";
+        resetPlayerClock();
         return;
     }
     scheduleSessionPoll(session.sessionId, token);
@@ -286,12 +341,13 @@ async function startPlayback() {
     playback.value = reducePlaybackState(playback.value, { type: "creating" });
     const token = ++sessionToken;
     const record = selectedRecord.value;
+    saveLastRecordIdentity(record);
     try {
-        const response = await createPlaybackSession(channelId.value, {
+        const response = await createPlaybackSession(playbackChannelId, {
             recordKey: record.recordKey,
             playFrom: playback.value.currentTime || record.startTime || ""
-        }, createIdempotencyKey());
-        applySession(response.data, token, true);
+        }, createIdempotencyKey(record));
+        applySession(response.data, token);
     } catch (error) {
         if (token !== sessionToken) return;
         playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
@@ -305,7 +361,7 @@ async function sendPlaybackAction(action: PlaybackActionRequest, syncPosition = 
     const token = sessionToken;
     controlPending.value = true;
     try {
-        const response = await actionPlaybackSession(channelId.value, sessionId, action);
+        const response = await actionPlaybackSession(playbackChannelId, sessionId, action);
         applySession(response.data, token, syncPosition);
     } catch (error) {
         if (token === sessionToken) playback.value = { ...playback.value, error: playbackErrorMessage(error) };
@@ -323,13 +379,17 @@ async function stopPlayback(keepSelection = true) {
     const selectedKey = playback.value.recordKey;
     ++sessionToken;
     clearPlaybackTimers();
+    resetPlayerClock();
+    playbackBuffering.value = false;
     playbackMediaUrl.value = "";
     if (sessionId) {
         playback.value = reducePlaybackState(playback.value, { type: "stopping" });
         try {
-            await deletePlaybackSession(channelId.value, sessionId);
+            await deletePlaybackSession(playbackChannelId, sessionId);
         } catch (error) {
             console.warn("停止设备录像回放会话失败", error);
+            playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
+            return false;
         }
     }
     if (keepSelection && selectedKey) {
@@ -337,6 +397,7 @@ async function stopPlayback(keepSelection = true) {
     } else {
         playback.value = createPlaybackState();
     }
+    return true;
 }
 
 async function setScale(scale: number) {
@@ -347,18 +408,17 @@ async function setScale(scale: number) {
     playback.value = reducePlaybackState(playback.value, { type: "scale", scale });
 }
 
-async function handleTimelineSelect(recordKey: string) {
-    const record = records.value.find(item => item.recordKey === recordKey);
-    if (record && playback.value.recordKey !== recordKey) await selectRecord(record);
-}
-
 async function handleTimelineLocate(event: TimelineLocateEvent) {
     if (!event.recordKey) return;
     const record = records.value.find(item => item.recordKey === event.recordKey);
     if (!record) return;
-    if (playback.value.recordKey !== event.recordKey) await selectRecord(record);
+    if (playback.value.recordKey !== event.recordKey && !await selectRecord(record)) return;
     playback.value = { ...playback.value, currentTime: event.time };
-    if (!playback.value.sessionId || !record.startTime || !record.endTime) return;
+    if (!playback.value.sessionId) {
+        await startPlayback();
+        return;
+    }
+    if (!record.startTime || !record.endTime) return;
     const duration = Math.max(0, (Date.parse(record.endTime) - Date.parse(record.startTime)) / 1000);
     const positionSeconds = Math.min(Math.max(0, duration - 0.001), Math.max(0, (Date.parse(event.time) - Date.parse(record.startTime)) / 1000));
     await sendPlaybackAction({ action: "seek", positionSeconds }, true);
@@ -416,7 +476,7 @@ onUnmounted(() => {
     const sessionId = playback.value.sessionId;
     ++sessionToken;
     clearPlaybackTimers();
-    if (sessionId) void deletePlaybackSession(channelId.value, sessionId).catch(() => undefined);
+    if (sessionId) void deletePlaybackSession(playbackChannelId, sessionId).catch(() => undefined);
     if (downloadTimer !== null) window.clearTimeout(downloadTimer);
     restorePreviewTheme?.();
 });
@@ -477,17 +537,21 @@ onUnmounted(() => {
                             :has-audio="playbackHasAudio"
                             playback
                             @error="handlePlayerError"
+                            @timeupdate="handlePlayerTimeUpdate"
+                            @loading="handlePlayerLoading"
                         />
+                        <div v-if="playbackMediaUrl && playbackBuffering" class="playback-buffering" data-testid="playback-buffering">
+                            <LoaderCircle :size="22" class="spin" aria-hidden="true" />
+                            <span>画面缓冲中</span>
+                        </div>
                         <div v-if="playbackMediaUrl" class="video-overlay top-overlay">
                             <span>CH-01 {{ options?.channel.name || "东门出入口" }}</span>
-                            <span>{{ localDateTime(playback.currentTime || selectedRecord?.startTime || options?.serverNow) }}</span>
                         </div>
-                        <div v-if="playbackMediaUrl" class="video-overlay bottom-overlay">
-                            <span class="stream-badge">设备录像 · <b>{{ statusText }}</b></span>
-                            <span>{{ options?.device.code }}</span>
-                        </div>
-                        <div v-else class="playback-idle-cover" data-testid="playback-idle-cover" role="img" aria-label="录像未播放">
-                            <LoaderCircle v-if="['creating', 'buffering'].includes(playback.status)" :size="48" class="spin" aria-hidden="true" />
+                        <div v-else class="playback-idle-cover" data-testid="playback-idle-cover" role="img" :aria-label="isPlaybackLoading ? statusText : '录像未播放'">
+                            <div v-if="isPlaybackLoading" class="playback-loading" data-testid="playback-loading">
+                                <LoaderCircle :size="42" class="spin" aria-hidden="true" />
+                                <span>{{ statusText }}</span>
+                            </div>
                             <CircleAlert v-else-if="playback.status === 'failed'" :size="48" aria-hidden="true" />
                             <Videotape v-else :size="64" :stroke-width="1.35" aria-hidden="true" />
                         </div>
@@ -508,7 +572,6 @@ onUnmounted(() => {
                             <Play v-else :size="17" fill="currentColor" />
                         </button>
                         <button class="control-icon" type="button" aria-label="停止" title="停止" :disabled="!selectedRecord" @click="stopPlayback()"><Square :size="15" fill="currentColor" /></button>
-                        <span class="control-time" data-testid="playback-time">{{ shortTime(playback.currentTime || selectedRecord?.startTime) }} <i>/</i> {{ shortTime(selectedRecord?.endTime) }}</span>
                         <div class="control-spacer"></div>
                         <label class="scale-select" title="播放倍速">
                             <select :value="playback.scale" @change="setScale(Number(($event.target as HTMLSelectElement).value))">
@@ -535,15 +598,18 @@ onUnmounted(() => {
                             <button
                                 :data-testid="`record-segment-${index}`"
                                 :class="['segment-item', { selected: playback.recordKey === record.recordKey }]"
+                                :aria-current="playback.recordKey === record.recordKey ? 'true' : undefined"
                                 type="button"
-                                @click="selectRecord(record)"
-                                @dblclick="startPlayback"
+                                @click="playRecord(record)"
                             >
-                                <span class="segment-marker" :class="record.type || 'unknown'"></span>
                                 <span class="segment-content">
                                     <strong>{{ record.name || `录像段 ${index + 1}` }}</strong>
                                     <span class="segment-time"><Clock3 :size="12" />{{ shortTime(record.startTime) }} - {{ shortTime(record.endTime) }}</span>
-                                    <span class="segment-meta"><i>{{ recordQueryTypeText(record.type) }}</i><i>{{ durationText(record) }}</i></span>
+                                    <span class="segment-meta">
+                                        <i class="segment-type"><span class="segment-marker" :class="record.type || 'unknown'"></span>{{ recordQueryTypeText(record.type) }}</i>
+                                        <i>{{ durationText(record) }}</i>
+                                        <i v-if="record.fileSize != null && record.fileSize >= 0" :data-testid="`record-segment-size-${index}`">{{ fileSizeText(record.fileSize) }}</i>
+                                    </span>
                                 </span>
                             </button>
                             <button
@@ -575,7 +641,6 @@ onUnmounted(() => {
                 :records="records"
                 :selected-record-key="playback.recordKey"
                 :current-time="playback.currentTime"
-                @select="handleTimelineSelect"
                 @locate="handleTimelineLocate"
             />
         </div>
@@ -612,29 +677,28 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .player-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .playback-viewport { position: relative; flex: 1; min-height: clamp(220px, 30vh, 340px); overflow: hidden; color: #e8eef5; background: #000; }
 .playback-idle-cover { position: absolute; inset: 0; display: grid; place-items: center; color: #89939d; background: #000; }
+.playback-loading { display: flex; align-items: center; flex-direction: column; gap: 12px; color: #c9d1d9; font-size: 12px; }
+.playback-buffering { position: absolute; z-index: 4; top: 12px; left: 50%; display: flex; align-items: center; gap: 7px; padding: 6px 9px; color: #fff; font-size: 11px; background: rgb(10 15 20 / 76%); border: 1px solid rgb(255 255 255 / 18%); border-radius: 5px; transform: translateX(-50%); }
 .playback-idle-cover .lucide-circle-alert { color: #e05d5d; }
 .playback-status-sr { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; white-space: nowrap; border: 0; clip: rect(0, 0, 0, 0); clip-path: inset(50%); }
 .video-overlay { position: absolute; z-index: 2; right: 14px; left: 14px; display: flex; justify-content: space-between; gap: 12px; color: rgb(239 246 255 / 86%); font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; text-shadow: 0 1px 3px #000; }
-.top-overlay { top: 12px; }.bottom-overlay { bottom: 12px; align-items: flex-end; }
-.stream-badge { padding: 3px 6px; color: #fff; background: rgb(10 15 20 / 64%); border: 1px solid rgb(255 255 255 / 20%); border-radius: 3px; }
-.stream-badge b { font-weight: 500; }
+.top-overlay { top: 12px; }
 .download-notice { position: absolute; z-index: 5; top: 42px; right: 14px; display: flex; align-items: center; gap: 6px; max-width: calc(100% - 28px); padding: 7px 10px; overflow: hidden; color: #fff; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; background: rgb(10 15 20 / 82%); border: 1px solid rgb(255 255 255 / 18%); border-radius: 4px; box-shadow: 0 4px 14px rgb(0 0 0 / 24%); }
 .playback-controls { display: flex; align-items: center; gap: 7px; height: 48px; padding: 0 10px; color: var(--uvp-text-secondary); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-top: 0; }
 .control-primary { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; color: #fff; background: var(--uvp-brand); border: 0; border-radius: 50%; cursor: pointer; }
 .control-primary:hover { background: var(--uvp-brand-strong); }
-.control-time { min-width: 142px; margin-left: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }.control-time i { color: var(--uvp-text-tertiary); font-style: normal; }
 .control-spacer { flex: 1; }
 .scale-select { position: relative; }.scale-select select { width: 62px; height: 30px; padding: 0 23px 0 8px; color: var(--uvp-text-secondary); font-size: 11px; background: var(--uvp-search-control-bg); border: 1px solid var(--uvp-search-secondary-btn-border); border-radius: 6px; appearance: none; }.scale-select svg { position: absolute; top: 9px; right: 6px; pointer-events: none; }
 .segment-panel { display: flex; flex-direction: column; min-height: 0; margin-left: 10px; background: var(--uvp-list-panel-bg); border: 1px solid var(--uvp-list-panel-border); }
 .segment-header { display: flex; align-items: center; justify-content: space-between; min-height: 53px; padding: 8px 10px 8px 12px; background: var(--uvp-list-toolbar-bg); border-bottom: 1px solid var(--uvp-list-panel-border); }
 .segment-header div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }.segment-header strong { font-size: 13px; }.segment-header span { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .segment-header button { width: 28px; height: 28px; }
-.segment-list { flex: 1; min-height: 0; overflow-y: auto; }
+.segment-list { flex: 1; min-height: 0; padding: 4px; overflow-y: auto; }
 .segment-row { position: relative; }
-.segment-item { position: relative; display: flex; align-items: center; gap: 9px; width: 100%; min-height: 74px; padding: 9px 44px 9px 11px; color: var(--uvp-text-primary); text-align: left; background: var(--uvp-table-row-bg); border: 0; border-bottom: 1px solid var(--uvp-list-panel-border); cursor: pointer; transition: background-color 170ms ease; }
-.segment-item:hover { background: var(--uvp-table-row-hover-bg); }.segment-item.selected { background: var(--uvp-table-row-checked-bg); box-shadow: inset 3px 0 0 var(--uvp-brand); }
-.segment-marker { width: 3px; height: 42px; background: #708090; border-radius: 3px; }.segment-marker.time { background: var(--uvp-brand); }.segment-marker.alarm { background: var(--uvp-danger); }.segment-marker.manual { background: var(--uvp-warning); }
-.segment-content { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }.segment-content strong { overflow: hidden; font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }.segment-time { display: flex; align-items: center; gap: 4px; color: var(--uvp-text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }.segment-meta { display: flex; gap: 10px; }.segment-meta i { color: var(--uvp-text-tertiary); font-size: 10px; font-style: normal; }
+.segment-item { position: relative; display: flex; align-items: center; width: 100%; min-height: 74px; padding: 9px 40px 9px 11px; color: var(--uvp-text-primary); text-align: left; background: var(--uvp-table-row-bg); border: 1px solid transparent; border-bottom-color: var(--uvp-list-panel-border); border-radius: 5px; cursor: pointer; transition: background-color 170ms ease, border-color 170ms ease, box-shadow 170ms ease; }
+.segment-item:hover { background: var(--uvp-table-row-hover-bg); }.segment-item:focus-visible { border-color: var(--uvp-brand); outline: 2px solid var(--uvp-brand); outline-offset: -2px; }.segment-item.selected { z-index: 1; background: var(--uvp-table-row-checked-bg); border-color: var(--uvp-brand); box-shadow: 0 2px 8px rgb(29 100 235 / 12%); }
+.segment-marker { flex: none; width: 7px; height: 7px; background: #708090; border-radius: 50%; }.segment-marker.time { background: var(--uvp-brand); }.segment-marker.alarm { background: var(--uvp-danger); }.segment-marker.manual { background: var(--uvp-warning); }
+.segment-content { display: flex; flex: 1; flex-direction: column; gap: 4px; min-width: 0; }.segment-content strong { overflow: hidden; font-size: 12px; line-height: 17px; text-overflow: ellipsis; white-space: nowrap; }.segment-time { display: flex; align-items: center; gap: 4px; color: var(--uvp-text-secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }.segment-meta { display: flex; gap: 10px; }.segment-meta i { color: var(--uvp-text-tertiary); font-size: 10px; font-style: normal; }.segment-type { display: inline-flex; align-items: center; gap: 5px; }
 .segment-download { position: absolute; z-index: 2; top: 23px; right: 8px; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 1px solid transparent; border-radius: 5px; cursor: pointer; transition: color 160ms ease, background-color 160ms ease, border-color 160ms ease; }.segment-download:hover, .segment-download:focus-visible, .segment-row.selected .segment-download { color: var(--uvp-brand); background: var(--uvp-search-secondary-btn-bg); border-color: var(--uvp-search-secondary-btn-border); outline: none; }
 .segment-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; color: var(--uvp-text-tertiary); text-align: center; }.segment-empty strong { font-size: 12px; }.segment-empty span { font-size: 11px; }
 .segment-footer { display: flex; justify-content: space-between; padding: 8px 11px; color: var(--uvp-text-tertiary); font-size: 10px; background: var(--uvp-list-toolbar-bg); border-top: 1px solid var(--uvp-list-panel-border); }
@@ -648,7 +712,7 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
     .record-playback-page { height: auto; min-height: 100%; overflow: auto; }.playback-workspace { height: auto; min-height: 100%; border-radius: 0; }.query-bar { align-items: flex-start; margin: 0 8px 8px; padding: 10px 12px; }.channel-context { min-width: 0; }.online-indicator { display: none; }.query-fields { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }.query-field input { width: 100%; }.range-separator { display: none; }.type-field, .query-submit { width: 100%; }.type-field select { width: 100%; }.playback-main { display: flex; flex: none; flex-direction: column; margin: 0 8px; padding: 8px; }.playback-viewport { flex: none; min-height: 0; aspect-ratio: 16 / 9; }.segment-panel { height: 280px; margin: 8px 0 0; }.timeline-panel { margin: 8px; }
 }
 @media (max-width: 430px) {
-    .back-command { width: 36px; height: 36px; }.channel-context span:not(.channel-icon) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }.query-fields { grid-template-columns: 1fr; }.query-field input, .query-field select, .query-submit { height: 44px; }.playback-controls { height: 52px; }.control-icon, .control-primary { width: 36px; height: 36px; }.control-time { min-width: 0; font-size: 9px; }.control-spacer { display: none; }.scale-select { display: none; }.segment-panel { height: 306px; }
+    .back-command { width: 36px; height: 36px; }.channel-context span:not(.channel-icon) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }.query-fields { grid-template-columns: 1fr; }.query-field input, .query-field select, .query-submit { height: 44px; }.playback-controls { height: 52px; }.control-icon, .control-primary { width: 36px; height: 36px; }.control-spacer { display: none; }.scale-select { display: none; }.segment-panel { height: 306px; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
 </style>

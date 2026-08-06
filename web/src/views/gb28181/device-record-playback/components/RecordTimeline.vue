@@ -39,6 +39,7 @@ const locatedInGap = ref(false);
 const dragging = ref(false);
 let dragStartX = 0;
 let dragMoved = false;
+let dragStartedOnSegment = false;
 let dragStartViewport: TimelineViewport | null = null;
 
 const ticks = computed(() => {
@@ -63,10 +64,11 @@ const playheadPercent = computed(() => playheadTime.value ? timeToPercent(props.
 const queryStartPercent = computed(() => timeToPercent(viewport.value, props.range.startTime));
 const queryEndPercent = computed(() => timeToPercent(viewport.value, props.range.endTime));
 const playheadInGap = computed(() => locatedInGap.value || !recordAt(playheadTime.value));
-const visibleRangeText = computed(() => {
-    const start = formatDateTime(viewport.value.startTime);
-    const end = formatDateTime(viewport.value.endTime);
-    return start.slice(0, 10) === end.slice(0, 10) ? `${start} - ${end.slice(11)}` : `${start} - ${end}`;
+const selectedRecordRangeText = computed(() => {
+    const record = selectedRecord();
+    return record?.startTime && record.endTime
+        ? `${formatDateTime(record.startTime)} - ${formatDateTime(record.endTime)}`
+        : "未选择";
 });
 
 watch(() => [props.range.startTime, props.range.endTime], () => {
@@ -155,6 +157,7 @@ function centerAndLocate(time: string, preferredRecordKey?: string) {
 }
 
 function onSegmentClick(recordKey: string, event: MouseEvent) {
+    if (dragMoved) return;
     const time = pointerTime(event.clientX);
     const record = props.records.find(item => item.recordKey === recordKey);
     if (!record) return;
@@ -167,14 +170,23 @@ function onSegmentClick(recordKey: string, event: MouseEvent) {
     centerAndLocate(located, recordKey);
 }
 
-function onSurfacePointerDown(event: PointerEvent) {
+function startTimelineDrag(event: PointerEvent, fromSegment = false) {
     if (event.button !== 0) return;
     dragStartX = event.clientX;
     dragMoved = false;
+    dragStartedOnSegment = fromSegment;
     dragStartViewport = { ...viewport.value };
     dragging.value = true;
     window.addEventListener("pointermove", onWindowPointerMove);
     window.addEventListener("pointerup", onWindowPointerUp, { once: true });
+}
+
+function onSurfacePointerDown(event: PointerEvent) {
+    startTimelineDrag(event);
+}
+
+function onSegmentPointerDown(event: PointerEvent) {
+    startTimelineDrag(event, true);
 }
 
 function onWindowPointerMove(event: PointerEvent) {
@@ -190,11 +202,12 @@ function onWindowPointerMove(event: PointerEvent) {
 function onWindowPointerUp(event: PointerEvent) {
     window.removeEventListener("pointermove", onWindowPointerMove);
     if (dragMoved) locateTime(playheadTime.value);
-    else {
+    else if (!dragStartedOnSegment) {
         const time = pointerTime(event.clientX);
         if (time) centerAndLocate(time);
     }
     dragging.value = false;
+    dragStartedOnSegment = false;
     dragStartViewport = null;
 }
 
@@ -227,7 +240,7 @@ onUnmounted(() => {
         <header class="timeline-header">
             <div class="timeline-title">
                 <strong>录像时间轴</strong>
-                <span>{{ visibleRangeText }}</span>
+                <span data-testid="timeline-range">当前录像 · {{ selectedRecordRangeText }}</span>
             </div>
             <div class="timeline-actions">
                 <div class="timeline-legend" aria-label="录像类型图例">
@@ -275,7 +288,7 @@ onUnmounted(() => {
                 :class="['timeline-segment', segment.type, { selected: selectedRecordKey === segment.key }]"
                 :style="{ left: `${segment.left}%`, width: `${Math.max(segment.width, 0.55)}%`, top: `${47 + segment.lane * 28}px` }"
                 :title="`${formatPointerTime(segment.trueStartTime)} - ${formatPointerTime(segment.trueEndTime)}`"
-                @pointerdown.stop
+                @pointerdown.stop="onSegmentPointerDown"
                 @click.stop="onSegmentClick(segment.key, $event)"
             >
                 <span v-if="segment.width >= 8">{{ formatPointerTime(segment.trueStartTime) }} - {{ formatPointerTime(segment.trueEndTime) }}</span>
@@ -318,7 +331,7 @@ onUnmounted(() => {
 .timeline-segment { position: absolute; z-index: 3; display: flex; align-items: center; min-width: 6px; height: 22px; padding: 0 7px; overflow: hidden; color: #fff; font: 9px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: left; text-shadow: 0 1px 2px rgb(0 0 0 / 38%); white-space: nowrap; background: #708090; border: 1px solid rgb(255 255 255 / 48%); border-radius: 3px; cursor: pointer; transition: filter 160ms ease, box-shadow 160ms ease; }
 .timeline-segment:hover { filter: brightness(1.12); }.timeline-segment.time { background: var(--uvp-brand); }.timeline-segment.alarm { background: var(--uvp-danger); }.timeline-segment.manual { background: var(--uvp-warning); }
 .timeline-segment.selected { z-index: 4; box-shadow: 0 0 0 2px var(--uvp-panel-bg), 0 0 0 3px var(--uvp-text-primary); }
-.timeline-playhead { position: absolute; z-index: 7; top: 0; bottom: 0; left: 50%; width: 2px; background: var(--uvp-brand); box-shadow: 0 0 0 1px color-mix(in srgb, var(--uvp-panel-bg) 68%, transparent); pointer-events: none; }
+.timeline-playhead { position: absolute; z-index: 7; top: 0; bottom: 0; left: 50%; width: 2px; background: var(--uvp-brand); box-shadow: 0 0 0 1px color-mix(in srgb, var(--uvp-panel-bg) 68%, transparent); cursor: ew-resize; pointer-events: auto; }
 .timeline-playhead > span { position: absolute; top: 4px; left: 50%; min-width: 72px; padding: 4px 8px; color: #fff; font: 10px ui-monospace, SFMono-Regular, Menlo, monospace; text-align: center; white-space: nowrap; background: var(--uvp-brand); border-radius: 4px; box-shadow: 0 2px 7px rgb(0 0 0 / 18%); transform: translateX(-50%); }
 .timeline-playhead > span::after { position: absolute; bottom: -5px; left: 50%; width: 9px; height: 6px; background: inherit; clip-path: polygon(0 0, 100% 0, 50% 100%); content: ""; transform: translateX(-50%); }
 .timeline-playhead > span b { margin-left: 5px; color: #fff0ca; font-weight: 500; }.timeline-playhead > i { position: absolute; right: -4px; bottom: 0; width: 10px; height: 4px; background: var(--uvp-brand); border-radius: 4px 4px 0 0; }

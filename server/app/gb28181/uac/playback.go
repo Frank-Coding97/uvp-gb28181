@@ -22,6 +22,8 @@ var (
 	ErrPlaybackRejected    = errors.New("playback control rejected")
 )
 
+const playbackTeardownTimeout = 2 * time.Second
+
 type PlaybackInviteRequest struct {
 	DeviceID, ChannelID, Destination, Transport, SSRC, SDP string
 }
@@ -370,13 +372,15 @@ func (u *UAC) TeardownPlayback(ctx context.Context, callID string) error {
 	body, buildErr := mansrtsp.BuildTeardown(cseq)
 	var controlErr error
 	if buildErr == nil {
+		controlCtx, controlCancel := context.WithTimeout(ctx, playbackTeardownTimeout)
 		req := sip.NewRequest(sip.INFO, u.deviceURI(record.metadata.ChannelID))
 		req.SetBody(body)
 		req.AppendHeader(sip.NewHeader("Content-Type", mansrtsp.ContentType))
 		callIDHeader := sip.CallIDHeader(record.metadata.CallID)
 		req.AppendHeader(&callIDHeader)
 		req.AppendHeader(&sip.CSeqHeader{SeqNo: cseq, MethodName: sip.INFO})
-		response, err := record.dialog.Do(ctx, req)
+		response, err := record.dialog.Do(controlCtx, req)
+		controlCancel()
 		if err != nil {
 			controlErr = fmt.Errorf("发送 PLAYBACK TEARDOWN 失败: %w", err)
 		} else if !is2xx(response.StatusCode) {
@@ -389,8 +393,13 @@ func (u *UAC) TeardownPlayback(ctx context.Context, callID string) error {
 			controlErr = fmt.Errorf("%w: MANSRTSP %d %s", ErrPlaybackRejected, result.StatusCode, result.Reason)
 		}
 	}
-	byeErr := record.dialog.Bye(ctx)
+	byeCtx, byeCancel := context.WithTimeout(context.WithoutCancel(ctx), playbackTeardownTimeout)
+	byeErr := record.dialog.Bye(byeCtx)
+	byeCancel()
 	closeErr := record.dialog.Close()
+	if byeErr == nil && (errors.Is(controlErr, context.Canceled) || errors.Is(controlErr, context.DeadlineExceeded)) {
+		controlErr = nil
+	}
 	return errors.Join(controlErr, byeErr, closeErr)
 }
 

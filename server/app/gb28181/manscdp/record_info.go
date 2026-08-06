@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -171,7 +172,9 @@ type RecordInfoItem struct {
 	Secrecy        int
 	Type           RecordInfoItemType
 	RecorderID     string
+	FileSize       *int64
 	RecordLocation string
+	StreamNumber   *int
 }
 
 type RecordInfoItemErrorCode string
@@ -218,12 +221,14 @@ type RecordInfoWarning struct {
 type RecordInfoResponse struct {
 	SN                int
 	DeviceID          string
+	Name              string
 	SumNum            int
 	RecordListPresent bool
 	RecordListNum     int
 	Items             []RecordInfoItem
 	ItemResults       []RecordInfoItemResult
 	Warnings          []RecordInfoWarning
+	ExtraInfo         []string
 	Empty             bool
 }
 
@@ -240,12 +245,14 @@ func (r *RecordInfoResponse) HasWarning(code RecordInfoWarningCode) bool {
 }
 
 type recordInfoResponseWire struct {
-	XMLName  xml.Name            `xml:"Response"`
-	CmdType  string              `xml:"CmdType"`
-	SN       int                 `xml:"SN"`
-	DeviceID string              `xml:"DeviceID"`
-	SumNum   *int                `xml:"SumNum"`
-	List     *recordInfoListWire `xml:"RecordList"`
+	XMLName   xml.Name            `xml:"Response"`
+	CmdType   string              `xml:"CmdType"`
+	SN        int                 `xml:"SN"`
+	DeviceID  string              `xml:"DeviceID"`
+	Name      string              `xml:"Name"`
+	SumNum    *int                `xml:"SumNum"`
+	List      *recordInfoListWire `xml:"RecordList"`
+	ExtraInfo []string            `xml:"ExtraInfo"`
 }
 
 type recordInfoListWire struct {
@@ -263,7 +270,9 @@ type recordInfoItemWire struct {
 	Secrecy        int    `xml:"Secrecy"`
 	Type           string `xml:"Type"`
 	RecorderID     string `xml:"RecorderID"`
+	FileSize       string `xml:"FileSize"`
 	RecordLocation string `xml:"RecordLocation"`
+	StreamNumber   string `xml:"StreamNumber"`
 }
 
 // ParseRecordInfoResponse decodes one possibly segmented RecordInfo MESSAGE.
@@ -276,6 +285,7 @@ func ParseRecordInfoResponse(body []byte) (*RecordInfoResponse, error) {
 	}
 	wire.CmdType = strings.TrimSpace(wire.CmdType)
 	wire.DeviceID = strings.TrimSpace(wire.DeviceID)
+	wire.Name = strings.TrimSpace(wire.Name)
 	if wire.CmdType == "" {
 		return nil, &RecordInfoError{Code: RecordInfoErrorMalformed, Field: "CmdType", Err: errors.New("不能为空")}
 	}
@@ -298,8 +308,10 @@ func ParseRecordInfoResponse(body []byte) (*RecordInfoResponse, error) {
 	response := &RecordInfoResponse{
 		SN:                wire.SN,
 		DeviceID:          wire.DeviceID,
+		Name:              wire.Name,
 		SumNum:            *wire.SumNum,
 		RecordListPresent: wire.List != nil,
+		ExtraInfo:         normalizeRecordInfoExtraInfo(wire.ExtraInfo),
 		Empty:             *wire.SumNum == 0 && wire.List == nil,
 	}
 	if wire.List == nil {
@@ -344,8 +356,41 @@ func normalizeRecordInfoItem(wire recordInfoItemWire) RecordInfoItem {
 		Secrecy:        wire.Secrecy,
 		Type:           RecordInfoItemType(strings.TrimSpace(wire.Type)),
 		RecorderID:     strings.TrimSpace(wire.RecorderID),
+		FileSize:       parseOptionalNonNegativeInt64(wire.FileSize),
 		RecordLocation: strings.TrimSpace(wire.RecordLocation),
+		StreamNumber:   parseOptionalRecordInfoInt(wire.StreamNumber),
 	}
+}
+
+func parseOptionalNonNegativeInt64(value string) *int64 {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || parsed < 0 {
+		return nil
+	}
+	return &parsed
+}
+
+func parseOptionalRecordInfoInt(value string) *int {
+	parsed := parseOptionalNonNegativeInt64(value)
+	if parsed == nil || int64(int(*parsed)) != *parsed {
+		return nil
+	}
+	result := int(*parsed)
+	return &result
+}
+
+func normalizeRecordInfoExtraInfo(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func validateRecordInfoItem(item RecordInfoItem, expectedDeviceID string) *RecordInfoItemError {

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -117,6 +118,18 @@ func randomPlaybackValue(prefix string) string {
 	return fmt.Sprintf("%s%d", prefix, time.Now().UnixNano())
 }
 
+func randomPlaybackSSRC() string {
+	value, err := rand.Int(rand.Reader, big.NewInt(1_000_000_000))
+	if err == nil {
+		return fmt.Sprintf("1%09d", value.Int64())
+	}
+	fallback := time.Now().UnixNano() % 1_000_000_000
+	if fallback < 0 {
+		fallback = -fallback
+	}
+	return fmt.Sprintf("1%09d", fallback)
+}
+
 type allocationResources struct {
 	allocation RTPAllocation
 	teardown   func(context.Context) error
@@ -179,7 +192,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 		return CreateResult{Session: created.Session, Existing: true}, nil
 	}
 	session := created.Session
-	streamID, ssrc := randomPlaybackValue("pb-"), "1"+randomPlaybackValue("")[:9]
+	streamID, ssrc := randomPlaybackValue("pb-"), randomPlaybackSSRC()
 	node, err := s.picker.Pick(ctx, PickRequest{OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID,
 		SIPChannelID: request.SIPChannelID, RecordKey: request.RecordKey, StreamID: streamID,
 		Destination: request.Destination, Transport: request.Transport, TCPMode: request.TCPMode})

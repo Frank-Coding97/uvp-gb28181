@@ -256,6 +256,53 @@ func TestParseRecordInfoResponsePreservesTypesAndRecordLocation(t *testing.T) {
 	}
 }
 
+func TestParseRecordInfoResponseParsesOptionalFileMetadata(t *testing.T) {
+	item := `<Item><DeviceID>34020000001320000001</DeviceID><Name>东门</Name><FilePath>/record/001.ps</FilePath><StartTime>2026-08-02T08:00:00</StartTime><EndTime>2026-08-02T08:10:00</EndTime><Secrecy>0</Secrecy><Type>time</Type><FileSize>248635904</FileSize><RecordLocation>34020000001320000001</RecordLocation><StreamNumber>0</StreamNumber></Item>`
+	body := encodeRecordInfoXML(t, "UTF-8", recordInfoResponseXMLTextWithExtra(1, 1, item, "vendor-extra"))
+
+	response, err := ParseRecordInfoResponse(body)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	require.NotNil(t, response.Items[0].FileSize)
+	require.Equal(t, int64(248635904), *response.Items[0].FileSize)
+	require.NotNil(t, response.Items[0].StreamNumber)
+	require.Equal(t, 0, *response.Items[0].StreamNumber)
+	require.Equal(t, "东门通道", response.Name)
+	require.Equal(t, []string{"vendor-extra"}, response.ExtraInfo)
+}
+
+func TestParseRecordInfoResponseKeepsMissingFileMetadataNil(t *testing.T) {
+	item := recordInfoItemXML("34020000001320000001", "东门", "园区", "2026-08-02T08:00:00", "2026-08-02T08:10:00", "time", "local")
+	body := encodeRecordInfoXML(t, "UTF-8", recordInfoResponseXMLText(1, 1, item))
+
+	response, err := ParseRecordInfoResponse(body)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	require.Nil(t, response.Items[0].FileSize)
+	require.Nil(t, response.Items[0].StreamNumber)
+}
+
+func TestParseRecordInfoResponseTreatsBlankFileSizeAsMissing(t *testing.T) {
+	item := `<Item><DeviceID>34020000001320000001</DeviceID><Name>东门</Name><StartTime>2026-08-02T08:00:00</StartTime><EndTime>2026-08-02T08:10:00</EndTime><Secrecy>0</Secrecy><FileSize> </FileSize></Item>`
+	body := encodeRecordInfoXML(t, "UTF-8", recordInfoResponseXMLText(1, 1, item))
+
+	response, err := ParseRecordInfoResponse(body)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	require.Nil(t, response.Items[0].FileSize)
+}
+
+func TestParseRecordInfoResponseTreatsInvalidOptionalNumbersAsMissing(t *testing.T) {
+	item := `<Item><DeviceID>34020000001320000001</DeviceID><Name>东门</Name><StartTime>2026-08-02T08:00:00</StartTime><EndTime>2026-08-02T08:10:00</EndTime><Secrecy>0</Secrecy><FileSize>invalid</FileSize><StreamNumber>-1</StreamNumber></Item>`
+	body := encodeRecordInfoXML(t, "UTF-8", recordInfoResponseXMLText(1, 1, item))
+
+	response, err := ParseRecordInfoResponse(body)
+	require.NoError(t, err)
+	require.Len(t, response.Items, 1)
+	require.Nil(t, response.Items[0].FileSize)
+	require.Nil(t, response.Items[0].StreamNumber)
+}
+
 func TestParseRecordInfoResponseRejectsMalformedHeaders(t *testing.T) {
 	tests := []struct {
 		name string
@@ -300,11 +347,19 @@ func encodeRecordInfoXML(t *testing.T, charset, xmlText string) []byte {
 }
 
 func recordInfoResponseXMLText(sumNum, listNum int, items string) string {
+	return recordInfoResponseXMLTextWithExtra(sumNum, listNum, items)
+}
+
+func recordInfoResponseXMLTextWithExtra(sumNum, listNum int, items string, extra ...string) string {
 	recordList := ""
 	if listNum >= 0 {
 		recordList = fmt.Sprintf(`<RecordList Num="%d">%s</RecordList>`, listNum, items)
 	}
-	return fmt.Sprintf(`<Response><CmdType>RecordInfo</CmdType><SN>8</SN><DeviceID>34020000001320000001</DeviceID><SumNum>%d</SumNum>%s</Response>`, sumNum, recordList)
+	extraInfo := ""
+	for _, value := range extra {
+		extraInfo += fmt.Sprintf(`<ExtraInfo>%s</ExtraInfo>`, value)
+	}
+	return fmt.Sprintf(`<Response><CmdType>RecordInfo</CmdType><SN>8</SN><DeviceID>34020000001320000001</DeviceID><Name>东门通道</Name><SumNum>%d</SumNum>%s%s</Response>`, sumNum, recordList, extraInfo)
 }
 
 func recordInfoItemXML(deviceID, name, address, startTime, endTime, recordType, location string) string {

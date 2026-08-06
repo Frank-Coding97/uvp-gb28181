@@ -3,6 +3,8 @@ import { baseUrlApi } from "./utils";
 import { BaseResult } from "./types";
 import { getAccessToken } from "@/utils/auth";
 
+const silentRequestConfig = { showErrorMessage: false };
+
 // ===== 设备 =====
 
 export interface GbDevice {
@@ -147,7 +149,12 @@ export interface StreamMonitorSnapshot {
 }
 
 export const getStreamMonitor = (streamId: string) =>
-  http.request<BaseResult<StreamMonitorSnapshot>>("get", baseUrlApi(`gb28181/play/${streamId}/monitor`));
+  http.request<BaseResult<StreamMonitorSnapshot>>(
+    "get",
+    baseUrlApi(`gb28181/play/${streamId}/monitor`),
+    undefined,
+    silentRequestConfig
+  );
 
 export interface ProbeSnapshot {
   nodeId: number;
@@ -220,7 +227,9 @@ export interface DeviceControlCapabilities {
 export const getControlCapabilities = (channelId: number) =>
   http.request<BaseResult<DeviceControlCapabilities>>(
     "get",
-    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/control-capabilities`)
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/control-capabilities`),
+    undefined,
+    silentRequestConfig
   );
 
 export type DeviceFactState = "on" | "off" | "armed" | "disarmed" | "alarm" | "unknown" | string;
@@ -290,7 +299,8 @@ export const getDeviceStatus = (channelId: number, refresh = false) =>
   http.request<BaseResult<DeviceStatusResult>>(
     "get",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/device-status`),
-    { params: refresh ? { refresh: true } : undefined }
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
   );
 
 export interface DeviceOperationResult {
@@ -438,14 +448,16 @@ export const listPtzPresets = (channelId: number, refresh = false) =>
   http.request<BaseResult<{ list: Array<Record<string, unknown>>; freshness: string }>>(
     "get",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/presets`),
-    { params: refresh ? { refresh: true } : undefined }
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
   );
 
 export const listCruiseTracks = (channelId: number, refresh = false) =>
   http.request<BaseResult<CruiseTrackListResult>>(
     "get",
     baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/cruise-tracks`),
-    { params: refresh ? { refresh: true } : undefined }
+    { params: refresh ? { refresh: true } : undefined },
+    silentRequestConfig
   );
 
 export type HomePositionSource = "device_query" | "control_ack" | "legacy_profile";
@@ -525,7 +537,8 @@ export const getHomePosition = (channelId: number, refresh = false, idempotencyK
     {
       params: refresh ? { refresh: true } : undefined,
       ...(idempotencyKey ? { headers: { "Idempotency-Key": idempotencyKey } } : {})
-    }
+    },
+    silentRequestConfig
   );
 
 export const updateHomePosition = (channelId: number, data: HomePositionPatch, idempotencyKey?: string) =>
@@ -541,7 +554,9 @@ export const updateHomePosition = (channelId: number, data: HomePositionPatch, i
 export const getPtzOperation = (channelId: number, operationId: string) =>
   http.request<BaseResult<PTZOperation>>(
     "get",
-    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/operations/${operationId}`)
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz/operations/${operationId}`),
+    undefined,
+    silentRequestConfig
   );
 
 export const getPtzPreciseStatus = (channelId: number, refresh = false) =>

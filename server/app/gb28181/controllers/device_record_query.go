@@ -274,8 +274,8 @@ func recordQueryResultView(result recordquery.QueryResult, cfg gbconfig.RecordQu
 			Name: optionalString(item.Name), FilePath: optionalString(item.FilePath), Address: optionalString(item.Address),
 			StartTime: start.Format(time.RFC3339), EndTime: end.Format(time.RFC3339),
 			RawStartTime: item.StartTime, RawEndTime: item.EndTime, Secrecy: item.Secrecy,
-			Type: optionalString(typeValue), RecorderID: optionalString(item.RecorderID),
-			RecordLocation: optionalString(item.RecordLocation),
+			Type: optionalString(typeValue), RecorderID: optionalString(item.RecorderID), FileSize: item.FileSize,
+			RecordLocation: optionalString(item.RecordLocation), StreamNumber: item.StreamNumber,
 		})
 	}
 	partialReason := any(nil)

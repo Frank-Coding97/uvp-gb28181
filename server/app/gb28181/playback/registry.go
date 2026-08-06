@@ -99,7 +99,19 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 		}
 	}
 	scope := scopeKey(request.OwnerID, request.ChannelID)
-	if r.activeByScope[scope] != "" {
+	if activeID := r.activeByScope[scope]; activeID != "" {
+		if record := r.sessions[activeID]; record != nil {
+			record.mu.Lock()
+			active := record.session.clone()
+			record.mu.Unlock()
+			if !active.State.IsTerminal() && active.DeviceID == request.DeviceID &&
+				active.SegmentStart.Equal(request.SegmentStart) && active.SegmentEnd.Equal(request.SegmentEnd) {
+				if request.IdempotencyKey != "" {
+					r.idempotentByKey[idempotencyKey(request.OwnerID, request.ChannelID, request.IdempotencyKey)] = activeID
+				}
+				return CreateResult{Session: active, Existing: true}, nil
+			}
+		}
 		return CreateResult{}, ErrPlaybackBusy
 	}
 	id, err := newSessionID()
@@ -285,6 +297,11 @@ func (r *Registry) removeActive(session Session) {
 	defer r.mu.Unlock()
 	if r.activeByScope[scopeKey(session.OwnerID, session.ChannelID)] == session.ID {
 		delete(r.activeByScope, scopeKey(session.OwnerID, session.ChannelID))
+	}
+	for key, id := range r.idempotentByKey {
+		if id == session.ID {
+			delete(r.idempotentByKey, key)
+		}
 	}
 }
 
