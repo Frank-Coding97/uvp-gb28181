@@ -72,6 +72,22 @@ describe("multi-screen playback page", () => {
         expect(wrapper.find("[data-test=layout-9]").exists()).toBe(true);
     });
 
+    it.each([
+        [1, "layout-1"],
+        [4, "layout-4"],
+        [6, "layout-6"],
+        [8, "layout-8"],
+        [9, "layout-9"],
+        [16, "layout-16"]
+    ])("switches to %i visible playback slots", async (count, layoutClass) => {
+        const wrapper = mount(MultiScreenPlayback);
+
+        await wrapper.get(`[data-test=layout-${count}]`).trigger("click");
+
+        expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(count);
+        expect(wrapper.get("[aria-label=多屏播放格子]").classes()).toContain(layoutClass);
+    });
+
     it("starts independent streams when two sources are assigned", async () => {
         const wrapper = mount(MultiScreenPlayback);
         await flushPromises();
@@ -95,5 +111,49 @@ describe("multi-screen playback page", () => {
         await wrapper.get("[data-test=slot-remove-0]").trigger("click");
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([]);
         expect(playback.stopPlay).not.toHaveBeenCalled();
+    });
+
+    it("stops and resumes all visible players without releasing shared streams", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await wrapper.get("[data-test=source-channel-2]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(2);
+        await wrapper.get("[data-test=stop-all]").trigger("click");
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(0);
+        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门", "西门"]);
+        expect(playback.stopPlay).not.toHaveBeenCalled();
+
+        await wrapper.get("[data-test=play-all]").trigger("click");
+        await flushPromises();
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(2);
+        expect(playback.startPlay).toHaveBeenCalledTimes(2);
+    });
+
+    it("provides fullscreen and polling controls", async () => {
+        const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(HTMLElement.prototype, "requestFullscreen", {
+            configurable: true,
+            value: requestFullscreen
+        });
+        const wrapper = mount(MultiScreenPlayback);
+
+        await wrapper.get("[data-test=fullscreen]").trigger("click");
+        expect(requestFullscreen).toHaveBeenCalledTimes(1);
+        expect(wrapper.find("[data-test=polling-settings]").exists()).toBe(true);
+        expect(wrapper.find(".polling-settings").exists()).toBe(false);
+
+        await wrapper.get("[data-test=polling-settings]").trigger("click");
+        expect(wrapper.find(".polling-settings").exists()).toBe(true);
+        const interval = wrapper.get<HTMLInputElement>("[data-test=polling-interval]");
+        expect(interval.element.value).toBe("30");
+
+        await interval.setValue("45");
+        await wrapper.get("[data-test=save-polling]").trigger("click");
+        expect(wrapper.find(".polling-settings").exists()).toBe(false);
+        expect(wrapper.get("[role=status]").text()).toContain("45 秒");
+
+        delete (HTMLElement.prototype as Partial<HTMLElement>).requestFullscreen;
     });
 });

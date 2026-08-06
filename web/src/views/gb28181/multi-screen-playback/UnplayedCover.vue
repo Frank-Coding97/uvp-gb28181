@@ -1,10 +1,20 @@
+<script setup lang="ts">
+import { computed } from "vue";
+
+const props = defineProps<{ index: number }>();
+const slotNumber = computed(() => String(props.index + 1).padStart(2, "0"));
+</script>
+
 <template>
-    <div class="unplayed-cover" aria-label="未播放画面">
-        <div class="cover-center">
-            <span class="protocol-chip">GB/T 28181-2022</span>
-            <strong class="cover-brand">UVP</strong>
+    <div class="unplayed-cover" :aria-label="`${index + 1}号预览窗口，待接入`">
+        <div class="cover-meta" aria-hidden="true">
+            <span class="slot-number">窗口 {{ slotNumber }}</span>
+            <span class="idle-state"><span class="idle-dot" />待接入</span>
         </div>
-        <span class="cover-hint">选择设备通道</span>
+        <div class="brand-lockup" aria-hidden="true">
+            <strong class="cover-brand">UVP</strong>
+            <span class="brand-caption">统一视频接入平台</span>
+        </div>
     </div>
 </template>
 
@@ -16,33 +26,56 @@
     min-height: 0;
     flex: 1;
     overflow: hidden;
-    color: #FFFFFF;
-    background: linear-gradient(135deg, #0B1E3F 0%, #0F2A57 52%, #1A4480 100%);
+    color: #F8FAFC;
+    background: #090B0F;
+    container-type: inline-size;
     place-items: center;
 }
-.cover-center { display: flex; align-items: center; flex-direction: column; gap: 10px; }
-.protocol-chip {
-    padding: 3px 10px;
-    color: rgb(255 255 255 / 70%);
-    background: rgb(255 255 255 / 8%);
-    border: 1px solid rgb(255 255 255 / 18%);
-    border-radius: 10px;
+.cover-meta {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    color: #9CA3AF;
+    font-size: 10px;
+}
+.slot-number {
     font-family: var(--zlm-font-mono);
-    font-size: 9px;
-    letter-spacing: 1px;
+    font-variant-numeric: tabular-nums;
+}
+.idle-state { display: inline-flex; align-items: center; gap: 6px; }
+.idle-dot { width: 6px; height: 6px; background: #6B7280; border-radius: 50%; }
+.brand-lockup {
+    display: flex;
+    align-items: center;
+    flex-direction: column;
+    gap: 10px;
 }
 .cover-brand {
-    color: #FFFFFF;
-    font-size: clamp(40px, 5vw, 60px);
-    font-weight: 900;
-    letter-spacing: 10px;
+    color: transparent;
+    background: linear-gradient(110deg, #F8FAFC 8%, #C7D7F2 54%, #72A2F5 100%);
+    background-clip: text;
+    filter: drop-shadow(0 8px 18px rgb(37 99 235 / 16%));
+    font-family: var(--zlm-font-display);
+    font-size: 52px;
+    font-weight: 700;
+    letter-spacing: 0;
     line-height: 1;
-    text-shadow: 0 0 18px rgb(124 196 255 / 20%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
 }
-.cover-hint {
-    position: absolute;
-    bottom: 10px;
-    color: rgb(255 255 255 / 55%);
-    font-size: 10px;
+.brand-caption { color: #778397; font-size: 10px; font-weight: 500; letter-spacing: 0; line-height: 1.4; }
+
+@container (max-width: 220px) {
+    .cover-brand { font-size: 38px; }
+    .brand-caption { font-size: 9px; }
+}
+@container (min-width: 520px) {
+    .cover-brand { font-size: 68px; }
+    .brand-caption { font-size: 11px; }
 }
 </style>

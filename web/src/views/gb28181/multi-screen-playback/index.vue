@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import {
     AlertTriangle,
     Check,
-    Grid2X2,
-    Grid3X3,
-    LayoutGrid,
+    CircleStop,
     Maximize2,
+    Minimize2,
+    Play,
     RefreshCw,
+    Repeat2,
     Square,
     X
 } from "lucide-vue-next";
@@ -19,8 +20,8 @@ import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
 import type { ChannelVO } from "../device-mgmt/api";
 
-type LayoutSize = 1 | 4 | 9;
-type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
+type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
+type SlotStatus = "idle" | "requesting" | "playing" | "stopped" | "error" | "offline";
 
 interface PlaybackSlot {
     index: number;
@@ -36,21 +37,31 @@ const focusedIndex = ref<number | null>(null);
 const consoleVisible = ref(false);
 const consoleChannel = ref<ChannelVO | null>(null);
 const toast = ref("");
+const monitorAreaRef = ref<HTMLElement | null>(null);
+const isFullscreen = ref(false);
+const pollingVisible = ref(false);
+const pollingDraft = reactive({ intervalSeconds: 30, skipOffline: true });
+const pollingSettings = reactive({ intervalSeconds: 30, skipOffline: true });
 
 function createSlot(index: number): PlaybackSlot {
     return { index, channel: null, status: "idle", result: null, error: "", token: 0 };
 }
 
-const slots = reactive<PlaybackSlot[]>(Array.from({ length: 9 }, (_, index) => createSlot(index)));
+const slots = reactive<PlaybackSlot[]>(Array.from({ length: 16 }, (_, index) => createSlot(index)));
 const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
-const emptySlotIndex = computed(() => slots.findIndex(slot => !slot.channel));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
+const hasVisibleChannels = computed(() => visibleSlots.value.some(slot => slot.channel));
+const hasPlayingSlots = computed(() => visibleSlots.value.some(slot => slot.status === "playing" || slot.status === "requesting"));
+const hasStoppedSlots = computed(() => visibleSlots.value.some(slot => slot.channel && slot.status !== "playing" && slot.status !== "requesting"));
 
-const layoutOptions: Array<{ value: LayoutSize; label: string; icon: typeof LayoutGrid }> = [
-    { value: 1, label: "单屏", icon: LayoutGrid },
-    { value: 4, label: "四分屏", icon: Grid2X2 },
-    { value: 9, label: "九分屏", icon: Grid3X3 }
+const layoutOptions: Array<{ value: LayoutSize; label: string; cells: number }> = [
+    { value: 1, label: "一分屏", cells: 1 },
+    { value: 4, label: "四分屏", cells: 4 },
+    { value: 6, label: "六分屏", cells: 6 },
+    { value: 8, label: "八分屏", cells: 8 },
+    { value: 9, label: "九分屏", cells: 9 },
+    { value: 16, label: "十六分屏", cells: 16 }
 ];
 
 function slotGridClass() {
@@ -74,30 +85,14 @@ function resetSlot(slot: PlaybackSlot) {
     slot.error = "";
 }
 
-async function assignChannel(channel: ChannelVO) {
-    if (channelIsUsed(channel)) {
-        toast.value = `${channel.name || channel.channelId} 已在分屏中`;
-        return;
-    }
-    if (channel.status !== 1) {
-        toast.value = "离线通道不能开始实时播放";
-        return;
-    }
-    const target = emptySlotIndex.value >= 0
-        ? slots[emptySlotIndex.value]
-        : (focusedSlot.value?.channel ? focusedSlot.value : null);
-    if (!target || target.index >= layout.value) {
-        toast.value = "当前布局已满，请先聚焦一个格子再替换";
-        return;
-    }
+async function playSlot(target: PlaybackSlot) {
+    if (!target.channel) return;
+    const channel = target.channel;
     const token = target.token + 1;
     target.token = token;
-    target.channel = channel;
     target.status = "requesting";
     target.result = null;
     target.error = "";
-    focusedIndex.value = target.index;
-    toast.value = "";
     try {
         const response = await startPlay(channel.deviceId, channel.channelId);
         if (target.token !== token || target.channel?.id !== channel.id) return;
@@ -112,6 +107,27 @@ async function assignChannel(channel: ChannelVO) {
     }
 }
 
+async function assignChannel(channel: ChannelVO) {
+    if (channelIsUsed(channel)) {
+        toast.value = `${channel.name || channel.channelId} 已在分屏中`;
+        return;
+    }
+    if (channel.status !== 1) {
+        toast.value = "离线通道不能开始实时播放";
+        return;
+    }
+    const target = visibleSlots.value.find(slot => !slot.channel)
+        || (focusedSlot.value?.channel && focusedSlot.value.index < layout.value ? focusedSlot.value : null);
+    if (!target) {
+        toast.value = "当前布局已满，请先聚焦一个格子再替换";
+        return;
+    }
+    target.channel = channel;
+    focusedIndex.value = target.index;
+    toast.value = "";
+    await playSlot(target);
+}
+
 function removeSlot(slot: PlaybackSlot) {
     resetSlot(slot);
     if (focusedIndex.value === slot.index) focusedIndex.value = null;
@@ -119,9 +135,7 @@ function removeSlot(slot: PlaybackSlot) {
 
 async function retrySlot(slot: PlaybackSlot) {
     if (!slot.channel) return;
-    const channel = slot.channel;
-    resetSlot(slot);
-    await assignChannel(channel);
+    await playSlot(slot);
 }
 
 function focusSlot(slot: PlaybackSlot) {
@@ -140,11 +154,68 @@ function setLayout(value: LayoutSize) {
     if (focusedIndex.value != null && focusedIndex.value >= value) focusedIndex.value = null;
 }
 
+function stopAll() {
+    visibleSlots.value.forEach(slot => {
+        if (!slot.channel) return;
+        slot.token += 1;
+        slot.status = "stopped";
+        slot.error = "";
+    });
+    toast.value = hasVisibleChannels.value ? "已停止当前布局中的全部画面" : "当前布局没有可停止的画面";
+}
+
+async function playAll() {
+    const targets = visibleSlots.value.filter(slot => slot.channel && slot.status !== "playing" && slot.status !== "requesting");
+    await Promise.all(targets.map(slot => {
+        if (slot.result && resolvePlayUrl(slot.result)) {
+            slot.status = "playing";
+            slot.error = "";
+            return Promise.resolve();
+        }
+        return playSlot(slot);
+    }));
+    toast.value = targets.length ? "已恢复当前布局中的全部画面" : "当前布局没有待播放的画面";
+}
+
+async function toggleFullscreen() {
+    try {
+        if (document.fullscreenElement) {
+            await document.exitFullscreen();
+        } else if (monitorAreaRef.value?.requestFullscreen) {
+            await monitorAreaRef.value.requestFullscreen();
+        } else {
+            toast.value = "当前浏览器不支持全屏显示";
+        }
+    } catch {
+        toast.value = "浏览器未允许进入全屏";
+    } finally {
+        syncFullscreenState();
+    }
+}
+
+function syncFullscreenState() {
+    isFullscreen.value = document.fullscreenElement === monitorAreaRef.value;
+}
+
+function openPollingSettings() {
+    pollingDraft.intervalSeconds = pollingSettings.intervalSeconds;
+    pollingDraft.skipOffline = pollingSettings.skipOffline;
+    pollingVisible.value = true;
+}
+
+function savePollingSettings() {
+    pollingSettings.intervalSeconds = Math.min(3600, Math.max(5, Number(pollingDraft.intervalSeconds) || 30));
+    pollingSettings.skipOffline = pollingDraft.skipOffline;
+    pollingVisible.value = false;
+    toast.value = `轮询设置已保存，间隔 ${pollingSettings.intervalSeconds} 秒`;
+}
+
 function statusLabel(slot: PlaybackSlot) {
     return {
         idle: "空闲",
         requesting: "建立中",
         playing: "播放中",
+        stopped: "已停止",
         error: "播放失败",
         offline: "流已离线"
     }[slot.status];
@@ -155,6 +226,7 @@ function statusTone(slot: PlaybackSlot) {
         idle: "idle",
         requesting: "loading",
         playing: "playing",
+        stopped: "stopped",
         error: "error",
         offline: "offline"
     }[slot.status];
@@ -166,7 +238,9 @@ function onPlayerError(slot: PlaybackSlot, message: string) {
     slot.error = message || "播放器拉流失败";
 }
 
+onMounted(() => document.addEventListener("fullscreenchange", syncFullscreenState));
 onBeforeUnmount(() => {
+    document.removeEventListener("fullscreenchange", syncFullscreenState);
     slots.forEach(slot => { slot.token += 1; });
 });
 </script>
@@ -179,10 +253,19 @@ onBeforeUnmount(() => {
                 <BasicPtzPanel :channel="focusedSlot?.channel || null" />
             </section>
 
-            <main class="monitor-area">
+            <main ref="monitorAreaRef" class="monitor-area" :class="{ fullscreen: isFullscreen }">
                 <div class="monitor-toolbar">
                     <div class="layout-switcher" role="group" aria-label="选择分屏布局">
-                        <button v-for="option in layoutOptions" :key="option.value" type="button" :data-test="`layout-${option.value}`" :class="{ active: layout === option.value }" :aria-pressed="layout === option.value" :title="option.label" @click="setLayout(option.value)"><component :is="option.icon" :size="16" aria-hidden="true" /><span>{{ option.label }}</span></button>
+                        <button v-for="option in layoutOptions" :key="option.value" type="button" :data-test="`layout-${option.value}`" :class="{ active: layout === option.value }" :aria-label="option.label" :aria-pressed="layout === option.value" :title="option.label" @click="setLayout(option.value)">
+                            <span class="layout-glyph" :class="`glyph-${option.value}`" aria-hidden="true"><i v-for="cell in option.cells" :key="cell" /></span>
+                        </button>
+                    </div>
+                    <span class="toolbar-divider" aria-hidden="true" />
+                    <div class="playback-actions" role="group" aria-label="批量播放控制">
+                        <button type="button" data-test="play-all" :disabled="!hasStoppedSlots" aria-label="播放全部" title="播放全部" @click="playAll"><Play :size="17" aria-hidden="true" /></button>
+                        <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
+                        <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>
+                        <button type="button" data-test="polling-settings" aria-label="轮询设置" title="轮询设置" @click="openPollingSettings"><Repeat2 :size="17" aria-hidden="true" /></button>
                     </div>
                 </div>
 
@@ -200,14 +283,27 @@ onBeforeUnmount(() => {
                                 <PlayWindow v-if="slot.status === 'playing' && slot.result" :url="resolvePlayUrl(slot.result)" :has-audio="slot.channel.audioEnabled" @error="onPlayerError(slot, $event)" />
                                 <div v-else-if="slot.status === 'requesting'" class="slot-state"><RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
                                 <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong><button class="text-action" type="button" @click.stop="retrySlot(slot)"><RefreshCw :size="14" aria-hidden="true" />重试</button></div>
+                                <div v-else-if="slot.status === 'stopped'" class="slot-state stopped-state"><CircleStop :size="24" aria-hidden="true" /><strong>画面已停止</strong><button class="text-action" type="button" @click.stop="playSlot(slot)"><Play :size="14" aria-hidden="true" />恢复播放</button></div>
                                 <div v-else class="slot-state"><Square :size="24" aria-hidden="true" /><strong>画面暂不可用</strong></div>
                             </div>
                             <footer class="slot-footer"><span>{{ slot.channel.deviceId }}</span><span v-if="slot.result?.node">节点 {{ slot.result.node.name }}</span><span v-if="focusedIndex === slot.index" class="focused-label"><Check :size="13" aria-hidden="true" />已聚焦</span></footer>
                         </template>
-                        <UnplayedCover v-else />
+                        <UnplayedCover v-else :index="slot.index" />
                     </article>
                 </div>
                 <p v-if="toast" class="workspace-toast" role="status">{{ toast }}</p>
+
+                <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
+                    <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
+                        <header><div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div><button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false"><X :size="17" aria-hidden="true" /></button></header>
+                        <div class="polling-form">
+                            <label for="polling-interval">轮询间隔</label>
+                            <div class="interval-input"><input id="polling-interval" v-model.number="pollingDraft.intervalSeconds" data-test="polling-interval" type="number" min="5" max="3600" step="5" /><span>秒</span></div>
+                            <label class="checkbox-row"><input v-model="pollingDraft.skipOffline" type="checkbox" /><span>跳过离线通道</span></label>
+                        </div>
+                        <footer><button type="button" class="dialog-secondary" @click="pollingVisible = false">取消</button><button type="button" class="dialog-primary" data-test="save-polling" @click="savePollingSettings">保存</button></footer>
+                    </section>
+                </div>
             </main>
         </div>
         <PlayConsoleLinked v-model:visible="consoleVisible" :channel="consoleChannel" />
@@ -232,6 +328,7 @@ onBeforeUnmount(() => {
 .slot-topline,
 .slot-footer,
 .layout-switcher,
+.playback-actions,
 .slot-title,
 .slot-actions,
 .text-action {
@@ -241,24 +338,56 @@ onBeforeUnmount(() => {
 
 .workspace { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 0; flex: 1 1 auto; overflow: hidden; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); box-shadow: var(--zlm-shadow-sm); }
 .source-panel { display: grid; grid-template-rows: minmax(0, 1fr) auto; row-gap: 12px; min-width: 0; min-height: 0; overflow: hidden; background: var(--uvp-navigation-bg); border-right: 1px solid var(--zlm-border); }
-.layout-switcher button { min-height: 36px; padding: 0 10px; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
-.layout-switcher button.active { color: var(--zlm-brand-700); background: var(--zlm-brand-50); border-color: var(--zlm-brand-100); font-weight: 700; }
 .text-action { gap: 5px; color: var(--zlm-brand-600); background: transparent; border: 0; cursor: pointer; font: inherit; font-size: 12px; }
 
 .monitor-area { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 16px; background: var(--zlm-bg); }
-.monitor-toolbar { justify-content: flex-end; gap: 16px; margin-bottom: 14px; }
+.monitor-area:fullscreen { padding: 16px; background: var(--zlm-bg); }
+.monitor-toolbar { justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
 .layout-switcher { gap: 4px; }
-.layout-switcher button { display: inline-flex; align-items: center; gap: 6px; }
-.slot-grid { display: grid; min-height: 0; flex: 1 1 auto; gap: 0; }
+.layout-switcher button,
+.playback-actions button,
+.polling-settings header button { display: inline-flex; width: 34px; height: 34px; align-items: center; justify-content: center; padding: 0; color: var(--zlm-text-3); background: transparent; border: 1px solid transparent; border-radius: var(--zlm-radius-sm); cursor: pointer; }
+.layout-switcher button:hover,
+.playback-actions button:hover,
+.polling-settings header button:hover { color: var(--zlm-text-1); background: var(--zlm-fill-2); border-color: var(--zlm-border); }
+.layout-switcher button:focus-visible,
+.playback-actions button:focus-visible,
+.polling-settings button:focus-visible,
+.polling-settings input:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
+.layout-switcher button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-100); }
+.playback-actions { gap: 4px; }
+.playback-actions button:disabled { color: var(--zlm-text-4); cursor: not-allowed; opacity: 0.52; }
+.playback-actions button:disabled:hover { background: transparent; border-color: transparent; }
+.toolbar-divider { width: 1px; height: 20px; background: var(--zlm-border); }
+.layout-glyph { display: grid; width: 18px; height: 18px; gap: 1px; }
+.layout-glyph i { display: block; min-width: 0; min-height: 0; background: currentColor; }
+.glyph-1 { grid-template: 1fr / 1fr; }
+.glyph-4 { grid-template: repeat(2, 1fr) / repeat(2, 1fr); }
+.glyph-6, .glyph-9 { grid-template: repeat(3, 1fr) / repeat(3, 1fr); }
+.glyph-8, .glyph-16 { grid-template: repeat(4, 1fr) / repeat(4, 1fr); }
+.glyph-6 i:first-child { grid-column: span 2; grid-row: span 2; }
+.glyph-8 i:first-child { grid-column: span 3; grid-row: span 3; }
+.slot-grid { display: grid; min-height: 0; flex: 1 1 auto; gap: 1px; overflow: hidden; background: #4B5563; border: 1px solid #4B5563; border-radius: var(--zlm-radius-md); box-shadow: 0 8px 24px rgb(15 23 42 / 10%); }
 .slot-grid.layout-1 { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .slot-grid.layout-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
-.slot-grid.layout-9 { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
-.screen-slot { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #020617; border: 1px solid #1E293B; border-radius: 0; outline: 0; }
-.screen-slot:focus-visible, .screen-slot.focused { border-color: var(--zlm-brand-500); box-shadow: 0 0 0 2px color-mix(in srgb, var(--zlm-brand-500) 20%, transparent); }
-.screen-slot.empty { min-height: 0; background: #020617; }
+.slot-grid.layout-6, .slot-grid.layout-9 { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
+.slot-grid.layout-8, .slot-grid.layout-16 { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(4, minmax(0, 1fr)); }
+.slot-grid.layout-6 .screen-slot:first-child { grid-column: span 2; grid-row: span 2; }
+.slot-grid.layout-8 .screen-slot:first-child { grid-column: span 3; grid-row: span 3; }
+.screen-slot { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: #0E1014; border: 0; border-radius: 0; outline: 0; }
+.screen-slot::after { position: absolute; z-index: 5; content: ""; inset: 0; border: 2px solid transparent; pointer-events: none; transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out), box-shadow var(--zlm-dur-fast) var(--zlm-ease-out); }
+.screen-slot:hover::after { border-color: rgb(148 163 184 / 38%); }
+.screen-slot:focus-visible, .screen-slot.focused { z-index: 1; }
+.screen-slot:focus-visible::after, .screen-slot.focused::after { border-color: var(--zlm-brand-500); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--zlm-brand-500) 30%, transparent); }
+.screen-slot.empty { min-height: 0; background: #090B0F; }
 .slot-topline, .slot-footer { justify-content: space-between; gap: 8px; min-width: 0; padding: 8px 10px; }
 .slot-topline { min-height: 40px; color: #F8FAFC; background: #0F172A; }
 .slot-title { min-width: 0; gap: 7px; }
+.status-dot { width: 6px; height: 6px; flex: 0 0 auto; background: #64748B; border-radius: 50%; }
+.status-dot.loading { background: #38BDF8; }
+.status-dot.playing { background: #22C55E; box-shadow: 0 0 0 3px rgb(34 197 94 / 12%); }
+.status-dot.stopped { background: #94A3B8; }
+.status-dot.error, .status-dot.offline { background: #EF4444; }
 .slot-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
 .slot-status { color: #94A3B8; font-size: 10px; }
 .slot-actions { gap: 2px; }
@@ -272,10 +401,26 @@ onBeforeUnmount(() => {
 .slot-state span { color: #94A3B8; font-family: var(--zlm-font-mono); font-size: 10px; }
 .error-state { color: #FCA5A5; }
 .error-state strong { color: #FECACA; }
+.stopped-state { color: #94A3B8; }
 .slot-footer { min-height: 32px; color: #64748B; background: #0F172A; font-size: 10px; }
 .slot-footer > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focused-label { display: inline-flex; align-items: center; gap: 3px; color: #93C5FD; }
 .workspace-toast { position: absolute; right: 20px; bottom: 16px; max-width: min(420px, calc(100% - 40px)); margin: 0; padding: 9px 12px; color: #FEF3C7; background: #451A03; border: 1px solid #92400E; border-radius: var(--zlm-radius-sm); font-size: 12px; }
+.polling-backdrop { position: absolute; z-index: 20; display: grid; background: rgb(15 23 42 / 34%); inset: 0; place-items: center; }
+.polling-settings { width: min(360px, calc(100% - 32px)); color: var(--zlm-text-1); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); box-shadow: var(--zlm-shadow-lg); }
+.polling-settings header, .polling-settings footer { display: flex; align-items: center; padding: 14px 16px; }
+.polling-settings header { justify-content: space-between; border-bottom: 1px solid var(--zlm-border); }
+.polling-settings header > div { display: flex; align-items: center; gap: 8px; }
+.polling-settings footer { justify-content: flex-end; gap: 8px; border-top: 1px solid var(--zlm-border); }
+.polling-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 18px 12px; padding: 20px 16px; font-size: 13px; }
+.interval-input { display: flex; align-items: center; gap: 8px; }
+.interval-input input { width: 96px; height: 34px; padding: 0 10px; color: var(--zlm-text-1); background: var(--zlm-bg); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-sm); font: inherit; }
+.interval-input span { color: var(--zlm-text-3); }
+.checkbox-row { display: flex; grid-column: 1 / -1; align-items: center; gap: 8px; cursor: pointer; }
+.checkbox-row input { width: 16px; height: 16px; accent-color: var(--zlm-brand-600); }
+.polling-settings footer button { min-width: 64px; height: 34px; padding: 0 14px; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
+.dialog-secondary { color: var(--zlm-text-2); background: var(--zlm-card); border: 1px solid var(--zlm-border); }
+.dialog-primary { color: #FFFFFF; background: var(--zlm-brand-600); border: 1px solid var(--zlm-brand-600); }
 .spin { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -286,15 +431,20 @@ onBeforeUnmount(() => {
     .workspace, .workspace.source-collapsed { grid-template-columns: 1fr; overflow-x: hidden; overflow-y: auto; }
     .source-panel { min-height: 640px; border-right: 0; border-bottom: 1px solid var(--zlm-border); }
     .monitor-area { padding: 12px; }
-    .slot-grid.layout-4 { grid-template-columns: 1fr; grid-template-rows: repeat(4, minmax(0, 1fr)); }
-    .slot-grid.layout-9 { grid-template-columns: 1fr; grid-template-rows: repeat(9, minmax(0, 1fr)); }
+    .slot-grid { flex: 0 0 auto; grid-auto-rows: clamp(220px, 56vw, 360px); }
+    .slot-grid.layout-1, .slot-grid.layout-4, .slot-grid.layout-6, .slot-grid.layout-8, .slot-grid.layout-9, .slot-grid.layout-16 { grid-template-columns: 1fr; grid-template-rows: none; }
+    .slot-grid.layout-6 .screen-slot:first-child, .slot-grid.layout-8 .screen-slot:first-child { grid-column: auto; grid-row: auto; }
 }
 @media (max-width: 480px) {
-    .monitor-toolbar { align-items: flex-start; flex-direction: column; }
-    .layout-switcher { width: 100%; }
-    .layout-switcher button { flex: 1; justify-content: center; }
+    .monitor-toolbar { align-items: center; justify-content: space-between; gap: 6px; overflow-x: hidden; }
+    .layout-switcher, .playback-actions { flex: 0 0 auto; }
+    .layout-switcher, .playback-actions { gap: 2px; }
+    .layout-switcher button, .playback-actions button { width: 30px; height: 30px; }
+    .layout-glyph { width: 16px; height: 16px; }
+    .toolbar-divider { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
     .spin { animation: none; }
+    .screen-slot::after { transition: none; }
 }
 </style>
