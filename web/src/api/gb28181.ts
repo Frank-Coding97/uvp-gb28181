@@ -69,10 +69,24 @@ export interface PlayResult {
   urls?: {
     wsFlv?: string | null;
     httpFlv?: string | null;
+    wssFlv?: string | null;
+    httpsFlv?: string | null;
+    wsFmp4?: string | null;
+    httpFmp4?: string | null;
+    wssFmp4?: string | null;
+    httpsFmp4?: string | null;
     hls?: string | null;
+    httpsHls?: string | null;
+    wsTs?: string | null;
+    httpTs?: string | null;
+    wssTs?: string | null;
+    httpsTs?: string | null;
     webrtc?: string | null;
+    webrtcs?: string | null;
     rtmp?: string | null;
+    rtmps?: string | null;
     rtsp?: string | null;
+    rtsps?: string | null;
   };
   urlWarnings?: string[];
   wsflvUrl: string;

@@ -293,6 +293,64 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("按返回地址动态展示协议并优先选择可播放的 WS-FLV", async () => {
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-mixed",
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: {
+          wsFlv: "ws://zlm/rtp/mixed.live.flv",
+          wssFlv: "wss://zlm/rtp/mixed.live.flv",
+          httpsHls: "https://zlm/rtp/mixed/hls.m3u8",
+          rtsp: "rtsp://zlm:10554/rtp/mixed"
+        },
+        wsflvUrl: "ws://legacy/rtp/mixed.live.flv",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("ws://zlm/rtp/mixed.live.flv");
+    expect(wrapper.findAll(".proto-btn").map((button) => button.text())).toEqual(["WS-FLV", "HTTP-FLV", "HLS"]);
+
+    await wrapper.get(".protocol-switcher select").trigger("click");
+    await flushPromises();
+    const dropdownText = wrapper.text();
+    expect(dropdownText).toContain("wss://zlm/rtp/mixed.live.flv");
+    expect(dropdownText).toContain("rtsp://zlm:10554/rtp/mixed");
+    expect(dropdownText).not.toContain("http://legacy/rtp/mixed.live.flv");
+    wrapper.unmount();
+  });
+
+  it("只有诊断协议时保持播放器地址为空", async () => {
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-diagnostic",
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { rtsp: "rtsp://zlm:10554/rtp/diagnostic", rtmp: "rtmp://zlm:11935/rtp/diagnostic" },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("");
+    expect(wrapper.findAll(".proto-btn.active")).toHaveLength(0);
+    wrapper.unmount();
+  });
+
   it("建立真实点播、读取概况、执行探针并在关闭时仅销毁本地播放器", async () => {
     api.runStreamProbe.mockResolvedValueOnce({
       code: 0,

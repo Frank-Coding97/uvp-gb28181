@@ -158,32 +158,87 @@ const tabs: Array<{ key: TabKey; label: string; icon: any; description: string }
 
 /* ────────────────────────── 视频区状态 ────────────────────────── */
 
-type StreamProtocol = "ws-flv" | "http-flv" | "hls" | "webrtc" | "rtmp" | "rtsp";
-const protocol = ref<StreamProtocol>("ws-flv");
-const protocolUrls = computed<Record<StreamProtocol, string | null>>(() => {
+type StreamProtocol =
+    | "ws-flv" | "http-flv" | "wss-flv" | "https-flv"
+    | "ws-fmp4" | "http-fmp4" | "wss-fmp4" | "https-fmp4"
+    | "hls" | "https-hls"
+    | "ws-ts" | "http-ts" | "wss-ts" | "https-ts"
+    | "webrtc" | "webrtcs" | "rtmp" | "rtmps" | "rtsp" | "rtsps";
+type ProtocolURLMap = Record<StreamProtocol, string | null>;
+type ProtocolOption = {
+    value: StreamProtocol;
+    label: string;
+    desc: string;
+    browserPlayable: boolean;
+    shortcut?: boolean;
+};
+
+const protocol = ref<StreamProtocol | "">("ws-flv");
+const protocolUrls = computed<ProtocolURLMap>(() => {
     const result = playResult.value;
     return {
         "ws-flv": result?.urls?.wsFlv || result?.wsflvUrl || null,
         "http-flv": result?.urls?.httpFlv || result?.httpFlvUrl || null,
+        "wss-flv": result?.urls?.wssFlv || null,
+        "https-flv": result?.urls?.httpsFlv || null,
+        "ws-fmp4": result?.urls?.wsFmp4 || null,
+        "http-fmp4": result?.urls?.httpFmp4 || null,
+        "wss-fmp4": result?.urls?.wssFmp4 || null,
+        "https-fmp4": result?.urls?.httpsFmp4 || null,
         hls: result?.urls?.hls || result?.hlsUrl || null,
+        "https-hls": result?.urls?.httpsHls || null,
+        "ws-ts": result?.urls?.wsTs || null,
+        "http-ts": result?.urls?.httpTs || null,
+        "wss-ts": result?.urls?.wssTs || null,
+        "https-ts": result?.urls?.httpsTs || null,
         webrtc: result?.urls?.webrtc || null,
+        webrtcs: result?.urls?.webrtcs || null,
         rtmp: result?.urls?.rtmp || null,
+        rtmps: result?.urls?.rtmps || null,
         rtsp: result?.urls?.rtsp || null,
+        rtsps: result?.urls?.rtsps || null,
     };
 });
 
-const protocolOptions: Array<{ value: StreamProtocol; label: string; desc: string }> = [
-    { value: "ws-flv", label: "WS-FLV", desc: "延迟最低,适合实时监控" },
-    { value: "http-flv", label: "HTTP-FLV", desc: "兼容性好,延迟较低" },
-    { value: "hls", label: "HLS", desc: "兼容性最佳,延迟较高" },
-    { value: "webrtc", label: "WebRTC", desc: "超低延迟,需 HTTPS" },
-    { value: "rtmp", label: "RTMP", desc: "传统直播协议" },
-    { value: "rtsp", label: "RTSP", desc: "监控设备标准" },
+const protocolOptions: ProtocolOption[] = [
+    { value: "ws-flv", label: "WS-FLV", desc: "延迟最低,适合实时监控", browserPlayable: true, shortcut: true },
+    { value: "http-flv", label: "HTTP-FLV", desc: "兼容性好,延迟较低", browserPlayable: true, shortcut: true },
+    { value: "hls", label: "HLS", desc: "兼容性最佳,延迟较高", browserPlayable: true, shortcut: true },
+    { value: "wss-flv", label: "WSS-FLV", desc: "安全实时播放", browserPlayable: true },
+    { value: "https-flv", label: "HTTPS-FLV", desc: "安全兼容播放", browserPlayable: true },
+    { value: "https-hls", label: "HTTPS-HLS", desc: "安全 HLS 播放", browserPlayable: true },
+    { value: "ws-fmp4", label: "WS-fMP4", desc: "低延迟 fMP4 流", browserPlayable: false },
+    { value: "http-fmp4", label: "HTTP-fMP4", desc: "fMP4 流地址", browserPlayable: false },
+    { value: "wss-fmp4", label: "WSS-fMP4", desc: "安全 fMP4 流地址", browserPlayable: false },
+    { value: "https-fmp4", label: "HTTPS-fMP4", desc: "安全 fMP4 流地址", browserPlayable: false },
+    { value: "ws-ts", label: "WS-TS", desc: "低延迟 TS 流地址", browserPlayable: false },
+    { value: "http-ts", label: "HTTP-TS", desc: "TS 流地址", browserPlayable: false },
+    { value: "wss-ts", label: "WSS-TS", desc: "安全 TS 流地址", browserPlayable: false },
+    { value: "https-ts", label: "HTTPS-TS", desc: "安全 TS 流地址", browserPlayable: false },
+    { value: "webrtc", label: "WebRTC", desc: "超低延迟,需 HTTPS", browserPlayable: false },
+    { value: "webrtcs", label: "WebRTCS", desc: "安全 WebRTC 地址", browserPlayable: false },
+    { value: "rtmp", label: "RTMP", desc: "传统直播协议", browserPlayable: false },
+    { value: "rtmps", label: "RTMPS", desc: "安全 RTMP 地址", browserPlayable: false },
+    { value: "rtsp", label: "RTSP", desc: "监控设备标准", browserPlayable: false },
+    { value: "rtsps", label: "RTSPS", desc: "安全 RTSP 地址", browserPlayable: false },
 ];
 
-const currentProtocolUrl = computed(() => protocolUrls.value[protocol.value] || "");
+const availableProtocolOptions = computed(() =>
+    protocolOptions.filter((option) => Boolean(protocolUrls.value[option.value])),
+);
+const shortcutProtocolOptions = computed(() => protocolOptions.filter((option) => option.shortcut));
+const currentProtocolOption = computed(() => protocolOptions.find((option) => option.value === protocol.value));
+
+const currentProtocolUrl = computed(() => (protocol.value ? protocolUrls.value[protocol.value] || "" : ""));
 function isBrowserPlayable(proto: StreamProtocol) {
-    return proto === "ws-flv" || proto === "http-flv" || proto === "hls";
+    return protocolOptions.find((option) => option.value === proto)?.browserPlayable === true;
+}
+function defaultProtocol(): StreamProtocol | "" {
+    const secure = window.location.protocol === "https:";
+    const preference = secure
+        ? ["wss-flv", "https-flv", "https-hls"]
+        : ["ws-flv", "http-flv", "hls", "wss-flv", "https-flv", "https-hls"];
+    return (preference.find((value) => protocolUrls.value[value as StreamProtocol]) as StreamProtocol | undefined) || "";
 }
 
 const title = computed(
@@ -1378,7 +1433,7 @@ async function startSession() {
         streamInfo.value.streamId = response.data.streamId;
         streamInfo.value.ssrc = response.data.ssrc;
         streamInfo.value.urls = response.data.urls || {};
-        protocol.value = protocolUrls.value["ws-flv"] ? "ws-flv" : protocolUrls.value["http-flv"] ? "http-flv" : "hls";
+        protocol.value = defaultProtocol();
         phase.value = "playing";
         beginMonitor();
         void loadPanelData();
@@ -2653,12 +2708,12 @@ async function stopTalk() {
 
 function switchProtocol(proto: StreamProtocol) {
     if (proto === protocol.value) return;
-    if (!isBrowserPlayable(proto)) {
-        Message.warning("该协议仅供外部客户端使用，浏览器内不可直接播放");
-        return;
-    }
     if (!protocolUrls.value[proto]) {
         Message.warning("当前节点未返回该协议地址");
+        return;
+    }
+    if (!isBrowserPlayable(proto)) {
+        Message.warning("该协议仅供外部客户端使用，浏览器内不可直接播放");
         return;
     }
     protocol.value = proto;
@@ -2667,8 +2722,9 @@ function switchProtocol(proto: StreamProtocol) {
 function copyProtocolUrl(proto: StreamProtocol) {
     const url = protocolUrls.value[proto];
     if (!url) { Message.warning("当前协议地址不可用"); return; }
+    const label = protocolOptions.find((option) => option.value === proto)?.label || proto;
     navigator.clipboard?.writeText(url).then(() => {
-        Message.success(`${proto.toUpperCase()} 地址已复制`);
+        Message.success(`${label} 地址已复制`);
     }).catch(() => {
         Message.error("复制失败");
     });
@@ -2791,26 +2847,31 @@ onBeforeUnmount(() => {
                             <a-select
                                 :model-value="protocol"
                                 :style="{ width: '160px' }"
+                                :placeholder="currentProtocolOption?.label || '无可播放地址'"
                                 size="small"
                                 @change="switchProtocol"
                             >
                                 <a-option
-                                    v-for="opt in protocolOptions"
+                                    v-for="opt in availableProtocolOptions"
                                     :key="opt.value"
                                     :value="opt.value"
                                     :label="opt.label"
-                                    :disabled="!protocolUrls[opt.value] || !isBrowserPlayable(opt.value)"
+                                    :disabled="!opt.browserPlayable"
                                 >
                                     <div class="protocol-option">
-                                        <strong>{{ opt.label }}</strong>
+                                        <div class="protocol-option-head">
+                                            <strong>{{ opt.label }}</strong>
+                                            <span class="protocol-availability">{{ opt.browserPlayable ? "可播放" : "仅复制" }}</span>
+                                        </div>
                                         <span class="desc">{{ opt.desc }}</span>
+                                        <span class="protocol-url" :title="protocolUrls[opt.value] || ''">{{ protocolUrls[opt.value] }}</span>
                                     </div>
                                 </a-option>
                             </a-select>
                         </div>
                         <div class="switcher-right">
                             <button
-                                v-for="opt in protocolOptions.slice(0, 3)"
+                                v-for="opt in shortcutProtocolOptions"
                                 :key="opt.value"
                                 class="proto-btn"
                                 :class="{ active: protocol === opt.value }"
@@ -2826,12 +2887,14 @@ onBeforeUnmount(() => {
                             </button>
                             <template #content>
                                 <a-doption
-                                    v-for="opt in protocolOptions"
+                                    v-for="opt in availableProtocolOptions"
                                     :key="opt.value"
-                                    :disabled="!protocolUrls[opt.value]"
                                     @click="copyProtocolUrl(opt.value)"
                                 >
-                                    复制 {{ opt.label }} 地址
+                                    <span class="copy-option">
+                                        <strong>{{ opt.label }}</strong>
+                                        <span>{{ protocolUrls[opt.value] }}</span>
+                                    </span>
                                 </a-doption>
                             </template>
                         </a-dropdown>
@@ -4366,9 +4429,15 @@ onBeforeUnmount(() => {
     font-size: 11px;
 }
 
-.protocol-option { display: grid; gap: 2px; }
-.protocol-option strong { font-size: 12px; font-weight: 500; }
+.protocol-option { display: grid; min-width: min(360px, calc(100vw - 48px)); max-width: 360px; gap: 2px; }
+.protocol-option-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.protocol-option strong { min-width: 0; font-size: 12px; font-weight: 500; }
+.protocol-availability { flex: 0 0 auto; color: var(--uvp-text-tertiary); font-size: 10px; }
 .protocol-option .desc { color: var(--uvp-text-tertiary); font-size: 10.5px; }
+.protocol-url { overflow-wrap: anywhere; color: var(--uvp-text-secondary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; line-height: 1.35; }
+.copy-option { display: grid; max-width: min(360px, calc(100vw - 48px)); gap: 2px; }
+.copy-option strong { font-size: 11px; font-weight: 500; }
+.copy-option span { overflow-wrap: anywhere; color: var(--uvp-text-tertiary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; line-height: 1.35; }
 
 /* 播放器下方的运行信息面板 */
 .stream-info-bar {
