@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 
+	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -88,6 +90,67 @@ func itoa(i int) string {
 func cleanup(deviceIDs ...string) {
 	for _, id := range deviceIDs {
 		app.GormDbMysql.Unscoped().Where("device_id = ?", id).Delete(&GbDevice{})
+	}
+}
+
+type listPagedTestConfig struct{}
+
+func (listPagedTestConfig) ConfigFileChangeListen(...func()) {}
+func (listPagedTestConfig) Get(string) interface{}           { return nil }
+func (listPagedTestConfig) GetString(string) string          { return "mysql" }
+func (listPagedTestConfig) GetBool(string) bool              { return false }
+func (listPagedTestConfig) GetInt(string) int                { return 0 }
+func (listPagedTestConfig) GetInt32(string) int32            { return 0 }
+func (listPagedTestConfig) GetInt64(string) int64            { return 0 }
+func (listPagedTestConfig) GetFloat64(string) float64        { return 0 }
+func (listPagedTestConfig) GetDuration(string) time.Duration { return 0 }
+func (listPagedTestConfig) GetStringSlice(string) []string   { return nil }
+func (listPagedTestConfig) GetUintSlice(string) []uint       { return nil }
+func (listPagedTestConfig) Set(string, interface{})          {}
+func (listPagedTestConfig) SaveConfig() error                { return nil }
+
+func TestListPaged_DefaultSort(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("打开 SQLite 失败: %v", err)
+	}
+	if err := db.AutoMigrate(&GbDevice{}); err != nil {
+		t.Fatalf("迁移设备表失败: %v", err)
+	}
+	originalDB, originalConfig := app.GormDbMysql, app.ConfigYml
+	app.GormDbMysql = db
+	app.ConfigYml = listPagedTestConfig{}
+	t.Cleanup(func() {
+		app.GormDbMysql = originalDB
+		app.ConfigYml = originalConfig
+	})
+
+	now := time.Now()
+	latestOnline := now.Add(-time.Minute)
+	olderOnline := now.Add(-time.Hour)
+	devices := []GbDevice{
+		{DeviceID: "online-bravo", Name: "Bravo", Status: DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "online-alpha-old-id", Name: "Alpha", Status: DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "online-alpha-new-id", Name: "Alpha", Status: DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "online-old", Name: "Zulu", Status: DeviceStatusOnline, RegisterTime: &olderOnline, SubscribeCapability: SubscribeUnknown},
+		{DeviceID: "offline-newest", Name: "Zulu", Status: DeviceStatusOffline, RegisterTime: &now, SubscribeCapability: SubscribeUnknown},
+	}
+	if err := db.Create(&devices).Error; err != nil {
+		t.Fatalf("创建设备测试数据失败: %v", err)
+	}
+
+	list, total, err := ListPaged(context.Background(), 1, 20)
+	if err != nil {
+		t.Fatalf("查询设备列表失败: %v", err)
+	}
+	if total != 5 || len(list) != 5 {
+		t.Fatalf("设备数量不符: total=%d len=%d", total, len(list))
+	}
+	want := []string{"online-bravo", "online-alpha-new-id", "online-alpha-old-id", "online-old", "offline-newest"}
+	for i := range want {
+		if list[i].DeviceID != want[i] {
+			t.Fatalf("第 %d 个设备不符: want=%s got=%s", i, want[i], list[i].DeviceID)
+		}
 	}
 }
 

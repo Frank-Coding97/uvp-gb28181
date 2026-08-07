@@ -245,7 +245,7 @@ func ListPaged(c context.Context, page, pageSize int, scopes ...func(*gorm.DB) *
 		return nil, 0, err
 	}
 	err := q.
-		Order("id DESC").
+		Order("status DESC, register_time DESC, name DESC, id DESC").
 		Offset((page - 1) * pageSize).
 		Limit(pageSize).
 		Find(&list).Error

@@ -148,6 +148,7 @@ type deviceVOExtra struct {
 
 // ListDevices 设备列表
 // GET /devices?nodeId=&status=online&vendor=&q=&page=1&pageSize=20&sort=name:asc
+// 未传 sort 时默认按在线状态、注册时间、设备名称、ID 依次倒序
 func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 	db := dc.db()
 	if db == nil {
@@ -249,7 +250,7 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 			}
 		}
 	} else {
-		q = q.Order("id DESC")
+		q = q.Order("status DESC, register_time DESC, name DESC, id DESC")
 	}
 
 	var total int64

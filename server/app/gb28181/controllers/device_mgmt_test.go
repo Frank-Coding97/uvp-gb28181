@@ -264,6 +264,33 @@ func TestDeviceMgmt_ListDevices(t *testing.T) {
 	assert.EqualValues(t, 1, d["channelOnlineCount"])
 }
 
+func TestDeviceMgmt_ListDevices_DefaultSort(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	now := time.Now()
+	latestOnline := now.Add(-time.Minute)
+	olderOnline := now.Add(-time.Hour)
+	devices := []gbmodels.GbDevice{
+		{DeviceID: "online-bravo", Name: "Bravo", Status: gbmodels.DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "online-alpha-old-id", Name: "Alpha", Status: gbmodels.DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "online-alpha-new-id", Name: "Alpha", Status: gbmodels.DeviceStatusOnline, RegisterTime: &latestOnline, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "online-old", Name: "Zulu", Status: gbmodels.DeviceStatusOnline, RegisterTime: &olderOnline, SubscribeCapability: gbmodels.SubscribeUnknown},
+		{DeviceID: "offline-newest", Name: "Zulu", Status: gbmodels.DeviceStatusOffline, RegisterTime: &now, SubscribeCapability: gbmodels.SubscribeUnknown},
+	}
+	require.NoError(t, db.Create(&devices).Error)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	list := unmarshal(t, w)["data"].(map[string]any)["list"].([]any)
+	require.Len(t, list, 5)
+	assert.Equal(t, "online-bravo", list[0].(map[string]any)["deviceId"])
+	assert.Equal(t, "online-alpha-new-id", list[1].(map[string]any)["deviceId"])
+	assert.Equal(t, "online-alpha-old-id", list[2].(map[string]any)["deviceId"])
+	assert.Equal(t, "online-old", list[3].(map[string]any)["deviceId"])
+	assert.Equal(t, "offline-newest", list[4].(map[string]any)["deviceId"])
+}
+
 func TestDeviceMgmt_ListDevices_FiltersByOwnerDept(t *testing.T) {
 	const userID = 100
 	r, db := newDeviceMgmtRouter(t, withClaims(userID))
