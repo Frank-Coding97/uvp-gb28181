@@ -22,6 +22,7 @@ import { listChannels, type ChannelVO } from "../device-mgmt/api";
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
 type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
+type PtzDirection = "上" | "右上" | "右" | "右下" | "下" | "左下" | "左" | "左上";
 
 interface PlaybackSlot {
     index: number;
@@ -47,6 +48,7 @@ const pollingCursor = ref(0);
 const pollingSaving = ref(false);
 const pollingError = ref("");
 const playAllLoading = ref(false);
+const ptzMotion = ref<{ channelId: number; direction: PtzDirection } | null>(null);
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
 let pollingCycleRunning = false;
 let playAllToken = 0;
@@ -60,6 +62,16 @@ const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
 const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
+const ptzDirectionByAction: Record<string, PtzDirection> = {
+    left_up: "左上",
+    up: "上",
+    right_up: "右上",
+    left: "左",
+    right: "右",
+    left_down: "左下",
+    down: "下",
+    right_down: "右下"
+};
 
 const layoutOptions: Array<{ value: LayoutSize; label: string; cells: number }> = [
     { value: 1, label: "一分屏", cells: 1 },
@@ -148,6 +160,11 @@ async function retrySlot(slot: PlaybackSlot) {
 
 function focusSlot(slot: PlaybackSlot) {
     focusedIndex.value = slot.index;
+}
+
+function handlePtzActionChange(value: { channelId: number; action: string } | null) {
+    const direction = value ? ptzDirectionByAction[value.action] : null;
+    ptzMotion.value = value && direction ? { channelId: value.channelId, direction } : null;
 }
 
 function openConsole(slot: PlaybackSlot) {
@@ -362,7 +379,7 @@ onBeforeUnmount(() => {
         <div class="workspace">
             <section class="source-panel" aria-label="设备树和云台控制">
                 <PlaybackSourceTree :used-channel-ids="usedChannelIds" @select="assignChannel" />
-                <BasicPtzPanel :channel="focusedSlot?.channel || null" />
+                <BasicPtzPanel :channel="focusedSlot?.channel || null" @action-change="handlePtzActionChange" />
             </section>
 
             <main ref="monitorAreaRef" class="monitor-area" :class="{ fullscreen: isFullscreen }">
@@ -396,6 +413,13 @@ onBeforeUnmount(() => {
                                 <div v-else-if="slot.status === 'requesting'" class="slot-state"><RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
                                 <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong><button class="text-action" type="button" @click.stop="retrySlot(slot)"><RefreshCw :size="14" aria-hidden="true" />重试</button></div>
                                 <div v-else class="slot-state"><Square :size="24" aria-hidden="true" /><strong>画面暂不可用</strong></div>
+                                <div v-if="slot.status === 'playing' && ptzMotion?.channelId === slot.channel.id" class="ptz-direction-indicator" data-test="ptz-direction-indicator" :data-direction="ptzMotion.direction" role="status" :aria-label="`云台正在向${ptzMotion.direction}移动`">
+                                    <span class="ptz-direction-stack">
+                                        <span class="ptz-direction-chevron front" aria-hidden="true" />
+                                        <span class="ptz-direction-chevron middle" aria-hidden="true" />
+                                        <span class="ptz-direction-chevron back" aria-hidden="true" />
+                                    </span>
+                                </div>
                             </div>
                             <footer class="slot-footer"><span>{{ slot.channel.deviceId }}</span><span v-if="slot.result?.node">节点 {{ slot.result.node.name }}</span><span v-if="focusedIndex === slot.index" class="focused-label"><Check :size="13" aria-hidden="true" />已聚焦</span></footer>
                         </template>
@@ -507,8 +531,25 @@ onBeforeUnmount(() => {
 .slot-action { width: 30px; height: 30px; color: #CBD5E1; }
 .slot-action:hover { color: #FFFFFF; background: #1E293B; border-color: #334155; }
 .slot-action.danger:hover { color: #FCA5A5; }
-.slot-body { display: flex; min-width: 0; min-height: 0; flex: 1; align-items: center; justify-content: center; }
+.slot-body { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; align-items: center; justify-content: center; }
 .slot-body :deep(.play-window) { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
+.ptz-direction-indicator { --ptz-direction-rotation: 0deg; position: absolute; top: 50%; left: 50%; z-index: 5; display: grid; width: clamp(72px, 12%, 104px); aspect-ratio: 1; transform: translate(-50%, -50%) rotate(var(--ptz-direction-rotation)); pointer-events: none; place-items: center; }
+.ptz-direction-stack { position: relative; display: block; width: 100%; height: 100%; animation: ptz-direction-flow 0.95s ease-in-out infinite; will-change: opacity, transform; }
+.ptz-direction-chevron { position: absolute; left: 50%; display: block; width: 76%; height: 34%; background: rgb(96 165 250 / 82%); clip-path: polygon(0 68%, 50% 0, 100% 68%, 80% 100%, 50% 58%, 20% 100%); transform: translateX(-50%); }
+.ptz-direction-chevron.front { top: 4%; filter: drop-shadow(0 2px 8px rgb(15 23 42 / 42%)) drop-shadow(0 0 9px rgb(59 130 246 / 34%)); }
+.ptz-direction-chevron.middle { top: 32%; width: 66%; background: rgb(147 197 253 / 48%); }
+.ptz-direction-chevron.back { top: 58%; width: 56%; background: rgb(191 219 254 / 22%); }
+.ptz-direction-indicator[data-direction="右上"] { --ptz-direction-rotation: 45deg; }
+.ptz-direction-indicator[data-direction="右"] { --ptz-direction-rotation: 90deg; }
+.ptz-direction-indicator[data-direction="右下"] { --ptz-direction-rotation: 135deg; }
+.ptz-direction-indicator[data-direction="下"] { --ptz-direction-rotation: 180deg; }
+.ptz-direction-indicator[data-direction="左下"] { --ptz-direction-rotation: 225deg; }
+.ptz-direction-indicator[data-direction="左"] { --ptz-direction-rotation: 270deg; }
+.ptz-direction-indicator[data-direction="左上"] { --ptz-direction-rotation: 315deg; }
+@keyframes ptz-direction-flow {
+    0%, 100% { opacity: 0.48; transform: translateY(5px) scale(0.94); }
+    50% { opacity: 1; transform: translateY(-4px) scale(1); }
+}
 .slot-state { display: flex; flex: 1; min-height: 180px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 20px; color: #CBD5E1; text-align: center; }
 .slot-state strong { max-width: 90%; color: #F8FAFC; font-size: 12px; line-height: 1.45; }
 .slot-state span { color: #94A3B8; font-family: var(--zlm-font-mono); font-size: 10px; }

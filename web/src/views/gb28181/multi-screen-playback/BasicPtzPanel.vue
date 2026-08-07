@@ -24,6 +24,9 @@ import type { ChannelVO } from "../device-mgmt/api";
 const props = defineProps<{
     channel: ChannelVO | null;
 }>();
+const emit = defineEmits<{
+    actionChange: [value: { channelId: number; action: string } | null];
+}>();
 
 const speed = ref(5);
 const collapsed = ref(false);
@@ -65,6 +68,7 @@ async function stopActive(force = false) {
     const target = activeAction;
     if (!target && !force) return;
     activeAction = null;
+    emit("actionChange", null);
     const channelId = target?.channelId || props.channel?.id;
     if (channelId) await send(channelId, "stop");
 }
@@ -74,6 +78,7 @@ async function startAction(action: string) {
     if (activeAction?.channelId === props.channel.id && activeAction.action === action) return;
     if (activeAction) await stopActive();
     activeAction = { channelId: props.channel.id, action };
+    emit("actionChange", activeAction);
     await send(props.channel.id, action);
 }
 

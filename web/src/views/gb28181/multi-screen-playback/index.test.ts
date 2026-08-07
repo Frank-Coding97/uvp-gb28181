@@ -6,7 +6,9 @@ const api = vi.hoisted(() => ({
 }));
 const playback = vi.hoisted(() => ({
     startPlay: vi.fn(),
-    stopPlay: vi.fn()
+    stopPlay: vi.fn(),
+    controlPtz: vi.fn(),
+    getControlCapabilities: vi.fn()
 }));
 
 vi.mock("../device-mgmt/api", () => api);
@@ -63,6 +65,11 @@ describe("multi-screen playback page", () => {
             }
         }));
         playback.stopPlay.mockResolvedValue({ code: 0, data: { released: true, streamId: "" } });
+        playback.controlPtz.mockResolvedValue({ code: 0, data: { action: "accepted" } });
+        playback.getControlCapabilities.mockResolvedValue({
+            code: 0,
+            data: { basicPtz: { state: "supported", reason: "" } }
+        });
     });
 
     it("renders four stable slots and the dedicated playback source tree", async () => {
@@ -103,6 +110,20 @@ describe("multi-screen playback page", () => {
         expect(playback.startPlay).toHaveBeenNthCalledWith(1, "device-1", "channel-1");
         expect(playback.startPlay).toHaveBeenNthCalledWith(2, "device-2", "channel-2");
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门", "西门"]);
+    });
+
+    it("shows the focused player's PTZ direction while movement is held", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+
+        await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+        const indicator = wrapper.get("[data-test=ptz-direction-indicator]");
+        expect(indicator.attributes("data-direction")).toBe("上");
+        expect(indicator.attributes("aria-label")).toBe("云台正在向上移动");
+
+        await wrapper.get("[data-test=ptz-up]").trigger("pointerup");
+        expect(wrapper.find("[data-test=ptz-direction-indicator]").exists()).toBe(false);
     });
 
     it("removes one slot locally without stopping the shared channel stream", async () => {

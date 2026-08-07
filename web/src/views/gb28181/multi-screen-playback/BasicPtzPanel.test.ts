@@ -64,10 +64,13 @@ describe("BasicPtzPanel", () => {
         await flushPromises();
 
         await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+        expect(wrapper.emitted("actionChange")?.[0]).toEqual([{ channelId: onlineChannel.id, action: "up" }]);
+
         await wrapper.get("[data-test=ptz-up]").trigger("pointerup");
 
         expect(api.controlPtz).toHaveBeenNthCalledWith(1, onlineChannel.id, expect.objectContaining({ action: "up", speed: 125 }));
         expect(api.controlPtz).toHaveBeenNthCalledWith(2, onlineChannel.id, expect.objectContaining({ action: "stop" }));
+        expect(wrapper.emitted("actionChange")?.[1]).toEqual([null]);
     });
 
     it("stops an active action on channel change and window blur", async () => {
