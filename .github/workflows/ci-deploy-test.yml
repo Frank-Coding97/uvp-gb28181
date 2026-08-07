@@ -134,7 +134,7 @@ jobs:
     needs: build-test
     if: github.event_name == 'push' || inputs.deploy == true
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 75
     environment:
       name: test
       url: https://www.uvplatform.cn
