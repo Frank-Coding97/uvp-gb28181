@@ -8,7 +8,13 @@ const playback = vi.hoisted(() => ({
     startPlay: vi.fn(),
     stopPlay: vi.fn(),
     controlPtz: vi.fn(),
-    getControlCapabilities: vi.fn()
+    getControlCapabilities: vi.fn(),
+    listPlaybackSchemes: vi.fn(),
+    getPlaybackScheme: vi.fn(),
+    createPlaybackScheme: vi.fn(),
+    renamePlaybackScheme: vi.fn(),
+    replacePlaybackSchemeLayout: vi.fn(),
+    deletePlaybackScheme: vi.fn()
 }));
 
 vi.mock("../device-mgmt/api", () => api);
@@ -70,6 +76,7 @@ describe("multi-screen playback page", () => {
             code: 0,
             data: { basicPtz: { state: "supported", reason: "" } }
         });
+        playback.listPlaybackSchemes.mockResolvedValue({ code: 0, data: { list: [], total: 0, page: 1, pageSize: 10 } });
     });
 
     it("renders four stable slots and the dedicated playback source tree", async () => {
@@ -80,6 +87,23 @@ describe("multi-screen playback page", () => {
         expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(4);
         expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
         expect(wrapper.find("[data-test=layout-9]").exists()).toBe(true);
+    });
+
+    it("opens and closes playback schemes without changing current playback", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+        const callsBeforeOpen = playback.startPlay.mock.calls.length;
+
+        await wrapper.get("[data-test=playback-schemes]").trigger("click");
+        await flushPromises();
+        expect(wrapper.find(".scheme-panel").exists()).toBe(true);
+        expect(playback.listPlaybackSchemes).toHaveBeenCalledWith({ page: 1, pageSize: 10, q: undefined });
+
+        await wrapper.get("[data-test=close-schemes]").trigger("click");
+        expect(wrapper.find(".scheme-panel").exists()).toBe(false);
+        expect(playback.startPlay).toHaveBeenCalledTimes(callsBeforeOpen);
+        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门"]);
     });
 
     it.each([

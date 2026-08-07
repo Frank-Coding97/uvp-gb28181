@@ -4,6 +4,7 @@ import {
     AlertTriangle,
     Check,
     CircleStop,
+    ListVideo,
     Maximize2,
     Minimize2,
     Play,
@@ -16,6 +17,7 @@ import { startPlay, type PlayResult } from "@/api/gb28181";
 import PlayWindow from "../components/PlayWindow.vue";
 import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
+import PlaybackSchemePanel from "./PlaybackSchemePanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
@@ -41,6 +43,7 @@ const toast = ref("");
 const monitorAreaRef = ref<HTMLElement | null>(null);
 const isFullscreen = ref(false);
 const pollingVisible = ref(false);
+const schemeVisible = ref(false);
 const pollingDraft = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
 const pollingSettings = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
 const pollingChannels = ref<ChannelVO[]>([]);
@@ -62,6 +65,11 @@ const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
 const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
+const currentSchemeSlots = computed(() => slots.slice(0, layout.value).flatMap(slot => slot.channel ? [{
+    slotIndex: slot.index,
+    deviceCode: slot.channel.deviceId,
+    channelCode: slot.channel.channelId
+}] : []));
 const ptzDirectionByAction: Record<string, PtzDirection> = {
     left_up: "左上",
     up: "上",
@@ -391,6 +399,7 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
+                        <button type="button" data-test="playback-schemes" :class="{ active: schemeVisible }" aria-label="播放方案" title="播放方案" @click="schemeVisible = true"><ListVideo :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>
@@ -441,6 +450,7 @@ onBeforeUnmount(() => {
                         <footer><button type="button" class="dialog-secondary" :disabled="pollingSaving" @click="pollingVisible = false">取消</button><button type="button" class="dialog-primary" data-test="save-polling" :disabled="pollingSaving" @click="savePollingSettings">{{ pollingSaving ? "加载中" : "保存" }}</button></footer>
                     </section>
                 </div>
+                <PlaybackSchemePanel v-model:visible="schemeVisible" :current-layout="layout" :current-slots="currentSchemeSlots" />
             </main>
         </div>
         <PlayConsoleLinked v-model:visible="consoleVisible" :channel="consoleChannel" />

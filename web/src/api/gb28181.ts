@@ -127,6 +127,71 @@ export interface StopPlayResult {
 export const stopPlay = (streamId: string) =>
   http.request<BaseResult<StopPlayResult>>("delete", baseUrlApi(`gb28181/play/${streamId}`));
 
+// ===== 多屏播放方案 =====
+
+export type PlaybackSchemeLayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
+
+export interface PlaybackSchemeSlotInput {
+  slotIndex: number;
+  deviceCode: string;
+  channelCode: string;
+}
+
+export interface PlaybackSchemeSummary {
+  id: number;
+  name: string;
+  layoutSize: PlaybackSchemeLayoutSize;
+  slotCount: number;
+  updatedAt: string;
+}
+
+export type PlaybackSchemeAvailability = "available" | "offline" | "missing" | "forbidden";
+
+export interface PlaybackSchemeSlot extends PlaybackSchemeSlotInput {
+  id: number;
+  deviceName: string;
+  channelName: string;
+  availability: PlaybackSchemeAvailability;
+  channelRecordId: number | null;
+  channelStatus: number | null;
+  audioEnabled: boolean;
+}
+
+export interface PlaybackSchemeDetail extends PlaybackSchemeSummary {
+  slots: PlaybackSchemeSlot[];
+}
+
+export interface PlaybackSchemeListData {
+  list: PlaybackSchemeSummary[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface PlaybackSchemePayload {
+  name: string;
+  layoutSize: PlaybackSchemeLayoutSize;
+  slots: PlaybackSchemeSlotInput[];
+}
+
+export const listPlaybackSchemes = (params: { page?: number; pageSize?: number; q?: string } = {}) =>
+  http.request<BaseResult<PlaybackSchemeListData>>("get", baseUrlApi("gb28181/playback-schemes"), { params });
+
+export const getPlaybackScheme = (id: number) =>
+  http.request<BaseResult<PlaybackSchemeDetail>>("get", baseUrlApi(`gb28181/playback-schemes/${id}`));
+
+export const createPlaybackScheme = (data: PlaybackSchemePayload) =>
+  http.request<BaseResult<PlaybackSchemeSummary>>("post", baseUrlApi("gb28181/playback-schemes"), { data });
+
+export const renamePlaybackScheme = (id: number, name: string) =>
+  http.request<BaseResult<{ id: number; name: string }>>("patch", baseUrlApi(`gb28181/playback-schemes/${id}`), { data: { name } });
+
+export const replacePlaybackSchemeLayout = (id: number, data: Omit<PlaybackSchemePayload, "name">) =>
+  http.request<BaseResult<PlaybackSchemeSummary>>("put", baseUrlApi(`gb28181/playback-schemes/${id}/layout`), { data });
+
+export const deletePlaybackScheme = (id: number) =>
+  http.request<BaseResult<{ id: number }>>("delete", baseUrlApi(`gb28181/playback-schemes/${id}`));
+
 export interface StreamMonitorTrack {
   kind: "video" | "audio" | "unknown";
   codec: string;
