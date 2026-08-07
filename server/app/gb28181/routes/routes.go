@@ -52,6 +52,9 @@ var dashboardController = gbcontrollers.NewDashboardController(nil)
 // platformController 本级 SIP 平台接入信息(只读配置)
 var platformController = gbcontrollers.NewPlatformController()
 
+// serviceConfigController 国标服务配置页面的动态配置控制器。
+var serviceConfigController = gbcontrollers.NewServiceConfigController()
+
 var setupController *gbcontrollers.SetupController
 
 // qrController 扫码接入二维码(token 生成 + 免鉴权兑换),由 bootstrap 后置注入
@@ -274,6 +277,11 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			sipGroup.GET("/stream", func(c *gin.Context) { dashboardController.Stream(c) })
 		}
 		gb.GET("/sip/platform", func(c *gin.Context) { platformController.Info(c) })
+		serviceConfig := gb.Group("/sip/service-config")
+		{
+			serviceConfig.GET("/position-history", serviceConfigController.GetPositionHistory)
+			serviceConfig.PUT("/position-history", serviceConfigController.UpdatePositionHistory)
+		}
 		setup := gb.Group("/sip/setup")
 		{
 			setup.GET("/status", setupRoute(func(controller *gbcontrollers.SetupController, c *gin.Context) { controller.Status(c) }))

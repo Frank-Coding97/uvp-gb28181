@@ -6,6 +6,7 @@ vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
+  fetchPositionHistoryConfig,
   getControlCapabilities,
   getDeviceStatus,
   getHomePosition,
@@ -14,9 +15,31 @@ import {
   listCruiseTracks,
   listPtzPresets,
   updateHomePosition,
+  updatePositionHistoryConfig,
   type DeviceStatusResult,
   type HomePositionPatch
 } from "./gb28181";
+
+describe("国标服务配置 API", () => {
+  beforeEach(() => {
+    request.mockReset();
+    request.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
+  });
+
+  it("读取移动位置历史轨迹开关", async () => {
+    await fetchPositionHistoryConfig();
+    expect(request).toHaveBeenCalledWith("get", "/api/gb28181/sip/service-config/position-history");
+  });
+
+  it("只提交 enabled 字段切换移动位置历史轨迹", async () => {
+    await updatePositionHistoryConfig(false);
+    expect(request).toHaveBeenCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/position-history",
+      { data: { enabled: false } }
+    );
+  });
+});
 
 describe("gb28181 home position API", () => {
   beforeEach(() => {

@@ -1,0 +1,131 @@
+package controllers
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
+)
+
+type serviceConfigTestYAML struct {
+	values  map[string]interface{}
+	saveErr error
+	saveNum int
+}
+
+func (c *serviceConfigTestYAML) ConfigFileChangeListen(...func()) {}
+func (c *serviceConfigTestYAML) Get(key string) interface{}       { return c.values[key] }
+func (c *serviceConfigTestYAML) GetString(string) string          { return "" }
+func (c *serviceConfigTestYAML) GetBool(key string) bool {
+	value, _ := c.values[key].(bool)
+	return value
+}
+func (c *serviceConfigTestYAML) GetInt(string) int                 { return 0 }
+func (c *serviceConfigTestYAML) GetInt32(string) int32             { return 0 }
+func (c *serviceConfigTestYAML) GetInt64(string) int64             { return 0 }
+func (c *serviceConfigTestYAML) GetFloat64(string) float64         { return 0 }
+func (c *serviceConfigTestYAML) GetDuration(string) time.Duration  { return 0 }
+func (c *serviceConfigTestYAML) GetStringSlice(string) []string    { return nil }
+func (c *serviceConfigTestYAML) GetUintSlice(string) []uint        { return nil }
+func (c *serviceConfigTestYAML) Set(key string, value interface{}) { c.values[key] = value }
+func (c *serviceConfigTestYAML) SaveConfig() error                 { c.saveNum++; return c.saveErr }
+
+func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	app.Response = response.NewResponseHandler()
+	router := gin.New()
+	router.GET("/position-history", controller.GetPositionHistory)
+	router.PUT("/position-history", controller.UpdatePositionHistory)
+	return router
+}
+
+func serviceConfigData(t *testing.T, recorder *httptest.ResponseRecorder) map[string]interface{} {
+	t.Helper()
+	var envelope struct {
+		Data map[string]interface{} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &envelope))
+	return envelope.Data
+}
+
+func TestServiceConfigController_GetPositionHistoryDefaultsToEnabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/position-history", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, true, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdatePositionHistoryPersistsToggle(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{positionHistoryConfigKey: true}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, enabled := range []bool{false, true} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPut, "/position-history", jsonBody(t, map[string]bool{"enabled": enabled}))
+		router.ServeHTTP(recorder, request)
+
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, enabled, config.values[positionHistoryConfigKey])
+		require.Equal(t, enabled, serviceConfigData(t, recorder)["enabled"])
+		require.Equal(t, enabled, subscribe.PositionHistoryEnabled(), "位置处理器应读取最新配置值")
+	}
+	require.Equal(t, 2, config.saveNum)
+}
+
+func TestServiceConfigController_UpdatePositionHistoryRejectsMissingValue(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{}}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/position-history", jsonBody(t, map[string]string{})),
+	)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, 0, config.saveNum)
+}
+
+func TestServiceConfigController_UpdatePositionHistoryReturnsSaveError(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{}, saveErr: errors.New("write failed")}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/position-history", jsonBody(t, map[string]bool{"enabled": false})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, 1, config.saveNum)
+	require.Equal(t, true, config.values[positionHistoryConfigKey], "保存失败时不能留下未持久化的运行时开关")
+}
+
+func jsonBody(t *testing.T, value interface{}) *bytes.Reader {
+	t.Helper()
+	encoded, err := json.Marshal(value)
+	require.NoError(t, err)
+	return bytes.NewReader(encoded)
+}

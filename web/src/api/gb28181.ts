@@ -651,6 +651,20 @@ export interface SipPlatformInfo {
 
 export const fetchSipPlatformInfo = () => http.request<BaseResult<SipPlatformInfo>>("get", baseUrlApi("gb28181/sip/platform"));
 
+// ===== 国标服务配置 =====
+
+export interface PositionHistoryConfig {
+  enabled: boolean;
+}
+
+export const fetchPositionHistoryConfig = () =>
+  http.request<BaseResult<PositionHistoryConfig>>("get", baseUrlApi("gb28181/sip/service-config/position-history"));
+
+export const updatePositionHistoryConfig = (enabled: boolean) =>
+  http.request<BaseResult<PositionHistoryConfig>>("put", baseUrlApi("gb28181/sip/service-config/position-history"), {
+    data: { enabled }
+  });
+
 export type SipDeploymentMode = "lan" | "public";
 // 2026-07-20 后端简化:runtime state 仍是六态,restart_required 语义已废弃(保留兼容枚举,新代码不产生).
 export type SipRuntimeState = "disabled" | "unconfigured" | "starting" | "running" | "failed" | "restart_required";
