@@ -2849,6 +2849,20 @@ onBeforeUnmount(() => {
                                 <span>{{ phaseHint }}</span>
                             </div>
                         </template>
+                        <div
+                            v-if="joystickDirection && (phase === 'playing' || phase === 'paused')"
+                            class="ptz-direction-indicator"
+                            data-testid="ptz-direction-indicator"
+                            :data-direction="joystickDirection"
+                            role="status"
+                            :aria-label="`云台正在向${joystickDirection}移动`"
+                        >
+                            <span class="ptz-direction-stack">
+                                <span class="ptz-direction-chevron front" aria-hidden="true"></span>
+                                <span class="ptz-direction-chevron middle" aria-hidden="true"></span>
+                                <span class="ptz-direction-chevron back" aria-hidden="true"></span>
+                            </span>
+                        </div>
                     </div>
 
                     <!-- 多协议切换器(底部) -->
@@ -4339,6 +4353,42 @@ onBeforeUnmount(() => {
     width: 100%; height: 100%; min-height: 100%; aspect-ratio: auto;
     border: 0; border-radius: 0;
 }
+.ptz-direction-indicator {
+    --ptz-direction-rotation: 0deg;
+    position: absolute; top: 50%; left: 50%; z-index: 5;
+    display: grid; place-items: center; width: clamp(72px, 12%, 104px); aspect-ratio: 1;
+    transform: translate(-50%, -50%) rotate(var(--ptz-direction-rotation));
+    pointer-events: none;
+}
+.ptz-direction-stack {
+    position: relative; display: block; width: 100%; height: 100%;
+    animation: ptz-direction-flow 0.95s ease-in-out infinite;
+    will-change: opacity, transform;
+}
+.ptz-direction-chevron {
+    position: absolute; left: 50%; display: block;
+    width: 76%; height: 34%;
+    background: rgb(96 165 250 / 82%);
+    clip-path: polygon(0 68%, 50% 0, 100% 68%, 80% 100%, 50% 58%, 20% 100%);
+    transform: translateX(-50%);
+}
+.ptz-direction-chevron.front {
+    top: 4%;
+    filter: drop-shadow(0 2px 8px rgb(15 23 42 / 42%)) drop-shadow(0 0 9px rgb(59 130 246 / 34%));
+}
+.ptz-direction-chevron.middle { top: 32%; width: 66%; background: rgb(147 197 253 / 48%); }
+.ptz-direction-chevron.back { top: 58%; width: 56%; background: rgb(191 219 254 / 22%); }
+.ptz-direction-indicator[data-direction="右上"] { --ptz-direction-rotation: 45deg; }
+.ptz-direction-indicator[data-direction="右"] { --ptz-direction-rotation: 90deg; }
+.ptz-direction-indicator[data-direction="右下"] { --ptz-direction-rotation: 135deg; }
+.ptz-direction-indicator[data-direction="下"] { --ptz-direction-rotation: 180deg; }
+.ptz-direction-indicator[data-direction="左下"] { --ptz-direction-rotation: 225deg; }
+.ptz-direction-indicator[data-direction="左"] { --ptz-direction-rotation: 270deg; }
+.ptz-direction-indicator[data-direction="左上"] { --ptz-direction-rotation: 315deg; }
+@keyframes ptz-direction-flow {
+    0%, 100% { opacity: 0.48; transform: translateY(5px) scale(0.94); }
+    50% { opacity: 1; transform: translateY(-4px) scale(1); }
+}
 .drag-zoom-layer {
     position: absolute; inset: 0; z-index: 6; cursor: crosshair;
     background: rgb(8 47 73 / 12%); touch-action: none;
@@ -4870,6 +4920,7 @@ onBeforeUnmount(() => {
 }
 @media (prefers-reduced-motion: reduce) {
     .joystick-handle { transition: none; }
+    .ptz-direction-stack { animation: none; opacity: 0.82; }
 }
 
 .talk-mode-switch {

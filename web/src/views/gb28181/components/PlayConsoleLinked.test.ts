@@ -293,6 +293,41 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("云台移动期间在视频画面显示对应方向的呼吸箭头，停止后隐藏", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='ptz-direction-indicator']").exists()).toBe(false);
+
+    const joystick = wrapper.get(".joystick-stage");
+    vi.spyOn(joystick.element, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, top: 0, left: 0, right: 176, bottom: 176, width: 176, height: 176, toJSON: () => ({}),
+    } as DOMRect);
+    const pointerDown = new MouseEvent("pointerdown", { bubbles: true, clientX: 156, clientY: 20 });
+    Object.defineProperty(pointerDown, "pointerId", { value: 2 });
+    joystick.element.dispatchEvent(pointerDown);
+    await flushPromises();
+
+    const indicator = wrapper.get("[data-testid='ptz-direction-indicator']");
+    expect(indicator.attributes("data-direction")).toBe("右上");
+    expect(indicator.attributes("aria-label")).toBe("云台正在向右上移动");
+    expect(indicator.findAll(".ptz-direction-chevron")).toHaveLength(3);
+    expect(indicator.findAll("[aria-hidden='true']")).toHaveLength(3);
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+    expect(source).toContain("background: rgb(96 165 250 / 82%);");
+    expect(source).toContain("background: rgb(147 197 253 / 48%);");
+    expect(source).toContain("background: rgb(191 219 254 / 22%);");
+    expect(source).not.toContain("drop-shadow(0 0 9px rgb(255 255 255 / 28%))");
+
+    const pointerUp = new MouseEvent("pointerup", { bubbles: true, clientX: 156, clientY: 20 });
+    Object.defineProperty(pointerUp, "pointerId", { value: 2 });
+    joystick.element.dispatchEvent(pointerUp);
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='ptz-direction-indicator']").exists()).toBe(false);
+    wrapper.unmount();
+  });
+
   it("按返回地址动态展示协议并优先选择可播放的 WS-FLV", async () => {
     api.startPlay.mockResolvedValueOnce({
       code: 0,
