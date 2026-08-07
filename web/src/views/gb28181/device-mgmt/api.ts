@@ -46,6 +46,11 @@ export interface PageResult<T> {
     pageSize: number;
 }
 
+export interface DevicePageResult extends PageResult<DeviceVO> {
+    onlineTotal: number;
+    offlineTotal: number;
+}
+
 export interface CatalogNode {
     id: number;
     nodeType: "civil_code" | "biz_group" | "virtual_org" | "device" | "channel" | string;
@@ -345,7 +350,7 @@ export const getAnomalyCount = () =>
     http.request<BaseResult<{ count: number }>>("get", baseUrlApi("gb28181/device-mgmt/catalog/anomaly/count"));
 
 export const listDevices = (params: DeviceQuery) =>
-    http.request<BaseResult<PageResult<DeviceVO>>>("get", baseUrlApi("gb28181/device-mgmt/devices"), { params });
+    http.request<BaseResult<DevicePageResult>>("get", baseUrlApi("gb28181/device-mgmt/devices"), { params });
 
 export const getDevice = (id: number) =>
     http.request<BaseResult<DeviceVO>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}`));

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { Camera, Cctv, ChevronRight, Folder, MapPin, RefreshCw, Router } from "lucide-vue-next";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { Camera, Cctv, ChevronRight, Folder, MapPin, RefreshCw } from "lucide-vue-next";
 import {
     listChannels,
     listDevices,
@@ -49,10 +49,16 @@ const error = ref("");
 const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
 const deviceStatsLoaded = ref(false);
+const devicePage = ref(1);
+const devicePageSize = 50;
+const deviceListTotal = ref(0);
 const deviceTotal = computed(() => onlineDeviceTotal.value + offlineDeviceTotal.value);
+let refreshTimer: number | null = null;
+let refreshInFlight = false;
+let unmounted = false;
 
 const viewOptions: Array<{ value: SourceView; label: string }> = [
-    { value: "devices", label: "直接展示" },
+    { value: "devices", label: "设备树" },
     { value: "national", label: "国标目录" },
     { value: "custom", label: "自定义目录" }
 ];
@@ -145,28 +151,13 @@ function responseList<T>(response: any): T[] {
     return response.data?.list || [];
 }
 
-async function loadRoot(nextView: SourceView = view.value, force = false) {
-    if (loaded.value[nextView] && !force) return;
-    loading.value = true;
-    error.value = "";
-    try {
-        if (nextView === "devices") {
-            const devices = responseList<DeviceVO>(await listDevices({ page: 1, pageSize: 200 }));
-            trees.value.devices = devices.map(device => deviceNode(device, "root", 0));
-        } else {
-            const directories = responseList<DirectoryNode>(await listDirectoryTree(nextView));
-            trees.value[nextView] = directories.map(node => directoryNode(node));
-        }
-        loaded.value[nextView] = true;
-    } catch (reason: any) {
-        error.value = reason?.message || "设备树加载失败";
-        trees.value[nextView] = [];
-    } finally {
-        loading.value = false;
+async function updateDeviceTotals(response: any) {
+    if (typeof response.data?.onlineTotal === "number" && typeof response.data?.offlineTotal === "number") {
+        onlineDeviceTotal.value = response.data.onlineTotal;
+        offlineDeviceTotal.value = response.data.offlineTotal;
+        deviceStatsLoaded.value = true;
+        return;
     }
-}
-
-async function refreshDeviceStats() {
     try {
         const [onlineResponse, offlineResponse] = await Promise.all([
             listDevices({ status: "online", page: 1, pageSize: 1 }),
@@ -177,7 +168,58 @@ async function refreshDeviceStats() {
         offlineDeviceTotal.value = offlineResponse.data?.total || 0;
         deviceStatsLoaded.value = true;
     } catch {
-        // The tree can still be used when the optional summary request fails.
+        return;
+    }
+}
+
+function preserveNodeState(nextNodes: SourceTreeNode[], previousNodes: SourceTreeNode[]) {
+    const previousByKey = new Map(previousNodes.map(node => [node.key, node]));
+    return nextNodes.map(node => {
+        const previous = previousByKey.get(node.key);
+        if (!previous || !node.hasChildren) return node;
+        node.expanded = previous.expanded;
+        node.loaded = previous.loaded;
+        if (node.kind === "device" && previous.loaded) {
+            node.children = previous.children;
+        } else if (node.kind === "directory") {
+            node.staticChildren = preserveNodeState(node.staticChildren, previous.children);
+            const staticKeys = new Set(node.staticChildren.map(child => child.key));
+            const loadedDevices = previous.children.filter(child => child.kind === "device" && !staticKeys.has(child.key));
+            node.children = previous.loaded ? [...node.staticChildren, ...loadedDevices] : node.staticChildren;
+        }
+        return node;
+    });
+}
+
+async function loadRoot(nextView: SourceView = view.value, force = false, silent = false) {
+    if (loaded.value[nextView] && !force) return;
+    if (!silent) loading.value = true;
+    error.value = "";
+    try {
+        if (nextView === "devices") {
+            const response = await listDevices({ page: devicePage.value, pageSize: devicePageSize });
+            const devices = responseList<DeviceVO>(response);
+            deviceListTotal.value = response.data?.total || 0;
+            await updateDeviceTotals(response);
+            const maxPage = Math.max(1, Math.ceil(deviceListTotal.value / devicePageSize));
+            if (devicePage.value > maxPage) {
+                devicePage.value = maxPage;
+                await loadRoot(nextView, true, silent);
+                return;
+            }
+            const nextNodes = devices.map(device => deviceNode(device, "root", 0));
+            trees.value.devices = preserveNodeState(nextNodes, trees.value.devices);
+        } else {
+            const directories = responseList<DirectoryNode>(await listDirectoryTree(nextView));
+            const nextNodes = directories.map(node => directoryNode(node));
+            trees.value[nextView] = preserveNodeState(nextNodes, trees.value[nextView]);
+        }
+        loaded.value[nextView] = true;
+    } catch (reason: any) {
+        error.value = reason?.message || "设备树加载失败";
+        if (!loaded.value[nextView]) trees.value[nextView] = [];
+    } finally {
+        if (!silent) loading.value = false;
     }
 }
 
@@ -230,9 +272,20 @@ async function changeView(nextView: SourceView) {
     await loadRoot(nextView);
 }
 
-async function refresh() {
-    loaded.value[view.value] = false;
-    await Promise.all([loadRoot(view.value, true), refreshDeviceStats()]);
+async function changeDevicePage(page: number) {
+    if (page === devicePage.value) return;
+    devicePage.value = page;
+    await loadRoot("devices", true);
+}
+
+async function refresh(silent = false) {
+    if (refreshInFlight) return;
+    refreshInFlight = true;
+    try {
+        await loadRoot(view.value, true, silent);
+    } finally {
+        refreshInFlight = false;
+    }
 }
 
 function nodeIcon(node: SourceTreeNode) {
@@ -247,27 +300,39 @@ function nodeStatus(node: SourceTreeNode) {
     return node.count ? `${node.onlineCount}/${node.count}` : "空";
 }
 
-onMounted(() => Promise.all([loadRoot(), refreshDeviceStats()]));
+onMounted(async () => {
+    await loadRoot();
+    if (unmounted) return;
+    refreshTimer = window.setInterval(() => {
+        if (loading.value || visibleRows.value.some(({ node }) => node.loading)) return;
+        void refresh(true);
+    }, 10_000);
+});
+
+onBeforeUnmount(() => {
+    unmounted = true;
+    if (refreshTimer) window.clearInterval(refreshTimer);
+});
 </script>
 
 <template>
     <aside class="playback-source-tree" aria-label="设备树">
         <header class="tree-head">
-            <div class="tree-heading">
-                <div class="tree-title"><Router :size="14" aria-hidden="true" /><strong>设备树</strong><span v-if="deviceStatsLoaded" class="device-total">共 {{ deviceTotal }} 台</span></div>
-                <div v-if="deviceStatsLoaded" class="tree-summary" :aria-label="`设备状态：在线 ${onlineDeviceTotal} 台，离线 ${offlineDeviceTotal} 台`">
+            <div class="tree-summary" :aria-label="deviceStatsLoaded ? `设备状态：共 ${deviceTotal} 台，在线 ${onlineDeviceTotal} 台，离线 ${offlineDeviceTotal} 台` : '设备状态加载中'">
+                <template v-if="deviceStatsLoaded">
+                    <span class="device-total">共 {{ deviceTotal }} 台</span>
                     <span><i class="summary-dot online" aria-hidden="true" />在线 {{ onlineDeviceTotal }}</span>
                     <span><i class="summary-dot offline" aria-hidden="true" />离线 {{ offlineDeviceTotal }}</span>
-                </div>
+                </template>
             </div>
-            <button class="tree-refresh" type="button" aria-label="刷新设备树" title="刷新设备树" @click="refresh"><RefreshCw :size="14" :class="{ spin: loading }" /></button>
+            <button class="tree-refresh" type="button" aria-label="刷新设备树" title="刷新设备树" @click="refresh()"><RefreshCw :size="14" :class="{ spin: loading }" /></button>
         </header>
 
         <div class="tree-views" role="tablist" aria-label="设备树视图">
             <button v-for="option in viewOptions" :key="option.value" :data-test="`source-view-${option.value}`" type="button" role="tab" :aria-selected="view === option.value" :class="{ active: view === option.value }" @click="changeView(option.value)">{{ option.label }}</button>
         </div>
 
-        <div v-if="error" class="tree-error" role="alert">{{ error }}<button type="button" @click="refresh">重试</button></div>
+        <div v-if="error" class="tree-error" role="alert">{{ error }}<button type="button" @click="refresh()">重试</button></div>
         <a-spin :loading="loading" class="tree-loading">
             <div class="tree-content" role="tree">
                 <div v-for="{ node, level } in visibleRows" :key="node.key" class="tree-row" :class="{ used: node.kind === 'channel' && node.channel && isUsed(node.channel), offline: node.kind !== 'directory' && node.status !== 1 }" :style="{ paddingLeft: `${8 + level * 14}px` }" :data-node-key="node.key" role="treeitem" :aria-expanded="node.hasChildren ? node.expanded : undefined">
@@ -282,17 +347,18 @@ onMounted(() => Promise.all([loadRoot(), refreshDeviceStats()]));
                 <div v-if="!loading && !visibleRows.length" class="tree-empty">暂无设备或通道</div>
             </div>
         </a-spin>
+        <div v-if="view === 'devices' && deviceListTotal > devicePageSize" class="tree-pagination">
+            <a-pagination simple size="mini" :current="devicePage" :page-size="devicePageSize" :total="deviceListTotal" @change="changeDevicePage" />
+        </div>
     </aside>
 </template>
 
 <style scoped>
 .playback-source-tree { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; color: var(--uvp-text-secondary); background: var(--zlm-card); border: 1px solid var(--zlm-border); }
-.tree-head, .tree-title, .tree-summary, .tree-summary span { display: flex; align-items: center; }
-.tree-head { min-height: 56px; justify-content: space-between; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--uvp-panel-border); }
-.tree-heading { display: grid; min-width: 0; gap: 4px; }
-.tree-title { gap: 7px; color: var(--uvp-text-primary); font-size: 13px; }
+.tree-head, .tree-summary, .tree-summary span { display: flex; align-items: center; }
+.tree-head { min-height: 44px; justify-content: space-between; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--uvp-panel-border); }
 .device-total { color: var(--uvp-text-tertiary); font-size: 10px; font-weight: 500; }
-.tree-summary { gap: 12px; padding-left: 21px; color: var(--uvp-text-tertiary); font-size: 10px; }
+.tree-summary { gap: 12px; color: var(--uvp-text-tertiary); font-size: 10px; }
 .tree-summary span { gap: 5px; }
 .summary-dot, .node-status-dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
 .summary-dot.online, .node-status-dot.online { background: #10B981; box-shadow: 0 0 0 2px rgb(16 185 129 / 12%); }
@@ -321,6 +387,7 @@ onMounted(() => Promise.all([loadRoot(), refreshDeviceStats()]));
 .tree-error { display: flex; gap: 8px; align-items: center; padding: 10px 12px; color: var(--uvp-danger); font-size: 12px; }
 .tree-error button { padding: 0; color: var(--uvp-brand); background: transparent; border: 0; cursor: pointer; font: inherit; }
 .tree-empty { display: grid; min-height: 120px; color: var(--uvp-text-tertiary); place-items: center; font-size: 12px; }
+.tree-pagination { display: flex; min-height: 38px; flex: 0 0 38px; align-items: center; justify-content: center; padding: 4px 8px; border-top: 1px solid var(--uvp-panel-border); }
 .spin { animation: source-tree-spin 0.9s linear infinite; }
 @keyframes source-tree-spin { to { transform: rotate(360deg); } }
 </style>

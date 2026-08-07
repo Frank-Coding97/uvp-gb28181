@@ -240,6 +240,29 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		q = q.Where("name LIKE ? OR device_id LIKE ?", like, like)
 	}
 
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		dc.FailAndAbort(c, "统计失败", err)
+		return
+	}
+	type deviceStatusCount struct {
+		Status int8
+		Count  int64
+	}
+	var statusCounts []deviceStatusCount
+	if err := q.Session(&gorm.Session{}).Select("status, COUNT(*) AS count").Group("status").Scan(&statusCounts).Error; err != nil {
+		dc.FailAndAbort(c, "状态统计失败", err)
+		return
+	}
+	var onlineTotal, offlineTotal int64
+	for _, row := range statusCounts {
+		if row.Status == gbmodels.DeviceStatusOnline {
+			onlineTotal = row.Count
+		} else if row.Status == gbmodels.DeviceStatusOffline {
+			offlineTotal = row.Count
+		}
+	}
+
 	// 排序:sort=name:asc 或 keepalive:desc
 	if so := c.Query("sort"); so != "" {
 		parts := strings.SplitN(so, ":", 2)
@@ -253,22 +276,26 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		q = q.Order("status DESC, register_time DESC, name DESC, id DESC")
 	}
 
-	var total int64
-	if err := q.Count(&total).Error; err != nil {
-		dc.FailAndAbort(c, "统计失败", err)
-		return
-	}
 	var list []gbmodels.GbDevice
 	if err := q.Offset((page - 1) * pageSize).Limit(pageSize).Find(&list).Error; err != nil {
 		dc.FailAndAbort(c, "查询失败", err)
 		return
 	}
 
-	// 派生通道聚合
+	deviceIDs := make([]string, 0, len(list))
+	for i := range list {
+		deviceIDs = append(deviceIDs, list[i].DeviceID)
+	}
+	statsByDevice, err := dc.channelAggregates(c, db, deviceIDs)
+	if err != nil {
+		dc.FailAndAbort(c, "通道统计失败", err)
+		return
+	}
+
 	vos := make([]deviceVOExtra, 0, len(list))
 	for i := range list {
 		d := list[i]
-		stats := dc.channelAggregate(c, db, d.DeviceID)
+		stats := statsByDevice[d.DeviceID]
 		vos = append(vos, deviceVOExtra{
 			GbDevice:           &d,
 			Online:             d.Status == gbmodels.DeviceStatusOnline,
@@ -277,7 +304,10 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 			OnlineRate:         stats.rate(),
 		})
 	}
-	dc.Success(c, gin.H{"list": vos, "total": total, "page": page, "pageSize": pageSize})
+	dc.Success(c, gin.H{
+		"list": vos, "total": total, "onlineTotal": onlineTotal, "offlineTotal": offlineTotal,
+		"page": page, "pageSize": pageSize,
+	})
 }
 
 type chStats struct{ total, online int64 }
@@ -294,6 +324,32 @@ func (dc *DeviceMgmtController) channelAggregate(c *gin.Context, db *gorm.DB, de
 	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Where("device_id = ?", deviceID).Count(&total).Error
 	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Where("device_id = ? AND status = ?", deviceID, gbmodels.ChannelStatusOnline).Count(&online).Error
 	return chStats{total: total, online: online}
+}
+
+func (dc *DeviceMgmtController) channelAggregates(c *gin.Context, db *gorm.DB, deviceIDs []string) (map[string]chStats, error) {
+	result := make(map[string]chStats, len(deviceIDs))
+	if len(deviceIDs) == 0 {
+		return result, nil
+	}
+	type aggregateRow struct {
+		DeviceID string
+		Total    int64
+		Online   int64
+	}
+	var rows []aggregateRow
+	err := db.WithContext(c).Model(&gbmodels.GbChannel{}).
+		Scopes(ownerDeptScope(c)).
+		Select("device_id, COUNT(*) AS total, SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS online", gbmodels.ChannelStatusOnline).
+		Where("device_id IN ?", deviceIDs).
+		Group("device_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.DeviceID] = chStats{total: row.Total, online: row.Online}
+	}
+	return result, nil
 }
 
 func safeSortColumn(s string) string {

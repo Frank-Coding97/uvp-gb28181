@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -262,6 +263,34 @@ func TestDeviceMgmt_ListDevices(t *testing.T) {
 	assert.Equal(t, "测试 NVR", d["name"])
 	assert.EqualValues(t, 2, d["channelCount"])
 	assert.EqualValues(t, 1, d["channelOnlineCount"])
+	assert.EqualValues(t, 1, data["onlineTotal"])
+	assert.EqualValues(t, 0, data["offlineTotal"])
+}
+
+func TestDeviceMgmt_ListDevices_ThousandDevicesUseFixedQueryCount(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	devices := make([]gbmodels.GbDevice, 1000)
+	channels := make([]gbmodels.GbChannel, 1000)
+	for i := range devices {
+		deviceID := fmt.Sprintf("batch-device-%02d", i)
+		devices[i] = gbmodels.GbDevice{DeviceID: deviceID, Status: gbmodels.DeviceStatusOnline, SubscribeCapability: gbmodels.SubscribeUnknown}
+		channels[i] = gbmodels.GbChannel{DeviceID: deviceID, ChannelID: fmt.Sprintf("batch-channel-%02d", i), Status: gbmodels.ChannelStatusOnline}
+	}
+	require.NoError(t, db.CreateInBatches(&devices, 100).Error)
+	require.NoError(t, db.CreateInBatches(&channels, 100).Error)
+
+	queryCount := 0
+	countQuery := func(*gorm.DB) {
+		queryCount++
+	}
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("count_device_list_queries", countQuery))
+	require.NoError(t, db.Callback().Row().Before("gorm:row").Register("count_device_list_rows", countQuery))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/devices?page=1&pageSize=50", nil))
+
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Len(t, unmarshal(t, w)["data"].(map[string]any)["list"].([]any), 50)
+	assert.Equal(t, 4, queryCount, "设备列表查询数不应随设备数线性增长")
 }
 
 func TestDeviceMgmt_ListDevices_DefaultSort(t *testing.T) {
