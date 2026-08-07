@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Camera, Cctv, ChevronRight, Folder, MapPin, RefreshCw } from "lucide-vue-next";
+import { Camera, Cctv, ChevronRight, Folder, MapPin, RefreshCw, Search, X } from "lucide-vue-next";
 import {
     listChannels,
     listDevices,
@@ -52,8 +52,11 @@ const deviceStatsLoaded = ref(false);
 const devicePage = ref(1);
 const devicePageSize = 50;
 const deviceListTotal = ref(0);
+const deviceKeyword = ref("");
+const appliedDeviceKeyword = ref("");
 const deviceTotal = computed(() => onlineDeviceTotal.value + offlineDeviceTotal.value);
 let refreshTimer: number | null = null;
+let deviceSearchTimer: number | null = null;
 let refreshInFlight = false;
 let unmounted = false;
 
@@ -151,6 +154,11 @@ function responseList<T>(response: any): T[] {
     return response.data?.list || [];
 }
 
+function deviceListParams(page = devicePage.value) {
+    const q = appliedDeviceKeyword.value || undefined;
+    return { ...(q ? { q } : {}), page, pageSize: devicePageSize };
+}
+
 async function updateDeviceTotals(response: any) {
     if (typeof response.data?.onlineTotal === "number" && typeof response.data?.offlineTotal === "number") {
         onlineDeviceTotal.value = response.data.onlineTotal;
@@ -159,9 +167,10 @@ async function updateDeviceTotals(response: any) {
         return;
     }
     try {
+        const q = appliedDeviceKeyword.value || undefined;
         const [onlineResponse, offlineResponse] = await Promise.all([
-            listDevices({ status: "online", page: 1, pageSize: 1 }),
-            listDevices({ status: "offline", page: 1, pageSize: 1 })
+            listDevices({ ...(q ? { q } : {}), status: "online", page: 1, pageSize: 1 }),
+            listDevices({ ...(q ? { q } : {}), status: "offline", page: 1, pageSize: 1 })
         ]);
         if (onlineResponse.code !== 0 || offlineResponse.code !== 0) return;
         onlineDeviceTotal.value = onlineResponse.data?.total || 0;
@@ -197,7 +206,7 @@ async function loadRoot(nextView: SourceView = view.value, force = false, silent
     error.value = "";
     try {
         if (nextView === "devices") {
-            const response = await listDevices({ page: devicePage.value, pageSize: devicePageSize });
+            const response = await listDevices(deviceListParams());
             const devices = responseList<DeviceVO>(response);
             deviceListTotal.value = response.data?.total || 0;
             await updateDeviceTotals(response);
@@ -278,6 +287,34 @@ async function changeDevicePage(page: number) {
     await loadRoot("devices", true);
 }
 
+function cancelDeviceSearch() {
+    if (deviceSearchTimer === null) return;
+    window.clearTimeout(deviceSearchTimer);
+    deviceSearchTimer = null;
+}
+
+async function applyDeviceSearch() {
+    cancelDeviceSearch();
+    const keyword = deviceKeyword.value.trim();
+    deviceKeyword.value = keyword;
+    appliedDeviceKeyword.value = keyword;
+    devicePage.value = 1;
+    await loadRoot("devices", true);
+}
+
+function scheduleDeviceSearch() {
+    cancelDeviceSearch();
+    deviceSearchTimer = window.setTimeout(() => {
+        deviceSearchTimer = null;
+        void applyDeviceSearch();
+    }, 300);
+}
+
+async function clearDeviceSearch() {
+    deviceKeyword.value = "";
+    await applyDeviceSearch();
+}
+
 async function refresh(silent = false) {
     if (refreshInFlight) return;
     refreshInFlight = true;
@@ -312,6 +349,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
     unmounted = true;
     if (refreshTimer) window.clearInterval(refreshTimer);
+    cancelDeviceSearch();
 });
 </script>
 
@@ -332,6 +370,12 @@ onBeforeUnmount(() => {
             <button v-for="option in viewOptions" :key="option.value" :data-test="`source-view-${option.value}`" type="button" role="tab" :aria-selected="view === option.value" :class="{ active: view === option.value }" @click="changeView(option.value)">{{ option.label }}</button>
         </div>
 
+        <div v-if="view === 'devices'" class="tree-search">
+            <Search :size="13" aria-hidden="true" />
+            <input v-model="deviceKeyword" data-test="device-search" type="text" aria-label="搜索设备名称或国标编号" placeholder="搜索设备名称或国标编号" @input="scheduleDeviceSearch" @keydown.enter.prevent="applyDeviceSearch" />
+            <button v-if="deviceKeyword" data-test="clear-device-search" type="button" aria-label="清空设备搜索" title="清空设备搜索" @click="clearDeviceSearch"><X :size="13" /></button>
+        </div>
+
         <div v-if="error" class="tree-error" role="alert">{{ error }}<button type="button" @click="refresh()">重试</button></div>
         <a-spin :loading="loading" class="tree-loading">
             <div class="tree-content" role="tree">
@@ -344,7 +388,7 @@ onBeforeUnmount(() => {
                         <span v-else class="node-status-dot" :class="node.status === 1 ? 'online' : 'offline'" role="img" :aria-label="nodeStatus(node)" :title="nodeStatus(node)" />
                     </button>
                 </div>
-                <div v-if="!loading && !visibleRows.length" class="tree-empty">暂无设备或通道</div>
+                <div v-if="!loading && !visibleRows.length" class="tree-empty">{{ view === "devices" && appliedDeviceKeyword ? "未找到匹配设备" : "暂无设备或通道" }}</div>
             </div>
         </a-spin>
         <div v-if="view === 'devices' && deviceListTotal > devicePageSize" class="tree-pagination">
@@ -366,8 +410,14 @@ onBeforeUnmount(() => {
 .tree-refresh { display: inline-grid; width: 26px; height: 26px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 5px; place-items: center; cursor: pointer; }
 .tree-refresh:hover { color: var(--uvp-brand); background: var(--uvp-sidebar-active-bg); }
 .tree-views { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 10px 12px 8px; padding: 2px; background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 6px; }
-.tree-views button { min-width: 0; height: 28px; padding: 0 4px; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; }
+.tree-views button { min-width: 0; height: 28px; padding: 0 4px; color: var(--uvp-text-tertiary); white-space: nowrap; background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .tree-views button.active { color: var(--uvp-text-primary); font-weight: 620; background: var(--uvp-panel-bg); box-shadow: 0 0 0 1px var(--uvp-panel-border); }
+.tree-search { display: flex; height: 30px; flex: 0 0 30px; align-items: center; gap: 7px; margin: 0 12px 8px; padding: 0 8px; color: var(--uvp-text-tertiary); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: 5px; }
+.tree-search:focus-within { color: var(--uvp-brand); border-color: var(--uvp-brand); }
+.tree-search input { min-width: 0; height: 100%; flex: 1; padding: 0; color: var(--uvp-text-primary); background: transparent; border: 0; outline: 0; font: inherit; font-size: 12px; }
+.tree-search input::placeholder { color: var(--uvp-text-tertiary); }
+.tree-search button { display: inline-grid; width: 22px; height: 22px; flex: 0 0 22px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; place-items: center; }
+.tree-search button:hover { color: var(--uvp-text-primary); background: var(--uvp-sidebar-active-bg); }
 .tree-loading { min-height: 0; flex: 1; overflow: hidden; }
 .tree-content { height: 100%; min-height: 120px; padding: 2px 6px 10px; overflow: auto; scrollbar-gutter: stable; }
 .tree-row { display: flex; height: 32px; min-width: 0; align-items: center; border-radius: 5px; }

@@ -137,6 +137,28 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.text()).toContain("二号设备");
     });
 
+    it("searches devices on the server and resets pagination", async () => {
+        vi.useFakeTimers();
+        const wrapper = mountTree();
+        await flushPromises();
+        await wrapper.get("[data-test=device-pagination]").trigger("click");
+        await flushPromises();
+
+        await wrapper.get("[data-test=device-search]").setValue("  UVP-Sim  ");
+        await vi.advanceTimersByTimeAsync(300);
+        await flushPromises();
+
+        expect(api.listDevices).toHaveBeenLastCalledWith({ q: "UVP-Sim", page: 1, pageSize: 50 });
+        await vi.advanceTimersByTimeAsync(10_000);
+        await flushPromises();
+        expect(api.listDevices).toHaveBeenLastCalledWith({ q: "UVP-Sim", page: 1, pageSize: 50 });
+
+        await wrapper.get("[data-test=clear-device-search]").trigger("click");
+        await flushPromises();
+        expect(api.listDevices).toHaveBeenLastCalledWith({ page: 1, pageSize: 50 });
+        wrapper.unmount();
+    });
+
     it("loads devices under a national directory node instead of rendering a second flat list", async () => {
         const wrapper = mountTree();
         await wrapper.get("[data-test=source-view-national]").trigger("click");
