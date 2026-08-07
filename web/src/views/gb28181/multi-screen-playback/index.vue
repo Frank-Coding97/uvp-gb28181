@@ -18,10 +18,10 @@ import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
-import type { ChannelVO } from "../device-mgmt/api";
+import { listChannels, type ChannelVO } from "../device-mgmt/api";
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
-type SlotStatus = "idle" | "requesting" | "playing" | "stopped" | "error" | "offline";
+type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
 
 interface PlaybackSlot {
     index: number;
@@ -40,8 +40,16 @@ const toast = ref("");
 const monitorAreaRef = ref<HTMLElement | null>(null);
 const isFullscreen = ref(false);
 const pollingVisible = ref(false);
-const pollingDraft = reactive({ intervalSeconds: 30, skipOffline: true });
-const pollingSettings = reactive({ intervalSeconds: 30, skipOffline: true });
+const pollingDraft = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
+const pollingSettings = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
+const pollingChannels = ref<ChannelVO[]>([]);
+const pollingCursor = ref(0);
+const pollingSaving = ref(false);
+const pollingError = ref("");
+const playAllLoading = ref(false);
+let pollingTimer: ReturnType<typeof setInterval> | null = null;
+let pollingCycleRunning = false;
+let playAllToken = 0;
 
 function createSlot(index: number): PlaybackSlot {
     return { index, channel: null, status: "idle", result: null, error: "", token: 0 };
@@ -51,9 +59,7 @@ const slots = reactive<PlaybackSlot[]>(Array.from({ length: 16 }, (_, index) => 
 const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
-const hasVisibleChannels = computed(() => visibleSlots.value.some(slot => slot.channel));
-const hasPlayingSlots = computed(() => visibleSlots.value.some(slot => slot.status === "playing" || slot.status === "requesting"));
-const hasStoppedSlots = computed(() => visibleSlots.value.some(slot => slot.channel && slot.status !== "playing" && slot.status !== "requesting"));
+const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
 
 const layoutOptions: Array<{ value: LayoutSize; label: string; cells: number }> = [
     { value: 1, label: "一分屏", cells: 1 },
@@ -108,6 +114,8 @@ async function playSlot(target: PlaybackSlot) {
 }
 
 async function assignChannel(channel: ChannelVO) {
+    playAllToken += 1;
+    if (pollingSettings.enabled) stopPolling();
     if (channelIsUsed(channel)) {
         toast.value = `${channel.name || channel.channelId} 已在分屏中`;
         return;
@@ -152,29 +160,51 @@ function openConsole(slot: PlaybackSlot) {
 function setLayout(value: LayoutSize) {
     layout.value = value;
     if (focusedIndex.value != null && focusedIndex.value >= value) focusedIndex.value = null;
+    if (pollingSettings.enabled) {
+        pollingCursor.value = 0;
+        void runPollingCycle();
+        schedulePolling();
+    }
 }
 
 function stopAll() {
-    visibleSlots.value.forEach(slot => {
-        if (!slot.channel) return;
-        slot.token += 1;
-        slot.status = "stopped";
-        slot.error = "";
-    });
-    toast.value = hasVisibleChannels.value ? "已停止当前布局中的全部画面" : "当前布局没有可停止的画面";
+    const hadChannels = slots.some(slot => slot.channel);
+    playAllToken += 1;
+    stopPolling();
+    slots.forEach(resetSlot);
+    focusedIndex.value = null;
+    consoleVisible.value = false;
+    consoleChannel.value = null;
+    toast.value = hadChannels ? "已停止并清空全部画面" : "当前没有可停止的画面";
 }
 
 async function playAll() {
-    const targets = visibleSlots.value.filter(slot => slot.channel && slot.status !== "playing" && slot.status !== "requesting");
-    await Promise.all(targets.map(slot => {
-        if (slot.result && resolvePlayUrl(slot.result)) {
-            slot.status = "playing";
-            slot.error = "";
-            return Promise.resolve();
+    if (playAllLoading.value) return;
+    const token = playAllToken + 1;
+    playAllToken = token;
+    stopPolling();
+    playAllLoading.value = true;
+    toast.value = "";
+    try {
+        const channels = await loadPlaybackChannels(true);
+        if (token !== playAllToken) return;
+        slots.forEach(resetSlot);
+        focusedIndex.value = null;
+        const batch = channels.slice(0, layout.value);
+        if (!batch.length) {
+            toast.value = "当前没有在线通道";
+            return;
         }
-        return playSlot(slot);
-    }));
-    toast.value = targets.length ? "已恢复当前布局中的全部画面" : "当前布局没有待播放的画面";
+        await Promise.all(batch.map((channel, index) => {
+            const slot = slots[index];
+            slot.channel = channel;
+            return playSlot(slot);
+        }));
+    } catch (reason: any) {
+        if (token === playAllToken) toast.value = reason?.message || "加载在线通道失败";
+    } finally {
+        playAllLoading.value = false;
+    }
 }
 
 async function toggleFullscreen() {
@@ -198,16 +228,98 @@ function syncFullscreenState() {
 }
 
 function openPollingSettings() {
+    pollingDraft.enabled = pollingSettings.enabled;
     pollingDraft.intervalSeconds = pollingSettings.intervalSeconds;
     pollingDraft.skipOffline = pollingSettings.skipOffline;
+    pollingError.value = "";
     pollingVisible.value = true;
 }
 
-function savePollingSettings() {
-    pollingSettings.intervalSeconds = Math.min(3600, Math.max(5, Number(pollingDraft.intervalSeconds) || 30));
+function stopPolling() {
+    if (pollingTimer) clearInterval(pollingTimer);
+    pollingTimer = null;
+    pollingSettings.enabled = false;
+}
+
+function schedulePolling() {
+    if (pollingTimer) clearInterval(pollingTimer);
+    pollingTimer = null;
+    if (!pollingSettings.enabled) return;
+    pollingTimer = setInterval(() => void runPollingCycle(), pollingSettings.intervalSeconds * 1000);
+}
+
+function channelPage(response: any) {
+    if (response?.code !== 0) throw new Error(response?.message || "加载轮询通道失败");
+    return response.data;
+}
+
+async function loadPlaybackChannels(onlineOnly: boolean) {
+    const params = { status: onlineOnly ? "online" as const : undefined, page: 1, pageSize: 200 };
+    const firstPage = channelPage(await listChannels(params));
+    const channels = [...(firstPage?.list || [])] as ChannelVO[];
+    const pageCount = Math.ceil((firstPage?.total || channels.length) / params.pageSize);
+    if (pageCount > 1) {
+        const responses = await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) =>
+            listChannels({ ...params, page: index + 2 })
+        ));
+        responses.forEach(response => channels.push(...(channelPage(response)?.list || [])));
+    }
+    return channels;
+}
+
+async function runPollingCycle() {
+    if (!pollingSettings.enabled || pollingCycleRunning || !pollingChannels.value.length) return;
+    pollingCycleRunning = true;
+    try {
+        const count = Math.min(layout.value, pollingChannels.value.length);
+        const batch = Array.from({ length: count }, (_, index) =>
+            pollingChannels.value[(pollingCursor.value + index) % pollingChannels.value.length]
+        );
+        pollingCursor.value = (pollingCursor.value + layout.value) % pollingChannels.value.length;
+        slots.forEach(resetSlot);
+        focusedIndex.value = null;
+        await Promise.all(batch.map((channel, index) => {
+            const slot = slots[index];
+            slot.channel = channel;
+            if (channel.status !== 1) {
+                slot.status = "offline";
+                return Promise.resolve();
+            }
+            return playSlot(slot);
+        }));
+    } finally {
+        pollingCycleRunning = false;
+    }
+}
+
+async function savePollingSettings() {
+    pollingError.value = "";
+    const intervalSeconds = Math.min(3600, Math.max(5, Number(pollingDraft.intervalSeconds) || 30));
+    pollingSettings.intervalSeconds = intervalSeconds;
     pollingSettings.skipOffline = pollingDraft.skipOffline;
-    pollingVisible.value = false;
-    toast.value = `轮询设置已保存，间隔 ${pollingSettings.intervalSeconds} 秒`;
+    if (!pollingDraft.enabled) {
+        stopPolling();
+        pollingVisible.value = false;
+        toast.value = `轮询设置已保存，间隔 ${intervalSeconds} 秒`;
+        return;
+    }
+    pollingSaving.value = true;
+    try {
+        const channels = await loadPlaybackChannels(pollingDraft.skipOffline);
+        if (!channels.length) throw new Error("当前没有可轮询的通道");
+        pollingChannels.value = channels;
+        pollingCursor.value = 0;
+        pollingSettings.enabled = true;
+        await runPollingCycle();
+        schedulePolling();
+        pollingVisible.value = false;
+        toast.value = `轮询已启动，共 ${channels.length} 路通道`;
+    } catch (reason: any) {
+        stopPolling();
+        pollingError.value = reason?.message || "启动轮询失败";
+    } finally {
+        pollingSaving.value = false;
+    }
 }
 
 function statusLabel(slot: PlaybackSlot) {
@@ -215,7 +327,6 @@ function statusLabel(slot: PlaybackSlot) {
         idle: "空闲",
         requesting: "建立中",
         playing: "播放中",
-        stopped: "已停止",
         error: "播放失败",
         offline: "流已离线"
     }[slot.status];
@@ -226,7 +337,6 @@ function statusTone(slot: PlaybackSlot) {
         idle: "idle",
         requesting: "loading",
         playing: "playing",
-        stopped: "stopped",
         error: "error",
         offline: "offline"
     }[slot.status];
@@ -240,6 +350,8 @@ function onPlayerError(slot: PlaybackSlot, message: string) {
 
 onMounted(() => document.addEventListener("fullscreenchange", syncFullscreenState));
 onBeforeUnmount(() => {
+    playAllToken += 1;
+    stopPolling();
     document.removeEventListener("fullscreenchange", syncFullscreenState);
     slots.forEach(slot => { slot.token += 1; });
 });
@@ -262,10 +374,10 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
-                        <button type="button" data-test="play-all" :disabled="!hasStoppedSlots" aria-label="播放全部" title="播放全部" @click="playAll"><Play :size="17" aria-hidden="true" /></button>
+                        <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>
-                        <button type="button" data-test="polling-settings" aria-label="轮询设置" title="轮询设置" @click="openPollingSettings"><Repeat2 :size="17" aria-hidden="true" /></button>
+                        <button type="button" data-test="polling-settings" :class="{ active: pollingSettings.enabled }" :aria-label="pollingSettings.enabled ? '轮询设置，运行中' : '轮询设置'" :title="pollingSettings.enabled ? '轮询运行中，打开设置' : '轮询设置'" @click="openPollingSettings"><Repeat2 :size="17" aria-hidden="true" /></button>
                     </div>
                 </div>
 
@@ -283,7 +395,6 @@ onBeforeUnmount(() => {
                                 <PlayWindow v-if="slot.status === 'playing' && slot.result" :url="resolvePlayUrl(slot.result)" :has-audio="slot.channel.audioEnabled" @error="onPlayerError(slot, $event)" />
                                 <div v-else-if="slot.status === 'requesting'" class="slot-state"><RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
                                 <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong><button class="text-action" type="button" @click.stop="retrySlot(slot)"><RefreshCw :size="14" aria-hidden="true" />重试</button></div>
-                                <div v-else-if="slot.status === 'stopped'" class="slot-state stopped-state"><CircleStop :size="24" aria-hidden="true" /><strong>画面已停止</strong><button class="text-action" type="button" @click.stop="playSlot(slot)"><Play :size="14" aria-hidden="true" />恢复播放</button></div>
                                 <div v-else class="slot-state"><Square :size="24" aria-hidden="true" /><strong>画面暂不可用</strong></div>
                             </div>
                             <footer class="slot-footer"><span>{{ slot.channel.deviceId }}</span><span v-if="slot.result?.node">节点 {{ slot.result.node.name }}</span><span v-if="focusedIndex === slot.index" class="focused-label"><Check :size="13" aria-hidden="true" />已聚焦</span></footer>
@@ -297,11 +408,13 @@ onBeforeUnmount(() => {
                     <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
                         <header><div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div><button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false"><X :size="17" aria-hidden="true" /></button></header>
                         <div class="polling-form">
+                            <label class="checkbox-row polling-enabled-row"><input v-model="pollingDraft.enabled" data-test="polling-enabled" type="checkbox" /><span>启用轮询</span></label>
                             <label for="polling-interval">轮询间隔</label>
                             <div class="interval-input"><input id="polling-interval" v-model.number="pollingDraft.intervalSeconds" data-test="polling-interval" type="number" min="5" max="3600" step="5" /><span>秒</span></div>
                             <label class="checkbox-row"><input v-model="pollingDraft.skipOffline" type="checkbox" /><span>跳过离线通道</span></label>
+                            <p v-if="pollingError" class="polling-error" role="alert">{{ pollingError }}</p>
                         </div>
-                        <footer><button type="button" class="dialog-secondary" @click="pollingVisible = false">取消</button><button type="button" class="dialog-primary" data-test="save-polling" @click="savePollingSettings">保存</button></footer>
+                        <footer><button type="button" class="dialog-secondary" :disabled="pollingSaving" @click="pollingVisible = false">取消</button><button type="button" class="dialog-primary" data-test="save-polling" :disabled="pollingSaving" @click="savePollingSettings">{{ pollingSaving ? "加载中" : "保存" }}</button></footer>
                     </section>
                 </div>
             </main>
@@ -356,6 +469,7 @@ onBeforeUnmount(() => {
 .polling-settings input:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }
 .layout-switcher button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-100); }
 .playback-actions { gap: 4px; }
+.playback-actions button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-200); box-shadow: inset 0 -2px 0 var(--zlm-brand-500); }
 .playback-actions button:disabled { color: var(--zlm-text-4); cursor: not-allowed; opacity: 0.52; }
 .playback-actions button:disabled:hover { background: transparent; border-color: transparent; }
 .toolbar-divider { width: 1px; height: 20px; background: var(--zlm-border); }
@@ -386,7 +500,6 @@ onBeforeUnmount(() => {
 .status-dot { width: 6px; height: 6px; flex: 0 0 auto; background: #64748B; border-radius: 50%; }
 .status-dot.loading { background: #38BDF8; }
 .status-dot.playing { background: #22C55E; box-shadow: 0 0 0 3px rgb(34 197 94 / 12%); }
-.status-dot.stopped { background: #94A3B8; }
 .status-dot.error, .status-dot.offline { background: #EF4444; }
 .slot-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
 .slot-status { color: #94A3B8; font-size: 10px; }
@@ -401,7 +514,6 @@ onBeforeUnmount(() => {
 .slot-state span { color: #94A3B8; font-family: var(--zlm-font-mono); font-size: 10px; }
 .error-state { color: #FCA5A5; }
 .error-state strong { color: #FECACA; }
-.stopped-state { color: #94A3B8; }
 .slot-footer { min-height: 32px; color: #64748B; background: #0F172A; font-size: 10px; }
 .slot-footer > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focused-label { display: inline-flex; align-items: center; gap: 3px; color: #93C5FD; }
@@ -417,8 +529,11 @@ onBeforeUnmount(() => {
 .interval-input input { width: 96px; height: 34px; padding: 0 10px; color: var(--zlm-text-1); background: var(--zlm-bg); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-sm); font: inherit; }
 .interval-input span { color: var(--zlm-text-3); }
 .checkbox-row { display: flex; grid-column: 1 / -1; align-items: center; gap: 8px; cursor: pointer; }
+.polling-enabled-row { padding-bottom: 2px; border-bottom: 1px solid var(--zlm-border); }
 .checkbox-row input { width: 16px; height: 16px; accent-color: var(--zlm-brand-600); }
+.polling-error { grid-column: 1 / -1; margin: -6px 0 0; color: var(--zlm-danger); font-size: 12px; }
 .polling-settings footer button { min-width: 64px; height: 34px; padding: 0 14px; border-radius: var(--zlm-radius-sm); cursor: pointer; font: inherit; font-size: 12px; }
+.polling-settings footer button:disabled { cursor: wait; opacity: 0.6; }
 .dialog-secondary { color: var(--zlm-text-2); background: var(--zlm-card); border: 1px solid var(--zlm-border); }
 .dialog-primary { color: #FFFFFF; background: var(--zlm-brand-600); border: 1px solid var(--zlm-brand-600); }
 .spin { animation: spin 900ms linear infinite; }

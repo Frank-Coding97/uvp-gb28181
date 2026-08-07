@@ -1,7 +1,9 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const api = vi.hoisted(() => ({}));
+const api = vi.hoisted(() => ({
+    listChannels: vi.fn()
+}));
 const playback = vi.hoisted(() => ({
     startPlay: vi.fn(),
     stopPlay: vi.fn()
@@ -46,6 +48,7 @@ import MultiScreenPlayback from "./index.vue";
 
 describe("multi-screen playback page", () => {
     beforeEach(() => {
+        api.listChannels.mockReset();
         playback.startPlay.mockImplementation(async (_deviceId: string, channelId: string) => ({
             code: 0,
             data: {
@@ -113,22 +116,115 @@ describe("multi-screen playback page", () => {
         expect(playback.stopPlay).not.toHaveBeenCalled();
     });
 
-    it("stops and resumes all visible players without releasing shared streams", async () => {
+    it("plays available online channels until the active layout is filled", async () => {
+        const channels = Array.from({ length: 8 }, (_, index) => ({
+            id: index + 11,
+            channelId: `online-channel-${index + 1}`,
+            deviceId: `online-device-${index + 1}`,
+            name: `在线通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
         const wrapper = mount(MultiScreenPlayback);
-        await wrapper.get("[data-test=source-channel-1]").trigger("click");
-        await wrapper.get("[data-test=source-channel-2]").trigger("click");
+
+        await wrapper.get("[data-test=layout-6]").trigger("click");
+        expect(wrapper.get("[data-test=play-all]").attributes("disabled")).toBeUndefined();
+        await wrapper.get("[data-test=play-all]").trigger("click");
         await flushPromises();
 
-        expect(wrapper.findAll(".mock-play-window")).toHaveLength(2);
-        await wrapper.get("[data-test=stop-all]").trigger("click");
-        expect(wrapper.findAll(".mock-play-window")).toHaveLength(0);
-        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门", "西门"]);
-        expect(playback.stopPlay).not.toHaveBeenCalled();
+        expect(api.listChannels).toHaveBeenCalledWith({ status: "online", page: 1, pageSize: 200 });
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(6);
+        expect(wrapper.findAll(".unplayed-cover")).toHaveLength(0);
+        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
+            "在线通道1", "在线通道2", "在线通道3", "在线通道4", "在线通道5", "在线通道6"
+        ]);
+        expect(wrapper.find(".workspace-toast").exists()).toBe(false);
+    });
+
+    it("leaves remaining windows covered when online channels are insufficient", async () => {
+        const channels = Array.from({ length: 2 }, (_, index) => ({
+            id: index + 31,
+            channelId: `limited-channel-${index + 1}`,
+            deviceId: `limited-device-${index + 1}`,
+            name: `有限通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
+        const wrapper = mount(MultiScreenPlayback);
 
         await wrapper.get("[data-test=play-all]").trigger("click");
         await flushPromises();
+
         expect(wrapper.findAll(".mock-play-window")).toHaveLength(2);
-        expect(playback.startPlay).toHaveBeenCalledTimes(2);
+        expect(wrapper.findAll(".unplayed-cover")).toHaveLength(2);
+    });
+
+    it("stops all players by clearing every visible channel back to covers", async () => {
+        const channels = Array.from({ length: 3 }, (_, index) => ({
+            id: index + 21,
+            channelId: `stop-channel-${index + 1}`,
+            deviceId: `stop-device-${index + 1}`,
+            name: `停止通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=play-all]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(3);
+        await wrapper.get("[data-test=stop-all]").trigger("click");
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(0);
+        expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
+        expect(wrapper.findAll(".slot-channel-name")).toHaveLength(0);
+        expect(playback.stopPlay).not.toHaveBeenCalled();
+    });
+
+    it("polls channel groups by the active layout and stops polling with stop all", async () => {
+        vi.useFakeTimers();
+        const channels = Array.from({ length: 5 }, (_, index) => ({
+            id: index + 11,
+            channelId: `poll-channel-${index + 1}`,
+            deviceId: `poll-device-${index + 1}`,
+            name: `轮询通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
+
+        try {
+            const wrapper = mount(MultiScreenPlayback);
+            await wrapper.get("[data-test=polling-settings]").trigger("click");
+            await wrapper.get("[data-test=polling-enabled]").setValue(true);
+            await wrapper.get("[data-test=polling-interval]").setValue("5");
+            await wrapper.get("[data-test=save-polling]").trigger("click");
+            await flushPromises();
+
+            expect(api.listChannels).toHaveBeenCalledWith({ status: "online", page: 1, pageSize: 200 });
+            expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
+                "轮询通道1", "轮询通道2", "轮询通道3", "轮询通道4"
+            ]);
+            expect(wrapper.get("[data-test=polling-settings]").classes()).toContain("active");
+
+            await vi.advanceTimersByTimeAsync(5000);
+            await flushPromises();
+            expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
+                "轮询通道5", "轮询通道1", "轮询通道2", "轮询通道3"
+            ]);
+
+            await wrapper.get("[data-test=stop-all]").trigger("click");
+            const callsAfterStop = playback.startPlay.mock.calls.length;
+            await vi.advanceTimersByTimeAsync(5000);
+            await flushPromises();
+            expect(playback.startPlay).toHaveBeenCalledTimes(callsAfterStop);
+            expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
+            expect(wrapper.get("[data-test=polling-settings]").classes()).not.toContain("active");
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("provides fullscreen and polling controls", async () => {
