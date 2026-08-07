@@ -34,6 +34,30 @@ describe("PlayWindow playback embedding", () => {
         expect(playWindowSource).not.toContain(".play-window.playback :deep(.easyplayer-zoom-controls)");
     });
 
+    it("enables the ZLM WebRTC adapter only when requested by the caller", async () => {
+        const options: Record<string, unknown>[] = [];
+        class FakeEasyPlayer {
+            constructor(_element: HTMLElement, value: Record<string, unknown>) {
+                options.push(value);
+            }
+            on = vi.fn();
+            play = vi.fn();
+            destroy = vi.fn();
+        }
+        (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+        const wrapper = mount(PlayWindow, {
+            props: {
+                url: "webrtc://zlm:18080/index/api/webrtc?app=rtp&stream=stream-1&type=play",
+                zlmWebrtc: true
+            }
+        });
+        await flushPromises();
+
+        expect(options[0]).toMatchObject({ isRtcZLM: true });
+        wrapper.unmount();
+    });
+
     it("forwards EasyPlayer time and loading events", async () => {
         const listeners: Record<string, (value?: unknown) => void> = {};
         class FakeEasyPlayer {

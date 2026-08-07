@@ -214,8 +214,8 @@ const protocolOptions: ProtocolOption[] = [
     { value: "wss-ts", label: "WSS-TS", browserPlayable: false },
     { value: "http-ts", label: "HTTP-TS", browserPlayable: false },
     { value: "https-ts", label: "HTTPS-TS", browserPlayable: false },
-    { value: "webrtc", label: "WebRTC", browserPlayable: false },
-    { value: "webrtcs", label: "WebRTCS", browserPlayable: false },
+    { value: "webrtc", label: "WebRTC", browserPlayable: true, shortcut: true },
+    { value: "webrtcs", label: "WebRTCS", browserPlayable: true },
     { value: "rtmp", label: "RTMP", browserPlayable: false },
     { value: "rtmps", label: "RTMPS", browserPlayable: false },
     { value: "rtsp", label: "RTSP", browserPlayable: false },
@@ -228,7 +228,15 @@ const availableProtocolOptions = computed(() =>
 const shortcutProtocolOptions = computed(() => protocolOptions.filter((option) => option.shortcut));
 const currentProtocolOption = computed(() => protocolOptions.find((option) => option.value === protocol.value));
 
-const currentProtocolUrl = computed(() => (protocol.value ? protocolUrls.value[protocol.value] || "" : ""));
+function toEasyPlayerWebRtcUrl(url: string) {
+    return url.replace(/^https?:\/\//i, "webrtc://");
+}
+const currentProtocolUrl = computed(() => {
+    if (!protocol.value) return "";
+    const url = protocolUrls.value[protocol.value] || "";
+    return protocol.value === "webrtc" || protocol.value === "webrtcs" ? toEasyPlayerWebRtcUrl(url) : url;
+});
+const currentProtocolUsesZlmWebRtc = computed(() => protocol.value === "webrtc" || protocol.value === "webrtcs");
 function isBrowserPlayable(proto: StreamProtocol) {
     return protocolOptions.find((option) => option.value === proto)?.browserPlayable === true;
 }
@@ -2810,7 +2818,11 @@ onBeforeUnmount(() => {
                             <span class="drag-zoom-hint">拖动选择 3D {{ dragZoomAction === 'drag_zoom_out' ? '缩小' : '放大' }}区域</span>
                         </div>
                         <template v-if="phase === 'playing' || phase === 'paused'">
-                            <PlayWindow :url="currentProtocolUrl" @error="handlePlayerError" />
+                            <PlayWindow
+                                :url="currentProtocolUrl"
+                                :zlm-webrtc="currentProtocolUsesZlmWebRtc"
+                                @error="handlePlayerError"
+                            />
                             <div v-if="phase === 'paused'" class="paused-mask">
                                 <Pause :size="42" /><span>已暂停</span>
                             </div>
@@ -2861,6 +2873,15 @@ onBeforeUnmount(() => {
                                     <div class="protocol-option">
                                         <strong>{{ opt.label }}:</strong>
                                         <span class="protocol-url" :title="protocolUrls[opt.value] || ''">{{ protocolUrls[opt.value] }}</span>
+                                        <button
+                                            type="button"
+                                            class="protocol-copy-btn"
+                                            :title="`复制 ${opt.label} 地址`"
+                                            @mousedown.stop.prevent
+                                            @click.stop="copyProtocolUrl(opt.value)"
+                                        >
+                                            <Copy :size="13" />
+                                        </button>
                                     </div>
                                 </a-option>
                             </a-select>
@@ -2877,23 +2898,6 @@ onBeforeUnmount(() => {
                                 {{ opt.label }}
                             </button>
                         </div>
-                        <a-dropdown trigger="click" position="br">
-                            <button class="copy-url" title="复制协议地址">
-                                <Copy :size="13" />
-                            </button>
-                            <template #content>
-                                <a-doption
-                                    v-for="opt in availableProtocolOptions"
-                                    :key="opt.value"
-                                    @click="copyProtocolUrl(opt.value)"
-                                >
-                                    <span class="copy-option">
-                                        <strong>{{ opt.label }}</strong>
-                                        <span>{{ protocolUrls[opt.value] }}</span>
-                                    </span>
-                                </a-doption>
-                            </template>
-                        </a-dropdown>
                     </div>
 
                 </div>
@@ -4408,14 +4412,6 @@ onBeforeUnmount(() => {
 }
 .proto-btn:hover { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent); }
 .proto-btn.active { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 42%, transparent); }
-.copy-url {
-    display: inline-grid; place-items: center; width: 28px; height: 28px;
-    color: rgba(219, 234, 254, 0.68); background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 6px;
-    cursor: pointer; transition: all 0.15s ease;
-}
-.copy-url:hover { color: var(--uvp-brand); background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 32%, transparent); }
-
 /* 流信息(协议切换器内) */
 .stream-info {
     display: flex; align-items: center; gap: 8px;
@@ -4425,12 +4421,15 @@ onBeforeUnmount(() => {
     font-size: 11px;
 }
 
-.protocol-option { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; min-width: min(600px, calc(100vw - 80px)); max-width: min(600px, calc(100vw - 80px)); gap: 8px; padding: 2px 0; }
+.protocol-option { display: grid; grid-template-columns: max-content minmax(0, 1fr) 24px; align-items: center; min-width: min(600px, calc(100vw - 80px)); max-width: min(600px, calc(100vw - 80px)); gap: 8px; padding: 2px 0; }
 .protocol-option strong { min-width: 0; font-size: 11px; font-weight: 500; line-height: 1.4; }
 .protocol-url { overflow-wrap: anywhere; color: var(--uvp-text-secondary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 1.4; }
-.copy-option { display: grid; max-width: min(360px, calc(100vw - 48px)); gap: 2px; }
-.copy-option strong { font-size: 11px; font-weight: 500; }
-.copy-option span { overflow-wrap: anywhere; color: var(--uvp-text-tertiary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; line-height: 1.35; }
+.protocol-copy-btn {
+    display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0;
+    color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 5px;
+    cursor: pointer; transition: color 0.15s ease, background 0.15s ease;
+}
+.protocol-copy-btn:hover { color: var(--uvp-brand); background: var(--uvp-brand-soft); }
 
 /* 播放器下方的运行信息面板 */
 .stream-info-bar {

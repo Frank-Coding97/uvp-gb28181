@@ -7,6 +7,8 @@ interface Props {
     /** 录像回放页嵌入模式：填满父容器，由外层提供业务控制栏。 */
     playback?: boolean;
     hasAudio?: boolean;
+    /** 启用 EasyPlayer 的 ZLMediaKit WebRTC 信令适配。 */
+    zlmWebrtc?: boolean;
 }
 
 const props = defineProps<Props>();
@@ -68,6 +70,7 @@ async function play(u: string) {
             hasAudio: props.hasAudio ?? true,
             isMute: true,         // 默认静音(浏览器自动播放策略友好)
             stretch: true,
+            isRtcZLM: props.zlmWebrtc ?? false,
             // 解码模式优先级:MSE > WCS > WASM。打开 WASM 兜底,确保 G711/H265 也能放
             MSE: true,
             WCS: true,

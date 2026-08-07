@@ -133,9 +133,9 @@ const api = vi.hoisted(() => {
 vi.mock("@/api/gb28181", () => api);
 vi.mock("./PlayWindow.vue", () => ({
   default: {
-    props: ["url"],
+    props: ["url", "zlmWebrtc"],
     emits: ["error"],
-    template: "<button class='play-window' data-testid='play-window' :data-url='url' @click=\"$emit('error', '拉流超时')\" />"
+    template: "<button class='play-window' data-testid='play-window' :data-url='url' :data-zlm-webrtc='String(Boolean(zlmWebrtc))' @click=\"$emit('error', '拉流超时')\" />"
   }
 }));
 
@@ -320,7 +320,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe("ws://zlm/rtp/mixed.live.flv");
-    expect(wrapper.findAll(".proto-btn").map((button) => button.text())).toEqual(["WS-FLV", "HTTP-FLV", "HLS"]);
+    expect(wrapper.findAll(".proto-btn").map((button) => button.text())).toEqual(["WS-FLV", "HTTP-FLV", "HLS", "WebRTC"]);
+    expect(wrapper.findAll(".proto-btn").find((button) => button.text() === "WebRTC")?.attributes("disabled")).toBeDefined();
 
     await wrapper.get(".protocol-switcher select").trigger("click");
     await flushPromises();
@@ -331,6 +332,10 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(dropdownText).not.toContain("可播放");
     expect(dropdownText).not.toContain("仅复制");
     expect(dropdownText).not.toContain("延迟最低,适合实时监控");
+    expect(wrapper.find(".copy-url").exists()).toBe(false);
+    const protocolRows = wrapper.findAll(".protocol-option");
+    expect(protocolRows).toHaveLength(7);
+    expect(protocolRows.every((row) => row.element.lastElementChild?.classList.contains("protocol-copy-btn"))).toBe(true);
     expect(wrapper.findAll(".protocol-option strong").map((label) => label.text())).toEqual([
       "WS-FLV:",
       "WSS-FLV:",
@@ -340,6 +345,54 @@ describe("PlayConsoleLinked 双区联动", () => {
       "HTTPS-HLS:",
       "RTSP:"
     ]);
+    wrapper.unmount();
+  });
+
+  it("在播放弹窗中手动切换并包装 ZLM WebRTC 地址", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-webrtc",
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: {
+          wsFlv: "ws://zlm/rtp/stream-webrtc.live.flv",
+          webrtc: "http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play"
+        },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const player = wrapper.get("[data-testid='play-window']");
+    expect(player.attributes("data-url")).toBe("ws://zlm/rtp/stream-webrtc.live.flv");
+    expect(player.attributes("data-zlm-webrtc")).toBe("false");
+    expect(wrapper.findAll(".protocol-option strong").map((label) => label.text())).toContain("WebRTC:");
+    expect(wrapper.findAll(".proto-btn").map((button) => button.text())).toContain("WebRTC");
+
+    const webRtcOption = wrapper.findAll(".protocol-option").find((option) => option.text().includes("WebRTC:"));
+    await webRtcOption!.get(".protocol-copy-btn").trigger("click");
+    await flushPromises();
+    expect(writeText).toHaveBeenCalledWith(
+      "http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play"
+    );
+    expect(player.attributes("data-url")).toBe("ws://zlm/rtp/stream-webrtc.live.flv");
+
+    const vm = wrapper.vm as unknown as { switchProtocol: (proto: "webrtc") => void };
+    vm.switchProtocol("webrtc");
+    await flushPromises();
+
+    expect(player.attributes("data-url")).toBe(
+      "webrtc://zlm:18080/index/api/webrtc?app=rtp&stream=stream-webrtc&type=play"
+    );
+    expect(player.attributes("data-zlm-webrtc")).toBe("true");
     wrapper.unmount();
   });
 
