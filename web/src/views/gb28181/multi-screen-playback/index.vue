@@ -527,10 +527,11 @@ onBeforeUnmount(() => {
 .status-dot.error, .status-dot.offline { background: #EF4444; }
 .slot-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
 .slot-status { color: #94A3B8; font-size: 10px; }
-.slot-actions { gap: 2px; }
-.slot-action { width: 30px; height: 30px; color: #CBD5E1; }
-.slot-action:hover { color: #FFFFFF; background: #1E293B; border-color: #334155; }
-.slot-action.danger:hover { color: #FCA5A5; }
+.slot-actions { flex: 0 0 auto; gap: 4px; }
+.slot-action { display: inline-grid; width: 28px; height: 28px; padding: 0; color: #94A3B8; background: transparent; border: 1px solid transparent; border-radius: 5px; cursor: pointer; transition: color var(--zlm-dur-fast) var(--zlm-ease-out), background-color var(--zlm-dur-fast) var(--zlm-ease-out), border-color var(--zlm-dur-fast) var(--zlm-ease-out); place-items: center; }
+.slot-action:hover { color: #F8FAFC; background: rgb(51 65 85 / 68%); border-color: rgb(100 116 139 / 36%); }
+.slot-action.danger:hover { color: #FCA5A5; background: rgb(127 29 29 / 28%); border-color: rgb(248 113 113 / 24%); }
+.slot-action:focus-visible { outline: 2px solid #60A5FA; outline-offset: 1px; }
 .slot-body { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; align-items: center; justify-content: center; }
 .slot-body :deep(.play-window) { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
 .ptz-direction-indicator { --ptz-direction-rotation: 0deg; position: absolute; top: 50%; left: 50%; z-index: 5; display: grid; width: clamp(72px, 12%, 104px); aspect-ratio: 1; transform: translate(-50%, -50%) rotate(var(--ptz-direction-rotation)); pointer-events: none; place-items: center; }
