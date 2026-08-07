@@ -90,9 +90,17 @@ async function openDetail(scheme: PlaybackSchemeSummary) {
 }
 
 async function applyScheme(scheme: PlaybackSchemeSummary | PlaybackSchemeDetail) {
-    const loaded = "slots" in scheme ? scheme : responseData<PlaybackSchemeDetail>(await getPlaybackScheme(scheme.id), "加载方案详情失败");
-    detail.value = loaded;
-    emit("apply", loaded);
+    detailLoading.value = true;
+    error.value = "";
+    try {
+        const loaded = "slots" in scheme ? scheme : responseData<PlaybackSchemeDetail>(await getPlaybackScheme(scheme.id), "加载方案详情失败");
+        detail.value = loaded;
+        emit("apply", loaded);
+    } catch (reason: any) {
+        error.value = reason?.message || "加载方案详情失败";
+    } finally {
+        detailLoading.value = false;
+    }
 }
 
 function beginSave() {

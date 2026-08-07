@@ -106,6 +106,81 @@ describe("multi-screen playback page", () => {
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门"]);
     });
 
+    it("applies saved slot positions, reuses an existing stream, and preserves offline slots", async () => {
+        playback.listPlaybackSchemes.mockResolvedValue({ code: 0, data: { list: [{ id: 9, name: "九宫格", layoutSize: 9, slotCount: 2, updatedAt: "2026-08-07T15:00:00Z" }], total: 1, page: 1, pageSize: 10 } });
+        playback.getPlaybackScheme.mockResolvedValue({
+            code: 0,
+            data: {
+                id: 9, name: "九宫格", layoutSize: 9, slotCount: 2, updatedAt: "2026-08-07T15:00:00Z",
+                slots: [
+                    { id: 1, slotIndex: 0, deviceCode: "device-1", channelCode: "channel-1", deviceName: "园区", channelName: "东门", availability: "available", channelRecordId: 1, channelStatus: 1, audioEnabled: false },
+                    { id: 2, slotIndex: 8, deviceCode: "device-2", channelCode: "channel-2", deviceName: "园区", channelName: "西门", availability: "offline", channelRecordId: 2, channelStatus: 0, audioEnabled: false }
+                ]
+            }
+        });
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+        expect(playback.startPlay).toHaveBeenCalledTimes(1);
+
+        await wrapper.get("[data-test=playback-schemes]").trigger("click");
+        await flushPromises();
+        await wrapper.get("[data-test=apply-scheme-9]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(9);
+        expect(playback.startPlay).toHaveBeenCalledTimes(1);
+        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门", "西门"]);
+        expect(wrapper.findAll("[data-test=screen-slot]")[8].text()).toContain("离线");
+    });
+
+    it("isolates playback failures while applying a scheme", async () => {
+        playback.listPlaybackSchemes.mockResolvedValue({ code: 0, data: { list: [{ id: 10, name: "双通道", layoutSize: 4, slotCount: 2, updatedAt: "2026-08-07T15:00:00Z" }], total: 1, page: 1, pageSize: 10 } });
+        playback.getPlaybackScheme.mockResolvedValue({
+            code: 0,
+            data: {
+                id: 10, name: "双通道", layoutSize: 4, slotCount: 2, updatedAt: "2026-08-07T15:00:00Z",
+                slots: [
+                    { id: 1, slotIndex: 0, deviceCode: "device-a", channelCode: "channel-a", deviceName: "A", channelName: "通道A", availability: "available", channelRecordId: 21, channelStatus: 1, audioEnabled: false },
+                    { id: 2, slotIndex: 2, deviceCode: "device-b", channelCode: "channel-b", deviceName: "B", channelName: "通道B", availability: "available", channelRecordId: 22, channelStatus: 1, audioEnabled: false }
+                ]
+            }
+        });
+        playback.startPlay.mockImplementation(async (_deviceId: string, channelId: string) => {
+            if (channelId === "channel-b") throw new Error("媒体节点不可用");
+            return { code: 0, data: { streamId: "stream-a", ssrc: "1", app: "rtp", urls: { wsFlv: "ws://zlm/a.flv" }, wsflvUrl: "ws://zlm/a.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 } };
+        });
+        const wrapper = mount(MultiScreenPlayback);
+
+        await wrapper.get("[data-test=playback-schemes]").trigger("click");
+        await flushPromises();
+        await wrapper.get("[data-test=apply-scheme-10]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(1);
+        expect(wrapper.text()).toContain("媒体节点不可用");
+        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["通道A", "通道B"]);
+    });
+
+    it("preserves the workspace when scheme details cannot be loaded", async () => {
+        playback.listPlaybackSchemes.mockResolvedValue({ code: 0, data: { list: [{ id: 11, name: "不可读取", layoutSize: 9, slotCount: 1, updatedAt: "2026-08-07T15:00:00Z" }], total: 1, page: 1, pageSize: 10 } });
+        playback.getPlaybackScheme.mockRejectedValue(new Error("方案详情读取失败"));
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+        const callsBeforeApply = playback.startPlay.mock.calls.length;
+
+        await wrapper.get("[data-test=playback-schemes]").trigger("click");
+        await flushPromises();
+        await wrapper.get("[data-test=apply-scheme-11]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(4);
+        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门"]);
+        expect(playback.startPlay).toHaveBeenCalledTimes(callsBeforeApply);
+        expect(wrapper.text()).toContain("方案详情读取失败");
+    });
+
     it.each([
         [1, "layout-1"],
         [4, "layout-4"],

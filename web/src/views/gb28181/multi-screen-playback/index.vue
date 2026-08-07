@@ -13,7 +13,7 @@ import {
     Square,
     X
 } from "lucide-vue-next";
-import { startPlay, type PlayResult } from "@/api/gb28181";
+import { startPlay, type PlaybackSchemeDetail, type PlaybackSchemeSlot, type PlayResult } from "@/api/gb28181";
 import PlayWindow from "../components/PlayWindow.vue";
 import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
@@ -109,6 +109,43 @@ function resetSlot(slot: PlaybackSlot) {
     slot.status = "idle";
     slot.result = null;
     slot.error = "";
+}
+
+function schemeChannel(slot: PlaybackSchemeSlot): ChannelVO {
+    return {
+        id: slot.channelRecordId ?? -(slot.id || slot.slotIndex + 1),
+        channelId: slot.channelCode,
+        deviceId: slot.deviceCode,
+        name: slot.channelName || slot.channelCode,
+        alias: "",
+        manufacturer: "",
+        model: "",
+        owner: "",
+        civilCode: "",
+        parentId: "",
+        ptzType: 0,
+        longitude: 0,
+        latitude: 0,
+        status: slot.channelStatus ?? 0,
+        streamId: "",
+        onDemandLive: true,
+        streamTransport: "",
+        audioEnabled: slot.audioEnabled,
+        cloudRecordingEnabled: false,
+        cloudRecordingState: "",
+        cloudRecordingError: "",
+        createdAt: "",
+        updatedAt: ""
+    };
+}
+
+function schemeUnavailableMessage(availability: PlaybackSchemeSlot["availability"]) {
+    return {
+        available: "",
+        offline: "通道离线",
+        missing: "通道不存在",
+        forbidden: "无权访问这个通道"
+    }[availability] || "画面暂不可用";
 }
 
 async function playSlot(target: PlaybackSlot) {
@@ -230,6 +267,55 @@ async function playAll() {
     } finally {
         playAllLoading.value = false;
     }
+}
+
+async function applyPlaybackScheme(scheme: PlaybackSchemeDetail) {
+    if (!layoutOptions.some(option => option.value === scheme.layoutSize)) {
+        toast.value = "方案布局无效，当前画面未改变";
+        return;
+    }
+    const previousPlaying = new Map(slots.flatMap(slot =>
+        slot.channel && slot.status === "playing" && slot.result
+            ? [[`${slot.channel.deviceId}\x00${slot.channel.channelId}`, {
+                channel: slot.channel, status: slot.status, result: slot.result, error: slot.error
+            }] as const]
+            : []
+    ));
+    playAllToken += 1;
+    stopPolling();
+    pollingVisible.value = false;
+    layout.value = scheme.layoutSize;
+    slots.forEach(resetSlot);
+    focusedIndex.value = null;
+    const pending: PlaybackSlot[] = [];
+    [...scheme.slots].sort((left, right) => left.slotIndex - right.slotIndex).forEach(saved => {
+        if (saved.slotIndex < 0 || saved.slotIndex >= scheme.layoutSize) return;
+        const target = slots[saved.slotIndex];
+        const channel = schemeChannel(saved);
+        target.channel = channel;
+        if (focusedIndex.value == null) focusedIndex.value = target.index;
+        if (saved.availability !== "available") {
+            target.status = "offline";
+            target.error = schemeUnavailableMessage(saved.availability);
+            return;
+        }
+        const reused = previousPlaying.get(`${saved.deviceCode}\x00${saved.channelCode}`);
+        if (reused) {
+            target.channel = reused.channel;
+            target.status = reused.status;
+            target.result = reused.result;
+            target.error = reused.error;
+            return;
+        }
+        pending.push(target);
+    });
+    schemeVisible.value = false;
+    await Promise.all(pending.map(playSlot));
+    const applied = slots.slice(0, scheme.layoutSize).filter(slot => slot.channel);
+    const playing = applied.filter(slot => slot.status === "playing").length;
+    const unavailable = applied.filter(slot => slot.status === "offline").length;
+    const failed = applied.filter(slot => slot.status === "error").length;
+    toast.value = `已应用“${scheme.name}”：${playing} 个播放中${unavailable ? `，${unavailable} 个不可用` : ""}${failed ? `，${failed} 个失败` : ""}`;
 }
 
 async function toggleFullscreen() {
@@ -421,6 +507,7 @@ onBeforeUnmount(() => {
                                 <PlayWindow v-if="slot.status === 'playing' && slot.result" :url="resolvePlayUrl(slot.result)" :has-audio="slot.channel.audioEnabled" @error="onPlayerError(slot, $event)" />
                                 <div v-else-if="slot.status === 'requesting'" class="slot-state"><RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
                                 <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong><button class="text-action" type="button" @click.stop="retrySlot(slot)"><RefreshCw :size="14" aria-hidden="true" />重试</button></div>
+                                <div v-else-if="slot.status === 'offline'" class="slot-state offline-state" role="status"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error || "通道离线" }}</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
                                 <div v-else class="slot-state"><Square :size="24" aria-hidden="true" /><strong>画面暂不可用</strong></div>
                                 <div v-if="slot.status === 'playing' && ptzMotion?.channelId === slot.channel.id" class="ptz-direction-indicator" data-test="ptz-direction-indicator" :data-direction="ptzMotion.direction" role="status" :aria-label="`云台正在向${ptzMotion.direction}移动`">
                                     <span class="ptz-direction-stack">
@@ -450,7 +537,7 @@ onBeforeUnmount(() => {
                         <footer><button type="button" class="dialog-secondary" :disabled="pollingSaving" @click="pollingVisible = false">取消</button><button type="button" class="dialog-primary" data-test="save-polling" :disabled="pollingSaving" @click="savePollingSettings">{{ pollingSaving ? "加载中" : "保存" }}</button></footer>
                     </section>
                 </div>
-                <PlaybackSchemePanel v-model:visible="schemeVisible" :current-layout="layout" :current-slots="currentSchemeSlots" />
+                <PlaybackSchemePanel v-model:visible="schemeVisible" :current-layout="layout" :current-slots="currentSchemeSlots" @apply="applyPlaybackScheme" />
             </main>
         </div>
         <PlayConsoleLinked v-model:visible="consoleVisible" :channel="consoleChannel" />
@@ -566,6 +653,8 @@ onBeforeUnmount(() => {
 .slot-state span { color: #94A3B8; font-family: var(--zlm-font-mono); font-size: 10px; }
 .error-state { color: #FCA5A5; }
 .error-state strong { color: #FECACA; }
+.offline-state { color: #FBBF24; }
+.offline-state strong { color: #FDE68A; }
 .slot-footer { min-height: 32px; color: #64748B; background: #0F172A; font-size: 10px; }
 .slot-footer > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focused-label { display: inline-flex; align-items: center; gap: 3px; color: #93C5FD; }
