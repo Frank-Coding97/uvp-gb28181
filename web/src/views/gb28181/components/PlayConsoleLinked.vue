@@ -168,7 +168,6 @@ type ProtocolURLMap = Record<StreamProtocol, string | null>;
 type ProtocolOption = {
     value: StreamProtocol;
     label: string;
-    desc: string;
     browserPlayable: boolean;
     shortcut?: boolean;
 };
@@ -201,26 +200,26 @@ const protocolUrls = computed<ProtocolURLMap>(() => {
 });
 
 const protocolOptions: ProtocolOption[] = [
-    { value: "ws-flv", label: "WS-FLV", desc: "延迟最低,适合实时监控", browserPlayable: true, shortcut: true },
-    { value: "http-flv", label: "HTTP-FLV", desc: "兼容性好,延迟较低", browserPlayable: true, shortcut: true },
-    { value: "hls", label: "HLS", desc: "兼容性最佳,延迟较高", browserPlayable: true, shortcut: true },
-    { value: "wss-flv", label: "WSS-FLV", desc: "安全实时播放", browserPlayable: true },
-    { value: "https-flv", label: "HTTPS-FLV", desc: "安全兼容播放", browserPlayable: true },
-    { value: "https-hls", label: "HTTPS-HLS", desc: "安全 HLS 播放", browserPlayable: true },
-    { value: "ws-fmp4", label: "WS-fMP4", desc: "低延迟 fMP4 流", browserPlayable: false },
-    { value: "http-fmp4", label: "HTTP-fMP4", desc: "fMP4 流地址", browserPlayable: false },
-    { value: "wss-fmp4", label: "WSS-fMP4", desc: "安全 fMP4 流地址", browserPlayable: false },
-    { value: "https-fmp4", label: "HTTPS-fMP4", desc: "安全 fMP4 流地址", browserPlayable: false },
-    { value: "ws-ts", label: "WS-TS", desc: "低延迟 TS 流地址", browserPlayable: false },
-    { value: "http-ts", label: "HTTP-TS", desc: "TS 流地址", browserPlayable: false },
-    { value: "wss-ts", label: "WSS-TS", desc: "安全 TS 流地址", browserPlayable: false },
-    { value: "https-ts", label: "HTTPS-TS", desc: "安全 TS 流地址", browserPlayable: false },
-    { value: "webrtc", label: "WebRTC", desc: "超低延迟,需 HTTPS", browserPlayable: false },
-    { value: "webrtcs", label: "WebRTCS", desc: "安全 WebRTC 地址", browserPlayable: false },
-    { value: "rtmp", label: "RTMP", desc: "传统直播协议", browserPlayable: false },
-    { value: "rtmps", label: "RTMPS", desc: "安全 RTMP 地址", browserPlayable: false },
-    { value: "rtsp", label: "RTSP", desc: "监控设备标准", browserPlayable: false },
-    { value: "rtsps", label: "RTSPS", desc: "安全 RTSP 地址", browserPlayable: false },
+    { value: "ws-flv", label: "WS-FLV", browserPlayable: true, shortcut: true },
+    { value: "wss-flv", label: "WSS-FLV", browserPlayable: true },
+    { value: "http-flv", label: "HTTP-FLV", browserPlayable: true, shortcut: true },
+    { value: "https-flv", label: "HTTPS-FLV", browserPlayable: true },
+    { value: "hls", label: "HLS", browserPlayable: true, shortcut: true },
+    { value: "https-hls", label: "HTTPS-HLS", browserPlayable: true },
+    { value: "ws-fmp4", label: "WS-fMP4", browserPlayable: false },
+    { value: "wss-fmp4", label: "WSS-fMP4", browserPlayable: false },
+    { value: "http-fmp4", label: "HTTP-fMP4", browserPlayable: false },
+    { value: "https-fmp4", label: "HTTPS-fMP4", browserPlayable: false },
+    { value: "ws-ts", label: "WS-TS", browserPlayable: false },
+    { value: "wss-ts", label: "WSS-TS", browserPlayable: false },
+    { value: "http-ts", label: "HTTP-TS", browserPlayable: false },
+    { value: "https-ts", label: "HTTPS-TS", browserPlayable: false },
+    { value: "webrtc", label: "WebRTC", browserPlayable: false },
+    { value: "webrtcs", label: "WebRTCS", browserPlayable: false },
+    { value: "rtmp", label: "RTMP", browserPlayable: false },
+    { value: "rtmps", label: "RTMPS", browserPlayable: false },
+    { value: "rtsp", label: "RTSP", browserPlayable: false },
+    { value: "rtsps", label: "RTSPS", browserPlayable: false },
 ];
 
 const availableProtocolOptions = computed(() =>
@@ -2849,6 +2848,7 @@ onBeforeUnmount(() => {
                                 :style="{ width: '160px' }"
                                 :placeholder="currentProtocolOption?.label || '无可播放地址'"
                                 size="small"
+                                :trigger-props="{ autoFitPopupWidth: false }"
                                 @change="switchProtocol"
                             >
                                 <a-option
@@ -2859,11 +2859,7 @@ onBeforeUnmount(() => {
                                     :disabled="!opt.browserPlayable"
                                 >
                                     <div class="protocol-option">
-                                        <div class="protocol-option-head">
-                                            <strong>{{ opt.label }}</strong>
-                                            <span class="protocol-availability">{{ opt.browserPlayable ? "可播放" : "仅复制" }}</span>
-                                        </div>
-                                        <span class="desc">{{ opt.desc }}</span>
+                                        <strong>{{ opt.label }}:</strong>
                                         <span class="protocol-url" :title="protocolUrls[opt.value] || ''">{{ protocolUrls[opt.value] }}</span>
                                     </div>
                                 </a-option>
@@ -4429,12 +4425,9 @@ onBeforeUnmount(() => {
     font-size: 11px;
 }
 
-.protocol-option { display: grid; min-width: min(360px, calc(100vw - 48px)); max-width: 360px; gap: 2px; }
-.protocol-option-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.protocol-option strong { min-width: 0; font-size: 12px; font-weight: 500; }
-.protocol-availability { flex: 0 0 auto; color: var(--uvp-text-tertiary); font-size: 10px; }
-.protocol-option .desc { color: var(--uvp-text-tertiary); font-size: 10.5px; }
-.protocol-url { overflow-wrap: anywhere; color: var(--uvp-text-secondary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; line-height: 1.35; }
+.protocol-option { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; min-width: min(600px, calc(100vw - 80px)); max-width: min(600px, calc(100vw - 80px)); gap: 8px; padding: 2px 0; }
+.protocol-option strong { min-width: 0; font-size: 11px; font-weight: 500; line-height: 1.4; }
+.protocol-url { overflow-wrap: anywhere; color: var(--uvp-text-secondary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 1.4; }
 .copy-option { display: grid; max-width: min(360px, calc(100vw - 48px)); gap: 2px; }
 .copy-option strong { font-size: 11px; font-weight: 500; }
 .copy-option span { overflow-wrap: anywhere; color: var(--uvp-text-tertiary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 10px; line-height: 1.35; }

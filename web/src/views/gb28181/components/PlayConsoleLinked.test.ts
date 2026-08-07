@@ -304,6 +304,9 @@ describe("PlayConsoleLinked 双区联动", () => {
         urls: {
           wsFlv: "ws://zlm/rtp/mixed.live.flv",
           wssFlv: "wss://zlm/rtp/mixed.live.flv",
+          httpFlv: "http://zlm/rtp/mixed.live.flv",
+          httpsFlv: "https://zlm/rtp/mixed.live.flv",
+          hls: "http://zlm/rtp/mixed/hls.m3u8",
           httpsHls: "https://zlm/rtp/mixed/hls.m3u8",
           rtsp: "rtsp://zlm:10554/rtp/mixed"
         },
@@ -325,6 +328,18 @@ describe("PlayConsoleLinked 双区联动", () => {
     expect(dropdownText).toContain("wss://zlm/rtp/mixed.live.flv");
     expect(dropdownText).toContain("rtsp://zlm:10554/rtp/mixed");
     expect(dropdownText).not.toContain("http://legacy/rtp/mixed.live.flv");
+    expect(dropdownText).not.toContain("可播放");
+    expect(dropdownText).not.toContain("仅复制");
+    expect(dropdownText).not.toContain("延迟最低,适合实时监控");
+    expect(wrapper.findAll(".protocol-option strong").map((label) => label.text())).toEqual([
+      "WS-FLV:",
+      "WSS-FLV:",
+      "HTTP-FLV:",
+      "HTTPS-FLV:",
+      "HLS:",
+      "HTTPS-HLS:",
+      "RTSP:"
+    ]);
     wrapper.unmount();
   });
 
