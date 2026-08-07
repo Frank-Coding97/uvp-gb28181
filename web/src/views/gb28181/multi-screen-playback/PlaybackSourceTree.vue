@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { Camera, Cctv, ChevronRight, Folder, MapPin, RefreshCw, Search, X } from "lucide-vue-next";
+import { Camera, Cctv, ChevronRight, Folder, ListFilter, MapPin, RefreshCw, Search, X } from "lucide-vue-next";
 import {
     listChannels,
     listDevices,
@@ -54,7 +54,9 @@ const devicePageSize = 50;
 const deviceListTotal = ref(0);
 const deviceKeyword = ref("");
 const appliedDeviceKeyword = ref("");
-const deviceTotal = computed(() => onlineDeviceTotal.value + offlineDeviceTotal.value);
+const deviceStatusFilter = ref<"" | "online" | "offline">("");
+const filtersOpen = ref(false);
+const hasDeviceFilters = computed(() => Boolean(appliedDeviceKeyword.value || deviceStatusFilter.value));
 let refreshTimer: number | null = null;
 let deviceSearchTimer: number | null = null;
 let refreshInFlight = false;
@@ -156,7 +158,8 @@ function responseList<T>(response: any): T[] {
 
 function deviceListParams(page = devicePage.value) {
     const q = appliedDeviceKeyword.value || undefined;
-    return { ...(q ? { q } : {}), page, pageSize: devicePageSize };
+    const status = deviceStatusFilter.value || undefined;
+    return { ...(q ? { q } : {}), ...(status ? { status } : {}), page, pageSize: devicePageSize };
 }
 
 async function updateDeviceTotals(response: any) {
@@ -315,6 +318,13 @@ async function clearDeviceSearch() {
     await applyDeviceSearch();
 }
 
+async function changeDeviceStatus(status: "" | "online" | "offline") {
+    if (status === deviceStatusFilter.value) return;
+    deviceStatusFilter.value = status;
+    devicePage.value = 1;
+    await loadRoot("devices", true);
+}
+
 async function refresh(silent = false) {
     if (refreshInFlight) return;
     refreshInFlight = true;
@@ -356,24 +366,44 @@ onBeforeUnmount(() => {
 <template>
     <aside class="playback-source-tree" aria-label="设备树">
         <header class="tree-head">
-            <div class="tree-summary" :aria-label="deviceStatsLoaded ? `设备状态：共 ${deviceTotal} 台，在线 ${onlineDeviceTotal} 台，离线 ${offlineDeviceTotal} 台` : '设备状态加载中'">
+            <div class="tree-summary" :aria-label="deviceStatsLoaded ? `设备状态：在线 ${onlineDeviceTotal} 台，离线 ${offlineDeviceTotal} 台` : '设备状态加载中'">
                 <template v-if="deviceStatsLoaded">
-                    <span class="device-total">共 {{ deviceTotal }} 台</span>
                     <span><i class="summary-dot online" aria-hidden="true" />在线 {{ onlineDeviceTotal }}</span>
                     <span><i class="summary-dot offline" aria-hidden="true" />离线 {{ offlineDeviceTotal }}</span>
                 </template>
             </div>
-            <button class="tree-refresh" type="button" aria-label="刷新设备树" title="刷新设备树" @click="refresh()"><RefreshCw :size="14" :class="{ spin: loading }" /></button>
+            <div class="tree-head-actions">
+                <button
+                    v-if="view === 'devices'"
+                    class="tree-icon-button tree-filter-toggle"
+                    :class="{ active: hasDeviceFilters }"
+                    data-test="device-filter-toggle"
+                    type="button"
+                    :aria-label="hasDeviceFilters ? '筛选设备（已启用）' : '筛选设备'"
+                    :title="hasDeviceFilters ? '筛选设备（已启用）' : '筛选设备'"
+                    :aria-expanded="filtersOpen"
+                    aria-controls="device-tree-filters"
+                    @click="filtersOpen = !filtersOpen"
+                ><ListFilter :size="14" /></button>
+                <button class="tree-icon-button tree-refresh" type="button" aria-label="刷新设备树" title="刷新设备树" @click="refresh()"><RefreshCw :size="14" :class="{ spin: loading }" /></button>
+            </div>
         </header>
 
         <div class="tree-views" role="tablist" aria-label="设备树视图">
             <button v-for="option in viewOptions" :key="option.value" :data-test="`source-view-${option.value}`" type="button" role="tab" :aria-selected="view === option.value" :class="{ active: view === option.value }" @click="changeView(option.value)">{{ option.label }}</button>
         </div>
 
-        <div v-if="view === 'devices'" class="tree-search">
-            <Search :size="13" aria-hidden="true" />
-            <input v-model="deviceKeyword" data-test="device-search" type="text" aria-label="搜索设备名称或国标编号" placeholder="搜索设备名称或国标编号" @input="scheduleDeviceSearch" @keydown.enter.prevent="applyDeviceSearch" />
-            <button v-if="deviceKeyword" data-test="clear-device-search" type="button" aria-label="清空设备搜索" title="清空设备搜索" @click="clearDeviceSearch"><X :size="13" /></button>
+        <div v-if="view === 'devices' && filtersOpen" id="device-tree-filters" class="tree-filters" aria-label="设备筛选条件">
+            <div class="device-status-filter" role="group" aria-label="设备状态筛选">
+                <button data-test="device-status-all" type="button" :aria-pressed="deviceStatusFilter === ''" :class="{ active: deviceStatusFilter === '' }" @click="changeDeviceStatus('')">全部</button>
+                <button data-test="device-status-online" type="button" :aria-pressed="deviceStatusFilter === 'online'" :class="{ active: deviceStatusFilter === 'online' }" @click="changeDeviceStatus('online')"><i class="filter-status-dot online" aria-hidden="true" />在线</button>
+                <button data-test="device-status-offline" type="button" :aria-pressed="deviceStatusFilter === 'offline'" :class="{ active: deviceStatusFilter === 'offline' }" @click="changeDeviceStatus('offline')"><i class="filter-status-dot offline" aria-hidden="true" />离线</button>
+            </div>
+            <div class="tree-search">
+                <Search :size="13" aria-hidden="true" />
+                <input v-model="deviceKeyword" data-test="device-search" type="text" aria-label="搜索设备名称或国标编号" placeholder="搜索设备名称或国标编号" @input="scheduleDeviceSearch" @keydown.enter.prevent="applyDeviceSearch" />
+                <button v-if="deviceKeyword" data-test="clear-device-search" type="button" aria-label="清空设备搜索" title="清空设备搜索" @click="clearDeviceSearch"><X :size="13" /></button>
+            </div>
         </div>
 
         <div v-if="error" class="tree-error" role="alert">{{ error }}<button type="button" @click="refresh()">重试</button></div>
@@ -388,18 +418,19 @@ onBeforeUnmount(() => {
                         <span v-else class="node-status-dot" :class="node.status === 1 ? 'online' : 'offline'" role="img" :aria-label="nodeStatus(node)" :title="nodeStatus(node)" />
                     </button>
                 </div>
-                <div v-if="!loading && !visibleRows.length" class="tree-empty">{{ view === "devices" && appliedDeviceKeyword ? "未找到匹配设备" : "暂无设备或通道" }}</div>
+                <div v-if="!loading && !visibleRows.length" class="tree-empty">{{ view === "devices" && hasDeviceFilters ? "当前筛选条件下暂无设备" : "暂无设备或通道" }}</div>
             </div>
         </a-spin>
-        <div v-if="view === 'devices' && deviceListTotal > devicePageSize" class="tree-pagination">
-            <a-pagination simple size="mini" :current="devicePage" :page-size="devicePageSize" :total="deviceListTotal" @change="changeDevicePage" />
+        <div v-if="view === 'devices' && deviceStatsLoaded" class="tree-pagination" :aria-label="`共 ${deviceListTotal} 台设备`">
+            <span class="device-total">共 {{ deviceListTotal }} 台</span>
+            <a-pagination v-if="deviceListTotal > devicePageSize" simple size="mini" :current="devicePage" :page-size="devicePageSize" :total="deviceListTotal" @change="changeDevicePage" />
         </div>
     </aside>
 </template>
 
 <style scoped>
 .playback-source-tree { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; color: var(--uvp-text-secondary); background: var(--zlm-card); border: 1px solid var(--zlm-border); }
-.tree-head, .tree-summary, .tree-summary span { display: flex; align-items: center; }
+.tree-head, .tree-head-actions, .tree-summary, .tree-summary span { display: flex; align-items: center; }
 .tree-head { min-height: 44px; justify-content: space-between; padding: 7px 10px 7px 14px; border-bottom: 1px solid var(--uvp-panel-border); }
 .device-total { color: var(--uvp-text-tertiary); font-size: 10px; font-weight: 500; }
 .tree-summary { gap: 12px; color: var(--uvp-text-tertiary); font-size: 10px; }
@@ -407,12 +438,22 @@ onBeforeUnmount(() => {
 .summary-dot, .node-status-dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
 .summary-dot.online, .node-status-dot.online { background: #10B981; box-shadow: 0 0 0 2px rgb(16 185 129 / 12%); }
 .summary-dot.offline, .node-status-dot.offline { background: #EF4444; box-shadow: 0 0 0 2px rgb(239 68 68 / 10%); }
-.tree-refresh { display: inline-grid; width: 26px; height: 26px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 5px; place-items: center; cursor: pointer; }
-.tree-refresh:hover { color: var(--uvp-brand); background: var(--uvp-sidebar-active-bg); }
+.tree-head-actions { gap: 2px; }
+.tree-icon-button { position: relative; display: inline-grid; width: 26px; height: 26px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 5px; place-items: center; cursor: pointer; }
+.tree-icon-button:hover, .tree-filter-toggle[aria-expanded="true"], .tree-filter-toggle.active { color: var(--uvp-brand); background: var(--uvp-sidebar-active-bg); }
+.tree-filter-toggle.active::after { position: absolute; top: 4px; right: 4px; width: 5px; height: 5px; background: var(--uvp-brand); border: 1px solid var(--zlm-card); border-radius: 50%; content: ""; }
 .tree-views { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin: 10px 12px 8px; padding: 2px; background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 6px; }
 .tree-views button { min-width: 0; height: 28px; padding: 0 4px; color: var(--uvp-text-tertiary); white-space: nowrap; background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .tree-views button.active { color: var(--uvp-text-primary); font-weight: 620; background: var(--uvp-panel-bg); box-shadow: 0 0 0 1px var(--uvp-panel-border); }
-.tree-search { display: flex; height: 30px; flex: 0 0 30px; align-items: center; gap: 7px; margin: 0 12px 8px; padding: 0 8px; color: var(--uvp-text-tertiary); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: 5px; }
+.tree-filters { flex: 0 0 auto; margin: 0 12px 8px; padding: 6px; background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 6px; }
+.device-status-filter { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin-bottom: 6px; }
+.device-status-filter button { display: flex; min-width: 0; height: 26px; align-items: center; justify-content: center; gap: 5px; padding: 0 4px; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+.device-status-filter button:hover { color: var(--uvp-text-primary); background: var(--uvp-sidebar-active-bg); }
+.device-status-filter button.active { color: var(--uvp-text-primary); font-weight: 600; background: var(--uvp-panel-bg); box-shadow: 0 0 0 1px var(--uvp-panel-border); }
+.filter-status-dot { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; }
+.filter-status-dot.online { background: #10B981; }
+.filter-status-dot.offline { background: #EF4444; }
+.tree-search { display: flex; height: 30px; flex: 0 0 30px; align-items: center; gap: 7px; padding: 0 8px; color: var(--uvp-text-tertiary); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: 5px; }
 .tree-search:focus-within { color: var(--uvp-brand); border-color: var(--uvp-brand); }
 .tree-search input { min-width: 0; height: 100%; flex: 1; padding: 0; color: var(--uvp-text-primary); background: transparent; border: 0; outline: 0; font: inherit; font-size: 12px; }
 .tree-search input::placeholder { color: var(--uvp-text-tertiary); }
@@ -437,7 +478,7 @@ onBeforeUnmount(() => {
 .tree-error { display: flex; gap: 8px; align-items: center; padding: 10px 12px; color: var(--uvp-danger); font-size: 12px; }
 .tree-error button { padding: 0; color: var(--uvp-brand); background: transparent; border: 0; cursor: pointer; font: inherit; }
 .tree-empty { display: grid; min-height: 120px; color: var(--uvp-text-tertiary); place-items: center; font-size: 12px; }
-.tree-pagination { display: flex; min-height: 38px; flex: 0 0 38px; align-items: center; justify-content: center; padding: 4px 8px; border-top: 1px solid var(--uvp-panel-border); }
+.tree-pagination { display: flex; min-height: 38px; flex: 0 0 38px; align-items: center; justify-content: center; gap: 12px; padding: 4px 8px; border-top: 1px solid var(--uvp-panel-border); }
 .spin { animation: source-tree-spin 0.9s linear infinite; }
 @keyframes source-tree-spin { to { transform: rotate(360deg); } }
 </style>

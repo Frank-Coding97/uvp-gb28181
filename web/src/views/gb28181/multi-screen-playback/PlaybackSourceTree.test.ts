@@ -58,9 +58,15 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.findAll("[role=tab]").map(node => node.text())).toEqual(["设备树", "国标目录", "自定义目录"]);
         expect(wrapper.find(".tree-title").exists()).toBe(false);
         expect(wrapper.find(".tree-head .lucide-router").exists()).toBe(false);
-        expect(wrapper.get(".device-total").text()).toBe("共 120 台");
+        expect(wrapper.find(".tree-head .device-total").exists()).toBe(false);
+        expect(wrapper.get(".tree-pagination .device-total").text()).toBe("共 120 台");
         expect(wrapper.get(".tree-summary").text()).toContain("在线 1");
         expect(wrapper.get(".tree-summary").text()).toContain("离线 119");
+        expect(wrapper.get("[data-test=device-filter-toggle]").attributes("aria-expanded")).toBe("false");
+        expect(wrapper.find("[data-test=device-search]").exists()).toBe(false);
+        await wrapper.get("[data-test=device-filter-toggle]").trigger("click");
+        expect(wrapper.get("[data-test=device-filter-toggle]").attributes("aria-expanded")).toBe("true");
+        expect(wrapper.find("[data-test=device-search]").exists()).toBe(true);
         expect(wrapper.text()).toContain("一号设备");
         expect(wrapper.get('[data-node-key="root:device:1"] .tree-node svg').classes()).toContain("lucide-cctv");
         expect(wrapper.get('[data-node-key="root:device:1"] .node-status-dot').classes()).toContain("online");
@@ -137,12 +143,26 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.text()).toContain("二号设备");
     });
 
+    it("keeps the device total in the footer when pagination is unnecessary", async () => {
+        api.listDevices.mockResolvedValueOnce({
+            code: 0,
+            data: { list: [device(1, "device-1", "一号设备")], total: 1, onlineTotal: 1, offlineTotal: 0 }
+        });
+
+        const wrapper = mountTree();
+        await flushPromises();
+
+        expect(wrapper.get(".tree-pagination .device-total").text()).toBe("共 1 台");
+        expect(wrapper.find("[data-test=device-pagination]").exists()).toBe(false);
+    });
+
     it("searches devices on the server and resets pagination", async () => {
         vi.useFakeTimers();
         const wrapper = mountTree();
         await flushPromises();
         await wrapper.get("[data-test=device-pagination]").trigger("click");
         await flushPromises();
+        await wrapper.get("[data-test=device-filter-toggle]").trigger("click");
 
         await wrapper.get("[data-test=device-search]").setValue("  UVP-Sim  ");
         await vi.advanceTimersByTimeAsync(300);
@@ -156,6 +176,33 @@ describe("PlaybackSourceTree", () => {
         await wrapper.get("[data-test=clear-device-search]").trigger("click");
         await flushPromises();
         expect(api.listDevices).toHaveBeenLastCalledWith({ page: 1, pageSize: 50 });
+        wrapper.unmount();
+    });
+
+    it("filters devices by status and combines it with the search keyword", async () => {
+        vi.useFakeTimers();
+        const wrapper = mountTree();
+        await flushPromises();
+        await wrapper.get("[data-test=device-pagination]").trigger("click");
+        await flushPromises();
+        await wrapper.get("[data-test=device-filter-toggle]").trigger("click");
+        api.listDevices.mockResolvedValueOnce({
+            code: 0,
+            data: { list: [device(3, "device-3", "离线设备")], total: 60, onlineTotal: 2, offlineTotal: 60 }
+        });
+        await wrapper.get("[data-test=device-status-offline]").trigger("click");
+        await flushPromises();
+
+        expect(api.listDevices).toHaveBeenLastCalledWith({ status: "offline", page: 1, pageSize: 50 });
+        expect(wrapper.get(".tree-pagination .device-total").text()).toBe("共 60 台");
+        expect(wrapper.get("[data-test=device-status-offline]").attributes("aria-pressed")).toBe("true");
+        expect(wrapper.get("[data-test=device-filter-toggle]").classes()).toContain("active");
+
+        await wrapper.get("[data-test=device-search]").setValue("摄像机");
+        await vi.advanceTimersByTimeAsync(300);
+        await flushPromises();
+
+        expect(api.listDevices).toHaveBeenLastCalledWith({ q: "摄像机", status: "offline", page: 1, pageSize: 50 });
         wrapper.unmount();
     });
 
