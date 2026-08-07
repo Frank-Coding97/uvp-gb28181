@@ -576,7 +576,7 @@ onBeforeUnmount(() => {
 
 .monitor-area { position: relative; display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 16px; background: var(--zlm-bg); }
 .monitor-area:fullscreen { padding: 16px; background: var(--zlm-bg); }
-.monitor-toolbar { justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
+.monitor-toolbar { flex: 0 0 auto; justify-content: flex-end; gap: 10px; margin-bottom: 12px; }
 .layout-switcher { gap: 4px; }
 .layout-switcher button,
 .playback-actions button,

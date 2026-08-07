@@ -1,4 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -87,6 +89,12 @@ describe("multi-screen playback page", () => {
         expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(4);
         expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
         expect(wrapper.find("[data-test=layout-9]").exists()).toBe(true);
+    });
+
+    it("keeps the monitor toolbar clickable when the mobile workspace shrinks", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
+
+        expect(source).toMatch(/\.monitor-toolbar\s*\{[^}]*flex:\s*0 0 auto;/s);
     });
 
     it("opens and closes playback schemes without changing current playback", async () => {
