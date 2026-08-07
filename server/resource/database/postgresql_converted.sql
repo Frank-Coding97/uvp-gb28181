@@ -1516,6 +1516,30 @@ SELECT setval('sys_api_id_seq',227,true);
 SELECT setval('sys_menu_id_seq',140361,true);
 SELECT setval('sys_casbin_rule_id_seq',7571,true);
 
+-- Playback schemes reuse the multi-screen page and expose one hidden permission.
+INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
+(228,'查询播放方案','/api/gb28181/playback-schemes','GET','GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(229,'查看播放方案','/api/gb28181/playback-schemes/:id','GET','GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(230,'创建播放方案','/api/gb28181/playback-schemes','POST','GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(231,'重命名播放方案','/api/gb28181/playback-schemes/:id','PATCH','GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(232,'覆盖播放方案','/api/gb28181/playback-schemes/:id/layout','PUT','GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(233,'删除播放方案','/api/gb28181/playback-schemes/:id','DELETE','GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
+(140362,140355,'','','','管理播放方案',1,3,'gb28181:playback-scheme:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140362);
+INSERT INTO sys_menu_api (menu_id,api_id) VALUES
+(140362,228),(140362,229),(140362,230),(140362,231),(140362,232),(140362,233);
+INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
+(7572,'p','role_1','/api/gb28181/playback-schemes','GET','*','',''),
+(7573,'p','role_1','/api/gb28181/playback-schemes/:id','GET','*','',''),
+(7574,'p','role_1','/api/gb28181/playback-schemes','POST','*','',''),
+(7575,'p','role_1','/api/gb28181/playback-schemes/:id','PATCH','*','',''),
+(7576,'p','role_1','/api/gb28181/playback-schemes/:id/layout','PUT','*','',''),
+(7577,'p','role_1','/api/gb28181/playback-schemes/:id','DELETE','*','','');
+SELECT setval('sys_api_id_seq',233,true);
+SELECT setval('sys_menu_id_seq',140362,true);
+SELECT setval('sys_casbin_rule_id_seq',7577,true);
+
 -- GB28181 device registry and dual-version profile archive.
 DROP TABLE IF EXISTS gb_device;
 CREATE TABLE gb_device (

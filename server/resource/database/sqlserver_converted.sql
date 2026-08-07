@@ -501,6 +501,33 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 -- Table structure for sys_department
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
+-- Playback schemes reuse the multi-screen page and expose one hidden permission.
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
+(228,N'查询播放方案','/api/gb28181/playback-schemes','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(229,N'查看播放方案','/api/gb28181/playback-schemes/:id','GET',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(230,N'创建播放方案','/api/gb28181/playback-schemes','POST',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(231,N'重命名播放方案','/api/gb28181/playback-schemes/:id','PATCH',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(232,N'覆盖播放方案','/api/gb28181/playback-schemes/:id/layout','PUT',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(233,N'删除播放方案','/api/gb28181/playback-schemes/:id','DELETE',N'GB28181 多屏播放',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[type],[permission],[created_at],[updated_at],[created_by]) VALUES
+(140362,140355,'','','',N'管理播放方案',1,3,'gb28181:playback-scheme:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140362);
+INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES
+(140362,228),(140362,229),(140362,230),(140362,231),(140362,232),(140362,233);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
+(7572,'p','role_1','/api/gb28181/playback-schemes','GET','*','',''),
+(7573,'p','role_1','/api/gb28181/playback-schemes/:id','GET','*','',''),
+(7574,'p','role_1','/api/gb28181/playback-schemes','POST','*','',''),
+(7575,'p','role_1','/api/gb28181/playback-schemes/:id','PATCH','*','',''),
+(7576,'p','role_1','/api/gb28181/playback-schemes/:id/layout','PUT','*','',''),
+(7577,'p','role_1','/api/gb28181/playback-schemes/:id','DELETE','*','','');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
 -- GB28181 device registry and dual-version profile archive.
 IF OBJECT_ID(N'gb_device', N'U') IS NOT NULL DROP TABLE [gb_device];
 CREATE TABLE [gb_device] (

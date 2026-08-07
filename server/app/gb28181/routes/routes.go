@@ -23,6 +23,7 @@ var deviceController = gbcontrollers.NewDeviceController()
 var catalogTreeController = gbcontrollers.NewCatalogTreeController()
 var directoryController = gbcontrollers.NewDirectoryController()
 var customGroupController = gbcontrollers.NewCustomGroupController()
+var playbackSchemeController = gbcontrollers.NewPlaybackSchemeController()
 var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
 var mapController = gbcontrollers.NewMapController()
 var anomalyController = gbcontrollers.NewAnomalyController()
@@ -291,6 +292,15 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		}
 		// 扫码接入:生成一次性 token(兑换端点在 RegisterPublicRoutes,免鉴权)
 		gb.POST("/sip/qr/token", func(c *gin.Context) { qrController.GenerateToken(c) })
+		playbackSchemes := gb.Group("/playback-schemes")
+		{
+			playbackSchemes.GET("", playbackSchemeController.List)
+			playbackSchemes.GET("/:id", playbackSchemeController.Detail)
+			playbackSchemes.POST("", playbackSchemeController.Create)
+			playbackSchemes.PATCH("/:id", playbackSchemeController.Rename)
+			playbackSchemes.PUT("/:id/layout", playbackSchemeController.ReplaceLayout)
+			playbackSchemes.DELETE("/:id", playbackSchemeController.Delete)
+		}
 		traceGroup := gb.Group("/sip-traces")
 		{
 			traceGroup.GET("/health", func(c *gin.Context) { currentTraceController().Health(c) })
