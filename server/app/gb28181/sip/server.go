@@ -12,6 +12,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
+	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -42,13 +43,21 @@ type TraceFactory func(gbconfig.TraceConfig) gbtrace.Runtime
 type ServerOption func(*serverOptions)
 
 type serverOptions struct {
-	traceFactory TraceFactory
+	traceFactory      TraceFactory
+	securityAdmission *gbsecurity.Admission
 }
 
 func WithTraceFactory(factory TraceFactory) ServerOption {
 	return func(options *serverOptions) {
 		options.traceFactory = factory
 	}
+}
+
+// WithSecurityAdmission installs the pre-parser security gate. The gate is
+// composed with Trace rather than replacing it, because sipgo accepts one
+// TransportReadFilter per transport.
+func WithSecurityAdmission(admission *gbsecurity.Admission) ServerOption {
+	return func(options *serverOptions) { options.securityAdmission = admission }
 }
 
 // SetErrorHandler registers a callback for asynchronous listener failures.
@@ -93,12 +102,37 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 			if setter, ok := traceRuntime.(interface{ SetPlatformAddr(string) }); ok && !cfg.SIP.DynamicAdvertise && cfg.SIP.AdvertiseIP != "" && cfg.SIP.Port > 0 {
 				setter.SetPlatformAddr(fmt.Sprintf("%s:%d", cfg.SIP.AdvertiseIP, cfg.SIP.Port))
 			}
-			uaOptions = append(uaOptions, sipgo.WithUserAgentTransportLayerOptions(
-				siplib.WithTransportLayerReadFilter(traceRuntime.ReadFilter),
-				siplib.WithTransportLayerWriteObserver(traceRuntime.WriteObserver),
-				siplib.WithTransportLayerConnectionCloseObserver(traceRuntime.ConnectionClosed),
-			))
 		}
+	}
+	var readFilter siplib.TransportReadFilter
+	var closeObserver siplib.TransportConnectionCloseObserver
+	if traceRuntime != nil {
+		readFilter = traceRuntime.ReadFilter
+		closeObserver = traceRuntime.ConnectionClosed
+	}
+	if opts.securityAdmission != nil {
+		opts.securityAdmission.SetTraceFilter(readFilter)
+		readFilter = opts.securityAdmission.Filter
+		previousClose := closeObserver
+		closeObserver = func(info siplib.TransportReadProps) {
+			opts.securityAdmission.ConnectionClosed(info)
+			if previousClose != nil {
+				previousClose(info)
+			}
+		}
+	}
+	if readFilter != nil || closeObserver != nil || traceRuntime != nil {
+		transportOptions := []siplib.TransportLayerOption{}
+		if readFilter != nil {
+			transportOptions = append(transportOptions, siplib.WithTransportLayerReadFilter(readFilter))
+		}
+		if traceRuntime != nil {
+			transportOptions = append(transportOptions, siplib.WithTransportLayerWriteObserver(traceRuntime.WriteObserver))
+		}
+		if closeObserver != nil {
+			transportOptions = append(transportOptions, siplib.WithTransportLayerConnectionCloseObserver(closeObserver))
+		}
+		uaOptions = append(uaOptions, sipgo.WithUserAgentTransportLayerOptions(transportOptions...))
 	}
 
 	ua, err := sipgo.NewUA(uaOptions...)

@@ -13,6 +13,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
+	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streamprobe"
@@ -55,6 +56,7 @@ var platformController = gbcontrollers.NewPlatformController()
 
 // serviceConfigController 国标服务配置页面的动态配置控制器。
 var serviceConfigController = gbcontrollers.NewServiceConfigController()
+var securityController = gbcontrollers.NewSecurityController(nil)
 
 var setupController *gbcontrollers.SetupController
 
@@ -97,6 +99,46 @@ func SetTraceController(ctrl *gbcontrollers.TraceController) {
 		return
 	}
 	traceController.Store(ctrl)
+}
+
+// SetSecurityProvider 由 bootstrap 注入安全聚合/封禁/agent provider。
+func SetSecurityProvider(provider gbcontrollers.SecurityProvider) {
+	securityController.SetProvider(provider)
+}
+
+type securityRuntimeProvider struct{ runtime *gbsecurity.Runtime }
+
+func (p securityRuntimeProvider) Snapshot() gbcontrollers.SecuritySnapshot {
+	s := p.runtime.Snapshot()
+	return gbcontrollers.SecuritySnapshot{Mode: s.Mode, Dropped: s.Dropped, Sampled: s.Sampled, Events: s.Events, Bans: s.Bans, Agent: s.Agent, AsOf: s.AsOf}
+}
+func (p securityRuntimeProvider) Events() []gbsecurity.EventAggregate { return p.runtime.Events() }
+func (p securityRuntimeProvider) Bans() []gbsecurity.FirewallBan      { return p.runtime.Bans() }
+func (p securityRuntimeProvider) Policy() gbsecurity.SecurityPolicy   { return p.runtime.Policy() }
+func (p securityRuntimeProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy) error {
+	return p.runtime.UpdatePolicy(policy)
+}
+func (p securityRuntimeProvider) Unban(id, actor string) error        { return p.runtime.Unban(id, actor) }
+func (p securityRuntimeProvider) AgentStatus() gbsecurity.AgentStatus { return p.runtime.AgentStatus() }
+func (p securityRuntimeProvider) Stream() (<-chan gbcontrollers.SecuritySnapshot, func()) {
+	in, cancel := p.runtime.Stream()
+	out := make(chan gbcontrollers.SecuritySnapshot, 8)
+	go func() {
+		defer close(out)
+		for range in {
+			out <- securityRuntimeProvider{runtime: p.runtime}.Snapshot()
+		}
+	}()
+	return out, cancel
+}
+
+// SetSecurityRuntime wires the application runtime into the protected API.
+func SetSecurityRuntime(runtime *gbsecurity.Runtime) {
+	if runtime == nil {
+		securityController.SetProvider(nil)
+		return
+	}
+	securityController.SetProvider(securityRuntimeProvider{runtime: runtime})
 }
 
 func currentTraceController() *gbcontrollers.TraceController {
@@ -282,6 +324,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			serviceConfig.GET("/position-history", serviceConfigController.GetPositionHistory)
 			serviceConfig.PUT("/position-history", serviceConfigController.UpdatePositionHistory)
+			serviceConfig.GET("/sdp-extension", serviceConfigController.GetSDPExtension)
+			serviceConfig.PUT("/sdp-extension", serviceConfigController.UpdateSDPExtension)
 		}
 		setup := gb.Group("/sip/setup")
 		{
@@ -311,6 +355,17 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			traceGroup.GET("/stream", func(c *gin.Context) { currentTraceController().Stream(c) })
 			traceGroup.GET("/sessions/:callId/messages", func(c *gin.Context) { currentTraceController().ListSessionMessages(c) })
 			traceGroup.POST("/captures/:id/stop", func(c *gin.Context) { currentTraceController().StopCapture(c) })
+		}
+		securityGroup := gb.Group("/security")
+		{
+			securityGroup.GET("/snapshot", securityController.Snapshot)
+			securityGroup.GET("/events", securityController.Events)
+			securityGroup.GET("/bans", securityController.Bans)
+			securityGroup.POST("/bans/:id/unban", securityController.Unban)
+			securityGroup.GET("/policy", securityController.Policy)
+			securityGroup.PUT("/policy", securityController.UpdatePolicy)
+			securityGroup.GET("/agent/health", securityController.AgentHealth)
+			securityGroup.GET("/stream", securityController.Stream)
 		}
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
