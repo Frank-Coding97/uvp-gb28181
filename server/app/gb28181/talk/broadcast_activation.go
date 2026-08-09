@@ -140,6 +140,12 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 			return PreparedBroadcastInvite{}, err
 		}
 	}
+	if len(candidates) == 0 && strings.TrimSpace(invite.PeerID) != "" {
+		candidates, err = s.repo.FindPendingBroadcast(ctx, "", strings.TrimSpace(invite.PeerID))
+		if err != nil {
+			return PreparedBroadcastInvite{}, err
+		}
+	}
 	if len(candidates) == 0 {
 		return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 403, Reason: "没有匹配的 Broadcast 会话"}
 	}
