@@ -57,7 +57,7 @@ const SliderStub = {
 };
 
 const SelectStub = {
-    props: ["modelValue", "disabled", "loading"],
+    props: ["modelValue", "disabled", "loading", "type"],
     emits: ["update:modelValue"],
     template: `<select :disabled="disabled || loading" :value="modelValue" @change="$emit('update:modelValue', $event.target.value)"><slot /></select>`
 };
@@ -287,7 +287,7 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchDefaultChannelStreamTransportConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("新通道默认流传输模式");
-        expect(wrapper.text()).toContain("仅影响之后新发现的通道");
+        expect(wrapper.text()).toContain("仅影响之后通过 Catalog 新发现的通道");
         const transportSelect = wrapper
             .findAll("label")
             .find(label => label.text().includes("新通道默认流传输模式"))
