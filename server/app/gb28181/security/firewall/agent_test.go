@@ -36,8 +36,10 @@ func TestAgentAcceptsPermanentRulesAndKeepsThemDuringReconcile(t *testing.T) {
 	a := New(backend, clock, nil)
 	decision := security.BanDecision{DecisionID: "permanent", SourceIP: "203.0.113.3", CreatedAt: clock.now, Permanent: true}
 	require.NoError(t, a.Ban(decision))
+	require.True(t, backend.rules[decision.SourceIP].IsZero())
 	clock.now = clock.now.Add(365 * 24 * time.Hour)
 	require.NoError(t, a.Reconcile([]security.BanDecision{decision}))
+	require.True(t, backend.rules[decision.SourceIP].IsZero())
 	require.Equal(t, 1, a.Status().AppliedRules)
 }
 

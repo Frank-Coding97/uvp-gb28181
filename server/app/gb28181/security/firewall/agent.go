@@ -84,7 +84,8 @@ func (a *Agent) Ban(decision security.BanDecision) error {
 	if decision.CreatedAt.IsZero() {
 		decision.CreatedAt = a.clock.Now()
 	}
-	if err := a.backend.Add(decision.SourceIP, decision.CreatedAt.Add(decision.TTL)); err != nil {
+	expiresAt := decision.ExpiresAt()
+	if err := a.backend.Add(decision.SourceIP, expiresAt); err != nil {
 		a.setError(err)
 		return err
 	}
