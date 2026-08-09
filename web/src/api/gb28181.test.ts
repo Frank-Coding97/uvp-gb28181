@@ -11,6 +11,7 @@ import {
   fetchSIPLogConfig,
   fetchPositionHistoryConfig,
   fetchSyncChannelsOnOnlineConfig,
+  fetchIgnoreChannelOfflineStatusNotifyConfig,
   getControlCapabilities,
   getDeviceStatus,
   getHomePosition,
@@ -24,6 +25,7 @@ import {
   updateSDPExtensionConfig,
   updateSIPLogConfig,
   updateSyncChannelsOnOnlineConfig,
+  updateIgnoreChannelOfflineStatusNotifyConfig,
   type DeviceStatusResult,
   type HomePositionPatch
 } from "./gb28181";
@@ -82,6 +84,16 @@ describe("国标服务配置 API", () => {
       "/api/gb28181/sip/service-config/sync-channels-on-online",
       { data: { enabled: false } }
     );
+  });
+
+  it("读取并更新忽略通道离线/异常通知配置", async () => {
+    await fetchIgnoreChannelOfflineStatusNotifyConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify");
+
+    await updateIgnoreChannelOfflineStatusNotifyConfig(true);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/ignore-channel-offline-status-notify", {
+      data: { enabled: true }
+    });
   });
 
   it("读取并更新 SIP 日志配置", async () => {

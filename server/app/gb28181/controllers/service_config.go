@@ -35,6 +35,10 @@ type SyncChannelsOnOnlineConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+type IgnoreChannelOfflineStatusNotifyConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // PTZDefaultSpeedConfig 是云台控制界面初始使用的 1-10 档速度。
 type PTZDefaultSpeedConfig struct {
 	Level int `json:"level"`
@@ -173,6 +177,36 @@ func (sc *ServiceConfigController) UpdateSyncChannelsOnOnline(c *gin.Context) {
 	}
 
 	sc.SuccessWithMessage(c, "设备上线同步通道配置已更新", SyncChannelsOnOnlineConfig{Enabled: *request.Enabled})
+}
+
+// GetIgnoreChannelOfflineStatusNotify GET /api/gb28181/sip/service-config/ignore-channel-offline-status-notify
+func (sc *ServiceConfigController) GetIgnoreChannelOfflineStatusNotify(c *gin.Context) {
+	sc.Success(c, IgnoreChannelOfflineStatusNotifyConfig{Enabled: gbconfig.IgnoreChannelOfflineStatusNotify()})
+}
+
+// UpdateIgnoreChannelOfflineStatusNotify PUT /api/gb28181/sip/service-config/ignore-channel-offline-status-notify
+func (sc *ServiceConfigController) UpdateIgnoreChannelOfflineStatusNotify(c *gin.Context) {
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+		sc.Fail(c, "保存忽略通道离线/异常通知配置失败：enabled 必须为布尔值", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.IgnoreChannelOfflineStatusNotify()
+	app.ConfigYml.Set(gbconfig.IgnoreChannelOfflineStatusNotifyConfigKey, *request.Enabled)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.IgnoreChannelOfflineStatusNotifyConfigKey, previous)
+		sc.Fail(c, "保存忽略通道离线/异常通知配置失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "忽略通道离线/异常通知配置已更新", IgnoreChannelOfflineStatusNotifyConfig{Enabled: *request.Enabled})
 }
 
 // GetPTZDefaultSpeed GET /api/gb28181/sip/service-config/ptz-default-speed

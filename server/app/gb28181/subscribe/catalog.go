@@ -2,19 +2,25 @@ package subscribe
 
 import (
 	"context"
+	"strings"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
 // CatalogProcessor forwards subscription notifications through the established catalog pipeline.
 type CatalogProcessor struct {
-	pipeline *catalog.Pipeline
+	pipeline                  *catalog.Pipeline
+	ignoreOfflineStatusNotify func() bool
 }
 
 func NewCatalogProcessor(pipeline *catalog.Pipeline) *CatalogProcessor {
-	return &CatalogProcessor{pipeline: pipeline}
+	return &CatalogProcessor{
+		pipeline:                  pipeline,
+		ignoreOfflineStatusNotify: gbconfig.IgnoreChannelOfflineStatusNotify,
+	}
 }
 
 func (p *CatalogProcessor) Process(ctx context.Context, device *gbmodels.GbDevice, notification Notification) error {
@@ -25,29 +31,29 @@ func (p *CatalogProcessor) Process(ctx context.Context, device *gbmodels.GbDevic
 	if err != nil {
 		return err
 	}
-	items := make([]catalog.CatalogItem, 0, len(notify.DeviceList.Items))
-	for _, item := range notify.DeviceList.Items {
-		if item.DeviceID != "" {
-			items = append(items, catalogItemFromMANSCDP(item))
-		}
-	}
 	sender := catalog.Sender{SourceDeviceID: device.DeviceID, OwnerDeptID: device.OwnerDeptID}
-	for i, item := range notify.DeviceList.Items {
-		if item.Event == "" {
+	full := make([]catalog.CatalogItem, 0, len(notify.DeviceList.Items))
+	for _, item := range notify.DeviceList.Items {
+		if item.DeviceID == "" {
 			continue
 		}
-		if err := p.pipeline.IngestDelta(ctx, sender, item.Event, catalogItemFromMANSCDP(item)); err != nil {
-			return err
+		event := strings.ToUpper(strings.TrimSpace(item.Event))
+		if event == "" {
+			full = append(full, catalogItemFromMANSCDP(item))
+			continue
 		}
-		items[i] = catalog.CatalogItem{}
-	}
-	full := items[:0]
-	for _, item := range items {
-		if item.DeviceID != "" {
-			full = append(full, item)
+		if p.ignoreOfflineStatusNotify != nil && p.ignoreOfflineStatusNotify() && isNegativeChannelStatusEvent(event) {
+			continue
+		}
+		if err := p.pipeline.IngestDelta(ctx, sender, event, catalogItemFromMANSCDP(item)); err != nil {
+			return err
 		}
 	}
 	return p.pipeline.Ingest(ctx, sender, full)
+}
+
+func isNegativeChannelStatusEvent(event string) bool {
+	return event == "OFF" || event == "VLOST" || event == "DEFECT"
 }
 
 func catalogItemFromMANSCDP(item manscdp.CatalogItem) catalog.CatalogItem {

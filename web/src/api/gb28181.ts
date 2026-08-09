@@ -755,6 +755,25 @@ export const updateSyncChannelsOnOnlineConfig = (enabled: boolean) =>
     data: { enabled }
   });
 
+export interface IgnoreChannelOfflineStatusNotifyConfig {
+  enabled: boolean;
+}
+
+export const fetchIgnoreChannelOfflineStatusNotifyConfig = () =>
+  http.request<BaseResult<IgnoreChannelOfflineStatusNotifyConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/ignore-channel-offline-status-notify")
+  );
+
+export const updateIgnoreChannelOfflineStatusNotifyConfig = (enabled: boolean) =>
+  http.request<BaseResult<IgnoreChannelOfflineStatusNotifyConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/ignore-channel-offline-status-notify"),
+    {
+      data: { enabled }
+    }
+  );
+
 export interface PTZDefaultSpeedConfig {
   level: number;
 }

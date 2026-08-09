@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
     updateSDPExtensionConfig: vi.fn(),
     fetchSyncChannelsOnOnlineConfig: vi.fn(),
     updateSyncChannelsOnOnlineConfig: vi.fn(),
+    fetchIgnoreChannelOfflineStatusNotifyConfig: vi.fn(),
+    updateIgnoreChannelOfflineStatusNotifyConfig: vi.fn(),
     fetchSIPLogConfig: vi.fn(),
     updateSIPLogConfig: vi.fn()
 }));
@@ -79,6 +81,8 @@ describe("ServiceConfig edit mode", () => {
         api.updatePTZDefaultSpeedConfig.mockReset();
         api.fetchSyncChannelsOnOnlineConfig.mockReset();
         api.updateSyncChannelsOnOnlineConfig.mockReset();
+        api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockReset();
+        api.updateIgnoreChannelOfflineStatusNotifyConfig.mockReset();
         api.fetchSIPLogConfig.mockReset();
         api.updateSIPLogConfig.mockReset();
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
@@ -93,6 +97,8 @@ describe("ServiceConfig edit mode", () => {
         api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
+        api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
+        api.updateIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
         api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, applied: true } });
         api.updateSIPLogConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true, applied: true } });
     });
@@ -266,6 +272,30 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updateSIPLogConfig).toHaveBeenCalledWith(true);
+    });
+
+    it("loads and saves the ignore channel offline status notify switch", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchIgnoreChannelOfflineStatusNotifyConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("忽略通道离线/异常通知");
+        expect(wrapper.text()).toContain("OFF、VLOST、DEFECT");
+        const statusSwitch = wrapper
+            .findAll("label")
+            .find(label => label.text().includes("忽略通道离线/异常通知"))
+            ?.find("button");
+        expect(statusSwitch?.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        expect(statusSwitch?.element).toHaveProperty("disabled", false);
+        await statusSwitch?.trigger("click");
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateIgnoreChannelOfflineStatusNotifyConfig).toHaveBeenCalledWith(true);
     });
 
     it("shows when the saved SIP trace switch is not applied to the runtime", async () => {

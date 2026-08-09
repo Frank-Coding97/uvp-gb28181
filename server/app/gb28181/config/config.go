@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	SDPExtensionConfigKey         = "gb28181.sdp.extension_enabled"
-	SyncChannelsOnOnlineConfigKey = "gb28181.device.sync_channels_on_online"
-	SIPTraceEnabledConfigKey      = "gb28181.trace.enabled"
+	SDPExtensionConfigKey                     = "gb28181.sdp.extension_enabled"
+	SyncChannelsOnOnlineConfigKey             = "gb28181.device.sync_channels_on_online"
+	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
+	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
@@ -68,6 +69,18 @@ func SyncChannelsOnOnlineFrom(c valueSource) bool {
 // observes a saved setting without rebuilding the GB28181 runtime.
 func SyncChannelsOnOnline() bool {
 	return SyncChannelsOnOnlineFrom(app.ConfigYml)
+}
+
+// IgnoreChannelOfflineStatusNotifyFrom returns whether negative channel
+// status events from Catalog NOTIFY should be ignored. Missing configuration
+// defaults to false so standards-compliant status notifications remain active.
+func IgnoreChannelOfflineStatusNotifyFrom(c valueSource) bool {
+	return c != nil && c.Get(IgnoreChannelOfflineStatusNotifyConfigKey) != nil && c.GetBool(IgnoreChannelOfflineStatusNotifyConfigKey)
+}
+
+// IgnoreChannelOfflineStatusNotify reads the live compatibility setting.
+func IgnoreChannelOfflineStatusNotify() bool {
+	return IgnoreChannelOfflineStatusNotifyFrom(app.ConfigYml)
 }
 
 // Config GB28181 国标平台配置

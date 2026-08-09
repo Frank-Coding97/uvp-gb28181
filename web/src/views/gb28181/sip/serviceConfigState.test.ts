@@ -13,9 +13,11 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).toHaveLength(15);
         expect(staticServiceConfigLabels).toContain("扩展 SDP 兼容模式");
         expect(staticServiceConfigLabels).toContain("云台默认速度");
+        expect(staticServiceConfigLabels).toContain("忽略通道离线/异常通知");
         expect(draft.positionHistoryRetentionDays).toBe(7);
         expect(draft.ptzSpeed).toBe(6);
         expect(draft.syncChannelsOnOnline).toBe(true);
+        expect(draft.ignoreChannelOfflineStatusNotify).toBe(false);
         expect(draft.sipTimeoutSec).toBe(10);
         expect(draft.notifyCacheMaxLength).toBe(10000);
         expect(playbackServiceConfigLabels).toHaveLength(6);

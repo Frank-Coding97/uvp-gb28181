@@ -8,11 +8,13 @@ import {
     fetchSDPExtensionConfig,
     fetchSIPLogConfig,
     fetchSyncChannelsOnOnlineConfig,
+    fetchIgnoreChannelOfflineStatusNotifyConfig,
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
     updateSIPLogConfig,
     updateSDPExtensionConfig,
-    updateSyncChannelsOnOnlineConfig
+    updateSyncChannelsOnOnlineConfig,
+    updateIgnoreChannelOfflineStatusNotifyConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { createStaticServiceConfigDraft } from "./serviceConfigState";
@@ -33,6 +35,9 @@ const ptzDefaultSpeedReady = ref(false);
 const syncChannelsOnOnlineLoading = ref(true);
 const syncChannelsOnOnlineSaving = ref(false);
 const syncChannelsOnOnlineReady = ref(false);
+const ignoreChannelOfflineStatusNotifyLoading = ref(true);
+const ignoreChannelOfflineStatusNotifySaving = ref(false);
+const ignoreChannelOfflineStatusNotifyReady = ref(false);
 const sipLogLoading = ref(true);
 const sipLogSaving = ref(false);
 const sipLogReady = ref(false);
@@ -42,6 +47,7 @@ const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedSyncChannelsOnOnline = ref(true);
+const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const positionHistoryChanged = computed(
     () =>
@@ -53,6 +59,9 @@ const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefault
 const syncChannelsOnOnlineChanged = computed(
     () => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value
 );
+const ignoreChannelOfflineStatusNotifyChanged = computed(
+    () => draft.ignoreChannelOfflineStatusNotify !== savedIgnoreChannelOfflineStatusNotify.value
+);
 const sipLogChanged = computed(() => draft.sipLogEnabled !== savedSIPLogEnabled.value);
 const hasChanges = computed(
     () =>
@@ -60,6 +69,7 @@ const hasChanges = computed(
         sdpExtensionChanged.value ||
         ptzDefaultSpeedChanged.value ||
         syncChannelsOnOnlineChanged.value ||
+        ignoreChannelOfflineStatusNotifyChanged.value ||
         sipLogChanged.value
 );
 const configLoading = computed(
@@ -68,6 +78,7 @@ const configLoading = computed(
         sdpExtensionLoading.value ||
         ptzDefaultSpeedLoading.value ||
         syncChannelsOnOnlineLoading.value ||
+        ignoreChannelOfflineStatusNotifyLoading.value ||
         sipLogLoading.value
 );
 const configSaving = computed(
@@ -76,6 +87,7 @@ const configSaving = computed(
         sdpExtensionSaving.value ||
         ptzDefaultSpeedSaving.value ||
         syncChannelsOnOnlineSaving.value ||
+        ignoreChannelOfflineStatusNotifySaving.value ||
         sipLogSaving.value
 );
 const configReady = computed(
@@ -84,6 +96,7 @@ const configReady = computed(
         sdpExtensionReady.value &&
         ptzDefaultSpeedReady.value &&
         syncChannelsOnOnlineReady.value &&
+        ignoreChannelOfflineStatusNotifyReady.value &&
         sipLogReady.value
 );
 const formLayout = computed(() => (isMobile.value ? "vertical" : "horizontal"));
@@ -151,6 +164,21 @@ async function loadSyncChannelsOnOnlineConfig() {
     }
 }
 
+async function loadIgnoreChannelOfflineStatusNotifyConfig() {
+    ignoreChannelOfflineStatusNotifyLoading.value = true;
+    try {
+        const response = await fetchIgnoreChannelOfflineStatusNotifyConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.ignoreChannelOfflineStatusNotify = response.data.enabled;
+        savedIgnoreChannelOfflineStatusNotify.value = response.data.enabled;
+        ignoreChannelOfflineStatusNotifyReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载忽略通道离线/异常通知配置失败");
+    } finally {
+        ignoreChannelOfflineStatusNotifyLoading.value = false;
+    }
+}
+
 async function loadSIPLogConfig() {
     sipLogLoading.value = true;
     try {
@@ -173,6 +201,7 @@ function startEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
+    draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = true;
 }
@@ -183,6 +212,7 @@ function cancelEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
+    draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = false;
 }
@@ -232,6 +262,14 @@ async function saveConfig() {
             savedSyncChannelsOnOnline.value = response.data.enabled;
             syncChannelsOnOnlineSaving.value = false;
         }
+        if (ignoreChannelOfflineStatusNotifyChanged.value) {
+            ignoreChannelOfflineStatusNotifySaving.value = true;
+            const response = await updateIgnoreChannelOfflineStatusNotifyConfig(draft.ignoreChannelOfflineStatusNotify);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.ignoreChannelOfflineStatusNotify = response.data.enabled;
+            savedIgnoreChannelOfflineStatusNotify.value = response.data.enabled;
+            ignoreChannelOfflineStatusNotifySaving.value = false;
+        }
         if (sipLogChanged.value) {
             sipLogSaving.value = true;
             const response = await updateSIPLogConfig(draft.sipLogEnabled);
@@ -255,6 +293,7 @@ async function saveConfig() {
         sdpExtensionSaving.value = false;
         ptzDefaultSpeedSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
+        ignoreChannelOfflineStatusNotifySaving.value = false;
         sipLogSaving.value = false;
     }
 }
@@ -265,6 +304,7 @@ onMounted(() =>
         loadSDPExtensionConfig(),
         loadPTZDefaultSpeedConfig(),
         loadSyncChannelsOnOnlineConfig(),
+        loadIgnoreChannelOfflineStatusNotifyConfig(),
         loadSIPLogConfig()
     ])
 );
@@ -413,8 +453,23 @@ onMounted(() =>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="keepChannelStatus" label="保持通道状态">
-                                        <a-switch v-model="draft.keepChannelStatus" disabled />
+                                    <a-form-item field="ignoreChannelOfflineStatusNotify" label="忽略通道离线/异常通知">
+                                        <a-switch
+                                            v-model="draft.ignoreChannelOfflineStatusNotify"
+                                            :loading="ignoreChannelOfflineStatusNotifyLoading || ignoreChannelOfflineStatusNotifySaving"
+                                            :disabled="
+                                                !isEditing ||
+                                                ignoreChannelOfflineStatusNotifyLoading ||
+                                                ignoreChannelOfflineStatusNotifySaving ||
+                                                !ignoreChannelOfflineStatusNotifyReady
+                                            "
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                        <template #extra>
+                                            <div>开启后忽略 Catalog NOTIFY 上报的 OFF、VLOST、DEFECT，仅用于兼容错误状态消息；默认关闭。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

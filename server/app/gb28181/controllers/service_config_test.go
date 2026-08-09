@@ -54,6 +54,8 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/sdp-extension", controller.UpdateSDPExtension)
 	router.GET("/sync-channels-on-online", controller.GetSyncChannelsOnOnline)
 	router.PUT("/sync-channels-on-online", controller.UpdateSyncChannelsOnOnline)
+	router.GET("/ignore-channel-offline-status-notify", controller.GetIgnoreChannelOfflineStatusNotify)
+	router.PUT("/ignore-channel-offline-status-notify", controller.UpdateIgnoreChannelOfflineStatusNotify)
 	router.GET("/ptz-default-speed", controller.GetPTZDefaultSpeed)
 	router.PUT("/ptz-default-speed", controller.UpdatePTZDefaultSpeed)
 	router.GET("/sip-log", controller.GetSIPLog)
@@ -186,6 +188,39 @@ func TestServiceConfigController_UpdateSyncChannelsOnOnlinePersistsAndRollsBack(
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sync-channels-on-online", jsonBody(t, map[string]bool{"enabled": true})))
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, false, config.values[gbconfig.SyncChannelsOnOnlineConfigKey])
+}
+
+func TestServiceConfigController_IgnoreChannelOfflineStatusNotifyDefaultsToDisabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/ignore-channel-offline-status-notify", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, false, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdateIgnoreChannelOfflineStatusNotifyPersistsAndRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.IgnoreChannelOfflineStatusNotifyConfigKey: false}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/ignore-channel-offline-status-notify", jsonBody(t, map[string]any{"enabled": true})))
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, true, config.values[gbconfig.IgnoreChannelOfflineStatusNotifyConfigKey])
+
+	config.saveErr = errors.New("disk full")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/ignore-channel-offline-status-notify", jsonBody(t, map[string]any{"enabled": false})))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, true, config.values[gbconfig.IgnoreChannelOfflineStatusNotifyConfigKey])
 }
 
 func TestServiceConfigController_PTZDefaultSpeedDefaultsToSix(t *testing.T) {

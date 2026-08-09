@@ -326,6 +326,26 @@ func TestPipeline_IngestDeltaAddUpdateDel(t *testing.T) {
 	assert.EqualValues(t, 0, leftover)
 }
 
+func TestPipeline_IngestDeltaUpdatesChannelStatus(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	ctx := context.Background()
+	sender := catalog.Sender{OwnerDeptID: 1, SourceDeviceID: "34020000002000000001"}
+	item := catalog.CatalogItem{DeviceID: "37011200001310000001", Name: "入口", CivilCode: "370112", StatusOn: true}
+	require.NoError(t, p.Ingest(ctx, sender, []catalog.CatalogItem{item}))
+
+	for _, action := range []string{"OFF", "VLOST", "DEFECT"} {
+		require.NoError(t, p.IngestDelta(ctx, sender, action, catalog.CatalogItem{DeviceID: item.DeviceID}))
+		var channel gbmodels.GbChannel
+		require.NoError(t, db.Where("channel_id = ?", item.DeviceID).First(&channel).Error)
+		assert.Equal(t, gbmodels.ChannelStatusOffline, channel.Status, action)
+
+		require.NoError(t, p.IngestDelta(ctx, sender, "ON", catalog.CatalogItem{DeviceID: item.DeviceID}))
+		require.NoError(t, db.Where("channel_id = ?", item.DeviceID).First(&channel).Error)
+		assert.Equal(t, gbmodels.ChannelStatusOnline, channel.Status, action)
+	}
+}
+
 func TestPipeline_IngestRejectsUnknownDeltaAction(t *testing.T) {
 	p := catalog.New(newPipelineTestDB(t))
 	err := p.IngestDelta(context.Background(), catalog.Sender{OwnerDeptID: 1}, "BROKEN", catalog.CatalogItem{DeviceID: "x"})

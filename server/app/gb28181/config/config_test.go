@@ -127,6 +127,19 @@ func TestSyncChannelsOnOnlineFromDefaultsToEnabled(t *testing.T) {
 	require.True(t, SyncChannelsOnOnlineFrom(source))
 }
 
+func TestIgnoreChannelOfflineStatusNotifyFromDefaultsToDisabled(t *testing.T) {
+	source := fakeSource{}
+	require.False(t, IgnoreChannelOfflineStatusNotifyFrom(source))
+
+	source.values = map[string]interface{}{IgnoreChannelOfflineStatusNotifyConfigKey: true}
+	source.bools = map[string]bool{IgnoreChannelOfflineStatusNotifyConfigKey: true}
+	require.True(t, IgnoreChannelOfflineStatusNotifyFrom(source))
+
+	source.values[IgnoreChannelOfflineStatusNotifyConfigKey] = false
+	source.bools[IgnoreChannelOfflineStatusNotifyConfigKey] = false
+	require.False(t, IgnoreChannelOfflineStatusNotifyFrom(source))
+}
+
 func TestSIPTraceEnabledFromDefaultsToDisabled(t *testing.T) {
 	source := fakeSource{}
 	require.False(t, SIPTraceEnabledFrom(source))

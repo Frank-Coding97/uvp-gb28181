@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -15,7 +16,7 @@ import (
 //
 // 责任:
 // - Ingest — 一批 CatalogItem 全量入库(manscdp 解析后调用)
-// - IngestDelta — Subscribe NOTIFY 单条事件入库(Add / Update / Del)
+// - IngestDelta — Subscribe NOTIFY 单条事件入库(Add / Update / Del / 状态变化)
 //
 // 实现策略:
 // - 单事务处理一批(失败回滚)
@@ -177,7 +178,7 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 
 // IngestDelta Subscribe NOTIFY 单条增量入库(G1 task 调用入口)
 //
-// action:add / update / del(GB/T 28181 §11.5.3)
+// action:add / update / del / on / off / vlost / defect
 // del:软删(deleted_at),不真删
 func (p *Pipeline) IngestDelta(ctx context.Context, sender Sender, action string, it CatalogItem) error {
 	if sender.OwnerDeptID == 0 {
@@ -187,17 +188,30 @@ func (p *Pipeline) IngestDelta(ctx context.Context, sender Sender, action string
 		return fmt.Errorf("%w: sourceDeviceId=%s", ErrOwnerDeptRequired, sender.SourceDeviceID)
 	}
 
-	switch action {
-	case "ADD", "add":
+	switch strings.ToUpper(strings.TrimSpace(action)) {
+	case "ADD":
 		return p.Ingest(ctx, sender, []CatalogItem{it})
-	case "UPDATE", "update":
+	case "UPDATE":
 		// 当前 ingestOne 自带 upsert 行为;UPDATE = ingest
 		return p.Ingest(ctx, sender, []CatalogItem{it})
-	case "DEL", "del", "DELETE", "delete":
+	case "DEL", "DELETE":
 		return p.softDelete(ctx, sender, it.DeviceID)
+	case "ON":
+		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOnline)
+	case "OFF", "VLOST", "DEFECT":
+		return p.updateChannelStatus(ctx, sender, it.DeviceID, gbmodels.ChannelStatusOffline)
 	default:
 		return errors.New("catalog: unknown delta action: " + action)
 	}
+}
+
+func (p *Pipeline) updateChannelStatus(ctx context.Context, sender Sender, code string, status int8) error {
+	if code == "" {
+		return nil
+	}
+	return p.db.WithContext(ctx).Model(&gbmodels.GbChannel{}).
+		Where("owner_dept_id = ? AND device_id = ? AND channel_id = ?", sender.OwnerDeptID, sender.SourceDeviceID, code).
+		Update("status", status).Error
 }
 
 // softDelete 软删节点 + 关联(deleted_at)

@@ -251,6 +251,8 @@ gb28181:
     keepalive_grace_seconds: 15 # 离线判定宽限缓冲(秒),避开边界误判
     offline_scan_interval: 30 # 离线扫描周期(秒)
     sync_channels_on_online: true # 设备上线或离线恢复时同步 Catalog 通道
+  catalog:
+    ignore_channel_offline_status_notify: false # 兼容错误状态上报：忽略 Catalog NOTIFY 的 OFF/VLOST/DEFECT
   position_history:
     enabled: true             # 是否保存位置历史轨迹；关闭后仍更新最新位置
     retention_days: 7         # 历史轨迹保留天数，范围 1-365
