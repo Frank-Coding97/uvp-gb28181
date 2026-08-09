@@ -32,6 +32,7 @@ type TalkRepo interface {
 	FindByCallID(context.Context, string) (*models.GbTalkSession, error)
 	FindByBroadcastSN(context.Context, uint, string, string) (*models.GbTalkSession, error)
 	FindPendingBroadcast(context.Context, string, string) ([]models.GbTalkSession, error)
+	ClaimBroadcastDialog(context.Context, string, string, uint) (bool, error)
 	UpdateBroadcastFacts(context.Context, string, BroadcastFactsPatch) (bool, error)
 	ConsumeTokenForPublish(context.Context, string, string, string, time.Time) (bool, error)
 	Transition(context.Context, string, models.TalkSessionState, models.TalkSessionState, TransitionPatch) (bool, error)

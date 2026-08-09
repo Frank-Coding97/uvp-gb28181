@@ -96,6 +96,9 @@ func (s *Service) onBroadcastPublished(ctx context.Context, session *models.GbTa
 		if findErr != nil || current == nil || current.State != models.TalkSessionInviting {
 			return findErr
 		}
+		if current.SignalPhase == models.TalkSignalPhaseWaitingAck || current.SignalPhase == models.TalkSignalPhaseActive {
+			return nil
+		}
 	}
 	phase = models.TalkSignalPhaseWaitingInvite
 	_, err = s.repo.UpdateBroadcastFacts(ctx, session.SessionID, BroadcastFactsPatch{SignalPhase: &phase})
@@ -148,6 +151,21 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 	if err != nil {
 		return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 488, Reason: err.Error()}
 	}
+	claimed, err := s.repo.ClaimBroadcastDialog(ctx, session.SessionID, invite.CallID, invite.CSeq)
+	if err != nil {
+		return PreparedBroadcastInvite{}, err
+	}
+	if !claimed {
+		current, findErr := s.repo.FindBySession(ctx, session.SessionID)
+		if findErr != nil {
+			return PreparedBroadcastInvite{}, findErr
+		}
+		if current == nil || current.CallID != strings.TrimSpace(invite.CallID) || current.LocalPort <= 0 {
+			return PreparedBroadcastInvite{}, &BroadcastSIPError{Status: 486, Reason: "Broadcast dialog 已被其他 INVITE 认领"}
+		}
+		answer, answerErr := sdp.BuildBroadcastAnswer(sdp.BroadcastAnswerParams{ServerID: s.activation.deps.Platform.ServerID, LocalIP: s.broadcastLocalIP(current.NodeID), LocalPort: current.LocalPort, SSRC: current.SSRC, SenderMode: sdp.BroadcastSenderMode(current.SenderMode)})
+		return PreparedBroadcastInvite{SessionID: current.SessionID, AnswerSDP: answer}, answerErr
+	}
 	mediaNode, ok := s.nodes.Get(session.NodeID)
 	if !ok || mediaNode == nil || !mediaNode.IsActive() {
 		return PreparedBroadcastInvite{}, ErrTalkNodeUnavailable
@@ -155,23 +173,23 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 	client := s.activation.deps.ClientFor(mediaNode)
 	broadcastClient, ok := client.(broadcastMediaClient)
 	if !ok || broadcastClient == nil {
-		return PreparedBroadcastInvite{}, ErrTalkActivationUnavailable
+		return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, ErrTalkActivationUnavailable)
 	}
 	info, err := client.GetMediaInfo(ctx, "rtsp", defaultTalkVHost, session.App, session.SourceStream)
 	if err != nil || info == nil || !info.Online || !hasReadyPCMA(info.Tracks) {
-		return PreparedBroadcastInvite{}, ErrTalkSourceUnavailable
+		return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, ErrTalkSourceUnavailable)
 	}
 	localPort := 0
 	if media.SenderMode == sdp.BroadcastSenderTCPPassive {
 		result, startErr := client.StartSendRtpPassive(ctx, zlm.TalkSendRtpRequest{VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream, RecvStreamID: session.RecvStream, SSRC: session.SSRC, CloseDelayMS: defaultTalkCloseDelay})
 		if startErr != nil {
-			return PreparedBroadcastInvite{}, startErr
+			return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, startErr)
 		}
 		localPort = result.LocalPort
 	} else {
 		result, startErr := broadcastClient.StartBroadcastSendRtp(ctx, zlm.BroadcastSendRtpRequest{VHost: defaultTalkVHost, App: session.App, SourceStream: session.SourceStream, SSRC: session.SSRC, RemoteIP: media.RemoteIP, RemotePort: media.RemotePort, IsUDP: media.SenderMode == sdp.BroadcastSenderUDP})
 		if startErr != nil {
-			return PreparedBroadcastInvite{}, startErr
+			return PreparedBroadcastInvite{}, s.failActivation(ctx, session, client, "", false, startErr)
 		}
 		localPort = result.LocalPort
 	}
@@ -185,8 +203,7 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 	phase := models.TalkSignalPhaseWaitingAck
 	transport := strings.ToLower(media.Transport)
 	senderMode := string(media.SenderMode)
-	callID := strings.TrimSpace(invite.CallID)
-	changed, err := s.repo.UpdateBroadcastFacts(ctx, session.SessionID, BroadcastFactsPatch{SignalPhase: &phase, RemoteMediaIP: &media.RemoteIP, RemotePort: &media.RemotePort, Transport: &transport, SenderMode: &senderMode, CallID: &callID, CSeq: &invite.CSeq})
+	changed, err := s.repo.UpdateBroadcastFacts(ctx, session.SessionID, BroadcastFactsPatch{SignalPhase: &phase, RemoteMediaIP: &media.RemoteIP, RemotePort: &media.RemotePort, Transport: &transport, SenderMode: &senderMode, LocalPort: &localPort})
 	if err != nil || !changed {
 		_ = client.StopSendRtp(ctx, defaultTalkVHost, session.App, session.SourceStream, session.SSRC)
 		return PreparedBroadcastInvite{}, err
@@ -197,6 +214,15 @@ func (s *Service) PrepareBroadcastInvite(ctx context.Context, invite BroadcastIn
 		return PreparedBroadcastInvite{}, err
 	}
 	return PreparedBroadcastInvite{SessionID: session.SessionID, AnswerSDP: answer}, nil
+}
+
+func (s *Service) broadcastLocalIP(nodeID int64) string {
+	if s != nil && s.nodes != nil {
+		if mediaNode, ok := s.nodes.Get(nodeID); ok && mediaNode != nil {
+			return mediaNode.Host
+		}
+	}
+	return ""
 }
 
 func (s *Service) OnBroadcastAck(ctx context.Context, callID string) error {

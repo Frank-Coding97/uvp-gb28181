@@ -63,6 +63,7 @@ type BroadcastFactsPatch struct {
 	RemoteTag     *string
 	RemoteURI     *string
 	CSeq          *uint
+	LocalPort     *int
 }
 
 type GormRepo struct {
@@ -154,6 +155,18 @@ func (r *GormRepo) FindPendingBroadcast(ctx context.Context, deviceID, targetID 
 	return sessions, err
 }
 
+func (r *GormRepo) ClaimBroadcastDialog(ctx context.Context, sessionID, callID string, cseq uint) (bool, error) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+		Where("session_id = ? AND mode = ? AND call_id = '' AND state IN ?", sessionID, models.TalkSessionModeBroadcast,
+			[]models.TalkSessionState{models.TalkSessionPublishing, models.TalkSessionInviting}).
+		Updates(map[string]any{"call_id": callID, "dialog_cseq": cseq, "signal_phase": models.TalkSignalPhaseAnswering})
+	return result.RowsAffected > 0, result.Error
+}
+
 func (r *GormRepo) UpdateBroadcastFacts(ctx context.Context, sessionID string, patch BroadcastFactsPatch) (bool, error) {
 	updates := make(map[string]any)
 	if patch.SN != nil {
@@ -191,6 +204,9 @@ func (r *GormRepo) UpdateBroadcastFacts(ctx context.Context, sessionID string, p
 	}
 	if patch.CSeq != nil {
 		updates["dialog_cseq"] = *patch.CSeq
+	}
+	if patch.LocalPort != nil {
+		updates["local_port"] = *patch.LocalPort
 	}
 	if len(updates) == 0 {
 		return false, nil

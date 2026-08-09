@@ -48,6 +48,16 @@ func TestBroadcastSessionFactsPersistAndMatchExactly(t *testing.T) {
 	require.Equal(t, models.TalkSignalPhaseAnswering, got.SignalPhase)
 	require.Equal(t, "192.0.2.20", got.RemoteMediaIP)
 	require.Equal(t, 30000, got.RemoteMediaPort)
+
+	transitioned, err := repo.Transition(context.Background(), session.SessionID, models.TalkSessionReserved, models.TalkSessionPublishing, TransitionPatch{})
+	require.NoError(t, err)
+	require.True(t, transitioned)
+	claimed, err := repo.ClaimBroadcastDialog(context.Background(), session.SessionID, "call-1", 8)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	claimed, err = repo.ClaimBroadcastDialog(context.Background(), session.SessionID, "call-2", 9)
+	require.NoError(t, err)
+	require.False(t, claimed)
 }
 
 func pointer(value string) *string                                            { return &value }
