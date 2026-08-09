@@ -127,6 +127,19 @@ func TestSyncChannelsOnOnlineFromDefaultsToEnabled(t *testing.T) {
 	require.True(t, SyncChannelsOnOnlineFrom(source))
 }
 
+func TestOnlineOnHeartbeatFromDefaultsToEnabled(t *testing.T) {
+	source := fakeSource{}
+	require.True(t, OnlineOnHeartbeatFrom(source))
+
+	source.values = map[string]interface{}{OnlineOnHeartbeatConfigKey: false}
+	source.bools = map[string]bool{OnlineOnHeartbeatConfigKey: false}
+	require.False(t, OnlineOnHeartbeatFrom(source))
+
+	source.values[OnlineOnHeartbeatConfigKey] = true
+	source.bools[OnlineOnHeartbeatConfigKey] = true
+	require.True(t, OnlineOnHeartbeatFrom(source))
+}
+
 func TestIgnoreChannelOfflineStatusNotifyFromDefaultsToDisabled(t *testing.T) {
 	source := fakeSource{}
 	require.False(t, IgnoreChannelOfflineStatusNotifyFrom(source))

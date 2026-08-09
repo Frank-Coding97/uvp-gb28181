@@ -83,6 +83,40 @@ func TestOfflineAndKeepalive_StatusEventSemantics(t *testing.T) {
 	})
 }
 
+func TestKeepaliveDisabledUpdatesFactWithoutRestoringStatus(t *testing.T) {
+	db := newStatusEventTestDB(t)
+	ctx := context.Background()
+	info := RegisterInfo{DeviceID: "34020000002000000033", Transport: "UDP", IP: "192.0.2.33", Port: 5060, Expires: 3600}
+	_, err := HandleRegister(ctx, info, 60)
+	require.NoError(t, err)
+	require.NoError(t, HandleUnregister(ctx, info.DeviceID))
+
+	app.ConfigYml = onlineOnHeartbeatDisabledConfig{testConfig: testConfig{}}
+	restored, err := Keepalive(ctx, info.DeviceID)
+	require.NoError(t, err)
+	assert.False(t, restored)
+
+	var device gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", info.DeviceID).First(&device).Error)
+	assert.Equal(t, gbmodels.DeviceStatusOffline, device.Status)
+	require.NotNil(t, device.KeepaliveTime)
+	assertStatusEvents(t, db, []gbmodels.DeviceStatusEventType{
+		gbmodels.DeviceEventRegisterOnline,
+		gbmodels.DeviceEventUnregisterOffline,
+	})
+}
+
+type onlineOnHeartbeatDisabledConfig struct{ testConfig }
+
+func (onlineOnHeartbeatDisabledConfig) Get(key string) interface{} {
+	if key == "gb28181.device.online_on_heartbeat" {
+		return false
+	}
+	return nil
+}
+
+func (onlineOnHeartbeatDisabledConfig) GetBool(string) bool { return false }
+
 func newStatusEventTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	prevDB, prevConfig := app.GormDbMysql, app.ConfigYml

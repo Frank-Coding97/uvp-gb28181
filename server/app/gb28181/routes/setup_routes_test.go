@@ -24,6 +24,8 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"PUT /api/gb28181/sip/service-config/position-history",
 		"GET /api/gb28181/sip/service-config/sync-channels-on-online",
 		"PUT /api/gb28181/sip/service-config/sync-channels-on-online",
+		"GET /api/gb28181/sip/service-config/online-on-heartbeat",
+		"PUT /api/gb28181/sip/service-config/online-on-heartbeat",
 		"GET /api/gb28181/sip/service-config/ignore-channel-offline-status-notify",
 		"PUT /api/gb28181/sip/service-config/ignore-channel-offline-status-notify",
 		"GET /api/gb28181/sip/service-config/ptz-default-speed",

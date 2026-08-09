@@ -11,6 +11,7 @@ import (
 const (
 	SDPExtensionConfigKey                     = "gb28181.sdp.extension_enabled"
 	SyncChannelsOnOnlineConfigKey             = "gb28181.device.sync_channels_on_online"
+	OnlineOnHeartbeatConfigKey                = "gb28181.device.online_on_heartbeat"
 	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 
@@ -69,6 +70,18 @@ func SyncChannelsOnOnlineFrom(c valueSource) bool {
 // observes a saved setting without rebuilding the GB28181 runtime.
 func SyncChannelsOnOnline() bool {
 	return SyncChannelsOnOnlineFrom(app.ConfigYml)
+}
+
+// OnlineOnHeartbeatFrom returns whether a Keepalive should restore an offline
+// device to online. Missing configuration defaults to true to preserve the
+// historical behavior.
+func OnlineOnHeartbeatFrom(c valueSource) bool {
+	return c == nil || c.Get(OnlineOnHeartbeatConfigKey) == nil || c.GetBool(OnlineOnHeartbeatConfigKey)
+}
+
+// OnlineOnHeartbeat reads the live setting for the next device Keepalive.
+func OnlineOnHeartbeat() bool {
+	return OnlineOnHeartbeatFrom(app.ConfigYml)
 }
 
 // IgnoreChannelOfflineStatusNotifyFrom returns whether negative channel

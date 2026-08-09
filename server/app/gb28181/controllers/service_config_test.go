@@ -54,6 +54,8 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/sdp-extension", controller.UpdateSDPExtension)
 	router.GET("/sync-channels-on-online", controller.GetSyncChannelsOnOnline)
 	router.PUT("/sync-channels-on-online", controller.UpdateSyncChannelsOnOnline)
+	router.GET("/online-on-heartbeat", controller.GetOnlineOnHeartbeat)
+	router.PUT("/online-on-heartbeat", controller.UpdateOnlineOnHeartbeat)
 	router.GET("/ignore-channel-offline-status-notify", controller.GetIgnoreChannelOfflineStatusNotify)
 	router.PUT("/ignore-channel-offline-status-notify", controller.UpdateIgnoreChannelOfflineStatusNotify)
 	router.GET("/ptz-default-speed", controller.GetPTZDefaultSpeed)
@@ -188,6 +190,39 @@ func TestServiceConfigController_UpdateSyncChannelsOnOnlinePersistsAndRollsBack(
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sync-channels-on-online", jsonBody(t, map[string]bool{"enabled": true})))
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, false, config.values[gbconfig.SyncChannelsOnOnlineConfigKey])
+}
+
+func TestServiceConfigController_OnlineOnHeartbeatDefaultsToEnabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/online-on-heartbeat", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, true, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdateOnlineOnHeartbeatPersistsAndRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.OnlineOnHeartbeatConfigKey: true}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/online-on-heartbeat", jsonBody(t, map[string]bool{"enabled": false})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, false, config.values[gbconfig.OnlineOnHeartbeatConfigKey])
+
+	config.saveErr = errors.New("write failed")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/online-on-heartbeat", jsonBody(t, map[string]bool{"enabled": true})))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, false, config.values[gbconfig.OnlineOnHeartbeatConfigKey])
 }
 
 func TestServiceConfigController_IgnoreChannelOfflineStatusNotifyDefaultsToDisabled(t *testing.T) {

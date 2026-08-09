@@ -12,6 +12,7 @@ import {
   fetchPositionHistoryConfig,
   fetchSyncChannelsOnOnlineConfig,
   fetchIgnoreChannelOfflineStatusNotifyConfig,
+  fetchOnlineOnHeartbeatConfig,
   getControlCapabilities,
   getDeviceStatus,
   getHomePosition,
@@ -26,6 +27,7 @@ import {
   updateSIPLogConfig,
   updateSyncChannelsOnOnlineConfig,
   updateIgnoreChannelOfflineStatusNotifyConfig,
+  updateOnlineOnHeartbeatConfig,
   type DeviceStatusResult,
   type HomePositionPatch
 } from "./gb28181";
@@ -84,6 +86,16 @@ describe("国标服务配置 API", () => {
       "/api/gb28181/sip/service-config/sync-channels-on-online",
       { data: { enabled: false } }
     );
+  });
+
+  it("读取并更新收到心跳恢复设备上线配置", async () => {
+    await fetchOnlineOnHeartbeatConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/online-on-heartbeat");
+
+    await updateOnlineOnHeartbeatConfig(false);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/online-on-heartbeat", {
+      data: { enabled: false }
+    });
   });
 
   it("读取并更新忽略通道离线/异常通知配置", async () => {

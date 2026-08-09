@@ -348,6 +348,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			serviceConfig.PUT("/sdp-extension", serviceConfigController.UpdateSDPExtension)
 			serviceConfig.GET("/sync-channels-on-online", serviceConfigController.GetSyncChannelsOnOnline)
 			serviceConfig.PUT("/sync-channels-on-online", serviceConfigController.UpdateSyncChannelsOnOnline)
+			serviceConfig.GET("/online-on-heartbeat", serviceConfigController.GetOnlineOnHeartbeat)
+			serviceConfig.PUT("/online-on-heartbeat", serviceConfigController.UpdateOnlineOnHeartbeat)
 			serviceConfig.GET("/ignore-channel-offline-status-notify", serviceConfigController.GetIgnoreChannelOfflineStatusNotify)
 			serviceConfig.PUT("/ignore-channel-offline-status-notify", serviceConfigController.UpdateIgnoreChannelOfflineStatusNotify)
 			serviceConfig.GET("/ptz-default-speed", serviceConfigController.GetPTZDefaultSpeed)

@@ -35,6 +35,10 @@ type SyncChannelsOnOnlineConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+type OnlineOnHeartbeatConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 type IgnoreChannelOfflineStatusNotifyConfig struct {
 	Enabled bool `json:"enabled"`
 }
@@ -177,6 +181,36 @@ func (sc *ServiceConfigController) UpdateSyncChannelsOnOnline(c *gin.Context) {
 	}
 
 	sc.SuccessWithMessage(c, "设备上线同步通道配置已更新", SyncChannelsOnOnlineConfig{Enabled: *request.Enabled})
+}
+
+// GetOnlineOnHeartbeat GET /api/gb28181/sip/service-config/online-on-heartbeat
+func (sc *ServiceConfigController) GetOnlineOnHeartbeat(c *gin.Context) {
+	sc.Success(c, OnlineOnHeartbeatConfig{Enabled: gbconfig.OnlineOnHeartbeat()})
+}
+
+// UpdateOnlineOnHeartbeat PUT /api/gb28181/sip/service-config/online-on-heartbeat
+func (sc *ServiceConfigController) UpdateOnlineOnHeartbeat(c *gin.Context) {
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+		sc.Fail(c, "保存收到心跳恢复设备上线配置失败：enabled 必须为布尔值", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.OnlineOnHeartbeat()
+	app.ConfigYml.Set(gbconfig.OnlineOnHeartbeatConfigKey, *request.Enabled)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.OnlineOnHeartbeatConfigKey, previous)
+		sc.Fail(c, "保存收到心跳恢复设备上线配置失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "收到心跳恢复设备上线配置已更新", OnlineOnHeartbeatConfig{Enabled: *request.Enabled})
 }
 
 // GetIgnoreChannelOfflineStatusNotify GET /api/gb28181/sip/service-config/ignore-channel-offline-status-notify

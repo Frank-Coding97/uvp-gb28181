@@ -8,12 +8,14 @@ import {
     fetchSDPExtensionConfig,
     fetchSIPLogConfig,
     fetchSyncChannelsOnOnlineConfig,
+    fetchOnlineOnHeartbeatConfig,
     fetchIgnoreChannelOfflineStatusNotifyConfig,
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
     updateSIPLogConfig,
     updateSDPExtensionConfig,
     updateSyncChannelsOnOnlineConfig,
+    updateOnlineOnHeartbeatConfig,
     updateIgnoreChannelOfflineStatusNotifyConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
@@ -35,6 +37,9 @@ const ptzDefaultSpeedReady = ref(false);
 const syncChannelsOnOnlineLoading = ref(true);
 const syncChannelsOnOnlineSaving = ref(false);
 const syncChannelsOnOnlineReady = ref(false);
+const onlineOnHeartbeatLoading = ref(true);
+const onlineOnHeartbeatSaving = ref(false);
+const onlineOnHeartbeatReady = ref(false);
 const ignoreChannelOfflineStatusNotifyLoading = ref(true);
 const ignoreChannelOfflineStatusNotifySaving = ref(false);
 const ignoreChannelOfflineStatusNotifyReady = ref(false);
@@ -47,6 +52,7 @@ const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedSyncChannelsOnOnline = ref(true);
+const savedOnlineOnHeartbeat = ref(true);
 const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const positionHistoryChanged = computed(
@@ -59,6 +65,7 @@ const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefault
 const syncChannelsOnOnlineChanged = computed(
     () => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value
 );
+const onlineOnHeartbeatChanged = computed(() => draft.onlineOnHeartbeat !== savedOnlineOnHeartbeat.value);
 const ignoreChannelOfflineStatusNotifyChanged = computed(
     () => draft.ignoreChannelOfflineStatusNotify !== savedIgnoreChannelOfflineStatusNotify.value
 );
@@ -69,6 +76,7 @@ const hasChanges = computed(
         sdpExtensionChanged.value ||
         ptzDefaultSpeedChanged.value ||
         syncChannelsOnOnlineChanged.value ||
+        onlineOnHeartbeatChanged.value ||
         ignoreChannelOfflineStatusNotifyChanged.value ||
         sipLogChanged.value
 );
@@ -78,6 +86,7 @@ const configLoading = computed(
         sdpExtensionLoading.value ||
         ptzDefaultSpeedLoading.value ||
         syncChannelsOnOnlineLoading.value ||
+        onlineOnHeartbeatLoading.value ||
         ignoreChannelOfflineStatusNotifyLoading.value ||
         sipLogLoading.value
 );
@@ -87,6 +96,7 @@ const configSaving = computed(
         sdpExtensionSaving.value ||
         ptzDefaultSpeedSaving.value ||
         syncChannelsOnOnlineSaving.value ||
+        onlineOnHeartbeatSaving.value ||
         ignoreChannelOfflineStatusNotifySaving.value ||
         sipLogSaving.value
 );
@@ -96,6 +106,7 @@ const configReady = computed(
         sdpExtensionReady.value &&
         ptzDefaultSpeedReady.value &&
         syncChannelsOnOnlineReady.value &&
+        onlineOnHeartbeatReady.value &&
         ignoreChannelOfflineStatusNotifyReady.value &&
         sipLogReady.value
 );
@@ -164,6 +175,21 @@ async function loadSyncChannelsOnOnlineConfig() {
     }
 }
 
+async function loadOnlineOnHeartbeatConfig() {
+    onlineOnHeartbeatLoading.value = true;
+    try {
+        const response = await fetchOnlineOnHeartbeatConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.onlineOnHeartbeat = response.data.enabled;
+        savedOnlineOnHeartbeat.value = response.data.enabled;
+        onlineOnHeartbeatReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载收到心跳恢复设备上线配置失败");
+    } finally {
+        onlineOnHeartbeatLoading.value = false;
+    }
+}
+
 async function loadIgnoreChannelOfflineStatusNotifyConfig() {
     ignoreChannelOfflineStatusNotifyLoading.value = true;
     try {
@@ -201,6 +227,7 @@ function startEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
+    draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
     draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = true;
@@ -212,6 +239,7 @@ function cancelEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
+    draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
     draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = false;
@@ -262,6 +290,14 @@ async function saveConfig() {
             savedSyncChannelsOnOnline.value = response.data.enabled;
             syncChannelsOnOnlineSaving.value = false;
         }
+        if (onlineOnHeartbeatChanged.value) {
+            onlineOnHeartbeatSaving.value = true;
+            const response = await updateOnlineOnHeartbeatConfig(draft.onlineOnHeartbeat);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.onlineOnHeartbeat = response.data.enabled;
+            savedOnlineOnHeartbeat.value = response.data.enabled;
+            onlineOnHeartbeatSaving.value = false;
+        }
         if (ignoreChannelOfflineStatusNotifyChanged.value) {
             ignoreChannelOfflineStatusNotifySaving.value = true;
             const response = await updateIgnoreChannelOfflineStatusNotifyConfig(draft.ignoreChannelOfflineStatusNotify);
@@ -293,6 +329,7 @@ async function saveConfig() {
         sdpExtensionSaving.value = false;
         ptzDefaultSpeedSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
+        onlineOnHeartbeatSaving.value = false;
         ignoreChannelOfflineStatusNotifySaving.value = false;
         sipLogSaving.value = false;
     }
@@ -304,6 +341,7 @@ onMounted(() =>
         loadSDPExtensionConfig(),
         loadPTZDefaultSpeedConfig(),
         loadSyncChannelsOnOnlineConfig(),
+        loadOnlineOnHeartbeatConfig(),
         loadIgnoreChannelOfflineStatusNotifyConfig(),
         loadSIPLogConfig()
     ])
@@ -474,7 +512,17 @@ onMounted(() =>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="onlineOnHeartbeat" label="收到心跳就把设备设置为上线">
-                                        <a-switch v-model="draft.onlineOnHeartbeat" disabled />
+                                        <a-switch
+                                            v-model="draft.onlineOnHeartbeat"
+                                            :loading="onlineOnHeartbeatLoading || onlineOnHeartbeatSaving"
+                                            :disabled="!isEditing || onlineOnHeartbeatLoading || onlineOnHeartbeatSaving || !onlineOnHeartbeatReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                        <template #extra>
+                                            <div>开启后，离线设备收到 Keepalive 会恢复为在线；关闭后仍记录最后心跳时间，但保持当前设备状态。默认开启。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

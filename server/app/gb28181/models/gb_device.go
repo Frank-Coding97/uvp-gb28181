@@ -148,9 +148,9 @@ func UpdateStatus(c context.Context, deviceID string, status int8) error {
 		Update("status", status).Error
 }
 
-// TouchKeepalive 记录一次心跳:更新 keepalive_time 事实 + 刷新 status 缓存为在线。
+// TouchKeepalive 记录一次心跳；onlineOnHeartbeat 控制是否同步刷新 status 为在线。
 // 返回 true 表示本次心跳让设备从离线恢复,在线恢复方据此重新拉取 Catalog。
-func TouchKeepalive(c context.Context, deviceID string) (bool, error) {
+func TouchKeepalive(c context.Context, deviceID string, onlineOnHeartbeat bool) (bool, error) {
 	now := time.Now()
 	db := app.DB().WithContext(c)
 	var restored bool
@@ -159,6 +159,9 @@ func TouchKeepalive(c context.Context, deviceID string) (bool, error) {
 		result := tx.Set("gorm:query_option", "FOR UPDATE").Where("device_id = ?", deviceID).Limit(1).Find(&d)
 		if result.Error != nil || result.RowsAffected == 0 {
 			return result.Error
+		}
+		if !onlineOnHeartbeat {
+			return tx.Model(&GbDevice{}).Where("id = ?", d.ID).Update("keepalive_time", now).Error
 		}
 		metadata := StatusEventMetadata{IP: d.IP, Port: d.Port, Transport: d.Transport, KeepaliveInterval: intPtr(d.KeepaliveInterval)}
 		if d.Status != DeviceStatusOnline {

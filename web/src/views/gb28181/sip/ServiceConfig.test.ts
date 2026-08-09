@@ -13,6 +13,8 @@ const api = vi.hoisted(() => ({
     updateSyncChannelsOnOnlineConfig: vi.fn(),
     fetchIgnoreChannelOfflineStatusNotifyConfig: vi.fn(),
     updateIgnoreChannelOfflineStatusNotifyConfig: vi.fn(),
+    fetchOnlineOnHeartbeatConfig: vi.fn(),
+    updateOnlineOnHeartbeatConfig: vi.fn(),
     fetchSIPLogConfig: vi.fn(),
     updateSIPLogConfig: vi.fn()
 }));
@@ -83,6 +85,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateSyncChannelsOnOnlineConfig.mockReset();
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockReset();
         api.updateIgnoreChannelOfflineStatusNotifyConfig.mockReset();
+        api.fetchOnlineOnHeartbeatConfig.mockReset();
+        api.updateOnlineOnHeartbeatConfig.mockReset();
         api.fetchSIPLogConfig.mockReset();
         api.updateSIPLogConfig.mockReset();
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
@@ -99,6 +103,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
         api.updateIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
+        api.fetchOnlineOnHeartbeatConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
+        api.updateOnlineOnHeartbeatConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, applied: true } });
         api.updateSIPLogConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true, applied: true } });
     });
@@ -296,6 +302,30 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updateIgnoreChannelOfflineStatusNotifyConfig).toHaveBeenCalledWith(true);
+    });
+
+    it("loads and saves the online-on-heartbeat switch", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchOnlineOnHeartbeatConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("收到心跳就把设备设置为上线");
+        expect(wrapper.text()).toContain("关闭后仍记录最后心跳时间");
+        const heartbeatSwitch = wrapper
+            .findAll("label")
+            .find(label => label.text().includes("收到心跳就把设备设置为上线"))
+            ?.find("button");
+        expect(heartbeatSwitch?.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        expect(heartbeatSwitch?.element).toHaveProperty("disabled", false);
+        await heartbeatSwitch?.trigger("click");
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateOnlineOnHeartbeatConfig).toHaveBeenCalledWith(false);
     });
 
     it("shows when the saved SIP trace switch is not applied to the runtime", async () => {

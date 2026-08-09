@@ -8,6 +8,7 @@ import (
 
 	"gorm.io/gorm"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -171,8 +172,8 @@ func HandleUnregister(ctx context.Context, deviceID string) error {
 	return gbmodels.MarkOfflineWithReason(ctx, deviceID, gbmodels.DeviceEventUnregisterOffline, gbmodels.DeviceEventSourceUnregister)
 }
 
-// Keepalive 处理心跳:更新 keepalive_time 事实 + 刷新 status 缓存。
+// Keepalive 处理心跳:始终更新 keepalive_time，按动态配置决定是否刷新 status 缓存。
 // 返回 true 表示设备从离线恢复,调用方应重新查询 Catalog 恢复通道状态。
 func Keepalive(ctx context.Context, deviceID string) (bool, error) {
-	return gbmodels.TouchKeepalive(ctx, deviceID)
+	return gbmodels.TouchKeepalive(ctx, deviceID, gbconfig.OnlineOnHeartbeat())
 }

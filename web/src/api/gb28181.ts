@@ -755,6 +755,18 @@ export const updateSyncChannelsOnOnlineConfig = (enabled: boolean) =>
     data: { enabled }
   });
 
+export interface OnlineOnHeartbeatConfig {
+  enabled: boolean;
+}
+
+export const fetchOnlineOnHeartbeatConfig = () =>
+  http.request<BaseResult<OnlineOnHeartbeatConfig>>("get", baseUrlApi("gb28181/sip/service-config/online-on-heartbeat"));
+
+export const updateOnlineOnHeartbeatConfig = (enabled: boolean) =>
+  http.request<BaseResult<OnlineOnHeartbeatConfig>>("put", baseUrlApi("gb28181/sip/service-config/online-on-heartbeat"), {
+    data: { enabled }
+  });
+
 export interface IgnoreChannelOfflineStatusNotifyConfig {
   enabled: boolean;
 }
