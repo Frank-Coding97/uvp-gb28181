@@ -11,16 +11,19 @@ export interface SecuritySnapshot { mode: SecurityMode; dropped: number; sampled
 export type AccessListType = "blacklist" | "allowlist";
 export type AccessMatchType = "ip" | "cidr" | "user_agent";
 export interface SecurityAccessRule { id: number; listType: AccessListType; matchType: AccessMatchType; matchValue: string; scope: string; status: "enabled" | "disabled"; expiresAt?: string; note: string; createdBy: string; createdAt: string; updatedAt: string }
+export interface SecurityPageParams { page?: number; pageSize?: number }
+export interface SecurityBanPageParams extends SecurityPageParams { activeOnly?: boolean }
+export interface SecurityPage<T> { items: T[]; total: number; page: number; pageSize: number }
 
 export const getSecuritySnapshot = () => http.request<BaseResult<SecuritySnapshot>>("get", baseUrlApi("gb28181/security/snapshot"));
-export const listSecurityEvents = (params: { limit?: number } = {}) => http.request<BaseResult<{ items: SecurityEventAggregate[]; total: number; limit: number }>>("get", baseUrlApi("gb28181/security/events"), { params });
-export const listSecurityBans = () => http.request<BaseResult<{ items: FirewallBan[]; total: number }>>("get", baseUrlApi("gb28181/security/bans"));
+export const listSecurityEvents = (params: SecurityPageParams = {}) => http.request<BaseResult<SecurityPage<SecurityEventAggregate>>>("get", baseUrlApi("gb28181/security/events"), { params });
+export const listSecurityBans = (params: SecurityBanPageParams = {}) => http.request<BaseResult<SecurityPage<FirewallBan>>>("get", baseUrlApi("gb28181/security/bans"), { params });
 export const unbanSecurity = (id: string) => http.request<BaseResult<{ id: string; status: string }>>("post", baseUrlApi(`gb28181/security/bans/${encodeURIComponent(id)}/unban`));
 export const getSecurityPolicy = () => http.request<BaseResult<SecurityPolicy>>("get", baseUrlApi("gb28181/security/policy"));
 export const updateSecurityPolicy = (policy: SecurityPolicy) => http.request<BaseResult<SecurityPolicy>>("put", baseUrlApi("gb28181/security/policy"), { data: policy });
 export const getSecurityAgentHealth = () => http.request<BaseResult<AgentStatus>>("get", baseUrlApi("gb28181/security/agent/health"));
 export const buildSecurityStreamUrl = () => baseUrlApi("gb28181/security/stream");
-export const listSecurityAccessRules = (listType?: AccessListType) => http.request<BaseResult<{ items: SecurityAccessRule[]; total: number }>>("get", baseUrlApi("gb28181/security/access-rules"), { params: listType ? { listType } : undefined });
+export const listSecurityAccessRules = (listType?: AccessListType, params: SecurityPageParams = {}) => http.request<BaseResult<SecurityPage<SecurityAccessRule>>>("get", baseUrlApi("gb28181/security/access-rules"), { params: { ...params, ...(listType ? { listType } : {}) } });
 export const createSecurityAccessRule = (rule: Partial<SecurityAccessRule>) => http.request<BaseResult<SecurityAccessRule>>("post", baseUrlApi("gb28181/security/access-rules"), { data: rule });
 export const updateSecurityAccessRule = (id: number, rule: Partial<SecurityAccessRule>) => http.request<BaseResult<SecurityAccessRule>>("put", baseUrlApi(`gb28181/security/access-rules/${id}`), { data: rule });
 export const deleteSecurityAccessRule = (id: number) => http.request<BaseResult<{ id: number; deleted: boolean }>>("delete", baseUrlApi(`gb28181/security/access-rules/${id}`));

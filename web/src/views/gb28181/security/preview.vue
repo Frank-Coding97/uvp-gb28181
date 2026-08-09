@@ -119,6 +119,19 @@ const period = ref<SecurityTrendPeriod>("24h");
 const trendPeriods: SecurityTrendPeriod[] = ["1h", "24h", "7d"];
 const eventSeverity = ref("全部风险");
 const eventSearch = ref("");
+const tablePageSizeOptions = [10, 20, 30, 50];
+const eventPage = ref(1);
+const eventPageSize = ref(20);
+const eventTotal = ref(0);
+const banPage = ref(1);
+const banPageSize = ref(20);
+const banTotal = ref(0);
+const blackRulePage = ref(1);
+const blackRulePageSize = ref(20);
+const blackRuleTotal = ref(0);
+const allowRulePage = ref(1);
+const allowRulePageSize = ref(20);
+const allowRuleTotal = ref(0);
 const protectionModes: ProtectionModeOption[] = [
   {
     key: "observe",
@@ -173,7 +186,7 @@ const ruleFormModel = computed(() => ({
 }));
 const maxUdpThreshold = ref(120);
 const banThreshold = ref(100);
-const lastRefreshAt = ref<string | undefined>();
+const refreshCountdown = ref(10);
 const dataUnavailable = ref(false);
 const chartElement = ref<HTMLElement | null>(null);
 let chart: VChart | null = null;
@@ -192,14 +205,21 @@ const filteredEvents = computed(() =>
 );
 
 const currentRules = computed(() => (activeTab.value === "allowlist" ? allowRules.value : blackRules.value));
+const currentRulePage = computed(() => activeTab.value === "allowlist" ? allowRulePage.value : blackRulePage.value);
+const currentRulePageSize = computed(() => activeTab.value === "allowlist" ? allowRulePageSize.value : blackRulePageSize.value);
+const currentRuleTotal = computed(() => activeTab.value === "allowlist" ? allowRuleTotal.value : blackRuleTotal.value);
+const eventPagination = computed(() => ({ total: eventTotal.value, current: eventPage.value, pageSize: eventPageSize.value, showTotal: true, showJumper: true, showPageSize: true, pageSizeOptions: tablePageSizeOptions }));
+const banPagination = computed(() => ({ total: banTotal.value, current: banPage.value, pageSize: banPageSize.value, showTotal: true, showJumper: true, showPageSize: true, pageSizeOptions: tablePageSizeOptions }));
+const rulePagination = computed(() => ({ total: currentRuleTotal.value, current: currentRulePage.value, pageSize: currentRulePageSize.value, showTotal: true, showJumper: true, showPageSize: true, pageSizeOptions: tablePageSizeOptions }));
 const selectedModeConfig = computed(() => protectionModes.find(item => item.key === selectedMode.value) ?? protectionModes[1]);
 const trendData = computed(() => buildSecurityTrend(securityEvents.value, period.value));
 const recognizedCount = computed(() => securityEvents.value.reduce((total, item) => total + Math.max(0, Number(item.count) || 0), 0));
 const blockedCount = computed(() => securityEvents.value.reduce((total, item) => total + (["drop", "ban"].includes(item.action) ? Math.max(0, Number(item.count) || 0) : 0), 0));
-const attentionCount = computed(() => autoBans.value.length + (allowRules.value.length > 0 ? 1 : 0));
+const overviewEvents = computed(() => (securitySnapshot.value?.events || []).slice().sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt)).map((item, index) => mapEvent(item, index)));
+const overviewBans = computed(() => (securitySnapshot.value?.bans || []).filter(item => item.status === "active" || item.status === "agent_failed").map((item, index) => mapBan(item, index)));
+const attentionCount = computed(() => banTotal.value + (allowRuleTotal.value > 0 ? 1 : 0));
 const enabledDefenseLayers = computed(() => 1 + (securityAgent.value.connected ? 1 : 0));
 const policyWindowLabel = computed(() => securityPolicy.value ? `${securityPolicy.value.window} 秒窗口` : "策略窗口读取中");
-const lastRefreshLabel = computed(() => lastRefreshAt.value ? new Date(lastRefreshAt.value).toLocaleTimeString() : "--");
 const liveStatus = computed(() => {
   if (dataUnavailable.value) return { label: "数据不可用", color: "red" as const };
   if (selectedMode.value === "observe") return { label: "仅观察", color: "orange" as const };
@@ -305,28 +325,41 @@ function expiryToIso(expiry: string) {
   return duration ? new Date(Date.now() + duration).toISOString() : undefined;
 }
 
-function mapEvent(event: SecurityEventAggregate, index: number): SecurityEvent {
+function mapEvent(event: SecurityEventAggregate, index: number, offset = 0): SecurityEvent {
   const highRisk = event.action === "ban" || event.reason.includes("nonce") || event.reason.includes("digest");
-  return { id: index + 1, severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危", source: event.sourceIp, location: "公网来源", method: event.method || "未知", userAgent: event.userAgent || "未上报", rule: event.reason, action: event.action, count: event.count, time: new Date(event.lastSeenAt).toLocaleString() };
+  return { id: offset + index + 1, severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危", source: event.sourceIp, location: "公网来源", method: event.method || "未知", userAgent: event.userAgent || "未上报", rule: event.reason, action: event.action, count: event.count, time: new Date(event.lastSeenAt).toLocaleString() };
 }
 
-function mapBan(ban: FirewallBan, index: number): AutoBanRecord {
+function mapBan(ban: FirewallBan, index: number, offset = 0): AutoBanRecord {
   const decision = ban.decision;
   const applied = ban.agentState === "applied";
   const permanent = decision.permanent === true || decision.ttl === 0;
-  return { id: index + 1, decisionId: decision.decisionId, source: decision.sourceIp, location: "公网来源", method: decision.triggerMethod || "未知", reason: decision.reason, evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`, mode: decision.policyMode === "strict" ? "严格" : "保护", firewallState: applied ? "已生效" : ban.agentState === "failed" ? "同步失败" : "待同步", createdAt: new Date(decision.createdAt).toLocaleTimeString(), expires: permanent ? "永久，人工解封" : formatRemaining(decision.createdAt, decision.ttl), blocked: ban.blockedCountAfterBan || 0 };
+  return { id: offset + index + 1, decisionId: decision.decisionId, source: decision.sourceIp, location: "公网来源", method: decision.triggerMethod || "未知", reason: decision.reason, evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`, mode: decision.policyMode === "strict" ? "严格" : "保护", firewallState: applied ? "已生效" : ban.agentState === "failed" ? "同步失败" : "待同步", createdAt: new Date(decision.createdAt).toLocaleTimeString(), expires: permanent ? "永久，人工解封" : formatRemaining(decision.createdAt, decision.ttl), blocked: ban.blockedCountAfterBan || 0 };
 }
 
-async function refreshPreview(showMessage = false) {
+async function refreshPreview(showMessage = false, forceLists = false) {
+  if (showMessage) refreshCountdown.value = 10;
   if (refreshInFlight) return;
   refreshInFlight = true;
   try {
-    const [snapshot, eventResult, banResult, policy, black, allow, agentHealth] = await Promise.all([getSecuritySnapshot(), listSecurityEvents({ limit: 500 }), listSecurityBans(), getSecurityPolicy(), listSecurityAccessRules("blacklist"), listSecurityAccessRules("allowlist"), getSecurityAgentHealth()]);
-    const successful = [snapshot, eventResult, banResult, policy, black, allow].filter(result => result.code === 0).length;
+    const shouldRefreshEvents = forceLists || showMessage || eventPage.value === 1;
+    const shouldRefreshBans = forceLists || showMessage || banPage.value === 1;
+    const shouldRefreshBlackRules = forceLists || showMessage || blackRulePage.value === 1;
+    const shouldRefreshAllowRules = forceLists || showMessage || allowRulePage.value === 1;
+    const [snapshot, eventResult, banResult, policy, black, allow, agentHealth] = await Promise.all([
+      getSecuritySnapshot(),
+      shouldRefreshEvents ? listSecurityEvents({ page: eventPage.value, pageSize: eventPageSize.value }) : Promise.resolve(null),
+      shouldRefreshBans ? listSecurityBans({ page: banPage.value, pageSize: banPageSize.value, activeOnly: true }) : Promise.resolve(null),
+      getSecurityPolicy(),
+      shouldRefreshBlackRules ? listSecurityAccessRules("blacklist", { page: blackRulePage.value, pageSize: blackRulePageSize.value }) : Promise.resolve(null),
+      shouldRefreshAllowRules ? listSecurityAccessRules("allowlist", { page: allowRulePage.value, pageSize: allowRulePageSize.value }) : Promise.resolve(null),
+      getSecurityAgentHealth()
+    ]);
+    const successful = [snapshot, eventResult, banResult, policy, black, allow].filter(result => result?.code === 0).length;
     dataUnavailable.value = successful === 0;
     if (snapshot.code === 0 && snapshot.data) {
       securitySnapshot.value = snapshot.data;
-      lastRefreshAt.value = snapshot.data.asOf;
+      securityEvents.value = snapshot.data.events || [];
       securityAgent.value = {
         connected: !!snapshot.data.agent?.connected,
         appliedRules: snapshot.data.agent?.appliedRules ?? 0,
@@ -337,21 +370,39 @@ async function refreshPreview(showMessage = false) {
     if (agentHealth.code === 0 && agentHealth.data) {
       securityAgent.value = agentHealth.data;
     }
-    if (eventResult.code === 0) {
+    if (eventResult?.code === 0) {
       const items = (eventResult.data?.items || []).slice().sort((left, right) => Date.parse(right.lastSeenAt) - Date.parse(left.lastSeenAt));
-      securityEvents.value = items;
-      events.value = items.map(mapEvent);
+      eventTotal.value = eventResult.data?.total || 0;
+      events.value = items.map((item, index) => mapEvent(item, index, (eventPage.value - 1) * eventPageSize.value));
     }
-    if (banResult.code === 0) autoBans.value = (banResult.data?.items || []).filter(item => item.status === "active" || item.status === "agent_failed").map(mapBan);
+    if (banResult?.code === 0) {
+      banTotal.value = banResult.data?.total || 0;
+      autoBans.value = (banResult.data?.items || []).map((item, index) => mapBan(item, index, (banPage.value - 1) * banPageSize.value));
+    }
     if (policy.code === 0 && policy.data) { securityPolicy.value = policy.data; selectedMode.value = policy.data.mode; maxUdpThreshold.value = policy.data.maxUdpPerWindow; banThreshold.value = policy.data.banScore; }
-    if (black.code === 0) blackRules.value = (black.data?.items || []).map(mapRule);
-    if (allow.code === 0) allowRules.value = (allow.data?.items || []).map(mapRule);
+    if (black?.code === 0) { blackRuleTotal.value = black.data?.total || 0; blackRules.value = (black.data?.items || []).map(mapRule); }
+    if (allow?.code === 0) { allowRuleTotal.value = allow.data?.total || 0; allowRules.value = (allow.data?.items || []).map(mapRule); }
     if (showMessage) Message.success("安全数据已刷新");
   } catch (error: any) {
     Message.warning(error?.message || "安全数据暂时不可用");
   } finally {
     refreshInFlight = false;
   }
+}
+
+function handleEventPageChange(page: number) { eventPage.value = page; void refreshPreview(false, true); }
+function handleEventPageSizeChange(pageSize: number) { eventPageSize.value = pageSize; eventPage.value = 1; void refreshPreview(false, true); }
+function handleBanPageChange(page: number) { banPage.value = page; void refreshPreview(false, true); }
+function handleBanPageSizeChange(pageSize: number) { banPageSize.value = pageSize; banPage.value = 1; void refreshPreview(false, true); }
+function handleRulePageChange(page: number) {
+  if (activeTab.value === "allowlist") allowRulePage.value = page;
+  else blackRulePage.value = page;
+  void refreshPreview(false, true);
+}
+function handleRulePageSizeChange(pageSize: number) {
+  if (activeTab.value === "allowlist") { allowRulePageSize.value = pageSize; allowRulePage.value = 1; }
+  else { blackRulePageSize.value = pageSize; blackRulePage.value = 1; }
+  void refreshPreview(false, true);
 }
 
 function stopLiveRefresh() {
@@ -363,7 +414,15 @@ function stopLiveRefresh() {
 
 function startLiveRefresh() {
   stopLiveRefresh();
-  if (live.value) refreshTimer = window.setInterval(() => refreshPreview(), 10000);
+  refreshCountdown.value = 10;
+  if (!live.value) return;
+  refreshTimer = window.setInterval(() => {
+    refreshCountdown.value -= 1;
+    if (refreshCountdown.value <= 0) {
+      refreshCountdown.value = 10;
+      void refreshPreview();
+    }
+  }, 1000);
 }
 
 async function saveRule() {
@@ -375,7 +434,7 @@ async function saveRule() {
   const result = await createSecurityAccessRule({ listType: editingRuleKind.value === "blacklist" ? "blacklist" : "allowlist", matchType: type, matchValue: ruleValue.value.trim(), scope: ruleType.value === "User-Agent" ? "public" : "all_sip", status: "enabled", expiresAt: expiryToIso(ruleExpiry.value), note: ruleNote.value.trim() || "手动添加" });
   if (result.code !== 0) { Message.error(result.message || "规则保存失败"); return; }
   ruleDrawerVisible.value = false;
-  await refreshPreview();
+  await refreshPreview(false, true);
   Message.success("规则已保存");
 }
 
@@ -388,7 +447,7 @@ async function toggleRule(rule: AccessRule, enabled: boolean) {
     Message.error(result.message || "规则状态更新失败");
     return;
   }
-  await refreshPreview();
+  await refreshPreview(false, true);
 }
 
 function toggleRuleFromEvent(rule: AccessRule, value: unknown) {
@@ -398,7 +457,7 @@ function toggleRuleFromEvent(rule: AccessRule, value: unknown) {
 async function removeRule(_kind: RuleKind, id: number) {
   const result = await deleteSecurityAccessRule(id);
   if (result.code !== 0) { Message.error(result.message || "规则删除失败"); return; }
-  await refreshPreview();
+  await refreshPreview(false, true);
   Message.success("规则已移除");
 }
 
@@ -410,13 +469,13 @@ function showBanEvents(item: AutoBanRecord) {
 async function unbanPreview(item: AutoBanRecord) {
   const result = await unbanSecurity(item.decisionId);
   if (result.code !== 0) { Message.error(result.message || "解除封禁失败"); return; }
-  await refreshPreview();
+  await refreshPreview(false, true);
   Message.success(`${item.source} 已解除自动封禁`);
 }
 
 async function promoteToBlacklist(item: AutoBanRecord) {
   if (!blackRules.value.some(rule => rule.type === "IP" && rule.value === item.source)) await createSecurityAccessRule({ listType: "blacklist", matchType: "ip", matchValue: item.source, scope: "all_sip", status: "enabled", note: item.reason });
-  await refreshPreview();
+  await refreshPreview(false, true);
   activeTab.value = "blacklist";
   Message.success(`${item.source} 已转为手动黑名单`);
 }
@@ -428,7 +487,7 @@ async function savePolicyPreview() {
   securityPolicy.value.maxUdpPerWindow = Math.max(1, maxUdpThreshold.value);
   const result = await updateSecurityPolicy(securityPolicy.value);
   if (result.code !== 0) { Message.error(result.message || "防护策略保存失败"); return; }
-  await refreshPreview();
+  await refreshPreview(false, true);
   Message.success("防护策略已保存");
 }
 
@@ -462,7 +521,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="snow-page security-preview">
-    <div class="snow-inner security-shell">
+    <div class="snow-inner uvp-page-shell-flat security-shell">
       <div class="security-nav">
         <a-tabs v-model:active-key="activeTab" class="security-tabs" type="line">
           <a-tab-pane key="overview" title="安全总览" />
@@ -475,7 +534,7 @@ onBeforeUnmount(() => {
         <div class="tab-actions">
           <a-tag :color="liveStatus.color" bordered><span class="live-dot" />{{ liveStatus.label }}</a-tag>
           <a-tooltip content="刷新安全数据">
-            <a-button aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>刷新</a-button>
+            <a-button aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button>
           </a-tooltip>
           <a-button v-if="activeTab === 'policy'" type="primary" @click="savePolicyPreview"><template #icon><Check :size="16" /></template>保存策略</a-button>
           <a-button v-else-if="activeTab === 'bans'" type="primary" @click="activeTab = 'policy'"><template #icon><SlidersHorizontal :size="16" /></template>调整策略</a-button>
@@ -489,7 +548,6 @@ onBeforeUnmount(() => {
             <span class="shield-orbit" aria-hidden="true"><ShieldCheck :size="30" /></span>
             <div><span class="section-label">当前安全态势</span><h2>{{ selectedModeConfig.title }}模式已启用</h2><p>{{ selectedModeConfig.summary }}主机防火墙状态以 Agent 实际回报为准，云厂商边界防护尚未接入。</p></div>
           </div>
-          <div class="score-block"><strong>{{ lastRefreshLabel }}</strong><small>接口更新时间</small><span>{{ live ? "每 10 秒自动刷新" : "自动刷新已暂停" }}</span></div>
           <button class="advice-block" type="button" @click="activeTab = 'policy'">
             <span><TriangleAlert :size="18" /></span>
             <span><strong>{{ attentionCount ? `还有 ${attentionCount} 项待处理` : "当前没有待处理项" }}</strong><small>{{ attentionCount ? "查看自动封禁和访问名单，确认是否需要长期处理。" : "自动封禁和访问名单当前没有需要复核的项目。" }}</small></span>
@@ -500,7 +558,7 @@ onBeforeUnmount(() => {
         <section class="metric-grid" aria-label="安全指标">
           <article><span>已识别安全事件</span><strong>{{ recognizedCount }}</strong><small class="warning"><Activity :size="13" />来自安全事件接口聚合</small></article>
           <article><span>应用层已拦截</span><strong>{{ blockedCount }}</strong><small class="success"><ShieldCheck :size="13" />丢弃与封禁动作累计</small></article>
-          <article><span>生效中自动封禁</span><strong>{{ autoBans.length }}</strong><small><Ban :size="13" />主机防火墙已生效 {{ autoBans.filter(item => item.firewallState === '已生效').length }}</small></article>
+          <article><span>生效中自动封禁</span><strong>{{ banTotal }}</strong><small><Ban :size="13" />主机防火墙已生效 {{ overviewBans.filter(item => item.firewallState === '已生效').length }}</small></article>
             <article><span>主机防火墙</span><strong class="status-value">{{ securityAgent.connected ? '在线' : '降级' }}</strong><small :class="securityAgent.connected ? 'success' : 'warning'"><BrickWall :size="13" />{{ securityAgent.appliedRules }} 条动态规则</small></article>
         </section>
 
@@ -533,8 +591,8 @@ onBeforeUnmount(() => {
         <section class="overview-grid lower-grid">
           <article class="uvp-system-panel signal-panel">
             <div class="panel-heading"><div><span class="section-label">实时信号</span><h3>最近高频来源</h3></div><button class="live-toggle" type="button" :aria-pressed="live" @click="live = !live"><Pause v-if="live" :size="14" /><Play v-else :size="14" />{{ live ? '自动刷新' : '已暂停' }}</button></div>
-            <div v-if="!events.length" class="empty-state signal-empty" role="status"><span class="empty-state-icon"><Activity :size="22" /></span><strong>暂无高频来源</strong><small>安全事件接口暂未发现重复风险来源，收到数据后会在这里显示。</small></div>
-            <button v-for="event in events.slice(0, 3)" v-else :key="event.id" class="signal-row" type="button" @click="activeTab = 'events'">
+            <div v-if="!overviewEvents.length" class="empty-state signal-empty" role="status"><span class="empty-state-icon"><Activity :size="22" /></span><strong>暂无高频来源</strong><small>安全事件接口暂未发现重复风险来源，收到数据后会在这里显示。</small></div>
+            <button v-for="event in overviewEvents.slice(0, 3)" v-else :key="event.id" class="signal-row" type="button" @click="activeTab = 'events'">
               <span :class="['risk-dot', event.severity === '高危' ? 'danger' : 'warning']" />
               <span><strong>{{ event.source }}</strong><small>{{ event.method }} · {{ event.rule }}</small></span>
               <b>{{ event.count }} 次</b><ChevronRight :size="16" />
@@ -543,20 +601,20 @@ onBeforeUnmount(() => {
 
           <article class="uvp-system-panel attention-panel">
             <div class="panel-heading"><div><span class="section-label">待处理</span><h3>安全建议</h3></div><span class="attention-count">{{ attentionCount }}</span></div>
-            <button v-if="autoBans.length" class="attention-row" type="button" @click="activeTab = 'bans'"><span class="attention-icon danger"><Ban :size="18" /></span><span><strong>{{ autoBans.length }} 条自动封禁待复核</strong><small>自动封禁已永久生效，复核后可转为人工黑名单。</small></span><ChevronRight :size="16" /></button>
-            <button v-if="allowRules.length" class="attention-row" type="button" @click="activeTab = 'allowlist'"><span class="attention-icon warning"><UserRoundCheck :size="18" /></span><span><strong>{{ allowRules.length }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span><ChevronRight :size="16" /></button>
+            <button v-if="banTotal" class="attention-row" type="button" @click="activeTab = 'bans'"><span class="attention-icon danger"><Ban :size="18" /></span><span><strong>{{ banTotal }} 条自动封禁待复核</strong><small>自动封禁已永久生效，复核后可转为人工黑名单。</small></span><ChevronRight :size="16" /></button>
+            <button v-if="allowRuleTotal" class="attention-row" type="button" @click="activeTab = 'allowlist'"><span class="attention-icon warning"><UserRoundCheck :size="18" /></span><span><strong>{{ allowRuleTotal }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span><ChevronRight :size="16" /></button>
             <div v-if="!attentionCount" class="empty-state attention-empty" role="status"><span class="empty-state-icon"><CheckCircle2 :size="22" /></span><strong>当前没有待处理项</strong><small>安全事件、自动封禁和访问名单会在接口刷新后更新。</small></div>
           </article>
         </section>
       </template>
 
-      <section v-else-if="activeTab === 'events'" class="workspace-panel uvp-system-panel">
+      <section v-else-if="activeTab === 'events'" class="workspace-panel">
         <div class="filter-bar">
           <a-select v-model="eventSeverity" aria-label="风险等级" style="width: 150px"><a-option>全部风险</a-option><a-option>高危</a-option><a-option>中危</a-option><a-option>低危</a-option></a-select>
           <a-input v-model="eventSearch" allow-clear placeholder="搜索 IP、方法或 User-Agent" aria-label="搜索风险事件"><template #prefix><Search :size="15" /></template></a-input>
           <a-button><template #icon><SlidersHorizontal :size="15" /></template>更多筛选</a-button>
         </div>
-        <a-table class="security-table" :data="filteredEvents" row-key="id" :pagination="{ pageSize: 5 }" :scroll="{ x: 1050 }">
+        <a-table class="security-table" :data="filteredEvents" row-key="id" :pagination="eventPagination" :scroll="{ x: 1050 }" @page-change="handleEventPageChange" @page-size-change="handleEventPageSizeChange">
           <template #columns>
             <a-table-column title="风险" :width="90"><template #cell="{ record }"><span :class="['severity', record.severity === '高危' ? 'high' : record.severity === '中危' ? 'medium' : 'low']"><i />{{ record.severity }}</span></template></a-table-column>
             <a-table-column title="来源" :width="170"><template #cell="{ record }"><strong class="mono">{{ record.source }}</strong><small class="cell-subline">{{ record.location }}</small></template></a-table-column>
@@ -570,14 +628,14 @@ onBeforeUnmount(() => {
         </a-table>
       </section>
 
-      <section v-else-if="activeTab === 'bans'" class="workspace-panel uvp-system-panel">
+      <section v-else-if="activeTab === 'bans'" class="workspace-panel">
         <div class="ban-summary">
-          <div><span>正在封禁</span><strong>{{ autoBans.length }}</strong></div>
-          <div><span>主机防火墙生效</span><strong>{{ autoBans.filter(item => item.firewallState === '已生效').length }}</strong></div>
-          <div><span>仅应用层拦截</span><strong>{{ autoBans.filter(item => item.firewallState !== '已生效').length }}</strong></div>
+          <div><span>正在封禁</span><strong>{{ banTotal }}</strong></div>
+          <div><span>本页主机防火墙生效</span><strong>{{ autoBans.filter(item => item.firewallState === '已生效').length }}</strong></div>
+          <div><span>本页仅应用层拦截</span><strong>{{ autoBans.filter(item => item.firewallState !== '已生效').length }}</strong></div>
             <div class="ban-summary-note"><ShieldCheck :size="18" /><span><strong>自动封禁与手动黑名单分开管理</strong><small>自动封禁永久生效，只有人工解封才会解除。</small></span></div>
         </div>
-        <a-table class="security-table ban-table" :data="autoBans" row-key="id" :pagination="false" :scroll="{ x: 1060 }">
+        <a-table class="security-table ban-table" :data="autoBans" row-key="id" :pagination="banPagination" :scroll="{ x: 1060 }" @page-change="handleBanPageChange" @page-size-change="handleBanPageSizeChange">
           <template #columns>
             <a-table-column title="来源" :width="160"><template #cell="{ record }"><strong class="mono">{{ record.source }}</strong><small class="cell-subline">{{ record.location }}</small></template></a-table-column>
             <a-table-column title="进入原因" :width="280"><template #cell="{ record }"><strong class="ban-reason">{{ record.reason }}</strong><small class="cell-subline">{{ record.evidence }}</small></template></a-table-column>
@@ -590,14 +648,14 @@ onBeforeUnmount(() => {
         </a-table>
       </section>
 
-      <section v-else-if="activeTab === 'blacklist' || activeTab === 'allowlist'" class="workspace-panel uvp-system-panel">
+      <section v-else-if="activeTab === 'blacklist' || activeTab === 'allowlist'" class="workspace-panel">
         <div class="rule-summary">
-          <div><span>规则总数</span><strong>{{ currentRules.length }}</strong></div>
-          <div><span>正在生效</span><strong>{{ currentRules.filter(item => item.enabled).length }}</strong></div>
-          <div><span>{{ activeTab === 'blacklist' ? '人工添加' : '永久可信' }}</span><strong>{{ activeTab === 'blacklist' ? currentRules.length : currentRules.filter(item => item.expires === '永久').length }}</strong></div>
+          <div><span>规则总数</span><strong>{{ currentRuleTotal }}</strong></div>
+          <div><span>本页正在生效</span><strong>{{ currentRules.filter(item => item.enabled).length }}</strong></div>
+          <div><span>{{ activeTab === 'blacklist' ? '本页人工添加' : '本页永久可信' }}</span><strong>{{ activeTab === 'blacklist' ? currentRules.length : currentRules.filter(item => item.expires === '永久').length }}</strong></div>
           <div class="rule-safety"><ShieldCheck :size="18" /><span><strong>{{ activeTab === 'blacklist' ? '这里只管理手动黑名单' : '白名单不绕过协议校验' }}</strong><small>{{ activeTab === 'blacklist' ? '策略自动生成的临时封禁请到“自动封禁”查看。' : '异常报文仍会被应用层拒绝。' }}</small></span></div>
         </div>
-        <a-table class="security-table" :data="currentRules" row-key="id" :pagination="false" :scroll="{ x: 900 }">
+        <a-table class="security-table" :data="currentRules" row-key="id" :pagination="rulePagination" :scroll="{ x: 900 }" @page-change="handleRulePageChange" @page-size-change="handleRulePageSizeChange">
           <template #columns>
             <a-table-column title="类型" data-index="type" :width="120" />
             <a-table-column title="匹配内容" :width="210"><template #cell="{ record }"><span class="mono">{{ record.value }}</span></template></a-table-column>
@@ -610,7 +668,7 @@ onBeforeUnmount(() => {
         </a-table>
       </section>
 
-      <section v-else class="workspace-panel uvp-system-panel policy-workspace">
+      <section v-else class="workspace-panel policy-workspace">
         <div class="mode-selector" role="radiogroup" aria-label="防护模式">
           <button v-for="mode in protectionModes" :key="mode.key" type="button" :class="['mode-option', `mode-${mode.key}`, { active: selectedMode === mode.key }]" :aria-checked="selectedMode === mode.key" role="radio" @click="selectedMode = mode.key">
             <span class="mode-icon"><component :is="mode.icon" :size="20" /></span>
@@ -741,8 +799,7 @@ onBeforeUnmount(() => {
 }
 
 .uvp-system-panel,
-.metric-grid article,
-.workspace-panel {
+.metric-grid article {
   border: 1px solid var(--uvp-panel-border);
   border-radius: var(--uvp-panel-radius);
   background: var(--uvp-panel-bg);
@@ -751,7 +808,7 @@ onBeforeUnmount(() => {
 
 .posture-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 150px minmax(300px, 0.65fr);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.65fr);
   align-items: stretch;
   overflow: hidden;
   border-color: color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-panel-border));
@@ -801,35 +858,12 @@ onBeforeUnmount(() => {
   line-height: 1.5;
 }
 
-.score-block {
-  display: grid;
-  align-content: center;
-  padding: 16px 22px;
-  border-left: 1px solid var(--uvp-panel-border);
-  border-right: 1px solid var(--uvp-panel-border);
-  text-align: center;
-}
-
-.score-block strong {
-  color: var(--uvp-brand-strong);
-  font-size: 30px;
-}
-
-.score-block span,
-.score-block small {
-  color: var(--uvp-text-tertiary);
-}
-
-.score-block small {
-  margin-top: 3px;
-  font-size: 11px;
-}
-
 .advice-block {
   width: 100%;
   gap: 12px;
   padding: 16px 20px;
   border: 0;
+  border-left: 1px solid var(--uvp-warning-border);
   color: inherit;
   background: var(--uvp-warning-soft);
   text-align: left;
@@ -1238,7 +1272,7 @@ onBeforeUnmount(() => {
 
 .workspace-panel {
   min-width: 0;
-  padding: 20px;
+  padding: 0;
 }
 
 .filter-bar {
@@ -1769,8 +1803,8 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1180px) {
-  .posture-panel { grid-template-columns: minmax(0, 1fr) 140px; }
-  .advice-block { grid-column: 1 / -1; border-top: 1px solid var(--uvp-warning-border); }
+  .posture-panel { grid-template-columns: 1fr; }
+  .advice-block { border-top: 1px solid var(--uvp-warning-border); border-left: 0; }
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .overview-grid,
   .lower-grid { grid-template-columns: 1fr; }
@@ -1785,8 +1819,6 @@ onBeforeUnmount(() => {
   .security-nav { align-items: stretch; flex-direction: column-reverse; gap: 0; }
   .tab-actions { width: 100%; justify-content: flex-end; padding-bottom: 6px; }
   .posture-panel { grid-template-columns: 1fr; }
-  .score-block { border: 0; border-top: 1px solid var(--uvp-panel-border); border-bottom: 1px solid var(--uvp-panel-border); }
-  .advice-block { grid-column: auto; }
   .mode-selector,
   .policy-grid,
   .mode-result-grid { grid-template-columns: 1fr; }
@@ -1809,8 +1841,7 @@ onBeforeUnmount(() => {
   .chart-panel,
   .defense-panel,
   .signal-panel,
-  .attention-panel,
-  .workspace-panel { padding: 14px; }
+  .attention-panel { padding: 14px; }
   .period-switch { grid-template-columns: repeat(3, 36px); }
   .chart-legend b { display: none; }
   .trend-chart { height: 220px; }

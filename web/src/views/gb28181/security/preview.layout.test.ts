@@ -7,6 +7,7 @@ const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/security/p
 describe("security preview system integration", () => {
   it("uses the UVP workspace shell and theme tokens", () => {
     expect(source).toContain('class="snow-page security-preview"');
+    expect(source).toContain('class="snow-inner uvp-page-shell-flat security-shell"');
     expect(source).toContain("var(--uvp-panel-bg)");
     expect(source).toContain("var(--uvp-brand)");
     expect(source).toContain("var(--uvp-text-primary)");
@@ -33,6 +34,9 @@ describe("security preview system integration", () => {
   it("starts tab workspaces with their controls instead of repeated headings", () => {
     expect(source).not.toContain('class="workspace-heading');
     expect(source).not.toContain('class="rule-heading');
+    expect(source).not.toContain('class="workspace-panel uvp-system-panel');
+    expect(source.match(/class="workspace-panel/g)).toHaveLength(4);
+    expect(source).toMatch(/\.workspace-panel\s*{[^}]*padding:\s*0;/s);
     expect(source).toContain("activeTab === 'policy'");
     expect(source).toContain("activeTab === 'allowlist' ? '添加白名单' : '添加黑名单'");
   });
@@ -81,7 +85,33 @@ describe("security preview system integration", () => {
     expect(source).not.toContain('const trendData = [');
     expect(source).toContain("暂无趋势数据");
     expect(source).toContain("暂无高频来源");
-    expect(source).toContain("window.setInterval(() => refreshPreview(), 10000)");
+  });
+
+  it("moves the automatic refresh countdown into the refresh action", () => {
+    expect(source).not.toContain('class="score-block"');
+    expect(source).toContain("const refreshCountdown = ref(10)");
+    expect(source).toContain("refreshCountdown.value -= 1");
+    expect(source).toContain("window.setInterval(() => {");
+    expect(source).toContain('{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}');
+  });
+
+  it("uses the existing Arco table pagination style for all security lists", () => {
+    expect(source).toContain("const tablePageSizeOptions = [10, 20, 30, 50]");
+    expect(source).toContain(':pagination="eventPagination"');
+    expect(source).toContain(':pagination="banPagination"');
+    expect(source).toContain(':pagination="rulePagination"');
+    expect(source).toContain('showTotal: true');
+    expect(source).toContain('showJumper: true');
+    expect(source).toContain('showPageSize: true');
+    expect(source).toContain('pageSizeOptions: tablePageSizeOptions');
+    expect(source).toContain('@page-change="handleEventPageChange"');
+    expect(source).toContain('@page-change="handleBanPageChange"');
+    expect(source).toContain('@page-change="handleRulePageChange"');
+  });
+
+  it("keeps later event pages stable during automatic refresh", () => {
+    expect(source).toContain("const shouldRefreshEvents = forceLists || showMessage || eventPage.value === 1");
+    expect(source).toContain("shouldRefreshEvents ? listSecurityEvents");
   });
 
   it("uses a compact framed layout for actionable security advice", () => {
@@ -93,12 +123,12 @@ describe("security preview system integration", () => {
 
   it("renders operational data from security APIs instead of fixed demo values", () => {
     expect(source).toContain("getSecurityAgentHealth()");
-    expect(source).toContain("listSecurityAccessRules(\"blacklist\")");
+    expect(source).toContain("listSecurityAccessRules(\"blacklist\", { page:");
     expect(source).toContain("updateSecurityAccessRule(rule.id");
     expect(source).toContain("expiryToIso(ruleExpiry.value)");
     expect(source).toContain("自动封禁有效期");
     expect(source).toContain("永久加入防护");
-    expect(source).toContain("window.setInterval(() => refreshPreview(), 10000)");
+    expect(source).toContain("refreshCountdown.value = 10");
     expect(source).not.toContain('<strong>86</strong>');
     expect(source).not.toContain('<span class="attention-count">2</span>');
     expect(source).not.toContain('<a-tag>10 分钟</a-tag><ChevronRight');

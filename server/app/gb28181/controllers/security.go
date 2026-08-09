@@ -3,6 +3,7 @@ package controllers
 import (
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -105,16 +106,16 @@ func (c *SecurityController) Events(ctx *gin.Context) {
 		securityUnavailable(ctx)
 		return
 	}
-	items := []gbsecurity.EventAggregate{}
-	items = c.provider.Events()
-	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "100"))
-	if limit <= 0 || limit > 500 {
-		limit = 100
-	}
-	if len(items) > limit {
-		items = items[len(items)-limit:]
-	}
-	c.Success(ctx, gin.H{"items": items, "total": len(items), "limit": limit})
+	items := append([]gbsecurity.EventAggregate(nil), c.provider.Events()...)
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].LastSeenAt.Equal(items[j].LastSeenAt) {
+			return items[i].SourceIP < items[j].SourceIP
+		}
+		return items[i].LastSeenAt.After(items[j].LastSeenAt)
+	})
+	page, pageSize := securityPageParams(ctx)
+	total := len(items)
+	c.Success(ctx, gin.H{"items": securityPage(items, page, pageSize), "total": total, "page": page, "pageSize": pageSize})
 }
 
 func (c *SecurityController) Bans(ctx *gin.Context) {
@@ -122,8 +123,25 @@ func (c *SecurityController) Bans(ctx *gin.Context) {
 		securityUnavailable(ctx)
 		return
 	}
-	items := c.provider.Bans()
-	c.Success(ctx, gin.H{"items": items, "total": len(items)})
+	items := append([]gbsecurity.FirewallBan(nil), c.provider.Bans()...)
+	if ctx.Query("activeOnly") == "true" {
+		activeItems := make([]gbsecurity.FirewallBan, 0, len(items))
+		for _, item := range items {
+			if item.Status == gbsecurity.BanActive || item.Status == gbsecurity.BanAgentFailed {
+				activeItems = append(activeItems, item)
+			}
+		}
+		items = activeItems
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Decision.CreatedAt.Equal(items[j].Decision.CreatedAt) {
+			return items[i].Decision.DecisionID > items[j].Decision.DecisionID
+		}
+		return items[i].Decision.CreatedAt.After(items[j].Decision.CreatedAt)
+	})
+	page, pageSize := securityPageParams(ctx)
+	total := len(items)
+	c.Success(ctx, gin.H{"items": securityPage(items, page, pageSize), "total": total, "page": page, "pageSize": pageSize})
 }
 
 func (c *SecurityController) Policy(ctx *gin.Context) {
@@ -186,8 +204,40 @@ func (c *SecurityController) AccessRules(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid listType"})
 		return
 	}
-	items := c.provider.AccessRules(listType)
-	c.Success(ctx, gin.H{"items": items, "total": len(items)})
+	items := append([]gbsecurity.AccessRule(nil), c.provider.AccessRules(listType)...)
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	page, pageSize := securityPageParams(ctx)
+	total := len(items)
+	c.Success(ctx, gin.H{"items": securityPage(items, page, pageSize), "total": total, "page": page, "pageSize": pageSize})
+}
+
+func securityPageParams(ctx *gin.Context) (int, int) {
+	page, pageErr := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	pageSize, pageSizeErr := strconv.Atoi(ctx.DefaultQuery("pageSize", "20"))
+	if pageErr != nil || page <= 0 {
+		page = 1
+	}
+	if pageSizeErr != nil || pageSize <= 0 || pageSize > 100 {
+		pageSize = 20
+	}
+	return page, pageSize
+}
+
+func securityPage[T any](items []T, page, pageSize int) []T {
+	start := (page - 1) * pageSize
+	if start >= len(items) {
+		return []T{}
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end]
 }
 
 func (c *SecurityController) CreateAccessRule(ctx *gin.Context) {
