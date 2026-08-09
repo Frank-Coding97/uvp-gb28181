@@ -767,6 +767,42 @@ export const updateOnlineOnHeartbeatConfig = (enabled: boolean) =>
     data: { enabled }
   });
 
+export interface SaveAlarmMessagesConfig {
+  enabled: boolean;
+}
+
+export const fetchSaveAlarmMessagesConfig = () =>
+  http.request<BaseResult<SaveAlarmMessagesConfig>>("get", baseUrlApi("gb28181/sip/service-config/save-alarm-messages"));
+
+export const updateSaveAlarmMessagesConfig = (enabled: boolean) =>
+  http.request<BaseResult<SaveAlarmMessagesConfig>>("put", baseUrlApi("gb28181/sip/service-config/save-alarm-messages"), {
+    data: { enabled }
+  });
+
+export interface SIPCommandTimeoutConfig {
+  timeoutSec: number;
+}
+
+export const fetchSIPCommandTimeoutConfig = () =>
+  http.request<BaseResult<SIPCommandTimeoutConfig>>("get", baseUrlApi("gb28181/sip/service-config/sip-command-timeout"));
+
+export const updateSIPCommandTimeoutConfig = (timeoutSec: number) =>
+  http.request<BaseResult<SIPCommandTimeoutConfig>>("put", baseUrlApi("gb28181/sip/service-config/sip-command-timeout"), {
+    data: { timeoutSec }
+  });
+
+export interface PreallocationModeConfig {
+  enabled: boolean;
+}
+
+export const fetchPreallocationModeConfig = () =>
+  http.request<BaseResult<PreallocationModeConfig>>("get", baseUrlApi("gb28181/sip/service-config/preallocation-mode"));
+
+export const updatePreallocationModeConfig = (enabled: boolean) =>
+  http.request<BaseResult<PreallocationModeConfig>>("put", baseUrlApi("gb28181/sip/service-config/preallocation-mode"), {
+    data: { enabled }
+  });
+
 export interface IgnoreChannelOfflineStatusNotifyConfig {
   enabled: boolean;
 }

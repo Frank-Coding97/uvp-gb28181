@@ -176,6 +176,8 @@ func (u *UAC) InviteTalk(ctx context.Context, in TalkInviteRequest) (TalkDialogM
 	if u == nil || u.talkDialogs == nil || u.talkDialogs.transport == nil {
 		return TalkDialogMetadata{}, fmt.Errorf("SIP TALK UAC 未就绪")
 	}
+	ctx, cancel := withSIPCommandTimeout(ctx)
+	defer cancel()
 	req, metadata, err := u.buildTalkInviteRequest(in)
 	if err != nil {
 		return metadata, err

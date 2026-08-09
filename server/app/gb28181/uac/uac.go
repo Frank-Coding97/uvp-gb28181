@@ -311,6 +311,8 @@ func (u *UAC) SendMessageTracked(ctx context.Context, deviceID, dest, transport 
 		err := fmt.Errorf("SIP UAC 未就绪")
 		return TrackedMessageResult{ErrorSummary: trackedMessageErrorSummary(err)}, err
 	}
+	ctx, cancel := withSIPCommandTimeout(ctx)
+	defer cancel()
 	req, result, err := u.buildTrackedMessageRequest(TrackedMessageRequest{DeviceID: deviceID, Destination: dest, Transport: transport, Body: body})
 	if err != nil {
 		result.ErrorSummary = trackedMessageErrorSummary(err)
@@ -415,6 +417,8 @@ func (u *UAC) SendSubscribe(ctx context.Context, in SubscriptionRequest) (Subscr
 	if u == nil || u.client == nil {
 		return SubscriptionResponse{}, fmt.Errorf("SIP UAC 未就绪")
 	}
+	ctx, cancel := withSIPCommandTimeout(ctx)
+	defer cancel()
 	req, err := u.buildSubscribeRequest(in)
 	if err != nil {
 		return SubscriptionResponse{}, err
@@ -543,6 +547,8 @@ func (u *UAC) buildInviteRequest(s *Session, sdpBody string) (*sip.Request, erro
 //
 //	host 是国标域(如 3402000000),不可路由,仍需 SetDestination 指定设备真实 IP:port
 func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody string) error {
+	ctx, cancel := withSIPCommandTimeout(ctx)
+	defer cancel()
 	s.State = StateInviting
 	s.createdAt = time.Now()
 

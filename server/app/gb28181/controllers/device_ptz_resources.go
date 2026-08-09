@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/clause"
 	"gorm.io/plugin/dbresolver"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
@@ -303,7 +304,7 @@ func (dc *DeviceMgmtController) reconcilePresetsAsync(target ptz.Target) {
 		return
 	}
 	go func(service *ptz.Service) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), gbconfig.SIPCommandTimeout())
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryPreset, 0, "reconcile-"+uuid.NewString()); err != nil {
 			if app.ZapLog != nil {
@@ -535,7 +536,7 @@ func (dc *DeviceMgmtController) reconcileCruiseAsync(target ptz.Target, trackID 
 		return
 	}
 	go func(service *ptz.Service) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), gbconfig.SIPCommandTimeout())
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrackList, 0, "reconcile-cruise-"+uuid.NewString()); err != nil {
 			if app.ZapLog != nil {

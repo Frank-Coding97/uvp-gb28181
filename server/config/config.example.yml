@@ -232,6 +232,7 @@ scheduler:
 # 老部署环境如果仍然通过 YAML 供参数,升级到本版本后请手动进入引导页确认或修改.
 gb28181:
   enabled: true              # 是否启用国标 SIP 服务;关闭后 HTTP 依然运行,SIP 相关路由返 503
+  sip_command_timeout_sec: 10 # 出站 SIP 命令默认等待时间，范围 1-300 秒
   # SIP 原始报文诊断模块。默认关闭；关闭时不连接 ClickHouse，也不启动采集 worker。
   trace:
     enabled: false
@@ -252,8 +253,11 @@ gb28181:
     offline_scan_interval: 30 # 离线扫描周期(秒)
     sync_channels_on_online: true # 设备上线或离线恢复时同步 Catalog 通道
     online_on_heartbeat: true # 收到心跳时将离线设备恢复为在线；关闭后仍更新时间但不恢复状态
+    preallocation_mode: false # 开启后仅允许设备表中预先存在的国标 ID 注册
   catalog:
     ignore_channel_offline_status_notify: false # 兼容错误状态上报：忽略 Catalog NOTIFY 的 OFF/VLOST/DEFECT
+  alarm:
+    save_messages: true # 是否将设备报警通知写入报警记录；关闭后仍接收和解析通知
   position_history:
     enabled: true             # 是否保存位置历史轨迹；关闭后仍更新最新位置
     retention_days: 7         # 历史轨迹保留天数，范围 1-365

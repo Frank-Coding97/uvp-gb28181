@@ -56,6 +56,12 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/sync-channels-on-online", controller.UpdateSyncChannelsOnOnline)
 	router.GET("/online-on-heartbeat", controller.GetOnlineOnHeartbeat)
 	router.PUT("/online-on-heartbeat", controller.UpdateOnlineOnHeartbeat)
+	router.GET("/save-alarm-messages", controller.GetSaveAlarmMessages)
+	router.PUT("/save-alarm-messages", controller.UpdateSaveAlarmMessages)
+	router.GET("/sip-command-timeout", controller.GetSIPCommandTimeout)
+	router.PUT("/sip-command-timeout", controller.UpdateSIPCommandTimeout)
+	router.GET("/preallocation-mode", controller.GetPreallocationMode)
+	router.PUT("/preallocation-mode", controller.UpdatePreallocationMode)
 	router.GET("/ignore-channel-offline-status-notify", controller.GetIgnoreChannelOfflineStatusNotify)
 	router.PUT("/ignore-channel-offline-status-notify", controller.UpdateIgnoreChannelOfflineStatusNotify)
 	router.GET("/ptz-default-speed", controller.GetPTZDefaultSpeed)
@@ -223,6 +229,111 @@ func TestServiceConfigController_UpdateOnlineOnHeartbeatPersistsAndRollsBack(t *
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/online-on-heartbeat", jsonBody(t, map[string]bool{"enabled": true})))
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, false, config.values[gbconfig.OnlineOnHeartbeatConfigKey])
+}
+
+func TestServiceConfigController_SaveAlarmMessagesDefaultsToEnabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/save-alarm-messages", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, true, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdateSaveAlarmMessagesPersistsAndRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.SaveAlarmMessagesConfigKey: true}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/save-alarm-messages", jsonBody(t, map[string]bool{"enabled": false})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, false, config.values[gbconfig.SaveAlarmMessagesConfigKey])
+
+	config.saveErr = errors.New("write failed")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/save-alarm-messages", jsonBody(t, map[string]bool{"enabled": true})))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, false, config.values[gbconfig.SaveAlarmMessagesConfigKey])
+}
+
+func TestServiceConfigController_SIPCommandTimeoutDefaultsToTen(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/sip-command-timeout", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, float64(10), serviceConfigData(t, recorder)["timeoutSec"])
+}
+
+func TestServiceConfigController_UpdateSIPCommandTimeoutValidatesAndRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.SIPCommandTimeoutSecConfigKey: 10}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sip-command-timeout", jsonBody(t, map[string]int{"timeoutSec": 30})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 30, config.values[gbconfig.SIPCommandTimeoutSecConfigKey])
+
+	for _, invalid := range []int{0, 301} {
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sip-command-timeout", jsonBody(t, map[string]int{"timeoutSec": invalid})))
+		require.Equal(t, http.StatusBadRequest, recorder.Code)
+	}
+
+	config.saveErr = errors.New("write failed")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sip-command-timeout", jsonBody(t, map[string]int{"timeoutSec": 20})))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, 30, config.values[gbconfig.SIPCommandTimeoutSecConfigKey])
+}
+
+func TestServiceConfigController_PreallocationModeDefaultsToDisabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/preallocation-mode", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, false, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdatePreallocationModePersistsAndRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.PreallocationModeConfigKey: false}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/preallocation-mode", jsonBody(t, map[string]bool{"enabled": true})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, true, config.values[gbconfig.PreallocationModeConfigKey])
+
+	config.saveErr = errors.New("write failed")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/preallocation-mode", jsonBody(t, map[string]bool{"enabled": false})))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, true, config.values[gbconfig.PreallocationModeConfigKey])
 }
 
 func TestServiceConfigController_IgnoreChannelOfflineStatusNotifyDefaultsToDisabled(t *testing.T) {

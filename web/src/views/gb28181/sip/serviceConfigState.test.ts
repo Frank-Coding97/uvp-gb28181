@@ -14,6 +14,8 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).toContain("扩展 SDP 兼容模式");
         expect(staticServiceConfigLabels).toContain("云台默认速度");
         expect(staticServiceConfigLabels).toContain("忽略通道离线/异常通知");
+        expect(staticServiceConfigLabels).toContain("心跳恢复设备在线状态");
+        expect(staticServiceConfigLabels).toContain("SIP 命令超时时间（秒）");
         expect(draft.positionHistoryRetentionDays).toBe(7);
         expect(draft.ptzSpeed).toBe(6);
         expect(draft.syncChannelsOnOnline).toBe(true);

@@ -13,6 +13,9 @@ import {
   fetchSyncChannelsOnOnlineConfig,
   fetchIgnoreChannelOfflineStatusNotifyConfig,
   fetchOnlineOnHeartbeatConfig,
+  fetchSaveAlarmMessagesConfig,
+  fetchSIPCommandTimeoutConfig,
+  fetchPreallocationModeConfig,
   getControlCapabilities,
   getDeviceStatus,
   getHomePosition,
@@ -28,6 +31,9 @@ import {
   updateSyncChannelsOnOnlineConfig,
   updateIgnoreChannelOfflineStatusNotifyConfig,
   updateOnlineOnHeartbeatConfig,
+  updateSaveAlarmMessagesConfig,
+  updateSIPCommandTimeoutConfig,
+  updatePreallocationModeConfig,
   type DeviceStatusResult,
   type HomePositionPatch
 } from "./gb28181";
@@ -95,6 +101,36 @@ describe("国标服务配置 API", () => {
     await updateOnlineOnHeartbeatConfig(false);
     expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/online-on-heartbeat", {
       data: { enabled: false }
+    });
+  });
+
+  it("读取并更新报警消息存储配置", async () => {
+    await fetchSaveAlarmMessagesConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/save-alarm-messages");
+
+    await updateSaveAlarmMessagesConfig(false);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/save-alarm-messages", {
+      data: { enabled: false }
+    });
+  });
+
+  it("读取并更新 SIP 命令超时时间", async () => {
+    await fetchSIPCommandTimeoutConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sip-command-timeout");
+
+    await updateSIPCommandTimeoutConfig(30);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/sip-command-timeout", {
+      data: { timeoutSec: 30 }
+    });
+  });
+
+  it("读取并更新预分配模式", async () => {
+    await fetchPreallocationModeConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/preallocation-mode");
+
+    await updatePreallocationModeConfig(true);
+    expect(request).toHaveBeenLastCalledWith("put", "/api/gb28181/sip/service-config/preallocation-mode", {
+      data: { enabled: true }
     });
   });
 

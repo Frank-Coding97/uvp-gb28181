@@ -78,3 +78,21 @@ func TestAlarmProcessor_PersistsNestedTypeAndLeavesMissingTypeNull(t *testing.T)
 	require.NoError(t, db.Where("sn = ?", "1261").First(&missing).Error)
 	require.Nil(t, missing.AlarmType)
 }
+
+func TestAlarmProcessor_DisabledStillParsesButDoesNotPersist(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbAlarmEvent{}))
+	device := &gbmodels.GbDevice{DeviceID: "D"}
+	require.NoError(t, db.Create(device).Error)
+	p := NewAlarmProcessor(db, time.Now)
+	p.saveEnabled = func() bool { return false }
+
+	body := []byte(`<Notify><CmdType>Alarm</CmdType><SN>7</SN><DeviceID>D</DeviceID><AlarmPriority>2</AlarmPriority></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{CallID: "call", CSeq: "9", Body: body}))
+
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbAlarmEvent{}).Count(&count).Error)
+	require.Zero(t, count)
+	require.Error(t, p.Process(context.Background(), device, Notification{Body: []byte(`<Notify>`)}))
+}

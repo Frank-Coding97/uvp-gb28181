@@ -9,6 +9,9 @@ import {
     fetchSIPLogConfig,
     fetchSyncChannelsOnOnlineConfig,
     fetchOnlineOnHeartbeatConfig,
+    fetchSaveAlarmMessagesConfig,
+    fetchSIPCommandTimeoutConfig,
+    fetchPreallocationModeConfig,
     fetchIgnoreChannelOfflineStatusNotifyConfig,
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
@@ -16,6 +19,9 @@ import {
     updateSDPExtensionConfig,
     updateSyncChannelsOnOnlineConfig,
     updateOnlineOnHeartbeatConfig,
+    updateSaveAlarmMessagesConfig,
+    updateSIPCommandTimeoutConfig,
+    updatePreallocationModeConfig,
     updateIgnoreChannelOfflineStatusNotifyConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
@@ -40,6 +46,15 @@ const syncChannelsOnOnlineReady = ref(false);
 const onlineOnHeartbeatLoading = ref(true);
 const onlineOnHeartbeatSaving = ref(false);
 const onlineOnHeartbeatReady = ref(false);
+const saveAlarmMessagesLoading = ref(true);
+const saveAlarmMessagesSaving = ref(false);
+const saveAlarmMessagesReady = ref(false);
+const sipCommandTimeoutLoading = ref(true);
+const sipCommandTimeoutSaving = ref(false);
+const sipCommandTimeoutReady = ref(false);
+const preallocationModeLoading = ref(true);
+const preallocationModeSaving = ref(false);
+const preallocationModeReady = ref(false);
 const ignoreChannelOfflineStatusNotifyLoading = ref(true);
 const ignoreChannelOfflineStatusNotifySaving = ref(false);
 const ignoreChannelOfflineStatusNotifyReady = ref(false);
@@ -53,6 +68,9 @@ const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedSyncChannelsOnOnline = ref(true);
 const savedOnlineOnHeartbeat = ref(true);
+const savedSaveAlarmMessages = ref(true);
+const savedSIPCommandTimeoutSec = ref(10);
+const savedPreallocationMode = ref(false);
 const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
 const positionHistoryChanged = computed(
@@ -66,6 +84,9 @@ const syncChannelsOnOnlineChanged = computed(
     () => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value
 );
 const onlineOnHeartbeatChanged = computed(() => draft.onlineOnHeartbeat !== savedOnlineOnHeartbeat.value);
+const saveAlarmMessagesChanged = computed(() => draft.saveAlarmMessages !== savedSaveAlarmMessages.value);
+const sipCommandTimeoutChanged = computed(() => draft.sipTimeoutSec !== savedSIPCommandTimeoutSec.value);
+const preallocationModeChanged = computed(() => draft.preallocationMode !== savedPreallocationMode.value);
 const ignoreChannelOfflineStatusNotifyChanged = computed(
     () => draft.ignoreChannelOfflineStatusNotify !== savedIgnoreChannelOfflineStatusNotify.value
 );
@@ -77,6 +98,9 @@ const hasChanges = computed(
         ptzDefaultSpeedChanged.value ||
         syncChannelsOnOnlineChanged.value ||
         onlineOnHeartbeatChanged.value ||
+        saveAlarmMessagesChanged.value ||
+        sipCommandTimeoutChanged.value ||
+        preallocationModeChanged.value ||
         ignoreChannelOfflineStatusNotifyChanged.value ||
         sipLogChanged.value
 );
@@ -87,6 +111,9 @@ const configLoading = computed(
         ptzDefaultSpeedLoading.value ||
         syncChannelsOnOnlineLoading.value ||
         onlineOnHeartbeatLoading.value ||
+        saveAlarmMessagesLoading.value ||
+        sipCommandTimeoutLoading.value ||
+        preallocationModeLoading.value ||
         ignoreChannelOfflineStatusNotifyLoading.value ||
         sipLogLoading.value
 );
@@ -97,6 +124,9 @@ const configSaving = computed(
         ptzDefaultSpeedSaving.value ||
         syncChannelsOnOnlineSaving.value ||
         onlineOnHeartbeatSaving.value ||
+        saveAlarmMessagesSaving.value ||
+        sipCommandTimeoutSaving.value ||
+        preallocationModeSaving.value ||
         ignoreChannelOfflineStatusNotifySaving.value ||
         sipLogSaving.value
 );
@@ -107,6 +137,9 @@ const configReady = computed(
         ptzDefaultSpeedReady.value &&
         syncChannelsOnOnlineReady.value &&
         onlineOnHeartbeatReady.value &&
+        saveAlarmMessagesReady.value &&
+        sipCommandTimeoutReady.value &&
+        preallocationModeReady.value &&
         ignoreChannelOfflineStatusNotifyReady.value &&
         sipLogReady.value
 );
@@ -190,6 +223,51 @@ async function loadOnlineOnHeartbeatConfig() {
     }
 }
 
+async function loadSaveAlarmMessagesConfig() {
+    saveAlarmMessagesLoading.value = true;
+    try {
+        const response = await fetchSaveAlarmMessagesConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.saveAlarmMessages = response.data.enabled;
+        savedSaveAlarmMessages.value = response.data.enabled;
+        saveAlarmMessagesReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载报警消息存储配置失败");
+    } finally {
+        saveAlarmMessagesLoading.value = false;
+    }
+}
+
+async function loadSIPCommandTimeoutConfig() {
+    sipCommandTimeoutLoading.value = true;
+    try {
+        const response = await fetchSIPCommandTimeoutConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.sipTimeoutSec = response.data.timeoutSec;
+        savedSIPCommandTimeoutSec.value = response.data.timeoutSec;
+        sipCommandTimeoutReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载 SIP 命令超时时间失败");
+    } finally {
+        sipCommandTimeoutLoading.value = false;
+    }
+}
+
+async function loadPreallocationModeConfig() {
+    preallocationModeLoading.value = true;
+    try {
+        const response = await fetchPreallocationModeConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.preallocationMode = response.data.enabled;
+        savedPreallocationMode.value = response.data.enabled;
+        preallocationModeReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载预分配模式失败");
+    } finally {
+        preallocationModeLoading.value = false;
+    }
+}
+
 async function loadIgnoreChannelOfflineStatusNotifyConfig() {
     ignoreChannelOfflineStatusNotifyLoading.value = true;
     try {
@@ -228,6 +306,9 @@ function startEditing() {
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
+    draft.saveAlarmMessages = savedSaveAlarmMessages.value;
+    draft.sipTimeoutSec = savedSIPCommandTimeoutSec.value;
+    draft.preallocationMode = savedPreallocationMode.value;
     draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = true;
@@ -240,6 +321,9 @@ function cancelEditing() {
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
+    draft.saveAlarmMessages = savedSaveAlarmMessages.value;
+    draft.sipTimeoutSec = savedSIPCommandTimeoutSec.value;
+    draft.preallocationMode = savedPreallocationMode.value;
     draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = false;
@@ -298,6 +382,30 @@ async function saveConfig() {
             savedOnlineOnHeartbeat.value = response.data.enabled;
             onlineOnHeartbeatSaving.value = false;
         }
+        if (saveAlarmMessagesChanged.value) {
+            saveAlarmMessagesSaving.value = true;
+            const response = await updateSaveAlarmMessagesConfig(draft.saveAlarmMessages);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.saveAlarmMessages = response.data.enabled;
+            savedSaveAlarmMessages.value = response.data.enabled;
+            saveAlarmMessagesSaving.value = false;
+        }
+        if (sipCommandTimeoutChanged.value) {
+            sipCommandTimeoutSaving.value = true;
+            const response = await updateSIPCommandTimeoutConfig(draft.sipTimeoutSec);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.sipTimeoutSec = response.data.timeoutSec;
+            savedSIPCommandTimeoutSec.value = response.data.timeoutSec;
+            sipCommandTimeoutSaving.value = false;
+        }
+        if (preallocationModeChanged.value) {
+            preallocationModeSaving.value = true;
+            const response = await updatePreallocationModeConfig(draft.preallocationMode);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.preallocationMode = response.data.enabled;
+            savedPreallocationMode.value = response.data.enabled;
+            preallocationModeSaving.value = false;
+        }
         if (ignoreChannelOfflineStatusNotifyChanged.value) {
             ignoreChannelOfflineStatusNotifySaving.value = true;
             const response = await updateIgnoreChannelOfflineStatusNotifyConfig(draft.ignoreChannelOfflineStatusNotify);
@@ -330,6 +438,9 @@ async function saveConfig() {
         ptzDefaultSpeedSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
         onlineOnHeartbeatSaving.value = false;
+        saveAlarmMessagesSaving.value = false;
+        sipCommandTimeoutSaving.value = false;
+        preallocationModeSaving.value = false;
         ignoreChannelOfflineStatusNotifySaving.value = false;
         sipLogSaving.value = false;
     }
@@ -342,6 +453,9 @@ onMounted(() =>
         loadPTZDefaultSpeedConfig(),
         loadSyncChannelsOnOnlineConfig(),
         loadOnlineOnHeartbeatConfig(),
+        loadSaveAlarmMessagesConfig(),
+        loadSIPCommandTimeoutConfig(),
+        loadPreallocationModeConfig(),
         loadIgnoreChannelOfflineStatusNotifyConfig(),
         loadSIPLogConfig()
     ])
@@ -350,7 +464,7 @@ onMounted(() =>
 
 <template>
     <div class="snow-fill">
-        <div class="snow-fill-inner">
+        <div class="snow-fill-inner service-config-shell">
             <a-tabs
                 v-model:active-key="activeTab"
                 class="uvp-system-tabs service-config-tabs"
@@ -511,7 +625,7 @@ onMounted(() =>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="onlineOnHeartbeat" label="收到心跳就把设备设置为上线">
+                                    <a-form-item field="onlineOnHeartbeat" label="心跳恢复设备在线状态">
                                         <a-switch
                                             v-model="draft.onlineOnHeartbeat"
                                             :loading="onlineOnHeartbeatLoading || onlineOnHeartbeatSaving"
@@ -527,12 +641,30 @@ onMounted(() =>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="saveAlarmMessages" label="是否存储报警消息">
-                                        <a-switch v-model="draft.saveAlarmMessages" disabled />
+                                        <a-switch
+                                            v-model="draft.saveAlarmMessages"
+                                            :loading="saveAlarmMessagesLoading || saveAlarmMessagesSaving"
+                                            :disabled="!isEditing || saveAlarmMessagesLoading || saveAlarmMessagesSaving || !saveAlarmMessagesReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                        <template #extra>
+                                            <div>开启后将设备报警通知写入报警管理；关闭后仍接收和解析报警通知，但不写入报警记录。默认开启。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="sipTimeoutSec" label="SIP信令超时时间（秒）">
-                                        <a-input-number v-model="draft.sipTimeoutSec" :min="1" :max="300" disabled />
+                                    <a-form-item field="sipTimeoutSec" label="SIP 命令超时时间（秒）">
+                                        <a-input-number
+                                            v-model="draft.sipTimeoutSec"
+                                            :min="1"
+                                            :max="300"
+                                            :disabled="!isEditing || sipCommandTimeoutLoading || sipCommandTimeoutSaving || !sipCommandTimeoutReady"
+                                        />
+                                        <template #extra>
+                                            <div>控制平台向设备发送 MESSAGE、SUBSCRIBE、直播、回放和对讲 INVITE 时等待响应的默认时长，默认 10 秒。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
@@ -557,7 +689,17 @@ onMounted(() =>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="preallocationMode" label="预分配模式">
-                                        <a-switch v-model="draft.preallocationMode" disabled />
+                                        <a-switch
+                                            v-model="draft.preallocationMode"
+                                            :loading="preallocationModeLoading || preallocationModeSaving"
+                                            :disabled="!isEditing || preallocationModeLoading || preallocationModeSaving || !preallocationModeReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                        <template #extra>
+                                            <div>开启后，未知国标 ID 将被拒绝注册，需要先在设备列表新建设备；默认关闭。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                             </a-row>
@@ -655,6 +797,10 @@ onMounted(() =>
 </template>
 
 <style lang="scss" scoped>
+.service-config-shell {
+    overflow-y: auto;
+}
+
 .service-config-tabs {
     :deep(.arco-tabs-nav) {
         display: flex;

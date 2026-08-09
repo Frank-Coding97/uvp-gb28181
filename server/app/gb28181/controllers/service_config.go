@@ -39,6 +39,18 @@ type OnlineOnHeartbeatConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+type SaveAlarmMessagesConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
+type SIPCommandTimeoutConfig struct {
+	TimeoutSec int `json:"timeoutSec"`
+}
+
+type PreallocationModeConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 type IgnoreChannelOfflineStatusNotifyConfig struct {
 	Enabled bool `json:"enabled"`
 }
@@ -211,6 +223,96 @@ func (sc *ServiceConfigController) UpdateOnlineOnHeartbeat(c *gin.Context) {
 	}
 
 	sc.SuccessWithMessage(c, "收到心跳恢复设备上线配置已更新", OnlineOnHeartbeatConfig{Enabled: *request.Enabled})
+}
+
+// GetSaveAlarmMessages GET /api/gb28181/sip/service-config/save-alarm-messages
+func (sc *ServiceConfigController) GetSaveAlarmMessages(c *gin.Context) {
+	sc.Success(c, SaveAlarmMessagesConfig{Enabled: gbconfig.SaveAlarmMessages()})
+}
+
+// UpdateSaveAlarmMessages PUT /api/gb28181/sip/service-config/save-alarm-messages
+func (sc *ServiceConfigController) UpdateSaveAlarmMessages(c *gin.Context) {
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+		sc.Fail(c, "保存报警消息存储配置失败：enabled 必须为布尔值", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.SaveAlarmMessages()
+	app.ConfigYml.Set(gbconfig.SaveAlarmMessagesConfigKey, *request.Enabled)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.SaveAlarmMessagesConfigKey, previous)
+		sc.Fail(c, "保存报警消息存储配置失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "报警消息存储配置已更新", SaveAlarmMessagesConfig{Enabled: *request.Enabled})
+}
+
+// GetSIPCommandTimeout GET /api/gb28181/sip/service-config/sip-command-timeout
+func (sc *ServiceConfigController) GetSIPCommandTimeout(c *gin.Context) {
+	sc.Success(c, SIPCommandTimeoutConfig{TimeoutSec: gbconfig.SIPCommandTimeoutSec()})
+}
+
+// UpdateSIPCommandTimeout PUT /api/gb28181/sip/service-config/sip-command-timeout
+func (sc *ServiceConfigController) UpdateSIPCommandTimeout(c *gin.Context) {
+	var request struct {
+		TimeoutSec *int `json:"timeoutSec"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.TimeoutSec == nil || *request.TimeoutSec < 1 || *request.TimeoutSec > gbconfig.MaxSIPCommandTimeoutSec {
+		sc.Fail(c, "保存 SIP 命令超时时间失败：timeoutSec 必须为 1-300 的整数", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.SIPCommandTimeoutSec()
+	app.ConfigYml.Set(gbconfig.SIPCommandTimeoutSecConfigKey, *request.TimeoutSec)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.SIPCommandTimeoutSecConfigKey, previous)
+		sc.Fail(c, "保存 SIP 命令超时时间失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "SIP 命令超时时间已更新", SIPCommandTimeoutConfig{TimeoutSec: *request.TimeoutSec})
+}
+
+// GetPreallocationMode GET /api/gb28181/sip/service-config/preallocation-mode
+func (sc *ServiceConfigController) GetPreallocationMode(c *gin.Context) {
+	sc.Success(c, PreallocationModeConfig{Enabled: gbconfig.PreallocationMode()})
+}
+
+// UpdatePreallocationMode PUT /api/gb28181/sip/service-config/preallocation-mode
+func (sc *ServiceConfigController) UpdatePreallocationMode(c *gin.Context) {
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+		sc.Fail(c, "保存预分配模式失败：enabled 必须为布尔值", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.PreallocationMode()
+	app.ConfigYml.Set(gbconfig.PreallocationModeConfigKey, *request.Enabled)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.PreallocationModeConfigKey, previous)
+		sc.Fail(c, "保存预分配模式失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "预分配模式已更新", PreallocationModeConfig{Enabled: *request.Enabled})
 }
 
 // GetIgnoreChannelOfflineStatusNotify GET /api/gb28181/sip/service-config/ignore-channel-offline-status-notify

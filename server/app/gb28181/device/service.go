@@ -2,6 +2,7 @@ package device
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+var ErrDeviceNotPreallocated = errors.New("device is not preallocated")
 
 // RegisterInfo 注册时采集的信息
 type RegisterInfo struct {
@@ -45,6 +48,9 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 		existing, err := gbmodels.FindByDeviceIDWithDB(ctx, tx.Set("gorm:query_option", "FOR UPDATE"), info.DeviceID)
 		if err != nil {
 			return fmt.Errorf("查询设备失败: %w", err)
+		}
+		if existing == nil && gbconfig.PreallocationMode() {
+			return ErrDeviceNotPreallocated
 		}
 		isFirst = existing == nil || existing.Status != gbmodels.DeviceStatusOnline
 		profile := resolveRegisterProfile(existing, info.ReportedVersion)

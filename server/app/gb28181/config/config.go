@@ -12,6 +12,9 @@ const (
 	SDPExtensionConfigKey                     = "gb28181.sdp.extension_enabled"
 	SyncChannelsOnOnlineConfigKey             = "gb28181.device.sync_channels_on_online"
 	OnlineOnHeartbeatConfigKey                = "gb28181.device.online_on_heartbeat"
+	SaveAlarmMessagesConfigKey                = "gb28181.alarm.save_messages"
+	SIPCommandTimeoutSecConfigKey             = "gb28181.sip_command_timeout_sec"
+	PreallocationModeConfigKey                = "gb28181.device.preallocation_mode"
 	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 
@@ -24,6 +27,7 @@ const (
 	DefaultPlaybackMediaWaitSec          = 10
 	DefaultPlaybackIdleTimeoutSec        = 60
 	DefaultPlaybackMaxSessionSec         = 86400
+	DefaultSIPCommandTimeoutSec          = 10
 
 	MaxRecordQueryTimeoutSec = 300
 	MaxRecordQueryRangeHours = 168
@@ -33,6 +37,7 @@ const (
 	MaxMediaWaitSec          = 120
 	MaxPlaybackIdleSec       = 3600
 	MaxPlaybackSessionSec    = 86400
+	MaxSIPCommandTimeoutSec  = 300
 )
 
 // SIPTraceEnabledFrom returns whether raw SIP trace collection is enabled.
@@ -82,6 +87,49 @@ func OnlineOnHeartbeatFrom(c valueSource) bool {
 // OnlineOnHeartbeat reads the live setting for the next device Keepalive.
 func OnlineOnHeartbeat() bool {
 	return OnlineOnHeartbeatFrom(app.ConfigYml)
+}
+
+// SaveAlarmMessagesFrom returns whether received alarm notifications should be
+// persisted. Missing configuration defaults to true to preserve the historical
+// behavior.
+func SaveAlarmMessagesFrom(c valueSource) bool {
+	return c == nil || c.Get(SaveAlarmMessagesConfigKey) == nil || c.GetBool(SaveAlarmMessagesConfigKey)
+}
+
+// SaveAlarmMessages reads the live setting for the next alarm notification.
+func SaveAlarmMessages() bool {
+	return SaveAlarmMessagesFrom(app.ConfigYml)
+}
+
+// SIPCommandTimeoutSecFrom returns the default timeout for outbound SIP
+// transactions. Missing or invalid configuration falls back to ten seconds.
+func SIPCommandTimeoutSecFrom(c valueSource) int {
+	if c == nil || c.Get(SIPCommandTimeoutSecConfigKey) == nil {
+		return DefaultSIPCommandTimeoutSec
+	}
+	value := c.GetInt(SIPCommandTimeoutSecConfigKey)
+	if value < 1 || value > MaxSIPCommandTimeoutSec {
+		return DefaultSIPCommandTimeoutSec
+	}
+	return value
+}
+
+func SIPCommandTimeoutSec() int {
+	return SIPCommandTimeoutSecFrom(app.ConfigYml)
+}
+
+func SIPCommandTimeout() time.Duration {
+	return time.Duration(SIPCommandTimeoutSec()) * time.Second
+}
+
+// PreallocationModeFrom returns whether REGISTER may only update devices that
+// were created in advance. Missing configuration defaults to false.
+func PreallocationModeFrom(c valueSource) bool {
+	return c != nil && c.Get(PreallocationModeConfigKey) != nil && c.GetBool(PreallocationModeConfigKey)
+}
+
+func PreallocationMode() bool {
+	return PreallocationModeFrom(app.ConfigYml)
 }
 
 // IgnoreChannelOfflineStatusNotifyFrom returns whether negative channel

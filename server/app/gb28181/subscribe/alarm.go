@@ -11,20 +11,22 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
 type AlarmProcessor struct {
-	db  *gorm.DB
-	now func() time.Time
+	db          *gorm.DB
+	now         func() time.Time
+	saveEnabled func() bool
 }
 
 func NewAlarmProcessor(db *gorm.DB, now func() time.Time) *AlarmProcessor {
 	if now == nil {
 		now = time.Now
 	}
-	return &AlarmProcessor{db: db, now: now}
+	return &AlarmProcessor{db: db, now: now, saveEnabled: gbconfig.SaveAlarmMessages}
 }
 
 func (p *AlarmProcessor) Process(ctx context.Context, device *gbmodels.GbDevice, notification Notification) error {
@@ -34,6 +36,9 @@ func (p *AlarmProcessor) Process(ctx context.Context, device *gbmodels.GbDevice,
 	alarm, err := manscdp.ParseAlarmNotify(notification.Body)
 	if err != nil {
 		return err
+	}
+	if p.saveEnabled != nil && !p.saveEnabled() {
+		return nil
 	}
 	var channel gbmodels.GbChannel
 	channelResult := p.db.WithContext(ctx).Where("device_id = ? AND channel_id = ?", device.DeviceID, alarm.DeviceID).Limit(1).Find(&channel)

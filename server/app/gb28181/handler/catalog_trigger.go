@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"sync/atomic"
-	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -20,14 +19,13 @@ type CatalogTrigger interface {
 
 // uacCatalogTrigger 默认实现:用 UAC 发 MESSAGE(承载 Catalog Query XML)
 type uacCatalogTrigger struct {
-	uac    *uac.UAC
-	sn     atomic.Int64
-	cmdTTL time.Duration // 单次发送超时
+	uac *uac.UAC
+	sn  atomic.Int64
 }
 
 // NewUACCatalogTrigger 包装 UAC 为 CatalogTrigger
 func NewUACCatalogTrigger(u *uac.UAC) CatalogTrigger {
-	return &uacCatalogTrigger{uac: u, cmdTTL: 5 * time.Second}
+	return &uacCatalogTrigger{uac: u}
 }
 
 // Trigger 异步向设备发 Catalog 查询(失败仅记日志,不阻塞注册响应)
@@ -42,9 +40,7 @@ func (t *uacCatalogTrigger) Trigger(_ context.Context, deviceID, dest, transport
 			app.ZapLog.Warn("Catalog 查询 XML 构造失败", zap.String("deviceId", deviceID), zap.Error(err))
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), t.cmdTTL)
-		defer cancel()
-		if err := t.uac.SendMessage(ctx, deviceID, dest, transport, body); err != nil {
+		if err := t.uac.SendMessage(context.Background(), deviceID, dest, transport, body); err != nil {
 			app.ZapLog.Warn("Catalog 查询发送失败",
 				zap.String("deviceId", deviceID), zap.String("dest", dest),
 				zap.String("transport", transport), zap.Error(err))

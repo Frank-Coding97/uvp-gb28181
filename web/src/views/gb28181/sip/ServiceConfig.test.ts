@@ -15,6 +15,12 @@ const api = vi.hoisted(() => ({
     updateIgnoreChannelOfflineStatusNotifyConfig: vi.fn(),
     fetchOnlineOnHeartbeatConfig: vi.fn(),
     updateOnlineOnHeartbeatConfig: vi.fn(),
+    fetchSaveAlarmMessagesConfig: vi.fn(),
+    updateSaveAlarmMessagesConfig: vi.fn(),
+    fetchSIPCommandTimeoutConfig: vi.fn(),
+    updateSIPCommandTimeoutConfig: vi.fn(),
+    fetchPreallocationModeConfig: vi.fn(),
+    updatePreallocationModeConfig: vi.fn(),
     fetchSIPLogConfig: vi.fn(),
     updateSIPLogConfig: vi.fn()
 }));
@@ -87,6 +93,12 @@ describe("ServiceConfig edit mode", () => {
         api.updateIgnoreChannelOfflineStatusNotifyConfig.mockReset();
         api.fetchOnlineOnHeartbeatConfig.mockReset();
         api.updateOnlineOnHeartbeatConfig.mockReset();
+        api.fetchSaveAlarmMessagesConfig.mockReset();
+        api.updateSaveAlarmMessagesConfig.mockReset();
+        api.fetchSIPCommandTimeoutConfig.mockReset();
+        api.updateSIPCommandTimeoutConfig.mockReset();
+        api.fetchPreallocationModeConfig.mockReset();
+        api.updatePreallocationModeConfig.mockReset();
         api.fetchSIPLogConfig.mockReset();
         api.updateSIPLogConfig.mockReset();
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
@@ -105,6 +117,12 @@ describe("ServiceConfig edit mode", () => {
         api.updateIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
         api.fetchOnlineOnHeartbeatConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateOnlineOnHeartbeatConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
+        api.fetchSaveAlarmMessagesConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
+        api.updateSaveAlarmMessagesConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
+        api.fetchSIPCommandTimeoutConfig.mockResolvedValue({ code: 0, message: "", data: { timeoutSec: 10 } });
+        api.updateSIPCommandTimeoutConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { timeoutSec: 30 } });
+        api.fetchPreallocationModeConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
+        api.updatePreallocationModeConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
         api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, applied: true } });
         api.updateSIPLogConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true, applied: true } });
     });
@@ -114,6 +132,7 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(wrapper.find(".uvp-system-tabs").exists()).toBe(true);
+        expect(wrapper.find(".service-config-shell").exists()).toBe(true);
         expect(wrapper.findAll(".uvp-system-panel")).toHaveLength(3);
         expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
     });
@@ -309,11 +328,11 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.fetchOnlineOnHeartbeatConfig).toHaveBeenCalledOnce();
-        expect(wrapper.text()).toContain("收到心跳就把设备设置为上线");
+        expect(wrapper.text()).toContain("心跳恢复设备在线状态");
         expect(wrapper.text()).toContain("关闭后仍记录最后心跳时间");
         const heartbeatSwitch = wrapper
             .findAll("label")
-            .find(label => label.text().includes("收到心跳就把设备设置为上线"))
+            .find(label => label.text().includes("心跳恢复设备在线状态"))
             ?.find("button");
         expect(heartbeatSwitch?.element).toHaveProperty("disabled", true);
 
@@ -326,6 +345,60 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updateOnlineOnHeartbeatConfig).toHaveBeenCalledWith(false);
+    });
+
+    it("loads and saves the alarm message storage switch", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchSaveAlarmMessagesConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("是否存储报警消息");
+        expect(wrapper.text()).toContain("关闭后仍接收和解析报警通知");
+        const alarmSwitch = wrapper
+            .findAll("label")
+            .find(label => label.text().includes("是否存储报警消息"))
+            ?.find("button");
+        expect(alarmSwitch?.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        expect(alarmSwitch?.element).toHaveProperty("disabled", false);
+        await alarmSwitch?.trigger("click");
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateSaveAlarmMessagesConfig).toHaveBeenCalledWith(false);
+    });
+
+    it("loads and saves the SIP command timeout and preallocation mode", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchSIPCommandTimeoutConfig).toHaveBeenCalledOnce();
+        expect(api.fetchPreallocationModeConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("SIP 命令超时时间（秒）");
+        expect(wrapper.text()).toContain("未知国标 ID 将被拒绝注册");
+
+        await wrapper.get("button").trigger("click");
+        const timeoutInputs = wrapper.findAll("input[type='number']");
+        const timeoutInput = timeoutInputs.find(input => input.element.getAttribute("value") === "10");
+        expect(timeoutInput?.element).toHaveProperty("disabled", false);
+        await timeoutInput?.setValue("30");
+
+        const preallocationSwitch = wrapper
+            .findAll("label")
+            .find(label => label.text().includes("预分配模式"))
+            ?.find("button");
+        expect(preallocationSwitch?.element).toHaveProperty("disabled", false);
+        await preallocationSwitch?.trigger("click");
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateSIPCommandTimeoutConfig).toHaveBeenCalledWith(30);
+        expect(api.updatePreallocationModeConfig).toHaveBeenCalledWith(true);
     });
 
     it("shows when the saved SIP trace switch is not applied to the runtime", async () => {

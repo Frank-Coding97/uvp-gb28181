@@ -73,6 +73,52 @@ func TestHandleRegister_RejectsMissingDefaultOwnerDeptConfig(t *testing.T) {
 	assert.Contains(t, err.Error(), "default_owner_dept_id")
 }
 
+func TestHandleRegister_PreallocationRejectsUnknownDevice(t *testing.T) {
+	prevDB := app.GormDbMysql
+	prevConfig := app.ConfigYml
+	t.Cleanup(func() {
+		app.GormDbMysql = prevDB
+		app.ConfigYml = prevConfig
+	})
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
+	app.GormDbMysql = db
+	app.ConfigYml = preallocationTestConfig{enabled: true}
+
+	_, err = HandleRegister(context.Background(), RegisterInfo{DeviceID: "34020000002000000003", Expires: 3600}, 60)
+	require.ErrorIs(t, err, ErrDeviceNotPreallocated)
+
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestHandleRegister_PreallocationAllowsExistingDevice(t *testing.T) {
+	prevDB := app.GormDbMysql
+	prevConfig := app.ConfigYml
+	t.Cleanup(func() {
+		app.GormDbMysql = prevDB
+		app.ConfigYml = prevConfig
+	})
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbDeviceStatusEvent{}, &basemodels.SysDepartment{}))
+	app.GormDbMysql = db
+	app.ConfigYml = preallocationTestConfig{enabled: true}
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: "34020000002000000004", Status: gbmodels.DeviceStatusOffline, OwnerDeptID: 9}).Error)
+
+	_, err = HandleRegister(context.Background(), RegisterInfo{DeviceID: "34020000002000000004", Expires: 3600}, 60)
+	require.NoError(t, err)
+
+	var got gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", "34020000002000000004").First(&got).Error)
+	require.Equal(t, gbmodels.DeviceStatusOnline, got.Status)
+	require.EqualValues(t, 9, got.OwnerDeptID)
+}
+
 type testConfig struct{}
 
 func (testConfig) ConfigFileChangeListen(...func()) {}
@@ -102,3 +148,19 @@ func (testConfig) SaveConfig() error                { return nil }
 type testConfigWithoutDefaultDept struct{ testConfig }
 
 func (testConfigWithoutDefaultDept) GetInt(string) int { return 0 }
+
+type preallocationTestConfig struct {
+	testConfig
+	enabled bool
+}
+
+func (c preallocationTestConfig) Get(key string) interface{} {
+	if key == "gb28181.device.preallocation_mode" {
+		return c.enabled
+	}
+	return c.testConfig.Get(key)
+}
+
+func (c preallocationTestConfig) GetBool(key string) bool {
+	return key == "gb28181.device.preallocation_mode" && c.enabled
+}

@@ -425,7 +425,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		Transport: dev.Transport,
 	}
 
-	inviteCtx, inviteCancel := context.WithTimeout(ctx, 5*time.Second)
+	inviteCtx, inviteCancel := context.WithTimeout(ctx, gbconfig.SIPCommandTimeout())
 	defer inviteCancel()
 	if err := s.inviter.Invite(inviteCtx, s.sessions, sess, body); err != nil {
 		_ = client.CloseRtpServer(context.Background(), streamID)

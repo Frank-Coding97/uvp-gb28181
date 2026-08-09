@@ -255,9 +255,10 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	isFirst, err := device.HandleRegister(ctx, info, h.keepaliveInterval)
 	if err != nil {
-		app.ZapLog.Error("GB28181 自动建档失败", zap.String("deviceId", deviceID), zap.Error(err))
-		_ = tx.Respond(h.newResponse(req, 500, "Server error", nil))
-		h.recordEnd(req, 500, false)
+		status, reason := registerFailureResponse(err)
+		app.ZapLog.Error("GB28181 注册状态更新失败", zap.String("deviceId", deviceID), zap.Error(err))
+		_ = tx.Respond(h.newResponse(req, status, reason, nil))
+		h.recordEnd(req, status, false)
 		return
 	}
 	if err := h.security.TrustEndpoint(deviceID, req.Transport(), ip, time.Duration(expires)*time.Second); err != nil {
@@ -288,6 +289,13 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			h.deviceInfoTrigger.Trigger(ctx, deviceID, dest, transport)
 		}
 	}
+}
+
+func registerFailureResponse(err error) (int, string) {
+	if errors.Is(err, device.ErrDeviceNotPreallocated) {
+		return sip.StatusForbidden, "Device not preallocated"
+	}
+	return sip.StatusInternalServerError, "Server error"
 }
 
 func digestNonceCount(count int) string {

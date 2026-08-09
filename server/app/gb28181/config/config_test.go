@@ -140,6 +140,47 @@ func TestOnlineOnHeartbeatFromDefaultsToEnabled(t *testing.T) {
 	require.True(t, OnlineOnHeartbeatFrom(source))
 }
 
+func TestSaveAlarmMessagesFromDefaultsToEnabled(t *testing.T) {
+	source := fakeSource{}
+	require.True(t, SaveAlarmMessagesFrom(source))
+
+	source.values = map[string]interface{}{SaveAlarmMessagesConfigKey: false}
+	source.bools = map[string]bool{SaveAlarmMessagesConfigKey: false}
+	require.False(t, SaveAlarmMessagesFrom(source))
+
+	source.values[SaveAlarmMessagesConfigKey] = true
+	source.bools[SaveAlarmMessagesConfigKey] = true
+	require.True(t, SaveAlarmMessagesFrom(source))
+}
+
+func TestSIPCommandTimeoutSecFromDefaultsAndValidates(t *testing.T) {
+	source := fakeSource{}
+	require.Equal(t, 10, SIPCommandTimeoutSecFrom(source))
+
+	source.values = map[string]interface{}{SIPCommandTimeoutSecConfigKey: 30}
+	source.ints = map[string]int{SIPCommandTimeoutSecConfigKey: 30}
+	require.Equal(t, 30, SIPCommandTimeoutSecFrom(source))
+
+	for _, invalid := range []int{0, 301} {
+		source.values[SIPCommandTimeoutSecConfigKey] = invalid
+		source.ints[SIPCommandTimeoutSecConfigKey] = invalid
+		require.Equal(t, 10, SIPCommandTimeoutSecFrom(source))
+	}
+}
+
+func TestPreallocationModeFromDefaultsToDisabled(t *testing.T) {
+	source := fakeSource{}
+	require.False(t, PreallocationModeFrom(source))
+
+	source.values = map[string]interface{}{PreallocationModeConfigKey: true}
+	source.bools = map[string]bool{PreallocationModeConfigKey: true}
+	require.True(t, PreallocationModeFrom(source))
+
+	source.values[PreallocationModeConfigKey] = false
+	source.bools[PreallocationModeConfigKey] = false
+	require.False(t, PreallocationModeFrom(source))
+}
+
 func TestIgnoreChannelOfflineStatusNotifyFromDefaultsToDisabled(t *testing.T) {
 	source := fakeSource{}
 	require.False(t, IgnoreChannelOfflineStatusNotifyFrom(source))
