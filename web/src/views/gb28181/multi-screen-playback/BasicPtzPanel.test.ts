@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
     controlPtz: vi.fn(),
-    getControlCapabilities: vi.fn()
+    getControlCapabilities: vi.fn(),
+    fetchPTZDefaultSpeedConfig: vi.fn()
 }));
 
 vi.mock("@/api/gb28181", () => api);
@@ -25,6 +26,7 @@ describe("BasicPtzPanel", () => {
             data: { basicPtz: { state: "supported", reason: "" } }
         });
         api.controlPtz.mockResolvedValue({ code: 0, data: { action: "accepted" } });
+        api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, data: { level: 6 } });
     });
 
     it("collapses the controls while keeping the panel header available", async () => {
@@ -68,9 +70,36 @@ describe("BasicPtzPanel", () => {
 
         await wrapper.get("[data-test=ptz-up]").trigger("pointerup");
 
-        expect(api.controlPtz).toHaveBeenNthCalledWith(1, onlineChannel.id, expect.objectContaining({ action: "up", speed: 125 }));
+        expect(api.controlPtz).toHaveBeenNthCalledWith(1, onlineChannel.id, expect.objectContaining({ action: "up", speed: 153 }));
         expect(api.controlPtz).toHaveBeenNthCalledWith(2, onlineChannel.id, expect.objectContaining({ action: "stop" }));
         expect(wrapper.emitted("actionChange")?.[1]).toEqual([null]);
+    });
+
+    it("loads level ten and sends the full GB28181 speed byte", async () => {
+        api.fetchPTZDefaultSpeedConfig.mockResolvedValueOnce({ code: 0, data: { level: 10 } });
+        const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+        await flushPromises();
+
+        expect(wrapper.get("input[type='range']").element).toHaveProperty("value", "10");
+        await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+
+        expect(api.controlPtz).toHaveBeenCalledWith(
+            onlineChannel.id,
+            expect.objectContaining({ action: "up", speed: 255 })
+        );
+    });
+
+    it("falls back to level six when the default speed cannot be loaded", async () => {
+        api.fetchPTZDefaultSpeedConfig.mockRejectedValueOnce(new Error("network error"));
+        const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+        await flushPromises();
+
+        expect(wrapper.get("input[type='range']").element).toHaveProperty("value", "6");
+        await wrapper.get("[data-test=ptz-up]").trigger("pointerdown");
+        expect(api.controlPtz).toHaveBeenCalledWith(
+            onlineChannel.id,
+            expect.objectContaining({ action: "up", speed: 153 })
+        );
     });
 
     it("stops an active action on channel change and window blur", async () => {

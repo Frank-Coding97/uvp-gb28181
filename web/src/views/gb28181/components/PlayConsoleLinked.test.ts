@@ -90,6 +90,7 @@ const api = vi.hoisted(() => {
         refreshError: null
       }
     }),
+    fetchPTZDefaultSpeedConfig: vi.fn().mockResolvedValue({ code: 0, message: "", data: { level: 6 } }),
     listPtzPresets: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: presets, freshness: "fresh" } }),
     listCruiseTracks: vi.fn().mockResolvedValue({ code: 0, message: "", data: { list: cruises, freshness: "fresh" } }),
     getHomePosition: vi
@@ -207,6 +208,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.getPtzOperation.mockReset();
     api.getDeviceStatus.mockReset();
     api.updateHomePosition.mockReset();
+    api.fetchPTZDefaultSpeedConfig.mockReset();
+    api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 6 } });
     api.startPlay.mockResolvedValue({
       code: 0,
       message: "",
@@ -290,6 +293,31 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     expect(api.controlPtz).toHaveBeenLastCalledWith(channel.id, expect.objectContaining({ action: "stop" }));
     expect(api.controlPtz).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it("读取云台默认速度并把第十档映射为协议速度 255", async () => {
+    api.fetchPTZDefaultSpeedConfig.mockResolvedValueOnce({ code: 0, message: "", data: { level: 10 } });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.get("input[type='range'][max='10']").element).toHaveProperty("value", "10");
+    await wrapper.get("[aria-label='云台方向摇杆']").trigger("keydown", { key: "ArrowUp" });
+    await flushPromises();
+
+    expect(api.controlPtz).toHaveBeenCalledWith(
+      channel.id,
+      expect.objectContaining({ action: "up", speed: 255 })
+    );
+    wrapper.unmount();
+  });
+
+  it("云台默认速度加载失败时回退到第六档", async () => {
+    api.fetchPTZDefaultSpeedConfig.mockRejectedValueOnce(new Error("network error"));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(wrapper.get("input[type='range'][max='10']").element).toHaveProperty("value", "6");
     wrapper.unmount();
   });
 

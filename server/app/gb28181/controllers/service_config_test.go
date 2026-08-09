@@ -51,7 +51,77 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/position-history", controller.UpdatePositionHistory)
 	router.GET("/sdp-extension", controller.GetSDPExtension)
 	router.PUT("/sdp-extension", controller.UpdateSDPExtension)
+	router.GET("/ptz-default-speed", controller.GetPTZDefaultSpeed)
+	router.PUT("/ptz-default-speed", controller.UpdatePTZDefaultSpeed)
 	return router
+}
+
+func TestServiceConfigController_PTZDefaultSpeedDefaultsToSix(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/ptz-default-speed", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, float64(6), serviceConfigData(t, recorder)["level"])
+}
+
+func TestServiceConfigController_UpdatePTZDefaultSpeedPersistsBoundaries(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{ptzDefaultSpeedLevelConfigKey: 6}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, level := range []int{1, 10} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(
+			http.MethodPut, "/ptz-default-speed", jsonBody(t, map[string]int{"level": level}),
+		))
+
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, level, config.values[ptzDefaultSpeedLevelConfigKey])
+		require.Equal(t, float64(level), serviceConfigData(t, recorder)["level"])
+	}
+	require.Equal(t, 2, config.saveNum)
+}
+
+func TestServiceConfigController_UpdatePTZDefaultSpeedRejectsInvalidLevel(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{ptzDefaultSpeedLevelConfigKey: 6}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, body := range []map[string]int{{"level": 0}, {"level": 11}, {}} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/ptz-default-speed", jsonBody(t, body)))
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
+	require.Equal(t, 0, config.saveNum)
+	require.Equal(t, 6, config.values[ptzDefaultSpeedLevelConfigKey])
+}
+
+func TestServiceConfigController_UpdatePTZDefaultSpeedRollsBackOnSaveError(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{
+		values:  map[string]interface{}{ptzDefaultSpeedLevelConfigKey: 6},
+		saveErr: errors.New("write failed"),
+	}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/ptz-default-speed", jsonBody(t, map[string]int{"level": 10})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, 6, config.values[ptzDefaultSpeedLevelConfigKey])
 }
 
 func TestServiceConfigController_SDPExtensionDefaultsToDisabled(t *testing.T) {

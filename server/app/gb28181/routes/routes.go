@@ -324,8 +324,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			serviceConfig.GET("/position-history", serviceConfigController.GetPositionHistory)
 			serviceConfig.PUT("/position-history", serviceConfigController.UpdatePositionHistory)
-		serviceConfig.GET("/sdp-extension", serviceConfigController.GetSDPExtension)
-		serviceConfig.PUT("/sdp-extension", serviceConfigController.UpdateSDPExtension)
+			serviceConfig.GET("/sdp-extension", serviceConfigController.GetSDPExtension)
+			serviceConfig.PUT("/sdp-extension", serviceConfigController.UpdateSDPExtension)
+			serviceConfig.GET("/ptz-default-speed", serviceConfigController.GetPTZDefaultSpeed)
+			serviceConfig.PUT("/ptz-default-speed", serviceConfigController.UpdatePTZDefaultSpeed)
 		}
 		setup := gb.Group("/sip/setup")
 		{

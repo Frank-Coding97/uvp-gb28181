@@ -24,6 +24,7 @@ import {
     createPtzPreset,
     deletePtzPreset,
     deleteTalkSession,
+    fetchPTZDefaultSpeedConfig,
     getControlCapabilities,
     getDeviceStatus,
     getHomePosition,
@@ -56,6 +57,7 @@ import {
     type StreamMonitorSnapshot,
     type TalkCreateResult,
 } from "@/api/gb28181";
+import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
 import {
     Activity,
     AlertTriangle,
@@ -315,7 +317,7 @@ const talkAvailable = computed(() => props.channel?.status === 1);
 const broadcastUnavailableTitle = "平台暂未实现国标语音广播信令链路，无法建立广播会话";
 
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
-const moveSpeed = ref(6); // 1-10 步进,转发时 * 25 得 GB28181 1-255
+const moveSpeed = ref(DEFAULT_PTZ_SPEED_LEVEL);
 const focusMode = ref<"auto" | "manual">("auto");
 const irisMode = ref<"auto" | "manual">("auto");
 type JoystickDirection = "左上" | "上" | "右上" | "左" | "右" | "左下" | "下" | "右下";
@@ -1856,10 +1858,24 @@ async function sendPtz(action: string) {
     if (action === "停止") activePtzAction = "";
     else activePtzAction = action;
     try {
-        const response = await controlPtz(props.channel.id, { action: ptzActions[action] || action, speed: Math.max(1, Math.min(255, moveSpeed.value * 25)), idempotencyKey: `${props.channel.id}-${action}-${Date.now()}` });
+        const response = await controlPtz(props.channel.id, {
+            action: ptzActions[action] || action,
+            speed: levelToProtocolSpeed(moveSpeed.value),
+            idempotencyKey: `${props.channel.id}-${action}-${Date.now()}`
+        });
         if (response.code !== 0) throw new Error(response.message || "云台指令失败");
     } catch (error: any) {
         Message.error(error?.message || `云台指令 ${action} 失败`);
+    }
+}
+
+async function loadDefaultPtzSpeed() {
+    moveSpeed.value = DEFAULT_PTZ_SPEED_LEVEL;
+    try {
+        const response = await fetchPTZDefaultSpeedConfig();
+        if (response.code === 0 && response.data) moveSpeed.value = normalizePtzSpeedLevel(response.data.level);
+    } catch {
+        // 配置读取失败时保持默认 6 档，不阻断播放和云台控制。
     }
 }
 
@@ -2752,7 +2768,10 @@ function handleVisibilityChange() {
 watch(
     [() => props.visible, () => channelContextKey()],
     ([visible]) => {
-        if (visible && props.channel) void startSession();
+        if (visible && props.channel) {
+            void loadDefaultPtzSpeed();
+            void startSession();
+        }
         else { releasePtzControl(); cleanupTalkLocally(); cleanupSessionLocally(); }
     },
     { immediate: true },

@@ -18,8 +18,9 @@ import {
     ZoomIn,
     ZoomOut
 } from "@lucide/vue";
-import { controlPtz, getControlCapabilities } from "@/api/gb28181";
+import { controlPtz, fetchPTZDefaultSpeedConfig, getControlCapabilities } from "@/api/gb28181";
 import type { ChannelVO } from "../device-mgmt/api";
+import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
 
 const props = defineProps<{
     channel: ChannelVO | null;
@@ -28,7 +29,7 @@ const emit = defineEmits<{
     actionChange: [value: { channelId: number; action: string } | null];
 }>();
 
-const speed = ref(5);
+const speed = ref(DEFAULT_PTZ_SPEED_LEVEL);
 const collapsed = ref(false);
 const capabilityState = ref("unknown");
 let capabilityToken = 0;
@@ -43,14 +44,10 @@ const disabledReason = computed(() => {
 });
 const controlsDisabled = computed(() => Boolean(disabledReason.value));
 
-function ptzSpeed() {
-    return Math.max(1, Math.min(255, speed.value * 25));
-}
-
 function payload(channelId: number, action: string) {
     return {
         action,
-        speed: ptzSpeed(),
+        speed: levelToProtocolSpeed(speed.value),
         idempotencyKey: `${channelId}-${action}-${Date.now()}`
     };
 }
@@ -95,6 +92,16 @@ async function loadCapability(channelId: number, token: number) {
     }
 }
 
+async function loadDefaultSpeed() {
+    speed.value = DEFAULT_PTZ_SPEED_LEVEL;
+    try {
+        const response = await fetchPTZDefaultSpeedConfig();
+        if (response.code === 0 && response.data) speed.value = normalizePtzSpeedLevel(response.data.level);
+    } catch {
+        // 配置读取失败时保持默认 6 档，不影响云台控制。
+    }
+}
+
 function handleVisibilityChange() {
     if (document.visibilityState === "hidden") void stopActive();
 }
@@ -119,6 +126,7 @@ watch(collapsed, value => {
 });
 
 onMounted(() => {
+    void loadDefaultSpeed();
     window.addEventListener("blur", handleWindowBlur);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 });

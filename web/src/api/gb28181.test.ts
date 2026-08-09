@@ -6,6 +6,7 @@ vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
+  fetchPTZDefaultSpeedConfig,
   fetchSDPExtensionConfig,
   fetchPositionHistoryConfig,
   getControlCapabilities,
@@ -17,6 +18,7 @@ import {
   listPtzPresets,
   updateHomePosition,
   updatePositionHistoryConfig,
+  updatePTZDefaultSpeedConfig,
   updateSDPExtensionConfig,
   type DeviceStatusResult,
   type HomePositionPatch
@@ -51,6 +53,18 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/sdp-extension",
       { data: { enabled: true } }
+    );
+  });
+
+  it("读取并更新云台默认速度档位", async () => {
+    await fetchPTZDefaultSpeedConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/ptz-default-speed");
+
+    await updatePTZDefaultSpeedConfig(10);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/ptz-default-speed",
+      { data: { level: 10 } }
     );
   });
 });

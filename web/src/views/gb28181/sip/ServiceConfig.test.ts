@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ServiceConfig from "./ServiceConfig.vue";
 
 const api = vi.hoisted(() => ({
+    fetchPTZDefaultSpeedConfig: vi.fn(),
+    updatePTZDefaultSpeedConfig: vi.fn(),
     fetchPositionHistoryConfig: vi.fn(),
     updatePositionHistoryConfig: vi.fn(),
     fetchSDPExtensionConfig: vi.fn(),
@@ -32,6 +34,12 @@ const InputNumberStub = {
     template: `<input type="number" :disabled="disabled" :value="modelValue" @input="$emit('update:modelValue', Number($event.target.value))" />`
 };
 
+const SliderStub = {
+    props: ["modelValue", "min", "max", "step", "disabled"],
+    emits: ["update:modelValue"],
+    template: `<input type="range" :min="min" :max="max" :step="step" :disabled="disabled" :value="modelValue" @input="$emit('update:modelValue', Number($event.target.value))" />`
+};
+
 function mountPage() {
     return mount(ServiceConfig, {
         global: {
@@ -48,6 +56,7 @@ function mountPage() {
                 },
                 "a-button": ButtonStub,
                 "a-switch": SwitchStub,
+                "a-slider": SliderStub,
                 "a-input-number": InputNumberStub,
                 "a-select": { template: `<select disabled><slot /></select>` },
                 "a-option": { template: `<option><slot /></option>` }
@@ -62,14 +71,18 @@ describe("ServiceConfig edit mode", () => {
         api.updatePositionHistoryConfig.mockReset();
         api.fetchSDPExtensionConfig.mockReset();
         api.updateSDPExtensionConfig.mockReset();
+        api.fetchPTZDefaultSpeedConfig.mockReset();
+        api.updatePTZDefaultSpeedConfig.mockReset();
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
         api.fetchSDPExtensionConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
+        api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 8 } });
         api.updatePositionHistoryConfig.mockResolvedValue({
             code: 0,
             message: "保存成功",
             data: { enabled: false, retentionDays: 7 }
         });
         api.updateSDPExtensionConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
+        api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
     });
 
     it("reuses the system configuration page layout primitives", async () => {
@@ -172,5 +185,27 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updateSDPExtensionConfig).toHaveBeenCalledWith(true);
+    });
+
+    it("presents and saves the PTZ default speed as a 1-10 level slider", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.text()).toContain("云台默认速度");
+        expect(wrapper.text()).toContain("8 档");
+        const speedSlider = wrapper.get("input[type='range']");
+        expect(speedSlider.attributes()).toMatchObject({ min: "1", max: "10", step: "1" });
+        expect(speedSlider.element).toHaveProperty("value", "8");
+        expect(speedSlider.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        expect(speedSlider.element).toHaveProperty("disabled", false);
+        await speedSlider.setValue("10");
+        expect(wrapper.text()).toContain("10 档");
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updatePTZDefaultSpeedConfig).toHaveBeenCalledWith(10);
     });
 });

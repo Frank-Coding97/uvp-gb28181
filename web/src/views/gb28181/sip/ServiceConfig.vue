@@ -3,9 +3,11 @@ import { Message } from "@arco-design/web-vue";
 import { Check, Pencil, X } from "lucide-vue-next";
 import { computed, onMounted, reactive, ref } from "vue";
 import {
+    fetchPTZDefaultSpeedConfig,
     fetchPositionHistoryConfig,
     fetchSDPExtensionConfig,
     updatePositionHistoryConfig,
+    updatePTZDefaultSpeedConfig,
     updateSDPExtensionConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
@@ -21,21 +23,26 @@ const positionHistoryReady = ref(false);
 const sdpExtensionLoading = ref(true);
 const sdpExtensionSaving = ref(false);
 const sdpExtensionReady = ref(false);
+const ptzDefaultSpeedLoading = ref(true);
+const ptzDefaultSpeedSaving = ref(false);
+const ptzDefaultSpeedReady = ref(false);
 const savedPositionHistoryEnabled = ref(true);
 const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
+const savedPTZDefaultSpeed = ref(6);
 const positionHistoryChanged = computed(
     () =>
         draft.saveMobilePositionHistory !== savedPositionHistoryEnabled.value ||
         draft.positionHistoryRetentionDays !== savedPositionHistoryRetentionDays.value
 );
 const sdpExtensionChanged = computed(() => draft.sdpExtension !== savedSDPExtensionEnabled.value);
+const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefaultSpeed.value);
 const hasChanges = computed(
-    () => positionHistoryChanged.value || sdpExtensionChanged.value
+    () => positionHistoryChanged.value || sdpExtensionChanged.value || ptzDefaultSpeedChanged.value
 );
-const configLoading = computed(() => positionHistoryLoading.value || sdpExtensionLoading.value);
-const configSaving = computed(() => positionHistorySaving.value || sdpExtensionSaving.value);
-const configReady = computed(() => positionHistoryReady.value && sdpExtensionReady.value);
+const configLoading = computed(() => positionHistoryLoading.value || sdpExtensionLoading.value || ptzDefaultSpeedLoading.value);
+const configSaving = computed(() => positionHistorySaving.value || sdpExtensionSaving.value || ptzDefaultSpeedSaving.value);
+const configReady = computed(() => positionHistoryReady.value && sdpExtensionReady.value && ptzDefaultSpeedReady.value);
 const formLayout = computed(() => (isMobile.value ? "vertical" : "horizontal"));
 
 async function loadPositionHistoryConfig() {
@@ -71,10 +78,26 @@ async function loadSDPExtensionConfig() {
     }
 }
 
+async function loadPTZDefaultSpeedConfig() {
+    ptzDefaultSpeedLoading.value = true;
+    try {
+        const response = await fetchPTZDefaultSpeedConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.ptzSpeed = response.data.level;
+        savedPTZDefaultSpeed.value = response.data.level;
+        ptzDefaultSpeedReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载云台默认速度失败");
+    } finally {
+        ptzDefaultSpeedLoading.value = false;
+    }
+}
+
 function startEditing() {
     draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
+    draft.ptzSpeed = savedPTZDefaultSpeed.value;
     isEditing.value = true;
 }
 
@@ -82,6 +105,7 @@ function cancelEditing() {
     draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
+    draft.ptzSpeed = savedPTZDefaultSpeed.value;
     isEditing.value = false;
 }
 
@@ -114,6 +138,14 @@ async function saveConfig() {
             savedSDPExtensionEnabled.value = response.data.enabled;
             sdpExtensionSaving.value = false;
         }
+        if (ptzDefaultSpeedChanged.value) {
+            ptzDefaultSpeedSaving.value = true;
+            const response = await updatePTZDefaultSpeedConfig(draft.ptzSpeed);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.ptzSpeed = response.data.level;
+            savedPTZDefaultSpeed.value = response.data.level;
+            ptzDefaultSpeedSaving.value = false;
+        }
         isEditing.value = false;
         Message.success("国标服务配置已更新");
     } catch (error: any) {
@@ -121,10 +153,11 @@ async function saveConfig() {
     } finally {
         positionHistorySaving.value = false;
         sdpExtensionSaving.value = false;
+        ptzDefaultSpeedSaving.value = false;
     }
 }
 
-onMounted(() => Promise.all([loadPositionHistoryConfig(), loadSDPExtensionConfig()]));
+onMounted(() => Promise.all([loadPositionHistoryConfig(), loadSDPExtensionConfig(), loadPTZDefaultSpeedConfig()]));
 </script>
 
 <template>
@@ -218,8 +251,24 @@ onMounted(() => Promise.all([loadPositionHistoryConfig(), loadSDPExtensionConfig
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="ptzSpeed" label="云台速度">
-                                        <a-input-number v-model="draft.ptzSpeed" :min="1" :max="255" disabled />
+                                    <a-form-item field="ptzSpeed" label="云台默认速度">
+                                        <div class="ptz-default-speed">
+                                            <span class="ptz-default-speed__edge">慢</span>
+                                            <a-slider
+                                                v-model="draft.ptzSpeed"
+                                                :min="1"
+                                                :max="10"
+                                                :step="1"
+                                                show-ticks
+                                                :disabled="!isEditing || ptzDefaultSpeedLoading || ptzDefaultSpeedSaving || !ptzDefaultSpeedReady"
+                                                aria-label="云台默认速度"
+                                            />
+                                            <span class="ptz-default-speed__edge">快</span>
+                                            <output class="ptz-default-speed__value">{{ draft.ptzSpeed }} 档</output>
+                                        </div>
+                                        <template #extra>
+                                            <div>作为播放弹窗和大屏云台控制的初始档位，可在控制面板临时调整。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
@@ -395,6 +444,27 @@ onMounted(() => Promise.all([loadPositionHistoryConfig(), loadSDPExtensionConfig
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.ptz-default-speed {
+    display: grid;
+    grid-template-columns: auto minmax(88px, 1fr) auto 48px;
+    gap: 8px;
+    align-items: center;
+    width: min(100%, 360px);
+}
+
+.ptz-default-speed__edge {
+    color: var(--color-text-3);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.ptz-default-speed__value {
+    color: var(--color-text-1);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
 }
 
 .mb-4 {
