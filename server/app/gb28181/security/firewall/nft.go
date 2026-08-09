@@ -235,6 +235,10 @@ func collectNftValues(value interface{}, values *[]string) {
 		for _, child := range current {
 			collectNftValues(child, values)
 		}
+	case string:
+		if net.ParseIP(current) != nil {
+			*values = append(*values, current)
+		}
 	}
 }
 
