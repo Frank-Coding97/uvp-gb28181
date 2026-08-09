@@ -42,6 +42,14 @@ type TalkInviter interface {
 	ByeTalk(context.Context, string) error
 }
 
+type BroadcastMessageSender interface {
+	SendMessageTracked(context.Context, string, string, string, []byte) (uac.TrackedMessageResult, error)
+}
+
+type BroadcastDialogTerminator interface {
+	ByeBroadcast(context.Context, string) error
+}
+
 type TalkTargetLoader interface {
 	LoadTalkTarget(context.Context, uint, string) (*models.GbChannel, *models.GbDevice, error)
 }
@@ -51,10 +59,12 @@ type ActivationPlatform struct {
 }
 
 type ActivationDependencies struct {
-	ClientFor func(*node.Node) TalkMediaClient
-	Inviter   TalkInviter
-	Targets   TalkTargetLoader
-	Platform  ActivationPlatform
+	ClientFor        func(*node.Node) TalkMediaClient
+	Inviter          TalkInviter
+	Targets          TalkTargetLoader
+	Platform         ActivationPlatform
+	BroadcastSender  BroadcastMessageSender
+	BroadcastDialogs BroadcastDialogTerminator
 }
 
 type activationRuntime struct {
@@ -74,7 +84,7 @@ func (s *Service) ConfigureActivation(deps ActivationDependencies) {
 }
 
 func (s *Service) OnPublished(ctx context.Context, nodeID int64, appName, sourceStream string) error {
-	if s == nil || s.repo == nil || s.nodes == nil || s.activation == nil || s.activation.deps.Inviter == nil || s.activation.deps.Targets == nil {
+	if s == nil || s.repo == nil || s.nodes == nil || s.activation == nil || s.activation.deps.Targets == nil {
 		return ErrTalkActivationUnavailable
 	}
 	session, err := s.repo.FindBySource(ctx, nodeID, appName, sourceStream)
@@ -86,6 +96,15 @@ func (s *Service) OnPublished(ctx context.Context, nodeID int64, appName, source
 	}
 	if session.State != models.TalkSessionPublishing {
 		return nil
+	}
+	if session.Mode == models.TalkSessionModeBroadcast {
+		if s.activation.deps.BroadcastSender == nil {
+			return ErrTalkActivationUnavailable
+		}
+		return s.onBroadcastPublished(ctx, session)
+	}
+	if s.activation.deps.Inviter == nil {
+		return ErrTalkActivationUnavailable
 	}
 	if !s.activation.begin(session.SessionID) {
 		return nil

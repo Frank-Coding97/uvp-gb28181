@@ -86,8 +86,12 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 			}
 		}
 	}
-	if session.CallID != "" && s.activation != nil && s.activation.deps.Inviter != nil {
-		record("TALK BYE", s.activation.deps.Inviter.ByeTalk(ctx, session.CallID))
+	if session.CallID != "" && s.activation != nil {
+		if session.Mode == models.TalkSessionModeBroadcast && s.activation.deps.BroadcastDialogs != nil {
+			record("Broadcast BYE", s.activation.deps.BroadcastDialogs.ByeBroadcast(ctx, session.CallID))
+		} else if session.Mode == models.TalkSessionModeTalk && s.activation.deps.Inviter != nil {
+			record("TALK BYE", s.activation.deps.Inviter.ByeTalk(ctx, session.CallID))
+		}
 	}
 	var client TalkMediaClient
 	if s.activation == nil || s.activation.deps.ClientFor == nil || s.nodes == nil {

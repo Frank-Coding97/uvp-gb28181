@@ -545,7 +545,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
 	setupPlaybackRuntime(cfg, srv.UAC())
-	setupTalkRuntime(cfg, srv.UAC())
+	setupTalkRuntime(cfg, srv)
 	setupRecordingRuntime(cfg)
 
 	// 装配兜底对账 reconciler(通道播放状态显示 T7 新增)
@@ -713,7 +713,36 @@ func stopRecordingRuntime() {
 	gbroutes.SetRecordingService(nil, nil, nil)
 }
 
-func setupTalkRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
+type broadcastSIPAdapter struct{ service *gbtalk.Service }
+
+func (a broadcastSIPAdapter) PrepareBroadcastInvite(ctx context.Context, request gbhandler.BroadcastInviteRequest) (gbhandler.BroadcastInviteResponse, error) {
+	prepared, err := a.service.PrepareBroadcastInvite(ctx, gbtalk.BroadcastInvite{
+		PeerID: request.PeerID, TargetID: request.TargetID, CallID: request.CallID, CSeq: request.CSeq, SDP: request.SDP,
+	})
+	return gbhandler.BroadcastInviteResponse{SessionID: prepared.SessionID, AnswerSDP: prepared.AnswerSDP}, err
+}
+
+func (a broadcastSIPAdapter) OnBroadcastAck(ctx context.Context, callID string) error {
+	return a.service.OnBroadcastAck(ctx, callID)
+}
+
+func (a broadcastSIPAdapter) OnBroadcastBye(ctx context.Context, callID string) error {
+	return a.service.OnBroadcastBye(ctx, callID)
+}
+
+type broadcastRuntimeServer interface {
+	SetBroadcastMessageProcessor(gbhandler.BroadcastMessageProcessor)
+	SetBroadcastInviteProcessor(gbhandler.BroadcastInviteProcessor)
+	ByeBroadcast(context.Context, string) error
+}
+
+func setupTalkRuntime(cfg gbconfig.Config, server sipRuntimeServer) {
+	var inviter *uac.UAC
+	var broadcastRuntime broadcastRuntimeServer
+	if server != nil {
+		inviter = server.UAC()
+		broadcastRuntime, _ = server.(broadcastRuntimeServer)
+	}
 	if talkSvc != nil || talkCleanupWorker != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		stopTalkRuntime(ctx)
@@ -735,7 +764,8 @@ func setupTalkRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
 	)
 	service.ConfigureActivation(gbtalk.ActivationDependencies{
 		Inviter: inviter, Targets: gbtalk.NewGormTargetLoader(app.DB()),
-		Platform: gbtalk.ActivationPlatform{ServerID: cfg.SIP.ServerID},
+		Platform:        gbtalk.ActivationPlatform{ServerID: cfg.SIP.ServerID},
+		BroadcastSender: inviter, BroadcastDialogs: broadcastRuntime,
 	})
 	recoveryCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	if err := service.Recover(recoveryCtx); err != nil {
@@ -744,6 +774,10 @@ func setupTalkRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
 	cancel()
 	talkSvc = service
 	gbroutes.SetTalkService(service, zlmRegistry)
+	if broadcastRuntime != nil {
+		broadcastRuntime.SetBroadcastMessageProcessor(service)
+		broadcastRuntime.SetBroadcastInviteProcessor(broadcastSIPAdapter{service: service})
+	}
 	inviter.SetTalkByeHandler(func(metadata uac.TalkDialogMetadata) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -763,13 +797,19 @@ func stopTalkRuntime(ctx context.Context) {
 		talkCleanupWorker = nil
 	}
 	service := talkSvc
+	if broadcastRuntime, ok := sipServer.(broadcastRuntimeServer); ok {
+		broadcastRuntime.SetBroadcastMessageProcessor(nil)
+		broadcastRuntime.SetBroadcastInviteProcessor(nil)
+	}
+	if sipServer != nil {
+		if sipServer.UAC() != nil {
+			sipServer.UAC().SetTalkByeHandler(nil)
+		}
+	}
 	if service != nil {
 		if err := service.Shutdown(ctx); err != nil {
 			app.ZapLog.Warn("GB28181 语音对讲关闭清理存在失败", zap.Error(err))
 		}
-	}
-	if sipServer != nil && sipServer.UAC() != nil {
-		sipServer.UAC().SetTalkByeHandler(nil)
 	}
 	talkSvc = nil
 	gbroutes.SetTalkService(nil, nil)

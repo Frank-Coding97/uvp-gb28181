@@ -19,15 +19,17 @@ import (
 
 // MessageHandler 处理 MESSAGE(MANSCDP):本期处理 Keepalive 心跳
 type MessageHandler struct {
-	recorder          metrics.Recorder // 可选:埋点 SIP 事务
-	catalogTrigger    CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
-	subscriptionWaker SubscriptionWaker
-	alarmProcessor    AlarmMessageProcessor
-	ptzProcessor      PTZMessageProcessor
-	recordInfoMu      sync.RWMutex
-	recordInfoSink    RecordInfoSink
-	playbackEndMu     sync.RWMutex
-	playbackEndSink   PlaybackEndSink
+	recorder           metrics.Recorder // 可选:埋点 SIP 事务
+	catalogTrigger     CatalogTrigger   // 可选:设备从离线恢复后重新拉 Catalog
+	subscriptionWaker  SubscriptionWaker
+	alarmProcessor     AlarmMessageProcessor
+	ptzProcessor       PTZMessageProcessor
+	recordInfoMu       sync.RWMutex
+	recordInfoSink     RecordInfoSink
+	playbackEndMu      sync.RWMutex
+	playbackEndSink    PlaybackEndSink
+	broadcastMu        sync.RWMutex
+	broadcastProcessor BroadcastMessageProcessor
 }
 
 type AlarmMessageProcessor interface {
@@ -46,6 +48,10 @@ type RecordInfoSink interface {
 
 type PlaybackEndSink interface {
 	OnPlaybackFileToEnd(context.Context, string, string, []byte) error
+}
+
+type BroadcastMessageProcessor interface {
+	OnBroadcastMessage(context.Context, string, []byte) error
 }
 
 // NewMessageHandler 创建消息处理器
@@ -74,6 +80,18 @@ func (h *MessageHandler) SetAlarmProcessor(processor AlarmMessageProcessor) {
 
 func (h *MessageHandler) SetPTZProcessor(processor PTZMessageProcessor) {
 	h.ptzProcessor = processor
+}
+
+func (h *MessageHandler) SetBroadcastProcessor(processor BroadcastMessageProcessor) {
+	h.broadcastMu.Lock()
+	h.broadcastProcessor = processor
+	h.broadcastMu.Unlock()
+}
+
+func (h *MessageHandler) getBroadcastProcessor() BroadcastMessageProcessor {
+	h.broadcastMu.RLock()
+	defer h.broadcastMu.RUnlock()
+	return h.broadcastProcessor
 }
 
 func (h *MessageHandler) SetRecordInfoSink(sink RecordInfoSink) {
@@ -154,6 +172,15 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 
 	if head.DeviceID != "" {
 		ctx := context.Background()
+		if head.CmdType == manscdp.CmdBroadcast {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if processor := h.getBroadcastProcessor(); processor != nil {
+				if err := processor.OnBroadcastMessage(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					app.ZapLog.Warn("GB28181 Broadcast Response 处理失败", zap.Error(err))
+				}
+			}
+			return
+		}
 		if isPlaybackFileToEnd(req.Body()) {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {

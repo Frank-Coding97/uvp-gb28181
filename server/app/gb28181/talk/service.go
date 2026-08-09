@@ -20,7 +20,6 @@ import (
 
 var (
 	ErrInvalidTalkSessionMode   = errors.New("对讲模式不合法")
-	ErrBroadcastNotImplemented  = errors.New("标准语音广播尚未实现")
 	ErrTalkTargetOffline        = errors.New("设备或通道离线")
 	ErrTalkNodeUnavailable      = errors.New("无可用对讲媒体节点")
 	ErrSecurePublishUnavailable = errors.New("媒体节点未提供安全发布端口")
@@ -112,9 +111,6 @@ func NewService(repo TalkRepo, nodes TalkNodeRegistry, locations TalkLocationSto
 func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateResult, error) {
 	if !request.Mode.Valid() {
 		return nil, ErrInvalidTalkSessionMode
-	}
-	if request.Mode == models.TalkSessionModeBroadcast {
-		return nil, ErrBroadcastNotImplemented
 	}
 	if request.Channel == nil || request.Device == nil || request.Channel.Status != models.ChannelStatusOnline || request.Device.Status != models.DeviceStatusOnline {
 		return nil, ErrTalkTargetOffline

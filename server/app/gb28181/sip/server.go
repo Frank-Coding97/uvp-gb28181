@@ -22,21 +22,24 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
-	cfg       gbconfig.Config
-	ua        *sipgo.UserAgent
-	srv       *sipgo.Server
-	regH      *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
-	msgH      *handler.MessageHandler
-	notifyH   *handler.NotifyHandler
-	uac       *uac.UAC // 供 play service 等业务模块复用
-	recorder  metrics.Recorder
-	onError   func(error)
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	started   bool
-	trace     gbtrace.Runtime
-	traceOnce sync.Once
-	security  handler.RegisterSecurity
+	cfg                gbconfig.Config
+	ua                 *sipgo.UserAgent
+	srv                *sipgo.Server
+	regH               *handler.RegisterHandler // 暴露给测试/扩展注入 CatalogTrigger
+	msgH               *handler.MessageHandler
+	notifyH            *handler.NotifyHandler
+	uac                *uac.UAC // 供 play service 等业务模块复用
+	recorder           metrics.Recorder
+	onError            func(error)
+	cancel             context.CancelFunc
+	wg                 sync.WaitGroup
+	started            bool
+	trace              gbtrace.Runtime
+	traceOnce          sync.Once
+	security           handler.RegisterSecurity
+	broadcastDialogs   *sipgo.DialogServerCache
+	broadcastProcessor handler.BroadcastInviteProcessor
+	broadcastSessions  sync.Map
 }
 
 type TraceFactory func(gbconfig.TraceConfig) gbtrace.Runtime
@@ -181,6 +184,17 @@ func (s *Server) registerHandlers() {
 		regHandler.SetCatalogTrigger(catalogTrigger)
 		msgHandler.SetCatalogTrigger(catalogTrigger)
 		regHandler.SetDeviceInfoTrigger(handler.NewUACDeviceInfoTrigger(u))
+		contactHost := strings.TrimSpace(s.cfg.SIP.AdvertiseIP)
+		if contactHost == "" {
+			contactHost = strings.TrimSpace(s.cfg.SIP.ListenIP)
+		}
+		if contactHost != "" && contactHost != "0.0.0.0" && contactHost != "::" {
+			if client, clientErr := sipgo.NewClient(s.ua); clientErr == nil {
+				s.broadcastDialogs = sipgo.NewDialogServerCache(client, siplib.ContactHeader{Address: siplib.Uri{User: s.cfg.SIP.ServerID, Host: contactHost, Port: s.cfg.SIP.Port}})
+			} else {
+				app.ZapLog.Warn("GB28181 Broadcast UAS client 初始化失败", zap.Error(clientErr))
+			}
+		}
 	}
 
 	s.regH = regHandler
@@ -189,13 +203,90 @@ func (s *Server) registerHandlers() {
 	s.srv.OnMessage(msgHandler.Handle)
 	s.notifyH = handler.NewNotifyHandler(nil)
 	s.srv.OnNotify(s.notifyH.Handle)
+	s.srv.OnInvite(s.handleBroadcastInvite)
+	s.srv.OnAck(s.handleBroadcastAck)
 	s.srv.OnBye(s.handleBye)
 }
 
+func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTransaction) {
+	if req == nil || tx == nil {
+		return
+	}
+	if s.broadcastDialogs == nil || s.broadcastProcessor == nil {
+		_ = tx.Respond(siplib.NewResponseFromRequest(req, siplib.StatusServiceUnavailable, "Broadcast Service Unavailable", nil))
+		return
+	}
+	dialog, err := s.broadcastDialogs.ReadInvite(req, tx)
+	if err != nil {
+		_ = tx.Respond(siplib.NewResponseFromRequest(req, siplib.StatusBadRequest, "Invalid Dialog", nil))
+		return
+	}
+	callID := requestCallID(req)
+	peerID := ""
+	if from := req.From(); from != nil {
+		peerID = from.Address.User
+	}
+	targetID := broadcastSubjectTarget(req)
+	cseq := uint(0)
+	if req.CSeq() != nil {
+		cseq = uint(req.CSeq().SeqNo)
+	}
+	prepared, prepareErr := s.broadcastProcessor.PrepareBroadcastInvite(context.Background(), handler.BroadcastInviteRequest{
+		PeerID: peerID, TargetID: targetID, CallID: callID, CSeq: cseq, SDP: string(req.Body()),
+	})
+	if prepareErr != nil {
+		status := siplib.StatusNotAcceptableHere
+		if statusProvider, ok := prepareErr.(interface{ SIPStatus() int }); ok {
+			status = statusProvider.SIPStatus()
+		}
+		_ = dialog.Respond(status, prepareErr.Error(), nil)
+		_ = dialog.Close()
+		return
+	}
+	s.broadcastSessions.Store(callID, struct {
+		sessionID string
+		dialog    *sipgo.DialogServerSession
+	}{prepared.SessionID, dialog})
+	if err := dialog.RespondSDP([]byte(prepared.AnswerSDP)); err != nil {
+		s.broadcastSessions.Delete(callID)
+		_ = dialog.Close()
+		_ = s.broadcastProcessor.OnBroadcastBye(context.Background(), callID)
+	}
+}
+
+func (s *Server) handleBroadcastAck(req *siplib.Request, tx siplib.ServerTransaction) {
+	if req == nil || s.broadcastDialogs == nil {
+		return
+	}
+	callID := requestCallID(req)
+	if _, ok := s.broadcastSessions.Load(callID); !ok {
+		return
+	}
+	if err := s.broadcastDialogs.ReadAck(req, tx); err != nil {
+		app.ZapLog.Warn("处理设备 Broadcast ACK 失败", zap.String("callId", callID), zap.Error(err))
+		return
+	}
+	if s.broadcastProcessor != nil {
+		if err := s.broadcastProcessor.OnBroadcastAck(context.Background(), callID); err != nil {
+			app.ZapLog.Warn("激活 Broadcast 会话失败", zap.String("callId", callID), zap.Error(err))
+		}
+	}
+}
+
 func (s *Server) handleBye(req *siplib.Request, tx siplib.ServerTransaction) {
-	callID := ""
-	if req != nil && req.CallID() != nil {
-		callID = string(*req.CallID())
+	callID := requestCallID(req)
+	if _, ok := s.broadcastSessions.Load(callID); ok && s.broadcastDialogs != nil {
+		if err := s.broadcastDialogs.ReadBye(req, tx); err != nil {
+			app.ZapLog.Warn("处理设备 Broadcast BYE 失败", zap.String("callId", callID), zap.Error(err))
+			return
+		}
+		s.broadcastSessions.Delete(callID)
+		if s.broadcastProcessor != nil {
+			if err := s.broadcastProcessor.OnBroadcastBye(context.Background(), callID); err != nil {
+				app.ZapLog.Warn("设备 Broadcast BYE 清理失败", zap.String("callId", callID), zap.Error(err))
+			}
+		}
+		return
 	}
 	if strings.HasPrefix(callID, "talk-") && s.uac != nil {
 		if _, err := s.uac.HandleTalkBye(req, tx); err != nil {
@@ -206,6 +297,27 @@ func (s *Server) handleBye(req *siplib.Request, tx siplib.ServerTransaction) {
 	if req != nil && tx != nil {
 		_ = tx.Respond(siplib.NewResponseFromRequest(req, siplib.StatusCallTransactionDoesNotExists, "Call/Transaction Does Not Exist", nil))
 	}
+}
+
+func requestCallID(req *siplib.Request) string {
+	if req != nil && req.CallID() != nil {
+		return string(*req.CallID())
+	}
+	return ""
+}
+
+func broadcastSubjectTarget(req *siplib.Request) string {
+	if req == nil {
+		return ""
+	}
+	if subject := req.GetHeader("Subject"); subject != nil {
+		value := strings.TrimSpace(subject.Value())
+		if index := strings.IndexAny(value, ":,"); index > 0 {
+			return strings.TrimSpace(value[:index])
+		}
+		return value
+	}
+	return ""
 }
 
 // SetCatalogTrigger 替换默认 Catalog 触发器(主要给测试用),同时覆盖注册与心跳恢复路径。
@@ -246,6 +358,33 @@ func (s *Server) SetPTZMessageProcessor(processor handler.PTZMessageProcessor) {
 	if s.msgH != nil {
 		s.msgH.SetPTZProcessor(processor)
 	}
+}
+
+func (s *Server) SetBroadcastMessageProcessor(processor handler.BroadcastMessageProcessor) {
+	if s.msgH != nil {
+		s.msgH.SetBroadcastProcessor(processor)
+	}
+}
+
+func (s *Server) SetBroadcastInviteProcessor(processor handler.BroadcastInviteProcessor) {
+	s.broadcastProcessor = processor
+}
+
+func (s *Server) ByeBroadcast(ctx context.Context, callID string) error {
+	value, ok := s.broadcastSessions.Load(strings.TrimSpace(callID))
+	if !ok {
+		return nil
+	}
+	entry := value.(struct {
+		sessionID string
+		dialog    *sipgo.DialogServerSession
+	})
+	err := entry.dialog.Bye(ctx)
+	if err == nil {
+		s.broadcastSessions.Delete(callID)
+		_ = entry.dialog.Close()
+	}
+	return err
 }
 
 func (s *Server) SetRecordInfoSink(sink handler.RecordInfoSink) {

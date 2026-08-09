@@ -35,6 +35,7 @@ type TalkSessionView struct {
 	SessionID string                    `json:"sessionId"`
 	Mode      gbmodels.TalkSessionMode  `json:"mode"`
 	State     gbmodels.TalkSessionState `json:"state"`
+	Phase     gbmodels.TalkSignalPhase  `json:"phase,omitempty"`
 	ExpiresAt time.Time                 `json:"expiresAt"`
 	StartedAt *time.Time                `json:"startedAt,omitempty"`
 	EndedAt   *time.Time                `json:"endedAt,omitempty"`
@@ -185,8 +186,6 @@ func (c *TalkController) writeServiceError(ctx *gin.Context, err error) {
 	switch {
 	case errors.Is(err, talk.ErrLeaseConflict):
 		response.Fail(ctx, "通道正在对讲中", http.StatusConflict)
-	case errors.Is(err, talk.ErrBroadcastNotImplemented):
-		response.Fail(ctx, "标准语音广播尚未实现", http.StatusNotImplemented)
 	case errors.Is(err, talk.ErrInvalidTalkSessionMode):
 		response.Fail(ctx, "mode 仅支持 broadcast 或 talk", http.StatusBadRequest)
 	case errors.Is(err, talk.ErrTalkTargetOffline):
@@ -202,7 +201,7 @@ func (c *TalkController) writeServiceError(ctx *gin.Context, err error) {
 
 func talkSessionView(session *gbmodels.GbTalkSession) TalkSessionView {
 	return TalkSessionView{
-		SessionID: session.SessionID, Mode: session.Mode, State: session.State, ExpiresAt: session.ExpiresAt,
+		SessionID: session.SessionID, Mode: session.Mode, State: session.State, Phase: session.SignalPhase, ExpiresAt: session.ExpiresAt,
 		StartedAt: session.StartedAt, EndedAt: session.EndedAt, Error: session.Error,
 	}
 }

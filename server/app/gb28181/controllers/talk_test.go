@@ -110,8 +110,8 @@ func TestTalkControllerForwardsTalkModeAndReturnsIt(t *testing.T) {
 	require.Equal(t, "talk", data["mode"])
 }
 
-func TestTalkControllerReturnsNotImplementedForBroadcast(t *testing.T) {
-	service := &fakeTalkSessionService{createErr: talk.ErrBroadcastNotImplemented}
+func TestTalkControllerCreatesBroadcastSession(t *testing.T) {
+	service := &fakeTalkSessionService{}
 	router, _, ownID, _ := newTalkControllerRouter(t, service)
 	path := "/channel/" + strconv.FormatUint(uint64(ownID), 10) + "/talk-sessions"
 	response := httptest.NewRecorder()
@@ -119,10 +119,10 @@ func TestTalkControllerReturnsNotImplementedForBroadcast(t *testing.T) {
 	request.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(response, request)
 
-	require.Equal(t, http.StatusNotImplemented, response.Code)
+	require.Equal(t, http.StatusOK, response.Code)
 	require.Equal(t, 1, service.createCalls)
 	require.Equal(t, gbmodels.TalkSessionModeBroadcast, service.request.Mode)
-	require.Contains(t, response.Body.String(), "标准语音广播尚未实现")
+	require.Contains(t, response.Body.String(), `"mode":"broadcast"`)
 }
 
 func TestTalkControllerRejectsMissingOrInvalidMode(t *testing.T) {

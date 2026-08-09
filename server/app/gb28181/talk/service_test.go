@@ -132,7 +132,7 @@ func TestTalkServiceRejectsInvalidModeWithoutCreatingLease(t *testing.T) {
 	require.Empty(t, sessions)
 }
 
-func TestTalkServiceRejectsBroadcastWithoutCreatingLease(t *testing.T) {
+func TestTalkServiceCreatesBroadcastLease(t *testing.T) {
 	db := newTalkRepoTestDB(t)
 	repo := NewGormRepo(db)
 	n := &node.Node{ID: 1, Host: "node", State: node.StateActive}
@@ -142,12 +142,14 @@ func TestTalkServiceRejectsBroadcastWithoutCreatingLease(t *testing.T) {
 
 	request := talkCreateRequest(1)
 	request.Mode = models.TalkSessionModeBroadcast
-	_, err := service.Create(context.Background(), request)
-	require.ErrorIs(t, err, ErrBroadcastNotImplemented)
-	require.Zero(t, picker.calls.Load())
+	result, err := service.Create(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, models.TalkSessionModeBroadcast, result.Mode)
+	require.Equal(t, int32(1), picker.calls.Load())
 	sessions, err := repo.ListNonterminal(context.Background())
 	require.NoError(t, err)
-	require.Empty(t, sessions)
+	require.Len(t, sessions, 1)
+	require.Equal(t, request.Channel.ChannelID, sessions[0].TargetID)
 }
 
 func TestTalkServiceRejectsInsecureNodeWithoutCreatingLease(t *testing.T) {

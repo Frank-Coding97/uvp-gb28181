@@ -121,16 +121,32 @@ func (r *GormRepo) FindByCallID(ctx context.Context, callID string) (*models.GbT
 }
 
 func (r *GormRepo) FindByBroadcastSN(ctx context.Context, sn uint, deviceID, targetID string) (*models.GbTalkSession, error) {
-	if sn == 0 || strings.TrimSpace(deviceID) == "" || strings.TrimSpace(targetID) == "" {
+	if sn == 0 {
 		return nil, nil
 	}
-	return r.findOne(ctx, "mode = ? AND broadcast_sn = ? AND device_id = ? AND target_id = ?", models.TalkSessionModeBroadcast, sn, deviceID, targetID)
+	query := r.db.WithContext(ctx).Where("mode = ? AND broadcast_sn = ?", models.TalkSessionModeBroadcast, sn)
+	if strings.TrimSpace(deviceID) != "" {
+		query = query.Where("device_id = ?", deviceID)
+	}
+	if strings.TrimSpace(targetID) != "" {
+		query = query.Where("target_id = ?", targetID)
+	}
+	var sessions []models.GbTalkSession
+	if err := query.Order("id DESC").Limit(2).Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	if len(sessions) != 1 {
+		return nil, nil
+	}
+	return &sessions[0], nil
 }
 
 func (r *GormRepo) FindPendingBroadcast(ctx context.Context, deviceID, targetID string) ([]models.GbTalkSession, error) {
 	var sessions []models.GbTalkSession
-	query := r.db.WithContext(ctx).
-		Where("mode = ? AND device_id = ? AND state IN ?", models.TalkSessionModeBroadcast, deviceID, nonterminalStates)
+	query := r.db.WithContext(ctx).Where("mode = ? AND state IN ?", models.TalkSessionModeBroadcast, nonterminalStates)
+	if strings.TrimSpace(deviceID) != "" {
+		query = query.Where("device_id = ?", deviceID)
+	}
 	if strings.TrimSpace(targetID) != "" {
 		query = query.Where("target_id = ?", targetID)
 	}
