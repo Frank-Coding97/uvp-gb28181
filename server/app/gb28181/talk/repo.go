@@ -50,6 +50,21 @@ type TransitionPatch struct {
 	Error        *string
 }
 
+type BroadcastFactsPatch struct {
+	SN            *uint
+	ReplyStatus   *string
+	SignalPhase   *models.TalkSignalPhase
+	RemoteMediaIP *string
+	RemotePort    *int
+	Transport     *string
+	SenderMode    *string
+	CallID        *string
+	LocalTag      *string
+	RemoteTag     *string
+	RemoteURI     *string
+	CSeq          *uint
+}
+
 type GormRepo struct {
 	db *gorm.DB
 }
@@ -103,6 +118,71 @@ func (r *GormRepo) FindByCallID(ctx context.Context, callID string) (*models.GbT
 		return nil, nil
 	}
 	return r.findOne(ctx, "call_id = ?", callID)
+}
+
+func (r *GormRepo) FindByBroadcastSN(ctx context.Context, sn uint, deviceID, targetID string) (*models.GbTalkSession, error) {
+	if sn == 0 || strings.TrimSpace(deviceID) == "" || strings.TrimSpace(targetID) == "" {
+		return nil, nil
+	}
+	return r.findOne(ctx, "mode = ? AND broadcast_sn = ? AND device_id = ? AND target_id = ?", models.TalkSessionModeBroadcast, sn, deviceID, targetID)
+}
+
+func (r *GormRepo) FindPendingBroadcast(ctx context.Context, deviceID, targetID string) ([]models.GbTalkSession, error) {
+	var sessions []models.GbTalkSession
+	query := r.db.WithContext(ctx).
+		Where("mode = ? AND device_id = ? AND state IN ?", models.TalkSessionModeBroadcast, deviceID, nonterminalStates)
+	if strings.TrimSpace(targetID) != "" {
+		query = query.Where("target_id = ?", targetID)
+	}
+	err := query.Order("id").Find(&sessions).Error
+	return sessions, err
+}
+
+func (r *GormRepo) UpdateBroadcastFacts(ctx context.Context, sessionID string, patch BroadcastFactsPatch) (bool, error) {
+	updates := make(map[string]any)
+	if patch.SN != nil {
+		updates["broadcast_sn"] = *patch.SN
+	}
+	if patch.ReplyStatus != nil {
+		updates["broadcast_reply_status"] = *patch.ReplyStatus
+	}
+	if patch.SignalPhase != nil {
+		updates["signal_phase"] = *patch.SignalPhase
+	}
+	if patch.RemoteMediaIP != nil {
+		updates["remote_media_ip"] = *patch.RemoteMediaIP
+	}
+	if patch.RemotePort != nil {
+		updates["remote_media_port"] = *patch.RemotePort
+	}
+	if patch.Transport != nil {
+		updates["media_transport"] = *patch.Transport
+	}
+	if patch.SenderMode != nil {
+		updates["sender_mode"] = *patch.SenderMode
+	}
+	if patch.CallID != nil {
+		updates["call_id"] = *patch.CallID
+	}
+	if patch.LocalTag != nil {
+		updates["dialog_local_tag"] = *patch.LocalTag
+	}
+	if patch.RemoteTag != nil {
+		updates["dialog_remote_tag"] = *patch.RemoteTag
+	}
+	if patch.RemoteURI != nil {
+		updates["dialog_remote_uri"] = *patch.RemoteURI
+	}
+	if patch.CSeq != nil {
+		updates["dialog_cseq"] = *patch.CSeq
+	}
+	if len(updates) == 0 {
+		return false, nil
+	}
+	result := r.db.WithContext(ctx).Model(&models.GbTalkSession{}).
+		Where("session_id = ? AND state IN ?", sessionID, nonterminalStates).
+		Updates(updates)
+	return result.RowsAffected > 0, result.Error
 }
 
 func (r *GormRepo) findOne(ctx context.Context, query string, args ...any) (*models.GbTalkSession, error) {

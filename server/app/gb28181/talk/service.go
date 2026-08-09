@@ -31,6 +31,9 @@ type TalkRepo interface {
 	FindBySession(context.Context, string) (*models.GbTalkSession, error)
 	FindBySource(context.Context, int64, string, string) (*models.GbTalkSession, error)
 	FindByCallID(context.Context, string) (*models.GbTalkSession, error)
+	FindByBroadcastSN(context.Context, uint, string, string) (*models.GbTalkSession, error)
+	FindPendingBroadcast(context.Context, string, string) ([]models.GbTalkSession, error)
+	UpdateBroadcastFacts(context.Context, string, BroadcastFactsPatch) (bool, error)
 	ConsumeTokenForPublish(context.Context, string, string, string, time.Time) (bool, error)
 	Transition(context.Context, string, models.TalkSessionState, models.TalkSessionState, TransitionPatch) (bool, error)
 	RenewActive(context.Context, string, time.Time) (bool, error)
@@ -142,7 +145,8 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 	expiresAt := s.now().UTC().Add(30 * time.Second)
 	session := &models.GbTalkSession{
 		SessionID: sessionID, ChannelID: request.Channel.ID, DeviceID: request.Device.DeviceID,
-		ActorID: request.ActorID, ActorDeptID: request.ActorDeptID,
+		TargetID: request.Channel.ChannelID,
+		ActorID:  request.ActorID, ActorDeptID: request.ActorDeptID,
 		Mode:   request.Mode,
 		NodeID: mediaNode.ID, App: "talk", SourceStream: sourceStream, RecvStream: recvStream, SSRC: ssrc,
 		State: models.TalkSessionReserved, ExpiresAt: expiresAt,
