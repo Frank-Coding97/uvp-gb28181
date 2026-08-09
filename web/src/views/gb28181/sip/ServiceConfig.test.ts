@@ -137,6 +137,16 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
     });
 
+    it("removes unsupported legacy WVP configuration placeholders", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.text()).not.toContain("使用来源请求ip作为streamIp");
+        expect(wrapper.text()).not.toContain("是否使用设备来源IP作为回复IP");
+        expect(wrapper.text()).not.toContain("缺少国标ID是否给所有上级发送消息");
+        expect(wrapper.text()).not.toContain("设置notify缓存队列最大长度");
+    });
+
     it("keeps controls read-only until edit and only persists on save", async () => {
         const wrapper = mountPage();
         await flushPromises();

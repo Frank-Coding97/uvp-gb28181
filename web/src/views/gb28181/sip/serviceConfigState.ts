@@ -9,10 +9,6 @@ export interface StaticServiceConfigDraft {
     onlineOnHeartbeat: boolean;
     saveAlarmMessages: boolean;
     sipTimeoutSec: number;
-    useRequestIpAsStreamIp: boolean;
-    useDeviceSourceIpAsReplyIp: boolean;
-    broadcastMissingGbId: boolean;
-    notifyCacheMaxLength: number;
     preallocationMode: boolean;
     playback: {
         autoInvite: boolean;
@@ -44,10 +40,6 @@ export const staticServiceConfigLabels = [
     "心跳恢复设备在线状态",
     "是否存储报警消息",
     "SIP 命令超时时间（秒）",
-    "使用来源请求ip作为streamIp",
-    "是否使用设备来源IP作为回复IP",
-    "缺少国标ID是否给所有上级发送消息",
-    "设置notify缓存队列最大长度",
     "预分配模式"
 ] as const;
 
@@ -82,10 +74,6 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
         onlineOnHeartbeat: true,
         saveAlarmMessages: true,
         sipTimeoutSec: 10,
-        useRequestIpAsStreamIp: false,
-        useDeviceSourceIpAsReplyIp: false,
-        broadcastMissingGbId: false,
-        notifyCacheMaxLength: 10000,
         preallocationMode: false,
         playback: {
             autoInvite: true,

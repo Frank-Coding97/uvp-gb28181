@@ -668,26 +668,6 @@ onMounted(() =>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="useRequestIpAsStreamIp" label="使用来源请求ip作为streamIp">
-                                        <a-switch v-model="draft.useRequestIpAsStreamIp" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="useDeviceSourceIpAsReplyIp" label="是否使用设备来源IP作为回复IP">
-                                        <a-switch v-model="draft.useDeviceSourceIpAsReplyIp" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="broadcastMissingGbId" label="缺少国标ID是否给所有上级发送消息">
-                                        <a-switch v-model="draft.broadcastMissingGbId" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="notifyCacheMaxLength" label="设置notify缓存队列最大长度">
-                                        <a-input-number v-model="draft.notifyCacheMaxLength" :min="1" :max="100000" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="preallocationMode" label="预分配模式">
                                         <a-switch
                                             v-model="draft.preallocationMode"
