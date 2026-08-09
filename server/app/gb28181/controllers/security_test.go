@@ -8,13 +8,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestSecurityControllerSnapshotHasSafeObserveDefault(t *testing.T) {
+func TestSecurityControllerSnapshotReportsUnavailableRuntime(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/snapshot", NewSecurityController(nil).Snapshot)
 	req := httptest.NewRequest("GET", "/snapshot", nil)
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
-	require.Equal(t, 200, resp.Code)
-	require.Contains(t, resp.Body.String(), `"mode":"observe"`)
+	require.Equal(t, 503, resp.Code)
+	require.Contains(t, resp.Body.String(), `security runtime unavailable`)
 }

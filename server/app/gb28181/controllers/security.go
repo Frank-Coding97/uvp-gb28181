@@ -25,7 +25,7 @@ type SecurityProvider interface {
 	Events() []gbsecurity.EventAggregate
 	Bans() []gbsecurity.FirewallBan
 	Policy() gbsecurity.SecurityPolicy
-	UpdatePolicy(gbsecurity.SecurityPolicy) error
+	UpdatePolicy(gbsecurity.SecurityPolicy, string) error
 	Unban(string, string) error
 	AgentStatus() gbsecurity.AgentStatus
 	Stream() (<-chan SecuritySnapshot, func())
@@ -43,17 +43,19 @@ func (c *SecurityController) SetProvider(provider SecurityProvider) { c.provider
 
 func (c *SecurityController) Snapshot(ctx *gin.Context) {
 	if c.provider == nil {
-		c.Success(ctx, SecuritySnapshot{Mode: gbsecurity.ModeObserve, Events: []gbsecurity.EventAggregate{}, Bans: []gbsecurity.FirewallBan{}, AsOf: time.Now()})
+		securityUnavailable(ctx)
 		return
 	}
 	c.Success(ctx, c.provider.Snapshot())
 }
 
 func (c *SecurityController) Events(ctx *gin.Context) {
-	items := []gbsecurity.EventAggregate{}
-	if c.provider != nil {
-		items = c.provider.Events()
+	if c.provider == nil {
+		securityUnavailable(ctx)
+		return
 	}
+	items := []gbsecurity.EventAggregate{}
+	items = c.provider.Events()
 	limit, _ := strconv.Atoi(ctx.DefaultQuery("limit", "100"))
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -65,16 +67,17 @@ func (c *SecurityController) Events(ctx *gin.Context) {
 }
 
 func (c *SecurityController) Bans(ctx *gin.Context) {
-	items := []gbsecurity.FirewallBan{}
-	if c.provider != nil {
-		items = c.provider.Bans()
+	if c.provider == nil {
+		securityUnavailable(ctx)
+		return
 	}
+	items := c.provider.Bans()
 	c.Success(ctx, gin.H{"items": items, "total": len(items)})
 }
 
 func (c *SecurityController) Policy(ctx *gin.Context) {
 	if c.provider == nil {
-		c.Success(ctx, gbsecurity.DefaultPolicy())
+		securityUnavailable(ctx)
 		return
 	}
 	c.Success(ctx, c.provider.Policy())
@@ -94,7 +97,7 @@ func (c *SecurityController) UpdatePolicy(ctx *gin.Context) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "security provider unavailable"})
 		return
 	}
-	if err := c.provider.UpdatePolicy(policy); err != nil {
+	if err := c.provider.UpdatePolicy(policy, ctx.GetString("userId")); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -115,21 +118,20 @@ func (c *SecurityController) Unban(ctx *gin.Context) {
 
 func (c *SecurityController) AgentHealth(ctx *gin.Context) {
 	if c.provider == nil {
-		c.Success(ctx, gbsecurity.AgentStatus{})
+		securityUnavailable(ctx)
 		return
 	}
 	c.Success(ctx, c.provider.AgentStatus())
 }
 
 func (c *SecurityController) Stream(ctx *gin.Context) {
+	if c.provider == nil {
+		securityUnavailable(ctx)
+		return
+	}
 	ctx.Header("Content-Type", "text/event-stream")
 	ctx.Header("Cache-Control", "no-cache")
 	ctx.Header("Connection", "keep-alive")
-	if c.provider == nil {
-		ctx.SSEvent("ready", SecuritySnapshot{Mode: gbsecurity.ModeObserve, AsOf: time.Now()})
-		ctx.Writer.Flush()
-		return
-	}
 	ch, cancel := c.provider.Stream()
 	defer cancel()
 	ctx.SSEvent("ready", c.provider.Snapshot())
@@ -149,4 +151,8 @@ func (c *SecurityController) Stream(ctx *gin.Context) {
 			ctx.Writer.Flush()
 		}
 	}
+}
+
+func securityUnavailable(ctx *gin.Context) {
+	ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "security runtime unavailable"})
 }

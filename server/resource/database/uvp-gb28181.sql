@@ -1737,3 +1737,79 @@ CREATE TABLE `gb_playback_scheme_slot` (
   UNIQUE KEY `uk_playback_scheme_slot` (`scheme_id`, `slot_index`),
   KEY `idx_playback_scheme_slot_scheme` (`scheme_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `gb_sip_security_event` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `bucket_at` datetime NOT NULL,
+  `source_ip` varchar(64) NOT NULL,
+  `address_family` varchar(8) NOT NULL,
+  `transport` varchar(8) NOT NULL,
+  `method` varchar(16) NOT NULL,
+  `reason` varchar(32) NOT NULL,
+  `action` varchar(16) NOT NULL,
+  `count` bigint NOT NULL DEFAULT 0,
+  `score_delta` bigint NOT NULL DEFAULT 0,
+  `first_seen_at` datetime NOT NULL,
+  `last_seen_at` datetime NOT NULL,
+  `sample_event_id` varchar(64) NOT NULL DEFAULT '',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_gb_sip_security_event` (`bucket_at`,`source_ip`,`transport`,`method`,`reason`,`action`),
+  KEY `idx_gb_sip_security_event_source_time` (`source_ip`,`last_seen_at`),
+  KEY `idx_gb_sip_security_event_reason_time` (`reason`,`last_seen_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `gb_sip_security_ban` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `source_ip` varchar(64) NOT NULL,
+  `address_family` varchar(8) NOT NULL,
+  `status` varchar(16) NOT NULL,
+  `reason` varchar(32) NOT NULL,
+  `rule_id` varchar(64) NOT NULL,
+  `score` int NOT NULL DEFAULT 0,
+  `created_at` datetime NOT NULL,
+  `expires_at` datetime NOT NULL,
+  `unbanned_at` datetime DEFAULT NULL,
+  `unbanned_by` varchar(64) NOT NULL DEFAULT '',
+  `origin` varchar(16) NOT NULL,
+  `agent_state` varchar(16) NOT NULL,
+  `decision_id` varchar(64) NOT NULL,
+  `last_error` varchar(512) NOT NULL DEFAULT '',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_gb_sip_security_ban_decision` (`decision_id`),
+  KEY `idx_gb_sip_security_ban_source_status` (`source_ip`,`status`),
+  KEY `idx_gb_sip_security_ban_expiry` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `gb_sip_security_policy` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `scope_key` varchar(32) NOT NULL,
+  `mode` varchar(16) NOT NULL,
+  `window_seconds` int NOT NULL,
+  `ban_score` int NOT NULL,
+  `max_packet_bytes` int NOT NULL,
+  `max_udp_per_window` int NOT NULL,
+  `max_tcp_connections` int NOT NULL,
+  `sample_per_source` int NOT NULL,
+  `nonce_ttl_seconds` int NOT NULL,
+  `ban_ttl_steps` varchar(1024) NOT NULL,
+  `allowlist_text` varchar(4096) NOT NULL,
+  `updated_by` bigint NOT NULL DEFAULT 0,
+  `updated_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_gb_sip_security_policy_scope` (`scope_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+CREATE TABLE `gb_sip_security_audit` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `actor` varchar(64) NOT NULL,
+  `action` varchar(32) NOT NULL,
+  `target` varchar(128) NOT NULL,
+  `reason` varchar(255) NOT NULL,
+  `decision_id` varchar(64) NOT NULL DEFAULT '',
+  `created_at` datetime NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `idx_gb_sip_security_audit_time` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+INSERT INTO `gb_sip_security_policy` (`scope_key`,`mode`,`window_seconds`,`ban_score`,`max_packet_bytes`,`max_udp_per_window`,`max_tcp_connections`,`sample_per_source`,`nonce_ttl_seconds`,`ban_ttl_steps`,`allowlist_text`,`updated_at`)
+VALUES ('global','observe',60,100,65536,120,32,3,60,'100:600;250:3600;500:86400',CONCAT('127.0.0.0/8',CHAR(10),'10.0.0.0/8',CHAR(10),'172.16.0.0/12',CHAR(10),'192.168.0.0/16'),NOW());

@@ -44,13 +44,23 @@ type fakeClock struct{ now time.Time }
 func (c *fakeClock) Now() time.Time { return c.now }
 
 type fakeAgent struct {
-	banCalls []BanDecision
-	status   AgentStatus
+	banCalls       []BanDecision
+	unbanCalls     []string
+	reconcileCalls [][]BanDecision
+	status         AgentStatus
+	banErr         error
 }
 
-func (a *fakeAgent) Ban(d BanDecision) error { a.banCalls = append(a.banCalls, d); return nil }
-func (a *fakeAgent) Unban(string) error      { return nil }
-func (a *fakeAgent) Status() AgentStatus     { return a.status }
+func (a *fakeAgent) Ban(d BanDecision) error { a.banCalls = append(a.banCalls, d); return a.banErr }
+func (a *fakeAgent) Unban(sourceIP string) error {
+	a.unbanCalls = append(a.unbanCalls, sourceIP)
+	return nil
+}
+func (a *fakeAgent) Status() AgentStatus { return a.status }
+func (a *fakeAgent) Reconcile(items []BanDecision) error {
+	a.reconcileCalls = append(a.reconcileCalls, append([]BanDecision(nil), items...))
+	return nil
+}
 
 func TestFakeAgentRecordsDecisionAndStatus(t *testing.T) {
 	agent := &fakeAgent{status: AgentStatus{Connected: true}}

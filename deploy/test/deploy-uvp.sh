@@ -12,6 +12,7 @@ EXPECTED_SHA256="${3:-}"
 CURRENT_FILE="$ROOT/current-release"
 PREVIOUS=""
 ACTIVATION_STARTED=0
+AGENT_ACTIVATED=0
 
 log() {
   printf '[%s] %s\n' "$(date -Is)" "$*"
@@ -41,6 +42,18 @@ rollback() {
     IMAGE_TAG="test" UVP_ROOT="$ROOT" \
       docker compose -p uvp-gb28181 -f "$ROOT/compose.yml" \
       up -d --no-build --wait --wait-timeout 180 || true
+  fi
+  if [[ "$AGENT_ACTIVATED" == "1" ]]; then
+    if [[ -n "$PREVIOUS" && -x "$RELEASES/$PREVIOUS/agent/uvp-firewall-agent" ]]; then
+      install -m 0644 "$RELEASES/$PREVIOUS/agent/uvp-firewall-agent.service" /etc/systemd/system/uvp-firewall-agent.service
+      ln -sfn "$RELEASES/$PREVIOUS/agent" "$ROOT/agent-current"
+      systemctl daemon-reload || true
+      systemctl restart uvp-firewall-agent || true
+    else
+      systemctl disable --now uvp-firewall-agent || true
+      nft delete table inet uvp_sip_guard >/dev/null 2>&1 || true
+      rm -f "$ROOT/agent-current"
+    fi
   fi
   exit "$exit_code"
 }
@@ -84,6 +97,9 @@ for required in \
   compose.yml \
   backend/Dockerfile \
   backend/uvp-gb28181 \
+  agent/uvp-firewall-agent \
+  agent/uvp-firewall-agent.service \
+  agent/uvp-firewall-agent.default \
   backend/resource/database/uvp-gb28181.sql \
   clickhouse/init/01-sip-trace.sh \
   frontend/Dockerfile \
@@ -98,6 +114,23 @@ chmod 0755 "$FINAL_RELEASE/backend/uvp-gb28181"
 
 log "Validating release $SHA"
 compose_for "$SHA" config --quiet
+
+log "Activating firewall agent for $SHA"
+install -m 0644 "$FINAL_RELEASE/agent/uvp-firewall-agent.service" /etc/systemd/system/uvp-firewall-agent.service
+if [[ ! -e /etc/default/uvp-firewall-agent ]]; then
+  install -m 0644 "$FINAL_RELEASE/agent/uvp-firewall-agent.default" /etc/default/uvp-firewall-agent
+fi
+ln -sfn "$FINAL_RELEASE/agent" "$ROOT/agent-current"
+AGENT_ACTIVATED=1
+systemctl daemon-reload
+systemctl enable uvp-firewall-agent
+systemctl restart uvp-firewall-agent
+systemctl is-active --quiet uvp-firewall-agent
+for _ in {1..50}; do
+  [[ -S /run/uvp/firewall-agent.sock ]] && break
+  sleep 0.1
+done
+[[ -S /run/uvp/firewall-agent.sock ]] || fail "Firewall agent socket was not created"
 
 log "Building runtime images for $SHA"
 compose_for "$SHA" build --pull
@@ -128,6 +161,7 @@ mv "$CURRENT_FILE.tmp" "$CURRENT_FILE"
 ln -sfn "$FINAL_RELEASE" "$ROOT/current"
 rm -f "$ARCHIVE"
 ACTIVATION_STARTED=0
+AGENT_ACTIVATED=0
 
 log "Release $SHA is healthy"
 

@@ -115,8 +115,8 @@ func (p securityRuntimeProvider) Snapshot() gbcontrollers.SecuritySnapshot {
 func (p securityRuntimeProvider) Events() []gbsecurity.EventAggregate { return p.runtime.Events() }
 func (p securityRuntimeProvider) Bans() []gbsecurity.FirewallBan      { return p.runtime.Bans() }
 func (p securityRuntimeProvider) Policy() gbsecurity.SecurityPolicy   { return p.runtime.Policy() }
-func (p securityRuntimeProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy) error {
-	return p.runtime.UpdatePolicy(policy)
+func (p securityRuntimeProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy, actor string) error {
+	return p.runtime.UpdatePolicy(policy, actor)
 }
 func (p securityRuntimeProvider) Unban(id, actor string) error        { return p.runtime.Unban(id, actor) }
 func (p securityRuntimeProvider) AgentStatus() gbsecurity.AgentStatus { return p.runtime.AgentStatus() }

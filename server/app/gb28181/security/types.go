@@ -85,7 +85,20 @@ func DefaultPolicy() Policy {
 			{Score: 250, TTL: time.Hour},
 			{Score: 500, TTL: 24 * time.Hour},
 		},
+		Allowlist: defaultAllowlist(),
 	}
+}
+
+func defaultAllowlist() []net.IPNet {
+	values := []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
+	items := make([]net.IPNet, 0, len(values))
+	for _, value := range values {
+		_, network, err := net.ParseCIDR(value)
+		if err == nil {
+			items = append(items, *network)
+		}
+	}
+	return items
 }
 
 func (p Policy) Validate() error {

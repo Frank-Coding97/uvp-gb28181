@@ -83,10 +83,17 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	if event.Occurred.IsZero() {
 		event.Occurred = s.clock.Now()
 	}
+	s.mu.Lock()
+	policy := s.policy
+	s.mu.Unlock()
+	if policy.IsAllowlisted(event.SourceIP) {
+		event.Action = ActionAllow
+		return event, nil, nil
+	}
 	delta := reasonScore(event.Reason)
 	event.Score = delta
 	event.Action = ActionAllow
-	if s.policy.Mode != ModeObserve {
+	if policy.Mode != ModeObserve {
 		event.Action = ActionDrop
 	}
 
@@ -95,7 +102,7 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	key := event.SourceIP
 	s.mu.Lock()
 	b := s.buckets[key]
-	if b.started.IsZero() || event.Occurred.Sub(b.started) >= s.policy.Window {
+	if b.started.IsZero() || event.Occurred.Sub(b.started) >= policy.Window {
 		b = scoreBucket{started: event.Occurred}
 	}
 	b.score += delta
@@ -103,11 +110,11 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	total := b.score
 	s.mu.Unlock()
 
-	if total < s.policy.BanScore || s.policy.Mode == ModeObserve {
+	if total < policy.BanScore || policy.Mode == ModeObserve {
 		return event, nil, nil
 	}
 
-	ttl := s.policy.TTLForScore(total)
+	ttl := policy.TTLForScore(total)
 	if ttl <= 0 {
 		return event, nil, nil
 	}
@@ -121,17 +128,15 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	}
 	event.Action = ActionBan
 	s.mu.Lock()
-	if _, exists := s.decisions[event.SourceIP]; exists {
-		s.mu.Unlock()
-		return event, nil, nil
+	if previous, exists := s.decisions[event.SourceIP]; exists {
+		if previous.CreatedAt.Add(previous.TTL).After(event.Occurred) {
+			s.mu.Unlock()
+			return event, nil, nil
+		}
+		delete(s.decisions, event.SourceIP)
 	}
 	s.decisions[event.SourceIP] = decision
 	s.mu.Unlock()
-	if s.agent != nil {
-		if err := s.agent.Ban(decision); err != nil {
-			return event, &decision, err
-		}
-	}
 	return event, &decision, nil
 }
 
@@ -139,6 +144,8 @@ func reasonScore(reason Reason) int {
 	switch reason {
 	case ReasonNonceReplay:
 		return 80
+	case ReasonInviteRate:
+		return 15
 	case ReasonNonceInvalid, ReasonNonceExpired:
 		return 30
 	case ReasonServerMismatch:
@@ -172,6 +179,7 @@ func (s *Scorer) UpdateTrustedEndpoint(deviceID, transport, address string, expi
 	}
 	s.mu.Lock()
 	s.endpoints[deviceID] = Endpoint{DeviceID: deviceID, Transport: strings.ToUpper(transport), Address: ip.String(), ExpiresAt: expiresAt, UpdatedAt: s.clock.Now()}
+	delete(s.buckets, ip.String())
 	s.mu.Unlock()
 	return nil
 }
@@ -193,7 +201,7 @@ type NonceManager struct {
 	ttl    time.Duration
 	clock  Clock
 	mu     sync.Mutex
-	used   map[string]struct{}
+	used   map[string]time.Time
 }
 
 func NewNonceManager(secret []byte, ttl time.Duration, clock Clock) *NonceManager {
@@ -204,7 +212,7 @@ func NewNonceManager(secret []byte, ttl time.Duration, clock Clock) *NonceManage
 		secret = make([]byte, 32)
 		_, _ = rand.Read(secret)
 	}
-	return &NonceManager{secret: append([]byte(nil), secret...), ttl: ttl, clock: clock, used: make(map[string]struct{})}
+	return &NonceManager{secret: append([]byte(nil), secret...), ttl: ttl, clock: clock, used: make(map[string]time.Time)}
 }
 
 func (m *NonceManager) Issue() (string, error) {
@@ -236,10 +244,15 @@ func (m *NonceManager) Validate(nonce, nonceCount string) error {
 	key := nonce + "|" + strings.TrimSpace(nonceCount)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	for usedKey, expiresAt := range m.used {
+		if !expiresAt.After(now) {
+			delete(m.used, usedKey)
+		}
+	}
 	if _, exists := m.used[key]; exists {
 		return ErrNonceReplay
 	}
-	m.used[key] = struct{}{}
+	m.used[key] = issued.Add(m.ttl)
 	return nil
 }
 

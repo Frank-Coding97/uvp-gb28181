@@ -22,7 +22,7 @@ type Admission struct {
 	mu      sync.Mutex
 	banned  map[string]time.Time
 	windows map[string]windowCounter
-	conns   map[string]int
+	conns   map[string]map[string]struct{}
 	partial map[string][]byte
 	onEvent func(Event)
 
@@ -48,7 +48,7 @@ func NewAdmission(policy Policy, clock Clock, trace sip.TransportReadFilter, onE
 		trace:   trace,
 		banned:  make(map[string]time.Time),
 		windows: make(map[string]windowCounter),
-		conns:   make(map[string]int),
+		conns:   make(map[string]map[string]struct{}),
 		partial: make(map[string][]byte),
 		onEvent: onEvent,
 	}
@@ -65,7 +65,7 @@ func (a *Admission) SetPolicy(policy Policy) {
 
 func (a *Admission) Ban(sourceIP string, expiresAt time.Time) error {
 	ip, err := ValidateSource(sourceIP)
-	if err != nil || a.policy.IsAllowlisted(ip.String()) {
+	if err != nil || a.currentPolicy().IsAllowlisted(ip.String()) {
 		return ErrInvalidAddress
 	}
 	a.mu.Lock()
@@ -107,32 +107,57 @@ func (a *Admission) Sampled() int64 { return a.sampled.Load() }
 // Filter is suitable for sip.TransportReadFilter. A zero-length result is a
 // drop signal understood by sipgo and prevents both parser and Trace work.
 func (a *Admission) Filter(info sip.TransportReadProps, data []byte) ([]byte, error) {
+	policy := a.currentPolicy()
 	source := sourceIP(info.RemoteAddr)
 	if source == "" {
 		return a.reject(info, ReasonUnknownMethod, "")
 	}
-	allowlisted := a.policy.IsAllowlisted(source)
-	if a.IsBanned(source) && a.policy.Mode != ModeObserve && !allowlisted {
+	allowlisted := policy.IsAllowlisted(source)
+	if a.IsBanned(source) && policy.Mode != ModeObserve && !allowlisted {
 		return a.reject(info, ReasonConnectionRate, source)
 	}
-	if len(data) > a.policy.MaxPacketBytes && a.policy.Mode != ModeObserve && !allowlisted {
-		return a.reject(info, ReasonPacketTooLarge, source)
+	if len(data) > policy.MaxPacketBytes && !allowlisted {
+		if policy.Mode != ModeObserve {
+			return a.reject(info, ReasonPacketTooLarge, source)
+		}
+		a.sample(info, ReasonPacketTooLarge, source, "")
 	}
 
 	now := a.clock.Now()
 	method, complete := a.method(info, source, data)
-	if complete {
+	if complete && shouldRateLimit(method) {
 		key := source + ":" + strings.ToUpper(info.Transport) + ":" + method
-		if a.overLimit(key, now, a.policy.MaxUDPPerWindow) && a.policy.Mode != ModeObserve && !allowlisted {
-			return a.reject(info, ReasonUnknownMethod, source)
+		reason := ReasonUnknownMethod
+		if strings.EqualFold(method, "INVITE") {
+			reason = ReasonInviteRate
+		}
+		if a.overLimit(key, now, policy.MaxUDPPerWindow) && !allowlisted {
+			if policy.Mode != ModeObserve {
+				return a.reject(info, reason, source)
+			}
+			a.sample(info, reason, source, method)
 		}
 	}
 	if strings.EqualFold(info.Transport, "tcp") || strings.EqualFold(info.Transport, "tls") {
+		endpoint := remoteEndpoint(info.RemoteAddr)
 		a.mu.Lock()
-		a.conns[source]++
 		connections := a.conns[source]
+		if connections == nil {
+			connections = make(map[string]struct{})
+			a.conns[source] = connections
+		}
+		_, known := connections[endpoint]
+		if !known {
+			connections[endpoint] = struct{}{}
+		}
+		count := len(connections)
 		a.mu.Unlock()
-		if connections > a.policy.MaxTCPConnections && a.policy.Mode == ModeStrict {
+		if count > policy.MaxTCPConnections && policy.Mode == ModeStrict && !allowlisted {
+			a.mu.Lock()
+			if !known {
+				delete(connections, endpoint)
+			}
+			a.mu.Unlock()
 			return a.reject(info, ReasonConnectionRate, source)
 		}
 	}
@@ -145,18 +170,23 @@ func (a *Admission) Filter(info sip.TransportReadProps, data []byte) ([]byte, er
 
 func (a *Admission) method(info sip.TransportReadProps, source string, data []byte) (string, bool) {
 	if strings.EqualFold(info.Transport, "tcp") || strings.EqualFold(info.Transport, "tls") {
+		key := remoteEndpoint(info.RemoteAddr)
+		if key == "" {
+			key = source
+		}
+		policy := a.currentPolicy()
 		a.mu.Lock()
-		buffer := append(a.partial[source], data...)
-		if len(buffer) > a.policy.MaxPacketBytes {
-			delete(a.partial, source)
+		buffer := append(a.partial[key], data...)
+		if len(buffer) > policy.MaxPacketBytes {
+			delete(a.partial, key)
 			a.mu.Unlock()
 			return "", true
 		}
 		lineReady := bytes.IndexByte(buffer, '\n') >= 0
 		if lineReady {
-			delete(a.partial, source)
+			delete(a.partial, key)
 		} else {
-			a.partial[source] = buffer
+			a.partial[key] = buffer
 		}
 		a.mu.Unlock()
 		if !lineReady {
@@ -172,12 +202,14 @@ func (a *Admission) ConnectionClosed(info sip.TransportReadProps) {
 	if source == "" {
 		return
 	}
+	endpoint := remoteEndpoint(info.RemoteAddr)
 	a.mu.Lock()
-	delete(a.partial, source)
-	if n := a.conns[source]; n <= 1 {
-		delete(a.conns, source)
-	} else {
-		a.conns[source] = n - 1
+	delete(a.partial, endpoint)
+	if connections := a.conns[source]; connections != nil {
+		delete(connections, endpoint)
+		if len(connections) == 0 {
+			delete(a.conns, source)
+		}
 	}
 	a.mu.Unlock()
 }
@@ -202,6 +234,30 @@ func (a *Admission) reject(info sip.TransportReadProps, reason Reason, source st
 	return nil, nil
 }
 
+func (a *Admission) sample(info sip.TransportReadProps, reason Reason, source, method string) {
+	a.sampled.Add(1)
+	if a.onEvent != nil {
+		a.onEvent(Event{SourceIP: source, Transport: strings.ToUpper(info.Transport), Method: method, Reason: reason, Action: ActionSample, Occurred: a.clock.Now()})
+	}
+}
+
+func (a *Admission) currentPolicy() Policy {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.policy
+}
+
+func shouldRateLimit(method string) bool {
+	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case "REGISTER", "MESSAGE", "NOTIFY", "SUBSCRIBE", "ACK", "BYE", "CANCEL", "OPTIONS", "INFO", "PRACK", "UPDATE", "REFER", "PUBLISH":
+		return false
+	case "":
+		return false
+	default:
+		return true
+	}
+}
+
 func sourceIP(addr net.Addr) string {
 	if addr == nil {
 		return ""
@@ -215,6 +271,13 @@ func sourceIP(addr net.Addr) string {
 		return ""
 	}
 	return ip.String()
+}
+
+func remoteEndpoint(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	return strings.TrimSpace(addr.String())
 }
 
 func firstMethod(data []byte) (string, bool) {

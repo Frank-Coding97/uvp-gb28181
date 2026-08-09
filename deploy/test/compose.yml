@@ -12,12 +12,13 @@ services:
       TZ: Asia/Shanghai
     ports:
       - "127.0.0.1:56001:18978"
-      - "56002:56002/tcp"
-      - "56002:56002/udp"
+      - "0.0.0.0:56002:56002/tcp"
+      - "0.0.0.0:56002:56002/udp"
     volumes:
       - ${UVP_ROOT:-/opt/uvp-gb28181}/config/config.yml:/app/config/config.yml:ro
       - ${UVP_ROOT:-/opt/uvp-gb28181}/data/logs:/app/resource/logs
       - ${UVP_ROOT:-/opt/uvp-gb28181}/data/uploads:/app/resource/public/uploads
+      - /run/uvp:/run/uvp
     networks:
       wvp-network:
         aliases:

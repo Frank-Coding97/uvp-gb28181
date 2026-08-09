@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -23,6 +24,7 @@ import (
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
+	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	gbsip "uvplatform.cn/uvp-gb28181/app/gb28181/sip"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/snapshot"
@@ -153,6 +155,11 @@ type sipRuntimeFactory func(gbconfig.Config) (sipRuntimeServer, error)
 // sipServer 持有全局 SIP 服务实例,供优雅关闭引用
 var sipServer sipRuntimeServer
 var sipLifecycleMu sync.Mutex
+
+var securityRuntime *gbsecurity.Runtime
+
+// SecurityRuntime exposes the live SIP security composition for diagnostics.
+func SecurityRuntime() *gbsecurity.Runtime { return securityRuntime }
 
 var sipRuntimeStatus = gbsetup.NewRuntimeStatus()
 
@@ -386,15 +393,41 @@ func loadSIPConfigFromDB(base gbconfig.Config) (gbconfig.Config, bool, error) {
 	return base, true, nil
 }
 
+func setupSecurityRuntime() *gbsecurity.Runtime {
+	clock := gbsecurity.RealClock()
+	socketPath := os.Getenv("UVP_GB28181_FIREWALL_SOCKET")
+	if socketPath == "" {
+		socketPath = "/run/uvp/firewall-agent.sock"
+	}
+	agent := gbsecurity.NewUnixFirewallClient(socketPath, 2*time.Second)
+	secret := []byte(os.Getenv("UVP_GB28181_NONCE_SECRET"))
+	if app.DB() != nil {
+		store := gbsecurity.NewGormStore(app.DB())
+		runtime, err := gbsecurity.NewPersistentRuntime(context.Background(), store, clock, agent, secret)
+		if err == nil {
+			gbroutes.SetSecurityRuntime(runtime)
+			return runtime
+		}
+		app.ZapLog.Warn("GB28181 安全持久化运行时装配失败,降级为内存 observe", zap.Error(err))
+	}
+	runtime := gbsecurity.NewRuntime(gbsecurity.DefaultPolicy(), clock, agent, secret)
+	gbroutes.SetSecurityRuntime(runtime)
+	return runtime
+}
+
 // startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
 func startSIPDependencies(cfg gbconfig.Config) error {
+	runtime := setupSecurityRuntime()
 	srv, err := startSIPRuntime(cfg, metricsAgg, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
-		return gbsip.NewServer(cfg)
+		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(runtime))
 	})
 	if err != nil {
+		_ = runtime.Close(context.Background())
+		gbroutes.SetSecurityRuntime(nil)
 		return err
 	}
+	securityRuntime = runtime
 	var newPTZService *ptz.Service
 	var newPTZScheduler ptzSchedulerLifecycle
 	if u := srv.UAC(); u != nil {
@@ -561,6 +594,13 @@ func stopSIPDependencies(ctx context.Context) {
 		}
 		sipServer = nil
 	}
+	if securityRuntime != nil {
+		if err := securityRuntime.Close(ctx); err != nil {
+			app.ZapLog.Warn("GB28181 安全事件持久化停止失败,忽略继续", zap.Error(err))
+		}
+		securityRuntime = nil
+	}
+	gbroutes.SetSecurityRuntime(nil)
 }
 
 func stopPlaybackRuntime(ctx context.Context) {

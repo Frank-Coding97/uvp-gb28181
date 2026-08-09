@@ -36,6 +36,7 @@ type Server struct {
 	started   bool
 	trace     gbtrace.Runtime
 	traceOnce sync.Once
+	security  handler.RegisterSecurity
 }
 
 type TraceFactory func(gbconfig.TraceConfig) gbtrace.Runtime
@@ -45,6 +46,7 @@ type ServerOption func(*serverOptions)
 type serverOptions struct {
 	traceFactory      TraceFactory
 	securityAdmission *gbsecurity.Admission
+	registerSecurity  handler.RegisterSecurity
 }
 
 func WithTraceFactory(factory TraceFactory) ServerOption {
@@ -58,6 +60,18 @@ func WithTraceFactory(factory TraceFactory) ServerOption {
 // TransportReadFilter per transport.
 func WithSecurityAdmission(admission *gbsecurity.Admission) ServerOption {
 	return func(options *serverOptions) { options.securityAdmission = admission }
+}
+
+// WithSecurityRuntime installs both the transport admission gate and REGISTER
+// authentication protection from the same runtime generation.
+func WithSecurityRuntime(runtime *gbsecurity.Runtime) ServerOption {
+	return func(options *serverOptions) {
+		if runtime == nil {
+			return
+		}
+		options.securityAdmission = runtime.Admission()
+		options.registerSecurity = runtime
+	}
 }
 
 // SetErrorHandler registers a callback for asynchronous listener failures.
@@ -146,7 +160,7 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建 SIP server 失败: %w", err)
 	}
-	s := &Server{cfg: cfg, ua: ua, srv: srv, trace: traceRuntime}
+	s := &Server{cfg: cfg, ua: ua, srv: srv, trace: traceRuntime, security: opts.registerSecurity}
 	s.registerHandlers()
 	return s, nil
 }
@@ -154,6 +168,7 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 // registerHandlers 注册 SIP 方法处理器
 func (s *Server) registerHandlers() {
 	regHandler := handler.NewRegisterHandler(s.cfg)
+	regHandler.SetSecurity(s.security)
 	msgHandler := handler.NewMessageHandler(s.cfg)
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE

@@ -21,7 +21,7 @@ func TestScorerAccumulatesAndBansOnlyAfterThreshold(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, decision)
 	require.Equal(t, 25+10, decision.Score)
-	require.Len(t, agent.banCalls, 1)
+	require.Empty(t, agent.banCalls)
 }
 
 func TestScorerObserveModeNeverCallsAgent(t *testing.T) {
@@ -44,6 +44,21 @@ func TestTrustedEndpointUpdatesOnlyWithValidAddress(t *testing.T) {
 	require.Equal(t, "198.51.100.12", e.Address)
 }
 
+func TestTrustedEndpointClearsSourceScore(t *testing.T) {
+	p := DefaultPolicyWithMode(ModeProtect)
+	p.BanScore = 30
+	p.BanTTLs = []TTLStep{{Score: 30, TTL: time.Minute}}
+	s := NewScorer(p, &fakeClock{now: time.Unix(100, 0)}, nil, []byte("secret"))
+
+	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.12", Reason: ReasonDigestFailure})
+	require.NoError(t, err)
+	require.Nil(t, decision)
+	require.NoError(t, s.UpdateTrustedEndpoint("34020000001320000001", "udp", "198.51.100.12", time.Time{}))
+	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.12", Reason: ReasonServerMismatch})
+	require.NoError(t, err)
+	require.Nil(t, decision, "a valid REGISTER starts a fresh score window for that endpoint")
+}
+
 func TestNonceIsSignedExpiringAndSingleUse(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	m := NewNonceManager([]byte("secret"), time.Minute, clock)
@@ -56,4 +71,19 @@ func TestNonceIsSignedExpiringAndSingleUse(t *testing.T) {
 	require.NoError(t, err)
 	clock.now = clock.now.Add(2 * time.Minute)
 	require.ErrorIs(t, m.Validate(nonce2, "00000001"), ErrNonceExpired)
+}
+
+func TestNonceReplayStateExpiresWithNonceTTL(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(100, 0)}
+	m := NewNonceManager([]byte("secret"), time.Minute, clock)
+	nonce, err := m.Issue()
+	require.NoError(t, err)
+	require.NoError(t, m.Validate(nonce, "00000001"))
+	require.Len(t, m.used, 1)
+
+	clock.now = clock.now.Add(2 * time.Minute)
+	fresh, err := m.Issue()
+	require.NoError(t, err)
+	require.NoError(t, m.Validate(fresh, "00000001"))
+	require.Len(t, m.used, 1)
 }

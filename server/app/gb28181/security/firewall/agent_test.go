@@ -30,6 +30,21 @@ func TestAgentReconcileSkipsExpiredRules(t *testing.T) {
 	require.Equal(t, 1, a.Status().AppliedRules)
 }
 
+func TestAgentReconcileRemovesRulesThatNowOverlapAllowlist(t *testing.T) {
+	clock := &testClock{now: time.Unix(100, 0)}
+	backend := NewMemoryBackend()
+	require.NoError(t, backend.Add("198.51.100.7", clock.now.Add(time.Hour)))
+	_, network, err := net.ParseCIDR("198.51.100.0/24")
+	require.NoError(t, err)
+	a := New(backend, clock, []net.IPNet{*network})
+
+	err = a.Reconcile([]security.BanDecision{{DecisionID: "old", SourceIP: "198.51.100.7", CreatedAt: clock.now, TTL: time.Hour}})
+	require.NoError(t, err)
+	rules, err := backend.List()
+	require.NoError(t, err)
+	require.Empty(t, rules)
+}
+
 type testClock struct{ now time.Time }
 
 func (c *testClock) Now() time.Time { return c.now }

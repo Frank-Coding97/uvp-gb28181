@@ -68,6 +68,14 @@ jobs:
           GOARCH: amd64
         run: go build -trimpath -ldflags="-s -w" -o bin/uvp-gb28181-linux-amd64 main.go
 
+      - name: Build Linux firewall agent
+        working-directory: server
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags="-s -w" -o bin/uvp-firewall-agent-linux-amd64 ./cmd/uvp-firewall-agent
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v6.0.9
         with:
@@ -99,11 +107,15 @@ jobs:
           rm -rf "$release_dir" "$output_dir"
           mkdir -p \
             "$release_dir/backend/resource/public" \
+            "$release_dir/agent" \
             "$release_dir/clickhouse/init" \
             "$release_dir/frontend" \
             "$output_dir"
 
           install -m 0755 server/bin/uvp-gb28181-linux-amd64 "$release_dir/backend/uvp-gb28181"
+          install -m 0755 server/bin/uvp-firewall-agent-linux-amd64 "$release_dir/agent/uvp-firewall-agent"
+          install -m 0644 deploy/test/uvp-firewall-agent.service "$release_dir/agent/uvp-firewall-agent.service"
+          install -m 0644 deploy/test/uvp-firewall-agent.default "$release_dir/agent/uvp-firewall-agent.default"
           cp -a server/resource/database "$release_dir/backend/resource/database"
           if [[ -d server/resource/public ]]; then
             cp -a server/resource/public/. "$release_dir/backend/resource/public/"

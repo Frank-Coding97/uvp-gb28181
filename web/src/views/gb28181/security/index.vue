@@ -12,8 +12,8 @@ const refreshing = ref(false);
 let source: EventSource | null = null;
 let pollTimer: number | null = null;
 
-const modeLabel = computed(() => ({ observe: "观察", protect: "保护", strict: "严格" }[state.snapshot?.mode || "observe"]));
-const activeBans = computed(() => state.bans.filter(item => item.status === "active"));
+const modeLabel = computed(() => state.snapshot ? ({ observe: "观察", protect: "保护", strict: "严格" }[state.snapshot.mode]) : "未连接");
+const activeBans = computed(() => state.bans.filter(item => item.status === "active" || item.status === "agent_failed"));
 const latestEvents = computed(() => state.events.slice().sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()).slice(0, 8));
 
 async function refresh() {
@@ -51,7 +51,7 @@ onBeforeUnmount(() => { source?.close(); stopPolling(); });
     </header>
     <a-alert v-if="state.degraded" type="warning" class="degraded" role="status"><template #icon><WifiOff :size="16" /></template>实时通道不可用，正在使用 10 秒轮询。</a-alert>
     <section class="summary-grid" aria-label="安全概览">
-      <div class="metric"><span>保护模式</span><strong>{{ modeLabel }}</strong><small>{{ state.snapshot?.mode || "observe" }}</small></div>
+      <div class="metric"><span>保护模式</span><strong>{{ modeLabel }}</strong><small>{{ state.snapshot?.mode || "--" }}</small></div>
       <div class="metric"><span>已拦截</span><strong>{{ state.snapshot?.dropped ?? 0 }}</strong><small>当前运行周期</small></div>
       <div class="metric"><span>临时封禁</span><strong>{{ activeBans.length }}</strong><small>动态规则</small></div>
       <div class="metric"><span>Agent</span><strong :class="state.agent.connected ? 'ok' : 'warn'">{{ state.agent.connected ? "在线" : "降级" }}</strong><small>{{ state.agent.appliedRules }} 条规则</small></div>

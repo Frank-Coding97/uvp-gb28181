@@ -112,20 +112,53 @@ func (a *Agent) Unban(sourceIP string) error {
 }
 
 func (a *Agent) Status() security.AgentStatus {
+	rules, err := a.backend.List()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return security.AgentStatus{Connected: a.lastError == "", AppliedRules: len(a.rules), LastError: a.lastError, CheckedAt: a.clock.Now()}
+	if err != nil {
+		a.lastError = err.Error()
+		return security.AgentStatus{Connected: false, AppliedRules: 0, LastError: a.lastError, CheckedAt: a.clock.Now()}
+	}
+	if a.lastError != "" {
+		a.lastError = ""
+	}
+	return security.AgentStatus{Connected: true, AppliedRules: len(rules), LastError: "", CheckedAt: a.clock.Now()}
 }
 
 func (a *Agent) Reconcile(decisions []security.BanDecision) error {
 	now := a.clock.Now()
+	desired := make(map[string]security.BanDecision, len(decisions))
 	for _, decision := range decisions {
-		if decision.CreatedAt.Add(decision.TTL).After(now) {
-			if err := a.Ban(decision); err != nil {
+		ip, err := security.ValidateSource(decision.SourceIP)
+		if err != nil {
+			return err
+		}
+		allowlisted := false
+		for _, network := range a.allowlist {
+			if network.Contains(ip) {
+				allowlisted = true
+				break
+			}
+		}
+		if !allowlisted && decision.CreatedAt.Add(decision.TTL).After(now) {
+			decision.SourceIP = ip.String()
+			desired[decision.SourceIP] = decision
+		}
+	}
+	existing, err := a.backend.List()
+	if err != nil {
+		return err
+	}
+	for _, sourceIP := range existing {
+		if _, ok := desired[sourceIP]; !ok {
+			if err := a.Unban(sourceIP); err != nil {
 				return err
 			}
-		} else {
-			_ = a.Unban(decision.SourceIP)
+		}
+	}
+	for _, decision := range desired {
+		if err := a.Ban(decision); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -134,9 +167,10 @@ func (a *Agent) Reconcile(decisions []security.BanDecision) error {
 func (a *Agent) setError(err error) { a.mu.Lock(); a.lastError = err.Error(); a.mu.Unlock() }
 
 type request struct {
-	Action   string               `json:"action"`
-	Decision security.BanDecision `json:"decision"`
-	SourceIP string               `json:"sourceIp"`
+	Action    string                 `json:"action"`
+	Decision  security.BanDecision   `json:"decision"`
+	SourceIP  string                 `json:"sourceIp"`
+	Decisions []security.BanDecision `json:"decisions,omitempty"`
 }
 type response struct {
 	OK     bool                 `json:"ok"`
@@ -199,6 +233,8 @@ func (a *Agent) handleConn(conn net.Conn) {
 	case "unban":
 		err = a.Unban(req.SourceIP)
 	case "status":
+	case "reconcile":
+		err = a.Reconcile(req.Decisions)
 	default:
 		err = errors.New("unsupported action")
 	}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -29,6 +31,36 @@ type RegisterHandler struct {
 	deviceInfoTrigger DeviceInfoTrigger // 可选:首次注册成功后触发 DeviceInfo 查询(拉设备本体元数据)
 	subscriptionWaker SubscriptionWaker // 可选:设备恢复在线后恢复已启用订阅
 	recorder          metrics.Recorder  // 可选:埋点 SIP 事务
+	security          RegisterSecurity
+}
+
+// RegisterSecurity keeps authentication protection independent from the SIP
+// transport implementation. Runtime supplies persistence, scoring and bans;
+// the standalone fallback still provides signed, expiring nonces in tests and
+// non-bootstrap uses.
+type RegisterSecurity interface {
+	IssueNonce() (string, error)
+	ValidateNonce(nonce, nonceCount string) error
+	Record(gbsecurity.Event) error
+	TrustEndpoint(deviceID, transport, address string, expires time.Duration) error
+}
+
+type standaloneRegisterSecurity struct{ nonce *gbsecurity.NonceManager }
+
+func newStandaloneRegisterSecurity() RegisterSecurity {
+	policy := gbsecurity.DefaultPolicy()
+	return &standaloneRegisterSecurity{nonce: gbsecurity.NewNonceManager(nil, policy.NonceTTL, gbsecurity.RealClock())}
+}
+
+func (s *standaloneRegisterSecurity) IssueNonce() (string, error) {
+	return s.nonce.Issue()
+}
+func (s *standaloneRegisterSecurity) ValidateNonce(nonce, nonceCount string) error {
+	return s.nonce.Validate(nonce, nonceCount)
+}
+func (s *standaloneRegisterSecurity) Record(gbsecurity.Event) error { return nil }
+func (s *standaloneRegisterSecurity) TrustEndpoint(string, string, string, time.Duration) error {
+	return nil
 }
 
 // NewRegisterHandler 创建注册处理器
@@ -37,7 +69,14 @@ func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
 	if interval <= 0 {
 		interval = 60
 	}
-	return &RegisterHandler{cfg: cfg, keepaliveInterval: interval, platformVersion: platformXGBVersion(cfg)}
+	return &RegisterHandler{cfg: cfg, keepaliveInterval: interval, platformVersion: platformXGBVersion(cfg), security: newStandaloneRegisterSecurity()}
+}
+
+// SetSecurity installs the shared SIP security runtime before the server starts.
+func (h *RegisterHandler) SetSecurity(security RegisterSecurity) {
+	if security != nil {
+		h.security = security
+	}
 }
 
 // SetCatalogTrigger 注入 Catalog 触发器(可选;不注入则不触发)
@@ -121,6 +160,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		}
 	}
 	if claimedServerID != h.cfg.SIP.ServerID {
+		h.recordSecurity(req, deviceID, gbsecurity.ReasonServerMismatch)
 		app.ZapLog.Warn("GB28181 注册拒绝:上级平台编码与平台 ServerID 不匹配",
 			zap.String("deviceId", deviceID),
 			zap.String("gotServerId", claimedServerID),
@@ -133,30 +173,34 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	// 第二步:无 Authorization → 回 401 挑战 digest
 	authHeader := req.GetHeader("Authorization")
 	if authHeader == nil {
-		chal := digest.Challenge{
-			Realm:     h.cfg.SIP.Domain,
-			Nonce:     fmt.Sprintf("%d", time.Now().UnixMicro()),
-			Algorithm: "MD5",
-		}
-		res := h.newResponse(req, 401, "Unauthorized", nil)
-		res.AppendHeader(sip.NewHeader("WWW-Authenticate", chal.String()))
-		_ = tx.Respond(res)
+		status := h.respondChallenge(req, tx)
 		// 401 挑战是正常协议握手,不算失败(后续 Authorization 重发会再走一遍 Handle)
-		h.recordEnd(req, 401, true)
+		h.recordEnd(req, status, status == sip.StatusUnauthorized)
 		return
 	}
 
 	// 第三步:校验 digest(统一接入密码)
 	cred, err := digest.ParseCredentials(authHeader.Value())
 	if err != nil {
-		_ = tx.Respond(h.newResponse(req, 400, "Bad credentials", nil))
-		h.recordEnd(req, 400, false)
+		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
+		status := h.respondChallenge(req, tx)
+		h.recordEnd(req, status, false)
+		return
+	}
+	algorithm := strings.ToUpper(strings.TrimSpace(cred.Algorithm))
+	if algorithm == "" {
+		algorithm = "MD5"
+	}
+	if cred.Realm != h.cfg.SIP.Domain || cred.Username != deviceID || algorithm != "MD5" {
+		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
+		status := h.respondChallenge(req, tx)
+		h.recordEnd(req, status, false)
 		return
 	}
 	chal := digest.Challenge{
 		Realm:     cred.Realm,
 		Nonce:     cred.Nonce,
-		Algorithm: cred.Algorithm,
+		Algorithm: algorithm,
 		Opaque:    cred.Opaque,
 		QOP:       splitQOP(cred.QOP),
 	}
@@ -169,9 +213,16 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		Cnonce:   cred.Cnonce,
 	})
 	if err != nil || expected.Response != cred.Response {
+		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
 		app.ZapLog.Warn("GB28181 注册鉴权失败", zap.String("deviceId", deviceID))
-		_ = tx.Respond(h.newResponse(req, 401, "Unauthorized", nil))
-		h.recordEnd(req, 401, false)
+		status := h.respondChallenge(req, tx)
+		h.recordEnd(req, status, false)
+		return
+	}
+	if err := h.security.ValidateNonce(cred.Nonce, digestNonceCount(cred.Nc)); err != nil {
+		h.recordSecurity(req, deviceID, nonceFailureReason(err))
+		status := h.respondChallenge(req, tx)
+		h.recordEnd(req, status, false)
 		return
 	}
 
@@ -209,6 +260,9 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		h.recordEnd(req, 500, false)
 		return
 	}
+	if err := h.security.TrustEndpoint(deviceID, req.Transport(), ip, time.Duration(expires)*time.Second); err != nil {
+		app.ZapLog.Warn("GB28181 注册安全端点更新失败", zap.String("deviceId", deviceID), zap.Error(err))
+	}
 	app.ZapLog.Info("GB28181 设备注册成功",
 		zap.String("deviceId", deviceID),
 		zap.String("transport", req.Transport()),
@@ -233,6 +287,45 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		if h.deviceInfoTrigger != nil {
 			h.deviceInfoTrigger.Trigger(ctx, deviceID, dest, transport)
 		}
+	}
+}
+
+func digestNonceCount(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%08x", count)
+}
+
+func (h *RegisterHandler) respondChallenge(req *sip.Request, tx sip.ServerTransaction) int {
+	nonce, err := h.security.IssueNonce()
+	if err != nil {
+		_ = tx.Respond(h.newResponse(req, sip.StatusInternalServerError, "Server error", nil))
+		return sip.StatusInternalServerError
+	}
+	challenge := digest.Challenge{Realm: h.cfg.SIP.Domain, Nonce: nonce, Algorithm: "MD5"}
+	res := h.newResponse(req, sip.StatusUnauthorized, "Unauthorized", nil)
+	res.AppendHeader(sip.NewHeader("WWW-Authenticate", challenge.String()))
+	_ = tx.Respond(res)
+	return sip.StatusUnauthorized
+}
+
+func (h *RegisterHandler) recordSecurity(req *sip.Request, deviceID string, reason gbsecurity.Reason) {
+	sourceIP, _ := splitHostPort(req.Source())
+	_ = h.security.Record(gbsecurity.Event{
+		SourceIP: sourceIP, Transport: req.Transport(), Method: string(req.Method),
+		DeviceID: deviceID, Reason: reason, Action: gbsecurity.ActionSample,
+	})
+}
+
+func nonceFailureReason(err error) gbsecurity.Reason {
+	switch {
+	case errors.Is(err, gbsecurity.ErrNonceExpired):
+		return gbsecurity.ReasonNonceExpired
+	case errors.Is(err, gbsecurity.ErrNonceReplay):
+		return gbsecurity.ReasonNonceReplay
+	default:
+		return gbsecurity.ReasonNonceInvalid
 	}
 }
 

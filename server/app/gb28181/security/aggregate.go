@@ -78,6 +78,19 @@ func (s *AggregateStore) Dropped() int64 {
 	return s.dropped
 }
 
+func (s *AggregateStore) Seed(items []EventAggregate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range items {
+		if len(s.items) >= s.maxKeys {
+			s.dropped++
+			break
+		}
+		key := aggregateKey(item.BucketAt, item.SourceIP, item.Transport, item.Method, item.Reason, item.Action)
+		s.items[key] = item
+	}
+}
+
 func aggregateKey(bucket time.Time, source, transport, method string, reason Reason, action Action) string {
 	return bucket.UTC().Format(time.RFC3339) + "|" + source + "|" + transport + "|" + method + "|" + string(reason) + "|" + string(action)
 }
@@ -109,6 +122,17 @@ type BanStore struct {
 
 func NewBanStore() *BanStore { return &BanStore{items: make(map[string]FirewallBan)} }
 
+func (s *BanStore) Seed(items []FirewallBan) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range items {
+		current, ok := s.items[item.Decision.SourceIP]
+		if !ok || current.Decision.CreatedAt.Before(item.Decision.CreatedAt) {
+			s.items[item.Decision.SourceIP] = item
+		}
+	}
+}
+
 func (s *BanStore) Upsert(decision BanDecision, origin string) FirewallBan {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,6 +142,32 @@ func (s *BanStore) Upsert(decision BanDecision, origin string) FirewallBan {
 	}
 	s.items[decision.SourceIP] = item
 	return item
+}
+
+func (s *BanStore) MarkApplied(sourceIP string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[sourceIP]
+	if !ok {
+		return
+	}
+	item.Status = BanActive
+	item.AgentState = "applied"
+	item.LastError = ""
+	s.items[sourceIP] = item
+}
+
+func (s *BanStore) MarkAgentFailed(sourceIP, message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[sourceIP]
+	if !ok {
+		return
+	}
+	item.Status = BanAgentFailed
+	item.AgentState = "failed"
+	item.LastError = message
+	s.items[sourceIP] = item
 }
 
 func (s *BanStore) Get(sourceIP string, now time.Time) (FirewallBan, bool) {
@@ -132,6 +182,22 @@ func (s *BanStore) Get(sourceIP string, now time.Time) (FirewallBan, bool) {
 		s.items[sourceIP] = item
 	}
 	return item, true
+}
+
+func (s *BanStore) Find(identifier string, now time.Time) (FirewallBan, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for sourceIP, item := range s.items {
+		if sourceIP != identifier && item.Decision.DecisionID != identifier {
+			continue
+		}
+		if item.Status == BanActive && !item.Decision.CreatedAt.IsZero() && now.After(item.Decision.CreatedAt.Add(item.Decision.TTL)) {
+			item.Status = BanExpired
+			s.items[sourceIP] = item
+		}
+		return item, true
+	}
+	return FirewallBan{}, false
 }
 
 func (s *BanStore) Unban(sourceIP, actor string, now time.Time) (FirewallBan, bool) {
