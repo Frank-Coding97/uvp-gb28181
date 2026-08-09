@@ -38,6 +38,45 @@ func TestStartSendRtpPassiveTalkParameters(t *testing.T) {
 	}
 }
 
+func TestStartBroadcastSendRtpParameters(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		isUDP bool
+		want  string
+	}{{name: "udp", isUDP: true, want: "1"}, {name: "tcp active", isUDP: false, want: "0"}} {
+		t.Run(test.name, func(t *testing.T) {
+			c, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/index/api/startSendRtp" {
+					t.Fatalf("path=%s", r.URL.Path)
+				}
+				want := map[string]string{
+					"vhost": "__defaultVhost__", "app": "talk", "stream": "source-1",
+					"ssrc": "0200000001", "dst_url": "192.0.2.20", "dst_port": "30000",
+					"is_udp": test.want, "only_audio": "1", "pt": "8", "use_ps": "0",
+				}
+				for key, value := range want {
+					if got := r.URL.Query().Get(key); got != value {
+						t.Errorf("%s=%q, want %q", key, got, value)
+					}
+				}
+				_, _ = w.Write([]byte(`{"code":0,"local_port":31000}`))
+			})
+			defer server.Close()
+
+			result, err := c.StartBroadcastSendRtp(context.Background(), BroadcastSendRtpRequest{
+				VHost: "__defaultVhost__", App: "talk", SourceStream: "source-1", SSRC: "0200000001",
+				RemoteIP: "192.0.2.20", RemotePort: 30000, IsUDP: test.isUDP,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.LocalPort != 31000 {
+				t.Fatalf("localPort=%d", result.LocalPort)
+			}
+		})
+	}
+}
+
 func TestStartSendRtpPassiveRejectsInvalidCloseDelay(t *testing.T) {
 	c := &Client{}
 	_, err := c.StartSendRtpPassive(context.Background(), TalkSendRtpRequest{

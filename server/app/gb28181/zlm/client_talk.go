@@ -3,6 +3,7 @@ package zlm
 import (
 	"context"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -25,6 +26,54 @@ type TalkSendRtpRequest struct {
 
 type StartSendRtpPassiveResult struct {
 	LocalPort int
+}
+
+type BroadcastSendRtpRequest struct {
+	VHost        string
+	App          string
+	SourceStream string
+	SSRC         string
+	RemoteIP     string
+	RemotePort   int
+	IsUDP        bool
+}
+
+type StartBroadcastSendRtpResult struct {
+	LocalPort int
+}
+
+func (c *Client) StartBroadcastSendRtp(ctx context.Context, in BroadcastSendRtpRequest) (*StartBroadcastSendRtpResult, error) {
+	if strings.TrimSpace(in.VHost) == "" || strings.TrimSpace(in.App) == "" ||
+		strings.TrimSpace(in.SourceStream) == "" || strings.TrimSpace(in.SSRC) == "" {
+		return nil, fmt.Errorf("startSendRtp 缺少流标识或 SSRC")
+	}
+	ip := net.ParseIP(strings.TrimSpace(in.RemoteIP))
+	if ip == nil || ip.To4() == nil || ip.IsUnspecified() || in.RemotePort <= 0 || in.RemotePort > 65535 {
+		return nil, fmt.Errorf("startSendRtp 目标地址或端口不合法")
+	}
+	isUDP := "0"
+	if in.IsUDP {
+		isUDP = "1"
+	}
+	var response struct {
+		baseResp
+		LocalPort int `json:"local_port"`
+	}
+	params := map[string]string{
+		"vhost": in.VHost, "app": in.App, "stream": in.SourceStream, "ssrc": in.SSRC,
+		"dst_url": ip.String(), "dst_port": strconv.Itoa(in.RemotePort), "is_udp": isUDP,
+		"only_audio": "1", "pt": "8", "use_ps": "0",
+	}
+	if err := c.call(ctx, "startSendRtp", params, &response); err != nil {
+		return nil, err
+	}
+	if response.Code != 0 {
+		return nil, fmt.Errorf("startSendRtp code=%d msg=%s", response.Code, response.Msg)
+	}
+	if response.LocalPort <= 0 || response.LocalPort > 65535 {
+		return nil, fmt.Errorf("startSendRtp 返回无效 local_port=%d", response.LocalPort)
+	}
+	return &StartBroadcastSendRtpResult{LocalPort: response.LocalPort}, nil
 }
 
 // StartSendRtpPassive opens the TCP/RTP passive sender used by first-phase
