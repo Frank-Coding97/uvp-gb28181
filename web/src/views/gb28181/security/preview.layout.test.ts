@@ -84,6 +84,13 @@ describe("security preview system integration", () => {
     expect(source).toContain("window.setInterval(() => refreshPreview(), 10000)");
   });
 
+  it("uses a compact framed layout for actionable security advice", () => {
+    expect(source).toContain('class="attention-row"');
+    expect(source).toMatch(/\.attention-row\s*{[^}]*display:\s*grid;/s);
+    expect(source).toMatch(/\.attention-row\s*{[^}]*grid-template-columns:\s*36px minmax\(0, 1fr\) 18px;/s);
+    expect(source).toMatch(/\.attention-row\s*{[^}]*border:\s*1px solid var\(--uvp-list-panel-border\);/s);
+  });
+
   it("renders operational data from security APIs instead of fixed demo values", () => {
     expect(source).toContain("getSecurityAgentHealth()");
     expect(source).toContain("listSecurityAccessRules(\"blacklist\")");

@@ -543,8 +543,8 @@ onBeforeUnmount(() => {
 
           <article class="uvp-system-panel attention-panel">
             <div class="panel-heading"><div><span class="section-label">待处理</span><h3>安全建议</h3></div><span class="attention-count">{{ attentionCount }}</span></div>
-            <button v-if="autoBans.length" type="button" @click="activeTab = 'bans'"><span class="attention-icon danger"><Ban :size="18" /></span><span><strong>{{ autoBans.length }} 条自动封禁待复核</strong><small>自动封禁已永久生效，复核后可转为人工黑名单。</small></span><ChevronRight :size="16" /></button>
-            <button v-if="allowRules.length" type="button" @click="activeTab = 'allowlist'"><span class="attention-icon warning"><UserRoundCheck :size="18" /></span><span><strong>{{ allowRules.length }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span><ChevronRight :size="16" /></button>
+            <button v-if="autoBans.length" class="attention-row" type="button" @click="activeTab = 'bans'"><span class="attention-icon danger"><Ban :size="18" /></span><span><strong>{{ autoBans.length }} 条自动封禁待复核</strong><small>自动封禁已永久生效，复核后可转为人工黑名单。</small></span><ChevronRight :size="16" /></button>
+            <button v-if="allowRules.length" class="attention-row" type="button" @click="activeTab = 'allowlist'"><span class="attention-icon warning"><UserRoundCheck :size="18" /></span><span><strong>{{ allowRules.length }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span><ChevronRight :size="16" /></button>
             <div v-if="!attentionCount" class="empty-state attention-empty" role="status"><span class="empty-state-icon"><CheckCircle2 :size="22" /></span><strong>当前没有待处理项</strong><small>安全事件、自动封禁和访问名单会在接口刷新后更新。</small></div>
           </article>
         </section>
@@ -1072,8 +1072,7 @@ onBeforeUnmount(() => {
 
 .defense-item small,
 .panel-note,
-.signal-row small,
-.attention-panel button small {
+.signal-row small {
   color: var(--uvp-text-tertiary);
   line-height: 1.45;
 }
@@ -1113,8 +1112,7 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.signal-row,
-.attention-panel > button {
+.signal-row {
   width: 100%;
   min-height: 58px;
   gap: 10px;
@@ -1127,13 +1125,11 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.signal-row:last-child,
-.attention-panel > button:last-child {
+.signal-row:last-child {
   border-bottom: 0;
 }
 
-.signal-row:hover,
-.attention-panel > button:hover {
+.signal-row:hover {
   background: var(--uvp-table-row-hover-bg);
 }
 
@@ -1152,8 +1148,7 @@ onBeforeUnmount(() => {
   background: var(--uvp-warning);
 }
 
-.signal-row > span:nth-child(2),
-.attention-panel button > span:nth-child(2) {
+.signal-row > span:nth-child(2) {
   display: flex;
   flex: 1;
   min-width: 0;
@@ -1165,6 +1160,50 @@ onBeforeUnmount(() => {
   color: var(--uvp-text-secondary);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.attention-row {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 18px;
+  width: 100%;
+  min-height: 76px;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--uvp-list-panel-border);
+  border-radius: 8px;
+  color: inherit;
+  background: var(--uvp-list-panel-bg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.attention-row:hover {
+  border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
+  background: var(--uvp-table-row-hover-bg);
+}
+
+.attention-row > span:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attention-row strong {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.attention-row small {
+  color: var(--uvp-text-tertiary);
+  line-height: 1.5;
+}
+
+.attention-row > svg {
+  justify-self: end;
+  color: var(--uvp-text-tertiary);
 }
 
 .attention-count {
