@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 )
@@ -86,6 +88,30 @@ func TestLoadFromPlayConfig(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadFromZLMAddressOverrides(t *testing.T) {
+	src := fakeSource{strings: map[string]string{
+		"gb28181.zlm.host":         "10.0.0.2",
+		"gb28181.zlm.receivehost":  "203.0.113.10",
+		"gb28181.zlm.playbackhost": "play.example.com",
+	}}
+	cfg := LoadFrom(src)
+	require.Equal(t, "10.0.0.2", cfg.ZLM.Host)
+	require.Equal(t, "203.0.113.10", cfg.ZLM.EffectiveReceiveHost())
+	require.Equal(t, "play.example.com", cfg.ZLM.EffectivePlaybackHost())
+}
+
+func TestSDPExtensionEnabledFromReadsLatestValue(t *testing.T) {
+	source := fakeSource{
+		values: map[string]interface{}{SDPExtensionConfigKey: false},
+		bools:  map[string]bool{SDPExtensionConfigKey: false},
+	}
+	require.False(t, SDPExtensionEnabledFrom(source))
+
+	source.values[SDPExtensionConfigKey] = true
+	source.bools[SDPExtensionConfigKey] = true
+	require.True(t, SDPExtensionEnabledFrom(source))
 }
 
 func TestRecordRuntimeConfigDefaults(t *testing.T) {

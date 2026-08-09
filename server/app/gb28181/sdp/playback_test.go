@@ -28,14 +28,36 @@ func TestBuildPlaybackSDP(t *testing.T) {
 		"u=34020000001320000001:0\r\n" +
 		"c=IN IP4 192.0.2.10\r\n" +
 		"t=1200 2000\r\n" +
-		"m=video 30000 RTP/AVP 96 98 97\r\n" +
+		"m=video 30000 RTP/AVP 96 97 98 99\r\n" +
 		"a=recvonly\r\n" +
 		"a=rtpmap:96 PS/90000\r\n" +
-		"a=rtpmap:98 H264/90000\r\n" +
 		"a=rtpmap:97 MPEG4/90000\r\n" +
+		"a=rtpmap:98 H264/90000\r\n" +
+		"a=rtpmap:99 H265/90000\r\n" +
 		"y=1402000001\r\n"
 	if got != want {
 		t.Fatalf("BuildPlaybackSDP() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildPlaybackSDPExtendedCompatibility(t *testing.T) {
+	got, err := BuildPlaybackSDP(PlaybackParams{
+		ServerID: "34020000002000000001", ChannelID: "34020000001320000001",
+		RecvIP: "192.0.2.10", RecvPort: 30000, SSRC: "1402000001",
+		Start: time.Unix(1_000, 0), End: time.Unix(2_000, 0), Extended: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"m=video 30000 RTP/AVP 96 126 125 99 34 98 97\r\n",
+		"a=rtpmap:126 H264/90000\r\n",
+		"a=rtpmap:125 H264S/90000\r\n",
+		"a=rtpmap:99 H265/90000\r\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("扩展兼容回放 SDP 缺少 %q:\n%s", want, got)
+		}
 	}
 }
 

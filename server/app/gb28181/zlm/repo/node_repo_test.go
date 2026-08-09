@@ -29,6 +29,8 @@ func TestNodeRepo_CreateGetUpdateDelete(t *testing.T) {
 	in := node.Node{
 		Name:            "zlm-1",
 		Host:            "1.1.1.1",
+		ReceiveHost:     "203.0.113.10",
+		PlaybackHost:    "play.example.com",
 		APIPort:         18080,
 		APISecret:       "s",
 		MediaServerUUID: "uuid-1",
@@ -47,6 +49,8 @@ func TestNodeRepo_CreateGetUpdateDelete(t *testing.T) {
 	require.NotNil(t, got)
 	require.Equal(t, "zlm-1", got.Name)
 	require.Equal(t, "uuid-1", got.MediaServerUUID)
+	require.Equal(t, "203.0.113.10", got.ReceiveHost)
+	require.Equal(t, "play.example.com", got.PlaybackHost)
 	require.Equal(t, node.StateActive, got.State)
 	require.Equal(t, 30000, got.RTPPortStart)
 

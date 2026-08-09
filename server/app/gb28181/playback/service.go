@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
 )
 
@@ -233,7 +234,8 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 		sipChannelID = request.ChannelID
 	}
 	body, err := sdp.BuildPlaybackSDP(sdp.PlaybackParams{ServerID: serverID, ChannelID: sipChannelID, RecvIP: node.RecvIP,
-		RecvPort: allocation.Port, SSRC: ssrc, TCPMode: tcpMode, Start: start, End: end, PlayFrom: playFrom})
+		RecvPort: allocation.Port, SSRC: ssrc, TCPMode: tcpMode, Start: start, End: end, PlayFrom: playFrom,
+		Extended: gbconfig.SDPExtensionEnabled()})
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "invalid_sdp", err, resources)
 	}

@@ -49,13 +49,13 @@ func (fakePlaybackServerConfigs) Get(context.Context, int64) (node.ServerConfig,
 }
 
 func TestZLMRuntimeAdaptersPickAllocateWaitAndCleanup(t *testing.T) {
-	selected := &node.Node{ID: 7, Host: "192.0.2.10", State: node.StateActive}
+	selected := &node.Node{ID: 7, Host: "192.0.2.10", ReceiveHost: "198.51.100.10", PlaybackHost: "play.example.com", State: node.StateActive}
 	client := &fakePlaybackZLMClient{}
 	clientForNode := func(*node.Node) PlaybackZLMClient { return client }
 	locations := stream.NewLocationMap()
 	picker := NewZLMNodePicker(fakePlaybackScheduler{selected: selected}, "34020000002000000001")
 	picked, err := picker.Pick(context.Background(), PickRequest{DeviceID: "device-1", SIPChannelID: "channel-1", StreamID: "pb-1", Destination: "192.0.2.20:5060", Transport: "UDP"})
-	if err != nil || picked.ID != "7" || picked.RecvIP != selected.Host || picked.Destination == "" {
+	if err != nil || picked.ID != "7" || picked.RecvIP != selected.ReceiveHost || picked.Destination == "" {
 		t.Fatalf("picked=%+v err=%v", picked, err)
 	}
 
@@ -74,7 +74,7 @@ func TestZLMRuntimeAdaptersPickAllocateWaitAndCleanup(t *testing.T) {
 	waiter := NewZLMMediaWaiter(fakePlaybackNodes{selected: selected}, locations, stream.NewNotifier(),
 		fakePlaybackServerConfigs{}, clientForNode)
 	ready, err := waiter.Wait(context.Background(), "pb-1")
-	if err != nil || ready.URLs["wsFlv"] == "" || ready.URLs["rtsp"] == "" || !ready.HasAudio {
+	if err != nil || ready.URLs["wsFlv"] != "ws://play.example.com:8080/rtp/pb-1.live.flv" || ready.URLs["rtsp"] != "rtsp://play.example.com:554/rtp/pb-1" || !ready.HasAudio {
 		t.Fatalf("ready=%+v err=%v", ready, err)
 	}
 	if err := allocation.Close(context.Background()); err != nil {

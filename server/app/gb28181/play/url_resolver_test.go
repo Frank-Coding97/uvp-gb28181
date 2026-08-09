@@ -63,6 +63,19 @@ func TestURLResolverUsesMediaPortsFromTargetNode(t *testing.T) {
 	assertURL(t, urls.RTSPS, "rtsps://192.168.10.220:10555/rtp/stream-1")
 }
 
+func TestURLResolverUsesPlaybackHostWithoutChangingNodeAPIHost(t *testing.T) {
+	resolver := NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 18080}})
+	mediaNode := &node.Node{ID: 7, Host: "10.0.0.2", PlaybackHost: "play.example.com"}
+	urls, warnings := resolver.Resolve(context.Background(), mediaNode, "rtp", "stream-1")
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected warnings: %v", warnings)
+	}
+	assertURL(t, urls.HTTPFLV, "http://play.example.com:18080/rtp/stream-1.live.flv")
+	if mediaNode.Host != "10.0.0.2" {
+		t.Fatalf("resolver must not mutate API host: %q", mediaNode.Host)
+	}
+}
+
 func TestURLResolverLeavesUnavailableProtocolsNull(t *testing.T) {
 	resolver := NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 18080, RTSPEnabled: true, RTMPEnabled: true, HLSEnabled: true, TSEnabled: true, FMP4Enabled: true}})
 	urls, warnings := resolver.Resolve(context.Background(), &node.Node{ID: 8, Host: "zlm.local"}, "rtp", "stream-2")

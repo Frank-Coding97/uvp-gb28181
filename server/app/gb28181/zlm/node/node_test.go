@@ -19,6 +19,15 @@ func TestNode_HTTPEndpoint(t *testing.T) {
 	require.Equal(t, "http://1.2.3.4:18080/index/api", n.HTTPEndpoint())
 }
 
+func TestNode_EffectiveMediaHostsFallbackAndOverride(t *testing.T) {
+	n := node.Node{Host: "10.0.0.2", ReceiveHost: "  ", PlaybackHost: "play.example.com"}
+	require.Equal(t, "10.0.0.2", n.EffectiveReceiveHost())
+	require.Equal(t, "play.example.com", n.EffectivePlaybackHost())
+
+	n.ReceiveHost = "203.0.113.10"
+	require.Equal(t, "203.0.113.10", n.EffectiveReceiveHost())
+}
+
 func TestNode_IsActive(t *testing.T) {
 	cases := []struct {
 		state  node.State

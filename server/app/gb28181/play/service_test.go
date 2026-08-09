@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,10 +68,12 @@ type mockInviter struct {
 	inviteErr   error
 	byeErr      error
 	onInvite    func(*uac.Session)
+	lastBody    string
 }
 
 func (m *mockInviter) Invite(ctx context.Context, sm *uac.SessionManager, s *uac.Session, body string) error {
 	m.inviteCalls.Add(1)
+	m.lastBody = body
 	if m.onInvite != nil {
 		m.onInvite(s)
 	}
@@ -190,6 +193,37 @@ func TestStartHappyPath(t *testing.T) {
 	}
 	if ch.StreamID != res.StreamID {
 		t.Errorf("点播成功应记录通道 stream_id, got %q want %q", ch.StreamID, res.StreamID)
+	}
+}
+
+func TestStartUsesSeparateReceiveAndPlaybackHosts(t *testing.T) {
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	dev, ch := onlineDevice(), aChannel()
+	notifier := stream.NewNotifier()
+	sm := uac.NewSessionManager()
+	channels := &fakeChannels{c: ch}
+	cfg := testCfg()
+	cfg.ZLM.ReceiveHost = "203.0.113.10"
+	cfg.ZLM.PlaybackHost = "play.example.com"
+	s := New(cfg, z, inv, sm, notifier, fakeDevices{dev}, channels)
+	s.SetReadyTimings(800*time.Millisecond, 50*time.Millisecond)
+	inv.onInvite = func(sess *uac.Session) {
+		go func(streamID string) {
+			time.Sleep(50 * time.Millisecond)
+			notifier.Publish(streamID)
+		}(sess.StreamID)
+	}
+
+	result, err := s.Start(context.Background(), dev.DeviceID, ch.ChannelID)
+	if err != nil {
+		t.Fatalf("Start 应成功: %v", err)
+	}
+	if !strings.Contains(inv.lastBody, "c=IN IP4 203.0.113.10\r\n") {
+		t.Fatalf("SDP 应使用设备收流地址:\n%s", inv.lastBody)
+	}
+	if !strings.HasPrefix(result.WSFlvURL, "ws://play.example.com:") {
+		t.Fatalf("播放地址应使用播放访问地址: %q", result.WSFlvURL)
 	}
 }
 

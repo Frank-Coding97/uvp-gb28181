@@ -6,6 +6,7 @@ vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
+  fetchSDPExtensionConfig,
   fetchPositionHistoryConfig,
   getControlCapabilities,
   getDeviceStatus,
@@ -16,6 +17,7 @@ import {
   listPtzPresets,
   updateHomePosition,
   updatePositionHistoryConfig,
+  updateSDPExtensionConfig,
   type DeviceStatusResult,
   type HomePositionPatch
 } from "./gb28181";
@@ -23,7 +25,7 @@ import {
 describe("国标服务配置 API", () => {
   beforeEach(() => {
     request.mockReset();
-    request.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
+    request.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
   });
 
   it("读取移动位置历史轨迹开关", async () => {
@@ -31,12 +33,24 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenCalledWith("get", "/api/gb28181/sip/service-config/position-history");
   });
 
-  it("只提交 enabled 字段切换移动位置历史轨迹", async () => {
-    await updatePositionHistoryConfig(false);
+  it("同时提交轨迹开关和保留天数", async () => {
+    await updatePositionHistoryConfig({ enabled: false, retentionDays: 30 });
     expect(request).toHaveBeenCalledWith(
       "put",
       "/api/gb28181/sip/service-config/position-history",
-      { data: { enabled: false } }
+      { data: { enabled: false, retentionDays: 30 } }
+    );
+  });
+
+  it("读取并更新扩展 SDP 兼容模式", async () => {
+    await fetchSDPExtensionConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sdp-extension");
+
+    await updateSDPExtensionConfig(true);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/sdp-extension",
+      { data: { enabled: true } }
     );
   });
 });

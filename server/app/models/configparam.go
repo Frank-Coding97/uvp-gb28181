@@ -25,19 +25,9 @@ type CaptchaConfig struct {
 	Length int  `json:"length" yaml:"length"`
 }
 
-type PositionHistoryConfig struct {
-	Enabled       bool `json:"enabled" yaml:"enabled"`
-	RetentionDays int  `json:"retentionDays" yaml:"retentionDays"`
-}
-
-type GB28181Config struct {
-	PositionHistory PositionHistoryConfig `json:"positionHistory" yaml:"positionHistory"`
-}
-
 // ConfigRequest 配置请求参数
 type ConfigRequest struct {
-	System  SystemConfig   `json:"system" yaml:"System"`
-	Safe    SafeConfig     `json:"safe" yaml:"Safe"`
-	Captcha CaptchaConfig  `json:"captcha" yaml:"Captcha"`
-	GB28181 *GB28181Config `json:"gb28181" yaml:"GB28181"`
+	System  SystemConfig  `json:"system" yaml:"System"`
+	Safe    SafeConfig    `json:"safe" yaml:"Safe"`
+	Captcha CaptchaConfig `json:"captcha" yaml:"Captcha"`
 }

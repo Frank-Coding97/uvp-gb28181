@@ -30,6 +30,8 @@ func TestOptionalClickHouseDeploymentContract(t *testing.T) {
 	require.Contains(t, initScript, "CREATE DATABASE IF NOT EXISTS")
 	require.Contains(t, initScript, "CREATE USER IF NOT EXISTS")
 	require.Contains(t, initScript, "GRANT CREATE TABLE, CREATE VIEW, SELECT, INSERT")
+	require.Contains(t, initScript, "GRANT DROP VIEW\n  ON \\`${database}\\`.sip_trace_session_day_mv")
+	require.NotContains(t, initScript, "GRANT DROP VIEW\n  ON \\`${database}\\`.*")
 	require.NotContains(t, strings.ToUpper(initScript), "GRANT ALL")
 
 	envExample := read(".env.example")

@@ -16,6 +16,7 @@ import LifecycleDot from "./components/LifecycleDot.vue";
 import HealthBadge from "./components/HealthBadge.vue";
 import Sparkline from "./components/Sparkline.vue";
 import NodeConfig from "./NodeConfig.vue";
+import NodeForm from "./NodeForm.vue";
 
 interface HistoryPoint {
     time: number;
@@ -27,6 +28,7 @@ const router = useRouter();
 const node = ref<ZLMNode | null>(null);
 const loading = ref(false);
 const activeTab = ref<"overview" | "config">("overview");
+const editVisible = ref(false);
 let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
 const HISTORY_MAX = 30;
@@ -257,6 +259,7 @@ function fmtTime(s: string | undefined | null): string {
                         >
                             激活
                         </a-button>
+                        <a-button v-if="node" @click="editVisible = true">编辑地址</a-button>
                         <a-dropdown
                             v-if="node && node.state !== 'offline'"
                             trigger="click"
@@ -388,6 +391,14 @@ function fmtTime(s: string | undefined | null): string {
                                         <div class="info-value mono">{{ node?.host }}:{{ node?.apiPort }}</div>
                                     </div>
                                     <div class="info-item">
+                                        <div class="info-label">设备收流地址</div>
+                                        <div class="info-value mono">{{ node?.receiveHost || node?.host }}</div>
+                                    </div>
+                                    <div class="info-item">
+                                        <div class="info-label">播放访问地址</div>
+                                        <div class="info-value mono">{{ node?.playbackHost || node?.host }}</div>
+                                    </div>
+                                    <div class="info-item">
                                         <div class="info-label">RTP 端口范围</div>
                                         <div class="info-value">{{ node?.rtpPortStart }} - {{ node?.rtpPortEnd }}</div>
                                     </div>
@@ -408,6 +419,7 @@ function fmtTime(s: string | undefined | null): string {
                     </a-tab-pane>
                 </a-tabs>
             </div>
+            <NodeForm v-model:visible="editVisible" :node="node" @saved="refresh" />
         </div>
     </div>
 </template>

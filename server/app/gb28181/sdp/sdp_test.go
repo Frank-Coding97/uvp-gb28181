@@ -63,3 +63,32 @@ func TestBuildPlaySDP_TCP(t *testing.T) {
 		t.Error("TCP模式应含 a=setup:passive")
 	}
 }
+
+func TestBuildPlaySDPExtendedCompatibility(t *testing.T) {
+	got := BuildPlaySDP(PlayParams{
+		ServerID: "34020000002000000001", RecvIP: "192.0.2.10", RecvPort: 40000,
+		SSRC: "0200000001", Extended: true,
+	})
+
+	for _, want := range []string{
+		"m=video 40000 RTP/AVP 96 126 125 99 34 98 97\r\n",
+		"a=rtpmap:126 H264/90000\r\n",
+		"a=rtpmap:125 H264S/90000\r\n",
+		"a=rtpmap:99 H265/90000\r\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("扩展兼容 SDP 缺少 %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestBuildPlaySDPDefaultCompatibility(t *testing.T) {
+	got := BuildPlaySDP(PlayParams{ServerID: "x", RecvIP: "1.2.3.4", RecvPort: 40000, SSRC: "0200000001"})
+	if !strings.Contains(got, "m=video 40000 RTP/AVP 96 97 98 99\r\n") ||
+		!strings.Contains(got, "a=rtpmap:99 H265/90000\r\n") {
+		t.Fatalf("默认 SDP 应保留 WVP 基础兼容负载:\n%s", got)
+	}
+	if strings.Contains(got, "H264S") {
+		t.Fatalf("默认 SDP 不应包含扩展编码声明:\n%s", got)
+	}
+}

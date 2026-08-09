@@ -10,7 +10,9 @@ describe("static service config draft", () => {
     it("matches the reference controls without SIP access identity fields", () => {
         const draft = createStaticServiceConfigDraft();
 
-        expect(staticServiceConfigLabels).toHaveLength(14);
+        expect(staticServiceConfigLabels).toHaveLength(15);
+        expect(staticServiceConfigLabels).toContain("扩展 SDP 兼容模式");
+        expect(draft.positionHistoryRetentionDays).toBe(7);
         expect(draft.ptzSpeed).toBe(56);
         expect(draft.sipTimeoutSec).toBe(10);
         expect(draft.notifyCacheMaxLength).toBe(10000);

@@ -253,12 +253,16 @@ gb28181:
   position_history:
     enabled: true             # 是否保存位置历史轨迹；关闭后仍更新最新位置
     retention_days: 7         # 历史轨迹保留天数，范围 1-365
+  sdp:
+    extension_enabled: false  # 部分设备需要的扩展 SDP 媒体编码兼容模式，一般无需开启
   # ZLMediaKit 媒体服务器 — 首次部署 seed(数据面)
   #
   # 仅作 meta_node 表为空时的 seed 兜底:启动时若 DB 已存在节点,本配置忽略,
   # 运行时通过"流媒体节点"UI 管理多节点。yaml 改值不会影响已 seed 节点。
   zlm:
     host: "127.0.0.1"             # ZLM 地址
+    receivehost: ""               # 设备收流地址,留空跟随 host
+    playbackhost: ""              # 播放访问地址,可填公网 IP 或域名,留空跟随 host
     httpport: 18080               # ZLM HTTP API 端口
     secret: "CHANGE_ME"           # ZLM API secret(部署时填 ZLM 实际 secret)
     rtpport: 40000                # RTP 单端口收流

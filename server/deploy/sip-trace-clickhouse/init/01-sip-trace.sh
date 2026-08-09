@@ -27,4 +27,6 @@ ALTER USER \`${app_user}\`
   IDENTIFIED WITH sha256_password BY {app_password:String};
 GRANT CREATE TABLE, CREATE VIEW, SELECT, INSERT
   ON \`${database}\`.* TO \`${app_user}\`;
+GRANT DROP VIEW
+  ON \`${database}\`.sip_trace_session_day_mv TO \`${app_user}\`;
 SQL

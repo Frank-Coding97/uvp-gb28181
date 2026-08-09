@@ -324,6 +324,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			serviceConfig.GET("/position-history", serviceConfigController.GetPositionHistory)
 			serviceConfig.PUT("/position-history", serviceConfigController.UpdatePositionHistory)
+		serviceConfig.GET("/sdp-extension", serviceConfigController.GetSDPExtension)
+		serviceConfig.PUT("/sdp-extension", serviceConfigController.UpdateSDPExtension)
 		}
 		setup := gb.Group("/sip/setup")
 		{

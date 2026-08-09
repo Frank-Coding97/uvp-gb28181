@@ -89,6 +89,7 @@ describe("multi-screen playback page", () => {
         expect(wrapper.findAll("[data-test=screen-slot]")).toHaveLength(4);
         expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
         expect(wrapper.find("[data-test=layout-9]").exists()).toBe(true);
+        expect(wrapper.get("[data-test=playback-schemes] .lucide-gallery-vertical-end").exists()).toBe(true);
     });
 
     it("keeps the monitor toolbar clickable when the mobile workspace shrinks", () => {

@@ -127,35 +127,6 @@
           </a-card>
         </a-tab-pane>
 
-        <!-- 位置历史配置 -->
-        <a-tab-pane key="position-history" title="位置历史">
-          <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
-            <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.gb28181.positionHistory" auto-label-width>
-              <a-row :gutter="24">
-                <a-col :span="isMobile ? 24 : 12">
-                  <a-form-item field="enabled" label="保存历史轨迹">
-                    <a-switch v-model="configData.gb28181.positionHistory.enabled">
-                      <template #checked>开启</template>
-                      <template #unchecked>关闭</template>
-                    </a-switch>
-                    <template #extra>
-                      <div>关闭后仍更新设备和通道的最新位置，不再新增轨迹点。</div>
-                    </template>
-                  </a-form-item>
-                </a-col>
-                <a-col :span="isMobile ? 24 : 12">
-                  <a-form-item field="retentionDays" label="保留天数">
-                    <a-input-number v-model="configData.gb28181.positionHistory.retentionDays" :min="1" :max="365" :disabled="!configData.gb28181.positionHistory.enabled" />
-                    <template #extra>
-                      <div>历史轨迹按接收时间自动清理，默认保留 7 天。</div>
-                    </template>
-                  </a-form-item>
-                </a-col>
-              </a-row>
-            </a-form>
-          </a-card>
-        </a-tab-pane>
-
         <a-tab-pane key="safe" title="安全配置">
           <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
             <a-form class="uvp-system-form" :layout="layoutMode.layout" :model="configData.safe" auto-label-width>
@@ -256,8 +227,7 @@ const sysConfigStore = useSysConfigStore();
 const configData = ref({
   system: sysConfigStore.systemConfig,
   captcha: sysConfigStore.captchaConfig,
-  safe: sysConfigStore.safeConfig,
-  gb28181: { positionHistory: sysConfigStore.positionHistoryConfig }
+  safe: sysConfigStore.safeConfig
 });
 
 // 获取配置信息
@@ -268,8 +238,7 @@ const getConfig = async () => {
     configData.value = {
       system: sysConfigStore.systemConfig,
       captcha: sysConfigStore.captchaConfig,
-      safe: sysConfigStore.safeConfig,
-      gb28181: { positionHistory: sysConfigStore.positionHistoryConfig }
+      safe: sysConfigStore.safeConfig
     };
   } catch (error) {
     console.error("获取配置失败:", error);

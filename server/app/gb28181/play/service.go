@@ -303,7 +303,7 @@ func (s *Service) buildReuseResult(ctx context.Context, streamID string, mediaNo
 	if mediaNode != nil {
 		return s.buildNodeResult(ctx, streamID, ssrc, mediaNode, true)
 	}
-	result := s.buildResultFor(streamID, ssrc, s.cfg.ZLM.Host)
+	result := s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
 	result.Reused = true
 	return result
 }
@@ -378,7 +378,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 			return nil, fmt.Errorf("无可用 ZLM 节点: %w", err)
 		}
 		client = zlm.NewClientForNode(selectedNode)
-		recvHost = selectedNode.Host
+		recvHost = selectedNode.EffectiveReceiveHost()
 		rtpFallback = selectedNode.RTPPortStart // 兜底端口
 		pickedNodeID = selectedNode.ID
 		pickedNode = selectedNode
@@ -386,7 +386,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	} else {
 		// deprecated 单节点路径
 		client = s.zlm
-		recvHost = s.cfg.ZLM.Host
+		recvHost = s.cfg.ZLM.EffectiveReceiveHost()
 		rtpFallback = s.cfg.ZLM.RTPPort
 	}
 
@@ -413,6 +413,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		RecvIP:   recvHost,
 		RecvPort: recvPort,
 		SSRC:     ssrc,
+		Extended: gbconfig.SDPExtensionEnabled(),
 	})
 
 	sess := &uac.Session{
@@ -476,7 +477,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	if pickedNode != nil {
 		result = s.buildNodeResult(ctx, streamID, ssrc, pickedNode, false)
 	} else {
-		result = s.buildResultFor(streamID, ssrc, recvHost)
+		result = s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
 	}
 	return result, nil
 }
@@ -571,7 +572,7 @@ func (s *Service) buildNodeResult(ctx context.Context, streamID, ssrc string, me
 //
 // Deprecated: 走 buildResultFor。仅保留用于 service_test 旧用例(若有)。
 func (s *Service) buildResult(streamID, ssrc string) *Result {
-	return s.buildResultFor(streamID, ssrc, s.cfg.ZLM.Host)
+	return s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
 }
 
 // sessions 暴露给 hook 端点(on_stream_none_reader / on_rtp_server_timeout 用)

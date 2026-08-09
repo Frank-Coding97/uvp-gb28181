@@ -28,22 +28,11 @@ export interface CaptchaConfig {
     length: number;
 }
 
-export interface PositionHistoryConfig {
-    enabled: boolean;
-    retentionDays: number;
-}
-
-export interface GB28181Config {
-    positionHistory: PositionHistoryConfig;
-}
-
-
 // 配置响应数据
 export interface ConfigResponseData {
     system: SystemConfig;
     captcha: CaptchaConfig;
     safe: SafeConfig;
-    gb28181: GB28181Config;
 }
 
 // 配置请求参数
@@ -51,7 +40,6 @@ export interface ConfigRequestData {
     system: SystemConfig;
     safe: SafeConfig;
     captcha: CaptchaConfig;
-    gb28181?: GB28181Config;
 }
 
 // 获取配置响应结果
@@ -68,5 +56,4 @@ export const getConfigAPI = () => {
 export const updateConfigAPI = (data: ConfigRequestData) => {
     return http.request<BaseResult>("put", baseUrlApi("config/update"), { data });
 };
-
 

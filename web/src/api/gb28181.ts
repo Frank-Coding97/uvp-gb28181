@@ -720,13 +720,26 @@ export const fetchSipPlatformInfo = () => http.request<BaseResult<SipPlatformInf
 
 export interface PositionHistoryConfig {
   enabled: boolean;
+  retentionDays: number;
 }
 
 export const fetchPositionHistoryConfig = () =>
   http.request<BaseResult<PositionHistoryConfig>>("get", baseUrlApi("gb28181/sip/service-config/position-history"));
 
-export const updatePositionHistoryConfig = (enabled: boolean) =>
+export const updatePositionHistoryConfig = (config: PositionHistoryConfig) =>
   http.request<BaseResult<PositionHistoryConfig>>("put", baseUrlApi("gb28181/sip/service-config/position-history"), {
+    data: config
+  });
+
+export interface SDPExtensionConfig {
+  enabled: boolean;
+}
+
+export const fetchSDPExtensionConfig = () =>
+  http.request<BaseResult<SDPExtensionConfig>>("get", baseUrlApi("gb28181/sip/service-config/sdp-extension"));
+
+export const updateSDPExtensionConfig = (enabled: boolean) =>
+  http.request<BaseResult<SDPExtensionConfig>>("put", baseUrlApi("gb28181/sip/service-config/sdp-extension"), {
     data: { enabled }
   });
 

@@ -540,7 +540,7 @@ async function handleBatchActivate() {
                     </div>
                 </transition>
 
-                <NodeForm v-model:visible="drawerVisible" @created="refresh" />
+                <NodeForm v-model:visible="drawerVisible" @saved="refresh" />
             </div>
         </div>
     </div>

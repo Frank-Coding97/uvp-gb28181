@@ -4,7 +4,7 @@ import {
     AlertTriangle,
     Check,
     CircleStop,
-    ListVideo,
+    GalleryVerticalEnd,
     Maximize2,
     Minimize2,
     Play,
@@ -485,7 +485,7 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
-                        <button type="button" data-test="playback-schemes" :class="{ active: schemeVisible }" aria-label="播放方案" title="播放方案" @click="schemeVisible = true"><ListVideo :size="17" aria-hidden="true" /></button>
+                        <button type="button" data-test="playback-schemes" :class="{ active: schemeVisible }" aria-label="播放方案" title="播放方案" @click="schemeVisible = true"><GalleryVerticalEnd :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>

@@ -155,16 +155,20 @@ func TestZLMNodeAPI_CreateAndList_E2E(t *testing.T) {
 	r, _ := setupRouter(t)
 
 	w, resp := do(t, r, "POST", "/api/gb28181/zlm/nodes", service.CreateNodeReq{
-		Name: "n1", Host: "1.2.3.4", APIPort: 18080, APISecret: "s",
+		Name: "n1", Host: "1.2.3.4", ReceiveHost: "203.0.113.10", PlaybackHost: "play.example.com", APIPort: 18080, APISecret: "s",
 	})
 	require.Equal(t, 200, w.Code)
 	require.NotNil(t, resp["data"])
+	created := resp["data"].(map[string]any)
+	require.Equal(t, "203.0.113.10", created["receiveHost"])
+	require.Equal(t, "play.example.com", created["playbackHost"])
 
 	w2, resp2 := do(t, r, "GET", "/api/gb28181/zlm/nodes", nil)
 	require.Equal(t, 200, w2.Code)
 	data := resp2["data"].(map[string]any)
 	list := data["list"].([]any)
 	require.Len(t, list, 1)
+	require.Equal(t, "play.example.com", list[0].(map[string]any)["playbackHost"])
 }
 
 func TestZLMNodeAPI_Get_NotFound(t *testing.T) {

@@ -35,6 +35,7 @@ type PlaybackParams struct {
 	Start     time.Time
 	End       time.Time
 	PlayFrom  time.Time
+	Extended  bool
 }
 
 // BuildPlaybackSDP builds a GB28181 historical playback offer. PlayFrom is
@@ -56,11 +57,7 @@ func BuildPlaybackSDP(params PlaybackParams) (string, error) {
 	body.WriteString(fmt.Sprintf("u=%s:0\r\n", params.ChannelID))
 	body.WriteString(fmt.Sprintf("c=IN IP4 %s\r\n", params.RecvIP))
 	body.WriteString(fmt.Sprintf("t=%d %d\r\n", playFrom.Unix(), params.End.Unix()))
-	body.WriteString(fmt.Sprintf("m=video %d %s 96 98 97\r\n", params.RecvPort, transport))
-	body.WriteString("a=recvonly\r\n")
-	body.WriteString("a=rtpmap:96 PS/90000\r\n")
-	body.WriteString("a=rtpmap:98 H264/90000\r\n")
-	body.WriteString("a=rtpmap:97 MPEG4/90000\r\n")
+	writeVideoMediaDescription(&body, params.RecvPort, transport, params.Extended)
 	if params.TCPMode {
 		body.WriteString("a=setup:passive\r\n")
 		body.WriteString("a=connection:new\r\n")

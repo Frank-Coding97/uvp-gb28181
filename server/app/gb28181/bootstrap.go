@@ -835,6 +835,8 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 		_, err := reg.Add(ctx, node.Node{
 			Name:            "zlm-default",
 			Host:            cfg.ZLM.Host,
+			ReceiveHost:     cfg.ZLM.ReceiveHost,
+			PlaybackHost:    cfg.ZLM.PlaybackHost,
 			APIPort:         cfg.ZLM.HTTPPort,
 			APISecret:       cfg.ZLM.Secret,
 			MediaServerUUID: uuidStr,

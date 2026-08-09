@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,8 @@ type Node struct {
 	ID              int64             // DB 自增主键
 	Name            string            // 显示名
 	Host            string            // ZLM API host
+	ReceiveHost     string            // 设备收流地址,写入 SDP 的 c= 地址
+	PlaybackHost    string            // 播放访问地址,返回给浏览器/客户端
 	APIPort         int               // ZLM API port
 	APISecret       string            // ZLM api.secret
 	MediaServerUUID string            // 业务侧生成,启动时写入 ZLM general.mediaServerId
@@ -30,6 +33,24 @@ type Node struct {
 	Stats           Stats // 实时状态,内存,心跳更新
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+// EffectiveReceiveHost 返回设备应向其发送 RTP 的地址。
+// 旧节点未配置时回退到 API host,保持升级兼容。
+func (n Node) EffectiveReceiveHost() string {
+	if host := strings.TrimSpace(n.ReceiveHost); host != "" {
+		return host
+	}
+	return n.Host
+}
+
+// EffectivePlaybackHost 返回播放 URL 使用的地址。
+// 旧节点未配置时回退到 API host,保持升级兼容。
+func (n Node) EffectivePlaybackHost() string {
+	if host := strings.TrimSpace(n.PlaybackHost); host != "" {
+		return host
+	}
+	return n.Host
 }
 
 // Stats 实时状态(由心跳更新,内存表)

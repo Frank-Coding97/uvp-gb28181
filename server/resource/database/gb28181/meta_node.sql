@@ -5,6 +5,8 @@ CREATE TABLE `meta_node` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(64) NOT NULL DEFAULT '' COMMENT '显示名,如 zlm-bj-1',
   `host` varchar(64) NOT NULL DEFAULT '' COMMENT 'ZLM API host',
+  `receive_host` varchar(255) NOT NULL DEFAULT '' COMMENT '设备收流地址,写入 SDP 的 c= 地址',
+  `playback_host` varchar(255) NOT NULL DEFAULT '' COMMENT '播放访问地址,返回给浏览器/客户端',
   `api_port` int NOT NULL DEFAULT '18080' COMMENT 'ZLM API port',
   `api_secret` varchar(128) NOT NULL DEFAULT '' COMMENT 'ZLM api.secret',
   `media_server_uuid` varchar(64) NOT NULL DEFAULT '' COMMENT '业务侧 UUID,启动时写入 ZLM general.mediaServerId',

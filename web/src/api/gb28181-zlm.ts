@@ -21,6 +21,8 @@ export interface ZLMNode {
     id: number;
     name: string;
     host: string;
+    receiveHost: string;
+    playbackHost: string;
     apiPort: number;
     mediaServerUUID: string;
     weight: number;
@@ -37,6 +39,8 @@ export interface ZLMNode {
 export interface CreateZLMNodeReq {
     name: string;
     host: string;
+    receiveHost?: string;
+    playbackHost?: string;
     apiPort: number;
     apiSecret: string;
     weight?: number;
@@ -47,6 +51,8 @@ export interface CreateZLMNodeReq {
 
 export interface UpdateZLMNodeReq {
     name?: string;
+    receiveHost?: string;
+    playbackHost?: string;
     apiSecret?: string;
     weight?: number;
     tags?: Record<string, string>;

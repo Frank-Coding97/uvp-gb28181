@@ -30,7 +30,10 @@ func (c *serviceConfigTestYAML) GetBool(key string) bool {
 	value, _ := c.values[key].(bool)
 	return value
 }
-func (c *serviceConfigTestYAML) GetInt(string) int                 { return 0 }
+func (c *serviceConfigTestYAML) GetInt(key string) int {
+	value, _ := c.values[key].(int)
+	return value
+}
 func (c *serviceConfigTestYAML) GetInt32(string) int32             { return 0 }
 func (c *serviceConfigTestYAML) GetInt64(string) int64             { return 0 }
 func (c *serviceConfigTestYAML) GetFloat64(string) float64         { return 0 }
@@ -46,7 +49,61 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router := gin.New()
 	router.GET("/position-history", controller.GetPositionHistory)
 	router.PUT("/position-history", controller.UpdatePositionHistory)
+	router.GET("/sdp-extension", controller.GetSDPExtension)
+	router.PUT("/sdp-extension", controller.UpdateSDPExtension)
 	return router
+}
+
+func TestServiceConfigController_SDPExtensionDefaultsToDisabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/sdp-extension", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, false, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdateSDPExtensionPersistsToggle(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{sdpExtensionConfigKey: false}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, enabled := range []bool{true, false} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(
+			http.MethodPut, "/sdp-extension", jsonBody(t, map[string]bool{"enabled": enabled}),
+		))
+
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, enabled, config.values[sdpExtensionConfigKey])
+		require.Equal(t, enabled, serviceConfigData(t, recorder)["enabled"])
+	}
+	require.Equal(t, 2, config.saveNum)
+}
+
+func TestServiceConfigController_UpdateSDPExtensionRollsBackOnSaveError(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{
+		values:  map[string]interface{}{sdpExtensionConfigKey: false},
+		saveErr: errors.New("write failed"),
+	}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/sdp-extension", jsonBody(t, map[string]bool{"enabled": true})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, false, config.values[sdpExtensionConfigKey])
 }
 
 func serviceConfigData(t *testing.T, recorder *httptest.ResponseRecorder) map[string]interface{} {
@@ -70,26 +127,79 @@ func TestServiceConfigController_GetPositionHistoryDefaultsToEnabled(t *testing.
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	require.Equal(t, true, serviceConfigData(t, recorder)["enabled"])
+	require.Equal(t, float64(7), serviceConfigData(t, recorder)["retentionDays"])
 }
 
 func TestServiceConfigController_UpdatePositionHistoryPersistsToggle(t *testing.T) {
 	previous := app.ConfigYml
 	t.Cleanup(func() { app.ConfigYml = previous })
-	config := &serviceConfigTestYAML{values: map[string]interface{}{positionHistoryConfigKey: true}}
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		positionHistoryConfigKey:              true,
+		positionHistoryRetentionDaysConfigKey: 7,
+	}}
 	app.ConfigYml = config
 	router := newServiceConfigRouter(NewServiceConfigController())
 
 	for _, enabled := range []bool{false, true} {
 		recorder := httptest.NewRecorder()
-		request := httptest.NewRequest(http.MethodPut, "/position-history", jsonBody(t, map[string]bool{"enabled": enabled}))
+		request := httptest.NewRequest(http.MethodPut, "/position-history", jsonBody(t, map[string]interface{}{
+			"enabled":       enabled,
+			"retentionDays": 30,
+		}))
 		router.ServeHTTP(recorder, request)
 
 		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 		require.Equal(t, enabled, config.values[positionHistoryConfigKey])
+		require.Equal(t, 30, config.values[positionHistoryRetentionDaysConfigKey])
 		require.Equal(t, enabled, serviceConfigData(t, recorder)["enabled"])
+		require.Equal(t, float64(30), serviceConfigData(t, recorder)["retentionDays"])
 		require.Equal(t, enabled, subscribe.PositionHistoryEnabled(), "位置处理器应读取最新配置值")
 	}
 	require.Equal(t, 2, config.saveNum)
+}
+
+func TestServiceConfigController_UpdatePositionHistoryAcceptsLegacyToggleOnly(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		positionHistoryConfigKey:              true,
+		positionHistoryRetentionDaysConfigKey: 14,
+	}}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/position-history", jsonBody(t, map[string]bool{"enabled": false})),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, false, config.values[positionHistoryConfigKey])
+	require.Equal(t, 14, config.values[positionHistoryRetentionDaysConfigKey])
+	require.Equal(t, float64(14), serviceConfigData(t, recorder)["retentionDays"])
+}
+
+func TestServiceConfigController_UpdatePositionHistoryRejectsInvalidRetentionDays(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		positionHistoryConfigKey:              true,
+		positionHistoryRetentionDaysConfigKey: 7,
+	}}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/position-history", jsonBody(t, map[string]interface{}{
+			"enabled":       true,
+			"retentionDays": 366,
+		})),
+	)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, 0, config.saveNum)
+	require.Equal(t, 7, config.values[positionHistoryRetentionDaysConfigKey])
 }
 
 func TestServiceConfigController_UpdatePositionHistoryRejectsMissingValue(t *testing.T) {
@@ -110,7 +220,9 @@ func TestServiceConfigController_UpdatePositionHistoryRejectsMissingValue(t *tes
 func TestServiceConfigController_UpdatePositionHistoryReturnsSaveError(t *testing.T) {
 	previous := app.ConfigYml
 	t.Cleanup(func() { app.ConfigYml = previous })
-	config := &serviceConfigTestYAML{values: map[string]interface{}{}, saveErr: errors.New("write failed")}
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		positionHistoryRetentionDaysConfigKey: 7,
+	}, saveErr: errors.New("write failed")}
 	app.ConfigYml = config
 
 	recorder := httptest.NewRecorder()
@@ -121,6 +233,7 @@ func TestServiceConfigController_UpdatePositionHistoryReturnsSaveError(t *testin
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, 1, config.saveNum)
 	require.Equal(t, true, config.values[positionHistoryConfigKey], "保存失败时不能留下未持久化的运行时开关")
+	require.Equal(t, 7, config.values[positionHistoryRetentionDaysConfigKey], "保存失败时不能留下未持久化的保留天数")
 }
 
 func jsonBody(t *testing.T, value interface{}) *bytes.Reader {

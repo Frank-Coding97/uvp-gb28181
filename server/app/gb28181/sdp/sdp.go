@@ -43,15 +43,16 @@ func extractMid8(code string) string {
 
 // PlayParams 实时点播 SDP 构造参数
 type PlayParams struct {
-	ServerID   string // 平台国标编码(o= 行)
-	RecvIP     string // 收流 IP(ZLM 地址)
-	RecvPort   int    // 收流端口(ZLM RTP 端口)
-	SSRC       string // 媒体流 SSRC
-	TCPMode    bool   // true=TCP被动收流, false=UDP
+	ServerID string // 平台国标编码(o= 行)
+	RecvIP   string // 收流 IP(ZLM 地址)
+	RecvPort int    // 收流端口(ZLM RTP 端口)
+	SSRC     string // 媒体流 SSRC
+	TCPMode  bool   // true=TCP被动收流, false=UDP
+	Extended bool   // true=为兼容部分设备声明额外视频负载类型
 }
 
 // BuildPlaySDP 构造实时点播 SDP(平台作主叫,s=Play)
-// 遵循 GB/T 28181 附录 SDP 格式:PS 封装(96/97/98) + H264/H265
+// 遵循 GB/T 28181 附录 SDP 格式，并兼容 WVP 使用的视频负载声明。
 func BuildPlaySDP(p PlayParams) string {
 	proto := "RTP/AVP"
 	var b strings.Builder
@@ -60,11 +61,7 @@ func BuildPlaySDP(p PlayParams) string {
 	b.WriteString("s=Play\r\n")
 	b.WriteString(fmt.Sprintf("c=IN IP4 %s\r\n", p.RecvIP))
 	b.WriteString("t=0 0\r\n")
-	b.WriteString(fmt.Sprintf("m=video %d %s 96 98 97\r\n", p.RecvPort, proto))
-	b.WriteString("a=recvonly\r\n")
-	b.WriteString("a=rtpmap:96 PS/90000\r\n")   // PS 封装(国标主流)
-	b.WriteString("a=rtpmap:98 H264/90000\r\n")
-	b.WriteString("a=rtpmap:97 MPEG4/90000\r\n")
+	writeVideoMediaDescription(&b, p.RecvPort, proto, p.Extended)
 	if p.TCPMode {
 		b.WriteString("a=setup:passive\r\n")
 		b.WriteString("a=connection:new\r\n")
@@ -72,4 +69,27 @@ func BuildPlaySDP(p PlayParams) string {
 	// y= 行:国标扩展,声明 SSRC(10位)
 	b.WriteString(fmt.Sprintf("y=%s\r\n", p.SSRC))
 	return b.String()
+}
+
+func writeVideoMediaDescription(b *strings.Builder, port int, transport string, extended bool) {
+	if extended {
+		b.WriteString(fmt.Sprintf("m=video %d %s 96 126 125 99 34 98 97\r\n", port, transport))
+		b.WriteString("a=recvonly\r\n")
+		b.WriteString("a=rtpmap:96 PS/90000\r\n")
+		b.WriteString("a=fmtp:126 profile-level-id=42e01e\r\n")
+		b.WriteString("a=rtpmap:126 H264/90000\r\n")
+		b.WriteString("a=rtpmap:125 H264S/90000\r\n")
+		b.WriteString("a=fmtp:125 profile-level-id=42e01e\r\n")
+		b.WriteString("a=rtpmap:99 H265/90000\r\n")
+		b.WriteString("a=rtpmap:98 H264/90000\r\n")
+		b.WriteString("a=rtpmap:97 MPEG4/90000\r\n")
+		return
+	}
+
+	b.WriteString(fmt.Sprintf("m=video %d %s 96 97 98 99\r\n", port, transport))
+	b.WriteString("a=recvonly\r\n")
+	b.WriteString("a=rtpmap:96 PS/90000\r\n")
+	b.WriteString("a=rtpmap:97 MPEG4/90000\r\n")
+	b.WriteString("a=rtpmap:98 H264/90000\r\n")
+	b.WriteString("a=rtpmap:99 H265/90000\r\n")
 }

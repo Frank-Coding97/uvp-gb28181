@@ -2,12 +2,15 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 const (
+	SDPExtensionConfigKey = "gb28181.sdp.extension_enabled"
+
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
 	DefaultRecordQueryMaxRangeHours      = 24
@@ -27,6 +30,18 @@ const (
 	MaxPlaybackIdleSec       = 3600
 	MaxPlaybackSessionSec    = 86400
 )
+
+// SDPExtensionEnabledFrom returns the current SDP compatibility setting.
+// Missing configuration intentionally defaults to false.
+func SDPExtensionEnabledFrom(c valueSource) bool {
+	return c != nil && c.Get(SDPExtensionConfigKey) != nil && c.GetBool(SDPExtensionConfigKey)
+}
+
+// SDPExtensionEnabled reads the live configuration so newly created INVITEs
+// pick up a saved setting without rebuilding the GB28181 runtime.
+func SDPExtensionEnabled() bool {
+	return SDPExtensionEnabledFrom(app.ConfigYml)
+}
 
 // Config GB28181 国标平台配置
 type Config struct {
@@ -103,10 +118,26 @@ type TraceConfig struct {
 
 // ZLMConfig ZLMediaKit 媒体服务器配置(数据面)
 type ZLMConfig struct {
-	Host     string // ZLM 地址
-	HTTPPort int    // ZLM HTTP API 端口
-	Secret   string // API secret
-	RTPPort  int    // RTP 单端口收流
+	Host         string // ZLM API 地址
+	ReceiveHost  string // 设备收流地址,写入 SDP 的 c= 地址
+	PlaybackHost string // 播放访问地址,返回给浏览器/客户端
+	HTTPPort     int    // ZLM HTTP API 端口
+	Secret       string // API secret
+	RTPPort      int    // RTP 单端口收流
+}
+
+func (c ZLMConfig) EffectiveReceiveHost() string {
+	if host := strings.TrimSpace(c.ReceiveHost); host != "" {
+		return host
+	}
+	return c.Host
+}
+
+func (c ZLMConfig) EffectivePlaybackHost() string {
+	if host := strings.TrimSpace(c.PlaybackHost); host != "" {
+		return host
+	}
+	return c.Host
 }
 
 // MediaConfig 媒体/Hook 配置
@@ -223,10 +254,12 @@ func loadFrom(c valueSource) (Config, error) {
 			OfflineScanInterval:   c.GetInt("gb28181.device.offline_scan_interval"),
 		},
 		ZLM: ZLMConfig{
-			Host:     c.GetString("gb28181.zlm.host"),
-			HTTPPort: c.GetInt("gb28181.zlm.httpport"),
-			Secret:   c.GetString("gb28181.zlm.secret"),
-			RTPPort:  c.GetInt("gb28181.zlm.rtpport"),
+			Host:         c.GetString("gb28181.zlm.host"),
+			ReceiveHost:  c.GetString("gb28181.zlm.receivehost"),
+			PlaybackHost: c.GetString("gb28181.zlm.playbackhost"),
+			HTTPPort:     c.GetInt("gb28181.zlm.httpport"),
+			Secret:       c.GetString("gb28181.zlm.secret"),
+			RTPPort:      c.GetInt("gb28181.zlm.rtpport"),
 		},
 		Media: MediaConfig{
 			HookHost:                c.GetString("gb28181.media.hookhost"),

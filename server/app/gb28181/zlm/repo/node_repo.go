@@ -16,6 +16,8 @@ type MetaNode struct {
 	ID              int64     `gorm:"primaryKey;column:id"`
 	Name            string    `gorm:"column:name;size:64;not null;default:''"`
 	Host            string    `gorm:"column:host;size:64;not null;default:''"`
+	ReceiveHost     string    `gorm:"column:receive_host;size:255;not null;default:''"`
+	PlaybackHost    string    `gorm:"column:playback_host;size:255;not null;default:''"`
 	APIPort         int       `gorm:"column:api_port;not null;default:18080"`
 	APISecret       string    `gorm:"column:api_secret;size:128;not null;default:''"`
 	MediaServerUUID string    `gorm:"column:media_server_uuid;size:64;not null;default:'';uniqueIndex:uk_media_server_uuid"`
@@ -41,6 +43,8 @@ func (m MetaNode) ToDomain() node.Node {
 		ID:              m.ID,
 		Name:            m.Name,
 		Host:            m.Host,
+		ReceiveHost:     m.ReceiveHost,
+		PlaybackHost:    m.PlaybackHost,
 		APIPort:         m.APIPort,
 		APISecret:       m.APISecret,
 		MediaServerUUID: m.MediaServerUUID,
@@ -65,6 +69,8 @@ func fromDomain(n node.Node) MetaNode {
 		ID:              n.ID,
 		Name:            n.Name,
 		Host:            n.Host,
+		ReceiveHost:     n.ReceiveHost,
+		PlaybackHost:    n.PlaybackHost,
 		APIPort:         n.APIPort,
 		APISecret:       n.APISecret,
 		MediaServerUUID: n.MediaServerUUID,

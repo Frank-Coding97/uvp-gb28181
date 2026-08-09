@@ -44,6 +44,8 @@ type NodeDTO struct {
 	ID              int64             `json:"id"`
 	Name            string            `json:"name"`
 	Host            string            `json:"host"`
+	ReceiveHost     string            `json:"receiveHost"`
+	PlaybackHost    string            `json:"playbackHost"`
 	APIPort         int               `json:"apiPort"`
 	MediaServerUUID string            `json:"mediaServerUUID"`
 	Weight          int               `json:"weight"`
@@ -61,6 +63,8 @@ type NodeDTO struct {
 type CreateNodeReq struct {
 	Name         string            `json:"name" binding:"required"`
 	Host         string            `json:"host" binding:"required"`
+	ReceiveHost  string            `json:"receiveHost"`
+	PlaybackHost string            `json:"playbackHost"`
 	APIPort      int               `json:"apiPort" binding:"required"`
 	APISecret    string            `json:"apiSecret" binding:"required"`
 	Weight       int               `json:"weight"`
@@ -72,6 +76,8 @@ type CreateNodeReq struct {
 // UpdateNodeReq 更新节点入参(可选字段用指针)
 type UpdateNodeReq struct {
 	Name         *string           `json:"name,omitempty"`
+	ReceiveHost  *string           `json:"receiveHost,omitempty"`
+	PlaybackHost *string           `json:"playbackHost,omitempty"`
 	APISecret    *string           `json:"apiSecret,omitempty"`
 	Weight       *int              `json:"weight,omitempty"`
 	Tags         map[string]string `json:"tags,omitempty"`
@@ -99,6 +105,8 @@ func toDTO(n *node.Node) *NodeDTO {
 		ID:              n.ID,
 		Name:            n.Name,
 		Host:            n.Host,
+		ReceiveHost:     n.ReceiveHost,
+		PlaybackHost:    n.PlaybackHost,
 		APIPort:         n.APIPort,
 		MediaServerUUID: n.MediaServerUUID,
 		Weight:          n.Weight,
@@ -152,6 +160,8 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 	tmp := &node.Node{
 		Name:            req.Name,
 		Host:            req.Host,
+		ReceiveHost:     req.ReceiveHost,
+		PlaybackHost:    req.PlaybackHost,
 		APIPort:         req.APIPort,
 		APISecret:       req.APISecret,
 		MediaServerUUID: uuid.NewString(),
@@ -190,6 +200,12 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 	}
 	if req.Name != nil {
 		cur.Name = *req.Name
+	}
+	if req.ReceiveHost != nil {
+		cur.ReceiveHost = *req.ReceiveHost
+	}
+	if req.PlaybackHost != nil {
+		cur.PlaybackHost = *req.PlaybackHost
 	}
 	if req.APISecret != nil {
 		cur.APISecret = *req.APISecret

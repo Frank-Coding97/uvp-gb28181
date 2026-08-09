@@ -68,7 +68,7 @@ func (p *zlmNodePicker) Pick(ctx context.Context, request PickRequest) (NodeInfo
 		return NodeInfo{}, ErrNodeUnavailable
 	}
 	return NodeInfo{ID: strconv.FormatInt(selected.ID, 10), DeviceID: request.DeviceID, ServerID: p.serverID,
-		Destination: request.Destination, Transport: request.Transport, RecvIP: selected.Host, TCPMode: request.TCPMode}, nil
+		Destination: request.Destination, Transport: request.Transport, RecvIP: selected.EffectiveReceiveHost(), TCPMode: request.TCPMode}, nil
 }
 
 type zlmRTPOpener struct {
@@ -152,7 +152,7 @@ func (w *zlmMediaWaiter) Wait(ctx context.Context, streamID string) (MediaReady,
 	if err != nil {
 		return MediaReady{}, err
 	}
-	ready := MediaReady{URLs: playbackURLs(selected.Host, config, playbackZLMApp, streamID)}
+	ready := MediaReady{URLs: playbackURLs(selected.EffectivePlaybackHost(), config, playbackZLMApp, streamID)}
 	if info, infoErr := client.GetMediaInfo(ctx, "rtsp", "__defaultVhost__", playbackZLMApp, streamID); infoErr == nil && info != nil {
 		for _, track := range info.Tracks {
 			if track.CodecType == 1 && track.Ready {
