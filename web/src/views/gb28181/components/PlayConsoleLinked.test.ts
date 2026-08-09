@@ -127,6 +127,7 @@ const api = vi.hoisted(() => {
     createCruiseTrack: vi.fn(),
     controlDevice: vi.fn(),
     createTalkSession: vi.fn(),
+    getTalkSession: vi.fn(),
     deleteTalkSession: vi.fn()
   };
 });
@@ -260,11 +261,19 @@ describe("PlayConsoleLinked 双区联动", () => {
       message: "",
       data: { operationId: "home-default", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
     });
+    api.createTalkSession.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { sessionId: "talk-1", mode: "broadcast", state: "reserved", nodeId: 1, nodeName: "ZLM", sourceStream: "talk", recvStream: "recv", ssrc: "1", publishUrl: "https://zlm/whip", publishToken: "secret", expiresAt: "" }
+    });
+    api.getTalkSession.mockResolvedValue({ code: 0, message: "", data: { sessionId: "talk-1", mode: "broadcast", state: "active", expiresAt: "" } });
+    api.deleteTalkSession.mockResolvedValue({ code: 0, message: "", data: { sessionId: "talk-1", state: "ended" } });
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("拖拽摇杆按八方向发送云台指令，松手停止且不展示绝对角度", async () => {
@@ -608,7 +617,7 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     const ptzSide = wrapper.get("[data-testid='linked-side-ptz']");
     const ptzDetail = wrapper.get("[data-testid='linked-detail-ptz']");
-    expect(ptzSide.text()).toContain("按住对讲");
+    expect(ptzSide.text()).toContain("按住广播");
     expect(ptzSide.text()).not.toContain("预置位");
     expect(ptzSide.text()).not.toContain("巡航轨迹");
     expect(ptzDetail.text()).toContain("预置位");
@@ -763,10 +772,11 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
-  it("对讲建立阶段松手会回收迟到的后端会话且不再申请麦克风", async () => {
-    let resolveCreate!: (value: any) => void;
-    api.createTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve; }));
-    const getUserMedia = vi.fn();
+  it("麦克风授权期间松手不会创建后端会话", async () => {
+    let resolveMedia!: (value: any) => void;
+    const stop = vi.fn();
+    const track = { enabled: true, stop };
+    const getUserMedia = vi.fn().mockReturnValueOnce(new Promise(resolve => { resolveMedia = resolve; }));
     vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
@@ -774,23 +784,23 @@ describe("PlayConsoleLinked 双区联动", () => {
     const talkButton = wrapper.get("[data-testid='talk-button']");
     talkButton.element.dispatchEvent(new Event("pointerdown"));
     await flushPromises();
-    expect(api.createTalkSession).toHaveBeenCalledWith(channel.id, "talk");
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(api.createTalkSession).not.toHaveBeenCalled();
     await talkButton.trigger("pointerup");
-    resolveCreate({
-      code: 0,
-      message: "",
-      data: { sessionId: "talk-late", state: "reserved", nodeId: 1, nodeName: "ZLM", sourceStream: "talk", recvStream: "recv", ssrc: "1", publishUrl: "https://zlm/whip", publishToken: "secret", expiresAt: "" }
-    });
+    resolveMedia({ getTracks: () => [track], getAudioTracks: () => [track] });
     await flushPromises();
 
-    expect(getUserMedia).not.toHaveBeenCalled();
-    expect(api.deleteTalkSession).toHaveBeenCalledWith(channel.id, "talk-late");
+    expect(api.createTalkSession).not.toHaveBeenCalled();
+    expect(stop).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 
-  it("对讲建立阶段关闭弹窗不会补发删除会话请求", async () => {
+  it("创建响应迟到时关闭弹窗仍会删除后端会话", async () => {
     let resolveCreate!: (value: any) => void;
     api.createTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveCreate = resolve; }));
+    const stop = vi.fn();
+    const track = { enabled: true, stop };
+    vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn().mockResolvedValue({ getTracks: () => [track], getAudioTracks: () => [track] }) } });
     const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
     await flushPromises();
 
@@ -800,11 +810,58 @@ describe("PlayConsoleLinked 双区联动", () => {
     resolveCreate({
       code: 0,
       message: "",
-      data: { sessionId: "talk-after-close", state: "reserved", nodeId: 1, nodeName: "ZLM", sourceStream: "talk", recvStream: "recv", ssrc: "1", publishUrl: "https://zlm/whip", publishToken: "secret", expiresAt: "" }
+      data: { sessionId: "talk-after-close", mode: "broadcast", state: "reserved", nodeId: 1, nodeName: "ZLM", sourceStream: "talk", recvStream: "recv", ssrc: "1", publishUrl: "https://zlm/whip", publishToken: "secret", expiresAt: "" }
     });
     await flushPromises();
 
-    expect(api.deleteTalkSession).not.toHaveBeenCalled();
+    expect(api.deleteTalkSession).toHaveBeenCalledWith(channel.id, "talk-after-close");
+    wrapper.unmount();
+  });
+
+  it("Broadcast 的麦克风在后端 active 前保持静音并锁定 PCMA", async () => {
+    let resolveStatus!: (value: any) => void;
+    api.getTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveStatus = resolve; }));
+    const stop = vi.fn();
+    const track = { enabled: true, stop };
+    const stream = { getTracks: () => [track], getAudioTracks: () => [track] };
+    const setCodecPreferences = vi.fn();
+    const offerSdp = "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 8\r\na=rtpmap:8 PCMA/8000\r\n";
+    class FakePeerConnection {
+      iceGatheringState = "complete";
+      localDescription: RTCSessionDescriptionInit | null = null;
+      addTransceiver = vi.fn(() => ({ setCodecPreferences }));
+      createOffer = vi.fn().mockResolvedValue({ type: "offer", sdp: offerSdp });
+      setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => { this.localDescription = description; });
+      setRemoteDescription = vi.fn().mockResolvedValue(undefined);
+      addEventListener = vi.fn();
+      removeEventListener = vi.fn();
+      close = vi.fn();
+    }
+    vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn().mockResolvedValue(stream) } });
+    vi.stubGlobal("RTCRtpSender", { getCapabilities: () => ({ codecs: [{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }] }) });
+    vi.stubGlobal("RTCPeerConnection", FakePeerConnection);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, status: 201, text: async () => offerSdp }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    wrapper.get("[data-testid='talk-button']").element.dispatchEvent(new Event("pointerdown"));
+    await flushPromises();
+
+    expect(api.createTalkSession).toHaveBeenCalledWith(channel.id, "broadcast");
+    expect(track.enabled).toBe(false);
+    expect(setCodecPreferences).toHaveBeenCalledWith([{ mimeType: "audio/PCMA", clockRate: 8000, channels: 1 }]);
+    expect(wrapper.get("[data-testid='talk-button']").text()).toContain("正在建立广播");
+
+    resolveStatus({ code: 0, message: "", data: { sessionId: "talk-1", mode: "broadcast", state: "active", expiresAt: "" } });
+    await flushPromises();
+    expect(track.enabled).toBe(true);
+    expect(wrapper.get("[data-testid='talk-button']").text()).toContain("广播中");
+
+    await wrapper.get("[data-testid='talk-button']").trigger("pointerup");
+    await flushPromises();
+    expect(track.enabled).toBe(false);
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(api.deleteTalkSession).toHaveBeenCalledWith(channel.id, "talk-1");
     wrapper.unmount();
   });
 
@@ -844,8 +901,8 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     expect(wrapper.get("[data-testid='talk-button']").attributes("disabled")).toBeUndefined();
     const [broadcastMode, talkMode] = wrapper.findAll(".talk-mode-switch button");
-    expect(broadcastMode.attributes("disabled")).toBeDefined();
-    expect(broadcastMode.attributes("title")).toContain("平台暂未实现");
+    expect(broadcastMode.attributes("disabled")).toBeUndefined();
+    expect(broadcastMode.attributes("title")).toContain("设备上报不支持");
     expect(talkMode.attributes("disabled")).toBeUndefined();
     expect(wrapper.get("[data-testid='talk-button']").attributes("title")).toContain("设备上报不支持");
     expect(wrapper.find(".capability-warn").exists()).toBe(false);

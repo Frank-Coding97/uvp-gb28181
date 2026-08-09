@@ -13,6 +13,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import PlayWindow from "./PlayWindow.vue";
+import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
 import {
     controlDevice,
     controlPtz,
@@ -314,7 +315,6 @@ function capabilityActionTitle(key: keyof DeviceControlCapabilities, action: str
 }
 const isAudioCapable = computed(() => props.channel?.status === 1);
 const talkAvailable = computed(() => props.channel?.status === 1);
-const broadcastUnavailableTitle = "平台暂未实现国标语音广播信令链路，无法建立广播会话";
 
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
 const moveSpeed = ref(DEFAULT_PTZ_SPEED_LEVEL);
@@ -2622,16 +2622,24 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
 
 /* ────────────────────────── 语音对讲 ────────────────────────── */
 
-type TalkState = "idle" | "connecting" | "talking";
+type TalkState = "idle" | "permission" | "publishing" | "signaling" | "talking" | "stopping";
 const talkState = ref<TalkState>("idle");
-const talkMode = ref<"broadcast" | "talk">("talk");
+const talkMode = ref<"broadcast" | "talk">("broadcast");
 const talkSession = ref<TalkCreateResult | null>(null);
 let talkConnection: RTCPeerConnection | null = null;
 let talkStream: MediaStream | null = null;
+let talkSessionChannelId: number | null = null;
 let talkPollTimer: number | null = null;
 let talkToken = 0;
-// 关闭弹窗只销毁本地对讲资源,阻止迟到的创建响应补发 deleteTalkSession。
-let localTalkCleanupThroughToken = 0;
+
+const talkButtonText = computed(() => {
+    if (talkState.value === "permission") return "正在申请麦克风";
+    if (talkState.value === "publishing") return "正在发布音源";
+    if (talkState.value === "signaling") return talkMode.value === "broadcast" ? "正在建立广播" : "正在建立对讲";
+    if (talkState.value === "talking") return talkMode.value === "broadcast" ? "广播中 · 松开结束" : "对讲中 · 松开结束";
+    if (talkState.value === "stopping") return "正在停止";
+    return talkMode.value === "broadcast" ? "按住广播" : "按住对讲";
+});
 
 function clearTalkPoll() {
     if (talkPollTimer) window.clearInterval(talkPollTimer);
@@ -2639,7 +2647,8 @@ function clearTalkPoll() {
 }
 
 async function waitTalkActive(channelId: number, sessionId: string, token: number) {
-    for (let attempt = 0; attempt < 17; attempt++) {
+    talkState.value = "signaling";
+    for (let attempt = 0; attempt < 100; attempt++) {
         if (token !== talkToken) return false;
         const response = await getTalkSession(channelId, sessionId);
         if (token !== talkToken) return false;
@@ -2665,68 +2674,88 @@ function beginTalkPoll(channelId: number, sessionId: string) {
 
 async function startTalk() {
     if (talkState.value !== "idle") return;
-    if (talkMode.value === "broadcast") {
-        Message.warning(broadcastUnavailableTitle);
-        return;
-    }
     if (!isAudioCapable.value) {
-        Message.warning("设备离线，无法建立语音对讲");
+        Message.warning("设备离线，无法建立语音会话");
         return;
     }
     if (!props.channel) return;
+    const channelId = props.channel.id;
     const token = ++talkToken;
-    talkState.value = "connecting";
+    talkState.value = "permission";
+    let acquiredStream: MediaStream | null = null;
     try {
-        const response = await createTalkSession(props.channel.id, talkMode.value);
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error("当前浏览器不支持麦克风采集");
+        acquiredStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+        const audioTrack = acquiredStream.getAudioTracks()[0];
+        if (!audioTrack) throw new Error("没有可用的麦克风音轨");
+        acquiredStream.getTracks().forEach((track) => { track.enabled = false; });
+        if (token !== talkToken) {
+            acquiredStream.getTracks().forEach((track) => track.stop());
+            return;
+        }
+        talkStream = acquiredStream;
+        talkState.value = "publishing";
+
+        const response = await createTalkSession(channelId, talkMode.value);
         if (response.code !== 0 || !response.data) throw new Error(response.message || "对讲会话创建失败");
         if (token !== talkToken) {
-            if (token > localTalkCleanupThroughToken) {
-                await deleteTalkSession(props.channel.id, response.data.sessionId).catch(() => undefined);
-            }
+            acquiredStream.getTracks().forEach((track) => track.stop());
+            await deleteTalkSession(channelId, response.data.sessionId).catch(() => undefined);
             return;
         }
         talkSession.value = response.data;
-        talkStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
-        if (token !== talkToken) {
-            talkStream.getTracks().forEach((track) => track.stop());
-            talkStream = null;
-            return;
-        }
+        talkSessionChannelId = channelId;
         talkConnection = new RTCPeerConnection();
-        talkStream.getTracks().forEach((track) => talkConnection!.addTrack(track, talkStream!));
+        const transceiver = talkConnection.addTransceiver(audioTrack, { direction: "sendonly", streams: [talkStream] });
+        const audioCodecs = typeof RTCRtpSender === "undefined" ? [] : RTCRtpSender.getCapabilities?.("audio")?.codecs || [];
+        preferPCMA8000(transceiver, audioCodecs);
         const offer = await talkConnection.createOffer();
         await talkConnection.setLocalDescription(offer);
-        const answer = await fetch(response.data.publishUrl, { method: "POST", headers: { "Content-Type": "application/sdp" }, body: offer.sdp || "" });
+        await waitForIceGatheringComplete(talkConnection);
+        const offerSdp = talkConnection.localDescription?.sdp || "";
+        assertPCMA8000(offerSdp);
+        if (token !== talkToken) return;
+        const answer = await fetch(response.data.publishUrl, { method: "POST", headers: { "Content-Type": "application/sdp" }, body: offerSdp });
         if (!answer.ok) throw new Error(`WHIP 发布失败(${answer.status})`);
         const answerSdp = await answer.text();
+        assertPCMA8000(answerSdp);
         await talkConnection.setRemoteDescription({ type: "answer", sdp: answerSdp });
-        if (!await waitTalkActive(props.channel.id, response.data.sessionId, token)) return;
+        if (!await waitTalkActive(channelId, response.data.sessionId, token)) return;
+        if (token !== talkToken) return;
+        talkStream.getAudioTracks().forEach((track) => { track.enabled = true; });
         talkState.value = "talking";
-        beginTalkPoll(props.channel.id, response.data.sessionId);
+        beginTalkPoll(channelId, response.data.sessionId);
     } catch (error: any) {
+        if (token !== talkToken) {
+            acquiredStream?.getTracks().forEach((track) => track.stop());
+            return;
+        }
         await stopTalk();
         Message.error(error?.message || "对讲启动失败");
     }
 }
 
-function cleanupTalkLocally(suppressBackendCleanup = true) {
-    if (suppressBackendCleanup) {
-        localTalkCleanupThroughToken = Math.max(localTalkCleanupThroughToken, talkToken);
-    }
+function cleanupTalkLocally() {
     talkToken++;
     clearTalkPoll();
-    if (talkStream) talkStream.getTracks().forEach((track) => track.stop());
+    if (talkStream) talkStream.getTracks().forEach((track) => {
+        track.enabled = false;
+        track.stop();
+    });
     talkStream = null;
     talkConnection?.close();
     talkConnection = null;
     talkSession.value = null;
-    talkState.value = "idle";
+    talkSessionChannelId = null;
 }
 
 async function stopTalk() {
     const session = talkSession.value;
-    cleanupTalkLocally(false);
-    if (props.channel && session?.sessionId) await deleteTalkSession(props.channel.id, session.sessionId).catch(() => undefined);
+    const channelId = talkSessionChannelId;
+    talkState.value = "stopping";
+    cleanupTalkLocally();
+    if (channelId && session?.sessionId) await deleteTalkSession(channelId, session.sessionId).catch(() => undefined);
+    talkState.value = "idle";
 }
 
 function switchProtocol(proto: StreamProtocol) {
@@ -2772,7 +2801,7 @@ watch(
             void loadDefaultPtzSpeed();
             void startSession();
         }
-        else { releasePtzControl(); cleanupTalkLocally(); cleanupSessionLocally(); }
+        else { releasePtzControl(); void stopTalk(); cleanupSessionLocally(); }
     },
     { immediate: true },
 );
@@ -2788,7 +2817,7 @@ onBeforeUnmount(() => {
     clearProbeTimers();
     clearTimer();
     clearMonitor();
-    cleanupTalkLocally();
+    void stopTalk();
     cleanupSessionLocally();
 });
 </script>
@@ -3464,7 +3493,7 @@ onBeforeUnmount(() => {
                             </div>
 
                             <div class="talk-mode-switch" aria-label="对讲模式">
-                                <button :class="{ active: talkMode === 'broadcast' }" disabled :title="broadcastUnavailableTitle">广播</button>
+                                <button :class="{ active: talkMode === 'broadcast' }" :disabled="talkState !== 'idle' || !talkAvailable" :title="capabilityActionTitle('broadcast', '广播')" @click="talkMode = 'broadcast'">广播</button>
                                 <button :class="{ active: talkMode === 'talk' }" :disabled="talkState !== 'idle' || !talkAvailable" :title="capabilityActionTitle('talk', 'Talk')" @click="talkMode = 'talk'">Talk</button>
                             </div>
                             <button
@@ -3480,7 +3509,7 @@ onBeforeUnmount(() => {
                                 @pointercancel="stopTalk"
                             >
                                 <Mic :size="14" />
-                                <span>{{ talkState === "connecting" ? "正在建立对讲" : talkState === "talking" ? "对讲中 · 松开结束" : "按住对讲" }}</span>
+                                <span>{{ talkButtonText }}</span>
                             </button>
 
                             <div class="speed-row">
