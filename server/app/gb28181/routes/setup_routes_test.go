@@ -26,6 +26,8 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"PUT /api/gb28181/sip/service-config/sync-channels-on-online",
 		"GET /api/gb28181/sip/service-config/ptz-default-speed",
 		"PUT /api/gb28181/sip/service-config/ptz-default-speed",
+		"GET /api/gb28181/sip/service-config/sip-log",
+		"PUT /api/gb28181/sip/service-config/sip-log",
 	} {
 		require.True(t, got[route], route)
 	}

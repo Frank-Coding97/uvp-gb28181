@@ -6,9 +6,11 @@ import {
     fetchPTZDefaultSpeedConfig,
     fetchPositionHistoryConfig,
     fetchSDPExtensionConfig,
+    fetchSIPLogConfig,
     fetchSyncChannelsOnOnlineConfig,
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
+    updateSIPLogConfig,
     updateSDPExtensionConfig,
     updateSyncChannelsOnOnlineConfig
 } from "@/api/gb28181";
@@ -31,11 +33,16 @@ const ptzDefaultSpeedReady = ref(false);
 const syncChannelsOnOnlineLoading = ref(true);
 const syncChannelsOnOnlineSaving = ref(false);
 const syncChannelsOnOnlineReady = ref(false);
+const sipLogLoading = ref(true);
+const sipLogSaving = ref(false);
+const sipLogReady = ref(false);
+const sipLogApplied = ref(true);
 const savedPositionHistoryEnabled = ref(true);
 const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedSyncChannelsOnOnline = ref(true);
+const savedSIPLogEnabled = ref(false);
 const positionHistoryChanged = computed(
     () =>
         draft.saveMobilePositionHistory !== savedPositionHistoryEnabled.value ||
@@ -46,33 +53,38 @@ const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefault
 const syncChannelsOnOnlineChanged = computed(
     () => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value
 );
+const sipLogChanged = computed(() => draft.sipLogEnabled !== savedSIPLogEnabled.value);
 const hasChanges = computed(
     () =>
         positionHistoryChanged.value ||
         sdpExtensionChanged.value ||
         ptzDefaultSpeedChanged.value ||
-        syncChannelsOnOnlineChanged.value
+        syncChannelsOnOnlineChanged.value ||
+        sipLogChanged.value
 );
 const configLoading = computed(
     () =>
         positionHistoryLoading.value ||
         sdpExtensionLoading.value ||
         ptzDefaultSpeedLoading.value ||
-        syncChannelsOnOnlineLoading.value
+        syncChannelsOnOnlineLoading.value ||
+        sipLogLoading.value
 );
 const configSaving = computed(
     () =>
         positionHistorySaving.value ||
         sdpExtensionSaving.value ||
         ptzDefaultSpeedSaving.value ||
-        syncChannelsOnOnlineSaving.value
+        syncChannelsOnOnlineSaving.value ||
+        sipLogSaving.value
 );
 const configReady = computed(
     () =>
         positionHistoryReady.value &&
         sdpExtensionReady.value &&
         ptzDefaultSpeedReady.value &&
-        syncChannelsOnOnlineReady.value
+        syncChannelsOnOnlineReady.value &&
+        sipLogReady.value
 );
 const formLayout = computed(() => (isMobile.value ? "vertical" : "horizontal"));
 
@@ -139,12 +151,29 @@ async function loadSyncChannelsOnOnlineConfig() {
     }
 }
 
+async function loadSIPLogConfig() {
+    sipLogLoading.value = true;
+    try {
+        const response = await fetchSIPLogConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.sipLogEnabled = response.data.enabled;
+        savedSIPLogEnabled.value = response.data.enabled;
+        sipLogApplied.value = response.data.applied;
+        sipLogReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载 SIP 日志配置失败");
+    } finally {
+        sipLogLoading.value = false;
+    }
+}
+
 function startEditing() {
     draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
+    draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = true;
 }
 
@@ -154,6 +183,7 @@ function cancelEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
+    draft.sipLogEnabled = savedSIPLogEnabled.value;
     isEditing.value = false;
 }
 
@@ -202,6 +232,20 @@ async function saveConfig() {
             savedSyncChannelsOnOnline.value = response.data.enabled;
             syncChannelsOnOnlineSaving.value = false;
         }
+        if (sipLogChanged.value) {
+            sipLogSaving.value = true;
+            const response = await updateSIPLogConfig(draft.sipLogEnabled);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.sipLogEnabled = response.data.enabled;
+            savedSIPLogEnabled.value = response.data.enabled;
+            sipLogApplied.value = response.data.applied;
+            sipLogSaving.value = false;
+            if (response.data.applied === false) {
+                Message.error("SIP 日志配置已保存，但 SIP 服务重载失败，请检查服务状态");
+                isEditing.value = false;
+                return;
+            }
+        }
         isEditing.value = false;
         Message.success("国标服务配置已更新");
     } catch (error: any) {
@@ -211,6 +255,7 @@ async function saveConfig() {
         sdpExtensionSaving.value = false;
         ptzDefaultSpeedSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
+        sipLogSaving.value = false;
     }
 }
 
@@ -219,7 +264,8 @@ onMounted(() =>
         loadPositionHistoryConfig(),
         loadSDPExtensionConfig(),
         loadPTZDefaultSpeedConfig(),
-        loadSyncChannelsOnOnlineConfig()
+        loadSyncChannelsOnOnlineConfig(),
+        loadSIPLogConfig()
     ])
 );
 </script>
@@ -351,8 +397,19 @@ onMounted(() =>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="sipLogEnabled" label="是否开启SIP日志">
-                                        <a-switch v-model="draft.sipLogEnabled" disabled />
+                                    <a-form-item field="sipLogEnabled" label="是否开启 SIP 日志">
+                                        <a-switch
+                                            v-model="draft.sipLogEnabled"
+                                            :loading="sipLogLoading || sipLogSaving"
+                                            :disabled="!isEditing || sipLogLoading || sipLogSaving || !sipLogReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                        <template #extra>
+                                            <div>保存后会热重载 SIP 服务，采集原始信令并写入 Trace 存储；默认关闭。</div>
+                                            <div v-if="!sipLogApplied">配置尚未应用，SIP 服务当前状态与开关不一致。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

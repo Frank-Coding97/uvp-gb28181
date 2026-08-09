@@ -230,6 +230,16 @@ var schedulerLogCancel context.CancelFunc
 // PlayService 返回点播 service(可能为 nil,gb28181 未启用 / UAC 初始化失败时)
 func PlayService() *play.Service { return playSvc }
 
+// SIPTraceRuntimeEnabled reports whether the current SIP transport has trace
+// hooks attached. It intentionally does not treat a degraded ClickHouse store
+// as disabled; storage health is exposed by the trace health API.
+func SIPTraceRuntimeEnabled() bool {
+	sipLifecycleMu.Lock()
+	defer sipLifecycleMu.Unlock()
+	traceServer, ok := sipServer.(interface{ TraceRuntime() gbtrace.Runtime })
+	return ok && traceServer.TraceRuntime() != nil
+}
+
 // MetricsAggregator 返回全局聚合器(controllers/dashboard 用)
 func MetricsAggregator() *metrics.Aggregator { return metricsAgg }
 
@@ -262,6 +272,8 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 func startControlPlane(cfg gbconfig.Config) {
 	setupCivilCodeService()
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
+	gbroutes.SetServiceConfigSIPTraceReloader(ReloadSIP)
+	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)
 	gbroutes.SetPlatformController(gbcontrollers.NewConfiguredPlatformController(
 		app.DB(), sipRuntimeStatus, cfg.Enabled, cfg.SIP.Transport,
 	))

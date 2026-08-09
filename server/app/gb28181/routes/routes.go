@@ -87,6 +87,14 @@ func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 
 func SetSetupController(controller *gbcontrollers.SetupController) { setupController = controller }
 
+func SetServiceConfigSIPTraceReloader(reload gbcontrollers.SIPTraceReloader) {
+	serviceConfigController.SetSIPTraceReloader(reload)
+}
+
+func SetServiceConfigSIPTraceRuntimeProvider(provider gbcontrollers.SIPTraceRuntimeProvider) {
+	serviceConfigController.SetSIPTraceRuntimeProvider(provider)
+}
+
 func SetPlatformController(controller *gbcontrollers.PlatformController) {
 	platformController = controller
 }
@@ -342,6 +350,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			serviceConfig.PUT("/sync-channels-on-online", serviceConfigController.UpdateSyncChannelsOnOnline)
 			serviceConfig.GET("/ptz-default-speed", serviceConfigController.GetPTZDefaultSpeed)
 			serviceConfig.PUT("/ptz-default-speed", serviceConfigController.UpdatePTZDefaultSpeed)
+			serviceConfig.GET("/sip-log", serviceConfigController.GetSIPLog)
+			serviceConfig.PUT("/sip-log", serviceConfigController.UpdateSIPLog)
 		}
 		setup := gb.Group("/sip/setup")
 		{

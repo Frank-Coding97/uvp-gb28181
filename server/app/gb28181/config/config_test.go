@@ -127,6 +127,19 @@ func TestSyncChannelsOnOnlineFromDefaultsToEnabled(t *testing.T) {
 	require.True(t, SyncChannelsOnOnlineFrom(source))
 }
 
+func TestSIPTraceEnabledFromDefaultsToDisabled(t *testing.T) {
+	source := fakeSource{}
+	require.False(t, SIPTraceEnabledFrom(source))
+
+	source.values = map[string]interface{}{SIPTraceEnabledConfigKey: true}
+	source.bools = map[string]bool{SIPTraceEnabledConfigKey: true}
+	require.True(t, SIPTraceEnabledFrom(source))
+
+	source.values[SIPTraceEnabledConfigKey] = false
+	source.bools[SIPTraceEnabledConfigKey] = false
+	require.False(t, SIPTraceEnabledFrom(source))
+}
+
 func TestRecordRuntimeConfigDefaults(t *testing.T) {
 	cfg, err := LoadValidatedFrom(fakeSource{})
 	if err != nil {

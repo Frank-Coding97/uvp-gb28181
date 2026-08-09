@@ -40,14 +40,79 @@ type PTZDefaultSpeedConfig struct {
 	Level int `json:"level"`
 }
 
+// SIPLogUpdateResult 是 SIP 原始报文 Trace 开关及运行时应用结果。
+type SIPLogUpdateResult struct {
+	Enabled    bool   `json:"enabled"`
+	Applied    bool   `json:"applied"`
+	ApplyError string `json:"applyError,omitempty"`
+}
+
+type SIPTraceReloader func() error
+type SIPTraceRuntimeProvider func() bool
+
 // ServiceConfigController 提供国标服务配置页面使用的单项动态配置接口。
 // 这里不复用 /api/config/update，避免页面提交时覆盖系统和安全配置。
 type ServiceConfigController struct {
 	controllers.Common
+	reload         SIPTraceReloader
+	runtimeEnabled SIPTraceRuntimeProvider
 }
 
 func NewServiceConfigController() *ServiceConfigController {
 	return &ServiceConfigController{}
+}
+
+func (sc *ServiceConfigController) SetSIPTraceReloader(reload SIPTraceReloader) {
+	sc.reload = reload
+}
+
+func (sc *ServiceConfigController) SetSIPTraceRuntimeProvider(provider SIPTraceRuntimeProvider) {
+	sc.runtimeEnabled = provider
+}
+
+// GetSIPLog GET /api/gb28181/sip/service-config/sip-log
+func (sc *ServiceConfigController) GetSIPLog(c *gin.Context) {
+	enabled := gbconfig.SIPTraceEnabled()
+	sc.Success(c, SIPLogUpdateResult{Enabled: enabled, Applied: sc.sipTraceApplied(enabled)})
+}
+
+// UpdateSIPLog PUT /api/gb28181/sip/service-config/sip-log
+func (sc *ServiceConfigController) UpdateSIPLog(c *gin.Context) {
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+		sc.Fail(c, "保存 SIP 日志配置失败：enabled 必须为布尔值", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.SIPTraceEnabled()
+	app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, *request.Enabled)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, previous)
+		sc.Fail(c, "保存 SIP 日志配置失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	result := SIPLogUpdateResult{Enabled: *request.Enabled, Applied: true}
+	if previous != *request.Enabled && sc.reload != nil {
+		if err := sc.reload(); err != nil {
+			result.Applied = false
+			result.ApplyError = err.Error()
+			sc.SuccessWithMessage(c, "SIP 日志配置已保存，但 SIP 服务重载失败", result)
+			return
+		}
+	}
+	result.Applied = sc.sipTraceApplied(*request.Enabled)
+	sc.SuccessWithMessage(c, "SIP 日志配置已更新", result)
+}
+
+func (sc *ServiceConfigController) sipTraceApplied(enabled bool) bool {
+	return sc.runtimeEnabled == nil || sc.runtimeEnabled() == enabled
 }
 
 // GetSDPExtension GET /api/gb28181/sip/service-config/sdp-extension

@@ -56,7 +56,102 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/sync-channels-on-online", controller.UpdateSyncChannelsOnOnline)
 	router.GET("/ptz-default-speed", controller.GetPTZDefaultSpeed)
 	router.PUT("/ptz-default-speed", controller.UpdatePTZDefaultSpeed)
+	router.GET("/sip-log", controller.GetSIPLog)
+	router.PUT("/sip-log", controller.UpdateSIPLog)
 	return router
+}
+
+func TestServiceConfigController_SIPLogDefaultsToDisabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/sip-log", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	data := serviceConfigData(t, recorder)
+	require.Equal(t, false, data["enabled"])
+	require.Equal(t, true, data["applied"])
+}
+
+func TestServiceConfigController_SIPLogReportsRuntimeMismatch(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.SIPTraceEnabledConfigKey: true}}
+	controller := NewServiceConfigController()
+	controller.SetSIPTraceRuntimeProvider(func() bool { return false })
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(controller).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/sip-log", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	data := serviceConfigData(t, recorder)
+	require.Equal(t, true, data["enabled"])
+	require.Equal(t, false, data["applied"])
+}
+
+func TestServiceConfigController_UpdateSIPLogPersistsAndReloads(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.SIPTraceEnabledConfigKey: false}}
+	app.ConfigYml = config
+	reloads := 0
+	controller := NewServiceConfigController()
+	controller.SetSIPTraceReloader(func() error { reloads++; return nil })
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(controller).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/sip-log", jsonBody(t, map[string]bool{"enabled": true})),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, true, config.values[gbconfig.SIPTraceEnabledConfigKey])
+	require.Equal(t, 1, config.saveNum)
+	require.Equal(t, 1, reloads)
+	require.Equal(t, true, serviceConfigData(t, recorder)["applied"])
+}
+
+func TestServiceConfigController_UpdateSIPLogReportsReloadFailure(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.SIPTraceEnabledConfigKey: false}}
+	app.ConfigYml = config
+	controller := NewServiceConfigController()
+	controller.SetSIPTraceReloader(func() error { return errors.New("reload failed") })
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(controller).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/sip-log", jsonBody(t, map[string]bool{"enabled": true})),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	data := serviceConfigData(t, recorder)
+	require.Equal(t, true, data["enabled"])
+	require.Equal(t, false, data["applied"])
+	require.Equal(t, "reload failed", data["applyError"])
+}
+
+func TestServiceConfigController_UpdateSIPLogRollsBackOnSaveFailure(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{
+		values:  map[string]interface{}{gbconfig.SIPTraceEnabledConfigKey: false},
+		saveErr: errors.New("write failed"),
+	}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/sip-log", jsonBody(t, map[string]bool{"enabled": true})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, false, config.values[gbconfig.SIPTraceEnabledConfigKey])
 }
 
 func TestServiceConfigController_SyncChannelsOnOnlineDefaultsToEnabled(t *testing.T) {

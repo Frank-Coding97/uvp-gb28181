@@ -767,6 +767,20 @@ export const updatePTZDefaultSpeedConfig = (level: number) =>
     data: { level }
   });
 
+export interface SIPLogConfig {
+  enabled: boolean;
+  applied: boolean;
+  applyError?: string;
+}
+
+export const fetchSIPLogConfig = () =>
+  http.request<BaseResult<SIPLogConfig>>("get", baseUrlApi("gb28181/sip/service-config/sip-log"));
+
+export const updateSIPLogConfig = (enabled: boolean) =>
+  http.request<BaseResult<SIPLogConfig>>("put", baseUrlApi("gb28181/sip/service-config/sip-log"), {
+    data: { enabled }
+  });
+
 export type SipDeploymentMode = "lan" | "public";
 // 2026-07-20 后端简化:runtime state 仍是六态,restart_required 语义已废弃(保留兼容枚举,新代码不产生).
 export type SipRuntimeState = "disabled" | "unconfigured" | "starting" | "running" | "failed" | "restart_required";

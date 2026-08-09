@@ -10,7 +10,9 @@ const api = vi.hoisted(() => ({
     fetchSDPExtensionConfig: vi.fn(),
     updateSDPExtensionConfig: vi.fn(),
     fetchSyncChannelsOnOnlineConfig: vi.fn(),
-    updateSyncChannelsOnOnlineConfig: vi.fn()
+    updateSyncChannelsOnOnlineConfig: vi.fn(),
+    fetchSIPLogConfig: vi.fn(),
+    updateSIPLogConfig: vi.fn()
 }));
 
 vi.mock("@/api/gb28181", () => api);
@@ -77,6 +79,8 @@ describe("ServiceConfig edit mode", () => {
         api.updatePTZDefaultSpeedConfig.mockReset();
         api.fetchSyncChannelsOnOnlineConfig.mockReset();
         api.updateSyncChannelsOnOnlineConfig.mockReset();
+        api.fetchSIPLogConfig.mockReset();
+        api.updateSIPLogConfig.mockReset();
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
         api.fetchSDPExtensionConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
         api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 8 } });
@@ -89,6 +93,8 @@ describe("ServiceConfig edit mode", () => {
         api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
+        api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, applied: true } });
+        api.updateSIPLogConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true, applied: true } });
     });
 
     it("reuses the system configuration page layout primitives", async () => {
@@ -236,5 +242,38 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updateSyncChannelsOnOnlineConfig).toHaveBeenCalledWith(false);
+    });
+
+    it("loads and saves the SIP trace switch with immediate-apply feedback", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchSIPLogConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("是否开启 SIP 日志");
+        expect(wrapper.text()).toContain("热重载 SIP 服务");
+        const sipLogSwitch = wrapper
+            .findAll("label")
+            .find(label => label.text().includes("是否开启 SIP 日志"))
+            ?.find("button");
+        expect(sipLogSwitch?.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        expect(sipLogSwitch?.element).toHaveProperty("disabled", false);
+        await sipLogSwitch?.trigger("click");
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateSIPLogConfig).toHaveBeenCalledWith(true);
+    });
+
+    it("shows when the saved SIP trace switch is not applied to the runtime", async () => {
+        api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, applied: false } });
+
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.text()).toContain("配置尚未应用");
     });
 });

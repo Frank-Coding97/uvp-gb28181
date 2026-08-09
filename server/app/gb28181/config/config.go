@@ -11,6 +11,7 @@ import (
 const (
 	SDPExtensionConfigKey         = "gb28181.sdp.extension_enabled"
 	SyncChannelsOnOnlineConfigKey = "gb28181.device.sync_channels_on_online"
+	SIPTraceEnabledConfigKey      = "gb28181.trace.enabled"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
@@ -31,6 +32,18 @@ const (
 	MaxPlaybackIdleSec       = 3600
 	MaxPlaybackSessionSec    = 86400
 )
+
+// SIPTraceEnabledFrom returns whether raw SIP trace collection is enabled.
+// Missing configuration intentionally defaults to false because trace storage
+// may contain sensitive signaling payloads and can incur ClickHouse writes.
+func SIPTraceEnabledFrom(c valueSource) bool {
+	return c != nil && c.Get(SIPTraceEnabledConfigKey) != nil && c.GetBool(SIPTraceEnabledConfigKey)
+}
+
+// SIPTraceEnabled reads the live configuration used by the service-config API.
+func SIPTraceEnabled() bool {
+	return SIPTraceEnabledFrom(app.ConfigYml)
+}
 
 // SDPExtensionEnabledFrom returns the current SDP compatibility setting.
 // Missing configuration intentionally defaults to false.

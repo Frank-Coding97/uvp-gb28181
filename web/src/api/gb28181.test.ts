@@ -8,6 +8,7 @@ vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 import {
   fetchPTZDefaultSpeedConfig,
   fetchSDPExtensionConfig,
+  fetchSIPLogConfig,
   fetchPositionHistoryConfig,
   fetchSyncChannelsOnOnlineConfig,
   getControlCapabilities,
@@ -21,6 +22,7 @@ import {
   updatePositionHistoryConfig,
   updatePTZDefaultSpeedConfig,
   updateSDPExtensionConfig,
+  updateSIPLogConfig,
   updateSyncChannelsOnOnlineConfig,
   type DeviceStatusResult,
   type HomePositionPatch
@@ -79,6 +81,18 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/sync-channels-on-online",
       { data: { enabled: false } }
+    );
+  });
+
+  it("读取并更新 SIP 日志配置", async () => {
+    await fetchSIPLogConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sip-log");
+
+    await updateSIPLogConfig(true);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/sip-log",
+      { data: { enabled: true } }
     );
   });
 });
