@@ -11,6 +11,7 @@ const (
 	CmdDeviceControl      = "DeviceControl"
 	CmdAlarm              = "Alarm"
 	CmdMobilePosition     = "MobilePosition"
+	CmdBroadcast          = "Broadcast"
 	CmdPTZPrecisePosition = "PTZPrecisePosition"
 )
 
