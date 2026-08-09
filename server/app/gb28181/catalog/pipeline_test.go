@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -12,8 +13,31 @@ import (
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/catalog"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+type pipelineTestYAML struct {
+	values map[string]interface{}
+}
+
+func (c *pipelineTestYAML) ConfigFileChangeListen(...func()) {}
+func (c *pipelineTestYAML) Get(key string) interface{}       { return c.values[key] }
+func (c *pipelineTestYAML) GetString(key string) string {
+	value, _ := c.values[key].(string)
+	return value
+}
+func (c *pipelineTestYAML) GetBool(string) bool               { return false }
+func (c *pipelineTestYAML) GetInt(string) int                 { return 0 }
+func (c *pipelineTestYAML) GetInt32(string) int32             { return 0 }
+func (c *pipelineTestYAML) GetInt64(string) int64             { return 0 }
+func (c *pipelineTestYAML) GetFloat64(string) float64         { return 0 }
+func (c *pipelineTestYAML) GetDuration(string) time.Duration  { return 0 }
+func (c *pipelineTestYAML) GetStringSlice(string) []string    { return nil }
+func (c *pipelineTestYAML) GetUintSlice(string) []uint        { return nil }
+func (c *pipelineTestYAML) Set(key string, value interface{}) { c.values[key] = value }
+func (c *pipelineTestYAML) SaveConfig() error                 { return nil }
 
 func newPipelineTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -55,6 +79,37 @@ func TestPipeline_IngestWithOwnerDept(t *testing.T) {
 	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&channel).Error)
 	assert.EqualValues(t, 10, channel.OwnerDeptID)
 	assert.True(t, channel.AudioEnabled, "新建通道默认应开启音频")
+}
+
+func TestPipeline_IngestUsesConfiguredTransportOnlyForNewChannels(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	testConfig := &pipelineTestYAML{values: map[string]interface{}{
+		gbconfig.DefaultChannelStreamTransportConfigKey: "UDP",
+	}}
+	app.ConfigYml = testConfig
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001180000001"}
+
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: "37011200001310000001", Name: "入口", StatusOn: true},
+	}))
+	var first gbmodels.GbChannel
+	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&first).Error)
+	require.Equal(t, "UDP", first.StreamTransport)
+
+	testConfig.values[gbconfig.DefaultChannelStreamTransportConfigKey] = "TCP-Active"
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: "37011200001310000001", Name: "入口更新", StatusOn: true},
+		{DeviceID: "37011200001310000002", Name: "出口", StatusOn: true},
+	}))
+
+	var channels []gbmodels.GbChannel
+	require.NoError(t, db.Order("channel_id").Find(&channels).Error)
+	require.Len(t, channels, 2)
+	require.Equal(t, "UDP", channels[0].StreamTransport, "已有通道不能被新默认值覆盖")
+	require.Equal(t, "TCP-Active", channels[1].StreamTransport)
 }
 
 func TestPipeline_IngestPersistsAlarmResourceAndMultipleParents(t *testing.T) {

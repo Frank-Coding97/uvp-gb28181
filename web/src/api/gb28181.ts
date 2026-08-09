@@ -834,6 +834,25 @@ export const updatePTZDefaultSpeedConfig = (level: number) =>
     data: { level }
   });
 
+export type ChannelStreamTransport = "UDP" | "TCP-Active" | "TCP-Passive";
+
+export interface DefaultChannelStreamTransportConfig {
+  transport: ChannelStreamTransport;
+}
+
+export const fetchDefaultChannelStreamTransportConfig = () =>
+  http.request<BaseResult<DefaultChannelStreamTransportConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/default-channel-stream-transport")
+  );
+
+export const updateDefaultChannelStreamTransportConfig = (transport: ChannelStreamTransport) =>
+  http.request<BaseResult<DefaultChannelStreamTransportConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/default-channel-stream-transport"),
+    { data: { transport } }
+  );
+
 export interface SIPLogConfig {
   enabled: boolean;
   applied: boolean;

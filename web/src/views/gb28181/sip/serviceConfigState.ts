@@ -1,4 +1,5 @@
 export interface StaticServiceConfigDraft {
+    defaultChannelStreamTransport: "UDP" | "TCP-Active" | "TCP-Passive";
     saveMobilePositionHistory: boolean;
     positionHistoryRetentionDays: number;
     sdpExtension: boolean;
@@ -30,6 +31,7 @@ export interface StaticServiceConfigDraft {
 }
 
 export const staticServiceConfigLabels = [
+    "新通道默认流传输模式",
     "保存移动位置历史轨迹",
     "位置历史保留天数（天）",
     "扩展 SDP 兼容模式",
@@ -64,6 +66,7 @@ export const cascadeServiceConfigLabels = [
 
 export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     return {
+        defaultChannelStreamTransport: "TCP-Passive",
         saveMobilePositionHistory: true,
         positionHistoryRetentionDays: 7,
         sdpExtension: false,

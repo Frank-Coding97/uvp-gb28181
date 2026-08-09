@@ -360,6 +360,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			serviceConfig.PUT("/ignore-channel-offline-status-notify", serviceConfigController.UpdateIgnoreChannelOfflineStatusNotify)
 			serviceConfig.GET("/ptz-default-speed", serviceConfigController.GetPTZDefaultSpeed)
 			serviceConfig.PUT("/ptz-default-speed", serviceConfigController.UpdatePTZDefaultSpeed)
+			serviceConfig.GET("/default-channel-stream-transport", serviceConfigController.GetDefaultChannelStreamTransport)
+			serviceConfig.PUT("/default-channel-stream-transport", serviceConfigController.UpdateDefaultChannelStreamTransport)
 			serviceConfig.GET("/sip-log", serviceConfigController.GetSIPLog)
 			serviceConfig.PUT("/sip-log", serviceConfigController.UpdateSIPLog)
 		}

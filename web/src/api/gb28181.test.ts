@@ -7,6 +7,7 @@ vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
   fetchPTZDefaultSpeedConfig,
+  fetchDefaultChannelStreamTransportConfig,
   fetchSDPExtensionConfig,
   fetchSIPLogConfig,
   fetchPositionHistoryConfig,
@@ -26,6 +27,7 @@ import {
   updateHomePosition,
   updatePositionHistoryConfig,
   updatePTZDefaultSpeedConfig,
+  updateDefaultChannelStreamTransportConfig,
   updateSDPExtensionConfig,
   updateSIPLogConfig,
   updateSyncChannelsOnOnlineConfig,
@@ -79,6 +81,18 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/ptz-default-speed",
       { data: { level: 10 } }
+    );
+  });
+
+  it("读取并更新新通道默认流传输模式", async () => {
+    await fetchDefaultChannelStreamTransportConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-channel-stream-transport");
+
+    await updateDefaultChannelStreamTransportConfig("TCP-Active");
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/default-channel-stream-transport",
+      { data: { transport: "TCP-Active" } }
     );
   });
 

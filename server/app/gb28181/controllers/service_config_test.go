@@ -26,7 +26,10 @@ type serviceConfigTestYAML struct {
 
 func (c *serviceConfigTestYAML) ConfigFileChangeListen(...func()) {}
 func (c *serviceConfigTestYAML) Get(key string) interface{}       { return c.values[key] }
-func (c *serviceConfigTestYAML) GetString(string) string          { return "" }
+func (c *serviceConfigTestYAML) GetString(key string) string {
+	value, _ := c.values[key].(string)
+	return value
+}
 func (c *serviceConfigTestYAML) GetBool(key string) bool {
 	value, _ := c.values[key].(bool)
 	return value
@@ -66,6 +69,8 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/ignore-channel-offline-status-notify", controller.UpdateIgnoreChannelOfflineStatusNotify)
 	router.GET("/ptz-default-speed", controller.GetPTZDefaultSpeed)
 	router.PUT("/ptz-default-speed", controller.UpdatePTZDefaultSpeed)
+	router.GET("/default-channel-stream-transport", controller.GetDefaultChannelStreamTransport)
+	router.PUT("/default-channel-stream-transport", controller.UpdateDefaultChannelStreamTransport)
 	router.GET("/sip-log", controller.GetSIPLog)
 	router.PUT("/sip-log", controller.UpdateSIPLog)
 	return router
@@ -435,6 +440,81 @@ func TestServiceConfigController_UpdatePTZDefaultSpeedRollsBackOnSaveError(t *te
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, 6, config.values[ptzDefaultSpeedLevelConfigKey])
+}
+
+func TestServiceConfigController_DefaultChannelStreamTransportDefaultsToTCPPassive(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = &serviceConfigTestYAML{values: map[string]interface{}{}}
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/default-channel-stream-transport", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "TCP-Passive", serviceConfigData(t, recorder)["transport"])
+}
+
+func TestServiceConfigController_UpdateDefaultChannelStreamTransportPersistsSupportedValues(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.DefaultChannelStreamTransportConfigKey: "TCP-Passive",
+	}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, transport := range []string{"UDP", "TCP-Active", "TCP-Passive"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(
+			http.MethodPut,
+			"/default-channel-stream-transport",
+			jsonBody(t, map[string]string{"transport": transport}),
+		))
+
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, transport, config.values[gbconfig.DefaultChannelStreamTransportConfigKey])
+	}
+	require.Equal(t, 3, config.saveNum)
+}
+
+func TestServiceConfigController_UpdateDefaultChannelStreamTransportRejectsInvalidValue(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.DefaultChannelStreamTransportConfigKey: "TCP-Passive",
+	}}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/default-channel-stream-transport", jsonBody(t, map[string]string{"transport": "SCTP"})),
+	)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, "TCP-Passive", config.values[gbconfig.DefaultChannelStreamTransportConfigKey])
+	require.Zero(t, config.saveNum)
+}
+
+func TestServiceConfigController_UpdateDefaultChannelStreamTransportRollsBackOnSaveError(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{
+		values:  map[string]interface{}{gbconfig.DefaultChannelStreamTransportConfigKey: "TCP-Passive"},
+		saveErr: errors.New("disk full"),
+	}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/default-channel-stream-transport", jsonBody(t, map[string]string{"transport": "UDP"})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, "TCP-Passive", config.values[gbconfig.DefaultChannelStreamTransportConfigKey])
 }
 
 func TestServiceConfigController_SDPExtensionDefaultsToDisabled(t *testing.T) {

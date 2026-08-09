@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
@@ -147,7 +148,7 @@ func upsertChannel(
 			OnDemandLive:    true,
 			AudioEnabled:    true,
 			OwnerDeptID:     ownerDeptID,
-			StreamTransport: "TCP-Passive",
+			StreamTransport: gbconfig.CurrentDefaultChannelStreamTransport(),
 		}
 		if err := db.WithContext(ctx).Create(&ch).Error; err != nil {
 			return nil, nil, err
@@ -266,8 +267,8 @@ func fallbackName(name, fallback string) string {
 //
 // L1/L2 结果需校验 sys_civil_code 字典存在性,查不到降级下一层
 func resolveCivilCode(
-	itemCivilCode   string, // L1: XML 上报
-	clsCivilCode    string, // L2: classifier 从 DeviceID 提取
+	itemCivilCode string, // L1: XML 上报
+	clsCivilCode string, // L2: classifier 从 DeviceID 提取
 	parentCivilCode string, // L3: 父节点
 ) string {
 	const unassigned = "000000" // L4 兜底

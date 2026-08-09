@@ -4,6 +4,7 @@ import { Check, Pencil, X } from "lucide-vue-next";
 import { computed, onMounted, reactive, ref } from "vue";
 import {
     fetchPTZDefaultSpeedConfig,
+    fetchDefaultChannelStreamTransportConfig,
     fetchPositionHistoryConfig,
     fetchSDPExtensionConfig,
     fetchSIPLogConfig,
@@ -15,6 +16,7 @@ import {
     fetchIgnoreChannelOfflineStatusNotifyConfig,
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
+    updateDefaultChannelStreamTransportConfig,
     updateSIPLogConfig,
     updateSDPExtensionConfig,
     updateSyncChannelsOnOnlineConfig,
@@ -40,6 +42,9 @@ const sdpExtensionReady = ref(false);
 const ptzDefaultSpeedLoading = ref(true);
 const ptzDefaultSpeedSaving = ref(false);
 const ptzDefaultSpeedReady = ref(false);
+const defaultChannelStreamTransportLoading = ref(true);
+const defaultChannelStreamTransportSaving = ref(false);
+const defaultChannelStreamTransportReady = ref(false);
 const syncChannelsOnOnlineLoading = ref(true);
 const syncChannelsOnOnlineSaving = ref(false);
 const syncChannelsOnOnlineReady = ref(false);
@@ -66,6 +71,7 @@ const savedPositionHistoryEnabled = ref(true);
 const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
+const savedDefaultChannelStreamTransport = ref<"UDP" | "TCP-Active" | "TCP-Passive">("TCP-Passive");
 const savedSyncChannelsOnOnline = ref(true);
 const savedOnlineOnHeartbeat = ref(true);
 const savedSaveAlarmMessages = ref(true);
@@ -80,6 +86,9 @@ const positionHistoryChanged = computed(
 );
 const sdpExtensionChanged = computed(() => draft.sdpExtension !== savedSDPExtensionEnabled.value);
 const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefaultSpeed.value);
+const defaultChannelStreamTransportChanged = computed(
+    () => draft.defaultChannelStreamTransport !== savedDefaultChannelStreamTransport.value
+);
 const syncChannelsOnOnlineChanged = computed(
     () => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value
 );
@@ -96,6 +105,7 @@ const hasChanges = computed(
         positionHistoryChanged.value ||
         sdpExtensionChanged.value ||
         ptzDefaultSpeedChanged.value ||
+        defaultChannelStreamTransportChanged.value ||
         syncChannelsOnOnlineChanged.value ||
         onlineOnHeartbeatChanged.value ||
         saveAlarmMessagesChanged.value ||
@@ -109,6 +119,7 @@ const configLoading = computed(
         positionHistoryLoading.value ||
         sdpExtensionLoading.value ||
         ptzDefaultSpeedLoading.value ||
+        defaultChannelStreamTransportLoading.value ||
         syncChannelsOnOnlineLoading.value ||
         onlineOnHeartbeatLoading.value ||
         saveAlarmMessagesLoading.value ||
@@ -122,6 +133,7 @@ const configSaving = computed(
         positionHistorySaving.value ||
         sdpExtensionSaving.value ||
         ptzDefaultSpeedSaving.value ||
+        defaultChannelStreamTransportSaving.value ||
         syncChannelsOnOnlineSaving.value ||
         onlineOnHeartbeatSaving.value ||
         saveAlarmMessagesSaving.value ||
@@ -135,6 +147,7 @@ const configReady = computed(
         positionHistoryReady.value &&
         sdpExtensionReady.value &&
         ptzDefaultSpeedReady.value &&
+        defaultChannelStreamTransportReady.value &&
         syncChannelsOnOnlineReady.value &&
         onlineOnHeartbeatReady.value &&
         saveAlarmMessagesReady.value &&
@@ -190,6 +203,21 @@ async function loadPTZDefaultSpeedConfig() {
         Message.error(error?.message || "加载云台默认速度失败");
     } finally {
         ptzDefaultSpeedLoading.value = false;
+    }
+}
+
+async function loadDefaultChannelStreamTransportConfig() {
+    defaultChannelStreamTransportLoading.value = true;
+    try {
+        const response = await fetchDefaultChannelStreamTransportConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.defaultChannelStreamTransport = response.data.transport;
+        savedDefaultChannelStreamTransport.value = response.data.transport;
+        defaultChannelStreamTransportReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载新通道默认流传输模式失败");
+    } finally {
+        defaultChannelStreamTransportLoading.value = false;
     }
 }
 
@@ -304,6 +332,7 @@ function startEditing() {
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
+    draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
     draft.saveAlarmMessages = savedSaveAlarmMessages.value;
@@ -319,6 +348,7 @@ function cancelEditing() {
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
+    draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
     draft.saveAlarmMessages = savedSaveAlarmMessages.value;
@@ -365,6 +395,14 @@ async function saveConfig() {
             draft.ptzSpeed = response.data.level;
             savedPTZDefaultSpeed.value = response.data.level;
             ptzDefaultSpeedSaving.value = false;
+        }
+        if (defaultChannelStreamTransportChanged.value) {
+            defaultChannelStreamTransportSaving.value = true;
+            const response = await updateDefaultChannelStreamTransportConfig(draft.defaultChannelStreamTransport);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.defaultChannelStreamTransport = response.data.transport;
+            savedDefaultChannelStreamTransport.value = response.data.transport;
+            defaultChannelStreamTransportSaving.value = false;
         }
         if (syncChannelsOnOnlineChanged.value) {
             syncChannelsOnOnlineSaving.value = true;
@@ -436,6 +474,7 @@ async function saveConfig() {
         positionHistorySaving.value = false;
         sdpExtensionSaving.value = false;
         ptzDefaultSpeedSaving.value = false;
+        defaultChannelStreamTransportSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
         onlineOnHeartbeatSaving.value = false;
         saveAlarmMessagesSaving.value = false;
@@ -451,6 +490,7 @@ onMounted(() =>
         loadPositionHistoryConfig(),
         loadSDPExtensionConfig(),
         loadPTZDefaultSpeedConfig(),
+        loadDefaultChannelStreamTransportConfig(),
         loadSyncChannelsOnOnlineConfig(),
         loadOnlineOnHeartbeatConfig(),
         loadSaveAlarmMessagesConfig(),
@@ -570,6 +610,28 @@ onMounted(() =>
                                         </div>
                                         <template #extra>
                                             <div>作为播放弹窗和大屏云台控制的初始档位，可在控制面板临时调整。</div>
+                                        </template>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item field="defaultChannelStreamTransport" label="新通道默认流传输模式">
+                                        <a-radio-group
+                                            v-model="draft.defaultChannelStreamTransport"
+                                            type="button"
+                                            class="stream-transport-segments"
+                                            :disabled="
+                                                !isEditing ||
+                                                defaultChannelStreamTransportLoading ||
+                                                defaultChannelStreamTransportSaving ||
+                                                !defaultChannelStreamTransportReady
+                                            "
+                                        >
+                                            <a-radio value="UDP">UDP</a-radio>
+                                            <a-radio value="TCP-Active">TCP 主动</a-radio>
+                                            <a-radio value="TCP-Passive">TCP 被动</a-radio>
+                                        </a-radio-group>
+                                        <template #extra>
+                                            <div>仅影响之后通过 Catalog 新发现的通道，现有通道保持不变；默认 TCP 被动。</div>
                                         </template>
                                     </a-form-item>
                                 </a-col>
@@ -825,6 +887,17 @@ onMounted(() =>
     font-variant-numeric: tabular-nums;
     text-align: right;
     white-space: nowrap;
+}
+
+.stream-transport-segments {
+    display: flex;
+    width: min(100%, 360px);
+
+    :deep(.arco-radio-button) {
+        flex: 1 1 0;
+        min-width: 0;
+        text-align: center;
+    }
 }
 
 .mb-4 {

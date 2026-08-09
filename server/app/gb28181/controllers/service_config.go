@@ -55,6 +55,10 @@ type IgnoreChannelOfflineStatusNotifyConfig struct {
 	Enabled bool `json:"enabled"`
 }
 
+type DefaultChannelStreamTransportConfig struct {
+	Transport string `json:"transport"`
+}
+
 // PTZDefaultSpeedConfig 是云台控制界面初始使用的 1-10 档速度。
 type PTZDefaultSpeedConfig struct {
 	Level int `json:"level"`
@@ -343,6 +347,36 @@ func (sc *ServiceConfigController) UpdateIgnoreChannelOfflineStatusNotify(c *gin
 	}
 
 	sc.SuccessWithMessage(c, "忽略通道离线/异常通知配置已更新", IgnoreChannelOfflineStatusNotifyConfig{Enabled: *request.Enabled})
+}
+
+// GetDefaultChannelStreamTransport GET /api/gb28181/sip/service-config/default-channel-stream-transport
+func (sc *ServiceConfigController) GetDefaultChannelStreamTransport(c *gin.Context) {
+	sc.Success(c, DefaultChannelStreamTransportConfig{Transport: gbconfig.CurrentDefaultChannelStreamTransport()})
+}
+
+// UpdateDefaultChannelStreamTransport PUT /api/gb28181/sip/service-config/default-channel-stream-transport
+func (sc *ServiceConfigController) UpdateDefaultChannelStreamTransport(c *gin.Context) {
+	var request struct {
+		Transport *string `json:"transport"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Transport == nil || !gbconfig.IsSupportedChannelStreamTransport(*request.Transport) {
+		sc.Fail(c, "保存新通道默认流传输模式失败：transport 必须为 UDP、TCP-Active 或 TCP-Passive", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.CurrentDefaultChannelStreamTransport()
+	app.ConfigYml.Set(gbconfig.DefaultChannelStreamTransportConfigKey, *request.Transport)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.DefaultChannelStreamTransportConfigKey, previous)
+		sc.Fail(c, "保存新通道默认流传输模式失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "新通道默认流传输模式已更新", DefaultChannelStreamTransportConfig{Transport: *request.Transport})
 }
 
 // GetPTZDefaultSpeed GET /api/gb28181/sip/service-config/ptz-default-speed

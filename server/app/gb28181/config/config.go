@@ -16,6 +16,7 @@ const (
 	SIPCommandTimeoutSecConfigKey             = "gb28181.sip_command_timeout_sec"
 	PreallocationModeConfigKey                = "gb28181.device.preallocation_mode"
 	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
+	DefaultChannelStreamTransportConfigKey    = "gb28181.catalog.default_channel_stream_transport"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
@@ -28,6 +29,7 @@ const (
 	DefaultPlaybackIdleTimeoutSec        = 60
 	DefaultPlaybackMaxSessionSec         = 86400
 	DefaultSIPCommandTimeoutSec          = 10
+	DefaultChannelStreamTransport        = "TCP-Passive"
 
 	MaxRecordQueryTimeoutSec = 300
 	MaxRecordQueryRangeHours = 168
@@ -142,6 +144,32 @@ func IgnoreChannelOfflineStatusNotifyFrom(c valueSource) bool {
 // IgnoreChannelOfflineStatusNotify reads the live compatibility setting.
 func IgnoreChannelOfflineStatusNotify() bool {
 	return IgnoreChannelOfflineStatusNotifyFrom(app.ConfigYml)
+}
+
+func IsSupportedChannelStreamTransport(transport string) bool {
+	switch transport {
+	case "UDP", "TCP-Active", "TCP-Passive":
+		return true
+	default:
+		return false
+	}
+}
+
+// DefaultChannelStreamTransportFrom returns the transport assigned when a
+// Catalog response creates a channel. Existing channels keep their saved value.
+func DefaultChannelStreamTransportFrom(c valueSource) string {
+	if c == nil || c.Get(DefaultChannelStreamTransportConfigKey) == nil {
+		return DefaultChannelStreamTransport
+	}
+	transport := c.GetString(DefaultChannelStreamTransportConfigKey)
+	if !IsSupportedChannelStreamTransport(transport) {
+		return DefaultChannelStreamTransport
+	}
+	return transport
+}
+
+func CurrentDefaultChannelStreamTransport() string {
+	return DefaultChannelStreamTransportFrom(app.ConfigYml)
 }
 
 // Config GB28181 国标平台配置

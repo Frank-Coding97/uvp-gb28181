@@ -5,6 +5,8 @@ import ServiceConfig from "./ServiceConfig.vue";
 const api = vi.hoisted(() => ({
     fetchPTZDefaultSpeedConfig: vi.fn(),
     updatePTZDefaultSpeedConfig: vi.fn(),
+    fetchDefaultChannelStreamTransportConfig: vi.fn(),
+    updateDefaultChannelStreamTransportConfig: vi.fn(),
     fetchPositionHistoryConfig: vi.fn(),
     updatePositionHistoryConfig: vi.fn(),
     fetchSDPExtensionConfig: vi.fn(),
@@ -54,6 +56,17 @@ const SliderStub = {
     template: `<input type="range" :min="min" :max="max" :step="step" :disabled="disabled" :value="modelValue" @input="$emit('update:modelValue', Number($event.target.value))" />`
 };
 
+const SelectStub = {
+    props: ["modelValue", "disabled", "loading"],
+    emits: ["update:modelValue"],
+    template: `<select :disabled="disabled || loading" :value="modelValue" @change="$emit('update:modelValue', $event.target.value)"><slot /></select>`
+};
+
+const OptionStub = {
+    props: ["value"],
+    template: `<option :value="value"><slot /></option>`
+};
+
 function mountPage() {
     return mount(ServiceConfig, {
         global: {
@@ -72,8 +85,10 @@ function mountPage() {
                 "a-switch": SwitchStub,
                 "a-slider": SliderStub,
                 "a-input-number": InputNumberStub,
-                "a-select": { template: `<select disabled><slot /></select>` },
-                "a-option": { template: `<option><slot /></option>` }
+                "a-radio-group": SelectStub,
+                "a-radio": OptionStub,
+                "a-select": SelectStub,
+                "a-option": OptionStub
             }
         }
     });
@@ -87,6 +102,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateSDPExtensionConfig.mockReset();
         api.fetchPTZDefaultSpeedConfig.mockReset();
         api.updatePTZDefaultSpeedConfig.mockReset();
+        api.fetchDefaultChannelStreamTransportConfig.mockReset();
+        api.updateDefaultChannelStreamTransportConfig.mockReset();
         api.fetchSyncChannelsOnOnlineConfig.mockReset();
         api.updateSyncChannelsOnOnlineConfig.mockReset();
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockReset();
@@ -104,6 +121,7 @@ describe("ServiceConfig edit mode", () => {
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
         api.fetchSDPExtensionConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
         api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 8 } });
+        api.fetchDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "", data: { transport: "TCP-Passive" } });
         api.updatePositionHistoryConfig.mockResolvedValue({
             code: 0,
             message: "保存成功",
@@ -111,6 +129,7 @@ describe("ServiceConfig edit mode", () => {
         });
         api.updateSDPExtensionConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
         api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
+        api.updateDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { transport: "UDP" } });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
@@ -260,6 +279,31 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updatePTZDefaultSpeedConfig).toHaveBeenCalledWith(10);
+    });
+
+    it("loads and saves the default stream transport for newly discovered channels", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchDefaultChannelStreamTransportConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("新通道默认流传输模式");
+        expect(wrapper.text()).toContain("仅影响之后新发现的通道");
+        const transportSelect = wrapper
+            .findAll("label")
+            .find(label => label.text().includes("新通道默认流传输模式"))
+            ?.find("select");
+        expect(transportSelect?.element).toHaveProperty("value", "TCP-Passive");
+        expect(transportSelect?.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        expect(transportSelect?.element).toHaveProperty("disabled", false);
+        await transportSelect?.setValue("UDP");
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateDefaultChannelStreamTransportConfig).toHaveBeenCalledWith("UDP");
     });
 
     it("loads and saves the device-online channel synchronization switch", async () => {

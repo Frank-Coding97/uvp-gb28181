@@ -9,8 +9,10 @@ import {
 describe("static service config draft", () => {
     it("matches the reference controls without SIP access identity fields", () => {
         const draft = createStaticServiceConfigDraft();
+        expect(draft.defaultChannelStreamTransport).toBe("TCP-Passive");
 
-        expect(staticServiceConfigLabels).toHaveLength(11);
+        expect(staticServiceConfigLabels).toHaveLength(12);
+        expect(staticServiceConfigLabels).toContain("新通道默认流传输模式");
         expect(staticServiceConfigLabels).toContain("扩展 SDP 兼容模式");
         expect(staticServiceConfigLabels).toContain("云台默认速度");
         expect(staticServiceConfigLabels).toContain("忽略通道离线/异常通知");

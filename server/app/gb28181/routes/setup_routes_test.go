@@ -36,6 +36,8 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"PUT /api/gb28181/sip/service-config/ignore-channel-offline-status-notify",
 		"GET /api/gb28181/sip/service-config/ptz-default-speed",
 		"PUT /api/gb28181/sip/service-config/ptz-default-speed",
+		"GET /api/gb28181/sip/service-config/default-channel-stream-transport",
+		"PUT /api/gb28181/sip/service-config/default-channel-stream-transport",
 		"GET /api/gb28181/sip/service-config/sip-log",
 		"PUT /api/gb28181/sip/service-config/sip-log",
 	} {

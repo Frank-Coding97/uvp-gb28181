@@ -194,6 +194,23 @@ func TestIgnoreChannelOfflineStatusNotifyFromDefaultsToDisabled(t *testing.T) {
 	require.False(t, IgnoreChannelOfflineStatusNotifyFrom(source))
 }
 
+func TestDefaultChannelStreamTransportFromDefaultsAndValidates(t *testing.T) {
+	source := fakeSource{}
+	require.Equal(t, "TCP-Passive", DefaultChannelStreamTransportFrom(source))
+
+	for _, transport := range []string{"UDP", "TCP-Active", "TCP-Passive"} {
+		source.values = map[string]interface{}{DefaultChannelStreamTransportConfigKey: transport}
+		source.strings = map[string]string{DefaultChannelStreamTransportConfigKey: transport}
+		require.Equal(t, transport, DefaultChannelStreamTransportFrom(source))
+	}
+
+	for _, invalid := range []string{"", "tcp-passive", "SCTP"} {
+		source.values = map[string]interface{}{DefaultChannelStreamTransportConfigKey: invalid}
+		source.strings = map[string]string{DefaultChannelStreamTransportConfigKey: invalid}
+		require.Equal(t, "TCP-Passive", DefaultChannelStreamTransportFrom(source))
+	}
+}
+
 func TestSIPTraceEnabledFromDefaultsToDisabled(t *testing.T) {
 	source := fakeSource{}
 	require.False(t, SIPTraceEnabledFrom(source))
