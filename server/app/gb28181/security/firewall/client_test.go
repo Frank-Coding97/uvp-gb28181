@@ -69,6 +69,24 @@ func TestNftBackendCreatesOwnedTableAndUsesValidatedTimeoutElement(t *testing.T)
 	require.NotContains(t, last.input, ";")
 }
 
+func TestNftBackendCreatesPermanentElementWithoutTimeout(t *testing.T) {
+	runner := &fakeRunner{fn: func(name string, args []string, input string) ([]byte, error) {
+		if name == "nft" && strings.Join(args, " ") == "-j list table inet uvp_sip_guard" {
+			return nil, errors.New("table missing")
+		}
+		if name == "nft" && strings.Join(args, " ") == "-j list set inet uvp_sip_guard blocked_v4" {
+			return []byte(`{"nftables":[{"set":{"elem":[]}}]}`), nil
+		}
+		return nil, nil
+	}}
+	backend, err := NewNftBackend(context.Background(), runner, NftConfig{Interface: "eth0", Destination: mustIP(t, "192.168.168.101"), Port: 56002})
+	require.NoError(t, err)
+	require.NoError(t, backend.Add("203.0.113.10", time.Time{}))
+	last := runner.calls[len(runner.calls)-1]
+	require.Contains(t, last.input, "add element inet uvp_sip_guard blocked_v4 { 203.0.113.10 }")
+	require.NotContains(t, last.input, "timeout")
+}
+
 func TestNftBackendRebuildsExistingOwnedTable(t *testing.T) {
 	runner := &fakeRunner{fn: func(name string, args []string, _ string) ([]byte, error) {
 		if name == "nft" && strings.Join(args, " ") == "-j list table inet uvp_sip_guard" {

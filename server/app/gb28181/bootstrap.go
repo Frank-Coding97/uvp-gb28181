@@ -408,7 +408,7 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 			gbroutes.SetSecurityRuntime(runtime)
 			return runtime
 		}
-		app.ZapLog.Warn("GB28181 安全持久化运行时装配失败,降级为内存 observe", zap.Error(err))
+		app.ZapLog.Warn("GB28181 安全持久化运行时装配失败,降级为内存 protect", zap.Error(err))
 	}
 	runtime := gbsecurity.NewRuntime(gbsecurity.DefaultPolicy(), clock, agent, secret)
 	gbroutes.SetSecurityRuntime(runtime)

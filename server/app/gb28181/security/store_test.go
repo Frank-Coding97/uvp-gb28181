@@ -15,7 +15,7 @@ func newSecurityStoreTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&securityEventRow{}, &securityBanRow{}, &securityPolicyRow{}, &securityAuditRow{}))
+	require.NoError(t, db.AutoMigrate(&securityEventRow{}, &securityBanRow{}, &securityPolicyRow{}, &securityAuditRow{}, &securityAccessRuleRow{}))
 	return db
 }
 
@@ -87,6 +87,27 @@ func TestGormStoreRestoresAndUnbansActiveDecision(t *testing.T) {
 	require.NoError(t, db.Find(&audits).Error)
 	require.Len(t, audits, 1)
 	require.Equal(t, "ban.unban", audits[0].Action)
+}
+
+func TestGormStoreCRUDsAccessRules(t *testing.T) {
+	db := newSecurityStoreTestDB(t)
+	require.NoError(t, db.AutoMigrate(&securityAccessRuleRow{}))
+	store := NewGormStore(db)
+	rule := AccessRule{ListType: ListBlacklist, MatchType: MatchIP, MatchValue: "203.0.113.8", Scope: "all_sip", Status: RuleEnabled, Note: "manual test", CreatedBy: "7"}
+	require.NoError(t, store.CreateAccessRule(context.Background(), &rule))
+	require.NotZero(t, rule.ID)
+
+	items, err := store.ListAccessRules(context.Background(), ListBlacklist)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, EnforcementApplication, items[0].EnforcementLayer())
+
+	rule.Status = RuleDisabled
+	require.NoError(t, store.UpdateAccessRule(context.Background(), rule))
+	require.NoError(t, store.DeleteAccessRule(context.Background(), rule.ID, "7"))
+	items, err = store.ListAccessRules(context.Background(), ListBlacklist)
+	require.NoError(t, err)
+	require.Empty(t, items)
 }
 
 func mustNetworks(t *testing.T, values ...string) []net.IPNet {

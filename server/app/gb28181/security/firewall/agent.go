@@ -77,7 +77,7 @@ func (a *Agent) Ban(decision security.BanDecision) error {
 			return ErrAllowlisted
 		}
 	}
-	if decision.TTL <= 0 {
+	if !decision.Permanent && decision.TTL <= 0 {
 		return errors.New("ttl must be positive")
 	}
 	decision.SourceIP = ip.String()
@@ -140,7 +140,7 @@ func (a *Agent) Reconcile(decisions []security.BanDecision) error {
 				break
 			}
 		}
-		if !allowlisted && decision.CreatedAt.Add(decision.TTL).After(now) {
+		if !allowlisted && decision.ActiveAt(now) {
 			decision.SourceIP = ip.String()
 			desired[decision.SourceIP] = decision
 		}

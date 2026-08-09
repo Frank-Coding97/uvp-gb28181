@@ -11,6 +11,7 @@ type EventAggregate struct {
 	SourceIP    string    `json:"sourceIp"`
 	Transport   string    `json:"transport"`
 	Method      string    `json:"method"`
+	UserAgent   string    `json:"userAgent"`
 	Reason      Reason    `json:"reason"`
 	Action      Action    `json:"action"`
 	Count       int64     `json:"count"`
@@ -52,7 +53,7 @@ func (s *AggregateStore) Record(event Event) bool {
 			s.dropped++
 			return false
 		}
-		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), Transport: event.Transport, Method: event.Method, Reason: event.Reason, Action: event.Action, FirstSeenAt: now}
+		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), Transport: event.Transport, Method: event.Method, UserAgent: event.UserAgent, Reason: event.Reason, Action: event.Action, FirstSeenAt: now}
 	}
 	item.Count++
 	item.ScoreDelta += int64(event.Score)
@@ -105,14 +106,17 @@ const (
 )
 
 type FirewallBan struct {
-	Decision   BanDecision `json:"decision"`
-	Status     BanStatus   `json:"status"`
-	RuleID     string      `json:"ruleId"`
-	Origin     string      `json:"origin"`
-	AgentState string      `json:"agentState"`
-	UnbannedAt time.Time   `json:"unbannedAt,omitempty"`
-	UnbannedBy string      `json:"unbannedBy,omitempty"`
-	LastError  string      `json:"lastError,omitempty"`
+	Decision             BanDecision `json:"decision"`
+	Status               BanStatus   `json:"status"`
+	RuleID               string      `json:"ruleId"`
+	Origin               string      `json:"origin"`
+	AgentState           string      `json:"agentState"`
+	UnbannedAt           time.Time   `json:"unbannedAt,omitempty"`
+	UnbannedBy           string      `json:"unbannedBy,omitempty"`
+	LastError            string      `json:"lastError,omitempty"`
+	FirewallAppliedAt    time.Time   `json:"firewallAppliedAt,omitempty"`
+	BlockedCountAfterBan int64       `json:"blockedCountAfterBan"`
+	LastBlockedAt        time.Time   `json:"lastBlockedAt,omitempty"`
 }
 
 type BanStore struct {
@@ -144,7 +148,7 @@ func (s *BanStore) Upsert(decision BanDecision, origin string) FirewallBan {
 	return item
 }
 
-func (s *BanStore) MarkApplied(sourceIP string) {
+func (s *BanStore) MarkApplied(sourceIP string, at time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, ok := s.items[sourceIP]
@@ -154,6 +158,19 @@ func (s *BanStore) MarkApplied(sourceIP string) {
 	item.Status = BanActive
 	item.AgentState = "applied"
 	item.LastError = ""
+	item.FirewallAppliedAt = at
+	s.items[sourceIP] = item
+}
+
+func (s *BanStore) RecordBlocked(sourceIP string, at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := s.items[sourceIP]
+	if !ok || (item.Status != BanActive && item.Status != BanAgentFailed) {
+		return
+	}
+	item.BlockedCountAfterBan++
+	item.LastBlockedAt = at
 	s.items[sourceIP] = item
 }
 
@@ -177,7 +194,7 @@ func (s *BanStore) Get(sourceIP string, now time.Time) (FirewallBan, bool) {
 	if !ok {
 		return FirewallBan{}, false
 	}
-	if item.Status == BanActive && !item.Decision.CreatedAt.IsZero() && now.After(item.Decision.CreatedAt.Add(item.Decision.TTL)) {
+	if item.Status == BanActive && !item.Decision.ActiveAt(now) {
 		item.Status = BanExpired
 		s.items[sourceIP] = item
 	}
@@ -191,7 +208,7 @@ func (s *BanStore) Find(identifier string, now time.Time) (FirewallBan, bool) {
 		if sourceIP != identifier && item.Decision.DecisionID != identifier {
 			continue
 		}
-		if item.Status == BanActive && !item.Decision.CreatedAt.IsZero() && now.After(item.Decision.CreatedAt.Add(item.Decision.TTL)) {
+	if item.Status == BanActive && !item.Decision.ActiveAt(now) {
 			item.Status = BanExpired
 			s.items[sourceIP] = item
 		}
@@ -222,7 +239,7 @@ func (s *BanStore) List(now time.Time) []FirewallBan {
 	items := make([]FirewallBan, 0, len(s.items))
 	for source := range s.items {
 		item := s.items[source]
-		if item.Status == BanActive && now.After(item.Decision.CreatedAt.Add(item.Decision.TTL)) {
+		if item.Status == BanActive && !item.Decision.ActiveAt(now) {
 			item.Status = BanExpired
 			s.items[source] = item
 		}

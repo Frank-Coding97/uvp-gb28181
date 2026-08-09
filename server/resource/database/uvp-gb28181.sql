@@ -1744,7 +1744,8 @@ CREATE TABLE `gb_sip_security_event` (
   `source_ip` varchar(64) NOT NULL,
   `address_family` varchar(8) NOT NULL,
   `transport` varchar(8) NOT NULL,
-  `method` varchar(16) NOT NULL,
+	`method` varchar(16) NOT NULL,
+	`user_agent` varchar(255) NOT NULL DEFAULT '',
   `reason` varchar(32) NOT NULL,
   `action` varchar(16) NOT NULL,
   `count` bigint NOT NULL DEFAULT 0,
@@ -1767,13 +1768,21 @@ CREATE TABLE `gb_sip_security_ban` (
   `rule_id` varchar(64) NOT NULL,
   `score` int NOT NULL DEFAULT 0,
   `created_at` datetime NOT NULL,
-  `expires_at` datetime NOT NULL,
+  `expires_at` datetime DEFAULT NULL,
   `unbanned_at` datetime DEFAULT NULL,
   `unbanned_by` varchar(64) NOT NULL DEFAULT '',
   `origin` varchar(16) NOT NULL,
   `agent_state` varchar(16) NOT NULL,
   `decision_id` varchar(64) NOT NULL,
-  `last_error` varchar(512) NOT NULL DEFAULT '',
+	`last_error` varchar(512) NOT NULL DEFAULT '',
+	`trigger_method` varchar(16) NOT NULL DEFAULT '',
+	`trigger_count` int NOT NULL DEFAULT 0,
+	`trigger_threshold` int NOT NULL DEFAULT 0,
+	`window_seconds` int NOT NULL DEFAULT 0,
+	`policy_mode` varchar(16) NOT NULL DEFAULT '',
+	`firewall_applied_at` datetime DEFAULT NULL,
+	`blocked_count_after_ban` bigint NOT NULL DEFAULT 0,
+	`last_blocked_at` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_gb_sip_security_ban_decision` (`decision_id`),
   KEY `idx_gb_sip_security_ban_source_status` (`source_ip`,`status`),
@@ -1812,4 +1821,21 @@ CREATE TABLE `gb_sip_security_audit` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 INSERT INTO `gb_sip_security_policy` (`scope_key`,`mode`,`window_seconds`,`ban_score`,`max_packet_bytes`,`max_udp_per_window`,`max_tcp_connections`,`sample_per_source`,`nonce_ttl_seconds`,`ban_ttl_steps`,`allowlist_text`,`updated_at`)
-VALUES ('global','observe',60,100,65536,120,32,3,60,'100:600;250:3600;500:86400',CONCAT('127.0.0.0/8',CHAR(10),'10.0.0.0/8',CHAR(10),'172.16.0.0/12',CHAR(10),'192.168.0.0/16'),NOW());
+VALUES ('global','protect',10,100,65536,120,32,3,60,'100:0',CONCAT('127.0.0.0/8',CHAR(10),'10.0.0.0/8',CHAR(10),'172.16.0.0/12',CHAR(10),'192.168.0.0/16'),NOW());
+
+CREATE TABLE IF NOT EXISTS `gb_sip_security_access_rule` (
+  `id` BIGINT NOT NULL AUTO_INCREMENT,
+  `list_type` VARCHAR(16) NOT NULL,
+  `match_type` VARCHAR(16) NOT NULL,
+  `match_value` VARCHAR(255) NOT NULL,
+  `scope` VARCHAR(32) NOT NULL DEFAULT 'all_sip',
+  `status` VARCHAR(16) NOT NULL DEFAULT 'enabled',
+  `expires_at` DATETIME NULL,
+  `note` VARCHAR(255) NOT NULL DEFAULT '',
+  `created_by` VARCHAR(64) NOT NULL DEFAULT '',
+  `created_at` DATETIME NOT NULL,
+  `updated_at` DATETIME NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_gb_sip_security_access_rule_match` (`list_type`,`match_type`,`match_value`),
+  KEY `idx_gb_sip_security_access_rule_list_status` (`list_type`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -25,6 +25,7 @@ type Admission struct {
 	conns   map[string]map[string]struct{}
 	partial map[string][]byte
 	onEvent func(Event)
+	rules   *AccessRuleMatcher
 
 	dropped atomic.Int64
 	sampled atomic.Int64
@@ -55,6 +56,11 @@ func NewAdmission(policy Policy, clock Clock, trace sip.TransportReadFilter, onE
 }
 
 func (a *Admission) SetTraceFilter(trace sip.TransportReadFilter) { a.trace = trace }
+func (a *Admission) SetAccessRules(rules []AccessRule) {
+	a.mu.Lock()
+	a.rules = NewAccessRuleMatcher(rules)
+	a.mu.Unlock()
+}
 func (a *Admission) SetPolicy(policy Policy) {
 	if policy.Validate() == nil {
 		a.mu.Lock()
@@ -110,30 +116,41 @@ func (a *Admission) Filter(info sip.TransportReadProps, data []byte) ([]byte, er
 	policy := a.currentPolicy()
 	source := sourceIP(info.RemoteAddr)
 	if source == "" {
-		return a.reject(info, ReasonUnknownMethod, "")
+		return a.reject(info, ReasonUnknownMethod, "", "", "")
 	}
-	allowlisted := policy.IsAllowlisted(source)
+	now := a.clock.Now()
+	userAgent := headerValue(data, "user-agent")
+	a.mu.Lock()
+	rules := a.rules
+	a.mu.Unlock()
+	method, complete := a.method(info, source, data)
+	allowlisted := policy.IsAllowlisted(source) || rules.IsTrustedSource(source, userAgent, now)
+	if _, blocked := rules.BlockedBy(source, userAgent, now); blocked && !allowlisted {
+		return a.reject(info, ReasonManualBlacklist, source, method, userAgent)
+	}
 	if a.IsBanned(source) && policy.Mode != ModeObserve && !allowlisted {
-		return a.reject(info, ReasonConnectionRate, source)
+		return a.reject(info, ReasonActiveBan, source, method, userAgent)
 	}
 	if len(data) > policy.MaxPacketBytes && !allowlisted {
 		if policy.Mode != ModeObserve {
-			return a.reject(info, ReasonPacketTooLarge, source)
+			return a.reject(info, ReasonPacketTooLarge, source, "", userAgent)
 		}
 		a.sample(info, ReasonPacketTooLarge, source, "")
 	}
 
-	now := a.clock.Now()
-	method, complete := a.method(info, source, data)
+	if complete && strings.EqualFold(method, "INVITE") && !allowlisted {
+		if policy.Mode == ModeObserve {
+			a.sample(info, ReasonInviteRate, source, method)
+		} else {
+			return a.reject(info, ReasonInviteRate, source, method, userAgent)
+		}
+	}
 	if complete && shouldRateLimit(method) {
 		key := source + ":" + strings.ToUpper(info.Transport) + ":" + method
 		reason := ReasonUnknownMethod
-		if strings.EqualFold(method, "INVITE") {
-			reason = ReasonInviteRate
-		}
 		if a.overLimit(key, now, policy.MaxUDPPerWindow) && !allowlisted {
 			if policy.Mode != ModeObserve {
-				return a.reject(info, reason, source)
+				return a.reject(info, reason, source, method, userAgent)
 			}
 			a.sample(info, reason, source, method)
 		}
@@ -158,7 +175,7 @@ func (a *Admission) Filter(info sip.TransportReadProps, data []byte) ([]byte, er
 				delete(connections, endpoint)
 			}
 			a.mu.Unlock()
-			return a.reject(info, ReasonConnectionRate, source)
+			return a.reject(info, ReasonConnectionRate, source, method, userAgent)
 		}
 	}
 
@@ -226,12 +243,27 @@ func (a *Admission) overLimit(key string, now time.Time, limit int) bool {
 	return limit > 0 && c.count > limit
 }
 
-func (a *Admission) reject(info sip.TransportReadProps, reason Reason, source string) ([]byte, error) {
+func (a *Admission) reject(info sip.TransportReadProps, reason Reason, source, method, userAgent string) ([]byte, error) {
 	a.dropped.Add(1)
 	if a.onEvent != nil {
-		a.onEvent(Event{SourceIP: source, Transport: strings.ToUpper(info.Transport), Reason: reason, Action: ActionDrop, Occurred: a.clock.Now()})
+		a.onEvent(Event{SourceIP: source, Transport: strings.ToUpper(info.Transport), Method: method, UserAgent: userAgent, Reason: reason, Action: ActionDrop, Occurred: a.clock.Now()})
 	}
 	return nil, nil
+}
+
+func headerValue(data []byte, name string) string {
+	wanted := strings.ToLower(strings.TrimSpace(name))
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			break
+		}
+		key, value, ok := strings.Cut(line, ":")
+		if ok && strings.ToLower(strings.TrimSpace(key)) == wanted {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func (a *Admission) sample(info sip.TransportReadProps, reason Reason, source, method string) {
@@ -249,6 +281,8 @@ func (a *Admission) currentPolicy() Policy {
 
 func shouldRateLimit(method string) bool {
 	switch strings.ToUpper(strings.TrimSpace(method)) {
+	case "INVITE":
+		return false
 	case "REGISTER", "MESSAGE", "NOTIFY", "SUBSCRIBE", "ACK", "BYE", "CANCEL", "OPTIONS", "INFO", "PRACK", "UPDATE", "REFER", "PUBLISH":
 		return false
 	case "":

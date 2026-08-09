@@ -23,6 +23,7 @@ var (
 type scoreBucket struct {
 	started time.Time
 	score   int
+	count   int
 }
 
 type Endpoint struct {
@@ -33,7 +34,7 @@ type Endpoint struct {
 	UpdatedAt time.Time
 }
 
-// Scorer converts security observations into explainable, TTL-bound decisions.
+// Scorer converts security observations into explainable enforcement decisions.
 type Scorer struct {
 	policy Policy
 	clock  Clock
@@ -106,6 +107,7 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 		b = scoreBucket{started: event.Occurred}
 	}
 	b.score += delta
+	b.count++
 	s.buckets[key] = b
 	total := b.score
 	s.mu.Unlock()
@@ -114,22 +116,28 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 		return event, nil, nil
 	}
 
-	ttl := policy.TTLForScore(total)
-	if ttl <= 0 {
+	ttl, shouldBan := policy.BanForScore(total)
+	if !shouldBan {
 		return event, nil, nil
 	}
 	decision := BanDecision{
-		DecisionID: s.nextDecisionID(event.SourceIP, event.Occurred),
-		SourceIP:   event.SourceIP,
-		Reason:     event.Reason,
-		Score:      total,
-		TTL:        ttl,
-		CreatedAt:  event.Occurred,
+		DecisionID:       s.nextDecisionID(event.SourceIP, event.Occurred),
+		SourceIP:         event.SourceIP,
+		Reason:           event.Reason,
+		Score:            total,
+		TTL:              ttl,
+		Permanent:        ttl == 0,
+		CreatedAt:        event.Occurred,
+		TriggerMethod:    strings.ToUpper(event.Method),
+		TriggerCount:     b.count,
+		TriggerThreshold: triggerThreshold(policy, event.Reason),
+		WindowSeconds:    int(policy.Window / time.Second),
+		PolicyMode:       policy.Mode,
 	}
 	event.Action = ActionBan
 	s.mu.Lock()
-	if previous, exists := s.decisions[event.SourceIP]; exists {
-		if previous.CreatedAt.Add(previous.TTL).After(event.Occurred) {
+		if previous, exists := s.decisions[event.SourceIP]; exists {
+			if previous.ActiveAt(event.Occurred) {
 			s.mu.Unlock()
 			return event, nil, nil
 		}
@@ -140,12 +148,20 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	return event, &decision, nil
 }
 
+func triggerThreshold(policy Policy, reason Reason) int {
+	delta := reasonScore(reason)
+	if delta <= 0 {
+		return policy.BanScore
+	}
+	return (policy.BanScore + delta - 1) / delta
+}
+
 func reasonScore(reason Reason) int {
 	switch reason {
 	case ReasonNonceReplay:
 		return 80
 	case ReasonInviteRate:
-		return 15
+		return 20
 	case ReasonNonceInvalid, ReasonNonceExpired:
 		return 30
 	case ReasonServerMismatch:
@@ -156,6 +172,8 @@ func reasonScore(reason Reason) int {
 		return 5
 	case ReasonPacketTooLarge, ReasonConnectionRate, ReasonUnknownMethod:
 		return 10
+	case ReasonManualBlacklist, ReasonActiveBan:
+		return 0
 	default:
 		return 1
 	}

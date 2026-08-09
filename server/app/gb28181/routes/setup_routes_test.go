@@ -22,6 +22,8 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"POST /api/gb28181/sip/setup/skip",
 		"GET /api/gb28181/sip/service-config/position-history",
 		"PUT /api/gb28181/sip/service-config/position-history",
+		"GET /api/gb28181/sip/service-config/ptz-default-speed",
+		"PUT /api/gb28181/sip/service-config/ptz-default-speed",
 	} {
 		require.True(t, got[route], route)
 	}

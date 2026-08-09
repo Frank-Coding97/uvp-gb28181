@@ -53,8 +53,7 @@ func TestAdmissionRejectsOversizedPacket(t *testing.T) {
 }
 
 func TestAdmissionObserveSamplesScannerTrafficWithoutDropping(t *testing.T) {
-	p := DefaultPolicy()
-	p.MaxUDPPerWindow = 1
+	p := DefaultPolicyWithMode(ModeObserve)
 	var events []Event
 	traceCalls := 0
 	a := NewAdmission(p, &fakeClock{now: time.Unix(100, 0)}, func(_ sip.TransportReadProps, data []byte) ([]byte, error) {
@@ -69,9 +68,64 @@ func TestAdmissionObserveSamplesScannerTrafficWithoutDropping(t *testing.T) {
 		require.Equal(t, packet, out)
 	}
 	require.Equal(t, 2, traceCalls)
-	require.Equal(t, int64(1), a.Sampled())
-	require.Len(t, events, 1)
+	require.Equal(t, int64(2), a.Sampled())
+	require.Len(t, events, 2)
 	require.Equal(t, ActionSample, events[0].Action)
+	require.Equal(t, "INVITE", events[0].Method)
+}
+
+func TestAdmissionProtectDropsFirstUnknownInviteBeforeTrace(t *testing.T) {
+	var events []Event
+	traceCalls := 0
+	a := NewAdmission(DefaultPolicy(), &fakeClock{now: time.Unix(100, 0)}, func(_ sip.TransportReadProps, data []byte) ([]byte, error) {
+		traceCalls++
+		return data, nil
+	}, func(event Event) { events = append(events, event) })
+
+	out, err := a.Filter(readProps(), []byte("INVITE sip:x SIP/2.0\r\nUser-Agent: friendly-scanner\r\n\r\n"))
+	require.NoError(t, err)
+	require.Empty(t, out)
+	require.Zero(t, traceCalls)
+	require.Len(t, events, 1)
+	require.Equal(t, "INVITE", events[0].Method)
+	require.Equal(t, ReasonInviteRate, events[0].Reason)
+	require.Equal(t, ActionDrop, events[0].Action)
+}
+
+func TestAdmissionProtectAllowsAllowlistedInvite(t *testing.T) {
+	p := DefaultPolicy()
+	_, network, err := net.ParseCIDR("198.51.100.0/24")
+	require.NoError(t, err)
+	p.Allowlist = []net.IPNet{*network}
+	traceCalls := 0
+	a := NewAdmission(p, &fakeClock{now: time.Unix(100, 0)}, func(_ sip.TransportReadProps, data []byte) ([]byte, error) {
+		traceCalls++
+		return data, nil
+	}, nil)
+	packet := []byte("INVITE sip:x SIP/2.0\r\n")
+
+	out, err := a.Filter(readProps(), packet)
+	require.NoError(t, err)
+	require.Equal(t, packet, out)
+	require.Equal(t, 1, traceCalls)
+}
+
+func TestAdmissionDropsManualUserAgentBlacklistBeforeTrace(t *testing.T) {
+	var events []Event
+	traceCalls := 0
+	a := NewAdmission(DefaultPolicy(), &fakeClock{now: time.Unix(100, 0)}, func(_ sip.TransportReadProps, data []byte) ([]byte, error) {
+		traceCalls++
+		return data, nil
+	}, func(event Event) { events = append(events, event) })
+	a.SetAccessRules([]AccessRule{{ID: 9, ListType: ListBlacklist, MatchType: MatchUserAgent, MatchValue: "friendly-scanner*", Status: RuleEnabled}})
+
+	out, err := a.Filter(readProps(), []byte("REGISTER sip:x SIP/2.0\r\nUser-Agent: Friendly-Scanner/1.0\r\n\r\n"))
+	require.NoError(t, err)
+	require.Empty(t, out)
+	require.Zero(t, traceCalls)
+	require.Len(t, events, 1)
+	require.Equal(t, ReasonManualBlacklist, events[0].Reason)
+	require.Equal(t, "Friendly-Scanner/1.0", events[0].UserAgent)
 }
 
 func TestAdmissionDoesNotRateLimitNormalRegisterTraffic(t *testing.T) {

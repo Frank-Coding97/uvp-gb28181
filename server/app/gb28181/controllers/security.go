@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -20,6 +21,52 @@ type SecuritySnapshot struct {
 	AsOf    time.Time                   `json:"asOf"`
 }
 
+type SecurityPolicyView struct {
+	Mode              gbsecurity.Mode `json:"mode"`
+	Window            int             `json:"window"`
+	BanScore          int             `json:"banScore"`
+	MaxPacketBytes    int             `json:"maxPacketBytes"`
+	MaxUDPPerWindow   int             `json:"maxUdpPerWindow"`
+	MaxTCPConnections int             `json:"maxTcpConnections"`
+	SamplePerSource   int             `json:"samplePerSource"`
+	NonceTTL          int             `json:"nonceTtl"`
+	PermanentAutoBan  bool            `json:"permanentAutoBan"`
+	BanTTLs           []struct {
+		Score int `json:"score"`
+		TTL   int `json:"ttl"`
+	} `json:"banTTLs"`
+	Allowlist []string `json:"allowlist"`
+}
+
+func securityPolicyView(policy gbsecurity.SecurityPolicy) SecurityPolicyView {
+	view := SecurityPolicyView{Mode: policy.Mode, Window: int(policy.Window / time.Second), BanScore: policy.BanScore, MaxPacketBytes: policy.MaxPacketBytes, MaxUDPPerWindow: policy.MaxUDPPerWindow, MaxTCPConnections: policy.MaxTCPConnections, SamplePerSource: policy.SamplePerSource, NonceTTL: int(policy.NonceTTL / time.Second), PermanentAutoBan: true}
+	view.BanTTLs = append(view.BanTTLs, struct {
+		Score int `json:"score"`
+		TTL   int `json:"ttl"`
+	}{Score: policy.BanScore, TTL: 0})
+	for _, network := range policy.Allowlist {
+		view.Allowlist = append(view.Allowlist, network.String())
+	}
+	return view
+}
+
+func policyFromView(view SecurityPolicyView) gbsecurity.SecurityPolicy {
+	policy := gbsecurity.DefaultPolicy()
+	policy.Mode, policy.Window, policy.BanScore = view.Mode, time.Duration(view.Window)*time.Second, view.BanScore
+	policy.MaxPacketBytes, policy.MaxUDPPerWindow, policy.MaxTCPConnections = view.MaxPacketBytes, view.MaxUDPPerWindow, view.MaxTCPConnections
+	policy.SamplePerSource, policy.NonceTTL = view.SamplePerSource, time.Duration(view.NonceTTL)*time.Second
+	policy.BanTTLs = []gbsecurity.TTLStep{{Score: policy.BanScore, TTL: 0}}
+	if view.Allowlist != nil {
+		policy.Allowlist = nil
+		for _, raw := range view.Allowlist {
+			if _, network, err := net.ParseCIDR(raw); err == nil {
+				policy.Allowlist = append(policy.Allowlist, *network)
+			}
+		}
+	}
+	return policy
+}
+
 type SecurityProvider interface {
 	Snapshot() SecuritySnapshot
 	Events() []gbsecurity.EventAggregate
@@ -27,6 +74,10 @@ type SecurityProvider interface {
 	Policy() gbsecurity.SecurityPolicy
 	UpdatePolicy(gbsecurity.SecurityPolicy, string) error
 	Unban(string, string) error
+	AccessRules(gbsecurity.AccessListType) []gbsecurity.AccessRule
+	CreateAccessRule(*gbsecurity.AccessRule, string) error
+	UpdateAccessRule(gbsecurity.AccessRule, string) error
+	DeleteAccessRule(uint64, string) error
 	AgentStatus() gbsecurity.AgentStatus
 	Stream() (<-chan SecuritySnapshot, func())
 }
@@ -80,15 +131,16 @@ func (c *SecurityController) Policy(ctx *gin.Context) {
 		securityUnavailable(ctx)
 		return
 	}
-	c.Success(ctx, c.provider.Policy())
+	c.Success(ctx, securityPolicyView(c.provider.Policy()))
 }
 
 func (c *SecurityController) UpdatePolicy(ctx *gin.Context) {
-	var policy gbsecurity.SecurityPolicy
-	if err := ctx.ShouldBindJSON(&policy); err != nil {
+	var view SecurityPolicyView
+	if err := ctx.ShouldBindJSON(&view); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
+	policy := policyFromView(view)
 	if err := policy.Validate(); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
@@ -101,7 +153,7 @@ func (c *SecurityController) UpdatePolicy(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
-	c.Success(ctx, policy)
+	c.Success(ctx, securityPolicyView(policy))
 }
 
 func (c *SecurityController) Unban(ctx *gin.Context) {
@@ -122,6 +174,77 @@ func (c *SecurityController) AgentHealth(ctx *gin.Context) {
 		return
 	}
 	c.Success(ctx, c.provider.AgentStatus())
+}
+
+func (c *SecurityController) AccessRules(ctx *gin.Context) {
+	if c.provider == nil {
+		securityUnavailable(ctx)
+		return
+	}
+	listType := gbsecurity.AccessListType(ctx.Query("listType"))
+	if listType != "" && listType != gbsecurity.ListBlacklist && listType != gbsecurity.ListAllowlist {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid listType"})
+		return
+	}
+	items := c.provider.AccessRules(listType)
+	c.Success(ctx, gin.H{"items": items, "total": len(items)})
+}
+
+func (c *SecurityController) CreateAccessRule(ctx *gin.Context) {
+	if c.provider == nil {
+		securityUnavailable(ctx)
+		return
+	}
+	var rule gbsecurity.AccessRule
+	if err := ctx.ShouldBindJSON(&rule); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
+		return
+	}
+	if err := c.provider.CreateAccessRule(&rule, ctx.GetString("userId")); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
+		return
+	}
+	c.Success(ctx, rule)
+}
+
+func (c *SecurityController) UpdateAccessRule(ctx *gin.Context) {
+	if c.provider == nil {
+		securityUnavailable(ctx)
+		return
+	}
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid access rule id"})
+		return
+	}
+	var rule gbsecurity.AccessRule
+	if err := ctx.ShouldBindJSON(&rule); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
+		return
+	}
+	rule.ID = id
+	if err := c.provider.UpdateAccessRule(rule, ctx.GetString("userId")); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
+		return
+	}
+	c.Success(ctx, rule)
+}
+
+func (c *SecurityController) DeleteAccessRule(ctx *gin.Context) {
+	if c.provider == nil {
+		securityUnavailable(ctx)
+		return
+	}
+	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid access rule id"})
+		return
+	}
+	if err := c.provider.DeleteAccessRule(id, ctx.GetString("userId")); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
+		return
+	}
+	c.Success(ctx, gin.H{"id": id, "deleted": true})
 }
 
 func (c *SecurityController) Stream(ctx *gin.Context) {

@@ -30,6 +30,17 @@ func TestAgentReconcileSkipsExpiredRules(t *testing.T) {
 	require.Equal(t, 1, a.Status().AppliedRules)
 }
 
+func TestAgentAcceptsPermanentRulesAndKeepsThemDuringReconcile(t *testing.T) {
+	clock := &testClock{now: time.Unix(100, 0)}
+	backend := NewMemoryBackend()
+	a := New(backend, clock, nil)
+	decision := security.BanDecision{DecisionID: "permanent", SourceIP: "203.0.113.3", CreatedAt: clock.now, Permanent: true}
+	require.NoError(t, a.Ban(decision))
+	clock.now = clock.now.Add(365 * 24 * time.Hour)
+	require.NoError(t, a.Reconcile([]security.BanDecision{decision}))
+	require.Equal(t, 1, a.Status().AppliedRules)
+}
+
 func TestAgentReconcileRemovesRulesThatNowOverlapAllowlist(t *testing.T) {
 	clock := &testClock{now: time.Unix(100, 0)}
 	backend := NewMemoryBackend()

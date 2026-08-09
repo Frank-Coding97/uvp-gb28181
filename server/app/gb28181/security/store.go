@@ -25,6 +25,10 @@ type Store interface {
 	ActiveBans(context.Context, time.Time) ([]FirewallBan, error)
 	RecentBans(context.Context, int, time.Time) ([]FirewallBan, error)
 	Unban(context.Context, string, string, time.Time) error
+	ListAccessRules(context.Context, AccessListType) ([]AccessRule, error)
+	CreateAccessRule(context.Context, *AccessRule) error
+	UpdateAccessRule(context.Context, AccessRule) error
+	DeleteAccessRule(context.Context, uint64, string) error
 }
 
 type GormStore struct{ db *gorm.DB }
@@ -38,6 +42,7 @@ type securityEventRow struct {
 	AddressFamily string    `gorm:"column:address_family;size:8;not null"`
 	Transport     string    `gorm:"column:transport;size:8;not null;uniqueIndex:uk_gb_sip_security_event,priority:3"`
 	Method        string    `gorm:"column:method;size:16;not null;uniqueIndex:uk_gb_sip_security_event,priority:4"`
+	UserAgent     string    `gorm:"column:user_agent;size:255;not null"`
 	Reason        string    `gorm:"column:reason;size:32;not null;uniqueIndex:uk_gb_sip_security_event,priority:5"`
 	Action        string    `gorm:"column:action;size:16;not null;uniqueIndex:uk_gb_sip_security_event,priority:6"`
 	Count         int64     `gorm:"column:count;not null"`
@@ -50,21 +55,29 @@ type securityEventRow struct {
 func (securityEventRow) TableName() string { return "gb_sip_security_event" }
 
 type securityBanRow struct {
-	ID            uint64     `gorm:"column:id;primaryKey;autoIncrement"`
-	SourceIP      string     `gorm:"column:source_ip;size:64;not null;index:idx_gb_sip_security_ban_source_status,priority:1"`
-	AddressFamily string     `gorm:"column:address_family;size:8;not null"`
-	Status        string     `gorm:"column:status;size:16;not null;index:idx_gb_sip_security_ban_source_status,priority:2"`
-	Reason        string     `gorm:"column:reason;size:32;not null"`
-	RuleID        string     `gorm:"column:rule_id;size:64;not null"`
-	Score         int        `gorm:"column:score;not null"`
-	CreatedAt     time.Time  `gorm:"column:created_at;not null"`
-	ExpiresAt     time.Time  `gorm:"column:expires_at;not null;index:idx_gb_sip_security_ban_expiry"`
-	UnbannedAt    *time.Time `gorm:"column:unbanned_at"`
-	UnbannedBy    string     `gorm:"column:unbanned_by;size:64;not null"`
-	Origin        string     `gorm:"column:origin;size:16;not null"`
-	AgentState    string     `gorm:"column:agent_state;size:16;not null"`
-	DecisionID    string     `gorm:"column:decision_id;size:64;not null;uniqueIndex:uk_gb_sip_security_ban_decision"`
-	LastError     string     `gorm:"column:last_error;size:512;not null"`
+	ID                   uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	SourceIP             string     `gorm:"column:source_ip;size:64;not null;index:idx_gb_sip_security_ban_source_status,priority:1"`
+	AddressFamily        string     `gorm:"column:address_family;size:8;not null"`
+	Status               string     `gorm:"column:status;size:16;not null;index:idx_gb_sip_security_ban_source_status,priority:2"`
+	Reason               string     `gorm:"column:reason;size:32;not null"`
+	RuleID               string     `gorm:"column:rule_id;size:64;not null"`
+	Score                int        `gorm:"column:score;not null"`
+	CreatedAt            time.Time  `gorm:"column:created_at;not null"`
+	ExpiresAt            *time.Time `gorm:"column:expires_at;index:idx_gb_sip_security_ban_expiry"`
+	UnbannedAt           *time.Time `gorm:"column:unbanned_at"`
+	UnbannedBy           string     `gorm:"column:unbanned_by;size:64;not null"`
+	Origin               string     `gorm:"column:origin;size:16;not null"`
+	AgentState           string     `gorm:"column:agent_state;size:16;not null"`
+	DecisionID           string     `gorm:"column:decision_id;size:64;not null;uniqueIndex:uk_gb_sip_security_ban_decision"`
+	LastError            string     `gorm:"column:last_error;size:512;not null"`
+	TriggerMethod        string     `gorm:"column:trigger_method;size:16;not null"`
+	TriggerCount         int        `gorm:"column:trigger_count;not null"`
+	TriggerThreshold     int        `gorm:"column:trigger_threshold;not null"`
+	WindowSeconds        int        `gorm:"column:window_seconds;not null"`
+	PolicyMode           string     `gorm:"column:policy_mode;size:16;not null"`
+	FirewallAppliedAt    *time.Time `gorm:"column:firewall_applied_at"`
+	BlockedCountAfterBan int64      `gorm:"column:blocked_count_after_ban;not null"`
+	LastBlockedAt        *time.Time `gorm:"column:last_blocked_at"`
 }
 
 func (securityBanRow) TableName() string { return "gb_sip_security_ban" }
@@ -99,6 +112,22 @@ type securityAuditRow struct {
 }
 
 func (securityAuditRow) TableName() string { return "gb_sip_security_audit" }
+
+type securityAccessRuleRow struct {
+	ID         uint64     `gorm:"column:id;primaryKey;autoIncrement"`
+	ListType   string     `gorm:"column:list_type;size:16;not null;index:idx_gb_sip_security_access_rule_list_status,priority:1"`
+	MatchType  string     `gorm:"column:match_type;size:16;not null"`
+	MatchValue string     `gorm:"column:match_value;size:255;not null"`
+	Scope      string     `gorm:"column:scope;size:32;not null"`
+	Status     string     `gorm:"column:status;size:16;not null;index:idx_gb_sip_security_access_rule_list_status,priority:2"`
+	ExpiresAt  *time.Time `gorm:"column:expires_at"`
+	Note       string     `gorm:"column:note;size:255;not null"`
+	CreatedBy  string     `gorm:"column:created_by;size:64;not null"`
+	CreatedAt  time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt  time.Time  `gorm:"column:updated_at;not null"`
+}
+
+func (securityAccessRuleRow) TableName() string { return "gb_sip_security_access_rule" }
 
 func (s *GormStore) LoadPolicy(ctx context.Context) (Policy, error) {
 	if s == nil || s.db == nil {
@@ -187,7 +216,7 @@ func (s *GormStore) SaveBan(ctx context.Context, item FirewallBan) error {
 	row := banRow(item)
 	return s.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "decision_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"status", "rule_id", "unbanned_at", "unbanned_by", "agent_state", "last_error"}),
+		DoUpdates: clause.AssignmentColumns([]string{"status", "rule_id", "unbanned_at", "unbanned_by", "agent_state", "last_error", "firewall_applied_at", "blocked_count_after_ban", "last_blocked_at"}),
 	}).Create(&row).Error
 }
 
@@ -196,7 +225,7 @@ func (s *GormStore) ActiveBans(ctx context.Context, now time.Time) ([]FirewallBa
 		return nil, err
 	}
 	var rows []securityBanRow
-	if err := s.db.WithContext(ctx).Where("status IN ? AND expires_at > ?", []string{string(BanActive), string(BanAgentFailed)}, now).Order("created_at ASC").Find(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Where("status IN ? AND (expires_at IS NULL OR expires_at > ?)", []string{string(BanActive), string(BanAgentFailed)}, now).Order("created_at ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return bansFromRows(rows), nil
@@ -230,8 +259,86 @@ func (s *GormStore) Unban(ctx context.Context, identifier, actor string, at time
 	})
 }
 
+func (s *GormStore) ListAccessRules(ctx context.Context, listType AccessListType) ([]AccessRule, error) {
+	query := s.db.WithContext(ctx).Model(&securityAccessRuleRow{})
+	if listType != "" {
+		query = query.Where("list_type = ?", listType)
+	}
+	var rows []securityAccessRuleRow
+	if err := query.Order("created_at DESC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]AccessRule, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, row.rule())
+	}
+	return items, nil
+}
+
+func (s *GormStore) CreateAccessRule(ctx context.Context, rule *AccessRule) error {
+	if rule == nil {
+		return errors.New("access rule is required")
+	}
+	normalizeAccessRule(rule)
+	if err := rule.Validate(); err != nil {
+		return err
+	}
+	now := time.Now()
+	rule.CreatedAt, rule.UpdatedAt = now, now
+	row := accessRuleRow(*rule)
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&row).Error; err != nil {
+			return err
+		}
+		rule.ID = row.ID
+		return tx.Create(&securityAuditRow{Actor: actorOrSystem(rule.CreatedBy), Action: "access_rule.create", Target: strconv.FormatUint(row.ID, 10), Reason: string(rule.ListType) + ":" + string(rule.MatchType), CreatedAt: now}).Error
+	})
+}
+
+func (s *GormStore) UpdateAccessRule(ctx context.Context, rule AccessRule) error {
+	if rule.ID == 0 {
+		return errors.New("access rule id is required")
+	}
+	normalizeAccessRule(&rule)
+	if err := rule.Validate(); err != nil {
+		return err
+	}
+	now := time.Now()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&securityAccessRuleRow{}).Where("id = ?", rule.ID).Updates(map[string]interface{}{
+			"list_type": rule.ListType, "match_type": rule.MatchType, "match_value": rule.MatchValue,
+			"scope": rule.Scope, "status": rule.Status, "expires_at": rule.ExpiresAt,
+			"note": rule.Note, "updated_at": now,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Create(&securityAuditRow{Actor: actorOrSystem(rule.CreatedBy), Action: "access_rule.update", Target: strconv.FormatUint(rule.ID, 10), Reason: string(rule.ListType) + ":" + string(rule.MatchType), CreatedAt: now}).Error
+	})
+}
+
+func (s *GormStore) DeleteAccessRule(ctx context.Context, id uint64, actor string) error {
+	if id == 0 {
+		return errors.New("access rule id is required")
+	}
+	now := time.Now()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Delete(&securityAccessRuleRow{}, id)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Create(&securityAuditRow{Actor: actorOrSystem(actor), Action: "access_rule.delete", Target: strconv.FormatUint(id, 10), Reason: "manual access rule removed", CreatedAt: now}).Error
+	})
+}
+
 func (s *GormStore) expireBans(ctx context.Context, now time.Time) error {
-	return s.db.WithContext(ctx).Model(&securityBanRow{}).Where("status IN ? AND expires_at <= ?", []string{string(BanActive), string(BanAgentFailed)}, now).Updates(map[string]interface{}{"status": string(BanExpired), "agent_state": "expired"}).Error
+	return s.db.WithContext(ctx).Model(&securityBanRow{}).Where("status IN ? AND expires_at IS NOT NULL AND expires_at <= ?", []string{string(BanActive), string(BanAgentFailed)}, now).Updates(map[string]interface{}{"status": string(BanExpired), "agent_state": "expired"}).Error
 }
 
 func policyRow(policy Policy, actor string) securityPolicyRow {
@@ -263,11 +370,11 @@ func (r securityPolicyRow) policy() (Policy, error) {
 }
 
 func eventRow(item EventAggregate) securityEventRow {
-	return securityEventRow{BucketAt: item.BucketAt, SourceIP: item.SourceIP, AddressFamily: addressFamily(item.SourceIP), Transport: strings.ToUpper(item.Transport), Method: strings.ToUpper(item.Method), Reason: string(item.Reason), Action: string(item.Action), Count: item.Count, ScoreDelta: item.ScoreDelta, FirstSeenAt: item.FirstSeenAt, LastSeenAt: item.LastSeenAt}
+	return securityEventRow{BucketAt: item.BucketAt, SourceIP: item.SourceIP, AddressFamily: addressFamily(item.SourceIP), Transport: strings.ToUpper(item.Transport), Method: strings.ToUpper(item.Method), UserAgent: item.UserAgent, Reason: string(item.Reason), Action: string(item.Action), Count: item.Count, ScoreDelta: item.ScoreDelta, FirstSeenAt: item.FirstSeenAt, LastSeenAt: item.LastSeenAt}
 }
 
 func (r securityEventRow) aggregate() EventAggregate {
-	return EventAggregate{BucketAt: r.BucketAt, SourceIP: r.SourceIP, Transport: r.Transport, Method: r.Method, Reason: Reason(r.Reason), Action: Action(r.Action), Count: r.Count, ScoreDelta: r.ScoreDelta, FirstSeenAt: r.FirstSeenAt, LastSeenAt: r.LastSeenAt}
+	return EventAggregate{BucketAt: r.BucketAt, SourceIP: r.SourceIP, Transport: r.Transport, Method: r.Method, UserAgent: r.UserAgent, Reason: Reason(r.Reason), Action: Action(r.Action), Count: r.Count, ScoreDelta: r.ScoreDelta, FirstSeenAt: r.FirstSeenAt, LastSeenAt: r.LastSeenAt}
 }
 
 func banRow(item FirewallBan) securityBanRow {
@@ -276,13 +383,67 @@ func banRow(item FirewallBan) securityBanRow {
 		value := item.UnbannedAt
 		unbannedAt = &value
 	}
-	return securityBanRow{SourceIP: item.Decision.SourceIP, AddressFamily: addressFamily(item.Decision.SourceIP), Status: string(item.Status), Reason: string(item.Decision.Reason), RuleID: item.RuleID, Score: item.Decision.Score, CreatedAt: item.Decision.CreatedAt, ExpiresAt: item.Decision.CreatedAt.Add(item.Decision.TTL), UnbannedAt: unbannedAt, UnbannedBy: item.UnbannedBy, Origin: item.Origin, AgentState: item.AgentState, DecisionID: item.Decision.DecisionID, LastError: item.LastError}
+	var firewallAppliedAt, lastBlockedAt *time.Time
+	if !item.FirewallAppliedAt.IsZero() {
+		value := item.FirewallAppliedAt
+		firewallAppliedAt = &value
+	}
+	if !item.LastBlockedAt.IsZero() {
+		value := item.LastBlockedAt
+		lastBlockedAt = &value
+	}
+	var expiresAt *time.Time
+	if value := item.Decision.ExpiresAt(); !value.IsZero() {
+		expiresAt = &value
+	}
+	return securityBanRow{SourceIP: item.Decision.SourceIP, AddressFamily: addressFamily(item.Decision.SourceIP), Status: string(item.Status), Reason: string(item.Decision.Reason), RuleID: item.RuleID, Score: item.Decision.Score, CreatedAt: item.Decision.CreatedAt, ExpiresAt: expiresAt, UnbannedAt: unbannedAt, UnbannedBy: item.UnbannedBy, Origin: item.Origin, AgentState: item.AgentState, DecisionID: item.Decision.DecisionID, LastError: item.LastError, TriggerMethod: item.Decision.TriggerMethod, TriggerCount: item.Decision.TriggerCount, TriggerThreshold: item.Decision.TriggerThreshold, WindowSeconds: item.Decision.WindowSeconds, PolicyMode: string(item.Decision.PolicyMode), FirewallAppliedAt: firewallAppliedAt, BlockedCountAfterBan: item.BlockedCountAfterBan, LastBlockedAt: lastBlockedAt}
+}
+
+func accessRuleRow(rule AccessRule) securityAccessRuleRow {
+	return securityAccessRuleRow{ID: rule.ID, ListType: string(rule.ListType), MatchType: string(rule.MatchType), MatchValue: rule.MatchValue, Scope: rule.Scope, Status: string(rule.Status), ExpiresAt: rule.ExpiresAt, Note: rule.Note, CreatedBy: rule.CreatedBy, CreatedAt: rule.CreatedAt, UpdatedAt: rule.UpdatedAt}
+}
+
+func (r securityAccessRuleRow) rule() AccessRule {
+	return AccessRule{ID: r.ID, ListType: AccessListType(r.ListType), MatchType: AccessMatchType(r.MatchType), MatchValue: r.MatchValue, Scope: r.Scope, Status: AccessRuleStatus(r.Status), ExpiresAt: r.ExpiresAt, Note: r.Note, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+}
+
+func normalizeAccessRule(rule *AccessRule) {
+	rule.MatchValue = strings.TrimSpace(rule.MatchValue)
+	rule.Scope = strings.TrimSpace(rule.Scope)
+	if rule.Scope == "" {
+		rule.Scope = "all_sip"
+	}
+	if rule.Status == "" {
+		rule.Status = RuleEnabled
+	}
+	if rule.MatchType == MatchIP {
+		if ip := net.ParseIP(rule.MatchValue); ip != nil {
+			rule.MatchValue = ip.String()
+		}
+	}
+	if rule.MatchType == MatchCIDR {
+		if _, network, err := net.ParseCIDR(rule.MatchValue); err == nil {
+			rule.MatchValue = network.String()
+		}
+	}
 }
 
 func (r securityBanRow) ban() FirewallBan {
-	item := FirewallBan{Decision: BanDecision{DecisionID: r.DecisionID, SourceIP: r.SourceIP, Reason: Reason(r.Reason), Score: r.Score, CreatedAt: r.CreatedAt, TTL: r.ExpiresAt.Sub(r.CreatedAt)}, Status: BanStatus(r.Status), RuleID: r.RuleID, Origin: r.Origin, AgentState: r.AgentState, UnbannedBy: r.UnbannedBy, LastError: r.LastError}
+	decision := BanDecision{DecisionID: r.DecisionID, SourceIP: r.SourceIP, Reason: Reason(r.Reason), Score: r.Score, CreatedAt: r.CreatedAt, TriggerMethod: r.TriggerMethod, TriggerCount: r.TriggerCount, TriggerThreshold: r.TriggerThreshold, WindowSeconds: r.WindowSeconds, PolicyMode: Mode(r.PolicyMode)}
+	if r.ExpiresAt == nil {
+		decision.Permanent = true
+	} else {
+		decision.TTL = r.ExpiresAt.Sub(r.CreatedAt)
+	}
+	item := FirewallBan{Decision: decision, Status: BanStatus(r.Status), RuleID: r.RuleID, Origin: r.Origin, AgentState: r.AgentState, UnbannedBy: r.UnbannedBy, LastError: r.LastError, BlockedCountAfterBan: r.BlockedCountAfterBan}
 	if r.UnbannedAt != nil {
 		item.UnbannedAt = *r.UnbannedAt
+	}
+	if r.FirewallAppliedAt != nil {
+		item.FirewallAppliedAt = *r.FirewallAppliedAt
+	}
+	if r.LastBlockedAt != nil {
+		item.LastBlockedAt = *r.LastBlockedAt
 	}
 	return item
 }

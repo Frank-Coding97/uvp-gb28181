@@ -118,7 +118,19 @@ func (p securityRuntimeProvider) Policy() gbsecurity.SecurityPolicy   { return p
 func (p securityRuntimeProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy, actor string) error {
 	return p.runtime.UpdatePolicy(policy, actor)
 }
-func (p securityRuntimeProvider) Unban(id, actor string) error        { return p.runtime.Unban(id, actor) }
+func (p securityRuntimeProvider) Unban(id, actor string) error { return p.runtime.Unban(id, actor) }
+func (p securityRuntimeProvider) AccessRules(listType gbsecurity.AccessListType) []gbsecurity.AccessRule {
+	return p.runtime.AccessRules(listType)
+}
+func (p securityRuntimeProvider) CreateAccessRule(rule *gbsecurity.AccessRule, actor string) error {
+	return p.runtime.CreateAccessRule(rule, actor)
+}
+func (p securityRuntimeProvider) UpdateAccessRule(rule gbsecurity.AccessRule, actor string) error {
+	return p.runtime.UpdateAccessRule(rule, actor)
+}
+func (p securityRuntimeProvider) DeleteAccessRule(id uint64, actor string) error {
+	return p.runtime.DeleteAccessRule(id, actor)
+}
 func (p securityRuntimeProvider) AgentStatus() gbsecurity.AgentStatus { return p.runtime.AgentStatus() }
 func (p securityRuntimeProvider) Stream() (<-chan gbcontrollers.SecuritySnapshot, func()) {
 	in, cancel := p.runtime.Stream()
@@ -364,6 +376,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			securityGroup.GET("/events", securityController.Events)
 			securityGroup.GET("/bans", securityController.Bans)
 			securityGroup.POST("/bans/:id/unban", securityController.Unban)
+			securityGroup.GET("/access-rules", securityController.AccessRules)
+			securityGroup.POST("/access-rules", securityController.CreateAccessRule)
+			securityGroup.PUT("/access-rules/:id", securityController.UpdateAccessRule)
+			securityGroup.DELETE("/access-rules/:id", securityController.DeleteAccessRule)
 			securityGroup.GET("/policy", securityController.Policy)
 			securityGroup.PUT("/policy", securityController.UpdatePolicy)
 			securityGroup.GET("/agent/health", securityController.AgentHealth)

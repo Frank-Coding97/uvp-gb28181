@@ -100,10 +100,17 @@ func (b *NftBackend) Add(sourceIP string, expiresAt time.Time) error {
 	if b.isAllowlisted(ip) {
 		return ErrAllowlisted
 	}
+	if expiresAt.IsZero() {
+		return b.addElement(ip, "")
+	}
 	remaining := time.Until(expiresAt)
 	if remaining <= 0 {
 		return errors.New("firewall rule already expired")
 	}
+	return b.addElement(ip, fmt.Sprintf(" timeout %ds", max(1, int(remaining/time.Second))))
+}
+
+func (b *NftBackend) addElement(ip net.IP, timeout string) error {
 	set, err := b.sourceSet(ip)
 	if err != nil {
 		return err
@@ -112,11 +119,10 @@ func (b *NftBackend) Add(sourceIP string, expiresAt time.Time) error {
 	if err != nil {
 		return err
 	}
-	seconds := max(1, int(remaining/time.Second))
-	input := fmt.Sprintf("add element inet uvp_sip_guard %s { %s timeout %ds }\n", set, ip.String(), seconds)
+	input := fmt.Sprintf("add element inet uvp_sip_guard %s { %s%s }\n", set, ip.String(), timeout)
 	for _, current := range existing {
 		if current == ip.String() {
-			input = fmt.Sprintf("delete element inet uvp_sip_guard %s { %s }\nadd element inet uvp_sip_guard %s { %s timeout %ds }\n", set, ip.String(), set, ip.String(), seconds)
+			input = fmt.Sprintf("delete element inet uvp_sip_guard %s { %s }\nadd element inet uvp_sip_guard %s { %s%s }\n", set, ip.String(), set, ip.String(), timeout)
 			break
 		}
 	}

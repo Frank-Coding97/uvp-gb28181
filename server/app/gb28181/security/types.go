@@ -39,6 +39,8 @@ const (
 	ReasonUnregisteredMsg Reason = "unregistered_message"
 	ReasonPacketTooLarge  Reason = "packet_too_large"
 	ReasonConnectionRate  Reason = "connection_rate"
+	ReasonManualBlacklist Reason = "manual_blacklist"
+	ReasonActiveBan       Reason = "active_ban"
 )
 
 var (
@@ -71,8 +73,8 @@ type SecurityPolicy = Policy
 
 func DefaultPolicy() Policy {
 	return Policy{
-		Mode:              ModeObserve,
-		Window:            time.Minute,
+		Mode:              ModeProtect,
+		Window:            10 * time.Second,
 		BanScore:          100,
 		MaxPacketBytes:    64 * 1024,
 		MaxUDPPerWindow:   120,
@@ -80,12 +82,8 @@ func DefaultPolicy() Policy {
 		MaxEventKeys:      4096,
 		SamplePerSource:   3,
 		NonceTTL:          60 * time.Second,
-		BanTTLs: []TTLStep{
-			{Score: 100, TTL: 10 * time.Minute},
-			{Score: 250, TTL: time.Hour},
-			{Score: 500, TTL: 24 * time.Hour},
-		},
-		Allowlist: defaultAllowlist(),
+		BanTTLs:           []TTLStep{{Score: 100, TTL: 0}},
+		Allowlist:         defaultAllowlist(),
 	}
 }
 
@@ -115,8 +113,8 @@ func (p Policy) Validate() error {
 		return ErrInvalidPolicy
 	}
 	lastScore := 0
-	for _, step := range p.BanTTLs {
-		if step.Score <= lastScore || step.TTL <= 0 {
+	for index, step := range p.BanTTLs {
+		if step.Score <= lastScore || step.TTL < 0 || (step.TTL == 0 && index != len(p.BanTTLs)-1) {
 			return ErrInvalidPolicy
 		}
 		lastScore = step.Score
@@ -125,13 +123,32 @@ func (p Policy) Validate() error {
 }
 
 func (p Policy) TTLForScore(score int) time.Duration {
+	ttl, _ := p.BanForScore(score)
+	return ttl
+}
+
+func (p Policy) BanForScore(score int) (time.Duration, bool) {
 	var selected time.Duration
+	matched := false
 	for _, step := range p.BanTTLs {
 		if score >= step.Score {
 			selected = step.TTL
+			matched = true
 		}
 	}
-	return selected
+	return selected, matched
+}
+
+func (p Policy) PermanentForScore(score int) bool {
+	ttl, matched := p.BanForScore(score)
+	return matched && ttl == 0
+}
+
+// WithPermanentAutoBan keeps the policy thresholds but makes every automatic
+// ban explicit and permanent. Manual unban remains the only release path.
+func (p Policy) WithPermanentAutoBan() Policy {
+	p.BanTTLs = []TTLStep{{Score: p.BanScore, TTL: 0}}
+	return p
 }
 
 func (p Policy) IsAllowlisted(raw string) bool {
@@ -160,6 +177,7 @@ type Event struct {
 	Transport string    `json:"transport"`
 	Method    string    `json:"method"`
 	DeviceID  string    `json:"deviceId"`
+	UserAgent string    `json:"userAgent"`
 	Reason    Reason    `json:"reason"`
 	Action    Action    `json:"action"`
 	Score     int       `json:"score"`
@@ -167,12 +185,33 @@ type Event struct {
 }
 
 type BanDecision struct {
-	DecisionID string        `json:"decisionId"`
-	SourceIP   string        `json:"sourceIp"`
-	Reason     Reason        `json:"reason"`
-	Score      int           `json:"score"`
-	TTL        time.Duration `json:"ttl"`
-	CreatedAt  time.Time     `json:"createdAt"`
+	DecisionID       string        `json:"decisionId"`
+	SourceIP         string        `json:"sourceIp"`
+	Reason           Reason        `json:"reason"`
+	Score            int           `json:"score"`
+	TTL              time.Duration `json:"ttl"`
+	Permanent        bool          `json:"permanent"`
+	CreatedAt        time.Time     `json:"createdAt"`
+	TriggerMethod    string        `json:"triggerMethod"`
+	TriggerCount     int           `json:"triggerCount"`
+	TriggerThreshold int           `json:"triggerThreshold"`
+	WindowSeconds    int           `json:"windowSeconds"`
+	PolicyMode       Mode          `json:"policyMode"`
+}
+
+func (d BanDecision) ExpiresAt() time.Time {
+	if d.Permanent {
+		return time.Time{}
+	}
+	return d.CreatedAt.Add(d.TTL)
+}
+
+func (d BanDecision) ActiveAt(now time.Time) bool {
+	if d.Permanent {
+		return true
+	}
+	expiresAt := d.ExpiresAt()
+	return !expiresAt.IsZero() && now.Before(expiresAt)
 }
 
 type Clock interface{ Now() time.Time }

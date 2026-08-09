@@ -17,4 +17,8 @@ func TestSecurityRoutesAreProtectedGroupPaths(t *testing.T) {
 	require.True(t, paths["GET /api/gb28181/security/snapshot"])
 	require.True(t, paths["GET /api/gb28181/security/stream"])
 	require.True(t, paths["POST /api/gb28181/security/bans/:id/unban"])
+	require.True(t, paths["GET /api/gb28181/security/access-rules"])
+	require.True(t, paths["POST /api/gb28181/security/access-rules"])
+	require.True(t, paths["PUT /api/gb28181/security/access-rules/:id"])
+	require.True(t, paths["DELETE /api/gb28181/security/access-rules/:id"])
 }

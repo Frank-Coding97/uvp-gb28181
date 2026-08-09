@@ -11,11 +11,44 @@ import (
 
 func TestRuntimeObserveAggregatesWithoutFirewallSideEffect(t *testing.T) {
 	agent := &fakeAgent{}
-	r := NewRuntime(DefaultPolicy(), &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
+	r := NewRuntime(DefaultPolicyWithMode(ModeObserve), &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
 	require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonUnknownMethod, Action: ActionDrop}))
 	snapshot := r.Snapshot()
 	require.Len(t, snapshot.Events, 1)
 	require.Empty(t, agent.banCalls)
+}
+
+func TestRuntimeProtectBansOnFifthUnknownInviteButNotBefore(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(100, 0)}
+	agent := &fakeAgent{}
+	r := NewRuntime(DefaultPolicy(), clock, agent, []byte("secret"))
+	packet := []byte("INVITE sip:x SIP/2.0\r\n")
+
+	for i := 0; i < 4; i++ {
+		out, err := r.Admission().Filter(readProps(), packet)
+		require.NoError(t, err)
+		require.Empty(t, out)
+		require.Empty(t, agent.banCalls)
+	}
+	out, err := r.Admission().Filter(readProps(), packet)
+	require.NoError(t, err)
+	require.Empty(t, out)
+	require.Len(t, agent.banCalls, 1)
+	require.True(t, r.Admission().IsBanned("198.51.100.10"))
+	require.Equal(t, ReasonInviteRate, agent.banCalls[0].Reason)
+	require.Equal(t, 100, agent.banCalls[0].Score)
+	require.Equal(t, "INVITE", agent.banCalls[0].TriggerMethod)
+	require.Equal(t, 5, agent.banCalls[0].TriggerCount)
+	require.Equal(t, 5, agent.banCalls[0].TriggerThreshold)
+	require.Equal(t, 10, agent.banCalls[0].WindowSeconds)
+	require.Equal(t, ModeProtect, agent.banCalls[0].PolicyMode)
+
+	_, err = r.Admission().Filter(readProps(), packet)
+	require.NoError(t, err)
+	bans := r.Bans()
+	require.Len(t, bans, 1)
+	require.Equal(t, int64(1), bans[0].BlockedCountAfterBan)
+	require.Equal(t, clock.Now(), bans[0].LastBlockedAt)
 }
 
 func TestRuntimeProtectPropagatesBanToAdmissionAndAgent(t *testing.T) {
@@ -43,7 +76,14 @@ func TestRuntimeAdmissionFeedsScorerAndSnapshot(t *testing.T) {
 	out, err := r.Admission().Filter(readProps(), packet)
 	require.NoError(t, err)
 	require.Empty(t, out)
-	require.Len(t, r.Events(), 1)
+	require.Len(t, r.Events(), 2)
+	var foundActiveBan bool
+	for _, event := range r.Events() {
+		if event.Reason == ReasonActiveBan {
+			foundActiveBan = true
+		}
+	}
+	require.True(t, foundActiveBan)
 	require.Len(t, r.Bans(), 1)
 	require.Len(t, agent.banCalls, 1)
 }
@@ -66,7 +106,6 @@ func TestPersistentRuntimeRestoresPolicyBanAndFlushesEvents(t *testing.T) {
 	db := newSecurityStoreTestDB(t)
 	store := NewGormStore(db)
 	policy := DefaultPolicy()
-	policy.Mode = ModeProtect
 	require.NoError(t, store.SavePolicy(context.Background(), policy, "system"))
 	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	ban := FirewallBan{Decision: BanDecision{DecisionID: "restore-1", SourceIP: "203.0.113.10", Reason: ReasonInviteRate, Score: 120, CreatedAt: now, TTL: time.Hour}, Status: BanActive, RuleID: "restore-1", Origin: "auto", AgentState: "applied"}
@@ -91,7 +130,7 @@ func TestPersistentRuntimeRestoresPolicyBanAndFlushesEvents(t *testing.T) {
 func TestPersistentRuntimeObserveClearsKernelRulesInsteadOfRestoringBans(t *testing.T) {
 	db := newSecurityStoreTestDB(t)
 	store := NewGormStore(db)
-	policy := DefaultPolicy()
+	policy := DefaultPolicyWithMode(ModeObserve)
 	require.NoError(t, store.SavePolicy(context.Background(), policy, "system"))
 	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
 	ban := FirewallBan{Decision: BanDecision{DecisionID: "observe-1", SourceIP: "203.0.113.10", Reason: ReasonInviteRate, Score: 120, CreatedAt: now, TTL: time.Hour}, Status: BanActive, RuleID: "observe-1", Origin: "auto", AgentState: "applied"}

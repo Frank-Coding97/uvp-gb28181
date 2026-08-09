@@ -32,6 +32,7 @@ type Runtime struct {
 	store          Store
 	persist        *eventPersister
 	persistDropped atomic.Int64
+	accessRules    []AccessRule
 	subsMu         sync.Mutex
 	subs           map[chan RuntimeSnapshot]struct{}
 }
@@ -59,8 +60,14 @@ func NewPersistentRuntime(ctx context.Context, store Store, clock Clock, agent F
 	if err != nil {
 		return nil, err
 	}
+	policy = policy.WithPermanentAutoBan()
 	r := NewRuntime(policy, clock, agent, nonceSecret)
 	r.store = store
+	if rules, loadErr := store.ListAccessRules(ctx, ""); loadErr != nil {
+		return nil, loadErr
+	} else {
+		r.setAccessRules(rules)
+	}
 	if events, loadErr := store.RecentEvents(ctx, 500); loadErr != nil {
 		return nil, loadErr
 	} else {
@@ -77,7 +84,7 @@ func NewPersistentRuntime(ctx context.Context, store Store, clock Clock, agent F
 	}
 	decisions := enforcementDecisions(policy, active, r.clock.Now())
 	for _, item := range decisions {
-		_ = r.admit.Ban(item.SourceIP, item.CreatedAt.Add(item.TTL))
+		_ = r.admit.Ban(item.SourceIP, item.ExpiresAt())
 	}
 	if reconciler, ok := agent.(interface{ Reconcile([]BanDecision) error }); ok {
 		_ = reconciler.Reconcile(decisions)
@@ -100,6 +107,19 @@ func (r *Runtime) TrustedEndpoint(deviceID string) (Endpoint, bool) {
 	return r.scorer.TrustedEndpoint(deviceID)
 }
 func (r *Runtime) Record(event Event) error {
+	if event.Reason == ReasonActiveBan {
+		if event.Occurred.IsZero() {
+			event.Occurred = r.clock.Now()
+		}
+		event.Action = ActionDrop
+		r.bans.RecordBlocked(event.SourceIP, event.Occurred)
+		recorded := r.events.Record(event)
+		if recorded && r.persist != nil && !r.persist.Enqueue(event) {
+			r.persistDropped.Add(1)
+		}
+		r.publish(r.Snapshot())
+		return nil
+	}
 	event, decision, err := r.scorer.Observe(event)
 	if err != nil {
 		return err
@@ -113,7 +133,7 @@ func (r *Runtime) Record(event Event) error {
 	}
 	if decision != nil {
 		item := r.bans.Upsert(*decision, "auto")
-		_ = r.admit.Ban(decision.SourceIP, decision.CreatedAt.Add(decision.TTL))
+		_ = r.admit.Ban(decision.SourceIP, decision.ExpiresAt())
 		if r.agent != nil {
 			if err := r.agent.Ban(*decision); err != nil {
 				r.bans.MarkAgentFailed(decision.SourceIP, err.Error())
@@ -124,7 +144,7 @@ func (r *Runtime) Record(event Event) error {
 				r.publish(r.Snapshot())
 				return err
 			}
-			r.bans.MarkApplied(decision.SourceIP)
+			r.bans.MarkApplied(decision.SourceIP, r.clock.Now())
 			item, _ = r.bans.Get(decision.SourceIP, r.clock.Now())
 		} else {
 			r.bans.MarkAgentFailed(decision.SourceIP, "agent unavailable")
@@ -150,7 +170,68 @@ func (r *Runtime) Snapshot() RuntimeSnapshot {
 func (r *Runtime) Events() []EventAggregate { return r.events.Snapshot() }
 func (r *Runtime) Bans() []FirewallBan      { return r.bans.List(r.clock.Now()) }
 func (r *Runtime) Policy() Policy           { r.mu.RLock(); defer r.mu.RUnlock(); return r.policy }
+func (r *Runtime) AccessRules(listType AccessListType) []AccessRule {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	items := make([]AccessRule, 0, len(r.accessRules))
+	for _, rule := range r.accessRules {
+		if listType == "" || rule.ListType == listType {
+			items = append(items, rule)
+		}
+	}
+	return items
+}
+
+func (r *Runtime) CreateAccessRule(rule *AccessRule, actor string) error {
+	if r.store == nil {
+		return errors.New("security store unavailable")
+	}
+	rule.CreatedBy = actorOrSystem(actor)
+	if err := r.store.CreateAccessRule(context.Background(), rule); err != nil {
+		return err
+	}
+	return r.reloadAccessRules()
+}
+
+func (r *Runtime) UpdateAccessRule(rule AccessRule, actor string) error {
+	if r.store == nil {
+		return errors.New("security store unavailable")
+	}
+	rule.CreatedBy = actorOrSystem(actor)
+	if err := r.store.UpdateAccessRule(context.Background(), rule); err != nil {
+		return err
+	}
+	return r.reloadAccessRules()
+}
+
+func (r *Runtime) DeleteAccessRule(id uint64, actor string) error {
+	if r.store == nil {
+		return errors.New("security store unavailable")
+	}
+	if err := r.store.DeleteAccessRule(context.Background(), id, actor); err != nil {
+		return err
+	}
+	return r.reloadAccessRules()
+}
+
+func (r *Runtime) reloadAccessRules() error {
+	rules, err := r.store.ListAccessRules(context.Background(), "")
+	if err != nil {
+		return err
+	}
+	r.setAccessRules(rules)
+	return nil
+}
+
+func (r *Runtime) setAccessRules(rules []AccessRule) {
+	r.mu.Lock()
+	r.accessRules = append([]AccessRule(nil), rules...)
+	r.mu.Unlock()
+	r.admit.SetAccessRules(rules)
+}
+
 func (r *Runtime) UpdatePolicy(policy Policy, actors ...string) error {
+	policy = policy.WithPermanentAutoBan()
 	if err := policy.Validate(); err != nil {
 		return err
 	}
@@ -174,7 +255,7 @@ func (r *Runtime) UpdatePolicy(policy Policy, actors ...string) error {
 		r.admit.Unban(item.Decision.SourceIP)
 	}
 	for _, item := range decisions {
-		_ = r.admit.Ban(item.SourceIP, item.CreatedAt.Add(item.TTL))
+		_ = r.admit.Ban(item.SourceIP, item.ExpiresAt())
 	}
 	if reconciler, ok := r.agent.(interface{ Reconcile([]BanDecision) error }); ok {
 		if err := reconciler.Reconcile(decisions); err != nil {
@@ -193,7 +274,7 @@ func enforcementDecisions(policy Policy, bans []FirewallBan, now time.Time) []Ba
 		if item.Status != BanActive && item.Status != BanAgentFailed {
 			continue
 		}
-		if item.Decision.CreatedAt.Add(item.Decision.TTL).After(now) && !policy.IsAllowlisted(item.Decision.SourceIP) {
+		if item.Decision.ActiveAt(now) && !policy.IsAllowlisted(item.Decision.SourceIP) {
 			decisions = append(decisions, item.Decision)
 		}
 	}

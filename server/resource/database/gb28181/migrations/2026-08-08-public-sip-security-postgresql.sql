@@ -1,7 +1,7 @@
 -- UVP 国标公网安全防护一期安全聚合/封禁/策略/审计 (PostgreSQL)
 CREATE TABLE IF NOT EXISTS gb_sip_security_event (
   id BIGSERIAL PRIMARY KEY, bucket_at TIMESTAMP NOT NULL, source_ip VARCHAR(64) NOT NULL,
-  address_family VARCHAR(8) NOT NULL, transport VARCHAR(8) NOT NULL, method VARCHAR(16) NOT NULL,
+  address_family VARCHAR(8) NOT NULL, transport VARCHAR(8) NOT NULL, method VARCHAR(16) NOT NULL, user_agent VARCHAR(255) NOT NULL DEFAULT '',
   reason VARCHAR(32) NOT NULL, action VARCHAR(16) NOT NULL, count BIGINT NOT NULL DEFAULT 0,
   score_delta BIGINT NOT NULL DEFAULT 0, first_seen_at TIMESTAMP NOT NULL, last_seen_at TIMESTAMP NOT NULL,
   sample_event_id VARCHAR(64) NOT NULL DEFAULT '',
@@ -13,9 +13,9 @@ CREATE INDEX IF NOT EXISTS idx_gb_sip_security_event_reason_time ON gb_sip_secur
 CREATE TABLE IF NOT EXISTS gb_sip_security_ban (
   id BIGSERIAL PRIMARY KEY, source_ip VARCHAR(64) NOT NULL, address_family VARCHAR(8) NOT NULL,
   status VARCHAR(16) NOT NULL, reason VARCHAR(32) NOT NULL, rule_id VARCHAR(64) NOT NULL,
-  score INT NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP NOT NULL,
+  score INT NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP NULL,
   unbanned_at TIMESTAMP NULL, unbanned_by VARCHAR(64) NOT NULL DEFAULT '', origin VARCHAR(16) NOT NULL,
-  agent_state VARCHAR(16) NOT NULL, decision_id VARCHAR(64) NOT NULL UNIQUE, last_error VARCHAR(512) NOT NULL DEFAULT ''
+  agent_state VARCHAR(16) NOT NULL, decision_id VARCHAR(64) NOT NULL UNIQUE, last_error VARCHAR(512) NOT NULL DEFAULT '', trigger_method VARCHAR(16) NOT NULL DEFAULT '', trigger_count INT NOT NULL DEFAULT 0, trigger_threshold INT NOT NULL DEFAULT 0, window_seconds INT NOT NULL DEFAULT 0, policy_mode VARCHAR(16) NOT NULL DEFAULT '', firewall_applied_at TIMESTAMP NULL, blocked_count_after_ban BIGINT NOT NULL DEFAULT 0, last_blocked_at TIMESTAMP NULL
 );
 CREATE INDEX IF NOT EXISTS idx_gb_sip_security_ban_source_status ON gb_sip_security_ban(source_ip,status);
 CREATE INDEX IF NOT EXISTS idx_gb_sip_security_ban_expiry ON gb_sip_security_ban(expires_at);
@@ -34,5 +34,5 @@ CREATE TABLE IF NOT EXISTS gb_sip_security_audit (
 );
 CREATE INDEX IF NOT EXISTS idx_gb_sip_security_audit_time ON gb_sip_security_audit(created_at);
 INSERT INTO gb_sip_security_policy (scope_key,mode,window_seconds,ban_score,max_packet_bytes,max_udp_per_window,max_tcp_connections,sample_per_source,nonce_ttl_seconds,ban_ttl_steps,allowlist_text,updated_at)
-VALUES ('global','observe',60,100,65536,120,32,3,60,'100:600;250:3600;500:86400','',CURRENT_TIMESTAMP)
+VALUES ('global','protect',10,100,65536,120,32,3,60,'100:0','',CURRENT_TIMESTAMP)
 ON CONFLICT (scope_key) DO NOTHING;
