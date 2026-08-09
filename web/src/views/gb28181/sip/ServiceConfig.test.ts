@@ -8,7 +8,9 @@ const api = vi.hoisted(() => ({
     fetchPositionHistoryConfig: vi.fn(),
     updatePositionHistoryConfig: vi.fn(),
     fetchSDPExtensionConfig: vi.fn(),
-    updateSDPExtensionConfig: vi.fn()
+    updateSDPExtensionConfig: vi.fn(),
+    fetchSyncChannelsOnOnlineConfig: vi.fn(),
+    updateSyncChannelsOnOnlineConfig: vi.fn()
 }));
 
 vi.mock("@/api/gb28181", () => api);
@@ -73,6 +75,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateSDPExtensionConfig.mockReset();
         api.fetchPTZDefaultSpeedConfig.mockReset();
         api.updatePTZDefaultSpeedConfig.mockReset();
+        api.fetchSyncChannelsOnOnlineConfig.mockReset();
+        api.updateSyncChannelsOnOnlineConfig.mockReset();
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
         api.fetchSDPExtensionConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
         api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 8 } });
@@ -83,6 +87,8 @@ describe("ServiceConfig edit mode", () => {
         });
         api.updateSDPExtensionConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
         api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
+        api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
+        api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
     });
 
     it("reuses the system configuration page layout primitives", async () => {
@@ -207,5 +213,28 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updatePTZDefaultSpeedConfig).toHaveBeenCalledWith(10);
+    });
+
+    it("loads and saves the device-online channel synchronization switch", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchSyncChannelsOnOnlineConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("设备上线时同步通道");
+        const syncSwitch = wrapper
+            .findAll("label")
+            .find(label => label.text().includes("设备上线时同步通道"))
+            ?.find("button");
+        expect(syncSwitch?.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        expect(syncSwitch?.element).toHaveProperty("disabled", false);
+        await syncSwitch?.trigger("click");
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateSyncChannelsOnOnlineConfig).toHaveBeenCalledWith(false);
     });
 });

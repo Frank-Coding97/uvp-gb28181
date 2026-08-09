@@ -281,7 +281,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 				app.ZapLog.Warn("GB28181 设备恢复订阅失败", zap.String("deviceId", deviceID), zap.Error(err))
 			}
 		}
-		if h.catalogTrigger != nil {
+		if h.catalogTrigger != nil && gbconfig.SyncChannelsOnOnline() {
 			h.catalogTrigger.Trigger(ctx, deviceID, dest, transport)
 		}
 		if h.deviceInfoTrigger != nil {

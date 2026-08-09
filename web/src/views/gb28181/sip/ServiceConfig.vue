@@ -6,9 +6,11 @@ import {
     fetchPTZDefaultSpeedConfig,
     fetchPositionHistoryConfig,
     fetchSDPExtensionConfig,
+    fetchSyncChannelsOnOnlineConfig,
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
-    updateSDPExtensionConfig
+    updateSDPExtensionConfig,
+    updateSyncChannelsOnOnlineConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { createStaticServiceConfigDraft } from "./serviceConfigState";
@@ -26,10 +28,14 @@ const sdpExtensionReady = ref(false);
 const ptzDefaultSpeedLoading = ref(true);
 const ptzDefaultSpeedSaving = ref(false);
 const ptzDefaultSpeedReady = ref(false);
+const syncChannelsOnOnlineLoading = ref(true);
+const syncChannelsOnOnlineSaving = ref(false);
+const syncChannelsOnOnlineReady = ref(false);
 const savedPositionHistoryEnabled = ref(true);
 const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
+const savedSyncChannelsOnOnline = ref(true);
 const positionHistoryChanged = computed(
     () =>
         draft.saveMobilePositionHistory !== savedPositionHistoryEnabled.value ||
@@ -37,12 +43,37 @@ const positionHistoryChanged = computed(
 );
 const sdpExtensionChanged = computed(() => draft.sdpExtension !== savedSDPExtensionEnabled.value);
 const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefaultSpeed.value);
-const hasChanges = computed(
-    () => positionHistoryChanged.value || sdpExtensionChanged.value || ptzDefaultSpeedChanged.value
+const syncChannelsOnOnlineChanged = computed(
+    () => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value
 );
-const configLoading = computed(() => positionHistoryLoading.value || sdpExtensionLoading.value || ptzDefaultSpeedLoading.value);
-const configSaving = computed(() => positionHistorySaving.value || sdpExtensionSaving.value || ptzDefaultSpeedSaving.value);
-const configReady = computed(() => positionHistoryReady.value && sdpExtensionReady.value && ptzDefaultSpeedReady.value);
+const hasChanges = computed(
+    () =>
+        positionHistoryChanged.value ||
+        sdpExtensionChanged.value ||
+        ptzDefaultSpeedChanged.value ||
+        syncChannelsOnOnlineChanged.value
+);
+const configLoading = computed(
+    () =>
+        positionHistoryLoading.value ||
+        sdpExtensionLoading.value ||
+        ptzDefaultSpeedLoading.value ||
+        syncChannelsOnOnlineLoading.value
+);
+const configSaving = computed(
+    () =>
+        positionHistorySaving.value ||
+        sdpExtensionSaving.value ||
+        ptzDefaultSpeedSaving.value ||
+        syncChannelsOnOnlineSaving.value
+);
+const configReady = computed(
+    () =>
+        positionHistoryReady.value &&
+        sdpExtensionReady.value &&
+        ptzDefaultSpeedReady.value &&
+        syncChannelsOnOnlineReady.value
+);
 const formLayout = computed(() => (isMobile.value ? "vertical" : "horizontal"));
 
 async function loadPositionHistoryConfig() {
@@ -93,11 +124,27 @@ async function loadPTZDefaultSpeedConfig() {
     }
 }
 
+async function loadSyncChannelsOnOnlineConfig() {
+    syncChannelsOnOnlineLoading.value = true;
+    try {
+        const response = await fetchSyncChannelsOnOnlineConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.syncChannelsOnOnline = response.data.enabled;
+        savedSyncChannelsOnOnline.value = response.data.enabled;
+        syncChannelsOnOnlineReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载设备上线同步通道配置失败");
+    } finally {
+        syncChannelsOnOnlineLoading.value = false;
+    }
+}
+
 function startEditing() {
     draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
+    draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     isEditing.value = true;
 }
 
@@ -106,6 +153,7 @@ function cancelEditing() {
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
+    draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     isEditing.value = false;
 }
 
@@ -146,6 +194,14 @@ async function saveConfig() {
             savedPTZDefaultSpeed.value = response.data.level;
             ptzDefaultSpeedSaving.value = false;
         }
+        if (syncChannelsOnOnlineChanged.value) {
+            syncChannelsOnOnlineSaving.value = true;
+            const response = await updateSyncChannelsOnOnlineConfig(draft.syncChannelsOnOnline);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.syncChannelsOnOnline = response.data.enabled;
+            savedSyncChannelsOnOnline.value = response.data.enabled;
+            syncChannelsOnOnlineSaving.value = false;
+        }
         isEditing.value = false;
         Message.success("国标服务配置已更新");
     } catch (error: any) {
@@ -154,10 +210,18 @@ async function saveConfig() {
         positionHistorySaving.value = false;
         sdpExtensionSaving.value = false;
         ptzDefaultSpeedSaving.value = false;
+        syncChannelsOnOnlineSaving.value = false;
     }
 }
 
-onMounted(() => Promise.all([loadPositionHistoryConfig(), loadSDPExtensionConfig(), loadPTZDefaultSpeedConfig()]));
+onMounted(() =>
+    Promise.all([
+        loadPositionHistoryConfig(),
+        loadSDPExtensionConfig(),
+        loadPTZDefaultSpeedConfig(),
+        loadSyncChannelsOnOnlineConfig()
+    ])
+);
 </script>
 
 <template>
@@ -273,7 +337,17 @@ onMounted(() => Promise.all([loadPositionHistoryConfig(), loadSDPExtensionConfig
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="syncChannelsOnOnline" label="设备上线时同步通道">
-                                        <a-switch v-model="draft.syncChannelsOnOnline" disabled />
+                                        <a-switch
+                                            v-model="draft.syncChannelsOnOnline"
+                                            :loading="syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving"
+                                            :disabled="!isEditing || syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving || !syncChannelsOnOnlineReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                        <template #extra>
+                                            <div>设备首次上线或离线恢复时，自动向设备查询 Catalog 并同步通道。</div>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

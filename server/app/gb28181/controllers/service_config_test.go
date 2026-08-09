@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
@@ -51,9 +52,45 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/position-history", controller.UpdatePositionHistory)
 	router.GET("/sdp-extension", controller.GetSDPExtension)
 	router.PUT("/sdp-extension", controller.UpdateSDPExtension)
+	router.GET("/sync-channels-on-online", controller.GetSyncChannelsOnOnline)
+	router.PUT("/sync-channels-on-online", controller.UpdateSyncChannelsOnOnline)
 	router.GET("/ptz-default-speed", controller.GetPTZDefaultSpeed)
 	router.PUT("/ptz-default-speed", controller.UpdatePTZDefaultSpeed)
 	return router
+}
+
+func TestServiceConfigController_SyncChannelsOnOnlineDefaultsToEnabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/sync-channels-on-online", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, true, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdateSyncChannelsOnOnlinePersistsAndRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.SyncChannelsOnOnlineConfigKey: true}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sync-channels-on-online", jsonBody(t, map[string]bool{"enabled": false})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, false, config.values[gbconfig.SyncChannelsOnOnlineConfigKey])
+	require.Equal(t, 1, config.saveNum)
+
+	config.saveErr = errors.New("write failed")
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sync-channels-on-online", jsonBody(t, map[string]bool{"enabled": true})))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, false, config.values[gbconfig.SyncChannelsOnOnlineConfigKey])
 }
 
 func TestServiceConfigController_PTZDefaultSpeedDefaultsToSix(t *testing.T) {

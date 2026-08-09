@@ -15,6 +15,7 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).toContain("云台默认速度");
         expect(draft.positionHistoryRetentionDays).toBe(7);
         expect(draft.ptzSpeed).toBe(6);
+        expect(draft.syncChannelsOnOnline).toBe(true);
         expect(draft.sipTimeoutSec).toBe(10);
         expect(draft.notifyCacheMaxLength).toBe(10000);
         expect(playbackServiceConfigLabels).toHaveLength(6);

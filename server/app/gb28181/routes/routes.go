@@ -338,6 +338,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			serviceConfig.PUT("/position-history", serviceConfigController.UpdatePositionHistory)
 			serviceConfig.GET("/sdp-extension", serviceConfigController.GetSDPExtension)
 			serviceConfig.PUT("/sdp-extension", serviceConfigController.UpdateSDPExtension)
+			serviceConfig.GET("/sync-channels-on-online", serviceConfigController.GetSyncChannelsOnOnline)
+			serviceConfig.PUT("/sync-channels-on-online", serviceConfigController.UpdateSyncChannelsOnOnline)
 			serviceConfig.GET("/ptz-default-speed", serviceConfigController.GetPTZDefaultSpeed)
 			serviceConfig.PUT("/ptz-default-speed", serviceConfigController.UpdatePTZDefaultSpeed)
 		}

@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	SDPExtensionConfigKey = "gb28181.sdp.extension_enabled"
+	SDPExtensionConfigKey         = "gb28181.sdp.extension_enabled"
+	SyncChannelsOnOnlineConfigKey = "gb28181.device.sync_channels_on_online"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
@@ -41,6 +42,19 @@ func SDPExtensionEnabledFrom(c valueSource) bool {
 // pick up a saved setting without rebuilding the GB28181 runtime.
 func SDPExtensionEnabled() bool {
 	return SDPExtensionEnabledFrom(app.ConfigYml)
+}
+
+// SyncChannelsOnOnlineFrom returns whether device registration/recovery should
+// trigger a Catalog query. Missing configuration intentionally defaults to true
+// to preserve the historical behavior.
+func SyncChannelsOnOnlineFrom(c valueSource) bool {
+	return c == nil || c.Get(SyncChannelsOnOnlineConfigKey) == nil || c.GetBool(SyncChannelsOnOnlineConfigKey)
+}
+
+// SyncChannelsOnOnline reads the live configuration so the next online event
+// observes a saved setting without rebuilding the GB28181 runtime.
+func SyncChannelsOnOnline() bool {
+	return SyncChannelsOnOnlineFrom(app.ConfigYml)
 }
 
 // Config GB28181 国标平台配置

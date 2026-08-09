@@ -9,6 +9,7 @@ import {
   fetchPTZDefaultSpeedConfig,
   fetchSDPExtensionConfig,
   fetchPositionHistoryConfig,
+  fetchSyncChannelsOnOnlineConfig,
   getControlCapabilities,
   getDeviceStatus,
   getHomePosition,
@@ -20,6 +21,7 @@ import {
   updatePositionHistoryConfig,
   updatePTZDefaultSpeedConfig,
   updateSDPExtensionConfig,
+  updateSyncChannelsOnOnlineConfig,
   type DeviceStatusResult,
   type HomePositionPatch
 } from "./gb28181";
@@ -65,6 +67,18 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/ptz-default-speed",
       { data: { level: 10 } }
+    );
+  });
+
+  it("读取并更新设备上线同步通道配置", async () => {
+    await fetchSyncChannelsOnOnlineConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sync-channels-on-online");
+
+    await updateSyncChannelsOnOnlineConfig(false);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/sync-channels-on-online",
+      { data: { enabled: false } }
     );
   });
 });

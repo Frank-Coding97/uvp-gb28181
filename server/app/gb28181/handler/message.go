@@ -194,7 +194,7 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 						app.ZapLog.Warn("GB28181 设备恢复订阅失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
 					}
 				}
-				if h.catalogTrigger != nil && req.Source() != "" {
+				if h.catalogTrigger != nil && req.Source() != "" && gbconfig.SyncChannelsOnOnline() {
 					// 离线时通道已统一置 OFF。设备恢复只证明 SIP 可达,
 					// 通道必须等待新的 Catalog ON/OFF 后再恢复。
 					h.catalogTrigger.Trigger(ctx, head.DeviceID, req.Source(), req.Transport())

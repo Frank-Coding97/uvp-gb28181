@@ -743,6 +743,18 @@ export const updateSDPExtensionConfig = (enabled: boolean) =>
     data: { enabled }
   });
 
+export interface SyncChannelsOnOnlineConfig {
+  enabled: boolean;
+}
+
+export const fetchSyncChannelsOnOnlineConfig = () =>
+  http.request<BaseResult<SyncChannelsOnOnlineConfig>>("get", baseUrlApi("gb28181/sip/service-config/sync-channels-on-online"));
+
+export const updateSyncChannelsOnOnlineConfig = (enabled: boolean) =>
+  http.request<BaseResult<SyncChannelsOnOnlineConfig>>("put", baseUrlApi("gb28181/sip/service-config/sync-channels-on-online"), {
+    data: { enabled }
+  });
+
 export interface PTZDefaultSpeedConfig {
   level: number;
 }

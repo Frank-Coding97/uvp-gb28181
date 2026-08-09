@@ -114,6 +114,19 @@ func TestSDPExtensionEnabledFromReadsLatestValue(t *testing.T) {
 	require.True(t, SDPExtensionEnabledFrom(source))
 }
 
+func TestSyncChannelsOnOnlineFromDefaultsToEnabled(t *testing.T) {
+	source := fakeSource{}
+	require.True(t, SyncChannelsOnOnlineFrom(source))
+
+	source.values = map[string]interface{}{SyncChannelsOnOnlineConfigKey: false}
+	source.bools = map[string]bool{SyncChannelsOnOnlineConfigKey: false}
+	require.False(t, SyncChannelsOnOnlineFrom(source))
+
+	source.values[SyncChannelsOnOnlineConfigKey] = true
+	source.bools[SyncChannelsOnOnlineConfigKey] = true
+	require.True(t, SyncChannelsOnOnlineFrom(source))
+}
+
 func TestRecordRuntimeConfigDefaults(t *testing.T) {
 	cfg, err := LoadValidatedFrom(fakeSource{})
 	if err != nil {
