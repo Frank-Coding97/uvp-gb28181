@@ -298,16 +298,14 @@ const requestCoordinator = createLatestRequestCoordinator();
 const activePoller = createPollingController(
   async () => {
     try {
-      return (await listActiveRecordings()).data.list ?? [];
+      return { list: (await listActiveRecordings()).data.list ?? [], error: "" };
     } catch (error) {
-      activeError.value = recordingErrorPresentation(error);
-      activeLoading.value = false;
-      return activeRecordings.value;
+      return { list: activeRecordings.value, error: recordingErrorPresentation(error) };
     }
   },
-  value => {
-    activeRecordings.value = value;
-    activeError.value = "";
+  result => {
+    activeRecordings.value = result.list;
+    activeError.value = result.error;
     activeLoading.value = false;
   },
   10000
