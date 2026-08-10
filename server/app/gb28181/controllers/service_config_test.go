@@ -23,6 +23,7 @@ type serviceConfigTestYAML struct {
 	values  map[string]interface{}
 	saveErr error
 	saveNum int
+	setHook func(string, interface{})
 }
 
 func (c *serviceConfigTestYAML) ConfigFileChangeListen(...func()) {}
@@ -47,9 +48,14 @@ func (c *serviceConfigTestYAML) GetStringSlice(key string) []string {
 	value, _ := c.values[key].([]string)
 	return value
 }
-func (c *serviceConfigTestYAML) GetUintSlice(string) []uint        { return nil }
-func (c *serviceConfigTestYAML) Set(key string, value interface{}) { c.values[key] = value }
-func (c *serviceConfigTestYAML) SaveConfig() error                 { c.saveNum++; return c.saveErr }
+func (c *serviceConfigTestYAML) GetUintSlice(string) []uint { return nil }
+func (c *serviceConfigTestYAML) Set(key string, value interface{}) {
+	c.values[key] = value
+	if c.setHook != nil {
+		c.setHook(key, value)
+	}
+}
+func (c *serviceConfigTestYAML) SaveConfig() error { c.saveNum++; return c.saveErr }
 
 func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -83,9 +89,118 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/default-channel-audio", controller.UpdateDefaultChannelAudio)
 	router.GET("/playback-settings", controller.GetPlaybackSettings)
 	router.PUT("/playback-settings", controller.UpdatePlaybackSettings)
+	router.GET("/fixed-address-playback", controller.GetFixedAddressPlayback)
+	router.PUT("/fixed-address-playback", controller.UpdateFixedAddressPlayback)
 	router.GET("/sip-log", controller.GetSIPLog)
 	router.PUT("/sip-log", controller.UpdateSIPLog)
 	return router
+}
+
+func TestServiceConfigController_FixedAddressPlaybackDefaults(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/fixed-address-playback", nil),
+	)
+	require.Equal(t, http.StatusOK, recorder.Code)
+	data := serviceConfigData(t, recorder)
+	require.Equal(t, false, data["fixedAddressEnabled"])
+	require.Equal(t, false, data["autoOnDemandEnabled"])
+}
+
+func TestServiceConfigController_UpdateFixedAddressPlaybackValidatesAndPersists(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.FixedAddressEnabledConfigKey: false,
+		gbconfig.AutoOnDemandEnabledConfigKey: false,
+	}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, body := range []map[string]interface{}{
+		{"fixedAddressEnabled": true},
+		{"autoOnDemandEnabled": true},
+		{"fixedAddressEnabled": false, "autoOnDemandEnabled": true},
+	} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/fixed-address-playback", jsonBody(t, body)))
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
+	require.Zero(t, config.saveNum)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/fixed-address-playback", jsonBody(t, map[string]interface{}{
+		"fixedAddressEnabled": true, "autoOnDemandEnabled": true,
+	})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 1, config.saveNum)
+	require.Equal(t, true, config.values[gbconfig.FixedAddressEnabledConfigKey])
+	require.Equal(t, true, config.values[gbconfig.AutoOnDemandEnabledConfigKey])
+}
+
+func TestServiceConfigController_UpdateFixedAddressPlaybackRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.FixedAddressEnabledConfigKey: true,
+		gbconfig.AutoOnDemandEnabledConfigKey: false,
+	}, saveErr: errors.New("disk full")}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/fixed-address-playback", jsonBody(t, map[string]interface{}{
+			"fixedAddressEnabled": true, "autoOnDemandEnabled": true,
+		})),
+	)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, 1, config.saveNum)
+	require.Equal(t, true, config.values[gbconfig.FixedAddressEnabledConfigKey])
+	require.Equal(t, false, config.values[gbconfig.AutoOnDemandEnabledConfigKey])
+}
+
+func TestFixedAddressPlaybackRuntimeReadIsAtomicDuringSave(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	firstSet := make(chan struct{})
+	releaseSet := make(chan struct{})
+	var once sync.Once
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.FixedAddressEnabledConfigKey: true,
+		gbconfig.AutoOnDemandEnabledConfigKey: true,
+	}}
+	config.setHook = func(key string, _ interface{}) {
+		if key == gbconfig.FixedAddressEnabledConfigKey {
+			once.Do(func() { close(firstSet); <-releaseSet })
+		}
+	}
+	app.ConfigYml = config
+
+	router := newServiceConfigRouter(NewServiceConfigController())
+	updated := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/fixed-address-playback", jsonBody(t, map[string]interface{}{
+			"fixedAddressEnabled": false, "autoOnDemandEnabled": false,
+		})))
+		updated <- recorder
+	}()
+	<-firstSet
+
+	read := make(chan gbconfig.FixedAddressPlaybackSettings, 1)
+	go func() { read <- gbconfig.CurrentFixedAddressPlaybackSettings() }()
+	select {
+	case got := <-read:
+		t.Fatalf("runtime observed an in-flight snapshot: %+v", got)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseSet)
+	require.Equal(t, http.StatusOK, (<-updated).Code)
+	require.Equal(t, gbconfig.FixedAddressPlaybackSettings{}, <-read)
 }
 
 func TestServiceConfigController_PlaybackSettingsDefaults(t *testing.T) {

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -24,6 +25,8 @@ const (
 	PlayRequestTimeoutMsConfigKey             = "gb28181.play.request_timeout_ms"
 	DefaultChannelOnDemandLiveConfigKey       = "gb28181.catalog.default_channel_on_demand_live"
 	DefaultChannelCloudRecordingConfigKey     = "gb28181.catalog.default_channel_cloud_recording_enabled"
+	FixedAddressEnabledConfigKey              = "gb28181.play.fixed_address_enabled"
+	AutoOnDemandEnabledConfigKey              = "gb28181.play.auto_on_demand_enabled"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
@@ -62,6 +65,8 @@ const (
 )
 
 var supportedGlobalSubscriptionItems = []string{"catalog", "mobile_position", "alarm", "ptz_precise_position"}
+
+var fixedAddressPlaybackMu sync.RWMutex
 
 // GlobalSubscriptionItemsFrom returns the subscription kinds used as defaults
 // for devices that do not yet have a device-level subscription row.
@@ -164,6 +169,67 @@ func ValidatePlaybackSettings(settings PlaybackSettings) error {
 	if settings.PlayTimeoutMs < MinPlayRequestTimeoutMs || settings.PlayTimeoutMs > MaxPlayRequestTimeoutMs {
 		return invalid(PlayRequestTimeoutMsConfigKey, settings.PlayTimeoutMs,
 			fmt.Sprintf("must be between %d and %d", MinPlayRequestTimeoutMs, MaxPlayRequestTimeoutMs))
+	}
+	return nil
+}
+
+type FixedAddressPlaybackSettings struct {
+	FixedAddressEnabled bool `json:"fixedAddressEnabled"`
+	AutoOnDemandEnabled bool `json:"autoOnDemandEnabled"`
+}
+
+func FixedAddressPlaybackSettingsFrom(c valueSource) FixedAddressPlaybackSettings {
+	if c == nil {
+		return FixedAddressPlaybackSettings{}
+	}
+	settings := FixedAddressPlaybackSettings{}
+	if c.Get(FixedAddressEnabledConfigKey) != nil {
+		settings.FixedAddressEnabled = c.GetBool(FixedAddressEnabledConfigKey)
+	}
+	if c.Get(AutoOnDemandEnabledConfigKey) != nil {
+		settings.AutoOnDemandEnabled = c.GetBool(AutoOnDemandEnabledConfigKey)
+	}
+	return settings
+}
+
+func ValidateFixedAddressPlaybackSettings(settings FixedAddressPlaybackSettings) error {
+	if settings.AutoOnDemandEnabled && !settings.FixedAddressEnabled {
+		return invalid(AutoOnDemandEnabledConfigKey, true, "requires fixed_address_enabled=true")
+	}
+	return nil
+}
+
+// CurrentFixedAddressPlaybackSettings shares the same lock as the aggregate
+// save path, so runtime consumers can only observe a complete old or new pair.
+func CurrentFixedAddressPlaybackSettings() FixedAddressPlaybackSettings {
+	fixedAddressPlaybackMu.RLock()
+	defer fixedAddressPlaybackMu.RUnlock()
+	return FixedAddressPlaybackSettingsFrom(app.ConfigYml)
+}
+
+type mutableValueSource interface {
+	valueSource
+	Set(string, interface{})
+	SaveConfig() error
+}
+
+func SaveFixedAddressPlaybackSettings(c mutableValueSource, settings FixedAddressPlaybackSettings) error {
+	if err := ValidateFixedAddressPlaybackSettings(settings); err != nil {
+		return err
+	}
+	if c == nil {
+		return fmt.Errorf("配置服务尚未初始化")
+	}
+
+	fixedAddressPlaybackMu.Lock()
+	defer fixedAddressPlaybackMu.Unlock()
+	previous := FixedAddressPlaybackSettingsFrom(c)
+	c.Set(FixedAddressEnabledConfigKey, settings.FixedAddressEnabled)
+	c.Set(AutoOnDemandEnabledConfigKey, settings.AutoOnDemandEnabled)
+	if err := c.SaveConfig(); err != nil {
+		c.Set(FixedAddressEnabledConfigKey, previous.FixedAddressEnabled)
+		c.Set(AutoOnDemandEnabledConfigKey, previous.AutoOnDemandEnabled)
+		return err
 	}
 	return nil
 }

@@ -159,6 +159,40 @@ func (sc *ServiceConfigController) UpdatePlaybackSettings(c *gin.Context) {
 	sc.SuccessWithMessage(c, "播放配置已更新", settings)
 }
 
+// GetFixedAddressPlayback GET /api/gb28181/sip/service-config/fixed-address-playback
+func (sc *ServiceConfigController) GetFixedAddressPlayback(c *gin.Context) {
+	sc.Success(c, gbconfig.CurrentFixedAddressPlaybackSettings())
+}
+
+// UpdateFixedAddressPlayback PUT /api/gb28181/sip/service-config/fixed-address-playback
+func (sc *ServiceConfigController) UpdateFixedAddressPlayback(c *gin.Context) {
+	var request struct {
+		FixedAddressEnabled *bool `json:"fixedAddressEnabled"`
+		AutoOnDemandEnabled *bool `json:"autoOnDemandEnabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.FixedAddressEnabled == nil || request.AutoOnDemandEnabled == nil {
+		sc.Fail(c, "保存固定地址播放配置失败：必须提交完整配置", err, http.StatusBadRequest)
+		return
+	}
+	settings := gbconfig.FixedAddressPlaybackSettings{
+		FixedAddressEnabled: *request.FixedAddressEnabled,
+		AutoOnDemandEnabled: *request.AutoOnDemandEnabled,
+	}
+	if err := gbconfig.ValidateFixedAddressPlaybackSettings(settings); err != nil {
+		sc.Fail(c, "保存固定地址播放配置失败：自动点播依赖固定播放地址", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+	if err := gbconfig.SaveFixedAddressPlaybackSettings(app.ConfigYml, settings); err != nil {
+		sc.Fail(c, "保存固定地址播放配置失败", err, http.StatusInternalServerError)
+		return
+	}
+	sc.SuccessWithMessage(c, "固定地址播放配置已更新", settings)
+}
+
 // GetSIPLog GET /api/gb28181/sip/service-config/sip-log
 func (sc *ServiceConfigController) GetSIPLog(c *gin.Context) {
 	enabled := gbconfig.SIPTraceEnabled()

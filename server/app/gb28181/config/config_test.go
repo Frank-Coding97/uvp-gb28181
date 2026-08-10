@@ -302,6 +302,36 @@ func TestPlaybackSettingsFromReadsLatestSourceValue(t *testing.T) {
 	require.Equal(t, 300000, PlaybackSettingsFrom(source).PlayTimeoutMs)
 }
 
+func TestFixedAddressPlaybackSettingsDefaultsAndValidStates(t *testing.T) {
+	source := fakeSource{}
+	require.Equal(t, FixedAddressPlaybackSettings{}, FixedAddressPlaybackSettingsFrom(source))
+
+	for _, settings := range []FixedAddressPlaybackSettings{
+		{},
+		{FixedAddressEnabled: true},
+		{FixedAddressEnabled: true, AutoOnDemandEnabled: true},
+	} {
+		source.values = map[string]interface{}{
+			FixedAddressEnabledConfigKey: settings.FixedAddressEnabled,
+			AutoOnDemandEnabledConfigKey: settings.AutoOnDemandEnabled,
+		}
+		source.bools = map[string]bool{
+			FixedAddressEnabledConfigKey: settings.FixedAddressEnabled,
+			AutoOnDemandEnabledConfigKey: settings.AutoOnDemandEnabled,
+		}
+		require.Equal(t, settings, FixedAddressPlaybackSettingsFrom(source))
+		require.NoError(t, ValidateFixedAddressPlaybackSettings(settings))
+	}
+}
+
+func TestValidateFixedAddressPlaybackSettingsRejectsAutoWithoutFixed(t *testing.T) {
+	err := ValidateFixedAddressPlaybackSettings(FixedAddressPlaybackSettings{AutoOnDemandEnabled: true})
+	require.Error(t, err)
+	var validationErr *ValidationError
+	require.ErrorAs(t, err, &validationErr)
+	require.Equal(t, AutoOnDemandEnabledConfigKey, validationErr.Field)
+}
+
 func TestGlobalSubscriptionItemsFromFiltersInvalidAndDuplicateItems(t *testing.T) {
 	source := fakeSource{}
 	require.Empty(t, GlobalSubscriptionItemsFrom(source))
