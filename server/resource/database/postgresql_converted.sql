@@ -1846,3 +1846,29 @@ CREATE TABLE gb_playback_scheme_slot (
     CONSTRAINT uk_playback_scheme_slot UNIQUE (scheme_id, slot_index)
 );
 CREATE INDEX idx_playback_scheme_slot_scheme ON gb_playback_scheme_slot (scheme_id);
+
+CREATE TABLE gb_sip_trace_capture (
+    id CHAR(36) PRIMARY KEY, device_id BIGINT NOT NULL, device_code VARCHAR(20) NOT NULL, created_by BIGINT NOT NULL,
+    started_at TIMESTAMP(3) WITH TIME ZONE NOT NULL, planned_end_at TIMESTAMP(3) WITH TIME ZONE NOT NULL,
+    ended_at TIMESTAMP(3) WITH TIME ZONE NULL, end_reason VARCHAR(16) NOT NULL DEFAULT '', active_key VARCHAR(64) NULL,
+    created_at TIMESTAMP(3) WITH TIME ZONE NOT NULL, updated_at TIMESTAMP(3) WITH TIME ZONE NOT NULL
+);
+CREATE UNIQUE INDEX uk_sip_trace_capture_active ON gb_sip_trace_capture (active_key);
+CREATE INDEX idx_sip_trace_capture_device_started ON gb_sip_trace_capture (device_id, started_at);
+CREATE INDEX idx_sip_trace_capture_device_code ON gb_sip_trace_capture (device_code);
+CREATE INDEX idx_sip_trace_capture_created_by ON gb_sip_trace_capture (created_by);
+CREATE INDEX idx_sip_trace_capture_planned_end ON gb_sip_trace_capture (planned_end_at);
+
+CREATE TABLE gb_sip_trace_message (
+    event_id VARCHAR(36) PRIMARY KEY, occurred_at TIMESTAMP(6) WITH TIME ZONE NOT NULL, direction VARCHAR(16) NOT NULL,
+    transport VARCHAR(16) NOT NULL, local_addr VARCHAR(255) NOT NULL, remote_addr VARCHAR(255) NOT NULL,
+    device_id VARCHAR(64) NOT NULL, method VARCHAR(32) NOT NULL, status_code SMALLINT NOT NULL,
+    call_id VARCHAR(255) NOT NULL, cseq INTEGER NOT NULL, cseq_method VARCHAR(32) NOT NULL,
+    from_uri VARCHAR(512) NOT NULL, to_uri VARCHAR(512) NOT NULL, user_agent VARCHAR(512) NOT NULL,
+    malformed BOOLEAN NOT NULL DEFAULT FALSE, parse_error VARCHAR(1024) NOT NULL,
+    payload_nonce BYTEA NOT NULL, payload_ciphertext BYTEA NOT NULL, payload_algorithm VARCHAR(32) NOT NULL,
+    payload_key_version VARCHAR(64) NOT NULL, payload_digest_sha256 CHAR(64) NOT NULL
+);
+CREATE INDEX idx_gb_sip_trace_occurred_event ON gb_sip_trace_message (occurred_at, event_id);
+CREATE INDEX idx_gb_sip_trace_device_occurred ON gb_sip_trace_message (device_id, occurred_at, event_id);
+CREATE INDEX idx_gb_sip_trace_call_occurred ON gb_sip_trace_message (call_id, occurred_at, event_id);

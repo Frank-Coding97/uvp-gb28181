@@ -39,6 +39,22 @@ func TestSIPTraceMessageMigrationsShareSchemaAndGuards(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, strings.ToLower(string(body)), "gb_sip_trace_message")
 	}
+	for _, path := range []string{"2026-07-19-sip-trace-capture.sql", "2026-08-10-sip-trace-capture-postgresql.sql", "2026-08-10-sip-trace-capture-sqlserver.sql"} {
+		body, err := os.ReadFile(filepath.Join(root, path))
+		require.NoError(t, err)
+		text := strings.ToLower(string(body))
+		require.Contains(t, text, "gb_sip_trace_capture")
+		require.Contains(t, text, "active_key")
+		require.Contains(t, text, "idx_sip_trace_capture_device_started")
+	}
+	databaseRoot := filepath.Join(root, "..", "..")
+	for _, path := range []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"} {
+		body, err := os.ReadFile(filepath.Join(databaseRoot, path))
+		require.NoError(t, err)
+		text := strings.ToLower(string(body))
+		require.Contains(t, text, "gb_sip_trace_message")
+		require.Contains(t, text, "gb_sip_trace_capture")
+	}
 }
 
 func migrationRoot(t *testing.T) string {
