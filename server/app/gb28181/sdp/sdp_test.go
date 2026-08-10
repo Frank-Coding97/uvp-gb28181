@@ -7,10 +7,13 @@ import (
 
 // TestGenRealtimeSSRC T4-测1: SSRC 符合国标(10位,实时0开头,唯一)
 func TestGenRealtimeSSRC(t *testing.T) {
-	domain := "34020000002000000001"
+	domain := "3402000000"
 	seen := make(map[string]bool)
 	for i := 0; i < 10; i++ {
-		s := GenRealtimeSSRC(domain)
+		s, err := GenRealtimeSSRC(domain)
+		if err != nil {
+			t.Fatalf("生成 SSRC 失败: %v", err)
+		}
 		if len(s) != 10 {
 			t.Errorf("SSRC 应10位,实际%d位: %s", len(s), s)
 		}
@@ -24,11 +27,21 @@ func TestGenRealtimeSSRC(t *testing.T) {
 	}
 }
 
-// TestExtractMid8 中间8位提取
-func TestExtractMid8(t *testing.T) {
-	got := extractMid8("34020000002000000001")
-	if len(got) != 8 {
-		t.Errorf("应8位,实际%d: %s", len(got), got)
+func TestFormatRealtimeSSRCUsesDomainFiveDigitsAndFourDigitSequence(t *testing.T) {
+	got, err := FormatRealtimeSSRC("3402000000", 0)
+	if err != nil {
+		t.Fatalf("格式化 SSRC 失败: %v", err)
+	}
+	if got != "0200000000" {
+		t.Fatalf("SSRC 分段错误: got=%s want=0200000000", got)
+	}
+}
+
+func TestFormatRealtimeSSRCRejectsInvalidDomain(t *testing.T) {
+	for _, domain := range []string{"", "340200000", "34020000000", "34020x0000"} {
+		if _, err := FormatRealtimeSSRC(domain, 0); err == nil {
+			t.Fatalf("非法域应被拒绝: %q", domain)
+		}
 	}
 }
 

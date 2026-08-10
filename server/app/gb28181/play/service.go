@@ -367,7 +367,10 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	}
 
 	// 3. 生成 SSRC + StreamID(stream_id = ssrc,简化映射)
-	ssrc := sdp.GenRealtimeSSRC(s.cfg.SIP.Domain)
+	ssrc, err := sdp.GenRealtimeSSRC(s.cfg.SIP.Domain)
+	if err != nil {
+		return nil, fmt.Errorf("生成实时 SSRC 失败: %w", err)
+	}
 	streamID := ssrc
 
 	// 4. 多节点路径:Pick + Bind;单节点路径:直接走 s.zlm

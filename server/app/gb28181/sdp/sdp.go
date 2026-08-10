@@ -1,44 +1,39 @@
 package sdp
 
 import (
+	"errors"
 	"fmt"
-	"math/rand"
 	"strings"
 	"sync/atomic"
 )
 
-// SSRC 国标格式:10 位十进制
-// 首位:0=实时流 1=回放流
-// 中间 8 位:取国标编码(domain)的中间 8 位(地市/设备编码段)
-// 末 1 位:流序号(同一通道多路区分)
+// SSRC 国标格式:10 位十进制。实时流为 0 + 域第4-8位 + 4位序号。
 const (
 	SSRCRealtime = "0" // 实时流首位
 	SSRCPlayback = "1" // 回放流首位
 )
 
+var ErrInvalidRealtimeSSRC = errors.New("非法实时SSRC参数")
+
 var ssrcSeq uint32
 
-// GenRealtimeSSRC 生成实时流 SSRC
-// domain = SIP 域(20位编码或10位域),取其中段 8 位
-func GenRealtimeSSRC(domain string) string {
-	mid := extractMid8(domain)
-	seq := atomic.AddUint32(&ssrcSeq, 1) % 10
-	return SSRCRealtime + mid + fmt.Sprintf("%d", seq)
+// GenRealtimeSSRC is the compatibility generator used by the legacy dynamic
+// start path. New coordinated live sessions use play.RealtimeSSRCAllocator.
+func GenRealtimeSSRC(domain string) (string, error) {
+	sequence := (atomic.AddUint32(&ssrcSeq, 1) - 1) % 10000
+	return FormatRealtimeSSRC(domain, uint16(sequence))
 }
 
-// extractMid8 从国标编码取中间 8 位(第 4-11 位,即地市/区县段);不足则随机补
-func extractMid8(code string) string {
-	digits := strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return r
-		}
-		return -1
-	}, code)
-	if len(digits) >= 11 {
-		return digits[3:11]
+func FormatRealtimeSSRC(domain string, sequence uint16) (string, error) {
+	if len(domain) != 10 || sequence > 9999 {
+		return "", ErrInvalidRealtimeSSRC
 	}
-	// 不足:随机 8 位兜底
-	return fmt.Sprintf("%08d", rand.Intn(100000000))
+	for _, digit := range domain {
+		if digit < '0' || digit > '9' {
+			return "", ErrInvalidRealtimeSSRC
+		}
+	}
+	return fmt.Sprintf("%s%s%04d", SSRCRealtime, domain[3:8], sequence), nil
 }
 
 // PlayParams 实时点播 SDP 构造参数
