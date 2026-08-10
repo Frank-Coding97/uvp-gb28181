@@ -12,6 +12,7 @@ const (
 type LiveState string
 
 const (
+	LiveStateIdle     LiveState = "idle"
 	LiveStateStarting LiveState = "starting"
 	LiveStateReady    LiveState = "ready"
 	LiveStateStopping LiveState = "stopping"

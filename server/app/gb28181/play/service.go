@@ -141,6 +141,9 @@ type Service struct {
 
 	snapshotSvc SnapshotService // 通道快照(播放触发),可为 nil
 	urlResolver *URLResolver
+
+	liveCoordinatorMu sync.Mutex
+	liveCoordinator   *Coordinator
 }
 
 // SnapshotService 通道快照能力(播放成功后 fire-and-forget 抓帧)
@@ -315,12 +318,21 @@ func (s *Service) buildReuseResult(ctx context.Context, streamID string, mediaNo
 	return result
 }
 
-// Start 发起点播
+// Start 发起点播并通过通道级协调器合并并发请求。
+//
+// 旧调用方继续使用这个签名；实际副作用由 startDirect 执行，避免
+// REST、级联等多个入口在同一通道重复 openRtpServer/INVITE。
+func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Result, error) {
+	return s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, Trigger: "explicit"})
+}
+
+// startDirect 发起一次不经过协调器的点播事务。调用方必须已经持有通道
+// EnsureLive reservation；失败补偿完成后才返回。
 // 0) 检查通道是否已在播放，在线则直接返回现有地址
 // 1) 校验设备/通道  2) Pick 节点 + openRtpServer + Bind  3) 构造 SDP+SSRC
 // 4) UAC INVITE  5) WaitReady  6) 返地址
 // 任一中断都会回滚已开的 RTP 端口 + Unbind LocationMap
-func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Result, error) {
+func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (*Result, error) {
 	// 1. 校验设备 + 通道
 	dev, err := s.devices.FindByDeviceID(ctx, deviceID)
 	if err != nil {
@@ -363,7 +375,7 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 			zap.String("deviceId", deviceID),
 			zap.String("channelId", channelID),
 			zap.String("staleStreamId", ch.StreamID))
-		_ = s.Stop(context.Background(), ch.StreamID)
+		_ = s.stopDirect(context.Background(), ch.StreamID)
 	}
 
 	// 3. 生成 SSRC + StreamID(stream_id = ssrc,简化映射)
@@ -505,8 +517,22 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	return result, nil
 }
 
-// Stop 停播:发 BYE + 关 RTP 端口 + Unbind LocationMap
+// Stop 停播:通过协调器执行 Stopping 栅栏，再发 BYE + 关 RTP 端口 + Unbind。
 func (s *Service) Stop(ctx context.Context, streamID string) error {
+	s.liveCoordinatorMu.Lock()
+	c := s.liveCoordinator
+	s.liveCoordinatorMu.Unlock()
+	if c != nil {
+		if stopped, err := c.StopStream(ctx, streamID); stopped {
+			return err
+		}
+	}
+	return s.stopDirect(ctx, streamID)
+}
+
+// stopDirect performs one stream cleanup without consulting the coordinator.
+// It is used by the coordinator owner callback and by startDirect rollback.
+func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 	byeErr := s.inviter.Bye(ctx, s.sessions, streamID)
 
 	client, clientErr := s.clientForStream(streamID)
