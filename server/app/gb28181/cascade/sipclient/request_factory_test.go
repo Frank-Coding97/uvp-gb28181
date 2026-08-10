@@ -54,11 +54,12 @@ func TestRequestFactoryRejectsInvalidIdentity(t *testing.T) {
 		LocalDeviceID: "34020000001320000001", LocalDomain: "3402000000", LocalIP: "192.0.2.20", LocalPort: 5061,
 		Transport: "udp", Profile: protocol.Version2016,
 	}
-	cases := []Identity{valid, valid, valid, valid}
+	cases := []Identity{valid, valid, valid, valid, valid}
 	cases[0].LocalDeviceID = "bad"
 	cases[1].Host = ""
 	cases[2].LocalIP = "0.0.0.0"
 	cases[3].Transport = "ws"
+	cases[4].Host = "upstream.example\r\nVia: injected"
 	for i, identity := range cases {
 		if _, err := NewRequestFactory(identity); err == nil {
 			t.Fatalf("case %d must fail", i)

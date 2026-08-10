@@ -36,7 +36,7 @@ func NewRequestFactory(identity Identity) (*RequestFactory, error) {
 	if !validGBID(identity.UpstreamServerID) || !validGBID(identity.LocalDeviceID) {
 		return nil, fmt.Errorf("cascade SIP identity requires 20-digit IDs")
 	}
-	if strings.TrimSpace(identity.UpstreamDomain) == "" || strings.TrimSpace(identity.LocalDomain) == "" || strings.TrimSpace(identity.Host) == "" {
+	if !validHostToken(identity.UpstreamDomain) || !validHostToken(identity.LocalDomain) || !validHostToken(identity.Host) {
 		return nil, fmt.Errorf("cascade SIP identity requires domains and upstream host")
 	}
 	localIP := net.ParseIP(strings.TrimSpace(identity.LocalIP))
@@ -98,6 +98,27 @@ func validGBID(value string) bool {
 	for _, char := range value {
 		if char < '0' || char > '9' {
 			return false
+		}
+	}
+	return true
+}
+
+func validHostToken(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 253 || strings.ContainsAny(value, " \t\r\n/@") {
+		return false
+	}
+	if net.ParseIP(value) != nil {
+		return true
+	}
+	for _, label := range strings.Split(value, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, char := range label {
+			if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' {
+				return false
+			}
 		}
 	}
 	return true
