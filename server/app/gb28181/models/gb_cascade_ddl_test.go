@@ -94,7 +94,7 @@ func TestCascadeMigrationContracts(t *testing.T) {
 		for _, token := range []string{
 			"gb_cascade_platform", "gb_cascade_device_projection", "gb_cascade_channel_projection", "gb_cascade_media_session",
 			"secret_nonce", "secret_ciphertext", "secret_alg", "secret_key_version",
-			"config_revision", "deleted_at", "dialog_key", "state",
+			"config_revision", "projection_revision", "deleted_at", "dialog_key", "state",
 			"uk_cascade_platform_name", "uk_cascade_platform_local_identity",
 			"uk_cascade_device_source", "uk_cascade_device_published",
 			"uk_cascade_channel_source", "uk_cascade_channel_published", "uk_cascade_media_dialog",

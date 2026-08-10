@@ -77,11 +77,12 @@ type GbCascadePlatform struct {
 	LastErrorMessage  string     `gorm:"column:last_error_message;type:text" json:"lastErrorMessage"`
 	LastErrorAt       *time.Time `gorm:"column:last_error_at" json:"lastErrorAt"`
 
-	Enabled        bool           `gorm:"column:enabled;not null;default:false;index:idx_cascade_platform_enabled" json:"enabled"`
-	ConfigRevision uint64         `gorm:"column:config_revision;not null;default:1" json:"configRevision"`
-	CreatedAt      time.Time      `gorm:"column:created_at;not null" json:"createdAt"`
-	UpdatedAt      time.Time      `gorm:"column:updated_at;not null" json:"updatedAt"`
-	DeletedAt      gorm.DeletedAt `gorm:"column:deleted_at;index:idx_cascade_platform_deleted_at" json:"-"`
+	Enabled            bool           `gorm:"column:enabled;not null;default:false;index:idx_cascade_platform_enabled" json:"enabled"`
+	ConfigRevision     uint64         `gorm:"column:config_revision;not null;default:1" json:"configRevision"`
+	ProjectionRevision uint64         `gorm:"column:projection_revision;not null;default:0" json:"projectionRevision"`
+	CreatedAt          time.Time      `gorm:"column:created_at;not null" json:"createdAt"`
+	UpdatedAt          time.Time      `gorm:"column:updated_at;not null" json:"updatedAt"`
+	DeletedAt          gorm.DeletedAt `gorm:"column:deleted_at;index:idx_cascade_platform_deleted_at" json:"-"`
 }
 
 func (GbCascadePlatform) TableName() string { return "gb_cascade_platform" }

@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS gb_cascade_platform (
   publish_group BOOLEAN NOT NULL DEFAULT FALSE, max_streams INTEGER NOT NULL DEFAULT 1, ptz_enabled BOOLEAN NOT NULL DEFAULT FALSE,
   register_at TIMESTAMP(3), register_expires_at TIMESTAMP(3), heartbeat_at TIMESTAMP(3),
   last_error_code VARCHAR(64), last_error_message TEXT, last_error_at TIMESTAMP(3),
-  enabled BOOLEAN NOT NULL DEFAULT FALSE, config_revision BIGINT NOT NULL DEFAULT 1,
+  enabled BOOLEAN NOT NULL DEFAULT FALSE, config_revision BIGINT NOT NULL DEFAULT 1, projection_revision BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMP(3) NOT NULL, updated_at TIMESTAMP(3) NOT NULL, deleted_at TIMESTAMP(3),
   CONSTRAINT uk_cascade_platform_name UNIQUE (name),
   CONSTRAINT uk_cascade_platform_local_identity UNIQUE (local_device_id, local_domain)

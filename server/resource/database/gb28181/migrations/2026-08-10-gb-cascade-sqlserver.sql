@@ -18,7 +18,8 @@ BEGIN
     [ptz_enabled] BIT NOT NULL CONSTRAINT [df_cascade_platform_ptz_enabled] DEFAULT 0, [register_at] DATETIME2(3) NULL,
     [register_expires_at] DATETIME2(3) NULL, [heartbeat_at] DATETIME2(3) NULL, [last_error_code] NVARCHAR(64) NULL,
     [last_error_message] NVARCHAR(MAX) NULL, [last_error_at] DATETIME2(3) NULL, [enabled] BIT NOT NULL CONSTRAINT [df_cascade_platform_enabled] DEFAULT 0,
-    [config_revision] BIGINT NOT NULL CONSTRAINT [df_cascade_platform_config_revision] DEFAULT 1, [created_at] DATETIME2(3) NOT NULL,
+    [config_revision] BIGINT NOT NULL CONSTRAINT [df_cascade_platform_config_revision] DEFAULT 1,
+    [projection_revision] BIGINT NOT NULL CONSTRAINT [df_cascade_platform_projection_revision] DEFAULT 0, [created_at] DATETIME2(3) NOT NULL,
     [updated_at] DATETIME2(3) NOT NULL, [deleted_at] DATETIME2(3) NULL,
     CONSTRAINT [pk_gb_cascade_platform] PRIMARY KEY ([id]), CONSTRAINT [uk_cascade_platform_name] UNIQUE ([name]),
     CONSTRAINT [uk_cascade_platform_local_identity] UNIQUE ([local_device_id], [local_domain])

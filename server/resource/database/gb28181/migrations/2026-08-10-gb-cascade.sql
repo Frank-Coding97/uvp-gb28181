@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS `gb_cascade_platform` (
   `last_error_at` datetime(3) DEFAULT NULL,
   `enabled` tinyint(1) NOT NULL DEFAULT 0,
   `config_revision` bigint unsigned NOT NULL DEFAULT 1,
+  `projection_revision` bigint unsigned NOT NULL DEFAULT 0,
   `created_at` datetime(3) NOT NULL,
   `updated_at` datetime(3) NOT NULL,
   `deleted_at` datetime(3) DEFAULT NULL,
