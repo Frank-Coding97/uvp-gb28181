@@ -91,6 +91,49 @@ func (f *RequestFactory) BuildRegister(expires int, callID string) (*sip.Request
 	return request, nil
 }
 
+// BuildMessage creates only the SIP envelope for a profile-owned MANSCDP body.
+// Message XML is intentionally encoded outside this factory.
+func (f *RequestFactory) BuildMessage(body []byte, callID string) (*sip.Request, error) {
+	if f == nil || len(body) == 0 || strings.TrimSpace(callID) == "" {
+		return nil, fmt.Errorf("invalid cascade MESSAGE request")
+	}
+	recipient := sip.Uri{Scheme: "sip", User: f.identity.UpstreamServerID, Host: f.identity.UpstreamDomain}
+	request := sip.NewRequest(sip.MESSAGE, recipient)
+	request.SetDestination(net.JoinHostPort(f.identity.Host, strconv.Itoa(f.identity.Port)))
+	request.SetTransport(f.transport)
+
+	fromParams := sip.NewParams()
+	fromParams.Add("tag", sip.GenerateTagN(16))
+	request.AppendHeader(&sip.FromHeader{
+		Address: sip.Uri{Scheme: "sip", User: f.identity.LocalDeviceID, Host: f.identity.LocalDomain}, Params: fromParams,
+	})
+	request.AppendHeader(&sip.ToHeader{Address: sip.Uri{Scheme: "sip", User: f.identity.UpstreamServerID, Host: f.identity.UpstreamDomain}, Params: sip.NewParams()})
+	request.AppendHeader(&sip.ContactHeader{Address: sip.Uri{Scheme: "sip", User: f.identity.LocalDeviceID, Host: f.identity.LocalIP, Port: f.identity.LocalPort}})
+	viaParams := sip.NewParams()
+	viaParams.Add("branch", sip.GenerateBranchN(16))
+	request.AppendHeader(&sip.ViaHeader{
+		ProtocolName: "SIP", ProtocolVersion: "2.0", Transport: f.transport,
+		Host: f.identity.LocalIP, Port: f.identity.LocalPort, Params: viaParams,
+	})
+	callIDHeader := sip.CallIDHeader(strings.TrimSpace(callID))
+	request.AppendHeader(&callIDHeader)
+	request.AppendHeader(&sip.CSeqHeader{SeqNo: atomic.AddUint32(&f.cseq, 1), MethodName: sip.MESSAGE})
+	request.AppendHeader(sip.NewHeader("Max-Forwards", "70"))
+	request.AppendHeader(sip.NewHeader("Content-Type", "Application/MANSCDP+xml"))
+	if f.identity.Profile == protocol.Version2022 {
+		request.AppendHeader(sip.NewHeader("X-GB-Ver", "3.0"))
+	}
+	request.SetBody(body)
+	return request, nil
+}
+
+func (f *RequestFactory) Profile() protocol.Version {
+	if f == nil {
+		return ""
+	}
+	return f.identity.Profile
+}
+
 func validGBID(value string) bool {
 	if len(value) != 20 {
 		return false
