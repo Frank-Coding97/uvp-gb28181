@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 	"sync"
@@ -9,8 +10,11 @@ import (
 	"time"
 
 	"github.com/emiago/sipgo/sip"
+	"gorm.io/gorm"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // Runtime is the lifecycle boundary between the SIP transport and trace pipeline.
@@ -24,18 +28,18 @@ type Runtime interface {
 
 // Module owns transport hooks, framing, the bounded queue, and the batch writer lifecycle.
 type Module struct {
-	closed         atomic.Bool
-	framer         *FrameAssembler
-	onFrame        func(Frame)
-	collector      *Collector
-	store          Store
-	cipher         PayloadCipher
-	health         *healthTracker
-	streamHub      *StreamHub
+	closed    atomic.Bool
+	framer    *FrameAssembler
+	onFrame   func(Frame)
+	collector *Collector
+	store     Store
+	cipher    PayloadCipher
+	health    *healthTracker
+	streamHub *StreamHub
 	// platformAddr 是 SIP 服务实际的 AdvertiseIP:Port,用于替换采集拿到的
 	// wildcard socket 地址([::]:5062 / 0.0.0.0:5062),这样 Source/Destination
 	// 显示给用户的是真实的平台端点而不是绑定通配符。
-	platformAddr string
+	platformAddr   string
 	batchSize      int
 	flushInterval  time.Duration
 	retryMin       time.Duration
@@ -44,6 +48,7 @@ type Module struct {
 	cancel         context.CancelFunc
 	done           chan struct{}
 	retryDone      chan struct{}
+	prunerDone     chan struct{}
 	retryQueue     chan retryBatch
 	pendingRetries atomic.Int64
 	shutdownOnce   sync.Once
@@ -78,15 +83,44 @@ func (m *Module) resolveAddr(addr string) string {
 }
 
 func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
+	return NewRuntimeWithDB(cfg, activeTraceDB())
+}
+
+func activeTraceDB() *gorm.DB {
+	if app.ConfigYml != nil {
+		switch strings.ToLower(app.ConfigYml.GetString("gormv2.usedbtype")) {
+		case "postgresql":
+			return app.GormDbPostgreSql
+		case "sqlserver":
+			return app.GormDbSqlserver
+		case "mysql":
+			return app.GormDbMysql
+		}
+	}
+	for _, db := range []*gorm.DB{app.GormDbMysql, app.GormDbPostgreSql, app.GormDbSqlserver} {
+		if db != nil {
+			return db
+		}
+	}
+	return nil
+}
+
+func NewRuntimeWithDB(cfg gbconfig.TraceConfig, db *gorm.DB) Runtime {
 	loadedCipher, err := LoadCipherFromEnv(cfg.EncryptionKeyEnv, "v1")
 	var payloadCipher PayloadCipher = loadedCipher
 	if err != nil {
 		payloadCipher = failingCipher{err: ErrInvalidEncryptionKey}
 	}
 	var store Store = unavailableStore{}
-	if err == nil {
+	if err == nil && db != nil {
 		store = NewReconnectingStore(func(ctx context.Context) (Store, error) {
-			return OpenClickHouseStore(ctx, cfg)
+			if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
+				return nil, fmt.Errorf("connect relational SIP trace store: %w", pingErr)
+			}
+			if !db.Migrator().HasTable(&gbmodels.GbSipTraceMessage{}) {
+				return nil, fmt.Errorf("relational SIP trace table is unavailable")
+			}
+			return NewRelationalStoreWithRetention(db, cfg.RetentionDays)
 		}, 250*time.Millisecond, 30*time.Second)
 	}
 	module := NewModule(cfg, store, payloadCipher)
@@ -94,7 +128,7 @@ func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
 		module.health.degraded("trace encryption key is unavailable")
 	} else {
 		module.health.degraded(ErrTraceStoreUnavailable.Error())
-		// 启动时主动 ensure ClickHouse 连接(异步,不阻塞 bootstrap),
+		// 启动时主动检查关系型存储(异步,不阻塞 bootstrap),
 		// 避免第一次 UI 查询才 dial 的冷启动问题,同时把真实错误(schema 缺失/权限等)透出到 health.lastError
 		if rs, ok := store.(*ReconnectingStore); ok {
 			go func() {
@@ -139,6 +173,7 @@ func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCiphe
 		now:           time.Now,
 		done:          make(chan struct{}),
 		retryDone:     make(chan struct{}),
+		prunerDone:    make(chan struct{}),
 		retryQueue:    make(chan retryBatch, 32),
 	}
 	module.collector = NewCollector(cfg.QueueCapacity, func() {
@@ -148,6 +183,15 @@ func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCiphe
 	module.cancel = cancel
 	go module.runWriter(ctx)
 	go module.runRetryWriter(ctx)
+	if prunable, ok := store.(PrunableStore); ok {
+		pruner := NewTracePruner(prunable, cfg.RetentionDays, DefaultTracePruneBatchSize, time.Now)
+		go func() {
+			defer close(module.prunerDone)
+			pruner.Run(ctx, time.Hour, func(err error) { module.health.degraded(err.Error()) })
+		}()
+	} else {
+		close(module.prunerDone)
+	}
 	return module
 }
 
@@ -228,10 +272,13 @@ func (m *Module) Shutdown(ctx context.Context) error {
 	case <-m.done:
 		select {
 		case <-m.retryDone:
+			m.cancel()
+			<-m.prunerDone
 			return m.closeStore()
 		case <-ctx.Done():
 			m.cancel()
 			<-m.retryDone
+			<-m.prunerDone
 			_ = m.closeStore()
 			return ctx.Err()
 		}
@@ -239,6 +286,7 @@ func (m *Module) Shutdown(ctx context.Context) error {
 		m.cancel()
 		<-m.done
 		<-m.retryDone
+		<-m.prunerDone
 		_ = m.closeStore()
 		return ctx.Err()
 	}

@@ -17,6 +17,9 @@ func newRelationalStoreTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
+	dbConn, err := db.DB()
+	require.NoError(t, err)
+	dbConn.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipTraceMessage{}))
 	return db
 }

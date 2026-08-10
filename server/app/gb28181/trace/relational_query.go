@@ -216,7 +216,12 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 			acc.summary.Methods = append(acc.summary.Methods, method)
 		}
 		sort.Strings(acc.summary.Methods)
-		acc.summary.SessionDerivedState = deriveSessionState(acc.summary.LastAt, acc.summary.FinalStatus, acc.summary.RequestCount, acc.summary.FinalResponseCount, now)
+		expiresAt := acc.summary.LastAt.Add(s.rawMessageRetention())
+		missing := acc.summary.RequestCount > acc.summary.FinalResponseCount
+		acc.summary.SessionDerivedState = SessionDerivedState{
+			OriginalAvailable: now.Before(expiresAt), OriginalExpiresAt: expiresAt,
+			MissingResponse: missing, Anomaly: missing || acc.summary.FinalStatus >= 300,
+		}
 		if !filter.Anomaly || acc.summary.Anomaly {
 			sessions = append(sessions, acc.summary)
 		}

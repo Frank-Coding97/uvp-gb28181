@@ -7,20 +7,33 @@ import (
 
 	"gorm.io/gorm"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
 // RelationalStore persists SIP trace events through the application's active
 // GORM connection. It does not own or close that shared connection.
 type RelationalStore struct {
-	db *gorm.DB
+	db            *gorm.DB
+	retentionDays int
 }
 
 func NewRelationalStore(db *gorm.DB) (*RelationalStore, error) {
+	return NewRelationalStoreWithRetention(db, gbconfig.DefaultSIPTraceRetentionDays)
+}
+
+func NewRelationalStoreWithRetention(db *gorm.DB, retentionDays int) (*RelationalStore, error) {
 	if db == nil {
 		return nil, ErrTraceStoreUnavailable
 	}
-	return &RelationalStore{db: db}, nil
+	if retentionDays < gbconfig.MinSIPTraceRetentionDays || retentionDays > gbconfig.MaxSIPTraceRetentionDays {
+		retentionDays = gbconfig.DefaultSIPTraceRetentionDays
+	}
+	return &RelationalStore{db: db, retentionDays: retentionDays}, nil
+}
+
+func (s *RelationalStore) rawMessageRetention() time.Duration {
+	return time.Duration(s.retentionDays) * 24 * time.Hour
 }
 
 func (s *RelationalStore) InsertBatch(ctx context.Context, events []StoredEvent) error {

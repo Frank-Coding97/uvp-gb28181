@@ -149,6 +149,22 @@ func (s *ReconnectingStore) GetSessionStats(ctx context.Context, filter SessionF
 	return stats, err
 }
 
+func (s *ReconnectingStore) Prune(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	store, err := s.ensure(ctx)
+	if err != nil {
+		return 0, err
+	}
+	prunable, ok := store.(PrunableStore)
+	if !ok {
+		return 0, ErrTraceStoreUnavailable
+	}
+	deleted, err := prunable.Prune(ctx, cutoff, batchSize)
+	if err != nil {
+		s.markBroken(store)
+	}
+	return deleted, err
+}
+
 func (s *ReconnectingStore) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
