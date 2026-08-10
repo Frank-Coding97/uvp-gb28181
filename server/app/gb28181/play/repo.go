@@ -35,5 +35,34 @@ func (gormChannelRepo) ClearStream(ctx context.Context, streamID string) error {
 	return gbmodels.ClearChannelStream(ctx, streamID)
 }
 
+func (gormChannelRepo) SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string) error {
+	return gbmodels.SetChannelCurrent(ctx, deviceID, channelID, streamID, ssrc)
+}
+
+func (gormChannelRepo) ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error) {
+	return gbmodels.ClearChannelCurrentIfCurrent(ctx, streamID, ssrc)
+}
+
+// CurrentSSRCForChannel preserves compatibility with rows created before
+// current_ssrc existed. Only a valid 10-digit legacy stream_id can be treated
+// as its SSRC; fixed or otherwise malformed stream IDs never receive a guess.
+func CurrentSSRCForChannel(ch *gbmodels.GbChannel) string {
+	if ch == nil {
+		return ""
+	}
+	if ch.CurrentSSRC != "" {
+		return ch.CurrentSSRC
+	}
+	if len(ch.StreamID) != 10 {
+		return ""
+	}
+	for _, digit := range ch.StreamID {
+		if digit < '0' || digit > '9' {
+			return ""
+		}
+	}
+	return ch.StreamID
+}
+
 // NewChannelRepo 默认通道仓库(生产路径)
 func NewChannelRepo() ChannelRepo { return gormChannelRepo{} }

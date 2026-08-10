@@ -15,6 +15,7 @@ CREATE TABLE `gb_channel` (
   `latitude` decimal(10,6) DEFAULT '0.000000' COMMENT '纬度',
   `status` tinyint(1) DEFAULT '0' COMMENT '通道在线 0离线 1在线',
   `stream_id` varchar(64) NOT NULL DEFAULT '' COMMENT '当前播放流ID(ZLM app/stream),空=未点播',
+  `current_ssrc` varchar(10) NOT NULL DEFAULT '' COMMENT '当前实时媒体会话SSRC',
   `on_demand_live` tinyint(1) NOT NULL DEFAULT '1' COMMENT '按需直播 1=无人观看自动关闭',
   `audio_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '点播是否接收音频',
   `cloud_recording_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '云端录像期望开关',

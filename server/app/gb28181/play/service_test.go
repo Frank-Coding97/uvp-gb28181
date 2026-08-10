@@ -184,6 +184,29 @@ func (f *fakeChannels) ClearStream(ctx context.Context, streamID string) error {
 	return nil
 }
 
+func (f *fakeChannels) SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	if f.c != nil {
+		f.c.StreamID = streamID
+		f.c.CurrentSSRC = ssrc
+	}
+	return nil
+}
+
+func (f *fakeChannels) ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error) {
+	if f.clearErr != nil {
+		return false, f.clearErr
+	}
+	if f.c == nil || f.c.StreamID != streamID || f.c.CurrentSSRC != ssrc {
+		return false, nil
+	}
+	f.c.StreamID = ""
+	f.c.CurrentSSRC = ""
+	return true, nil
+}
+
 // ===== fixtures =====
 
 func onlineDevice() *gbmodels.GbDevice {

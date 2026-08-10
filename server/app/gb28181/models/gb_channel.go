@@ -30,6 +30,7 @@ type GbChannel struct {
 	Latitude                float64    `gorm:"column:latitude;comment:纬度" json:"latitude"`
 	Status                  int8       `gorm:"column:status;default:0;comment:通道在线" json:"status"`
 	StreamID                string     `gorm:"column:stream_id;size:64;comment:当前播放流ID" json:"streamId"`
+	CurrentSSRC             string     `gorm:"column:current_ssrc;size:10;not null;default:'';comment:当前实时媒体会话SSRC" json:"currentSsrc"`
 	OnDemandLive            bool       `gorm:"column:on_demand_live;default:true;comment:按需直播,无人观看自动关闭" json:"onDemandLive"`
 	StreamTransport         string     `gorm:"column:stream_transport;size:16;default:TCP-Passive;comment:流传输模式 UDP/TCP-Active/TCP-Passive" json:"streamTransport"`
 	AudioEnabled            bool       `gorm:"column:audio_enabled;default:true;comment:点播是否接收音频" json:"audioEnabled"`
@@ -114,11 +115,30 @@ func UpdateChannelStream(c context.Context, deviceID, channelID, streamID string
 		Update("stream_id", streamID).Error
 }
 
+// SetChannelCurrent atomically records the current stream identity and its
+// independent GB28181 media SSRC. Both values describe one live generation
+// and must never be persisted by separate updates.
+func SetChannelCurrent(c context.Context, deviceID, channelID, streamID, ssrc string) error {
+	return app.DB().WithContext(c).Model(&GbChannel{}).
+		Where("device_id = ? AND channel_id = ?", deviceID, channelID).
+		Updates(map[string]any{"stream_id": streamID, "current_ssrc": ssrc}).Error
+}
+
 // ClearChannelStream 按当前流 ID 清空通道播放状态
 func ClearChannelStream(c context.Context, streamID string) error {
 	return app.DB().WithContext(c).Model(&GbChannel{}).
 		Where("stream_id = ?", streamID).
 		Update("stream_id", "").Error
+}
+
+// ClearChannelCurrentIfCurrent clears both current identity fields only when
+// the supplied stream/SSRC still owns the row. A stale callback therefore
+// cannot erase a newer media generation.
+func ClearChannelCurrentIfCurrent(c context.Context, streamID, ssrc string) (bool, error) {
+	result := app.DB().WithContext(c).Model(&GbChannel{}).
+		Where("stream_id = ? AND current_ssrc = ?", streamID, ssrc).
+		Updates(map[string]any{"stream_id": "", "current_ssrc": ""})
+	return result.RowsAffected == 1, result.Error
 }
 
 // FindChannelByStreamID 按当前播放流 ID 查询通道。
@@ -136,12 +156,12 @@ func FindChannelByStreamID(c context.Context, streamID string) (*GbChannel, erro
 	return &ch, nil
 }
 
-// ListPlayingChannels 列出所有 DB 认为在播的通道(stream_id != '').
+// ListPlayingChannels 列出所有 DB 认为在播的通道(stream_id != ”).
 // 用于 play/reconciler 对账扫描:只查关键字段避免拖慢,不 SELECT * 拉快照 URL 等大字段.
 func ListPlayingChannels(c context.Context) (GbChannelList, error) {
 	var list GbChannelList
 	err := app.DB().WithContext(c).
-		Select("id, device_id, channel_id, stream_id").
+		Select("id, device_id, channel_id, stream_id, current_ssrc").
 		Where("stream_id != ''").
 		Find(&list).Error
 	return list, err

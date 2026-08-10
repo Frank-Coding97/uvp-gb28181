@@ -64,6 +64,8 @@ type ChannelRepo interface {
 	FindChannelByStream(ctx context.Context, streamID string) (*gbmodels.GbChannel, error)
 	UpdateStream(ctx context.Context, deviceID, channelID, streamID string) error
 	ClearStream(ctx context.Context, streamID string) error
+	SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string) error
+	ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error)
 }
 
 // DeviceRepo 设备查询(便于测试 mock)
