@@ -59,6 +59,10 @@ type DefaultChannelStreamTransportConfig struct {
 	Transport string `json:"transport"`
 }
 
+type DefaultPlaybackProtocolConfig struct {
+	Protocol string `json:"protocol"`
+}
+
 type GlobalSubscriptionConfig struct {
 	Items []string `json:"items"`
 }
@@ -385,6 +389,36 @@ func (sc *ServiceConfigController) UpdateDefaultChannelStreamTransport(c *gin.Co
 	}
 
 	sc.SuccessWithMessage(c, "新通道默认流传输模式已更新", DefaultChannelStreamTransportConfig{Transport: *request.Transport})
+}
+
+// GetDefaultPlaybackProtocol GET /api/gb28181/sip/service-config/default-playback-protocol
+func (sc *ServiceConfigController) GetDefaultPlaybackProtocol(c *gin.Context) {
+	sc.Success(c, DefaultPlaybackProtocolConfig{Protocol: gbconfig.CurrentDefaultPlaybackProtocol()})
+}
+
+// UpdateDefaultPlaybackProtocol PUT /api/gb28181/sip/service-config/default-playback-protocol
+func (sc *ServiceConfigController) UpdateDefaultPlaybackProtocol(c *gin.Context) {
+	var request struct {
+		Protocol *string `json:"protocol"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Protocol == nil || !gbconfig.IsSupportedPlaybackProtocol(*request.Protocol) {
+		sc.Fail(c, "保存默认播放协议失败：protocol 必须为 ws-flv、http-flv、hls 或 webrtc", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.CurrentDefaultPlaybackProtocol()
+	app.ConfigYml.Set(gbconfig.DefaultPlaybackProtocolConfigKey, *request.Protocol)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.DefaultPlaybackProtocolConfigKey, previous)
+		sc.Fail(c, "保存默认播放协议失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "默认播放协议已更新", DefaultPlaybackProtocolConfig{Protocol: *request.Protocol})
 }
 
 // GetGlobalSubscriptions GET /api/gb28181/sip/service-config/global-subscriptions

@@ -73,18 +73,22 @@ type DeviceRepo interface {
 
 // Result 点播结果
 type Result struct {
-	StreamID    string       `json:"streamId"` // ZLM stream id(也是会话主键)
-	SSRC        string       `json:"ssrc"`     // 媒体流 SSRC
-	App         string       `json:"app"`      // ZLM app(固定 rtp)
-	Reused      bool         `json:"reused"`
-	Status      string       `json:"status"`
-	Node        *ResultNode  `json:"node"`
-	URLs        PlaybackURLs `json:"urls"`
-	URLWarnings []string     `json:"urlWarnings"`
-	WSFlvURL    string       `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
-	HLSURL      string       `json:"hlsUrl"`     // HLS 备用
-	HTTPFlvURL  string       `json:"httpFlvUrl"` // http-flv 备用
-	ExpireAt    int64        `json:"expireAt"`   // 预计无人观看断流时刻(秒,UTC)
+	StreamID        string       `json:"streamId"` // ZLM stream id(也是会话主键)
+	SSRC            string       `json:"ssrc"`     // 媒体流 SSRC
+	App             string       `json:"app"`      // ZLM app(固定 rtp)
+	Reused          bool         `json:"reused"`
+	Status          string       `json:"status"`
+	Node            *ResultNode  `json:"node"`
+	URLs            PlaybackURLs `json:"urls"`
+	URLWarnings     []string     `json:"urlWarnings"`
+	WSFlvURL        string       `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
+	HLSURL          string       `json:"hlsUrl"`     // HLS 备用
+	HTTPFlvURL      string       `json:"httpFlvUrl"` // http-flv 备用
+	DefaultProtocol string       `json:"defaultProtocol"`
+	Protocol        string       `json:"protocol"`
+	URL             string       `json:"url"`
+	ZLMWebRTC       bool         `json:"zlmWebrtc"`
+	ExpireAt        int64        `json:"expireAt"` // 预计无人观看断流时刻(秒,UTC)
 }
 
 type ResultNode struct {
@@ -531,16 +535,23 @@ func (s *Service) ShouldCloseOnNoneReader(ctx context.Context, streamID string) 
 func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 	port := s.cfg.ZLM.HTTPPort
 	base := fmt.Sprintf("%s:%d/%s/%s", host, port, zlmApp, streamID)
-	return &Result{
+	urls := PlaybackURLs{
+		WSFLV: stringPtr("ws://" + base + ".live.flv"), HTTPFLV: stringPtr("http://" + base + ".live.flv"),
+		HLS: stringPtr("http://" + base + "/hls.m3u8"),
+	}
+	result := &Result{
 		StreamID:   streamID,
 		SSRC:       ssrc,
 		App:        zlmApp,
 		Status:     "online",
+		URLs:       urls,
 		WSFlvURL:   "ws://" + base + ".live.flv",
 		HTTPFlvURL: "http://" + base + ".live.flv",
 		HLSURL:     "http://" + base + "/hls.m3u8",
 		ExpireAt:   time.Now().Add(time.Duration(s.cfg.Media.StreamNoneReaderTimeout) * time.Second).Unix(),
 	}
+	ApplyPlaybackSelection(result, gbconfig.CurrentDefaultPlaybackProtocol(), false)
+	return result
 }
 
 func (s *Service) buildNodeResult(ctx context.Context, streamID, ssrc string, mediaNode *node.Node, reused bool) *Result {
@@ -565,7 +576,19 @@ func (s *Service) buildNodeResult(ctx context.Context, streamID, ssrc string, me
 	if urls.HLS != nil {
 		result.HLSURL = *urls.HLS
 	}
+	ApplyPlaybackSelection(result, gbconfig.CurrentDefaultPlaybackProtocol(), false)
 	return result
+}
+
+func ApplyPlaybackSelection(result *Result, preferred string, secure bool) {
+	if result == nil {
+		return
+	}
+	if result.DefaultProtocol == "" {
+		result.DefaultProtocol = preferred
+	}
+	selected := SelectPlaybackSource(result.URLs, result.DefaultProtocol, secure)
+	result.Protocol, result.URL, result.ZLMWebRTC = selected.Protocol, selected.URL, selected.ZLMWebRTC
 }
 
 // buildResult 旧版,deprecated 单节点路径用

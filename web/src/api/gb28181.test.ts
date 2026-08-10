@@ -8,6 +8,7 @@ vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 import {
   fetchPTZDefaultSpeedConfig,
   fetchDefaultChannelStreamTransportConfig,
+  fetchDefaultPlaybackProtocolConfig,
   fetchGlobalSubscriptionConfig,
   fetchDefaultChannelAudioConfig,
   fetchSDPExtensionConfig,
@@ -30,6 +31,7 @@ import {
   updatePositionHistoryConfig,
   updatePTZDefaultSpeedConfig,
   updateDefaultChannelStreamTransportConfig,
+  updateDefaultPlaybackProtocolConfig,
   updateGlobalSubscriptionConfig,
   updateDefaultChannelAudioConfig,
   updateSDPExtensionConfig,
@@ -97,6 +99,18 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/default-channel-stream-transport",
       { data: { transport: "TCP-Active" } }
+    );
+  });
+
+  it("读取并更新默认播放协议", async () => {
+    await fetchDefaultPlaybackProtocolConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-playback-protocol");
+
+    await updateDefaultPlaybackProtocolConfig("webrtc");
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/default-playback-protocol",
+      { data: { protocol: "webrtc" } }
     );
   });
 

@@ -121,6 +121,33 @@ func TestPlaybackServiceCreateOpensRTPBeforeInviteAndWaitsForMedia(t *testing.T)
 	}
 }
 
+func TestPlaybackServiceStoresSelectedProtocolSnapshot(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	media := &fakeMedia{ready: MediaReady{URLs: map[string]string{
+		"wsFlv": "ws://node/live.flv", "wssFlv": "wss://node/live.flv",
+		"webrtc": "http://node/index/api/webrtc", "webrtcs": "https://node/index/api/webrtc",
+	}}}
+	service := NewService(NewRegistry(RegistryConfig{Now: func() time.Time { return now }}),
+		&fakeNodePicker{node: NodeInfo{ID: "node-1", ServerID: "34020000002000000001", Destination: "192.0.2.20:5060", RecvIP: "192.0.2.10"}},
+		&fakeRTP{}, &fakeInvite{}, media, ServiceConfig{})
+	request := validCreate(now)
+	request.DefaultProtocol = "webrtc"
+	request.Secure = true
+	result, err := service.Create(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Session.DefaultProtocol != "webrtc" || result.Session.Protocol != "webrtc" || result.Session.URL != "https://node/index/api/webrtc" || !result.Session.ZLMWebRTC {
+		t.Fatalf("session=%+v", result.Session)
+	}
+
+	request.DefaultProtocol = "ws-flv"
+	stored, ok := service.GetForOwner(result.Session.ID, result.Session.OwnerID)
+	if !ok || stored.Protocol != "webrtc" || stored.URL != result.Session.URL {
+		t.Fatalf("stored=%+v ok=%v", stored, ok)
+	}
+}
+
 func TestPlaybackServiceIdempotentCreateReportsExisting(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	service := NewService(NewRegistry(RegistryConfig{Now: func() time.Time { return now }}),

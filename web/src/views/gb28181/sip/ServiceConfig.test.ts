@@ -7,6 +7,8 @@ const api = vi.hoisted(() => ({
     updatePTZDefaultSpeedConfig: vi.fn(),
     fetchDefaultChannelStreamTransportConfig: vi.fn(),
     updateDefaultChannelStreamTransportConfig: vi.fn(),
+    fetchDefaultPlaybackProtocolConfig: vi.fn(),
+    updateDefaultPlaybackProtocolConfig: vi.fn(),
     fetchGlobalSubscriptionConfig: vi.fn(),
     updateGlobalSubscriptionConfig: vi.fn(),
     fetchDefaultChannelAudioConfig: vi.fn(),
@@ -31,7 +33,12 @@ const api = vi.hoisted(() => ({
     updateSIPLogConfig: vi.fn()
 }));
 
+const dictionaryApi = vi.hoisted(() => ({
+    getDictItemsByDictCodeAPI: vi.fn()
+}));
+
 vi.mock("@/api/gb28181", () => api);
+vi.mock("@/api/dictionary", () => dictionaryApi);
 vi.mock("@arco-design/web-vue", () => ({
     Message: { success: vi.fn(), error: vi.fn() }
 }));
@@ -124,6 +131,8 @@ describe("ServiceConfig edit mode", () => {
         api.updatePTZDefaultSpeedConfig.mockReset();
         api.fetchDefaultChannelStreamTransportConfig.mockReset();
         api.updateDefaultChannelStreamTransportConfig.mockReset();
+        api.fetchDefaultPlaybackProtocolConfig.mockReset();
+        api.updateDefaultPlaybackProtocolConfig.mockReset();
         api.fetchGlobalSubscriptionConfig.mockReset();
         api.updateGlobalSubscriptionConfig.mockReset();
         api.fetchDefaultChannelAudioConfig.mockReset();
@@ -142,10 +151,24 @@ describe("ServiceConfig edit mode", () => {
         api.updatePreallocationModeConfig.mockReset();
         api.fetchSIPLogConfig.mockReset();
         api.updateSIPLogConfig.mockReset();
+        dictionaryApi.getDictItemsByDictCodeAPI.mockReset();
         api.fetchPositionHistoryConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
         api.fetchSDPExtensionConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
         api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 8 } });
         api.fetchDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "", data: { transport: "TCP-Passive" } });
+        api.fetchDefaultPlaybackProtocolConfig.mockResolvedValue({ code: 0, message: "", data: { protocol: "ws-flv" } });
+        dictionaryApi.getDictItemsByDictCodeAPI.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: {
+                list: [
+                    { id: 1, name: "WebRTC（低延迟）", value: "webrtc", status: 1, dictId: 1 },
+                    { id: 2, name: "WS-FLV", value: "ws-flv", status: 1, dictId: 1 },
+                    { id: 3, name: "HTTP-FLV", value: "http-flv", status: 1, dictId: 1 },
+                    { id: 4, name: "HLS", value: "hls", status: 1, dictId: 1 }
+                ]
+            }
+        });
         api.fetchGlobalSubscriptionConfig.mockResolvedValue({ code: 0, message: "", data: { items: [] } });
         api.fetchDefaultChannelAudioConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updatePositionHistoryConfig.mockResolvedValue({
@@ -162,6 +185,7 @@ describe("ServiceConfig edit mode", () => {
         api.updateDefaultChannelAudioConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
         api.updateDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { transport: "UDP" } });
+        api.updateDefaultPlaybackProtocolConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { protocol: "webrtc" } });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
@@ -197,7 +221,7 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(14);
+        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(15);
         expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
             "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
         );
@@ -357,6 +381,39 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updateDefaultChannelStreamTransportConfig).toHaveBeenCalledWith("UDP");
+    });
+
+    it("loads, saves, and cancels the default playback protocol", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchDefaultPlaybackProtocolConfig).toHaveBeenCalledOnce();
+        expect(dictionaryApi.getDictItemsByDictCodeAPI).toHaveBeenCalledWith("gb28181_playback_protocol");
+        const field = wrapper.find("[data-field='defaultProtocol']");
+        expect(field.text()).toContain("默认播放协议");
+        expect(field.findAll("option").map(option => option.text())).toEqual([
+            "WebRTC（低延迟）",
+            "WS-FLV",
+            "HTTP-FLV",
+            "HLS"
+        ]);
+        const select = field.get("select");
+        expect(select.element).toHaveProperty("value", "ws-flv");
+        expect(select.element).toHaveProperty("disabled", true);
+
+        await wrapper.get("button").trigger("click");
+        await select.setValue("webrtc");
+        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("取消"));
+        await cancelButton?.trigger("click");
+        expect(select.element).toHaveProperty("value", "ws-flv");
+
+        await wrapper.get("button").trigger("click");
+        await select.setValue("webrtc");
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+        expect(api.updateDefaultPlaybackProtocolConfig).toHaveBeenCalledWith("webrtc");
+        expect(select.element).toHaveProperty("value", "webrtc");
     });
 
     it("loads and saves global subscription defaults", async () => {

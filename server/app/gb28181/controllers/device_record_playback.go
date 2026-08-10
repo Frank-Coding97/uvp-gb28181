@@ -90,7 +90,8 @@ func (dc *DeviceMgmtController) CreatePlaybackSession(c *gin.Context) {
 			ChannelID: strconv.FormatUint(uint64(channelID), 10), SIPChannelID: snapshot.ChannelCode,
 			RecordKey: snapshot.RecordKey, IdempotencyKey: key,
 			Destination: net.JoinHostPort(target.device.IP, strconv.Itoa(target.device.Port)), Transport: target.device.Transport,
-			TCPMode:      strings.Contains(strings.ToUpper(target.channel.StreamTransport), "TCP"),
+			TCPMode:         strings.Contains(strings.ToUpper(target.channel.StreamTransport), "TCP"),
+			DefaultProtocol: gbconfig.CurrentDefaultPlaybackProtocol(), Secure: isSecurePlaybackRequest(c.Request),
 			SegmentStart: snapshot.SegmentStart, SegmentEnd: snapshot.SegmentEnd, PlayFrom: playFrom})
 		if createErr != nil {
 			status, errorCode, stage, msg := mapPlaybackServiceError(createErr)
@@ -245,7 +246,8 @@ func playbackSessionView(session *gbplayback.Session) gin.H {
 	}
 	return gin.H{"sessionId": session.ID, "state": session.State, "channelId": session.ChannelID, "recordKey": session.RecordKey,
 		"segmentStart": session.SegmentStart.Format(time.RFC3339), "segmentEnd": session.SegmentEnd.Format(time.RFC3339),
-		"positionSeconds": session.PositionSeconds, "scale": session.Scale, "hasAudio": session.HasAudio, "media": gin.H{"urls": session.MediaURLs},
+		"positionSeconds": session.PositionSeconds, "scale": session.Scale, "hasAudio": session.HasAudio, "media": gin.H{"urls": session.MediaURLs,
+			"defaultProtocol": session.DefaultProtocol, "protocol": session.Protocol, "url": session.URL, "zlmWebrtc": session.ZLMWebRTC},
 		"expiresAt": session.Deadline.Format(time.RFC3339), "errorStage": session.ErrorStage, "errorCode": session.ErrorCode}
 }
 

@@ -35,7 +35,7 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).not.toContain("是否使用设备来源IP作为回复IP");
         expect(staticServiceConfigLabels).not.toContain("缺少国标ID是否给所有上级发送消息");
         expect(staticServiceConfigLabels).not.toContain("设置notify缓存队列最大长度");
-        expect(playbackServiceConfigLabels).toHaveLength(6);
+        expect(playbackServiceConfigLabels).toHaveLength(7);
         expect(cascadeServiceConfigLabels).toHaveLength(7);
         expect(draft.playback.autoInvite).toBe(true);
         expect(draft.playback.inviteTimeoutMs).toBe(10000);

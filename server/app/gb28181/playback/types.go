@@ -73,6 +73,10 @@ type Session struct {
 	SSRC            string
 	CallID          string
 	MediaURLs       map[string]string
+	DefaultProtocol string
+	Protocol        string
+	URL             string
+	ZLMWebRTC       bool
 	HasAudio        bool
 	SegmentStart    time.Time
 	SegmentEnd      time.Time
@@ -97,6 +101,8 @@ type CreateRequest struct {
 	SegmentStart, SegmentEnd                          time.Time
 	PlayFrom                                          time.Time
 	TCPMode                                           bool
+	DefaultProtocol                                   string
+	Secure                                            bool
 	Now                                               time.Time
 	Resources                                         CleanupResources
 }

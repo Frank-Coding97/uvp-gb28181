@@ -1,6 +1,7 @@
 import { http } from "@/utils/http";
 import { baseUrlApi } from "@/api/utils";
 import type { BaseResult } from "@/api/types";
+import type { PlaybackProtocol } from "@/api/gb28181";
 
 export type PlaybackSessionState = "creating" | "buffering" | "playing" | "paused" | "ended" | "failed" | "stopping" | "stopped";
 
@@ -9,6 +10,10 @@ export interface PlaybackMediaUrls {
     httpFlv?: string;
     hls?: string;
     webrtc?: string;
+    wssFlv?: string;
+    httpsFlv?: string;
+    httpsHls?: string;
+    webrtcs?: string;
     rtmp?: string;
     rtsp?: string;
 }
@@ -23,7 +28,13 @@ export interface PlaybackSession {
     positionSeconds: number;
     scale: number;
     hasAudio: boolean;
-    media: { urls: PlaybackMediaUrls };
+    media: {
+        urls: PlaybackMediaUrls;
+        defaultProtocol?: PlaybackProtocol;
+        protocol?: PlaybackProtocol;
+        url?: string;
+        zlmWebrtc?: boolean;
+    };
     expiresAt: string;
     errorStage: string;
     errorCode: string;

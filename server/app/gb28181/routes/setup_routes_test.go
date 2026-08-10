@@ -38,6 +38,8 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"PUT /api/gb28181/sip/service-config/ptz-default-speed",
 		"GET /api/gb28181/sip/service-config/default-channel-stream-transport",
 		"PUT /api/gb28181/sip/service-config/default-channel-stream-transport",
+		"GET /api/gb28181/sip/service-config/default-playback-protocol",
+		"PUT /api/gb28181/sip/service-config/default-playback-protocol",
 		"GET /api/gb28181/sip/service-config/global-subscriptions",
 		"PUT /api/gb28181/sip/service-config/global-subscriptions",
 		"GET /api/gb28181/sip/service-config/default-channel-audio",

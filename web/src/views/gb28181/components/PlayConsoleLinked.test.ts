@@ -468,6 +468,45 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("新会话优先使用服务端协议快照并允许本次会话手动切换", async () => {
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-default-webrtc",
+        ssrc: "0102030405",
+        app: "rtp",
+        defaultProtocol: "webrtc",
+        protocol: "webrtc",
+        url: "http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-default-webrtc&type=play",
+        zlmWebrtc: true,
+        urls: {
+          wsFlv: "ws://zlm/rtp/stream-default-webrtc.live.flv",
+          webrtc: "http://zlm:18080/index/api/webrtc?app=rtp&stream=stream-default-webrtc&type=play"
+        },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    const player = wrapper.get("[data-testid='play-window']");
+    expect(player.attributes("data-url")).toBe(
+      "webrtc://zlm:18080/index/api/webrtc?app=rtp&stream=stream-default-webrtc&type=play"
+    );
+    expect(player.attributes("data-zlm-webrtc")).toBe("true");
+
+    const vm = wrapper.vm as unknown as { switchProtocol: (proto: "ws-flv") => void };
+    vm.switchProtocol("ws-flv");
+    await flushPromises();
+    expect(player.attributes("data-url")).toBe("ws://zlm/rtp/stream-default-webrtc.live.flv");
+    expect(player.attributes("data-zlm-webrtc")).toBe("false");
+    wrapper.unmount();
+  });
+
   it("只有诊断协议时保持播放器地址为空", async () => {
     api.startPlay.mockResolvedValueOnce({
       code: 0,

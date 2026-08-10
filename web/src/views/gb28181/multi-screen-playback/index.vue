@@ -21,6 +21,7 @@ import PlaybackSchemePanel from "./PlaybackSchemePanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
 import { listChannels, type ChannelVO } from "../device-mgmt/api";
+import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
 type SlotStatus = "idle" | "requesting" | "playing" | "error" | "offline";
@@ -31,6 +32,7 @@ interface PlaybackSlot {
     channel: ChannelVO | null;
     status: SlotStatus;
     result: PlayResult | null;
+    source: PlaybackSource | null;
     error: string;
     token: number;
 }
@@ -57,7 +59,7 @@ let pollingCycleRunning = false;
 let playAllToken = 0;
 
 function createSlot(index: number): PlaybackSlot {
-    return { index, channel: null, status: "idle", result: null, error: "", token: 0 };
+    return { index, channel: null, status: "idle", result: null, source: null, error: "", token: 0 };
 }
 
 const slots = reactive<PlaybackSlot[]>(Array.from({ length: 16 }, (_, index) => createSlot(index)));
@@ -98,16 +100,12 @@ function channelIsUsed(channel: ChannelVO) {
     return slots.some(slot => slot.channel?.id === channel.id);
 }
 
-function resolvePlayUrl(result: PlayResult) {
-    const urls = result.urls || {};
-    return urls.wsFlv || result.wsflvUrl || urls.httpFlv || result.httpFlvUrl || urls.hls || result.hlsUrl || "";
-}
-
 function resetSlot(slot: PlaybackSlot) {
     slot.token += 1;
     slot.channel = null;
     slot.status = "idle";
     slot.result = null;
+    slot.source = null;
     slot.error = "";
 }
 
@@ -155,14 +153,16 @@ async function playSlot(target: PlaybackSlot) {
     target.token = token;
     target.status = "requesting";
     target.result = null;
+    target.source = null;
     target.error = "";
     try {
         const response = await startPlay(channel.deviceId, channel.channelId);
         if (target.token !== token || target.channel?.id !== channel.id) return;
         if (response.code !== 0 || !response.data) throw new Error(response.message || "点播失败");
         target.result = response.data;
-        target.status = resolvePlayUrl(response.data) ? "playing" : "error";
-        target.error = resolvePlayUrl(response.data) ? "" : "后端没有返回浏览器可用的播放地址";
+        target.source = resolvePlaybackSource(response.data, window.location.protocol === "https:");
+        target.status = target.source ? "playing" : "error";
+        target.error = target.source ? "" : "后端没有返回浏览器可用的播放地址";
     } catch (error: any) {
         if (target.token !== token || target.channel?.id !== channel.id) return;
         target.status = "error";
@@ -504,7 +504,7 @@ onBeforeUnmount(() => {
                                 </div>
                             </div>
                             <div class="slot-body">
-                                <PlayWindow v-if="slot.status === 'playing' && slot.result" :url="resolvePlayUrl(slot.result)" :has-audio="slot.channel.audioEnabled" @error="onPlayerError(slot, $event)" />
+                                <PlayWindow v-if="slot.status === 'playing' && slot.source" :url="slot.source.url" :zlm-webrtc="slot.source.zlmWebrtc" :has-audio="slot.channel.audioEnabled" @error="onPlayerError(slot, $event)" />
                                 <div v-else-if="slot.status === 'requesting'" class="slot-state"><RefreshCw :size="24" class="spin" aria-hidden="true" /><strong>正在建立媒体链路</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>
                                 <div v-else-if="slot.status === 'error'" class="slot-state error-state" role="alert"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error }}</strong><button class="text-action" type="button" @click.stop="retrySlot(slot)"><RefreshCw :size="14" aria-hidden="true" />重试</button></div>
                                 <div v-else-if="slot.status === 'offline'" class="slot-state offline-state" role="status"><AlertTriangle :size="24" aria-hidden="true" /><strong>{{ slot.error || "通道离线" }}</strong><span>{{ slot.channel.deviceId }} / {{ slot.channel.channelId }}</span></div>

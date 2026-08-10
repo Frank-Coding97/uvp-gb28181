@@ -34,7 +34,7 @@ vi.mock("./api", async importOriginal => ({
 vi.mock("../components/PlayWindow.vue", () => ({
     default: {
         name: "PlayWindow",
-        props: ["url", "playback", "hasAudio"],
+        props: ["url", "playback", "hasAudio", "zlmWebrtc"],
         emits: ["timeupdate", "loading"],
         template: '<div data-testid="playback-player" :data-media-url="url" />'
     }
@@ -397,6 +397,31 @@ describe("device record playback workspace", () => {
         player.vm.$emit("timeupdate", 11_000);
         await flushPromises();
         expect(wrapper.get('[data-testid="timeline-playhead"]').text()).toContain("08:10:01");
+    });
+
+    it("uses the session protocol snapshot and does not reselect it during polling", async () => {
+        vi.useFakeTimers();
+        api.createPlaybackSession.mockResolvedValueOnce({ code: 0, data: {
+            sessionId: "session-webrtc", state: "playing", channelId: "31", recordKey: "opaque-record-key",
+            segmentStart: "2026-08-02T08:10:00+08:00", segmentEnd: "2026-08-02T08:42:16+08:00", positionSeconds: 0, scale: 1,
+            hasAudio: false,
+            media: { defaultProtocol: "webrtc", protocol: "webrtc", url: "https://zlm/index/api/webrtc?stream=one", zlmWebrtc: true, urls: { wsFlv: "ws://zlm/old.live.flv" } },
+            expiresAt: "2026-08-02T09:10:00+08:00", errorStage: "", errorCode: ""
+        }});
+        api.getPlaybackSession.mockResolvedValueOnce({ code: 0, data: {
+            sessionId: "session-webrtc", state: "playing", channelId: "31", recordKey: "opaque-record-key",
+            segmentStart: "2026-08-02T08:10:00+08:00", segmentEnd: "2026-08-02T08:42:16+08:00", positionSeconds: 1, scale: 1,
+            hasAudio: false, media: { urls: { wsFlv: "ws://zlm/changed.live.flv" } },
+            expiresAt: "2026-08-02T09:10:00+08:00", errorStage: "", errorCode: ""
+        }});
+        const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await flushPromises();
+        expect(wrapper.get('[data-testid="playback-player"]').attributes("data-media-url")).toBe("webrtc://zlm/index/api/webrtc?stream=one");
+        expect(wrapper.findComponent({ name: "PlayWindow" }).props("zlmWebrtc")).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(800);
+        await flushPromises();
+        expect(wrapper.get('[data-testid="playback-player"]').attributes("data-media-url")).toBe("webrtc://zlm/index/api/webrtc?stream=one");
     });
 
     it("freezes the timeline while the media is buffering", async () => {

@@ -74,6 +74,8 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/ptz-default-speed", controller.UpdatePTZDefaultSpeed)
 	router.GET("/default-channel-stream-transport", controller.GetDefaultChannelStreamTransport)
 	router.PUT("/default-channel-stream-transport", controller.UpdateDefaultChannelStreamTransport)
+	router.GET("/default-playback-protocol", controller.GetDefaultPlaybackProtocol)
+	router.PUT("/default-playback-protocol", controller.UpdateDefaultPlaybackProtocol)
 	router.GET("/global-subscriptions", controller.GetGlobalSubscriptions)
 	router.PUT("/global-subscriptions", controller.UpdateGlobalSubscriptions)
 	router.GET("/default-channel-audio", controller.GetDefaultChannelAudio)
@@ -522,6 +524,75 @@ func TestServiceConfigController_UpdateDefaultChannelStreamTransportRollsBackOnS
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, "TCP-Passive", config.values[gbconfig.DefaultChannelStreamTransportConfigKey])
+}
+
+func TestServiceConfigController_DefaultPlaybackProtocolDefaultsToWSFLV(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = &serviceConfigTestYAML{values: map[string]interface{}{}}
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/default-playback-protocol", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "ws-flv", serviceConfigData(t, recorder)["protocol"])
+}
+
+func TestServiceConfigController_UpdateDefaultPlaybackProtocolPersistsSupportedValues(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.DefaultPlaybackProtocolConfigKey: "ws-flv"}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, protocol := range []string{"ws-flv", "http-flv", "hls", "webrtc"} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(
+			http.MethodPut, "/default-playback-protocol", jsonBody(t, map[string]string{"protocol": protocol}),
+		))
+		require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+		require.Equal(t, protocol, config.values[gbconfig.DefaultPlaybackProtocolConfigKey])
+		require.Equal(t, protocol, serviceConfigData(t, recorder)["protocol"])
+	}
+	require.Equal(t, 4, config.saveNum)
+}
+
+func TestServiceConfigController_UpdateDefaultPlaybackProtocolRejectsInvalidValue(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{gbconfig.DefaultPlaybackProtocolConfigKey: "hls"}}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/default-playback-protocol", jsonBody(t, map[string]string{"protocol": "rtmp"})),
+	)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, "hls", config.values[gbconfig.DefaultPlaybackProtocolConfigKey])
+	require.Zero(t, config.saveNum)
+}
+
+func TestServiceConfigController_UpdateDefaultPlaybackProtocolRollsBackOnSaveError(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{
+		values:  map[string]interface{}{gbconfig.DefaultPlaybackProtocolConfigKey: "ws-flv"},
+		saveErr: errors.New("disk full"),
+	}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/default-playback-protocol", jsonBody(t, map[string]string{"protocol": "webrtc"})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, "ws-flv", config.values[gbconfig.DefaultPlaybackProtocolConfigKey])
 }
 
 func TestServiceConfigController_GlobalSubscriptionsDefaultsToEmpty(t *testing.T) {

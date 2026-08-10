@@ -45,7 +45,7 @@ func (f *fakePlaybackZLMClient) GetMediaInfo(context.Context, string, string, st
 type fakePlaybackServerConfigs struct{}
 
 func (fakePlaybackServerConfigs) Get(context.Context, int64) (node.ServerConfig, error) {
-	return node.ServerConfig{HTTPPort: 8080, RTSPPort: 554}, nil
+	return node.ServerConfig{HTTPPort: 8080, RTSPPort: 554, RTSPEnabled: true}, nil
 }
 
 func TestZLMRuntimeAdaptersPickAllocateWaitAndCleanup(t *testing.T) {

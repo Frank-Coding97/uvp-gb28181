@@ -41,8 +41,8 @@ vi.mock("./PlaybackSourceTree.vue", () => ({
 vi.mock("../components/PlayWindow.vue", () => ({
     default: {
         name: "PlayWindow",
-        props: ["url"],
-        template: "<div class=\"mock-play-window\" :data-url=\"url\" />"
+        props: ["url", "zlmWebrtc"],
+        template: "<div class=\"mock-play-window\" :data-url=\"url\" :data-zlm-webrtc=\"String(Boolean(zlmWebrtc))\" />"
     }
 }));
 vi.mock("../components/PlayConsoleLinked.vue", () => ({
@@ -218,6 +218,40 @@ describe("multi-screen playback page", () => {
         expect(playback.startPlay).toHaveBeenNthCalledWith(1, "device-1", "channel-1");
         expect(playback.startPlay).toHaveBeenNthCalledWith(2, "device-2", "channel-2");
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门", "西门"]);
+    });
+
+    it("keeps an independent protocol snapshot for every new slot", async () => {
+        playback.startPlay.mockImplementation(async (_deviceId: string, channelId: string) => channelId === "channel-1"
+            ? {
+                code: 0,
+                data: {
+                    streamId: "stream-rtc", ssrc: "1", app: "rtp",
+                    defaultProtocol: "webrtc", protocol: "webrtc",
+                    url: "http://zlm/index/api/webrtc?stream=one", zlmWebrtc: true,
+                    urls: { webrtc: "http://zlm/index/api/webrtc?stream=one" },
+                    wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0
+                }
+            }
+            : {
+                code: 0,
+                data: {
+                    streamId: "stream-flv", ssrc: "2", app: "rtp",
+                    defaultProtocol: "ws-flv", protocol: "ws-flv",
+                    url: "ws://zlm/two.live.flv", zlmWebrtc: false,
+                    urls: { wsFlv: "ws://zlm/two.live.flv" },
+                    wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0
+                }
+            });
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await wrapper.get("[data-test=source-channel-2]").trigger("click");
+        await flushPromises();
+
+        const players = wrapper.findAll(".mock-play-window");
+        expect(players[0].attributes("data-url")).toBe("webrtc://zlm/index/api/webrtc?stream=one");
+        expect(players[0].attributes("data-zlm-webrtc")).toBe("true");
+        expect(players[1].attributes("data-url")).toBe("ws://zlm/two.live.flv");
+        expect(players[1].attributes("data-zlm-webrtc")).toBe("false");
     });
 
     it("shows the focused player's PTZ direction while movement is held", async () => {

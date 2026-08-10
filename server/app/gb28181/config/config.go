@@ -17,6 +17,7 @@ const (
 	PreallocationModeConfigKey                = "gb28181.device.preallocation_mode"
 	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
 	DefaultChannelStreamTransportConfigKey    = "gb28181.catalog.default_channel_stream_transport"
+	DefaultPlaybackProtocolConfigKey          = "gb28181.playback.default_protocol"
 	DefaultChannelAudioEnabledConfigKey       = "gb28181.catalog.default_channel_audio_enabled"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
@@ -32,6 +33,7 @@ const (
 	DefaultPlaybackMaxSessionSec         = 86400
 	DefaultSIPCommandTimeoutSec          = 10
 	DefaultChannelStreamTransport        = "TCP-Passive"
+	DefaultPlaybackProtocol              = "ws-flv"
 	DefaultChannelAudioEnabledValue      = true
 
 	MaxRecordQueryTimeoutSec = 300
@@ -227,6 +229,32 @@ func DefaultChannelStreamTransportFrom(c valueSource) string {
 
 func CurrentDefaultChannelStreamTransport() string {
 	return DefaultChannelStreamTransportFrom(app.ConfigYml)
+}
+
+func IsSupportedPlaybackProtocol(protocol string) bool {
+	switch protocol {
+	case "ws-flv", "http-flv", "hls", "webrtc":
+		return true
+	default:
+		return false
+	}
+}
+
+// DefaultPlaybackProtocolFrom returns the preferred protocol for newly
+// created playback sessions. Existing sessions keep their selected protocol.
+func DefaultPlaybackProtocolFrom(c valueSource) string {
+	if c == nil || c.Get(DefaultPlaybackProtocolConfigKey) == nil {
+		return DefaultPlaybackProtocol
+	}
+	protocol := c.GetString(DefaultPlaybackProtocolConfigKey)
+	if !IsSupportedPlaybackProtocol(protocol) {
+		return DefaultPlaybackProtocol
+	}
+	return protocol
+}
+
+func CurrentDefaultPlaybackProtocol() string {
+	return DefaultPlaybackProtocolFrom(app.ConfigYml)
 }
 
 // Config GB28181 国标平台配置

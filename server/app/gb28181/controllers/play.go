@@ -3,6 +3,8 @@ package controllers
 import (
 	"context"
 	"errors"
+	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -69,7 +71,19 @@ func (pc *PlayController) Start(c *gin.Context) {
 		pc.FailAndAbort(c, mapPlayErr(err), err)
 		return
 	}
+	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
 	pc.Success(c, res)
+}
+
+func isSecurePlaybackRequest(request *http.Request) bool {
+	if request == nil {
+		return false
+	}
+	if request.TLS != nil {
+		return true
+	}
+	forwarded := strings.TrimSpace(strings.Split(request.Header.Get("X-Forwarded-Proto"), ",")[0])
+	return strings.EqualFold(forwarded, "https")
 }
 
 // Stop 停播

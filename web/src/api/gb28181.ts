@@ -89,6 +89,10 @@ export interface PlayResult {
     rtsps?: string | null;
   };
   urlWarnings?: string[];
+  defaultProtocol?: PlaybackProtocol;
+  protocol?: PlaybackProtocol;
+  url?: string;
+  zlmWebrtc?: boolean;
   wsflvUrl: string;
   httpFlvUrl: string;
   hlsUrl: string;
@@ -835,6 +839,7 @@ export const updatePTZDefaultSpeedConfig = (level: number) =>
   });
 
 export type ChannelStreamTransport = "UDP" | "TCP-Active" | "TCP-Passive";
+export type PlaybackProtocol = "ws-flv" | "http-flv" | "hls" | "webrtc";
 
 export interface DefaultChannelStreamTransportConfig {
   transport: ChannelStreamTransport;
@@ -851,6 +856,23 @@ export const updateDefaultChannelStreamTransportConfig = (transport: ChannelStre
     "put",
     baseUrlApi("gb28181/sip/service-config/default-channel-stream-transport"),
     { data: { transport } }
+  );
+
+export interface DefaultPlaybackProtocolConfig {
+  protocol: PlaybackProtocol;
+}
+
+export const fetchDefaultPlaybackProtocolConfig = () =>
+  http.request<BaseResult<DefaultPlaybackProtocolConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/default-playback-protocol")
+  );
+
+export const updateDefaultPlaybackProtocolConfig = (protocol: PlaybackProtocol) =>
+  http.request<BaseResult<DefaultPlaybackProtocolConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/default-playback-protocol"),
+    { data: { protocol } }
   );
 
 export type GlobalSubscriptionItem = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";

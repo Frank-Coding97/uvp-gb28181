@@ -131,6 +131,33 @@ func TestURLResolverReturnsWarningsWithoutInventingURLs(t *testing.T) {
 	}
 }
 
+func TestBuildPlaybackURLsAndSelectPlaybackSource(t *testing.T) {
+	urls := BuildPlaybackURLs("play.example.com", node.ServerConfig{
+		HTTPPort: 8080, HTTPSPort: 8443, HLSEnabled: true,
+	}, "app name", "stream/?&")
+	assertURL(t, urls.WSFLV, "ws://play.example.com:8080/app%20name/stream%2F%3F&.live.flv")
+	assertURL(t, urls.HTTPSHLS, "https://play.example.com:8443/app%20name/stream%2F%3F&/hls.m3u8")
+
+	selected := SelectPlaybackSource(urls, "webrtc", true)
+	if selected.Protocol != "webrtc" || selected.URL != "https://play.example.com:8443/index/api/webrtc?app=app+name&stream=stream%2F%3F%26&type=play" || !selected.ZLMWebRTC {
+		t.Fatalf("selected=%+v", selected)
+	}
+
+	urls.WebRTCS = nil
+	selected = SelectPlaybackSource(urls, "webrtc", true)
+	if selected.Protocol != "ws-flv" || selected.URL != "wss://play.example.com:8443/app%20name/stream%2F%3F&.live.flv" || selected.ZLMWebRTC {
+		t.Fatalf("secure fallback=%+v", selected)
+	}
+}
+
+func TestSelectPlaybackSourceDoesNotUseInsecureURLOnHTTPS(t *testing.T) {
+	ws := "ws://node/live.flv"
+	selected := SelectPlaybackSource(PlaybackURLs{WSFLV: &ws}, "ws-flv", true)
+	if selected.URL != "" || selected.Protocol != "" || selected.ZLMWebRTC {
+		t.Fatalf("selected=%+v", selected)
+	}
+}
+
 func TestReuseResultKeepsOriginalNodeAndItsPorts(t *testing.T) {
 	mediaNode := &node.Node{ID: 22, Name: "edge-22", Host: "10.0.0.22"}
 	service := &Service{

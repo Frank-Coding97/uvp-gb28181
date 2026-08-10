@@ -2,9 +2,11 @@
 import { Message } from "@arco-design/web-vue";
 import { Check, Pencil, X } from "lucide-vue-next";
 import { computed, onMounted, reactive, ref } from "vue";
+import { getDictItemsByDictCodeAPI } from "@/api/dictionary";
 import {
     fetchPTZDefaultSpeedConfig,
     fetchDefaultChannelStreamTransportConfig,
+    fetchDefaultPlaybackProtocolConfig,
     fetchGlobalSubscriptionConfig,
     fetchDefaultChannelAudioConfig,
     fetchPositionHistoryConfig,
@@ -19,6 +21,7 @@ import {
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
     updateDefaultChannelStreamTransportConfig,
+    updateDefaultPlaybackProtocolConfig,
     updateGlobalSubscriptionConfig,
     updateDefaultChannelAudioConfig,
     updateSIPLogConfig,
@@ -28,9 +31,14 @@ import {
     updateSaveAlarmMessagesConfig,
     updateSIPCommandTimeoutConfig,
     updatePreallocationModeConfig,
-    updateIgnoreChannelOfflineStatusNotifyConfig
+    updateIgnoreChannelOfflineStatusNotifyConfig,
+    type PlaybackProtocol
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
+import {
+    PLAYBACK_PROTOCOL_DICT_CODE,
+    playbackProtocolOptionsFromDictionary
+} from "../playbackProtocol";
 import { createStaticServiceConfigDraft } from "./serviceConfigState";
 
 const { isMobile } = useDevicesSize();
@@ -49,6 +57,9 @@ const ptzDefaultSpeedReady = ref(false);
 const defaultChannelStreamTransportLoading = ref(true);
 const defaultChannelStreamTransportSaving = ref(false);
 const defaultChannelStreamTransportReady = ref(false);
+const defaultPlaybackProtocolLoading = ref(true);
+const defaultPlaybackProtocolSaving = ref(false);
+const defaultPlaybackProtocolReady = ref(false);
 const globalSubscriptionLoading = ref(true);
 const globalSubscriptionSaving = ref(false);
 const globalSubscriptionReady = ref(false);
@@ -82,6 +93,8 @@ const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedDefaultChannelStreamTransport = ref<"UDP" | "TCP-Active" | "TCP-Passive">("TCP-Passive");
+const savedDefaultPlaybackProtocol = ref<PlaybackProtocol>("ws-flv");
+const playbackProtocolOptions = ref(playbackProtocolOptionsFromDictionary([]));
 const savedGlobalSubscriptionItems = ref<Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">>([]);
 const savedDefaultChannelAudioEnabled = ref(true);
 const savedSyncChannelsOnOnline = ref(true);
@@ -100,6 +113,9 @@ const sdpExtensionChanged = computed(() => draft.sdpExtension !== savedSDPExtens
 const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefaultSpeed.value);
 const defaultChannelStreamTransportChanged = computed(
     () => draft.defaultChannelStreamTransport !== savedDefaultChannelStreamTransport.value
+);
+const defaultPlaybackProtocolChanged = computed(
+    () => draft.playback.defaultProtocol !== savedDefaultPlaybackProtocol.value
 );
 const globalSubscriptionChanged = computed(
     () => JSON.stringify(draft.globalSubscriptionItems) !== JSON.stringify(savedGlobalSubscriptionItems.value)
@@ -124,6 +140,7 @@ const hasChanges = computed(
         sdpExtensionChanged.value ||
         ptzDefaultSpeedChanged.value ||
         defaultChannelStreamTransportChanged.value ||
+        defaultPlaybackProtocolChanged.value ||
         globalSubscriptionChanged.value ||
         defaultChannelAudioChanged.value ||
         syncChannelsOnOnlineChanged.value ||
@@ -140,6 +157,7 @@ const configLoading = computed(
         sdpExtensionLoading.value ||
         ptzDefaultSpeedLoading.value ||
         defaultChannelStreamTransportLoading.value ||
+        defaultPlaybackProtocolLoading.value ||
         globalSubscriptionLoading.value ||
         defaultChannelAudioLoading.value ||
         syncChannelsOnOnlineLoading.value ||
@@ -156,6 +174,7 @@ const configSaving = computed(
         sdpExtensionSaving.value ||
         ptzDefaultSpeedSaving.value ||
         defaultChannelStreamTransportSaving.value ||
+        defaultPlaybackProtocolSaving.value ||
         globalSubscriptionSaving.value ||
         defaultChannelAudioSaving.value ||
         syncChannelsOnOnlineSaving.value ||
@@ -172,6 +191,7 @@ const configReady = computed(
         sdpExtensionReady.value &&
         ptzDefaultSpeedReady.value &&
         defaultChannelStreamTransportReady.value &&
+        defaultPlaybackProtocolReady.value &&
         globalSubscriptionReady.value &&
         defaultChannelAudioReady.value &&
         syncChannelsOnOnlineReady.value &&
@@ -244,6 +264,32 @@ async function loadDefaultChannelStreamTransportConfig() {
         Message.error(error?.message || "加载新通道默认流传输模式失败");
     } finally {
         defaultChannelStreamTransportLoading.value = false;
+    }
+}
+
+async function loadDefaultPlaybackProtocolConfig() {
+    defaultPlaybackProtocolLoading.value = true;
+    try {
+        const response = await fetchDefaultPlaybackProtocolConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.playback.defaultProtocol = response.data.protocol;
+        savedDefaultPlaybackProtocol.value = response.data.protocol;
+        defaultPlaybackProtocolReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载默认播放协议失败");
+    } finally {
+        defaultPlaybackProtocolLoading.value = false;
+    }
+}
+
+async function loadPlaybackProtocolOptions() {
+    try {
+        const response = await getDictItemsByDictCodeAPI(PLAYBACK_PROTOCOL_DICT_CODE);
+        if (response.code === 0) {
+            playbackProtocolOptions.value = playbackProtocolOptionsFromDictionary(response.data?.list);
+        }
+    } catch {
+        playbackProtocolOptions.value = playbackProtocolOptionsFromDictionary([]);
     }
 }
 
@@ -389,6 +435,7 @@ function startEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
+    draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
@@ -407,6 +454,7 @@ function cancelEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
+    draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
@@ -463,6 +511,14 @@ async function saveConfig() {
             draft.defaultChannelStreamTransport = response.data.transport;
             savedDefaultChannelStreamTransport.value = response.data.transport;
             defaultChannelStreamTransportSaving.value = false;
+        }
+        if (defaultPlaybackProtocolChanged.value) {
+            defaultPlaybackProtocolSaving.value = true;
+            const response = await updateDefaultPlaybackProtocolConfig(draft.playback.defaultProtocol);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.playback.defaultProtocol = response.data.protocol;
+            savedDefaultPlaybackProtocol.value = response.data.protocol;
+            defaultPlaybackProtocolSaving.value = false;
         }
         if (globalSubscriptionChanged.value) {
             globalSubscriptionSaving.value = true;
@@ -551,6 +607,7 @@ async function saveConfig() {
         sdpExtensionSaving.value = false;
         ptzDefaultSpeedSaving.value = false;
         defaultChannelStreamTransportSaving.value = false;
+        defaultPlaybackProtocolSaving.value = false;
         globalSubscriptionSaving.value = false;
         defaultChannelAudioSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
@@ -569,6 +626,8 @@ onMounted(() =>
         loadSDPExtensionConfig(),
         loadPTZDefaultSpeedConfig(),
         loadDefaultChannelStreamTransportConfig(),
+        loadDefaultPlaybackProtocolConfig(),
+        loadPlaybackProtocolOptions(),
         loadGlobalSubscriptionConfig(),
         loadDefaultChannelAudioConfig(),
         loadSyncChannelsOnOnlineConfig(),
@@ -892,6 +951,27 @@ onMounted(() =>
                     <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
                         <a-form class="uvp-system-form" :layout="formLayout" :model="draft.playback" auto-label-width>
                             <a-row :gutter="24">
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="defaultProtocol"
+                                        label="默认播放协议"
+                                        tooltip="仅影响之后新建的实时播放和设备录像回放；当前正在播放的会话不切换。"
+                                    >
+                                        <a-select
+                                            v-model="draft.playback.defaultProtocol"
+                                            :loading="defaultPlaybackProtocolLoading || defaultPlaybackProtocolSaving"
+                                            :disabled="!isEditing || defaultPlaybackProtocolLoading || defaultPlaybackProtocolSaving || !defaultPlaybackProtocolReady"
+                                        >
+                                            <a-option
+                                                v-for="option in playbackProtocolOptions"
+                                                :key="option.value"
+                                                :value="option.value"
+                                            >
+                                                {{ option.label }}
+                                            </a-option>
+                                        </a-select>
+                                    </a-form-item>
+                                </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="autoInvite" label="自动点播">
                                         <a-switch v-model="draft.playback.autoInvite" disabled />

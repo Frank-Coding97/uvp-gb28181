@@ -14,6 +14,7 @@ export interface StaticServiceConfigDraft {
     sipTimeoutSec: number;
     preallocationMode: boolean;
     playback: {
+        defaultProtocol: "ws-flv" | "http-flv" | "hls" | "webrtc";
         autoInvite: boolean;
         inviteTimeoutMs: number;
         recordPushStream: boolean;
@@ -50,6 +51,7 @@ export const staticServiceConfigLabels = [
 ] as const;
 
 export const playbackServiceConfigLabels = [
+    "默认播放协议",
     "自动点播",
     "点播超时时间（毫秒）",
     "推流是否录制",
@@ -85,6 +87,7 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
         sipTimeoutSec: 10,
         preallocationMode: false,
         playback: {
+            defaultProtocol: "ws-flv",
             autoInvite: true,
             inviteTimeoutMs: 10000,
             recordPushStream: false,

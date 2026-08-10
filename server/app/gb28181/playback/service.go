@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
 )
 
@@ -175,6 +176,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	if s == nil || s.registry == nil || s.picker == nil || s.rtp == nil || s.inviter == nil || s.media == nil {
 		return CreateResult{}, ErrRTPUnavailable
 	}
+	if !gbconfig.IsSupportedPlaybackProtocol(request.DefaultProtocol) {
+		request.DefaultProtocol = gbconfig.DefaultPlaybackProtocol
+	}
 	operationCtx, operationCancel := context.WithCancel(ctx)
 	stopLifecycleCancel := context.AfterFunc(s.lifecycle, operationCancel)
 	defer func() {
@@ -271,7 +275,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 		return CreateResult{}, s.fail(ctx, session.ID, "media_wait", "timeout", fmt.Errorf("%w: %w", ErrMediaWait, err), resources)
 	}
 	if err := s.registry.Update(session.ID, func(value *Session) error {
+		selected := playurl.Select(playurl.FromMap(ready.URLs), request.DefaultProtocol, request.Secure)
 		value.MediaURLs, value.HasAudio, value.State = ready.URLs, ready.HasAudio, StatePlaying
+		value.DefaultProtocol, value.Protocol, value.URL, value.ZLMWebRTC = request.DefaultProtocol, selected.Protocol, selected.URL, selected.ZLMWebRTC
 		return nil
 	}); err != nil {
 		return CreateResult{}, err

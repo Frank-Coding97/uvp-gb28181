@@ -211,6 +211,21 @@ func TestDefaultChannelStreamTransportFromDefaultsAndValidates(t *testing.T) {
 	}
 }
 
+func TestDefaultPlaybackProtocolFromDefaultsAndValidates(t *testing.T) {
+	source := fakeSource{}
+	require.Equal(t, "ws-flv", DefaultPlaybackProtocolFrom(source))
+	for _, protocol := range []string{"ws-flv", "http-flv", "hls", "webrtc"} {
+		source.values = map[string]interface{}{DefaultPlaybackProtocolConfigKey: protocol}
+		source.strings = map[string]string{DefaultPlaybackProtocolConfigKey: protocol}
+		require.Equal(t, protocol, DefaultPlaybackProtocolFrom(source))
+	}
+	for _, invalid := range []string{"", "WS-FLV", "rtmp", "http-flv "} {
+		source.values = map[string]interface{}{DefaultPlaybackProtocolConfigKey: invalid}
+		source.strings = map[string]string{DefaultPlaybackProtocolConfigKey: invalid}
+		require.Equal(t, "ws-flv", DefaultPlaybackProtocolFrom(source))
+	}
+}
+
 func TestDefaultChannelAudioEnabledFromDefaultsToEnabled(t *testing.T) {
 	source := fakeSource{}
 	require.True(t, DefaultChannelAudioEnabledFrom(source))

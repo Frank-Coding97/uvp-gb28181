@@ -13,6 +13,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import PlayWindow from "./PlayWindow.vue";
+import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
 import {
     controlDevice,
@@ -176,6 +177,7 @@ type ProtocolOption = {
 };
 
 const protocol = ref<StreamProtocol | "">("ws-flv");
+const playbackSnapshot = ref<PlaybackSource | null>(null);
 const protocolUrls = computed<ProtocolURLMap>(() => {
     const result = playResult.value;
     return {
@@ -236,10 +238,15 @@ function toEasyPlayerWebRtcUrl(url: string) {
 }
 const currentProtocolUrl = computed(() => {
     if (!protocol.value) return "";
+    if (playbackSnapshot.value?.protocol === protocol.value) return playbackSnapshot.value.url;
     const url = protocolUrls.value[protocol.value] || "";
     return protocol.value === "webrtc" || protocol.value === "webrtcs" ? toEasyPlayerWebRtcUrl(url) : url;
 });
-const currentProtocolUsesZlmWebRtc = computed(() => protocol.value === "webrtc" || protocol.value === "webrtcs");
+const currentProtocolUsesZlmWebRtc = computed(() =>
+    playbackSnapshot.value?.protocol === protocol.value
+        ? playbackSnapshot.value.zlmWebrtc
+        : protocol.value === "webrtc" || protocol.value === "webrtcs"
+);
 function isBrowserPlayable(proto: StreamProtocol) {
     return protocolOptions.find((option) => option.value === proto)?.browserPlayable === true;
 }
@@ -1442,7 +1449,8 @@ async function startSession() {
         streamInfo.value.streamId = response.data.streamId;
         streamInfo.value.ssrc = response.data.ssrc;
         streamInfo.value.urls = response.data.urls || {};
-        protocol.value = defaultProtocol();
+        playbackSnapshot.value = resolvePlaybackSource(response.data, window.location.protocol === "https:");
+        protocol.value = playbackSnapshot.value?.protocol || defaultProtocol();
         phase.value = "playing";
         beginMonitor();
         void loadPanelData();
@@ -1459,6 +1467,7 @@ function resetSessionState() {
     clearMonitor();
     clearTimer();
     playResult.value = null;
+    playbackSnapshot.value = null;
     phase.value = "idle";
     startedAt.value = null;
     errorMessage.value = "";
@@ -2768,6 +2777,7 @@ function switchProtocol(proto: StreamProtocol) {
         Message.warning("该协议仅供外部客户端使用，浏览器内不可直接播放");
         return;
     }
+    playbackSnapshot.value = null;
     protocol.value = proto;
 }
 

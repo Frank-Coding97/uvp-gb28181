@@ -36,7 +36,8 @@ func (f *fakePlaybackHTTPService) Create(_ context.Context, request gbplayback.C
 	}
 	if f.session == nil {
 		f.session = &gbplayback.Session{ID: "session-1", OwnerID: request.OwnerID, ChannelID: request.ChannelID, RecordKey: request.RecordKey, State: gbplayback.StatePlaying,
-			SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd, Deadline: time.Unix(1700003600, 0), Scale: 1, MediaURLs: map[string]string{"wsFlv": "ws://node/live.flv"}}
+			SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd, Deadline: time.Unix(1700003600, 0), Scale: 1, MediaURLs: map[string]string{"wsFlv": "ws://node/live.flv"},
+			DefaultProtocol: request.DefaultProtocol, Protocol: "ws-flv", URL: "wss://node/live.flv"}
 	}
 	return gbplayback.CreateResult{Session: f.session}, nil
 }
@@ -103,6 +104,7 @@ func TestDeviceRecordPlaybackCreateAndGetContract(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"recordKey":"opaque-key","playFrom":"2026-08-04T08:10:00"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Idempotency-Key", "idem-1")
+	request.Header.Set("X-Forwarded-Proto", "https")
 	result := httptest.NewRecorder()
 	fixture.router.ServeHTTP(result, request)
 	require.Equal(t, http.StatusOK, result.Code, result.Body.String())
@@ -113,12 +115,17 @@ func TestDeviceRecordPlaybackCreateAndGetContract(t *testing.T) {
 	require.Equal(t, fixture.channel.ChannelID, service.created.SIPChannelID)
 	require.Equal(t, fixture.device.IP+":"+uintStr(uint(fixture.device.Port)), service.created.Destination)
 	require.Equal(t, fixture.device.Transport, service.created.Transport)
+	require.Equal(t, "ws-flv", service.created.DefaultProtocol)
+	require.True(t, service.created.Secure)
+	require.Contains(t, result.Body.String(), `"defaultProtocol":"ws-flv"`)
+	require.Contains(t, result.Body.String(), `"protocol":"ws-flv"`)
+	require.Contains(t, result.Body.String(), `"url":"wss://node/live.flv"`)
 	require.True(t, service.created.PlayFrom.Hour() == 8 && service.created.PlayFrom.Minute() == 10)
 
 	get := httptest.NewRecorder()
 	fixture.router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, path+"/session-1", nil))
 	require.Equal(t, http.StatusOK, get.Code, get.Body.String())
-	require.Contains(t, get.Body.String(), `"media":{"urls":{"wsFlv":"ws://node/live.flv"}}`)
+	require.Contains(t, get.Body.String(), `"urls":{"wsFlv":"ws://node/live.flv"}`)
 }
 
 func TestDeviceRecordPlaybackRejectsTamperedAndInvalidCreate(t *testing.T) {

@@ -196,6 +196,18 @@ func TestStartHappyPath(t *testing.T) {
 	}
 }
 
+func TestBuildResultIncludesDefaultPlaybackSelectionSnapshot(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+	s, _, _ := newSvc(t, &mockZLM{}, &mockInviter{}, onlineDevice(), aChannel())
+
+	result := s.buildResultFor("stream-1", "0100000001", "play.example.com")
+	if result.DefaultProtocol != "ws-flv" || result.Protocol != "ws-flv" || result.URL != result.WSFlvURL || result.ZLMWebRTC {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
 func TestStartUsesSeparateReceiveAndPlaybackHosts(t *testing.T) {
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}

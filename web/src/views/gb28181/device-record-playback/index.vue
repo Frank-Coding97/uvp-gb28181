@@ -39,12 +39,12 @@ import { createPlaybackState, reducePlaybackState } from "./playbackState";
 import { positionToTime } from "./timeline";
 import RecordTimeline, { type TimelineLocateEvent } from "./components/RecordTimeline.vue";
 import PlayWindow from "../components/PlayWindow.vue";
+import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import {
     actionPlaybackSession,
     createPlaybackSession,
     deletePlaybackSession,
     getPlaybackSession,
-    selectPlaybackMediaUrl,
     type PlaybackActionRequest,
     type PlaybackSession
 } from "./api";
@@ -61,6 +61,7 @@ const result = ref<RecordQueryResult | null>(null);
 const records = ref<RecordQueryItem[]>([]);
 const playback = ref(createPlaybackState());
 const playbackMediaUrl = ref("");
+const playbackSource = ref<PlaybackSource | null>(null);
 const playbackHasAudio = ref(false);
 const playbackBuffering = ref(false);
 const controlPending = ref(false);
@@ -298,6 +299,7 @@ function scheduleSessionPoll(sessionId: string, token: number) {
             if (token !== sessionToken) return;
             playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
             playbackMediaUrl.value = "";
+            playbackSource.value = null;
             clearPlaybackTimers();
         }
     }, 800);
@@ -317,13 +319,23 @@ function applySession(session: PlaybackSession, token: number, syncPosition = fa
     playback.value = reducePlaybackState(playback.value, { type: "scale", scale: session.scale || 1 });
     if (previousSessionId !== session.sessionId || shouldSyncPosition) resetPlayerClock();
     playbackHasAudio.value = session.hasAudio;
-    playbackMediaUrl.value = selectPlaybackMediaUrl(session.media?.urls);
+    if (previousSessionId !== session.sessionId || !playbackSource.value) {
+        playbackSource.value = resolvePlaybackSource({
+            defaultProtocol: session.media?.defaultProtocol,
+            protocol: session.media?.protocol,
+            url: session.media?.url,
+            zlmWebrtc: session.media?.zlmWebrtc,
+            urls: session.media?.urls
+        }, window.location.protocol === "https:");
+    }
+    playbackMediaUrl.value = playbackSource.value?.url || "";
     playbackBuffering.value = false;
 
     if (["ended", "failed", "stopped"].includes(session.state)) {
         if (sessionPollTimer !== null) window.clearTimeout(sessionPollTimer);
         sessionPollTimer = null;
         playbackMediaUrl.value = "";
+        playbackSource.value = null;
         resetPlayerClock();
         return;
     }
@@ -338,6 +350,7 @@ async function startPlayback() {
     }
     clearPlaybackTimers();
     playbackMediaUrl.value = "";
+    playbackSource.value = null;
     playback.value = reducePlaybackState(playback.value, { type: "creating" });
     const token = ++sessionToken;
     const record = selectedRecord.value;
@@ -352,6 +365,7 @@ async function startPlayback() {
         if (token !== sessionToken) return;
         playback.value = { ...playback.value, status: "failed", error: playbackErrorMessage(error) };
         playbackMediaUrl.value = "";
+        playbackSource.value = null;
     }
 }
 
@@ -382,6 +396,7 @@ async function stopPlayback(keepSelection = true) {
     resetPlayerClock();
     playbackBuffering.value = false;
     playbackMediaUrl.value = "";
+    playbackSource.value = null;
     if (sessionId) {
         playback.value = reducePlaybackState(playback.value, { type: "stopping" });
         try {
@@ -534,6 +549,7 @@ onUnmounted(() => {
                             data-testid="playback-player"
                             :data-media-url="playbackMediaUrl"
                             :url="playbackMediaUrl"
+                            :zlm-webrtc="playbackSource?.zlmWebrtc || false"
                             :has-audio="playbackHasAudio"
                             playback
                             @error="handlePlayerError"

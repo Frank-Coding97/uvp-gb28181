@@ -3,10 +3,10 @@ package playback
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strconv"
 	"time"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -152,7 +152,7 @@ func (w *zlmMediaWaiter) Wait(ctx context.Context, streamID string) (MediaReady,
 	if err != nil {
 		return MediaReady{}, err
 	}
-	ready := MediaReady{URLs: playbackURLs(selected.EffectivePlaybackHost(), config, playbackZLMApp, streamID)}
+	ready := MediaReady{URLs: playurl.Build(selected.EffectivePlaybackHost(), config, playbackZLMApp, streamID).AsMap()}
 	if info, infoErr := client.GetMediaInfo(ctx, "rtsp", "__defaultVhost__", playbackZLMApp, streamID); infoErr == nil && info != nil {
 		for _, track := range info.Tracks {
 			if track.CodecType == 1 && track.Ready {
@@ -162,24 +162,4 @@ func (w *zlmMediaWaiter) Wait(ctx context.Context, streamID string) (MediaReady,
 		}
 	}
 	return ready, nil
-}
-
-func playbackURLs(host string, config node.ServerConfig, appName, streamID string) map[string]string {
-	result := make(map[string]string)
-	escapedApp, escapedStream := url.PathEscape(appName), url.PathEscape(streamID)
-	if config.HTTPPort > 0 {
-		base := fmt.Sprintf("%s:%d/%s/%s", host, config.HTTPPort, escapedApp, escapedStream)
-		result["wsFlv"] = "ws://" + base + ".live.flv"
-		result["httpFlv"] = "http://" + base + ".live.flv"
-		result["hls"] = "http://" + base + "/hls.m3u8"
-		query := url.Values{"app": {appName}, "stream": {streamID}, "type": {"play"}}
-		result["webrtc"] = fmt.Sprintf("http://%s:%d/index/api/webrtc?%s", host, config.HTTPPort, query.Encode())
-	}
-	if config.RTMPPort > 0 {
-		result["rtmp"] = fmt.Sprintf("rtmp://%s:%d/%s/%s", host, config.RTMPPort, escapedApp, escapedStream)
-	}
-	if config.RTSPPort > 0 {
-		result["rtsp"] = fmt.Sprintf("rtsp://%s:%d/%s/%s", host, config.RTSPPort, escapedApp, escapedStream)
-	}
-	return result
 }
