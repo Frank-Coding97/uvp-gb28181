@@ -368,6 +368,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			serviceConfig.PUT("/global-subscriptions", serviceConfigController.UpdateGlobalSubscriptions)
 			serviceConfig.GET("/default-channel-audio", serviceConfigController.GetDefaultChannelAudio)
 			serviceConfig.PUT("/default-channel-audio", serviceConfigController.UpdateDefaultChannelAudio)
+			serviceConfig.GET("/playback-settings", serviceConfigController.GetPlaybackSettings)
+			serviceConfig.PUT("/playback-settings", serviceConfigController.UpdatePlaybackSettings)
 			serviceConfig.GET("/sip-log", serviceConfigController.GetSIPLog)
 			serviceConfig.PUT("/sip-log", serviceConfigController.UpdateSIPLog)
 		}

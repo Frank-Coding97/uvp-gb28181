@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -80,9 +81,138 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/global-subscriptions", controller.UpdateGlobalSubscriptions)
 	router.GET("/default-channel-audio", controller.GetDefaultChannelAudio)
 	router.PUT("/default-channel-audio", controller.UpdateDefaultChannelAudio)
+	router.GET("/playback-settings", controller.GetPlaybackSettings)
+	router.PUT("/playback-settings", controller.UpdatePlaybackSettings)
 	router.GET("/sip-log", controller.GetSIPLog)
 	router.PUT("/sip-log", controller.UpdateSIPLog)
 	return router
+}
+
+func TestServiceConfigController_PlaybackSettingsDefaults(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/playback-settings", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	data := serviceConfigData(t, recorder)
+	require.EqualValues(t, 10000, data["playTimeoutMs"])
+	require.Equal(t, true, data["onDemandLive"])
+	require.Equal(t, false, data["cloudRecordingEnabled"])
+}
+
+func TestServiceConfigController_UpdatePlaybackSettingsPersistsAggregate(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{}}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/playback-settings", jsonBody(t, map[string]interface{}{
+			"playTimeoutMs": 15000, "onDemandLive": false, "cloudRecordingEnabled": true,
+		})),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 1, config.saveNum)
+	require.Equal(t, 15000, config.values[gbconfig.PlayRequestTimeoutMsConfigKey])
+	require.Equal(t, false, config.values[gbconfig.DefaultChannelOnDemandLiveConfigKey])
+	require.Equal(t, true, config.values[gbconfig.DefaultChannelCloudRecordingConfigKey])
+	data := serviceConfigData(t, recorder)
+	require.EqualValues(t, 15000, data["playTimeoutMs"])
+	require.Equal(t, false, data["onDemandLive"])
+	require.Equal(t, true, data["cloudRecordingEnabled"])
+}
+
+func TestServiceConfigController_UpdatePlaybackSettingsRequiresCompleteValidObject(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.PlayRequestTimeoutMsConfigKey:         10000,
+		gbconfig.DefaultChannelOnDemandLiveConfigKey:   true,
+		gbconfig.DefaultChannelCloudRecordingConfigKey: false,
+	}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	for _, body := range []map[string]interface{}{
+		{"playTimeoutMs": 15000, "onDemandLive": false},
+		{"playTimeoutMs": 999, "onDemandLive": false, "cloudRecordingEnabled": true},
+		{"playTimeoutMs": 300001, "onDemandLive": false, "cloudRecordingEnabled": true},
+	} {
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/playback-settings", jsonBody(t, body)))
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
+	require.Zero(t, config.saveNum)
+	require.Equal(t, 10000, config.values[gbconfig.PlayRequestTimeoutMsConfigKey])
+	require.Equal(t, true, config.values[gbconfig.DefaultChannelOnDemandLiveConfigKey])
+	require.Equal(t, false, config.values[gbconfig.DefaultChannelCloudRecordingConfigKey])
+}
+
+func TestServiceConfigController_UpdatePlaybackSettingsRollsBackAggregate(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{
+		values: map[string]interface{}{
+			gbconfig.PlayRequestTimeoutMsConfigKey:         10000,
+			gbconfig.DefaultChannelOnDemandLiveConfigKey:   true,
+			gbconfig.DefaultChannelCloudRecordingConfigKey: false,
+		},
+		saveErr: errors.New("disk full"),
+	}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/playback-settings", jsonBody(t, map[string]interface{}{
+			"playTimeoutMs": 20000, "onDemandLive": false, "cloudRecordingEnabled": true,
+		})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, 1, config.saveNum)
+	require.Equal(t, 10000, config.values[gbconfig.PlayRequestTimeoutMsConfigKey])
+	require.Equal(t, true, config.values[gbconfig.DefaultChannelOnDemandLiveConfigKey])
+	require.Equal(t, false, config.values[gbconfig.DefaultChannelCloudRecordingConfigKey])
+}
+
+func TestServiceConfigController_UpdatePlaybackSettingsSerializesConcurrentWrites(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{}}
+	app.ConfigYml = config
+	controller := NewServiceConfigController()
+	router := newServiceConfigRouter(controller)
+
+	requests := []map[string]interface{}{
+		{"playTimeoutMs": 15000, "onDemandLive": false, "cloudRecordingEnabled": true},
+		{"playTimeoutMs": 25000, "onDemandLive": true, "cloudRecordingEnabled": false},
+	}
+	var wg sync.WaitGroup
+	for _, body := range requests {
+		body := body
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/playback-settings", jsonBody(t, body)))
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			data := serviceConfigData(t, recorder)
+			require.EqualValues(t, body["playTimeoutMs"], data["playTimeoutMs"])
+			require.Equal(t, body["onDemandLive"], data["onDemandLive"])
+			require.Equal(t, body["cloudRecordingEnabled"], data["cloudRecordingEnabled"])
+		}()
+	}
+	wg.Wait()
+	require.Equal(t, 2, config.saveNum)
 }
 
 func TestServiceConfigController_SIPLogDefaultsToDisabled(t *testing.T) {

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 
@@ -91,8 +92,9 @@ type SIPTraceRuntimeProvider func() bool
 // 这里不复用 /api/config/update，避免页面提交时覆盖系统和安全配置。
 type ServiceConfigController struct {
 	controllers.Common
-	reload         SIPTraceReloader
-	runtimeEnabled SIPTraceRuntimeProvider
+	reload             SIPTraceReloader
+	runtimeEnabled     SIPTraceRuntimeProvider
+	playbackSettingsMu sync.Mutex
 }
 
 func NewServiceConfigController() *ServiceConfigController {
@@ -105,6 +107,56 @@ func (sc *ServiceConfigController) SetSIPTraceReloader(reload SIPTraceReloader) 
 
 func (sc *ServiceConfigController) SetSIPTraceRuntimeProvider(provider SIPTraceRuntimeProvider) {
 	sc.runtimeEnabled = provider
+}
+
+// GetPlaybackSettings GET /api/gb28181/sip/service-config/playback-settings
+func (sc *ServiceConfigController) GetPlaybackSettings(c *gin.Context) {
+	sc.playbackSettingsMu.Lock()
+	defer sc.playbackSettingsMu.Unlock()
+	sc.Success(c, gbconfig.CurrentPlaybackSettings())
+}
+
+// UpdatePlaybackSettings PUT /api/gb28181/sip/service-config/playback-settings
+func (sc *ServiceConfigController) UpdatePlaybackSettings(c *gin.Context) {
+	var request struct {
+		PlayTimeoutMs         *int  `json:"playTimeoutMs"`
+		OnDemandLive          *bool `json:"onDemandLive"`
+		CloudRecordingEnabled *bool `json:"cloudRecordingEnabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.PlayTimeoutMs == nil || request.OnDemandLive == nil || request.CloudRecordingEnabled == nil {
+		sc.Fail(c, "保存播放配置失败：必须提交完整配置", err, http.StatusBadRequest)
+		return
+	}
+	settings := gbconfig.PlaybackSettings{
+		PlayTimeoutMs:         *request.PlayTimeoutMs,
+		OnDemandLive:          *request.OnDemandLive,
+		CloudRecordingEnabled: *request.CloudRecordingEnabled,
+	}
+	if err := gbconfig.ValidatePlaybackSettings(settings); err != nil {
+		sc.Fail(c, "保存播放配置失败：playTimeoutMs 必须为 1000-300000 的整数", err, http.StatusBadRequest)
+		return
+	}
+
+	sc.playbackSettingsMu.Lock()
+	defer sc.playbackSettingsMu.Unlock()
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.CurrentPlaybackSettings()
+	app.ConfigYml.Set(gbconfig.PlayRequestTimeoutMsConfigKey, settings.PlayTimeoutMs)
+	app.ConfigYml.Set(gbconfig.DefaultChannelOnDemandLiveConfigKey, settings.OnDemandLive)
+	app.ConfigYml.Set(gbconfig.DefaultChannelCloudRecordingConfigKey, settings.CloudRecordingEnabled)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.PlayRequestTimeoutMsConfigKey, previous.PlayTimeoutMs)
+		app.ConfigYml.Set(gbconfig.DefaultChannelOnDemandLiveConfigKey, previous.OnDemandLive)
+		app.ConfigYml.Set(gbconfig.DefaultChannelCloudRecordingConfigKey, previous.CloudRecordingEnabled)
+		sc.Fail(c, "保存播放配置失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "播放配置已更新", settings)
 }
 
 // GetSIPLog GET /api/gb28181/sip/service-config/sip-log

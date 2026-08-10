@@ -44,6 +44,8 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"PUT /api/gb28181/sip/service-config/global-subscriptions",
 		"GET /api/gb28181/sip/service-config/default-channel-audio",
 		"PUT /api/gb28181/sip/service-config/default-channel-audio",
+		"GET /api/gb28181/sip/service-config/playback-settings",
+		"PUT /api/gb28181/sip/service-config/playback-settings",
 		"GET /api/gb28181/sip/service-config/sip-log",
 		"PUT /api/gb28181/sip/service-config/sip-log",
 	} {
