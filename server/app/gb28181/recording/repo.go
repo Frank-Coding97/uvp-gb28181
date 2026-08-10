@@ -14,11 +14,12 @@ import (
 var ErrChannelNotFound = errors.New("通道不存在")
 
 type GormRepo struct {
-	db *gorm.DB
+	db  *gorm.DB
+	now func() time.Time
 }
 
 func NewGormRepo(db *gorm.DB) *GormRepo {
-	return &GormRepo{db: db}
+	return &GormRepo{db: db, now: time.Now}
 }
 
 func (r *GormRepo) GetChannel(ctx context.Context, channelID uint) (*models.GbChannel, error) {
