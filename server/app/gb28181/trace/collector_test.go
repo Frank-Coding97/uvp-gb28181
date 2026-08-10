@@ -93,13 +93,13 @@ func TestWriterRecoversStorePanicAndRetries(t *testing.T) {
 }
 
 func TestWriterFailureIsVisibleAndShutdownCancelsRetry(t *testing.T) {
-	store := &recordingStore{err: errors.New("clickhouse unavailable")}
+	store := &recordingStore{err: errors.New("trace store unavailable")}
 	module := NewModule(testTraceConfig(4, 1, 5), store, testPayloadCipher())
 	module.WriteObserver(testWriteProps(), []byte("fail"))
 
 	require.Eventually(t, func() bool {
 		health := module.Health()
-		return health.State == HealthDegraded && health.LastError == "clickhouse unavailable"
+		return health.State == HealthDegraded && health.LastError == "trace store unavailable"
 	}, time.Second, 10*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -112,7 +112,7 @@ func TestWriterFailureIsVisibleAndShutdownCancelsRetry(t *testing.T) {
 }
 
 func TestWriterFailureDoesNotStopConsumingLaterEvents(t *testing.T) {
-	store := &recordingStore{err: errors.New("clickhouse unavailable")}
+	store := &recordingStore{err: errors.New("trace store unavailable")}
 	module := NewModule(testTraceConfig(16, 1, 1), store, testPayloadCipher())
 	for i := 0; i < 8; i++ {
 		module.WriteObserver(testWriteProps(), []byte("event"))

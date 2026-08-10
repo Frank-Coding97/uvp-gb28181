@@ -98,6 +98,7 @@ func TestServiceConfigController_SIPLogDefaultsToDisabled(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	data := serviceConfigData(t, recorder)
 	require.Equal(t, false, data["enabled"])
+	require.EqualValues(t, gbconfig.DefaultSIPTraceRetentionDays, data["retentionDays"])
 	require.Equal(t, true, data["applied"])
 }
 
@@ -138,6 +139,43 @@ func TestServiceConfigController_UpdateSIPLogPersistsAndReloads(t *testing.T) {
 	require.Equal(t, 1, config.saveNum)
 	require.Equal(t, 1, reloads)
 	require.Equal(t, true, serviceConfigData(t, recorder)["applied"])
+}
+
+func TestServiceConfigController_UpdateSIPLogRetentionAndKeepsOldClientCompatibility(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.SIPTraceEnabledConfigKey: false, gbconfig.SIPTraceRetentionDaysConfigKey: 30,
+	}}
+	app.ConfigYml = config
+	controller := NewServiceConfigController()
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(controller).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sip-log", jsonBody(t, map[string]interface{}{"enabled": true})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 30, config.values[gbconfig.SIPTraceRetentionDaysConfigKey])
+	require.EqualValues(t, 30, serviceConfigData(t, recorder)["retentionDays"])
+
+	recorder = httptest.NewRecorder()
+	newServiceConfigRouter(controller).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sip-log", jsonBody(t, map[string]interface{}{"retentionDays": 365})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, true, config.values[gbconfig.SIPTraceEnabledConfigKey])
+	require.Equal(t, 365, config.values[gbconfig.SIPTraceRetentionDaysConfigKey])
+}
+
+func TestServiceConfigController_UpdateSIPLogRejectsInvalidRetention(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.SIPTraceEnabledConfigKey: false, gbconfig.SIPTraceRetentionDaysConfigKey: 7,
+	}}
+	app.ConfigYml = config
+	for _, days := range []interface{}{0, -1, 366, 1.5, "7"} {
+		recorder := httptest.NewRecorder()
+		newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/sip-log", jsonBody(t, map[string]interface{}{"retentionDays": days})))
+		require.Equal(t, http.StatusBadRequest, recorder.Code, "days=%v body=%s", days, recorder.Body.String())
+		require.Equal(t, 7, config.values[gbconfig.SIPTraceRetentionDaysConfigKey])
+	}
 }
 
 func TestServiceConfigController_UpdateSIPLogReportsReloadFailure(t *testing.T) {

@@ -259,6 +259,22 @@ func TestSIPTraceEnabledFromDefaultsToDisabled(t *testing.T) {
 	require.False(t, SIPTraceEnabledFrom(source))
 }
 
+func TestSIPTraceRetentionDaysFromDefaultsAndBounds(t *testing.T) {
+	source := fakeSource{}
+	require.Equal(t, DefaultSIPTraceRetentionDays, SIPTraceRetentionDaysFrom(source))
+
+	for _, days := range []int{MinSIPTraceRetentionDays, 30, MaxSIPTraceRetentionDays} {
+		source.values = map[string]interface{}{SIPTraceRetentionDaysConfigKey: days}
+		source.ints = map[string]int{SIPTraceRetentionDaysConfigKey: days}
+		require.Equal(t, days, SIPTraceRetentionDaysFrom(source))
+	}
+	for _, days := range []int{-1, 0, MaxSIPTraceRetentionDays + 1} {
+		source.values = map[string]interface{}{SIPTraceRetentionDaysConfigKey: days}
+		source.ints = map[string]int{SIPTraceRetentionDaysConfigKey: days}
+		require.Equal(t, DefaultSIPTraceRetentionDays, SIPTraceRetentionDaysFrom(source))
+	}
+}
+
 func TestRecordRuntimeConfigDefaults(t *testing.T) {
 	cfg, err := LoadValidatedFrom(fakeSource{})
 	if err != nil {

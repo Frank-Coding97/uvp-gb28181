@@ -1573,6 +1573,39 @@ BEGIN
         CONSTRAINT [uk_control_state_target] UNIQUE ([device_id], [target_scope], [target_code])
     );
 END;
+
+IF OBJECT_ID(N'gb_sip_trace_capture', N'U') IS NULL
+BEGIN
+    CREATE TABLE [gb_sip_trace_capture] (
+        [id] CHAR(36) NOT NULL PRIMARY KEY, [device_id] BIGINT NOT NULL, [device_code] VARCHAR(20) NOT NULL,
+        [created_by] BIGINT NOT NULL, [started_at] DATETIME2(3) NOT NULL, [planned_end_at] DATETIME2(3) NOT NULL,
+        [ended_at] DATETIME2(3) NULL, [end_reason] VARCHAR(16) NOT NULL DEFAULT '', [active_key] VARCHAR(64) NULL,
+        [created_at] DATETIME2(3) NOT NULL, [updated_at] DATETIME2(3) NOT NULL
+    );
+    CREATE UNIQUE INDEX [uk_sip_trace_capture_active] ON [gb_sip_trace_capture] ([active_key]) WHERE [active_key] IS NOT NULL;
+    CREATE INDEX [idx_sip_trace_capture_device_started] ON [gb_sip_trace_capture] ([device_id], [started_at]);
+    CREATE INDEX [idx_sip_trace_capture_device_code] ON [gb_sip_trace_capture] ([device_code]);
+    CREATE INDEX [idx_sip_trace_capture_created_by] ON [gb_sip_trace_capture] ([created_by]);
+    CREATE INDEX [idx_sip_trace_capture_planned_end] ON [gb_sip_trace_capture] ([planned_end_at]);
+END;
+
+IF OBJECT_ID(N'gb_sip_trace_message', N'U') IS NULL
+BEGIN
+    CREATE TABLE [gb_sip_trace_message] (
+        [event_id] VARCHAR(36) NOT NULL PRIMARY KEY, [occurred_at] DATETIME2(6) NOT NULL, [direction] VARCHAR(16) NOT NULL,
+        [transport] VARCHAR(16) NOT NULL, [local_addr] VARCHAR(255) NOT NULL, [remote_addr] VARCHAR(255) NOT NULL,
+        [device_id] VARCHAR(64) NOT NULL, [method] VARCHAR(32) NOT NULL, [status_code] SMALLINT NOT NULL,
+        [call_id] VARCHAR(255) NOT NULL, [cseq] INT NOT NULL, [cseq_method] VARCHAR(32) NOT NULL,
+        [from_uri] VARCHAR(512) NOT NULL, [to_uri] VARCHAR(512) NOT NULL, [user_agent] VARCHAR(512) NOT NULL,
+        [malformed] BIT NOT NULL DEFAULT 0, [parse_error] VARCHAR(1024) NOT NULL,
+        [payload_nonce] VARBINARY(MAX) NOT NULL, [payload_ciphertext] VARBINARY(MAX) NOT NULL,
+        [payload_algorithm] VARCHAR(32) NOT NULL, [payload_key_version] VARCHAR(64) NOT NULL,
+        [payload_digest_sha256] CHAR(64) NOT NULL
+    );
+    CREATE INDEX [idx_gb_sip_trace_occurred_event] ON [gb_sip_trace_message] ([occurred_at], [event_id]);
+    CREATE INDEX [idx_gb_sip_trace_device_occurred] ON [gb_sip_trace_message] ([device_id], [occurred_at], [event_id]);
+    CREATE INDEX [idx_gb_sip_trace_call_occurred] ON [gb_sip_trace_message] ([call_id], [occurred_at], [event_id]);
+END;
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_control_state') AND name = N'idx_control_state_device_target')
     CREATE INDEX [idx_control_state_device_target] ON [gb_device_control_state] ([device_id], [target_scope], [target_code]);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID(N'gb_device_control_state') AND name = N'idx_control_state_channel')

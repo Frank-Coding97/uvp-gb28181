@@ -1,4 +1,4 @@
--- Optional SIP trace diagnostic windows. SIP messages remain in ClickHouse.
+-- Optional SIP trace diagnostic windows. SIP messages use the active business database.
 CREATE TABLE IF NOT EXISTS `gb_sip_trace_capture` (
   `id` char(36) NOT NULL,
   `device_id` int unsigned NOT NULL,

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -21,6 +23,7 @@ const (
 	DefaultChannelAudioEnabledConfigKey       = "gb28181.catalog.default_channel_audio_enabled"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
+	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
@@ -35,6 +38,9 @@ const (
 	DefaultChannelStreamTransport        = "TCP-Passive"
 	DefaultPlaybackProtocol              = "ws-flv"
 	DefaultChannelAudioEnabledValue      = true
+	DefaultSIPTraceRetentionDays         = 7
+	MinSIPTraceRetentionDays             = 1
+	MaxSIPTraceRetentionDays             = 365
 
 	MaxRecordQueryTimeoutSec = 300
 	MaxRecordQueryRangeHours = 168
@@ -103,7 +109,7 @@ func DefaultChannelAudioEnabled() bool {
 
 // SIPTraceEnabledFrom returns whether raw SIP trace collection is enabled.
 // Missing configuration intentionally defaults to false because trace storage
-// may contain sensitive signaling payloads and can incur ClickHouse writes.
+// may contain sensitive signaling payloads and can incur business-database writes.
 func SIPTraceEnabledFrom(c valueSource) bool {
 	return c != nil && c.Get(SIPTraceEnabledConfigKey) != nil && c.GetBool(SIPTraceEnabledConfigKey)
 }
@@ -111,6 +117,30 @@ func SIPTraceEnabledFrom(c valueSource) bool {
 // SIPTraceEnabled reads the live configuration used by the service-config API.
 func SIPTraceEnabled() bool {
 	return SIPTraceEnabledFrom(app.ConfigYml)
+}
+
+func SIPTraceRetentionDaysFrom(c valueSource) int {
+	if c == nil || c.Get(SIPTraceRetentionDaysConfigKey) == nil {
+		return DefaultSIPTraceRetentionDays
+	}
+	days := c.GetInt(SIPTraceRetentionDaysConfigKey)
+	if days < MinSIPTraceRetentionDays || days > MaxSIPTraceRetentionDays {
+		return DefaultSIPTraceRetentionDays
+	}
+	return days
+}
+
+func SIPTraceRetentionDays() int {
+	days := SIPTraceRetentionDaysFrom(app.ConfigYml)
+	if app.ConfigYml != nil && app.ConfigYml.Get(SIPTraceRetentionDaysConfigKey) != nil {
+		configured := app.ConfigYml.GetInt(SIPTraceRetentionDaysConfigKey)
+		if configured < MinSIPTraceRetentionDays || configured > MaxSIPTraceRetentionDays {
+			if app.ZapLog != nil {
+				app.ZapLog.Warn("SIP trace retention days is invalid; using default", zap.Int("configured", configured), zap.Int("default", days))
+			}
+		}
+	}
+	return days
 }
 
 // SDPExtensionEnabledFrom returns the current SDP compatibility setting.
@@ -319,15 +349,11 @@ func (e *ValidationError) Error() string {
 // TraceConfig controls the optional SIP trace module.
 type TraceConfig struct {
 	Enabled          bool
-	Address          string
-	Database         string
-	Username         string
-	PasswordEnv      string
-	TLS              bool
 	QueueCapacity    int
 	BatchSize        int
 	FlushIntervalMS  int
 	EncryptionKeyEnv string
+	RetentionDays    int
 }
 
 // ZLMConfig ZLMediaKit 媒体服务器配置(数据面)
@@ -451,15 +477,11 @@ func loadFrom(c valueSource) (Config, error) {
 		},
 		Trace: TraceConfig{
 			Enabled:          c.GetBool("gb28181.trace.enabled"),
-			Address:          c.GetString("gb28181.trace.address"),
-			Database:         c.GetString("gb28181.trace.database"),
-			Username:         c.GetString("gb28181.trace.username"),
-			PasswordEnv:      c.GetString("gb28181.trace.password_env"),
-			TLS:              c.GetBool("gb28181.trace.tls"),
 			QueueCapacity:    c.GetInt("gb28181.trace.queue_capacity"),
 			BatchSize:        c.GetInt("gb28181.trace.batch_size"),
 			FlushIntervalMS:  c.GetInt("gb28181.trace.flush_interval_ms"),
 			EncryptionKeyEnv: c.GetString("gb28181.trace.encryption_key_env"),
+			RetentionDays:    SIPTraceRetentionDaysFrom(c),
 		},
 		Device: DeviceConfig{
 			KeepaliveInterval:     c.GetInt("gb28181.device.keepalive_interval"),

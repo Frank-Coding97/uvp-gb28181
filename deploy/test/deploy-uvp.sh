@@ -101,7 +101,6 @@ for required in \
   agent/uvp-firewall-agent.service \
   agent/uvp-firewall-agent.default \
   backend/resource/database/uvp-gb28181.sql \
-  clickhouse/init/01-sip-trace.sh \
   frontend/Dockerfile \
   frontend/nginx.conf \
   frontend/dist/index.html; do

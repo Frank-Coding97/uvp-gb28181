@@ -28,6 +28,30 @@ CREATE TABLE `gb_custom_group_device` (
   KEY `idx_custom_group_device_device` (`device_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE IF NOT EXISTS `gb_sip_trace_capture` (
+  `id` char(36) NOT NULL, `device_id` int unsigned NOT NULL, `device_code` varchar(20) NOT NULL,
+  `created_by` int unsigned NOT NULL, `started_at` datetime(3) NOT NULL, `planned_end_at` datetime(3) NOT NULL,
+  `ended_at` datetime(3) DEFAULT NULL, `end_reason` varchar(16) NOT NULL DEFAULT '', `active_key` varchar(64) DEFAULT NULL,
+  `created_at` datetime(3) NOT NULL, `updated_at` datetime(3) NOT NULL,
+  PRIMARY KEY (`id`), UNIQUE KEY `uk_sip_trace_capture_active` (`active_key`),
+  KEY `idx_sip_trace_capture_device_started` (`device_id`,`started_at`), KEY `idx_sip_trace_capture_device_code` (`device_code`),
+  KEY `idx_sip_trace_capture_created_by` (`created_by`), KEY `idx_sip_trace_capture_planned_end` (`planned_end_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `gb_sip_trace_message` (
+  `event_id` varchar(36) NOT NULL, `occurred_at` datetime(6) NOT NULL, `direction` varchar(16) NOT NULL,
+  `transport` varchar(16) NOT NULL, `local_addr` varchar(255) NOT NULL, `remote_addr` varchar(255) NOT NULL,
+  `device_id` varchar(64) NOT NULL, `method` varchar(32) NOT NULL, `status_code` smallint unsigned NOT NULL,
+  `call_id` varchar(255) NOT NULL, `cseq` int unsigned NOT NULL, `cseq_method` varchar(32) NOT NULL,
+  `from_uri` varchar(512) NOT NULL, `to_uri` varchar(512) NOT NULL, `user_agent` varchar(512) NOT NULL,
+  `malformed` boolean NOT NULL DEFAULT false, `parse_error` varchar(1024) NOT NULL,
+  `payload_nonce` blob NOT NULL, `payload_ciphertext` mediumblob NOT NULL, `payload_algorithm` varchar(32) NOT NULL,
+  `payload_key_version` varchar(64) NOT NULL, `payload_digest_sha256` char(64) NOT NULL,
+  PRIMARY KEY (`event_id`), KEY `idx_gb_sip_trace_occurred_event` (`occurred_at`,`event_id`),
+  KEY `idx_gb_sip_trace_device_occurred` (`device_id`,`occurred_at`,`event_id`),
+  KEY `idx_gb_sip_trace_call_occurred` (`call_id`,`occurred_at`,`event_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 DROP TABLE IF EXISTS `gb_custom_group`;
 CREATE TABLE `gb_custom_group` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

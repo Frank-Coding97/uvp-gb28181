@@ -103,7 +103,7 @@ function mountPage() {
                     template: `<div :data-span="span"><slot /></div>`
                 },
                 "a-form-item": {
-                    props: ["field", "label", "tooltip"],
+                    props: ["field", "label", "tooltip", "validateStatus"],
                     template: `<label :data-field="field" :data-tooltip="tooltip">{{ label }}<slot /><slot name="extra" /></label>`
                 },
                 "a-button": ButtonStub,
@@ -198,8 +198,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateSIPCommandTimeoutConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { timeoutSec: 30 } });
         api.fetchPreallocationModeConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
         api.updatePreallocationModeConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
-        api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, applied: true } });
-        api.updateSIPLogConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true, applied: true } });
+        api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false, retentionDays: 7, applied: true } });
+        api.updateSIPLogConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true, retentionDays: 7, applied: true } });
     });
 
     it("reuses the system configuration page layout primitives", async () => {
@@ -211,7 +211,7 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.find(".service-config-shell").exists()).toBe(false);
         expect(wrapper.findAll(".uvp-system-panel")).toHaveLength(3);
         expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
-        expect(wrapper.findAll("input[type='number']")).toHaveLength(5);
+        expect(wrapper.findAll("input[type='number']")).toHaveLength(6);
         expect(wrapper.findAll("input[type='number']").every(input => input.classes().includes("service-config-number-input"))).toBe(
             true
         );
@@ -506,7 +506,47 @@ describe("ServiceConfig edit mode", () => {
         await saveButton?.trigger("click");
         await flushPromises();
 
-        expect(api.updateSIPLogConfig).toHaveBeenCalledWith(true);
+        expect(api.updateSIPLogConfig).toHaveBeenCalledWith({ enabled: true, retentionDays: 7 });
+    });
+
+    it("loads and saves SIP trace retention days in the existing form", async () => {
+        api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 30, applied: true } });
+        api.updateSIPLogConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true, retentionDays: 60, applied: true } });
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.text()).toContain("SIP 日志保留天数（天）");
+        await wrapper.get("button").trigger("click");
+        const retentionInput = wrapper.find("[data-field='sipLogRetentionDays'] input[type='number']");
+        expect(retentionInput.element).toHaveProperty("disabled", false);
+        await retentionInput.setValue("60");
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateSIPLogConfig).toHaveBeenCalledWith({ enabled: true, retentionDays: 60 });
+    });
+
+    it.each([0, 1.5, 366])("blocks invalid SIP trace retention days: %s", async invalidRetentionDays => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        await wrapper.get("button").trigger("click");
+        const retentionInput = wrapper.find("[data-field='sipLogRetentionDays'] input[type='number']");
+        await retentionInput.setValue(String(invalidRetentionDays));
+
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        expect(saveButton?.element).toHaveProperty("disabled", true);
+        expect(wrapper.find("[data-field='sipLogRetentionDays']").text()).toContain("请输入 1-365 之间的整数");
+        expect(api.updateSIPLogConfig).not.toHaveBeenCalled();
+    });
+
+    it("uses the default retention when loading an old SIP log response", async () => {
+        api.fetchSIPLogConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true, applied: true } });
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.find("[data-field='sipLogRetentionDays'] input[type='number']").element).toHaveProperty("value", "7");
     });
 
     it("loads and saves the ignore channel offline status notify switch", async () => {

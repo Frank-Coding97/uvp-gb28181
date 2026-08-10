@@ -233,18 +233,14 @@ scheduler:
 gb28181:
   enabled: true              # 是否启用国标 SIP 服务;关闭后 HTTP 依然运行,SIP 相关路由返 503
   sip_command_timeout_sec: 10 # 出站 SIP 命令默认等待时间，范围 1-300 秒
-  # SIP 原始报文诊断模块。默认关闭；关闭时不连接 ClickHouse，也不启动采集 worker。
+  # SIP 原始报文诊断模块。默认关闭；日志写入当前业务数据库。
   trace:
     enabled: false
-    address: "127.0.0.1:9000"
-    database: "uvp_sip_trace"
-    username: "uvp_trace"
-    password_env: "UVP_SIP_TRACE_CLICKHOUSE_PASSWORD"
-    tls: false
     queue_capacity: 8192
     batch_size: 500
     flush_interval_ms: 500
     encryption_key_env: "UVP_SIP_TRACE_ENCRYPTION_KEY"
+    retention_days: 7
   device:
     default_owner_dept_id: 1 # 首次自动建档默认归属部门；建议改成"待分配/接入池"部门
     keepalive_interval: 60   # 设备心跳周期(秒)

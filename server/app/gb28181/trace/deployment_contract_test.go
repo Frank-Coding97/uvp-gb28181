@@ -9,64 +9,45 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestOptionalClickHouseDeploymentContract(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "deploy", "sip-trace-clickhouse")
-	read := func(name string) string {
-		content, err := os.ReadFile(filepath.Join(root, name))
-		require.NoError(t, err, name)
-		return string(content)
+func TestRelationalTraceDeploymentContract(t *testing.T) {
+	serverRoot := filepath.Join("..", "..", "..")
+	repoRoot := filepath.Join(serverRoot, "..")
+	forbidden := strings.Join([]string{"click", "house"}, "")
+	paths := []string{
+		filepath.Join(serverRoot, "go.mod"),
+		filepath.Join(serverRoot, "config", "config.example.yml"),
+		filepath.Join(repoRoot, "deploy", "test", "compose.yml"),
+		filepath.Join(repoRoot, "deploy", "test", "configure_server.py"),
+		filepath.Join(repoRoot, "deploy", "test", "deploy-uvp.sh"),
+		filepath.Join(repoRoot, ".github", "workflows", "ci-deploy-test.yml"),
 	}
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		require.NoError(t, err)
+		require.NotContains(t, strings.ToLower(string(body)), forbidden, path)
+	}
+	_, err := os.Stat(filepath.Join(serverRoot, "deploy", "sip-trace-"+forbidden))
+	require.ErrorIs(t, err, os.ErrNotExist)
 
-	compose := read("compose.yml")
-	require.Contains(t, compose, "clickhouse/clickhouse-server:26.3.17.4")
-	require.Contains(t, compose, "healthcheck:")
-	require.Contains(t, compose, "clickhouse-data:")
-	require.Contains(t, compose, "CLICKHOUSE_BIND_IP")
-
-	initScript := read("init/01-sip-trace.sh")
-	initInfo, err := os.Stat(filepath.Join(root, "init", "01-sip-trace.sh"))
+	schema, err := os.ReadFile(filepath.Join(serverRoot, "resource", "database", "uvp-gb28181.sql"))
 	require.NoError(t, err)
-	require.NotZero(t, initInfo.Mode().Perm()&0o111)
-	require.Contains(t, initScript, "CREATE DATABASE IF NOT EXISTS")
-	require.Contains(t, initScript, "CREATE USER IF NOT EXISTS")
-	require.Contains(t, initScript, "GRANT CREATE TABLE, CREATE VIEW, SELECT, INSERT")
-	require.Contains(t, initScript, "GRANT DROP VIEW\n  ON \\`${database}\\`.sip_trace_session_day_mv")
-	require.NotContains(t, initScript, "GRANT DROP VIEW\n  ON \\`${database}\\`.*")
-	require.NotContains(t, strings.ToUpper(initScript), "GRANT ALL")
-
-	envExample := read(".env.example")
-	require.Contains(t, envExample, "CHANGE_ME")
-	require.NotContains(t, envExample, "192.168.10.220")
-
-	documentation := read("README.md")
-	for _, required := range []string{"enabled: false", "openssl rand -base64 32", "7 天", "30 天", "70%", "85%", "恢复"} {
-		require.Contains(t, documentation, required)
-	}
+	require.Contains(t, strings.ToLower(string(schema)), "gb_sip_trace_message")
 }
 
-func TestTestEnvironmentClickHouseDeploymentContract(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "..", "deploy", "test")
-	read := func(name string) string {
-		content, err := os.ReadFile(filepath.Join(root, name))
-		require.NoError(t, err, name)
-		return string(content)
+func TestRelationalTraceDownMigrationsRejectNonEmptyTable(t *testing.T) {
+	serverRoot := filepath.Join("..", "..", "..")
+	migrationRoot := filepath.Join(serverRoot, "resource", "database", "gb28181", "migrations")
+	contracts := map[string]string{
+		"2026-08-10-sip-trace-message-down.sql":            "sip_trace_down_guard",
+		"2026-08-10-sip-trace-message-postgresql-down.sql": "raise exception",
+		"2026-08-10-sip-trace-message-sqlserver-down.sql":  "throw 50000",
 	}
-
-	compose := read("compose.yml")
-	require.Contains(t, compose, "sip-trace-backend.env")
-	require.Contains(t, compose, "clickhouse/clickhouse-server:26.3.17.4")
-	require.Contains(t, compose, "sip-trace-clickhouse.env")
-	require.Contains(t, compose, "./clickhouse/init:/docker-entrypoint-initdb.d:ro")
-	require.Contains(t, compose, "clickhouse-data:/var/lib/clickhouse")
-	require.NotContains(t, compose, "8123:8123")
-	require.NotContains(t, compose, "9000:9000")
-
-	configure := read("configure_server.py")
-	require.Contains(t, configure, "UVP_SIP_TRACE_CLICKHOUSE_PASSWORD")
-	require.Contains(t, configure, "UVP_SIP_TRACE_ENCRYPTION_KEY")
-	require.Contains(t, configure, `("gb28181", "trace", "enabled"): True`)
-	require.Contains(t, configure, `("gb28181", "trace", "address"): "uvp-clickhouse:9000"`)
-
-	deploy := read("deploy-uvp.sh")
-	require.Contains(t, deploy, "clickhouse/init/01-sip-trace.sh")
+	for name, guard := range contracts {
+		body, err := os.ReadFile(filepath.Join(migrationRoot, name))
+		require.NoError(t, err)
+		sql := strings.ToLower(string(body))
+		require.Contains(t, sql, guard, name)
+		require.Contains(t, sql, "gb_sip_trace_message", name)
+		require.Less(t, strings.Index(sql, guard), strings.LastIndex(sql, "drop table"), name)
+	}
 }

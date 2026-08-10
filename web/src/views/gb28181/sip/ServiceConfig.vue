@@ -104,6 +104,7 @@ const savedSIPCommandTimeoutSec = ref(10);
 const savedPreallocationMode = ref(false);
 const savedIgnoreChannelOfflineStatusNotify = ref(false);
 const savedSIPLogEnabled = ref(false);
+const savedSIPLogRetentionDays = ref(7);
 const positionHistoryChanged = computed(
     () =>
         draft.saveMobilePositionHistory !== savedPositionHistoryEnabled.value ||
@@ -133,7 +134,14 @@ const preallocationModeChanged = computed(() => draft.preallocationMode !== save
 const ignoreChannelOfflineStatusNotifyChanged = computed(
     () => draft.ignoreChannelOfflineStatusNotify !== savedIgnoreChannelOfflineStatusNotify.value
 );
-const sipLogChanged = computed(() => draft.sipLogEnabled !== savedSIPLogEnabled.value);
+const sipLogChanged = computed(
+    () =>
+        draft.sipLogEnabled !== savedSIPLogEnabled.value ||
+        draft.sipLogRetentionDays !== savedSIPLogRetentionDays.value
+);
+const sipLogRetentionValid = computed(
+    () => Number.isInteger(draft.sipLogRetentionDays) && draft.sipLogRetentionDays >= 1 && draft.sipLogRetentionDays <= 365
+);
 const hasChanges = computed(
     () =>
         positionHistoryChanged.value ||
@@ -418,8 +426,11 @@ async function loadSIPLogConfig() {
     try {
         const response = await fetchSIPLogConfig();
         if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        const retentionDays = response.data.retentionDays ?? 7;
         draft.sipLogEnabled = response.data.enabled;
+        draft.sipLogRetentionDays = retentionDays;
         savedSIPLogEnabled.value = response.data.enabled;
+        savedSIPLogRetentionDays.value = retentionDays;
         sipLogApplied.value = response.data.applied;
         sipLogReady.value = true;
     } catch (error: any) {
@@ -445,6 +456,7 @@ function startEditing() {
     draft.preallocationMode = savedPreallocationMode.value;
     draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
+    draft.sipLogRetentionDays = savedSIPLogRetentionDays.value;
     isEditing.value = true;
 }
 
@@ -464,6 +476,7 @@ function cancelEditing() {
     draft.preallocationMode = savedPreallocationMode.value;
     draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
+    draft.sipLogRetentionDays = savedSIPLogRetentionDays.value;
     isEditing.value = false;
 }
 
@@ -586,10 +599,16 @@ async function saveConfig() {
         }
         if (sipLogChanged.value) {
             sipLogSaving.value = true;
-            const response = await updateSIPLogConfig(draft.sipLogEnabled);
+            const response = await updateSIPLogConfig({
+                enabled: draft.sipLogEnabled,
+                retentionDays: draft.sipLogRetentionDays
+            });
             if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            const retentionDays = response.data.retentionDays ?? draft.sipLogRetentionDays;
             draft.sipLogEnabled = response.data.enabled;
+            draft.sipLogRetentionDays = retentionDays;
             savedSIPLogEnabled.value = response.data.enabled;
+            savedSIPLogRetentionDays.value = retentionDays;
             sipLogApplied.value = response.data.applied;
             sipLogSaving.value = false;
             if (response.data.applied === false) {
@@ -668,7 +687,7 @@ onMounted(() =>
                             <a-button
                                 type="primary"
                                 :loading="configSaving"
-                                :disabled="configSaving || !hasChanges"
+                                :disabled="configSaving || !hasChanges || !sipLogRetentionValid"
                                 @click="saveConfig"
                             >
                                 <template #icon><Check :size="15" /></template>
@@ -833,6 +852,27 @@ onMounted(() =>
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
                                         </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="sipLogRetentionDays"
+                                        label="SIP 日志保留天数（天）"
+                                        tooltip="SIP 日志按接收时间自动清理，默认保留 7 天。"
+                                        :validate-status="sipLogRetentionValid ? undefined : 'error'"
+                                    >
+                                        <a-input-number
+                                            v-model="draft.sipLogRetentionDays"
+                                            class="service-config-number-input"
+                                            :min="1"
+                                            :max="365"
+                                            :step="1"
+                                            :precision="0"
+                                            :disabled="!isEditing || sipLogLoading || sipLogSaving || !sipLogReady"
+                                        />
+                                        <template v-if="!sipLogRetentionValid" #extra>
+                                            <span>请输入 1-365 之间的整数</span>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

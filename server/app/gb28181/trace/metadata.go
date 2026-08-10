@@ -68,7 +68,7 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 	return metadata
 }
 
-// fromToString 序列化 From/To 头 URI 为 "user@host" 形式,超长截断避免 ClickHouse 存储压力
+// fromToString 序列化 From/To 头 URI 为 "user@host" 形式,超长截断避免日志存储压力
 func fromToString(addr sip.Uri) string {
 	s := addr.String()
 	return truncateHeader(s, 256)
