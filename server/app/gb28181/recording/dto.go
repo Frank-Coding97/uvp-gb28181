@@ -45,6 +45,66 @@ type AccessDTO struct {
 	ExpiresAt  time.Time `json:"expiresAt"`
 }
 
+type ActiveCatalogSession struct {
+	ID          uint64     `json:"-"`
+	ChannelID   uint       `json:"-"`
+	ChannelCode string     `json:"channelCode"`
+	ChannelName string     `json:"channelName"`
+	DeviceID    string     `json:"deviceId"`
+	NodeID      int64      `json:"-"`
+	State       string     `json:"state"`
+	StartedAt   *time.Time `json:"startedAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+type ActiveSessionDTO struct {
+	ID          string     `json:"id"`
+	ChannelID   string     `json:"channelId"`
+	ChannelCode string     `json:"channelCode"`
+	ChannelName string     `json:"channelName"`
+	DeviceID    string     `json:"deviceId"`
+	Node        NodeDTO    `json:"node"`
+	State       string     `json:"state"`
+	StartedAt   *time.Time `json:"startedAt"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+type ReconciliationDTO struct {
+	Node              NodeDTO    `json:"node"`
+	Status            string     `json:"status"`
+	TriggerSource     string     `json:"triggerSource"`
+	EffectiveStart    *time.Time `json:"effectiveStart"`
+	EffectiveEnd      *time.Time `json:"effectiveEnd"`
+	StartedAt         *time.Time `json:"startedAt"`
+	FinishedAt        *time.Time `json:"finishedAt"`
+	CandidateCount    int        `json:"candidateCount"`
+	SuccessCount      int        `json:"successCount"`
+	FailureCount      int        `json:"failureCount"`
+	DiscoveredCount   int        `json:"discoveredCount"`
+	InsertedCount     int        `json:"insertedCount"`
+	UpdatedCount      int        `json:"updatedCount"`
+	MissingCount      int        `json:"missingCount"`
+	UnattributedCount int        `json:"unattributedCount"`
+	UpdatedAt         time.Time  `json:"updatedAt"`
+}
+
+type CatalogChannelOptionDTO struct {
+	ID   string `json:"id"`
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
+type CatalogDeviceOptionDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type CatalogOptionsDTO struct {
+	Channels []CatalogChannelOptionDTO `json:"channels"`
+	Devices  []CatalogDeviceOptionDTO  `json:"devices"`
+	Nodes    []NodeDTO                 `json:"nodes"`
+}
+
 // NewFileDTO converts the internal GORM model into the public catalog shape.
 // Internal paths and raw ZLM URLs intentionally have no representation here.
 func NewFileDTO(file models.GbRecordingFile, node NodeDTO, availability string) FileDTO {

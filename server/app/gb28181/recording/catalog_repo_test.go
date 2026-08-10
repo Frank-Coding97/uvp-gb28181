@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -123,6 +124,45 @@ func TestCatalogAvailabilityUsesDocumentedPriority(t *testing.T) {
 	file.MissingAt = nil
 	require.Equal(t, AvailabilityAccessUnavailable, CatalogAvailability(file, []int64{10}, nil, nil))
 	require.Equal(t, AvailabilityAvailable, CatalogAvailability(file, []int64{10}, nil, []int64{10}))
+}
+
+func TestCatalogRepoListsScopedActiveSessionsAndReconciliations(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:catalog-active?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.GbChannel{}, &models.GbRecordingSession{}, &models.GbRecordingReconcileState{}))
+	now := time.Now().UTC()
+	visibleChannel := models.GbChannel{ID: 1, ChannelID: "C1", DeviceID: "D1", Name: "大厅", OwnerDeptID: 10}
+	hiddenChannel := models.GbChannel{ID: 2, ChannelID: "C2", DeviceID: "D2", Name: "库房", OwnerDeptID: 20}
+	require.NoError(t, db.Create(&visibleChannel).Error)
+	require.NoError(t, db.Create(&hiddenChannel).Error)
+	for _, session := range []models.GbRecordingSession{
+		{ID: 1, ChannelID: 1, DeviceID: "D1", NodeID: 11, VHost: "v", App: "a", Stream: "private-1", State: models.RecordingSessionStateRecording, StartedAt: &now},
+		{ID: 2, ChannelID: 2, DeviceID: "D2", NodeID: 12, VHost: "v", App: "a", Stream: "private-2", State: models.RecordingSessionStateStarting, StartedAt: &now},
+		{ID: 3, ChannelID: 1, DeviceID: "D1", NodeID: 11, VHost: "v", App: "a", Stream: "private-3", State: models.RecordingSessionStateStopped, StartedAt: &now},
+	} {
+		require.NoError(t, db.Create(&session).Error)
+	}
+	for _, state := range []models.GbRecordingReconcileState{
+		{NodeID: 12, Status: models.RecordingReconcileFailed, UpdatedAt: now.Add(-time.Minute)},
+		{NodeID: 11, Status: models.RecordingReconcileSucceeded, UpdatedAt: now},
+	} {
+		require.NoError(t, db.Create(&state).Error)
+	}
+
+	repo := NewGormRepo(db)
+	active, err := repo.ListActiveCatalogSessions(context.Background(), []uint{10}, false)
+	require.NoError(t, err)
+	require.Len(t, active, 1)
+	require.Equal(t, uint64(1), active[0].ID)
+	require.Equal(t, "大厅", active[0].ChannelName)
+	require.Equal(t, "C1", active[0].ChannelCode)
+	payload, err := json.Marshal(active[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "private-1")
+
+	states, err := repo.ListCatalogReconcileStates(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []int64{11, 12}, []int64{states[0].NodeID, states[1].NodeID})
 }
 
 func catalogFile(id uint64, dept uint, nodeID int64, start time.Time, name string) models.GbRecordingFile {

@@ -83,6 +83,17 @@ func (s *CapabilitySigner) Issue(fileID string, userID uint, mode string, durati
 }
 
 func (s *CapabilitySigner) Verify(token, fileID, mode string) (CapabilityClaims, error) {
+	claims, err := s.VerifyForFile(token, fileID)
+	if err != nil {
+		return CapabilityClaims{}, err
+	}
+	if claims.Mode != mode {
+		return CapabilityClaims{}, ErrCapabilityInvalid
+	}
+	return claims, nil
+}
+
+func (s *CapabilitySigner) VerifyForFile(token, fileID string) (CapabilityClaims, error) {
 	payloadPart, signaturePart, ok := splitCapability(token)
 	if !ok {
 		return CapabilityClaims{}, ErrCapabilityInvalid
@@ -100,7 +111,7 @@ func (s *CapabilitySigner) Verify(token, fileID, mode string) (CapabilityClaims,
 		return CapabilityClaims{}, ErrCapabilityInvalid
 	}
 	if claims.Version != capabilityVersion || claims.KeyID != s.keyID || claims.Audience != capabilityAudience ||
-		claims.FileID != fileID || claims.Mode != mode || claims.UserID == 0 || claims.JTI == "" || !validCapabilityMode(claims.Mode) {
+		claims.FileID != fileID || claims.UserID == 0 || claims.JTI == "" || !validCapabilityMode(claims.Mode) {
 		return CapabilityClaims{}, ErrCapabilityInvalid
 	}
 	now := s.now().UTC().Unix()

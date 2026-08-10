@@ -114,6 +114,37 @@ func (r *GormRepo) GetCatalogFile(ctx context.Context, id uint64, allowedDeptIDs
 	return &file, nil
 }
 
+func (r *GormRepo) ListActiveCatalogSessions(ctx context.Context, allowedDeptIDs []uint, fullAccess bool) ([]ActiveCatalogSession, error) {
+	query := r.db.WithContext(ctx).
+		Table("gb_recording_session AS recording_session").
+		Select(`recording_session.id, recording_session.channel_id, channel.channel_id AS channel_code,
+			CASE WHEN channel.alias <> '' THEN channel.alias ELSE channel.name END AS channel_name,
+			recording_session.device_id, recording_session.node_id, recording_session.state,
+			recording_session.started_at, recording_session.updated_at`).
+		Joins("JOIN gb_channel AS channel ON channel.id = recording_session.channel_id").
+		Where("recording_session.state IN ?", []string{
+			models.RecordingSessionStateStarting,
+			models.RecordingSessionStateRecording,
+			models.RecordingSessionStateStopping,
+		})
+	if !fullAccess {
+		if len(allowedDeptIDs) == 0 {
+			query = query.Where("1 = 0")
+		} else {
+			query = query.Where("channel.owner_dept_id IN ?", allowedDeptIDs)
+		}
+	}
+	result := make([]ActiveCatalogSession, 0)
+	err := query.Order("recording_session.started_at DESC").Order("recording_session.id DESC").Scan(&result).Error
+	return result, err
+}
+
+func (r *GormRepo) ListCatalogReconcileStates(ctx context.Context) ([]models.GbRecordingReconcileState, error) {
+	states := make([]models.GbRecordingReconcileState, 0)
+	err := r.db.WithContext(ctx).Order("node_id").Find(&states).Error
+	return states, err
+}
+
 func (r *GormRepo) catalogFileQuery(ctx context.Context, query FileQuery) *gorm.DB {
 	db := r.db.WithContext(ctx).Model(&models.GbRecordingFile{})
 	if !query.FullAccess {

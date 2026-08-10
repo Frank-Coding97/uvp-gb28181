@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,6 +44,7 @@ import (
 	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -710,6 +712,43 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	catalogInterval := time.Duration(cfg.Recording.CatalogReconcileIntervalSec) * time.Second
 	recordingCatalogScheduler = gbrecording.NewCatalogReconcileScheduler(catalogReconciler, zlmRegistry, catalogInterval, 10*time.Second)
 	recordingCatalogScheduler.Start(context.Background())
+
+	var capabilitySigner *gbrecording.CapabilitySigner
+	capabilityKey := os.Getenv(strings.TrimSpace(cfg.Recording.CapabilityKeyEnv))
+	keyReused := capabilityKey != "" && (capabilityKey == app.ConfigYml.GetString("token.jwttokensignkey") || capabilityKey == cfg.ZLM.Secret)
+	if !keyReused {
+		for _, n := range zlmRegistry.List() {
+			if capabilityKey != "" && capabilityKey == n.APISecret {
+				keyReused = true
+				break
+			}
+		}
+	}
+	if keyReused {
+		app.ZapLog.Warn("GB28181 云端录像 capability 密钥拒绝装配(禁止复用 JWT/ZLM secret)")
+	} else if signer, err := gbrecording.NewCapabilitySigner([]byte(capabilityKey), "recording-v1"); err != nil {
+		app.ZapLog.Warn("GB28181 云端录像 capability 密钥未配置或长度不足")
+	} else {
+		capabilitySigner = signer
+	}
+	catalogService := gbrecording.NewCatalogService(gbrecording.CatalogServiceConfig{
+		Repo: repo, Nodes: zlmRegistry, Scheduler: recordingCatalogScheduler, Signer: capabilitySigner,
+		ResolveAccess: func(ctx context.Context, userID uint) (gbrecording.CatalogAccess, error) {
+			access, err := datascope.ResolveOwnerDeptAccessByUserID(ctx, app.DB(), userID)
+			if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
+				return gbrecording.CatalogAccess{}, gbrecording.ErrCatalogAccessRevoked
+			}
+			return gbrecording.CatalogAccess{FullAccess: access.FullAccess, DeptIDs: access.DeptIDs}, err
+		},
+		CheckPermission: func(_ context.Context, userID uint, path, method string) (bool, error) {
+			if app.CasbinV2 == nil {
+				return false, errors.New("casbin unavailable")
+			}
+			return app.CasbinV2.Enforce(fmt.Sprintf("user_%d", userID), path, method, "")
+		},
+		NewDownloader: func(n *node.Node) gbrecording.ContentDownloader { return gbzlm.NewClientForNode(n) },
+	})
+	gbroutes.SetCloudRecordingCatalogService(catalogService)
 	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.Duration("interval", catalogInterval))
 }
 
@@ -725,6 +764,7 @@ func stopRecordingRuntime() {
 		recordingReconciler = nil
 	}
 	recordingSvc = nil
+	gbroutes.SetCloudRecordingCatalogService(nil)
 	gbroutes.SetRecordingService(nil, nil, nil)
 }
 

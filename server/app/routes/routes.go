@@ -46,6 +46,8 @@ func InitRoutes(engine *gin.Engine) {
 	gbroutes.RegisterHookRoutes(engine)
 	// 扫码接入引导页(普通扫码 App 打开二维码 URL 时看到的页面)
 	gbroutes.RegisterQRLandingRoute(engine)
+	// 云端录像内容代理必须绕过全局 30 秒 handler timeout，鉴权由短期 capability 完成。
+	gbroutes.RegisterContentRoutes(engine)
 
 	//	调试模式下注册Swagger路由、查看内存缓存项
 	if app.ConfigYml.GetBool("server.appdebug") {

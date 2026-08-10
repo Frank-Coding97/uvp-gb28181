@@ -46,6 +46,7 @@ var talkController atomic.Pointer[gbcontrollers.TalkController]
 var playService *gbplay.Service
 var recordingService *gbrecording.Service
 var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
+var cloudRecordingCatalogController atomic.Pointer[gbcontrollers.CloudRecordingCatalogController]
 
 // dashboardController SIP 监控看板控制器
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
@@ -69,6 +70,7 @@ var traceController atomic.Pointer[gbcontrollers.TraceController]
 func init() {
 	traceController.Store(gbcontrollers.NewTraceController(nil, nil, nil))
 	talkController.Store(gbcontrollers.NewTalkController(nil))
+	cloudRecordingCatalogController.Store(gbcontrollers.NewCloudRecordingCatalogController(nil))
 }
 
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
@@ -305,11 +307,34 @@ func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUU
 	hookController.SetStreamObserver(service)
 }
 
+func SetCloudRecordingCatalogService(service gbcontrollers.CloudRecordingCatalogAPI) {
+	cloudRecordingCatalogController.Store(gbcontrollers.NewCloudRecordingCatalogController(service))
+}
+
+func currentCloudRecordingCatalogController() *gbcontrollers.CloudRecordingCatalogController {
+	controller := cloudRecordingCatalogController.Load()
+	if controller == nil {
+		controller = gbcontrollers.NewCloudRecordingCatalogController(nil)
+		cloudRecordingCatalogController.CompareAndSwap(nil, controller)
+	}
+	return controller
+}
+
 // RegisterRoutes 注册 GB28181 业务路由到已带鉴权的 protected 组
 // 在底座 routes.InitRoutes 的 protected 块中调用
 func RegisterRoutes(protected *gin.RouterGroup) {
 	gb := protected.Group("/gb28181")
 	{
+		cloudRecordings := gb.Group("/cloud-recordings")
+		{
+			cloudRecordings.GET("/files", func(c *gin.Context) { currentCloudRecordingCatalogController().ListFiles(c) })
+			cloudRecordings.GET("/files/options", func(c *gin.Context) { currentCloudRecordingCatalogController().FileOptions(c) })
+			cloudRecordings.GET("/files/:id", func(c *gin.Context) { currentCloudRecordingCatalogController().FileDetail(c) })
+			cloudRecordings.POST("/files/:id/access", func(c *gin.Context) { currentCloudRecordingCatalogController().IssueAccess(c) })
+			cloudRecordings.GET("/active", func(c *gin.Context) { currentCloudRecordingCatalogController().ActiveSessions(c) })
+			cloudRecordings.GET("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().Reconciliations(c) })
+			cloudRecordings.POST("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().TriggerReconciliation(c) })
+		}
 		alarms := gb.Group("/alarms")
 		{
 			alarms.GET("", alarmController.List)
@@ -512,6 +537,15 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/anomaly/batch-resolve", anomalyController.BatchResolve)
 		}
 	}
+}
+
+// RegisterContentRoutes must be called before the global request-timeout and
+// operation-log middleware. Capability verification is performed by the
+// controller on every request; JWT and query-logging middleware are omitted.
+func RegisterContentRoutes(engine *gin.Engine) {
+	engine.GET("/api/gb28181/cloud-recordings/content/:id", func(c *gin.Context) {
+		currentCloudRecordingCatalogController().Content(c)
+	})
 }
 
 func setupRoute(fn func(*gbcontrollers.SetupController, *gin.Context)) gin.HandlerFunc {
