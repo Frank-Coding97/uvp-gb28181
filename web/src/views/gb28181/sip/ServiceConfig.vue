@@ -583,7 +583,7 @@ onMounted(() =>
 </script>
 
 <template>
-    <div class="snow-fill">
+    <div class="snow-fill service-config-page">
         <a-tabs
                 v-model:active-key="activeTab"
                 class="uvp-system-tabs service-config-tabs"
@@ -623,7 +623,11 @@ onMounted(() =>
                         <a-form class="uvp-system-form" :layout="formLayout" :model="draft" auto-label-width>
                             <a-row :gutter="24">
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="saveMobilePositionHistory" label="保存移动位置历史轨迹">
+                                    <a-form-item
+                                        field="saveMobilePositionHistory"
+                                        label="保存移动位置历史轨迹"
+                                        tooltip="关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
+                                    >
                                         <a-switch
                                             v-model="draft.saveMobilePositionHistory"
                                             :loading="positionHistoryLoading || positionHistorySaving"
@@ -632,15 +636,17 @@ onMounted(() =>
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
                                         </a-switch>
-                                        <template #extra>
-                                            <div>关闭后仍更新设备和通道的最新位置，不再新增轨迹点。</div>
-                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="positionHistoryRetentionDays" label="位置历史保留天数（天）">
+                                    <a-form-item
+                                        field="positionHistoryRetentionDays"
+                                        label="位置历史保留天数（天）"
+                                        tooltip="历史轨迹按接收时间自动清理，默认保留 7 天。"
+                                    >
                                         <a-input-number
                                             v-model="draft.positionHistoryRetentionDays"
+                                            class="service-config-number-input"
                                             :min="1"
                                             :max="365"
                                             :disabled="
@@ -651,13 +657,14 @@ onMounted(() =>
                                                 !draft.saveMobilePositionHistory
                                             "
                                         />
-                                        <template #extra>
-                                            <div>历史轨迹按接收时间自动清理，默认保留 7 天。</div>
-                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="sdpExtension" label="扩展 SDP 兼容模式">
+                                    <a-form-item
+                                        field="sdpExtension"
+                                        label="扩展 SDP 兼容模式"
+                                        tooltip="为部分兼容性设备在点播和录像回放请求中声明更多视频编码类型，一般设备无需开启。"
+                                    >
                                         <a-switch
                                             v-model="draft.sdpExtension"
                                             :loading="sdpExtensionLoading || sdpExtensionSaving"
@@ -666,13 +673,14 @@ onMounted(() =>
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
                                         </a-switch>
-                                        <template #extra>
-                                            <div>为部分兼容性设备在点播和录像回放请求中声明更多视频编码类型，一般设备无需开启。</div>
-                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="ptzSpeed" label="云台默认速度">
+                                    <a-form-item
+                                        field="ptzSpeed"
+                                        label="云台默认速度"
+                                        tooltip="作为播放弹窗和大屏云台控制的初始档位，可在控制面板临时调整。"
+                                    >
                                         <div class="ptz-default-speed">
                                             <span class="ptz-default-speed__edge">慢</span>
                                             <a-slider
@@ -687,17 +695,17 @@ onMounted(() =>
                                             <span class="ptz-default-speed__edge">快</span>
                                             <output class="ptz-default-speed__value">{{ draft.ptzSpeed }} 档</output>
                                         </div>
-                                        <template #extra>
-                                            <div>作为播放弹窗和大屏云台控制的初始档位，可在控制面板临时调整。</div>
-                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="defaultChannelStreamTransport" label="新通道默认流传输模式">
-                                        <a-radio-group
+                                    <a-form-item
+                                        field="defaultChannelStreamTransport"
+                                        label="新通道默认流传输模式"
+                                        tooltip="仅影响之后通过 Catalog 新发现的通道，现有通道保持不变；默认 TCP 被动。"
+                                    >
+                                        <a-select
                                             v-model="draft.defaultChannelStreamTransport"
-                                            type="button"
-                                            class="stream-transport-segments"
+                                            class="stream-transport-select"
                                             :disabled="
                                                 !isEditing ||
                                                 defaultChannelStreamTransportLoading ||
@@ -705,17 +713,159 @@ onMounted(() =>
                                                 !defaultChannelStreamTransportReady
                                             "
                                         >
-                                            <a-radio value="UDP">UDP</a-radio>
-                                            <a-radio value="TCP-Active">TCP 主动</a-radio>
-                                            <a-radio value="TCP-Passive">TCP 被动</a-radio>
-                                        </a-radio-group>
-                                        <template #extra>
-                                            <div>仅影响之后通过 Catalog 新发现的通道，现有通道保持不变；默认 TCP 被动。</div>
-                                        </template>
+                                            <a-option value="UDP">UDP</a-option>
+                                            <a-option value="TCP-Active">TCP 主动</a-option>
+                                            <a-option value="TCP-Passive">TCP 被动</a-option>
+                                        </a-select>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="globalSubscriptionItems" label="全局订阅项目">
+                                    <a-form-item
+                                        field="defaultChannelAudioEnabled"
+                                        label="全局通道开启音频"
+                                        tooltip="仅影响之后通过 Catalog 新发现的通道，现有通道保持原音频设置；默认开启。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.defaultChannelAudioEnabled"
+                                            :loading="defaultChannelAudioLoading || defaultChannelAudioSaving"
+                                            :disabled="
+                                                !isEditing ||
+                                                defaultChannelAudioLoading ||
+                                                defaultChannelAudioSaving ||
+                                                !defaultChannelAudioReady
+                                            "
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="syncChannelsOnOnline"
+                                        label="设备上线时同步通道"
+                                        tooltip="设备首次上线或离线恢复时，自动向设备查询 Catalog 并同步通道。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.syncChannelsOnOnline"
+                                            :loading="syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving"
+                                            :disabled="!isEditing || syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving || !syncChannelsOnOnlineReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="sipLogEnabled"
+                                        label="是否开启 SIP 日志"
+                                        :tooltip="
+                                            sipLogApplied
+                                                ? '保存后会热重载 SIP 服务，采集原始信令并写入 Trace 存储；默认关闭。'
+                                                : '保存后会热重载 SIP 服务，采集原始信令并写入 Trace 存储；默认关闭。配置尚未应用，SIP 服务当前状态与开关不一致。'
+                                        "
+                                    >
+                                        <a-switch
+                                            v-model="draft.sipLogEnabled"
+                                            :loading="sipLogLoading || sipLogSaving"
+                                            :disabled="!isEditing || sipLogLoading || sipLogSaving || !sipLogReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="ignoreChannelOfflineStatusNotify"
+                                        label="忽略通道离线/异常通知"
+                                        tooltip="开启后忽略 Catalog NOTIFY 上报的 OFF、VLOST、DEFECT，仅用于兼容错误状态消息；默认关闭。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.ignoreChannelOfflineStatusNotify"
+                                            :loading="ignoreChannelOfflineStatusNotifyLoading || ignoreChannelOfflineStatusNotifySaving"
+                                            :disabled="
+                                                !isEditing ||
+                                                ignoreChannelOfflineStatusNotifyLoading ||
+                                                ignoreChannelOfflineStatusNotifySaving ||
+                                                !ignoreChannelOfflineStatusNotifyReady
+                                            "
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="onlineOnHeartbeat"
+                                        label="心跳恢复设备在线状态"
+                                        tooltip="开启后，离线设备收到 Keepalive 会恢复为在线；关闭后仍记录最后心跳时间，但保持当前设备状态。默认开启。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.onlineOnHeartbeat"
+                                            :loading="onlineOnHeartbeatLoading || onlineOnHeartbeatSaving"
+                                            :disabled="!isEditing || onlineOnHeartbeatLoading || onlineOnHeartbeatSaving || !onlineOnHeartbeatReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="saveAlarmMessages"
+                                        label="是否存储报警消息"
+                                        tooltip="开启后将设备报警通知写入报警管理；关闭后仍接收和解析报警通知，但不写入报警记录。默认开启。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.saveAlarmMessages"
+                                            :loading="saveAlarmMessagesLoading || saveAlarmMessagesSaving"
+                                            :disabled="!isEditing || saveAlarmMessagesLoading || saveAlarmMessagesSaving || !saveAlarmMessagesReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="sipTimeoutSec"
+                                        label="SIP 命令超时时间（秒）"
+                                        tooltip="控制平台向设备发送 MESSAGE、SUBSCRIBE、直播、回放和对讲 INVITE 时等待响应的默认时长，默认 10 秒。"
+                                    >
+                                        <a-input-number
+                                            v-model="draft.sipTimeoutSec"
+                                            class="service-config-number-input"
+                                            :min="1"
+                                            :max="300"
+                                            :disabled="!isEditing || sipCommandTimeoutLoading || sipCommandTimeoutSaving || !sipCommandTimeoutReady"
+                                        />
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="preallocationMode"
+                                        label="预分配模式"
+                                        tooltip="开启后，未知国标 ID 将被拒绝注册，需要先在设备列表新建设备；默认关闭。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.preallocationMode"
+                                            :loading="preallocationModeLoading || preallocationModeSaving"
+                                            :disabled="!isEditing || preallocationModeLoading || preallocationModeSaving || !preallocationModeReady"
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="24">
+                                    <a-form-item
+                                        field="globalSubscriptionItems"
+                                        label="全局订阅项目"
+                                        tooltip="设备下次上线时，为尚未单独配置的订阅项目应用默认值；设备已有订阅配置保持不变。默认不启用。"
+                                    >
                                         <a-checkbox-group
                                             v-model="draft.globalSubscriptionItems"
                                             class="global-subscription-items"
@@ -731,138 +881,6 @@ onMounted(() =>
                                             <a-checkbox value="mobile_position">位置</a-checkbox>
                                             <a-checkbox value="ptz_precise_position">PTZ 精准位置变化（2022）</a-checkbox>
                                         </a-checkbox-group>
-                                        <template #extra>
-                                            <div>设备下次上线时，为尚未单独配置的订阅项目应用默认值；设备已有订阅配置保持不变。默认不启用。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="defaultChannelAudioEnabled" label="全局通道开启音频">
-                                        <a-switch
-                                            v-model="draft.defaultChannelAudioEnabled"
-                                            :loading="defaultChannelAudioLoading || defaultChannelAudioSaving"
-                                            :disabled="
-                                                !isEditing ||
-                                                defaultChannelAudioLoading ||
-                                                defaultChannelAudioSaving ||
-                                                !defaultChannelAudioReady
-                                            "
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                        <template #extra>
-                                            <div>仅影响之后通过 Catalog 新发现的通道，现有通道保持原音频设置；默认开启。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="syncChannelsOnOnline" label="设备上线时同步通道">
-                                        <a-switch
-                                            v-model="draft.syncChannelsOnOnline"
-                                            :loading="syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving"
-                                            :disabled="!isEditing || syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving || !syncChannelsOnOnlineReady"
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                        <template #extra>
-                                            <div>设备首次上线或离线恢复时，自动向设备查询 Catalog 并同步通道。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="sipLogEnabled" label="是否开启 SIP 日志">
-                                        <a-switch
-                                            v-model="draft.sipLogEnabled"
-                                            :loading="sipLogLoading || sipLogSaving"
-                                            :disabled="!isEditing || sipLogLoading || sipLogSaving || !sipLogReady"
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                        <template #extra>
-                                            <div>保存后会热重载 SIP 服务，采集原始信令并写入 Trace 存储；默认关闭。</div>
-                                            <div v-if="!sipLogApplied">配置尚未应用，SIP 服务当前状态与开关不一致。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="ignoreChannelOfflineStatusNotify" label="忽略通道离线/异常通知">
-                                        <a-switch
-                                            v-model="draft.ignoreChannelOfflineStatusNotify"
-                                            :loading="ignoreChannelOfflineStatusNotifyLoading || ignoreChannelOfflineStatusNotifySaving"
-                                            :disabled="
-                                                !isEditing ||
-                                                ignoreChannelOfflineStatusNotifyLoading ||
-                                                ignoreChannelOfflineStatusNotifySaving ||
-                                                !ignoreChannelOfflineStatusNotifyReady
-                                            "
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                        <template #extra>
-                                            <div>开启后忽略 Catalog NOTIFY 上报的 OFF、VLOST、DEFECT，仅用于兼容错误状态消息；默认关闭。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="onlineOnHeartbeat" label="心跳恢复设备在线状态">
-                                        <a-switch
-                                            v-model="draft.onlineOnHeartbeat"
-                                            :loading="onlineOnHeartbeatLoading || onlineOnHeartbeatSaving"
-                                            :disabled="!isEditing || onlineOnHeartbeatLoading || onlineOnHeartbeatSaving || !onlineOnHeartbeatReady"
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                        <template #extra>
-                                            <div>开启后，离线设备收到 Keepalive 会恢复为在线；关闭后仍记录最后心跳时间，但保持当前设备状态。默认开启。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="saveAlarmMessages" label="是否存储报警消息">
-                                        <a-switch
-                                            v-model="draft.saveAlarmMessages"
-                                            :loading="saveAlarmMessagesLoading || saveAlarmMessagesSaving"
-                                            :disabled="!isEditing || saveAlarmMessagesLoading || saveAlarmMessagesSaving || !saveAlarmMessagesReady"
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                        <template #extra>
-                                            <div>开启后将设备报警通知写入报警管理；关闭后仍接收和解析报警通知，但不写入报警记录。默认开启。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="sipTimeoutSec" label="SIP 命令超时时间（秒）">
-                                        <a-input-number
-                                            v-model="draft.sipTimeoutSec"
-                                            :min="1"
-                                            :max="300"
-                                            :disabled="!isEditing || sipCommandTimeoutLoading || sipCommandTimeoutSaving || !sipCommandTimeoutReady"
-                                        />
-                                        <template #extra>
-                                            <div>控制平台向设备发送 MESSAGE、SUBSCRIBE、直播、回放和对讲 INVITE 时等待响应的默认时长，默认 10 秒。</div>
-                                        </template>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="preallocationMode" label="预分配模式">
-                                        <a-switch
-                                            v-model="draft.preallocationMode"
-                                            :loading="preallocationModeLoading || preallocationModeSaving"
-                                            :disabled="!isEditing || preallocationModeLoading || preallocationModeSaving || !preallocationModeReady"
-                                        >
-                                            <template #checked>开启</template>
-                                            <template #unchecked>关闭</template>
-                                        </a-switch>
-                                        <template #extra>
-                                            <div>开启后，未知国标 ID 将被拒绝注册，需要先在设备列表新建设备；默认关闭。</div>
-                                        </template>
                                     </a-form-item>
                                 </a-col>
                             </a-row>
@@ -881,7 +899,13 @@ onMounted(() =>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="inviteTimeoutMs" label="点播超时时间（毫秒）">
-                                        <a-input-number v-model="draft.playback.inviteTimeoutMs" :min="1000" :max="300000" disabled />
+                                        <a-input-number
+                                            v-model="draft.playback.inviteTimeoutMs"
+                                            class="service-config-number-input"
+                                            :min="1000"
+                                            :max="300000"
+                                            disabled
+                                        />
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
@@ -915,7 +939,13 @@ onMounted(() =>
                             <a-row :gutter="24">
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="parentInviteTimeoutMs" label="上级平台点播超时时间">
-                                        <a-input-number v-model="draft.cascade.parentInviteTimeoutMs" :min="1000" :max="600000" disabled />
+                                        <a-input-number
+                                            v-model="draft.cascade.parentInviteTimeoutMs"
+                                            class="service-config-number-input"
+                                            :min="1000"
+                                            :max="600000"
+                                            disabled
+                                        />
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
@@ -937,7 +967,13 @@ onMounted(() =>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="offlineRetryIntervalSec" label="国标级联离线久重试间隔（秒）">
-                                        <a-input-number v-model="draft.cascade.offlineRetryIntervalSec" :min="1" :max="3600" disabled />
+                                        <a-input-number
+                                            v-model="draft.cascade.offlineRetryIntervalSec"
+                                            class="service-config-number-input"
+                                            :min="1"
+                                            :max="3600"
+                                            disabled
+                                        />
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
@@ -959,6 +995,10 @@ onMounted(() =>
 </template>
 
 <style lang="scss" scoped>
+.service-config-page {
+    overflow-y: auto;
+}
+
 .service-config-tabs {
     :deep(.arco-tabs-nav) {
         display: flex;
@@ -984,6 +1024,10 @@ onMounted(() =>
     gap: 8px;
 }
 
+.service-config-number-input {
+    width: min(100%, 160px);
+}
+
 .ptz-default-speed {
     display: grid;
     grid-template-columns: auto minmax(88px, 1fr) auto 48px;
@@ -1005,15 +1049,8 @@ onMounted(() =>
     white-space: nowrap;
 }
 
-.stream-transport-segments {
-    display: flex;
-    width: min(100%, 360px);
-
-    :deep(.arco-radio-button) {
-        flex: 1 1 0;
-        min-width: 0;
-        text-align: center;
-    }
+.stream-transport-select {
+    width: min(100%, 160px);
 }
 
 .global-subscription-items {
@@ -1040,6 +1077,10 @@ onMounted(() =>
 }
 
 @media (max-width: 640px) {
+    .service-config-number-input {
+        width: 100%;
+    }
+
     .service-config-tabs {
         :deep(.arco-tabs-nav) {
             position: relative;

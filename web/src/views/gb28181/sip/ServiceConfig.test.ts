@@ -91,10 +91,13 @@ function mountPage() {
                 "a-card": { template: `<div><slot /></div>` },
                 "a-form": { template: `<form><slot /></form>` },
                 "a-row": { template: `<div><slot /></div>` },
-                "a-col": { template: `<div><slot /></div>` },
+                "a-col": {
+                    props: ["span"],
+                    template: `<div :data-span="span"><slot /></div>`
+                },
                 "a-form-item": {
-                    props: ["label"],
-                    template: `<label>{{ label }}<slot /><slot name="extra" /></label>`
+                    props: ["field", "label", "tooltip"],
+                    template: `<label :data-field="field" :data-tooltip="tooltip">{{ label }}<slot /><slot name="extra" /></label>`
                 },
                 "a-button": ButtonStub,
                 "a-switch": SwitchStub,
@@ -179,10 +182,28 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
+        expect(wrapper.find(".service-config-page").exists()).toBe(true);
         expect(wrapper.find(".uvp-system-tabs").exists()).toBe(true);
         expect(wrapper.find(".service-config-shell").exists()).toBe(false);
         expect(wrapper.findAll(".uvp-system-panel")).toHaveLength(3);
         expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
+        expect(wrapper.findAll("input[type='number']")).toHaveLength(5);
+        expect(wrapper.findAll("input[type='number']").every(input => input.classes().includes("service-config-number-input"))).toBe(
+            true
+        );
+    });
+
+    it("moves configuration descriptions into form-item tooltips", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(14);
+        expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
+            "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
+        );
+        expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain(
+            "保存后会热重载 SIP 服务"
+        );
     });
 
     it("removes unsupported legacy WVP configuration placeholders", async () => {
@@ -271,7 +292,7 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchSDPExtensionConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("扩展 SDP 兼容模式");
-        expect(wrapper.text()).toContain("一般设备无需开启");
+        expect(wrapper.find("[data-field='sdpExtension']").attributes("data-tooltip")).toContain("一般设备无需开启");
 
         const falseSwitch = wrapper.findAll("button").find(button => button.text() === "false");
         expect(falseSwitch?.element).toHaveProperty("disabled", true);
@@ -316,11 +337,14 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchDefaultChannelStreamTransportConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("新通道默认流传输模式");
-        expect(wrapper.text()).toContain("仅影响之后通过 Catalog 新发现的通道");
+        expect(wrapper.find("[data-field='defaultChannelStreamTransport']").attributes("data-tooltip")).toContain(
+            "仅影响之后通过 Catalog 新发现的通道"
+        );
         const transportSelect = wrapper
             .findAll("label")
             .find(label => label.text().includes("新通道默认流传输模式"))
             ?.find("select");
+        expect(transportSelect?.classes()).toContain("stream-transport-select");
         expect(transportSelect?.element).toHaveProperty("value", "TCP-Passive");
         expect(transportSelect?.element).toHaveProperty("disabled", true);
 
@@ -345,6 +369,10 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.text()).toContain("报警");
         expect(wrapper.text()).toContain("位置");
         expect(wrapper.text()).toContain("PTZ 精准位置变化（2022）");
+        const subscriptionField = wrapper.find("[data-field='globalSubscriptionItems']");
+        expect(subscriptionField.element.parentElement?.getAttribute("data-span")).toBe("24");
+        const formFields = wrapper.findAll("[data-field]").map(field => field.attributes("data-field"));
+        expect(formFields.indexOf("globalSubscriptionItems")).toBeGreaterThan(formFields.indexOf("preallocationMode"));
 
         await wrapper.get("button").trigger("click");
         wrapper.findComponent(CheckboxGroupStub).vm.$emit("update:modelValue", ["catalog", "alarm", "ptz_precise_position"]);
@@ -362,7 +390,9 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchDefaultChannelAudioConfig).toHaveBeenCalledOnce();
         const audioLabel = wrapper.findAll("label").find(label => label.text().includes("全局通道开启音频"));
-        expect(audioLabel?.text()).toContain("仅影响之后通过 Catalog 新发现的通道");
+        expect(wrapper.find("[data-field='defaultChannelAudioEnabled']").attributes("data-tooltip")).toContain(
+            "仅影响之后通过 Catalog 新发现的通道"
+        );
         const audioSwitch = audioLabel?.find("button");
 
         await wrapper.get("button").trigger("click");
@@ -403,7 +433,7 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchSIPLogConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("是否开启 SIP 日志");
-        expect(wrapper.text()).toContain("热重载 SIP 服务");
+        expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain("热重载 SIP 服务");
         const sipLogSwitch = wrapper
             .findAll("label")
             .find(label => label.text().includes("是否开启 SIP 日志"))
@@ -427,7 +457,9 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchIgnoreChannelOfflineStatusNotifyConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("忽略通道离线/异常通知");
-        expect(wrapper.text()).toContain("OFF、VLOST、DEFECT");
+        expect(wrapper.find("[data-field='ignoreChannelOfflineStatusNotify']").attributes("data-tooltip")).toContain(
+            "OFF、VLOST、DEFECT"
+        );
         const statusSwitch = wrapper
             .findAll("label")
             .find(label => label.text().includes("忽略通道离线/异常通知"))
@@ -451,7 +483,9 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchOnlineOnHeartbeatConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("心跳恢复设备在线状态");
-        expect(wrapper.text()).toContain("关闭后仍记录最后心跳时间");
+        expect(wrapper.find("[data-field='onlineOnHeartbeat']").attributes("data-tooltip")).toContain(
+            "关闭后仍记录最后心跳时间"
+        );
         const heartbeatSwitch = wrapper
             .findAll("label")
             .find(label => label.text().includes("心跳恢复设备在线状态"))
@@ -475,7 +509,9 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.fetchSaveAlarmMessagesConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("是否存储报警消息");
-        expect(wrapper.text()).toContain("关闭后仍接收和解析报警通知");
+        expect(wrapper.find("[data-field='saveAlarmMessages']").attributes("data-tooltip")).toContain(
+            "关闭后仍接收和解析报警通知"
+        );
         const alarmSwitch = wrapper
             .findAll("label")
             .find(label => label.text().includes("是否存储报警消息"))
@@ -500,7 +536,9 @@ describe("ServiceConfig edit mode", () => {
         expect(api.fetchSIPCommandTimeoutConfig).toHaveBeenCalledOnce();
         expect(api.fetchPreallocationModeConfig).toHaveBeenCalledOnce();
         expect(wrapper.text()).toContain("SIP 命令超时时间（秒）");
-        expect(wrapper.text()).toContain("未知国标 ID 将被拒绝注册");
+        expect(wrapper.find("[data-field='preallocationMode']").attributes("data-tooltip")).toContain(
+            "未知国标 ID 将被拒绝注册"
+        );
 
         await wrapper.get("button").trigger("click");
         const timeoutInputs = wrapper.findAll("input[type='number']");
@@ -529,6 +567,6 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        expect(wrapper.text()).toContain("配置尚未应用");
+        expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain("配置尚未应用");
     });
 });
