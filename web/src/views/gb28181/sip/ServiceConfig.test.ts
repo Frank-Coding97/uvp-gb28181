@@ -221,7 +221,7 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(15);
+        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(16);
         expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
             "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
         );
