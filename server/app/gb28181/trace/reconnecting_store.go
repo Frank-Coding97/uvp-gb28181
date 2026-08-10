@@ -11,7 +11,7 @@ var ErrTraceStoreUnavailable = errors.New("SIP trace store is unavailable")
 
 // StoreFactory opens and fully initializes one store connection, including
 // schema checks. It is deliberately injectable so cold-start and recovery can
-// be tested without a ClickHouse process.
+// be tested without a database process.
 type StoreFactory func(context.Context) (Store, error)
 
 type ReconnectingStore struct {

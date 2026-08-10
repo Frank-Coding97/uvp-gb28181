@@ -173,7 +173,7 @@ func (m *Module) encryptBatch(events []Event) ([]StoredEvent, error) {
 		}
 		eventID := uuid.NewString()
 		// SSE fanout:采集侧已解析元数据,趁 raw payload 明文尚在,分发一次。
-		// 之后再走 encrypt 存 ClickHouse。fanout 是非阻塞的,慢消费者不阻挡采集。
+		// 之后再走 encrypt 存关系型业务库。fanout 是非阻塞的,慢消费者不阻挡采集。
 		if m.streamHub != nil && m.streamHub.SubscriberCount() > 0 {
 			raw := StreamEvent{
 				EventID:    eventID,

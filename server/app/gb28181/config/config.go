@@ -107,7 +107,7 @@ func DefaultChannelAudioEnabled() bool {
 
 // SIPTraceEnabledFrom returns whether raw SIP trace collection is enabled.
 // Missing configuration intentionally defaults to false because trace storage
-// may contain sensitive signaling payloads and can incur ClickHouse writes.
+// may contain sensitive signaling payloads and can incur business-database writes.
 func SIPTraceEnabledFrom(c valueSource) bool {
 	return c != nil && c.Get(SIPTraceEnabledConfigKey) != nil && c.GetBool(SIPTraceEnabledConfigKey)
 }
@@ -321,11 +321,6 @@ func (e *ValidationError) Error() string {
 // TraceConfig controls the optional SIP trace module.
 type TraceConfig struct {
 	Enabled          bool
-	Address          string
-	Database         string
-	Username         string
-	PasswordEnv      string
-	TLS              bool
 	QueueCapacity    int
 	BatchSize        int
 	FlushIntervalMS  int
@@ -454,11 +449,6 @@ func loadFrom(c valueSource) (Config, error) {
 		},
 		Trace: TraceConfig{
 			Enabled:          c.GetBool("gb28181.trace.enabled"),
-			Address:          c.GetString("gb28181.trace.address"),
-			Database:         c.GetString("gb28181.trace.database"),
-			Username:         c.GetString("gb28181.trace.username"),
-			PasswordEnv:      c.GetString("gb28181.trace.password_env"),
-			TLS:              c.GetBool("gb28181.trace.tls"),
 			QueueCapacity:    c.GetInt("gb28181.trace.queue_capacity"),
 			BatchSize:        c.GetInt("gb28181.trace.batch_size"),
 			FlushIntervalMS:  c.GetInt("gb28181.trace.flush_interval_ms"),

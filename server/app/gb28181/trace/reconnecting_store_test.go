@@ -26,7 +26,7 @@ func TestReconnectingStoreRecoversAfterFactoryFailure(t *testing.T) {
 	stub := &reconnectStoreStub{}
 	store := NewReconnectingStore(func(context.Context) (Store, error) {
 		if attempts.Add(1) == 1 {
-			return nil, errors.New("clickhouse is starting")
+			return nil, errors.New("trace store is starting")
 		}
 		return stub, nil
 	}, time.Millisecond, 5*time.Millisecond)

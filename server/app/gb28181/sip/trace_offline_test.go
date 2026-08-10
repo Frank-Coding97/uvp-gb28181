@@ -19,10 +19,10 @@ import (
 type offlineTraceStore struct{}
 
 func (offlineTraceStore) InsertBatch(context.Context, []gbtrace.StoredEvent) error {
-	return errors.New("clickhouse offline")
+	return errors.New("trace store offline")
 }
 
-func TestClickHouseOfflineDoesNotChangeUDPRegisterResponse(t *testing.T) {
+func TestTraceStoreOfflineDoesNotChangeUDPRegisterResponse(t *testing.T) {
 	probe, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	require.NoError(t, err)
 	port := probe.LocalAddr().(*net.UDPAddr).Port
@@ -66,10 +66,10 @@ func TestClickHouseOfflineDoesNotChangeUDPRegisterResponse(t *testing.T) {
 		require.NotNil(t, response)
 		require.Contains(t, []int{siplib.StatusUnauthorized, siplib.StatusOK}, response.StatusCode)
 	case <-time.After(3 * time.Second):
-		t.Fatal("SIP REGISTER response timed out while ClickHouse was offline")
+		t.Fatal("SIP REGISTER response timed out while trace store was offline")
 	}
 	require.Eventually(t, func() bool {
 		health := runtime.Health()
-		return health.State == gbtrace.HealthDegraded && health.LastError == "clickhouse offline"
+		return health.State == gbtrace.HealthDegraded && health.LastError == "trace store offline"
 	}, time.Second, 10*time.Millisecond)
 }

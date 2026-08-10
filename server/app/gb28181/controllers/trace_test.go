@@ -124,7 +124,7 @@ func TestTraceControllerReturnsDisabledHealthAndEmptyList(t *testing.T) {
 
 func TestTraceControllerDegradedQueryIsExplicit(t *testing.T) {
 	service := &fakeTraceQueryService{
-		health: gbtrace.HealthSnapshot{State: gbtrace.HealthDegraded, LastError: "clickhouse unavailable"},
+		health: gbtrace.HealthSnapshot{State: gbtrace.HealthDegraded, LastError: "trace store unavailable"},
 		err:    errors.New("query failed"),
 	}
 	r := newTraceControllerRouter(service, fakeTraceAccess{allowed: true})

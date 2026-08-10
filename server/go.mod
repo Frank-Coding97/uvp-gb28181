@@ -5,7 +5,6 @@ go 1.25
 replace github.com/emiago/sipgo => ./third_party/sipgo
 
 require (
-	github.com/ClickHouse/clickhouse-go/v2 v2.40.3
 	github.com/casbin/casbin/v2 v2.120.0
 	github.com/casbin/gorm-adapter/v3 v3.36.0
 	github.com/emiago/sipgo v1.4.0
@@ -33,7 +32,6 @@ require (
 
 require (
 	github.com/BurntSushi/toml v1.5.0 // indirect
-	github.com/ClickHouse/ch-go v0.68.0 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/bytedance/gopkg v0.1.3 // indirect

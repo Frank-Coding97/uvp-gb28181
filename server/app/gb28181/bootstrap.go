@@ -231,7 +231,7 @@ var schedulerLogCancel context.CancelFunc
 func PlayService() *play.Service { return playSvc }
 
 // SIPTraceRuntimeEnabled reports whether the current SIP transport has trace
-// hooks attached. It intentionally does not treat a degraded ClickHouse store
+// hooks attached. It intentionally does not treat a degraded trace store
 // as disabled; storage health is exposed by the trace health API.
 func SIPTraceRuntimeEnabled() bool {
 	sipLifecycleMu.Lock()
