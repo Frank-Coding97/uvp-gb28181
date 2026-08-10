@@ -146,6 +146,82 @@ func TestPipeline_IngestUsesConfiguredAudioOnlyForNewChannels(t *testing.T) {
 	require.True(t, channels[1].AudioEnabled)
 }
 
+func TestPipeline_IngestUsesPlaybackDefaultsForNewChannels(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+
+	tests := []struct {
+		name           string
+		onDemandLive   bool
+		cloudRecording bool
+		wantState      string
+	}{
+		{name: "按需且不录像", onDemandLive: true, cloudRecording: false, wantState: gbmodels.CloudRecordingStateDisabled},
+		{name: "按需且录像", onDemandLive: true, cloudRecording: true, wantState: gbmodels.CloudRecordingStateWaiting},
+		{name: "常驻且不录像", onDemandLive: false, cloudRecording: false, wantState: gbmodels.CloudRecordingStateDisabled},
+		{name: "常驻且录像", onDemandLive: false, cloudRecording: true, wantState: gbmodels.CloudRecordingStateWaiting},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			app.ConfigYml = &pipelineTestYAML{values: map[string]interface{}{
+				gbconfig.DefaultChannelOnDemandLiveConfigKey:   test.onDemandLive,
+				gbconfig.DefaultChannelCloudRecordingConfigKey: test.cloudRecording,
+			}}
+			db := newPipelineTestDB(t)
+			p := catalog.New(db)
+			channelID := fmt.Sprintf("370112000013100000%02d", index+1)
+			require.NoError(t, p.Ingest(context.Background(), catalog.Sender{
+				OwnerDeptID: 10, SourceDeviceID: "34020000001180000001",
+			}, []catalog.CatalogItem{{DeviceID: channelID, Name: test.name, StatusOn: true}}))
+
+			var channel gbmodels.GbChannel
+			require.NoError(t, db.Where("channel_id = ?", channelID).First(&channel).Error)
+			require.Equal(t, test.onDemandLive, channel.OnDemandLive)
+			require.Equal(t, test.cloudRecording, channel.CloudRecordingEnabled)
+			require.Equal(t, test.wantState, channel.CloudRecordingState)
+		})
+	}
+}
+
+func TestPipeline_IngestDoesNotOverwriteExistingPlaybackPolicy(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	testConfig := &pipelineTestYAML{values: map[string]interface{}{
+		gbconfig.DefaultChannelOnDemandLiveConfigKey:   false,
+		gbconfig.DefaultChannelCloudRecordingConfigKey: true,
+	}}
+	app.ConfigYml = testConfig
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001180000001"}
+
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: "37011200001310000001", Name: "入口", StatusOn: true},
+	}))
+	var first gbmodels.GbChannel
+	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&first).Error)
+	require.False(t, first.OnDemandLive)
+	require.True(t, first.CloudRecordingEnabled)
+	require.Equal(t, gbmodels.CloudRecordingStateWaiting, first.CloudRecordingState)
+
+	testConfig.values[gbconfig.DefaultChannelOnDemandLiveConfigKey] = true
+	testConfig.values[gbconfig.DefaultChannelCloudRecordingConfigKey] = false
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: "37011200001310000001", Name: "入口更新", StatusOn: true},
+		{DeviceID: "37011200001310000002", Name: "出口", StatusOn: true},
+	}))
+
+	var channels []gbmodels.GbChannel
+	require.NoError(t, db.Order("channel_id").Find(&channels).Error)
+	require.Len(t, channels, 2)
+	require.False(t, channels[0].OnDemandLive, "已有通道按需直播不能被全局默认值覆盖")
+	require.True(t, channels[0].CloudRecordingEnabled, "已有通道云端录像不能被全局默认值覆盖")
+	require.Equal(t, gbmodels.CloudRecordingStateWaiting, channels[0].CloudRecordingState)
+	require.True(t, channels[1].OnDemandLive)
+	require.False(t, channels[1].CloudRecordingEnabled)
+	require.Equal(t, gbmodels.CloudRecordingStateDisabled, channels[1].CloudRecordingState)
+}
+
 func TestPipeline_IngestPersistsAlarmResourceAndMultipleParents(t *testing.T) {
 	db := newPipelineTestDB(t)
 	p := catalog.New(db)

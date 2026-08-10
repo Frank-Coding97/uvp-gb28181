@@ -133,33 +133,46 @@ func upsertChannel(
 	}
 	if res.RowsAffected == 0 {
 		defaultAudioEnabled := gbconfig.DefaultChannelAudioEnabled()
+		playbackDefaults := gbconfig.CurrentPlaybackSettings()
+		recordingState := gbmodels.CloudRecordingStateDisabled
+		if playbackDefaults.CloudRecordingEnabled {
+			recordingState = gbmodels.CloudRecordingStateWaiting
+		}
 		ch = gbmodels.GbChannel{
-			ChannelID:       item.DeviceID,
-			DeviceID:        sourceDeviceID,
-			Name:            fallbackName(item.Name, item.DeviceID),
-			Manufacturer:    item.Manufacturer,
-			Model:           item.Model,
-			Owner:           item.Owner,
-			CivilCode:       resolvedCivilCode,
-			ParentID:        item.ParentID,
-			PTZType:         int8(item.PTZType),
-			Longitude:       item.Longitude,
-			Latitude:        item.Latitude,
-			Status:          status,
-			OnDemandLive:    true,
-			AudioEnabled:    defaultAudioEnabled,
-			OwnerDeptID:     ownerDeptID,
-			StreamTransport: gbconfig.CurrentDefaultChannelStreamTransport(),
+			ChannelID:             item.DeviceID,
+			DeviceID:              sourceDeviceID,
+			Name:                  fallbackName(item.Name, item.DeviceID),
+			Manufacturer:          item.Manufacturer,
+			Model:                 item.Model,
+			Owner:                 item.Owner,
+			CivilCode:             resolvedCivilCode,
+			ParentID:              item.ParentID,
+			PTZType:               int8(item.PTZType),
+			Longitude:             item.Longitude,
+			Latitude:              item.Latitude,
+			Status:                status,
+			OnDemandLive:          playbackDefaults.OnDemandLive,
+			AudioEnabled:          defaultAudioEnabled,
+			CloudRecordingEnabled: playbackDefaults.CloudRecordingEnabled,
+			CloudRecordingState:   recordingState,
+			OwnerDeptID:           ownerDeptID,
+			StreamTransport:       gbconfig.CurrentDefaultChannelStreamTransport(),
 		}
 		if err := db.WithContext(ctx).Create(&ch).Error; err != nil {
 			return nil, nil, err
 		}
-		// GORM 会把带 default:true 标签的 false 零值替换为数据库默认值。
+		// GORM 会把带 default:true 标签的 false 零值替换为数据库默认值，
+		// 因此新通道策略必须在 Create 后按列写入全局快照的精确值。
+		postCreateUpdates := map[string]any{
+			"on_demand_live":          playbackDefaults.OnDemandLive,
+			"cloud_recording_enabled": playbackDefaults.CloudRecordingEnabled,
+			"cloud_recording_state":   recordingState,
+		}
 		if !defaultAudioEnabled {
-			if err := db.WithContext(ctx).Model(&ch).UpdateColumn("audio_enabled", false).Error; err != nil {
-				return nil, nil, err
-			}
-			ch.AudioEnabled = false
+			postCreateUpdates["audio_enabled"] = false
+		}
+		if err := db.WithContext(ctx).Model(&ch).UpdateColumns(postCreateUpdates).Error; err != nil {
+			return nil, nil, err
 		}
 	} else {
 		updates := map[string]any{
