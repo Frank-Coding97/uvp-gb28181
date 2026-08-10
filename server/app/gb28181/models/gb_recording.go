@@ -24,6 +24,12 @@ const (
 
 	RecordingMetadataComplete = "complete"
 	RecordingMetadataPartial  = "partial"
+
+	RecordingReconcileQueued    = "queued"
+	RecordingReconcileRunning   = "running"
+	RecordingReconcileSucceeded = "succeeded"
+	RecordingReconcilePartial   = "partial"
+	RecordingReconcileFailed    = "failed"
 )
 
 // GbRecordingSession records the ZLM stream tuple used for one cloud-recording run.
@@ -79,5 +85,29 @@ type GbRecordingFile struct {
 	CreatedAt          time.Time  `json:"-"`
 	UpdatedAt          time.Time  `gorm:"column:updated_at" json:"-"`
 }
+
+type GbRecordingReconcileState struct {
+	NodeID            int64      `gorm:"column:node_id;primaryKey" json:"nodeId"`
+	Status            string     `gorm:"column:status;size:16;not null;default:queued" json:"status"`
+	TriggerSource     string     `gorm:"column:trigger_source;size:16;not null;default:scheduled" json:"triggerSource"`
+	RequestedStart    *time.Time `gorm:"column:requested_start" json:"requestedStart"`
+	RequestedEnd      *time.Time `gorm:"column:requested_end" json:"requestedEnd"`
+	EffectiveStart    *time.Time `gorm:"column:effective_start" json:"effectiveStart"`
+	EffectiveEnd      *time.Time `gorm:"column:effective_end" json:"effectiveEnd"`
+	StartedAt         *time.Time `gorm:"column:started_at" json:"startedAt"`
+	FinishedAt        *time.Time `gorm:"column:finished_at" json:"finishedAt"`
+	CandidateCount    int        `gorm:"column:candidate_count;not null;default:0" json:"candidateCount"`
+	SuccessCount      int        `gorm:"column:success_count;not null;default:0" json:"successCount"`
+	FailureCount      int        `gorm:"column:failure_count;not null;default:0" json:"failureCount"`
+	DiscoveredCount   int        `gorm:"column:discovered_count;not null;default:0" json:"discoveredCount"`
+	InsertedCount     int        `gorm:"column:inserted_count;not null;default:0" json:"insertedCount"`
+	UpdatedCount      int        `gorm:"column:updated_count;not null;default:0" json:"updatedCount"`
+	MissingCount      int        `gorm:"column:missing_count;not null;default:0" json:"missingCount"`
+	UnattributedCount int        `gorm:"column:unattributed_count;not null;default:0" json:"unattributedCount"`
+	LastError         string     `gorm:"column:last_error;size:500;not null;default:''" json:"lastError"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at;not null" json:"updatedAt"`
+}
+
+func (GbRecordingReconcileState) TableName() string { return "gb_recording_reconcile_state" }
 
 func (GbRecordingFile) TableName() string { return "gb_recording_file" }

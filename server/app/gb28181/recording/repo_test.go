@@ -19,7 +19,7 @@ func newRepoTestDB(t *testing.T) *gorm.DB {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&models.GbDevice{}, &models.GbChannel{}, &models.GbRecordingSession{}, &models.GbRecordingFile{}))
+	require.NoError(t, db.AutoMigrate(&models.GbDevice{}, &models.GbChannel{}, &models.GbRecordingSession{}, &models.GbRecordingFile{}, &models.GbRecordingReconcileState{}))
 	return db
 }
 
