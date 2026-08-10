@@ -21,8 +21,10 @@ var (
 type PlatformStore interface {
 	CreatePlatform(ctx context.Context, platform *model.GbCascadePlatform) error
 	FindPlatform(ctx context.Context, platformID uint64) (*model.GbCascadePlatform, error)
+	ListPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error)
 	ListEnabledPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error)
 	UpdatePlatformConfig(ctx context.Context, platform *model.GbCascadePlatform, expectedRevision uint64) (*model.GbCascadePlatform, error)
+	SoftDeletePlatform(ctx context.Context, platformID uint64) error
 	RecordRegistrationSuccess(ctx context.Context, platformID uint64, registeredAt, expiresAt time.Time) error
 	RecordRegistrationExpired(ctx context.Context, platformID uint64, at time.Time) error
 	RecordRegistrationFailure(ctx context.Context, platformID uint64, code, message string, at time.Time) error
@@ -112,6 +114,12 @@ func (r *GormRepository) FindPlatform(ctx context.Context, platformID uint64) (*
 	return &platform, nil
 }
 
+func (r *GormRepository) ListPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error) {
+	var platforms []model.GbCascadePlatform
+	err := r.db.WithContext(ctx).Order("id").Find(&platforms).Error
+	return platforms, err
+}
+
 func (r *GormRepository) ListEnabledPlatforms(ctx context.Context) ([]model.GbCascadePlatform, error) {
 	var platforms []model.GbCascadePlatform
 	err := r.db.WithContext(ctx).Where("enabled = ?", true).Order("id").Find(&platforms).Error
@@ -154,6 +162,10 @@ func platformConfigUpdates(platform *model.GbCascadePlatform) map[string]any {
 		"local_sip_port":     platform.LocalSIPPort,
 		"media_advertise_ip": platform.MediaAdvertiseIP,
 		"auth_username":      platform.AuthUsername,
+		"secret_nonce":       platform.SecretNonce,
+		"secret_ciphertext":  platform.SecretCiphertext,
+		"secret_alg":         platform.SecretAlg,
+		"secret_key_version": platform.SecretKeyVersion,
 		"profile_override":   platform.ProfileOverride,
 		"charset_override":   platform.CharsetOverride,
 		"register_expires":   platform.RegisterExpires,
@@ -168,6 +180,31 @@ func platformConfigUpdates(platform *model.GbCascadePlatform) map[string]any {
 		"ptz_enabled":        platform.PTZEnabled,
 		"enabled":            platform.Enabled,
 	}
+}
+
+// SoftDeletePlatform hides the platform and deactivates its projection in one
+// transaction. Media-session safety is enforced by the management service.
+func (r *GormRepository) SoftDeletePlatform(ctx context.Context, platformID uint64) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var platform model.GbCascadePlatform
+		result := tx.First(&platform, platformID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return ErrPlatformNotFound
+		}
+		if result.Error != nil {
+			return result.Error
+		}
+		now := time.Now().UTC()
+		if err := tx.Model(&model.GbCascadeChannelProjection{}).Where("platform_id = ? AND active = ?", platformID, true).
+			Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.GbCascadeDeviceProjection{}).Where("platform_id = ? AND active = ?", platformID, true).
+			Updates(map[string]any{"active": false, "revision": gorm.Expr("revision + ?", 1), "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&platform).Error
+	})
 }
 
 func (r *GormRepository) RecordRegistrationSuccess(ctx context.Context, platformID uint64, registeredAt, expiresAt time.Time) error {
@@ -297,6 +334,7 @@ func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint6
 
 func validateProjectionInputs(devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
 	deviceSet := make(map[uint64]struct{}, len(devices))
+	publishedIDs := make(map[string]struct{}, len(devices)+len(channels))
 	for _, input := range devices {
 		if input.SourceDeviceID == 0 || input.PublishedDeviceID == "" {
 			return ErrInvalidProjection
@@ -305,6 +343,10 @@ func validateProjectionInputs(devices []DeviceProjectionInput, channels []Channe
 			return ErrInvalidProjection
 		}
 		deviceSet[input.SourceDeviceID] = struct{}{}
+		if _, exists := publishedIDs[input.PublishedDeviceID]; exists {
+			return ErrInvalidProjection
+		}
+		publishedIDs[input.PublishedDeviceID] = struct{}{}
 	}
 	channelSet := make(map[uint64]struct{}, len(channels))
 	for _, input := range channels {
@@ -318,6 +360,10 @@ func validateProjectionInputs(devices []DeviceProjectionInput, channels []Channe
 			return ErrInvalidProjection
 		}
 		channelSet[input.SourceChannelID] = struct{}{}
+		if _, exists := publishedIDs[input.PublishedChannelID]; exists {
+			return ErrInvalidProjection
+		}
+		publishedIDs[input.PublishedChannelID] = struct{}{}
 	}
 	return nil
 }

@@ -69,6 +69,49 @@ func TestPlatformConfigUpdateUsesRevisionCASAndPlatformScope(t *testing.T) {
 	require.EqualValues(t, 1, storedB.ConfigRevision)
 }
 
+func TestManagementRepositoryListsSoftDeletesAndPreservesCredential(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	platformA := newPlatform("upstream-a", "34020000001320000001")
+	platformA.SecretNonce = []byte("nonce-a")
+	platformA.SecretCiphertext = []byte("cipher-a")
+	platformA.SecretAlg = "AES-256-GCM"
+	platformA.SecretKeyVersion = "v1"
+	platformB := newPlatform("upstream-b", "34020000001320000002")
+	require.NoError(t, repo.CreatePlatform(ctx, platformA))
+	require.NoError(t, repo.CreatePlatform(ctx, platformB))
+
+	platformA.Host = "198.51.100.20"
+	updated, err := repo.UpdatePlatformConfig(ctx, platformA, platformA.ConfigRevision)
+	require.NoError(t, err)
+	require.Equal(t, []byte("nonce-a"), updated.SecretNonce)
+	require.Equal(t, []byte("cipher-a"), updated.SecretCiphertext)
+	require.Equal(t, "AES-256-GCM", updated.SecretAlg)
+	require.Equal(t, "v1", updated.SecretKeyVersion)
+
+	platforms, err := repo.ListPlatforms(ctx)
+	require.NoError(t, err)
+	require.Len(t, platforms, 2)
+
+	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID,
+		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011"}},
+		[]ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000021"}},
+	))
+	require.NoError(t, repo.SoftDeletePlatform(ctx, platformA.ID))
+	_, err = repo.FindPlatform(ctx, platformA.ID)
+	require.ErrorIs(t, err, ErrPlatformNotFound)
+	platforms, err = repo.ListPlatforms(ctx)
+	require.NoError(t, err)
+	require.Len(t, platforms, 1)
+	require.Equal(t, platformB.ID, platforms[0].ID)
+
+	var activeDevices, activeChannels int64
+	require.NoError(t, repo.db.Model(&model.GbCascadeDeviceProjection{}).Where("platform_id = ? AND active = ?", platformA.ID, true).Count(&activeDevices).Error)
+	require.NoError(t, repo.db.Model(&model.GbCascadeChannelProjection{}).Where("platform_id = ? AND active = ?", platformA.ID, true).Count(&activeChannels).Error)
+	require.Zero(t, activeDevices)
+	require.Zero(t, activeChannels)
+}
+
 func TestRuntimeFactsAreIndependentAndNeverOverwriteLastSuccessfulProfile(t *testing.T) {
 	repo := newTestRepository(t)
 	ctx := context.Background()
@@ -151,6 +194,19 @@ func TestReplaceProjectionIsAtomicAndSnapshotsArePlatformScoped(t *testing.T) {
 	require.Empty(t, other.Devices)
 	require.Empty(t, other.Channels)
 	require.Zero(t, other.Revision)
+}
+
+func TestReplaceProjectionRejectsPublishedIDCollisionAcrossKinds(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	platform := newPlatform("upstream-a", "34020000001320000001")
+	require.NoError(t, repo.CreatePlatform(ctx, platform))
+
+	err := repo.ReplaceProjection(ctx, platform.ID,
+		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011"}},
+		[]ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000011"}},
+	)
+	require.ErrorIs(t, err, ErrInvalidProjection)
 }
 
 func TestMediaSessionTerminalStateIsMonotonicAndNonterminalScanExcludesClosed(t *testing.T) {

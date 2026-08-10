@@ -6,6 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"gorm.io/gorm"
+	gbcascadecontroller "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/controller"
+	gbcascadeservice "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/service"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
@@ -57,6 +60,7 @@ var platformController = gbcontrollers.NewPlatformController()
 // serviceConfigController 国标服务配置页面的动态配置控制器。
 var serviceConfigController = gbcontrollers.NewServiceConfigController()
 var securityController = gbcontrollers.NewSecurityController(nil)
+var cascadeManagementController *gbcascadecontroller.ManagementController
 
 var setupController *gbcontrollers.SetupController
 
@@ -112,6 +116,21 @@ func SetTraceController(ctrl *gbcontrollers.TraceController) {
 // SetSecurityProvider 由 bootstrap 注入安全聚合/封禁/agent provider。
 func SetSecurityProvider(provider gbcontrollers.SecurityProvider) {
 	securityController.SetProvider(provider)
+}
+
+// SetCascadeManagementController injects the cascade service after database/runtime bootstrap.
+// Passing nil deliberately makes the protected endpoints return 503 until the runtime is ready.
+func SetCascadeManagementController(controller *gbcascadecontroller.ManagementController) {
+	cascadeManagementController = controller
+}
+
+// SetCascadeManagementService is a convenience for bootstrap code that already owns the DB handle.
+func SetCascadeManagementService(service *gbcascadeservice.ManagementService, db *gorm.DB) {
+	if service == nil {
+		cascadeManagementController = nil
+		return
+	}
+	cascadeManagementController = gbcascadecontroller.NewManagementController(service, db)
 }
 
 type securityRuntimeProvider struct{ runtime *gbsecurity.Runtime }
@@ -417,6 +436,24 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			securityGroup.GET("/agent/health", securityController.AgentHealth)
 			securityGroup.GET("/stream", securityController.Stream)
 		}
+		cascade := gb.Group("/cascade")
+		{
+			cascade.GET("/platforms", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.List(c) }))
+			cascade.POST("/platforms", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.Create(c) }))
+			cascade.GET("/platforms/:id", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.Get(c) }))
+			cascade.PUT("/platforms/:id", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.Update(c) }))
+			cascade.DELETE("/platforms/:id", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.Delete(c) }))
+			cascade.POST("/platforms/:id/enable", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.SetEnabled(c) }))
+			cascade.POST("/platforms/:id/disable", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.SetEnabled(c) }))
+			cascade.PUT("/platforms/:id/enabled", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.SetEnabled(c) }))
+			cascade.POST("/platforms/:id/reconnect", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.Reconnect(c) }))
+			cascade.GET("/platforms/:id/shares", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.GetShares(c) }))
+			cascade.PUT("/platforms/:id/shares", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.ReplaceShares(c) }))
+			// Plan-compatible aliases keep channel terminology available to existing clients.
+			cascade.GET("/platforms/:id/channels", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.GetShares(c) }))
+			cascade.POST("/platforms/:id/channels/share", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.ReplaceShares(c) }))
+			cascade.POST("/platforms/:id/channels/unshare", cascadeRoute(func(ctrl *gbcascadecontroller.ManagementController, c *gin.Context) { ctrl.ReplaceShares(c) }))
+		}
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
 		{
@@ -558,6 +595,16 @@ func zlmSchedulerRoute(fn func(*gbcontrollers.ZLMSchedulerController, *gin.Conte
 			return
 		}
 		fn(zlmSchedulerController, c)
+	}
+}
+
+func cascadeRoute(fn func(*gbcascadecontroller.ManagementController, *gin.Context)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if cascadeManagementController == nil {
+			c.JSON(503, gin.H{"code": 503, "msg": "国标级联服务尚未装配"})
+			return
+		}
+		fn(cascadeManagementController, c)
 	}
 }
 
