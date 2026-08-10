@@ -399,19 +399,25 @@ func TestLoadFromRecordingCatalogConfig(t *testing.T) {
 	require.Equal(t, 6*60*60, cfg.Recording.CatalogReconcileIntervalSec)
 	require.Equal(t, 2, cfg.Recording.CatalogPeriodicLookbackDays)
 	require.Equal(t, 7, cfg.Recording.CatalogManualLookbackDays)
+	require.Equal(t, "UVP_CLOUD_RECORDING_CAPABILITY_KEY", cfg.Recording.CapabilityKeyEnv)
 
 	src.values = map[string]interface{}{
 		"gb28181.recording.catalog_reconcile_interval_sec": 0,
 		"gb28181.recording.catalog_periodic_lookback_days": 3,
 		"gb28181.recording.catalog_manual_lookback_days":   8,
+		"gb28181.recording.capability_key_env":             "UVP_TEST_RECORDING_CAPABILITY_KEY",
 	}
 	src.ints = map[string]int{
 		"gb28181.recording.catalog_reconcile_interval_sec": 0,
 		"gb28181.recording.catalog_periodic_lookback_days": 3,
 		"gb28181.recording.catalog_manual_lookback_days":   8,
 	}
+	src.strings = map[string]string{
+		"gb28181.recording.capability_key_env": "UVP_TEST_RECORDING_CAPABILITY_KEY",
+	}
 	cfg = LoadFrom(src)
 	require.Zero(t, cfg.Recording.CatalogReconcileIntervalSec)
 	require.Equal(t, 3, cfg.Recording.CatalogPeriodicLookbackDays)
 	require.Equal(t, 8, cfg.Recording.CatalogManualLookbackDays)
+	require.Equal(t, "UVP_TEST_RECORDING_CAPABILITY_KEY", cfg.Recording.CapabilityKeyEnv)
 }
