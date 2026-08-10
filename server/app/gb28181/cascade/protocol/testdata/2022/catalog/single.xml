@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="GB18030"?>
+<Response>
+  <CmdType>Catalog</CmdType>
+  <SN>100</SN>
+  <DeviceID>34020000002000000001</DeviceID>
+  <SumNum>1</SumNum>
+  <DeviceList Num="1"><Item><DeviceID>34020000001320000001</DeviceID><Name>camera</Name><Status>ON</Status></Item></DeviceList>
+</Response>
