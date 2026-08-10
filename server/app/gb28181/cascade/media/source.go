@@ -25,6 +25,8 @@ type AcquireRequest struct {
 type StartResult struct {
 	StreamID string
 	SSRC     string
+	App      string
+	NodeID   int64
 	Reused   bool
 }
 
@@ -51,7 +53,11 @@ func (a *PlayServiceAdapter) Start(ctx context.Context, deviceID, channelID stri
 	if result == nil || result.StreamID == "" {
 		return StartResult{}, errors.New("play service returned an empty source handle")
 	}
-	return StartResult{StreamID: result.StreamID, SSRC: result.SSRC, Reused: result.Reused}, nil
+	var nodeID int64
+	if result.Node != nil {
+		nodeID = result.Node.ID
+	}
+	return StartResult{StreamID: result.StreamID, SSRC: result.SSRC, App: result.App, NodeID: nodeID, Reused: result.Reused}, nil
 }
 
 // Lease is an idempotent consumer hold on one source stream.

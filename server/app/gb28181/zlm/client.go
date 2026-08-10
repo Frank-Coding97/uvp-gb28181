@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -38,12 +39,25 @@ func NewClientForNode(n *node.Node) *Client {
 // Node 返回绑定节点
 func (c *Client) Node() *node.Node { return c.node }
 
-
 // baseResp ZLM API 通用响应头
 type baseResp struct {
 	Code int    `json:"code"`
 	Msg  string `json:"msg"`
 }
+
+type redactedTransportError struct {
+	err    error
+	secret string
+}
+
+func (e redactedTransportError) Error() string {
+	if e.secret == "" {
+		return e.err.Error()
+	}
+	return strings.ReplaceAll(e.err.Error(), e.secret, "***")
+}
+
+func (e redactedTransportError) Unwrap() error { return e.err }
 
 // call 发起 GET 请求(ZLM API 多为 GET + query 参数),解析到 out
 func (c *Client) call(ctx context.Context, api string, params map[string]string, out interface{}) error {
@@ -59,7 +73,7 @@ func (c *Client) call(ctx context.Context, api string, params map[string]string,
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("ZLM 请求失败 %s: %w", api, err)
+		return fmt.Errorf("ZLM 请求失败 %s: %w", api, redactedTransportError{err: err, secret: c.secret})
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)

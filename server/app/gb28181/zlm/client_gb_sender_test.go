@@ -83,3 +83,16 @@ func TestStartGBSendRTPDoesNotLeakSecret(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestStartGBSendRTPConnectionErrorDoesNotLeakSecret(t *testing.T) {
+	c, server := newMockClient(t, func(http.ResponseWriter, *http.Request) {})
+	server.Close()
+
+	_, err := c.StartGBSendRTP(context.Background(), GBSendRTPRequest{
+		VHost: "v", App: "a", Stream: "s", SSRC: "1", PayloadType: 96,
+		RemoteIP: "192.0.2.1", RemotePort: 30000, Transport: GBSendRTPUDP,
+	})
+	if err == nil || strings.Contains(err.Error(), "test-secret") {
+		t.Fatalf("err=%v", err)
+	}
+}
