@@ -875,6 +875,25 @@ export const updateDefaultPlaybackProtocolConfig = (protocol: PlaybackProtocol) 
     { data: { protocol } }
   );
 
+export interface PlaybackSettingsConfig {
+  playTimeoutMs: number;
+  onDemandLive: boolean;
+  cloudRecordingEnabled: boolean;
+}
+
+export const fetchPlaybackSettingsConfig = () =>
+  http.request<BaseResult<PlaybackSettingsConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/playback-settings")
+  );
+
+export const updatePlaybackSettingsConfig = (config: PlaybackSettingsConfig) =>
+  http.request<BaseResult<PlaybackSettingsConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/playback-settings"),
+    { data: config }
+  );
+
 export type GlobalSubscriptionItem = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";
 
 export interface GlobalSubscriptionConfig {

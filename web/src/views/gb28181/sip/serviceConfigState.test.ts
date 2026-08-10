@@ -42,8 +42,11 @@ describe("static service config draft", () => {
         expect(playbackServiceConfigLabels).not.toContain("推流鉴权");
         expect(cascadeServiceConfigLabels).toHaveLength(7);
         expect(draft.playback.autoInvite).toBe(true);
-        expect(draft.playback.inviteTimeoutMs).toBe(10000);
-        expect(draft.playback.stopWhenUnwatched).toBe(true);
+        expect(draft.playback.playTimeoutMs).toBe(10000);
+        expect(draft.playback.onDemandLive).toBe(true);
+        expect(draft.playback.cloudRecordingEnabled).toBe(false);
+        expect(playbackServiceConfigLabels).toContain("按需直播");
+        expect(playbackServiceConfigLabels).not.toContain("是否开启无人观看自动停止");
         expect(draft.playback).not.toHaveProperty("recordPushStream");
         expect(draft.playback).not.toHaveProperty("pushAuth");
         expect(draft.cascade.parentInviteTimeoutMs).toBe(60000);

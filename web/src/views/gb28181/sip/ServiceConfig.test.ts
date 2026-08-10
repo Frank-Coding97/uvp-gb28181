@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
     updateDefaultChannelStreamTransportConfig: vi.fn(),
     fetchDefaultPlaybackProtocolConfig: vi.fn(),
     updateDefaultPlaybackProtocolConfig: vi.fn(),
+    fetchPlaybackSettingsConfig: vi.fn(),
+    updatePlaybackSettingsConfig: vi.fn(),
     fetchGlobalSubscriptionConfig: vi.fn(),
     updateGlobalSubscriptionConfig: vi.fn(),
     fetchDefaultChannelAudioConfig: vi.fn(),
@@ -133,6 +135,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateDefaultChannelStreamTransportConfig.mockReset();
         api.fetchDefaultPlaybackProtocolConfig.mockReset();
         api.updateDefaultPlaybackProtocolConfig.mockReset();
+        api.fetchPlaybackSettingsConfig.mockReset();
+        api.updatePlaybackSettingsConfig.mockReset();
         api.fetchGlobalSubscriptionConfig.mockReset();
         api.updateGlobalSubscriptionConfig.mockReset();
         api.fetchDefaultChannelAudioConfig.mockReset();
@@ -157,6 +161,11 @@ describe("ServiceConfig edit mode", () => {
         api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 8 } });
         api.fetchDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "", data: { transport: "TCP-Passive" } });
         api.fetchDefaultPlaybackProtocolConfig.mockResolvedValue({ code: 0, message: "", data: { protocol: "ws-flv" } });
+        api.fetchPlaybackSettingsConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { playTimeoutMs: 10000, onDemandLive: true, cloudRecordingEnabled: false }
+        });
         dictionaryApi.getDictItemsByDictCodeAPI.mockResolvedValue({
             code: 0,
             message: "",
@@ -186,6 +195,11 @@ describe("ServiceConfig edit mode", () => {
         api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
         api.updateDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { transport: "UDP" } });
         api.updateDefaultPlaybackProtocolConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { protocol: "webrtc" } });
+        api.updatePlaybackSettingsConfig.mockResolvedValue({
+            code: 0,
+            message: "保存成功",
+            data: { playTimeoutMs: 15000, onDemandLive: false, cloudRecordingEnabled: true }
+        });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
@@ -221,7 +235,7 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(16);
+        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(19);
         expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
             "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
         );
@@ -415,6 +429,90 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
         expect(api.updateDefaultPlaybackProtocolConfig).toHaveBeenCalledWith("webrtc");
         expect(select.element).toHaveProperty("value", "webrtc");
+    });
+
+    it("loads, cancels, and saves the global playback settings as one aggregate", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchPlaybackSettingsConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("点播超时时间（毫秒）");
+        expect(wrapper.text()).toContain("按需直播");
+        expect(wrapper.text()).not.toContain("是否开启无人观看自动停止");
+        expect(wrapper.find("[data-field='onDemandLive']").attributes("data-tooltip")).toContain("新通道默认值");
+        expect(wrapper.find("[data-field='cloudRecordingEnabled']").attributes("data-tooltip")).toContain("新通道默认值");
+
+        const timeout = wrapper.find("[data-field='playTimeoutMs'] input[type='number']");
+        const onDemand = wrapper.find("[data-field='onDemandLive'] button");
+        const recording = wrapper.find("[data-field='cloudRecordingEnabled'] button");
+        expect(timeout.element).toHaveProperty("value", "10000");
+        expect(timeout.element).toHaveProperty("disabled", true);
+        expect(onDemand.text()).toBe("true");
+        expect(recording.text()).toBe("false");
+
+        await wrapper.get("button").trigger("click");
+        await timeout.setValue("15000");
+        await onDemand.trigger("click");
+        await recording.trigger("click");
+        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("取消"));
+        await cancelButton?.trigger("click");
+        expect(timeout.element).toHaveProperty("value", "10000");
+        expect(onDemand.text()).toBe("true");
+        expect(recording.text()).toBe("false");
+        expect(api.updatePlaybackSettingsConfig).not.toHaveBeenCalled();
+
+        await wrapper.get("button").trigger("click");
+        await timeout.setValue("15000");
+        await onDemand.trigger("click");
+        await recording.trigger("click");
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updatePlaybackSettingsConfig).toHaveBeenCalledOnce();
+        expect(api.updatePlaybackSettingsConfig).toHaveBeenCalledWith({
+            playTimeoutMs: 15000,
+            onDemandLive: false,
+            cloudRecordingEnabled: true
+        });
+    });
+
+    it("restores all playback settings when the aggregate save fails", async () => {
+        api.updatePlaybackSettingsConfig.mockRejectedValue(new Error("保存失败"));
+        const wrapper = mountPage();
+        await flushPromises();
+
+        await wrapper.get("button").trigger("click");
+        const timeout = wrapper.find("[data-field='playTimeoutMs'] input[type='number']");
+        const onDemand = wrapper.find("[data-field='onDemandLive'] button");
+        const recording = wrapper.find("[data-field='cloudRecordingEnabled'] button");
+        await timeout.setValue("15000");
+        await onDemand.trigger("click");
+        await recording.trigger("click");
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(timeout.element).toHaveProperty("value", "10000");
+        expect(onDemand.text()).toBe("true");
+        expect(recording.text()).toBe("false");
+    });
+
+    it("blocks aggregate save when the play timeout is outside the supported range", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        await wrapper.get("button").trigger("click");
+        const timeout = wrapper.find("[data-field='playTimeoutMs'] input[type='number']");
+        await timeout.setValue("999");
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        expect(saveButton?.element).toHaveProperty("disabled", true);
+        await saveButton?.trigger("click");
+        expect(api.updatePlaybackSettingsConfig).not.toHaveBeenCalled();
+
+        await timeout.setValue("300001");
+        expect(saveButton?.element).toHaveProperty("disabled", true);
+        expect(api.updatePlaybackSettingsConfig).not.toHaveBeenCalled();
     });
 
     it("loads and saves global subscription defaults", async () => {

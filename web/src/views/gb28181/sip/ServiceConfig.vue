@@ -7,6 +7,7 @@ import {
     fetchPTZDefaultSpeedConfig,
     fetchDefaultChannelStreamTransportConfig,
     fetchDefaultPlaybackProtocolConfig,
+    fetchPlaybackSettingsConfig,
     fetchGlobalSubscriptionConfig,
     fetchDefaultChannelAudioConfig,
     fetchPositionHistoryConfig,
@@ -22,6 +23,7 @@ import {
     updatePTZDefaultSpeedConfig,
     updateDefaultChannelStreamTransportConfig,
     updateDefaultPlaybackProtocolConfig,
+    updatePlaybackSettingsConfig,
     updateGlobalSubscriptionConfig,
     updateDefaultChannelAudioConfig,
     updateSIPLogConfig,
@@ -32,7 +34,8 @@ import {
     updateSIPCommandTimeoutConfig,
     updatePreallocationModeConfig,
     updateIgnoreChannelOfflineStatusNotifyConfig,
-    type PlaybackProtocol
+    type PlaybackProtocol,
+    type PlaybackSettingsConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import {
@@ -60,6 +63,9 @@ const defaultChannelStreamTransportReady = ref(false);
 const defaultPlaybackProtocolLoading = ref(true);
 const defaultPlaybackProtocolSaving = ref(false);
 const defaultPlaybackProtocolReady = ref(false);
+const playbackSettingsLoading = ref(true);
+const playbackSettingsSaving = ref(false);
+const playbackSettingsReady = ref(false);
 const globalSubscriptionLoading = ref(true);
 const globalSubscriptionSaving = ref(false);
 const globalSubscriptionReady = ref(false);
@@ -94,6 +100,11 @@ const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedDefaultChannelStreamTransport = ref<"UDP" | "TCP-Active" | "TCP-Passive">("TCP-Passive");
 const savedDefaultPlaybackProtocol = ref<PlaybackProtocol>("ws-flv");
+const savedPlaybackSettings = reactive<PlaybackSettingsConfig>({
+    playTimeoutMs: 10000,
+    onDemandLive: true,
+    cloudRecordingEnabled: false
+});
 const playbackProtocolOptions = ref(playbackProtocolOptionsFromDictionary([]));
 const savedGlobalSubscriptionItems = ref<Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">>([]);
 const savedDefaultChannelAudioEnabled = ref(true);
@@ -117,6 +128,12 @@ const defaultChannelStreamTransportChanged = computed(
 );
 const defaultPlaybackProtocolChanged = computed(
     () => draft.playback.defaultProtocol !== savedDefaultPlaybackProtocol.value
+);
+const playbackSettingsChanged = computed(
+    () =>
+        draft.playback.playTimeoutMs !== savedPlaybackSettings.playTimeoutMs ||
+        draft.playback.onDemandLive !== savedPlaybackSettings.onDemandLive ||
+        draft.playback.cloudRecordingEnabled !== savedPlaybackSettings.cloudRecordingEnabled
 );
 const globalSubscriptionChanged = computed(
     () => JSON.stringify(draft.globalSubscriptionItems) !== JSON.stringify(savedGlobalSubscriptionItems.value)
@@ -142,6 +159,12 @@ const sipLogChanged = computed(
 const sipLogRetentionValid = computed(
     () => Number.isInteger(draft.sipLogRetentionDays) && draft.sipLogRetentionDays >= 1 && draft.sipLogRetentionDays <= 365
 );
+const playTimeoutValid = computed(
+    () =>
+        Number.isInteger(draft.playback.playTimeoutMs) &&
+        draft.playback.playTimeoutMs >= 1000 &&
+        draft.playback.playTimeoutMs <= 300000
+);
 const hasChanges = computed(
     () =>
         positionHistoryChanged.value ||
@@ -149,6 +172,7 @@ const hasChanges = computed(
         ptzDefaultSpeedChanged.value ||
         defaultChannelStreamTransportChanged.value ||
         defaultPlaybackProtocolChanged.value ||
+        playbackSettingsChanged.value ||
         globalSubscriptionChanged.value ||
         defaultChannelAudioChanged.value ||
         syncChannelsOnOnlineChanged.value ||
@@ -166,6 +190,7 @@ const configLoading = computed(
         ptzDefaultSpeedLoading.value ||
         defaultChannelStreamTransportLoading.value ||
         defaultPlaybackProtocolLoading.value ||
+        playbackSettingsLoading.value ||
         globalSubscriptionLoading.value ||
         defaultChannelAudioLoading.value ||
         syncChannelsOnOnlineLoading.value ||
@@ -183,6 +208,7 @@ const configSaving = computed(
         ptzDefaultSpeedSaving.value ||
         defaultChannelStreamTransportSaving.value ||
         defaultPlaybackProtocolSaving.value ||
+        playbackSettingsSaving.value ||
         globalSubscriptionSaving.value ||
         defaultChannelAudioSaving.value ||
         syncChannelsOnOnlineSaving.value ||
@@ -200,6 +226,7 @@ const configReady = computed(
         ptzDefaultSpeedReady.value &&
         defaultChannelStreamTransportReady.value &&
         defaultPlaybackProtocolReady.value &&
+        playbackSettingsReady.value &&
         globalSubscriptionReady.value &&
         defaultChannelAudioReady.value &&
         syncChannelsOnOnlineReady.value &&
@@ -287,6 +314,33 @@ async function loadDefaultPlaybackProtocolConfig() {
         Message.error(error?.message || "加载默认播放协议失败");
     } finally {
         defaultPlaybackProtocolLoading.value = false;
+    }
+}
+
+function applyPlaybackSettings(settings: PlaybackSettingsConfig) {
+    draft.playback.playTimeoutMs = settings.playTimeoutMs;
+    draft.playback.onDemandLive = settings.onDemandLive;
+    draft.playback.cloudRecordingEnabled = settings.cloudRecordingEnabled;
+    Object.assign(savedPlaybackSettings, settings);
+}
+
+function restorePlaybackSettingsDraft() {
+    draft.playback.playTimeoutMs = savedPlaybackSettings.playTimeoutMs;
+    draft.playback.onDemandLive = savedPlaybackSettings.onDemandLive;
+    draft.playback.cloudRecordingEnabled = savedPlaybackSettings.cloudRecordingEnabled;
+}
+
+async function loadPlaybackSettingsConfig() {
+    playbackSettingsLoading.value = true;
+    try {
+        const response = await fetchPlaybackSettingsConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        applyPlaybackSettings(response.data);
+        playbackSettingsReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载播放配置失败");
+    } finally {
+        playbackSettingsLoading.value = false;
     }
 }
 
@@ -447,6 +501,7 @@ function startEditing() {
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
+    restorePlaybackSettingsDraft();
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
@@ -467,6 +522,7 @@ function cancelEditing() {
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
+    restorePlaybackSettingsDraft();
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
@@ -482,6 +538,7 @@ function cancelEditing() {
 
 async function saveConfig() {
     if (!configReady.value || !isEditing.value) return;
+    if (!sipLogRetentionValid.value || !playTimeoutValid.value) return;
     if (!hasChanges.value) {
         isEditing.value = false;
         return;
@@ -532,6 +589,17 @@ async function saveConfig() {
             draft.playback.defaultProtocol = response.data.protocol;
             savedDefaultPlaybackProtocol.value = response.data.protocol;
             defaultPlaybackProtocolSaving.value = false;
+        }
+        if (playbackSettingsChanged.value) {
+            playbackSettingsSaving.value = true;
+            const response = await updatePlaybackSettingsConfig({
+                playTimeoutMs: draft.playback.playTimeoutMs,
+                onDemandLive: draft.playback.onDemandLive,
+                cloudRecordingEnabled: draft.playback.cloudRecordingEnabled
+            });
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            applyPlaybackSettings(response.data);
+            playbackSettingsSaving.value = false;
         }
         if (globalSubscriptionChanged.value) {
             globalSubscriptionSaving.value = true;
@@ -620,6 +688,7 @@ async function saveConfig() {
         isEditing.value = false;
         Message.success("国标服务配置已更新");
     } catch (error: any) {
+        restorePlaybackSettingsDraft();
         Message.error(error?.message || "保存国标服务配置失败");
     } finally {
         positionHistorySaving.value = false;
@@ -627,6 +696,7 @@ async function saveConfig() {
         ptzDefaultSpeedSaving.value = false;
         defaultChannelStreamTransportSaving.value = false;
         defaultPlaybackProtocolSaving.value = false;
+        playbackSettingsSaving.value = false;
         globalSubscriptionSaving.value = false;
         defaultChannelAudioSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
@@ -646,6 +716,7 @@ onMounted(() =>
         loadPTZDefaultSpeedConfig(),
         loadDefaultChannelStreamTransportConfig(),
         loadDefaultPlaybackProtocolConfig(),
+        loadPlaybackSettingsConfig(),
         loadPlaybackProtocolOptions(),
         loadGlobalSubscriptionConfig(),
         loadDefaultChannelAudioConfig(),
@@ -687,7 +758,7 @@ onMounted(() =>
                             <a-button
                                 type="primary"
                                 :loading="configSaving"
-                                :disabled="configSaving || !hasChanges || !sipLogRetentionValid"
+                                :disabled="configSaving || !hasChanges || !sipLogRetentionValid || !playTimeoutValid"
                                 @click="saveConfig"
                             >
                                 <template #icon><Check :size="15" /></template>
@@ -1019,24 +1090,45 @@ onMounted(() =>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="inviteTimeoutMs" label="点播超时时间（毫秒）">
+                                    <a-form-item
+                                        field="playTimeoutMs"
+                                        label="点播超时时间（毫秒）"
+                                        tooltip="控制实时点播从发送 INVITE 到媒体流就绪的总等待时间。"
+                                        :validate-status="playTimeoutValid ? undefined : 'error'"
+                                    >
                                         <a-input-number
-                                            v-model="draft.playback.inviteTimeoutMs"
+                                            v-model="draft.playback.playTimeoutMs"
                                             class="service-config-number-input"
                                             :min="1000"
                                             :max="300000"
-                                            disabled
+                                            :disabled="!isEditing || playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
                                         />
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="cloudRecording" label="云端录像">
-                                        <a-switch v-model="draft.playback.cloudRecording" disabled />
+                                    <a-form-item
+                                        field="onDemandLive"
+                                        label="按需直播"
+                                        tooltip="这是按需直播的新通道默认值；仅应用于通过 Catalog 新发现的通道，已有通道保持不变。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.playback.onDemandLive"
+                                            :loading="playbackSettingsLoading || playbackSettingsSaving"
+                                            :disabled="!isEditing || playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
+                                        />
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="stopWhenUnwatched" label="是否开启无人观看自动停止">
-                                        <a-switch v-model="draft.playback.stopWhenUnwatched" disabled />
+                                    <a-form-item
+                                        field="cloudRecordingEnabled"
+                                        label="云端录像"
+                                        tooltip="这是云端录像的新通道默认值；仅应用于通过 Catalog 新发现的通道，开启后录像对账可能自动发起拉流。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.playback.cloudRecordingEnabled"
+                                            :loading="playbackSettingsLoading || playbackSettingsSaving"
+                                            :disabled="!isEditing || playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
+                                        />
                                     </a-form-item>
                                 </a-col>
                             </a-row>

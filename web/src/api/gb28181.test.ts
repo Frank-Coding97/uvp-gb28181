@@ -9,6 +9,7 @@ import {
   fetchPTZDefaultSpeedConfig,
   fetchDefaultChannelStreamTransportConfig,
   fetchDefaultPlaybackProtocolConfig,
+  fetchPlaybackSettingsConfig,
   fetchGlobalSubscriptionConfig,
   fetchDefaultChannelAudioConfig,
   fetchSDPExtensionConfig,
@@ -32,6 +33,7 @@ import {
   updatePTZDefaultSpeedConfig,
   updateDefaultChannelStreamTransportConfig,
   updateDefaultPlaybackProtocolConfig,
+  updatePlaybackSettingsConfig,
   updateGlobalSubscriptionConfig,
   updateDefaultChannelAudioConfig,
   updateSDPExtensionConfig,
@@ -111,6 +113,19 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/default-playback-protocol",
       { data: { protocol: "webrtc" } }
+    );
+  });
+
+  it("使用聚合 API 读取并更新全局播放策略", async () => {
+    await fetchPlaybackSettingsConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/playback-settings");
+
+    const config = { playTimeoutMs: 15000, onDemandLive: false, cloudRecordingEnabled: true };
+    await updatePlaybackSettingsConfig(config);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/playback-settings",
+      { data: config }
     );
   });
 
