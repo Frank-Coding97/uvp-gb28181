@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -45,4 +46,30 @@ func (s *RelationalStore) InsertBatch(ctx context.Context, events []StoredEvent)
 		return fmt.Errorf("insert relational SIP trace batch: %w", err)
 	}
 	return nil
+}
+
+func (s *RelationalStore) Prune(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	if batchSize <= 0 {
+		batchSize = DefaultTracePruneBatchSize
+	}
+	var deleted int64
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var ids []string
+		if err := tx.Model(&gbmodels.GbSipTraceMessage{}).
+			Where("occurred_at < ?", cutoff.UTC()).
+			Order("occurred_at ASC").Order("event_id ASC").Limit(batchSize).
+			Pluck("event_id", &ids).Error; err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		result := tx.Where("event_id IN ?", ids).Delete(&gbmodels.GbSipTraceMessage{})
+		deleted = result.RowsAffected
+		return result.Error
+	})
+	if err != nil {
+		return deleted, fmt.Errorf("delete relational SIP trace batch: %w", err)
+	}
+	return deleted, nil
 }
