@@ -32,6 +32,8 @@ func TestMain(m *testing.M) {
 type mockZLM struct {
 	openCalls     atomic.Int32
 	lastOnlyTrack atomic.Int32
+	lastStreamID  atomic.Value
+	lastSSRC      atomic.Value
 	closeCalls    atomic.Int32
 	openErr       error
 	closeErr      error
@@ -41,9 +43,11 @@ type mockZLM struct {
 	onlineErr     error
 }
 
-func (m *mockZLM) OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int, onlyTrack int) (*zlm.OpenRtpServerResult, error) {
+func (m *mockZLM) OpenRtpServerWithSSRC(ctx context.Context, request zlm.OpenRtpServerRequest) (*zlm.OpenRtpServerResult, error) {
 	m.openCalls.Add(1)
-	m.lastOnlyTrack.Store(int32(onlyTrack))
+	m.lastOnlyTrack.Store(int32(request.OnlyTrack))
+	m.lastStreamID.Store(request.StreamID)
+	m.lastSSRC.Store(request.SSRC)
 	if m.openErr != nil {
 		return nil, m.openErr
 	}
@@ -69,6 +73,7 @@ type mockInviter struct {
 	byeErr      error
 	onInvite    func(*uac.Session)
 	lastBody    string
+	lastSession *uac.Session
 }
 
 type delayedInviter struct {
@@ -129,6 +134,7 @@ func playbackSource(timeoutMs int) *playbackSettingsSource {
 func (m *mockInviter) Invite(ctx context.Context, sm *uac.SessionManager, s *uac.Session, body string) error {
 	m.inviteCalls.Add(1)
 	m.lastBody = body
+	m.lastSession = s
 	if m.onInvite != nil {
 		m.onInvite(s)
 	}
@@ -196,6 +202,7 @@ func (f *fakeChannels) SetCurrent(ctx context.Context, deviceID, channelID, stre
 }
 
 func (f *fakeChannels) ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error) {
+	f.clearedStreamID = streamID
 	if f.clearErr != nil {
 		return false, f.clearErr
 	}
@@ -252,6 +259,7 @@ func TestStartHappyPath(t *testing.T) {
 	inv.onInvite = func(sess *uac.Session) {
 		go func(streamID string) {
 			time.Sleep(100 * time.Millisecond)
+			z.online.Store(true)
 			n.Publish(streamID)
 		}(sess.StreamID)
 	}
@@ -262,6 +270,9 @@ func TestStartHappyPath(t *testing.T) {
 	}
 	if res.StreamID == "" || res.SSRC == "" {
 		t.Errorf("StreamID/SSRC 应非空: %+v", res)
+	}
+	if res.StreamID != res.SSRC || res.ModeAtStart != LiveModeDynamic {
+		t.Errorf("默认动态模式应保持 streamID=SSRC: %+v", res)
 	}
 	if res.WSFlvURL == "" {
 		t.Errorf("WSFlvURL 应非空: %+v", res)
@@ -301,6 +312,7 @@ func TestStartUsesSeparateReceiveAndPlaybackHosts(t *testing.T) {
 	inv.onInvite = func(sess *uac.Session) {
 		go func(streamID string) {
 			time.Sleep(50 * time.Millisecond)
+			z.online.Store(true)
 			notifier.Publish(streamID)
 		}(sess.StreamID)
 	}
@@ -497,7 +509,13 @@ func TestStartUsesUpdatedPlaybackTimeoutWithoutRebuildingService(t *testing.T) {
 		t.Fatalf("首次 100ms 配置应超时，实际 %v", err)
 	}
 	source.Set(gbconfig.PlayRequestTimeoutMsConfigKey, 3000)
-	inv.onSuccess = func(sess *uac.Session) { go func() { time.Sleep(100 * time.Millisecond); n.Publish(sess.StreamID) }() }
+	inv.onSuccess = func(sess *uac.Session) {
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			z.online.Store(true)
+			n.Publish(sess.StreamID)
+		}()
+	}
 	if _, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661"); err != nil {
 		t.Fatalf("更新到 300ms 后应成功，实际 %v", err)
 	}
@@ -589,6 +607,7 @@ func TestStartTriggersSnapshotAfterWaitReady(t *testing.T) {
 	inv.onInvite = func(sess *uac.Session) {
 		go func(sid string) {
 			time.Sleep(50 * time.Millisecond)
+			z.online.Store(true)
 			n.Publish(sid)
 		}(sess.StreamID)
 	}
@@ -620,6 +639,7 @@ func TestStartNoSnapshotSvcStillWorks(t *testing.T) {
 	inv.onInvite = func(sess *uac.Session) {
 		go func(sid string) {
 			time.Sleep(50 * time.Millisecond)
+			z.online.Store(true)
 			n.Publish(sid)
 		}(sess.StreamID)
 	}
@@ -688,6 +708,7 @@ func TestStartReuseStreamOffline(t *testing.T) {
 	inv.onInvite = func(sess *uac.Session) {
 		go func(streamID string) {
 			time.Sleep(50 * time.Millisecond)
+			z.online.Store(true)
 			n.Publish(streamID)
 		}(sess.StreamID)
 	}

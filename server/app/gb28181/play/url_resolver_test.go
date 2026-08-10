@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
@@ -166,7 +167,10 @@ func TestReuseResultKeepsOriginalNodeAndItsPorts(t *testing.T) {
 		urlResolver: NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 28080, RTSPEnabled: true, RTMPEnabled: true, HLSEnabled: true, TSEnabled: true, FMP4Enabled: true}}),
 	}
 
-	result := service.buildReuseResult(context.Background(), "existing", mediaNode)
+	result := service.buildReuseResult(context.Background(), &gbmodels.GbChannel{
+		StreamID:    "existing",
+		CurrentSSRC: "0200000001",
+	}, mediaNode)
 	if !result.Reused || result.Node == nil || result.Node.ID != 22 || result.Node.Name != "edge-22" {
 		t.Fatalf("unexpected reused node result: %+v", result)
 	}

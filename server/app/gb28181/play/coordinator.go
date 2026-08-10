@@ -287,7 +287,7 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 	if s.liveCoordinator == nil {
 		s.liveCoordinator = NewCoordinatorWithStop(
 			func(ctx context.Context, req Request) (*Result, error) {
-				return s.startDirect(ctx, req.DeviceID, req.ChannelID)
+				return s.startDirect(ctx, req)
 			},
 			func(ctx context.Context, result *Result) error {
 				if result == nil {

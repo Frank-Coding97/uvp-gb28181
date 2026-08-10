@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -21,7 +22,7 @@ import (
 
 // ZLM ZLM 客户端能力(便于测试 mock)
 type ZLM interface {
-	OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int, onlyTrack int) (*zlm.OpenRtpServerResult, error)
+	OpenRtpServerWithSSRC(ctx context.Context, request zlm.OpenRtpServerRequest) (*zlm.OpenRtpServerResult, error)
 	CloseRtpServer(ctx context.Context, streamID string) error
 	IsMediaOnline(ctx context.Context, app, stream string) (bool, error)
 }
@@ -91,6 +92,8 @@ type Result struct {
 	URL             string       `json:"url"`
 	ZLMWebRTC       bool         `json:"zlmWebrtc"`
 	ExpireAt        int64        `json:"expireAt"` // 预计无人观看断流时刻(秒,UTC)
+	Generation      uint64       `json:"-"`
+	ModeAtStart     LiveMode     `json:"-"`
 }
 
 type ResultNode struct {
@@ -144,6 +147,10 @@ type Service struct {
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
+
+	ssrcAllocator    *RealtimeSSRCAllocator
+	ssrcAllocatorErr error
+	nextGeneration   atomic.Uint64
 }
 
 // SnapshotService 通道快照能力(播放成功后 fire-and-forget 抓帧)
@@ -170,10 +177,12 @@ func WithURLResolver(resolver *URLResolver) Option {
 // Deprecated: M2 起新代码用 NewWithScheduler,这里保留兼容旧 service_test 不退化。
 func New(cfg gbconfig.Config, z ZLM, inv Inviter, sm *uac.SessionManager, n *stream.Notifier,
 	devices DeviceRepo, channels ChannelRepo) *Service {
+	allocator, allocatorErr := NewRealtimeSSRCAllocator(cfg.SIP.Domain)
 	return &Service{
 		cfg: cfg, zlm: z, inviter: inv, sessions: sm, notifier: n,
 		devices: devices, channels: channels,
 		readyWait: defaultReadyWait, pollEvery: defaultPollEvery,
+		ssrcAllocator: allocator, ssrcAllocatorErr: allocatorErr,
 	}
 }
 
@@ -184,11 +193,13 @@ func New(cfg gbconfig.Config, z ZLM, inv Inviter, sm *uac.SessionManager, n *str
 func NewWithScheduler(cfg gbconfig.Config, picker NodePicker, registry NodeLookup, locationMap LocationStore,
 	inv Inviter, sm *uac.SessionManager, n *stream.Notifier,
 	devices DeviceRepo, channels ChannelRepo, opts ...Option) *Service {
+	allocator, allocatorErr := NewRealtimeSSRCAllocator(cfg.SIP.Domain)
 	s := &Service{
 		cfg: cfg, inviter: inv, sessions: sm, notifier: n,
 		devices: devices, channels: channels,
 		picker: picker, registry: registry, locationMap: locationMap,
 		readyWait: defaultReadyWait, pollEvery: defaultPollEvery,
+		ssrcAllocator: allocator, ssrcAllocatorErr: allocatorErr,
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -217,6 +228,17 @@ func (s *Service) clientForStream(streamID string) (ZLM, error) {
 		return nil, fmt.Errorf("stream %s bound to node %d but node not found", streamID, nodeID)
 	}
 	return zlm.NewClientForNode(n), nil
+}
+
+func (s *Service) unbindLocation(ref stream.LiveRef) {
+	if !s.useMultiNode() || ref.StreamID == "" {
+		return
+	}
+	if versioned, ok := s.locationMap.(interface{ UnbindIfCurrent(stream.LiveRef) bool }); ok {
+		versioned.UnbindIfCurrent(ref)
+		return
+	}
+	s.locationMap.Unbind(ref.StreamID)
 }
 
 // SetReadyTimings 给测试调小等待
@@ -252,7 +274,7 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 		if !online {
 			return nil, nil
 		}
-		return s.buildReuseResult(ctx, streamID, nil), nil
+		return s.buildReuseResult(ctx, ch, nil), nil
 	}
 
 	// 多节点路径:优先看 LocationMap
@@ -261,7 +283,7 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 			client := zlm.NewClientForNode(n)
 			online, err := client.IsMediaOnline(ctx, zlmApp, streamID)
 			if err == nil && online {
-				return s.buildReuseResult(ctx, streamID, n), nil
+				return s.buildReuseResult(ctx, ch, n), nil
 			}
 			app.ZapLog.Info("流复用绑定节点探测未在线",
 				zap.String("streamId", streamID),
@@ -298,17 +320,22 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 			app.ZapLog.Info("流复用兜底探测命中,恢复 LocationMap",
 				zap.String("streamId", streamID),
 				zap.Int64("nodeId", n.ID))
-			return s.buildReuseResult(ctx, streamID, n), nil
+			return s.buildReuseResult(ctx, ch, n), nil
 		}
 	}
 	return nil, nil
 }
 
-// buildReuseResult 构造复用返回值(从 session 取 SSRC,取不到用 streamID 兜底)
-func (s *Service) buildReuseResult(ctx context.Context, streamID string, mediaNode *node.Node) *Result {
-	ssrc := streamID
-	if sess := s.sessions.Get(streamID); sess != nil {
-		ssrc = sess.SSRC
+// buildReuseResult constructs a result from the persisted current media SSRC.
+// Legacy dynamic rows can derive it from their 10-digit stream ID; a fixed
+// stream must never be misreported as its own SSRC.
+func (s *Service) buildReuseResult(ctx context.Context, ch *gbmodels.GbChannel, mediaNode *node.Node) *Result {
+	streamID := ch.StreamID
+	ssrc := CurrentSSRCForChannel(ch)
+	if ssrc == "" {
+		if sess := s.sessions.Get(streamID); sess != nil {
+			ssrc = sess.SSRC
+		}
 	}
 	if mediaNode != nil {
 		return s.buildNodeResult(ctx, streamID, ssrc, mediaNode, true)
@@ -332,7 +359,8 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 // 1) 校验设备/通道  2) Pick 节点 + openRtpServer + Bind  3) 构造 SDP+SSRC
 // 4) UAC INVITE  5) WaitReady  6) 返地址
 // 任一中断都会回滚已开的 RTP 端口 + Unbind LocationMap
-func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (*Result, error) {
+func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error) {
+	deviceID, channelID := req.DeviceID, req.ChannelID
 	// 1. 校验设备 + 通道
 	dev, err := s.devices.FindByDeviceID(ctx, deviceID)
 	if err != nil {
@@ -378,12 +406,34 @@ func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (
 		_ = s.stopDirect(context.Background(), ch.StreamID)
 	}
 
-	// 3. 生成 SSRC + StreamID(stream_id = ssrc,简化映射)
-	ssrc, err := sdp.GenRealtimeSSRC(s.cfg.SIP.Domain)
+	// 3. Snapshot the mode for this generation, then allocate its independent
+	// GB28181 media SSRC. Changing the global setting never renames this flow.
+	if s.ssrcAllocatorErr != nil || s.ssrcAllocator == nil {
+		return nil, fmt.Errorf("初始化实时 SSRC 分配器失败: %w", s.ssrcAllocatorErr)
+	}
+	ssrc, err := s.ssrcAllocator.Acquire()
 	if err != nil {
 		return nil, fmt.Errorf("生成实时 SSRC 失败: %w", err)
 	}
+	releaseSSRC := true
+	defer func() {
+		if releaseSSRC {
+			s.ssrcAllocator.Release(ssrc)
+		}
+	}()
+
+	settings := gbconfig.CurrentFixedAddressPlaybackSettings()
+	mode := LiveModeDynamic
 	streamID := ssrc
+	if settings.FixedAddressEnabled {
+		streamID, err = FixedStreamID(deviceID, channelID)
+		if err != nil {
+			return nil, err
+		}
+		mode = LiveModeFixed
+	}
+	generation := s.nextGeneration.Add(1)
+	liveRef := stream.LiveRef{StreamID: streamID, SSRC: ssrc, Generation: generation}
 
 	// 4. 多节点路径:Pick + Bind;单节点路径:直接走 s.zlm
 	var client ZLM
@@ -393,18 +443,34 @@ func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (
 	var pickedNode *node.Node
 
 	if s.useMultiNode() {
-		selectedNode, err := s.picker.Pick(ctx, PickContext{
-			DeviceID: deviceID, ChannelID: channelID, StreamID: streamID,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("无可用 ZLM 节点: %w", err)
+		var selectedNode *node.Node
+		if req.RequiredNode != 0 {
+			var ok bool
+			selectedNode, ok = s.registry.Get(req.RequiredNode)
+			if !ok {
+				return nil, fmt.Errorf("指定 ZLM 节点不存在: %d", req.RequiredNode)
+			}
+		} else {
+			selectedNode, err = s.picker.Pick(ctx, PickContext{
+				DeviceID: deviceID, ChannelID: channelID, StreamID: streamID,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("无可用 ZLM 节点: %w", err)
+			}
 		}
 		client = zlm.NewClientForNode(selectedNode)
 		recvHost = selectedNode.EffectiveReceiveHost()
 		rtpFallback = selectedNode.RTPPortStart // 兜底端口
 		pickedNodeID = selectedNode.ID
 		pickedNode = selectedNode
-		s.locationMap.Bind(streamID, selectedNode.ID)
+		liveRef.NodeID = selectedNode.ID
+		if versioned, ok := s.locationMap.(interface{ BindCurrent(stream.LiveRef) bool }); ok {
+			if !versioned.BindCurrent(liveRef) {
+				return nil, fmt.Errorf("绑定实时流代际失败: %s", streamID)
+			}
+		} else {
+			s.locationMap.Bind(streamID, selectedNode.ID)
+		}
 	} else {
 		// deprecated 单节点路径
 		client = s.zlm
@@ -417,11 +483,15 @@ func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (
 	if ch.AudioEnabled {
 		onlyTrack = 0 // ZLM: 0=音视频
 	}
-	rtpRes, err := client.OpenRtpServer(ctx, streamID, 0, 0, onlyTrack)
+	rtpRes, err := client.OpenRtpServerWithSSRC(ctx, zlm.OpenRtpServerRequest{
+		StreamID:  streamID,
+		SSRC:      ssrc,
+		Port:      0,
+		TCPMode:   0,
+		OnlyTrack: onlyTrack,
+	})
 	if err != nil {
-		if s.useMultiNode() {
-			s.locationMap.Unbind(streamID)
-		}
+		s.unbindLocation(liveRef)
 		return nil, fmt.Errorf("申请 ZLM 收流端口失败: %w", err)
 	}
 	recvPort := rtpRes.Port
@@ -439,12 +509,14 @@ func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (
 	})
 
 	sess := &uac.Session{
-		DeviceID:  deviceID,
-		ChannelID: channelID,
-		SSRC:      ssrc,
-		StreamID:  streamID,
-		Dest:      fmt.Sprintf("%s:%d", dev.IP, dev.Port),
-		Transport: dev.Transport,
+		DeviceID:   deviceID,
+		ChannelID:  channelID,
+		SSRC:       ssrc,
+		StreamID:   streamID,
+		Generation: generation,
+		NodeID:     pickedNodeID,
+		Dest:       fmt.Sprintf("%s:%d", dev.IP, dev.Port),
+		Transport:  dev.Transport,
 	}
 
 	playCtx, playCancel := context.WithTimeout(ctx, gbconfig.CurrentPlaybackSettings().PlayTimeout())
@@ -458,43 +530,50 @@ func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (
 		}
 		_ = client.CloseRtpServer(cleanupCtx, streamID)
 		cleanupCancel()
-		if s.useMultiNode() {
-			s.locationMap.Unbind(streamID)
-		}
+		s.unbindLocation(liveRef)
 		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("%w: %v", ErrPlayTimeout, err)
 		}
 		return nil, fmt.Errorf("发 INVITE 失败: %w", err)
 	}
 
-	// 7. WaitReady:hook + 轮询双源(ADR-002 创新 3)
+	// 7. WaitReady:the hook only wakes the waiter. The exact generation and
+	// target node must still own the stream and report the media online.
 	readyCtx, readyCancel := context.WithTimeout(playCtx, s.readyWait)
 	defer readyCancel()
-	poll := func(ctx context.Context) (bool, error) {
-		return client.IsMediaOnline(ctx, zlmApp, streamID)
+	poll := func(ctx context.Context, expected stream.LiveRef) (bool, error) {
+		if s.useMultiNode() {
+			if versioned, ok := s.locationMap.(interface {
+				LookupCurrent(string) (stream.LiveRef, bool)
+			}); ok {
+				current, exists := versioned.LookupCurrent(expected.StreamID)
+				if !exists || current != expected {
+					return false, nil
+				}
+			} else if nodeID, exists := s.locationMap.Lookup(expected.StreamID); !exists || nodeID != expected.NodeID {
+				return false, nil
+			}
+		}
+		return client.IsMediaOnline(ctx, zlmApp, expected.StreamID)
 	}
-	if err := stream.WaitReady(readyCtx, s.notifier, streamID, poll, s.pollEvery); err != nil {
+	if err := stream.WaitReadyRef(readyCtx, s.notifier, liveRef, poll, s.pollEvery); err != nil {
 		// 流没就绪:发 BYE + 关 RTP 端口 + Unbind
 		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = s.inviter.Bye(byeCtx, s.sessions, streamID)
 		_ = client.CloseRtpServer(byeCtx, streamID)
 		byeCancel()
-		if s.useMultiNode() {
-			s.locationMap.Unbind(streamID)
-		}
+		s.unbindLocation(liveRef)
 		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
 			return nil, fmt.Errorf("%w: %v", ErrPlayTimeout, err)
 		}
 		return nil, fmt.Errorf("%w: %v", ErrStreamNotReady, err)
 	}
-	if err := s.channels.UpdateStream(ctx, deviceID, channelID, streamID); err != nil {
+	if err := s.channels.SetCurrent(ctx, deviceID, channelID, streamID, ssrc); err != nil {
 		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = s.inviter.Bye(byeCtx, s.sessions, streamID)
 		_ = client.CloseRtpServer(byeCtx, streamID)
 		byeCancel()
-		if s.useMultiNode() {
-			s.locationMap.Unbind(streamID)
-		}
+		s.unbindLocation(liveRef)
 		return nil, fmt.Errorf("记录通道播放流失败: %w", err)
 	}
 
@@ -514,6 +593,9 @@ func (s *Service) startDirect(ctx context.Context, deviceID, channelID string) (
 	} else {
 		result = s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
 	}
+	result.Generation = generation
+	result.ModeAtStart = mode
+	releaseSSRC = false
 	return result, nil
 }
 
@@ -533,6 +615,18 @@ func (s *Service) Stop(ctx context.Context, streamID string) error {
 // stopDirect performs one stream cleanup without consulting the coordinator.
 // It is used by the coordinator owner callback and by startDirect rollback.
 func (s *Service) stopDirect(ctx context.Context, streamID string) error {
+	var currentSSRC string
+	var currentSSRCPersisted bool
+	if ch, err := s.channels.FindChannelByStream(ctx, streamID); err == nil && ch != nil {
+		currentSSRC = CurrentSSRCForChannel(ch)
+		currentSSRCPersisted = ch.CurrentSSRC != ""
+	}
+	if currentSSRC == "" {
+		if session := s.sessions.Get(streamID); session != nil {
+			currentSSRC = session.SSRC
+		}
+	}
+
 	byeErr := s.inviter.Bye(ctx, s.sessions, streamID)
 
 	client, clientErr := s.clientForStream(streamID)
@@ -549,7 +643,17 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 	if s.useMultiNode() {
 		s.locationMap.Unbind(streamID)
 	}
-	clearErr := s.channels.ClearStream(ctx, streamID)
+	var clearErr error
+	clearedCurrent := false
+	if currentSSRCPersisted {
+		clearedCurrent, clearErr = s.channels.ClearIfCurrent(ctx, streamID, currentSSRC)
+	} else {
+		clearErr = s.channels.ClearStream(ctx, streamID)
+		clearedCurrent = clearErr == nil
+	}
+	if clearedCurrent && s.ssrcAllocator != nil && currentSSRC != "" {
+		s.ssrcAllocator.Release(currentSSRC)
+	}
 
 	if byeErr != nil {
 		return byeErr

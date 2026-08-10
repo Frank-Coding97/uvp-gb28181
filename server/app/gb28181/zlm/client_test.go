@@ -156,16 +156,38 @@ func TestOpenRtpServerOnlyTrack_MockedZLM(t *testing.T) {
 		if got := r.URL.Query().Get("only_track"); got != "2" {
 			t.Errorf("only_track 没透传: %s", got)
 		}
+		if got := r.URL.Query().Get("stream_id"); got != "stream-1" {
+			t.Errorf("stream_id 没透传: %s", got)
+		}
+		if got := r.URL.Query().Get("ssrc"); got != "0200000001" {
+			t.Errorf("ssrc 没透传: %s", got)
+		}
 		_, _ = w.Write([]byte(`{"code":0,"port":40000}`))
 	})
 	defer srv.Close()
 
-	result, err := c.OpenRtpServer(context.Background(), "stream-1", 0, 0, 2)
+	result, err := c.OpenRtpServerWithSSRC(context.Background(), OpenRtpServerRequest{
+		StreamID: "stream-1", SSRC: "0200000001", Port: 0, TCPMode: 0, OnlyTrack: 2,
+	})
 	if err != nil {
 		t.Fatalf("OpenRtpServer 报错: %v", err)
 	}
 	if result.Port != 40000 {
 		t.Fatalf("期望端口40000,实际%d", result.Port)
+	}
+}
+
+func TestOpenRtpServerLegacyOmitsSSRC(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if _, exists := r.URL.Query()["ssrc"]; exists {
+			t.Errorf("legacy openRtpServer must not add an ssrc query: %q", r.URL.Query().Get("ssrc"))
+		}
+		_, _ = w.Write([]byte(`{"code":0,"port":40000}`))
+	})
+	defer srv.Close()
+
+	if _, err := c.OpenRtpServer(context.Background(), "playback-stream", 0, 0, 0); err != nil {
+		t.Fatalf("legacy OpenRtpServer: %v", err)
 	}
 }
 

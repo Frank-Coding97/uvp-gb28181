@@ -120,18 +120,39 @@ type OpenRtpServerResult struct {
 	Port int // ZLM 实际分配的收流端口
 }
 
-// OpenRtpServer 申请一个 RTP 收流端口
-// streamID = ZLM 内 stream 标识;ssrc 用于单端口模式按 SSRC 分流(传 "" 则不限);port=0 让 ZLM 自选
+// OpenRtpServerRequest describes one ZLM RTP receiver. StreamID is the media
+// path identity while SSRC belongs to the current GB28181 media session.
+type OpenRtpServerRequest struct {
+	StreamID  string
+	SSRC      string
+	Port      int
+	TCPMode   int
+	OnlyTrack int
+}
+
+// OpenRtpServer preserves the legacy callers that do not need an independent
+// SSRC (for example device-record playback).
 func (c *Client) OpenRtpServer(ctx context.Context, streamID string, port int, tcpMode int, onlyTrack int) (*OpenRtpServerResult, error) {
+	return c.OpenRtpServerWithSSRC(ctx, OpenRtpServerRequest{
+		StreamID: streamID, Port: port, TCPMode: tcpMode, OnlyTrack: onlyTrack,
+	})
+}
+
+// OpenRtpServerWithSSRC opens a live RTP receiver with separate media path and
+// GB28181 session identities.
+func (c *Client) OpenRtpServerWithSSRC(ctx context.Context, request OpenRtpServerRequest) (*OpenRtpServerResult, error) {
 	var r struct {
 		baseResp
 		Port int `json:"port"`
 	}
 	params := map[string]string{
-		"stream_id":  streamID,
-		"port":       strconv.Itoa(port),
-		"tcp_mode":   strconv.Itoa(tcpMode),   // 0=UDP 1=TCP被动
-		"only_track": strconv.Itoa(onlyTrack), // 0=音视频 2=仅视频
+		"stream_id":  request.StreamID,
+		"port":       strconv.Itoa(request.Port),
+		"tcp_mode":   strconv.Itoa(request.TCPMode),   // 0=UDP 1=TCP被动
+		"only_track": strconv.Itoa(request.OnlyTrack), // 0=音视频 2=仅视频
+	}
+	if request.SSRC != "" {
+		params["ssrc"] = request.SSRC
 	}
 	if err := c.call(ctx, "openRtpServer", params, &r); err != nil {
 		return nil, err
