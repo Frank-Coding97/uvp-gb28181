@@ -990,11 +990,6 @@ onMounted(() =>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="recordPushStream" label="推流是否录制">
-                                        <a-switch v-model="draft.playback.recordPushStream" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="cloudRecording" label="云端录像">
                                         <a-switch v-model="draft.playback.cloudRecording" disabled />
                                     </a-form-item>
@@ -1002,11 +997,6 @@ onMounted(() =>
                                 <a-col :span="isMobile ? 24 : 12">
                                     <a-form-item field="stopWhenUnwatched" label="是否开启无人观看自动停止">
                                         <a-switch v-model="draft.playback.stopWhenUnwatched" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="pushAuth" label="推流鉴权">
-                                        <a-switch v-model="draft.playback.pushAuth" disabled />
                                     </a-form-item>
                                 </a-col>
                             </a-row>

@@ -17,10 +17,8 @@ export interface StaticServiceConfigDraft {
         defaultProtocol: "ws-flv" | "http-flv" | "hls" | "webrtc";
         autoInvite: boolean;
         inviteTimeoutMs: number;
-        recordPushStream: boolean;
         cloudRecording: boolean;
         stopWhenUnwatched: boolean;
-        pushAuth: boolean;
     };
     cascade: {
         parentInviteTimeoutMs: number;
@@ -54,10 +52,8 @@ export const playbackServiceConfigLabels = [
     "默认播放协议",
     "自动点播",
     "点播超时时间（毫秒）",
-    "推流是否录制",
     "云端录像",
-    "是否开启无人观看自动停止",
-    "推流鉴权"
+    "是否开启无人观看自动停止"
 ] as const;
 
 export const cascadeServiceConfigLabels = [
@@ -90,10 +86,8 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
             defaultProtocol: "ws-flv",
             autoInvite: true,
             inviteTimeoutMs: 10000,
-            recordPushStream: false,
             cloudRecording: false,
-            stopWhenUnwatched: true,
-            pushAuth: false
+            stopWhenUnwatched: true
         },
         cascade: {
             parentInviteTimeoutMs: 60000,
