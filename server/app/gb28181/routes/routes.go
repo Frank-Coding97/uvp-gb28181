@@ -268,6 +268,13 @@ func SetKeepaliveCollector(c gbhandler.KeepaliveCollector) {
 	hookController.SetKeepaliveCollector(c)
 }
 
+// SetCascadeSourceLeaseChecker keeps cascade-owned sources alive while ZLM
+// reports no browser readers; the existing none-reader policy remains the
+// final browser/reconciler cleanup authority.
+func SetCascadeSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
+	hookController.SetSourceLeaseChecker(checker)
+}
+
 // SetDeviceMgmtCatalogTrigger 由 bootstrap 在 SIP UAC 就绪后注入
 // handler.CatalogTrigger 满足 controllers.CatalogTrigger 接口(duck typing)
 func SetDeviceMgmtCatalogTrigger(t gbhandler.CatalogTrigger) {

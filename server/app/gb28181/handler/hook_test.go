@@ -31,6 +31,10 @@ type mockNoneReaderPolicy struct {
 	err   error
 }
 
+type mockSourceLeaseChecker struct{ active bool }
+
+func (m mockSourceLeaseChecker) HasLease(string) bool { return m.active }
+
 type mockStreamObserver struct {
 	calls      atomic.Int32
 	registered atomic.Bool
@@ -169,6 +173,26 @@ func TestHookOnStreamNoneReaderDisabledPolicyKeepsStream(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if got := stopper.calls.Load(); got != 0 {
 		t.Errorf("关闭按需直播时不应触发 Stop,实际 %d", got)
+	}
+}
+
+func TestHookOnStreamNoneReaderKeepsCascadeLeaseBeforeBrowserPolicy(t *testing.T) {
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetPlayStopper(&mockStopper{})
+	h.SetNoneReaderPolicy(&mockNoneReaderPolicy{close: true})
+	h.SetSourceLeaseChecker(mockSourceLeaseChecker{active: true})
+	e := newHookEngine(t, h)
+
+	rr := postJSON(t, e, "/index/hook/on_stream_none_reader", gin.H{"app": "rtp", "stream": "cascade-stream"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("hook 应返 200,实际 %d", rr.Code)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析 hook 响应失败: %v", err)
+	}
+	if close, ok := body["close"].(bool); !ok || close {
+		t.Fatalf("有级联 lease 时应保持 close=false,实际 %v", body["close"])
 	}
 }
 

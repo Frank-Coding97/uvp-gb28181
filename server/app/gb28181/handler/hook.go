@@ -30,6 +30,12 @@ type NoneReaderPolicy interface {
 	ShouldCloseOnNoneReader(ctx context.Context, streamID string) (bool, error)
 }
 
+// SourceLeaseChecker marks streams that still have an active non-browser
+// consumer. ZLM must keep such a source alive even when its reader count is 0.
+type SourceLeaseChecker interface {
+	HasLease(streamID string) bool
+}
+
 // KeepaliveCollector 由 heartbeat.Collector 实现:接收 ZLM on_server_keepalive 上报
 // 接口化避免 handler 包反向依赖 heartbeat 包
 type KeepaliveCollector interface {
@@ -80,6 +86,7 @@ type HookController struct {
 	notifier       *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
 	stopper        PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
 	policy         NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
+	leaseChecker   SourceLeaseChecker   // 级联 source lease,可为 nil
 	collector      KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
 	resolver       NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
 	binder         StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
@@ -105,6 +112,12 @@ func (h *HookController) SetPlayStopper(s PlayStopper) {
 // SetNoneReaderPolicy 注入通道级无人观看断流策略。
 func (h *HookController) SetNoneReaderPolicy(p NoneReaderPolicy) {
 	h.policy = p
+}
+
+// SetSourceLeaseChecker injects the cascade lease registry without coupling
+// the hook package to cascade/media.
+func (h *HookController) SetSourceLeaseChecker(checker SourceLeaseChecker) {
+	h.leaseChecker = checker
 }
 
 // SetKeepaliveCollector 注入心跳收集器(bootstrap M2.1 装配 heartbeat.Collector 后调用)
@@ -220,7 +233,9 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		zap.String("app", body.App), zap.String("stream", body.Stream))
 
 	closeStream := true
-	if h.policy != nil && body.Stream != "" {
+	if h.leaseChecker != nil && body.Stream != "" && h.leaseChecker.HasLease(body.Stream) {
+		closeStream = false
+	} else if h.policy != nil && body.Stream != "" {
 		var err error
 		closeStream, err = h.policy.ShouldCloseOnNoneReader(c.Request.Context(), body.Stream)
 		if err != nil {
