@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Message } from "@arco-design/web-vue";
 import { Check, Pencil, X } from "lucide-vue-next";
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onMounted, reactive, ref, watch } from "vue";
 import { getDictItemsByDictCodeAPI } from "@/api/dictionary";
 import {
     fetchPTZDefaultSpeedConfig,
     fetchDefaultChannelStreamTransportConfig,
     fetchDefaultPlaybackProtocolConfig,
+    fetchFixedAddressPlaybackConfig,
     fetchPlaybackSettingsConfig,
     fetchGlobalSubscriptionConfig,
     fetchDefaultChannelAudioConfig,
@@ -23,6 +24,7 @@ import {
     updatePTZDefaultSpeedConfig,
     updateDefaultChannelStreamTransportConfig,
     updateDefaultPlaybackProtocolConfig,
+    updateFixedAddressPlaybackConfig,
     updatePlaybackSettingsConfig,
     updateGlobalSubscriptionConfig,
     updateDefaultChannelAudioConfig,
@@ -35,6 +37,7 @@ import {
     updatePreallocationModeConfig,
     updateIgnoreChannelOfflineStatusNotifyConfig,
     type PlaybackProtocol,
+    type FixedAddressPlaybackConfig,
     type PlaybackSettingsConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
@@ -66,6 +69,9 @@ const defaultPlaybackProtocolReady = ref(false);
 const playbackSettingsLoading = ref(true);
 const playbackSettingsSaving = ref(false);
 const playbackSettingsReady = ref(false);
+const fixedAddressPlaybackLoading = ref(true);
+const fixedAddressPlaybackSaving = ref(false);
+const fixedAddressPlaybackReady = ref(false);
 const globalSubscriptionLoading = ref(true);
 const globalSubscriptionSaving = ref(false);
 const globalSubscriptionReady = ref(false);
@@ -105,6 +111,10 @@ const savedPlaybackSettings = reactive<PlaybackSettingsConfig>({
     onDemandLive: true,
     cloudRecordingEnabled: false
 });
+const savedFixedAddressPlayback = reactive<FixedAddressPlaybackConfig>({
+    fixedAddressEnabled: false,
+    autoOnDemandEnabled: false
+});
 const playbackProtocolOptions = ref(playbackProtocolOptionsFromDictionary([]));
 const savedGlobalSubscriptionItems = ref<Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">>([]);
 const savedDefaultChannelAudioEnabled = ref(true);
@@ -134,6 +144,11 @@ const playbackSettingsChanged = computed(
         draft.playback.playTimeoutMs !== savedPlaybackSettings.playTimeoutMs ||
         draft.playback.onDemandLive !== savedPlaybackSettings.onDemandLive ||
         draft.playback.cloudRecordingEnabled !== savedPlaybackSettings.cloudRecordingEnabled
+);
+const fixedAddressPlaybackChanged = computed(
+    () =>
+        draft.playback.fixedAddressEnabled !== savedFixedAddressPlayback.fixedAddressEnabled ||
+        draft.playback.autoOnDemandEnabled !== savedFixedAddressPlayback.autoOnDemandEnabled
 );
 const globalSubscriptionChanged = computed(
     () => JSON.stringify(draft.globalSubscriptionItems) !== JSON.stringify(savedGlobalSubscriptionItems.value)
@@ -172,6 +187,7 @@ const hasChanges = computed(
         ptzDefaultSpeedChanged.value ||
         defaultChannelStreamTransportChanged.value ||
         defaultPlaybackProtocolChanged.value ||
+        fixedAddressPlaybackChanged.value ||
         playbackSettingsChanged.value ||
         globalSubscriptionChanged.value ||
         defaultChannelAudioChanged.value ||
@@ -190,6 +206,7 @@ const configLoading = computed(
         ptzDefaultSpeedLoading.value ||
         defaultChannelStreamTransportLoading.value ||
         defaultPlaybackProtocolLoading.value ||
+        fixedAddressPlaybackLoading.value ||
         playbackSettingsLoading.value ||
         globalSubscriptionLoading.value ||
         defaultChannelAudioLoading.value ||
@@ -208,6 +225,7 @@ const configSaving = computed(
         ptzDefaultSpeedSaving.value ||
         defaultChannelStreamTransportSaving.value ||
         defaultPlaybackProtocolSaving.value ||
+        fixedAddressPlaybackSaving.value ||
         playbackSettingsSaving.value ||
         globalSubscriptionSaving.value ||
         defaultChannelAudioSaving.value ||
@@ -226,6 +244,7 @@ const configReady = computed(
         ptzDefaultSpeedReady.value &&
         defaultChannelStreamTransportReady.value &&
         defaultPlaybackProtocolReady.value &&
+        fixedAddressPlaybackReady.value &&
         playbackSettingsReady.value &&
         globalSubscriptionReady.value &&
         defaultChannelAudioReady.value &&
@@ -328,6 +347,37 @@ function restorePlaybackSettingsDraft() {
     draft.playback.playTimeoutMs = savedPlaybackSettings.playTimeoutMs;
     draft.playback.onDemandLive = savedPlaybackSettings.onDemandLive;
     draft.playback.cloudRecordingEnabled = savedPlaybackSettings.cloudRecordingEnabled;
+}
+
+function applyFixedAddressPlaybackConfig(config: FixedAddressPlaybackConfig) {
+    const normalized = {
+        fixedAddressEnabled: config.fixedAddressEnabled,
+        autoOnDemandEnabled: config.fixedAddressEnabled && config.autoOnDemandEnabled
+    };
+    draft.playback.fixedAddressEnabled = normalized.fixedAddressEnabled;
+    draft.playback.autoOnDemandEnabled = normalized.autoOnDemandEnabled;
+    Object.assign(savedFixedAddressPlayback, normalized);
+}
+
+function restoreFixedAddressPlaybackDraft() {
+    draft.playback.fixedAddressEnabled = savedFixedAddressPlayback.fixedAddressEnabled;
+    draft.playback.autoOnDemandEnabled = savedFixedAddressPlayback.fixedAddressEnabled
+        ? savedFixedAddressPlayback.autoOnDemandEnabled
+        : false;
+}
+
+async function loadFixedAddressPlaybackConfig() {
+    fixedAddressPlaybackLoading.value = true;
+    try {
+        const response = await fetchFixedAddressPlaybackConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        applyFixedAddressPlaybackConfig(response.data);
+        fixedAddressPlaybackReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载固定播放地址与自动点播配置失败");
+    } finally {
+        fixedAddressPlaybackLoading.value = false;
+    }
 }
 
 async function loadPlaybackSettingsConfig() {
@@ -501,6 +551,7 @@ function startEditing() {
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
+    restoreFixedAddressPlaybackDraft();
     restorePlaybackSettingsDraft();
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
@@ -522,6 +573,7 @@ function cancelEditing() {
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
+    restoreFixedAddressPlaybackDraft();
     restorePlaybackSettingsDraft();
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
@@ -535,6 +587,13 @@ function cancelEditing() {
     draft.sipLogRetentionDays = savedSIPLogRetentionDays.value;
     isEditing.value = false;
 }
+
+watch(
+    () => draft.playback.fixedAddressEnabled,
+    enabled => {
+        if (!enabled) draft.playback.autoOnDemandEnabled = false;
+    }
+);
 
 async function saveConfig() {
     if (!configReady.value || !isEditing.value) return;
@@ -589,6 +648,16 @@ async function saveConfig() {
             draft.playback.defaultProtocol = response.data.protocol;
             savedDefaultPlaybackProtocol.value = response.data.protocol;
             defaultPlaybackProtocolSaving.value = false;
+        }
+        if (fixedAddressPlaybackChanged.value) {
+            fixedAddressPlaybackSaving.value = true;
+            const response = await updateFixedAddressPlaybackConfig({
+                fixedAddressEnabled: draft.playback.fixedAddressEnabled,
+                autoOnDemandEnabled: draft.playback.fixedAddressEnabled && draft.playback.autoOnDemandEnabled
+            });
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            applyFixedAddressPlaybackConfig(response.data);
+            fixedAddressPlaybackSaving.value = false;
         }
         if (playbackSettingsChanged.value) {
             playbackSettingsSaving.value = true;
@@ -688,6 +757,7 @@ async function saveConfig() {
         isEditing.value = false;
         Message.success("国标服务配置已更新");
     } catch (error: any) {
+        restoreFixedAddressPlaybackDraft();
         restorePlaybackSettingsDraft();
         Message.error(error?.message || "保存国标服务配置失败");
     } finally {
@@ -696,6 +766,7 @@ async function saveConfig() {
         ptzDefaultSpeedSaving.value = false;
         defaultChannelStreamTransportSaving.value = false;
         defaultPlaybackProtocolSaving.value = false;
+        fixedAddressPlaybackSaving.value = false;
         playbackSettingsSaving.value = false;
         globalSubscriptionSaving.value = false;
         defaultChannelAudioSaving.value = false;
@@ -716,6 +787,7 @@ onMounted(() =>
         loadPTZDefaultSpeedConfig(),
         loadDefaultChannelStreamTransportConfig(),
         loadDefaultPlaybackProtocolConfig(),
+        loadFixedAddressPlaybackConfig(),
         loadPlaybackSettingsConfig(),
         loadPlaybackProtocolOptions(),
         loadGlobalSubscriptionConfig(),
@@ -1085,8 +1157,35 @@ onMounted(() =>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="autoInvite" label="自动点播">
-                                        <a-switch v-model="draft.playback.autoInvite" disabled />
+                                    <a-form-item
+                                        field="fixedAddressEnabled"
+                                        label="固定播放地址"
+                                        tooltip="开启后，新建实时播放使用稳定的固定播放地址；关闭时沿用动态播放地址。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.playback.fixedAddressEnabled"
+                                            :loading="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving"
+                                            :disabled="!isEditing || fixedAddressPlaybackLoading || fixedAddressPlaybackSaving || !fixedAddressPlaybackReady"
+                                        />
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="autoOnDemandEnabled"
+                                        label="自动点播"
+                                        tooltip="仅在固定播放地址开启时生效；访问缺少媒体流的实时地址时自动发起点播。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.playback.autoOnDemandEnabled"
+                                            :loading="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving"
+                                            :disabled="
+                                                !isEditing ||
+                                                !draft.playback.fixedAddressEnabled ||
+                                                fixedAddressPlaybackLoading ||
+                                                fixedAddressPlaybackSaving ||
+                                                !fixedAddressPlaybackReady
+                                            "
+                                        />
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

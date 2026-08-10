@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
     updateDefaultChannelStreamTransportConfig: vi.fn(),
     fetchDefaultPlaybackProtocolConfig: vi.fn(),
     updateDefaultPlaybackProtocolConfig: vi.fn(),
+    fetchFixedAddressPlaybackConfig: vi.fn(),
+    updateFixedAddressPlaybackConfig: vi.fn(),
     fetchPlaybackSettingsConfig: vi.fn(),
     updatePlaybackSettingsConfig: vi.fn(),
     fetchGlobalSubscriptionConfig: vi.fn(),
@@ -135,6 +137,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateDefaultChannelStreamTransportConfig.mockReset();
         api.fetchDefaultPlaybackProtocolConfig.mockReset();
         api.updateDefaultPlaybackProtocolConfig.mockReset();
+        api.fetchFixedAddressPlaybackConfig.mockReset();
+        api.updateFixedAddressPlaybackConfig.mockReset();
         api.fetchPlaybackSettingsConfig.mockReset();
         api.updatePlaybackSettingsConfig.mockReset();
         api.fetchGlobalSubscriptionConfig.mockReset();
@@ -165,6 +169,11 @@ describe("ServiceConfig edit mode", () => {
             code: 0,
             message: "",
             data: { playTimeoutMs: 10000, onDemandLive: true, cloudRecordingEnabled: false }
+        });
+        api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { fixedAddressEnabled: false, autoOnDemandEnabled: false }
         });
         dictionaryApi.getDictItemsByDictCodeAPI.mockResolvedValue({
             code: 0,
@@ -199,6 +208,11 @@ describe("ServiceConfig edit mode", () => {
             code: 0,
             message: "保存成功",
             data: { playTimeoutMs: 15000, onDemandLive: false, cloudRecordingEnabled: true }
+        });
+        api.updateFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "保存成功",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
         });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
@@ -235,13 +249,108 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(19);
+        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(21);
         expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
             "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
         );
         expect(wrapper.find("[data-field='sipLogEnabled']").attributes("data-tooltip")).toContain(
             "保存后会热重载 SIP 服务"
         );
+    });
+
+    it("联动固定播放地址与自动点播开关", async () => {
+        api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+
+        const fixedSwitch = wrapper.find("[data-field='fixedAddressEnabled'] button");
+        const autoSwitch = wrapper.find("[data-field='autoOnDemandEnabled'] button");
+        expect(fixedSwitch.element).toHaveProperty("disabled", true);
+
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        expect(fixedSwitch.element).toHaveProperty("disabled", false);
+        expect(autoSwitch.element).toHaveProperty("disabled", false);
+
+        await fixedSwitch.trigger("click");
+        await flushPromises();
+        expect(fixedSwitch.text()).toBe("false");
+        expect(autoSwitch.text()).toBe("false");
+        expect(autoSwitch.element).toHaveProperty("disabled", true);
+        expect(api.updateFixedAddressPlaybackConfig).not.toHaveBeenCalled();
+    });
+
+    it("完整提交两个开关并按响应原子更新", async () => {
+        api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: false }
+        });
+        api.updateFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "保存成功",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        await wrapper.find("[data-field='autoOnDemandEnabled'] button").trigger("click");
+        await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateFixedAddressPlaybackConfig).toHaveBeenCalledOnce();
+        expect(api.updateFixedAddressPlaybackConfig).toHaveBeenCalledWith({
+            fixedAddressEnabled: true,
+            autoOnDemandEnabled: true
+        });
+        expect(wrapper.find("[data-field='autoOnDemandEnabled'] button").text()).toBe("true");
+    });
+
+    it("固定播放地址保存失败时整体恢复服务端状态", async () => {
+        api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
+        });
+        api.updateFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 400,
+            message: "固定播放地址关闭时不能启用自动点播",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        await wrapper.find("[data-field='fixedAddressEnabled'] button").trigger("click");
+        await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateFixedAddressPlaybackConfig).toHaveBeenCalledWith({
+            fixedAddressEnabled: false,
+            autoOnDemandEnabled: false
+        });
+        expect(wrapper.find("[data-field='fixedAddressEnabled'] button").text()).toBe("true");
+        expect(wrapper.find("[data-field='autoOnDemandEnabled'] button").text()).toBe("true");
+    });
+
+    it("取消编辑时同时恢复固定播放地址与自动点播", async () => {
+        api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: false }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        await wrapper.find("[data-field='autoOnDemandEnabled'] button").trigger("click");
+        await wrapper.findAll("button").find(button => button.text().includes("取消"))?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateFixedAddressPlaybackConfig).not.toHaveBeenCalled();
+        expect(wrapper.find("[data-field='fixedAddressEnabled'] button").text()).toBe("true");
+        expect(wrapper.find("[data-field='autoOnDemandEnabled'] button").text()).toBe("false");
     });
 
     it("removes unsupported legacy WVP configuration placeholders", async () => {

@@ -9,6 +9,7 @@ import {
   fetchPTZDefaultSpeedConfig,
   fetchDefaultChannelStreamTransportConfig,
   fetchDefaultPlaybackProtocolConfig,
+  fetchFixedAddressPlaybackConfig,
   fetchPlaybackSettingsConfig,
   fetchGlobalSubscriptionConfig,
   fetchDefaultChannelAudioConfig,
@@ -33,6 +34,7 @@ import {
   updatePTZDefaultSpeedConfig,
   updateDefaultChannelStreamTransportConfig,
   updateDefaultPlaybackProtocolConfig,
+  updateFixedAddressPlaybackConfig,
   updatePlaybackSettingsConfig,
   updateGlobalSubscriptionConfig,
   updateDefaultChannelAudioConfig,
@@ -125,6 +127,22 @@ describe("国标服务配置 API", () => {
     expect(request).toHaveBeenLastCalledWith(
       "put",
       "/api/gb28181/sip/service-config/playback-settings",
+      { data: config }
+    );
+  });
+
+  it("读取并完整更新固定播放地址与自动点播配置", async () => {
+    await fetchFixedAddressPlaybackConfig();
+    expect(request).toHaveBeenLastCalledWith(
+      "get",
+      "/api/gb28181/sip/service-config/fixed-address-playback"
+    );
+
+    const config = { fixedAddressEnabled: true, autoOnDemandEnabled: false };
+    await updateFixedAddressPlaybackConfig(config);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/fixed-address-playback",
       { data: config }
     );
   });

@@ -894,6 +894,24 @@ export const updatePlaybackSettingsConfig = (config: PlaybackSettingsConfig) =>
     { data: config }
   );
 
+export interface FixedAddressPlaybackConfig {
+  fixedAddressEnabled: boolean;
+  autoOnDemandEnabled: boolean;
+}
+
+export const fetchFixedAddressPlaybackConfig = () =>
+  http.request<BaseResult<FixedAddressPlaybackConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/fixed-address-playback")
+  );
+
+export const updateFixedAddressPlaybackConfig = (config: FixedAddressPlaybackConfig) =>
+  http.request<BaseResult<FixedAddressPlaybackConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/fixed-address-playback"),
+    { data: config }
+  );
+
 export type GlobalSubscriptionItem = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";
 
 export interface GlobalSubscriptionConfig {

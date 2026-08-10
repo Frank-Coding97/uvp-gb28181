@@ -16,7 +16,8 @@ export interface StaticServiceConfigDraft {
     preallocationMode: boolean;
     playback: {
         defaultProtocol: "ws-flv" | "http-flv" | "hls" | "webrtc";
-        autoInvite: boolean;
+        fixedAddressEnabled: boolean;
+        autoOnDemandEnabled: boolean;
         playTimeoutMs: number;
         cloudRecordingEnabled: boolean;
         onDemandLive: boolean;
@@ -52,6 +53,7 @@ export const staticServiceConfigLabels = [
 
 export const playbackServiceConfigLabels = [
     "默认播放协议",
+    "固定播放地址",
     "自动点播",
     "点播超时时间（毫秒）",
     "云端录像",
@@ -87,7 +89,8 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
         preallocationMode: false,
         playback: {
             defaultProtocol: "ws-flv",
-            autoInvite: true,
+            fixedAddressEnabled: false,
+            autoOnDemandEnabled: false,
             playTimeoutMs: 10000,
             cloudRecordingEnabled: false,
             onDemandLive: true
