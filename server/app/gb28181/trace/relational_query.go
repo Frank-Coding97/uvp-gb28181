@@ -140,6 +140,44 @@ type sessionAccumulator struct {
 	methods map[string]struct{}
 }
 
+type sessionCandidate struct {
+	Day      time.Time
+	DeviceID string
+	CallID   string
+	LastAt   time.Time
+}
+
+type databaseTime time.Time
+
+func (value *databaseTime) Scan(raw any) error {
+	if at, ok := raw.(time.Time); ok {
+		*value = databaseTime(at)
+		return nil
+	}
+	var text string
+	switch raw := raw.(type) {
+	case string:
+		text = raw
+	case []byte:
+		text = string(raw)
+	default:
+		return fmt.Errorf("unsupported database time value %T", raw)
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05",
+	} {
+		if at, err := time.Parse(layout, text); err == nil {
+			*value = databaseTime(at)
+			return nil
+		}
+	}
+	return fmt.Errorf("unsupported database time %q", text)
+}
+
 func validateSessionFilter(filter SessionFilter) error {
 	if filter.From.IsZero() || filter.To.IsZero() || !filter.From.Before(filter.To) || filter.To.Sub(filter.From) > MaxSessionQueryRange {
 		return ErrTraceTimeRangeRequired
@@ -147,15 +185,16 @@ func validateSessionFilter(filter SessionFilter) error {
 	return nil
 }
 
-func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilter) ([]SessionSummary, error) {
-	if err := validateSessionFilter(filter); err != nil {
-		return nil, err
-	}
+func sessionQueryRange(filter SessionFilter) (time.Time, time.Time) {
 	from := filter.From.UTC()
 	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
 	to := filter.To.UTC()
 	to = time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
-	query := s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}).
+	return from, to
+}
+
+func applySessionFilter(query *gorm.DB, filter SessionFilter, from, to time.Time) *gorm.DB {
+	query = query.
 		Where("occurred_at >= ? AND occurred_at < ?", from, to)
 	if len(filter.DeviceIDs) > 0 {
 		query = query.Where("device_id IN ?", filter.DeviceIDs)
@@ -168,6 +207,89 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
 		like := "%" + strings.ToLower(keyword) + "%"
 		query = query.Where("LOWER(call_id) LIKE ? OR LOWER(device_id) LIKE ?", like, like)
+	}
+	return query
+}
+
+func (s *RelationalStore) listSessionCandidates(
+	ctx context.Context,
+	filter SessionFilter,
+	from time.Time,
+	to time.Time,
+	limit int,
+) ([]sessionCandidate, error) {
+	candidates := make([]sessionCandidate, 0, limit)
+	for day := from; day.Before(to); day = day.AddDate(0, 0, 1) {
+		dayEnd := day.AddDate(0, 0, 1)
+		if dayEnd.After(to) {
+			dayEnd = to
+		}
+		var rows []struct {
+			DeviceID string       `gorm:"column:device_id"`
+			CallID   string       `gorm:"column:call_id"`
+			LastAt   databaseTime `gorm:"column:last_at"`
+		}
+		query := applySessionFilter(
+			s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}),
+			filter,
+			day,
+			dayEnd,
+		)
+		if err := query.
+			Select("device_id, call_id, MAX(occurred_at) AS last_at").
+			Group("device_id, call_id").
+			Order("MAX(occurred_at) DESC").Order("call_id DESC").
+			Limit(limit).
+			Scan(&rows).Error; err != nil {
+			return nil, fmt.Errorf("query relational SIP trace session candidates: %w", err)
+		}
+		for _, row := range rows {
+			candidates = append(candidates, sessionCandidate{
+				Day: day, DeviceID: row.DeviceID, CallID: row.CallID, LastAt: time.Time(row.LastAt).UTC(),
+			})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].LastAt.Equal(candidates[j].LastAt) {
+			return candidates[i].CallID > candidates[j].CallID
+		}
+		return candidates[i].LastAt.After(candidates[j].LastAt)
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	return candidates, nil
+}
+
+func applySessionCandidates(query *gorm.DB, candidates []sessionCandidate) *gorm.DB {
+	var scope *gorm.DB
+	for _, candidate := range candidates {
+		condition := "device_id = ? AND call_id = ? AND occurred_at >= ? AND occurred_at < ?"
+		args := []any{candidate.DeviceID, candidate.CallID, candidate.Day, candidate.Day.AddDate(0, 0, 1)}
+		if scope == nil {
+			scope = query.Session(&gorm.Session{NewDB: true}).Where(condition, args...)
+		} else {
+			scope = scope.Or(condition, args...)
+		}
+	}
+	return query.Where(scope)
+}
+
+func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilter, candidateLimit int) ([]SessionSummary, error) {
+	if err := validateSessionFilter(filter); err != nil {
+		return nil, err
+	}
+	from, to := sessionQueryRange(filter)
+	query := applySessionFilter(s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}), filter, from, to)
+	if candidateLimit > 0 {
+		candidates, err := s.listSessionCandidates(ctx, filter, from, to, candidateLimit)
+		if err != nil {
+			return nil, err
+		}
+		if len(candidates) == 0 {
+			return []SessionSummary{}, nil
+		}
+		query = applySessionCandidates(query, candidates)
 	}
 	var rows []gbmodels.GbSipTraceMessage
 	if err := query.Order("occurred_at ASC").Order("event_id ASC").Find(&rows).Error; err != nil {
@@ -236,16 +358,20 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 }
 
 func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter) ([]SessionSummary, error) {
-	sessions, err := s.reduceSessions(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = DefaultSessionPageSize
 	}
 	if limit > MaxSessionPageSize {
 		limit = MaxSessionPageSize
+	}
+	candidateLimit := limit
+	if filter.Anomaly {
+		candidateLimit = MaxSessionPageSize
+	}
+	sessions, err := s.reduceSessions(ctx, filter, candidateLimit)
+	if err != nil {
+		return nil, err
 	}
 	if len(sessions) > limit {
 		sessions = sessions[:limit]
@@ -256,7 +382,7 @@ func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter
 func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
 	filter.Limit = 0
 	filter.Anomaly = false
-	sessions, err := s.reduceSessions(ctx, filter)
+	sessions, err := s.reduceSessions(ctx, filter, 0)
 	if err != nil {
 		return SessionStats{}, err
 	}

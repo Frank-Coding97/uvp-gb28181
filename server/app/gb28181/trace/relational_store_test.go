@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -134,6 +135,65 @@ func TestRelationalStoreDerivesSessionsAndUnpagedStats(t *testing.T) {
 	sessions, err = store.ListSessions(t.Context(), filter)
 	require.NoError(t, err)
 	require.Len(t, sessions, 2)
+}
+
+func TestRelationalStoreListSessionsBoundsCandidateRows(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	events := make([]StoredEvent, 50)
+	for i := range events {
+		events[i] = testRelationalEvent(
+			fmt.Sprintf("event-%03d", i),
+			at.Add(time.Duration(i)*time.Second),
+			"device-a",
+			fmt.Sprintf("call-%03d", i),
+			"MESSAGE",
+			200,
+		)
+	}
+	require.NoError(t, store.InsertBatch(t.Context(), events))
+
+	var rowsRead []int64
+	require.NoError(t, db.Callback().Query().After("gorm:after_query").Register("test:capture-session-query-rows", func(tx *gorm.DB) {
+		rowsRead = append(rowsRead, tx.RowsAffected)
+	}))
+
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{
+		From:  at.Add(-time.Minute),
+		To:    at.Add(time.Minute),
+		Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Equal(t, "call-049", sessions[0].CallID)
+	require.NotEmpty(t, rowsRead)
+	for _, rows := range rowsRead {
+		require.LessOrEqual(t, rows, int64(1), "session list query must not load unrelated sessions")
+	}
+}
+
+func TestRelationalStoreListSessionsKeepsDailySessionIdentity(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	firstDay := time.Date(2026, 8, 9, 23, 59, 0, 0, time.UTC)
+	secondDay := firstDay.Add(2 * time.Minute)
+	require.NoError(t, store.InsertBatch(t.Context(), []StoredEvent{
+		testRelationalEvent("event-day-1", firstDay, "device-a", "same-call", "MESSAGE", 200),
+		testRelationalEvent("event-day-2", secondDay, "device-a", "same-call", "MESSAGE", 200),
+	}))
+
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{
+		From:  firstDay.Add(-time.Minute),
+		To:    secondDay.Add(time.Minute),
+		Limit: 2,
+	})
+	require.NoError(t, err)
+	require.Len(t, sessions, 2)
+	require.Equal(t, secondDay.Truncate(24*time.Hour), sessions[0].Day)
+	require.Equal(t, firstDay.Truncate(24*time.Hour), sessions[1].Day)
 }
 
 func testRelationalEvent(id string, at time.Time, deviceID, callID, method string, status uint16) StoredEvent {

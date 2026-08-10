@@ -33,3 +33,21 @@ func TestRelationalTraceDeploymentContract(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, strings.ToLower(string(schema)), "gb_sip_trace_message")
 }
+
+func TestRelationalTraceDownMigrationsRejectNonEmptyTable(t *testing.T) {
+	serverRoot := filepath.Join("..", "..", "..")
+	migrationRoot := filepath.Join(serverRoot, "resource", "database", "gb28181", "migrations")
+	contracts := map[string]string{
+		"2026-08-10-sip-trace-message-down.sql":            "sip_trace_down_guard",
+		"2026-08-10-sip-trace-message-postgresql-down.sql": "raise exception",
+		"2026-08-10-sip-trace-message-sqlserver-down.sql":  "throw 50000",
+	}
+	for name, guard := range contracts {
+		body, err := os.ReadFile(filepath.Join(migrationRoot, name))
+		require.NoError(t, err)
+		sql := strings.ToLower(string(body))
+		require.Contains(t, sql, guard, name)
+		require.Contains(t, sql, "gb_sip_trace_message", name)
+		require.Less(t, strings.Index(sql, guard), strings.LastIndex(sql, "drop table"), name)
+	}
+}
