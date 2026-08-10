@@ -296,3 +296,6 @@ gb28181:
     max_session_sec: 86400        # 单会话绝对上限，不超过 24 小时
   recording:
     reconcile_interval_sec: 30   # 云端录像对账周期(秒);0 仅禁用周期任务
+    catalog_reconcile_interval_sec: 21600 # 录像文件目录周期对账(秒);0 只禁周期,保留手动对账
+    catalog_periodic_lookback_days: 2     # 周期对账逻辑回看天数
+    catalog_manual_lookback_days: 7       # 首次/手动对账默认逻辑回看天数

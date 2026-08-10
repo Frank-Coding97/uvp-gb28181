@@ -42,12 +42,33 @@ type CatalogReconciler struct {
 	client    func(*node.Node) CatalogRecordClient
 	now       func() time.Time
 
-	mu      sync.Mutex
-	running map[int64]struct{}
+	mu                   sync.Mutex
+	running              map[int64]struct{}
+	periodicLookbackDays int
+	manualLookbackDays   int
 }
 
 func NewCatalogReconciler(repo CatalogReconcileRepo, locations LocationLookup, nodes CatalogNodeLookup, client func(*node.Node) CatalogRecordClient) *CatalogReconciler {
-	return &CatalogReconciler{repo: repo, locations: locations, nodes: nodes, client: client, now: time.Now, running: make(map[int64]struct{})}
+	return &CatalogReconciler{repo: repo, locations: locations, nodes: nodes, client: client, now: time.Now, running: make(map[int64]struct{}), periodicLookbackDays: 2, manualLookbackDays: 7}
+}
+
+func (r *CatalogReconciler) ConfigureLookbackDays(periodic, manual int) {
+	if periodic > 0 {
+		r.periodicLookbackDays = periodic
+	}
+	if manual > 0 {
+		r.manualLookbackDays = manual
+	}
+}
+
+func (r *CatalogReconciler) MarkQueued(ctx context.Context, nodeID int64, trigger string, start, end *time.Time) error {
+	now := r.currentTime()
+	requestedStart, requestedEnd, effectiveStart, effectiveEnd := r.reconcileWindow(now, trigger, start, end)
+	return r.repo.SaveReconcileState(ctx, &models.GbRecordingReconcileState{
+		NodeID: nodeID, Status: models.RecordingReconcileQueued, TriggerSource: trigger,
+		RequestedStart: &requestedStart, RequestedEnd: &requestedEnd,
+		EffectiveStart: &effectiveStart, EffectiveEnd: &effectiveEnd, UpdatedAt: now,
+	})
 }
 
 func (r *CatalogReconciler) RunNode(ctx context.Context, nodeID int64, trigger string, start, end *time.Time) (models.GbRecordingReconcileState, error) {
@@ -57,7 +78,7 @@ func (r *CatalogReconciler) RunNode(ctx context.Context, nodeID int64, trigger s
 	defer r.endNode(nodeID)
 
 	now := r.currentTime()
-	requestedStart, requestedEnd, effectiveStart, effectiveEnd := reconcileWindow(now, trigger, start, end)
+	requestedStart, requestedEnd, effectiveStart, effectiveEnd := r.reconcileWindow(now, trigger, start, end)
 	state := models.GbRecordingReconcileState{
 		NodeID: nodeID, Status: models.RecordingReconcileRunning, TriggerSource: trigger,
 		RequestedStart: &requestedStart, RequestedEnd: &requestedEnd,
@@ -158,12 +179,20 @@ func (r *CatalogReconciler) candidatesForNode(ctx context.Context, nodeID int64)
 	return result, nil
 }
 
-func reconcileWindow(now time.Time, trigger string, start, end *time.Time) (time.Time, time.Time, time.Time, time.Time) {
+func (r *CatalogReconciler) reconcileWindow(now time.Time, trigger string, start, end *time.Time) (time.Time, time.Time, time.Time, time.Time) {
 	today := calendarDate(now)
 	requestedEnd := today
-	requestedStart := today.AddDate(0, 0, -6)
+	manualDays := r.manualLookbackDays
+	if manualDays <= 0 {
+		manualDays = 7
+	}
+	requestedStart := today.AddDate(0, 0, -manualDays+1)
 	if trigger == ReconcileTriggerScheduled {
-		requestedStart = today.AddDate(0, 0, -1)
+		periodicDays := r.periodicLookbackDays
+		if periodicDays <= 0 {
+			periodicDays = 2
+		}
+		requestedStart = today.AddDate(0, 0, -periodicDays+1)
 	}
 	if start != nil {
 		requestedStart = calendarDate(*start)

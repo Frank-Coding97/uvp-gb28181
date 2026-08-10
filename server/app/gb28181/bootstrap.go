@@ -218,6 +218,7 @@ var playReconciler *reconciler.Reconciler
 
 var recordingSvc *gbrecording.Service
 var recordingReconciler *gbrecording.Reconciler
+var recordingCatalogScheduler *gbrecording.CatalogReconcileScheduler
 var talkSvc *gbtalk.Service
 var talkCleanupWorker *gbtalk.CleanupWorker
 
@@ -696,15 +697,29 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 
 	if cfg.Recording.ReconcileIntervalSec <= 0 {
 		app.ZapLog.Info("GB28181 云端录像周期对账未启用(reconcile_interval_sec=0)")
-		return
+	} else {
+		interval := time.Duration(cfg.Recording.ReconcileIntervalSec) * time.Second
+		recordingReconciler = gbrecording.NewReconciler(repo, recordingSvc, interval, 10*time.Second)
+		recordingReconciler.Start(context.Background())
+		app.ZapLog.Info("GB28181 云端录像 reconciler 已启动", zap.Duration("interval", interval))
 	}
-	interval := time.Duration(cfg.Recording.ReconcileIntervalSec) * time.Second
-	recordingReconciler = gbrecording.NewReconciler(repo, recordingSvc, interval, 10*time.Second)
-	recordingReconciler.Start(context.Background())
-	app.ZapLog.Info("GB28181 云端录像 reconciler 已启动", zap.Duration("interval", interval))
+
+	catalogReconciler := gbrecording.NewCatalogReconciler(repo, zlmLocationMap, zlmRegistry,
+		func(n *node.Node) gbrecording.CatalogRecordClient { return gbzlm.NewClientForNode(n) })
+	catalogReconciler.ConfigureLookbackDays(cfg.Recording.CatalogPeriodicLookbackDays, cfg.Recording.CatalogManualLookbackDays)
+	catalogInterval := time.Duration(cfg.Recording.CatalogReconcileIntervalSec) * time.Second
+	recordingCatalogScheduler = gbrecording.NewCatalogReconcileScheduler(catalogReconciler, zlmRegistry, catalogInterval, 10*time.Second)
+	recordingCatalogScheduler.Start(context.Background())
+	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.Duration("interval", catalogInterval))
 }
 
 func stopRecordingRuntime() {
+	if recordingCatalogScheduler != nil {
+		if err := recordingCatalogScheduler.Stop(); err != nil {
+			app.ZapLog.Warn("GB28181 云端录像目录对账停止超时", zap.Error(err))
+		}
+		recordingCatalogScheduler = nil
+	}
 	if recordingReconciler != nil {
 		recordingReconciler.Stop()
 		recordingReconciler = nil
