@@ -1,6 +1,8 @@
 package models
 
 import (
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -37,9 +39,37 @@ func TestRecordingModelsUniqueKeys(t *testing.T) {
 	duplicateSession.ID = 0
 	require.Error(t, db.Create(&duplicateSession).Error)
 
-	file := &GbRecordingFile{ChannelID: 1, DeviceID: "device", NodeID: 2, VHost: DefaultRecordingVHost, App: DefaultRecordingApp, Stream: "stream", FilePath: "/record/one.mp4", StartTime: now}
+	file := &GbRecordingFile{ChannelID: 1, DeviceID: "device", NodeID: 2, VHost: DefaultRecordingVHost, App: DefaultRecordingApp, Stream: "stream", FilePath: "/record/one.mp4", StartTime: &now}
 	require.NoError(t, db.Create(file).Error)
 	duplicateFile := *file
 	duplicateFile.ID = 0
 	require.Error(t, db.Create(&duplicateFile).Error)
+}
+
+func TestRecordingFileCatalogFieldsKeepUnknownMetadataNullableAndInternalPathsPrivate(t *testing.T) {
+	typeOfFile := reflect.TypeOf(GbRecordingFile{})
+	for _, name := range []string{
+		"FileKey", "ChannelCode", "ChannelName", "DeviceName", "OwnerDeptID", "Source", "MetadataState",
+		"RecordDate", "DiscoveredAt", "LastSeenAt", "MissingAt", "ReconcileMissCount", "UpdatedAt",
+	} {
+		if _, ok := typeOfFile.FieldByName(name); !ok {
+			t.Errorf("GbRecordingFile missing catalog field %s", name)
+		}
+	}
+	for _, name := range []string{"StartTime", "TimeLen", "FileSize"} {
+		field, ok := typeOfFile.FieldByName(name)
+		if !ok {
+			t.Errorf("GbRecordingFile missing nullable metadata field %s", name)
+			continue
+		}
+		if field.Type.Kind() != reflect.Ptr {
+			t.Errorf("GbRecordingFile.%s must be nullable, got %s", name, field.Type)
+		}
+	}
+
+	body, err := json.Marshal(GbRecordingFile{FilePath: "/private/a.mp4", Folder: "/private", URL: "http://internal/a.mp4"})
+	require.NoError(t, err)
+	require.NotContains(t, string(body), "filePath")
+	require.NotContains(t, string(body), "folder")
+	require.NotContains(t, string(body), "url")
 }
