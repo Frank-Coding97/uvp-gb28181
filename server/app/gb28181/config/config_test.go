@@ -235,6 +235,73 @@ func TestDefaultChannelAudioEnabledFromDefaultsToEnabled(t *testing.T) {
 	require.False(t, DefaultChannelAudioEnabledFrom(source))
 }
 
+func TestPlaybackSettingsFromDefaultsAndReadsExplicitFalse(t *testing.T) {
+	source := fakeSource{}
+	settings := PlaybackSettingsFrom(source)
+	require.Equal(t, DefaultPlayRequestTimeoutMs, settings.PlayTimeoutMs)
+	require.True(t, settings.OnDemandLive)
+	require.False(t, settings.CloudRecordingEnabled)
+	require.Equal(t, 10*time.Second, settings.PlayTimeout())
+
+	source.values = map[string]interface{}{
+		PlayRequestTimeoutMsConfigKey:         1500,
+		DefaultChannelOnDemandLiveConfigKey:   false,
+		DefaultChannelCloudRecordingConfigKey: false,
+	}
+	source.ints = map[string]int{PlayRequestTimeoutMsConfigKey: 1500}
+	source.bools = map[string]bool{
+		DefaultChannelOnDemandLiveConfigKey:   false,
+		DefaultChannelCloudRecordingConfigKey: false,
+	}
+	settings = PlaybackSettingsFrom(source)
+	require.Equal(t, 1500, settings.PlayTimeoutMs)
+	require.False(t, settings.OnDemandLive)
+	require.False(t, settings.CloudRecordingEnabled)
+	require.Equal(t, 1500*time.Millisecond, settings.PlayTimeout())
+}
+
+func TestPlaybackSettingsFromFallsBackOnInvalidTimeout(t *testing.T) {
+	source := fakeSource{
+		values: map[string]interface{}{PlayRequestTimeoutMsConfigKey: 0},
+		ints:   map[string]int{PlayRequestTimeoutMsConfigKey: 0},
+	}
+	require.Equal(t, DefaultPlayRequestTimeoutMs, PlaybackSettingsFrom(source).PlayTimeoutMs)
+
+	for _, invalid := range []int{999, 300001, -1} {
+		source.values[PlayRequestTimeoutMsConfigKey] = invalid
+		source.ints[PlayRequestTimeoutMsConfigKey] = invalid
+		require.Equal(t, DefaultPlayRequestTimeoutMs, PlaybackSettingsFrom(source).PlayTimeoutMs)
+	}
+	for _, valid := range []int{1000, 300000} {
+		source.values[PlayRequestTimeoutMsConfigKey] = valid
+		source.ints[PlayRequestTimeoutMsConfigKey] = valid
+		require.Equal(t, valid, PlaybackSettingsFrom(source).PlayTimeoutMs)
+	}
+}
+
+func TestValidatePlaybackSettings(t *testing.T) {
+	require.NoError(t, ValidatePlaybackSettings(PlaybackSettings{PlayTimeoutMs: 1000}))
+	require.NoError(t, ValidatePlaybackSettings(PlaybackSettings{PlayTimeoutMs: 300000}))
+	for _, invalid := range []int{0, 999, 300001, -1} {
+		err := ValidatePlaybackSettings(PlaybackSettings{PlayTimeoutMs: invalid})
+		require.Error(t, err)
+		var validationErr *ValidationError
+		require.ErrorAs(t, err, &validationErr)
+		require.Equal(t, PlayRequestTimeoutMsConfigKey, validationErr.Field)
+	}
+}
+
+func TestPlaybackSettingsFromReadsLatestSourceValue(t *testing.T) {
+	source := fakeSource{
+		values: map[string]interface{}{PlayRequestTimeoutMsConfigKey: 1000},
+		ints:   map[string]int{PlayRequestTimeoutMsConfigKey: 1000},
+	}
+	require.Equal(t, 1000, PlaybackSettingsFrom(source).PlayTimeoutMs)
+	source.values[PlayRequestTimeoutMsConfigKey] = 300000
+	source.ints[PlayRequestTimeoutMsConfigKey] = 300000
+	require.Equal(t, 300000, PlaybackSettingsFrom(source).PlayTimeoutMs)
+}
+
 func TestGlobalSubscriptionItemsFromFiltersInvalidAndDuplicateItems(t *testing.T) {
 	source := fakeSource{}
 	require.Empty(t, GlobalSubscriptionItemsFrom(source))

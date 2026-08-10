@@ -21,6 +21,9 @@ const (
 	DefaultChannelStreamTransportConfigKey    = "gb28181.catalog.default_channel_stream_transport"
 	DefaultPlaybackProtocolConfigKey          = "gb28181.playback.default_protocol"
 	DefaultChannelAudioEnabledConfigKey       = "gb28181.catalog.default_channel_audio_enabled"
+	PlayRequestTimeoutMsConfigKey             = "gb28181.play.request_timeout_ms"
+	DefaultChannelOnDemandLiveConfigKey       = "gb28181.catalog.default_channel_on_demand_live"
+	DefaultChannelCloudRecordingConfigKey     = "gb28181.catalog.default_channel_cloud_recording_enabled"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
@@ -38,6 +41,11 @@ const (
 	DefaultChannelStreamTransport        = "TCP-Passive"
 	DefaultPlaybackProtocol              = "ws-flv"
 	DefaultChannelAudioEnabledValue      = true
+	DefaultPlayRequestTimeoutMs          = 10000
+	MinPlayRequestTimeoutMs              = 1000
+	MaxPlayRequestTimeoutMs              = 300000
+	DefaultChannelOnDemandLive           = true
+	DefaultChannelCloudRecordingEnabled  = false
 	DefaultSIPTraceRetentionDays         = 7
 	MinSIPTraceRetentionDays             = 1
 	MaxSIPTraceRetentionDays             = 365
@@ -105,6 +113,59 @@ func DefaultChannelAudioEnabledFrom(c valueSource) bool {
 
 func DefaultChannelAudioEnabled() bool {
 	return DefaultChannelAudioEnabledFrom(app.ConfigYml)
+}
+
+// PlaybackSettings contains global playback behavior used as defaults for
+// new channels and as the live timeout budget for real-time play requests.
+type PlaybackSettings struct {
+	PlayTimeoutMs         int  `json:"playTimeoutMs"`
+	OnDemandLive          bool `json:"onDemandLive"`
+	CloudRecordingEnabled bool `json:"cloudRecordingEnabled"`
+}
+
+func (s PlaybackSettings) PlayTimeout() time.Duration {
+	return time.Duration(s.PlayTimeoutMs) * time.Millisecond
+}
+
+// PlaybackSettingsFrom reads the current values on every call. Missing or
+// invalid timeout values fall back to the documented default while boolean
+// values preserve an explicitly saved false.
+func PlaybackSettingsFrom(c valueSource) PlaybackSettings {
+	settings := PlaybackSettings{
+		PlayTimeoutMs:         DefaultPlayRequestTimeoutMs,
+		OnDemandLive:          DefaultChannelOnDemandLive,
+		CloudRecordingEnabled: DefaultChannelCloudRecordingEnabled,
+	}
+	if c == nil {
+		return settings
+	}
+	if c.Get(PlayRequestTimeoutMsConfigKey) != nil {
+		value := c.GetInt(PlayRequestTimeoutMsConfigKey)
+		if value >= MinPlayRequestTimeoutMs && value <= MaxPlayRequestTimeoutMs {
+			settings.PlayTimeoutMs = value
+		}
+	}
+	if c.Get(DefaultChannelOnDemandLiveConfigKey) != nil {
+		settings.OnDemandLive = c.GetBool(DefaultChannelOnDemandLiveConfigKey)
+	}
+	if c.Get(DefaultChannelCloudRecordingConfigKey) != nil {
+		settings.CloudRecordingEnabled = c.GetBool(DefaultChannelCloudRecordingConfigKey)
+	}
+	return settings
+}
+
+func CurrentPlaybackSettings() PlaybackSettings {
+	return PlaybackSettingsFrom(app.ConfigYml)
+}
+
+// ValidatePlaybackSettings validates the complete aggregate submitted by the
+// service-config API before any of its values are persisted.
+func ValidatePlaybackSettings(settings PlaybackSettings) error {
+	if settings.PlayTimeoutMs < MinPlayRequestTimeoutMs || settings.PlayTimeoutMs > MaxPlayRequestTimeoutMs {
+		return invalid(PlayRequestTimeoutMsConfigKey, settings.PlayTimeoutMs,
+			fmt.Sprintf("must be between %d and %d", MinPlayRequestTimeoutMs, MaxPlayRequestTimeoutMs))
+	}
+	return nil
 }
 
 // SIPTraceEnabledFrom returns whether raw SIP trace collection is enabled.
