@@ -391,6 +391,7 @@ describe("ServiceConfig edit mode", () => {
         expect(dictionaryApi.getDictItemsByDictCodeAPI).toHaveBeenCalledWith("gb28181_playback_protocol");
         const field = wrapper.find("[data-field='defaultProtocol']");
         expect(field.text()).toContain("默认播放协议");
+        expect(field.find(".playback-protocol-select").exists()).toBe(true);
         expect(field.findAll("option").map(option => option.text())).toEqual([
             "WebRTC（低延迟）",
             "WS-FLV",

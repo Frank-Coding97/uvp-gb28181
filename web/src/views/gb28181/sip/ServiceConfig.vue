@@ -959,6 +959,7 @@ onMounted(() =>
                                     >
                                         <a-select
                                             v-model="draft.playback.defaultProtocol"
+                                            class="playback-protocol-select"
                                             :loading="defaultPlaybackProtocolLoading || defaultPlaybackProtocolSaving"
                                             :disabled="!isEditing || defaultPlaybackProtocolLoading || defaultPlaybackProtocolSaving || !defaultPlaybackProtocolReady"
                                         >
@@ -1134,6 +1135,11 @@ onMounted(() =>
     max-width: 100%;
 }
 
+:deep(.playback-protocol-select) {
+    width: 160px !important;
+    max-width: 100%;
+}
+
 .global-subscription-items {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -1161,6 +1167,10 @@ onMounted(() =>
     :deep(.service-config-number-input),
     :deep(.stream-transport-select) {
         width: 100%;
+    }
+
+    :deep(.playback-protocol-select) {
+        width: 100% !important;
     }
 
     .service-config-tabs {
