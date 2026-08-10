@@ -13,7 +13,7 @@ describe("static service config draft", () => {
         expect(draft.globalSubscriptionItems).toEqual([]);
         expect(draft.defaultChannelAudioEnabled).toBe(true);
 
-        expect(staticServiceConfigLabels).toHaveLength(14);
+        expect(staticServiceConfigLabels).toHaveLength(15);
         expect(staticServiceConfigLabels).toContain("新通道默认流传输模式");
         expect(staticServiceConfigLabels).toContain("全局订阅项目");
         expect(staticServiceConfigLabels).toContain("全局通道开启音频");
@@ -23,6 +23,8 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).toContain("心跳恢复设备在线状态");
         expect(staticServiceConfigLabels).toContain("SIP 命令超时时间（秒）");
         expect(draft.positionHistoryRetentionDays).toBe(7);
+        expect(draft.sipLogRetentionDays).toBe(7);
+        expect(staticServiceConfigLabels).toContain("SIP 日志保留天数（天）");
         expect(draft.ptzSpeed).toBe(6);
         expect(draft.syncChannelsOnOnline).toBe(true);
         expect(draft.ignoreChannelOfflineStatusNotify).toBe(false);

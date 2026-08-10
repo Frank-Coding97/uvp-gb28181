@@ -190,11 +190,11 @@ describe("国标服务配置 API", () => {
     await fetchSIPLogConfig();
     expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/sip-log");
 
-    await updateSIPLogConfig(true);
+    await updateSIPLogConfig({ enabled: true, retentionDays: 30 });
     expect(request).toHaveBeenLastCalledWith(
       "put",
       "/api/gb28181/sip/service-config/sip-log",
-      { data: { enabled: true } }
+      { data: { enabled: true, retentionDays: 30 } }
     );
   });
 });

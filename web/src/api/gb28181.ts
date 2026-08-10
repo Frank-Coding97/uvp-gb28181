@@ -891,6 +891,7 @@ export const updateDefaultChannelAudioConfig = (enabled: boolean) =>
 
 export interface SIPLogConfig {
   enabled: boolean;
+  retentionDays?: number;
   applied: boolean;
   applyError?: string;
 }
@@ -898,9 +899,9 @@ export interface SIPLogConfig {
 export const fetchSIPLogConfig = () =>
   http.request<BaseResult<SIPLogConfig>>("get", baseUrlApi("gb28181/sip/service-config/sip-log"));
 
-export const updateSIPLogConfig = (enabled: boolean) =>
+export const updateSIPLogConfig = (config: { enabled: boolean; retentionDays: number }) =>
   http.request<BaseResult<SIPLogConfig>>("put", baseUrlApi("gb28181/sip/service-config/sip-log"), {
-    data: { enabled }
+    data: config
   });
 
 export type SipDeploymentMode = "lan" | "public";

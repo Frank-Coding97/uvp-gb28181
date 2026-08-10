@@ -8,6 +8,7 @@ export interface StaticServiceConfigDraft {
     ptzSpeed: number;
     syncChannelsOnOnline: boolean;
     sipLogEnabled: boolean;
+    sipLogRetentionDays: number;
     ignoreChannelOfflineStatusNotify: boolean;
     onlineOnHeartbeat: boolean;
     saveAlarmMessages: boolean;
@@ -42,6 +43,7 @@ export const staticServiceConfigLabels = [
     "云台默认速度",
     "设备上线时同步通道",
     "是否开启SIP日志",
+    "SIP 日志保留天数（天）",
     "忽略通道离线/异常通知",
     "心跳恢复设备在线状态",
     "是否存储报警消息",
@@ -79,6 +81,7 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
         ptzSpeed: 6,
         syncChannelsOnOnline: true,
         sipLogEnabled: false,
+        sipLogRetentionDays: 7,
         ignoreChannelOfflineStatusNotify: false,
         onlineOnHeartbeat: true,
         saveAlarmMessages: true,
