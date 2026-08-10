@@ -131,3 +131,46 @@ func TestNotifierConcurrent(t *testing.T) {
 		<-done
 	}
 }
+
+func TestWaitReadyRefRechecksAfterHook(t *testing.T) {
+	n := NewNotifier()
+	ref := LiveRef{StreamID: "fixed", SSRC: "0200000002", Generation: 2, NodeID: 20}
+	ready := atomic.Bool{}
+	polls := make(chan LiveRef, 4)
+	poll := func(ctx context.Context, got LiveRef) (bool, error) {
+		polls <- got
+		return ready.Load(), nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- WaitReadyRef(ctx, n, ref, poll, time.Hour) }()
+
+	requirePoll := func() {
+		t.Helper()
+		select {
+		case got := <-polls:
+			if got != ref {
+				t.Fatalf("poll ref mismatch: got=%+v want=%+v", got, ref)
+			}
+		case <-time.After(200 * time.Millisecond):
+			t.Fatal("poll was not invoked")
+		}
+	}
+	requirePoll() // immediate verification
+	n.Publish(ref.StreamID)
+	requirePoll() // hook only wakes and rechecks
+	select {
+	case err := <-done:
+		t.Fatalf("offline target must not become ready after hook: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	ready.Store(true)
+	n.Publish(ref.StreamID)
+	requirePoll()
+	if err := <-done; err != nil {
+		t.Fatalf("target node became ready: %v", err)
+	}
+}

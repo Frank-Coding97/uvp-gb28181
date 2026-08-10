@@ -65,3 +65,24 @@ func TestLocationMap_UnbindNonexistent_NoOp(t *testing.T) {
 	m.Unbind("nope")
 	require.Equal(t, 0, m.Size())
 }
+
+func TestLocationMap_VersionedBindingRejectsStaleGeneration(t *testing.T) {
+	m := stream.NewLocationMap()
+	current := stream.LiveRef{StreamID: "fixed", SSRC: "0200000002", Generation: 2, NodeID: 20}
+	stale := stream.LiveRef{StreamID: "fixed", SSRC: "0200000001", Generation: 1, NodeID: 10}
+	require.True(t, m.BindCurrent(current))
+	require.False(t, m.BindCurrent(stale))
+
+	got, ok := m.LookupCurrent("fixed")
+	require.True(t, ok)
+	require.Equal(t, current, got)
+	require.False(t, m.UnbindIfCurrent(stale))
+	got, ok = m.LookupCurrent("fixed")
+	require.True(t, ok)
+	require.Equal(t, current, got)
+
+	require.True(t, m.UnbindIfCurrent(current))
+	require.False(t, m.UnbindIfCurrent(current))
+	_, ok = m.LookupCurrent("fixed")
+	require.False(t, ok)
+}

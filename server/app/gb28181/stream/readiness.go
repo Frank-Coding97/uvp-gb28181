@@ -57,6 +57,8 @@ func (n *Notifier) Publish(streamID string) {
 // PollFn 轮询函数:返回 (ready, err);err 不致命(网络抖动)继续轮询
 type PollFn func(ctx context.Context) (bool, error)
 
+type PollRefFn func(ctx context.Context, ref LiveRef) (bool, error)
+
 // WaitReady 双源等待流就绪:hook channel 与 polling 取早(ADR-002 创新3)
 //   - hook 通常 100-500ms 内到,正常路径
 //   - polling 200ms 间隔兜底,hook 丢失/延迟时仍可成功
@@ -92,6 +94,46 @@ func WaitReady(ctx context.Context, n *Notifier, streamID string, poll PollFn, p
 			}
 			ok, _ := poll(ctx) // err 视为暂未就绪,继续轮询直到 ctx 超时
 			if ok {
+				return nil
+			}
+		}
+	}
+}
+
+// WaitReadyRef treats a hook as a wake-up signal only. Readiness succeeds only
+// after the caller verifies the exact generation and target node represented
+// by ref.
+func WaitReadyRef(ctx context.Context, n *Notifier, ref LiveRef, poll PollRefFn, pollInterval time.Duration) error {
+	hookCh := n.Subscribe(ref.StreamID)
+	defer n.Unsubscribe(ref.StreamID)
+
+	if pollInterval <= 0 {
+		pollInterval = 200 * time.Millisecond
+	}
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	check := func() bool {
+		if poll == nil {
+			return false
+		}
+		ok, _ := poll(ctx, ref)
+		return ok
+	}
+	if check() {
+		return nil
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-hookCh:
+			if check() {
+				return nil
+			}
+		case <-ticker.C:
+			if check() {
 				return nil
 			}
 		}

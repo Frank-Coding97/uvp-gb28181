@@ -487,15 +487,31 @@ const (
 
 // Session 一路点播会话
 type Session struct {
-	DeviceID  string
-	ChannelID string
-	SSRC      string
-	StreamID  string
-	Dest      string
-	Transport string // 传输协议(UDP/TCP),对应 gb_device.transport;空值兜底 UDP
-	State     SessionState
-	dialog    *sipgo.DialogClientSession
-	createdAt time.Time
+	DeviceID   string
+	ChannelID  string
+	SSRC       string
+	StreamID   string
+	Generation uint64
+	NodeID     int64
+	Dest       string
+	Transport  string // 传输协议(UDP/TCP),对应 gb_device.transport;空值兜底 UDP
+	State      SessionState
+	dialog     *sipgo.DialogClientSession
+	createdAt  time.Time
+}
+
+type SessionRef struct {
+	StreamID   string
+	SSRC       string
+	Generation uint64
+	NodeID     int64
+}
+
+func (s *Session) Ref() SessionRef {
+	if s == nil {
+		return SessionRef{}
+	}
+	return SessionRef{StreamID: s.StreamID, SSRC: s.SSRC, Generation: s.Generation, NodeID: s.NodeID}
 }
 
 // SessionManager 会话管理(内存)
@@ -514,16 +530,54 @@ func (m *SessionManager) Get(streamID string) *Session {
 	return m.sessions[streamID]
 }
 
-func (m *SessionManager) put(s *Session) {
+func (m *SessionManager) GetCurrent(streamID string) (*Session, bool) {
+	session := m.Get(streamID)
+	return session, session != nil
+}
+
+// PutIfCurrent rejects stale generations and conflicting writes for the same
+// generation. Generation zero retains the legacy last-write behavior.
+func (m *SessionManager) PutIfCurrent(s *Session) bool {
+	if s == nil || s.StreamID == "" {
+		return false
+	}
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[s.StreamID]
+	if ok && current.Generation > 0 && s.Generation == 0 {
+		return false
+	}
+	if ok && s.Generation > 0 && current.Generation > 0 {
+		if current.Generation > s.Generation {
+			return false
+		}
+		if current.Generation == s.Generation && current.Ref() != s.Ref() {
+			return false
+		}
+	}
 	m.sessions[s.StreamID] = s
-	m.mu.Unlock()
+	return true
+}
+
+func (m *SessionManager) put(s *Session) {
+	m.PutIfCurrent(s)
 }
 
 func (m *SessionManager) remove(streamID string) {
 	m.mu.Lock()
 	delete(m.sessions, streamID)
 	m.mu.Unlock()
+}
+
+func (m *SessionManager) RemoveIfCurrent(ref SessionRef) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.sessions[ref.StreamID]
+	if !ok || current.Ref() != ref {
+		return false
+	}
+	delete(m.sessions, ref.StreamID)
+	return true
 }
 
 func (u *UAC) buildInviteRequest(s *Session, sdpBody string) (*sip.Request, error) {

@@ -42,3 +42,31 @@ func TestSessionManagerConcurrent(t *testing.T) {
 		<-done
 	}
 }
+
+func TestSessionManagerConditionalGeneration(t *testing.T) {
+	m := NewSessionManager()
+	current := &Session{StreamID: "fixed", SSRC: "0200000002", Generation: 2, NodeID: 20}
+	stale := &Session{StreamID: "fixed", SSRC: "0200000001", Generation: 1, NodeID: 10}
+	if !m.PutIfCurrent(current) {
+		t.Fatal("current generation should be stored")
+	}
+	if m.PutIfCurrent(stale) {
+		t.Fatal("stale generation must not replace current session")
+	}
+	if m.PutIfCurrent(&Session{StreamID: "fixed"}) {
+		t.Fatal("legacy session must not replace a versioned session")
+	}
+	got, ok := m.GetCurrent("fixed")
+	if !ok || got != current {
+		t.Fatalf("current session mismatch: %+v", got)
+	}
+	if m.RemoveIfCurrent(stale.Ref()) {
+		t.Fatal("stale generation must not remove current session")
+	}
+	if !m.RemoveIfCurrent(current.Ref()) {
+		t.Fatal("current generation should be removed")
+	}
+	if m.RemoveIfCurrent(current.Ref()) {
+		t.Fatal("conditional remove must be idempotent")
+	}
+}
