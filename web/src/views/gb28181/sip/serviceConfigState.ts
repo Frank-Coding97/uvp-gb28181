@@ -1,5 +1,7 @@
 export interface StaticServiceConfigDraft {
     defaultChannelStreamTransport: "UDP" | "TCP-Active" | "TCP-Passive";
+    globalSubscriptionItems: Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">;
+    defaultChannelAudioEnabled: boolean;
     saveMobilePositionHistory: boolean;
     positionHistoryRetentionDays: number;
     sdpExtension: boolean;
@@ -32,6 +34,8 @@ export interface StaticServiceConfigDraft {
 
 export const staticServiceConfigLabels = [
     "新通道默认流传输模式",
+    "全局订阅项目",
+    "全局通道开启音频",
     "保存移动位置历史轨迹",
     "位置历史保留天数（天）",
     "扩展 SDP 兼容模式",
@@ -67,6 +71,8 @@ export const cascadeServiceConfigLabels = [
 export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
     return {
         defaultChannelStreamTransport: "TCP-Passive",
+        globalSubscriptionItems: [],
+        defaultChannelAudioEnabled: true,
         saveMobilePositionHistory: true,
         positionHistoryRetentionDays: 7,
         sdpExtension: false,

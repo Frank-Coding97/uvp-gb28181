@@ -44,6 +44,8 @@ func BuildSubscriptionQueryWithProfile(profile protocol.Profile, kind gbmodels.S
 		q.Interval = &interval
 	case gbmodels.SubscriptionKindAlarm:
 		q.CmdType, event = CmdAlarm, "presence"
+	case gbmodels.SubscriptionKindPTZPrecisePosition:
+		q.CmdType, event = CmdPTZPosition, CmdPTZPosition
 	}
 	body, err := MarshalProfiledXML(profile, q)
 	if err != nil {
@@ -71,6 +73,10 @@ func ResolveSubscriptionKind(event string, body []byte) (gbmodels.SubscriptionKi
 	case CmdAlarm:
 		if normalized == "presence" || normalized == "alarm" {
 			return gbmodels.SubscriptionKindAlarm, nil
+		}
+	case CmdPTZPrecisePosition, CmdPTZPosition:
+		if strings.Contains(normalized, "ptzprecise") || strings.Contains(normalized, "ptzposition") {
+			return gbmodels.SubscriptionKindPTZPrecisePosition, nil
 		}
 	}
 	return "", fmt.Errorf("不支持的订阅通知 Event=%q CmdType=%q", event, head.CmdType)

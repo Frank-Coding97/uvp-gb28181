@@ -5,6 +5,8 @@ import { computed, onMounted, reactive, ref } from "vue";
 import {
     fetchPTZDefaultSpeedConfig,
     fetchDefaultChannelStreamTransportConfig,
+    fetchGlobalSubscriptionConfig,
+    fetchDefaultChannelAudioConfig,
     fetchPositionHistoryConfig,
     fetchSDPExtensionConfig,
     fetchSIPLogConfig,
@@ -17,6 +19,8 @@ import {
     updatePositionHistoryConfig,
     updatePTZDefaultSpeedConfig,
     updateDefaultChannelStreamTransportConfig,
+    updateGlobalSubscriptionConfig,
+    updateDefaultChannelAudioConfig,
     updateSIPLogConfig,
     updateSDPExtensionConfig,
     updateSyncChannelsOnOnlineConfig,
@@ -45,6 +49,12 @@ const ptzDefaultSpeedReady = ref(false);
 const defaultChannelStreamTransportLoading = ref(true);
 const defaultChannelStreamTransportSaving = ref(false);
 const defaultChannelStreamTransportReady = ref(false);
+const globalSubscriptionLoading = ref(true);
+const globalSubscriptionSaving = ref(false);
+const globalSubscriptionReady = ref(false);
+const defaultChannelAudioLoading = ref(true);
+const defaultChannelAudioSaving = ref(false);
+const defaultChannelAudioReady = ref(false);
 const syncChannelsOnOnlineLoading = ref(true);
 const syncChannelsOnOnlineSaving = ref(false);
 const syncChannelsOnOnlineReady = ref(false);
@@ -72,6 +82,8 @@ const savedPositionHistoryRetentionDays = ref(7);
 const savedSDPExtensionEnabled = ref(false);
 const savedPTZDefaultSpeed = ref(6);
 const savedDefaultChannelStreamTransport = ref<"UDP" | "TCP-Active" | "TCP-Passive">("TCP-Passive");
+const savedGlobalSubscriptionItems = ref<Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">>([]);
+const savedDefaultChannelAudioEnabled = ref(true);
 const savedSyncChannelsOnOnline = ref(true);
 const savedOnlineOnHeartbeat = ref(true);
 const savedSaveAlarmMessages = ref(true);
@@ -88,6 +100,12 @@ const sdpExtensionChanged = computed(() => draft.sdpExtension !== savedSDPExtens
 const ptzDefaultSpeedChanged = computed(() => draft.ptzSpeed !== savedPTZDefaultSpeed.value);
 const defaultChannelStreamTransportChanged = computed(
     () => draft.defaultChannelStreamTransport !== savedDefaultChannelStreamTransport.value
+);
+const globalSubscriptionChanged = computed(
+    () => JSON.stringify(draft.globalSubscriptionItems) !== JSON.stringify(savedGlobalSubscriptionItems.value)
+);
+const defaultChannelAudioChanged = computed(
+    () => draft.defaultChannelAudioEnabled !== savedDefaultChannelAudioEnabled.value
 );
 const syncChannelsOnOnlineChanged = computed(
     () => draft.syncChannelsOnOnline !== savedSyncChannelsOnOnline.value
@@ -106,6 +124,8 @@ const hasChanges = computed(
         sdpExtensionChanged.value ||
         ptzDefaultSpeedChanged.value ||
         defaultChannelStreamTransportChanged.value ||
+        globalSubscriptionChanged.value ||
+        defaultChannelAudioChanged.value ||
         syncChannelsOnOnlineChanged.value ||
         onlineOnHeartbeatChanged.value ||
         saveAlarmMessagesChanged.value ||
@@ -120,6 +140,8 @@ const configLoading = computed(
         sdpExtensionLoading.value ||
         ptzDefaultSpeedLoading.value ||
         defaultChannelStreamTransportLoading.value ||
+        globalSubscriptionLoading.value ||
+        defaultChannelAudioLoading.value ||
         syncChannelsOnOnlineLoading.value ||
         onlineOnHeartbeatLoading.value ||
         saveAlarmMessagesLoading.value ||
@@ -134,6 +156,8 @@ const configSaving = computed(
         sdpExtensionSaving.value ||
         ptzDefaultSpeedSaving.value ||
         defaultChannelStreamTransportSaving.value ||
+        globalSubscriptionSaving.value ||
+        defaultChannelAudioSaving.value ||
         syncChannelsOnOnlineSaving.value ||
         onlineOnHeartbeatSaving.value ||
         saveAlarmMessagesSaving.value ||
@@ -148,6 +172,8 @@ const configReady = computed(
         sdpExtensionReady.value &&
         ptzDefaultSpeedReady.value &&
         defaultChannelStreamTransportReady.value &&
+        globalSubscriptionReady.value &&
+        defaultChannelAudioReady.value &&
         syncChannelsOnOnlineReady.value &&
         onlineOnHeartbeatReady.value &&
         saveAlarmMessagesReady.value &&
@@ -218,6 +244,36 @@ async function loadDefaultChannelStreamTransportConfig() {
         Message.error(error?.message || "加载新通道默认流传输模式失败");
     } finally {
         defaultChannelStreamTransportLoading.value = false;
+    }
+}
+
+async function loadGlobalSubscriptionConfig() {
+    globalSubscriptionLoading.value = true;
+    try {
+        const response = await fetchGlobalSubscriptionConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.globalSubscriptionItems = [...response.data.items];
+        savedGlobalSubscriptionItems.value = [...response.data.items];
+        globalSubscriptionReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载全局订阅项目失败");
+    } finally {
+        globalSubscriptionLoading.value = false;
+    }
+}
+
+async function loadDefaultChannelAudioConfig() {
+    defaultChannelAudioLoading.value = true;
+    try {
+        const response = await fetchDefaultChannelAudioConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        draft.defaultChannelAudioEnabled = response.data.enabled;
+        savedDefaultChannelAudioEnabled.value = response.data.enabled;
+        defaultChannelAudioReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载全局通道音频配置失败");
+    } finally {
+        defaultChannelAudioLoading.value = false;
     }
 }
 
@@ -333,6 +389,8 @@ function startEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
+    draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
+    draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
     draft.saveAlarmMessages = savedSaveAlarmMessages.value;
@@ -349,6 +407,8 @@ function cancelEditing() {
     draft.sdpExtension = savedSDPExtensionEnabled.value;
     draft.ptzSpeed = savedPTZDefaultSpeed.value;
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
+    draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
+    draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
     draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
     draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
     draft.saveAlarmMessages = savedSaveAlarmMessages.value;
@@ -403,6 +463,22 @@ async function saveConfig() {
             draft.defaultChannelStreamTransport = response.data.transport;
             savedDefaultChannelStreamTransport.value = response.data.transport;
             defaultChannelStreamTransportSaving.value = false;
+        }
+        if (globalSubscriptionChanged.value) {
+            globalSubscriptionSaving.value = true;
+            const response = await updateGlobalSubscriptionConfig(draft.globalSubscriptionItems);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.globalSubscriptionItems = [...response.data.items];
+            savedGlobalSubscriptionItems.value = [...response.data.items];
+            globalSubscriptionSaving.value = false;
+        }
+        if (defaultChannelAudioChanged.value) {
+            defaultChannelAudioSaving.value = true;
+            const response = await updateDefaultChannelAudioConfig(draft.defaultChannelAudioEnabled);
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            draft.defaultChannelAudioEnabled = response.data.enabled;
+            savedDefaultChannelAudioEnabled.value = response.data.enabled;
+            defaultChannelAudioSaving.value = false;
         }
         if (syncChannelsOnOnlineChanged.value) {
             syncChannelsOnOnlineSaving.value = true;
@@ -475,6 +551,8 @@ async function saveConfig() {
         sdpExtensionSaving.value = false;
         ptzDefaultSpeedSaving.value = false;
         defaultChannelStreamTransportSaving.value = false;
+        globalSubscriptionSaving.value = false;
+        defaultChannelAudioSaving.value = false;
         syncChannelsOnOnlineSaving.value = false;
         onlineOnHeartbeatSaving.value = false;
         saveAlarmMessagesSaving.value = false;
@@ -491,6 +569,8 @@ onMounted(() =>
         loadSDPExtensionConfig(),
         loadPTZDefaultSpeedConfig(),
         loadDefaultChannelStreamTransportConfig(),
+        loadGlobalSubscriptionConfig(),
+        loadDefaultChannelAudioConfig(),
         loadSyncChannelsOnOnlineConfig(),
         loadOnlineOnHeartbeatConfig(),
         loadSaveAlarmMessagesConfig(),
@@ -504,8 +584,7 @@ onMounted(() =>
 
 <template>
     <div class="snow-fill">
-        <div class="snow-fill-inner service-config-shell">
-            <a-tabs
+        <a-tabs
                 v-model:active-key="activeTab"
                 class="uvp-system-tabs service-config-tabs"
                 :animation="true"
@@ -632,6 +711,48 @@ onMounted(() =>
                                         </a-radio-group>
                                         <template #extra>
                                             <div>仅影响之后通过 Catalog 新发现的通道，现有通道保持不变；默认 TCP 被动。</div>
+                                        </template>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item field="globalSubscriptionItems" label="全局订阅项目">
+                                        <a-checkbox-group
+                                            v-model="draft.globalSubscriptionItems"
+                                            class="global-subscription-items"
+                                            :disabled="
+                                                !isEditing ||
+                                                globalSubscriptionLoading ||
+                                                globalSubscriptionSaving ||
+                                                !globalSubscriptionReady
+                                            "
+                                        >
+                                            <a-checkbox value="catalog">目录</a-checkbox>
+                                            <a-checkbox value="alarm">报警</a-checkbox>
+                                            <a-checkbox value="mobile_position">位置</a-checkbox>
+                                            <a-checkbox value="ptz_precise_position">PTZ 精准位置变化（2022）</a-checkbox>
+                                        </a-checkbox-group>
+                                        <template #extra>
+                                            <div>设备下次上线时，为尚未单独配置的订阅项目应用默认值；设备已有订阅配置保持不变。默认不启用。</div>
+                                        </template>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item field="defaultChannelAudioEnabled" label="全局通道开启音频">
+                                        <a-switch
+                                            v-model="draft.defaultChannelAudioEnabled"
+                                            :loading="defaultChannelAudioLoading || defaultChannelAudioSaving"
+                                            :disabled="
+                                                !isEditing ||
+                                                defaultChannelAudioLoading ||
+                                                defaultChannelAudioSaving ||
+                                                !defaultChannelAudioReady
+                                            "
+                                        >
+                                            <template #checked>开启</template>
+                                            <template #unchecked>关闭</template>
+                                        </a-switch>
+                                        <template #extra>
+                                            <div>仅影响之后通过 Catalog 新发现的通道，现有通道保持原音频设置；默认开启。</div>
                                         </template>
                                     </a-form-item>
                                 </a-col>
@@ -833,16 +954,11 @@ onMounted(() =>
                         </a-form>
                     </a-card>
                 </a-tab-pane>
-            </a-tabs>
-        </div>
+        </a-tabs>
     </div>
 </template>
 
 <style lang="scss" scoped>
-.service-config-shell {
-    overflow-y: auto;
-}
-
 .service-config-tabs {
     :deep(.arco-tabs-nav) {
         display: flex;
@@ -897,6 +1013,25 @@ onMounted(() =>
         flex: 1 1 0;
         min-width: 0;
         text-align: center;
+    }
+}
+
+.global-subscription-items {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    min-height: 32px;
+    align-items: center;
+    width: min(100%, 360px);
+
+    :deep(.arco-checkbox) {
+        min-width: 0;
+        margin-right: 0;
+        white-space: normal;
+    }
+
+    :deep(.arco-checkbox-label) {
+        line-height: 20px;
     }
 }
 

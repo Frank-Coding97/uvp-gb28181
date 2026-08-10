@@ -28,7 +28,10 @@ func (c *pipelineTestYAML) GetString(key string) string {
 	value, _ := c.values[key].(string)
 	return value
 }
-func (c *pipelineTestYAML) GetBool(string) bool               { return false }
+func (c *pipelineTestYAML) GetBool(key string) bool {
+	value, _ := c.values[key].(bool)
+	return value
+}
 func (c *pipelineTestYAML) GetInt(string) int                 { return 0 }
 func (c *pipelineTestYAML) GetInt32(string) int32             { return 0 }
 func (c *pipelineTestYAML) GetInt64(string) int64             { return 0 }
@@ -110,6 +113,37 @@ func TestPipeline_IngestUsesConfiguredTransportOnlyForNewChannels(t *testing.T) 
 	require.Len(t, channels, 2)
 	require.Equal(t, "UDP", channels[0].StreamTransport, "已有通道不能被新默认值覆盖")
 	require.Equal(t, "TCP-Active", channels[1].StreamTransport)
+}
+
+func TestPipeline_IngestUsesConfiguredAudioOnlyForNewChannels(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	testConfig := &pipelineTestYAML{values: map[string]interface{}{
+		gbconfig.DefaultChannelAudioEnabledConfigKey: false,
+	}}
+	app.ConfigYml = testConfig
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: "34020000001180000001"}
+
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: "37011200001310000001", Name: "入口", StatusOn: true},
+	}))
+	var first gbmodels.GbChannel
+	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&first).Error)
+	require.False(t, first.AudioEnabled)
+
+	testConfig.values[gbconfig.DefaultChannelAudioEnabledConfigKey] = true
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: "37011200001310000001", Name: "入口更新", StatusOn: true},
+		{DeviceID: "37011200001310000002", Name: "出口", StatusOn: true},
+	}))
+
+	var channels []gbmodels.GbChannel
+	require.NoError(t, db.Order("channel_id").Find(&channels).Error)
+	require.Len(t, channels, 2)
+	require.False(t, channels[0].AudioEnabled, "已有通道不能被新默认值覆盖")
+	require.True(t, channels[1].AudioEnabled)
 }
 
 func TestPipeline_IngestPersistsAlarmResourceAndMultipleParents(t *testing.T) {

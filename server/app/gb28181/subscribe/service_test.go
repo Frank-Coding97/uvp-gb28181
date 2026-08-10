@@ -69,6 +69,21 @@ func TestService_EnableRejectsOfflineAndDegradesOnFailure(t *testing.T) {
 	require.NotNil(t, sub.NextActionAt)
 }
 
+func TestService_PTZPrecisePositionFailureWaitsForNextOnline(t *testing.T) {
+	sender := &fakeSender{err: errors.New("not supported")}
+	svc, db, device := newServiceTest(t, sender)
+
+	sub, err := svc.Enable(context.Background(), device, gbmodels.SubscriptionKindPTZPrecisePosition)
+	require.ErrorContains(t, err, "not supported")
+	require.Equal(t, gbmodels.SubscriptionStatusDegraded, sub.Status)
+	require.True(t, sub.Enabled)
+	require.Nil(t, sub.NextActionAt)
+
+	require.NoError(t, svc.WakeDevice(context.Background(), device.ID))
+	require.NoError(t, db.Where("device_id = ? AND kind = ?", device.ID, gbmodels.SubscriptionKindPTZPrecisePosition).First(&sub).Error)
+	require.WithinDuration(t, svc.now(), *sub.NextActionAt, time.Second)
+}
+
 func TestService_DisableStopsLocallyWhenRemoteCancelFails(t *testing.T) {
 	sender := &fakeSender{response: uac.SubscriptionResponse{StatusCode: 200, Expires: 3600, CallID: "call", CSeq: 1}}
 	svc, _, device := newServiceTest(t, sender)

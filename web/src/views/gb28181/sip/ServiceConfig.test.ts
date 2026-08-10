@@ -7,6 +7,10 @@ const api = vi.hoisted(() => ({
     updatePTZDefaultSpeedConfig: vi.fn(),
     fetchDefaultChannelStreamTransportConfig: vi.fn(),
     updateDefaultChannelStreamTransportConfig: vi.fn(),
+    fetchGlobalSubscriptionConfig: vi.fn(),
+    updateGlobalSubscriptionConfig: vi.fn(),
+    fetchDefaultChannelAudioConfig: vi.fn(),
+    updateDefaultChannelAudioConfig: vi.fn(),
     fetchPositionHistoryConfig: vi.fn(),
     updatePositionHistoryConfig: vi.fn(),
     fetchSDPExtensionConfig: vi.fn(),
@@ -67,6 +71,17 @@ const OptionStub = {
     template: `<option :value="value"><slot /></option>`
 };
 
+const CheckboxGroupStub = {
+    props: ["modelValue", "disabled"],
+    emits: ["update:modelValue"],
+    template: `<div data-checkbox-group>{{ modelValue.join(",") }}<slot /></div>`
+};
+
+const CheckboxStub = {
+    props: ["value"],
+    template: `<span><slot /></span>`
+};
+
 function mountPage() {
     return mount(ServiceConfig, {
         global: {
@@ -87,6 +102,8 @@ function mountPage() {
                 "a-input-number": InputNumberStub,
                 "a-radio-group": SelectStub,
                 "a-radio": OptionStub,
+                "a-checkbox-group": CheckboxGroupStub,
+                "a-checkbox": CheckboxStub,
                 "a-select": SelectStub,
                 "a-option": OptionStub
             }
@@ -104,6 +121,10 @@ describe("ServiceConfig edit mode", () => {
         api.updatePTZDefaultSpeedConfig.mockReset();
         api.fetchDefaultChannelStreamTransportConfig.mockReset();
         api.updateDefaultChannelStreamTransportConfig.mockReset();
+        api.fetchGlobalSubscriptionConfig.mockReset();
+        api.updateGlobalSubscriptionConfig.mockReset();
+        api.fetchDefaultChannelAudioConfig.mockReset();
+        api.updateDefaultChannelAudioConfig.mockReset();
         api.fetchSyncChannelsOnOnlineConfig.mockReset();
         api.updateSyncChannelsOnOnlineConfig.mockReset();
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockReset();
@@ -122,12 +143,20 @@ describe("ServiceConfig edit mode", () => {
         api.fetchSDPExtensionConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
         api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 8 } });
         api.fetchDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "", data: { transport: "TCP-Passive" } });
+        api.fetchGlobalSubscriptionConfig.mockResolvedValue({ code: 0, message: "", data: { items: [] } });
+        api.fetchDefaultChannelAudioConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updatePositionHistoryConfig.mockResolvedValue({
             code: 0,
             message: "保存成功",
             data: { enabled: false, retentionDays: 7 }
         });
         api.updateSDPExtensionConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: true } });
+        api.updateGlobalSubscriptionConfig.mockResolvedValue({
+            code: 0,
+            message: "保存成功",
+            data: { items: ["catalog", "alarm"] }
+        });
+        api.updateDefaultChannelAudioConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.updatePTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { level: 10 } });
         api.updateDefaultChannelStreamTransportConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { transport: "UDP" } });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
@@ -151,7 +180,7 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(wrapper.find(".uvp-system-tabs").exists()).toBe(true);
-        expect(wrapper.find(".service-config-shell").exists()).toBe(true);
+        expect(wrapper.find(".service-config-shell").exists()).toBe(false);
         expect(wrapper.findAll(".uvp-system-panel")).toHaveLength(3);
         expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
     });
@@ -304,6 +333,45 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(api.updateDefaultChannelStreamTransportConfig).toHaveBeenCalledWith("UDP");
+    });
+
+    it("loads and saves global subscription defaults", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchGlobalSubscriptionConfig).toHaveBeenCalledOnce();
+        expect(wrapper.text()).toContain("全局订阅项目");
+        expect(wrapper.text()).toContain("目录");
+        expect(wrapper.text()).toContain("报警");
+        expect(wrapper.text()).toContain("位置");
+        expect(wrapper.text()).toContain("PTZ 精准位置变化（2022）");
+
+        await wrapper.get("button").trigger("click");
+        wrapper.findComponent(CheckboxGroupStub).vm.$emit("update:modelValue", ["catalog", "alarm", "ptz_precise_position"]);
+        await wrapper.vm.$nextTick();
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateGlobalSubscriptionConfig).toHaveBeenCalledWith(["catalog", "alarm", "ptz_precise_position"]);
+    });
+
+    it("loads and saves the default audio switch for newly discovered channels", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(api.fetchDefaultChannelAudioConfig).toHaveBeenCalledOnce();
+        const audioLabel = wrapper.findAll("label").find(label => label.text().includes("全局通道开启音频"));
+        expect(audioLabel?.text()).toContain("仅影响之后通过 Catalog 新发现的通道");
+        const audioSwitch = audioLabel?.find("button");
+
+        await wrapper.get("button").trigger("click");
+        await audioSwitch?.trigger("click");
+        const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
+        await saveButton?.trigger("click");
+        await flushPromises();
+
+        expect(api.updateDefaultChannelAudioConfig).toHaveBeenCalledWith(false);
     });
 
     it("loads and saves the device-online channel synchronization switch", async () => {

@@ -211,6 +211,26 @@ func TestDefaultChannelStreamTransportFromDefaultsAndValidates(t *testing.T) {
 	}
 }
 
+func TestDefaultChannelAudioEnabledFromDefaultsToEnabled(t *testing.T) {
+	source := fakeSource{}
+	require.True(t, DefaultChannelAudioEnabledFrom(source))
+
+	source.values = map[string]interface{}{DefaultChannelAudioEnabledConfigKey: false}
+	source.bools = map[string]bool{DefaultChannelAudioEnabledConfigKey: false}
+	require.False(t, DefaultChannelAudioEnabledFrom(source))
+}
+
+func TestGlobalSubscriptionItemsFromFiltersInvalidAndDuplicateItems(t *testing.T) {
+	source := fakeSource{}
+	require.Empty(t, GlobalSubscriptionItemsFrom(source))
+
+	source.values = map[string]interface{}{GlobalSubscriptionItemsConfigKey: []string{"catalog"}}
+	source.slices = map[string][]string{
+		GlobalSubscriptionItemsConfigKey: {"catalog", "alarm", "catalog", "ptz", "mobile_position", "ptz_precise_position"},
+	}
+	require.Equal(t, []string{"catalog", "alarm", "mobile_position", "ptz_precise_position"}, GlobalSubscriptionItemsFrom(source))
+}
+
 func TestSIPTraceEnabledFromDefaultsToDisabled(t *testing.T) {
 	source := fakeSource{}
 	require.False(t, SIPTraceEnabledFrom(source))

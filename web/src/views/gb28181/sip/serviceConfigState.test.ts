@@ -10,9 +10,13 @@ describe("static service config draft", () => {
     it("matches the reference controls without SIP access identity fields", () => {
         const draft = createStaticServiceConfigDraft();
         expect(draft.defaultChannelStreamTransport).toBe("TCP-Passive");
+        expect(draft.globalSubscriptionItems).toEqual([]);
+        expect(draft.defaultChannelAudioEnabled).toBe(true);
 
-        expect(staticServiceConfigLabels).toHaveLength(12);
+        expect(staticServiceConfigLabels).toHaveLength(14);
         expect(staticServiceConfigLabels).toContain("新通道默认流传输模式");
+        expect(staticServiceConfigLabels).toContain("全局订阅项目");
+        expect(staticServiceConfigLabels).toContain("全局通道开启音频");
         expect(staticServiceConfigLabels).toContain("扩展 SDP 兼容模式");
         expect(staticServiceConfigLabels).toContain("云台默认速度");
         expect(staticServiceConfigLabels).toContain("忽略通道离线/异常通知");

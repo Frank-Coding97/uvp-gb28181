@@ -44,6 +44,7 @@ func TestSubscriptionKinds_Validate(t *testing.T) {
 		gbmodels.SubscriptionKindCatalog,
 		gbmodels.SubscriptionKindMobilePosition,
 		gbmodels.SubscriptionKindAlarm,
+		gbmodels.SubscriptionKindPTZPrecisePosition,
 	} {
 		require.True(t, kind.Valid())
 	}

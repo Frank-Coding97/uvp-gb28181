@@ -18,6 +18,7 @@ func TestBuildSubscriptionQuery(t *testing.T) {
 		{gbmodels.SubscriptionKindCatalog, "Catalog", "<CmdType>Catalog</CmdType>"},
 		{gbmodels.SubscriptionKindMobilePosition, "presence", "<Interval>30</Interval>"},
 		{gbmodels.SubscriptionKindAlarm, "presence", "<CmdType>Alarm</CmdType>"},
+		{gbmodels.SubscriptionKindPTZPrecisePosition, "PTZPosition", "<CmdType>PTZPosition</CmdType>"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.kind), func(t *testing.T) {
@@ -42,6 +43,7 @@ func TestResolveSubscriptionKind_CompatibleEventVariants(t *testing.T) {
 		{"presence", `<Notify><CmdType>MobilePosition</CmdType><DeviceID>D</DeviceID></Notify>`, gbmodels.SubscriptionKindMobilePosition},
 		{"presence", `<Notify><CmdType>Alarm</CmdType><DeviceID>D</DeviceID></Notify>`, gbmodels.SubscriptionKindAlarm},
 		{"Alarm;id=9", `<Notify><CmdType>Alarm</CmdType><DeviceID>D</DeviceID></Notify>`, gbmodels.SubscriptionKindAlarm},
+		{"PTZPosition", `<Notify><CmdType>PTZPosition</CmdType><DeviceID>D</DeviceID></Notify>`, gbmodels.SubscriptionKindPTZPrecisePosition},
 	}
 	for _, tc := range cases {
 		got, err := ResolveSubscriptionKind(tc.event, []byte(tc.body))

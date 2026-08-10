@@ -38,11 +38,14 @@ func (c *serviceConfigTestYAML) GetInt(key string) int {
 	value, _ := c.values[key].(int)
 	return value
 }
-func (c *serviceConfigTestYAML) GetInt32(string) int32             { return 0 }
-func (c *serviceConfigTestYAML) GetInt64(string) int64             { return 0 }
-func (c *serviceConfigTestYAML) GetFloat64(string) float64         { return 0 }
-func (c *serviceConfigTestYAML) GetDuration(string) time.Duration  { return 0 }
-func (c *serviceConfigTestYAML) GetStringSlice(string) []string    { return nil }
+func (c *serviceConfigTestYAML) GetInt32(string) int32            { return 0 }
+func (c *serviceConfigTestYAML) GetInt64(string) int64            { return 0 }
+func (c *serviceConfigTestYAML) GetFloat64(string) float64        { return 0 }
+func (c *serviceConfigTestYAML) GetDuration(string) time.Duration { return 0 }
+func (c *serviceConfigTestYAML) GetStringSlice(key string) []string {
+	value, _ := c.values[key].([]string)
+	return value
+}
 func (c *serviceConfigTestYAML) GetUintSlice(string) []uint        { return nil }
 func (c *serviceConfigTestYAML) Set(key string, value interface{}) { c.values[key] = value }
 func (c *serviceConfigTestYAML) SaveConfig() error                 { c.saveNum++; return c.saveErr }
@@ -71,6 +74,10 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/ptz-default-speed", controller.UpdatePTZDefaultSpeed)
 	router.GET("/default-channel-stream-transport", controller.GetDefaultChannelStreamTransport)
 	router.PUT("/default-channel-stream-transport", controller.UpdateDefaultChannelStreamTransport)
+	router.GET("/global-subscriptions", controller.GetGlobalSubscriptions)
+	router.PUT("/global-subscriptions", controller.UpdateGlobalSubscriptions)
+	router.GET("/default-channel-audio", controller.GetDefaultChannelAudio)
+	router.PUT("/default-channel-audio", controller.UpdateDefaultChannelAudio)
 	router.GET("/sip-log", controller.GetSIPLog)
 	router.PUT("/sip-log", controller.UpdateSIPLog)
 	return router
@@ -515,6 +522,108 @@ func TestServiceConfigController_UpdateDefaultChannelStreamTransportRollsBackOnS
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Equal(t, "TCP-Passive", config.values[gbconfig.DefaultChannelStreamTransportConfigKey])
+}
+
+func TestServiceConfigController_GlobalSubscriptionsDefaultsToEmpty(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/global-subscriptions", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Empty(t, serviceConfigData(t, recorder)["items"])
+}
+
+func TestServiceConfigController_UpdateGlobalSubscriptionsPersistsAndValidates(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.GlobalSubscriptionItemsConfigKey: []string{},
+	}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPut, "/global-subscriptions", jsonBody(t, map[string]any{"items": []string{"catalog", "alarm"}}),
+	))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"catalog", "alarm"}, config.values[gbconfig.GlobalSubscriptionItemsConfigKey])
+
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPut, "/global-subscriptions", jsonBody(t, map[string]any{"items": []string{"ptz_precise_position"}}),
+	))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []string{"ptz_precise_position"}, config.values[gbconfig.GlobalSubscriptionItemsConfigKey])
+
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(
+		http.MethodPut, "/global-subscriptions", jsonBody(t, map[string]any{"items": []string{"ptz"}}),
+	))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Equal(t, []string{"ptz_precise_position"}, config.values[gbconfig.GlobalSubscriptionItemsConfigKey])
+}
+
+func TestServiceConfigController_UpdateGlobalSubscriptionsRollsBackOnSaveError(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{
+		values:  map[string]interface{}{gbconfig.GlobalSubscriptionItemsConfigKey: []string{"catalog"}},
+		saveErr: errors.New("disk full"),
+	}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder,
+		httptest.NewRequest(http.MethodPut, "/global-subscriptions", jsonBody(t, map[string]any{"items": []string{"alarm"}})),
+	)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, []string{"catalog"}, config.values[gbconfig.GlobalSubscriptionItemsConfigKey])
+}
+
+func TestServiceConfigController_DefaultChannelAudioDefaultsToEnabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = nil
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodGet, "/default-channel-audio", nil),
+	)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, true, serviceConfigData(t, recorder)["enabled"])
+}
+
+func TestServiceConfigController_UpdateDefaultChannelAudioPersistsAndRollsBack(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.DefaultChannelAudioEnabledConfigKey: true,
+	}}
+	app.ConfigYml = config
+
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/default-channel-audio", jsonBody(t, map[string]bool{"enabled": false})),
+	)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, false, config.values[gbconfig.DefaultChannelAudioEnabledConfigKey])
+
+	config.saveErr = errors.New("disk full")
+	recorder = httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(
+		recorder, httptest.NewRequest(http.MethodPut, "/default-channel-audio", jsonBody(t, map[string]bool{"enabled": true})),
+	)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
+	require.Equal(t, false, config.values[gbconfig.DefaultChannelAudioEnabledConfigKey])
 }
 
 func TestServiceConfigController_SDPExtensionDefaultsToDisabled(t *testing.T) {

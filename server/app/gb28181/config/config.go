@@ -17,6 +17,8 @@ const (
 	PreallocationModeConfigKey                = "gb28181.device.preallocation_mode"
 	IgnoreChannelOfflineStatusNotifyConfigKey = "gb28181.catalog.ignore_channel_offline_status_notify"
 	DefaultChannelStreamTransportConfigKey    = "gb28181.catalog.default_channel_stream_transport"
+	DefaultChannelAudioEnabledConfigKey       = "gb28181.catalog.default_channel_audio_enabled"
+	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
@@ -30,6 +32,7 @@ const (
 	DefaultPlaybackMaxSessionSec         = 86400
 	DefaultSIPCommandTimeoutSec          = 10
 	DefaultChannelStreamTransport        = "TCP-Passive"
+	DefaultChannelAudioEnabledValue      = true
 
 	MaxRecordQueryTimeoutSec = 300
 	MaxRecordQueryRangeHours = 168
@@ -41,6 +44,60 @@ const (
 	MaxPlaybackSessionSec    = 86400
 	MaxSIPCommandTimeoutSec  = 300
 )
+
+var supportedGlobalSubscriptionItems = []string{"catalog", "mobile_position", "alarm", "ptz_precise_position"}
+
+// GlobalSubscriptionItemsFrom returns the subscription kinds used as defaults
+// for devices that do not yet have a device-level subscription row.
+// Missing or invalid entries are ignored, and the result is de-duplicated.
+func GlobalSubscriptionItemsFrom(c valueSource) []string {
+	if c == nil || c.Get(GlobalSubscriptionItemsConfigKey) == nil {
+		return []string{}
+	}
+	allowed := make(map[string]struct{}, len(supportedGlobalSubscriptionItems))
+	for _, item := range supportedGlobalSubscriptionItems {
+		allowed[item] = struct{}{}
+	}
+	seen := make(map[string]struct{})
+	items := make([]string, 0, len(supportedGlobalSubscriptionItems))
+	for _, item := range c.GetStringSlice(GlobalSubscriptionItemsConfigKey) {
+		if _, ok := allowed[item]; !ok {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		items = append(items, item)
+	}
+	return items
+}
+
+func GlobalSubscriptionItems() []string {
+	return GlobalSubscriptionItemsFrom(app.ConfigYml)
+}
+
+func IsSupportedGlobalSubscriptionItem(item string) bool {
+	for _, supported := range supportedGlobalSubscriptionItems {
+		if item == supported {
+			return true
+		}
+	}
+	return false
+}
+
+// DefaultChannelAudioEnabledFrom returns the audio default for newly created
+// Catalog channels. Missing configuration preserves the historical behavior.
+func DefaultChannelAudioEnabledFrom(c valueSource) bool {
+	if c == nil || c.Get(DefaultChannelAudioEnabledConfigKey) == nil {
+		return DefaultChannelAudioEnabledValue
+	}
+	return c.GetBool(DefaultChannelAudioEnabledConfigKey)
+}
+
+func DefaultChannelAudioEnabled() bool {
+	return DefaultChannelAudioEnabledFrom(app.ConfigYml)
+}
 
 // SIPTraceEnabledFrom returns whether raw SIP trace collection is enabled.
 // Missing configuration intentionally defaults to false because trace storage

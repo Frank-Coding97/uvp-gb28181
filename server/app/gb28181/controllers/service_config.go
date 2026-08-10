@@ -59,6 +59,14 @@ type DefaultChannelStreamTransportConfig struct {
 	Transport string `json:"transport"`
 }
 
+type GlobalSubscriptionConfig struct {
+	Items []string `json:"items"`
+}
+
+type DefaultChannelAudioConfig struct {
+	Enabled bool `json:"enabled"`
+}
+
 // PTZDefaultSpeedConfig 是云台控制界面初始使用的 1-10 档速度。
 type PTZDefaultSpeedConfig struct {
 	Level int `json:"level"`
@@ -377,6 +385,79 @@ func (sc *ServiceConfigController) UpdateDefaultChannelStreamTransport(c *gin.Co
 	}
 
 	sc.SuccessWithMessage(c, "新通道默认流传输模式已更新", DefaultChannelStreamTransportConfig{Transport: *request.Transport})
+}
+
+// GetGlobalSubscriptions GET /api/gb28181/sip/service-config/global-subscriptions
+func (sc *ServiceConfigController) GetGlobalSubscriptions(c *gin.Context) {
+	sc.Success(c, GlobalSubscriptionConfig{Items: gbconfig.GlobalSubscriptionItems()})
+}
+
+// UpdateGlobalSubscriptions PUT /api/gb28181/sip/service-config/global-subscriptions
+func (sc *ServiceConfigController) UpdateGlobalSubscriptions(c *gin.Context) {
+	var request struct {
+		Items *[]string `json:"items"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Items == nil {
+		sc.Fail(c, "保存全局订阅项目失败：items 必须为数组", err, http.StatusBadRequest)
+		return
+	}
+	seen := make(map[string]struct{}, len(*request.Items))
+	for _, item := range *request.Items {
+		if !gbconfig.IsSupportedGlobalSubscriptionItem(item) {
+			sc.Fail(c, "保存全局订阅项目失败：仅支持 catalog、mobile_position、alarm、ptz_precise_position", nil, http.StatusBadRequest)
+			return
+		}
+		if _, ok := seen[item]; ok {
+			sc.Fail(c, "保存全局订阅项目失败：items 不能重复", nil, http.StatusBadRequest)
+			return
+		}
+		seen[item] = struct{}{}
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.GlobalSubscriptionItems()
+	items := append([]string(nil), (*request.Items)...)
+	app.ConfigYml.Set(gbconfig.GlobalSubscriptionItemsConfigKey, items)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.GlobalSubscriptionItemsConfigKey, previous)
+		sc.Fail(c, "保存全局订阅项目失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "全局订阅项目已更新", GlobalSubscriptionConfig{Items: items})
+}
+
+// GetDefaultChannelAudio GET /api/gb28181/sip/service-config/default-channel-audio
+func (sc *ServiceConfigController) GetDefaultChannelAudio(c *gin.Context) {
+	sc.Success(c, DefaultChannelAudioConfig{Enabled: gbconfig.DefaultChannelAudioEnabled()})
+}
+
+// UpdateDefaultChannelAudio PUT /api/gb28181/sip/service-config/default-channel-audio
+func (sc *ServiceConfigController) UpdateDefaultChannelAudio(c *gin.Context) {
+	var request struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
+		sc.Fail(c, "保存全局通道音频配置失败：enabled 必须为布尔值", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+
+	previous := gbconfig.DefaultChannelAudioEnabled()
+	app.ConfigYml.Set(gbconfig.DefaultChannelAudioEnabledConfigKey, *request.Enabled)
+	if err := app.ConfigYml.SaveConfig(); err != nil {
+		app.ConfigYml.Set(gbconfig.DefaultChannelAudioEnabledConfigKey, previous)
+		sc.Fail(c, "保存全局通道音频配置失败", err, http.StatusInternalServerError)
+		return
+	}
+
+	sc.SuccessWithMessage(c, "全局通道音频配置已更新", DefaultChannelAudioConfig{Enabled: *request.Enabled})
 }
 
 // GetPTZDefaultSpeed GET /api/gb28181/sip/service-config/ptz-default-speed

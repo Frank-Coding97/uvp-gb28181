@@ -853,6 +853,42 @@ export const updateDefaultChannelStreamTransportConfig = (transport: ChannelStre
     { data: { transport } }
   );
 
+export type GlobalSubscriptionItem = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";
+
+export interface GlobalSubscriptionConfig {
+  items: GlobalSubscriptionItem[];
+}
+
+export const fetchGlobalSubscriptionConfig = () =>
+  http.request<BaseResult<GlobalSubscriptionConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/global-subscriptions")
+  );
+
+export const updateGlobalSubscriptionConfig = (items: GlobalSubscriptionItem[]) =>
+  http.request<BaseResult<GlobalSubscriptionConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/global-subscriptions"),
+    { data: { items } }
+  );
+
+export interface DefaultChannelAudioConfig {
+  enabled: boolean;
+}
+
+export const fetchDefaultChannelAudioConfig = () =>
+  http.request<BaseResult<DefaultChannelAudioConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/default-channel-audio")
+  );
+
+export const updateDefaultChannelAudioConfig = (enabled: boolean) =>
+  http.request<BaseResult<DefaultChannelAudioConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/default-channel-audio"),
+    { data: { enabled } }
+  );
+
 export interface SIPLogConfig {
   enabled: boolean;
   applied: boolean;

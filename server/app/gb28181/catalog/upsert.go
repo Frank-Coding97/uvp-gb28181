@@ -132,6 +132,7 @@ func upsertChannel(
 		return nil, nil, res.Error
 	}
 	if res.RowsAffected == 0 {
+		defaultAudioEnabled := gbconfig.DefaultChannelAudioEnabled()
 		ch = gbmodels.GbChannel{
 			ChannelID:       item.DeviceID,
 			DeviceID:        sourceDeviceID,
@@ -146,12 +147,19 @@ func upsertChannel(
 			Latitude:        item.Latitude,
 			Status:          status,
 			OnDemandLive:    true,
-			AudioEnabled:    true,
+			AudioEnabled:    defaultAudioEnabled,
 			OwnerDeptID:     ownerDeptID,
 			StreamTransport: gbconfig.CurrentDefaultChannelStreamTransport(),
 		}
 		if err := db.WithContext(ctx).Create(&ch).Error; err != nil {
 			return nil, nil, err
+		}
+		// GORM 会把带 default:true 标签的 false 零值替换为数据库默认值。
+		if !defaultAudioEnabled {
+			if err := db.WithContext(ctx).Model(&ch).UpdateColumn("audio_enabled", false).Error; err != nil {
+				return nil, nil, err
+			}
+			ch.AudioEnabled = false
 		}
 	} else {
 		updates := map[string]any{

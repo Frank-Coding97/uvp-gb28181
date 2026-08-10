@@ -87,6 +87,9 @@ func (s *Service) WakeDevice(ctx context.Context, deviceID uint) error {
 	if s == nil || s.db == nil {
 		return nil
 	}
+	if err := s.ApplyGlobalDefaults(ctx, deviceID); err != nil {
+		return err
+	}
 	now := s.now()
 	return s.db.WithContext(ctx).Model(&gbmodels.GbDeviceSubscription{}).
 		Where("device_id = ? AND enabled = ?", deviceID, true).

@@ -5,14 +5,15 @@ import "time"
 type SubscriptionKind string
 
 const (
-	SubscriptionKindCatalog        SubscriptionKind = "catalog"
-	SubscriptionKindMobilePosition SubscriptionKind = "mobile_position"
-	SubscriptionKindAlarm          SubscriptionKind = "alarm"
+	SubscriptionKindCatalog            SubscriptionKind = "catalog"
+	SubscriptionKindMobilePosition     SubscriptionKind = "mobile_position"
+	SubscriptionKindAlarm              SubscriptionKind = "alarm"
+	SubscriptionKindPTZPrecisePosition SubscriptionKind = "ptz_precise_position"
 )
 
 func (k SubscriptionKind) Valid() bool {
 	switch k {
-	case SubscriptionKindCatalog, SubscriptionKindMobilePosition, SubscriptionKindAlarm:
+	case SubscriptionKindCatalog, SubscriptionKindMobilePosition, SubscriptionKindAlarm, SubscriptionKindPTZPrecisePosition:
 		return true
 	default:
 		return false

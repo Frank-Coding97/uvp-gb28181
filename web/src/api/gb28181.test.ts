@@ -8,6 +8,8 @@ vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 import {
   fetchPTZDefaultSpeedConfig,
   fetchDefaultChannelStreamTransportConfig,
+  fetchGlobalSubscriptionConfig,
+  fetchDefaultChannelAudioConfig,
   fetchSDPExtensionConfig,
   fetchSIPLogConfig,
   fetchPositionHistoryConfig,
@@ -28,6 +30,8 @@ import {
   updatePositionHistoryConfig,
   updatePTZDefaultSpeedConfig,
   updateDefaultChannelStreamTransportConfig,
+  updateGlobalSubscriptionConfig,
+  updateDefaultChannelAudioConfig,
   updateSDPExtensionConfig,
   updateSIPLogConfig,
   updateSyncChannelsOnOnlineConfig,
@@ -93,6 +97,30 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/default-channel-stream-transport",
       { data: { transport: "TCP-Active" } }
+    );
+  });
+
+  it("读取并更新全局订阅项目", async () => {
+    await fetchGlobalSubscriptionConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/global-subscriptions");
+
+    await updateGlobalSubscriptionConfig(["catalog", "alarm"]);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/global-subscriptions",
+      { data: { items: ["catalog", "alarm"] } }
+    );
+  });
+
+  it("读取并更新全局通道音频默认值", async () => {
+    await fetchDefaultChannelAudioConfig();
+    expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip/service-config/default-channel-audio");
+
+    await updateDefaultChannelAudioConfig(false);
+    expect(request).toHaveBeenLastCalledWith(
+      "put",
+      "/api/gb28181/sip/service-config/default-channel-audio",
+      { data: { enabled: false } }
     );
   });
 

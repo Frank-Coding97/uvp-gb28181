@@ -9,6 +9,7 @@ import (
 	"github.com/emiago/sipgo/sip"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
@@ -95,6 +96,15 @@ func (h *NotifyHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		strings.Contains(event, "ptzprecise") || strings.Contains(event, "ptzposition")) {
 		if err := ptzProcessor.OnPTZNotify(context.Background(), head.DeviceID, callID, cseq, req.Body()); err != nil {
 			app.ZapLog.Warn("GB28181 PTZ 精准通知处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+		}
+		if notifier != nil {
+			state, expires := parseSubscriptionState(headerValue(req, "Subscription-State"))
+			if err := notifier.OnNotify(context.Background(), subscribe.Notification{
+				Kind: gbmodels.SubscriptionKindPTZPrecisePosition, DeviceCode: head.DeviceID, CallID: callID, CSeq: cseq,
+				Source: req.Source(), SubscriptionState: state, Expires: expires, Body: req.Body(),
+			}); err != nil {
+				app.ZapLog.Warn("GB28181 PTZ 精准订阅状态更新失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
+			}
 		}
 		return
 	}

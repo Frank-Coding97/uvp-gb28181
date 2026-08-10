@@ -362,6 +362,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			serviceConfig.PUT("/ptz-default-speed", serviceConfigController.UpdatePTZDefaultSpeed)
 			serviceConfig.GET("/default-channel-stream-transport", serviceConfigController.GetDefaultChannelStreamTransport)
 			serviceConfig.PUT("/default-channel-stream-transport", serviceConfigController.UpdateDefaultChannelStreamTransport)
+			serviceConfig.GET("/global-subscriptions", serviceConfigController.GetGlobalSubscriptions)
+			serviceConfig.PUT("/global-subscriptions", serviceConfigController.UpdateGlobalSubscriptions)
+			serviceConfig.GET("/default-channel-audio", serviceConfigController.GetDefaultChannelAudio)
+			serviceConfig.PUT("/default-channel-audio", serviceConfigController.UpdateDefaultChannelAudio)
 			serviceConfig.GET("/sip-log", serviceConfigController.GetSIPLog)
 			serviceConfig.PUT("/sip-log", serviceConfigController.UpdateSIPLog)
 		}

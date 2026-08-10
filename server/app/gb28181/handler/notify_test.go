@@ -81,10 +81,13 @@ func TestNotifyHandler_PTZPreciseDispatchesAndAcknowledges(t *testing.T) {
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 2, MethodName: sip.NOTIFY})
 	tx := siptest.NewServerTxRecorder(req)
 	recorder := &ptzNotifyRecorder{}
-	h := NewNotifyHandler(nil)
+	notifier := &notifyRecorder{}
+	h := NewNotifyHandler(notifier)
 	h.SetPTZProcessor(recorder)
 	h.Handle(req, tx)
 	require.Len(t, recorder.bodies, 1)
+	require.Len(t, notifier.values, 1)
+	require.Equal(t, gbmodels.SubscriptionKindPTZPrecisePosition, notifier.values[0].Kind)
 	require.Len(t, tx.Result(), 1)
 	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
 }
@@ -99,10 +102,13 @@ func TestNotifyHandler_PTZPositionDispatchesAndAcknowledges(t *testing.T) {
 	req.AppendHeader(&sip.CSeqHeader{SeqNo: 2, MethodName: sip.NOTIFY})
 	tx := siptest.NewServerTxRecorder(req)
 	recorder := &ptzNotifyRecorder{}
-	h := NewNotifyHandler(nil)
+	notifier := &notifyRecorder{}
+	h := NewNotifyHandler(notifier)
 	h.SetPTZProcessor(recorder)
 	h.Handle(req, tx)
 	require.Len(t, recorder.bodies, 1)
+	require.Len(t, notifier.values, 1)
+	require.Equal(t, gbmodels.SubscriptionKindPTZPrecisePosition, notifier.values[0].Kind)
 	require.Len(t, tx.Result(), 1)
 	require.EqualValues(t, 200, tx.Result()[0].StatusCode)
 }

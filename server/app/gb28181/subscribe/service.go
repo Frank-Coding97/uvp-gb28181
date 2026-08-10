@@ -10,6 +10,7 @@ import (
 
 	"gorm.io/gorm"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -51,8 +52,11 @@ func (s *Service) lock(deviceID uint, kind gbmodels.SubscriptionKind) func() {
 }
 
 func subscriptionEvent(kind gbmodels.SubscriptionKind) string {
-	if kind == gbmodels.SubscriptionKindCatalog {
+	switch kind {
+	case gbmodels.SubscriptionKindCatalog:
 		return "Catalog"
+	case gbmodels.SubscriptionKindPTZPrecisePosition:
+		return manscdp.CmdPTZPosition
 	}
 	return "presence"
 }
@@ -86,17 +90,56 @@ func (s *Service) findOrCreate(ctx context.Context, deviceID uint, kind gbmodels
 	if result.RowsAffected > 0 {
 		return &sub, nil
 	}
-	sub = gbmodels.GbDeviceSubscription{
+	sub = newSubscription(deviceID, kind)
+	if err := s.db.WithContext(ctx).Create(&sub).Error; err != nil {
+		return nil, err
+	}
+	return &sub, nil
+}
+
+func newSubscription(deviceID uint, kind gbmodels.SubscriptionKind) gbmodels.GbDeviceSubscription {
+	sub := gbmodels.GbDeviceSubscription{
 		DeviceID: deviceID, Kind: kind, Event: subscriptionEvent(kind),
 		Status: gbmodels.SubscriptionStatusDisabled, ExpiresSeconds: 3600,
 	}
 	if kind == gbmodels.SubscriptionKindMobilePosition {
 		sub.IntervalSeconds = 30
 	}
-	if err := s.db.WithContext(ctx).Create(&sub).Error; err != nil {
-		return nil, err
+	return sub
+}
+
+// ApplyGlobalDefaults creates enabled subscription rows only when a device has
+// no device-level setting for that kind. Explicit device settings always win.
+func (s *Service) ApplyGlobalDefaults(ctx context.Context, deviceID uint) error {
+	if s == nil || s.db == nil || deviceID == 0 {
+		return nil
 	}
-	return &sub, nil
+	for _, item := range gbconfig.GlobalSubscriptionItems() {
+		kind := gbmodels.SubscriptionKind(item)
+		if !kind.Valid() {
+			continue
+		}
+		unlock := s.lock(deviceID, kind)
+		var existing gbmodels.GbDeviceSubscription
+		result := s.db.WithContext(ctx).Where("device_id = ? AND kind = ?", deviceID, kind).Limit(1).Find(&existing)
+		if result.Error != nil {
+			unlock()
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			now := s.now()
+			sub := newSubscription(deviceID, kind)
+			sub.Enabled = true
+			sub.Status = gbmodels.SubscriptionStatusPending
+			sub.NextActionAt = &now
+			if err := s.db.WithContext(ctx).Create(&sub).Error; err != nil {
+				unlock()
+				return err
+			}
+		}
+		unlock()
+	}
+	return nil
 }
 
 func (s *Service) Enable(ctx context.Context, device *gbmodels.GbDevice, kind gbmodels.SubscriptionKind) (*gbmodels.GbDeviceSubscription, error) {
@@ -208,7 +251,11 @@ func (s *Service) send(ctx context.Context, device *gbmodels.GbDevice, sub *gbmo
 	}
 	response, err := s.sendRequest(ctx, device, sub, expires)
 	if err != nil {
-		next := now.Add(retryDelay(sub.RetryCount + 1))
+		var next *time.Time
+		if sub.Kind != gbmodels.SubscriptionKindPTZPrecisePosition {
+			retryAt := now.Add(retryDelay(sub.RetryCount + 1))
+			next = &retryAt
+		}
 		_ = s.db.WithContext(ctx).Model(sub).Updates(map[string]any{
 			"status": gbmodels.SubscriptionStatusDegraded, "retry_count": sub.RetryCount + 1,
 			"last_error": err.Error(), "next_action_at": next,
