@@ -22,10 +22,25 @@ import (
 type stopTestPlayService struct {
 	stopCalls atomic.Int32
 	stopErr   error
+	startErr  error
 }
 
 func (s *stopTestPlayService) Start(context.Context, string, string) (*play.Result, error) {
-	return nil, nil
+	return nil, s.startErr
+}
+
+func TestPlayControllerStartMapsGlobalTimeoutToGatewayTimeout(t *testing.T) {
+	service := &stopTestPlayService{startErr: play.ErrPlayTimeout}
+	router := buildStopRouter(t, service)
+	controller := gbcontrollers.NewPlayController(service)
+	router.POST("/start/:deviceId/:channelId", controller.Start)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/start/device/channel", nil))
+
+	require.Equal(t, http.StatusGatewayTimeout, recorder.Code, recorder.Body.String())
+	body := unmarshal(t, recorder)
+	assert.Equal(t, "点播超时", body["message"])
 }
 
 func (s *stopTestPlayService) Stop(context.Context, string) error {

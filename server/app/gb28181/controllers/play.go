@@ -68,6 +68,10 @@ func (pc *PlayController) Start(c *gin.Context) {
 	}
 	res, err := pc.svc.Start(c.Request.Context(), deviceID, channelID)
 	if err != nil {
+		if errors.Is(err, play.ErrPlayTimeout) {
+			pc.FailAndAbort(c, mapPlayErr(err), err, http.StatusGatewayTimeout)
+			return
+		}
 		pc.FailAndAbort(c, mapPlayErr(err), err)
 		return
 	}
@@ -154,6 +158,8 @@ func mapPlayErr(err error) string {
 		return "通道不存在"
 	case errors.Is(err, play.ErrStreamNotReady):
 		return "流就绪超时,设备未推流"
+	case errors.Is(err, play.ErrPlayTimeout):
+		return "点播超时"
 	default:
 		return "点播失败"
 	}

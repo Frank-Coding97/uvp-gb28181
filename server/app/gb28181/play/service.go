@@ -110,6 +110,7 @@ var (
 	ErrDeviceOffline   = errors.New("设备离线")
 	ErrChannelNotFound = errors.New("通道不存在")
 	ErrStreamNotReady  = errors.New("流就绪等待超时")
+	ErrPlayTimeout     = errors.New("点播总超时")
 )
 
 // Service 点播 service:串联 ZLM 收流 + UAC INVITE + 流就绪等待
@@ -429,18 +430,28 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 		Transport: dev.Transport,
 	}
 
-	inviteCtx, inviteCancel := context.WithTimeout(ctx, gbconfig.SIPCommandTimeout())
+	playCtx, playCancel := context.WithTimeout(ctx, gbconfig.CurrentPlaybackSettings().PlayTimeout())
+	defer playCancel()
+	inviteCtx, inviteCancel := context.WithTimeout(playCtx, gbconfig.SIPCommandTimeout())
 	defer inviteCancel()
 	if err := s.inviter.Invite(inviteCtx, s.sessions, sess, body); err != nil {
-		_ = client.CloseRtpServer(context.Background(), streamID)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
+			_ = s.inviter.Bye(cleanupCtx, s.sessions, streamID)
+		}
+		_ = client.CloseRtpServer(cleanupCtx, streamID)
+		cleanupCancel()
 		if s.useMultiNode() {
 			s.locationMap.Unbind(streamID)
+		}
+		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %v", ErrPlayTimeout, err)
 		}
 		return nil, fmt.Errorf("发 INVITE 失败: %w", err)
 	}
 
 	// 7. WaitReady:hook + 轮询双源(ADR-002 创新 3)
-	readyCtx, readyCancel := context.WithTimeout(ctx, s.readyWait)
+	readyCtx, readyCancel := context.WithTimeout(playCtx, s.readyWait)
 	defer readyCancel()
 	poll := func(ctx context.Context) (bool, error) {
 		return client.IsMediaOnline(ctx, zlmApp, streamID)
@@ -448,19 +459,22 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 	if err := stream.WaitReady(readyCtx, s.notifier, streamID, poll, s.pollEvery); err != nil {
 		// 流没就绪:发 BYE + 关 RTP 端口 + Unbind
 		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer byeCancel()
 		_ = s.inviter.Bye(byeCtx, s.sessions, streamID)
-		_ = client.CloseRtpServer(context.Background(), streamID)
+		_ = client.CloseRtpServer(byeCtx, streamID)
+		byeCancel()
 		if s.useMultiNode() {
 			s.locationMap.Unbind(streamID)
+		}
+		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("%w: %v", ErrPlayTimeout, err)
 		}
 		return nil, fmt.Errorf("%w: %v", ErrStreamNotReady, err)
 	}
 	if err := s.channels.UpdateStream(ctx, deviceID, channelID, streamID); err != nil {
 		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer byeCancel()
 		_ = s.inviter.Bye(byeCtx, s.sessions, streamID)
-		_ = client.CloseRtpServer(context.Background(), streamID)
+		_ = client.CloseRtpServer(byeCtx, streamID)
+		byeCancel()
 		if s.useMultiNode() {
 			s.locationMap.Unbind(streamID)
 		}

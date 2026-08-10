@@ -71,6 +71,61 @@ type mockInviter struct {
 	lastBody    string
 }
 
+type delayedInviter struct {
+	delay     time.Duration
+	onSuccess func(*uac.Session)
+	byeCalls  atomic.Int32
+}
+
+func (m *delayedInviter) Invite(ctx context.Context, _ *uac.SessionManager, s *uac.Session, _ string) error {
+	select {
+	case <-time.After(m.delay):
+		if m.onSuccess != nil {
+			m.onSuccess(s)
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *delayedInviter) Bye(context.Context, *uac.SessionManager, string) error {
+	m.byeCalls.Add(1)
+	return nil
+}
+
+type playbackSettingsSource struct {
+	values map[string]interface{}
+}
+
+func (s *playbackSettingsSource) ConfigFileChangeListen(...func()) {}
+func (s *playbackSettingsSource) Get(key string) interface{}       { return s.values[key] }
+func (s *playbackSettingsSource) GetString(string) string          { return "" }
+func (s *playbackSettingsSource) GetBool(key string) bool {
+	value, _ := s.values[key].(bool)
+	return value
+}
+func (s *playbackSettingsSource) GetInt(key string) int {
+	value, _ := s.values[key].(int)
+	return value
+}
+func (s *playbackSettingsSource) GetInt32(string) int32             { return 0 }
+func (s *playbackSettingsSource) GetInt64(string) int64             { return 0 }
+func (s *playbackSettingsSource) GetFloat64(string) float64         { return 0 }
+func (s *playbackSettingsSource) GetDuration(string) time.Duration  { return 0 }
+func (s *playbackSettingsSource) GetStringSlice(string) []string    { return nil }
+func (s *playbackSettingsSource) GetUintSlice(string) []uint        { return nil }
+func (s *playbackSettingsSource) Set(key string, value interface{}) { s.values[key] = value }
+func (s *playbackSettingsSource) SaveConfig() error                 { return nil }
+
+func playbackSource(timeoutMs int) *playbackSettingsSource {
+	return &playbackSettingsSource{values: map[string]interface{}{
+		gbconfig.PlayRequestTimeoutMsConfigKey:         timeoutMs,
+		gbconfig.DefaultChannelOnDemandLiveConfigKey:   true,
+		gbconfig.DefaultChannelCloudRecordingConfigKey: false,
+	}}
+}
+
 func (m *mockInviter) Invite(ctx context.Context, sm *uac.SessionManager, s *uac.Session, body string) error {
 	m.inviteCalls.Add(1)
 	m.lastBody = body
@@ -328,6 +383,100 @@ func TestStartStreamNotReadyRollsBackAll(t *testing.T) {
 	}
 	if inv.byeCalls.Load() != 1 {
 		t.Errorf("超时应发 BYE,实际 %d", inv.byeCalls.Load())
+	}
+}
+
+func TestStartInviteTimeoutUsesGlobalTotalBudgetAndCompensates(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = playbackSource(1000)
+	z := &mockZLM{port: 40000}
+	inv := &delayedInviter{delay: 2 * time.Second}
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s.SetReadyTimings(time.Second, 10*time.Millisecond)
+
+	started := time.Now()
+	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+
+	if !errors.Is(err, ErrPlayTimeout) {
+		t.Fatalf("INVITE 超过总预算应返回 ErrPlayTimeout，实际 %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 1800*time.Millisecond {
+		t.Fatalf("总超时不应等待完整 INVITE，耗时 %v", elapsed)
+	}
+	if z.closeCalls.Load() != 1 || inv.byeCalls.Load() != 1 {
+		t.Fatalf("超时应补偿 BYE 和关闭 RTP，bye=%d close=%d", inv.byeCalls.Load(), z.closeCalls.Load())
+	}
+}
+
+func TestStartMediaTimeoutConsumesRemainingTotalBudget(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = playbackSource(1000)
+	z := &mockZLM{port: 40000}
+	inv := &delayedInviter{}
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s.SetReadyTimings(time.Second, 10*time.Millisecond)
+
+	started := time.Now()
+	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+
+	if !errors.Is(err, ErrPlayTimeout) {
+		t.Fatalf("媒体阶段超过总预算应返回 ErrPlayTimeout，实际 %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 1800*time.Millisecond {
+		t.Fatalf("媒体等待应消费剩余预算，耗时 %v", elapsed)
+	}
+	if z.closeCalls.Load() != 1 || inv.byeCalls.Load() != 1 {
+		t.Fatalf("媒体超时应补偿 BYE 和关闭 RTP，bye=%d close=%d", inv.byeCalls.Load(), z.closeCalls.Load())
+	}
+}
+
+func TestStartInviteAndMediaShareOneTotalBudget(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	app.ConfigYml = playbackSource(1000)
+	z := &mockZLM{port: 40000}
+	n := stream.NewNotifier()
+	inv := &delayedInviter{delay: 700 * time.Millisecond}
+	inv.onSuccess = func(sess *uac.Session) {
+		go func() {
+			time.Sleep(700 * time.Millisecond)
+			n.Publish(sess.StreamID)
+		}()
+	}
+	sm := uac.NewSessionManager()
+	s := New(testCfg(), z, inv, sm, n, fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()})
+	s.SetReadyTimings(time.Second, 10*time.Millisecond)
+
+	started := time.Now()
+	_, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
+
+	if !errors.Is(err, ErrPlayTimeout) {
+		t.Fatalf("INVITE+媒体应共享总预算，实际 %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 1800*time.Millisecond {
+		t.Fatalf("总预算不应叠加，耗时 %v", elapsed)
+	}
+}
+
+func TestStartUsesUpdatedPlaybackTimeoutWithoutRebuildingService(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous })
+	source := playbackSource(1000)
+	app.ConfigYml = source
+	z := &mockZLM{port: 40000}
+	inv := &delayedInviter{delay: 1500 * time.Millisecond}
+	s, n, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s.SetReadyTimings(time.Second, 10*time.Millisecond)
+
+	if _, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661"); !errors.Is(err, ErrPlayTimeout) {
+		t.Fatalf("首次 100ms 配置应超时，实际 %v", err)
+	}
+	source.Set(gbconfig.PlayRequestTimeoutMsConfigKey, 3000)
+	inv.onSuccess = func(sess *uac.Session) { go func() { time.Sleep(100 * time.Millisecond); n.Publish(sess.StreamID) }() }
+	if _, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661"); err != nil {
+		t.Fatalf("更新到 300ms 后应成功，实际 %v", err)
 	}
 }
 
