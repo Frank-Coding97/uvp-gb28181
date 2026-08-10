@@ -1050,7 +1050,8 @@ onMounted(() =>
 }
 
 .stream-transport-select {
-    width: min(100%, 160px);
+    width: 160px !important;
+    max-width: 100%;
 }
 
 .global-subscription-items {
@@ -1077,7 +1078,8 @@ onMounted(() =>
 }
 
 @media (max-width: 640px) {
-    .service-config-number-input {
+    .service-config-number-input,
+    .stream-transport-select {
         width: 100%;
     }
 
