@@ -1024,7 +1024,7 @@ onMounted(() =>
     gap: 8px;
 }
 
-.service-config-number-input {
+:deep(.service-config-number-input) {
     width: min(100%, 160px);
 }
 
@@ -1049,7 +1049,7 @@ onMounted(() =>
     white-space: nowrap;
 }
 
-.stream-transport-select {
+:deep(.stream-transport-select) {
     width: 160px !important;
     max-width: 100%;
 }
@@ -1078,8 +1078,8 @@ onMounted(() =>
 }
 
 @media (max-width: 640px) {
-    .service-config-number-input,
-    .stream-transport-select {
+    :deep(.service-config-number-input),
+    :deep(.stream-transport-select) {
         width: 100%;
     }
 
