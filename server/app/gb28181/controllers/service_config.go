@@ -74,9 +74,10 @@ type PTZDefaultSpeedConfig struct {
 
 // SIPLogUpdateResult 是 SIP 原始报文 Trace 开关及运行时应用结果。
 type SIPLogUpdateResult struct {
-	Enabled    bool   `json:"enabled"`
-	Applied    bool   `json:"applied"`
-	ApplyError string `json:"applyError,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	RetentionDays int    `json:"retentionDays"`
+	Applied       bool   `json:"applied"`
+	ApplyError    string `json:"applyError,omitempty"`
 }
 
 type SIPTraceReloader func() error
@@ -105,16 +106,21 @@ func (sc *ServiceConfigController) SetSIPTraceRuntimeProvider(provider SIPTraceR
 // GetSIPLog GET /api/gb28181/sip/service-config/sip-log
 func (sc *ServiceConfigController) GetSIPLog(c *gin.Context) {
 	enabled := gbconfig.SIPTraceEnabled()
-	sc.Success(c, SIPLogUpdateResult{Enabled: enabled, Applied: sc.sipTraceApplied(enabled)})
+	sc.Success(c, SIPLogUpdateResult{Enabled: enabled, RetentionDays: gbconfig.SIPTraceRetentionDays(), Applied: sc.sipTraceApplied(enabled)})
 }
 
 // UpdateSIPLog PUT /api/gb28181/sip/service-config/sip-log
 func (sc *ServiceConfigController) UpdateSIPLog(c *gin.Context) {
 	var request struct {
-		Enabled *bool `json:"enabled"`
+		Enabled       *bool `json:"enabled"`
+		RetentionDays *int  `json:"retentionDays"`
 	}
-	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil {
-		sc.Fail(c, "保存 SIP 日志配置失败：enabled 必须为布尔值", err, http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&request); err != nil || (request.Enabled == nil && request.RetentionDays == nil) {
+		sc.Fail(c, "保存 SIP 日志配置失败：enabled 或 retentionDays 参数无效", err, http.StatusBadRequest)
+		return
+	}
+	if request.RetentionDays != nil && (*request.RetentionDays < gbconfig.MinSIPTraceRetentionDays || *request.RetentionDays > gbconfig.MaxSIPTraceRetentionDays) {
+		sc.Fail(c, "保存 SIP 日志配置失败：retentionDays 必须为 1-365 的整数", nil, http.StatusBadRequest)
 		return
 	}
 	if app.ConfigYml == nil {
@@ -122,16 +128,27 @@ func (sc *ServiceConfigController) UpdateSIPLog(c *gin.Context) {
 		return
 	}
 
-	previous := gbconfig.SIPTraceEnabled()
-	app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, *request.Enabled)
+	previousEnabled := gbconfig.SIPTraceEnabled()
+	previousRetentionDays := gbconfig.SIPTraceRetentionDays()
+	enabled := previousEnabled
+	retentionDays := previousRetentionDays
+	if request.Enabled != nil {
+		enabled = *request.Enabled
+		app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, enabled)
+	}
+	if request.RetentionDays != nil {
+		retentionDays = *request.RetentionDays
+		app.ConfigYml.Set(gbconfig.SIPTraceRetentionDaysConfigKey, retentionDays)
+	}
 	if err := app.ConfigYml.SaveConfig(); err != nil {
-		app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, previous)
+		app.ConfigYml.Set(gbconfig.SIPTraceEnabledConfigKey, previousEnabled)
+		app.ConfigYml.Set(gbconfig.SIPTraceRetentionDaysConfigKey, previousRetentionDays)
 		sc.Fail(c, "保存 SIP 日志配置失败", err, http.StatusInternalServerError)
 		return
 	}
 
-	result := SIPLogUpdateResult{Enabled: *request.Enabled, Applied: true}
-	if previous != *request.Enabled && sc.reload != nil {
+	result := SIPLogUpdateResult{Enabled: enabled, RetentionDays: retentionDays, Applied: true}
+	if (previousEnabled != enabled || previousRetentionDays != retentionDays) && sc.reload != nil {
 		if err := sc.reload(); err != nil {
 			result.Applied = false
 			result.ApplyError = err.Error()
@@ -139,7 +156,7 @@ func (sc *ServiceConfigController) UpdateSIPLog(c *gin.Context) {
 			return
 		}
 	}
-	result.Applied = sc.sipTraceApplied(*request.Enabled)
+	result.Applied = sc.sipTraceApplied(enabled)
 	sc.SuccessWithMessage(c, "SIP 日志配置已更新", result)
 }
 

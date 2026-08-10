@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -20,6 +22,7 @@ const (
 	DefaultChannelAudioEnabledConfigKey       = "gb28181.catalog.default_channel_audio_enabled"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
+	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
 
 	DefaultRecordQueryTimezone           = "Asia/Shanghai"
 	DefaultRecordQueryTimeoutSec         = 15
@@ -33,6 +36,9 @@ const (
 	DefaultSIPCommandTimeoutSec          = 10
 	DefaultChannelStreamTransport        = "TCP-Passive"
 	DefaultChannelAudioEnabledValue      = true
+	DefaultSIPTraceRetentionDays         = 7
+	MinSIPTraceRetentionDays             = 1
+	MaxSIPTraceRetentionDays             = 365
 
 	MaxRecordQueryTimeoutSec = 300
 	MaxRecordQueryRangeHours = 168
@@ -109,6 +115,30 @@ func SIPTraceEnabledFrom(c valueSource) bool {
 // SIPTraceEnabled reads the live configuration used by the service-config API.
 func SIPTraceEnabled() bool {
 	return SIPTraceEnabledFrom(app.ConfigYml)
+}
+
+func SIPTraceRetentionDaysFrom(c valueSource) int {
+	if c == nil || c.Get(SIPTraceRetentionDaysConfigKey) == nil {
+		return DefaultSIPTraceRetentionDays
+	}
+	days := c.GetInt(SIPTraceRetentionDaysConfigKey)
+	if days < MinSIPTraceRetentionDays || days > MaxSIPTraceRetentionDays {
+		return DefaultSIPTraceRetentionDays
+	}
+	return days
+}
+
+func SIPTraceRetentionDays() int {
+	days := SIPTraceRetentionDaysFrom(app.ConfigYml)
+	if app.ConfigYml != nil && app.ConfigYml.Get(SIPTraceRetentionDaysConfigKey) != nil {
+		configured := app.ConfigYml.GetInt(SIPTraceRetentionDaysConfigKey)
+		if configured < MinSIPTraceRetentionDays || configured > MaxSIPTraceRetentionDays {
+			if app.ZapLog != nil {
+				app.ZapLog.Warn("SIP trace retention days is invalid; using default", zap.Int("configured", configured), zap.Int("default", days))
+			}
+		}
+	}
+	return days
 }
 
 // SDPExtensionEnabledFrom returns the current SDP compatibility setting.
@@ -300,6 +330,7 @@ type TraceConfig struct {
 	BatchSize        int
 	FlushIntervalMS  int
 	EncryptionKeyEnv string
+	RetentionDays    int
 }
 
 // ZLMConfig ZLMediaKit 媒体服务器配置(数据面)
@@ -432,6 +463,7 @@ func loadFrom(c valueSource) (Config, error) {
 			BatchSize:        c.GetInt("gb28181.trace.batch_size"),
 			FlushIntervalMS:  c.GetInt("gb28181.trace.flush_interval_ms"),
 			EncryptionKeyEnv: c.GetString("gb28181.trace.encryption_key_env"),
+			RetentionDays:    SIPTraceRetentionDaysFrom(c),
 		},
 		Device: DeviceConfig{
 			KeepaliveInterval:     c.GetInt("gb28181.device.keepalive_interval"),

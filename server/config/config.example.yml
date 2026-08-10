@@ -245,6 +245,7 @@ gb28181:
     batch_size: 500
     flush_interval_ms: 500
     encryption_key_env: "UVP_SIP_TRACE_ENCRYPTION_KEY"
+    retention_days: 7
   device:
     default_owner_dept_id: 1 # 首次自动建档默认归属部门；建议改成"待分配/接入池"部门
     keepalive_interval: 60   # 设备心跳周期(秒)
