@@ -71,7 +71,7 @@ func TestGormRepoSessionAndFileIdempotency(t *testing.T) {
 	file := &models.GbRecordingFile{
 		SessionID: &stored.ID, ChannelID: 1, DeviceID: "device", NodeID: 2,
 		VHost: models.DefaultRecordingVHost, App: models.DefaultRecordingApp, Stream: "stream",
-		FileName: "one.mp4", FilePath: "/record/one.mp4", StartTime: now,
+		FileName: "one.mp4", FilePath: "/record/one.mp4", StartTime: &now,
 	}
 	inserted, err := repo.InsertFile(context.Background(), file)
 	require.NoError(t, err)

@@ -33,10 +33,11 @@ func (i *FileIndexer) IndexRecordMP4(ctx context.Context, nodeID int64, event Re
 	if err != nil || session == nil {
 		return false, err
 	}
+	startTime, timeLen, fileSize := event.StartTime, event.TimeLen, event.FileSize
 	return i.repo.InsertFile(ctx, &models.GbRecordingFile{
 		SessionID: &session.ID, ChannelID: session.ChannelID, DeviceID: session.DeviceID,
 		NodeID: nodeID, VHost: event.VHost, App: event.App, Stream: event.Stream,
 		FileName: event.FileName, FilePath: event.FilePath, Folder: event.Folder, URL: event.URL,
-		StartTime: event.StartTime, TimeLen: event.TimeLen, FileSize: event.FileSize,
+		StartTime: &startTime, TimeLen: &timeLen, FileSize: &fileSize,
 	})
 }

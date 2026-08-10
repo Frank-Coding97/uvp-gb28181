@@ -18,6 +18,12 @@ const (
 	RecordingSessionStateStopping  = "stopping"
 	RecordingSessionStateStopped   = "stopped"
 	RecordingSessionStateFailed    = "failed"
+
+	RecordingFileSourceHook      = "hook"
+	RecordingFileSourceReconcile = "reconcile"
+
+	RecordingMetadataComplete = "complete"
+	RecordingMetadataPartial  = "partial"
 )
 
 // GbRecordingSession records the ZLM stream tuple used for one cloud-recording run.
@@ -43,22 +49,35 @@ func (GbRecordingSession) TableName() string { return "gb_recording_session" }
 
 // GbRecordingFile is the durable index emitted by ZLM's on_record_mp4 hook.
 type GbRecordingFile struct {
-	ID        uint64    `gorm:"primaryKey" json:"id"`
-	SessionID *uint64   `gorm:"column:session_id;index" json:"sessionId"`
-	ChannelID uint      `gorm:"column:channel_id;not null;index:idx_recording_file_channel_start,priority:1" json:"channelId"`
-	DeviceID  string    `gorm:"column:device_id;size:20;not null;index:idx_recording_file_device_start,priority:1" json:"deviceId"`
-	NodeID    int64     `gorm:"column:node_id;not null;uniqueIndex:uk_recording_file_node_path,priority:1" json:"nodeId"`
-	VHost     string    `gorm:"column:vhost;size:128;not null" json:"vhost"`
-	App       string    `gorm:"column:app;size:64;not null" json:"app"`
-	Stream    string    `gorm:"column:stream;size:64;not null" json:"stream"`
-	FileName  string    `gorm:"column:file_name;size:255;not null" json:"fileName"`
-	FilePath  string    `gorm:"column:file_path;size:1000;not null;uniqueIndex:uk_recording_file_node_path,priority:2" json:"filePath"`
-	Folder    string    `gorm:"column:folder;size:1000;not null;default:''" json:"folder"`
-	URL       string    `gorm:"column:url;size:1000;not null;default:''" json:"url"`
-	StartTime time.Time `gorm:"column:start_time;not null;index:idx_recording_file_channel_start,priority:2;index:idx_recording_file_device_start,priority:2" json:"startTime"`
-	TimeLen   float64   `gorm:"column:time_len;type:decimal(12,3);not null;default:0" json:"timeLen"`
-	FileSize  uint64    `gorm:"column:file_size;not null;default:0" json:"fileSize"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID                 uint64     `gorm:"primaryKey" json:"-"`
+	SessionID          *uint64    `gorm:"column:session_id;index" json:"-"`
+	ChannelID          uint       `gorm:"column:channel_id;not null;index:idx_recording_file_channel_start,priority:1" json:"-"`
+	DeviceID           string     `gorm:"column:device_id;size:20;not null;index:idx_recording_file_device_start,priority:1" json:"-"`
+	ChannelCode        string     `gorm:"column:channel_code;size:20;not null;default:''" json:"-"`
+	ChannelName        string     `gorm:"column:channel_name;size:255;not null;default:''" json:"-"`
+	DeviceName         string     `gorm:"column:device_name;size:255;not null;default:''" json:"-"`
+	OwnerDeptID        uint       `gorm:"column:owner_dept_id;not null;default:0;index" json:"-"`
+	NodeID             int64      `gorm:"column:node_id;not null;uniqueIndex:uk_recording_file_node_path,priority:1" json:"-"`
+	VHost              string     `gorm:"column:vhost;size:128;not null" json:"-"`
+	App                string     `gorm:"column:app;size:64;not null" json:"-"`
+	Stream             string     `gorm:"column:stream;size:64;not null" json:"-"`
+	FileKey            string     `gorm:"column:file_key;size:64;not null;index" json:"-"`
+	FileName           string     `gorm:"column:file_name;size:255;not null" json:"-"`
+	FilePath           string     `gorm:"column:file_path;size:1000;not null;uniqueIndex:uk_recording_file_node_path,priority:2" json:"-"`
+	Folder             string     `gorm:"column:folder;size:1000;not null;default:''" json:"-"`
+	URL                string     `gorm:"column:url;size:1000;not null;default:''" json:"-"`
+	StartTime          *time.Time `gorm:"column:start_time;index:idx_recording_file_channel_start,priority:2;index:idx_recording_file_device_start,priority:2" json:"-"`
+	TimeLen            *float64   `gorm:"column:time_len;type:decimal(12,3)" json:"-"`
+	FileSize           *uint64    `gorm:"column:file_size" json:"-"`
+	Source             string     `gorm:"column:source;size:16;not null;default:hook" json:"-"`
+	MetadataState      string     `gorm:"column:metadata_state;size:16;not null;default:complete" json:"-"`
+	RecordDate         *time.Time `gorm:"column:record_date;type:date" json:"-"`
+	DiscoveredAt       time.Time  `gorm:"column:discovered_at;not null" json:"-"`
+	LastSeenAt         *time.Time `gorm:"column:last_seen_at" json:"-"`
+	MissingAt          *time.Time `gorm:"column:missing_at" json:"-"`
+	ReconcileMissCount int        `gorm:"column:reconcile_miss_count;not null;default:0" json:"-"`
+	CreatedAt          time.Time  `json:"-"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at" json:"-"`
 }
 
 func (GbRecordingFile) TableName() string { return "gb_recording_file" }
