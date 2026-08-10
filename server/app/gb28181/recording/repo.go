@@ -164,9 +164,6 @@ func (r *GormRepo) ListUnfinishedSessions(ctx context.Context) ([]models.GbRecor
 }
 
 func (r *GormRepo) InsertFile(ctx context.Context, file *models.GbRecordingFile) (bool, error) {
-	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "node_id"}, {Name: "file_path"}},
-		DoNothing: true,
-	}).Create(file)
-	return result.RowsAffected > 0, result.Error
+	created, _, err := r.UpsertCatalogFile(ctx, file)
+	return created, err
 }

@@ -57,13 +57,13 @@ type GbRecordingFile struct {
 	ChannelName        string     `gorm:"column:channel_name;size:255;not null;default:''" json:"-"`
 	DeviceName         string     `gorm:"column:device_name;size:255;not null;default:''" json:"-"`
 	OwnerDeptID        uint       `gorm:"column:owner_dept_id;not null;default:0;index" json:"-"`
-	NodeID             int64      `gorm:"column:node_id;not null;uniqueIndex:uk_recording_file_node_path,priority:1" json:"-"`
+	NodeID             int64      `gorm:"column:node_id;not null" json:"-"`
 	VHost              string     `gorm:"column:vhost;size:128;not null" json:"-"`
 	App                string     `gorm:"column:app;size:64;not null" json:"-"`
 	Stream             string     `gorm:"column:stream;size:64;not null" json:"-"`
-	FileKey            string     `gorm:"column:file_key;size:64;not null;index" json:"-"`
+	FileKey            string     `gorm:"column:file_key;size:64;not null;uniqueIndex:uk_recording_file_key" json:"-"`
 	FileName           string     `gorm:"column:file_name;size:255;not null" json:"-"`
-	FilePath           string     `gorm:"column:file_path;size:1000;not null;uniqueIndex:uk_recording_file_node_path,priority:2" json:"-"`
+	FilePath           string     `gorm:"column:file_path;size:1000;not null" json:"-"`
 	Folder             string     `gorm:"column:folder;size:1000;not null;default:''" json:"-"`
 	URL                string     `gorm:"column:url;size:1000;not null;default:''" json:"-"`
 	StartTime          *time.Time `gorm:"column:start_time;index:idx_recording_file_channel_start,priority:2;index:idx_recording_file_device_start,priority:2" json:"-"`

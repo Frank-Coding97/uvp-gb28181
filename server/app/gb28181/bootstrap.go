@@ -690,7 +690,7 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	repo := gbrecording.NewGormRepo(app.DB())
 	recordingSvc = gbrecording.NewService(repo, playSvc, playSvc, zlmLocationMap, zlmRegistry,
 		func(n *node.Node) gbrecording.RecorderClient { return gbzlm.NewClientForNode(n) })
-	indexer := gbrecording.NewFileIndexer(repo)
+	indexer := gbrecording.NewFileIndexer(repo, zlmLocationMap)
 	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
 	app.ZapLog.Info("GB28181 云端录像 service / Hook 已装配")
 
