@@ -196,6 +196,33 @@ func TestReplaceProjectionIsAtomicAndSnapshotsArePlatformScoped(t *testing.T) {
 	require.Zero(t, other.Revision)
 }
 
+func TestReplaceProjectionCreatesRowsWhenRecordNotFoundErrorsAreMasked(t *testing.T) {
+	repo := newTestRepository(t)
+	require.NoError(t, repo.db.Callback().Query().Before("gorm:query").Register("mask_record_not_found_for_test", func(db *gorm.DB) {
+		db.Statement.RaiseErrorOnNotFound = false
+	}))
+	ctx := context.Background()
+	platform := newPlatform("upstream-a", "34020000001320000001")
+	require.NoError(t, repo.CreatePlatform(ctx, platform))
+
+	require.NoError(t, repo.ReplaceProjection(ctx, platform.ID,
+		[]DeviceProjectionInput{
+			{SourceDeviceID: 10, PublishedDeviceID: "34020000001320000010"},
+			{SourceDeviceID: 20, PublishedDeviceID: "34020000001320000020"},
+		},
+		[]ChannelProjectionInput{
+			{SourceDeviceID: 10, SourceChannelID: 11, PublishedChannelID: "34020000001320000011"},
+			{SourceDeviceID: 20, SourceChannelID: 21, PublishedChannelID: "34020000001320000021"},
+		},
+	))
+
+	snapshot, err := repo.ProjectionSnapshot(ctx, platform.ID)
+	require.NoError(t, err)
+	require.Len(t, snapshot.Devices, 2)
+	require.Len(t, snapshot.Channels, 2)
+	require.EqualValues(t, []uint64{10, 20}, []uint64{snapshot.Devices[0].SourceDeviceID, snapshot.Devices[1].SourceDeviceID})
+}
+
 func TestReplaceProjectionRejectsPublishedIDCollisionAcrossKinds(t *testing.T) {
 	repo := newTestRepository(t)
 	ctx := context.Background()

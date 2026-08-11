@@ -22,7 +22,7 @@ SET
     `name` = 'gb28181-sip-service-config',
     `component` = 'gb28181/sip/ServiceConfig',
     `title` = '国标服务配置',
-    `icon` = 'lucide:RadioTower',
+    `icon` = 'lucide:ServerCog',
     `sort` = 3,
     `hide` = 0,
     `disable` = 0,
@@ -42,7 +42,7 @@ SELECT
     0,
     3,
     2,
-    'lucide:RadioTower',
+    'lucide:ServerCog',
     NOW(),
     NOW(),
     1

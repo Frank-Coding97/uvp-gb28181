@@ -7,10 +7,6 @@
 
       <template v-else>
         <header class="cascade-header">
-          <div>
-            <h2>国标级联</h2>
-            <p>管理 UVP 作为下级平台向上级平台的注册、资源共享和运行状态。</p>
-          </div>
           <div class="cascade-header__actions">
             <a-button :loading="loading" @click="refresh">
               <template #icon><RefreshCw :size="15" /></template>
@@ -23,26 +19,52 @@
           </div>
         </header>
 
-        <div class="cascade-summary" aria-label="级联平台摘要">
-          <div class="cascade-summary__item"><span>平台总数</span><strong>{{ platforms.length }}</strong></div>
-          <div class="cascade-summary__item"><span>已启用</span><strong>{{ summary.enabled }}</strong></div>
-          <div class="cascade-summary__item"><span>在线</span><strong class="is-success">{{ summary.online }}</strong></div>
-          <div class="cascade-summary__item"><span>需关注</span><strong :class="{ 'is-warning': summary.attention > 0 }">{{ summary.attention }}</strong></div>
-        </div>
+        <section class="cascade-summary" aria-label="级联平台摘要">
+          <article class="cascade-summary-card">
+            <span class="cascade-summary-card__icon is-brand"><Building2 :size="19" /></span>
+            <div class="cascade-summary-card__content">
+              <strong>{{ platforms.length }}</strong>
+              <span>平台总数</span>
+            </div>
+          </article>
+          <article class="cascade-summary-card">
+            <span class="cascade-summary-card__icon is-enabled"><CircleCheck :size="19" /></span>
+            <div class="cascade-summary-card__content">
+              <strong>{{ summary.enabled }}</strong>
+              <span>已启用</span>
+            </div>
+          </article>
+          <article class="cascade-summary-card">
+            <span class="cascade-summary-card__icon is-online"><RadioTower :size="19" /></span>
+            <div class="cascade-summary-card__content">
+              <strong class="is-online">{{ summary.online }}</strong>
+              <span>在线</span>
+            </div>
+          </article>
+          <article class="cascade-summary-card">
+            <span class="cascade-summary-card__icon is-attention"><TriangleAlert :size="19" /></span>
+            <div class="cascade-summary-card__content">
+              <strong :class="{ 'is-attention': summary.attention > 0 }">{{ summary.attention }}</strong>
+              <span>需关注</span>
+            </div>
+          </article>
+        </section>
 
         <a-alert v-if="errorMessage" type="error" class="cascade-alert">{{ errorMessage }}</a-alert>
 
-        <div class="cascade-toolbar">
-          <a-input v-model="keyword" allow-clear placeholder="平台名称 / 编码 / 地址" class="cascade-search">
-            <template #prefix><Search :size="15" /></template>
-          </a-input>
-          <a-select v-model="statusFilter" class="cascade-status-filter">
-            <a-option value="all">全部状态</a-option>
-            <a-option value="online">在线</a-option>
-            <a-option value="offline">离线</a-option>
-            <a-option value="disabled">已停用</a-option>
-          </a-select>
-        </div>
+        <s-layout-search class="cascade-search-panel">
+          <template #fields>
+            <a-input-search v-model="keyword" allow-clear placeholder="平台名称 / 编码 / 地址" class="cascade-search" />
+            <div class="cascade-status-filter">
+              <a-select v-model="statusFilter">
+                <a-option value="all">全部状态</a-option>
+                <a-option value="online">在线</a-option>
+                <a-option value="offline">离线</a-option>
+                <a-option value="disabled">已停用</a-option>
+              </a-select>
+            </div>
+          </template>
+        </s-layout-search>
 
         <a-table
           class="uvp-data-table cascade-table"
@@ -114,7 +136,15 @@
       </template>
     </div>
 
-    <a-drawer v-model:visible="editorVisible" :width="isMobile ? '100%' : 760" :footer="false" unmount-on-close>
+    <a-modal
+      v-model:visible="editorVisible"
+      width="min(820px, calc(100vw - 24px))"
+      modal-class="uvp-system-dialog cascade-platform-dialog"
+      :mask-closable="!saving"
+      :closable="!saving"
+      :esc-to-close="!saving"
+      unmount-on-close
+    >
       <template #title>{{ editing ? "编辑上级平台" : "新增上级平台" }}</template>
       <a-form :model="form" layout="vertical" class="cascade-form">
         <section class="form-section">
@@ -167,53 +197,136 @@
             <label><span>保存后启用</span><a-switch v-model="form.enabled" /></label>
           </div>
         </section>
-
-        <div class="drawer-actions">
-          <a-button @click="editorVisible = false">取消</a-button>
+      </a-form>
+      <template #footer>
+        <div class="dialog-actions">
+          <a-button :disabled="saving" @click="editorVisible = false">取消</a-button>
           <a-button type="primary" :loading="saving" @click="savePlatform">保存</a-button>
         </div>
-      </a-form>
-    </a-drawer>
+      </template>
+    </a-modal>
 
-    <a-drawer v-model:visible="shareVisible" :width="isMobile ? '100%' : 880" :footer="false" unmount-on-close>
-      <template #title>共享资源 · {{ sharingPlatform?.name }}</template>
+    <a-modal
+      v-model:visible="shareVisible"
+      width="min(1080px, calc(100vw - 24px))"
+      modal-class="uvp-system-dialog cascade-share-dialog"
+      :mask-closable="!shareSaving"
+      :closable="!shareSaving"
+      :esc-to-close="!shareSaving"
+      unmount-on-close
+    >
+      <template #title>
+        <div class="share-dialog-title"><Share2 :size="17" /><span>共享通道</span><small>{{ sharingPlatform?.name }}</small></div>
+      </template>
       <a-spin :loading="shareLoading" class="share-workspace">
-        <div class="share-summary">
-          <span>已选设备 <strong>{{ selectedDeviceIds.length }}</strong></span>
-          <span>已选通道 <strong>{{ selectedChannelIds.length }}</strong></span>
-          <span>投影版本 <strong>{{ shares?.revision || 0 }}</strong></span>
+        <div class="share-toolbar">
+          <a-radio-group v-model="shareMode" type="button" size="small" class="share-mode-switch" @change="switchShareMode">
+            <a-radio value="device">按设备</a-radio>
+            <a-radio value="channel">按通道</a-radio>
+          </a-radio-group>
+          <span class="share-mode-hint">{{ shareMode === "device" ? "设备模式下会将该设备的全部通道加入共享" : "通道模式下仅共享勾选通道" }}</span>
+          <a-input-search
+            v-if="shareMode === 'device'"
+            v-model="deviceKeyword"
+            allow-clear
+            placeholder="设备名称 / 国标编号"
+            class="share-resource-search"
+            @search="queryShareDevices"
+          />
+          <a-input-search
+            v-else
+            v-model="channelKeyword"
+            allow-clear
+            placeholder="通道名称 / 国标编号"
+            class="share-resource-search"
+            @search="queryShareChannels"
+          />
         </div>
-        <div class="share-grid">
-          <section class="share-panel">
-            <header><h3>设备</h3><small>共享通道时会自动包含所属设备</small></header>
-            <a-input v-model="deviceKeyword" allow-clear placeholder="搜索设备" />
-            <a-checkbox-group v-model="selectedDeviceIds" class="share-list">
-              <a-checkbox v-for="device in filteredDevices" :key="device.id" :value="device.id">
-                <span class="share-option"><strong>{{ device.name || device.deviceId }}</strong><code>{{ device.deviceId }}</code></span>
-              </a-checkbox>
-            </a-checkbox-group>
-          </section>
-          <section class="share-panel">
-            <header><h3>通道</h3><small>选择设备后加载通道</small></header>
-            <a-select v-model="activeSourceDeviceId" placeholder="选择设备" allow-search @change="loadDeviceChannels">
-              <a-option v-for="device in devices" :key="device.id" :value="device.id">{{ device.name || device.deviceId }}</a-option>
-            </a-select>
-            <a-checkbox-group v-model="selectedChannelIds" class="share-list">
-              <a-checkbox v-for="channel in activeChannels" :key="channel.id" :value="channel.id">
-                <span class="share-option"><strong>{{ channel.name || channel.channelId }}</strong><code>{{ channel.channelId }}</code></span>
-              </a-checkbox>
-            </a-checkbox-group>
-            <a-empty v-if="activeSourceDeviceId && !activeChannels.length && !channelLoading" description="该设备暂无通道" />
-            <a-spin v-if="channelLoading" :loading="true" />
-          </section>
-        </div>
+        <a-table
+          v-if="shareMode === 'device'"
+          :selected-keys="selectedDeviceKeys"
+          class="share-device-table share-table"
+          row-key="id"
+          :data="devices"
+          :loading="channelLoading"
+          :bordered="false"
+          :row-selection="{ type: 'checkbox', showCheckedAll: true }"
+          :pagination="devicePagination"
+          :scroll="{ x: '100%', minWidth: 850, y: 360 }"
+          @page-change="handleDevicePageChange"
+          @page-size-change="handleDevicePageSizeChange"
+          @update:selected-keys="handleDeviceSelectionChange"
+        >
+          <template #columns>
+            <a-table-column title="设备名称" :width="220">
+              <template #cell="{ record }"><strong class="share-channel-name">{{ record.name || record.deviceId }}</strong></template>
+            </a-table-column>
+            <a-table-column title="设备国标编号" :width="230">
+              <template #cell="{ record }"><code class="share-channel-code">{{ record.deviceId }}</code></template>
+            </a-table-column>
+            <a-table-column title="厂商" :width="150">
+              <template #cell="{ record }">{{ record.manufacturer || "-" }}</template>
+            </a-table-column>
+            <a-table-column title="通道数" :width="100" align="center">
+              <template #cell="{ record }">{{ record.channelCount ?? 0 }}</template>
+            </a-table-column>
+            <a-table-column title="在线通道" :width="110" align="center">
+              <template #cell="{ record }">{{ record.channelOnlineCount ?? 0 }}</template>
+            </a-table-column>
+            <a-table-column title="状态" :width="90" align="center">
+              <template #cell="{ record }"><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{ record.status === 1 ? "在线" : "离线" }}</a-tag></template>
+            </a-table-column>
+          </template>
+          <template #empty><a-empty description="暂无符合条件的设备" /></template>
+        </a-table>
+        <a-table
+          v-else
+          :selected-keys="selectedChannelIds"
+          class="share-channel-table share-table"
+          row-key="id"
+          :data="channelRows"
+          :loading="channelLoading"
+          :bordered="false"
+          :row-selection="{ type: 'checkbox', showCheckedAll: true }"
+          :pagination="channelPagination"
+          :scroll="{ x: '100%', minWidth: 850, y: 360 }"
+          @page-change="handleChannelPageChange"
+          @page-size-change="handleChannelPageSizeChange"
+          @update:selected-keys="handleChannelSelectionChange"
+        >
+          <template #columns>
+            <a-table-column title="通道名称" :width="210">
+              <template #cell="{ record }"><strong class="share-channel-name">{{ record.name || record.channelId }}</strong></template>
+            </a-table-column>
+            <a-table-column title="通道国标编号" :width="210">
+              <template #cell="{ record }"><code class="share-channel-code">{{ record.channelId }}</code></template>
+            </a-table-column>
+            <a-table-column title="所属设备" :width="250">
+              <template #cell="{ record }">
+                <div class="entity-cell"><span>{{ deviceNameByCode(record.deviceId) }}</span><code>{{ record.deviceId }}</code></div>
+              </template>
+            </a-table-column>
+            <a-table-column title="厂商" :width="110">
+              <template #cell="{ record }">{{ record.manufacturer || "-" }}</template>
+            </a-table-column>
+            <a-table-column title="状态" :width="90" align="center">
+              <template #cell="{ record }"><a-tag :color="record.status === 1 ? 'green' : 'gray'">{{ record.status === 1 ? "在线" : "离线" }}</a-tag></template>
+            </a-table-column>
+          </template>
+          <template #empty><a-empty description="暂无符合条件的通道" /></template>
+        </a-table>
         <a-alert v-if="shareError" type="error" class="cascade-alert">{{ shareError }}</a-alert>
-        <div class="drawer-actions">
-          <a-button @click="shareVisible = false">取消</a-button>
-          <a-button type="primary" :loading="shareSaving" @click="saveShares">保存共享</a-button>
-        </div>
       </a-spin>
-    </a-drawer>
+      <template #footer>
+        <div class="share-dialog-footer">
+          <span>已选 {{ selectedChannelIds.length }} 个通道，覆盖 {{ selectedDeviceIds.length }} 个设备目录</span>
+          <div class="dialog-actions">
+            <a-button :disabled="shareSaving" @click="shareVisible = false">取消</a-button>
+            <a-button type="primary" :loading="shareSaving" @click="saveShares">保存共享</a-button>
+          </div>
+        </div>
+      </template>
+    </a-modal>
   </div>
 </template>
 
@@ -221,14 +334,15 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import dayjs from "dayjs";
-import { Building2, Fingerprint, MoreHorizontal, Plus, RefreshCw, RotateCw, Search, Settings2, Share2, SlidersHorizontal } from "lucide-vue-next";
+import { Building2, CircleCheck, Fingerprint, MoreHorizontal, Plus, RadioTower, RefreshCw, RotateCw, Settings2, Share2, SlidersHorizontal, TriangleAlert } from "lucide-vue-next";
 import {
   createCascadePlatform,
   deleteCascadePlatform,
+  fetchSipNetworkInterfaces,
+  fetchSipSetupStatus,
   getCascadeShares,
   listCascadePlatforms,
   listChannels,
-  listDevices,
   reconnectCascadePlatform,
   replaceCascadeShares,
   setCascadePlatformEnabled,
@@ -239,13 +353,22 @@ import {
   type CascadePlatformInput,
   type CascadeShares,
   type GbChannel,
-  type GbDevice
+  type GbDevice,
+  type SipConfigSummary
 } from "@/api/gb28181";
+import {
+  listChannels as listChannelPage,
+  listDevices as listDevicePage,
+  type ChannelVO,
+  type DeviceVO
+} from "../device-mgmt/api";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
-import { cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, validGbId, validateCascadePlatform } from "./cascadeState";
+import { cascadeLocalIdentityDefaults, cascadePresentation, defaultCascadePlatform, heartbeatLabel, registrationLabel, uniquePublishedGbId, validGbId, validateCascadePlatform } from "./cascadeState";
 
-type ChannelOption = GbChannel & { sourceDeviceId: number };
+type ShareMode = "device" | "channel";
+type ChannelOption = (GbChannel | ChannelVO) & { sourceDeviceId: number };
+type ShareDevice = GbDevice & Partial<DeviceVO>;
 
 const userStore = useUserStoreHook();
 const { isMobile } = useDevicesSize();
@@ -266,6 +389,8 @@ const statusFilter = ref("all");
 const editorVisible = ref(false);
 const editing = ref<CascadePlatform | null>(null);
 const form = reactive(defaultCascadePlatform());
+const localSipConfig = ref<SipConfigSummary | null>(null);
+let localSipConfigRequest: Promise<void> | null = null;
 
 const summary = computed(() => ({
   enabled: platforms.value.filter(item => item.enabled).length,
@@ -296,9 +421,39 @@ async function refresh() {
   }
 }
 
-function openCreate() {
+async function loadLocalSipConfig() {
+  if (localSipConfigRequest) return localSipConfigRequest;
+  localSipConfigRequest = (async () => {
+    try {
+      const response = await fetchSipSetupStatus();
+      if (response.code !== 0 || !response.data?.config) return;
+      const config = response.data.config;
+      let advertiseIp = config.advertiseIp;
+      if (!advertiseIp && config.listenIp === "0.0.0.0") {
+        const networkResponse = await fetchSipNetworkInterfaces();
+        if (networkResponse.code === 0) {
+          const addresses = networkResponse.data?.items || [];
+          advertiseIp = addresses.find(item => item.recommended && !item.loopback && !item.listenOnly)?.ip
+            || addresses.find(item => !item.loopback && !item.listenOnly)?.ip
+            || "";
+        }
+      }
+      localSipConfig.value = { ...config, advertiseIp };
+    } catch {
+      // 本级 SIP 配置读取失败时保留手工填写能力,不阻塞新增平台。
+    }
+  })()
+    .catch(() => undefined)
+    .finally(() => {
+      localSipConfigRequest = null;
+    });
+  return localSipConfigRequest;
+}
+
+async function openCreate() {
+  if (!localSipConfig.value) await loadLocalSipConfig();
   editing.value = null;
-  Object.assign(form, defaultCascadePlatform());
+  Object.assign(form, defaultCascadePlatform(), cascadeLocalIdentityDefaults(localSipConfig.value || undefined));
   editorVisible.value = true;
 }
 
@@ -396,55 +551,187 @@ const channelLoading = ref(false);
 const shareError = ref("");
 const sharingPlatform = ref<CascadePlatform | null>(null);
 const shares = ref<CascadeShares | null>(null);
-const devices = ref<GbDevice[]>([]);
+const devices = ref<ShareDevice[]>([]);
+const deviceDirectory = reactive(new Map<number, ShareDevice>());
 const channelsByDevice = reactive(new Map<number, ChannelOption[]>());
-const selectedDeviceIds = ref<number[]>([]);
+const channelRows = ref<ChannelOption[]>([]);
 const selectedChannelIds = ref<number[]>([]);
-const activeSourceDeviceId = ref<number | undefined>();
+const shareMode = ref<ShareMode>("channel");
 const deviceKeyword = ref("");
-
-const filteredDevices = computed(() => {
-  const q = deviceKeyword.value.trim().toLowerCase();
-  return devices.value.filter(device => !q || [device.name, device.deviceId].some(value => String(value || "").toLowerCase().includes(q)));
+const channelKeyword = ref("");
+const devicePage = reactive({ page: 1, pageSize: 10, total: 0 });
+const channelPage = reactive({ page: 1, pageSize: 10, total: 0 });
+const devicePagination = computed(() => ({ current: devicePage.page, pageSize: devicePage.pageSize, total: devicePage.total, showTotal: true, showPageSize: true, pageSizeOptions: [10, 20, 50] }));
+const channelPagination = computed(() => ({ current: channelPage.page, pageSize: channelPage.pageSize, total: channelPage.total, showTotal: true, showPageSize: true, pageSizeOptions: [10, 20, 50] }));
+const channelSourceDeviceIds = computed(() => {
+  const sourceDeviceIds = new Map<number, number>();
+  const projectionDevices = new Map((shares.value?.devices || []).map(device => [device.id, device.sourceDeviceId]));
+  (shares.value?.channels || []).forEach(channel => {
+    const sourceDeviceId = channel.sourceDeviceId || projectionDevices.get(channel.deviceProjectionId);
+    if (sourceDeviceId) sourceDeviceIds.set(channel.sourceChannelId, sourceDeviceId);
+  });
+  channelsByDevice.forEach(channels => channels.forEach(channel => sourceDeviceIds.set(channel.id, channel.sourceDeviceId)));
+  channelRows.value.forEach(channel => {
+    if (channel.sourceDeviceId) sourceDeviceIds.set(channel.id, channel.sourceDeviceId);
+  });
+  return sourceDeviceIds;
 });
-const activeChannels = computed(() => activeSourceDeviceId.value ? channelsByDevice.get(activeSourceDeviceId.value) || [] : []);
+const selectedDeviceIds = computed(() => {
+  const deviceIds = new Set<number>();
+  selectedChannelIds.value.forEach(channelId => {
+    const sourceDeviceId = channelSourceDeviceIds.value.get(channelId);
+    if (sourceDeviceId) deviceIds.add(sourceDeviceId);
+  });
+  return [...deviceIds];
+});
+const selectedDeviceKeys = computed(() => devices.value.filter(device => {
+  const channels = channelsByDevice.get(device.id);
+  return Boolean(channels?.length && channels.every(channel => selectedChannelIds.value.includes(channel.id)));
+}).map(device => device.id));
+
+function unwrapPage<T>(response: any): T {
+  return response?.data?.data || response?.data || response;
+}
+
+function deviceNameByCode(deviceCode: string) {
+  return [...deviceDirectory.values()].find(device => device.deviceId === deviceCode)?.name || deviceCode || "-";
+}
+
+async function loadShareDevices(page = 1) {
+  const response: any = await listDevicePage({ page, pageSize: devicePage.pageSize, q: deviceKeyword.value.trim() || undefined });
+  const payload = unwrapPage<{ list?: ShareDevice[]; total?: number }>(response) || {};
+  devices.value = payload.list || [];
+  devices.value.forEach(device => deviceDirectory.set(device.id, device));
+  devicePage.page = page;
+  devicePage.total = Number(payload.total || 0);
+  if (shareMode.value === "device") {
+    const selectedIds = new Set(selectedDeviceIds.value);
+    await Promise.all(devices.value.filter(device => selectedIds.has(device.id)).map(loadAllDeviceChannels));
+  }
+}
+
+async function loadShareChannels(page = 1) {
+  channelLoading.value = true;
+  try {
+    const response: any = await listChannelPage({ page, pageSize: channelPage.pageSize, q: channelKeyword.value.trim() || undefined });
+    const payload = unwrapPage<{ list?: ChannelVO[]; total?: number }>(response) || {};
+    channelRows.value = (payload.list || []).map(channel => ({
+      ...channel,
+      sourceDeviceId: channelSourceDeviceIds.value.get(channel.id) || 0
+    }));
+    channelPage.page = page;
+    channelPage.total = Number(payload.total || 0);
+  } finally {
+    channelLoading.value = false;
+  }
+}
+
+async function switchShareMode(mode: string | number | boolean) {
+  shareMode.value = String(mode) as ShareMode;
+  if (shareMode.value === "device") await loadShareDevices(1);
+  else await loadShareChannels(1);
+}
+
+function queryShareDevices() {
+  void loadShareDevices(1);
+}
+
+function queryShareChannels() {
+  void loadShareChannels(1);
+}
+
+function handleDevicePageChange(page: number) {
+  void loadShareDevices(page);
+}
+
+function handleDevicePageSizeChange(pageSize: number) {
+  devicePage.pageSize = pageSize;
+  void loadShareDevices(1);
+}
+
+function handleChannelPageChange(page: number) {
+  void loadShareChannels(page);
+}
+
+function handleChannelPageSizeChange(pageSize: number) {
+  channelPage.pageSize = pageSize;
+  void loadShareChannels(1);
+}
+
+async function loadAllDeviceChannels(device: ShareDevice) {
+  if (channelsByDevice.has(device.id)) return channelsByDevice.get(device.id) || [];
+  const response: any = await listChannels(device.deviceId);
+  const list: GbChannel[] = response?.data?.list || response?.list || [];
+  const channels = list.map(channel => ({ ...channel, sourceDeviceId: device.id }));
+  channelsByDevice.set(device.id, channels);
+  return channels;
+}
+
+async function resolveChannelSourceDevice(channel: ChannelOption) {
+  if (channel.sourceDeviceId) return channel.sourceDeviceId;
+  const existing = (shares.value?.channels || []).find(item => item.sourceChannelId === channel.id);
+  if (existing?.sourceDeviceId) {
+    channel.sourceDeviceId = existing.sourceDeviceId;
+    return channel.sourceDeviceId;
+  }
+  const response: any = await listDevicePage({ page: 1, pageSize: 1, q: channel.deviceId });
+  const payload = unwrapPage<{ list?: ShareDevice[] }>(response) || {};
+  const device = payload.list?.find(item => item.deviceId === channel.deviceId);
+  if (device) {
+    deviceDirectory.set(device.id, device);
+    channel.sourceDeviceId = device.id;
+  }
+  return channel.sourceDeviceId;
+}
+
+async function handleChannelSelectionChange(keys: Array<string | number>) {
+  const currentIds = new Set(channelRows.value.map(channel => channel.id));
+  const next = new Set(selectedChannelIds.value.filter(id => !currentIds.has(id)));
+  keys.forEach(key => next.add(Number(key)));
+  selectedChannelIds.value = [...next];
+  await Promise.all(channelRows.value.filter(channel => next.has(channel.id)).map(resolveChannelSourceDevice));
+}
+
+async function handleDeviceSelectionChange(keys: Array<string | number>) {
+  const previous = new Set(selectedDeviceKeys.value);
+  const next = new Set(keys.map(Number));
+  const selected = new Set(selectedChannelIds.value);
+  const changedDevices = devices.value.filter(device => previous.has(device.id) !== next.has(device.id));
+  channelLoading.value = true;
+  try {
+    const channelGroups = await Promise.all(changedDevices.map(loadAllDeviceChannels));
+    channelGroups.forEach((channels, index) => {
+      const isSelected = next.has(changedDevices[index].id);
+      channels.forEach(channel => isSelected ? selected.add(channel.id) : selected.delete(channel.id));
+    });
+    selectedChannelIds.value = [...selected];
+  } finally {
+    channelLoading.value = false;
+  }
+}
 
 async function openShare(platform: CascadePlatform) {
   sharingPlatform.value = platform;
   shareVisible.value = true;
   shareLoading.value = true;
   shareError.value = "";
+  deviceKeyword.value = "";
+  channelKeyword.value = "";
+  shareMode.value = "channel";
+  devicePage.page = 1;
+  channelPage.page = 1;
+  deviceDirectory.clear();
   channelsByDevice.clear();
+  channelRows.value = [];
   try {
-    const [projectionResponse, deviceResponse]: any[] = await Promise.all([
-      getCascadeShares(platform.id),
-      listDevices({ page: 1, pageSize: 200 })
-    ]);
+    const projectionResponse: any = await getCascadeShares(platform.id);
     shares.value = projectionResponse?.data || projectionResponse;
-    devices.value = deviceResponse?.data?.list || deviceResponse?.list || [];
-    selectedDeviceIds.value = (shares.value?.devices || []).filter(item => item.active !== false).map(item => item.sourceDeviceId);
     selectedChannelIds.value = (shares.value?.channels || []).filter(item => item.active !== false).map(item => item.sourceChannelId);
-    activeSourceDeviceId.value = selectedDeviceIds.value[0] || devices.value[0]?.id;
-    if (activeSourceDeviceId.value) await loadDeviceChannels(activeSourceDeviceId.value);
+    await Promise.all([loadShareDevices(1), loadShareChannels(1)]);
   } catch {
     shareError.value = "共享资源加载失败，请稍后重试。";
   } finally {
     shareLoading.value = false;
-  }
-}
-
-async function loadDeviceChannels(value?: string | number) {
-  const sourceDeviceId = Number(value || activeSourceDeviceId.value);
-  if (!sourceDeviceId || channelsByDevice.has(sourceDeviceId)) return;
-  const device = devices.value.find(item => item.id === sourceDeviceId);
-  if (!device) return;
-  channelLoading.value = true;
-  try {
-    const response: any = await listChannels(device.deviceId);
-    const list: GbChannel[] = response?.data?.list || response?.list || [];
-    channelsByDevice.set(sourceDeviceId, list.map(channel => ({ ...channel, sourceDeviceId })));
-  } finally {
-    channelLoading.value = false;
   }
 }
 
@@ -455,30 +742,31 @@ async function saveShares() {
   try {
     const existingDevices = new Map((shares.value?.devices || []).map(item => [item.sourceDeviceId, item]));
     const existingChannels = new Map((shares.value?.channels || []).map(item => [item.sourceChannelId, item]));
-    const allLoadedChannels = [...channelsByDevice.values()].flat();
+    const allLoadedChannels = [...channelsByDevice.values()].flat().concat(channelRows.value);
     const loadedChannelMap = new Map(allLoadedChannels.map(item => [item.id, item]));
     const requiredDeviceIds = new Set(selectedDeviceIds.value);
-    selectedChannelIds.value.forEach(id => {
-      const sourceDeviceId = loadedChannelMap.get(id)?.sourceDeviceId || existingChannels.get(id)?.sourceDeviceId;
-      if (sourceDeviceId) requiredDeviceIds.add(sourceDeviceId);
-    });
     const deviceProjection: CascadeDeviceProjection[] = [...requiredDeviceIds].map(id => {
-      const source = devices.value.find(item => item.id === id);
+      const source = deviceDirectory.get(id);
       const existing = existingDevices.get(id);
       return { sourceDeviceId: id, publishedDeviceId: existing?.publishedDeviceId || source?.deviceId || "", name: existing?.name || source?.name || source?.deviceId || "" };
     });
+    const usedPublishedIds = new Set(deviceProjection.map(item => item.publishedDeviceId).filter(Boolean));
     const channelProjection: CascadeChannelProjection[] = selectedChannelIds.value.map(id => {
       const source = loadedChannelMap.get(id);
       const existing = existingChannels.get(id);
+      const publishedChannelId = uniquePublishedGbId(existing?.publishedChannelId || source?.channelId || "", id, usedPublishedIds);
       return {
         sourceDeviceId: source?.sourceDeviceId || existing?.sourceDeviceId || 0,
         sourceChannelId: id,
-        publishedChannelId: existing?.publishedChannelId || source?.channelId || "",
+        publishedChannelId,
         name: existing?.name || source?.name || source?.channelId || "",
         parentOverride: existing?.parentOverride || "",
         ptzAllowed: existing?.ptzAllowed || false
       };
     });
+    if (channelProjection.some(item => !item.sourceDeviceId)) {
+      throw new Error("部分通道无法关联所属设备，请刷新后重新选择。");
+    }
     if (deviceProjection.some(item => !validGbId(item.publishedDeviceId)) || channelProjection.some(item => !validGbId(item.publishedChannelId))) {
       throw new Error("共享资源存在非 20 位国标编码，请先修正设备或通道编码。");
     }
@@ -497,26 +785,33 @@ async function saveShares() {
 function profileLabel(value: string) { return value === "auto" ? "自动协商" : `固定 ${value}`; }
 function formatRelative(value?: string | null) { return value ? dayjs(value).format("MM-DD HH:mm:ss") : "暂无记录"; }
 
-onMounted(refresh);
+onMounted(() => {
+  refresh();
+  loadLocalSipConfig();
+});
 </script>
 
 <style scoped lang="scss">
 .cascade-page { min-height: 100%; }
-.cascade-shell { display: flex; min-height: 100%; flex-direction: column; gap: 14px; padding: 18px 20px; }
-.cascade-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.cascade-header h2 { margin: 0; color: var(--color-text-1); font-size: 20px; letter-spacing: 0; }
-.cascade-header p { margin: 5px 0 0; color: var(--color-text-3); font-size: 13px; }
-.cascade-header__actions, .drawer-actions, .cascade-actions { display: flex; align-items: center; gap: 8px; }
-.cascade-summary { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); border-block: 1px solid var(--color-border-2); background: var(--color-fill-1); }
-.cascade-summary__item { display: flex; min-height: 62px; align-items: center; justify-content: space-between; padding: 0 18px; border-right: 1px solid var(--color-border-2); }
-.cascade-summary__item:last-child { border-right: 0; }
-.cascade-summary__item span { color: var(--color-text-3); font-size: 13px; }
-.cascade-summary__item strong { color: var(--color-text-1); font-size: 22px; font-weight: 600; }
-.cascade-summary__item .is-success { color: rgb(var(--green-6)); }
-.cascade-summary__item .is-warning { color: rgb(var(--orange-6)); }
-.cascade-toolbar { display: flex; align-items: center; gap: 10px; }
-.cascade-search { width: 280px; }
-.cascade-status-filter { width: 132px; }
+.cascade-shell { display: flex; min-height: 100%; flex-direction: column; gap: 14px; }
+.cascade-header { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
+.cascade-header__actions, .cascade-actions { display: flex; align-items: center; gap: 8px; }
+.cascade-summary { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; }
+.cascade-summary-card { display: flex; min-width: 0; min-height: 78px; align-items: center; gap: 12px; padding: 14px 16px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }
+.cascade-summary-card__icon { display: inline-flex; width: 40px; height: 40px; flex: 0 0 40px; align-items: center; justify-content: center; border-radius: 10px; }
+.cascade-summary-card__icon.is-brand { color: var(--uvp-brand); background: var(--uvp-brand-soft); }
+.cascade-summary-card__icon.is-enabled { color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); }
+.cascade-summary-card__icon.is-online { color: var(--uvp-brand-cyan); background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent); }
+.cascade-summary-card__icon.is-attention { color: var(--uvp-warning); background: var(--uvp-warning-soft); }
+.cascade-summary-card__content { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.cascade-summary-card__content strong { color: var(--uvp-text-primary); font-size: 24px; font-weight: 600; line-height: 1; }
+.cascade-summary-card__content strong.is-online { color: var(--uvp-brand-cyan); }
+.cascade-summary-card__content strong.is-attention { color: var(--uvp-warning); }
+.cascade-summary-card__content span { color: var(--uvp-text-tertiary); font-size: 12px; }
+.cascade-search-panel { margin-bottom: 0; }
+.cascade-search { flex: 0 0 280px; width: 280px; }
+.cascade-status-filter { flex: 0 0 148px; width: 148px; }
+.cascade-status-filter :deep(.arco-select) { width: 100%; }
 .cascade-table { min-height: 260px; }
 .entity-cell { display: flex; min-width: 0; flex-direction: column; gap: 4px; }
 .entity-cell strong, .entity-cell span { overflow: hidden; color: var(--color-text-1); text-overflow: ellipsis; white-space: nowrap; }
@@ -527,40 +822,76 @@ onMounted(refresh);
 .cascade-form { display: flex; flex-direction: column; gap: 14px; }
 .form-section { padding: 0 0 14px; border-bottom: 1px solid var(--color-border-2); }
 .form-section > header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; color: var(--color-text-2); }
-.form-section h3, .share-panel h3 { margin: 0; color: var(--color-text-1); font-size: 15px; letter-spacing: 0; }
+.form-section h3 { margin: 0; color: var(--color-text-1); font-size: 15px; letter-spacing: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
 .form-grid :deep(.arco-input-number), .form-grid :deep(.arco-select) { width: 100%; }
 .switch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 16px; }
 .switch-grid label { display: flex; min-height: 36px; align-items: center; justify-content: space-between; padding: 0 10px; background: var(--color-fill-1); }
-.drawer-actions { justify-content: flex-end; padding-top: 4px; }
+.dialog-actions { display: flex; width: 100%; align-items: center; justify-content: flex-end; gap: 8px; }
 .share-workspace { display: block; }
-.share-summary { display: flex; gap: 20px; margin-bottom: 14px; padding: 10px 12px; background: var(--color-fill-1); color: var(--color-text-3); }
-.share-summary strong { margin-left: 4px; color: var(--color-text-1); }
-.share-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-height: 420px; }
-.share-panel { display: flex; min-width: 0; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--color-border-2); border-radius: 6px; }
-.share-panel header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.share-panel header small { color: var(--color-text-3); }
-.share-list { display: flex; max-height: 360px; flex-direction: column; gap: 2px; overflow: auto; }
-.share-list :deep(.arco-checkbox) { width: 100%; margin: 0; padding: 8px; }
-.share-list :deep(.arco-checkbox:hover) { background: var(--color-fill-2); }
-.share-option { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
-.share-option strong, .share-option code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.share-option code { color: var(--color-text-3); font-size: 12px; letter-spacing: 0; }
+.share-dialog-title { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.share-dialog-title > span { color: var(--color-text-1); font-weight: 500; }
+.share-dialog-title small { overflow: hidden; margin-left: 4px; color: var(--color-text-3); font-size: 12px; font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
+.share-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.share-mode-switch { flex: 0 0 auto; }
+.share-mode-switch :deep(.arco-radio-button) { min-width: 84px; text-align: center; }
+.share-mode-hint { min-width: 0; color: var(--color-text-3); font-size: 12px; }
+.share-resource-search { width: 280px; margin-left: auto; }
+.share-table { min-height: 454px; }
+.share-table :deep(.arco-table-th) { background: var(--color-fill-1); }
+.share-table :deep(.arco-table-cell) { white-space: nowrap; }
+.share-channel-name { display: block; overflow: hidden; color: var(--color-text-1); font-weight: 500; text-overflow: ellipsis; }
+.share-channel-code { color: var(--color-text-2); font-size: 12px; letter-spacing: 0; }
+.share-dialog-footer { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 14px; color: var(--color-text-3); font-size: 13px; }
+.share-dialog-footer > span { min-width: 0; }
+.share-dialog-footer .dialog-actions { width: auto; flex: 0 0 auto; }
 
 @media (max-width: 900px) {
-  .cascade-shell { padding: 14px 12px; }
   .cascade-header { align-items: stretch; flex-direction: column; }
   .cascade-header__actions { justify-content: flex-end; }
   .cascade-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cascade-summary__item:nth-child(2) { border-right: 0; }
-  .cascade-summary__item:nth-child(-n + 2) { border-bottom: 1px solid var(--color-border-2); }
-  .share-grid { grid-template-columns: 1fr; }
+  .share-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .share-mode-hint { display: flex; align-items: center; }
+  .share-resource-search { width: min(100%, 300px); margin-left: auto; }
 }
 
 @media (max-width: 560px) {
-  .cascade-header__actions, .cascade-toolbar { align-items: stretch; flex-direction: column; }
-  .cascade-search, .cascade-status-filter { width: 100%; }
+  .cascade-header__actions { align-items: stretch; flex-direction: column; }
+  .cascade-search, .cascade-status-filter { width: 100%; flex-basis: 100%; }
   .form-grid, .switch-grid { grid-template-columns: 1fr; }
-  .cascade-summary__item { min-height: 54px; padding: 0 12px; }
+  .cascade-summary-card { min-height: 70px; padding: 12px; }
+  .share-mode-switch, .share-resource-search { width: 100%; margin-left: 0; }
+  .share-mode-switch :deep(.arco-radio-button) { min-width: 0; flex: 1; }
+  .share-mode-hint { width: 100%; }
+  .share-dialog-footer { align-items: stretch; flex-direction: column; }
+  .share-dialog-footer .dialog-actions { width: 100%; }
+}
+</style>
+
+<style lang="scss">
+.cascade-platform-dialog .arco-modal-body {
+  max-height: calc(100dvh - 260px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cascade-share-dialog .arco-modal-body {
+  max-height: calc(100dvh - 230px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 560px) {
+  .cascade-platform-dialog .arco-modal-header {
+    padding-inline: 16px !important;
+  }
+
+  .cascade-platform-dialog .arco-modal-body {
+    padding: 18px 16px !important;
+  }
+
+  .cascade-platform-dialog .arco-modal-footer {
+    padding-inline: 16px !important;
+  }
 }
 </style>

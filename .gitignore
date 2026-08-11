@@ -19,6 +19,7 @@ ehthumbs.db
 
 # AI 工具
 .claude/
+.codex/
 CLAUDE.md
 AGENTS.md
 .trae/

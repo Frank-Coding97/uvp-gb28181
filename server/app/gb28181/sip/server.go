@@ -408,12 +408,6 @@ func (s *Server) SetPlaybackEndSink(sink handler.PlaybackEndSink) {
 	}
 }
 
-func (s *Server) SetPTZNotifyProcessor(processor handler.PTZNotifyProcessor) {
-	if s.notifyH != nil {
-		s.notifyH.SetPTZProcessor(processor)
-	}
-}
-
 // Start 启动双栈监听(配置里声明的每个 transport 各起一个 goroutine)
 func (s *Server) Start() error {
 	ctx, cancel := context.WithCancel(context.Background())

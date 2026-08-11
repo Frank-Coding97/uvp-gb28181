@@ -40,6 +40,7 @@ func TestGBMenuFlattenMigrations(t *testing.T) {
 				"lucide:filetext",
 				"lucide:monitorplay",
 				"lucide:bellring",
+				"lucide:clapperboard",
 			} {
 				require.Contains(t, sql, token)
 			}

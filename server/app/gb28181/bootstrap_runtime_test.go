@@ -37,7 +37,6 @@ func (f *fakeSIPRuntimeServer) SetRecordInfoSink(sink gbhandler.RecordInfoSink) 
 	}
 }
 func (f *fakeSIPRuntimeServer) SetPlaybackEndSink(gbhandler.PlaybackEndSink)             {}
-func (f *fakeSIPRuntimeServer) SetPTZNotifyProcessor(gbhandler.PTZNotifyProcessor)       {}
 func (f *fakeSIPRuntimeServer) SetSubscriptionWaker(gbhandler.SubscriptionWaker)         {}
 func (f *fakeSIPRuntimeServer) SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)   {}
 func (f *fakeSIPRuntimeServer) SetAlarmMessageProcessor(gbhandler.AlarmMessageProcessor) {}

@@ -14,8 +14,9 @@ const (
 	CapabilityModePlay     = "play"
 	CapabilityModeDownload = "download"
 
-	capabilityAudience = "cloud-recording-content"
-	capabilityVersion  = 1
+	capabilityAudience   = "cloud-recording-content"
+	capabilityVersion    = 1
+	capabilityKeyContext = "uvp-gb28181/cloud-recording-capability/v1"
 )
 
 var (
@@ -52,6 +53,18 @@ func NewCapabilitySigner(key []byte, keyID string) (*CapabilitySigner, error) {
 		return nil, ErrCapabilityKey
 	}
 	return &CapabilitySigner{key: append([]byte(nil), key...), keyID: keyID, now: time.Now}, nil
+}
+
+// DeriveCapabilityKey creates a purpose-specific key from the application's
+// existing root secret. This keeps deployments configuration-free while
+// preventing the raw JWT/ZLM secret from being used as the capability key.
+func DeriveCapabilityKey(root []byte) ([]byte, error) {
+	if len(root) == 0 {
+		return nil, ErrCapabilityKey
+	}
+	mac := hmac.New(sha256.New, root)
+	_, _ = mac.Write([]byte(capabilityKeyContext))
+	return mac.Sum(nil), nil
 }
 
 func (s *CapabilitySigner) Issue(fileID string, userID uint, mode string, durationSeconds *float64) (CapabilityGrant, error) {

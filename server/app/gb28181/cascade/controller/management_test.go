@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/repository"
 )
 
@@ -57,6 +58,19 @@ func TestShareRequestPreservesPTZAndPublishedIdentity(t *testing.T) {
 	require.Equal(t, "34020000001320000001", devices[0].PublishedDeviceID)
 	require.Equal(t, "34020000001320000002", channels[0].PublishedChannelID)
 	require.True(t, channels[0].PTZAllowed)
+}
+
+func TestShareResponseIncludesChannelSourceDeviceID(t *testing.T) {
+	response := buildShareResponse(3, &repository.ProjectionSnapshot{
+		Revision: 5,
+		Devices:  []model.GbCascadeDeviceProjection{{ID: 7, SourceDeviceID: 11}},
+		Channels: []model.GbCascadeChannelProjection{{ID: 9, DeviceProjectionID: 7, SourceChannelID: 13}},
+	})
+
+	require.EqualValues(t, 11, response.Channels[0].SourceDeviceID)
+	payload, err := json.Marshal(response)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"platformId":3,"revision":5,"devices":[{"id":7,"platformId":0,"sourceDeviceId":11,"publishedDeviceId":"","name":"","manufacturer":"","model":"","owner":"","civilCode":"","address":"","parental":0,"secrecy":0,"active":false,"revision":0,"createdAt":"0001-01-01T00:00:00Z","updatedAt":"0001-01-01T00:00:00Z"}],"channels":[{"id":9,"platformId":0,"deviceProjectionId":7,"sourceChannelId":13,"publishedChannelId":"","name":"","parentOverride":"","ptzAllowed":false,"active":false,"revision":0,"createdAt":"0001-01-01T00:00:00Z","updatedAt":"0001-01-01T00:00:00Z","sourceDeviceId":11}]}`, string(payload))
 }
 
 func TestPlatformRequestUsesCamelCaseAndKeepsPasswordWriteOnly(t *testing.T) {

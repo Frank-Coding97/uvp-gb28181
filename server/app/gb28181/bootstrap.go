@@ -117,7 +117,6 @@ type sipRuntimeServer interface {
 	SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)
 	SetRecordInfoSink(gbhandler.RecordInfoSink)
 	SetPlaybackEndSink(gbhandler.PlaybackEndSink)
-	SetPTZNotifyProcessor(gbhandler.PTZNotifyProcessor)
 	SetSubscriptionWaker(gbhandler.SubscriptionWaker)
 	SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)
 	SetAlarmMessageProcessor(gbhandler.AlarmMessageProcessor)
@@ -507,7 +506,6 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		}
 		newPTZScheduler = ptz.NewScheduler(newPTZService)
 		srv.SetPTZMessageProcessor(newPTZService)
-		srv.SetPTZNotifyProcessor(newPTZService)
 	}
 	sipServer = srv
 	if err := startCascadeRuntime(cfg, srv); err != nil {
@@ -531,6 +529,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindCatalog, subscribe.NewCatalogProcessor(catalog.New(app.DB())))
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindMobilePosition, subscribe.NewPositionProcessor(app.DB(), time.Now))
 		subscriptionService.SetProcessor(gbmodels.SubscriptionKindAlarm, subscribe.NewAlarmProcessor(app.DB(), time.Now))
+		subscriptionService.SetProcessor(gbmodels.SubscriptionKindPTZPrecisePosition, subscribe.NewPTZProcessor(newPTZService))
 		subscriptionScheduler = subscribe.NewScheduler(subscriptionService, 30*time.Second)
 		subscriptionScheduler.Start(context.Background())
 		srv.SetSubscriptionWaker(subscriptionService)
@@ -816,11 +815,24 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	recordingCatalogScheduler.Start(context.Background())
 
 	var capabilitySigner *gbrecording.CapabilitySigner
-	capabilityKey := os.Getenv(strings.TrimSpace(cfg.Recording.CapabilityKeyEnv))
-	keyReused := capabilityKey != "" && (capabilityKey == app.ConfigYml.GetString("token.jwttokensignkey") || capabilityKey == cfg.ZLM.Secret)
-	if !keyReused {
+	jwtRootKey := strings.TrimSpace(app.ConfigYml.GetString("token.jwttokensignkey"))
+	capabilityKey := strings.TrimSpace(os.Getenv(strings.TrimSpace(cfg.Recording.CapabilityKeyEnv)))
+	explicitCapabilityKey := capabilityKey != ""
+	keySource := "应用根密钥派生"
+	if !explicitCapabilityKey {
+		derivedKey, err := gbrecording.DeriveCapabilityKey([]byte(jwtRootKey))
+		if err != nil {
+			app.ZapLog.Warn("GB28181 云端录像 capability 密钥无法派生(JWT 根密钥为空)")
+		} else {
+			capabilityKey = string(derivedKey)
+		}
+	} else {
+		keySource = "环境变量"
+	}
+	keyReused := explicitCapabilityKey && (capabilityKey == jwtRootKey || capabilityKey == cfg.ZLM.Secret)
+	if !keyReused && explicitCapabilityKey {
 		for _, n := range zlmRegistry.List() {
-			if capabilityKey != "" && capabilityKey == n.APISecret {
+			if capabilityKey == n.APISecret {
 				keyReused = true
 				break
 			}
@@ -832,6 +844,7 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 		app.ZapLog.Warn("GB28181 云端录像 capability 密钥未配置或长度不足")
 	} else {
 		capabilitySigner = signer
+		app.ZapLog.Info("GB28181 云端录像 capability signer 已装配", zap.String("keySource", keySource))
 	}
 	catalogService := gbrecording.NewCatalogService(gbrecording.CatalogServiceConfig{
 		Repo: repo, Nodes: zlmRegistry, Scheduler: recordingCatalogScheduler, Signer: capabilitySigner,

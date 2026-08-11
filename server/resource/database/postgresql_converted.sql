@@ -1456,7 +1456,7 @@ SET
         WHEN 140352 THEN 'lucide:Server'
         WHEN 140353 THEN 'lucide:Workflow'
         WHEN 140354 THEN 'lucide:History'
-        WHEN 140355 THEN 'lucide:RadioTower'
+        WHEN 140355 THEN 'lucide:Clapperboard'
         WHEN 140357 THEN 'lucide:Activity'
         WHEN 140358 THEN 'lucide:MonitorPlay'
         ELSE icon

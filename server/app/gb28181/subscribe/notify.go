@@ -39,14 +39,13 @@ func (s *Service) SetProcessor(kind gbmodels.SubscriptionKind, processor Process
 
 // OnNotify validates a notification against the persisted subscription dialog and dispatches its business payload.
 func (s *Service) OnNotify(ctx context.Context, notification Notification) error {
-	if s == nil || s.db == nil || !notification.Kind.Valid() || strings.TrimSpace(notification.DeviceCode) == "" {
+	notification.CallID = strings.TrimSpace(notification.CallID)
+	if s == nil || s.db == nil || !notification.Kind.Valid() || strings.TrimSpace(notification.DeviceCode) == "" || notification.CallID == "" {
 		return fmt.Errorf("非法订阅通知")
 	}
 	var sub gbmodels.GbDeviceSubscription
-	query := s.db.WithContext(ctx).Where("kind = ? AND enabled = ?", notification.Kind, true)
-	if notification.CallID != "" {
-		query = query.Where("call_id = ?", notification.CallID)
-	}
+	query := s.db.WithContext(ctx).
+		Where("kind = ? AND enabled = ? AND call_id = ?", notification.Kind, true, notification.CallID)
 	result := query.Limit(1).Find(&sub)
 	if result.Error != nil || result.RowsAffected == 0 {
 		return fmt.Errorf("未匹配到活动订阅")

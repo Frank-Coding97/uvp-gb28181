@@ -160,7 +160,7 @@ func (c *ManagementController) GetShares(ctx *gin.Context) {
 		c.fail(ctx, err)
 		return
 	}
-	ctx.JSON(http.StatusOK, shareResponse{PlatformID: id, Revision: snapshot.Revision, Devices: snapshot.Devices, Channels: snapshot.Channels})
+	ctx.JSON(http.StatusOK, buildShareResponse(id, snapshot))
 }
 
 func (c *ManagementController) ReplaceShares(ctx *gin.Context) {
@@ -195,7 +195,7 @@ func (c *ManagementController) ReplaceShares(ctx *gin.Context) {
 		c.fail(ctx, err)
 		return
 	}
-	ctx.JSON(http.StatusOK, shareResponse{PlatformID: id, Revision: snapshot.Revision, Devices: snapshot.Devices, Channels: snapshot.Channels})
+	ctx.JSON(http.StatusOK, buildShareResponse(id, snapshot))
 }
 
 func (c *ManagementController) ready(ctx *gin.Context) bool {
@@ -354,8 +354,28 @@ func (r shareRequest) projection() ([]repository.DeviceProjectionInput, []reposi
 }
 
 type shareResponse struct {
-	PlatformID uint64                             `json:"platformId"`
-	Revision   uint64                             `json:"revision"`
-	Devices    []model.GbCascadeDeviceProjection  `json:"devices"`
-	Channels   []model.GbCascadeChannelProjection `json:"channels"`
+	PlatformID uint64                            `json:"platformId"`
+	Revision   uint64                            `json:"revision"`
+	Devices    []model.GbCascadeDeviceProjection `json:"devices"`
+	Channels   []shareChannelResponse            `json:"channels"`
+}
+
+type shareChannelResponse struct {
+	model.GbCascadeChannelProjection
+	SourceDeviceID uint64 `json:"sourceDeviceId"`
+}
+
+func buildShareResponse(platformID uint64, snapshot *repository.ProjectionSnapshot) shareResponse {
+	deviceSources := make(map[uint64]uint64, len(snapshot.Devices))
+	for _, device := range snapshot.Devices {
+		deviceSources[device.ID] = device.SourceDeviceID
+	}
+	channels := make([]shareChannelResponse, 0, len(snapshot.Channels))
+	for _, channel := range snapshot.Channels {
+		channels = append(channels, shareChannelResponse{
+			GbCascadeChannelProjection: channel,
+			SourceDeviceID:             deviceSources[channel.DeviceProjectionID],
+		})
+	}
+	return shareResponse{PlatformID: platformID, Revision: snapshot.Revision, Devices: snapshot.Devices, Channels: channels}
 }

@@ -24,7 +24,9 @@ SET `sort` = 1,
 WHERE `path` = '/home' AND `deleted_at` IS NULL;
 
 UPDATE `sys_menu`
-SET `sort` = 9,
+SET `svg_icon` = '',
+    `icon` = 'lucide:Clapperboard',
+    `sort` = 9,
     `updated_at` = NOW()
 WHERE `path` = '/media' AND `deleted_at` IS NULL;
 
@@ -38,7 +40,7 @@ SET `svg_icon` = '',
         WHEN '/gb28181/multi-screen-playback' THEN 'lucide:MonitorPlay'
         WHEN '/gb28181/alarm-management' THEN 'lucide:BellRing'
         WHEN '/gb28181/sip/platform' THEN 'lucide:Router'
-        WHEN '/gb28181/sip/config' THEN 'lucide:RadioTower'
+        WHEN '/gb28181/sip/config' THEN 'lucide:ServerCog'
         WHEN '/gb28181/sip-traces' THEN 'lucide:FileText'
         WHEN '/gb28181/security' THEN 'lucide:Shield'
         WHEN '/security-preview' THEN 'lucide:Shield'

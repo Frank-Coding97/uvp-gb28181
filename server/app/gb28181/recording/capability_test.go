@@ -36,6 +36,26 @@ func TestCapabilitySignerTTLAndVerification(t *testing.T) {
 	require.Equal(t, now.Add(15*time.Minute), download.ExpiresAt)
 }
 
+func TestDeriveCapabilityKeyIsPurposeSpecificAndDeterministic(t *testing.T) {
+	root := []byte(strings.Repeat("r", 32))
+	first, err := DeriveCapabilityKey(root)
+	require.NoError(t, err)
+	require.Len(t, first, 32)
+
+	second, err := DeriveCapabilityKey(root)
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+
+	other, err := DeriveCapabilityKey([]byte(strings.Repeat("s", 32)))
+	require.NoError(t, err)
+	require.NotEqual(t, first, other)
+}
+
+func TestDeriveCapabilityKeyRejectsEmptyRoot(t *testing.T) {
+	_, err := DeriveCapabilityKey(nil)
+	require.ErrorIs(t, err, ErrCapabilityKey)
+}
+
 func TestCapabilitySignerRejectsTamperingExpiryAndWeakKeys(t *testing.T) {
 	_, err := NewCapabilitySigner([]byte("short"), "recording-v1")
 	require.ErrorIs(t, err, ErrCapabilityKey)

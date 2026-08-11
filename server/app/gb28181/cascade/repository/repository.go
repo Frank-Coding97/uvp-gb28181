@@ -375,7 +375,7 @@ func upsertDeviceProjection(tx *gorm.DB, platformID uint64, input DeviceProjecti
 		return nil, result.Error
 	}
 	now := time.Now().UTC()
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+	if result.RowsAffected == 0 {
 		row = model.GbCascadeDeviceProjection{PlatformID: platformID, SourceDeviceID: input.SourceDeviceID, CreatedAt: now, Revision: 1}
 	} else {
 		row.Revision++
@@ -405,7 +405,7 @@ func upsertChannelProjection(tx *gorm.DB, platformID, deviceProjectionID uint64,
 		return result.Error
 	}
 	now := time.Now().UTC()
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+	if result.RowsAffected == 0 {
 		row = model.GbCascadeChannelProjection{PlatformID: platformID, SourceChannelID: input.SourceChannelID, CreatedAt: now, Revision: 1}
 	} else {
 		row.Revision++

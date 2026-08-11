@@ -18,7 +18,7 @@ SET parent_id = 0,
     name = 'gb28181-sip-service-config',
     component = 'gb28181/sip/ServiceConfig',
     title = N'国标服务配置',
-    icon = 'lucide:RadioTower',
+    icon = 'lucide:ServerCog',
     sort = 3,
     hide = 0,
     disable = 0,
@@ -31,7 +31,7 @@ IF NOT EXISTS (
 )
 BEGIN
     INSERT INTO sys_menu (parent_id,path,name,component,title,hide,disable,sort,type,icon,created_at,updated_at,created_by)
-    VALUES (0,'/gb28181/sip/config','gb28181-sip-service-config','gb28181/sip/ServiceConfig',N'国标服务配置',0,0,3,2,'lucide:RadioTower',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+    VALUES (0,'/gb28181/sip/config','gb28181-sip-service-config','gb28181/sip/ServiceConfig',N'国标服务配置',0,0,3,2,'lucide:ServerCog',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
 END;
 
 SELECT TOP 1 @GB_MENU_ID = id

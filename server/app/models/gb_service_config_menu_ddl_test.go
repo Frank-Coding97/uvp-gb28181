@@ -28,6 +28,7 @@ func TestGBServiceConfigMenuMigrations(t *testing.T) {
 				"/gb28181/sip/config",
 				"gb28181/sip/serviceconfig",
 				"国标服务配置",
+				"lucide:servercog",
 				"sys_role_menu",
 				"gb28181:sip:config:view",
 				"gb28181:sip:config:update",
