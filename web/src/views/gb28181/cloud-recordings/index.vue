@@ -242,8 +242,9 @@ import {
 const proxy = useGlobalProperties();
 const userStore = useUserStoreHook();
 const { isMobile } = useDevicesSize();
-const canView = computed(() => userStore.account.permissions.includes("gb28181:recording:view"));
-const canReconcile = computed(() => userStore.account.permissions.includes("gb28181:recording:reconcile"));
+const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
+const canView = computed(() => hasPermission("gb28181:recording:view"));
+const canReconcile = computed(() => hasPermission("gb28181:recording:reconcile"));
 
 const initialQuery = defaultRecordingQuery();
 const form = reactive({

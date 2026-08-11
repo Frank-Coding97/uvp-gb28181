@@ -97,6 +97,17 @@ describe("CloudRecordings", () => {
     expect(wrapper.get("[data-testid='recording-table']").attributes("data-total")).toBe("1");
   });
 
+  it("allows the admin wildcard permission to view and reconcile recordings", async () => {
+    account.permissions = ["*:*:*"];
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(api.listRecordingFiles).toHaveBeenCalledTimes(1);
+    await wrapper.get("[data-testid='recording-reconcile']").trigger("click");
+    await flushPromises();
+    expect(api.triggerReconciliation).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["node_offline", "node_missing", "file_missing", "access_unavailable"])("hides access actions for %s", async availability => {
     api.listRecordingFiles.mockResolvedValue(pageResult([file(availability)]));
     const wrapper = mount(CloudRecordings, { global: { stubs } });
