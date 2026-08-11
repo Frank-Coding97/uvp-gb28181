@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -20,9 +23,10 @@ const (
 	QueryParameter = "play_token"
 	DefaultTTL     = 120 * time.Second
 
-	tokenVersion             = 1
+	tokenVersion             = 2
 	tokenAudience            = "gb28181-play"
-	playKeyContext           = "uvp-gb28181/play-authorization/v1"
+	playKeyContext           = "uvp-gb28181/play-authorization/v2"
+	ipKeyContext             = "uvp-gb28181/play-ip-binding/v1"
 	callbackCapabilityDomain = "uvp-gb28181/on-stream-not-found-callback/v1"
 	maxClockSkew             = 30 * time.Second
 	minimumRootKeyBytes      = 32
@@ -36,31 +40,51 @@ var (
 	ErrURLInvalid        = errors.New("invalid playback URL")
 )
 
+type KeyMaterial struct {
+	ID     string
+	Secret []byte
+}
+
 type Binding struct {
-	DeviceID      string
-	ChannelID     string
-	App           string
-	Stream        string
-	MediaServerID string
+	DeviceID        string
+	ChannelID       string
+	App             string
+	Stream          string
+	MediaServerID   string
+	MediaGeneration uint64
+	BindClientIP    bool
+	ClientIP        string
 }
 
 type Claims struct {
-	Version       int    `json:"v"`
-	Audience      string `json:"aud"`
-	Mode          string `json:"mode"`
-	DeviceID      string `json:"did"`
-	ChannelID     string `json:"cid"`
-	App           string `json:"app"`
-	Stream        string `json:"stream"`
-	MediaServerID string `json:"node"`
-	IssuedAt      int64  `json:"iat"`
-	ExpiresAt     int64  `json:"exp"`
-	Nonce         string `json:"nonce"`
+	Version                 int    `json:"v"`
+	Audience                string `json:"aud"`
+	Mode                    string `json:"mode"`
+	KeyID                   string `json:"kid"`
+	DeviceID                string `json:"did"`
+	ChannelID               string `json:"cid"`
+	App                     string `json:"app"`
+	Stream                  string `json:"stream"`
+	MediaServerID           string `json:"node"`
+	MediaGeneration         uint64 `json:"mgen"`
+	IssuedAt                int64  `json:"iat"`
+	ExpiresAt               int64  `json:"exp"`
+	Nonce                   string `json:"nonce"`
+	AuthorizationGeneration string `json:"agen"`
+	ClientIPDigest          string `json:"iph,omitempty"`
+}
+
+type Prepared struct {
+	IssuedAt                time.Time
+	ExpiresAt               time.Time
+	Nonce                   string
+	AuthorizationGeneration string
 }
 
 type Grant struct {
-	Token     string
-	ExpiresAt time.Time
+	Token                   string
+	ExpiresAt               time.Time
+	AuthorizationGeneration string
 }
 
 type DirectIssuer interface {
@@ -73,27 +97,75 @@ type Verifier interface {
 
 type Option func(*Signer) error
 
+type derivedKey struct {
+	sign []byte
+	ip   []byte
+}
+
 type Signer struct {
-	key []byte
-	ttl time.Duration
-	now func() time.Time
+	activeID string
+	keys     map[string]derivedKey
+	ttl      time.Duration
+	now      func() time.Time
+	random   io.Reader
 }
 
 func NewSigner(root []byte, opts ...Option) (*Signer, error) {
-	if len(root) < minimumRootKeyBytes {
-		return nil, ErrKeyInvalid
-	}
-	key, err := deriveKey(root, playKeyContext)
+	return NewKeyring(KeyMaterial{Secret: root}, nil, opts...)
+}
+
+func NewKeyring(active KeyMaterial, previous *KeyMaterial, opts ...Option) (*Signer, error) {
+	activeID, activeKey, err := buildKey(active)
 	if err != nil {
 		return nil, err
 	}
-	signer := &Signer{key: key, ttl: DefaultTTL, now: time.Now}
+	signer := &Signer{
+		activeID: activeID,
+		keys:     map[string]derivedKey{activeID: activeKey},
+		ttl:      DefaultTTL,
+		now:      time.Now,
+		random:   rand.Reader,
+	}
+	if previous != nil && len(previous.Secret) > 0 {
+		previousID, previousKey, keyErr := buildKey(*previous)
+		if keyErr != nil || previousID == activeID {
+			return nil, ErrKeyInvalid
+		}
+		signer.keys[previousID] = previousKey
+	}
 	for _, opt := range opts {
 		if err := opt(signer); err != nil {
 			return nil, err
 		}
 	}
 	return signer, nil
+}
+
+func KeyID(secret []byte) string {
+	sum := sha256.Sum256(secret)
+	return base64.RawURLEncoding.EncodeToString(sum[:9])
+}
+
+func buildKey(material KeyMaterial) (string, derivedKey, error) {
+	if len(material.Secret) < minimumRootKeyBytes {
+		return "", derivedKey{}, ErrKeyInvalid
+	}
+	id := strings.TrimSpace(material.ID)
+	if id == "" {
+		id = KeyID(material.Secret)
+	}
+	if strings.ContainsAny(id, ". 	\r\n") {
+		return "", derivedKey{}, ErrKeyInvalid
+	}
+	signKey, err := deriveKey(material.Secret, playKeyContext)
+	if err != nil {
+		return "", derivedKey{}, err
+	}
+	ipKey, err := deriveKey(material.Secret, ipKeyContext)
+	if err != nil {
+		return "", derivedKey{}, err
+	}
+	return id, derivedKey{sign: signKey, ip: ipKey}, nil
 }
 
 func WithTTL(ttl time.Duration) Option {
@@ -116,33 +188,74 @@ func WithNow(now func() time.Time) Option {
 	}
 }
 
-func (s *Signer) IssueDirect(binding Binding) (Grant, error) {
-	if s == nil || !validBinding(binding) {
-		return Grant{}, ErrTokenInvalid
+func WithRandomReader(reader io.Reader) Option {
+	return func(s *Signer) error {
+		if reader == nil {
+			return ErrTokenInvalid
+		}
+		s.random = reader
+		return nil
+	}
+}
+
+func (s *Signer) Prepare() (Prepared, error) {
+	if s == nil || s.random == nil || s.now == nil || s.ttl <= 0 {
+		return Prepared{}, ErrTokenInvalid
+	}
+	randomBytes := make([]byte, 32)
+	if _, err := io.ReadFull(s.random, randomBytes); err != nil {
+		return Prepared{}, ErrTokenInvalid
 	}
 	now := s.now().UTC()
-	expiresAt := now.Add(s.ttl)
-	nonce := make([]byte, 16)
-	if _, err := rand.Read(nonce); err != nil {
+	return Prepared{
+		IssuedAt:                now,
+		ExpiresAt:               now.Add(s.ttl),
+		Nonce:                   base64.RawURLEncoding.EncodeToString(randomBytes[:16]),
+		AuthorizationGeneration: base64.RawURLEncoding.EncodeToString(randomBytes[16:]),
+	}, nil
+}
+
+func (s *Signer) Bind(prepared Prepared, binding Binding) (Grant, error) {
+	if s == nil || !validBinding(binding) || prepared.Nonce == "" || prepared.AuthorizationGeneration == "" ||
+		prepared.IssuedAt.IsZero() || !prepared.ExpiresAt.After(prepared.IssuedAt) {
 		return Grant{}, ErrTokenInvalid
 	}
+	key, ok := s.keys[s.activeID]
+	if !ok {
+		return Grant{}, ErrKeyInvalid
+	}
 	claims := Claims{
-		Version: tokenVersion, Audience: tokenAudience, Mode: ModeDirect,
-		DeviceID: binding.DeviceID, ChannelID: binding.ChannelID,
-		App: binding.App, Stream: binding.Stream, MediaServerID: binding.MediaServerID,
-		IssuedAt: now.Unix(), ExpiresAt: expiresAt.Unix(),
-		Nonce: base64.RawURLEncoding.EncodeToString(nonce),
+		Version: tokenVersion, Audience: tokenAudience, Mode: ModeDirect, KeyID: s.activeID,
+		DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, App: binding.App,
+		Stream: binding.Stream, MediaServerID: binding.MediaServerID, MediaGeneration: binding.MediaGeneration,
+		IssuedAt: prepared.IssuedAt.Unix(), ExpiresAt: prepared.ExpiresAt.Unix(), Nonce: prepared.Nonce,
+		AuthorizationGeneration: prepared.AuthorizationGeneration,
+	}
+	if binding.BindClientIP {
+		digest, err := clientIPDigest(key.ip, binding.ClientIP)
+		if err != nil {
+			return Grant{}, ErrTokenInvalid
+		}
+		claims.ClientIPDigest = digest
 	}
 	payload, err := json.Marshal(claims)
 	if err != nil {
 		return Grant{}, ErrTokenInvalid
 	}
 	encoded := base64.RawURLEncoding.EncodeToString(payload)
-	signature := s.signature([]byte(encoded))
 	return Grant{
-		Token:     encoded + "." + base64.RawURLEncoding.EncodeToString(signature),
-		ExpiresAt: expiresAt,
+		Token:                   encoded + "." + base64.RawURLEncoding.EncodeToString(signature(key.sign, []byte(encoded))),
+		ExpiresAt:               prepared.ExpiresAt,
+		AuthorizationGeneration: prepared.AuthorizationGeneration,
 	}, nil
+}
+
+func (s *Signer) IssueDirect(binding Binding) (Grant, error) {
+	prepared, err := s.Prepare()
+	if err != nil {
+		return Grant{}, err
+	}
+	return s.Bind(prepared, binding)
 }
 
 func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
@@ -153,10 +266,6 @@ func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return Claims{}, ErrTokenInvalid
 	}
-	signature, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil || !hmac.Equal(signature, s.signature([]byte(parts[0]))) {
-		return Claims{}, ErrTokenInvalid
-	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
 		return Claims{}, ErrTokenInvalid
@@ -165,10 +274,28 @@ func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return Claims{}, ErrTokenInvalid
 	}
-	if claims.Version != tokenVersion || claims.Audience != tokenAudience || claims.Mode != ModeDirect ||
-		claims.Nonce == "" || claims.DeviceID != expected.DeviceID || claims.ChannelID != expected.ChannelID ||
-		claims.App != expected.App || claims.Stream != expected.Stream || claims.MediaServerID != expected.MediaServerID {
+	key, ok := s.keys[claims.KeyID]
+	if !ok || claims.KeyID == "" {
 		return Claims{}, ErrTokenInvalid
+	}
+	providedSignature, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || !hmac.Equal(providedSignature, signature(key.sign, []byte(parts[0]))) {
+		return Claims{}, ErrTokenInvalid
+	}
+	if claims.Version != tokenVersion || claims.Audience != tokenAudience || claims.Mode != ModeDirect ||
+		claims.Nonce == "" || claims.AuthorizationGeneration == "" || claims.DeviceID != expected.DeviceID ||
+		claims.ChannelID != expected.ChannelID || claims.App != expected.App || claims.Stream != expected.Stream ||
+		claims.MediaServerID != expected.MediaServerID || claims.MediaGeneration != expected.MediaGeneration {
+		return Claims{}, ErrTokenInvalid
+	}
+	if expected.BindClientIP && claims.ClientIPDigest == "" {
+		return Claims{}, ErrTokenInvalid
+	}
+	if claims.ClientIPDigest != "" {
+		digest, digestErr := clientIPDigest(key.ip, expected.ClientIP)
+		if digestErr != nil || !hmac.Equal([]byte(claims.ClientIPDigest), []byte(digest)) {
+			return Claims{}, ErrTokenInvalid
+		}
 	}
 	now := s.now().UTC()
 	if claims.IssuedAt <= 0 || claims.ExpiresAt <= claims.IssuedAt || time.Unix(claims.IssuedAt, 0).After(now.Add(maxClockSkew)) {
@@ -180,10 +307,31 @@ func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
 	return claims, nil
 }
 
-func (s *Signer) signature(payload []byte) []byte {
-	mac := hmac.New(sha256.New, s.key)
+func signature(key, payload []byte) []byte {
+	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write(payload)
 	return mac.Sum(nil)
+}
+
+func clientIPDigest(key []byte, rawIP string) (string, error) {
+	normalized, err := NormalizeClientIP(rawIP)
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(signature(key, []byte(normalized))), nil
+}
+
+func NormalizeClientIP(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	value = strings.Trim(value, "[]")
+	address, err := netip.ParseAddr(value)
+	if err != nil {
+		return "", ErrTokenInvalid
+	}
+	return address.Unmap().String(), nil
 }
 
 func CallbackCapability(apiSecret, mediaServerID string) (string, error) {
@@ -194,17 +342,12 @@ func CallbackCapability(apiSecret, mediaServerID string) (string, error) {
 	if err != nil {
 		return "", ErrCapabilityInvalid
 	}
-	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write([]byte(mediaServerID))
-	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
+	return base64.RawURLEncoding.EncodeToString(signature(key, []byte(mediaServerID))), nil
 }
 
 func VerifyCallbackCapability(apiSecret, mediaServerID, capability string) bool {
 	want, err := CallbackCapability(apiSecret, mediaServerID)
-	if err != nil || capability == "" {
-		return false
-	}
-	return hmac.Equal([]byte(want), []byte(capability))
+	return err == nil && capability != "" && hmac.Equal([]byte(want), []byte(capability))
 }
 
 func DecorateURLs(values playurl.URLs, token string) (playurl.URLs, error) {
@@ -232,15 +375,19 @@ func deriveKey(root []byte, context string) ([]byte, error) {
 	if len(root) == 0 {
 		return nil, ErrKeyInvalid
 	}
-	mac := hmac.New(sha256.New, root)
-	_, _ = mac.Write([]byte(context))
-	return mac.Sum(nil), nil
+	return signature(root, []byte(context)), nil
 }
 
 func validBinding(binding Binding) bool {
-	return validGBID(binding.DeviceID) && validGBID(binding.ChannelID) &&
-		strings.TrimSpace(binding.App) != "" && strings.TrimSpace(binding.Stream) != "" &&
-		strings.TrimSpace(binding.MediaServerID) != ""
+	if !validGBID(binding.DeviceID) || !validGBID(binding.ChannelID) || strings.TrimSpace(binding.App) == "" ||
+		strings.TrimSpace(binding.Stream) == "" || strings.TrimSpace(binding.MediaServerID) == "" {
+		return false
+	}
+	if binding.BindClientIP {
+		_, err := NormalizeClientIP(binding.ClientIP)
+		return err == nil
+	}
+	return true
 }
 
 func validGBID(value string) bool {
