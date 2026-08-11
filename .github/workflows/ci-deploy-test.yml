@@ -1,4 +1,4 @@
-name: CI and Deploy Test
+name: CI
 
 on:
   push:
@@ -8,22 +8,8 @@ on:
     branches:
       - develop
       - main
-  workflow_dispatch:
-    inputs:
-      deploy:
-        description: Deploy the selected revision to the test environment
-        required: true
-        type: boolean
-        default: false
-      allow_database_changes:
-        description: Database changes were reviewed and applied separately
-        required: true
-        type: boolean
-        default: false
-
 permissions:
   contents: read
-  deployments: read
 
 concurrency:
   group: uvp-ci-${{ github.ref }}
@@ -97,176 +83,29 @@ jobs:
         working-directory: web
         run: pnpm run build:prod
 
-      - name: Assemble immutable release bundle
-        if: github.event_name == 'push' || inputs.deploy == true
-        run: |
-          set -euo pipefail
-          release_dir="$RUNNER_TEMP/uvp-release"
-          output_dir="$RUNNER_TEMP/release-output"
-          archive="$output_dir/uvp-release-$GITHUB_SHA.tar.gz"
-          rm -rf "$release_dir" "$output_dir"
-          mkdir -p \
-            "$release_dir/backend/resource/public" \
-            "$release_dir/agent" \
-            "$release_dir/frontend" \
-            "$output_dir"
-
-          install -m 0755 server/bin/uvp-gb28181-linux-amd64 "$release_dir/backend/uvp-gb28181"
-          install -m 0755 server/bin/uvp-firewall-agent-linux-amd64 "$release_dir/agent/uvp-firewall-agent"
-          install -m 0644 deploy/test/uvp-firewall-agent.service "$release_dir/agent/uvp-firewall-agent.service"
-          install -m 0644 deploy/test/uvp-firewall-agent.default "$release_dir/agent/uvp-firewall-agent.default"
-          cp -a server/resource/database "$release_dir/backend/resource/database"
-          if [[ -d server/resource/public ]]; then
-            cp -a server/resource/public/. "$release_dir/backend/resource/public/"
-          fi
-          cp deploy/test/backend.Dockerfile "$release_dir/backend/Dockerfile"
-
-          cp -a web/dist "$release_dir/frontend/dist"
-          cp deploy/test/frontend.Dockerfile "$release_dir/frontend/Dockerfile"
-          cp deploy/test/nginx.conf "$release_dir/frontend/nginx.conf"
-          cp deploy/test/compose.yml "$release_dir/compose.yml"
-
-          tar -czf "$archive" -C "$release_dir" .
-
-      - name: Upload immutable release artifact
-        if: github.event_name == 'push' || inputs.deploy == true
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: uvp-release-${{ github.sha }}
-          path: ${{ runner.temp }}/release-output/uvp-release-${{ github.sha }}.tar.gz
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  deploy-test:
-    name: Deploy test
+  mirror-gitee:
+    name: Mirror verified develop to Gitee
     needs: build-test
-    if: github.event_name == 'push' || inputs.deploy == true
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
-    environment:
-      name: test
-      url: https://www.uvplatform.cn
+    env:
+      GITEE_PUSH_URL: ${{ secrets.GITEE_PUSH_URL }}
 
     steps:
-      - name: Check out deployment metadata
+      - name: Skip until the Gitee mirror credential is configured
+        if: env.GITEE_PUSH_URL == ''
+        run: echo 'GITEE_PUSH_URL is not configured; skipping mirror.'
+
+      - name: Check out the verified revision
+        if: env.GITEE_PUSH_URL != ''
         uses: actions/checkout@v7.0.1
         with:
-          fetch-depth: 0
+          ref: ${{ github.sha }}
+          fetch-depth: 1
 
-      - name: Block automatic deployment of unreviewed database changes
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Fast-forward Gitee develop
+        if: env.GITEE_PUSH_URL != ''
         run: |
           set -euo pipefail
-          baseline_sha=""
-          while IFS=$'\t' read -r deployment_id deployment_sha; do
-            state=$(gh api \
-              "repos/$GITHUB_REPOSITORY/deployments/$deployment_id/statuses" \
-              --jq '.[0].state // ""')
-            if [[ "$state" == "success" ]]; then
-              baseline_sha="$deployment_sha"
-              break
-            fi
-          done < <(
-            gh api \
-              "repos/$GITHUB_REPOSITORY/deployments?environment=test&per_page=100" \
-              --jq '.[] | [.id, .sha] | @tsv'
-          )
-
-          if [[ -z "$baseline_sha" ]]; then
-            echo "::error::No successful test deployment baseline exists. Run workflow_dispatch with deploy and allow_database_changes enabled for the first deployment."
-            exit 1
-          fi
-          git cat-file -e "$baseline_sha^{commit}"
-          if ! git diff --quiet "$baseline_sha" "$GITHUB_SHA" -- server/resource/database; then
-            echo "::error::Database files changed since the last successful deployment. Apply and review migrations separately, then use workflow_dispatch with allow_database_changes enabled."
-            exit 1
-          fi
-
-      - name: Require acknowledgement for manual database-change deployment
-        if: github.event_name == 'workflow_dispatch' && inputs.allow_database_changes != true
-        run: |
-          if git diff --name-only "origin/${{ github.event.repository.default_branch }}...$GITHUB_SHA" -- server/resource/database | grep -q .; then
-            echo "::error::Database files differ from the default branch. Enable allow_database_changes only after applying reviewed migrations."
-            exit 1
-          fi
-
-      - name: Download immutable release artifact
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: uvp-release-${{ github.sha }}
-          path: ${{ runner.temp }}/release-output
-
-      - name: Verify release artifact
-        run: |
-          set -euo pipefail
-          archive="$RUNNER_TEMP/release-output/uvp-release-$GITHUB_SHA.tar.gz"
-          test -f "$archive"
-          echo "RELEASE_ARCHIVE=$archive" >> "$GITHUB_ENV"
-          echo "RELEASE_SHA256=$(sha256sum "$archive" | awk '{print $1}')" >> "$GITHUB_ENV"
-
-      - name: Configure deployment SSH identity
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.TEST_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.TEST_SSH_KNOWN_HOSTS }}
-        run: |
-          set -euo pipefail
-          test -n "$SSH_PRIVATE_KEY"
-          test -n "$SSH_KNOWN_HOSTS"
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/uvp_test_deploy"
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
-          chmod 0600 "$HOME/.ssh/uvp_test_deploy" "$HOME/.ssh/known_hosts"
-
-      - name: Upload release bundle
-        env:
-          TEST_HOST: ${{ vars.TEST_HOST }}
-        run: |
-          set -euo pipefail
-          test -n "$TEST_HOST"
-          scp \
-            -i "$HOME/.ssh/uvp_test_deploy" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            "$RELEASE_ARCHIVE" \
-            "uvp-deploy@$TEST_HOST:/home/uvp-deploy/incoming/uvp-release-$GITHUB_SHA.tar.gz"
-
-      - name: Deploy and verify test environment
-        env:
-          TEST_HOST: ${{ vars.TEST_HOST }}
-        run: |
-          set -euo pipefail
-          remote_archive="/home/uvp-deploy/incoming/uvp-release-$GITHUB_SHA.tar.gz"
-          set +e
-          ssh \
-            -i "$HOME/.ssh/uvp_test_deploy" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            "uvp-deploy@$TEST_HOST" \
-            "sudo /usr/local/sbin/deploy-uvp '$GITHUB_SHA' '$remote_archive' '$RELEASE_SHA256'"
-          deploy_status=$?
-          set -e
-          ssh \
-            -i "$HOME/.ssh/uvp_test_deploy" \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            "uvp-deploy@$TEST_HOST" \
-            "rm -f '$remote_archive'" || true
-          exit "$deploy_status"
-
-      - name: Publish deployment summary
-        run: |
-          {
-            echo "### Test deployment"
-            echo "- Revision: \`$GITHUB_SHA\`"
-            echo "- URL: https://www.uvplatform.cn"
-            echo "- Result: healthy"
-          } >> "$GITHUB_STEP_SUMMARY"
+          git remote add gitee "$GITEE_PUSH_URL"
+          git push gitee HEAD:refs/heads/develop

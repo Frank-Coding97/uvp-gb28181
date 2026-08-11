@@ -19,6 +19,10 @@ func TestRelationalTraceDeploymentContract(t *testing.T) {
 		filepath.Join(repoRoot, "deploy", "test", "compose.yml"),
 		filepath.Join(repoRoot, "deploy", "test", "configure_server.py"),
 		filepath.Join(repoRoot, "deploy", "test", "deploy-uvp.sh"),
+		filepath.Join(repoRoot, "deploy", "test", "assemble-release.sh"),
+		filepath.Join(repoRoot, "deploy", "test", "build-release.sh"),
+		filepath.Join(repoRoot, "deploy", "test", "uvp-gitee-deploy-local.sh"),
+		filepath.Join(repoRoot, "deploy", "test", "uvp-gitee-deploy-worker.sh"),
 		filepath.Join(repoRoot, ".github", "workflows", "ci-deploy-test.yml"),
 	}
 	for _, path := range paths {
