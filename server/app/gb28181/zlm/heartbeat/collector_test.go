@@ -2,6 +2,7 @@ package heartbeat_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -9,6 +10,24 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
+
+type configScheduler struct {
+	mu    sync.Mutex
+	calls []int64
+}
+
+func (s *configScheduler) ScheduleConfigConvergence(nodeID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, nodeID)
+	return true
+}
+
+func (s *configScheduler) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.calls)
+}
 
 // 构造 registry + 预置节点,返回 registry 与节点 ID(便于断言)
 func setupRegistry(t *testing.T, uuid string) (*node.Registry, int64) {
@@ -90,4 +109,28 @@ func TestCollector_EmptyMediaServerId_ReturnsErr(t *testing.T) {
 
 	// mediaServerId 缺失 → 无法反查节点,拒绝
 	require.Error(t, coll.Receive([]byte(`{"data":{"MediaSource":1}}`)))
+}
+
+func TestCollector_SchedulesConfigUntilRecoveredNodeIsReady(t *testing.T) {
+	reg, id := setupRegistry(t, "uuid-1")
+	require.True(t, reg.SetAutoOnDemandReady(id, true))
+	require.NoError(t, reg.MarkOffline(context.Background(), id))
+	scheduler := &configScheduler{}
+	coll := heartbeat.NewCollectorWithConfigScheduler(reg, scheduler)
+	payload := []byte(`{"mediaServerId":"uuid-1","data":{"MediaSource":1}}`)
+
+	require.NoError(t, coll.Receive(payload))
+	require.Equal(t, 1, scheduler.count())
+	recovered, ok := reg.Get(id)
+	require.True(t, ok)
+	require.Equal(t, node.StateActive, recovered.State)
+	require.False(t, reg.IsAutoOnDemandReady(id))
+
+	// Apply still failed: another heartbeat must retain the retry opportunity.
+	require.NoError(t, coll.Receive(payload))
+	require.Equal(t, 2, scheduler.count())
+
+	require.True(t, reg.SetAutoOnDemandReady(id, true))
+	require.NoError(t, coll.Receive(payload))
+	require.Equal(t, 2, scheduler.count(), "ready 后普通心跳不重复 Apply")
 }

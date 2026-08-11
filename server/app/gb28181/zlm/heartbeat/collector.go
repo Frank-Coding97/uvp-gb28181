@@ -22,12 +22,21 @@ var ErrEmptyMediaServerID = errors.New("heartbeat: empty mediaServerId in payloa
 
 // Collector 心跳收集器,把 ZLM on_server_keepalive payload 解析为 Stats 写入 Registry。
 type Collector struct {
-	registry *node.Registry
+	registry  *node.Registry
+	scheduler ConfigConvergenceScheduler
+}
+
+type ConfigConvergenceScheduler interface {
+	ScheduleConfigConvergence(nodeID int64) bool
 }
 
 // NewCollector 构造
 func NewCollector(reg *node.Registry) *Collector {
 	return &Collector{registry: reg}
+}
+
+func NewCollectorWithConfigScheduler(reg *node.Registry, scheduler ConfigConvergenceScheduler) *Collector {
+	return &Collector{registry: reg, scheduler: scheduler}
 }
 
 // keepalivePayload ZLM on_server_keepalive 回调载荷
@@ -89,5 +98,9 @@ func (c *Collector) Receive(payload []byte) error {
 	stats.MediaSourceCount = body.Data.MediaSource
 	stats.SessionCount = body.Data.TcpSession + body.Data.UdpSession
 	c.registry.UpdateStats(body.MediaServerID, stats)
+	if current, ok := c.registry.GetByUUID(body.MediaServerID); ok && current.IsActive() &&
+		!c.registry.IsAutoOnDemandReady(current.ID) && c.scheduler != nil {
+		c.scheduler.ScheduleConfigConvergence(current.ID)
+	}
 	return nil
 }

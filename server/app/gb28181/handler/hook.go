@@ -439,6 +439,34 @@ type onPlayBody struct {
 	MediaServerID string `json:"mediaServerId"`
 }
 
+type onStreamNotFoundBody struct {
+	MediaServerID string `json:"mediaServerId"`
+	VHost         string `json:"vhost"`
+	App           string `json:"app"`
+	Schema        string `json:"schema"`
+	Stream        string `json:"stream"`
+	Params        string `json:"params"`
+}
+
+// OnStreamNotFound remains fail-closed until the bounded auto-start
+// dispatcher and both authorization layers are installed.
+func (h *HookController) OnStreamNotFound(c *gin.Context) {
+	var body onStreamNotFoundBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		hookDenied(c, "invalid stream-not-found request")
+		return
+	}
+	if body.MediaServerID == "" || body.App != "rtp" {
+		hookDenied(c, "automatic playback unavailable")
+		return
+	}
+	if _, _, err := play.ParseFixedStreamID(body.Stream); err != nil {
+		hookDenied(c, "automatic playback unavailable")
+		return
+	}
+	hookDenied(c, "automatic playback unavailable")
+}
+
 // OnPlay keeps legacy dynamic streams compatible while fixed live paths are
 // always authorized before ZLM serves media.
 func (h *HookController) OnPlay(c *gin.Context) {

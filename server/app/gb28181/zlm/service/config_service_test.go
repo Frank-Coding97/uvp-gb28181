@@ -13,11 +13,11 @@ import (
 
 // mockZLMClient stub 用于 config_service 测试
 type mockZLMClient struct {
-	getReturn       map[string]string
-	getErr          error
-	setErr          error
-	lastSetParams   map[string]string
-	getCalls        int
+	getReturn     map[string]string
+	getErr        error
+	setErr        error
+	lastSetParams map[string]string
+	getCalls      int
 }
 
 func (m *mockZLMClient) GetServerConfig(_ context.Context, _ *node.Node) (map[string]string, error) {
@@ -45,10 +45,12 @@ func fakeRegistry(t *testing.T, nodes ...node.Node) *node.Registry {
 
 func TestConfigService_GetGrouped(t *testing.T) {
 	full := map[string]string{
+		"api.secret":                      "zlm-api-secret",
 		"http.port":                       "80",
 		"rtmp.port":                       "1935",
 		"hook.enable":                     "1",
 		"hook.on_stream_changed":          "http://x/y",
+		"hook.on_stream_not_found":        "http://platform/index/hook/on_stream_not_found?cap=replayable-secret",
 		"general.streamNoneReaderDelayMS": "20000",
 		"general.mediaServerId":           "uuid-a",
 	}
@@ -68,7 +70,7 @@ func TestConfigService_GetGrouped(t *testing.T) {
 	require.True(t, names["运行时策略"] || names["运行时"], "缺少分组 运行时")
 
 	// 验证 hot_reloadable 标志
-	var httpPort, hookEnable *service.ConfigItem
+	var httpPort, hookEnable, streamNotFound, apiSecret *service.ConfigItem
 	for i := range grouped {
 		for j := range grouped[i].Items {
 			it := &grouped[i].Items[j]
@@ -78,12 +80,23 @@ func TestConfigService_GetGrouped(t *testing.T) {
 			if it.Key == "hook.enable" {
 				hookEnable = it
 			}
+			if it.Key == "hook.on_stream_not_found" {
+				streamNotFound = it
+			}
+			if it.Key == "api.secret" {
+				apiSecret = it
+			}
 		}
 	}
 	require.NotNil(t, httpPort)
 	require.NotNil(t, hookEnable)
 	require.False(t, httpPort.HotReloadable, "http.port 应该需要重启")
 	require.True(t, hookEnable.HotReloadable, "hook.enable 应该可热改")
+	require.NotNil(t, streamNotFound)
+	require.NotContains(t, streamNotFound.Value, "replayable-secret")
+	require.NotContains(t, streamNotFound.Value, "cap=")
+	require.NotNil(t, apiSecret)
+	require.Empty(t, apiSecret.Value)
 }
 
 func TestConfigService_Update_SplitsHotAndRestart(t *testing.T) {
@@ -94,15 +107,15 @@ func TestConfigService_Update_SplitsHotAndRestart(t *testing.T) {
 
 	resp, err := svc.Update(context.Background(), id, service.UpdateConfigReq{
 		Changes: map[string]string{
-			"hook.enable": "1",
-			"http.port":   "8080",
+			"hook.timeoutSec": "12",
+			"http.port":       "8080",
 		},
 	})
 	require.NoError(t, err)
-	require.Contains(t, resp.Applied, "hook.enable")
+	require.Contains(t, resp.Applied, "hook.timeoutSec")
 	require.Contains(t, resp.RequiresRestart, "http.port")
 	require.NotContains(t, resp.Applied, "http.port", "需重启项不应在 Applied")
-	require.Equal(t, map[string]string{"hook.enable": "1"}, cli.lastSetParams,
+	require.Equal(t, map[string]string{"hook.timeoutSec": "12"}, cli.lastSetParams,
 		"只应给 ZLM 下发热改项")
 }
 
@@ -113,10 +126,25 @@ func TestConfigService_Update_AllHot_NoRestart(t *testing.T) {
 	id := reg.List()[0].ID
 
 	resp, err := svc.Update(context.Background(), id, service.UpdateConfigReq{
-		Changes: map[string]string{"hook.enable": "0"},
+		Changes: map[string]string{"hook.timeoutSec": "15"},
 	})
 	require.NoError(t, err)
 	require.Empty(t, resp.RequiresRestart)
+}
+
+func TestConfigService_UpdateRejectsPlatformManagedAutoOnDemandKeys(t *testing.T) {
+	cli := &mockZLMClient{}
+	reg := fakeRegistry(t, node.Node{Name: "n1", MediaServerUUID: "uuid-a", State: node.StateActive})
+	svc := service.NewConfigService(reg, cli)
+	id := reg.List()[0].ID
+
+	for _, key := range []string{
+		"api.secret", "hook.enable", "hook.on_stream_not_found", "general.mediaServerId", "general.maxStreamWaitMS",
+	} {
+		_, err := svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{key: "tampered"}})
+		require.ErrorIs(t, err, service.ErrManagedConfigKey, key)
+	}
+	require.Nil(t, cli.lastSetParams)
 }
 
 func TestConfigService_Update_NodeNotFound(t *testing.T) {

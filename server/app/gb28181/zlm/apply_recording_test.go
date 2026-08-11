@@ -2,6 +2,7 @@ package zlm
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,8 +19,20 @@ import (
 func TestApplyConfigForNodeIncludesRecordMP4Hook(t *testing.T) {
 	var query url.Values
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		query = r.URL.Query()
-		_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+		if strings.HasSuffix(r.URL.Path, "/setServerConfig") {
+			query = r.URL.Query()
+			_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+			return
+		}
+		config := make(map[string]string, len(query))
+		for key := range query {
+			if key != "secret" {
+				config[key] = query.Get(key)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code": 0, "data": []map[string]string{config},
+		})
 	}))
 	defer server.Close()
 	parts := strings.Split(strings.TrimPrefix(server.URL, "http://"), ":")

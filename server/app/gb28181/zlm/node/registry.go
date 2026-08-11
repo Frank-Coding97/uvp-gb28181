@@ -28,18 +28,20 @@ type Repo interface {
 // 内存表 + DB 双写:Add/Update/Delete/MarkOffline 都同步写 DB;
 // UpdateStats 不写 DB(高频心跳数据只在内存)。
 type Registry struct {
-	mu    sync.RWMutex
-	nodes map[int64]*Node  // ID -> Node
-	uuids map[string]int64 // mediaServerUUID -> ID(Hook 反查)
-	repo  Repo
+	mu                sync.RWMutex
+	nodes             map[int64]*Node  // ID -> Node
+	uuids             map[string]int64 // mediaServerUUID -> ID(Hook 反查)
+	autoOnDemandReady map[int64]bool   // 当前进程已写入并回读确认缺流 Hook
+	repo              Repo
 }
 
 // NewRegistry 构造,不会自动 LoadAll(由调用方控制时机)
 func NewRegistry(repo Repo) *Registry {
 	return &Registry{
-		nodes: make(map[int64]*Node),
-		uuids: make(map[string]int64),
-		repo:  repo,
+		nodes:             make(map[int64]*Node),
+		uuids:             make(map[string]int64),
+		autoOnDemandReady: make(map[int64]bool),
+		repo:              repo,
 	}
 }
 
@@ -53,12 +55,14 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 	defer r.mu.Unlock()
 	r.nodes = make(map[int64]*Node, len(rows))
 	r.uuids = make(map[string]int64, len(rows))
+	r.autoOnDemandReady = make(map[int64]bool, len(rows))
 	for i := range rows {
 		n := rows[i]
 		r.nodes[n.ID] = &n
 		if n.MediaServerUUID != "" {
 			r.uuids[n.MediaServerUUID] = n.ID
 		}
+		r.autoOnDemandReady[n.ID] = false
 	}
 	return nil
 }
@@ -81,6 +85,7 @@ func (r *Registry) Add(ctx context.Context, n Node) (*Node, error) {
 	defer r.mu.Unlock()
 	stored := n
 	r.nodes[id] = &stored
+	r.autoOnDemandReady[id] = false
 	if n.MediaServerUUID != "" {
 		r.uuids[n.MediaServerUUID] = id
 	}
@@ -112,6 +117,7 @@ func (r *Registry) Update(ctx context.Context, n Node) error {
 	if n.MediaServerUUID != "" {
 		r.uuids[n.MediaServerUUID] = n.ID
 	}
+	r.autoOnDemandReady[n.ID] = false
 	return nil
 }
 
@@ -127,8 +133,28 @@ func (r *Registry) Delete(ctx context.Context, id int64) error {
 			delete(r.uuids, cur.MediaServerUUID)
 		}
 		delete(r.nodes, id)
+		delete(r.autoOnDemandReady, id)
 	}
 	return nil
+}
+
+// SetAutoOnDemandReady records transient node readiness. It is deliberately
+// not persisted because every process start must verify the effective ZLM
+// configuration again.
+func (r *Registry) SetAutoOnDemandReady(id int64, ready bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.nodes[id]; !ok {
+		return false
+	}
+	r.autoOnDemandReady[id] = ready
+	return true
+}
+
+func (r *Registry) IsAutoOnDemandReady(id int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.autoOnDemandReady[id]
 }
 
 // Get 按 ID 取节点(包含最新 Stats,内存优先)
@@ -241,6 +267,7 @@ func (r *Registry) MarkOffline(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 	cur.State = StateOffline
+	r.autoOnDemandReady[id] = false
 	cur.UpdatedAt = time.Now()
 	snapshot := *cur
 	r.mu.Unlock()

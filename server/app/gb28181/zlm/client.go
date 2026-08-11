@@ -46,15 +46,20 @@ type baseResp struct {
 }
 
 type redactedTransportError struct {
-	err    error
-	secret string
+	err     error
+	secrets []string
 }
 
 func (e redactedTransportError) Error() string {
-	if e.secret == "" {
-		return e.err.Error()
+	message := e.err.Error()
+	for _, secret := range e.secrets {
+		if secret == "" {
+			continue
+		}
+		message = strings.ReplaceAll(message, secret, "***")
+		message = strings.ReplaceAll(message, url.QueryEscape(secret), "***")
 	}
-	return strings.ReplaceAll(e.err.Error(), e.secret, "***")
+	return message
 }
 
 func (e redactedTransportError) Unwrap() error { return e.err }
@@ -73,13 +78,19 @@ func (c *Client) call(ctx context.Context, api string, params map[string]string,
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("ZLM 请求失败 %s: %w", api, redactedTransportError{err: err, secret: c.secret})
+		secrets := []string{c.secret}
+		if rawHook := params["hook.on_stream_not_found"]; rawHook != "" {
+			if parsedHook, parseErr := url.Parse(rawHook); parseErr == nil {
+				secrets = append(secrets, parsedHook.Query().Get("cap"))
+			}
+		}
+		return fmt.Errorf("ZLM 请求失败 %s: %w", api, redactedTransportError{err: err, secrets: secrets})
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	if out != nil {
 		if err := json.Unmarshal(body, out); err != nil {
-			return fmt.Errorf("ZLM 响应解析失败 %s: %w, body=%s", api, err, string(body))
+			return fmt.Errorf("ZLM 响应解析失败 %s: %w, bodyLen=%d", api, err, len(body))
 		}
 	}
 	return nil

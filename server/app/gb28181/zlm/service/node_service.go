@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
@@ -16,6 +18,10 @@ var ErrNodeNotFound = errors.New("node not found")
 
 // ErrNodeNotInMaintenance 删除节点前必须先进维护态
 var ErrNodeNotInMaintenance = errors.New("node must be in maintenance state to delete")
+
+var ErrConfigConvergenceInProgress = errors.New("node config convergence in progress")
+
+var ErrNodeConfigChanged = errors.New("node config changed during convergence")
 
 // ZLMProbe 节点连通性探测 + 配置下发抽象
 // 由 zlm.Client 实现(适配器在 bootstrap 注入),测试用 mock。
@@ -41,22 +47,23 @@ type MediaTuning struct {
 
 // NodeDTO 对外暴露的节点视图(剥掉 secret)
 type NodeDTO struct {
-	ID              int64             `json:"id"`
-	Name            string            `json:"name"`
-	Host            string            `json:"host"`
-	ReceiveHost     string            `json:"receiveHost"`
-	PlaybackHost    string            `json:"playbackHost"`
-	APIPort         int               `json:"apiPort"`
-	MediaServerUUID string            `json:"mediaServerUUID"`
-	Weight          int               `json:"weight"`
-	Tags            map[string]string `json:"tags,omitempty"`
-	State           node.State        `json:"state"`
-	RTPPortStart    int               `json:"rtpPortStart"`
-	RTPPortEnd      int               `json:"rtpPortEnd"`
-	Stats           node.Stats        `json:"stats"`
-	NearCapacity    bool              `json:"nearCapacity"` // T3.4: port_usage>=80% 或 cpu>=80%,UI 黄色高亮
-	CreatedAt       time.Time         `json:"createdAt"`
-	UpdatedAt       time.Time         `json:"updatedAt"`
+	ID                int64             `json:"id"`
+	Name              string            `json:"name"`
+	Host              string            `json:"host"`
+	ReceiveHost       string            `json:"receiveHost"`
+	PlaybackHost      string            `json:"playbackHost"`
+	APIPort           int               `json:"apiPort"`
+	MediaServerUUID   string            `json:"mediaServerUUID"`
+	Weight            int               `json:"weight"`
+	Tags              map[string]string `json:"tags,omitempty"`
+	State             node.State        `json:"state"`
+	RTPPortStart      int               `json:"rtpPortStart"`
+	RTPPortEnd        int               `json:"rtpPortEnd"`
+	Stats             node.Stats        `json:"stats"`
+	NearCapacity      bool              `json:"nearCapacity"` // T3.4: port_usage>=80% 或 cpu>=80%,UI 黄色高亮
+	AutoOnDemandReady bool              `json:"autoOnDemandReady"`
+	CreatedAt         time.Time         `json:"createdAt"`
+	UpdatedAt         time.Time         `json:"updatedAt"`
 }
 
 // CreateNodeReq 新建节点入参
@@ -90,34 +97,50 @@ type NodeService struct {
 	registry *node.Registry
 	probe    ZLMProbe
 	tuning   MediaTuning
+	applyMu  sync.Mutex
+	applying map[int64]struct{}
+	logger   *zap.Logger
 }
 
 // NewNodeService 构造
 func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *NodeService {
-	return &NodeService{registry: reg, probe: probe, tuning: tuning}
+	return &NodeService{
+		registry: reg,
+		probe:    probe,
+		tuning:   tuning,
+		applying: make(map[int64]struct{}),
+		logger:   zap.NewNop(),
+	}
 }
 
-func toDTO(n *node.Node) *NodeDTO {
+func (s *NodeService) SetLogger(logger *zap.Logger) {
+	if logger != nil {
+		s.logger = logger
+	}
+}
+
+func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 	if n == nil {
 		return nil
 	}
 	return &NodeDTO{
-		ID:              n.ID,
-		Name:            n.Name,
-		Host:            n.Host,
-		ReceiveHost:     n.ReceiveHost,
-		PlaybackHost:    n.PlaybackHost,
-		APIPort:         n.APIPort,
-		MediaServerUUID: n.MediaServerUUID,
-		Weight:          n.Weight,
-		Tags:            n.Tags,
-		State:           n.State,
-		RTPPortStart:    n.RTPPortStart,
-		RTPPortEnd:      n.RTPPortEnd,
-		Stats:           n.Stats,
-		NearCapacity:    n.IsNearCapacity(),
-		CreatedAt:       n.CreatedAt,
-		UpdatedAt:       n.UpdatedAt,
+		ID:                n.ID,
+		Name:              n.Name,
+		Host:              n.Host,
+		ReceiveHost:       n.ReceiveHost,
+		PlaybackHost:      n.PlaybackHost,
+		APIPort:           n.APIPort,
+		MediaServerUUID:   n.MediaServerUUID,
+		Weight:            n.Weight,
+		Tags:              n.Tags,
+		State:             n.State,
+		RTPPortStart:      n.RTPPortStart,
+		RTPPortEnd:        n.RTPPortEnd,
+		Stats:             n.Stats,
+		NearCapacity:      n.IsNearCapacity(),
+		AutoOnDemandReady: s.registry.IsAutoOnDemandReady(n.ID),
+		CreatedAt:         n.CreatedAt,
+		UpdatedAt:         n.UpdatedAt,
 	}
 }
 
@@ -126,7 +149,7 @@ func (s *NodeService) List(_ context.Context) ([]*NodeDTO, error) {
 	nodes := s.registry.List()
 	out := make([]*NodeDTO, 0, len(nodes))
 	for _, n := range nodes {
-		out = append(out, toDTO(n))
+		out = append(out, s.toDTO(n))
 	}
 	return out, nil
 }
@@ -137,7 +160,7 @@ func (s *NodeService) Get(_ context.Context, id int64) (*NodeDTO, error) {
 	if !ok {
 		return nil, ErrNodeNotFound
 	}
-	return toDTO(n), nil
+	return s.toDTO(n), nil
 }
 
 // Create 新建:probe → 生成 UUID → 入库 → ApplyConfigForNode 写 UUID 到 ZLM
@@ -184,12 +207,12 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 	}
 
 	// 3. 把 mediaServerId + Hook 写到 ZLM(失败则回滚)
-	if err := s.probe.ApplyConfigForNode(ctx, added, s.tuning); err != nil {
+	if err := s.ConvergeNodeConfig(ctx, added.ID); err != nil {
 		_ = s.registry.Delete(ctx, added.ID)
 		return nil, fmt.Errorf("写 ZLM 配置失败,已回滚: %w", err)
 	}
 
-	return toDTO(added), nil
+	return s.toDTO(added), nil
 }
 
 // Update 更新可变字段
@@ -226,7 +249,105 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 		return nil, err
 	}
 	got, _ := s.registry.Get(id)
-	return toDTO(got), nil
+	return s.toDTO(got), nil
+}
+
+type ConfigApplyResult struct {
+	NodeID int64
+	Name   string
+	Ready  bool
+	Err    error
+}
+
+// ApplyActiveConfigs converges every active node through the same verified
+// configuration path used by node creation and heartbeat recovery.
+func (s *NodeService) ApplyActiveConfigs(ctx context.Context) []ConfigApplyResult {
+	nodes := s.registry.ListActive()
+	results := make([]ConfigApplyResult, len(nodes))
+	var wg sync.WaitGroup
+	for index, current := range nodes {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result := ConfigApplyResult{NodeID: current.ID, Name: current.Name}
+			result.Err = s.ConvergeNodeConfig(ctx, current.ID)
+			result.Ready = result.Err == nil && s.registry.IsAutoOnDemandReady(current.ID)
+			results[index] = result
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
+func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) error {
+	current, ok := s.beginConfigConvergence(nodeID)
+	if !ok {
+		if s.registry.IsAutoOnDemandReady(nodeID) {
+			return nil
+		}
+		return ErrConfigConvergenceInProgress
+	}
+	return s.applyClaimedConfig(ctx, current)
+}
+
+// ScheduleConfigConvergence is non-blocking and de-duplicates per node. A
+// failed apply leaves readiness false so the next heartbeat retries it.
+func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
+	current, ok := s.beginConfigConvergence(nodeID)
+	if !ok {
+		return false
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		if err := s.applyClaimedConfig(ctx, current); err != nil {
+			s.logger.Warn("GB28181 ZLM 节点配置恢复失败",
+				zap.Int64("nodeId", current.ID), zap.String("name", current.Name), zap.Error(err))
+			return
+		}
+		s.logger.Info("GB28181 ZLM 节点配置已恢复",
+			zap.Int64("nodeId", current.ID), zap.String("name", current.Name))
+	}()
+	return true
+}
+
+func (s *NodeService) beginConfigConvergence(nodeID int64) (*node.Node, bool) {
+	current, ok := s.registry.Get(nodeID)
+	if !ok || !current.IsActive() || s.registry.IsAutoOnDemandReady(nodeID) {
+		return nil, false
+	}
+	s.applyMu.Lock()
+	defer s.applyMu.Unlock()
+	if _, exists := s.applying[nodeID]; exists {
+		return nil, false
+	}
+	s.applying[nodeID] = struct{}{}
+	s.registry.SetAutoOnDemandReady(nodeID, false)
+	return current, true
+}
+
+func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node) error {
+	defer func() {
+		s.applyMu.Lock()
+		delete(s.applying, current.ID)
+		s.applyMu.Unlock()
+	}()
+	if err := s.probe.ApplyConfigForNode(ctx, current, s.tuning); err != nil {
+		return err
+	}
+	latest, ok := s.registry.Get(current.ID)
+	if !ok {
+		return ErrNodeNotFound
+	}
+	if !latest.IsActive() || latest.Host != current.Host || latest.APIPort != current.APIPort ||
+		latest.APISecret != current.APISecret || latest.MediaServerUUID != current.MediaServerUUID {
+		s.registry.SetAutoOnDemandReady(current.ID, false)
+		return ErrNodeConfigChanged
+	}
+	if !s.registry.SetAutoOnDemandReady(current.ID, true) {
+		return ErrNodeNotFound
+	}
+	return nil
 }
 
 // Delete 删除前必须 state=maintenance,流量 0 检查留到 M2 LocationMap 之后

@@ -304,12 +304,13 @@ func startControlPlane(cfg gbconfig.Config) {
 			RTPServerTimeout:        cfg.Media.RTPServerTimeout,
 		}
 		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
+		nodeSvc.SetLogger(app.ZapLog)
 		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
 		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
 		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
 		app.ZapLog.Info("GB28181 ZLM 节点/配置 controller 已装配")
 
-		collector := heartbeat.NewCollector(zlmRegistry)
+		collector := heartbeat.NewCollectorWithConfigScheduler(zlmRegistry, nodeSvc)
 		gbroutes.SetKeepaliveCollector(collector)
 		watcher := heartbeat.NewWatcher(zlmRegistry, heartbeat.RealClock(), 30*time.Second, 90*time.Second)
 		var hbCtx context.Context
@@ -322,6 +323,35 @@ func startControlPlane(cfg gbconfig.Config) {
 		threadPoller := heartbeat.NewThreadLoadPoller(zlmRegistry, adapter, 30*time.Second)
 		threadPoller.Start(hbCtx)
 		app.ZapLog.Info("GB28181 ZLM 线程负载 Poller 已启动", zap.Duration("interval", 30*time.Second))
+
+		go func() {
+			initialCtx, cancel := context.WithTimeout(hbCtx, 30*time.Second)
+			for _, result := range nodeSvc.ApplyActiveConfigs(initialCtx) {
+				if result.Err != nil {
+					app.ZapLog.Warn("GB28181 ZLM 节点配置启动收敛失败",
+						zap.Int64("nodeId", result.NodeID), zap.String("name", result.Name), zap.Error(result.Err))
+					continue
+				}
+				app.ZapLog.Info("GB28181 ZLM 节点配置启动收敛完成",
+					zap.Int64("nodeId", result.NodeID), zap.String("name", result.Name))
+			}
+			cancel()
+
+			ticker := time.NewTicker(30 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-hbCtx.Done():
+					return
+				case <-ticker.C:
+					for _, mediaNode := range zlmRegistry.ListActive() {
+						if !zlmRegistry.IsAutoOnDemandReady(mediaNode.ID) {
+							nodeSvc.ScheduleConfigConvergence(mediaNode.ID)
+						}
+					}
+				}
+			}
+		}()
 	}
 
 	zlmClient = pickInitialClient(cfg)
@@ -329,15 +359,6 @@ func startControlPlane(cfg gbconfig.Config) {
 		app.ZapLog.Warn("GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发")
 		return
 	}
-	go func(client *gbzlm.Client) {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := client.ApplyConfigForNode(ctx, cfg.Media); err != nil {
-			app.ZapLog.Warn("GB28181 ZLM 配置下发失败(ZLM 可能暂不可达,不影响启动)", zap.Error(err))
-		} else {
-			app.ZapLog.Info("GB28181 ZLM Hook 配置已下发", zap.String("hookHost", cfg.Media.HookHost))
-		}
-	}(zlmClient)
 }
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)

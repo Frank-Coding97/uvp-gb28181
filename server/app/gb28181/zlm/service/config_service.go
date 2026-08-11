@@ -2,9 +2,31 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net/url"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
+
+var ErrManagedConfigKey = errors.New("platform-managed ZLM config key")
+
+var platformManagedConfigKeys = map[string]struct{}{
+	"api.secret":                 {},
+	"hook.enable":                {},
+	"hook.on_server_started":     {},
+	"hook.on_server_keepalive":   {},
+	"hook.on_stream_changed":     {},
+	"hook.on_stream_none_reader": {},
+	"hook.on_stream_not_found":   {},
+	"hook.on_rtp_server_timeout": {},
+	"hook.on_publish":            {},
+	"hook.on_play":               {},
+	"hook.on_record_mp4":         {},
+	"hook.alive_interval":        {},
+	"general.mediaServerId":      {},
+	"general.maxStreamWaitMS":    {},
+}
 
 // ConfigItem 单条 ZLM 配置元数据
 type ConfigItem struct {
@@ -148,9 +170,9 @@ type UpdateConfigResp struct {
 
 // TestConnectionResult 探测结果
 type TestConnectionResult struct {
-	Online    bool   `json:"online"`
-	HTTPPort  string `json:"httpPort,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Online   bool   `json:"online"`
+	HTTPPort string `json:"httpPort,omitempty"`
+	Error    string `json:"error,omitempty"`
 }
 
 // ZLMConfigClient ZLM 配置面接口(GetServerConfig + SetServerConfig)
@@ -185,7 +207,7 @@ func (s *ConfigService) GetGrouped(ctx context.Context, nodeID int64) ([]ConfigG
 		items := make([]ConfigItem, 0, len(g.Items))
 		for _, it := range g.Items {
 			if v, ok := current[it.Key]; ok {
-				it.Value = v
+				it.Value = visibleConfigValue(it.Key, v)
 			} else {
 				it.Value = it.Default
 			}
@@ -209,6 +231,9 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 	}
 	hotParams := map[string]string{}
 	for k, v := range req.Changes {
+		if _, managed := platformManagedConfigKeys[k]; managed {
+			return nil, fmt.Errorf("%w: %s", ErrManagedConfigKey, k)
+		}
 		meta, known := catalogIndex[k]
 		if !known {
 			resp.Unknown = append(resp.Unknown, k)
@@ -228,6 +253,22 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 		}
 	}
 	return resp, nil
+}
+
+func visibleConfigValue(key, value string) string {
+	if key == "api.secret" {
+		return ""
+	}
+	if key != "hook.on_stream_not_found" || value == "" {
+		return value
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return ""
+	}
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 // TestConnection 探测 ZLM 是否可达
