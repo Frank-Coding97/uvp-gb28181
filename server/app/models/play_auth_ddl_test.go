@@ -56,3 +56,24 @@ func TestPlayAuthPermissionDownMigrations(t *testing.T) {
 		})
 	}
 }
+
+func TestPlayAuthFreshInstallSeeds(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	serverRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+	for _, filename := range []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"} {
+		t.Run(filename, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join(serverRoot, "resource", "database", filename))
+			require.NoError(t, err)
+			sql := strings.ToLower(string(body))
+			for _, token := range []string{
+				"/api/gb28181/sip/service-config/play-auth",
+				"'get'", "'put'",
+				"gb28181:sip:config:view", "gb28181:sip:config:update",
+				"sys_menu_api", "sys_casbin_rule",
+			} {
+				require.Contains(t, sql, token)
+			}
+		})
+	}
+}

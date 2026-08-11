@@ -1563,6 +1563,25 @@ INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUE
 (7571,'p','role_1','/api/gb28181/device-mgmt/custom-groups/:id/devices/remove','POST','*','','');
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
+-- Playback authorization settings for fresh SQL Server installs.
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
+(247,N'读取播放鉴权配置','/api/gb28181/sip/service-config/play-auth','GET',N'GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(248,N'修改播放鉴权配置','/api/gb28181/sip/service-config/play-auth','PUT',N'GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[type],[permission],[created_at],[updated_at],[created_by]) VALUES
+(140368,140355,'','','',N'读取播放鉴权配置',1,3,'gb28181:sip:config:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
+(140369,140355,'','','',N'修改播放鉴权配置',1,3,'gb28181:sip:config:update',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140368),(1,140369);
+INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES (140368,247),(140369,248);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
+(7591,'p','role_1','/api/gb28181/sip/service-config/play-auth','GET','*','',''),
+(7592,'p','role_1','/api/gb28181/sip/service-config/play-auth','PUT','*','','');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
 IF COL_LENGTH(N'gb_ptz_operation', N'profile_version') IS NULL ALTER TABLE [gb_ptz_operation] ADD [profile_version] NVARCHAR(8) NULL;
 IF COL_LENGTH(N'gb_ptz_operation', N'profile_charset') IS NULL ALTER TABLE [gb_ptz_operation] ADD [profile_charset] NVARCHAR(16) NULL;
 IF COL_LENGTH(N'gb_ptz_operation', N'target_scope') IS NULL ALTER TABLE [gb_ptz_operation] ADD [target_scope] NVARCHAR(16) NULL;

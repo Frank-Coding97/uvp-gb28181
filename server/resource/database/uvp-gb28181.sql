@@ -1462,6 +1462,19 @@ INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES (140363,234),(140363,236)
 INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUES
 (7578,'p','role_1','/api/gb28181/cascade/platforms','GET','*','',''),(7579,'p','role_1','/api/gb28181/cascade/platforms','POST','*','',''),(7580,'p','role_1','/api/gb28181/cascade/platforms/:id','GET','*','',''),(7581,'p','role_1','/api/gb28181/cascade/platforms/:id','PUT','*','',''),(7582,'p','role_1','/api/gb28181/cascade/platforms/:id','DELETE','*','',''),(7583,'p','role_1','/api/gb28181/cascade/platforms/:id/enabled','PUT','*','',''),(7584,'p','role_1','/api/gb28181/cascade/platforms/:id/enable','POST','*','',''),(7585,'p','role_1','/api/gb28181/cascade/platforms/:id/disable','POST','*','',''),(7586,'p','role_1','/api/gb28181/cascade/platforms/:id/reconnect','POST','*','',''),(7587,'p','role_1','/api/gb28181/cascade/platforms/:id/shares','GET','*','',''),(7588,'p','role_1','/api/gb28181/cascade/platforms/:id/shares','PUT','*','',''),(7589,'p','role_1','/api/gb28181/cascade/platforms/:id/channels/share','POST','*','',''),(7590,'p','role_1','/api/gb28181/cascade/platforms/:id/channels/unshare','POST','*','','');
 
+-- Playback authorization settings for fresh MySQL installs.
+INSERT INTO `sys_api` (`id`,`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`deleted_at`,`created_by`) VALUES
+(247,'读取播放鉴权配置','/api/gb28181/sip/service-config/play-auth','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(248,'修改播放鉴权配置','/api/gb28181/sip/service-config/play-auth','PUT','GB28181 SIP 配置',NOW(),NOW(),NULL,1);
+INSERT INTO `sys_menu` (`id`,`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`) VALUES
+(140368,140355,'','','','读取播放鉴权配置',1,3,'gb28181:sip:config:view',NOW(),NOW(),1),
+(140369,140355,'','','','修改播放鉴权配置',1,3,'gb28181:sip:config:update',NOW(),NOW(),1);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140368),(1,140369);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES (140368,247),(140369,248);
+INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUES
+(7591,'p','role_1','/api/gb28181/sip/service-config/play-auth','GET','*','',''),
+(7592,'p','role_1','/api/gb28181/sip/service-config/play-auth','PUT','*','','');
+
 -- GB28181 device registry and dual-version profile archive.
 DROP TABLE IF EXISTS `gb_device`;
 CREATE TABLE `gb_device` (
