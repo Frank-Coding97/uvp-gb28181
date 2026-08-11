@@ -55,3 +55,14 @@ func TestRelationalTraceDownMigrationsRejectNonEmptyTable(t *testing.T) {
 		require.Less(t, strings.Index(sql, guard), strings.LastIndex(sql, "drop table"), name)
 	}
 }
+
+func TestGiteeDeployWorkerMovesFailuresOutOfWatchedQueue(t *testing.T) {
+	serverRoot := filepath.Join("..", "..", "..")
+	repoRoot := filepath.Join(serverRoot, "..")
+	body, err := os.ReadFile(filepath.Join(repoRoot, "deploy", "test", "uvp-gitee-deploy-worker.sh"))
+	require.NoError(t, err)
+
+	script := string(body)
+	require.Contains(t, script, "UVP_GITEE_FAILED_DIR")
+	require.NotContains(t, script, `mv -- "$processing_job" "$processing_job.failed"`)
+}
