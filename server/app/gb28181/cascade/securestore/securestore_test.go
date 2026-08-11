@@ -67,3 +67,13 @@ func TestCipherRejectsInvalidKeyAndPurpose(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestNilCipherReportsUnavailableInsteadOfPanicking(t *testing.T) {
+	var cipher *Cipher
+	if _, err := cipher.Encrypt("upstream-password", []byte("secret")); !errors.Is(err, ErrKeyUnavailable) {
+		t.Fatalf("encrypt err=%v", err)
+	}
+	if _, err := cipher.Decrypt("upstream-password", Envelope{}); !errors.Is(err, ErrKeyUnavailable) {
+		t.Fatalf("decrypt err=%v", err)
+	}
+}

@@ -68,6 +68,9 @@ func (c *Cipher) Encrypt(purpose string, plaintext []byte) (Envelope, error) {
 	if strings.TrimSpace(purpose) == "" {
 		return Envelope{}, ErrInvalidPurpose
 	}
+	if c == nil || c.aead == nil {
+		return Envelope{}, ErrKeyUnavailable
+	}
 	nonce := make([]byte, c.aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return Envelope{}, fmt.Errorf("generate cascade nonce: %w", err)
@@ -81,6 +84,9 @@ func (c *Cipher) Encrypt(purpose string, plaintext []byte) (Envelope, error) {
 func (c *Cipher) Decrypt(purpose string, envelope Envelope) ([]byte, error) {
 	if strings.TrimSpace(purpose) == "" {
 		return nil, ErrInvalidPurpose
+	}
+	if c == nil || c.aead == nil {
+		return nil, ErrKeyUnavailable
 	}
 	if envelope.Algorithm != AlgorithmAES256GCM || envelope.KeyVersion != c.keyVersion {
 		return nil, ErrAuthentication
