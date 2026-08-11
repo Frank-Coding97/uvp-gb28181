@@ -287,6 +287,9 @@ func SaveFixedAddressPlaybackSettings(c mutableValueSource, settings FixedAddres
 
 	fixedAddressPlaybackMu.Lock()
 	defer fixedAddressPlaybackMu.Unlock()
+	if settings.AutoOnDemandEnabled && !PlayAuthSettingsFrom(c).Enabled {
+		return invalid(AutoOnDemandEnabledConfigKey, true, "requires play authorization enabled")
+	}
 	previous := FixedAddressPlaybackSettingsFrom(c)
 	c.Set(FixedAddressEnabledConfigKey, settings.FixedAddressEnabled)
 	c.Set(AutoOnDemandEnabledConfigKey, settings.AutoOnDemandEnabled)

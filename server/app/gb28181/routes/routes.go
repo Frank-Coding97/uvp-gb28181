@@ -209,6 +209,7 @@ func SetPlayService(svc *gbplay.Service) {
 
 func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
 	hookController.SetPlayAuthorizer(authorizer)
+	gbcontrollers.SetPlayAuthRuntimeReady(authorizer != nil)
 }
 
 func SetStreamMonitorService(service *streammonitor.Service) {
@@ -429,6 +430,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			serviceConfig.PUT("/playback-settings", serviceConfigController.UpdatePlaybackSettings)
 			serviceConfig.GET("/fixed-address-playback", serviceConfigController.GetFixedAddressPlayback)
 			serviceConfig.PUT("/fixed-address-playback", serviceConfigController.UpdateFixedAddressPlayback)
+			serviceConfig.GET("/play-auth", serviceConfigController.GetPlayAuth)
+			serviceConfig.PUT("/play-auth", serviceConfigController.UpdatePlayAuth)
 			serviceConfig.GET("/sip-log", serviceConfigController.GetSIPLog)
 			serviceConfig.PUT("/sip-log", serviceConfigController.UpdateSIPLog)
 		}

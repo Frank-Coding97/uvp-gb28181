@@ -91,9 +91,61 @@ func newServiceConfigRouter(controller *ServiceConfigController) *gin.Engine {
 	router.PUT("/playback-settings", controller.UpdatePlaybackSettings)
 	router.GET("/fixed-address-playback", controller.GetFixedAddressPlayback)
 	router.PUT("/fixed-address-playback", controller.UpdateFixedAddressPlayback)
+	router.GET("/play-auth", controller.GetPlayAuth)
+	router.PUT("/play-auth", controller.UpdatePlayAuth)
 	router.GET("/sip-log", controller.GetSIPLog)
 	router.PUT("/sip-log", controller.UpdateSIPLog)
 	return router
+}
+
+func TestServiceConfigControllerPlayAuthLifecycle(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous; SetPlayAuthRuntimeReady(false) })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.FixedAddressEnabledConfigKey: true,
+		gbconfig.AutoOnDemandEnabledConfigKey: false,
+	}}
+	app.ConfigYml = config
+	router := newServiceConfigRouter(NewServiceConfigController())
+
+	get := httptest.NewRecorder()
+	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/play-auth", nil))
+	require.Equal(t, http.StatusOK, get.Code)
+	data := serviceConfigData(t, get)
+	require.Equal(t, false, data["authEnabled"])
+	require.Equal(t, false, data["authBindClientIP"])
+
+	missing := httptest.NewRecorder()
+	router.ServeHTTP(missing, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true})))
+	require.Equal(t, http.StatusBadRequest, missing.Code)
+
+	unavailable := httptest.NewRecorder()
+	router.ServeHTTP(unavailable, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true, "authBindClientIP": false})))
+	require.Equal(t, http.StatusServiceUnavailable, unavailable.Code)
+	require.Zero(t, config.saveNum)
+
+	SetPlayAuthRuntimeReady(true)
+	enabled := httptest.NewRecorder()
+	router.ServeHTTP(enabled, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true, "authBindClientIP": true})))
+	require.Equal(t, http.StatusOK, enabled.Code, enabled.Body.String())
+	require.Equal(t, true, config.values[gbconfig.PlayAuthEnabledConfigKey])
+	require.Equal(t, true, config.values[gbconfig.PlayAuthBindClientIPConfigKey])
+}
+
+func TestServiceConfigControllerRejectsAuthDisableWhileAutoOnDemandEnabled(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous; SetPlayAuthRuntimeReady(false) })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{
+		gbconfig.FixedAddressEnabledConfigKey: true,
+		gbconfig.AutoOnDemandEnabledConfigKey: true,
+		gbconfig.PlayAuthEnabledConfigKey:     true,
+	}}
+	app.ConfigYml = config
+	SetPlayAuthRuntimeReady(true)
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": false, "authBindClientIP": false})))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, config.saveNum)
 }
 
 func TestServiceConfigController_FixedAddressPlaybackDefaults(t *testing.T) {
@@ -117,6 +169,7 @@ func TestServiceConfigController_UpdateFixedAddressPlaybackValidatesAndPersists(
 	config := &serviceConfigTestYAML{values: map[string]interface{}{
 		gbconfig.FixedAddressEnabledConfigKey: false,
 		gbconfig.AutoOnDemandEnabledConfigKey: false,
+		gbconfig.PlayAuthEnabledConfigKey:     true,
 	}}
 	app.ConfigYml = config
 	router := newServiceConfigRouter(NewServiceConfigController())
@@ -148,6 +201,7 @@ func TestServiceConfigController_UpdateFixedAddressPlaybackRollsBack(t *testing.
 	config := &serviceConfigTestYAML{values: map[string]interface{}{
 		gbconfig.FixedAddressEnabledConfigKey: true,
 		gbconfig.AutoOnDemandEnabledConfigKey: false,
+		gbconfig.PlayAuthEnabledConfigKey:     true,
 	}, saveErr: errors.New("disk full")}
 	app.ConfigYml = config
 
@@ -172,6 +226,7 @@ func TestFixedAddressPlaybackRuntimeReadIsAtomicDuringSave(t *testing.T) {
 	config := &serviceConfigTestYAML{values: map[string]interface{}{
 		gbconfig.FixedAddressEnabledConfigKey: true,
 		gbconfig.AutoOnDemandEnabledConfigKey: true,
+		gbconfig.PlayAuthEnabledConfigKey:     true,
 	}}
 	config.setHook = func(key string, _ interface{}) {
 		if key == gbconfig.FixedAddressEnabledConfigKey {

@@ -3,6 +3,7 @@ package controllers
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 
@@ -87,6 +88,12 @@ type SIPLogUpdateResult struct {
 
 type SIPTraceReloader func() error
 type SIPTraceRuntimeProvider func() bool
+
+var playAuthRuntimeReady atomic.Bool
+
+func SetPlayAuthRuntimeReady(ready bool) {
+	playAuthRuntimeReady.Store(ready)
+}
 
 // ServiceConfigController 提供国标服务配置页面使用的单项动态配置接口。
 // 这里不复用 /api/config/update，避免页面提交时覆盖系统和安全配置。
@@ -186,11 +193,50 @@ func (sc *ServiceConfigController) UpdateFixedAddressPlayback(c *gin.Context) {
 		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
 		return
 	}
+	if settings.AutoOnDemandEnabled && !gbconfig.CurrentPlayAuthSettings().Enabled {
+		sc.Fail(c, "保存固定地址播放配置失败：自动点播依赖播放鉴权", nil, http.StatusBadRequest)
+		return
+	}
 	if err := gbconfig.SaveFixedAddressPlaybackSettings(app.ConfigYml, settings); err != nil {
 		sc.Fail(c, "保存固定地址播放配置失败", err, http.StatusInternalServerError)
 		return
 	}
 	sc.SuccessWithMessage(c, "固定地址播放配置已更新", settings)
+}
+
+// GetPlayAuth GET /api/gb28181/sip/service-config/play-auth
+func (sc *ServiceConfigController) GetPlayAuth(c *gin.Context) {
+	sc.Success(c, gbconfig.CurrentPlayAuthSettings())
+}
+
+// UpdatePlayAuth PUT /api/gb28181/sip/service-config/play-auth
+func (sc *ServiceConfigController) UpdatePlayAuth(c *gin.Context) {
+	var request struct {
+		Enabled      *bool `json:"authEnabled"`
+		BindClientIP *bool `json:"authBindClientIP"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil || request.BindClientIP == nil {
+		sc.Fail(c, "保存播放鉴权配置失败：必须提交完整配置", err, http.StatusBadRequest)
+		return
+	}
+	if app.ConfigYml == nil {
+		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
+		return
+	}
+	settings := gbconfig.PlayAuthSettings{Enabled: *request.Enabled, BindClientIP: *request.BindClientIP}
+	if err := gbconfig.ValidatePlayAuthSettings(settings, gbconfig.CurrentFixedAddressPlaybackSettings()); err != nil {
+		sc.Fail(c, "保存播放鉴权配置失败：请检查 IP 绑定和自动点播依赖", err, http.StatusBadRequest)
+		return
+	}
+	if settings.Enabled && !playAuthRuntimeReady.Load() {
+		sc.Fail(c, "播放鉴权密钥不可用，请配置独立 active key 后重启服务", nil, http.StatusServiceUnavailable)
+		return
+	}
+	if err := gbconfig.SavePlayAuthSettings(app.ConfigYml, settings); err != nil {
+		sc.Fail(c, "保存播放鉴权配置失败", err, http.StatusInternalServerError)
+		return
+	}
+	sc.SuccessWithMessage(c, "播放鉴权配置已更新", settings)
 }
 
 // GetSIPLog GET /api/gb28181/sip/service-config/sip-log
