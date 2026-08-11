@@ -81,21 +81,20 @@ func (r *GormRepo) ListCatalogFiles(ctx context.Context, query FileQuery) (FileP
 
 func (r *GormRepo) CatalogOptions(ctx context.Context, query FileQuery) (CatalogOptions, error) {
 	query = normalizeFileQuery(query, r.currentTime())
-	base := r.catalogFileQuery(ctx, query)
 	result := CatalogOptions{
 		Channels: make([]CatalogChannelOption, 0),
 		Devices:  make([]CatalogDeviceOption, 0),
 		NodeIDs:  make([]int64, 0),
 	}
-	if err := base.Select("DISTINCT channel_id AS id, channel_code AS code, channel_name AS name").
+	if err := r.catalogFileQuery(ctx, query).Select("DISTINCT channel_id AS id, channel_code AS code, channel_name AS name").
 		Order("channel_name").Order("channel_id").Find(&result.Channels).Error; err != nil {
 		return CatalogOptions{}, err
 	}
-	if err := base.Select("DISTINCT device_id AS id, device_name AS name").
+	if err := r.catalogFileQuery(ctx, query).Select("DISTINCT device_id AS id, device_name AS name").
 		Order("device_name").Order("device_id").Find(&result.Devices).Error; err != nil {
 		return CatalogOptions{}, err
 	}
-	if err := base.Distinct("node_id").Order("node_id").Pluck("node_id", &result.NodeIDs).Error; err != nil {
+	if err := r.catalogFileQuery(ctx, query).Distinct("node_id").Order("node_id").Pluck("node_id", &result.NodeIDs).Error; err != nil {
 		return CatalogOptions{}, err
 	}
 	return result, nil

@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,11 +101,20 @@ func TestCatalogRepoOptionsUseFileSnapshotsAndFailClosedScope(t *testing.T) {
 	require.NoError(t, db.Create(&hidden).Error)
 
 	repo := NewGormRepo(db)
+	var optionQueries []string
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("capture_catalog_option_sql", func(tx *gorm.DB) {
+		if strings.Contains(tx.Statement.SQL.String(), "SELECT DISTINCT") {
+			optionQueries = append(optionQueries, tx.Statement.SQL.String())
+		}
+	}))
 	options, err := repo.CatalogOptions(context.Background(), FileQuery{AllowedDeptIDs: []uint{1}})
 	require.NoError(t, err)
 	require.Equal(t, []CatalogChannelOption{{ID: visible.ChannelID, Code: visible.ChannelCode, Name: visible.ChannelName}}, options.Channels)
 	require.Equal(t, []CatalogDeviceOption{{ID: visible.DeviceID, Name: visible.DeviceName}}, options.Devices)
 	require.Equal(t, []int64{10}, options.NodeIDs)
+	require.Len(t, optionQueries, 3)
+	require.NotContains(t, optionQueries[1], "channel_name")
+	require.NotContains(t, optionQueries[1], "channel_id")
 
 	closed, err := repo.CatalogOptions(context.Background(), FileQuery{})
 	require.NoError(t, err)
