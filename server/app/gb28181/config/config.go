@@ -525,7 +525,11 @@ type PlayConfig struct {
 
 type RecordingConfig struct {
 	// ReconcileIntervalSec 云端录像状态对账周期。0 仅禁用周期任务，手动开关仍可用。
-	ReconcileIntervalSec int
+	ReconcileIntervalSec        int
+	CatalogReconcileIntervalSec int
+	CatalogPeriodicLookbackDays int
+	CatalogManualLookbackDays   int
+	CapabilityKeyEnv            string
 }
 
 // SIPConfig SIP 服务配置
@@ -634,7 +638,11 @@ func loadFrom(c valueSource) (Config, error) {
 			ReconcileIntervalSec: c.GetInt("gb28181.play.reconcile_interval_sec"),
 		},
 		Recording: RecordingConfig{
-			ReconcileIntervalSec: c.GetInt("gb28181.recording.reconcile_interval_sec"),
+			ReconcileIntervalSec:        c.GetInt("gb28181.recording.reconcile_interval_sec"),
+			CatalogReconcileIntervalSec: intValue(c, "gb28181.recording.catalog_reconcile_interval_sec", 6*60*60),
+			CatalogPeriodicLookbackDays: intValue(c, "gb28181.recording.catalog_periodic_lookback_days", 2),
+			CatalogManualLookbackDays:   intValue(c, "gb28181.recording.catalog_manual_lookback_days", 7),
+			CapabilityKeyEnv:            stringValue(c, "gb28181.recording.capability_key_env", "UVP_CLOUD_RECORDING_CAPABILITY_KEY"),
 		},
 		RecordQuery: RecordQueryConfig{
 			Timezone:           stringValue(c, "gb28181.record_query.timezone", DefaultRecordQueryTimezone),

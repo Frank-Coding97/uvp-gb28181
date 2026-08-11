@@ -14,11 +14,12 @@ import (
 var ErrChannelNotFound = errors.New("通道不存在")
 
 type GormRepo struct {
-	db *gorm.DB
+	db  *gorm.DB
+	now func() time.Time
 }
 
 func NewGormRepo(db *gorm.DB) *GormRepo {
-	return &GormRepo{db: db}
+	return &GormRepo{db: db, now: time.Now}
 }
 
 func (r *GormRepo) GetChannel(ctx context.Context, channelID uint) (*models.GbChannel, error) {
@@ -163,9 +164,6 @@ func (r *GormRepo) ListUnfinishedSessions(ctx context.Context) ([]models.GbRecor
 }
 
 func (r *GormRepo) InsertFile(ctx context.Context, file *models.GbRecordingFile) (bool, error) {
-	result := r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "node_id"}, {Name: "file_path"}},
-		DoNothing: true,
-	}).Create(file)
-	return result.RowsAffected > 0, result.Error
+	created, _, err := r.UpsertCatalogFile(ctx, file)
+	return created, err
 }

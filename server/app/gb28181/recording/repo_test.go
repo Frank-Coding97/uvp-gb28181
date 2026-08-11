@@ -19,7 +19,7 @@ func newRepoTestDB(t *testing.T) *gorm.DB {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&models.GbChannel{}, &models.GbRecordingSession{}, &models.GbRecordingFile{}))
+	require.NoError(t, db.AutoMigrate(&models.GbDevice{}, &models.GbChannel{}, &models.GbRecordingSession{}, &models.GbRecordingFile{}, &models.GbRecordingReconcileState{}))
 	return db
 }
 
@@ -71,7 +71,7 @@ func TestGormRepoSessionAndFileIdempotency(t *testing.T) {
 	file := &models.GbRecordingFile{
 		SessionID: &stored.ID, ChannelID: 1, DeviceID: "device", NodeID: 2,
 		VHost: models.DefaultRecordingVHost, App: models.DefaultRecordingApp, Stream: "stream",
-		FileName: "one.mp4", FilePath: "/record/one.mp4", StartTime: now,
+		FileName: "one.mp4", FilePath: "/record/one.mp4", StartTime: &now,
 	}
 	inserted, err := repo.InsertFile(context.Background(), file)
 	require.NoError(t, err)

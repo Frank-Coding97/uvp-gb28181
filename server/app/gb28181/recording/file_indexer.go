@@ -21,22 +21,58 @@ type RecordMP4Event struct {
 }
 
 type FileIndexer struct {
-	repo Repository
+	repo      FileIndexRepository
+	locations LocationLookup
 }
 
-func NewFileIndexer(repo Repository) *FileIndexer {
-	return &FileIndexer{repo: repo}
+type FileIndexRepository interface {
+	FindSessionByMedia(context.Context, int64, string, string, string) (*models.GbRecordingSession, error)
+	FindChannelByStream(context.Context, string) (*models.GbChannel, error)
+	UpsertCompleteFile(context.Context, RecordingFileAttribution, RecordMP4Event) error
+}
+
+type RecordingFileAttribution struct {
+	NodeID    int64
+	SessionID *uint64
+	ChannelID uint
+	DeviceID  string
+}
+
+func NewFileIndexer(repo FileIndexRepository, locations ...LocationLookup) *FileIndexer {
+	indexer := &FileIndexer{repo: repo}
+	if len(locations) > 0 {
+		indexer.locations = locations[0]
+	}
+	return indexer
 }
 
 func (i *FileIndexer) IndexRecordMP4(ctx context.Context, nodeID int64, event RecordMP4Event) (bool, error) {
 	session, err := i.repo.FindSessionByMedia(ctx, nodeID, event.VHost, event.App, event.Stream)
-	if err != nil || session == nil {
+	if err != nil {
 		return false, err
 	}
-	return i.repo.InsertFile(ctx, &models.GbRecordingFile{
-		SessionID: &session.ID, ChannelID: session.ChannelID, DeviceID: session.DeviceID,
-		NodeID: nodeID, VHost: event.VHost, App: event.App, Stream: event.Stream,
-		FileName: event.FileName, FilePath: event.FilePath, Folder: event.Folder, URL: event.URL,
-		StartTime: event.StartTime, TimeLen: event.TimeLen, FileSize: event.FileSize,
-	})
+	attribution := RecordingFileAttribution{NodeID: nodeID}
+	if session != nil {
+		attribution = RecordingFileAttribution{NodeID: nodeID, SessionID: &session.ID, ChannelID: session.ChannelID, DeviceID: session.DeviceID}
+	} else {
+		if i.locations == nil {
+			return false, nil
+		}
+		locatedNodeID, ok := i.locations.Lookup(event.Stream)
+		if !ok || locatedNodeID != nodeID {
+			return false, nil
+		}
+		channel, findErr := i.repo.FindChannelByStream(ctx, event.Stream)
+		if findErr != nil {
+			return false, findErr
+		}
+		if channel == nil {
+			return false, nil
+		}
+		attribution = RecordingFileAttribution{NodeID: nodeID, ChannelID: channel.ID, DeviceID: channel.DeviceID}
+	}
+	if err := i.repo.UpsertCompleteFile(ctx, attribution, event); err != nil {
+		return false, err
+	}
+	return true, nil
 }

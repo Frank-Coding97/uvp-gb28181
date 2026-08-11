@@ -397,12 +397,12 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 		StartTime: time.Unix(body.StartTime, 0), TimeLen: body.TimeLen, FileSize: body.FileSize,
 	})
 	if err != nil {
-		app.ZapLog.Error("写入 ZLM 录像文件索引失败", zap.Error(err), zap.String("filePath", body.FilePath))
+		app.ZapLog.Error("写入 ZLM 录像文件索引失败", zap.Error(err), zap.Int64("nodeId", nodeID))
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "persist recording file failed"})
 		return
 	}
 	if !indexed {
-		app.ZapLog.Warn("忽略未关联录像会话的 MP4 文件", zap.Int64("nodeId", nodeID), zap.String("stream", body.Stream))
+		app.ZapLog.Warn("忽略无法归属的 ZLM MP4 文件", zap.Int64("nodeId", nodeID))
 	}
 	hookOK(c)
 }
