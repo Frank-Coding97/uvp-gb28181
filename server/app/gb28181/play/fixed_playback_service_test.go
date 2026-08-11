@@ -8,9 +8,54 @@ import (
 	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+type fixedTestPicker struct{ mediaNode *node.Node }
+
+func (p fixedTestPicker) Pick(context.Context, PickContext) (*node.Node, error) {
+	return p.mediaNode, nil
+}
+
+type fixedTestRegistry struct{ mediaNode *node.Node }
+
+func (r fixedTestRegistry) Get(id int64) (*node.Node, bool) {
+	return r.mediaNode, r.mediaNode != nil && r.mediaNode.ID == id
+}
+
+func (r fixedTestRegistry) ListActive() []*node.Node {
+	if r.mediaNode == nil || !r.mediaNode.IsActive() {
+		return nil
+	}
+	return []*node.Node{r.mediaNode}
+}
+
+func newFixedSvc(t *testing.T, z ZLM, inv Inviter, dev *gbmodels.GbDevice, ch *gbmodels.GbChannel) (*Service, *stream.Notifier, *fakeChannels) {
+	t.Helper()
+	notifier := stream.NewNotifier()
+	channels := &fakeChannels{c: ch}
+	mediaNode := &node.Node{
+		ID: 1, Name: "node-a", Host: "192.168.10.222", PlaybackHost: "192.168.10.222",
+		MediaServerUUID: "node-a", State: node.StateActive, RTPPortStart: 40000,
+	}
+	signer, err := playauth.NewSigner([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewWithScheduler(testCfg(), fixedTestPicker{mediaNode}, fixedTestRegistry{mediaNode}, stream.NewLocationMap(),
+		inv, uac.NewSessionManager(), notifier, fakeDevices{dev}, channels,
+		WithPlayTokenIssuer(signer),
+		WithURLResolver(NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 80, HLSEnabled: true, FMP4Enabled: true}})),
+		WithNodeClientFactory(func(*node.Node) ZLM { return z }),
+	)
+	service.SetReadyTimings(800*time.Millisecond, 50*time.Millisecond)
+	return service, notifier, channels
+}
 
 func withFixedAddressPlaybackSettings(t *testing.T, fixed, auto bool) *playbackSettingsSource {
 	t.Helper()
@@ -27,7 +72,7 @@ func TestStartFixedAddressUsesStableStreamIDAndSeparateSSRC(t *testing.T) {
 	withFixedAddressPlaybackSettings(t, true, false)
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
-	s, notifier, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
 	inv.onInvite = func(sess *uac.Session) {
 		z.online.Store(true)
 		go notifier.Publish(sess.StreamID)
@@ -65,7 +110,7 @@ func TestStartFixedAddressHookOnlyWakesUntilMediaIsOnline(t *testing.T) {
 	withFixedAddressPlaybackSettings(t, true, false)
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
-	s, notifier, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
 	done := make(chan error, 1)
 
 	go func() {
@@ -118,7 +163,7 @@ func TestStartModeSwitchKeepsCurrentGenerationAndAppliesAfterStop(t *testing.T) 
 			source := withFixedAddressPlaybackSettings(t, tt.initial, false)
 			z := &mockZLM{port: 40000}
 			inv := &mockInviter{}
-			s, notifier, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+			s, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
 			inv.onInvite = func(sess *uac.Session) {
 				z.online.Store(true)
 				go notifier.Publish(sess.StreamID)
@@ -175,7 +220,7 @@ func TestStartFixedAddressRejectsInvalidGBIDs(t *testing.T) {
 			channel.DeviceID = tt.deviceID
 			channel.ChannelID = tt.channelID
 			z := &mockZLM{}
-			s, _, _ := newSvc(t, z, &mockInviter{}, device, channel)
+			s, _, _ := newFixedSvc(t, z, &mockInviter{}, device, channel)
 
 			_, err := s.Start(context.Background(), tt.deviceID, tt.channelID)
 			if !errors.Is(err, ErrInvalidFixedStreamID) {
@@ -199,7 +244,7 @@ func TestStartFixedAddressReuseReturnsCurrentSSRC(t *testing.T) {
 	channel := aChannel()
 	channel.StreamID = streamID
 	channel.CurrentSSRC = "0200000001"
-	s, _, _ := newSvc(t, z, &mockInviter{}, onlineDevice(), channel)
+	s, _, _ := newFixedSvc(t, z, &mockInviter{}, onlineDevice(), channel)
 
 	result, err := s.Start(context.Background(), channel.DeviceID, channel.ChannelID)
 	if err != nil {
@@ -214,7 +259,7 @@ func TestStartFixedAddressNewGenerationKeepsPathAndChangesSSRC(t *testing.T) {
 	withFixedAddressPlaybackSettings(t, true, false)
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
-	s, notifier, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	s, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
 	inv.onInvite = func(sess *uac.Session) {
 		z.online.Store(true)
 		go func(streamID string) {

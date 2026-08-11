@@ -12,6 +12,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -144,6 +145,8 @@ type Service struct {
 
 	snapshotSvc SnapshotService // 通道快照(播放触发),可为 nil
 	urlResolver *URLResolver
+	tokenIssuer playauth.DirectIssuer
+	nodeClient  func(*node.Node) ZLM
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
@@ -172,18 +175,30 @@ func WithURLResolver(resolver *URLResolver) Option {
 	return func(s *Service) { s.urlResolver = resolver }
 }
 
+func WithPlayTokenIssuer(issuer playauth.DirectIssuer) Option {
+	return func(s *Service) { s.tokenIssuer = issuer }
+}
+
+func WithNodeClientFactory(factory func(*node.Node) ZLM) Option {
+	return func(s *Service) { s.nodeClient = factory }
+}
+
 // New 创建 service(deprecated 单节点路径,M1/test fixture 兼容)
 //
 // Deprecated: M2 起新代码用 NewWithScheduler,这里保留兼容旧 service_test 不退化。
 func New(cfg gbconfig.Config, z ZLM, inv Inviter, sm *uac.SessionManager, n *stream.Notifier,
-	devices DeviceRepo, channels ChannelRepo) *Service {
+	devices DeviceRepo, channels ChannelRepo, opts ...Option) *Service {
 	allocator, allocatorErr := NewRealtimeSSRCAllocator(cfg.SIP.Domain)
-	return &Service{
+	s := &Service{
 		cfg: cfg, zlm: z, inviter: inv, sessions: sm, notifier: n,
 		devices: devices, channels: channels,
 		readyWait: defaultReadyWait, pollEvery: defaultPollEvery,
 		ssrcAllocator: allocator, ssrcAllocatorErr: allocatorErr,
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // NewWithScheduler 创建多节点版 service
@@ -212,6 +227,13 @@ func (s *Service) useMultiNode() bool {
 	return s.picker != nil && s.registry != nil && s.locationMap != nil
 }
 
+func (s *Service) clientForNode(mediaNode *node.Node) ZLM {
+	if s.nodeClient != nil {
+		return s.nodeClient(mediaNode)
+	}
+	return zlm.NewClientForNode(mediaNode)
+}
+
 // clientForStream 返回操作 streamID 对应节点的 ZLM client。
 // 多节点路径:LocationMap.Lookup → registry.Get → NewClientForNode
 // 单节点路径:s.zlm
@@ -227,7 +249,7 @@ func (s *Service) clientForStream(streamID string) (ZLM, error) {
 	if !ok {
 		return nil, fmt.Errorf("stream %s bound to node %d but node not found", streamID, nodeID)
 	}
-	return zlm.NewClientForNode(n), nil
+	return s.clientForNode(n), nil
 }
 
 func (s *Service) unbindLocation(ref stream.LiveRef) {
@@ -280,7 +302,7 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 	// 多节点路径:优先看 LocationMap
 	if nodeID, ok := s.locationMap.Lookup(streamID); ok {
 		if n, ok := s.registry.Get(nodeID); ok {
-			client := zlm.NewClientForNode(n)
+			client := s.clientForNode(n)
 			online, err := client.IsMediaOnline(ctx, zlmApp, streamID)
 			if err == nil && online {
 				return s.buildReuseResult(ctx, ch, n), nil
@@ -305,7 +327,7 @@ func (s *Service) tryReuseStream(ctx context.Context, ch *gbmodels.GbChannel) (*
 		zap.String("streamId", streamID),
 		zap.Int("activeNodes", len(activeNodes)))
 	for _, n := range activeNodes {
-		client := zlm.NewClientForNode(n)
+		client := s.clientForNode(n)
 		online, err := client.IsMediaOnline(ctx, zlmApp, streamID)
 		if err != nil {
 			app.ZapLog.Debug("流复用兜底探测单节点失败",
@@ -392,6 +414,16 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		if reused, err := s.tryReuseStream(ctx, ch); err != nil {
 			return nil, err
 		} else if reused != nil {
+			if parsedDeviceID, parsedChannelID, parseErr := ParseFixedStreamID(reused.StreamID); parseErr == nil {
+				reused.ModeAtStart = LiveModeFixed
+				var owner *node.Node
+				if reused.Node != nil && s.registry != nil {
+					owner, _ = s.registry.Get(reused.Node.ID)
+				}
+				if err := s.authorizeFixedResult(reused, parsedDeviceID, parsedChannelID, owner); err != nil {
+					return nil, err
+				}
+			}
 			app.ZapLog.Info("点播复用现有流",
 				zap.String("deviceId", deviceID),
 				zap.String("channelId", channelID),
@@ -431,6 +463,9 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			return nil, err
 		}
 		mode = LiveModeFixed
+		if !s.useMultiNode() {
+			return nil, ErrFixedPlaybackRequiresManagedNode
+		}
 	}
 	generation := s.nextGeneration.Add(1)
 	liveRef := stream.LiveRef{StreamID: streamID, SSRC: ssrc, Generation: generation}
@@ -458,7 +493,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 				return nil, fmt.Errorf("无可用 ZLM 节点: %w", err)
 			}
 		}
-		client = zlm.NewClientForNode(selectedNode)
+		client = s.clientForNode(selectedNode)
 		recvHost = selectedNode.EffectiveReceiveHost()
 		rtpFallback = selectedNode.RTPPortStart // 兜底端口
 		pickedNodeID = selectedNode.ID
@@ -476,6 +511,22 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		client = s.zlm
 		recvHost = s.cfg.ZLM.EffectiveReceiveHost()
 		rtpFallback = s.cfg.ZLM.RTPPort
+	}
+
+	// Build and authorize the playback result before opening RTP or sending an
+	// INVITE. A fixed stream must never leave a live upstream session behind
+	// when URL authorization cannot be issued.
+	var result *Result
+	if pickedNode != nil {
+		result = s.buildNodeResult(ctx, streamID, ssrc, pickedNode, false)
+	} else {
+		result = s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
+	}
+	result.Generation = generation
+	result.ModeAtStart = mode
+	if err := s.authorizeFixedResult(result, deviceID, channelID, pickedNode); err != nil {
+		s.unbindLocation(liveRef)
+		return nil, err
 	}
 
 	// 5. openRtpServer:port=0 让 ZLM 自选临时端口
@@ -586,15 +637,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		s.snapshotSvc.FireAfterPlay(context.Background(), nodeIDStr, streamID, deviceID, channelID)
 	}
 
-	// 9. 生成播放地址(多节点用 picked node 的 host;单节点用 cfg.ZLM.Host)
-	var result *Result
-	if pickedNode != nil {
-		result = s.buildNodeResult(ctx, streamID, ssrc, pickedNode, false)
-	} else {
-		result = s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
-	}
-	result.Generation = generation
-	result.ModeAtStart = mode
+	// 9. 播放地址已在任何媒体副作用前完成构建和授权。
 	releaseSSRC = false
 	return result, nil
 }

@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -80,6 +82,10 @@ type TalkStreamObserver interface {
 	ObserveTalkStream(context.Context, int64, string, string, bool) error
 }
 
+type PlayAuthorizer interface {
+	Verify(string, playauth.Binding) (playauth.Claims, error)
+}
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
@@ -98,6 +104,8 @@ type HookController struct {
 	talkAuthorizer TalkPublishAuthorizer
 	talkObserver   TalkStreamObserver
 	talkMu         sync.RWMutex
+	playAuthorizer PlayAuthorizer
+	playAuthMu     sync.RWMutex
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -150,6 +158,12 @@ func (h *HookController) SetTalk(resolver NodeUUIDResolver, authorizer TalkPubli
 	h.talkResolver = resolver
 	h.talkAuthorizer = authorizer
 	h.talkObserver = observer
+}
+
+func (h *HookController) SetPlayAuthorizer(authorizer PlayAuthorizer) {
+	h.playAuthMu.Lock()
+	defer h.playAuthMu.Unlock()
+	h.playAuthorizer = authorizer
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -350,9 +364,53 @@ func (h *HookController) talkDependencies() (NodeUUIDResolver, TalkPublishAuthor
 	return h.talkResolver, h.talkAuthorizer, h.talkObserver
 }
 
-// OnPlay 播放鉴权(本期放行)
+type onPlayBody struct {
+	App           string `json:"app"`
+	Stream        string `json:"stream"`
+	Schema        string `json:"schema"`
+	Params        string `json:"params"`
+	MediaServerID string `json:"mediaServerId"`
+}
+
+// OnPlay keeps legacy dynamic streams compatible while fixed live paths are
+// always authorized before ZLM serves media.
 func (h *HookController) OnPlay(c *gin.Context) {
+	var body onPlayBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		hookDenied(c, "invalid playback request")
+		return
+	}
+	deviceID, channelID, err := play.ParseFixedStreamID(body.Stream)
+	if body.App != "rtp" || err != nil {
+		hookOK(c)
+		return
+	}
+
+	h.playAuthMu.RLock()
+	authorizer := h.playAuthorizer
+	h.playAuthMu.RUnlock()
+	if authorizer == nil {
+		hookDenied(c, "fixed playback authorization unavailable")
+		return
+	}
+	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
+	if err != nil {
+		hookDenied(c, "invalid playback authorization")
+		return
+	}
+	_, err = authorizer.Verify(params.Get(playauth.QueryParameter), playauth.Binding{
+		DeviceID: deviceID, ChannelID: channelID, App: body.App,
+		Stream: body.Stream, MediaServerID: body.MediaServerID,
+	})
+	if err != nil {
+		hookDenied(c, "playback authorization denied")
+		return
+	}
 	hookOK(c)
+}
+
+func hookDenied(c *gin.Context, message string) {
+	c.JSON(http.StatusOK, gin.H{"code": -1, "msg": message})
 }
 
 // OnServerStarted ZLM 启动事件

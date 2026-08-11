@@ -205,6 +205,10 @@ func SetPlayService(svc *gbplay.Service) {
 	hookController.SetNoneReaderPolicy(svc)
 }
 
+func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
+	hookController.SetPlayAuthorizer(authorizer)
+}
+
 func SetStreamMonitorService(service *streammonitor.Service) {
 	streamMonitorController = gbcontrollers.NewStreamMonitorController(service)
 }

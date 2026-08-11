@@ -20,6 +20,7 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play/reconciler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
@@ -514,6 +515,15 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	offlineScanner.Start()
 	app.ZapLog.Info("GB28181 离线扫描器已启动", zap.Int("intervalSeconds", cfg.Device.OfflineScanInterval))
 
+	playSigner, signerErr := playauth.NewSigner([]byte(strings.TrimSpace(app.ConfigYml.GetString("token.jwttokensignkey"))))
+	if signerErr != nil {
+		app.ZapLog.Warn("GB28181 固定播放地址鉴权未装配(JWT 根密钥缺失或强度不足)")
+		gbroutes.SetPlayAuthorizer(nil)
+	} else {
+		app.ZapLog.Info("GB28181 固定播放地址鉴权 signer 已装配")
+		gbroutes.SetPlayAuthorizer(playSigner)
+	}
+
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
 	if u := srv.UAC(); u != nil {
 		if zlmRegistry != nil && zlmScheduler != nil {
@@ -527,6 +537,9 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				opts = append(opts, play.WithSnapshotService(snapshotSvc))
 				app.ZapLog.Info("GB28181 通道快照 service 已装配")
 			}
+			if playSigner != nil {
+				opts = append(opts, play.WithPlayTokenIssuer(playSigner))
+			}
 			playSvc = play.NewWithScheduler(cfg,
 				schedulerPickerAdapter{m: zlmScheduler},
 				zlmRegistry,
@@ -539,8 +552,12 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
 			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)")
 		} else {
+			opts := make([]play.Option, 0, 1)
+			if playSigner != nil {
+				opts = append(opts, play.WithPlayTokenIssuer(playSigner))
+			}
 			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
-				play.NewDeviceRepo(), play.NewChannelRepo())
+				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
 			gbroutes.SetPlayService(playSvc)
 			app.ZapLog.Info("GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)")
 		}
@@ -601,6 +618,7 @@ func stopSIPDependencies(ctx context.Context) {
 	}
 	playSvc = nil
 	gbroutes.SetPlayService(nil)
+	gbroutes.SetPlayAuthorizer(nil)
 	gbroutes.SetDeviceMgmtCatalogTrigger(nil)
 	gbroutes.SetDeviceMgmtSubscriptionManager(nil)
 	if sipServer != nil {
