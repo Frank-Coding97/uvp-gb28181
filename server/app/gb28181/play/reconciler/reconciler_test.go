@@ -10,10 +10,10 @@ import (
 
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // ============ 手写 fake(不用 gomock) ============
@@ -23,6 +23,23 @@ type fakeStopper struct {
 	mu      sync.Mutex
 	calls   []string
 	stopErr error // 非 nil 则 Stop 返回该 err
+}
+
+type conditionalStopCall struct {
+	streamID string
+	ssrc     string
+}
+
+type fakeConditionalStopper struct {
+	fakeStopper
+	conditional []conditionalStopCall
+}
+
+func (s *fakeConditionalStopper) StopIfPersistedCurrent(_ context.Context, streamID, ssrc string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.conditional = append(s.conditional, conditionalStopCall{streamID: streamID, ssrc: ssrc})
+	return s.stopErr
 }
 
 func (s *fakeStopper) Stop(ctx context.Context, streamID string) error {
@@ -298,6 +315,30 @@ func TestT6_6_Q5LocationMissAllOffline(t *testing.T) {
 	calls := stopper.Calls()
 	if len(calls) != 1 || calls[0] != "ssrc-6" {
 		t.Errorf("期望 stopper.Stop(ssrc-6) 一次, 实际 %v", calls)
+	}
+}
+
+func TestReconcilerCarriesPersistedSSRCIntoConditionalStop(t *testing.T) {
+	stopper := &fakeConditionalStopper{}
+	n1 := makeNode(1, node.StateActive)
+	registry := &fakeRegistry{nodes: map[int64]*node.Node{1: n1}}
+	locMap := stream.NewLocationMap()
+	probe := &fakeProbe{online: map[string]bool{keyFor(1, "fixed-stream"): false}}
+	channel := makeChannel("fixed-stream")
+	channel.CurrentSSRC = "0200000007"
+	rec := New(time.Millisecond, stopper,
+		WithRegistry(registry), WithLocationMap(locMap), WithMediaProbe(probe),
+		WithChannelLister(&fakeLister{channels: gbmodels.GbChannelList{channel}}))
+
+	stats := rec.runOnce(context.Background())
+	if stats.Cleaned != 1 || len(stopper.conditional) != 1 {
+		t.Fatalf("stats=%+v conditional=%+v", stats, stopper.conditional)
+	}
+	if got := stopper.conditional[0]; got.streamID != "fixed-stream" || got.ssrc != "0200000007" {
+		t.Fatalf("conditional stop=%+v", got)
+	}
+	if len(stopper.Calls()) != 0 {
+		t.Fatalf("conditional stopper fell back to unsafe Stop: %v", stopper.Calls())
 	}
 }
 

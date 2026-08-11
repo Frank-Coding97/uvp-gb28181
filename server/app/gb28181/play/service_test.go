@@ -158,6 +158,13 @@ type fakeChannels struct {
 	clearedStreamID string
 }
 
+func (f *fakeChannels) ListPlayingChannels(context.Context) (gbmodels.GbChannelList, error) {
+	if f.c == nil || f.c.StreamID == "" {
+		return nil, nil
+	}
+	return gbmodels.GbChannelList{f.c}, nil
+}
+
 func (f *fakeChannels) FindChannel(ctx context.Context, deviceID, channelID string) (*gbmodels.GbChannel, error) {
 	return f.c, nil
 }

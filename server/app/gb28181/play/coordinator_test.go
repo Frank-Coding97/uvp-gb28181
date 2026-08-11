@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 )
 
@@ -254,6 +255,82 @@ func TestCoordinatorStoppingIsBarrier(t *testing.T) {
 	}
 }
 
+func TestCoordinatorRestoreReusesRecoveredGeneration(t *testing.T) {
+	var startCalls atomic.Int32
+	recovered := &Result{
+		StreamID: "device_channel", SSRC: "0200000001", Generation: 7,
+		Node: &ResultNode{ID: 9}, ModeAtStart: LiveModeFixed,
+	}
+	c := NewCoordinator(func(context.Context, Request) (*Result, error) {
+		startCalls.Add(1)
+		return nil, errors.New("must not start")
+	})
+	req := coordinatorRequest("device", "channel")
+	req.RequiredNode = 9
+	if !c.Restore(req, recovered) {
+		t.Fatal("recovered generation was not restored")
+	}
+	got, err := c.EnsureLive(context.Background(), req)
+	if err != nil || got != recovered {
+		t.Fatalf("recovered ensure result=%p err=%v", got, err)
+	}
+	if startCalls.Load() != 0 {
+		t.Fatalf("recovered generation started %d times", startCalls.Load())
+	}
+}
+
+func TestCoordinatorConditionalStopRejectsStaleGeneration(t *testing.T) {
+	var stopCalls atomic.Int32
+	current := &Result{
+		StreamID: "device_channel", SSRC: "0200000002", Generation: 2,
+		Node: &ResultNode{ID: 20}, ModeAtStart: LiveModeFixed,
+	}
+	c := NewCoordinatorWithStop(
+		func(context.Context, Request) (*Result, error) { return current, nil },
+		func(context.Context, *Result) error { stopCalls.Add(1); return nil },
+	)
+	req := coordinatorRequest("device", "channel")
+	if _, err := c.EnsureLive(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	stale := stream.LiveRef{StreamID: current.StreamID, SSRC: "0200000001", Generation: 1, NodeID: 10}
+	handled, err := c.StopIfCurrent(context.Background(), stale)
+	if err != nil || !handled {
+		t.Fatalf("stale stop handled=%v err=%v", handled, err)
+	}
+	if stopCalls.Load() != 0 {
+		t.Fatalf("stale generation stopped current stream %d times", stopCalls.Load())
+	}
+	if got, ok := c.CurrentResult(current.StreamID); !ok || !resultMatchesRef(got, resultLiveRef(current)) {
+		t.Fatalf("current generation disappeared: got=%+v ok=%v", got, ok)
+	}
+}
+
+func TestCoordinatorConditionalStopIsIdempotentForCurrentGeneration(t *testing.T) {
+	var stopCalls atomic.Int32
+	current := &Result{
+		StreamID: "device_channel", SSRC: "0200000002", Generation: 2,
+		Node: &ResultNode{ID: 20}, ModeAtStart: LiveModeFixed,
+	}
+	c := NewCoordinatorWithStop(
+		func(context.Context, Request) (*Result, error) { return current, nil },
+		func(context.Context, *Result) error { stopCalls.Add(1); return nil },
+	)
+	if _, err := c.EnsureLive(context.Background(), coordinatorRequest("device", "channel")); err != nil {
+		t.Fatal(err)
+	}
+	ref := stream.LiveRef{StreamID: current.StreamID, SSRC: current.SSRC, Generation: current.Generation, NodeID: current.Node.ID}
+	if handled, err := c.StopIfCurrent(context.Background(), ref); err != nil || !handled {
+		t.Fatalf("current stop handled=%v err=%v", handled, err)
+	}
+	if handled, err := c.StopIfCurrent(context.Background(), ref); err != nil || handled {
+		t.Fatalf("repeated stop handled=%v err=%v", handled, err)
+	}
+	if stopCalls.Load() != 1 {
+		t.Fatalf("current generation stopped %d times", stopCalls.Load())
+	}
+}
+
 func TestServiceStartConcurrentUsesCoordinator(t *testing.T) {
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
@@ -282,8 +359,9 @@ func TestServiceStartConcurrentUsesCoordinator(t *testing.T) {
 		if err != nil {
 			t.Fatalf("request %d err = %v", i, err)
 		}
-		if results[i] != results[0] {
-			t.Fatalf("request %d returned a different result pointer", i)
+		if results[i].StreamID != results[0].StreamID || results[i].SSRC != results[0].SSRC ||
+			results[i].Generation != results[0].Generation {
+			t.Fatalf("request %d returned a different live generation", i)
 		}
 	}
 	if inv.inviteCalls.Load() != 1 || z.openCalls.Load() != 1 {

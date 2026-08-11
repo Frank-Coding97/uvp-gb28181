@@ -68,6 +68,7 @@ type ChannelRepo interface {
 	ClearStream(ctx context.Context, streamID string) error
 	SetCurrent(ctx context.Context, deviceID, channelID, streamID, ssrc string) error
 	ClearIfCurrent(ctx context.Context, streamID, ssrc string) (bool, error)
+	ListPlayingChannels(ctx context.Context) (gbmodels.GbChannelList, error)
 }
 
 // DeviceRepo 设备查询(便于测试 mock)
@@ -414,15 +415,8 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		if reused, err := s.tryReuseStream(ctx, ch); err != nil {
 			return nil, err
 		} else if reused != nil {
-			if parsedDeviceID, parsedChannelID, parseErr := ParseFixedStreamID(reused.StreamID); parseErr == nil {
+			if _, _, parseErr := ParseFixedStreamID(reused.StreamID); parseErr == nil {
 				reused.ModeAtStart = LiveModeFixed
-				var owner *node.Node
-				if reused.Node != nil && s.registry != nil {
-					owner, _ = s.registry.Get(reused.Node.ID)
-				}
-				if err := s.authorizeFixedResult(reused, parsedDeviceID, parsedChannelID, owner); err != nil {
-					return nil, err
-				}
 			}
 			app.ZapLog.Info("点播复用现有流",
 				zap.String("deviceId", deviceID),
@@ -435,7 +429,11 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			zap.String("deviceId", deviceID),
 			zap.String("channelId", channelID),
 			zap.String("staleStreamId", ch.StreamID))
-		_ = s.stopDirect(context.Background(), ch.StreamID)
+		if currentSSRC := CurrentSSRCForChannel(ch); currentSSRC != "" {
+			_ = s.StopIfPersistedCurrent(context.Background(), ch.StreamID, currentSSRC)
+		} else {
+			_ = s.stopDirect(context.Background(), ch.StreamID)
+		}
 	}
 
 	// 3. Snapshot the mode for this generation, then allocate its independent
@@ -524,7 +522,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	}
 	result.Generation = generation
 	result.ModeAtStart = mode
-	if err := s.authorizeFixedResult(result, deviceID, channelID, pickedNode); err != nil {
+	if err := s.preflightFixedResult(req, result, pickedNode); err != nil {
 		s.unbindLocation(liveRef)
 		return nil, err
 	}
@@ -644,12 +642,18 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 
 // Stop 停播:通过协调器执行 Stopping 栅栏，再发 BYE + 关 RTP 端口 + Unbind。
 func (s *Service) Stop(ctx context.Context, streamID string) error {
-	s.liveCoordinatorMu.Lock()
-	c := s.liveCoordinator
-	s.liveCoordinatorMu.Unlock()
-	if c != nil {
-		if stopped, err := c.StopStream(ctx, streamID); stopped {
-			return err
+	c := s.coordinator()
+	if stopped, err := c.StopStream(ctx, streamID); stopped {
+		return err
+	}
+	if ch, err := s.channels.FindChannelByStream(ctx, streamID); err != nil {
+		return err
+	} else if ch != nil {
+		if currentSSRC := CurrentSSRCForChannel(ch); currentSSRC != "" {
+			return s.StopIfPersistedCurrent(ctx, streamID, currentSSRC)
+		}
+		if _, _, fixedErr := ParseFixedStreamID(streamID); fixedErr == nil {
+			return nil
 		}
 	}
 	return s.stopDirect(ctx, streamID)

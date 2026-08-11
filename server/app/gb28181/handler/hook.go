@@ -3,9 +3,11 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,6 +27,12 @@ import (
 // 接口化便于 hook 端点接入,且让 handler 包不依赖 play 包(避免循环导入)
 type PlayStopper interface {
 	Stop(ctx context.Context, streamID string) error
+}
+
+type GenerationPlayStopper interface {
+	CurrentLiveRef(streamID string) (stream.LiveRef, bool)
+	StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bool, error)
+	StopOnNoneReader(ctx context.Context, captured stream.LiveRef) (bool, error)
 }
 
 // NoneReaderPolicy 查询流对应通道的无人观看断流策略。
@@ -247,6 +255,7 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		zap.String("app", body.App), zap.String("stream", body.Stream))
 
 	closeStream := true
+	policyFailed := false
 	if h.leaseChecker != nil && body.Stream != "" && h.leaseChecker.HasLease(body.Stream) {
 		closeStream = false
 	} else if h.policy != nil && body.Stream != "" {
@@ -256,11 +265,31 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 			app.ZapLog.Warn("查询无人观看断流策略失败,沿用默认关闭策略",
 				zap.String("stream", body.Stream), zap.Error(err))
 			closeStream = true
+			policyFailed = true
 		}
 	}
 
-	// 异步停播:发 BYE + closeRtpServer。即便失败也告知 ZLM 关流,避免端口悬挂
-	if closeStream && h.stopper != nil && body.Stream != "" {
+	_, _, fixedErr := play.ParseFixedStreamID(body.Stream)
+	isFixedLive := body.App == "rtp" && fixedErr == nil
+	if closeStream && isFixedLive {
+		// 固定 stream ID 会跨代复用，不能让 ZLM 按裸 stream 名立即关闭。
+		// 捕获当前代并由 service 复查 readerCount 后执行条件清理。
+		closeStream = false
+		if !policyFailed {
+			if stopper, ok := h.stopper.(GenerationPlayStopper); ok {
+				if captured, exists := stopper.CurrentLiveRef(body.Stream); exists {
+					go func(ref stream.LiveRef) {
+						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+						defer cancel()
+						if _, err := stopper.StopOnNoneReader(ctx, ref); err != nil {
+							app.ZapLog.Warn("固定流无人观看条件断流失败", zap.String("stream", ref.StreamID), zap.Error(err))
+						}
+					}(captured)
+				}
+			}
+		}
+	} else if closeStream && h.stopper != nil && body.Stream != "" {
+		// 动态流名不会跨代复用，保留历史快速关闭行为。
 		go func(streamID string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -278,9 +307,26 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 
 // onRtpServerTimeoutBody on_rtp_server_timeout 回调载荷
 type onRtpServerTimeoutBody struct {
-	StreamID string `json:"stream_id"`
-	App      string `json:"app"`
-	SSRC     string `json:"ssrc"`
+	StreamID      string   `json:"stream_id"`
+	App           string   `json:"app"`
+	SSRC          hookSSRC `json:"ssrc"`
+	MediaServerID string   `json:"mediaServerId"`
+}
+
+type hookSSRC string
+
+func (s *hookSSRC) UnmarshalJSON(data []byte) error {
+	raw := strings.Trim(strings.TrimSpace(string(data)), "\"")
+	if raw == "" || raw == "null" {
+		*s = ""
+		return nil
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil || value > 9_999_999_999 {
+		return fmt.Errorf("invalid ssrc")
+	}
+	*s = hookSSRC(fmt.Sprintf("%010d", value))
+	return nil
 }
 
 // OnRtpServerTimeout RTP 收流超时 → 设备实际没推流,清理会话
@@ -288,9 +334,30 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 	var body onRtpServerTimeoutBody
 	_ = c.ShouldBindJSON(&body)
 	app.ZapLog.Info("ZLM Hook on_rtp_server_timeout",
-		zap.String("stream_id", body.StreamID), zap.String("ssrc", body.SSRC))
+		zap.String("stream_id", body.StreamID), zap.String("ssrc", string(body.SSRC)),
+		zap.String("mediaServerId", body.MediaServerID))
 
-	if h.stopper != nil && body.StreamID != "" {
+	_, _, fixedErr := play.ParseFixedStreamID(body.StreamID)
+	isFixedLive := body.App == "rtp" && fixedErr == nil
+	if isFixedLive {
+		stopper, stopperOK := h.stopper.(GenerationPlayStopper)
+		nodeID, nodeOK := int64(0), false
+		if h.resolver != nil && body.MediaServerID != "" {
+			nodeID, nodeOK = h.resolver.IDForUUID(body.MediaServerID)
+		}
+		if stopperOK && nodeOK && body.SSRC != "" {
+			if current, ok := stopper.CurrentLiveRef(body.StreamID); ok &&
+				current.NodeID == nodeID && current.SSRC == string(body.SSRC) {
+				go func(ref stream.LiveRef) {
+					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer cancel()
+					if _, err := stopper.StopIfCurrent(ctx, ref); err != nil {
+						app.ZapLog.Warn("RTP 超时条件清理会话失败", zap.String("stream", ref.StreamID), zap.Error(err))
+					}
+				}(current)
+			}
+		}
+	} else if h.stopper != nil && body.StreamID != "" {
 		go func(streamID string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

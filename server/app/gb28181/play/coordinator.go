@@ -65,10 +65,11 @@ type coordinatorEntry struct {
 // Coordinator serializes side effects per device/channel while allowing
 // independent channels to progress concurrently.
 type Coordinator struct {
-	mu      sync.Mutex
-	entries map[coordinatorKey]*coordinatorEntry
-	start   StartFunc
-	stop    StopFunc
+	mu              sync.Mutex
+	entries         map[coordinatorKey]*coordinatorEntry
+	recoveryPending bool
+	start           StartFunc
+	stop            StopFunc
 }
 
 func NewCoordinator(start StartFunc) *Coordinator {
@@ -94,6 +95,10 @@ func (c *Coordinator) EnsureLive(ctx context.Context, req Request) (*Result, err
 
 	for {
 		c.mu.Lock()
+		if c.recoveryPending {
+			c.mu.Unlock()
+			return nil, ErrLiveRecoveryPending
+		}
 		entry := c.entries[key]
 		if entry == nil {
 			entry = &coordinatorEntry{
@@ -283,6 +288,15 @@ func waitFor(ctx context.Context, done <-chan struct{}) error {
 // Existing Start callers remain compatible; new REST/Hook integrations can
 // migrate to this method without changing the underlying Start transaction.
 func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) {
+	c := s.coordinator()
+	result, err := c.EnsureLive(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return s.resultForCaller(req, result)
+}
+
+func (s *Service) coordinator() *Coordinator {
 	s.liveCoordinatorMu.Lock()
 	if s.liveCoordinator == nil {
 		s.liveCoordinator = NewCoordinatorWithStop(
@@ -290,14 +304,11 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 				return s.startDirect(ctx, req)
 			},
 			func(ctx context.Context, result *Result) error {
-				if result == nil {
-					return nil
-				}
-				return s.stopDirect(ctx, result.StreamID)
+				return s.stopCurrentResult(ctx, result)
 			},
 		)
 	}
 	c := s.liveCoordinator
 	s.liveCoordinatorMu.Unlock()
-	return c.EnsureLive(ctx, req)
+	return c
 }

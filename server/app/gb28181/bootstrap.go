@@ -546,11 +546,24 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				zlmLocationMap,
 				u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
+			playSvc.BeginRecovery()
+			recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			recoveryStats, recoveryErr := playSvc.RecoverLiveSessions(recoveryCtx)
+			recoveryCancel()
+			if recoveryErr != nil {
+				return fmt.Errorf("恢复 GB28181 实时点播会话失败: %w", recoveryErr)
+			}
+			playSvc.FinishRecovery()
 			gbroutes.SetPlayService(playSvc)
 			gbroutes.SetStreamMonitorService(streammonitor.NewService(zlmRegistry, zlmLocationMap, nil, time.Now))
 			gbroutes.SetStreamProbeService(streamprobe.NewService(zlmRegistry, zlmLocationMap, nil, 5*time.Second, time.Now))
 			gbroutes.SetHookMultiNode(zlmRegistry, zlmLocationMap)
-			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)")
+			app.ZapLog.Info("GB28181 点播 service 已装配(多节点 + scheduler)",
+				zap.Int("recoveryScanned", recoveryStats.Scanned),
+				zap.Int("recoveryRestored", recoveryStats.Restored),
+				zap.Int("recoveryCleaned", recoveryStats.Cleaned),
+				zap.Int("recoverySkipped", recoveryStats.Skipped),
+				zap.Int("recoveryFailed", recoveryStats.Failed))
 		} else {
 			opts := make([]play.Option, 0, 1)
 			if playSigner != nil {

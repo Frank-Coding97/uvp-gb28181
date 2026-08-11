@@ -183,7 +183,9 @@ func TestStartModeSwitchKeepsCurrentGenerationAndAppliesAfterStop(t *testing.T) 
 			if err != nil {
 				t.Fatalf("reuse after mode switch: %v", err)
 			}
-			if reused != first || inv.inviteCalls.Load() != 1 {
+			if reused.StreamID != first.StreamID || reused.SSRC != first.SSRC ||
+				reused.Generation != first.Generation || reused.ModeAtStart != first.ModeAtStart ||
+				inv.inviteCalls.Load() != 1 {
 				t.Fatalf("mode switch must reuse current generation: first=%+v reused=%+v invites=%d", first, reused, inv.inviteCalls.Load())
 			}
 

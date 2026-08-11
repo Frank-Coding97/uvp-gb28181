@@ -21,15 +21,19 @@ import (
 
 	"go.uber.org/zap"
 
-	"uvplatform.cn/uvp-gb28181/app/global/app"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // Stopper 抽象 play.Service.Stop,便于 mock.
 type Stopper interface {
 	Stop(ctx context.Context, streamID string) error
+}
+
+type ConditionalStopper interface {
+	StopIfPersistedCurrent(ctx context.Context, streamID, ssrc string) error
 }
 
 // Registry 抽象 zlm/node.Registry,便于 mock.
@@ -211,13 +215,19 @@ func (r *Reconciler) runOnce(ctx context.Context) Stats {
 		case judgeSkip:
 			stats.Skipped++
 		case judgeStale:
-			if err := r.stopper.Stop(ctx, ch.StreamID); err != nil {
+			var stopErr error
+			if conditional, ok := r.stopper.(ConditionalStopper); ok && ch.CurrentSSRC != "" {
+				stopErr = conditional.StopIfPersistedCurrent(ctx, ch.StreamID, ch.CurrentSSRC)
+			} else {
+				stopErr = r.stopper.Stop(ctx, ch.StreamID)
+			}
+			if stopErr != nil {
 				stats.Failed++
 				app.ZapLog.Error("reconciler 清理假阳性失败",
 					zap.String("streamID", ch.StreamID),
 					zap.String("deviceID", ch.DeviceID),
 					zap.String("channelID", ch.ChannelID),
-					zap.Error(err))
+					zap.Error(stopErr))
 			} else {
 				stats.Cleaned++
 				app.ZapLog.Info("reconciler 已清理假阳性",

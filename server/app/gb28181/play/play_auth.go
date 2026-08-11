@@ -7,6 +7,46 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
+func cloneResult(result *Result) *Result {
+	if result == nil {
+		return nil
+	}
+	cloned := *result
+	cloned.URLs = PlaybackURLsFromMap(result.URLs.AsMap())
+	cloned.URLWarnings = append([]string(nil), result.URLWarnings...)
+	if result.Node != nil {
+		nodeCopy := *result.Node
+		cloned.Node = &nodeCopy
+	}
+	return &cloned
+}
+
+func (s *Service) resultForCaller(req Request, result *Result) (*Result, error) {
+	result = cloneResult(result)
+	if result == nil || result.ModeAtStart != LiveModeFixed {
+		return result, nil
+	}
+	if result.Node == nil || s.registry == nil {
+		return nil, ErrFixedPlaybackRequiresManagedNode
+	}
+	mediaNode, ok := s.registry.Get(result.Node.ID)
+	if !ok {
+		return nil, ErrFixedPlaybackRequiresManagedNode
+	}
+	if err := s.authorizeFixedResult(result, req.DeviceID, req.ChannelID, mediaNode); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *Service) preflightFixedResult(req Request, result *Result, mediaNode *node.Node) error {
+	if result == nil || result.ModeAtStart != LiveModeFixed {
+		return nil
+	}
+	copy := cloneResult(result)
+	return s.authorizeFixedResult(copy, req.DeviceID, req.ChannelID, mediaNode)
+}
+
 var (
 	ErrPlayAuthorizationUnavailable     = errors.New("play authorization unavailable")
 	ErrFixedPlaybackRequiresManagedNode = errors.New("fixed playback requires a managed ZLM node")

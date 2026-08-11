@@ -43,6 +43,10 @@ func (gormChannelRepo) ClearIfCurrent(ctx context.Context, streamID, ssrc string
 	return gbmodels.ClearChannelCurrentIfCurrent(ctx, streamID, ssrc)
 }
 
+func (gormChannelRepo) ListPlayingChannels(ctx context.Context) (gbmodels.GbChannelList, error) {
+	return gbmodels.ListPlayingChannels(ctx)
+}
+
 // CurrentSSRCForChannel preserves compatibility with rows created before
 // current_ssrc existed. Only a valid 10-digit legacy stream_id can be treated
 // as its SSRC; fixed or otherwise malformed stream IDs never receive a guess.

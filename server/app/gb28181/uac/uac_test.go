@@ -70,3 +70,24 @@ func TestSessionManagerConditionalGeneration(t *testing.T) {
 		t.Fatal("conditional remove must be idempotent")
 	}
 }
+
+func TestSessionManagerTakeIfCurrent(t *testing.T) {
+	m := NewSessionManager()
+	current := &Session{StreamID: "fixed", SSRC: "0200000002", Generation: 2, NodeID: 20}
+	stale := SessionRef{StreamID: "fixed", SSRC: "0200000001", Generation: 1, NodeID: 10}
+	if !m.PutIfCurrent(current) {
+		t.Fatal("current generation should be stored")
+	}
+	if taken, ok := m.TakeIfCurrent(stale); ok || taken != nil {
+		t.Fatalf("stale take returned session=%p ok=%v", taken, ok)
+	}
+	if got, ok := m.GetCurrent("fixed"); !ok || got != current {
+		t.Fatalf("stale take changed current session: got=%p ok=%v", got, ok)
+	}
+	if taken, ok := m.TakeIfCurrent(current.Ref()); !ok || taken != current {
+		t.Fatalf("current take returned session=%p ok=%v", taken, ok)
+	}
+	if taken, ok := m.TakeIfCurrent(current.Ref()); ok || taken != nil {
+		t.Fatalf("repeated take returned session=%p ok=%v", taken, ok)
+	}
+}

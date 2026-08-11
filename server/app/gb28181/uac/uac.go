@@ -570,14 +570,22 @@ func (m *SessionManager) remove(streamID string) {
 }
 
 func (m *SessionManager) RemoveIfCurrent(ref SessionRef) bool {
+	_, ok := m.TakeIfCurrent(ref)
+	return ok
+}
+
+// TakeIfCurrent atomically removes and returns exactly one matching live
+// session. A stale generation cannot remove a newer dialog stored under the
+// same fixed stream ID.
+func (m *SessionManager) TakeIfCurrent(ref SessionRef) (*Session, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	current, ok := m.sessions[ref.StreamID]
 	if !ok || current.Ref() != ref {
-		return false
+		return nil, false
 	}
 	delete(m.sessions, ref.StreamID)
-	return true
+	return current, true
 }
 
 func (u *UAC) buildInviteRequest(s *Session, sdpBody string) (*sip.Request, error) {
@@ -659,21 +667,36 @@ func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody
 // Bye 停止点播
 func (u *UAC) Bye(ctx context.Context, m *SessionManager, streamID string) error {
 	s := m.Get(streamID)
-	if s == nil || s.dialog == nil {
+	if s == nil {
 		return nil
 	}
+	_, err := u.ByeIfCurrent(ctx, m, s.Ref())
+	return err
+}
+
+// ByeIfCurrent sends BYE only for the exact live generation identified by
+// ref. The session is atomically taken before network I/O so duplicate or late
+// cleanup events cannot target a newer dialog.
+func (u *UAC) ByeIfCurrent(ctx context.Context, m *SessionManager, ref SessionRef) (bool, error) {
+	s, ok := m.TakeIfCurrent(ref)
+	if !ok {
+		return false, nil
+	}
+	if s.dialog == nil {
+		s.State = StateBye
+		return true, nil
+	}
 	// 为 BYE 单独记一次出向事务(用临时 key,跟 INVITE 的 dialog Call-ID 区分)
-	callID := fmt.Sprintf("bye-%s-%d", streamID, time.Now().UnixNano())
+	callID := fmt.Sprintf("bye-%s-%d", ref.StreamID, time.Now().UnixNano())
 	cseq := u.nextCSeq()
 	u.recordBegin(metrics.TxBye, callID, cseq, s.DeviceID)
 
 	err := s.dialog.Bye(ctx)
 	s.State = StateBye
-	m.remove(streamID)
 	if err != nil {
 		u.recordEnd(callID, cseq, 0, false)
-		return fmt.Errorf("BYE 失败: %w", err)
+		return true, fmt.Errorf("BYE 失败: %w", err)
 	}
 	u.recordEnd(callID, cseq, 200, true)
-	return nil
+	return true, nil
 }

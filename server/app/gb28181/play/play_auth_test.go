@@ -139,3 +139,41 @@ func TestFixedPlaybackDeprecatedSingleNodeFailsClosed(t *testing.T) {
 		t.Fatalf("deprecated fixed playback opened media: open=%d invite=%d", z.openCalls.Load(), inv.inviteCalls.Load())
 	}
 }
+
+func TestFixedPlaybackReadyReuseRefreshesAuthorization(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, true, true)
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	service, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
+	inv.onInvite = func(session *uac.Session) {
+		z.online.Store(true)
+		go notifier.Publish(session.StreamID)
+	}
+	first, err := service.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstURL, err := url.Parse(valueOrEmpty(first.URLs.HTTPFMP4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondURL, err := url.Parse(valueOrEmpty(second.URLs.HTTPFMP4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstToken := firstURL.Query().Get(playauth.QueryParameter)
+	secondToken := secondURL.Query().Get(playauth.QueryParameter)
+	if firstToken == "" || secondToken == "" || firstToken == secondToken {
+		t.Fatalf("ready reuse did not refresh token: first=%q second=%q", firstToken, secondToken)
+	}
+	if first.StreamID != second.StreamID || first.SSRC != second.SSRC || first.Generation != second.Generation {
+		t.Fatalf("ready reuse changed generation: first=%+v second=%+v", first, second)
+	}
+	if z.openCalls.Load() != 1 || inv.inviteCalls.Load() != 1 {
+		t.Fatalf("ready reuse restarted upstream: open=%d invite=%d", z.openCalls.Load(), inv.inviteCalls.Load())
+	}
+}
