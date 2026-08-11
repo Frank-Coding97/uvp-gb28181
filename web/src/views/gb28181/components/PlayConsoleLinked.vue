@@ -12,6 +12,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
+import { copyTextToClipboard } from "@/utils/app";
 import PlayWindow from "./PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
@@ -2781,15 +2782,10 @@ function switchProtocol(proto: StreamProtocol) {
     protocol.value = proto;
 }
 
-function copyProtocolUrl(proto: StreamProtocol) {
+async function copyProtocolUrl(proto: StreamProtocol) {
     const url = protocolUrls.value[proto];
     if (!url) { Message.warning("当前协议地址不可用"); return; }
-    const label = protocolOptions.find((option) => option.value === proto)?.label || proto;
-    navigator.clipboard?.writeText(url).then(() => {
-        Message.success(`${label} 地址已复制`);
-    }).catch(() => {
-        Message.error("复制失败");
-    });
+    await copyTextToClipboard(url);
 }
 
 function releaseContinuousControls() {
@@ -2949,6 +2945,7 @@ onBeforeUnmount(() => {
                                             type="button"
                                             class="protocol-copy-btn"
                                             :title="`复制 ${opt.label} 地址`"
+                                            :aria-label="`复制 ${opt.label} 地址`"
                                             @mousedown.stop.prevent
                                             @click.stop="copyProtocolUrl(opt.value)"
                                         >
@@ -4529,11 +4526,18 @@ onBeforeUnmount(() => {
     font-size: 11px;
 }
 
-.protocol-option { display: grid; grid-template-columns: max-content minmax(0, 1fr) 24px; align-items: center; min-width: min(600px, calc(100vw - 80px)); max-width: min(600px, calc(100vw - 80px)); gap: 8px; padding: 2px 0; }
+.protocol-option {
+    display: grid; grid-template-columns: max-content minmax(0, 1fr) 28px; align-items: center;
+    box-sizing: border-box; width: min(600px, calc(100vw - 80px)); gap: 8px; padding: 2px 0;
+}
 .protocol-option strong { min-width: 0; font-size: 11px; font-weight: 500; line-height: 1.4; }
-.protocol-url { overflow-wrap: anywhere; color: var(--uvp-text-secondary); font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 11px; line-height: 1.4; }
+.protocol-url {
+    min-width: 0; overflow: hidden; color: var(--uvp-text-secondary);
+    font-family: var(--uvp-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 11px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap;
+}
 .protocol-copy-btn {
-    display: inline-grid; place-items: center; width: 24px; height: 24px; padding: 0;
+    position: relative; z-index: 1; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0;
     color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 5px;
     cursor: pointer; transition: color 0.15s ease, background 0.15s ease;
 }

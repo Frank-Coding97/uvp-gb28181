@@ -468,6 +468,57 @@ describe("PlayConsoleLinked 双区联动", () => {
     wrapper.unmount();
   });
 
+  it("在 HTTP 页面回退复制外部客户端协议地址且长地址不侵占按钮", async () => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const originalExecCommand = Object.getOwnPropertyDescriptor(document, "execCommand");
+    const execCommand = vi.fn().mockReturnValue(true);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: undefined });
+    Object.defineProperty(document, "execCommand", { configurable: true, value: execCommand });
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: "stream-copy-fallback",
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: {
+          wsFlv: "ws://zlm/rtp/stream-copy-fallback.live.flv",
+          wsTs: "ws://zlm/rtp/stream-copy-fallback-with-a-very-long-fixed-address.live.ts"
+        },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    try {
+      await flushPromises();
+      const wsTsOption = wrapper.findAll(".protocol-option").find((option) => option.text().includes("WS-TS:"));
+      const copyButton = wsTsOption!.get(".protocol-copy-btn");
+
+      expect(copyButton.attributes("aria-label")).toBe("复制 WS-TS 地址");
+      await copyButton.trigger("click");
+      await flushPromises();
+
+      expect(execCommand).toHaveBeenCalledWith("copy");
+      expect(document.querySelector("textarea")).toBeNull();
+      expect(wrapper.get("[data-testid='play-window']").attributes("data-url")).toBe(
+        "ws://zlm/rtp/stream-copy-fallback.live.flv"
+      );
+
+      const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+      expect(source).toMatch(/\.protocol-url\s*\{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/s);
+    } finally {
+      wrapper.unmount();
+      if (originalClipboard) Object.defineProperty(navigator, "clipboard", originalClipboard);
+      else Reflect.deleteProperty(navigator, "clipboard");
+      if (originalExecCommand) Object.defineProperty(document, "execCommand", originalExecCommand);
+      else Reflect.deleteProperty(document, "execCommand");
+    }
+  });
+
   it("新会话优先使用服务端协议快照并允许本次会话手动切换", async () => {
     api.startPlay.mockResolvedValueOnce({
       code: 0,
