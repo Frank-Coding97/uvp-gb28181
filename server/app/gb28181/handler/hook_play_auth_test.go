@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,9 +12,13 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -46,15 +51,30 @@ func setHookPlayAuth(t *testing.T, enabled, bindIP bool) {
 }
 
 type hookMediaResolver struct {
-	binding playauth.Binding
-	err     error
+	binding     playauth.Binding
+	err         error
+	coldBinding playauth.Binding
+	coldErr     error
 }
 
 func (r hookMediaResolver) ResolvePlaybackMediaContext(appName, streamID, mediaServerID string) (playauth.Binding, error) {
-	if r.err != nil || r.binding.App != appName || r.binding.Stream != streamID || r.binding.MediaServerID != mediaServerID {
+	if r.err != nil {
+		return playauth.Binding{}, r.err
+	}
+	if r.binding.App != appName || r.binding.Stream != streamID || r.binding.MediaServerID != mediaServerID {
 		return playauth.Binding{}, errors.New("not current")
 	}
 	return r.binding, nil
+}
+
+func (r hookMediaResolver) ResolveColdPlaybackMediaContext(_ context.Context, appName, streamID, mediaServerID string) (playauth.Binding, error) {
+	if r.coldErr != nil {
+		return playauth.Binding{}, r.coldErr
+	}
+	if r.coldBinding.App != appName || r.coldBinding.Stream != streamID || r.coldBinding.MediaServerID != mediaServerID {
+		return playauth.Binding{}, errors.New("cold media is not absent")
+	}
+	return r.coldBinding, nil
 }
 
 func TestOnPlayAuthorizesDynamicAndFixedCurrentMedia(t *testing.T) {
@@ -110,6 +130,77 @@ func TestOnPlayAuthorizesDynamicAndFixedCurrentMedia(t *testing.T) {
 	}
 }
 
+func TestOnPlayAuthorizesColdFixedPreauthorizationBeforeLiveMediaExists(t *testing.T) {
+	setHookPlayAuth(t, true, false)
+	signer, err := playauth.NewSigner([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceID := "37010301021320000014"
+	channelID := "37010301021320000001"
+	streamID := deviceID + "_" + channelID
+	binding := playauth.Binding{
+		DeviceID: deviceID, ChannelID: channelID,
+		App: "rtp", Stream: streamID, MediaServerID: "node-a",
+	}
+	authorization := playauth.NewAuthorizationService(signer, playauth.NewAuthorizationRegistry())
+	grant, err := authorization.IssueDirect(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetPlayAuthorizer(authorization)
+	h.SetPlaybackMediaContextResolver(hookMediaResolver{err: play.ErrPlaybackMediaNotCurrent, coldBinding: binding})
+	router := gin.New()
+	router.POST("/index/hook/on_play", h.OnPlay)
+	response := postJSON(t, router, "/index/hook/on_play", gin.H{
+		"app": "rtp", "stream": streamID, "schema": "fmp4", "mediaServerId": "node-a",
+		"params": "?" + url.Values{playauth.QueryParameter: {grant.Token}}.Encode(),
+	})
+	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
+
+	response = postJSON(t, router, "/index/hook/on_play", gin.H{
+		"app": "rtp", "stream": streamID, "schema": "fmp4", "mediaServerId": "node-b",
+		"params": "?" + url.Values{playauth.QueryParameter: {grant.Token}}.Encode(),
+	})
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+}
+
+func TestOnPlayRejectsColdFallbackWhenMediaAbsenceIsNotProven(t *testing.T) {
+	setHookPlayAuth(t, true, false)
+	signer, err := playauth.NewSigner([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceID := "37010301021320000014"
+	channelID := "37010301021320000001"
+	streamID := deviceID + "_" + channelID
+	binding := playauth.Binding{
+		DeviceID: deviceID, ChannelID: channelID,
+		App: "rtp", Stream: streamID, MediaServerID: "node-a",
+	}
+	authorization := playauth.NewAuthorizationService(signer, playauth.NewAuthorizationRegistry())
+	grant, err := authorization.IssueDirect(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetPlayAuthorizer(authorization)
+	h.SetPlaybackMediaContextResolver(hookMediaResolver{
+		err:     play.ErrPlaybackMediaNotCurrent,
+		coldErr: errors.New("media is online or ownership is uncertain"),
+	})
+	router := gin.New()
+	router.POST("/index/hook/on_play", h.OnPlay)
+	response := postJSON(t, router, "/index/hook/on_play", gin.H{
+		"app": "rtp", "stream": streamID, "schema": "fmp4", "mediaServerId": "node-a",
+		"params": "?" + url.Values{playauth.QueryParameter: {grant.Token}}.Encode(),
+	})
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+}
+
 func TestOnPlayCompatibilityAndFailClosedPolicy(t *testing.T) {
 	h := handler.NewHookController(stream.NewNotifier())
 	e := gin.New()
@@ -132,6 +223,47 @@ func TestOnPlayCompatibilityAndFailClosedPolicy(t *testing.T) {
 	response := httptest.NewRecorder()
 	e.ServeHTTP(response, malformed)
 	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+
+	oversized := postJSON(t, e, "/index/hook/on_play", gin.H{
+		"app": "talk", "stream": "talk-stream", "params": strings.Repeat("x", 17<<10),
+	})
+	assertHookCode(t, oversized.Code, oversized.Body.Bytes(), -1)
+}
+
+func TestOnPlayLogsStableDenialReasonWithoutToken(t *testing.T) {
+	setHookPlayAuth(t, true, false)
+	core, observed := observer.New(zap.DebugLevel)
+	previousLogger := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previousLogger })
+
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetPlayAuthorizer(&rejectingPlayAuthorizer{})
+	h.SetPlaybackMediaContextResolver(hookMediaResolver{binding: playauth.Binding{
+		DeviceID: "37010301021320000014", ChannelID: "37010301021320000001",
+		App: "rtp", Stream: "dynamic-stream", MediaServerID: "node-a", MediaGeneration: 9,
+	}})
+	router := gin.New()
+	router.POST("/index/hook/on_play", h.OnPlay)
+	response := postJSON(t, router, "/index/hook/on_play", gin.H{
+		"app": "rtp", "stream": "dynamic-stream", "mediaServerId": "node-a",
+		"params": "?play_token=must-not-appear-in-log",
+	})
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+
+	entries := observed.FilterMessage("播放鉴权 Hook 已拒绝").All()
+	require.Len(t, entries, 1)
+	fields := entries[0].ContextMap()
+	require.Equal(t, "tampered", fields["reason"])
+	encoded, err := json.Marshal(fields)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "must-not-appear-in-log")
+}
+
+type rejectingPlayAuthorizer struct{}
+
+func (*rejectingPlayAuthorizer) Verify(string, playauth.Binding) (playauth.Claims, error) {
+	return playauth.Claims{}, playauth.ErrTokenInvalid
 }
 
 func assertHookCode(t *testing.T, status int, raw []byte, want float64) {

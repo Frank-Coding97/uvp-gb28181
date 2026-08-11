@@ -1,6 +1,8 @@
 package playauth
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"errors"
 	"strings"
 	"sync"
@@ -10,6 +12,7 @@ import (
 const (
 	DefaultAuthorizationRegistryCapacity = 4096
 	MinimumAuthorizationStartLifetime    = 30 * time.Second
+	VerifiedClientSourceLifetime         = 30 * time.Second
 )
 
 var (
@@ -21,6 +24,7 @@ var (
 	ErrAuthorizationAlreadyBound        = errors.New("play authorization already bound")
 	ErrAuthorizationClaimsMismatch      = errors.New("play authorization claims mismatch")
 	ErrAuthorizationLifetimeTooShort    = errors.New("play authorization lifetime too short")
+	ErrAuthorizationClientNotVerified   = errors.New("play authorization client source not verified")
 )
 
 type AuthorizationState uint8
@@ -35,6 +39,15 @@ const (
 // verifier. Only an unbound authorization can enter automatic start.
 type AutoStartVerifier interface {
 	VerifyForAutoStart(string, Binding) (Claims, error)
+}
+
+// VerifiedClientAutoStartVerifier permits a cold, IP-bound authorization to
+// continue from OnPlay to on_stream_not_found only after OnPlay has verified
+// the real client address.
+type VerifiedClientAutoStartVerifier interface {
+	AutoStartVerifier
+	MarkVerifiedClientSource(string, Claims, Binding) error
+	VerifyForVerifiedClientAutoStart(string, Binding) (Claims, error)
 }
 
 type AuthorizationRegistryOption func(*AuthorizationRegistry)
@@ -65,16 +78,19 @@ type authorizationBinding struct {
 }
 
 type authorizationRecord struct {
-	binding         authorizationBinding
-	issuedAt        time.Time
-	expiresAt       time.Time
-	nonce           string
-	state           AuthorizationState
-	mediaGeneration uint64
+	binding                   authorizationBinding
+	issuedAt                  time.Time
+	expiresAt                 time.Time
+	nonce                     string
+	state                     AuthorizationState
+	mediaGeneration           uint64
+	verifiedClientTokenDigest [sha256.Size]byte
+	verifiedClientUntil       time.Time
 }
 
-// AuthorizationRegistry is intentionally in-memory. A restart therefore
-// invalidates all outstanding tokens rather than accepting untracked grants.
+// AuthorizationRegistry is intentionally in-memory. A restart invalidates
+// cold-stream preauthorizations while explicit live-media tokens stay
+// independently verifiable by HMAC for their remaining lifetime.
 type AuthorizationRegistry struct {
 	mu               sync.Mutex
 	capacity         int
@@ -155,11 +171,11 @@ func (r *AuthorizationRegistry) BindAuthorization(authorizationGeneration string
 	if !ok {
 		return ErrAuthorizationNotFound
 	}
-	if !now.Before(record.expiresAt) {
-		return ErrAuthorizationExpired
-	}
 	switch record.state {
 	case AuthorizationUnbound:
+		if !now.Before(record.expiresAt) {
+			return ErrAuthorizationExpired
+		}
 		record.state = AuthorizationBound
 		record.mediaGeneration = mediaGeneration
 		r.records[authorizationGeneration] = record
@@ -227,6 +243,67 @@ func (r *AuthorizationRegistry) verify(claims Claims, expected Binding, requireU
 
 func (r *AuthorizationRegistry) verifyUnbound(claims Claims, expected Binding) error {
 	return r.verifyWithLifetime(claims, expected, true, false)
+}
+
+// MarkVerifiedClientSource records a brief proof that OnPlay validated an
+// IP-bound cold authorization with ZLM's real client address. The token is
+// retained only as a digest and is never written to logs or metrics.
+func (r *AuthorizationRegistry) MarkVerifiedClientSource(token string, claims Claims, expected Binding) error {
+	if r == nil {
+		return ErrAuthorizationRegistryUnavailable
+	}
+	if strings.TrimSpace(token) == "" || !validBinding(expected) || expected.MediaGeneration != 0 ||
+		!expected.BindClientIP || claims.ClientIPDigest == "" || strings.TrimSpace(claims.AuthorizationGeneration) == "" {
+		return ErrAuthorizationClaimsMismatch
+	}
+	now := r.currentTime()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	record, ok := r.records[claims.AuthorizationGeneration]
+	if !ok {
+		return ErrAuthorizationNotFound
+	}
+	if record.state != AuthorizationUnbound || !now.Before(record.expiresAt) {
+		return ErrAuthorizationClientNotVerified
+	}
+	if !record.matchesClaims(claims) || !record.binding.sameResource(expected) {
+		return ErrAuthorizationClaimsMismatch
+	}
+	record.verifiedClientTokenDigest = sha256.Sum256([]byte(token))
+	record.verifiedClientUntil = now.Add(VerifiedClientSourceLifetime)
+	if record.verifiedClientUntil.After(record.expiresAt) {
+		record.verifiedClientUntil = record.expiresAt
+	}
+	r.records[claims.AuthorizationGeneration] = record
+	return nil
+}
+
+func (r *AuthorizationRegistry) verifyForVerifiedClientAutoStart(token string, expected Binding) (Claims, error) {
+	if r == nil {
+		return Claims{}, ErrAuthorizationRegistryUnavailable
+	}
+	if strings.TrimSpace(token) == "" || !validBinding(expected) || expected.MediaGeneration != 0 {
+		return Claims{}, ErrAuthorizationClaimsMismatch
+	}
+	now := r.currentTime()
+	digest := sha256.Sum256([]byte(token))
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for authorizationGeneration, record := range r.records {
+		if record.state != AuthorizationUnbound || !now.Before(record.expiresAt) ||
+			!now.Before(record.verifiedClientUntil) ||
+			subtle.ConstantTimeCompare(record.verifiedClientTokenDigest[:], digest[:]) != 1 ||
+			!record.binding.sameResource(expected) || record.expiresAt.Sub(now) < MinimumAuthorizationStartLifetime {
+			continue
+		}
+		return Claims{
+			DeviceID: record.binding.deviceID, ChannelID: record.binding.channelID,
+			App: record.binding.app, Stream: record.binding.stream, MediaServerID: record.binding.mediaServerID,
+			MediaGeneration: record.binding.mediaGeneration, IssuedAt: record.issuedAt.Unix(), ExpiresAt: record.expiresAt.Unix(),
+			Nonce: record.nonce, AuthorizationGeneration: authorizationGeneration,
+		}, nil
+	}
+	return Claims{}, ErrAuthorizationClientNotVerified
 }
 
 func (r *AuthorizationRegistry) verifyWithLifetime(claims Claims, expected Binding, requireUnbound, requireStartLifetime bool) error {
@@ -333,35 +410,64 @@ func (r authorizationRecord) matchesClaims(claims Claims) bool {
 		r.binding.mediaGeneration == claims.MediaGeneration
 }
 
-// AuthorizationService combines cryptographic token validation with the
-// process-local lifecycle registry. A valid HMAC alone is deliberately not a
-// valid authorization after a restart.
+// AuthorizationService combines stateless HMAC validation for live media with
+// the process-local lifecycle registry required by cold-stream preauthorization.
 type AuthorizationService struct {
 	signer   *Signer
 	registry *AuthorizationRegistry
+	metrics  *Metrics
 }
 
-func NewAuthorizationService(signer *Signer, registry *AuthorizationRegistry) *AuthorizationService {
-	return &AuthorizationService{signer: signer, registry: registry}
+type AuthorizationServiceOption func(*AuthorizationService)
+
+func WithAuthorizationMetrics(metrics *Metrics) AuthorizationServiceOption {
+	return func(service *AuthorizationService) { service.metrics = metrics }
 }
 
-func (s *AuthorizationService) Prepare() (Prepared, error) {
+func NewAuthorizationService(signer *Signer, registry *AuthorizationRegistry, opts ...AuthorizationServiceOption) *AuthorizationService {
+	service := &AuthorizationService{signer: signer, registry: registry}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(service)
+		}
+	}
+	return service
+}
+
+func (s *AuthorizationService) Prepare() (prepared Prepared, err error) {
+	defer func() {
+		if err != nil {
+			s.recordMetric(MetricOutcomeForError("prepare", err))
+		}
+	}()
 	if s == nil || s.signer == nil {
 		return Prepared{}, ErrAuthorizationRegistryUnavailable
 	}
 	return s.signer.Prepare()
 }
 
-func (s *AuthorizationService) Bind(prepared Prepared, binding Binding) (Grant, error) {
-	if s == nil || s.signer == nil || s.registry == nil {
+func (s *AuthorizationService) Bind(prepared Prepared, binding Binding) (grant Grant, err error) {
+	defer func() {
+		if err != nil {
+			s.recordMetric(MetricOutcomeForError("bind", err))
+			return
+		}
+		s.recordMetric(MetricOutcomeIssued)
+	}()
+	if s == nil || s.signer == nil {
 		return Grant{}, ErrAuthorizationRegistryUnavailable
 	}
-	grant, err := s.signer.Bind(prepared, binding)
+	grant, err = s.signer.Bind(prepared, binding)
 	if err != nil {
 		return Grant{}, err
 	}
-	if err := s.registry.Register(prepared, binding); err != nil {
-		return Grant{}, err
+	if binding.MediaGeneration == 0 {
+		if s.registry == nil {
+			return Grant{}, ErrAuthorizationRegistryUnavailable
+		}
+		if err := s.registry.Register(prepared, binding); err != nil {
+			return Grant{}, err
+		}
 	}
 	return grant, nil
 }
@@ -374,25 +480,44 @@ func (s *AuthorizationService) IssueDirect(binding Binding) (Grant, error) {
 	return s.Bind(prepared, binding)
 }
 
-func (s *AuthorizationService) Verify(token string, expected Binding) (Claims, error) {
-	if s == nil || s.signer == nil || s.registry == nil {
+func (s *AuthorizationService) Verify(token string, expected Binding) (claims Claims, err error) {
+	defer func() {
+		if err != nil {
+			s.recordMetric(MetricOutcomeForError(token, err))
+			return
+		}
+		s.recordMetric(MetricOutcomeVerified)
+	}()
+	if s == nil || s.signer == nil {
 		return Claims{}, ErrAuthorizationRegistryUnavailable
 	}
-	claims, err := s.signer.Verify(token, expected)
+	claims, err = s.signer.Verify(token, expected)
 	if err == nil {
+		if claims.MediaGeneration != 0 {
+			return claims, nil
+		}
+		if s.registry == nil {
+			return Claims{}, ErrAuthorizationRegistryUnavailable
+		}
 		if verifyErr := s.registry.verify(claims, expected, false); verifyErr != nil {
 			return Claims{}, verifyErr
 		}
 		return claims, nil
 	}
-	if expected.MediaGeneration == 0 {
+	if !errors.Is(err, ErrTokenMediaGenerationMismatch) || expected.MediaGeneration == 0 {
 		return Claims{}, err
+	}
+	if s.registry == nil {
+		return Claims{}, ErrAuthorizationRegistryUnavailable
 	}
 	preauthorized := expected
 	preauthorized.MediaGeneration = 0
 	claims, err = s.signer.Verify(token, preauthorized)
 	if err != nil {
 		return Claims{}, err
+	}
+	if err := s.registry.verify(claims, expected, false); err == nil {
+		return claims, nil
 	}
 	if err := s.registry.verifyUnbound(claims, preauthorized); err != nil {
 		return Claims{}, err
@@ -406,14 +531,21 @@ func (s *AuthorizationService) Verify(token string, expected Binding) (Claims, e
 	return claims, nil
 }
 
-func (s *AuthorizationService) VerifyForAutoStart(token string, expected Binding) (Claims, error) {
+func (s *AuthorizationService) VerifyForAutoStart(token string, expected Binding) (claims Claims, err error) {
+	defer func() {
+		if err != nil {
+			s.recordMetric(MetricOutcomeForError(token, err))
+			return
+		}
+		s.recordMetric(MetricOutcomeVerified)
+	}()
 	if s == nil || s.signer == nil || s.registry == nil {
 		return Claims{}, ErrAuthorizationRegistryUnavailable
 	}
 	if expected.MediaGeneration != 0 {
 		return Claims{}, ErrAuthorizationClaimsMismatch
 	}
-	claims, err := s.signer.Verify(token, expected)
+	claims, err = s.signer.Verify(token, expected)
 	if err != nil {
 		return Claims{}, err
 	}
@@ -421,6 +553,40 @@ func (s *AuthorizationService) VerifyForAutoStart(token string, expected Binding
 		return Claims{}, err
 	}
 	return claims, nil
+}
+
+func (s *AuthorizationService) MarkVerifiedClientSource(token string, claims Claims, expected Binding) error {
+	if s == nil || s.signer == nil || s.registry == nil {
+		return ErrAuthorizationRegistryUnavailable
+	}
+	verifiedClaims, err := s.signer.Verify(token, expected)
+	if err != nil {
+		return err
+	}
+	if verifiedClaims != claims {
+		return ErrAuthorizationClaimsMismatch
+	}
+	return s.registry.MarkVerifiedClientSource(token, claims, expected)
+}
+
+func (s *AuthorizationService) VerifyForVerifiedClientAutoStart(token string, expected Binding) (claims Claims, err error) {
+	defer func() {
+		if err != nil {
+			s.recordMetric(MetricOutcomeForError(token, err))
+			return
+		}
+		s.recordMetric(MetricOutcomeVerified)
+	}()
+	if s == nil || s.registry == nil {
+		return Claims{}, ErrAuthorizationRegistryUnavailable
+	}
+	return s.registry.verifyForVerifiedClientAutoStart(token, expected)
+}
+
+func (s *AuthorizationService) recordMetric(outcome MetricOutcome) {
+	if s != nil && s.metrics != nil {
+		s.metrics.Record(outcome)
+	}
 }
 
 func (s *AuthorizationService) BindAuthorization(authorizationGeneration string, mediaGeneration uint64) error {

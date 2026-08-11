@@ -204,6 +204,13 @@ function protocolUrlsFor(result: PlayResult | null | undefined): ProtocolURLMap 
         rtsps: result?.urls?.rtsps || null,
     };
 }
+function hasPlaybackToken(rawURL: string): boolean {
+    try {
+        return new URL(rawURL).searchParams.has("play_token");
+    } catch {
+        return false;
+    }
+}
 const protocolUrls = computed<ProtocolURLMap>(() => protocolUrlsFor(playResult.value));
 
 const protocolOptions: ProtocolOption[] = [
@@ -2790,14 +2797,20 @@ async function copyProtocolUrl(proto: StreamProtocol) {
     const channel = props.channel;
     const result = playResult.value;
     const fixedStreamID = channel ? `${channel.deviceId}_${channel.channelId}` : "";
-    if (channel && result?.streamId === fixedStreamID && url.includes("play_token")) {
+    if (channel && result?.streamId === fixedStreamID && hasPlaybackToken(url)) {
         try {
             const response = await authorizeFixedPlayback(channel.deviceId, channel.channelId);
-            if (response.code === 0 && response.data) {
-                url = protocolUrlsFor(response.data)[proto] || url;
+            const authorizedURL = response.code === 0 && response.data
+                ? protocolUrlsFor(response.data)[proto]
+                : null;
+            if (!authorizedURL) {
+                Message.error("播放地址授权失败，请重试");
+                return;
             }
+            url = authorizedURL;
         } catch {
-            // A copy request must remain usable when authorization refresh fails.
+            Message.error("播放地址授权失败，请重试");
+            return;
         }
     }
     await copyTextToClipboard(url);

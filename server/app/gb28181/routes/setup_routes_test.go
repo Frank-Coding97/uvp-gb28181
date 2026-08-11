@@ -52,6 +52,7 @@ func TestRegisterRoutes_IncludesSIPSetupEndpoints(t *testing.T) {
 		"PUT /api/gb28181/sip/service-config/play-auth",
 		"GET /api/gb28181/sip/service-config/sip-log",
 		"PUT /api/gb28181/sip/service-config/sip-log",
+		"POST /api/gb28181/play/:deviceId/:channelId/authorization",
 	} {
 		require.True(t, got[route], route)
 	}

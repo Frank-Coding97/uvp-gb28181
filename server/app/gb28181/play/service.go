@@ -43,6 +43,9 @@ type PickContext struct {
 // NodeLookup 按 ID 取节点(由 node.Registry 实现)
 type NodeLookup interface {
 	Get(id int64) (*node.Node, bool)
+	// List returns all registered nodes. Recovery cleanup must include inactive
+	// owners because a stale heartbeat does not prove their RTP listener is gone.
+	List() []*node.Node
 	// ListActive 返回所有活跃节点(用于流复用检测时,LocationMap 无 binding 的兜底探测)
 	ListActive() []*node.Node
 }
@@ -78,25 +81,26 @@ type DeviceRepo interface {
 
 // Result 点播结果
 type Result struct {
-	StreamID               string       `json:"streamId"` // ZLM stream id(也是会话主键)
-	SSRC                   string       `json:"ssrc"`     // 媒体流 SSRC
-	App                    string       `json:"app"`      // ZLM app(固定 rtp)
-	Reused                 bool         `json:"reused"`
-	Status                 string       `json:"status"`
-	Node                   *ResultNode  `json:"node"`
-	URLs                   PlaybackURLs `json:"urls"`
-	URLWarnings            []string     `json:"urlWarnings"`
-	WSFlvURL               string       `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
-	HLSURL                 string       `json:"hlsUrl"`     // HLS 备用
-	HTTPFlvURL             string       `json:"httpFlvUrl"` // http-flv 备用
-	DefaultProtocol        string       `json:"defaultProtocol"`
-	Protocol               string       `json:"protocol"`
-	URL                    string       `json:"url"`
-	ZLMWebRTC              bool         `json:"zlmWebrtc"`
-	ExpireAt               int64        `json:"expireAt"` // 预计无人观看断流时刻(秒,UTC)
-	AuthorizationExpiresAt int64        `json:"authorizationExpiresAt,omitempty"`
-	Generation             uint64       `json:"-"`
-	ModeAtStart            LiveMode     `json:"-"`
+	StreamID                   string       `json:"streamId"` // ZLM stream id(也是会话主键)
+	SSRC                       string       `json:"ssrc"`     // 媒体流 SSRC
+	App                        string       `json:"app"`      // ZLM app(固定 rtp)
+	Reused                     bool         `json:"reused"`
+	Status                     string       `json:"status"`
+	Node                       *ResultNode  `json:"node"`
+	URLs                       PlaybackURLs `json:"urls"`
+	URLWarnings                []string     `json:"urlWarnings"`
+	WSFlvURL                   string       `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
+	HLSURL                     string       `json:"hlsUrl"`     // HLS 备用
+	HTTPFlvURL                 string       `json:"httpFlvUrl"` // http-flv 备用
+	DefaultProtocol            string       `json:"defaultProtocol"`
+	Protocol                   string       `json:"protocol"`
+	URL                        string       `json:"url"`
+	ZLMWebRTC                  bool         `json:"zlmWebrtc"`
+	ExpireAt                   int64        `json:"expireAt"` // 预计无人观看断流时刻(秒,UTC)
+	AuthorizationExpiresAt     int64        `json:"authorizationExpiresAt,omitempty"`
+	AuthorizationCorrelationID string       `json:"-"`
+	Generation                 uint64       `json:"-"`
+	ModeAtStart                LiveMode     `json:"-"`
 }
 
 type ResultNode struct {
@@ -432,9 +436,13 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			zap.String("channelId", channelID),
 			zap.String("staleStreamId", ch.StreamID))
 		if currentSSRC := CurrentSSRCForChannel(ch); currentSSRC != "" {
-			_ = s.StopIfPersistedCurrent(context.Background(), ch.StreamID, currentSSRC)
+			if err := s.StopIfPersistedCurrent(context.Background(), ch.StreamID, currentSSRC); err != nil {
+				return nil, fmt.Errorf("清理残留播放会话失败: %w", err)
+			}
 		} else {
-			_ = s.stopDirect(context.Background(), ch.StreamID)
+			if err := s.stopDirect(context.Background(), ch.StreamID); err != nil {
+				return nil, fmt.Errorf("清理残留播放会话失败: %w", err)
+			}
 		}
 	}
 
@@ -469,6 +477,19 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	}
 	generation := s.nextGeneration.Add(1)
 	liveRef := stream.LiveRef{StreamID: streamID, SSRC: ssrc, Generation: generation}
+	authorizationBound := false
+	startCompleted := false
+	if req.AuthorizationID != "" {
+		if err := s.bindAuthorization(req.AuthorizationID, generation); err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+		authorizationBound = true
+		defer func() {
+			if !startCompleted {
+				s.terminateAuthorizationGeneration(generation)
+			}
+		}()
+	}
 
 	// 4. 多节点路径:Pick + Bind;单节点路径:直接走 s.zlm
 	var client ZLM
@@ -573,17 +594,11 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	inviteCtx, inviteCancel := context.WithTimeout(playCtx, gbconfig.SIPCommandTimeout())
 	defer inviteCancel()
 	if err := s.inviter.Invite(inviteCtx, s.sessions, sess, body); err != nil {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		cause := fmt.Errorf("发 INVITE 失败: %w", err)
 		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
-			_ = s.inviter.Bye(cleanupCtx, s.sessions, streamID)
+			cause = fmt.Errorf("%w: %v", ErrPlayTimeout, err)
 		}
-		_ = client.CloseRtpServer(cleanupCtx, streamID)
-		cleanupCancel()
-		s.unbindLocation(liveRef)
-		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: %v", ErrPlayTimeout, err)
-		}
-		return nil, fmt.Errorf("发 INVITE 失败: %w", err)
+		return s.rollbackFailedStart(req, result, liveRef, client, cause, errors.Is(playCtx.Err(), context.DeadlineExceeded), &releaseSSRC)
 	}
 
 	// 7. WaitReady:the hook only wakes the waiter. The exact generation and
@@ -606,24 +621,14 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		return client.IsMediaOnline(ctx, zlmApp, expected.StreamID)
 	}
 	if err := stream.WaitReadyRef(readyCtx, s.notifier, liveRef, poll, s.pollEvery); err != nil {
-		// 流没就绪:发 BYE + 关 RTP 端口 + Unbind
-		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = s.inviter.Bye(byeCtx, s.sessions, streamID)
-		_ = client.CloseRtpServer(byeCtx, streamID)
-		byeCancel()
-		s.unbindLocation(liveRef)
+		cause := fmt.Errorf("%w: %v", ErrStreamNotReady, err)
 		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
-			return nil, fmt.Errorf("%w: %v", ErrPlayTimeout, err)
+			cause = fmt.Errorf("%w: %v", ErrPlayTimeout, err)
 		}
-		return nil, fmt.Errorf("%w: %v", ErrStreamNotReady, err)
+		return s.rollbackFailedStart(req, result, liveRef, client, cause, true, &releaseSSRC)
 	}
 	if err := s.channels.SetCurrent(ctx, deviceID, channelID, streamID, ssrc); err != nil {
-		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		_ = s.inviter.Bye(byeCtx, s.sessions, streamID)
-		_ = client.CloseRtpServer(byeCtx, streamID)
-		byeCancel()
-		s.unbindLocation(liveRef)
-		return nil, fmt.Errorf("记录通道播放流失败: %w", err)
+		return s.rollbackFailedStart(req, result, liveRef, client, fmt.Errorf("记录通道播放流失败: %w", err), true, &releaseSSRC)
 	}
 
 	// 8. 通道快照(fire-and-forget,不阻塞返回,不影响主链路)
@@ -637,7 +642,37 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 
 	// 9. 播放地址已在任何媒体副作用前完成构建和授权。
 	releaseSSRC = false
+	if authorizationBound {
+		startCompleted = true
+	}
 	return result, nil
+}
+
+func (s *Service) rollbackFailedStart(
+	req Request,
+	result *Result,
+	ref stream.LiveRef,
+	client ZLM,
+	cause error,
+	sendBye bool,
+	releaseSSRC *bool,
+) (*Result, error) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var byeErr error
+	if sendBye {
+		byeErr = s.inviter.Bye(cleanupCtx, s.sessions, ref.StreamID)
+	}
+	closeErr := client.CloseRtpServer(cleanupCtx, ref.StreamID)
+	if closeErr != nil {
+		if releaseSSRC != nil {
+			*releaseSSRC = false
+		}
+		persistErr := s.channels.SetCurrent(cleanupCtx, req.DeviceID, req.ChannelID, ref.StreamID, ref.SSRC)
+		return result, errors.Join(ErrLiveCleanupPending, cause, byeErr, closeErr, persistErr)
+	}
+	s.unbindLocation(ref)
+	return nil, errors.Join(cause, byeErr)
 }
 
 // Stop 停播:通过协调器执行 Stopping 栅栏，再发 BYE + 关 RTP 端口 + Unbind。

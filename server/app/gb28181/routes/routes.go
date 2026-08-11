@@ -472,6 +472,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		play := gb.Group("/play")
 		{
 			play.POST("/:deviceId/:channelId", func(c *gin.Context) { playController.Start(c) })
+			play.POST("/:deviceId/:channelId/authorization", func(c *gin.Context) { playController.Authorize(c) })
 			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })
 			play.GET("/:streamId/monitor", func(c *gin.Context) { streamMonitorController.Get(c) })
 			// Gin requires wildcard names at the same path depth to match the start-play route.

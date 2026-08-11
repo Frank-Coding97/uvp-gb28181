@@ -5,16 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Request identifies one channel-level live ensure operation.
 // Trigger is diagnostic metadata only; it never creates a separate
 // coordination lane for the same device/channel pair.
 type Request struct {
-	DeviceID     string
-	ChannelID    string
-	Trigger      string
-	RequiredNode int64
+	DeviceID        string
+	ChannelID       string
+	Trigger         string
+	RequiredNode    int64
+	AuthorizationID string
 }
 
 // EnsureRequest is kept as a descriptive alias for callers that prefer the
@@ -22,16 +24,45 @@ type Request struct {
 type EnsureRequest = Request
 
 // StartFunc owns the complete side-effecting live start transaction. It must
-// return only after any failure compensation has completed.
+// return only after failure compensation completed or was quarantined for an
+// exact retry by the coordinator.
 type StartFunc func(context.Context, Request) (*Result, error)
 
 // StopFunc owns the complete live stop/cleanup transaction.
 type StopFunc func(context.Context, *Result) error
 
+// stopCompletionError retains cleanup failures after media has definitely
+// stopped. Callers still receive the original failure through errors.Is.
+type stopCompletionError struct {
+	err error
+}
+
+func (e *stopCompletionError) Error() string { return e.err.Error() }
+
+func (e *stopCompletionError) Unwrap() error { return e.err }
+
+func completedMediaStop(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &stopCompletionError{err: err}
+}
+
+func stopReachedMediaTerminal(err error) bool {
+	if err == nil {
+		return true
+	}
+	var completion *stopCompletionError
+	return errors.As(err, &completion)
+}
+
 var (
 	ErrOwnerNodeMismatch  = errors.New("owner-node-mismatch")
 	ErrLiveStartNilResult = errors.New("live start returned nil result")
+	ErrLiveCleanupPending = errors.New("live start cleanup pending")
 )
+
+const cleanupPendingRetryTimeout = 5 * time.Second
 
 // OwnerNodeMismatchError is returned when a request requires a node different
 // from the node that owns the current live generation.
@@ -142,6 +173,26 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 				return nil, true, err
 			}
 			return entry.result, true, entry.err
+		case LiveStateCleanupPending:
+			if err := ownerNodeConflict(req, entry); err != nil {
+				c.mu.Unlock()
+				return nil, true, err
+			}
+			entry.state = LiveStateStopping
+			entry.done = make(chan struct{})
+			result := entry.result
+			c.mu.Unlock()
+
+			var cleanupErr error
+			if c.stop != nil {
+				cleanupErr = c.stop(context.WithoutCancel(ctx), result)
+			}
+			c.finishStop(key, entry, cleanupErr, LiveStateCleanupPending)
+			if cleanupErr != nil {
+				return nil, true, errors.Join(ErrLiveCleanupPending, cleanupErr)
+			}
+			// A successful cleanup removes the entry. Re-check the map and let
+			// this request reserve a new generation through the normal path.
 		case LiveStateStopping:
 			done := entry.done
 			c.mu.Unlock()
@@ -168,6 +219,8 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 	}
 	result, err := c.start(startCtx, req)
 
+	var retryCleanup bool
+	retryReq := Request{}
 	c.mu.Lock()
 	if err == nil && result == nil {
 		err = ErrLiveStartNilResult
@@ -189,6 +242,10 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 	entry.err = err
 	if err == nil {
 		entry.state = LiveStateReady
+	} else if errors.Is(err, ErrLiveCleanupPending) && result != nil {
+		entry.state = LiveStateCleanupPending
+		retryCleanup = true
+		retryReq = Request{DeviceID: key.deviceID, ChannelID: key.channelID, RequiredNode: entry.ownerNode}
 	} else {
 		entry.state = LiveStateIdle
 		if current := c.entries[key]; current == entry {
@@ -197,7 +254,20 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 	}
 	close(entry.done)
 	c.mu.Unlock()
+	if retryCleanup {
+		go c.retryCleanupPending(retryReq)
+	}
 	return result, err
+}
+
+// retryCleanupPending gives a failed start one bounded retry after its result
+// has been published as CleanupPending. This closes the gap where a ZLM timeout
+// hook arrived while the start was still in-flight and therefore had no current
+// generation to stop. Further retries remain serialized through Stop/EnsureLive.
+func (c *Coordinator) retryCleanupPending(req Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupPendingRetryTimeout)
+	defer cancel()
+	_ = c.Stop(ctx, req)
 }
 
 // Stop transitions a ready generation through Stopping and blocks new starts
@@ -221,6 +291,9 @@ func (c *Coordinator) Stop(ctx context.Context, req Request) error {
 			if err := waitFor(ctx, done); err != nil {
 				return err
 			}
+			if errors.Is(entry.err, ErrLiveCleanupPending) {
+				continue
+			}
 			if entry.err != nil {
 				return entry.err
 			}
@@ -230,11 +303,12 @@ func (c *Coordinator) Stop(ctx context.Context, req Request) error {
 			if err := waitFor(ctx, done); err != nil {
 				return err
 			}
-		case LiveStateReady:
+		case LiveStateReady, LiveStateCleanupPending:
 			if err := ownerNodeConflict(req, entry); err != nil {
 				c.mu.Unlock()
 				return err
 			}
+			failureState := entry.state
 			entry.state = LiveStateStopping
 			entry.done = make(chan struct{})
 			result := entry.result
@@ -244,19 +318,27 @@ func (c *Coordinator) Stop(ctx context.Context, req Request) error {
 			if c.stop != nil {
 				err = c.stop(context.WithoutCancel(ctx), result)
 			}
-			c.mu.Lock()
-			entry.state = LiveStateIdle
-			if current := c.entries[key]; current == entry {
-				delete(c.entries, key)
-			}
-			close(entry.done)
-			c.mu.Unlock()
+			c.finishStop(key, entry, err, failureState)
 			return err
 		default:
 			c.mu.Unlock()
 			return nil
 		}
 	}
+}
+
+func (c *Coordinator) finishStop(key coordinatorKey, entry *coordinatorEntry, err error, failureState LiveState) {
+	c.mu.Lock()
+	if stopReachedMediaTerminal(err) {
+		entry.state = LiveStateIdle
+		if current := c.entries[key]; current == entry {
+			delete(c.entries, key)
+		}
+	} else {
+		entry.state = failureState
+	}
+	close(entry.done)
+	c.mu.Unlock()
 }
 
 // StopStream resolves the channel owner for a stream and applies the same
@@ -304,6 +386,11 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 	result, reused, err := c.ensureLive(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if req.AuthorizationID != "" {
+		if result == nil || result.Generation == 0 || s.bindAuthorization(req.AuthorizationID, result.Generation) != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
 	}
 	callerResult, err := s.resultForCaller(req, result)
 	if callerResult != nil && reused {

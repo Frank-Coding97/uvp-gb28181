@@ -55,9 +55,10 @@ type AutoStartDispatcherOptions struct {
 }
 
 type autoStartKey struct {
-	deviceID     string
-	channelID    string
-	requiredNode int64
+	deviceID        string
+	channelID       string
+	requiredNode    int64
+	authorizationID string
 }
 
 type autoStartBucket struct {
@@ -189,10 +190,13 @@ func (d *AutoStartDispatcher) Submit(req Request) error {
 }
 
 func (d *AutoStartDispatcher) requestKey(req Request) (autoStartKey, error) {
-	if req.DeviceID == "" || req.ChannelID == "" || req.RequiredNode <= 0 {
+	if req.DeviceID == "" || req.ChannelID == "" || req.RequiredNode <= 0 || req.AuthorizationID == "" {
 		return autoStartKey{}, ErrAutoStartInvalidRequest
 	}
-	return autoStartKey{deviceID: req.DeviceID, channelID: req.ChannelID, requiredNode: req.RequiredNode}, nil
+	return autoStartKey{
+		deviceID: req.DeviceID, channelID: req.ChannelID,
+		requiredNode: req.RequiredNode, authorizationID: req.AuthorizationID,
+	}, nil
 }
 
 // Stop rejects new work before closing the queue, then waits for the fixed

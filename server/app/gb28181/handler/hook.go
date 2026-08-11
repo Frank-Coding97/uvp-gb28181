@@ -37,6 +37,7 @@ type PlayStopper interface {
 
 type GenerationPlayStopper interface {
 	CurrentLiveRef(streamID string) (stream.LiveRef, bool)
+	CleanupPendingLiveRef(streamID string) (stream.LiveRef, bool)
 	StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bool, error)
 	StopOnNoneReader(ctx context.Context, captured stream.LiveRef) (bool, error)
 }
@@ -102,6 +103,10 @@ type PlayAuthorizer interface {
 
 type PlaybackMediaContextResolver interface {
 	ResolvePlaybackMediaContext(app, stream, mediaServerID string) (playauth.Binding, error)
+}
+
+type ColdPlaybackMediaContextResolver interface {
+	ResolveColdPlaybackMediaContext(context.Context, string, string, string) (playauth.Binding, error)
 }
 
 type AutoOnDemandNodeResolver interface {
@@ -288,6 +293,20 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 	if !body.Regist && h.playbackMedia != nil && body.Stream != "" {
 		h.notifyPlaybackEnded(body.Stream, "media-offline")
 	}
+	if !body.Regist && body.App == "rtp" && body.Stream != "" && body.MediaServerID != "" {
+		if _, _, err := play.ParseFixedStreamID(body.Stream); err == nil {
+			stopper, stopperOK := h.stopper.(GenerationPlayStopper)
+			nodeID, nodeOK := int64(0), false
+			if h.resolver != nil {
+				nodeID, nodeOK = h.resolver.IDForUUID(body.MediaServerID)
+			}
+			if stopperOK && nodeOK {
+				if pending, ok := stopper.CleanupPendingLiveRef(body.Stream); ok && pending.NodeID == nodeID {
+					go h.stopCleanupPending(pending, "流注销清理失败")
+				}
+			}
+		}
+	}
 	talkResolver, _, talkObserver := h.talkDependencies()
 	if body.App == "talk" && talkObserver != nil && talkResolver != nil && body.Stream != "" && body.MediaServerID != "" {
 		if nodeID, ok := talkResolver.IDForUUID(body.MediaServerID); ok {
@@ -349,6 +368,8 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 							app.ZapLog.Warn("固定流无人观看条件断流失败", zap.String("stream", ref.StreamID), zap.Error(err))
 						}
 					}(captured)
+				} else if pending, exists := stopper.CleanupPendingLiveRef(body.Stream); exists {
+					go h.stopCleanupPending(pending, "固定流无人观看清理失败")
 				}
 			}
 		}
@@ -410,8 +431,11 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 			nodeID, nodeOK = h.resolver.IDForUUID(body.MediaServerID)
 		}
 		if stopperOK && nodeOK && body.SSRC != "" {
-			if current, ok := stopper.CurrentLiveRef(body.StreamID); ok &&
-				current.NodeID == nodeID && current.SSRC == string(body.SSRC) {
+			current, ok := stopper.CurrentLiveRef(body.StreamID)
+			if !ok {
+				current, ok = stopper.CleanupPendingLiveRef(body.StreamID)
+			}
+			if ok && current.NodeID == nodeID && current.SSRC == string(body.SSRC) {
 				go func(ref stream.LiveRef) {
 					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 					defer cancel()
@@ -435,6 +459,18 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 		h.notifyPlaybackEnded(body.StreamID, "rtp-timeout")
 	}
 	hookOK(c)
+}
+
+func (h *HookController) stopCleanupPending(ref stream.LiveRef, failureMessage string) {
+	stopper, ok := h.stopper.(GenerationPlayStopper)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := stopper.StopIfCurrent(ctx, ref); err != nil {
+		app.ZapLog.Warn(failureMessage, zap.String("stream", ref.StreamID), zap.Error(err))
+	}
 }
 
 func (h *HookController) notifyPlaybackEnded(streamID, reason string) {
@@ -519,10 +555,6 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		h.denyAutoOnDemand(c, "runtime-unavailable")
 		return
 	}
-	if h.autoLimiter == nil || !h.autoLimiter.Allow() {
-		h.denyAutoOnDemand(c, "global-rate-limited")
-		return
-	}
 	peerIP, ok := parsePeerIP(c.Request.RemoteAddr)
 	if !ok {
 		h.denyAutoOnDemand(c, "source-invalid")
@@ -547,7 +579,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		return
 	}
 	settings := settingsProvider()
-	if !settings.FixedAddressEnabled || !settings.AutoOnDemandEnabled {
+	if !settings.FixedAddressEnabled || !settings.AutoOnDemandEnabled || !gbconfig.CurrentPlayAuthSettings().Enabled {
 		h.denyAutoOnDemand(c, "feature-disabled")
 		return
 	}
@@ -566,16 +598,21 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		h.denyAutoOnDemand(c, "callback-auth-invalid")
 		return
 	}
+	if h.autoLimiter == nil || !h.autoLimiter.Allow() {
+		h.denyAutoOnDemand(c, "global-rate-limited")
+		return
+	}
 	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
 	if err != nil {
 		h.denyAutoOnDemand(c, "params-invalid")
 		return
 	}
 	playToken, ok := singleValue(params, playauth.QueryParameter)
-	if !ok || !h.verifyPlayToken(playToken, playauth.Binding{
+	claims, verified := h.verifyAutoStartToken(playToken, playauth.Binding{
 		DeviceID: deviceID, ChannelID: channelID, App: body.App,
 		Stream: body.Stream, MediaServerID: body.MediaServerID,
-	}) {
+	})
+	if !ok || !verified {
 		h.denyAutoOnDemand(c, "play-auth-invalid")
 		return
 	}
@@ -589,6 +626,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 	if err := dispatcher.Submit(play.Request{
 		DeviceID: deviceID, ChannelID: channelID,
 		Trigger: "on_stream_not_found", RequiredNode: mediaNode.ID,
+		AuthorizationID: claims.AuthorizationGeneration,
 	}); err != nil {
 		h.denyAutoOnDemand(c, autoOnDemandAdmissionReason(err))
 		return
@@ -606,9 +644,10 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 // OnPlay authorizes every real-time rtp pull when playback authorization is
 // enabled. Non-live applications retain their existing behavior.
 func (h *HookController) OnPlay(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
 	var body onPlayBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		hookDenied(c, "invalid playback request")
+		h.denyPlayback(c, "tampered", "invalid playback request")
 		return
 	}
 	if body.App != "rtp" {
@@ -621,7 +660,7 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		return
 	}
 	if body.Stream == "" || body.MediaServerID == "" {
-		hookDenied(c, "playback authorization denied")
+		h.denyPlayback(c, "wrong_resource", "playback authorization denied")
 		return
 	}
 
@@ -630,32 +669,63 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	resolver := h.playResolver
 	h.playAuthMu.RUnlock()
 	if authorizer == nil || resolver == nil {
-		hookDenied(c, "playback authorization unavailable")
+		h.denyPlayback(c, "unavailable", "playback authorization unavailable")
 		return
 	}
 	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
 	if err != nil {
-		hookDenied(c, "invalid playback authorization")
+		h.denyPlayback(c, "tampered", "invalid playback authorization")
 		return
 	}
 	binding, err := resolver.ResolvePlaybackMediaContext(body.App, body.Stream, body.MediaServerID)
+	if errors.Is(err, play.ErrPlaybackMediaNotCurrent) {
+		coldResolver, ok := resolver.(ColdPlaybackMediaContextResolver)
+		if !ok {
+			err = play.ErrPlaybackMediaStateUncertain
+		} else {
+			probeCtx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
+			binding, err = coldResolver.ResolveColdPlaybackMediaContext(probeCtx, body.App, body.Stream, body.MediaServerID)
+			cancel()
+		}
+	}
 	if err != nil {
-		hookDenied(c, "playback authorization denied")
+		h.denyPlayback(c, "wrong_resource", "playback authorization denied")
 		return
 	}
 	binding.BindClientIP = settings.BindClientIP
 	binding.ClientIP = body.IP
 	playToken, ok := singleValue(params, playauth.QueryParameter)
 	if !ok {
-		hookDenied(c, "invalid playback authorization")
+		h.denyPlayback(c, "missing", "invalid playback authorization")
 		return
 	}
-	_, err = authorizer.Verify(playToken, binding)
+	claims, err := authorizer.Verify(playToken, binding)
 	if err != nil {
-		hookDenied(c, "playback authorization denied")
+		h.denyPlayback(c, string(playauth.MetricOutcomeForError(playToken, err)), "playback authorization denied")
 		return
+	}
+	if binding.MediaGeneration == 0 && binding.BindClientIP {
+		verifier, ok := authorizer.(playauth.VerifiedClientAutoStartVerifier)
+		if !ok || verifier.MarkVerifiedClientSource(playToken, claims, binding) != nil {
+			h.denyPlayback(c, "unavailable", "playback authorization unavailable")
+			return
+		}
+	}
+	if app.ZapLog != nil {
+		app.ZapLog.Info("播放鉴权 Hook 已放行",
+			zap.String("result", "verified"),
+			zap.String("stream", body.Stream),
+			zap.String("mediaServerId", body.MediaServerID),
+			zap.String("correlationId", playauth.CorrelationID(claims.AuthorizationGeneration)))
 	}
 	hookOK(c)
+}
+
+func (h *HookController) denyPlayback(c *gin.Context, reason, message string) {
+	if app.ZapLog != nil {
+		app.ZapLog.Info("播放鉴权 Hook 已拒绝", zap.String("reason", reason))
+	}
+	hookDenied(c, message)
 }
 
 func hookDenied(c *gin.Context, message string) {
@@ -673,15 +743,24 @@ func (h *HookController) autoOnDemandDependencies() (
 	return h.autoResolver, h.autoValidator, h.autoDispatcher, h.autoSettings
 }
 
-func (h *HookController) verifyPlayToken(token string, binding playauth.Binding) bool {
+func (h *HookController) verifyAutoStartToken(token string, binding playauth.Binding) (playauth.Claims, bool) {
 	h.playAuthMu.RLock()
 	authorizer := h.playAuthorizer
 	h.playAuthMu.RUnlock()
-	if authorizer == nil {
-		return false
+	verifier, ok := authorizer.(playauth.AutoStartVerifier)
+	if !ok || verifier == nil || token == "" {
+		return playauth.Claims{}, false
 	}
-	_, err := authorizer.Verify(token, binding)
-	return err == nil
+	claims, err := verifier.VerifyForAutoStart(token, binding)
+	if err == nil {
+		return claims, true
+	}
+	verifiedClientVerifier, ok := authorizer.(playauth.VerifiedClientAutoStartVerifier)
+	if !ok {
+		return playauth.Claims{}, false
+	}
+	claims, err = verifiedClientVerifier.VerifyForVerifiedClientAutoStart(token, binding)
+	return claims, err == nil
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {

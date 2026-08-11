@@ -67,13 +67,10 @@ func (s *Service) RecoverLiveSessions(ctx context.Context) (RecoveryStats, error
 			continue
 		}
 		if definitelyOffline {
-			cleared, clearErr := s.channels.ClearIfCurrent(ctx, channel.StreamID, ssrc)
-			if clearErr != nil {
+			if cleanupErr := s.StopIfPersistedCurrent(ctx, channel.StreamID, ssrc); cleanupErr != nil {
 				stats.Failed++
-			} else if cleared {
-				stats.Cleaned++
 			} else {
-				stats.Skipped++
+				stats.Cleaned++
 			}
 			continue
 		}
@@ -156,6 +153,14 @@ func (s *Service) CurrentLiveRef(streamID string) (stream.LiveRef, bool) {
 	return resultLiveRef(result), true
 }
 
+func (s *Service) CleanupPendingLiveRef(streamID string) (stream.LiveRef, bool) {
+	result, ok := s.coordinator().cleanupPendingResult(streamID)
+	if !ok {
+		return stream.LiveRef{}, false
+	}
+	return resultLiveRef(result), true
+}
+
 func resultLiveRef(result *Result) stream.LiveRef {
 	if result == nil {
 		return stream.LiveRef{}
@@ -216,14 +221,30 @@ func (s *Service) StopOnNoneReader(ctx context.Context, captured stream.LiveRef)
 }
 
 // StopIfPersistedCurrent is the reconciler-safe stop entry point. When an
-// in-memory generation exists it enters the same coordinator barrier; stale
-// rows without an owner are only CAS-cleared and never emit a guessed BYE.
+// in-memory generation exists it enters the same coordinator barrier. After a
+// restart the SIP dialog is gone and the owner node may be unknown, so stale
+// rows close the idempotent RTP listener on every registered node before CAS
+// clear. A node marked offline can still own a listener after a stale heartbeat.
 func (s *Service) StopIfPersistedCurrent(ctx context.Context, streamID, ssrc string) error {
+	channel, err := s.channels.FindChannelByStream(ctx, streamID)
+	if err != nil {
+		return err
+	}
+	if channel == nil || channel.CurrentSSRC != ssrc {
+		return nil
+	}
 	if current, ok := s.CurrentLiveRef(streamID); ok {
 		if current.SSRC != ssrc {
 			return nil
 		}
 		_, err := s.StopIfCurrent(ctx, current)
+		return err
+	}
+	if pending, ok := s.CleanupPendingLiveRef(streamID); ok && pending.SSRC == ssrc {
+		_, err := s.StopIfCurrent(ctx, pending)
+		return err
+	}
+	if err := s.closePersistedRTP(ctx, streamID); err != nil {
 		return err
 	}
 	cleared, err := s.channels.ClearIfCurrent(ctx, streamID, ssrc)
@@ -237,6 +258,29 @@ func (s *Service) StopIfPersistedCurrent(ctx context.Context, streamID, ssrc str
 		s.ssrcAllocator.Release(ssrc)
 	}
 	return nil
+}
+
+func (s *Service) closePersistedRTP(ctx context.Context, streamID string) error {
+	if !s.useMultiNode() {
+		if s.zlm == nil {
+			return fmt.Errorf("stream %s cleanup has no ZLM client", streamID)
+		}
+		return s.zlm.CloseRtpServer(ctx, streamID)
+	}
+	nodes := s.registry.List()
+	if len(nodes) == 0 {
+		return fmt.Errorf("stream %s cleanup has no registered ZLM node", streamID)
+	}
+	var closeErr error
+	for _, mediaNode := range nodes {
+		if mediaNode == nil {
+			continue
+		}
+		if err := s.clientForNode(mediaNode).CloseRtpServer(ctx, streamID); err != nil {
+			closeErr = errors.Join(closeErr, fmt.Errorf("close stream %s on node %d: %w", streamID, mediaNode.ID, err))
+		}
+	}
+	return closeErr
 }
 
 func (s *Service) lookupLocationRef(streamID string) (stream.LiveRef, bool) {
@@ -267,10 +311,6 @@ func (s *Service) stopCurrentResult(ctx context.Context, result *Result) error {
 	defer cancel()
 	ctx = cleanupCtx
 	ref := resultLiveRef(result)
-	cleared, clearErr := s.channels.ClearIfCurrent(ctx, ref.StreamID, ref.SSRC)
-	if clearErr != nil || !cleared {
-		return clearErr
-	}
 
 	var byeErr error
 	if inviter, ok := s.inviter.(conditionalInviter); ok {
@@ -292,12 +332,16 @@ func (s *Service) stopCurrentResult(ctx context.Context, result *Result) error {
 	} else if s.zlm != nil {
 		closeErr = s.zlm.CloseRtpServer(ctx, ref.StreamID)
 	}
+	if closeErr != nil {
+		return errors.Join(byeErr, closeErr)
+	}
+
 	s.unbindLocation(ref)
 	if s.ssrcAllocator != nil {
 		s.ssrcAllocator.Release(ref.SSRC)
 	}
-	if byeErr != nil {
-		return byeErr
-	}
-	return closeErr
+	s.terminateAuthorizationGeneration(result.Generation)
+
+	_, clearErr := s.channels.ClearIfCurrent(ctx, ref.StreamID, ref.SSRC)
+	return completedMediaStop(errors.Join(byeErr, clearErr))
 }

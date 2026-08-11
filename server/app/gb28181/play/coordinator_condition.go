@@ -69,6 +69,17 @@ func (c *Coordinator) CurrentResult(streamID string) (*Result, bool) {
 	return nil, false
 }
 
+func (c *Coordinator) cleanupPendingResult(streamID string) (*Result, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, entry := range c.entries {
+		if entry.state == LiveStateCleanupPending && entry.result != nil && entry.result.StreamID == streamID {
+			return cloneResult(entry.result), true
+		}
+	}
+	return nil, false
+}
+
 // StopIfCurrent applies stop only when ref is the current live generation.
 // A known stream with an older ref is considered handled but must not affect
 // the newer generation.
@@ -98,11 +109,12 @@ func (c *Coordinator) StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bo
 		c.mu.Unlock()
 		return true, nil
 	}
-	if entry.state != LiveStateReady {
+	if entry.state != LiveStateReady && entry.state != LiveStateCleanupPending {
 		c.mu.Unlock()
 		return true, nil
 	}
 
+	failureState := entry.state
 	entry.state = LiveStateStopping
 	entry.done = make(chan struct{})
 	result := entry.result
@@ -113,13 +125,7 @@ func (c *Coordinator) StopIfCurrent(ctx context.Context, ref stream.LiveRef) (bo
 		err = c.stop(context.WithoutCancel(ctx), result)
 	}
 
-	c.mu.Lock()
-	entry.state = LiveStateIdle
-	if current := c.entries[key]; current == entry {
-		delete(c.entries, key)
-	}
-	close(entry.done)
-	c.mu.Unlock()
+	c.finishStop(key, entry, err, failureState)
 	return true, err
 }
 

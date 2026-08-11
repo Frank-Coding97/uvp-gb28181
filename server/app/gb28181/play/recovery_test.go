@@ -3,6 +3,7 @@ package play
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
@@ -70,6 +71,58 @@ func TestServiceRecoveryRestoresOnlineFixedLiveWithoutInvite(t *testing.T) {
 	ref, ok := s.CurrentLiveRef(streamID)
 	if !ok || ref.SSRC != channel.CurrentSSRC || ref.Generation == 0 || ref.NodeID == 0 {
 		t.Fatalf("recovered ref=%+v ok=%v", ref, ok)
+	}
+}
+
+func TestServiceRecoveryClosesPersistedOfflineRTPBeforeClearing(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, true, false)
+	streamID, err := FixedStreamID(onlineDevice().DeviceID, aChannel().ChannelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := aChannel()
+	channel.StreamID = streamID
+	channel.CurrentSSRC = "0200000007"
+	z := &mockZLM{port: 40000}
+	s, _, channels := newFixedSvc(t, z, &mockInviter{}, onlineDevice(), channel)
+	s.BeginRecovery()
+	stats, err := s.RecoverLiveSessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.FinishRecovery()
+	if stats.Scanned != 1 || stats.Cleaned != 1 || stats.Failed != 0 {
+		t.Fatalf("recovery stats=%+v", stats)
+	}
+	if z.closeCalls.Load() != 1 {
+		t.Fatalf("offline persisted RTP listener was not closed before cleanup: close=%d", z.closeCalls.Load())
+	}
+	if channels.c.StreamID != "" || channels.c.CurrentSSRC != "" {
+		t.Fatalf("successful recovery cleanup retained persistence: %+v", channels.c)
+	}
+}
+
+func TestStartRefusesNewGenerationWhenPersistedCleanupCannotClose(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, true, false)
+	streamID, err := FixedStreamID(onlineDevice().DeviceID, aChannel().ChannelID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := aChannel()
+	channel.StreamID = streamID
+	channel.CurrentSSRC = "0200000007"
+	z := &mockZLM{port: 40000, closeErr: errors.New("close unavailable")}
+	s, _, channels := newFixedSvc(t, z, &mockInviter{}, onlineDevice(), channel)
+
+	_, err = s.Start(context.Background(), channel.DeviceID, channel.ChannelID)
+	if err == nil || !strings.Contains(err.Error(), "close unavailable") {
+		t.Fatalf("start error=%v, want persisted cleanup failure", err)
+	}
+	if z.openCalls.Load() != 0 {
+		t.Fatalf("cleanup failure opened a new RTP generation: open=%d", z.openCalls.Load())
+	}
+	if channels.c.StreamID != streamID || channels.c.CurrentSSRC != "0200000007" {
+		t.Fatalf("cleanup failure cleared durable quarantine: %+v", channels.c)
 	}
 }
 

@@ -27,7 +27,10 @@ func newAutoStartDispatcherForTest(t *testing.T, ensure AutoStartEnsurer, opts A
 }
 
 func autoStartRequest(device string) Request {
-	return Request{DeviceID: device, ChannelID: "channel", RequiredNode: 7, Trigger: "caller-value"}
+	return Request{
+		DeviceID: device, ChannelID: "channel", RequiredNode: 7,
+		AuthorizationID: "authorization-" + device, Trigger: "caller-value",
+	}
 }
 
 func TestAutoStartDispatcherDeduplicatesAndSetsTrigger(t *testing.T) {
@@ -65,6 +68,43 @@ func TestAutoStartDispatcherDeduplicatesAndSetsTrigger(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 	}
+}
+
+func TestAutoStartDispatcherKeepsDistinctAuthorizationGenerations(t *testing.T) {
+	started := make(chan Request, 2)
+	release := make(chan struct{})
+	d := newAutoStartDispatcherForTest(t, autoStartEnsureFunc(func(ctx context.Context, req Request) (*Result, error) {
+		started <- req
+		select {
+		case <-release:
+			return &Result{StreamID: "stream"}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}), AutoStartDispatcherOptions{KnownNodeIDs: []int64{7}})
+
+	first := autoStartRequest("device")
+	first.AuthorizationID = "authorization-a"
+	second := first
+	second.AuthorizationID = "authorization-b"
+	if err := d.Submit(first); err != nil {
+		t.Fatalf("first authorization submit: %v", err)
+	}
+	if err := d.Submit(second); err != nil {
+		t.Fatalf("second authorization submit: %v", err)
+	}
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case request := <-started:
+			seen[request.AuthorizationID] = true
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatalf("dispatched authorization generations=%v, want both", seen)
+		}
+	}
+	close(release)
 }
 
 func TestAutoStartDispatcherBoundsGlobalInFlightAtSixteen(t *testing.T) {
@@ -214,7 +254,10 @@ func TestAutoStartDispatcherAndExplicitEnsureShareOneStart(t *testing.T) {
 		go func() {
 			defer submits.Done()
 			<-begin
-			if err := d.Submit(Request{DeviceID: "device", ChannelID: "channel", RequiredNode: 7}); err != nil {
+			if err := d.Submit(Request{
+				DeviceID: "device", ChannelID: "channel", RequiredNode: 7,
+				AuthorizationID: "authorization-shared",
+			}); err != nil {
 				t.Errorf("auto submit: %v", err)
 			}
 		}()
