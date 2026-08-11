@@ -199,10 +199,12 @@ func SetPlayService(svc *gbplay.Service) {
 	if svc == nil {
 		hookController.SetPlayStopper(nil)
 		hookController.SetNoneReaderPolicy(nil)
+		hookController.SetPlaybackMediaContextResolver(nil)
 		return
 	}
 	hookController.SetPlayStopper(svc)
 	hookController.SetNoneReaderPolicy(svc)
+	hookController.SetPlaybackMediaContextResolver(svc)
 }
 
 func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
