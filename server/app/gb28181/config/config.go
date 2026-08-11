@@ -27,6 +27,10 @@ const (
 	DefaultChannelCloudRecordingConfigKey     = "gb28181.catalog.default_channel_cloud_recording_enabled"
 	FixedAddressEnabledConfigKey              = "gb28181.play.fixed_address_enabled"
 	AutoOnDemandEnabledConfigKey              = "gb28181.play.auto_on_demand_enabled"
+	PlayAuthEnabledConfigKey                  = "gb28181.play.auth.enabled"
+	PlayAuthBindClientIPConfigKey             = "gb28181.play.auth.bind_client_ip"
+	PlayAuthActiveKeyConfigKey                = "gb28181.play.auth.active_key"
+	PlayAuthPreviousKeyConfigKey              = "gb28181.play.auth.previous_key"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
 	SIPTraceEnabledConfigKey                  = "gb28181.trace.enabled"
 	SIPTraceRetentionDaysConfigKey            = "gb28181.trace.retention_days"
@@ -176,6 +180,66 @@ func ValidatePlaybackSettings(settings PlaybackSettings) error {
 type FixedAddressPlaybackSettings struct {
 	FixedAddressEnabled bool `json:"fixedAddressEnabled"`
 	AutoOnDemandEnabled bool `json:"autoOnDemandEnabled"`
+}
+
+// PlayAuthSettings is the public playback authorization policy. Key material
+// is intentionally excluded from this DTO and is only read during bootstrap.
+type PlayAuthSettings struct {
+	Enabled      bool `json:"authEnabled"`
+	BindClientIP bool `json:"authBindClientIP"`
+}
+
+func PlayAuthSettingsFrom(c valueSource) PlayAuthSettings {
+	if c == nil {
+		return PlayAuthSettings{}
+	}
+	return PlayAuthSettings{
+		Enabled:      c.Get(PlayAuthEnabledConfigKey) != nil && c.GetBool(PlayAuthEnabledConfigKey),
+		BindClientIP: c.Get(PlayAuthBindClientIPConfigKey) != nil && c.GetBool(PlayAuthBindClientIPConfigKey),
+	}
+}
+
+func CurrentPlayAuthSettings() PlayAuthSettings {
+	fixedAddressPlaybackMu.RLock()
+	defer fixedAddressPlaybackMu.RUnlock()
+	return PlayAuthSettingsFrom(app.ConfigYml)
+}
+
+func ValidatePlayAuthSettings(settings PlayAuthSettings, fixed FixedAddressPlaybackSettings) error {
+	if settings.BindClientIP && !settings.Enabled {
+		return invalid(PlayAuthBindClientIPConfigKey, true, "requires play authorization enabled")
+	}
+	if fixed.AutoOnDemandEnabled && !settings.Enabled {
+		return invalid(PlayAuthEnabledConfigKey, false, "requires auto on-demand to be disabled first")
+	}
+	return nil
+}
+
+func SavePlayAuthSettings(c mutableValueSource, settings PlayAuthSettings) error {
+	if c == nil {
+		return fmt.Errorf("配置服务尚未初始化")
+	}
+	fixedAddressPlaybackMu.Lock()
+	defer fixedAddressPlaybackMu.Unlock()
+	if err := ValidatePlayAuthSettings(settings, FixedAddressPlaybackSettingsFrom(c)); err != nil {
+		return err
+	}
+	previous := PlayAuthSettingsFrom(c)
+	c.Set(PlayAuthEnabledConfigKey, settings.Enabled)
+	c.Set(PlayAuthBindClientIPConfigKey, settings.BindClientIP)
+	if err := c.SaveConfig(); err != nil {
+		c.Set(PlayAuthEnabledConfigKey, previous.Enabled)
+		c.Set(PlayAuthBindClientIPConfigKey, previous.BindClientIP)
+		return err
+	}
+	return nil
+}
+
+func PlayAuthKeyMaterialFrom(c valueSource) (active, previous string) {
+	if c == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(c.GetString(PlayAuthActiveKeyConfigKey)), strings.TrimSpace(c.GetString(PlayAuthPreviousKeyConfigKey))
 }
 
 func FixedAddressPlaybackSettingsFrom(c valueSource) FixedAddressPlaybackSettings {

@@ -547,13 +547,26 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	offlineScanner.Start()
 	app.ZapLog.Info("GB28181 离线扫描器已启动", zap.Int("intervalSeconds", cfg.Device.OfflineScanInterval))
 
-	playSigner, signerErr := playauth.NewSigner([]byte(strings.TrimSpace(app.ConfigYml.GetString("token.jwttokensignkey"))))
+	playAuthSettings := gbconfig.CurrentPlayAuthSettings()
+	activePlayKey, previousPlayKey := gbconfig.PlayAuthKeyMaterialFrom(app.ConfigYml)
+	playSigner, signerErr := buildPlaySigner(
+		playAuthSettings,
+		activePlayKey,
+		previousPlayKey,
+		app.ConfigYml.GetString("token.jwttokensignkey"),
+		cfg.ZLM.Secret,
+	)
 	if signerErr != nil {
-		app.ZapLog.Warn("GB28181 固定播放地址鉴权未装配(JWT 根密钥缺失或强度不足)")
 		gbroutes.SetPlayAuthorizer(nil)
+		if playAuthSettings.Enabled {
+			return fmt.Errorf("装配 GB28181 播放鉴权失败: %w", signerErr)
+		}
+		app.ZapLog.Warn("GB28181 播放鉴权 signer 未装配，播放鉴权保持关闭")
 	} else {
-		app.ZapLog.Info("GB28181 固定播放地址鉴权 signer 已装配")
 		gbroutes.SetPlayAuthorizer(playSigner)
+		if playSigner != nil {
+			app.ZapLog.Info("GB28181 播放鉴权 signer 已装配")
+		}
 	}
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
@@ -634,6 +647,31 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		app.ZapLog.Info("GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)")
 	}
 	return nil
+}
+
+func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSecret, zlmSecret string) (*playauth.Signer, error) {
+	active = strings.TrimSpace(active)
+	previous = strings.TrimSpace(previous)
+	if active == "" && !settings.Enabled {
+		return nil, nil
+	}
+	if active == "" {
+		return nil, playauth.ErrKeyInvalid
+	}
+	for _, reused := range []string{strings.TrimSpace(jwtSecret), strings.TrimSpace(zlmSecret)} {
+		if reused != "" && active == reused {
+			return nil, fmt.Errorf("%w: active key must not reuse another application secret", playauth.ErrKeyInvalid)
+		}
+		if previous != "" && reused != "" && previous == reused {
+			return nil, fmt.Errorf("%w: previous key must not reuse another application secret", playauth.ErrKeyInvalid)
+		}
+	}
+	activeKey := playauth.KeyMaterial{Secret: []byte(active)}
+	if previous == "" {
+		return playauth.NewKeyring(activeKey, nil)
+	}
+	previousKey := playauth.KeyMaterial{Secret: []byte(previous)}
+	return playauth.NewKeyring(activeKey, &previousKey)
 }
 
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.

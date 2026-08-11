@@ -290,6 +290,12 @@ gb28181:
     media_wait_sec: 10            # SIP 成功后等待回放媒体上线
     idle_timeout_sec: 60          # 无控制/读取活动后的回收时间
     max_session_sec: 86400        # 单会话绝对上限，不超过 24 小时
+  play:
+    auth:
+      enabled: false              # 播放地址鉴权，默认关闭以兼容现网
+      bind_client_ip: false       # 可选 IP 绑定，仅在 enabled=true 时生效
+      active_key: ""              # 独立随机密钥，开启鉴权时至少 32 字节；不得复用 JWT/ZLM secret
+      previous_key: ""            # 密钥轮换宽限期旧密钥，可留空
   recording:
     reconcile_interval_sec: 30   # 云端录像对账周期(秒);0 仅禁用周期任务
     catalog_reconcile_interval_sec: 21600 # 录像文件目录周期对账(秒);0 只禁周期,保留手动对账
