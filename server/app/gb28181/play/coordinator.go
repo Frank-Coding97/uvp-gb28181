@@ -158,8 +158,14 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 
 func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinatorKey, entry *coordinatorEntry) (*Result, error) {
 	// A caller disappearing must not cancel the public start shared by other
-	// callers. Service.Start applies its own configured total deadline.
+	// callers. Keep the original deadline so a caller cannot turn the public
+	// operation into an unbounded start.
 	startCtx := context.WithoutCancel(ctx)
+	var cancel context.CancelFunc
+	if deadline, ok := ctx.Deadline(); ok {
+		startCtx, cancel = context.WithDeadline(startCtx, deadline)
+		defer cancel()
+	}
 	result, err := c.start(startCtx, req)
 
 	c.mu.Lock()

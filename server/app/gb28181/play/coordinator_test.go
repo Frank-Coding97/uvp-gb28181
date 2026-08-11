@@ -95,6 +95,44 @@ func TestCoordinatorWaiterCancellationDoesNotCancelOwner(t *testing.T) {
 	}
 }
 
+func TestCoordinatorOwnerCancellationKeepsOriginalDeadline(t *testing.T) {
+	started := make(chan struct{})
+	deadlineSeen := make(chan time.Time, 1)
+	c := NewCoordinator(func(ctx context.Context, _ Request) (*Result, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("shared start context lost its deadline")
+		}
+		deadlineSeen <- deadline
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	ownerCtx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	wantDeadline, ok := ownerCtx.Deadline()
+	if !ok {
+		t.Fatal("owner context has no deadline")
+	}
+	go func() {
+		<-started
+		cancel()
+	}()
+
+	startedAt := time.Now()
+	_, err := c.EnsureLive(ownerCtx, coordinatorRequest("device", "channel"))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shared start err = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed < 40*time.Millisecond {
+		t.Fatalf("shared start returned after %s; caller cancellation cancelled it", elapsed)
+	}
+	if got := <-deadlineSeen; got != wantDeadline {
+		t.Fatalf("shared start deadline = %s, want %s", got, wantDeadline)
+	}
+}
+
 func TestCoordinatorRequiredNodeConflictDoesNotStart(t *testing.T) {
 	var calls atomic.Int32
 	c := NewCoordinator(func(context.Context, Request) (*Result, error) {

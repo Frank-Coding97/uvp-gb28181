@@ -88,9 +88,13 @@ func TestOnPlayAuthorizesDynamicAndFixedCurrentMedia(t *testing.T) {
 
 			for name, mutate := range map[string]func(gin.H){
 				"missing token": func(body gin.H) { body["params"] = "" },
+				"wrong stream":  func(body gin.H) { body["stream"] = "37010301021320000014_37010301021320000006" },
 				"wrong node":    func(body gin.H) { body["mediaServerId"] = "node-b" },
 				"wrong ip":      func(body gin.H) { body["ip"] = "203.0.113.10" },
-				"bad params":    func(body gin.H) { body["params"] = "%zz" },
+				"duplicate token": func(body gin.H) {
+					body["params"] = url.Values{playauth.QueryParameter: {grant.Token, grant.Token}}.Encode()
+				},
+				"bad params": func(body gin.H) { body["params"] = "%zz" },
 			} {
 				t.Run(name, func(t *testing.T) {
 					body := gin.H{"app": "rtp", "stream": streamID, "mediaServerId": "node-a", "ip": "203.0.113.9", "params": url.Values{playauth.QueryParameter: {grant.Token}}.Encode()}

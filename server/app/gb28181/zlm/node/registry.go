@@ -184,6 +184,25 @@ func (r *Registry) GetByUUID(uuid string) (*Node, bool) {
 	return &copy, true
 }
 
+// ResolveAutoOnDemandNode atomically resolves a callback UUID and admits only
+// nodes whose managed hook configuration is ready and which can accept a new
+// live stream. The returned value is a snapshot; callers never receive the
+// registry's mutable node pointer.
+func (r *Registry) ResolveAutoOnDemandNode(uuid string) (*Node, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	id, ok := r.uuids[uuid]
+	if !ok || !r.autoOnDemandReady[id] {
+		return nil, false
+	}
+	n, ok := r.nodes[id]
+	if !ok || !n.IsActive() || n.IsNearCapacity() {
+		return nil, false
+	}
+	copy := *n
+	return &copy, true
+}
+
 // IDForUUID 按 ZLM mediaServerId 只反查 nodeID(轻量,不复制 Node)
 //
 // hook 端点用:OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind。

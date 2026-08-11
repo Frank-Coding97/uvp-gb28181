@@ -2,10 +2,13 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -13,12 +16,14 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -99,6 +104,21 @@ type PlaybackMediaContextResolver interface {
 	ResolvePlaybackMediaContext(app, stream, mediaServerID string) (playauth.Binding, error)
 }
 
+type AutoOnDemandNodeResolver interface {
+	ResolveAutoOnDemandNode(mediaServerID string) (*node.Node, bool)
+}
+
+type AutoOnDemandTargetValidator interface {
+	ValidateAutoOnDemandTarget(context.Context, string, string) error
+}
+
+type AutoOnDemandDispatcher interface {
+	Available() bool
+	Submit(play.Request) error
+}
+
+type AutoOnDemandSettingsProvider func() gbconfig.FixedAddressPlaybackSettings
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
@@ -120,10 +140,20 @@ type HookController struct {
 	playAuthorizer PlayAuthorizer
 	playResolver   PlaybackMediaContextResolver
 	playAuthMu     sync.RWMutex
+	autoMu         sync.RWMutex
+	autoResolver   AutoOnDemandNodeResolver
+	autoValidator  AutoOnDemandTargetValidator
+	autoDispatcher AutoOnDemandDispatcher
+	autoSettings   AutoOnDemandSettingsProvider
+	autoLimiter    *rate.Limiter
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
-	return &HookController{notifier: notifier}
+	return &HookController{
+		notifier:     notifier,
+		autoSettings: gbconfig.CurrentFixedAddressPlaybackSettings,
+		autoLimiter:  rate.NewLimiter(32, 32),
+	}
 }
 
 // SetPlayStopper 注入点播停止器(bootstrap 装配 play service 后调用)
@@ -184,6 +214,28 @@ func (h *HookController) SetPlaybackMediaContextResolver(resolver PlaybackMediaC
 	h.playAuthMu.Lock()
 	defer h.playAuthMu.Unlock()
 	h.playResolver = resolver
+}
+
+func (h *HookController) SetAutoOnDemandRuntime(
+	resolver AutoOnDemandNodeResolver,
+	validator AutoOnDemandTargetValidator,
+	dispatcher AutoOnDemandDispatcher,
+) {
+	h.autoMu.Lock()
+	defer h.autoMu.Unlock()
+	h.autoResolver = resolver
+	h.autoValidator = validator
+	h.autoDispatcher = dispatcher
+}
+
+func (h *HookController) SetAutoOnDemandSettingsProvider(provider AutoOnDemandSettingsProvider) {
+	h.autoMu.Lock()
+	defer h.autoMu.Unlock()
+	if provider == nil {
+		h.autoSettings = gbconfig.CurrentFixedAddressPlaybackSettings
+		return
+	}
+	h.autoSettings = provider
 }
 
 // hookOK ZLM 期望的标准成功响应
@@ -461,23 +513,94 @@ type onStreamNotFoundBody struct {
 	Params        string `json:"params"`
 }
 
-// OnStreamNotFound remains fail-closed until the bounded auto-start
-// dispatcher and both authorization layers are installed.
 func (h *HookController) OnStreamNotFound(c *gin.Context) {
+	resolver, validator, dispatcher, settingsProvider := h.autoOnDemandDependencies()
+	if resolver == nil || validator == nil || dispatcher == nil || settingsProvider == nil || !dispatcher.Available() {
+		h.denyAutoOnDemand(c, "runtime-unavailable")
+		return
+	}
+	if h.autoLimiter == nil || !h.autoLimiter.Allow() {
+		h.denyAutoOnDemand(c, "global-rate-limited")
+		return
+	}
+	peerIP, ok := parsePeerIP(c.Request.RemoteAddr)
+	if !ok {
+		h.denyAutoOnDemand(c, "source-invalid")
+		return
+	}
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
 	var body onStreamNotFoundBody
-	if err := c.ShouldBindJSON(&body); err != nil {
-		hookDenied(c, "invalid stream-not-found request")
+	decoder := json.NewDecoder(c.Request.Body)
+	if err := decoder.Decode(&body); err != nil {
+		h.denyAutoOnDemand(c, "payload-invalid")
 		return
 	}
-	if body.MediaServerID == "" || body.App != "rtp" {
-		hookDenied(c, "automatic playback unavailable")
+	if err := ensureJSONEOF(decoder); err != nil {
+		h.denyAutoOnDemand(c, "payload-invalid")
 		return
 	}
-	if _, _, err := play.ParseFixedStreamID(body.Stream); err != nil {
-		hookDenied(c, "automatic playback unavailable")
+	deviceID, channelID, err := play.ParseFixedStreamID(body.Stream)
+	if body.MediaServerID == "" || body.VHost != "__defaultVhost__" || body.App != "rtp" ||
+		!validAutoOnDemandSchema(body.Schema) || err != nil {
+		h.denyAutoOnDemand(c, "media-scope-invalid")
 		return
 	}
-	hookDenied(c, "automatic playback unavailable")
+	settings := settingsProvider()
+	if !settings.FixedAddressEnabled || !settings.AutoOnDemandEnabled {
+		h.denyAutoOnDemand(c, "feature-disabled")
+		return
+	}
+	mediaNode, ok := resolver.ResolveAutoOnDemandNode(body.MediaServerID)
+	if !ok || mediaNode == nil || mediaNode.ID == 0 || !mediaNode.IsActive() || mediaNode.IsNearCapacity() ||
+		mediaNode.MediaServerUUID != body.MediaServerID {
+		h.denyAutoOnDemand(c, "node-unavailable")
+		return
+	}
+	if !sourceIPMatchesNode(peerIP, mediaNode.Host) {
+		h.denyAutoOnDemand(c, "source-mismatch")
+		return
+	}
+	capability, ok := singleValue(c.Request.URL.Query(), "cap")
+	if !ok || !playauth.VerifyCallbackCapability(mediaNode.APISecret, body.MediaServerID, capability) {
+		h.denyAutoOnDemand(c, "callback-auth-invalid")
+		return
+	}
+	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
+	if err != nil {
+		h.denyAutoOnDemand(c, "params-invalid")
+		return
+	}
+	playToken, ok := singleValue(params, playauth.QueryParameter)
+	if !ok || !h.verifyPlayToken(playToken, playauth.Binding{
+		DeviceID: deviceID, ChannelID: channelID, App: body.App,
+		Stream: body.Stream, MediaServerID: body.MediaServerID,
+	}) {
+		h.denyAutoOnDemand(c, "play-auth-invalid")
+		return
+	}
+	validateCtx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
+	err = validator.ValidateAutoOnDemandTarget(validateCtx, deviceID, channelID)
+	cancel()
+	if err != nil {
+		h.denyAutoOnDemand(c, "target-invalid")
+		return
+	}
+	if err := dispatcher.Submit(play.Request{
+		DeviceID: deviceID, ChannelID: channelID,
+		Trigger: "on_stream_not_found", RequiredNode: mediaNode.ID,
+	}); err != nil {
+		h.denyAutoOnDemand(c, autoOnDemandAdmissionReason(err))
+		return
+	}
+	if app.ZapLog != nil {
+		app.ZapLog.Info("自动点播 Hook 已接收",
+			zap.String("reason", "accepted"),
+			zap.String("deviceId", deviceID),
+			zap.String("channelId", channelID),
+			zap.Int64("nodeId", mediaNode.ID))
+	}
+	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "close": false})
 }
 
 // OnPlay authorizes every real-time rtp pull when playback authorization is
@@ -522,7 +645,12 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	}
 	binding.BindClientIP = settings.BindClientIP
 	binding.ClientIP = body.IP
-	_, err = authorizer.Verify(params.Get(playauth.QueryParameter), binding)
+	playToken, ok := singleValue(params, playauth.QueryParameter)
+	if !ok {
+		hookDenied(c, "invalid playback authorization")
+		return
+	}
+	_, err = authorizer.Verify(playToken, binding)
 	if err != nil {
 		hookDenied(c, "playback authorization denied")
 		return
@@ -532,6 +660,96 @@ func (h *HookController) OnPlay(c *gin.Context) {
 
 func hookDenied(c *gin.Context, message string) {
 	c.JSON(http.StatusOK, gin.H{"code": -1, "msg": message})
+}
+
+func (h *HookController) autoOnDemandDependencies() (
+	AutoOnDemandNodeResolver,
+	AutoOnDemandTargetValidator,
+	AutoOnDemandDispatcher,
+	AutoOnDemandSettingsProvider,
+) {
+	h.autoMu.RLock()
+	defer h.autoMu.RUnlock()
+	return h.autoResolver, h.autoValidator, h.autoDispatcher, h.autoSettings
+}
+
+func (h *HookController) verifyPlayToken(token string, binding playauth.Binding) bool {
+	h.playAuthMu.RLock()
+	authorizer := h.playAuthorizer
+	h.playAuthMu.RUnlock()
+	if authorizer == nil {
+		return false
+	}
+	_, err := authorizer.Verify(token, binding)
+	return err == nil
+}
+
+func ensureJSONEOF(decoder *json.Decoder) error {
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return errors.New("multiple JSON values")
+		}
+		return err
+	}
+	return nil
+}
+
+func singleValue(values url.Values, key string) (string, bool) {
+	items, ok := values[key]
+	returnValue := ""
+	if ok && len(items) == 1 {
+		returnValue = items[0]
+	}
+	return returnValue, ok && len(items) == 1 && returnValue != ""
+}
+
+func parsePeerIP(remoteAddr string) (netip.Addr, bool) {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return address.Unmap(), true
+}
+
+func sourceIPMatchesNode(peerIP netip.Addr, nodeHost string) bool {
+	nodeIP, err := netip.ParseAddr(strings.TrimSpace(nodeHost))
+	return err == nil && nodeIP.Unmap() == peerIP
+}
+
+func validAutoOnDemandSchema(schema string) bool {
+	switch strings.ToLower(strings.TrimSpace(schema)) {
+	case "fmp4", "http", "https", "ws", "wss", "rtsp", "rtsps", "rtmp", "rtmps", "webrtc":
+		return true
+	default:
+		return false
+	}
+}
+
+func (h *HookController) denyAutoOnDemand(c *gin.Context, reason string) {
+	if app.ZapLog != nil {
+		app.ZapLog.Debug("自动点播 Hook 已拒绝", zap.String("reason", reason))
+	}
+	hookDenied(c, "automatic playback unavailable")
+}
+
+func autoOnDemandAdmissionReason(err error) string {
+	switch {
+	case errors.Is(err, play.ErrAutoStartStopped):
+		return "dispatcher-stopped"
+	case errors.Is(err, play.ErrAutoStartQueueFull):
+		return "queue-full"
+	case errors.Is(err, play.ErrAutoStartNodeRateLimited):
+		return "node-rate-limited"
+	case errors.Is(err, play.ErrAutoStartInvalidRequest):
+		return "admission-invalid"
+	default:
+		return "admission-failed"
+	}
 }
 
 // OnServerStarted ZLM 启动事件
