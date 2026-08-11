@@ -1555,18 +1555,21 @@ INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
 -- Playback authorization settings for fresh PostgreSQL installs.
 INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
 (247,'读取播放鉴权配置','/api/gb28181/sip/service-config/play-auth','GET','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
-(248,'修改播放鉴权配置','/api/gb28181/sip/service-config/play-auth','PUT','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+(248,'修改播放鉴权配置','/api/gb28181/sip/service-config/play-auth','PUT','GB28181 SIP 配置',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(249,'发起实时点播','/api/gb28181/play/:deviceId/:channelId','POST','GB28181 播放鉴权',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(250,'申请固定播放地址授权','/api/gb28181/play/:deviceId/:channelId/authorization','POST','GB28181 播放鉴权',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
 INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
-(140368,140355,'','','','读取播放鉴权配置',TRUE,3,'gb28181:sip:config:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
-(140369,140355,'','','','修改播放鉴权配置',TRUE,3,'gb28181:sip:config:update',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140368),(1,140369);
-INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140368,247),(140369,248);
+(140371,140355,'','','','发起实时点播',TRUE,3,'gb28181:play:start',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140371);
+INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140359,247),(140360,248),(140371,249),(140371,250);
 INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
 (7591,'p','role_1','/api/gb28181/sip/service-config/play-auth','GET','*','',''),
-(7592,'p','role_1','/api/gb28181/sip/service-config/play-auth','PUT','*','','');
-SELECT setval('sys_api_id_seq',248,true);
-SELECT setval('sys_menu_id_seq',140369,true);
-SELECT setval('sys_casbin_rule_id_seq',7592,true);
+(7592,'p','role_1','/api/gb28181/sip/service-config/play-auth','PUT','*','',''),
+(7593,'p','role_1','/api/gb28181/play/:deviceId/:channelId','POST','*','',''),
+(7594,'p','role_1','/api/gb28181/play/:deviceId/:channelId/authorization','POST','*','','');
+SELECT setval('sys_api_id_seq',250,true);
+SELECT setval('sys_menu_id_seq',140371,true);
+SELECT setval('sys_casbin_rule_id_seq',7594,true);
 
 -- GB28181 device registry and dual-version profile archive.
 DROP TABLE IF EXISTS gb_device;

@@ -29,12 +29,17 @@ type mockStopper struct {
 type mockGenerationStopper struct {
 	mockStopper
 	current         stream.LiveRef
+	pending         stream.LiveRef
 	conditional     atomic.Int32
 	noneReaderCalls atomic.Int32
 }
 
 func (m *mockGenerationStopper) CurrentLiveRef(streamID string) (stream.LiveRef, bool) {
 	return m.current, m.current.StreamID == streamID
+}
+
+func (m *mockGenerationStopper) CleanupPendingLiveRef(streamID string) (stream.LiveRef, bool) {
+	return m.pending, m.pending.StreamID == streamID
 }
 
 func (m *mockGenerationStopper) StopIfCurrent(context.Context, stream.LiveRef) (bool, error) {
@@ -183,6 +188,29 @@ func TestHookFixedNoneReaderDefersCloseToConditionalStop(t *testing.T) {
 	}
 }
 
+func TestHookFixedNoneReaderRetriesCleanupPendingGeneration(t *testing.T) {
+	streamID := "37010301021320000014_37010301021320000001"
+	stopper := &mockGenerationStopper{pending: stream.LiveRef{
+		StreamID: streamID, SSRC: "0200000007", Generation: 7, NodeID: 22,
+	}}
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetPlayStopper(stopper)
+	h.SetNoneReaderPolicy(&mockNoneReaderPolicy{close: true})
+	e := newHookEngine(t, h)
+	response := postJSON(t, e, "/index/hook/on_stream_none_reader", gin.H{"app": "rtp", "stream": streamID})
+	var body map[string]interface{}
+	_ = json.Unmarshal(response.Body.Bytes(), &body)
+	if closeStream, ok := body["close"].(bool); !ok || closeStream {
+		t.Fatalf("fixed cleanup-pending none-reader must return close=false: %v", body)
+	}
+	if !waitInt32(&stopper.conditional, 1, 500*time.Millisecond) {
+		t.Fatalf("cleanup-pending conditional calls=%d", stopper.conditional.Load())
+	}
+	if stopper.noneReaderCalls.Load() != 0 || stopper.calls.Load() != 0 {
+		t.Fatalf("cleanup-pending used reader probe or unsafe stop: noneReader=%d unsafe=%d", stopper.noneReaderCalls.Load(), stopper.calls.Load())
+	}
+}
+
 func TestHookStreamOfflineAndRTPTimeoutNotifyPlaybackFinalizer(t *testing.T) {
 	h := handler.NewHookController(stream.NewNotifier())
 	sink := &mockPlaybackMediaSink{}
@@ -308,6 +336,40 @@ func TestHookFixedRTPTimeoutRequiresMatchingNodeAndNormalizedSSRC(t *testing.T) 
 	time.Sleep(50 * time.Millisecond)
 	if stopper.conditional.Load() != 1 || stopper.calls.Load() != 0 {
 		t.Fatalf("mismatched timeout changed stream: conditional=%d unsafe=%d", stopper.conditional.Load(), stopper.calls.Load())
+	}
+}
+
+func TestHookFixedRTPTimeoutRetriesMatchingCleanupPendingGeneration(t *testing.T) {
+	streamID := "37010301021320000014_37010301021320000001"
+	stopper := &mockGenerationStopper{pending: stream.LiveRef{
+		StreamID: streamID, SSRC: "0200000007", Generation: 7, NodeID: 22,
+	}}
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetPlayStopper(stopper)
+	h.SetMultiNode(mockNodeResolver{uuid: "node-a", nodeID: 22}, nil)
+	e := newHookEngine(t, h)
+	postJSON(t, e, "/index/hook/on_rtp_server_timeout", gin.H{
+		"stream_id": streamID, "app": "rtp", "ssrc": 200000007, "mediaServerId": "node-a",
+	})
+	if !waitInt32(&stopper.conditional, 1, 500*time.Millisecond) {
+		t.Fatalf("cleanup-pending timeout conditional calls=%d", stopper.conditional.Load())
+	}
+}
+
+func TestHookStreamOfflineRetriesMatchingCleanupPendingGeneration(t *testing.T) {
+	streamID := "37010301021320000014_37010301021320000001"
+	stopper := &mockGenerationStopper{pending: stream.LiveRef{
+		StreamID: streamID, SSRC: "0200000007", Generation: 7, NodeID: 22,
+	}}
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetPlayStopper(stopper)
+	h.SetMultiNode(mockNodeResolver{uuid: "node-a", nodeID: 22}, nil)
+	e := newHookEngine(t, h)
+	postJSON(t, e, "/index/hook/on_stream_changed", gin.H{
+		"app": "rtp", "stream": streamID, "regist": false, "mediaServerId": "node-a",
+	})
+	if !waitInt32(&stopper.conditional, 1, 500*time.Millisecond) {
+		t.Fatalf("cleanup-pending offline conditional calls=%d", stopper.conditional.Load())
 	}
 }
 

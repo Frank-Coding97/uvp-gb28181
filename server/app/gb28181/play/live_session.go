@@ -12,10 +12,11 @@ const (
 type LiveState string
 
 const (
-	LiveStateIdle     LiveState = "idle"
-	LiveStateStarting LiveState = "starting"
-	LiveStateReady    LiveState = "ready"
-	LiveStateStopping LiveState = "stopping"
+	LiveStateIdle           LiveState = "idle"
+	LiveStateStarting       LiveState = "starting"
+	LiveStateReady          LiveState = "ready"
+	LiveStateStopping       LiveState = "stopping"
+	LiveStateCleanupPending LiveState = "cleanup-pending"
 )
 
 type LiveSession struct {

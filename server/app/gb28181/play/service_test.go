@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ type mockZLM struct {
 	lastStreamID  atomic.Value
 	lastSSRC      atomic.Value
 	closeCalls    atomic.Int32
+	closeMu       sync.RWMutex
 	openErr       error
 	closeErr      error
 	port          int
@@ -58,8 +60,17 @@ func (m *mockZLM) OpenRtpServerWithSSRC(ctx context.Context, request zlm.OpenRtp
 	return &zlm.OpenRtpServerResult{Port: p}, nil
 }
 func (m *mockZLM) CloseRtpServer(ctx context.Context, streamID string) error {
+	m.closeMu.RLock()
+	err := m.closeErr
+	m.closeMu.RUnlock()
 	m.closeCalls.Add(1)
-	return m.closeErr
+	return err
+}
+
+func (m *mockZLM) SetCloseErr(err error) {
+	m.closeMu.Lock()
+	m.closeErr = err
+	m.closeMu.Unlock()
 }
 func (m *mockZLM) IsMediaOnline(ctx context.Context, app, stream string) (bool, error) {
 	m.onlineCalls.Add(1)

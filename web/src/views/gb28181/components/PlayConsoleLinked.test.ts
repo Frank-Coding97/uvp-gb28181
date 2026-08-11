@@ -27,6 +27,7 @@ const api = vi.hoisted(() => {
           expireAt: 0
         }
       }),
+    authorizeFixedPlayback: vi.fn(),
     stopPlay: vi.fn().mockResolvedValue({ code: 0, message: "", data: null }),
     getStreamMonitor: vi
       .fn()
@@ -205,6 +206,7 @@ async function requestDeviceStatus(wrapper: VueWrapper) {
 
 describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
+    api.authorizeFixedPlayback.mockReset();
     api.getHomePosition.mockReset();
     api.getPtzOperation.mockReset();
     api.getDeviceStatus.mockReset();
@@ -517,6 +519,174 @@ describe("PlayConsoleLinked 双区联动", () => {
       if (originalExecCommand) Object.defineProperty(document, "execCommand", originalExecCommand);
       else Reflect.deleteProperty(document, "execCommand");
     }
+  });
+
+  it("复制固定流的带 token 协议地址前预授权，并复制同协议的新地址", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fixedStreamID = `${channel.deviceId}_${channel.channelId}`;
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: fixedStreamID,
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wsFlv: "ws://zlm/rtp/fixed.live.flv?play_token=expired" },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+    api.authorizeFixedPlayback.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: fixedStreamID,
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wsFlv: "ws://zlm/rtp/fixed.live.flv?play_token=fresh" },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0,
+        authorizationExpiresAt: 1786867200
+      }
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    await option!.get(".protocol-copy-btn").trigger("click");
+    await flushPromises();
+
+    expect(api.authorizeFixedPlayback).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
+    expect(writeText).toHaveBeenCalledWith("ws://zlm/rtp/fixed.live.flv?play_token=fresh");
+    wrapper.unmount();
+  });
+
+  it("固定流预授权业务失败时拒绝复制旧地址", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const error = vi.spyOn(Message, "error");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fixedStreamID = `${channel.deviceId}_${channel.channelId}`;
+    const currentURL = "ws://zlm/rtp/fixed.live.flv?play_token=current";
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { streamId: fixedStreamID, ssrc: "0102030405", app: "rtp", urls: { wsFlv: currentURL }, wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+    });
+    api.authorizeFixedPlayback.mockResolvedValueOnce({ code: 500, message: "authorization rejected", data: null });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    await option!.get(".protocol-copy-btn").trigger("click");
+    await flushPromises();
+
+    expect(api.authorizeFixedPlayback).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith("播放地址授权失败，请重试");
+    wrapper.unmount();
+    error.mockRestore();
+  });
+
+  it("固定流预授权请求失败时拒绝复制旧地址", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const error = vi.spyOn(Message, "error");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fixedStreamID = `${channel.deviceId}_${channel.channelId}`;
+    const currentURL = "ws://zlm/rtp/fixed.live.flv?play_token=current";
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { streamId: fixedStreamID, ssrc: "0102030405", app: "rtp", urls: { wsFlv: currentURL }, wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+    });
+    api.authorizeFixedPlayback.mockRejectedValueOnce(new Error("network unavailable"));
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    await option!.get(".protocol-copy-btn").trigger("click");
+    await flushPromises();
+
+    expect(api.authorizeFixedPlayback).toHaveBeenCalledWith(channel.deviceId, channel.channelId);
+    expect(writeText).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith("播放地址授权失败，请重试");
+    wrapper.unmount();
+    error.mockRestore();
+  });
+
+  it("固定流预授权未返回当前协议地址时拒绝复制旧地址", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    const error = vi.spyOn(Message, "error");
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const fixedStreamID = `${channel.deviceId}_${channel.channelId}`;
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: fixedStreamID,
+        ssrc: "0102030405",
+        app: "rtp",
+        urls: { wsFlv: "ws://zlm/rtp/fixed.live.flv?play_token=current" },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+    api.authorizeFixedPlayback.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: {
+        streamId: fixedStreamID,
+        ssrc: "",
+        app: "rtp",
+        urls: { httpFlv: "http://zlm/rtp/fixed.live.flv?play_token=fresh" },
+        wsflvUrl: "",
+        httpFlvUrl: "",
+        hlsUrl: "",
+        expireAt: 0
+      }
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    await option!.get(".protocol-copy-btn").trigger("click");
+    await flushPromises();
+
+    expect(writeText).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith("播放地址授权失败，请重试");
+    wrapper.unmount();
+    error.mockRestore();
+  });
+
+  it.each([
+    ["动态流", "stream-dynamic", "ws://zlm/rtp/dynamic.live.flv?play_token=present"],
+    ["固定流无 token", `${channel.deviceId}_${channel.channelId}`, "ws://zlm/rtp/fixed.live.flv"],
+    ["固定流仅有同名参数", `${channel.deviceId}_${channel.channelId}`, "ws://zlm/rtp/fixed.live.flv?not_play_token=present"],
+    ["非当前固定流", "other-device_other-channel", "ws://zlm/rtp/other.live.flv?play_token=present"]
+  ])("%s 复制地址时不请求预授权", async (_label, streamId, url) => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    api.startPlay.mockResolvedValueOnce({
+      code: 0,
+      message: "",
+      data: { streamId, ssrc: "0102030405", app: "rtp", urls: { wsFlv: url }, wsflvUrl: "", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+    });
+
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const option = wrapper.findAll(".protocol-option").find((item) => item.text().includes("WS-FLV:"));
+    await option!.get(".protocol-copy-btn").trigger("click");
+    await flushPromises();
+
+    expect(api.authorizeFixedPlayback).not.toHaveBeenCalled();
+    expect(writeText).toHaveBeenCalledWith(url);
+    wrapper.unmount();
   });
 
   it("新会话优先使用服务端协议快照并允许本次会话手动切换", async () => {

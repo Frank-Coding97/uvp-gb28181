@@ -369,6 +369,71 @@ func TestCoordinatorConditionalStopIsIdempotentForCurrentGeneration(t *testing.T
 	}
 }
 
+func TestCoordinatorStopFailureKeepsGenerationReadyForRetry(t *testing.T) {
+	stopErr := errors.New("close failed")
+	result := &Result{StreamID: "stream-1", SSRC: "0200000001", Generation: 1, Node: &ResultNode{ID: 1}}
+	var stopCalls atomic.Int32
+	c := NewCoordinatorWithStop(
+		func(context.Context, Request) (*Result, error) { return result, nil },
+		func(context.Context, *Result) error {
+			if stopCalls.Add(1) == 1 {
+				return stopErr
+			}
+			return nil
+		},
+	)
+	req := coordinatorRequest("device", "channel")
+	if _, err := c.EnsureLive(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Stop(context.Background(), req); !errors.Is(err, stopErr) {
+		t.Fatalf("first stop error=%v, want close failure", err)
+	}
+	if got, ok := c.CurrentResult(result.StreamID); !ok || !resultMatchesRef(got, resultLiveRef(result)) {
+		t.Fatalf("failed stop lost current generation: got=%+v ok=%v", got, ok)
+	}
+	if got, err := c.EnsureLive(context.Background(), req); err != nil || !resultMatchesRef(got, resultLiveRef(result)) {
+		t.Fatalf("failed stop did not restore ready generation: got=%+v err=%v", got, err)
+	}
+	if err := c.Stop(context.Background(), req); err != nil {
+		t.Fatalf("retry stop: %v", err)
+	}
+	if _, ok := c.CurrentResult(result.StreamID); ok {
+		t.Fatal("successful retry retained current generation")
+	}
+}
+
+func TestCoordinatorConditionalStopFailureKeepsGenerationReadyForRetry(t *testing.T) {
+	stopErr := errors.New("close failed")
+	result := &Result{StreamID: "stream-1", SSRC: "0200000001", Generation: 1, Node: &ResultNode{ID: 1}}
+	var stopCalls atomic.Int32
+	c := NewCoordinatorWithStop(
+		func(context.Context, Request) (*Result, error) { return result, nil },
+		func(context.Context, *Result) error {
+			if stopCalls.Add(1) == 1 {
+				return stopErr
+			}
+			return nil
+		},
+	)
+	if _, err := c.EnsureLive(context.Background(), coordinatorRequest("device", "channel")); err != nil {
+		t.Fatal(err)
+	}
+	ref := resultLiveRef(result)
+	if handled, err := c.StopIfCurrent(context.Background(), ref); !handled || !errors.Is(err, stopErr) {
+		t.Fatalf("first conditional stop handled=%v err=%v", handled, err)
+	}
+	if got, ok := c.CurrentResult(result.StreamID); !ok || !resultMatchesRef(got, ref) {
+		t.Fatalf("failed conditional stop lost current generation: got=%+v ok=%v", got, ok)
+	}
+	if handled, err := c.StopIfCurrent(context.Background(), ref); !handled || err != nil {
+		t.Fatalf("conditional retry handled=%v err=%v", handled, err)
+	}
+	if _, ok := c.CurrentResult(result.StreamID); ok {
+		t.Fatal("successful conditional retry retained current generation")
+	}
+}
+
 func TestServiceStartConcurrentUsesCoordinator(t *testing.T) {
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}

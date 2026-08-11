@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -29,12 +31,12 @@ func GetEngine() *gin.Engine {
 		// 生产环境下，关闭gin框架默认的日志输出，避免日志重复输出
 		gin.DefaultWriter = io.Discard
 		engine = gin.New()
-		engine.Use(gin.Logger(), CustomRecovery())
+		engine.Use(accessLogger(gin.DefaultWriter), CustomRecovery())
 	} else {
 		// 开发环境下，开启调试模式，方便开发调试
 		gin.SetMode(gin.DebugMode)
 		engine = gin.New()
-		engine.Use(gin.Logger(), CustomRecovery())
+		engine.Use(accessLogger(gin.DefaultWriter), CustomRecovery())
 
 		/**
 		注册pprof后，可以通过以下HTTP端点访问性能数据：
@@ -49,6 +51,55 @@ func GetEngine() *gin.Engine {
 	}
 	return engine
 
+}
+
+func accessLogger(output io.Writer) gin.HandlerFunc {
+	return gin.LoggerWithConfig(gin.LoggerConfig{
+		Formatter: accessLogFormatter,
+		Output:    output,
+	})
+}
+
+func accessLogFormatter(param gin.LogFormatterParams) string {
+	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
+		param.TimeStamp.Format("2006/01/02 - 15:04:05"),
+		param.StatusCode,
+		param.Latency,
+		param.ClientIP,
+		param.Method,
+		redactAccessLogPath(param.Path),
+		param.ErrorMessage,
+	)
+}
+
+func redactAccessLogPath(path string) string {
+	parsed, err := url.ParseRequestURI(path)
+	if err != nil {
+		return redactAccessLogPathFallback(path)
+	}
+	query := parsed.Query()
+	redacted := false
+	for _, key := range []string{"play_token", "cap"} {
+		if _, exists := query[key]; exists {
+			query.Set(key, "REDACTED")
+			redacted = true
+		}
+	}
+	if !redacted {
+		return path
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.RequestURI()
+}
+
+func redactAccessLogPathFallback(path string) string {
+	lower := strings.ToLower(path)
+	if strings.Contains(lower, "play_token=") || strings.Contains(lower, "cap=") {
+		if index := strings.IndexByte(path, '?'); index >= 0 {
+			return path[:index] + "?REDACTED"
+		}
+	}
+	return path
 }
 
 // CustomRecovery 自定义错误(panic等)拦截中间件、对可能发生的错误进行拦截、统一记录

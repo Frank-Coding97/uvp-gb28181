@@ -25,6 +25,27 @@ func MarkSensitiveOperation(c *gin.Context, metadata map[string]any) {
 	}
 }
 
+// SensitiveOperationMetadata returns a copy for narrowly scoped audit tests
+// and middleware integrations. Sensitive response payloads remain unavailable.
+func SensitiveOperationMetadata(c *gin.Context) (map[string]any, bool) {
+	if c == nil {
+		return nil, false
+	}
+	metadata, ok := c.Get(sensitiveOperationContextKey)
+	if !ok {
+		return nil, false
+	}
+	values, ok := metadata.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	copy := make(map[string]any, len(values))
+	for key, value := range values {
+		copy[key] = value
+	}
+	return copy, true
+}
+
 // MarkDeleteOperation records a POST-based batch endpoint as a delete action.
 func MarkDeleteOperation(c *gin.Context) {
 	if c != nil {

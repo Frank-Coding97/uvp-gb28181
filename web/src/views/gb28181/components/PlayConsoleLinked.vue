@@ -17,6 +17,7 @@ import PlayWindow from "./PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
 import {
+    authorizeFixedPlayback,
     controlDevice,
     controlPtz,
     controlPtzCruise,
@@ -179,8 +180,7 @@ type ProtocolOption = {
 
 const protocol = ref<StreamProtocol | "">("ws-flv");
 const playbackSnapshot = ref<PlaybackSource | null>(null);
-const protocolUrls = computed<ProtocolURLMap>(() => {
-    const result = playResult.value;
+function protocolUrlsFor(result: PlayResult | null | undefined): ProtocolURLMap {
     return {
         "ws-flv": result?.urls?.wsFlv || result?.wsflvUrl || null,
         "http-flv": result?.urls?.httpFlv || result?.httpFlvUrl || null,
@@ -203,7 +203,16 @@ const protocolUrls = computed<ProtocolURLMap>(() => {
         rtsp: result?.urls?.rtsp || null,
         rtsps: result?.urls?.rtsps || null,
     };
-});
+}
+
+function hasPlaybackToken(rawURL: string): boolean {
+    try {
+        return new URL(rawURL).searchParams.has("play_token");
+    } catch {
+        return false;
+    }
+}
+const protocolUrls = computed<ProtocolURLMap>(() => protocolUrlsFor(playResult.value));
 
 const protocolOptions: ProtocolOption[] = [
     { value: "ws-flv", label: "WS-FLV", browserPlayable: true, shortcut: true },
@@ -2783,8 +2792,28 @@ function switchProtocol(proto: StreamProtocol) {
 }
 
 async function copyProtocolUrl(proto: StreamProtocol) {
-    const url = protocolUrls.value[proto];
+    let url = protocolUrls.value[proto];
     if (!url) { Message.warning("当前协议地址不可用"); return; }
+
+    const channel = props.channel;
+    const result = playResult.value;
+    const fixedStreamID = channel ? `${channel.deviceId}_${channel.channelId}` : "";
+    if (channel && result?.streamId === fixedStreamID && hasPlaybackToken(url)) {
+        try {
+            const response = await authorizeFixedPlayback(channel.deviceId, channel.channelId);
+            const authorizedURL = response.code === 0 && response.data
+                ? protocolUrlsFor(response.data)[proto]
+                : null;
+            if (!authorizedURL) {
+                Message.error("播放地址授权失败，请重试");
+                return;
+            }
+            url = authorizedURL;
+        } catch {
+            Message.error("播放地址授权失败，请重试");
+            return;
+        }
+    }
     await copyTextToClipboard(url);
 }
 

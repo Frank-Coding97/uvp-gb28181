@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -78,6 +79,8 @@ type autoOnDemandFixture struct {
 	validator  *fakeAutoTargetValidator
 	dispatcher *fakeAutoDispatcher
 	signer     *playauth.Signer
+	clock      *autoAuthorizationClock
+	authID     string
 	settings   gbconfig.FixedAddressPlaybackSettings
 	deviceID   string
 	channelID  string
@@ -86,19 +89,28 @@ type autoOnDemandFixture struct {
 	token      string
 	path       string
 	peer       string
+	clientIP   string
 	body       map[string]interface{}
 	raw        []byte
 	xff        string
 }
 
-func newAutoOnDemandFixture(t *testing.T) *autoOnDemandFixture {
+type autoAuthorizationClock struct{ now time.Time }
+
+func (c *autoAuthorizationClock) Now() time.Time { return c.now }
+
+func newAutoOnDemandFixture(t *testing.T, bindClientIP ...bool) *autoOnDemandFixture {
 	t.Helper()
-	now := time.Unix(1_800_000_000, 0).UTC()
+	bindIP := len(bindClientIP) == 1 && bindClientIP[0]
+	setHookPlayAuth(t, true, bindIP)
+	clock := &autoAuthorizationClock{now: time.Unix(1_800_000_000, 0).UTC()}
 	signer, err := playauth.NewSigner(
 		[]byte("0123456789abcdef0123456789abcdef"),
-		playauth.WithNow(func() time.Time { return now }),
+		playauth.WithNow(clock.Now),
 	)
 	require.NoError(t, err)
+	authorization := playauth.NewAuthorizationService(signer,
+		playauth.NewAuthorizationRegistry(playauth.WithAuthorizationRegistryNow(clock.Now)))
 	deviceID := "37010301021320000014"
 	channelID := "37010301021320000001"
 	streamID := deviceID + "_" + channelID
@@ -107,9 +119,12 @@ func newAutoOnDemandFixture(t *testing.T) *autoOnDemandFixture {
 		MediaServerUUID: "node-a", State: node.StateActive,
 		RTPPortStart: 30000, RTPPortEnd: 30100,
 	}
-	grant, err := signer.IssueDirect(playauth.Binding{
+	prepared, err := authorization.Prepare()
+	require.NoError(t, err)
+	grant, err := authorization.Bind(prepared, playauth.Binding{
 		DeviceID: deviceID, ChannelID: channelID, App: "rtp",
 		Stream: streamID, MediaServerID: mediaNode.MediaServerUUID,
+		BindClientIP: bindIP, ClientIP: "203.0.113.9",
 	})
 	require.NoError(t, err)
 	capability, err := playauth.CallbackCapability(mediaNode.APISecret, mediaNode.MediaServerUUID)
@@ -120,7 +135,7 @@ func newAutoOnDemandFixture(t *testing.T) *autoOnDemandFixture {
 	dispatcher := &fakeAutoDispatcher{available: true}
 	settings := gbconfig.FixedAddressPlaybackSettings{FixedAddressEnabled: true, AutoOnDemandEnabled: true}
 	controller := handler.NewHookController(stream.NewNotifier())
-	controller.SetPlayAuthorizer(signer)
+	controller.SetPlayAuthorizer(authorization)
 	controller.SetAutoOnDemandSettingsProvider(func() gbconfig.FixedAddressPlaybackSettings { return settings })
 	controller.SetAutoOnDemandRuntime(resolver, validator, dispatcher)
 	engine := gin.New()
@@ -129,9 +144,10 @@ func newAutoOnDemandFixture(t *testing.T) *autoOnDemandFixture {
 	fixture := &autoOnDemandFixture{
 		controller: controller, engine: engine, resolver: resolver,
 		validator: validator, dispatcher: dispatcher, signer: signer,
+		clock: clock, authID: grant.AuthorizationGeneration,
 		settings: settings, deviceID: deviceID, channelID: channelID,
 		streamID: streamID, capability: capability, token: grant.Token,
-		peer: "192.0.2.1:1234",
+		peer: "192.0.2.1:1234", clientIP: "203.0.113.9",
 	}
 	fixture.path = "/index/hook/on_stream_not_found?cap=" + url.QueryEscape(capability)
 	fixture.body = map[string]interface{}{
@@ -144,6 +160,41 @@ func newAutoOnDemandFixture(t *testing.T) *autoOnDemandFixture {
 	}
 	controller.SetAutoOnDemandSettingsProvider(func() gbconfig.FixedAddressPlaybackSettings { return fixture.settings })
 	return fixture
+}
+
+func TestOnStreamNotFoundIPBoundPreauthorizationRequiresVerifiedOnPlay(t *testing.T) {
+	fixture := newAutoOnDemandFixture(t, true)
+	fixture.controller.SetPlaybackMediaContextResolver(hookMediaResolver{
+		err: play.ErrPlaybackMediaNotCurrent,
+		coldBinding: playauth.Binding{
+			DeviceID: fixture.deviceID, ChannelID: fixture.channelID,
+			App: "rtp", Stream: fixture.streamID, MediaServerID: fixture.resolver.node.MediaServerUUID,
+		},
+	})
+	fixture.engine.POST("/index/hook/on_play", fixture.controller.OnPlay)
+
+	response := fixture.serve(t)
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+	require.Zero(t, fixture.dispatcher.count())
+
+	onPlay := func(clientIP string) *httptest.ResponseRecorder {
+		return postJSON(t, fixture.engine, "/index/hook/on_play", gin.H{
+			"app": "rtp", "stream": fixture.streamID, "schema": "fmp4",
+			"mediaServerId": fixture.resolver.node.MediaServerUUID, "ip": clientIP,
+			"params": url.Values{playauth.QueryParameter: {fixture.token}}.Encode(),
+		})
+	}
+	response = onPlay("203.0.113.10")
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+	response = fixture.serve(t)
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+	require.Zero(t, fixture.dispatcher.count())
+
+	response = onPlay(fixture.clientIP)
+	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
+	response = fixture.serve(t)
+	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
+	require.Equal(t, 1, fixture.dispatcher.count())
 }
 
 func (f *autoOnDemandFixture) serve(t *testing.T) *httptest.ResponseRecorder {
@@ -180,6 +231,7 @@ func TestOnStreamNotFoundAcceptsAuthorizedFixedRequest(t *testing.T) {
 	require.Equal(t, play.Request{
 		DeviceID: fixture.deviceID, ChannelID: fixture.channelID,
 		Trigger: "on_stream_not_found", RequiredNode: fixture.resolver.node.ID,
+		AuthorizationID: fixture.authID,
 	}, fixture.dispatcher.requests[0])
 }
 
@@ -209,6 +261,9 @@ func TestOnStreamNotFoundFailsClosedBeforeDispatch(t *testing.T) {
 		}},
 		{name: "fixed disabled", mutate: func(f *autoOnDemandFixture) { f.settings.FixedAddressEnabled = false }},
 		{name: "auto disabled", mutate: func(f *autoOnDemandFixture) { f.settings.AutoOnDemandEnabled = false }},
+		{name: "play auth disabled", mutate: func(_ *autoOnDemandFixture) {
+			app.ConfigYml.Set(gbconfig.PlayAuthEnabledConfigKey, false)
+		}},
 		{name: "cap missing", mutate: func(f *autoOnDemandFixture) { f.path = "/index/hook/on_stream_not_found" }},
 		{name: "cap duplicated", mutate: func(f *autoOnDemandFixture) { f.path += "&cap=" + url.QueryEscape(f.capability) }},
 		{name: "cap invalid", mutate: func(f *autoOnDemandFixture) { f.path = "/index/hook/on_stream_not_found?cap=invalid" }},
@@ -218,6 +273,12 @@ func TestOnStreamNotFoundFailsClosedBeforeDispatch(t *testing.T) {
 		}},
 		{name: "play token invalid", mutate: func(f *autoOnDemandFixture) {
 			f.body["params"] = url.Values{playauth.QueryParameter: {"invalid"}}.Encode()
+		}},
+		{name: "signer without authorization registry", mutate: func(f *autoOnDemandFixture) {
+			f.controller.SetPlayAuthorizer(f.signer)
+		}},
+		{name: "authorization near expiry", mutate: func(f *autoOnDemandFixture) {
+			f.clock.now = f.clock.now.Add(91 * time.Second)
 		}},
 		{name: "target unknown", mutate: func(f *autoOnDemandFixture) { f.validator.err = errors.New("not found") }},
 		{name: "runtime missing", mutate: func(f *autoOnDemandFixture) {
@@ -247,6 +308,7 @@ func TestOnStreamNotFoundRejectsDispatcherAdmissionError(t *testing.T) {
 func TestOnStreamNotFoundGlobalLimiterBoundsPreAuthenticationWork(t *testing.T) {
 	fixture := newAutoOnDemandFixture(t)
 	accepted := 0
+	started := time.Now()
 	for i := 0; i < 40; i++ {
 		response := fixture.serve(t)
 		var payload struct {
@@ -257,8 +319,26 @@ func TestOnStreamNotFoundGlobalLimiterBoundsPreAuthenticationWork(t *testing.T) 
 			accepted++
 		}
 	}
-	require.Equal(t, 32, accepted)
-	require.Equal(t, 32, fixture.dispatcher.count())
+	maxAccepted := 32 + int(math.Ceil(time.Since(started).Seconds()*32))
+	require.LessOrEqual(t, accepted, maxAccepted)
+	require.Less(t, accepted, 40)
+	require.Equal(t, accepted, fixture.dispatcher.count())
+}
+
+func TestOnStreamNotFoundInvalidCallbackDoesNotConsumeAuthorizedQuota(t *testing.T) {
+	fixture := newAutoOnDemandFixture(t)
+	validPath := fixture.path
+	fixture.path = "/index/hook/on_stream_not_found?cap=invalid"
+	for i := 0; i < 40; i++ {
+		response := fixture.serve(t)
+		assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+	}
+	require.Zero(t, fixture.dispatcher.count())
+
+	fixture.path = validPath
+	response := fixture.serve(t)
+	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
+	require.Equal(t, 1, fixture.dispatcher.count())
 }
 
 type blockingAutoEnsurer struct {

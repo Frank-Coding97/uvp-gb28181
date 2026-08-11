@@ -14,6 +14,8 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/middleware"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
@@ -34,6 +36,10 @@ type PlayService interface {
 
 type AuthorizedPlayService interface {
 	StartAuthorized(context.Context, string, string, string) (*play.Result, error)
+}
+
+type FixedPlaybackAuthorizationService interface {
+	AuthorizeFixedPlayback(context.Context, string, string, string) (*play.Result, error)
 }
 
 type StreamRetentionPolicy interface {
@@ -58,17 +64,21 @@ func NewPlayController(svc PlayService, opts ...PlayControllerOption) *PlayContr
 // Start 发起点播
 // @Router /api/gb28181/play/{deviceId}/{channelId} [post]
 func (pc *PlayController) Start(c *gin.Context) {
+	deviceID := c.Param("deviceId")
+	channelID := c.Param("channelId")
+	audit := playbackAuthorizationAudit(c, "realtime_play_authorization_issue", deviceID, channelID)
 	if pc.svc == nil {
+		audit["result"] = "unavailable"
 		pc.FailAndAbort(c, "点播服务未启用(GB28181 disabled?)", nil)
 		return
 	}
-	deviceID := c.Param("deviceId")
-	channelID := c.Param("channelId")
 	if deviceID == "" || channelID == "" {
+		audit["result"] = "invalid_argument"
 		pc.FailAndAbort(c, "deviceId/channelId 不能为空", nil)
 		return
 	}
 	if !pc.channelVisible(c, deviceID, channelID) {
+		audit["result"] = "denied"
 		return
 	}
 	var res *play.Result
@@ -79,6 +89,7 @@ func (pc *PlayController) Start(c *gin.Context) {
 		res, err = pc.svc.Start(c.Request.Context(), deviceID, channelID)
 	}
 	if err != nil {
+		audit["result"] = playAuthorizationAuditResult(err)
 		if errors.Is(err, play.ErrPlayTimeout) {
 			pc.FailAndAbort(c, mapPlayErr(err), err, http.StatusGatewayTimeout)
 			return
@@ -87,7 +98,81 @@ func (pc *PlayController) Start(c *gin.Context) {
 		return
 	}
 	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
+	finishPlaybackAuthorizationAudit(audit, res)
 	pc.Success(c, res)
+}
+
+// Authorize returns a fresh short-lived fixed playback URL without starting
+// the device. Login and Casbin run before this protected controller; channel
+// visibility is checked before the playback service can select a node.
+func (pc *PlayController) Authorize(c *gin.Context) {
+	deviceID := c.Param("deviceId")
+	channelID := c.Param("channelId")
+	audit := playbackAuthorizationAudit(c, "fixed_play_authorization_issue", deviceID, channelID)
+	service, ok := pc.svc.(FixedPlaybackAuthorizationService)
+	if pc.svc == nil || !ok {
+		audit["result"] = "unavailable"
+		pc.FailAndAbort(c, "固定播放地址预授权不可用", nil)
+		return
+	}
+	if deviceID == "" || channelID == "" {
+		audit["result"] = "invalid_argument"
+		pc.FailAndAbort(c, "deviceId/channelId 不能为空", nil)
+		return
+	}
+	if !pc.channelVisible(c, deviceID, channelID) {
+		audit["result"] = "denied"
+		return
+	}
+	result, err := service.AuthorizeFixedPlayback(
+		c.Request.Context(), deviceID, channelID, requestPlaybackSourceIP(c.Request),
+	)
+	if err != nil {
+		audit["result"] = playAuthorizationAuditResult(err)
+		pc.FailAndAbort(c, "固定播放地址预授权失败", err)
+		return
+	}
+	play.ApplyPlaybackSelection(result, result.DefaultProtocol, isSecurePlaybackRequest(c.Request))
+	finishPlaybackAuthorizationAudit(audit, result)
+	pc.Success(c, result)
+}
+
+func playbackAuthorizationAudit(c *gin.Context, action, deviceID, channelID string) map[string]any {
+	audit := map[string]any{
+		"action":    action,
+		"deviceId":  deviceID,
+		"channelId": channelID,
+		"result":    "denied",
+	}
+	if claims := common.GetClaims(c); claims != nil {
+		audit["userId"] = claims.UserID
+	}
+	middleware.MarkSensitiveOperation(c, audit)
+	return audit
+}
+
+func finishPlaybackAuthorizationAudit(audit map[string]any, result *play.Result) {
+	if audit == nil || result == nil {
+		return
+	}
+	if result.AuthorizationExpiresAt > 0 {
+		audit["result"] = "issued"
+	} else {
+		audit["result"] = "not_enabled"
+	}
+	if result.Node != nil {
+		audit["nodeId"] = result.Node.ID
+	}
+	if result.AuthorizationCorrelationID != "" {
+		audit["correlationId"] = result.AuthorizationCorrelationID
+	}
+}
+
+func playAuthorizationAuditResult(err error) string {
+	if errors.Is(err, play.ErrPlayAuthorizationUnavailable) {
+		return "unavailable"
+	}
+	return "failed"
 }
 
 func requestPlaybackSourceIP(request *http.Request) string {

@@ -39,6 +39,13 @@ func (r fixedTestRegistry) Get(id int64) (*node.Node, bool) {
 	return r.mediaNode, r.mediaNode != nil && r.mediaNode.ID == id
 }
 
+func (r fixedTestRegistry) List() []*node.Node {
+	if r.mediaNode == nil {
+		return nil
+	}
+	return []*node.Node{r.mediaNode}
+}
+
 func (r fixedTestRegistry) ListActive() []*node.Node {
 	if r.mediaNode == nil || !r.mediaNode.IsActive() {
 		return nil

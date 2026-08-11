@@ -1465,15 +1465,18 @@ INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUE
 -- Playback authorization settings for fresh MySQL installs.
 INSERT INTO `sys_api` (`id`,`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`deleted_at`,`created_by`) VALUES
 (247,'读取播放鉴权配置','/api/gb28181/sip/service-config/play-auth','GET','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
-(248,'修改播放鉴权配置','/api/gb28181/sip/service-config/play-auth','PUT','GB28181 SIP 配置',NOW(),NOW(),NULL,1);
+(248,'修改播放鉴权配置','/api/gb28181/sip/service-config/play-auth','PUT','GB28181 SIP 配置',NOW(),NOW(),NULL,1),
+(249,'发起实时点播','/api/gb28181/play/:deviceId/:channelId','POST','GB28181 播放鉴权',NOW(),NOW(),NULL,1),
+(250,'申请固定播放地址授权','/api/gb28181/play/:deviceId/:channelId/authorization','POST','GB28181 播放鉴权',NOW(),NOW(),NULL,1);
 INSERT INTO `sys_menu` (`id`,`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`) VALUES
-(140368,140355,'','','','读取播放鉴权配置',1,3,'gb28181:sip:config:view',NOW(),NOW(),1),
-(140369,140355,'','','','修改播放鉴权配置',1,3,'gb28181:sip:config:update',NOW(),NOW(),1);
-INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140368),(1,140369);
-INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES (140368,247),(140369,248);
+(140371,140355,'','','','发起实时点播',1,3,'gb28181:play:start',NOW(),NOW(),1);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140371);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES (140359,247),(140360,248),(140371,249),(140371,250);
 INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUES
 (7591,'p','role_1','/api/gb28181/sip/service-config/play-auth','GET','*','',''),
-(7592,'p','role_1','/api/gb28181/sip/service-config/play-auth','PUT','*','','');
+(7592,'p','role_1','/api/gb28181/sip/service-config/play-auth','PUT','*','',''),
+(7593,'p','role_1','/api/gb28181/play/:deviceId/:channelId','POST','*','',''),
+(7594,'p','role_1','/api/gb28181/play/:deviceId/:channelId/authorization','POST','*','','');
 
 -- GB28181 device registry and dual-version profile archive.
 DROP TABLE IF EXISTS `gb_device`;

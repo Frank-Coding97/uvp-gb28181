@@ -33,11 +33,15 @@ const (
 )
 
 var (
-	ErrKeyInvalid        = errors.New("invalid play authorization key")
-	ErrTokenInvalid      = errors.New("invalid play authorization token")
-	ErrTokenExpired      = errors.New("expired play authorization token")
-	ErrCapabilityInvalid = errors.New("invalid callback capability")
-	ErrURLInvalid        = errors.New("invalid playback URL")
+	ErrKeyInvalid                   = errors.New("invalid play authorization key")
+	ErrTokenInvalid                 = errors.New("invalid play authorization token")
+	ErrTokenExpired                 = errors.New("expired play authorization token")
+	ErrTokenTampered                = fmt.Errorf("%w: tampered", ErrTokenInvalid)
+	ErrTokenBindingMismatch         = fmt.Errorf("%w: resource binding mismatch", ErrTokenInvalid)
+	ErrTokenMediaGenerationMismatch = fmt.Errorf("%w: media generation mismatch", ErrTokenInvalid)
+	ErrTokenIPMismatch              = fmt.Errorf("%w: client ip mismatch", ErrTokenInvalid)
+	ErrCapabilityInvalid            = errors.New("invalid callback capability")
+	ErrURLInvalid                   = errors.New("invalid playback URL")
 )
 
 type KeyMaterial struct {
@@ -264,47 +268,60 @@ func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
 	}
 	parts := strings.Split(token, ".")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return Claims{}, ErrTokenInvalid
+		return Claims{}, ErrTokenTampered
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[0])
 	if err != nil {
-		return Claims{}, ErrTokenInvalid
+		return Claims{}, ErrTokenTampered
 	}
 	var claims Claims
 	if err := json.Unmarshal(payload, &claims); err != nil {
-		return Claims{}, ErrTokenInvalid
+		return Claims{}, ErrTokenTampered
 	}
 	key, ok := s.keys[claims.KeyID]
 	if !ok || claims.KeyID == "" {
-		return Claims{}, ErrTokenInvalid
+		return Claims{}, ErrTokenTampered
 	}
 	providedSignature, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil || !hmac.Equal(providedSignature, signature(key.sign, []byte(parts[0]))) {
-		return Claims{}, ErrTokenInvalid
+		return Claims{}, ErrTokenTampered
 	}
 	if claims.Version != tokenVersion || claims.Audience != tokenAudience || claims.Mode != ModeDirect ||
 		claims.Nonce == "" || claims.AuthorizationGeneration == "" || claims.DeviceID != expected.DeviceID ||
 		claims.ChannelID != expected.ChannelID || claims.App != expected.App || claims.Stream != expected.Stream ||
-		claims.MediaServerID != expected.MediaServerID || claims.MediaGeneration != expected.MediaGeneration {
-		return Claims{}, ErrTokenInvalid
+		claims.MediaServerID != expected.MediaServerID {
+		return Claims{}, ErrTokenBindingMismatch
+	}
+	if claims.MediaGeneration != expected.MediaGeneration {
+		return Claims{}, ErrTokenMediaGenerationMismatch
 	}
 	if expected.BindClientIP && claims.ClientIPDigest == "" {
-		return Claims{}, ErrTokenInvalid
+		return Claims{}, ErrTokenIPMismatch
 	}
 	if claims.ClientIPDigest != "" {
 		digest, digestErr := clientIPDigest(key.ip, expected.ClientIP)
 		if digestErr != nil || !hmac.Equal([]byte(claims.ClientIPDigest), []byte(digest)) {
-			return Claims{}, ErrTokenInvalid
+			return Claims{}, ErrTokenIPMismatch
 		}
 	}
 	now := s.now().UTC()
 	if claims.IssuedAt <= 0 || claims.ExpiresAt <= claims.IssuedAt || time.Unix(claims.IssuedAt, 0).After(now.Add(maxClockSkew)) {
-		return Claims{}, ErrTokenInvalid
+		return Claims{}, ErrTokenTampered
 	}
 	if !now.Before(time.Unix(claims.ExpiresAt, 0)) {
 		return Claims{}, ErrTokenExpired
 	}
 	return claims, nil
+}
+
+// CorrelationID is safe for logs and audit records. It is not a bearer
+// credential and never exposes the random authorization generation itself.
+func CorrelationID(authorizationGeneration string) string {
+	if authorizationGeneration == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("uvp-gb28181/play-audit/v1:" + authorizationGeneration))
+	return base64.RawURLEncoding.EncodeToString(sum[:9])
 }
 
 func signature(key, payload []byte) []byte {

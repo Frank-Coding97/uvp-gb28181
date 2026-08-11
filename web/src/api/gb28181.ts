@@ -97,6 +97,7 @@ export interface PlayResult {
   httpFlvUrl: string;
   hlsUrl: string;
   expireAt: number;
+  authorizationExpiresAt?: number;
 }
 
 export type PlayApiResult = BaseResult<PlayResult>;
@@ -114,6 +115,10 @@ export const listChannels = (deviceId: string) =>
 /** 发起点播 */
 export const startPlay = (deviceId: string, channelId: string) =>
   http.request<PlayApiResult>("post", baseUrlApi(`gb28181/play/${deviceId}/${channelId}`));
+
+/** 为固定播放地址刷新短期访问凭据。 */
+export const authorizeFixedPlayback = (deviceId: string, channelId: string) =>
+  http.request<PlayApiResult>("post", baseUrlApi(`gb28181/play/${deviceId}/${channelId}/authorization`));
 
 /**
  * 停播响应

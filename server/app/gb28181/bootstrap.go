@@ -204,6 +204,9 @@ var zlmLocationMap *stream.LocationMap
 // playSvc 全局点播 service(routes 用 GetPlayService 取)
 var playSvc *play.Service
 
+// playAuthMetrics records fixed-outcome authorization counters in memory.
+var playAuthMetrics *playauth.Metrics
+
 // playSessions 全局点播会话管理(让 hook 端点 on_stream_none_reader/on_rtp_server_timeout 也能查到)
 var playSessions = uac.NewSessionManager()
 
@@ -233,6 +236,8 @@ var schedulerLogCancel context.CancelFunc
 
 // PlayService 返回点播 service(可能为 nil,gb28181 未启用 / UAC 初始化失败时)
 func PlayService() *play.Service { return playSvc }
+
+func PlayAuthorizationMetrics() *playauth.Metrics { return playAuthMetrics }
 
 // SIPTraceRuntimeEnabled reports whether the current SIP transport has trace
 // hooks attached. It intentionally does not treat a degraded trace store
@@ -556,17 +561,25 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		app.ConfigYml.GetString("token.jwttokensignkey"),
 		cfg.ZLM.Secret,
 	)
+	var playAuthorization *playauth.AuthorizationService
+	playAuthMetrics = nil
 	if signerErr != nil {
 		gbroutes.SetPlayAuthorizer(nil)
 		if playAuthSettings.Enabled {
 			return fmt.Errorf("装配 GB28181 播放鉴权失败: %w", signerErr)
 		}
 		app.ZapLog.Warn("GB28181 播放鉴权 signer 未装配，播放鉴权保持关闭")
+	} else if playSigner != nil {
+		playAuthMetrics = playauth.NewMetrics()
+		playAuthorization = playauth.NewAuthorizationService(
+			playSigner,
+			playauth.NewAuthorizationRegistry(),
+			playauth.WithAuthorizationMetrics(playAuthMetrics),
+		)
+		gbroutes.SetPlayAuthorizer(playAuthorization)
+		app.ZapLog.Info("GB28181 播放鉴权服务已装配")
 	} else {
-		gbroutes.SetPlayAuthorizer(playSigner)
-		if playSigner != nil {
-			app.ZapLog.Info("GB28181 播放鉴权 signer 已装配")
-		}
+		gbroutes.SetPlayAuthorizer(nil)
 	}
 
 	// 装配点播 service(依赖 SIP UAC + ZLM 客户端 + 流就绪 Notifier)
@@ -582,8 +595,8 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				opts = append(opts, play.WithSnapshotService(snapshotSvc))
 				app.ZapLog.Info("GB28181 通道快照 service 已装配")
 			}
-			if playSigner != nil {
-				opts = append(opts, play.WithPlayTokenIssuer(playSigner))
+			if playAuthorization != nil {
+				opts = append(opts, play.WithPlayTokenIssuer(playAuthorization))
 			}
 			playSvc = play.NewWithScheduler(cfg,
 				schedulerPickerAdapter{m: zlmScheduler},
@@ -611,8 +624,8 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				zap.Int("recoveryFailed", recoveryStats.Failed))
 		} else {
 			opts := make([]play.Option, 0, 1)
-			if playSigner != nil {
-				opts = append(opts, play.WithPlayTokenIssuer(playSigner))
+			if playAuthorization != nil {
+				opts = append(opts, play.WithPlayTokenIssuer(playAuthorization))
 			}
 			playSvc = play.New(cfg, zlmClient, u, playSessions, gbroutes.StreamNotifier(),
 				play.NewDeviceRepo(), play.NewChannelRepo(), opts...)
@@ -700,6 +713,7 @@ func stopSIPDependencies(ctx context.Context) {
 		playReconciler = nil
 	}
 	playSvc = nil
+	playAuthMetrics = nil
 	gbroutes.SetPlayService(nil)
 	gbroutes.SetPlayAuthorizer(nil)
 	gbroutes.SetDeviceMgmtCatalogTrigger(nil)
