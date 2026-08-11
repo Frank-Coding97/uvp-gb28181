@@ -113,11 +113,12 @@ const (
 
 // 错误
 var (
-	ErrDeviceNotFound  = errors.New("设备不存在")
-	ErrDeviceOffline   = errors.New("设备离线")
-	ErrChannelNotFound = errors.New("通道不存在")
-	ErrStreamNotReady  = errors.New("流就绪等待超时")
-	ErrPlayTimeout     = errors.New("点播总超时")
+	ErrDeviceNotFound          = errors.New("设备不存在")
+	ErrDeviceOffline           = errors.New("设备离线")
+	ErrChannelNotFound         = errors.New("通道不存在")
+	ErrStreamNotReady          = errors.New("流就绪等待超时")
+	ErrPlayTimeout             = errors.New("点播总超时")
+	ErrRequiredNodeUnavailable = errors.New("指定 ZLM 节点不可用")
 )
 
 // Service 点播 service:串联 ZLM 收流 + UAC INVITE + 流就绪等待
@@ -482,6 +483,9 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			selectedNode, ok = s.registry.Get(req.RequiredNode)
 			if !ok {
 				return nil, fmt.Errorf("指定 ZLM 节点不存在: %d", req.RequiredNode)
+			}
+			if !selectedNode.IsActive() || selectedNode.IsNearCapacity() {
+				return nil, fmt.Errorf("%w: %d", ErrRequiredNodeUnavailable, req.RequiredNode)
 			}
 		} else {
 			selectedNode, err = s.picker.Pick(ctx, PickContext{

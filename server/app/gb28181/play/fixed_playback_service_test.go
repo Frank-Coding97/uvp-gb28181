@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +20,16 @@ import (
 type fixedTestPicker struct{ mediaNode *node.Node }
 
 func (p fixedTestPicker) Pick(context.Context, PickContext) (*node.Node, error) {
+	return p.mediaNode, nil
+}
+
+type countingFixedPicker struct {
+	mediaNode *node.Node
+	calls     atomic.Int32
+}
+
+func (p *countingFixedPicker) Pick(context.Context, PickContext) (*node.Node, error) {
+	p.calls.Add(1)
 	return p.mediaNode, nil
 }
 
@@ -232,6 +243,44 @@ func TestStartFixedAddressRejectsInvalidGBIDs(t *testing.T) {
 				t.Fatalf("invalid fixed ID opened RTP %d times", z.openCalls.Load())
 			}
 		})
+	}
+}
+
+func TestEnsureLiveRequiredNodeRejectsInactiveNodeBeforeMediaSideEffects(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, true, true)
+	mediaNode := &node.Node{
+		ID: 1, Name: "node-a", Host: "192.168.10.222", PlaybackHost: "192.168.10.222",
+		MediaServerUUID: "node-a", State: node.StateOffline, RTPPortStart: 40000,
+	}
+	z := &mockZLM{port: 40000}
+	inviter := &mockInviter{}
+	picker := &countingFixedPicker{mediaNode: &node.Node{
+		ID: 2, Name: "node-b", Host: "192.168.10.223", PlaybackHost: "192.168.10.223",
+		MediaServerUUID: "node-b", State: node.StateActive, RTPPortStart: 41000,
+	}}
+	signer, err := playauth.NewSigner([]byte("0123456789abcdef0123456789abcdef"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewWithScheduler(testCfg(), picker, fixedTestRegistry{mediaNode}, stream.NewLocationMap(),
+		inviter, uac.NewSessionManager(), stream.NewNotifier(), fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()},
+		WithPlayTokenIssuer(signer),
+		WithURLResolver(NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 80}})),
+		WithNodeClientFactory(func(*node.Node) ZLM { return z }),
+	)
+
+	_, err = service.EnsureLive(context.Background(), Request{
+		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID,
+		Trigger: "on_stream_not_found", RequiredNode: mediaNode.ID,
+	})
+	if !errors.Is(err, ErrRequiredNodeUnavailable) {
+		t.Fatalf("error=%v, want ErrRequiredNodeUnavailable", err)
+	}
+	if z.openCalls.Load() != 0 || inviter.inviteCalls.Load() != 0 {
+		t.Fatalf("inactive required node caused side effects: open=%d invite=%d", z.openCalls.Load(), inviter.inviteCalls.Load())
+	}
+	if picker.calls.Load() != 0 {
+		t.Fatalf("required node path called scheduler %d times", picker.calls.Load())
 	}
 }
 

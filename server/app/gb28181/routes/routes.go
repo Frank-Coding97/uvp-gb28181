@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +22,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streamprobe"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/talk"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 var deviceController = gbcontrollers.NewDeviceController()
@@ -47,6 +49,10 @@ var streamMonitorController = gbcontrollers.NewStreamMonitorController(nil)
 var streamProbeController = gbcontrollers.NewStreamProbeController(nil)
 var talkController atomic.Pointer[gbcontrollers.TalkController]
 var playService *gbplay.Service
+var autoOnDemandMu sync.Mutex
+var autoOnDemandPlayService *gbplay.Service
+var autoOnDemandRegistry autoOnDemandNodeRegistry
+var autoOnDemandDispatcher *gbplay.AutoStartDispatcher
 var recordingService *gbrecording.Service
 var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
 var cloudRecordingCatalogController atomic.Pointer[gbcontrollers.CloudRecordingCatalogController]
@@ -199,10 +205,12 @@ func SetPlayService(svc *gbplay.Service) {
 	if svc == nil {
 		hookController.SetPlayStopper(nil)
 		hookController.SetNoneReaderPolicy(nil)
+		configureAutoOnDemandService(nil)
 		return
 	}
 	hookController.SetPlayStopper(svc)
 	hookController.SetNoneReaderPolicy(svc)
+	configureAutoOnDemandService(svc)
 }
 
 func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
@@ -315,6 +323,84 @@ func SetDeviceMgmtPlaybackRuntime(service gbcontrollers.PlaybackSessionService, 
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
 	hookController.SetMultiNode(resolver, binder)
+	registry, _ := resolver.(autoOnDemandNodeRegistry)
+	configureAutoOnDemandRegistry(registry)
+}
+
+type autoOnDemandNodeRegistry interface {
+	gbhandler.AutoOnDemandNodeResolver
+	Get(int64) (*node.Node, bool)
+	IsAutoOnDemandReady(int64) bool
+	List() []*node.Node
+}
+
+type autoOnDemandTargetValidator struct {
+	channels gbplay.ChannelRepo
+}
+
+func (v autoOnDemandTargetValidator) ValidateAutoOnDemandTarget(ctx context.Context, deviceID, channelID string) error {
+	channel, err := v.channels.FindChannel(ctx, deviceID, channelID)
+	if err != nil {
+		return err
+	}
+	if channel == nil {
+		return gbplay.ErrChannelNotFound
+	}
+	return nil
+}
+
+func configureAutoOnDemandService(service *gbplay.Service) {
+	autoOnDemandMu.Lock()
+	defer autoOnDemandMu.Unlock()
+	registry := autoOnDemandRegistry
+	if service == nil {
+		registry = nil
+	}
+	configureAutoOnDemandRuntimeLocked(service, registry)
+}
+
+func configureAutoOnDemandRegistry(registry autoOnDemandNodeRegistry) {
+	autoOnDemandMu.Lock()
+	defer autoOnDemandMu.Unlock()
+	configureAutoOnDemandRuntimeLocked(autoOnDemandPlayService, registry)
+}
+
+func configureAutoOnDemandRuntimeLocked(service *gbplay.Service, registry autoOnDemandNodeRegistry) {
+	hookController.SetAutoOnDemandRuntime(nil, nil, nil)
+	if autoOnDemandDispatcher != nil {
+		_ = autoOnDemandDispatcher.Stop()
+		autoOnDemandDispatcher = nil
+	}
+	autoOnDemandPlayService = service
+	autoOnDemandRegistry = registry
+	if service == nil || registry == nil {
+		return
+	}
+
+	knownNodeIDs := make([]int64, 0)
+	for _, mediaNode := range registry.List() {
+		if autoOnDemandNodeAllowed(registry, mediaNode.ID) {
+			knownNodeIDs = append(knownNodeIDs, mediaNode.ID)
+		}
+	}
+	dispatcher := gbplay.NewAutoStartDispatcher(service, gbplay.AutoStartDispatcherOptions{
+		KnownNodeIDs: knownNodeIDs,
+		NodeAllowed: func(nodeID int64) bool {
+			return autoOnDemandNodeAllowed(registry, nodeID)
+		},
+	})
+	autoOnDemandDispatcher = dispatcher
+	hookController.SetAutoOnDemandRuntime(
+		registry,
+		autoOnDemandTargetValidator{channels: gbplay.NewChannelRepo()},
+		dispatcher,
+	)
+}
+
+func autoOnDemandNodeAllowed(registry autoOnDemandNodeRegistry, nodeID int64) bool {
+	mediaNode, ok := registry.Get(nodeID)
+	return ok && mediaNode != nil && mediaNode.IsActive() && !mediaNode.IsNearCapacity() &&
+		registry.IsAutoOnDemandReady(nodeID)
 }
 
 func SetPlaybackMediaSink(sink gbhandler.PlaybackMediaSink) {

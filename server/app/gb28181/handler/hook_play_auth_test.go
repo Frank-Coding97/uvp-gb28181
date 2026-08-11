@@ -45,7 +45,10 @@ func TestOnPlayUsesDirectAuthorizationForFixedStreams(t *testing.T) {
 		"missing token": {"app": "rtp", "stream": streamID, "mediaServerId": "node-a"},
 		"wrong stream":  {"app": "rtp", "stream": deviceID + "_37010301021320000006", "mediaServerId": "node-a", "params": url.Values{playauth.QueryParameter: {grant.Token}}.Encode()},
 		"wrong node":    {"app": "rtp", "stream": streamID, "mediaServerId": "node-b", "params": url.Values{playauth.QueryParameter: {grant.Token}}.Encode()},
-		"bad params":    {"app": "rtp", "stream": streamID, "mediaServerId": "node-a", "params": "%zz"},
+		"duplicate token": {"app": "rtp", "stream": streamID, "mediaServerId": "node-a", "params": url.Values{
+			playauth.QueryParameter: {grant.Token, grant.Token},
+		}.Encode()},
+		"bad params": {"app": "rtp", "stream": streamID, "mediaServerId": "node-a", "params": "%zz"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rr := postJSON(t, e, "/index/hook/on_play", body)
