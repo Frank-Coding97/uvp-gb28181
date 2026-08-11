@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
     cascadeServiceConfigLabels,
     createStaticServiceConfigDraft,
+    normalizePlayAuthConfig,
     playbackServiceConfigLabels,
     staticServiceConfigLabels
 } from "./serviceConfigState";
@@ -37,12 +38,14 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).not.toContain("是否使用设备来源IP作为回复IP");
         expect(staticServiceConfigLabels).not.toContain("缺少国标ID是否给所有上级发送消息");
         expect(staticServiceConfigLabels).not.toContain("设置notify缓存队列最大长度");
-        expect(playbackServiceConfigLabels).toHaveLength(6);
+        expect(playbackServiceConfigLabels).toHaveLength(8);
         expect(playbackServiceConfigLabels).not.toContain("推流是否录制");
         expect(playbackServiceConfigLabels).not.toContain("推流鉴权");
         expect(cascadeServiceConfigLabels).toHaveLength(7);
         expect(draft.playback.fixedAddressEnabled).toBe(false);
         expect(draft.playback.autoOnDemandEnabled).toBe(false);
+        expect(draft.playback.authEnabled).toBe(false);
+        expect(draft.playback.authBindClientIP).toBe(false);
         expect(draft.playback).not.toHaveProperty("autoInvite");
         expect(draft.playback.playTimeoutMs).toBe(10000);
         expect(draft.playback.onDemandLive).toBe(true);
@@ -50,6 +53,8 @@ describe("static service config draft", () => {
         expect(playbackServiceConfigLabels).toContain("按需直播");
         expect(playbackServiceConfigLabels).toContain("固定播放地址");
         expect(playbackServiceConfigLabels).toContain("自动点播");
+        expect(playbackServiceConfigLabels).toContain("播放鉴权");
+        expect(playbackServiceConfigLabels).toContain("绑定客户端 IP");
         expect(playbackServiceConfigLabels).not.toContain("是否开启无人观看自动停止");
         expect(draft.playback).not.toHaveProperty("recordPushStream");
         expect(draft.playback).not.toHaveProperty("pushAuth");
@@ -60,5 +65,16 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).not.toContain("SIP端口");
         expect(staticServiceConfigLabels).not.toContain("SIP域");
         expect(staticServiceConfigLabels).not.toContain("SIP密码");
+    });
+
+    it("disables IP binding whenever playback auth is disabled", () => {
+        expect(normalizePlayAuthConfig({ authEnabled: false, authBindClientIP: true })).toEqual({
+            authEnabled: false,
+            authBindClientIP: false
+        });
+        expect(normalizePlayAuthConfig({ authEnabled: true, authBindClientIP: true })).toEqual({
+            authEnabled: true,
+            authBindClientIP: true
+        });
     });
 });

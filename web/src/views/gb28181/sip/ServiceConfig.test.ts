@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
     updateDefaultPlaybackProtocolConfig: vi.fn(),
     fetchFixedAddressPlaybackConfig: vi.fn(),
     updateFixedAddressPlaybackConfig: vi.fn(),
+    fetchPlayAuthConfig: vi.fn(),
+    updatePlayAuthConfig: vi.fn(),
     fetchPlaybackSettingsConfig: vi.fn(),
     updatePlaybackSettingsConfig: vi.fn(),
     fetchGlobalSubscriptionConfig: vi.fn(),
@@ -139,6 +141,8 @@ describe("ServiceConfig edit mode", () => {
         api.updateDefaultPlaybackProtocolConfig.mockReset();
         api.fetchFixedAddressPlaybackConfig.mockReset();
         api.updateFixedAddressPlaybackConfig.mockReset();
+        api.fetchPlayAuthConfig.mockReset();
+        api.updatePlayAuthConfig.mockReset();
         api.fetchPlaybackSettingsConfig.mockReset();
         api.updatePlaybackSettingsConfig.mockReset();
         api.fetchGlobalSubscriptionConfig.mockReset();
@@ -174,6 +178,11 @@ describe("ServiceConfig edit mode", () => {
             code: 0,
             message: "",
             data: { fixedAddressEnabled: false, autoOnDemandEnabled: false }
+        });
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { authEnabled: false, authBindClientIP: false }
         });
         dictionaryApi.getDictItemsByDictCodeAPI.mockResolvedValue({
             code: 0,
@@ -214,6 +223,11 @@ describe("ServiceConfig edit mode", () => {
             message: "保存成功",
             data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
         });
+        api.updatePlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "保存成功",
+            data: { authEnabled: true, authBindClientIP: true }
+        });
         api.fetchSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: true } });
         api.updateSyncChannelsOnOnlineConfig.mockResolvedValue({ code: 0, message: "保存成功", data: { enabled: false } });
         api.fetchIgnoreChannelOfflineStatusNotifyConfig.mockResolvedValue({ code: 0, message: "", data: { enabled: false } });
@@ -249,7 +263,7 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(21);
+        expect(wrapper.findAll("[data-tooltip]")).toHaveLength(23);
         expect(wrapper.find("[data-field='saveMobilePositionHistory']").attributes("data-tooltip")).toBe(
             "关闭后仍更新设备和通道的最新位置，不再新增轨迹点。"
         );
@@ -263,6 +277,11 @@ describe("ServiceConfig edit mode", () => {
             code: 0,
             message: "",
             data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
+        });
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { authEnabled: true, authBindClientIP: false }
         });
         const wrapper = mountPage();
         await flushPromises();
@@ -288,6 +307,11 @@ describe("ServiceConfig edit mode", () => {
             code: 0,
             message: "",
             data: { fixedAddressEnabled: true, autoOnDemandEnabled: false }
+        });
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { authEnabled: true, authBindClientIP: false }
         });
         api.updateFixedAddressPlaybackConfig.mockResolvedValue({
             code: 0,
@@ -341,6 +365,11 @@ describe("ServiceConfig edit mode", () => {
             message: "",
             data: { fixedAddressEnabled: true, autoOnDemandEnabled: false }
         });
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { authEnabled: true, authBindClientIP: false }
+        });
         const wrapper = mountPage();
         await flushPromises();
         await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
@@ -351,6 +380,98 @@ describe("ServiceConfig edit mode", () => {
         expect(api.updateFixedAddressPlaybackConfig).not.toHaveBeenCalled();
         expect(wrapper.find("[data-field='fixedAddressEnabled'] button").text()).toBe("true");
         expect(wrapper.find("[data-field='autoOnDemandEnabled'] button").text()).toBe("false");
+    });
+
+    it("联动播放鉴权与客户端 IP 绑定开关", async () => {
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { authEnabled: true, authBindClientIP: true }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+
+        const authSwitch = wrapper.find("[data-field='authEnabled'] button");
+        const bindIPSwitch = wrapper.find("[data-field='authBindClientIP'] button");
+        expect(authSwitch.element).toHaveProperty("disabled", true);
+
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        expect(authSwitch.element).toHaveProperty("disabled", false);
+        expect(bindIPSwitch.element).toHaveProperty("disabled", false);
+
+        await authSwitch.trigger("click");
+        await flushPromises();
+        expect(authSwitch.text()).toBe("false");
+        expect(bindIPSwitch.text()).toBe("false");
+        expect(bindIPSwitch.element).toHaveProperty("disabled", true);
+    });
+
+    it("已保存自动点播时阻止关闭播放鉴权", async () => {
+        api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { fixedAddressEnabled: true, autoOnDemandEnabled: true }
+        });
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { authEnabled: true, authBindClientIP: false }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        await wrapper.find("[data-field='authEnabled'] button").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.find("[data-field='authEnabled'] button").text()).toBe("true");
+        expect(wrapper.text()).toContain("请先关闭自动点播");
+        expect(api.updatePlayAuthConfig).not.toHaveBeenCalled();
+    });
+
+    it("完整提交播放鉴权公开配置且不包含密钥", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        await wrapper.find("[data-field='authEnabled'] button").trigger("click");
+        await wrapper.find("[data-field='authBindClientIP'] button").trigger("click");
+        await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
+        await flushPromises();
+
+        expect(api.updatePlayAuthConfig).toHaveBeenCalledOnce();
+        expect(api.updatePlayAuthConfig).toHaveBeenCalledWith({
+            authEnabled: true,
+            authBindClientIP: true
+        });
+        expect(JSON.stringify(api.updatePlayAuthConfig.mock.calls[0][0])).not.toContain("key");
+    });
+
+    it("播放鉴权保存失败时恢复服务端快照", async () => {
+        api.fetchPlayAuthConfig.mockResolvedValue({
+            code: 0,
+            message: "",
+            data: { authEnabled: true, authBindClientIP: false }
+        });
+        api.updatePlayAuthConfig.mockRejectedValue(new Error("保存失败"));
+        const wrapper = mountPage();
+        await flushPromises();
+        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
+        await wrapper.find("[data-field='authBindClientIP'] button").trigger("click");
+        await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
+        await flushPromises();
+
+        expect(wrapper.find("[data-field='authEnabled'] button").text()).toBe("true");
+        expect(wrapper.find("[data-field='authBindClientIP'] button").text()).toBe("false");
+    });
+
+    it("展示播放鉴权有效期和 IP 网络限制", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.find("[data-field='authEnabled']").attributes("data-tooltip")).toContain("120 秒");
+        expect(wrapper.find("[data-field='authEnabled']").attributes("data-tooltip")).toContain("新连接");
+        expect(wrapper.find("[data-field='authEnabled']").attributes("data-tooltip")).toContain("裸地址");
+        expect(wrapper.find("[data-field='authBindClientIP']").attributes("data-tooltip")).toContain("NAT");
+        expect(wrapper.find("[data-field='authBindClientIP']").attributes("data-tooltip")).toContain("VPN");
     });
 
     it("removes unsupported legacy WVP configuration placeholders", async () => {

@@ -1044,6 +1044,24 @@ export const updateFixedAddressPlaybackConfig = (config: FixedAddressPlaybackCon
     { data: config }
   );
 
+export interface PlayAuthConfig {
+  authEnabled: boolean;
+  authBindClientIP: boolean;
+}
+
+export const fetchPlayAuthConfig = () =>
+  http.request<BaseResult<PlayAuthConfig>>(
+    "get",
+    baseUrlApi("gb28181/sip/service-config/play-auth")
+  );
+
+export const updatePlayAuthConfig = (config: PlayAuthConfig) =>
+  http.request<BaseResult<PlayAuthConfig>>(
+    "put",
+    baseUrlApi("gb28181/sip/service-config/play-auth"),
+    { data: config }
+  );
+
 export type GlobalSubscriptionItem = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";
 
 export interface GlobalSubscriptionConfig {

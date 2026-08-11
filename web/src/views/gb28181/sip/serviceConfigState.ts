@@ -18,6 +18,8 @@ export interface StaticServiceConfigDraft {
         defaultProtocol: "ws-flv" | "http-flv" | "hls" | "webrtc";
         fixedAddressEnabled: boolean;
         autoOnDemandEnabled: boolean;
+        authEnabled: boolean;
+        authBindClientIP: boolean;
         playTimeoutMs: number;
         cloudRecordingEnabled: boolean;
         onDemandLive: boolean;
@@ -55,6 +57,8 @@ export const playbackServiceConfigLabels = [
     "默认播放协议",
     "固定播放地址",
     "自动点播",
+    "播放鉴权",
+    "绑定客户端 IP",
     "点播超时时间（毫秒）",
     "云端录像",
     "按需直播"
@@ -91,6 +95,8 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
             defaultProtocol: "ws-flv",
             fixedAddressEnabled: false,
             autoOnDemandEnabled: false,
+            authEnabled: false,
+            authBindClientIP: false,
             playTimeoutMs: 10000,
             cloudRecordingEnabled: false,
             onDemandLive: true
@@ -104,5 +110,17 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
             renewalMode: true,
             usePushStatusAsChannelStatus: false
         }
+    };
+}
+
+export interface PlayAuthDraft {
+    authEnabled: boolean;
+    authBindClientIP: boolean;
+}
+
+export function normalizePlayAuthConfig(config: PlayAuthDraft): PlayAuthDraft {
+    return {
+        authEnabled: config.authEnabled,
+        authBindClientIP: config.authEnabled && config.authBindClientIP
     };
 }

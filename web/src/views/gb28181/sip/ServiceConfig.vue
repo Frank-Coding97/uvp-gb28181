@@ -8,6 +8,7 @@ import {
     fetchDefaultChannelStreamTransportConfig,
     fetchDefaultPlaybackProtocolConfig,
     fetchFixedAddressPlaybackConfig,
+    fetchPlayAuthConfig,
     fetchPlaybackSettingsConfig,
     fetchGlobalSubscriptionConfig,
     fetchDefaultChannelAudioConfig,
@@ -25,6 +26,7 @@ import {
     updateDefaultChannelStreamTransportConfig,
     updateDefaultPlaybackProtocolConfig,
     updateFixedAddressPlaybackConfig,
+    updatePlayAuthConfig,
     updatePlaybackSettingsConfig,
     updateGlobalSubscriptionConfig,
     updateDefaultChannelAudioConfig,
@@ -38,6 +40,7 @@ import {
     updateIgnoreChannelOfflineStatusNotifyConfig,
     type PlaybackProtocol,
     type FixedAddressPlaybackConfig,
+    type PlayAuthConfig,
     type PlaybackSettingsConfig
 } from "@/api/gb28181";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
@@ -45,7 +48,7 @@ import {
     PLAYBACK_PROTOCOL_DICT_CODE,
     playbackProtocolOptionsFromDictionary
 } from "../playbackProtocol";
-import { createStaticServiceConfigDraft } from "./serviceConfigState";
+import { createStaticServiceConfigDraft, normalizePlayAuthConfig } from "./serviceConfigState";
 
 const { isMobile } = useDevicesSize();
 const activeTab = ref("gb");
@@ -72,6 +75,9 @@ const playbackSettingsReady = ref(false);
 const fixedAddressPlaybackLoading = ref(true);
 const fixedAddressPlaybackSaving = ref(false);
 const fixedAddressPlaybackReady = ref(false);
+const playAuthLoading = ref(true);
+const playAuthSaving = ref(false);
+const playAuthReady = ref(false);
 const globalSubscriptionLoading = ref(true);
 const globalSubscriptionSaving = ref(false);
 const globalSubscriptionReady = ref(false);
@@ -115,6 +121,10 @@ const savedFixedAddressPlayback = reactive<FixedAddressPlaybackConfig>({
     fixedAddressEnabled: false,
     autoOnDemandEnabled: false
 });
+const savedPlayAuth = reactive<PlayAuthConfig>({
+    authEnabled: false,
+    authBindClientIP: false
+});
 const playbackProtocolOptions = ref(playbackProtocolOptionsFromDictionary([]));
 const savedGlobalSubscriptionItems = ref<Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">>([]);
 const savedDefaultChannelAudioEnabled = ref(true);
@@ -149,6 +159,11 @@ const fixedAddressPlaybackChanged = computed(
     () =>
         draft.playback.fixedAddressEnabled !== savedFixedAddressPlayback.fixedAddressEnabled ||
         draft.playback.autoOnDemandEnabled !== savedFixedAddressPlayback.autoOnDemandEnabled
+);
+const playAuthChanged = computed(
+    () =>
+        draft.playback.authEnabled !== savedPlayAuth.authEnabled ||
+        draft.playback.authBindClientIP !== savedPlayAuth.authBindClientIP
 );
 const globalSubscriptionChanged = computed(
     () => JSON.stringify(draft.globalSubscriptionItems) !== JSON.stringify(savedGlobalSubscriptionItems.value)
@@ -188,6 +203,7 @@ const hasChanges = computed(
         defaultChannelStreamTransportChanged.value ||
         defaultPlaybackProtocolChanged.value ||
         fixedAddressPlaybackChanged.value ||
+        playAuthChanged.value ||
         playbackSettingsChanged.value ||
         globalSubscriptionChanged.value ||
         defaultChannelAudioChanged.value ||
@@ -207,6 +223,7 @@ const configLoading = computed(
         defaultChannelStreamTransportLoading.value ||
         defaultPlaybackProtocolLoading.value ||
         fixedAddressPlaybackLoading.value ||
+        playAuthLoading.value ||
         playbackSettingsLoading.value ||
         globalSubscriptionLoading.value ||
         defaultChannelAudioLoading.value ||
@@ -226,6 +243,7 @@ const configSaving = computed(
         defaultChannelStreamTransportSaving.value ||
         defaultPlaybackProtocolSaving.value ||
         fixedAddressPlaybackSaving.value ||
+        playAuthSaving.value ||
         playbackSettingsSaving.value ||
         globalSubscriptionSaving.value ||
         defaultChannelAudioSaving.value ||
@@ -245,6 +263,7 @@ const configReady = computed(
         defaultChannelStreamTransportReady.value &&
         defaultPlaybackProtocolReady.value &&
         fixedAddressPlaybackReady.value &&
+        playAuthReady.value &&
         playbackSettingsReady.value &&
         globalSubscriptionReady.value &&
         defaultChannelAudioReady.value &&
@@ -364,6 +383,33 @@ function restoreFixedAddressPlaybackDraft() {
     draft.playback.autoOnDemandEnabled = savedFixedAddressPlayback.fixedAddressEnabled
         ? savedFixedAddressPlayback.autoOnDemandEnabled
         : false;
+}
+
+function applyPlayAuthConfig(config: PlayAuthConfig) {
+    const normalized = normalizePlayAuthConfig(config);
+    draft.playback.authEnabled = normalized.authEnabled;
+    draft.playback.authBindClientIP = normalized.authBindClientIP;
+    Object.assign(savedPlayAuth, normalized);
+}
+
+function restorePlayAuthDraft() {
+    const normalized = normalizePlayAuthConfig(savedPlayAuth);
+    draft.playback.authEnabled = normalized.authEnabled;
+    draft.playback.authBindClientIP = normalized.authBindClientIP;
+}
+
+async function loadPlayAuthConfig() {
+    playAuthLoading.value = true;
+    try {
+        const response = await fetchPlayAuthConfig();
+        if (response.code !== 0) throw new Error(response.message || "加载配置失败");
+        applyPlayAuthConfig(response.data);
+        playAuthReady.value = true;
+    } catch (error: any) {
+        Message.error(error?.message || "加载播放鉴权配置失败");
+    } finally {
+        playAuthLoading.value = false;
+    }
 }
 
 async function loadFixedAddressPlaybackConfig() {
@@ -552,6 +598,7 @@ function startEditing() {
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
     restoreFixedAddressPlaybackDraft();
+    restorePlayAuthDraft();
     restorePlaybackSettingsDraft();
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
@@ -574,6 +621,7 @@ function cancelEditing() {
     draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
     draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
     restoreFixedAddressPlaybackDraft();
+    restorePlayAuthDraft();
     restorePlaybackSettingsDraft();
     draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
     draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
@@ -594,6 +642,19 @@ watch(
         if (!enabled) draft.playback.autoOnDemandEnabled = false;
     }
 );
+
+function handlePlayAuthEnabledChange(enabled: boolean) {
+    if (!enabled && savedFixedAddressPlayback.autoOnDemandEnabled) {
+        Message.error("请先关闭自动点播并保存，再关闭播放鉴权");
+        return;
+    }
+    const normalized = normalizePlayAuthConfig({
+        authEnabled: enabled,
+        authBindClientIP: draft.playback.authBindClientIP
+    });
+    draft.playback.authEnabled = normalized.authEnabled;
+    draft.playback.authBindClientIP = normalized.authBindClientIP;
+}
 
 async function saveConfig() {
     if (!configReady.value || !isEditing.value) return;
@@ -648,6 +709,16 @@ async function saveConfig() {
             draft.playback.defaultProtocol = response.data.protocol;
             savedDefaultPlaybackProtocol.value = response.data.protocol;
             defaultPlaybackProtocolSaving.value = false;
+        }
+        if (playAuthChanged.value) {
+            playAuthSaving.value = true;
+            const response = await updatePlayAuthConfig({
+                authEnabled: draft.playback.authEnabled,
+                authBindClientIP: draft.playback.authEnabled && draft.playback.authBindClientIP
+            });
+            if (response.code !== 0) throw new Error(response.message || "保存配置失败");
+            applyPlayAuthConfig(response.data);
+            playAuthSaving.value = false;
         }
         if (fixedAddressPlaybackChanged.value) {
             fixedAddressPlaybackSaving.value = true;
@@ -758,6 +829,7 @@ async function saveConfig() {
         Message.success("国标服务配置已更新");
     } catch (error: any) {
         restoreFixedAddressPlaybackDraft();
+        restorePlayAuthDraft();
         restorePlaybackSettingsDraft();
         Message.error(error?.message || "保存国标服务配置失败");
     } finally {
@@ -767,6 +839,7 @@ async function saveConfig() {
         defaultChannelStreamTransportSaving.value = false;
         defaultPlaybackProtocolSaving.value = false;
         fixedAddressPlaybackSaving.value = false;
+        playAuthSaving.value = false;
         playbackSettingsSaving.value = false;
         globalSubscriptionSaving.value = false;
         defaultChannelAudioSaving.value = false;
@@ -788,6 +861,7 @@ onMounted(() =>
         loadDefaultChannelStreamTransportConfig(),
         loadDefaultPlaybackProtocolConfig(),
         loadFixedAddressPlaybackConfig(),
+        loadPlayAuthConfig(),
         loadPlaybackSettingsConfig(),
         loadPlaybackProtocolOptions(),
         loadGlobalSubscriptionConfig(),
@@ -1181,9 +1255,46 @@ onMounted(() =>
                                             :disabled="
                                                 !isEditing ||
                                                 !draft.playback.fixedAddressEnabled ||
+                                                !draft.playback.authEnabled ||
                                                 fixedAddressPlaybackLoading ||
                                                 fixedAddressPlaybackSaving ||
                                                 !fixedAddressPlaybackReady
+                                            "
+                                        />
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="authEnabled"
+                                        label="播放鉴权"
+                                        tooltip="开启后播放地址携带 120 秒短时凭证，仅限制新连接和重连，不会主动中断已建立播放；关闭后媒体裸地址泄露即可被直接使用。"
+                                    >
+                                        <a-switch
+                                            :model-value="draft.playback.authEnabled"
+                                            :loading="playAuthLoading || playAuthSaving"
+                                            :disabled="!isEditing || playAuthLoading || playAuthSaving || !playAuthReady"
+                                            @update:model-value="handlePlayAuthEnabledChange"
+                                        />
+                                        <template v-if="savedFixedAddressPlayback.autoOnDemandEnabled" #extra>
+                                            <span>请先关闭自动点播并保存，再关闭播放鉴权。</span>
+                                        </template>
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="authBindClientIP"
+                                        label="绑定客户端 IP"
+                                        tooltip="仅在播放鉴权开启时生效。NAT、VPN、移动网络切换、IPv6 临时地址或代理拓扑变化可能导致合法重连被拒绝。"
+                                    >
+                                        <a-switch
+                                            v-model="draft.playback.authBindClientIP"
+                                            :loading="playAuthLoading || playAuthSaving"
+                                            :disabled="
+                                                !isEditing ||
+                                                !draft.playback.authEnabled ||
+                                                playAuthLoading ||
+                                                playAuthSaving ||
+                                                !playAuthReady
                                             "
                                         />
                                     </a-form-item>
