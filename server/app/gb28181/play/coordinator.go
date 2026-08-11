@@ -88,6 +88,11 @@ func NewCoordinatorWithStop(start StartFunc, stop StopFunc) *Coordinator {
 // operation and receive the same result or error. A waiting request's context
 // only controls its own wait.
 func (c *Coordinator) EnsureLive(ctx context.Context, req Request) (*Result, error) {
+	result, _, err := c.ensureLive(ctx, req)
+	return result, err
+}
+
+func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -97,7 +102,7 @@ func (c *Coordinator) EnsureLive(ctx context.Context, req Request) (*Result, err
 		c.mu.Lock()
 		if c.recoveryPending {
 			c.mu.Unlock()
-			return nil, ErrLiveRecoveryPending
+			return nil, false, ErrLiveRecoveryPending
 		}
 		entry := c.entries[key]
 		if entry == nil {
@@ -108,7 +113,8 @@ func (c *Coordinator) EnsureLive(ctx context.Context, req Request) (*Result, err
 			}
 			c.entries[key] = entry
 			c.mu.Unlock()
-			return c.runStart(ctx, req, key, entry)
+			result, err := c.runStart(ctx, req, key, entry)
+			return result, false, err
 		}
 
 		switch entry.state {
@@ -117,30 +123,30 @@ func (c *Coordinator) EnsureLive(ctx context.Context, req Request) (*Result, err
 			result := entry.result
 			c.mu.Unlock()
 			if err != nil {
-				return nil, err
+				return nil, true, err
 			}
-			return result, entry.err
+			return result, true, entry.err
 		case LiveStateStarting:
 			if err := ownerNodeConflict(req, entry); err != nil {
 				c.mu.Unlock()
-				return nil, err
+				return nil, true, err
 			}
 			done := entry.done
 			c.mu.Unlock()
 			if err := waitFor(ctx, done); err != nil {
-				return nil, err
+				return nil, true, err
 			}
 			// The entry is immutable after done is closed. This preserves the
 			// exact shared result/error for all waiters, including failed starts.
 			if err := ownerNodeConflict(req, entry); err != nil {
-				return nil, err
+				return nil, true, err
 			}
-			return entry.result, entry.err
+			return entry.result, true, entry.err
 		case LiveStateStopping:
 			done := entry.done
 			c.mu.Unlock()
 			if err := waitFor(ctx, done); err != nil {
-				return nil, err
+				return nil, true, err
 			}
 			// Stop completion removes the entry. Re-check the map before
 			// reserving a new generation.
@@ -289,11 +295,15 @@ func waitFor(ctx context.Context, done <-chan struct{}) error {
 // migrate to this method without changing the underlying Start transaction.
 func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) {
 	c := s.coordinator()
-	result, err := c.EnsureLive(ctx, req)
+	result, reused, err := c.ensureLive(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	return s.resultForCaller(req, result)
+	callerResult, err := s.resultForCaller(req, result)
+	if callerResult != nil && reused {
+		callerResult.Reused = true
+	}
+	return callerResult, err
 }
 
 func (s *Service) coordinator() *Coordinator {

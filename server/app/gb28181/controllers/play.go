@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"strings"
 
@@ -29,6 +30,10 @@ type PlayController struct {
 type PlayService interface {
 	Start(context.Context, string, string) (*play.Result, error)
 	Stop(context.Context, string) error
+}
+
+type AuthorizedPlayService interface {
+	StartAuthorized(context.Context, string, string, string) (*play.Result, error)
 }
 
 type StreamRetentionPolicy interface {
@@ -66,7 +71,13 @@ func (pc *PlayController) Start(c *gin.Context) {
 	if !pc.channelVisible(c, deviceID, channelID) {
 		return
 	}
-	res, err := pc.svc.Start(c.Request.Context(), deviceID, channelID)
+	var res *play.Result
+	var err error
+	if authorized, ok := pc.svc.(AuthorizedPlayService); ok {
+		res, err = authorized.StartAuthorized(c.Request.Context(), deviceID, channelID, requestPlaybackSourceIP(c.Request))
+	} else {
+		res, err = pc.svc.Start(c.Request.Context(), deviceID, channelID)
+	}
 	if err != nil {
 		if errors.Is(err, play.ErrPlayTimeout) {
 			pc.FailAndAbort(c, mapPlayErr(err), err, http.StatusGatewayTimeout)
@@ -77,6 +88,16 @@ func (pc *PlayController) Start(c *gin.Context) {
 	}
 	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
 	pc.Success(c, res)
+}
+
+func requestPlaybackSourceIP(request *http.Request) string {
+	if request == nil {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(strings.TrimSpace(request.RemoteAddr)); err == nil {
+		return host
+	}
+	return strings.TrimSpace(request.RemoteAddr)
 }
 
 func isSecurePlaybackRequest(request *http.Request) bool {

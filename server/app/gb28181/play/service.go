@@ -78,24 +78,25 @@ type DeviceRepo interface {
 
 // Result 点播结果
 type Result struct {
-	StreamID        string       `json:"streamId"` // ZLM stream id(也是会话主键)
-	SSRC            string       `json:"ssrc"`     // 媒体流 SSRC
-	App             string       `json:"app"`      // ZLM app(固定 rtp)
-	Reused          bool         `json:"reused"`
-	Status          string       `json:"status"`
-	Node            *ResultNode  `json:"node"`
-	URLs            PlaybackURLs `json:"urls"`
-	URLWarnings     []string     `json:"urlWarnings"`
-	WSFlvURL        string       `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
-	HLSURL          string       `json:"hlsUrl"`     // HLS 备用
-	HTTPFlvURL      string       `json:"httpFlvUrl"` // http-flv 备用
-	DefaultProtocol string       `json:"defaultProtocol"`
-	Protocol        string       `json:"protocol"`
-	URL             string       `json:"url"`
-	ZLMWebRTC       bool         `json:"zlmWebrtc"`
-	ExpireAt        int64        `json:"expireAt"` // 预计无人观看断流时刻(秒,UTC)
-	Generation      uint64       `json:"-"`
-	ModeAtStart     LiveMode     `json:"-"`
+	StreamID               string       `json:"streamId"` // ZLM stream id(也是会话主键)
+	SSRC                   string       `json:"ssrc"`     // 媒体流 SSRC
+	App                    string       `json:"app"`      // ZLM app(固定 rtp)
+	Reused                 bool         `json:"reused"`
+	Status                 string       `json:"status"`
+	Node                   *ResultNode  `json:"node"`
+	URLs                   PlaybackURLs `json:"urls"`
+	URLWarnings            []string     `json:"urlWarnings"`
+	WSFlvURL               string       `json:"wsflvUrl"`   // ws-flv 播放地址(前端 avplayer 用)
+	HLSURL                 string       `json:"hlsUrl"`     // HLS 备用
+	HTTPFlvURL             string       `json:"httpFlvUrl"` // http-flv 备用
+	DefaultProtocol        string       `json:"defaultProtocol"`
+	Protocol               string       `json:"protocol"`
+	URL                    string       `json:"url"`
+	ZLMWebRTC              bool         `json:"zlmWebrtc"`
+	ExpireAt               int64        `json:"expireAt"` // 预计无人观看断流时刻(秒,UTC)
+	AuthorizationExpiresAt int64        `json:"authorizationExpiresAt,omitempty"`
+	Generation             uint64       `json:"-"`
+	ModeAtStart            LiveMode     `json:"-"`
 }
 
 type ResultNode struct {
@@ -373,7 +374,7 @@ func (s *Service) buildReuseResult(ctx context.Context, ch *gbmodels.GbChannel, 
 // 旧调用方继续使用这个签名；实际副作用由 startDirect 执行，避免
 // REST、级联等多个入口在同一通道重复 openRtpServer/INVITE。
 func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Result, error) {
-	return s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, Trigger: "explicit"})
+	return s.StartAuthorized(ctx, deviceID, channelID, "")
 }
 
 // startDirect 发起一次不经过协调器的点播事务。调用方必须已经持有通道
@@ -522,11 +523,6 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	}
 	result.Generation = generation
 	result.ModeAtStart = mode
-	if err := s.preflightFixedResult(req, result, pickedNode); err != nil {
-		s.unbindLocation(liveRef)
-		return nil, err
-	}
-
 	// 5. openRtpServer:port=0 让 ZLM 自选临时端口
 	onlyTrack := 2 // ZLM: 2=仅视频,关闭音频
 	if ch.AudioEnabled {

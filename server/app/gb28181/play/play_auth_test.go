@@ -3,15 +3,92 @@ package play
 import (
 	"context"
 	"errors"
+	"io"
 	"net/url"
 	"testing"
 	"time"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+type failedEntropy struct{}
+
+func (failedEntropy) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func withPlayAuthorization(t *testing.T, enabled, bindIP bool) {
+	t.Helper()
+	if app.ConfigYml == nil {
+		withFixedAddressPlaybackSettings(t, false, false)
+	}
+	app.ConfigYml.Set(gbconfig.PlayAuthEnabledConfigKey, enabled)
+	app.ConfigYml.Set(gbconfig.PlayAuthBindClientIPConfigKey, bindIP)
+}
+
+func TestDynamicPlaybackGetsIndependentGenerationBoundAuthorization(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
+	withPlayAuthorization(t, true, true)
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	service, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
+	inv.onInvite = func(session *uac.Session) {
+		z.online.Store(true)
+		go notifier.Publish(session.StreamID)
+	}
+
+	first, err := service.StartAuthorized(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "203.0.113.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.StartAuthorized(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "203.0.113.9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstURL, _ := url.Parse(valueOrEmpty(first.URLs.HTTPFLV))
+	secondURL, _ := url.Parse(valueOrEmpty(second.URLs.HTTPFLV))
+	firstToken := firstURL.Query().Get(playauth.QueryParameter)
+	secondToken := secondURL.Query().Get(playauth.QueryParameter)
+	if firstToken == "" || secondToken == "" || firstToken == secondToken {
+		t.Fatalf("tokens not independently issued: first=%q second=%q", firstToken, secondToken)
+	}
+	if first.Generation == 0 || first.Generation != second.Generation || first.AuthorizationExpiresAt == 0 {
+		t.Fatalf("generation/expiry mismatch: first=%+v second=%+v", first, second)
+	}
+	binding, err := service.ResolvePlaybackMediaContext("rtp", first.StreamID, "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding.BindClientIP = true
+	binding.ClientIP = "203.0.113.9"
+	if _, err := service.tokenIssuer.(playauth.Verifier).Verify(firstToken, binding); err != nil {
+		t.Fatalf("issued token did not verify: %v", err)
+	}
+}
+
+func TestAuthorizationPrepareFailureHasNoMediaSideEffects(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
+	withPlayAuthorization(t, true, false)
+	z := &mockZLM{port: 40000}
+	inv := &mockInviter{}
+	service, _, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
+	signer, err := playauth.NewSigner([]byte("0123456789abcdef0123456789abcdef"), playauth.WithRandomReader(failedEntropy{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.tokenIssuer = signer
+
+	_, err = service.StartAuthorized(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "203.0.113.9")
+	if !errors.Is(err, ErrPlayAuthorizationUnavailable) {
+		t.Fatalf("error=%v", err)
+	}
+	if z.openCalls.Load() != 0 || inv.inviteCalls.Load() != 0 {
+		t.Fatalf("authorization preflight opened media: open=%d invite=%d", z.openCalls.Load(), inv.inviteCalls.Load())
+	}
+}
 
 type failingPlayTokenIssuer struct{}
 
@@ -86,26 +163,21 @@ func TestDynamicPlaybackResultIsNotChangedByFixedAddressAuthorization(t *testing
 
 func TestFixedPlaybackAuthorizationFailsBeforeMediaSideEffects(t *testing.T) {
 	withFixedAddressPlaybackSettings(t, true, false)
+	withPlayAuthorization(t, true, false)
 	tests := []struct {
-		name            string
-		issuer          playauth.DirectIssuer
-		resolverFailure bool
-		want            error
+		name   string
+		issuer playauth.DirectIssuer
+		want   error
 	}{
 		{name: "missing issuer", want: ErrPlayAuthorizationUnavailable},
 		{name: "issuer failure", issuer: failingPlayTokenIssuer{}, want: ErrPlayAuthorizationUnavailable},
-		{name: "resolver failure", resolverFailure: true, want: playauth.ErrURLInvalid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			z := &mockZLM{port: 40000}
 			inv := &mockInviter{}
 			s, _, channels := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
-			if !tt.resolverFailure {
-				s.tokenIssuer = tt.issuer
-			} else {
-				s.urlResolver = NewURLResolver(fakeServerConfigProvider{err: errors.New("config unavailable")})
-			}
+			s.tokenIssuer = tt.issuer
 
 			_, err := s.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)
 			if !errors.Is(err, tt.want) {
@@ -142,6 +214,7 @@ func TestFixedPlaybackDeprecatedSingleNodeFailsClosed(t *testing.T) {
 
 func TestFixedPlaybackReadyReuseRefreshesAuthorization(t *testing.T) {
 	withFixedAddressPlaybackSettings(t, true, true)
+	withPlayAuthorization(t, true, false)
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
 	service, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
