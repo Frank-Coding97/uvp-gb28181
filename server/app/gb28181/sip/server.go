@@ -84,6 +84,15 @@ func (s *Server) SetErrorHandler(fn func(error)) { s.onError = fn }
 // UAC 返回 SIP 服务内置的 UAC(可能为 nil,初始化失败时)
 func (s *Server) UAC() *uac.UAC { return s.uac }
 
+// NewCascadeClient creates another transaction client on the server-owned UA.
+// The UA and its listeners remain owned by Server and are closed by Shutdown.
+func (s *Server) NewCascadeClient() (*sipgo.Client, error) {
+	if s == nil || s.ua == nil {
+		return nil, fmt.Errorf("GB28181 shared SIP UA is unavailable")
+	}
+	return sipgo.NewClient(s.ua)
+}
+
 // TraceRuntime returns the optional trace runtime for controller bootstrap wiring.
 func (s *Server) TraceRuntime() gbtrace.Runtime { return s.trace }
 

@@ -131,6 +131,138 @@ export interface StopPlayResult {
 export const stopPlay = (streamId: string) =>
   http.request<BaseResult<StopPlayResult>>("delete", baseUrlApi(`gb28181/play/${streamId}`));
 
+// ===== 国标级联 =====
+
+export type CascadeProfileOverride = "auto" | "2016" | "2022" | string;
+export type CascadeRegistrationState = "unregistered" | "registered" | "expired" | string;
+export type CascadeHeartbeatState = "unknown" | "healthy" | "stale" | string;
+export type CascadeOverallState = "online" | "offline" | string;
+
+export interface CascadePlatform {
+  id: number;
+  name: string;
+  upstreamServerId: string;
+  upstreamDomain: string;
+  host: string;
+  port: number;
+  localDeviceId: string;
+  localDomain: string;
+  localSipIp: string;
+  localSipPort: number;
+  mediaAdvertiseIp?: string;
+  authUsername?: string;
+  hasPassword: boolean;
+  profileOverride: CascadeProfileOverride;
+  effectiveVersion: string;
+  effectiveVersionFrom: string;
+  charsetOverride?: string;
+  registerExpires: number;
+  keepaliveInterval: number;
+  transport: "UDP" | "TCP" | string;
+  catalogBatchSize: number;
+  publishPlatform: boolean;
+  publishCivil: boolean;
+  publishGroup: boolean;
+  maxStreams: number;
+  ptzEnabled: boolean;
+  enabled: boolean;
+  configRevision: number;
+  projectionRevision: number;
+  registration: CascadeRegistrationState;
+  heartbeat: CascadeHeartbeatState;
+  overall: CascadeOverallState;
+  registerAt?: string | null;
+  registerExpiresAt?: string | null;
+  heartbeatAt?: string | null;
+  lastErrorCode?: string;
+  lastErrorMessage?: string;
+  lastErrorAt?: string | null;
+}
+
+export type CascadePlatformInput = Omit<
+  CascadePlatform,
+  | "id"
+  | "hasPassword"
+  | "effectiveVersion"
+  | "effectiveVersionFrom"
+  | "configRevision"
+  | "projectionRevision"
+  | "registration"
+  | "heartbeat"
+  | "overall"
+  | "registerAt"
+  | "registerExpiresAt"
+  | "heartbeatAt"
+  | "lastErrorCode"
+  | "lastErrorMessage"
+  | "lastErrorAt"
+> & { password?: string; retryPolicy?: string };
+
+export interface CascadeDeviceProjection {
+  id?: number;
+  platformId?: number;
+  sourceDeviceId: number;
+  publishedDeviceId: string;
+  name: string;
+  active?: boolean;
+}
+
+export interface CascadeChannelProjection {
+  id?: number;
+  platformId?: number;
+  deviceProjectionId?: number;
+  sourceDeviceId: number;
+  sourceChannelId: number;
+  publishedChannelId: string;
+  name: string;
+  parentOverride: string;
+  ptzAllowed: boolean;
+  active?: boolean;
+}
+
+export interface CascadeShares {
+  platformId: number;
+  revision: number;
+  devices: CascadeDeviceProjection[];
+  channels: CascadeChannelProjection[];
+}
+
+export interface CascadeListData { list: CascadePlatform[] }
+
+export const listCascadePlatforms = () =>
+  http.request<CascadeListData>("get", baseUrlApi("gb28181/cascade/platforms"));
+
+export const getCascadePlatform = (id: number) =>
+  http.request<CascadePlatform>("get", baseUrlApi(`gb28181/cascade/platforms/${id}`));
+
+export const createCascadePlatform = (data: CascadePlatformInput) =>
+  http.request<CascadePlatform>("post", baseUrlApi("gb28181/cascade/platforms"), { data });
+
+export const updateCascadePlatform = (id: number, data: CascadePlatformInput, expectedRevision: number) =>
+  http.request<CascadePlatform>("put", baseUrlApi(`gb28181/cascade/platforms/${id}`), {
+    data: { ...data, expectedRevision }
+  });
+
+export const deleteCascadePlatform = (id: number) =>
+  http.request<{ ok: boolean }>("delete", baseUrlApi(`gb28181/cascade/platforms/${id}`));
+
+export const setCascadePlatformEnabled = (id: number, enabled: boolean, expectedRevision: number) =>
+  http.request<CascadePlatform>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/enabled`), {
+    data: { enabled, expectedRevision }
+  });
+
+export const reconnectCascadePlatform = (id: number) =>
+  http.request<{ ok: boolean; platformId: number }>("post", baseUrlApi(`gb28181/cascade/platforms/${id}/reconnect`));
+
+export const getCascadeShares = (id: number) =>
+  http.request<CascadeShares>("get", baseUrlApi(`gb28181/cascade/platforms/${id}/shares`));
+
+export const replaceCascadeShares = (id: number, data: {
+  scope: "all" | "devices" | "channels";
+  devices: CascadeDeviceProjection[];
+  channels: CascadeChannelProjection[];
+}) => http.request<CascadeShares>("put", baseUrlApi(`gb28181/cascade/platforms/${id}/shares`), { data });
+
 // ===== 多屏播放方案 =====
 
 export type PlaybackSchemeLayoutSize = 1 | 4 | 6 | 8 | 9 | 16;

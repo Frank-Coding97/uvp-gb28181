@@ -25,6 +25,8 @@ func TestCascadePermissionsSeedsCoverAllDatabaseVariantsAndFreshInstalls(t *test
 		require.Contains(t, text, "gb28181:cascade:view", file)
 		require.Contains(t, text, "gb28181:cascade:manage", file)
 		require.Contains(t, text, "/api/gb28181/cascade/platforms", file)
+		require.Contains(t, text, "/gb28181/cascade", file)
+		require.Contains(t, text, "gb28181/cascade/index", file)
 		require.Contains(t, text, "sys_casbin_rule", file)
 	}
 }

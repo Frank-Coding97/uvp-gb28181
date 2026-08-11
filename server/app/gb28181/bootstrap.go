@@ -275,6 +275,12 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 
 func startControlPlane(cfg gbconfig.Config) {
 	setupCivilCodeService()
+	cascadeCipher, err := loadCascadeCredentialCipher()
+	if err != nil {
+		app.ZapLog.Warn("国标级联凭据密钥未配置,列表可用但密码写入和启用受限",
+			zap.String("env", cascadeCredentialKeyEnv))
+	}
+	setupCascadeManagement(nil, cascadeCipher)
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
 	gbroutes.SetServiceConfigSIPTraceReloader(ReloadSIP)
 	gbroutes.SetServiceConfigSIPTraceRuntimeProvider(SIPTraceRuntimeEnabled)
@@ -504,6 +510,11 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		srv.SetPTZNotifyProcessor(newPTZService)
 	}
 	sipServer = srv
+	if err := startCascadeRuntime(cfg, srv); err != nil {
+		app.ZapLog.Error("国标级联运行时装配失败,设备侧 SIP 继续运行", zap.Error(err))
+	} else {
+		app.ZapLog.Info("国标级联运行时已装配")
+	}
 	if traceServer, ok := srv.(interface{ TraceRuntime() gbtrace.Runtime }); ok {
 		setupTraceController(cfg, traceServer.TraceRuntime())
 	}
@@ -655,6 +666,7 @@ func stopSIPDependencies(ctx context.Context) {
 	gbroutes.SetPlayAuthorizer(nil)
 	gbroutes.SetDeviceMgmtCatalogTrigger(nil)
 	gbroutes.SetDeviceMgmtSubscriptionManager(nil)
+	stopCascadeRuntime(ctx)
 	if sipServer != nil {
 		if err := sipServer.Shutdown(ctx); err != nil {
 			app.ZapLog.Warn("GB28181 SIP 服务优雅关闭失败,忽略继续", zap.Error(err))

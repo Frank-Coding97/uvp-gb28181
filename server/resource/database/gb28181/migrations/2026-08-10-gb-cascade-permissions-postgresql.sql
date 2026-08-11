@@ -8,10 +8,16 @@ FROM (VALUES
  ('重连级联平台','/api/gb28181/cascade/platforms/:id/reconnect','POST'),('查看级联共享','/api/gb28181/cascade/platforms/:id/shares','GET'),('更新级联共享','/api/gb28181/cascade/platforms/:id/shares','PUT')
 ) v(title,path,method)
 WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path=v.path AND a.method=v.method AND a.deleted_at IS NULL);
+INSERT INTO sys_menu (parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by)
+SELECT 0,'/gb28181/cascade','gb28181-cascade','gb28181/cascade/index','国标级联',FALSE,FALSE,13,2,'','lucide:GitBranch',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/gb28181/cascade' AND deleted_at IS NULL);
+UPDATE sys_menu
+SET parent_id=(SELECT id FROM sys_menu WHERE path='/gb28181/cascade' AND deleted_at IS NULL ORDER BY id LIMIT 1), updated_at=CURRENT_TIMESTAMP
+WHERE permission IN ('gb28181:cascade:view','gb28181:cascade:manage','gb28181:cascade:enable','gb28181:cascade:share','gb28181:cascade:reconnect') AND deleted_at IS NULL;
 INSERT INTO sys_menu (parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by)
 SELECT m.id,'','gb28181-cascade-'||v.permission,'','国标级联',TRUE,3,'gb28181:cascade:'||v.permission,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
 FROM sys_menu m CROSS JOIN (VALUES ('view'),('manage'),('enable'),('share'),('reconnect')) v(permission)
-WHERE m.path='/gb28181' AND m.deleted_at IS NULL
+WHERE m.path='/gb28181/cascade' AND m.deleted_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM sys_menu x WHERE x.permission='gb28181:cascade:'||v.permission AND x.deleted_at IS NULL);
 INSERT INTO sys_menu_api (menu_id,api_id)
 SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a
@@ -27,6 +33,9 @@ WHERE ((m.permission='gb28181:cascade:enable' AND a.path LIKE '/api/gb28181/casc
   AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 INSERT INTO sys_role_menu (role_id,menu_id)
 SELECT 1,m.id FROM sys_menu m WHERE m.permission IN ('gb28181:cascade:view','gb28181:cascade:manage','gb28181:cascade:enable','gb28181:cascade:share','gb28181:cascade:reconnect') AND m.deleted_at IS NULL
+  AND NOT EXISTS (SELECT 1 FROM sys_role_menu r WHERE r.role_id=1 AND r.menu_id=m.id);
+INSERT INTO sys_role_menu (role_id,menu_id)
+SELECT 1,m.id FROM sys_menu m WHERE m.path='/gb28181/cascade' AND m.deleted_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM sys_role_menu r WHERE r.role_id=1 AND r.menu_id=m.id);
 INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
 SELECT 'p','role_1',a.path,a.method,'*','','' FROM sys_api a WHERE a.path LIKE '/api/gb28181/cascade/%' AND a.deleted_at IS NULL

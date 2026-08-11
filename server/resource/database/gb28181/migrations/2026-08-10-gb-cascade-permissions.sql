@@ -17,30 +17,40 @@ FROM (
 ) v
 WHERE NOT EXISTS (SELECT 1 FROM `sys_api` a WHERE a.`path`=v.path AND a.`method`=v.method AND a.`deleted_at` IS NULL);
 
+INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`)
+SELECT 0,'/gb28181/cascade','gb28181-cascade','gb28181/cascade/index','国标级联',0,0,13,2,'','lucide:GitBranch',NOW(),NOW(),1
+FROM (SELECT 1) seed
+WHERE NOT EXISTS (SELECT 1 FROM `sys_menu` WHERE `path`='/gb28181/cascade' AND `deleted_at` IS NULL);
+SET @GB_CASCADE_MENU_ID := (SELECT `id` FROM `sys_menu` WHERE `path`='/gb28181/cascade' AND `deleted_at` IS NULL ORDER BY `id` LIMIT 1);
+UPDATE `sys_menu`
+SET `parent_id`=@GB_CASCADE_MENU_ID, `updated_at`=NOW()
+WHERE `permission` IN ('gb28181:cascade:view','gb28181:cascade:manage','gb28181:cascade:enable','gb28181:cascade:share','gb28181:cascade:reconnect')
+  AND `deleted_at` IS NULL AND @GB_CASCADE_MENU_ID IS NOT NULL;
+
 INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`)
-SELECT m.`id`,'','gb28181-cascade-view','','查看国标级联',1,3,'gb28181:cascade:view',NOW(),NOW(),1
-FROM `sys_menu` m
-WHERE m.`path`='/gb28181' AND m.`deleted_at` IS NULL
+SELECT @GB_CASCADE_MENU_ID,'','gb28181-cascade-view','','查看国标级联',1,3,'gb28181:cascade:view',NOW(),NOW(),1
+FROM (SELECT 1) seed
+WHERE @GB_CASCADE_MENU_ID IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM `sys_menu` x WHERE x.`permission`='gb28181:cascade:view' AND x.`deleted_at` IS NULL);
 INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`)
-SELECT m.`id`,'','gb28181-cascade-manage','','管理国标级联',1,3,'gb28181:cascade:manage',NOW(),NOW(),1
-FROM `sys_menu` m
-WHERE m.`path`='/gb28181' AND m.`deleted_at` IS NULL
+SELECT @GB_CASCADE_MENU_ID,'','gb28181-cascade-manage','','管理国标级联',1,3,'gb28181:cascade:manage',NOW(),NOW(),1
+FROM (SELECT 1) seed
+WHERE @GB_CASCADE_MENU_ID IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM `sys_menu` x WHERE x.`permission`='gb28181:cascade:manage' AND x.`deleted_at` IS NULL);
 INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`)
-SELECT m.`id`,'','gb28181-cascade-enable','','启停国标级联',1,3,'gb28181:cascade:enable',NOW(),NOW(),1
-FROM `sys_menu` m
-WHERE m.`path`='/gb28181' AND m.`deleted_at` IS NULL
+SELECT @GB_CASCADE_MENU_ID,'','gb28181-cascade-enable','','启停国标级联',1,3,'gb28181:cascade:enable',NOW(),NOW(),1
+FROM (SELECT 1) seed
+WHERE @GB_CASCADE_MENU_ID IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM `sys_menu` x WHERE x.`permission`='gb28181:cascade:enable' AND x.`deleted_at` IS NULL);
 INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`)
-SELECT m.`id`,'','gb28181-cascade-share','','共享国标级联资源',1,3,'gb28181:cascade:share',NOW(),NOW(),1
-FROM `sys_menu` m
-WHERE m.`path`='/gb28181' AND m.`deleted_at` IS NULL
+SELECT @GB_CASCADE_MENU_ID,'','gb28181-cascade-share','','共享国标级联资源',1,3,'gb28181:cascade:share',NOW(),NOW(),1
+FROM (SELECT 1) seed
+WHERE @GB_CASCADE_MENU_ID IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM `sys_menu` x WHERE x.`permission`='gb28181:cascade:share' AND x.`deleted_at` IS NULL);
 INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`component`,`title`,`hide`,`type`,`permission`,`created_at`,`updated_at`,`created_by`)
-SELECT m.`id`,'','gb28181-cascade-reconnect','','重连国标级联',1,3,'gb28181:cascade:reconnect',NOW(),NOW(),1
-FROM `sys_menu` m
-WHERE m.`path`='/gb28181' AND m.`deleted_at` IS NULL
+SELECT @GB_CASCADE_MENU_ID,'','gb28181-cascade-reconnect','','重连国标级联',1,3,'gb28181:cascade:reconnect',NOW(),NOW(),1
+FROM (SELECT 1) seed
+WHERE @GB_CASCADE_MENU_ID IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM `sys_menu` x WHERE x.`permission`='gb28181:cascade:reconnect' AND x.`deleted_at` IS NULL);
 
 INSERT INTO `sys_menu_api` (`menu_id`,`api_id`)
@@ -73,6 +83,10 @@ INSERT INTO `sys_role_menu` (`role_id`,`menu_id`)
 SELECT 1,m.`id` FROM `sys_menu` m
 WHERE m.`permission` IN ('gb28181:cascade:view','gb28181:cascade:manage','gb28181:cascade:enable','gb28181:cascade:share','gb28181:cascade:reconnect')
   AND m.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` r WHERE r.`role_id`=1 AND r.`menu_id`=m.`id`);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`)
+SELECT 1,@GB_CASCADE_MENU_ID FROM (SELECT 1) seed
+WHERE @GB_CASCADE_MENU_ID IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` r WHERE r.`role_id`=1 AND r.`menu_id`=@GB_CASCADE_MENU_ID);
 INSERT INTO `sys_casbin_rule` (`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
 SELECT 'p','role_1',a.`path`,a.`method`,'*','','' FROM `sys_api` a
 WHERE a.`path` LIKE '/api/gb28181/cascade/%' AND a.`deleted_at` IS NULL
