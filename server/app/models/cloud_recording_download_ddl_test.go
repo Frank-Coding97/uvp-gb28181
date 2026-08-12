@@ -53,8 +53,8 @@ func TestCloudRecordingDownloadPermissionDownMigrationsAreNonDestructive(t *test
 			body, err := os.ReadFile(filepath.Join(serverRoot, "resource", "database", "gb28181", "migrations", filename))
 			require.NoError(t, err)
 			sql := strings.ToLower(string(body))
-			require.Contains(t, sql, "non-destructive rollback")
-			require.Contains(t, sql, "ownership metadata")
+			require.Contains(t, sql, "forward-only")
+			require.Contains(t, sql, "source")
 			require.Contains(t, sql, "select 1")
 			for _, forbidden := range []string{"delete", "update", "insert", "alter", "drop", "truncate"} {
 				require.NotContains(t, sql, forbidden)

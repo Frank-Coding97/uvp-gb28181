@@ -1,7 +1,4 @@
--- Safe non-destructive rollback for MySQL.
--- The up migration may reuse existing download API, menu and Casbin records.
--- sys_casbin_rule has no migration ownership metadata, so deleting by API group,
--- path or method could remove pre-existing or administrator-added permissions.
--- Keep this additive metadata on code rollback; remove it only through a reviewed,
--- targeted administrative cleanup with a backup.
+-- Forward-only: this down migration is intentionally a no-op.
+-- The up migration has no source field identifying the rows it created.
+-- Automatic cleanup could affect pre-existing or administrator-managed permissions.
 SELECT 1;

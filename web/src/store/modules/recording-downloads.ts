@@ -16,7 +16,7 @@ export const useRecordingDownloadStore = defineStore("recording-downloads", () =
   function upsert(task: RecordingDownloadItem) {
     const index = tasks.value.findIndex(item => item.taskId === task.taskId);
     if (index < 0) tasks.value.unshift(task);
-    else tasks.value[index] = { ...tasks.value[index], ...task };
+    else tasks.value[index] = task;
   }
 
   function remove(taskId: string) {

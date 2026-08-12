@@ -23,7 +23,7 @@ type CloudRecordingCatalogAPI interface {
 	CreateDownload(context.Context, uint, uint64) (gbrecording.DownloadTaskView, string, error)
 	DownloadStatus(context.Context, uint, string) (gbrecording.DownloadTaskView, error)
 	CancelDownload(context.Context, uint, string) (gbrecording.DownloadTaskView, error)
-	ClaimDownload(context.Context, http.ResponseWriter, string, string, string) error
+	ClaimDownload(context.Context, http.ResponseWriter, string, string, string, func()) error
 	ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error)
 	Reconciliations(context.Context) ([]gbrecording.ReconciliationDTO, error)
 	TriggerReconciliation([]int64, *time.Time, *time.Time) ([]int64, error)
@@ -136,7 +136,7 @@ func (c *CloudRecordingCatalogController) CancelDownload(ctx *gin.Context) {
 
 func (c *CloudRecordingCatalogController) DownloadContent(ctx *gin.Context) {
 	taskID := ctx.Param("taskId")
-	if taskID == "" {
+	if taskID == "" || ctx.Request.URL.RawQuery != "" {
 		catalogFailure(ctx, http.StatusForbidden, "下载凭据无效")
 		return
 	}
@@ -145,8 +145,9 @@ func (c *CloudRecordingCatalogController) DownloadContent(ctx *gin.Context) {
 		catalogFailure(ctx, http.StatusForbidden, "下载凭据无效")
 		return
 	}
-	setDownloadTicketCookie(ctx, taskID, "", -1)
-	err = c.requireService().ClaimDownload(ctx.Request.Context(), ctx.Writer, taskID, ticket, ctx.GetHeader("Range"))
+	err = c.requireService().ClaimDownload(ctx.Request.Context(), ctx.Writer, taskID, ticket, ctx.GetHeader("Range"), func() {
+		setDownloadTicketCookie(ctx, taskID, "", -1)
+	})
 	if err == nil || ctx.Writer.Written() {
 		return
 	}
@@ -243,7 +244,7 @@ func (unavailableCloudRecordingCatalogService) DownloadStatus(context.Context, u
 func (unavailableCloudRecordingCatalogService) CancelDownload(context.Context, uint, string) (gbrecording.DownloadTaskView, error) {
 	return gbrecording.DownloadTaskView{}, gbrecording.ErrCatalogAccessUnavailable
 }
-func (unavailableCloudRecordingCatalogService) ClaimDownload(context.Context, http.ResponseWriter, string, string, string) error {
+func (unavailableCloudRecordingCatalogService) ClaimDownload(context.Context, http.ResponseWriter, string, string, string, func()) error {
 	return gbrecording.ErrCatalogAccessUnavailable
 }
 func (unavailableCloudRecordingCatalogService) ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error) {
@@ -341,9 +342,11 @@ func respondCatalogError(ctx *gin.Context, err error) {
 	switch {
 	case errors.Is(err, gbrecording.ErrRecordingFileNotFound), errors.Is(err, gbrecording.ErrCatalogFileMissing), errors.Is(err, zlm.ErrRecordingNotFound):
 		status, message = http.StatusNotFound, "录像文件不存在"
+	case errors.Is(err, gbrecording.ErrContentTimeout), errors.Is(err, zlm.ErrRecordingResponseTimeout), errors.Is(err, context.DeadlineExceeded):
+		status, message = http.StatusGatewayTimeout, "录像内容响应超时"
 	case errors.Is(err, gbrecording.ErrCatalogNodeMissing), errors.Is(err, gbrecording.ErrCatalogNodeOffline), errors.Is(err, zlm.ErrRecordingNodeUnavailable):
 		status, message = http.StatusServiceUnavailable, "录像节点当前不可用"
-	case errors.Is(err, gbrecording.ErrCatalogAccessUnavailable), errors.Is(err, zlm.ErrRecordingAccessUnavailable), errors.Is(err, gbrecording.ErrContentUpstream), errors.Is(err, gbrecording.ErrContentRedirect):
+	case errors.Is(err, gbrecording.ErrCatalogAccessUnavailable), errors.Is(err, zlm.ErrRecordingAccessUnavailable), errors.Is(err, gbrecording.ErrContentUpstream), errors.Is(err, gbrecording.ErrContentRedirect), errors.Is(err, gbrecording.ErrContentDeadline):
 		status, message = http.StatusBadGateway, "录像内容当前不可访问"
 	case errors.Is(err, gbrecording.ErrCatalogAccessRevoked), errors.Is(err, gbrecording.ErrCapabilityInvalid):
 		status, message = http.StatusForbidden, "录像访问权限已失效"

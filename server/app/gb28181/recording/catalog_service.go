@@ -117,7 +117,7 @@ func (s *CatalogService) CloseDownloads() {
 	}
 }
 
-func (s *CatalogService) ClaimDownload(ctx context.Context, writer http.ResponseWriter, taskID, ticket, byteRange string) error {
+func (s *CatalogService) ClaimDownload(ctx context.Context, writer http.ResponseWriter, taskID, ticket, byteRange string, onClaimed func()) error {
 	if s.downloads == nil {
 		return ErrCatalogAccessUnavailable
 	}
@@ -127,6 +127,9 @@ func (s *CatalogService) ClaimDownload(ctx context.Context, writer http.Response
 	view, taskCtx, _, err := s.downloads.Claim(taskID, ticket)
 	if err != nil {
 		return err
+	}
+	if onClaimed != nil {
+		onClaimed()
 	}
 	defer func() {
 		if recoverValue := recover(); recoverValue != nil {
@@ -213,6 +216,8 @@ func downloadErrorCode(err error) string {
 		return "file_missing"
 	case errors.Is(err, ErrCatalogNodeMissing), errors.Is(err, ErrCatalogNodeOffline), errors.Is(err, zlm.ErrRecordingNodeUnavailable):
 		return "node_unavailable"
+	case errors.Is(err, ErrContentTimeout), errors.Is(err, zlm.ErrRecordingResponseTimeout), errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
 	case errors.Is(err, ErrContentRangeInvalid):
 		return "range_invalid"
 	default:

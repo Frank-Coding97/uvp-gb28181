@@ -37,8 +37,11 @@ func (*routeCatalogService) DownloadStatus(context.Context, uint, string) (gbrec
 func (*routeCatalogService) CancelDownload(context.Context, uint, string) (gbrecording.DownloadTaskView, error) {
 	return gbrecording.DownloadTaskView{}, nil
 }
-func (s *routeCatalogService) ClaimDownload(ctx context.Context, writer http.ResponseWriter, _, _, _ string) error {
+func (s *routeCatalogService) ClaimDownload(ctx context.Context, writer http.ResponseWriter, _, _, _ string, onClaimed func()) error {
 	_, s.contentHasDeadline = ctx.Deadline()
+	if onClaimed != nil {
+		onClaimed()
+	}
 	_, _ = writer.Write([]byte("streamed"))
 	return nil
 }

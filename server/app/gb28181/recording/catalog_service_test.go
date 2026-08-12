@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -165,9 +166,111 @@ func TestCatalogServiceDownloadRechecksPermissionBeforeUpstream(t *testing.T) {
 	task, ticket, err := service.CreateDownload(context.Background(), 7, 202)
 	require.NoError(t, err)
 	allowed = false
-	err = service.ClaimDownload(context.Background(), httptest.NewRecorder(), task.TaskID, ticket, "")
+	err = service.ClaimDownload(context.Background(), httptest.NewRecorder(), task.TaskID, ticket, "", nil)
 	require.ErrorIs(t, err, ErrCatalogAccessRevoked)
 	require.Zero(t, upstreamCalls)
+}
+
+func TestCatalogServiceDownloadTimeoutFailsTaskAndReleasesSlot(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Now().UTC()
+	file := catalogFile(204, 10, 1, now, "camera.mp4")
+	require.NoError(t, db.Create(&file).Error)
+	registry := NewDownloadRegistry(DownloadRegistryConfig{PerUserStreaming: 1, PerInstanceStreaming: 1})
+	body := newBlockingReadCloser()
+	signer, err := NewCapabilitySigner([]byte(strings.Repeat("h", 32)), "recording-v1")
+	require.NoError(t, err)
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo: NewGormRepo(db), Downloads: registry, Signer: signer,
+		Nodes:           catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, Host: "127.0.0.1", APIPort: 18080, APISecret: "configured", State: node.StateActive}}},
+		ResolveAccess:   func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+		CheckPermission: func(context.Context, uint, string, string) (bool, error) { return true, nil },
+		NewDownloader: func(*node.Node) ContentDownloader {
+			return contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+				return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}, nil
+			})
+		},
+		Proxy: &ContentProxy{writeDeadline: time.Second, inactivityTimeout: 20 * time.Millisecond},
+	})
+	task, ticket, err := service.CreateDownload(context.Background(), 7, file.ID)
+	require.NoError(t, err)
+
+	err = service.ClaimDownload(context.Background(), deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}, task.TaskID, ticket, "", nil)
+	require.ErrorIs(t, err, ErrContentTimeout)
+	view, err := service.DownloadStatus(context.Background(), 7, task.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, DownloadStatusFailed, view.Status)
+	require.Equal(t, "timeout", view.ErrorCode)
+	require.Equal(t, 0, registry.streamingTotal)
+}
+
+func TestCatalogServiceStalledDownloadAfterFirstChunkReturnsShortRead(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Now().UTC()
+	file := catalogFile(205, 10, 1, now, "camera.mp4")
+	fileSize := uint64(1024)
+	file.FileSize = &fileSize
+	require.NoError(t, db.Create(&file).Error)
+	registry := NewDownloadRegistry(DownloadRegistryConfig{PerUserStreaming: 1, PerInstanceStreaming: 1})
+	body := newFirstChunkThenBlockReadCloser([]byte("partial-mp4"))
+	downloaderContextCancelled := make(chan struct{})
+	signer, err := NewCapabilitySigner([]byte(strings.Repeat("i", 32)), "recording-v1")
+	require.NoError(t, err)
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo: NewGormRepo(db), Downloads: registry, Signer: signer,
+		Nodes:           catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, Host: "127.0.0.1", APIPort: 18080, APISecret: "configured", State: node.StateActive}}},
+		ResolveAccess:   func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+		CheckPermission: func(context.Context, uint, string, string) (bool, error) { return true, nil },
+		NewDownloader: func(*node.Node) ContentDownloader {
+			return contentDownloaderFunc(func(ctx context.Context, _ string, _ string) (*zlm.DownloadResponse, error) {
+				go func() {
+					<-ctx.Done()
+					close(downloaderContextCancelled)
+				}()
+				return &zlm.DownloadResponse{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Length": []string{"1024"}},
+					Body:       body,
+				}, nil
+			})
+		},
+		Proxy: &ContentProxy{writeDeadline: time.Second, inactivityTimeout: 100 * time.Millisecond},
+	})
+	task, ticket, err := service.CreateDownload(context.Background(), 7, file.ID)
+	require.NoError(t, err)
+
+	claimResult := make(chan error, 1)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		claimResult <- service.ClaimDownload(request.Context(), writer, task.TaskID, ticket, "", nil)
+	}))
+	server.Config.WriteTimeout = time.Second
+	server.Start()
+	defer server.Close()
+
+	response, err := server.Client().Get(server.URL)
+	require.NoError(t, err)
+	downloaded, readErr := io.ReadAll(response.Body)
+	require.NoError(t, response.Body.Close())
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Equal(t, []byte("partial-mp4"), downloaded)
+	require.ErrorIs(t, readErr, io.ErrUnexpectedEOF)
+
+	select {
+	case claimErr := <-claimResult:
+		require.ErrorIs(t, claimErr, ErrContentTimeout)
+	case <-time.After(2 * time.Second):
+		t.Fatal("stalled download handler did not return")
+	}
+	select {
+	case <-downloaderContextCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("stalled download did not cancel the downloader context")
+	}
+	view, err := service.DownloadStatus(context.Background(), 7, task.TaskID)
+	require.NoError(t, err)
+	require.Equal(t, DownloadStatusFailed, view.Status)
+	require.Equal(t, "timeout", view.ErrorCode)
+	require.Equal(t, 0, registry.streamingTotal)
 }
 
 func TestCatalogServiceIssueAccessRejectsDownloadAndContentRequiresPlay(t *testing.T) {
@@ -273,4 +376,29 @@ func newCatalogServiceDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.GbRecordingFile{}, &models.GbRecordingSession{}, &models.GbRecordingReconcileState{}, &models.GbChannel{}))
 	return db
+}
+
+type firstChunkThenBlockReadCloser struct {
+	chunk     []byte
+	sent      bool
+	closed    chan struct{}
+	closeOnce sync.Once
+}
+
+func newFirstChunkThenBlockReadCloser(chunk []byte) *firstChunkThenBlockReadCloser {
+	return &firstChunkThenBlockReadCloser{chunk: append([]byte(nil), chunk...), closed: make(chan struct{})}
+}
+
+func (r *firstChunkThenBlockReadCloser) Read(buffer []byte) (int, error) {
+	if !r.sent {
+		r.sent = true
+		return copy(buffer, r.chunk), nil
+	}
+	<-r.closed
+	return 0, errors.New("body closed")
+}
+
+func (r *firstChunkThenBlockReadCloser) Close() error {
+	r.closeOnce.Do(func() { close(r.closed) })
+	return nil
 }

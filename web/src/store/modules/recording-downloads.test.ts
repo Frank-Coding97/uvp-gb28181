@@ -19,4 +19,16 @@ describe("recording download store", () => {
     store.remove("one");
     expect(store.tasks).toEqual([]);
   });
+
+  it("replaces stale transient progress fields with the latest server snapshot", () => {
+    const store = useRecordingDownloadStore();
+    store.upsert({
+      taskId: "one", fileId: "file-1", fileName: "a.mp4", status: "streaming", bytesSent: 50, totalBytes: 100,
+      speedBytesPerSecond: 25, etaSeconds: 2, errorCode: "status_unavailable", createdAt: "now", expiresAt: "later"
+    });
+    store.upsert({ taskId: "one", fileId: "file-1", fileName: "a.mp4", status: "completed", bytesSent: 100, totalBytes: 100, createdAt: "now", expiresAt: "later" });
+    expect(store.tasks[0]).not.toHaveProperty("speedBytesPerSecond");
+    expect(store.tasks[0]).not.toHaveProperty("etaSeconds");
+    expect(store.tasks[0]).not.toHaveProperty("errorCode");
+  });
 });

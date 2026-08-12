@@ -82,17 +82,82 @@ func TestDownloadRegistryExpiryAndConcurrentClaim(t *testing.T) {
 }
 
 func TestDownloadRegistryProgressNeverExceedsTotal(t *testing.T) {
-	reg := NewDownloadRegistry(DownloadRegistryConfig{})
+	now := time.Unix(100, 0).UTC()
+	reg := NewDownloadRegistry(DownloadRegistryConfig{Now: func() time.Time { return now }})
 	task, ticket, err := reg.Create(7, "41")
 	require.NoError(t, err)
 	_, _, _, err = reg.Claim(task.TaskID, ticket)
 	require.NoError(t, err)
-	reg.SetTotal(task.TaskID, 10)
+	reg.SetTotal(task.TaskID, 100)
+	now = now.Add(time.Second)
 	reg.AddBytes(task.TaskID, 6)
+	now = now.Add(time.Second)
 	reg.AddBytes(task.TaskID, 8)
 	snapshot, err := reg.Get(task.TaskID, 7)
 	require.NoError(t, err)
-	require.EqualValues(t, 10, snapshot.BytesSent)
+	require.EqualValues(t, 14, snapshot.BytesSent)
+	require.NotNil(t, snapshot.SpeedBytesPerSecond)
+	require.Equal(t, uint64(7), *snapshot.SpeedBytesPerSecond)
+	require.NotNil(t, snapshot.ETASeconds)
+	require.Equal(t, uint64(13), *snapshot.ETASeconds)
+}
+
+func TestDownloadRegistryProgressOmitsRateWithoutElapsedTime(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	reg := NewDownloadRegistry(DownloadRegistryConfig{Now: func() time.Time { return now }})
+	task, ticket, err := reg.Create(7, "41")
+	require.NoError(t, err)
+	_, _, _, err = reg.Claim(task.TaskID, ticket)
+	require.NoError(t, err)
+	reg.AddBytes(task.TaskID, 6)
+	snapshot, err := reg.Get(task.TaskID, 7)
+	require.NoError(t, err)
+	require.Nil(t, snapshot.SpeedBytesPerSecond)
+	require.Nil(t, snapshot.ETASeconds)
+}
+
+func TestDownloadRegistryProgressUsesCurrentTimeForSubsecondWrites(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	reg := NewDownloadRegistry(DownloadRegistryConfig{Now: func() time.Time { return now }})
+	task, ticket, err := reg.Create(7, "41")
+	require.NoError(t, err)
+	_, _, _, err = reg.Claim(task.TaskID, ticket)
+	require.NoError(t, err)
+
+	now = now.Add(time.Second)
+	reg.AddBytes(task.TaskID, 100)
+	now = now.Add(500 * time.Millisecond)
+	reg.AddBytes(task.TaskID, 100)
+	snapshot, err := reg.Get(task.TaskID, 7)
+	require.NoError(t, err)
+	require.NotNil(t, snapshot.SpeedBytesPerSecond)
+	require.Equal(t, uint64(133), *snapshot.SpeedBytesPerSecond)
+}
+
+func TestDownloadRegistryProgressKeepsOnlyRecentSamples(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	registry := NewDownloadRegistry(DownloadRegistryConfig{Now: func() time.Time { return now }})
+	task, ticket, err := registry.Create(7, "41")
+	require.NoError(t, err)
+	_, _, _, err = registry.Claim(task.TaskID, ticket)
+	require.NoError(t, err)
+	registry.SetTotal(task.TaskID, 100)
+
+	for index := 0; index < 20; index++ {
+		now = now.Add(time.Second)
+		registry.AddBytes(task.TaskID, 1)
+	}
+
+	registry.mu.Lock()
+	samples := append([]downloadProgressSample(nil), registry.tasks[task.TaskID].progress...)
+	registry.mu.Unlock()
+	require.LessOrEqual(t, len(samples), 7)
+	require.False(t, samples[0].at.Before(now.Add(-downloadProgressWindow)))
+
+	snapshot, err := registry.Get(task.TaskID, 7)
+	require.NoError(t, err)
+	require.NotNil(t, snapshot.SpeedBytesPerSecond)
+	require.Equal(t, uint64(1), *snapshot.SpeedBytesPerSecond)
 }
 
 func TestDownloadRegistryCloseCancelsActiveTask(t *testing.T) {

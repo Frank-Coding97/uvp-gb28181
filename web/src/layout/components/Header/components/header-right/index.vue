@@ -105,14 +105,13 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { logout } from "@/api/user";
-import { recordingDownloadCoordinator } from "@/views/gb28181/cloud-recordings/recordingDownloadService";
 const router = useRouter();
 const { isMobile } = useDevicesSize();
 const themeStore = useThemeConfig();
 const { darkMode, darkModeStyle } = storeToRefs(themeStore);
 //const userStore = useUserInfoStore();
 //const { account } = storeToRefs(userStore);
-import { useUserStoreHook } from "@/store/modules/user";
+import { runUserLogoutCleanup, useUserStoreHook } from "@/store/modules/user";
 const account = useUserStoreHook().account;
 
 // 系统设置
@@ -171,7 +170,7 @@ const logOut = () => {
     closable: true,
     onBeforeOk: async () => {
       try {
-        await recordingDownloadCoordinator.cancelAll();
+        await runUserLogoutCleanup();
         // 用户退出
         //await userStore.logOut();
         await logout().catch((error: any) => {
@@ -182,7 +181,7 @@ const logOut = () => {
             // Message.warning("退出登录请求失败，但已清理本地数据");
           }
         });
-        await useUserStoreHook().logOut();
+        await useUserStoreHook().logOut(false);
         router.replace("/login");
         // 清除路由数据
         useRouteConfigStore().resetRoute();

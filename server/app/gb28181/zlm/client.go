@@ -20,10 +20,11 @@ import (
 // Client ZLMediaKit HTTP API 客户端(控制面)
 // 一个 Client 绑一个 node;多节点场景每节点一个 Client(无连接池,Go http.Client 自带)。
 type Client struct {
-	node    *node.Node
-	baseURL string
-	secret  string
-	http    *http.Client
+	node         *node.Node
+	baseURL      string
+	secret       string
+	http         *http.Client
+	downloadHTTP *http.Client
 }
 
 // NewClientForNode 基于 Node 构造 Client

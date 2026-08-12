@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
@@ -23,6 +25,8 @@ type fakeCloudRecordingCatalogService struct {
 	detailErr  error
 	accessErr  error
 	contentErr error
+	claimErr   error
+	claimCalls int
 	triggered  []int64
 }
 
@@ -55,8 +59,12 @@ func (*fakeCloudRecordingCatalogService) CancelDownload(context.Context, uint, s
 	return gbrecording.DownloadTaskView{TaskID: "download-task", Status: gbrecording.DownloadStatusCancelled}, nil
 }
 
-func (*fakeCloudRecordingCatalogService) ClaimDownload(context.Context, http.ResponseWriter, string, string, string) error {
-	return nil
+func (s *fakeCloudRecordingCatalogService) ClaimDownload(_ context.Context, _ http.ResponseWriter, _ string, _ string, _ string, onClaimed func()) error {
+	s.claimCalls++
+	if s.claimErr == nil && onClaimed != nil {
+		onClaimed()
+	}
+	return s.claimErr
 }
 
 func (*fakeCloudRecordingCatalogService) ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error) {
@@ -169,6 +177,38 @@ func TestCloudRecordingCatalogControllerContentErrorDoesNotEchoCapability(t *tes
 	require.NotContains(t, recorder.Body.String(), "top-secret-capability")
 }
 
+func TestCloudRecordingCatalogControllerMapsDownloadTimeoutBeforeBody(t *testing.T) {
+	app.Response = response.NewResponseHandler()
+	for _, timeoutErr := range []error{gbrecording.ErrContentTimeout, zlm.ErrRecordingResponseTimeout} {
+		service := &fakeCloudRecordingCatalogService{claimErr: timeoutErr}
+		controller := NewCloudRecordingCatalogController(service)
+		recorder := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(recorder)
+		ctx.Request = httptest.NewRequest(http.MethodGet, "/api/gb28181/cloud-recordings/downloads/download-task/content", nil)
+		ctx.Request.AddCookie(&http.Cookie{Name: downloadTicketCookieName("download-task"), Value: "ticket"})
+		ctx.Params = gin.Params{{Key: "taskId", Value: "download-task"}}
+
+		controller.DownloadContent(ctx)
+
+		require.Equal(t, http.StatusGatewayTimeout, recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestCloudRecordingCatalogControllerMapsUnsupportedDownloadWriter(t *testing.T) {
+	app.Response = response.NewResponseHandler()
+	service := &fakeCloudRecordingCatalogService{claimErr: gbrecording.ErrContentDeadline}
+	controller := NewCloudRecordingCatalogController(service)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/gb28181/cloud-recordings/downloads/download-task/content", nil)
+	ctx.Request.AddCookie(&http.Cookie{Name: downloadTicketCookieName("download-task"), Value: "ticket"})
+	ctx.Params = gin.Params{{Key: "taskId", Value: "download-task"}}
+
+	controller.DownloadContent(ctx)
+
+	require.Equal(t, http.StatusBadGateway, recorder.Code, recorder.Body.String())
+}
+
 func TestCloudRecordingCatalogControllerCreatesCookieBoundDownload(t *testing.T) {
 	app.Response = response.NewResponseHandler()
 	service := &fakeCloudRecordingCatalogService{}
@@ -183,10 +223,45 @@ func TestCloudRecordingCatalogControllerCreatesCookieBoundDownload(t *testing.T)
 	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
 	cookie := recorder.Result().Cookies()[0]
 	require.True(t, cookie.HttpOnly)
+	require.False(t, cookie.Secure, "controlled HTTP deployments must retain the same-origin cookie handoff")
 	require.Equal(t, http.SameSiteStrictMode, cookie.SameSite)
 	require.Equal(t, "/api/gb28181/cloud-recordings/downloads/download-task/content", cookie.Path)
 	require.Equal(t, 60, cookie.MaxAge)
 	require.NotContains(t, recorder.Body.String(), "ticket")
+}
+
+func TestDownloadTicketCookieUsesTransportTLSAndIgnoresForwardedProto(t *testing.T) {
+	app.Response = response.NewResponseHandler()
+	controller := NewCloudRecordingCatalogController(&fakeCloudRecordingCatalogService{})
+	for _, tc := range []struct {
+		name           string
+		tls            bool
+		forwardedProto string
+		secure         bool
+	}{
+		{name: "plain HTTP", secure: false},
+		{name: "forged forwarded proto", forwardedProto: "https", secure: false},
+		{name: "direct TLS", tls: true, secure: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			ctx.Request = httptest.NewRequest(http.MethodPost, "/api/gb28181/cloud-recordings/files/41/downloads", nil)
+			ctx.Request.TLS = nil
+			if tc.tls {
+				ctx.Request.TLS = &tls.ConnectionState{}
+			}
+			ctx.Request.Header.Set("X-Forwarded-Proto", tc.forwardedProto)
+			ctx.Params = gin.Params{{Key: "id", Value: "41"}}
+			ctx.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: 7}})
+
+			controller.CreateDownload(ctx)
+
+			cookies := recorder.Result().Cookies()
+			require.Len(t, cookies, 1)
+			require.Equal(t, tc.secure, cookies[0].Secure)
+		})
+	}
 }
 
 func TestCloudRecordingCatalogControllerDownloadContentRejectsQueryCredentials(t *testing.T) {
@@ -195,7 +270,43 @@ func TestCloudRecordingCatalogControllerDownloadContentRejectsQueryCredentials(t
 	recorder := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(recorder)
 	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/gb28181/cloud-recordings/downloads/download-task/content?cap=secret&token=jwt", nil)
+	ctx.Request.AddCookie(&http.Cookie{Name: downloadTicketCookieName("download-task"), Value: "ticket"})
 	ctx.Params = gin.Params{{Key: "taskId", Value: "download-task"}}
 	controller.DownloadContent(ctx)
 	require.Equal(t, http.StatusForbidden, recorder.Code)
+	require.Zero(t, service.claimCalls)
+}
+
+func TestCloudRecordingCatalogControllerKeepsTicketCookieWhenDownloadSlotIsFull(t *testing.T) {
+	app.Response = response.NewResponseHandler()
+	service := &fakeCloudRecordingCatalogService{claimErr: gbrecording.ErrDownloadLimit}
+	controller := NewCloudRecordingCatalogController(service)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/gb28181/cloud-recordings/downloads/download-task/content", nil)
+	ctx.Request.AddCookie(&http.Cookie{Name: downloadTicketCookieName("download-task"), Value: "ticket"})
+	ctx.Params = gin.Params{{Key: "taskId", Value: "download-task"}}
+
+	controller.DownloadContent(ctx)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code, recorder.Body.String())
+	require.Empty(t, recorder.Header().Values("Set-Cookie"), "a ready task must retain its ticket after a concurrency rejection")
+}
+
+func TestCloudRecordingCatalogControllerClearsTicketCookieAfterDownloadClaim(t *testing.T) {
+	app.Response = response.NewResponseHandler()
+	controller := NewCloudRecordingCatalogController(&fakeCloudRecordingCatalogService{})
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/api/gb28181/cloud-recordings/downloads/download-task/content", nil)
+	ctx.Request.AddCookie(&http.Cookie{Name: downloadTicketCookieName("download-task"), Value: "ticket"})
+	ctx.Params = gin.Params{{Key: "taskId", Value: "download-task"}}
+
+	controller.DownloadContent(ctx)
+
+	cookies := recorder.Result().Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, downloadTicketCookieName("download-task"), cookies[0].Name)
+	require.Equal(t, -1, cookies[0].MaxAge)
+	require.Equal(t, downloadContentPath("download-task"), cookies[0].Path)
 }

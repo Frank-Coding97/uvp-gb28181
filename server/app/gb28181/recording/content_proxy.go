@@ -5,10 +5,12 @@ import (
 	"errors"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -17,13 +19,17 @@ import (
 
 const contentProxyBufferSize = 32 * 1024
 
-const downloadWriteDeadline = 90 * time.Second
+const (
+	defaultDownloadWriteDeadline     = 90 * time.Second
+	defaultDownloadInactivityTimeout = 90 * time.Second
+)
 
 var (
 	ErrContentRangeInvalid = errors.New("invalid recording content range")
 	ErrContentRedirect     = errors.New("recording content redirect refused")
 	ErrContentUpstream     = errors.New("recording content upstream failure")
 	ErrContentDeadline     = errors.New("recording content writer deadline unavailable")
+	ErrContentTimeout      = errors.New("recording content transfer timeout")
 )
 
 type ContentDownloader interface {
@@ -38,9 +44,17 @@ type ContentRequest struct {
 	Range    string
 }
 
-type ContentProxy struct{}
+type ContentProxy struct {
+	writeDeadline     time.Duration
+	inactivityTimeout time.Duration
+}
 
-func NewContentProxy() *ContentProxy { return &ContentProxy{} }
+func NewContentProxy() *ContentProxy {
+	return &ContentProxy{
+		writeDeadline:     defaultDownloadWriteDeadline,
+		inactivityTimeout: defaultDownloadInactivityTimeout,
+	}
+}
 
 func (p *ContentProxy) Stream(ctx context.Context, writer http.ResponseWriter, downloader ContentDownloader, request ContentRequest) error {
 	if writer == nil || downloader == nil || request.FilePath == "" || !validCapabilityMode(request.Mode) {
@@ -85,7 +99,13 @@ func (p *ContentProxy) StreamDownload(ctx context.Context, writer http.ResponseW
 	if writer == nil || downloader == nil || request.FilePath == "" || request.Mode != CapabilityModeDownload {
 		return ErrContentUpstream
 	}
-	response, err := downloader.DownloadFile(ctx, request.FilePath, "")
+	if err := p.setDownloadDeadline(writer); err != nil {
+		return err
+	}
+	transferCtx, transferCancel := context.WithCancel(ctx)
+	defer transferCancel()
+
+	response, err := downloader.DownloadFile(transferCtx, request.FilePath, "")
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -95,58 +115,151 @@ func (p *ContentProxy) StreamDownload(ctx context.Context, writer http.ResponseW
 	if response == nil || response.Body == nil {
 		return ErrContentUpstream
 	}
-	defer response.Body.Close()
 	if err := validateContentStatus(response.StatusCode, false); err != nil {
+		_ = response.Body.Close()
 		return err
 	}
 	if err := validateDownloadLength(response.Header.Get("Content-Length"), request.FileSize); err != nil {
+		_ = response.Body.Close()
 		return err
 	}
-	if err := setDownloadDeadline(writer); err != nil {
-		return err
+	return p.copyDownload(ctx, transferCancel, writer, response, request, onWrite)
+}
+
+func (p *ContentProxy) copyDownload(parentCtx context.Context, transferCancel context.CancelFunc, writer http.ResponseWriter, response *zlm.DownloadResponse, request ContentRequest, onWrite func(uint64)) error {
+	defer transferCancel()
+	closeBody := sync.OnceFunc(func() { _ = response.Body.Close() })
+	defer closeBody()
+
+	progress := make(chan struct{}, 1)
+	done := make(chan struct{})
+	defer close(done)
+	var timedOut bool
+	lastProgress := time.Now()
+	var watchdogMu sync.Mutex
+	stopTransfer := sync.OnceFunc(func() {
+		transferCancel()
+		closeBody()
+	})
+	markProgress := func() {
+		watchdogMu.Lock()
+		lastProgress = time.Now()
+		watchdogMu.Unlock()
+		select {
+		case progress <- struct{}{}:
+		default:
+		}
 	}
-	copyContentHeaders(writer.Header(), response.Header, response.StatusCode)
-	writer.Header().Set("Content-Disposition", contentDisposition(CapabilityModeDownload, request.FileName))
-	writer.Header().Set("Cache-Control", "no-store")
-	writer.Header().Set("X-Accel-Buffering", "no")
-	writer.WriteHeader(http.StatusOK)
+	go func() {
+		timeout := p.downloadInactivityTimeout()
+		timer := time.NewTimer(timeout)
+		defer timer.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-parentCtx.Done():
+				stopTransfer()
+				return
+			case <-progress:
+				resetDownloadTimer(timer, timeout)
+			case <-timer.C:
+				watchdogMu.Lock()
+				idle := time.Since(lastProgress)
+				if idle < timeout {
+					watchdogMu.Unlock()
+					timer.Reset(timeout - idle)
+					continue
+				}
+				timedOut = true
+				watchdogMu.Unlock()
+				stopTransfer()
+				return
+			}
+		}
+	}()
+	timedOutTransfer := func() bool {
+		watchdogMu.Lock()
+		defer watchdogMu.Unlock()
+		return timedOut
+	}
+
+	var copied uint64
+	headersWritten := false
+	writeHeaders := func() {
+		if headersWritten {
+			return
+		}
+		copyContentHeaders(writer.Header(), response.Header, response.StatusCode)
+		writer.Header().Set("Content-Disposition", contentDisposition(CapabilityModeDownload, request.FileName))
+		writer.Header().Set("Cache-Control", "no-store")
+		writer.Header().Set("X-Accel-Buffering", "no")
+		writer.WriteHeader(http.StatusOK)
+		headersWritten = true
+	}
 
 	buffer := make([]byte, contentProxyBufferSize)
-	var copied uint64
 	for {
 		count, readErr := response.Body.Read(buffer)
 		if count > 0 {
+			writeHeaders()
 			written, writeErr := writer.Write(buffer[:count])
 			if written > 0 {
 				copied += uint64(written)
+				markProgress()
 				if onWrite != nil {
 					onWrite(uint64(written))
 				}
-				if deadlineErr := setDownloadDeadline(writer); deadlineErr != nil {
+				if deadlineErr := p.setDownloadDeadline(writer); deadlineErr != nil {
+					stopTransfer()
 					return deadlineErr
 				}
 			}
 			if writeErr != nil || written != count {
-				if ctx.Err() != nil {
-					return ctx.Err()
+				stopTransfer()
+				if parentCtx.Err() != nil {
+					return parentCtx.Err()
+				}
+				if timedOutTransfer() || networkTimeout(writeErr) {
+					return ErrContentTimeout
 				}
 				return ErrContentUpstream
 			}
 		}
 		if readErr == io.EOF {
-			break
+			if !headersWritten {
+				writeHeaders()
+			}
+			if expected := expectedDownloadLength(response.Header.Get("Content-Length"), request.FileSize); expected != nil && copied != *expected {
+				return ErrContentUpstream
+			}
+			return nil
 		}
 		if readErr != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if parentCtx.Err() != nil {
+				return parentCtx.Err()
+			}
+			if timedOutTransfer() {
+				return ErrContentTimeout
 			}
 			return ErrContentUpstream
 		}
 	}
-	if expected := expectedDownloadLength(response.Header.Get("Content-Length"), request.FileSize); expected != nil && copied != *expected {
-		return ErrContentUpstream
+}
+
+func networkTimeout(err error) bool {
+	var networkErr net.Error
+	return errors.As(err, &networkErr) && networkErr.Timeout()
+}
+
+func resetDownloadTimer(timer *time.Timer, timeout time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
 	}
-	return nil
+	timer.Reset(timeout)
 }
 
 func validateDownloadRange(value string) error {
@@ -176,11 +289,25 @@ func expectedDownloadLength(contentLength string, fileSize *uint64) *uint64 {
 	return fileSize
 }
 
-func setDownloadDeadline(writer http.ResponseWriter) error {
-	if err := http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(downloadWriteDeadline)); err != nil {
+func (p *ContentProxy) setDownloadDeadline(writer http.ResponseWriter) error {
+	if err := http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(p.downloadWriteDeadline())); err != nil {
 		return ErrContentDeadline
 	}
 	return nil
+}
+
+func (p *ContentProxy) downloadWriteDeadline() time.Duration {
+	if p == nil || p.writeDeadline <= 0 {
+		return defaultDownloadWriteDeadline
+	}
+	return p.writeDeadline
+}
+
+func (p *ContentProxy) downloadInactivityTimeout() time.Duration {
+	if p == nil || p.inactivityTimeout <= 0 {
+		return defaultDownloadInactivityTimeout
+	}
+	return p.inactivityTimeout
 }
 
 func validateSingleRange(value string, size *uint64) error {
@@ -243,7 +370,7 @@ func validateContentStatus(status int, ranged bool) error {
 func classifyContentDownloadError(err error) error {
 	for _, known := range []error{
 		context.Canceled, context.DeadlineExceeded,
-		zlm.ErrRecordingNotFound, zlm.ErrRecordingNodeUnavailable, zlm.ErrRecordingAccessUnavailable,
+		zlm.ErrRecordingNotFound, zlm.ErrRecordingNodeUnavailable, zlm.ErrRecordingAccessUnavailable, zlm.ErrRecordingResponseTimeout,
 	} {
 		if errors.Is(err, known) {
 			return known

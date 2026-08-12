@@ -4,6 +4,7 @@ set -eu
 
 config_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 config_file="$config_dir/nginx.conf"
+edge_config_file="$config_dir/uvplatform.npm.conf"
 
 content_location='location ~ ^/api/gb28181/cloud-recordings/downloads/[^/]+/content$'
 location_line=$(grep -n -F "$content_location" "$config_file" | cut -d: -f1)
@@ -29,3 +30,5 @@ for directive in \
 do
     printf '%s\n' "$location_block" | grep -F -- "$directive" >/dev/null
 done
+
+grep -F -- 'proxy_cookie_flags ~^uvp_recording_download_ secure httponly samesite=strict;' "$edge_config_file" >/dev/null

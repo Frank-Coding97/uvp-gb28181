@@ -22,9 +22,13 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
   const pollIntervalMs = deps.pollIntervalMs ?? 1500;
   const items = new Map<string, RecordingDownloadItem>();
   const pending: DownloadRequest[] = [];
+  const creatingFileIds = new Set<string>();
   const activeTaskIds = new Set<string>();
   const contentUrls = new Map<string, string>();
+  const creatingOperations = new Set<Promise<void>>();
   let pollTimer: ReturnType<typeof setInterval> | undefined;
+  let creatingCount = 0;
+  let generation = 0;
 
   const publish = () => deps.onChange?.(snapshot());
   const toItem = (task: RecordingDownloadTask, fileName: string): RecordingDownloadItem => ({ ...task, fileName });
@@ -44,10 +48,15 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
     }
   }
 
-  async function start(request: DownloadRequest) {
+  async function start(request: DownloadRequest, startGeneration: number) {
     const created = await deps.create(request.fileId);
+    if (startGeneration !== generation) {
+      await deps.cancel(created.task.taskId).catch(() => undefined);
+      return;
+    }
     if (!isSameOriginContentPath(created.contentUrl, created.task.taskId)) {
       const invalidTask = toItem(created.task, request.fileName);
+      items.delete(`queued-${request.fileId}`);
       items.set(invalidTask.taskId, { ...invalidTask, status: "failed", errorCode: "content_url_invalid" });
       publish();
       return;
@@ -57,30 +66,46 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
     items.set(item.taskId, item);
     activeTaskIds.add(item.taskId);
     contentUrls.set(item.taskId, created.contentUrl);
-    deps.startNativeDownload(created.contentUrl, request.fileName);
+    try {
+      deps.startNativeDownload(created.contentUrl, request.fileName);
+    } catch {
+      items.set(item.taskId, { ...item, errorCode: "browser_start_failed" });
+    }
     publish();
     startPolling();
   }
 
   async function drain() {
-    while (activeTaskIds.size < maxConcurrent && pending.length) {
+    while (activeTaskIds.size + creatingCount < maxConcurrent && pending.length) {
       const next = pending.shift();
       if (!next) return;
+      creatingCount += 1;
+      creatingFileIds.add(next.fileId);
+      const startGeneration = generation;
+      const operation = start(next, startGeneration);
+      creatingOperations.add(operation);
       try {
-        await start(next);
+        await operation;
       } catch {
         const taskId = `local-${next.fileId}-${Date.now()}`;
+        items.delete(`queued-${next.fileId}`);
         items.set(taskId, {
           taskId, fileId: next.fileId, fileName: next.fileName, status: "failed", bytesSent: 0,
           createdAt: new Date().toISOString(), expiresAt: "", errorCode: "create_failed"
         });
         publish();
+      } finally {
+        creatingOperations.delete(operation);
+        creatingFileIds.delete(next.fileId);
+        creatingCount -= 1;
       }
     }
   }
 
   async function enqueue(request: DownloadRequest) {
-    if ([...items.values()].some(item => item.fileId === request.fileId && !terminalStatuses.has(item.status)) || pending.some(item => item.fileId === request.fileId)) return;
+    if (creatingFileIds.has(request.fileId)
+      || [...items.values()].some(item => item.fileId === request.fileId && !terminalStatuses.has(item.status))
+      || pending.some(item => item.fileId === request.fileId)) return;
     pending.push(request);
     await drain();
     if (pending.some(item => item.fileId === request.fileId)) {
@@ -143,9 +168,21 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
   }
 
   async function cancelAll() {
-    await Promise.allSettled([...items.values()]
-      .filter(item => activeTaskIds.has(item.taskId) || item.status === "queued")
-      .map(item => cancel(item.taskId)));
+    generation += 1;
+    pending.length = 0;
+    for (const [taskId, item] of items) {
+      if (item.status !== "queued") continue;
+      items.set(taskId, { ...item, status: "cancelled" });
+    }
+    const cancellations = [...items.values()]
+      .filter(item => activeTaskIds.has(item.taskId))
+      .map(item => cancel(item.taskId));
+    await Promise.allSettled([...cancellations, ...creatingOperations]);
+    activeTaskIds.clear();
+    contentUrls.clear();
+    items.clear();
+    stopPollingWhenIdle();
+    publish();
   }
 
   function clearTerminal() {
@@ -162,7 +199,15 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
     if (!current) return;
     if (current.status === "ready") {
       const contentUrl = contentUrls.get(taskId);
-      if (contentUrl) deps.startNativeDownload(contentUrl, current.fileName);
+      if (contentUrl) {
+        try {
+          deps.startNativeDownload(contentUrl, current.fileName);
+          items.set(taskId, { ...current, errorCode: undefined });
+        } catch {
+          items.set(taskId, { ...current, errorCode: "browser_start_failed" });
+        }
+        publish();
+      }
       return;
     }
     if (!terminalStatuses.has(current.status)) return;

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
 	"path"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,6 +20,7 @@ var (
 	ErrRecordingNotFound          = errors.New("zlm recording not found")
 	ErrRecordingNodeUnavailable   = errors.New("zlm recording node unavailable")
 	ErrRecordingAccessUnavailable = errors.New("zlm recording access unavailable")
+	ErrRecordingResponseTimeout   = errors.New("zlm recording response timeout")
 )
 
 // MP4RecordFile is the partial file fact available from getMP4RecordFile.
@@ -40,17 +44,30 @@ type DownloadResponse struct {
 	Body       io.ReadCloser
 }
 
-var recordingDownloadHTTPClient = &http.Client{
-	Transport: recordingDownloadTransport(),
-	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-		return http.ErrUseLastResponse
-	},
+const recordingResponseHeaderTimeout = 15 * time.Second
+
+var defaultRecordingDownloadHTTPClient = newRecordingDownloadHTTPClient(recordingResponseHeaderTimeout)
+
+func newRecordingDownloadHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport: recordingDownloadTransport(responseHeaderTimeout),
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
-func recordingDownloadTransport() *http.Transport {
+func recordingDownloadTransport(responseHeaderTimeout time.Duration) *http.Transport {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = 15 * time.Second
+	transport.ResponseHeaderTimeout = responseHeaderTimeout
 	return transport
+}
+
+func (c *Client) recordingDownloadHTTPClient() *http.Client {
+	if c.downloadHTTP != nil {
+		return c.downloadHTTP
+	}
+	return defaultRecordingDownloadHTTPClient
 }
 
 // GetMP4RecordFiles lists MP4 files for one known ZLM media tuple and date.
@@ -111,6 +128,9 @@ func joinRecordPath(rootPath, recordPath string) string {
 // DownloadFile opens ZLM's downloadFile response without buffering its body.
 // It forwards only an explicitly supplied Range header and never follows redirects.
 func (c *Client) DownloadFile(ctx context.Context, filePath, byteRange string) (*DownloadResponse, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	query := url.Values{}
 	query.Set("secret", c.secret)
 	query.Set("file_path", filePath)
@@ -121,11 +141,19 @@ func (c *Client) DownloadFile(ctx context.Context, filePath, byteRange string) (
 	if byteRange != "" {
 		req.Header.Set("Range", byteRange)
 	}
+	var gotConnection atomic.Bool
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{
+		GotConn: func(httptrace.GotConnInfo) { gotConnection.Store(true) },
+	}))
 
-	resp, err := recordingDownloadHTTPClient.Do(req)
+	resp, err := c.recordingDownloadHTTPClient().Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
+		}
+		var networkErr net.Error
+		if gotConnection.Load() && errors.As(err, &networkErr) && networkErr.Timeout() {
+			return nil, fmt.Errorf("%w: response headers timed out", ErrRecordingResponseTimeout)
 		}
 		return nil, fmt.Errorf("%w: download request failed", ErrRecordingNodeUnavailable)
 	}

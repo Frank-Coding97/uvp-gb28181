@@ -4,10 +4,16 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 func TestStartRecordSendsMP4Parameters(t *testing.T) {
@@ -242,3 +248,53 @@ func TestDownloadFileContextCancelAndSanitizesTransportErrors(t *testing.T) {
 		t.Fatalf("error leaks sensitive request data: %q", got)
 	}
 }
+
+func TestDownloadFileClassifiesResponseHeaderTimeout(t *testing.T) {
+	client, server := newMockClient(t, func(_ http.ResponseWriter, request *http.Request) {
+		<-request.Context().Done()
+	})
+	defer server.Close()
+	client.secret = "top-secret"
+	client.downloadHTTP = newRecordingDownloadHTTPClient(10 * time.Millisecond)
+
+	_, err := client.DownloadFile(context.Background(), "/absolute/private/video.mp4", "")
+	require.ErrorIs(t, err, ErrRecordingResponseTimeout)
+	require.NotContains(t, err.Error(), "top-secret")
+	require.NotContains(t, err.Error(), "/absolute/private/video.mp4")
+}
+
+func TestDownloadFileKeepsConnectionTimeoutAsNodeUnavailable(t *testing.T) {
+	client, server := newMockClient(t, func(http.ResponseWriter, *http.Request) {})
+	server.Close()
+	client.downloadHTTP = &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return nil, timeoutNetworkError{}
+	})}
+
+	_, err := client.DownloadFile(context.Background(), "/absolute/private/video.mp4", "")
+	require.ErrorIs(t, err, ErrRecordingNodeUnavailable)
+	require.NotErrorIs(t, err, ErrRecordingResponseTimeout)
+}
+
+func TestNewClientForNodeUsesSharedRecordingDownloadHTTPClient(t *testing.T) {
+	first := NewClientForNode(&node.Node{Host: "127.0.0.1", APIPort: 80})
+	second := NewClientForNode(&node.Node{Host: "127.0.0.2", APIPort: 80})
+
+	require.Nil(t, first.downloadHTTP)
+	require.Nil(t, second.downloadHTTP)
+	require.Same(t, defaultRecordingDownloadHTTPClient, first.recordingDownloadHTTPClient())
+	require.Same(t, first.recordingDownloadHTTPClient(), second.recordingDownloadHTTPClient())
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
+type timeoutNetworkError struct{}
+
+func (timeoutNetworkError) Error() string   { return "connection timeout" }
+func (timeoutNetworkError) Timeout() bool   { return true }
+func (timeoutNetworkError) Temporary() bool { return true }
+
+var _ net.Error = timeoutNetworkError{}

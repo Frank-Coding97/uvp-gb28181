@@ -7,6 +7,17 @@ import { getLocalStorage, setLocalStorage, removeLocalStorage } from "@/utils/ap
 import { type UserResult, type RefreshTokenResult, getLogin, refreshTokenApi, getProfileAPI } from "@/api/user";
 import { userType } from "@/store/types";
 import { handleUrl } from "@/utils/app";
+
+let logoutCleanup: (() => Promise<void> | void) | undefined;
+
+export function registerUserLogoutCleanup(cleanup: () => Promise<void> | void) {
+    logoutCleanup = cleanup;
+}
+
+export async function runUserLogoutCleanup() {
+    await Promise.resolve(logoutCleanup?.()).catch(() => undefined);
+}
+
 export const useUserStore = defineStore("user", () => {
     const userInfo = getLocalStorage<userType>(UserInfoKey);
     // State
@@ -44,7 +55,8 @@ export const useUserStore = defineStore("user", () => {
         });
     };
     /** 前端登出（不调用接口） */
-    const logOut = async () => {
+    const logOut = async (cleanup = true) => {
+        if (cleanup) await runUserLogoutCleanup();
         account.value.id = 0;
         account.value.avatar = "";
         account.value.username = "";

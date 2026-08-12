@@ -13,6 +13,7 @@ export default defineConfig(({ mode }) => {
     const root = process.cwd();
     // 获取跟路径对应的文件
     const env: any = loadEnv(mode, root);
+    const apiProxyTarget = env.VITE_APP_BASE_URL || "http://127.0.0.1:8280";
     return {
         // 生产环境服务的公共基础路径-用于生出环境的代理的路径
         base: "/",
@@ -23,13 +24,13 @@ export default defineConfig(({ mode }) => {
             // 为开发服务器配置自定义代理规则-用于开发时的代理
             proxy: {
                 "/api": {
-                    target: env.VITE_APP_BASE_URL,
+                    target: apiProxyTarget,
                     changeOrigin: true
                     //rewrite: path => path.replace(/^\/api/, "")
                 },
                 // 后端 Gin static:通道快照 / 上传文件等,由 httpserver.serverrootpath 挂载
                 "/public": {
-                    target: env.VITE_APP_BASE_URL,
+                    target: apiProxyTarget,
                     changeOrigin: true
                 }
             }

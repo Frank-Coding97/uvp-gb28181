@@ -1,15 +1,19 @@
 package recording
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
@@ -182,7 +186,7 @@ func TestContentProxyDownloadAllowsOnlyInitialRangeAndChecksLength(t *testing.T)
 
 	fileSize := uint64(9)
 	called := false
-	err := NewContentProxy().StreamDownload(context.Background(), httptest.NewRecorder(), contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+	err := NewContentProxy().StreamDownload(context.Background(), deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}, contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
 		called = true
 		return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{"Content-Length": []string{"8"}}, Body: io.NopCloser(strings.NewReader("too-short"))}, nil
 	}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", FileSize: &fileSize, Mode: CapabilityModeDownload}, nil)
@@ -207,6 +211,157 @@ func TestContentProxyDownloadUsesSingleFullResponseAndProgress(t *testing.T) {
 	require.Empty(t, recorder.Header().Get("Set-Cookie"))
 	require.Contains(t, recorder.Header().Get("Content-Disposition"), "attachment")
 }
+
+func TestContentProxyDownloadRequiresDeadlineCapableWriter(t *testing.T) {
+	called := false
+	err := NewContentProxy().StreamDownload(context.Background(), httptest.NewRecorder(), contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+		called = true
+		return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{"Content-Length": []string{"1"}}, Body: io.NopCloser(strings.NewReader("x"))}, nil
+	}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", Mode: CapabilityModeDownload}, nil)
+
+	require.ErrorIs(t, err, ErrContentDeadline)
+	require.False(t, called, "unsupported writers must fail before opening the upstream response")
+}
+
+func TestContentProxyDownloadTimesOutWhenUpstreamBodyStopsMakingProgress(t *testing.T) {
+	body := newBlockingReadCloser()
+	downloaderContextCancelled := make(chan struct{})
+	proxy := &ContentProxy{writeDeadline: time.Second, inactivityTimeout: 20 * time.Millisecond}
+	result := make(chan error, 1)
+	go func() {
+		result <- proxy.StreamDownload(context.Background(), deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}, contentDownloaderFunc(func(ctx context.Context, _ string, _ string) (*zlm.DownloadResponse, error) {
+			go func() {
+				<-ctx.Done()
+				close(downloaderContextCancelled)
+			}()
+			return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}, nil
+		}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", Mode: CapabilityModeDownload}, nil)
+	}()
+
+	select {
+	case <-body.started:
+	case <-time.After(time.Second):
+		t.Fatal("upstream body was not read")
+	}
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, ErrContentTimeout)
+	case <-time.After(time.Second):
+		t.Fatal("stalled upstream body was not cancelled")
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("stalled upstream body was not closed")
+	}
+	select {
+	case <-downloaderContextCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("watchdog did not cancel the context passed to the downloader")
+	}
+}
+
+func TestContentProxyDownloadCancelsAndClosesUpstreamOnRequestCancellation(t *testing.T) {
+	body := newBlockingReadCloser()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	proxy := &ContentProxy{writeDeadline: time.Second, inactivityTimeout: time.Second}
+	result := make(chan error, 1)
+	go func() {
+		result <- proxy.StreamDownload(ctx, deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}, contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+			return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}, nil
+		}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", Mode: CapabilityModeDownload}, nil)
+	}()
+
+	select {
+	case <-body.started:
+	case <-time.After(time.Second):
+		t.Fatal("upstream body was not read")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("request cancellation did not stop the upstream body")
+	}
+	select {
+	case <-body.closed:
+	default:
+		t.Fatal("request cancellation did not close the upstream body")
+	}
+}
+
+func TestContentProxyRefreshesDeadlineDuringLongRunningHTTPDownload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const (
+		chunkCount = 8
+		chunkDelay = 50 * time.Millisecond
+	)
+	body := &slowChunkReadCloser{chunk: bytes.Repeat([]byte("x"), contentProxyBufferSize), remaining: chunkCount, delay: chunkDelay}
+	proxy := &ContentProxy{writeDeadline: 500 * time.Millisecond, inactivityTimeout: 500 * time.Millisecond}
+	router := gin.New()
+	router.GET("/download", func(ctx *gin.Context) {
+		err := proxy.StreamDownload(ctx.Request.Context(), ctx.Writer, contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+			return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{"Content-Length": []string{strconv.Itoa(chunkCount * contentProxyBufferSize)}}, Body: body}, nil
+		}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", Mode: CapabilityModeDownload}, nil)
+		if err != nil {
+			ctx.Error(err)
+		}
+	})
+	server := httptest.NewUnstartedServer(router)
+	server.Config.WriteTimeout = 150 * time.Millisecond
+	server.Start()
+	defer server.Close()
+
+	response, err := server.Client().Get(server.URL + "/download")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	downloaded, err := io.ReadAll(response.Body)
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, response.StatusCode)
+	require.Len(t, downloaded, chunkCount*contentProxyBufferSize)
+	require.Greater(t, time.Duration(chunkCount)*chunkDelay, server.Config.WriteTimeout)
+}
+
+type blockingReadCloser struct {
+	started   chan struct{}
+	closed    chan struct{}
+	startOnce sync.Once
+	closeOnce sync.Once
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{started: make(chan struct{}), closed: make(chan struct{})}
+}
+
+func (r *blockingReadCloser) Read([]byte) (int, error) {
+	r.startOnce.Do(func() { close(r.started) })
+	<-r.closed
+	return 0, errors.New("body closed")
+}
+
+func (r *blockingReadCloser) Close() error {
+	r.closeOnce.Do(func() { close(r.closed) })
+	return nil
+}
+
+type slowChunkReadCloser struct {
+	chunk     []byte
+	remaining int
+	delay     time.Duration
+}
+
+func (r *slowChunkReadCloser) Read(buffer []byte) (int, error) {
+	if r.remaining == 0 {
+		return 0, io.EOF
+	}
+	time.Sleep(r.delay)
+	r.remaining--
+	return copy(buffer, r.chunk), nil
+}
+
+func (*slowChunkReadCloser) Close() error { return nil }
 
 type deadlineRecorder struct{ *httptest.ResponseRecorder }
 
