@@ -18,10 +18,11 @@ const (
 	DownloadStatusCancelled = "cancelled"
 	DownloadStatusExpired   = "expired"
 
-	defaultDownloadReadyTTL       = time.Minute
-	defaultDownloadTerminalTTL    = 30 * time.Minute
-	defaultDownloadPerUserLimit   = 2
-	defaultDownloadPerInstanceMax = 16
+	defaultDownloadReadyTTL        = time.Minute
+	defaultDownloadTerminalTTL     = 30 * time.Minute
+	defaultDownloadPerUserLimit    = 2
+	defaultDownloadPerInstanceMax  = 16
+	defaultDownloadTerminalPerUser = 20
 )
 
 var (
@@ -281,6 +282,7 @@ func (r *DownloadRegistry) Expire(taskID string) error {
 		task.finishedAt = &now
 		task.expiresAt = now.Add(r.terminalTTL)
 		task.ticketDigest = [sha256.Size]byte{}
+		r.trimTerminalLocked(task.ownerUserID)
 		return ErrDownloadExpired
 	}
 	if task.status == DownloadStatusExpired {
@@ -328,6 +330,7 @@ func (r *DownloadRegistry) expireLocked(now time.Time) {
 			task.finishedAt = &now
 			task.expiresAt = now.Add(r.terminalTTL)
 			task.ticketDigest = [sha256.Size]byte{}
+			r.trimTerminalLocked(task.ownerUserID)
 		}
 		if downloadTerminalStatus(task.status) && !task.expiresAt.IsZero() && !now.Before(task.expiresAt) {
 			delete(r.tasks, id)
@@ -350,6 +353,26 @@ func (r *DownloadRegistry) finishLocked(task *downloadTask, status, errorCode st
 	task.status, task.errorCode = status, errorCode
 	task.finishedAt = &now
 	task.expiresAt = now.Add(r.terminalTTL)
+	r.trimTerminalLocked(task.ownerUserID)
+}
+
+func (r *DownloadRegistry) trimTerminalLocked(ownerUserID uint) {
+	terminal := make([]*downloadTask, 0, defaultDownloadTerminalPerUser+1)
+	for _, task := range r.tasks {
+		if task.ownerUserID == ownerUserID && downloadTerminalStatus(task.status) {
+			terminal = append(terminal, task)
+		}
+	}
+	for len(terminal) > defaultDownloadTerminalPerUser {
+		oldest := 0
+		for i := 1; i < len(terminal); i++ {
+			if terminal[i].finishedAt.Before(*terminal[oldest].finishedAt) || (terminal[i].finishedAt.Equal(*terminal[oldest].finishedAt) && terminal[i].taskID < terminal[oldest].taskID) {
+				oldest = i
+			}
+		}
+		delete(r.tasks, terminal[oldest].taskID)
+		terminal = append(terminal[:oldest], terminal[oldest+1:]...)
+	}
 }
 
 func (task *downloadTask) view() DownloadTaskView {

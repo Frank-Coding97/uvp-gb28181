@@ -114,6 +114,28 @@ func TestDownloadRegistryCloseCancelsActiveTask(t *testing.T) {
 	require.ErrorIs(t, err, ErrDownloadState)
 }
 
+func TestDownloadRegistryRetainsOnlyLatestTwentyTerminalTasksPerOwner(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
+	registry := NewDownloadRegistry(DownloadRegistryConfig{Now: func() time.Time { return now }})
+	for i := 0; i < 21; i++ {
+		task, ticket, err := registry.Create(7, "41")
+		require.NoError(t, err)
+		_, _, _, err = registry.Claim(task.TaskID, ticket)
+		require.NoError(t, err)
+		registry.Finish(task.TaskID, DownloadStatusCompleted, "")
+		now = now.Add(time.Second)
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	terminal := 0
+	for _, task := range registry.tasks {
+		if task.ownerUserID == 7 && downloadTerminalStatus(task.status) {
+			terminal++
+		}
+	}
+	require.Equal(t, defaultDownloadTerminalPerUser, terminal)
+}
+
 func TestDownloadRegistryErrorSentinelsAreStable(t *testing.T) {
 	require.True(t, errors.Is(ErrDownloadNotOwner, ErrDownloadNotOwner))
 	require.NotEmpty(t, strings.TrimSpace(ErrDownloadTicketInvalid.Error()))
