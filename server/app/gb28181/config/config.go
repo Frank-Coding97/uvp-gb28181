@@ -1,7 +1,10 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +32,7 @@ const (
 	AutoOnDemandEnabledConfigKey              = "gb28181.play.auto_on_demand_enabled"
 	PlayAuthEnabledConfigKey                  = "gb28181.play.auth.enabled"
 	PlayAuthBindClientIPConfigKey             = "gb28181.play.auth.bind_client_ip"
+	PlayAuthTTLSecondsConfigKey               = "gb28181.play.auth.ttl_seconds"
 	PlayAuthActiveKeyConfigKey                = "gb28181.play.auth.active_key"
 	PlayAuthPreviousKeyConfigKey              = "gb28181.play.auth.previous_key"
 	GlobalSubscriptionItemsConfigKey          = "gb28181.subscribe.global_items"
@@ -66,6 +70,11 @@ const (
 	MaxPlaybackIdleSec       = 3600
 	MaxPlaybackSessionSec    = 86400
 	MaxSIPCommandTimeoutSec  = 300
+
+	playAuthGeneratedKeyBytes = 32
+	DefaultPlayAuthTTLSeconds = 120
+	MinPlayAuthTTLSeconds     = 60
+	MaxPlayAuthTTLSeconds     = 3600
 )
 
 var supportedGlobalSubscriptionItems = []string{"catalog", "mobile_position", "alarm", "ptz_precise_position"}
@@ -187,16 +196,29 @@ type FixedAddressPlaybackSettings struct {
 type PlayAuthSettings struct {
 	Enabled      bool `json:"authEnabled"`
 	BindClientIP bool `json:"authBindClientIP"`
+	TTLSeconds   int  `json:"authTTLSeconds"`
 }
 
 func PlayAuthSettingsFrom(c valueSource) PlayAuthSettings {
 	if c == nil {
-		return PlayAuthSettings{}
+		return PlayAuthSettings{TTLSeconds: DefaultPlayAuthTTLSeconds}
 	}
 	return PlayAuthSettings{
 		Enabled:      c.Get(PlayAuthEnabledConfigKey) != nil && c.GetBool(PlayAuthEnabledConfigKey),
 		BindClientIP: c.Get(PlayAuthBindClientIPConfigKey) != nil && c.GetBool(PlayAuthBindClientIPConfigKey),
+		TTLSeconds:   playAuthTTLSecondsFrom(c),
 	}
+}
+
+func playAuthTTLSecondsFrom(c valueSource) int {
+	if c == nil || c.Get(PlayAuthTTLSecondsConfigKey) == nil {
+		return DefaultPlayAuthTTLSeconds
+	}
+	ttl := c.GetInt(PlayAuthTTLSecondsConfigKey)
+	if ttl < MinPlayAuthTTLSeconds || ttl > MaxPlayAuthTTLSeconds {
+		return DefaultPlayAuthTTLSeconds
+	}
+	return ttl
 }
 
 func CurrentPlayAuthSettings() PlayAuthSettings {
@@ -206,11 +228,12 @@ func CurrentPlayAuthSettings() PlayAuthSettings {
 }
 
 func ValidatePlayAuthSettings(settings PlayAuthSettings, fixed FixedAddressPlaybackSettings) error {
+	if settings.TTLSeconds < MinPlayAuthTTLSeconds || settings.TTLSeconds > MaxPlayAuthTTLSeconds {
+		return invalid(PlayAuthTTLSecondsConfigKey, settings.TTLSeconds,
+			fmt.Sprintf("must be between %d and %d", MinPlayAuthTTLSeconds, MaxPlayAuthTTLSeconds))
+	}
 	if settings.BindClientIP && !settings.Enabled {
 		return invalid(PlayAuthBindClientIPConfigKey, true, "requires play authorization enabled")
-	}
-	if fixed.AutoOnDemandEnabled && !settings.Enabled {
-		return invalid(PlayAuthEnabledConfigKey, false, "requires auto on-demand to be disabled first")
 	}
 	return nil
 }
@@ -227,9 +250,11 @@ func SavePlayAuthSettings(c mutableValueSource, settings PlayAuthSettings) error
 	previous := PlayAuthSettingsFrom(c)
 	c.Set(PlayAuthEnabledConfigKey, settings.Enabled)
 	c.Set(PlayAuthBindClientIPConfigKey, settings.BindClientIP)
+	c.Set(PlayAuthTTLSecondsConfigKey, settings.TTLSeconds)
 	if err := c.SaveConfig(); err != nil {
 		c.Set(PlayAuthEnabledConfigKey, previous.Enabled)
 		c.Set(PlayAuthBindClientIPConfigKey, previous.BindClientIP)
+		c.Set(PlayAuthTTLSecondsConfigKey, previous.TTLSeconds)
 		return err
 	}
 	return nil
@@ -240,6 +265,40 @@ func PlayAuthKeyMaterialFrom(c valueSource) (active, previous string) {
 		return "", ""
 	}
 	return strings.TrimSpace(c.GetString(PlayAuthActiveKeyConfigKey)), strings.TrimSpace(c.GetString(PlayAuthPreviousKeyConfigKey))
+}
+
+// EnsurePlayAuthActiveKey creates the server-owned playback authorization key
+// on first initialization. The key is never exposed through the public config
+// DTO and existing key material is preserved for rotation compatibility.
+func EnsurePlayAuthActiveKey(c mutableValueSource) error {
+	if c == nil {
+		return fmt.Errorf("配置服务尚未初始化")
+	}
+	fixedAddressPlaybackMu.Lock()
+	defer fixedAddressPlaybackMu.Unlock()
+	return ensurePlayAuthActiveKey(c, rand.Reader)
+}
+
+func ensurePlayAuthActiveKey(c mutableValueSource, reader io.Reader) error {
+	if strings.TrimSpace(c.GetString(PlayAuthActiveKeyConfigKey)) != "" {
+		return nil
+	}
+	if reader == nil {
+		return fmt.Errorf("生成播放鉴权密钥失败: 随机源为空")
+	}
+
+	keyBytes := make([]byte, playAuthGeneratedKeyBytes)
+	if _, err := io.ReadFull(reader, keyBytes); err != nil {
+		return fmt.Errorf("生成播放鉴权密钥失败: %w", err)
+	}
+	generated := base64.RawURLEncoding.EncodeToString(keyBytes)
+	previous := c.Get(PlayAuthActiveKeyConfigKey)
+	c.Set(PlayAuthActiveKeyConfigKey, generated)
+	if err := c.SaveConfig(); err != nil {
+		c.Set(PlayAuthActiveKeyConfigKey, previous)
+		return fmt.Errorf("保存播放鉴权密钥失败: %w", err)
+	}
+	return nil
 }
 
 func FixedAddressPlaybackSettingsFrom(c valueSource) FixedAddressPlaybackSettings {
@@ -287,9 +346,6 @@ func SaveFixedAddressPlaybackSettings(c mutableValueSource, settings FixedAddres
 
 	fixedAddressPlaybackMu.Lock()
 	defer fixedAddressPlaybackMu.Unlock()
-	if settings.AutoOnDemandEnabled && !PlayAuthSettingsFrom(c).Enabled {
-		return invalid(AutoOnDemandEnabledConfigKey, true, "requires play authorization enabled")
-	}
 	previous := FixedAddressPlaybackSettingsFrom(c)
 	c.Set(FixedAddressEnabledConfigKey, settings.FixedAddressEnabled)
 	c.Set(AutoOnDemandEnabledConfigKey, settings.AutoOnDemandEnabled)

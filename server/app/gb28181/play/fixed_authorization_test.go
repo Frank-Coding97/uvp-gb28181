@@ -90,6 +90,48 @@ func TestAuthorizeFixedPlaybackHasNoMediaSideEffects(t *testing.T) {
 	}
 }
 
+func TestAuthorizeFixedPlaybackWithoutAuthReturnsBareURLs(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, true, true)
+	withPlayAuthorization(t, false, false)
+	z := &mockZLM{port: 40000}
+	inviter := &mockInviter{}
+	service, _, registry, picker, _ := newFixedAuthorizationService(t, true, z, inviter)
+
+	result, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	if err != nil {
+		t.Fatalf("authorize fixed playback without auth: %v", err)
+	}
+	for protocol, rawURL := range result.URLs.AsMap() {
+		parsed, parseErr := url.Parse(rawURL)
+		if parseErr != nil {
+			t.Fatalf("parse %s URL: %v", protocol, parseErr)
+		}
+		if token := parsed.Query().Get(playauth.QueryParameter); token != "" {
+			t.Fatalf("%s URL unexpectedly contains play token", protocol)
+		}
+	}
+	if result.AuthorizationExpiresAt != 0 || result.AuthorizationCorrelationID != "" || registry.Size() != 0 {
+		t.Fatalf("unauthenticated fixed URL created authorization: result=%+v registry=%d", result, registry.Size())
+	}
+	if picker.calls.Load() != 1 || z.openCalls.Load() != 0 || inviter.inviteCalls.Load() != 0 {
+		t.Fatalf("unexpected side effects: picker=%d open=%d invite=%d", picker.calls.Load(), z.openCalls.Load(), inviter.inviteCalls.Load())
+	}
+}
+
+func TestAuthorizeFixedPlaybackDoesNotRequireAutoOnDemand(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, true, false)
+	withPlayAuthorization(t, true, false)
+	service, _, _, _, _ := newFixedAuthorizationService(t, false, &mockZLM{port: 40000}, &mockInviter{})
+
+	result, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	if err != nil {
+		t.Fatalf("fixed playback authorization with auto on-demand disabled: %v", err)
+	}
+	if result == nil || result.AuthorizationExpiresAt == 0 {
+		t.Fatalf("authorization result did not contain a refreshed credential: %+v", result)
+	}
+}
+
 func TestAuthorizeFixedPlaybackRequiresAllRuntimeGates(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -98,10 +140,7 @@ func TestAuthorizeFixedPlaybackRequiresAllRuntimeGates(t *testing.T) {
 		auth      bool
 		nodeReady bool
 	}{
-		{name: "fixed disabled", auto: true, auth: true, nodeReady: true},
-		{name: "auto disabled", fixed: true, auth: true, nodeReady: true},
-		{name: "auth disabled", fixed: true, auto: true, nodeReady: true},
-		{name: "node not auto-ready", fixed: true, auto: true, auth: true},
+		{name: "fixed disabled", fixed: false, auto: true, auth: true, nodeReady: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -118,7 +157,7 @@ func TestAuthorizeFixedPlaybackRequiresAllRuntimeGates(t *testing.T) {
 			if registry.Size() != 0 || z.openCalls.Load() != 0 || inviter.inviteCalls.Load() != 0 {
 				t.Fatalf("rejected authorization had side effects: registry=%d open=%d invite=%d", registry.Size(), z.openCalls.Load(), inviter.inviteCalls.Load())
 			}
-			if (!tt.fixed || !tt.auto || !tt.auth) && picker.calls.Load() != 0 {
+			if (!tt.fixed || !tt.auto) && picker.calls.Load() != 0 {
 				t.Fatalf("configuration rejection selected a node %d times", picker.calls.Load())
 			}
 		})

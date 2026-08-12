@@ -404,6 +404,14 @@ func Start() {
 		app.ZapLog.Warn("GB28181 SIP 尚未配置,跳过 SIP 依赖并继续启动后台(等待引导页录入)")
 		return
 	}
+	if err := gbconfig.EnsurePlayAuthActiveKey(app.ConfigYml); err != nil {
+		if gbconfig.CurrentPlayAuthSettings().Enabled {
+			sipRuntimeStatus.MarkFailed(err.Error())
+			app.ZapLog.Error("GB28181 播放鉴权密钥初始化失败", zap.Error(err))
+			return
+		}
+		app.ZapLog.Warn("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.Error(err))
+	}
 
 	if err := startSIPDependencies(sipCfg); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
@@ -679,11 +687,25 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 		}
 	}
 	activeKey := playauth.KeyMaterial{Secret: []byte(active)}
+	var signer *playauth.Signer
+	var err error
 	if previous == "" {
-		return playauth.NewKeyring(activeKey, nil)
+		signer, err = playauth.NewKeyring(activeKey, nil)
+	} else {
+		previousKey := playauth.KeyMaterial{Secret: []byte(previous)}
+		signer, err = playauth.NewKeyring(activeKey, &previousKey)
 	}
-	previousKey := playauth.KeyMaterial{Secret: []byte(previous)}
-	return playauth.NewKeyring(activeKey, &previousKey)
+	if err != nil {
+		return nil, err
+	}
+	ttlSeconds := settings.TTLSeconds
+	if ttlSeconds == 0 {
+		ttlSeconds = gbconfig.DefaultPlayAuthTTLSeconds
+	}
+	if err := signer.SetTTL(time.Duration(ttlSeconds) * time.Second); err != nil {
+		return nil, err
+	}
+	return signer, nil
 }
 
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
@@ -1018,6 +1040,13 @@ func ReloadSIP() error {
 	if !ok {
 		sipRuntimeStatus.MarkUnconfigured()
 		return errors.New("DB 里没有 SIP 配置,无法热启动")
+	}
+	if err := gbconfig.EnsurePlayAuthActiveKey(app.ConfigYml); err != nil {
+		if gbconfig.CurrentPlayAuthSettings().Enabled {
+			sipRuntimeStatus.MarkFailed(err.Error())
+			return fmt.Errorf("初始化播放鉴权密钥失败: %w", err)
+		}
+		app.ZapLog.Warn("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.Error(err))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

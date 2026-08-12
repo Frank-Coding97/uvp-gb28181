@@ -70,6 +70,28 @@ func TestAutoStartDispatcherDeduplicatesAndSetsTrigger(t *testing.T) {
 	}
 }
 
+func TestAutoStartDispatcherAcceptsRequestWithoutAuthorization(t *testing.T) {
+	started := make(chan Request, 1)
+	d := newAutoStartDispatcherForTest(t, autoStartEnsureFunc(func(_ context.Context, req Request) (*Result, error) {
+		started <- req
+		return &Result{StreamID: "stream"}, nil
+	}), AutoStartDispatcherOptions{KnownNodeIDs: []int64{7}})
+
+	request := autoStartRequest("without-auth")
+	request.AuthorizationID = ""
+	if err := d.Submit(request); err != nil {
+		t.Fatalf("submit without authorization: %v", err)
+	}
+	select {
+	case got := <-started:
+		if got.AuthorizationID != "" {
+			t.Fatalf("authorization id = %q, want empty", got.AuthorizationID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("request was not dispatched")
+	}
+}
+
 func TestAutoStartDispatcherKeepsDistinctAuthorizationGenerations(t *testing.T) {
 	started := make(chan Request, 2)
 	release := make(chan struct{})

@@ -123,7 +123,8 @@ const savedFixedAddressPlayback = reactive<FixedAddressPlaybackConfig>({
 });
 const savedPlayAuth = reactive<PlayAuthConfig>({
     authEnabled: false,
-    authBindClientIP: false
+    authBindClientIP: false,
+    authTTLSeconds: 120
 });
 const playbackProtocolOptions = ref(playbackProtocolOptionsFromDictionary([]));
 const savedGlobalSubscriptionItems = ref<Array<"catalog" | "mobile_position" | "alarm" | "ptz_precise_position">>([]);
@@ -163,7 +164,8 @@ const fixedAddressPlaybackChanged = computed(
 const playAuthChanged = computed(
     () =>
         draft.playback.authEnabled !== savedPlayAuth.authEnabled ||
-        draft.playback.authBindClientIP !== savedPlayAuth.authBindClientIP
+        draft.playback.authBindClientIP !== savedPlayAuth.authBindClientIP ||
+        draft.playback.authTTLSeconds !== savedPlayAuth.authTTLSeconds
 );
 const globalSubscriptionChanged = computed(
     () => JSON.stringify(draft.globalSubscriptionItems) !== JSON.stringify(savedGlobalSubscriptionItems.value)
@@ -194,6 +196,12 @@ const playTimeoutValid = computed(
         Number.isInteger(draft.playback.playTimeoutMs) &&
         draft.playback.playTimeoutMs >= 1000 &&
         draft.playback.playTimeoutMs <= 300000
+);
+const playAuthTTLValid = computed(
+    () =>
+        Number.isInteger(draft.playback.authTTLSeconds) &&
+        draft.playback.authTTLSeconds >= 60 &&
+        draft.playback.authTTLSeconds <= 3600
 );
 const hasChanges = computed(
     () =>
@@ -389,6 +397,7 @@ function applyPlayAuthConfig(config: PlayAuthConfig) {
     const normalized = normalizePlayAuthConfig(config);
     draft.playback.authEnabled = normalized.authEnabled;
     draft.playback.authBindClientIP = normalized.authBindClientIP;
+    draft.playback.authTTLSeconds = normalized.authTTLSeconds;
     Object.assign(savedPlayAuth, normalized);
 }
 
@@ -396,6 +405,7 @@ function restorePlayAuthDraft() {
     const normalized = normalizePlayAuthConfig(savedPlayAuth);
     draft.playback.authEnabled = normalized.authEnabled;
     draft.playback.authBindClientIP = normalized.authBindClientIP;
+    draft.playback.authTTLSeconds = normalized.authTTLSeconds;
 }
 
 async function loadPlayAuthConfig() {
@@ -644,21 +654,19 @@ watch(
 );
 
 function handlePlayAuthEnabledChange(enabled: boolean) {
-    if (!enabled && savedFixedAddressPlayback.autoOnDemandEnabled) {
-        Message.error("请先关闭自动点播并保存，再关闭播放鉴权");
-        return;
-    }
     const normalized = normalizePlayAuthConfig({
         authEnabled: enabled,
-        authBindClientIP: draft.playback.authBindClientIP
+        authBindClientIP: draft.playback.authBindClientIP,
+        authTTLSeconds: draft.playback.authTTLSeconds
     });
     draft.playback.authEnabled = normalized.authEnabled;
     draft.playback.authBindClientIP = normalized.authBindClientIP;
+    draft.playback.authTTLSeconds = normalized.authTTLSeconds;
 }
 
 async function saveConfig() {
     if (!configReady.value || !isEditing.value) return;
-    if (!sipLogRetentionValid.value || !playTimeoutValid.value) return;
+    if (!sipLogRetentionValid.value || !playTimeoutValid.value || !playAuthTTLValid.value) return;
     if (!hasChanges.value) {
         isEditing.value = false;
         return;
@@ -714,7 +722,8 @@ async function saveConfig() {
             playAuthSaving.value = true;
             const response = await updatePlayAuthConfig({
                 authEnabled: draft.playback.authEnabled,
-                authBindClientIP: draft.playback.authEnabled && draft.playback.authBindClientIP
+                authBindClientIP: draft.playback.authEnabled && draft.playback.authBindClientIP,
+                authTTLSeconds: draft.playback.authTTLSeconds
             });
             if (response.code !== 0) throw new Error(response.message || "保存配置失败");
             applyPlayAuthConfig(response.data);
@@ -904,7 +913,7 @@ onMounted(() =>
                             <a-button
                                 type="primary"
                                 :loading="configSaving"
-                                :disabled="configSaving || !hasChanges || !sipLogRetentionValid || !playTimeoutValid"
+                                :disabled="configSaving || !hasChanges || !sipLogRetentionValid || !playTimeoutValid || !playAuthTTLValid"
                                 @click="saveConfig"
                             >
                                 <template #icon><Check :size="15" /></template>
@@ -1255,7 +1264,6 @@ onMounted(() =>
                                             :disabled="
                                                 !isEditing ||
                                                 !draft.playback.fixedAddressEnabled ||
-                                                !draft.playback.authEnabled ||
                                                 fixedAddressPlaybackLoading ||
                                                 fixedAddressPlaybackSaving ||
                                                 !fixedAddressPlaybackReady
@@ -1267,7 +1275,7 @@ onMounted(() =>
                                     <a-form-item
                                         field="authEnabled"
                                         label="播放鉴权"
-                                        tooltip="开启后播放地址携带 120 秒短时凭证，仅限制新连接和重连，不会主动中断已建立播放；关闭后媒体裸地址泄露即可被直接使用。"
+                                        tooltip="开启后播放地址携带按配置有效期签发的短时凭证，仅限制新连接和重连，不会主动中断已建立播放；关闭后媒体裸地址泄露即可被直接使用。"
                                     >
                                         <a-switch
                                             :model-value="draft.playback.authEnabled"
@@ -1275,9 +1283,6 @@ onMounted(() =>
                                             :disabled="!isEditing || playAuthLoading || playAuthSaving || !playAuthReady"
                                             @update:model-value="handlePlayAuthEnabledChange"
                                         />
-                                        <template v-if="savedFixedAddressPlayback.autoOnDemandEnabled" #extra>
-                                            <span>请先关闭自动点播并保存，再关闭播放鉴权。</span>
-                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">
@@ -1297,6 +1302,27 @@ onMounted(() =>
                                                 !playAuthReady
                                             "
                                         />
+                                    </a-form-item>
+                                </a-col>
+                                <a-col :span="isMobile ? 24 : 12">
+                                    <a-form-item
+                                        field="authTTLSeconds"
+                                        label="凭证有效期（秒）"
+                                        tooltip="仅影响新签发的播放凭证；已签发凭证保持原到期时间。默认 120 秒。"
+                                        :validate-status="playAuthTTLValid ? undefined : 'error'"
+                                    >
+                                        <a-input-number
+                                            v-model="draft.playback.authTTLSeconds"
+                                            class="service-config-number-input"
+                                            :min="60"
+                                            :max="3600"
+                                            :step="1"
+                                            :precision="0"
+                                            :disabled="!isEditing || playAuthLoading || playAuthSaving || !playAuthReady"
+                                        />
+                                        <template v-if="!playAuthTTLValid" #extra>
+                                            <span>请输入 60-3600 之间的整数</span>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

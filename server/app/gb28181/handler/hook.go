@@ -579,7 +579,8 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		return
 	}
 	settings := settingsProvider()
-	if !settings.FixedAddressEnabled || !settings.AutoOnDemandEnabled || !gbconfig.CurrentPlayAuthSettings().Enabled {
+	authSettings := gbconfig.CurrentPlayAuthSettings()
+	if !settings.FixedAddressEnabled || !settings.AutoOnDemandEnabled {
 		h.denyAutoOnDemand(c, "feature-disabled")
 		return
 	}
@@ -602,19 +603,23 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		h.denyAutoOnDemand(c, "global-rate-limited")
 		return
 	}
-	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
-	if err != nil {
-		h.denyAutoOnDemand(c, "params-invalid")
-		return
-	}
-	playToken, ok := singleValue(params, playauth.QueryParameter)
-	claims, verified := h.verifyAutoStartToken(playToken, playauth.Binding{
-		DeviceID: deviceID, ChannelID: channelID, App: body.App,
-		Stream: body.Stream, MediaServerID: body.MediaServerID,
-	})
-	if !ok || !verified {
-		h.denyAutoOnDemand(c, "play-auth-invalid")
-		return
+	var authorizationID string
+	if authSettings.Enabled {
+		params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
+		if err != nil {
+			h.denyAutoOnDemand(c, "params-invalid")
+			return
+		}
+		playToken, ok := singleValue(params, playauth.QueryParameter)
+		claims, verified := h.verifyAutoStartToken(playToken, playauth.Binding{
+			DeviceID: deviceID, ChannelID: channelID, App: body.App,
+			Stream: body.Stream, MediaServerID: body.MediaServerID,
+		})
+		if !ok || !verified {
+			h.denyAutoOnDemand(c, "play-auth-invalid")
+			return
+		}
+		authorizationID = claims.AuthorizationGeneration
 	}
 	validateCtx, cancel := context.WithTimeout(c.Request.Context(), 500*time.Millisecond)
 	err = validator.ValidateAutoOnDemandTarget(validateCtx, deviceID, channelID)
@@ -626,7 +631,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 	if err := dispatcher.Submit(play.Request{
 		DeviceID: deviceID, ChannelID: channelID,
 		Trigger: "on_stream_not_found", RequiredNode: mediaNode.ID,
-		AuthorizationID: claims.AuthorizationGeneration,
+		AuthorizationID: authorizationID,
 	}); err != nil {
 		h.denyAutoOnDemand(c, autoOnDemandAdmissionReason(err))
 		return

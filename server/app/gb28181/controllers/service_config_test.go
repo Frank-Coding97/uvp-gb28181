@@ -106,7 +106,13 @@ func TestServiceConfigControllerPlayAuthLifecycle(t *testing.T) {
 		gbconfig.AutoOnDemandEnabledConfigKey: false,
 	}}
 	app.ConfigYml = config
-	router := newServiceConfigRouter(NewServiceConfigController())
+	controller := NewServiceConfigController()
+	var appliedTTL time.Duration
+	controller.SetPlayAuthTTLUpdater(func(ttl time.Duration) error {
+		appliedTTL = ttl
+		return nil
+	})
+	router := newServiceConfigRouter(controller)
 
 	get := httptest.NewRecorder()
 	router.ServeHTTP(get, httptest.NewRequest(http.MethodGet, "/play-auth", nil))
@@ -114,25 +120,41 @@ func TestServiceConfigControllerPlayAuthLifecycle(t *testing.T) {
 	data := serviceConfigData(t, get)
 	require.Equal(t, false, data["authEnabled"])
 	require.Equal(t, false, data["authBindClientIP"])
+	require.Equal(t, float64(gbconfig.DefaultPlayAuthTTLSeconds), data["authTTLSeconds"])
 
 	missing := httptest.NewRecorder()
 	router.ServeHTTP(missing, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true})))
 	require.Equal(t, http.StatusBadRequest, missing.Code)
 
 	unavailable := httptest.NewRecorder()
-	router.ServeHTTP(unavailable, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true, "authBindClientIP": false})))
+	router.ServeHTTP(unavailable, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true, "authBindClientIP": false, "authTTLSeconds": 120})))
 	require.Equal(t, http.StatusServiceUnavailable, unavailable.Code)
 	require.Zero(t, config.saveNum)
 
 	SetPlayAuthRuntimeReady(true)
 	enabled := httptest.NewRecorder()
-	router.ServeHTTP(enabled, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true, "authBindClientIP": true})))
+	router.ServeHTTP(enabled, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": true, "authBindClientIP": true, "authTTLSeconds": 300})))
 	require.Equal(t, http.StatusOK, enabled.Code, enabled.Body.String())
 	require.Equal(t, true, config.values[gbconfig.PlayAuthEnabledConfigKey])
 	require.Equal(t, true, config.values[gbconfig.PlayAuthBindClientIPConfigKey])
+	require.Equal(t, 300, config.values[gbconfig.PlayAuthTTLSecondsConfigKey])
+	require.Equal(t, 300*time.Second, appliedTTL)
 }
 
-func TestServiceConfigControllerRejectsAuthDisableWhileAutoOnDemandEnabled(t *testing.T) {
+func TestServiceConfigControllerRejectsInvalidPlayAuthTTL(t *testing.T) {
+	previous := app.ConfigYml
+	t.Cleanup(func() { app.ConfigYml = previous; SetPlayAuthRuntimeReady(false) })
+	config := &serviceConfigTestYAML{values: map[string]interface{}{}}
+	app.ConfigYml = config
+	recorder := httptest.NewRecorder()
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{
+		"authEnabled": false, "authBindClientIP": false, "authTTLSeconds": gbconfig.MinPlayAuthTTLSeconds - 1,
+	})))
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, config.saveNum)
+}
+
+func TestServiceConfigControllerAllowsAuthDisableWhileAutoOnDemandEnabled(t *testing.T) {
 	previous := app.ConfigYml
 	t.Cleanup(func() { app.ConfigYml = previous; SetPlayAuthRuntimeReady(false) })
 	config := &serviceConfigTestYAML{values: map[string]interface{}{
@@ -143,9 +165,10 @@ func TestServiceConfigControllerRejectsAuthDisableWhileAutoOnDemandEnabled(t *te
 	app.ConfigYml = config
 	SetPlayAuthRuntimeReady(true)
 	recorder := httptest.NewRecorder()
-	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": false, "authBindClientIP": false})))
-	require.Equal(t, http.StatusBadRequest, recorder.Code)
-	require.Zero(t, config.saveNum)
+	newServiceConfigRouter(NewServiceConfigController()).ServeHTTP(recorder, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{"authEnabled": false, "authBindClientIP": false, "authTTLSeconds": 120})))
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, 1, config.saveNum)
+	require.Equal(t, false, config.values[gbconfig.PlayAuthEnabledConfigKey])
 }
 
 func TestServiceConfigController_FixedAddressPlaybackDefaults(t *testing.T) {
@@ -169,7 +192,7 @@ func TestServiceConfigController_UpdateFixedAddressPlaybackValidatesAndPersists(
 	config := &serviceConfigTestYAML{values: map[string]interface{}{
 		gbconfig.FixedAddressEnabledConfigKey: false,
 		gbconfig.AutoOnDemandEnabledConfigKey: false,
-		gbconfig.PlayAuthEnabledConfigKey:     true,
+		gbconfig.PlayAuthEnabledConfigKey:     false,
 	}}
 	app.ConfigYml = config
 	router := newServiceConfigRouter(NewServiceConfigController())

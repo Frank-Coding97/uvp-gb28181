@@ -144,8 +144,9 @@ func (d *AutoStartDispatcher) Available() bool {
 }
 
 // Submit queues one on-demand live start without blocking. Repeated queued or
-// running requests with the same device, channel, and required node succeed
-// without consuming capacity or a rate-limit token.
+// running requests with the same request key succeed without consuming
+// capacity or a rate-limit token. AuthorizationID is optional when playback
+// authorization is disabled.
 func (d *AutoStartDispatcher) Submit(req Request) error {
 	key, err := d.requestKey(req)
 	if err != nil {
@@ -190,7 +191,7 @@ func (d *AutoStartDispatcher) Submit(req Request) error {
 }
 
 func (d *AutoStartDispatcher) requestKey(req Request) (autoStartKey, error) {
-	if req.DeviceID == "" || req.ChannelID == "" || req.RequiredNode <= 0 || req.AuthorizationID == "" {
+	if req.DeviceID == "" || req.ChannelID == "" || req.RequiredNode <= 0 {
 		return autoStartKey{}, ErrAutoStartInvalidRequest
 	}
 	return autoStartKey{

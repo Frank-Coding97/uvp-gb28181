@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -88,6 +89,7 @@ type SIPLogUpdateResult struct {
 
 type SIPTraceReloader func() error
 type SIPTraceRuntimeProvider func() bool
+type PlayAuthTTLUpdater func(time.Duration) error
 
 var playAuthRuntimeReady atomic.Bool
 
@@ -101,6 +103,7 @@ type ServiceConfigController struct {
 	controllers.Common
 	reload             SIPTraceReloader
 	runtimeEnabled     SIPTraceRuntimeProvider
+	playAuthTTLUpdater PlayAuthTTLUpdater
 	playbackSettingsMu sync.Mutex
 }
 
@@ -114,6 +117,10 @@ func (sc *ServiceConfigController) SetSIPTraceReloader(reload SIPTraceReloader) 
 
 func (sc *ServiceConfigController) SetSIPTraceRuntimeProvider(provider SIPTraceRuntimeProvider) {
 	sc.runtimeEnabled = provider
+}
+
+func (sc *ServiceConfigController) SetPlayAuthTTLUpdater(updater PlayAuthTTLUpdater) {
+	sc.playAuthTTLUpdater = updater
 }
 
 // GetPlaybackSettings GET /api/gb28181/sip/service-config/playback-settings
@@ -193,10 +200,6 @@ func (sc *ServiceConfigController) UpdateFixedAddressPlayback(c *gin.Context) {
 		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
 		return
 	}
-	if settings.AutoOnDemandEnabled && !gbconfig.CurrentPlayAuthSettings().Enabled {
-		sc.Fail(c, "保存固定地址播放配置失败：自动点播依赖播放鉴权", nil, http.StatusBadRequest)
-		return
-	}
 	if err := gbconfig.SaveFixedAddressPlaybackSettings(app.ConfigYml, settings); err != nil {
 		sc.Fail(c, "保存固定地址播放配置失败", err, http.StatusInternalServerError)
 		return
@@ -214,8 +217,9 @@ func (sc *ServiceConfigController) UpdatePlayAuth(c *gin.Context) {
 	var request struct {
 		Enabled      *bool `json:"authEnabled"`
 		BindClientIP *bool `json:"authBindClientIP"`
+		TTLSeconds   *int  `json:"authTTLSeconds"`
 	}
-	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil || request.BindClientIP == nil {
+	if err := c.ShouldBindJSON(&request); err != nil || request.Enabled == nil || request.BindClientIP == nil || request.TTLSeconds == nil {
 		sc.Fail(c, "保存播放鉴权配置失败：必须提交完整配置", err, http.StatusBadRequest)
 		return
 	}
@@ -223,18 +227,24 @@ func (sc *ServiceConfigController) UpdatePlayAuth(c *gin.Context) {
 		sc.Fail(c, "配置服务尚未初始化", nil, http.StatusServiceUnavailable)
 		return
 	}
-	settings := gbconfig.PlayAuthSettings{Enabled: *request.Enabled, BindClientIP: *request.BindClientIP}
+	settings := gbconfig.PlayAuthSettings{Enabled: *request.Enabled, BindClientIP: *request.BindClientIP, TTLSeconds: *request.TTLSeconds}
 	if err := gbconfig.ValidatePlayAuthSettings(settings, gbconfig.CurrentFixedAddressPlaybackSettings()); err != nil {
-		sc.Fail(c, "保存播放鉴权配置失败：请检查 IP 绑定和自动点播依赖", err, http.StatusBadRequest)
+		sc.Fail(c, "保存播放鉴权配置失败：请检查凭证有效期和客户端 IP 绑定", err, http.StatusBadRequest)
 		return
 	}
 	if settings.Enabled && !playAuthRuntimeReady.Load() {
-		sc.Fail(c, "播放鉴权密钥不可用，请配置独立 active key 后重启服务", nil, http.StatusServiceUnavailable)
+		sc.Fail(c, "播放鉴权运行时未就绪，请重启服务并检查启动日志", nil, http.StatusServiceUnavailable)
 		return
 	}
 	if err := gbconfig.SavePlayAuthSettings(app.ConfigYml, settings); err != nil {
 		sc.Fail(c, "保存播放鉴权配置失败", err, http.StatusInternalServerError)
 		return
+	}
+	if sc.playAuthTTLUpdater != nil {
+		if err := sc.playAuthTTLUpdater(time.Duration(settings.TTLSeconds) * time.Second); err != nil {
+			sc.Fail(c, "播放鉴权配置已保存，但有效期未应用", err, http.StatusInternalServerError)
+			return
+		}
 	}
 	sc.SuccessWithMessage(c, "播放鉴权配置已更新", settings)
 }

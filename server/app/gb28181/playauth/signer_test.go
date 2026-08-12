@@ -95,6 +95,34 @@ func TestDirectTokenRejectsTamperingExpiryAndMalformedValues(t *testing.T) {
 	}
 }
 
+func TestSignerSetTTLAppliesToNewTokensOnly(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0).UTC()
+	signer, err := NewSigner([]byte(testRootSecret), WithNow(func() time.Time { return now }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := signer.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := signer.SetTTL(5 * time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	second, err := signer.Prepare()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.ExpiresAt.Equal(now.Add(DefaultTTL)) {
+		t.Fatalf("first expiry=%s", first.ExpiresAt)
+	}
+	if !second.ExpiresAt.Equal(now.Add(5 * time.Minute)) {
+		t.Fatalf("second expiry=%s", second.ExpiresAt)
+	}
+	if err := signer.SetTTL(0); !errors.Is(err, ErrTokenInvalid) {
+		t.Fatalf("error=%v, want ErrTokenInvalid", err)
+	}
+}
+
 func TestIssueDirectRejectsInvalidIdentity(t *testing.T) {
 	signer, err := NewSigner([]byte(testRootSecret))
 	if err != nil {

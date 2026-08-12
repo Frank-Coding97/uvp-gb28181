@@ -118,7 +118,7 @@ export const startPlay = (deviceId: string, channelId: string) =>
 
 /** 为固定播放地址刷新短期访问凭据。 */
 export const authorizeFixedPlayback = (deviceId: string, channelId: string) =>
-  http.request<PlayApiResult>("post", baseUrlApi(`gb28181/play/${deviceId}/${channelId}/authorization`));
+  http.request<PlayApiResult>("post", baseUrlApi(`gb28181/play/${deviceId}/${channelId}/authorization`), undefined, silentRequestConfig);
 
 /**
  * 停播响应
@@ -1052,6 +1052,7 @@ export const updateFixedAddressPlaybackConfig = (config: FixedAddressPlaybackCon
 export interface PlayAuthConfig {
   authEnabled: boolean;
   authBindClientIP: boolean;
+  authTTLSeconds: number;
 }
 
 export const fetchPlayAuthConfig = () =>

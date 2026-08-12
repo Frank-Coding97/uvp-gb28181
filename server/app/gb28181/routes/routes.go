@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -105,6 +106,10 @@ func SetServiceConfigSIPTraceReloader(reload gbcontrollers.SIPTraceReloader) {
 
 func SetServiceConfigSIPTraceRuntimeProvider(provider gbcontrollers.SIPTraceRuntimeProvider) {
 	serviceConfigController.SetSIPTraceRuntimeProvider(provider)
+}
+
+func SetServiceConfigPlayAuthTTLUpdater(updater gbcontrollers.PlayAuthTTLUpdater) {
+	serviceConfigController.SetPlayAuthTTLUpdater(updater)
 }
 
 func SetPlatformController(controller *gbcontrollers.PlatformController) {
@@ -218,6 +223,11 @@ func SetPlayService(svc *gbplay.Service) {
 func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
 	hookController.SetPlayAuthorizer(authorizer)
 	gbcontrollers.SetPlayAuthRuntimeReady(authorizer != nil)
+	if updater, ok := authorizer.(interface{ SetTTL(time.Duration) error }); ok {
+		SetServiceConfigPlayAuthTTLUpdater(updater.SetTTL)
+	} else {
+		SetServiceConfigPlayAuthTTLUpdater(nil)
+	}
 }
 
 func SetStreamMonitorService(service *streammonitor.Service) {

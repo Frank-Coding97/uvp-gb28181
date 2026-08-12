@@ -20,6 +20,7 @@ export interface StaticServiceConfigDraft {
         autoOnDemandEnabled: boolean;
         authEnabled: boolean;
         authBindClientIP: boolean;
+        authTTLSeconds: number;
         playTimeoutMs: number;
         cloudRecordingEnabled: boolean;
         onDemandLive: boolean;
@@ -59,6 +60,7 @@ export const playbackServiceConfigLabels = [
     "自动点播",
     "播放鉴权",
     "绑定客户端 IP",
+    "凭证有效期（秒）",
     "点播超时时间（毫秒）",
     "云端录像",
     "按需直播"
@@ -97,6 +99,7 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
             autoOnDemandEnabled: false,
             authEnabled: false,
             authBindClientIP: false,
+            authTTLSeconds: 120,
             playTimeoutMs: 10000,
             cloudRecordingEnabled: false,
             onDemandLive: true
@@ -116,11 +119,13 @@ export function createStaticServiceConfigDraft(): StaticServiceConfigDraft {
 export interface PlayAuthDraft {
     authEnabled: boolean;
     authBindClientIP: boolean;
+    authTTLSeconds?: number;
 }
 
-export function normalizePlayAuthConfig(config: PlayAuthDraft): PlayAuthDraft {
+export function normalizePlayAuthConfig(config: PlayAuthDraft): Required<PlayAuthDraft> {
     return {
         authEnabled: config.authEnabled,
-        authBindClientIP: config.authEnabled && config.authBindClientIP
+        authBindClientIP: config.authEnabled && config.authBindClientIP,
+        authTTLSeconds: Number.isInteger(config.authTTLSeconds) ? config.authTTLSeconds! : 120
     };
 }

@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
@@ -109,7 +110,7 @@ type derivedKey struct {
 type Signer struct {
 	activeID string
 	keys     map[string]derivedKey
-	ttl      time.Duration
+	ttl      atomic.Int64
 	now      func() time.Time
 	random   io.Reader
 }
@@ -126,10 +127,10 @@ func NewKeyring(active KeyMaterial, previous *KeyMaterial, opts ...Option) (*Sig
 	signer := &Signer{
 		activeID: activeID,
 		keys:     map[string]derivedKey{activeID: activeKey},
-		ttl:      DefaultTTL,
 		now:      time.Now,
 		random:   rand.Reader,
 	}
+	signer.ttl.Store(int64(DefaultTTL))
 	if previous != nil && len(previous.Secret) > 0 {
 		previousID, previousKey, keyErr := buildKey(*previous)
 		if keyErr != nil || previousID == activeID {
@@ -177,9 +178,17 @@ func WithTTL(ttl time.Duration) Option {
 		if ttl <= 0 {
 			return ErrTokenInvalid
 		}
-		s.ttl = ttl
+		s.ttl.Store(int64(ttl))
 		return nil
 	}
+}
+
+func (s *Signer) SetTTL(ttl time.Duration) error {
+	if s == nil || ttl <= 0 {
+		return ErrTokenInvalid
+	}
+	s.ttl.Store(int64(ttl))
+	return nil
 }
 
 func WithNow(now func() time.Time) Option {
@@ -203,7 +212,7 @@ func WithRandomReader(reader io.Reader) Option {
 }
 
 func (s *Signer) Prepare() (Prepared, error) {
-	if s == nil || s.random == nil || s.now == nil || s.ttl <= 0 {
+	if s == nil || s.random == nil || s.now == nil || s.ttl.Load() <= 0 {
 		return Prepared{}, ErrTokenInvalid
 	}
 	randomBytes := make([]byte, 32)
@@ -213,7 +222,7 @@ func (s *Signer) Prepare() (Prepared, error) {
 	now := s.now().UTC()
 	return Prepared{
 		IssuedAt:                now,
-		ExpiresAt:               now.Add(s.ttl),
+		ExpiresAt:               now.Add(time.Duration(s.ttl.Load())),
 		Nonce:                   base64.RawURLEncoding.EncodeToString(randomBytes[:16]),
 		AuthorizationGeneration: base64.RawURLEncoding.EncodeToString(randomBytes[16:]),
 	}, nil

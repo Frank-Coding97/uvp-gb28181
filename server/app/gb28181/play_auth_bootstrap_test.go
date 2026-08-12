@@ -2,6 +2,7 @@ package gb28181
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -45,4 +46,18 @@ func TestBuildPlaySignerAllowsDisabledCompatibilityAndValidRotation(t *testing.T
 	)
 	require.NoError(t, err)
 	require.NotNil(t, signer)
+}
+
+func TestBuildPlaySignerUsesConfiguredTTL(t *testing.T) {
+	signer, err := buildPlaySigner(
+		gbconfig.PlayAuthSettings{Enabled: true, TTLSeconds: 300},
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"",
+		"jwt",
+		"zlm",
+	)
+	require.NoError(t, err)
+	prepared, err := signer.Prepare()
+	require.NoError(t, err)
+	require.WithinDuration(t, time.Now().Add(300*time.Second), prepared.ExpiresAt, time.Second)
 }

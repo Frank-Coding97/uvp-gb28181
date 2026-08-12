@@ -294,7 +294,8 @@ gb28181:
     auth:
       enabled: false              # 播放地址鉴权，默认关闭以兼容现网
       bind_client_ip: false       # 可选 IP 绑定，仅在 enabled=true 时生效
-      active_key: ""              # 独立随机密钥，开启鉴权时至少 32 字节；不得复用 JWT/ZLM secret
+      ttl_seconds: 120            # 播放凭证有效期，前端可配置 60-3600 秒
+      active_key: ""              # 首次完成 SIP 引导时由服务端自动生成；不得复用 JWT/ZLM secret
       previous_key: ""            # 密钥轮换宽限期旧密钥，可留空
   recording:
     reconcile_interval_sec: 30   # 云端录像对账周期(秒);0 仅禁用周期任务

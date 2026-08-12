@@ -235,6 +235,21 @@ func TestOnStreamNotFoundAcceptsAuthorizedFixedRequest(t *testing.T) {
 	}, fixture.dispatcher.requests[0])
 }
 
+func TestOnStreamNotFoundAcceptsFixedRequestWithoutPlayAuth(t *testing.T) {
+	fixture := newAutoOnDemandFixture(t)
+	setHookPlayAuth(t, false, false)
+	fixture.body["params"] = ""
+
+	response := fixture.serve(t)
+	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
+	require.Equal(t, 1, fixture.validator.calls)
+	require.Equal(t, 1, fixture.dispatcher.count())
+	require.Equal(t, play.Request{
+		DeviceID: fixture.deviceID, ChannelID: fixture.channelID,
+		Trigger: "on_stream_not_found", RequiredNode: fixture.resolver.node.ID,
+	}, fixture.dispatcher.requests[0])
+}
+
 func TestOnStreamNotFoundFailsClosedBeforeDispatch(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -261,9 +276,6 @@ func TestOnStreamNotFoundFailsClosedBeforeDispatch(t *testing.T) {
 		}},
 		{name: "fixed disabled", mutate: func(f *autoOnDemandFixture) { f.settings.FixedAddressEnabled = false }},
 		{name: "auto disabled", mutate: func(f *autoOnDemandFixture) { f.settings.AutoOnDemandEnabled = false }},
-		{name: "play auth disabled", mutate: func(_ *autoOnDemandFixture) {
-			app.ConfigYml.Set(gbconfig.PlayAuthEnabledConfigKey, false)
-		}},
 		{name: "cap missing", mutate: func(f *autoOnDemandFixture) { f.path = "/index/hook/on_stream_not_found" }},
 		{name: "cap duplicated", mutate: func(f *autoOnDemandFixture) { f.path += "&cap=" + url.QueryEscape(f.capability) }},
 		{name: "cap invalid", mutate: func(f *autoOnDemandFixture) { f.path = "/index/hook/on_stream_not_found?cap=invalid" }},

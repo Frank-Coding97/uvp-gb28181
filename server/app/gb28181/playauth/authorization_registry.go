@@ -434,6 +434,13 @@ func NewAuthorizationService(signer *Signer, registry *AuthorizationRegistry, op
 	return service
 }
 
+func (s *AuthorizationService) SetTTL(ttl time.Duration) error {
+	if s == nil || s.signer == nil {
+		return ErrAuthorizationRegistryUnavailable
+	}
+	return s.signer.SetTTL(ttl)
+}
+
 func (s *AuthorizationService) Prepare() (prepared Prepared, err error) {
 	defer func() {
 		if err != nil {

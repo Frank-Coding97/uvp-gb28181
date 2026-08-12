@@ -38,7 +38,7 @@ describe("static service config draft", () => {
         expect(staticServiceConfigLabels).not.toContain("是否使用设备来源IP作为回复IP");
         expect(staticServiceConfigLabels).not.toContain("缺少国标ID是否给所有上级发送消息");
         expect(staticServiceConfigLabels).not.toContain("设置notify缓存队列最大长度");
-        expect(playbackServiceConfigLabels).toHaveLength(8);
+        expect(playbackServiceConfigLabels).toHaveLength(9);
         expect(playbackServiceConfigLabels).not.toContain("推流是否录制");
         expect(playbackServiceConfigLabels).not.toContain("推流鉴权");
         expect(cascadeServiceConfigLabels).toHaveLength(7);
@@ -46,6 +46,7 @@ describe("static service config draft", () => {
         expect(draft.playback.autoOnDemandEnabled).toBe(false);
         expect(draft.playback.authEnabled).toBe(false);
         expect(draft.playback.authBindClientIP).toBe(false);
+        expect(draft.playback.authTTLSeconds).toBe(120);
         expect(draft.playback).not.toHaveProperty("autoInvite");
         expect(draft.playback.playTimeoutMs).toBe(10000);
         expect(draft.playback.onDemandLive).toBe(true);
@@ -55,6 +56,7 @@ describe("static service config draft", () => {
         expect(playbackServiceConfigLabels).toContain("自动点播");
         expect(playbackServiceConfigLabels).toContain("播放鉴权");
         expect(playbackServiceConfigLabels).toContain("绑定客户端 IP");
+        expect(playbackServiceConfigLabels).toContain("凭证有效期（秒）");
         expect(playbackServiceConfigLabels).not.toContain("是否开启无人观看自动停止");
         expect(draft.playback).not.toHaveProperty("recordPushStream");
         expect(draft.playback).not.toHaveProperty("pushAuth");
@@ -68,13 +70,20 @@ describe("static service config draft", () => {
     });
 
     it("disables IP binding whenever playback auth is disabled", () => {
-        expect(normalizePlayAuthConfig({ authEnabled: false, authBindClientIP: true })).toEqual({
+        expect(normalizePlayAuthConfig({ authEnabled: false, authBindClientIP: true, authTTLSeconds: 300 })).toEqual({
             authEnabled: false,
-            authBindClientIP: false
+            authBindClientIP: false,
+            authTTLSeconds: 300
         });
-        expect(normalizePlayAuthConfig({ authEnabled: true, authBindClientIP: true })).toEqual({
+        expect(normalizePlayAuthConfig({ authEnabled: true, authBindClientIP: true, authTTLSeconds: 300 })).toEqual({
             authEnabled: true,
-            authBindClientIP: true
+            authBindClientIP: true,
+            authTTLSeconds: 300
+        });
+        expect(normalizePlayAuthConfig({ authEnabled: true, authBindClientIP: false })).toEqual({
+            authEnabled: true,
+            authBindClientIP: false,
+            authTTLSeconds: 120
         });
     });
 });
