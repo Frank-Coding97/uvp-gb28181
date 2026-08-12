@@ -898,6 +898,7 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 			return app.CasbinV2.Enforce(fmt.Sprintf("user_%d", userID), path, method, "")
 		},
 		NewDownloader: func(n *node.Node) gbrecording.ContentDownloader { return gbzlm.NewClientForNode(n) },
+		Downloads:     gbrecording.NewDownloadRegistry(gbrecording.DownloadRegistryConfig{}),
 	})
 	gbroutes.SetCloudRecordingCatalogService(catalogService)
 	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.Duration("interval", catalogInterval))

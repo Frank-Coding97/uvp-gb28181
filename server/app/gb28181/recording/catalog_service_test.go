@@ -3,6 +3,7 @@ package recording
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -133,6 +134,66 @@ func TestCatalogServiceContentRechecksPermissionAndDataScope(t *testing.T) {
 	require.NoError(t, service.StreamContent(context.Background(), recorder, "201", grant.Capability, ""))
 	require.Equal(t, "content", recorder.Body.String())
 	require.Equal(t, 1, downloaderCalls)
+}
+
+func TestCatalogServiceDownloadRechecksPermissionBeforeUpstream(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Now().UTC()
+	file := catalogFile(202, 10, 1, now, "camera.mp4")
+	require.NoError(t, db.Create(&file).Error)
+	signer, err := NewCapabilitySigner([]byte(strings.Repeat("f", 32)), "recording-v1")
+	require.NoError(t, err)
+	allowed := true
+	upstreamCalls := 0
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo: NewGormRepo(db), Downloads: NewDownloadRegistry(DownloadRegistryConfig{}), Signer: signer,
+		Nodes: catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, Host: "127.0.0.1", APIPort: 18080, APISecret: "configured", State: node.StateActive}}},
+		ResolveAccess: func(context.Context, uint) (CatalogAccess, error) {
+			if !allowed {
+				return CatalogAccess{}, ErrCatalogAccessRevoked
+			}
+			return CatalogAccess{DeptIDs: []uint{10}}, nil
+		},
+		CheckPermission: func(context.Context, uint, string, string) (bool, error) { return allowed, nil },
+		NewDownloader: func(*node.Node) ContentDownloader {
+			return contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+				upstreamCalls++
+				return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("content"))}, nil
+			})
+		},
+	})
+	task, ticket, err := service.CreateDownload(context.Background(), 7, 202)
+	require.NoError(t, err)
+	allowed = false
+	err = service.ClaimDownload(context.Background(), httptest.NewRecorder(), task.TaskID, ticket, "")
+	require.ErrorIs(t, err, ErrCatalogAccessRevoked)
+	require.Zero(t, upstreamCalls)
+}
+
+func TestCatalogServiceIssueAccessRejectsDownloadAndContentRequiresPlay(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Now().UTC()
+	file := catalogFile(203, 10, 1, now, "camera.mp4")
+	require.NoError(t, db.Create(&file).Error)
+	signer, err := NewCapabilitySigner([]byte(strings.Repeat("g", 32)), "recording-v1")
+	require.NoError(t, err)
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo: NewGormRepo(db), Signer: signer,
+		Nodes:           catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, Host: "127.0.0.1", APIPort: 18080, APISecret: "configured", State: node.StateActive}}},
+		ResolveAccess:   func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+		CheckPermission: func(context.Context, uint, string, string) (bool, error) { return true, nil },
+		NewDownloader: func(*node.Node) ContentDownloader {
+			return contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+				return nil, errors.New("must not call")
+			})
+		},
+	})
+	_, err = service.IssueAccess(context.Background(), 7, 203, CapabilityModeDownload)
+	require.ErrorIs(t, err, ErrCapabilityInvalid)
+	legacy, err := signer.Issue("203", 7, CapabilityModeDownload, nil)
+	require.NoError(t, err)
+	err = service.StreamContent(context.Background(), httptest.NewRecorder(), "203", legacy.Token, "")
+	require.ErrorIs(t, err, ErrCapabilityInvalid)
 }
 
 func TestCatalogServiceAvailabilityErrorsAreStable(t *testing.T) {

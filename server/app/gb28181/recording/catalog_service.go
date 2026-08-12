@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
@@ -51,6 +52,7 @@ type CatalogServiceConfig struct {
 	CheckPermission CatalogPermissionChecker
 	NewDownloader   CatalogDownloaderFactory
 	Proxy           *ContentProxy
+	Downloads       *DownloadRegistry
 }
 
 type CatalogService struct {
@@ -62,6 +64,7 @@ type CatalogService struct {
 	checkPermission CatalogPermissionChecker
 	newDownloader   CatalogDownloaderFactory
 	proxy           *ContentProxy
+	downloads       *DownloadRegistry
 }
 
 type FileDTOPage struct {
@@ -80,6 +83,134 @@ func NewCatalogService(config CatalogServiceConfig) *CatalogService {
 		repo: config.Repo, nodes: config.Nodes, scheduler: config.Scheduler, signer: config.Signer,
 		resolveAccess: config.ResolveAccess, checkPermission: config.CheckPermission,
 		newDownloader: config.NewDownloader, proxy: proxy,
+		downloads: config.Downloads,
+	}
+}
+
+func (s *CatalogService) CreateDownload(ctx context.Context, userID uint, fileID uint64) (DownloadTaskView, string, error) {
+	if s.downloads == nil {
+		return DownloadTaskView{}, "", ErrCatalogAccessUnavailable
+	}
+	if _, err := s.downloadableFile(ctx, userID, fileID); err != nil {
+		return DownloadTaskView{}, "", err
+	}
+	return s.downloads.Create(userID, strconv.FormatUint(fileID, 10))
+}
+
+func (s *CatalogService) DownloadStatus(_ context.Context, userID uint, taskID string) (DownloadTaskView, error) {
+	if s.downloads == nil {
+		return DownloadTaskView{}, ErrCatalogAccessUnavailable
+	}
+	return s.downloads.Get(taskID, userID)
+}
+
+func (s *CatalogService) CancelDownload(_ context.Context, userID uint, taskID string) (DownloadTaskView, error) {
+	if s.downloads == nil {
+		return DownloadTaskView{}, ErrCatalogAccessUnavailable
+	}
+	return s.downloads.Cancel(taskID, userID)
+}
+
+func (s *CatalogService) ClaimDownload(ctx context.Context, writer http.ResponseWriter, taskID, ticket, byteRange string) error {
+	if s.downloads == nil {
+		return ErrCatalogAccessUnavailable
+	}
+	if err := validateDownloadRange(byteRange); err != nil {
+		return err
+	}
+	view, taskCtx, _, err := s.downloads.Claim(taskID, ticket)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if recoverValue := recover(); recoverValue != nil {
+			s.downloads.Finish(taskID, DownloadStatusFailed, "internal")
+			panic(recoverValue)
+		}
+	}()
+	transferCtx, transferCancel := context.WithCancel(ctx)
+	defer transferCancel()
+	go func() {
+		select {
+		case <-taskCtx.Done():
+			transferCancel()
+		case <-transferCtx.Done():
+		}
+	}()
+	fileID, err := strconv.ParseUint(view.FileID, 10, 64)
+	if err != nil || fileID == 0 {
+		s.downloads.Finish(taskID, DownloadStatusFailed, "unavailable")
+		return ErrCatalogAccessRevoked
+	}
+	ownerUserID, ok := s.downloads.Owner(taskID)
+	if !ok {
+		s.downloads.Finish(taskID, DownloadStatusFailed, "unavailable")
+		return ErrCatalogAccessRevoked
+	}
+	file, err := s.downloadableFile(transferCtx, ownerUserID, fileID)
+	if err != nil {
+		s.downloads.Finish(taskID, DownloadStatusFailed, downloadErrorCode(err))
+		return err
+	}
+	nodeValue, ok := s.nodes.Get(file.NodeID)
+	if !ok {
+		s.downloads.Finish(taskID, DownloadStatusFailed, "node_unavailable")
+		return ErrCatalogNodeMissing
+	}
+	if file.FileSize != nil {
+		s.downloads.SetTotal(taskID, *file.FileSize)
+	}
+	err = s.proxy.StreamDownload(transferCtx, writer, s.newDownloader(nodeValue), ContentRequest{FilePath: file.FilePath, FileName: file.FileName, FileSize: file.FileSize, Mode: CapabilityModeDownload}, func(written uint64) { s.downloads.AddBytes(taskID, written) })
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			s.downloads.Finish(taskID, DownloadStatusCancelled, "cancelled")
+		} else {
+			s.downloads.Finish(taskID, DownloadStatusFailed, downloadErrorCode(err))
+		}
+		return err
+	}
+	s.downloads.Finish(taskID, DownloadStatusCompleted, "")
+	return nil
+}
+
+func (s *CatalogService) downloadableFile(ctx context.Context, userID uint, fileID uint64) (*models.GbRecordingFile, error) {
+	if s.signer == nil || s.checkPermission == nil || s.newDownloader == nil {
+		return nil, ErrCatalogAccessUnavailable
+	}
+	allowed, err := s.checkPermission(ctx, userID, "/api/gb28181/cloud-recordings/files/:id/downloads", http.MethodPost)
+	if err != nil || !allowed {
+		return nil, ErrCatalogAccessRevoked
+	}
+	access, err := s.access(ctx, userID)
+	if err != nil {
+		return nil, ErrCatalogAccessRevoked
+	}
+	file, err := s.repo.GetCatalogFile(ctx, fileID, access.DeptIDs, access.FullAccess)
+	if errors.Is(err, ErrRecordingFileNotFound) {
+		return nil, ErrCatalogAccessRevoked
+	}
+	if err != nil {
+		return nil, err
+	}
+	nodes := s.nodeSnapshot()
+	if err := catalogAvailabilityError(CatalogAvailability(*file, nodes.known, nodes.offline, nodes.accessible)); err != nil {
+		return nil, err
+	}
+	return file, nil
+}
+
+func downloadErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrCatalogAccessRevoked):
+		return "access_revoked"
+	case errors.Is(err, ErrCatalogFileMissing), errors.Is(err, ErrRecordingFileNotFound):
+		return "file_missing"
+	case errors.Is(err, ErrCatalogNodeMissing), errors.Is(err, ErrCatalogNodeOffline), errors.Is(err, zlm.ErrRecordingNodeUnavailable):
+		return "node_unavailable"
+	case errors.Is(err, ErrContentRangeInvalid):
+		return "range_invalid"
+	default:
+		return "transfer_failed"
 	}
 }
 
@@ -196,6 +327,9 @@ func (s *CatalogService) FileDetail(ctx context.Context, userID uint, fileID uin
 }
 
 func (s *CatalogService) IssueAccess(ctx context.Context, userID uint, fileID uint64, mode string) (AccessDTO, error) {
+	if mode != CapabilityModePlay {
+		return AccessDTO{}, ErrCapabilityInvalid
+	}
 	if s.signer == nil {
 		return AccessDTO{}, ErrCatalogAccessUnavailable
 	}
@@ -222,7 +356,7 @@ func (s *CatalogService) StreamContent(ctx context.Context, writer http.Response
 	if s.signer == nil || s.checkPermission == nil || s.newDownloader == nil {
 		return ErrCatalogAccessUnavailable
 	}
-	claims, err := s.signer.VerifyForFile(capability, fileID)
+	claims, err := s.signer.Verify(capability, fileID, CapabilityModePlay)
 	if err != nil {
 		return err
 	}

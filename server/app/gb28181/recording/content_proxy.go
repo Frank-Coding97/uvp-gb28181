@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
@@ -16,10 +17,13 @@ import (
 
 const contentProxyBufferSize = 32 * 1024
 
+const downloadWriteDeadline = 90 * time.Second
+
 var (
 	ErrContentRangeInvalid = errors.New("invalid recording content range")
 	ErrContentRedirect     = errors.New("recording content redirect refused")
 	ErrContentUpstream     = errors.New("recording content upstream failure")
+	ErrContentDeadline     = errors.New("recording content writer deadline unavailable")
 )
 
 type ContentDownloader interface {
@@ -71,6 +75,113 @@ func (p *ContentProxy) Stream(ctx context.Context, writer http.ResponseWriter, d
 			return ctx.Err()
 		}
 		return ErrContentUpstream
+	}
+	return nil
+}
+
+// StreamDownload forwards exactly one complete response and deliberately never
+// passes Range upstream. A later retry therefore starts from byte zero.
+func (p *ContentProxy) StreamDownload(ctx context.Context, writer http.ResponseWriter, downloader ContentDownloader, request ContentRequest, onWrite func(uint64)) error {
+	if writer == nil || downloader == nil || request.FilePath == "" || request.Mode != CapabilityModeDownload {
+		return ErrContentUpstream
+	}
+	responseCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	response, err := downloader.DownloadFile(responseCtx, request.FilePath, "")
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return classifyContentDownloadError(err)
+	}
+	if response == nil || response.Body == nil {
+		cancel()
+		return ErrContentUpstream
+	}
+	defer cancel()
+	defer response.Body.Close()
+	if err := validateContentStatus(response.StatusCode, false); err != nil {
+		return err
+	}
+	if err := validateDownloadLength(response.Header.Get("Content-Length"), request.FileSize); err != nil {
+		return err
+	}
+	if err := setDownloadDeadline(writer); err != nil {
+		return err
+	}
+	copyContentHeaders(writer.Header(), response.Header, response.StatusCode)
+	writer.Header().Set("Content-Disposition", contentDisposition(CapabilityModeDownload, request.FileName))
+	writer.Header().Set("Cache-Control", "no-store")
+	writer.Header().Set("X-Accel-Buffering", "no")
+	writer.WriteHeader(http.StatusOK)
+
+	buffer := make([]byte, contentProxyBufferSize)
+	var copied uint64
+	for {
+		count, readErr := response.Body.Read(buffer)
+		if count > 0 {
+			written, writeErr := writer.Write(buffer[:count])
+			if written > 0 {
+				copied += uint64(written)
+				if onWrite != nil {
+					onWrite(uint64(written))
+				}
+				if deadlineErr := setDownloadDeadline(writer); deadlineErr != nil {
+					return deadlineErr
+				}
+			}
+			if writeErr != nil || written != count {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				return ErrContentUpstream
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return ErrContentUpstream
+		}
+	}
+	if expected := expectedDownloadLength(response.Header.Get("Content-Length"), request.FileSize); expected != nil && copied != *expected {
+		return ErrContentUpstream
+	}
+	return nil
+}
+
+func validateDownloadRange(value string) error {
+	if value == "" || value == "bytes=0-" {
+		return nil
+	}
+	return ErrContentRangeInvalid
+}
+
+func validateDownloadLength(contentLength string, fileSize *uint64) error {
+	if contentLength == "" {
+		return nil
+	}
+	length, err := strconv.ParseUint(contentLength, 10, 64)
+	if err != nil || (fileSize != nil && length != *fileSize) {
+		return ErrContentUpstream
+	}
+	return nil
+}
+
+func expectedDownloadLength(contentLength string, fileSize *uint64) *uint64 {
+	if contentLength != "" {
+		if length, err := strconv.ParseUint(contentLength, 10, 64); err == nil {
+			return &length
+		}
+	}
+	return fileSize
+}
+
+func setDownloadDeadline(writer http.ResponseWriter) error {
+	if err := http.NewResponseController(writer).SetWriteDeadline(time.Now().Add(downloadWriteDeadline)); err != nil {
+		return ErrContentDeadline
 	}
 	return nil
 }

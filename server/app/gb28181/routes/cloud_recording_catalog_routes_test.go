@@ -28,6 +28,20 @@ func (*routeCatalogService) FileDetail(context.Context, uint, uint64) (gbrecordi
 func (*routeCatalogService) IssueAccess(context.Context, uint, uint64, string) (gbrecording.AccessDTO, error) {
 	return gbrecording.AccessDTO{}, nil
 }
+func (*routeCatalogService) CreateDownload(context.Context, uint, uint64) (gbrecording.DownloadTaskView, string, error) {
+	return gbrecording.DownloadTaskView{}, "", nil
+}
+func (*routeCatalogService) DownloadStatus(context.Context, uint, string) (gbrecording.DownloadTaskView, error) {
+	return gbrecording.DownloadTaskView{}, nil
+}
+func (*routeCatalogService) CancelDownload(context.Context, uint, string) (gbrecording.DownloadTaskView, error) {
+	return gbrecording.DownloadTaskView{}, nil
+}
+func (s *routeCatalogService) ClaimDownload(ctx context.Context, writer http.ResponseWriter, _, _, _ string) error {
+	_, s.contentHasDeadline = ctx.Deadline()
+	_, _ = writer.Write([]byte("streamed"))
+	return nil
+}
 func (*routeCatalogService) ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error) {
 	return nil, nil
 }
@@ -55,14 +69,18 @@ func TestCloudRecordingCatalogRoutesAndContentTimeoutBoundary(t *testing.T) {
 	RegisterRoutes(engine.Group("/api"))
 
 	want := map[string]bool{
-		"GET /api/gb28181/cloud-recordings/files":             false,
-		"GET /api/gb28181/cloud-recordings/files/options":     false,
-		"GET /api/gb28181/cloud-recordings/files/:id":         false,
-		"POST /api/gb28181/cloud-recordings/files/:id/access": false,
-		"GET /api/gb28181/cloud-recordings/active":            false,
-		"GET /api/gb28181/cloud-recordings/reconciliations":   false,
-		"POST /api/gb28181/cloud-recordings/reconciliations":  false,
-		"GET /api/gb28181/cloud-recordings/content/:id":       false,
+		"GET /api/gb28181/cloud-recordings/files":                     false,
+		"GET /api/gb28181/cloud-recordings/files/options":             false,
+		"GET /api/gb28181/cloud-recordings/files/:id":                 false,
+		"POST /api/gb28181/cloud-recordings/files/:id/access":         false,
+		"POST /api/gb28181/cloud-recordings/files/:id/downloads":      false,
+		"GET /api/gb28181/cloud-recordings/downloads/:taskId":         false,
+		"DELETE /api/gb28181/cloud-recordings/downloads/:taskId":      false,
+		"GET /api/gb28181/cloud-recordings/downloads/:taskId/content": false,
+		"GET /api/gb28181/cloud-recordings/active":                    false,
+		"GET /api/gb28181/cloud-recordings/reconciliations":           false,
+		"POST /api/gb28181/cloud-recordings/reconciliations":          false,
+		"GET /api/gb28181/cloud-recordings/content/:id":               false,
 	}
 	for _, route := range engine.Routes() {
 		key := route.Method + " " + route.Path

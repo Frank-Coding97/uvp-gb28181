@@ -460,6 +460,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			cloudRecordings.GET("/files/options", func(c *gin.Context) { currentCloudRecordingCatalogController().FileOptions(c) })
 			cloudRecordings.GET("/files/:id", func(c *gin.Context) { currentCloudRecordingCatalogController().FileDetail(c) })
 			cloudRecordings.POST("/files/:id/access", func(c *gin.Context) { currentCloudRecordingCatalogController().IssueAccess(c) })
+			cloudRecordings.POST("/files/:id/downloads", func(c *gin.Context) { currentCloudRecordingCatalogController().CreateDownload(c) })
+			cloudRecordings.GET("/downloads/:taskId", func(c *gin.Context) { currentCloudRecordingCatalogController().DownloadStatus(c) })
+			cloudRecordings.DELETE("/downloads/:taskId", func(c *gin.Context) { currentCloudRecordingCatalogController().CancelDownload(c) })
 			cloudRecordings.GET("/active", func(c *gin.Context) { currentCloudRecordingCatalogController().ActiveSessions(c) })
 			cloudRecordings.GET("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().Reconciliations(c) })
 			cloudRecordings.POST("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().TriggerReconciliation(c) })
@@ -699,6 +702,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 // operation-log middleware. Capability verification is performed by the
 // controller on every request; JWT and query-logging middleware are omitted.
 func RegisterContentRoutes(engine *gin.Engine) {
+	engine.GET("/api/gb28181/cloud-recordings/downloads/:taskId/content", func(c *gin.Context) {
+		currentCloudRecordingCatalogController().DownloadContent(c)
+	})
 	engine.GET("/api/gb28181/cloud-recordings/content/:id", func(c *gin.Context) {
 		currentCloudRecordingCatalogController().Content(c)
 	})
