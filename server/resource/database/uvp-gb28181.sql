@@ -226,7 +226,7 @@ CREATE TABLE `sys_api` (
   `deleted_at` datetime DEFAULT NULL,
   `created_by` int(11) unsigned DEFAULT NULL,
   PRIMARY KEY (`id`) USING BTREE
-) ENGINE=InnoDB AUTO_INCREMENT=217 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
+) ENGINE=InnoDB AUTO_INCREMENT=254 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci ROW_FORMAT=DYNAMIC;
 
 -- ----------------------------
 -- Records of sys_api
@@ -353,7 +353,7 @@ CREATE TABLE `sys_casbin_rule` (
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `idx_casbin_rule` (`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) USING BTREE,
   UNIQUE KEY `idx_sys_casbin_rule` (`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
-) ENGINE=InnoDB AUTO_INCREMENT=7561 DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci ROW_FORMAT=DYNAMIC;
+) ENGINE=InnoDB AUTO_INCREMENT=7598 DEFAULT CHARSET=utf8 COLLATE=utf8_unicode_ci ROW_FORMAT=DYNAMIC;
 
 -- ----------------------------
 -- Records of sys_casbin_rule
@@ -1477,6 +1477,22 @@ INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUE
 (7592,'p','role_1','/api/gb28181/sip/service-config/play-auth','PUT','*','',''),
 (7593,'p','role_1','/api/gb28181/play/:deviceId/:channelId','POST','*','',''),
 (7594,'p','role_1','/api/gb28181/play/:deviceId/:channelId/authorization','POST','*','','');
+
+-- Cloud recording download task control APIs for fresh MySQL installs.
+-- The content route is authorized by a one-time HttpOnly cookie and is not seeded here.
+INSERT INTO `sys_api` (`id`,`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`deleted_at`,`created_by`) VALUES
+(251,'创建云端录像下载','/api/gb28181/cloud-recordings/files/:id/downloads','POST','GB28181 云端录像下载',NOW(),NOW(),NULL,1),
+(252,'查询云端录像下载','/api/gb28181/cloud-recordings/downloads/:taskId','GET','GB28181 云端录像下载',NOW(),NOW(),NULL,1),
+(253,'取消云端录像下载','/api/gb28181/cloud-recordings/downloads/:taskId','DELETE','GB28181 云端录像下载',NOW(),NOW(),NULL,1);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`)
+SELECT m.`id`,a.`id` FROM `sys_menu` m CROSS JOIN `sys_api` a
+WHERE m.`path`='/gb28181/cloud-recordings' AND m.`deleted_at` IS NULL
+  AND a.`id` IN (251,252,253);
+INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`)
+VALUES
+(7595,'p','role_1','/api/gb28181/cloud-recordings/files/:id/downloads','POST','*','',''),
+(7596,'p','role_1','/api/gb28181/cloud-recordings/downloads/:taskId','GET','*','',''),
+(7597,'p','role_1','/api/gb28181/cloud-recordings/downloads/:taskId','DELETE','*','','');
 
 -- GB28181 device registry and dual-version profile archive.
 DROP TABLE IF EXISTS `gb_device`;
