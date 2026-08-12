@@ -281,6 +281,22 @@ func (r *DownloadRegistry) Expire(taskID string) error {
 	return nil
 }
 
+// Close makes the in-process registry reject all future work and cancels every
+// active transfer during a runtime stop. Tasks intentionally remain ephemeral.
+func (r *DownloadRegistry) Close() {
+	if r == nil {
+		return
+	}
+	now := r.currentTime()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, task := range r.tasks {
+		if task.status == DownloadStatusReady || task.status == DownloadStatusStreaming {
+			r.finishLocked(task, DownloadStatusCancelled, "shutdown", now)
+		}
+	}
+}
+
 func (r *DownloadRegistry) DebugString() string {
 	if r == nil {
 		return ""

@@ -111,6 +111,12 @@ func (s *CatalogService) CancelDownload(_ context.Context, userID uint, taskID s
 	return s.downloads.Cancel(taskID, userID)
 }
 
+func (s *CatalogService) CloseDownloads() {
+	if s != nil && s.downloads != nil {
+		s.downloads.Close()
+	}
+}
+
 func (s *CatalogService) ClaimDownload(ctx context.Context, writer http.ResponseWriter, taskID, ticket, byteRange string) error {
 	if s.downloads == nil {
 		return ErrCatalogAccessUnavailable
@@ -174,7 +180,7 @@ func (s *CatalogService) ClaimDownload(ctx context.Context, writer http.Response
 }
 
 func (s *CatalogService) downloadableFile(ctx context.Context, userID uint, fileID uint64) (*models.GbRecordingFile, error) {
-	if s.signer == nil || s.checkPermission == nil || s.newDownloader == nil {
+	if s.checkPermission == nil || s.newDownloader == nil {
 		return nil, ErrCatalogAccessUnavailable
 	}
 	allowed, err := s.checkPermission(ctx, userID, "/api/gb28181/cloud-recordings/files/:id/downloads", http.MethodPost)

@@ -95,6 +95,23 @@ func TestDownloadRegistryProgressNeverExceedsTotal(t *testing.T) {
 	require.EqualValues(t, 10, snapshot.BytesSent)
 }
 
+func TestDownloadRegistryCloseCancelsActiveTask(t *testing.T) {
+	registry := NewDownloadRegistry(DownloadRegistryConfig{})
+	task, ticket, err := registry.Create(7, "41")
+	require.NoError(t, err)
+	_, taskCtx, _, err := registry.Claim(task.TaskID, ticket)
+	require.NoError(t, err)
+	registry.Close()
+	select {
+	case <-taskCtx.Done():
+	default:
+		t.Fatal("active task context was not cancelled")
+	}
+	snapshot, err := registry.Get(task.TaskID, 7)
+	require.NoError(t, err)
+	require.Equal(t, DownloadStatusCancelled, snapshot.Status)
+}
+
 func TestDownloadRegistryErrorSentinelsAreStable(t *testing.T) {
 	require.True(t, errors.Is(ErrDownloadNotOwner, ErrDownloadNotOwner))
 	require.NotEmpty(t, strings.TrimSpace(ErrDownloadTicketInvalid.Error()))

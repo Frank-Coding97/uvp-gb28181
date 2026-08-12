@@ -224,6 +224,7 @@ var playReconciler *reconciler.Reconciler
 var recordingSvc *gbrecording.Service
 var recordingReconciler *gbrecording.Reconciler
 var recordingCatalogScheduler *gbrecording.CatalogReconcileScheduler
+var recordingCatalogService *gbrecording.CatalogService
 var talkSvc *gbtalk.Service
 var talkCleanupWorker *gbtalk.CleanupWorker
 
@@ -900,11 +901,16 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 		NewDownloader: func(n *node.Node) gbrecording.ContentDownloader { return gbzlm.NewClientForNode(n) },
 		Downloads:     gbrecording.NewDownloadRegistry(gbrecording.DownloadRegistryConfig{}),
 	})
+	recordingCatalogService = catalogService
 	gbroutes.SetCloudRecordingCatalogService(catalogService)
 	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.Duration("interval", catalogInterval))
 }
 
 func stopRecordingRuntime() {
+	if recordingCatalogService != nil {
+		recordingCatalogService.CloseDownloads()
+		recordingCatalogService = nil
+	}
 	if recordingCatalogScheduler != nil {
 		if err := recordingCatalogScheduler.Stop(); err != nil {
 			app.ZapLog.Warn("GB28181 云端录像目录对账停止超时", zap.Error(err))

@@ -85,8 +85,7 @@ func (p *ContentProxy) StreamDownload(ctx context.Context, writer http.ResponseW
 	if writer == nil || downloader == nil || request.FilePath == "" || request.Mode != CapabilityModeDownload {
 		return ErrContentUpstream
 	}
-	responseCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	response, err := downloader.DownloadFile(responseCtx, request.FilePath, "")
+	response, err := downloader.DownloadFile(ctx, request.FilePath, "")
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -94,10 +93,8 @@ func (p *ContentProxy) StreamDownload(ctx context.Context, writer http.ResponseW
 		return classifyContentDownloadError(err)
 	}
 	if response == nil || response.Body == nil {
-		cancel()
 		return ErrContentUpstream
 	}
-	defer cancel()
 	defer response.Body.Close()
 	if err := validateContentStatus(response.StatusCode, false); err != nil {
 		return err

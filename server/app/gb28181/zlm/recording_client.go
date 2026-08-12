@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 )
 
 var (
@@ -40,10 +41,16 @@ type DownloadResponse struct {
 }
 
 var recordingDownloadHTTPClient = &http.Client{
-	Transport: http.DefaultTransport.(*http.Transport).Clone(),
+	Transport: recordingDownloadTransport(),
 	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 		return http.ErrUseLastResponse
 	},
+}
+
+func recordingDownloadTransport() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 15 * time.Second
+	return transport
 }
 
 // GetMP4RecordFiles lists MP4 files for one known ZLM media tuple and date.
