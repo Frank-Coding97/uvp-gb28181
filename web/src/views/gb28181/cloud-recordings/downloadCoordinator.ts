@@ -46,7 +46,7 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
 
   async function start(request: DownloadRequest) {
     const created = await deps.create(request.fileId);
-    if (!isSameOriginContentPath(created.contentUrl)) {
+    if (!isSameOriginContentPath(created.contentUrl, created.task.taskId)) {
       const invalidTask = toItem(created.task, request.fileName);
       items.set(invalidTask.taskId, { ...invalidTask, status: "failed", errorCode: "content_url_invalid" });
       publish();
@@ -100,19 +100,19 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
     if (!current || !activeTaskIds.has(taskId)) return;
     try {
       const response = await deps.get(taskId);
+      if (items.get(taskId) !== current || !activeTaskIds.has(taskId)) return;
       const next = toItem(response.task, current.fileName);
       items.set(taskId, next);
       if (terminalStatuses.has(next.status)) {
         activeTaskIds.delete(taskId);
+        contentUrls.delete(taskId);
         stopPollingWhenIdle();
         await drain();
       }
       publish();
     } catch {
-      items.set(taskId, { ...current, status: "failed", errorCode: "status_unavailable" });
-      activeTaskIds.delete(taskId);
-      stopPollingWhenIdle();
-      await drain();
+      if (items.get(taskId) !== current || !activeTaskIds.has(taskId)) return;
+      items.set(taskId, { ...current, errorCode: "status_unavailable" });
       publish();
     }
   }
@@ -133,9 +133,27 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
     }
     const response = await deps.cancel(taskId);
     items.set(taskId, toItem(response.task, current.fileName));
-    activeTaskIds.delete(taskId);
-    stopPollingWhenIdle();
-    await drain();
+    if (terminalStatuses.has(response.task.status)) {
+      activeTaskIds.delete(taskId);
+      contentUrls.delete(taskId);
+      stopPollingWhenIdle();
+      await drain();
+    }
+    publish();
+  }
+
+  async function cancelAll() {
+    await Promise.allSettled([...items.values()]
+      .filter(item => activeTaskIds.has(item.taskId) || item.status === "queued")
+      .map(item => cancel(item.taskId)));
+  }
+
+  function clearTerminal() {
+    for (const [taskId, item] of items) {
+      if (!terminalStatuses.has(item.status)) continue;
+      items.delete(taskId);
+      contentUrls.delete(taskId);
+    }
     publish();
   }
 
@@ -157,10 +175,17 @@ export function createDownloadCoordinator(deps: CoordinatorDependencies) {
     contentUrls.clear();
   }
 
-  return { enqueue, refresh, refreshAll, cancel, retry, snapshot, dispose };
+  return { enqueue, refresh, refreshAll, cancel, cancelAll, retry, clearTerminal, snapshot, dispose };
 }
 
-function isSameOriginContentPath(contentUrl: string) {
-  if (!contentUrl.startsWith("/")) return false;
-  return /^\/api\/gb28181\/cloud-recordings\/downloads\/[^/]+\/content$/.test(contentUrl);
+function isSameOriginContentPath(contentUrl: string, taskId: string) {
+  try {
+    const url = new URL(contentUrl, window.location.origin);
+    return url.origin === window.location.origin
+      && !url.search
+      && !url.hash
+      && url.pathname === `/api/gb28181/cloud-recordings/downloads/${encodeURIComponent(taskId)}/content`;
+  } catch {
+    return false;
+  }
 }

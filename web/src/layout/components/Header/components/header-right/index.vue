@@ -105,6 +105,7 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { logout } from "@/api/user";
+import { recordingDownloadCoordinator } from "@/views/gb28181/cloud-recordings/recordingDownloadService";
 const router = useRouter();
 const { isMobile } = useDevicesSize();
 const themeStore = useThemeConfig();
@@ -170,6 +171,7 @@ const logOut = () => {
     closable: true,
     onBeforeOk: async () => {
       try {
+        await recordingDownloadCoordinator.cancelAll();
         // 用户退出
         //await userStore.logOut();
         await logout().catch((error: any) => {

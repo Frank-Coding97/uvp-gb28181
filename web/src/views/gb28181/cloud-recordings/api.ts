@@ -67,7 +67,7 @@ export interface RecordingAccess {
   expiresAt: string;
 }
 
-export type RecordingDownloadStatus = "queued" | "ready" | "streaming" | "completed" | "failed" | "cancelled" | "expired" | string;
+export type RecordingDownloadStatus = "queued" | "ready" | "streaming" | "completed" | "failed" | "cancelled" | "expired";
 
 export interface RecordingDownloadTask {
   taskId: string;

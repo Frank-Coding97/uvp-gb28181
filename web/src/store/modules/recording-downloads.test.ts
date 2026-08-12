@@ -12,4 +12,11 @@ describe("recording download store", () => {
     expect(store.activeCount).toBe(1);
     expect(JSON.stringify(store.$state)).not.toContain("contentUrl");
   });
+
+  it("removes terminal tasks through the coordinator snapshot reconciliation", () => {
+    const store = useRecordingDownloadStore();
+    store.upsert({ taskId: "one", fileId: "file-1", fileName: "a.mp4", status: "completed", bytesSent: 2, createdAt: "now", expiresAt: "later" });
+    store.remove("one");
+    expect(store.tasks).toEqual([]);
+  });
 });
