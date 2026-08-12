@@ -81,6 +81,7 @@ type DownloadRegistry struct {
 	tasks                map[string]*downloadTask
 	streamingByUser      map[uint]int
 	streamingTotal       int
+	closed               bool
 }
 
 func NewDownloadRegistry(config DownloadRegistryConfig) *DownloadRegistry {
@@ -121,6 +122,10 @@ func (r *DownloadRegistry) Create(ownerUserID uint, fileID string) (DownloadTask
 	now := r.currentTime()
 	task := &downloadTask{taskID: taskID, ticketDigest: sha256.Sum256([]byte(ticket)), ownerUserID: ownerUserID, fileID: fileID, status: DownloadStatusReady, createdAt: now, expiresAt: now.Add(r.readyTTL)}
 	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return DownloadTaskView{}, "", ErrDownloadState
+	}
 	r.expireLocked(now)
 	r.tasks[taskID] = task
 	r.mu.Unlock()
@@ -136,6 +141,9 @@ func (r *DownloadRegistry) Claim(taskID, ticket string) (DownloadTaskView, conte
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.expireLocked(now)
+	if r.closed {
+		return DownloadTaskView{}, nil, nil, ErrDownloadState
+	}
 	task, ok := r.tasks[taskID]
 	if !ok {
 		return DownloadTaskView{}, nil, nil, ErrDownloadTicketInvalid
@@ -290,6 +298,7 @@ func (r *DownloadRegistry) Close() {
 	now := r.currentTime()
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.closed = true
 	for _, task := range r.tasks {
 		if task.status == DownloadStatusReady || task.status == DownloadStatusStreaming {
 			r.finishLocked(task, DownloadStatusCancelled, "shutdown", now)

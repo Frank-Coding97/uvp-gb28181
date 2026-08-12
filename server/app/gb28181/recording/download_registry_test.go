@@ -110,6 +110,8 @@ func TestDownloadRegistryCloseCancelsActiveTask(t *testing.T) {
 	snapshot, err := registry.Get(task.TaskID, 7)
 	require.NoError(t, err)
 	require.Equal(t, DownloadStatusCancelled, snapshot.Status)
+	_, _, err = registry.Create(7, "42")
+	require.ErrorIs(t, err, ErrDownloadState)
 }
 
 func TestDownloadRegistryErrorSentinelsAreStable(t *testing.T) {

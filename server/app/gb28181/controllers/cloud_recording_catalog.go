@@ -347,6 +347,12 @@ func respondCatalogError(ctx *gin.Context, err error) {
 		status, message = http.StatusBadGateway, "录像内容当前不可访问"
 	case errors.Is(err, gbrecording.ErrCatalogAccessRevoked), errors.Is(err, gbrecording.ErrCapabilityInvalid):
 		status, message = http.StatusForbidden, "录像访问权限已失效"
+	case errors.Is(err, gbrecording.ErrDownloadNotFound), errors.Is(err, gbrecording.ErrDownloadNotOwner), errors.Is(err, gbrecording.ErrDownloadTicketInvalid), errors.Is(err, gbrecording.ErrDownloadState):
+		status, message = http.StatusForbidden, "下载任务不可用"
+	case errors.Is(err, gbrecording.ErrDownloadExpired):
+		status, message = http.StatusGone, "下载任务已过期"
+	case errors.Is(err, gbrecording.ErrDownloadLimit):
+		status, message = http.StatusTooManyRequests, "下载任务并发已达上限"
 	case errors.Is(err, gbrecording.ErrCapabilityExpired):
 		status, message = http.StatusGone, "录像访问凭据已过期"
 	case errors.Is(err, gbrecording.ErrContentRangeInvalid):
