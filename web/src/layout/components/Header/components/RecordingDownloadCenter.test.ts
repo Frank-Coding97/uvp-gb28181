@@ -40,4 +40,18 @@ describe("RecordingDownloadCenter", () => {
     expect(coordinator.cancel).toHaveBeenCalledWith("one");
     expect(coordinator.retry).toHaveBeenCalledWith("two");
   });
+
+  it("shows known speed and ETA without inventing an ETA when they are unavailable", async () => {
+    const store = useRecordingDownloadStore();
+    store.upsert({ taskId: "one", fileId: "file-1", fileName: "one.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, speedBytesPerSecond: 25, createdAt: "now", expiresAt: "later" });
+    store.upsert({ taskId: "two", fileId: "file-2", fileName: "two.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, createdAt: "now", expiresAt: "later" });
+    store.upsert({ taskId: "three", fileId: "file-3", fileName: "three.mp4", status: "streaming", bytesSent: 50, speedBytesPerSecond: 25, createdAt: "now", expiresAt: "later" });
+    const wrapper = mount(RecordingDownloadCenter, { global: { stubs } });
+    await wrapper.get("button[aria-label='下载任务']").trigger("click");
+    const items = wrapper.findAll(".recording-download-item");
+    expect(items[2].text()).toContain("25 B/s · 剩余2秒");
+    expect(items[0].text()).toContain("25 B/s");
+    expect(items[0].text()).not.toContain("剩余");
+    expect(items[1].text()).not.toContain("剩余");
+  });
 });

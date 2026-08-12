@@ -57,9 +57,32 @@ function progress(task: RecordingDownloadItem) {
   return Math.min(100, Math.round((task.bytesSent / task.totalBytes!) * 100));
 }
 
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+function formatDuration(seconds: number) {
+  const roundedSeconds = Math.max(0, Math.ceil(seconds));
+  if (roundedSeconds < 60) return `${roundedSeconds}秒`;
+  return `${Math.floor(roundedSeconds / 60)}分${roundedSeconds % 60}秒`;
+}
+
+function etaSeconds(task: RecordingDownloadItem) {
+  if (typeof task.etaSeconds === "number" && task.etaSeconds >= 0) return task.etaSeconds;
+  if (task.totalBytes && task.speedBytesPerSecond && task.speedBytesPerSecond > 0) {
+    return (task.totalBytes - task.bytesSent) / task.speedBytesPerSecond;
+  }
+  return undefined;
+}
+
 function progressLabel(task: RecordingDownloadItem) {
-  if (!task.totalBytes) return task.status === "ready" ? "等待浏览器开始下载" : `${task.bytesSent} B`;
-  return `${progress(task)}% · ${task.bytesSent} / ${task.totalBytes} B`;
+  if (!task.totalBytes && task.status === "ready") return "等待浏览器开始下载";
+  const label = task.totalBytes ? `${progress(task)}% · ${formatBytes(task.bytesSent)} / ${formatBytes(task.totalBytes)}` : formatBytes(task.bytesSent);
+  const speed = task.speedBytesPerSecond && task.speedBytesPerSecond > 0 ? ` · ${formatBytes(task.speedBytesPerSecond)}/s` : "";
+  const eta = etaSeconds(task);
+  return `${label}${speed}${eta === undefined ? "" : ` · 剩余${formatDuration(eta)}`}`;
 }
 
 function statusText(status: RecordingDownloadItem["status"]) {
@@ -79,7 +102,7 @@ function clearTerminal() { recordingDownloadCoordinator.clearTerminal(); }
 .recording-download-item { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--uvp-border); }
 .recording-download-item__main { display: grid; flex: 1; min-width: 0; gap: 4px; }
 .recording-download-item__main strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.recording-download-item__main span, .recording-download-item__main small { color: var(--uvp-text-secondary); font-size: 12px; }
+.recording-download-item__main span, .recording-download-item__main small { overflow-wrap: anywhere; color: var(--uvp-text-secondary); font-size: 12px; }
 .recording-download-item__actions { display: flex; flex: 0 0 auto; }
 @media (max-width: 768px) { .recording-download-item__actions :deep(.arco-btn) { width: 44px; min-height: 44px; } }
 </style>
