@@ -1,5 +1,5 @@
 import pinia from "@/store";
-import { useRecordingDownloadStore } from "@/store/modules/recording-downloads";
+import { useRecordingDownloadStore, type RecordingDownloadItem } from "@/store/modules/recording-downloads";
 import { cancelRecordingDownload, createRecordingDownload, getRecordingDownload } from "./api";
 import { createDownloadCoordinator } from "./downloadCoordinator";
 
@@ -20,5 +20,11 @@ export const recordingDownloadCoordinator = createDownloadCoordinator({
   get: async taskId => ({ task: (await getRecordingDownload(taskId)).data }),
   cancel: async taskId => ({ task: (await cancelRecordingDownload(taskId)).data }),
   startNativeDownload,
-  onChange: items => items.forEach(item => store.upsert(item))
+  onChange: (items: RecordingDownloadItem[]) => {
+    const taskIds = new Set(items.map(item => item.taskId));
+    (store.tasks as RecordingDownloadItem[])
+      .filter((item: RecordingDownloadItem) => !taskIds.has(item.taskId))
+      .forEach((item: RecordingDownloadItem) => store.remove(item.taskId));
+    items.forEach(item => store.upsert(item));
+  }
 });

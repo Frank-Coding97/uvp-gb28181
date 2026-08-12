@@ -18,7 +18,7 @@
     <template #title>下载任务</template>
     <div class="recording-download-toolbar">
       <span>{{ store.activeCount ? `${store.activeCount} 个进行中` : "暂无进行中的下载" }}</span>
-      <a-button v-if="store.tasks.length" type="text" size="small" @click="store.clearTerminal">清理已结束</a-button>
+      <a-button v-if="store.tasks.length" type="text" size="small" @click="clearTerminal">清理已结束</a-button>
     </div>
     <a-empty v-if="!store.tasks.length" description="暂无下载任务" />
     <div v-else class="recording-download-list">
@@ -50,8 +50,8 @@ import { recordingDownloadCoordinator } from "@/views/gb28181/cloud-recordings/r
 
 const visible = ref(false);
 const store = useRecordingDownloadStore();
-const activeStatuses = new Set(["queued", "ready", "streaming"]);
-const terminalStatuses = new Set(["completed", "failed", "cancelled", "expired"]);
+const activeStatuses = new Set<RecordingDownloadItem["status"]>(["queued", "ready", "streaming"]);
+const terminalStatuses = new Set<RecordingDownloadItem["status"]>(["completed", "failed", "cancelled", "expired"]);
 
 function progress(task: RecordingDownloadItem) {
   return Math.min(100, Math.round((task.bytesSent / task.totalBytes!) * 100));
@@ -62,14 +62,15 @@ function progressLabel(task: RecordingDownloadItem) {
   return `${progress(task)}% · ${task.bytesSent} / ${task.totalBytes} B`;
 }
 
-function statusText(status: string) {
-  return ({ queued: "排队中", ready: "等待浏览器开始", streaming: "下载中", completed: "已完成", failed: "下载失败", cancelled: "已取消", expired: "已过期" } as Record<string, string>)[status] ?? "状态未知";
+function statusText(status: RecordingDownloadItem["status"]) {
+  return { queued: "排队中", ready: "等待浏览器开始", streaming: "下载中", completed: "已完成", failed: "下载失败", cancelled: "已取消", expired: "已过期" }[status];
 }
 
-function canCancel(status: string) { return activeStatuses.has(status); }
-function canRetry(status: string) { return status === "ready" || terminalStatuses.has(status); }
-function cancel(taskId: string) { void recordingDownloadCoordinator.cancel(taskId); }
-function retry(taskId: string) { void recordingDownloadCoordinator.retry(taskId); }
+function canCancel(status: RecordingDownloadItem["status"]) { return activeStatuses.has(status); }
+function canRetry(status: RecordingDownloadItem["status"]) { return status === "ready" || terminalStatuses.has(status); }
+async function cancel(taskId: string) { await Promise.resolve(recordingDownloadCoordinator.cancel(taskId)).catch(() => undefined); }
+async function retry(taskId: string) { await Promise.resolve(recordingDownloadCoordinator.retry(taskId)).catch(() => undefined); }
+function clearTerminal() { recordingDownloadCoordinator.clearTerminal(); }
 </script>
 
 <style scoped lang="scss">
