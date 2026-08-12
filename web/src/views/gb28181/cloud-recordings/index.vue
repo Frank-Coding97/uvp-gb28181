@@ -217,8 +217,6 @@ import { useUserStoreHook } from "@/store/modules/user";
 import RecordingDetailDrawer from "./components/RecordingDetailDrawer.vue";
 import RecordingPlayerDialog from "./components/RecordingPlayerDialog.vue";
 import {
-  contentURL,
-  issueRecordingAccess,
   listActiveRecordings,
   listReconciliations,
   listRecordingFiles,
@@ -231,6 +229,7 @@ import {
   type RecordingOptions,
   type RecordingReconciliation
 } from "./api";
+import { recordingDownloadCoordinator } from "./recordingDownloadService";
 import {
   availabilityPresentation,
   createLatestRequestCoordinator,
@@ -239,8 +238,8 @@ import {
   recordingErrorPresentation
 } from "./recordingState";
 
-const proxy = useGlobalProperties();
 const userStore = useUserStoreHook();
+const proxy = useGlobalProperties();
 const { isMobile } = useDevicesSize();
 const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:recording:view"));
@@ -432,19 +431,11 @@ function playFromDetail(recording: RecordingFile) {
   play(recording);
 }
 
-async function download(recording: RecordingFile) {
-  try {
-    const response = await issueRecordingAccess(recording.id, "download");
-    const anchor = document.createElement("a");
-    anchor.href = contentURL(recording.id, response.data.capability);
-    anchor.download = recording.fileName || `recording-${recording.id}.mp4`;
-    anchor.rel = "noopener";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-  } catch (error) {
-    proxy.$message.error(recordingErrorPresentation(error));
-  }
+function download(recording: RecordingFile) {
+  void recordingDownloadCoordinator.enqueue({
+    fileId: recording.id,
+    fileName: recording.fileName || `recording-${recording.id}.mp4`
+  });
 }
 
 async function reconcile() {

@@ -6,6 +6,9 @@ vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }))
 
 import {
   contentURL,
+  cancelRecordingDownload,
+  createRecordingDownload,
+  getRecordingDownload,
   getRecordingDetail,
   issueRecordingAccess,
   listActiveRecordings,
@@ -33,12 +36,23 @@ describe("cloud recording API", () => {
     });
   });
 
-  it("keeps opaque string IDs across detail and access", async () => {
+  it("keeps opaque string IDs across detail and playback access", async () => {
     const id = "9007199254740993";
     await getRecordingDetail(id);
-    await issueRecordingAccess(id, "download");
+    await issueRecordingAccess(id, "play");
     expect(request).toHaveBeenNthCalledWith(1, "get", `/api/gb28181/cloud-recordings/files/${id}`, undefined, { showErrorMessage: false });
-    expect(request).toHaveBeenNthCalledWith(2, "post", `/api/gb28181/cloud-recordings/files/${id}/access`, { data: { mode: "download" } }, { showErrorMessage: false });
+    expect(request).toHaveBeenNthCalledWith(2, "post", `/api/gb28181/cloud-recordings/files/${id}/access`, { data: { mode: "play" } }, { showErrorMessage: false });
+  });
+
+  it("creates, polls and cancels opaque download tasks without exposing a ticket", async () => {
+    const fileId = "9007199254740993";
+    const taskId = "opaque-task-id";
+    await createRecordingDownload(fileId);
+    await getRecordingDownload(taskId);
+    await cancelRecordingDownload(taskId);
+    expect(request).toHaveBeenNthCalledWith(1, "post", `/api/gb28181/cloud-recordings/files/${fileId}/downloads`, undefined, { showErrorMessage: false });
+    expect(request).toHaveBeenNthCalledWith(2, "get", `/api/gb28181/cloud-recordings/downloads/${taskId}`, undefined, { showErrorMessage: false });
+    expect(request).toHaveBeenNthCalledWith(3, "delete", `/api/gb28181/cloud-recordings/downloads/${taskId}`, undefined, { showErrorMessage: false });
   });
 
   it("covers options, active and reconciliation control APIs", async () => {

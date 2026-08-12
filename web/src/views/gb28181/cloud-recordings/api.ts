@@ -4,7 +4,7 @@ import { http } from "@/utils/http";
 
 export type RecordingAvailability = "available" | "node_offline" | "node_missing" | "file_missing" | "access_unavailable";
 export type RecordingMetadataState = "complete" | "partial";
-export type RecordingAccessMode = "play" | "download";
+export type RecordingAccessMode = "play";
 
 export interface RecordingNode {
   id: string;
@@ -65,6 +65,28 @@ export interface RecordingAccess {
   mode: RecordingAccessMode;
   capability: string;
   expiresAt: string;
+}
+
+export type RecordingDownloadStatus = "queued" | "ready" | "streaming" | "completed" | "failed" | "cancelled" | "expired" | string;
+
+export interface RecordingDownloadTask {
+  taskId: string;
+  fileId: string;
+  status: RecordingDownloadStatus;
+  bytesSent: number;
+  totalBytes?: number;
+  createdAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  expiresAt: string;
+  errorCode?: string;
+  speedBytesPerSecond?: number;
+  etaSeconds?: number;
+}
+
+export interface RecordingDownloadCreation {
+  task: RecordingDownloadTask;
+  contentUrl: string;
 }
 
 export interface ActiveRecording {
@@ -135,6 +157,33 @@ export function issueRecordingAccess(id: string, mode: RecordingAccessMode) {
     "post",
     baseUrlApi(`gb28181/cloud-recordings/files/${encodeURIComponent(id)}/access`),
     { data: { mode } },
+    { showErrorMessage: false }
+  );
+}
+
+export function createRecordingDownload(id: string) {
+  return http.request<BaseResult<RecordingDownloadCreation>>(
+    "post",
+    baseUrlApi(`gb28181/cloud-recordings/files/${encodeURIComponent(id)}/downloads`),
+    undefined,
+    { showErrorMessage: false }
+  );
+}
+
+export function getRecordingDownload(taskId: string) {
+  return http.request<BaseResult<RecordingDownloadTask>>(
+    "get",
+    baseUrlApi(`gb28181/cloud-recordings/downloads/${encodeURIComponent(taskId)}`),
+    undefined,
+    { showErrorMessage: false }
+  );
+}
+
+export function cancelRecordingDownload(taskId: string) {
+  return http.request<BaseResult<RecordingDownloadTask>>(
+    "delete",
+    baseUrlApi(`gb28181/cloud-recordings/downloads/${encodeURIComponent(taskId)}`),
+    undefined,
     { showErrorMessage: false }
   );
 }
