@@ -20,6 +20,10 @@ type CloudRecordingCatalogAPI interface {
 	FileOptions(context.Context, uint, gbrecording.FileQuery) (gbrecording.CatalogOptionsDTO, error)
 	FileDetail(context.Context, uint, uint64) (gbrecording.FileDTO, error)
 	IssueAccess(context.Context, uint, uint64, string) (gbrecording.AccessDTO, error)
+	CreateDownload(context.Context, uint, uint64) (gbrecording.DownloadTaskView, string, error)
+	DownloadStatus(context.Context, uint, string) (gbrecording.DownloadTaskView, error)
+	CancelDownload(context.Context, uint, string) (gbrecording.DownloadTaskView, error)
+	ClaimDownload(context.Context, http.ResponseWriter, string, string, string) error
 	ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error)
 	Reconciliations(context.Context) ([]gbrecording.ReconciliationDTO, error)
 	TriggerReconciliation([]int64, *time.Time, *time.Time) ([]int64, error)
@@ -83,7 +87,7 @@ func (c *CloudRecordingCatalogController) IssueAccess(ctx *gin.Context) {
 	var request struct {
 		Mode string `json:"mode"`
 	}
-	if err := ctx.ShouldBindJSON(&request); err != nil || (request.Mode != gbrecording.CapabilityModePlay && request.Mode != gbrecording.CapabilityModeDownload) {
+	if err := ctx.ShouldBindJSON(&request); err != nil || request.Mode != gbrecording.CapabilityModePlay {
 		catalogFailure(ctx, http.StatusBadRequest, "访问模式不合法")
 		return
 	}
@@ -93,6 +97,60 @@ func (c *CloudRecordingCatalogController) IssueAccess(ctx *gin.Context) {
 		return
 	}
 	catalogSuccess(ctx, http.StatusOK, result)
+}
+
+func (c *CloudRecordingCatalogController) CreateDownload(ctx *gin.Context) {
+	id, ok := catalogFileID(ctx)
+	if !ok {
+		catalogFailure(ctx, http.StatusBadRequest, "文件 ID 不合法")
+		return
+	}
+	result, ticket, err := c.requireService().CreateDownload(ctx.Request.Context(), common.GetCurrentUserID(ctx), id)
+	if err != nil {
+		respondCatalogError(ctx, err)
+		return
+	}
+	contentPath := downloadContentPath(result.TaskID)
+	setDownloadTicketCookie(ctx, result.TaskID, ticket, 60)
+	ctx.Header("Cache-Control", "no-store")
+	catalogSuccess(ctx, http.StatusCreated, gin.H{"task": result, "contentUrl": contentPath})
+}
+
+func (c *CloudRecordingCatalogController) DownloadStatus(ctx *gin.Context) {
+	result, err := c.requireService().DownloadStatus(ctx.Request.Context(), common.GetCurrentUserID(ctx), ctx.Param("taskId"))
+	if err != nil {
+		respondCatalogError(ctx, err)
+		return
+	}
+	catalogSuccess(ctx, http.StatusOK, result)
+}
+
+func (c *CloudRecordingCatalogController) CancelDownload(ctx *gin.Context) {
+	result, err := c.requireService().CancelDownload(ctx.Request.Context(), common.GetCurrentUserID(ctx), ctx.Param("taskId"))
+	if err != nil {
+		respondCatalogError(ctx, err)
+		return
+	}
+	catalogSuccess(ctx, http.StatusOK, result)
+}
+
+func (c *CloudRecordingCatalogController) DownloadContent(ctx *gin.Context) {
+	taskID := ctx.Param("taskId")
+	if taskID == "" {
+		catalogFailure(ctx, http.StatusForbidden, "下载凭据无效")
+		return
+	}
+	ticket, err := ctx.Cookie(downloadTicketCookieName(taskID))
+	if err != nil || ticket == "" {
+		catalogFailure(ctx, http.StatusForbidden, "下载凭据无效")
+		return
+	}
+	setDownloadTicketCookie(ctx, taskID, "", -1)
+	err = c.requireService().ClaimDownload(ctx.Request.Context(), ctx.Writer, taskID, ticket, ctx.GetHeader("Range"))
+	if err == nil || ctx.Writer.Written() {
+		return
+	}
+	respondCatalogError(ctx, err)
 }
 
 func (c *CloudRecordingCatalogController) ActiveSessions(ctx *gin.Context) {
@@ -175,6 +233,18 @@ func (unavailableCloudRecordingCatalogService) FileDetail(context.Context, uint,
 }
 func (unavailableCloudRecordingCatalogService) IssueAccess(context.Context, uint, uint64, string) (gbrecording.AccessDTO, error) {
 	return gbrecording.AccessDTO{}, gbrecording.ErrCatalogAccessUnavailable
+}
+func (unavailableCloudRecordingCatalogService) CreateDownload(context.Context, uint, uint64) (gbrecording.DownloadTaskView, string, error) {
+	return gbrecording.DownloadTaskView{}, "", gbrecording.ErrCatalogAccessUnavailable
+}
+func (unavailableCloudRecordingCatalogService) DownloadStatus(context.Context, uint, string) (gbrecording.DownloadTaskView, error) {
+	return gbrecording.DownloadTaskView{}, gbrecording.ErrCatalogAccessUnavailable
+}
+func (unavailableCloudRecordingCatalogService) CancelDownload(context.Context, uint, string) (gbrecording.DownloadTaskView, error) {
+	return gbrecording.DownloadTaskView{}, gbrecording.ErrCatalogAccessUnavailable
+}
+func (unavailableCloudRecordingCatalogService) ClaimDownload(context.Context, http.ResponseWriter, string, string, string) error {
+	return gbrecording.ErrCatalogAccessUnavailable
 }
 func (unavailableCloudRecordingCatalogService) ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error) {
 	return nil, gbrecording.ErrCatalogAccessUnavailable
@@ -294,4 +364,23 @@ func catalogSuccess(ctx *gin.Context, status int, data any) {
 func catalogFailure(ctx *gin.Context, status int, message string) {
 	ctx.JSON(status, gin.H{"code": 1, "message": message, "data": nil})
 	ctx.Abort()
+}
+
+const downloadTicketCookiePrefix = "uvp_recording_download_"
+
+func downloadTicketCookieName(taskID string) string { return downloadTicketCookiePrefix + taskID }
+
+func downloadContentPath(taskID string) string {
+	return "/api/gb28181/cloud-recordings/downloads/" + taskID + "/content"
+}
+
+func downloadCookieSecure(ctx *gin.Context) bool {
+	return ctx.Request.TLS != nil
+}
+
+func setDownloadTicketCookie(ctx *gin.Context, taskID, value string, maxAge int) {
+	http.SetCookie(ctx.Writer, &http.Cookie{
+		Name: downloadTicketCookieName(taskID), Value: value, Path: downloadContentPath(taskID), MaxAge: maxAge,
+		HttpOnly: true, Secure: downloadCookieSecure(ctx), SameSite: http.SameSiteStrictMode,
+	})
 }

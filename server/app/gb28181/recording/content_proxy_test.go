@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -115,7 +116,7 @@ func TestContentProxyUsesBoundedBufferAndPropagatesCancellation(t *testing.T) {
 	downloader := contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
 		return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{}, Body: reader}, nil
 	})
-	recorder := httptest.NewRecorder()
+	recorder := deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 	require.NoError(t, NewContentProxy().Stream(context.Background(), recorder, downloader, ContentRequest{FilePath: "/record/large.mp4", FileName: "large.mp4", Mode: CapabilityModeDownload}))
 	require.LessOrEqual(t, reader.maxRead, contentProxyBufferSize)
 	require.Contains(t, recorder.Header().Get("Content-Disposition"), "attachment")
@@ -171,3 +172,42 @@ func TestContentProxyDoesNotLeakSensitiveInputInErrors(t *testing.T) {
 	require.ErrorIs(t, err, ErrContentUpstream)
 	require.NotContains(t, err.Error(), "/secret/node/path.mp4")
 }
+
+func TestContentProxyDownloadAllowsOnlyInitialRangeAndChecksLength(t *testing.T) {
+	for _, byteRange := range []string{"bytes=1-", "bytes=-10", "bytes=0-9", "bytes=0-1,3-4"} {
+		require.ErrorIs(t, validateDownloadRange(byteRange), ErrContentRangeInvalid)
+	}
+	require.NoError(t, validateDownloadRange(""))
+	require.NoError(t, validateDownloadRange("bytes=0-"))
+
+	fileSize := uint64(9)
+	called := false
+	err := NewContentProxy().StreamDownload(context.Background(), httptest.NewRecorder(), contentDownloaderFunc(func(context.Context, string, string) (*zlm.DownloadResponse, error) {
+		called = true
+		return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{"Content-Length": []string{"8"}}, Body: io.NopCloser(strings.NewReader("too-short"))}, nil
+	}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", FileSize: &fileSize, Mode: CapabilityModeDownload}, nil)
+	require.True(t, called)
+	require.ErrorIs(t, err, ErrContentUpstream)
+}
+
+func TestContentProxyDownloadUsesSingleFullResponseAndProgress(t *testing.T) {
+	progress := uint64(0)
+	fileSize := uint64(9)
+	recorder := deadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	err := NewContentProxy().StreamDownload(context.Background(), recorder, contentDownloaderFunc(func(_ context.Context, path, byteRange string) (*zlm.DownloadResponse, error) {
+		require.Equal(t, "/private/camera.mp4", path)
+		require.Empty(t, byteRange)
+		return &zlm.DownloadResponse{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"video/mp4"}, "Content-Length": []string{"9"}, "Set-Cookie": []string{"hidden"}}, Body: io.NopCloser(strings.NewReader("mp4-bytes"))}, nil
+	}), ContentRequest{FilePath: "/private/camera.mp4", FileName: "camera.mp4", FileSize: &fileSize, Mode: CapabilityModeDownload}, func(written uint64) { progress += written })
+	require.NoError(t, err)
+	require.Equal(t, "mp4-bytes", recorder.Body.String())
+	require.EqualValues(t, 9, progress)
+	require.Equal(t, "no", recorder.Header().Get("X-Accel-Buffering"))
+	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+	require.Empty(t, recorder.Header().Get("Set-Cookie"))
+	require.Contains(t, recorder.Header().Get("Content-Disposition"), "attachment")
+}
+
+type deadlineRecorder struct{ *httptest.ResponseRecorder }
+
+func (deadlineRecorder) SetWriteDeadline(time.Time) error { return nil }
