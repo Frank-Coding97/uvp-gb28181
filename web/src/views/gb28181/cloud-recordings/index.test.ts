@@ -6,13 +6,14 @@ const api = vi.hoisted(() => ({
   listRecordingOptions: vi.fn(),
   listActiveRecordings: vi.fn(),
   listReconciliations: vi.fn(),
-  triggerReconciliation: vi.fn(),
-  issueRecordingAccess: vi.fn()
+  triggerReconciliation: vi.fn()
 }));
+const enqueueDownload = vi.hoisted(() => vi.fn());
 const account = vi.hoisted(() => ({ permissions: ["gb28181:recording:view", "gb28181:recording:reconcile"] as string[] }));
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("./api", async importOriginal => ({ ...(await importOriginal<typeof import("./api")>()), ...api }));
+vi.mock("./recordingDownloadService", () => ({ recordingDownloadCoordinator: { enqueue: enqueueDownload } }));
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 vi.mock("@/hooks/useGlobalProperties", () => ({ default: () => ({ $message: messages }) }));
 vi.mock("@/hooks/useDevicesSize", () => ({ useDevicesSize: () => ({ isMobile: { value: false } }) }));
@@ -80,7 +81,7 @@ describe("CloudRecordings", () => {
     api.listActiveRecordings.mockResolvedValue({ code: 0, message: "", data: { list: [{ id: "77", channelId: "12", channelCode: "c", channelName: "东门", deviceId: "d", node: { id: "8", name: "节点 A" }, state: "recording", startedAt: "2026-08-10T12:00:00Z", updatedAt: "2026-08-10T12:01:00Z" }] } });
     api.listReconciliations.mockResolvedValue({ code: 0, message: "", data: { list: [] } });
     api.triggerReconciliation.mockResolvedValue({ code: 0, message: "", data: { acceptedNodeIds: [8] } });
-    api.issueRecordingAccess.mockResolvedValue({ code: 0, message: "", data: { mode: "download", capability: "signed", expiresAt: "2026-08-10T13:00:00Z" } });
+    enqueueDownload.mockReset();
     messages.success.mockReset();
     messages.error.mockReset();
   });
@@ -126,15 +127,12 @@ describe("CloudRecordings", () => {
     expect(wrapper.text()).not.toContain("record.mp4");
   });
 
-  it("registers Cloud and downloads through a freshly issued same-origin URL", async () => {
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+  it("registers Cloud and creates a cookie-bound download task through the coordinator", async () => {
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
     expect(getLucideIconComponent("lucide:Cloud")).toBeTruthy();
     await wrapper.get("[data-testid='download-9007199254740993']").trigger("click");
     await flushPromises();
-    expect(api.issueRecordingAccess).toHaveBeenCalledWith("9007199254740993", "download");
-    expect(click).toHaveBeenCalledTimes(1);
-    click.mockRestore();
+    expect(enqueueDownload).toHaveBeenCalledWith({ fileId: "9007199254740993", fileName: "record.mp4" });
   });
 });
