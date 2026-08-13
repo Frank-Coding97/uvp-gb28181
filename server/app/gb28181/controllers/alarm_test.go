@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
@@ -181,6 +182,27 @@ func TestAlarmListFiltersAndCountShareConditions(t *testing.T) {
 	data = response["data"].(map[string]any)
 	require.EqualValues(t, 1, data["total"])
 	require.Len(t, data["list"].([]any), 1)
+}
+
+func TestAlarmListKeywordSearchesDeviceChannelAndDescription(t *testing.T) {
+	fixture := newAlarmHTTPFixture(t, false)
+	for _, test := range []struct {
+		name    string
+		keyword string
+		total   int
+	}{
+		{name: "device name", keyword: "一号 NVR", total: 2},
+		{name: "device code", keyword: fixture.deviceA.DeviceID, total: 2},
+		{name: "channel name", keyword: "东门", total: 2},
+		{name: "channel code", keyword: fixture.channelA.ChannelID, total: 2},
+		{name: "description", keyword: "新移动目标", total: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response := alarmRequest(t, fixture.router, http.MethodGet, "/api/gb28181/alarms?keyword="+url.QueryEscape(test.keyword))
+			data := response["data"].(map[string]any)
+			require.EqualValues(t, test.total, data["total"])
+		})
+	}
 }
 
 func TestAlarmListAndDetailAreDepartmentScoped(t *testing.T) {

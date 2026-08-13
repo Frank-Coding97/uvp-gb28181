@@ -3,7 +3,9 @@ package models
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -90,8 +92,8 @@ func TestCloudRecordingDownloadFreshInstallIdentityWatermarks(t *testing.T) {
 	mysqlBody, err := os.ReadFile(filepath.Join(serverRoot, "resource", "database", "uvp-gb28181.sql"))
 	require.NoError(t, err)
 	mysql := strings.ToLower(string(mysqlBody))
-	require.Contains(t, mysql, "auto_increment=254")
-	require.Contains(t, mysql, "auto_increment=7598")
+	requireMySQLIdentityWatermarkAfterSeed(t, mysql, "sys_api")
+	requireMySQLIdentityWatermarkAfterSeed(t, mysql, "sys_casbin_rule")
 
 	postgresBody, err := os.ReadFile(filepath.Join(serverRoot, "resource", "database", "postgresql_converted.sql"))
 	require.NoError(t, err)
@@ -104,6 +106,31 @@ func TestCloudRecordingDownloadFreshInstallIdentityWatermarks(t *testing.T) {
 	sqlServer := strings.ToLower(string(sqlServerBody))
 	require.Contains(t, sqlServer, "set identity_insert [sys_api] on")
 	require.Contains(t, sqlServer, "set identity_insert [sys_casbin_rule] on")
+}
+
+func requireMySQLIdentityWatermarkAfterSeed(t *testing.T, sql, table string) {
+	t.Helper()
+	tablePattern := regexp.MustCompile(`(?s)create table ` + regexp.QuoteMeta("`"+table+"`") + `.*?auto_increment=(\d+).*?;`)
+	match := tablePattern.FindStringSubmatch(sql)
+	require.Len(t, match, 2, table)
+	nextID, err := strconv.Atoi(match[1])
+	require.NoError(t, err)
+
+	seedStart := strings.Index(sql, "-- seed data for `"+table+"`")
+	require.NotEqual(t, -1, seedStart, table)
+	seed := sql[seedStart:]
+	if nextSeed := strings.Index(seed[1:], "-- seed data for `"); nextSeed >= 0 {
+		seed = seed[:nextSeed+1]
+	}
+	maxID := 0
+	for _, row := range regexp.MustCompile(`(?m)^\((\d+),`).FindAllStringSubmatch(seed, -1) {
+		id, parseErr := strconv.Atoi(row[1])
+		require.NoError(t, parseErr)
+		if id > maxID {
+			maxID = id
+		}
+	}
+	require.Greater(t, nextID, maxID, table)
 }
 
 func cloudRecordingDownloadServerRoot(t *testing.T) string {

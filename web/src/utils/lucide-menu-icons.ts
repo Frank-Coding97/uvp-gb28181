@@ -96,5 +96,6 @@ export const getLucideIconName = (value?: string) => {
 
 export const getLucideIconComponent = (value?: string) => {
   const iconName = getLucideIconName(value);
-  return iconName ? lucideMenuIcons[iconName] : undefined;
+  if (!iconName) return undefined;
+  return lucideMenuIcons[iconName] || lucideMenuIcons[Object.keys(lucideMenuIcons).find((name) => name.toLowerCase() === iconName.toLowerCase()) || ""];
 };

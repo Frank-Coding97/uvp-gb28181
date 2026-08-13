@@ -6,7 +6,6 @@ import {
   mayDeleteAlarms,
   mayViewAlarms,
   normalizeAlarmQuery,
-  normalizeCurrentPageSelection,
   pageAfterAlarmDeletion
 } from "./alarmState";
 
@@ -71,9 +70,6 @@ describe("alarm deletion state", () => {
     expect(pageAfterAlarmDeletion(1, 20, 1, 1)).toBe(1);
   });
 
-  it("keeps only unique IDs that exist on the current page", () => {
-    expect(normalizeCurrentPageSelection(["3", "1", "3", "9"], ["1", "2", "3"])).toEqual(["3", "1"]);
-  });
 });
 
 describe("alarm display fallback", () => {

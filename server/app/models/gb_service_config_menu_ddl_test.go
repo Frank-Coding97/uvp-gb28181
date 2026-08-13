@@ -42,3 +42,28 @@ func TestGBServiceConfigMenuMigrations(t *testing.T) {
 		})
 	}
 }
+
+func TestFlattenGBMenuMigrationsRestoreTopLevelMenuIcons(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	serverRoot := filepath.Clean(filepath.Join(filepath.Dir(currentFile), "..", ".."))
+
+	for _, filename := range []string{
+		"2026-08-09-flatten-gb-menu.sql",
+		"2026-08-09-flatten-gb-menu-postgresql.sql",
+		"2026-08-09-flatten-gb-menu-sqlserver.sql",
+	} {
+		t.Run(filename, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join(serverRoot, "resource", "database", "gb28181", "migrations", filename))
+			require.NoError(t, err)
+			sql := strings.ToLower(string(body))
+			for _, token := range []string{
+				"'/media'", "lucide:clapperboard",
+				"'/gb28181/sip/config'", "lucide:servercog",
+				"'/gb28181/cascade'", "lucide:gitbranch",
+			} {
+				require.Contains(t, sql, token)
+			}
+		})
+	}
+}

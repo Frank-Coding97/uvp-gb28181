@@ -81,9 +81,3 @@ export function getAlarmDetail(id: string) {
 export function deleteAlarm(id: string) {
   return http.request<BaseResult<DeleteAlarmResult>>("delete", baseUrlApi(`gb28181/alarms/${id}`));
 }
-
-export function batchDeleteAlarms(ids: string[]) {
-  return http.request<BaseResult<DeleteAlarmResult>>("post", baseUrlApi("gb28181/alarms/batch-delete"), {
-    data: { ids }
-  });
-}

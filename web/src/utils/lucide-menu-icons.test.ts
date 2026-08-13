@@ -16,4 +16,10 @@ describe("lucide menu icons", () => {
     expect(getLucideIconName("lucide:Clapperboard")).toBe("Clapperboard");
     expect(getLucideIconComponent("lucide:Clapperboard")).toBeDefined();
   });
+
+  it("resolves icon names returned in lowercase by legacy menu data", () => {
+    expect(getLucideIconComponent("lucide:servercog")).toBeDefined();
+    expect(getLucideIconComponent("lucide:gitbranch")).toBeDefined();
+    expect(getLucideIconComponent("lucide:clapperboard")).toBeDefined();
+  });
 });

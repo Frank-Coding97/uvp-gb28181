@@ -41,6 +41,7 @@ SET `svg_icon` = '',
         WHEN '/gb28181/alarm-management' THEN 'lucide:BellRing'
         WHEN '/gb28181/sip/platform' THEN 'lucide:Router'
         WHEN '/gb28181/sip/config' THEN 'lucide:ServerCog'
+        WHEN '/gb28181/cascade' THEN 'lucide:GitBranch'
         WHEN '/gb28181/sip-traces' THEN 'lucide:FileText'
         WHEN '/gb28181/security' THEN 'lucide:Shield'
         WHEN '/security-preview' THEN 'lucide:Shield'
@@ -60,6 +61,7 @@ SET `svg_icon` = '',
         WHEN '/gb28181/sip/platform' THEN 6
         WHEN '/gb28181/sip/config' THEN 7
         WHEN '/gb28181/sip-traces' THEN 8
+        WHEN '/gb28181/cascade' THEN 13
         WHEN '/gb28181/zlm/nodes' THEN 10
         WHEN '/gb28181/zlm/scheduler' THEN 11
         WHEN '/gb28181/zlm/scheduler/logs' THEN 12
@@ -75,6 +77,7 @@ WHERE `path` IN (
     '/gb28181/alarm-management',
     '/gb28181/sip/platform',
     '/gb28181/sip/config',
+    '/gb28181/cascade',
     '/gb28181/sip-traces',
     '/gb28181/security',
     '/security-preview',

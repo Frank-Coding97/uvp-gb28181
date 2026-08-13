@@ -86,11 +86,6 @@ export function pageAfterAlarmDeletion(page: number, pageSize: number, total: nu
   return Math.min(Math.max(1, page), lastPage);
 }
 
-export function normalizeCurrentPageSelection(selectedIds: string[], currentPageIds: string[]): string[] {
-  const currentPage = new Set(currentPageIds);
-  return [...new Set(selectedIds)].filter(id => currentPage.has(id));
-}
-
 export function displayAlarmEntityName(
   entity: Pick<AlarmEntitySummary, "alias" | "name" | "code"> | null | undefined,
   fallback = "—"

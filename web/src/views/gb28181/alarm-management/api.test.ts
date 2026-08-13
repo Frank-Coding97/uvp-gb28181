@@ -4,7 +4,7 @@ const request = vi.hoisted(() => vi.fn());
 vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
-import { batchDeleteAlarms, deleteAlarm, getAlarmDetail, listAlarms } from "./api";
+import { deleteAlarm, getAlarmDetail, listAlarms } from "./api";
 
 describe("alarm management API", () => {
   beforeEach(() => {
@@ -28,9 +28,4 @@ describe("alarm management API", () => {
     expect(request).toHaveBeenLastCalledWith("delete", `/api/gb28181/alarms/${id}`);
   });
 
-  it("posts a string ID array for atomic batch deletion", async () => {
-    const ids = ["9007199254740993", "9007199254740995"];
-    await batchDeleteAlarms(ids);
-    expect(request).toHaveBeenCalledWith("post", "/api/gb28181/alarms/batch-delete", { data: { ids } });
-  });
 });
