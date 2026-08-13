@@ -21,7 +21,9 @@ if ! id uvp-deploy >/dev/null 2>&1; then
   useradd --system --gid uvp-deploy --home-dir /var/lib/uvp-gitee-deployer --create-home --shell /usr/sbin/nologin uvp-deploy
 fi
 
-install -d -o uvp-deploy -g uvp-deploy -m 0750 /var/lib/uvp-gitee-deployer/queue
+install -d -o uvp-deploy -g uvp-deploy -m 0750 \
+  /var/lib/uvp-gitee-deployer/queue \
+  /var/lib/uvp-gitee-deployer/failed
 install -d -o uvp-deploy -g uvp-deploy -m 0750 /home/uvp-deploy/incoming
 install -d -m 0755 /usr/local/libexec
 install -d -m 0755 "$(dirname "$SOURCE_ROOT")"
