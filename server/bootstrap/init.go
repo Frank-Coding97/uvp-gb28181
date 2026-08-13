@@ -2,6 +2,17 @@ package bootstrap
 
 import (
 	"context"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/natefinch/lumberjack"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"gorm.io/gorm"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
@@ -15,14 +26,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/uploadhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
-	"log"
-	"os"
-	"strings"
-	"time"
-
-	"github.com/natefinch/lumberjack"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
 func init() {
@@ -41,6 +44,15 @@ func init() {
 	app.ZapLog = createZapFactory(service.ZapLogHandler)
 	// 初始化数据库
 	initDB()
+
+	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
+	if err := migration.RunMigrations(map[string]*gorm.DB{
+		"mysql":      app.GormDbMysql,
+		"sqlserver":  app.GormDbSqlserver,
+		"postgresql": app.GormDbPostgreSql,
+	}); err != nil {
+		log.Fatal("数据库迁移失败: " + err.Error())
+	}
 
 	// 初始化casbin
 	app.CasbinV2 = casbinhelper.NewCasbinHelper()
