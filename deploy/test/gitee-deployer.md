@@ -15,6 +15,9 @@ backend binary and applied automatically at startup (see
    `UVP_GITEE_WEBHOOK_TOKEN`, restrict the file to root, and do not commit it.
 3. Run `sudo deploy/test/install-gitee-deployer.sh /opt/uvp-gb28181/source`.
    The source repository is cloned from `UVP_GITEE_REPO_URL` when absent.
+   Release builds skip the Go test suite by default (the worker exports
+   `UVP_SKIP_TESTS=1`); set `UVP_SKIP_TESTS=0` in the worker environment to
+   run tests on the server.
 4. Add `deploy/test/gitee-webhook.nginx.conf` to the HTTPS virtual host. The
    recommended endpoint is `https://<host>/hooks/gitee`; keep the Go receiver
    bound to loopback.

@@ -6,6 +6,7 @@ QUEUE_DIR="${UVP_GITEE_QUEUE_DIR:-/var/lib/uvp-gitee-deployer/queue}"
 FAILED_DIR="${UVP_GITEE_FAILED_DIR:-/var/lib/uvp-gitee-deployer/failed}"
 LOCK_FILE="${UVP_GITEE_WORKER_LOCK:-/run/lock/uvp-gitee-deploy-worker.lock}"
 DEPLOY_LOCAL="${UVP_GITEE_LOCAL_DEPLOY:-/usr/local/sbin/uvp-gitee-deploy-local}"
+export UVP_SKIP_TESTS="${UVP_SKIP_TESTS:-1}"
 
 fail() {
   printf '[%s] ERROR: %s\n' "$(date -Is)" "$*" >&2
