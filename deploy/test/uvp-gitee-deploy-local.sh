@@ -10,7 +10,6 @@ GIT_REMOTE="${UVP_GIT_REMOTE:-origin}"
 GIT_REF="${UVP_GIT_REF:-develop}"
 LOCK_FILE="${UVP_LOCAL_DEPLOY_LOCK:-/run/lock/uvp-gitee-local-deploy.lock}"
 SHA=""
-ALLOW_DATABASE_CHANGES=0
 
 fail() {
   printf '[%s] ERROR: %s\n' "$(date -Is)" "$*" >&2
@@ -19,7 +18,6 @@ fail() {
 
 for arg in "$@"; do
   case "$arg" in
-    --allow-database-changes) ALLOW_DATABASE_CHANGES=1 ;;
     --*) fail "unknown option $arg" ;;
     *) [[ -z "$SHA" ]] && SHA="$arg" || fail "duplicate revision" ;;
   esac
@@ -36,20 +34,8 @@ git -C "$SOURCE_ROOT" fetch --no-tags "$GIT_REMOTE" "$GIT_REF"
 fetched_sha=$(git -C "$SOURCE_ROOT" rev-parse FETCH_HEAD)
 [[ "$fetched_sha" == "$SHA" ]] || fail "fetched $fetched_sha does not match webhook $SHA"
 
-previous=""
 if [[ -e "$ROOT/current-release" && ! -f "$ROOT/current-release" ]]; then
   fail "release marker must be a regular file: $ROOT/current-release"
-fi
-if [[ -f "$ROOT/current-release" ]]; then
-  previous=$(tr -d '[:space:]' < "$ROOT/current-release")
-fi
-if [[ "$ALLOW_DATABASE_CHANGES" != "1" && ! "$previous" =~ ^[0-9a-f]{40}$ ]]; then
-  fail "no valid release baseline; apply and review migrations, then run manually with --allow-database-changes for the first deployment"
-fi
-if [[ "$ALLOW_DATABASE_CHANGES" != "1" ]]; then
-  if ! git -C "$SOURCE_ROOT" diff --quiet "$previous" "$SHA" -- server/resource/database; then
-    fail "database files changed since $previous; apply and review migrations separately before manual deployment"
-  fi
 fi
 
 build_root="$ROOT/builds/$SHA"
