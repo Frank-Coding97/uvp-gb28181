@@ -324,9 +324,13 @@ func (s *RelationalStore) activeSessionDiagnoses(ctx context.Context, filter Ses
 		s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceSessionDiagnosis{}), filter,
 	)
 	if err := query.Order("observed_at ASC").Order("id ASC").Find(&rows).Error; err != nil {
-		// Diagnosis storage is additive. A not-yet-migrated or temporarily
-		// unavailable diagnosis table must not hide the raw SIP workbench.
-		return nil, nil
+		// 诊断表查询失败只有在未请求诊断条件时才允许降级(原始报文列表
+		// 不该被 additive 的诊断表故障藏起来);显式按类别/代码筛选时,
+		// 静默返回空会把数据库故障伪装成"没有诊断结果"
+		if filter.DiagnosisCategory == "" && filter.DiagnosisCode == "" {
+			return nil, nil
+		}
+		return nil, err
 	}
 	return rows, nil
 }
@@ -356,6 +360,71 @@ func reconstructedRegisterDiagnosis(session SessionSummary) *SessionDiagnosis {
 		Source: diagnosis.SourceReconstructed, DeviceID: session.DeviceID,
 		CallID: session.CallID, Method: "REGISTER", StatusCode: session.FinalStatus,
 	}
+}
+
+// loadSessionRows 执行报文查询并返回按时间排序的原始行
+func (s *RelationalStore) loadSessionRows(query *gorm.DB) ([]gbmodels.GbSipTraceMessage, error) {
+	var rows []gbmodels.GbSipTraceMessage
+	if err := query.Order("occurred_at ASC").Order("event_id ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query relational SIP trace sessions: %w", err)
+	}
+	return rows, nil
+}
+
+// summarizeRows 把原始报文行聚合为会话摘要
+func summarizeRows(rows []gbmodels.GbSipTraceMessage, retention time.Duration) []SessionSummary {
+	accumulators := make(map[string]*sessionAccumulator)
+	for _, row := range rows {
+		at := row.OccurredAt.UTC()
+		day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
+		key := sessionIdentity(day, row.DeviceID, row.CallID)
+		acc := accumulators[key]
+		if acc == nil {
+			source, destination := row.LocalAddr, row.RemoteAddr
+			if row.Direction == string(DirectionInbound) {
+				source, destination = row.RemoteAddr, row.LocalAddr
+			}
+			acc = &sessionAccumulator{summary: SessionSummary{
+				Day: day, DeviceID: row.DeviceID, CallID: row.CallID, FirstAt: at, LastAt: at,
+				FirstMethod: row.Method, FromURI: row.FromURI, ToURI: row.ToURI,
+				SourceAddr: source, DestinationAddr: destination,
+			}, methods: make(map[string]struct{})}
+			accumulators[key] = acc
+		}
+		acc.summary.LastAt = at
+		acc.summary.MessageCount++
+		if row.Direction == string(DirectionInbound) {
+			acc.summary.InboundCount++
+		} else if row.Direction == string(DirectionOutbound) {
+			acc.summary.OutboundCount++
+		}
+		if row.Method != "" {
+			acc.methods[row.Method] = struct{}{}
+		}
+		if row.StatusCode >= 200 {
+			acc.summary.FinalStatus = row.StatusCode
+			acc.summary.FinalResponseCount++
+		}
+		if row.StatusCode == 0 && row.Method != "" && row.Method != "ACK" {
+			acc.summary.RequestCount++
+		}
+	}
+	now := time.Now().UTC()
+	sessions := make([]SessionSummary, 0, len(accumulators))
+	for _, acc := range accumulators {
+		for method := range acc.methods {
+			acc.summary.Methods = append(acc.summary.Methods, method)
+		}
+		sort.Strings(acc.summary.Methods)
+		expiresAt := acc.summary.LastAt.Add(retention)
+		missing := acc.summary.RequestCount > acc.summary.FinalResponseCount
+		acc.summary.SessionDerivedState = SessionDerivedState{
+			OriginalAvailable: now.Before(expiresAt), OriginalExpiresAt: expiresAt,
+			MissingResponse: missing,
+		}
+		sessions = append(sessions, acc.summary)
+	}
+	return sessions
 }
 
 func attachSessionDiagnoses(sessions []SessionSummary, rows []gbmodels.GbSipTraceSessionDiagnosis, filter SessionFilter) []SessionSummary {
@@ -427,61 +496,11 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 		}
 		query = applySessionCandidates(query, candidates)
 	}
-	var rows []gbmodels.GbSipTraceMessage
-	if err := query.Order("occurred_at ASC").Order("event_id ASC").Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("query relational SIP trace sessions: %w", err)
+	rows, err := s.loadSessionRows(query)
+	if err != nil {
+		return nil, err
 	}
-	accumulators := make(map[string]*sessionAccumulator)
-	for _, row := range rows {
-		at := row.OccurredAt.UTC()
-		day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
-		key := sessionIdentity(day, row.DeviceID, row.CallID)
-		acc := accumulators[key]
-		if acc == nil {
-			source, destination := row.LocalAddr, row.RemoteAddr
-			if row.Direction == string(DirectionInbound) {
-				source, destination = row.RemoteAddr, row.LocalAddr
-			}
-			acc = &sessionAccumulator{summary: SessionSummary{
-				Day: day, DeviceID: row.DeviceID, CallID: row.CallID, FirstAt: at, LastAt: at,
-				FirstMethod: row.Method, FromURI: row.FromURI, ToURI: row.ToURI,
-				SourceAddr: source, DestinationAddr: destination,
-			}, methods: make(map[string]struct{})}
-			accumulators[key] = acc
-		}
-		acc.summary.LastAt = at
-		acc.summary.MessageCount++
-		if row.Direction == string(DirectionInbound) {
-			acc.summary.InboundCount++
-		} else if row.Direction == string(DirectionOutbound) {
-			acc.summary.OutboundCount++
-		}
-		if row.Method != "" {
-			acc.methods[row.Method] = struct{}{}
-		}
-		if row.StatusCode >= 200 {
-			acc.summary.FinalStatus = row.StatusCode
-			acc.summary.FinalResponseCount++
-		}
-		if row.StatusCode == 0 && row.Method != "" && row.Method != "ACK" {
-			acc.summary.RequestCount++
-		}
-	}
-	now := time.Now().UTC()
-	sessions := make([]SessionSummary, 0, len(accumulators))
-	for _, acc := range accumulators {
-		for method := range acc.methods {
-			acc.summary.Methods = append(acc.summary.Methods, method)
-		}
-		sort.Strings(acc.summary.Methods)
-		expiresAt := acc.summary.LastAt.Add(s.rawMessageRetention())
-		missing := acc.summary.RequestCount > acc.summary.FinalResponseCount
-		acc.summary.SessionDerivedState = SessionDerivedState{
-			OriginalAvailable: now.Before(expiresAt), OriginalExpiresAt: expiresAt,
-			MissingResponse: missing,
-		}
-		sessions = append(sessions, acc.summary)
-	}
+	sessions := summarizeRows(rows, s.rawMessageRetention())
 	sessions = attachSessionDiagnoses(sessions, diagnosisRows, filter)
 	sort.Slice(sessions, func(i, j int) bool {
 		if sessions[i].LastAt.Equal(sessions[j].LastAt) {
@@ -517,7 +536,10 @@ func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter
 func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
 	filter.Limit = 0
 	filter.Anomaly = false
-	sessions, err := s.reduceSessions(ctx, filter, 0)
+	// 统计给候选上限:会话窗口允许 31 天,无 LIMIT 的全窗报文载入会
+	// 让慢查询和内存激增拖垮诊断页。上限内统计精确,超出按候选截断
+	const maxStatsCandidates = 1000
+	sessions, err := s.reduceSessions(ctx, filter, maxStatsCandidates)
 	if err != nil {
 		return SessionStats{}, err
 	}

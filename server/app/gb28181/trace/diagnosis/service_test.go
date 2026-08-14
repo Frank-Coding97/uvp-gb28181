@@ -106,7 +106,8 @@ func TestDiagnosisServiceFailureAndRecovery(t *testing.T) {
 	defer stopDiagnosisService(t, service)
 
 	require.NoError(t, service.Emit(context.Background(), validEvent()))
-	require.Eventually(t, func() bool { return service.Health().Failed == 1 }, time.Second, 10*time.Millisecond)
+	// 修复后契约:批写失败保留重试,每次失败尝试累计 Failed;短暂窗口内 >=1
+	require.Eventually(t, func() bool { return service.Health().Failed >= 1 }, time.Second, 10*time.Millisecond)
 	require.Equal(t, HealthDegraded, service.Health().State)
 
 	repository.mu.Lock()

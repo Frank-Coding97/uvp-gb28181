@@ -2,11 +2,15 @@ package diagnosis
 
 import "time"
 
+// maxFlushRetries 批写失败的最大重试次数:超过后按有界丢弃策略处理
+const maxFlushRetries = 5
+
 func (service *Service) runWorker() {
 	defer close(service.done)
 	ticker := time.NewTicker(service.flushInterval)
 	defer ticker.Stop()
 	batch := make([]Event, 0, service.batchSize)
+	failedAttempts := 0
 	for {
 		select {
 		case event, ok := <-service.queue:
@@ -16,12 +20,10 @@ func (service *Service) runWorker() {
 			}
 			batch = append(batch, event)
 			if len(batch) >= service.batchSize {
-				service.flush(batch)
-				batch = batch[:0]
+				batch, failedAttempts = service.flushBatch(batch, failedAttempts)
 			}
 		case <-ticker.C:
-			service.flush(batch)
-			batch = batch[:0]
+			batch, failedAttempts = service.flushBatch(batch, failedAttempts)
 		case <-service.ctx.Done():
 			service.health.droppedEvent("diagnosis worker canceled", uint64(len(batch)+len(service.queue)))
 			return
@@ -29,9 +31,26 @@ func (service *Service) runWorker() {
 	}
 }
 
-func (service *Service) flush(events []Event) {
+// flushBatch 尝试写出一批事件。失败时保留 batch 供重试;重试超过上限
+// 或 batch 超硬上限时按丢弃策略处理并计数,不让诊断盲区永久化
+func (service *Service) flushBatch(batch []Event, failedAttempts int) ([]Event, int) {
+	if len(batch) == 0 {
+		return batch, 0
+	}
+	if service.flush(batch) {
+		return batch[:0], 0
+	}
+	failedAttempts++
+	if failedAttempts >= maxFlushRetries || len(batch) > service.batchSize*2 {
+		service.health.droppedEvent("diagnosis batch dropped after failed retries", uint64(len(batch)))
+		return batch[:0], 0
+	}
+	return batch, failedAttempts
+}
+
+func (service *Service) flush(events []Event) bool {
 	if len(events) == 0 {
-		return
+		return true
 	}
 	records := make([]Record, len(events))
 	for i := range events {
@@ -39,9 +58,10 @@ func (service *Service) flush(events []Event) {
 	}
 	if err := service.repository.UpsertBatch(service.ctx, records); err != nil {
 		service.health.failedBatch(err, uint64(len(records)))
-		return
+		return false
 	}
 	service.health.succeeded(service.now())
+	return true
 }
 
 func recordFromEvent(event Event) Record {

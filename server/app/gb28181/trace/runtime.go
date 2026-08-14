@@ -110,75 +110,98 @@ func activeTraceDB() *gorm.DB {
 }
 
 func NewRuntimeWithDB(cfg gbconfig.TraceConfig, db *gorm.DB) Runtime {
-	loadedCipher, err := LoadCipherFromEnv(cfg.EncryptionKeyEnv, "v1")
-	var payloadCipher PayloadCipher = loadedCipher
-	if err != nil {
-		payloadCipher = failingCipher{err: ErrInvalidEncryptionKey}
-	}
-	var store Store = unavailableStore{}
-	if err == nil && db != nil {
-		store = NewReconnectingStore(func(ctx context.Context) (Store, error) {
-			if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
-				return nil, fmt.Errorf("connect relational SIP trace store: %w", pingErr)
-			}
-			if !db.Migrator().HasTable(&gbmodels.GbSipTraceMessage{}) {
-				return nil, fmt.Errorf("relational SIP trace table is unavailable")
-			}
-			return NewRelationalStoreWithRetention(db, cfg.RetentionDays)
-		}, 250*time.Millisecond, 30*time.Second)
-	}
-	var diagnosisService *diagnosis.Service
-	diagnosisFallback := diagnosis.DisabledHealth()
-	if db != nil {
-		repository, repositoryErr := diagnosis.NewGormRepository(db)
-		if repositoryErr == nil {
-			diagnosisService, repositoryErr = diagnosis.NewService(repository, diagnosis.ServiceConfig{
-				QueueCapacity: cfg.QueueCapacity, BatchSize: cfg.BatchSize,
-				FlushInterval:  time.Duration(cfg.FlushIntervalMS) * time.Millisecond,
-				Retention:      time.Duration(cfg.RetentionDays) * 24 * time.Hour,
-				PruneBatchSize: DefaultTracePruneBatchSize,
-			})
-		}
-		if repositoryErr != nil {
-			diagnosisFallback = diagnosis.HealthSnapshot{State: diagnosis.HealthDegraded, LastError: repositoryErr.Error()}
-		}
-	} else {
-		diagnosisFallback = diagnosis.HealthSnapshot{State: diagnosis.HealthDegraded, LastError: diagnosis.ErrRepositoryUnavailable.Error()}
-	}
+	payloadCipher, cipherErr := tracePayloadCipher(cfg)
+	store := traceRelationalStore(cfg, db, cipherErr)
+	diagnosisService, diagnosisFallback := traceDiagnosisService(cfg, db)
 	module := NewModuleWithDiagnosis(cfg, store, payloadCipher, diagnosisService)
 	module.diagnosisFallback = diagnosisFallback
-	if diagnosisService != nil {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
-				diagnosisService.MarkDegraded(fmt.Errorf("connect diagnosis store: %w", pingErr))
-				return
-			}
-			if !db.Migrator().HasTable(&gbmodels.GbSipTraceSessionDiagnosis{}) {
-				diagnosisService.MarkDegraded(errors.New("diagnosis table is unavailable"))
-			}
-		}()
-	}
-	if err != nil {
+	startDiagnosisHealthProbe(db, diagnosisService)
+	if cipherErr != nil {
 		module.health.degraded("trace encryption key is unavailable")
 	} else {
 		module.health.degraded(ErrTraceStoreUnavailable.Error())
-		// 启动时主动检查关系型存储(异步,不阻塞 bootstrap),
-		// 避免第一次 UI 查询才 dial 的冷启动问题,同时把真实错误(schema 缺失/权限等)透出到 health.lastError
-		if rs, ok := store.(*ReconnectingStore); ok {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				if _, err := rs.ensure(ctx); err != nil {
-					module.health.degraded(err.Error())
-				} else {
-					module.health.ready(time.Now())
-				}
-			}()
-		}
+		startRelationalHealthProbe(store, module)
 	}
 	return module
+}
+
+// tracePayloadCipher 从环境加载加密密钥,失败时返回 failingCipher
+func tracePayloadCipher(cfg gbconfig.TraceConfig) (PayloadCipher, error) {
+	loadedCipher, err := LoadCipherFromEnv(cfg.EncryptionKeyEnv, "v1")
+	if err != nil {
+		return failingCipher{err: ErrInvalidEncryptionKey}, err
+	}
+	return loadedCipher, nil
+}
+
+// traceRelationalStore 装配关系型存储(带重连);密钥不可用或 db 为空时降级 unavailableStore
+func traceRelationalStore(cfg gbconfig.TraceConfig, db *gorm.DB, cipherErr error) Store {
+	if cipherErr != nil || db == nil {
+		return unavailableStore{}
+	}
+	return NewReconnectingStore(func(ctx context.Context) (Store, error) {
+		if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
+			return nil, fmt.Errorf("connect relational SIP trace store: %w", pingErr)
+		}
+		if !db.Migrator().HasTable(&gbmodels.GbSipTraceMessage{}) {
+			return nil, fmt.Errorf("relational SIP trace table is unavailable")
+		}
+		return NewRelationalStoreWithRetention(db, cfg.RetentionDays)
+	}, 250*time.Millisecond, 30*time.Second)
+}
+
+// traceDiagnosisService 装配诊断服务;失败时返回降级健康快照
+func traceDiagnosisService(cfg gbconfig.TraceConfig, db *gorm.DB) (*diagnosis.Service, diagnosis.HealthSnapshot) {
+	if db == nil {
+		return nil, diagnosis.HealthSnapshot{State: diagnosis.HealthDegraded, LastError: diagnosis.ErrRepositoryUnavailable.Error()}
+	}
+	repository, repositoryErr := diagnosis.NewGormRepository(db)
+	if repositoryErr == nil {
+		service, _ := diagnosis.NewService(repository, diagnosis.ServiceConfig{
+			QueueCapacity: cfg.QueueCapacity, BatchSize: cfg.BatchSize,
+			FlushInterval:  time.Duration(cfg.FlushIntervalMS) * time.Millisecond,
+			Retention:      time.Duration(cfg.RetentionDays) * 24 * time.Hour,
+			PruneBatchSize: DefaultTracePruneBatchSize,
+		})
+		return service, diagnosis.DisabledHealth()
+	}
+	return nil, diagnosis.HealthSnapshot{State: diagnosis.HealthDegraded, LastError: repositoryErr.Error()}
+}
+
+// startDiagnosisHealthProbe 启动异步诊断表健康探测
+func startDiagnosisHealthProbe(db *gorm.DB, service *diagnosis.Service) {
+	if db == nil || service == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
+			service.MarkDegraded(fmt.Errorf("connect diagnosis store: %w", pingErr))
+			return
+		}
+		if !db.Migrator().HasTable(&gbmodels.GbSipTraceSessionDiagnosis{}) {
+			service.MarkDegraded(errors.New("diagnosis table is unavailable"))
+		}
+	}()
+}
+
+// startRelationalHealthProbe 启动异步关系型存储健康探测(不阻塞 bootstrap,
+// 避免第一次 UI 查询才 dial 的冷启动)
+func startRelationalHealthProbe(store Store, module *Module) {
+	rs, ok := store.(*ReconnectingStore)
+	if !ok {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, err := rs.ensure(ctx); err != nil {
+			module.health.degraded(err.Error())
+		} else {
+			module.health.ready(time.Now())
+		}
+	}()
 }
 
 func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCipher) *Module {
