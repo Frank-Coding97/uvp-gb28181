@@ -330,10 +330,20 @@ func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint6
 		if err := deactivateAbsentChannels(tx, platformID, desiredChannels); err != nil {
 			return err
 		}
-		return tx.Model(&model.GbCascadePlatform{}).Where("id = ?", platformID).Updates(map[string]any{
-			"projection_revision": gorm.Expr("projection_revision + ?", 1),
-			"updated_at":          time.Now().UTC(),
-		}).Error
+		// 提交时做真正的 CAS:revision 条件写回,并发陈旧写者得到 0 行而非覆盖
+		result := tx.Model(&model.GbCascadePlatform{}).
+			Where("id = ? AND projection_revision = ?", platformID, expectedProjectionRevision).
+			Updates(map[string]any{
+				"projection_revision": gorm.Expr("projection_revision + ?", 1),
+				"updated_at":          time.Now().UTC(),
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrRevisionConflict
+		}
+		return nil
 	})
 }
 

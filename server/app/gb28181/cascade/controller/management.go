@@ -114,6 +114,11 @@ func (c *ManagementController) Delete(ctx *gin.Context) {
 		return
 	}
 	if err := c.service.Delete(ctx, id); err != nil {
+		if errors.Is(err, service.ErrRuntimeSyncFailed) {
+			// 删除/禁用已提交,仅运行时未同步:返回已提交结果附降级提示
+			ctx.JSON(http.StatusOK, gin.H{"ok": true, "runtimeSynced": false, "warning": err.Error()})
+			return
+		}
 		c.fail(ctx, err)
 		return
 	}

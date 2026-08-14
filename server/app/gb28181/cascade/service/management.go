@@ -281,14 +281,18 @@ func (s *ManagementService) Delete(ctx context.Context, id uint64) error {
 			return err
 		}
 		if err := s.runtime.Reload(ctx); err != nil {
-			return err
+			// 禁用已持久化:降级返回,不谎报整体失败
+			return fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
 		}
 	}
 	if err := s.store.SoftDeletePlatform(ctx, id); err != nil {
 		return err
 	}
 	if s.runtime != nil {
-		return s.runtime.Reload(ctx)
+		if err := s.runtime.Reload(ctx); err != nil {
+			// 软删除已提交:降级返回,不谎报整体失败
+			return fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
+		}
 	}
 	return nil
 }

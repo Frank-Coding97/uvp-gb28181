@@ -47,14 +47,9 @@ func SeedIfEmpty(db *gorm.DB) (seeded int, err error) {
 		})
 	}
 
-	var existed int64
-	if err = db.Model(&SysCivilCode{}).Count(&existed).Error; err != nil {
-		return 0, fmt.Errorf("civilcode: count existing: %w", err)
-	}
-	if existed >= int64(len(rows)) {
-		return 0, nil
-	}
-
+	// 完整性不按行数短路:表内存在等量其他数据时缺项不会被发现。
+	// 始终对嵌入数据集执行幂等 upsert(code 主键冲突忽略),代价是一次
+	// ~3500 行批量写入,换来"每次都补齐缺失项"
 	const batch = 500
 	result := db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&rows, batch)
 	if result.Error != nil {
