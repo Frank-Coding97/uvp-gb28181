@@ -457,15 +457,21 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			zap.String("deviceId", deviceID),
 			zap.String("channelId", channelID),
 			zap.String("staleStreamId", ch.StreamID))
+		// 残留清理不纳入点播总预算(预算到期也得把残留清掉),但必须有自己的
+		// 有界超时,不能无限阻塞点播事务
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		if currentSSRC := CurrentSSRCForChannel(ch); currentSSRC != "" {
-			if err := s.StopIfPersistedCurrent(context.Background(), ch.StreamID, currentSSRC); err != nil {
+			if err := s.StopIfPersistedCurrent(cleanupCtx, ch.StreamID, currentSSRC); err != nil {
+				cleanupCancel()
 				return nil, fmt.Errorf("清理残留播放会话失败: %w", err)
 			}
 		} else {
-			if err := s.stopDirect(context.Background(), ch.StreamID); err != nil {
+			if err := s.stopDirect(cleanupCtx, ch.StreamID); err != nil {
+				cleanupCancel()
 				return nil, fmt.Errorf("清理残留播放会话失败: %w", err)
 			}
 		}
+		cleanupCancel()
 	}
 
 	// 3. Snapshot the mode for this generation, then allocate its independent
@@ -689,7 +695,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		}
 		return s.rollbackFailedStart(req, result, liveRef, client, cause, true, &releaseSSRC)
 	}
-	if err := s.channels.SetCurrent(ctx, deviceID, channelID, streamID, ssrc); err != nil {
+	if err := s.channels.SetCurrent(playCtx, deviceID, channelID, streamID, ssrc); err != nil {
 		return s.rollbackFailedStart(req, result, liveRef, client, fmt.Errorf("记录通道播放流失败: %w", err), true, &releaseSSRC)
 	}
 
