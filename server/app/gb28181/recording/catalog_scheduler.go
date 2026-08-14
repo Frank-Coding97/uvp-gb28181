@@ -4,8 +4,14 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"go.uber.org/zap"
+
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 var (
@@ -25,6 +31,25 @@ type CatalogReconcileScheduler struct {
 	accepting bool
 	jobs      map[int64]struct{}
 	wg        sync.WaitGroup
+
+	// 后台失败可观测:任务失败累计数与最近一次失败(供状态接口查询)
+	failureCount atomic.Int64
+	lastFailure  atomic.Value // string
+}
+
+// FailureStats 返回累计失败次数与最近一次失败描述.
+func (s *CatalogReconcileScheduler) FailureStats() (int64, string) {
+	last, _ := s.lastFailure.Load().(string)
+	return s.failureCount.Load(), last
+}
+
+// recordFailure 记日志并累计失败 —— 后台任务失败不得静默
+func (s *CatalogReconcileScheduler) recordFailure(scope string, err error) {
+	s.failureCount.Add(1)
+	s.lastFailure.Store(scope + ": " + err.Error())
+	if app.ZapLog != nil {
+		app.ZapLog.Error("录像目录后台任务失败", zap.String("scope", scope), zap.Error(err))
+	}
 }
 
 func NewCatalogReconcileScheduler(reconciler *CatalogReconciler, nodes CatalogNodeLookup, interval, stopWait time.Duration) *CatalogReconcileScheduler {
@@ -76,9 +101,12 @@ func (s *CatalogReconcileScheduler) Enqueue(trigger string, nodeIDs []int64, sta
 		go func() {
 			defer s.finishJob(nodeID)
 			if err := s.reconciler.MarkQueued(ctx, nodeID, trigger, start, end); err != nil {
+				s.recordFailure("mark-queued:node="+strconv.FormatInt(nodeID, 10), err)
 				return
 			}
-			_, _ = s.reconciler.RunNode(ctx, nodeID, trigger, start, end)
+			if _, err := s.reconciler.RunNode(ctx, nodeID, trigger, start, end); err != nil {
+				s.recordFailure("run-node:node="+strconv.FormatInt(nodeID, 10), err)
+			}
 		}()
 	}
 	return accepted, nil
@@ -122,7 +150,9 @@ func (s *CatalogReconcileScheduler) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			_, _ = s.Enqueue(ReconcileTriggerScheduled, nil, nil, nil)
+			if _, err := s.Enqueue(ReconcileTriggerScheduled, nil, nil, nil); err != nil && !errors.Is(err, ErrCatalogSchedulerStopped) {
+				s.recordFailure("enqueue-scheduled", err)
+			}
 		}
 	}
 }

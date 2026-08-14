@@ -37,14 +37,17 @@ func TestDownloadRegistryOwnerAndLimits(t *testing.T) {
 	require.NoError(t, err)
 	_, _, _, err = reg.Claim(second.TaskID, ticket)
 	require.NoError(t, err)
-	third, ticket, err := reg.Create(7, "3")
-	require.NoError(t, err)
-	_, _, _, err = reg.Claim(third.TaskID, ticket)
+
+	// ready+streaming 总量已达实例预算:创建即拒绝,防未领取任务无界增长
+	_, _, err = reg.Create(7, "3")
 	require.ErrorIs(t, err, ErrDownloadLimit)
 
 	_, err = reg.Get(first.TaskID, 8)
 	require.ErrorIs(t, err, ErrDownloadNotOwner)
 	reg.Finish(first.TaskID, DownloadStatusCompleted, "")
+	// 释放一个 streaming 后预算恢复,可以再创建并领取
+	third, ticket, err := reg.Create(7, "3")
+	require.NoError(t, err)
 	thirdSnapshot, _, _, err := reg.Claim(third.TaskID, ticket)
 	require.NoError(t, err)
 	require.Equal(t, DownloadStatusStreaming, thirdSnapshot.Status)

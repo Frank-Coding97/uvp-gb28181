@@ -122,6 +122,8 @@ type RegistryConfig struct {
 	Now         func() time.Time
 	IdleTimeout time.Duration
 	MaxSession  time.Duration
+	// TerminalTTL 终态会话在内存中的保留时长,超龄后从 sessions 表删除
+	TerminalTTL time.Duration
 }
 
 func (s Session) clone() *Session {

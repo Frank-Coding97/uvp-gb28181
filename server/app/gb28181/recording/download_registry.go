@@ -138,9 +138,29 @@ func (r *DownloadRegistry) Create(ownerUserID uint, fileID string) (DownloadTask
 		return DownloadTaskView{}, "", ErrDownloadState
 	}
 	r.expireLocked(now)
+	// 未领取任务无界创建的防线:ready+streaming 任务总量与 streaming 共用
+	// 同一实例/用户预算,创建时即拒绝,而不是等 Claim 才限制
+	userActive, instanceActive := r.countActiveLocked()
+	if userActive[ownerUserID] >= r.perUserStreaming || instanceActive >= r.perInstanceStreaming {
+		r.mu.Unlock()
+		return DownloadTaskView{}, "", ErrDownloadLimit
+	}
 	r.tasks[taskID] = task
 	r.mu.Unlock()
 	return task.viewAt(now), ticket, nil
+}
+
+// countActiveLocked 统计 ready+streaming 任务数(按用户与实例),调用方须持锁.
+func (r *DownloadRegistry) countActiveLocked() (map[uint]int, int) {
+	byUser := make(map[uint]int)
+	total := 0
+	for _, t := range r.tasks {
+		if t.status == DownloadStatusReady || t.status == DownloadStatusStreaming {
+			byUser[t.ownerUserID]++
+			total++
+		}
+	}
+	return byUser, total
 }
 
 func (r *DownloadRegistry) Claim(taskID, ticket string) (DownloadTaskView, context.Context, context.CancelFunc, error) {

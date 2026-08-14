@@ -280,9 +280,16 @@ func (s *Service) reconcileEnabledLocked(ctx context.Context, channel *models.Gb
 func (s *Service) markEnableFailure(ctx context.Context, channelID uint, session *models.GbRecordingSession, message string) (*models.GbChannel, error) {
 	session.State = models.RecordingSessionStateFailed
 	session.LastError = message
-	_ = s.repo.UpsertSession(ctx, session)
-	if _, err := s.repo.MarkState(ctx, channelID, true, models.CloudRecordingStateFailed, message); err != nil {
-		return nil, err
+	// 会话状态持久化失败不能无声吞掉:否则通道显示失败、会话停留在旧状态
+	var sessionErr error
+	if err := s.repo.UpsertSession(ctx, session); err != nil {
+		sessionErr = fmt.Errorf("会话状态持久化失败: %w", err)
+	}
+	if _, markErr := s.repo.MarkState(ctx, channelID, true, models.CloudRecordingStateFailed, message); markErr != nil {
+		return nil, errors.Join(markErr, sessionErr)
+	}
+	if sessionErr != nil {
+		return nil, sessionErr
 	}
 	return s.repo.GetChannel(ctx, channelID)
 }
@@ -290,9 +297,15 @@ func (s *Service) markEnableFailure(ctx context.Context, channelID uint, session
 func (s *Service) markDisableFailure(ctx context.Context, channelID uint, session *models.GbRecordingSession, message string) (*models.GbChannel, error) {
 	session.State = models.RecordingSessionStateFailed
 	session.LastError = message
-	_ = s.repo.UpsertSession(ctx, session)
-	if _, err := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateFailed, message); err != nil {
-		return nil, err
+	var sessionErr error
+	if err := s.repo.UpsertSession(ctx, session); err != nil {
+		sessionErr = fmt.Errorf("会话状态持久化失败: %w", err)
+	}
+	if _, markErr := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateFailed, message); markErr != nil {
+		return nil, errors.Join(markErr, sessionErr)
+	}
+	if sessionErr != nil {
+		return nil, sessionErr
 	}
 	return s.repo.GetChannel(ctx, channelID)
 }

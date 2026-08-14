@@ -14,6 +14,9 @@ import (
 const (
 	defaultIdleTimeout = time.Minute
 	defaultMaxSession  = 30 * time.Minute
+	// defaultTerminalTTL 终态会话默认保留 30 分钟,足够前端查询结果,
+	// 又不让 sessions 表随回放次数无界增长
+	defaultTerminalTTL = 30 * time.Minute
 )
 
 type sessionRecord struct {
@@ -30,6 +33,7 @@ type Registry struct {
 	now             func() time.Time
 	idleTimeout     time.Duration
 	maxSession      time.Duration
+	terminalTTL     time.Duration
 	sessions        map[string]*sessionRecord
 	activeByScope   map[string]string
 	idempotentByKey map[string]string
@@ -51,8 +55,12 @@ func NewRegistry(config RegistryConfig) *Registry {
 	if maxSession <= 0 {
 		maxSession = defaultMaxSession
 	}
+	terminalTTL := config.TerminalTTL
+	if terminalTTL <= 0 {
+		terminalTTL = defaultTerminalTTL
+	}
 	return &Registry{
-		now: now, idleTimeout: idle, maxSession: maxSession,
+		now: now, idleTimeout: idle, maxSession: maxSession, terminalTTL: terminalTTL,
 		sessions:      make(map[string]*sessionRecord),
 		activeByScope: make(map[string]string), idempotentByKey: make(map[string]string),
 	}
@@ -335,6 +343,7 @@ func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason
 	err := r.cleanup.Run(ctx, resources)
 	record.mu.Lock()
 	record.session.State = terminal
+	record.session.LastActivityAt = r.now()
 	record.session.EndReason = reason
 	if err != nil {
 		record.session.Error, record.session.EndReason = err, reason+": "+err.Error()
@@ -343,7 +352,25 @@ func (r *Registry) stopRecord(ctx context.Context, record *sessionRecord, reason
 	close(done)
 	record.mu.Unlock()
 	r.removeActive(session)
+	r.pruneTerminal(r.now())
 	return true, err
+}
+
+// pruneTerminal 删除超龄的终态记录,防止 sessions 表随回放次数无界增长.
+// 机会式执行:每次有会话终止时顺带清理一次.
+func (r *Registry) pruneTerminal(now time.Time) {
+	cutoff := now.Add(-r.terminalTTL)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, record := range r.sessions {
+		record.mu.Lock()
+		terminal := record.session.State.IsTerminal()
+		lastActive := record.session.LastActivityAt
+		record.mu.Unlock()
+		if terminal && !lastActive.IsZero() && lastActive.Before(cutoff) {
+			delete(r.sessions, id)
+		}
+	}
 }
 
 func (r *Registry) Stop(ctx context.Context, id, reason string) error {

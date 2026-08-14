@@ -260,11 +260,9 @@ onUnmounted(() => {
             data-testid="timeline-surface"
             :class="['timeline-surface', { dragging }]"
             :style="{ height: `${surfaceHeight}px` }"
-            role="slider"
-            tabindex="0"
+            role="group"
             aria-label="录像时间轴"
-            :aria-valuenow="Math.round(playheadPercent)"
-            :aria-valuetext="formatPointerTime(playheadTime)"
+            tabindex="0"
             @pointerdown="onSurfacePointerDown"
             @wheel.prevent="onWheel"
             @keydown="onKeyboard"
@@ -293,7 +291,15 @@ onUnmounted(() => {
             >
                 <span v-if="segment.width >= 8">{{ formatPointerTime(segment.trueStartTime) }} - {{ formatPointerTime(segment.trueEndTime) }}</span>
             </button>
-            <div data-testid="timeline-playhead" :class="['timeline-playhead', { gap: playheadInGap }]" aria-hidden="true">
+            <div
+                data-testid="timeline-playhead"
+                :class="['timeline-playhead', { gap: playheadInGap }]"
+                role="slider"
+                aria-label="播放头"
+                tabindex="-1"
+                :aria-valuenow="Math.round(playheadPercent)"
+                :aria-valuetext="formatPointerTime(playheadTime)"
+            >
                 <span>{{ formatPointerTime(playheadTime) }}<b v-if="playheadInGap">无录像</b></span><i></i>
             </div>
         </div>

@@ -458,3 +458,53 @@ func TestPlaybackServiceCloseCancelsMediaWaitAndCountsCleanupOnce(t *testing.T) 
 		t.Fatalf("cleanup teardown=%d close=%d unbind=%d", invite.teardown.Load(), rtp.closeCalls.Load(), rtp.unbindCalls.Load())
 	}
 }
+
+// cross-review round-4:终态会话有界 TTL —— 超龄记录被机会式清理,不再永久驻留
+func TestPlaybackRegistryPrunesTerminalSessionsAfterTTL(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	reg := NewRegistry(RegistryConfig{Now: func() time.Time { return now }, TerminalTTL: time.Minute})
+
+	service := NewService(reg, &fakeNodePicker{node: NodeInfo{ID: "node-1", ServerID: "34020000002000000001", Destination: "192.0.2.20:5060", RecvIP: "192.0.2.10"}},
+		&fakeRTP{}, &fakeInvite{}, &fakeMedia{ready: MediaReady{URLs: map[string]string{"wsFlv": "ws://node/live.flv"}}}, ServiceConfig{})
+	request := validCreate(now)
+	request.SIPChannelID = "34020000001320000001"
+	request.Destination = "192.0.2.20:5060"
+	request.Transport = "UDP"
+
+	result, err := service.Create(context.Background(), request)
+	if err != nil {
+		t.Fatalf("create err=%v", err)
+	}
+	id := result.Session.ID
+	if err := service.Stop(context.Background(), id, "test done"); err != nil {
+		t.Fatalf("stop err=%v", err)
+	}
+
+	// 未超龄:终态记录仍驻留(可查询)
+	reg.mu.RLock()
+	firstCount := len(reg.sessions)
+	reg.mu.RUnlock()
+	if firstCount != 1 {
+		t.Fatalf("sessions after first stop=%d, want 1", firstCount)
+	}
+
+	// 推进到 TTL 之外,另一次终止触发机会式清理(用不同 key 建全新会话)
+	now = now.Add(2 * time.Minute)
+	request2 := request
+	request2.RecordKey = "record-2"
+	request2.IdempotencyKey = "idem-record-2"
+	second, err := service.Create(context.Background(), request2)
+	if err != nil {
+		t.Fatalf("second create err=%v", err)
+	}
+	if err := service.Stop(context.Background(), second.Session.ID, "test done"); err != nil {
+		t.Fatalf("second stop err=%v", err)
+	}
+
+	reg.mu.RLock()
+	finalCount := len(reg.sessions)
+	reg.mu.RUnlock()
+	if finalCount != 1 {
+		t.Fatalf("sessions after prune=%d, want 1(超龄终态记录应被删除)", finalCount)
+	}
+}
