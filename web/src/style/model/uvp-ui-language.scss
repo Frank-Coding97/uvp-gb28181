@@ -17,6 +17,11 @@ body {
   box-sizing: border-box;
   width: var(--uvp-sidebar-width);
   background: var(--uvp-sidebar-bg);
+  transition: width 0.2s ease;
+}
+
+.aside.collapsed {
+  width: var(--uvp-sidebar-collapsed-width);
 }
 
 .aside::before {
@@ -239,6 +244,11 @@ body {
   content: "";
   background: var(--uvp-sidebar-active-line);
   border-radius: 999px;
+}
+
+// 折叠时隐藏选中项的左侧竖线，窄栏里只保留图标高亮
+.aside .arco-menu.arco-menu-collapsed > .arco-menu-inner > .arco-menu-item.arco-menu-selected::before {
+  display: none;
 }
 
 .aside .arco-menu > .arco-menu-inner > .arco-menu-item.arco-menu-selected .arco-menu-icon,

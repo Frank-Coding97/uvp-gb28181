@@ -1,5 +1,5 @@
 <template>
-  <div :class="asideDark ? 'aside dark' : 'aside'">
+  <div :class="['aside', { dark: asideDark, collapsed }]">
     <Logo />
     <a-layout-sider :collapsed="collapsed" breakpoint="xl" class="layout_side" :width="256">
       <a-scrollbar style="height: 100%; overflow: auto" outer-class="scrollbar"><Menu :route-tree="routeTree" /></a-scrollbar>
@@ -58,9 +58,8 @@ const { routeTree } = storeToRefs(routerStore);
     padding: 0;
   }
 
-  // 消除icon的自带margin-right值，并且设置icon的padding值以保留icon空隙
+  // 消除icon的自带margin-right值，高度由菜单项flex居中控制
   .arco-menu-icon {
-    padding: 10px 0;
     margin-right: 0;
   }
 

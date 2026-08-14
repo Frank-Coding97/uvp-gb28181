@@ -1,5 +1,5 @@
 <template>
-    <div :class="layoutType == 'layoutHead' ? 'logo_head no-border' : 'logo_head'">
+    <div :class="['logo_head', { 'no-border': layoutType == 'layoutHead', collapsed }]">
         <div class="logo_box" :class="(collapsed || layoutType == 'layoutHead') && 'padding-unset'">
             <!-- <img v-if="sysLogo" :src="sysLogo" alt="系统logo" style="width: 32px; height: 32px;" />
             <s-svg-icon v-else name="snow" :size="32" /> -->
@@ -73,7 +73,7 @@ const isTitle = computed(() => {
 
 <style lang="scss" scoped>
 // 头部
-.logo_head {
+    .logo_head {
     position: relative;
     box-sizing: border-box;
     display: flex;
@@ -92,6 +92,11 @@ const isTitle = computed(() => {
         height: 1px;
         content: "";
         background: linear-gradient(90deg, rgb(148 163 184 / 0%), rgb(148 163 184 / 24%) 18%, rgb(148 163 184 / 10%) 72%, rgb(148 163 184 / 0%));
+    }
+
+    &.collapsed {
+      padding-right: 0;
+      padding-left: 0;
     }
 
     .logo_box {
