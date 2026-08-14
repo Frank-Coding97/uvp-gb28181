@@ -36,6 +36,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/subscribe"
 	gbtalk "uvplatform.cn/uvp-gb28181/app/gb28181/talk"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
@@ -123,6 +124,14 @@ type sipRuntimeServer interface {
 	Start() error
 	UAC() *uac.UAC
 	Shutdown(context.Context) error
+}
+
+func diagnosisSinkForServer(server sipRuntimeServer) diagnosis.DiagnosticSink {
+	provider, ok := server.(interface{ TraceRuntime() gbtrace.Runtime })
+	if !ok {
+		return diagnosis.NoopSink{}
+	}
+	return gbtrace.DiagnosisSinkFromRuntime(provider.TraceRuntime())
 }
 
 var playbackService *gbplayback.Service
@@ -598,6 +607,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			snapshotSvc := buildSnapshotService()
 			opts := []play.Option{
 				play.WithURLResolver(play.NewURLResolver(zlmServerConfigCache)),
+				play.WithDiagnosticSink(diagnosisSinkForServer(srv)),
 			}
 			if snapshotSvc != nil {
 				opts = append(opts, play.WithSnapshotService(snapshotSvc))
@@ -631,7 +641,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				zap.Int("recoverySkipped", recoveryStats.Skipped),
 				zap.Int("recoveryFailed", recoveryStats.Failed))
 		} else {
-			opts := make([]play.Option, 0, 1)
+			opts := []play.Option{play.WithDiagnosticSink(diagnosisSinkForServer(srv))}
 			if playAuthorization != nil {
 				opts = append(opts, play.WithPlayTokenIssuer(playAuthorization))
 			}

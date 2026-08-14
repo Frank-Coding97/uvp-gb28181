@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -59,7 +61,7 @@ type LocationStore interface {
 
 // Inviter 平台主叫能力(便于测试 mock)
 type Inviter interface {
-	Invite(ctx context.Context, m *uac.SessionManager, s *uac.Session, sdpBody string) error
+	InviteTracked(ctx context.Context, m *uac.SessionManager, s *uac.Session, sdpBody string) (uac.InviteOutcome, error)
 	Bye(ctx context.Context, m *uac.SessionManager, streamID string) error
 }
 
@@ -112,7 +114,6 @@ type ResultNode struct {
 // 常量
 const (
 	zlmApp           = "rtp"
-	defaultReadyWait = 8 * time.Second
 	defaultPollEvery = 200 * time.Millisecond
 )
 
@@ -147,13 +148,14 @@ type Service struct {
 	registry    NodeLookup
 	locationMap LocationStore
 
-	readyWait time.Duration // 流就绪等待上限,默认 8s
+	readyWait time.Duration // 仅测试覆盖;生产使用 playCtx 剩余总预算
 	pollEvery time.Duration // 轮询间隔,默认 200ms
 
-	snapshotSvc SnapshotService // 通道快照(播放触发),可为 nil
-	urlResolver *URLResolver
-	tokenIssuer playauth.DirectIssuer
-	nodeClient  func(*node.Node) ZLM
+	snapshotSvc    SnapshotService // 通道快照(播放触发),可为 nil
+	urlResolver    *URLResolver
+	tokenIssuer    playauth.DirectIssuer
+	nodeClient     func(*node.Node) ZLM
+	diagnosticSink diagnosis.DiagnosticSink
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
@@ -190,6 +192,14 @@ func WithNodeClientFactory(factory func(*node.Node) ZLM) Option {
 	return func(s *Service) { s.nodeClient = factory }
 }
 
+func WithDiagnosticSink(sink diagnosis.DiagnosticSink) Option {
+	return func(service *Service) {
+		if sink != nil {
+			service.diagnosticSink = sink
+		}
+	}
+}
+
 // New 创建 service(deprecated 单节点路径,M1/test fixture 兼容)
 //
 // Deprecated: M2 起新代码用 NewWithScheduler,这里保留兼容旧 service_test 不退化。
@@ -199,7 +209,7 @@ func New(cfg gbconfig.Config, z ZLM, inv Inviter, sm *uac.SessionManager, n *str
 	s := &Service{
 		cfg: cfg, zlm: z, inviter: inv, sessions: sm, notifier: n,
 		devices: devices, channels: channels,
-		readyWait: defaultReadyWait, pollEvery: defaultPollEvery,
+		pollEvery: defaultPollEvery, diagnosticSink: diagnosis.NoopSink{},
 		ssrcAllocator: allocator, ssrcAllocatorErr: allocatorErr,
 	}
 	for _, opt := range opts {
@@ -220,7 +230,7 @@ func NewWithScheduler(cfg gbconfig.Config, picker NodePicker, registry NodeLooku
 		cfg: cfg, inviter: inv, sessions: sm, notifier: n,
 		devices: devices, channels: channels,
 		picker: picker, registry: registry, locationMap: locationMap,
-		readyWait: defaultReadyWait, pollEvery: defaultPollEvery,
+		pollEvery: defaultPollEvery, diagnosticSink: diagnosis.NoopSink{},
 		ssrcAllocator: allocator, ssrcAllocatorErr: allocatorErr,
 	}
 	for _, opt := range opts {
@@ -587,6 +597,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	sess := &uac.Session{
 		DeviceID:   deviceID,
 		ChannelID:  channelID,
+		RequestID:  diagnosis.NewPlayCorrelationKey(),
 		SSRC:       ssrc,
 		StreamID:   streamID,
 		Generation: generation,
@@ -599,17 +610,25 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	defer playCancel()
 	inviteCtx, inviteCancel := context.WithTimeout(playCtx, gbconfig.SIPCommandTimeout())
 	defer inviteCancel()
-	if err := s.inviter.Invite(inviteCtx, s.sessions, sess, body); err != nil {
-		cause := fmt.Errorf("发 INVITE 失败: %w", err)
+	outcome, inviteErr := s.inviter.InviteTracked(inviteCtx, s.sessions, sess, body)
+	if inviteErr != nil {
+		if code, ok := classifyPlayStuck(outcome, inviteErr, false, errors.Is(playCtx.Err(), context.DeadlineExceeded)); ok {
+			s.emitPlayStuck(sess, outcome, code)
+		}
+		cause := fmt.Errorf("发 INVITE 失败: %w", inviteErr)
 		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
-			cause = fmt.Errorf("%w: %v", ErrPlayTimeout, err)
+			cause = fmt.Errorf("%w: %v", ErrPlayTimeout, inviteErr)
 		}
 		return s.rollbackFailedStart(req, result, liveRef, client, cause, errors.Is(playCtx.Err(), context.DeadlineExceeded), &releaseSSRC)
 	}
 
 	// 7. WaitReady:the hook only wakes the waiter. The exact generation and
 	// target node must still own the stream and report the media online.
-	readyCtx, readyCancel := context.WithTimeout(playCtx, s.readyWait)
+	readyCtx := playCtx
+	readyCancel := func() {}
+	if s.readyWait > 0 {
+		readyCtx, readyCancel = context.WithTimeout(playCtx, s.readyWait)
+	}
 	defer readyCancel()
 	poll := func(ctx context.Context, expected stream.LiveRef) (bool, error) {
 		if s.useMultiNode() {
@@ -627,6 +646,10 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		return client.IsMediaOnline(ctx, zlmApp, expected.StreamID)
 	}
 	if err := stream.WaitReadyRef(readyCtx, s.notifier, liveRef, poll, s.pollEvery); err != nil {
+		totalExpired := errors.Is(playCtx.Err(), context.DeadlineExceeded)
+		if code, ok := classifyPlayStuck(outcome, err, false, totalExpired); ok {
+			s.emitPlayStuck(sess, outcome, code)
+		}
 		cause := fmt.Errorf("%w: %v", ErrStreamNotReady, err)
 		if errors.Is(playCtx.Err(), context.DeadlineExceeded) {
 			cause = fmt.Errorf("%w: %v", ErrPlayTimeout, err)
@@ -652,6 +675,38 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		startCompleted = true
 	}
 	return result, nil
+}
+
+func classifyPlayStuck(outcome uac.InviteOutcome, playErr error, mediaReady, totalExpired bool) (diagnosis.Code, bool) {
+	if mediaReady || playErr == nil {
+		return "", false
+	}
+	if outcome.RequestSent && outcome.FinalStatus == 0 && errors.Is(playErr, context.DeadlineExceeded) {
+		return diagnosis.CodeSignalingTimeout, true
+	}
+	if totalExpired && outcome.FinalStatus == 200 && outcome.AckSucceeded {
+		return diagnosis.CodeMediaTimeout, true
+	}
+	return "", false
+}
+
+func (s *Service) emitPlayStuck(session *uac.Session, outcome uac.InviteOutcome, code diagnosis.Code) {
+	if s == nil || session == nil || s.diagnosticSink == nil {
+		return
+	}
+	cseq, _ := strconv.ParseUint(outcome.CSeq, 10, 32)
+	stage := diagnosis.StageSignaling
+	if code == diagnosis.CodeMediaTimeout {
+		stage = diagnosis.StageMedia
+	}
+	_ = s.diagnosticSink.Emit(context.Background(), diagnosis.Event{
+		ObservedAt: time.Now().UTC(), CorrelationKey: session.RequestID,
+		State: diagnosis.StateActive, Category: diagnosis.CategoryPlayStuck,
+		Code: code, Stage: stage, Source: diagnosis.SourceRuntime,
+		DeviceID: session.DeviceID, ChannelID: session.ChannelID,
+		CallID: outcome.CallID, CSeq: uint32(cseq), Method: "INVITE",
+		StatusCode: uint16(outcome.FinalStatus), StreamID: session.StreamID,
+	})
 }
 
 func (s *Service) rollbackFailedStart(

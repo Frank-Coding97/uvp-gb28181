@@ -87,6 +87,7 @@ type mockInviter struct {
 	onInvite    func(*uac.Session)
 	lastBody    string
 	lastSession *uac.Session
+	outcome     uac.InviteOutcome
 }
 
 type delayedInviter struct {
@@ -95,15 +96,21 @@ type delayedInviter struct {
 	byeCalls  atomic.Int32
 }
 
-func (m *delayedInviter) Invite(ctx context.Context, _ *uac.SessionManager, s *uac.Session, _ string) error {
+func (m *delayedInviter) InviteTracked(ctx context.Context, _ *uac.SessionManager, s *uac.Session, _ string) (uac.InviteOutcome, error) {
+	outcome := uac.InviteOutcome{RequestID: s.RequestID, CallID: "delayed-call", CSeq: "1", RequestSent: true, SentAt: time.Now()}
 	select {
 	case <-time.After(m.delay):
 		if m.onSuccess != nil {
 			m.onSuccess(s)
 		}
-		return nil
+		outcome.FinalStatus = 200
+		outcome.FinalResponseAt = time.Now()
+		outcome.AckSucceeded = true
+		outcome.AckAt = time.Now()
+		return outcome, nil
 	case <-ctx.Done():
-		return ctx.Err()
+		outcome.Error = ctx.Err()
+		return outcome, ctx.Err()
 	}
 }
 
@@ -144,14 +151,25 @@ func playbackSource(timeoutMs int) *playbackSettingsSource {
 	}}
 }
 
-func (m *mockInviter) Invite(ctx context.Context, sm *uac.SessionManager, s *uac.Session, body string) error {
+func (m *mockInviter) InviteTracked(ctx context.Context, sm *uac.SessionManager, s *uac.Session, body string) (uac.InviteOutcome, error) {
 	m.inviteCalls.Add(1)
 	m.lastBody = body
 	m.lastSession = s
 	if m.onInvite != nil {
 		m.onInvite(s)
 	}
-	return m.inviteErr
+	outcome := m.outcome
+	if outcome.RequestID == "" {
+		outcome = uac.InviteOutcome{
+			RequestID: s.RequestID, CallID: "mock-call", CSeq: "1", RequestSent: true,
+			SentAt: time.Now(), FinalStatus: 200, FinalResponseAt: time.Now(),
+			AckSucceeded: true, AckAt: time.Now(),
+		}
+	}
+	if m.inviteErr != nil {
+		outcome.Error = m.inviteErr
+	}
+	return outcome, m.inviteErr
 }
 func (m *mockInviter) Bye(ctx context.Context, sm *uac.SessionManager, streamID string) error {
 	m.byeCalls.Add(1)
