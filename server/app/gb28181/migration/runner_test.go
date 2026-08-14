@@ -98,9 +98,10 @@ func TestRunFirstStartBaselines(t *testing.T) {
 
 	err := run(store, lock, src, exec)
 	require.NoError(t, err)
-	require.Empty(t, exec.executed, "基线化不应执行任何 SQL")
-	require.Len(t, store.marks, 1)
-	require.Equal(t, []string{"a.sql", "b.sql"}, store.marks[0])
+	// 修复后契约:空版本表不再推断 schema 已最新 —— 迁移 SQL 幂等,
+	// 逐文件执行,防基线库跳过本次新增表
+	require.Equal(t, []string{"SQL FOR a", "SQL FOR b"}, exec.executed)
+	require.Len(t, store.marks, 2)
 }
 
 // ---- 3.2 增量执行 ----

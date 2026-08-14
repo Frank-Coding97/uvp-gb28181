@@ -38,6 +38,14 @@ if [[ -e "$ROOT/current-release" && ! -f "$ROOT/current-release" ]]; then
   fail "release marker must be a regular file: $ROOT/current-release"
 fi
 
+# 损坏的 current-release 会导致回退定位失败:校验 40 位 SHA 与 release 目录
+previous_sha=""
+if [[ -f "$ROOT/current-release" ]]; then
+  previous_sha=$(tr -d '[:space:]' < "$ROOT/current-release")
+  [[ "$previous_sha" =~ ^[0-9a-f]{40}$ ]] || fail "corrupted current-release marker: not a 40-char SHA"
+  [[ -d "$ROOT/builds/$previous_sha" ]] || fail "current-release points to missing build: $previous_sha"
+fi
+
 build_root="$ROOT/builds/$SHA"
 rm -rf "$build_root"
 cleanup() {

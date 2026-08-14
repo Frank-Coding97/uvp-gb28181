@@ -64,11 +64,16 @@ func OperationLogMiddleware() gin.HandlerFunc {
 
 		startTime := time.Now()
 
-		// 复制请求体用于记录
+		// 复制请求体用于记录:审计副本有硬上限,超大请求只记元数据,
+		// 防止单个大请求制造多份内存副本拖垮进程
 		var requestBody []byte
 		if c.Request.Body != nil {
-			requestBody, _ = io.ReadAll(c.Request.Body)
+			const maxAuditBodyBytes = 64 << 10
+			requestBody, _ = io.ReadAll(io.LimitReader(c.Request.Body, maxAuditBodyBytes+1))
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+			if len(requestBody) > maxAuditBodyBytes {
+				requestBody = nil
+			}
 		}
 
 		// 创建自定义的ResponseWriter来捕获响应
@@ -76,8 +81,12 @@ func OperationLogMiddleware() gin.HandlerFunc {
 		c.Writer = writer
 
 		defer func() {
-			// 记录操作日志
-			go recordOperationLog(c, startTime, requestBody, writer.body.Bytes())
+			// 在请求 goroutine 内同步构造不可变日志记录:异步 goroutine 继续读
+			// Gin Context 会在 Context 回收复用时产生竞态/跨请求错配
+			record := buildOperationLogRecord(c, startTime, requestBody, writer.body.Bytes())
+			if record != nil {
+				go persistOperationLog(record)
+			}
 		}()
 
 		c.Next()
@@ -122,8 +131,8 @@ func shouldSkipLog(c *gin.Context) bool {
 	return false
 }
 
-// recordOperationLog 记录操作日志
-func recordOperationLog(c *gin.Context, startTime time.Time, requestBody, responseBody []byte) {
+// buildOperationLogRecord 同步构造操作日志记录(只在请求 goroutine 内调用)
+func buildOperationLogRecord(c *gin.Context, startTime time.Time, requestBody, responseBody []byte) *models.SysOperationLog {
 	duration := time.Since(startTime).Milliseconds()
 
 	// 获取用户信息
@@ -171,12 +180,14 @@ func recordOperationLog(c *gin.Context, startTime time.Time, requestBody, respon
 		Location:   getLocationByIP(c.ClientIP()),
 	}
 
-	// 异步保存日志
-	go func() {
-		if err := app.DB().Create(log).Error; err != nil {
-			app.ZapLog.Error("记录操作日志失败", zap.Error(err))
-		}
-	}()
+	return log
+}
+
+// persistOperationLog 异步持久化日志记录(不接触 Gin Context)
+func persistOperationLog(log *models.SysOperationLog) {
+	if err := app.DB().Create(log).Error; err != nil {
+		app.ZapLog.Error("记录操作日志失败", zap.Error(err))
+	}
 }
 
 func operationLogRequestData(c *gin.Context, requestBody []byte) string {
@@ -282,6 +293,26 @@ func getErrorMessage(c *gin.Context, responseBody []byte) string {
 	return ""
 }
 
+// sanitizeNested 递归脱敏嵌套对象/数组中的敏感键
+func sanitizeNested(value interface{}) interface{} {
+	switch nested := value.(type) {
+	case map[string]interface{}:
+		for key, item := range nested {
+			switch strings.ToLower(key) {
+			case "password", "newpassword", "oldpassword", "token", "accesstoken", "apikey", "secret", "apisecret":
+				nested[key] = "***"
+			default:
+				nested[key] = sanitizeNested(item)
+			}
+		}
+	case []interface{}:
+		for i, item := range nested {
+			nested[i] = sanitizeNested(item)
+		}
+	}
+	return value
+}
+
 // getLocationByIP 根据IP获取地理位置（简化实现）
 func getLocationByIP(ip string) string {
 	// 这里可以集成第三方IP地理位置服务
@@ -299,15 +330,15 @@ func sanitizeRequestData(data []byte) string {
 	if json.Valid(data) {
 		var jsonData map[string]interface{}
 		if err := json.Unmarshal(data, &jsonData); err == nil {
-			// 脱敏密码字段
-			if _, exists := jsonData["password"]; exists {
-				jsonData["password"] = "***"
-			}
-			if _, exists := jsonData["Password"]; exists {
-				jsonData["Password"] = "***"
-			}
-			if _, exists := jsonData["newPassword"]; exists {
-				jsonData["newPassword"] = "***"
+			// 按敏感键递归脱敏:密码/一次性 token/secret 等凭据不得落审计日志
+			// (QR 兑换端点以 token 为唯一凭据,落库等于泄露接入码)
+			for key, value := range jsonData {
+				switch strings.ToLower(key) {
+				case "password", "newpassword", "oldpassword", "token", "accesstoken", "apikey", "secret", "apisecret":
+					jsonData[key] = "***"
+				default:
+					jsonData[key] = sanitizeNested(value)
+				}
 			}
 
 			// 重新序列化

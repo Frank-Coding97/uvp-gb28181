@@ -10,6 +10,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/middleware"
 )
 
 // 扫码回填 SIP 接入信息 —— 平台侧 HTTP 端点.
@@ -87,6 +88,9 @@ func (qc *QRController) Exchange(c *gin.Context) {
 		qc.Fail(c, "接入二维码服务尚未装配", nil, http.StatusServiceUnavailable)
 		return
 	}
+	// 请求体携带一次性接入 token(免鉴权端点的唯一凭据):
+	// 标记敏感操作,审计中间件只记录资源与结果元数据
+	middleware.MarkSensitiveOperation(c, map[string]any{"resource": "gb28181_qr_exchange", "operation": "exchange"})
 
 	var req QRExchangeRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.Token == "" {

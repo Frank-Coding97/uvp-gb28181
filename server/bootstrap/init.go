@@ -45,6 +45,13 @@ func init() {
 	// 初始化数据库
 	initDB()
 
+	// -migrate-down=<文件名> 是纯运维回滚入口:只完成配置+DB 初始化,
+	// 不执行 Up/业务初始化(main 解析参数后直接走 Down)。
+	// 否则迁移失败时回滚命令会先重试同一失败的 Up 并 log.Fatal,永远到不了 Down
+	if downFileRequested() {
+		return
+	}
+
 	// 数据库迁移自动执行(schema 变更随部署生效,先迁移后启动业务初始化)
 	if err := migration.RunMigrations(map[string]*gorm.DB{
 		"mysql":      app.GormDbMysql,
@@ -337,4 +344,14 @@ func newScheduler() app.JobSchedulerInterf {
 	scheduler.Start()
 
 	return scheduler
+}
+
+// downFileRequested 判断启动参数是否请求 -migrate-down 运维回滚
+func downFileRequested() bool {
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "-migrate-down=") {
+			return true
+		}
+	}
+	return false
 }

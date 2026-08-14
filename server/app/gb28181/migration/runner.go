@@ -97,13 +97,10 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 		return fmt.Errorf("列迁移文件失败: %w", err)
 	}
 
-	// 首启基线化:版本表为空 → 存量迁移全部标记为已应用,不执行 SQL。
-	// 存量库 schema 与全量快照 uvp-gb28181.sql 一致,增量无需重放;
-	// 全新库先跑快照初始化再启动,同样走此分支。
-	if len(applied) == 0 && len(names) > 0 {
-		return store.MarkApplied(names)
-	}
-
+	// 版本表为空时不推断 schema 已是最新:全部迁移 SQL 均为幂等
+	// (CREATE TABLE IF NOT EXISTS / WHERE NOT EXISTS),直接逐文件执行。
+	// 否则基线库会跳过本次新增表(如 gb_sip_trace_session_diagnosis),
+	// 迁移记录成功但表缺失,后续读写必然失败
 	for _, name := range names {
 		if appliedSet[name] {
 			continue
