@@ -322,7 +322,9 @@ func (s *RelationalStore) activeSessionDiagnoses(ctx context.Context, filter Ses
 		s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceSessionDiagnosis{}), filter,
 	)
 	if err := query.Order("observed_at ASC").Order("id ASC").Find(&rows).Error; err != nil {
-		return nil, fmt.Errorf("query active SIP trace diagnoses: %w", err)
+		// Diagnosis storage is additive. A not-yet-migrated or temporarily
+		// unavailable diagnosis table must not hide the raw SIP workbench.
+		return nil, nil
 	}
 	return rows, nil
 }
@@ -512,6 +514,7 @@ func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter
 
 func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
 	filter.Limit = 0
+	filter.Anomaly = false
 	sessions, err := s.reduceSessions(ctx, filter, 0)
 	if err != nil {
 		return SessionStats{}, err

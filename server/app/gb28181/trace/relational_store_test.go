@@ -220,6 +220,22 @@ func TestRelationalStoreExcludesResolvedDiagnosisAndReconstructsOnlyClearRegiste
 	require.Equal(t, stats.PlayStuck, stats.InvitePending)
 }
 
+func TestRelationalStoreKeepsRawSessionsWhenDiagnosisTableIsUnavailable(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, store.InsertBatch(t.Context(), []StoredEvent{
+		testRelationalEvent("raw-only", at, "device-a", "raw-call", "MESSAGE", 200),
+	}))
+	require.NoError(t, db.Migrator().DropTable(&gbmodels.GbSipTraceSessionDiagnosis{}))
+
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute), Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Nil(t, sessions[0].Diagnosis)
+}
+
 func TestRelationalStoreListSessionsBoundsCandidateRows(t *testing.T) {
 	db := newRelationalStoreTestDB(t)
 	store, err := NewRelationalStore(db)
