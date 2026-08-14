@@ -65,6 +65,9 @@ server/.playwright-mcp/
 # 本地 CI/CD 临时密钥（仅用于初始化 GitHub Secrets，严禁提交）
 .ci-secrets/
 
+# 发布产物(打包脚本输出,不入库)
+release-output/
+
 # 临时截图 / 调试 JSON(开发过程产物,不入库)
 *.png
 !web/public/**/*.png
