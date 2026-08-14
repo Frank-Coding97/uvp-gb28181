@@ -1,19 +1,6 @@
 <template>
   <div class="snow-page">
     <main class="home-page" aria-label="GB28181 视频平台首页">
-      <section class="home-overview" aria-label="平台概览">
-        <div class="overview-copy">
-          <p class="overview-kicker">GB28181 Operations</p>
-          <h1>视频接入与流媒体运行总览</h1>
-          <p>集中观察设备注册、通道在线、实时点播、ZLMediaKit 节点与协议告警。</p>
-        </div>
-        <div class="overview-status" aria-label="核心运行状态">
-          <span class="status-pill status-pill--ok">SIP 信令正常</span>
-          <span class="status-pill">6 个流媒体节点</span>
-          <span class="status-pill status-pill--warn">32 条今日告警</span>
-        </div>
-      </section>
-
       <section class="stat-grid" aria-label="核心指标">
         <article class="stat-card" v-for="card in statCards" :key="card.label">
           <div class="stat-card__icon" aria-hidden="true">
@@ -331,78 +318,6 @@ const rankClass = (idx: number) => {
   flex-direction: column;
   gap: 20px;
   min-height: 100%;
-}
-
-.home-overview {
-  display: flex;
-  gap: 24px;
-  align-items: flex-end;
-  justify-content: space-between;
-  padding: 22px 24px;
-  background:
-    radial-gradient(circle at 0% 0%, rgb(37 99 235 / 8%), transparent 32%),
-    var(--uvp-panel-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: var(--uvp-panel-radius);
-  box-shadow: var(--uvp-panel-shadow);
-}
-
-.overview-copy {
-  min-width: 0;
-
-  h1 {
-    margin: 4px 0 8px;
-    font-size: 24px;
-    font-weight: 650;
-    line-height: 1.28;
-    color: var(--uvp-text-primary);
-  }
-
-  p {
-    margin: 0;
-    font-size: 13px;
-    color: var(--uvp-text-tertiary);
-  }
-}
-
-.overview-kicker {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--uvp-brand);
-  text-transform: uppercase;
-}
-
-.overview-status {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.status-pill {
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 12px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--uvp-text-secondary);
-  white-space: nowrap;
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 999px;
-}
-
-.status-pill--ok {
-  color: var(--uvp-brand-cyan);
-  background: rgb(15 170 166 / 10%);
-  border-color: rgb(15 170 166 / 18%);
-}
-
-.status-pill--warn {
-  color: var(--uvp-warning);
-  background: var(--uvp-warning-soft);
-  border-color: var(--uvp-warning-border);
 }
 
 .stat-grid {
@@ -918,18 +833,8 @@ const rankClass = (idx: number) => {
     gap: 16px;
   }
 
-  .home-overview {
-    align-items: flex-start;
-    padding: 18px;
-  }
-
-  .home-overview,
   .alarm-wrap {
     flex-direction: column;
-  }
-
-  .overview-status {
-    justify-content: flex-start;
   }
 
   .stat-grid {
