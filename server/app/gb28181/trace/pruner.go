@@ -2,9 +2,23 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 )
+
+type combinedPrunableStore struct {
+	trace     PrunableStore
+	diagnosis *diagnosis.Service
+}
+
+func (store combinedPrunableStore) Prune(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	traceDeleted, traceErr := store.trace.Prune(ctx, cutoff, batchSize)
+	diagnosisDeleted, diagnosisErr := store.diagnosis.Prune(ctx, cutoff, batchSize)
+	return traceDeleted + diagnosisDeleted, errors.Join(traceErr, diagnosisErr)
+}
 
 const (
 	DefaultTracePruneBatchSize = 500

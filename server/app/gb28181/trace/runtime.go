@@ -2,6 +2,7 @@ package trace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -28,14 +30,16 @@ type Runtime interface {
 
 // Module owns transport hooks, framing, the bounded queue, and the batch writer lifecycle.
 type Module struct {
-	closed    atomic.Bool
-	framer    *FrameAssembler
-	onFrame   func(Frame)
-	collector *Collector
-	store     Store
-	cipher    PayloadCipher
-	health    *healthTracker
-	streamHub *StreamHub
+	closed            atomic.Bool
+	framer            *FrameAssembler
+	onFrame           func(Frame)
+	collector         *Collector
+	store             Store
+	cipher            PayloadCipher
+	health            *healthTracker
+	diagnosis         *diagnosis.Service
+	diagnosisFallback diagnosis.HealthSnapshot
+	streamHub         *StreamHub
 	// platformAddr 是 SIP 服务实际的 AdvertiseIP:Port,用于替换采集拿到的
 	// wildcard socket 地址([::]:5062 / 0.0.0.0:5062),这样 Source/Destination
 	// 显示给用户的是真实的平台端点而不是绑定通配符。
@@ -123,7 +127,39 @@ func NewRuntimeWithDB(cfg gbconfig.TraceConfig, db *gorm.DB) Runtime {
 			return NewRelationalStoreWithRetention(db, cfg.RetentionDays)
 		}, 250*time.Millisecond, 30*time.Second)
 	}
-	module := NewModule(cfg, store, payloadCipher)
+	var diagnosisService *diagnosis.Service
+	diagnosisFallback := diagnosis.DisabledHealth()
+	if db != nil {
+		repository, repositoryErr := diagnosis.NewGormRepository(db)
+		if repositoryErr == nil {
+			diagnosisService, repositoryErr = diagnosis.NewService(repository, diagnosis.ServiceConfig{
+				QueueCapacity: cfg.QueueCapacity, BatchSize: cfg.BatchSize,
+				FlushInterval:  time.Duration(cfg.FlushIntervalMS) * time.Millisecond,
+				Retention:      time.Duration(cfg.RetentionDays) * 24 * time.Hour,
+				PruneBatchSize: DefaultTracePruneBatchSize,
+			})
+		}
+		if repositoryErr != nil {
+			diagnosisFallback = diagnosis.HealthSnapshot{State: diagnosis.HealthDegraded, LastError: repositoryErr.Error()}
+		}
+	} else {
+		diagnosisFallback = diagnosis.HealthSnapshot{State: diagnosis.HealthDegraded, LastError: diagnosis.ErrRepositoryUnavailable.Error()}
+	}
+	module := NewModuleWithDiagnosis(cfg, store, payloadCipher, diagnosisService)
+	module.diagnosisFallback = diagnosisFallback
+	if diagnosisService != nil {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
+				diagnosisService.MarkDegraded(fmt.Errorf("connect diagnosis store: %w", pingErr))
+				return
+			}
+			if !db.Migrator().HasTable(&gbmodels.GbSipTraceSessionDiagnosis{}) {
+				diagnosisService.MarkDegraded(errors.New("diagnosis table is unavailable"))
+			}
+		}()
+	}
 	if err != nil {
 		module.health.degraded("trace encryption key is unavailable")
 	} else {
@@ -146,6 +182,10 @@ func NewRuntimeWithDB(cfg gbconfig.TraceConfig, db *gorm.DB) Runtime {
 }
 
 func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCipher) *Module {
+	return NewModuleWithDiagnosis(cfg, store, payloadCipher, nil)
+}
+
+func NewModuleWithDiagnosis(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCipher, diagnosisService *diagnosis.Service) *Module {
 	if store == nil {
 		store = unavailableStore{}
 	}
@@ -161,20 +201,22 @@ func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCiphe
 		flushInterval = 500 * time.Millisecond
 	}
 	module := &Module{
-		framer:        NewFrameAssembler(DefaultMaxFrameBytes),
-		store:         store,
-		cipher:        payloadCipher,
-		health:        newHealthTracker(HealthReady, ""),
-		streamHub:     NewStreamHub(),
-		batchSize:     batchSize,
-		flushInterval: flushInterval,
-		retryMin:      10 * time.Millisecond,
-		retryMax:      time.Second,
-		now:           time.Now,
-		done:          make(chan struct{}),
-		retryDone:     make(chan struct{}),
-		prunerDone:    make(chan struct{}),
-		retryQueue:    make(chan retryBatch, 32),
+		framer:            NewFrameAssembler(DefaultMaxFrameBytes),
+		store:             store,
+		cipher:            payloadCipher,
+		health:            newHealthTracker(HealthReady, ""),
+		diagnosis:         diagnosisService,
+		diagnosisFallback: diagnosis.DisabledHealth(),
+		streamHub:         NewStreamHub(),
+		batchSize:         batchSize,
+		flushInterval:     flushInterval,
+		retryMin:          10 * time.Millisecond,
+		retryMax:          time.Second,
+		now:               time.Now,
+		done:              make(chan struct{}),
+		retryDone:         make(chan struct{}),
+		prunerDone:        make(chan struct{}),
+		retryQueue:        make(chan retryBatch, 32),
 	}
 	module.collector = NewCollector(cfg.QueueCapacity, func() {
 		module.health.degraded("trace queue is full; events were dropped")
@@ -184,7 +226,11 @@ func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCiphe
 	go module.runWriter(ctx)
 	go module.runRetryWriter(ctx)
 	if prunable, ok := store.(PrunableStore); ok {
-		pruner := NewTracePruner(prunable, cfg.RetentionDays, DefaultTracePruneBatchSize, time.Now)
+		var scheduledPruner PrunableStore = prunable
+		if diagnosisService != nil {
+			scheduledPruner = combinedPrunableStore{trace: prunable, diagnosis: diagnosisService}
+		}
+		pruner := NewTracePruner(scheduledPruner, cfg.RetentionDays, DefaultTracePruneBatchSize, time.Now)
 		go func() {
 			defer close(module.prunerDone)
 			pruner.Run(ctx, time.Hour, func(err error) { module.health.degraded(err.Error()) })
@@ -256,7 +302,29 @@ func (m *Module) Health() HealthSnapshot {
 	snapshot.QueueDepth = m.collector.Depth()
 	snapshot.QueueCapacity = m.collector.Capacity()
 	snapshot.Dropped = m.collector.Dropped()
+	if m.diagnosis != nil {
+		snapshot.Diagnosis = m.diagnosis.Health()
+	} else {
+		snapshot.Diagnosis = m.diagnosisFallback
+	}
 	return snapshot
+}
+
+func (m *Module) DiagnosticSink() diagnosis.DiagnosticSink {
+	if m == nil || m.diagnosis == nil {
+		return diagnosis.NoopSink{}
+	}
+	return m.diagnosis
+}
+
+func DiagnosisSinkFromRuntime(runtime Runtime) diagnosis.DiagnosticSink {
+	provider, ok := runtime.(interface {
+		DiagnosticSink() diagnosis.DiagnosticSink
+	})
+	if !ok {
+		return diagnosis.NoopSink{}
+	}
+	return provider.DiagnosticSink()
 }
 
 func (m *Module) Shutdown(ctx context.Context) error {
@@ -274,11 +342,16 @@ func (m *Module) Shutdown(ctx context.Context) error {
 		case <-m.retryDone:
 			m.cancel()
 			<-m.prunerDone
+			if err := m.stopDiagnosis(ctx); err != nil {
+				_ = m.closeStore()
+				return err
+			}
 			return m.closeStore()
 		case <-ctx.Done():
 			m.cancel()
 			<-m.retryDone
 			<-m.prunerDone
+			_ = m.stopDiagnosis(ctx)
 			_ = m.closeStore()
 			return ctx.Err()
 		}
@@ -287,9 +360,17 @@ func (m *Module) Shutdown(ctx context.Context) error {
 		<-m.done
 		<-m.retryDone
 		<-m.prunerDone
+		_ = m.stopDiagnosis(ctx)
 		_ = m.closeStore()
 		return ctx.Err()
 	}
+}
+
+func (m *Module) stopDiagnosis(ctx context.Context) error {
+	if m.diagnosis == nil {
+		return nil
+	}
+	return m.diagnosis.Stop(ctx)
 }
 
 func (m *Module) closeStore() error {

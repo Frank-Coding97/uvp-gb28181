@@ -3,6 +3,8 @@ package trace
 import (
 	"sync"
 	"time"
+
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 )
 
 type HealthState string
@@ -14,14 +16,15 @@ const (
 )
 
 type HealthSnapshot struct {
-	State         HealthState  `json:"state"`
-	QueueDepth    int          `json:"queueDepth"`
-	QueueCapacity int          `json:"queueCapacity"`
-	Dropped       uint64       `json:"dropped"`
-	LastError     string       `json:"lastError,omitempty"`
-	LastSuccessAt *time.Time   `json:"lastSuccessAt,omitempty"`
-	CurrentGap    *GapSnapshot `json:"currentGap,omitempty"`
-	LastGap       *GapSnapshot `json:"lastGap,omitempty"`
+	State         HealthState              `json:"state"`
+	QueueDepth    int                      `json:"queueDepth"`
+	QueueCapacity int                      `json:"queueCapacity"`
+	Dropped       uint64                   `json:"dropped"`
+	LastError     string                   `json:"lastError,omitempty"`
+	LastSuccessAt *time.Time               `json:"lastSuccessAt,omitempty"`
+	CurrentGap    *GapSnapshot             `json:"currentGap,omitempty"`
+	LastGap       *GapSnapshot             `json:"lastGap,omitempty"`
+	Diagnosis     diagnosis.HealthSnapshot `json:"diagnosis"`
 }
 
 // GapSnapshot describes a period in which trace events could not be persisted.
@@ -121,5 +124,5 @@ func cloneGap(value *GapSnapshot) *GapSnapshot {
 }
 
 func DisabledHealth() HealthSnapshot {
-	return HealthSnapshot{State: HealthDisabled}
+	return HealthSnapshot{State: HealthDisabled, Diagnosis: diagnosis.DisabledHealth()}
 }
