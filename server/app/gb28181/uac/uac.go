@@ -36,6 +36,7 @@ type UAC struct {
 	resolveLocalIP   localIPResolver
 	recorder         metrics.Recorder // 可选:埋点出向事务
 	doMessage        messageDoFunc    // MESSAGE 专用测试 seam;生产绑定 client.Do
+	inviteTransport  inviteDialogTransport
 	playbackEndMu    sync.RWMutex
 	playbackEndHook  func(context.Context, PlaybackDialogMetadata, string) error
 
@@ -68,6 +69,7 @@ func New(ua *sipgo.UserAgent, serverID, domain, advertiseIP string, sipPort int,
 		dynamicAdvertise: dynamicAdvertise,
 		resolveLocalIP:   resolveRouteLocalIP,
 	}
+	u.inviteTransport = &sipgoInviteDialogTransport{client: client}
 	u.doMessage = func(ctx context.Context, req *sip.Request) (*sip.Response, error) {
 		return client.Do(ctx, req)
 	}
@@ -489,6 +491,7 @@ const (
 type Session struct {
 	DeviceID   string
 	ChannelID  string
+	RequestID  string
 	SSRC       string
 	StreamID   string
 	Generation uint64
@@ -496,7 +499,7 @@ type Session struct {
 	Dest       string
 	Transport  string // 传输协议(UDP/TCP),对应 gb_device.transport;空值兜底 UDP
 	State      SessionState
-	dialog     *sipgo.DialogClientSession
+	dialog     inviteDialog
 	createdAt  time.Time
 }
 
@@ -600,68 +603,11 @@ func (u *UAC) buildInviteRequest(s *Session, sdpBody string) (*sip.Request, erro
 	return req, nil
 }
 
-// Invite 发起点播:INVITE → 等应答 → ACK,会话建立
-// 关键 1:sipgo v1.4 的 WaitAnswer 内部 select 不响应外部 ctx.Done(),
-//
-//	这里用 channel + select 包一层强制超时,ctx 到期主动 Close dialog
-//
-// 关键 2:Request-URI 的 userpart 使用可播放通道编码,不能使用设备根编码;
-//
-//	host 是国标域(如 3402000000),不可路由,仍需 SetDestination 指定设备真实 IP:port
+// Invite preserves the legacy error-only contract. New callers should use
+// InviteTracked when they need correlation and SIP-stage facts.
 func (u *UAC) Invite(ctx context.Context, m *SessionManager, s *Session, sdpBody string) error {
-	ctx, cancel := withSIPCommandTimeout(ctx)
-	defer cancel()
-	s.State = StateInviting
-	s.createdAt = time.Now()
-
-	// 自己构造 INVITE request,显式 SetDestination(避免 sipgo 默认按 URI 域名解析)
-	req, err := u.buildInviteRequest(s, sdpBody)
-	if err != nil {
-		s.State = StateIdle
-		return fmt.Errorf("构造 INVITE 失败: %w", err)
-	}
-
-	callID, cseq := u.extractKeyFromRequest(req)
-	u.recordBegin(metrics.TxInvite, callID, cseq, s.DeviceID)
-
-	dialogCache := sipgo.NewDialogClientCache(u.client, *req.Contact())
-	dialog, err := dialogCache.WriteInvite(ctx, req)
-	if err != nil {
-		s.State = StateIdle
-		u.recordEnd(callID, cseq, 0, false)
-		return fmt.Errorf("INVITE 失败: %w", err)
-	}
-
-	// WaitAnswer 不听 ctx,自己加超时控制
-	answered := make(chan error, 1)
-	go func() {
-		answered <- dialog.WaitAnswer(ctx, sipgo.AnswerOptions{})
-	}()
-	select {
-	case waitErr := <-answered:
-		if waitErr != nil {
-			s.State = StateIdle
-			_ = dialog.Close()
-			u.recordEnd(callID, cseq, 0, false)
-			return fmt.Errorf("等待 INVITE 应答失败: %w", waitErr)
-		}
-	case <-ctx.Done():
-		s.State = StateIdle
-		_ = dialog.Close()
-		u.recordEnd(callID, cseq, 0, false)
-		return fmt.Errorf("等待 INVITE 应答超时: %w", ctx.Err())
-	}
-
-	if err := dialog.Ack(ctx); err != nil {
-		s.State = StateIdle
-		u.recordEnd(callID, cseq, 0, false)
-		return fmt.Errorf("发送 ACK 失败: %w", err)
-	}
-	s.dialog = dialog
-	s.State = StateEstablished
-	m.put(s)
-	u.recordEnd(callID, cseq, 200, true)
-	return nil
+	_, err := u.InviteTracked(ctx, m, s, sdpBody)
+	return err
 }
 
 // Bye 停止点播
