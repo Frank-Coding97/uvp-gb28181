@@ -730,8 +730,8 @@ onBeforeUnmount(() => {
 
 .security-shell {
   width: 100%;
-  max-width: 1540px;
-  margin: 0 auto;
+  max-width: 100%;
+  min-width: 0;
 }
 
 .security-nav,
