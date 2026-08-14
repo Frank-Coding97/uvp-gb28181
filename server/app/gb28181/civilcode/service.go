@@ -16,7 +16,8 @@ type Service struct {
 	byParent   sync.Map // parent_code -> []*SysCivilCode
 	all        []*SysCivilCode
 	allMu      sync.RWMutex
-	warmedOnce sync.Once
+	warmMu     sync.Mutex
+	warmed     bool
 }
 
 // NewService 构造 Service(不自动 warm,调用方在 bootstrap 显式 WarmCache)
@@ -24,32 +25,35 @@ func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
 }
 
-// WarmCache 启动时一次性载入全表到进程内 map
-// 数据量 ~3500 行,~400KB,内存代价极小
+// WarmCache 载入全表到进程内 map(数据量 ~3500 行,~400KB)
+// 用带状态的 mutex 而非 sync.Once:首次加载失败后允许重试,
+// 数据库短暂故障恢复后服务不至于永远返回空数据
 func (s *Service) WarmCache(ctx context.Context) error {
-	var err error
-	s.warmedOnce.Do(func() {
-		var rows []SysCivilCode
-		if e := s.db.WithContext(ctx).Find(&rows).Error; e != nil {
-			err = e
-			return
-		}
-		parentMap := make(map[string][]*SysCivilCode, len(rows))
-		all := make([]*SysCivilCode, 0, len(rows))
-		for i := range rows {
-			r := &rows[i]
-			s.byCode.Store(r.Code, r)
-			parentMap[r.ParentCode] = append(parentMap[r.ParentCode], r)
-			all = append(all, r)
-		}
-		for pc, list := range parentMap {
-			s.byParent.Store(pc, list)
-		}
-		s.allMu.Lock()
-		s.all = all
-		s.allMu.Unlock()
-	})
-	return err
+	s.warmMu.Lock()
+	defer s.warmMu.Unlock()
+	if s.warmed {
+		return nil
+	}
+	var rows []SysCivilCode
+	if err := s.db.WithContext(ctx).Find(&rows).Error; err != nil {
+		return err
+	}
+	parentMap := make(map[string][]*SysCivilCode, len(rows))
+	all := make([]*SysCivilCode, 0, len(rows))
+	for i := range rows {
+		r := &rows[i]
+		s.byCode.Store(r.Code, r)
+		parentMap[r.ParentCode] = append(parentMap[r.ParentCode], r)
+		all = append(all, r)
+	}
+	for pc, list := range parentMap {
+		s.byParent.Store(pc, list)
+	}
+	s.allMu.Lock()
+	s.all = all
+	s.allMu.Unlock()
+	s.warmed = true
+	return nil
 }
 
 // Lookup 按 6 位行政区码查名称(命中缓存,O(1))

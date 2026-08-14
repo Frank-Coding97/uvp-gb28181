@@ -33,7 +33,7 @@ type PlatformStore interface {
 }
 
 type ProjectionStore interface {
-	ReplaceProjection(ctx context.Context, platformID uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error
+	ReplaceProjection(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error
 	ProjectionSnapshot(ctx context.Context, platformID uint64) (*ProjectionSnapshot, error)
 }
 
@@ -104,12 +104,13 @@ func (r *GormRepository) CreatePlatform(ctx context.Context, platform *model.GbC
 
 func (r *GormRepository) FindPlatform(ctx context.Context, platformID uint64) (*model.GbCascadePlatform, error) {
 	var platform model.GbCascadePlatform
-	result := r.db.WithContext(ctx).First(&platform, platformID)
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, ErrPlatformNotFound
-	}
+	// 全局 gorm hook 会吞掉 ErrRecordNotFound,判空必须看 RowsAffected
+	result := r.db.WithContext(ctx).Limit(1).Find(&platform, platformID)
 	if result.Error != nil {
 		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, ErrPlatformNotFound
 	}
 	return &platform, nil
 }
@@ -187,12 +188,12 @@ func platformConfigUpdates(platform *model.GbCascadePlatform) map[string]any {
 func (r *GormRepository) SoftDeletePlatform(ctx context.Context, platformID uint64) error {
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var platform model.GbCascadePlatform
-		result := tx.First(&platform, platformID)
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return ErrPlatformNotFound
-		}
+		result := tx.Limit(1).Find(&platform, platformID)
 		if result.Error != nil {
 			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
 		}
 		now := time.Now().UTC()
 		if err := tx.Model(&model.GbCascadeChannelProjection{}).Where("platform_id = ? AND active = ?", platformID, true).
@@ -289,17 +290,21 @@ type ProjectionSnapshot struct {
 }
 
 // ReplaceProjection atomically replaces one platform's active authorization projection.
-func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
+func (r *GormRepository) ReplaceProjection(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, devices []DeviceProjectionInput, channels []ChannelProjectionInput) error {
 	if err := validateProjectionInputs(devices, channels); err != nil {
 		return err
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var platform model.GbCascadePlatform
-		if err := tx.First(&platform, platformID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrPlatformNotFound
-			}
-			return err
+		if result := tx.Limit(1).Find(&platform, platformID); result.Error != nil {
+			return result.Error
+		} else if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
+		}
+		// 投影替换是破坏性全量操作:请求必须携带其基于的修订号,
+		// 两个管理员基于同一旧快照保存时后提交者必须得到冲突而非静默覆盖
+		if platform.ProjectionRevision != expectedProjectionRevision {
+			return ErrRevisionConflict
 		}
 		deviceIDs := make(map[uint64]uint64, len(devices))
 		desiredDevices := make([]uint64, 0, len(devices))
@@ -440,11 +445,10 @@ func deactivateAbsentChannels(tx *gorm.DB, platformID uint64, desired []uint64) 
 func (r *GormRepository) ProjectionSnapshot(ctx context.Context, platformID uint64) (*ProjectionSnapshot, error) {
 	snapshot := &ProjectionSnapshot{}
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.First(&snapshot.Platform, platformID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return ErrPlatformNotFound
-			}
-			return err
+		if result := tx.Limit(1).Find(&snapshot.Platform, platformID); result.Error != nil {
+			return result.Error
+		} else if result.RowsAffected == 0 {
+			return ErrPlatformNotFound
 		}
 		if err := tx.Where("platform_id = ? AND active = ?", platformID, true).Order("id").Find(&snapshot.Devices).Error; err != nil {
 			return err
@@ -487,12 +491,12 @@ func (r *GormRepository) CreateMediaSession(ctx context.Context, session *model.
 
 func (r *GormRepository) FindMediaSessionByDialog(ctx context.Context, dialogKey string) (*model.GbCascadeMediaSession, error) {
 	var session model.GbCascadeMediaSession
-	result := r.db.WithContext(ctx).Where("dialog_key = ?", dialogKey).First(&session)
-	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-		return nil, nil
-	}
+	result := r.db.WithContext(ctx).Where("dialog_key = ?", dialogKey).Limit(1).Find(&session)
 	if result.Error != nil {
 		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return nil, nil
 	}
 	return &session, nil
 }

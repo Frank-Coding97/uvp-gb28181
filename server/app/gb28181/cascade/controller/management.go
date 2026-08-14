@@ -68,6 +68,11 @@ func (c *ManagementController) Create(ctx *gin.Context) {
 	middleware.MarkSensitiveOperation(ctx, map[string]any{"resource": "cascade_platform", "operation": "create"})
 	item, err := c.service.Create(ctx, req.input())
 	if err != nil {
+		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
+			// 配置已持久化,仅运行时未同步:返回已提交资源,附降级提示
+			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
+			return
+		}
 		c.fail(ctx, err)
 		return
 	}
@@ -90,6 +95,10 @@ func (c *ManagementController) Update(ctx *gin.Context) {
 	middleware.MarkSensitiveOperation(ctx, map[string]any{"resource": "cascade_platform", "platformId": id, "operation": "update"})
 	item, err := c.service.Update(ctx, id, req.ExpectedRevision, req.input())
 	if err != nil {
+		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
+			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
+			return
+		}
 		c.fail(ctx, err)
 		return
 	}
@@ -126,6 +135,10 @@ func (c *ManagementController) SetEnabled(ctx *gin.Context) {
 	}
 	item, err := c.service.SetEnabled(ctx, id, req.ExpectedRevision, req.Enabled)
 	if err != nil {
+		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
+			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
+			return
+		}
 		c.fail(ctx, err)
 		return
 	}
@@ -186,7 +199,7 @@ func (c *ManagementController) ReplaceShares(ctx *gin.Context) {
 		return
 	}
 	middleware.MarkSensitiveOperation(ctx, map[string]any{"resource": "cascade_projection", "platformId": id, "operation": "replace"})
-	if err := c.service.ReplaceProjection(ctx, id, devices, channels); err != nil {
+	if err := c.service.ReplaceProjection(ctx, id, req.ExpectedProjectionRevision, devices, channels); err != nil {
 		c.fail(ctx, err)
 		return
 	}
@@ -309,9 +322,10 @@ type enabledRequest struct {
 }
 
 type shareRequest struct {
-	Scope    string         `json:"scope"`
-	Devices  []shareDevice  `json:"devices"`
-	Channels []shareChannel `json:"channels"`
+	Scope                     string         `json:"scope"`
+	Devices                    []shareDevice  `json:"devices"`
+	Channels                   []shareChannel `json:"channels"`
+	ExpectedProjectionRevision uint64         `json:"expectedProjectionRevision"`
 }
 type shareDevice struct {
 	SourceDeviceID    uint64 `json:"sourceDeviceId"`

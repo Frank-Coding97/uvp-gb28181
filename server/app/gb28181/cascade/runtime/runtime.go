@@ -316,10 +316,10 @@ func (a *Actor) Revision() uint64 { return a.platform.ConfigRevision }
 
 func (a *Actor) Start() {
 	go a.run()
-	a.enqueue(commandStart)
+	a.enqueue(context.Background(), commandStart)
 }
 
-func (a *Actor) Reconnect() { a.enqueue(commandReconnect) }
+func (a *Actor) Reconnect() { a.enqueue(context.Background(), commandReconnect) }
 
 func (a *Actor) Stop(ctx context.Context) error {
 	if a == nil {
@@ -328,29 +328,37 @@ func (a *Actor) Stop(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	a.enqueue(commandStop)
+	a.enqueue(ctx, commandStop)
 	select {
 	case <-a.done:
 		return nil
 	case <-ctx.Done():
 		a.cancel()
-		a.enqueue(commandForceStop)
+		// 强停必须送达:用独立短超时,队列满也不会永久阻塞
+		forceCtx, forceCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer forceCancel()
+		a.enqueue(forceCtx, commandForceStop)
 		return ctx.Err()
 	}
 }
 
-func (a *Actor) enqueue(command actorCommand) {
+func (a *Actor) enqueue(ctx context.Context, command actorCommand) {
 	if a == nil {
 		return
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	select {
 	case <-a.done:
 		return
 	default:
 	}
+	// 队列满时监听 ctx:调用方的停止期限不被永久阻塞
 	select {
 	case a.cmd <- command:
 	case <-a.done:
+	case <-ctx.Done():
 	}
 }
 
@@ -424,7 +432,7 @@ func (a *Actor) run() {
 		if delay <= 0 {
 			return nil
 		}
-		return a.scheduler.Schedule(delay, func() { a.enqueue(command) })
+		return a.scheduler.Schedule(delay, func() { a.enqueue(context.Background(), command) })
 	}
 
 	for {

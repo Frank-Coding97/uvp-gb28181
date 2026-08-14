@@ -82,6 +82,9 @@ type sourceEntry struct {
 	result    StartResult
 	consumers map[string]struct{}
 	owned     bool
+	// starting 期间 result/consumers 未就绪;done 在启动完成后关闭
+	starting bool
+	done     chan struct{}
 }
 
 // Provider deduplicates upstream source acquisition and tracks only cascade leases.
@@ -105,24 +108,74 @@ func (p *Provider) Acquire(ctx context.Context, request AcquireRequest) (*Lease,
 		return nil, ErrInvalidAcquire
 	}
 	key := sourceKey(request.DeviceID, request.ChannelID)
+
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return nil, ErrProviderClosed
+	}
+	if entry := p.sources[key]; entry != nil {
+		if entry.starting {
+			// 同一源正在锁外启动:等待完成,避免重复 Start
+			done := entry.done
+			p.mu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-done:
+			}
+			return p.acquireExisting(ctx, key, request)
+		}
+		if _, exists := entry.consumers[request.ConsumerKey]; exists {
+			p.mu.Unlock()
+			return nil, fmt.Errorf("consumer lease already exists: %s", request.ConsumerKey)
+		}
+		entry.consumers[request.ConsumerKey] = struct{}{}
+		p.mu.Unlock()
+		return &Lease{Source: entry.result, Consumer: request.ConsumerKey, provider: p, streamKey: key}, nil
+	}
+	// 占位防重复启动:Start 在锁外执行,阻塞的通道启动不再拖垮所有 Acquire/Release
+	entry := &sourceEntry{starting: true, done: make(chan struct{})}
+	p.sources[key] = entry
+	p.mu.Unlock()
+
+	result, err := p.starter.Start(ctx, request.DeviceID, request.ChannelID)
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err != nil || p.closed {
+		delete(p.sources, key)
+		close(entry.done)
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrProviderClosed
+	}
+	entry.result = result
+	entry.starting = false
+	entry.consumers = map[string]struct{}{request.ConsumerKey: {}}
+	entry.owned = !result.Reused
+	close(entry.done)
+	return &Lease{Source: result, Consumer: request.ConsumerKey, provider: p, streamKey: key}, nil
+}
+
+// acquireExisting 复用已有就绪 entry(锁内路径,由 Acquire 的等待分支调用)
+func (p *Provider) acquireExisting(ctx context.Context, key string, request AcquireRequest) (*Lease, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.closed {
 		return nil, ErrProviderClosed
 	}
-	if entry := p.sources[key]; entry != nil {
-		if _, exists := entry.consumers[request.ConsumerKey]; exists {
-			return nil, fmt.Errorf("consumer lease already exists: %s", request.ConsumerKey)
-		}
-		entry.consumers[request.ConsumerKey] = struct{}{}
-		return &Lease{Source: entry.result, Consumer: request.ConsumerKey, provider: p, streamKey: key}, nil
+	entry := p.sources[key]
+	if entry == nil || entry.starting {
+		// 启动失败或仍占位:视为竞争失败,让上层重试
+		return nil, fmt.Errorf("source became unavailable: %s", key)
 	}
-	result, err := p.starter.Start(ctx, request.DeviceID, request.ChannelID)
-	if err != nil {
-		return nil, err
+	if _, exists := entry.consumers[request.ConsumerKey]; exists {
+		return nil, fmt.Errorf("consumer lease already exists: %s", request.ConsumerKey)
 	}
-	p.sources[key] = &sourceEntry{result: result, consumers: map[string]struct{}{request.ConsumerKey: {}}, owned: !result.Reused}
-	return &Lease{Source: result, Consumer: request.ConsumerKey, provider: p, streamKey: key}, nil
+	entry.consumers[request.ConsumerKey] = struct{}{}
+	return &Lease{Source: entry.result, Consumer: request.ConsumerKey, provider: p, streamKey: key}, nil
 }
 
 func (p *Provider) release(_ context.Context, key, consumer string) error {

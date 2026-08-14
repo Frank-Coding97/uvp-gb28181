@@ -93,7 +93,7 @@ func TestManagementRepositoryListsSoftDeletesAndPreservesCredential(t *testing.T
 	require.NoError(t, err)
 	require.Len(t, platforms, 2)
 
-	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID,
+	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID, 0,
 		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011"}},
 		[]ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000021"}},
 	))
@@ -149,7 +149,7 @@ func TestReplaceProjectionIsAtomicAndSnapshotsArePlatformScoped(t *testing.T) {
 	require.NoError(t, repo.CreatePlatform(ctx, platformA))
 	require.NoError(t, repo.CreatePlatform(ctx, platformB))
 
-	err := repo.ReplaceProjection(ctx, platformA.ID,
+	err := repo.ReplaceProjection(ctx, platformA.ID, 0,
 		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011", Name: "device-a"}},
 		[]ChannelProjectionInput{{SourceDeviceID: 99, SourceChannelID: 2, PublishedChannelID: "34020000001320000021"}},
 	)
@@ -161,7 +161,7 @@ func TestReplaceProjectionIsAtomicAndSnapshotsArePlatformScoped(t *testing.T) {
 	require.Empty(t, empty.Channels)
 	require.Zero(t, empty.Revision, "failed projection writes must not advance revision")
 
-	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID,
+	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID, 0,
 		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011", Name: "device-a"}},
 		[]ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000021", Name: "camera-a"}},
 	))
@@ -172,7 +172,7 @@ func TestReplaceProjectionIsAtomicAndSnapshotsArePlatformScoped(t *testing.T) {
 	require.EqualValues(t, 1, first.Revision, "first successful replacement must advance revision")
 	require.Equal(t, "camera-a", first.Channels[0].Name)
 
-	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID,
+	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID, first.Revision,
 		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011", Name: "device-a"}},
 		[]ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000021", Name: "camera-a-renamed"}},
 	))
@@ -182,7 +182,7 @@ func TestReplaceProjectionIsAtomicAndSnapshotsArePlatformScoped(t *testing.T) {
 	require.Equal(t, "camera-a", first.Channels[0].Name, "captured snapshot must remain immutable")
 	require.Equal(t, "camera-a-renamed", second.Channels[0].Name)
 
-	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID, nil, nil))
+	require.NoError(t, repo.ReplaceProjection(ctx, platformA.ID, second.Revision, nil, nil))
 	cleared, err := repo.ProjectionSnapshot(ctx, platformA.ID)
 	require.NoError(t, err)
 	require.EqualValues(t, 3, cleared.Revision, "clearing all projections must still advance revision")
@@ -205,7 +205,7 @@ func TestReplaceProjectionCreatesRowsWhenRecordNotFoundErrorsAreMasked(t *testin
 	platform := newPlatform("upstream-a", "34020000001320000001")
 	require.NoError(t, repo.CreatePlatform(ctx, platform))
 
-	require.NoError(t, repo.ReplaceProjection(ctx, platform.ID,
+	require.NoError(t, repo.ReplaceProjection(ctx, platform.ID, 0,
 		[]DeviceProjectionInput{
 			{SourceDeviceID: 10, PublishedDeviceID: "34020000001320000010"},
 			{SourceDeviceID: 20, PublishedDeviceID: "34020000001320000020"},
@@ -229,7 +229,7 @@ func TestReplaceProjectionRejectsPublishedIDCollisionAcrossKinds(t *testing.T) {
 	platform := newPlatform("upstream-a", "34020000001320000001")
 	require.NoError(t, repo.CreatePlatform(ctx, platform))
 
-	err := repo.ReplaceProjection(ctx, platform.ID,
+	err := repo.ReplaceProjection(ctx, platform.ID, 0,
 		[]DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000011"}},
 		[]ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000011"}},
 	)

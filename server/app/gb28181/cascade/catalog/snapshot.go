@@ -119,16 +119,32 @@ func Build(projection repository.ProjectionSnapshot, facts SourceFacts) (Snapsho
 		})
 	}
 
-	deviceRows := sortedDevices(devices)
-	for _, device := range deviceRows {
-		if err := addPublishedID(snapshot.publishedIDs, device.PublishedDeviceID); err != nil {
-			return Snapshot{}, err
-		}
-		snapshot.Items = append(snapshot.Items, deviceCatalogItem(device, projection.Platform.LocalDeviceID, projection.Platform.PublishPlatform, facts))
+	if err := appendDeviceItems(&snapshot, devices, projection.Platform, facts); err != nil {
+		return Snapshot{}, err
 	}
+	if err := appendChannelItems(&snapshot, platformID, devices, channels, facts); err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.SumNum = len(snapshot.Items)
+	return snapshot, nil
+}
+
+// appendDeviceItems 把设备投影转为目录项并按发布 ID 注册
+func appendDeviceItems(snapshot *Snapshot, devices map[uint64]model.GbCascadeDeviceProjection, platform model.GbCascadePlatform, facts SourceFacts) error {
+	for _, device := range sortedDevices(devices) {
+		if err := addPublishedID(snapshot.publishedIDs, device.PublishedDeviceID); err != nil {
+			return err
+		}
+		snapshot.Items = append(snapshot.Items, deviceCatalogItem(device, platform.LocalDeviceID, platform.PublishPlatform, facts))
+	}
+	return nil
+}
+
+// appendChannelItems 把通道投影转为目录项与播放目标映射
+func appendChannelItems(snapshot *Snapshot, platformID uint64, devices map[uint64]model.GbCascadeDeviceProjection, channels []model.GbCascadeChannelProjection, facts SourceFacts) error {
 	for _, channel := range channels {
 		if err := addPublishedID(snapshot.publishedIDs, channel.PublishedChannelID); err != nil {
-			return Snapshot{}, err
+			return err
 		}
 	}
 	for _, channel := range channels {
@@ -153,8 +169,7 @@ func Build(projection repository.ProjectionSnapshot, facts SourceFacts) (Snapsho
 			PTZAllowed:      channel.PTZAllowed,
 		}
 	}
-	snapshot.SumNum = len(snapshot.Items)
-	return snapshot, nil
+	return nil
 }
 
 func sortedDevices(devices map[uint64]model.GbCascadeDeviceProjection) []model.GbCascadeDeviceProjection {
@@ -167,30 +182,52 @@ func sortedDevices(devices map[uint64]model.GbCascadeDeviceProjection) []model.G
 }
 
 func authorizedResources(projection repository.ProjectionSnapshot, platformID uint64) (map[uint64]model.GbCascadeDeviceProjection, []model.GbCascadeChannelProjection, error) {
+	allDevices, err := validateDeviceProjections(projection, platformID)
+	if err != nil {
+		return nil, nil, err
+	}
+	channels, usedDevices, err := validateChannelProjections(projection, platformID, allDevices)
+	if err != nil {
+		return nil, nil, err
+	}
+	devices := make(map[uint64]model.GbCascadeDeviceProjection, len(usedDevices))
+	for id := range usedDevices {
+		devices[id] = allDevices[id]
+	}
+	return devices, channels, nil
+}
+
+// validateDeviceProjections 校验并收集激活设备投影
+func validateDeviceProjections(projection repository.ProjectionSnapshot, platformID uint64) (map[uint64]model.GbCascadeDeviceProjection, error) {
 	allDevices := make(map[uint64]model.GbCascadeDeviceProjection, len(projection.Devices))
 	sourceDevices := make(map[uint64]struct{}, len(projection.Devices))
 	for _, device := range projection.Devices {
 		if device.PlatformID != platformID {
-			return nil, nil, fmt.Errorf("%w: device platform", ErrInvalidProjection)
+			return nil, fmt.Errorf("%w: device platform", ErrInvalidProjection)
 		}
 		if device.ID == 0 || device.SourceDeviceID == 0 {
-			return nil, nil, fmt.Errorf("%w: device identity", ErrInvalidProjection)
+			return nil, fmt.Errorf("%w: device identity", ErrInvalidProjection)
 		}
-		if device.Active {
-			if err := validatePublishedID(device.PublishedDeviceID); err != nil {
-				return nil, nil, err
-			}
-			if _, exists := allDevices[device.ID]; exists {
-				return nil, nil, fmt.Errorf("%w: duplicate device projection", ErrInvalidProjection)
-			}
-			if _, exists := sourceDevices[device.SourceDeviceID]; exists {
-				return nil, nil, fmt.Errorf("%w: duplicate source device", ErrInvalidProjection)
-			}
-			allDevices[device.ID] = device
-			sourceDevices[device.SourceDeviceID] = struct{}{}
+		if !device.Active {
+			continue
 		}
+		if err := validatePublishedID(device.PublishedDeviceID); err != nil {
+			return nil, err
+		}
+		if _, exists := allDevices[device.ID]; exists {
+			return nil, fmt.Errorf("%w: duplicate device projection", ErrInvalidProjection)
+		}
+		if _, exists := sourceDevices[device.SourceDeviceID]; exists {
+			return nil, fmt.Errorf("%w: duplicate source device", ErrInvalidProjection)
+		}
+		allDevices[device.ID] = device
+		sourceDevices[device.SourceDeviceID] = struct{}{}
 	}
+	return allDevices, nil
+}
 
+// validateChannelProjections 校验并收集激活通道投影及被引用的设备
+func validateChannelProjections(projection repository.ProjectionSnapshot, platformID uint64, allDevices map[uint64]model.GbCascadeDeviceProjection) ([]model.GbCascadeChannelProjection, map[uint64]struct{}, error) {
 	channels := make([]model.GbCascadeChannelProjection, 0, len(projection.Channels))
 	usedDevices := make(map[uint64]struct{}, len(projection.Channels))
 	sourceChannels := make(map[uint64]struct{}, len(projection.Channels))
@@ -218,13 +255,8 @@ func authorizedResources(projection repository.ProjectionSnapshot, platformID ui
 		sourceChannels[channel.SourceChannelID] = struct{}{}
 		channels = append(channels, channel)
 	}
-
-	devices := make(map[uint64]model.GbCascadeDeviceProjection, len(usedDevices))
-	for id := range usedDevices {
-		devices[id] = allDevices[id]
-	}
 	sort.Slice(channels, func(i, j int) bool { return channels[i].PublishedChannelID < channels[j].PublishedChannelID })
-	return devices, channels, nil
+	return channels, usedDevices, nil
 }
 
 func deviceCatalogItem(device model.GbCascadeDeviceProjection, platformID string, publishPlatform bool, facts SourceFacts) CatalogItem {

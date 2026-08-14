@@ -20,6 +20,9 @@ var (
 	ErrInvalidPlatformConfig     = errors.New("invalid cascade platform config")
 	ErrCredentialUnavailable     = errors.New("cascade credential sealer unavailable")
 	ErrRuntimeUnavailable        = errors.New("cascade runtime unavailable")
+	// ErrRuntimeSyncFailed 配置已持久化但运行时同步失败:调用方应返回已提交
+	// 资源而非整体失败,客户端重试会产生唯一键冲突
+	ErrRuntimeSyncFailed = errors.New("cascade config persisted but runtime sync failed")
 	ErrPlatformDisabled          = errors.New("cascade platform disabled")
 	ErrPlatformHasActiveSessions = errors.New("cascade platform has active media sessions")
 )
@@ -30,7 +33,7 @@ type ManagementStore interface {
 	ListPlatforms(context.Context) ([]model.GbCascadePlatform, error)
 	UpdatePlatformConfig(context.Context, *model.GbCascadePlatform, uint64) (*model.GbCascadePlatform, error)
 	SoftDeletePlatform(context.Context, uint64) error
-	ReplaceProjection(context.Context, uint64, []repository.DeviceProjectionInput, []repository.ChannelProjectionInput) error
+	ReplaceProjection(context.Context, uint64, uint64, []repository.DeviceProjectionInput, []repository.ChannelProjectionInput) error
 	ProjectionSnapshot(context.Context, uint64) (*repository.ProjectionSnapshot, error)
 	ListNonterminalMediaSessions(context.Context, uint64) ([]model.GbCascadeMediaSession, error)
 }
@@ -147,7 +150,9 @@ func (s *ManagementService) Create(ctx context.Context, input PlatformConfigInpu
 	}
 	if platform.Enabled {
 		if err := s.runtime.Reload(ctx); err != nil {
-			return nil, err
+			// DB 已提交:返回已保存资源 + 降级错误,不谎报整体失败
+			view := s.view(*platform)
+			return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
 		}
 	}
 	view := s.view(*platform)
@@ -210,7 +215,8 @@ func (s *ManagementService) Update(ctx context.Context, id, expectedRevision uin
 	}
 	if stored.Enabled || result.Enabled {
 		if err := s.runtime.Reload(ctx); err != nil {
-			return nil, err
+			view := s.view(*result)
+			return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
 		}
 	}
 	view := s.view(*result)
@@ -231,7 +237,8 @@ func (s *ManagementService) SetEnabled(ctx context.Context, id, expectedRevision
 		return nil, err
 	}
 	if err := s.runtime.Reload(ctx); err != nil {
-		return nil, err
+		view := s.view(*updated)
+		return &view, fmt.Errorf("%w: %v", ErrRuntimeSyncFailed, err)
 	}
 	view := s.view(*updated)
 	return &view, nil
@@ -286,11 +293,11 @@ func (s *ManagementService) Delete(ctx context.Context, id uint64) error {
 	return nil
 }
 
-func (s *ManagementService) ReplaceProjection(ctx context.Context, platformID uint64, devices []repository.DeviceProjectionInput, channels []repository.ChannelProjectionInput) error {
+func (s *ManagementService) ReplaceProjection(ctx context.Context, platformID uint64, expectedProjectionRevision uint64, devices []repository.DeviceProjectionInput, channels []repository.ChannelProjectionInput) error {
 	if _, err := s.store.FindPlatform(ctx, platformID); err != nil {
 		return err
 	}
-	return s.store.ReplaceProjection(ctx, platformID, devices, channels)
+	return s.store.ReplaceProjection(ctx, platformID, expectedProjectionRevision, devices, channels)
 }
 
 func (s *ManagementService) Projection(ctx context.Context, platformID uint64) (*repository.ProjectionSnapshot, error) {

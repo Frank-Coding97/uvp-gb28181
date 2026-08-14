@@ -33,8 +33,10 @@ func (l *GormTargetLoader) Load(ctx context.Context, sourceDeviceID, sourceChann
 		if err := tx.First(&channel, sourceChannelID).Error; err != nil {
 			return err
 		}
-		if err := tx.First(&device, sourceDeviceID).Error; err != nil {
-			return err
+		if result := tx.Limit(1).Find(&device, sourceDeviceID); result.Error != nil {
+			return result.Error
+		} else if result.RowsAffected == 0 {
+			return ErrSourceTargetNotFound
 		}
 		if channel.DeviceID != device.DeviceID {
 			return ErrSourceTargetNotFound

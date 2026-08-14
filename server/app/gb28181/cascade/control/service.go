@@ -95,25 +95,51 @@ func (s *Service) Forward(ctx context.Context, request ForwardRequest) (ForwardR
 		return ForwardResult{}, ErrFeatureUnavailable
 	}
 
-	upstreamProfile := protocol.ProfileFor(protocol.Version(snapshot.Platform.EffectiveVersion))
-	control, err := manscdp.ParsePTZControlWithProfile(upstreamProfile, request.Body)
-	if err != nil {
-		if errors.Is(err, manscdp.ErrUnsupportedPTZInstruction) {
-			return ForwardResult{}, fmt.Errorf("%w: %v", ErrFeatureUnavailable, err)
-		}
-		return ForwardResult{}, fmt.Errorf("%w: %v", ErrInvalidControl, err)
-	}
-	channel, device, ok := resolveProjection(snapshot, control.DeviceID)
-	if !ok || !channel.PTZAllowed {
-		return ForwardResult{}, ErrControlUnauthorized
-	}
-	target, err := s.targets.Load(ctx, device.SourceDeviceID, channel.SourceChannelID)
+	control, _, _, target, err := s.resolveForwardTarget(ctx, snapshot, request)
 	if err != nil {
 		return ForwardResult{}, err
 	}
+	command := s.buildForwardCommand(request, callID, control, target)
+	operation, err := s.executor.Execute(ctx, target, command)
+	if err != nil {
+		return ForwardResult{}, err
+	}
+	result := resultFromOperation(operation)
+	result.Action = control.Command.Action
+	result.CallID = callID
+	result.UpstreamSN = control.SN
+	result.PublishedChannel = control.DeviceID
+	return result, nil
+}
+
+// resolveForwardTarget 解析上游 PTZ 指令并定位下游设备/通道与发送目标
+func (s *Service) resolveForwardTarget(ctx context.Context, snapshot *repository.ProjectionSnapshot, request ForwardRequest) (manscdp.PTZControl, model.GbCascadeChannelProjection, model.GbCascadeDeviceProjection, ptz.Target, error) {
+	var control manscdp.PTZControl
+	upstreamProfile := protocol.ProfileFor(protocol.Version(snapshot.Platform.EffectiveVersion))
+	parsed, err := manscdp.ParsePTZControlWithProfile(upstreamProfile, request.Body)
+	if err != nil {
+		if errors.Is(err, manscdp.ErrUnsupportedPTZInstruction) {
+			return control, model.GbCascadeChannelProjection{}, model.GbCascadeDeviceProjection{}, ptz.Target{}, fmt.Errorf("%w: %v", ErrFeatureUnavailable, err)
+		}
+		return control, model.GbCascadeChannelProjection{}, model.GbCascadeDeviceProjection{}, ptz.Target{}, fmt.Errorf("%w: %v", ErrInvalidControl, err)
+	}
+	control = parsed
+	channel, device, ok := resolveProjection(snapshot, control.DeviceID)
+	if !ok || !channel.PTZAllowed {
+		return control, channel, device, ptz.Target{}, ErrControlUnauthorized
+	}
+	target, err := s.targets.Load(ctx, device.SourceDeviceID, channel.SourceChannelID)
+	if err != nil {
+		return control, channel, device, ptz.Target{}, err
+	}
+	return control, channel, device, target, nil
+}
+
+// buildForwardCommand 把上游指令转成下游 PTZ 命令
+func (s *Service) buildForwardCommand(request ForwardRequest, callID string, control manscdp.PTZControl, target ptz.Target) ptz.Command {
 	raw := control.Command.Raw
 	profile := target.Profile
-	command := ptz.Command{
+	return ptz.Command{
 		CmdType:        manscdp.CmdDeviceControl,
 		Action:         "cascade_" + control.Command.Action,
 		IdempotencyKey: fmt.Sprintf("cascade:%d:%s:%d", request.PlatformID, callID, control.SN),
@@ -126,16 +152,6 @@ func (s *Service) Forward(ctx context.Context, request ForwardRequest) (ForwardR
 			return manscdp.BuildRawPTZControlWithProfile(profile, target.ChannelCode, sn, raw)
 		},
 	}
-	operation, err := s.executor.Execute(ctx, target, command)
-	if err != nil {
-		return ForwardResult{}, err
-	}
-	result := resultFromOperation(operation)
-	result.Action = control.Command.Action
-	result.CallID = callID
-	result.UpstreamSN = control.SN
-	result.PublishedChannel = control.DeviceID
-	return result, nil
 }
 
 func resolveProjection(snapshot *repository.ProjectionSnapshot, publishedChannelID string) (

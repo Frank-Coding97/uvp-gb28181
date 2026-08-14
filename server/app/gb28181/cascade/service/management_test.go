@@ -114,7 +114,7 @@ func TestManagementServiceProjectionOperationsStayPlatformScoped(t *testing.T) {
 
 	devices := []repository.DeviceProjectionInput{{SourceDeviceID: 1, PublishedDeviceID: "34020000001320000001"}}
 	channels := []repository.ChannelProjectionInput{{SourceDeviceID: 1, SourceChannelID: 2, PublishedChannelID: "34020000001320000011"}}
-	require.NoError(t, service.ReplaceProjection(context.Background(), a.ID, devices, channels))
+	require.NoError(t, service.ReplaceProjection(context.Background(), a.ID, 0, devices, channels))
 	snapshotA, err := service.Projection(context.Background(), a.ID)
 	require.NoError(t, err)
 	require.Len(t, snapshotA.Channels, 1)
@@ -122,7 +122,7 @@ func TestManagementServiceProjectionOperationsStayPlatformScoped(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, snapshotB.Channels)
 
-	err = service.ReplaceProjection(context.Background(), 999, devices, channels)
+	err = service.ReplaceProjection(context.Background(), 999, 0, devices, channels)
 	require.ErrorIs(t, err, repository.ErrPlatformNotFound)
 }
 
@@ -223,7 +223,7 @@ func (s *managementStoreFake) SoftDeletePlatform(_ context.Context, id uint64) e
 	return nil
 }
 
-func (s *managementStoreFake) ReplaceProjection(_ context.Context, platformID uint64, devices []repository.DeviceProjectionInput, channels []repository.ChannelProjectionInput) error {
+func (s *managementStoreFake) ReplaceProjection(_ context.Context, platformID uint64, _ uint64, devices []repository.DeviceProjectionInput, channels []repository.ChannelProjectionInput) error {
 	platform, ok := s.platforms[platformID]
 	if !ok {
 		return repository.ErrPlatformNotFound

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // rawEntry embed JSON 一条记录(对应 tools/convert_civil_code 输出格式)
@@ -20,18 +21,10 @@ type rawEntry struct {
 // SeedIfEmpty Q2 决议:启动期幂等 seed。
 //
 // 行为:
-//  1. 若 sys_civil_code 表已有记录(任意一条),直接返回(已 seed)
+//  1. 按完整性判定:表内行数达到数据集行数才算已 seed,部分导入会补插
 //  2. 解析 embed JSON,批量 INSERT(每 500 条一批)
-//  3. 跑两次不重复(幂等);单 Insert 用 OnConflict DoNothing 兜底
+//  3. 幂等 upsert:code 主键冲突直接忽略(多实例并发 seed 安全)
 func SeedIfEmpty(db *gorm.DB) (seeded int, err error) {
-	var existed int64
-	if err = db.Model(&SysCivilCode{}).Limit(1).Count(&existed).Error; err != nil {
-		return 0, fmt.Errorf("civilcode: count existing: %w", err)
-	}
-	if existed > 0 {
-		return 0, nil
-	}
-
 	var entries []rawEntry
 	if err = json.Unmarshal(rawCivilCodeJSON, &entries); err != nil {
 		return 0, fmt.Errorf("civilcode: parse embed json: %w", err)
@@ -54,9 +47,18 @@ func SeedIfEmpty(db *gorm.DB) (seeded int, err error) {
 		})
 	}
 
-	const batch = 500
-	if err = db.CreateInBatches(&rows, batch).Error; err != nil {
-		return 0, fmt.Errorf("civilcode: insert batches: %w", err)
+	var existed int64
+	if err = db.Model(&SysCivilCode{}).Count(&existed).Error; err != nil {
+		return 0, fmt.Errorf("civilcode: count existing: %w", err)
 	}
-	return len(rows), nil
+	if existed >= int64(len(rows)) {
+		return 0, nil
+	}
+
+	const batch = 500
+	result := db.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&rows, batch)
+	if result.Error != nil {
+		return 0, fmt.Errorf("civilcode: insert batches: %w", result.Error)
+	}
+	return int(result.RowsAffected), nil
 }
