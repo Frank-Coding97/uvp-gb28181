@@ -48,7 +48,13 @@ describe("GB28181 SIP trace API contract", () => {
             params: { sensitive: undefined, purpose: undefined }
         });
 
-        const sessionQuery = { from: messageQuery.from, to: messageQuery.to, anomaly: true, limit: 200 };
+        const sessionQuery = {
+            from: messageQuery.from,
+            to: messageQuery.to,
+            diagnosisCategory: "play_stuck" as const,
+            diagnosisCode: "media_timeout" as const,
+            limit: 200
+        };
         await listTraceSessions(sessionQuery);
         expect(request).toHaveBeenLastCalledWith("get", "/api/gb28181/sip-traces/sessions", { params: sessionQuery });
 

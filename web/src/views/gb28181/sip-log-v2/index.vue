@@ -20,11 +20,13 @@ import {
     type TraceHealth,
     type TraceMessageDetail,
     type TraceMessageSummary,
+    type TraceDiagnosisCode,
+    type TraceSessionQuery,
     type TraceSessionStats,
     type TraceSessionSummary
 } from "@/api/gb28181-trace";
 
-type FilterScope = "all" | "anomaly";
+type FilterScope = "all" | "anomaly" | "register_failure" | "play_stuck";
 type ViewMode = "table" | "terminal";
 
 const route = useRoute();
@@ -33,12 +35,15 @@ const filters = ref({
     range: [dayjs().subtract(15, "minute").format("YYYY-MM-DD HH:mm:ss"), dayjs().format("YYYY-MM-DD HH:mm:ss")] as string[],
     deviceIds: [] as string[],
     scope: "all" as FilterScope,
+    diagnosisCode: "" as TraceDiagnosisCode | "",
     keyword: ""
 });
 
 const sessions = ref<TraceSessionSummary[]>([]);
 const sessionLoading = ref(false);
-const stats = ref<TraceSessionStats>({ total: 0, anomaly: 0, registerFail: 0, invitePending: 0 });
+const stats = ref<TraceSessionStats | null>(null);
+const statsLoading = ref(false);
+const statsError = ref(false);
 const health = ref<TraceHealth>({ state: "disabled", queueDepth: 0, queueCapacity: 0, dropped: 0 });
 const devices = ref<DeviceVO[]>([]);
 const detailLoading = ref(false);
@@ -58,16 +63,45 @@ const drillSession = computed<TraceSessionSummary | null>(() => {
 // 详情面板显示条件:只有会话时序详情页需要
 const showDetailPanel = computed(() => !!drillCallId.value);
 
-function buildSessionQuery(): { from: string; to: string; deviceIds?: string; keyword?: string; anomaly?: boolean; limit: number } {
+function buildBaseSessionQuery(): TraceSessionQuery {
     return {
         from: dayjs(filters.value.range[0]).toISOString(),
         to: dayjs(filters.value.range[1]).toISOString(),
         deviceIds: filters.value.deviceIds.length ? filters.value.deviceIds.join(",") : undefined,
         keyword: filters.value.keyword.trim() || undefined,
-        anomaly: filters.value.scope === "anomaly" ? true : undefined,
         limit: 200
     };
 }
+
+function buildSessionQuery(): TraceSessionQuery {
+    return {
+        ...buildBaseSessionQuery(),
+        anomaly: filters.value.scope === "anomaly" ? true : undefined,
+        diagnosisCategory: filters.value.scope === "register_failure" || filters.value.scope === "play_stuck"
+            ? filters.value.scope
+            : undefined,
+        diagnosisCode: filters.value.diagnosisCode || undefined
+    };
+}
+
+const diagnosisCodeOptions = computed<Array<{ value: TraceDiagnosisCode; label: string }>>(() => {
+    if (filters.value.scope === "register_failure") {
+        return [
+            ["digest_failure", "摘要认证失败"], ["nonce_invalid", "Nonce 无效"],
+            ["nonce_expired", "Nonce 已过期"], ["nonce_replay", "Nonce 重放"],
+            ["server_id_mismatch", "平台 ID 不匹配"], ["device_not_preallocated", "设备未预分配"],
+            ["invalid_request", "注册请求无效"], ["internal_error", "平台内部错误"],
+            ["timeout", "注册超时"], ["undetermined", "待判断"]
+        ].map(([value, label]) => ({ value: value as TraceDiagnosisCode, label }));
+    }
+    if (filters.value.scope === "play_stuck") {
+        return [
+            { value: "signaling_timeout", label: "信令响应超时" },
+            { value: "media_timeout", label: "信令成功，媒体未就绪" }
+        ];
+    }
+    return [];
+});
 
 async function loadSessions() {
     sessionLoading.value = true;
@@ -86,15 +120,35 @@ async function loadSessions() {
 }
 
 async function loadStats() {
+    statsLoading.value = true;
+    statsError.value = false;
+    stats.value = null;
     try {
-        const response = await fetchTraceSessionStats(buildSessionQuery());
+        const response = await fetchTraceSessionStats(buildBaseSessionQuery());
         if (response.code === 0) {
-            stats.value = response.data || { total: 0, anomaly: 0, registerFail: 0, invitePending: 0 };
+            stats.value = response.data;
+        } else {
+            statsError.value = true;
         }
     } catch {
-        // 统计接口失败不阻断主流程
+        statsError.value = true;
+    } finally {
+        statsLoading.value = false;
     }
 }
+
+function statValue(field: keyof Pick<TraceSessionStats, "total" | "anomaly" | "registerFail" | "playStuck">): number | string {
+    if (statsLoading.value || statsError.value || !stats.value) return "--";
+    return stats.value[field];
+}
+
+const diagnosisIncomplete = computed(() =>
+    health.value.state === "degraded" ||
+    health.value.dropped > 0 ||
+    health.value.diagnosis?.state === "degraded" ||
+    (health.value.diagnosis?.dropped || 0) > 0 ||
+    (health.value.diagnosis?.failed || 0) > 0
+);
 
 async function loadHealth() {
     try {
@@ -199,6 +253,7 @@ async function refresh() {
 function resetFilters() {
     filters.value.deviceIds = [];
     filters.value.scope = "all";
+    filters.value.diagnosisCode = "";
     filters.value.keyword = "";
 }
 
@@ -208,7 +263,8 @@ function search() {
 
 function selectScope(scope: FilterScope) {
     filters.value.scope = scope;
-    return search();
+    filters.value.diagnosisCode = "";
+    return loadSessions();
 }
 
 // 进入详情页时加载报文
@@ -330,36 +386,41 @@ onBeforeUnmount(() => {
                 </div>
             </div>
 
+            <div v-if="diagnosisIncomplete" class="diagnosis-warning" role="status">
+                <AlertTriangle :size="14" aria-hidden="true" />
+                诊断数据可能不完整，原始 SIP 报文仍可查看
+            </div>
+
             <!-- 统计卡片(时序详情页时隐藏) -->
             <div v-if="!drillCallId" class="stat-band">
                 <button type="button" :class="['stat-card', { active: filters.scope === 'all' }]" @click="selectScope('all')">
                     <span class="stat-icon icon-total"><ListChecks :size="18" /></span>
                     <div class="stat-content">
-                        <span class="stat-num">{{ stats.total }}</span>
+                        <span :class="['stat-num', { error: statsError }]">{{ statValue('total') }}</span>
                         <span class="stat-label">全部会话</span>
                     </div>
                 </button>
                 <button type="button" :class="['stat-card', 'warning', { active: filters.scope === 'anomaly' }]" @click="selectScope('anomaly')">
                     <span class="stat-icon icon-anomaly"><AlertTriangle :size="18" /></span>
                     <div class="stat-content">
-                        <span class="stat-num warning">{{ stats.anomaly }}</span>
+                        <span :class="['stat-num', 'warning', { error: statsError }]">{{ statValue('anomaly') }}</span>
                         <span class="stat-label">异常会话</span>
                     </div>
                 </button>
-                <div class="stat-card readonly">
+                <button type="button" :class="['stat-card', 'danger', { active: filters.scope === 'register_failure' }]" @click="selectScope('register_failure')">
                     <span class="stat-icon icon-danger"><ShieldAlert :size="18" /></span>
                     <div class="stat-content">
-                        <span class="stat-num danger">{{ stats.registerFail }}</span>
+                        <span :class="['stat-num', 'danger', { error: statsError }]">{{ statValue('registerFail') }}</span>
                         <span class="stat-label">注册失败</span>
                     </div>
-                </div>
-                <div class="stat-card readonly">
+                </button>
+                <button type="button" :class="['stat-card', 'warning', { active: filters.scope === 'play_stuck' }]" @click="selectScope('play_stuck')">
                     <span class="stat-icon icon-pending"><Clock :size="18" /></span>
                     <div class="stat-content">
-                        <span class="stat-num warning">{{ stats.invitePending }}</span>
+                        <span :class="['stat-num', 'warning', { error: statsError }]">{{ statValue('playStuck') }}</span>
                         <span class="stat-label">点播卡住</span>
                     </div>
-                </div>
+                </button>
             </div>
 
             <!-- 筛选栏(时序详情页时隐藏)- 走系统 s-layout-search 封装 -->
@@ -393,6 +454,18 @@ onBeforeUnmount(() => {
                     >
                         <template #prefix><Search :size="14" /></template>
                     </a-input>
+                    <a-select
+                        v-if="diagnosisCodeOptions.length"
+                        v-model="filters.diagnosisCode"
+                        allow-clear
+                        placeholder="全部失败类型"
+                        style="width: 220px"
+                        @change="loadSessions"
+                    >
+                        <a-option v-for="item in diagnosisCodeOptions" :key="item.value" :value="item.value">
+                            {{ item.label }}
+                        </a-option>
+                    </a-select>
                 </template>
                 <template #actions>
                     <a-button type="primary" @click="search">
@@ -473,6 +546,18 @@ onBeforeUnmount(() => {
 .head-badge.health-degraded { color: #b45309; background: rgb(217 119 6 / 10%); }
 .head-badge.health-disabled { color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg); }
 .head-meta { color: var(--uvp-text-tertiary); font-size: 12px; }
+.diagnosis-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 30px;
+    padding: 0 10px;
+    color: #b45309;
+    background: rgb(217 119 6 / 8%);
+    border: 1px solid rgb(217 119 6 / 24%);
+    border-radius: 6px;
+    font-size: 12px;
+}
 
 /* 实时刷新开关 */
 .live-toggle {
@@ -566,15 +651,15 @@ onBeforeUnmount(() => {
     color: var(--uvp-text-secondary);
     background: var(--uvp-panel-bg);
     border: 1px solid var(--uvp-panel-border);
-    border-radius: 12px;
+    border-radius: 8px;
     text-align: left;
     cursor: pointer;
     transition: border-color 120ms, box-shadow 120ms, transform 120ms;
 }
-.stat-card:not(.readonly):hover { border-color: var(--uvp-brand); transform: translateY(-1px); }
+.stat-card:hover { border-color: var(--uvp-brand); transform: translateY(-1px); }
 .stat-card.active { border-color: var(--uvp-brand); box-shadow: inset 0 0 0 1px var(--uvp-brand); }
 .stat-card.warning.active { border-color: var(--uvp-warning); box-shadow: inset 0 0 0 1px var(--uvp-warning); }
-.stat-card.readonly { cursor: default; }
+.stat-card.danger.active { border-color: var(--uvp-danger); box-shadow: inset 0 0 0 1px var(--uvp-danger); }
 
 .stat-icon {
     display: inline-flex;
@@ -594,6 +679,7 @@ onBeforeUnmount(() => {
 .stat-num { color: var(--uvp-text-primary); font-size: 22px; font-weight: 600; line-height: 1.1; }
 .stat-num.danger { color: var(--uvp-danger); }
 .stat-num.warning { color: var(--uvp-warning); }
+.stat-num.error { color: var(--uvp-text-tertiary); }
 .stat-label { color: var(--uvp-text-tertiary); font-size: 12px; }
 
 /* s-layout-search 内嵌样式微调 */
@@ -629,5 +715,15 @@ onBeforeUnmount(() => {
 @media (max-width: 1200px) {
     .workspace.has-detail { grid-template-columns: 1fr; grid-template-rows: 1fr auto; }
     .stat-band { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 768px) {
+    .toolbar { align-items: flex-start; flex-wrap: wrap; }
+    .toolbar-left { flex-wrap: wrap; gap: 8px; }
+    .toolbar-right { width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+    .head-meta { flex-basis: 100%; }
+    .stat-band { gap: 8px; }
+    .stat-card { gap: 8px; padding: 10px; }
+    .stat-icon { width: 34px; height: 34px; border-radius: 6px; }
+    .stat-num { font-size: 19px; }
 }
 </style>

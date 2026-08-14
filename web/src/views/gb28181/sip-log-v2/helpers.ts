@@ -1,5 +1,9 @@
 import dayjs from "dayjs";
-import type { TraceMessageSummary as TraceMessage, TraceSessionSummary as TraceSession } from "@/api/gb28181-trace";
+import type {
+    TraceDiagnosisCode,
+    TraceMessageSummary as TraceMessage,
+    TraceSessionSummary as TraceSession
+} from "@/api/gb28181-trace";
 
 export function formatTime(value: string): string {
     return dayjs(value).format("HH:mm:ss.SSS");
@@ -59,19 +63,40 @@ export function methodChainTone(step: string): StatusTone {
 }
 
 export function sessionStateLabel(session: TraceSession): { label: string; tone: StatusTone } {
+    if (session.diagnosis) {
+        return {
+            label: diagnosisLabel(session.diagnosis.code),
+            tone: session.diagnosis.category === "register_failure" ? "danger" : "warning"
+        };
+    }
     const methods = session.methods || [];
     const hasInvite = methods.includes("INVITE");
     const hasRegister = methods.includes("REGISTER");
-    if (hasRegister && session.finalStatus === 401 && session.requestCount > session.finalResponseCount) {
-        return { label: "认证失败", tone: "danger" };
-    }
-    if (hasInvite && (session.finalStatus === 0 || session.finalStatus === 100 || session.finalStatus < 200)) {
-        return { label: "点播卡住", tone: "warning" };
-    }
+    if (hasRegister && session.finalStatus === 401) return { label: "认证挑战", tone: "info" };
+    if (hasInvite && session.finalStatus < 200) return { label: "进行中", tone: "info" };
     if (session.finalStatus >= 400) return { label: `异常 ${session.finalStatus}`, tone: "danger" };
     if (session.finalStatus >= 200 && session.finalStatus < 300) return { label: "完成", tone: "success" };
     if (session.finalStatus === 100) return { label: "进行中", tone: "info" };
     return { label: "未知", tone: "neutral" };
+}
+
+const DIAGNOSIS_LABELS: Record<TraceDiagnosisCode, string> = {
+    digest_failure: "摘要认证失败",
+    nonce_invalid: "Nonce 无效",
+    nonce_expired: "Nonce 已过期",
+    nonce_replay: "Nonce 重放",
+    server_id_mismatch: "平台 ID 不匹配",
+    device_not_preallocated: "设备未预分配",
+    invalid_request: "注册请求无效",
+    internal_error: "平台内部错误",
+    timeout: "注册超时",
+    undetermined: "注册失败（待判断）",
+    signaling_timeout: "信令响应超时",
+    media_timeout: "信令成功，媒体未就绪"
+};
+
+export function diagnosisLabel(code: TraceDiagnosisCode): string {
+    return DIAGNOSIS_LABELS[code] || code;
 }
 
 function splitHeaderBody(payload: string): { header: string; body: string } {

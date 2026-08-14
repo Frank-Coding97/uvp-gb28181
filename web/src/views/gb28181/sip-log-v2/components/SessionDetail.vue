@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ArrowLeft, Copy } from "lucide-vue-next";
+import { AlertTriangle, ArrowLeft, Copy } from "lucide-vue-next";
 import { Message } from "@arco-design/web-vue";
-import type { TraceMessageSummary as TraceMessage, TraceSessionSummary as TraceSession } from "@/api/gb28181-trace";
-import { formatDuration, formatFullTime, methodLabel, sessionStateLabel, statusTone } from "../helpers";
+import type {
+    TraceMessageSummary as TraceMessage,
+    TraceSessionDiagnosis,
+    TraceSessionSummary as TraceSession
+} from "@/api/gb28181-trace";
+import { diagnosisLabel, formatDuration, formatFullTime, methodLabel, sessionStateLabel, statusTone } from "../helpers";
 
 const props = defineProps<{
     session: TraceSession;
@@ -67,14 +71,15 @@ function splitAddr(addr: string): { ip: string; port: string } {
 
 // 后端 SessionSummary 没有 scenario 字段,前端根据 methods + finalStatus 推断
 function deriveScenario(session: TraceSession): string {
+    if (session.diagnosis?.category === "register_failure") return "register-fail";
+    if (session.diagnosis?.category === "play_stuck") return "invite-stuck";
     const methods = session.methods || [];
     const hasInvite = methods.includes("INVITE");
     const hasRegister = methods.includes("REGISTER");
     const hasSubscribe = methods.includes("SUBSCRIBE");
-    if (hasInvite && session.finalStatus < 200) return "invite-pending";
-    if (hasInvite) return "invite-ok";
-    if (hasRegister && session.finalStatus === 401) return "register-fail";
-    if (hasRegister) return "register-ok";
+    if (hasInvite) return "invite";
+    if (hasRegister && session.finalStatus === 401) return "register-challenge";
+    if (hasRegister) return "register";
     if (hasSubscribe) return "subscribe";
     return "keepalive";
 }
@@ -91,14 +96,19 @@ function scenarioEmoji(session: TraceSession): string {
 function scenarioLabel(session: TraceSession): string {
     const scenario = deriveScenario(session);
     const map: Record<string, string> = {
-        "register-ok": "设备注册",
+        "register": "设备注册",
+        "register-challenge": "设备注册",
         "register-fail": "注册失败",
-        "invite-ok": "点播会话",
-        "invite-pending": "点播请求",
+        "invite": "点播会话",
+        "invite-stuck": "点播卡住",
         "keepalive": "心跳保持",
         "subscribe": "目录订阅"
     };
     return map[scenario] || "SIP 会话";
+}
+
+function diagnosisStageLabel(stage: TraceSessionDiagnosis["stage"]): string {
+    return ({ register: "注册", signaling: "信令", ack: "ACK", media: "媒体" } as Record<string, string>)[String(stage)] || String(stage);
 }
 
 function computeDuration(session: TraceSession): number {
@@ -135,6 +145,15 @@ async function copyCallId() {
                 <Copy :size="13" />
                 复制 Call-ID
             </button>
+        </div>
+
+        <div v-if="session.diagnosis" class="diagnosis-summary">
+            <AlertTriangle :size="16" aria-hidden="true" />
+            <strong>{{ diagnosisLabel(session.diagnosis.code) }}</strong>
+            <span>{{ diagnosisStageLabel(session.diagnosis.stage) }}阶段</span>
+            <span>{{ formatFullTime(session.diagnosis.observedAt) }}</span>
+            <span>{{ session.diagnosis.source === 'runtime' ? '实时判定' : '历史证据保守回算' }}</span>
+            <span v-if="session.diagnosis.cseq" class="mono">CSeq {{ session.diagnosis.cseq }}</span>
         </div>
 
         <!-- 元信息横条 -->
@@ -310,6 +329,19 @@ async function copyCallId() {
 .meta-key { color: var(--uvp-text-tertiary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
 .meta-val { color: var(--uvp-text-primary); font-size: 12px; word-break: break-all; }
 .call-id-val { color: var(--uvp-brand); font-weight: 500; }
+.diagnosis-summary {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 36px;
+    padding: 0 16px;
+    color: var(--uvp-warning);
+    background: var(--uvp-warning-soft);
+    border-bottom: 1px solid color-mix(in srgb, var(--uvp-warning) 24%, var(--uvp-panel-border));
+    font-size: 12px;
+    flex-wrap: wrap;
+}
+.diagnosis-summary strong { color: var(--uvp-text-primary); }
 
 /* ============ sngrep 时序图核心 ============ */
 .ladder-wrap {

@@ -5,6 +5,30 @@ import type { BaseResult } from "./types";
 
 export type TraceHealthState = "disabled" | "degraded" | "ready";
 export type TraceDirection = "inbound" | "outbound";
+export type TraceDiagnosisCategory = "register_failure" | "play_stuck";
+export type TraceDiagnosisCode =
+    | "digest_failure"
+    | "nonce_invalid"
+    | "nonce_expired"
+    | "nonce_replay"
+    | "server_id_mismatch"
+    | "device_not_preallocated"
+    | "invalid_request"
+    | "internal_error"
+    | "timeout"
+    | "undetermined"
+    | "signaling_timeout"
+    | "media_timeout";
+
+export interface TraceDiagnosisHealth {
+    state: TraceHealthState;
+    queueDepth: number;
+    queueCapacity: number;
+    dropped: number;
+    failed: number;
+    lastError?: string;
+    lastSuccessAt?: string;
+}
 
 export interface TraceHealth {
     state: TraceHealthState;
@@ -15,6 +39,7 @@ export interface TraceHealth {
     lastSuccessAt?: string;
     currentGap?: TraceGap;
     lastGap?: TraceGap;
+    diagnosis?: TraceDiagnosisHealth;
 }
 
 export interface TraceGap {
@@ -92,12 +117,30 @@ export interface TraceSessionSummary {
     originalExpiresAt: string;
     missingResponse: boolean;
     anomaly: boolean;
+    diagnosis?: TraceSessionDiagnosis;
+}
+
+export interface TraceSessionDiagnosis {
+    observedAt: string;
+    correlationKey?: string;
+    category: TraceDiagnosisCategory;
+    code: TraceDiagnosisCode;
+    stage: "register" | "signaling" | "ack" | "media";
+    source: "runtime" | "reconstructed";
+    deviceId?: string;
+    channelId?: string;
+    callId?: string;
+    cseq?: number;
+    method?: string;
+    statusCode?: number;
+    streamId?: string;
 }
 
 export interface TraceSessionStats {
     total: number;
     anomaly: number;
     registerFail: number;
+    playStuck: number;
     invitePending: number;
 }
 
@@ -109,6 +152,8 @@ export interface TraceSessionQuery {
     callId?: string;
     keyword?: string;
     anomaly?: boolean;
+    diagnosisCategory?: TraceDiagnosisCategory;
+    diagnosisCode?: TraceDiagnosisCode;
     limit?: number;
 }
 
