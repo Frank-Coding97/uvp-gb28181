@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -26,6 +28,10 @@ var (
 
 	// ErrSIPNotConfigured 平台 SIP 尚未配置,不该生成接入码
 	ErrSIPNotConfigured = errors.New("qr: sip not configured")
+
+	// ErrTooManyAttempts 兑换尝试超出速率上限.
+	// 兑换端点免鉴权且每次尝试都要打共享缓存,必须挡住无差别轰炸
+	ErrTooManyAttempts = errors.New("qr: too many attempts")
 )
 
 const (
@@ -40,6 +46,12 @@ const (
 	qrCacheKeyPrefix = "uvp-gb28181:qr:token:"
 	// defaultTransport SIP 传输协议缺省值
 	defaultTransport = "udp"
+	// qrExchangeRate 兑换端点全局速率上限(次/秒).
+	// 兑换的正常频率是"管理员生成码→设备立刻扫",每秒 5 次已留足余量;
+	// 每个合法格式的随机 token 都会打一次共享缓存,必须挡住轰炸
+	qrExchangeRate = 5
+	// qrExchangeBurst 允许的瞬时突发量,覆盖一台设备连扫重试的场景
+	qrExchangeBurst = 10
 )
 
 // QRPayload 二维码兑换后下发给设备的 SIP 接入六元组.
@@ -68,6 +80,9 @@ type QRService struct {
 	transportFn     func() []string
 	networkProvider InterfaceProvider
 	ttl             time.Duration
+	// limiter 兑换速率上限 —— 兑换端点免鉴权且每次尝试都要打共享缓存,
+	// 无差别轰炸会压满 Redis 与 HTTP worker
+	limiter *rate.Limiter
 }
 
 // NewQRService 构造 QRService.
@@ -79,6 +94,7 @@ func NewQRService(cache app.CacheInterf, config *SIPConfigService, transportFn f
 		config:      config,
 		transportFn: transportFn,
 		ttl:         qrTokenTTL,
+		limiter:     rate.NewLimiter(rate.Limit(qrExchangeRate), qrExchangeBurst),
 	}
 }
 
@@ -136,6 +152,12 @@ func (s *QRService) Exchange(ctx context.Context, token string) (*QRPayload, err
 	if !isWellFormedQRToken(token) {
 		// 格式就不对,不必查缓存 —— 也顺带挡掉大部分乱扫的二维码
 		return nil, ErrTokenMalformed
+	}
+
+	// 限流放在 GetDel 之前:格式合法但随机的 token 是真正的轰炸面,
+	// 每个都会打一次共享缓存
+	if !s.limiter.Allow() {
+		return nil, ErrTooManyAttempts
 	}
 
 	raw, err := s.cache.GetDel(ctx, qrCacheKey(token))

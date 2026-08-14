@@ -99,6 +99,8 @@ func (qc *QRController) Exchange(c *gin.Context) {
 		switch {
 		case errors.Is(err, gbsetup.ErrTokenMalformed):
 			qc.Fail(c, "二维码内容已损坏", err)
+		case errors.Is(err, gbsetup.ErrTooManyAttempts):
+			qc.Fail(c, "尝试过于频繁,请稍后再试", err, http.StatusTooManyRequests)
 		case errors.Is(err, gbsetup.ErrTokenInvalid):
 			// 过期与已消费刻意不区分 —— 用户处置动作相同(回平台重新生成),
 			// 区分反而泄露 token 是否曾有效

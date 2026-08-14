@@ -10,6 +10,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 )
@@ -249,4 +250,29 @@ func TestQRExchange_Expired(t *testing.T) {
 
 	_, err = svc.Exchange(ctx, token)
 	require.ErrorIs(t, err, ErrTokenInvalid)
+}
+
+// 1.14 兑换限流:burst 耗尽后返回 ErrTooManyAttempts,不查缓存
+func TestQRExchange_RateLimited(t *testing.T) {
+	db := newQRTestDB(t)
+	seedSIPConfig(t, db, "Str0ng!Passw0rd#2026")
+	svc := newQRService(t, db, []string{"udp"})
+	svc.limiter = rate.NewLimiter(rate.Limit(1), 2) // burst=2
+
+	ctx := context.Background()
+	token, _, err := svc.GenerateToken(ctx)
+	require.NoError(t, err)
+
+	// burst 内:第 1 次真实兑换成功
+	payload, err := svc.Exchange(ctx, token)
+	require.NoError(t, err)
+	require.Equal(t, "Str0ng!Passw0rd#2026", payload.Password)
+
+	// 第 2 次:token 已消费 → ErrTokenInvalid(仍消耗配额)
+	_, err = svc.Exchange(ctx, token)
+	require.ErrorIs(t, err, ErrTokenInvalid)
+
+	// 第 3 次:burst 耗尽 → ErrTooManyAttempts
+	_, err = svc.Exchange(ctx, token)
+	require.ErrorIs(t, err, ErrTooManyAttempts)
 }
