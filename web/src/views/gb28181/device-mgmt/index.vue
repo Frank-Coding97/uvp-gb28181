@@ -17,7 +17,7 @@ import {
     Layers,
     List,
     Loader2,
-    Map as MapIcon,
+    MapPinned as MapIcon,
     MoreHorizontal,
     Play,
     Pencil,
@@ -43,7 +43,6 @@ import {
     getChannel,
     getChannelTimeline,
     getDevice,
-    getNoCoordCount,
     listChannelMounts,
     listChannels,
     listDevices,
@@ -167,7 +166,6 @@ const pageSize = computed({
     }
 });
 const total = ref(0);
-const noCoordCount = ref(0);
 const selectedRowKeys = ref<number[]>([]);
 const mapZoom = ref(10);
 const mapMinZoom = 5;
@@ -185,6 +183,10 @@ const mapStyleUrls = {
 };
 const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
+const deviceTotal = computed(() => onlineDeviceTotal.value + offlineDeviceTotal.value);
+const deviceOnlineRatePercent = computed(() =>
+    deviceTotal.value === 0 ? 0 : Math.round((onlineDeviceTotal.value / deviceTotal.value) * 100)
+);
 const autoRefresh = ref(initialAutoRefresh());
 const refreshInterval = ref<number | null>(null);
 const isMacPlatform = computed(() => typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform));
@@ -741,14 +743,12 @@ async function loadMapData() {
             ...directoryQuery(directoryState.value),
             status: statusFilter.value
         };
-        const [markerRes, clusterRes, noCoordRes] = await Promise.all([
+        const [markerRes, clusterRes] = await Promise.all([
             listMapMarkers({ ...query, limit: 800 }),
-            listMapClusters({ ...query, zoom: mapZoom.value }),
-            getNoCoordCount(query)
+            listMapClusters({ ...query, zoom: mapZoom.value })
         ]);
         if (markerRes.code === 0) markers.value = markerRes.data?.list || [];
         if (clusterRes.code === 0) clusters.value = clusterRes.data?.clusters || [];
-        if (noCoordRes.code === 0) noCoordCount.value = noCoordRes.data?.count || 0;
         total.value = markerRes.data?.total || 0;
         renderMapOverlays();
         if (mapAutoFitPending && markers.value.length) {
@@ -1564,8 +1564,15 @@ onUnmounted(() => {
                     <template #fields>
                         <div class="workspace-toolbar-row">
                             <div class="device-stats">
-                                <span class="stat online">在线 {{ onlineDeviceTotal }}</span>
-                                <span class="stat offline">离线 {{ offlineDeviceTotal }}</span>
+                                <div class="stat-ring">
+                                    <div class="stat-ring__donut" :style="{ background: `conic-gradient(from -90deg, var(--uvp-brand-cyan) 0 ${deviceOnlineRatePercent}%, var(--uvp-danger) ${deviceOnlineRatePercent}% 100%)` }">
+                                        <span class="stat-ring__value">{{ deviceOnlineRatePercent }}%</span>
+                                    </div>
+                                    <div class="stat-ring__legend">
+                                        <span class="stat-ring__item"><span class="stat-ring__dot online"></span>在线 {{ onlineDeviceTotal }}</span>
+                                        <span class="stat-ring__item"><span class="stat-ring__dot offline"></span>离线 {{ offlineDeviceTotal }}</span>
+                                    </div>
+                                </div>
                             </div>
                             <div class="toolbar-actions">
                                 <div v-if="viewMode !== 'map'" class="segmented">
@@ -1585,9 +1592,6 @@ onUnmounted(() => {
                                     >
                                         <component :is="item.icon" :size="14" />
                                     </button>
-                                </div>
-                                <div v-if="viewMode === 'map' && noCoordCount" class="map-banner toolbar-map-banner">
-                                    <Info :size="14" /> 有 {{ noCoordCount }} 路通道缺少坐标，暂未显示在地图中。
                                 </div>
                                 <div class="cmdk">
                                     <Search :size="14" />
@@ -2744,22 +2748,71 @@ onUnmounted(() => {
     gap: 8px;
     flex: 0 0 auto;
 }
-.device-stats .stat {
+.stat-ring {
     display: inline-flex;
     align-items: center;
-    height: 30px;
-    padding: 0 10px;
-    border-radius: 10px;
+    gap: 12px;
+}
+.stat-ring__donut {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+}
+.stat-ring__donut::after {
+    content: "";
+    position: absolute;
+    inset: 7px;
+    border-radius: 50%;
+    background: var(--uvp-panel-bg);
+}
+.stat-ring__value {
+    position: relative;
+    z-index: 1;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--uvp-text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    line-height: 1;
+}
+.stat-ring__legend {
+    display: grid;
+    gap: 3px;
+}
+.stat-ring__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 13px;
     font-weight: 620;
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
+    color: var(--uvp-text-secondary);
 }
-.device-stats .online {
-    color: var(--uvp-brand-cyan);
+.stat-ring__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
 }
-.device-stats .offline {
-    color: var(--uvp-text-tertiary);
+.stat-ring__dot.online {
+    background: var(--uvp-brand-cyan);
+    animation: stat-ring-pulse 1.6s ease-out infinite;
+}
+.stat-ring__dot.offline {
+    background: var(--uvp-danger);
+    animation: stat-ring-pulse-danger 1.6s ease-out infinite;
+}
+@keyframes stat-ring-pulse {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--uvp-brand-cyan) 45%, transparent); }
+    70%, 100% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--uvp-brand-cyan) 0%, transparent); }
+}
+@keyframes stat-ring-pulse-danger {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--uvp-danger) 45%, transparent); }
+    70%, 100% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--uvp-danger) 0%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .stat-ring__dot.online,
+    .stat-ring__dot.offline { animation: none; }
 }
 .workspace-toolbar-row {
     display: flex;
@@ -3820,26 +3873,6 @@ onUnmounted(() => {
     .channel-card-status::after { animation: none; }
 }
 .map-view { display: flex; flex-direction: column; gap: 10px; }
-.map-banner {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 10px;
-    color: var(--uvp-warning);
-    background: var(--uvp-warning-soft);
-    border: 1px solid var(--uvp-warning-border);
-    border-radius: 10px;
-}
-.toolbar-map-banner {
-    flex: 1 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    padding: 0 10px;
-    height: 36px;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-}
-.toolbar-map-banner svg { flex: 0 0 auto; }
 .map-toolbar {
     display: flex;
     align-items: center;
@@ -3847,13 +3880,9 @@ onUnmounted(() => {
     gap: 8px;
     color: var(--uvp-text-tertiary);
 }
-@media (max-width: 960px) {
-    .toolbar-map-banner {
-        max-width: 42%;
-    }
-}
 .map-canvas {
     position: relative;
+    flex: 1 1 auto;
     min-height: 460px;
     overflow: hidden;
     border: 1px solid var(--uvp-panel-border);

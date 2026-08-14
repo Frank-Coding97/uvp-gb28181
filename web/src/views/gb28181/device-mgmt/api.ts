@@ -433,9 +433,6 @@ export const listMapClusters = (params: MapQuery & { zoom: number }) =>
         { params }
     );
 
-export const getNoCoordCount = (params: Pick<MapQuery, "q" | "nodeId" | "status" | "directoryView" | "directoryKey"> = {}) =>
-    http.request<BaseResult<{ count: number }>>("get", baseUrlApi("gb28181/device-mgmt/map/no-coord-count"), { params });
-
 export const listAnomalies = (params: { resolved?: "0" | "1"; page?: number; pageSize?: number }) =>
     http.request<BaseResult<PageResult<AnomalyRecord>>>("get", baseUrlApi("gb28181/device-mgmt/anomaly"), {
         params
