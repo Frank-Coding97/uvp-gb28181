@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  alarmPriorityTagColor,
   alarmTypeOptionsForMethod,
   displayAlarmEntityName,
   mayDeleteAlarms,
@@ -78,5 +79,21 @@ describe("alarm display fallback", () => {
     expect(displayAlarmEntityName({ alias: "", name: "通道一", code: "C1" })).toBe("通道一");
     expect(displayAlarmEntityName({ alias: "", name: "", code: "C1" })).toBe("C1");
     expect(displayAlarmEntityName(null, "未知来源")).toBe("未知来源");
+  });
+});
+
+describe("alarm priority colors", () => {
+  it("maps the four alarm levels to distinct colors", () => {
+    expect(alarmPriorityTagColor({ value: 1 })).toBe("red");
+    expect(alarmPriorityTagColor({ value: 2 })).toBe("orange");
+    expect(alarmPriorityTagColor({ value: 3 })).toBe("gold");
+    expect(alarmPriorityTagColor({ value: 4 })).toBe("arcoblue");
+  });
+
+  it("falls back to gray for unknown or missing levels", () => {
+    expect(alarmPriorityTagColor({ value: null })).toBe("gray");
+    expect(alarmPriorityTagColor({ value: 99 })).toBe("gray");
+    expect(alarmPriorityTagColor(null)).toBe("gray");
+    expect(alarmPriorityTagColor(undefined)).toBe("gray");
   });
 });

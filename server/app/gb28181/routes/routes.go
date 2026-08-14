@@ -471,6 +471,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			alarms.GET("", alarmController.List)
 			alarms.POST("/batch-delete", alarmController.BatchDelete)
+			alarms.POST("/clear-all", alarmController.ClearAll)
 			alarms.GET("/:id", alarmController.Detail)
 			alarms.DELETE("/:id", alarmController.Delete)
 		}

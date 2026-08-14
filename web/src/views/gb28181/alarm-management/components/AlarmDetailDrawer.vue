@@ -47,7 +47,7 @@
             <a-descriptions :column="descriptionColumns" bordered size="medium">
               <a-descriptions-item label="平台接收时间">{{ formatDateTime(detail.receivedAt) }}</a-descriptions-item>
               <a-descriptions-item label="设备告警时间">{{ formatDateTime(detail.alarmTime) }}</a-descriptions-item>
-              <a-descriptions-item label="告警级别"><a-tag>{{ detail.priority.label }}</a-tag></a-descriptions-item>
+              <a-descriptions-item label="告警级别"><a-tag :color="alarmPriorityTagColor(detail.priority)">{{ detail.priority.label }}</a-tag></a-descriptions-item>
               <a-descriptions-item label="告警方法">{{ detail.method.label }}</a-descriptions-item>
               <a-descriptions-item label="告警类型">{{ detail.alarmType.label }}</a-descriptions-item>
               <a-descriptions-item label="类型原始值">{{ rawEnumValue(detail.alarmType.value) }}</a-descriptions-item>
@@ -85,7 +85,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { BellRing, LoaderCircle, Trash2 } from "@lucide/vue";
-import { displayAlarmEntityName } from "../alarmState";
+import { alarmPriorityTagColor, displayAlarmEntityName } from "../alarmState";
 import { getAlarmDetail, type AlarmDetail } from "../api";
 
 const props = defineProps<{

@@ -156,6 +156,7 @@ func newAlarmHTTPFixture(t *testing.T, scoped bool) *alarmHTTPFixture {
 	router.GET("/api/gb28181/alarms/:id", controller.Detail)
 	router.DELETE("/api/gb28181/alarms/:id", controller.Delete)
 	router.POST("/api/gb28181/alarms/batch-delete", controller.BatchDelete)
+	router.POST("/api/gb28181/alarms/clear-all", controller.ClearAll)
 	return &alarmHTTPFixture{router: router, db: db, deviceA: deviceA, deviceB: deviceB, channelA: channelA, alarmOld: alarmOld, alarmNew: alarmNew, alarmOther: alarmOther}
 }
 
@@ -305,6 +306,20 @@ func TestAlarmSingleDeleteUnauthorizedMatchesMissing(t *testing.T) {
 		require.Equal(t, "ALARM_NOT_FOUND", response["data"].(map[string]any)["errorCode"])
 	}
 	require.EqualValues(t, 3, countAlarmRows(t, fixture.db))
+}
+
+func TestAlarmClearAllDeletesOnlyScopedRows(t *testing.T) {
+	fixture := newAlarmHTTPFixture(t, true)
+	w := alarmJSONRequest(t, fixture.router, http.MethodPost, "/api/gb28181/alarms/clear-all", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.EqualValues(t, 2, response["data"].(map[string]any)["deletedCount"])
+	require.EqualValues(t, 1, countAlarmRows(t, fixture.db), "外部门告警必须保留")
+
+	var remaining gbmodels.GbAlarmEvent
+	require.NoError(t, fixture.db.First(&remaining, fixture.alarmOther.ID).Error)
+	require.Equal(t, fixture.alarmOther.ID, remaining.ID)
 }
 
 func alarmRequest(t *testing.T, router *gin.Engine, method, path string) map[string]any {

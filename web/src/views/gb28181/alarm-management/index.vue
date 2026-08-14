@@ -48,8 +48,23 @@
               <template #icon><RotateCcw :size="15" /></template>
               重置
             </a-button>
+            <a-button v-if="canDelete" data-testid="alarm-clear-all" class="alarm-clear-all-btn" type="primary" status="warning" :loading="clearDeleting" :disabled="clearDeleting" @click="requestClearAll">
+              <template #icon><Eraser :size="15" /></template>
+              一键清理
+            </a-button>
           </template>
         </s-layout-search>
+
+        <div v-if="canDelete && selectedRowKeys.length" class="alarm-batch-bar">
+          <span class="alarm-batch-bar__info">已选 <strong>{{ selectedRowKeys.length }}</strong> 条</span>
+          <div class="alarm-batch-bar__ops">
+            <a-button data-testid="batch-delete" status="danger" :loading="batchDeleting" :disabled="batchDeleting" @click="requestBatchDelete">
+              <template #icon><Trash2 :size="14" /></template>
+              批量删除
+            </a-button>
+            <a-button data-testid="batch-cancel" @click="selectedRowKeys = []">取消选择</a-button>
+          </div>
+        </div>
 
         <a-alert v-if="errorMessage && !loading" class="alarm-state" type="error" closable @close="errorMessage = ''">
           {{ errorMessage }}
@@ -61,6 +76,8 @@
             data-testid="alarm-table"
             row-key="id"
             :data="alarms"
+            v-model:selected-keys="selectedRowKeys"
+            :row-selection="rowSelection"
             :bordered="false"
             :loading="loading"
             :pagination="pagination"
@@ -92,7 +109,7 @@
               </template>
             </a-table-column>
             <a-table-column title="级别" :width="112">
-              <template #cell="{ record }"><a-tag>{{ enumText(record.priority) }}</a-tag></template>
+              <template #cell="{ record }"><a-tag :color="alarmPriorityTagColor(record.priority)">{{ enumText(record.priority) }}</a-tag></template>
             </a-table-column>
             <a-table-column title="方法" :width="132">
               <template #cell="{ record }">{{ enumText(record.method) }}</template>
@@ -103,7 +120,7 @@
             <a-table-column title="告警描述" :width="260" :ellipsis="true" :tooltip="true">
               <template #cell="{ record }">{{ record.description || "—" }}</template>
             </a-table-column>
-            <a-table-column title="操作" :width="104" align="center" :fixed="isMobile ? '' : 'right'">
+            <a-table-column title="操作" :width="172" align="center" :fixed="isMobile ? '' : 'right'">
               <template #cell="{ record }">
                 <div class="uvp-table-actions">
                   <a-link
@@ -114,20 +131,21 @@
                     @keydown.enter.prevent="openDetail(record.id)"
                     @keydown.space.prevent="openDetail(record.id)"
                   >
-                    详情
+                    <template #icon><Eye :size="13" /></template>
+                    <span>详情</span>
                   </a-link>
                   <a-tooltip v-if="canDelete" content="物理删除告警，不可恢复">
-                    <a-button
+                    <a-link
+                      class="uvp-table-action uvp-table-action--delete"
                       :data-testid="`single-delete-${record.id}`"
-                      type="text"
-                      status="danger"
                       :loading="deletingIds.has(record.id)"
                       :disabled="deletingIds.has(record.id)"
                       :aria-label="`物理删除告警 ${record.id}`"
                       @click="requestSingleDelete(record)"
                     >
-                      <template #icon><Trash2 :size="14" /></template>
-                    </a-button>
+                      <template #icon><Trash2 :size="13" /></template>
+                      <span>删除</span>
+                    </a-link>
                   </a-tooltip>
                 </div>
               </template>
@@ -153,13 +171,14 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from "vue";
-import { RotateCcw, Search, Trash2 } from "@lucide/vue";
+import { Eraser, Eye, RotateCcw, Search, Trash2 } from "@lucide/vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
 import AlarmDetailDrawer from "./components/AlarmDetailDrawer.vue";
 import {
+  alarmPriorityTagColor,
   alarmTypeOptionsForMethod,
   displayAlarmEntityName,
   mayDeleteAlarms,
@@ -167,7 +186,7 @@ import {
   normalizeAlarmQuery,
   pageAfterAlarmDeletion
 } from "./alarmState";
-import { deleteAlarm, listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
+import { batchDeleteAlarms, clearAllAlarms, deleteAlarm, listAlarms, type AlarmEnumValue, type AlarmListItem, type AlarmQuery } from "./api";
 
 const { isMobile } = useDevicesSize();
 const proxy = useGlobalProperties();
@@ -188,9 +207,15 @@ const errorMessage = ref("");
 const detailVisible = ref(false);
 const detailAlarmId = ref<string | null>(null);
 const deletingIds = ref(new Set<string>());
+const selectedRowKeys = ref<string[]>([]);
+const batchDeleting = ref(false);
+const clearDeleting = ref(false);
+const rowSelection = computed(() =>
+  canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined
+);
 const pagination = reactive({
   current: 1,
-  pageSize: 20,
+  pageSize: 10,
   total: 0,
   showTotal: true,
   showJumper: true,
@@ -259,6 +284,7 @@ async function loadAlarms() {
 
 function query() {
   pagination.current = 1;
+  selectedRowKeys.value = [];
   loadAlarms();
 }
 
@@ -271,6 +297,7 @@ function reset() {
     keyword: ""
   });
   pagination.current = 1;
+  selectedRowKeys.value = [];
   loadAlarms();
 }
 
@@ -317,6 +344,69 @@ async function performSingleDelete(id: string) {
   }
 }
 
+function requestBatchDelete() {
+  if (!canDelete.value || !selectedRowKeys.value.length || batchDeleting.value) return;
+  Modal.warning({
+    title: "批量删除告警",
+    content: `将物理删除选中的 ${selectedRowKeys.value.length} 条告警记录，删除后不可恢复。`,
+    okText: "删除",
+    cancelText: "取消",
+    hideCancel: false,
+    escToClose: true,
+    okButtonProps: { status: "danger" },
+    onOk: () => performBatchDelete()
+  });
+}
+
+async function performBatchDelete() {
+  if (batchDeleting.value) return;
+  batchDeleting.value = true;
+  const ids = [...selectedRowKeys.value];
+  try {
+    const response = await batchDeleteAlarms(ids);
+    const deletedCount = response.data.deletedCount || ids.length;
+    pagination.current = pageAfterAlarmDeletion(pagination.current, pagination.pageSize, pagination.total, deletedCount);
+    proxy.$message.success(`已物理删除 ${deletedCount} 条告警`);
+    selectedRowKeys.value = [];
+    await loadAlarms();
+  } catch (error) {
+    proxy.$message.error(errorMessageOf(error, "批量删除告警失败，请刷新后重试"));
+  } finally {
+    batchDeleting.value = false;
+  }
+}
+
+function requestClearAll() {
+  if (!canDelete.value || clearDeleting.value) return;
+  Modal.warning({
+    title: "一键清理告警",
+    content: "将清除您数据权限范围内的所有告警记录，删除后不可恢复。",
+    okText: "清空",
+    cancelText: "取消",
+    hideCancel: false,
+    escToClose: true,
+    okButtonProps: { status: "danger" },
+    onOk: () => performClearAll()
+  });
+}
+
+async function performClearAll() {
+  if (clearDeleting.value) return;
+  clearDeleting.value = true;
+  try {
+    const response = await clearAllAlarms();
+    const deletedCount = response.data.deletedCount ?? 0;
+    proxy.$message.success(`已清空 ${deletedCount} 条告警`);
+    selectedRowKeys.value = [];
+    pagination.current = 1;
+    await loadAlarms();
+  } catch (error) {
+    proxy.$message.error(errorMessageOf(error, "清空告警失败，请刷新后重试"));
+  } finally {
+    clearDeleting.value = false;
+  }
+}
+
 function errorMessageOf(error: unknown, fallback: string): string {
   if (typeof error === "string" && error) return error;
   if (error && typeof error === "object") {
@@ -328,12 +418,14 @@ function errorMessageOf(error: unknown, fallback: string): string {
 
 function handlePageChange(page: number) {
   pagination.current = page;
+  selectedRowKeys.value = [];
   loadAlarms();
 }
 
 function handlePageSizeChange(pageSize: number) {
   pagination.current = 1;
   pagination.pageSize = pageSize;
+  selectedRowKeys.value = [];
   loadAlarms();
 }
 
@@ -374,6 +466,47 @@ onMounted(() => {
 
 .alarm-state {
   margin-bottom: 12px;
+}
+
+.alarm-management-page :deep(.alarm-clear-all-btn.arco-btn-primary) {
+  background: rgb(var(--warning-6));
+  border-color: rgb(var(--warning-6));
+  box-shadow: none;
+}
+
+.alarm-management-page :deep(.alarm-clear-all-btn.arco-btn-primary:hover) {
+  background: rgb(var(--warning-5));
+  border-color: rgb(var(--warning-5));
+  box-shadow: 0 8px 16px -14px rgb(var(--warning-6) / 45%);
+}
+
+.alarm-management-page :deep(.alarm-clear-all-btn.arco-btn-primary:active) {
+  background: rgb(var(--warning-7));
+  border-color: rgb(var(--warning-7));
+}
+
+.alarm-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 14px;
+  margin-bottom: 12px;
+  color: var(--uvp-text-secondary);
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
+}
+
+.alarm-batch-bar__info strong {
+  color: var(--uvp-brand);
+}
+
+.alarm-batch-bar__ops {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .alarm-table-wrap {

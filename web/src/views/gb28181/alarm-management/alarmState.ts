@@ -1,4 +1,4 @@
-import type { AlarmEntitySummary, AlarmQuery } from "./api";
+import type { AlarmEntitySummary, AlarmEnumValue, AlarmQuery } from "./api";
 
 const VIEW_PERMISSION = "gb28181:alarm:view";
 const DELETE_PERMISSION = "gb28181:alarm:delete";
@@ -91,4 +91,18 @@ export function displayAlarmEntityName(
   fallback = "—"
 ): string {
   return entity?.alias?.trim() || entity?.name?.trim() || entity?.code?.trim() || fallback;
+}
+
+// 告警级别颜色：一级最严重，四级最轻。
+const ALARM_PRIORITY_COLORS: Record<number, string> = {
+  1: "red",
+  2: "orange",
+  3: "gold",
+  4: "arcoblue"
+};
+
+export function alarmPriorityTagColor(priority: Pick<AlarmEnumValue, "value"> | null | undefined): string {
+  const value = priority?.value;
+  if (value == null) return "gray";
+  return ALARM_PRIORITY_COLORS[value] || "gray";
 }

@@ -219,6 +219,33 @@ func (controller *AlarmController) BatchDelete(c *gin.Context) {
 	controller.deleteAndRespond(c, ids, normalized)
 }
 
+func (controller *AlarmController) ClearAll(c *gin.Context) {
+	middleware.MarkDeleteOperation(c)
+	db := controller.database()
+	if db == nil {
+		alarmHTTPError(c, http.StatusServiceUnavailable, "ALARM_DB_UNAVAILABLE", "告警服务未就绪")
+		return
+	}
+	var deletedCount int64
+	err := db.WithContext(c).Transaction(func(tx *gorm.DB) error {
+		deviceScope := tx.Model(&gbmodels.GbDevice{}).
+			Select("id").
+			Scopes(datascope.OwnerDeptScopeWithDB(c, tx, "owner_dept_id"))
+		result := tx.Where("device_id IN (?)", deviceScope).
+			Delete(&gbmodels.GbAlarmEvent{})
+		if result.Error != nil {
+			return result.Error
+		}
+		deletedCount = result.RowsAffected
+		return nil
+	})
+	if err != nil {
+		alarmHTTPError(c, http.StatusInternalServerError, "ALARM_DELETE_FAILED", "清空告警失败")
+		return
+	}
+	alarmHTTPSuccess(c, gin.H{"deletedCount": deletedCount})
+}
+
 func (controller *AlarmController) deleteAndRespond(c *gin.Context, ids []uint64, normalized []string) {
 	db := controller.database()
 	if db == nil {

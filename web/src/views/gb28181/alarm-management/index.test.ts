@@ -1,7 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn(), deleteAlarm: vi.fn() }));
+const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn(), deleteAlarm: vi.fn(), batchDeleteAlarms: vi.fn(), clearAllAlarms: vi.fn() }));
 const deviceApi = vi.hoisted(() => ({ listDevices: vi.fn() }));
 const account = vi.hoisted(() => ({ permissions: ["gb28181:alarm:view"] as string[] }));
 const modal = vi.hoisted(() => ({ warning: vi.fn() }));
@@ -47,7 +47,7 @@ const listResult = (id = "9007199254740993") => ({
     ],
     total: 41,
     page: 1,
-    pageSize: 20
+    pageSize: 10
   }
 });
 
@@ -78,7 +78,7 @@ const stubs = {
       return { alarmTable: this };
     },
     template:
-      "<div data-testid='alarm-table' :data-count='data.length' :data-total='pagination.total' :data-ids='data.map(item => item.id).join(`,`)' :data-has-row-selection='Boolean(rowSelection)'><slot name='columns' /><button data-testid='page-three' @click='$emit(`pageChange`, 3)'>3</button></div>"
+      "<div data-testid='alarm-table' :data-count='data.length' :data-total='pagination.total' :data-ids='data.map(item => item.id).join(`,`)' :data-has-row-selection='Boolean(rowSelection)'><slot name='columns' /><button data-testid='page-three' @click='$emit(`pageChange`, 3)'>3</button><button data-testid='select-all' @click='$emit(`update:selectedKeys`, data.map(item => item.id))'>select</button></div>"
   },
   "a-table-column": {
     props: ["title"],
@@ -112,6 +112,14 @@ describe("AlarmManagement", () => {
       message: "ok",
       data: { deletedIds: ["9007199254740993"], deletedCount: 1 }
     });
+    alarmApi.batchDeleteAlarms.mockReset();
+    alarmApi.batchDeleteAlarms.mockResolvedValue({
+      code: 0,
+      message: "ok",
+      data: { deletedIds: ["9007199254740993"], deletedCount: 1 }
+    });
+    alarmApi.clearAllAlarms.mockReset();
+    alarmApi.clearAllAlarms.mockResolvedValue({ code: 0, message: "ok", data: { deletedCount: 41 } });
     modal.warning.mockReset();
     messages.error.mockReset();
     messages.success.mockReset();
@@ -139,19 +147,56 @@ describe("AlarmManagement", () => {
     expect(deviceApi.listDevices).not.toHaveBeenCalled();
   });
 
-  it("removes the batch action row and table selection", async () => {
-    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+  it("hides batch actions and row selection from view-only users", async () => {
+    account.permissions = ["gb28181:alarm:view"];
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.find(".alarm-batch-bar").exists()).toBe(false);
     expect(wrapper.find("[data-testid='batch-delete']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(false);
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("false");
+  });
+
+  it("shows row selection and a clear-all button for delete users", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    const wrapper = mountPage();
+    await flushPromises();
+    expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("true");
+    expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(true);
+  });
+
+  it("batch deletes selected rows after confirmation", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-testid='select-all']").trigger("click");
+    await flushPromises();
+    expect(wrapper.find(".alarm-batch-bar").exists()).toBe(true);
+
+    await wrapper.get("[data-testid='batch-delete']").trigger("click");
+    expect(modal.warning).toHaveBeenCalledTimes(1);
+    await modal.warning.mock.calls[0][0].onOk();
+    await flushPromises();
+    expect(alarmApi.batchDeleteAlarms).toHaveBeenCalledWith(["9007199254740993"]);
+    expect(messages.success).toHaveBeenCalledWith("已物理删除 1 条告警");
+  });
+
+  it("clears all alarms after confirmation", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-testid='alarm-clear-all']").trigger("click");
+    expect(modal.warning).toHaveBeenCalledTimes(1);
+    await modal.warning.mock.calls[0][0].onOk();
+    await flushPromises();
+    expect(alarmApi.clearAllAlarms).toHaveBeenCalledTimes(1);
+    expect(messages.success).toHaveBeenCalledWith("已清空 41 条告警");
   });
 
   it("loads the first page and renders the server total", async () => {
     const wrapper = mountPage();
     await flushPromises();
-    expect(alarmApi.listAlarms).toHaveBeenCalledWith({ page: 1, pageSize: 20 });
+    expect(alarmApi.listAlarms).toHaveBeenCalledWith({ page: 1, pageSize: 10 });
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-count")).toBe("1");
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-total")).toBe("41");
     expect(wrapper.text()).toContain("平台接收时间");
@@ -194,7 +239,7 @@ describe("AlarmManagement", () => {
     await flushPromises();
     expect(alarmApi.listAlarms).toHaveBeenLastCalledWith({
       page: 1,
-      pageSize: 20,
+      pageSize: 10,
       keyword: "移动"
     });
   });
@@ -272,8 +317,8 @@ describe("AlarmManagement", () => {
     account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
     alarmApi.listAlarms
       .mockResolvedValueOnce(listResult())
-      .mockResolvedValueOnce({ ...listResult(), data: { ...listResult().data, page: 3, total: 41 } })
-      .mockResolvedValueOnce({ ...listResult("40"), data: { ...listResult("40").data, page: 2, total: 40 } });
+      .mockResolvedValueOnce({ ...listResult(), data: { ...listResult().data, page: 3, total: 21 } })
+      .mockResolvedValueOnce({ ...listResult("40"), data: { ...listResult("40").data, page: 2, total: 20 } });
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.get("[data-testid='page-three']").trigger("click");
@@ -281,7 +326,7 @@ describe("AlarmManagement", () => {
     await wrapper.get("[data-testid='single-delete-9007199254740993']").trigger("click");
     await modal.warning.mock.calls[0][0].onOk();
     await flushPromises();
-    expect(alarmApi.listAlarms).toHaveBeenLastCalledWith({ page: 2, pageSize: 20 });
+    expect(alarmApi.listAlarms).toHaveBeenLastCalledWith({ page: 2, pageSize: 10 });
   });
 
 });

@@ -24,6 +24,7 @@ func TestAlarmRoutesRegistered(t *testing.T) {
 		"GET /api/gb28181/alarms/:id",
 		"DELETE /api/gb28181/alarms/:id",
 		"POST /api/gb28181/alarms/batch-delete",
+		"POST /api/gb28181/alarms/clear-all",
 	} {
 		require.True(t, registered[route], route)
 	}
