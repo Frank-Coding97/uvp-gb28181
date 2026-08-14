@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { BookOpen, Check, Copy, Eye, EyeOff, QrCode, RefreshCw, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
+import { BookOpen, Check, ChevronRight, Copy, Download, RefreshCw, Rocket, Server, Settings2, ShieldCheck } from "lucide-vue-next";
 import {
     fetchSipPlatformInfo,
     fetchSipSetupStatus,
@@ -10,23 +10,19 @@ import {
 } from "@/api/gb28181";
 import { useUserStoreHook } from "@/store/modules/user";
 import SipSetupModal from "@/layout/components/SipSetupModal.vue";
-import QrProvisionModal from "./QrProvisionModal.vue";
+import QrProvisionCard from "./QrProvisionCard.vue";
 import { mayEditSipConfig, runtimeColor, runtimeLabel } from "./platformViewState";
 import { mayGenerateQr } from "./qrProvisionState";
 import { activeSipAddresses } from "./sipSetupRules";
 
 const loading = ref(false);
 const wizardVisible = ref(false);
-const qrVisible = ref(false);
 const status = ref<SipSetupStatus | null>(null);
 const platform = ref<SipPlatformInfo | null>(null);
 const permissions = computed(() => useUserStoreHook().account.permissions);
 const canEdit = computed(() => mayEditSipConfig(permissions.value));
 const canGenerateQr = computed(() => mayGenerateQr(permissions.value));
 const copiedKey = ref<string>("");
-// 密码默认遮罩,用户点眼睛才展开明文.
-// 复制按钮无论遮罩 / 明文都直接复制真值,避免"要先展开才能复制"的多余步骤.
-const passwordVisible = ref(false);
 
 const config = computed(() => status.value?.config);
 const deploymentLabel = computed(() =>
@@ -51,14 +47,9 @@ const infoFields = computed(() => {
             value
         })),
         { key: "port", label: "SIP 端口", value: String(c.port) },
-        { key: "serverId", label: "平台 ID", value: c.serverId }
+        { key: "serverId", label: "平台 ID", value: c.serverId },
+        { key: "domain", label: "SIP 域", value: c.domain }
     ];
-});
-
-const passwordDisplay = computed(() => {
-    const c = config.value;
-    if (!c?.password) return "-";
-    return passwordVisible.value ? c.password : "•".repeat(Math.min(c.password.length, 12));
 });
 
 // 接入指南三步:对应用户在国标设备/客户端上要填的三块信息
@@ -114,6 +105,7 @@ async function copyValue(key: string, value: string) {
     try {
         await navigator.clipboard.writeText(value);
         copiedKey.value = key;
+        Message.success("已复制到剪贴板");
         setTimeout(() => {
             if (copiedKey.value === key) copiedKey.value = "";
         }, 1500);
@@ -136,7 +128,7 @@ async function copyAll() {
     ].join("\n");
     try {
         await navigator.clipboard.writeText(text);
-        Message.success("已复制全部接入信息");
+        Message.success("已复制 SIP 接入信息");
     } catch {
         Message.warning("复制失败,请手动选中");
     }
@@ -160,12 +152,7 @@ onMounted(refresh);
                     <div class="toolbar-actions">
                         <a-button v-if="config" @click="copyAll">
                             <template #icon><Copy :size="15" /></template>
-                            复制全部
-                        </a-button>
-                        <!-- SIP 未配置时后端拿不到六元组,不发码 -->
-                        <a-button v-if="canGenerateQr && config" @click="qrVisible = true">
-                            <template #icon><QrCode :size="15" /></template>
-                            扫码接入
+                            复制 SIP 接入信息
                         </a-button>
                         <a-tooltip content="刷新状态">
                             <a-button shape="circle" :loading="loading" @click="refresh">
@@ -240,21 +227,11 @@ onMounted(refresh);
                                         </div>
                                     </div>
 
-                                    <!-- 密码单独一行:遮罩 + 眼睛切换 + 直接复制明文 -->
-                                    <div class="sip-row">
+                                    <!-- 密码单独一行:直接展示明文 + 复制 -->
+                                    <div class="sip-row sip-row--full">
                                         <span class="sip-row__label">SIP 密码</span>
                                         <div class="sip-row__body">
-                                            <code class="sip-value sip-value--mono">{{ passwordDisplay }}</code>
-                                            <button
-                                                v-if="config?.password"
-                                                type="button"
-                                                class="sip-copy sip-copy--sm"
-                                                :title="passwordVisible ? '隐藏密码' : '显示密码'"
-                                                @click="passwordVisible = !passwordVisible"
-                                            >
-                                                <EyeOff v-if="passwordVisible" :size="14" />
-                                                <Eye v-else :size="14" />
-                                            </button>
+                                            <code class="sip-value sip-value--mono">{{ config?.password || "-" }}</code>
                                             <button
                                                 v-if="config?.password"
                                                 type="button"
@@ -269,6 +246,52 @@ onMounted(refresh);
                                         </div>
                                     </div>
                                 </div>
+                            </section>
+
+                            <!-- 接入指南卡 -->
+                            <section class="sip-card sip-card--guide">
+                                <header class="sip-card__header">
+                                    <span class="sip-card__icon sip-card__icon--soft">
+                                        <BookOpen :size="16" />
+                                    </span>
+                                    <h4>设备接入指南</h4>
+                                </header>
+                                <ol class="guide-steps">
+                                    <li v-for="step in setupSteps" :key="step.n" class="guide-step">
+                                        <span class="guide-step__num">{{ step.n }}</span>
+                                        <div class="guide-step__body">
+                                            <div class="guide-step__title">{{ step.title }}</div>
+                                            <p class="guide-step__desc">{{ step.desc }}</p>
+                                            <div
+                                                v-if="step.highlights.length"
+                                                class="guide-step__highlights"
+                                            >
+                                                <div
+                                                    v-for="hi in step.highlights"
+                                                    :key="`${hi.label}-${hi.value}`"
+                                                    class="guide-step__highlight"
+                                                >
+                                                    <span class="guide-step__hl-label">{{ hi.label }}</span>
+                                                    <code>{{ hi.value || "-" }}</code>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </li>
+                                </ol>
+
+                                <a
+                                    class="guide-download"
+                                    href="https://download.uvplatform.cn/"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                >
+                                    <Download :size="15" />
+                                    <span>
+                                        <strong>国标模拟器下载</strong>
+                                        <small>Android 移动端模拟器,可模拟设备接入与联调</small>
+                                    </span>
+                                    <ChevronRight :size="15" />
+                                </a>
                             </section>
                         </div>
 
@@ -306,37 +329,8 @@ onMounted(refresh);
                                 </div>
                             </section>
 
-                            <!-- 接入指南卡 -->
-                            <section class="sip-card sip-card--guide">
-                                <header class="sip-card__header">
-                                    <span class="sip-card__icon sip-card__icon--soft">
-                                        <BookOpen :size="16" />
-                                    </span>
-                                    <h4>设备接入指南</h4>
-                                </header>
-                                <ol class="guide-steps">
-                                    <li v-for="step in setupSteps" :key="step.n" class="guide-step">
-                                        <span class="guide-step__num">{{ step.n }}</span>
-                                        <div class="guide-step__body">
-                                            <div class="guide-step__title">{{ step.title }}</div>
-                                            <p class="guide-step__desc">{{ step.desc }}</p>
-                                            <div
-                                                v-if="step.highlights.length"
-                                                class="guide-step__highlights"
-                                            >
-                                                <div
-                                                    v-for="hi in step.highlights"
-                                                    :key="`${hi.label}-${hi.value}`"
-                                                    class="guide-step__highlight"
-                                                >
-                                                    <span class="guide-step__hl-label">{{ hi.label }}</span>
-                                                    <code>{{ hi.value || "-" }}</code>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </li>
-                                </ol>
-                            </section>
+                            <!-- 扫码接入卡 -->
+                            <QrProvisionCard v-if="canGenerateQr && config" />
                         </aside>
                     </div>
                 </a-spin>
@@ -348,7 +342,6 @@ onMounted(refresh);
             @close="wizardVisible = false"
             @saved="refresh"
         />
-        <QrProvisionModal v-model:visible="qrVisible" />
     </div>
 </template>
 
@@ -405,15 +398,15 @@ onMounted(refresh);
 /* --- 双栏 grid --- */
 .sip-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr);
-    gap: 16px;
+    grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
+    gap: 18px;
     align-items: start;
 }
 
 .sip-grid__main,
 .sip-grid__side {
     display: grid;
-    gap: 14px;
+    gap: 16px;
     min-width: 0;
 }
 
@@ -422,7 +415,7 @@ onMounted(refresh);
     display: flex;
     flex-direction: column;
     gap: 10px;
-    padding: 14px 16px;
+    padding: 12px 14px;
     background: var(--uvp-panel-bg, #ffffff);
     border: 1px solid var(--uvp-panel-border, #e8edf5);
     border-radius: 12px;
@@ -544,11 +537,6 @@ onMounted(refresh);
     letter-spacing: 0.5px;
 }
 
-.sip-copy--sm {
-    width: 24px;
-    height: 24px;
-}
-
 .sip-copy {
     display: inline-flex;
     align-items: center;
@@ -580,8 +568,8 @@ onMounted(refresh);
 /* --- 服务状态卡 --- */
 .status-detail {
     display: grid;
-    gap: 8px;
-    padding-top: 2px;
+    gap: 6px;
+    padding-top: 0;
 }
 
 .status-detail__row {
@@ -589,7 +577,7 @@ onMounted(refresh);
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 4px 2px;
+    padding: 2px;
     font-size: 12.5px;
 }
 
@@ -614,7 +602,7 @@ onMounted(refresh);
     padding: 0;
     margin: 0;
     display: grid;
-    gap: 14px;
+    gap: 18px;
 }
 
 .guide-step {
@@ -691,9 +679,64 @@ onMounted(refresh);
     text-align: right;
 }
 
+.guide-download {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    padding: 12px 14px;
+    color: var(--uvp-brand-strong, #1d4ed8);
+    background: var(--uvp-brand-soft, #e8f2ff);
+    border: 1px solid rgb(37 99 235 / 18%);
+    border-radius: 8px;
+    text-decoration: none;
+    transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.guide-download:hover {
+    background: color-mix(in srgb, var(--uvp-brand-soft, #e8f2ff) 70%, #ffffff);
+    border-color: rgb(37 99 235 / 32%);
+}
+
+.guide-download > span {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.guide-download strong {
+    color: var(--uvp-text-primary, #1f2937);
+    font-size: 12.5px;
+}
+
+.guide-download small {
+    color: var(--uvp-text-tertiary, #6b7280);
+    font-size: 11.5px;
+    line-height: 1.45;
+}
+
+.guide-download > svg:last-child {
+    flex-shrink: 0;
+    color: var(--uvp-text-tertiary, #6b7280);
+}
+
 @media (max-width: 1080px) {
     .sip-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+/* 桌面端内容尽量一屏放下:字段两列 */
+@media (min-width: 1081px) {
+    .sip-card__rows {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        column-gap: 22px;
+    }
+
+    .sip-row--full {
+        grid-column: 1 / -1;
     }
 }
 

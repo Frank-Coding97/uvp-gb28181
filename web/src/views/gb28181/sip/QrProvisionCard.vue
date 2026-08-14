@@ -1,12 +1,9 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { Clock, RefreshCw, ShieldAlert } from "lucide-vue-next";
+import { Clock, QrCode, RefreshCw, ShieldAlert, Smartphone } from "lucide-vue-next";
 import { generateSipQrToken } from "@/api/gb28181";
 import { buildQrUrl, formatCountdown, normalizeBaseUrl, validateBaseUrl } from "./qrProvisionState";
-
-const props = defineProps<{ visible: boolean }>();
-const emit = defineEmits<{ "update:visible": [value: boolean] }>();
 
 const loading = ref(false);
 const token = ref("");
@@ -37,14 +34,18 @@ function startCountdown(expiresInSeconds: number) {
     secondsLeft.value = Math.max(0, expiresInSeconds);
     timer = setInterval(() => {
         secondsLeft.value = Math.max(0, secondsLeft.value - 1);
-        if (secondsLeft.value === 0) stopTimer();
+        if (secondsLeft.value === 0) {
+            stopTimer();
+            // 二维码过期后自动续码,省去手动操作;地址不合法时停在失效态等用户修正.
+            if (baseUrlValid.value) void generate(true);
+        }
     }, 1000);
 }
 
-async function generate() {
+async function generate(silent = false) {
     touched.value.baseUrl = true;
     if (!baseUrlValid.value) {
-        Message.warning(validateBaseUrl(baseUrl.value));
+        if (!silent) Message.warning(validateBaseUrl(baseUrl.value));
         return;
     }
     loading.value = true;
@@ -54,7 +55,7 @@ async function generate() {
         token.value = res.data.token;
         startCountdown(res.data.expiresInSeconds);
     } catch (error: any) {
-        Message.error(error?.message || "生成接入二维码失败");
+        if (!silent) Message.error(error?.message || "生成接入二维码失败");
     } finally {
         loading.value = false;
     }
@@ -70,37 +71,25 @@ async function copyUrl() {
     }
 }
 
-function close() {
-    emit("update:visible", false);
-}
-
-watch(
-    () => props.visible,
-    visible => {
-        if (visible) {
-            generate();
-            return;
-        }
-        // 关闭即丢弃当前码:凭据不留在内存里等下次打开
-        stopTimer();
-        token.value = "";
-        secondsLeft.value = 0;
-        touched.value.baseUrl = false;
-    }
-);
-
 onUnmounted(stopTimer);
+
+// 内嵌在页面里,进入即出码;过期后自动续码.
+onMounted(generate);
 </script>
 
 <template>
-    <a-modal
-        :visible="visible"
-        title="扫码接入"
-        width="min(520px, calc(100vw - 24px))"
-        modal-class="uvp-system-dialog qr-provision-dialog"
-        unmount-on-close
-        @cancel="close"
-    >
+    <section class="qr-card">
+        <header class="qr-card__header">
+            <span class="qr-card__icon"><QrCode :size="15" /></span>
+            <h4>扫码接入</h4>
+            <span class="qr-card__header-hint">设备扫码后自动填入接入信息</span>
+        </header>
+
+        <div class="qr-note">
+            <Smartphone :size="14" />
+            <span>需配合 UVP 国标 28181 移动端国标模拟器扫码接入</span>
+        </div>
+
         <a-form layout="vertical">
             <a-form-item
                 label="平台访问地址"
@@ -127,13 +116,14 @@ onUnmounted(stopTimer);
                 <span v-if="expired">二维码已失效</span>
                 <span v-else-if="loading">正在生成…</span>
                 <span v-else-if="!baseUrlValid">请先填写合法的平台访问地址</span>
-                <span v-else>暂无二维码</span>
+                <span v-else>点击下方按钮生成二维码</span>
             </div>
 
             <div class="qr-meta">
                 <Clock :size="14" />
                 <span v-if="expired">已失效,请重新生成</span>
-                <span v-else>{{ countdownText }} 后失效</span>
+                <span v-else-if="token">{{ countdownText }} 后失效</span>
+                <span v-else>尚未生成</span>
             </div>
 
             <div v-if="qrUrl" class="qr-url">
@@ -141,6 +131,11 @@ onUnmounted(stopTimer);
                 <code class="qr-url__value">{{ qrUrl }}</code>
                 <a-button size="mini" type="text" @click="copyUrl">复制</a-button>
             </div>
+
+            <a-button type="primary" class="qr-generate" :loading="loading" @click="generate">
+                <template #icon><RefreshCw :size="15" /></template>
+                {{ token ? "重新生成" : "生成二维码" }}
+            </a-button>
         </div>
 
         <div class="qr-tips">
@@ -150,63 +145,97 @@ onUnmounted(stopTimer);
                 <span>点击重新生成后,旧二维码在原到期时间前仍然有效。</span>
             </div>
         </div>
-
-        <template #footer>
-            <a-button type="text" @click="close">关闭</a-button>
-            <span class="qr-footer-spacer" />
-            <a-button type="primary" :loading="loading" @click="generate">
-                <template #icon><RefreshCw :size="15" /></template>
-                {{ token ? "重新生成" : "生成二维码" }}
-            </a-button>
-        </template>
-    </a-modal>
+    </section>
 </template>
 
-<style lang="scss">
-/* uvp-system-dialog 已提供弹窗骨架样式,这里只补扫码区专有排版. */
-.qr-provision-dialog .qr-stage {
+<style scoped>
+/* 与同页 sip-card 视觉一致的内嵌卡片 */
+.qr-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 14px;
+    background: var(--uvp-panel-bg, #ffffff);
+    border: 1px solid var(--uvp-panel-border, #e8edf5);
+    border-radius: 12px;
+}
+
+.qr-card__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed var(--uvp-panel-border, #e8edf5);
+}
+
+.qr-card__header h4 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--uvp-text-primary, #1f2937);
+}
+
+.qr-card__header-hint {
+    margin-left: auto;
+    color: var(--uvp-text-tertiary, #6b7280);
+    font-size: 11.5px;
+}
+
+.qr-card__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    color: var(--uvp-brand, #2563eb);
+    background: var(--uvp-brand-soft, #e8f2ff);
+    border-radius: 7px;
+    flex-shrink: 0;
+}
+
+.qr-stage {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
+    gap: 7px;
 }
 
-.qr-provision-dialog .qr-canvas {
+.qr-canvas {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 236px;
-    height: 236px;
-    padding: 8px;
+    width: 156px;
+    height: 156px;
+    padding: 6px;
     background: #ffffff;
     border: 1px solid var(--uvp-panel-border, #e8edf5);
     border-radius: 12px;
 }
 
-.qr-provision-dialog .qr-canvas img {
+.qr-canvas img {
     width: 100%;
     height: 100%;
 }
 
-.qr-provision-dialog .qr-placeholder {
+.qr-placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 236px;
-    height: 236px;
+    width: 156px;
+    height: 156px;
     color: var(--uvp-text-tertiary, #6b7280);
-    font-size: 13px;
+    font-size: 12px;
     text-align: center;
     background: var(--uvp-shell-muted, #eef4f8);
     border: 1px dashed var(--uvp-panel-border, #e8edf5);
     border-radius: 12px;
 }
 
-.qr-provision-dialog .qr-placeholder.is-expired {
+.qr-placeholder.is-expired {
     color: #b7791f;
 }
 
-.qr-provision-dialog .qr-meta {
+.qr-meta {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -214,7 +243,7 @@ onUnmounted(stopTimer);
     font-size: 12.5px;
 }
 
-.qr-provision-dialog .qr-url {
+.qr-url {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -225,13 +254,13 @@ onUnmounted(stopTimer);
     border-radius: 8px;
 }
 
-.qr-provision-dialog .qr-url__label {
+.qr-url__label {
     flex-shrink: 0;
     color: var(--uvp-text-tertiary, #6b7280);
     font-size: 12px;
 }
 
-.qr-provision-dialog .qr-url__value {
+.qr-url__value {
     flex: 1;
     min-width: 0;
     overflow-wrap: anywhere;
@@ -241,31 +270,55 @@ onUnmounted(stopTimer);
     user-select: all;
 }
 
-.qr-provision-dialog .qr-tips {
+.qr-generate {
+    width: 100%;
+}
+
+.qr-tips {
     display: flex;
     gap: 8px;
-    margin-top: 14px;
-    padding: 10px 12px;
+    padding: 7px 9px;
     background: var(--uvp-warning-soft, #fffbeb);
     border: 1px solid rgb(183 121 31 / 22%);
     border-radius: 8px;
 }
 
-.qr-provision-dialog .qr-tips__icon {
+.qr-tips__icon {
     flex-shrink: 0;
     color: #b7791f;
     line-height: 1;
 }
 
-.qr-provision-dialog .qr-tips__body {
+.qr-tips__body {
     display: grid;
-    gap: 4px;
+    gap: 2px;
     color: var(--uvp-text-secondary, #4b5563);
     font-size: 12px;
-    line-height: 1.6;
+    line-height: 1.5;
 }
 
-.qr-provision-dialog .qr-footer-spacer {
-    flex: 1;
+.qr-card :deep(.arco-form-item) {
+    margin-bottom: 8px;
+}
+
+.qr-card :deep(.arco-form-message) {
+    font-size: 11px;
+}
+
+.qr-note {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 6px 9px;
+    color: var(--uvp-brand-strong, #1d4ed8);
+    background: var(--uvp-brand-soft, #e8f2ff);
+    border: 1px solid rgb(37 99 235 / 16%);
+    border-radius: 7px;
+    font-size: 11.5px;
+    line-height: 1.4;
+}
+
+.qr-note > svg {
+    flex-shrink: 0;
 }
 </style>
