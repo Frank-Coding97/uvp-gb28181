@@ -184,10 +184,49 @@ const mapStyleUrls = {
 };
 const onlineDeviceTotal = ref(0);
 const offlineDeviceTotal = ref(0);
-const deviceTotal = computed(() => onlineDeviceTotal.value + offlineDeviceTotal.value);
-const deviceOnlineRatePercent = computed(() =>
-    deviceTotal.value === 0 ? 0 : Math.round((onlineDeviceTotal.value / deviceTotal.value) * 100)
+const onlineChannelTotal = ref(0);
+const offlineChannelTotal = ref(0);
+const statEntityLabel = computed(() => (assetKind.value === "device" ? "设备" : "通道"));
+const statOnlineTotal = computed(() =>
+    assetKind.value === "device" ? onlineDeviceTotal.value : onlineChannelTotal.value
 );
+const statOfflineTotal = computed(() =>
+    assetKind.value === "device" ? offlineDeviceTotal.value : offlineChannelTotal.value
+);
+const statTotal = computed(() => statOnlineTotal.value + statOfflineTotal.value);
+const statOnlineRatePercent = computed(() =>
+    statTotal.value === 0 ? 0 : Math.round((statOnlineTotal.value / statTotal.value) * 100)
+);
+const ringDisplayRate = ref(0);
+let ringAnimFrame: number | null = null;
+
+function animateRingRate(target: number) {
+    if (ringAnimFrame !== null) {
+        cancelAnimationFrame(ringAnimFrame);
+        ringAnimFrame = null;
+    }
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+        ringDisplayRate.value = target;
+        return;
+    }
+    const start = ringDisplayRate.value;
+    const startTime = performance.now();
+    const duration = 750;
+    const tick = (now: number) => {
+        const t = Math.min(1, (now - startTime) / duration);
+        const eased = 1 - Math.pow(1 - t, 3);
+        ringDisplayRate.value = Math.round(start + (target - start) * eased);
+        if (t < 1) {
+            ringAnimFrame = requestAnimationFrame(tick);
+        } else {
+            ringDisplayRate.value = target;
+            ringAnimFrame = null;
+        }
+    };
+    ringAnimFrame = requestAnimationFrame(tick);
+}
+
+watch(statOnlineRatePercent, (value) => animateRingRate(value));
 const autoRefresh = ref(initialAutoRefresh());
 const refreshInterval = ref<number | null>(null);
 const isMacPlatform = computed(() => typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform));
@@ -804,14 +843,18 @@ async function loadMapData() {
     }
 }
 
-async function refreshDeviceStats() {
+async function refreshStats() {
     try {
-        const [onlineRes, offlineRes] = await Promise.all([
+        const [onlineDeviceRes, offlineDeviceRes, onlineChannelRes, offlineChannelRes] = await Promise.all([
             listDevices({ status: "online", page: 1, pageSize: 1 }),
-            listDevices({ status: "offline", page: 1, pageSize: 1 })
+            listDevices({ status: "offline", page: 1, pageSize: 1 }),
+            listChannels({ status: "online", page: 1, pageSize: 1 }),
+            listChannels({ status: "offline", page: 1, pageSize: 1 })
         ]);
-        if (onlineRes.code === 0) onlineDeviceTotal.value = onlineRes.data?.total || 0;
-        if (offlineRes.code === 0) offlineDeviceTotal.value = offlineRes.data?.total || 0;
+        if (onlineDeviceRes.code === 0) onlineDeviceTotal.value = onlineDeviceRes.data?.total || 0;
+        if (offlineDeviceRes.code === 0) offlineDeviceTotal.value = offlineDeviceRes.data?.total || 0;
+        if (onlineChannelRes.code === 0) onlineChannelTotal.value = onlineChannelRes.data?.total || 0;
+        if (offlineChannelRes.code === 0) offlineChannelTotal.value = offlineChannelRes.data?.total || 0;
     } catch (error: any) {
         console.warn(error);
     }
@@ -1123,7 +1166,7 @@ const createDeviceRules = {
 function afterDeleteSuccess() {
     selectedRowKeys.value = [];
     refreshMainData();
-    refreshDeviceStats();
+    refreshStats();
 }
 
 async function handleRefreshDeviceCatalog(record: DeviceVO) {
@@ -1171,7 +1214,7 @@ async function handleCreateDevice() {
             Message.success("设备已创建");
             createDeviceVisible.value = false;
             refreshMainData();
-            refreshDeviceStats();
+            refreshStats();
         } else {
             Message.error(res.message || "创建失败");
         }
@@ -1536,7 +1579,7 @@ function startAutoRefresh() {
     refreshInterval.value = window.setInterval(() => {
         if (autoRefresh.value) {
             refreshMainData();
-            refreshDeviceStats();
+            refreshStats();
         }
     }, 10000); // 每10秒刷新一次
 }
@@ -1580,7 +1623,7 @@ onMounted(async () => {
     }
     await Promise.all([
         viewMode.value === "map" ? Promise.resolve() : refreshMainData(),
-        refreshDeviceStats(),
+        refreshStats(),
         loadPtzTypeDict()
     ]);
     if (autoRefresh.value) {
@@ -1592,6 +1635,7 @@ onUnmounted(() => {
     window.removeEventListener("keydown", focusKeyword);
     cancelKeywordSearch();
     stopAutoRefresh();
+    if (ringAnimFrame !== null) cancelAnimationFrame(ringAnimFrame);
     destroyMap();
 });
 </script>
@@ -1604,12 +1648,13 @@ onUnmounted(() => {
                         <div class="workspace-toolbar-row">
                             <div class="device-stats">
                                 <div class="stat-ring">
-                                    <div class="stat-ring__donut" :style="{ background: `conic-gradient(from -90deg, var(--uvp-brand-cyan) 0 ${deviceOnlineRatePercent}%, var(--uvp-danger) ${deviceOnlineRatePercent}% 100%)` }">
-                                        <span class="stat-ring__value">{{ deviceOnlineRatePercent }}%</span>
+                                    <div class="stat-ring__donut" :style="{ background: `conic-gradient(from -90deg, var(--uvp-brand-cyan) 0 ${ringDisplayRate}%, var(--uvp-danger) ${ringDisplayRate}% 100%)` }">
+                                        <span class="stat-ring__value">{{ ringDisplayRate }}%</span>
                                     </div>
                                     <div class="stat-ring__legend">
-                                        <span class="stat-ring__item"><span class="stat-ring__dot online"></span>在线 {{ onlineDeviceTotal }}</span>
-                                        <span class="stat-ring__item"><span class="stat-ring__dot offline"></span>离线 {{ offlineDeviceTotal }}</span>
+                                        <span class="stat-ring__entity">{{ statEntityLabel }}</span>
+                                        <span class="stat-ring__item"><span class="stat-ring__dot online"></span>在线 {{ statOnlineTotal }}</span>
+                                        <span class="stat-ring__item"><span class="stat-ring__dot offline"></span>离线 {{ statOfflineTotal }}</span>
                                     </div>
                                 </div>
                             </div>
@@ -2819,6 +2864,12 @@ onUnmounted(() => {
 .stat-ring__legend {
     display: grid;
     gap: 3px;
+}
+.stat-ring__entity {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--uvp-text-tertiary);
+    letter-spacing: 0.04em;
 }
 .stat-ring__item {
     display: inline-flex;
