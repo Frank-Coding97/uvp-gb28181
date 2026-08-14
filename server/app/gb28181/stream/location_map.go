@@ -96,3 +96,15 @@ func (m *LocationMap) Size() int {
 	defer m.mu.RUnlock()
 	return len(m.streams)
 }
+
+// UnbindIfNode 仅当当前绑定仍是该节点时解绑:防止把并发建立的新代次绑定删掉
+func (m *LocationMap) UnbindIfNode(streamID string, nodeID int64) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	current, ok := m.streams[streamID]
+	if !ok || current.NodeID != nodeID {
+		return false
+	}
+	delete(m.streams, streamID)
+	return true
+}

@@ -19,7 +19,14 @@ func (f *fakeLocations) Lookup(streamID string) (int64, bool) {
 	return id, ok
 }
 func (f *fakeLocations) Bind(streamID string, nodeID int64) { f.bindings[streamID] = nodeID }
-func (f *fakeLocations) Unbind(streamID string)              { delete(f.bindings, streamID) }
+func (f *fakeLocations) Unbind(streamID string) { delete(f.bindings, streamID) }
+func (f *fakeLocations) UnbindIfNode(streamID string, nodeID int64) bool {
+	if current, ok := f.bindings[streamID]; ok && current == nodeID {
+		delete(f.bindings, streamID)
+		return true
+	}
+	return false
+}
 
 type fakeNodes struct {
 	items map[int64]*node.Node

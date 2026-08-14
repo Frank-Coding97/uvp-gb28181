@@ -323,19 +323,29 @@ func (r *Registry) MarkOffline(ctx context.Context, id int64) error {
 		r.mu.Unlock()
 		return ErrNotFound
 	}
-	// 先写 DB、成功后再提交内存:DB 失败时运行态与数据库分叉,
+	// 先写 DB、成功后再条件提交内存:DB 失败时运行态与数据库分叉,
 	// Watcher 不会重试已从 ListActive 消失的节点,重启后状态还会反转
+	prevState := cur.State
 	snapshot := *cur
 	snapshot.State = StateOffline
 	snapshot.UpdatedAt = time.Now()
-	if err := r.repo.Update(ctx, snapshot); err != nil {
-		r.mu.Unlock()
+	r.mu.Unlock()
+
+	// DB 写在全局锁外并带有界超时:DB 阻塞不得拖垮所有 Get/List/心跳更新
+	updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := r.repo.Update(updateCtx, snapshot); err != nil {
 		return err
 	}
-	cur.State = StateOffline
-	r.autoOnDemandReady[id] = false
-	cur.UpdatedAt = snapshot.UpdatedAt
-	r.mu.Unlock()
+
+	// 条件提交:状态未被并发修改时才应用(DB 已为权威,极端并发下以 DB 为准)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current, ok := r.nodes[id]; ok && current.State == prevState {
+		current.State = StateOffline
+		current.UpdatedAt = snapshot.UpdatedAt
+		r.autoOnDemandReady[id] = false
+	}
 	return nil
 }
 
@@ -356,18 +366,26 @@ func (r *Registry) MarkActive(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 	now := time.Now()
-	// 先写 DB、成功后再提交内存(同 MarkOffline,防状态分叉)
+	// 先写 DB、成功后再条件提交内存(同 MarkOffline,防状态分叉)
+	prevState := cur.State
 	snapshot := *cur
 	snapshot.State = StateActive
 	snapshot.Stats.LastHeartbeatAt = now
 	snapshot.UpdatedAt = now
-	if err := r.repo.Update(ctx, snapshot); err != nil {
-		r.mu.Unlock()
+	r.mu.Unlock()
+
+	updateCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := r.repo.Update(updateCtx, snapshot); err != nil {
 		return err
 	}
-	cur.State = StateActive
-	cur.Stats.LastHeartbeatAt = now
-	cur.UpdatedAt = now
-	r.mu.Unlock()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if current, ok := r.nodes[id]; ok && current.State == prevState {
+		current.State = StateActive
+		current.Stats.LastHeartbeatAt = now
+		current.UpdatedAt = now
+	}
 	return nil
 }

@@ -87,6 +87,9 @@ func (c *Client) call(ctx context.Context, api string, params map[string]string,
 		}
 		return fmt.Errorf("ZLM 请求失败 %s: %w", api, redactedTransportError{err: err, secrets: secrets})
 	}
+	// defer 必须先挂:超限/读取错误等所有路径都必须关闭响应体,否则连接
+	// 被持续占用直到超时
+	defer resp.Body.Close()
 	// 控制响应硬上限:被攻陷或误配置的节点可在超时窗口内持续发送数据,
 	// 无界 io.ReadAll 会让并发请求耗尽后端内存
 	const maxControlResponseBytes = 8 << 20

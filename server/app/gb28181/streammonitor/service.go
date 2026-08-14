@@ -28,6 +28,8 @@ type LocationStore interface {
 	Lookup(string) (int64, bool)
 	Bind(string, int64)
 	Unbind(string)
+	// UnbindIfNode 仅当当前绑定仍是该节点时解绑,防删并发建立的新代次绑定
+	UnbindIfNode(string, int64) bool
 }
 
 type NodeRegistry interface {
@@ -69,9 +71,10 @@ func (s *Service) Get(ctx context.Context, streamID string) (*Snapshot, error) {
 				return snap, nil
 			}
 		}
-		// 绑定指向的节点不存在/不可达/已无此流:旧绑定失效并扫描其余活跃节点,
-		// 否则节点故障转移或流迁移后监控会持续误报离线
-		s.locations.Unbind(streamID)
+		// 绑定指向的节点不存在/不可达/已无此流:条件解绑旧绑定并扫描其余活跃节点,
+		// 否则节点故障转移或流迁移后监控会持续误报离线。
+		// 条件解绑防把并发建立的新代次绑定一并删掉
+		s.locations.UnbindIfNode(streamID, nodeID)
 	}
 
 	active := s.nodes.ListActive()
