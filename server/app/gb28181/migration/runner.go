@@ -29,6 +29,13 @@ type migrationSource interface {
 	ReadSQL(name string) (string, error)
 }
 
+// baselineProbeTable 基线探测表:全量快照与最新迁移都包含该表。
+// 空版本表时用它的存在性区分"快照库(基线化)"与"老基线库(拒绝)"
+const baselineProbeTable = "gb_sip_trace_session_diagnosis"
+
+// schemaProbe 探测表是否存在
+type schemaProbe func(tableName string) (bool, error)
+
 // migrationExecutor 执行单条迁移 SQL。
 type migrationExecutor interface {
 	ExecSQL(sqlText string) error
@@ -70,11 +77,14 @@ func (e *dbExecutor) ExecSQL(sqlText string) error {
 
 // Up 执行未应用的迁移:建版本表 → 取锁 → 基线化或增量执行 → 放锁。
 func Up(db *gorm.DB, d Dialect) error {
-	return run(NewStore(db), newDBLocker(db, d), &embedSource{dialect: d}, &dbExecutor{db: db})
+	probe := func(tableName string) (bool, error) {
+		return db.Migrator().HasTable(tableName), nil
+	}
+	return run(NewStore(db), newDBLocker(db, d), &embedSource{dialect: d}, &dbExecutor{db: db}, probe)
 }
 
 // run 是 Up 的纯依赖版本,便于 fake 注入测试。
-func run(store versionStore, lock locker, src migrationSource, exec migrationExecutor) error {
+func run(store versionStore, lock locker, src migrationSource, exec migrationExecutor, probe schemaProbe) error {
 	if err := store.EnsureTable(); err != nil {
 		return fmt.Errorf("建版本表失败: %w", err)
 	}
@@ -97,10 +107,21 @@ func run(store versionStore, lock locker, src migrationSource, exec migrationExe
 		return fmt.Errorf("列迁移文件失败: %w", err)
 	}
 
-	// 版本表为空时不推断 schema 已是最新:全部迁移 SQL 均为幂等
-	// (CREATE TABLE IF NOT EXISTS / WHERE NOT EXISTS),直接逐文件执行。
-	// 否则基线库会跳过本次新增表(如 gb_sip_trace_session_diagnosis),
-	// 迁移记录成功但表缺失,后续读写必然失败
+	if len(applied) == 0 && len(names) > 0 {
+		// 空版本表:用基线探测表区分两种场景 ——
+		//   1. 快照库/已最新:探测表存在 → 基线化(全部标记已应用)
+		//   2. 老基线库:探测表缺失 → 无法确定哪些迁移已应用,
+		//      明确拒绝而不是"迁移成功但缺表"的假成功
+		exists, err := probe(baselineProbeTable)
+		if err != nil {
+			return fmt.Errorf("基线探测失败: %w", err)
+		}
+		if exists {
+			return store.MarkApplied(names)
+		}
+		return fmt.Errorf("检测到空迁移版本表且缺少 %s 表:无法确定存量库的迁移基线,请人工建立基线后重试", baselineProbeTable)
+	}
+
 	for _, name := range names {
 		if appliedSet[name] {
 			continue

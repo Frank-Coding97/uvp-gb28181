@@ -65,12 +65,13 @@ func OperationLogMiddleware() gin.HandlerFunc {
 		startTime := time.Now()
 
 		// 复制请求体用于记录:审计副本有硬上限,超大请求只记元数据,
-		// 防止单个大请求制造多份内存副本拖垮进程
+		// 防止单个大请求制造多份内存副本拖垮进程。
+		// 业务侧始终拿到完整请求体:超限时把已读前缀与剩余流拼接回去
 		var requestBody []byte
 		if c.Request.Body != nil {
 			const maxAuditBodyBytes = 64 << 10
 			requestBody, _ = io.ReadAll(io.LimitReader(c.Request.Body, maxAuditBodyBytes+1))
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
+			c.Request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(requestBody), c.Request.Body))
 			if len(requestBody) > maxAuditBodyBytes {
 				requestBody = nil
 			}
@@ -328,22 +329,16 @@ func sanitizeRequestData(data []byte) string {
 
 	// 如果是JSON数据，尝试脱敏敏感字段
 	if json.Valid(data) {
-		var jsonData map[string]interface{}
+		// 按敏感键递归脱敏:密码/一次性 token/secret 等凭据不得落审计日志
+		// (QR 兑换端点以 token 为唯一凭据,落库等于泄露接入码)。
+		// 用 interface{} 反序列化以同时支持根对象与根数组
+		var jsonData interface{}
 		if err := json.Unmarshal(data, &jsonData); err == nil {
-			// 按敏感键递归脱敏:密码/一次性 token/secret 等凭据不得落审计日志
-			// (QR 兑换端点以 token 为唯一凭据,落库等于泄露接入码)
-			for key, value := range jsonData {
-				switch strings.ToLower(key) {
-				case "password", "newpassword", "oldpassword", "token", "accesstoken", "apikey", "secret", "apisecret":
-					jsonData[key] = "***"
-				default:
-					jsonData[key] = sanitizeNested(value)
-				}
-			}
+			sanitized := sanitizeNested(jsonData)
 
 			// 重新序列化
-			if sanitized, err := json.Marshal(jsonData); err == nil {
-				return string(sanitized)
+			if encoded, err := json.Marshal(sanitized); err == nil {
+				return string(encoded)
 			}
 		}
 	}

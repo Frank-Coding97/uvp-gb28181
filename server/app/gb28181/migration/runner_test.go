@@ -96,12 +96,23 @@ func TestRunFirstStartBaselines(t *testing.T) {
 	src.files["a.sql"] = "SQL FOR a"
 	src.files["b.sql"] = "SQL FOR b"
 
-	err := run(store, lock, src, exec)
+	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
 	require.NoError(t, err)
-	// 修复后契约:空版本表不再推断 schema 已最新 —— 迁移 SQL 幂等,
-	// 逐文件执行,防基线库跳过本次新增表
-	require.Equal(t, []string{"SQL FOR a", "SQL FOR b"}, exec.executed)
-	require.Len(t, store.marks, 2)
+	require.Empty(t, exec.executed, "快照库(探测表存在)基线化不应执行任何 SQL")
+	require.Len(t, store.marks, 1)
+	require.Equal(t, []string{"a.sql", "b.sql"}, store.marks[0])
+}
+
+// ---- 3.1b 老基线库(探测表缺失)拒绝 ----
+
+func TestRunFirstStartRejectsMissingBaselineTable(t *testing.T) {
+	store, lock, src, exec := newFakes()
+	src.files["a.sql"] = "SQL FOR a"
+
+	err := run(store, lock, src, exec, func(string) (bool, error) { return false, nil })
+	require.Error(t, err, "老基线库不得记录假成功")
+	require.Empty(t, exec.executed)
+	require.Empty(t, store.marks)
 }
 
 // ---- 3.2 增量执行 ----
@@ -112,7 +123,7 @@ func TestRunIncrementalAppliesPendingOnly(t *testing.T) {
 	src.files["a.sql"] = "SQL FOR a"
 	src.files["b.sql"] = "SQL FOR b"
 
-	err := run(store, lock, src, exec)
+	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
 	require.NoError(t, err)
 	require.Len(t, exec.executed, 1)
 	require.Contains(t, exec.executed[0], "SQL FOR b")
@@ -128,7 +139,7 @@ func TestRunFailureNotMarked(t *testing.T) {
 	src.files["b.sql"] = "SQL FOR b IS BROKEN"
 	exec.failOn = "IS BROKEN"
 
-	err := run(store, lock, src, exec)
+	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "b.sql", "错误应含文件名")
 	require.Contains(t, err.Error(), "SQL FOR b IS BROKEN", "错误应含 SQL 内容")
@@ -143,8 +154,8 @@ func TestRunIdempotent(t *testing.T) {
 	src.files["a.sql"] = "SQL FOR a"
 	src.files["b.sql"] = "SQL FOR b"
 
-	require.NoError(t, run(store, lock, src, exec))
-	require.NoError(t, run(store, lock, src, exec))
+	require.NoError(t, run(store, lock, src, exec, func(string) (bool, error) { return true, nil }))
+	require.NoError(t, run(store, lock, src, exec, func(string) (bool, error) { return true, nil }))
 	require.Len(t, exec.executed, 1, "第二次运行不应执行任何 SQL")
 }
 
@@ -155,7 +166,7 @@ func TestRunLockFailureBlocks(t *testing.T) {
 	lock.acquireErr = errors.New("lock timeout")
 	src.files["a.sql"] = "SQL FOR a"
 
-	err := run(store, lock, src, exec)
+	err := run(store, lock, src, exec, func(string) (bool, error) { return true, nil })
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "lock timeout")
 	require.Empty(t, exec.executed, "锁失败不应执行任何迁移")

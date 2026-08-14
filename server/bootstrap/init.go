@@ -346,10 +346,11 @@ func newScheduler() app.JobSchedulerInterf {
 	return scheduler
 }
 
-// downFileRequested 判断启动参数是否请求 -migrate-down 运维回滚
+// downFileRequested 判断启动参数是否请求 -migrate-down 运维回滚。
+// 空值参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务
 func downFileRequested() bool {
 	for _, arg := range os.Args {
-		if strings.HasPrefix(arg, "-migrate-down=") {
+		if strings.HasPrefix(arg, "-migrate-down=") && strings.TrimPrefix(arg, "-migrate-down=") != "" {
 			return true
 		}
 	}
