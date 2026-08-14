@@ -27,6 +27,7 @@ var (
 type LocationStore interface {
 	Lookup(string) (int64, bool)
 	Bind(string, int64)
+	Unbind(string)
 }
 
 type NodeRegistry interface {
@@ -63,10 +64,14 @@ func (s *Service) Get(ctx context.Context, streamID string) (*Snapshot, error) {
 	}
 	if nodeID, ok := s.locations.Lookup(streamID); ok {
 		mediaNode, exists := s.nodes.Get(nodeID)
-		if !exists {
-			return nil, fmt.Errorf("%w: node %d not found", ErrNodeUnavailable, nodeID)
+		if exists {
+			if snap, err := s.read(ctx, streamID, mediaNode); err == nil {
+				return snap, nil
+			}
 		}
-		return s.read(ctx, streamID, mediaNode)
+		// 绑定指向的节点不存在/不可达/已无此流:旧绑定失效并扫描其余活跃节点,
+		// 否则节点故障转移或流迁移后监控会持续误报离线
+		s.locations.Unbind(streamID)
 	}
 
 	active := s.nodes.ListActive()

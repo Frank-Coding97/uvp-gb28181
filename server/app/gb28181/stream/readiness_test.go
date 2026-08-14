@@ -123,7 +123,7 @@ func TestNotifierConcurrent(t *testing.T) {
 			ch := n.Subscribe(id)
 			n.Publish(id)
 			<-ch
-			n.Unsubscribe(id)
+			n.Unsubscribe(id, ch)
 			done <- struct{}{}
 		}(i)
 	}
@@ -172,5 +172,27 @@ func TestWaitReadyRefRechecksAfterHook(t *testing.T) {
 	requirePoll()
 	if err := <-done; err != nil {
 		t.Fatalf("target node became ready: %v", err)
+	}
+}
+
+// cross-review round-7:同一 streamID 多等待者必须全部被一次 Publish 唤醒
+func TestNotifierBroadcastsToAllWaitersOnSameStream(t *testing.T) {
+	n := NewNotifier()
+	ch1 := n.Subscribe("stream-A")
+	ch2 := n.Subscribe("stream-A")
+	defer n.Unsubscribe("stream-A", ch1)
+	defer n.Unsubscribe("stream-A", ch2)
+
+	n.Publish("stream-A")
+
+	select {
+	case <-ch1:
+	case <-time.After(time.Second):
+		t.Fatal("waiter 1 not woken")
+	}
+	select {
+	case <-ch2:
+	case <-time.After(time.Second):
+		t.Fatal("waiter 2 not woken")
 	}
 }

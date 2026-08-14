@@ -277,6 +277,44 @@ func (r *Registry) UpdateStats(uuid string, stats Stats) {
 	}
 }
 
+// UpdateHeartbeatFields 在锁内合并心跳字段:与 UpdateLoadFields 并发时
+// 各自只改自己的字段,不会出现"读整体→改部分→覆盖整体"的丢失更新
+func (r *Registry) UpdateHeartbeatFields(uuid string, mediaSourceCount, sessionCount int, heartbeatAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.uuids[uuid]
+	if !ok {
+		return
+	}
+	n, ok := r.nodes[id]
+	if !ok {
+		return
+	}
+	n.Stats.LastHeartbeatAt = heartbeatAt
+	n.Stats.MediaSourceCount = mediaSourceCount
+	n.Stats.SessionCount = sessionCount
+	// 心跳到达 = 节点 alive,如果之前是 offline 自动恢复 active
+	if n.State == StateOffline {
+		n.State = StateActive
+	}
+}
+
+// UpdateLoadFields 在锁内合并线程负载字段(见 UpdateHeartbeatFields)
+func (r *Registry) UpdateLoadFields(uuid string, netLoad, workLoad float64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	id, ok := r.uuids[uuid]
+	if !ok {
+		return
+	}
+	n, ok := r.nodes[id]
+	if !ok {
+		return
+	}
+	n.Stats.NetThreadLoadAvg = netLoad
+	n.Stats.WorkThreadLoadAvg = workLoad
+}
+
 // MarkOffline 标记节点离线(由 Watcher 调用,写 DB + 内存)
 func (r *Registry) MarkOffline(ctx context.Context, id int64) error {
 	r.mu.Lock()
@@ -285,12 +323,20 @@ func (r *Registry) MarkOffline(ctx context.Context, id int64) error {
 		r.mu.Unlock()
 		return ErrNotFound
 	}
+	// 先写 DB、成功后再提交内存:DB 失败时运行态与数据库分叉,
+	// Watcher 不会重试已从 ListActive 消失的节点,重启后状态还会反转
+	snapshot := *cur
+	snapshot.State = StateOffline
+	snapshot.UpdatedAt = time.Now()
+	if err := r.repo.Update(ctx, snapshot); err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	cur.State = StateOffline
 	r.autoOnDemandReady[id] = false
-	cur.UpdatedAt = time.Now()
-	snapshot := *cur
+	cur.UpdatedAt = snapshot.UpdatedAt
 	r.mu.Unlock()
-	return r.repo.Update(ctx, snapshot)
+	return nil
 }
 
 // MarkActive 标记节点活跃(由启动探活 probe 调用,写 DB + 内存)
@@ -310,10 +356,18 @@ func (r *Registry) MarkActive(ctx context.Context, id int64) error {
 		return ErrNotFound
 	}
 	now := time.Now()
+	// 先写 DB、成功后再提交内存(同 MarkOffline,防状态分叉)
+	snapshot := *cur
+	snapshot.State = StateActive
+	snapshot.Stats.LastHeartbeatAt = now
+	snapshot.UpdatedAt = now
+	if err := r.repo.Update(ctx, snapshot); err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	cur.State = StateActive
 	cur.Stats.LastHeartbeatAt = now
 	cur.UpdatedAt = now
-	snapshot := *cur
 	r.mu.Unlock()
-	return r.repo.Update(ctx, snapshot)
+	return nil
 }

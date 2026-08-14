@@ -87,8 +87,16 @@ func (c *Client) call(ctx context.Context, api string, params map[string]string,
 		}
 		return fmt.Errorf("ZLM 请求失败 %s: %w", api, redactedTransportError{err: err, secrets: secrets})
 	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	// 控制响应硬上限:被攻陷或误配置的节点可在超时窗口内持续发送数据,
+	// 无界 io.ReadAll 会让并发请求耗尽后端内存
+	const maxControlResponseBytes = 8 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxControlResponseBytes+1))
+	if err != nil {
+		return fmt.Errorf("ZLM 响应读取失败 %s: %w", api, err)
+	}
+	if len(body) > maxControlResponseBytes {
+		return fmt.Errorf("ZLM 响应超出上限 %s: %d 字节", api, len(body))
+	}
 	if out != nil {
 		if err := json.Unmarshal(body, out); err != nil {
 			return fmt.Errorf("ZLM 响应解析失败 %s: %w, bodyLen=%d", api, err, len(body))
@@ -181,7 +189,11 @@ func (c *Client) CloseRtpServer(ctx context.Context, streamID string) error {
 	if err := c.call(ctx, "closeRtpServer", map[string]string{"stream_id": streamID}, &r); err != nil {
 		return err
 	}
-	// code!=0 不一定是错误(可能流已关),仅记录
+	// 只有明确的"资源不存在"可视为幂等成功;其他非零码必须报错,
+	// 否则上层会继续解绑流/回收 SSRC,留下实际未关闭的端口监听
+	if r.Code != 0 && !strings.Contains(strings.ToLower(r.Msg), "not exist") && !strings.Contains(r.Msg, "不存在") {
+		return fmt.Errorf("closeRtpServer code=%d msg=%s", r.Code, r.Msg)
+	}
 	return nil
 }
 

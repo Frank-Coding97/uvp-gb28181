@@ -172,18 +172,25 @@ onMounted(refresh);
                             :key="g.name"
                             class="tree-item"
                             :class="{ active: g.name === activeGroup }"
-                            @click="activeGroup = g.name"
                         >
-                            <span class="tree-name">{{ g.name }}</span>
-                            <span class="tree-meta">
-                                <span
-                                    v-if="dirtyCountInGroup(g) > 0"
-                                    class="tree-dirty-badge"
-                                >
-                                    {{ dirtyCountInGroup(g) }}
+                            <button
+                                type="button"
+                                class="tree-switch"
+                                role="tab"
+                                :aria-selected="g.name === activeGroup"
+                                @click="activeGroup = g.name"
+                            >
+                                <span class="tree-name">{{ g.name }}</span>
+                                <span class="tree-meta">
+                                    <span
+                                        v-if="dirtyCountInGroup(g) > 0"
+                                        class="tree-dirty-badge"
+                                    >
+                                        {{ dirtyCountInGroup(g) }}
+                                    </span>
+                                    <span class="tree-count">{{ g.items.length }}</span>
                                 </span>
-                                <span class="tree-count">{{ g.items.length }}</span>
-                            </span>
+                            </button>
                         </li>
                         <li v-if="filteredGroups.length === 0" class="tree-empty">
                             未匹配到分类
@@ -377,13 +384,34 @@ onMounted(refresh);
     justify-content: space-between;
     gap: 8px;
     min-height: 38px;
-    padding: 8px 14px;
     cursor: pointer;
     font-size: var(--zlm-fs-body);
     color: var(--uvp-text-secondary);
     transition: all var(--zlm-dur-fast) var(--zlm-ease-out);
     border-left: 3px solid transparent;
     position: relative;
+}
+
+/* button 承担 tab 语义,reset 原生样式由 li 控制外观与 hover */
+.tree-switch {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 14px;
+    border: 0;
+    background: transparent;
+    font-size: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.tree-switch:focus-visible {
+    outline: 2px solid var(--uvp-brand);
+    outline-offset: -2px;
 }
 
 .tree-item:hover {

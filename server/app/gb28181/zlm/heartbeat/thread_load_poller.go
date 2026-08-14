@@ -59,15 +59,8 @@ func (p *ThreadLoadPoller) fetchOne(ctx context.Context, n *node.Node) {
 		}
 		return
 	}
-	// 不覆盖 Collector 已经写入的 MediaSource/Session/LastHeartbeatAt,只写线程负载
-	cur, ok := p.registry.GetByUUID(n.MediaServerUUID)
-	if !ok {
-		return
-	}
-	stats := cur.Stats
-	stats.NetThreadLoadAvg = netLoad
-	stats.WorkThreadLoadAvg = workLoad
-	p.registry.UpdateStats(n.MediaServerUUID, stats)
+	// 锁内字段级更新:与 Collector 的心跳字段互不覆盖
+	p.registry.UpdateLoadFields(n.MediaServerUUID, netLoad, workLoad)
 }
 
 // Start 启动 goroutine,周期跑 Tick;ctx 取消 → 退出

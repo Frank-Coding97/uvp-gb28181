@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -166,6 +167,30 @@ func (s *NodeService) Get(_ context.Context, id int64) (*NodeDTO, error) {
 // Create 新建:probe → 生成 UUID → 入库 → ApplyConfigForNode 写 UUID 到 ZLM
 //
 // 失败回滚:probe 或 Apply 失败,DB 不应残留节点行。
+// validateNodeFields 服务端统一校验节点字段:API 调用可绕过前端约束;
+// 无效端口范围会让 PortUsage 返回 0,使节点绕过容量剔除进入调度
+func validateNodeFields(host string, apiPort, weight, rtpStart, rtpEnd int, apiSecret string) error {
+	if strings.TrimSpace(host) == "" || strings.ContainsAny(host, " \t") || strings.Contains(host, "://") {
+		return fmt.Errorf("host 非法: %q", host)
+	}
+	if apiPort <= 0 || apiPort > 65535 {
+		return fmt.Errorf("apiPort 非法: %d", apiPort)
+	}
+	if weight < 0 || weight > 100 {
+		return fmt.Errorf("weight 需在 0-100 之间: %d", weight)
+	}
+	if rtpStart <= 0 || rtpEnd <= 0 || rtpStart >= rtpEnd {
+		return fmt.Errorf("RTP 端口范围非法: start=%d end=%d,要求 0 < start < end", rtpStart, rtpEnd)
+	}
+	if rtpEnd > 65535 {
+		return fmt.Errorf("RTP 端口上限超出 65535: %d", rtpEnd)
+	}
+	if strings.TrimSpace(apiSecret) == "" {
+		return errors.New("apiSecret 不能为空")
+	}
+	return nil
+}
+
 func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, error) {
 	weight := req.Weight
 	if weight == 0 {
@@ -178,6 +203,9 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 	rtpEnd := req.RTPPortEnd
 	if rtpEnd == 0 {
 		rtpEnd = 35000
+	}
+	if err := validateNodeFields(req.Host, req.APIPort, weight, rtpStart, rtpEnd, req.APISecret); err != nil {
+		return nil, err
 	}
 
 	tmp := &node.Node{
@@ -244,6 +272,10 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 	}
 	if req.RTPPortEnd != nil {
 		cur.RTPPortEnd = *req.RTPPortEnd
+	}
+	// 合并后整体校验,防 API 绕过前端约束写入倒置端口范围/异常权重
+	if err := validateNodeFields(cur.Host, cur.APIPort, cur.Weight, cur.RTPPortStart, cur.RTPPortEnd, cur.APISecret); err != nil {
+		return nil, err
 	}
 	if err := s.registry.Update(ctx, *cur); err != nil {
 		return nil, err
@@ -350,7 +382,9 @@ func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node
 	return nil
 }
 
-// Delete 删除前必须 state=maintenance,流量 0 检查留到 M2 LocationMap 之后
+// Delete 删除前必须 state=maintenance 且已排空流量:
+// 维护态允许旧流自然结束,但节点上仍有活跃会话/媒体源时删除会让
+// 注册表与监控中留下无法关联的媒体会话
 func (s *NodeService) Delete(ctx context.Context, id int64) error {
 	cur, ok := s.registry.Get(id)
 	if !ok {
@@ -358,6 +392,9 @@ func (s *NodeService) Delete(ctx context.Context, id int64) error {
 	}
 	if cur.State != node.StateMaintenance {
 		return ErrNodeNotInMaintenance
+	}
+	if cur.Stats.SessionCount > 0 || cur.Stats.MediaSourceCount > 0 {
+		return fmt.Errorf("节点仍有 %d 个会话 / %d 个媒体源,请等待排空后再删除", cur.Stats.SessionCount, cur.Stats.MediaSourceCount)
 	}
 	return s.registry.Delete(ctx, id)
 }

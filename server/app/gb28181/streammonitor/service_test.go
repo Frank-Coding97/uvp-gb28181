@@ -19,6 +19,7 @@ func (f *fakeLocations) Lookup(streamID string) (int64, bool) {
 	return id, ok
 }
 func (f *fakeLocations) Bind(streamID string, nodeID int64) { f.bindings[streamID] = nodeID }
+func (f *fakeLocations) Unbind(streamID string)              { delete(f.bindings, streamID) }
 
 type fakeNodes struct {
 	items map[int64]*node.Node
@@ -109,10 +110,18 @@ func TestServiceDistinguishesNodeUnavailableAndStreamOffline(t *testing.T) {
 		return fakeMediaClient{list: nil}
 	}, time.Now)
 
-	if _, err := service.Get(context.Background(), "broken"); !errors.Is(err, ErrNodeUnavailable) {
-		t.Fatalf("err=%v, want ErrNodeUnavailable", err)
+	// 修复后契约:绑定节点不可达/无此流时旧绑定失效并扫描其余活跃节点;
+	// 本例两个节点都无此流,两场景都收敛为 ErrStreamOffline
+	if _, err := service.Get(context.Background(), "broken"); !errors.Is(err, ErrStreamOffline) {
+		t.Fatalf("err=%v, want ErrStreamOffline(扫描其余节点后流不存在)", err)
 	}
 	if _, err := service.Get(context.Background(), "offline"); !errors.Is(err, ErrStreamOffline) {
 		t.Fatalf("err=%v, want ErrStreamOffline", err)
+	}
+	if _, bound := locations.Lookup("broken"); bound {
+		t.Fatal("broken 节点的旧绑定应已失效")
+	}
+	if _, bound := locations.Lookup("offline"); bound {
+		t.Fatal("offline 节点的旧绑定应已失效")
 	}
 }

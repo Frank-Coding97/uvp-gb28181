@@ -7,50 +7,55 @@ import (
 )
 
 // Notifier 流就绪事件分发器(hook 收到 on_stream_changed regist=true 时 publish)
-// 多个 stream_id 并行,每个 stream_id 独立 channel(一次性)
+// 同一 streamID 支持多等待者:每个 Subscribe 拿到独立 channel,Publish 广播唤醒全部
 type Notifier struct {
 	mu   sync.Mutex
-	subs map[string]chan struct{}
+	subs map[string][]chan struct{}
 }
 
 // NewNotifier 创建分发器
 func NewNotifier() *Notifier {
-	return &Notifier{subs: make(map[string]chan struct{})}
+	return &Notifier{subs: make(map[string][]chan struct{})}
 }
 
 // Subscribe 订阅一个 streamID 的就绪事件,返回只读 channel(buffered=1)
 // 若已被 Publish 过,channel 会立即可读
-// 调用方负责 Unsubscribe 释放
+// 调用方负责 Unsubscribe(streamID, ch) 释放
 func (n *Notifier) Subscribe(streamID string) <-chan struct{} {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if ch, ok := n.subs[streamID]; ok {
-		return ch
-	}
 	ch := make(chan struct{}, 1)
-	n.subs[streamID] = ch
+	n.subs[streamID] = append(n.subs[streamID], ch)
 	return ch
 }
 
 // Unsubscribe 释放订阅(WaitReady 退出时调用,避免泄漏)
-func (n *Notifier) Unsubscribe(streamID string) {
+func (n *Notifier) Unsubscribe(streamID string, target <-chan struct{}) {
 	n.mu.Lock()
-	delete(n.subs, streamID)
-	n.mu.Unlock()
+	defer n.mu.Unlock()
+	list := n.subs[streamID]
+	for i, ch := range list {
+		if ch == target {
+			n.subs[streamID] = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
+	if len(n.subs[streamID]) == 0 {
+		delete(n.subs, streamID)
+	}
 }
 
-// Publish 发布就绪事件;若有订阅者则唤醒,否则丢弃
+// Publish 发布就绪事件;广播给该 streamID 的所有订阅者
 // 重复 Publish 安全(channel buffered=1,非阻塞写)
 func (n *Notifier) Publish(streamID string) {
 	n.mu.Lock()
-	ch, ok := n.subs[streamID]
+	list := append([]chan struct{}(nil), n.subs[streamID]...)
 	n.mu.Unlock()
-	if !ok {
-		return
-	}
-	select {
-	case ch <- struct{}{}:
-	default: // 已经有信号在 buffer 里,丢弃即可
+	for _, ch := range list {
+		select {
+		case ch <- struct{}{}:
+		default: // 已经有信号在 buffer 里,丢弃即可
+		}
 	}
 }
 
@@ -67,7 +72,7 @@ type PollRefFn func(ctx context.Context, ref LiveRef) (bool, error)
 // 调用方应在退出时 Unsubscribe(本函数已包,但只 Subscribe 一次)
 func WaitReady(ctx context.Context, n *Notifier, streamID string, poll PollFn, pollInterval time.Duration) error {
 	hookCh := n.Subscribe(streamID)
-	defer n.Unsubscribe(streamID)
+	defer n.Unsubscribe(streamID, hookCh)
 
 	if pollInterval <= 0 {
 		pollInterval = 200 * time.Millisecond
@@ -105,7 +110,7 @@ func WaitReady(ctx context.Context, n *Notifier, streamID string, poll PollFn, p
 // by ref.
 func WaitReadyRef(ctx context.Context, n *Notifier, ref LiveRef, poll PollRefFn, pollInterval time.Duration) error {
 	hookCh := n.Subscribe(ref.StreamID)
-	defer n.Unsubscribe(ref.StreamID)
+	defer n.Unsubscribe(ref.StreamID, hookCh)
 
 	if pollInterval <= 0 {
 		pollInterval = 200 * time.Millisecond

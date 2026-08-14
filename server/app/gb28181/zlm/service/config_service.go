@@ -11,6 +11,9 @@ import (
 
 var ErrManagedConfigKey = errors.New("platform-managed ZLM config key")
 
+// ErrRestartRequiredUnsupported 平台尚未实现待重启配置的持久化与应用流程
+var ErrRestartRequiredUnsupported = errors.New("ZLM config requires restart, not supported yet")
+
 var platformManagedConfigKeys = map[string]struct{}{
 	"api.secret":                 {},
 	"hook.enable":                {},
@@ -236,15 +239,18 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 		}
 		meta, known := catalogIndex[k]
 		if !known {
+			// 未知 key 不再透传:透传属于无调用方的投机性灵活设计,
+			// 且绕过 catalog 的校验与可维护性边界
 			resp.Unknown = append(resp.Unknown, k)
-			hotParams[k] = v // 未知项 fallback 当作热改下发
 			continue
 		}
 		if meta.HotReloadable {
 			hotParams[k] = v
 			resp.Applied = append(resp.Applied, k)
 		} else {
-			resp.RequiresRestart = append(resp.RequiresRestart, k)
+			// 平台尚未实现"重启后应用 desired state"的持久化流程,
+			// 接受这类配置会谎报成功(前端提示需重启,但重启后值并不存在)
+			return nil, fmt.Errorf("%w: %s", ErrRestartRequiredUnsupported, k)
 		}
 	}
 	if len(hotParams) > 0 {

@@ -105,18 +105,16 @@ func TestConfigService_Update_SplitsHotAndRestart(t *testing.T) {
 	svc := service.NewConfigService(reg, cli)
 	id := reg.List()[0].ID
 
-	resp, err := svc.Update(context.Background(), id, service.UpdateConfigReq{
+	_, err := svc.Update(context.Background(), id, service.UpdateConfigReq{
 		Changes: map[string]string{
 			"hook.timeoutSec": "12",
 			"http.port":       "8080",
 		},
 	})
-	require.NoError(t, err)
-	require.Contains(t, resp.Applied, "hook.timeoutSec")
-	require.Contains(t, resp.RequiresRestart, "http.port")
-	require.NotContains(t, resp.Applied, "http.port", "需重启项不应在 Applied")
-	require.Equal(t, map[string]string{"hook.timeoutSec": "12"}, cli.lastSetParams,
-		"只应给 ZLM 下发热改项")
+	// 修复后契约:含需重启项时整体拒绝(平台未实现 desired-state 持久化,
+	// 接受这类配置会谎报成功),热改项也不下发
+	require.ErrorIs(t, err, service.ErrRestartRequiredUnsupported)
+	require.Empty(t, cli.lastSetParams)
 }
 
 func TestConfigService_Update_AllHot_NoRestart(t *testing.T) {

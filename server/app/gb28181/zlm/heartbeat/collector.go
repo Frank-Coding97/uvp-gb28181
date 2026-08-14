@@ -87,17 +87,9 @@ func (c *Collector) Receive(payload []byte) error {
 	if body.MediaServerID == "" {
 		return ErrEmptyMediaServerID
 	}
-	// 不覆盖 NetThread/WorkThread 等由 Poller 维护的字段:
-	// 先拿当前 Stats,只覆盖心跳字段
-	cur, _ := c.registry.GetByUUID(body.MediaServerID)
-	var stats node.Stats
-	if cur != nil {
-		stats = cur.Stats
-	}
-	stats.LastHeartbeatAt = time.Now()
-	stats.MediaSourceCount = body.Data.MediaSource
-	stats.SessionCount = body.Data.TcpSession + body.Data.UdpSession
-	c.registry.UpdateStats(body.MediaServerID, stats)
+	// 锁内字段级更新:与 ThreadLoadPoller 的负载字段互不覆盖
+	c.registry.UpdateHeartbeatFields(body.MediaServerID,
+		body.Data.MediaSource, body.Data.TcpSession+body.Data.UdpSession, time.Now())
 	if current, ok := c.registry.GetByUUID(body.MediaServerID); ok && current.IsActive() &&
 		!c.registry.IsAutoOnDemandReady(current.ID) && c.scheduler != nil {
 		c.scheduler.ScheduleConfigConvergence(current.ID)

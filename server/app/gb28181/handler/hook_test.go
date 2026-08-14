@@ -380,7 +380,7 @@ func TestHookOnStreamChangedRegistPublishes(t *testing.T) {
 	e := newHookEngine(t, h)
 
 	ch := n.Subscribe("stream-pub-test")
-	defer n.Unsubscribe("stream-pub-test")
+	defer n.Unsubscribe("stream-pub-test", ch)
 
 	rr := postJSON(t, e, "/index/hook/on_stream_changed", gin.H{
 		"app":    "rtp",
@@ -405,7 +405,7 @@ func TestHookOnStreamChangedRegistFalseNoPublish(t *testing.T) {
 	e := newHookEngine(t, h)
 
 	ch := n.Subscribe("stream-unreg")
-	defer n.Unsubscribe("stream-unreg")
+	defer n.Unsubscribe("stream-unreg", ch)
 
 	rr := postJSON(t, e, "/index/hook/on_stream_changed", gin.H{
 		"app": "rtp", "stream": "stream-unreg", "regist": false,

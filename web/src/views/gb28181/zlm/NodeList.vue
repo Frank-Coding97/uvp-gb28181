@@ -273,25 +273,33 @@ async function handleDelete(node: ZLMNode) {
     });
 }
 
-// 批量操作
+// 批量操作:allSettled 汇总成败,失败节点保留选中,不谎报全部成功
+async function runBatchAction(action: (id: number) => Promise<unknown>, verb: string) {
+    const results = await Promise.allSettled(selectedNodes.value.map((n) => action(n.id)));
+    const failed = selectedNodes.value.filter((_, index) => results[index].status === "rejected");
+    const succeeded = selectedNodes.value.length - failed.length;
+    if (failed.length === 0) {
+        Message.success(`已${verb} ${succeeded} 个节点`);
+        selectedIds.value = [];
+    } else {
+        Message.warning(`${verb}成功 ${succeeded} 个,失败 ${failed.length} 个(已保留选中,可重试)`);
+        selectedIds.value = failed.map((n) => n.id);
+    }
+    refresh();
+}
+
 async function handleBatchMaintenance() {
     Modal.warning({
         title: `批量切维护态?`,
         content: `将把 ${selectedNodes.value.length} 个节点切到维护态。`,
         onOk: async () => {
-            await Promise.all(selectedNodes.value.map((n) => setZLMNodeMaintenance(n.id).catch(() => null)));
-            Message.success(`已操作 ${selectedNodes.value.length} 个节点`);
-            selectedIds.value = [];
-            refresh();
+            await runBatchAction(setZLMNodeMaintenance, "切维护态");
         }
     });
 }
 
 async function handleBatchActivate() {
-    await Promise.all(selectedNodes.value.map((n) => activateZLMNode(n.id).catch(() => null)));
-    Message.success(`已激活 ${selectedNodes.value.length} 个节点`);
-    selectedIds.value = [];
-    refresh();
+    await runBatchAction(activateZLMNode, "激活");
 }
 </script>
 
