@@ -1034,6 +1034,33 @@ CREATE TABLE `gb_sip_trace_message` (
   KEY `idx_gb_sip_trace_call_occurred` (`call_id`, `occurred_at`, `event_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
+-- Table structure for `gb_sip_trace_session_diagnosis`
+DROP TABLE IF EXISTS `gb_sip_trace_session_diagnosis`;
+CREATE TABLE `gb_sip_trace_session_diagnosis` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `session_day` date NOT NULL,
+  `observed_at` datetime(6) NOT NULL,
+  `correlation_key` varchar(128) NOT NULL,
+  `state` varchar(16) NOT NULL DEFAULT 'active',
+  `category` varchar(32) NOT NULL,
+  `code` varchar(64) NOT NULL,
+  `stage` varchar(32) NOT NULL,
+  `source` varchar(32) NOT NULL,
+  `device_id` varchar(64) NOT NULL DEFAULT '',
+  `channel_id` varchar(64) NOT NULL DEFAULT '',
+  `call_id` varchar(255) NOT NULL DEFAULT '',
+  `cseq` int unsigned NOT NULL DEFAULT 0,
+  `method` varchar(32) NOT NULL DEFAULT '',
+  `status_code` smallint unsigned NOT NULL DEFAULT 0,
+  `stream_id` varchar(255) NOT NULL DEFAULT '',
+  `resolved_at` datetime(6) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sip_trace_diagnosis_session` (`session_day`, `category`, `correlation_key`),
+  KEY `idx_sip_trace_diagnosis_category_state_observed` (`session_day`, `category`, `state`, `observed_at`),
+  KEY `idx_sip_trace_diagnosis_device_observed` (`device_id`, `observed_at`),
+  KEY `idx_sip_trace_diagnosis_call_cseq` (`call_id`, `cseq`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
 -- Table structure for `gb_talk_session`
 DROP TABLE IF EXISTS `gb_talk_session`;
 CREATE TABLE `gb_talk_session` (

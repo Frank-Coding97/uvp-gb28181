@@ -60,3 +60,44 @@ func TestMySQLReleaseInitializationContract(t *testing.T) {
 		require.NotRegexp(t, regexp.MustCompile(`(?m)^insert into `+"`"+environmentData+"`"), sql, environmentData)
 	}
 }
+
+func TestInitializationDiagnosisSchemaContract(t *testing.T) {
+	files := []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"}
+	columns := []string{
+		"gb_sip_trace_session_diagnosis", "session_day", "observed_at", "correlation_key",
+		"state", "category", "code", "stage", "source", "device_id", "channel_id",
+		"call_id", "cseq", "method", "status_code", "stream_id", "resolved_at",
+		"uk_sip_trace_diagnosis_session", "idx_sip_trace_diagnosis_category_state_observed",
+		"idx_sip_trace_diagnosis_device_observed", "idx_sip_trace_diagnosis_call_cseq",
+	}
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			body, err := os.ReadFile(file)
+			require.NoError(t, err)
+			text := diagnosisSchemaSection(strings.ToLower(string(body)))
+			for _, column := range columns {
+				require.Containsf(t, text, column, "fresh schema missing diagnosis field or index %s", column)
+			}
+			for _, forbidden := range []string{"json", "enum", "partial index"} {
+				require.NotContainsf(t, text, forbidden, "fresh schema contains unsupported feature %s", forbidden)
+			}
+		})
+	}
+}
+
+func diagnosisSchemaSection(text string) string {
+	start := strings.Index(text, "gb_sip_trace_session_diagnosis")
+	if start < 0 {
+		return text
+	}
+	section := text[start:]
+	if tableStart := strings.Index(section, "create table"); tableStart >= 0 {
+		section = section[tableStart:]
+	}
+	for _, marker := range []string{"\n-- table structure for `", "\ncreate table ", "\nif object_id(n'"} {
+		if end := strings.Index(section[1:], marker); end >= 0 {
+			section = section[:end+1]
+		}
+	}
+	return section
+}

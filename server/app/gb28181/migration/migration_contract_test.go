@@ -22,10 +22,10 @@ func TestMigrationFileContract(t *testing.T) {
 	var newFiles []string
 	for _, e := range entries {
 		name := e.Name()
-		date, _, ok := strings.Cut(name, "-")
-		if !ok || !strings.HasSuffix(name, ".sql") {
+		if len(name) < len(contractThreshold) || !strings.HasSuffix(name, ".sql") {
 			continue
 		}
+		date := name[:len(contractThreshold)]
 		if date >= contractThreshold {
 			newFiles = append(newFiles, name)
 		}
