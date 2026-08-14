@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 )
 
 func validateMessageFilter(filter MessageFilter) error {
@@ -182,6 +183,18 @@ func validateSessionFilter(filter SessionFilter) error {
 	if filter.From.IsZero() || filter.To.IsZero() || !filter.From.Before(filter.To) || filter.To.Sub(filter.From) > MaxSessionQueryRange {
 		return ErrTraceTimeRangeRequired
 	}
+	if filter.DiagnosisCode != "" && filter.DiagnosisCategory == "" {
+		return errors.New("diagnosis category is required when code is set")
+	}
+	if filter.DiagnosisCategory != "" {
+		if filter.DiagnosisCode == "" {
+			if filter.DiagnosisCategory != diagnosis.CategoryRegisterFailure && filter.DiagnosisCategory != diagnosis.CategoryPlayStuck {
+				return errors.New("invalid diagnosis category")
+			}
+		} else if err := diagnosis.ValidateCategoryCode(filter.DiagnosisCategory, filter.DiagnosisCode); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -275,8 +288,127 @@ func applySessionCandidates(query *gorm.DB, candidates []sessionCandidate) *gorm
 	return query.Where(scope)
 }
 
+func sessionIdentity(day time.Time, deviceID, callID string) string {
+	return day.UTC().Format("2006-01-02") + "\x00" + deviceID + "\x00" + callID
+}
+
+func applyDiagnosisBaseFilter(query *gorm.DB, filter SessionFilter) *gorm.DB {
+	query = query.Where("state = ? AND observed_at >= ? AND observed_at < ?",
+		string(diagnosis.StateActive), filter.From.UTC(), filter.To.UTC())
+	if len(filter.DeviceIDs) > 0 {
+		query = query.Where("device_id IN ?", filter.DeviceIDs)
+	} else if filter.DeviceID != "" {
+		query = query.Where("device_id = ?", filter.DeviceID)
+	}
+	if filter.CallID != "" {
+		query = query.Where("call_id = ?", filter.CallID)
+	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + strings.ToLower(keyword) + "%"
+		query = query.Where("LOWER(call_id) LIKE ? OR LOWER(device_id) LIKE ?", like, like)
+	}
+	if filter.DiagnosisCategory != "" {
+		query = query.Where("category = ?", string(filter.DiagnosisCategory))
+	}
+	if filter.DiagnosisCode != "" {
+		query = query.Where("code = ?", string(filter.DiagnosisCode))
+	}
+	return query
+}
+
+func (s *RelationalStore) activeSessionDiagnoses(ctx context.Context, filter SessionFilter) ([]gbmodels.GbSipTraceSessionDiagnosis, error) {
+	var rows []gbmodels.GbSipTraceSessionDiagnosis
+	query := applyDiagnosisBaseFilter(
+		s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceSessionDiagnosis{}), filter,
+	)
+	if err := query.Order("observed_at ASC").Order("id ASC").Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("query active SIP trace diagnoses: %w", err)
+	}
+	return rows, nil
+}
+
+func diagnosisSummary(row gbmodels.GbSipTraceSessionDiagnosis) SessionDiagnosis {
+	return SessionDiagnosis{
+		ObservedAt: row.ObservedAt.UTC(), CorrelationKey: row.CorrelationKey,
+		Category: diagnosis.Category(row.Category), Code: diagnosis.Code(row.Code),
+		Stage: diagnosis.Stage(row.Stage), Source: diagnosis.Source(row.Source),
+		DeviceID: row.DeviceID, ChannelID: row.ChannelID, CallID: row.CallID,
+		CSeq: row.CSeq, Method: row.Method, StatusCode: row.StatusCode, StreamID: row.StreamID,
+	}
+}
+
+func matchesDiagnosisFilter(item SessionDiagnosis, filter SessionFilter) bool {
+	return (filter.DiagnosisCategory == "" || item.Category == filter.DiagnosisCategory) &&
+		(filter.DiagnosisCode == "" || item.Code == filter.DiagnosisCode)
+}
+
+func reconstructedRegisterDiagnosis(session SessionSummary) *SessionDiagnosis {
+	if session.FirstMethod != "REGISTER" || session.FinalStatus < 400 || session.FinalStatus == 401 {
+		return nil
+	}
+	return &SessionDiagnosis{
+		ObservedAt: session.LastAt, Category: diagnosis.CategoryRegisterFailure,
+		Code: diagnosis.CodeUndetermined, Stage: diagnosis.StageRegister,
+		Source: diagnosis.SourceReconstructed, DeviceID: session.DeviceID,
+		CallID: session.CallID, Method: "REGISTER", StatusCode: session.FinalStatus,
+	}
+}
+
+func attachSessionDiagnoses(sessions []SessionSummary, rows []gbmodels.GbSipTraceSessionDiagnosis, filter SessionFilter) []SessionSummary {
+	bySession := make(map[string][]SessionDiagnosis)
+	for _, row := range rows {
+		key := sessionIdentity(row.SessionDay, row.DeviceID, row.CallID)
+		bySession[key] = append(bySession[key], diagnosisSummary(row))
+	}
+	filtered := make([]SessionSummary, 0, len(sessions))
+	for i := range sessions {
+		session := &sessions[i]
+		session.diagnoses = append(session.diagnoses, bySession[sessionIdentity(session.Day, session.DeviceID, session.CallID)]...)
+		if reconstructed := reconstructedRegisterDiagnosis(*session); reconstructed != nil {
+			hasRegisterDiagnosis := false
+			for _, item := range session.diagnoses {
+				if item.Category == diagnosis.CategoryRegisterFailure {
+					hasRegisterDiagnosis = true
+					break
+				}
+			}
+			if !hasRegisterDiagnosis {
+				session.diagnoses = append(session.diagnoses, *reconstructed)
+			}
+		}
+		matching := make([]SessionDiagnosis, 0, len(session.diagnoses))
+		for _, item := range session.diagnoses {
+			if matchesDiagnosisFilter(item, filter) {
+				matching = append(matching, item)
+			}
+		}
+		if (filter.DiagnosisCategory != "" || filter.DiagnosisCode != "") && len(matching) == 0 {
+			continue
+		}
+		if len(matching) > 0 {
+			latest := matching[len(matching)-1]
+			session.Diagnosis = &latest
+		}
+		missing := session.RequestCount > session.FinalResponseCount
+		statusAnomaly := session.FinalStatus >= 300
+		if session.FirstMethod == "REGISTER" && session.FinalStatus == 401 && !missing && len(session.diagnoses) == 0 {
+			statusAnomaly = false
+		}
+		session.MissingResponse = missing
+		session.Anomaly = missing || statusAnomaly || len(session.diagnoses) > 0
+		if !filter.Anomaly || session.Anomaly {
+			filtered = append(filtered, *session)
+		}
+	}
+	return filtered
+}
+
 func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilter, candidateLimit int) ([]SessionSummary, error) {
 	if err := validateSessionFilter(filter); err != nil {
+		return nil, err
+	}
+	diagnosisRows, err := s.activeSessionDiagnoses(ctx, filter)
+	if err != nil {
 		return nil, err
 	}
 	from, to := sessionQueryRange(filter)
@@ -299,7 +431,7 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 	for _, row := range rows {
 		at := row.OccurredAt.UTC()
 		day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
-		key := day.Format("2006-01-02") + "\x00" + row.DeviceID + "\x00" + row.CallID
+		key := sessionIdentity(day, row.DeviceID, row.CallID)
 		acc := accumulators[key]
 		if acc == nil {
 			source, destination := row.LocalAddr, row.RemoteAddr
@@ -342,12 +474,11 @@ func (s *RelationalStore) reduceSessions(ctx context.Context, filter SessionFilt
 		missing := acc.summary.RequestCount > acc.summary.FinalResponseCount
 		acc.summary.SessionDerivedState = SessionDerivedState{
 			OriginalAvailable: now.Before(expiresAt), OriginalExpiresAt: expiresAt,
-			MissingResponse: missing, Anomaly: missing || acc.summary.FinalStatus >= 300,
+			MissingResponse: missing,
 		}
-		if !filter.Anomaly || acc.summary.Anomaly {
-			sessions = append(sessions, acc.summary)
-		}
+		sessions = append(sessions, acc.summary)
 	}
+	sessions = attachSessionDiagnoses(sessions, diagnosisRows, filter)
 	sort.Slice(sessions, func(i, j int) bool {
 		if sessions[i].LastAt.Equal(sessions[j].LastAt) {
 			return sessions[i].CallID > sessions[j].CallID
@@ -366,8 +497,8 @@ func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter
 		limit = MaxSessionPageSize
 	}
 	candidateLimit := limit
-	if filter.Anomaly {
-		candidateLimit = MaxSessionPageSize
+	if filter.Anomaly || filter.DiagnosisCategory != "" || filter.DiagnosisCode != "" {
+		candidateLimit = 0
 	}
 	sessions, err := s.reduceSessions(ctx, filter, candidateLimit)
 	if err != nil {
@@ -381,7 +512,6 @@ func (s *RelationalStore) ListSessions(ctx context.Context, filter SessionFilter
 
 func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFilter) (SessionStats, error) {
 	filter.Limit = 0
-	filter.Anomaly = false
 	sessions, err := s.reduceSessions(ctx, filter, 0)
 	if err != nil {
 		return SessionStats{}, err
@@ -392,12 +522,17 @@ func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFil
 		if session.Anomaly {
 			stats.Anomaly++
 		}
-		if session.FirstMethod == "REGISTER" && session.FinalStatus == 401 && session.RequestCount > session.FinalResponseCount {
+		categories := make(map[diagnosis.Category]struct{})
+		for _, item := range session.diagnoses {
+			categories[item.Category] = struct{}{}
+		}
+		if _, ok := categories[diagnosis.CategoryRegisterFailure]; ok {
 			stats.RegisterFail++
 		}
-		if session.FirstMethod == "INVITE" && session.FinalStatus < 200 {
-			stats.InvitePending++
+		if _, ok := categories[diagnosis.CategoryPlayStuck]; ok {
+			stats.PlayStuck++
 		}
 	}
+	stats.InvitePending = stats.PlayStuck
 	return stats, nil
 }

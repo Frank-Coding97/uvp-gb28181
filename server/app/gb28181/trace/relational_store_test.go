@@ -22,6 +22,7 @@ func newRelationalStoreTestDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	dbConn.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipTraceMessage{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipTraceSessionDiagnosis{}))
 	return db
 }
 
@@ -109,13 +110,19 @@ func TestRelationalStoreDerivesSessionsAndUnpagedStats(t *testing.T) {
 	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
 	events := []StoredEvent{
 		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed31", at, "device-a", "register", "REGISTER", 0),
-		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed32", at.Add(time.Second), "device-a", "register", "REGISTER", 0),
-		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed33", at.Add(2*time.Second), "device-a", "register", "REGISTER", 401),
-		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed34", at.Add(3*time.Second), "device-a", "invite", "INVITE", 0),
-		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed35", at.Add(4*time.Second), "device-b", "message", "MESSAGE", 0),
-		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed36", at.Add(5*time.Second), "device-b", "message", "MESSAGE", 200),
+		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed32", at.Add(time.Second), "device-a", "register", "REGISTER", 401),
+		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed33", at.Add(2*time.Second), "device-a", "register", "REGISTER", 0),
+		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed34", at.Add(3*time.Second), "device-a", "register", "REGISTER", 200),
+		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed35", at.Add(4*time.Second), "device-a", "invite", "INVITE", 0),
+		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed36", at.Add(5*time.Second), "device-b", "message", "MESSAGE", 0),
+		testRelationalEvent("019f7a0c-a48d-7ddb-a44d-30a8ab2eed37", at.Add(6*time.Second), "device-b", "message", "MESSAGE", 200),
 	}
 	require.NoError(t, store.InsertBatch(t.Context(), events))
+	require.NoError(t, db.Create(&gbmodels.GbSipTraceSessionDiagnosis{
+		SessionDay: at.Truncate(24 * time.Hour), ObservedAt: at.Add(7 * time.Second),
+		CorrelationKey: "play-request", State: "active", Category: "play_stuck", Code: "signaling_timeout",
+		Stage: "signaling", Source: "runtime", DeviceID: "device-a", CallID: "invite", CSeq: 1, Method: "INVITE",
+	}).Error)
 	filter := SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute), Limit: 2}
 
 	sessions, err := store.ListSessions(t.Context(), filter)
@@ -128,13 +135,89 @@ func TestRelationalStoreDerivesSessionsAndUnpagedStats(t *testing.T) {
 
 	stats, err := store.GetSessionStats(t.Context(), filter)
 	require.NoError(t, err)
-	require.Equal(t, SessionStats{Total: 3, Anomaly: 2, RegisterFail: 1, InvitePending: 1}, stats)
+	require.Equal(t, SessionStats{Total: 3, Anomaly: 1, RegisterFail: 0, PlayStuck: 1, InvitePending: 1}, stats)
 
 	filter.Anomaly = true
 	filter.Limit = 10
 	sessions, err = store.ListSessions(t.Context(), filter)
 	require.NoError(t, err)
-	require.Len(t, sessions, 2)
+	require.Len(t, sessions, 1)
+	require.Equal(t, "invite", sessions[0].CallID)
+}
+
+func TestRelationalStoreFiltersActiveDiagnosisBeforePagination(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	events := make([]StoredEvent, 301)
+	for i := range events {
+		events[i] = testRelationalEvent(
+			fmt.Sprintf("event-diagnosis-%03d", i), at.Add(time.Duration(i)*time.Second),
+			"device-a", fmt.Sprintf("call-diagnosis-%03d", i), "MESSAGE", 200,
+		)
+	}
+	require.NoError(t, store.InsertBatch(t.Context(), events))
+	require.NoError(t, db.Create(&gbmodels.GbSipTraceSessionDiagnosis{
+		SessionDay: at.Truncate(24 * time.Hour), ObservedAt: at.Add(time.Second),
+		CorrelationKey: "register-attempt", State: "active", Category: "register_failure", Code: "digest_failure",
+		Stage: "register", Source: "runtime", DeviceID: "device-a", CallID: "call-diagnosis-001", CSeq: 1, Method: "REGISTER",
+	}).Error)
+
+	filter := SessionFilter{
+		From: at.Add(-time.Minute), To: at.Add(time.Hour), Limit: 20,
+		DiagnosisCategory: "register_failure", DiagnosisCode: "digest_failure",
+	}
+	sessions, err := store.ListSessions(t.Context(), filter)
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Equal(t, "call-diagnosis-001", sessions[0].CallID)
+	require.NotNil(t, sessions[0].Diagnosis)
+	require.Equal(t, "digest_failure", string(sessions[0].Diagnosis.Code))
+
+	stats, err := store.GetSessionStats(t.Context(), filter)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, stats.Total)
+	require.EqualValues(t, 1, stats.RegisterFail)
+}
+
+func TestRelationalStoreExcludesResolvedDiagnosisAndReconstructsOnlyClearRegisterFailure(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, store.InsertBatch(t.Context(), []StoredEvent{
+		testRelationalEvent("challenge-request", at, "device-a", "challenge", "REGISTER", 0),
+		testRelationalEvent("challenge-response", at.Add(time.Second), "device-a", "challenge", "REGISTER", 401),
+		testRelationalEvent("failure-request", at.Add(2*time.Second), "device-a", "failure", "REGISTER", 0),
+		testRelationalEvent("failure-response", at.Add(3*time.Second), "device-a", "failure", "REGISTER", 403),
+		testRelationalEvent("invite-request", at.Add(4*time.Second), "device-a", "invite", "INVITE", 0),
+	}))
+	require.NoError(t, db.Create(&gbmodels.GbSipTraceSessionDiagnosis{
+		SessionDay: at.Truncate(24 * time.Hour), ObservedAt: at.Add(5 * time.Second),
+		CorrelationKey: "resolved-attempt", State: "resolved", Category: "play_stuck", Code: "media_timeout",
+		Stage: "media", Source: "runtime", DeviceID: "device-a", CallID: "invite", CSeq: 1, Method: "INVITE",
+	}).Error)
+
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute), Limit: 10})
+	require.NoError(t, err)
+	byCallID := make(map[string]SessionSummary, len(sessions))
+	for _, session := range sessions {
+		byCallID[session.CallID] = session
+	}
+	require.False(t, byCallID["challenge"].Anomaly)
+	require.Nil(t, byCallID["challenge"].Diagnosis)
+	require.Nil(t, byCallID["invite"].Diagnosis)
+	require.NotNil(t, byCallID["failure"].Diagnosis)
+	require.Equal(t, "register_failure", string(byCallID["failure"].Diagnosis.Category))
+	require.Equal(t, "undetermined", string(byCallID["failure"].Diagnosis.Code))
+	require.Equal(t, "reconstructed", string(byCallID["failure"].Diagnosis.Source))
+
+	stats, err := store.GetSessionStats(t.Context(), SessionFilter{From: at.Add(-time.Minute), To: at.Add(time.Minute)})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, stats.RegisterFail)
+	require.Zero(t, stats.PlayStuck)
+	require.Equal(t, stats.PlayStuck, stats.InvitePending)
 }
 
 func TestRelationalStoreListSessionsBoundsCandidateRows(t *testing.T) {

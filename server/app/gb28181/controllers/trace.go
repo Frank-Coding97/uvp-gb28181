@@ -18,6 +18,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 )
@@ -543,6 +544,20 @@ func parseSessionFilter(c *gin.Context) (gbtrace.SessionFilter, error) {
 	filter.Anomaly, err = parseOptionalBool(c.Query("anomaly"))
 	if err != nil {
 		return gbtrace.SessionFilter{}, errors.New("anomaly 参数非法")
+	}
+	filter.DiagnosisCategory = diagnosis.Category(strings.TrimSpace(c.Query("diagnosisCategory")))
+	filter.DiagnosisCode = diagnosis.Code(strings.TrimSpace(c.Query("diagnosisCode")))
+	if filter.DiagnosisCode != "" && filter.DiagnosisCategory == "" {
+		return gbtrace.SessionFilter{}, errors.New("diagnosisCode 需要 diagnosisCategory")
+	}
+	if filter.DiagnosisCategory != "" {
+		if filter.DiagnosisCode == "" {
+			if filter.DiagnosisCategory != diagnosis.CategoryRegisterFailure && filter.DiagnosisCategory != diagnosis.CategoryPlayStuck {
+				return gbtrace.SessionFilter{}, errors.New("diagnosisCategory 参数非法")
+			}
+		} else if validateErr := diagnosis.ValidateCategoryCode(filter.DiagnosisCategory, filter.DiagnosisCode); validateErr != nil {
+			return gbtrace.SessionFilter{}, errors.New("diagnosisCategory/diagnosisCode 组合非法")
+		}
 	}
 	if value := c.Query("limit"); value != "" {
 		limit, parseErr := strconv.Atoi(value)

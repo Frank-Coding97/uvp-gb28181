@@ -22,13 +22,15 @@ type fakeTraceAccess struct{ allowed bool }
 func (a fakeTraceAccess) IsSystemAdmin(context.Context, uint) bool { return a.allowed }
 
 type fakeTraceQueryService struct {
-	health       gbtrace.HealthSnapshot
-	messages     gbtrace.MessagePage
-	sessions     []gbtrace.SessionSummary
-	detail       gbtrace.MessageDetail
-	err          error
-	listCalls    int
-	detailAccess gbtrace.DisclosureContext
+	health            gbtrace.HealthSnapshot
+	messages          gbtrace.MessagePage
+	sessions          []gbtrace.SessionSummary
+	detail            gbtrace.MessageDetail
+	err               error
+	listCalls         int
+	sessionCalls      int
+	lastSessionFilter gbtrace.SessionFilter
+	detailAccess      gbtrace.DisclosureContext
 }
 
 func (s *fakeTraceQueryService) Health() gbtrace.HealthSnapshot { return s.health }
@@ -43,7 +45,9 @@ func (s *fakeTraceQueryService) GetMessage(_ context.Context, _ string, sensitiv
 	}
 	return s.detail, s.err
 }
-func (s *fakeTraceQueryService) ListSessions(context.Context, gbtrace.SessionFilter) ([]gbtrace.SessionSummary, error) {
+func (s *fakeTraceQueryService) ListSessions(_ context.Context, filter gbtrace.SessionFilter) ([]gbtrace.SessionSummary, error) {
+	s.sessionCalls++
+	s.lastSessionFilter = filter
 	return s.sessions, s.err
 }
 func (s *fakeTraceQueryService) GetSessionStats(context.Context, gbtrace.SessionFilter) (gbtrace.SessionStats, error) {
@@ -160,4 +164,27 @@ func TestTraceControllerValidatesSessionWindow(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	r.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/sessions?from=2026-01-01T00:00:00Z&to=2026-07-19T00:00:00Z", nil))
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
+}
+
+func TestTraceControllerParsesAndValidatesDiagnosisFilters(t *testing.T) {
+	service := &fakeTraceQueryService{sessions: []gbtrace.SessionSummary{}}
+	r := newTraceControllerRouter(service, fakeTraceAccess{allowed: true})
+	base := "/sessions?from=2026-07-19T00:00:00Z&to=2026-07-19T01:00:00Z"
+
+	valid := httptest.NewRecorder()
+	r.ServeHTTP(valid, httptest.NewRequest(http.MethodGet, base+"&diagnosisCategory=play_stuck&diagnosisCode=media_timeout", nil))
+	require.Equal(t, http.StatusOK, valid.Code)
+	require.Equal(t, "play_stuck", string(service.lastSessionFilter.DiagnosisCategory))
+	require.Equal(t, "media_timeout", string(service.lastSessionFilter.DiagnosisCode))
+
+	for _, query := range []string{
+		"&diagnosisCategory=unknown",
+		"&diagnosisCode=media_timeout",
+		"&diagnosisCategory=register_failure&diagnosisCode=media_timeout",
+	} {
+		recorder := httptest.NewRecorder()
+		r.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, base+query, nil))
+		require.Equal(t, http.StatusBadRequest, recorder.Code, query)
+	}
+	require.Equal(t, 1, service.sessionCalls)
 }
