@@ -231,6 +231,9 @@ func (s *Service) finish(result QueryResult, request QueryRequest, snapshot entr
 	result.PartialReason = reason
 	result.DeclaredTotal = snapshot.declaredTotal
 	result.ReceivedCount = len(snapshot.records)
+	result.RejectedCount = snapshot.rejectedCount
+	result.WarningCount = snapshot.warningCount
+	result.WarningCodes = append([]string(nil), snapshot.warningCodes...)
 	result.Incomplete = status == QueryStatusPartial || status == QueryStatusTimeout || status == QueryStatusCanceled || status == QueryStatusUnavailable
 	result.FinishedAt = s.options.Now()
 	result.Records = make([]Record, 0, len(snapshot.records))

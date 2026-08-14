@@ -130,6 +130,10 @@ func (s *ResultSnapshotStore) Issue(input SnapshotInput) (Snapshot, error) {
 	}
 	s.cleanupExpiredLocked(now)
 	s.snapshots[recordKey] = snapshot
+	// 单次查询可产生数千条快照:写入后强制淘汰到总量上限
+	if max := s.maxSnapshots; max > 0 && len(s.snapshots) > max {
+		s.evictOldestLocked(len(s.snapshots) - max)
+	}
 	s.mu.Unlock()
 	return publicSnapshot(snapshot), nil
 }

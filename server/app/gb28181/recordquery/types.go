@@ -150,4 +150,9 @@ type QueryResult struct {
 	Records       []Record
 	StartedAt     time.Time
 	FinishedAt    time.Time
+	// 协议诊断:聚合边界保留的拒绝/警告计数,调用方可区分
+	// 协议数据错误与真正的设备超时
+	RejectedCount int
+	WarningCount  int
+	WarningCodes  []string
 }
