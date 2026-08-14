@@ -190,29 +190,49 @@ func operationLogRequestData(c *gin.Context, requestBody []byte) string {
 	return sanitizeRequestData(requestBody)
 }
 
-// getOperationModule 获取操作模块
+// getOperationModule 获取操作模块。
+// 前缀按具体度降序排列:例如 /gb28181/device-mgmt 必须先于 /gb28181/device,
+// /gb28181/playback-schemes 必须先于 /gb28181/play(Contains 子串匹配)。
 func getOperationModule(c *gin.Context) string {
 	path := c.Request.URL.Path
-	if strings.Contains(path, "/gb28181/alarms") {
-		return "GB28181告警管理"
-	} else if strings.Contains(path, "/users") {
-		return "用户管理"
-	} else if strings.Contains(path, "/sysMenu") {
-		return "菜单管理"
-	} else if strings.Contains(path, "/sysRole") {
-		return "角色管理"
-	} else if strings.Contains(path, "/sysDepartment") {
-		return "部门管理"
-	} else if strings.Contains(path, "/sysDict") {
-		return "字典管理"
-	} else if strings.Contains(path, "/sysApi") {
-		return "API管理"
-	} else if strings.Contains(path, "/sysAffix") {
-		return "文件管理"
-	} else if strings.Contains(path, "/config") {
-		return "系统配置"
-	} else if strings.Contains(path, "/sysOperationLog") {
-		return "操作日志管理"
+
+	modulePrefixes := []struct {
+		prefix string
+		module string
+	}{
+		// 国标模块(命名对齐前端菜单)
+		{"/gb28181/device-mgmt", "GB28181设备管理"},
+		{"/gb28181/device", "GB28181设备管理"},
+		{"/gb28181/playback-schemes", "GB28181多屏播放"},
+		{"/gb28181/play", "GB28181实时点播"},
+		{"/gb28181/cloud-recordings", "GB28181云端录像"},
+		{"/gb28181/alarms", "GB28181告警管理"},
+		{"/gb28181/cascade", "GB28181级联管理"},
+		{"/gb28181/zlm", "GB28181流媒体管理"},
+		{"/gb28181/security", "GB28181接入安全"},
+		{"/gb28181/sip/service-config", "GB28181服务配置"},
+		{"/gb28181/sip/setup", "GB28181初始化配置"},
+		{"/gb28181/sip/dashboard", "GB28181信令看板"},
+		{"/gb28181/sip/platform", "GB28181SIP接入信息"},
+		{"/gb28181/sip/qr", "GB28181扫码接入"},
+		{"/gb28181/sip-traces", "GB28181SIP日志"},
+		// 系统模块
+		{"/login", "认证管理"},
+		{"/users", "用户管理"},
+		{"/sysMenu", "菜单管理"},
+		{"/sysRole", "角色管理"},
+		{"/sysDepartment", "部门管理"},
+		{"/sysDict", "字典管理"},
+		{"/sysApi", "API管理"},
+		{"/sysAffix", "文件管理"},
+		{"/config", "系统配置"},
+		{"/sysOperationLog", "操作日志管理"},
+	}
+
+	for _, entry := range modulePrefixes {
+		if strings.Contains(path, entry.prefix) {
+			return entry.module
+		}
 	}
 	return "其他"
 }
