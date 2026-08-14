@@ -16,6 +16,9 @@ type inviteOutcomeDialog struct {
 	ackErr     error
 	statusCode int
 
+	byeErr   error
+	closeErr error
+
 	closeCalls int
 	byeCalls   int
 }
@@ -24,11 +27,11 @@ func (d *inviteOutcomeDialog) WaitAnswer(context.Context) error { return d.waitE
 func (d *inviteOutcomeDialog) Ack(context.Context) error        { return d.ackErr }
 func (d *inviteOutcomeDialog) Bye(context.Context) error {
 	d.byeCalls++
-	return nil
+	return d.byeErr
 }
 func (d *inviteOutcomeDialog) Close() error {
 	d.closeCalls++
-	return nil
+	return d.closeErr
 }
 func (d *inviteOutcomeDialog) FinalStatus() int { return d.statusCode }
 
@@ -244,6 +247,34 @@ func TestInviteTrackedStaleGenerationReleasesDialog(t *testing.T) {
 	}
 	if m.Get(s.StreamID) != live {
 		t.Fatal("stale invite must not replace the live session")
+	}
+}
+
+func TestInviteTrackedStaleGenerationSurfacesCleanupFailure(t *testing.T) {
+	byeErr := errors.New("BYE write failed")
+	dialog := &inviteOutcomeDialog{statusCode: sip.StatusOK, byeErr: byeErr}
+	transport := &inviteOutcomeTransport{dialog: dialog}
+	u := newInviteOutcomeTestUAC(transport)
+	m := NewSessionManager()
+
+	live := validInviteOutcomeSession()
+	live.Generation = 2
+	m.PutIfCurrent(live)
+
+	s := validInviteOutcomeSession()
+	s.Generation = 1
+
+	_, err := u.InviteTracked(context.Background(), m, s, "v=0\r\n")
+
+	// 主错误仍是 stale generation,清理失败必须可观测(错误链含 BYE 错误)
+	if !errors.Is(err, ErrStaleInviteGeneration) {
+		t.Fatalf("err=%v, want ErrStaleInviteGeneration", err)
+	}
+	if !errors.Is(err, byeErr) {
+		t.Fatalf("err=%v, want cleanup BYE failure in error chain", err)
+	}
+	if dialog.closeCalls != 1 {
+		t.Fatalf("stale dialog close calls=%d, want 1(Close 仍必须执行)", dialog.closeCalls)
 	}
 }
 

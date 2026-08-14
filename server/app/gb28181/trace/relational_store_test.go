@@ -23,6 +23,7 @@ func newRelationalStoreTestDB(t *testing.T) *gorm.DB {
 	dbConn.SetMaxOpenConns(1)
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipTraceMessage{}))
 	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipTraceSessionDiagnosis{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}))
 	return db
 }
 
@@ -292,6 +293,33 @@ func TestRelationalStoreListSessionsHonorsExactTimeRange(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, sessions, 1)
 	require.Equal(t, "call-inside", sessions[0].CallID)
+}
+
+func TestRelationalStoreKeywordMatchesDeviceNameAndAlias(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&gbmodels.GbDevice{
+		DeviceID: "device-a", Name: "南门摄像机", Alias: "南门",
+	}).Error)
+	require.NoError(t, store.InsertBatch(t.Context(), []StoredEvent{
+		testRelationalEvent("named-event", at, "device-a", "named-call", "MESSAGE", 200),
+	}))
+
+	page, err := store.ListMessages(t.Context(), MessageFilter{
+		From: at.Add(-time.Minute), To: at.Add(time.Minute), Keyword: "南门", Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "named-event", page.Items[0].EventID)
+
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{
+		From: at.Add(-time.Minute), To: at.Add(time.Minute), Keyword: "摄像机", Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Equal(t, "named-call", sessions[0].CallID)
 }
 
 func TestRelationalStoreListSessionsKeepsDailySessionIdentity(t *testing.T) {

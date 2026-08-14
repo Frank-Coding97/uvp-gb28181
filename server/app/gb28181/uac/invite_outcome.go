@@ -211,12 +211,21 @@ func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, 
 		// 只本地 Close 会留下设备端推流无人收
 		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer byeCancel()
-		_ = dialog.Bye(byeCtx)
-		_ = dialog.Close()
+		var cleanupErrs []error
+		if err := dialog.Bye(byeCtx); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
+		if err := dialog.Close(); err != nil {
+			cleanupErrs = append(cleanupErrs, err)
+		}
 		s.dialog = nil
 		s.State = StateIdle
 		u.recordEnd(callID, cseq, outcome.FinalStatus, false)
 		wrapped := fmt.Errorf("%w: INVITE 结果晚于更新代次,设备端会话已回收", ErrStaleInviteGeneration)
+		if len(cleanupErrs) > 0 {
+			// 清理失败不能无声 —— 上层需要知道设备端会话可能仍活着,可重试或走补偿
+			wrapped = errors.Join(wrapped, fmt.Errorf("设备端会话清理失败: %w", errors.Join(cleanupErrs...)))
+		}
 		outcome.Error = wrapped
 		return outcome, wrapped
 	}

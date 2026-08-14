@@ -612,6 +612,13 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	defer inviteCancel()
 	outcome, inviteErr := s.inviter.InviteTracked(inviteCtx, s.sessions, sess, body)
 	if inviteErr != nil {
+		if errors.Is(inviteErr, uac.ErrStaleInviteGeneration) {
+			// 本代次的 INVITE 晚于更新代次完成:InviteTracked 已回收本代次的
+			// 设备端会话。streamID 上挂的是新代次会话与 RTP 服务,不能走按
+			// streamID 的通用回滚(其 Bye/CloseRtpServer 会误杀新代次)。
+			// 本代次的 SSRC 由 defer 释放,location 绑定已被新代次覆盖,无需清理。
+			return nil, fmt.Errorf("发 INVITE 失败: %w", inviteErr)
+		}
 		if code, ok := classifyPlayStuck(outcome, inviteErr, false, errors.Is(playCtx.Err(), context.DeadlineExceeded)); ok {
 			s.emitPlayStuck(sess, outcome, code)
 		}
