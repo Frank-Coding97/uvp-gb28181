@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Message } from "@arco-design/web-vue";
-import { Check, Pencil, X } from "lucide-vue-next";
+import { Check, RotateCcw } from "lucide-vue-next";
 import { computed, onMounted, reactive, ref, watch } from "vue";
 import { getDictItemsByDictCodeAPI } from "@/api/dictionary";
 import {
@@ -53,7 +53,6 @@ import { createStaticServiceConfigDraft, normalizePlayAuthConfig } from "./servi
 const { isMobile } = useDevicesSize();
 const activeTab = ref("gb");
 const draft = reactive(createStaticServiceConfigDraft());
-const isEditing = ref(false);
 const positionHistoryLoading = ref(true);
 const positionHistorySaving = ref(false);
 const positionHistoryReady = ref(false);
@@ -222,26 +221,6 @@ const hasChanges = computed(
         preallocationModeChanged.value ||
         ignoreChannelOfflineStatusNotifyChanged.value ||
         sipLogChanged.value
-);
-const configLoading = computed(
-    () =>
-        positionHistoryLoading.value ||
-        sdpExtensionLoading.value ||
-        ptzDefaultSpeedLoading.value ||
-        defaultChannelStreamTransportLoading.value ||
-        defaultPlaybackProtocolLoading.value ||
-        fixedAddressPlaybackLoading.value ||
-        playAuthLoading.value ||
-        playbackSettingsLoading.value ||
-        globalSubscriptionLoading.value ||
-        defaultChannelAudioLoading.value ||
-        syncChannelsOnOnlineLoading.value ||
-        onlineOnHeartbeatLoading.value ||
-        saveAlarmMessagesLoading.value ||
-        sipCommandTimeoutLoading.value ||
-        preallocationModeLoading.value ||
-        ignoreChannelOfflineStatusNotifyLoading.value ||
-        sipLogLoading.value
 );
 const configSaving = computed(
     () =>
@@ -600,7 +579,7 @@ async function loadSIPLogConfig() {
     }
 }
 
-function startEditing() {
+function resetDraft() {
     draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
     draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
     draft.sdpExtension = savedSDPExtensionEnabled.value;
@@ -620,30 +599,6 @@ function startEditing() {
     draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
     draft.sipLogEnabled = savedSIPLogEnabled.value;
     draft.sipLogRetentionDays = savedSIPLogRetentionDays.value;
-    isEditing.value = true;
-}
-
-function cancelEditing() {
-    draft.saveMobilePositionHistory = savedPositionHistoryEnabled.value;
-    draft.positionHistoryRetentionDays = savedPositionHistoryRetentionDays.value;
-    draft.sdpExtension = savedSDPExtensionEnabled.value;
-    draft.ptzSpeed = savedPTZDefaultSpeed.value;
-    draft.defaultChannelStreamTransport = savedDefaultChannelStreamTransport.value;
-    draft.playback.defaultProtocol = savedDefaultPlaybackProtocol.value;
-    restoreFixedAddressPlaybackDraft();
-    restorePlayAuthDraft();
-    restorePlaybackSettingsDraft();
-    draft.globalSubscriptionItems = [...savedGlobalSubscriptionItems.value];
-    draft.defaultChannelAudioEnabled = savedDefaultChannelAudioEnabled.value;
-    draft.syncChannelsOnOnline = savedSyncChannelsOnOnline.value;
-    draft.onlineOnHeartbeat = savedOnlineOnHeartbeat.value;
-    draft.saveAlarmMessages = savedSaveAlarmMessages.value;
-    draft.sipTimeoutSec = savedSIPCommandTimeoutSec.value;
-    draft.preallocationMode = savedPreallocationMode.value;
-    draft.ignoreChannelOfflineStatusNotify = savedIgnoreChannelOfflineStatusNotify.value;
-    draft.sipLogEnabled = savedSIPLogEnabled.value;
-    draft.sipLogRetentionDays = savedSIPLogRetentionDays.value;
-    isEditing.value = false;
 }
 
 watch(
@@ -665,10 +620,9 @@ function handlePlayAuthEnabledChange(enabled: boolean) {
 }
 
 async function saveConfig() {
-    if (!configReady.value || !isEditing.value) return;
+    if (!configReady.value) return;
     if (!sipLogRetentionValid.value || !playTimeoutValid.value || !playAuthTTLValid.value) return;
     if (!hasChanges.value) {
-        isEditing.value = false;
         return;
     }
     try {
@@ -830,11 +784,9 @@ async function saveConfig() {
             sipLogSaving.value = false;
             if (response.data.applied === false) {
                 Message.error("SIP 日志配置已保存，但 SIP 服务重载失败，请检查服务状态");
-                isEditing.value = false;
                 return;
             }
         }
-        isEditing.value = false;
         Message.success("国标服务配置已更新");
     } catch (error: any) {
         restoreFixedAddressPlaybackDraft();
@@ -890,36 +842,29 @@ onMounted(() =>
     <div class="snow-fill service-config-page">
         <a-tabs
                 v-model:active-key="activeTab"
-                class="uvp-system-tabs service-config-tabs"
+                class="uvp-system-tabs uvp-config-tabs service-config-tabs"
                 :animation="true"
                 lazy-load
             >
                 <template #extra>
                     <div class="service-config-tabs__actions">
-                        <a-button
-                            v-if="!isEditing"
-                            type="primary"
-                            :disabled="configLoading || !configReady"
-                            @click="startEditing"
-                        >
-                            <template #icon><Pencil :size="15" /></template>
-                            编辑配置
+                        <span v-if="hasChanges" class="service-config-unsaved">
+                            <i class="service-config-unsaved__dot" />
+                            未保存
+                        </span>
+                        <a-button :disabled="configSaving || !hasChanges" @click="resetDraft">
+                            <template #icon><RotateCcw :size="15" /></template>
+                            重置
                         </a-button>
-                        <template v-else>
-                            <a-button :disabled="configSaving" @click="cancelEditing">
-                                <template #icon><X :size="15" /></template>
-                                取消
-                            </a-button>
-                            <a-button
-                                type="primary"
-                                :loading="configSaving"
-                                :disabled="configSaving || !hasChanges || !sipLogRetentionValid || !playTimeoutValid || !playAuthTTLValid"
-                                @click="saveConfig"
-                            >
-                                <template #icon><Check :size="15" /></template>
-                                保存配置
-                            </a-button>
-                        </template>
+                        <a-button
+                            type="primary"
+                            :loading="configSaving"
+                            :disabled="configSaving || !configReady || !hasChanges || !sipLogRetentionValid || !playTimeoutValid || !playAuthTTLValid"
+                            @click="saveConfig"
+                        >
+                            <template #icon><Check :size="15" /></template>
+                            保存配置
+                        </a-button>
                     </div>
                 </template>
                 <a-tab-pane key="gb" title="国标相关">
@@ -935,7 +880,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.saveMobilePositionHistory"
                                             :loading="positionHistoryLoading || positionHistorySaving"
-                                            :disabled="!isEditing || positionHistoryLoading || positionHistorySaving || !positionHistoryReady"
+                                            :disabled="positionHistoryLoading || positionHistorySaving || !positionHistoryReady"
                                         >
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
@@ -954,7 +899,6 @@ onMounted(() =>
                                             :min="1"
                                             :max="365"
                                             :disabled="
-                                                !isEditing ||
                                                 positionHistoryLoading ||
                                                 positionHistorySaving ||
                                                 !positionHistoryReady ||
@@ -972,7 +916,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.sdpExtension"
                                             :loading="sdpExtensionLoading || sdpExtensionSaving"
-                                            :disabled="!isEditing || sdpExtensionLoading || sdpExtensionSaving || !sdpExtensionReady"
+                                            :disabled="sdpExtensionLoading || sdpExtensionSaving || !sdpExtensionReady"
                                         >
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
@@ -993,7 +937,7 @@ onMounted(() =>
                                                 :max="10"
                                                 :step="1"
                                                 show-ticks
-                                                :disabled="!isEditing || ptzDefaultSpeedLoading || ptzDefaultSpeedSaving || !ptzDefaultSpeedReady"
+                                                :disabled="ptzDefaultSpeedLoading || ptzDefaultSpeedSaving || !ptzDefaultSpeedReady"
                                                 aria-label="云台默认速度"
                                             />
                                             <span class="ptz-default-speed__edge">快</span>
@@ -1011,7 +955,6 @@ onMounted(() =>
                                             v-model="draft.defaultChannelStreamTransport"
                                             class="stream-transport-select"
                                             :disabled="
-                                                !isEditing ||
                                                 defaultChannelStreamTransportLoading ||
                                                 defaultChannelStreamTransportSaving ||
                                                 !defaultChannelStreamTransportReady
@@ -1033,7 +976,6 @@ onMounted(() =>
                                             v-model="draft.defaultChannelAudioEnabled"
                                             :loading="defaultChannelAudioLoading || defaultChannelAudioSaving"
                                             :disabled="
-                                                !isEditing ||
                                                 defaultChannelAudioLoading ||
                                                 defaultChannelAudioSaving ||
                                                 !defaultChannelAudioReady
@@ -1053,7 +995,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.syncChannelsOnOnline"
                                             :loading="syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving"
-                                            :disabled="!isEditing || syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving || !syncChannelsOnOnlineReady"
+                                            :disabled="syncChannelsOnOnlineLoading || syncChannelsOnOnlineSaving || !syncChannelsOnOnlineReady"
                                         >
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
@@ -1073,7 +1015,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.sipLogEnabled"
                                             :loading="sipLogLoading || sipLogSaving"
-                                            :disabled="!isEditing || sipLogLoading || sipLogSaving || !sipLogReady"
+                                            :disabled="sipLogLoading || sipLogSaving || !sipLogReady"
                                         >
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
@@ -1094,7 +1036,7 @@ onMounted(() =>
                                             :max="365"
                                             :step="1"
                                             :precision="0"
-                                            :disabled="!isEditing || sipLogLoading || sipLogSaving || !sipLogReady"
+                                            :disabled="sipLogLoading || sipLogSaving || !sipLogReady"
                                         />
                                         <template v-if="!sipLogRetentionValid" #extra>
                                             <span>请输入 1-365 之间的整数</span>
@@ -1111,7 +1053,6 @@ onMounted(() =>
                                             v-model="draft.ignoreChannelOfflineStatusNotify"
                                             :loading="ignoreChannelOfflineStatusNotifyLoading || ignoreChannelOfflineStatusNotifySaving"
                                             :disabled="
-                                                !isEditing ||
                                                 ignoreChannelOfflineStatusNotifyLoading ||
                                                 ignoreChannelOfflineStatusNotifySaving ||
                                                 !ignoreChannelOfflineStatusNotifyReady
@@ -1131,7 +1072,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.onlineOnHeartbeat"
                                             :loading="onlineOnHeartbeatLoading || onlineOnHeartbeatSaving"
-                                            :disabled="!isEditing || onlineOnHeartbeatLoading || onlineOnHeartbeatSaving || !onlineOnHeartbeatReady"
+                                            :disabled="onlineOnHeartbeatLoading || onlineOnHeartbeatSaving || !onlineOnHeartbeatReady"
                                         >
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
@@ -1147,7 +1088,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.saveAlarmMessages"
                                             :loading="saveAlarmMessagesLoading || saveAlarmMessagesSaving"
-                                            :disabled="!isEditing || saveAlarmMessagesLoading || saveAlarmMessagesSaving || !saveAlarmMessagesReady"
+                                            :disabled="saveAlarmMessagesLoading || saveAlarmMessagesSaving || !saveAlarmMessagesReady"
                                         >
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
@@ -1165,7 +1106,7 @@ onMounted(() =>
                                             class="service-config-number-input"
                                             :min="1"
                                             :max="300"
-                                            :disabled="!isEditing || sipCommandTimeoutLoading || sipCommandTimeoutSaving || !sipCommandTimeoutReady"
+                                            :disabled="sipCommandTimeoutLoading || sipCommandTimeoutSaving || !sipCommandTimeoutReady"
                                         />
                                     </a-form-item>
                                 </a-col>
@@ -1178,7 +1119,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.preallocationMode"
                                             :loading="preallocationModeLoading || preallocationModeSaving"
-                                            :disabled="!isEditing || preallocationModeLoading || preallocationModeSaving || !preallocationModeReady"
+                                            :disabled="preallocationModeLoading || preallocationModeSaving || !preallocationModeReady"
                                         >
                                             <template #checked>开启</template>
                                             <template #unchecked>关闭</template>
@@ -1195,7 +1136,6 @@ onMounted(() =>
                                             v-model="draft.globalSubscriptionItems"
                                             class="global-subscription-items"
                                             :disabled="
-                                                !isEditing ||
                                                 globalSubscriptionLoading ||
                                                 globalSubscriptionSaving ||
                                                 !globalSubscriptionReady
@@ -1227,7 +1167,7 @@ onMounted(() =>
                                             v-model="draft.playback.defaultProtocol"
                                             class="playback-protocol-select"
                                             :loading="defaultPlaybackProtocolLoading || defaultPlaybackProtocolSaving"
-                                            :disabled="!isEditing || defaultPlaybackProtocolLoading || defaultPlaybackProtocolSaving || !defaultPlaybackProtocolReady"
+                                            :disabled="defaultPlaybackProtocolLoading || defaultPlaybackProtocolSaving || !defaultPlaybackProtocolReady"
                                         >
                                             <a-option
                                                 v-for="option in playbackProtocolOptions"
@@ -1248,7 +1188,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.playback.fixedAddressEnabled"
                                             :loading="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving"
-                                            :disabled="!isEditing || fixedAddressPlaybackLoading || fixedAddressPlaybackSaving || !fixedAddressPlaybackReady"
+                                            :disabled="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving || !fixedAddressPlaybackReady"
                                         />
                                     </a-form-item>
                                 </a-col>
@@ -1262,7 +1202,6 @@ onMounted(() =>
                                             v-model="draft.playback.autoOnDemandEnabled"
                                             :loading="fixedAddressPlaybackLoading || fixedAddressPlaybackSaving"
                                             :disabled="
-                                                !isEditing ||
                                                 !draft.playback.fixedAddressEnabled ||
                                                 fixedAddressPlaybackLoading ||
                                                 fixedAddressPlaybackSaving ||
@@ -1280,7 +1219,7 @@ onMounted(() =>
                                         <a-switch
                                             :model-value="draft.playback.authEnabled"
                                             :loading="playAuthLoading || playAuthSaving"
-                                            :disabled="!isEditing || playAuthLoading || playAuthSaving || !playAuthReady"
+                                            :disabled="playAuthLoading || playAuthSaving || !playAuthReady"
                                             @update:model-value="handlePlayAuthEnabledChange"
                                         />
                                     </a-form-item>
@@ -1295,7 +1234,6 @@ onMounted(() =>
                                             v-model="draft.playback.authBindClientIP"
                                             :loading="playAuthLoading || playAuthSaving"
                                             :disabled="
-                                                !isEditing ||
                                                 !draft.playback.authEnabled ||
                                                 playAuthLoading ||
                                                 playAuthSaving ||
@@ -1318,7 +1256,7 @@ onMounted(() =>
                                             :max="3600"
                                             :step="1"
                                             :precision="0"
-                                            :disabled="!isEditing || playAuthLoading || playAuthSaving || !playAuthReady"
+                                            :disabled="playAuthLoading || playAuthSaving || !playAuthReady"
                                         />
                                         <template v-if="!playAuthTTLValid" #extra>
                                             <span>请输入 60-3600 之间的整数</span>
@@ -1337,7 +1275,7 @@ onMounted(() =>
                                             class="service-config-number-input"
                                             :min="1000"
                                             :max="300000"
-                                            :disabled="!isEditing || playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
+                                            :disabled="playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
                                         />
                                     </a-form-item>
                                 </a-col>
@@ -1350,7 +1288,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.playback.onDemandLive"
                                             :loading="playbackSettingsLoading || playbackSettingsSaving"
-                                            :disabled="!isEditing || playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
+                                            :disabled="playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
                                         />
                                     </a-form-item>
                                 </a-col>
@@ -1363,7 +1301,7 @@ onMounted(() =>
                                         <a-switch
                                             v-model="draft.playback.cloudRecordingEnabled"
                                             :loading="playbackSettingsLoading || playbackSettingsSaving"
-                                            :disabled="!isEditing || playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
+                                            :disabled="playbackSettingsLoading || playbackSettingsSaving || !playbackSettingsReady"
                                         />
                                     </a-form-item>
                                 </a-col>
@@ -1374,59 +1312,48 @@ onMounted(() =>
 
                 <a-tab-pane key="cascade" title="国标级联相关">
                     <a-card :bordered="false" class="uvp-system-panel uvp-system-panel--dense mb-4">
-                        <a-form class="uvp-system-form" :layout="formLayout" :model="draft.cascade" auto-label-width>
-                            <a-row :gutter="24">
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="parentInviteTimeoutMs" label="上级平台点播超时时间">
-                                        <a-input-number
-                                            v-model="draft.cascade.parentInviteTimeoutMs"
-                                            class="service-config-number-input"
-                                            :min="1000"
-                                            :max="600000"
-                                            disabled
-                                        />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="intercomStreamMode" label="国标级联对讲流模式">
-                                        <a-select v-model="draft.cascade.intercomStreamMode" disabled>
-                                            <a-option value="TCP被动">TCP被动</a-option>
-                                        </a-select>
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="sendStatusChangeMessages" label="设备/通道状态变化时发送消息">
-                                        <a-switch v-model="draft.cascade.sendStatusChangeMessages" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="useCustomSsrc" label="是否使用自定义的ssrc">
-                                        <a-switch v-model="draft.cascade.useCustomSsrc" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="offlineRetryIntervalSec" label="国标级联离线久重试间隔（秒）">
-                                        <a-input-number
-                                            v-model="draft.cascade.offlineRetryIntervalSec"
-                                            class="service-config-number-input"
-                                            :min="1"
-                                            :max="3600"
-                                            disabled
-                                        />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="renewalMode" label="国标续订方式">
-                                        <a-switch v-model="draft.cascade.renewalMode" disabled />
-                                    </a-form-item>
-                                </a-col>
-                                <a-col :span="isMobile ? 24 : 12">
-                                    <a-form-item field="usePushStatusAsChannelStatus" label="使用推流状态作为推流通道状态">
-                                        <a-switch v-model="draft.cascade.usePushStatusAsChannelStatus" disabled />
-                                    </a-form-item>
-                                </a-col>
-                            </a-row>
-                        </a-form>
+                        <div class="uvp-config-view">
+                            <div class="uvp-config-view__row">
+                                <span class="uvp-config-view__label">上级平台点播超时时间</span>
+                                <code class="uvp-config-view__value">{{ draft.cascade.parentInviteTimeoutMs }} ms</code>
+                            </div>
+                            <div class="uvp-config-view__row">
+                                <span class="uvp-config-view__label">国标级联对讲流模式</span>
+                                <code class="uvp-config-view__value">{{ draft.cascade.intercomStreamMode }}</code>
+                            </div>
+                            <div class="uvp-config-view__row">
+                                <span class="uvp-config-view__label">设备/通道状态变化时发送消息</span>
+                                <span
+                                    class="uvp-config-badge"
+                                    :class="draft.cascade.sendStatusChangeMessages ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
+                                >{{ draft.cascade.sendStatusChangeMessages ? "开启" : "关闭" }}</span>
+                            </div>
+                            <div class="uvp-config-view__row">
+                                <span class="uvp-config-view__label">是否使用自定义的 ssrc</span>
+                                <span
+                                    class="uvp-config-badge"
+                                    :class="draft.cascade.useCustomSsrc ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
+                                >{{ draft.cascade.useCustomSsrc ? "开启" : "关闭" }}</span>
+                            </div>
+                            <div class="uvp-config-view__row">
+                                <span class="uvp-config-view__label">国标级联离线重试间隔（秒）</span>
+                                <code class="uvp-config-view__value">{{ draft.cascade.offlineRetryIntervalSec }} 秒</code>
+                            </div>
+                            <div class="uvp-config-view__row">
+                                <span class="uvp-config-view__label">国标续订方式</span>
+                                <span
+                                    class="uvp-config-badge"
+                                    :class="draft.cascade.renewalMode ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
+                                >{{ draft.cascade.renewalMode ? "开启" : "关闭" }}</span>
+                            </div>
+                            <div class="uvp-config-view__row">
+                                <span class="uvp-config-view__label">使用推流状态作为推流通道状态</span>
+                                <span
+                                    class="uvp-config-badge"
+                                    :class="draft.cascade.usePushStatusAsChannelStatus ? 'uvp-config-badge--on' : 'uvp-config-badge--off'"
+                                >{{ draft.cascade.usePushStatusAsChannelStatus ? "开启" : "关闭" }}</span>
+                            </div>
+                        </div>
                     </a-card>
                 </a-tab-pane>
         </a-tabs>
@@ -1463,8 +1390,27 @@ onMounted(() =>
     gap: 8px;
 }
 
+.service-config-unsaved {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-right: 4px;
+    color: var(--uvp-warning);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.service-config-unsaved__dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--uvp-warning);
+    box-shadow: 0 0 0 3px var(--uvp-warning-soft);
+}
+
 :deep(.service-config-number-input) {
-    width: min(100%, 160px);
+    width: min(100%, 260px);
 }
 
 .ptz-default-speed {
@@ -1472,7 +1418,7 @@ onMounted(() =>
     grid-template-columns: auto minmax(88px, 1fr) auto 48px;
     gap: 8px;
     align-items: center;
-    width: min(100%, 360px);
+    width: min(100%, 480px);
 }
 
 .ptz-default-speed__edge {
@@ -1489,22 +1435,22 @@ onMounted(() =>
 }
 
 :deep(.stream-transport-select) {
-    width: 160px !important;
+    width: 260px !important;
     max-width: 100%;
 }
 
 :deep(.playback-protocol-select) {
-    width: 160px !important;
+    width: 260px !important;
     max-width: 100%;
 }
 
 .global-subscription-items {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 20px;
     min-height: 32px;
     align-items: center;
-    width: min(100%, 360px);
+    width: min(100%, 560px);
 
     :deep(.arco-checkbox) {
         min-width: 0;

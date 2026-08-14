@@ -1549,6 +1549,7 @@ body[arco-theme="dark"] .zlm-node-form {
 }
 
 .uvp-system-panel.arco-card {
+  border-radius: 14px;
   box-shadow: var(--uvp-panel-shadow);
 }
 
@@ -1675,6 +1676,73 @@ body[arco-theme="dark"] .zlm-node-form {
 
 .uvp-system-tabs .arco-tabs-nav-ink {
   display: none;
+}
+
+/* ===== 配置页 UI(圆角风格)=====
+   配置类整页共用:国标服务配置 / 系统参数配置 / 用户信息。
+   形态:圆角 Tab 条贴内容 + 查看态描述列表 + 徽标,编辑态复用 uvp-system-form。
+   圆角节奏:Tab 条 12 / 面板 14 / 描述行 10 / 徽标全圆角。 */
+.uvp-config-tabs .arco-tabs-nav {
+  margin-bottom: 10px;
+}
+
+.uvp-config-tabs .arco-tabs-content {
+  padding-top: 0;
+}
+
+.uvp-config-view {
+  display: grid;
+  gap: 10px;
+}
+
+.uvp-config-view__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 42px;
+  padding: 8px 14px;
+  background: var(--uvp-list-panel-bg);
+  border: 1px solid var(--uvp-list-panel-border);
+  border-radius: 10px;
+}
+
+.uvp-config-view__label {
+  color: var(--uvp-text-secondary);
+  font-size: 13px;
+}
+
+.uvp-config-view__value {
+  color: var(--uvp-text-primary);
+  font-weight: 600;
+  text-align: right;
+}
+
+.uvp-config-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.uvp-config-badge--on {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid rgb(4 120 87 / 18%);
+}
+
+.uvp-config-badge--off {
+  color: var(--uvp-text-tertiary);
+  background: var(--uvp-table-header-bg);
+  border: 1px solid var(--uvp-panel-border);
+}
+
+.uvp-config-checkboxes {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
 }
 
 body[arco-theme="dark"] {

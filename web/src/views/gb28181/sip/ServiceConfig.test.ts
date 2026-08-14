@@ -252,8 +252,10 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.find(".uvp-system-tabs").exists()).toBe(true);
         expect(wrapper.find(".service-config-shell").exists()).toBe(false);
         expect(wrapper.findAll(".uvp-system-panel")).toHaveLength(3);
-        expect(wrapper.findAll(".uvp-system-form")).toHaveLength(3);
-        expect(wrapper.findAll("input[type='number']")).toHaveLength(7);
+        expect(wrapper.findAll(".uvp-system-form")).toHaveLength(2);
+        expect(wrapper.findAll(".uvp-config-view")).toHaveLength(1);
+        expect(wrapper.findAll(".uvp-config-badge")).toHaveLength(4);
+        expect(wrapper.findAll("input[type='number']")).toHaveLength(5);
         expect(wrapper.findAll("input[type='number']").every(input => input.classes().includes("service-config-number-input"))).toBe(
             true
         );
@@ -288,9 +290,8 @@ describe("ServiceConfig edit mode", () => {
 
         const fixedSwitch = wrapper.find("[data-field='fixedAddressEnabled'] button");
         const autoSwitch = wrapper.find("[data-field='autoOnDemandEnabled'] button");
-        expect(fixedSwitch.element).toHaveProperty("disabled", true);
+        expect(fixedSwitch.element).toHaveProperty("disabled", false);
 
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         expect(fixedSwitch.element).toHaveProperty("disabled", false);
         expect(autoSwitch.element).toHaveProperty("disabled", false);
 
@@ -320,7 +321,6 @@ describe("ServiceConfig edit mode", () => {
         });
         const wrapper = mountPage();
         await flushPromises();
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         await wrapper.find("[data-field='autoOnDemandEnabled'] button").trigger("click");
         await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
         await flushPromises();
@@ -346,7 +346,6 @@ describe("ServiceConfig edit mode", () => {
         });
         const wrapper = mountPage();
         await flushPromises();
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         await wrapper.find("[data-field='fixedAddressEnabled'] button").trigger("click");
         await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
         await flushPromises();
@@ -359,7 +358,7 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.find("[data-field='autoOnDemandEnabled'] button").text()).toBe("true");
     });
 
-    it("取消编辑时同时恢复固定播放地址与自动点播", async () => {
+    it("重置时同时恢复固定播放地址与自动点播", async () => {
         api.fetchFixedAddressPlaybackConfig.mockResolvedValue({
             code: 0,
             message: "",
@@ -372,9 +371,8 @@ describe("ServiceConfig edit mode", () => {
         });
         const wrapper = mountPage();
         await flushPromises();
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         await wrapper.find("[data-field='autoOnDemandEnabled'] button").trigger("click");
-        await wrapper.findAll("button").find(button => button.text().includes("取消"))?.trigger("click");
+        await wrapper.findAll("button").find(button => button.text().includes("重置"))?.trigger("click");
         await flushPromises();
 
         expect(api.updateFixedAddressPlaybackConfig).not.toHaveBeenCalled();
@@ -393,9 +391,8 @@ describe("ServiceConfig edit mode", () => {
 
         const authSwitch = wrapper.find("[data-field='authEnabled'] button");
         const bindIPSwitch = wrapper.find("[data-field='authBindClientIP'] button");
-        expect(authSwitch.element).toHaveProperty("disabled", true);
+        expect(authSwitch.element).toHaveProperty("disabled", false);
 
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         expect(authSwitch.element).toHaveProperty("disabled", false);
         expect(bindIPSwitch.element).toHaveProperty("disabled", false);
 
@@ -424,7 +421,6 @@ describe("ServiceConfig edit mode", () => {
         });
         const wrapper = mountPage();
         await flushPromises();
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         await wrapper.find("[data-field='authEnabled'] button").trigger("click");
         await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
         await flushPromises();
@@ -441,7 +437,6 @@ describe("ServiceConfig edit mode", () => {
     it("完整提交播放鉴权公开配置且不包含密钥", async () => {
         const wrapper = mountPage();
         await flushPromises();
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         await wrapper.find("[data-field='authEnabled'] button").trigger("click");
         await wrapper.find("[data-field='authBindClientIP'] button").trigger("click");
         await wrapper.find("[data-field='authTTLSeconds'] input").setValue("300");
@@ -460,7 +455,6 @@ describe("ServiceConfig edit mode", () => {
     it("凭证有效期超出范围时不允许保存", async () => {
         const wrapper = mountPage();
         await flushPromises();
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         await wrapper.find("[data-field='authTTLSeconds'] input").setValue("59");
         await flushPromises();
 
@@ -479,7 +473,6 @@ describe("ServiceConfig edit mode", () => {
         api.updatePlayAuthConfig.mockRejectedValue(new Error("保存失败"));
         const wrapper = mountPage();
         await flushPromises();
-        await wrapper.findAll("button").find(button => button.text().includes("编辑"))?.trigger("click");
         await wrapper.find("[data-field='authBindClientIP'] button").trigger("click");
         await wrapper.findAll("button").find(button => button.text().includes("保存"))?.trigger("click");
         await flushPromises();
@@ -511,16 +504,14 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.text()).not.toContain("设置notify缓存队列最大长度");
     });
 
-    it("keeps controls read-only until edit and only persists on save", async () => {
+    it("keeps controls editable by default and only persists on save", async () => {
         const wrapper = mountPage();
         await flushPromises();
 
         const switchButton = wrapper.findAll("button").find(button => button.text() === "true");
-        expect(switchButton?.element).toHaveProperty("disabled", true);
+        expect(switchButton?.element).toHaveProperty("disabled", false);
         expect(api.updatePositionHistoryConfig).not.toHaveBeenCalled();
 
-        await wrapper.get("button").trigger("click");
-        expect(switchButton?.element).toHaveProperty("disabled", false);
         await switchButton?.trigger("click");
         expect(api.updatePositionHistoryConfig).not.toHaveBeenCalled();
 
@@ -530,7 +521,7 @@ describe("ServiceConfig edit mode", () => {
 
         expect(api.updatePositionHistoryConfig).toHaveBeenCalledOnce();
         expect(api.updatePositionHistoryConfig).toHaveBeenCalledWith({ enabled: false, retentionDays: 7 });
-        expect(wrapper.text()).toContain("编辑");
+        expect(wrapper.text()).toContain("保存");
     });
 
     it("edits and persists the retention days from the migrated position history settings", async () => {
@@ -542,7 +533,6 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        await wrapper.get("button").trigger("click");
         const retentionDaysInput = wrapper.find("input[type='number']");
         expect(retentionDaysInput.element).toHaveProperty("disabled", false);
         await retentionDaysInput.setValue("30");
@@ -559,26 +549,24 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        await wrapper.get("button").trigger("click");
 
         expect(wrapper.find("input[type='number']").element).toHaveProperty("value", "7");
     });
 
-    it("restores the saved value when editing is cancelled", async () => {
+    it("restores the saved value when reset", async () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        await wrapper.get("button").trigger("click");
         const switchButton = wrapper.findAll("button").find(button => button.text() === "true");
         await switchButton?.trigger("click");
         expect(wrapper.text()).toContain("false");
 
-        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("取消"));
+        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("重置"));
         await cancelButton?.trigger("click");
 
         expect(api.updatePositionHistoryConfig).not.toHaveBeenCalled();
         expect(wrapper.text()).toContain("true");
-        expect(wrapper.text()).toContain("编辑");
+        expect(wrapper.text()).toContain("保存");
     });
 
     it("loads, edits and saves the SDP compatibility mode only after explicit save", async () => {
@@ -590,9 +578,8 @@ describe("ServiceConfig edit mode", () => {
         expect(wrapper.find("[data-field='sdpExtension']").attributes("data-tooltip")).toContain("一般设备无需开启");
 
         const falseSwitch = wrapper.findAll("button").find(button => button.text() === "false");
-        expect(falseSwitch?.element).toHaveProperty("disabled", true);
+        expect(falseSwitch?.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(falseSwitch?.element).toHaveProperty("disabled", false);
         await falseSwitch?.trigger("click");
         expect(api.updateSDPExtensionConfig).not.toHaveBeenCalled();
@@ -613,9 +600,8 @@ describe("ServiceConfig edit mode", () => {
         const speedSlider = wrapper.get("input[type='range']");
         expect(speedSlider.attributes()).toMatchObject({ min: "1", max: "10", step: "1" });
         expect(speedSlider.element).toHaveProperty("value", "8");
-        expect(speedSlider.element).toHaveProperty("disabled", true);
+        expect(speedSlider.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(speedSlider.element).toHaveProperty("disabled", false);
         await speedSlider.setValue("10");
         expect(wrapper.text()).toContain("10 档");
@@ -641,9 +627,8 @@ describe("ServiceConfig edit mode", () => {
             ?.find("select");
         expect(transportSelect?.classes()).toContain("stream-transport-select");
         expect(transportSelect?.element).toHaveProperty("value", "TCP-Passive");
-        expect(transportSelect?.element).toHaveProperty("disabled", true);
+        expect(transportSelect?.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(transportSelect?.element).toHaveProperty("disabled", false);
         await transportSelect?.setValue("UDP");
 
@@ -671,15 +656,13 @@ describe("ServiceConfig edit mode", () => {
         ]);
         const select = field.get("select");
         expect(select.element).toHaveProperty("value", "ws-flv");
-        expect(select.element).toHaveProperty("disabled", true);
+        expect(select.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         await select.setValue("webrtc");
-        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("取消"));
+        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("重置"));
         await cancelButton?.trigger("click");
         expect(select.element).toHaveProperty("value", "ws-flv");
 
-        await wrapper.get("button").trigger("click");
         await select.setValue("webrtc");
         const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
         await saveButton?.trigger("click");
@@ -703,22 +686,20 @@ describe("ServiceConfig edit mode", () => {
         const onDemand = wrapper.find("[data-field='onDemandLive'] button");
         const recording = wrapper.find("[data-field='cloudRecordingEnabled'] button");
         expect(timeout.element).toHaveProperty("value", "10000");
-        expect(timeout.element).toHaveProperty("disabled", true);
+        expect(timeout.element).toHaveProperty("disabled", false);
         expect(onDemand.text()).toBe("true");
         expect(recording.text()).toBe("false");
 
-        await wrapper.get("button").trigger("click");
         await timeout.setValue("15000");
         await onDemand.trigger("click");
         await recording.trigger("click");
-        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("取消"));
+        const cancelButton = wrapper.findAll("button").find(button => button.text().includes("重置"));
         await cancelButton?.trigger("click");
         expect(timeout.element).toHaveProperty("value", "10000");
         expect(onDemand.text()).toBe("true");
         expect(recording.text()).toBe("false");
         expect(api.updatePlaybackSettingsConfig).not.toHaveBeenCalled();
 
-        await wrapper.get("button").trigger("click");
         await timeout.setValue("15000");
         await onDemand.trigger("click");
         await recording.trigger("click");
@@ -739,7 +720,6 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        await wrapper.get("button").trigger("click");
         const timeout = wrapper.find("[data-field='playTimeoutMs'] input[type='number']");
         const onDemand = wrapper.find("[data-field='onDemandLive'] button");
         const recording = wrapper.find("[data-field='cloudRecordingEnabled'] button");
@@ -759,7 +739,6 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        await wrapper.get("button").trigger("click");
         const timeout = wrapper.find("[data-field='playTimeoutMs'] input[type='number']");
         await timeout.setValue("999");
         const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
@@ -787,7 +766,6 @@ describe("ServiceConfig edit mode", () => {
         const formFields = wrapper.findAll("[data-field]").map(field => field.attributes("data-field"));
         expect(formFields.indexOf("globalSubscriptionItems")).toBeGreaterThan(formFields.indexOf("preallocationMode"));
 
-        await wrapper.get("button").trigger("click");
         wrapper.findComponent(CheckboxGroupStub).vm.$emit("update:modelValue", ["catalog", "alarm", "ptz_precise_position"]);
         await wrapper.vm.$nextTick();
         const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
@@ -808,7 +786,6 @@ describe("ServiceConfig edit mode", () => {
         );
         const audioSwitch = audioLabel?.find("button");
 
-        await wrapper.get("button").trigger("click");
         await audioSwitch?.trigger("click");
         const saveButton = wrapper.findAll("button").find(button => button.text().includes("保存"));
         await saveButton?.trigger("click");
@@ -827,9 +804,8 @@ describe("ServiceConfig edit mode", () => {
             .findAll("label")
             .find(label => label.text().includes("设备上线时同步通道"))
             ?.find("button");
-        expect(syncSwitch?.element).toHaveProperty("disabled", true);
+        expect(syncSwitch?.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(syncSwitch?.element).toHaveProperty("disabled", false);
         await syncSwitch?.trigger("click");
 
@@ -851,9 +827,8 @@ describe("ServiceConfig edit mode", () => {
             .findAll("label")
             .find(label => label.text().includes("是否开启 SIP 日志"))
             ?.find("button");
-        expect(sipLogSwitch?.element).toHaveProperty("disabled", true);
+        expect(sipLogSwitch?.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(sipLogSwitch?.element).toHaveProperty("disabled", false);
         await sipLogSwitch?.trigger("click");
 
@@ -871,7 +846,6 @@ describe("ServiceConfig edit mode", () => {
         await flushPromises();
 
         expect(wrapper.text()).toContain("SIP 日志保留天数（天）");
-        await wrapper.get("button").trigger("click");
         const retentionInput = wrapper.find("[data-field='sipLogRetentionDays'] input[type='number']");
         expect(retentionInput.element).toHaveProperty("disabled", false);
         await retentionInput.setValue("60");
@@ -886,7 +860,6 @@ describe("ServiceConfig edit mode", () => {
         const wrapper = mountPage();
         await flushPromises();
 
-        await wrapper.get("button").trigger("click");
         const retentionInput = wrapper.find("[data-field='sipLogRetentionDays'] input[type='number']");
         await retentionInput.setValue(String(invalidRetentionDays));
 
@@ -917,9 +890,8 @@ describe("ServiceConfig edit mode", () => {
             .findAll("label")
             .find(label => label.text().includes("忽略通道离线/异常通知"))
             ?.find("button");
-        expect(statusSwitch?.element).toHaveProperty("disabled", true);
+        expect(statusSwitch?.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(statusSwitch?.element).toHaveProperty("disabled", false);
         await statusSwitch?.trigger("click");
 
@@ -943,9 +915,8 @@ describe("ServiceConfig edit mode", () => {
             .findAll("label")
             .find(label => label.text().includes("心跳恢复设备在线状态"))
             ?.find("button");
-        expect(heartbeatSwitch?.element).toHaveProperty("disabled", true);
+        expect(heartbeatSwitch?.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(heartbeatSwitch?.element).toHaveProperty("disabled", false);
         await heartbeatSwitch?.trigger("click");
 
@@ -969,9 +940,8 @@ describe("ServiceConfig edit mode", () => {
             .findAll("label")
             .find(label => label.text().includes("是否存储报警消息"))
             ?.find("button");
-        expect(alarmSwitch?.element).toHaveProperty("disabled", true);
+        expect(alarmSwitch?.element).toHaveProperty("disabled", false);
 
-        await wrapper.get("button").trigger("click");
         expect(alarmSwitch?.element).toHaveProperty("disabled", false);
         await alarmSwitch?.trigger("click");
 
@@ -993,7 +963,6 @@ describe("ServiceConfig edit mode", () => {
             "未知国标 ID 将被拒绝注册"
         );
 
-        await wrapper.get("button").trigger("click");
         const timeoutInputs = wrapper.findAll("input[type='number']");
         const timeoutInput = timeoutInputs.find(input => input.element.getAttribute("value") === "10");
         expect(timeoutInput?.element).toHaveProperty("disabled", false);
