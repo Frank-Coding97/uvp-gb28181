@@ -11,10 +11,8 @@ const traceApi = vi.hoisted(() => ({
     listTraceSessionMessages: vi.fn(),
     listTraceSessions: vi.fn()
 }));
-const listDevices = vi.hoisted(() => vi.fn());
 
 vi.mock("@/api/gb28181-trace", () => traceApi);
-vi.mock("@/views/gb28181/device-mgmt/api", () => ({ listDevices }));
 vi.mock("vue-router", () => ({ useRoute: () => ({ query: {} }) }));
 vi.mock("@arco-design/web-vue", () => ({ Message: { warning: vi.fn(), error: vi.fn() } }));
 
@@ -58,7 +56,6 @@ describe("SIP log workbench storage replacement regression", () => {
     beforeEach(() => {
         FakeEventSource.instances = [];
         vi.stubGlobal("EventSource", FakeEventSource);
-        listDevices.mockReset().mockResolvedValue({ code: 0, data: { list: [] } });
         traceApi.fetchTraceHealth.mockReset().mockResolvedValue({
             code: 0,
             data: { state: "ready", queueDepth: 0, queueCapacity: 1024, dropped: 0 }

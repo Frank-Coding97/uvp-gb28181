@@ -473,10 +473,7 @@ onBeforeUnmount(() => {
                         :loading="sessionLoading"
                         @select-session="onSelectSession"
                     />
-                    <TerminalView
-                        v-else
-                        :device-ids="filters.deviceIds"
-                    />
+                    <TerminalView v-else />
                 </div>
                 <DetailPanel
                     v-if="showDetailPanel"
