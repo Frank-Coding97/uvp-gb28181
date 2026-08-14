@@ -544,6 +544,7 @@ func (s *RelationalStore) GetSessionStats(ctx context.Context, filter SessionFil
 		return SessionStats{}, err
 	}
 	var stats SessionStats
+	stats.Truncated = len(sessions) >= maxStatsCandidates
 	stats.Total = uint64(len(sessions))
 	for _, session := range sessions {
 		if session.Anomaly {
