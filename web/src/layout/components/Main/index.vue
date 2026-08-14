@@ -32,7 +32,7 @@ const createComponentWrapper = (component: any, route: any) => {
   // 守卫：组件不存在（如路由未匹配到）则直接返回
   if (!component) return;
   // 如果路由未开启 keepAlive 缓存，则无需包装，直接渲染原始组件
-  if (!route.meta?.keepAlive) return h(component);
+  if (!route.meta?.keepAlive) return component;
   // 使用路由完整路径（含参数）作为包装器的唯一标识名
   const wrapperName = route.fullPath;
   // 从缓存 Map 中查找是否已存在该路径对应的包装器
@@ -43,8 +43,9 @@ const createComponentWrapper = (component: any, route: any) => {
     // 将包装器存入 Map 缓存，避免重复创建
     wrapperMap.set(wrapperName, wrapper);
   }
-  // 渲染包装器组件（而非直接渲染原始组件），使 keep-alive 能按 fullPath 独立缓存
-  return h(wrapper);
+  // 返回包装器组件定义，让 <component :is> 能正确应用 :key，
+  // 避免返回 VNode 时 key 被忽略导致快速切换白屏
+  return wrapper;
 };
 
 // 水印配置
