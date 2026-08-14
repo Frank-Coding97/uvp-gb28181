@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -230,4 +231,43 @@ func TestServiceApplyPreciseNotify_RejectsOlderAndInvalid(t *testing.T) {
 	bad := 999.0
 	_, err = svc.ApplyPreciseNotify(context.Background(), PreciseNotify{DeviceID: 2, DeviceCode: "D", ChannelID: 1, ChannelCode: "C", Pan: &bad, ReceivedAt: now, DedupeKey: "bad"})
 	require.Error(t, err)
+}
+
+// cross-review round-5 verify 补修:通道锁表回收不得产生双锁竞态。
+// 同一 channel 高并发 acquire/release 下,锁内互斥必须始终成立。
+func TestChannelLockRecyclingKeepsMutualExclusion(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPTZOperation{}))
+	sender := &fakeTrackedSender{}
+	service, err := NewService(db, sender, func() time.Time { return time.Now() })
+	require.NoError(t, err)
+
+	var inCritical atomic.Int32
+	var violations atomic.Int32
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				entry := service.lockChannel(7)
+				entry.mu.Lock()
+				if inCritical.Add(1) != 1 {
+					violations.Add(1)
+				}
+				time.Sleep(time.Microsecond)
+				inCritical.Add(-1)
+				entry.mu.Unlock()
+				service.unlockChannel(7, entry)
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Zero(t, violations.Load(), "同一通道必须只有一个有效锁")
+	service.lockTableMu.Lock()
+	_, retained := service.locks[7]
+	service.lockTableMu.Unlock()
+	require.False(t, retained, "引用归零后锁条目必须被回收")
 }

@@ -88,7 +88,10 @@ type Service struct {
 	sender       TrackedSender
 	now          func() time.Time
 	sn           atomic.Uint64
-	locks        sync.Map
+	// locks + lockTableMu 组成可回收的通道锁表:acquire 与删除都在表锁内完成,
+	// 保证同一 channel 永远只有一个有效锁,且锁表不随历史通道无限累积
+	lockTableMu   sync.Mutex
+	locks         map[uint]*channelLockEntry
 	queryStageMu sync.Mutex
 	queryStages  map[string]queryResponseStage
 	lifecycleMu  sync.RWMutex
@@ -109,7 +112,8 @@ func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Servi
 	if maxSN < 0 || uint64(maxSN) >= uint64(^uint(0)>>1) {
 		return nil, operationError(ErrorCodeHomePositionUnavailable, "PTZ operation SN 非法", nil)
 	}
-	service := &Service{db: db, sender: sender, now: now, queryStages: make(map[string]queryResponseStage)}
+	service := &Service{db: db, sender: sender, now: now, queryStages: make(map[string]queryResponseStage),
+		locks: make(map[uint]*channelLockEntry)}
 	service.sn.Store(uint64(maxSN))
 	return service, nil
 }
@@ -126,25 +130,26 @@ type channelLockEntry struct {
 }
 
 // lockChannel 获取通道锁并计数,返回的 entry 必须与 unlockChannel 成对使用.
+// acquire 与表删除都在 lockTableMu 内完成,不会出现同一 channel 双锁的回收竞态.
 func (s *Service) lockChannel(channelID uint) *channelLockEntry {
-	for {
-		value, _ := s.locks.LoadOrStore(channelID, &channelLockEntry{})
-		entry := value.(*channelLockEntry)
-		entry.refs.Add(1)
-		current, ok := s.locks.Load(channelID)
-		if ok && current == entry {
-			return entry
-		}
-		// 条目在计数期间已被回收替换:回退计数并重试到新条目
-		entry.refs.Add(-1)
+	s.lockTableMu.Lock()
+	defer s.lockTableMu.Unlock()
+	entry, ok := s.locks[channelID]
+	if !ok {
+		entry = &channelLockEntry{}
+		s.locks[channelID] = entry
 	}
+	entry.refs.Add(1)
+	return entry
 }
 
 // unlockChannel 释放引用;归零时若仍是当前条目则从锁表移除.
 func (s *Service) unlockChannel(channelID uint, entry *channelLockEntry) {
+	s.lockTableMu.Lock()
+	defer s.lockTableMu.Unlock()
 	if entry.refs.Add(-1) == 0 {
-		if current, ok := s.locks.Load(channelID); ok && current == entry {
-			s.locks.Delete(channelID)
+		if current := s.locks[channelID]; current == entry {
+			delete(s.locks, channelID)
 		}
 	}
 }

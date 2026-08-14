@@ -517,9 +517,9 @@ func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPT
 		return "", "", errors.New("PTZ 设备地址不可用")
 	}
 	// 重试路径必须复核通道:设备在线而通道已离线或目录已变更时,
-	// 不得对失效目标继续发送 PTZ 指令
+	// 不得对失效目标继续发送 PTZ 指令。用写库句柄防读副本返回过期在线状态
 	var channel gbmodels.GbChannel
-	channelResult := s.db.WithContext(ctx).
+	channelResult := ptzWriter(s.db).WithContext(ctx).
 		Where("id = ? AND device_id = ? AND channel_id = ?", operation.ChannelID, operation.DeviceCode, operation.ChannelCode).
 		Limit(1).Find(&channel)
 	if channelResult.Error != nil {

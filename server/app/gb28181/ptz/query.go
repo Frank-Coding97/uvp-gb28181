@@ -43,6 +43,9 @@ const (
 	// 超出上限直接终止聚合
 	maxQueryStagePresets = 10000
 	maxQueryStageTracks  = 10000
+	// maxQueryStageBodyBytes 单页响应体上限:在完整解析前拒绝超大 XML,
+	// 防止解析器先构造完整结构再被条目上限拒绝
+	maxQueryStageBodyBytes = 1 << 20
 )
 
 func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, trackID int, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
@@ -372,6 +375,10 @@ func (s *Service) accumulateQueryStage(operation gbmodels.GbPTZOperation, cmdTyp
 	if cmdType != manscdp.CmdPresetQuery && cmdType != manscdp.CmdCruiseTrackListQuery {
 		return nil, false, nil
 	}
+	// 解析前先限输入体积:单页超大 XML 不允许进入解析器
+	if len(body) > maxQueryStageBodyBytes {
+		return nil, false, fmt.Errorf("PTZ 查询响应体超出上限 %d 字节", maxQueryStageBodyBytes)
+	}
 	stage := cloneQueryResponseStage(s.queryStages[operation.OperationID])
 	if stage.cmdType != "" && stage.cmdType != cmdType {
 		return nil, false, fmt.Errorf("PTZ 查询暂存类型不一致: %s", cmdType)
@@ -622,7 +629,12 @@ func summarizePTZBody(body []byte) string {
 	// utf8mb4 写入失败 —— 先清洗为合法 UTF-8,再脱敏截断
 	text := strings.TrimSpace(strings.ToValidUTF8(string(gbtrace.RedactSIP(body)), "�"))
 	if len(text) > 4096 {
-		return text[:4096]
+		// 按 rune 边界截断并再次清洗,避免切断多字节字符产生非法 UTF-8
+		runes := []rune(text)
+		if len(runes) > 4096 {
+			text = string(runes[:4096])
+		}
+		text = strings.ToValidUTF8(text, "�")
 	}
 	return text
 }
