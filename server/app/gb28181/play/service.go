@@ -400,8 +400,13 @@ func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Resul
 // 任一中断都会回滚已开的 RTP 端口 + Unbind LocationMap
 func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error) {
 	deviceID, channelID := req.DeviceID, req.ChannelID
+	// 总超时预算覆盖整个点播事务:前置查询、节点选择、RTP 分配、INVITE 与
+	// 媒体等待全部纳入同一 deadline,任一阶段阻塞都不能超过 PlayTimeout
+	playCtx, playCancel := context.WithTimeout(ctx, gbconfig.CurrentPlaybackSettings().PlayTimeout())
+	defer playCancel()
+
 	// 1. 校验设备 + 通道
-	dev, err := s.devices.FindByDeviceID(ctx, deviceID)
+	dev, err := s.devices.FindByDeviceID(playCtx, deviceID)
 	if err != nil {
 		return nil, fmt.Errorf("查设备失败: %w", err)
 	}
@@ -411,12 +416,19 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	if dev.Status != gbmodels.DeviceStatusOnline {
 		return nil, ErrDeviceOffline
 	}
-	ch, err := s.channels.FindChannel(ctx, deviceID, channelID)
+	ch, err := s.channels.FindChannel(playCtx, deviceID, channelID)
 	if err != nil {
 		return nil, fmt.Errorf("查通道失败: %w", err)
 	}
 	if ch == nil {
 		return nil, ErrChannelNotFound
+	}
+
+	// 平台点播仅实现 UDP 与 TCP 被动收流(ZLM tcp_mode 0/1,SDP 仅生成 passive
+	// setup)。TCP-Active 若静默按 UDP 处理,设备按主动模式协商必然失败,
+	// 必须在发起前显式拒绝而不是静默回退。
+	if ch.StreamTransport == "TCP-Active" {
+		return nil, fmt.Errorf("通道流传输模式为 TCP-Active,平台点播暂不支持,请改为 UDP 或 TCP-Passive")
 	}
 
 	// 2. 检查通道是否已在播放 —— 尝试流复用
@@ -428,7 +440,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	//     不主动清理,尝试从 registry 里遍历所有节点探测 (兜底恢复 LocationMap)
 	//   - 所有节点都探测失败 → 才走清理路径(此时说明流真的不在了)
 	if ch.StreamID != "" {
-		if reused, err := s.tryReuseStream(ctx, ch); err != nil {
+		if reused, err := s.tryReuseStream(playCtx, ch); err != nil {
 			return nil, err
 		} else if reused != nil {
 			if _, _, parseErr := ParseFixedStreamID(reused.StreamID); parseErr == nil {
@@ -520,7 +532,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 				return nil, fmt.Errorf("%w: %d", ErrRequiredNodeUnavailable, req.RequiredNode)
 			}
 		} else {
-			selectedNode, err = s.picker.Pick(ctx, PickContext{
+			selectedNode, err = s.picker.Pick(playCtx, PickContext{
 				DeviceID: deviceID, ChannelID: channelID, StreamID: streamID,
 			})
 			if err != nil {
@@ -552,7 +564,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	// when URL authorization cannot be issued.
 	var result *Result
 	if pickedNode != nil {
-		result = s.buildNodeResult(ctx, streamID, ssrc, pickedNode, false)
+		result = s.buildNodeResult(playCtx, streamID, ssrc, pickedNode, false)
 	} else {
 		result = s.buildResultFor(streamID, ssrc, s.cfg.ZLM.EffectivePlaybackHost())
 	}
@@ -568,7 +580,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	if tcpPassive {
 		tcpMode = 1
 	}
-	rtpRes, err := client.OpenRtpServerWithSSRC(ctx, zlm.OpenRtpServerRequest{
+	rtpRes, err := client.OpenRtpServerWithSSRC(playCtx, zlm.OpenRtpServerRequest{
 		StreamID:  streamID,
 		SSRC:      ssrc,
 		Port:      0,
@@ -606,8 +618,6 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		Transport:  dev.Transport,
 	}
 
-	playCtx, playCancel := context.WithTimeout(ctx, gbconfig.CurrentPlaybackSettings().PlayTimeout())
-	defer playCancel()
 	inviteCtx, inviteCancel := context.WithTimeout(playCtx, gbconfig.SIPCommandTimeout())
 	defer inviteCancel()
 	outcome, inviteErr := s.inviter.InviteTracked(inviteCtx, s.sessions, sess, body)
@@ -621,8 +631,12 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			// 同节点时关 RTP 会误杀新代次的流,不关。
 			if nodeID := s.currentNodeID(liveRef.StreamID); nodeID != 0 && nodeID != liveRef.NodeID {
 				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
-				_ = client.CloseRtpServer(cleanupCtx, liveRef.StreamID)
+				rtpCloseErr := client.CloseRtpServer(cleanupCtx, liveRef.StreamID)
 				cleanupCancel()
+				if rtpCloseErr != nil {
+					// RTP 关闭失败:旧节点监听器可能仍活着,SSRC 同样不得回池复用
+					releaseSSRC = false
+				}
 			}
 			if errors.Is(inviteErr, uac.ErrStaleInviteCleanupFailed) {
 				// 设备端会话清理未确认:设备可能仍按旧 SSRC 推流。
