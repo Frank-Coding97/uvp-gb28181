@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import dayjs from "dayjs";
 import { Message } from "@arco-design/web-vue";
-import { AlertTriangle, Clock, ListChecks, RefreshCcw, Search, ShieldAlert, Table2, TerminalSquare, Wifi } from "lucide-vue-next";
+import { AlertTriangle, CircleCheck, CircleOff, Clock, ListChecks, RefreshCcw, Search, ShieldAlert, Table2, TerminalSquare } from "lucide-vue-next";
 import DetailPanel from "./components/DetailPanel.vue";
 import SessionDetail from "./components/SessionDetail.vue";
 import TableView from "./components/TableView.vue";
@@ -206,6 +206,11 @@ function search() {
     return refresh();
 }
 
+function selectScope(scope: FilterScope) {
+    filters.value.scope = scope;
+    return search();
+}
+
 // 进入详情页时加载报文
 watch(drillCallId, async (newVal) => {
     if (newVal) await loadDrillMessages();
@@ -286,8 +291,10 @@ onBeforeUnmount(() => {
             <div class="toolbar">
                 <div class="toolbar-left">
                     <span class="page-title">SIP 日志</span>
-                    <span :class="['head-badge', `health-${health.state}`]">
-                        <Wifi :size="12" />
+                    <span :class="['head-badge', `health-${health.state}`]" role="status" aria-live="polite" aria-atomic="true">
+                        <CircleCheck v-if="health.state === 'ready'" class="health-icon-ready" :size="13" aria-hidden="true" />
+                        <AlertTriangle v-else-if="health.state === 'degraded'" class="health-icon-degraded" :size="13" aria-hidden="true" />
+                        <CircleOff v-else class="health-icon-disabled" :size="13" aria-hidden="true" />
                         {{ health.state === 'ready' ? '采集正常' : health.state === 'degraded' ? '存储降级' : '未启用' }}
                     </span>
                     <span v-if="health.lastSuccessAt" class="head-meta">最后写入 {{ formatFullTime(health.lastSuccessAt) }}</span>
@@ -305,7 +312,7 @@ onBeforeUnmount(() => {
                     </label>
                     <div class="view-switch" v-if="!drillCallId">
                         <button
-                            v-for="v in ([{key:'table',label:'表格',icon:Table2},{key:'terminal',label:'实时',icon:TerminalSquare}] as const)"
+                            v-for="v in ([{key:'table',label:'表格',icon:Table2},{key:'terminal',label:'终端',icon:TerminalSquare}] as const)"
                             :key="v.key"
                             type="button"
                             :class="['view-btn', { active: viewMode === v.key }]"
@@ -325,14 +332,14 @@ onBeforeUnmount(() => {
 
             <!-- 统计卡片(时序详情页时隐藏) -->
             <div v-if="!drillCallId" class="stat-band">
-                <button type="button" :class="['stat-card', { active: filters.scope === 'all' }]" @click="filters.scope = 'all'">
+                <button type="button" :class="['stat-card', { active: filters.scope === 'all' }]" @click="selectScope('all')">
                     <span class="stat-icon icon-total"><ListChecks :size="18" /></span>
                     <div class="stat-content">
                         <span class="stat-num">{{ stats.total }}</span>
                         <span class="stat-label">全部会话</span>
                     </div>
                 </button>
-                <button type="button" :class="['stat-card', 'warning', { active: filters.scope === 'anomaly' }]" @click="filters.scope = 'anomaly'">
+                <button type="button" :class="['stat-card', 'warning', { active: filters.scope === 'anomaly' }]" @click="selectScope('anomaly')">
                     <span class="stat-icon icon-anomaly"><AlertTriangle :size="18" /></span>
                     <div class="stat-content">
                         <span class="stat-num warning">{{ stats.anomaly }}</span>
@@ -462,7 +469,9 @@ onBeforeUnmount(() => {
     font-weight: 500;
     border-radius: 4px;
 }
-.head-badge.health-ok { color: #059669; background: rgb(5 150 105 / 10%); }
+.head-badge.health-ready { color: #047857; background: rgb(5 150 105 / 10%); }
+.head-badge.health-degraded { color: #b45309; background: rgb(217 119 6 / 10%); }
+.head-badge.health-disabled { color: var(--uvp-text-tertiary); background: var(--uvp-list-toolbar-bg); }
 .head-meta { color: var(--uvp-text-tertiary); font-size: 12px; }
 
 /* 实时刷新开关 */

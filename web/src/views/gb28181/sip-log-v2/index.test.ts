@@ -83,10 +83,14 @@ describe("SIP log workbench storage replacement regression", () => {
 
         expect(wrapper.get(".page-title").text()).toBe("SIP 日志");
         expect(wrapper.get(".head-badge").text()).toContain("采集正常");
+        expect(wrapper.find(".health-icon-ready").exists()).toBe(true);
+        expect(wrapper.find(".health-icon-degraded").exists()).toBe(false);
+        expect(wrapper.find(".health-icon-disabled").exists()).toBe(false);
         expect(wrapper.find(".toolbar").exists()).toBe(true);
         expect(wrapper.find(".stat-band").exists()).toBe(true);
         expect(wrapper.find(".sip-log-search").exists()).toBe(true);
         expect(wrapper.find(".view-switch").exists()).toBe(true);
+        expect(wrapper.findAll(".view-btn").map(button => button.text())).toEqual(["表格", "终端"]);
         expect(wrapper.find(".workspace").exists()).toBe(true);
         expect(wrapper.findComponent({ name: "TableView" }).props("sessions")).toEqual([]);
         expect(wrapper.text()).toContain("全部会话");
@@ -101,8 +105,36 @@ describe("SIP log workbench storage replacement regression", () => {
         await flushPromises();
 
         expect(wrapper.get(".head-badge").text()).toContain("存储降级");
+        expect(wrapper.find(".health-icon-ready").exists()).toBe(false);
+        expect(wrapper.find(".health-icon-degraded").exists()).toBe(true);
         expect(wrapper.find(".stat-band").exists()).toBe(true);
         expect(wrapper.find(".workspace").exists()).toBe(true);
+    });
+
+    it("uses a disabled icon when trace collection is not enabled", async () => {
+        traceApi.fetchTraceHealth.mockResolvedValue({
+            code: 0,
+            data: { state: "disabled", queueDepth: 0, queueCapacity: 0, dropped: 0 }
+        });
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.get(".head-badge").text()).toContain("未启用");
+        expect(wrapper.find(".health-icon-ready").exists()).toBe(false);
+        expect(wrapper.find(".health-icon-degraded").exists()).toBe(false);
+        expect(wrapper.find(".health-icon-disabled").exists()).toBe(true);
+    });
+
+    it("searches immediately when switching the session scope cards", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        await wrapper.findAll(".stat-card")[1].trigger("click");
+        await flushPromises();
+
+        expect(traceApi.listTraceSessions).toHaveBeenCalledTimes(2);
+        expect(traceApi.listTraceSessions).toHaveBeenLastCalledWith(expect.objectContaining({ anomaly: true }));
+        expect(traceApi.fetchTraceSessionStats).toHaveBeenCalledTimes(2);
     });
 
     it("uses the existing SSE message event to refresh sessions and stats", async () => {
