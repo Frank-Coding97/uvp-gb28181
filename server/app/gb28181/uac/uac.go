@@ -562,10 +562,6 @@ func (m *SessionManager) PutIfCurrent(s *Session) bool {
 	return true
 }
 
-func (m *SessionManager) put(s *Session) {
-	m.PutIfCurrent(s)
-}
-
 func (m *SessionManager) remove(streamID string) {
 	m.mu.Lock()
 	delete(m.sessions, streamID)

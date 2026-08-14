@@ -2,6 +2,7 @@ package uac
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -11,6 +12,10 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 )
+
+// ErrStaleInviteGeneration 本 INVITE 的 ACK 已完成,但较新的代次已占据同一
+// streamID,结果被 SessionManager 拒绝写入。设备端会话已 BYE,本地 dialog 已关。
+var ErrStaleInviteGeneration = errors.New("uac: stale invite generation")
 
 // InviteOutcome reports the protocol facts observed while establishing an
 // INVITE dialog. It deliberately does not classify playback failures.
@@ -191,6 +196,7 @@ func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, 
 	if err := dialog.Ack(ctx); err != nil {
 		outcome.captureFinalStatus(dialog)
 		s.State = StateIdle
+		_ = dialog.Close()
 		u.recordEnd(callID, cseq, outcome.FinalStatus, false)
 		wrapped := fmt.Errorf("发送 ACK 失败: %w", err)
 		outcome.Error = wrapped
@@ -200,8 +206,19 @@ func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, 
 	outcome.AckAt = time.Now()
 	s.dialog = dialog
 	s.State = StateEstablished
-	if m != nil {
-		m.put(s)
+	if m != nil && !m.PutIfCurrent(s) {
+		// 较新的代次已占据 streamID:本对话框在设备端仍然活着,必须 BYE 回收,
+		// 只本地 Close 会留下设备端推流无人收
+		byeCtx, byeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer byeCancel()
+		_ = dialog.Bye(byeCtx)
+		_ = dialog.Close()
+		s.dialog = nil
+		s.State = StateIdle
+		u.recordEnd(callID, cseq, outcome.FinalStatus, false)
+		wrapped := fmt.Errorf("%w: INVITE 结果晚于更新代次,设备端会话已回收", ErrStaleInviteGeneration)
+		outcome.Error = wrapped
+		return outcome, wrapped
 	}
 	u.recordEnd(callID, cseq, outcome.FinalStatus, true)
 	return outcome, nil

@@ -273,6 +273,27 @@ func TestRelationalStoreListSessionsBoundsCandidateRows(t *testing.T) {
 	}
 }
 
+func TestRelationalStoreListSessionsHonorsExactTimeRange(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, store.InsertBatch(t.Context(), []StoredEvent{
+		testRelationalEvent("outside-before", at.Add(-time.Second), "device-a", "call-before", "MESSAGE", 200),
+		testRelationalEvent("inside", at.Add(time.Second), "device-a", "call-inside", "MESSAGE", 200),
+		testRelationalEvent("outside-after", at.Add(2*time.Minute), "device-a", "call-after", "MESSAGE", 200),
+	}))
+
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{
+		From: at,
+		To:   at.Add(time.Minute),
+		Limit: 10,
+	})
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Equal(t, "call-inside", sessions[0].CallID)
+}
+
 func TestRelationalStoreListSessionsKeepsDailySessionIdentity(t *testing.T) {
 	db := newRelationalStoreTestDB(t)
 	store, err := NewRelationalStore(db)

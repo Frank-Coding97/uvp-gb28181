@@ -199,11 +199,7 @@ func validateSessionFilter(filter SessionFilter) error {
 }
 
 func sessionQueryRange(filter SessionFilter) (time.Time, time.Time) {
-	from := filter.From.UTC()
-	from = time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.UTC)
-	to := filter.To.UTC()
-	to = time.Date(to.Year(), to.Month(), to.Day(), 0, 0, 0, 0, time.UTC).Add(24 * time.Hour)
-	return from, to
+	return filter.From.UTC(), filter.To.UTC()
 }
 
 func applySessionFilter(query *gorm.DB, filter SessionFilter, from, to time.Time) *gorm.DB {

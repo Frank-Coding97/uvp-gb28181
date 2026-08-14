@@ -17,11 +17,15 @@ type inviteOutcomeDialog struct {
 	statusCode int
 
 	closeCalls int
+	byeCalls   int
 }
 
 func (d *inviteOutcomeDialog) WaitAnswer(context.Context) error { return d.waitErr }
 func (d *inviteOutcomeDialog) Ack(context.Context) error        { return d.ackErr }
-func (d *inviteOutcomeDialog) Bye(context.Context) error        { return nil }
+func (d *inviteOutcomeDialog) Bye(context.Context) error {
+	d.byeCalls++
+	return nil
+}
 func (d *inviteOutcomeDialog) Close() error {
 	d.closeCalls++
 	return nil
@@ -201,6 +205,45 @@ func TestInviteTrackedACKFailureCapturesFinalResponseWithoutSession(t *testing.T
 	}
 	if outcome.AckSucceeded || !outcome.AckAt.IsZero() || s.State != StateIdle || m.Get(s.StreamID) != nil {
 		t.Fatalf("ACK failure outcome/state=%+v state=%v stored=%v", outcome, s.State, m.Get(s.StreamID))
+	}
+	if dialog.closeCalls != 1 {
+		t.Fatalf("ACK failure dialog close calls=%d, want 1", dialog.closeCalls)
+	}
+}
+
+func TestInviteTrackedStaleGenerationReleasesDialog(t *testing.T) {
+	dialog := &inviteOutcomeDialog{statusCode: sip.StatusOK}
+	transport := &inviteOutcomeTransport{dialog: dialog}
+	u := newInviteOutcomeTestUAC(transport)
+	m := NewSessionManager()
+
+	// 较新的代次已建立并写入:同 streamID、generation=2
+	live := validInviteOutcomeSession()
+	live.Generation = 2
+	m.PutIfCurrent(live)
+
+	s := validInviteOutcomeSession()
+	s.Generation = 1
+
+	outcome, err := u.InviteTracked(context.Background(), m, s, "v=0\r\n")
+
+	if !errors.Is(err, ErrStaleInviteGeneration) {
+		t.Fatalf("err=%v, want ErrStaleInviteGeneration", err)
+	}
+	if outcome.FinalStatus != sip.StatusOK || !outcome.AckSucceeded {
+		t.Fatalf("outcome=%+v, ACK 本身成功,只是写入被拒", outcome)
+	}
+	if dialog.byeCalls != 1 {
+		t.Fatalf("stale dialog bye calls=%d, want 1(设备端会话必须回收)", dialog.byeCalls)
+	}
+	if dialog.closeCalls != 1 {
+		t.Fatalf("stale dialog close calls=%d, want 1", dialog.closeCalls)
+	}
+	if s.State != StateIdle || s.dialog != nil {
+		t.Fatalf("stale session state=%v dialog=%v, want idle/nil", s.State, s.dialog)
+	}
+	if m.Get(s.StreamID) != live {
+		t.Fatal("stale invite must not replace the live session")
 	}
 }
 

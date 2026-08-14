@@ -6,7 +6,7 @@ import "testing"
 func TestSessionManager(t *testing.T) {
 	m := NewSessionManager()
 	s := &Session{DeviceID: "dev1", ChannelID: "ch1", StreamID: "stream1", State: StateEstablished}
-	m.put(s)
+	m.PutIfCurrent(s)
 
 	got := m.Get("stream1")
 	if got == nil || got.DeviceID != "dev1" {
@@ -32,7 +32,7 @@ func TestSessionManagerConcurrent(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		go func(n int) {
 			id := string(rune('a' + n))
-			m.put(&Session{StreamID: id})
+			m.PutIfCurrent(&Session{StreamID: id})
 			_ = m.Get(id)
 			m.remove(id)
 			done <- true
