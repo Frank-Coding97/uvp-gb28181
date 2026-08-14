@@ -172,6 +172,7 @@ const mapMinZoom = 5;
 const mapMaxZoom = 22;
 const mapContainer = ref<HTMLElement | null>(null);
 const mapReady = ref(false);
+const mapFirstRender = ref(false);
 const mapError = ref("");
 const themeStore = useThemeConfig();
 const { darkMode } = storeToRefs(themeStore);
@@ -261,7 +262,11 @@ const tablePagination = computed(() => ({
 watch([viewMode, assetKind], async () => {
     selectedRowKeys.value = [];
     page.value = 1;
-    if (viewMode.value === "map") await nextTick(ensureMap);
+    if (viewMode.value === "map") {
+        await nextTick(ensureMap);
+    } else {
+        destroyMap();
+    }
     refreshMainData();
 });
 watch(viewMode, (mode) => {
@@ -282,9 +287,14 @@ watch(darkMode, () => {
     if (!mapInstance) return;
     mapInstance.setStyle(currentMapStyleUrl());
     mapReady.value = false;
+    mapFirstRender.value = false;
     mapInstance.once("style.load", () => {
         mapReady.value = true;
+        mapInstance?.resize();
         renderMapOverlays();
+    });
+    mapInstance.once("idle", () => {
+        mapFirstRender.value = true;
     });
 });
 watch(statusFilter, () => {
@@ -606,6 +616,16 @@ function removeMapMarkers() {
     mapClusters.clear();
 }
 
+function destroyMap() {
+    if (mapInstance && mapMoveHandler) mapInstance.off("moveend", mapMoveHandler);
+    removeMapMarkers();
+    mapInstance?.remove();
+    mapInstance = null;
+    mapReady.value = false;
+    mapFirstRender.value = false;
+    mapError.value = "";
+}
+
 function createClusterElement(cluster: MapCluster) {
     const element = document.createElement("button");
     element.type = "button";
@@ -660,9 +680,17 @@ function fitMapToData() {
 
 function ensureMap() {
     if (mapInstance || !mapContainer.value) return;
+    const container = mapContainer.value;
+    // 容器尚未完成布局时延到下一帧，避免以 0 尺寸初始化导致画布空白。
+    if (container.clientWidth === 0 || container.clientHeight === 0) {
+        requestAnimationFrame(ensureMap);
+        return;
+    }
     mapError.value = "";
+    mapReady.value = false;
+    mapFirstRender.value = false;
     mapInstance = new maplibregl.Map({
-        container: mapContainer.value,
+        container,
         style: currentMapStyleUrl(),
         center: [116.3974, 39.9093],
         zoom: mapZoom.value,
@@ -675,8 +703,18 @@ function ensureMap() {
     mapInstance.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
     mapInstance.once("load", () => {
         mapReady.value = true;
-        mapInstance?.resize();
+        requestAnimationFrame(() => mapInstance?.resize());
         loadMapData();
+        // 底图瓦片长期未就绪时兜底，避免一直停在 loading。
+        window.setTimeout(() => {
+            if (!mapFirstRender.value && !mapError.value) {
+                mapFirstRender.value = true;
+                mapError.value = "地图底图加载超时，请检查网络后刷新";
+            }
+        }, 12000);
+    });
+    mapInstance.once("idle", () => {
+        mapFirstRender.value = true;
     });
     mapMoveHandler = () => {
         if (!mapInstance) return;
@@ -685,7 +723,11 @@ function ensureMap() {
     };
     mapInstance.on("moveend", mapMoveHandler);
     mapInstance.on("error", () => {
-        if (!mapReady.value) mapError.value = "底图加载失败，请检查网络或配置 VITE_MAP_STYLE_URL";
+        if (!mapReady.value) {
+            mapError.value = "底图加载失败，请检查网络或配置 VITE_MAP_STYLE_URL";
+        } else if (!mapFirstRender.value && !mapError.value) {
+            mapError.value = "地图底图加载异常，请稍后刷新";
+        }
     });
 }
 
@@ -1550,10 +1592,7 @@ onUnmounted(() => {
     window.removeEventListener("keydown", focusKeyword);
     cancelKeywordSearch();
     stopAutoRefresh();
-    if (mapInstance && mapMoveHandler) mapInstance.off("moveend", mapMoveHandler);
-    removeMapMarkers();
-    mapInstance?.remove();
-    mapInstance = null;
+    destroyMap();
 });
 </script>
 
@@ -2259,7 +2298,7 @@ onUnmounted(() => {
                         <div class="map-canvas">
                             <div ref="mapContainer" class="map-container"></div>
                             <div v-if="mapError" class="map-state map-state-error"><Info :size="16" /> {{ mapError }}</div>
-                            <div v-else-if="!mapReady" class="map-state"><Loader2 :size="16" class="spin" /> 正在加载地图</div>
+                            <div v-else-if="!mapReady || !mapFirstRender" class="map-state"><Loader2 :size="16" class="spin" /> 正在加载地图</div>
                         </div>
                     </div>
 
