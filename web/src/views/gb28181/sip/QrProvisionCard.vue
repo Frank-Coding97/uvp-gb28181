@@ -12,6 +12,14 @@ const secondsLeft = ref(0);
 const baseUrl = ref(normalizeBaseUrl(window.location.origin));
 const touched = ref({ baseUrl: false });
 let timer: ReturnType<typeof setInterval> | null = null;
+// 自动续码失败后的退避重试:已重试次数 + 挂起的定时器.
+// 失败后按 5s→10s→20s 退避,最多 3 次,之后停在失效态等手动点击.
+const renewAttempts = ref(0);
+const renewFailed = ref(false);
+let renewTimer: ReturnType<typeof setTimeout> | null = null;
+
+// 退避间隔(ms):第 1/2/3 次重试
+const RENEW_BACKOFF_MS = [5000, 10000, 20000];
 
 const baseUrlError = computed(() => (touched.value.baseUrl ? validateBaseUrl(baseUrl.value) : ""));
 const baseUrlValid = computed(() => validateBaseUrl(baseUrl.value) === "");
@@ -28,6 +36,13 @@ function stopTimer() {
     }
 }
 
+function stopRenewTimer() {
+    if (renewTimer !== null) {
+        clearTimeout(renewTimer);
+        renewTimer = null;
+    }
+}
+
 // 倒计时以响应到达时刻起算 expiresInSeconds,不用绝对时间戳 —— 免受客户端时钟偏移影响.
 function startCountdown(expiresInSeconds: number) {
     stopTimer();
@@ -37,16 +52,40 @@ function startCountdown(expiresInSeconds: number) {
         if (secondsLeft.value === 0) {
             stopTimer();
             // 二维码过期后自动续码,省去手动操作;地址不合法时停在失效态等用户修正.
-            if (baseUrlValid.value) void generate(true);
+            if (baseUrlValid.value) void autoRenew();
         }
     }, 1000);
 }
 
-async function generate(silent = false) {
+// 自动续码:失败后按退避策略重试,避免一次网络抖动就把页面停在失效态.
+async function autoRenew() {
+    const ok = await generate(true);
+    if (ok) {
+        renewAttempts.value = 0;
+        renewFailed.value = false;
+        return;
+    }
+    renewFailed.value = true;
+    if (renewAttempts.value >= RENEW_BACKOFF_MS.length) return;
+    const delayMs = RENEW_BACKOFF_MS[renewAttempts.value];
+    renewAttempts.value += 1;
+    renewTimer = setTimeout(() => {
+        renewTimer = null;
+        void autoRenew();
+    }, delayMs);
+}
+
+async function generate(silent = false): Promise<boolean> {
     touched.value.baseUrl = true;
+    // 手动生成时取消挂起的自动续码重试,避免新旧请求竞争
+    if (!silent) {
+        stopRenewTimer();
+        renewAttempts.value = 0;
+        renewFailed.value = false;
+    }
     if (!baseUrlValid.value) {
         if (!silent) Message.warning(validateBaseUrl(baseUrl.value));
-        return;
+        return false;
     }
     loading.value = true;
     try {
@@ -54,8 +93,10 @@ async function generate(silent = false) {
         if (res.code !== 0) throw new Error(res.message || "生成接入二维码失败");
         token.value = res.data.token;
         startCountdown(res.data.expiresInSeconds);
+        return true;
     } catch (error: any) {
         if (!silent) Message.error(error?.message || "生成接入二维码失败");
+        return false;
     } finally {
         loading.value = false;
     }
@@ -71,10 +112,13 @@ async function copyUrl() {
     }
 }
 
-onUnmounted(stopTimer);
+onUnmounted(() => {
+    stopTimer();
+    stopRenewTimer();
+});
 
 // 内嵌在页面里,进入即出码;过期后自动续码.
-onMounted(generate);
+onMounted(() => void generate());
 </script>
 
 <template>
@@ -113,7 +157,8 @@ onMounted(generate);
                 <SQrcodeDraw :key="qrUrl" :text="qrUrl" :options="{ width: 220, margin: 1 }" />
             </div>
             <div v-else class="qr-placeholder" :class="{ 'is-expired': expired }">
-                <span v-if="expired">二维码已失效</span>
+                <span v-if="expired && renewFailed">二维码已失效,自动续码未成功</span>
+                <span v-else-if="expired">二维码已失效</span>
                 <span v-else-if="loading">正在生成…</span>
                 <span v-else-if="!baseUrlValid">请先填写合法的平台访问地址</span>
                 <span v-else>点击下方按钮生成二维码</span>
@@ -132,7 +177,7 @@ onMounted(generate);
                 <a-button size="mini" type="text" @click="copyUrl">复制</a-button>
             </div>
 
-            <a-button type="primary" class="qr-generate" :loading="loading" @click="generate">
+            <a-button type="primary" class="qr-generate" :loading="loading" @click="generate()">
                 <template #icon><RefreshCw :size="15" /></template>
                 {{ token ? "重新生成" : "生成二维码" }}
             </a-button>
