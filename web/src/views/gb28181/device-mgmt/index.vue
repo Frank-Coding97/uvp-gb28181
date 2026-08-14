@@ -236,6 +236,10 @@ let suppressKeywordSearch = false;
 let mapInstance: MapLibreMap | null = null;
 let mapMoveHandler: (() => void) | null = null;
 let mapAutoFitPending = true;
+// 底图加载 12s 兜底定时器句柄(window.setTimeout 返回 number),销毁地图时必须清除,防跨实例污染
+let mapFirstRenderTimer: number | null = null;
+// 地图数据请求代次:响应返回时与当前代次不一致则丢弃
+let mapDataSeq = 0;
 const mapMarkers = new Map<number, MapLibreMarker>();
 const mapClusters = new Map<string, MapLibreMarker>();
 
@@ -656,6 +660,13 @@ function removeMapMarkers() {
 }
 
 function destroyMap() {
+    // 销毁时清除底图加载兜底定时器,防止旧实例的回调污染新地图状态
+    if (mapFirstRenderTimer !== null) {
+        clearTimeout(mapFirstRenderTimer);
+        mapFirstRenderTimer = null;
+    }
+    // 使在途的地图数据请求响应失效,避免旧响应覆盖当前视图
+    mapDataSeq += 1;
     if (mapInstance && mapMoveHandler) mapInstance.off("moveend", mapMoveHandler);
     removeMapMarkers();
     mapInstance?.remove();
@@ -728,7 +739,12 @@ function ensureMap() {
     mapError.value = "";
     mapReady.value = false;
     mapFirstRender.value = false;
-    mapInstance = new maplibregl.Map({
+    mapInstance = createMapInstance(container);
+    attachMapLifecycle();
+}
+
+function createMapInstance(container: HTMLElement): MapLibreMap {
+    const instance = new maplibregl.Map({
         container,
         style: currentMapStyleUrl(),
         center: [116.3974, 39.9093],
@@ -738,14 +754,20 @@ function ensureMap() {
         attributionControl: false,
         hash: false
     });
-    mapInstance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
-    mapInstance.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+    instance.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    instance.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+    return instance;
+}
+
+function attachMapLifecycle() {
+    if (!mapInstance) return;
     mapInstance.once("load", () => {
         mapReady.value = true;
         requestAnimationFrame(() => mapInstance?.resize());
         loadMapData();
         // 底图瓦片长期未就绪时兜底，避免一直停在 loading。
-        window.setTimeout(() => {
+        mapFirstRenderTimer = window.setTimeout(() => {
+            mapFirstRenderTimer = null;
             if (!mapFirstRender.value && !mapError.value) {
                 mapFirstRender.value = true;
                 mapError.value = "地图底图加载超时，请检查网络后刷新";
@@ -816,6 +838,9 @@ async function loadDevicesData() {
 
 async function loadMapData() {
     if (viewMode.value !== "map") return;
+    // 记录本次请求代次:响应返回时若已有更新的请求或地图已销毁,丢弃旧结果,
+    // 避免慢响应把过期的点位/数量覆盖到当前视图
+    const seq = ++mapDataSeq;
     mapLoading.value = true;
     try {
         const query = {
@@ -828,6 +853,7 @@ async function loadMapData() {
             listMapMarkers({ ...query, limit: 800 }),
             listMapClusters({ ...query, zoom: mapZoom.value })
         ]);
+        if (seq !== mapDataSeq) return;
         if (markerRes.code === 0) markers.value = markerRes.data?.list || [];
         if (clusterRes.code === 0) clusters.value = clusterRes.data?.clusters || [];
         total.value = markerRes.data?.total || 0;
@@ -837,26 +863,31 @@ async function loadMapData() {
             fitMapToData();
         }
     } catch (error: any) {
+        if (seq !== mapDataSeq) return;
         Message.error(error?.message || "地图数据加载失败");
     } finally {
-        mapLoading.value = false;
+        if (seq === mapDataSeq) mapLoading.value = false;
     }
 }
 
 async function refreshStats() {
-    try {
-        const [onlineDeviceRes, offlineDeviceRes, onlineChannelRes, offlineChannelRes] = await Promise.all([
-            listDevices({ status: "online", page: 1, pageSize: 1 }),
-            listDevices({ status: "offline", page: 1, pageSize: 1 }),
-            listChannels({ status: "online", page: 1, pageSize: 1 }),
-            listChannels({ status: "offline", page: 1, pageSize: 1 })
-        ]);
-        if (onlineDeviceRes.code === 0) onlineDeviceTotal.value = onlineDeviceRes.data?.total || 0;
-        if (offlineDeviceRes.code === 0) offlineDeviceTotal.value = offlineDeviceRes.data?.total || 0;
-        if (onlineChannelRes.code === 0) onlineChannelTotal.value = onlineChannelRes.data?.total || 0;
-        if (offlineChannelRes.code === 0) offlineChannelTotal.value = offlineChannelRes.data?.total || 0;
-    } catch (error: any) {
-        console.warn(error);
+    // 只拉当前资产类型的统计:UI 只展示当前 assetKind 的在线/离线数字,
+    // 一次轮询不应为另一类型额外执行全量计数查询
+    const isDevice = assetKind.value === "device";
+    const requests = isDevice
+        ? [listDevices({ status: "online", page: 1, pageSize: 1 }), listDevices({ status: "offline", page: 1, pageSize: 1 })]
+        : [listChannels({ status: "online", page: 1, pageSize: 1 }), listChannels({ status: "offline", page: 1, pageSize: 1 })];
+    const [onlineRes, offlineRes] = await Promise.allSettled(requests);
+    // 单个失败不拖累另一个:保留成功侧的结果,失败侧维持旧值
+    if (onlineRes.status === "fulfilled" && onlineRes.value.code === 0) {
+        const total = onlineRes.value.data?.total || 0;
+        if (isDevice) onlineDeviceTotal.value = total;
+        else onlineChannelTotal.value = total;
+    }
+    if (offlineRes.status === "fulfilled" && offlineRes.value.code === 0) {
+        const total = offlineRes.value.data?.total || 0;
+        if (isDevice) offlineDeviceTotal.value = total;
+        else offlineChannelTotal.value = total;
     }
 }
 
