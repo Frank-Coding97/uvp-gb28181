@@ -616,7 +616,19 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			// 本代次的 INVITE 晚于更新代次完成:InviteTracked 已回收本代次的
 			// 设备端会话。streamID 上挂的是新代次会话与 RTP 服务,不能走按
 			// streamID 的通用回滚(其 Bye/CloseRtpServer 会误杀新代次)。
-			// 本代次的 SSRC 由 defer 释放,location 绑定已被新代次覆盖,无需清理。
+			// 但本代次可能在旧节点开过 RTP:新代次迁到别的节点后,旧节点的
+			// listener 已无法通过 LocationMap 定位,必须按旧 client 关闭;
+			// 同节点时关 RTP 会误杀新代次的流,不关。
+			if nodeID := s.currentNodeID(liveRef.StreamID); nodeID != 0 && nodeID != liveRef.NodeID {
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 3*time.Second)
+				_ = client.CloseRtpServer(cleanupCtx, liveRef.StreamID)
+				cleanupCancel()
+			}
+			if errors.Is(inviteErr, uac.ErrStaleInviteCleanupFailed) {
+				// 设备端会话清理未确认:设备可能仍按旧 SSRC 推流。
+				// 宁可泄漏这个 SSRC,也不能回池后被新代次复用造成双流冲突
+				releaseSSRC = false
+			}
 			return nil, fmt.Errorf("发 INVITE 失败: %w", inviteErr)
 		}
 		if code, ok := classifyPlayStuck(outcome, inviteErr, false, errors.Is(playCtx.Err(), context.DeadlineExceeded)); ok {
@@ -714,6 +726,24 @@ func (s *Service) emitPlayStuck(session *uac.Session, outcome uac.InviteOutcome,
 		CallID: outcome.CallID, CSeq: uint32(cseq), Method: "INVITE",
 		StatusCode: uint16(outcome.FinalStatus), StreamID: session.StreamID,
 	})
+}
+
+// currentNodeID 返回 streamID 当前绑定节点(多节点时为新代次所在节点);
+// 无多节点设施或未绑定时返回 0.
+func (s *Service) currentNodeID(streamID string) int64 {
+	if !s.useMultiNode() {
+		return 0
+	}
+	if versioned, ok := s.locationMap.(interface {
+		LookupCurrent(string) (stream.LiveRef, bool)
+	}); ok {
+		if cur, exists := versioned.LookupCurrent(streamID); exists {
+			return cur.NodeID
+		}
+		return 0
+	}
+	nodeID, _ := s.locationMap.Lookup(streamID)
+	return nodeID
 }
 
 func (s *Service) rollbackFailedStart(

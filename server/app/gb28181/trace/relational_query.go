@@ -33,6 +33,21 @@ func validateMessageFilter(filter MessageFilter) error {
 	return nil
 }
 
+func applyTraceKeywordFilter(query *gorm.DB, keyword, traceTable string) *gorm.DB {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return query
+	}
+	like := "%" + strings.ToLower(keyword) + "%"
+	predicate := fmt.Sprintf(`
+		LOWER(%[1]s.call_id) LIKE ? OR LOWER(%[1]s.device_id) LIKE ? OR EXISTS (
+			SELECT 1 FROM gb_device
+			WHERE gb_device.device_id = %[1]s.device_id
+			  AND (LOWER(gb_device.name) LIKE ? OR LOWER(gb_device.alias) LIKE ?)
+		)`, traceTable)
+	return query.Where(predicate, like, like, like, like)
+}
+
 func applyMessageFilter(db *gorm.DB, filter MessageFilter) (*gorm.DB, error) {
 	if err := validateMessageFilter(filter); err != nil {
 		return nil, err
@@ -65,10 +80,7 @@ func applyMessageFilter(db *gorm.DB, filter MessageFilter) (*gorm.DB, error) {
 		}
 		db = db.Where("status_code >= ? AND status_code <= ?", min, max)
 	}
-	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		like := "%" + strings.ToLower(keyword) + "%"
-		db = db.Where("LOWER(call_id) LIKE ? OR LOWER(device_id) LIKE ?", like, like)
-	}
+	db = applyTraceKeywordFilter(db, filter.Keyword, "gb_sip_trace_message")
 	return db, nil
 }
 
@@ -213,10 +225,7 @@ func applySessionFilter(query *gorm.DB, filter SessionFilter, from, to time.Time
 	if filter.CallID != "" {
 		query = query.Where("call_id = ?", filter.CallID)
 	}
-	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		like := "%" + strings.ToLower(keyword) + "%"
-		query = query.Where("LOWER(call_id) LIKE ? OR LOWER(device_id) LIKE ?", like, like)
-	}
+	query = applyTraceKeywordFilter(query, filter.Keyword, "gb_sip_trace_message")
 	return query
 }
 
@@ -299,10 +308,7 @@ func applyDiagnosisBaseFilter(query *gorm.DB, filter SessionFilter) *gorm.DB {
 	if filter.CallID != "" {
 		query = query.Where("call_id = ?", filter.CallID)
 	}
-	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
-		like := "%" + strings.ToLower(keyword) + "%"
-		query = query.Where("LOWER(call_id) LIKE ? OR LOWER(device_id) LIKE ?", like, like)
-	}
+	query = applyTraceKeywordFilter(query, filter.Keyword, "gb_sip_trace_session_diagnosis")
 	if filter.DiagnosisCategory != "" {
 		query = query.Where("category = ?", string(filter.DiagnosisCategory))
 	}

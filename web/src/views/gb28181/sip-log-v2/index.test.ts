@@ -90,6 +90,8 @@ describe("SIP log workbench storage replacement regression", () => {
         expect(wrapper.find(".toolbar").exists()).toBe(true);
         expect(wrapper.find(".stat-band").exists()).toBe(true);
         expect(wrapper.find(".sip-log-search").exists()).toBe(true);
+        expect(wrapper.find("a-select-stub").exists()).toBe(false);
+        expect(wrapper.get("a-input-stub").attributes("placeholder")).toBe("搜索设备 ID、名称或 Call-ID");
         expect(wrapper.find(".view-switch").exists()).toBe(true);
         expect(wrapper.findAll(".view-btn").map(button => button.text())).toEqual(["表格", "终端"]);
         expect(wrapper.text().match(/实时/g)).toHaveLength(1);

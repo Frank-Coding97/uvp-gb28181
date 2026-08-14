@@ -17,6 +17,10 @@ import (
 // streamID,结果被 SessionManager 拒绝写入。设备端会话已 BYE,本地 dialog 已关。
 var ErrStaleInviteGeneration = errors.New("uac: stale invite generation")
 
+// ErrStaleInviteCleanupFailed stale 会话的设备端清理(BYE/Close)未确认成功,
+// 设备可能仍按旧代次推流 —— 调用方需隔离 SSRC,防止回池后被新代次复用造成双流冲突。
+var ErrStaleInviteCleanupFailed = errors.New("uac: stale invite cleanup failed")
+
 // InviteOutcome reports the protocol facts observed while establishing an
 // INVITE dialog. It deliberately does not classify playback failures.
 type InviteOutcome struct {
@@ -224,7 +228,8 @@ func (u *UAC) InviteTracked(ctx context.Context, m *SessionManager, s *Session, 
 		wrapped := fmt.Errorf("%w: INVITE 结果晚于更新代次,设备端会话已回收", ErrStaleInviteGeneration)
 		if len(cleanupErrs) > 0 {
 			// 清理失败不能无声 —— 上层需要知道设备端会话可能仍活着,可重试或走补偿
-			wrapped = errors.Join(wrapped, fmt.Errorf("设备端会话清理失败: %w", errors.Join(cleanupErrs...)))
+			wrapped = errors.Join(wrapped,
+				errors.Join(ErrStaleInviteCleanupFailed, errors.Join(cleanupErrs...)))
 		}
 		outcome.Error = wrapped
 		return outcome, wrapped

@@ -9,7 +9,6 @@ import SessionDetail from "./components/SessionDetail.vue";
 import TableView from "./components/TableView.vue";
 import TerminalView from "./components/TerminalView.vue";
 import { formatFullTime } from "./helpers";
-import { listDevices, type DeviceVO } from "@/views/gb28181/device-mgmt/api";
 import {
     buildTraceStreamUrl,
     fetchTraceHealth,
@@ -33,7 +32,6 @@ const route = useRoute();
 
 const filters = ref({
     range: [dayjs().subtract(15, "minute").format("YYYY-MM-DD HH:mm:ss"), dayjs().format("YYYY-MM-DD HH:mm:ss")] as string[],
-    deviceIds: [] as string[],
     scope: "all" as FilterScope,
     diagnosisCode: "" as TraceDiagnosisCode | "",
     keyword: ""
@@ -45,7 +43,6 @@ const stats = ref<TraceSessionStats | null>(null);
 const statsLoading = ref(false);
 const statsError = ref(false);
 const health = ref<TraceHealth>({ state: "disabled", queueDepth: 0, queueCapacity: 0, dropped: 0 });
-const devices = ref<DeviceVO[]>([]);
 const detailLoading = ref(false);
 const selectedEventId = ref<string>("");
 const currentMessageDetail = ref<TraceMessageDetail | null>(null);
@@ -67,7 +64,6 @@ function buildBaseSessionQuery(): TraceSessionQuery {
     return {
         from: dayjs(filters.value.range[0]).toISOString(),
         to: dayjs(filters.value.range[1]).toISOString(),
-        deviceIds: filters.value.deviceIds.length ? filters.value.deviceIds.join(",") : undefined,
         keyword: filters.value.keyword.trim() || undefined,
         limit: 200
     };
@@ -159,15 +155,6 @@ async function loadHealth() {
     }
 }
 
-async function loadDevices() {
-    try {
-        const response = await listDevices({ page: 1, pageSize: 200 });
-        if (response.code === 0) devices.value = response.data?.list || [];
-    } catch {
-        devices.value = [];
-    }
-}
-
 async function loadDrillMessages() {
     if (!drillCallId.value) return;
     detailLoading.value = true;
@@ -251,7 +238,6 @@ async function refresh() {
 }
 
 function resetFilters() {
-    filters.value.deviceIds = [];
     filters.value.scope = "all";
     filters.value.diagnosisCode = "";
     filters.value.keyword = "";
@@ -322,13 +308,13 @@ onMounted(async () => {
     // 从 URL 读取预填参数(来自设备管理页的诊断按钮)
     const { deviceIds, from, to } = route.query;
     if (deviceIds && typeof deviceIds === "string") {
-        filters.value.deviceIds = [deviceIds];
+        filters.value.keyword = deviceIds;
     }
     if (from && typeof from === "string" && to && typeof to === "string") {
         filters.value.range = [from, to];
     }
 
-    await Promise.all([loadDevices(), loadHealth(), loadSessions(), loadStats()]);
+    await Promise.all([loadHealth(), loadSessions(), loadStats()]);
     // 初始进入表格视图,启动实时订阅
     if (viewMode.value === "table" && liveEnabled.value) {
         openLiveSubscription();
@@ -434,23 +420,12 @@ onBeforeUnmount(() => {
                         style="width: 320px"
                         allow-clear
                     />
-                    <a-select
-                        v-model="filters.deviceIds"
-                        multiple
-                        allow-clear
-                        allow-search
-                        :max-tag-count="1"
-                        placeholder="全部设备"
-                        style="width: 200px"
-                    >
-                        <a-option v-for="d in devices" :key="d.id" :value="d.deviceId">{{ d.name || d.alias || d.deviceId }}</a-option>
-                    </a-select>
                     <a-input
                         v-model="filters.keyword"
                         allow-clear
-                        placeholder="搜索 Call-ID 或设备编号"
-                        style="width: 260px"
-                        @press-enter="() => {}"
+                        placeholder="搜索设备 ID、名称或 Call-ID"
+                        style="width: 300px"
+                        @press-enter="search"
                     >
                         <template #prefix><Search :size="14" /></template>
                     </a-input>

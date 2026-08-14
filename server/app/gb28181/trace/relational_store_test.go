@@ -286,8 +286,8 @@ func TestRelationalStoreListSessionsHonorsExactTimeRange(t *testing.T) {
 	}))
 
 	sessions, err := store.ListSessions(t.Context(), SessionFilter{
-		From: at,
-		To:   at.Add(time.Minute),
+		From:  at,
+		To:    at.Add(time.Minute),
 		Limit: 10,
 	})
 	require.NoError(t, err)

@@ -146,4 +146,34 @@ describe("QrProvisionCard 自动续码", () => {
         await flushPromises();
         expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
     });
+
+    it("卸载期间在途续码成功返回不重建计时器", async () => {
+        let resolveInFlight: ((r: unknown) => void) | undefined;
+        api.generateSipQrToken
+            .mockResolvedValueOnce(okResponse("tok-1", 1))
+            .mockImplementationOnce(
+                () =>
+                    new Promise(resolve => {
+                        resolveInFlight = resolve;
+                    })
+            );
+
+        const wrapper = mountCard();
+        await flushPromises();
+
+        vi.advanceTimersByTime(1100); // 过期 → autoRenew 发起在途请求
+        await flushPromises();
+        expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
+
+        wrapper.unmount();
+
+        // 在途请求在卸载后才成功返回:不得更新状态/重建计时器
+        resolveInFlight!(okResponse("tok-2", 1));
+        await flushPromises();
+
+        // 若计时器被重建,1 秒后会再次触发自动续码
+        vi.advanceTimersByTime(30000);
+        await flushPromises();
+        expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
+    });
 });

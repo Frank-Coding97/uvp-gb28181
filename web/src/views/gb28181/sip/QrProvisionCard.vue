@@ -94,6 +94,8 @@ async function generate(silent = false): Promise<boolean> {
     loading.value = true;
     try {
         const res = await generateSipQrToken();
+        // 卸载后在途成功响应:不更新任何状态、不重建计时器
+        if (!mounted) return false;
         if (res.code !== 0) throw new Error(res.message || "生成接入二维码失败");
         token.value = res.data.token;
         startCountdown(res.data.expiresInSeconds);
