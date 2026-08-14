@@ -25,7 +25,7 @@ import {
     ZoomIn,
     ZoomOut
 } from "@lucide/vue";
-import { startPlay, stopPlay, type PlayResult } from "@/api/gb28181";
+import { controlPtz, startPlay, stopPlay, type PlayResult } from "@/api/gb28181";
 import PlayWindow from "./PlayWindow.vue";
 
 interface PlaybackChannel {
@@ -215,13 +215,25 @@ async function reconnect() {
     await startSession();
 }
 
+// 未接入的 DeviceControl 动作(设备信息/关键帧/重启)的占位提示
 function showPendingControl(label: string) {
     Message.info(`${label}控制接口待接入,当前仅展示控制台操作面板`);
 }
 
-function sendPtz(action: string) {
-    if (!isPtzCapable.value) return;
-    showPendingControl(action);
+async function sendPtz(action: string) {
+    if (!isPtzCapable.value || !props.channel?.id) return;
+    try {
+        // 面板速度档位 1-10 映射到协议 1-255(25/档)
+        const res = await controlPtz(props.channel.id, {
+            action,
+            speed: speed.value * 25,
+            idempotencyKey: `ptz-${Date.now()}`
+        });
+        if (res.code !== 0) throw new Error(res.message || "云台控制失败");
+        Message.success(`已下发云台指令:${action}`);
+    } catch (error: any) {
+        Message.error(error?.message || "云台控制失败");
+    }
 }
 
 function selectProtocol(value: string) {

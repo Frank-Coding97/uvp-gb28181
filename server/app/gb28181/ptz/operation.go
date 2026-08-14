@@ -224,9 +224,12 @@ func (s *Service) Execute(ctx context.Context, target Target, command Command) (
 		return gbmodels.GbPTZOperation{}, err
 	}
 
-	mutex := s.lockFor(target.ChannelID)
-	mutex.Lock()
-	defer mutex.Unlock()
+	entry := s.lockChannel(target.ChannelID)
+	entry.mu.Lock()
+	defer func() {
+		entry.mu.Unlock()
+		s.unlockChannel(target.ChannelID, entry)
+	}()
 
 	existing, found, err := s.findIdempotentOperation(ctx, target.ChannelID, command.IdempotencyKey)
 	if err != nil {

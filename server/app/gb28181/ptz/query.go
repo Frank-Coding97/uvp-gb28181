@@ -37,6 +37,12 @@ const (
 	QueryCruiseTrackList QueryKind = "cruise_track_list"
 	QueryCruiseTrack     QueryKind = "cruise_track"
 	QueryPreciseStatus   QueryKind = "precise_status"
+
+	// maxQueryStagePresets / maxQueryStageTracks 单次查询聚合的条目硬上限:
+	// 异常或恶意设备可通过分页响应制造 O(条目数 × body 大小) 的内存放大,
+	// 超出上限直接终止聚合
+	maxQueryStagePresets = 10000
+	maxQueryStageTracks  = 10000
 )
 
 func (s *Service) Refresh(ctx context.Context, target Target, kind QueryKind, trackID int, idempotencyKey string) (gbmodels.GbPTZOperation, error) {
@@ -231,9 +237,12 @@ func (s *Service) applyHomePositionQueryResponse(ctx context.Context, operation 
 		})
 	}
 
-	mutex := s.lockFor(operation.ChannelID)
-	mutex.Lock()
-	defer mutex.Unlock()
+	entry := s.lockChannel(operation.ChannelID)
+	entry.mu.Lock()
+	defer func() {
+		entry.mu.Unlock()
+		s.unlockChannel(operation.ChannelID, entry)
+	}()
 
 	completedAt := s.now()
 	hasData := response.HomePosition != nil
@@ -379,6 +388,9 @@ func (s *Service) accumulateQueryStage(operation gbmodels.GbPTZOperation, cmdTyp
 			stage.presets = make(map[int]manscdp.Preset)
 		}
 		for _, item := range response.Presets {
+			if len(stage.presets) >= maxQueryStagePresets {
+				return nil, false, fmt.Errorf("PTZ 预置位条目数超出上限 %d", maxQueryStagePresets)
+			}
 			stage.presets[item.ID] = item
 		}
 		stage.expected = maxQueryStageExpected(stage.expected, response.SumNum, len(stage.presets))
@@ -392,8 +404,13 @@ func (s *Service) accumulateQueryStage(operation gbmodels.GbPTZOperation, cmdTyp
 		if stage.tracks == nil {
 			stage.tracks = make(map[int]stagedCruiseTrack)
 		}
+		// body 只保留脱敏截断摘要:不再为每条轨迹重复保存整页 XML
+		summary := []byte(summarizePTZBody(body))
 		for _, item := range response.List.Tracks {
-			stage.tracks[item.ID] = stagedCruiseTrack{item: item, body: append([]byte(nil), body...)}
+			if len(stage.tracks) >= maxQueryStageTracks {
+				return nil, false, fmt.Errorf("PTZ 巡航轨迹条目数超出上限 %d", maxQueryStageTracks)
+			}
+			stage.tracks[item.ID] = stagedCruiseTrack{item: item, body: summary}
 		}
 		stage.expected = maxQueryStageExpected(stage.expected, response.SumNum, len(stage.tracks))
 		return &stage, len(stage.tracks) >= stage.expected, nil
@@ -601,7 +618,9 @@ func newerAcceptedQueryExists(tx *gorm.DB, operation gbmodels.GbPTZOperation) (b
 }
 
 func summarizePTZBody(body []byte) string {
-	text := strings.TrimSpace(string(gbtrace.RedactSIP(body)))
+	// GB2312/GB18030 设备的通知可能含非法 UTF-8 字节,直接进 DB 会导致
+	// utf8mb4 写入失败 —— 先清洗为合法 UTF-8,再脱敏截断
+	text := strings.TrimSpace(strings.ToValidUTF8(string(gbtrace.RedactSIP(body)), "�"))
 	if len(text) > 4096 {
 		return text[:4096]
 	}

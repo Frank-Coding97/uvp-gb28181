@@ -347,9 +347,12 @@ func (s *Service) applyAcceptedHomePositionControl(ctx context.Context, operatio
 	if err != nil {
 		return err
 	}
-	mutex := s.lockFor(operation.ChannelID)
-	mutex.Lock()
-	defer mutex.Unlock()
+	entry := s.lockChannel(operation.ChannelID)
+	entry.mu.Lock()
+	defer func() {
+		entry.mu.Unlock()
+		s.unlockChannel(operation.ChannelID, entry)
+	}()
 
 	completedAt := s.now()
 	rawSummary := summarizePTZBody(body)
@@ -510,7 +513,7 @@ func (s *Service) OnPTZNotify(ctx context.Context, deviceCode, callID, cseq stri
 	return func() error {
 		_, err := s.ApplyPreciseNotify(ctx, PreciseNotify{DeviceID: device.ID, DeviceCode: deviceCode, ChannelID: channel.ID, ChannelCode: notify.DeviceID,
 			SN: notify.SN, Pan: notify.Pan, Tilt: notify.Tilt, Zoom: notify.Zoom, Focus: notify.Focus, Iris: notify.Iris,
-			DeviceTime: deviceTime, ReceivedAt: s.now(), DedupeKey: callID + ":" + cseq + ":" + strconv.Itoa(notify.SN), RawSummary: string(body)})
+			DeviceTime: deviceTime, ReceivedAt: s.now(), DedupeKey: callID + ":" + cseq + ":" + strconv.Itoa(notify.SN), RawSummary: summarizePTZBody(body)})
 		return err
 	}()
 }

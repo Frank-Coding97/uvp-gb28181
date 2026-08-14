@@ -11,11 +11,13 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 const (
@@ -327,7 +329,9 @@ func (s *Scheduler) recoverExpiredLeases(ctx context.Context, now time.Time) err
 			if err := tx.First(&operation, attempt.OperationID).Error; err != nil {
 				return err
 			}
-			if operation.MaxAttempts <= 1 {
+			// 没有剩余重试槽位时必须收敛 operation 终态:否则 attempt==max_attempts
+			// 且 next_attempt_at==nil,claimDue 永远跳过,API 轮询永久停在未完成
+			if operation.MaxAttempts <= 1 || operation.Attempt >= operation.MaxAttempts {
 				return tx.Model(&gbmodels.GbPTZOperation{}).
 					Where("id = ? AND response_required = ? AND status = ?", operation.ID, true, gbmodels.PTZOperationQueued).
 					Updates(map[string]interface{}{
@@ -496,7 +500,11 @@ func (s *Scheduler) dispatchAttempt(dispatchCtx context.Context, attempt gbmodel
 	observedAt := s.service.now()
 	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(dispatchCtx), 2*time.Second)
 	defer persistCancel()
-	_ = s.persistAttemptResult(persistCtx, attempt, result, err, observedAt)
+	if persistErr := s.persistAttemptResult(persistCtx, attempt, result, err, observedAt); persistErr != nil && app.ZapLog != nil {
+		// 写回失败不得无声:否则 attempt 停留 dispatching,直到租约恢复才可能被发现
+		app.ZapLog.Error("PTZ 调度结果持久化失败",
+			zap.Uint("attempt", attempt.ID), zap.Uint("operation", attempt.OperationID), zap.Error(persistErr))
+	}
 }
 
 func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPTZOperation) (string, string, error) {
@@ -507,6 +515,18 @@ func (s *Scheduler) schedulerTarget(ctx context.Context, operation gbmodels.GbPT
 	}
 	if result.RowsAffected == 0 || strings.TrimSpace(device.IP) == "" || device.Port <= 0 || device.Status != gbmodels.DeviceStatusOnline {
 		return "", "", errors.New("PTZ 设备地址不可用")
+	}
+	// 重试路径必须复核通道:设备在线而通道已离线或目录已变更时,
+	// 不得对失效目标继续发送 PTZ 指令
+	var channel gbmodels.GbChannel
+	channelResult := s.db.WithContext(ctx).
+		Where("id = ? AND device_id = ? AND channel_id = ?", operation.ChannelID, operation.DeviceCode, operation.ChannelCode).
+		Limit(1).Find(&channel)
+	if channelResult.Error != nil {
+		return "", "", channelResult.Error
+	}
+	if channelResult.RowsAffected == 0 || channel.Status != gbmodels.ChannelStatusOnline {
+		return "", "", errors.New("PTZ 通道不在线或已失效")
 	}
 	return net.JoinHostPort(device.IP, strconv.Itoa(device.Port)), device.Transport, nil
 }

@@ -128,9 +128,12 @@ func (s *Service) ApplyHomePosition(ctx context.Context, update HomePositionUpda
 	if s == nil || s.db == nil {
 		return gbmodels.GbPTZHomePosition{}, false, operationError(ErrorCodeHomePositionUnavailable, "PTZ service 未就绪", nil)
 	}
-	mutex := s.lockFor(update.ChannelID)
-	mutex.Lock()
-	defer mutex.Unlock()
+	entry := s.lockChannel(update.ChannelID)
+	entry.mu.Lock()
+	defer func() {
+		entry.mu.Unlock()
+		s.unlockChannel(update.ChannelID, entry)
+	}()
 	return s.applyHomePositionDB(ptzWriter(s.db).WithContext(ctx), update)
 }
 

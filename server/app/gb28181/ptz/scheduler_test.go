@@ -145,8 +145,13 @@ func newSchedulerFixture(t *testing.T, capacity int) *schedulerFixture {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(8)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}))
+	// 显式设置 WAL 与 busy_timeout:并发调度测试下多个 goroutine 同时读写,
+	// 缺省 DELETE 日志模式会让读与写互斥并立即报 database is locked
+	require.NoError(t, db.Exec("PRAGMA journal_mode=WAL").Error)
+	require.NoError(t, db.Exec("PRAGMA busy_timeout=5000").Error)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{}, &gbmodels.GbPTZOperationAttempt{}))
 	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: "D", IP: "192.0.2.10", Port: 5060, Transport: "UDP", Status: gbmodels.DeviceStatusOnline}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbChannel{DeviceID: "D", ChannelID: "C", Status: gbmodels.ChannelStatusOnline}).Error)
 	clock := &schedulerFakeClock{now: time.Now().Add(time.Hour).Truncate(time.Second)}
 	sender := &schedulerFakeSender{}
 	service, err := NewService(db, sender, clock.Now)

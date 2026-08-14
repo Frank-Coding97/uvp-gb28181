@@ -118,9 +118,35 @@ func ptzWriter(db *gorm.DB) *gorm.DB {
 	return db.Clauses(dbresolver.Write)
 }
 
-func (s *Service) lockFor(channelID uint) *sync.Mutex {
-	value, _ := s.locks.LoadOrStore(channelID, &sync.Mutex{})
-	return value.(*sync.Mutex)
+// channelLockEntry 带引用计数的通道锁:引用归零后可安全从锁表回收,
+// 防止锁表随历史通道 ID 无限累积
+type channelLockEntry struct {
+	mu   sync.Mutex
+	refs atomic.Int32
+}
+
+// lockChannel 获取通道锁并计数,返回的 entry 必须与 unlockChannel 成对使用.
+func (s *Service) lockChannel(channelID uint) *channelLockEntry {
+	for {
+		value, _ := s.locks.LoadOrStore(channelID, &channelLockEntry{})
+		entry := value.(*channelLockEntry)
+		entry.refs.Add(1)
+		current, ok := s.locks.Load(channelID)
+		if ok && current == entry {
+			return entry
+		}
+		// 条目在计数期间已被回收替换:回退计数并重试到新条目
+		entry.refs.Add(-1)
+	}
+}
+
+// unlockChannel 释放引用;归零时若仍是当前条目则从锁表移除.
+func (s *Service) unlockChannel(channelID uint, entry *channelLockEntry) {
+	if entry.refs.Add(-1) == 0 {
+		if current, ok := s.locks.Load(channelID); ok && current == entry {
+			s.locks.Delete(channelID)
+		}
+	}
 }
 
 func (s *Service) nextSN() int {
@@ -248,7 +274,9 @@ func (s *Service) ApplyPreciseNotify(ctx context.Context, notify PreciseNotify) 
 	if err != nil {
 		return gbmodels.GbPTZState{}, err
 	}
-	if err := s.db.WithContext(ctx).Where("channel_id = ?", notify.ChannelID).Limit(1).Find(&state).Error; err != nil {
+	// 事务后回读必须走写库句柄:dbresolver 读写分离时读副本可能滞后,
+	// 调用方(精准位置通知刚写入)会拿到旧状态
+	if err := ptzWriter(s.db).WithContext(ctx).Where("channel_id = ?", notify.ChannelID).Limit(1).Find(&state).Error; err != nil {
 		return gbmodels.GbPTZState{}, err
 	}
 	return state, nil
