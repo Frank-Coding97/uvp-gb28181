@@ -181,6 +181,7 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 func (s *Server) registerHandlers() {
 	regHandler := handler.NewRegisterHandler(s.cfg)
 	regHandler.SetSecurity(s.security)
+	regHandler.SetDiagnosticSink(gbtrace.DiagnosisSinkFromRuntime(s.trace))
 	msgHandler := handler.NewMessageHandler(s.cfg)
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE

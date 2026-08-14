@@ -17,6 +17,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -32,6 +33,11 @@ type RegisterHandler struct {
 	subscriptionWaker SubscriptionWaker // 可选:设备恢复在线后恢复已启用订阅
 	recorder          metrics.Recorder  // 可选:埋点 SIP 事务
 	security          RegisterSecurity
+	diagnosticSink    diagnosis.DiagnosticSink
+	attempts          *registerAttemptTracker
+	now               func() time.Time
+	handleRegister    func(context.Context, device.RegisterInfo, int) (bool, error)
+	handleUnregister  func(context.Context, string) error
 }
 
 // RegisterSecurity keeps authentication protection independent from the SIP
@@ -69,7 +75,22 @@ func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
 	if interval <= 0 {
 		interval = 60
 	}
-	return &RegisterHandler{cfg: cfg, keepaliveInterval: interval, platformVersion: platformXGBVersion(cfg), security: newStandaloneRegisterSecurity()}
+	sink := diagnosis.DiagnosticSink(diagnosis.NoopSink{})
+	handler := &RegisterHandler{
+		cfg: cfg, keepaliveInterval: interval, platformVersion: platformXGBVersion(cfg),
+		security: newStandaloneRegisterSecurity(), diagnosticSink: sink, now: time.Now,
+		handleRegister: device.HandleRegister, handleUnregister: device.HandleUnregister,
+	}
+	handler.attempts = newRegisterAttemptTracker(sink, func() time.Time { return handler.now() })
+	return handler
+}
+
+func (h *RegisterHandler) SetDiagnosticSink(sink diagnosis.DiagnosticSink) {
+	if sink == nil {
+		sink = diagnosis.NoopSink{}
+	}
+	h.diagnosticSink = sink
+	h.attempts.setSink(sink)
 }
 
 // SetSecurity installs the shared SIP security runtime before the server starts.
@@ -141,6 +162,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if deviceID == "" {
 		_ = tx.Respond(h.newResponse(req, 400, "Missing device id", nil))
 		h.recordEnd(req, 400, false)
+		h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeInvalidRequest, 400)
 		return
 	}
 
@@ -167,15 +189,21 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			zap.String("wantServerId", h.cfg.SIP.ServerID))
 		_ = tx.Respond(h.newResponse(req, 403, "Server ID mismatch", nil))
 		h.recordEnd(req, 403, false)
+		h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeServerIDMismatch, 403)
 		return
 	}
 
 	// 第二步:无 Authorization → 回 401 挑战 digest
 	authHeader := req.GetHeader("Authorization")
 	if authHeader == nil {
-		status := h.respondChallenge(req, tx)
+		status, nonce := h.respondChallenge(req, tx)
 		// 401 挑战是正常协议握手,不算失败(后续 Authorization 重发会再走一遍 Handle)
 		h.recordEnd(req, status, status == sip.StatusUnauthorized)
+		if status == sip.StatusUnauthorized {
+			h.trackRegisterChallenge(req, deviceID, nonce)
+		} else {
+			h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeInternalError, status)
+		}
 		return
 	}
 
@@ -183,8 +211,10 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	cred, err := digest.ParseCredentials(authHeader.Value())
 	if err != nil {
 		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
-		status := h.respondChallenge(req, tx)
+		status, _ := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
+		h.attempts.failByCallID(registerCallID(req))
+		h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeDigestFailure, status)
 		return
 	}
 	algorithm := strings.ToUpper(strings.TrimSpace(cred.Algorithm))
@@ -193,8 +223,9 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	if cred.Realm != h.cfg.SIP.Domain || cred.Username != deviceID || algorithm != "MD5" {
 		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
-		status := h.respondChallenge(req, tx)
+		status, _ := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
+		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeDigestFailure, status)
 		return
 	}
 	chal := digest.Challenge{
@@ -215,14 +246,16 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if err != nil || expected.Response != cred.Response {
 		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
 		app.ZapLog.Warn("GB28181 注册鉴权失败", zap.String("deviceId", deviceID))
-		status := h.respondChallenge(req, tx)
+		status, _ := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
+		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeDigestFailure, status)
 		return
 	}
 	if err := h.security.ValidateNonce(cred.Nonce, digestNonceCount(cred.Nc)); err != nil {
 		h.recordSecurity(req, deviceID, nonceFailureReason(err))
-		status := h.respondChallenge(req, tx)
+		status, _ := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
+		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosisCodeForNonceError(err), status)
 		return
 	}
 
@@ -231,15 +264,17 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	ctx := context.Background()
 	if expires == 0 {
 		// 注销
-		if err := device.HandleUnregister(ctx, deviceID); err != nil {
+		if err := h.handleUnregister(ctx, deviceID); err != nil {
 			app.ZapLog.Error("GB28181 注销处理失败", zap.String("deviceId", deviceID), zap.Error(err))
 			_ = tx.Respond(h.newResponse(req, 500, "Server error", nil))
 			h.recordEnd(req, 500, false)
+			h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeInternalError, 500)
 			return
 		}
 		app.ZapLog.Info("GB28181 设备注销", zap.String("deviceId", deviceID))
 		_ = tx.Respond(h.buildOKWithExpires(req, 0))
 		h.recordEnd(req, 200, true)
+		h.finishRegisterAttempt(req, deviceID, cred.Nonce)
 		return
 	}
 
@@ -253,12 +288,17 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		Expires:         expires,
 		ReportedVersion: advertised.Raw,
 	}
-	isFirst, err := device.HandleRegister(ctx, info, h.keepaliveInterval)
+	isFirst, err := h.handleRegister(ctx, info, h.keepaliveInterval)
 	if err != nil {
 		status, reason := registerFailureResponse(err)
 		app.ZapLog.Error("GB28181 注册状态更新失败", zap.String("deviceId", deviceID), zap.Error(err))
 		_ = tx.Respond(h.newResponse(req, status, reason, nil))
 		h.recordEnd(req, status, false)
+		code := diagnosis.CodeInternalError
+		if errors.Is(err, device.ErrDeviceNotPreallocated) {
+			code = diagnosis.CodeDeviceNotPreallocated
+		}
+		h.failAndEmitRegister(req, deviceID, cred.Nonce, code, status)
 		return
 	}
 	if err := h.security.TrustEndpoint(deviceID, req.Transport(), ip, time.Duration(expires)*time.Second); err != nil {
@@ -270,6 +310,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		zap.Bool("isFirst", isFirst))
 	_ = tx.Respond(h.buildOKWithExpires(req, expires))
 	h.recordEnd(req, 200, true)
+	h.finishRegisterAttempt(req, deviceID, cred.Nonce)
 
 	// 首次注册(或离线后重连)→ 触发 Catalog / DeviceInfo 查询
 	// 放在响应之后:不阻塞 200 OK,失败仅记日志。两个查询独立并行,任一失败不影响另一个。
@@ -305,17 +346,17 @@ func digestNonceCount(count int) string {
 	return fmt.Sprintf("%08x", count)
 }
 
-func (h *RegisterHandler) respondChallenge(req *sip.Request, tx sip.ServerTransaction) int {
+func (h *RegisterHandler) respondChallenge(req *sip.Request, tx sip.ServerTransaction) (int, string) {
 	nonce, err := h.security.IssueNonce()
 	if err != nil {
 		_ = tx.Respond(h.newResponse(req, sip.StatusInternalServerError, "Server error", nil))
-		return sip.StatusInternalServerError
+		return sip.StatusInternalServerError, ""
 	}
 	challenge := digest.Challenge{Realm: h.cfg.SIP.Domain, Nonce: nonce, Algorithm: "MD5"}
 	res := h.newResponse(req, sip.StatusUnauthorized, "Unauthorized", nil)
 	res.AppendHeader(sip.NewHeader("WWW-Authenticate", challenge.String()))
 	_ = tx.Respond(res)
-	return sip.StatusUnauthorized
+	return sip.StatusUnauthorized, nonce
 }
 
 func (h *RegisterHandler) recordSecurity(req *sip.Request, deviceID string, reason gbsecurity.Reason) {
