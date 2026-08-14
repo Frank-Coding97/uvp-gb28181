@@ -117,4 +117,33 @@ describe("QrProvisionCard 自动续码", () => {
         await flushPromises();
         expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
     });
+
+    it("卸载期间在途续码请求完成后不再调度重试", async () => {
+        let rejectInFlight: ((e: Error) => void) | undefined;
+        api.generateSipQrToken
+            .mockResolvedValueOnce(okResponse("tok-1", 1))
+            .mockImplementationOnce(
+                () =>
+                    new Promise((_, reject) => {
+                        rejectInFlight = reject;
+                    })
+            );
+
+        const wrapper = mountCard();
+        await flushPromises();
+
+        vi.advanceTimersByTime(1100); // 过期 → autoRenew 发起在途请求
+        await flushPromises();
+        expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
+
+        wrapper.unmount();
+
+        // 在途请求在卸载后才失败返回:不得再调度退避重试
+        rejectInFlight!(new Error("network down"));
+        await flushPromises();
+
+        vi.advanceTimersByTime(30000);
+        await flushPromises();
+        expect(api.generateSipQrToken).toHaveBeenCalledTimes(2);
+    });
 });

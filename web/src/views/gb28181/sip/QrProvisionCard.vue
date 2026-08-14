@@ -17,6 +17,8 @@ let timer: ReturnType<typeof setInterval> | null = null;
 const renewAttempts = ref(0);
 const renewFailed = ref(false);
 let renewTimer: ReturnType<typeof setTimeout> | null = null;
+// 卸载守卫:在途请求返回后不得再调度重试
+let mounted = false;
 
 // 退避间隔(ms):第 1/2/3 次重试
 const RENEW_BACKOFF_MS = [5000, 10000, 20000];
@@ -60,6 +62,7 @@ function startCountdown(expiresInSeconds: number) {
 // 自动续码:失败后按退避策略重试,避免一次网络抖动就把页面停在失效态.
 async function autoRenew() {
     const ok = await generate(true);
+    if (!mounted) return; // 卸载后在途请求返回,不再调度任何状态更新或重试
     if (ok) {
         renewAttempts.value = 0;
         renewFailed.value = false;
@@ -71,6 +74,7 @@ async function autoRenew() {
     renewAttempts.value += 1;
     renewTimer = setTimeout(() => {
         renewTimer = null;
+        if (!mounted) return;
         void autoRenew();
     }, delayMs);
 }
@@ -113,12 +117,16 @@ async function copyUrl() {
 }
 
 onUnmounted(() => {
+    mounted = false;
     stopTimer();
     stopRenewTimer();
 });
 
 // 内嵌在页面里,进入即出码;过期后自动续码.
-onMounted(() => void generate());
+onMounted(() => {
+    mounted = true;
+    void generate();
+});
 </script>
 
 <template>
