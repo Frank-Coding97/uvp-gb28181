@@ -50,6 +50,9 @@ type PlayParams struct {
 // 遵循 GB/T 28181 附录 SDP 格式，并兼容 WVP 使用的视频负载声明。
 func BuildPlaySDP(p PlayParams) string {
 	proto := "RTP/AVP"
+	if p.TCPMode {
+		proto = "TCP/RTP/AVP"
+	}
 	var b strings.Builder
 	b.WriteString("v=0\r\n")
 	b.WriteString(fmt.Sprintf("o=%s 0 0 IN IP4 %s\r\n", p.ServerID, p.RecvIP))

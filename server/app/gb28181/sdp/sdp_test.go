@@ -72,8 +72,17 @@ func TestBuildPlaySDP(t *testing.T) {
 // TestBuildPlaySDP_TCP TCP 被动模式
 func TestBuildPlaySDP_TCP(t *testing.T) {
 	sdp := BuildPlaySDP(PlayParams{ServerID: "x", RecvIP: "1.2.3.4", RecvPort: 40000, SSRC: "0200000001", TCPMode: true})
-	if !strings.Contains(sdp, "a=setup:passive") {
-		t.Error("TCP模式应含 a=setup:passive")
+	for _, want := range []string{
+		"m=video 40000 TCP/RTP/AVP",
+		"a=setup:passive",
+		"a=connection:new",
+	} {
+		if !strings.Contains(sdp, want) {
+			t.Errorf("TCP模式应含 %q\n完整SDP:\n%s", want, sdp)
+		}
+	}
+	if strings.Contains(sdp, "m=video 40000 RTP/AVP") {
+		t.Fatalf("TCP模式不应声明 UDP 传输:\n%s", sdp)
 	}
 }
 

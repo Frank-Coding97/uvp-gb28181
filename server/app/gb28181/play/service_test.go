@@ -33,6 +33,7 @@ func TestMain(m *testing.M) {
 type mockZLM struct {
 	openCalls     atomic.Int32
 	lastOnlyTrack atomic.Int32
+	lastTCPMode   atomic.Int32
 	lastStreamID  atomic.Value
 	lastSSRC      atomic.Value
 	closeCalls    atomic.Int32
@@ -48,6 +49,7 @@ type mockZLM struct {
 func (m *mockZLM) OpenRtpServerWithSSRC(ctx context.Context, request zlm.OpenRtpServerRequest) (*zlm.OpenRtpServerResult, error) {
 	m.openCalls.Add(1)
 	m.lastOnlyTrack.Store(int32(request.OnlyTrack))
+	m.lastTCPMode.Store(int32(request.TCPMode))
 	m.lastStreamID.Store(request.StreamID)
 	m.lastSSRC.Store(request.SSRC)
 	if m.openErr != nil {
@@ -361,6 +363,43 @@ func TestStartDisablesAudioPerChannel(t *testing.T) {
 	}
 	if got := z.lastOnlyTrack.Load(); got != 2 {
 		t.Fatalf("关闭音频时 only_track 应为2,实际%d", got)
+	}
+}
+
+func TestStartUsesChannelStreamTransport(t *testing.T) {
+	tests := []struct {
+		name             string
+		streamTransport  string
+		wantTCPMode      int32
+		wantMediaProfile string
+		wantSetup        bool
+	}{
+		{name: "TCP passive", streamTransport: "TCP-Passive", wantTCPMode: 1, wantMediaProfile: "TCP/RTP/AVP", wantSetup: true},
+		{name: "UDP", streamTransport: "UDP", wantTCPMode: 0, wantMediaProfile: "RTP/AVP", wantSetup: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			z := &mockZLM{}
+			z.online.Store(true)
+			inv := &mockInviter{}
+			ch := aChannel()
+			ch.StreamTransport = tt.streamTransport
+			s, _, _ := newSvc(t, z, inv, onlineDevice(), ch)
+
+			if _, err := s.Start(context.Background(), ch.DeviceID, ch.ChannelID); err != nil {
+				t.Fatalf("Start 应成功: %v", err)
+			}
+			if got := z.lastTCPMode.Load(); got != tt.wantTCPMode {
+				t.Fatalf("ZLM tcp_mode=%d, want %d", got, tt.wantTCPMode)
+			}
+			if !strings.Contains(inv.lastBody, "m=video 40000 "+tt.wantMediaProfile) {
+				t.Fatalf("SDP 应使用 %s:\n%s", tt.wantMediaProfile, inv.lastBody)
+			}
+			if got := strings.Contains(inv.lastBody, "a=setup:passive"); got != tt.wantSetup {
+				t.Fatalf("SDP setup passive=%v, want %v:\n%s", got, tt.wantSetup, inv.lastBody)
+			}
+		})
 	}
 }
 

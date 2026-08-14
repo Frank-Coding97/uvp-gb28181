@@ -553,11 +553,16 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	if ch.AudioEnabled {
 		onlyTrack = 0 // ZLM: 0=音视频
 	}
+	tcpPassive := ch.StreamTransport == "TCP-Passive"
+	tcpMode := 0
+	if tcpPassive {
+		tcpMode = 1
+	}
 	rtpRes, err := client.OpenRtpServerWithSSRC(ctx, zlm.OpenRtpServerRequest{
 		StreamID:  streamID,
 		SSRC:      ssrc,
 		Port:      0,
-		TCPMode:   0,
+		TCPMode:   tcpMode,
 		OnlyTrack: onlyTrack,
 	})
 	if err != nil {
@@ -575,6 +580,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		RecvIP:   recvHost,
 		RecvPort: recvPort,
 		SSRC:     ssrc,
+		TCPMode:  tcpPassive,
 		Extended: gbconfig.SDPExtensionEnabled(),
 	})
 

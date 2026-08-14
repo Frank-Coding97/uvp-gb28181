@@ -487,7 +487,7 @@ func (s *DialogClientSession) isEarlyDialog() bool {
 
 // newAckRequestUAC creates ACK request for 2xx INVITE
 // https://tools.ietf.org/html/rfc3261#section-13.2.2.4
-// NOTE: it does not copy Via header. This is left to transport or caller to enforce
+// Preserve the INVITE sent-by address while using a fresh branch for the ACK transaction.
 func newAckRequestUAC(inviteRequest *sip.Request, inviteResponse *sip.Response, body []byte) *sip.Request {
 	Recipient := &inviteRequest.Recipient
 	if contact := inviteResponse.Contact(); contact != nil {
@@ -498,6 +498,11 @@ func newAckRequestUAC(inviteRequest *sip.Request, inviteResponse *sip.Response, 
 		*Recipient.Clone(),
 	)
 	ackRequest.SipVersion = inviteRequest.SipVersion
+	if via := inviteRequest.Via(); via != nil {
+		ackVia := via.Clone()
+		ackVia.Params.Add("branch", sip.GenerateBranchN(16))
+		ackRequest.AppendHeader(ackVia)
+	}
 
 	if len(inviteRequest.GetHeaders("Route")) > 0 {
 		sip.CopyHeaders("Route", inviteRequest, ackRequest)

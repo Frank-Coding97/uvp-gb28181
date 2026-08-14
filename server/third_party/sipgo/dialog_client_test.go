@@ -120,6 +120,30 @@ func TestDialogClientRequestRecordRouteHeaders(t *testing.T) {
 
 }
 
+func TestNewAckRequestUACKeepsAdvertisedViaAddress(t *testing.T) {
+	invite := sip.NewRequest(sip.INVITE, sip.Uri{User: "device", Host: "192.0.2.20", Port: 5060})
+	client := testClient(t, func(req *sip.Request) *sip.Response {
+		return sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil)
+	})
+	require.NoError(t, clientRequestBuildReq(client, invite))
+	invite.RemoveHeader("Via")
+	params := sip.NewParams()
+	params.Add("branch", "z9hG4bK.original")
+	invite.AppendHeader(&sip.ViaHeader{
+		ProtocolName: "SIP", ProtocolVersion: "2.0", Transport: "UDP",
+		Host: "192.0.2.10", Port: 5062, Params: params,
+	})
+	response := sip.NewResponseFromRequest(invite, sip.StatusOK, "OK", nil)
+
+	ack := newAckRequestUAC(invite, response, nil)
+
+	require.NotNil(t, ack.Via())
+	assert.Equal(t, "192.0.2.10", ack.Via().Host)
+	assert.Equal(t, 5062, ack.Via().Port)
+	assert.Equal(t, "UDP", ack.Via().Transport)
+	assert.NotEqual(t, "z9hG4bK.original", ack.Via().Params.GetOr("branch", ""))
+}
+
 func TestDialogClientMultiRequest(t *testing.T) {
 	var sentReq *sip.Request
 	client := testClient(t, func(req *sip.Request) *sip.Response {
