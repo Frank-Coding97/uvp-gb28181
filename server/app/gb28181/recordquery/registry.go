@@ -25,6 +25,9 @@ type queryEntry struct {
 	declaredTotal   int
 	capacityReached bool
 	records         map[string]manscdp.RecordInfoItem
+	rejectedCount   int
+	warningCount    int
+	warningCodes    []string
 }
 
 type entrySnapshot struct {
@@ -33,6 +36,11 @@ type entrySnapshot struct {
 	declaredTotal   int
 	capacityReached bool
 	records         []manscdp.RecordInfoItem
+	// 协议诊断计数:聚合边界不再把无效项/警告静默丢弃,
+	// 结果里可区分协议数据错误与真正的设备超时
+	rejectedCount int
+	warningCount  int
+	warningCodes  []string
 }
 
 type Registry struct {
@@ -135,6 +143,7 @@ func (e *queryEntry) add(response *manscdp.RecordInfoResponse) {
 	}
 	for _, item := range response.Items {
 		if item.DeviceID != e.channelCode {
+			e.rejectedCount++
 			continue
 		}
 		key := recordDigest(item)
@@ -146,6 +155,18 @@ func (e *queryEntry) add(response *manscdp.RecordInfoResponse) {
 			break
 		}
 		e.records[key] = item
+	}
+	for _, result := range response.ItemResults {
+		if result.Valid {
+			continue
+		}
+		e.rejectedCount++
+		if result.Error != nil {
+			e.warningCount++
+			if code := strings.TrimSpace(string(result.Error.Code)); code != "" && len(e.warningCodes) < 8 {
+				e.warningCodes = append(e.warningCodes, code)
+			}
+		}
 	}
 	if len(e.records) >= e.maxRecords && (e.declaredTotal > len(e.records) || len(response.Items) > e.maxRecords) {
 		e.capacityReached = true
@@ -167,7 +188,9 @@ func (e *queryEntry) snapshot() entrySnapshot {
 	return entrySnapshot{
 		sawResponse: e.sawResponse, explicitEmpty: e.explicitEmpty,
 		declaredTotal: e.declaredTotal, capacityReached: e.capacityReached,
-		records: records,
+		records:       records,
+		rejectedCount: e.rejectedCount, warningCount: e.warningCount,
+		warningCodes: append([]string(nil), e.warningCodes...),
 	}
 }
 

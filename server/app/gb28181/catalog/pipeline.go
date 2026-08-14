@@ -84,96 +84,96 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 			civilNode = n
 		}
 
-		// 2. 业务父节点。2022 ParentID 可为 A/B；目录树只能选择一个
-		// 展示父节点，完整关系由资源关系表保留。
-		var parentNode *gbmodels.GbCatalogNode = civilNode
-		for _, parentCode := range SplitParentIDs(it.ParentID) {
-			if parentCode == it.DeviceID {
-				continue
-			}
-			var existingParent gbmodels.GbCatalogNode
-			found := tx.Where("owner_dept_id = ? AND code = ?", sender.OwnerDeptID, parentCode).
-				Order("id").Limit(1).Find(&existingParent)
-			if found.Error != nil {
-				return found.Error
-			}
-			if found.RowsAffected == 1 {
-				parentNode = &existingParent
-				break
-			}
-			pCls := Classify(parentCode)
-			switch pCls.NodeType {
-			case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
-				pn, err := findOrCreateNode(
-					tx,
-					sender.OwnerDeptID,
-					pCls.NodeType,
-					parentCode,
-					civilNodeID(civilNode),
-					civilNodePath(civilNode),
-					parentCode,
-				)
-				if err != nil {
-					return err
-				}
-				parentNode = pn
-				break
-			case gbmodels.NodeTypeDevice:
-				// device 父:让通道挂在设备节点下(NVR 下的子通道)
-				// 但本期为简化,通道直接挂行政区,设备节点单独建
-				// device 节点的具体 upsert 由 channel 上报路径推断;此处跳过
-			}
+		parentNode, err := resolveBusinessParent(tx, sender, it, civilNode)
+		if err != nil {
+			return err
 		}
+		return ingestByType(ctx, tx, sender, it, cls, parentNode)
+	})
+}
 
-		// 3. 根据当前 item 类型走不同路径
-		switch cls.NodeType {
-		case gbmodels.NodeTypeChannel:
-			node, _, err := upsertChannel(ctx, tx, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
-			if err != nil {
-				return err
-			}
-			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
-			}
-		case gbmodels.NodeTypeDevice:
-			node, _, err := upsertDevice(ctx, tx, sender.OwnerDeptID, it, cls, parentNode)
-			if err != nil {
-				return err
-			}
-			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
-			}
-		case gbmodels.NodeTypeAlarmInput, gbmodels.NodeTypeAlarmOutput:
-			node, _, err := upsertAlarmResource(ctx, tx, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
-			if err != nil {
-				return err
-			}
-			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
-			}
+// resolveBusinessParent 选择业务父节点。2022 ParentID 可为 A/B;目录树只能
+// 选择一个展示父节点,完整关系由资源关系表保留
+func resolveBusinessParent(tx *gorm.DB, sender Sender, it CatalogItem, civilNode *gbmodels.GbCatalogNode) (*gbmodels.GbCatalogNode, error) {
+	parentNode := civilNode
+	for _, parentCode := range SplitParentIDs(it.ParentID) {
+		if parentCode == it.DeviceID {
+			continue
+		}
+		var existingParent gbmodels.GbCatalogNode
+		found := tx.Where("owner_dept_id = ? AND code = ?", sender.OwnerDeptID, parentCode).
+			Order("id").Limit(1).Find(&existingParent)
+		if found.Error != nil {
+			return nil, found.Error
+		}
+		if found.RowsAffected == 1 {
+			parentNode = &existingParent
+			break
+		}
+		pCls := Classify(parentCode)
+		switch pCls.NodeType {
 		case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
-			node, err := findOrCreateNode(
-				tx,
-				sender.OwnerDeptID,
-				cls.NodeType,
-				it.DeviceID,
-				civilNodeID(parentNode),
-				civilNodePath(parentNode),
-				fallbackName(it.Name, it.DeviceID),
+			pn, err := findOrCreateNode(
+				tx, sender.OwnerDeptID, pCls.NodeType, parentCode,
+				civilNodeID(civilNode), civilNodePath(civilNode), parentCode,
 			)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			if cls.Anomaly {
-				return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
-			}
-		case gbmodels.NodeTypeCivilCode:
-			// 已在第 1 步处理;跳过
-		default:
-			return errors.New("catalog: unknown node type")
+			parentNode = pn
+		case gbmodels.NodeTypeDevice:
+			// device 父:让通道挂在设备节点下(NVR 下的子通道)
+			// 但本期为简化,通道直接挂行政区,设备节点单独建
+			// device 节点的具体 upsert 由 channel 上报路径推断;此处跳过
 		}
-		return nil
-	})
+	}
+	return parentNode, nil
+}
+
+// ingestByType 根据节点类型走对应的 upsert 路径
+func ingestByType(ctx context.Context, tx *gorm.DB, sender Sender, it CatalogItem, cls Classification, parentNode *gbmodels.GbCatalogNode) error {
+	switch cls.NodeType {
+	case gbmodels.NodeTypeChannel:
+		node, _, err := upsertChannel(ctx, tx, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
+		if err != nil {
+			return err
+		}
+		if cls.Anomaly {
+			return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+		}
+	case gbmodels.NodeTypeDevice:
+		node, _, err := upsertDevice(ctx, tx, sender.OwnerDeptID, it, cls, parentNode)
+		if err != nil {
+			return err
+		}
+		if cls.Anomaly {
+			return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+		}
+	case gbmodels.NodeTypeAlarmInput, gbmodels.NodeTypeAlarmOutput:
+		node, _, err := upsertAlarmResource(ctx, tx, sender.OwnerDeptID, sender.SourceDeviceID, it, cls, parentNode)
+		if err != nil {
+			return err
+		}
+		if cls.Anomaly {
+			return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+		}
+	case gbmodels.NodeTypeBizGroup, gbmodels.NodeTypeVirtualOrg:
+		node, err := findOrCreateNode(
+			tx, sender.OwnerDeptID, cls.NodeType, it.DeviceID,
+			civilNodeID(parentNode), civilNodePath(parentNode), fallbackName(it.Name, it.DeviceID),
+		)
+		if err != nil {
+			return err
+		}
+		if cls.Anomaly {
+			return recordAnomaly(ctx, tx, sender.OwnerDeptID, node, cls, lookupSourceDeviceID(tx, sender))
+		}
+	case gbmodels.NodeTypeCivilCode:
+		// 已在第 1 步处理;跳过
+	default:
+		return errors.New("catalog: unknown node type")
+	}
+	return nil
 }
 
 // IngestDelta Subscribe NOTIFY 单条增量入库(G1 task 调用入口)

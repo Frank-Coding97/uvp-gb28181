@@ -54,8 +54,15 @@ type ResultSnapshotStore struct {
 	now         func() time.Time
 	snapshots   map[string]Snapshot
 	generations map[ownerChannel]string
+	// invalidatedScopes 记录被显式失效过的查询范围:旧 RecordKey 报"过期"
+	invalidatedScopes map[ownerChannel]struct{}
 	closed      bool
+	// maxSnapshots 快照总量硬上限,0 表示不设限(测试用)
+	maxSnapshots int
 }
+
+// defaultMaxSnapshots 默认快照总量上限:高频重复查询不会让内存无界增长
+const defaultMaxSnapshots = 512
 
 type ownerChannel struct {
 	ownerUserID uint
@@ -71,6 +78,7 @@ func NewResultSnapshotStore(ttl time.Duration, now func() time.Time) (*ResultSna
 	}
 	return &ResultSnapshotStore{
 		ttl: ttl, now: now, snapshots: make(map[string]Snapshot), generations: make(map[ownerChannel]string),
+		invalidatedScopes: make(map[ownerChannel]struct{}), maxSnapshots: defaultMaxSnapshots,
 	}, nil
 }
 
@@ -115,6 +123,7 @@ func (s *ResultSnapshotStore) Issue(input SnapshotInput) (Snapshot, error) {
 	currentQueryID, exists := s.generations[generationKey]
 	if !exists {
 		s.generations[generationKey] = snapshot.QueryID
+		delete(s.invalidatedScopes, generationKey)
 	} else if currentQueryID != snapshot.QueryID {
 		s.mu.Unlock()
 		return Snapshot{}, queryError(ErrorCodeExpired, ErrSnapshotExpired)
@@ -143,6 +152,15 @@ func (s *ResultSnapshotStore) Resolve(request ResolveRequest) (Snapshot, error) 
 	}
 	s.mu.Unlock()
 	if !exists || snapshot.OwnerUserID != request.OwnerUserID || snapshot.ChannelID != request.ChannelID {
+		// 被新查询取代/显式失效而删除的旧快照:报"过期"而非"不存在"
+		s.mu.Lock()
+		genKey := ownerChannel{ownerUserID: request.OwnerUserID, channelID: request.ChannelID}
+		_, hasGeneration := s.generations[genKey]
+		_, wasInvalidated := s.invalidatedScopes[genKey]
+		s.mu.Unlock()
+		if hasGeneration || wasInvalidated {
+			return Snapshot{}, queryError(ErrorCodeExpired, ErrSnapshotExpired)
+		}
 		return Snapshot{}, queryError(ErrorCodeSnapshotMissing, ErrSnapshotNotFound)
 	}
 	if request.PlayFrom.IsZero() || request.PlayFrom.Before(snapshot.SegmentStart) || !request.PlayFrom.Before(snapshot.SegmentEnd) {
@@ -189,16 +207,42 @@ func (s *ResultSnapshotStore) InvalidateOwnerChannel(ownerUserID, channelID uint
 		return
 	}
 	s.invalidateOwnerChannelLocked(ownerUserID, channelID)
-	delete(s.generations, ownerChannel{ownerUserID: ownerUserID, channelID: channelID})
+	genKey := ownerChannel{ownerUserID: ownerUserID, channelID: channelID}
+	delete(s.generations, genKey)
+	s.invalidatedScopes[genKey] = struct{}{}
 	s.mu.Unlock()
 }
 
 func (s *ResultSnapshotStore) invalidateOwnerChannelLocked(ownerUserID, channelID uint) {
+	// 新查询开始即删除同用户/通道的旧快照:只标记失效会持续累积
+	// 无效记录,并让每次失效/清理都全表扫描
 	for key, snapshot := range s.snapshots {
 		if snapshot.OwnerUserID == ownerUserID && snapshot.ChannelID == channelID {
-			snapshot.invalidated = true
-			s.snapshots[key] = snapshot
+			delete(s.snapshots, key)
 		}
+	}
+	// 总量硬上限:删除最旧快照,防高频查询导致内存无界增长
+	if max := s.maxSnapshots; max > 0 && len(s.snapshots) >= max {
+		s.evictOldestLocked(len(s.snapshots) - max + 1)
+	}
+}
+
+// evictOldestLocked 删除 n 个最早过期(即最早创建)的快照
+func (s *ResultSnapshotStore) evictOldestLocked(n int) {
+	for n > 0 {
+		var oldestKey string
+		var oldestAt time.Time
+		first := true
+		for key, snapshot := range s.snapshots {
+			if first || snapshot.ExpiresAt.Before(oldestAt) {
+				oldestKey, oldestAt, first = key, snapshot.ExpiresAt, false
+			}
+		}
+		if first {
+			return
+		}
+		delete(s.snapshots, oldestKey)
+		n--
 	}
 }
 

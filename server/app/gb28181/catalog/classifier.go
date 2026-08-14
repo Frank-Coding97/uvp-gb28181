@@ -70,33 +70,36 @@ func Classify(code string) Classification {
 	out.CivilCode = trimmed[:6]
 
 	// 类型码 11-13 位(0-indexed: [10:13])
-	typeCode := trimmed[10:13]
-	switch typeCode {
-	case "131", "132":
-		out.NodeType = gbmodels.NodeTypeChannel
-	case "117", "130":
-		out.NodeType = gbmodels.NodeTypeDevice
-	case "134":
-		out.NodeType = gbmodels.NodeTypeAlarmInput
-	case "135", "140":
-		out.NodeType = gbmodels.NodeTypeAlarmOutput
-	case "111", "112", "113", "114", "115", "116", "118", "119", "120", "121":
-		// 系列编码 → 视为通道(部分厂商把 IPC 当通道挂在 NVR 下)
-		out.NodeType = gbmodels.NodeTypeChannel
-	case "200":
-		out.NodeType = gbmodels.NodeTypeDevice
-	case "215":
-		out.NodeType = gbmodels.NodeTypeBizGroup
-	case "216":
-		out.NodeType = gbmodels.NodeTypeVirtualOrg
-	default:
-		// 未知类型码:兜底但记录 raw
-		out.NodeType = gbmodels.NodeTypeVirtualOrg
-		out.Anomaly = true
-		out.Reason = "unknown type code: " + typeCode
-	}
-
+	classifyTypeCode(&out, trimmed[10:13])
 	return out
+}
+
+// nodeTypeByCode 国标类型码 → 节点类型映射表(独立维护,校验与分类可分别测试)
+var nodeTypeByCode = map[string]gbmodels.NodeType{
+	"131": gbmodels.NodeTypeChannel, "132": gbmodels.NodeTypeChannel,
+	"117": gbmodels.NodeTypeDevice, "130": gbmodels.NodeTypeDevice,
+	"134": gbmodels.NodeTypeAlarmInput,
+	"135": gbmodels.NodeTypeAlarmOutput, "140": gbmodels.NodeTypeAlarmOutput,
+	// 系列编码 → 视为通道(部分厂商把 IPC 当通道挂在 NVR 下)
+	"111": gbmodels.NodeTypeChannel, "112": gbmodels.NodeTypeChannel,
+	"113": gbmodels.NodeTypeChannel, "114": gbmodels.NodeTypeChannel,
+	"115": gbmodels.NodeTypeChannel, "116": gbmodels.NodeTypeChannel,
+	"118": gbmodels.NodeTypeChannel, "119": gbmodels.NodeTypeChannel,
+	"120": gbmodels.NodeTypeChannel, "121": gbmodels.NodeTypeChannel,
+	"200": gbmodels.NodeTypeDevice,
+	"215": gbmodels.NodeTypeBizGroup,
+	"216": gbmodels.NodeTypeVirtualOrg,
+}
+
+func classifyTypeCode(out *Classification, typeCode string) {
+	if nodeType, ok := nodeTypeByCode[typeCode]; ok {
+		out.NodeType = nodeType
+		return
+	}
+	// 未知类型码:兜底但记录 raw
+	out.NodeType = gbmodels.NodeTypeVirtualOrg
+	out.Anomaly = true
+	out.Reason = "unknown type code: " + typeCode
 }
 
 // IsCivilCodeNode 6 位 GB/T 2260 行政区码节点(纯行政区,非 20 位国标)

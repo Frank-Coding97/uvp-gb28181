@@ -140,8 +140,12 @@
                       :data-testid="`single-delete-${record.id}`"
                       :loading="deletingIds.has(record.id)"
                       :disabled="deletingIds.has(record.id)"
+                      role="button"
+                      tabindex="0"
                       :aria-label="`物理删除告警 ${record.id}`"
                       @click="requestSingleDelete(record)"
+                      @keydown.enter.prevent="requestSingleDelete(record)"
+                      @keydown.space.prevent="requestSingleDelete(record)"
                     >
                       <template #icon><Trash2 :size="13" /></template>
                       <span>删除</span>

@@ -76,8 +76,13 @@ func (s *Service) Query(ctx context.Context, request QueryRequest) (QueryResult,
 		return result, err
 	}
 
+	return s.sendAndWait(ctx, result, request, entry)
+}
+
+// sendAndWait 发送录像查询并等待聚合收敛(发送/等待两阶段)
+func (s *Service) sendAndWait(ctx context.Context, result QueryResult, request QueryRequest, entry *queryEntry) (QueryResult, error) {
 	body, err := manscdp.BuildRecordInfoQuery(manscdp.RecordInfoQuery{
-		SN: sn, DeviceID: request.ChannelCode, StartTime: request.StartTime, EndTime: request.EndTime,
+		SN: result.SN, DeviceID: request.ChannelCode, StartTime: request.StartTime, EndTime: request.EndTime,
 		Type: request.Type, Secrecy: request.Secrecy, RecorderID: request.RecorderID,
 	})
 	if err != nil {
@@ -108,7 +113,11 @@ func (s *Service) Query(ctx context.Context, request QueryRequest) (QueryResult,
 		}
 		return result, queryError(ErrorCodeSendFailed, errors.Join(ErrSendFailed, sendErr))
 	}
+	return s.waitAggregation(ctx, result, request, entry)
+}
 
+// waitAggregation 等待分页响应聚合到终态
+func (s *Service) waitAggregation(ctx context.Context, result QueryResult, request QueryRequest, entry *queryEntry) (QueryResult, error) {
 	timeout := time.NewTimer(s.options.Timeout)
 	defer stopTimer(timeout)
 	var quiet *time.Timer

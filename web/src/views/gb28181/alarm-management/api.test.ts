@@ -4,7 +4,7 @@ const request = vi.hoisted(() => vi.fn());
 vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
-import { deleteAlarm, getAlarmDetail, listAlarms } from "./api";
+import { batchDeleteAlarms, clearAllAlarms, deleteAlarm, getAlarmDetail, listAlarms } from "./api";
 
 describe("alarm management API", () => {
   beforeEach(() => {
@@ -26,6 +26,18 @@ describe("alarm management API", () => {
 
     await deleteAlarm(id);
     expect(request).toHaveBeenLastCalledWith("delete", `/api/gb28181/alarms/${id}`);
+  });
+
+  it("posts batch delete with the id list in the body", async () => {
+    await batchDeleteAlarms(["9007199254740993", "42"]);
+    expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/alarms/batch-delete", {
+      data: { ids: ["9007199254740993", "42"] }
+    });
+  });
+
+  it("posts clear-all without a body", async () => {
+    await clearAllAlarms();
+    expect(request).toHaveBeenLastCalledWith("post", "/api/gb28181/alarms/clear-all");
   });
 
 });
