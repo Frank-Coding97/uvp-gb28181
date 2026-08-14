@@ -158,6 +158,8 @@ function mountPage() {
 describe("device-mgmt round-2 修复回归", () => {
     beforeEach(() => {
         vi.useFakeTimers();
+        // 关闭 10s 自动轮询,隔离定时器计数断言的目标(只测地图兜底 timer)
+        localStorage.setItem("uvp.gb28181.device-mgmt.auto-refresh", "false");
         // happy-dom 元素无布局尺寸:容器永远 0 宽会让 ensureMap 无限 rAF 重试
         Object.defineProperty(HTMLElement.prototype, "clientWidth", { get: () => 800, configurable: true });
         Object.defineProperty(HTMLElement.prototype, "clientHeight", { get: () => 600, configurable: true });
@@ -201,7 +203,7 @@ describe("device-mgmt round-2 修复回归", () => {
         wrapper.unmount();
     });
 
-    it("#3 销毁地图清除 12s 兜底定时器", async () => {
+    it("#3a 未销毁时 12s 兜底把底图标记为超时", async () => {
         localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
         const wrapper = mountPage();
         await flushPromises();
@@ -209,13 +211,44 @@ describe("device-mgmt round-2 修复回归", () => {
         // FakeMap 同步触发 load → 12s 兜底定时器已挂
         expect(vi.getTimerCount()).toBeGreaterThan(0);
 
-        // 未销毁时,12s 后兜底会把底图标记为超时
         vi.advanceTimersByTime(12000);
         await flushPromises();
         expect(wrapper.text()).toContain("底图加载超时");
+        wrapper.unmount();
+    });
+
+    it("#3b 销毁地图清除仍挂起的 12s 兜底定时器", async () => {
+        localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+        const wrapper = mountPage();
+        await flushPromises();
+
+        // 兜底定时器尚挂起时:先推进 800ms,让一次性 resize rAF 与 750ms ring 动画
+        // 自然结束,此时剩余挂起 timer 应只有 12s 兜底
+        vi.advanceTimersByTime(800);
+        await flushPromises();
+        expect(vi.getTimerCount()).toBe(1); // 仅剩 12s 兜底
 
         wrapper.unmount();
-        // 销毁后所有挂起定时器必须清空(兜底 timer 不得跨实例存活)
+        // destroyMap 必须清除它,不能留跨实例存活
         expect(vi.getTimerCount()).toBe(0);
+
+        vi.advanceTimersByTime(12000);
+        await flushPromises();
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("切换资产类型立即刷新当前类型统计", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+        api.listChannels.mockClear();
+
+        const channelBtn = wrapper.findAll("button").find(btn => btn.text() === "通道");
+        expect(channelBtn).toBeTruthy();
+        await channelBtn!.trigger("click");
+        await flushPromises();
+
+        // 主列表 1 次 + 统计 online/offline 2 次
+        expect(api.listChannels).toHaveBeenCalledTimes(3);
+        wrapper.unmount();
     });
 });

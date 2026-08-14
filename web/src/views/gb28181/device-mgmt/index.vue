@@ -302,7 +302,7 @@ const tablePagination = computed(() => ({
     showJumper: true
 }));
 
-watch([viewMode, assetKind], async () => {
+watch([viewMode, assetKind], async (current, previous) => {
     selectedRowKeys.value = [];
     page.value = 1;
     if (viewMode.value === "map") {
@@ -311,6 +311,9 @@ watch([viewMode, assetKind], async () => {
         destroyMap();
     }
     refreshMainData();
+    // 统计实体随 assetKind 变化:统计只拉当前类型,切换后立即刷新,
+    // 否则另一类型的数字要等下一轮 10s 自动刷新才更新
+    if (current[1] !== previous?.[1]) refreshStats();
 });
 watch(viewMode, (mode) => {
     try {
