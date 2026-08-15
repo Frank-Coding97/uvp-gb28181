@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -13,7 +14,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"go.uber.org/zap"
@@ -83,13 +86,27 @@ type mockPlaybackMediaSink struct {
 }
 
 type mockFlowCollector struct {
-	last handler.FlowReport
-	err  error
+	calls atomic.Int32
+	last  handler.FlowReport
+	err   error
 }
 
 func (m *mockFlowCollector) CollectFlow(_ context.Context, report handler.FlowReport) error {
+	m.calls.Add(1)
 	m.last = report
 	return m.err
+}
+
+type mockFlowNodeResolver struct {
+	node *node.Node
+}
+
+func (m mockFlowNodeResolver) GetByUUID(uuid string) (*node.Node, bool) {
+	if m.node == nil || m.node.MediaServerUUID != uuid {
+		return nil, false
+	}
+	copy := *m.node
+	return &copy, true
 }
 
 func (m *mockPlaybackMediaSink) OnPlaybackStreamEnded(_ context.Context, streamID, reason string) error {
@@ -134,10 +151,15 @@ func newHookEngine(t *testing.T, h *handler.HookController) *gin.Engine {
 func TestHookOnFlowReportForwardsNormalizedPayloadAndFailsOpen(t *testing.T) {
 	collector := &mockFlowCollector{err: context.DeadlineExceeded}
 	h := handler.NewHookController(stream.NewNotifier())
-	h.SetFlowCollector(collector)
+	mediaNode := &node.Node{MediaServerUUID: "ms-1", Host: "192.0.2.1", APISecret: "zlm-secret"}
+	h.SetFlowRuntime(mockFlowNodeResolver{node: mediaNode}, collector)
 	e := newHookEngine(t, h)
+	capability, err := playauth.CallbackCapability(mediaNode.APISecret, mediaNode.MediaServerUUID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	rr := postJSON(t, e, "/index/hook/on_flow_report", map[string]interface{}{
+	rr := postJSON(t, e, "/index/hook/on_flow_report?cap="+url.QueryEscape(capability), map[string]interface{}{
 		"id": "sid-1", "mediaServerId": "ms-1", "schema": "ws", "vhost": "__defaultVhost__",
 		"app": "rtp", "stream": "stream-1", "player": true, "totalBytes": 1234,
 		"duration": 9, "ip": "10.0.0.8", "port": 4567,
@@ -148,6 +170,41 @@ func TestHookOnFlowReportForwardsNormalizedPayloadAndFailsOpen(t *testing.T) {
 	assertHookCode(t, rr.Code, rr.Body.Bytes(), 0)
 	if collector.last.ID != "sid-1" || !collector.last.Player || collector.last.TotalBytes != 1234 || collector.last.Duration != 9 {
 		t.Fatalf("flow report 未正确转发: %#v", collector.last)
+	}
+}
+
+func TestHookOnFlowReportRejectsUntrustedCallbacksWithoutBlockingMedia(t *testing.T) {
+	body := map[string]interface{}{
+		"id": "sid-1", "mediaServerId": "ms-1", "schema": "ws", "vhost": "__defaultVhost__",
+		"app": "rtp", "stream": "stream-1", "player": true, "totalBytes": 1234,
+	}
+	validCapability, err := playauth.CallbackCapability("zlm-secret", "ms-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name     string
+		path     string
+		nodeHost string
+	}{
+		{name: "missing capability", path: "/index/hook/on_flow_report", nodeHost: "192.0.2.1"},
+		{name: "invalid capability", path: "/index/hook/on_flow_report?cap=invalid", nodeHost: "192.0.2.1"},
+		{name: "duplicate capability", path: "/index/hook/on_flow_report?cap=" + url.QueryEscape(validCapability) + "&cap=other", nodeHost: "192.0.2.1"},
+		{name: "source mismatch", path: "/index/hook/on_flow_report?cap=" + url.QueryEscape(validCapability), nodeHost: "198.51.100.10"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			collector := &mockFlowCollector{}
+			h := handler.NewHookController(stream.NewNotifier())
+			h.SetFlowRuntime(mockFlowNodeResolver{node: &node.Node{
+				MediaServerUUID: "ms-1", Host: tt.nodeHost, APISecret: "zlm-secret",
+			}}, collector)
+			rr := postJSON(t, newHookEngine(t, h), tt.path, body)
+			assertHookCode(t, rr.Code, rr.Body.Bytes(), 0)
+			if got := collector.calls.Load(); got != 0 {
+				t.Fatalf("untrusted callback collected %d reports", got)
+			}
+		})
 	}
 }
 

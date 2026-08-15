@@ -51,6 +51,7 @@ func TestConfigService_GetGrouped(t *testing.T) {
 		"hook.enable":                     "1",
 		"hook.on_stream_changed":          "http://x/y",
 		"hook.on_stream_not_found":        "http://platform/index/hook/on_stream_not_found?cap=replayable-secret",
+		"hook.on_flow_report":             "http://platform/index/hook/on_flow_report?cap=flow-secret",
 		"general.streamNoneReaderDelayMS": "20000",
 		"general.mediaServerId":           "uuid-a",
 	}
@@ -70,7 +71,7 @@ func TestConfigService_GetGrouped(t *testing.T) {
 	require.True(t, names["运行时策略"] || names["运行时"], "缺少分组 运行时")
 
 	// 验证 hot_reloadable 标志
-	var httpPort, hookEnable, streamNotFound, apiSecret *service.ConfigItem
+	var httpPort, hookEnable, streamNotFound, flowReport, apiSecret *service.ConfigItem
 	for i := range grouped {
 		for j := range grouped[i].Items {
 			it := &grouped[i].Items[j]
@@ -82,6 +83,9 @@ func TestConfigService_GetGrouped(t *testing.T) {
 			}
 			if it.Key == "hook.on_stream_not_found" {
 				streamNotFound = it
+			}
+			if it.Key == "hook.on_flow_report" {
+				flowReport = it
 			}
 			if it.Key == "api.secret" {
 				apiSecret = it
@@ -95,6 +99,9 @@ func TestConfigService_GetGrouped(t *testing.T) {
 	require.NotNil(t, streamNotFound)
 	require.NotContains(t, streamNotFound.Value, "replayable-secret")
 	require.NotContains(t, streamNotFound.Value, "cap=")
+	require.NotNil(t, flowReport)
+	require.NotContains(t, flowReport.Value, "flow-secret")
+	require.NotContains(t, flowReport.Value, "cap=")
 	require.NotNil(t, apiSecret)
 	require.Empty(t, apiSecret.Value)
 }
@@ -137,7 +144,7 @@ func TestConfigService_UpdateRejectsPlatformManagedAutoOnDemandKeys(t *testing.T
 	id := reg.List()[0].ID
 
 	for _, key := range []string{
-		"api.secret", "hook.enable", "hook.on_stream_not_found", "general.mediaServerId", "general.maxStreamWaitMS",
+		"api.secret", "hook.enable", "hook.on_stream_not_found", "hook.on_flow_report", "general.flowThreshold", "general.mediaServerId", "general.maxStreamWaitMS",
 	} {
 		_, err := svc.Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{key: "tampered"}})
 		require.ErrorIs(t, err, service.ErrManagedConfigKey, key)

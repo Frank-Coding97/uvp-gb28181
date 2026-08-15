@@ -102,6 +102,10 @@ type FlowCollector interface {
 	CollectFlow(context.Context, FlowReport) error
 }
 
+type FlowReportNodeResolver interface {
+	GetByUUID(string) (*node.Node, bool)
+}
+
 type TalkPublishRequest struct {
 	NodeID       int64
 	App          string
@@ -159,6 +163,8 @@ type HookController struct {
 	recordResolver NodeUUIDResolver
 	observer       StreamObserver
 	playbackMedia  PlaybackMediaSink
+	flowMu         sync.RWMutex
+	flowResolver   FlowReportNodeResolver
 	flowCollector  FlowCollector
 	talkResolver   NodeUUIDResolver
 	talkAuthorizer TalkPublishAuthorizer
@@ -223,7 +229,10 @@ func (h *HookController) SetPlaybackMediaSink(sink PlaybackMediaSink) {
 	h.playbackMedia = sink
 }
 
-func (h *HookController) SetFlowCollector(collector FlowCollector) {
+func (h *HookController) SetFlowRuntime(resolver FlowReportNodeResolver, collector FlowCollector) {
+	h.flowMu.Lock()
+	defer h.flowMu.Unlock()
+	h.flowResolver = resolver
 	h.flowCollector = collector
 }
 
@@ -587,19 +596,41 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
 	var body onFlowReportBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+		hookOK(c)
 		return
 	}
-	if h.flowCollector != nil {
-		err := h.flowCollector.CollectFlow(c.Request.Context(), FlowReport{
-			ID: body.ID, MediaServerID: body.MediaServerID, Schema: body.Schema,
-			VHost: body.VHost, App: body.App, Stream: body.Stream,
-			Player: body.Player, TotalBytes: body.TotalBytes, Duration: body.Duration,
-			IP: body.IP, Port: body.Port,
-		})
-		if err != nil && app.ZapLog != nil {
-			app.ZapLog.Warn("ZLM on_flow_report 计量失败", zap.Error(err), zap.String("stream", body.Stream), zap.Bool("player", body.Player))
-		}
+	resolver, collector := h.flowDependencies()
+	if resolver == nil || collector == nil {
+		hookOK(c)
+		return
+	}
+	peerIP, ok := parsePeerIP(c.Request.RemoteAddr)
+	if !ok {
+		h.ignoreFlowReport(c, "source-invalid")
+		return
+	}
+	mediaNode, ok := resolver.GetByUUID(body.MediaServerID)
+	if !ok || mediaNode == nil || mediaNode.MediaServerUUID != body.MediaServerID {
+		h.ignoreFlowReport(c, "node-unknown")
+		return
+	}
+	if !sourceIPMatchesNode(peerIP, mediaNode.Host) {
+		h.ignoreFlowReport(c, "source-mismatch")
+		return
+	}
+	capability, ok := singleValue(c.Request.URL.Query(), "cap")
+	if !ok || !playauth.VerifyCallbackCapability(mediaNode.APISecret, body.MediaServerID, capability) {
+		h.ignoreFlowReport(c, "callback-auth-invalid")
+		return
+	}
+	err := collector.CollectFlow(c.Request.Context(), FlowReport{
+		ID: body.ID, MediaServerID: body.MediaServerID, Schema: body.Schema,
+		VHost: body.VHost, App: body.App, Stream: body.Stream,
+		Player: body.Player, TotalBytes: body.TotalBytes, Duration: body.Duration,
+		IP: body.IP, Port: body.Port,
+	})
+	if err != nil && app.ZapLog != nil {
+		app.ZapLog.Warn("ZLM on_flow_report 计量失败", zap.Error(err), zap.String("stream", body.Stream), zap.Bool("player", body.Player))
 	}
 	hookOK(c)
 }
@@ -810,6 +841,19 @@ func (h *HookController) autoOnDemandDependencies() (
 	h.autoMu.RLock()
 	defer h.autoMu.RUnlock()
 	return h.autoResolver, h.autoValidator, h.autoDispatcher, h.autoSettings
+}
+
+func (h *HookController) flowDependencies() (FlowReportNodeResolver, FlowCollector) {
+	h.flowMu.RLock()
+	defer h.flowMu.RUnlock()
+	return h.flowResolver, h.flowCollector
+}
+
+func (h *HookController) ignoreFlowReport(c *gin.Context, reason string) {
+	if app.ZapLog != nil {
+		app.ZapLog.Debug("ZLM on_flow_report 已忽略", zap.String("reason", reason))
+	}
+	hookOK(c)
 }
 
 func (h *HookController) verifyAutoStartToken(token string, binding playauth.Binding) (playauth.Claims, bool) {

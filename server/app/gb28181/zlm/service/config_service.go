@@ -26,7 +26,9 @@ var platformManagedConfigKeys = map[string]struct{}{
 	"hook.on_publish":            {},
 	"hook.on_play":               {},
 	"hook.on_record_mp4":         {},
+	"hook.on_flow_report":        {},
 	"hook.alive_interval":        {},
+	"general.flowThreshold":      {},
 	"general.mediaServerId":      {},
 	"general.maxStreamWaitMS":    {},
 }
@@ -265,7 +267,7 @@ func visibleConfigValue(key, value string) string {
 	if key == "api.secret" {
 		return ""
 	}
-	if key != "hook.on_stream_not_found" || value == "" {
+	if (key != "hook.on_stream_not_found" && key != "hook.on_flow_report") || value == "" {
 		return value
 	}
 	parsed, err := url.Parse(value)

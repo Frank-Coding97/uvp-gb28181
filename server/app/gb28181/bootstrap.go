@@ -1185,7 +1185,7 @@ func runStartupProbe(reg *node.Registry) {
 }
 
 func setupTrafficRuntime() {
-	gbroutes.SetFlowCollector(nil)
+	gbroutes.SetFlowRuntime(nil, nil)
 	trafficResolver = nil
 	trafficRealtime = nil
 	if trafficCancel != nil {
@@ -1218,9 +1218,12 @@ func setupTrafficRuntime() {
 	trafficCancel = cancel
 	trafficResolver = resolver
 	trafficRealtime = realtime
-	gbroutes.SetFlowCollector(flow)
+	gbroutes.SetFlowRuntime(zlmRegistry, flow)
 	gbroutes.SetDeviceTrafficController(gbcontrollers.NewDeviceTrafficController(db, realtime, zlmRegistry, zlmLocationMap))
 	sam.Start(ctx, time.Minute)
+	traffic.StartSessionPruner(ctx, repo, time.Now, func(err error) {
+		app.ZapLog.Warn("GB28181 终态流量会话清理失败", zap.Error(err))
+	})
 	app.ZapLog.Info("GB28181 流量统计 Hook / 采样器已装配", zap.Duration("interval", time.Minute))
 }
 

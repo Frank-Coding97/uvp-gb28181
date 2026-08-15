@@ -422,8 +422,8 @@ func SetPlaybackMediaSink(sink gbhandler.PlaybackMediaSink) {
 	hookController.SetPlaybackMediaSink(sink)
 }
 
-func SetFlowCollector(collector gbhandler.FlowCollector) {
-	hookController.SetFlowCollector(collector)
+func SetFlowRuntime(resolver gbhandler.FlowReportNodeResolver, collector gbhandler.FlowCollector) {
+	hookController.SetFlowRuntime(resolver, collector)
 }
 
 func SetDeviceTrafficController(controller *gbcontrollers.DeviceTrafficController) {

@@ -55,6 +55,11 @@ func TestApplyConfigForNodeConfiguresAndVerifiesAutoOnDemandHook(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wantCapability, hookURL.Query().Get("cap"))
 	require.NotContains(t, rawHook, "zlm-secret")
+	flowURL, err := url.Parse(applied.Get("hook.on_flow_report"))
+	require.NoError(t, err)
+	require.Equal(t, "http://platform:8280/index/hook/on_flow_report", flowURL.Scheme+"://"+flowURL.Host+flowURL.Path)
+	require.Equal(t, wantCapability, flowURL.Query().Get("cap"))
+	require.Equal(t, "0", applied.Get("general.flowThreshold"))
 	require.Equal(t, "30000", applied.Get("general.maxStreamWaitMS"))
 	require.Equal(t, "node-a", applied.Get("general.mediaServerId"))
 }
@@ -70,6 +75,8 @@ func TestApplyConfigForNodeFailsWhenAutoOnDemandConfigDoesNotConverge(t *testing
 			config := map[string]string{
 				"hook.enable":              applied.Get("hook.enable"),
 				"hook.on_stream_not_found": applied.Get("hook.on_stream_not_found"),
+				"hook.on_flow_report":      applied.Get("hook.on_flow_report"),
+				"general.flowThreshold":    applied.Get("general.flowThreshold"),
 				"general.mediaServerId":    applied.Get("general.mediaServerId"),
 				"general.maxStreamWaitMS":  "15000",
 			}
@@ -98,6 +105,8 @@ func TestApplyConfigForNodeFailsWhenHookRemainsDisabled(t *testing.T) {
 			config := map[string]string{
 				"hook.enable":              "0",
 				"hook.on_stream_not_found": applied.Get("hook.on_stream_not_found"),
+				"hook.on_flow_report":      applied.Get("hook.on_flow_report"),
+				"general.flowThreshold":    applied.Get("general.flowThreshold"),
 				"general.mediaServerId":    applied.Get("general.mediaServerId"),
 				"general.maxStreamWaitMS":  applied.Get("general.maxStreamWaitMS"),
 			}

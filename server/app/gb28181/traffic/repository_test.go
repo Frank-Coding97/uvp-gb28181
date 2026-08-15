@@ -62,3 +62,30 @@ func TestRepositorySeparatesDirections(t *testing.T) {
 	require.EqualValues(t, 10, daily.UpstreamBytes)
 	require.EqualValues(t, 20, daily.DownstreamBytes)
 }
+
+func TestRepositoryPruneSettledBeforeIsBoundedAndKeepsActiveSessions(t *testing.T) {
+	repo := newTrafficTestRepo(t)
+	cutoff := time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC)
+	oldEnd := cutoff.Add(-time.Hour)
+	newEnd := cutoff.Add(time.Hour)
+	rows := []gbmodels.GbDeviceTrafficSession{
+		{BusinessKey: "old-1", DeviceCode: "d", ChannelCode: "c", State: string(SessionSettled), EndedAt: &oldEnd},
+		{BusinessKey: "old-2", DeviceCode: "d", ChannelCode: "c", State: string(SessionSettled), EndedAt: &oldEnd},
+		{BusinessKey: "new", DeviceCode: "d", ChannelCode: "c", State: string(SessionSettled), EndedAt: &newEnd},
+		{BusinessKey: "active", DeviceCode: "d", ChannelCode: "c", State: string(SessionActive), EndedAt: &oldEnd},
+	}
+	require.NoError(t, repo.db.Create(&rows).Error)
+
+	deleted, err := repo.PruneSettledBefore(context.Background(), cutoff, 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, deleted)
+	deleted, err = repo.PruneSettledBefore(context.Background(), cutoff, 10)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, deleted)
+
+	var remaining []gbmodels.GbDeviceTrafficSession
+	require.NoError(t, repo.db.Order("business_key").Find(&remaining).Error)
+	require.Len(t, remaining, 2)
+	require.Equal(t, "active", remaining[0].BusinessKey)
+	require.Equal(t, "new", remaining[1].BusinessKey)
+}

@@ -104,6 +104,20 @@ func (r *GormRepository) CloseGap(ctx context.Context, nodeID int64, reason stri
 		Updates(map[string]interface{}{"state": "closed", "ended_at": at.UTC()}).Error
 }
 
+func (r *GormRepository) PruneSettledBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	if r == nil || r.db == nil || cutoff.IsZero() || batchSize <= 0 {
+		return 0, errors.New("invalid traffic session prune request")
+	}
+	ids := r.db.WithContext(ctx).Model(&gbmodels.GbDeviceTrafficSession{}).
+		Select("id").
+		Where("state = ? AND ended_at IS NOT NULL AND ended_at < ?", SessionSettled, cutoff.UTC()).
+		Order("id ASC").Limit(batchSize)
+	result := r.db.WithContext(ctx).
+		Where("id IN (?)", ids).
+		Delete(&gbmodels.GbDeviceTrafficSession{})
+	return result.RowsAffected, result.Error
+}
+
 func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (result ApplyResult, err error) {
 	if r == nil || r.db == nil {
 		return result, errors.New("traffic repository unavailable")
