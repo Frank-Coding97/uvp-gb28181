@@ -51,7 +51,7 @@ type CatalogOptions struct {
 }
 
 func (r *GormRepo) ListCatalogFiles(ctx context.Context, query FileQuery) (FilePage, error) {
-	query = normalizeFileQuery(query, r.currentTime())
+	query = normalizeFileQuery(query)
 	base := r.catalogFileQuery(ctx, query)
 	var total int64
 	if err := base.Count(&total).Error; err != nil {
@@ -67,7 +67,7 @@ func (r *GormRepo) ListCatalogFiles(ctx context.Context, query FileQuery) (FileP
 }
 
 func (r *GormRepo) CatalogOptions(ctx context.Context, query FileQuery) (CatalogOptions, error) {
-	query = normalizeFileQuery(query, r.currentTime())
+	query = normalizeFileQuery(query)
 	result := CatalogOptions{NodeIDs: make([]int64, 0)}
 	if err := r.catalogFileQuery(ctx, query).Distinct("node_id").Order("node_id").Pluck("node_id", &result.NodeIDs).Error; err != nil {
 		return CatalogOptions{}, err
@@ -226,7 +226,7 @@ func containsNodeID(ids []int64, want int64) bool {
 	return false
 }
 
-func normalizeFileQuery(query FileQuery, now time.Time) FileQuery {
+func normalizeFileQuery(query FileQuery) FileQuery {
 	if query.Page < 1 {
 		query.Page = 1
 	}
@@ -235,12 +235,6 @@ func normalizeFileQuery(query FileQuery, now time.Time) FileQuery {
 	}
 	if query.PageSize > 200 {
 		query.PageSize = 200
-	}
-	if query.Start == nil && query.End == nil {
-		end := now
-		start := end.Add(-24 * time.Hour)
-		query.Start = &start
-		query.End = &end
 	}
 	return query
 }

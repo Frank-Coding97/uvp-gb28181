@@ -133,7 +133,7 @@ func (s *Service) AssignOne(ctx context.Context, deviceID uint, targetDeptID uin
 func (s *Service) ensureDeptActive(ctx context.Context, targetDeptID uint) error {
 	var count int64
 	if err := s.db.WithContext(ctx).Table("sys_department").
-		Where("id = ? AND status = ? AND deleted_at IS NULL", targetDeptID, 1).Count(&count).Error; err != nil {
+		Where("id = ? AND (status = 1 OR status IS NULL) AND deleted_at IS NULL", targetDeptID).Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {

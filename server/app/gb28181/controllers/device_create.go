@@ -6,6 +6,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 )
 
 // CreateDevice 手动创建设备(预分配模式 / 一设备一密码)
@@ -62,23 +64,31 @@ func (dc *DeviceMgmtController) CreateDevice(c *gin.Context) {
 		return
 	}
 
-	// 获取用户信息
-	var createdBy uint
-	var ownerDeptID uint
-	if userID, exists := c.Get("userId"); exists {
-		if uid, ok := userID.(float64); ok {
-			createdBy = uint(uid)
-		} else if uid, ok := userID.(uint); ok {
-			createdBy = uid
-		}
+	// 获取用户信息(修复:原实现读不存在的 context 键,归属恒为 0)
+	claims := common.GetClaims(c)
+	if claims == nil || claims.UserID == 0 {
+		dc.FailAndAbort(c, "未获取到用户身份", nil)
+		return
 	}
-	if deptID, exists := c.Get("deptId"); exists {
-		if did, ok := deptID.(float64); ok {
-			ownerDeptID = uint(did)
-		} else if did, ok := deptID.(uint); ok {
-			ownerDeptID = did
-		}
+	createdBy := claims.UserID
+
+	// 归属部门 = 创建人当前部门,必须存在且启用
+	var user basemodels.User
+	if err := db.WithContext(c).Select("dept_id").Where("id = ?", claims.UserID).First(&user).Error; err != nil {
+		dc.FailAndAbort(c, "查询创建人部门失败", err)
+		return
 	}
+	var deptCount int64
+	if err := db.WithContext(c).Table("sys_department").
+		Where("id = ? AND (status = 1 OR status IS NULL) AND deleted_at IS NULL", user.DeptID).Count(&deptCount).Error; err != nil {
+		dc.FailAndAbort(c, "校验部门失败", err)
+		return
+	}
+	if user.DeptID == 0 || deptCount == 0 {
+		dc.FailAndAbort(c, "创建人部门无效或已停用", nil)
+		return
+	}
+	ownerDeptID := user.DeptID
 
 	// 创建设备
 	device := gbmodels.GbDevice{

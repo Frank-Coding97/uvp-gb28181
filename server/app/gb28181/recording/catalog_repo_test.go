@@ -70,7 +70,7 @@ func TestCatalogRepoAvailabilityFiltersAndScopedDetail(t *testing.T) {
 	require.ErrorIs(t, err, ErrRecordingFileNotFound)
 }
 
-func TestCatalogRepoDefaultsListToRecent24Hours(t *testing.T) {
+func TestCatalogRepoDefaultsListWithoutDateFilter(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:catalog-default-window?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.GbRecordingFile{}))
@@ -81,11 +81,12 @@ func TestCatalogRepoDefaultsListToRecent24Hours(t *testing.T) {
 	require.NoError(t, db.Create(&old).Error)
 
 	repo := NewGormRepo(db)
-	repo.now = func() time.Time { return now }
 	page, err := repo.ListCatalogFiles(context.Background(), FileQuery{FullAccess: true})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, page.Total)
+	require.EqualValues(t, 2, page.Total)
+	require.Len(t, page.Files, 2)
 	require.Equal(t, uint64(21), page.Files[0].ID)
+	require.Equal(t, uint64(22), page.Files[1].ID)
 }
 
 func TestCatalogRepoOptionsUseFileSnapshotsAndFailClosedScope(t *testing.T) {

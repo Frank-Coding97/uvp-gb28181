@@ -97,6 +97,7 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 	gr := r.Group("/api/gb28181/device-mgmt")
 	{
 		gr.GET("/devices", dmgmt.ListDevices)
+		gr.POST("/device", dmgmt.CreateDevice)
 		gr.GET("/device/:id", dmgmt.GetDevice)
 		gr.GET("/device/:id/status-events", dmgmt.ListDeviceStatusEvents)
 		gr.GET("/device/:id/subscriptions", dmgmt.ListSubscriptions)
