@@ -445,6 +445,57 @@ func (c *Client) GetMediaList(ctx context.Context, vhost, app, stream string) ([
 	return r.Data, nil
 }
 
+// MediaPlayer describes one active player connection returned by ZLM.
+// Identifier is the socket/session identifier used by kick_session when the
+// deployed ZLM version exposes the same id namespace.
+type MediaPlayer struct {
+	PeerIP     string `json:"peer_ip"`
+	PeerPort   int    `json:"peer_port"`
+	LocalIP    string `json:"local_ip"`
+	LocalPort  int    `json:"local_port"`
+	Identifier string `json:"identifier"`
+	TypeID     string `json:"typeid"`
+}
+
+// GetMediaPlayerList returns the active players for one media source.
+// ZLM requires the complete media tuple, including schema.
+func (c *Client) GetMediaPlayerList(ctx context.Context, schema, vhost, app, stream string) ([]MediaPlayer, error) {
+	var r struct {
+		baseResp
+		Data []MediaPlayer `json:"data"`
+	}
+	params := map[string]string{
+		"schema": schema,
+		"vhost":  vhost,
+		"app":    app,
+		"stream": stream,
+	}
+	if err := c.call(ctx, "getMediaPlayerList", params, &r); err != nil {
+		return nil, err
+	}
+	if r.Code != 0 {
+		return nil, fmt.Errorf("getMediaPlayerList code=%d msg=%s", r.Code, r.Msg)
+	}
+	return r.Data, nil
+}
+
+// KickSession closes exactly one ZLM TCP session.
+// Callers must first prove that the identifier came from the target media
+// source; IP/port matching is intentionally not accepted here.
+func (c *Client) KickSession(ctx context.Context, identifier string) error {
+	if strings.TrimSpace(identifier) == "" {
+		return fmt.Errorf("kick_session id 不能为空")
+	}
+	var r baseResp
+	if err := c.call(ctx, "kick_session", map[string]string{"id": identifier}, &r); err != nil {
+		return err
+	}
+	if r.Code != 0 {
+		return fmt.Errorf("kick_session code=%d msg=%s", r.Code, r.Msg)
+	}
+	return nil
+}
+
 // KickSessions 驱逐(可选 filter)会话,返回被踢的会话数
 //
 // filter 留空 → 踢全部;支持 ZLM 的 local_port / peer_ip / id 三种 filter。

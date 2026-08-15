@@ -210,6 +210,47 @@ func TestKickSessions_WithFilter(t *testing.T) {
 	}
 }
 
+func TestGetMediaPlayerList_MockedZLM(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/getMediaPlayerList" {
+			t.Errorf("调错路径: %s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		for key, want := range map[string]string{"schema": "ws", "vhost": "__defaultVhost__", "app": "rtp", "stream": "stream-1", "secret": "test-secret"} {
+			if got := q.Get(key); got != want {
+				t.Errorf("%s 未透传: got=%q want=%q", key, got, want)
+			}
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"peer_ip":"10.0.0.8","peer_port":4567,"local_port":80,"local_ip":"0.0.0.0","identifier":"sid-1","typeid":"HttpSession"}]}`))
+	})
+	defer srv.Close()
+
+	players, err := c.GetMediaPlayerList(context.Background(), "ws", "__defaultVhost__", "rtp", "stream-1")
+	if err != nil {
+		t.Fatalf("GetMediaPlayerList 报错: %v", err)
+	}
+	if len(players) != 1 || players[0].Identifier != "sid-1" || players[0].PeerIP != "10.0.0.8" {
+		t.Fatalf("播放器解析异常: %#v", players)
+	}
+}
+
+func TestKickSession_MockedZLM(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/kick_session" {
+			t.Errorf("调错路径: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("id"); got != "sid-1" {
+			t.Errorf("id 未透传: %s", got)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+	})
+	defer srv.Close()
+
+	if err := c.KickSession(context.Background(), "sid-1"); err != nil {
+		t.Fatalf("KickSession 报错: %v", err)
+	}
+}
+
 // TestRestartServer_MockedZLM T3.5-R: 验证 restartServer 调用,真机不能跑(会真重启)
 func TestRestartServer_MockedZLM(t *testing.T) {
 	called := false
