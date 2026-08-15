@@ -637,6 +637,11 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/catalog/anomaly/count", catalogTreeController.AnomalyCount)
 			// B2 devicemgmt:设备列表 + 通道列表 + 详情 + 多挂载 + timeline
 			dmgmt.GET("/devices", deviceMgmtController.ListDevices)
+			dmgmt.POST("/assign", deviceMgmtController.AssignDevices)
+			dmgmt.POST("/assign-dept", deviceMgmtController.AssignDeptDevices)
+			dmgmt.GET("/device/:id/grants", deviceMgmtController.ListGrants)
+			dmgmt.POST("/device/:id/grants", deviceMgmtController.AddGrants)
+			dmgmt.DELETE("/device/:id/grants/:grantId", deviceMgmtController.RemoveGrant)
 			dmgmt.POST("/device", deviceMgmtController.CreateDevice)
 			dmgmt.GET("/device/:id", deviceMgmtController.GetDevice)
 			dmgmt.GET("/device/:id/status-events", deviceMgmtController.ListDeviceStatusEvents)
