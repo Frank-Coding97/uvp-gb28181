@@ -4,7 +4,7 @@
             <!-- <img v-if="sysLogo" :src="sysLogo" alt="系统logo" style="width: 32px; height: 32px;" />
             <s-svg-icon v-else name="snow" :size="32" /> -->
             <div class="logo_mark">
-                <LogoSvg :imageUrl="sysLogo" :width="26" :height="26" />
+                <LogoSvg :imageUrl="sysLogo" :width="40" :height="40" />
             </div>
             <div class="logo_text" v-if="isTitle">
                 <div class="logo_title_row">
@@ -113,15 +113,11 @@ const isTitle = computed(() => {
     }
 
     .logo_mark {
-        display: grid;
+        display: block;
         flex: 0 0 40px;
         width: 40px;
         height: 40px;
-        place-items: center;
-        background: var(--uvp-sidebar-brand-mark-bg);
-        border: 1px solid rgb(190 213 236 / 58%);
-        border-radius: 12px;
-        box-shadow: inset 0 1px 0 rgb(255 255 255 / 86%), 0 10px 20px -18px rgb(37 99 235 / 34%);
+        overflow: hidden;
     }
 
     .logo_text {
