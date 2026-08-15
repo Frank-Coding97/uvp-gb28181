@@ -51,3 +51,20 @@ func (s *RealtimeStore) Get(channelCode string, now time.Time) (RealtimeSnapshot
 	}
 	return snapshot, true
 }
+
+func (s *RealtimeStore) List(deviceCode, channelCode string, now time.Time) []RealtimeSnapshot {
+	if s == nil {
+		return []RealtimeSnapshot{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]RealtimeSnapshot, 0)
+	for _, snapshot := range s.data {
+		if now.Sub(snapshot.SampledAt) > s.ttl || (deviceCode != "" && snapshot.DeviceCode != deviceCode) ||
+			(channelCode != "" && snapshot.ChannelCode != channelCode) {
+			continue
+		}
+		result = append(result, snapshot)
+	}
+	return result
+}

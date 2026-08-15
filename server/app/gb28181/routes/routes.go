@@ -57,6 +57,7 @@ var autoOnDemandDispatcher *gbplay.AutoStartDispatcher
 var recordingService *gbrecording.Service
 var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
 var cloudRecordingCatalogController atomic.Pointer[gbcontrollers.CloudRecordingCatalogController]
+var deviceTrafficController atomic.Pointer[gbcontrollers.DeviceTrafficController]
 
 // dashboardController SIP 监控看板控制器
 // provider 由 bootstrap 注入(指向 gb28181.MetricsAggregator)
@@ -82,6 +83,7 @@ func init() {
 	traceController.Store(gbcontrollers.NewTraceController(nil, nil, nil))
 	talkController.Store(gbcontrollers.NewTalkController(nil))
 	cloudRecordingCatalogController.Store(gbcontrollers.NewCloudRecordingCatalogController(nil))
+	deviceTrafficController.Store(gbcontrollers.NewDeviceTrafficController(nil, nil, nil, nil))
 }
 
 // zlmNodeController ZLM 节点 CRUD(注入式:bootstrap M1.6 装配 NodeService 后通过 SetZLMNodeController 注入)
@@ -424,6 +426,22 @@ func SetFlowCollector(collector gbhandler.FlowCollector) {
 	hookController.SetFlowCollector(collector)
 }
 
+func SetDeviceTrafficController(controller *gbcontrollers.DeviceTrafficController) {
+	if controller == nil {
+		controller = gbcontrollers.NewDeviceTrafficController(nil, nil, nil, nil)
+	}
+	deviceTrafficController.Store(controller)
+}
+
+func currentDeviceTrafficController() *gbcontrollers.DeviceTrafficController {
+	controller := deviceTrafficController.Load()
+	if controller == nil {
+		controller = gbcontrollers.NewDeviceTrafficController(nil, nil, nil, nil)
+		deviceTrafficController.CompareAndSwap(nil, controller)
+	}
+	return controller
+}
+
 func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUUIDResolver, indexer gbhandler.RecordMP4Indexer) {
 	recordingService = service
 	if service == nil {
@@ -478,6 +496,16 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			alarms.POST("/clear-all", alarmController.ClearAll)
 			alarms.GET("/:id", alarmController.Detail)
 			alarms.DELETE("/:id", alarmController.Delete)
+		}
+		deviceTraffic := gb.Group("/device-traffic")
+		{
+			deviceTraffic.GET("/summary", func(c *gin.Context) { currentDeviceTrafficController().Summary(c) })
+			deviceTraffic.GET("/trend", func(c *gin.Context) { currentDeviceTrafficController().Trend(c) })
+			deviceTraffic.GET("/realtime", func(c *gin.Context) { currentDeviceTrafficController().Realtime(c) })
+			deviceTraffic.GET("/sessions", func(c *gin.Context) { currentDeviceTrafficController().Sessions(c) })
+			deviceTraffic.GET("/coverage", func(c *gin.Context) { currentDeviceTrafficController().Coverage(c) })
+			deviceTraffic.GET("/viewers", func(c *gin.Context) { currentDeviceTrafficController().Viewers(c) })
+			deviceTraffic.POST("/viewers/kick", func(c *gin.Context) { currentDeviceTrafficController().KickViewer(c) })
 		}
 		dev := gb.Group("/device")
 		{

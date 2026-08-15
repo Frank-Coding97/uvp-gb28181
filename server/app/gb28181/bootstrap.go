@@ -608,6 +608,9 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	if u := srv.UAC(); u != nil {
 		if zlmRegistry != nil && zlmScheduler != nil {
 			zlmLocationMap = stream.NewLocationMap()
+			if trafficRealtime != nil {
+				gbroutes.SetDeviceTrafficController(gbcontrollers.NewDeviceTrafficController(app.DB(), trafficRealtime, zlmRegistry, zlmLocationMap))
+			}
 			// 通道快照 service(播放触发)—— 优先尝试装配,失败/nil 都不影响主链路
 			snapshotSvc := buildSnapshotService()
 			opts := []play.Option{
@@ -1216,6 +1219,7 @@ func setupTrafficRuntime() {
 	trafficResolver = resolver
 	trafficRealtime = realtime
 	gbroutes.SetFlowCollector(flow)
+	gbroutes.SetDeviceTrafficController(gbcontrollers.NewDeviceTrafficController(db, realtime, zlmRegistry, zlmLocationMap))
 	sam.Start(ctx, time.Minute)
 	app.ZapLog.Info("GB28181 流量统计 Hook / 采样器已装配", zap.Duration("interval", time.Minute))
 }
