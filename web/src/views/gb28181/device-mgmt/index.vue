@@ -79,6 +79,8 @@ import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
 import AddToGroupDialog from "./components/AddToGroupDialog.vue";
+import TrafficTrend from "./components/TrafficTrend.vue";
+import ViewerTable from "./components/ViewerTable.vue";
 import { cloudRecordingStateMeta, mergeCloudRecordingState } from "./cloudRecordingState";
 import { createDirectoryState, customGroupBatchActions, directoryQuery, findDirectoryNode, selectDirectory } from "./directoryState";
 import { normalizeProtocolOverride, protocolOverrideAfterSave } from "./protocolOverrideState";
@@ -254,6 +256,12 @@ const statusEventLoadMoreError = ref("");
 const statusEventScroll = ref<HTMLElement | null>(null);
 const statusEventHasMore = computed(() => statusEventList.value.length < statusEventTotal.value);
 let statusEventRequestVersion = 0;
+const runtimeActiveTab = ref<"status" | "traffic" | "viewers">("status");
+const runtimeChannelCode = ref("");
+const runtimeChannels = ref<ChannelVO[]>([]);
+const runtimeChannelLocked = ref(false);
+const runtimeChannelsLoading = ref(false);
+const runtimeSelectedChannel = computed(() => runtimeChannels.value.find(channel => channel.channelId === runtimeChannelCode.value) || null);
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
 const editDeviceVisible = ref(false);
@@ -1014,7 +1022,22 @@ async function loadStatusEvents(append = false) {
     }
 }
 
-function openStatusEvents(record: DeviceVO) {
+async function loadRuntimeChannels(record: DeviceVO, preferredChannel = "") {
+    const requestVersion = statusEventRequestVersion;
+    runtimeChannelsLoading.value = true;
+    try {
+        const result = await listChannels({ deviceId: record.deviceId, page: 1, pageSize: 200 });
+        if (requestVersion !== statusEventRequestVersion) return;
+        runtimeChannels.value = result.code === 0 ? result.data?.list || [] : [];
+        if (preferredChannel && runtimeChannels.value.some(channel => channel.channelId === preferredChannel)) {
+            runtimeChannelCode.value = preferredChannel;
+        }
+    } finally {
+        if (requestVersion === statusEventRequestVersion) runtimeChannelsLoading.value = false;
+    }
+}
+
+function openStatusEvents(record: DeviceVO, initialTab: "status" | "traffic" | "viewers" = "status", channel?: ChannelVO) {
     statusEventRequestVersion += 1;
     statusEventDevice.value = record;
     statusEventPage.value = 1;
@@ -1022,11 +1045,32 @@ function openStatusEvents(record: DeviceVO) {
     statusEventTotal.value = 0;
     statusEventLoading.value = false;
     statusEventLoadingMore.value = false;
+    runtimeActiveTab.value = initialTab;
+    runtimeChannelLocked.value = Boolean(channel);
+    runtimeChannelCode.value = channel?.channelId || "";
+    runtimeChannels.value = channel ? [channel] : [];
     statusEventVisible.value = true;
-    loadStatusEvents();
+    if (initialTab === "status") loadStatusEvents();
+    if (!channel && initialTab !== "status") loadRuntimeChannels(record);
     nextTick(() => {
         if (statusEventScroll.value) statusEventScroll.value.scrollTop = 0;
     });
+}
+
+async function openChannelRuntime(record: ChannelVO) {
+    const local = devices.value.find(device => device.deviceId === record.deviceId);
+    if (local) {
+        openStatusEvents(local, "traffic", record);
+        return;
+    }
+    try {
+        const result = await listDevices({ q: record.deviceId, page: 1, pageSize: 50 });
+        const device = result.data?.list?.find(item => item.deviceId === record.deviceId);
+        if (!device) throw new Error("未找到通道所属设备");
+        openStatusEvents(device, "traffic", record);
+    } catch (error: any) {
+        Message.error(error?.message || "运行监控打开失败");
+    }
 }
 
 function loadMoreStatusEvents() {
@@ -1050,7 +1094,20 @@ function closeStatusEvents() {
     statusEventPage.value = 1;
     statusEventLoading.value = false;
     statusEventLoadingMore.value = false;
+    runtimeActiveTab.value = "status";
+    runtimeChannelCode.value = "";
+    runtimeChannels.value = [];
+    runtimeChannelLocked.value = false;
 }
+
+watch(runtimeActiveTab, tab => {
+    if (tab === "status" && statusEventVisible.value && statusEventList.value.length === 0 && !statusEventLoading.value && !statusEventError.value) {
+        loadStatusEvents();
+    }
+    if (tab !== "status" && statusEventVisible.value && statusEventDevice.value && !runtimeChannelLocked.value && runtimeChannels.value.length === 0 && !runtimeChannelsLoading.value) {
+        loadRuntimeChannels(statusEventDevice.value);
+    }
+});
 
 function statusEventTime(value?: string | null) {
     if (!value || value.startsWith("0001-01-01")) return "-";
@@ -1944,7 +2001,7 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="338" fixed="right">
+                                <a-table-column title="操作" :width="398" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
                                             <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
@@ -1967,6 +2024,10 @@ onUnmounted(() => {
                                             <a-link class="uvp-table-action uvp-table-action--detail" @click="openChannel(record)">
                                                 <template #icon><Eye :size="13" /></template>
                                                 <span>详情</span>
+                                            </a-link>
+                                            <a-link class="uvp-table-action uvp-table-action--monitor" @click="openChannelRuntime(record)">
+                                                <template #icon><Activity :size="13" /></template>
+                                                <span>监控</span>
                                             </a-link>
                                             <a-link class="uvp-table-action uvp-table-action--edit" @click="openEditChannelModal(record)">
                                                 <template #icon><Pencil :size="13" /></template>
@@ -2022,7 +2083,7 @@ onUnmounted(() => {
                                 </a-table-column>
                                 <a-table-column title="状态" :width="100" align="center">
                                     <template #cell="{ record }">
-                                        <button class="status-inline status-trigger" :class="{ online: record.online }" type="button" title="查看状态轨迹" :aria-label="`查看${record.online ? '在线' : '离线'}状态轨迹`" @click.stop="openStatusEvents(record)">
+                                        <button class="status-inline status-trigger" :class="{ online: record.online }" type="button" title="运行监控" :aria-label="`查看设备${record.deviceId}运行监控`" @click.stop="openStatusEvents(record)">
                                             <History class="status-trigger-icon" :size="13" aria-hidden="true" />
                                             <span class="status-trigger-label">{{ record.online ? '在线' : '离线' }}</span>
                                         </button>
@@ -2137,12 +2198,12 @@ onUnmounted(() => {
                                     </a-tooltip>
                                 </div>
                             </div>
-                            <a-tooltip content="查看状态轨迹" position="top">
+                            <a-tooltip content="运行监控" position="top">
                                 <button
                                     class="device-status-ribbon"
                                     :class="{ online: item.online }"
                                     type="button"
-                                    :aria-label="`查看${item.online ? '在线' : '离线'}状态轨迹`"
+                                    :aria-label="`查看设备${item.deviceId}运行监控`"
                                     @click.stop="openStatusEvents(item)"
                                 >
                                     {{ item.online ? '在线' : '离线' }}
@@ -2298,6 +2359,11 @@ onUnmounted(() => {
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
+                                <a-tooltip content="运行监控" position="top">
+                                        <button class="icon-btn small framed" type="button" aria-label="打开通道运行监控" @click.stop="openChannelRuntime(item)">
+                                            <Activity :size="13" />
+                                        </button>
+                                </a-tooltip>
                                 <a-tooltip content="点播" position="top">
                                         <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
                                             <Play :size="13" />
@@ -2591,8 +2657,8 @@ onUnmounted(() => {
             <a-modal
                 v-model:visible="statusEventVisible"
                 modal-class="uvp-system-dialog status-event-dialog"
-                title="设备状态轨迹"
-                :width="720"
+                title="运行监控"
+                :width="920"
                 :footer="false"
                 unmount-on-close
                 @close="closeStatusEvents"
@@ -2611,38 +2677,55 @@ onUnmounted(() => {
                             {{ statusEventDevice.online ? '在线' : '离线' }}
                         </span>
                     </header>
-                    <div class="status-event-facts">
-                        <div><span>最近注册</span><strong>{{ dateTime(statusEventDevice.registerTime) }}</strong></div>
-                        <div><span>最近心跳</span><strong>{{ dateTime(statusEventDevice.keepaliveTime) }}</strong></div>
-                        <div><span>来源地址</span><strong class="mono">{{ endpointText(statusEventDevice) }}</strong></div>
-                    </div>
-
-                    <div ref="statusEventScroll" class="status-event-scroll" @scroll.passive="onStatusEventScroll">
-                        <a-spin :loading="statusEventLoading" class="status-event-content">
-                            <div v-if="statusEventError" class="status-event-state error">
-                                <strong>状态轨迹加载失败</strong>
-                                <span>{{ statusEventError }}</span>
-                                <a-button size="small" @click="loadStatusEvents()">重试</a-button>
+                    <a-tabs v-model:active-key="runtimeActiveTab" class="runtime-tabs">
+                        <a-tab-pane key="status" title="设备上下线">
+                            <div class="status-event-facts">
+                                <div><span>最近注册</span><strong>{{ dateTime(statusEventDevice.registerTime) }}</strong></div>
+                                <div><span>最近心跳</span><strong>{{ dateTime(statusEventDevice.keepaliveTime) }}</strong></div>
+                                <div><span>来源地址</span><strong class="mono">{{ endpointText(statusEventDevice) }}</strong></div>
                             </div>
-                            <a-empty v-else-if="!statusEventLoading && statusEventList.length === 0" description="暂无状态事件" />
-                            <a-timeline v-else class="status-event-timeline">
-                                <a-timeline-item v-for="event in statusEventList" :key="event.id" :label="statusEventTime(event.occurredAt)" :dot-color="eventColor(event.eventType)" dot-type="hollow">
-                                    <div class="status-event-item" :data-event="event.eventType" :title="eventMetaText(event)">
-                                        <strong>{{ event.eventName }}</strong>
+                            <div ref="statusEventScroll" class="status-event-scroll" @scroll.passive="onStatusEventScroll">
+                                <a-spin :loading="statusEventLoading" class="status-event-content">
+                                    <div v-if="statusEventError" class="status-event-state error" role="alert">
+                                        <strong>上下线记录加载失败</strong>
+                                        <span>{{ statusEventError }}</span>
+                                        <a-button size="small" @click="loadStatusEvents()">重试</a-button>
                                     </div>
-                                </a-timeline-item>
-                            </a-timeline>
-                        </a-spin>
-                        <div v-if="statusEventList.length" class="status-event-load-more">
-                            <span v-if="statusEventLoadingMore"><Loader2 :size="14" class="spin" /> 正在加载更多</span>
-                            <span v-else-if="statusEventLoadMoreError" class="error">
-                                {{ statusEventLoadMoreError }}
-                                <button type="button" @click="loadMoreStatusEvents">重试</button>
-                            </span>
-                            <span v-else-if="!statusEventHasMore">已展示全部 {{ statusEventTotal }} 条</span>
-                            <span v-else>向下滚动加载更多 · 已加载 {{ statusEventList.length }}/{{ statusEventTotal }} 条</span>
-                        </div>
-                    </div>
+                                    <a-empty v-else-if="!statusEventLoading && statusEventList.length === 0" description="暂无上下线记录" />
+                                    <a-timeline v-else class="status-event-timeline">
+                                        <a-timeline-item v-for="event in statusEventList" :key="event.id" :label="statusEventTime(event.occurredAt)" :dot-color="eventColor(event.eventType)" dot-type="hollow">
+                                            <div class="status-event-item" :data-event="event.eventType" :title="eventMetaText(event)"><strong>{{ event.eventName }}</strong></div>
+                                        </a-timeline-item>
+                                    </a-timeline>
+                                </a-spin>
+                                <div v-if="statusEventList.length" class="status-event-load-more">
+                                    <span v-if="statusEventLoadingMore"><Loader2 :size="14" class="spin" /> 正在加载更多</span>
+                                    <span v-else-if="statusEventLoadMoreError" class="error">{{ statusEventLoadMoreError }} <button type="button" @click="loadMoreStatusEvents">重试</button></span>
+                                    <span v-else-if="!statusEventHasMore">已展示全部 {{ statusEventTotal }} 条</span>
+                                    <span v-else>向下滚动加载更多 · 已加载 {{ statusEventList.length }}/{{ statusEventTotal }} 条</span>
+                                </div>
+                            </div>
+                        </a-tab-pane>
+                        <a-tab-pane key="traffic" title="流量统计">
+                            <div class="runtime-filter">
+                                <span>统计通道</span>
+                                <a-select v-model="runtimeChannelCode" :loading="runtimeChannelsLoading" :disabled="runtimeChannelLocked" allow-clear placeholder="全部通道(设备汇总)">
+                                    <a-option v-for="channel in runtimeChannels" :key="channel.channelId" :value="channel.channelId">{{ displayName(channel) }} · {{ channel.channelId }}</a-option>
+                                </a-select>
+                            </div>
+                            <TrafficTrend v-if="runtimeActiveTab === 'traffic'" :device-id="statusEventDevice.deviceId" :channel-id="runtimeChannelCode || undefined" />
+                        </a-tab-pane>
+                        <a-tab-pane key="viewers" title="当前观看">
+                            <div class="runtime-filter">
+                                <span>观看通道</span>
+                                <a-select v-model="runtimeChannelCode" :loading="runtimeChannelsLoading" :disabled="runtimeChannelLocked" placeholder="请选择通道">
+                                    <a-option v-for="channel in runtimeChannels" :key="channel.channelId" :value="channel.channelId">{{ displayName(channel) }} · {{ channel.channelId }}</a-option>
+                                </a-select>
+                            </div>
+                            <ViewerTable v-if="runtimeActiveTab === 'viewers' && runtimeChannelCode && runtimeSelectedChannel" :device-id="statusEventDevice.deviceId" :channel-id="runtimeChannelCode" />
+                            <a-empty v-else-if="runtimeActiveTab === 'viewers'" description="请选择一个通道查看当前观看连接" />
+                        </a-tab-pane>
+                    </a-tabs>
                 </div>
             </a-modal>
 
@@ -4243,6 +4326,17 @@ onUnmounted(() => {
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.runtime-tabs { min-width: 0; }
+.runtime-tabs :deep(.arco-tabs-content) { padding-top: 4px; }
+.runtime-filter {
+    display: grid;
+    grid-template-columns: 80px minmax(220px, 420px);
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    border-bottom: 1px solid var(--uvp-panel-border);
+}
+.runtime-filter > span { color: var(--uvp-text-tertiary); font-size: 12px; }
 .status-event-scroll {
     min-height: 180px;
     max-height: clamp(180px, calc(100vh - 350px), 440px);
@@ -4250,6 +4344,10 @@ onUnmounted(() => {
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
+}
+@media (max-width: 768px) {
+    .runtime-filter { grid-template-columns: 1fr; gap: 4px; padding: 8px 0; }
+    .status-event-facts { grid-template-columns: 1fr; }
 }
 .status-event-content { display: block; min-height: 180px; }
 .status-event-timeline {

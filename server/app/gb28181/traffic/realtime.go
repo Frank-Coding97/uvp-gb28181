@@ -6,15 +6,15 @@ import (
 )
 
 type RealtimeSnapshot struct {
-	DeviceCode                     string
-	ChannelCode                    string
-	NodeID                         int64
-	Stream                         string
-	InProgressUpstreamBytes        uint64
-	UpstreamBytesPerSecond         uint64
-	ReaderCount                    int
-	EstimatedDownstreamBytesPerSec uint64
-	SampledAt                      time.Time
+	DeviceCode                     string    `json:"deviceCode"`
+	ChannelCode                    string    `json:"channelCode"`
+	NodeID                         int64     `json:"nodeId"`
+	Stream                         string    `json:"stream"`
+	InProgressUpstreamBytes        uint64    `json:"inProgressUpstreamBytes"`
+	UpstreamBytesPerSecond         uint64    `json:"upstreamBytesPerSecond"`
+	ReaderCount                    int       `json:"readerCount"`
+	EstimatedDownstreamBytesPerSec uint64    `json:"estimatedDownstreamBytesPerSec"`
+	SampledAt                      time.Time `json:"sampledAt"`
 }
 
 type RealtimeStore struct {
