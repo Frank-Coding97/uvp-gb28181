@@ -7,6 +7,7 @@
 <script setup lang="ts">
 import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { useSysConfigStore } from "@/store/modules/sys-config";
+import uvpFavicon from "@/assets/logo/uvp-favicon.svg";
 import { watch } from "vue";
 
 // 初始化主题
@@ -62,7 +63,7 @@ const setFavicon = (iconUrl: string) => {
 
 // 设置默认图标的辅助方法
 const setDefaultFavicon = () => {
-    const defaultIconUrl = 'src/assets/sys/default.ico';
+    const defaultIconUrl = uvpFavicon;
     const links = document.querySelectorAll("link[rel='icon']");
     links.forEach(link => {
         link.remove();

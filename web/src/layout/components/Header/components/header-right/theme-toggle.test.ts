@@ -25,6 +25,14 @@ describe("header theme toggle", () => {
     expect(settingsSource).not.toContain("暗色风格");
   });
 
+  it("removes the retired system notice entry from the header", () => {
+    const headerSource = readSource("src/layout/components/Header/components/header-right/index.vue");
+
+    expect(headerSource).not.toContain("system-notice");
+    expect(headerSource).not.toContain("<Notice />");
+    expect(headerSource).not.toContain("components/Header/components/Notice");
+  });
+
   it("removes the retired frosted-black theme from runtime and styles", () => {
     const sources = [
       "src/store/modules/theme-config.ts",

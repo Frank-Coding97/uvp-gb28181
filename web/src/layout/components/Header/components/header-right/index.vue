@@ -3,17 +3,6 @@
     <!-- SIP 引导提醒:未配置/启动失败时才显示 -->
     <SipSetupBell />
     <RecordingDownloadCenter />
-    <!-- 通知 -->
-    <a-popover position="bottom" trigger="click">
-      <a-button size="mini" type="text" class="icon_btn notice" id="system-notice">
-        <template #icon>
-          <icon-notification :size="18" />
-        </template>
-      </a-button>
-      <template #content>
-        <Notice />
-      </template>
-    </a-popover>
     <!-- 全屏 -->
     <a-tooltip :content="$t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`)">
       <a-button size="mini" type="text" class="icon_btn" id="system-fullscreen" @click="onFullScreen">
@@ -86,7 +75,6 @@
 </template>
 
 <script setup lang="ts">
-import Notice from "@/layout/components/Header/components/Notice/index.vue";
 import SipSetupBell from "@/layout/components/Header/components/SipSetupBell.vue";
 import RecordingDownloadCenter from "@/layout/components/Header/components/RecordingDownloadCenter.vue";
 import SystemSettings from "@/layout/components/Header/components/system-settings/index.vue";
@@ -255,22 +243,6 @@ const logOut = () => {
       transform: rotate(0deg);
       transition: transform 0.2s;
     }
-  }
-}
-
-.notice {
-  position: relative;
-
-  &::before {
-    position: absolute;
-    top: -4px;
-    right: -2px;
-    width: 6px;
-    height: 6px;
-    content: "";
-    background: $color-danger;
-    border: 2px solid var(--uvp-workspace-bg);
-    border-radius: 50%;
   }
 }
 
