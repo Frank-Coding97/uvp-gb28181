@@ -1,6 +1,35 @@
 // Arco Design 组件全局样式覆盖
 // 目标：让 Arco 组件符合 UVP 系统设计风格
 
+// ========== Switch 开关 ==========
+.arco-switch {
+  background-color: var(--uvp-panel-border) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-text-tertiary) 24%, transparent) !important;
+
+  &:not([disabled]):hover {
+    background-color: color-mix(in srgb, var(--uvp-brand) 12%, var(--uvp-panel-border)) !important;
+  }
+
+  &.arco-switch-checked {
+    background-color: var(--uvp-brand) !important;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--uvp-brand) 14%, transparent) !important;
+  }
+
+  &:not(.arco-switch-checked):not([disabled]) .arco-switch-text {
+    color: var(--uvp-text-secondary) !important;
+  }
+
+  &[disabled] {
+    background-color: var(--uvp-panel-border) !important;
+    box-shadow: none !important;
+    opacity: 0.5;
+  }
+
+  &[disabled].arco-switch-checked {
+    background-color: color-mix(in srgb, var(--uvp-brand) 45%, var(--uvp-panel-border)) !important;
+  }
+}
+
 // ========== Select 下拉框 ==========
 .arco-select-view {
   border-radius: 8px !important;
