@@ -122,7 +122,7 @@ func newAlarmHTTPFixture(t *testing.T, scoped bool) *alarmHTTPFixture {
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbAlarmEvent{}, &gbmodels.GbDeviceSubscription{},
 		&basemodels.SysDepartment{}, &basemodels.SysRole{}, &basemodels.SysUserRole{}, &basemodels.User{},
-	))
+	 &gbmodels.GbDeviceGrant{}))
 
 	deviceA := &gbmodels.GbDevice{DeviceID: "37010301021320000111", Name: "一号 NVR", Alias: "机房一号", OwnerDeptID: 10}
 	deviceB := &gbmodels.GbDevice{DeviceID: "37010301021320000222", Name: "二号 NVR", OwnerDeptID: 20}

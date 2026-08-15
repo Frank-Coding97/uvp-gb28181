@@ -308,15 +308,9 @@ func (s *CatalogService) FileOptions(ctx context.Context, userID uint, query Fil
 		return CatalogOptionsDTO{}, err
 	}
 	result := CatalogOptionsDTO{
-		Channels: make([]CatalogChannelOptionDTO, 0, len(options.Channels)),
-		Devices:  make([]CatalogDeviceOptionDTO, 0, len(options.Devices)),
+		Channels: make([]CatalogChannelOptionDTO, 0),
+		Devices:  make([]CatalogDeviceOptionDTO, 0),
 		Nodes:    make([]NodeDTO, 0, len(options.NodeIDs)),
-	}
-	for _, option := range options.Channels {
-		result.Channels = append(result.Channels, CatalogChannelOptionDTO{ID: strconv.FormatUint(uint64(option.ID), 10), Code: option.Code, Name: option.Name})
-	}
-	for _, option := range options.Devices {
-		result.Devices = append(result.Devices, CatalogDeviceOptionDTO{ID: option.ID, Name: option.Name})
 	}
 	for _, nodeID := range options.NodeIDs {
 		result.Nodes = append(result.Nodes, nodes.dto(nodeID))

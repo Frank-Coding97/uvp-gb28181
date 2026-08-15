@@ -43,7 +43,7 @@ func (dc *DeviceMgmtController) ListDeviceStatusEvents(c *gin.Context) {
 	}
 
 	var device gbmodels.GbDevice
-	deviceResult := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&device)
+	deviceResult := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&device)
 	if deviceResult.Error != nil {
 		dc.FailAndAbort(c, "查询设备失败", deviceResult.Error)
 		return
@@ -64,7 +64,7 @@ func (dc *DeviceMgmtController) ListDeviceStatusEvents(c *gin.Context) {
 		Select("e.*").
 		Joins("JOIN gb_device AS d ON d.id = e.device_id AND d.deleted_at IS NULL").
 		Where("e.device_id = ? AND e.deleted_at IS NULL", device.ID).
-		Scopes(datascope.OwnerDeptScope(c, "d.owner_dept_id"))
+		Scopes(datascope.VisibilityScope(c, "d.owner_dept_id", "d.device_id"))
 
 	if eventType := strings.TrimSpace(c.Query("eventType")); eventType != "" {
 		parsed := gbmodels.DeviceStatusEventType(eventType)

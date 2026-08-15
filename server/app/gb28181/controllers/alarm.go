@@ -299,7 +299,7 @@ func (controller *AlarmController) scopedQuery(c *gin.Context, db *gorm.DB, quer
 	query := db.WithContext(c).Table("gb_alarm_event AS alarm").
 		Joins("JOIN gb_device AS device ON device.id = alarm.device_id AND device.deleted_at IS NULL").
 		Joins("LEFT JOIN gb_channel AS channel ON channel.id = alarm.channel_id").
-		Scopes(datascope.OwnerDeptScopeWithDB(c, db, "device.owner_dept_id"))
+		Scopes(datascope.VisibilityScopeWithDB(c, db, "device.owner_dept_id", "device.device_id"))
 	if queryParams.DeviceID != nil {
 		query = query.Where("alarm.device_id = ?", *queryParams.DeviceID)
 	}

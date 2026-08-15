@@ -109,7 +109,7 @@ func newPTZResourceController(t *testing.T) (*gbcontrollers.DeviceMgmtController
 		&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbPTZOperation{},
 		&gbmodels.GbPTZPreset{}, &gbmodels.GbPTZCruiseTrack{}, &gbmodels.GbPTZState{},
 		&gbmodels.GbAlarmResource{}, &gbmodels.GbAlarmResourceParent{}, &gbmodels.GbAlarmBinding{},
-	))
+	 &gbmodels.GbDeviceGrant{}))
 	device := &gbmodels.GbDevice{DeviceID: "D", IP: "192.0.2.10", Port: 5060, Transport: "UDP", Status: gbmodels.DeviceStatusOnline}
 	require.NoError(t, db.Create(device).Error)
 	channel := &gbmodels.GbChannel{DeviceID: "D", ChannelID: "C", Status: gbmodels.ChannelStatusOnline, PTZType: 1}
@@ -356,7 +356,7 @@ func TestDeviceMgmt_PTZRefreshQueuesOperationAndKeepsOldCacheStale(t *testing.T)
 
 func TestDeviceMgmt_PTZRefreshRejectsOtherDepartment(t *testing.T) {
 	controller, db, channel, sender := newPTZResourceController(t)
-	require.NoError(t, db.AutoMigrate(&basemodels.SysDepartment{}, &basemodels.SysRole{}, &basemodels.SysUserRole{}, &basemodels.User{}))
+	require.NoError(t, db.AutoMigrate(&basemodels.SysDepartment{}, &basemodels.SysRole{}, &basemodels.SysUserRole{}, &basemodels.User{}, &gbmodels.GbDeviceGrant{}))
 	seedDeptScopedUser(t, db, 100, 10)
 	require.NoError(t, db.Model(&gbmodels.GbDevice{}).Where("device_id = ?", "D").Update("owner_dept_id", 20).Error)
 	require.NoError(t, db.Model(channel).Update("owner_dept_id", 20).Error)

@@ -155,6 +155,11 @@ func defaultOwnerDeptID(ctx context.Context) (uint, error) {
 	return defaultOwnerDeptIDWithDB(ctx, app.DB())
 }
 
+// DefaultOwnerDeptIDWithDB 导出包装:读取并校验配置的默认归属部门 ID。
+func DefaultOwnerDeptIDWithDB(ctx context.Context, db *gorm.DB) (uint, error) {
+	return defaultOwnerDeptIDWithDB(ctx, db)
+}
+
 func defaultOwnerDeptIDWithDB(ctx context.Context, db *gorm.DB) (uint, error) {
 	if app.ConfigYml == nil {
 		return 0, fmt.Errorf("自动建档失败: 缺少配置,未设置 gb28181.device.default_owner_dept_id")

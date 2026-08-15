@@ -82,7 +82,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 	}
 
 	var channel gbmodels.GbChannel
-	result := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
+	result := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询通道失败", result.Error)
 		return
@@ -97,7 +97,7 @@ func (dc *DeviceMgmtController) ControlPTZ(c *gin.Context) {
 	}
 
 	var device gbmodels.GbDevice
-	result = db.WithContext(c).Scopes(ownerDeptScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result = db.WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询设备失败", result.Error)
 		return
@@ -208,12 +208,12 @@ func (dc *DeviceMgmtController) ControlPTZExtended(c *gin.Context) {
 		dc.FailAndAbort(c, "通道 ID 不合法", parseErr)
 		return
 	}
-	result := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
+	result := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "通道不存在或无权限", result.Error)
 		return
 	}
-	result = db.WithContext(c).Scopes(ownerDeptScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result = db.WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
 		return
@@ -266,13 +266,13 @@ func (dc *DeviceMgmtController) ControlPTZPrecise(c *gin.Context) {
 		return
 	}
 	var channel gbmodels.GbChannel
-	result := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
+	result := db.WithContext(c).Scopes(visibleScope(c)).Where("id = ?", channelID).Limit(1).Find(&channel)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "通道不存在或无权限", result.Error)
 		return
 	}
 	var device gbmodels.GbDevice
-	result = db.WithContext(c).Scopes(ownerDeptScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result = db.WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
 		return

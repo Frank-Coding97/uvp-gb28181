@@ -51,7 +51,7 @@ func (dc *DeviceMgmtController) findSubscriptionDevice(c *gin.Context) (*gbmodel
 		return nil, false
 	}
 	var device gbmodels.GbDevice
-	result := dc.db().WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&device)
+	result := dc.db().WithContext(c).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "设备不存在", result.Error)
 		return nil, false

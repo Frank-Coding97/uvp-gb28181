@@ -146,7 +146,7 @@ func (dc *DeviceMgmtController) loadHomePositionChannel(c *gin.Context) (*gbmode
 		return nil, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "数据库未就绪", nil)
 	}
 	var channel gbmodels.GbChannel
-	result := db.WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
+	result := db.WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
 	if result.Error != nil {
 		return nil, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "查询通道失败", result.Error)
 	}
@@ -158,7 +158,7 @@ func (dc *DeviceMgmtController) loadHomePositionChannel(c *gin.Context) (*gbmode
 
 func (dc *DeviceMgmtController) loadHomePositionTarget(c *gin.Context, channel *gbmodels.GbChannel) (ptz.Target, *homePositionHTTPFailure) {
 	var device gbmodels.GbDevice
-	result := dc.db().WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(ownerDeptScope(c)).
+	result := dc.db().WithContext(c.Request.Context()).Clauses(dbresolver.Write).Scopes(visibleScope(c)).
 		Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil {
 		return ptz.Target{}, homePositionFailure(http.StatusInternalServerError, ptz.ErrorCodeHomePositionInternal, "查询所属设备失败", result.Error)
@@ -209,7 +209,7 @@ func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.
 		return ptz.Target{}, false
 	}
 	var device gbmodels.GbDevice
-	result := dc.db().WithContext(c).Scopes(ownerDeptScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result := dc.db().WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
 		return ptz.Target{}, false

@@ -15,6 +15,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	gbdevice "uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
@@ -164,7 +165,26 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		pageSize = 20
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(ownerDeptScope(c))
+	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(visibleScope(c))
+
+	// 分配状态过滤(设备分配页三档 Tab):unassigned=归属默认部门 / assigned=已流转
+	if assignment := c.Query("assignment"); assignment == "unassigned" || assignment == "assigned" {
+		defaultDeptID, err := gbdevice.DefaultOwnerDeptIDWithDB(c, db)
+		if err != nil {
+			dc.FailAndAbort(c, "获取默认部门失败", err)
+			return
+		}
+		if assignment == "unassigned" {
+			q = q.Where("owner_dept_id = ?", defaultDeptID)
+		} else {
+			q = q.Where("owner_dept_id <> ?", defaultDeptID)
+		}
+	}
+	// 左侧部门树点选过滤(前端传 ownerDeptId)
+	if deptID, err := strconv.Atoi(c.Query("ownerDeptId")); err == nil && deptID > 0 {
+		q = q.Where("owner_dept_id = ?", deptID)
+	}
+
 	if c.Query("directoryView") != "" || c.Query("directoryKey") != "" {
 		if c.Query("nodeId") != "" {
 			dc.Fail(c, "新旧目录参数不能同时使用", nil, http.StatusBadRequest)
@@ -205,7 +225,7 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 				var channelDeviceCodes []string
 				if len(channelIDs) > 0 {
 					db.WithContext(c).Model(&gbmodels.GbChannel{}).
-						Scopes(ownerDeptScope(c)).
+						Scopes(visibleScope(c)).
 						Where("id IN ?", channelIDs).
 						Distinct().
 						Pluck("device_id", &channelDeviceCodes)
@@ -321,8 +341,8 @@ func (s chStats) rate() float64 {
 
 func (dc *DeviceMgmtController) channelAggregate(c *gin.Context, db *gorm.DB, deviceID string) chStats {
 	var total, online int64
-	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Where("device_id = ?", deviceID).Count(&total).Error
-	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Where("device_id = ? AND status = ?", deviceID, gbmodels.ChannelStatusOnline).Count(&online).Error
+	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c)).Where("device_id = ?", deviceID).Count(&total).Error
+	_ = db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c)).Where("device_id = ? AND status = ?", deviceID, gbmodels.ChannelStatusOnline).Count(&online).Error
 	return chStats{total: total, online: online}
 }
 
@@ -338,7 +358,7 @@ func (dc *DeviceMgmtController) channelAggregates(c *gin.Context, db *gorm.DB, d
 	}
 	var rows []aggregateRow
 	err := db.WithContext(c).Model(&gbmodels.GbChannel{}).
-		Scopes(ownerDeptScope(c)).
+		Scopes(visibleScope(c)).
 		Select("device_id, COUNT(*) AS total, SUM(CASE WHEN status = ? THEN 1 ELSE 0 END) AS online", gbmodels.ChannelStatusOnline).
 		Where("device_id IN ?", deviceIDs).
 		Group("device_id").
@@ -413,7 +433,7 @@ func (dc *DeviceMgmtController) ListChannels(c *gin.Context) {
 		pageSize = 40
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c))
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(visibleScope(c))
 	if c.Query("directoryView") != "" || c.Query("directoryKey") != "" {
 		if c.Query("nodeId") != "" {
 			dc.Fail(c, "新旧目录参数不能同时使用", nil, http.StatusBadRequest)
@@ -541,7 +561,7 @@ func (dc *DeviceMgmtController) UpdateChannelStreamTransport(c *gin.Context) {
 		return
 	}
 	res := db.WithContext(c).Model(&gbmodels.GbChannel{}).
-		Scopes(ownerDeptScope(c)).
+		Scopes(visibleScope(c)).
 		Where("id = ?", id).
 		Update("stream_transport", body.StreamTransport)
 	if res.Error != nil {
@@ -601,7 +621,7 @@ func (dc *DeviceMgmtController) UpdateChannel(c *gin.Context) {
 		return
 	}
 	res := db.WithContext(c).Model(&gbmodels.GbChannel{}).
-		Scopes(ownerDeptScope(c)).
+		Scopes(visibleScope(c)).
 		Where("id = ?", id).
 		Updates(updates)
 	if res.Error != nil {

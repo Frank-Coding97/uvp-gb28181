@@ -156,7 +156,7 @@ func (dc *DeviceMgmtController) deleteDeviceByID(c *gin.Context, db *gorm.DB, id
 		// 2. 查该设备下所有通道 ID(通过国标 device_id 关联,dept-scoped)
 		var channelIDs []uint
 		if err := tx.Model(&gbmodels.GbChannel{}).
-			Scopes(ownerDeptScope(c)).
+			Scopes(visibleScope(c)).
 			Where("device_id = ?", dev.DeviceID).
 			Pluck("id", &channelIDs).Error; err != nil {
 			return err

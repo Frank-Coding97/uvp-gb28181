@@ -245,7 +245,7 @@ func (c *ManagementController) authorizeSources(ctx *gin.Context, devices []repo
 	}
 	if len(deviceIDs) > 0 {
 		var rows []gbmodels.GbDevice
-		query := c.db.WithContext(ctx).Model(&gbmodels.GbDevice{}).Where("id IN ?", deviceIDs).Scopes(datascope.OwnerDeptScopeWithDB(ctx, c.db, "owner_dept_id"))
+		query := c.db.WithContext(ctx).Model(&gbmodels.GbDevice{}).Where("id IN ?", deviceIDs).Scopes(datascope.VisibilityScopeWithDB(ctx, c.db, "owner_dept_id", "device_id"))
 		if err := query.Find(&rows).Error; err != nil {
 			return err
 		}
@@ -261,7 +261,7 @@ func (c *ManagementController) authorizeSources(ctx *gin.Context, devices []repo
 			}
 		}
 		var rows []gbmodels.GbChannel
-		query := c.db.WithContext(ctx).Model(&gbmodels.GbChannel{}).Where("id IN ?", ids).Scopes(datascope.OwnerDeptScopeWithDB(ctx, c.db, "owner_dept_id"))
+		query := c.db.WithContext(ctx).Model(&gbmodels.GbChannel{}).Where("id IN ?", ids).Scopes(datascope.VisibilityScopeWithDB(ctx, c.db, "owner_dept_id", "device_id"))
 		if err := query.Find(&rows).Error; err != nil {
 			return err
 		}

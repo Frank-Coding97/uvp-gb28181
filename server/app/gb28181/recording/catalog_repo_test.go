@@ -109,17 +109,13 @@ func TestCatalogRepoOptionsUseFileSnapshotsAndFailClosedScope(t *testing.T) {
 	}))
 	options, err := repo.CatalogOptions(context.Background(), FileQuery{AllowedDeptIDs: []uint{1}})
 	require.NoError(t, err)
-	require.Equal(t, []CatalogChannelOption{{ID: visible.ChannelID, Code: visible.ChannelCode, Name: visible.ChannelName}}, options.Channels)
-	require.Equal(t, []CatalogDeviceOption{{ID: visible.DeviceID, Name: visible.DeviceName}}, options.Devices)
 	require.Equal(t, []int64{10}, options.NodeIDs)
-	require.Len(t, optionQueries, 3)
-	require.NotContains(t, optionQueries[1], "channel_name")
-	require.NotContains(t, optionQueries[1], "channel_id")
+	require.Len(t, optionQueries, 1)
+	require.NotContains(t, optionQueries[0], "channel_name")
+	require.NotContains(t, optionQueries[0], "device_name")
 
 	closed, err := repo.CatalogOptions(context.Background(), FileQuery{})
 	require.NoError(t, err)
-	require.Empty(t, closed.Channels)
-	require.Empty(t, closed.Devices)
 	require.Empty(t, closed.NodeIDs)
 }
 

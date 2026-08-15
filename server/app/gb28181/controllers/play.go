@@ -274,7 +274,7 @@ func mapPlayErr(err error) string {
 func (pc *PlayController) channelVisible(c *gin.Context, deviceID, channelID string) bool {
 	var ch gbmodels.GbChannel
 	result := app.DB().WithContext(c).
-		Scopes(datascope.OwnerDeptScope(c, "owner_dept_id")).
+		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ? AND channel_id = ?", deviceID, channelID).
 		Limit(1).
 		Find(&ch)
@@ -292,7 +292,7 @@ func (pc *PlayController) channelVisible(c *gin.Context, deviceID, channelID str
 func (pc *PlayController) streamVisible(c *gin.Context, streamID string) bool {
 	var ch gbmodels.GbChannel
 	result := app.DB().WithContext(c).
-		Scopes(datascope.OwnerDeptScope(c, "owner_dept_id")).
+		Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("stream_id = ?", streamID).
 		Limit(1).
 		Find(&ch)

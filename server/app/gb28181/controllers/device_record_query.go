@@ -199,7 +199,7 @@ func (dc *DeviceMgmtController) loadRecordQueryTargetByID(c *gin.Context, id uin
 		return nil, false
 	}
 	var target recordQueryTarget
-	result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&target.channel)
+	result := db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("id = ?", id).Limit(1).Find(&target.channel)
 	if result.Error != nil {
 		writeRecordQueryFailure(c, http.StatusServiceUnavailable, recordQueryUnavailable, "查询通道失败")
 		return nil, false
@@ -208,7 +208,7 @@ func (dc *DeviceMgmtController) loadRecordQueryTargetByID(c *gin.Context, id uin
 		writeRecordQueryFailure(c, http.StatusNotFound, recordQueryTargetNotFound, "通道不存在或无权限")
 		return nil, false
 	}
-	result = db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("device_id = ?", target.channel.DeviceID).Limit(1).Find(&target.device)
+	result = db.WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("device_id = ?", target.channel.DeviceID).Limit(1).Find(&target.device)
 	if result.Error != nil {
 		writeRecordQueryFailure(c, http.StatusServiceUnavailable, recordQueryUnavailable, "查询所属设备失败")
 		return nil, false

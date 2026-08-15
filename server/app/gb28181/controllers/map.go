@@ -12,6 +12,7 @@ import (
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
 
 // MapController 地图视图相关接口(plan §4.2 B3)
@@ -124,7 +125,7 @@ func (mc *MapController) Markers(c *gin.Context) {
 		limit = 500
 	}
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Joins(mapCoordinateJoin).
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
 		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
 		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
@@ -198,7 +199,7 @@ func (mc *MapController) Clusters(c *gin.Context) {
 	minLng, _ := strconv.ParseFloat(c.Query("minLng"), 64)
 	maxLng, _ := strconv.ParseFloat(c.Query("maxLng"), 64)
 
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Joins(mapCoordinateJoin).
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin).
 		Select("gb_channel.*, COALESCE(position_latest.latitude, gb_channel.latitude) AS latitude, COALESCE(position_latest.longitude, gb_channel.longitude) AS longitude").
 		Where("COALESCE(position_latest.latitude, gb_channel.latitude) != 0 AND COALESCE(position_latest.longitude, gb_channel.longitude) != 0")
 	q = applyMapFilters(c, db, q)
@@ -263,7 +264,7 @@ func (mc *MapController) NoCoordCount(c *gin.Context) {
 		return
 	}
 	var count int64
-	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(ownerDeptScope(c)).Joins(mapCoordinateJoin)
+	q := db.WithContext(c).Model(&gbmodels.GbChannel{}).Scopes(datascope.VisibilityScope(c, "gb_channel.owner_dept_id", "gb_channel.device_id")).Joins(mapCoordinateJoin)
 	q = applyMapFilters(c, db, q).Where("(COALESCE(position_latest.latitude, gb_channel.latitude) = 0 OR COALESCE(position_latest.longitude, gb_channel.longitude) = 0)")
 	q, err := applyMapDirectoryFilter(c, db, q)
 	if err != nil {

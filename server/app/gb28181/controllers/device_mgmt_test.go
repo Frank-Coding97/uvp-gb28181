@@ -80,7 +80,7 @@ func newDeviceMgmtRouter(t *testing.T, middlewares ...gin.HandlerFunc) (*gin.Eng
 		&basemodels.SysRole{},
 		&basemodels.SysUserRole{},
 		&basemodels.User{},
-	))
+	 &gbmodels.GbDeviceGrant{}))
 
 	dmgmt := gbcontrollers.NewDeviceMgmtController()
 	dmgmt.SetDB(func() *gorm.DB { return db })

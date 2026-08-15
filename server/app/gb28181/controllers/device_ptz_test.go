@@ -58,7 +58,7 @@ func (f *fakePTZSender) SendMessage(_ context.Context, deviceID, dest, transport
 func TestDeviceMgmt_ControlPTZ(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbChannel{}, &gbmodels.GbDeviceGrant{}))
 	device := &gbmodels.GbDevice{
 		DeviceID: "34020000002000000001", IP: "192.0.2.10", Port: 5060,
 		Transport: "TCP", Status: gbmodels.DeviceStatusOnline,

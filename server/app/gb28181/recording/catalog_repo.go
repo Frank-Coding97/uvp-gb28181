@@ -46,21 +46,8 @@ type FilePage struct {
 	PageSize int
 }
 
-type CatalogChannelOption struct {
-	ID   uint
-	Code string
-	Name string
-}
-
-type CatalogDeviceOption struct {
-	ID   string
-	Name string
-}
-
 type CatalogOptions struct {
-	Channels []CatalogChannelOption
-	Devices  []CatalogDeviceOption
-	NodeIDs  []int64
+	NodeIDs []int64
 }
 
 func (r *GormRepo) ListCatalogFiles(ctx context.Context, query FileQuery) (FilePage, error) {
@@ -81,19 +68,7 @@ func (r *GormRepo) ListCatalogFiles(ctx context.Context, query FileQuery) (FileP
 
 func (r *GormRepo) CatalogOptions(ctx context.Context, query FileQuery) (CatalogOptions, error) {
 	query = normalizeFileQuery(query, r.currentTime())
-	result := CatalogOptions{
-		Channels: make([]CatalogChannelOption, 0),
-		Devices:  make([]CatalogDeviceOption, 0),
-		NodeIDs:  make([]int64, 0),
-	}
-	if err := r.catalogFileQuery(ctx, query).Select("DISTINCT channel_id AS id, channel_code AS code, channel_name AS name").
-		Order("channel_name").Order("channel_id").Find(&result.Channels).Error; err != nil {
-		return CatalogOptions{}, err
-	}
-	if err := r.catalogFileQuery(ctx, query).Select("DISTINCT device_id AS id, device_name AS name").
-		Order("device_name").Order("device_id").Find(&result.Devices).Error; err != nil {
-		return CatalogOptions{}, err
-	}
+	result := CatalogOptions{NodeIDs: make([]int64, 0)}
 	if err := r.catalogFileQuery(ctx, query).Distinct("node_id").Order("node_id").Pluck("node_id", &result.NodeIDs).Error; err != nil {
 		return CatalogOptions{}, err
 	}

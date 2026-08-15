@@ -28,6 +28,7 @@ func newScopedDeviceDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDevice{},
 		&gbmodels.GbChannel{},
+		&gbmodels.GbDeviceGrant{},
 		&basemodels.SysDepartment{},
 		&basemodels.SysRole{},
 		&basemodels.SysUserRole{},
