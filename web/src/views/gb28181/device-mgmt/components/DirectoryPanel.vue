@@ -309,7 +309,7 @@ onMounted(() => load(props.modelValue.view));
 .directory-search:focus-within { border-color: var(--uvp-brand); }
 .directory-search input { width: 100%; min-width: 0; color: var(--uvp-text-primary); font-size: 12px; outline: none; background: transparent; border: 0; }
 .directory-tree-wrap { min-height: 0; flex: 1; }
-.directory-tree { height: 100%; padding: 2px 6px 10px; overflow: auto; scrollbar-gutter: stable; }
+.directory-tree { box-sizing: border-box; height: 100%; padding: 2px 6px 10px; overflow: auto; scrollbar-gutter: stable; }
 .directory-row { display: flex; height: 32px; min-width: 0; align-items: center; border-radius: 5px; }
 .directory-row:hover,
 .directory-row.active { color: var(--uvp-text-primary); background: var(--uvp-sidebar-active-bg); }

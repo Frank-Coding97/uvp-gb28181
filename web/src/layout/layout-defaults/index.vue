@@ -30,6 +30,7 @@ const { isPc } = useDevicesSize();
 
 <style lang="scss" scoped>
 .layout {
+  box-sizing: border-box;
   height: 100vh;
   padding: var(--uvp-workspace-gap);
   column-gap: var(--uvp-workspace-gap);
@@ -37,6 +38,7 @@ const { isPc } = useDevicesSize();
 }
 
 .layout-right {
+  box-sizing: border-box;
   display: grid;
   grid-template-rows: auto 1fr auto;
   min-width: 0;
@@ -44,7 +46,6 @@ const { isPc } = useDevicesSize();
   overflow: hidden;
   background: var(--uvp-workspace-bg);
   border: 1px solid var(--uvp-workspace-border);
-  border-left-color: transparent;
   border-radius: var(--uvp-workspace-radius);
   box-shadow: var(--uvp-workspace-shadow);
 }
