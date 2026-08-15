@@ -68,6 +68,12 @@ describe("header theme toggle", () => {
     expect(overridesSource).toMatch(/button\.btn-primary:disabled/);
   });
 
+  it("keeps the dark sidebar brand area on the navigation surface", () => {
+    const tokensSource = readSource("src/style/var/uvp-ui-tokens.scss");
+
+    expect(tokensSource).toMatch(/body\[arco-theme="dark"\]\s*\{[^}]*--uvp-sidebar-bg:\s*var\(--uvp-navigation-bg\)/s);
+  });
+
   it("switches themes without injecting a page transition", () => {
     const headerSource = readSource("src/layout/components/Header/components/header-right/index.vue");
     const themeStyles = readSource("src/style/model/uvp-ui-language.scss");
