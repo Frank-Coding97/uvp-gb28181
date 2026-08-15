@@ -177,7 +177,8 @@ func getDsn(sqlType, readWrite string, dbConf ...ConfigParams) string {
 		if TimeZone == "" {
 			TimeZone = "Local"
 		}
-		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s", User, Pass, Host, Port, DataBase, Charset, TimeZone)
+		// multiStatements=true:迁移 runner 一次 Exec 整个 .sql 文件(多语句),驱动必须放行
+		return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=%s&parseTime=true&loc=%s&multiStatements=true", User, Pass, Host, Port, DataBase, Charset, TimeZone)
 	case "sqlserver", "mssql":
 		// UseRowNumberForPaging=true 这个参数会告诉GORM的驱动，在为分页生成SQL时，使用兼容旧版本（SQL Server 2008）的ROW_NUMBER()语法，而不是OFFSET...FETCH
 		return fmt.Sprintf("server=%s;port=%d;database=%s;user id=%s;password=%s;encrypt=disable;UseRowNumberForPaging=true", Host, Port, DataBase, User, Pass)
