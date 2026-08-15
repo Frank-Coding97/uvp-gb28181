@@ -2,6 +2,7 @@ package migration
 
 import (
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -72,7 +73,41 @@ type dbExecutor struct {
 }
 
 func (e *dbExecutor) ExecSQL(sqlText string) error {
-	return e.db.Exec(sqlText).Error
+	// gorm 全局 PrepareStmt=true 时,Exec 走预处理路径,MySQL 服务器对多语句预处理报 1064。
+	// 因此按语句边界拆分后逐条 Exec(单语句预处理合法,且跨方言安全)。
+	for _, stmt := range splitStatements(sqlText) {
+		if err := e.db.Exec(stmt).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// splitStatements 按分号拆分 SQL 文本为独立语句:
+// 跳过空行与整行 -- 注释;语句以行尾分号结束;无分号结尾的残余片段按一条语句处理。
+func splitStatements(sqlText string) []string {
+	var stmts []string
+	var buf strings.Builder
+	flush := func() {
+		text := strings.TrimSpace(buf.String())
+		if text != "" {
+			stmts = append(stmts, text)
+		}
+		buf.Reset()
+	}
+	for _, line := range strings.Split(sqlText, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		buf.WriteString(line)
+		buf.WriteString("\n")
+		if strings.HasSuffix(trimmed, ";") {
+			flush()
+		}
+	}
+	flush()
+	return stmts
 }
 
 // Up 执行未应用的迁移:建版本表 → 取锁 → 基线化或增量执行 → 放锁。
