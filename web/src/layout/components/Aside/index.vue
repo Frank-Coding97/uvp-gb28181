@@ -56,11 +56,10 @@ const { routeTree } = storeToRefs(routerStore);
   .arco-menu-has-icon {
     justify-content: center;
     padding: 0;
-  }
 
-  // 消除icon的自带margin-right值，高度由菜单项flex居中控制
-  .arco-menu-icon {
-    margin-right: 0;
+    .arco-menu-icon {
+      margin-right: 0;
+    }
   }
 
   // 消除title占位

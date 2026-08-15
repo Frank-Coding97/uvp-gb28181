@@ -34,7 +34,7 @@ describe("device management toolbar layout", () => {
         expect(statusIndex).toBeGreaterThan(-1);
         expect(actionsIndex).toBeGreaterThan(-1);
         expect(statusIndex).toBeLessThan(actionsIndex);
-        for (const control of ['class="cmdk"', 'class="view-switch"', "create-device-btn", 'class="auto-refresh-control"', "status-select", 'class="segmented"']) {
+        for (const control of ['class="cmdk"', 'class="view-switch"', "create-device-btn", "refresh-control", "status-select", 'class="segmented"']) {
             expect(source.indexOf(control)).toBeGreaterThan(actionsIndex);
         }
         expect(source).toContain(".workspace-toolbar :deep(.uvp-search-panel__fields)");
@@ -47,8 +47,7 @@ describe("device management toolbar layout", () => {
             'class="view-switch"',
             'class="cmdk"',
             "status-select",
-            'class="btn-ghost"',
-            'class="auto-refresh-control"',
+            "refresh-control",
             "create-device-btn"
         ];
         const positions = controls.map(control => source.indexOf(control));

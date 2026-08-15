@@ -5,6 +5,19 @@ import DeviceMgmt from "./index.vue";
 // cross-review round-2 修复回归测试:
 // #3 地图兜底定时器销毁清理 / #5 统计只拉当前资产类型 / #6 统计单失败隔离
 
+const storage = new Map<string, string>();
+Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+        get length() { return storage.size; },
+        clear: () => storage.clear(),
+        getItem: (key: string) => storage.get(key) ?? null,
+        key: (index: number) => [...storage.keys()][index] ?? null,
+        removeItem: (key: string) => storage.delete(key),
+        setItem: (key: string, value: string) => storage.set(key, String(value))
+    }
+});
+
 const api = vi.hoisted(() => ({
     batchDeleteChannels: vi.fn(),
     batchDeleteDevices: vi.fn(),
@@ -158,8 +171,6 @@ function mountPage() {
 describe("device-mgmt round-2 修复回归", () => {
     beforeEach(() => {
         vi.useFakeTimers();
-        // 关闭 10s 自动轮询,隔离定时器计数断言的目标(只测地图兜底 timer)
-        localStorage.setItem("uvp.gb28181.device-mgmt.auto-refresh", "false");
         // happy-dom 元素无布局尺寸:容器永远 0 宽会让 ensureMap 无限 rAF 重试
         Object.defineProperty(HTMLElement.prototype, "clientWidth", { get: () => 800, configurable: true });
         Object.defineProperty(HTMLElement.prototype, "clientHeight", { get: () => 600, configurable: true });
@@ -172,7 +183,7 @@ describe("device-mgmt round-2 修复回归", () => {
     });
 
     afterEach(() => {
-        localStorage.clear();
+        window.localStorage.clear();
         vi.useRealTimers();
         vi.unstubAllGlobals();
     });
@@ -204,7 +215,7 @@ describe("device-mgmt round-2 修复回归", () => {
     });
 
     it("#3a 未销毁时 12s 兜底把底图标记为超时", async () => {
-        localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+        window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
         const wrapper = mountPage();
         await flushPromises();
 
@@ -218,23 +229,41 @@ describe("device-mgmt round-2 修复回归", () => {
     });
 
     it("#3b 销毁地图清除仍挂起的 12s 兜底定时器", async () => {
-        localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
+        window.localStorage.setItem("uvp.gb28181.device-mgmt.view-mode", "map");
         const wrapper = mountPage();
         await flushPromises();
 
         // 兜底定时器尚挂起时:先推进 800ms,让一次性 resize rAF 与 750ms ring 动画
-        // 自然结束,此时剩余挂起 timer 应只有 12s 兜底
+        // 自然结束,此时仍有地图兜底和自动刷新倒计时两个 timer
         vi.advanceTimersByTime(800);
         await flushPromises();
-        expect(vi.getTimerCount()).toBe(1); // 仅剩 12s 兜底
+        expect(vi.getTimerCount()).toBeGreaterThan(1);
 
         wrapper.unmount();
-        // destroyMap 必须清除它,不能留跨实例存活
+        // destroyMap 和自动刷新都必须清理,不能留跨实例存活
         expect(vi.getTimerCount()).toBe(0);
 
         vi.advanceTimersByTime(12000);
         await flushPromises();
         expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("shows a 10-second countdown and refreshes the current view automatically", async () => {
+        const wrapper = mountPage();
+        await flushPromises();
+
+        const refresh = wrapper.get("[data-testid='refresh-control']");
+        expect(refresh.text()).toContain("10s");
+        const initialDeviceCalls = api.listDevices.mock.calls.length;
+
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(refresh.text()).toContain("9s");
+
+        await vi.advanceTimersByTimeAsync(9000);
+        await flushPromises();
+        expect(api.listDevices.mock.calls.length).toBeGreaterThan(initialDeviceCalls);
+        expect(refresh.text()).toContain("10s");
+        wrapper.unmount();
     });
 
     it("切换资产类型立即刷新当前类型统计", async () => {

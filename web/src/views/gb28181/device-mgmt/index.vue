@@ -90,7 +90,7 @@ type DrawerTarget =
     | { type: "device"; id: number };
 
 const viewModeStorageKey = "uvp.gb28181.device-mgmt.view-mode";
-const autoRefreshStorageKey = "uvp.gb28181.device-mgmt.auto-refresh";
+const AUTO_REFRESH_INTERVAL_SECONDS = 10;
 function initialViewMode(): ViewMode {
     if (typeof window === "undefined") return "list";
     try {
@@ -100,15 +100,6 @@ function initialViewMode(): ViewMode {
         return "list";
     }
 }
-function initialAutoRefresh() {
-    if (typeof window === "undefined") return true;
-    try {
-        return window.localStorage.getItem(autoRefreshStorageKey) !== "false";
-    } catch {
-        return true;
-    }
-}
-
 const viewMode = ref<ViewMode>(initialViewMode());
 const router = useRouter();
 const route = useRoute();
@@ -227,8 +218,8 @@ function animateRingRate(target: number) {
 }
 
 watch(statOnlineRatePercent, (value) => animateRingRate(value));
-const autoRefresh = ref(initialAutoRefresh());
-const refreshInterval = ref<number | null>(null);
+const autoRefreshCountdown = ref(AUTO_REFRESH_INTERVAL_SECONDS);
+const refreshCountdownTimer = ref<number | null>(null);
 const isMacPlatform = computed(() => typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform));
 
 let keywordSearchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -318,13 +309,6 @@ watch([viewMode, assetKind], async (current, previous) => {
 watch(viewMode, (mode) => {
     try {
         window.localStorage.setItem(viewModeStorageKey, mode);
-    } catch {
-        // Storage can be unavailable in privacy-restricted browser contexts.
-    }
-});
-watch(autoRefresh, (enabled) => {
-    try {
-        window.localStorage.setItem(autoRefreshStorageKey, String(enabled));
     } catch {
         // Storage can be unavailable in privacy-restricted browser contexts.
     }
@@ -1608,32 +1592,33 @@ async function handleBatchDelete() {
     });
 }
 
+function resetAutoRefreshCountdown() {
+    autoRefreshCountdown.value = AUTO_REFRESH_INTERVAL_SECONDS;
+}
+
 function startAutoRefresh() {
-    if (refreshInterval.value) return;
-    refreshInterval.value = window.setInterval(() => {
-        if (autoRefresh.value) {
-            refreshMainData();
-            refreshStats();
+    if (refreshCountdownTimer.value) return;
+    resetAutoRefreshCountdown();
+    refreshCountdownTimer.value = window.setInterval(() => {
+        if (autoRefreshCountdown.value <= 1) {
+            resetAutoRefreshCountdown();
+            void refreshCurrent();
+        } else {
+            autoRefreshCountdown.value -= 1;
         }
-    }, 10000); // 每10秒刷新一次
+    }, 1000);
 }
 
 function stopAutoRefresh() {
-    if (refreshInterval.value) {
-        clearInterval(refreshInterval.value);
-        refreshInterval.value = null;
+    if (refreshCountdownTimer.value) {
+        clearInterval(refreshCountdownTimer.value);
+        refreshCountdownTimer.value = null;
     }
 }
 
-function toggleAutoRefresh(checked: boolean) {
-    autoRefresh.value = checked;
-    if (checked) {
-        startAutoRefresh();
-        Message.success("自动刷新已开启");
-    } else {
-        stopAutoRefresh();
-        Message.info("自动刷新已关闭");
-    }
+async function refreshCurrent() {
+    resetAutoRefreshCountdown();
+    await Promise.all([refreshMainData(), refreshStats()]);
 }
 
 function channelPercentage(record: DeviceVO): string {
@@ -1660,9 +1645,7 @@ onMounted(async () => {
         refreshStats(),
         loadPtzTypeDict()
     ]);
-    if (autoRefresh.value) {
-        startAutoRefresh();
-    }
+    startAutoRefresh();
 });
 
 onUnmounted(() => {
@@ -1731,21 +1714,17 @@ onUnmounted(() => {
                                     <a-option value="online">在线</a-option>
                                     <a-option value="offline">离线</a-option>
                                 </a-select>
-                                <button class="btn-ghost" type="button" @click="refreshMainData">
+                                <button
+                                    class="btn-ghost refresh-control"
+                                    data-testid="refresh-control"
+                                    type="button"
+                                    :title="`自动刷新倒计时 ${autoRefreshCountdown} 秒`"
+                                    :aria-label="`刷新设备列表，自动刷新倒计时 ${autoRefreshCountdown} 秒`"
+                                    @click="refreshCurrent"
+                                >
                                     <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
-                                    刷新
+                                    刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
                                 </button>
-                                <div class="auto-refresh-control">
-                                    <span class="refresh-label">自动刷新</span>
-                                    <a-switch
-                                        v-model="autoRefresh"
-                                        aria-label="自动刷新"
-                                        @change="toggleAutoRefresh"
-                                    >
-                                        <template #checked>开启</template>
-                                        <template #unchecked>关闭</template>
-                                    </a-switch>
-                                </div>
                                 <button class="btn-primary create-device-btn" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
                             </div>
                         </div>
@@ -3145,22 +3124,8 @@ onUnmounted(() => {
     flex-direction: column;
     padding: 14px 14px 12px;
 }
-.auto-refresh-control {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 12px;
-    height: 40px;
-    background: var(--uvp-list-toolbar-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 10px;
-}
-.refresh-label {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--uvp-text-secondary);
-    white-space: nowrap;
-}
+.refresh-control { width: 104px; min-width: 104px; }
+.refresh-countdown { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }
 .segmented {
     display: inline-flex;
     gap: 2px;
