@@ -82,6 +82,16 @@ type mockPlaybackMediaSink struct {
 	last  atomic.Value
 }
 
+type mockFlowCollector struct {
+	last handler.FlowReport
+	err  error
+}
+
+func (m *mockFlowCollector) CollectFlow(_ context.Context, report handler.FlowReport) error {
+	m.last = report
+	return m.err
+}
+
 func (m *mockPlaybackMediaSink) OnPlaybackStreamEnded(_ context.Context, streamID, reason string) error {
 	m.calls.Add(1)
 	m.last.Store(streamID + ":" + reason)
@@ -117,7 +127,28 @@ func newHookEngine(t *testing.T, h *handler.HookController) *gin.Engine {
 	e.POST("/index/hook/on_stream_changed", h.OnStreamChanged)
 	e.POST("/index/hook/on_stream_none_reader", h.OnStreamNoneReader)
 	e.POST("/index/hook/on_rtp_server_timeout", h.OnRtpServerTimeout)
+	e.POST("/index/hook/on_flow_report", h.OnFlowReport)
 	return e
+}
+
+func TestHookOnFlowReportForwardsNormalizedPayloadAndFailsOpen(t *testing.T) {
+	collector := &mockFlowCollector{err: context.DeadlineExceeded}
+	h := handler.NewHookController(stream.NewNotifier())
+	h.SetFlowCollector(collector)
+	e := newHookEngine(t, h)
+
+	rr := postJSON(t, e, "/index/hook/on_flow_report", map[string]interface{}{
+		"id": "sid-1", "mediaServerId": "ms-1", "schema": "ws", "vhost": "__defaultVhost__",
+		"app": "rtp", "stream": "stream-1", "player": true, "totalBytes": 1234,
+		"duration": 9, "ip": "10.0.0.8", "port": 4567,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	assertHookCode(t, rr.Code, rr.Body.Bytes(), 0)
+	if collector.last.ID != "sid-1" || !collector.last.Player || collector.last.TotalBytes != 1234 || collector.last.Duration != 9 {
+		t.Fatalf("flow report 未正确转发: %#v", collector.last)
+	}
 }
 
 func postJSON(t *testing.T, e *gin.Engine, path string, body interface{}) *httptest.ResponseRecorder {

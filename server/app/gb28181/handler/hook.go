@@ -81,6 +81,27 @@ type PlaybackMediaSink interface {
 	OnPlaybackStreamEnded(context.Context, string, string) error
 }
 
+// FlowReport is the normalized subset of ZLM on_flow_report used by traffic
+// accounting. The hook remains fail-open: a collector failure is logged and
+// ZLM still receives a successful response so media teardown is not blocked.
+type FlowReport struct {
+	ID            string
+	MediaServerID string
+	Schema        string
+	VHost         string
+	App           string
+	Stream        string
+	Player        bool
+	TotalBytes    uint64
+	Duration      int64
+	IP            string
+	Port          int
+}
+
+type FlowCollector interface {
+	CollectFlow(context.Context, FlowReport) error
+}
+
 type TalkPublishRequest struct {
 	NodeID       int64
 	App          string
@@ -138,6 +159,7 @@ type HookController struct {
 	recordResolver NodeUUIDResolver
 	observer       StreamObserver
 	playbackMedia  PlaybackMediaSink
+	flowCollector  FlowCollector
 	talkResolver   NodeUUIDResolver
 	talkAuthorizer TalkPublishAuthorizer
 	talkObserver   TalkStreamObserver
@@ -199,6 +221,10 @@ func (h *HookController) SetStreamObserver(observer StreamObserver) {
 
 func (h *HookController) SetPlaybackMediaSink(sink PlaybackMediaSink) {
 	h.playbackMedia = sink
+}
+
+func (h *HookController) SetFlowCollector(collector FlowCollector) {
+	h.flowCollector = collector
 }
 
 func (h *HookController) SetTalk(resolver NodeUUIDResolver, authorizer TalkPublishAuthorizer, observer TalkStreamObserver) {
@@ -538,6 +564,44 @@ type onPlayBody struct {
 	Params        string `json:"params"`
 	MediaServerID string `json:"mediaServerId"`
 	IP            string `json:"ip"`
+}
+
+type onFlowReportBody struct {
+	ID            string `json:"id"`
+	MediaServerID string `json:"mediaServerId"`
+	Schema        string `json:"schema"`
+	VHost         string `json:"vhost"`
+	App           string `json:"app"`
+	Stream        string `json:"stream"`
+	Player        bool   `json:"player"`
+	TotalBytes    uint64 `json:"totalBytes"`
+	Duration      int64  `json:"duration"`
+	IP            string `json:"ip"`
+	Port          int    `json:"port"`
+}
+
+// OnFlowReport receives a player/publisher final byte counter. Processing is
+// deliberately fail-open because returning a non-zero hook result can make
+// ZLM retry or delay media teardown.
+func (h *HookController) OnFlowReport(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
+	var body onFlowReportBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success"})
+		return
+	}
+	if h.flowCollector != nil {
+		err := h.flowCollector.CollectFlow(c.Request.Context(), FlowReport{
+			ID: body.ID, MediaServerID: body.MediaServerID, Schema: body.Schema,
+			VHost: body.VHost, App: body.App, Stream: body.Stream,
+			Player: body.Player, TotalBytes: body.TotalBytes, Duration: body.Duration,
+			IP: body.IP, Port: body.Port,
+		})
+		if err != nil && app.ZapLog != nil {
+			app.ZapLog.Warn("ZLM on_flow_report 计量失败", zap.Error(err), zap.String("stream", body.Stream), zap.Bool("player", body.Player))
+		}
+	}
+	hookOK(c)
 }
 
 type onStreamNotFoundBody struct {

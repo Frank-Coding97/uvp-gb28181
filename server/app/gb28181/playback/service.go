@@ -104,12 +104,21 @@ type Service struct {
 	sweeperWG     sync.WaitGroup
 	lifecycle     context.Context
 	lifecycleStop context.CancelFunc
+	mediaReady    func(Session)
 }
 
 func NewService(registry *Registry, picker NodePicker, rtp RTPOpener, inviter PlaybackInviter, media MediaWaiter, config ServiceConfig) *Service {
 	lifecycle, cancel := context.WithCancel(context.Background())
 	return &Service{registry: registry, picker: picker, rtp: rtp, inviter: inviter, media: media, config: config,
 		lifecycle: lifecycle, lifecycleStop: cancel}
+}
+
+// SetMediaReadyObserver reports a successfully established playback stream.
+// The observer is optional and accounting failures must stay outside playback.
+func (s *Service) SetMediaReadyObserver(observer func(Session)) {
+	if s != nil {
+		s.mediaReady = observer
+	}
 }
 
 func randomPlaybackValue(prefix string) string {
@@ -285,6 +294,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	result, ok := s.registry.Get(session.ID)
 	if !ok {
 		return CreateResult{}, ErrPlaybackNotFound
+	}
+	if s.mediaReady != nil {
+		s.mediaReady(*result)
 	}
 	return CreateResult{Session: result, Existing: created.Existing}, nil
 }

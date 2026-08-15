@@ -156,6 +156,7 @@ type Service struct {
 	tokenIssuer    playauth.DirectIssuer
 	nodeClient     func(*node.Node) ZLM
 	diagnosticSink diagnosis.DiagnosticSink
+	liveReady      func(LiveSession)
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
@@ -198,6 +199,12 @@ func WithDiagnosticSink(sink diagnosis.DiagnosticSink) Option {
 			service.diagnosticSink = sink
 		}
 	}
+}
+
+// WithLiveReadyObserver reports a successfully established live generation.
+// The observer is accounting-only and must not block or fail the media path.
+func WithLiveReadyObserver(observer func(LiveSession)) Option {
+	return func(service *Service) { service.liveReady = observer }
 }
 
 // New 创建 service(deprecated 单节点路径,M1/test fixture 兼容)
@@ -697,6 +704,12 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	}
 	if err := s.channels.SetCurrent(playCtx, deviceID, channelID, streamID, ssrc); err != nil {
 		return s.rollbackFailedStart(req, result, liveRef, client, fmt.Errorf("记录通道播放流失败: %w", err), true, &releaseSSRC)
+	}
+	if s.liveReady != nil {
+		s.liveReady(LiveSession{
+			DeviceID: deviceID, ChannelID: channelID, StreamID: streamID, SSRC: ssrc,
+			Generation: generation, NodeID: pickedNodeID, ModeAtStart: mode, State: LiveStateReady,
+		})
 	}
 
 	// 8. 通道快照(fire-and-forget,不阻塞返回,不影响主链路)

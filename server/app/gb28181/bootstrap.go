@@ -37,6 +37,7 @@ import (
 	gbtalk "uvplatform.cn/uvp-gb28181/app/gb28181/talk"
 	gbtrace "uvplatform.cn/uvp-gb28181/app/gb28181/trace"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/traffic"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
@@ -226,6 +227,9 @@ var metricsCleanupStop chan struct{}
 
 // heartbeatCancel 控制 Watcher goroutine 退出(M2 新增)
 var heartbeatCancel context.CancelFunc
+var trafficCancel context.CancelFunc
+var trafficResolver *traffic.AttributionResolver
+var trafficRealtime *traffic.RealtimeStore
 
 // playReconciler 兜底对账 goroutine(通道播放状态显示 T7 新增)
 var playReconciler *reconciler.Reconciler
@@ -311,6 +315,7 @@ func startControlPlane(cfg gbconfig.Config) {
 	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
 	setupTraceController(cfg, nil)
 	setupZLMRegistry(cfg)
+	setupTrafficRuntime()
 	setupZLMScheduler()
 	setupZLMSchedulerLog()
 	setupZLMSchedulerController()
@@ -609,6 +614,14 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 				play.WithURLResolver(play.NewURLResolver(zlmServerConfigCache)),
 				play.WithDiagnosticSink(diagnosisSinkForServer(srv)),
 			}
+			if trafficResolver != nil {
+				opts = append(opts, play.WithLiveReadyObserver(func(session play.LiveSession) {
+					trafficResolver.RegisterLive(traffic.LiveBinding{
+						NodeID: session.NodeID, StreamID: session.StreamID, Generation: session.Generation,
+						DeviceCode: session.DeviceID, ChannelCode: session.ChannelID,
+					})
+				}))
+			}
 			if snapshotSvc != nil {
 				opts = append(opts, play.WithSnapshotService(snapshotSvc))
 				app.ZapLog.Info("GB28181 通道快照 service 已装配")
@@ -803,6 +816,15 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
 		gbplayback.NewZLMMediaWaiter(zlmRegistry, zlmLocationMap, gbroutes.StreamNotifier(), zlmServerConfigCache, nil),
 		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics},
 	)
+	if trafficResolver != nil {
+		service.SetMediaReadyObserver(func(session gbplayback.Session) {
+			nodeID, _ := strconv.ParseInt(session.NodeID, 10, 64)
+			trafficResolver.RegisterPlayback(traffic.PlaybackBinding{
+				NodeID: nodeID, StreamID: session.StreamID, SessionID: session.ID,
+				DeviceCode: session.DeviceID, ChannelCode: session.ChannelID, MediaKind: traffic.MediaKindPlayback,
+			})
+		})
+	}
 	service.StartSweeper(context.Background(), time.Second)
 	SetPlaybackService(service, recordQueryService.Snapshots())
 	app.ZapLog.Info("GB28181 设备录像回放 service 已装配(ZLM scheduler + Playback UAC)")
@@ -1159,6 +1181,45 @@ func runStartupProbe(reg *node.Registry) {
 	}()
 }
 
+func setupTrafficRuntime() {
+	gbroutes.SetFlowCollector(nil)
+	trafficResolver = nil
+	trafficRealtime = nil
+	if trafficCancel != nil {
+		trafficCancel()
+		trafficCancel = nil
+	}
+	db := app.DB()
+	if db == nil || zlmRegistry == nil {
+		app.ZapLog.Info("GB28181 流量统计跳过装配(DB/ZLM Registry 未就绪)")
+		return
+	}
+	for _, model := range []interface{}{
+		&gbmodels.GbDeviceTrafficSession{}, &gbmodels.GbDeviceTrafficDaily{}, &gbmodels.GbDeviceTrafficGap{},
+	} {
+		if !db.Migrator().HasTable(model) {
+			app.ZapLog.Warn("GB28181 流量统计表未迁移,运行时跳过装配")
+			return
+		}
+	}
+	repo, err := traffic.NewGormRepository(db)
+	if err != nil {
+		app.ZapLog.Warn("GB28181 流量统计仓储装配失败", zap.Error(err))
+		return
+	}
+	resolver := traffic.NewAttributionResolver()
+	realtime := traffic.NewRealtimeStore(2 * time.Minute)
+	flow := traffic.NewFlowService(repo, resolver, zlmRegistry, time.Now)
+	sam := traffic.NewSampler(zlmRegistry, nil, repo, resolver, realtime, time.Now)
+	ctx, cancel := context.WithCancel(context.Background())
+	trafficCancel = cancel
+	trafficResolver = resolver
+	trafficRealtime = realtime
+	gbroutes.SetFlowCollector(flow)
+	sam.Start(ctx, time.Minute)
+	app.ZapLog.Info("GB28181 流量统计 Hook / 采样器已装配", zap.Duration("interval", time.Minute))
+}
+
 // setupZLMScheduler 装配调度器 Manager(M2 新增)
 //
 // 流程:
@@ -1365,6 +1426,10 @@ func Stop() {
 	if heartbeatCancel != nil {
 		heartbeatCancel()
 		heartbeatCancel = nil
+	}
+	if trafficCancel != nil {
+		trafficCancel()
+		trafficCancel = nil
 	}
 	if schedulerLogCancel != nil {
 		schedulerLogCancel() // 关 prune ticker 的 ctx

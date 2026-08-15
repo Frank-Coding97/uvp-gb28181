@@ -239,7 +239,16 @@ type MediaInfo struct {
 	OriginURL        string       `json:"originUrl"`
 	IsRecordingMP4   bool         `json:"isRecordingMP4"`
 	IsRecordingHLS   bool         `json:"isRecordingHLS"`
+	OriginSock       *SockInfo    `json:"originSock"`
 	Tracks           []MediaTrack `json:"tracks"`
+}
+
+type SockInfo struct {
+	PeerIP     string `json:"peer_ip"`
+	PeerPort   int    `json:"peer_port"`
+	LocalIP    string `json:"local_ip"`
+	LocalPort  int    `json:"local_port"`
+	Identifier string `json:"identifier"`
 }
 
 // ProbeFrame is one frame sampled by ZLM addProbe. Timestamps are milliseconds.
