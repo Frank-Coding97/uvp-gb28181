@@ -58,6 +58,104 @@
   }
 }
 
+// ========== DatePicker / RangePicker 日期弹层 ==========
+.arco-picker-container,
+.arco-picker-range-container {
+  color: var(--uvp-text-primary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+
+  .arco-picker-header,
+  .arco-picker-footer-btn-wrapper,
+  .arco-picker-footer-extra-wrapper,
+  .arco-picker-footer-now-wrapper,
+  .arco-panel-date-view-tabs,
+  .arco-panel-date-view-tab-pane,
+  .arco-panel-date-timepicker,
+  .arco-panel-date-timepicker-title,
+  .arco-panel-date-footer {
+    border-color: var(--uvp-popconfirm-border) !important;
+  }
+
+  .arco-picker-header-title,
+  .arco-picker-header-label,
+  .arco-panel-date-timepicker-title {
+    font-weight: 600 !important;
+    color: var(--uvp-text-primary) !important;
+  }
+
+  .arco-picker-header-icon {
+    color: var(--uvp-text-secondary) !important;
+    background: transparent !important;
+
+    &:hover {
+      color: var(--uvp-brand) !important;
+      background: var(--uvp-brand-soft) !important;
+    }
+  }
+
+  .arco-picker-week-list-item {
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    color: var(--uvp-text-tertiary) !important;
+  }
+
+  .arco-picker-date-value {
+    color: var(--uvp-text-tertiary) !important;
+  }
+
+  .arco-picker-cell-in-view .arco-picker-date-value {
+    color: var(--uvp-text-primary) !important;
+  }
+
+  .arco-picker-cell-in-range .arco-picker-date,
+  .arco-picker-cell-hover-in-range .arco-picker-date {
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  .arco-picker-cell-selected .arco-picker-date-value,
+  .arco-picker-cell-range-start .arco-picker-date-value,
+  .arco-picker-cell-range-end .arco-picker-date-value {
+    color: #ffffff !important;
+    background: var(--uvp-brand) !important;
+  }
+
+  .arco-picker-cell-in-view:not(.arco-picker-cell-selected, .arco-picker-cell-range-start, .arco-picker-cell-range-end, .arco-picker-cell-disabled) .arco-picker-date-value:hover,
+  .arco-picker-header-label:hover,
+  .arco-timepicker-cell:not(.arco-timepicker-cell-selected, .arco-timepicker-cell-disabled):hover .arco-timepicker-cell-inner {
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  .arco-picker-cell-today::after {
+    background: var(--uvp-brand) !important;
+  }
+
+  .arco-panel-date-view-tab-pane {
+    color: var(--uvp-text-tertiary) !important;
+  }
+
+  .arco-panel-date-view-tab-pane-active,
+  .arco-timepicker-cell-selected .arco-timepicker-cell-inner {
+    font-weight: 600 !important;
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
+  }
+
+  .arco-picker-btn-confirm.arco-btn-primary {
+    background: var(--uvp-brand) !important;
+    border-color: var(--uvp-brand) !important;
+    border-radius: 7px !important;
+
+    &:hover {
+      background: var(--uvp-brand-strong) !important;
+      border-color: var(--uvp-brand-strong) !important;
+    }
+  }
+}
+
 // 小尺寸 select
 .arco-select-size-small {
   .arco-select-view {

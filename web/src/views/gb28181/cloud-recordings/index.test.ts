@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   listRecordingFiles: vi.fn(),
@@ -51,18 +51,20 @@ const tableStub = {
 };
 const stubs = {
   "s-layout-search": { template: "<section><slot name='fields' /><slot name='actions' /></section>" },
-  "a-tabs": { props: ["activeKey"], emits: ["update:activeKey"], template: "<div><button data-testid='files-tab' @click='$emit(`update:activeKey`, `files`)'>录像文件</button><button data-testid='active-tab' @click='$emit(`update:activeKey`, `active`)'>正在录像</button><slot /></div>" },
-  "a-tab-pane": { props: ["key"], template: "<div><slot /></div>" },
   "a-table": tableStub,
   "a-table-column": { props: ["title"], inject: ["recordingTable"], template: "<span>{{ title }}<template v-for='record in recordingTable.data'><slot name='cell' :record='record' /></template></span>" },
-  "a-button": { emits: ["click"], template: "<button :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></button>" },
-  "a-link": { emits: ["click"], template: "<a :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot /></a>" },
+  "a-button": { emits: ["click"], template: "<button :data-testid='$attrs[`data-testid`]' :data-type='$attrs.type' @click='$emit(`click`)'><slot name='icon' /><slot /></button>" },
+  "a-link": { emits: ["click"], template: "<a :data-testid='$attrs[`data-testid`]' @click='$emit(`click`)'><slot name='icon' /><slot /></a>" },
   "a-tag": { template: "<span><slot /></span>" },
   "a-alert": { template: "<div><slot /></div>" },
   "a-empty": { props: ["description"], template: "<div>{{ description }}</div>" },
   "a-select": { template: "<select><slot /></select>" },
   "a-option": { template: "<option><slot /></option>" },
-  "a-input": { template: "<input />" },
+  "a-input": {
+    props: ["modelValue", "placeholder"],
+    emits: ["update:modelValue", "pressEnter"],
+    template: `<input :value="modelValue" :placeholder="placeholder" @input="$emit('update:modelValue', $event.target.value)" @keyup.enter="$emit('pressEnter')" />`
+  },
   "a-range-picker": { template: "<div />" },
   RecordingDetailDrawer: { template: "<div />" },
   RecordingPlayerDialog: { template: "<div />" }
@@ -86,16 +88,64 @@ describe("CloudRecordings", () => {
     messages.error.mockReset();
   });
 
-  it("loads files with default range and keeps partial metadata explicit", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("loads files without a default date range and keeps partial metadata explicit", async () => {
     api.listRecordingFiles.mockResolvedValue(pageResult([file("available", "partial")]));
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
     const query = api.listRecordingFiles.mock.calls[0][0];
     expect(query.page).toBe(1);
-    expect(Date.parse(query.end) - Date.parse(query.start)).toBe(24 * 60 * 60 * 1000);
+    expect(query.start).toBeUndefined();
+    expect(query.end).toBeUndefined();
     expect(wrapper.text()).toContain("待完善");
     expect(wrapper.text()).toContain("--");
     expect(wrapper.get("[data-testid='recording-table']").attributes("data-total")).toBe("1");
+  });
+
+  it("automatically refreshes the current list every 10 seconds with a countdown", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    const refresh = wrapper.get("[data-testid='recording-refresh']");
+    expect(refresh.text()).toContain("10s");
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(refresh.text()).toContain("9s");
+
+    await vi.advanceTimersByTimeAsync(9000);
+    await flushPromises();
+    expect(api.listRecordingFiles).toHaveBeenCalledTimes(2);
+    expect(refresh.text()).toContain("10s");
+
+    wrapper.unmount();
+  });
+
+  it("uses one keyword input without rendering device and channel option catalogs", async () => {
+    api.listRecordingOptions.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        channels: [{ id: "12", code: "C1", name: "不应渲染的通道" }],
+        devices: [{ id: "D1", name: "不应渲染的设备" }],
+        nodes: [{ id: "8", name: "边缘节点 A" }]
+      }
+    });
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.findAll("select")).toHaveLength(3);
+    expect(wrapper.text()).not.toContain("不应渲染的设备");
+    expect(wrapper.text()).not.toContain("不应渲染的通道");
+    const keyword = wrapper.get("[data-testid='recording-keyword']");
+    expect(keyword.attributes("placeholder")).toBe("文件名 / 设备名称或编号 / 通道名称或编号");
+    await keyword.setValue("  一号  ");
+    await wrapper.get("[data-testid='recording-query']").trigger("click");
+    await flushPromises();
+    expect(api.listRecordingFiles.mock.calls.at(-1)?.[0]).toMatchObject({ keyword: "一号" });
   });
 
   it("allows the admin wildcard permission to view and reconcile recordings", async () => {
@@ -109,6 +159,16 @@ describe("CloudRecordings", () => {
     expect(api.triggerReconciliation).toHaveBeenCalledTimes(1);
   });
 
+  it("emphasizes reconciliation and renders a success status icon", async () => {
+    api.listReconciliations.mockResolvedValue({ code: 0, message: "", data: { list: [{ status: "success" }] } });
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='recording-reconcile']").attributes("data-type")).toBe("primary");
+    expect(wrapper.get("[data-testid='reconciliation-summary']").text()).toContain("节点目录已对账");
+    expect(wrapper.find("[data-testid='reconciliation-success-icon']").exists()).toBe(true);
+  });
+
   it.each(["node_offline", "node_missing", "file_missing", "access_unavailable"])("hides access actions for %s", async availability => {
     api.listRecordingFiles.mockResolvedValue(pageResult([file(availability)]));
     const wrapper = mount(CloudRecordings, { global: { stubs } });
@@ -117,12 +177,29 @@ describe("CloudRecordings", () => {
     expect(wrapper.find("[data-testid='download-9007199254740993']").exists()).toBe(false);
   });
 
+  it("renders operation icons alongside their text labels", async () => {
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("220");
+    expect(wrapper.get(".cloud-recording-actions").classes()).toContain("cloud-recording-actions");
+    expect(wrapper.get("[data-testid='detail-9007199254740993']").text()).toContain("详情");
+    expect(wrapper.find("[data-testid='detail-icon-9007199254740993']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='play-9007199254740993']").text()).toContain("播放");
+    expect(wrapper.find("[data-testid='play-icon-9007199254740993']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='download-9007199254740993']").text()).toContain("下载");
+    expect(wrapper.find("[data-testid='download-icon-9007199254740993']").exists()).toBe(true);
+  });
+
   it("separates active recordings from catalog files", async () => {
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
     expect(wrapper.text()).toContain("record.mp4");
+    expect(wrapper.get("[data-testid='recording-view-switch']").attributes("role")).toBe("group");
+    expect(wrapper.get("[data-testid='files-tab']").attributes("aria-pressed")).toBe("true");
     await wrapper.get("[data-testid='active-tab']").trigger("click");
     await flushPromises();
+    expect(wrapper.get("[data-testid='active-tab']").attributes("aria-pressed")).toBe("true");
     expect(wrapper.text()).toContain("正在录制");
     expect(wrapper.text()).not.toContain("record.mp4");
   });

@@ -14,12 +14,10 @@ const availabilityPresentations: Record<RecordingAvailability, AvailabilityPrese
   access_unavailable: { label: "暂不可访问", color: "orange", canAccess: false }
 };
 
-export function defaultRecordingQuery(now = new Date()): RecordingFileQuery {
+export function defaultRecordingQuery(): RecordingFileQuery {
   return {
     page: 1,
-    pageSize: 20,
-    start: new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString(),
-    end: now.toISOString()
+    pageSize: 20
   };
 }
 

@@ -10,13 +10,10 @@ import {
 } from "./recordingState";
 
 describe("cloud recording query state", () => {
-  it("defaults to the latest 24 hours and page one", () => {
-    const now = new Date("2026-08-10T20:00:00.000Z");
-    expect(defaultRecordingQuery(now)).toEqual({
+  it("defaults to an unbounded date range and page one", () => {
+    expect(defaultRecordingQuery()).toEqual({
       page: 1,
-      pageSize: 20,
-      start: "2026-08-09T20:00:00.000Z",
-      end: "2026-08-10T20:00:00.000Z"
+      pageSize: 20
     });
   });
 
