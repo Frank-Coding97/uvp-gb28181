@@ -2078,47 +2078,6 @@ body[arco-theme="dark"] .uvp-system-summary .arco-descriptions-item-value {
   background: #162231;
 }
 
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .layout-right,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .snow-inner,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .snow-fill-inner,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-tree-panel,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-list-toolbar,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-search-panel__surface,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-data-table .arco-table-container,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-dialog,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-panel,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-summary,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-drawer,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .arco-trigger-popup .arco-popconfirm {
-  backdrop-filter: blur(18px) saturate(1.18);
-}
-
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .header,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .aside {
-  backdrop-filter: blur(16px) saturate(1.12);
-}
-
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-dialog .arco-card,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-dialog__body .arco-card,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-form .arco-card,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-panel .arco-card-header,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-description .arco-descriptions-item-label,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-summary .arco-descriptions-item-label,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-description .arco-descriptions-item-value,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-system-summary .arco-descriptions-item-value {
-  background: rgb(10 14 20 / 48%);
-}
-
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-data-table .arco-table-th.arco-table-col-fixed-left,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-data-table .arco-table-th.arco-table-col-fixed-right {
-  background: var(--uvp-table-header-bg) !important;
-}
-
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-data-table .arco-table-td.arco-table-col-fixed-left,
-body[arco-theme="dark"][uvp-dark-style="frostedBlack"] .uvp-data-table .arco-table-td.arco-table-col-fixed-right {
-  background: var(--uvp-table-row-bg) !important;
-}
-
 body[arco-theme="dark"] .arco-trigger-popup .arco-trigger-arrow-fill {
   fill: var(--uvp-popconfirm-bg);
 }

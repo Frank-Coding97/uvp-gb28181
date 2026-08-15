@@ -508,7 +508,7 @@ onMounted(async () => {
   });
   if (chartElement.value) resizeObserver.observe(chartElement.value);
   themeObserver = new MutationObserver(() => renderTrendChart());
-  themeObserver.observe(document.body, { attributes: true, attributeFilter: ["arco-theme", "uvp-dark-style"] });
+  themeObserver.observe(document.body, { attributes: true, attributeFilter: ["arco-theme"] });
 });
 
 onBeforeUnmount(() => {

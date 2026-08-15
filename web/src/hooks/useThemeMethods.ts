@@ -27,11 +27,11 @@ export const useThemeMethods = () => {
    */
   const setDarkMode = () => {
     const themeStore = useThemeConfig();
-    const { darkMode, darkModeStyle, asideDark } = storeToRefs(themeStore);
+    const { darkMode, asideDark } = storeToRefs(themeStore);
     if (darkMode.value) {
       // 设置为暗黑主题
       document.body.setAttribute("arco-theme", "dark");
-      document.body.setAttribute("uvp-dark-style", darkModeStyle.value || "nightOps");
+      document.body.removeAttribute("uvp-dark-style");
       asideDark.value = false; // 黑暗模式与侧边栏深色互斥
     } else {
       // 恢复亮色主题

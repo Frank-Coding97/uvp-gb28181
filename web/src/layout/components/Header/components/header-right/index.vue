@@ -32,19 +32,14 @@
       </a-button>
     </a-tooltip>
     <!-- 颜色模式 -->
-    <a-dropdown trigger="click" position="bottom" @select="onThemeModeSelect">
-      <a-button size="mini" type="text" class="icon_btn" id="system-dark">
+    <a-tooltip :content="darkMode ? '切换至明亮模式' : '切换至夜间蓝灰'">
+      <a-button size="mini" type="text" class="icon_btn" id="system-dark" @click="toggleThemeMode">
         <template #icon>
           <icon-sun-fill :size="18" v-if="!darkMode" />
           <icon-moon-fill :size="18" v-else />
         </template>
       </a-button>
-      <template #content>
-        <a-doption value="light" :disabled="!darkMode">明亮模式</a-doption>
-        <a-doption value="nightOps" :disabled="darkMode && darkModeStyle === 'nightOps'">夜间蓝灰</a-doption>
-        <a-doption value="frostedBlack" :disabled="darkMode && darkModeStyle === 'frostedBlack'">磨砂黑</a-doption>
-      </template>
-    </a-dropdown>
+    </a-tooltip>
     <!-- 我的 -->
     <a-dropdown trigger="click" position="br" :popup-max-height="false">
       <div class="my_setting" id="system-my-setting">
@@ -108,7 +103,7 @@ import { logout } from "@/api/user";
 const router = useRouter();
 const { isMobile } = useDevicesSize();
 const themeStore = useThemeConfig();
-const { darkMode, darkModeStyle } = storeToRefs(themeStore);
+const { darkMode } = storeToRefs(themeStore);
 //const userStore = useUserInfoStore();
 //const { account } = storeToRefs(userStore);
 import { runUserLogoutCleanup, useUserStoreHook } from "@/store/modules/user";
@@ -121,11 +116,8 @@ const onSystemSetting = () => {
 };
 
 // 颜色模式
-const onThemeModeSelect = (value: string) => {
-  darkMode.value = value !== "light";
-  if (darkMode.value) {
-    darkModeStyle.value = value;
-  }
+const toggleThemeMode = () => {
+  darkMode.value = !darkMode.value;
   const { setDarkMode } = useThemeMethods();
   setDarkMode();
 };

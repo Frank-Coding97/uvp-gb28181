@@ -463,7 +463,7 @@ function goBack() {
 function applyDemoPreviewTheme() {
     if (route.name !== "device-record-query-demo") return;
     const previewTheme = typeof route.query.previewTheme === "string" ? route.query.previewTheme : "";
-    if (!["light", "dark", "frostedBlack"].includes(previewTheme)) return;
+    if (!["light", "dark"].includes(previewTheme)) return;
     const oldTheme = document.body.getAttribute("arco-theme");
     const oldDarkStyle = document.body.getAttribute("uvp-dark-style");
     if (previewTheme === "light") {
@@ -471,8 +471,7 @@ function applyDemoPreviewTheme() {
         document.body.removeAttribute("uvp-dark-style");
     } else {
         document.body.setAttribute("arco-theme", "dark");
-        if (previewTheme === "frostedBlack") document.body.setAttribute("uvp-dark-style", "frostedBlack");
-        else document.body.removeAttribute("uvp-dark-style");
+        document.body.removeAttribute("uvp-dark-style");
     }
     restorePreviewTheme = () => {
         if (oldTheme === null) document.body.removeAttribute("arco-theme");

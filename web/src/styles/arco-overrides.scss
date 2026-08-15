@@ -5,7 +5,7 @@
 .arco-select-view {
   border-radius: 8px !important;
   border: 1px solid var(--uvp-panel-border) !important;
-  background: #ffffff !important;
+  background: var(--uvp-dialog-control-bg) !important;
 
   &:hover {
     border-color: var(--uvp-brand) !important;
@@ -30,9 +30,9 @@
 // 下拉面板
 .arco-select-dropdown {
   border-radius: 10px !important;
-  border: 1px solid var(--uvp-panel-border) !important;
-  background: #ffffff !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
 }
 
 .arco-select-dropdown-list-wrapper {
@@ -55,6 +55,23 @@
     color: var(--uvp-brand) !important;
     background: var(--uvp-brand-soft) !important;
     font-weight: 600 !important;
+  }
+}
+
+// Dropdown 菜单与 Select 弹层统一跟随主题
+.arco-dropdown {
+  color: var(--uvp-text-secondary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 1px solid var(--uvp-popconfirm-border) !important;
+  box-shadow: var(--uvp-popconfirm-shadow) !important;
+}
+
+.arco-dropdown-option {
+  color: var(--uvp-text-secondary) !important;
+
+  &:not(.arco-dropdown-option-disabled):hover {
+    color: var(--uvp-brand) !important;
+    background: var(--uvp-brand-soft) !important;
   }
 }
 
