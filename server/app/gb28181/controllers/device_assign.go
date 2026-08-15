@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -10,6 +11,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
@@ -47,6 +49,15 @@ func (dc *DeviceMgmtController) AssignDevices(c *gin.Context) {
 	if err != nil {
 		dc.FailAndAbort(c, "分配失败", err)
 		return
+	}
+	succeeded := 0
+	for _, item := range result.Results {
+		if item.Success {
+			succeeded++
+		}
+	}
+	if succeeded > 0 {
+		playauth.BumpRevocation(time.Now())
 	}
 	dc.Success(c, gin.H{"results": result.Results})
 }
@@ -93,6 +104,9 @@ func (dc *DeviceMgmtController) AssignDeptDevices(c *gin.Context) {
 		if item.Success {
 			succeeded++
 		}
+	}
+	if succeeded > 0 {
+		playauth.BumpRevocation(time.Now())
 	}
 	dc.Success(c, gin.H{"total": len(deviceIDs), "succeeded": succeeded, "results": result.Results})
 }
@@ -191,6 +205,7 @@ func (dc *DeviceMgmtController) RemoveGrant(c *gin.Context) {
 		dc.FailAndAbort(c, "取消共享失败", err)
 		return
 	}
+	playauth.BumpRevocation(time.Now())
 	dc.Success(c, gin.H{"removed": true})
 }
 

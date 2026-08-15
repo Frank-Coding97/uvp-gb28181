@@ -41,6 +41,7 @@ var (
 	ErrTokenBindingMismatch         = fmt.Errorf("%w: resource binding mismatch", ErrTokenInvalid)
 	ErrTokenMediaGenerationMismatch = fmt.Errorf("%w: media generation mismatch", ErrTokenInvalid)
 	ErrTokenIPMismatch              = fmt.Errorf("%w: client ip mismatch", ErrTokenInvalid)
+	ErrTokenRevoked                 = fmt.Errorf("%w: revoked by authorization bump", ErrTokenInvalid)
 	ErrCapabilityInvalid            = errors.New("invalid callback capability")
 	ErrURLInvalid                   = errors.New("invalid playback URL")
 )
@@ -319,6 +320,9 @@ func (s *Signer) Verify(token string, expected Binding) (Claims, error) {
 	}
 	if !now.Before(time.Unix(claims.ExpiresAt, 0)) {
 		return Claims{}, ErrTokenExpired
+	}
+	if revoked := revokedBefore.Load(); revoked > 0 && claims.IssuedAt < revoked {
+		return Claims{}, ErrTokenRevoked
 	}
 	return claims, nil
 }
