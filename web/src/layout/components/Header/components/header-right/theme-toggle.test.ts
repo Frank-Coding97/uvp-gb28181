@@ -55,7 +55,17 @@ describe("header theme toggle", () => {
 
     expect(overridesSource).toMatch(/\.arco-select-view\s*\{[^}]*background:\s*var\(--uvp-dialog-control-bg\)/s);
     expect(overridesSource).toMatch(/\.arco-select-dropdown\s*\{[^}]*background:\s*var\(--uvp-popconfirm-bg\)/s);
+    expect(overridesSource).toMatch(/\.arco-select-option\s*\{[^}]*background:\s*var\(--uvp-popconfirm-bg\)/s);
     expect(overridesSource).toMatch(/\.arco-dropdown\s*\{[^}]*background:\s*var\(--uvp-popconfirm-bg\)/s);
+  });
+
+  it("keeps custom primary buttons visually active in dark mode", () => {
+    const overridesSource = readSource("src/styles/arco-overrides.scss");
+
+    expect(overridesSource).toMatch(/body\[arco-theme="dark"\]\s+button\.btn-primary\s*\{/);
+    expect(overridesSource).toMatch(/button\.btn-primary:not\(:disabled\):hover/);
+    expect(overridesSource).toMatch(/button\.btn-primary:not\(:disabled\):active/);
+    expect(overridesSource).toMatch(/button\.btn-primary:disabled/);
   });
 
   it("switches themes without injecting a page transition", () => {

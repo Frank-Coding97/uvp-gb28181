@@ -43,10 +43,12 @@
   font-size: 12px !important;
   font-weight: 500 !important;
   color: var(--uvp-text-secondary) !important;
+  background: var(--uvp-popconfirm-bg) !important;
   border-radius: 6px !important;
   margin: 2px 0 !important;
 
-  &:hover {
+  &.arco-select-option-active,
+  &:not(.arco-select-option-disabled):hover {
     color: var(--uvp-brand) !important;
     background: var(--uvp-brand-soft) !important;
   }
@@ -316,6 +318,32 @@
         opacity: 0.5;
         cursor: not-allowed;
     }
+}
+
+body[arco-theme="dark"] button.btn-primary {
+    color: #fff;
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    box-shadow: 0 10px 22px -12px rgb(37 99 235 / 78%), inset 0 1px 0 rgb(255 255 255 / 18%);
+    transition: background 0.15s ease, box-shadow 0.15s ease, transform 0.1s ease;
+}
+
+body[arco-theme="dark"] button.btn-primary:not(:disabled):hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    box-shadow: 0 12px 24px -12px rgb(37 99 235 / 88%), inset 0 1px 0 rgb(255 255 255 / 16%);
+    transform: translateY(-1px);
+}
+
+body[arco-theme="dark"] button.btn-primary:not(:disabled):active {
+    background: linear-gradient(135deg, #1d4ed8 0%, #1e40af 100%);
+    box-shadow: 0 5px 12px -8px rgb(37 99 235 / 72%);
+    transform: translateY(0);
+}
+
+body[arco-theme="dark"] button.btn-primary:disabled {
+    color: var(--uvp-text-tertiary);
+    background: var(--uvp-panel-border);
+    box-shadow: none;
+    opacity: 1;
 }
 
 .btn-ghost {
