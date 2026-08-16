@@ -1,49 +1,54 @@
 <template>
   <div class="snow-page">
-    <div class="snow-inner userinfo-page">
+    <div class="snow-inner uvp-page-shell-flat userinfo-page">
       <a-spin :loading="loading" tip="loading...">
-        <div class="uvp-system-panel__stack">
-          <a-card class="uvp-system-panel" :bordered="false">
-            <div class="uvp-system-summary user-summary">
-              <div class="uvp-system-summary__aside">
-                <div class="avatar-container" :class="{ 'mobile-avatar': isMobile }">
-                  <a-avatar :size="isMobile ? 80 : 100" @click="showAvatarUpload" trigger-type="mask" :imageUrl="userInfo.avatar">
-                    <IconUser />
-                    <template #trigger-icon>
-                      <IconEdit />
-                    </template>
-                  </a-avatar>
-                </div>
-              </div>
-              <div class="uvp-system-summary__body">
-                <a-descriptions
-                  class="uvp-system-description uvp-system-description--compact"
-                  :data="detail"
-                  :column="isMobile ? 1 : 3"
-                  title="用户资料"
-                  :align="{ label: isMobile ? 'left' : 'right' }"
-                >
-                  <template #value="{ value, data }">
-                    <span v-if="data.key === 'roles'">
-                      {{ (Array.isArray(value) && value.map((curr: any) => curr.name).join(",")) || "-" }}
-                    </span>
-                    <span v-else-if="data.key === 'status'">
-                      {{ value === 1 ? "启用" : "禁用" }}
-                    </span>
-                    <span v-else-if="data.key === 'sex'">
-                      {{ getSexName(value) }}
-                    </span>
-                    <span v-else-if="data.key === 'createTime'">
-                      {{ formatTime(value) }}
-                    </span>
-                    <span v-else>{{ value || "-" }}</span>
-                  </template>
-                </a-descriptions>
-              </div>
+        <a-card class="uvp-system-panel userinfo-content" :bordered="false">
+          <section class="userinfo-profile">
+            <div class="avatar-container" :class="{ 'mobile-avatar': isMobile }">
+              <a-avatar
+                class="userinfo-avatar"
+                shape="square"
+                :size="isMobile ? 80 : 100"
+                @click="showAvatarUpload"
+                trigger-type="mask"
+                :imageUrl="userInfo.avatar"
+              >
+                <IconUser />
+                <template #trigger-icon>
+                  <IconEdit />
+                </template>
+              </a-avatar>
             </div>
-          </a-card>
+            <div class="userinfo-profile__details">
+              <a-descriptions
+                class="uvp-system-description uvp-system-description--compact"
+                :data="detail"
+                :column="isMobile ? 1 : 3"
+                title="用户资料"
+                :align="{ label: isMobile ? 'left' : 'right' }"
+              >
+                <template #value="{ value, data }">
+                  <span v-if="data.key === 'roles'">
+                    {{ (Array.isArray(value) && value.map((curr: any) => curr.name).join(",")) || "-" }}
+                  </span>
+                  <span v-else-if="data.key === 'status'">
+                    {{ value === 1 ? "启用" : "禁用" }}
+                  </span>
+                  <span v-else-if="data.key === 'sex'">
+                    {{ getSexName(value) }}
+                  </span>
+                  <span v-else-if="data.key === 'createTime'">
+                    {{ formatTime(value) }}
+                  </span>
+                  <span v-else>{{ value || "-" }}</span>
+                </template>
+              </a-descriptions>
+            </div>
+          </section>
 
-          <a-card class="uvp-system-panel userinfo-tabs-panel" :bordered="false">
+          <a-divider class="userinfo-divider" />
+
+          <section class="userinfo-settings">
             <a-tabs class="uvp-system-tabs" :active-key="activeTabs" @change="onChangeTab">
               <a-tab-pane key="1" title="基本信息">
                 <BasicInfo v-model="userInfo" @refresh="refresh" />
@@ -52,8 +57,8 @@
                 <SecuritySettings v-model="userInfo" @refresh="refresh" />
               </a-tab-pane>
             </a-tabs>
-          </a-card>
-        </div>
+          </section>
+        </a-card>
       </a-spin>
     </div>
 
@@ -288,14 +293,39 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
   min-height: 100%;
 }
 
-.userinfo-tabs-panel {
+.userinfo-content {
   :deep(.arco-card-body) {
-    padding-top: 18px;
+    padding: 0;
   }
+}
+
+.userinfo-profile {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+  padding: 28px;
+
+  :deep(.arco-descriptions-item-label) {
+    background: transparent !important;
+  }
+}
+
+.userinfo-profile__details {
+  flex: 1;
+  min-width: 0;
+}
+
+.userinfo-divider {
+  margin: 0 28px;
+}
+
+.userinfo-settings {
+  padding: 24px 28px 28px;
 }
 
 .avatar-container {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: center;
 
@@ -304,8 +334,8 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
   }
 }
 
-.user-summary {
-  align-items: center;
+.userinfo-avatar {
+  border-radius: 18px;
 }
 
 .avatar-upload-modal__actions {
@@ -330,7 +360,7 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
     margin: 0 auto;
     overflow: hidden;
     border: 1px dashed #ccc;
-    border-radius: 50%;
+    border-radius: 18px;
   }
 
   p {
@@ -345,15 +375,26 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
 }
 
 @media (max-width: 768px) {
-  .user-summary {
+  .userinfo-profile {
     flex-direction: column;
     align-items: stretch;
+    gap: 16px;
+    padding: 20px;
+  }
+
+  .userinfo-divider {
+    margin: 0 20px;
+  }
+
+  .userinfo-settings {
+    padding: 20px;
   }
 
   .avatar-preview {
     .preview-container {
       width: 120px;
       height: 120px;
+      border-radius: 16px;
     }
   }
 }
