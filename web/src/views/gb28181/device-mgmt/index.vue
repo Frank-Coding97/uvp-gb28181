@@ -408,7 +408,8 @@ const deviceSubscriptionSummary = computed(() => {
     return [
         { kind: "catalog", label: "目录", status: byKind.get("catalog")?.status || "disabled" },
         { kind: "mobile_position", label: "位置", status: byKind.get("mobile_position")?.status || "disabled" },
-        { kind: "alarm", label: "报警", status: byKind.get("alarm")?.status || "disabled" }
+        { kind: "alarm", label: "报警", status: byKind.get("alarm")?.status || "disabled" },
+        { kind: "ptz_precise_position", label: "PTZ 位置", status: byKind.get("ptz_precise_position")?.status || "disabled" }
     ];
 });
 

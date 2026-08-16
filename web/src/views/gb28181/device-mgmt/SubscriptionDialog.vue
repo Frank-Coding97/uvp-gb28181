@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
-import { Bell, FolderTree, MapPin, RefreshCcw, Save } from "@lucide/vue";
+import { Bell, Crosshair, FolderTree, MapPin, RefreshCcw, Save } from "@lucide/vue";
 import { Message } from "@arco-design/web-vue";
 import {
     listDeviceSubscriptions,
@@ -20,12 +20,14 @@ const pendingKind = ref<SubscriptionKind | null>(null);
 const drafts = reactive<Record<SubscriptionKind, { expiresSeconds: number; intervalSeconds: number }>>({
     catalog: { expiresSeconds: 3600, intervalSeconds: 0 },
     mobile_position: { expiresSeconds: 3600, intervalSeconds: 30 },
-    alarm: { expiresSeconds: 3600, intervalSeconds: 0 }
+    alarm: { expiresSeconds: 3600, intervalSeconds: 0 },
+    ptz_precise_position: { expiresSeconds: 3600, intervalSeconds: 0 }
 });
 const kinds: Array<{ kind: SubscriptionKind; label: string; icon: typeof FolderTree }> = [
     { kind: "catalog", label: "目录", icon: FolderTree },
     { kind: "mobile_position", label: "位置", icon: MapPin },
-    { kind: "alarm", label: "报警", icon: Bell }
+    { kind: "alarm", label: "报警", icon: Bell },
+    { kind: "ptz_precise_position", label: "PTZ 精准位置", icon: Crosshair }
 ];
 
 const byKind = computed(() => new Map(rows.value.map(row => [row.kind, row])));
@@ -150,7 +152,7 @@ watch(() => props.visible, visible => { if (visible) load(); });
 
 <style scoped>
 .dialog-device { margin-left: 8px; color: var(--uvp-text-tertiary); font-size: 13px; font-weight: 400; }
-.subscription-list { display: grid; gap: 8px; }
+.subscription-list { display: grid; max-height: min(560px, calc(100vh - 160px)); gap: 8px; overflow-y: auto; }
 .subscription-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 42px; align-items: center; gap: 12px; min-height: 104px; padding: 12px; border: 1px solid var(--uvp-panel-border); border-radius: 6px; }
 .subscription-icon { color: var(--uvp-brand); }
 .subscription-main { display: grid; gap: 3px; min-width: 0; }

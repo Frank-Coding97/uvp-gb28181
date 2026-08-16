@@ -20,6 +20,7 @@ export default {
         ["navigate mode"]: "navigate mode",
         ["personal-information"]: "personal information",
         ["change-password"]: "change password",
+        ["project-address"]: "project address",
         ["logout"]: "logout",
         ["notice"]: "Notice",
         ["message"]: "Message",
@@ -47,7 +48,7 @@ export default {
         ["please select"]: "please select"
     },
     menu: {
-        ["home"]: "home",
+        ["home"]: "Dashboard",
         ["file"]: "file",
         ["document-library"]: "document-library",
         ["table"]: "table",

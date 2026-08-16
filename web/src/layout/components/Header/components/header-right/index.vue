@@ -2,43 +2,51 @@
   <div class="header_setting" :class="isMobile && 'head-absolute-fix'">
     <!-- SIP 引导提醒:未配置/启动失败时才显示 -->
     <SipSetupBell />
-    <RecordingDownloadCenter />
-    <!-- 全屏 -->
-    <a-tooltip :content="$t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`)">
-      <a-button size="mini" type="text" class="icon_btn" id="system-fullscreen" @click="onFullScreen">
-        <template #icon>
-          <icon-fullscreen :size="18" v-if="fullScreen" />
-          <icon-fullscreen-exit :size="18" v-else />
-        </template>
-      </a-button>
-    </a-tooltip>
-    <!-- 系统设置 -->
-    <a-tooltip :content="$t(`system.system-settings`)">
-      <a-button size="mini" type="text" class="icon_btn" id="system-settings" @click="onSystemSetting">
-        <template #icon>
-          <icon-settings :size="18" />
-        </template>
-      </a-button>
-    </a-tooltip>
-    <!-- 颜色模式 -->
-    <a-tooltip :content="darkMode ? '切换至明亮模式' : '切换至夜间蓝灰'">
-      <a-button size="mini" type="text" class="icon_btn" id="system-dark" @click="toggleThemeMode">
-        <template #icon>
-          <icon-sun-fill :size="18" v-if="!darkMode" />
-          <icon-moon-fill :size="18" v-else />
-        </template>
-      </a-button>
-    </a-tooltip>
     <!-- 我的 -->
     <a-dropdown trigger="click" position="br" :popup-max-height="false">
-      <div class="my_setting" id="system-my-setting">
-        <a-image width="32" height="32" fit="cover" :src="account.avatar" class="my_image" />
-        <span class="user-nickname">{{ account.nickName }}</span>
+      <button class="my_setting" id="system-my-setting" type="button" aria-label="账号">
+        <a-image width="32" height="32" fit="cover" :src="account.avatar" :preview="false" class="my_image" />
+        <span class="user-nickname">{{ accountDisplayName }}</span>
         <div class="icon_down">
           <icon-down style="stroke-width: 3" />
         </div>
-      </div>
+      </button>
       <template #content>
+        <div class="uvp-user-menu-profile">
+          <a-image width="40" height="40" fit="cover" :src="account.avatar" :preview="false" class="uvp-user-menu-profile__avatar" />
+          <div class="uvp-user-menu-profile__text">
+            <strong class="uvp-user-menu-profile__name">{{ accountDisplayName }}</strong>
+            <span class="uvp-user-menu-profile__account">{{ account.username }}</span>
+          </div>
+        </div>
+        <a-divider margin="0" />
+        <!-- 工作台 -->
+        <RecordingDownloadCenter menu />
+        <a-doption class="uvp-user-menu-option" @click="onFullScreen">
+          <template #default>
+            <span class="uvp-user-menu-icon">
+              <icon-fullscreen :size="16" v-if="fullScreen" />
+              <icon-fullscreen-exit :size="16" v-else />
+            </span>
+            <span>{{ $t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`) }}</span>
+          </template>
+        </a-doption>
+        <a-doption class="uvp-user-menu-option" @click="onSystemSetting">
+          <template #default>
+            <span class="uvp-user-menu-icon"><icon-settings :size="16" /></span>
+            <span>{{ $t(`system.system-settings`) }}</span>
+          </template>
+        </a-doption>
+        <a-doption class="uvp-user-menu-option" @click="toggleThemeMode">
+          <template #default>
+            <span class="uvp-user-menu-icon">
+              <icon-sun-fill :size="16" v-if="!darkMode" />
+              <icon-moon-fill :size="16" v-else />
+            </span>
+            <span>{{ darkMode ? "切换至明亮模式" : "切换至夜间蓝灰" }}</span>
+          </template>
+        </a-doption>
+        <a-divider margin="0" />
         <!-- 个人中心 -->
         <a-doption class="uvp-user-menu-option" @click="onPerson(1)">
           <template #default>
@@ -62,7 +70,7 @@
         </a-doption>
         <a-divider margin="0" />
         <!-- 退出登录 -->
-        <a-doption class="uvp-user-menu-option uvp-user-menu-option--danger" @click="logOut">
+        <a-doption class="uvp-user-menu-option" @click="logOut">
           <template #default>
             <span class="uvp-user-menu-icon"><icon-poweroff :size="16" /></span>
             <span>{{ $t(`system.logout`) }}</span>
@@ -96,6 +104,7 @@ const { darkMode } = storeToRefs(themeStore);
 //const { account } = storeToRefs(userStore);
 import { runUserLogoutCleanup, useUserStoreHook } from "@/store/modules/user";
 const account = useUserStoreHook().account;
+const accountDisplayName = computed(() => account.nickname || account.username || "用户");
 
 // 系统设置
 const systemOpen = ref(false);
@@ -184,7 +193,9 @@ const logOut = () => {
 .header_setting {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 8px;
   height: 100%;
   background-color: transparent;
 
@@ -209,36 +220,45 @@ const logOut = () => {
   }
 
   .my_setting {
+    appearance: none;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    height: 38px;
-    margin-left: 12px;
-    padding: 0 8px 0 4px;
+    gap: 8px;
+    height: 40px;
+    margin-left: 8px;
+    padding: 4px 8px;
     overflow: hidden;
     color: var(--uvp-text-primary);
-    border-radius: 999px;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
     cursor: pointer;
     transition:
       background-color 0.2s ease,
-      box-shadow 0.2s ease;
+      color 0.2s ease;
 
     &:hover {
-      background: var(--uvp-brand-soft);
-      box-shadow: inset 0 0 0 1px rgb(37 99 235 / 8%);
+      background: color-mix(in srgb, var(--uvp-text-primary) 7%, transparent);
     }
 
     .my_image {
-      margin-right: 8px;
-      border-radius: 50%;
+      flex: 0 0 32px;
+      overflow: hidden;
+      border-radius: 8px;
     }
 
     .user-nickname {
+      max-width: 144px;
+      overflow: hidden;
+      font-size: 13px;
+      font-weight: 520;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
     .icon_down {
-      margin: 0 0 0 5px;
+      display: inline-flex;
+      margin-left: 2px;
       color: var(--uvp-text-tertiary);
       transform: rotate(0deg);
       transition: transform 0.2s;
@@ -252,81 +272,105 @@ const logOut = () => {
   }
 }
 
-:deep(.arco-dropdown) {
-  min-width: 178px;
-  padding: 6px;
-  background: rgb(255 255 255 / 98%);
-  border: 1px solid var(--uvp-list-panel-border);
+:global(.arco-dropdown:has(.uvp-user-menu-profile)) {
+  width: 260px;
+  min-width: 260px;
+  padding: 4px;
+  background: var(--uvp-popconfirm-bg) !important;
+  border: 0 !important;
   border-radius: 12px;
-  box-shadow: 0 16px 42px -28px rgb(31 45 61 / 55%);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--uvp-text-primary) 9%, transparent), var(--uvp-popconfirm-shadow) !important;
 }
 
-:deep(.arco-dropdown-list) {
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .arco-dropdown-list) {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
 }
 
-:deep(.uvp-user-menu-option) {
-  min-height: 38px;
-  padding: 0 10px;
-  color: var(--uvp-text-secondary);
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile) {
+  box-sizing: border-box;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  height: 60px;
+  min-height: 60px;
+  padding: 8px;
+}
+
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__avatar) {
+  flex: 0 0 40px;
+  overflow: hidden;
   border-radius: 9px;
+}
+
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__text) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__name),
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__account) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__name) {
+  color: var(--uvp-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-profile__account) {
+  color: var(--uvp-text-tertiary);
+  font-size: 12px;
+}
+
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-option) {
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  padding: 6px 8px;
+  color: var(--uvp-text-secondary);
+  background: transparent !important;
+  border-radius: 8px;
+  line-height: 24px;
   transition:
     background-color 0.18s ease,
     color 0.18s ease;
 }
 
-:deep(.uvp-user-menu-option:hover) {
-  color: var(--uvp-brand-strong);
-  background: rgb(37 99 235 / 7%);
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-option:hover) {
+  color: var(--uvp-text-primary) !important;
+  background: color-mix(in srgb, var(--uvp-text-primary) 7%, transparent) !important;
 }
 
-:deep(.uvp-user-menu-option .arco-dropdown-option-content) {
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-option .arco-dropdown-option-content) {
   display: flex;
-  gap: 9px;
+  gap: 12px;
   align-items: center;
   width: 100%;
-  font-size: 14px;
-  font-weight: 520;
+  font-size: 13px;
+  font-weight: 400;
 }
 
-:deep(.uvp-user-menu-icon) {
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-icon) {
   display: inline-grid;
-  width: 24px;
-  height: 24px;
-  color: #60758b;
-  place-items: center;
-  background: rgb(100 116 139 / 8%);
-  border-radius: 7px;
-}
-
-:deep(.uvp-user-menu-option:hover .uvp-user-menu-icon) {
-  color: var(--uvp-brand-strong);
-  background: rgb(37 99 235 / 10%);
-}
-
-:deep(.uvp-user-menu-arrow) {
-  margin-left: auto;
+  width: 20px;
+  height: 20px;
   color: var(--uvp-text-tertiary);
+  place-items: center;
 }
 
-:deep(.uvp-user-menu-option--danger) {
-  color: #c24141;
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .uvp-user-menu-option:hover .uvp-user-menu-icon) {
+  color: var(--uvp-text-primary);
 }
 
-:deep(.uvp-user-menu-option--danger .uvp-user-menu-icon) {
-  color: #c24141;
-  background: rgb(209 67 67 / 8%);
-}
-
-:deep(.uvp-user-menu-option--danger:hover) {
-  color: #b42323;
-  background: rgb(209 67 67 / 8%);
-}
-
-:deep(.arco-dropdown .arco-divider) {
-  margin: 4px -6px;
-  border-color: #e8eef6;
+:global(.arco-dropdown:has(.uvp-user-menu-profile) .arco-divider) {
+  margin: 4px 0;
+  border-color: color-mix(in srgb, var(--uvp-text-primary) 9%, transparent);
 }
 </style>

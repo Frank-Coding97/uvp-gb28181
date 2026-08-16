@@ -156,7 +156,8 @@ func TestDeviceMgmt_SubscriptionsReturnsAllKinds(t *testing.T) {
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 	list := unmarshal(t, w)["data"].(map[string]any)["list"].([]any)
-	require.Len(t, list, 3)
+	require.Len(t, list, 4)
+	require.Equal(t, "ptz_precise_position", list[3].(map[string]any)["kind"])
 }
 
 func TestDeviceMgmt_DeleteDeviceRemovesSubscriptionData(t *testing.T) {

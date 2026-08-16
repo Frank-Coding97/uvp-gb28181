@@ -1432,7 +1432,7 @@ UPDATE sys_menu
 SET
     svg_icon = '',
     icon = CASE id
-        WHEN 1 THEN 'lucide:House'
+        WHEN 1 THEN 'lucide:Gauge'
         WHEN 10 THEN 'lucide:Settings'
         WHEN 1001 THEN 'lucide:UserRound'
         WHEN 1002 THEN 'lucide:Shield'

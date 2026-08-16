@@ -1757,7 +1757,7 @@ INSERT INTO `sys_api` (`id`, `title`, `path`, `method`, `api_group`, `created_at
 
 -- Seed data for `sys_menu`
 INSERT INTO `sys_menu` (`id`, `parent_id`, `path`, `name`, `redirect`, `component`, `title`, `is_full`, `hide`, `disable`, `keep_alive`, `affix`, `link`, `iframe`, `svg_icon`, `icon`, `sort`, `type`, `is_link`, `permission`, `created_at`, `updated_at`, `deleted_at`, `created_by`) VALUES
-(1, 0, '/home', 'home', '', 'home/home', 'home', 0, 0, 0, 0, 1, '', 0, '', 'lucide:House', 1, 2, 0, '', '2025-08-27 09:09:44', '2026-08-09 22:41:04', NULL, 1),
+(1, 0, '/home', 'home', '', 'home/home', 'home', 0, 0, 0, 0, 1, '', 0, '', 'lucide:Gauge', 1, 2, 0, '', '2025-08-27 09:09:44', '2026-08-09 22:41:04', NULL, 1),
 (10, 0, '/system', 'system', '', '', 'system', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Settings', 0, 1, 0, '', '2025-08-27 09:09:44', '2026-07-08 10:46:25', NULL, 1),
 (1001, 10, '/system/account', 'account', '', 'system/account/account', 'account', 0, 0, 0, 1, 0, '', 0, '', 'lucide:UserRound', 0, 2, 0, '', '2025-08-27 09:09:44', '2026-07-08 10:46:25', NULL, 1),
 (1002, 10, '/system/role', 'role', '', 'system/role/role', 'role', 0, 0, 0, 1, 0, '', 0, '', 'lucide:Shield', 0, 2, 0, '', '2025-08-27 09:09:44', '2026-07-08 10:46:25', NULL, 1),

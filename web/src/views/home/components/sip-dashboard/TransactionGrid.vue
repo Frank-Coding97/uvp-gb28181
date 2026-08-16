@@ -8,13 +8,10 @@
         type="button"
         class="tx-cell"
         :class="{ 'tx-cell--alert': cell.alert }"
-        @click="emit('cell-click', cell.kind)"
+        @click="emit('cellClick', cell.kind)"
       >
         <div class="tx-cell__head">
           <div class="tx-cell__icon">{{ cell.iconAbbr }}</div>
-          <div class="tx-cell__trend" :class="trendClass(cell.trendPct)">
-            {{ trendText(cell.trendPct) }}
-          </div>
         </div>
         <div class="tx-cell__name">
           {{ cell.labelZh }}
@@ -42,7 +39,7 @@ interface Props {
 }
 const props = defineProps<Props>();
 const emit = defineEmits<{
-  (e: "cell-click", kind: string): void;
+  (e: "cellClick", kind: string): void;
 }>();
 
 // 8 类事务的图标缩写(2 字母)
@@ -75,17 +72,6 @@ function formatCount(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-function trendText(pct: number): string {
-  if (Math.abs(pct) < 0.5) return "— 0%";
-  if (pct > 0) return `↑ ${pct.toFixed(1)}%`;
-  return `↓ ${Math.abs(pct).toFixed(1)}%`;
-}
-
-function trendClass(pct: number): string {
-  if (Math.abs(pct) < 0.5) return "tx-cell__trend--neutral";
-  return pct > 0 ? "tx-cell__trend--up" : "tx-cell__trend--down";
-}
-
 function rateText(cell: TransactionStat): string {
   if (cell.todayCount === 0) return "—";
   return `${(cell.successRate * 100).toFixed(1)}%`;
@@ -103,134 +89,121 @@ function rateClass(cell: TransactionStat): string {
 .tx-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
 .tx-section__title {
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--uvp-text-tertiary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .tx-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  gap: 8px;
 }
 
 .tx-cell {
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 10px;
-  padding: 10px 12px;
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-height: 72px;
+  padding: 9px 10px;
+  overflow: hidden;
   font: inherit;
   color: inherit;
-  cursor: pointer;
   text-align: left;
   appearance: none;
-  transition: all 0.15s ease;
-  position: relative;
-  overflow: hidden;
-  min-height: 76px;
+  cursor: pointer;
+  background: var(--dashboard-surface-muted, var(--uvp-list-toolbar-bg));
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 6px;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .tx-cell:hover:not(.tx-cell--placeholder) {
-  border-color: var(--uvp-brand);
   background: var(--uvp-panel-bg);
-  box-shadow: 0 8px 18px rgb(37 99 235 / 10%);
-  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--uvp-brand) 38%, var(--uvp-panel-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand) 8%, transparent);
 }
 
 .tx-cell:focus-visible {
   outline: none;
   border-color: var(--uvp-brand);
-  box-shadow: 0 0 0 3px rgb(37 99 235 / 12%);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--uvp-brand) 12%, transparent);
 }
 
 .tx-cell--alert {
-  border-color: var(--uvp-danger-border);
   background: var(--uvp-danger-soft);
+  border-color: var(--uvp-danger-border);
 }
 
 .tx-cell--alert::before {
-  content: "";
   position: absolute;
   top: 0;
-  left: 0;
   right: 0;
+  left: 0;
   height: 2px;
+  content: "";
   background: var(--uvp-danger);
 }
 
 .tx-cell--placeholder {
   cursor: default;
-  background: var(--uvp-list-toolbar-bg);
-  border-style: dashed;
+  background: transparent;
   border-color: var(--uvp-panel-border);
+  border-style: dashed;
+  opacity: 0.55;
 }
 
 .tx-cell__head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
 }
 
 .tx-cell__icon {
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  background: var(--uvp-brand-soft);
-  color: var(--uvp-brand);
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 22px;
+  height: 22px;
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.3px;
+  color: var(--uvp-brand);
+  letter-spacing: 0;
+  background: var(--uvp-brand-soft);
+  border-radius: 4px;
 }
 
 .tx-cell--alert .tx-cell__icon {
+  color: var(--uvp-danger);
   background: var(--uvp-danger-soft);
-  color: var(--uvp-danger);
-}
-
-.tx-cell__trend {
-  font-size: 11px;
-  color: var(--uvp-text-tertiary);
-}
-
-.tx-cell__trend--up {
-  color: var(--uvp-brand-cyan);
-}
-
-.tx-cell__trend--down {
-  color: var(--uvp-danger);
-}
-
-.tx-cell__trend--neutral {
-  color: var(--uvp-text-tertiary);
 }
 
 .tx-cell__name {
   font-size: 13px;
-  color: var(--uvp-text-primary);
   font-weight: 500;
+  color: var(--uvp-text-primary);
 }
 
 .tx-cell__en {
-  color: var(--uvp-text-tertiary);
+  margin-left: 4px;
   font-size: 10px;
   font-weight: 400;
-  margin-left: 4px;
+  color: var(--uvp-text-tertiary);
 }
 
 .tx-cell__stats {
   display: flex;
-  justify-content: space-between;
   align-items: baseline;
+  justify-content: space-between;
   margin-top: 2px;
 }
 
@@ -243,8 +216,8 @@ function rateClass(cell: TransactionStat): string {
 
 .tx-cell__rate {
   font-size: 12px;
-  color: var(--uvp-brand-cyan);
   font-variant-numeric: tabular-nums;
+  color: var(--uvp-brand-cyan);
 }
 
 .tx-cell__rate--warn {

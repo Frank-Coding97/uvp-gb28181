@@ -1,5 +1,12 @@
 <template>
-  <a-badge :count="store.activeCount" :max-count="9" dot>
+  <a-doption v-if="props.menu" class="uvp-user-menu-option" @click="visible = true">
+    <template #default>
+      <span class="uvp-user-menu-icon"><Download :size="16" /></span>
+      <span class="uvp-user-menu-label">下载任务</span>
+      <span v-if="store.activeCount" class="uvp-user-menu-count">{{ store.activeCount }}</span>
+    </template>
+  </a-doption>
+  <a-badge v-else :count="store.activeCount" :max-count="9" dot>
     <a-tooltip content="下载任务">
       <a-button
         type="text"
@@ -49,6 +56,7 @@ import { useRecordingDownloadStore, type RecordingDownloadItem } from "@/store/m
 import { recordingDownloadCoordinator } from "@/views/gb28181/cloud-recordings/recordingDownloadService";
 
 const visible = ref(false);
+const props = defineProps<{ menu?: boolean }>();
 const store = useRecordingDownloadStore();
 const activeStatuses = new Set<RecordingDownloadItem["status"]>(["queued", "ready", "streaming"]);
 const terminalStatuses = new Set<RecordingDownloadItem["status"]>(["completed", "failed", "cancelled", "expired"]);
@@ -98,6 +106,8 @@ function clearTerminal() { recordingDownloadCoordinator.clearTerminal(); }
 
 <style scoped lang="scss">
 .recording-download-toolbar { display: flex; align-items: center; justify-content: space-between; padding-bottom: 10px; color: var(--uvp-text-secondary); font-size: 12px; border-bottom: 1px solid var(--uvp-border); }
+.uvp-user-menu-label { flex: 1; }
+.uvp-user-menu-count { min-width: 18px; height: 18px; padding: 0 5px; color: #fff; background: var(--uvp-brand); border-radius: 9px; font-size: 11px; line-height: 18px; text-align: center; }
 .recording-download-list { display: flex; flex-direction: column; }
 .recording-download-item { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid var(--uvp-border); }
 .recording-download-item__main { display: grid; flex: 1; min-width: 0; gap: 4px; }

@@ -20,6 +20,7 @@ export default {
         ["navigate mode"]: "导航模式",
         ["personal-information"]: "个人信息",
         ["change-password"]: "修改密码",
+        ["project-address"]: "项目地址",
         ["logout"]: "退出登录",
         ["notice"]: "通知",
         ["message"]: "消息",
@@ -47,7 +48,7 @@ export default {
         ["please select"]: "请选择"
     },
     menu: {
-        ["home"]: "首页",
+        ["home"]: "仪表盘",
         ["file"]: "文件管理",
         ["document-library"]: "文件库",
         ["table"]: "列表管理",

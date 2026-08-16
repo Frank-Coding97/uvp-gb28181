@@ -17,8 +17,6 @@ declare module 'vue' {
     ACheckbox: typeof import('@arco-design/web-vue')['Checkbox']
     ACheckboxGroup: typeof import('@arco-design/web-vue')['CheckboxGroup']
     ACol: typeof import('@arco-design/web-vue')['Col']
-    ACollapse: typeof import('@arco-design/web-vue')['Collapse']
-    ACollapseItem: typeof import('@arco-design/web-vue')['CollapseItem']
     AConfigProvider: typeof import('@arco-design/web-vue')['ConfigProvider']
     ADescriptions: typeof import('@arco-design/web-vue')['Descriptions']
     ADescriptionsItem: typeof import('@arco-design/web-vue')['DescriptionsItem']

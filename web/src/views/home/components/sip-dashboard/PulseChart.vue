@@ -126,7 +126,7 @@ interface Props {
 const props = defineProps<Props>();
 
 const W = 600;
-const H = 60;
+const H = 90;
 
 const svgEl = ref<SVGSVGElement | null>(null);
 const hoverIdx = ref<number>(-1);
@@ -254,38 +254,38 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
 
 <style scoped lang="scss">
 .pulse {
-  background: var(--uvp-list-toolbar-bg);
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 10px;
-  padding: 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  padding: 12px 14px;
+  background: var(--uvp-list-toolbar-bg);
+  border: 1px solid var(--uvp-panel-border);
+  border-radius: 10px;
 }
 
 .pulse__head {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
 }
 
 .pulse__title {
   font-size: 12px;
   color: var(--uvp-text-secondary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .pulse__stats {
   margin-left: 12px;
-  color: var(--uvp-text-tertiary);
   font-size: 11px;
+  color: var(--uvp-text-tertiary);
   letter-spacing: 0;
 
   b {
-    color: var(--uvp-brand);
+    margin: 0 1px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    margin: 0 1px;
+    color: var(--uvp-brand);
   }
 }
 
@@ -311,56 +311,59 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
 
 .pulse__chart {
   position: relative;
+  flex: 1;
   width: 100%;
-  height: 60px;
+  height: 90px;
+  min-height: 90px;
 }
 
 .pulse__svg {
-  width: 100%;
-  height: 60px;
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .pulse__empty {
-  height: 60px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--uvp-text-tertiary);
+  height: 100%;
+  min-height: 90px;
   font-size: 12px;
+  color: var(--uvp-text-tertiary);
 }
 
 .pulse__tip {
   position: absolute;
   top: 0;
+  z-index: 10;
+  padding: 6px 8px;
+  font-size: 11px;
+  color: #ffffff;
+  white-space: nowrap;
   pointer-events: none;
   background: rgb(15 23 42 / 88%);
-  color: #fff;
-  font-size: 11px;
-  padding: 6px 8px;
   border-radius: 4px;
-  white-space: nowrap;
-  z-index: 10;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
 
   b {
-    color: #fff;
+    margin: 0 2px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    margin: 0 2px;
+    color: #ffffff;
   }
 }
 
 .pulse__tip-time {
+  margin-bottom: 4px;
   font-size: 10px;
   color: #d9d9d9;
-  margin-bottom: 4px;
 }
 
 .pulse__tip-row {
   display: flex;
-  align-items: center;
   gap: 4px;
+  align-items: center;
   line-height: 1.5;
 }
 
@@ -368,8 +371,8 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   display: inline-block;
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   background: var(--uvp-brand);
+  border-radius: 50%;
 }
 
 .pulse__tip-dot--red {

@@ -7,23 +7,17 @@
     <div class="summary-bar__divider" />
     <div class="summary-bar__stats">
       <div class="summary-bar__stat">
-        <div class="summary-bar__value">{{ formatNumber(todayTotal) }}</div>
+        <div class="summary-bar__value">{{ summaryValue(todayTotal) }}</div>
         <div class="summary-bar__caption">今日信令</div>
-      </div>
-      <div class="summary-bar__stat">
-        <div class="summary-bar__value summary-bar__value--warn">
-          {{ formatNumber(todayAbnormal) }}
-        </div>
-        <div class="summary-bar__caption">异常事务</div>
       </div>
       <div class="summary-bar__stat">
         <div
           class="summary-bar__value"
-          :class="{ 'summary-bar__value--danger': pending > 0 }"
+          :class="{ 'summary-bar__value--warn': health !== HEALTH_EMPTY && todayAbnormal > 0 }"
         >
-          {{ formatNumber(pending) }}
+          {{ summaryValue(todayAbnormal) }}
         </div>
-        <div class="summary-bar__caption">待处理</div>
+        <div class="summary-bar__caption">异常事务</div>
       </div>
     </div>
   </div>
@@ -37,7 +31,6 @@ interface Props {
   health: number;
   todayTotal: number;
   todayAbnormal: number;
-  pending: number;
 }
 const props = defineProps<Props>();
 
@@ -56,54 +49,36 @@ const severityClass = computed((): string => {
 function formatNumber(n: number): string {
   return n.toLocaleString("en-US");
 }
+
+function summaryValue(n: number): string {
+  return props.health === HEALTH_EMPTY ? "--" : formatNumber(n);
+}
 </script>
 
 <style scoped lang="scss">
 .summary-bar {
-  display: flex;
-  align-items: center;
+  display: grid;
+  grid-template-columns: minmax(180px, 1.15fr) 1px minmax(0, 2fr);
   gap: 24px;
-  padding: 14px 18px;
-  border-radius: 10px;
-  border: 1px solid var(--uvp-panel-border);
-  background: var(--uvp-list-toolbar-bg);
-  transition: all 0.3s ease;
-}
-
-.summary-bar--ok {
-  background: rgb(15 170 166 / 9%);
-  border-color: rgb(15 170 166 / 18%);
-}
-
-.summary-bar--warn {
-  background: var(--uvp-warning-soft);
-  border-color: var(--uvp-warning-border);
-}
-
-.summary-bar--danger {
-  background: var(--uvp-danger-soft);
-  border-color: var(--uvp-danger-border);
-}
-
-.summary-bar--idle {
-  background: var(--uvp-list-toolbar-bg);
-  border-color: var(--uvp-panel-border);
+  align-items: center;
+  padding: 10px 2px 14px;
+  border-bottom: 1px solid var(--uvp-panel-border);
 }
 
 .summary-bar__health {
   display: flex;
-  align-items: baseline;
   gap: 8px;
+  align-items: baseline;
 }
 
 .summary-bar__num {
-  font-size: 32px;
+  font-size: 34px;
   font-weight: 700;
-  color: var(--uvp-brand-cyan);
-  letter-spacing: 0;
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  transition: color 0.3s;
+  color: var(--uvp-brand-cyan);
+  letter-spacing: 0;
+  transition: color 0.2s ease;
 }
 
 .summary-bar--warn .summary-bar__num {
@@ -119,7 +94,7 @@ function formatNumber(n: number): string {
 .summary-bar__label {
   font-size: 12px;
   color: var(--uvp-text-tertiary);
-  letter-spacing: 0.5px;
+  letter-spacing: 0;
 }
 
 .summary-bar__divider {
@@ -130,8 +105,8 @@ function formatNumber(n: number): string {
 
 .summary-bar__stats {
   display: flex;
-  gap: 32px;
   flex: 1;
+  gap: 38px;
 }
 
 .summary-bar__stat {

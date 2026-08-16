@@ -59,7 +59,7 @@ func (dc *DeviceMgmtController) findSubscriptionDevice(c *gin.Context) (*gbmodel
 	return &device, true
 }
 
-// ListSubscriptions always returns catalog, mobile_position and alarm in a stable order.
+// ListSubscriptions always returns every supported kind in a stable order.
 func (dc *DeviceMgmtController) ListSubscriptions(c *gin.Context) {
 	device, ok := dc.findSubscriptionDevice(c)
 	if !ok {
@@ -74,7 +74,12 @@ func (dc *DeviceMgmtController) ListSubscriptions(c *gin.Context) {
 	for _, row := range rows {
 		byKind[row.Kind] = row
 	}
-	kinds := []gbmodels.SubscriptionKind{gbmodels.SubscriptionKindCatalog, gbmodels.SubscriptionKindMobilePosition, gbmodels.SubscriptionKindAlarm}
+	kinds := []gbmodels.SubscriptionKind{
+		gbmodels.SubscriptionKindCatalog,
+		gbmodels.SubscriptionKindMobilePosition,
+		gbmodels.SubscriptionKindAlarm,
+		gbmodels.SubscriptionKindPTZPrecisePosition,
+	}
 	list := make([]subscriptionVO, 0, len(kinds))
 	for _, kind := range kinds {
 		vo := subscriptionDefaults(kind)

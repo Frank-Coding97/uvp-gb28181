@@ -17,6 +17,11 @@ describe("lucide menu icons", () => {
     expect(getLucideIconComponent("lucide:Clapperboard")).toBeDefined();
   });
 
+  it("resolves the dashboard icon stored in the database", () => {
+    expect(getLucideIconName("lucide:Gauge")).toBe("Gauge");
+    expect(getLucideIconComponent("lucide:Gauge")).toBeDefined();
+  });
+
   it("resolves icon names returned in lowercase by legacy menu data", () => {
     expect(getLucideIconComponent("lucide:servercog")).toBeDefined();
     expect(getLucideIconComponent("lucide:gitbranch")).toBeDefined();

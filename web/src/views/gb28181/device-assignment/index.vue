@@ -289,8 +289,10 @@ onMounted(() => {
                         </a-input>
                         <div class="tree-box uvp-tree-panel__body">
                             <a-tree
+                                v-if="deptTree.length"
                                 :data="filteredDeptTree"
                                 :field-names="{ key: 'id', title: 'name', children: 'children' }"
+                                default-expand-all
                                 show-line
                                 @select="onSelectDept"
                             >
@@ -586,6 +588,11 @@ onMounted(() => {
 
 .assignment-tabs {
     margin-right: 4px;
+}
+
+.right-box {
+    min-height: 0;
+    overflow: hidden;
 }
 
 .batch-bar {

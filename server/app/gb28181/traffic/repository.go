@@ -7,11 +7,14 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
 type Direction string
+
+var accountingLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
 const (
 	DirectionUpstream   Direction = "upstream"
@@ -69,13 +72,13 @@ func NewGormRepository(db *gorm.DB) (*GormRepository, error) {
 
 func (r *GormRepository) ActiveBusinessKey(ctx context.Context, nodeID int64, app, stream string, direction Direction) (string, bool, error) {
 	var row gbmodels.GbDeviceTrafficSession
-	err := r.db.WithContext(ctx).Where("node_id = ? AND app = ? AND stream = ? AND direction = ? AND state = ?", nodeID, app, stream, direction, SessionActive).
-		Order("id DESC").Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return "", false, nil
+	query := r.db.WithContext(ctx).Where("node_id = ? AND app = ? AND stream = ? AND direction = ? AND state = ?", nodeID, app, stream, direction, SessionActive).
+		Order("id DESC").Limit(1).Find(&row)
+	if query.Error != nil {
+		return "", false, query.Error
 	}
-	if err != nil {
-		return "", false, err
+	if query.RowsAffected == 0 {
+		return "", false, nil
 	}
 	return row.BusinessKey, true, nil
 }
@@ -85,12 +88,12 @@ func (r *GormRepository) OpenGap(ctx context.Context, nodeID int64, reason strin
 		return errors.New("invalid traffic gap")
 	}
 	var existing gbmodels.GbDeviceTrafficGap
-	err := r.db.WithContext(ctx).Where("node_id = ? AND reason = ? AND state = ?", nodeID, reason, "open").Take(&existing).Error
-	if err == nil {
-		return nil
+	query := r.db.WithContext(ctx).Where("node_id = ? AND reason = ? AND state = ?", nodeID, reason, "open").Limit(1).Find(&existing)
+	if query.Error != nil {
+		return query.Error
 	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
+	if query.RowsAffected > 0 {
+		return nil
 	}
 	return r.db.WithContext(ctx).Create(&gbmodels.GbDeviceTrafficGap{NodeID: nodeID, Reason: reason, State: "open", StartedAt: at.UTC()}).Error
 }
@@ -108,12 +111,17 @@ func (r *GormRepository) PruneSettledBefore(ctx context.Context, cutoff time.Tim
 	if r == nil || r.db == nil || cutoff.IsZero() || batchSize <= 0 {
 		return 0, errors.New("invalid traffic session prune request")
 	}
-	ids := r.db.WithContext(ctx).Model(&gbmodels.GbDeviceTrafficSession{}).
-		Select("id").
+	var ids []uint64
+	if err := r.db.WithContext(ctx).Model(&gbmodels.GbDeviceTrafficSession{}).
 		Where("state = ? AND ended_at IS NOT NULL AND ended_at < ?", SessionSettled, cutoff.UTC()).
-		Order("id ASC").Limit(batchSize)
+		Order("id ASC").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
 	result := r.db.WithContext(ctx).
-		Where("id IN (?)", ids).
+		Where("id IN ?", ids).
 		Delete(&gbmodels.GbDeviceTrafficSession{})
 	return result.RowsAffected, result.Error
 }
@@ -130,8 +138,11 @@ func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (resul
 	}
 	return result, r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row gbmodels.GbDeviceTrafficSession
-		err := tx.Where("business_key = ?", request.BusinessKey).Take(&row).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		query := tx.Where("business_key = ?", request.BusinessKey).Limit(1).Find(&row)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected == 0 {
 			row = gbmodels.GbDeviceTrafficSession{
 				BusinessKey: request.BusinessKey, NodeID: request.NodeID, MediaServerUUID: request.MediaServerUUID,
 				ZLMSessionID: request.ZLMSessionID, Direction: string(request.Direction), DeviceCode: request.DeviceCode,
@@ -142,8 +153,6 @@ func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (resul
 			if err := tx.Create(&row).Error; err != nil {
 				return err
 			}
-		} else if err != nil {
-			return err
 		}
 
 		state := Session{LastTotalBytes: row.LastTotalBytes, SettledTotalBytes: row.SettledTotalBytes, State: SessionState(row.State)}
@@ -172,7 +181,9 @@ func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (resul
 		if reset {
 			updates["unattributed_reason"] = "absolute_reset"
 		}
-		if err := tx.Model(&row).Updates(updates).Error; err != nil {
+		if err := tx.Model(&gbmodels.GbDeviceTrafficSession{}).
+			Where("business_key = ?", request.BusinessKey).
+			Updates(updates).Error; err != nil {
 			return err
 		}
 		if delta > 0 {
@@ -186,31 +197,35 @@ func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (resul
 }
 
 func upsertDaily(tx *gorm.DB, request ApplyRequest, delta uint64, newSettled bool) error {
-	day := time.Date(request.At.UTC().Year(), request.At.UTC().Month(), request.At.UTC().Day(), 0, 0, 0, 0, time.UTC)
-	var row gbmodels.GbDeviceTrafficDaily
-	err := tx.Where("stat_date = ? AND device_code = ? AND channel_code = ?", day, request.DeviceCode, request.ChannelCode).Take(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		row = gbmodels.GbDeviceTrafficDaily{StatDate: day, DeviceCode: request.DeviceCode, ChannelCode: request.ChannelCode, OwnerDeptID: request.OwnerDeptID}
-	} else if err != nil {
-		return err
+	localAt := request.At.In(accountingLocation)
+	day := time.Date(localAt.Year(), localAt.Month(), localAt.Day(), 0, 0, 0, 0, accountingLocation)
+	row := gbmodels.GbDeviceTrafficDaily{
+		StatDate: day, DeviceCode: request.DeviceCode, ChannelCode: request.ChannelCode, OwnerDeptID: request.OwnerDeptID,
 	}
+	updates := map[string]interface{}{"updated_at": request.At.UTC()}
 	if request.Direction == DirectionUpstream {
-		row.UpstreamBytes += delta
+		row.UpstreamBytes = delta
+		updates["upstream_bytes"] = gorm.Expr("upstream_bytes + ?", delta)
 		if newSettled {
-			row.UpstreamSessions++
-			row.UpstreamDurationSeconds += request.DurationSeconds
+			row.UpstreamSessions = 1
+			row.UpstreamDurationSeconds = request.DurationSeconds
+			updates["upstream_sessions"] = gorm.Expr("upstream_sessions + 1")
+			updates["upstream_duration_seconds"] = gorm.Expr("upstream_duration_seconds + ?", request.DurationSeconds)
 		}
 	} else {
-		row.DownstreamBytes += delta
+		row.DownstreamBytes = delta
+		updates["downstream_bytes"] = gorm.Expr("downstream_bytes + ?", delta)
 		if newSettled {
-			row.DownstreamSessions++
-			row.DownstreamDurationSeconds += request.DurationSeconds
+			row.DownstreamSessions = 1
+			row.DownstreamDurationSeconds = request.DurationSeconds
+			updates["downstream_sessions"] = gorm.Expr("downstream_sessions + 1")
+			updates["downstream_duration_seconds"] = gorm.Expr("downstream_duration_seconds + ?", request.DurationSeconds)
 		}
 	}
-	if row.ID == 0 {
-		return tx.Create(&row).Error
-	}
-	return tx.Save(&row).Error
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "stat_date"}, {Name: "device_code"}, {Name: "channel_code"}},
+		DoUpdates: clause.Assignments(updates),
+	}).Create(&row).Error
 }
 
 func valueOrZero(value *time.Time) time.Time {

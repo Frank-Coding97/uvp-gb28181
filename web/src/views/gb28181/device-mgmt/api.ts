@@ -140,7 +140,7 @@ export interface DeviceStatusEventQuery {
     to?: string;
 }
 
-export type SubscriptionKind = "catalog" | "mobile_position" | "alarm";
+export type SubscriptionKind = "catalog" | "mobile_position" | "alarm" | "ptz_precise_position";
 export type SubscriptionStatus = "disabled" | "pending" | "active" | "degraded" | "expired";
 
 export interface DeviceSubscription {
