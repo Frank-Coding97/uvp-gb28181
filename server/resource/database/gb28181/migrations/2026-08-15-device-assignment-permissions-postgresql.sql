@@ -27,8 +27,11 @@ WHERE m.permission='gb28181:device:share' AND m.deleted_at IS NULL AND a.deleted
 
 -- Casbin:已绑菜单的角色同步规则 + role_1 兜底
 INSERT INTO sys_casbin_rule (ptype,v0,v1,v2,v3,v4,v5)
-SELECT 'p',CONCAT('role_',rm.role_id),a.path,a.method,'*','',''
-FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id CROSS JOIN sys_api a
+SELECT DISTINCT 'p',CONCAT('role_',rm.role_id),a.path,a.method,'*','',''
+FROM sys_role_menu rm
+JOIN sys_menu m ON m.id=rm.menu_id
+JOIN sys_menu_api ma ON ma.menu_id=m.id
+JOIN sys_api a ON a.id=ma.api_id
 WHERE m.permission IN ('gb28181:device:assign','gb28181:device:share')
   AND m.deleted_at IS NULL AND a.deleted_at IS NULL
   AND a.path IN ('/api/gb28181/device-mgmt/assign','/api/gb28181/device-mgmt/assign-dept',

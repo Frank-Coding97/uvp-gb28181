@@ -51,3 +51,24 @@ func TestMigrationFileContract(t *testing.T) {
 		}
 	}
 }
+
+func TestDeviceAssignmentPermissionMigrationsUseMenuAPIBindings(t *testing.T) {
+	files := []string{
+		"2026-08-15-device-assignment-permissions.sql",
+		"2026-08-15-device-assignment-permissions-postgresql.sql",
+		"2026-08-15-device-assignment-permissions-sqlserver.sql",
+	}
+
+	for _, name := range files {
+		t.Run(name, func(t *testing.T) {
+			body, err := migrationsfs.FS.ReadFile("migrations/" + name)
+			require.NoError(t, err)
+
+			normalized := strings.NewReplacer("`", "", "[", "", "]", "").Replace(strings.ToLower(string(body)))
+			normalized = strings.Join(strings.Fields(normalized), " ")
+			require.Contains(t, normalized, "select distinct 'p'", "同一角色可能通过多个菜单命中同一 API,写入前必须去重")
+			require.Contains(t, normalized, "join sys_menu_api ma on ma.menu_id=m.id", "Casbin 规则必须复用菜单与 API 的精确绑定")
+			require.NotContains(t, normalized, "cross join sys_api a where m.permission in", "全量交叉连接会生成重复或越权规则")
+		})
+	}
+}
