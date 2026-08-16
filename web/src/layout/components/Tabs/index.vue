@@ -9,7 +9,14 @@
       @tab-click="onTabs"
       @delete="onDelete"
     >
-      <a-tab-pane v-for="item of tabsList" :key="item.path" :title="$t(`menu.${item.meta.title}`)" :closable="!item.meta.affix" />
+      <a-tab-pane v-for="item of tabsList" :key="item.path" :closable="!item.meta.affix">
+        <template #title>
+          <span class="tabs-tab-title">
+            <MenuItemIcon v-if="item.meta.svgIcon || item.meta.icon" :svg-icon="item.meta.svgIcon" :icon="item.meta.icon" />
+            <span>{{ $t(`menu.${item.meta.title}`) }}</span>
+          </span>
+        </template>
+      </a-tab-pane>
     </a-tabs>
     <div class="tabs_setting">
       <a-space>
@@ -52,6 +59,7 @@
 import { storeToRefs } from "pinia";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
+import MenuItemIcon from "@/layout/components/Menu/menu-item-icon.vue";
 const router = useRouter();
 const routerStore = useRouteConfigStore();
 const { tabsList, currentRoute } = storeToRefs(routerStore);
@@ -142,11 +150,13 @@ const closeOther = (type: string) => {
 .tabs {
   box-sizing: border-box;
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: space-between;
   height: 40px;
-  border-bottom: $border-1 solid $color-border-2;
+  overflow: hidden;
   .tabs_setting {
+    flex: 0 0 auto;
     margin: 0 0 0 $margin;
     .setting {
       margin-right: $margin;
@@ -158,23 +168,51 @@ const closeOther = (type: string) => {
     }
   }
 }
+.tabs :deep(.arco-tabs) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+:deep(.arco-tabs-nav) {
+  min-width: 0;
+}
+:deep(.arco-tabs-nav-type-line .arco-tabs-tab) {
+  margin: 0 10px;
+}
+:deep(.arco-tabs-nav-type-line.arco-tabs-nav-horizontal > .arco-tabs-tab:first-of-type) {
+  margin-left: 10px;
+}
 :deep(.arco-tabs-nav-tab) {
   // 移入展示关闭icon
+  min-width: 0;
+  overflow: hidden;
+  // 移入展示关闭icon
   .arco-tabs-tab-closable {
-    svg {
+    .arco-tabs-tab-close-btn svg {
       width: 0;
       transition: all 0.2s;
     }
-    &:hover {
-      svg {
-        width: 1em;
-      }
+    &:hover .arco-tabs-tab-close-btn svg {
+      width: 1em;
     }
   }
 
   // 消除tab移入的背景色
   &:hover .arco-tabs-tab-title::before {
     background: unset;
+  }
+}
+
+.tabs-tab-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+
+  :deep(svg) {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
   }
 }
 
