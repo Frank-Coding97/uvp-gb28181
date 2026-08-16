@@ -87,6 +87,20 @@ describe("device management toolbar layout", () => {
         expect(buttonRule).toContain("height: 28px;");
     });
 
+    it("does not expose SIP trace launch actions from device management", () => {
+        expect(source).not.toContain("启动 SIP 诊断窗口");
+        expect(source).not.toContain("startDeviceTraceCapture");
+        expect(source).not.toContain("traceCaptureStarting");
+        expect(source).not.toContain("trace-capture-action");
+        expect(source).not.toContain("icon-btn.trace-capture");
+    });
+
+    it("distinguishes subscription management from the primary channel action", () => {
+        expect(source).toContain('class="icon-btn small framed primary" type="button" @click.stop="showDeviceChannels(item)"');
+        expect(source).toContain('class="icon-btn small framed subscription" type="button" @click.stop="openSubscriptionManager(item)"');
+        expect(source).toContain(".icon-btn.framed.subscription {");
+    });
+
     it("distinguishes device drilldown from manual channel mode", () => {
         expect(source).toContain('channelEntrySource.value = "device-drilldown";');
         expect(source).toContain('channelEntrySource.value = "manual";');

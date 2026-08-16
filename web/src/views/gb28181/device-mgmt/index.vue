@@ -278,7 +278,6 @@ const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
 const controlConsoleVisible = ref(false);
 const controlConsoleChannel = ref<ChannelVO | null>(null);
-const traceCaptureStarting = reactive<Record<number, boolean>>({});
 const cloudRecordingLoading = ref<Set<number>>(new Set());
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -938,40 +937,6 @@ async function handleSubscriptionChanged() {
         if (res.code === 0) deviceSubscriptions.value = res.data?.list || [];
     } catch (error) {
         console.warn("刷新设备订阅摘要失败", error);
-    }
-}
-
-async function startDeviceTraceCapture(record: DeviceVO) {
-    if (traceCaptureStarting[record.id]) return;
-    traceCaptureStarting[record.id] = true;
-    try {
-        // 直接跳转到 sip-traces,预填设备 + 最近 15 分钟时间范围
-        const now = new Date();
-        const from = new Date(now.getTime() - 15 * 60 * 1000);
-
-        // 格式化为本地时间 YYYY-MM-DD HH:mm:ss
-        const formatLocalTime = (date: Date) => {
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, "0");
-            const day = String(date.getDate()).padStart(2, "0");
-            const hours = String(date.getHours()).padStart(2, "0");
-            const minutes = String(date.getMinutes()).padStart(2, "0");
-            const seconds = String(date.getSeconds()).padStart(2, "0");
-            return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-        };
-
-        await router.push({
-            path: "/gb28181/sip-traces",
-            query: {
-                deviceIds: record.deviceId,
-                from: formatLocalTime(from),
-                to: formatLocalTime(now)
-            }
-        });
-    } catch (error: any) {
-        Message.error(error?.message || "跳转 SIP 日志失败");
-    } finally {
-        traceCaptureStarting[record.id] = false;
     }
 }
 
@@ -2143,18 +2108,6 @@ onUnmounted(() => {
                                                 <template #icon><Bell :size="13" /></template>
                                                 <span>订阅</span>
                                             </a-link>
-                                            <a-tooltip content="启动 SIP 诊断窗口" position="top">
-                                                <button
-                                                    class="trace-capture-action"
-                                                    type="button"
-                                                    :disabled="traceCaptureStarting[record.id]"
-                                                    :aria-label="`对设备 ${record.deviceId} 启动 SIP 诊断窗口`"
-                                                    @click.stop="startDeviceTraceCapture(record)"
-                                                >
-                                                    <Loader2 v-if="traceCaptureStarting[record.id]" :size="14" class="spin" />
-                                                    <Activity v-else :size="14" />
-                                                </button>
-                                            </a-tooltip>
                                             <a-dropdown trigger="click" position="br">
                                                 <a-link class="uvp-table-action uvp-table-action--more">
                                                     <span>更多</span>
@@ -2242,13 +2195,7 @@ onUnmounted(() => {
                                     </button>
                                 </a-tooltip>
                                 <a-tooltip content="订阅管理" position="top">
-                                    <button class="icon-btn small framed primary" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
-                                </a-tooltip>
-                                <a-tooltip content="启动 SIP 诊断窗口" position="top">
-                                    <button class="icon-btn small framed trace-capture" type="button" :disabled="traceCaptureStarting[item.id]" @click.stop="startDeviceTraceCapture(item)">
-                                        <Loader2 v-if="traceCaptureStarting[item.id]" :size="13" class="spin" />
-                                        <Activity v-else :size="13" />
-                                    </button>
+                                    <button class="icon-btn small framed subscription" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
                                 </a-tooltip>
                                 <a-tooltip content="编辑设备" position="top">
                                     <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button>
@@ -3614,10 +3561,6 @@ onUnmounted(() => {
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--sync:hover) { color: #0f675f; background: rgb(15 118 110 / 8%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe) { color: var(--uvp-brand); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--subscribe:hover) { color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); }
-.trace-capture-action { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 28px; width: 28px; height: 28px; padding: 0; color: #0f766e; background: transparent; border: 0; border-radius: 4px; cursor: pointer; }
-.trace-capture-action:hover { color: #0b5f59; background: rgb(15 118 110 / 8%); }
-.trace-capture-action:disabled { cursor: wait; opacity: 0.55; }
-.icon-btn.trace-capture { color: #0f766e; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit) { color: #b7791f; }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--edit:hover) { color: #9a6b18; background: rgb(183 121 31 / 9%); }
 .device-mgmt-page :deep(.uvp-data-table .uvp-table-action--stop) { color: #dc2626; }
@@ -3672,6 +3615,16 @@ onUnmounted(() => {
     color: #fff;
     background: var(--uvp-brand);
     border-color: var(--uvp-brand);
+}
+.icon-btn.framed.subscription {
+    color: #6b4f9b;
+    background: rgb(107 79 155 / 8%);
+    border: 1px solid rgb(107 79 155 / 22%);
+}
+.icon-btn.framed.subscription:hover {
+    color: #fff;
+    background: #6b4f9b;
+    border-color: #6b4f9b;
 }
 .icon-btn.framed.record-query-entry {
     color: #6b4f9b;
