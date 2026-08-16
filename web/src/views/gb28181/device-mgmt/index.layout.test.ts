@@ -73,6 +73,20 @@ describe("device management toolbar layout", () => {
         expect(catalogRule).toContain("border-right: 1px solid var(--uvp-panel-border);");
     });
 
+    it("keeps a compact right-aligned device card action strip", () => {
+        const cardRule = source.match(/\.device-summary-card\s*\{([^}]*)\}/)?.[1] || "";
+        const actionRule = source.match(/\.device-card-actions\s*\{([^}]*)\}/)?.[1] || "";
+        const buttonRule = source.match(/\.device-card-actions \.icon-btn\.small\s*\{([^}]*)\}/)?.[1] || "";
+
+        expect(cardRule).toContain("grid-template-rows: auto auto max-content;");
+        expect(cardRule).toContain("padding: 12px 12px 6px;");
+        expect(actionRule).toContain("justify-content: flex-end;");
+        expect(actionRule).toContain("gap: 6px;");
+        expect(actionRule).toContain("padding-top: 3px;");
+        expect(buttonRule).toContain("width: 28px;");
+        expect(buttonRule).toContain("height: 28px;");
+    });
+
     it("distinguishes device drilldown from manual channel mode", () => {
         expect(source).toContain('channelEntrySource.value = "device-drilldown";');
         expect(source).toContain('channelEntrySource.value = "manual";');

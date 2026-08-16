@@ -3784,10 +3784,11 @@ onUnmounted(() => {
 .device-summary-card {
     position: relative;
     display: grid;
+    grid-template-rows: auto auto max-content;
     gap: 10px;
     align-self: start;
     min-height: 250px;
-    padding: 12px;
+    padding: 12px 12px 6px;
 }
 .device-card-head {
     display: grid;
@@ -3854,9 +3855,13 @@ onUnmounted(() => {
 .device-card-channel-value .channel-text { font-weight: 500; }
 .device-card-actions {
     justify-content: flex-end;
-    gap: 7px;
-    padding-top: 9px;
+    gap: 6px;
+    padding-top: 3px;
     border-top: 1px solid var(--uvp-panel-border);
+}
+.device-card-actions .icon-btn.small {
+    width: 28px;
+    height: 28px;
 }
 .channel-summary-card { min-width: 0; }
 .channel-snapshot {
