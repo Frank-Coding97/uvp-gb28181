@@ -29,8 +29,10 @@ mkdir -p "$SOURCE_ROOT/server/bin"
   env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=2 \
   go build -p 2 -trimpath -ldflags='-s -w' -o bin/uvp-firewall-agent-linux-amd64 ./cmd/uvp-firewall-agent)
 
-(cd "$SOURCE_ROOT/web" && pnpm install --frozen-lockfile)
-(cd "$SOURCE_ROOT/web" && NODE_OPTIONS=--max-old-space-size=1536 pnpm run build:prod)
+# pnpm progress goes to stderr: the caller captures stdout via command
+# substitution and treats it as the archive path
+(cd "$SOURCE_ROOT/web" && pnpm install --frozen-lockfile >&2)
+(cd "$SOURCE_ROOT/web" && NODE_OPTIONS=--max-old-space-size=1536 pnpm run build:prod >&2)
 
 UVP_SOURCE_ROOT="$SOURCE_ROOT" \
   "$SOURCE_ROOT/deploy/test/assemble-release.sh" "$SHA" "$OUTPUT_DIR"
