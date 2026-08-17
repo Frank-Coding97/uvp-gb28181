@@ -26,6 +26,7 @@ type UserController struct {
 	Common
 	UserService   *service.User
 	CasbinService *service.PermissionService
+	AuthSessions  *service.AuthSessionService
 }
 
 // NewUserController 创建用户控制器
@@ -35,6 +36,22 @@ func NewUserController() *UserController {
 		UserService:   service.NewUserService(),
 		CasbinService: service.NewPermissionService(),
 	}
+}
+
+func (uc *UserController) authSessions() *service.AuthSessionService {
+	if uc.AuthSessions != nil {
+		return uc.AuthSessions
+	}
+	sessions, _ := app.SessionValidator.(*service.AuthSessionService)
+	return sessions
+}
+
+func (uc *UserController) revokeUserSessionsTx(tx *gorm.DB, userID uint, reason string) error {
+	sessions := uc.authSessions()
+	if sessions == nil {
+		return service.ErrSessionStore
+	}
+	return sessions.RevokeAllForUserTx(tx, userID, reason)
 }
 
 // GetProfile 获取当前登录用户信息
@@ -311,7 +328,7 @@ func (uc *UserController) Update(c *gin.Context) {
 		}
 	}
 
-	// 使用事务更新用户和角色关联
+	// 使用事务更新用户、角色关联及停用后的会话撤销。
 	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
 		// 更新用户信息
 		user.Username = req.UserName
@@ -335,6 +352,11 @@ func (uc *UserController) Update(c *gin.Context) {
 
 		if err := tx.Save(user).Error; err != nil {
 			return err
+		}
+		if user.Status != 1 {
+			if err := uc.revokeUserSessionsTx(tx, user.ID, "user_disabled"); err != nil {
+				return err
+			}
 		}
 
 		// 删除现有的用户角色关联
@@ -398,8 +420,11 @@ func (uc *UserController) Delete(c *gin.Context) {
 		uc.FailAndAbort(c, "用户不存在", nil)
 	}
 
-	// 使用事务删除用户和角色关联
+	// 使用事务删除用户和角色关联,并撤销该用户的全部会话。
 	err = app.DB().WithContext(c).Transaction(func(tx *gorm.DB) error {
+		if err := uc.revokeUserSessionsTx(tx, user.ID, "user_deleted"); err != nil {
+			return err
+		}
 		// 删除用户角色关联
 		if err := tx.Where("user_id = ?", user.ID).Delete(&models.SysUserRole{}).Error; err != nil {
 			return err

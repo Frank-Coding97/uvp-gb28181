@@ -172,6 +172,32 @@ func (s *AuthSessionService) Revoke(ctx context.Context, sid, reason string, rev
 	return result.RowsAffected == 1, nil
 }
 
+// RevokeAllForUserTx revokes every still-live session using the caller's transaction.
+func (s *AuthSessionService) RevokeAllForUserTx(tx *gorm.DB, userID uint, reason string) error {
+	if tx == nil || userID == 0 {
+		return fmt.Errorf("%w: invalid user session transaction", ErrSessionStore)
+	}
+	now := s.now()
+	return tx.Model(&models.SysUserSession{}).
+		Where("user_id = ? AND revoked_at IS NULL", userID).
+		Updates(map[string]any{
+			"revoked_at": now, "revoke_reason": reason,
+			"refresh_token_hash": nil, "refresh_jti": nil, "updated_at": now,
+		}).Error
+}
+
+// CleanupTerminal removes revoked or naturally expired sessions older than the cutoff.
+func (s *AuthSessionService) CleanupTerminal(ctx context.Context, cutoff time.Time) (int64, error) {
+	result := s.db.WithContext(ctx).Where(
+		"(revoked_at IS NOT NULL AND revoked_at < ?) OR (revoked_at IS NULL AND session_expires_at < ?)",
+		cutoff, cutoff,
+	).Delete(&models.SysUserSession{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("%w: cleanup sessions: %v", ErrSessionStore, result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
 // RotateRefresh performs a database CAS before returning newly signed tokens.
 func (s *AuthSessionService) RotateRefresh(ctx context.Context, rawRefresh string, tokens app.TokenServiceInterface) (*SessionTokenPair, error) {
 	claims, err := tokens.ParseRefreshToken(rawRefresh)

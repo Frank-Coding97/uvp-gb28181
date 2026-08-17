@@ -18,6 +18,16 @@ import (
 func RegisterExecutors() {
 	// 注册演示执行器
 	app.JobScheduler.RegisterExecutor(&executors.DemoExecutor{})
+	app.JobScheduler.RegisterExecutor(&executors.SessionCleanupExecutor{})
+	if _, err := app.JobScheduler.AddOrUpdateJob(&schedulerhelper.Job{
+		ID: "system-session-cleanup", Group: "system", Name: "登录会话终态清理",
+		Description:  "每日清理撤销或自然过期超过 30 天的登录会话",
+		ExecutorName: executors.SessionCleanupExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+		Status: schedulerhelper.StatusEnabled, CronExpression: "0 0 3 * * *",
+		BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 10 * time.Minute,
+	}); err != nil && app.ZapLog != nil {
+		app.ZapLog.Error("注册登录会话清理任务失败", zap.Error(err))
+	}
 
 	// 在这里添加更多执行器...
 	// app.JobScheduler.RegisterExecutor(&executors.YourExecutor{})
