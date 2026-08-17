@@ -66,6 +66,13 @@ func TestOnlineUserListContractDoesNotExposeCredentials(t *testing.T) {
 	require.NotContains(t, body, "token")
 	require.NotContains(t, body, "hash")
 	require.NotContains(t, body, "jti")
+	var responseBody struct {
+		Data struct {
+			CurrentSID string `json:"currentSid"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(res.Body.Bytes(), &responseBody))
+	require.Equal(t, "current-session", responseBody.Data.CurrentSID)
 }
 
 func TestOnlineUserForceLogoutResponses(t *testing.T) {

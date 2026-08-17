@@ -36,6 +36,7 @@ import {
   UserCog,
   UserRound,
   Users,
+  UsersRound,
   Video,
   Webcam,
   Workflow
@@ -80,6 +81,7 @@ export const lucideMenuIcons: Record<string, Component> = {
   UserCog,
   UserRound,
   Users,
+  UsersRound,
   Video,
   Webcam,
   Workflow

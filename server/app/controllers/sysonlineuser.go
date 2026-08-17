@@ -72,7 +72,11 @@ func (c *SysOnlineUserController) List(ctx *gin.Context) {
 		}
 		c.FailAndAbort(ctx, "查询在线用户失败", err, status)
 	}
-	c.Success(ctx, gin.H{"list": list, "total": total})
+	currentSID := ""
+	if claims := common.GetClaims(ctx); claims != nil {
+		currentSID = claims.SID
+	}
+	c.Success(ctx, gin.H{"list": list, "total": total, "currentSid": currentSID})
 }
 
 type forceLogoutRequest struct {

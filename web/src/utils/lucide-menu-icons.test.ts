@@ -22,6 +22,11 @@ describe("lucide menu icons", () => {
     expect(getLucideIconComponent("lucide:Gauge")).toBeDefined();
   });
 
+  it("resolves the online user menu icon stored in the database", () => {
+    expect(getLucideIconName("lucide:UsersRound")).toBe("UsersRound");
+    expect(getLucideIconComponent("lucide:UsersRound")).toBeDefined();
+  });
+
   it("resolves icon names returned in lowercase by legacy menu data", () => {
     expect(getLucideIconComponent("lucide:servercog")).toBeDefined();
     expect(getLucideIconComponent("lucide:gitbranch")).toBeDefined();
