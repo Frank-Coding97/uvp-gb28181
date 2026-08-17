@@ -7,6 +7,7 @@ import { getLocalStorage, setLocalStorage, removeLocalStorage } from "@/utils/ap
 import { type UserResult, type RefreshTokenResult, getLogin, refreshTokenApi, getProfileAPI } from "@/api/user";
 import { userType } from "@/store/types";
 import { handleUrl } from "@/utils/app";
+import { startSessionHeartbeat, stopSessionHeartbeat } from "@/services/session-heartbeat";
 
 let logoutCleanup: (() => Promise<void> | void) | undefined;
 
@@ -44,6 +45,7 @@ export const useUserStore = defineStore("user", () => {
                         // 登录成功后，设置 accessToken 和 refreshToken
                         setAccessToken(res?.data?.accessToken, res?.data?.accessTokenExpires);
                         setRefreshToken(res?.data?.refreshToken, res?.data?.refreshTokenExpires);
+                        startSessionHeartbeat();
                         resolve(res);
                     } else {
                         reject(res?.message || "登录失败");
@@ -56,6 +58,7 @@ export const useUserStore = defineStore("user", () => {
     };
     /** 前端登出（不调用接口） */
     const logOut = async (cleanup = true) => {
+        stopSessionHeartbeat();
         if (cleanup) await runUserLogoutCleanup();
         account.value.id = 0;
         account.value.avatar = "";
