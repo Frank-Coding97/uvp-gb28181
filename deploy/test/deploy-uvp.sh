@@ -101,6 +101,10 @@ done
 
 rm -rf "$FINAL_RELEASE"
 mv "$TEMP_RELEASE" "$FINAL_RELEASE"
+# archives built before assemble-release.sh pinned the staging dir carry a
+# 0700 "." entry; extracting as root restores it on the release root, which
+# www-data nginx cannot traverse (silent 404). Force 0755 as a backstop.
+chmod 0755 "$FINAL_RELEASE"
 chmod 0755 "$FINAL_RELEASE/backend/uvp-gb28181"
 # runtime config, logs and uploads stay outside the release tree so they
 # survive release switches and cleanup. The release archive may contain a

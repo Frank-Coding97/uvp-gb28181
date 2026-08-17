@@ -42,6 +42,12 @@ cp "$SOURCE_ROOT/deploy/test/frontend.Dockerfile" "$release_dir/frontend/Dockerf
 cp "$SOURCE_ROOT/deploy/test/nginx.conf" "$release_dir/frontend/nginx.conf"
 cp "$SOURCE_ROOT/deploy/test/compose.yml" "$release_dir/compose.yml"
 
+# mktemp -d creates the staging dir with 0700, and `tar -C "$release_dir" .`
+# stores that mode in the "." entry. deploy-uvp.sh extracts as root, which
+# restores 0700 on the release root and leaves www-data nginx unable to
+# traverse it (silent 404 on every static file). Pin the mode before archiving.
+chmod 0755 "$release_dir"
+
 archive="$OUTPUT_DIR/uvp-release-$SHA.tar.gz"
 tar -czf "$archive" -C "$release_dir" .
 test -s "$archive"
