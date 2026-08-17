@@ -1948,3 +1948,42 @@ CREATE INDEX idx_sip_trace_diagnosis_device_observed
     ON gb_sip_trace_session_diagnosis (device_id, observed_at);
 CREATE INDEX idx_sip_trace_diagnosis_call_cseq
     ON gb_sip_trace_session_diagnosis (call_id, cseq);
+
+-- 在线用户会话与权限 seed。
+CREATE TABLE sys_user_sessions (
+    sid VARCHAR(36) PRIMARY KEY,
+    user_id BIGINT NOT NULL,
+    refresh_token_hash CHAR(64) NULL,
+    refresh_jti VARCHAR(36) NULL,
+    client_ip VARCHAR(50) NOT NULL DEFAULT '',
+    login_location VARCHAR(100) NOT NULL DEFAULT '未知',
+    user_agent VARCHAR(500) NOT NULL DEFAULT '',
+    browser VARCHAR(100) NOT NULL DEFAULT '未知',
+    os VARCHAR(100) NOT NULL DEFAULT '未知',
+    login_at TIMESTAMP NOT NULL,
+    last_active_at TIMESTAMP NOT NULL,
+    session_expires_at TIMESTAMP NOT NULL,
+    revoked_at TIMESTAMP NULL,
+    revoke_reason VARCHAR(32) NULL,
+    revoked_by BIGINT NULL,
+    created_at TIMESTAMP NULL,
+    updated_at TIMESTAMP NULL
+);
+CREATE INDEX idx_user_id ON sys_user_sessions (user_id);
+CREATE INDEX idx_session_valid ON sys_user_sessions (revoked_at,session_expires_at,login_at);
+CREATE INDEX idx_client_ip ON sys_user_sessions (client_ip);
+
+INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
+(339,'查询在线用户','/api/sysOnlineUser/list','GET','系统管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(340,'强制下线会话','/api/sysOnlineUser/forceLogout','POST','系统管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
+(140382,10,'/system/online-user','SystemOnlineUser','system/online-user/index','在线用户',FALSE,FALSE,8,2,'system:online-user:list','lucide:UsersRound',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
+(140383,140382,'','SystemOnlineUserForceLogout','','强制下线',TRUE,FALSE,1,3,'system:online-user:force-logout','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140382),(1,140383);
+INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140382,339),(140383,340);
+INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
+(7806,'p','role_1','/api/sysOnlineUser/list','GET','*','',''),
+(7807,'p','role_1','/api/sysOnlineUser/forceLogout','POST','*','','');
+SELECT setval('sys_api_id_seq',340,true);
+SELECT setval('sys_menu_id_seq',140383,true);
+SELECT setval('sys_casbin_rule_id_seq',7807,true);

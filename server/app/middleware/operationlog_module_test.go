@@ -80,6 +80,7 @@ func TestOperationModuleNonGB28181(t *testing.T) {
 		{"/api/users/list", "用户管理"},
 		{"/api/sysMenu/getRouters", "菜单管理"},
 		{"/api/sysOperationLog/list", "操作日志管理"},
+		{"/api/sysOnlineUser/forceLogout", "在线用户管理"},
 		{"/api/login", "认证管理"},
 		// 未匹配路径仍兜底"其他"
 		{"/api/unknown/path", "其他"},
@@ -90,4 +91,11 @@ func TestOperationModuleNonGB28181(t *testing.T) {
 		ctx.Request = httptest.NewRequest(http.MethodGet, tc.path, nil)
 		require.Equal(t, tc.module, getOperationModule(ctx), "path: %s", tc.path)
 	}
+}
+
+func TestOperationLogSkipsSessionHeartbeat(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/users/session/heartbeat", nil)
+	require.True(t, shouldSkipLog(ctx))
 }

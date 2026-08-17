@@ -5742,5 +5742,42 @@ INSERT INTO `sys_civil_code` (`code`, `name`, `short_name`, `parent_code`, `leve
 INSERT INTO `gb_sip_security_policy` (`id`, `scope_key`, `mode`, `window_seconds`, `ban_score`, `max_packet_bytes`, `max_udp_per_window`, `max_tcp_connections`, `sample_per_source`, `nonce_ttl_seconds`, `ban_ttl_steps`, `allowlist_text`, `updated_by`, `updated_at`) VALUES
 (1, 'global', 'protect', 10, 100, 65536, 120, 32, 3, 60, '100:0', '127.0.0.0/8\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16', 0, '2026-08-10 09:27:18');
 
+-- 在线用户会话与权限 seed。
+CREATE TABLE IF NOT EXISTS `sys_user_sessions` (
+  `sid` varchar(36) NOT NULL,
+  `user_id` bigint unsigned NOT NULL,
+  `refresh_token_hash` char(64) DEFAULT NULL,
+  `refresh_jti` varchar(36) DEFAULT NULL,
+  `client_ip` varchar(50) NOT NULL DEFAULT '',
+  `login_location` varchar(100) NOT NULL DEFAULT '未知',
+  `user_agent` varchar(500) NOT NULL DEFAULT '',
+  `browser` varchar(100) NOT NULL DEFAULT '未知',
+  `os` varchar(100) NOT NULL DEFAULT '未知',
+  `login_at` datetime NOT NULL,
+  `last_active_at` datetime NOT NULL,
+  `session_expires_at` datetime NOT NULL,
+  `revoked_at` datetime DEFAULT NULL,
+  `revoke_reason` varchar(32) DEFAULT NULL,
+  `revoked_by` bigint unsigned DEFAULT NULL,
+  `created_at` datetime DEFAULT NULL,
+  `updated_at` datetime DEFAULT NULL,
+  PRIMARY KEY (`sid`),
+  KEY `idx_user_id` (`user_id`),
+  KEY `idx_session_valid` (`revoked_at`,`session_expires_at`,`login_at`),
+  KEY `idx_client_ip` (`client_ip`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='后台登录会话';
+
+INSERT INTO `sys_api` (`id`,`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`deleted_at`,`created_by`) VALUES
+(339,'查询在线用户','/api/sysOnlineUser/list','GET','系统管理',NOW(),NOW(),NULL,1),
+(340,'强制下线会话','/api/sysOnlineUser/forceLogout','POST','系统管理',NOW(),NOW(),NULL,1);
+INSERT INTO `sys_menu` (`id`,`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`) VALUES
+(140382,10,'/system/online-user','SystemOnlineUser','system/online-user/index','在线用户',0,0,8,2,'system:online-user:list','lucide:UsersRound',NOW(),NOW(),1),
+(140383,140382,'','SystemOnlineUserForceLogout','','强制下线',1,0,1,3,'system:online-user:force-logout','',NOW(),NOW(),1);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140382),(1,140383);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES (140382,339),(140383,340);
+INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUES
+(7806,'p','role_1','/api/sysOnlineUser/list','GET','*','',''),
+(7807,'p','role_1','/api/sysOnlineUser/forceLogout','POST','*','','');
+
 SET UNIQUE_CHECKS = 1;
 SET FOREIGN_KEY_CHECKS = 1;

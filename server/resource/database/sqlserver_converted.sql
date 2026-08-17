@@ -1808,3 +1808,48 @@ BEGIN
     );
     CREATE INDEX [idx_playback_scheme_slot_scheme] ON [gb_playback_scheme_slot] ([scheme_id]);
 END;
+
+-- 在线用户会话与权限 seed。
+IF OBJECT_ID(N'sys_user_sessions', N'U') IS NULL
+BEGIN
+    CREATE TABLE [sys_user_sessions] (
+        [sid] VARCHAR(36) NOT NULL PRIMARY KEY,
+        [user_id] BIGINT NOT NULL,
+        [refresh_token_hash] CHAR(64) NULL,
+        [refresh_jti] VARCHAR(36) NULL,
+        [client_ip] VARCHAR(50) NOT NULL CONSTRAINT [df_user_session_client_ip] DEFAULT '',
+        [login_location] NVARCHAR(100) NOT NULL CONSTRAINT [df_user_session_login_location] DEFAULT N'未知',
+        [user_agent] NVARCHAR(500) NOT NULL CONSTRAINT [df_user_session_user_agent] DEFAULT N'',
+        [browser] NVARCHAR(100) NOT NULL CONSTRAINT [df_user_session_browser] DEFAULT N'未知',
+        [os] NVARCHAR(100) NOT NULL CONSTRAINT [df_user_session_os] DEFAULT N'未知',
+        [login_at] DATETIME2 NOT NULL,
+        [last_active_at] DATETIME2 NOT NULL,
+        [session_expires_at] DATETIME2 NOT NULL,
+        [revoked_at] DATETIME2 NULL,
+        [revoke_reason] VARCHAR(32) NULL,
+        [revoked_by] BIGINT NULL,
+        [created_at] DATETIME2 NULL,
+        [updated_at] DATETIME2 NULL
+    );
+    CREATE INDEX [idx_user_id] ON [sys_user_sessions] ([user_id]);
+    CREATE INDEX [idx_session_valid] ON [sys_user_sessions] ([revoked_at],[session_expires_at],[login_at]);
+    CREATE INDEX [idx_client_ip] ON [sys_user_sessions] ([client_ip]);
+END;
+
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
+(339,N'查询在线用户','/api/sysOnlineUser/list','GET',N'系统管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
+(340,N'强制下线会话','/api/sysOnlineUser/forceLogout','POST',N'系统管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[created_by]) VALUES
+(140382,10,'/system/online-user','SystemOnlineUser','system/online-user/index',N'在线用户',0,0,8,2,'system:online-user:list','lucide:UsersRound',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
+(140383,140382,'','SystemOnlineUserForceLogout','',N'强制下线',1,0,1,3,'system:online-user:force-logout','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140382),(1,140383);
+INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES (140382,339),(140383,340);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES
+(7806,'p','role_1','/api/sysOnlineUser/list','GET','*','',''),
+(7807,'p','role_1','/api/sysOnlineUser/forceLogout','POST','*','','');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;

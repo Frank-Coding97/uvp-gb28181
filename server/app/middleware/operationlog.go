@@ -116,10 +116,11 @@ func shouldSkipLog(c *gin.Context) bool {
 		"/favicon.ico",
 		"/health",
 		"/metrics",
-		"/api/refreshToken",  // 刷新token
-		"/api/captcha/id",    // 生成验证码ID
-		"/api/captcha/image", // 获取验证码图片
-		"/api/config/get",    // 获取配置信息
+		"/api/refreshToken",            // 刷新token
+		"/api/captcha/id",              // 生成验证码ID
+		"/api/captcha/image",           // 获取验证码图片
+		"/api/config/get",              // 获取配置信息
+		"/api/users/session/heartbeat", // 会话续活
 	}
 
 	path := c.Request.URL.Path
@@ -239,6 +240,7 @@ func getOperationModule(c *gin.Context) string {
 		{"/sysAffix", "文件管理"},
 		{"/config", "系统配置"},
 		{"/sysOperationLog", "操作日志管理"},
+		{"/sysOnlineUser", "在线用户管理"},
 	}
 
 	for _, entry := range modulePrefixes {
