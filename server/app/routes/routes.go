@@ -31,6 +31,7 @@ var pluginsManagerControllers = controllers.NewPluginsManagerController()   // �
 var sysJobsControllers = controllers.NewSysJobsController()                 // 定时任务控制器
 var sysJobResultsControllers = controllers.NewSysJobResultsController()     // 定时任务执行结果控制器
 var sysParamControllers = controllers.NewSysParamController()               // 参数管理控制器
+var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // 在线用户控制器
 
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) {
@@ -90,12 +91,22 @@ func InitRoutes(engine *gin.Engine) {
 		public.GET("/config/get", configControllers.GetConfig)
 		// GB28181 免鉴权端点(设备端无登录态,靠一次性 token 鉴别)
 		gbroutes.RegisterPublicRoutes(public)
+		// 在线心跳只要求有效登录会话，不依赖业务菜单权限。
+		sessionOnly := api.Group("")
+		sessionOnly.Use(middleware.JWTAuthMiddleware())
+		sessionOnly.POST("/users/session/heartbeat", sysOnlineUserControllers.Heartbeat)
 		// 受保护的路由
 		protected := api.Group("")
 		protected.Use(middleware.JWTAuthMiddleware())
 		protected.Use(middleware.DemoAccountMiddleware()) // 添加演示账号中间件
 		protected.Use(middleware.CasbinMiddleware())
 		{
+			sysOnlineUser := protected.Group("/sysOnlineUser")
+			{
+				sysOnlineUser.GET("/list", sysOnlineUserControllers.List)
+				sysOnlineUser.POST("/forceLogout", sysOnlineUserControllers.ForceLogout)
+			}
+
 			// 用户管理路由组
 			users := protected.Group("/users")
 			{
