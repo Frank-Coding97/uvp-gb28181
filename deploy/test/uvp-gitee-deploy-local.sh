@@ -5,7 +5,6 @@ umask 027
 ROOT="${UVP_ROOT:-/opt/uvp-gb28181}"
 SOURCE_ROOT="${UVP_SOURCE_ROOT:-$ROOT/source}"
 INCOMING="${UVP_INCOMING:-/home/uvp-deploy/incoming}"
-DEPLOY_SCRIPT="${UVP_DEPLOY_SCRIPT:-/usr/local/sbin/deploy-uvp}"
 GIT_REMOTE="${UVP_GIT_REMOTE:-origin}"
 GIT_REF="${UVP_GIT_REF:-develop}"
 LOCK_FILE="${UVP_LOCAL_DEPLOY_LOCK:-/run/lock/uvp-gitee-local-deploy.lock}"
@@ -25,7 +24,6 @@ done
 
 [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || fail "invalid Git revision"
 [[ -d "$SOURCE_ROOT/.git" ]] || fail "source repository is missing: $SOURCE_ROOT"
-[[ -x "$DEPLOY_SCRIPT" ]] || fail "deploy script is missing: $DEPLOY_SCRIPT"
 install -d -m 0750 "$INCOMING" "$ROOT/builds"
 exec 9>"$LOCK_FILE"
 flock -n 9 || fail "another local deployment is running"
@@ -56,6 +54,11 @@ cleanup() {
 }
 trap cleanup EXIT
 git -C "$SOURCE_ROOT" worktree add --detach "$build_root" "$SHA" >/dev/null
+
+# deploy 脚本与 build 脚本一样随被部署 commit 从 worktree 检出,避免固定
+# 路径 /usr/local/sbin/deploy-uvp 与仓库版本漂移;UVP_DEPLOY_SCRIPT 可显式覆盖
+DEPLOY_SCRIPT="${UVP_DEPLOY_SCRIPT:-$build_root/deploy/test/deploy-uvp.sh}"
+[[ -x "$DEPLOY_SCRIPT" ]] || fail "deploy script is missing: $DEPLOY_SCRIPT"
 
 archive=$(UVP_SOURCE_ROOT="$build_root" \
   "$build_root/deploy/test/build-release.sh" "$SHA" "$INCOMING")
