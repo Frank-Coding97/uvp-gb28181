@@ -35,6 +35,9 @@ type TokenServiceInterface interface {
 	// GenerateRefreshTokenForSession generates a refresh token bound to one server session.
 	GenerateRefreshTokenForSession(userID uint, sid, jti string) (string, error)
 
+	// GenerateRefreshTokenForSessionUntil signs a refresh token with a fixed absolute expiry.
+	GenerateRefreshTokenForSessionUntil(userID uint, sid, jti string, expiresAt time.Time) (string, error)
+
 	// ParseRefreshToken 解析Refresh Token
 	ParseRefreshToken(tokenString string) (*RefreshTokenClaims, error)
 

@@ -163,10 +163,24 @@ func (s *TokenService) GenerateRefreshToken(userID uint) (string, error) {
 
 // GenerateRefreshTokenForSession generates a refresh token with mandatory session bindings.
 func (s *TokenService) GenerateRefreshTokenForSession(userID uint, sid, jti string) (string, error) {
+	expirationTime := time.Now().Add(s.RefreshExpire * time.Second)
+	tokenString, err := s.GenerateRefreshTokenForSessionUntil(userID, sid, jti, expirationTime)
+	if err != nil {
+		return "", err
+	}
+	if s.RedisHelper != nil {
+		if err := s.storeRefreshToken(&app.RefreshTokenInfo{UserID: userID, Token: tokenString, ExpiresAt: expirationTime, CreatedAt: time.Now()}); err != nil {
+			return "", err
+		}
+	}
+	return tokenString, nil
+}
+
+// GenerateRefreshTokenForSessionUntil signs a refresh token without a cache side effect.
+func (s *TokenService) GenerateRefreshTokenForSessionUntil(userID uint, sid, jti string, expirationTime time.Time) (string, error) {
 	if err := validateSessionBindings(sid, jti); err != nil {
 		return "", err
 	}
-	expirationTime := time.Now().Add(s.RefreshExpire * time.Second)
 	claims := &app.RefreshTokenClaims{
 		UserID:        userID,
 		SessionClaims: app.SessionClaims{SID: sid, JTI: jti, TokenUse: TokenUseRefresh, SessionVersion: SessionVersion},
@@ -179,27 +193,7 @@ func (s *TokenService) GenerateRefreshTokenForSession(userID uint, sid, jti stri
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	tokenString, err := token.SignedString([]byte(s.JWTSecret))
-	if err != nil {
-		return "", err
-	}
-
-	// 存储refresh token到Redis
-	refreshTokenInfo := &app.RefreshTokenInfo{
-		UserID:    userID,
-		Token:     tokenString,
-		ExpiresAt: expirationTime,
-		CreatedAt: time.Now(),
-	}
-
-	if s.RedisHelper != nil {
-		err = s.storeRefreshToken(refreshTokenInfo)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	return tokenString, nil
+	return token.SignedString([]byte(s.JWTSecret))
 }
 
 // StoreRefreshToken 存储Refresh Token到Redis
@@ -350,7 +344,7 @@ func validateParsedClaims(claims app.SessionClaims, tokenUse string) error {
 }
 
 // refreshTokenHash is kept local for the session service; tokenhelper never logs or exposes it.
-func refreshTokenHash(token string) string {
+func HashRefreshToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return fmt.Sprintf("%x", sum)
 }

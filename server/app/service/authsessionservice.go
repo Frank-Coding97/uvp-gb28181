@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 )
 
 var (
@@ -26,6 +29,11 @@ type AuthSessionService struct {
 	now           func() time.Time
 	activeWindow  time.Duration
 	touchInterval time.Duration
+}
+
+type SessionTokenPair struct {
+	AccessToken  string
+	RefreshToken string
 }
 
 func NewAuthSessionService(db *gorm.DB) *AuthSessionService {
@@ -104,6 +112,48 @@ func (s *AuthSessionService) Revoke(ctx context.Context, sid, reason string, rev
 		return false, fmt.Errorf("%w: %v", ErrSessionStore, result.Error)
 	}
 	return result.RowsAffected == 1, nil
+}
+
+// RotateRefresh performs a database CAS before returning newly signed tokens.
+func (s *AuthSessionService) RotateRefresh(ctx context.Context, rawRefresh string, tokens app.TokenServiceInterface) (*SessionTokenPair, error) {
+	claims, err := tokens.ParseRefreshToken(rawRefresh)
+	if err != nil {
+		return nil, ErrSessionUnavailable
+	}
+	now := s.now()
+	var session models.SysUserSession
+	if err := s.db.WithContext(ctx).
+		Where("sid = ? AND user_id = ? AND revoked_at IS NULL AND session_expires_at > ? AND EXISTS (SELECT 1 FROM sys_users WHERE sys_users.id = sys_user_sessions.user_id AND sys_users.status = ? AND sys_users.deleted_at IS NULL)", claims.SID, claims.UserID, now, 1).
+		First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionUnavailable
+		}
+		return nil, fmt.Errorf("%w: %v", ErrSessionStore, err)
+	}
+	oldHash := tokenhelper.HashRefreshToken(rawRefresh)
+	if session.RefreshTokenHash == nil || *session.RefreshTokenHash != oldHash || session.RefreshJTI == nil || *session.RefreshJTI != claims.JTI {
+		return nil, ErrSessionUnavailable
+	}
+	newJTI := uuid.NewString()
+	newRefresh, err := tokens.GenerateRefreshTokenForSessionUntil(claims.UserID, claims.SID, newJTI, session.SessionExpiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("%w: sign refresh: %v", ErrSessionStore, err)
+	}
+	newAccess, err := tokens.GenerateTokenForSession(&app.ClaimsUser{UserID: claims.UserID}, claims.SID, uuid.NewString())
+	if err != nil {
+		return nil, fmt.Errorf("%w: sign access: %v", ErrSessionStore, err)
+	}
+	newHash := tokenhelper.HashRefreshToken(newRefresh)
+	result := s.db.WithContext(ctx).Model(&models.SysUserSession{}).
+		Where("sid = ? AND user_id = ? AND refresh_token_hash = ? AND refresh_jti = ? AND revoked_at IS NULL AND session_expires_at > ? AND EXISTS (SELECT 1 FROM sys_users WHERE sys_users.id = sys_user_sessions.user_id AND sys_users.status = ? AND sys_users.deleted_at IS NULL)", claims.SID, claims.UserID, oldHash, claims.JTI, now, 1).
+		Updates(map[string]any{"refresh_token_hash": newHash, "refresh_jti": newJTI, "last_active_at": now, "updated_at": now})
+	if result.Error != nil {
+		return nil, fmt.Errorf("%w: rotate: %v", ErrSessionStore, result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return nil, ErrSessionUnavailable
+	}
+	return &SessionTokenPair{AccessToken: newAccess, RefreshToken: newRefresh}, nil
 }
 
 func (s *AuthSessionService) Status(session models.SysUserSession, now time.Time) string {
