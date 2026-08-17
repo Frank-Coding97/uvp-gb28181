@@ -49,6 +49,15 @@ func (s *AuthSessionService) SetClock(now func() time.Time) {
 	}
 }
 
+func (s *AuthSessionService) ValidateSession(ctx context.Context, sid string, userID uint) error {
+	_, err := s.Authenticate(ctx, sid, userID)
+	return err
+}
+
+func (s *AuthSessionService) TouchSession(ctx context.Context, sid string) error {
+	return s.Touch(ctx, sid)
+}
+
 func (s *AuthSessionService) Create(ctx context.Context, session *models.SysUserSession) error {
 	if session == nil || session.SID == "" || session.UserID == 0 || session.SessionExpiresAt.IsZero() {
 		return fmt.Errorf("%w: invalid session", ErrSessionStore)

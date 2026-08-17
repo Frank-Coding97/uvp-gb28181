@@ -34,6 +34,9 @@ var sysParamControllers = controllers.NewSysParamController()               // �
 
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) {
+	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
+		panic("invalid httpserver.trustedproxies: " + err.Error())
+	}
 	// 全局跨域中间件
 	if app.ConfigYml.GetBool("httpserver.allowcrossdomain") {
 		engine.Use(middleware.CorsNext())
