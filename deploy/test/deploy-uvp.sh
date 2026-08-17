@@ -138,11 +138,19 @@ ACTIVATION_STARTED=1
 ln -sfn "$FINAL_RELEASE" "$ROOT/current"
 systemctl restart uvp-backend
 # the backend has no /healthz route (the container used `nc -z` port probing);
-# any HTTP response means the listener is up, so no --fail here. --retry-all-errors
-# would imply --fail and treat the 404 from /healthz as a failure, so plain --retry
-# (transient errors only) is correct: it waits for the listener, then 404 = success.
-curl --silent --show-error --retry 30 --retry-delay 2 \
-  --max-time 10 -o /dev/null http://127.0.0.1:56001/healthz
+# any HTTP response means the listener is up, so no --fail here. curl --retry
+# would not retry connection-refused (exit 7) and --retry-all-errors would imply
+# --fail and treat the 404 from /healthz as a failure, so poll manually instead:
+# exit 0 = listener responded (even 404), exit 7 = not up yet, retry.
+backend_up=0
+for _ in $(seq 1 30); do
+  if curl --silent --show-error --max-time 5 -o /dev/null http://127.0.0.1:56001/healthz; then
+    backend_up=1
+    break
+  fi
+  sleep 2
+done
+(( backend_up == 1 )) || fail "backend did not listen on :56001 within 60s"
 
 for url in \
   http://127.0.0.1:56000/healthz \
