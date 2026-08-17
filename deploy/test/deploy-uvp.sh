@@ -23,25 +23,18 @@ fail() {
   exit 1
 }
 
-compose_for() {
-  local release="$1"
-  IMAGE_TAG="$release" UVP_ROOT="$ROOT" \
-    docker compose -p uvp-gb28181 -f "$RELEASES/$release/compose.yml" "${@:2}"
-}
-
 rollback() {
   local exit_code=$?
   trap - ERR
-  if [[ "$ACTIVATION_STARTED" == "1" && -n "$PREVIOUS" && -f "$RELEASES/$PREVIOUS/compose.yml" ]]; then
-    log "Deployment failed; rolling back to $PREVIOUS"
-    IMAGE_TAG="$PREVIOUS" UVP_ROOT="$ROOT" \
-      docker compose -p uvp-gb28181 -f "$RELEASES/$PREVIOUS/compose.yml" \
-      up -d --no-build --wait --wait-timeout 180 || true
-  elif [[ "$ACTIVATION_STARTED" == "1" && -f "$ROOT/compose.yml" ]]; then
-    log "Deployment failed on first managed release; restoring bootstrap images"
-    IMAGE_TAG="test" UVP_ROOT="$ROOT" \
-      docker compose -p uvp-gb28181 -f "$ROOT/compose.yml" \
-      up -d --no-build --wait --wait-timeout 180 || true
+  if [[ "$ACTIVATION_STARTED" == "1" ]]; then
+    if [[ -n "$PREVIOUS" && -x "$RELEASES/$PREVIOUS/backend/uvp-gb28181" ]]; then
+      log "Deployment failed; rolling back to $PREVIOUS"
+      ln -sfn "$RELEASES/$PREVIOUS" "$ROOT/current"
+      systemctl restart uvp-backend || true
+    else
+      log "Deployment failed; no previous release to roll back to"
+      systemctl stop uvp-backend || true
+    fi
   fi
   if [[ "$AGENT_ACTIVATED" == "1" ]]; then
     if [[ -n "$PREVIOUS" && -x "$RELEASES/$PREVIOUS/agent/uvp-firewall-agent" ]]; then
@@ -64,7 +57,6 @@ trap rollback ERR
 [[ "$ARCHIVE" == "$INCOMING/uvp-release-$SHA.tar.gz" ]] || fail "Unexpected archive path"
 [[ -f "$ARCHIVE" ]] || fail "Release archive not found"
 [[ -f "$ROOT/config/config.yml" ]] || fail "Runtime config is missing"
-docker network inspect wvp_docker_compose_wvp-network >/dev/null 2>&1 || fail "Shared Docker network is missing"
 
 install -d -m 0755 "$RELEASES"
 exec 9>"$LOCK_FILE"
@@ -110,9 +102,19 @@ done
 rm -rf "$FINAL_RELEASE"
 mv "$TEMP_RELEASE" "$FINAL_RELEASE"
 chmod 0755 "$FINAL_RELEASE/backend/uvp-gb28181"
-
-log "Validating release $SHA"
-compose_for "$SHA" config --quiet
+# runtime config, logs and uploads stay outside the release tree so they
+# survive release switches and cleanup. The release archive may contain a
+# real public/uploads (resources committed to the repo), so remove it
+# before pointing the symlink at the shared data dir.
+rm -rf "$FINAL_RELEASE/backend/config" \
+  "$FINAL_RELEASE/backend/resource/logs" \
+  "$FINAL_RELEASE/backend/resource/public/uploads"
+ln -sfn "$ROOT/config" "$FINAL_RELEASE/backend/config"
+ln -sfn "$ROOT/data/logs" "$FINAL_RELEASE/backend/resource/logs"
+ln -sfn "$ROOT/data/uploads" "$FINAL_RELEASE/backend/resource/public/uploads"
+# the host nginx (www-data) serves frontend/dist straight from the release
+# tree; umask 027 would otherwise leave it root-only
+chmod -R o+rX "$FINAL_RELEASE/frontend"
 
 log "Activating firewall agent for $SHA"
 install -m 0644 "$FINAL_RELEASE/agent/uvp-firewall-agent.service" /etc/systemd/system/uvp-firewall-agent.service
@@ -131,12 +133,14 @@ for _ in {1..50}; do
 done
 [[ -S /run/uvp/firewall-agent.sock ]] || fail "Firewall agent socket was not created"
 
-log "Building runtime images for $SHA"
-compose_for "$SHA" build --pull
-
 log "Activating release $SHA"
 ACTIVATION_STARTED=1
-compose_for "$SHA" up -d --wait --wait-timeout 180
+ln -sfn "$FINAL_RELEASE" "$ROOT/current"
+systemctl restart uvp-backend
+# the backend has no /healthz route (the container used `nc -z` port probing);
+# any HTTP response means the listener is up, so no --fail here
+curl --silent --show-error --retry 30 --retry-delay 2 --retry-all-errors \
+  --max-time 10 -o /dev/null http://127.0.0.1:56001/healthz
 
 for url in \
   http://127.0.0.1:56000/healthz \
@@ -173,9 +177,6 @@ for old_release in "${OLD_RELEASES[@]}"; do
   old_name=$(basename "$old_release")
   if [[ "$old_name" != "$SHA" && "$old_name" != "$PREVIOUS" ]]; then
     rm -rf "$old_release"
-    docker image rm "uvp-gb28181-backend:$old_name" "uvp-gb28181-frontend:$old_name" >/dev/null 2>&1 || true
   fi
 done
-
-docker builder prune -f --filter 'until=168h' >/dev/null 2>&1 || true
 log "Deployment completed"

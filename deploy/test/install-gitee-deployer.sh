@@ -44,10 +44,15 @@ install -m 0755 "$SOURCE_ROOT/deploy/test/deploy-uvp.sh" /usr/local/sbin/deploy-
 install -m 0644 "$SOURCE_ROOT/deploy/test/uvp-gitee-webhook.service" /etc/systemd/system/uvp-gitee-webhook.service
 install -m 0644 "$SOURCE_ROOT/deploy/test/uvp-gitee-deploy.path" /etc/systemd/system/uvp-gitee-deploy.path
 install -m 0644 "$SOURCE_ROOT/deploy/test/uvp-gitee-deploy.service" /etc/systemd/system/uvp-gitee-deploy.service
+install -m 0644 "$SOURCE_ROOT/deploy/test/uvp-backend.service" /etc/systemd/system/uvp-backend.service
+install -d -m 0755 /etc/nginx/sites-available
+install -m 0644 "$SOURCE_ROOT/deploy/test/uvp-frontend.nginx.conf" /etc/nginx/sites-available/uvp-frontend
+ln -sfn /etc/nginx/sites-available/uvp-frontend /etc/nginx/sites-enabled/uvp-frontend
 
 systemctl daemon-reload
 systemctl enable --now uvp-gitee-webhook.service
 systemctl enable --now uvp-gitee-deploy.path
+systemctl enable uvp-backend.service
 systemctl is-active --quiet uvp-gitee-webhook.service
 systemctl is-active --quiet uvp-gitee-deploy.path
 printf 'installed Gitee deployer; configure HTTPS reverse proxy and Gitee WebHook next\n'
