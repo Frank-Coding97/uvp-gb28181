@@ -34,6 +34,15 @@ type AuthSessionService struct {
 type SessionTokenPair struct {
 	AccessToken  string
 	RefreshToken string
+	SID          string
+}
+
+type LoginMetadata struct {
+	ClientIP      string
+	LoginLocation string
+	UserAgent     string
+	Browser       string
+	OS            string
 }
 
 func NewAuthSessionService(db *gorm.DB) *AuthSessionService {
@@ -82,6 +91,46 @@ func (s *AuthSessionService) Create(ctx context.Context, session *models.SysUser
 		return fmt.Errorf("%w: %v", ErrSessionStore, err)
 	}
 	return nil
+}
+
+// CreateLogin signs one access/refresh pair and persists its independently revocable session.
+// Tokens are returned only after the session transaction commits.
+func (s *AuthSessionService) CreateLogin(ctx context.Context, user *models.User, metadata LoginMetadata, tokens app.TokenServiceInterface, sessionTTL time.Duration) (*SessionTokenPair, error) {
+	if user == nil || user.ID == 0 || user.Status != 1 || tokens == nil || sessionTTL <= 0 {
+		return nil, fmt.Errorf("%w: invalid login", ErrSessionStore)
+	}
+	now := s.now()
+	sid, accessJTI, refreshJTI := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	expiresAt := now.Add(sessionTTL)
+	accessToken, err := tokens.GenerateTokenForSession(&app.ClaimsUser{UserID: user.ID, Username: user.Username}, sid, accessJTI)
+	if err != nil {
+		return nil, fmt.Errorf("%w: sign access: %v", ErrSessionStore, err)
+	}
+	refreshToken, err := tokens.GenerateRefreshTokenForSessionUntil(user.ID, sid, refreshJTI, expiresAt)
+	if err != nil {
+		return nil, fmt.Errorf("%w: sign refresh: %v", ErrSessionStore, err)
+	}
+	refreshHash := tokenhelper.HashRefreshToken(refreshToken)
+	session := &models.SysUserSession{
+		SID: sid, UserID: user.ID, RefreshTokenHash: &refreshHash, RefreshJTI: &refreshJTI,
+		ClientIP: metadata.ClientIP, LoginLocation: metadata.LoginLocation, UserAgent: metadata.UserAgent,
+		Browser: metadata.Browser, OS: metadata.OS, LoginAt: now, LastActiveAt: now, SessionExpiresAt: expiresAt,
+	}
+	if session.LoginLocation == "" {
+		session.LoginLocation = "未知"
+	}
+	if session.Browser == "" {
+		session.Browser = "未知"
+	}
+	if session.OS == "" {
+		session.OS = "未知"
+	}
+	if err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return tx.Create(session).Error
+	}); err != nil {
+		return nil, fmt.Errorf("%w: create login: %v", ErrSessionStore, err)
+	}
+	return &SessionTokenPair{AccessToken: accessToken, RefreshToken: refreshToken, SID: sid}, nil
 }
 
 func (s *AuthSessionService) Authenticate(ctx context.Context, sid string, userID uint) (*models.SysUserSession, error) {
@@ -139,6 +188,13 @@ func (s *AuthSessionService) RotateRefresh(ctx context.Context, rawRefresh strin
 		}
 		return nil, fmt.Errorf("%w: %v", ErrSessionStore, err)
 	}
+	var user models.User
+	if err := s.db.WithContext(ctx).Select("id", "username").Where("id = ? AND status = ?", claims.UserID, 1).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrSessionUnavailable
+		}
+		return nil, fmt.Errorf("%w: load refresh user: %v", ErrSessionStore, err)
+	}
 	oldHash := tokenhelper.HashRefreshToken(rawRefresh)
 	if session.RefreshTokenHash == nil || *session.RefreshTokenHash != oldHash || session.RefreshJTI == nil || *session.RefreshJTI != claims.JTI {
 		return nil, ErrSessionUnavailable
@@ -148,7 +204,7 @@ func (s *AuthSessionService) RotateRefresh(ctx context.Context, rawRefresh strin
 	if err != nil {
 		return nil, fmt.Errorf("%w: sign refresh: %v", ErrSessionStore, err)
 	}
-	newAccess, err := tokens.GenerateTokenForSession(&app.ClaimsUser{UserID: claims.UserID}, claims.SID, uuid.NewString())
+	newAccess, err := tokens.GenerateTokenForSession(&app.ClaimsUser{UserID: claims.UserID, Username: user.Username}, claims.SID, uuid.NewString())
 	if err != nil {
 		return nil, fmt.Errorf("%w: sign access: %v", ErrSessionStore, err)
 	}
@@ -162,7 +218,7 @@ func (s *AuthSessionService) RotateRefresh(ctx context.Context, rawRefresh strin
 	if result.RowsAffected != 1 {
 		return nil, ErrSessionUnavailable
 	}
-	return &SessionTokenPair{AccessToken: newAccess, RefreshToken: newRefresh}, nil
+	return &SessionTokenPair{AccessToken: newAccess, RefreshToken: newRefresh, SID: claims.SID}, nil
 }
 
 func (s *AuthSessionService) Status(session models.SysUserSession, now time.Time) string {

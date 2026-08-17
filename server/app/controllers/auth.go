@@ -2,17 +2,22 @@ package controllers
 
 import (
 	"context"
+	"errors"
+	"net"
+	"net/http"
 	"strconv"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/service"
 
 	"uvplatform.cn/uvp-gb28181/app/utils/captchahelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
 
 	"github.com/gin-gonic/gin"
+	useragent "github.com/mssola/user_agent"
 	"gorm.io/gorm"
 )
 
@@ -20,13 +25,48 @@ import (
 
 type AuthController struct {
 	Common
+	sessions   authSessionLifecycle
+	tokens     app.TokenServiceInterface
+	sessionTTL func() time.Duration
+}
+
+type authSessionLifecycle interface {
+	CreateLogin(context.Context, *models.User, service.LoginMetadata, app.TokenServiceInterface, time.Duration) (*service.SessionTokenPair, error)
+	RotateRefresh(context.Context, string, app.TokenServiceInterface) (*service.SessionTokenPair, error)
+	Revoke(context.Context, string, string, *uint) (bool, error)
 }
 
 // NewAuthController 创建认证控制器
 func NewAuthController() *AuthController {
 	return &AuthController{
-		Common: Common{},
+		Common:     Common{},
+		sessionTTL: configuredSessionTTL,
 	}
+}
+
+func newAuthControllerWithDependencies(sessions authSessionLifecycle, tokens app.TokenServiceInterface, sessionTTL time.Duration) *AuthController {
+	return &AuthController{Common: Common{}, sessions: sessions, tokens: tokens, sessionTTL: func() time.Duration { return sessionTTL }}
+}
+
+func (ac *AuthController) authSessions() authSessionLifecycle {
+	if ac.sessions != nil {
+		return ac.sessions
+	}
+	if sessions, ok := app.SessionValidator.(authSessionLifecycle); ok {
+		return sessions
+	}
+	return nil
+}
+
+func (ac *AuthController) tokenService() app.TokenServiceInterface {
+	if ac.tokens != nil {
+		return ac.tokens
+	}
+	return app.TokenService
+}
+
+func configuredSessionTTL() time.Duration {
+	return app.ConfigYml.GetDuration("token.jwttokenrefreshexpire") * time.Second
 }
 
 // Login 用户登录
@@ -118,35 +158,29 @@ func (ac *AuthController) Login(c *gin.Context) {
 		}
 	}
 
-	// 生成token
+	// 会话落库成功后才向客户端返回 token。
 	user.Password = ""
-	token, err := app.TokenService.GenerateTokenWithCache(&app.ClaimsUser{
-		UserID:   user.ID,
-		Username: user.Username,
-	})
-
-	if err != nil {
-		ac.FailAndAbort(c, "生成token失败", err)
+	sessions, tokens := ac.authSessions(), ac.tokenService()
+	if sessions == nil || tokens == nil {
+		ac.FailAndAbort(c, "认证会话服务不可用", service.ErrSessionStore, http.StatusServiceUnavailable)
 	}
-
-	// 生成refresh token
-	refreshToken, err := app.TokenService.GenerateRefreshToken(user.ID)
+	pair, err := sessions.CreateLogin(c.Request.Context(), user, loginMetadata(c), tokens, ac.sessionTTL())
 	if err != nil {
-		ac.FailAndAbort(c, "生成refresh token失败", err)
+		ac.FailAndAbort(c, "创建登录会话失败", err, http.StatusServiceUnavailable)
 	}
-	claims, err := app.TokenService.ParseToken(token)
+	claims, err := tokens.ParseToken(pair.AccessToken)
 	if err != nil {
 		ac.FailAndAbort(c, "解析token失败", err)
 	}
-	claims1, err := app.TokenService.ParseRefreshToken(refreshToken)
+	claims1, err := tokens.ParseRefreshToken(pair.RefreshToken)
 	if err != nil {
 		ac.FailAndAbort(c, "解析refreshToken失败", err)
 	}
 
 	ac.Success(c, gin.H{
-		"accessToken":         token,
+		"accessToken":         pair.AccessToken,
 		"accessTokenExpires":  claims.ExpiresAt.Unix(),
-		"refreshToken":        refreshToken,
+		"refreshToken":        pair.RefreshToken,
 		"refreshTokenExpires": claims1.ExpiresAt.Unix(),
 	})
 }
@@ -174,48 +208,31 @@ func (ac *AuthController) RefreshToken(c *gin.Context) {
 		refreshToken = req.RefreshToken
 	}
 
-	// 解析refreshToken获取用户ID
-	claims, err := app.TokenService.ParseRefreshToken(refreshToken)
+	sessions, tokens := ac.authSessions(), ac.tokenService()
+	if sessions == nil || tokens == nil {
+		ac.FailAndAbort(c, "认证会话服务不可用", service.ErrSessionStore, http.StatusServiceUnavailable)
+	}
+	pair, err := sessions.RotateRefresh(c.Request.Context(), refreshToken, tokens)
 	if err != nil {
-		ac.FailAndAbort(c, "无效的refreshToken", err)
+		status := http.StatusUnauthorized
+		if errors.Is(err, service.ErrSessionStore) {
+			status = http.StatusServiceUnavailable
+		}
+		ac.FailAndAbort(c, "refresh token刷新失败", err, status)
 	}
-
-	// 从数据库中获取用户信息
-	var user models.User
-	if err = app.DB().WithContext(c).First(&user, claims.UserID).Error; err != nil {
-		ac.FailAndAbort(c, "用户不存在", err)
-	}
-
-	// 使用refresh token刷新access token
-	user.Password = ""
-	newAccessToken, err := app.TokenService.RefreshAccessTokenWithCache(refreshToken, &app.ClaimsUser{
-		UserID:   user.ID,
-		Username: user.Username,
-	})
-	if err != nil {
-		ac.FailAndAbort(c, "refresh token刷新失败", err)
-	}
-	claims1, err := app.TokenService.ParseToken(newAccessToken)
+	claims1, err := tokens.ParseToken(pair.AccessToken)
 	if err != nil {
 		ac.FailAndAbort(c, "refresh token解析失败", err)
 	}
-
-	// 取消旧的refresh token生成新的refresh token
-	newRefreshToken, err := app.TokenService.RotateRefreshToken(refreshToken)
-	if err != nil {
-		ac.FailAndAbort(c, "轮换refresh token失败", err)
-	}
-
-	// 解析新refresh token的过期时间
-	newRefreshClaims, err := app.TokenService.ParseRefreshToken(newRefreshToken)
+	newRefreshClaims, err := tokens.ParseRefreshToken(pair.RefreshToken)
 	if err != nil {
 		ac.FailAndAbort(c, "解析新refresh token失败", err)
 	}
 
 	ac.Success(c, gin.H{
-		"accessToken":         newAccessToken,
+		"accessToken":         pair.AccessToken,
 		"accessTokenExpires":  claims1.ExpiresAt.Unix(),
-		"refreshToken":        newRefreshToken,
+		"refreshToken":        pair.RefreshToken,
 		"refreshTokenExpires": newRefreshClaims.ExpiresAt.Unix(),
 	})
 }
@@ -237,22 +254,42 @@ func (ac *AuthController) Logout(c *gin.Context) {
 		return
 	}
 
-	// 撤销 access token
+	// 兼容已开启 access-token cache 的部署,但会话失效以数据库 sid 为准。
 	tokenString, err := common.GetAccessToken(c)
 	if err == nil && tokenString != "" {
-		// 尝试撤销access token，即使失败也继续执行
-		app.TokenService.RevokeTokenWithCache(tokenString)
+		_ = ac.tokenService().RevokeTokenWithCache(tokenString)
 	}
-
-	// 撤销refresh token
-	err = app.TokenService.RevokeRefreshToken(claims.UserID)
+	sessions := ac.authSessions()
+	if sessions == nil {
+		ac.FailAndAbort(c, "认证会话服务不可用", service.ErrSessionStore, http.StatusServiceUnavailable)
+	}
+	_, err = sessions.Revoke(c.Request.Context(), claims.SID, "logout", nil)
 	if err != nil {
-		ac.FailAndAbort(c, "登出失败", err)
+		ac.FailAndAbort(c, "登出失败", err, http.StatusServiceUnavailable)
 	}
 
 	ac.Success(c, gin.H{
 		"message": "登出成功",
 	})
+}
+
+func loginMetadata(c *gin.Context) service.LoginMetadata {
+	rawUA := c.Request.UserAgent()
+	ua := useragent.New(rawUA)
+	browser, _ := ua.Browser()
+	osName := ua.OS()
+	return service.LoginMetadata{
+		ClientIP: c.ClientIP(), LoginLocation: loginLocation(c.ClientIP()), UserAgent: rawUA,
+		Browser: browser, OS: osName,
+	}
+}
+
+func loginLocation(rawIP string) string {
+	ip := net.ParseIP(rawIP)
+	if ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
+		return "内网"
+	}
+	return "未知"
 }
 
 // GetVerifyImgString 获取验证码图片字符串
