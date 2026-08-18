@@ -20,6 +20,7 @@ var (
 	Cache            CacheInterf               // 缓存指针
 	TokenService     TokenServiceInterface     // token管理
 	SessionValidator SessionValidatorInterface // persistent login-session validation
+	LoginLogRecorder LoginLogRecorderInterface // login audit recorder
 	Response         ResponseHandler           // 全局响应指针
 	UploadService    FileUploadService         // 文件上传服务
 	JobScheduler     JobSchedulerInterf        // 全局任务调度器

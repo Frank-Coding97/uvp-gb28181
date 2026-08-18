@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/captchahelper"
 
 	"github.com/gin-gonic/gin"
@@ -30,6 +31,10 @@ func CaptchaMiddleware() gin.HandlerFunc {
 		if captchaValue == "" {
 			captchaValue = c.PostForm("captchaValue")
 		}
+		username := c.Query("username")
+		if username == "" {
+			username = c.PostForm("username")
+		}
 
 		// 如果URL参数和表单数据中没有找到，尝试从JSON body中获取
 		if captchaId == "" || captchaValue == "" {
@@ -48,6 +53,11 @@ func CaptchaMiddleware() gin.HandlerFunc {
 							captchaValue = val
 						}
 					}
+					if username == "" {
+						if val, ok := jsonBody["username"].(string); ok {
+							username = val
+						}
+					}
 				}
 				// 将原始数据重新设置回request body，以便后续中间件使用
 				c.Request.Body = io.NopCloser(bytes.NewBuffer(rawData))
@@ -56,6 +66,7 @@ func CaptchaMiddleware() gin.HandlerFunc {
 
 		// 检查验证码ID和值是否为空
 		if captchaId == "" || captchaValue == "" {
+			recordCaptchaFailure(c, username)
 			app.Response.Fail(c, "验证码ID和验证码值不能为空")
 			c.Abort()
 			return
@@ -63,6 +74,7 @@ func CaptchaMiddleware() gin.HandlerFunc {
 
 		// 验证验证码
 		if !captchahelper.GetCaptchaHelper().VerifyVerifyImgString(captchaId, captchaValue) {
+			recordCaptchaFailure(c, username)
 			app.Response.Fail(c, "验证码错误")
 			c.Abort()
 			return
@@ -71,4 +83,13 @@ func CaptchaMiddleware() gin.HandlerFunc {
 		// 验证通过，继续处理请求
 		c.Next()
 	}
+}
+
+func recordCaptchaFailure(c *gin.Context, username string) {
+	metadata := service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
+	service.RecordLoginAttempt(c.Request.Context(), app.LoginLogRecorder, app.LoginLogEvent{
+		Username: username, Result: service.LoginResultFailure, FailureReason: service.LoginFailureCaptchaInvalid,
+		IP: metadata.ClientIP, Location: metadata.LoginLocation, UserAgent: metadata.UserAgent,
+		Browser: metadata.Browser, OS: metadata.OS,
+	})
 }

@@ -84,6 +84,7 @@ func init() {
 
 	// 初始化持久化登录会话校验;JWT 中间件在 Casbin 前使用,数据库故障 fail-closed。
 	app.SessionValidator = service.NewAuthSessionService(app.DB())
+	app.LoginLogRecorder = service.NewLoginLogService(app.DB())
 
 	// 初始化文件上传服务
 	app.UploadService = newUploadService()

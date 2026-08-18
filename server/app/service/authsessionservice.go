@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/google/uuid"
+	useragent "github.com/mssola/user_agent"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
@@ -43,6 +45,24 @@ type LoginMetadata struct {
 	UserAgent     string
 	Browser       string
 	OS            string
+}
+
+// LoginMetadataFrom normalizes the request metadata shared by login and captcha audit paths.
+func LoginMetadataFrom(clientIP, rawUA string) LoginMetadata {
+	ua := useragent.New(rawUA)
+	browser, _ := ua.Browser()
+	if browser == "" {
+		browser = "未知"
+	}
+	osName := ua.OS()
+	if osName == "" {
+		osName = "未知"
+	}
+	location := "未知"
+	if ip := net.ParseIP(clientIP); ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
+		location = "内网"
+	}
+	return LoginMetadata{ClientIP: clientIP, LoginLocation: location, UserAgent: rawUA, Browser: browser, OS: osName}
 }
 
 func NewAuthSessionService(db *gorm.DB) *AuthSessionService {

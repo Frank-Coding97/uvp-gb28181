@@ -3,7 +3,6 @@ package controllers
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -17,7 +16,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
 
 	"github.com/gin-gonic/gin"
-	useragent "github.com/mssola/user_agent"
 	"gorm.io/gorm"
 )
 
@@ -83,6 +81,7 @@ func configuredSessionTTL() time.Duration {
 func (ac *AuthController) Login(c *gin.Context) {
 	var req models.LoginRequest
 	if err := req.Validate(c); err != nil {
+		ac.recordLogin(c, nil, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, err.Error(), err)
 	}
 
@@ -92,13 +91,16 @@ func (ac *AuthController) Login(c *gin.Context) {
 		return d.Where("username = ?", req.Username)
 	})
 	if err != nil {
+		ac.recordLogin(c, nil, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, "用户查询错误", err)
 	}
 
 	if user.IsEmpty() {
+		ac.recordLogin(c, nil, req.Username, service.LoginResultFailure, service.LoginFailureUserNotFound)
 		ac.FailAndAbort(c, "用户不存在", nil)
 	}
 	if user.Status != 1 {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureUserDisabled)
 		ac.FailAndAbort(c, "用户未启用", nil)
 	}
 
@@ -112,6 +114,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 		// 检查账户是否被锁定
 		lockKey := "account_locked:" + req.Username
 		if locked, _ := app.Cache.Exists(context.Background(), lockKey); locked > 0 {
+			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 			ac.FailAndAbort(c, "账户已被锁定，请稍后再试", nil)
 			return
 		}
@@ -137,12 +140,14 @@ func (ac *AuthController) Login(c *gin.Context) {
 			if failCount >= loginLockThreshold {
 				// 锁定账户
 				app.Cache.Set(context.Background(), lockKey, "1", time.Duration(loginLockDuration)*time.Second)
+				ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureAccountLocked)
 				ac.FailAndAbort(c, "密码错误次数过多，账户已被锁定", nil)
 				return
 			}
 
 			// 返回密码错误，并提示剩余尝试次数
 			remainingAttempts := loginLockThreshold - failCount
+			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailurePasswordIncorrect)
 			ac.FailAndAbort(c, "密码错误，剩余尝试次数: "+strconv.Itoa(remainingAttempts), nil)
 			return
 		}
@@ -154,6 +159,7 @@ func (ac *AuthController) Login(c *gin.Context) {
 		// 未启用登录锁定功能，使用原有逻辑
 		// 验证密码
 		if err = passwordhelper.ComparePassword(user.Password, req.Password); err != nil {
+			ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailurePasswordIncorrect)
 			ac.FailAndAbort(c, "密码错误", err)
 		}
 	}
@@ -162,27 +168,48 @@ func (ac *AuthController) Login(c *gin.Context) {
 	user.Password = ""
 	sessions, tokens := ac.authSessions(), ac.tokenService()
 	if sessions == nil || tokens == nil {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureSessionCreate)
 		ac.FailAndAbort(c, "认证会话服务不可用", service.ErrSessionStore, http.StatusServiceUnavailable)
 	}
 	pair, err := sessions.CreateLogin(c.Request.Context(), user, loginMetadata(c), tokens, ac.sessionTTL())
-	if err != nil {
+	if err != nil || pair == nil {
+		if err == nil {
+			err = service.ErrSessionStore
+		}
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureSessionCreate)
 		ac.FailAndAbort(c, "创建登录会话失败", err, http.StatusServiceUnavailable)
 	}
 	claims, err := tokens.ParseToken(pair.AccessToken)
 	if err != nil {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, "解析token失败", err)
 	}
 	claims1, err := tokens.ParseRefreshToken(pair.RefreshToken)
 	if err != nil {
+		ac.recordLogin(c, user, req.Username, service.LoginResultFailure, service.LoginFailureServerError)
 		ac.FailAndAbort(c, "解析refreshToken失败", err)
 	}
 
+	ac.recordLogin(c, user, req.Username, service.LoginResultSuccess, "")
 	ac.Success(c, gin.H{
 		"accessToken":         pair.AccessToken,
 		"accessTokenExpires":  claims.ExpiresAt.Unix(),
 		"refreshToken":        pair.RefreshToken,
 		"refreshTokenExpires": claims1.ExpiresAt.Unix(),
 	})
+}
+
+func (ac *AuthController) recordLogin(c *gin.Context, user *models.User, username, result, reason string) {
+	var userID *uint
+	if user != nil && user.ID != 0 {
+		id := user.ID
+		userID = &id
+	}
+	event := app.LoginLogEvent{UserID: userID, Username: username, Result: result, FailureReason: reason}
+	metadata := service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
+	event.IP, event.Location, event.UserAgent = metadata.ClientIP, metadata.LoginLocation, metadata.UserAgent
+	event.Browser, event.OS = metadata.Browser, metadata.OS
+	service.RecordLoginAttempt(c.Request.Context(), app.LoginLogRecorder, event)
 }
 
 // RefreshToken 刷新访问令牌
@@ -274,22 +301,11 @@ func (ac *AuthController) Logout(c *gin.Context) {
 }
 
 func loginMetadata(c *gin.Context) service.LoginMetadata {
-	rawUA := c.Request.UserAgent()
-	ua := useragent.New(rawUA)
-	browser, _ := ua.Browser()
-	osName := ua.OS()
-	return service.LoginMetadata{
-		ClientIP: c.ClientIP(), LoginLocation: loginLocation(c.ClientIP()), UserAgent: rawUA,
-		Browser: browser, OS: osName,
-	}
+	return service.LoginMetadataFrom(c.ClientIP(), c.Request.UserAgent())
 }
 
 func loginLocation(rawIP string) string {
-	ip := net.ParseIP(rawIP)
-	if ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()) {
-		return "内网"
-	}
-	return "未知"
+	return service.LoginMetadataFrom(rawIP, "").LoginLocation
 }
 
 // GetVerifyImgString 获取验证码图片字符串
