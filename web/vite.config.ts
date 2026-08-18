@@ -25,7 +25,8 @@ export default defineConfig(({ mode }) => {
             proxy: {
                 "/api": {
                     target: apiProxyTarget,
-                    changeOrigin: true
+                    changeOrigin: true,
+                    xfwd: true
                     //rewrite: path => path.replace(/^\/api/, "")
                 },
                 // 后端 Gin static:通道快照 / 上传文件等,由 httpserver.serverrootpath 挂载

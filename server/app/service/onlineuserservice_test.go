@@ -57,3 +57,16 @@ func TestOnlineUserForceLogoutRejectsCurrentAndIsIdempotent(t *testing.T) {
 	_, err = service.Authenticate(context.Background(), "sid-current", 7)
 	require.NoError(t, err)
 }
+
+func TestOnlineUserForceLogoutRejectsUnknownSessionWhenNotFoundErrorMasked(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.User{}, &models.SysUserSession{}))
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:disable_raise_record_not_found", func(g *gorm.DB) {
+		g.Statement.RaiseErrorOnNotFound = false
+	}))
+
+	service := NewAuthSessionService(db)
+	_, err = service.ForceLogout(context.Background(), "missing", "sid-current", 99)
+	require.ErrorIs(t, err, ErrSessionUnavailable)
+}

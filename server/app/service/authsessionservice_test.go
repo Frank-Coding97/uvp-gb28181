@@ -53,6 +53,9 @@ func TestAuthSessionRevokeIsIdempotentAndFailClosed(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.SysUserSession{}))
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("test:disable_raise_record_not_found", func(g *gorm.DB) {
+		g.Statement.RaiseErrorOnNotFound = false
+	}))
 
 	now := time.Date(2026, 8, 17, 16, 0, 0, 0, time.UTC)
 	service := NewAuthSessionService(db)

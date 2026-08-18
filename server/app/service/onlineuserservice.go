@@ -112,15 +112,15 @@ func (s *AuthSessionService) ForceLogout(ctx context.Context, targetSID, current
 		models.SysUserSession
 		Username string
 	}
-	err := s.db.WithContext(ctx).Table("sys_user_sessions AS sessions").
+	query := s.db.WithContext(ctx).Table("sys_user_sessions AS sessions").
 		Select("sessions.*, users.username").
 		Joins("LEFT JOIN sys_users AS users ON users.id = sessions.user_id").
-		Where("sessions.sid = ?", targetSID).Take(&row).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrSessionUnavailable
-		}
-		return nil, fmt.Errorf("%w: load force-logout target: %v", ErrSessionStore, err)
+		Where("sessions.sid = ?", targetSID).Take(&row)
+	if query.Error != nil && !errors.Is(query.Error, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: load force-logout target: %v", ErrSessionStore, query.Error)
+	}
+	if query.RowsAffected != 1 {
+		return nil, ErrSessionUnavailable
 	}
 	result := &ForceLogoutResult{Username: row.Username, ClientIP: row.ClientIP, SID: row.SID}
 	if row.RevokedAt != nil || !row.SessionExpiresAt.After(s.now()) {

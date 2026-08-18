@@ -135,16 +135,18 @@ func (s *AuthSessionService) CreateLogin(ctx context.Context, user *models.User,
 
 func (s *AuthSessionService) Authenticate(ctx context.Context, sid string, userID uint) (*models.SysUserSession, error) {
 	var session models.SysUserSession
-	err := s.db.WithContext(ctx).
+	result := s.db.WithContext(ctx).
 		Where("sid = ? AND user_id = ? AND revoked_at IS NULL AND session_expires_at > ?", sid, userID, s.now()).
-		First(&session).Error
-	if err == nil {
-		return &session, nil
+		First(&session)
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: %v", ErrSessionStore, result.Error)
 	}
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	// gormhelper disables RaiseErrorOnNotFound globally, so RowsAffected is the
+	// authoritative signal for an absent, revoked, or expired session.
+	if result.RowsAffected != 1 {
 		return nil, ErrSessionUnavailable
 	}
-	return nil, fmt.Errorf("%w: %v", ErrSessionStore, err)
+	return &session, nil
 }
 
 func (s *AuthSessionService) Touch(ctx context.Context, sid string) error {
@@ -206,20 +208,22 @@ func (s *AuthSessionService) RotateRefresh(ctx context.Context, rawRefresh strin
 	}
 	now := s.now()
 	var session models.SysUserSession
-	if err := s.db.WithContext(ctx).
+	sessionResult := s.db.WithContext(ctx).
 		Where("sid = ? AND user_id = ? AND revoked_at IS NULL AND session_expires_at > ? AND EXISTS (SELECT 1 FROM sys_users WHERE sys_users.id = sys_user_sessions.user_id AND sys_users.status = ? AND sys_users.deleted_at IS NULL)", claims.SID, claims.UserID, now, 1).
-		First(&session).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrSessionUnavailable
-		}
-		return nil, fmt.Errorf("%w: %v", ErrSessionStore, err)
+		First(&session)
+	if sessionResult.Error != nil && !errors.Is(sessionResult.Error, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: %v", ErrSessionStore, sessionResult.Error)
+	}
+	if sessionResult.RowsAffected != 1 {
+		return nil, ErrSessionUnavailable
 	}
 	var user models.User
-	if err := s.db.WithContext(ctx).Select("id", "username").Where("id = ? AND status = ?", claims.UserID, 1).First(&user).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrSessionUnavailable
-		}
-		return nil, fmt.Errorf("%w: load refresh user: %v", ErrSessionStore, err)
+	userResult := s.db.WithContext(ctx).Select("id", "username").Where("id = ? AND status = ?", claims.UserID, 1).First(&user)
+	if userResult.Error != nil && !errors.Is(userResult.Error, gorm.ErrRecordNotFound) {
+		return nil, fmt.Errorf("%w: load refresh user: %v", ErrSessionStore, userResult.Error)
+	}
+	if userResult.RowsAffected != 1 {
+		return nil, ErrSessionUnavailable
 	}
 	oldHash := tokenhelper.HashRefreshToken(rawRefresh)
 	if session.RefreshTokenHash == nil || *session.RefreshTokenHash != oldHash || session.RefreshJTI == nil || *session.RefreshJTI != claims.JTI {
