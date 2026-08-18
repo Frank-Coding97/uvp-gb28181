@@ -73,10 +73,16 @@ type dbExecutor struct {
 }
 
 func (e *dbExecutor) ExecSQL(sqlText string) error {
-	// gorm 全局 PrepareStmt=true 时,Exec 走预处理路径,MySQL 服务器对多语句预处理报 1064。
-	// 因此按语句边界拆分后逐条 Exec(单语句预处理合法,且跨方言安全)。
+	// 迁移 SQL 可能包含 MySQL PREPARE/EXECUTE 这样的服务器端控制语句。
+	// 即使按语句拆分,全局 PrepareStmt 仍会把 PREPARE 当成预处理协议发送并报 1295,
+	// 所以迁移必须在关闭 GORM PrepareStmt 且解包底层连接池的 session 上逐条执行。
+	db := e.db.Session(&gorm.Session{NewDB: true, PrepareStmt: false})
+	if prepared, ok := db.Statement.ConnPool.(*gorm.PreparedStmtDB); ok {
+		db.Statement.ConnPool = prepared.ConnPool
+		db.Config.ConnPool = prepared.ConnPool
+	}
 	for _, stmt := range splitStatements(sqlText) {
-		if err := e.db.Exec(stmt).Error; err != nil {
+		if err := db.Exec(stmt).Error; err != nil {
 			return err
 		}
 	}
