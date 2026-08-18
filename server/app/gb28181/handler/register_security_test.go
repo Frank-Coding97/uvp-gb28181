@@ -13,6 +13,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 )
 
 type fakeRegisterSecurity struct {
@@ -20,6 +21,7 @@ type fakeRegisterSecurity struct {
 	issueCalls   int
 	validateErr  error
 	validatedNC  string
+	validatedTxn string
 	events       []gbsecurity.Event
 	trustedCalls []trustedRegisterCall
 }
@@ -93,6 +95,12 @@ func TestRegisterTransactionReplaysSuccessWithoutDuplicateSideEffects(t *testing
 
 func (f *fakeRegisterSecurity) ValidateNonce(_ string, nonceCount string) error {
 	f.validatedNC = nonceCount
+	return f.validateErr
+}
+
+func (f *fakeRegisterSecurity) ValidateNonceForTransaction(_ string, nonceCount, transactionFingerprint string) error {
+	f.validatedNC = nonceCount
+	f.validatedTxn = transactionFingerprint
 	return f.validateErr
 }
 
@@ -181,6 +189,28 @@ func TestRegisterSecurityClassifiesNonceFailuresAndReturnsFreshChallenge(t *test
 			require.Empty(t, security.validatedNC, "legacy devices without qop/nc must remain supported")
 		})
 	}
+}
+
+func TestRegisterSecurityTreatsTrackedExpiredChallengeAsStale(t *testing.T) {
+	security := &fakeRegisterSecurity{nonces: []string{"old-nonce", "fresh-nonce"}}
+	handler := NewRegisterHandler(securityTestCfg())
+	handler.SetSecurity(security)
+	sink := &captureDiagnosticSink{}
+	handler.SetDiagnosticSink(sink)
+
+	initial := newSecurityRegisterRequest(securityTestDeviceID, securityTestServerID)
+	handler.Handle(initial, &captureServerTransaction{})
+	security.validateErr = gbsecurity.ErrNonceExpired
+	stale := authorizedRegisterRequest(t, "old-nonce", securityTestPassword)
+	tx := &captureServerTransaction{}
+	handler.Handle(stale, tx)
+
+	require.Equal(t, sip.StatusUnauthorized, tx.response.StatusCode)
+	require.Len(t, security.events, 1)
+	require.Equal(t, gbsecurity.ReasonNonceStale, security.events[0].Reason)
+	require.NotEmpty(t, security.validatedTxn)
+	require.Len(t, sink.snapshot(), 1)
+	require.Equal(t, diagnosis.CodeNonceStale, sink.snapshot()[0].Code)
 }
 
 func newSecurityRegisterRequest(deviceID, serverID string) *sip.Request {

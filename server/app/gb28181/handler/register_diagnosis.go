@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"sync"
 	"time"
@@ -27,13 +28,13 @@ func (h *RegisterHandler) trackRegisterChallenge(req *sip.Request, deviceID, non
 	}
 	callID := registerCallID(req)
 	cseq := registerCSeq(req)
-	h.attempts.start(diagnosis.Event{
+	h.attempts.startChallenge(diagnosis.Event{
 		CorrelationKey: diagnosis.RegisterCorrelationKey(deviceID, callID, cseq, nonce),
 		State:          diagnosis.StateActive, Category: diagnosis.CategoryRegisterFailure,
 		Code: diagnosis.CodeRegisterTimeout, Stage: diagnosis.StageRegister,
 		Source: diagnosis.SourceRuntime, DeviceID: deviceID, CallID: callID,
 		CSeq: cseq, Method: string(sip.REGISTER),
-	})
+	}, nonce)
 }
 
 func (h *RegisterHandler) finishRegisterAttempt(req *sip.Request, deviceID, nonce string) {
@@ -81,6 +82,8 @@ func diagnosisCodeForNonceError(err error) diagnosis.Code {
 		return diagnosis.CodeNonceExpired
 	case errors.Is(err, gbsecurity.ErrNonceReplay):
 		return diagnosis.CodeNonceReplay
+	case errors.Is(err, gbsecurity.ErrNonceStale):
+		return diagnosis.CodeNonceStale
 	default:
 		return diagnosis.CodeNonceInvalid
 	}
@@ -92,6 +95,7 @@ type registerAttempt struct {
 	deadline time.Time
 	timedOut bool
 	timer    registerTimer
+	nonceSum [sha256.Size]byte
 }
 
 type registerAttemptTracker struct {
@@ -130,9 +134,16 @@ func (tracker *registerAttemptTracker) setSink(sink diagnosis.DiagnosticSink) {
 }
 
 func (tracker *registerAttemptTracker) start(event diagnosis.Event) {
+	tracker.startChallenge(event, "")
+}
+
+func (tracker *registerAttemptTracker) startChallenge(event diagnosis.Event, nonce string) {
 	now := tracker.now().UTC()
 	event.ObservedAt = now
 	attempt := &registerAttempt{event: event, started: now, deadline: now.Add(tracker.window)}
+	if nonce != "" {
+		attempt.nonceSum = sha256.Sum256([]byte(nonce))
+	}
 	tracker.mu.Lock()
 	if current := tracker.attempts[event.CorrelationKey]; current != nil && current.timer != nil {
 		current.timer.Stop()
@@ -143,6 +154,21 @@ func (tracker *registerAttemptTracker) start(event diagnosis.Event) {
 	tracker.attempts[event.CorrelationKey] = attempt
 	attempt.timer = tracker.after(tracker.window, func() { tracker.expire(event.CorrelationKey) })
 	tracker.mu.Unlock()
+}
+
+func (tracker *registerAttemptTracker) hasChallenge(deviceID, nonce string) bool {
+	if deviceID == "" || nonce == "" {
+		return false
+	}
+	sum := sha256.Sum256([]byte(nonce))
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	for _, attempt := range tracker.attempts {
+		if attempt.event.DeviceID == deviceID && attempt.nonceSum == sum {
+			return true
+		}
+	}
+	return false
 }
 
 func (tracker *registerAttemptTracker) expire(key string) bool {

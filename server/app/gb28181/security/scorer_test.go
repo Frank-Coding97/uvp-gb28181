@@ -104,3 +104,24 @@ func TestNonceReplayStateExpiresWithNonceTTL(t *testing.T) {
 	require.NoError(t, m.Validate(fresh, "00000001"))
 	require.Len(t, m.used, 1)
 }
+
+func TestNonceValidationIsIdempotentWithinSameTransaction(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(100, 0)}
+	m := NewNonceManager([]byte("secret"), time.Minute, clock)
+	nonce, err := m.Issue()
+	require.NoError(t, err)
+
+	require.NoError(t, m.ValidateForTransaction(nonce, "00000001", "device|call|1|branch"))
+	require.NoError(t, m.ValidateForTransaction(nonce, "00000001", "device|call|1|branch"))
+	require.Len(t, m.used, 1)
+}
+
+func TestNonceValidationRejectsReplayAcrossTransactions(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(100, 0)}
+	m := NewNonceManager([]byte("secret"), time.Minute, clock)
+	nonce, err := m.Issue()
+	require.NoError(t, err)
+
+	require.NoError(t, m.ValidateForTransaction(nonce, "00000001", "device|call-a|1|branch-a"))
+	require.ErrorIs(t, m.ValidateForTransaction(nonce, "00000001", "device|call-b|2|branch-b"), ErrNonceReplay)
+}

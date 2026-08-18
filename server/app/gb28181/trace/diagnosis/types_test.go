@@ -16,6 +16,7 @@ func TestCategoryCodeMatrix(t *testing.T) {
 		{CategoryRegisterFailure, CodeNonceInvalid},
 		{CategoryRegisterFailure, CodeNonceExpired},
 		{CategoryRegisterFailure, CodeNonceReplay},
+		{CategoryRegisterFailure, CodeNonceStale},
 		{CategoryRegisterFailure, CodeServerIDMismatch},
 		{CategoryRegisterFailure, CodeDeviceNotPreallocated},
 		{CategoryRegisterFailure, CodeInvalidRequest},

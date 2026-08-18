@@ -199,6 +199,7 @@ func TestRegisterDiagnosisNonceCodeMapping(t *testing.T) {
 		{gbsecurity.ErrNonceInvalid, diagnosis.CodeNonceInvalid},
 		{gbsecurity.ErrNonceExpired, diagnosis.CodeNonceExpired},
 		{gbsecurity.ErrNonceReplay, diagnosis.CodeNonceReplay},
+		{gbsecurity.ErrNonceStale, diagnosis.CodeNonceStale},
 	} {
 		require.Equal(t, tt.code, diagnosisCodeForNonceError(tt.err))
 	}

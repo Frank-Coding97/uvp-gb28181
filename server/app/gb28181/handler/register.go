@@ -65,6 +65,9 @@ func (s *standaloneRegisterSecurity) IssueNonce() (string, error) {
 func (s *standaloneRegisterSecurity) ValidateNonce(nonce, nonceCount string) error {
 	return s.nonce.Validate(nonce, nonceCount)
 }
+func (s *standaloneRegisterSecurity) ValidateNonceForTransaction(nonce, nonceCount, transactionFingerprint string) error {
+	return s.nonce.ValidateForTransaction(nonce, nonceCount, transactionFingerprint)
+}
 func (s *standaloneRegisterSecurity) Record(gbsecurity.Event) error { return nil }
 func (s *standaloneRegisterSecurity) TrustEndpoint(string, string, string, time.Duration) error {
 	return nil
@@ -266,11 +269,14 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeDigestFailure, status)
 		return
 	}
-	if err := h.security.ValidateNonce(cred.Nonce, digestNonceCount(cred.Nc)); err != nil {
+	if err := h.validateNonce(cred.Nonce, digestNonceCount(cred.Nc), transactionKey, deviceID); err != nil {
 		h.recordSecurity(req, deviceID, nonceFailureReason(err))
-		status, _ := h.respondChallenge(req, tx)
+		status, freshNonce := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
 		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosisCodeForNonceError(err), status)
+		if status == sip.StatusUnauthorized {
+			h.trackRegisterChallenge(req, deviceID, freshNonce)
+		}
 		return
 	}
 
@@ -361,6 +367,23 @@ func digestNonceCount(count int) string {
 	return fmt.Sprintf("%08x", count)
 }
 
+type transactionNonceValidator interface {
+	ValidateNonceForTransaction(nonce, nonceCount, transactionFingerprint string) error
+}
+
+func (h *RegisterHandler) validateNonce(nonce, nonceCount, transactionFingerprint, deviceID string) error {
+	var err error
+	if validator, ok := h.security.(transactionNonceValidator); ok {
+		err = validator.ValidateNonceForTransaction(nonce, nonceCount, transactionFingerprint)
+	} else {
+		err = h.security.ValidateNonce(nonce, nonceCount)
+	}
+	if errors.Is(err, gbsecurity.ErrNonceExpired) && h.attempts.hasChallenge(deviceID, nonce) {
+		return gbsecurity.ErrNonceStale
+	}
+	return err
+}
+
 func (h *RegisterHandler) respondChallenge(req *sip.Request, tx sip.ServerTransaction) (int, string) {
 	nonce, err := h.security.IssueNonce()
 	if err != nil {
@@ -388,6 +411,8 @@ func nonceFailureReason(err error) gbsecurity.Reason {
 		return gbsecurity.ReasonNonceExpired
 	case errors.Is(err, gbsecurity.ErrNonceReplay):
 		return gbsecurity.ReasonNonceReplay
+	case errors.Is(err, gbsecurity.ErrNonceStale):
+		return gbsecurity.ReasonNonceStale
 	default:
 		return gbsecurity.ReasonNonceInvalid
 	}

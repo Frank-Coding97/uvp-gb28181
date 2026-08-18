@@ -100,6 +100,9 @@ func (r *Runtime) IssueNonce() (string, error) {
 func (r *Runtime) ValidateNonce(nonce, nonceCount string) error {
 	return r.scorer.Nonce().Validate(nonce, nonceCount)
 }
+func (r *Runtime) ValidateNonceForTransaction(nonce, nonceCount, transactionFingerprint string) error {
+	return r.scorer.Nonce().ValidateForTransaction(nonce, nonceCount, transactionFingerprint)
+}
 func (r *Runtime) TrustEndpoint(deviceID, transport, address string, expires time.Duration) error {
 	return r.scorer.UpdateTrustedEndpoint(deviceID, transport, address, r.clock.Now().Add(expires))
 }

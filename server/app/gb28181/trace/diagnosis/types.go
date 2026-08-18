@@ -20,6 +20,7 @@ const (
 	CodeNonceInvalid          Code = "nonce_invalid"
 	CodeNonceExpired          Code = "nonce_expired"
 	CodeNonceReplay           Code = "nonce_replay"
+	CodeNonceStale            Code = "nonce_stale"
 	CodeServerIDMismatch      Code = "server_id_mismatch"
 	CodeDeviceNotPreallocated Code = "device_not_preallocated"
 	CodeInvalidRequest        Code = "invalid_request"
@@ -96,7 +97,7 @@ func ValidateCategoryCode(category Category, code Code) error {
 	switch category {
 	case CategoryRegisterFailure:
 		switch code {
-		case CodeDigestFailure, CodeNonceInvalid, CodeNonceExpired, CodeNonceReplay,
+		case CodeDigestFailure, CodeNonceInvalid, CodeNonceExpired, CodeNonceReplay, CodeNonceStale,
 			CodeServerIDMismatch, CodeDeviceNotPreallocated, CodeInvalidRequest,
 			CodeInternalError, CodeRegisterTimeout, CodeUndetermined:
 			valid = true

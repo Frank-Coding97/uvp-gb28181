@@ -18,6 +18,7 @@ var (
 	ErrNonceInvalid = errors.New("nonce invalid")
 	ErrNonceExpired = errors.New("nonce expired")
 	ErrNonceReplay  = errors.New("nonce replay")
+	ErrNonceStale   = errors.New("nonce stale")
 )
 
 type scoreBucket struct {
@@ -136,8 +137,8 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	}
 	event.Action = ActionBan
 	s.mu.Lock()
-		if previous, exists := s.decisions[event.SourceIP]; exists {
-			if previous.ActiveAt(event.Occurred) {
+	if previous, exists := s.decisions[event.SourceIP]; exists {
+		if previous.ActiveAt(event.Occurred) {
 			s.mu.Unlock()
 			return event, nil, nil
 		}
@@ -219,7 +220,12 @@ type NonceManager struct {
 	ttl    time.Duration
 	clock  Clock
 	mu     sync.Mutex
-	used   map[string]time.Time
+	used   map[string]nonceUse
+}
+
+type nonceUse struct {
+	transactionFingerprint string
+	expiresAt              time.Time
 }
 
 func NewNonceManager(secret []byte, ttl time.Duration, clock Clock) *NonceManager {
@@ -230,7 +236,7 @@ func NewNonceManager(secret []byte, ttl time.Duration, clock Clock) *NonceManage
 		secret = make([]byte, 32)
 		_, _ = rand.Read(secret)
 	}
-	return &NonceManager{secret: append([]byte(nil), secret...), ttl: ttl, clock: clock, used: make(map[string]time.Time)}
+	return &NonceManager{secret: append([]byte(nil), secret...), ttl: ttl, clock: clock, used: make(map[string]nonceUse)}
 }
 
 func (m *NonceManager) Issue() (string, error) {
@@ -246,6 +252,10 @@ func (m *NonceManager) Issue() (string, error) {
 }
 
 func (m *NonceManager) Validate(nonce, nonceCount string) error {
+	return m.ValidateForTransaction(nonce, nonceCount, "")
+}
+
+func (m *NonceManager) ValidateForTransaction(nonce, nonceCount, transactionFingerprint string) error {
 	raw, err := base64.RawURLEncoding.DecodeString(nonce)
 	if err != nil || len(raw) != 56 {
 		return ErrNonceInvalid
@@ -262,15 +272,18 @@ func (m *NonceManager) Validate(nonce, nonceCount string) error {
 	key := nonce + "|" + strings.TrimSpace(nonceCount)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for usedKey, expiresAt := range m.used {
-		if !expiresAt.After(now) {
+	for usedKey, use := range m.used {
+		if !use.expiresAt.After(now) {
 			delete(m.used, usedKey)
 		}
 	}
-	if _, exists := m.used[key]; exists {
+	if use, exists := m.used[key]; exists {
+		if transactionFingerprint != "" && hmac.Equal([]byte(use.transactionFingerprint), []byte(transactionFingerprint)) {
+			return nil
+		}
 		return ErrNonceReplay
 	}
-	m.used[key] = issued.Add(m.ttl)
+	m.used[key] = nonceUse{transactionFingerprint: transactionFingerprint, expiresAt: issued.Add(m.ttl)}
 	return nil
 }
 
