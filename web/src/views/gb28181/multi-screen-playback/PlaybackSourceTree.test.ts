@@ -35,6 +35,7 @@ function mountTree() {
 
 describe("PlaybackSourceTree", () => {
     beforeEach(() => {
+        window.localStorage.clear();
         api.listDevices.mockReset();
         api.listChannels.mockReset();
         api.listDirectoryTree.mockReset();
@@ -51,11 +52,16 @@ describe("PlaybackSourceTree", () => {
         vi.useRealTimers();
     });
 
-    it("shows three source views and nests channels below an expanded device", async () => {
+    it("shows source views and nests channels below an expanded device", async () => {
         const wrapper = mountTree();
         await flushPromises();
 
-        expect(wrapper.findAll("[role=tab]").map(node => node.text())).toEqual(["设备树", "国标目录", "自定义目录"]);
+        expect(wrapper.findAll("[role=tab]").map(node => node.text())).toEqual(["设备树", "国标目录", "自定义目录", "我的收藏"]);
+        expect(wrapper.findAll("[data-test^=source-view-scroll]")).toHaveLength(2);
+        expect(wrapper.find("[data-test=source-view-devices] .lucide-cctv").exists()).toBe(true);
+        expect(wrapper.find("[data-test=source-view-national] .lucide-map-pin").exists()).toBe(true);
+        expect(wrapper.find("[data-test=source-view-custom] .lucide-folder").exists()).toBe(true);
+        expect(wrapper.find("[data-test=source-view-favorites] .lucide-star").exists()).toBe(true);
         expect(wrapper.find(".tree-title").exists()).toBe(false);
         expect(wrapper.find(".tree-head .lucide-router").exists()).toBe(false);
         expect(wrapper.find(".tree-head .device-total").exists()).toBe(false);
@@ -80,6 +86,35 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.get('[data-node-key="root:device:1:channel:11"] .tree-node svg').classes()).toContain("lucide-camera");
         await wrapper.get('[data-node-key="root:device:1:channel:11"] .tree-node').trigger("click");
         expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11, name: "东门" });
+    });
+
+    it("opens a group dialog when favoriting a device and shows the group in my favorites", async () => {
+        const wrapper = mountTree();
+        await flushPromises();
+
+        await wrapper.get('[data-node-key="root:device:1"] .favorite-toggle').trigger("click");
+        expect(wrapper.find("[data-test=favorite-group-name]").exists()).toBe(true);
+        await wrapper.get("[data-test=favorite-group-name]").setValue("园区重点设备");
+        await wrapper.get("[data-test=save-favorite-group]").trigger("click");
+        expect(window.localStorage.getItem("uvp.gb28181.playback.favorite-groups")).toContain("园区重点设备");
+
+        await wrapper.get("[data-test=source-view-favorites]").trigger("click");
+        await flushPromises();
+        expect(wrapper.text()).toContain("园区重点设备");
+        expect(wrapper.get('[data-node-key^="favorites:group:"] .node-status').text()).toBe("1 台设备");
+        await wrapper.get('[data-node-key^="favorites:group:"] .twist-button').trigger("click");
+        expect(wrapper.text()).toContain("一号设备");
+    });
+
+    it("emits a quick-play action for a favorite group", async () => {
+        window.localStorage.setItem("uvp.gb28181.playback.favorite-groups", JSON.stringify([{ id: "group-1", name: "园区重点设备", devices: [device(1, "device-1", "一号设备")] }]));
+        const wrapper = mountTree();
+        await flushPromises();
+        await wrapper.get("[data-test=source-view-favorites]").trigger("click");
+        await flushPromises();
+
+        await wrapper.get('[data-test="favorite-group-play-group-1"]').trigger("click");
+        expect(wrapper.emitted("select-group")?.[0]?.[0]).toMatchObject({ name: "园区重点设备" });
     });
 
     it("refreshes every ten seconds without collapsing expanded devices", async () => {

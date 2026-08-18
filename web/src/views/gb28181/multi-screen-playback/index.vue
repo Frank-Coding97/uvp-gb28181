@@ -4,23 +4,22 @@ import {
     AlertTriangle,
     Check,
     CircleStop,
-    GalleryVerticalEnd,
     Maximize2,
     Minimize2,
     Play,
     RefreshCw,
     Repeat2,
     Square,
+    Star,
     X
 } from "lucide-vue-next";
-import { startPlay, type PlaybackSchemeDetail, type PlaybackSchemeSlot, type PlayResult } from "@/api/gb28181";
+import { startPlay, type PlayResult } from "@/api/gb28181";
 import PlayWindow from "../components/PlayWindow.vue";
 import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
-import PlaybackSchemePanel from "./PlaybackSchemePanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
-import { listChannels, type ChannelVO } from "../device-mgmt/api";
+import { listChannels, type ChannelVO, type DeviceVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
@@ -37,6 +36,12 @@ interface PlaybackSlot {
     token: number;
 }
 
+interface FavoriteDeviceGroup {
+    id: string;
+    name: string;
+    devices: DeviceVO[];
+}
+
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
 const consoleVisible = ref(false);
@@ -45,7 +50,8 @@ const toast = ref("");
 const monitorAreaRef = ref<HTMLElement | null>(null);
 const isFullscreen = ref(false);
 const pollingVisible = ref(false);
-const schemeVisible = ref(false);
+type SourceView = "devices" | "national" | "custom" | "favorites";
+const sourceView = ref<SourceView>("devices");
 const pollingDraft = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
 const pollingSettings = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
 const pollingChannels = ref<ChannelVO[]>([]);
@@ -67,11 +73,6 @@ const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
 const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
-const currentSchemeSlots = computed(() => slots.slice(0, layout.value).flatMap(slot => slot.channel ? [{
-    slotIndex: slot.index,
-    deviceCode: slot.channel.deviceId,
-    channelCode: slot.channel.channelId
-}] : []));
 const ptzDirectionByAction: Record<string, PtzDirection> = {
     left_up: "左上",
     up: "上",
@@ -107,43 +108,6 @@ function resetSlot(slot: PlaybackSlot) {
     slot.result = null;
     slot.source = null;
     slot.error = "";
-}
-
-function schemeChannel(slot: PlaybackSchemeSlot): ChannelVO {
-    return {
-        id: slot.channelRecordId ?? -(slot.id || slot.slotIndex + 1),
-        channelId: slot.channelCode,
-        deviceId: slot.deviceCode,
-        name: slot.channelName || slot.channelCode,
-        alias: "",
-        manufacturer: "",
-        model: "",
-        owner: "",
-        civilCode: "",
-        parentId: "",
-        ptzType: 0,
-        longitude: 0,
-        latitude: 0,
-        status: slot.channelStatus ?? 0,
-        streamId: "",
-        onDemandLive: true,
-        streamTransport: "",
-        audioEnabled: slot.audioEnabled,
-        cloudRecordingEnabled: false,
-        cloudRecordingState: "",
-        cloudRecordingError: "",
-        createdAt: "",
-        updatedAt: ""
-    };
-}
-
-function schemeUnavailableMessage(availability: PlaybackSchemeSlot["availability"]) {
-    return {
-        available: "",
-        offline: "通道离线",
-        missing: "通道不存在",
-        forbidden: "无权访问这个通道"
-    }[availability] || "画面暂不可用";
 }
 
 async function playSlot(target: PlaybackSlot) {
@@ -269,53 +233,42 @@ async function playAll() {
     }
 }
 
-async function applyPlaybackScheme(scheme: PlaybackSchemeDetail) {
-    if (!layoutOptions.some(option => option.value === scheme.layoutSize)) {
-        toast.value = "方案布局无效，当前画面未改变";
-        return;
-    }
-    const previousPlaying = new Map(slots.flatMap(slot =>
-        slot.channel && slot.status === "playing" && slot.result
-            ? [[`${slot.channel.deviceId}\x00${slot.channel.channelId}`, {
-                channel: slot.channel, status: slot.status, result: slot.result, error: slot.error
-            }] as const]
-            : []
-    ));
-    playAllToken += 1;
+function openFavorites() {
+    sourceView.value = "favorites";
+}
+
+async function playFavoriteGroup(group: FavoriteDeviceGroup) {
+    if (playAllLoading.value) return;
+    const token = playAllToken + 1;
+    playAllToken = token;
     stopPolling();
-    pollingVisible.value = false;
-    layout.value = scheme.layoutSize;
-    slots.forEach(resetSlot);
-    focusedIndex.value = null;
-    const pending: PlaybackSlot[] = [];
-    [...scheme.slots].sort((left, right) => left.slotIndex - right.slotIndex).forEach(saved => {
-        if (saved.slotIndex < 0 || saved.slotIndex >= scheme.layoutSize) return;
-        const target = slots[saved.slotIndex];
-        const channel = schemeChannel(saved);
-        target.channel = channel;
-        if (focusedIndex.value == null) focusedIndex.value = target.index;
-        if (saved.availability !== "available") {
-            target.status = "offline";
-            target.error = schemeUnavailableMessage(saved.availability);
+    playAllLoading.value = true;
+    toast.value = "";
+    try {
+        const responses = await Promise.all(group.devices.map(device => listChannels({ deviceId: device.deviceId, status: "online", page: 1, pageSize: 200 })));
+        if (token !== playAllToken) return;
+        const channels = responses.flatMap(response => {
+            if (response?.code !== 0) throw new Error(response?.message || "加载收藏组通道失败");
+            return (response.data?.list || []) as ChannelVO[];
+        });
+        slots.forEach(resetSlot);
+        focusedIndex.value = null;
+        const batch = channels.slice(0, layout.value);
+        if (!batch.length) {
+            toast.value = `收藏组“${group.name}”暂无在线通道`;
             return;
         }
-        const reused = previousPlaying.get(`${saved.deviceCode}\x00${saved.channelCode}`);
-        if (reused) {
-            target.channel = reused.channel;
-            target.status = reused.status;
-            target.result = reused.result;
-            target.error = reused.error;
-            return;
-        }
-        pending.push(target);
-    });
-    schemeVisible.value = false;
-    await Promise.all(pending.map(playSlot));
-    const applied = slots.slice(0, scheme.layoutSize).filter(slot => slot.channel);
-    const playing = applied.filter(slot => slot.status === "playing").length;
-    const unavailable = applied.filter(slot => slot.status === "offline").length;
-    const failed = applied.filter(slot => slot.status === "error").length;
-    toast.value = `已应用“${scheme.name}”：${playing} 个播放中${unavailable ? `，${unavailable} 个不可用` : ""}${failed ? `，${failed} 个失败` : ""}`;
+        await Promise.all(batch.map((channel, index) => {
+            const slot = slots[index];
+            slot.channel = channel;
+            return playSlot(slot);
+        }));
+        toast.value = `已播放收藏组“${group.name}”的 ${batch.length} 路通道`;
+    } catch (reason: any) {
+        if (token === playAllToken) toast.value = reason?.message || "加载收藏组通道失败";
+    } finally {
+        playAllLoading.value = false;
+    }
 }
 
 async function toggleFullscreen() {
@@ -472,7 +425,7 @@ onBeforeUnmount(() => {
     <div class="snow-fill gb28181-page multi-screen-page">
         <div class="workspace">
             <section class="source-panel" aria-label="设备树和云台控制">
-                <PlaybackSourceTree :used-channel-ids="usedChannelIds" @select="assignChannel" />
+                <PlaybackSourceTree v-model:view="sourceView" :used-channel-ids="usedChannelIds" @select="assignChannel" @select-group="playFavoriteGroup" />
                 <BasicPtzPanel :channel="focusedSlot?.channel || null" @action-change="handlePtzActionChange" />
             </section>
 
@@ -485,7 +438,7 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
-                        <button type="button" data-test="playback-schemes" :class="{ active: schemeVisible }" aria-label="播放方案" title="播放方案" @click="schemeVisible = true"><GalleryVerticalEnd :size="17" aria-hidden="true" /></button>
+                        <button type="button" data-test="my-favorites" :class="{ active: sourceView === 'favorites' }" aria-label="我的收藏" title="我的收藏" @click="openFavorites"><Star :size="17" :fill="sourceView === 'favorites' ? 'currentColor' : 'none'" aria-hidden="true" /></button>
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>
@@ -537,7 +490,6 @@ onBeforeUnmount(() => {
                         <footer><button type="button" class="dialog-secondary" :disabled="pollingSaving" @click="pollingVisible = false">取消</button><button type="button" class="dialog-primary" data-test="save-polling" :disabled="pollingSaving" @click="savePollingSettings">{{ pollingSaving ? "加载中" : "保存" }}</button></footer>
                     </section>
                 </div>
-                <PlaybackSchemePanel v-model:visible="schemeVisible" :current-layout="layout" :current-slots="currentSchemeSlots" @apply="applyPlaybackScheme" />
             </main>
         </div>
         <PlayConsoleLinked v-model:visible="consoleVisible" :channel="consoleChannel" />
