@@ -35,11 +35,11 @@ func TestScorerObserveModeNeverCallsAgent(t *testing.T) {
 	require.Empty(t, agent.banCalls)
 }
 
-func TestDefaultProtectPolicyProducesPermanentAutoBan(t *testing.T) {
+func TestProtectPolicyProducesFiniteAutoBan(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	p := DefaultPolicyWithMode(ModeProtect)
 	p.BanScore = 40
-	p.BanTTLs = []TTLStep{{Score: 40, TTL: 0}}
+	p.BanTTLs = []TTLStep{{Score: 40, TTL: time.Minute}}
 	s := NewScorer(p, clock, nil, []byte("secret"))
 	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.11", Method: "INVITE", Reason: ReasonInviteRate})
 	require.NoError(t, err)
@@ -48,8 +48,8 @@ func TestDefaultProtectPolicyProducesPermanentAutoBan(t *testing.T) {
 	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.11", Method: "INVITE", Reason: ReasonInviteRate})
 	require.NoError(t, err)
 	require.NotNil(t, decision)
-	require.True(t, decision.Permanent)
-	require.True(t, decision.ExpiresAt().IsZero())
+	require.False(t, decision.Permanent)
+	require.Equal(t, clock.Now().Add(time.Minute), decision.ExpiresAt())
 }
 
 func TestTrustedEndpointUpdatesOnlyWithValidAddress(t *testing.T) {

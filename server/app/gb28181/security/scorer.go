@@ -159,7 +159,7 @@ func triggerThreshold(policy Policy, reason Reason) int {
 func reasonScore(reason Reason) int {
 	switch reason {
 	case ReasonNonceReplay:
-		return 80
+		return 20
 	case ReasonInviteRate:
 		return 20
 	case ReasonNonceInvalid, ReasonNonceExpired:
@@ -172,7 +172,7 @@ func reasonScore(reason Reason) int {
 		return 5
 	case ReasonPacketTooLarge, ReasonConnectionRate, ReasonUnknownMethod:
 		return 10
-	case ReasonManualBlacklist, ReasonActiveBan:
+	case ReasonNonceStale, ReasonManualBlacklist, ReasonActiveBan:
 		return 0
 	default:
 		return 1

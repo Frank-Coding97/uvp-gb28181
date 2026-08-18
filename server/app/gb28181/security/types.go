@@ -36,6 +36,7 @@ const (
 	ReasonNonceInvalid    Reason = "nonce_invalid"
 	ReasonNonceExpired    Reason = "nonce_expired"
 	ReasonNonceReplay     Reason = "nonce_replay"
+	ReasonNonceStale      Reason = "nonce_stale"
 	ReasonUnregisteredMsg Reason = "unregistered_message"
 	ReasonPacketTooLarge  Reason = "packet_too_large"
 	ReasonConnectionRate  Reason = "connection_rate"
@@ -82,7 +83,11 @@ func DefaultPolicy() Policy {
 		MaxEventKeys:      4096,
 		SamplePerSource:   3,
 		NonceTTL:          60 * time.Second,
-		BanTTLs:           []TTLStep{{Score: 100, TTL: 0}},
+		BanTTLs: []TTLStep{
+			{Score: 100, TTL: time.Minute},
+			{Score: 200, TTL: 10 * time.Minute},
+			{Score: 500, TTL: time.Hour},
+		},
 		Allowlist:         defaultAllowlist(),
 	}
 }
@@ -113,8 +118,8 @@ func (p Policy) Validate() error {
 		return ErrInvalidPolicy
 	}
 	lastScore := 0
-	for index, step := range p.BanTTLs {
-		if step.Score <= lastScore || step.TTL < 0 || (step.TTL == 0 && index != len(p.BanTTLs)-1) {
+	for _, step := range p.BanTTLs {
+		if step.Score <= lastScore || step.TTL <= 0 {
 			return ErrInvalidPolicy
 		}
 		lastScore = step.Score
@@ -144,10 +149,9 @@ func (p Policy) PermanentForScore(score int) bool {
 	return matched && ttl == 0
 }
 
-// WithPermanentAutoBan keeps the policy thresholds but makes every automatic
-// ban explicit and permanent. Manual unban remains the only release path.
+// WithPermanentAutoBan is retained for source compatibility. Automatic bans
+// are always finite; permanent rules belong to the manual access-rule model.
 func (p Policy) WithPermanentAutoBan() Policy {
-	p.BanTTLs = []TTLStep{{Score: p.BanScore, TTL: 0}}
 	return p
 }
 
