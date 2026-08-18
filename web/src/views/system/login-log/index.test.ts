@@ -2,16 +2,25 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import LoginLogPage from "./index.vue";
 
+const userStore = vi.hoisted(() => ({ account: { permissions: [] as string[] } }));
+
 const api = vi.hoisted(() => ({
   getLoginLogsAPI: vi.fn(),
-  getLoginLogDetailAPI: vi.fn()
+  getLoginLogDetailAPI: vi.fn(),
+  deleteLoginLogsAPI: vi.fn(),
+  clearLoginLogsAPI: vi.fn(),
+  unlockLoginLogAccountAPI: vi.fn()
 }));
 
 vi.mock("@/api/login-log", () => ({
   getLoginLogsAPI: api.getLoginLogsAPI,
-  getLoginLogDetailAPI: api.getLoginLogDetailAPI
+  getLoginLogDetailAPI: api.getLoginLogDetailAPI,
+  deleteLoginLogsAPI: api.deleteLoginLogsAPI,
+  clearLoginLogsAPI: api.clearLoginLogsAPI,
+  unlockLoginLogAccountAPI: api.unlockLoginLogAccountAPI
 }));
-vi.mock("@/globals", () => ({ formatTime: (value: string) => value }));
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userStore }));
+vi.mock("@/globals", () => ({ formatTime: (value: string) => value, throttle: (fn: (...args: any[]) => any) => fn }));
 
 const log = (id = 1) => ({
   id, userId: 7, username: "alice", result: "failure", failureReason: "unknown_reason",
@@ -38,7 +47,10 @@ function mountPage() {
         "a-descriptions-item": { template: "<div><slot /></div>" },
         "a-empty": { template: "<span>{{ description }}</span>", props: ["description"] },
         Search: true,
-        RotateCcw: true
+        RotateCcw: true,
+        Eraser: true,
+        Trash2: true,
+        KeyRound: true
       }
     }
   });
@@ -48,6 +60,10 @@ describe("login log page", () => {
   beforeEach(() => {
     api.getLoginLogsAPI.mockReset().mockResolvedValue({ code: 0, data: { list: [log()], total: 1 } });
     api.getLoginLogDetailAPI.mockReset().mockResolvedValue({ code: 0, data: { ...log(), failureReason: "password_incorrect", userAgent: "Mozilla/5.0" } });
+    api.deleteLoginLogsAPI.mockReset().mockResolvedValue({ code: 0, data: { deletedCount: 1 } });
+    api.clearLoginLogsAPI.mockReset().mockResolvedValue({ code: 0, data: { deletedCount: 1 } });
+    api.unlockLoginLogAccountAPI.mockReset().mockResolvedValue({ code: 0, data: null });
+    userStore.account.permissions = ["system:login-log:delete", "system:login-log:clear", "system:login-log:unlock"];
   });
 
   it("loads, filters, resets, and falls back for unknown failure reasons", async () => {
@@ -85,5 +101,18 @@ describe("login log page", () => {
     await flushPromises();
     expect(wrapper.get('[role="alert"]').text()).toContain("权限不足");
     expect(wrapper.find('[data-testid="login-table"]').exists()).toBe(false);
+  });
+
+  it("deletes selected logs, clears all logs, and unlocks locked accounts", async () => {
+    const wrapper = mountPage();
+    await flushPromises();
+    const vm = wrapper.vm as any;
+    vm.selectedRowKeys = [1];
+    await vm.performDelete();
+    expect(api.deleteLoginLogsAPI).toHaveBeenCalledWith([1]);
+    await vm.performClear();
+    expect(api.clearLoginLogsAPI).toHaveBeenCalled();
+    await vm.performUnlock(9);
+    expect(api.unlockLoginLogAccountAPI).toHaveBeenCalledWith(9);
   });
 });

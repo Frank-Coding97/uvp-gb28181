@@ -83,3 +83,38 @@ func (r *SysLoginLogListRequest) Paginate() func(*gorm.DB) *gorm.DB {
 func (r *SysLoginLogListRequest) Cutoff(now time.Time) time.Time {
 	return now.Add(-180 * 24 * time.Hour)
 }
+
+type SysLoginLogDeleteRequest struct {
+	Validator
+	IDs []uint `json:"ids" form:"ids"`
+}
+
+func (r *SysLoginLogDeleteRequest) Validate(c *gin.Context) error {
+	if err := r.Check(c, r); err != nil {
+		return err
+	}
+	if len(r.IDs) == 0 || len(r.IDs) > 100 {
+		return gorm.ErrInvalidData
+	}
+	for _, id := range r.IDs {
+		if id == 0 {
+			return gorm.ErrInvalidData
+		}
+	}
+	return nil
+}
+
+type SysLoginLogUnlockRequest struct {
+	Validator
+	ID uint `json:"id" form:"id"`
+}
+
+func (r *SysLoginLogUnlockRequest) Validate(c *gin.Context) error {
+	if err := r.Check(c, r); err != nil {
+		return err
+	}
+	if r.ID == 0 {
+		return gorm.ErrInvalidData
+	}
+	return nil
+}

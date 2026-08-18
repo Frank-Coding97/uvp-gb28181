@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/middleware"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/service"
 )
@@ -18,9 +19,16 @@ type loginLogQuery interface {
 	Detail(context.Context, uint) (*service.LoginLogDetail, error)
 }
 
+type loginLogMutation interface {
+	Delete(context.Context, []uint) (int64, error)
+	Clear(context.Context) (int64, error)
+	Unlock(context.Context, uint) error
+}
+
 type SysLoginLogController struct {
 	Common
-	query loginLogQuery
+	query    loginLogQuery
+	mutation loginLogMutation
 }
 
 func NewSysLoginLogController() *SysLoginLogController {
@@ -31,11 +39,22 @@ func newSysLoginLogControllerWithQuery(query loginLogQuery) *SysLoginLogControll
 	return &SysLoginLogController{Common: Common{}, query: query}
 }
 
+func newSysLoginLogControllerWithDependencies(query loginLogQuery, mutation loginLogMutation) *SysLoginLogController {
+	return &SysLoginLogController{Common: Common{}, query: query, mutation: mutation}
+}
+
 func (c *SysLoginLogController) queryService() loginLogQuery {
 	if c.query != nil {
 		return c.query
 	}
 	return service.NewLoginLogQueryService(app.DB())
+}
+
+func (c *SysLoginLogController) mutationService() loginLogMutation {
+	if c.mutation != nil {
+		return c.mutation
+	}
+	return service.NewLoginLogManagementService(app.DB(), app.Cache)
 }
 
 // List returns a filtered, stable page without the full user-agent value.
@@ -77,6 +96,49 @@ func (c *SysLoginLogController) Detail(ctx *gin.Context) {
 		c.FailAndAbort(ctx, "查询登录日志详情失败", err, http.StatusInternalServerError)
 	}
 	c.Success(ctx, detail)
+}
+
+func (c *SysLoginLogController) Delete(ctx *gin.Context) {
+	var req models.SysLoginLogDeleteRequest
+	if err := req.Validate(ctx); err != nil {
+		c.FailAndAbort(ctx, "登录日志删除参数错误", err, http.StatusBadRequest)
+	}
+	middleware.MarkDeleteOperation(ctx)
+	deletedCount, err := c.mutationService().Delete(ctx.Request.Context(), req.IDs)
+	if err != nil {
+		c.FailAndAbort(ctx, "删除登录日志失败", err, http.StatusInternalServerError)
+	}
+	c.Success(ctx, gin.H{"deletedCount": deletedCount})
+}
+
+func (c *SysLoginLogController) Clear(ctx *gin.Context) {
+	middleware.MarkDeleteOperation(ctx)
+	deletedCount, err := c.mutationService().Clear(ctx.Request.Context())
+	if err != nil {
+		c.FailAndAbort(ctx, "清空登录日志失败", err, http.StatusInternalServerError)
+	}
+	c.Success(ctx, gin.H{"deletedCount": deletedCount})
+}
+
+func (c *SysLoginLogController) Unlock(ctx *gin.Context) {
+	var req models.SysLoginLogUnlockRequest
+	if err := req.Validate(ctx); err != nil {
+		c.FailAndAbort(ctx, "登录日志解锁参数错误", err, http.StatusBadRequest)
+	}
+	err := c.mutationService().Unlock(ctx.Request.Context(), req.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrLoginLogNotFound), errors.Is(err, service.ErrLoginLogUnlockUser):
+			c.FailAndAbort(ctx, "登录日志关联用户不存在", err, http.StatusNotFound)
+		case errors.Is(err, service.ErrLoginLogUnlockNotAllowed):
+			c.FailAndAbort(ctx, "该登录日志不是账户锁定事件", err, http.StatusBadRequest)
+		case errors.Is(err, service.ErrLoginLogCacheUnavailable):
+			c.FailAndAbort(ctx, "解锁服务暂不可用", err, http.StatusServiceUnavailable)
+		default:
+			c.FailAndAbort(ctx, "解锁账号失败", err, http.StatusInternalServerError)
+		}
+	}
+	c.SuccessWithMessage(ctx, "账号已解锁", nil)
 }
 
 func parseLoginLogTime(value string) (*time.Time, error) {

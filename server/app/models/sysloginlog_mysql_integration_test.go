@@ -40,11 +40,13 @@ func TestLoginLogMySQLSchemaAndPermissionSeed(t *testing.T) {
 	}
 
 	assertMySQLCount(t, db, "SELECT COUNT(*) FROM gb_schema_migrations WHERE version = ?", 1, "2026-08-18-login-logs.sql")
-	assertMySQLCount(t, db, "SELECT COUNT(*) FROM sys_api WHERE path IN (?, ?) AND method = 'GET' AND deleted_at IS NULL", 2, "/api/sysLoginLog/list", "/api/sysLoginLog/:id")
+	assertMySQLCount(t, db, "SELECT COUNT(*) FROM gb_schema_migrations WHERE version = ?", 1, "2026-08-19-login-logs-actions.sql")
+	assertMySQLCount(t, db, "SELECT COUNT(*) FROM sys_api WHERE path IN (?, ?, ?, ?, ?) AND deleted_at IS NULL", 5, "/api/sysLoginLog/list", "/api/sysLoginLog/:id", "/api/sysLoginLog/delete", "/api/sysLoginLog/clear", "/api/sysLoginLog/unlock")
 	assertMySQLCount(t, db, "SELECT COUNT(*) FROM sys_menu WHERE path = ? AND permission = ? AND deleted_at IS NULL", 1, "/system/login-log", "system:login-log:list")
 	assertMySQLMinimum(t, db, "SELECT COUNT(*) FROM sys_role_menu rm JOIN sys_menu m ON m.id = rm.menu_id WHERE rm.role_id = 1 AND m.path = ?", 1, "/system/login-log")
 	assertMySQLMinimum(t, db, "SELECT COUNT(*) FROM sys_menu_api ma JOIN sys_menu m ON m.id = ma.menu_id WHERE m.path = ?", 2, "/system/login-log")
-	assertMySQLMinimum(t, db, "SELECT COUNT(*) FROM sys_casbin_rule WHERE v1 IN (?, ?) AND v2 = 'GET'", 2, "/api/sysLoginLog/list", "/api/sysLoginLog/:id")
+	assertMySQLMinimum(t, db, "SELECT COUNT(*) FROM sys_menu WHERE permission IN (?, ?, ?) AND deleted_at IS NULL", 3, "system:login-log:delete", "system:login-log:clear", "system:login-log:unlock")
+	assertMySQLMinimum(t, db, "SELECT COUNT(*) FROM sys_casbin_rule WHERE v1 IN (?, ?, ?, ?, ?)", 5, "/api/sysLoginLog/list", "/api/sysLoginLog/:id", "/api/sysLoginLog/delete", "/api/sysLoginLog/clear", "/api/sysLoginLog/unlock")
 }
 
 type mysqlQueryer interface {

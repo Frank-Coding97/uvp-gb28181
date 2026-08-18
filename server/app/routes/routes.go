@@ -316,10 +316,13 @@ func InitRoutes(engine *gin.Engine) {
 				sysOperationLog.GET("/export", sysOperationLogControllers.Export)
 			}
 
-			// 登录日志只读路由组
+			// 登录日志路由组
 			sysLoginLog := protected.Group("/sysLoginLog")
 			{
 				sysLoginLog.GET("/list", sysLoginLogControllers.List)
+				sysLoginLog.DELETE("/delete", sysLoginLogControllers.Delete)
+				sysLoginLog.POST("/clear", sysLoginLogControllers.Clear)
+				sysLoginLog.POST("/unlock", sysLoginLogControllers.Unlock)
 				sysLoginLog.GET("/:id", sysLoginLogControllers.Detail)
 			}
 

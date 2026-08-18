@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
-import { RotateCcw, Search } from "lucide-vue-next";
+import { Eraser, Eye, KeyRound, RotateCcw, Search, Trash2 } from "lucide-vue-next";
+import { Modal } from "@arco-design/web-vue";
 import { formatTime } from "@/globals";
+import { useUserStoreHook } from "@/store/modules/user";
 import {
+  clearLoginLogsAPI,
+  deleteLoginLogsAPI,
   getLoginLogDetailAPI,
   getLoginLogsAPI,
+  unlockLoginLogAccountAPI,
   type LoginLogDetail,
   type LoginLogFailureReason,
   type LoginLogItem,
@@ -37,6 +42,16 @@ const detailVisible = ref(false);
 const detailLoading = ref(false);
 const detailError = ref("");
 const currentDetail = ref<LoginLogDetail | null>(null);
+const selectedRowKeys = ref<number[]>([]);
+const deleting = ref(false);
+const clearing = ref(false);
+const unlockingId = ref<number | null>(null);
+const permissions = computed(() => useUserStoreHook().account.permissions || []);
+const can = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
+const canDelete = computed(() => can("system:login-log:delete"));
+const canClear = computed(() => can("system:login-log:clear"));
+const canUnlock = computed(() => can("system:login-log:unlock"));
+const rowSelection = computed(() => (canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined));
 
 const tableScroll = computed(() => ({ x: "100%", minWidth: 1060 }));
 
@@ -66,12 +81,80 @@ async function load() {
     const result = await getLoginLogsAPI(buildParams());
     if (result.code !== 0) throw new Error(result.message || "登录日志加载失败");
     logs.value = result.data?.list || [];
+    selectedRowKeys.value = [];
     pagination.total = result.data?.total || 0;
   } catch (cause: unknown) {
     error.value = errorMessage(cause);
   } finally {
     loading.value = false;
   }
+}
+
+function requestDelete() {
+  if (!canDelete.value || !selectedRowKeys.value.length || deleting.value) return;
+  Modal.warning({
+    title: "删除登录日志",
+    content: `将删除选中的 ${selectedRowKeys.value.length} 条登录日志，删除后不可恢复。`,
+    okText: "删除", cancelText: "取消", hideCancel: false, escToClose: true,
+    okButtonProps: { status: "danger" }, onOk: () => performDelete()
+  });
+}
+
+async function performDelete() {
+  deleting.value = true;
+  const ids = [...selectedRowKeys.value];
+  try {
+    const result = await deleteLoginLogsAPI(ids);
+    if (result.code !== 0) throw new Error(result.message || "删除登录日志失败");
+    selectedRowKeys.value = [];
+    await load();
+  } catch (cause) {
+    error.value = errorMessage(cause);
+  } finally { deleting.value = false; }
+}
+
+function requestClear() {
+  if (!canClear.value || clearing.value) return;
+  Modal.warning({
+    title: "清空登录日志",
+    content: "将清空当前数据库中已有的全部登录日志，删除后不可恢复。",
+    okText: "清空", cancelText: "取消", hideCancel: false, escToClose: true,
+    okButtonProps: { status: "danger" }, onOk: () => performClear()
+  });
+}
+
+async function performClear() {
+  clearing.value = true;
+  try {
+    const result = await clearLoginLogsAPI();
+    if (result.code !== 0) throw new Error(result.message || "清空登录日志失败");
+    pagination.current = 1;
+    selectedRowKeys.value = [];
+    await load();
+  } catch (cause) {
+    error.value = errorMessage(cause);
+  } finally { clearing.value = false; }
+}
+
+function requestUnlock(record: LoginLogItem) {
+  if (!canUnlock.value || unlockingId.value !== null) return;
+  Modal.warning({
+    title: "解锁账号",
+    content: `确认解锁账号“${record.username}”吗？`,
+    okText: "解锁", cancelText: "取消", hideCancel: false, escToClose: true,
+    onOk: () => performUnlock(record.id)
+  });
+}
+
+async function performUnlock(id: number) {
+  unlockingId.value = id;
+  try {
+    const result = await unlockLoginLogAccountAPI(id);
+    if (result.code !== 0) throw new Error(result.message || "解锁账号失败");
+    await load();
+  } catch (cause) {
+    error.value = errorMessage(cause);
+  } finally { unlockingId.value = null; }
 }
 
 async function search() {
@@ -126,7 +209,7 @@ function failureLabel(reason?: string) {
 
 onMounted(() => void load());
 
-defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail, detailLoading, detailError, load, search, reset, handlePageChange, handlePageSizeChange, viewDetail, failureLabel });
+defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail, detailLoading, detailError, selectedRowKeys, canDelete, canClear, canUnlock, load, search, reset, handlePageChange, handlePageSizeChange, viewDetail, requestDelete, requestClear, requestUnlock, performDelete, performClear, performUnlock, failureLabel });
 </script>
 
 <template>
@@ -152,6 +235,7 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
         <template #actions>
           <a-button type="primary" @click="search"><template #icon><Search :size="16" /></template>查询</a-button>
           <a-button @click="reset"><template #icon><RotateCcw :size="16" /></template>重置</a-button>
+          <a-button v-if="canClear" class="login-log-clear-button" status="danger" :loading="clearing" @click="requestClear"><template #icon><Eraser :size="16" /></template>清空日志</a-button>
         </template>
       </s-layout-search>
 
@@ -160,7 +244,8 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
         <a-button size="small" @click="load">重试</a-button>
       </div>
 
-      <a-table v-else class="uvp-data-table login-log-table" row-key="id" :data="logs" :loading="loading" :pagination="pagination" :scroll="tableScroll" :bordered="false" @page-change="handlePageChange" @page-size-change="handlePageSizeChange">
+      <div v-if="canDelete && selectedRowKeys.length" class="login-log-batch-bar"><span>已选 <strong>{{ selectedRowKeys.length }}</strong> 条</span><a-button status="danger" :loading="deleting" @click="requestDelete"><template #icon><Trash2 :size="14" /></template>删除</a-button></div>
+      <a-table v-if="!error" class="uvp-data-table login-log-table" row-key="id" :data="logs" :loading="loading" :pagination="pagination" :scroll="tableScroll" :bordered="false" v-model:selected-keys="selectedRowKeys" :row-selection="rowSelection" @page-change="handlePageChange" @page-size-change="handlePageSizeChange">
         <template #columns>
           <a-table-column title="用户名" data-index="username" :width="140" />
           <a-table-column title="结果" :width="90" align="center">
@@ -171,7 +256,7 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
           <a-table-column title="地点" data-index="location" :width="120" />
           <a-table-column title="浏览器 / OS" :width="200"><template #cell="{ record }">{{ record.browser || '未知浏览器' }} / {{ record.os || '未知系统' }}</template></a-table-column>
           <a-table-column title="登录时间" :width="180"><template #cell="{ record }">{{ formatTime(record.createdAt) }}</template></a-table-column>
-          <a-table-column title="操作" :width="90" align="center" fixed="right"><template #cell="{ record }"><a-link @click="viewDetail(record)">详情</a-link></template></a-table-column>
+          <a-table-column title="操作" :width="canUnlock ? 160 : 90" align="center" fixed="right"><template #cell="{ record }"><div class="uvp-table-actions"><a-link class="uvp-table-action uvp-table-action--detail" @click="viewDetail(record)"><template #icon><Eye :size="13" /></template><span>详情</span></a-link><a-link v-if="canUnlock && record.result === 'failure' && record.failureReason === 'account_locked' && record.userId" class="uvp-table-action uvp-table-action--unlock" :loading="unlockingId === record.id" @click="requestUnlock(record)"><template #icon><KeyRound :size="13" /></template><span>解锁</span></a-link></div></template></a-table-column>
         </template>
         <template #empty><a-empty description="暂无登录日志" /></template>
       </a-table>
@@ -215,11 +300,20 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
 .login-log-filter--reason { width: 160px; flex-basis: 160px; }
 .login-log-filter :deep(.arco-input-wrapper),
 .login-log-filter :deep(.arco-select-view) { width: 100%; min-height: 44px; }
-.login-log-page :deep(.uvp-search-panel .arco-btn),
-.login-log-page :deep(.arco-pagination-item),
-.login-log-page :deep(.arco-pagination-jumper-input),
-.login-log-page :deep(.arco-pagination-options .arco-select-view) { min-height: 44px; }
+.login-log-page :deep(.uvp-search-panel .arco-btn) { min-height: 44px; }
+.login-log-page :deep(.uvp-search-panel__actions .login-log-clear-button) {
+  color: var(--uvp-danger);
+  background: var(--uvp-danger-soft);
+  border-color: var(--uvp-danger-border);
+  box-shadow: none;
+}
+.login-log-page :deep(.uvp-search-panel__actions .login-log-clear-button:hover) {
+  color: #c53030;
+  background: #ffe8e8;
+  border-color: #efb7b7;
+}
 .login-log-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0; padding: 12px 14px; color: var(--uvp-danger); background: var(--uvp-danger-soft); border: 1px solid var(--uvp-danger-border); border-radius: 6px; }
+.login-log-batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 10px 14px; background: var(--uvp-surface-muted); border: 1px solid var(--uvp-border); border-radius: 6px; }
 .login-log-detail-loading { display: block; min-height: 180px; }
 .login-log-user-agent { max-height: 180px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; color: var(--uvp-text-secondary); }
 

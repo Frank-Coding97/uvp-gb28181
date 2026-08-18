@@ -981,12 +981,14 @@ body[arco-theme="dark"] .zlm-node-form {
 }
 
 .uvp-data-table .uvp-table-action--execute,
-.uvp-data-table .uvp-table-action--sync {
+.uvp-data-table .uvp-table-action--sync,
+.uvp-data-table .uvp-table-action--unlock {
   color: #1e7a63;
 }
 
 .uvp-data-table .uvp-table-action--execute:hover,
-.uvp-data-table .uvp-table-action--sync:hover {
+.uvp-data-table .uvp-table-action--sync:hover,
+.uvp-data-table .uvp-table-action--unlock:hover {
   color: #126a56;
   background: rgb(22 132 95 / 8%);
 }

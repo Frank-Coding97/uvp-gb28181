@@ -5788,7 +5788,7 @@ INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUE
 SET UNIQUE_CHECKS = 1;
 SET FOREIGN_KEY_CHECKS = 1;
 
--- 登录审计事件与只读菜单 seed。
+-- 登录审计事件与操作菜单 seed。
 CREATE TABLE IF NOT EXISTS `sys_login_logs` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT, `user_id` bigint unsigned DEFAULT NULL,
   `username` varchar(100) NOT NULL, `result` varchar(16) NOT NULL, `failure_reason` varchar(48) DEFAULT NULL,
@@ -5799,10 +5799,12 @@ CREATE TABLE IF NOT EXISTS `sys_login_logs` (
   KEY `idx_login_logs_result` (`result`), KEY `idx_login_logs_failure_reason` (`failure_reason`), KEY `idx_login_logs_ip` (`ip`), KEY `idx_login_logs_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='后台登录审计日志';
 INSERT INTO `sys_api` (`id`,`title`,`path`,`method`,`api_group`,`created_at`,`updated_at`,`deleted_at`,`created_by`) VALUES
-(341,'登录日志列表','/api/sysLoginLog/list','GET','日志管理',NOW(),NOW(),NULL,1),(342,'登录日志详情','/api/sysLoginLog/:id','GET','日志管理',NOW(),NOW(),NULL,1);
+(341,'登录日志列表','/api/sysLoginLog/list','GET','日志管理',NOW(),NOW(),NULL,1),(342,'登录日志详情','/api/sysLoginLog/:id','GET','日志管理',NOW(),NOW(),NULL,1),(343,'删除登录日志','/api/sysLoginLog/delete','DELETE','日志管理',NOW(),NOW(),NULL,1),(344,'清空登录日志','/api/sysLoginLog/clear','POST','日志管理',NOW(),NOW(),NULL,1),(345,'解锁登录账号','/api/sysLoginLog/unlock','POST','日志管理',NOW(),NOW(),NULL,1);
 INSERT INTO `sys_menu` (`id`,`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`) VALUES
 (140384,10,'/system/login-log','SystemLoginLog','system/login-log/index','登录日志',0,0,1,2,'system:login-log:list','lucide:FileClock',NOW(),NOW(),1);
-INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140384);
-INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES (140384,341),(140384,342);
+INSERT INTO `sys_menu` (`id`,`parent_id`,`path`,`name`,`component`,`title`,`hide`,`disable`,`sort`,`type`,`permission`,`icon`,`created_at`,`updated_at`,`created_by`) VALUES
+(140385,140384,'','SystemLoginLogDelete','','删除登录日志',1,0,1,3,'system:login-log:delete','',NOW(),NOW(),1),(140386,140384,'','SystemLoginLogClear','','清空登录日志',1,0,2,3,'system:login-log:clear','',NOW(),NOW(),1),(140387,140384,'','SystemLoginLogUnlock','','解锁登录账号',1,0,3,3,'system:login-log:unlock','',NOW(),NOW(),1);
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) VALUES (1,140384),(1,140385),(1,140386),(1,140387);
+INSERT INTO `sys_menu_api` (`menu_id`,`api_id`) VALUES (140384,341),(140384,342),(140385,343),(140386,344),(140387,345);
 INSERT INTO `sys_casbin_rule` (`id`,`ptype`,`v0`,`v1`,`v2`,`v3`,`v4`,`v5`) VALUES
-(7808,'p','role_1','/api/sysLoginLog/list','GET','*','',''),(7809,'p','role_1','/api/sysLoginLog/:id','GET','*','','');
+(7808,'p','role_1','/api/sysLoginLog/list','GET','*','',''),(7809,'p','role_1','/api/sysLoginLog/:id','GET','*','',''),(7810,'p','role_1','/api/sysLoginLog/delete','DELETE','*','',''),(7811,'p','role_1','/api/sysLoginLog/clear','POST','*','',''),(7812,'p','role_1','/api/sysLoginLog/unlock','POST','*','','');
