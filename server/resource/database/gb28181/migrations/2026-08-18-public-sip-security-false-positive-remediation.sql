@@ -1,10 +1,39 @@
 -- Repair SIP security false positives and restore finite automatic bans (MySQL).
-ALTER TABLE `gb_sip_security_event`
-  ADD COLUMN IF NOT EXISTS `device_id` VARCHAR(64) NULL AFTER `source_ip`,
-  ADD COLUMN IF NOT EXISTS `risk_scope` VARCHAR(16) NULL AFTER `device_id`;
-ALTER TABLE `gb_sip_security_ban`
-  ADD COLUMN IF NOT EXISTS `device_id` VARCHAR(64) NULL AFTER `source_ip`,
-  ADD COLUMN IF NOT EXISTS `risk_scope` VARCHAR(16) NULL AFTER `device_id`;
+SET @add_event_device_id = IF(
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_sip_security_event' AND column_name = 'device_id'),
+  'SELECT 1',
+  'ALTER TABLE `gb_sip_security_event` ADD COLUMN `device_id` VARCHAR(64) NULL AFTER `source_ip`'
+);
+PREPARE stmt FROM @add_event_device_id;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_event_risk_scope = IF(
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_sip_security_event' AND column_name = 'risk_scope'),
+  'SELECT 1',
+  'ALTER TABLE `gb_sip_security_event` ADD COLUMN `risk_scope` VARCHAR(16) NULL AFTER `device_id`'
+);
+PREPARE stmt FROM @add_event_risk_scope;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_ban_device_id = IF(
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_sip_security_ban' AND column_name = 'device_id'),
+  'SELECT 1',
+  'ALTER TABLE `gb_sip_security_ban` ADD COLUMN `device_id` VARCHAR(64) NULL AFTER `source_ip`'
+);
+PREPARE stmt FROM @add_ban_device_id;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @add_ban_risk_scope = IF(
+  EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'gb_sip_security_ban' AND column_name = 'risk_scope'),
+  'SELECT 1',
+  'ALTER TABLE `gb_sip_security_ban` ADD COLUMN `risk_scope` VARCHAR(16) NULL AFTER `device_id`'
+);
+PREPARE stmt FROM @add_ban_risk_scope;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 UPDATE `gb_sip_security_event`
 SET `device_id` = COALESCE(`device_id`, ''),

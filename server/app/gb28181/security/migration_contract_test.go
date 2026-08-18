@@ -80,6 +80,17 @@ func TestSecurityFalsePositiveRemediationMigrationsCoverThreeDialects(t *testing
 	}
 }
 
+func TestSecurityMySQLRemediationMigrationUsesCompatibleColumnGuards(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "resource", "database", "gb28181", "migrations")
+	data, err := os.ReadFile(filepath.Join(root, "2026-08-18-public-sip-security-false-positive-remediation.sql"))
+	require.NoError(t, err)
+	text := strings.ToLower(string(data))
+	require.NotContains(t, text, "add column if not exists")
+	for _, token := range []string{"information_schema.columns", "prepare stmt", "execute stmt", "deallocate prepare stmt"} {
+		require.Contains(t, text, token)
+	}
+}
+
 func TestSecurityAccessRuleMigrationsCoverThreeDialectsAndAPIs(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "resource", "database", "gb28181", "migrations")
 	files := []string{"2026-08-09-public-sip-security-access-rules.sql", "2026-08-09-public-sip-security-access-rules-postgresql.sql", "2026-08-09-public-sip-security-access-rules-sqlserver.sql"}
