@@ -14,6 +14,7 @@ import QrProvisionCard from "./QrProvisionCard.vue";
 import { mayEditSipConfig, runtimeColor, runtimeLabel } from "./platformViewState";
 import { mayGenerateQr } from "./qrProvisionState";
 import { activeSipAddresses } from "./sipSetupRules";
+import { writeTextToClipboard } from "@/utils/app";
 
 const loading = ref(false);
 const wizardVisible = ref(false);
@@ -102,16 +103,15 @@ async function refresh() {
 
 async function copyValue(key: string, value: string) {
     if (!value || value === "-" || value.startsWith("(")) return;
-    try {
-        await navigator.clipboard.writeText(value);
+    if (await writeTextToClipboard(value)) {
         copiedKey.value = key;
         Message.success("已复制到剪贴板");
         setTimeout(() => {
             if (copiedKey.value === key) copiedKey.value = "";
         }, 1500);
-    } catch {
-        Message.warning("复制失败,请手动选中");
+        return;
     }
+    Message.warning("复制失败,请手动选中");
 }
 
 async function copyAll() {
@@ -126,12 +126,11 @@ async function copyAll() {
         `SIP 域: ${c.domain}`,
         `SIP 密码: ${c.password || "(未设置)"}`
     ].join("\n");
-    try {
-        await navigator.clipboard.writeText(text);
+    if (await writeTextToClipboard(text)) {
         Message.success("已复制 SIP 接入信息");
-    } catch {
-        Message.warning("复制失败,请手动选中");
+        return;
     }
+    Message.warning("复制失败,请手动选中");
 }
 
 onMounted(refresh);

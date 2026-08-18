@@ -5,6 +5,7 @@ import { Check, Copy, Rocket, Server } from "lucide-vue-next";
 import type { SipNetworkInterfaces } from "@/api/gb28181";
 import type { SipSetupForm } from "../useSipSetup";
 import { activeSipAddresses } from "../sipSetupRules";
+import { writeTextToClipboard } from "@/utils/app";
 
 const props = defineProps<{
     form: SipSetupForm;
@@ -31,15 +32,14 @@ const passwordDisplay = computed(() => {
 
 async function copyValue(key: string, value: string) {
     if (!value || value === "-" || value === "(保留原密码)") return;
-    try {
-        await navigator.clipboard.writeText(value);
+    if (await writeTextToClipboard(value)) {
         copiedKey.value = key;
         setTimeout(() => {
             if (copiedKey.value === key) copiedKey.value = "";
         }, 1500);
-    } catch {
-        Message.warning("复制失败,请手动选中");
+        return;
     }
+    Message.warning("复制失败,请手动选中");
 }
 
 const fields = computed(() => [
