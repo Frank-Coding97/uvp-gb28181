@@ -25,6 +25,7 @@ var sysApiControllers = controllers.NewSysApiController()                   // A
 var sysAffixControllers = controllers.NewSysAffixController()               // 文件管理
 var configControllers = controllers.NewConfigController()                   // 配置控制器
 var sysOperationLogControllers = controllers.NewSysOperationLogController() // 操作日志控制器
+var sysLoginLogControllers = controllers.NewSysLoginLogController()         // 登录日志控制器
 var codeGenControllers = controllers.NewCodeGenController()                 // 代码生成控制器
 var sysGenControllers = controllers.NewSysGenController()                   // 代码生成配置控制器
 var pluginsManagerControllers = controllers.NewPluginsManagerController()   // 插件管理控制器
@@ -313,6 +314,13 @@ func InitRoutes(engine *gin.Engine) {
 				sysOperationLog.DELETE("/delete", sysOperationLogControllers.Delete)
 				// 导出操作日志
 				sysOperationLog.GET("/export", sysOperationLogControllers.Export)
+			}
+
+			// 登录日志只读路由组
+			sysLoginLog := protected.Group("/sysLoginLog")
+			{
+				sysLoginLog.GET("/list", sysLoginLogControllers.List)
+				sysLoginLog.GET("/:id", sysLoginLogControllers.Detail)
 			}
 
 			// 代码生成配置路由组

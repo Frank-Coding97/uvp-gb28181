@@ -240,6 +240,7 @@ func getOperationModule(c *gin.Context) string {
 		{"/sysAffix", "文件管理"},
 		{"/config", "系统配置"},
 		{"/sysOperationLog", "操作日志管理"},
+		{"/sysLoginLog", "登录日志管理"},
 		{"/sysOnlineUser", "在线用户管理"},
 	}
 

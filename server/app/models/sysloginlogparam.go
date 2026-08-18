@@ -23,14 +23,14 @@ func (r *SysLoginLogListRequest) Validate(c *gin.Context) error {
 	if err := r.Check(c, r); err != nil {
 		return err
 	}
-	if r.PageNum < 1 {
+	if r.PageNum < 0 || r.PageSize < 0 || r.PageSize > 100 {
+		return gorm.ErrInvalidData
+	}
+	if r.PageNum == 0 {
 		r.PageNum = 1
 	}
-	if r.PageSize < 1 {
+	if r.PageSize == 0 {
 		r.PageSize = 20
-	}
-	if r.PageSize > 100 {
-		r.PageSize = 100
 	}
 	if r.Result != "" && r.Result != "success" && r.Result != "failure" {
 		return gorm.ErrInvalidData
