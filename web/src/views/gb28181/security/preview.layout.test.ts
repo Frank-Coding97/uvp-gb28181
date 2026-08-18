@@ -77,6 +77,9 @@ describe("security preview system integration", () => {
     expect(source).toContain("主机防火墙{{ record.firewallState }}");
     expect(source).toContain("转为手动黑名单");
     expect(source).toContain("这里只管理手动黑名单");
+		expect(source).toContain("record.location");
+		expect(source).not.toContain("自动封禁永久生效");
+		expect(source).not.toContain("自动永久封禁");
   });
 
   it("uses security events for the trend and provides explicit empty states", () => {
@@ -127,7 +130,7 @@ describe("security preview system integration", () => {
     expect(source).toContain("updateSecurityAccessRule(rule.id");
     expect(source).toContain("expiryToIso(ruleExpiry.value)");
     expect(source).toContain("自动封禁有效期");
-    expect(source).toContain("永久加入防护");
+    expect(source).toContain("automaticBanTTLLabel");
     expect(source).toContain("refreshCountdown.value = 10");
     expect(source).not.toContain('<strong>86</strong>');
     expect(source).not.toContain('<span class="attention-count">2</span>');
