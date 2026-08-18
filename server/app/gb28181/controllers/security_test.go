@@ -125,6 +125,22 @@ func TestSecurityControllerAccessRulesPaginatesFilteredListNewestFirst(t *testin
 	require.Equal(t, uint64(3), response.Data.Items[0].ID)
 }
 
+func TestSecurityPolicyViewExposesFiniteAutomaticTTLs(t *testing.T) {
+	view := securityPolicyView(gbsecurity.DefaultPolicy())
+	require.False(t, view.PermanentAutoBan)
+	require.Len(t, view.BanTTLs, 3)
+	require.Equal(t, 60, view.BanTTLs[0].TTL)
+	require.Equal(t, 600, view.BanTTLs[1].TTL)
+	require.Equal(t, 3600, view.BanTTLs[2].TTL)
+}
+
+func TestPolicyFromViewRejectsPermanentAutomaticBan(t *testing.T) {
+	view := securityPolicyView(gbsecurity.DefaultPolicy())
+	view.PermanentAutoBan = true
+	policy := policyFromView(view)
+	require.Error(t, policy.Validate())
+}
+
 func serveSecurityList(t *testing.T, target string, handler gin.HandlerFunc) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

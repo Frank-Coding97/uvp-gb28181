@@ -60,7 +60,6 @@ func NewPersistentRuntime(ctx context.Context, store Store, clock Clock, agent F
 	if err != nil {
 		return nil, err
 	}
-	policy = policy.WithPermanentAutoBan()
 	r := NewRuntime(policy, clock, agent, nonceSecret)
 	r.store = store
 	if rules, loadErr := store.ListAccessRules(ctx, ""); loadErr != nil {
@@ -234,7 +233,6 @@ func (r *Runtime) setAccessRules(rules []AccessRule) {
 }
 
 func (r *Runtime) UpdatePolicy(policy Policy, actors ...string) error {
-	policy = policy.WithPermanentAutoBan()
 	if err := policy.Validate(); err != nil {
 		return err
 	}
