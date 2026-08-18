@@ -910,6 +910,8 @@ DROP TABLE IF EXISTS `gb_sip_security_ban`;
 CREATE TABLE `gb_sip_security_ban` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `source_ip` varchar(64) NOT NULL,
+  `device_id` varchar(64) DEFAULT NULL,
+  `risk_scope` varchar(16) DEFAULT NULL,
   `address_family` varchar(8) NOT NULL,
   `status` varchar(16) NOT NULL,
   `reason` varchar(32) NOT NULL,
@@ -934,6 +936,7 @@ CREATE TABLE `gb_sip_security_ban` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_gb_sip_security_ban_decision` (`decision_id`),
   KEY `idx_gb_sip_security_ban_source_status` (`source_ip`, `status`),
+  KEY `idx_gb_sip_security_ban_attribution_status` (`risk_scope`, `device_id`, `status`),
   KEY `idx_gb_sip_security_ban_expiry` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -943,6 +946,8 @@ CREATE TABLE `gb_sip_security_event` (
   `id` bigint NOT NULL AUTO_INCREMENT,
   `bucket_at` datetime NOT NULL,
   `source_ip` varchar(64) NOT NULL,
+  `device_id` varchar(64) DEFAULT NULL,
+  `risk_scope` varchar(16) DEFAULT NULL,
   `address_family` varchar(8) NOT NULL,
   `transport` varchar(8) NOT NULL,
   `method` varchar(16) NOT NULL,
@@ -955,8 +960,9 @@ CREATE TABLE `gb_sip_security_event` (
   `last_seen_at` datetime NOT NULL,
   `sample_event_id` varchar(64) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_gb_sip_security_event` (`bucket_at`, `source_ip`, `transport`, `method`, `reason`, `action`),
+  UNIQUE KEY `uk_gb_sip_security_event` (`bucket_at`, `source_ip`, `device_id`, `risk_scope`, `transport`, `method`, `reason`, `action`),
   KEY `idx_gb_sip_security_event_source_time` (`source_ip`, `last_seen_at`),
+  KEY `idx_gb_sip_security_event_attribution_time` (`risk_scope`, `device_id`, `last_seen_at`),
   KEY `idx_gb_sip_security_event_reason_time` (`reason`, `last_seen_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -5740,7 +5746,7 @@ INSERT INTO `sys_civil_code` (`code`, `name`, `short_name`, `parent_code`, `leve
 
 -- Seed data for `gb_sip_security_policy`
 INSERT INTO `gb_sip_security_policy` (`id`, `scope_key`, `mode`, `window_seconds`, `ban_score`, `max_packet_bytes`, `max_udp_per_window`, `max_tcp_connections`, `sample_per_source`, `nonce_ttl_seconds`, `ban_ttl_steps`, `allowlist_text`, `updated_by`, `updated_at`) VALUES
-(1, 'global', 'protect', 10, 100, 65536, 120, 32, 3, 60, '100:0', '127.0.0.0/8\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16', 0, '2026-08-10 09:27:18');
+(1, 'global', 'protect', 10, 100, 65536, 120, 32, 3, 60, '100:60;200:600;500:3600', '127.0.0.0/8\n10.0.0.0/8\n172.16.0.0/12\n192.168.0.0/16', 0, '2026-08-18 17:00:00');
 
 -- 在线用户会话与权限 seed。
 CREATE TABLE IF NOT EXISTS `sys_user_sessions` (

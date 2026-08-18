@@ -45,7 +45,9 @@ func TestSecurityFreshSchemaAndDefaultAllowlistStayInSync(t *testing.T) {
 		require.Contains(t, string(fresh), table)
 	}
 	require.Contains(t, strings.ToLower(string(fresh)), "`expires_at` datetime default null")
-	require.Contains(t, strings.ToLower(string(fresh)), "'100:0'")
+	require.Contains(t, strings.ToLower(string(fresh)), "'100:60;200:600;500:3600'")
+	require.Contains(t, strings.ToLower(string(fresh)), "`device_id` varchar(64)")
+	require.Contains(t, strings.ToLower(string(fresh)), "`risk_scope` varchar(16)")
 
 	migrations := filepath.Join(databaseRoot, "gb28181", "migrations")
 	files := []string{"2026-08-09-public-sip-security-default-allowlist.sql", "2026-08-09-public-sip-security-default-allowlist-postgresql.sql", "2026-08-09-public-sip-security-default-allowlist-sqlserver.sql"}
@@ -56,6 +58,25 @@ func TestSecurityFreshSchemaAndDefaultAllowlistStayInSync(t *testing.T) {
 		for _, network := range []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"} {
 			require.Contains(t, text, network, name)
 		}
+	}
+}
+
+func TestSecurityFalsePositiveRemediationMigrationsCoverThreeDialects(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "resource", "database", "gb28181", "migrations")
+	files := []string{
+		"2026-08-18-public-sip-security-false-positive-remediation.sql",
+		"2026-08-18-public-sip-security-false-positive-remediation-postgresql.sql",
+		"2026-08-18-public-sip-security-false-positive-remediation-sqlserver.sql",
+	}
+	for _, name := range files {
+		data, err := os.ReadFile(filepath.Join(root, name))
+		require.NoError(t, err, name)
+		text := strings.ToLower(string(data))
+		for _, token := range []string{"device_id", "risk_scope", "100:60;200:600;500:3600", "origin", "auto", "expires_at", "60", "gb_sip_security_audit", "not exists"} {
+			require.Contains(t, text, token, name)
+		}
+		require.NotContains(t, text, "origin = 'manual'", name)
+		require.NotContains(t, text, "origin = n'manual'", name)
 	}
 }
 
