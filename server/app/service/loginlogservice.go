@@ -63,6 +63,35 @@ func (s *LoginLogService) RecordLogin(parent context.Context, event app.LoginLog
 	return result.Error
 }
 
+// CleanupBefore hard-deletes immutable audit rows in bounded batches.
+func (s *LoginLogService) CleanupBefore(ctx context.Context, cutoff time.Time, batchSize int) (int64, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("login log database is unavailable")
+	}
+	if batchSize <= 0 || batchSize > 1000 {
+		batchSize = 1000
+	}
+	var deleted int64
+	for {
+		var ids []uint
+		if err := s.db.WithContext(ctx).Model(&models.SysLoginLog{}).
+			Where("created_at < ?", cutoff).Order("id").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
+			return deleted, err
+		}
+		if len(ids) == 0 {
+			return deleted, nil
+		}
+		result := s.db.WithContext(ctx).Where("id IN ?", ids).Delete(&models.SysLoginLog{})
+		if result.Error != nil {
+			return deleted, result.Error
+		}
+		deleted += result.RowsAffected
+		if len(ids) < batchSize {
+			return deleted, nil
+		}
+	}
+}
+
 func recordLoginFailure(event app.LoginLogEvent, err error) {
 	if err == nil {
 		return
