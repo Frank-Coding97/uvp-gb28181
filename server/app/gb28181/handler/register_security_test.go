@@ -32,6 +32,19 @@ type trustedRegisterCall struct {
 	expires  time.Duration
 }
 
+type countingRegisterTrigger struct{ calls int }
+
+func (trigger *countingRegisterTrigger) Trigger(context.Context, string, string, string) {
+	trigger.calls++
+}
+
+type countingSubscriptionWaker struct{ calls int }
+
+func (waker *countingSubscriptionWaker) WakeDeviceByCode(context.Context, string) error {
+	waker.calls++
+	return nil
+}
+
 const (
 	securityTestDeviceID = "34020000001320000088"
 	securityTestServerID = "34020000002000000001"
@@ -91,6 +104,67 @@ func TestRegisterTransactionReplaysSuccessWithoutDuplicateSideEffects(t *testing
 	require.Equal(t, sip.StatusOK, replay.response.StatusCode)
 	require.Equal(t, 1, registerCalls)
 	require.Equal(t, 1, len(security.trustedCalls))
+}
+
+func TestRegisterTransactionReplaysFirstRegistrationWithoutDuplicateTriggers(t *testing.T) {
+	security := &fakeRegisterSecurity{}
+	handler := NewRegisterHandler(securityTestCfg())
+	handler.SetSecurity(security)
+	handler.handleRegister = func(context.Context, device.RegisterInfo, int) (bool, error) { return true, nil }
+	deviceInfo := &countingRegisterTrigger{}
+	waker := &countingSubscriptionWaker{}
+	handler.SetDeviceInfoTrigger(deviceInfo)
+	handler.SetSubscriptionWaker(waker)
+	req := authorizedRegisterRequest(t, "accepted-nonce", securityTestPassword)
+
+	handler.Handle(req, &captureServerTransaction{})
+	handler.Handle(req, &captureServerTransaction{})
+
+	require.Equal(t, 1, deviceInfo.calls)
+	require.Equal(t, 1, waker.calls)
+}
+
+func TestRegisterRenewalWithNewCSeqExecutesAgain(t *testing.T) {
+	security := &fakeRegisterSecurity{}
+	handler := NewRegisterHandler(securityTestCfg())
+	handler.SetSecurity(security)
+	var expires []int
+	handler.handleRegister = func(_ context.Context, info device.RegisterInfo, _ int) (bool, error) {
+		expires = append(expires, info.Expires)
+		return false, nil
+	}
+	first := authorizedRegisterRequest(t, "accepted-nonce", securityTestPassword)
+	renewal := first.Clone()
+	renewal.RemoveHeader("CSeq")
+	renewal.AppendHeader(sip.NewHeader("CSeq", "2 REGISTER"))
+
+	handler.Handle(first, &captureServerTransaction{})
+	handler.Handle(renewal, &captureServerTransaction{})
+
+	require.Equal(t, []int{3600, 3600}, expires)
+	require.Len(t, security.trustedCalls, 2)
+}
+
+func TestRegisterUnregisterReplayExecutesOnce(t *testing.T) {
+	security := &fakeRegisterSecurity{}
+	handler := NewRegisterHandler(securityTestCfg())
+	handler.SetSecurity(security)
+	unregisterCalls := 0
+	handler.handleUnregister = func(context.Context, string) error {
+		unregisterCalls++
+		return nil
+	}
+	req := authorizedRegisterRequest(t, "accepted-nonce", securityTestPassword)
+	req.RemoveHeader("Expires")
+	req.AppendHeader(sip.NewHeader("Expires", "0"))
+	first, replay := &captureServerTransaction{}, &captureServerTransaction{}
+
+	handler.Handle(req, first)
+	handler.Handle(req, replay)
+
+	require.Equal(t, sip.StatusOK, first.response.StatusCode)
+	require.Equal(t, sip.StatusOK, replay.response.StatusCode)
+	require.Equal(t, 1, unregisterCalls)
 }
 
 func (f *fakeRegisterSecurity) ValidateNonce(_ string, nonceCount string) error {
