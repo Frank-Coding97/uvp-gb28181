@@ -82,6 +82,7 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 		return event, nil, err
 	}
 	event.SourceIP = ip.String()
+	event.RiskScope = riskScopeForEvent(event)
 	if event.Occurred.IsZero() {
 		event.Occurred = s.clock.Now()
 	}
@@ -101,7 +102,7 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 
 	// Aggregate a source across reasons within the same window so a mixed
 	// sequence of mismatch, digest and replay signals reaches a threshold.
-	key := event.SourceIP
+	key := riskBucketKey(event)
 	s.mu.Lock()
 	b := s.buckets[key]
 	if b.started.IsZero() || event.Occurred.Sub(b.started) >= policy.Window {
@@ -113,7 +114,7 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	total := b.score
 	s.mu.Unlock()
 
-	if total < policy.BanScore || policy.Mode == ModeObserve {
+	if total < policy.BanScore || policy.Mode == ModeObserve || event.RiskScope != ScopeSource {
 		return event, nil, nil
 	}
 
@@ -124,6 +125,8 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	decision := BanDecision{
 		DecisionID:       s.nextDecisionID(event.SourceIP, event.Occurred),
 		SourceIP:         event.SourceIP,
+		DeviceID:         event.DeviceID,
+		RiskScope:        event.RiskScope,
 		Reason:           event.Reason,
 		Score:            total,
 		TTL:              ttl,
@@ -198,9 +201,27 @@ func (s *Scorer) UpdateTrustedEndpoint(deviceID, transport, address string, expi
 	}
 	s.mu.Lock()
 	s.endpoints[deviceID] = Endpoint{DeviceID: deviceID, Transport: strings.ToUpper(transport), Address: ip.String(), ExpiresAt: expiresAt, UpdatedAt: s.clock.Now()}
-	delete(s.buckets, ip.String())
+	delete(s.buckets, riskBucketKey(Event{SourceIP: ip.String(), DeviceID: deviceID, RiskScope: ScopeDevice}))
 	s.mu.Unlock()
 	return nil
+}
+
+func riskScopeForEvent(event Event) RiskScope {
+	if strings.TrimSpace(string(event.RiskScope)) == string(ScopeSource) || event.RiskScope == ScopeSource {
+		return ScopeSource
+	}
+	if strings.TrimSpace(event.DeviceID) != "" {
+		return ScopeDevice
+	}
+	return ScopeSource
+}
+
+func riskBucketKey(event Event) string {
+	scope := riskScopeForEvent(event)
+	if scope == ScopeDevice {
+		return string(scope) + "|" + strings.TrimSpace(event.DeviceID)
+	}
+	return string(ScopeSource) + "|" + event.SourceIP
 }
 
 func (s *Scorer) TrustedEndpoint(deviceID string) (Endpoint, bool) {

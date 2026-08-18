@@ -89,10 +89,10 @@ func (p *eventPersister) aggregate(pending map[string]EventAggregate, event Even
 		at = p.clock.Now()
 	}
 	bucket := at.Truncate(time.Minute)
-	key := aggregateKey(bucket, ip.String(), event.Transport, event.Method, event.Reason, event.Action)
+	key := aggregateKey(bucket, ip.String(), event.DeviceID, riskScopeForEvent(event), event.Transport, event.Method, event.Reason, event.Action)
 	item, ok := pending[key]
 	if !ok {
-		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), Transport: event.Transport, Method: event.Method, Reason: event.Reason, Action: event.Action, FirstSeenAt: at}
+		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), DeviceID: event.DeviceID, RiskScope: riskScopeForEvent(event), Transport: event.Transport, Method: event.Method, Reason: event.Reason, Action: event.Action, FirstSeenAt: at}
 	}
 	item.Count++
 	item.ScoreDelta += int64(event.Score)

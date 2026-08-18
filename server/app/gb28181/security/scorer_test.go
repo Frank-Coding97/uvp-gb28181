@@ -73,7 +73,7 @@ func TestTrustedEndpointClearsSourceScore(t *testing.T) {
 	require.NoError(t, s.UpdateTrustedEndpoint("34020000001320000001", "udp", "198.51.100.12", time.Time{}))
 	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.12", Reason: ReasonServerMismatch})
 	require.NoError(t, err)
-	require.Nil(t, decision, "a valid REGISTER starts a fresh score window for that endpoint")
+	require.NotNil(t, decision, "a valid REGISTER must not clear a shared source bucket")
 }
 
 func TestNonceIsSignedExpiringAndSingleUse(t *testing.T) {
@@ -124,4 +124,40 @@ func TestNonceValidationRejectsReplayAcrossTransactions(t *testing.T) {
 
 	require.NoError(t, m.ValidateForTransaction(nonce, "00000001", "device|call-a|1|branch-a"))
 	require.ErrorIs(t, m.ValidateForTransaction(nonce, "00000001", "device|call-b|2|branch-b"), ErrNonceReplay)
+}
+
+func TestKnownDeviceRiskDoesNotCreateNATSourceBan(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(100, 0)}
+	p := DefaultPolicyWithMode(ModeProtect)
+	p.BanScore = 40
+	p.BanTTLs = []TTLStep{{Score: 40, TTL: time.Minute}}
+	s := NewScorer(p, clock, nil, []byte("secret"))
+	for _, deviceID := range []string{"device-a", "device-b"} {
+		for i := 0; i < 3; i++ {
+			_, decision, err := s.Observe(Event{SourceIP: "198.51.100.10", DeviceID: deviceID, Reason: ReasonNonceReplay})
+			require.NoError(t, err)
+			require.Nil(t, decision)
+		}
+	}
+	require.Empty(t, s.decisions)
+	events := []Event{{SourceIP: "198.51.100.10", DeviceID: "device-a", Reason: ReasonNonceReplay}, {SourceIP: "198.51.100.10", DeviceID: "device-b", Reason: ReasonNonceReplay}}
+	for _, event := range events {
+		require.Equal(t, ScopeDevice, riskScopeForEvent(event))
+	}
+}
+
+func TestTransportRiskCanStillBanSourceIP(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(100, 0)}
+	p := DefaultPolicyWithMode(ModeProtect)
+	p.BanScore = 20
+	p.BanTTLs = []TTLStep{{Score: 20, TTL: time.Minute}}
+	s := NewScorer(p, clock, nil, []byte("secret"))
+	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.11", Reason: ReasonPacketTooLarge})
+	require.NoError(t, err)
+	require.Nil(t, decision)
+	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.11", Reason: ReasonPacketTooLarge})
+	require.NoError(t, err)
+	require.NotNil(t, decision)
+	require.Equal(t, ScopeSource, decision.RiskScope)
+	require.Empty(t, decision.DeviceID)
 }

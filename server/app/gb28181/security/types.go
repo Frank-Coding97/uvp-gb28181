@@ -26,6 +26,13 @@ const (
 	ActionExpired Action = "expired"
 )
 
+type RiskScope string
+
+const (
+	ScopeSource RiskScope = "source"
+	ScopeDevice RiskScope = "device"
+)
+
 type Reason string
 
 const (
@@ -88,7 +95,7 @@ func DefaultPolicy() Policy {
 			{Score: 200, TTL: 10 * time.Minute},
 			{Score: 500, TTL: time.Hour},
 		},
-		Allowlist:         defaultAllowlist(),
+		Allowlist: defaultAllowlist(),
 	}
 }
 
@@ -181,6 +188,7 @@ type Event struct {
 	Transport string    `json:"transport"`
 	Method    string    `json:"method"`
 	DeviceID  string    `json:"deviceId"`
+	RiskScope RiskScope `json:"riskScope"`
 	UserAgent string    `json:"userAgent"`
 	Reason    Reason    `json:"reason"`
 	Action    Action    `json:"action"`
@@ -191,6 +199,8 @@ type Event struct {
 type BanDecision struct {
 	DecisionID       string        `json:"decisionId"`
 	SourceIP         string        `json:"sourceIp"`
+	DeviceID         string        `json:"deviceId,omitempty"`
+	RiskScope        RiskScope     `json:"riskScope"`
 	Reason           Reason        `json:"reason"`
 	Score            int           `json:"score"`
 	TTL              time.Duration `json:"ttl"`

@@ -22,6 +22,17 @@ func TestAggregateStoreUpsertsWithinMinuteAndBoundsKeys(t *testing.T) {
 	require.EqualValues(t, 1, s.Dropped())
 }
 
+func TestAggregateStoreSeparatesDeviceAttribution(t *testing.T) {
+	s := NewAggregateStore(4)
+	now := time.Unix(100, 0)
+	for _, deviceID := range []string{"device-a", "device-b"} {
+		require.True(t, s.Record(Event{SourceIP: "198.51.100.10", DeviceID: deviceID, RiskScope: ScopeDevice, Method: "REGISTER", Reason: ReasonNonceReplay, Action: ActionSample, Occurred: now}))
+	}
+	items := s.Snapshot()
+	require.Len(t, items, 2)
+	require.NotEqual(t, items[0].DeviceID, items[1].DeviceID)
+}
+
 func TestBanStoreExpiresAndUnbanIsIdempotent(t *testing.T) {
 	s := NewBanStore()
 	now := time.Unix(100, 0)

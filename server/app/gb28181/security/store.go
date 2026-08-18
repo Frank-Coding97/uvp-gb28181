@@ -39,12 +39,14 @@ type securityEventRow struct {
 	ID            uint64    `gorm:"column:id;primaryKey;autoIncrement"`
 	BucketAt      time.Time `gorm:"column:bucket_at;not null;uniqueIndex:uk_gb_sip_security_event,priority:1"`
 	SourceIP      string    `gorm:"column:source_ip;size:64;not null;uniqueIndex:uk_gb_sip_security_event,priority:2"`
+	DeviceID      string    `gorm:"column:device_id;size:64;not null;uniqueIndex:uk_gb_sip_security_event,priority:3"`
+	RiskScope     string    `gorm:"column:risk_scope;size:16;not null;uniqueIndex:uk_gb_sip_security_event,priority:4"`
 	AddressFamily string    `gorm:"column:address_family;size:8;not null"`
-	Transport     string    `gorm:"column:transport;size:8;not null;uniqueIndex:uk_gb_sip_security_event,priority:3"`
-	Method        string    `gorm:"column:method;size:16;not null;uniqueIndex:uk_gb_sip_security_event,priority:4"`
+	Transport     string    `gorm:"column:transport;size:8;not null;uniqueIndex:uk_gb_sip_security_event,priority:5"`
+	Method        string    `gorm:"column:method;size:16;not null;uniqueIndex:uk_gb_sip_security_event,priority:6"`
 	UserAgent     string    `gorm:"column:user_agent;size:255;not null"`
-	Reason        string    `gorm:"column:reason;size:32;not null;uniqueIndex:uk_gb_sip_security_event,priority:5"`
-	Action        string    `gorm:"column:action;size:16;not null;uniqueIndex:uk_gb_sip_security_event,priority:6"`
+	Reason        string    `gorm:"column:reason;size:32;not null;uniqueIndex:uk_gb_sip_security_event,priority:7"`
+	Action        string    `gorm:"column:action;size:16;not null;uniqueIndex:uk_gb_sip_security_event,priority:8"`
 	Count         int64     `gorm:"column:count;not null"`
 	ScoreDelta    int64     `gorm:"column:score_delta;not null"`
 	FirstSeenAt   time.Time `gorm:"column:first_seen_at;not null"`
@@ -57,6 +59,8 @@ func (securityEventRow) TableName() string { return "gb_sip_security_event" }
 type securityBanRow struct {
 	ID                   uint64     `gorm:"column:id;primaryKey;autoIncrement"`
 	SourceIP             string     `gorm:"column:source_ip;size:64;not null;index:idx_gb_sip_security_ban_source_status,priority:1"`
+	DeviceID             string     `gorm:"column:device_id;size:64;not null"`
+	RiskScope            string     `gorm:"column:risk_scope;size:16;not null"`
 	AddressFamily        string     `gorm:"column:address_family;size:8;not null"`
 	Status               string     `gorm:"column:status;size:16;not null;index:idx_gb_sip_security_ban_source_status,priority:2"`
 	Reason               string     `gorm:"column:reason;size:32;not null"`
@@ -168,7 +172,7 @@ func (s *GormStore) IncrementEvents(ctx context.Context, items []EventAggregate)
 		for _, item := range items {
 			row := eventRow(item)
 			var existing securityEventRow
-			err := tx.Where("bucket_at = ? AND source_ip = ? AND transport = ? AND method = ? AND reason = ? AND action = ?", row.BucketAt, row.SourceIP, row.Transport, row.Method, row.Reason, row.Action).First(&existing).Error
+			err := tx.Where("bucket_at = ? AND source_ip = ? AND device_id = ? AND risk_scope = ? AND transport = ? AND method = ? AND reason = ? AND action = ?", row.BucketAt, row.SourceIP, row.DeviceID, row.RiskScope, row.Transport, row.Method, row.Reason, row.Action).First(&existing).Error
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				if err := tx.Create(&row).Error; err != nil {
 					return err
@@ -370,11 +374,19 @@ func (r securityPolicyRow) policy() (Policy, error) {
 }
 
 func eventRow(item EventAggregate) securityEventRow {
-	return securityEventRow{BucketAt: item.BucketAt, SourceIP: item.SourceIP, AddressFamily: addressFamily(item.SourceIP), Transport: strings.ToUpper(item.Transport), Method: strings.ToUpper(item.Method), UserAgent: item.UserAgent, Reason: string(item.Reason), Action: string(item.Action), Count: item.Count, ScoreDelta: item.ScoreDelta, FirstSeenAt: item.FirstSeenAt, LastSeenAt: item.LastSeenAt}
+	scope := item.RiskScope
+	if scope == "" {
+		scope = riskScopeForEvent(Event{SourceIP: item.SourceIP, DeviceID: item.DeviceID})
+	}
+	return securityEventRow{BucketAt: item.BucketAt, SourceIP: item.SourceIP, DeviceID: item.DeviceID, RiskScope: string(scope), AddressFamily: addressFamily(item.SourceIP), Transport: strings.ToUpper(item.Transport), Method: strings.ToUpper(item.Method), UserAgent: item.UserAgent, Reason: string(item.Reason), Action: string(item.Action), Count: item.Count, ScoreDelta: item.ScoreDelta, FirstSeenAt: item.FirstSeenAt, LastSeenAt: item.LastSeenAt}
 }
 
 func (r securityEventRow) aggregate() EventAggregate {
-	return EventAggregate{BucketAt: r.BucketAt, SourceIP: r.SourceIP, Transport: r.Transport, Method: r.Method, UserAgent: r.UserAgent, Reason: Reason(r.Reason), Action: Action(r.Action), Count: r.Count, ScoreDelta: r.ScoreDelta, FirstSeenAt: r.FirstSeenAt, LastSeenAt: r.LastSeenAt}
+	scope := RiskScope(r.RiskScope)
+	if scope == "" {
+		scope = riskScopeForEvent(Event{SourceIP: r.SourceIP, DeviceID: r.DeviceID})
+	}
+	return EventAggregate{BucketAt: r.BucketAt, SourceIP: r.SourceIP, DeviceID: r.DeviceID, RiskScope: scope, Transport: r.Transport, Method: r.Method, UserAgent: r.UserAgent, Reason: Reason(r.Reason), Action: Action(r.Action), Count: r.Count, ScoreDelta: r.ScoreDelta, FirstSeenAt: r.FirstSeenAt, LastSeenAt: r.LastSeenAt}
 }
 
 func banRow(item FirewallBan) securityBanRow {
@@ -396,7 +408,7 @@ func banRow(item FirewallBan) securityBanRow {
 	if value := item.Decision.ExpiresAt(); !value.IsZero() {
 		expiresAt = &value
 	}
-	return securityBanRow{SourceIP: item.Decision.SourceIP, AddressFamily: addressFamily(item.Decision.SourceIP), Status: string(item.Status), Reason: string(item.Decision.Reason), RuleID: item.RuleID, Score: item.Decision.Score, CreatedAt: item.Decision.CreatedAt, ExpiresAt: expiresAt, UnbannedAt: unbannedAt, UnbannedBy: item.UnbannedBy, Origin: item.Origin, AgentState: item.AgentState, DecisionID: item.Decision.DecisionID, LastError: item.LastError, TriggerMethod: item.Decision.TriggerMethod, TriggerCount: item.Decision.TriggerCount, TriggerThreshold: item.Decision.TriggerThreshold, WindowSeconds: item.Decision.WindowSeconds, PolicyMode: string(item.Decision.PolicyMode), FirewallAppliedAt: firewallAppliedAt, BlockedCountAfterBan: item.BlockedCountAfterBan, LastBlockedAt: lastBlockedAt}
+	return securityBanRow{SourceIP: item.Decision.SourceIP, DeviceID: item.Decision.DeviceID, RiskScope: string(item.Decision.RiskScope), AddressFamily: addressFamily(item.Decision.SourceIP), Status: string(item.Status), Reason: string(item.Decision.Reason), RuleID: item.RuleID, Score: item.Decision.Score, CreatedAt: item.Decision.CreatedAt, ExpiresAt: expiresAt, UnbannedAt: unbannedAt, UnbannedBy: item.UnbannedBy, Origin: item.Origin, AgentState: item.AgentState, DecisionID: item.Decision.DecisionID, LastError: item.LastError, TriggerMethod: item.Decision.TriggerMethod, TriggerCount: item.Decision.TriggerCount, TriggerThreshold: item.Decision.TriggerThreshold, WindowSeconds: item.Decision.WindowSeconds, PolicyMode: string(item.Decision.PolicyMode), FirewallAppliedAt: firewallAppliedAt, BlockedCountAfterBan: item.BlockedCountAfterBan, LastBlockedAt: lastBlockedAt}
 }
 
 func accessRuleRow(rule AccessRule) securityAccessRuleRow {
@@ -429,7 +441,7 @@ func normalizeAccessRule(rule *AccessRule) {
 }
 
 func (r securityBanRow) ban() FirewallBan {
-	decision := BanDecision{DecisionID: r.DecisionID, SourceIP: r.SourceIP, Reason: Reason(r.Reason), Score: r.Score, CreatedAt: r.CreatedAt, TriggerMethod: r.TriggerMethod, TriggerCount: r.TriggerCount, TriggerThreshold: r.TriggerThreshold, WindowSeconds: r.WindowSeconds, PolicyMode: Mode(r.PolicyMode)}
+	decision := BanDecision{DecisionID: r.DecisionID, SourceIP: r.SourceIP, DeviceID: r.DeviceID, RiskScope: RiskScope(r.RiskScope), Reason: Reason(r.Reason), Score: r.Score, CreatedAt: r.CreatedAt, TriggerMethod: r.TriggerMethod, TriggerCount: r.TriggerCount, TriggerThreshold: r.TriggerThreshold, WindowSeconds: r.WindowSeconds, PolicyMode: Mode(r.PolicyMode)}
 	if r.ExpiresAt == nil {
 		decision.Permanent = true
 	} else {

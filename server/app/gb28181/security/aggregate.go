@@ -9,6 +9,8 @@ import (
 type EventAggregate struct {
 	BucketAt    time.Time `json:"bucketAt"`
 	SourceIP    string    `json:"sourceIp"`
+	DeviceID    string    `json:"deviceId,omitempty"`
+	RiskScope   RiskScope `json:"riskScope"`
 	Transport   string    `json:"transport"`
 	Method      string    `json:"method"`
 	UserAgent   string    `json:"userAgent"`
@@ -44,7 +46,7 @@ func (s *AggregateStore) Record(event Event) bool {
 		now = time.Now()
 	}
 	bucket := now.Truncate(time.Minute)
-	key := aggregateKey(bucket, ip.String(), event.Transport, event.Method, event.Reason, event.Action)
+	key := aggregateKey(bucket, ip.String(), event.DeviceID, riskScopeForEvent(event), event.Transport, event.Method, event.Reason, event.Action)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, ok := s.items[key]
@@ -53,7 +55,7 @@ func (s *AggregateStore) Record(event Event) bool {
 			s.dropped++
 			return false
 		}
-		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), Transport: event.Transport, Method: event.Method, UserAgent: event.UserAgent, Reason: event.Reason, Action: event.Action, FirstSeenAt: now}
+		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), DeviceID: event.DeviceID, RiskScope: riskScopeForEvent(event), Transport: event.Transport, Method: event.Method, UserAgent: event.UserAgent, Reason: event.Reason, Action: event.Action, FirstSeenAt: now}
 	}
 	item.Count++
 	item.ScoreDelta += int64(event.Score)
@@ -87,13 +89,13 @@ func (s *AggregateStore) Seed(items []EventAggregate) {
 			s.dropped++
 			break
 		}
-		key := aggregateKey(item.BucketAt, item.SourceIP, item.Transport, item.Method, item.Reason, item.Action)
+		key := aggregateKey(item.BucketAt, item.SourceIP, item.DeviceID, item.RiskScope, item.Transport, item.Method, item.Reason, item.Action)
 		s.items[key] = item
 	}
 }
 
-func aggregateKey(bucket time.Time, source, transport, method string, reason Reason, action Action) string {
-	return bucket.UTC().Format(time.RFC3339) + "|" + source + "|" + transport + "|" + method + "|" + string(reason) + "|" + string(action)
+func aggregateKey(bucket time.Time, source, deviceID string, scope RiskScope, transport, method string, reason Reason, action Action) string {
+	return bucket.UTC().Format(time.RFC3339) + "|" + source + "|" + deviceID + "|" + string(scope) + "|" + transport + "|" + method + "|" + string(reason) + "|" + string(action)
 }
 
 type BanStatus string
@@ -208,7 +210,7 @@ func (s *BanStore) Find(identifier string, now time.Time) (FirewallBan, bool) {
 		if sourceIP != identifier && item.Decision.DecisionID != identifier {
 			continue
 		}
-	if item.Status == BanActive && !item.Decision.ActiveAt(now) {
+		if item.Status == BanActive && !item.Decision.ActiveAt(now) {
 			item.Status = BanExpired
 			s.items[sourceIP] = item
 		}
