@@ -1987,3 +1987,21 @@ INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
 SELECT setval('sys_api_id_seq',340,true);
 SELECT setval('sys_menu_id_seq',140383,true);
 SELECT setval('sys_casbin_rule_id_seq',7807,true);
+
+-- 登录审计事件与只读菜单 seed。
+CREATE TABLE IF NOT EXISTS sys_login_logs (
+  id BIGSERIAL PRIMARY KEY, user_id BIGINT NULL, username VARCHAR(100) NOT NULL, result VARCHAR(16) NOT NULL,
+  failure_reason VARCHAR(48) NULL, ip VARCHAR(50) NOT NULL DEFAULT '', location VARCHAR(100) NOT NULL DEFAULT '未知',
+  user_agent VARCHAR(500) NOT NULL DEFAULT '', browser VARCHAR(100) NOT NULL DEFAULT '未知', os VARCHAR(100) NOT NULL DEFAULT '未知',
+  created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NULL, deleted_at TIMESTAMP NULL
+);
+CREATE INDEX idx_login_logs_user_id ON sys_login_logs(user_id); CREATE INDEX idx_login_logs_username ON sys_login_logs(username);
+CREATE INDEX idx_login_logs_result ON sys_login_logs(result); CREATE INDEX idx_login_logs_failure_reason ON sys_login_logs(failure_reason);
+CREATE INDEX idx_login_logs_ip ON sys_login_logs(ip); CREATE INDEX idx_login_logs_created_at ON sys_login_logs(created_at);
+INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
+(341,'登录日志列表','/api/sysLoginLog/list','GET','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,'登录日志详情','/api/sysLoginLog/:id','GET','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
+(140384,10,'/system/login-log','SystemLoginLog','system/login-log/index','登录日志',FALSE,FALSE,1,2,'system:login-log:list','lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_role_menu(role_id,menu_id) VALUES (1,140384); INSERT INTO sys_menu_api(menu_id,api_id) VALUES (140384,341),(140384,342);
+INSERT INTO sys_casbin_rule(id,ptype,v0,v1,v2,v3,v4,v5) VALUES (7808,'p','role_1','/api/sysLoginLog/list','GET','*','',''),(7809,'p','role_1','/api/sysLoginLog/:id','GET','*','','');
+SELECT setval('sys_api_id_seq',342,true); SELECT setval('sys_menu_id_seq',140384,true); SELECT setval('sys_casbin_rule_id_seq',7809,true);

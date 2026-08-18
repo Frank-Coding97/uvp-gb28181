@@ -501,6 +501,20 @@ INSERT INTO [sys_casbin_rule] ([id], [ptype], [v0], [v1], [v2], [v3], [v4], [v5]
 -- Table structure for sys_department
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
+-- 登录审计事件与只读菜单 seed。
+IF OBJECT_ID(N'sys_login_logs', N'U') IS NULL CREATE TABLE [sys_login_logs] ([id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,[user_id] BIGINT NULL,[username] NVARCHAR(100) NOT NULL,[result] NVARCHAR(16) NOT NULL,[failure_reason] NVARCHAR(48) NULL,[ip] NVARCHAR(50) NOT NULL DEFAULT N'',[location] NVARCHAR(100) NOT NULL DEFAULT N'未知',[user_agent] NVARCHAR(500) NOT NULL DEFAULT N'',[browser] NVARCHAR(100) NOT NULL DEFAULT N'未知',[os] NVARCHAR(100) NOT NULL DEFAULT N'未知',[created_at] DATETIME2 NOT NULL,[updated_at] DATETIME2 NULL,[deleted_at] DATETIME2 NULL);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_login_logs_created_at' AND object_id=OBJECT_ID(N'sys_login_logs')) CREATE INDEX idx_login_logs_created_at ON sys_login_logs(created_at);
+SET IDENTITY_INSERT [sys_api] ON;
+INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (341,N'登录日志列表',N'/api/sysLoginLog/list',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,N'登录日志详情',N'/api/sysLoginLog/:id',N'GET',N'日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_api] OFF;
+SET IDENTITY_INSERT [sys_menu] ON;
+INSERT INTO [sys_menu] ([id],[parent_id],[path],[name],[component],[title],[hide],[disable],[sort],[type],[permission],[icon],[created_at],[updated_at],[deleted_at],[created_by]) VALUES (140384,10,N'/system/login-log',N'SystemLoginLog',N'system/login-log/index',N'登录日志',0,0,1,2,N'system:login-log:list',N'lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
+SET IDENTITY_INSERT [sys_menu] OFF;
+INSERT INTO [sys_role_menu] ([role_id],[menu_id]) VALUES (1,140384); INSERT INTO [sys_menu_api] ([menu_id],[api_id]) VALUES (140384,341),(140384,342);
+SET IDENTITY_INSERT [sys_casbin_rule] ON;
+INSERT INTO [sys_casbin_rule] ([id],[ptype],[v0],[v1],[v2],[v3],[v4],[v5]) VALUES (7808,N'p',N'role_1',N'/api/sysLoginLog/list',N'GET',N'*',N'',N''),(7809,N'p',N'role_1',N'/api/sysLoginLog/:id',N'GET',N'*',N'',N'');
+SET IDENTITY_INSERT [sys_casbin_rule] OFF;
+
 -- Playback schemes reuse the multi-screen page and expose one hidden permission.
 SET IDENTITY_INSERT [sys_api] ON;
 INSERT INTO [sys_api] ([id],[title],[path],[method],[api_group],[created_at],[updated_at],[deleted_at],[created_by]) VALUES
