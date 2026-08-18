@@ -35,6 +35,7 @@ type RegisterHandler struct {
 	security          RegisterSecurity
 	diagnosticSink    diagnosis.DiagnosticSink
 	attempts          *registerAttemptTracker
+	transactions      *registerTransactionLedger
 	now               func() time.Time
 	handleRegister    func(context.Context, device.RegisterInfo, int) (bool, error)
 	handleUnregister  func(context.Context, string) error
@@ -82,6 +83,7 @@ func NewRegisterHandler(cfg gbconfig.Config) *RegisterHandler {
 		handleRegister: device.HandleRegister, handleUnregister: device.HandleUnregister,
 	}
 	handler.attempts = newRegisterAttemptTracker(sink, func() time.Time { return handler.now() })
+	handler.transactions = newRegisterTransactionLedger(defaultRegisterTransactionTTL, defaultMaxRegisterTransactions, func() time.Time { return handler.now() })
 	return handler
 }
 
@@ -192,6 +194,19 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeServerIDMismatch, 403)
 		return
 	}
+
+	transactionKey := registerTransactionKey(req, deviceID)
+	result, finishTransaction, execute := h.transactions.begin(transactionKey)
+	if !execute {
+		_ = tx.Respond(result.response(req, h.platformVersion))
+		h.recordEnd(req, result.status, result.status == sip.StatusUnauthorized || result.status >= 200 && result.status < 300)
+		return
+	}
+	capture := &capturingRegisterTransaction{ServerTransaction: tx}
+	tx = capture
+	defer func() {
+		finishTransaction(capture.responseResult, capture.captured)
+	}()
 
 	// 第二步:无 Authorization → 回 401 挑战 digest
 	authHeader := req.GetHeader("Authorization")

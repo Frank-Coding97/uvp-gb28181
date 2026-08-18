@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -10,11 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
 )
 
 type fakeRegisterSecurity struct {
 	nonces       []string
+	issueCalls   int
 	validateErr  error
 	validatedNC  string
 	events       []gbsecurity.Event
@@ -42,12 +45,50 @@ func securityTestCfg() gbconfig.Config {
 }
 
 func (f *fakeRegisterSecurity) IssueNonce() (string, error) {
+	f.issueCalls++
 	if len(f.nonces) == 0 {
 		return "", errors.New("no nonce configured")
 	}
 	nonce := f.nonces[0]
 	f.nonces = f.nonces[1:]
 	return nonce, nil
+}
+
+func TestRegisterTransactionReusesInitialChallengeForUDPReplay(t *testing.T) {
+	security := &fakeRegisterSecurity{nonces: []string{"stable-nonce"}}
+	handler := NewRegisterHandler(securityTestCfg())
+	handler.SetSecurity(security)
+	req := newSecurityRegisterRequest(securityTestDeviceID, securityTestServerID)
+	first, replay := &captureServerTransaction{}, &captureServerTransaction{}
+
+	handler.Handle(req, first)
+	handler.Handle(req, replay)
+
+	require.Equal(t, sip.StatusUnauthorized, first.response.StatusCode)
+	require.Equal(t, sip.StatusUnauthorized, replay.response.StatusCode)
+	require.Equal(t, first.response.GetHeader("WWW-Authenticate").Value(), replay.response.GetHeader("WWW-Authenticate").Value())
+	require.Equal(t, 1, security.issueCalls)
+}
+
+func TestRegisterTransactionReplaysSuccessWithoutDuplicateSideEffects(t *testing.T) {
+	security := &fakeRegisterSecurity{}
+	handler := NewRegisterHandler(securityTestCfg())
+	handler.SetSecurity(security)
+	registerCalls := 0
+	handler.handleRegister = func(context.Context, device.RegisterInfo, int) (bool, error) {
+		registerCalls++
+		return false, nil
+	}
+	req := authorizedRegisterRequest(t, "accepted-nonce", securityTestPassword)
+	first, replay := &captureServerTransaction{}, &captureServerTransaction{}
+
+	handler.Handle(req, first)
+	handler.Handle(req, replay)
+
+	require.Equal(t, sip.StatusOK, first.response.StatusCode)
+	require.Equal(t, sip.StatusOK, replay.response.StatusCode)
+	require.Equal(t, 1, registerCalls)
+	require.Equal(t, 1, len(security.trustedCalls))
 }
 
 func (f *fakeRegisterSecurity) ValidateNonce(_ string, nonceCount string) error {
