@@ -81,6 +81,13 @@ func TestNonceIsSignedExpiringAndSingleUse(t *testing.T) {
 	m := NewNonceManager([]byte("secret"), time.Minute, clock)
 	nonce, err := m.Issue()
 	require.NoError(t, err)
+	tampered := []byte(nonce)
+	if tampered[len(tampered)-1] == 'A' {
+		tampered[len(tampered)-1] = 'B'
+	} else {
+		tampered[len(tampered)-1] = 'A'
+	}
+	require.ErrorIs(t, m.Validate(string(tampered), "00000001"), ErrNonceInvalid)
 	require.NoError(t, m.Validate(nonce, "00000001"))
 	require.ErrorIs(t, m.Validate(nonce, "00000001"), ErrNonceReplay)
 	clock.now = clock.now.Add(2 * time.Minute)
@@ -88,6 +95,16 @@ func TestNonceIsSignedExpiringAndSingleUse(t *testing.T) {
 	require.NoError(t, err)
 	clock.now = clock.now.Add(2 * time.Minute)
 	require.ErrorIs(t, m.Validate(nonce2, "00000001"), ErrNonceExpired)
+}
+
+func TestNonceFitsLegacyDeviceBuffer(t *testing.T) {
+	m := NewNonceManager([]byte("secret"), time.Minute, &fakeClock{now: time.Unix(100, 0)})
+
+	nonce, err := m.Issue()
+
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(nonce), 64)
+	require.NoError(t, m.Validate(nonce, "00000001"))
 }
 
 func TestNonceReplayStateExpiresWithNonceTTL(t *testing.T) {

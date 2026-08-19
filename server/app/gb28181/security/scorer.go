@@ -249,6 +249,11 @@ type nonceUse struct {
 	expiresAt              time.Time
 }
 
+const (
+	noncePayloadSize = 24
+	nonceMACSize     = 16
+)
+
 func NewNonceManager(secret []byte, ttl time.Duration, clock Clock) *NonceManager {
 	if clock == nil {
 		clock = RealClock()
@@ -265,10 +270,11 @@ func (m *NonceManager) Issue() (string, error) {
 	if _, err := rand.Read(random); err != nil {
 		return "", err
 	}
-	buf := make([]byte, 24)
+	buf := make([]byte, noncePayloadSize)
 	binary.BigEndian.PutUint64(buf[:8], uint64(m.clock.Now().Unix()))
 	copy(buf[8:], random)
-	sig := m.sign(buf)
+	// A 128-bit HMAC tag keeps the nonce below legacy devices' 64-byte limit.
+	sig := m.sign(buf)[:nonceMACSize]
 	return base64.RawURLEncoding.EncodeToString(append(buf, sig...)), nil
 }
 
@@ -278,11 +284,11 @@ func (m *NonceManager) Validate(nonce, nonceCount string) error {
 
 func (m *NonceManager) ValidateForTransaction(nonce, nonceCount, transactionFingerprint string) error {
 	raw, err := base64.RawURLEncoding.DecodeString(nonce)
-	if err != nil || len(raw) != 56 {
+	if err != nil || len(raw) != noncePayloadSize+nonceMACSize {
 		return ErrNonceInvalid
 	}
-	payload, sig := raw[:24], raw[24:]
-	if !hmac.Equal(sig, m.sign(payload)) {
+	payload, sig := raw[:noncePayloadSize], raw[noncePayloadSize:]
+	if !hmac.Equal(sig, m.sign(payload)[:nonceMACSize]) {
 		return ErrNonceInvalid
 	}
 	issued := time.Unix(int64(binary.BigEndian.Uint64(payload[:8])), 0)
