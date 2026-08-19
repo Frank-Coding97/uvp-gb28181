@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
     listChannels: vi.fn()
 }));
+const favoriteDialog = vi.hoisted(() => ({ opened: false, channels: [] as ChannelVO[] }));
 const playback = vi.hoisted(() => ({
     startPlay: vi.fn(),
     stopPlay: vi.fn(),
@@ -19,7 +20,11 @@ vi.mock("./PlaybackSourceTree.vue", () => ({
     default: {
         name: "PlaybackSourceTree",
         props: ["usedChannelIds", "view"],
-        emits: ["select", "select-group"],
+        emits: ["select", "select-group", "favorite-saved"],
+        setup(_props: unknown, { expose }: { expose: (value: unknown) => void }) {
+            expose({ openFavoriteDialogForChannels: (channels: ChannelVO[]) => { favoriteDialog.opened = true; favoriteDialog.channels = channels; } });
+            return { favoriteDialog };
+        },
         template: `
             <div data-test="playback-source-tree" :data-view="view">
                 <button data-test="source-channel-1" @click="$emit('select', {
@@ -29,8 +34,10 @@ vi.mock("./PlaybackSourceTree.vue", () => ({
                     id: 2, channelId: 'channel-2', deviceId: 'device-2', name: '西门', status: 1, audioEnabled: false
                 })">西门</button>
                 <button data-test="favorite-group-1" @click="$emit('select-group', {
-                    id: 'group-1', name: '重点设备', devices: [{ deviceId: 'device-1' }]
-                })">重点设备</button>
+                    id: 'group-1', name: '重点通道', channels: [{ id: 3, channelId: 'channel-3', deviceId: 'device-1', name: '后门', status: 1, audioEnabled: false }]
+                })">重点通道</button>
+                <button data-test="favorite-saved" @click="$emit('favorite-saved', '重点设备', 1, 0)">收藏成功</button>
+                <span v-if="favoriteDialog.opened" data-test="favorite-dialog-opened" />
             </div>
         `
     }
@@ -52,10 +59,13 @@ vi.mock("../components/PlayConsoleLinked.vue", () => ({
 }));
 
 import MultiScreenPlayback from "./index.vue";
+import type { ChannelVO } from "../device-mgmt/api";
 
 describe("multi-screen playback page", () => {
     beforeEach(() => {
         api.listChannels.mockReset();
+        favoriteDialog.opened = false;
+        favoriteDialog.channels = [];
         playback.startPlay.mockImplementation(async (_deviceId: string, channelId: string) => ({
             code: 0,
             data: {
@@ -140,21 +150,40 @@ describe("multi-screen playback page", () => {
         expect(wrapper.get(".slot-node-name").text()).toBe("节点 zlm-220");
     });
 
-    it("opens my favorites from the toolbar without changing current playback", async () => {
+    it("opens the favorite group dialog for current playback without changing playback", async () => {
         const wrapper = mount(MultiScreenPlayback);
+        expect(wrapper.get("[data-test=my-favorites]").attributes("aria-label")).toBe("收藏当前播放通道");
+        expect(wrapper.get("[data-test=my-favorites]").attributes("title")).toBe("收藏当前播放通道");
         await wrapper.get("[data-test=source-channel-1]").trigger("click");
         await flushPromises();
         const callsBeforeOpen = playback.startPlay.mock.calls.length;
 
         await wrapper.get("[data-test=my-favorites]").trigger("click");
         await flushPromises();
-        expect(wrapper.get("[data-test=my-favorites]").classes()).toContain("active");
-        expect(wrapper.get("[data-test=playback-source-tree]").attributes("data-view")).toBe("favorites");
+        expect(favoriteDialog.opened).toBe(true);
+        expect(favoriteDialog.channels).toEqual([expect.objectContaining({ channelId: "channel-1" })]);
+        expect(wrapper.get("[data-test=playback-source-tree]").attributes("data-view")).toBe("devices");
         expect(playback.startPlay).toHaveBeenCalledTimes(callsBeforeOpen);
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["东门"]);
     });
 
-    it("plays all online channels from a favorite device group", async () => {
+    it("asks for a playback channel before opening the favorite group dialog", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+
+        await wrapper.get("[data-test=my-favorites]").trigger("click");
+
+        expect(wrapper.text()).toContain("请先播放至少一路通道，再收藏当前播放通道");
+    });
+
+    it("shows a success toast after saving a favorite group", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+
+        await wrapper.get("[data-test=favorite-saved]").trigger("click");
+
+        expect(wrapper.get(".workspace-toast").text()).toBe("已将 1 个通道加入收藏组“重点设备”");
+    });
+
+    it("plays all channels from a favorite channel group", async () => {
         api.listChannels.mockResolvedValue({
             code: 0,
             data: { list: [{ id: 3, channelId: "channel-3", deviceId: "device-1", name: "后门", status: 1, audioEnabled: false }] }
@@ -164,10 +193,10 @@ describe("multi-screen playback page", () => {
         await wrapper.get("[data-test=favorite-group-1]").trigger("click");
         await flushPromises();
 
-        expect(api.listChannels).toHaveBeenCalledWith({ deviceId: "device-1", status: "online", page: 1, pageSize: 200 });
+        expect(api.listChannels).not.toHaveBeenCalled();
         expect(playback.startPlay).toHaveBeenCalledWith("device-1", "channel-3");
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["后门"]);
-        expect(wrapper.text()).toContain("已播放收藏组“重点设备”");
+        expect(wrapper.text()).toContain("已播放收藏组“重点通道”");
     });
 
     it.each([

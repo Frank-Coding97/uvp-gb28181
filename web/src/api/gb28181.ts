@@ -2,6 +2,7 @@ import { http } from "@/utils/http";
 import { baseUrlApi } from "./utils";
 import { BaseResult } from "./types";
 import { getAccessToken } from "@/utils/auth";
+import type { ChannelVO } from "@/views/gb28181/device-mgmt/api";
 
 const silentRequestConfig = { showErrorMessage: false };
 
@@ -56,6 +57,20 @@ export type ChannelListResult = BaseResult<{
   list: GbChannel[];
   total: number;
 }>;
+
+// ===== 通道收藏 =====
+
+export interface ChannelFavoriteInput { deviceCode: string; channelCode: string; }
+export interface ChannelFavoriteItem { id: number; deviceCode: string; channelCode: string; deviceName: string; channelName: string; channel?: ChannelVO; }
+export interface ChannelFavoriteGroup { id: number; name: string; items: ChannelFavoriteItem[]; availableCount: number; unavailableCount: number; }
+export interface ChannelFavoriteAppendResult { requestedCount: number; addedCount: number; skippedCount: number; }
+
+const channelFavoriteGroupsPath = "gb28181/channel-favorite-groups";
+export const listChannelFavoriteGroups = () => http.request<BaseResult<{ list: ChannelFavoriteGroup[] }>>("get", baseUrlApi(channelFavoriteGroupsPath));
+export const createChannelFavoriteGroup = (name: string, channels: ChannelFavoriteInput[]) => http.request<BaseResult<ChannelFavoriteGroup>>("post", baseUrlApi(channelFavoriteGroupsPath), { data: { name, channels } });
+export const appendChannelFavoriteGroup = (groupId: number, channels: ChannelFavoriteInput[]) => http.request<BaseResult<ChannelFavoriteAppendResult>>("post", baseUrlApi(`${channelFavoriteGroupsPath}/${groupId}/channels`), { data: { channels } });
+export const removeChannelFavoriteItem = (groupId: number, channel: ChannelFavoriteInput) => http.request<BaseResult<{ removed: boolean }>>("delete", baseUrlApi(`${channelFavoriteGroupsPath}/${groupId}/channels`), { data: channel });
+export const deleteChannelFavoriteGroup = (groupId: number) => http.request<BaseResult<{ deleted: boolean }>>("delete", baseUrlApi(`${channelFavoriteGroupsPath}/${groupId}`));
 
 // ===== 点播 =====
 

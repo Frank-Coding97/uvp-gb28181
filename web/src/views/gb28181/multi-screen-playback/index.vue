@@ -19,7 +19,7 @@ import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
-import { listChannels, type ChannelVO, type DeviceVO } from "../device-mgmt/api";
+import { listChannels, type ChannelVO } from "../device-mgmt/api";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 
 type LayoutSize = 1 | 4 | 6 | 8 | 9 | 16;
@@ -36,10 +36,10 @@ interface PlaybackSlot {
     token: number;
 }
 
-interface FavoriteDeviceGroup {
-    id: string;
+interface FavoriteChannelGroup {
+    id: number;
     name: string;
-    devices: DeviceVO[];
+    channels: ChannelVO[];
 }
 
 const layout = ref<LayoutSize>(4);
@@ -52,6 +52,7 @@ const isFullscreen = ref(false);
 const pollingVisible = ref(false);
 type SourceView = "devices" | "national" | "custom" | "favorites";
 const sourceView = ref<SourceView>("devices");
+const sourceTreeRef = ref<{ openFavoriteDialogForChannels?: (channels: ChannelVO[]) => void } | null>(null);
 const pollingDraft = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
 const pollingSettings = reactive({ enabled: false, intervalSeconds: 30, skipOffline: true });
 const pollingChannels = ref<ChannelVO[]>([]);
@@ -233,11 +234,28 @@ async function playAll() {
     }
 }
 
-function openFavorites() {
-    sourceView.value = "favorites";
+async function openFavorites() {
+    const channels = slots.flatMap(slot => slot.channel ? [slot.channel] : []);
+    if (!channels.length) {
+        toast.value = "请先播放至少一路通道，再收藏当前播放通道";
+        return;
+    }
+    sourceTreeRef.value?.openFavoriteDialogForChannels?.(channels);
 }
 
-async function playFavoriteGroup(group: FavoriteDeviceGroup) {
+function handleFavoriteSaved(groupName: string, addedCount: number, skippedCount: number) {
+    if (skippedCount && addedCount) {
+        toast.value = `已将 ${addedCount} 个通道加入收藏组“${groupName}”，${skippedCount} 个通道已在组内`;
+        return;
+    }
+    if (skippedCount) {
+        toast.value = `收藏组“${groupName}”已包含当前通道，无需重复收藏`;
+        return;
+    }
+    toast.value = `已将 ${addedCount} 个通道加入收藏组“${groupName}”`;
+}
+
+async function playFavoriteGroup(group: FavoriteChannelGroup) {
     if (playAllLoading.value) return;
     const token = playAllToken + 1;
     playAllToken = token;
@@ -245,12 +263,8 @@ async function playFavoriteGroup(group: FavoriteDeviceGroup) {
     playAllLoading.value = true;
     toast.value = "";
     try {
-        const responses = await Promise.all(group.devices.map(device => listChannels({ deviceId: device.deviceId, status: "online", page: 1, pageSize: 200 })));
+        const channels = group.channels || [];
         if (token !== playAllToken) return;
-        const channels = responses.flatMap(response => {
-            if (response?.code !== 0) throw new Error(response?.message || "加载收藏组通道失败");
-            return (response.data?.list || []) as ChannelVO[];
-        });
         slots.forEach(resetSlot);
         focusedIndex.value = null;
         const batch = channels.slice(0, layout.value);
@@ -425,7 +439,7 @@ onBeforeUnmount(() => {
     <div class="snow-fill gb28181-page multi-screen-page">
         <div class="workspace">
             <section class="source-panel" aria-label="设备树和云台控制">
-                <PlaybackSourceTree v-model:view="sourceView" :used-channel-ids="usedChannelIds" @select="assignChannel" @select-group="playFavoriteGroup" />
+                <PlaybackSourceTree ref="sourceTreeRef" v-model:view="sourceView" :used-channel-ids="usedChannelIds" @select="assignChannel" @select-group="playFavoriteGroup" @favorite-saved="handleFavoriteSaved" />
                 <BasicPtzPanel :channel="focusedSlot?.channel || null" @action-change="handlePtzActionChange" />
             </section>
 
@@ -438,7 +452,7 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
-                        <button type="button" data-test="my-favorites" :class="{ active: sourceView === 'favorites' }" aria-label="我的收藏" title="我的收藏" @click="openFavorites"><Star :size="17" :fill="sourceView === 'favorites' ? 'currentColor' : 'none'" aria-hidden="true" /></button>
+                        <button type="button" data-test="my-favorites" aria-label="收藏当前播放通道" title="收藏当前播放通道" @click="openFavorites"><Star :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>

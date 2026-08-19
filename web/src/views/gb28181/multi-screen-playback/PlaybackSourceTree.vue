@@ -10,14 +10,16 @@ import {
     type DirectoryNode,
     type DirectoryView
 } from "../device-mgmt/api";
+import { appendChannelFavoriteGroup, createChannelFavoriteGroup, deleteChannelFavoriteGroup, listChannelFavoriteGroups, removeChannelFavoriteItem, type ChannelFavoriteGroup as ApiFavoriteGroup, type ChannelFavoriteInput } from "@/api/gb28181";
 
 type SourceView = "devices" | DirectoryView | "favorites";
 type SourceNodeKind = "directory" | "device" | "channel" | "favorite-group";
 
-export interface FavoriteDeviceGroup {
-    id: string;
+export interface FavoriteChannelGroup {
+    id: number;
     name: string;
-    devices: DeviceVO[];
+    channels: ChannelVO[];
+    unavailableCount?: number;
 }
 
 interface SourceTreeNode {
@@ -31,7 +33,8 @@ interface SourceTreeNode {
     deviceId?: string;
     device?: DeviceVO;
     channel?: ChannelVO;
-    favoriteGroup?: FavoriteDeviceGroup;
+    favoriteGroup?: FavoriteChannelGroup;
+    favoriteGroupId?: number;
     children: SourceTreeNode[];
     staticChildren: SourceTreeNode[];
     hasChildren: boolean;
@@ -47,7 +50,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     select: [channel: ChannelVO];
-    "select-group": [group: FavoriteDeviceGroup];
+    "select-group": [group: FavoriteChannelGroup];
+    "favorite-saved": [groupName: string, addedCount: number, skippedCount: number];
     "update:view": [view: SourceView];
 }>();
 
@@ -79,54 +83,31 @@ const viewOptions: Array<{ value: SourceView; label: string; icon: Component }> 
     { value: "favorites", label: "我的收藏", icon: Star }
 ];
 
-const favoriteStorageKey = "uvp.gb28181.playback.favorite-groups";
 const favoriteDialogVisible = ref(false);
-const favoriteDialogDevice = ref<DeviceVO | null>(null);
+const favoriteDialogChannel = ref<ChannelVO | null>(null);
+const favoriteDialogChannels = ref<ChannelVO[]>([]);
+const favoriteDialogMode = ref<"existing" | "new">("new");
+const favoriteDialogGroupId = ref("");
 const favoriteGroupName = ref("");
 const favoriteDialogError = ref("");
 const viewTabsRef = ref<HTMLElement | null>(null);
 
-function readFavoriteGroups(): FavoriteDeviceGroup[] {
-    try {
-        const raw = window.localStorage.getItem(favoriteStorageKey);
-        const parsed = raw ? JSON.parse(raw) : [];
-        return Array.isArray(parsed)
-            ? parsed
-                .filter(group => group && typeof group.id === "string" && typeof group.name === "string" && Array.isArray(group.devices))
-                .map(group => ({
-                    id: group.id,
-                    name: group.name,
-                    devices: group.devices.filter((device: DeviceVO) => device && typeof device.id === "number" && typeof device.deviceId === "string")
-                }))
-            : [];
-    } catch {
-        return [];
-    }
+const favoriteGroups = ref<FavoriteChannelGroup[]>([]);
+
+function isChannelFavorite(channel: ChannelVO) {
+    return favoriteGroups.value.some(group => group.channels.some(item => item.deviceId === channel.deviceId && item.channelId === channel.channelId));
 }
 
-const favoriteGroups = ref<FavoriteDeviceGroup[]>([]);
-
-function persistFavoriteGroups() {
-    try {
-        window.localStorage.setItem(favoriteStorageKey, JSON.stringify(favoriteGroups.value));
-    } catch {
-        favoriteDialogError.value = "收藏组保存失败，请检查浏览器存储空间";
-    }
-}
-
-function isDeviceFavorite(device: DeviceVO) {
-    return favoriteGroups.value.some(group => group.devices.some(item => item.id === device.id));
-}
-
-function favoriteGroupNode(group: FavoriteDeviceGroup, index: number): SourceTreeNode {
-    const staticChildren = group.devices.map(device => deviceNode(device, `favorites:${index}`, 1));
+function favoriteGroupNode(group: FavoriteChannelGroup, index: number): SourceTreeNode {
+    const channelChildren = group.channels.map(channel => ({ ...channelNode(channel, `favorites:${index}:group:${group.id}`, 1), favoriteGroupId: group.id }));
+    const staticChildren = channelChildren;
     return {
         key: `favorites:group:${group.id}`,
         name: group.name,
         kind: "favorite-group",
         depth: 0,
-        count: group.devices.length,
-        onlineCount: group.devices.filter(device => device.status === 1).length,
+        count: staticChildren.length,
+        onlineCount: group.channels.filter(channel => channel.status === 1).length,
         children: staticChildren,
         staticChildren,
         favoriteGroup: group,
@@ -137,9 +118,28 @@ function favoriteGroupNode(group: FavoriteDeviceGroup, index: number): SourceTre
     };
 }
 
+async function removeFavoriteChannel(node: SourceTreeNode) {
+    if (!node.channel || !node.favoriteGroupId || !window.confirm(`确认移除“${displayChannelName(node.channel)}”吗？`)) return;
+    try { await removeChannelFavoriteItem(node.favoriteGroupId, { deviceCode: node.channel.deviceId, channelCode: node.channel.channelId }); await loadFavorites(); } catch { error.value = "移除收藏失败，请稍后重试"; }
+}
+
+async function removeFavoriteGroup(node: SourceTreeNode) {
+    if (!node.favoriteGroup || !window.confirm(`确认删除收藏组“${node.favoriteGroup.name}”吗？`)) return;
+    try { await deleteChannelFavoriteGroup(node.favoriteGroup.id); await loadFavorites(); } catch { error.value = "删除收藏组失败，请稍后重试"; }
+}
+
 function openFavoriteDialog(node: SourceTreeNode) {
-    if (!node.device) return;
-    favoriteDialogDevice.value = node.device;
+    if (!node.channel) return;
+    openFavoriteDialogForChannels([node.channel]);
+}
+
+function openFavoriteDialogForChannels(channels: ChannelVO[]) {
+    const uniqueChannels = channels.filter((channel, index, list) => channel && list.findIndex(item => item.id === channel.id) === index);
+    if (!uniqueChannels.length) return;
+    favoriteDialogChannels.value = uniqueChannels;
+    favoriteDialogChannel.value = uniqueChannels[0];
+    favoriteDialogMode.value = favoriteGroups.value.length ? "existing" : "new";
+    favoriteDialogGroupId.value = "";
     favoriteGroupName.value = "";
     favoriteDialogError.value = "";
     favoriteDialogVisible.value = true;
@@ -147,32 +147,60 @@ function openFavoriteDialog(node: SourceTreeNode) {
 
 function closeFavoriteDialog() {
     favoriteDialogVisible.value = false;
-    favoriteDialogDevice.value = null;
+    favoriteDialogChannel.value = null;
+    favoriteDialogChannels.value = [];
+    favoriteDialogGroupId.value = "";
     favoriteGroupName.value = "";
     favoriteDialogError.value = "";
 }
 
-function saveFavoriteGroup() {
-    const device = favoriteDialogDevice.value;
-    const name = favoriteGroupName.value.trim();
-    if (!device) return;
-    if (!name) {
-        favoriteDialogError.value = "请输入收藏组名称";
+async function saveFavoriteGroup() {
+    const channels = favoriteDialogChannels.value;
+    if (!channels.length) return;
+    let group: FavoriteChannelGroup | undefined;
+    const inputs: ChannelFavoriteInput[] = channels.map(channel => ({ deviceCode: channel.deviceId, channelCode: channel.channelId }));
+    if (favoriteDialogMode.value === "existing") {
+        group = favoriteGroups.value.find(item => String(item.id) === String(favoriteDialogGroupId.value));
+        if (!group) {
+            favoriteDialogError.value = "请选择要追加的收藏组";
+            return;
+        }
+    } else {
+        const name = favoriteGroupName.value.trim();
+        if (!name) {
+            favoriteDialogError.value = "请输入收藏组名称";
+            return;
+        }
+        try {
+            await createChannelFavoriteGroup(name, inputs);
+            emit("favorite-saved", name, channels.length, 0);
+            await loadFavorites();
+            closeFavoriteDialog();
+        } catch (error: any) {
+            favoriteDialogError.value = error?.response?.data?.data?.errorCode === "CHANNEL_FAVORITE_GROUP_NAME_CONFLICT" ? "已存在同名收藏组，请切换“选择已有组”进行追加" : "收藏组保存失败，请稍后重试";
+        }
         return;
     }
-    let group = favoriteGroups.value.find(item => item.name === name);
-    if (!group) {
-        group = { id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, name, devices: [] };
-        favoriteGroups.value = [...favoriteGroups.value, group];
-    }
-    if (!group.devices.some(item => item.id === device.id)) group.devices = [...group.devices, device];
-    persistFavoriteGroups();
-    loadFavorites();
-    closeFavoriteDialog();
+    try {
+        const response = await appendChannelFavoriteGroup(group.id, inputs);
+        const result = response.data;
+        if (!result) throw new Error("收藏组追加失败");
+        if (result.addedCount === 0 && result.skippedCount > 0) {
+            favoriteDialogError.value = `当前通道已在“${group.name}”中，无需重复收藏`;
+            return;
+        }
+        emit("favorite-saved", group.name, result.addedCount, result.skippedCount);
+        await loadFavorites();
+        closeFavoriteDialog();
+    } catch { favoriteDialogError.value = "收藏组保存失败，请稍后重试"; }
 }
 
-function loadFavorites() {
-    favoriteGroups.value = readFavoriteGroups();
+async function loadFavorites() {
+    try {
+        const response = await listChannelFavoriteGroups();
+        const groups = response.data?.list || [];
+        favoriteGroups.value = groups.map((group: ApiFavoriteGroup) => ({ id: group.id, name: group.name, unavailableCount: group.unavailableCount, channels: (group.items || []).map(item => item.channel).filter((channel): channel is ChannelVO => Boolean(channel)) }));
+    } catch { favoriteGroups.value = []; }
     trees.value.favorites = favoriteGroups.value.map(favoriteGroupNode);
     loaded.value.favorites = true;
 }
@@ -318,7 +346,7 @@ async function loadRoot(nextView: SourceView = view.value, force = false, silent
     error.value = "";
     try {
         if (nextView === "favorites") {
-            loadFavorites();
+            await loadFavorites();
         } else if (nextView === "devices") {
             const response = await listDevices(deviceListParams());
             const devices = responseList<DeviceVO>(response);
@@ -463,12 +491,12 @@ function nodeIcon(node: SourceTreeNode) {
 function nodeStatus(node: SourceTreeNode) {
     if (node.kind === "channel") return node.status === 1 ? "在线" : "离线";
     if (node.kind === "device") return node.status === 1 ? "在线" : "离线";
-    if (node.kind === "favorite-group") return `${node.count} 台设备`;
+    if (node.kind === "favorite-group") return node.favoriteGroup?.unavailableCount ? `${node.count} 个通道，${node.favoriteGroup.unavailableCount} 个不可用` : `${node.count} 个通道`;
     return node.count ? `${node.onlineCount}/${node.count}` : "空";
 }
 
 onMounted(async () => {
-    loadFavorites();
+    await loadFavorites();
     await loadRoot();
     if (unmounted) return;
     refreshTimer = window.setInterval(() => {
@@ -488,6 +516,8 @@ onBeforeUnmount(() => {
     if (refreshTimer) window.clearInterval(refreshTimer);
     cancelDeviceSearch();
 });
+
+defineExpose({ openFavoriteDialogForChannels });
 </script>
 
 <template>
@@ -548,12 +578,14 @@ onBeforeUnmount(() => {
                         <span v-if="node.kind === 'directory' || node.kind === 'favorite-group'" class="node-status">{{ nodeStatus(node) }}</span>
                         <span v-else class="node-status-dot" :class="node.status === 1 ? 'online' : 'offline'" role="img" :aria-label="nodeStatus(node)" :title="nodeStatus(node)" />
                     </button>
-                    <button v-if="node.kind === 'device' && node.device" class="favorite-toggle" :class="{ active: isDeviceFavorite(node.device) }" type="button" :aria-label="isDeviceFavorite(node.device) ? '追加到收藏组' : '收藏设备'" :title="isDeviceFavorite(node.device) ? '追加到收藏组' : '收藏设备'" @click.stop="openFavoriteDialog(node)">
-                        <Star :size="14" :fill="isDeviceFavorite(node.device) ? 'currentColor' : 'none'" aria-hidden="true" />
+                    <button v-if="node.kind === 'channel' && node.channel" class="favorite-toggle" :class="{ active: isChannelFavorite(node.channel) }" type="button" :aria-label="isChannelFavorite(node.channel) ? '追加到收藏组' : '收藏通道'" :title="isChannelFavorite(node.channel) ? '追加到收藏组' : '收藏通道'" @click.stop="openFavoriteDialog(node)">
+                        <Star :size="14" :fill="isChannelFavorite(node.channel) ? 'currentColor' : 'none'" aria-hidden="true" />
                     </button>
+                    <button v-if="node.kind === 'channel' && node.favoriteGroupId" class="favorite-remove" type="button" aria-label="移除收藏通道" title="移除收藏通道" @click.stop="removeFavoriteChannel(node)"><X :size="13" aria-hidden="true" /></button>
                     <button v-if="node.kind === 'favorite-group' && node.favoriteGroup" class="favorite-play" type="button" :data-test="`favorite-group-play-${node.favoriteGroup.id}`" aria-label="播放收藏组" title="播放收藏组" @click.stop="emit('select-group', node.favoriteGroup)">
                         <Play :size="13" aria-hidden="true" />播放
                     </button>
+                    <button v-if="node.kind === 'favorite-group' && node.favoriteGroup" class="favorite-remove" type="button" aria-label="删除收藏组" title="删除收藏组" @click.stop="removeFavoriteGroup(node)"><X :size="13" aria-hidden="true" /></button>
                 </div>
                 <div v-if="!loading && !visibleRows.length" class="tree-empty">{{ view === "devices" && hasDeviceFilters ? "当前筛选条件下暂无设备" : view === "favorites" ? "暂无收藏组" : "暂无设备或通道" }}</div>
             </div>
@@ -564,10 +596,26 @@ onBeforeUnmount(() => {
         </div>
         <div v-if="favoriteDialogVisible" class="favorite-dialog-backdrop" @click.self="closeFavoriteDialog">
             <section class="favorite-dialog" role="dialog" aria-modal="true" aria-labelledby="favorite-dialog-title">
-                <header><strong id="favorite-dialog-title">收藏设备</strong><button type="button" aria-label="关闭收藏组弹窗" title="关闭" @click="closeFavoriteDialog"><X :size="16" aria-hidden="true" /></button></header>
-                <p>将“{{ favoriteDialogDevice ? displayName(favoriteDialogDevice) : '' }}”加入收藏组</p>
-                <input v-model="favoriteGroupName" data-test="favorite-group-name" type="text" maxlength="64" autofocus placeholder="输入组名，例如：园区重点设备" aria-label="收藏组名称" @keyup.enter="saveFavoriteGroup" />
-                <span class="favorite-dialog-hint">输入已有组名可把设备追加到同一组</span>
+                <header><strong id="favorite-dialog-title">收藏通道</strong><button type="button" aria-label="关闭收藏组弹窗" title="关闭" @click="closeFavoriteDialog"><X :size="16" aria-hidden="true" /></button></header>
+                <p>{{ favoriteDialogChannels.length > 1 ? `将当前 ${favoriteDialogChannels.length} 个播放通道加入收藏组` : `将“${favoriteDialogChannel ? displayChannelName(favoriteDialogChannel) : ''}”加入收藏组` }}</p>
+                <div class="favorite-dialog-modes" role="tablist" aria-label="收藏方式">
+                    <button type="button" role="tab" :disabled="!favoriteGroups.length" :aria-selected="favoriteDialogMode === 'existing'" :class="{ active: favoriteDialogMode === 'existing' }" @click="favoriteDialogMode = 'existing'; favoriteDialogError = ''">选择已有组</button>
+                    <button type="button" role="tab" :aria-selected="favoriteDialogMode === 'new'" :class="{ active: favoriteDialogMode === 'new' }" @click="favoriteDialogMode = 'new'; favoriteDialogError = ''">新建组</button>
+                </div>
+                <div v-if="favoriteDialogMode === 'existing'" class="favorite-dialog-field">
+                    <label for="favorite-group-select">收藏组</label>
+                    <select id="favorite-group-select" v-model="favoriteDialogGroupId" data-test="favorite-group-select" aria-label="选择已有收藏组">
+                        <option value="">请选择收藏组</option>
+                        <option v-for="group in favoriteGroups" :key="group.id" :value="group.id">{{ group.name }}（{{ group.channels.length }} 个）</option>
+                    </select>
+                    <span v-if="!favoriteGroups.length" class="favorite-dialog-hint">暂无已有组，请切换到“新建组”</span>
+                    <span v-else class="favorite-dialog-hint">已在组内的设备不会重复添加</span>
+                </div>
+                <div v-else class="favorite-dialog-field">
+                    <label for="favorite-group-name">新建组名称</label>
+                    <input id="favorite-group-name" v-model="favoriteGroupName" data-test="favorite-group-name" type="text" maxlength="64" autofocus placeholder="输入组名，例如：园区重点通道" aria-label="新建收藏组名称" @keyup.enter="saveFavoriteGroup" />
+                    <span class="favorite-dialog-hint">组名不能与已有组重复</span>
+                </div>
                 <p v-if="favoriteDialogError" class="favorite-dialog-error" role="alert">{{ favoriteDialogError }}</p>
                 <footer><button type="button" class="dialog-secondary" @click="closeFavoriteDialog">取消</button><button type="button" class="dialog-primary" data-test="save-favorite-group" @click="saveFavoriteGroup">保存收藏</button></footer>
             </section>
@@ -629,6 +677,8 @@ onBeforeUnmount(() => {
 .tree-node > svg { flex: 0 0 auto; color: var(--uvp-brand); }
 .favorite-toggle { display: inline-grid; width: 24px; height: 24px; flex: 0 0 24px; margin-right: 4px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; place-items: center; }
 .favorite-toggle:hover, .favorite-toggle.active { color: var(--zlm-warn-500); background: var(--uvp-sidebar-active-bg); }
+.favorite-remove { display: inline-grid; width: 22px; height: 22px; flex: 0 0 22px; margin-right: 4px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; place-items: center; }
+.favorite-remove:hover { color: var(--uvp-danger); background: var(--uvp-sidebar-active-bg); }
 .favorite-play { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 3px; height: 24px; margin-right: 4px; padding: 0 6px; color: var(--uvp-brand); background: transparent; border: 1px solid var(--uvp-panel-border); border-radius: 4px; cursor: pointer; font: inherit; font-size: 10px; }
 .favorite-play:hover { background: var(--uvp-sidebar-active-bg); border-color: var(--uvp-brand); }
 .tree-row.offline .tree-node > svg { color: var(--uvp-text-tertiary); }
@@ -638,13 +688,22 @@ onBeforeUnmount(() => {
 .tree-error { display: flex; gap: 8px; align-items: center; padding: 10px 12px; color: var(--uvp-danger); font-size: 12px; }
 .tree-error button { padding: 0; color: var(--uvp-brand); background: transparent; border: 0; cursor: pointer; font: inherit; }
 .tree-empty { display: grid; min-height: 120px; color: var(--uvp-text-tertiary); place-items: center; font-size: 12px; }
-.favorite-dialog-backdrop { position: absolute; z-index: 20; inset: 0; display: grid; padding: 16px; background: rgb(15 23 42 / 20%); place-items: center; }
+.favorite-dialog-backdrop { position: fixed; z-index: 1000; inset: 0; display: grid; padding: 16px; background: rgb(15 23 42 / 20%); place-items: center; }
 .favorite-dialog { width: min(320px, 100%); padding: 16px; color: var(--uvp-text-primary); background: var(--zlm-card); border: 1px solid var(--uvp-panel-border); border-radius: 8px; box-shadow: 0 12px 30px rgb(15 23 42 / 18%); }
 .favorite-dialog header, .favorite-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .favorite-dialog header { padding-bottom: 10px; border-bottom: 1px solid var(--uvp-panel-border); }
 .favorite-dialog header button { display: inline-grid; width: 26px; height: 26px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; place-items: center; }
 .favorite-dialog header button:hover { color: var(--uvp-text-primary); background: var(--uvp-sidebar-active-bg); }
 .favorite-dialog > p { margin: 12px 0 8px; font-size: 12px; }
+.favorite-dialog-modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; margin: 14px 0 12px; padding: 2px; background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 5px; }
+.favorite-dialog-modes button { height: 28px; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+.favorite-dialog-modes button:hover { color: var(--uvp-text-primary); background: var(--uvp-sidebar-active-bg); }
+.favorite-dialog-modes button:disabled { color: var(--uvp-text-tertiary); cursor: not-allowed; opacity: 0.55; }
+.favorite-dialog-modes button.active { color: var(--uvp-brand); font-weight: 600; background: var(--uvp-panel-bg); box-shadow: 0 0 0 1px var(--uvp-panel-border); }
+.favorite-dialog-field { display: grid; gap: 6px; }
+.favorite-dialog-field label { color: var(--uvp-text-secondary); font-size: 11px; }
+.favorite-dialog select { box-sizing: border-box; width: 100%; height: 34px; padding: 0 9px; color: var(--uvp-text-primary); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: 5px; outline: 0; font: inherit; font-size: 12px; }
+.favorite-dialog select:focus { border-color: var(--uvp-brand); }
 .favorite-dialog input { box-sizing: border-box; width: 100%; height: 34px; padding: 0 9px; color: var(--uvp-text-primary); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: 5px; outline: 0; font: inherit; font-size: 12px; }
 .favorite-dialog input:focus { border-color: var(--uvp-brand); }
 .favorite-dialog-hint { display: block; margin-top: 7px; color: var(--uvp-text-tertiary); font-size: 10px; }
