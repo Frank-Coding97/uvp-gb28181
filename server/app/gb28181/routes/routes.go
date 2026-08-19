@@ -35,6 +35,7 @@ var deviceMgmtController = gbcontrollers.NewDeviceMgmtController()
 var mapController = gbcontrollers.NewMapController()
 var anomalyController = gbcontrollers.NewAnomalyController()
 var alarmController = gbcontrollers.NewAlarmController()
+var channelFavoriteController = gbcontrollers.NewChannelFavoriteController()
 
 // streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
 var streamNotifier = stream.NewNotifier()
@@ -476,6 +477,14 @@ func currentCloudRecordingCatalogController() *gbcontrollers.CloudRecordingCatal
 func RegisterRoutes(protected *gin.RouterGroup) {
 	gb := protected.Group("/gb28181")
 	{
+		favorites := gb.Group("/channel-favorite-groups")
+		{
+			favorites.GET("", channelFavoriteController.List)
+			favorites.POST("", channelFavoriteController.Create)
+			favorites.POST("/:id/channels", channelFavoriteController.Append)
+			favorites.DELETE("/:id/channels", channelFavoriteController.Remove)
+			favorites.DELETE("/:id", channelFavoriteController.Delete)
+		}
 		cloudRecordings := gb.Group("/cloud-recordings")
 		{
 			cloudRecordings.GET("/files", func(c *gin.Context) { currentCloudRecordingCatalogController().ListFiles(c) })

@@ -3,6 +3,14 @@
 
 SET NOCOUNT ON;
 
+IF OBJECT_ID('gb_channel_favorite_item','U') IS NOT NULL DROP TABLE [gb_channel_favorite_item];
+CREATE TABLE [gb_channel_favorite_item] ([id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY, [group_id] BIGINT NOT NULL, [device_code] NVARCHAR(64) NOT NULL, [channel_code] NVARCHAR(64) NOT NULL, [device_name] NVARCHAR(255) NOT NULL DEFAULT '', [channel_name] NVARCHAR(255) NOT NULL DEFAULT '', [created_at] DATETIME2 NOT NULL, [updated_at] DATETIME2 NOT NULL);
+CREATE UNIQUE INDEX [uk_gb_channel_favorite_item_code] ON [gb_channel_favorite_item] ([group_id],[device_code],[channel_code]);
+CREATE INDEX [idx_gb_channel_favorite_item_group] ON [gb_channel_favorite_item] ([group_id]);
+IF OBJECT_ID('gb_channel_favorite_group','U') IS NOT NULL DROP TABLE [gb_channel_favorite_group];
+CREATE TABLE [gb_channel_favorite_group] ([id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY, [owner_user_id] BIGINT NOT NULL, [name] NVARCHAR(64) NOT NULL, [created_at] DATETIME2 NOT NULL, [updated_at] DATETIME2 NOT NULL);
+CREATE UNIQUE INDEX [uk_gb_channel_favorite_group_owner_name] ON [gb_channel_favorite_group] ([owner_user_id],[name]);
+CREATE INDEX [idx_gb_channel_favorite_group_owner] ON [gb_channel_favorite_group] ([owner_user_id]);
 IF OBJECT_ID('gb_custom_group_device', 'U') IS NOT NULL DROP TABLE [gb_custom_group_device];
 CREATE TABLE [gb_custom_group_device] (
     [id] BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
