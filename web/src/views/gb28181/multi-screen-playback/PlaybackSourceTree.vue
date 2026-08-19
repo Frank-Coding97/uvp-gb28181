@@ -594,9 +594,11 @@ onBeforeUnmount(() => {
 .tree-view-scroll::-webkit-scrollbar { display: none; }
 .tree-views button { height: 28px; padding: 0 8px; color: var(--uvp-text-tertiary); white-space: nowrap; background: transparent; border: 0; border-radius: 4px; cursor: pointer; font-size: 12px; }
 .tree-view-scroll button { flex: 0 0 auto; }
-.tree-view-scroll [role="tab"] { display: inline-flex; align-items: center; gap: 4px; }
+.tree-view-scroll [role="tab"] { position: relative; display: inline-flex; align-items: center; gap: 4px; border: 1px solid transparent; transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease; }
 .tree-view-scroll [role="tab"] > svg { flex: 0 0 auto; }
-.tree-views button.active { color: var(--uvp-text-primary); font-weight: 620; background: var(--uvp-panel-bg); box-shadow: 0 0 0 1px var(--uvp-panel-border); }
+.tree-view-scroll [role="tab"]:hover:not(.active) { color: var(--uvp-text-primary); background: var(--uvp-sidebar-active-bg); }
+.tree-view-scroll [role="tab"]:focus-visible { outline: 2px solid var(--uvp-brand); outline-offset: 1px; }
+.tree-view-scroll [role="tab"].active { color: var(--uvp-brand-strong, var(--uvp-brand)); font-weight: 650; background: var(--uvp-brand-soft); border-color: color-mix(in srgb, var(--uvp-brand) 32%, var(--uvp-panel-border)); box-shadow: 0 1px 2px rgb(37 99 235 / 12%); }
 .tree-view-arrow { display: inline-grid; width: 24px; flex: 0 0 24px; padding: 0; place-items: center; }
 .tree-view-arrow:hover { color: var(--uvp-text-primary); background: var(--uvp-panel-bg); }
 .tree-filters { flex: 0 0 auto; margin: 0 12px 8px; padding: 6px; background: var(--uvp-list-toolbar-bg); border: 1px solid var(--uvp-panel-border); border-radius: 6px; }

@@ -88,6 +88,26 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11, name: "东门" });
     });
 
+    it("keeps the selected source view visually and semantically distinct", async () => {
+        const wrapper = mountTree();
+        await flushPromises();
+
+        const devicesTab = wrapper.get("[data-test=source-view-devices]");
+        const nationalTab = wrapper.get("[data-test=source-view-national]");
+        expect(devicesTab.classes()).toContain("active");
+        expect(devicesTab.attributes("aria-selected")).toBe("true");
+        expect(nationalTab.classes()).not.toContain("active");
+        expect(nationalTab.attributes("aria-selected")).toBe("false");
+
+        await nationalTab.trigger("click");
+        await flushPromises();
+
+        expect(devicesTab.classes()).not.toContain("active");
+        expect(devicesTab.attributes("aria-selected")).toBe("false");
+        expect(nationalTab.classes()).toContain("active");
+        expect(nationalTab.attributes("aria-selected")).toBe("true");
+    });
+
     it("opens a group dialog when favoriting a device and shows the group in my favorites", async () => {
         const wrapper = mountTree();
         await flushPromises();
