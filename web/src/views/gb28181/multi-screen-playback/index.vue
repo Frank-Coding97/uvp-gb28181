@@ -2,13 +2,13 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import {
     AlertTriangle,
-    Check,
     CircleStop,
     Maximize2,
     Minimize2,
     Play,
     RefreshCw,
     Repeat2,
+    SlidersHorizontal,
     Square,
     Star,
     X
@@ -450,10 +450,10 @@ onBeforeUnmount(() => {
                     <article v-for="slot in visibleSlots" :key="slot.index" class="screen-slot" :class="{ focused: focusedIndex === slot.index, empty: !slot.channel }" data-test="screen-slot" tabindex="0" @click="focusSlot(slot)" @keydown.enter="focusSlot(slot)">
                         <template v-if="slot.channel">
                             <div class="slot-topline">
-                                <div class="slot-title"><span class="status-dot" :class="statusTone(slot)" aria-hidden="true" /><span class="slot-channel-name">{{ slot.channel.name || slot.channel.alias || slot.channel.channelId }}</span><span class="slot-status">{{ statusLabel(slot) }}</span></div>
+                                <div class="slot-title"><span class="status-dot" :class="statusTone(slot)" aria-hidden="true" /><span class="slot-channel-name">{{ slot.channel.name || slot.channel.alias || slot.channel.channelId }}</span><span class="slot-status">{{ statusLabel(slot) }}</span><span v-if="slot.result?.node" class="slot-node-name">节点 {{ slot.result.node.name }}</span></div>
                                 <div class="slot-actions">
-                                    <button class="slot-action" type="button" aria-label="打开通道控制台" title="打开通道控制台" @click.stop="openConsole(slot)"><Maximize2 :size="15" aria-hidden="true" /></button>
-                                    <button class="slot-action danger" type="button" :data-test="`slot-remove-${slot.index}`" aria-label="移除这个画面" title="移除这个画面" @click.stop="removeSlot(slot)"><X :size="15" aria-hidden="true" /></button>
+                                    <button class="slot-action" type="button" aria-label="打开通道控制台" title="打开通道控制台" @click.stop="openConsole(slot)"><SlidersHorizontal :size="15" aria-hidden="true" /></button>
+                                    <button class="slot-action danger" type="button" :data-test="`slot-remove-${slot.index}`" aria-label="关闭当前播放" title="关闭当前播放" @click.stop="removeSlot(slot)"><X :size="15" aria-hidden="true" /></button>
                                 </div>
                             </div>
                             <div class="slot-body">
@@ -470,7 +470,6 @@ onBeforeUnmount(() => {
                                     </span>
                                 </div>
                             </div>
-                            <footer class="slot-footer"><span>{{ slot.channel.deviceId }}</span><span v-if="slot.result?.node">节点 {{ slot.result.node.name }}</span><span v-if="focusedIndex === slot.index" class="focused-label"><Check :size="13" aria-hidden="true" />已聚焦</span></footer>
                         </template>
                         <UnplayedCover v-else :index="slot.index" />
                     </article>
@@ -512,7 +511,6 @@ onBeforeUnmount(() => {
 
 .monitor-toolbar,
 .slot-topline,
-.slot-footer,
 .layout-switcher,
 .playback-actions,
 .slot-title,
@@ -567,8 +565,8 @@ onBeforeUnmount(() => {
 .screen-slot:focus-visible, .screen-slot.focused { z-index: 1; }
 .screen-slot:focus-visible::after, .screen-slot.focused::after { border-color: var(--zlm-brand-500); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--zlm-brand-500) 30%, transparent); }
 .screen-slot.empty { min-height: 0; background: #090B0F; }
-.slot-topline, .slot-footer { justify-content: space-between; gap: 8px; min-width: 0; padding: 8px 10px; }
-.slot-topline { min-height: 40px; color: #F8FAFC; background: #0F172A; }
+.slot-topline { position: absolute; z-index: 6; top: 0; right: 0; left: 0; display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; padding: 2px 8px; color: #F8FAFC; background: rgb(15 23 42 / 72%); backdrop-filter: blur(4px); opacity: 0; pointer-events: none; transform: translateY(-6px); transition: opacity var(--zlm-dur-fast) var(--zlm-ease-out), transform var(--zlm-dur-fast) var(--zlm-ease-out), visibility var(--zlm-dur-fast) var(--zlm-ease-out); visibility: hidden; }
+.screen-slot:hover .slot-topline, .screen-slot:focus-within .slot-topline { opacity: 1; pointer-events: auto; transform: translateY(0); visibility: visible; }
 .slot-title { min-width: 0; gap: 7px; }
 .status-dot { width: 6px; height: 6px; flex: 0 0 auto; background: #64748B; border-radius: 50%; }
 .status-dot.loading { background: #38BDF8; }
@@ -576,13 +574,16 @@ onBeforeUnmount(() => {
 .status-dot.error, .status-dot.offline { background: #EF4444; }
 .slot-channel-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 700; }
 .slot-status { color: #94A3B8; font-size: 10px; }
+.slot-node-name { overflow: hidden; color: #94A3B8; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .slot-actions { flex: 0 0 auto; gap: 4px; }
 .slot-action { display: inline-grid; width: 28px; height: 28px; padding: 0; color: #94A3B8; background: transparent; border: 1px solid transparent; border-radius: 5px; cursor: pointer; transition: color var(--zlm-dur-fast) var(--zlm-ease-out), background-color var(--zlm-dur-fast) var(--zlm-ease-out), border-color var(--zlm-dur-fast) var(--zlm-ease-out); place-items: center; }
 .slot-action:hover { color: #F8FAFC; background: rgb(51 65 85 / 68%); border-color: rgb(100 116 139 / 36%); }
 .slot-action.danger:hover { color: #FCA5A5; background: rgb(127 29 29 / 28%); border-color: rgb(248 113 113 / 24%); }
 .slot-action:focus-visible { outline: 2px solid #60A5FA; outline-offset: 1px; }
 .slot-body { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; align-items: center; justify-content: center; }
-.slot-body :deep(.play-window) { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 0; }
+.slot-body :deep(.play-window) { width: 100%; height: 100%; min-height: 100%; aspect-ratio: auto; border: 0; border-radius: 0; }
+.slot-body :deep(.play-window .player), .slot-body :deep(.play-window video), .slot-body :deep(.play-window canvas) { width: 100% !important; height: 100% !important; }
+.slot-body :deep(.play-window video) { object-fit: contain !important; }
 .ptz-direction-indicator { --ptz-direction-rotation: 0deg; position: absolute; top: 50%; left: 50%; z-index: 5; display: grid; width: clamp(72px, 12%, 104px); aspect-ratio: 1; transform: translate(-50%, -50%) rotate(var(--ptz-direction-rotation)); pointer-events: none; place-items: center; }
 .ptz-direction-stack { position: relative; display: block; width: 100%; height: 100%; animation: ptz-direction-flow 0.95s ease-in-out infinite; will-change: opacity, transform; }
 .ptz-direction-chevron { position: absolute; left: 50%; display: block; width: 76%; height: 34%; background: rgb(96 165 250 / 82%); clip-path: polygon(0 68%, 50% 0, 100% 68%, 80% 100%, 50% 58%, 20% 100%); transform: translateX(-50%); }
@@ -607,9 +608,6 @@ onBeforeUnmount(() => {
 .error-state strong { color: #FECACA; }
 .offline-state { color: #FBBF24; }
 .offline-state strong { color: #FDE68A; }
-.slot-footer { min-height: 32px; color: #64748B; background: #0F172A; font-size: 10px; }
-.slot-footer > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.focused-label { display: inline-flex; align-items: center; gap: 3px; color: #93C5FD; }
 .workspace-toast { position: absolute; right: 20px; bottom: 16px; max-width: min(420px, calc(100% - 40px)); margin: 0; padding: 9px 12px; color: #FEF3C7; background: #451A03; border: 1px solid #92400E; border-radius: var(--zlm-radius-sm); font-size: 12px; }
 .polling-backdrop { position: absolute; z-index: 20; display: grid; background: rgb(15 23 42 / 34%); inset: 0; place-items: center; }
 .polling-settings { width: min(360px, calc(100% - 32px)); color: var(--zlm-text-1); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); box-shadow: var(--zlm-shadow-lg); }

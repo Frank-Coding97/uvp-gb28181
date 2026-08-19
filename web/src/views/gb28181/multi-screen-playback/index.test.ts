@@ -94,6 +94,52 @@ describe("multi-screen playback page", () => {
         expect(source).toMatch(/\.monitor-toolbar\s*\{[^}]*flex:\s*0 0 auto;/s);
     });
 
+    it("fills the playback window on tall large-screen slots", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
+
+        expect(source).toMatch(/\.slot-body :deep\(\.play-window\)\s*\{[^}]*height:\s*100%;[^}]*aspect-ratio:\s*auto;/s);
+        expect(source).toMatch(/\.slot-body :deep\(\.play-window video\)\s*\{[^}]*object-fit:\s*contain !important;/s);
+    });
+
+    it("overlays the channel header on hover and removes the footer layout", async () => {
+        const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
+
+        expect(source).toMatch(/\.slot-topline\s*\{[^}]*position:\s*absolute;[^}]*z-index:\s*6;/s);
+        expect(source).toMatch(/\.slot-topline\s*\{[^}]*min-height:\s*28px;[^}]*background:\s*rgb\(15 23 42 \/ 72%\);/s);
+        expect(source).toMatch(/\.screen-slot:hover \.slot-topline, \.screen-slot:focus-within \.slot-topline/);
+        expect(source).not.toContain("<footer class=\"slot-footer\">");
+        expect(source).toContain('class="slot-node-name">节点 {{ slot.result.node.name }}</span>');
+        expect(source).toContain('<SlidersHorizontal :size="15" aria-hidden="true" />');
+        expect(source).not.toContain('aria-label="打开通道控制台" title="打开通道控制台" @click.stop="openConsole(slot)"><Maximize2');
+
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+        expect(wrapper.find(".slot-footer").exists()).toBe(false);
+    });
+
+    it("shows the media node name in the floating channel header", async () => {
+        playback.startPlay.mockResolvedValueOnce({
+            code: 0,
+            data: {
+                streamId: "stream-channel-1",
+                ssrc: "ssrc-channel-1",
+                app: "rtp",
+                node: { name: "zlm-220" },
+                urls: { wsFlv: "ws://zlm/channel-1.live.flv" },
+                wsflvUrl: "ws://zlm/channel-1.live.flv",
+                httpFlvUrl: "",
+                hlsUrl: "",
+                expireAt: 0
+            }
+        });
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+
+        expect(wrapper.get(".slot-node-name").text()).toBe("节点 zlm-220");
+    });
+
     it("opens my favorites from the toolbar without changing current playback", async () => {
         const wrapper = mount(MultiScreenPlayback);
         await wrapper.get("[data-test=source-channel-1]").trigger("click");
@@ -211,6 +257,16 @@ describe("multi-screen playback page", () => {
         await wrapper.get("[data-test=slot-remove-0]").trigger("click");
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([]);
         expect(playback.stopPlay).not.toHaveBeenCalled();
+    });
+
+    it("exposes a dedicated close action for each playing slot", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+
+        const closeButton = wrapper.get("[data-test=slot-remove-0]");
+        expect(closeButton.attributes("aria-label")).toBe("关闭当前播放");
+        expect(closeButton.attributes("title")).toBe("关闭当前播放");
     });
 
     it("plays available online channels until the active layout is filled", async () => {
