@@ -13,9 +13,16 @@ const playback = vi.hoisted(() => ({
     controlPtz: vi.fn(),
     getControlCapabilities: vi.fn()
 }));
+const message = vi.hoisted(() => ({
+    success: vi.fn(),
+    info: vi.fn(),
+    warning: vi.fn(),
+    error: vi.fn()
+}));
 
 vi.mock("../device-mgmt/api", () => api);
 vi.mock("@/api/gb28181", () => playback);
+vi.mock("@arco-design/web-vue", () => ({ Message: message }));
 vi.mock("./PlaybackSourceTree.vue", () => ({
     default: {
         name: "PlaybackSourceTree",
@@ -85,6 +92,10 @@ describe("multi-screen playback page", () => {
             code: 0,
             data: { basicPtz: { state: "supported", reason: "" } }
         });
+        message.success.mockReset();
+        message.info.mockReset();
+        message.warning.mockReset();
+        message.error.mockReset();
     });
 
     it("renders four stable slots and the dedicated playback source tree", async () => {
@@ -102,6 +113,13 @@ describe("multi-screen playback page", () => {
         const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
 
         expect(source).toMatch(/\.monitor-toolbar\s*\{[^}]*flex:\s*0 0 auto;/s);
+    });
+
+    it("keeps the desktop polling countdown content inside its status button", () => {
+        const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/index.vue"), "utf8");
+
+        expect(source).toMatch(/\.playback-actions button\.polling-control\.counting\s*\{[^}]*width:\s*44px;[^}]*flex-shrink:\s*0;/s);
+        expect(source).not.toContain("class=\"countdown-label\"");
     });
 
     it("fills the playback window on tall large-screen slots", () => {
@@ -172,15 +190,16 @@ describe("multi-screen playback page", () => {
 
         await wrapper.get("[data-test=my-favorites]").trigger("click");
 
-        expect(wrapper.text()).toContain("请先播放至少一路通道，再收藏当前播放通道");
+        expect(message.info).toHaveBeenCalledWith("请先播放至少一路通道，再收藏当前播放通道");
     });
 
-    it("shows a success toast after saving a favorite group", async () => {
+    it("shows a system message after saving a favorite group", async () => {
         const wrapper = mount(MultiScreenPlayback);
 
         await wrapper.get("[data-test=favorite-saved]").trigger("click");
 
-        expect(wrapper.get(".workspace-toast").text()).toBe("已将 1 个通道加入收藏组“重点设备”");
+        expect(message.success).toHaveBeenCalledWith("已将 1 个通道加入收藏组“重点设备”");
+        expect(wrapper.find(".workspace-toast").exists()).toBe(false);
     });
 
     it("plays all channels from a favorite channel group", async () => {
@@ -196,7 +215,7 @@ describe("multi-screen playback page", () => {
         expect(api.listChannels).not.toHaveBeenCalled();
         expect(playback.startPlay).toHaveBeenCalledWith("device-1", "channel-3");
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual(["后门"]);
-        expect(wrapper.text()).toContain("已播放收藏组“重点通道”");
+        expect(message.success).toHaveBeenCalledWith("已播放收藏组“重点通道”的 1 路通道");
     });
 
     it.each([
@@ -321,7 +340,7 @@ describe("multi-screen playback page", () => {
         expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
             "在线通道1", "在线通道2", "在线通道3", "在线通道4", "在线通道5", "在线通道6"
         ]);
-        expect(wrapper.find(".workspace-toast").exists()).toBe(false);
+        expect(message.error).not.toHaveBeenCalled();
     });
 
     it("leaves remaining windows covered when online channels are insufficient", async () => {
@@ -390,12 +409,18 @@ describe("multi-screen playback page", () => {
                 "轮询通道1", "轮询通道2", "轮询通道3", "轮询通道4"
             ]);
             expect(wrapper.get("[data-test=polling-settings]").classes()).toContain("active");
+            expect(wrapper.get("[data-test=polling-countdown]").attributes("data-remaining-seconds")).toBe("5");
+            expect(wrapper.get("[data-test=polling-countdown]").attributes("aria-label")).toBe("距离下一轮轮询还有 5 秒");
 
-            await vi.advanceTimersByTimeAsync(5000);
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(wrapper.get("[data-test=polling-countdown]").attributes("data-remaining-seconds")).toBe("4");
+
+            await vi.advanceTimersByTimeAsync(4000);
             await flushPromises();
             expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
                 "轮询通道5", "轮询通道1", "轮询通道2", "轮询通道3"
             ]);
+            expect(wrapper.get("[data-test=polling-countdown]").attributes("data-remaining-seconds")).toBe("5");
 
             await wrapper.get("[data-test=stop-all]").trigger("click");
             const callsAfterStop = playback.startPlay.mock.calls.length;
@@ -404,9 +429,166 @@ describe("multi-screen playback page", () => {
             expect(playback.startPlay).toHaveBeenCalledTimes(callsAfterStop);
             expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
             expect(wrapper.get("[data-test=polling-settings]").classes()).not.toContain("active");
+            expect(wrapper.find("[data-test=polling-countdown]").exists()).toBe(false);
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    it("immediately replaces a failed polling channel without waiting for the interval", async () => {
+        const channels = Array.from({ length: 5 }, (_, index) => ({
+            id: index + 31,
+            channelId: `fallback-channel-${index + 1}`,
+            deviceId: `fallback-device-${index + 1}`,
+            name: `补位通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
+        playback.startPlay.mockImplementation(async (_deviceId: string, channelId: string) => channelId === "fallback-channel-1"
+            ? { code: 500, message: "点播失败" }
+            : {
+                code: 0,
+                data: {
+                    streamId: `stream-${channelId}`,
+                    ssrc: `ssrc-${channelId}`,
+                    app: "rtp",
+                    urls: { wsFlv: `ws://zlm/${channelId}.live.flv` },
+                    wsflvUrl: `ws://zlm/${channelId}.live.flv`,
+                    httpFlvUrl: "",
+                    hlsUrl: "",
+                    expireAt: 0
+                }
+            });
+
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=polling-settings]").trigger("click");
+        await wrapper.get("[data-test=polling-enabled]").setValue(true);
+        await wrapper.get("[data-test=polling-interval]").setValue("30");
+        await wrapper.get("[data-test=save-polling]").trigger("click");
+        await flushPromises();
+
+        expect(playback.startPlay).toHaveBeenCalledTimes(5);
+        expect(playback.startPlay).toHaveBeenNthCalledWith(
+            1,
+            "fallback-device-1",
+            "fallback-channel-1",
+            { silent: true }
+        );
+        expect(message.warning).toHaveBeenCalledWith(
+            "“补位通道1”点播失败，已跳过该通道，继续点播下一个通道"
+        );
+        expect(message.error).not.toHaveBeenCalled();
+        expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
+            "补位通道5", "补位通道2", "补位通道3", "补位通道4"
+        ]);
+        expect(wrapper.findAll(".mock-play-window")).toHaveLength(4);
+    });
+
+    it("stops polling from the active toolbar button without opening the settings dialog", async () => {
+        vi.useFakeTimers();
+        const channels = Array.from({ length: 5 }, (_, index) => ({
+            id: index + 61,
+            channelId: `toggle-channel-${index + 1}`,
+            deviceId: `toggle-device-${index + 1}`,
+            name: `切换通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
+
+        try {
+            const wrapper = mount(MultiScreenPlayback);
+            await wrapper.get("[data-test=polling-settings]").trigger("click");
+            await wrapper.get("[data-test=polling-enabled]").setValue(true);
+            await wrapper.get("[data-test=polling-interval]").setValue("5");
+            await wrapper.get("[data-test=save-polling]").trigger("click");
+            await flushPromises();
+            const callsBeforeStop = playback.startPlay.mock.calls.length;
+
+            await wrapper.get("[data-test=polling-settings]").trigger("click");
+            await flushPromises();
+
+            expect(wrapper.find(".polling-settings").exists()).toBe(false);
+            expect(wrapper.get("[data-test=polling-settings]").classes()).not.toContain("active");
+            expect(wrapper.find("[data-test=polling-countdown]").exists()).toBe(false);
+            expect(wrapper.findAll(".slot-channel-name").map(node => node.text())).toEqual([
+                "切换通道1", "切换通道2", "切换通道3", "切换通道4"
+            ]);
+            expect(message.info).toHaveBeenCalledWith("轮询已停止");
+
+            await vi.advanceTimersByTimeAsync(5000);
+            await flushPromises();
+            expect(playback.startPlay).toHaveBeenCalledTimes(callsBeforeStop);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("tries each polling channel at most once per cycle when all playback requests fail", async () => {
+        vi.useFakeTimers();
+        const channels = Array.from({ length: 5 }, (_, index) => ({
+            id: index + 41,
+            channelId: `failed-channel-${index + 1}`,
+            deviceId: `failed-device-${index + 1}`,
+            name: `失败通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
+        playback.startPlay.mockResolvedValue({ code: 500, message: "点播失败" });
+
+        try {
+            const wrapper = mount(MultiScreenPlayback);
+            await wrapper.get("[data-test=polling-settings]").trigger("click");
+            await wrapper.get("[data-test=polling-enabled]").setValue(true);
+            await wrapper.get("[data-test=polling-interval]").setValue("30");
+            await wrapper.get("[data-test=save-polling]").trigger("click");
+            await flushPromises();
+
+            expect(playback.startPlay).toHaveBeenCalledTimes(5);
+            await vi.advanceTimersByTimeAsync(29_999);
+            expect(playback.startPlay).toHaveBeenCalledTimes(5);
+
+            await vi.advanceTimersByTimeAsync(1);
+            await flushPromises();
+            expect(playback.startPlay).toHaveBeenCalledTimes(10);
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("does not retry another polling channel after stop all interrupts an in-flight cycle", async () => {
+        const channels = Array.from({ length: 5 }, (_, index) => ({
+            id: index + 51,
+            channelId: `interrupt-channel-${index + 1}`,
+            deviceId: `interrupt-device-${index + 1}`,
+            name: `中断通道${index + 1}`,
+            status: 1,
+            audioEnabled: false
+        }));
+        const resolvePlaybacks: Array<(value: { code: number; message: string }) => void> = [];
+        api.listChannels.mockResolvedValue({ code: 0, data: { list: channels, total: channels.length, page: 1, pageSize: 200 } });
+        playback.startPlay.mockImplementation(() => new Promise(resolve => {
+            resolvePlaybacks.push(resolve);
+        }));
+
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=polling-settings]").trigger("click");
+        await wrapper.get("[data-test=polling-enabled]").setValue(true);
+        await wrapper.get("[data-test=save-polling]").trigger("click");
+        await flushPromises();
+        expect(playback.startPlay).toHaveBeenCalledTimes(4);
+        expect(wrapper.find("[data-test=polling-countdown]").exists()).toBe(false);
+        expect(wrapper.get("[data-test=polling-settings]").attributes("aria-label")).toBe("停止轮询");
+        expect(wrapper.find("[data-test=polling-starting]").exists()).toBe(true);
+
+        await wrapper.get("[data-test=stop-all]").trigger("click");
+        resolvePlaybacks.forEach(resolve => resolve({ code: 500, message: "点播失败" }));
+        await flushPromises();
+
+        expect(playback.startPlay).toHaveBeenCalledTimes(4);
+        expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
     });
 
     it("provides fullscreen and polling controls", async () => {
@@ -430,7 +612,7 @@ describe("multi-screen playback page", () => {
         await interval.setValue("45");
         await wrapper.get("[data-test=save-polling]").trigger("click");
         expect(wrapper.find(".polling-settings").exists()).toBe(false);
-        expect(wrapper.get("[role=status]").text()).toContain("45 秒");
+        expect(message.success).toHaveBeenCalledWith("轮询设置已保存，间隔 45 秒");
 
         delete (HTMLElement.prototype as Partial<HTMLElement>).requestFullscreen;
     });

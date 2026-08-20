@@ -14,6 +14,7 @@ import {
     X
 } from "lucide-vue-next";
 import { startPlay, type PlayResult } from "@/api/gb28181";
+import { Message } from "@arco-design/web-vue";
 import PlayWindow from "../components/PlayWindow.vue";
 import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
@@ -46,7 +47,6 @@ const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
 const consoleVisible = ref(false);
 const consoleChannel = ref<ChannelVO | null>(null);
-const toast = ref("");
 const monitorAreaRef = ref<HTMLElement | null>(null);
 const isFullscreen = ref(false);
 const pollingVisible = ref(false);
@@ -59,9 +59,12 @@ const pollingChannels = ref<ChannelVO[]>([]);
 const pollingCursor = ref(0);
 const pollingSaving = ref(false);
 const pollingError = ref("");
+const pollingRemainingSeconds = ref(0);
 const playAllLoading = ref(false);
 const ptzMotion = ref<{ channelId: number; direction: PtzDirection } | null>(null);
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
+let pollingCountdownTimer: ReturnType<typeof setInterval> | null = null;
+let pollingNextCycleAt = 0;
 let pollingCycleRunning = false;
 let playAllToken = 0;
 
@@ -74,6 +77,10 @@ const visibleSlots = computed(() => slots.slice(0, layout.value));
 const usedChannelIds = computed(() => slots.flatMap(slot => slot.channel ? [slot.channel.id] : []));
 const focusedSlot = computed(() => focusedIndex.value == null ? null : slots[focusedIndex.value] || null);
 const hasPlayingSlots = computed(() => slots.some(slot => slot.channel && (slot.status === "playing" || slot.status === "requesting" || slot.status === "error" || slot.status === "offline")));
+const pollingProgressDegrees = computed(() => {
+    if (!pollingSettings.intervalSeconds) return 0;
+    return Math.round(Math.min(1, pollingRemainingSeconds.value / pollingSettings.intervalSeconds) * 360);
+});
 const ptzDirectionByAction: Record<string, PtzDirection> = {
     left_up: "左上",
     up: "上",
@@ -111,8 +118,8 @@ function resetSlot(slot: PlaybackSlot) {
     slot.error = "";
 }
 
-async function playSlot(target: PlaybackSlot) {
-    if (!target.channel) return;
+async function playSlot(target: PlaybackSlot, silentRequestError = false) {
+    if (!target.channel) return false;
     const channel = target.channel;
     const token = target.token + 1;
     target.token = token;
@@ -121,17 +128,21 @@ async function playSlot(target: PlaybackSlot) {
     target.source = null;
     target.error = "";
     try {
-        const response = await startPlay(channel.deviceId, channel.channelId);
-        if (target.token !== token || target.channel?.id !== channel.id) return;
+        const response = silentRequestError
+            ? await startPlay(channel.deviceId, channel.channelId, { silent: true })
+            : await startPlay(channel.deviceId, channel.channelId);
+        if (target.token !== token || target.channel?.id !== channel.id) return false;
         if (response.code !== 0 || !response.data) throw new Error(response.message || "点播失败");
         target.result = response.data;
         target.source = resolvePlaybackSource(response.data, window.location.protocol === "https:");
         target.status = target.source ? "playing" : "error";
         target.error = target.source ? "" : "后端没有返回浏览器可用的播放地址";
+        return Boolean(target.source);
     } catch (error: any) {
-        if (target.token !== token || target.channel?.id !== channel.id) return;
+        if (target.token !== token || target.channel?.id !== channel.id) return false;
         target.status = "error";
         target.error = error?.message || "点播失败，请重试";
+        return false;
     }
 }
 
@@ -139,22 +150,21 @@ async function assignChannel(channel: ChannelVO) {
     playAllToken += 1;
     if (pollingSettings.enabled) stopPolling();
     if (channelIsUsed(channel)) {
-        toast.value = `${channel.name || channel.channelId} 已在分屏中`;
+        Message.warning(`${channel.name || channel.channelId} 已在分屏中`);
         return;
     }
     if (channel.status !== 1) {
-        toast.value = "离线通道不能开始实时播放";
+        Message.warning("离线通道不能开始实时播放");
         return;
     }
     const target = visibleSlots.value.find(slot => !slot.channel)
         || (focusedSlot.value?.channel && focusedSlot.value.index < layout.value ? focusedSlot.value : null);
     if (!target) {
-        toast.value = "当前布局已满，请先聚焦一个格子再替换";
+        Message.warning("当前布局已满，请先聚焦一个格子再替换");
         return;
     }
     target.channel = channel;
     focusedIndex.value = target.index;
-    toast.value = "";
     await playSlot(target);
 }
 
@@ -202,7 +212,7 @@ function stopAll() {
     focusedIndex.value = null;
     consoleVisible.value = false;
     consoleChannel.value = null;
-    toast.value = hadChannels ? "已停止并清空全部画面" : "当前没有可停止的画面";
+    Message.info(hadChannels ? "已停止并清空全部画面" : "当前没有可停止的画面");
 }
 
 async function playAll() {
@@ -211,7 +221,6 @@ async function playAll() {
     playAllToken = token;
     stopPolling();
     playAllLoading.value = true;
-    toast.value = "";
     try {
         const channels = await loadPlaybackChannels(true);
         if (token !== playAllToken) return;
@@ -219,7 +228,7 @@ async function playAll() {
         focusedIndex.value = null;
         const batch = channels.slice(0, layout.value);
         if (!batch.length) {
-            toast.value = "当前没有在线通道";
+            Message.info("当前没有在线通道");
             return;
         }
         await Promise.all(batch.map((channel, index) => {
@@ -228,7 +237,7 @@ async function playAll() {
             return playSlot(slot);
         }));
     } catch (reason: any) {
-        if (token === playAllToken) toast.value = reason?.message || "加载在线通道失败";
+        if (token === playAllToken) Message.error(reason?.message || "加载在线通道失败");
     } finally {
         playAllLoading.value = false;
     }
@@ -237,7 +246,7 @@ async function playAll() {
 async function openFavorites() {
     const channels = slots.flatMap(slot => slot.channel ? [slot.channel] : []);
     if (!channels.length) {
-        toast.value = "请先播放至少一路通道，再收藏当前播放通道";
+        Message.info("请先播放至少一路通道，再收藏当前播放通道");
         return;
     }
     sourceTreeRef.value?.openFavoriteDialogForChannels?.(channels);
@@ -245,14 +254,14 @@ async function openFavorites() {
 
 function handleFavoriteSaved(groupName: string, addedCount: number, skippedCount: number) {
     if (skippedCount && addedCount) {
-        toast.value = `已将 ${addedCount} 个通道加入收藏组“${groupName}”，${skippedCount} 个通道已在组内`;
+        Message.success(`已将 ${addedCount} 个通道加入收藏组“${groupName}”，${skippedCount} 个通道已在组内`);
         return;
     }
     if (skippedCount) {
-        toast.value = `收藏组“${groupName}”已包含当前通道，无需重复收藏`;
+        Message.info(`收藏组“${groupName}”已包含当前通道，无需重复收藏`);
         return;
     }
-    toast.value = `已将 ${addedCount} 个通道加入收藏组“${groupName}”`;
+    Message.success(`已将 ${addedCount} 个通道加入收藏组“${groupName}”`);
 }
 
 async function playFavoriteGroup(group: FavoriteChannelGroup) {
@@ -261,7 +270,6 @@ async function playFavoriteGroup(group: FavoriteChannelGroup) {
     playAllToken = token;
     stopPolling();
     playAllLoading.value = true;
-    toast.value = "";
     try {
         const channels = group.channels || [];
         if (token !== playAllToken) return;
@@ -269,7 +277,7 @@ async function playFavoriteGroup(group: FavoriteChannelGroup) {
         focusedIndex.value = null;
         const batch = channels.slice(0, layout.value);
         if (!batch.length) {
-            toast.value = `收藏组“${group.name}”暂无在线通道`;
+            Message.info(`收藏组“${group.name}”暂无在线通道`);
             return;
         }
         await Promise.all(batch.map((channel, index) => {
@@ -277,9 +285,9 @@ async function playFavoriteGroup(group: FavoriteChannelGroup) {
             slot.channel = channel;
             return playSlot(slot);
         }));
-        toast.value = `已播放收藏组“${group.name}”的 ${batch.length} 路通道`;
+        Message.success(`已播放收藏组“${group.name}”的 ${batch.length} 路通道`);
     } catch (reason: any) {
-        if (token === playAllToken) toast.value = reason?.message || "加载收藏组通道失败";
+        if (token === playAllToken) Message.error(reason?.message || "加载收藏组通道失败");
     } finally {
         playAllLoading.value = false;
     }
@@ -292,10 +300,10 @@ async function toggleFullscreen() {
         } else if (monitorAreaRef.value?.requestFullscreen) {
             await monitorAreaRef.value.requestFullscreen();
         } else {
-            toast.value = "当前浏览器不支持全屏显示";
+            Message.warning("当前浏览器不支持全屏显示");
         }
     } catch {
-        toast.value = "浏览器未允许进入全屏";
+        Message.error("浏览器未允许进入全屏");
     } finally {
         syncFullscreenState();
     }
@@ -315,15 +323,45 @@ function openPollingSettings() {
 
 function stopPolling() {
     if (pollingTimer) clearInterval(pollingTimer);
+    if (pollingCountdownTimer) clearInterval(pollingCountdownTimer);
     pollingTimer = null;
+    pollingCountdownTimer = null;
+    pollingNextCycleAt = 0;
+    pollingRemainingSeconds.value = 0;
     pollingSettings.enabled = false;
+}
+
+function togglePolling() {
+    if (!pollingSettings.enabled) {
+        openPollingSettings();
+        return;
+    }
+    stopPolling();
+    pollingVisible.value = false;
+    Message.info("轮询已停止");
+}
+
+function resetPollingCountdown() {
+    pollingNextCycleAt = Date.now() + pollingSettings.intervalSeconds * 1000;
+    pollingRemainingSeconds.value = pollingSettings.intervalSeconds;
+}
+
+function updatePollingCountdown() {
+    pollingRemainingSeconds.value = Math.max(0, Math.ceil((pollingNextCycleAt - Date.now()) / 1000));
 }
 
 function schedulePolling() {
     if (pollingTimer) clearInterval(pollingTimer);
+    if (pollingCountdownTimer) clearInterval(pollingCountdownTimer);
     pollingTimer = null;
+    pollingCountdownTimer = null;
     if (!pollingSettings.enabled) return;
-    pollingTimer = setInterval(() => void runPollingCycle(), pollingSettings.intervalSeconds * 1000);
+    resetPollingCountdown();
+    pollingTimer = setInterval(() => {
+        resetPollingCountdown();
+        void runPollingCycle();
+    }, pollingSettings.intervalSeconds * 1000);
+    pollingCountdownTimer = setInterval(updatePollingCountdown, 1000);
 }
 
 function channelPage(response: any) {
@@ -349,22 +387,38 @@ async function runPollingCycle() {
     if (!pollingSettings.enabled || pollingCycleRunning || !pollingChannels.value.length) return;
     pollingCycleRunning = true;
     try {
-        const count = Math.min(layout.value, pollingChannels.value.length);
-        const batch = Array.from({ length: count }, (_, index) =>
-            pollingChannels.value[(pollingCursor.value + index) % pollingChannels.value.length]
-        );
-        pollingCursor.value = (pollingCursor.value + layout.value) % pollingChannels.value.length;
+        const channelCount = pollingChannels.value.length;
+        const cycleStart = pollingCursor.value;
+        let attemptedCount = 0;
+        let failedSlots = slots.slice(0, Math.min(layout.value, channelCount));
         slots.forEach(resetSlot);
         focusedIndex.value = null;
-        await Promise.all(batch.map((channel, index) => {
-            const slot = slots[index];
-            slot.channel = channel;
-            if (channel.status !== 1) {
-                slot.status = "offline";
-                return Promise.resolve();
+        while (pollingSettings.enabled && failedSlots.length && attemptedCount < channelCount) {
+            const attemptSlots = failedSlots.slice(0, channelCount - attemptedCount);
+            const results = await Promise.all(attemptSlots.map(slot => {
+                const channel = pollingChannels.value[(cycleStart + attemptedCount) % channelCount];
+                attemptedCount += 1;
+                slot.channel = channel;
+                if (channel.status !== 1) {
+                    slot.status = "offline";
+                    return false;
+                }
+                return playSlot(slot, true);
+            }));
+            const failedChannels = attemptSlots.flatMap((slot, index) =>
+                !results[index] && slot.channel ? [slot.channel] : []
+            );
+            if (failedChannels.length) {
+                const names = failedChannels.map(channel => `“${channel.name || channel.channelId}”`).join("、");
+                const hasNextChannel = attemptedCount < channelCount;
+                const skippedLabel = failedChannels.length > 1 ? "这些通道" : "该通道";
+                Message.warning(hasNextChannel
+                    ? `${names}点播失败，已跳过${skippedLabel}，继续点播下一个通道`
+                    : `${names}点播失败，本轮已无其他候选通道`);
             }
-            return playSlot(slot);
-        }));
+            failedSlots = attemptSlots.filter((_slot, index) => !results[index]);
+        }
+        pollingCursor.value = (cycleStart + attemptedCount) % channelCount;
     } finally {
         pollingCycleRunning = false;
     }
@@ -378,7 +432,7 @@ async function savePollingSettings() {
     if (!pollingDraft.enabled) {
         stopPolling();
         pollingVisible.value = false;
-        toast.value = `轮询设置已保存，间隔 ${intervalSeconds} 秒`;
+        Message.success(`轮询设置已保存，间隔 ${intervalSeconds} 秒`);
         return;
     }
     pollingSaving.value = true;
@@ -391,7 +445,7 @@ async function savePollingSettings() {
         await runPollingCycle();
         schedulePolling();
         pollingVisible.value = false;
-        toast.value = `轮询已启动，共 ${channels.length} 路通道`;
+        Message.success(`轮询已启动，共 ${channels.length} 路通道`);
     } catch (reason: any) {
         stopPolling();
         pollingError.value = reason?.message || "启动轮询失败";
@@ -456,7 +510,13 @@ onBeforeUnmount(() => {
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>
-                        <button type="button" data-test="polling-settings" :class="{ active: pollingSettings.enabled }" :aria-label="pollingSettings.enabled ? '轮询设置，运行中' : '轮询设置'" :title="pollingSettings.enabled ? '轮询运行中，打开设置' : '轮询设置'" @click="openPollingSettings"><Repeat2 :size="17" aria-hidden="true" /></button>
+                        <button type="button" class="polling-control" data-test="polling-settings" :class="{ active: pollingSettings.enabled, counting: pollingRemainingSeconds > 0 }" :aria-label="pollingSettings.enabled ? (pollingRemainingSeconds > 0 ? `停止轮询，距离下一轮还有 ${pollingRemainingSeconds} 秒` : '停止轮询') : '轮询设置'" :title="pollingSettings.enabled ? '停止轮询' : '轮询设置'" @click="togglePolling">
+                            <span v-if="pollingSettings.enabled && pollingRemainingSeconds > 0" class="polling-countdown" data-test="polling-countdown" role="timer" aria-live="off" :aria-label="`距离下一轮轮询还有 ${pollingRemainingSeconds} 秒`" :data-remaining-seconds="pollingRemainingSeconds">
+                                <span class="countdown-ring" :style="{ '--polling-progress': `${pollingProgressDegrees}deg` }" aria-hidden="true"><strong>{{ pollingRemainingSeconds }}</strong></span>
+                            </span>
+                            <RefreshCw v-else-if="pollingSettings.enabled" data-test="polling-starting" :size="17" class="spin" aria-hidden="true" />
+                            <Repeat2 v-else :size="17" aria-hidden="true" />
+                        </button>
                     </div>
                 </div>
 
@@ -488,8 +548,6 @@ onBeforeUnmount(() => {
                         <UnplayedCover v-else :index="slot.index" />
                     </article>
                 </div>
-                <p v-if="toast" class="workspace-toast" role="status">{{ toast }}</p>
-
                 <div v-if="pollingVisible" class="polling-backdrop" @click.self="pollingVisible = false">
                     <section class="polling-settings" role="dialog" aria-modal="true" aria-labelledby="polling-title">
                         <header><div><Repeat2 :size="18" aria-hidden="true" /><strong id="polling-title">轮询设置</strong></div><button type="button" aria-label="关闭轮询设置" title="关闭" @click="pollingVisible = false"><X :size="17" aria-hidden="true" /></button></header>
@@ -555,6 +613,11 @@ onBeforeUnmount(() => {
 .layout-switcher button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-100); }
 .playback-actions { gap: 4px; }
 .playback-actions button.active { color: var(--zlm-brand-600); background: var(--zlm-brand-50); border-color: var(--zlm-brand-200); box-shadow: inset 0 -2px 0 var(--zlm-brand-500); }
+.playback-actions button.polling-control.counting { width: 44px; flex-shrink: 0; padding: 0; }
+.polling-countdown { display: flex; align-items: center; justify-content: center; }
+.countdown-ring { position: relative; display: grid; width: 26px; height: 26px; flex: 0 0 26px; background: conic-gradient(var(--zlm-brand-500) var(--polling-progress), var(--zlm-brand-100) 0); border-radius: 50%; place-items: center; }
+.countdown-ring::before { position: absolute; background: var(--zlm-brand-50); border-radius: 50%; content: ""; inset: 3px; }
+.countdown-ring strong { position: relative; z-index: 1; min-width: 2ch; color: var(--zlm-brand-700); font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 700; line-height: 1; text-align: center; }
 .playback-actions button:disabled { color: var(--zlm-text-4); cursor: not-allowed; opacity: 0.52; }
 .playback-actions button:disabled:hover { background: transparent; border-color: transparent; }
 .toolbar-divider { width: 1px; height: 20px; background: var(--zlm-border); }
@@ -622,7 +685,6 @@ onBeforeUnmount(() => {
 .error-state strong { color: #FECACA; }
 .offline-state { color: #FBBF24; }
 .offline-state strong { color: #FDE68A; }
-.workspace-toast { position: absolute; right: 20px; bottom: 16px; max-width: min(420px, calc(100% - 40px)); margin: 0; padding: 9px 12px; color: #FEF3C7; background: #451A03; border: 1px solid #92400E; border-radius: var(--zlm-radius-sm); font-size: 12px; }
 .polling-backdrop { position: absolute; z-index: 20; display: grid; background: rgb(15 23 42 / 34%); inset: 0; place-items: center; }
 .polling-settings { width: min(360px, calc(100% - 32px)); color: var(--zlm-text-1); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); box-shadow: var(--zlm-shadow-lg); }
 .polling-settings header, .polling-settings footer { display: flex; align-items: center; padding: 14px 16px; }
@@ -660,6 +722,8 @@ onBeforeUnmount(() => {
     .layout-switcher, .playback-actions { flex: 0 0 auto; }
     .layout-switcher, .playback-actions { gap: 2px; }
     .layout-switcher button, .playback-actions button { width: 30px; height: 30px; }
+    .playback-actions button.polling-control.counting { width: 30px; padding: 0; }
+    .countdown-ring { width: 24px; height: 24px; flex-basis: 24px; }
     .layout-glyph { width: 16px; height: 16px; }
     .toolbar-divider { display: none; }
 }

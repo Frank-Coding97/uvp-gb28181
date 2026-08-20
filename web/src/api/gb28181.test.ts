@@ -29,6 +29,7 @@ import {
   getStreamMonitor,
   listCruiseTracks,
   listPtzPresets,
+  startPlay,
   updateHomePosition,
   updatePositionHistoryConfig,
   updatePTZDefaultSpeedConfig,
@@ -54,6 +55,17 @@ describe("国标服务配置 API", () => {
   beforeEach(() => {
     request.mockReset();
     request.mockResolvedValue({ code: 0, message: "", data: { enabled: true, retentionDays: 7 } });
+  });
+
+  it("点播请求可关闭公共错误消息", async () => {
+    await startPlay("device-1", "channel-1", { silent: true });
+
+    expect(request).toHaveBeenCalledWith(
+      "post",
+      "/api/gb28181/play/device-1/channel-1",
+      undefined,
+      { showErrorMessage: false }
+    );
   });
 
   it("读取移动位置历史轨迹开关", async () => {

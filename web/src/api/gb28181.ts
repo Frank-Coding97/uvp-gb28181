@@ -128,8 +128,12 @@ export const listChannels = (deviceId: string) =>
   http.request<ChannelListResult>("get", baseUrlApi(`gb28181/device/${deviceId}/channels`));
 
 /** 发起点播 */
-export const startPlay = (deviceId: string, channelId: string) =>
-  http.request<PlayApiResult>("post", baseUrlApi(`gb28181/play/${deviceId}/${channelId}`));
+export const startPlay = (deviceId: string, channelId: string, options: { silent?: boolean } = {}) => {
+  const url = baseUrlApi(`gb28181/play/${deviceId}/${channelId}`);
+  return options.silent
+    ? http.request<PlayApiResult>("post", url, undefined, silentRequestConfig)
+    : http.request<PlayApiResult>("post", url);
+};
 
 /** 为固定播放地址刷新短期访问凭据。 */
 export const authorizeFixedPlayback = (deviceId: string, channelId: string) =>

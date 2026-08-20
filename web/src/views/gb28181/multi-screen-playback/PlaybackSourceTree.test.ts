@@ -31,6 +31,19 @@ function mountTree() {
                 "a-pagination": {
                     emits: ["change"],
                     template: "<button data-test='device-pagination' @click='$emit(\"change\", 2)'>下一页</button>"
+                },
+                "a-select": {
+                    props: ["modelValue"],
+                    emits: ["update:modelValue", "change"],
+                    template: "<select :value='modelValue' @change='$emit(\"update:modelValue\", $event.target.value); $emit(\"change\", $event.target.value)'><option value=''></option><slot /></select>"
+                },
+                "a-option": {
+                    props: ["value"],
+                    template: "<option :value='value'><slot /></option>"
+                },
+                "a-popconfirm": {
+                    emits: ["ok", "cancel"],
+                    template: "<div class='popconfirm-stub'><slot /></div>"
                 }
             }
         }
@@ -140,6 +153,20 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.text()).toContain("东门");
     });
 
+    it("keeps the existing-group tab enabled when there are no groups", async () => {
+        const wrapper = mountTree();
+        await flushPromises();
+        await wrapper.get('[data-node-key="root:device:1"] .twist-button').trigger("click");
+        await flushPromises();
+        await wrapper.get('[data-node-key="root:device:1:channel:11"] .favorite-toggle').trigger("click");
+
+        const existingTab = wrapper.get('.favorite-dialog [role="tab"]');
+        expect(existingTab.attributes("disabled")).toBeUndefined();
+        await existingTab.trigger("click");
+        expect(existingTab.attributes("aria-selected")).toBe("true");
+        expect(wrapper.text()).toContain("暂无已有组，请切换到“新建组”");
+    });
+
     it("appends a channel to a selected existing group", async () => {
         favoritesApi.listChannelFavoriteGroups.mockResolvedValue({ code: 0, data: { list: [{ id: 1, name: "园区重点设备", items: [{ id: 12, deviceCode: "device-1", channelCode: "channel-12", channel: { ...channel, id: 12, channelId: "channel-12", name: "西门" } }], availableCount: 1, unavailableCount: 0 }] } });
         favoritesApi.appendChannelFavoriteGroup.mockResolvedValue({ code: 0, data: { requestedCount: 1, addedCount: 1, skippedCount: 0 } });
@@ -159,21 +186,15 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.find("[data-test=favorite-group-select]").exists()).toBe(false);
     });
 
-    it("keeps the dialog open and skips a channel already in the selected group", async () => {
+    it("does not show an append action for a channel already in favorites", async () => {
         favoritesApi.listChannelFavoriteGroups.mockResolvedValue({ code: 0, data: { list: [{ id: 1, name: "园区重点设备", items: [{ id: 1, deviceCode: "device-1", channelCode: "channel-11", channel }], availableCount: 1, unavailableCount: 0 }] } });
-        favoritesApi.appendChannelFavoriteGroup.mockResolvedValue({ code: 0, data: { requestedCount: 1, addedCount: 0, skippedCount: 1 } });
         const wrapper = mountTree();
         await flushPromises();
 
         await wrapper.get('[data-node-key="root:device:1"] .twist-button').trigger("click");
         await flushPromises();
-        await wrapper.get('[data-node-key="root:device:1:channel:11"] .favorite-toggle').trigger("click");
-        await wrapper.get("[data-test=favorite-group-select]").setValue("1");
-        await wrapper.get("[data-test=save-favorite-group]").trigger("click");
 
-        expect(wrapper.text()).toContain("当前通道已在“园区重点设备”中，无需重复收藏");
-        expect(favoritesApi.appendChannelFavoriteGroup).toHaveBeenCalled();
-        expect(wrapper.find("[data-test=favorite-group-select]").exists()).toBe(true);
+        expect(wrapper.find('[data-node-key="root:device:1:channel:11"] .favorite-toggle').exists()).toBe(false);
     });
 
     it("rejects creating a group with an existing name", async () => {
@@ -206,8 +227,35 @@ describe("PlaybackSourceTree", () => {
         await wrapper.get("[data-test=source-view-favorites]").trigger("click");
         await flushPromises();
 
-        await wrapper.get('[data-test^="favorite-group-play-"]').trigger("click");
+        const playButton = wrapper.get('[data-test^="favorite-group-play-"]');
+        expect(playButton.find(".lucide-play").exists()).toBe(true);
+        expect(playButton.text()).toBe("");
+        await playButton.trigger("click");
         expect(wrapper.emitted("select-group")?.[0]?.[0]).toMatchObject({ name: "园区重点设备" });
+    });
+
+    it("uses a delete icon for removing a favorite group", async () => {
+        favoritesApi.listChannelFavoriteGroups.mockResolvedValue({ code: 0, data: { list: [{ id: 1, name: "园区重点设备", items: [{ id: 1, deviceCode: "device-1", channelCode: "channel-11", channel }], availableCount: 1, unavailableCount: 0 }] } });
+        const wrapper = mountTree();
+        await flushPromises();
+        await wrapper.get("[data-test=source-view-favorites]").trigger("click");
+        await flushPromises();
+
+        const groupRow = wrapper.get('[data-node-key="favorites:group:1"]');
+        expect(groupRow.find(".favorite-remove .lucide-trash-2").exists()).toBe(true);
+        await groupRow.get(".twist-button").trigger("click");
+        await flushPromises();
+        const channelRow = wrapper.get('[data-node-key="favorites:0:group:1:channel:11"]');
+        expect(channelRow.find(".favorite-remove .lucide-trash-2").exists()).toBe(true);
+
+        const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/multi-screen-playback/PlaybackSourceTree.vue"), "utf8");
+        expect(source).toMatch(/\.favorite-remove\s*\{[^}]*color:\s*var\(--uvp-danger\);/s);
+        expect(source).toMatch(/\.favorite-play\s*\{[^}]*width:\s*22px;[^}]*margin-right:\s*0;/s);
+        expect(source).toMatch(/\.favorite-remove\s*\{[^}]*width:\s*20px;[^}]*margin-right:\s*0;/s);
+        expect(source).toContain("<a-popconfirm");
+        expect(source).not.toContain("window.confirm");
+        expect(source).toContain("<a-select id=\"favorite-group-select\"");
+        expect(source).not.toContain("<select id=\"favorite-group-select\"");
     });
 
     it("refreshes every ten seconds without collapsing expanded devices", async () => {
@@ -228,6 +276,42 @@ describe("PlaybackSourceTree", () => {
         wrapper.unmount();
         await vi.advanceTimersByTimeAsync(10_000);
         expect(api.listDevices).toHaveBeenCalledTimes(2);
+    });
+
+    it("refreshes every ten seconds without collapsing an expanded favorite group", async () => {
+        vi.useFakeTimers();
+        favoritesApi.listChannelFavoriteGroups.mockResolvedValue({
+            code: 0,
+            data: {
+                list: [{
+                    id: 1,
+                    name: "园区重点设备",
+                    items: [{ id: 1, deviceCode: "device-1", channelCode: "channel-11", channel: { ...channel } }],
+                    availableCount: 1,
+                    unavailableCount: 0
+                }]
+            }
+        });
+
+        const wrapper = mountTree();
+        await flushPromises();
+        await wrapper.get("[data-test=source-view-favorites]").trigger("click");
+        await flushPromises();
+
+        const groupSelector = '[data-node-key="favorites:group:1"]';
+        await wrapper.get(`${groupSelector} .twist-button`).trigger("click");
+        await flushPromises();
+
+        expect(wrapper.get(groupSelector).attributes("aria-expanded")).toBe("true");
+        expect(wrapper.text()).toContain("东门");
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        await flushPromises();
+
+        expect(favoritesApi.listChannelFavoriteGroups).toHaveBeenCalledTimes(2);
+        expect(wrapper.get(groupSelector).attributes("aria-expanded")).toBe("true");
+        expect(wrapper.text()).toContain("东门");
+        wrapper.unmount();
     });
 
     it("keeps the expanded tree when an automatic refresh fails", async () => {
