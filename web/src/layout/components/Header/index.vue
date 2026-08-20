@@ -35,6 +35,7 @@ const { isTabs } = storeToRefs(useThemeConfig());
   display: flex;
   min-width: 0;
   height: 40px;
+  align-items: center;
   overflow: hidden;
 }
 

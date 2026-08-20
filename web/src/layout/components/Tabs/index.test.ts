@@ -11,6 +11,22 @@ describe("workspace tabs", () => {
     expect(source).toContain("$t(`menu.${item.meta.title}`)");
     expect(source).toContain(".arco-tabs-tab-close-btn svg");
     expect(source).toContain(".arco-tabs-nav-type-line .arco-tabs-tab");
-    expect(source).toContain("margin: 0 10px;");
+    expect(source).toContain("margin: 0 2px;");
+  });
+
+  it("renders the active workspace tab with the reference browser-tab shape", () => {
+    expect(source).toContain(":deep(.arco-tabs-tab-active)");
+    expect(source).toContain("background: var(--color-primary-light-1);");
+    expect(source).toContain("height: 34px;");
+    expect(source).toContain("margin: 0 2px;");
+    expect(source).toContain("padding: 6px 10px;");
+    expect(source).toContain("border-radius: 8px;");
+    expect(source).toContain(".arco-tabs-tab-closable");
+    expect(source).toContain("width: 1em;");
+    expect(source).toContain(":deep(.arco-tabs-nav-ink)");
+    expect(source).toContain("display: none;");
+    expect(source).not.toContain("box-shadow: inset 0 -2px 0 rgb(var(--primary-6));");
+    expect(source).not.toContain(".arco-tabs-tab-active)::before");
+    expect(source).not.toContain(".arco-tabs-tab-active)::after");
   });
 });

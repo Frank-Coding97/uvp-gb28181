@@ -23,4 +23,13 @@ describe("default header workspace layout", () => {
     expect(themeConfig).toContain("const isTabs = ref<boolean>(true);");
     expect(themeConfig).toContain("const isBreadcrumb = ref<boolean>(false);");
   });
+
+  it("keeps workspace tabs centered in the header slot", () => {
+    const header = readSource("src/layout/components/Header/index.vue");
+
+    expect(header).toContain("height: 40px;");
+    expect(header).toContain("align-items: center;");
+    expect(header).toContain("overflow: hidden;");
+    expect(header).not.toContain("margin: -8px 0;");
+  });
 });

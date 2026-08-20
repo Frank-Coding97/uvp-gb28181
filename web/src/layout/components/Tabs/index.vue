@@ -173,14 +173,34 @@ const closeOther = (type: string) => {
   min-width: 0;
   overflow: hidden;
 }
+:deep(.arco-tabs-nav-type-line) {
+  height: 40px;
+}
 :deep(.arco-tabs-nav) {
   min-width: 0;
 }
 :deep(.arco-tabs-nav-type-line .arco-tabs-tab) {
-  margin: 0 10px;
+  height: 34px;
+  margin: 0 2px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
 }
 :deep(.arco-tabs-nav-type-line.arco-tabs-nav-horizontal > .arco-tabs-tab:first-of-type) {
-  margin-left: 10px;
+  margin-left: 2px;
+}
+:deep(.arco-tabs-tab-active),
+:deep(.arco-tabs-tab-active:hover) {
+  position: relative;
+  z-index: 1;
+  color: rgb(var(--primary-6));
+  font-weight: 500;
+  background: var(--color-primary-light-1);
+}
+:deep(.arco-tabs-nav-ink) {
+  display: none;
 }
 :deep(.arco-tabs-nav-tab) {
   // 移入展示关闭icon
@@ -189,11 +209,12 @@ const closeOther = (type: string) => {
   // 移入展示关闭icon
   .arco-tabs-tab-closable {
     .arco-tabs-tab-close-btn svg {
-      width: 0;
-      transition: all 0.2s;
+      width: 1em;
+      opacity: 0.55;
+      transition: opacity 0.2s ease;
     }
     &:hover .arco-tabs-tab-close-btn svg {
-      width: 1em;
+      opacity: 1;
     }
   }
 
