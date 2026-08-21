@@ -30,6 +30,16 @@ func BuildCustomTree(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]Dire
 		}
 		direct[relation.GroupID][relation.DeviceID] = struct{}{}
 	}
+	var onlineDeviceIDs []uint
+	if err := db.WithContext(ctx).Model(&gbmodels.GbDevice{}).
+		Where("owner_dept_id = ? AND status = ?", ownerDeptID, gbmodels.DeviceStatusOnline).
+		Pluck("id", &onlineDeviceIDs).Error; err != nil {
+		return nil, err
+	}
+	onlineDevices := make(map[uint]struct{}, len(onlineDeviceIDs))
+	for _, deviceID := range onlineDeviceIDs {
+		onlineDevices[deviceID] = struct{}{}
+	}
 	var build func(uint, int) ([]DirectoryNodeVO, map[uint]struct{})
 	build = func(parentID uint, depth int) ([]DirectoryNodeVO, map[uint]struct{}) {
 		rows := children[parentID]
@@ -48,7 +58,13 @@ func BuildCustomTree(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]Dire
 			for id := range members {
 				all[id] = struct{}{}
 			}
-			out = append(out, DirectoryNodeVO{Key: fmt.Sprintf("custom:group:%d", group.ID), Name: group.Name, Type: "group", Count: len(members), Depth: depth, Children: childNodes})
+			onlineCount := 0
+			for id := range members {
+				if _, ok := onlineDevices[id]; ok {
+					onlineCount++
+				}
+			}
+			out = append(out, DirectoryNodeVO{Key: fmt.Sprintf("custom:group:%d", group.ID), Name: group.Name, Type: "group", Count: len(members), OnlineCount: onlineCount, Depth: depth, Children: childNodes})
 		}
 		return out, all
 	}
@@ -58,14 +74,20 @@ func BuildCustomTree(ctx context.Context, db *gorm.DB, ownerDeptID uint) ([]Dire
 		Where("NOT EXISTS (?)", db.Model(&gbmodels.GbCustomGroupDevice{}).Select("1").Where("gb_custom_group_device.device_id = gb_device.id")).Count(&ungrouped).Error; err != nil {
 		return nil, err
 	}
+	var ungroupedOnline int64
+	if err := db.WithContext(ctx).Model(&gbmodels.GbDevice{}).Where("owner_dept_id = ? AND status = ?", ownerDeptID, gbmodels.DeviceStatusOnline).
+		Where("NOT EXISTS (?)", db.Model(&gbmodels.GbCustomGroupDevice{}).Select("1").Where("gb_custom_group_device.device_id = gb_device.id")).Count(&ungroupedOnline).Error; err != nil {
+		return nil, err
+	}
 	if ungrouped > 0 {
 		tree = append(tree, DirectoryNodeVO{
-			Key:      fmt.Sprintf("custom:ungrouped:%d", ownerDeptID),
-			Name:     "未分组",
-			Type:     "ungrouped",
-			ReadOnly: true,
-			Count:    int(ungrouped),
-			Meta:     map[string]string{"ownerDeptId": fmt.Sprintf("%d", ownerDeptID)},
+			Key:         fmt.Sprintf("custom:ungrouped:%d", ownerDeptID),
+			Name:        "未分组",
+			Type:        "ungrouped",
+			ReadOnly:    true,
+			Count:       int(ungrouped),
+			OnlineCount: int(ungroupedOnline),
+			Meta:        map[string]string{"ownerDeptId": fmt.Sprintf("%d", ownerDeptID)},
 		})
 	}
 	return tree, nil

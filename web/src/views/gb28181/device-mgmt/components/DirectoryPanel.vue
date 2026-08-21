@@ -162,8 +162,14 @@ onMounted(() => load(props.modelValue.view));
         </div>
 
         <div class="directory-switch" role="tablist" aria-label="目录类型">
-            <button data-view="national" type="button" :class="{ active: modelValue.view === 'national' }" @click="changeView('national')">国标目录</button>
-            <button data-view="custom" type="button" :class="{ active: modelValue.view === 'custom' }" @click="changeView('custom')">自定义分组</button>
+            <button data-view="national" type="button" role="tab" :aria-selected="modelValue.view === 'national'" :class="{ active: modelValue.view === 'national' }" @click="changeView('national')">
+                <MapPin :size="13" aria-hidden="true" />
+                <span>国标目录</span>
+            </button>
+            <button data-view="custom" type="button" role="tab" :aria-selected="modelValue.view === 'custom'" :class="{ active: modelValue.view === 'custom' }" @click="changeView('custom')">
+                <Folder :size="13" aria-hidden="true" />
+                <span>自定义分组</span>
+            </button>
         </div>
 
         <label class="directory-search">
@@ -205,7 +211,9 @@ onMounted(() => load(props.modelValue.view));
                         <MapPin v-if="node.type === 'area' || node.type === 'unknown'" :size="13" />
                         <Folder v-else :size="13" />
                         <span class="node-name">{{ node.name }}</span>
-                        <span class="node-count">{{ node.count }}</span>
+                        <span class="node-count" :aria-label="`在线设备 ${node.onlineCount} 台，共 ${node.count} 台`" :title="`在线 ${node.onlineCount} / 总数 ${node.count}`">
+                            <span class="node-online-count">{{ node.onlineCount }}</span><span aria-hidden="true">/</span><span>{{ node.count }}</span>
+                        </span>
                     </button>
                     <a-dropdown v-if="actionAllowed(node)" trigger="click" position="br">
                         <button class="more-button" type="button" aria-label="分组操作"><MoreHorizontal :size="14" /></button>
@@ -282,17 +290,26 @@ onMounted(() => load(props.modelValue.view));
     border-radius: 6px;
 }
 .directory-switch button {
+    position: relative;
+    display: inline-flex;
     min-width: 0;
     height: 28px;
-    padding: 0 6px;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    padding: 0 8px;
     color: var(--uvp-text-tertiary);
     font-size: 12px;
     background: transparent;
-    border: 0;
+    border: 1px solid transparent;
     border-radius: 4px;
     cursor: pointer;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
-.directory-switch button.active { color: var(--uvp-text-primary); font-weight: 620; background: var(--uvp-panel-bg); box-shadow: 0 0 0 1px var(--uvp-panel-border); }
+.directory-switch button > svg { flex: 0 0 auto; }
+.directory-switch button:hover:not(.active) { color: var(--uvp-text-primary); background: var(--uvp-sidebar-active-bg); }
+.directory-switch button:focus-visible { outline: 2px solid var(--uvp-brand); outline-offset: 1px; }
+.directory-switch button.active { color: var(--uvp-brand-strong, var(--uvp-brand)); font-weight: 650; }
 .directory-search {
     display: flex;
     height: 32px;
@@ -319,7 +336,9 @@ onMounted(() => load(props.modelValue.view));
 .directory-node { min-width: 0; height: 100%; flex: 1; gap: 7px; padding: 0 4px 0 2px; color: inherit; text-align: left; background: transparent; border: 0; cursor: pointer; }
 .directory-node > svg { flex: 0 0 auto; color: var(--uvp-brand); }
 .node-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.node-count { min-width: 20px; color: var(--uvp-text-tertiary); font-size: 11px; text-align: right; }
+.node-count { display: inline-flex; min-width: 32px; justify-content: flex-end; color: var(--uvp-text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.node-online-count { color: #158052; font-weight: 600; }
+:global(body[arco-theme="dark"]) .node-online-count { color: #86efac; }
 .more-button { width: 24px; height: 24px; margin-right: 3px; flex: 0 0 24px; }
 .directory-empty { display: grid; min-height: 120px; place-items: center; color: var(--uvp-text-tertiary); font-size: 12px; }
 .spin { animation: directory-spin 0.9s linear infinite; }

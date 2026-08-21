@@ -3855,8 +3855,6 @@ onUnmounted(() => {
     object-fit: cover;
     cursor: zoom-in;
 }
-.channel-snapshot.offline { color: var(--uvp-text-tertiary); opacity: 0.72; }
-.channel-snapshot.offline .channel-snapshot-image :deep(.arco-image-img) { filter: grayscale(1); opacity: 0.6; }
 .snapshot-empty {
     position: relative;
     z-index: 1;

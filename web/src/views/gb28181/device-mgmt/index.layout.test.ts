@@ -87,6 +87,12 @@ describe("device management toolbar layout", () => {
         expect(buttonRule).toContain("height: 28px;");
     });
 
+    it("keeps offline channel snapshots at normal color and opacity", () => {
+        expect(source).not.toContain(".channel-snapshot.offline { color: var(--uvp-text-tertiary); opacity: 0.72; }");
+        expect(source).not.toContain("filter: grayscale(1);");
+        expect(source).not.toContain(".channel-snapshot.offline .channel-snapshot-image");
+    });
+
     it("does not expose SIP trace launch actions from device management", () => {
         expect(source).not.toContain("启动 SIP 诊断窗口");
         expect(source).not.toContain("startDeviceTraceCapture");

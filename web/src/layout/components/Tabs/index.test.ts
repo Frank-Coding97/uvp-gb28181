@@ -5,6 +5,31 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/layout/components/Tabs/index.vue"), "utf8");
 
 describe("workspace tabs", () => {
+  it("exposes fullscreen and theme actions in the tab bar instead of the account menu", () => {
+    const headerRightSource = readFileSync(
+      resolve(process.cwd(), "src/layout/components/Header/components/header-right/index.vue"),
+      "utf8"
+    );
+    const fullscreenIndex = source.indexOf('id="system-tabs-fullscreen"');
+    const themeIndex = source.indexOf('id="system-tabs-theme"');
+    const refreshIndex = source.indexOf('id="system-tabs-refresh"');
+    const settingIndex = source.indexOf('id="system-tabs-setting"');
+
+    expect(refreshIndex).toBeGreaterThan(-1);
+    expect(settingIndex).toBeGreaterThan(refreshIndex);
+    expect(fullscreenIndex).toBeGreaterThan(settingIndex);
+    expect(themeIndex).toBeGreaterThan(fullscreenIndex);
+    expect(source).toContain("@click=\"onFullScreen\"");
+    expect(source).toContain("@click=\"toggleThemeMode\"");
+    expect(source).toContain("darkMode ? '明亮' : '暗色'");
+    expect(source).not.toContain("切换至夜间蓝灰");
+    expect(source).not.toContain("切换至明亮模式");
+    expect(source).toContain('document.addEventListener("fullscreenchange", syncFullScreen)');
+    expect(headerRightSource).not.toContain("@click=\"onFullScreen\"");
+    expect(headerRightSource).not.toContain("@click=\"toggleThemeMode\"");
+    expect(headerRightSource).toContain("@click=\"onSystemSetting\"");
+  });
+
   it("renders each opened route icon before its localized title", () => {
     expect(source).toContain('<template #title>');
     expect(source).toContain("<MenuItemIcon v-if=\"item.meta.svgIcon || item.meta.icon\" :svg-icon=\"item.meta.svgIcon\" :icon=\"item.meta.icon\" />");

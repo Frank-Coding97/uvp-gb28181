@@ -50,6 +50,30 @@
             </a-doption>
           </template>
         </a-dropdown>
+        <a-tooltip :content="$t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`)" position="bottom" mini>
+          <button
+            id="system-tabs-fullscreen"
+            class="tabs-action"
+            type="button"
+            :aria-label="$t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`)"
+            @click="onFullScreen"
+          >
+            <icon-fullscreen v-if="fullScreen" :size="18" />
+            <icon-fullscreen-exit v-else :size="18" />
+          </button>
+        </a-tooltip>
+        <a-tooltip :content="darkMode ? '明亮' : '暗色'" position="bottom" mini>
+          <button
+            id="system-tabs-theme"
+            class="tabs-action"
+            type="button"
+            :aria-label="darkMode ? '明亮' : '暗色'"
+            @click="toggleThemeMode"
+          >
+            <icon-sun-fill v-if="!darkMode" :size="18" />
+            <icon-moon-fill v-else :size="18" />
+          </button>
+        </a-tooltip>
       </a-space>
     </div>
   </div>
@@ -59,10 +83,35 @@
 import { storeToRefs } from "pinia";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
+import { useThemeMethods } from "@/hooks/useThemeMethods";
 import MenuItemIcon from "@/layout/components/Menu/menu-item-icon.vue";
 const router = useRouter();
 const routerStore = useRouteConfigStore();
+const themeStore = useThemeConfig();
 const { tabsList, currentRoute } = storeToRefs(routerStore);
+const { darkMode } = storeToRefs(themeStore);
+
+const toggleThemeMode = () => {
+  darkMode.value = !darkMode.value;
+  const { setDarkMode } = useThemeMethods();
+  setDarkMode();
+};
+
+const fullScreen = ref(!document.fullscreenElement);
+const syncFullScreen = () => {
+  fullScreen.value = !document.fullscreenElement;
+};
+const onFullScreen = async () => {
+  if (!document.fullscreenElement) {
+    await document.documentElement.requestFullscreen().catch(() => undefined);
+  } else if (document.exitFullscreen) {
+    await document.exitFullscreen().catch(() => undefined);
+  }
+  syncFullScreen();
+};
+
+onMounted(() => document.addEventListener("fullscreenchange", syncFullScreen));
+onBeforeUnmount(() => document.removeEventListener("fullscreenchange", syncFullScreen));
 
 // 点击标签页，如果标签页存在，则跳转
 const onTabs = (key: string) => {
@@ -85,7 +134,6 @@ const refresh = () => {
   setTimeout(() => {
     rotateOpen.value = false;
   }, 500);
-  const themeStore = useThemeConfig();
   themeStore.setRefreshPage(false);
   currentRoute.value.meta.keepAlive && routerStore.removeRouteName(currentRoute.value.path);
   nextTick(() => {
@@ -158,6 +206,25 @@ const closeOther = (type: string) => {
   .tabs_setting {
     flex: 0 0 auto;
     margin: 0 0 0 $margin;
+    .tabs-action {
+      appearance: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      color: $color-text-2;
+      background: transparent;
+      border: 0;
+      border-radius: 6px;
+      cursor: pointer;
+
+      &:hover {
+        color: rgb(var(--primary-6));
+        background: var(--color-primary-light-1);
+      }
+    }
     .setting {
       margin-right: $margin;
       color: $color-text-2;

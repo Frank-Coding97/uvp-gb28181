@@ -22,28 +22,10 @@
         <a-divider margin="0" />
         <!-- 工作台 -->
         <RecordingDownloadCenter menu />
-        <a-doption class="uvp-user-menu-option" @click="onFullScreen">
-          <template #default>
-            <span class="uvp-user-menu-icon">
-              <icon-fullscreen :size="16" v-if="fullScreen" />
-              <icon-fullscreen-exit :size="16" v-else />
-            </span>
-            <span>{{ $t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`) }}</span>
-          </template>
-        </a-doption>
         <a-doption class="uvp-user-menu-option" @click="onSystemSetting">
           <template #default>
             <span class="uvp-user-menu-icon"><icon-settings :size="16" /></span>
             <span>{{ $t(`system.system-settings`) }}</span>
-          </template>
-        </a-doption>
-        <a-doption class="uvp-user-menu-option" @click="toggleThemeMode">
-          <template #default>
-            <span class="uvp-user-menu-icon">
-              <icon-sun-fill :size="16" v-if="!darkMode" />
-              <icon-moon-fill :size="16" v-else />
-            </span>
-            <span>{{ darkMode ? "切换至明亮模式" : "切换至夜间蓝灰" }}</span>
           </template>
         </a-doption>
         <a-divider margin="0" />
@@ -89,17 +71,12 @@ import SystemSettings from "@/layout/components/Header/components/system-setting
 //import myImage from "@/assets/img/my-image.jpg";
 import { Modal } from "@arco-design/web-vue";
 import { useRouter } from "vue-router";
-import { storeToRefs } from "pinia";
 //import { useUserInfoStore } from "@/store/modules/user-info";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { useRouteConfigStore } from "@/store/modules/route-config";
-import { useThemeConfig } from "@/store/modules/theme-config";
-import { useThemeMethods } from "@/hooks/useThemeMethods";
 import { logout } from "@/api/user";
 const router = useRouter();
 const { isMobile } = useDevicesSize();
-const themeStore = useThemeConfig();
-const { darkMode } = storeToRefs(themeStore);
 //const userStore = useUserInfoStore();
 //const { account } = storeToRefs(userStore);
 import { runUserLogoutCleanup, useUserStoreHook } from "@/store/modules/user";
@@ -110,27 +87,6 @@ const accountDisplayName = computed(() => account.nickname || account.username |
 const systemOpen = ref(false);
 const onSystemSetting = () => {
   systemOpen.value = true;
-};
-
-// 颜色模式
-const toggleThemeMode = () => {
-  darkMode.value = !darkMode.value;
-  const { setDarkMode } = useThemeMethods();
-  setDarkMode();
-};
-
-// 全屏
-const fullScreen = ref(true);
-const onFullScreen = () => {
-  if (!document.fullscreenElement) {
-    document.documentElement.requestFullscreen();
-    fullScreen.value = false;
-  } else {
-    if (document.exitFullscreen) {
-      document.exitFullscreen();
-      fullScreen.value = true;
-    }
-  }
 };
 
 // 个人中心

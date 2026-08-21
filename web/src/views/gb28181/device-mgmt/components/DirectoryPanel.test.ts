@@ -110,6 +110,23 @@ describe("DirectoryPanel", () => {
         expect(wrapper.find("[data-action='rename']").exists()).toBe(false);
     });
 
+    it("shows an icon beside each directory view label", async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+
+        expect(wrapper.get("[data-view='national']").find("svg").exists()).toBe(true);
+        expect(wrapper.get("[data-view='custom']").find("svg").exists()).toBe(true);
+    });
+
+    it("shows online and total device counts with an accessible label", async () => {
+        const wrapper = mountPanel();
+        await flushPromises();
+
+        const count = wrapper.get('[data-node-key="national:area:370000"] .node-count');
+        expect(count.text()).toBe("1/2");
+        expect(count.attributes("aria-label")).toBe("在线设备 1 台，共 2 台");
+    });
+
     it("switches to custom groups, filters with its own keyword and exposes actions only on writable groups", async () => {
         const wrapper = mountPanel();
         await flushPromises();

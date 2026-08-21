@@ -19,9 +19,12 @@ describe("default header workspace layout", () => {
 
   it("keeps the tabs enabled by default and removes breadcrumb rendering by default", () => {
     const themeConfig = readSource("src/store/modules/theme-config.ts");
+    const systemSettings = readSource("src/layout/components/Header/components/system-settings/index.vue");
 
     expect(themeConfig).toContain("const isTabs = ref<boolean>(true);");
     expect(themeConfig).toContain("const isBreadcrumb = ref<boolean>(false);");
+    expect(systemSettings).not.toContain("system.breadcrumb");
+    expect(systemSettings).not.toContain("v-model=\"isBreadcrumb\"");
   });
 
   it("keeps workspace tabs centered in the header slot", () => {
