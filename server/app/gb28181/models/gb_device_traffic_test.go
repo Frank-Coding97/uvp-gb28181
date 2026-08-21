@@ -16,6 +16,7 @@ func TestDeviceTrafficModelsAutoMigrate(t *testing.T) {
 	require.NoError(t, db.AutoMigrate(
 		&gbmodels.GbDeviceTrafficSession{},
 		&gbmodels.GbDeviceTrafficDaily{},
+		&gbmodels.GbDeviceTrafficHourly{},
 		&gbmodels.GbDeviceTrafficGap{},
 	))
 
@@ -32,6 +33,9 @@ func TestDeviceTrafficModelsAutoMigrate(t *testing.T) {
 	}
 	for _, column := range []string{"stat_date", "device_code", "channel_code", "upstream_bytes", "downstream_bytes"} {
 		require.True(t, db.Migrator().HasColumn(&gbmodels.GbDeviceTrafficDaily{}, column), column)
+	}
+	for _, column := range []string{"stat_hour", "device_code", "channel_code", "upstream_bytes", "downstream_bytes"} {
+		require.True(t, db.Migrator().HasColumn(&gbmodels.GbDeviceTrafficHourly{}, column), column)
 	}
 	for _, column := range []string{"node_id", "reason", "started_at", "ended_at", "state"} {
 		require.True(t, db.Migrator().HasColumn(&gbmodels.GbDeviceTrafficGap{}, column), column)

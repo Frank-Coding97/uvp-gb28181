@@ -54,6 +54,28 @@ type GbDeviceTrafficDaily struct {
 
 func (GbDeviceTrafficDaily) TableName() string { return "gb_device_traffic_daily" }
 
+// GbDeviceTrafficHourly is the durable per-hour aggregate used by the
+// rolling 24-hour view. It is kept separate from the daily ledger so hourly
+// values are based on observed deltas instead of being reconstructed from
+// settled sessions.
+type GbDeviceTrafficHourly struct {
+	ID                        uint64    `gorm:"primaryKey" json:"id"`
+	StatHour                  time.Time `gorm:"column:stat_hour;not null;uniqueIndex:uk_traffic_hourly_scope,priority:1;index:idx_traffic_hourly_device" json:"statHour"`
+	DeviceCode                string    `gorm:"column:device_code;size:64;not null;uniqueIndex:uk_traffic_hourly_scope,priority:2;index:idx_traffic_hourly_device" json:"deviceCode"`
+	ChannelCode               string    `gorm:"column:channel_code;size:64;not null;default:'';uniqueIndex:uk_traffic_hourly_scope,priority:3" json:"channelCode"`
+	OwnerDeptID               uint      `gorm:"column:owner_dept_id;not null;default:0;index" json:"ownerDeptId"`
+	UpstreamBytes             uint64    `gorm:"column:upstream_bytes;not null;default:0" json:"upstreamBytes"`
+	DownstreamBytes           uint64    `gorm:"column:downstream_bytes;not null;default:0" json:"downstreamBytes"`
+	UpstreamDurationSeconds   int64     `gorm:"column:upstream_duration_seconds;not null;default:0" json:"upstreamDurationSeconds"`
+	DownstreamDurationSeconds int64     `gorm:"column:downstream_duration_seconds;not null;default:0" json:"downstreamDurationSeconds"`
+	UpstreamSessions          int64     `gorm:"column:upstream_sessions;not null;default:0" json:"upstreamSessions"`
+	DownstreamSessions        int64     `gorm:"column:downstream_sessions;not null;default:0" json:"downstreamSessions"`
+	CreatedAt                 time.Time `json:"createdAt"`
+	UpdatedAt                 time.Time `json:"updatedAt"`
+}
+
+func (GbDeviceTrafficHourly) TableName() string { return "gb_device_traffic_hourly" }
+
 // GbDeviceTrafficGap records periods where the accounting coverage is not
 // trustworthy and must not be rendered as zero traffic.
 type GbDeviceTrafficGap struct {

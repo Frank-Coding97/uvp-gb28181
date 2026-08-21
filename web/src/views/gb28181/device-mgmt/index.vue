@@ -7,6 +7,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import {
     Activity,
     ArrowLeft,
+    BarChart3,
     Bell,
     Camera,
     Copy,
@@ -259,9 +260,8 @@ let statusEventRequestVersion = 0;
 const runtimeActiveTab = ref<"status" | "traffic" | "viewers">("status");
 const runtimeChannelCode = ref("");
 const runtimeChannels = ref<ChannelVO[]>([]);
-const runtimeChannelLocked = ref(false);
 const runtimeChannelsLoading = ref(false);
-const runtimeSelectedChannel = computed(() => runtimeChannels.value.find(channel => channel.channelId === runtimeChannelCode.value) || null);
+const runtimeChannelsError = ref("");
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
 const editDeviceVisible = ref(false);
@@ -988,22 +988,26 @@ async function loadStatusEvents(append = false) {
     }
 }
 
-async function loadRuntimeChannels(record: DeviceVO, preferredChannel = "") {
+async function loadRuntimeChannels(record: DeviceVO) {
     const requestVersion = statusEventRequestVersion;
     runtimeChannelsLoading.value = true;
+    runtimeChannelsError.value = "";
     try {
         const result = await listChannels({ deviceId: record.deviceId, page: 1, pageSize: 200 });
         if (requestVersion !== statusEventRequestVersion) return;
-        runtimeChannels.value = result.code === 0 ? result.data?.list || [] : [];
-        if (preferredChannel && runtimeChannels.value.some(channel => channel.channelId === preferredChannel)) {
-            runtimeChannelCode.value = preferredChannel;
-        }
+        if (result.code !== 0) throw new Error(result.message || "设备通道加载失败");
+        runtimeChannels.value = result.data?.list || [];
+        if (runtimeChannelCode.value && !runtimeChannels.value.some(channel => channel.channelId === runtimeChannelCode.value)) runtimeChannelCode.value = "";
+    } catch (error: any) {
+        if (requestVersion !== statusEventRequestVersion) return;
+        runtimeChannels.value = [];
+        runtimeChannelsError.value = error?.message || "设备通道加载失败";
     } finally {
         if (requestVersion === statusEventRequestVersion) runtimeChannelsLoading.value = false;
     }
 }
 
-function openStatusEvents(record: DeviceVO, initialTab: "status" | "traffic" | "viewers" = "status", channel?: ChannelVO) {
+function openStatusEvents(record: DeviceVO) {
     statusEventRequestVersion += 1;
     statusEventDevice.value = record;
     statusEventPage.value = 1;
@@ -1011,32 +1015,15 @@ function openStatusEvents(record: DeviceVO, initialTab: "status" | "traffic" | "
     statusEventTotal.value = 0;
     statusEventLoading.value = false;
     statusEventLoadingMore.value = false;
-    runtimeActiveTab.value = initialTab;
-    runtimeChannelLocked.value = Boolean(channel);
-    runtimeChannelCode.value = channel?.channelId || "";
-    runtimeChannels.value = channel ? [channel] : [];
+    runtimeActiveTab.value = "status";
+    runtimeChannelCode.value = "";
+    runtimeChannels.value = [];
+    runtimeChannelsError.value = "";
     statusEventVisible.value = true;
-    if (initialTab === "status") loadStatusEvents();
-    if (!channel && initialTab !== "status") loadRuntimeChannels(record);
+    loadStatusEvents();
     nextTick(() => {
         if (statusEventScroll.value) statusEventScroll.value.scrollTop = 0;
     });
-}
-
-async function openChannelRuntime(record: ChannelVO) {
-    const local = devices.value.find(device => device.deviceId === record.deviceId);
-    if (local) {
-        openStatusEvents(local, "traffic", record);
-        return;
-    }
-    try {
-        const result = await listDevices({ q: record.deviceId, page: 1, pageSize: 50 });
-        const device = result.data?.list?.find(item => item.deviceId === record.deviceId);
-        if (!device) throw new Error("未找到通道所属设备");
-        openStatusEvents(device, "traffic", record);
-    } catch (error: any) {
-        Message.error(error?.message || "运行监控打开失败");
-    }
 }
 
 function loadMoreStatusEvents() {
@@ -1063,14 +1050,14 @@ function closeStatusEvents() {
     runtimeActiveTab.value = "status";
     runtimeChannelCode.value = "";
     runtimeChannels.value = [];
-    runtimeChannelLocked.value = false;
+    runtimeChannelsError.value = "";
 }
 
 watch(runtimeActiveTab, tab => {
     if (tab === "status" && statusEventVisible.value && statusEventList.value.length === 0 && !statusEventLoading.value && !statusEventError.value) {
         loadStatusEvents();
     }
-    if (tab !== "status" && statusEventVisible.value && statusEventDevice.value && !runtimeChannelLocked.value && runtimeChannels.value.length === 0 && !runtimeChannelsLoading.value) {
+    if (tab !== "status" && statusEventVisible.value && statusEventDevice.value && runtimeChannels.value.length === 0 && !runtimeChannelsLoading.value && !runtimeChannelsError.value) {
         loadRuntimeChannels(statusEventDevice.value);
     }
 });
@@ -1967,7 +1954,7 @@ onUnmounted(() => {
                                         </div>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="398" fixed="right">
+                                <a-table-column title="操作" :width="350" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
                                             <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
@@ -1990,10 +1977,6 @@ onUnmounted(() => {
                                             <a-link class="uvp-table-action uvp-table-action--detail" @click="openChannel(record)">
                                                 <template #icon><Eye :size="13" /></template>
                                                 <span>详情</span>
-                                            </a-link>
-                                            <a-link class="uvp-table-action uvp-table-action--monitor" @click="openChannelRuntime(record)">
-                                                <template #icon><Activity :size="13" /></template>
-                                                <span>监控</span>
                                             </a-link>
                                             <a-link class="uvp-table-action uvp-table-action--edit" @click="openEditChannelModal(record)">
                                                 <template #icon><Pencil :size="13" /></template>
@@ -2307,11 +2290,6 @@ onUnmounted(() => {
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
-                                <a-tooltip content="运行监控" position="top">
-                                        <button class="icon-btn small framed" type="button" aria-label="打开通道运行监控" @click.stop="openChannelRuntime(item)">
-                                            <Activity :size="13" />
-                                        </button>
-                                </a-tooltip>
                                 <a-tooltip content="点播" position="top">
                                         <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
                                             <Play :size="13" />
@@ -2605,8 +2583,8 @@ onUnmounted(() => {
             <a-modal
                 v-model:visible="statusEventVisible"
                 modal-class="uvp-system-dialog status-event-dialog"
-                title="运行监控"
-                :width="920"
+                title="设备运行监控"
+                :width="960"
                 :footer="false"
                 unmount-on-close
                 @close="closeStatusEvents"
@@ -2614,8 +2592,9 @@ onUnmounted(() => {
                 <div v-if="statusEventDevice" class="status-event-body">
                     <header class="status-event-summary">
                         <div class="status-event-device">
-                            <span class="summary-icon"><History :size="18" /></span>
+                            <span class="summary-icon"><Activity :size="18" /></span>
                             <div>
+                                <span class="runtime-eyebrow">设备运行概览</span>
                                 <strong>{{ displayName(statusEventDevice) }}</strong>
                                 <span class="mono">{{ statusEventDevice.deviceId }}</span>
                             </div>
@@ -2625,12 +2604,33 @@ onUnmounted(() => {
                             {{ statusEventDevice.online ? '在线' : '离线' }}
                         </span>
                     </header>
+                    <section class="runtime-overview" aria-label="设备运行概览">
+                        <div class="runtime-overview-card">
+                            <span>设备状态</span>
+                            <strong :class="{ online: statusEventDevice.online }">{{ statusEventDevice.online ? '运行正常' : '当前离线' }}</strong>
+                        </div>
+                        <div class="runtime-overview-card">
+                            <span>在线通道</span>
+                            <strong>{{ statusEventDevice.channelOnlineCount }}/{{ statusEventDevice.channelCount }}</strong>
+                        </div>
+                        <div class="runtime-overview-card">
+                            <span>最近心跳</span>
+                            <strong>{{ dateTime(statusEventDevice.keepaliveTime) }}</strong>
+                        </div>
+                        <div class="runtime-overview-card">
+                            <span>来源地址</span>
+                            <strong class="mono">{{ endpointText(statusEventDevice) }}</strong>
+                        </div>
+                    </section>
                     <a-tabs v-model:active-key="runtimeActiveTab" class="runtime-tabs">
-                        <a-tab-pane key="status" title="设备上下线">
-                            <div class="status-event-facts">
-                                <div><span>最近注册</span><strong>{{ dateTime(statusEventDevice.registerTime) }}</strong></div>
-                                <div><span>最近心跳</span><strong>{{ dateTime(statusEventDevice.keepaliveTime) }}</strong></div>
-                                <div><span>来源地址</span><strong class="mono">{{ endpointText(statusEventDevice) }}</strong></div>
+                        <a-tab-pane key="status">
+                            <template #title><span class="runtime-tab-title"><History :size="15" />状态轨迹</span></template>
+                            <div class="status-event-section-head">
+                                <div>
+                                    <strong>设备上下线记录</strong>
+                                    <span>最近注册 {{ dateTime(statusEventDevice.registerTime) }}</span>
+                                </div>
+                                <span>{{ statusEventTotal }} 条</span>
                             </div>
                             <div ref="statusEventScroll" class="status-event-scroll" @scroll.passive="onStatusEventScroll">
                                 <a-spin :loading="statusEventLoading" class="status-event-content">
@@ -2654,24 +2654,39 @@ onUnmounted(() => {
                                 </div>
                             </div>
                         </a-tab-pane>
-                        <a-tab-pane key="traffic" title="流量统计">
+                        <a-tab-pane key="traffic">
+                            <template #title><span class="runtime-tab-title"><BarChart3 :size="15" />流量统计</span></template>
                             <div class="runtime-filter">
-                                <span>统计通道</span>
-                                <a-select v-model="runtimeChannelCode" :loading="runtimeChannelsLoading" :disabled="runtimeChannelLocked" allow-clear placeholder="全部通道(设备汇总)">
-                                    <a-option v-for="channel in runtimeChannels" :key="channel.channelId" :value="channel.channelId">{{ displayName(channel) }} · {{ channel.channelId }}</a-option>
-                                </a-select>
+                                <span>统计范围</span>
+                                <div class="runtime-filter-control">
+                                    <a-select v-model="runtimeChannelCode" :loading="runtimeChannelsLoading" allow-clear placeholder="全部通道（设备汇总）">
+                                        <a-option v-for="channel in runtimeChannels" :key="channel.channelId" :value="channel.channelId">{{ displayName(channel) }} · {{ channel.channelId }}</a-option>
+                                    </a-select>
+                                    <small>不选择通道时展示整台设备的汇总数据</small>
+                                </div>
+                            </div>
+                            <div v-if="runtimeChannelsError" class="runtime-channel-state" role="alert">
+                                <span>{{ runtimeChannelsError }}，当前仍可查看设备汇总</span>
+                                <a-button size="mini" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
                             </div>
                             <TrafficTrend v-if="runtimeActiveTab === 'traffic'" :device-id="statusEventDevice.deviceId" :channel-id="runtimeChannelCode || undefined" />
                         </a-tab-pane>
-                        <a-tab-pane key="viewers" title="当前观看">
+                        <a-tab-pane key="viewers">
+                            <template #title><span class="runtime-tab-title"><Eye :size="15" />当前观看</span></template>
                             <div class="runtime-filter">
                                 <span>观看通道</span>
-                                <a-select v-model="runtimeChannelCode" :loading="runtimeChannelsLoading" :disabled="runtimeChannelLocked" placeholder="请选择通道">
-                                    <a-option v-for="channel in runtimeChannels" :key="channel.channelId" :value="channel.channelId">{{ displayName(channel) }} · {{ channel.channelId }}</a-option>
-                                </a-select>
+                                <div class="runtime-filter-control">
+                                    <a-select v-model="runtimeChannelCode" :loading="runtimeChannelsLoading" allow-clear placeholder="全部通道（默认）">
+                                        <a-option v-for="channel in runtimeChannels" :key="channel.channelId" :value="channel.channelId">{{ displayName(channel) }} · {{ channel.channelId }}</a-option>
+                                    </a-select>
+                                    <small>默认展示设备全部通道，可按通道筛选</small>
+                                </div>
                             </div>
-                            <ViewerTable v-if="runtimeActiveTab === 'viewers' && runtimeChannelCode && runtimeSelectedChannel" :device-id="statusEventDevice.deviceId" :channel-id="runtimeChannelCode" />
-                            <a-empty v-else-if="runtimeActiveTab === 'viewers'" description="请选择一个通道查看当前观看连接" />
+                            <div v-if="runtimeChannelsError" class="runtime-channel-state error" role="alert">
+                                <span>{{ runtimeChannelsError }}，当前仍展示全部通道</span>
+                                <a-button size="mini" @click="loadRuntimeChannels(statusEventDevice)">重试</a-button>
+                            </div>
+                            <ViewerTable v-if="runtimeActiveTab === 'viewers'" :device-id="statusEventDevice.deviceId" :channel-id="runtimeChannelCode || undefined" />
                         </a-tab-pane>
                     </a-tabs>
                 </div>
@@ -4222,14 +4237,14 @@ onUnmounted(() => {
 }
 .status-event-body {
     display: grid;
-    gap: 16px;
+    gap: 12px;
 }
 .status-event-summary {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 12px 14px;
+    padding: 14px 16px;
     border: 1px solid var(--uvp-panel-border);
     border-radius: 10px;
     background: var(--uvp-list-toolbar-bg);
@@ -4242,7 +4257,7 @@ onUnmounted(() => {
 }
 .status-event-device > div {
     display: grid;
-    gap: 3px;
+    gap: 2px;
     min-width: 0;
 }
 .status-event-device strong,
@@ -4253,6 +4268,12 @@ onUnmounted(() => {
 }
 .status-event-device strong { color: var(--uvp-text-primary); }
 .status-event-device span { color: var(--uvp-text-tertiary); font-size: 12px; }
+.status-event-device .runtime-eyebrow {
+    color: var(--uvp-brand);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+}
 .summary-icon {
     display: inline-grid;
     place-items: center;
@@ -4263,37 +4284,70 @@ onUnmounted(() => {
     border-radius: 8px;
     background: color-mix(in srgb, var(--uvp-brand-cyan) 12%, transparent);
 }
-.status-event-facts {
+.runtime-overview {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
 }
-.status-event-facts > div {
+.runtime-overview-card {
     display: grid;
-    gap: 4px;
+    gap: 6px;
     min-width: 0;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--uvp-panel-border);
+    padding: 11px 12px;
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 9px;
+    background: var(--uvp-panel-bg);
 }
-.status-event-facts span { color: var(--uvp-text-tertiary); font-size: 12px; }
-.status-event-facts strong {
+.runtime-overview-card span { color: var(--uvp-text-tertiary); font-size: 11px; }
+.runtime-overview-card strong {
     overflow: hidden;
-    color: var(--uvp-text-secondary);
-    font-size: 12px;
+    color: var(--uvp-text-primary);
+    font-size: 13px;
+    font-weight: 650;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.runtime-overview-card strong.online { color: var(--uvp-brand-cyan); }
 .runtime-tabs { min-width: 0; }
-.runtime-tabs :deep(.arco-tabs-content) { padding-top: 4px; }
-.runtime-filter {
-    display: grid;
-    grid-template-columns: 80px minmax(220px, 420px);
+.runtime-tabs :deep(.arco-tabs-content) { padding-top: 2px; }
+.runtime-tab-title { display: inline-flex; align-items: center; gap: 6px; }
+.status-event-section-head {
+    display: flex;
     align-items: center;
-    gap: 10px;
-    min-height: 48px;
+    justify-content: space-between;
+    min-height: 50px;
+    padding: 4px 10px 8px;
     border-bottom: 1px solid var(--uvp-panel-border);
 }
-.runtime-filter > span { color: var(--uvp-text-tertiary); font-size: 12px; }
+.status-event-section-head > div { display: grid; gap: 2px; }
+.status-event-section-head strong { color: var(--uvp-text-primary); font-size: 13px; }
+.status-event-section-head span { color: var(--uvp-text-tertiary); font-size: 11px; }
+.runtime-filter {
+    display: grid;
+    grid-template-columns: 72px minmax(220px, 440px);
+    align-items: start;
+    gap: 12px;
+    min-height: 66px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--uvp-panel-border);
+}
+.runtime-filter > span { padding-top: 8px; color: var(--uvp-text-secondary); font-size: 12px; font-weight: 600; }
+.runtime-filter-control { display: grid; gap: 4px; }
+.runtime-filter-control small { color: var(--uvp-text-tertiary); font-size: 11px; }
+.runtime-channel-state {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 40px;
+    padding: 7px 10px;
+    color: var(--uvp-warning);
+    font-size: 12px;
+    background: var(--uvp-warning-soft);
+    border: 1px solid var(--uvp-warning-border);
+    border-radius: 8px;
+}
+.runtime-channel-state.error { color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border); }
 .status-event-scroll {
     min-height: 180px;
     max-height: clamp(180px, calc(100vh - 350px), 440px);
@@ -4304,7 +4358,8 @@ onUnmounted(() => {
 }
 @media (max-width: 768px) {
     .runtime-filter { grid-template-columns: 1fr; gap: 4px; padding: 8px 0; }
-    .status-event-facts { grid-template-columns: 1fr; }
+    .runtime-filter > span { padding-top: 0; }
+    .runtime-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .status-event-content { display: block; min-height: 180px; }
 .status-event-timeline {
@@ -4384,7 +4439,8 @@ onUnmounted(() => {
 }
 .status-event-state.error strong { color: var(--uvp-danger); }
 @media (max-width: 720px) {
-    .status-event-facts { grid-template-columns: 1fr; }
+    .status-event-summary { align-items: flex-start; }
+    .runtime-overview { grid-template-columns: 1fr; }
     .status-event-scroll { max-height: clamp(180px, calc(100vh - 470px), 360px); }
 }
 .info-group {

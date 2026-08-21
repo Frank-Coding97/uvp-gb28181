@@ -23,6 +23,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var registerDateLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
 // RegisterHandler 处理 REGISTER:401 挑战 → digest 校验(统一密码)→ 自动建档/注销
 type RegisterHandler struct {
 	cfg               gbconfig.Config
@@ -480,7 +482,7 @@ func (h *RegisterHandler) newResponse(req *sip.Request, status int, reason strin
 func (h *RegisterHandler) buildOKWithExpires(req *sip.Request, expires int) *sip.Response {
 	res := h.newResponse(req, 200, "OK", nil)
 	res.AppendHeader(sip.NewHeader("Expires", strconv.Itoa(expires)))
-	res.AppendHeader(sip.NewHeader("Date", time.Now().Format("2006-01-02T15:04:05")))
+	res.AppendHeader(sip.NewHeader("Date", h.now().In(registerDateLocation).Format("2006-01-02T15:04:05.000")))
 	return res
 }
 

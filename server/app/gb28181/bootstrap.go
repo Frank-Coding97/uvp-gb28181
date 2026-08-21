@@ -1198,7 +1198,7 @@ func setupTrafficRuntime() {
 		return
 	}
 	for _, model := range []interface{}{
-		&gbmodels.GbDeviceTrafficSession{}, &gbmodels.GbDeviceTrafficDaily{}, &gbmodels.GbDeviceTrafficGap{},
+		&gbmodels.GbDeviceTrafficSession{}, &gbmodels.GbDeviceTrafficDaily{}, &gbmodels.GbDeviceTrafficHourly{}, &gbmodels.GbDeviceTrafficGap{},
 	} {
 		if !db.Migrator().HasTable(model) {
 			app.ZapLog.Warn("GB28181 流量统计表未迁移,运行时跳过装配")

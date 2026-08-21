@@ -16,7 +16,7 @@ func newTrafficTestRepo(t *testing.T) *GormRepository {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&gbmodels.GbDeviceTrafficSession{}, &gbmodels.GbDeviceTrafficDaily{}, &gbmodels.GbDeviceTrafficGap{}))
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDeviceTrafficSession{}, &gbmodels.GbDeviceTrafficDaily{}, &gbmodels.GbDeviceTrafficHourly{}, &gbmodels.GbDeviceTrafficGap{}))
 	repo, err := NewGormRepository(db)
 	require.NoError(t, err)
 	return repo
@@ -47,6 +47,12 @@ func TestRepositoryApplyAbsoluteAndSettleOnlyAddsDelta(t *testing.T) {
 	require.NoError(t, repo.db.First(&daily).Error)
 	require.EqualValues(t, 134, daily.UpstreamBytes)
 	require.EqualValues(t, 1, daily.UpstreamSessions)
+	var hourly gbmodels.GbDeviceTrafficHourly
+	require.NoError(t, repo.db.First(&hourly).Error)
+	require.EqualValues(t, 134, hourly.UpstreamBytes)
+	var session gbmodels.GbDeviceTrafficSession
+	require.NoError(t, repo.db.Where("business_key = ?", base.BusinessKey).First(&session).Error)
+	require.NotNil(t, session.StartedAt)
 }
 
 func TestRepositoryCreatesRowsWhenRecordNotFoundIsMasked(t *testing.T) {

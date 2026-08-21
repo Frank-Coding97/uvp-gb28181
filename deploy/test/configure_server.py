@@ -13,6 +13,7 @@ CONFIG_PATH = BASE / "config" / "config.yml"
 TRACE_BACKEND_ENV_PATH = BASE / "config" / "sip-trace-backend.env"
 DATABASE_NAME = "uvp_gb28181"
 DATABASE_USER = "uvp_gb28181"
+TRUSTED_PROXIES = ["127.0.0.1", "::1", "172.18.0.3"]
 
 
 def container_env(name: str) -> dict[str, str]:
@@ -177,6 +178,7 @@ def main() -> None:
         ("server", "notcheckuser"): [1],
         ("system", "systemname"): "UVP GB28181",
         ("httpserver", "port"): ":18978",
+        ("httpserver", "trustedproxies"): TRUSTED_PROXIES,
         ("token", "jwttokensignkey"): jwt_secret,
         ("redis", "host"): "wvp-redis",
         ("redis", "port"): 6379,

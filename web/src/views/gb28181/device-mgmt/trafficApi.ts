@@ -7,6 +7,12 @@ export interface TrafficScopeParams {
     channelId?: string;
     from?: string;
     to?: string;
+    granularity?: "day" | "hour";
+}
+
+export interface TrafficSessionParams extends TrafficScopeParams {
+    page: number;
+    pageSize: number;
 }
 
 export interface TrafficSummary {
@@ -23,10 +29,25 @@ export interface TrafficSummary {
 }
 
 export interface TrafficTrendPoint {
+    bucket?: string;
     date: string;
     upstreamBytes: number;
     downstreamBytes: number;
     totalBytes: number;
+}
+
+export interface TrafficSession {
+    id: number;
+    direction: "upstream" | "downstream" | string;
+    channelCode: string;
+    mediaKind: string;
+    schema: string;
+    settledTotalBytes: number;
+    durationSeconds: number;
+    state: string;
+    startedAt?: string | null;
+    endedAt?: string | null;
+    createdAt: string;
 }
 
 export interface TrafficRealtime {
@@ -57,6 +78,18 @@ export interface CurrentViewer {
     kickable: boolean;
 }
 
+export interface CurrentViewerStream {
+    channelId: string;
+    channelName: string;
+    startedAt?: string | null;
+    aliveSecond: number;
+    bitrateKbps: number;
+    totalBytes: number;
+    viewerCount: number;
+    status: "streaming" | string;
+    viewers: CurrentViewer[];
+}
+
 export const getTrafficSummary = (params: TrafficScopeParams, signal?: AbortSignal) =>
     http.request<BaseResult<TrafficSummary>>("get", baseUrlApi("gb28181/device-traffic/summary"), { params, signal });
 
@@ -69,8 +102,11 @@ export const getTrafficRealtime = (params: TrafficScopeParams, signal?: AbortSig
 export const getTrafficCoverage = (params: TrafficScopeParams, signal?: AbortSignal) =>
     http.request<BaseResult<TrafficCoverage>>("get", baseUrlApi("gb28181/device-traffic/coverage"), { params, signal });
 
+export const getTrafficSessions = (params: TrafficSessionParams, signal?: AbortSignal) =>
+    http.request<BaseResult<{ list: TrafficSession[]; total: number; page: number; pageSize: number }>>("get", baseUrlApi("gb28181/device-traffic/sessions"), { params, signal });
+
 export const getCurrentViewers = (params: TrafficScopeParams, signal?: AbortSignal) =>
-    http.request<BaseResult<{ list: CurrentViewer[]; total: number; canKick: boolean }>>("get", baseUrlApi("gb28181/device-traffic/viewers"), { params, signal });
+    http.request<BaseResult<{ list: CurrentViewerStream[]; total: number; totalViewers: number; canKick: boolean }>>("get", baseUrlApi("gb28181/device-traffic/viewers"), { params, signal });
 
 export const kickCurrentViewer = (params: TrafficScopeParams, data: { id: string; schema: string }) =>
     http.request<BaseResult<{ kicked: boolean }>>("post", baseUrlApi("gb28181/device-traffic/viewers/kick"), { params, data });

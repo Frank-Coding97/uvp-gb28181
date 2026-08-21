@@ -143,12 +143,13 @@ func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (resul
 			return query.Error
 		}
 		if query.RowsAffected == 0 {
+			startedAt := request.At.UTC()
 			row = gbmodels.GbDeviceTrafficSession{
 				BusinessKey: request.BusinessKey, NodeID: request.NodeID, MediaServerUUID: request.MediaServerUUID,
 				ZLMSessionID: request.ZLMSessionID, Direction: string(request.Direction), DeviceCode: request.DeviceCode,
 				ChannelCode: request.ChannelCode, OwnerDeptID: request.OwnerDeptID, MediaKind: string(request.MediaKind),
 				Schema: request.Schema, VHost: request.VHost, App: request.App, Stream: request.Stream,
-				CreateStamp: request.CreateStamp, State: string(SessionActive),
+				CreateStamp: request.CreateStamp, State: string(SessionActive), StartedAt: &startedAt,
 			}
 			if err := tx.Create(&row).Error; err != nil {
 				return err
@@ -178,6 +179,9 @@ func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (resul
 			"duration_seconds": state.DurationSeconds, "state": string(state.State),
 			"last_seen_at": lastSeen, "ended_at": nullableTime(endedAt),
 		}
+		if row.StartedAt == nil {
+			updates["started_at"] = request.At.UTC()
+		}
 		if reset {
 			updates["unattributed_reason"] = "absolute_reset"
 		}
@@ -190,10 +194,45 @@ func (r *GormRepository) Apply(ctx context.Context, request ApplyRequest) (resul
 			if err := upsertDaily(tx, request, delta, becameSettled); err != nil {
 				return err
 			}
+			if err := upsertHourly(tx, request, delta, becameSettled); err != nil {
+				return err
+			}
 		}
 		result = ApplyResult{DeltaBytes: delta, Reset: reset, Settled: state.State == SessionSettled}
 		return nil
 	})
+}
+
+func upsertHourly(tx *gorm.DB, request ApplyRequest, delta uint64, newSettled bool) error {
+	localAt := request.At.In(accountingLocation)
+	hour := time.Date(localAt.Year(), localAt.Month(), localAt.Day(), localAt.Hour(), 0, 0, 0, accountingLocation)
+	row := gbmodels.GbDeviceTrafficHourly{
+		StatHour: hour, DeviceCode: request.DeviceCode, ChannelCode: request.ChannelCode, OwnerDeptID: request.OwnerDeptID,
+	}
+	updates := map[string]interface{}{"updated_at": request.At.UTC()}
+	if request.Direction == DirectionUpstream {
+		row.UpstreamBytes = delta
+		updates["upstream_bytes"] = gorm.Expr("upstream_bytes + ?", delta)
+		if newSettled {
+			row.UpstreamSessions = 1
+			row.UpstreamDurationSeconds = request.DurationSeconds
+			updates["upstream_sessions"] = gorm.Expr("upstream_sessions + 1")
+			updates["upstream_duration_seconds"] = gorm.Expr("upstream_duration_seconds + ?", request.DurationSeconds)
+		}
+	} else {
+		row.DownstreamBytes = delta
+		updates["downstream_bytes"] = gorm.Expr("downstream_bytes + ?", delta)
+		if newSettled {
+			row.DownstreamSessions = 1
+			row.DownstreamDurationSeconds = request.DurationSeconds
+			updates["downstream_sessions"] = gorm.Expr("downstream_sessions + 1")
+			updates["downstream_duration_seconds"] = gorm.Expr("downstream_duration_seconds + ?", request.DurationSeconds)
+		}
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "stat_hour"}, {Name: "device_code"}, {Name: "channel_code"}},
+		DoUpdates: clause.Assignments(updates),
+	}).Create(&row).Error
 }
 
 func upsertDaily(tx *gorm.DB, request ApplyRequest, delta uint64, newSettled bool) error {

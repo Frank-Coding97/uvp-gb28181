@@ -59,6 +59,8 @@ type trafficScope struct {
 	Channel     *gbmodels.GbChannel
 }
 
+var trafficAccountingLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
 func (dc *DeviceTrafficController) scope(c *gin.Context, requireChannel bool) (trafficScope, bool) {
 	if dc == nil || dc.db == nil {
 		dc.FailAndAbort(c, "流量统计服务尚未装配", nil)
@@ -99,7 +101,7 @@ func (dc *DeviceTrafficController) scope(c *gin.Context, requireChannel bool) (t
 func trafficRange(c *gin.Context) (time.Time, time.Time, error) {
 	now := time.Now().UTC()
 	to := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	from := to.AddDate(0, 0, -29)
+	from := to.AddDate(0, 0, -6)
 	var err error
 	if raw := strings.TrimSpace(c.Query("from")); raw != "" {
 		from, err = time.Parse("2006-01-02", raw)
@@ -128,9 +130,55 @@ func (dc *DeviceTrafficController) dailyQuery(c *gin.Context, scope trafficScope
 	return query
 }
 
+func trafficHourlyRange(now time.Time) (time.Time, time.Time) {
+	to := now.In(trafficAccountingLocation).Truncate(time.Hour)
+	return to.Add(-23 * time.Hour), to
+}
+
+func (dc *DeviceTrafficController) hourlyQuery(c *gin.Context, scope trafficScope, from, to time.Time) *gorm.DB {
+	query := dc.db.WithContext(c).Model(&gbmodels.GbDeviceTrafficHourly{}).
+		Where("device_code = ? AND stat_hour >= ? AND stat_hour <= ?", scope.DeviceCode, from, to)
+	if scope.ChannelCode != "" {
+		query = query.Where("channel_code = ?", scope.ChannelCode)
+	}
+	return query
+}
+
+type trafficTotal struct {
+	UpstreamBytes, DownstreamBytes                     uint64
+	UpstreamDurationSeconds, DownstreamDurationSeconds int64
+	UpstreamSessions, DownstreamSessions               int64
+}
+
+func trafficTotalSelect() string {
+	return "COALESCE(SUM(upstream_bytes),0) AS upstream_bytes, COALESCE(SUM(downstream_bytes),0) AS downstream_bytes, " +
+		"COALESCE(SUM(upstream_duration_seconds),0) AS upstream_duration_seconds, COALESCE(SUM(downstream_duration_seconds),0) AS downstream_duration_seconds, " +
+		"COALESCE(SUM(upstream_sessions),0) AS upstream_sessions, COALESCE(SUM(downstream_sessions),0) AS downstream_sessions"
+}
+
+func trafficSummaryPayload(total trafficTotal, from, to, timezone, granularity string) gin.H {
+	return gin.H{
+		"upstreamBytes": total.UpstreamBytes, "downstreamBytes": total.DownstreamBytes,
+		"totalBytes":              total.UpstreamBytes + total.DownstreamBytes,
+		"upstreamDurationSeconds": total.UpstreamDurationSeconds, "downstreamDurationSeconds": total.DownstreamDurationSeconds,
+		"upstreamSessions": total.UpstreamSessions, "downstreamSessions": total.DownstreamSessions,
+		"from": from, "to": to, "timezone": timezone, "granularity": granularity,
+	}
+}
+
 func (dc *DeviceTrafficController) Summary(c *gin.Context) {
 	scope, ok := dc.scope(c, false)
 	if !ok {
+		return
+	}
+	if c.Query("granularity") == "hour" {
+		from, to := trafficHourlyRange(time.Now())
+		var total trafficTotal
+		if err := dc.hourlyQuery(c, scope, from, to).Select(trafficTotalSelect()).Scan(&total).Error; err != nil {
+			dc.FailAndAbort(c, "查询小时流量汇总失败", err)
+			return
+		}
+		dc.Success(c, trafficSummaryPayload(total, from.Format(time.RFC3339), to.Add(time.Hour).Format(time.RFC3339), "Asia/Shanghai", "hour"))
 		return
 	}
 	from, to, err := trafficRange(c)
@@ -138,26 +186,13 @@ func (dc *DeviceTrafficController) Summary(c *gin.Context) {
 		dc.FailAndAbort(c, "日期范围不合法", err)
 		return
 	}
-	var total struct {
-		UpstreamBytes, DownstreamBytes                     uint64
-		UpstreamDurationSeconds, DownstreamDurationSeconds int64
-		UpstreamSessions, DownstreamSessions               int64
-	}
-	err = dc.dailyQuery(c, scope, from, to).Select(
-		"COALESCE(SUM(upstream_bytes),0) AS upstream_bytes, COALESCE(SUM(downstream_bytes),0) AS downstream_bytes, " +
-			"COALESCE(SUM(upstream_duration_seconds),0) AS upstream_duration_seconds, COALESCE(SUM(downstream_duration_seconds),0) AS downstream_duration_seconds, " +
-			"COALESCE(SUM(upstream_sessions),0) AS upstream_sessions, COALESCE(SUM(downstream_sessions),0) AS downstream_sessions").Scan(&total).Error
+	var total trafficTotal
+	err = dc.dailyQuery(c, scope, from, to).Select(trafficTotalSelect()).Scan(&total).Error
 	if err != nil {
 		dc.FailAndAbort(c, "查询流量汇总失败", err)
 		return
 	}
-	dc.Success(c, gin.H{
-		"upstreamBytes": total.UpstreamBytes, "downstreamBytes": total.DownstreamBytes,
-		"totalBytes":              total.UpstreamBytes + total.DownstreamBytes,
-		"upstreamDurationSeconds": total.UpstreamDurationSeconds, "downstreamDurationSeconds": total.DownstreamDurationSeconds,
-		"upstreamSessions": total.UpstreamSessions, "downstreamSessions": total.DownstreamSessions,
-		"from": from.Format("2006-01-02"), "to": to.Format("2006-01-02"), "timezone": "UTC",
-	})
+	dc.Success(c, trafficSummaryPayload(total, from.Format("2006-01-02"), to.Format("2006-01-02"), "Asia/Shanghai", "day"))
 }
 
 type trafficTrendRow struct {
@@ -166,9 +201,41 @@ type trafficTrendRow struct {
 	DownstreamBytes uint64    `json:"downstreamBytes"`
 }
 
+type trafficHourlyTrendRow struct {
+	StatHour        time.Time
+	UpstreamBytes   uint64
+	DownstreamBytes uint64
+}
+
 func (dc *DeviceTrafficController) Trend(c *gin.Context) {
 	scope, ok := dc.scope(c, false)
 	if !ok {
+		return
+	}
+	if c.Query("granularity") == "hour" {
+		from, to := trafficHourlyRange(time.Now())
+		var rows []trafficHourlyTrendRow
+		err := dc.hourlyQuery(c, scope, from, to).Select(
+			"stat_hour, COALESCE(SUM(upstream_bytes),0) AS upstream_bytes, COALESCE(SUM(downstream_bytes),0) AS downstream_bytes").
+			Group("stat_hour").Order("stat_hour").Scan(&rows).Error
+		if err != nil {
+			dc.FailAndAbort(c, "查询小时流量趋势失败", err)
+			return
+		}
+		rowByHour := make(map[string]trafficHourlyTrendRow, len(rows))
+		for _, row := range rows {
+			rowByHour[row.StatHour.In(trafficAccountingLocation).Format("2006-01-02T15")] = row
+		}
+		list := make([]gin.H, 0, 24)
+		for hour := from; !hour.After(to); hour = hour.Add(time.Hour) {
+			row := rowByHour[hour.Format("2006-01-02T15")]
+			list = append(list, gin.H{
+				"bucket": hour.Format(time.RFC3339), "date": hour.Format(time.RFC3339),
+				"upstreamBytes": row.UpstreamBytes, "downstreamBytes": row.DownstreamBytes,
+				"totalBytes": row.UpstreamBytes + row.DownstreamBytes,
+			})
+		}
+		dc.Success(c, gin.H{"list": list, "from": from.Format(time.RFC3339), "to": to.Add(time.Hour).Format(time.RFC3339), "granularity": "hour", "timezone": "Asia/Shanghai"})
 		return
 	}
 	from, to, err := trafficRange(c)
@@ -186,10 +253,10 @@ func (dc *DeviceTrafficController) Trend(c *gin.Context) {
 	}
 	list := make([]gin.H, 0, len(rows))
 	for _, row := range rows {
-		list = append(list, gin.H{"date": row.StatDate.Format("2006-01-02"), "upstreamBytes": row.UpstreamBytes,
+		list = append(list, gin.H{"bucket": row.StatDate.Format("2006-01-02"), "date": row.StatDate.Format("2006-01-02"), "upstreamBytes": row.UpstreamBytes,
 			"downstreamBytes": row.DownstreamBytes, "totalBytes": row.UpstreamBytes + row.DownstreamBytes})
 	}
-	dc.Success(c, gin.H{"list": list, "from": from.Format("2006-01-02"), "to": to.Format("2006-01-02"), "timezone": "UTC"})
+	dc.Success(c, gin.H{"list": list, "from": from.Format("2006-01-02"), "to": to.Format("2006-01-02"), "granularity": "day", "timezone": "Asia/Shanghai"})
 }
 
 func (dc *DeviceTrafficController) Realtime(c *gin.Context) {
@@ -218,6 +285,18 @@ func (dc *DeviceTrafficController) Sessions(c *gin.Context) {
 	query := dc.db.WithContext(c).Model(&gbmodels.GbDeviceTrafficSession{}).Where("device_code = ?", scope.DeviceCode)
 	if scope.ChannelCode != "" {
 		query = query.Where("channel_code = ?", scope.ChannelCode)
+	}
+	if rawFrom, rawTo := strings.TrimSpace(c.Query("from")), strings.TrimSpace(c.Query("to")); rawFrom != "" || rawTo != "" {
+		from, fromErr := time.Parse(time.RFC3339, rawFrom)
+		to, toErr := time.Parse(time.RFC3339, rawTo)
+		if fromErr != nil || toErr != nil || !to.After(from) {
+			dc.FailAndAbort(c, "明细时间范围不合法", errors.Join(fromErr, toErr))
+			return
+		}
+		query = query.Where(
+			"COALESCE(started_at, created_at) < ? AND COALESCE(ended_at, last_seen_at, started_at, created_at) >= ?",
+			to.UTC(), from.UTC(),
+		)
 	}
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -272,6 +351,23 @@ type currentViewer struct {
 	Kickable  bool   `json:"kickable"`
 }
 
+type currentViewerStream struct {
+	ChannelID   string          `json:"channelId"`
+	ChannelName string          `json:"channelName"`
+	StartedAt   *time.Time      `json:"startedAt"`
+	AliveSecond uint64          `json:"aliveSecond"`
+	BitrateKbps float64         `json:"bitrateKbps"`
+	TotalBytes  uint64          `json:"totalBytes"`
+	ViewerCount int             `json:"viewerCount"`
+	Status      string          `json:"status"`
+	Viewers     []currentViewer `json:"viewers"`
+}
+
+type viewerChannel struct {
+	ID   string
+	Name string
+}
+
 func (dc *DeviceTrafficController) channelClient(c *gin.Context, scope trafficScope) (trafficNodeClient, *node.Node, bool) {
 	if scope.Channel == nil || scope.Channel.StreamID == "" || dc.nodes == nil || dc.locations == nil {
 		return nil, nil, false
@@ -287,54 +383,166 @@ func (dc *DeviceTrafficController) channelClient(c *gin.Context, scope trafficSc
 	return dc.clientFor(mediaNode), mediaNode, true
 }
 
-func (dc *DeviceTrafficController) listViewers(c *gin.Context, scope trafficScope) ([]currentViewer, error) {
-	client, _, ok := dc.channelClient(c, scope)
-	if !ok {
-		return []currentViewer{}, nil
+func viewerChannelName(channel gbmodels.GbChannel) string {
+	if name := strings.TrimSpace(channel.Alias); name != "" {
+		return name
 	}
-	media, err := client.GetMediaList(c.Request.Context(), "__defaultVhost__", "rtp", scope.Channel.StreamID)
-	if err != nil {
+	if name := strings.TrimSpace(channel.Name); name != "" {
+		return name
+	}
+	return channel.ChannelID
+}
+
+func (dc *DeviceTrafficController) listViewerStreams(c *gin.Context, scope trafficScope) ([]currentViewerStream, error) {
+	channels := make([]gbmodels.GbChannel, 0)
+	if scope.Channel != nil {
+		channels = append(channels, *scope.Channel)
+	} else if err := dc.db.WithContext(c).Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
+		Where("device_id = ? AND stream_id <> ''", scope.DeviceCode).Order("channel_id").Find(&channels).Error; err != nil {
 		return nil, err
 	}
-	result := make([]currentViewer, 0)
-	seen := make(map[string]struct{})
+	if dc.locations == nil || dc.nodes == nil {
+		return []currentViewerStream{}, nil
+	}
+	type viewerNodeGroup struct {
+		client          trafficNodeClient
+		channelByStream map[string]viewerChannel
+	}
+	groups := make(map[int64]*viewerNodeGroup)
+	for i := range channels {
+		if channels[i].StreamID == "" {
+			continue
+		}
+		nodeID, ok := dc.locations.Lookup(channels[i].StreamID)
+		if !ok {
+			continue
+		}
+		group := groups[nodeID]
+		if group == nil {
+			mediaNode, exists := dc.nodes.Get(nodeID)
+			if !exists || mediaNode == nil {
+				continue
+			}
+			group = &viewerNodeGroup{client: dc.clientFor(mediaNode), channelByStream: make(map[string]viewerChannel)}
+			groups[nodeID] = group
+		}
+		group.channelByStream[channels[i].StreamID] = viewerChannel{ID: channels[i].ChannelID, Name: viewerChannelName(channels[i])}
+	}
+	nodeIDs := make([]int64, 0, len(groups))
+	for nodeID := range groups {
+		nodeIDs = append(nodeIDs, nodeID)
+	}
+	sort.Slice(nodeIDs, func(i, j int) bool { return nodeIDs[i] < nodeIDs[j] })
+	result := make([]currentViewerStream, 0)
+	for _, nodeID := range nodeIDs {
+		group := groups[nodeID]
+		streamFilter := ""
+		if scope.Channel != nil {
+			streamFilter = scope.Channel.StreamID
+		}
+		media, err := group.client.GetMediaList(c.Request.Context(), "__defaultVhost__", "rtp", streamFilter)
+		if err != nil {
+			return nil, err
+		}
+		streams, err := currentViewerStreamsFromMedia(c.Request.Context(), group.client, group.channelByStream, media)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, streams...)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ChannelID < result[j].ChannelID })
+	return result, nil
+}
+
+func currentViewerStreamsFromMedia(ctx context.Context, client trafficNodeClient, channelByStream map[string]viewerChannel, media []zlm.MediaInfo) ([]currentViewerStream, error) {
+	streamByChannel := make(map[string]*currentViewerStream)
+	seenViewer := make(map[string]struct{})
 	for _, item := range media {
+		channel, belongsToDevice := channelByStream[item.Stream]
+		if !belongsToDevice {
+			continue
+		}
 		if item.ReaderCount <= 0 || item.Schema == "" {
 			continue
 		}
-		players, err := client.GetMediaPlayerList(c.Request.Context(), item.Schema, item.VHost, item.App, item.Stream)
+		stream := streamByChannel[channel.ID]
+		if stream == nil {
+			stream = &currentViewerStream{
+				ChannelID: channel.ID, ChannelName: channel.Name, Status: "streaming", Viewers: make([]currentViewer, 0),
+			}
+			streamByChannel[channel.ID] = stream
+		}
+		stream.ViewerCount += item.ReaderCount
+		if item.AliveSecond > stream.AliveSecond {
+			stream.AliveSecond = item.AliveSecond
+		}
+		if bitrate := float64(item.BytesSpeed) * 8 / 1000; bitrate > stream.BitrateKbps {
+			stream.BitrateKbps = bitrate
+		}
+		if item.TotalBytes > stream.TotalBytes {
+			stream.TotalBytes = item.TotalBytes
+		}
+		if item.CreateStamp > 0 {
+			startedAt := time.Unix(int64(item.CreateStamp), 0).UTC()
+			if stream.StartedAt == nil || startedAt.Before(*stream.StartedAt) {
+				stream.StartedAt = &startedAt
+			}
+		}
+		players, err := client.GetMediaPlayerList(ctx, item.Schema, item.VHost, item.App, item.Stream)
 		if err != nil {
 			return nil, err
 		}
 		for _, player := range players {
-			key := item.Schema + "\x00" + player.Identifier
-			if _, exists := seen[key]; exists {
+			key := channel.ID + "\x00" + item.Schema + "\x00" + player.Identifier
+			if _, exists := seenViewer[key]; exists {
 				continue
 			}
-			seen[key] = struct{}{}
+			seenViewer[key] = struct{}{}
 			typeID := strings.ToLower(player.TypeID)
-			result = append(result, currentViewer{
-				ChannelID: scope.ChannelCode, Schema: item.Schema,
+			stream.Viewers = append(stream.Viewers, currentViewer{
+				ChannelID: channel.ID, Schema: item.Schema,
 				Remote: fmt.Sprintf("%s:%d", player.PeerIP, player.PeerPort), LocalPort: player.LocalPort,
 				ID: player.Identifier, Type: player.TypeID,
 				Kickable: player.Identifier != "" && typeID != "" && !strings.Contains(typeID, "udp"),
 			})
 		}
 	}
+	result := make([]currentViewerStream, 0, len(streamByChannel))
+	for _, stream := range streamByChannel {
+		sort.Slice(stream.Viewers, func(i, j int) bool { return stream.Viewers[i].Remote < stream.Viewers[j].Remote })
+		result = append(result, *stream)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ChannelID < result[j].ChannelID })
+	return result, nil
+}
+
+func (dc *DeviceTrafficController) listViewers(c *gin.Context, scope trafficScope) ([]currentViewer, error) {
+	streams, err := dc.listViewerStreams(c, scope)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]currentViewer, 0)
+	for i := range streams {
+		result = append(result, streams[i].Viewers...)
+	}
 	return result, nil
 }
 
 func (dc *DeviceTrafficController) Viewers(c *gin.Context) {
-	scope, ok := dc.scope(c, true)
+	scope, ok := dc.scope(c, false)
 	if !ok {
 		return
 	}
-	list, err := dc.listViewers(c, scope)
+	list, err := dc.listViewerStreams(c, scope)
 	if err != nil {
 		dc.FailAndAbort(c, "查询当前观看连接失败", err)
 		return
 	}
-	dc.Success(c, gin.H{"list": list, "total": len(list), "canKick": trafficSuperAdmin(c)})
+	totalViewers := 0
+	for i := range list {
+		totalViewers += list[i].ViewerCount
+	}
+	dc.Success(c, gin.H{"list": list, "total": len(list), "totalViewers": totalViewers, "canKick": trafficSuperAdmin(c)})
 }
 
 func (dc *DeviceTrafficController) KickViewer(c *gin.Context) {
