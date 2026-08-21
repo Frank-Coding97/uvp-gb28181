@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/glebarez/sqlite"
@@ -14,6 +15,14 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
+
+func catalogResponseBody(sn, sumNum int, deviceID string, itemIDs ...string) []byte {
+	items := ""
+	for _, itemID := range itemIDs {
+		items += fmt.Sprintf(`<Item><DeviceID>%s</DeviceID><Name>%s</Name><CivilCode>370112</CivilCode><Status>ON</Status></Item>`, itemID, itemID)
+	}
+	return []byte(fmt.Sprintf(`<Response><CmdType>Catalog</CmdType><SN>%d</SN><DeviceID>%s</DeviceID><SumNum>%d</SumNum><DeviceList Num="%d">%s</DeviceList></Response>`, sn, deviceID, sumNum, len(itemIDs), items))
+}
 
 func init() {
 	// 单测兜底:给 app.ZapLog 一个 nop logger,防 Handle* 路径 nil 解引用
@@ -100,4 +109,54 @@ func TestHandleCatalogResponse_NoPipelineSafe(t *testing.T) {
 	require.NotPanics(t, func() {
 		HandleCatalogResponse(context.Background(), body)
 	})
+}
+
+func TestHandleCatalogResponse_AggregatesByDeviceAndSNBeforeIngest(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&gbmodels.GbCatalogNode{}, &gbmodels.GbChannelMount{}, &gbmodels.GbAnomalyRecord{},
+		&gbmodels.GbChannel{}, &gbmodels.GbDevice{},
+	))
+	deviceID := "34020000002000000001"
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: deviceID, OwnerDeptID: 1}).Error)
+	SetCatalogPipeline(catalog.New(db))
+	catalogAgg.reset()
+	t.Cleanup(func() {
+		SetCatalogPipeline(nil)
+		catalogAgg.reset()
+	})
+
+	// SN=10 的第一包未收齐，不能提前把部分目录写入数据库。
+	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000001"))
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
+	require.Zero(t, count)
+
+	// 重复包不能增加聚合进度。
+	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000001"))
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
+	require.Zero(t, count)
+
+	// 同设备另一个 SN 应独立聚合并可以先完成。
+	HandleCatalogResponse(context.Background(), catalogResponseBody(
+		11, 2, deviceID,
+		"37011200001310000002", "37011200001310000003",
+	))
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
+	require.EqualValues(t, 2, count)
+
+	// SN=10 补齐后，再一次性落入它自己的两条结果。
+	HandleCatalogResponse(context.Background(), catalogResponseBody(10, 2, deviceID, "37011200001310000004"))
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
+	require.EqualValues(t, 4, count)
+}
+
+func TestHandleCatalogResponse_EmptyResponseDoesNotLeaveBucket(t *testing.T) {
+	SetCatalogPipeline(nil)
+	catalogAgg.reset()
+	t.Cleanup(func() { catalogAgg.reset() })
+
+	HandleCatalogResponse(context.Background(), catalogResponseBody(7, 0, "empty-device"))
+	require.Equal(t, 0, catalogAgg.active())
 }

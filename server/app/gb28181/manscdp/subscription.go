@@ -86,6 +86,7 @@ type CatalogNotify struct {
 	CmdType    string `xml:"CmdType"`
 	SN         int    `xml:"SN"`
 	DeviceID   string `xml:"DeviceID"`
+	SumNum     int    `xml:"SumNum"`
 	DeviceList struct {
 		Num   int           `xml:"Num,attr"`
 		Items []CatalogItem `xml:"Item"`

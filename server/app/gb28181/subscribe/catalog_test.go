@@ -68,3 +68,26 @@ func TestCatalogProcessor_IgnoresOnlyNegativeStatusNotifyWhenConfigured(t *testi
 	require.NoError(t, db.Where("channel_id = ?", "37011200001310000001").First(&channel).Error)
 	require.Equal(t, gbmodels.ChannelStatusOnline, channel.Status)
 }
+
+func TestCatalogProcessor_AggregatesMultiResponseNotifyBySN(t *testing.T) {
+	db := newCatalogProcessorDB(t)
+	device := &gbmodels.GbDevice{DeviceID: "34020000002000000001", OwnerDeptID: 1}
+	require.NoError(t, db.Create(device).Error)
+	p := NewCatalogProcessor(catalog.New(db))
+
+	first := []byte(`<Notify><CmdType>Catalog</CmdType><SN>9</SN><DeviceID>34020000002000000001</DeviceID><SumNum>2</SumNum><DeviceList Num="1"><Item><DeviceID>37011200001310000001</DeviceID><Name>入口</Name><CivilCode>370112</CivilCode><Status>ON</Status></Item></DeviceList></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: first}))
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
+	require.Zero(t, count, "未收齐的订阅通知不能提前落库")
+
+	// 重复第一包不能推进聚合计数。
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: first}))
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
+	require.Zero(t, count)
+
+	second := []byte(`<Notify><CmdType>Catalog</CmdType><SN>9</SN><DeviceID>34020000002000000001</DeviceID><SumNum>2</SumNum><DeviceList Num="1"><Item><DeviceID>37011200001310000002</DeviceID><Name>出口</Name><CivilCode>370112</CivilCode><Status>ON</Status></Item></DeviceList></Notify>`)
+	require.NoError(t, p.Process(context.Background(), device, Notification{Body: second}))
+	require.NoError(t, db.Model(&gbmodels.GbChannel{}).Count(&count).Error)
+	require.EqualValues(t, 2, count)
+}

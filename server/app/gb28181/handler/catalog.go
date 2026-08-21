@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"sync"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -13,19 +14,113 @@ import (
 	"go.uber.org/zap"
 )
 
-// catalogAggregator 按 deviceID 聚合分包的 Catalog 应答
-// 国标 Catalog 应答可能分多条 MESSAGE 到达,需按 SumNum 累积齐后落库
+const catalogAggregationTimeout = 30 * time.Second
+
+// catalogAggregator 按 deviceID + SN 聚合分包的 Catalog 应答。
 type catalogAggregator struct {
 	mu    sync.Mutex
-	cache map[string]*catalogBucket // key: deviceID
+	cache map[catalogAggregateKey]*catalogBucket
+}
+
+type catalogAggregateKey struct {
+	deviceID string
+	sn       int
 }
 
 type catalogBucket struct {
-	sumNum   int
-	received int
+	sumNum int
+	items  map[string]manscdp.CatalogItem
+	order  []string
+	timer  *time.Timer
 }
 
-var catalogAgg = &catalogAggregator{cache: make(map[string]*catalogBucket)}
+var catalogAgg = &catalogAggregator{cache: make(map[catalogAggregateKey]*catalogBucket)}
+
+func (a *catalogAggregator) add(resp *manscdp.CatalogResponse) (items []manscdp.CatalogItem, received, total int, done bool) {
+	if resp == nil {
+		return nil, 0, 0, false
+	}
+	key := catalogAggregateKey{deviceID: resp.DeviceID, sn: resp.SN}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// 标准空结果是一个完整终态，不能留下永不完成的 SumNum=0 bucket。
+	if resp.SumNum == 0 && len(resp.DeviceList.Items) == 0 {
+		if old := a.cache[key]; old != nil {
+			old.timer.Stop()
+			delete(a.cache, key)
+		}
+		return nil, 0, 0, true
+	}
+
+	b := a.cache[key]
+	if b == nil {
+		b = &catalogBucket{
+			sumNum: resp.SumNum,
+			items:  make(map[string]manscdp.CatalogItem),
+		}
+		a.cache[key] = b
+	}
+	if resp.SumNum > b.sumNum {
+		b.sumNum = resp.SumNum
+	}
+	for _, item := range resp.DeviceList.Items {
+		if item.DeviceID == "" {
+			continue
+		}
+		if _, exists := b.items[item.DeviceID]; !exists {
+			b.order = append(b.order, item.DeviceID)
+		}
+		// 相同目录编码的重复包不增加进度；较新的字段覆盖旧值。
+		b.items[item.DeviceID] = item
+	}
+	if b.sumNum <= 0 {
+		// 兼容少量老设备漏填 SumNum 的单包应答。
+		b.sumNum = len(b.items)
+	}
+	received, total = len(b.items), b.sumNum
+	done = total > 0 && received >= total
+	if done {
+		items = make([]manscdp.CatalogItem, 0, len(b.order))
+		for _, id := range b.order {
+			items = append(items, b.items[id])
+		}
+		if b.timer != nil {
+			b.timer.Stop()
+		}
+		delete(a.cache, key)
+		return items, received, total, true
+	}
+
+	if b.timer != nil {
+		b.timer.Stop()
+	}
+	b.timer = time.AfterFunc(catalogAggregationTimeout, func() {
+		a.mu.Lock()
+		if current := a.cache[key]; current == b {
+			delete(a.cache, key)
+		}
+		a.mu.Unlock()
+	})
+	return nil, received, total, false
+}
+
+func (a *catalogAggregator) reset() {
+	a.mu.Lock()
+	for _, bucket := range a.cache {
+		if bucket.timer != nil {
+			bucket.timer.Stop()
+		}
+	}
+	a.cache = make(map[catalogAggregateKey]*catalogBucket)
+	a.mu.Unlock()
+}
+
+func (a *catalogAggregator) active() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.cache)
+}
 
 // catalogPipeline 全局入库管道(A4 改造:不再直接 UpsertChannel,投递到 catalog.Pipeline)
 // 包内可见单例,首次使用 lazy 装配;测试可调 SetCatalogPipeline 注入替身
@@ -62,7 +157,7 @@ func getCatalogPipeline() *catalog.Pipeline {
 	return catalogPipeline
 }
 
-// HandleCatalogResponse 处理一条 Catalog 应答:逐项入库 + 分包计数
+// HandleCatalogResponse 处理一条 Catalog 应答:按设备与 SN 聚合，收齐后一次性入库。
 //
 // A4 改造:
 //   - 旧路径:gbmodels.UpsertChannel(只写 gb_channel)
@@ -77,44 +172,29 @@ func HandleCatalogResponse(ctx context.Context, body []byte) {
 		return
 	}
 
-	pipeline := getCatalogPipeline()
-
-	if pipeline != nil {
-		items := make([]catalog.CatalogItem, 0, len(resp.DeviceList.Items))
-		for _, it := range resp.DeviceList.Items {
-			if it.DeviceID == "" {
-				continue
-			}
-			items = append(items, manscdpToCatalogItem(it))
-		}
-		if e := pipeline.Ingest(ctx, catalog.Sender{
-			SourceDeviceID: resp.DeviceID,
-		}, items); e != nil {
-			app.ZapLog.Error("Catalog Pipeline.Ingest 失败(部分通道未入库)",
-				zap.String("deviceId", resp.DeviceID), zap.Error(e))
-		}
-	} else {
-		// 兼容回退:db 未初始化(单测/早启动)
-		app.ZapLog.Debug("CatalogPipeline 不可用,跳过 catalog 入库", zap.String("deviceId", resp.DeviceID))
-	}
-
-	// 分包聚合计数(便于日志/判断是否收齐)
-	catalogAgg.mu.Lock()
-	b := catalogAgg.cache[resp.DeviceID]
-	if b == nil {
-		b = &catalogBucket{sumNum: resp.SumNum}
-		catalogAgg.cache[resp.DeviceID] = b
-	}
-	b.received += len(resp.DeviceList.Items)
-	done := b.received >= b.sumNum && b.sumNum > 0
-	received, sumNum := b.received, b.sumNum
+	aggregated, received, sumNum, done := catalogAgg.add(resp)
 	if done {
-		delete(catalogAgg.cache, resp.DeviceID)
+		pipeline := getCatalogPipeline()
+		if pipeline != nil {
+			items := make([]catalog.CatalogItem, 0, len(aggregated))
+			for _, it := range aggregated {
+				if it.DeviceID == "" {
+					continue
+				}
+				items = append(items, manscdpToCatalogItem(it))
+			}
+			if e := pipeline.Ingest(ctx, catalog.Sender{SourceDeviceID: resp.DeviceID}, items); e != nil {
+				app.ZapLog.Error("Catalog Pipeline.Ingest 失败(部分通道未入库)",
+					zap.String("deviceId", resp.DeviceID), zap.Error(e))
+			}
+		} else {
+			app.ZapLog.Debug("CatalogPipeline 不可用,跳过 catalog 入库", zap.String("deviceId", resp.DeviceID))
+		}
 	}
-	catalogAgg.mu.Unlock()
 
 	app.ZapLog.Info("Catalog 应答处理",
 		zap.String("deviceId", resp.DeviceID),
+		zap.Int("sn", resp.SN),
 		zap.Int("本条", len(resp.DeviceList.Items)),
 		zap.Int("累计", received), zap.Int("总数", sumNum), zap.Bool("收齐", done))
 }
