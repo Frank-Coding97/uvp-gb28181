@@ -17,6 +17,7 @@ import (
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	zlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
@@ -29,6 +30,7 @@ func newScopedDeviceDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbDevice{},
 		&gbmodels.GbChannel{},
 		&gbmodels.GbDeviceGrant{},
+		&zlmrepo.MetaNode{},
 		&basemodels.SysDepartment{},
 		&basemodels.SysRole{},
 		&basemodels.SysUserRole{},
@@ -147,6 +149,33 @@ func TestDeviceController_UpdateAutoDefaultsTo2016AfterOverrideWithoutReportedVe
 	require.Equal(t, gbmodels.ProtocolOverrideAuto, stored.ProtocolOverride)
 	require.Equal(t, gbmodels.ProtocolVersion2016, stored.EffectiveVersion)
 	require.Equal(t, gbmodels.ProtocolVersionSourceDefault, stored.EffectiveVersionSource)
+}
+
+func TestDeviceController_UpdateZLMNodeBinding(t *testing.T) {
+	r, db := newScopedDeviceRouter(t, 100)
+	require.NoError(t, db.Create(&zlmrepo.MetaNode{ID: 7, Name: "主媒体节点", State: "active"}).Error)
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPatch, "/api/gb28181/device/34020000002000000010", bytes.NewBufferString(`{"zlmNodeId":7}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var stored gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", "34020000002000000010").First(&stored).Error)
+	require.Equal(t, int64(7), stored.ZLMNodeID)
+}
+
+func TestDeviceController_UpdateRejectsUnknownZLMNode(t *testing.T) {
+	r, _ := newScopedDeviceRouter(t, 100)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPatch, "/api/gb28181/device/34020000002000000010", bytes.NewBufferString(`{"zlmNodeId":999}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	resp := unmarshal(t, w)
+	require.EqualValues(t, 1, resp["code"])
+	require.Equal(t, "ZLM 节点不存在", resp["message"])
 }
 
 func TestPlayController_FiltersOwnerDept(t *testing.T) {

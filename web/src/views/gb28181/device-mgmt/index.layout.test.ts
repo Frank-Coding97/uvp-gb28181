@@ -117,4 +117,19 @@ describe("device management toolbar layout", () => {
         expect(source).toContain('function resetFilters()');
         expect(source).toContain('if (assetKind.value === "channel" && channelEntrySource.value === "device-drilldown")');
     });
+
+    it("edits the device alias, media node and protocol without overriding reported hardware metadata", () => {
+        const modalStart = source.indexOf("<!-- 编辑设备 Modal -->");
+        const modalEnd = source.indexOf("<!-- 编辑通道 Modal -->", modalStart);
+        const modal = source.slice(modalStart, modalEnd);
+
+        expect(modal).toContain('field="zlmNodeId" label="ZLM 节点"');
+        expect(modal).toContain(':loading="zlmNodesLoading"');
+        expect(source).toContain('value: 0, label: "自动调度"');
+        expect(modal).not.toContain('field="manufacturer"');
+        expect(modal).not.toContain('field="model"');
+        expect(modal).not.toContain('field="firmware"');
+        expect(source).toContain("listZLMNodes");
+        expect(source).toContain("zlmNodesError");
+    });
 });

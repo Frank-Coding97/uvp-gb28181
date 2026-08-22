@@ -600,12 +600,14 @@ CREATE TABLE [gb_device] (
     [effective_version] NVARCHAR(8) NOT NULL CONSTRAINT [df_gb_device_effective_version] DEFAULT N'2016',
     [effective_version_source] NVARCHAR(16) NOT NULL CONSTRAINT [df_gb_device_effective_source] DEFAULT N'default',
     [effective_version_at] DATETIME2(3) NULL,
+    [zlm_node_id] BIGINT NOT NULL CONSTRAINT [df_gb_device_zlm_node] DEFAULT 0,
     CONSTRAINT [pk_gb_device] PRIMARY KEY ([id]),
     CONSTRAINT [uk_gb_device_id] UNIQUE ([device_id])
 );
 CREATE INDEX [idx_gb_device_deleted_at] ON [gb_device] ([deleted_at]);
 CREATE INDEX [idx_gb_device_owner_dept_deleted] ON [gb_device] ([owner_dept_id], [deleted_at]);
 CREATE INDEX [idx_gb_device_status_keepalive] ON [gb_device] ([status], [keepalive_time]);
+CREATE INDEX [idx_gb_device_zlm_node] ON [gb_device] ([zlm_node_id]);
 
 -- GB28181 PTZ / home-position tables (2026-07-24).
 IF OBJECT_ID(N'gb_ptz_home_position', N'U') IS NOT NULL DROP TABLE [gb_ptz_home_position];

@@ -89,7 +89,8 @@ func (dc *DeviceMgmtController) CreatePlaybackSession(c *gin.Context) {
 		result, createErr := service.Create(c.Request.Context(), gbplayback.CreateRequest{OwnerID: strconv.FormatUint(uint64(claims.UserID), 10), DeviceID: target.device.DeviceID,
 			ChannelID: strconv.FormatUint(uint64(channelID), 10), SIPChannelID: snapshot.ChannelCode,
 			RecordKey: snapshot.RecordKey, IdempotencyKey: key,
-			Destination: net.JoinHostPort(target.device.IP, strconv.Itoa(target.device.Port)), Transport: target.device.Transport,
+			PreferredNodeID: target.device.ZLMNodeID,
+			Destination:     net.JoinHostPort(target.device.IP, strconv.Itoa(target.device.Port)), Transport: target.device.Transport,
 			TCPMode:         strings.Contains(strings.ToUpper(target.channel.StreamTransport), "TCP"),
 			DefaultProtocol: gbconfig.CurrentDefaultPlaybackProtocol(), Secure: isSecurePlaybackRequest(c.Request),
 			SegmentStart: snapshot.SegmentStart, SegmentEnd: snapshot.SegmentEnd, PlayFrom: playFrom})

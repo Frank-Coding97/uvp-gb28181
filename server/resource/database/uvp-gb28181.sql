@@ -427,12 +427,14 @@ CREATE TABLE `gb_device` (
   `effective_version` varchar(8) NOT NULL DEFAULT 2016 COMMENT '当前生效协议版本',
   `effective_version_source` varchar(16) NOT NULL DEFAULT 'default' COMMENT '生效版本来源',
   `effective_version_at` datetime(3) DEFAULT NULL COMMENT '生效版本更新时间',
+  `zlm_node_id` bigint NOT NULL DEFAULT 0 COMMENT '首选 ZLM 节点,0 表示自动调度',
   PRIMARY KEY (`id`) USING BTREE,
   UNIQUE KEY `uk_device_id` (`device_id`) USING BTREE,
   KEY `idx_deleted_at` (`deleted_at`),
   KEY `idx_status_keepalive` (`status`, `keepalive_time`),
   KEY `idx_subscribe_capability` (`subscribe_capability`, `subscribe_last_test`),
-  KEY `idx_owner_dept_deleted` (`owner_dept_id`, `deleted_at`)
+  KEY `idx_owner_dept_deleted` (`owner_dept_id`, `deleted_at`),
+  KEY `idx_gb_device_zlm_node` (`zlm_node_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181国标设备表';
 
 -- Table structure for `gb_device_control_state`

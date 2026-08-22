@@ -96,7 +96,20 @@ func (p *Pipeline) ingestOne(ctx context.Context, sender Sender, it CatalogItem)
 // 选择一个展示父节点,完整关系由资源关系表保留
 func resolveBusinessParent(tx *gorm.DB, sender Sender, it CatalogItem, civilNode *gbmodels.GbCatalogNode) (*gbmodels.GbCatalogNode, error) {
 	parentNode := civilNode
-	for _, parentCode := range SplitParentIDs(it.ParentID) {
+	// 通道同时上报 ParentID(物理设备) 与 BusinessGroupID(业务组织) 时，
+	// 目录展示优先挂到业务组织；设备/组织节点仍优先沿 ParentID 建物理层级。
+	parentCodes := SplitParentIDs(it.ParentID)
+	if Classify(it.DeviceID).NodeType == gbmodels.NodeTypeChannel {
+		parentCodes = append(SplitParentIDs(it.BusinessGroupID), parentCodes...)
+	} else {
+		parentCodes = append(parentCodes, SplitParentIDs(it.BusinessGroupID)...)
+	}
+	seenParents := map[string]struct{}{}
+	for _, parentCode := range parentCodes {
+		if _, seen := seenParents[parentCode]; seen {
+			continue
+		}
+		seenParents[parentCode] = struct{}{}
 		if parentCode == it.DeviceID {
 			continue
 		}
@@ -122,9 +135,14 @@ func resolveBusinessParent(tx *gorm.DB, sender Sender, it CatalogItem, civilNode
 			}
 			parentNode = pn
 		case gbmodels.NodeTypeDevice:
-			// device 父:让通道挂在设备节点下(NVR 下的子通道)
-			// 但本期为简化,通道直接挂行政区,设备节点单独建
-			// device 节点的具体 upsert 由 channel 上报路径推断;此处跳过
+			pn, err := findOrCreateNode(
+				tx, sender.OwnerDeptID, pCls.NodeType, parentCode,
+				civilNodeID(civilNode), civilNodePath(civilNode), parentCode,
+			)
+			if err != nil {
+				return nil, err
+			}
+			parentNode = pn
 		}
 	}
 	return parentNode, nil

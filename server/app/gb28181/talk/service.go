@@ -117,7 +117,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (*CreateRes
 		return nil, ErrTalkTargetOffline
 	}
 	sessionID := uuid.NewString()
-	mediaNode, err := s.selectNode(ctx, request.Channel, sessionID)
+	mediaNode, err := s.selectNode(ctx, request.Channel, request.Device, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -233,7 +233,7 @@ func (s *Service) OnRemoteBye(ctx context.Context, callID string) error {
 	return s.Cleanup(ctx, session.SessionID, models.TalkSessionEnded, "device sent TALK BYE")
 }
 
-func (s *Service) selectNode(ctx context.Context, channel *models.GbChannel, sessionID string) (*node.Node, error) {
+func (s *Service) selectNode(ctx context.Context, channel *models.GbChannel, device *models.GbDevice, sessionID string) (*node.Node, error) {
 	if channel.StreamID != "" && s.locations != nil && s.nodes != nil {
 		if nodeID, ok := s.locations.Lookup(channel.StreamID); ok {
 			if mediaNode, exists := s.nodes.Get(nodeID); exists && mediaNode.IsActive() {
@@ -244,7 +244,11 @@ func (s *Service) selectNode(ctx context.Context, channel *models.GbChannel, ses
 	if s.picker == nil {
 		return nil, ErrTalkNodeUnavailable
 	}
-	mediaNode, err := s.picker.Pick(ctx, play.PickContext{DeviceID: channel.DeviceID, ChannelID: channel.ChannelID, StreamID: sessionID})
+	preferredNodeID := int64(0)
+	if device != nil {
+		preferredNodeID = device.ZLMNodeID
+	}
+	mediaNode, err := s.picker.Pick(ctx, play.PickContext{DeviceID: channel.DeviceID, ChannelID: channel.ChannelID, StreamID: sessionID, PreferredNodeID: preferredNodeID})
 	if err != nil || mediaNode == nil {
 		return nil, fmt.Errorf("%w: %v", ErrTalkNodeUnavailable, err)
 	}

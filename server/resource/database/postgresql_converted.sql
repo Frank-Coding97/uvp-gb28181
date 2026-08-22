@@ -1628,12 +1628,14 @@ CREATE TABLE gb_device (
     effective_version VARCHAR(8) NOT NULL DEFAULT '2016',
     effective_version_source VARCHAR(16) NOT NULL DEFAULT 'default',
     effective_version_at TIMESTAMP(3),
+    zlm_node_id BIGINT NOT NULL DEFAULT 0,
     PRIMARY KEY (id),
     CONSTRAINT uk_gb_device_id UNIQUE (device_id)
 );
 CREATE INDEX idx_gb_device_deleted_at ON gb_device (deleted_at);
 CREATE INDEX idx_gb_device_owner_dept_deleted ON gb_device (owner_dept_id, deleted_at);
 CREATE INDEX idx_gb_device_status_keepalive ON gb_device (status, keepalive_time);
+CREATE INDEX idx_gb_device_zlm_node ON gb_device (zlm_node_id);
 
 -- GB28181 PTZ / home-position tables (2026-07-24).
 DROP TABLE IF EXISTS gb_ptz_home_position;

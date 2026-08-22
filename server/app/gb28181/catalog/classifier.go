@@ -58,6 +58,13 @@ func Classify(code string) Classification {
 		return out
 	}
 
+	// 2022 附录 J 允许行政区域目录项使用 2/4/6/8 位编码。
+	if len(trimmed) == 2 || len(trimmed) == 4 || len(trimmed) == 6 || len(trimmed) == 8 {
+		out.NodeType = gbmodels.NodeTypeCivilCode
+		out.CivilCode = trimmed
+		return out
+	}
+
 	// 长度异常 → 兜底
 	if len(trimmed) != 20 {
 		out.NodeType = gbmodels.NodeTypeVirtualOrg

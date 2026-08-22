@@ -66,7 +66,7 @@ func findOrCreateCivilCodeChain(db *gorm.DB, ownerDeptID uint, civilCode string)
 	if len(civilCode) >= 4 {
 		codes = append(codes, civilCode[:4])
 	}
-	if len(civilCode) == 6 {
+	if len(civilCode) == 6 || len(civilCode) == 8 {
 		codes = append(codes, civilCode)
 	}
 

@@ -15,10 +15,11 @@ import (
 //
 // M2 RoundRobin 不依赖任何字段;M3 Weighted / LeastLoad / Tags 选路时会用到。
 type InviteContext struct {
-	DeviceID  string
-	ChannelID string
-	StreamID  string
-	Tags      map[string]string
+	DeviceID        string
+	ChannelID       string
+	StreamID        string
+	PreferredNodeID int64
+	Tags            map[string]string
 }
 
 // Scheduler 节点调度算法抽象

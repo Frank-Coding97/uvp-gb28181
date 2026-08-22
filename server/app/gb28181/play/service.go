@@ -37,9 +37,10 @@ type NodePicker interface {
 
 // PickContext 给 scheduler 的上下文(避免直接依赖 scheduler.InviteContext 反向引用)
 type PickContext struct {
-	DeviceID  string
-	ChannelID string
-	StreamID  string
+	DeviceID        string
+	ChannelID       string
+	StreamID        string
+	PreferredNodeID int64
 }
 
 // NodeLookup 按 ID 取节点(由 node.Registry 实现)
@@ -546,7 +547,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 			}
 		} else {
 			selectedNode, err = s.picker.Pick(playCtx, PickContext{
-				DeviceID: deviceID, ChannelID: channelID, StreamID: streamID,
+				DeviceID: deviceID, ChannelID: channelID, StreamID: streamID, PreferredNodeID: dev.ZLMNodeID,
 			})
 			if err != nil {
 				return nil, fmt.Errorf("无可用 ZLM 节点: %w", err)

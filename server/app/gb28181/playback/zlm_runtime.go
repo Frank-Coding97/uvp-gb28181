@@ -60,7 +60,7 @@ func (p *zlmNodePicker) Pick(ctx context.Context, request PickRequest) (NodeInfo
 		return NodeInfo{}, ErrNodeUnavailable
 	}
 	selected, err := p.scheduler.Pick(ctx, scheduler.InviteContext{DeviceID: request.DeviceID,
-		ChannelID: request.SIPChannelID, StreamID: request.StreamID})
+		ChannelID: request.SIPChannelID, StreamID: request.StreamID, PreferredNodeID: request.PreferredNodeID})
 	if err != nil {
 		return NodeInfo{}, err
 	}

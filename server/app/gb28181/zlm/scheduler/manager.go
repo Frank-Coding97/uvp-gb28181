@@ -79,6 +79,15 @@ func (m *Manager) Pick(ctx context.Context, inv InviteContext) (*node.Node, erro
 		}
 		return nil, ErrNoSchedulerSet
 	}
+	if inv.PreferredNodeID > 0 && m.factory != nil && m.factory.reg != nil {
+		if preferred, ok := m.factory.reg.Get(inv.PreferredNodeID); ok && preferred.IsActive() && !preferred.IsNearCapacity() {
+			if log != nil {
+				log.Emit(SchedulerLog{HappenedAt: time.Now(), Algorithm: "preferred", NodeID: preferred.ID,
+					NodeName: preferred.Name, StreamID: inv.StreamID, DeviceID: inv.DeviceID, ChannelID: inv.ChannelID})
+			}
+			return preferred, nil
+		}
+	}
 	picked, err := s.Pick(ctx, inv)
 	if log != nil {
 		entry := SchedulerLog{

@@ -84,6 +84,28 @@ func TestPipeline_IngestWithOwnerDept(t *testing.T) {
 	assert.True(t, channel.AudioEnabled, "新建通道默认应开启音频")
 }
 
+func TestPipeline_IngestKeepsDeviceParentAndBusinessGroupRelation(t *testing.T) {
+	db := newPipelineTestDB(t)
+	p := catalog.New(db)
+	deviceID := "37011200001170000001"
+	groupID := "37011200002150000001"
+	channelID := "37011200001320000001"
+	sender := catalog.Sender{OwnerDeptID: 10, SourceDeviceID: deviceID}
+	require.NoError(t, p.Ingest(context.Background(), sender, []catalog.CatalogItem{
+		{DeviceID: deviceID, Name: "NVR", CivilCode: "370112", StatusOn: true},
+		{DeviceID: groupID, Name: "重点场所", CivilCode: "370112", ParentID: deviceID},
+		{DeviceID: channelID, Name: "校门", CivilCode: "370112", ParentID: deviceID, BusinessGroupID: groupID, StatusOn: true},
+	}))
+	var channelNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", channelID).First(&channelNode).Error)
+	var groupNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", groupID).First(&groupNode).Error)
+	var deviceNode gbmodels.GbCatalogNode
+	require.NoError(t, db.Where("code = ?", deviceID).First(&deviceNode).Error)
+	assert.Equal(t, deviceNode.ID, *groupNode.ParentID)
+	assert.Equal(t, groupNode.ID, *channelNode.ParentID)
+}
+
 func TestPipeline_IngestUsesConfiguredTransportOnlyForNewChannels(t *testing.T) {
 	previous := app.ConfigYml
 	t.Cleanup(func() { app.ConfigYml = previous })

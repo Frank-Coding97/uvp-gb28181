@@ -8,11 +8,10 @@ import {
     type ChannelVO,
     type DeviceVO,
     type DirectoryNode,
-    type DirectoryView
 } from "../device-mgmt/api";
 import { appendChannelFavoriteGroup, createChannelFavoriteGroup, deleteChannelFavoriteGroup, listChannelFavoriteGroups, removeChannelFavoriteItem, type ChannelFavoriteGroup as ApiFavoriteGroup, type ChannelFavoriteInput } from "@/api/gb28181";
 
-type SourceView = "devices" | DirectoryView | "favorites";
+type SourceView = "devices" | "national" | "custom" | "favorites";
 type SourceNodeKind = "directory" | "device" | "channel" | "favorite-group";
 
 export interface FavoriteChannelGroup {

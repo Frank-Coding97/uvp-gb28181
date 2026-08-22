@@ -98,6 +98,7 @@ type Session struct {
 type CreateRequest struct {
 	OwnerID, DeviceID, ChannelID, SIPChannelID        string
 	RecordKey, IdempotencyKey, Destination, Transport string
+	PreferredNodeID                                   int64
 	SegmentStart, SegmentEnd                          time.Time
 	PlayFrom                                          time.Time
 	TCPMode                                           bool

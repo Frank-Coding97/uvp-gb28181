@@ -12,7 +12,7 @@ describe("directoryState", () => {
         state = switchDirectoryView(state, "custom");
         state = selectDirectory(state, "custom:group:12");
         state = switchDirectoryView(state, "national");
-        expect(state.selectedKey).toEqual({ national: "national:area:370112", custom: "custom:group:12" });
+        expect(state.selectedKey).toEqual({ national: "national:area:370112", administrative: null, business: null, custom: "custom:group:12" });
     });
 
     it("maps selected namespaced key to paired query params", () => {

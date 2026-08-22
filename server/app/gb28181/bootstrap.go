@@ -60,9 +60,10 @@ type schedulerPickerAdapter struct {
 
 func (a schedulerPickerAdapter) Pick(ctx context.Context, inv play.PickContext) (*node.Node, error) {
 	return a.m.Pick(ctx, gbzlmsched.InviteContext{
-		DeviceID:  inv.DeviceID,
-		ChannelID: inv.ChannelID,
-		StreamID:  inv.StreamID,
+		DeviceID:        inv.DeviceID,
+		ChannelID:       inv.ChannelID,
+		StreamID:        inv.StreamID,
+		PreferredNodeID: inv.PreferredNodeID,
 	})
 }
 

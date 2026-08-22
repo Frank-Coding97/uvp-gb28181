@@ -29,10 +29,10 @@ func TestClassify(t *testing.T) {
 		{"虚拟组织 216", "34010500002160000001", gbmodels.NodeTypeVirtualOrg, false},
 		{"系列设备 111", "34010500001110000001", gbmodels.NodeTypeChannel, false},
 		{"未知类型 999 → 兜底", "34010500009990000001", gbmodels.NodeTypeVirtualOrg, true},
-		{"长度不足 → 兜底", "34010500", gbmodels.NodeTypeVirtualOrg, true},
+		{"8 位行政区划 → 行政区节点", "34010500", gbmodels.NodeTypeCivilCode, false},
 		{"含字母 → 兜底", "UVP-PRIVATE-0012", gbmodels.NodeTypeVirtualOrg, true},
 		{"空串 → 兜底", "", gbmodels.NodeTypeVirtualOrg, true},
-		{"带空格 → trim 后兜底(长度)", "  34010500  ", gbmodels.NodeTypeVirtualOrg, true},
+		{"带空格 → trim 后行政区节点", "  34010500  ", gbmodels.NodeTypeCivilCode, false},
 	}
 
 	for _, c := range cases {
@@ -63,4 +63,13 @@ func TestIsCivilCodeNode(t *testing.T) {
 	assert.False(t, catalog.IsCivilCodeNode("3701")) // 长度不对
 	assert.False(t, catalog.IsCivilCodeNode("ABC123"))
 	assert.False(t, catalog.IsCivilCodeNode(""))
+}
+
+func TestClassifyAdministrativeRegionCodes(t *testing.T) {
+	for _, code := range []string{"37", "3701", "370112", "37011201"} {
+		got := catalog.Classify(code)
+		assert.Equal(t, gbmodels.NodeTypeCivilCode, got.NodeType, code)
+		assert.False(t, got.Anomaly, code)
+		assert.Equal(t, code, got.CivilCode, code)
+	}
 }

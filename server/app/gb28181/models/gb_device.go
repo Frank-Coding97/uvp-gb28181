@@ -76,6 +76,7 @@ type GbDevice struct {
 	EffectiveVersion       string     `gorm:"column:effective_version;size:8;not null;default:2016;comment:当前生效协议版本" json:"effectiveVersion"`
 	EffectiveVersionSource string     `gorm:"column:effective_version_source;size:16;not null;default:default;comment:生效版本来源" json:"effectiveVersionSource"`
 	EffectiveVersionAt     *time.Time `gorm:"column:effective_version_at;comment:生效版本更新时间" json:"effectiveVersionAt"`
+	ZLMNodeID              int64      `gorm:"column:zlm_node_id;not null;default:0;index:idx_gb_device_zlm_node;comment:首选 ZLM 节点,0 表示自动调度" json:"zlmNodeId"`
 }
 
 // IsOnlineByFact 从事实(keepalive_time)派生在线状态,不依赖 status 缓存字段

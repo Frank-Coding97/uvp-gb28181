@@ -32,6 +32,7 @@ type NodeInfo struct {
 type PickRequest struct {
 	OwnerID, DeviceID, ChannelID, SIPChannelID, RecordKey string
 	StreamID, Destination, Transport                      string
+	PreferredNodeID                                       int64
 	TCPMode                                               bool
 }
 
@@ -209,7 +210,7 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	streamID, ssrc := randomPlaybackValue("pb-"), randomPlaybackSSRC()
 	node, err := s.picker.Pick(ctx, PickRequest{OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID,
 		SIPChannelID: request.SIPChannelID, RecordKey: request.RecordKey, StreamID: streamID,
-		Destination: request.Destination, Transport: request.Transport, TCPMode: request.TCPMode})
+		Destination: request.Destination, Transport: request.Transport, PreferredNodeID: request.PreferredNodeID, TCPMode: request.TCPMode})
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "node", "unavailable", fmt.Errorf("%w: %w", ErrNodeUnavailable, err), nil)
 	}

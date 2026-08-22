@@ -170,6 +170,20 @@ func TestManager_SwitchAlgorithm(t *testing.T) {
 	require.Equal(t, "roundrobin", m.CurrentName())
 }
 
+func TestManager_PrefersConfiguredActiveNodeAndFallsBack(t *testing.T) {
+	reg := buildRegistry(t, node.StateActive, node.StateActive, node.StateOffline)
+	m := scheduler.NewManager(scheduler.NewFactory(reg))
+	require.NoError(t, m.Switch("roundrobin"))
+
+	picked, err := m.Pick(context.Background(), scheduler.InviteContext{PreferredNodeID: 2})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), picked.ID)
+
+	picked, err = m.Pick(context.Background(), scheduler.InviteContext{PreferredNodeID: 3})
+	require.NoError(t, err)
+	require.NotEqual(t, int64(3), picked.ID)
+}
+
 func TestFactory_Build(t *testing.T) {
 	reg := buildRegistry(t, node.StateActive)
 	factory := scheduler.NewFactory(reg)

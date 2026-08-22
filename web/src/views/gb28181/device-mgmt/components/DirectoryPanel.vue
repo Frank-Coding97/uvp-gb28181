@@ -22,9 +22,9 @@ const emit = defineEmits<{
 }>();
 
 const loading = ref(false);
-const trees = ref<Record<DirectoryView, DirectoryNode[]>>({ national: [], custom: [] });
-const loaded = ref<Record<DirectoryView, boolean>>({ national: false, custom: false });
-const requestTokens: Record<DirectoryView, number> = { national: 0, custom: 0 };
+const trees = ref<Record<DirectoryView, DirectoryNode[]>>({ national: [], administrative: [], business: [], custom: [] });
+const loaded = ref<Record<DirectoryView, boolean>>({ national: false, administrative: false, business: false, custom: false });
+const requestTokens: Record<DirectoryView, number> = { national: 0, administrative: 0, business: 0, custom: 0 };
 let loadingToken = 0;
 let activeView = props.modelValue.view;
 
@@ -164,7 +164,15 @@ onMounted(() => load(props.modelValue.view));
         <div class="directory-switch" role="tablist" aria-label="目录类型">
             <button data-view="national" type="button" role="tab" :aria-selected="modelValue.view === 'national'" :class="{ active: modelValue.view === 'national' }" @click="changeView('national')">
                 <MapPin :size="13" aria-hidden="true" />
-                <span>国标目录</span>
+                <span>综合目录</span>
+            </button>
+            <button data-view="administrative" type="button" role="tab" :aria-selected="modelValue.view === 'administrative'" :class="{ active: modelValue.view === 'administrative' }" @click="changeView('administrative')">
+                <MapPin :size="13" aria-hidden="true" />
+                <span>行政区划</span>
+            </button>
+            <button data-view="business" type="button" role="tab" :aria-selected="modelValue.view === 'business'" :class="{ active: modelValue.view === 'business' }" @click="changeView('business')">
+                <FolderTree :size="13" aria-hidden="true" />
+                <span>业务组织</span>
             </button>
             <button data-view="custom" type="button" role="tab" :aria-selected="modelValue.view === 'custom'" :class="{ active: modelValue.view === 'custom' }" @click="changeView('custom')">
                 <Folder :size="13" aria-hidden="true" />

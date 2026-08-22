@@ -34,7 +34,7 @@ func (dc *DirectoryController) SetDB(provider func() *gorm.DB) { dc.db = provide
 
 func (dc *DirectoryController) Tree(c *gin.Context) {
 	view := c.Query("view")
-	if view != "national" && view != "custom" {
+	if view != "national" && view != "administrative" && view != "business" && view != "custom" {
 		dc.Fail(c, "目录视图参数错误", nil, http.StatusBadRequest)
 		return
 	}
@@ -49,14 +49,23 @@ func (dc *DirectoryController) Tree(c *gin.Context) {
 		return
 	}
 	var tree []gbdirectory.DirectoryNodeVO
-	if view == "national" {
+	if view == "national" || view == "administrative" || view == "business" {
 		lookup := civilcode.NewService(db)
 		if err := lookup.WarmCache(c.Request.Context()); err != nil {
 			dc.Fail(c, "加载行政区字典失败", err, http.StatusInternalServerError)
 			return
 		}
 		for _, deptID := range deptIDs {
-			part, buildErr := gbdirectory.BuildNationalTree(c.Request.Context(), db, deptID, lookup)
+			var part []gbdirectory.DirectoryNodeVO
+			var buildErr error
+			switch view {
+			case "administrative":
+				part, buildErr = gbdirectory.BuildAdministrativeTree(c.Request.Context(), db, deptID, lookup)
+			case "business":
+				part, buildErr = gbdirectory.BuildBusinessTree(c.Request.Context(), db, deptID)
+			default:
+				part, buildErr = gbdirectory.BuildNationalTree(c.Request.Context(), db, deptID, lookup)
+			}
 			if buildErr != nil {
 				dc.Fail(c, "生成国标目录失败", buildErr, http.StatusInternalServerError)
 				return

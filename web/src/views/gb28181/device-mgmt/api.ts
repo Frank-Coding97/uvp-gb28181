@@ -8,12 +8,12 @@ export type OnlineStatus = "online" | "offline";
 export type AssetKind = "channel" | "device";
 export type ProtocolOverride = "auto" | "2016" | "2022";
 export type ProtocolVersionSource = "register" | "override" | "history" | "default" | string;
-export type DirectoryView = "national" | "custom";
+export type DirectoryView = "national" | "administrative" | "business" | "custom";
 
 export interface DirectoryNode {
     key: string;
     name: string;
-    type: "area" | "organization" | "unknown" | "group" | "ungrouped" | string;
+    type: "area" | "organization" | "biz_group" | "virtual_org" | "unknown" | "group" | "ungrouped" | string;
     code?: string;
     readOnly: boolean;
     count: number;
@@ -106,6 +106,8 @@ export interface DeviceVO {
     effectiveVersion?: "2016" | "2022" | string;
     effectiveVersionSource?: ProtocolVersionSource;
     effectiveVersionAt?: string | null;
+    /** Preferred ZLM node; 0 lets the cluster scheduler decide. */
+    zlmNodeId?: number;
 }
 
 export type DeviceStatusEventType =
@@ -534,6 +536,7 @@ export const updateDevice = (
         model?: string;
         firmware?: string;
         protocolOverride?: ProtocolOverride;
+        zlmNodeId?: number;
     }
 ) =>
     http.request<BaseResult<Partial<DeviceVO> & { deviceId: string }>>(

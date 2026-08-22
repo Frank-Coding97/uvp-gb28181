@@ -34,6 +34,7 @@ import {
     FolderMinus
 } from "@lucide/vue";
 import { stopPlay } from "@/api/gb28181";
+import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
 import {
     batchDeleteChannels,
     batchDeleteDevices,
@@ -113,7 +114,7 @@ const keywordInput = ref<HTMLInputElement | null>(null);
 const deviceIdFilter = ref("");
 const statusFilter = ref<OnlineStatus | undefined>();
 const directoryState = ref(createDirectoryState());
-const selectedDirectories = ref<Record<"national" | "custom", DirectoryNode | null>>({ national: null, custom: null });
+const selectedDirectories = ref<Record<"national" | "administrative" | "business" | "custom", DirectoryNode | null>>({ national: null, administrative: null, business: null, custom: null });
 const selectedDirectory = computed(() => selectedDirectories.value[directoryState.value.view]);
 const directoryPanelRef = ref<InstanceType<typeof DirectoryPanel> | null>(null);
 const customTree = ref<DirectoryNode[]>([]);
@@ -141,10 +142,10 @@ if (returnSnapshot) {
     statusFilter.value = returnSnapshot.statusFilter;
     directoryState.value = {
         ...directoryState.value,
-        view: returnSnapshot.directoryView === "custom" ? "custom" : "national",
+        view: ["national", "administrative", "business", "custom"].includes(returnSnapshot.directoryView) ? returnSnapshot.directoryView as any : "national",
         selectedKey: {
             ...directoryState.value.selectedKey,
-            [returnSnapshot.directoryView === "custom" ? "custom" : "national"]: returnSnapshot.directorySelectedKey
+            [(["national", "administrative", "business", "custom"].includes(returnSnapshot.directoryView) ? returnSnapshot.directoryView : "national") as "national" | "administrative" | "business" | "custom"]: returnSnapshot.directorySelectedKey
         }
     };
     page.value = returnSnapshot.page;
@@ -265,12 +266,30 @@ const runtimeChannelsError = ref("");
 const channelMounts = ref<ChannelMount[]>([]);
 const timeline = ref<TimelineSlot[]>([]);
 const editDeviceVisible = ref(false);
-const editDeviceForm = ref<{ deviceId: string; alias: string; name: string; manufacturer: string; model: string; firmware: string; protocolOverride: ProtocolOverride }>({
-    deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "", protocolOverride: "auto"
+const editDeviceForm = ref<{ deviceId: string; alias: string; name: string; zlmNodeId: number; protocolOverride: ProtocolOverride }>({
+    deviceId: "", alias: "", name: "", zlmNodeId: 0, protocolOverride: "auto"
 });
 const editingDevice = ref(false);
 const editingDeviceId = ref("");
+const zlmNodes = ref<ZLMNode[]>([]);
+const zlmNodesLoading = ref(false);
+const zlmNodesError = ref("");
+const zlmNodeOptions = computed(() => {
+    const options = [
+        { value: 0, label: "自动调度", disabled: false },
+        ...zlmNodes.value.map(mediaNode => ({
+            value: mediaNode.id,
+            label: `${mediaNode.name} · ${mediaNode.host}:${mediaNode.apiPort} · ${{ active: "可用", maintenance: "维护中", offline: "离线" }[mediaNode.state]}`,
+            disabled: mediaNode.state !== "active" && mediaNode.id !== editDeviceForm.value.zlmNodeId
+        }))
+    ];
+    if (editDeviceForm.value.zlmNodeId > 0 && !zlmNodes.value.some(mediaNode => mediaNode.id === editDeviceForm.value.zlmNodeId)) {
+        options.push({ value: editDeviceForm.value.zlmNodeId, label: `节点 #${editDeviceForm.value.zlmNodeId} · 已删除或无权限`, disabled: true });
+    }
+    return options;
+});
 let originalProtocolOverride: ProtocolOverride = "auto";
+let originalZLMNodeID = 0;
 const editChannelVisible = ref(false);
 const editChannelForm = ref({ channelId: "", deviceId: "", alias: "", name: "", manufacturer: "", model: "", ptzType: 0, streamTransport: "UDP", onDemandLive: true });
 const editingChannel = ref(false);
@@ -469,7 +488,7 @@ function clearDirectorySelection(refresh = true) {
     selectedRowKeys.value = [];
     if (refresh) refreshMainData();
 }
-function onDirectoryTreeLoaded(view: "national" | "custom", tree: DirectoryNode[]) {
+function onDirectoryTreeLoaded(view: "national" | "administrative" | "business" | "custom", tree: DirectoryNode[]) {
     if (view === "custom") customTree.value = tree;
     const selectedKey = directoryState.value.selectedKey[view];
     if (selectedKey) {
@@ -1255,17 +1274,32 @@ async function handleCreateDevice() {
 
 function openEditDeviceModal(record: DeviceVO) {
     originalProtocolOverride = normalizeProtocolOverride(record.protocolOverride);
+    originalZLMNodeID = record.zlmNodeId || 0;
     editDeviceForm.value = {
         deviceId: record.deviceId,
         alias: record.alias || "",
         name: record.name || "",
-        manufacturer: record.manufacturer || "",
-        model: record.model || "",
-        firmware: record.firmware || "",
+        zlmNodeId: record.zlmNodeId || 0,
         protocolOverride: originalProtocolOverride
     };
     editingDeviceId.value = record.deviceId;
     editDeviceVisible.value = true;
+    loadZLMNodeOptions();
+}
+
+async function loadZLMNodeOptions() {
+    zlmNodesLoading.value = true;
+    zlmNodesError.value = "";
+    try {
+        const res = await listZLMNodes();
+        if (res.code !== 0) throw new Error(res.message || "ZLM 节点加载失败");
+        zlmNodes.value = res.data?.list || [];
+    } catch (error: any) {
+        zlmNodes.value = [];
+        zlmNodesError.value = error?.message || "ZLM 节点加载失败";
+    } finally {
+        zlmNodesLoading.value = false;
+    }
 }
 
 function openEditChannelModal(record: ChannelVO) {
@@ -1329,9 +1363,11 @@ async function handleEditChannel() {
 
 function cancelEditDevice() {
     editDeviceVisible.value = false;
-    editDeviceForm.value = { deviceId: "", alias: "", name: "", manufacturer: "", model: "", firmware: "", protocolOverride: "auto" };
+    editDeviceForm.value = { deviceId: "", alias: "", name: "", zlmNodeId: 0, protocolOverride: "auto" };
     editingDeviceId.value = "";
+    zlmNodesError.value = "";
     originalProtocolOverride = "auto";
+    originalZLMNodeID = 0;
 }
 
 function rollbackProtocolOverride() {
@@ -1346,12 +1382,13 @@ async function handleEditDevice() {
     if (!editingDeviceId.value) return;
     editingDevice.value = true;
     try {
+        const zlmNodeUpdate = editDeviceForm.value.zlmNodeId === originalZLMNodeID
+            ? {}
+            : { zlmNodeId: editDeviceForm.value.zlmNodeId };
         const res = await updateDevice(editingDeviceId.value, {
             alias: editDeviceForm.value.alias,
-            manufacturer: editDeviceForm.value.manufacturer,
-            model: editDeviceForm.value.model,
-            firmware: editDeviceForm.value.firmware,
-            protocolOverride: editDeviceForm.value.protocolOverride
+            protocolOverride: editDeviceForm.value.protocolOverride,
+            ...zlmNodeUpdate
         });
         if (res.code === 0) {
             originalProtocolOverride = protocolOverrideAfterSave(
@@ -1359,6 +1396,7 @@ async function handleEditDevice() {
                 editDeviceForm.value.protocolOverride,
                 true,
             );
+            originalZLMNodeID = editDeviceForm.value.zlmNodeId;
             Message.success("设备信息已更新");
             editDeviceVisible.value = false;
             refreshMainData();
@@ -1368,9 +1406,7 @@ async function handleEditDevice() {
                 deviceDetail.value = {
                     ...deviceDetail.value,
                     alias: editDeviceForm.value.alias,
-                    manufacturer: editDeviceForm.value.manufacturer,
-                    model: editDeviceForm.value.model,
-                    firmware: editDeviceForm.value.firmware
+                    zlmNodeId: editDeviceForm.value.zlmNodeId
                 };
             }
         } else {
@@ -2784,26 +2820,20 @@ onUnmounted(() => {
                             <span class="form-hint">优先展示,不会被设备重新注册覆盖</span>
                         </template>
                     </a-form-item>
-                    <a-form-item field="manufacturer" label="厂商">
-                        <a-input
-                            v-model="editDeviceForm.manufacturer"
-                            placeholder="选填"
-                            allow-clear
+                    <a-form-item field="zlmNodeId" label="ZLM 节点">
+                        <a-select
+                            v-model="editDeviceForm.zlmNodeId"
+                            :options="zlmNodeOptions"
+                            :loading="zlmNodesLoading"
+                            placeholder="请选择媒体节点"
+                            allow-search
                         />
-                    </a-form-item>
-                    <a-form-item field="model" label="型号">
-                        <a-input
-                            v-model="editDeviceForm.model"
-                            placeholder="选填"
-                            allow-clear
-                        />
-                    </a-form-item>
-                    <a-form-item field="firmware" label="固件版本">
-                        <a-input
-                            v-model="editDeviceForm.firmware"
-                            placeholder="选填"
-                            allow-clear
-                        />
+                        <template #extra>
+                            <span v-if="zlmNodesError" class="form-hint form-hint-error" role="alert">
+                                {{ zlmNodesError }}，<a-link @click="loadZLMNodeOptions">重新加载</a-link>
+                            </span>
+                            <span v-else class="form-hint">自动调度由集群选择节点；指定节点不可用时自动回退集群调度，仅影响新开的媒体流。</span>
+                        </template>
                     </a-form-item>
                     <a-form-item field="protocolOverride" label="协议版本覆盖">
                         <a-select v-model="editDeviceForm.protocolOverride" :options="[
@@ -4601,6 +4631,9 @@ onUnmounted(() => {
     font-size: 12px;
     color: var(--uvp-text-tertiary);
     line-height: 1.4;
+}
+.form-hint-error {
+    color: var(--uvp-danger);
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 1080px) {

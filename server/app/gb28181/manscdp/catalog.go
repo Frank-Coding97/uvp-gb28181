@@ -31,18 +31,23 @@ func BuildCatalogQueryWithProfile(profile protocol.Profile, deviceID string, sn 
 
 // CatalogItem Catalog 应答里的单个通道项
 type CatalogItem struct {
-	DeviceID     string  `xml:"DeviceID"`
-	Name         string  `xml:"Name"`
-	Manufacturer string  `xml:"Manufacturer"`
-	Model        string  `xml:"Model"`
-	Owner        string  `xml:"Owner"`
-	CivilCode    string  `xml:"CivilCode"`
-	ParentID     string  `xml:"ParentID"`
-	PTZType      int     `xml:"PTZType"`
-	Longitude    float64 `xml:"Longitude"`
-	Latitude     float64 `xml:"Latitude"`
-	Status       string  `xml:"Status"` // ON/OFF
-	Event        string  `xml:"Event"`  // ADD/UPDATE/DEL in Catalog NOTIFY
+	DeviceID        string  `xml:"DeviceID"`
+	Name            string  `xml:"Name"`
+	Manufacturer    string  `xml:"Manufacturer"`
+	Model           string  `xml:"Model"`
+	Owner           string  `xml:"Owner"`
+	CivilCode       string  `xml:"CivilCode"`
+	ParentID        string  `xml:"ParentID"`
+	BusinessGroupID string  `xml:"BusinessGroupID"`
+	Address         string  `xml:"Address"`
+	Parental        int     `xml:"Parental"`
+	RegisterWay     int     `xml:"RegisterWay"`
+	Secrecy         int     `xml:"Secrecy"`
+	PTZType         int     `xml:"PTZType"`
+	Longitude       float64 `xml:"Longitude"`
+	Latitude        float64 `xml:"Latitude"`
+	Status          string  `xml:"Status"` // ON/OFF
+	Event           string  `xml:"Event"`  // ADD/UPDATE/DEL in Catalog NOTIFY
 }
 
 // CatalogResponse Catalog 应答(设备→平台,可能多条分包)

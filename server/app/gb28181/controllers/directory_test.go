@@ -28,7 +28,7 @@ func TestDirectoryControllerViews(t *testing.T) {
 	ctrl := NewDirectoryController(func() *gorm.DB { return db })
 	r := gin.New()
 	r.GET("/tree", ctrl.Tree)
-	for _, view := range []string{"national", "custom"} {
+	for _, view := range []string{"national", "administrative", "business", "custom"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/tree?view="+view, nil))
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())

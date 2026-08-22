@@ -202,16 +202,21 @@ func HandleCatalogResponse(ctx context.Context, body []byte) {
 // manscdpToCatalogItem 把 manscdp DTO 转 catalog DTO(无依赖,易测)
 func manscdpToCatalogItem(it manscdp.CatalogItem) catalog.CatalogItem {
 	return catalog.CatalogItem{
-		DeviceID:     it.DeviceID,
-		Name:         it.Name,
-		Manufacturer: it.Manufacturer,
-		Model:        it.Model,
-		Owner:        it.Owner,
-		CivilCode:    it.CivilCode,
-		ParentID:     it.ParentID,
-		PTZType:      it.PTZType,
-		Longitude:    it.Longitude,
-		Latitude:     it.Latitude,
-		StatusOn:     it.IsOnline(),
+		DeviceID:        it.DeviceID,
+		Name:            it.Name,
+		Manufacturer:    it.Manufacturer,
+		Model:           it.Model,
+		Owner:           it.Owner,
+		CivilCode:       it.CivilCode,
+		ParentID:        it.ParentID,
+		BusinessGroupID: it.BusinessGroupID,
+		Parental:        it.Parental,
+		PTZType:         it.PTZType,
+		Longitude:       it.Longitude,
+		Latitude:        it.Latitude,
+		StatusOn:        it.IsOnline(),
+		Address:         it.Address,
+		Secrecy:         int8(it.Secrecy),
+		RegisterWay:     int8(it.RegisterWay),
 	}
 }

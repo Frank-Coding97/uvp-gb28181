@@ -39,8 +39,14 @@ func TestParseCatalogResponse(t *testing.T) {
 <DeviceID>34020000001320000019</DeviceID>
 <Name>Camera1</Name>
 <Manufacturer>Hikvision</Manufacturer>
-<Status>ON</Status>
-<PTZType>1</PTZType>
+		<Status>ON</Status>
+		<Parental>0</Parental>
+		<ParentID>34020000001320000018</ParentID>
+		<BusinessGroupID>34020000002150000001</BusinessGroupID>
+		<Address>FrontDoor</Address>
+		<RegisterWay>1</RegisterWay>
+		<Secrecy>0</Secrecy>
+		<PTZType>1</PTZType>
 </Item>
 <Item>
 <DeviceID>34020000001320000020</DeviceID>
@@ -62,6 +68,9 @@ func TestParseCatalogResponse(t *testing.T) {
 	it := resp.DeviceList.Items[0]
 	if it.DeviceID != "34020000001320000019" || it.Name != "Camera1" || !it.IsOnline() {
 		t.Errorf("通道1字段不符: %+v", it)
+	}
+	if it.BusinessGroupID != "34020000002150000001" || it.ParentID == "" || it.Address != "FrontDoor" || it.Parental != 0 {
+		t.Errorf("2022 目录关系字段不符: %+v", it)
 	}
 	if resp.DeviceList.Items[1].IsOnline() {
 		t.Error("通道2应离线(OFF)")

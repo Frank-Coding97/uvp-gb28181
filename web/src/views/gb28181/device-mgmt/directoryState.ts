@@ -1,6 +1,6 @@
 import type { DirectoryNode } from "./api";
 
-export type DirectoryView = "national" | "custom";
+export type DirectoryView = "national" | "administrative" | "business" | "custom";
 
 export interface DirectoryState {
     view: DirectoryView;
@@ -13,8 +13,8 @@ export interface DirectoryState {
 export function createDirectoryState(): DirectoryState {
     return {
         view: "national",
-        selectedKey: { national: null, custom: null },
-        expandedKeys: { national: [], custom: [] },
+        selectedKey: { national: null, administrative: null, business: null, custom: null },
+        expandedKeys: { national: [], administrative: [], business: [], custom: [] },
         treeKeyword: "",
         listReset: { page: 1, clearSelection: true }
     };

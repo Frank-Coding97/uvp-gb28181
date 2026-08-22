@@ -12,6 +12,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	zlmrepo "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/repo"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
@@ -100,6 +101,7 @@ func (dc *DeviceController) Update(c *gin.Context) {
 		Model            *string `json:"model"`
 		Firmware         *string `json:"firmware"`
 		ProtocolOverride *string `json:"protocolOverride"`
+		ZLMNodeID        *int64  `json:"zlmNodeId"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dc.FailAndAbort(c, "请求体不合法", err)
@@ -156,6 +158,29 @@ func (dc *DeviceController) Update(c *gin.Context) {
 		updates["effective_version"] = string(resolution.Profile.Version)
 		updates["effective_version_source"] = string(resolution.Source)
 		updates["effective_version_at"] = &now
+	}
+	if body.ZLMNodeID != nil {
+		if *body.ZLMNodeID < 0 {
+			app.Response.Fail(c, "ZLM 节点 ID 不合法", http.StatusUnprocessableEntity)
+			return
+		}
+		if *body.ZLMNodeID > 0 {
+			var mediaNode zlmrepo.MetaNode
+			result := app.DB().WithContext(c).Where("id = ?", *body.ZLMNodeID).Limit(1).Find(&mediaNode)
+			if result.Error != nil {
+				dc.FailAndAbort(c, "查询 ZLM 节点失败", result.Error)
+				return
+			}
+			if result.RowsAffected == 0 {
+				app.Response.Fail(c, "ZLM 节点不存在", http.StatusUnprocessableEntity)
+				return
+			}
+			if mediaNode.State != "active" && device.ZLMNodeID != *body.ZLMNodeID {
+				app.Response.Fail(c, "ZLM 节点当前不可用", http.StatusUnprocessableEntity)
+				return
+			}
+		}
+		updates["zlm_node_id"] = *body.ZLMNodeID
 	}
 
 	if len(updates) == 0 {
