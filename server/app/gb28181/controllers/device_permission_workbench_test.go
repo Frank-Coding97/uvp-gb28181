@@ -24,6 +24,8 @@ func registerPermissionWorkbenchRoutes(r *gin.Engine, db *gorm.DB) {
 	controller.SetDB(func() *gorm.DB { return db })
 	r.GET("/api/gb28181/device-mgmt/permission-workbench/summary", controller.PermissionWorkbenchSummary)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/devices/resolve", controller.ResolvePermissionWorkbenchDevices)
+	r.POST("/api/gb28181/device-mgmt/permission-workbench/grants/query", controller.QueryPermissionWorkbenchGrants)
+	r.GET("/api/gb28181/device-mgmt/permission-workbench/grant-targets", controller.SearchPermissionWorkbenchGrantTargets)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/assignments", controller.ApplyPermissionWorkbenchAssignments)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/assignments/departments", controller.ApplyPermissionWorkbenchDepartmentAssignment)
 }
@@ -159,4 +161,57 @@ func TestPermissionWorkbench_DepartmentAssignmentRejectsChangedCount(t *testing.
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	require.Equal(t, http.StatusConflict, w.Code)
+}
+
+func TestPermissionWorkbench_GrantQueryEndpoint(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	registerPermissionWorkbenchRoutes(r, db)
+	active := int8(1)
+	department := basemodels.SysDepartment{BaseModel: basemodels.BaseModel{ID: 10}, Name: "安保部", Status: &active}
+	require.NoError(t, db.Create(&department).Error)
+	device := gbmodels.GbDevice{DeviceID: "grant-query", Name: "共享设备", OwnerDeptID: 10}
+	require.NoError(t, db.Create(&device).Error)
+	require.NoError(t, db.Create(&gbmodels.GbDeviceGrant{DeviceID: device.ID, TargetType: gbmodels.GrantTargetTypeDept, TargetID: department.ID}).Error)
+	body, err := json.Marshal(map[string]any{"deviceIds": []uint{device.ID, 999}})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/gb28181/device-mgmt/permission-workbench/grants/query", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	data := unmarshal(t, w)["data"].(map[string]any)
+	devices := data["devices"].([]any)
+	require.Len(t, devices, 1)
+	require.NotEmpty(t, devices[0].(map[string]any)["revision"])
+	grants := devices[0].(map[string]any)["grants"].([]any)
+	require.Equal(t, "安保部", grants[0].(map[string]any)["targetName"])
+	require.Equal(t, []any{float64(999)}, data["unavailableIds"])
+}
+
+func TestPermissionWorkbench_GrantTargetsUseTrustedScope(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t, withClaims(100))
+	registerPermissionWorkbenchRoutes(r, db)
+	active := int8(1)
+	require.NoError(t, db.Create(&[]basemodels.SysDepartment{
+		{BaseModel: basemodels.BaseModel{ID: 10}, Name: "可见部门", Status: &active},
+		{BaseModel: basemodels.BaseModel{ID: 20}, Name: "越权部门", Status: &active},
+	}).Error)
+	require.NoError(t, db.Create(&[]basemodels.User{
+		{BaseModel: basemodels.BaseModel{ID: 100}, Username: "operator", Password: "x", Status: 1, DeptID: 10},
+		{BaseModel: basemodels.BaseModel{ID: 101}, Username: "guard-inside", Password: "x", Status: 1, DeptID: 10},
+		{BaseModel: basemodels.BaseModel{ID: 102}, Username: "guard-outside", Password: "x", Status: 1, DeptID: 20},
+	}).Error)
+	role := basemodels.SysRole{Name: "本部门", Status: 1, DataScope: 3}
+	require.NoError(t, db.Create(&role).Error)
+	require.NoError(t, db.Create(&basemodels.SysUserRole{UserID: 100, RoleID: role.ID}).Error)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/gb28181/device-mgmt/permission-workbench/grant-targets?type=user&q=guard&page=1&pageSize=50", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	data := unmarshal(t, w)["data"].(map[string]any)
+	require.EqualValues(t, 1, data["total"])
+	list := data["list"].([]any)
+	require.Len(t, list, 1)
+	require.Equal(t, "guard-inside", list[0].(map[string]any)["name"])
 }

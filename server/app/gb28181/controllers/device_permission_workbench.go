@@ -1,13 +1,16 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
@@ -45,6 +48,61 @@ func (dc *DeviceMgmtController) ResolvePermissionWorkbenchDevices(c *gin.Context
 	result, err := assign.NewQueryService(db, visibleScope(c)).Resolve(c, body.DeviceIDs)
 	if err != nil {
 		dc.FailAndAbort(c, "解析设备失败", err)
+		return
+	}
+	dc.Success(c, result)
+}
+
+func (dc *DeviceMgmtController) QueryPermissionWorkbenchGrants(c *gin.Context) {
+	var body struct {
+		DeviceIDs []uint `json:"deviceIds"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.DeviceIDs) == 0 {
+		dc.FailAndAbort(c, "deviceIds 必填", err)
+		return
+	}
+	db := dc.db()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	result, err := grant.NewService(db, visibleScope(c)).Query(c, body.DeviceIDs)
+	if err != nil {
+		dc.Fail(c, "查询共享授权失败", err, http.StatusInternalServerError)
+		return
+	}
+	dc.Success(c, result)
+}
+
+func (dc *DeviceMgmtController) SearchPermissionWorkbenchGrantTargets(c *gin.Context) {
+	targetType := c.Query("type")
+	page, pageErr := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, pageSizeErr := strconv.Atoi(c.DefaultQuery("pageSize", "50"))
+	if pageErr != nil || pageSizeErr != nil || page < 1 || pageSize < 1 || pageSize > 100 {
+		dc.Fail(c, "page 与 pageSize 参数不合法", nil, http.StatusBadRequest)
+		return
+	}
+	db := dc.db()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	access, err := datascope.ResolveOwnerDeptAccessByUserID(c, db, dc.GetCurrentUserID(c))
+	if err != nil {
+		if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
+			dc.Fail(c, "无可授权的数据范围", err, http.StatusForbidden)
+			return
+		}
+		dc.Fail(c, "解析可授权范围失败", err, http.StatusInternalServerError)
+		return
+	}
+	result, err := grant.NewService(db, nil).SearchTargets(c, targetType, c.Query("q"), page, pageSize, access)
+	if err != nil {
+		if errors.Is(err, grant.ErrTargetTypeInvalid) {
+			dc.Fail(c, err.Error(), err, http.StatusBadRequest)
+			return
+		}
+		dc.Fail(c, "查询共享目标失败", err, http.StatusInternalServerError)
 		return
 	}
 	dc.Success(c, result)
