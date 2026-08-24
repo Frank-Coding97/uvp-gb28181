@@ -93,6 +93,17 @@ func TestStartSIPRuntime_TracksFailuresAndAsyncListenError(t *testing.T) {
 	})
 }
 
+func TestSnapshotStreamURLUsesZLMLoopback(t *testing.T) {
+	require.Equal(t,
+		"rtsp://127.0.0.1:10554/rtp/stream-1?play_token=token.value",
+		snapshotStreamURL(10554, "stream-1", "token.value"),
+	)
+	require.Equal(t,
+		"rtsp://127.0.0.1:10554/rtp/stream-1",
+		snapshotStreamURL(10554, "stream-1", ""),
+	)
+}
+
 func TestPTZServiceReloadStopsSchedulerBeforeSIP(t *testing.T) {
 	events := []string{}
 	previousServer, previousScheduler, previousService := sipServer, ptzScheduler, ptzService

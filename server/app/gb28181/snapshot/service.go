@@ -22,16 +22,15 @@ type GetClientFunc func(nodeID string) (ZLMClient, error)
 //
 // 由 bootstrap 装配时注入:内部一般走 rtsp(比 http-flv 更稳),端口从 ServerConfigCache
 // 按 nodeID 拉 ZLM /index/api/getServerConfig 拿到 rtsp.port 后构造。
-type BuildStreamURLFunc func(ctx context.Context, nodeID, streamID string) (string, error)
+type BuildStreamURLFunc func(ctx context.Context, nodeID, streamID, playToken string) (string, error)
 
 // Config 装配参数
 type Config struct {
 	UploadRoot     string             // upload 根目录(如 ./resource/public/uploads)
 	URLPrefix      string             // 前端可访问 URL 前缀(如 /uploads)
-	DedupTTL       time.Duration      // 30s
 	DelayBefore    time.Duration      // 2s,给 ZLM 收流稳画面用
 	ZLMTimeout     int                // ZLM 抓帧超时秒(推荐 5)
-	ZLMExpire      int                // ZLM 缓存快照秒(推荐 30,跟 DedupTTL 对齐)
+	ZLMExpire      int                // ZLM 缓存快照秒(默认 1,避免点播复用历史帧)
 	GetClient      GetClientFunc      // 按 nodeID 拿 ZLM client
 	BuildStreamURL BuildStreamURLFunc // 按 nodeID + streamID 拼 ZLM 内部拉流 URL
 	Repo           Repo
@@ -40,16 +39,12 @@ type Config struct {
 
 // Service 通道快照服务:播放触发,fire-and-forget 抓帧落盘 + 更新通道行
 type Service struct {
-	cfg   Config
-	dedup *dedupCache
-	log   *zap.Logger
+	cfg Config
+	log *zap.Logger
 }
 
 // New 构造 Service。cfg 各字段为 0/空时给合理默认。
 func New(cfg Config) *Service {
-	if cfg.DedupTTL == 0 {
-		cfg.DedupTTL = 30 * time.Second
-	}
 	if cfg.DelayBefore == 0 {
 		cfg.DelayBefore = 2 * time.Second
 	}
@@ -57,7 +52,7 @@ func New(cfg Config) *Service {
 		cfg.ZLMTimeout = 5
 	}
 	if cfg.ZLMExpire == 0 {
-		cfg.ZLMExpire = 30
+		cfg.ZLMExpire = 1
 	}
 	if cfg.URLPrefix == "" {
 		cfg.URLPrefix = "/uploads"
@@ -67,9 +62,8 @@ func New(cfg Config) *Service {
 		log = zap.NewNop()
 	}
 	return &Service{
-		cfg:   cfg,
-		dedup: newDedup(cfg.DedupTTL),
-		log:   log,
+		cfg: cfg,
+		log: log,
 	}
 }
 
@@ -79,14 +73,8 @@ func New(cfg Config) *Service {
 // nodeID:   多节点场景传 pickedNode.ID.string(),单节点传空串
 // streamID: ZLM 内部 stream 标识(通常 = ssrc)
 // s 为 nil 时安全跳过(方便 play.Service 未注入 snapshot 时零改动)。
-func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string) {
+func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID, playToken string) {
 	if s == nil {
-		return
-	}
-	key := deviceID + ":" + channelID
-	if !s.dedup.CheckAndMark(key) {
-		s.log.Debug("通道快照 30s 内已抓过,复用",
-			zap.String("device", deviceID), zap.String("channel", channelID))
 		return
 	}
 	go func() {
@@ -97,7 +85,7 @@ func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID,
 					zap.String("device", deviceID), zap.String("channel", channelID))
 			}
 		}()
-		if err := s.doCapture(nodeID, streamID, deviceID, channelID); err != nil {
+		if err := s.doCapture(nodeID, streamID, deviceID, channelID, playToken); err != nil {
 			s.log.Warn("通道快照抓取失败",
 				zap.Error(err),
 				zap.String("device", deviceID), zap.String("channel", channelID))
@@ -106,7 +94,7 @@ func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID,
 }
 
 // doCapture 独立于 ctx 跑(播放请求 ctx 会 cancel),内部走独立 context.Background
-func (s *Service) doCapture(nodeID, streamID, deviceID, channelID string) error {
+func (s *Service) doCapture(nodeID, streamID, deviceID, channelID, playToken string) error {
 	// 延迟 2s,给 ZLM 收流稳画面
 	time.Sleep(s.cfg.DelayBefore)
 
@@ -129,7 +117,7 @@ func (s *Service) doCapture(nodeID, streamID, deviceID, channelID string) error 
 		time.Duration(s.cfg.ZLMTimeout+2)*time.Second)
 	defer cancel()
 
-	streamURL, err := s.cfg.BuildStreamURL(ctx, nodeID, streamID)
+	streamURL, err := s.cfg.BuildStreamURL(ctx, nodeID, streamID, playToken)
 	if err != nil {
 		return fmt.Errorf("构造流 URL 失败: %w", err)
 	}

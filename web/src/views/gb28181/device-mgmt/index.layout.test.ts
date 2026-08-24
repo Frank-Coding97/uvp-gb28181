@@ -93,6 +93,15 @@ describe("device management toolbar layout", () => {
         expect(source).not.toContain(".channel-snapshot.offline .channel-snapshot-image");
     });
 
+    it("refreshes overwritten snapshot files when snapshotAt changes", () => {
+        expect(source).toContain("function snapshotImageUrl");
+        expect(source).toContain("snapshotAt");
+        expect(source).toContain(':src="snapshotImageUrl(record)"');
+        expect(source).toContain(':src="snapshotImageUrl(item)"');
+        expect(source).not.toContain(':src="record.snapshotUrl"');
+        expect(source).not.toContain(':src="item.snapshotUrl"');
+    });
+
     it("does not expose SIP trace launch actions from device management", () => {
         expect(source).not.toContain("启动 SIP 诊断窗口");
         expect(source).not.toContain("startDeviceTraceCapture");

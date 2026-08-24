@@ -173,7 +173,7 @@ type Service struct {
 //
 // 由 snapshot.Service 实现;为 nil 时 Start 静默跳过,主链路零影响。
 type SnapshotService interface {
-	FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string)
+	FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID, playToken string)
 }
 
 type PlaybackRecordingLifecycle interface {
@@ -737,21 +737,58 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 		})
 	}
 
-	// 8. 通道快照(fire-and-forget,不阻塞返回,不影响主链路)
-	if s.snapshotSvc != nil {
-		nodeIDStr := ""
-		if pickedNodeID != 0 {
-			nodeIDStr = fmt.Sprintf("%d", pickedNodeID)
-		}
-		s.snapshotSvc.FireAfterPlay(context.Background(), nodeIDStr, streamID, deviceID, channelID)
-	}
-
-	// 9. 播放地址已在任何媒体副作用前完成构建和授权。
+	// 8. 播放地址已在任何媒体副作用前完成构建和授权。
 	releaseSSRC = false
 	if authorizationBound {
 		startCompleted = true
 	}
 	return result, nil
+}
+
+func (s *Service) fireSnapshot(result *Result, deviceID, channelID string) {
+	if s.snapshotSvc == nil || result == nil || result.StreamID == "" {
+		return
+	}
+	nodeID := int64(0)
+	if result.Node != nil {
+		nodeID = result.Node.ID
+	}
+	nodeIDStr := ""
+	if nodeID != 0 {
+		nodeIDStr = fmt.Sprintf("%d", nodeID)
+	}
+	playToken := ""
+	authSettings := gbconfig.CurrentPlayAuthSettings()
+	if authSettings.Enabled {
+		if s.tokenIssuer == nil || s.registry == nil || result.Node == nil || result.Generation == 0 {
+			app.ZapLog.Warn("通道快照内部播放令牌无法签发",
+				zap.String("deviceId", deviceID), zap.String("channelId", channelID),
+				zap.String("streamId", result.StreamID))
+			return
+		}
+		mediaNode, ok := s.registry.Get(result.Node.ID)
+		if !ok || mediaNode == nil || mediaNode.MediaServerUUID == "" {
+			app.ZapLog.Warn("通道快照无法解析媒体节点",
+				zap.String("deviceId", deviceID), zap.String("channelId", channelID),
+				zap.Int64("nodeId", result.Node.ID))
+			return
+		}
+		grant, err := s.tokenIssuer.IssueDirect(playauth.Binding{
+			DeviceID: deviceID, ChannelID: channelID, App: zlmApp,
+			Stream: result.StreamID, MediaServerID: mediaNode.MediaServerUUID,
+			MediaGeneration: result.Generation,
+			BindClientIP:    authSettings.BindClientIP,
+			ClientIP:        "127.0.0.1",
+		})
+		if err != nil {
+			app.ZapLog.Warn("通道快照内部播放令牌签发失败",
+				zap.String("deviceId", deviceID), zap.String("channelId", channelID),
+				zap.String("streamId", result.StreamID), zap.Error(err))
+			return
+		}
+		playToken = grant.Token
+	}
+	s.snapshotSvc.FireAfterPlay(context.Background(), nodeIDStr, result.StreamID, deviceID, channelID, playToken)
 }
 
 func classifyPlayStuck(outcome uac.InviteOutcome, playErr error, mediaReady, totalExpired bool) (diagnosis.Code, bool) {

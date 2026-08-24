@@ -382,6 +382,14 @@ function relTime(value?: string | null) {
 function displayName(item: { alias?: string; name?: string; channelId?: string; deviceId?: string }) {
     return item.alias?.trim() || item.name?.trim() || item.channelId || item.deviceId || "未命名";
 }
+
+function snapshotImageUrl(channel: Pick<ChannelVO, "snapshotUrl" | "snapshotAt">) {
+    const url = channel.snapshotUrl?.trim() ?? "";
+    const snapshotAt = channel.snapshotAt?.trim();
+    if (!url || !snapshotAt) return url;
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}snapshotAt=${encodeURIComponent(snapshotAt)}`;
+}
 function deviceNameText(item: { alias?: string | null; name?: string | null }) {
     return item.alias?.trim() || item.name?.trim() || "-";
 }
@@ -1874,7 +1882,7 @@ onUnmounted(() => {
                                     <template #cell="{ record }">
                                         <a-image
                                             v-if="record.snapshotUrl"
-                                            :src="record.snapshotUrl"
+                                            :src="snapshotImageUrl(record)"
                                             :width="100"
                                             :height="60"
                                             fit="cover"
@@ -2226,7 +2234,7 @@ onUnmounted(() => {
                             <div class="channel-snapshot" :class="{ offline: item.status !== 1 }">
                                 <a-image
                                     v-if="item.snapshotUrl"
-                                    :src="item.snapshotUrl"
+                                    :src="snapshotImageUrl(item)"
                                     fit="cover"
                                     :preview="true"
                                     class="channel-snapshot-image"

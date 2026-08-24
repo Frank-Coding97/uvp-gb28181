@@ -695,16 +695,17 @@ type fakeSnapshotSvc struct {
 	lastArgs atomic.Value // snapshotArgs
 }
 type snapshotArgs struct {
-	nodeID, streamID, deviceID, channelID string
+	nodeID, streamID, deviceID, channelID, playToken string
 }
 
-func (f *fakeSnapshotSvc) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string) {
+func (f *fakeSnapshotSvc) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID, playToken string) {
 	f.called.Add(1)
-	f.lastArgs.Store(snapshotArgs{nodeID, streamID, deviceID, channelID})
+	f.lastArgs.Store(snapshotArgs{nodeID, streamID, deviceID, channelID, playToken})
 }
 
 // TestStartTriggersSnapshotAfterWaitReady 通道快照 T4:play 成功后应异步调 FireAfterPlay
 func TestStartTriggersSnapshotAfterWaitReady(t *testing.T) {
+	withPlayAuthorization(t, false, false)
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
 	s, n, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
@@ -733,6 +734,9 @@ func TestStartTriggersSnapshotAfterWaitReady(t *testing.T) {
 	// 单节点路径下 nodeID 为空字符串
 	if got.nodeID != "" {
 		t.Errorf("单节点路径 nodeID 应为空,实际 %q", got.nodeID)
+	}
+	if got.playToken != "" {
+		t.Errorf("播放鉴权关闭时快照不应携带令牌,实际 %q", got.playToken)
 	}
 }
 
@@ -779,6 +783,8 @@ func TestStartReuseExistingStream(t *testing.T) {
 	ch := aChannel()
 	ch.StreamID = "existing-stream-id" // 通道已有 streamID
 	s, _, _ := newSvc(t, z, inv, onlineDevice(), ch)
+	snapshot := &fakeSnapshotSvc{}
+	s.snapshotSvc = snapshot
 
 	// 第一次调用应复用,不应发 INVITE
 	res, err := s.Start(context.Background(), "34020000001320000002", "12345678911116666661")
@@ -800,6 +806,9 @@ func TestStartReuseExistingStream(t *testing.T) {
 	// UpdateStream 不应被调用(因为没发新 INVITE)
 	if ch.StreamID != "existing-stream-id" {
 		t.Errorf("复用流不应修改通道 streamID,got %q", ch.StreamID)
+	}
+	if snapshot.called.Load() != 1 {
+		t.Errorf("复用流点播成功也应刷新快照,实际调用 %d 次", snapshot.called.Load())
 	}
 }
 

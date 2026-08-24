@@ -317,20 +317,36 @@ func TestGetSnap_Success(t *testing.T) {
 		if q.Get("url") != "rtsp://host/rtp/test-stream" {
 			t.Errorf("url 未透传: %s", q.Get("url"))
 		}
-		if q.Get("timeout_sec") != "5" || q.Get("expire_sec") != "30" {
+		if q.Get("timeout_sec") != "5" || q.Get("expire_sec") != "1" {
 			t.Errorf("timeout/expire 未透传: t=%s e=%s", q.Get("timeout_sec"), q.Get("expire_sec"))
+		}
+		if _, ok := q["async"]; ok {
+			t.Errorf("外部 FFmpeg 抓帧不应发送 async 参数,实际 %q", q.Get("async"))
 		}
 		w.Header().Set("Content-Type", "image/jpeg")
 		_, _ = w.Write(fakeJPEG)
 	})
 	defer srv.Close()
 
-	got, err := c.GetSnap(context.Background(), "rtsp://host/rtp/test-stream", 5, 30)
+	got, err := c.GetSnap(context.Background(), "rtsp://host/rtp/test-stream", 5, 1)
 	if err != nil {
 		t.Fatalf("GetSnap 报错: %v", err)
 	}
 	if len(got) != len(fakeJPEG) || got[0] != 0xFF || got[1] != 0xD8 || got[2] != 0xFF {
 		t.Errorf("期望 JPEG SOI 头,实际 %x", got)
+	}
+}
+
+func TestGetSnap_RejectsPNGPlaceholder(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write([]byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'})
+	})
+	defer srv.Close()
+
+	_, err := c.GetSnap(context.Background(), "rtsp://host/rtp/test-stream", 5, 1)
+	if err == nil {
+		t.Fatal("ZLM PNG 占位图不应被当作成功快照")
 	}
 }
 

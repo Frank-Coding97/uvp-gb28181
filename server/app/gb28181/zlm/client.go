@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -612,7 +613,7 @@ func (c *Client) GetWorkThreadsLoad(ctx context.Context) (float64, error) {
 //
 // streamURL:  完整流地址,如 http://host:port/app/stream.live.flv 或 rtsp://host:port/app/stream
 // timeoutSec: 单次抓帧的最长等待秒数(ZLM 侧),通常 5 秒
-// expireSec:  ZLM 本地缓存这张快照的秒数,建议跟 dedup TTL 对齐(30 秒)
+// expireSec:  ZLM 本地缓存这张快照的秒数,点播快照使用 1 秒避免复用历史帧
 //
 // 返回 bytes 是完整 JPEG 内容(含 SOI 头 0xFF 0xD8 0xFF)。
 func (c *Client) GetSnap(ctx context.Context, streamURL string, timeoutSec, expireSec int) ([]byte, error) {
@@ -641,28 +642,20 @@ func (c *Client) GetSnap(ctx context.Context, streamURL string, timeoutSec, expi
 		return nil, fmt.Errorf("ZLM getSnap 读取响应失败: %w", err)
 	}
 
-	// 成功时 Content-Type 是 image/jpeg 或 image/png(ZLM 抓帧失败时返回 PNG 占位图);
-	// 失败时是 application/json envelope
+	// 成功时必须是 JPEG。ZLM 抓帧失败时可能返回默认 PNG 占位图，不能把它
+	// 当作通道快照落盘并刷新 snapshot_at。
 	ct := resp.Header.Get("Content-Type")
-	if !isImageContentType(ct) {
+	mediaType, _, mediaTypeErr := mime.ParseMediaType(ct)
+	if mediaTypeErr != nil || !strings.EqualFold(mediaType, "image/jpeg") {
 		// 尝试解析错误 envelope 给一条可读消息
 		var errResp baseResp
 		if json.Unmarshal(body, &errResp) == nil && errResp.Code != 0 {
 			return nil, fmt.Errorf("ZLM getSnap 返回错误: code=%d msg=%s", errResp.Code, errResp.Msg)
 		}
-		return nil, fmt.Errorf("ZLM getSnap 返回非图片内容: content-type=%s body=%.200s", ct, string(body))
+		return nil, fmt.Errorf("ZLM getSnap 未返回 JPEG: content-type=%s body=%.200s", ct, string(body))
 	}
-	if len(body) == 0 {
-		return nil, fmt.Errorf("ZLM getSnap 返回空 body")
+	if len(body) < 3 || body[0] != 0xFF || body[1] != 0xD8 || body[2] != 0xFF {
+		return nil, fmt.Errorf("ZLM getSnap 返回内容不是有效 JPEG")
 	}
 	return body, nil
-}
-
-// isImageContentType 宽松匹配 image/*(ZLM 抓帧失败会返回默认 PNG 占位图,也需要接受)
-func isImageContentType(ct string) bool {
-	const prefix = "image/"
-	if len(ct) < len(prefix) {
-		return false
-	}
-	return ct[:len(prefix)] == prefix
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -1539,7 +1540,7 @@ func buildSnapshotService() *snapshot.Service {
 	}
 
 	// BuildStreamURL:构造 ZLM 内部 rtsp 拉流 URL(比 http-flv 稳,让 FFmpeg 拉自己更可靠)
-	buildStreamURL := func(ctx context.Context, nodeID, streamID string) (string, error) {
+	buildStreamURL := func(ctx context.Context, nodeID, streamID, playToken string) (string, error) {
 		n, err := resolveNode(nodeID)
 		if err != nil {
 			return "", err
@@ -1552,20 +1553,33 @@ func buildSnapshotService() *snapshot.Service {
 			return "", fmt.Errorf("ZLM node %d 未暴露 rtsp.port", n.ID)
 		}
 		// ZLM 单端口收流后 stream 落在 rtp app 下(见 play.Service zlmApp 常量)
-		return fmt.Sprintf("rtsp://%s:%d/rtp/%s", n.Host, cfg.RTSPPort, streamID), nil
+		return snapshotStreamURL(cfg.RTSPPort, streamID, playToken), nil
 	}
 
 	svc := snapshot.New(snapshot.Config{
 		UploadRoot:     serverroot,
 		URLPrefix:      serverrootpath,
-		DedupTTL:       30 * time.Second,
 		DelayBefore:    2 * time.Second,
 		ZLMTimeout:     5,
-		ZLMExpire:      30,
+		ZLMExpire:      1,
 		GetClient:      getClient,
 		BuildStreamURL: buildStreamURL,
 		Repo:           snapshot.NewGormRepo(app.DB()),
 		Logger:         app.ZapLog.Named("gb.snapshot"),
 	})
 	return svc
+}
+
+func snapshotStreamURL(rtspPort int, streamID, playToken string) string {
+	streamURL := url.URL{
+		Scheme: "rtsp",
+		Host:   fmt.Sprintf("127.0.0.1:%d", rtspPort),
+		Path:   "/rtp/" + streamID,
+	}
+	if playToken != "" {
+		query := streamURL.Query()
+		query.Set(playauth.QueryParameter, playToken)
+		streamURL.RawQuery = query.Encode()
+	}
+	return streamURL.String()
 }

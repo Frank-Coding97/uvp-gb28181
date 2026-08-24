@@ -35,6 +35,8 @@ func TestDynamicPlaybackGetsIndependentGenerationBoundAuthorization(t *testing.T
 	z := &mockZLM{port: 40000}
 	inv := &mockInviter{}
 	service, notifier, _ := newFixedSvc(t, z, inv, onlineDevice(), aChannel())
+	snapshot := &fakeSnapshotSvc{}
+	service.snapshotSvc = snapshot
 	inv.onInvite = func(session *uac.Session) {
 		z.online.Store(true)
 		go notifier.Publish(session.StreamID)
@@ -66,6 +68,20 @@ func TestDynamicPlaybackGetsIndependentGenerationBoundAuthorization(t *testing.T
 	binding.ClientIP = "203.0.113.9"
 	if _, err := service.tokenIssuer.(playauth.Verifier).Verify(firstToken, binding); err != nil {
 		t.Fatalf("issued token did not verify: %v", err)
+	}
+	if snapshot.called.Load() != 2 {
+		t.Fatalf("每次成功点播都应触发快照,实际调用 %d 次", snapshot.called.Load())
+	}
+	snapshotCall, _ := snapshot.lastArgs.Load().(snapshotArgs)
+	if snapshotCall.playToken == "" {
+		t.Fatal("播放鉴权开启时快照应携带独立令牌")
+	}
+	if snapshotCall.playToken == secondToken {
+		t.Fatal("快照内部令牌不应复用调用方的播放令牌")
+	}
+	binding.ClientIP = "127.0.0.1"
+	if _, err := service.tokenIssuer.(playauth.Verifier).Verify(snapshotCall.playToken, binding); err != nil {
+		t.Fatalf("快照内部令牌无法按当前媒体实例和回环 IP 验证: %v", err)
 	}
 }
 
