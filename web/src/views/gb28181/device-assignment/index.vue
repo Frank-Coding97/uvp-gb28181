@@ -21,7 +21,7 @@ import {
     listAssignmentDevices,
     type AssignmentFilter
 } from "./api";
-import SharePanel, { type ShareDeviceBrief } from "./components/SharePanel.vue";
+import ShareDrawer, { type ShareDeviceBrief } from "./components/ShareDrawer.vue";
 import AssignmentDrawer, { type AssignmentDeviceBrief } from "./components/AssignmentDrawer.vue";
 import { useCrossPageSelection } from "./useCrossPageSelection";
 
@@ -234,7 +234,8 @@ const openBatchShare = () => {
     shareVisible.value = true;
 };
 
-const handleShareChanged = () => {
+const handleShareSubmitted = () => {
+    void loadSummary();
     void loadDevices();
 };
 
@@ -377,7 +378,7 @@ onMounted(() => {
                             :pagination="tablePagination"
                             row-key="id"
                             :scroll="{ x: 1200, y: '85%' }"
-                            :row-selection="canAssign ? { type: 'checkbox', showCheckedAll: true } : undefined"
+                            :row-selection="canAssign || canShare ? { type: 'checkbox', showCheckedAll: true } : undefined"
                             class="uvp-data-table device-data-table"
                             @page-change="onPageChange"
                             @page-size-change="onPageSizeChange"
@@ -471,8 +472,8 @@ onMounted(() => {
             @submitted="handleAssignmentSubmitted"
         />
 
-        <!-- 共享管理面板 -->
-        <SharePanel v-model:visible="shareVisible" :devices="shareDevices" @changed="handleShareChanged" />
+        <!-- 共享管理抽屉 -->
+        <ShareDrawer v-model:visible="shareVisible" :devices="shareDevices" @submitted="handleShareSubmitted" />
     </div>
 </template>
 
