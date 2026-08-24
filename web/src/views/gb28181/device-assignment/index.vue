@@ -18,7 +18,12 @@ import {
 import { getDivisionAPI, type DivisionItem } from "@/api/department";
 import { useUserStoreHook } from "@/store/modules/user";
 import type { DeviceVO, OnlineStatus } from "@/views/gb28181/device-mgmt/api";
-import { assignDeptDevices, assignDevices, listAssignmentDevices, type AssignmentFilter } from "./api";
+import {
+    applyPermissionWorkbenchAssignments,
+    applyPermissionWorkbenchDepartmentAssignment,
+    listAssignmentDevices,
+    type AssignmentFilter
+} from "./api";
 import SharePanel, { type ShareDeviceBrief } from "./components/SharePanel.vue";
 
 // ---- 权限 ----
@@ -109,7 +114,7 @@ const loadDevices = async () => {
             q: keyword.value || undefined,
             status: statusFilter.value,
             assignment: assignmentFilter.value,
-            deptId: selectedDeptId.value
+            ownerDeptId: selectedDeptId.value
         });
         devices.value = data?.list ?? [];
         total.value = data?.total ?? 0;
@@ -220,12 +225,21 @@ const submitAssign = async () => {
     assignSubmitting.value = true;
     try {
         if (assignMode.value === "dept") {
-            const { data } = await assignDeptDevices(assignSourceDeptId.value!, assignTargetDeptId.value);
-            Message.success(`整部门分配完成:${data?.succeeded ?? 0}/${data?.total ?? 0} 台`);
+            const { data } = await applyPermissionWorkbenchDepartmentAssignment({
+                sourceDeptId: assignSourceDeptId.value!,
+                targetDeptId: assignTargetDeptId.value,
+                includeChildren: false,
+                expectedCount: total.value
+            });
+            Message.success(`整部门分配完成:${data?.summary.changed ?? 0}/${data?.summary.requested ?? 0} 台`);
         } else {
-            const { data } = await assignDevices(assignPendingIds.value, assignTargetDeptId.value);
-            const succeeded = data?.results?.filter((r) => r.success).length ?? 0;
-            const failed = (data?.results?.length ?? 0) - succeeded;
+            const items = assignPendingIds.value.map((deviceId) => {
+                const device = devices.value.find((item) => item.id === deviceId);
+                return { deviceId, expectedOwnerDeptId: device?.ownerDeptId ?? 0 };
+            });
+            const { data } = await applyPermissionWorkbenchAssignments({ items, targetDeptId: assignTargetDeptId.value });
+            const succeeded = data?.summary.changed ?? 0;
+            const failed = data?.summary.failed ?? 0;
             Message.success(`分配完成:成功 ${succeeded} 台${failed > 0 ? `,失败 ${failed} 台` : ""}`);
         }
         assignVisible.value = false;

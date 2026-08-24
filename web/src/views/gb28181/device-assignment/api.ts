@@ -3,50 +3,46 @@ import { baseUrlApi } from "@/api/utils";
 import type { BaseResult } from "@/api/types";
 import { listDevices as fetchDevices } from "@/views/gb28181/device-mgmt/api";
 import type { DevicePageResult, OnlineStatus } from "@/views/gb28181/device-mgmt/api";
-import {
-    shouldUsePermissionMock,
-    mockAssignDevices,
-    mockAssignDeptDevices,
-    mockListDevices,
-    mockListGrants,
-    mockAddGrants,
-    mockRemoveGrant,
-    type MockListParams
-} from "./permissionMock";
-
-// ============ 类型 ============
 
 export type GrantTargetType = "dept" | "user";
+export type AssignmentFilter = "all" | "unassigned" | "assigned";
+export type PermissionApplyMode = "add" | "remove";
 
-export interface GrantTarget {
-    type: GrantTargetType;
-    id: number;
-    name?: string;
-}
+export interface GrantTarget { type: GrantTargetType; id: number; }
+export interface GrantItem { id: number; targetType: GrantTargetType; targetId: number; targetName: string; invalid: boolean; }
+export interface DeviceGrantState { deviceId: number; deviceCode: string; name: string; revision: string; grants: GrantItem[]; }
+export interface GrantQueryResult { devices: DeviceGrantState[]; unavailableIds: number[]; }
+export interface GrantTargetOption { id: number; type: GrantTargetType; name: string; deptId?: number; deptName?: string; }
+export interface GrantTargetPage { list: GrantTargetOption[]; total: number; page: number; pageSize: number; }
 
-export interface GrantVO {
-    id: number;
+export interface AssignmentItem { deviceId: number; expectedOwnerDeptId: number; }
+export interface AssignmentResultItem {
     deviceId: number;
-    targetType: GrantTargetType;
-    targetId: number;
-    targetName: string;
-    createdBy: number;
-    createdAt: string;
-}
-
-export interface AssignItemResult {
-    deviceId: number;
-    success: boolean;
+    deviceCode: string;
+    name: string;
+    status: "changed" | "skipped" | "failed";
     message: string;
 }
-
-export interface AssignResult {
-    results: AssignItemResult[];
+export interface AssignmentResult {
+    summary: { requested: number; changed: number; skipped: number; failed: number };
+    results: AssignmentResultItem[];
 }
-
-// ============ 列表(带分配状态过滤) ============
-
-export type AssignmentFilter = "all" | "unassigned" | "assigned";
+export interface DepartmentAssignmentRequest { sourceDeptId: number; targetDeptId: number; includeChildren: boolean; expectedCount: number; }
+export interface GrantApplyRequest {
+    items: Array<{ deviceId: number; expectedRevision: string }>;
+    mode: PermissionApplyMode;
+    targets: GrantTarget[];
+}
+export interface GrantApplyResult {
+    summary: { requested: number; changed: number; skipped: number; failed: number; added: number; removed: number; relationsSkipped: number };
+    results: Array<{ deviceId: number; deviceCode: string; name: string; status: "changed" | "skipped" | "failed"; message: string; added: number; removed: number; skipped: number; revision: string }>;
+}
+export interface WorkbenchSummary {
+    allCount: number;
+    assignedCount: number;
+    unassignedCount: number;
+    departments: Array<{ deptId: number; directCount: number; subtreeCount: number }>;
+}
 
 export interface AssignmentListParams {
     page: number;
@@ -54,100 +50,30 @@ export interface AssignmentListParams {
     q?: string;
     status?: OnlineStatus;
     assignment: AssignmentFilter;
-    /** 左侧部门树选中的部门(叠加过滤) */
-    deptId?: number;
+    ownerDeptId?: number;
 }
 
-/**
- * 设备列表(带分配状态过滤)。
- * - mock 阶段:非"全部"视图走演示数据;
- * - TODO(后端 T3 完成后):mock 开关改 false,assignment/deptId 参数由后端解析(ownerDeptId)。
- */
-export const listAssignmentDevices = async (params: AssignmentListParams): Promise<BaseResult<DevicePageResult>> => {
-    if (shouldUsePermissionMock() && params.assignment !== "all") {
-        return mockListDevices(params as MockListParams);
-    }
-    return fetchDevices({
-        page: params.page,
-        pageSize: params.pageSize,
-        q: params.q,
-        status: params.status,
-        assignment: params.assignment,
-        ownerDeptId: params.deptId
-    } as never);
-};
+export const listAssignmentDevices = (params: AssignmentListParams): Promise<BaseResult<DevicePageResult>> => fetchDevices(params);
 
-// ============ 归属分配 ============
+export const getPermissionWorkbenchSummary = () =>
+    http.request<BaseResult<WorkbenchSummary>>("get", baseUrlApi("gb28181/device-mgmt/permission-workbench/summary"));
 
-/**
- * 分配设备归属部门(批量,逐条事务)。
- * TODO(后端 T8 完成后):mock 开关改为 false,走 http 真实调用。
- */
-export const assignDevices = async (deviceIds: number[], targetDeptId: number): Promise<BaseResult<AssignResult>> => {
-    if (shouldUsePermissionMock()) {
-        return mockAssignDevices(deviceIds, targetDeptId);
-    }
-    return http.request<BaseResult<AssignResult>>("post", baseUrlApi("gb28181/device-mgmt/assign"), {
-        data: { deviceIds, targetDeptId }
-    });
-};
-
-/**
- * 整部门分配:流转该部门全部设备到目标部门。
- * TODO(后端 T8 完成后):mock 开关改为 false,走 http 真实调用。
- */
-export const assignDeptDevices = async (
-    sourceDeptId: number,
-    targetDeptId: number
-): Promise<BaseResult<{ total: number; succeeded: number }>> => {
-    if (shouldUsePermissionMock()) {
-        return mockAssignDeptDevices(sourceDeptId, targetDeptId);
-    }
-    return http.request<BaseResult<{ total: number; succeeded: number }>>(
-        "post",
-        baseUrlApi("gb28181/device-mgmt/assign-dept"),
-        { data: { sourceDeptId, targetDeptId } }
+export const resolvePermissionWorkbenchDevices = (deviceIds: number[]) =>
+    http.request<BaseResult<{ devices: Array<{ id: number; deviceId: string; name: string; status: number; online: boolean; ownerDeptId: number; ownerDeptName: string }>; unavailableIds: number[] }>>(
+        "post", baseUrlApi("gb28181/device-mgmt/permission-workbench/devices/resolve"), { data: { deviceIds } }
     );
-};
 
-// ============ 共享授权 ============
+export const applyPermissionWorkbenchAssignments = (data: { items: AssignmentItem[]; targetDeptId: number }) =>
+    http.request<BaseResult<AssignmentResult>>("post", baseUrlApi("gb28181/device-mgmt/permission-workbench/assignments"), { data });
 
-/**
- * 查询某台设备的共享授权列表。
- * TODO(后端 T9 完成后):mock 开关改为 false,走 http 真实调用。
- */
-export const listGrants = async (deviceId: number): Promise<BaseResult<GrantVO[]>> => {
-    if (shouldUsePermissionMock()) {
-        return mockListGrants(deviceId);
-    }
-    return http.request<BaseResult<GrantVO[]>>("get", baseUrlApi(`gb28181/device-mgmt/device/${deviceId}/grants`));
-};
+export const applyPermissionWorkbenchDepartmentAssignment = (data: DepartmentAssignmentRequest) =>
+    http.request<BaseResult<AssignmentResult>>("post", baseUrlApi("gb28181/device-mgmt/permission-workbench/assignments/departments"), { data });
 
-/**
- * 批量添加共享授权(设备 × 目标列表,逐条事务)。
- * TODO(后端 T9 完成后):mock 开关改为 false,走 http 真实调用。
- */
-export const addGrants = async (
-    deviceId: number,
-    targets: GrantTarget[]
-): Promise<BaseResult<{ added: number; skipped: number }>> => {
-    if (shouldUsePermissionMock()) {
-        return mockAddGrants(deviceId, targets);
-    }
-    return http.request<BaseResult<{ added: number; skipped: number }>>(
-        "post",
-        baseUrlApi(`gb28181/device-mgmt/device/${deviceId}/grants`),
-        { data: { targets } }
-    );
-};
+export const queryPermissionWorkbenchGrants = (deviceIds: number[]) =>
+    http.request<BaseResult<GrantQueryResult>>("post", baseUrlApi("gb28181/device-mgmt/permission-workbench/grants/query"), { data: { deviceIds } });
 
-/**
- * 取消一条共享授权。
- * TODO(后端 T9 完成后):mock 开关改为 false,走 http 真实调用。
- */
-export const removeGrant = async (deviceId: number, grantId: number): Promise<BaseResult<null>> => {
-    if (shouldUsePermissionMock()) {
-        return mockRemoveGrant(deviceId, grantId);
-    }
-    return http.request<BaseResult<null>>("delete", baseUrlApi(`gb28181/device-mgmt/device/${deviceId}/grants/${grantId}`));
-};
+export const applyPermissionWorkbenchGrants = (data: GrantApplyRequest) =>
+    http.request<BaseResult<GrantApplyResult>>("post", baseUrlApi("gb28181/device-mgmt/permission-workbench/grants/apply"), { data });
+
+export const searchPermissionWorkbenchGrantTargets = (params: { type: GrantTargetType; q?: string; page?: number; pageSize?: number }) =>
+    http.request<BaseResult<GrantTargetPage>>("get", baseUrlApi("gb28181/device-mgmt/permission-workbench/grant-targets"), { params });

@@ -4,7 +4,13 @@ import { Message } from "@arco-design/web-vue";
 import { Building2, UsersRound } from "lucide-vue-next";
 import { getAccountListAPI } from "@/api/user";
 import { getDivisionAPI, type DivisionItem } from "@/api/department";
-import { addGrants, listGrants, removeGrant, type GrantTargetType, type GrantVO } from "../api";
+import {
+    applyPermissionWorkbenchGrants,
+    queryPermissionWorkbenchGrants,
+    type GrantItem,
+    type GrantTarget,
+    type GrantTargetType
+} from "../api";
 
 export interface ShareDeviceBrief {
     id: number;
@@ -64,7 +70,10 @@ const toTransferTree = (nodes: DivisionItem[]): TransferDeptNode[] =>
     });
 
 // 已共享记录(仅单台模式,用于移除时找 grant id)
-const grants = ref<GrantVO[]>([]);
+const grants = ref<GrantItem[]>([]);
+const revisionByDevice = ref(new Map<number, string>());
+const initialDeptTargetKeys = ref<number[]>([]);
+const initialUserTargetKeys = ref<number[]>([]);
 
 // 穿梭目标 keys
 const deptTargetKeys = ref<number[]>([]);
@@ -100,10 +109,14 @@ const loadUserList = async () => {
 const loadGrants = async () => {
     if (!currentDevice.value) return;
     try {
-        const { data } = await listGrants(currentDevice.value.id);
-        grants.value = data ?? [];
+        const { data } = await queryPermissionWorkbenchGrants([currentDevice.value.id]);
+        const state = data?.devices?.[0];
+        grants.value = state?.grants ?? [];
+        revisionByDevice.value = new Map(state ? [[currentDevice.value.id, state.revision]] : []);
         deptTargetKeys.value = grants.value.filter((g) => g.targetType === "dept").map((g) => g.targetId);
         userTargetKeys.value = grants.value.filter((g) => g.targetType === "user").map((g) => g.targetId);
+        initialDeptTargetKeys.value = [...deptTargetKeys.value];
+        initialUserTargetKeys.value = [...userTargetKeys.value];
     } catch (error: unknown) {
         Message.error(error instanceof Error ? error.message : "加载共享列表失败");
     }
@@ -115,54 +128,29 @@ const diffKeys = (before: number[], after: number[]) => ({
     removed: before.filter((id) => !after.includes(id))
 });
 
-watch(deptTargetKeys, async (after, before) => {
-    const { added, removed } = diffKeys(before, after);
-    if (added.length) await doAddGrants("dept", added);
-    if (removed.length) await doRemoveGrants("dept", removed);
-});
-
-watch(userTargetKeys, async (after, before) => {
-    const { added, removed } = diffKeys(before, after);
-    if (added.length) await doAddGrants("user", added);
-    if (removed.length) await doRemoveGrants("user", removed);
-});
-
-const doAddGrants = async (type: GrantTargetType, ids: number[]) => {
-    const names =
-        type === "dept"
-            ? ids.map((id) => deptNameById.get(id) ?? `部门 #${id}`)
-            : ids.map((id) => userList.value.find((u) => u.value === id)?.label ?? `用户 #${id}`);
-    let addedTotal = 0;
-    let skippedTotal = 0;
-    for (const device of props.devices) {
-        const { data } = await addGrants(
-            device.id,
-            ids.map((id, i) => ({ type, id, name: names[i] }))
-        );
-        addedTotal += data?.added ?? 0;
-        skippedTotal += data?.skipped ?? 0;
-    }
-    Message.success(`已授权 ${addedTotal} 项${skippedTotal ? `,跳过重复 ${skippedTotal} 项` : ""}`);
-    emit("changed");
-};
-
-const doRemoveGrants = async (type: GrantTargetType, ids: number[]) => {
-    // 仅单台模式可精确移除(grant id 可定位);批量模式不支持穿梭移除
-    if (!singleMode.value || !currentDevice.value) {
-        Message.warning("批量模式下不支持移除,请在单台设备的共享管理中操作");
+const saveChanges = async () => {
+    const changes: Array<{ mode: "add" | "remove"; targets: GrantTarget[] }> = [];
+    const collect = (type: GrantTargetType, before: number[], after: number[]) => {
+        const { added, removed } = diffKeys(before, after);
+        if (added.length) changes.push({ mode: "add", targets: added.map((id) => ({ type, id })) });
+        if (removed.length) changes.push({ mode: "remove", targets: removed.map((id) => ({ type, id })) });
+    };
+    collect("dept", initialDeptTargetKeys.value, deptTargetKeys.value);
+    collect("user", initialUserTargetKeys.value, userTargetKeys.value);
+    if (!changes.length) {
+        Message.info("没有待保存的变更");
         return;
     }
-    for (const id of ids) {
-        const grant = grants.value.find((g) => g.targetType === type && g.targetId === id);
-        if (!grant) continue;
-        try {
-            await removeGrant(currentDevice.value.id, grant.id);
-        } catch (error: unknown) {
-            Message.error(error instanceof Error ? error.message : `移除共享失败(${grant.targetName})`);
-        }
+    for (const change of changes) {
+        await applyPermissionWorkbenchGrants({
+            items: props.devices.map((device) => ({ deviceId: device.id, expectedRevision: revisionByDevice.value.get(device.id) ?? "" })),
+            mode: change.mode,
+            targets: change.targets
+        });
     }
-    Message.success("已收回共享");
+    Message.success("共享变更已保存");
     emit("changed");
+    visible.value = false;
 };
 
 // ---- 生命周期 ----
@@ -195,9 +183,7 @@ watch(
             <div class="share-panel__title">
                 <span class="share-panel__title-main">{{ panelTitle }}</span>
                 <span class="share-panel__title-hint">
-                    勾选左侧对象,移入右侧即生效
-                    <template v-if="singleMode">,右侧移回可收回授权</template>
-                    <template v-else>(批量模式仅支持新增)</template>
+                    调整共享对象后保存变更
                 </span>
             </div>
         </template>
@@ -233,6 +219,10 @@ watch(
                     />
                 </a-tab-pane>
             </a-tabs>
+            <div class="share-panel__footer">
+                <a-button @click="visible = false">取消</a-button>
+                <a-button type="primary" @click="saveChanges">保存变更</a-button>
+            </div>
         </div>
     </a-modal>
 </template>

@@ -108,6 +108,8 @@ export interface DeviceVO {
     effectiveVersionAt?: string | null;
     /** Preferred ZLM node; 0 lets the cluster scheduler decide. */
     zlmNodeId?: number;
+    ownerDeptId: number;
+    ownerDeptName?: string;
 }
 
 export type DeviceStatusEventType =
@@ -299,6 +301,8 @@ export interface DeviceQuery extends DirectoryQuery {
     page?: number;
     pageSize?: number;
     sort?: string;
+    assignment?: "all" | "unassigned" | "assigned";
+    ownerDeptId?: number;
 }
 
 export interface ChannelQuery extends DirectoryQuery {
