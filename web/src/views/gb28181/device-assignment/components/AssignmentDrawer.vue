@@ -35,7 +35,7 @@ const props = withDefaults(
 
 const emit = defineEmits<{
     (event: "update:visible", visible: boolean): void;
-    (event: "submitted", result: AssignmentResult): void;
+    (event: "submitted", result: AssignmentResult, targetDeptId: number): void;
 }>();
 
 const visible = computed({ get: () => props.visible, set: (value) => emit("update:visible", value) });
@@ -125,7 +125,7 @@ const submit = async () => {
                       targetDeptId: targetDeptId.value
                   });
         if (response.data) {
-            emit("submitted", response.data);
+            emit("submitted", response.data, targetDeptId.value);
             visible.value = false;
             if (response.data.summary.failed > 0) Message.warning(`部分失败：${response.data.summary.failed} 台失败，详见结果`);
             else Message.success("设备归属调整完成");

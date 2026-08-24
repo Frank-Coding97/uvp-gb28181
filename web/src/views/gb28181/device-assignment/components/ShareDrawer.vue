@@ -28,7 +28,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
     (event: "update:visible", visible: boolean): void;
-    (event: "submitted", result: GrantApplyResult): void;
+    (event: "submitted", result: GrantApplyResult, context: { mode: ShareMode; targets: GrantTarget[] }): void;
 }>();
 
 const mode = ref<ShareMode>("add");
@@ -192,7 +192,7 @@ const submit = async () => {
         });
         if (data) {
             clearDraft();
-            emit("submitted", data);
+            emit("submitted", data, { mode: mode.value, targets });
             emit("update:visible", false);
             Message.success("共享变更已保存");
         }

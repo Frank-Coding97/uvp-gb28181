@@ -5,6 +5,7 @@
         <template #fields>
           <a-input v-model="form.username" placeholder="请输入用户名" style="width: 176px" allow-clear @press-enter="search" />
           <a-input v-model="form.module" placeholder="请输入操作模块" style="width: 176px" allow-clear @press-enter="search" />
+          <a-input v-model="form.path" placeholder="请输入请求路径" style="width: 220px" allow-clear @press-enter="search" />
           <a-select v-model="form.operation" placeholder="操作类型" style="width: 126px" allow-clear>
             <a-option value="create">新增</a-option>
             <a-option value="update">更新</a-option>
@@ -154,7 +155,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from "vue";
+import { ref, reactive, onMounted, computed } from "vue";
+import { useRoute } from "vue-router";
 import { getOperationLogsAPI, deleteOperationLogsAPI, exportOperationLogsAPI, type OperationLogItem } from "@/api/log";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { formatTime } from "@/globals";
@@ -175,6 +177,7 @@ const layoutMode = computed(() => {
 });
 
 const proxy = useGlobalProperties();
+const route = useRoute();
 
 // 表单数据
 const form = ref({
@@ -182,7 +185,8 @@ const form = ref({
   module: "",
   operation: "",
   status: "",
-  ip: ""
+  ip: "",
+  path: ""
 });
 
 // 日期范围
@@ -222,7 +226,8 @@ const getLogList = async () => {
       module: form.value.module,
       operation: form.value.operation,
       status: form.value.status,
-      ip: form.value.ip
+      ip: form.value.ip,
+      path: form.value.path
     };
 
     if (dateRange.value && dateRange.value.length === 2) {
@@ -252,8 +257,9 @@ const reset = () => {
     username: "",
     module: "",
     operation: "",
-    status: "",
-    ip: ""
+      status: "",
+      ip: "",
+      path: ""
   };
   dateRange.value = [];
   pagination.current = 1;
@@ -303,7 +309,8 @@ const onExport = async () => {
       module: form.value.module,
       operation: form.value.operation,
       status: form.value.status,
-      ip: form.value.ip
+      ip: form.value.ip,
+      path: form.value.path
     };
 
     if (dateRange.value && dateRange.value.length === 2) {
@@ -334,6 +341,9 @@ const onExport = async () => {
 
 // 初始化
 onMounted(() => {
+  const query = route.query;
+  if (typeof query.module === "string") form.value.module = query.module;
+  if (typeof query.path === "string") form.value.path = query.path;
   getLogList();
 });
 </script>

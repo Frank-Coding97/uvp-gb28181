@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { useDebounceFn } from "@vueuse/core";
+import { useRouter } from "vue-router";
 import {
     Building2,
     ChevronDown,
@@ -17,16 +18,25 @@ import { getDivisionAPI, type DivisionItem } from "@/api/department";
 import { useUserStoreHook } from "@/store/modules/user";
 import type { DeviceVO, OnlineStatus } from "@/views/gb28181/device-mgmt/api";
 import {
+    applyPermissionWorkbenchAssignments,
+    applyPermissionWorkbenchGrants,
     getPermissionWorkbenchSummary,
     listAssignmentDevices,
-    type AssignmentFilter
+    queryPermissionWorkbenchGrants,
+    resolvePermissionWorkbenchDevices,
+    type AssignmentFilter,
+    type AssignmentResult,
+    type GrantApplyResult,
+    type GrantTarget
 } from "./api";
 import ShareDrawer, { type ShareDeviceBrief } from "./components/ShareDrawer.vue";
 import AssignmentDrawer, { type AssignmentDeviceBrief } from "./components/AssignmentDrawer.vue";
+import OperationResultDrawer from "./components/OperationResultDrawer.vue";
 import { useCrossPageSelection } from "./useCrossPageSelection";
 
 // ---- 权限 ----
 const permissions = computed(() => useUserStoreHook().account?.permissions ?? []);
+const router = useRouter();
 const canAssign = computed(() => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:device:assign"));
 const canShare = computed(() => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:device:share"));
 
@@ -234,15 +244,78 @@ const openBatchShare = () => {
     shareVisible.value = true;
 };
 
-const handleShareSubmitted = () => {
+type OperationResult = AssignmentResult | GrantApplyResult;
+const resultVisible = ref(false);
+const resultKind = ref<"assignment" | "grant">("assignment");
+const operationResult = ref<OperationResult | null>(null);
+const retryOperation = ref<(() => Promise<void>) | null>(null);
+
+const applyOperationSelectionResult = (result: OperationResult) => {
+    selection.applyOperationResult({
+        changed: result.results.filter((item) => item.status === "changed").map((item) => item.deviceId),
+        skipped: result.results.filter((item) => item.status === "skipped").map((item) => item.deviceId),
+        failed: result.results.filter((item) => item.status === "failed").map((item) => item.deviceId)
+    });
+};
+
+const handleShareSubmitted = (result: GrantApplyResult, context: { mode: "add" | "remove"; targets: GrantTarget[] }) => {
+    operationResult.value = result;
+    resultKind.value = "grant";
+    resultVisible.value = true;
+    applyOperationSelectionResult(result);
+    retryOperation.value = async () => {
+        const failedIds = result.results.filter((item) => item.status === "failed").map((item) => item.deviceId);
+        if (!failedIds.length) return;
+        const latest = await queryPermissionWorkbenchGrants(failedIds);
+        const revisions = new Map((latest.data?.devices ?? []).map((device) => [device.deviceId, device.revision]));
+        const retried = await applyPermissionWorkbenchGrants({
+            items: failedIds.map((deviceId) => ({ deviceId, expectedRevision: revisions.get(deviceId) ?? "" })),
+            mode: context.mode,
+            targets: context.targets
+        });
+        if (retried.data) {
+            operationResult.value = retried.data;
+            applyOperationSelectionResult(retried.data);
+        }
+    };
     void loadSummary();
     void loadDevices();
 };
 
-const handleAssignmentSubmitted = () => {
-    selection.clear();
+const handleAssignmentSubmitted = (result: AssignmentResult, targetDeptId: number) => {
+    operationResult.value = result;
+    resultKind.value = "assignment";
+    resultVisible.value = true;
+    retryOperation.value = async () => {
+        const failedIds = result.results.filter((item) => item.status === "failed").map((item) => item.deviceId);
+        if (!failedIds.length) return;
+        const latest = await resolvePermissionWorkbenchDevices(failedIds);
+        const items = (latest.data?.devices ?? []).map((device) => ({ deviceId: device.id, expectedOwnerDeptId: device.ownerDeptId }));
+        const retried = await applyPermissionWorkbenchAssignments({ items, targetDeptId });
+        if (retried.data) {
+            operationResult.value = retried.data;
+            applyOperationSelectionResult(retried.data);
+        }
+    };
+    applyOperationSelectionResult(result);
     void loadSummary();
     void loadDevices();
+};
+
+const retryFailedOperation = async () => {
+    if (!retryOperation.value) return;
+    try {
+        await retryOperation.value();
+        Message.success("失败项已重新提交");
+        void loadSummary();
+        void loadDevices();
+    } catch (error: unknown) {
+        Message.error(error instanceof Error ? error.message : "重试失败项失败");
+    }
+};
+
+const openOperationLogs = () => {
+    void router.push({ path: "/system/log", query: { module: "GB28181设备管理", path: "permission-workbench" } });
 };
 
 onMounted(() => {
@@ -474,6 +547,13 @@ onMounted(() => {
 
         <!-- 共享管理抽屉 -->
         <ShareDrawer v-model:visible="shareVisible" :devices="shareDevices" @submitted="handleShareSubmitted" />
+        <OperationResultDrawer
+            v-model:visible="resultVisible"
+            :kind="resultKind"
+            :result="operationResult"
+            @retry="retryFailedOperation"
+            @view-log="openOperationLogs"
+        />
     </div>
 </template>
 
