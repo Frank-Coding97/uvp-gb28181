@@ -32,7 +32,7 @@ func TestGormRepoDesiredStateAndConditionalUpdate(t *testing.T) {
 	got, err := repo.SetDesired(context.Background(), channel.ID, true)
 	require.NoError(t, err)
 	require.True(t, got.CloudRecordingEnabled)
-	require.Equal(t, models.CloudRecordingStateStarting, got.CloudRecordingState)
+	require.Equal(t, models.CloudRecordingStateWaiting, got.CloudRecordingState)
 
 	_, err = repo.SetDesired(context.Background(), channel.ID, false)
 	require.NoError(t, err)

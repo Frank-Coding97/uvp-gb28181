@@ -1141,13 +1141,8 @@ async function handleStopChannel(record: ChannelVO) {
             stoppingChannels.value.add(record.id);
             try {
                 const response = await stopPlay(record.streamId);
-                // released=true 通道级真停,列表需刷新清"直播中";released=false 说明流被云端录制保留,状态不变
-                if (response.data?.released) {
-                    Message.success(response.message || "已停止当前直播");
-                    refreshMainData();
-                } else {
-                    Message.info(response.message || "已停止观看,通道云端录制仍在继续");
-                }
+                Message.success(response.message || "已停止当前直播");
+                refreshMainData();
             } catch (e: any) {
                 // stopPlay 失败不刷新列表 —— 避免把"实际还在播"错误清成"空闲"
                 Message.error(e?.message || "停止播放失败,请稍后重试");
@@ -1598,7 +1593,7 @@ async function handleCloudRecordingChange(channelId: number, enabled: boolean) {
             mergeCloudRecordingState(detail, res.data);
             channelDetail.value = detail;
         }
-        Message.success(enabled ? "云端录像已开启" : "云端录像已关闭");
+        Message.success(enabled ? "云端录像已开启，下次点播生效" : "云端录像已关闭");
     } catch (error: any) {
         Message.error(error?.message || "更新云端录像失败");
     } finally {

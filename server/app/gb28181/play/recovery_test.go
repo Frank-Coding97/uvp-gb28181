@@ -178,11 +178,20 @@ func TestServiceStopOnNoneReaderRechecksReadersBeforeConditionalStop(t *testing.
 		t.Fatal(err)
 	}
 	ref := resultLiveRef(result)
+	lifecycle := &fakePlaybackRecordingLifecycle{onEnd: func() {
+		if z.closeCalls.Load() != 0 {
+			t.Fatal("无人观看停流必须先收尾录像")
+		}
+	}}
+	s.SetPlaybackRecordingLifecycle(lifecycle)
 	if stopped, err := s.StopOnNoneReader(context.Background(), ref); err != nil || stopped {
 		t.Fatalf("reader recovery stopped=%v err=%v", stopped, err)
 	}
 	if z.closeCalls.Load() != 0 || channels.c.StreamID == "" {
 		t.Fatalf("reader recovery changed current stream: close=%d channel=%+v", z.closeCalls.Load(), channels.c)
+	}
+	if lifecycle.endCalls.Load() != 0 {
+		t.Fatalf("读者恢复时不应收尾录像,实际 %d", lifecycle.endCalls.Load())
 	}
 	z.readers = 0
 	if stopped, err := s.StopOnNoneReader(context.Background(), ref); err != nil || !stopped {
@@ -190,6 +199,9 @@ func TestServiceStopOnNoneReaderRechecksReadersBeforeConditionalStop(t *testing.
 	}
 	if z.closeCalls.Load() != 1 || channels.c.StreamID != "" {
 		t.Fatalf("zero readers cleanup close=%d channel=%+v", z.closeCalls.Load(), channels.c)
+	}
+	if lifecycle.endCalls.Load() != 1 {
+		t.Fatalf("零读者停流应收尾录像一次,实际 %d", lifecycle.endCalls.Load())
 	}
 }
 

@@ -90,6 +90,19 @@ type mockInviter struct {
 	outcome     uac.InviteOutcome
 }
 
+type fakePlaybackRecordingLifecycle struct {
+	endCalls atomic.Int32
+	onEnd    func()
+}
+
+func (f *fakePlaybackRecordingLifecycle) EndPlayback(context.Context, string) error {
+	if f.onEnd != nil {
+		f.onEnd()
+	}
+	f.endCalls.Add(1)
+	return nil
+}
+
 type delayedInviter struct {
 	delay     time.Duration
 	onSuccess func(*uac.Session)
@@ -635,6 +648,25 @@ func TestStop(t *testing.T) {
 	}
 	if channels.clearedStreamID != "fake-stream" {
 		t.Errorf("Stop 应清空通道 stream_id,实际 %q", channels.clearedStreamID)
+	}
+}
+
+func TestStopEndsRecordingBeforeMediaCleanup(t *testing.T) {
+	z := &mockZLM{}
+	inv := &mockInviter{}
+	s, _, _ := newSvc(t, z, inv, onlineDevice(), aChannel())
+	lifecycle := &fakePlaybackRecordingLifecycle{onEnd: func() {
+		if inv.byeCalls.Load() != 0 || z.closeCalls.Load() != 0 {
+			t.Fatal("结束录像必须发生在 BYE 和 CloseRtpServer 之前")
+		}
+	}}
+	s.SetPlaybackRecordingLifecycle(lifecycle)
+
+	if err := s.Stop(context.Background(), "fake-stream"); err != nil {
+		t.Fatalf("Stop 失败: %v", err)
+	}
+	if lifecycle.endCalls.Load() != 1 {
+		t.Fatalf("应收尾录像一次,实际 %d", lifecycle.endCalls.Load())
 	}
 }
 

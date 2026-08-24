@@ -6,33 +6,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
-
-type fakeStarter struct {
-	result *play.Result
-	err    error
-	calls  atomic.Int32
-}
-
-func (f *fakeStarter) Start(context.Context, string, string) (*play.Result, error) {
-	f.calls.Add(1)
-	return f.result, f.err
-}
-
-type fakeStopper struct{ calls atomic.Int32 }
-
-func (f *fakeStopper) Stop(context.Context, string) error {
-	f.calls.Add(1)
-	return nil
-}
 
 type fakeLocation struct {
 	nodeID int64
@@ -56,7 +35,6 @@ type fakeRecorderClient struct {
 	recording  bool
 	startErr   error
 	stopErr    error
-	mediaInfo  *zlm.MediaInfo
 	startCalls atomic.Int32
 	stopCalls  atomic.Int32
 }
@@ -72,13 +50,6 @@ func (f *fakeRecorderClient) StopRecord(context.Context, string, string, string)
 	f.stopCalls.Add(1)
 	return f.stopErr
 }
-func (f *fakeRecorderClient) GetMediaInfo(context.Context, string, string, string, string) (*zlm.MediaInfo, error) {
-	if f.mediaInfo == nil {
-		return &zlm.MediaInfo{}, nil
-	}
-	return f.mediaInfo, nil
-}
-
 func seedRecordingChannel(t *testing.T, online bool) (*GormRepo, *models.GbChannel) {
 	t.Helper()
 	db := newRepoTestDB(t)
@@ -90,33 +61,35 @@ func seedRecordingChannel(t *testing.T, online bool) (*GormRepo, *models.GbChann
 	return NewGormRepo(db), channel
 }
 
-func newRecordingService(repo *GormRepo, starter *fakeStarter, client *fakeRecorderClient, location fakeLocation, registry fakeRegistry) *Service {
-	return NewService(repo, starter, &fakeStopper{}, location, registry, func(*node.Node) RecorderClient {
+func newRecordingService(repo *GormRepo, client *fakeRecorderClient, location fakeLocation, registry fakeRegistry) *Service {
+	return NewService(repo, location, registry, func(*node.Node) RecorderClient {
 		return client
 	})
 }
 
-func TestEnableWaitsWhenDeviceOffline(t *testing.T) {
-	repo, channel := seedRecordingChannel(t, false)
-	starter := &fakeStarter{err: play.ErrDeviceOffline}
-	service := newRecordingService(repo, starter, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+func TestEnableOnlyWaitsForNextPlayback(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	client := &fakeRecorderClient{}
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
 
 	got, err := service.Enable(context.Background(), channel.ID)
 	require.NoError(t, err)
 	require.True(t, got.CloudRecordingEnabled)
 	require.Equal(t, models.CloudRecordingStateWaiting, got.CloudRecordingState)
+	require.Zero(t, client.startCalls.Load())
 }
 
-func TestEnableStartsStreamAndRecording(t *testing.T) {
+func TestBeginPlaybackStartsEnabledRecording(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
-	starter := &fakeStarter{result: &play.Result{StreamID: "stream-1"}}
+	channel.StreamID = "stream-1"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
 	client := &fakeRecorderClient{}
-	service := newRecordingService(repo, starter, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
-
-	got, err := service.Enable(context.Background(), channel.ID)
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+	_, err := service.Enable(context.Background(), channel.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CloudRecordingStateRecording, got.CloudRecordingState)
-	require.EqualValues(t, 1, starter.calls.Load())
+
+	require.NoError(t, service.BeginPlayback(context.Background(), channel.StreamID))
+
 	require.EqualValues(t, 1, client.startCalls.Load())
 	session, err := repo.FindLatestSessionByChannel(context.Background(), channel.ID)
 	require.NoError(t, err)
@@ -125,10 +98,15 @@ func TestEnableStartsStreamAndRecording(t *testing.T) {
 
 func TestEnableReusesExistingZLMRecorder(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
+	channel.StreamID = "stream-1"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
 	client := &fakeRecorderClient{recording: true}
-	service := newRecordingService(repo, &fakeStarter{result: &play.Result{StreamID: "stream-1"}}, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
 
-	got, err := service.Enable(context.Background(), channel.ID)
+	_, err := service.Enable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.NoError(t, service.BeginPlayback(context.Background(), channel.StreamID))
+	got, err := repo.GetChannel(context.Background(), channel.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CloudRecordingStateRecording, got.CloudRecordingState)
 	require.Zero(t, client.startCalls.Load())
@@ -136,19 +114,29 @@ func TestEnableReusesExistingZLMRecorder(t *testing.T) {
 
 func TestEnableWaitsWhenNodeBindingMissing(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
-	service := newRecordingService(repo, &fakeStarter{result: &play.Result{StreamID: "stream-1"}}, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+	channel.StreamID = "stream-1"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
+	service := newRecordingService(repo, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
 
-	got, err := service.Enable(context.Background(), channel.ID)
+	_, err := service.Enable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.NoError(t, service.BeginPlayback(context.Background(), channel.StreamID))
+	got, err := repo.GetChannel(context.Background(), channel.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.CloudRecordingStateWaiting, got.CloudRecordingState)
 }
 
 func TestEnableKeepsDesiredStateWhenStartRecordFails(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
+	channel.StreamID = "stream-1"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
 	client := &fakeRecorderClient{startErr: errors.New("zlm unavailable")}
-	service := newRecordingService(repo, &fakeStarter{result: &play.Result{StreamID: "stream-1"}}, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
 
-	got, err := service.Enable(context.Background(), channel.ID)
+	_, err := service.Enable(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.NoError(t, service.BeginPlayback(context.Background(), channel.StreamID))
+	got, err := repo.GetChannel(context.Background(), channel.ID)
 	require.NoError(t, err)
 	require.True(t, got.CloudRecordingEnabled)
 	require.Equal(t, models.CloudRecordingStateFailed, got.CloudRecordingState)
@@ -168,53 +156,25 @@ func seedActiveSession(t *testing.T, repo *GormRepo, channel *models.GbChannel) 
 	return session
 }
 
-func TestDisableStopsRecordingButKeepsStreamWithReaders(t *testing.T) {
+func TestDisableStopsRecordingAndMarksSessionStopped(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
 	session := seedActiveSession(t, repo, channel)
-	client := &fakeRecorderClient{mediaInfo: &zlm.MediaInfo{Online: true, ReaderCount: 2}}
-	stopper := &fakeStopper{}
-	service := NewService(repo, &fakeStarter{}, stopper, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
+	client := &fakeRecorderClient{}
+	service := NewService(repo, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
 
 	got, err := service.Disable(context.Background(), channel.ID)
 	require.NoError(t, err)
 	require.False(t, got.CloudRecordingEnabled)
 	require.Equal(t, models.CloudRecordingStateDisabled, got.CloudRecordingState)
 	require.EqualValues(t, 1, client.stopCalls.Load())
-	require.Zero(t, stopper.calls.Load())
 	stored, err := repo.FindSessionByMedia(context.Background(), 2, session.VHost, session.App, session.Stream)
 	require.NoError(t, err)
 	require.Equal(t, models.RecordingSessionStateStopped, stored.State)
 }
 
-func TestDisableStopsIdleOnDemandStream(t *testing.T) {
-	repo, channel := seedRecordingChannel(t, true)
-	seedActiveSession(t, repo, channel)
-	client := &fakeRecorderClient{mediaInfo: &zlm.MediaInfo{Online: true, ReaderCount: 0}}
-	stopper := &fakeStopper{}
-	service := NewService(repo, &fakeStarter{}, stopper, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
-
-	_, err := service.Disable(context.Background(), channel.ID)
-	require.NoError(t, err)
-	require.EqualValues(t, 1, stopper.calls.Load())
-}
-
-func TestDisableKeepsAlwaysOnStreamWithoutReaders(t *testing.T) {
-	repo, channel := seedRecordingChannel(t, true)
-	channel.OnDemandLive = false
-	require.NoError(t, repo.db.Model(channel).Update("on_demand_live", false).Error)
-	seedActiveSession(t, repo, channel)
-	client := &fakeRecorderClient{mediaInfo: &zlm.MediaInfo{Online: true, ReaderCount: 0}}
-	stopper := &fakeStopper{}
-	service := NewService(repo, &fakeStarter{}, stopper, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
-
-	_, err := service.Disable(context.Background(), channel.ID)
-	require.NoError(t, err)
-	require.Zero(t, stopper.calls.Load())
-}
-
 func TestDisableIsIdempotentWithoutSession(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
-	service := newRecordingService(repo, &fakeStarter{}, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+	service := newRecordingService(repo, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
 
 	got, err := service.Disable(context.Background(), channel.ID)
 	require.NoError(t, err)
@@ -225,7 +185,7 @@ func TestDisableRetainsSessionWhenStopRecordFails(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
 	session := seedActiveSession(t, repo, channel)
 	client := &fakeRecorderClient{stopErr: errors.New("zlm unavailable")}
-	service := NewService(repo, &fakeStarter{}, &fakeStopper{}, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
+	service := NewService(repo, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient { return client })
 
 	got, err := service.Disable(context.Background(), channel.ID)
 	require.NoError(t, err)
@@ -236,11 +196,10 @@ func TestDisableRetainsSessionWhenStopRecordFails(t *testing.T) {
 	require.NotEqual(t, models.RecordingSessionStateStopped, stored.State)
 }
 
-func TestConcurrentEnableStartsRecorderOnce(t *testing.T) {
+func TestConcurrentEnableDoesNotStartRecorder(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
-	starter := &fakeStarter{result: &play.Result{StreamID: "stream-1"}}
 	client := &fakeRecorderClient{}
-	service := newRecordingService(repo, starter, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
 
 	var wg sync.WaitGroup
 	for range 20 {
@@ -252,51 +211,7 @@ func TestConcurrentEnableStartsRecorderOnce(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	require.EqualValues(t, 1, starter.calls.Load())
-	require.EqualValues(t, 1, client.startCalls.Load())
-}
-
-type parallelStarter struct {
-	active    atomic.Int32
-	maxActive atomic.Int32
-}
-
-func (p *parallelStarter) Start(_ context.Context, _, channelID string) (*play.Result, error) {
-	active := p.active.Add(1)
-	for {
-		current := p.maxActive.Load()
-		if active <= current || p.maxActive.CompareAndSwap(current, active) {
-			break
-		}
-	}
-	time.Sleep(40 * time.Millisecond)
-	p.active.Add(-1)
-	return &play.Result{StreamID: "stream-" + channelID}, nil
-}
-
-func TestDifferentChannelsCanReconcileConcurrently(t *testing.T) {
-	db := newRepoTestDB(t)
-	repo := NewGormRepo(db)
-	first := &models.GbChannel{DeviceID: "device", ChannelID: "first", Status: models.ChannelStatusOnline}
-	second := &models.GbChannel{DeviceID: "device", ChannelID: "second", Status: models.ChannelStatusOnline}
-	require.NoError(t, db.Create(first).Error)
-	require.NoError(t, db.Create(second).Error)
-	starter := &parallelStarter{}
-	service := NewService(repo, starter, &fakeStopper{}, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}}, func(*node.Node) RecorderClient {
-		return &fakeRecorderClient{}
-	})
-
-	var wg sync.WaitGroup
-	for _, id := range []uint{first.ID, second.ID} {
-		wg.Add(1)
-		go func(channelID uint) {
-			defer wg.Done()
-			_, err := service.Enable(context.Background(), channelID)
-			require.NoError(t, err)
-		}(id)
-	}
-	wg.Wait()
-	require.EqualValues(t, 2, starter.maxActive.Load())
+	require.Zero(t, client.startCalls.Load())
 }
 
 func TestObserveRegisteredStreamStartsEnabledRecordingOnce(t *testing.T) {
@@ -305,28 +220,45 @@ func TestObserveRegisteredStreamStartsEnabledRecordingOnce(t *testing.T) {
 	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
 	_, err := repo.SetDesired(context.Background(), channel.ID, true)
 	require.NoError(t, err)
-	starter := &fakeStarter{result: &play.Result{StreamID: channel.StreamID}}
 	client := &fakeRecorderClient{}
-	service := newRecordingService(repo, starter, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
 
 	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
 	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
-	require.EqualValues(t, 1, client.startCalls.Load())
+	require.Zero(t, client.startCalls.Load())
 	stored, err := repo.GetChannel(context.Background(), channel.ID)
 	require.NoError(t, err)
-	require.Equal(t, models.CloudRecordingStateRecording, stored.CloudRecordingState)
+	require.Equal(t, models.CloudRecordingStateWaiting, stored.CloudRecordingState)
+}
+
+func TestEndPlaybackStopsRecordingAndKeepsEnabledForNextPlayback(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	channel.StreamID = "stream-1"
+	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
+	session := seedActiveSession(t, repo, channel)
+	client := &fakeRecorderClient{}
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+
+	require.NoError(t, service.EndPlayback(context.Background(), channel.StreamID))
+
+	require.EqualValues(t, 1, client.stopCalls.Load())
+	stored, err := repo.GetChannel(context.Background(), channel.ID)
+	require.NoError(t, err)
+	require.True(t, stored.CloudRecordingEnabled)
+	require.Equal(t, models.CloudRecordingStateWaiting, stored.CloudRecordingState)
+	storedSession, err := repo.FindSessionByMedia(context.Background(), session.NodeID, session.VHost, session.App, session.Stream)
+	require.NoError(t, err)
+	require.Equal(t, models.RecordingSessionStateStopped, storedSession.State)
 }
 
 func TestObserveRegisteredStreamIgnoresDisabledChannel(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
 	channel.StreamID = "stream-disabled"
 	require.NoError(t, repo.db.Model(channel).Update("stream_id", channel.StreamID).Error)
-	starter := &fakeStarter{result: &play.Result{StreamID: channel.StreamID}}
 	client := &fakeRecorderClient{}
-	service := newRecordingService(repo, starter, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
+	service := newRecordingService(repo, client, fakeLocation{nodeID: 2, ok: true}, fakeRegistry{item: &node.Node{ID: 2}})
 
 	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, true))
-	require.Zero(t, starter.calls.Load())
 	require.Zero(t, client.startCalls.Load())
 }
 
@@ -337,7 +269,7 @@ func TestObserveUnregisteredStreamMovesEnabledChannelToWaiting(t *testing.T) {
 	session := seedActiveSession(t, repo, channel)
 	session.Stream = channel.StreamID
 	require.NoError(t, repo.UpsertSession(context.Background(), session))
-	service := newRecordingService(repo, &fakeStarter{}, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+	service := newRecordingService(repo, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
 
 	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, false))
 	stored, err := repo.GetChannel(context.Background(), channel.ID)
@@ -359,7 +291,7 @@ func TestObserveUnregisteredStreamKeepsDisabledChannelDisabled(t *testing.T) {
 		Stream: channel.StreamID, State: models.RecordingSessionStateRecording,
 	}
 	require.NoError(t, repo.UpsertSession(context.Background(), session))
-	service := newRecordingService(repo, &fakeStarter{}, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
+	service := newRecordingService(repo, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})
 
 	require.NoError(t, service.ObserveStream(context.Background(), channel.StreamID, false))
 	stored, err := repo.GetChannel(context.Background(), channel.ID)

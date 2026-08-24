@@ -25,8 +25,8 @@ import (
 //	DELETE /api/gb28181/play/:streamId              停播
 type PlayController struct {
 	controllers.Common
-	svc             PlayService
-	retentionPolicy StreamRetentionPolicy
+	svc              PlayService
+	recordingStarter PlaybackRecordingStarter
 }
 
 type PlayService interface {
@@ -42,14 +42,14 @@ type FixedPlaybackAuthorizationService interface {
 	AuthorizeFixedPlayback(context.Context, string, string, string) (*play.Result, error)
 }
 
-type StreamRetentionPolicy interface {
-	ShouldKeepStream(context.Context, string) (bool, error)
+type PlaybackRecordingStarter interface {
+	BeginPlayback(context.Context, string) error
 }
 
 type PlayControllerOption func(*PlayController)
 
-func WithStreamRetentionPolicy(policy StreamRetentionPolicy) PlayControllerOption {
-	return func(controller *PlayController) { controller.retentionPolicy = policy }
+func WithPlaybackRecordingStarter(starter PlaybackRecordingStarter) PlayControllerOption {
+	return func(controller *PlayController) { controller.recordingStarter = starter }
 }
 
 // NewPlayController 装配点播控制器(svc 由 bootstrap 注入)
@@ -98,6 +98,11 @@ func (pc *PlayController) Start(c *gin.Context) {
 		return
 	}
 	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
+	if pc.recordingStarter != nil && res != nil && res.StreamID != "" {
+		if err := pc.recordingStarter.BeginPlayback(c.Request.Context(), res.StreamID); err != nil && app.ZapLog != nil {
+			app.ZapLog.Warn("点播成功后启动云端录像失败", zap.String("streamId", res.StreamID), zap.Error(err))
+		}
+	}
 	finishPlaybackAuthorizationAudit(audit, res)
 	pc.Success(c, res)
 }
@@ -198,10 +203,8 @@ func isSecurePlaybackRequest(request *http.Request) bool {
 
 // Stop 停播
 //
-// 响应 data 结构:{released bool, streamId string, reason string?}
-//   - released=true:通道级停流(BYE + CloseRtpServer + Unbind + ClearStream 全套已执行),前端应刷新列表把"直播中"清掉
-//   - released=false:仅结束当前观看者的会话,通道流仍在(通常因 CloudRecordingEnabled),前端应展示 info 提示不刷新
-//   - reason:仅 released=false 时给出,当前枚举 "cloud_recording_active";供日志/前端调试,不参与 UI 分支
+// 响应 data 结构:{released bool, streamId string}。点播 service 会在释放实时流前
+// 统一收尾本次云端录像。
 //
 // @Router /api/gb28181/play/{streamId} [delete]
 func (pc *PlayController) Stop(c *gin.Context) {
@@ -217,14 +220,6 @@ func (pc *PlayController) Stop(c *gin.Context) {
 	if !pc.streamVisible(c, streamID) {
 		return
 	}
-	if pc.shouldKeepStream(c, streamID) {
-		pc.Success(c, gin.H{
-			"released": false,
-			"streamId": streamID,
-			"reason":   "cloud_recording_active",
-		}, "已停止观看,通道云端录制仍在继续")
-		return
-	}
 	if err := pc.svc.Stop(c.Request.Context(), streamID); err != nil {
 		pc.FailAndAbort(c, "停止流失败", err)
 		return
@@ -233,24 +228,6 @@ func (pc *PlayController) Stop(c *gin.Context) {
 		"released": true,
 		"streamId": streamID,
 	}, "已停止直播")
-}
-
-// shouldKeepStream 决定是否保留上游流。未注入 policy 视作 keep=false(单元测试 / gb28181 disabled
-// 场景走真停);policy 查询报错视作 keep=true 保守派——录制中的流误停不可逆,而会话残留 5min
-// reconciler 会兜底清理。
-func (pc *PlayController) shouldKeepStream(c *gin.Context, streamID string) bool {
-	if pc.retentionPolicy == nil {
-		return false
-	}
-	keep, err := pc.retentionPolicy.ShouldKeepStream(c.Request.Context(), streamID)
-	if err != nil {
-		if app.ZapLog != nil {
-			app.ZapLog.Warn("retention policy 查询失败,保守视作保留流",
-				zap.String("streamId", streamID), zap.Error(err))
-		}
-		return true
-	}
-	return keep
 }
 
 // mapPlayErr 把 service 错误翻译成更友好的消息

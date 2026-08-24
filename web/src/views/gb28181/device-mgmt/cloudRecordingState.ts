@@ -40,7 +40,7 @@ export function cloudRecordingStateMeta(state: CloudRecordingState | null | unde
         case "recording":
             return { label: "录像中", tone: "success", loading: false, tooltip: "" };
         case "waiting":
-            return { label: "等待设备/流", tone: "warning", loading: false, tooltip: error };
+            return { label: "等待点播", tone: "warning", loading: false, tooltip: error };
         case "stopping":
             return { label: "停止中", tone: "warning", loading: true, tooltip: "" };
         case "failed":

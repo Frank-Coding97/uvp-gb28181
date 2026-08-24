@@ -364,8 +364,8 @@ type onStreamNoneReaderBody struct {
 	Schema string `json:"schema"`
 }
 
-// OnStreamNoneReader 无人观看 → ZLM 询问是否关流
-// 返回 close=true 让 ZLM 立即关流;同时异步向设备发 BYE 释放上行
+// OnStreamNoneReader 无人观看 → ZLM 询问是否关流。
+// GB 实时流返回 close=false，由点播 service 按“录像收尾 → BYE → 关 RTP”顺序释放。
 func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 	var body onStreamNoneReaderBody
 	_ = c.ShouldBindJSON(&body)
@@ -408,8 +408,9 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 				}
 			}
 		}
-	} else if closeStream && h.stopper != nil && body.Stream != "" {
-		// 动态流名不会跨代复用，保留历史快速关闭行为。
+	} else if closeStream && body.App == "rtp" && h.stopper != nil && body.Stream != "" {
+		// 动态 GB 实时流也必须走受控关闭，避免 ZLM 在 StopRecord 前先销毁媒体源。
+		closeStream = false
 		go func(streamID string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -418,6 +419,14 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 					zap.String("stream", streamID), zap.Error(err))
 			} else {
 				app.ZapLog.Info("无人观看自动断流", zap.String("stream", streamID))
+			}
+		}(body.Stream)
+	} else if closeStream && h.stopper != nil && body.Stream != "" {
+		go func(streamID string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := h.stopper.Stop(ctx, streamID); err != nil {
+				app.ZapLog.Warn("无人观看自动断流失败", zap.String("stream", streamID), zap.Error(err))
 			}
 		}(body.Stream)
 	}

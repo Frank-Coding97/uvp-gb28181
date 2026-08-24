@@ -23,10 +23,11 @@ type stopTestPlayService struct {
 	stopCalls atomic.Int32
 	stopErr   error
 	startErr  error
+	result    *play.Result
 }
 
 func (s *stopTestPlayService) Start(context.Context, string, string) (*play.Result, error) {
-	return nil, s.startErr
+	return s.result, s.startErr
 }
 
 func TestPlayControllerStartMapsGlobalTimeoutToGatewayTimeout(t *testing.T) {
@@ -48,17 +49,19 @@ func (s *stopTestPlayService) Stop(context.Context, string) error {
 	return s.stopErr
 }
 
-type stopTestRetentionPolicy struct {
-	keep bool
-	err  error
+type stopTestRecordingStarter struct {
+	beginCalls atomic.Int32
+	streamID   atomic.Value
 }
 
-func (p stopTestRetentionPolicy) ShouldKeepStream(context.Context, string) (bool, error) {
-	return p.keep, p.err
+func (l *stopTestRecordingStarter) BeginPlayback(_ context.Context, streamID string) error {
+	l.streamID.Store(streamID)
+	l.beginCalls.Add(1)
+	return nil
 }
 
 // buildStopRouter 装配一个仅挂 Stop 路由的最小 router,seed 一条 dept10 的通道
-// 用于 stopPlay 主路径断言,通过可变参数决定是否绑定 retention policy。
+// 用于 stopPlay 主路径断言。
 func buildStopRouter(t *testing.T, svc gbcontrollers.PlayService, opts ...gbcontrollers.PlayControllerOption) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -78,29 +81,41 @@ func serveStop(router *gin.Engine, streamID string) *httptest.ResponseRecorder {
 	return recorder
 }
 
-func TestPlayControllerStopKeepsCloudRecordingStream(t *testing.T) {
+func TestPlayControllerStartBeginsRecordingForReturnedStream(t *testing.T) {
+	service := &stopTestPlayService{result: &play.Result{StreamID: "dept10-stream"}}
+	starter := &stopTestRecordingStarter{}
+	router := buildStopRouter(t, service)
+	controller := gbcontrollers.NewPlayController(service, gbcontrollers.WithPlaybackRecordingStarter(starter))
+	router.POST("/start/:deviceId/:channelId", controller.Start)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/start/device/channel", nil))
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.EqualValues(t, 1, starter.beginCalls.Load())
+	assert.Equal(t, "dept10-stream", starter.streamID.Load())
+}
+
+func TestPlayControllerStopDelegatesLifecycleCleanupToPlayService(t *testing.T) {
 	service := &stopTestPlayService{}
-	router := buildStopRouter(t, service,
-		gbcontrollers.WithStreamRetentionPolicy(stopTestRetentionPolicy{keep: true}))
+	router := buildStopRouter(t, service)
 
 	recorder := serveStop(router, "dept10-stream")
 
 	require.Equal(t, http.StatusOK, recorder.Code)
 	body := unmarshal(t, recorder)
 	assert.EqualValues(t, 0, body["code"])
-	assert.Equal(t, "已停止观看,通道云端录制仍在继续", body["message"])
+	assert.Equal(t, "已停止直播", body["message"])
 	data, ok := body["data"].(map[string]any)
 	require.True(t, ok, "response.data 应该是对象: %v", body["data"])
-	assert.Equal(t, false, data["released"])
-	assert.Equal(t, "cloud_recording_active", data["reason"])
+	assert.Equal(t, true, data["released"])
 	assert.Equal(t, "dept10-stream", data["streamId"])
-	assert.EqualValues(t, 0, service.stopCalls.Load())
+	assert.EqualValues(t, 1, service.stopCalls.Load())
 }
 
 func TestPlayControllerStopReleasesUnrecordedStream(t *testing.T) {
 	service := &stopTestPlayService{}
-	router := buildStopRouter(t, service,
-		gbcontrollers.WithStreamRetentionPolicy(stopTestRetentionPolicy{keep: false}))
+	router := buildStopRouter(t, service)
 
 	recorder := serveStop(router, "dept10-stream")
 
@@ -117,8 +132,7 @@ func TestPlayControllerStopReleasesUnrecordedStream(t *testing.T) {
 
 func TestPlayControllerStopReturnsErrorWhenServiceFails(t *testing.T) {
 	service := &stopTestPlayService{stopErr: errors.New("bye 失败")}
-	router := buildStopRouter(t, service,
-		gbcontrollers.WithStreamRetentionPolicy(stopTestRetentionPolicy{keep: false}))
+	router := buildStopRouter(t, service)
 
 	recorder := serveStop(router, "dept10-stream")
 
@@ -128,25 +142,8 @@ func TestPlayControllerStopReturnsErrorWhenServiceFails(t *testing.T) {
 	assert.EqualValues(t, 1, service.stopCalls.Load())
 }
 
-func TestPlayControllerStopTreatsPolicyLookupErrorAsKeep(t *testing.T) {
-	service := &stopTestPlayService{}
-	router := buildStopRouter(t, service,
-		gbcontrollers.WithStreamRetentionPolicy(stopTestRetentionPolicy{err: errors.New("db 抖动")}))
-
-	recorder := serveStop(router, "dept10-stream")
-
-	require.Equal(t, http.StatusOK, recorder.Code)
-	body := unmarshal(t, recorder)
-	assert.EqualValues(t, 0, body["code"])
-	data, ok := body["data"].(map[string]any)
-	require.True(t, ok)
-	assert.Equal(t, false, data["released"], "policy 查询报错时保守视作 keep=true,不释放流")
-	assert.EqualValues(t, 0, service.stopCalls.Load())
-}
-
 func TestPlayControllerStopWithoutPolicyReleases(t *testing.T) {
 	service := &stopTestPlayService{}
-	// 不注入 WithStreamRetentionPolicy —— 视作 keep=false 走真停(Q2 拍板)
 	router := buildStopRouter(t, service)
 
 	recorder := serveStop(router, "dept10-stream")

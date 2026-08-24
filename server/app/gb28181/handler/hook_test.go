@@ -218,7 +218,7 @@ func postJSON(t *testing.T, e *gin.Engine, path string, body interface{}) *httpt
 	return rr
 }
 
-// TestHookOnStreamNoneReaderTriggersStop T7-测1: 无人观看 hook → close=true + 异步发 BYE
+// TestHookOnStreamNoneReaderTriggersStop T7-测1: GB 实时流无人观看 → close=false + 服务端受控停流
 func TestHookOnStreamNoneReaderTriggersStop(t *testing.T) {
 	n := stream.NewNotifier()
 	stopper := &mockStopper{}
@@ -240,8 +240,8 @@ func TestHookOnStreamNoneReaderTriggersStop(t *testing.T) {
 	if body["code"].(float64) != 0 {
 		t.Errorf("应返 code=0,实际 %v", body["code"])
 	}
-	if close, ok := body["close"].(bool); !ok || !close {
-		t.Errorf("应返 close=true 让 ZLM 立即关流,实际 %v", body["close"])
+	if close, ok := body["close"].(bool); !ok || close {
+		t.Errorf("应返 close=false 由服务端先收尾录像再关流,实际 %v", body["close"])
 	}
 
 	// stopper 是 goroutine 调用,等一下

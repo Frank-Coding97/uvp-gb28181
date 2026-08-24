@@ -158,6 +158,8 @@ type Service struct {
 	nodeClient     func(*node.Node) ZLM
 	diagnosticSink diagnosis.DiagnosticSink
 	liveReady      func(LiveSession)
+	recordingMu    sync.RWMutex
+	recording      PlaybackRecordingLifecycle
 
 	liveCoordinatorMu sync.Mutex
 	liveCoordinator   *Coordinator
@@ -172,6 +174,10 @@ type Service struct {
 // 由 snapshot.Service 实现;为 nil 时 Start 静默跳过,主链路零影响。
 type SnapshotService interface {
 	FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID, channelID string)
+}
+
+type PlaybackRecordingLifecycle interface {
+	EndPlayback(context.Context, string) error
 }
 
 // Option 装配可选能力
@@ -290,6 +296,24 @@ func (s *Service) unbindLocation(ref stream.LiveRef) {
 
 // SetReadyTimings 给测试调小等待
 func (s *Service) SetReadyTimings(wait, poll time.Duration) { s.readyWait, s.pollEvery = wait, poll }
+
+func (s *Service) SetPlaybackRecordingLifecycle(lifecycle PlaybackRecordingLifecycle) {
+	s.recordingMu.Lock()
+	s.recording = lifecycle
+	s.recordingMu.Unlock()
+}
+
+func (s *Service) endPlaybackRecording(ctx context.Context, streamID string) {
+	s.recordingMu.RLock()
+	lifecycle := s.recording
+	s.recordingMu.RUnlock()
+	if lifecycle == nil {
+		return
+	}
+	if err := lifecycle.EndPlayback(ctx, streamID); err != nil && app.ZapLog != nil {
+		app.ZapLog.Warn("停流前收尾云端录像失败", zap.String("streamId", streamID), zap.Error(err))
+	}
+}
 
 // tryReuseStream 尝试复用通道现有流。
 //
@@ -841,6 +865,7 @@ func (s *Service) stopDirect(ctx context.Context, streamID string) error {
 		}
 	}
 
+	s.endPlaybackRecording(ctx, streamID)
 	byeErr := s.inviter.Bye(ctx, s.sessions, streamID)
 
 	client, clientErr := s.clientForStream(streamID)
@@ -888,7 +913,7 @@ func (s *Service) ShouldCloseOnNoneReader(ctx context.Context, streamID string) 
 	if ch == nil {
 		return true, nil
 	}
-	return ch.OnDemandLive && !ch.CloudRecordingEnabled, nil
+	return ch.OnDemandLive, nil
 }
 
 // buildResultFor 构造播放地址,host 由 Start 传(多节点路径取选中 node host,单节点取 cfg.ZLM.Host)

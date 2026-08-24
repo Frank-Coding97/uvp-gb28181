@@ -7,7 +7,7 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
 
-func TestShouldCloseOnNoneReaderHonorsCloudRecording(t *testing.T) {
+func TestShouldCloseOnNoneReaderIgnoresCloudRecordingPreference(t *testing.T) {
 	tests := []struct {
 		name           string
 		onDemand       bool
@@ -15,7 +15,7 @@ func TestShouldCloseOnNoneReaderHonorsCloudRecording(t *testing.T) {
 		want           bool
 	}{
 		{name: "按需且未录像", onDemand: true, cloudRecording: false, want: true},
-		{name: "按需且录像中", onDemand: true, cloudRecording: true, want: false},
+		{name: "按需且开启录像", onDemand: true, cloudRecording: true, want: true},
 		{name: "常驻且未录像", onDemand: false, cloudRecording: false, want: false},
 		{name: "常驻且录像中", onDemand: false, cloudRecording: true, want: false},
 	}

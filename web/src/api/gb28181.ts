@@ -141,14 +141,11 @@ export const authorizeFixedPlayback = (deviceId: string, channelId: string) =>
 
 /**
  * 停播响应
- * - released=true:通道级停流,前端应刷新列表清"直播中"徽章
- * - released=false:仅结束当前观看,通道流仍在(如云端录制中),前端展示 info 不刷新
- * - reason:仅 released=false 时给出,当前唯一枚举 cloud_recording_active
+ * - released=true:录像收尾后完成通道级停流,前端刷新列表清"直播中"徽章
  */
 export interface StopPlayResult {
   released: boolean;
   streamId: string;
-  reason?: "cloud_recording_active";
 }
 
 /** 停播 */

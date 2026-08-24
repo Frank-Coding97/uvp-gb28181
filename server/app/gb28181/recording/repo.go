@@ -50,7 +50,7 @@ func (r *GormRepo) SetDesired(ctx context.Context, channelID uint, enabled bool)
 	now := time.Now()
 	state := models.CloudRecordingStateStopping
 	if enabled {
-		state = models.CloudRecordingStateStarting
+		state = models.CloudRecordingStateWaiting
 	}
 	result := r.db.WithContext(ctx).Model(&models.GbChannel{}).
 		Where("id = ?", channelID).

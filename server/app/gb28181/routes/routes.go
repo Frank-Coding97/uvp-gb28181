@@ -217,6 +217,11 @@ func SetPlayService(svc *gbplay.Service) {
 		configureAutoOnDemandService(nil)
 		return
 	}
+	if recordingService == nil {
+		svc.SetPlaybackRecordingLifecycle(nil)
+	} else {
+		svc.SetPlaybackRecordingLifecycle(recordingService)
+	}
 	hookController.SetPlayStopper(svc)
 	hookController.SetNoneReaderPolicy(svc)
 	hookController.SetPlaybackMediaContextResolver(svc)
@@ -271,7 +276,7 @@ func SetTalkService(service *talk.Service, resolver gbhandler.NodeUUIDResolver) 
 func rebuildPlayController() {
 	if recordingService != nil {
 		playController = gbcontrollers.NewPlayController(playService,
-			gbcontrollers.WithStreamRetentionPolicy(recordingService))
+			gbcontrollers.WithPlaybackRecordingStarter(recordingService))
 		return
 	}
 	playController = gbcontrollers.NewPlayController(playService)
@@ -445,6 +450,13 @@ func currentDeviceTrafficController() *gbcontrollers.DeviceTrafficController {
 
 func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUUIDResolver, indexer gbhandler.RecordMP4Indexer) {
 	recordingService = service
+	if playService != nil {
+		if service == nil {
+			playService.SetPlaybackRecordingLifecycle(nil)
+		} else {
+			playService.SetPlaybackRecordingLifecycle(service)
+		}
+	}
 	if service == nil {
 		cloudRecordingController.SetManager(nil)
 	} else {

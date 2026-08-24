@@ -244,6 +244,7 @@ func (s *Service) StopIfPersistedCurrent(ctx context.Context, streamID, ssrc str
 		_, err := s.StopIfCurrent(ctx, pending)
 		return err
 	}
+	s.endPlaybackRecording(ctx, streamID)
 	if err := s.closePersistedRTP(ctx, streamID); err != nil {
 		return err
 	}
@@ -311,6 +312,7 @@ func (s *Service) stopCurrentResult(ctx context.Context, result *Result) error {
 	defer cancel()
 	ctx = cleanupCtx
 	ref := resultLiveRef(result)
+	s.endPlaybackRecording(ctx, ref.StreamID)
 
 	var byeErr error
 	if inviter, ok := s.inviter.(conditionalInviter); ok {

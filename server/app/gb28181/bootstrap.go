@@ -865,7 +865,7 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 		return
 	}
 	repo := gbrecording.NewGormRepo(app.DB())
-	recordingSvc = gbrecording.NewService(repo, playSvc, playSvc, zlmLocationMap, zlmRegistry,
+	recordingSvc = gbrecording.NewService(repo, zlmLocationMap, zlmRegistry,
 		func(n *node.Node) gbrecording.RecorderClient { return gbzlm.NewClientForNode(n) })
 	indexer := gbrecording.NewFileIndexer(repo, zlmLocationMap)
 	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
