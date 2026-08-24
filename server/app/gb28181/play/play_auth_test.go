@@ -69,8 +69,8 @@ func TestDynamicPlaybackGetsIndependentGenerationBoundAuthorization(t *testing.T
 	if _, err := service.tokenIssuer.(playauth.Verifier).Verify(firstToken, binding); err != nil {
 		t.Fatalf("issued token did not verify: %v", err)
 	}
-	if snapshot.called.Load() != 2 {
-		t.Fatalf("每次成功点播都应触发快照,实际调用 %d 次", snapshot.called.Load())
+	if snapshot.called.Load() != 1 {
+		t.Fatalf("复用正在播放的流不应重复抓拍,实际调用 %d 次", snapshot.called.Load())
 	}
 	snapshotCall, _ := snapshot.lastArgs.Load().(snapshotArgs)
 	if snapshotCall.playToken == "" {

@@ -112,8 +112,8 @@ func TestService_DoCapture_HappyPath(t *testing.T) {
 	}
 }
 
-// TestService_FireAfterPlay_EachPlayCaptures 每次成功点播都应刷新快照。
-func TestService_FireAfterPlay_EachPlayCaptures(t *testing.T) {
+// TestService_FireAfterPlay_EachTriggerCaptures 每次明确触发都应执行抓拍。
+func TestService_FireAfterPlay_EachTriggerCaptures(t *testing.T) {
 	tmp := t.TempDir()
 	client := &fakeZLMClient{returnMe: []byte{0xFF, 0xD8, 0xFF}}
 	repo := &fakeRepo{}
@@ -127,7 +127,7 @@ func TestService_FireAfterPlay_EachPlayCaptures(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	if atomic.LoadInt32(&client.called) != 2 {
-		t.Errorf("两次成功点播应抓取两次快照,实际 called=%d", client.called)
+		t.Errorf("两次明确触发应抓取两次快照,实际 called=%d", client.called)
 	}
 }
 

@@ -807,8 +807,8 @@ func TestStartReuseExistingStream(t *testing.T) {
 	if ch.StreamID != "existing-stream-id" {
 		t.Errorf("复用流不应修改通道 streamID,got %q", ch.StreamID)
 	}
-	if snapshot.called.Load() != 1 {
-		t.Errorf("复用流点播成功也应刷新快照,实际调用 %d 次", snapshot.called.Load())
+	if snapshot.called.Load() != 0 {
+		t.Errorf("复用正在播放的流不应刷新快照,实际调用 %d 次", snapshot.called.Load())
 	}
 }
 

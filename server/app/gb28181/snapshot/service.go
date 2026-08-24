@@ -67,7 +67,7 @@ func New(cfg Config) *Service {
 	}
 }
 
-// FireAfterPlay 由 play.Service 在 WaitReady 之后 fire-and-forget 调。
+// FireAfterPlay 由 play.Service 在新流 WaitReady 之后 fire-and-forget 调。
 // 内部起 goroutine 异步抓帧,不阻塞调用方;任何失败都是 warn 级不 panic。
 //
 // nodeID:   多节点场景传 pickedNode.ID.string(),单节点传空串
