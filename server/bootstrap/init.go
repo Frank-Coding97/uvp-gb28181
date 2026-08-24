@@ -12,7 +12,6 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
 
-	gbdevice "uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
@@ -60,13 +59,6 @@ func init() {
 		"postgresql": app.GormDbPostgreSql,
 	}); err != nil {
 		log.Fatal("数据库迁移失败: " + err.Error())
-	}
-
-	// 迁移后数据修复:存量 owner_dept_id=0 设备回填默认部门(幂等,设备数据权限前置)
-	if n, err := gbdevice.BackfillZeroOwnerDeptFromConfig(context.Background(), app.GormDbMysql); err != nil {
-		log.Printf("警告: 存量设备归属回填跳过: %v", err)
-	} else if n > 0 {
-		log.Printf("存量设备归属回填: %d 台 owner=0 设备已归入默认部门", n)
 	}
 
 	// 初始化casbin

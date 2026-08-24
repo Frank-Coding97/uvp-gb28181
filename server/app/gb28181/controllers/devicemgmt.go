@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,7 +16,6 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
-	gbdevice "uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
@@ -167,18 +167,10 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 
 	q := db.WithContext(c).Model(&gbmodels.GbDevice{}).Scopes(visibleScope(c))
 
-	// 分配状态过滤(设备分配页三档 Tab):unassigned=归属默认部门 / assigned=已流转
-	if assignment := c.Query("assignment"); assignment == "unassigned" || assignment == "assigned" {
-		defaultDeptID, err := gbdevice.DefaultOwnerDeptIDWithDB(c, db)
-		if err != nil {
-			dc.FailAndAbort(c, "获取默认部门失败", err)
-			return
-		}
-		if assignment == "unassigned" {
-			q = q.Where("owner_dept_id = ?", defaultDeptID)
-		} else {
-			q = q.Where("owner_dept_id <> ?", defaultDeptID)
-		}
+	q, err := applyAssignmentFilter(q, c.Query("assignment"))
+	if err != nil {
+		dc.Fail(c, "分配状态参数错误", err, http.StatusBadRequest)
+		return
 	}
 	// 左侧部门树点选过滤(前端传 ownerDeptId)
 	if deptID, err := strconv.Atoi(c.Query("ownerDeptId")); err == nil && deptID > 0 {
@@ -328,6 +320,19 @@ func (dc *DeviceMgmtController) ListDevices(c *gin.Context) {
 		"list": vos, "total": total, "onlineTotal": onlineTotal, "offlineTotal": offlineTotal,
 		"page": page, "pageSize": pageSize,
 	})
+}
+
+func applyAssignmentFilter(db *gorm.DB, assignment string) (*gorm.DB, error) {
+	switch assignment {
+	case "", "all":
+		return db, nil
+	case "unassigned":
+		return db.Where("owner_dept_id = ?", 0), nil
+	case "assigned":
+		return db.Where("owner_dept_id > ?", 0), nil
+	default:
+		return nil, fmt.Errorf("assignment must be all, unassigned or assigned")
+	}
 }
 
 type chStats struct{ total, online int64 }
