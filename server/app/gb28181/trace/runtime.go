@@ -72,18 +72,30 @@ func (m *Module) SetPlatformAddr(addr string) {
 }
 
 // resolveAddr 把 wildcard 通配符地址换成 platformAddr,其他地址原样返回
-func (m *Module) resolveAddr(addr string) string {
-	if m.platformAddr == "" {
+func (m *Module) resolveAddr(addr, peerAddr string) string {
+	if !strings.HasPrefix(addr, "[::]:") && !strings.HasPrefix(addr, "0.0.0.0:") {
 		return addr
 	}
-	if addr == "" {
-		return addr
-	}
-	// [::]:port / 0.0.0.0:port 都是 dual-stack socket 的通配符表示
-	if strings.HasPrefix(addr, "[::]:") || strings.HasPrefix(addr, "0.0.0.0:") {
+	if m.platformAddr != "" {
 		return m.platformAddr
 	}
-	return addr
+	port := ""
+	if _, parsedPort, err := net.SplitHostPort(addr); err == nil {
+		port = parsedPort
+	}
+	if peerAddr != "" {
+		if connection, err := net.DialTimeout("udp", peerAddr, 100*time.Millisecond); err == nil {
+			localHost, _, splitErr := net.SplitHostPort(connection.LocalAddr().String())
+			_ = connection.Close()
+			if splitErr == nil && net.ParseIP(localHost) != nil {
+				return net.JoinHostPort(localHost, port)
+			}
+		}
+	}
+	if port != "" {
+		return "本机 SIP:" + port
+	}
+	return "本机 SIP"
 }
 
 func NewRuntime(cfg gbconfig.TraceConfig) Runtime {
@@ -284,8 +296,8 @@ func (m *Module) WriteObserver(props sip.TransportWriteProps, data []byte) {
 		OccurredAt: m.nowUTC(),
 		Direction:  DirectionOutbound,
 		Transport:  props.Transport,
-		LocalAddr:  m.resolveAddr(addrString(props.LocalAddr)),
-		RemoteAddr: m.resolveAddr(addrString(props.RemoteAddr)),
+		LocalAddr:  m.resolveAddr(addrString(props.LocalAddr), addrString(props.RemoteAddr)),
+		RemoteAddr: addrString(props.RemoteAddr),
 		Raw:        data,
 	})
 }
@@ -308,8 +320,8 @@ func (m *Module) emitFrame(frame Frame) {
 			OccurredAt: m.nowUTC(),
 			Direction:  DirectionInbound,
 			Transport:  frame.Props.Transport,
-			LocalAddr:  m.resolveAddr(addrString(frame.Props.LocalAddr)),
-			RemoteAddr: m.resolveAddr(addrString(frame.Props.RemoteAddr)),
+			LocalAddr:  m.resolveAddr(addrString(frame.Props.LocalAddr), addrString(frame.Props.RemoteAddr)),
+			RemoteAddr: addrString(frame.Props.RemoteAddr),
 			Raw:        frame.Data,
 			Malformed:  frame.Malformed,
 			ParseError: frame.Error,

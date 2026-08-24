@@ -48,6 +48,7 @@ func (s *RelationalStore) InsertBatch(ctx context.Context, events []StoredEvent)
 			DeviceID: event.DeviceID, Method: event.Method, StatusCode: event.StatusCode,
 			CallID: event.CallID, CSeq: event.CSeq, CSeqMethod: event.CSeqMethod,
 			FromURI: event.FromURI, ToURI: event.ToURI, UserAgent: event.UserAgent,
+			FromID: event.FromID, ToID: event.ToID, BusinessCode: string(event.BusinessCode), BusinessType: event.BusinessType, BusinessConfidence: event.BusinessConfidence,
 			Malformed: event.Malformed, ParseError: event.ParseError,
 			PayloadNonce:      append([]byte(nil), event.Payload.Nonce...),
 			PayloadCiphertext: append([]byte(nil), event.Payload.Ciphertext...),

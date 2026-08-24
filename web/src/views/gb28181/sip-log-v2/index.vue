@@ -27,15 +27,32 @@ import {
 
 type FilterScope = "all" | "anomaly" | "register_failure" | "play_stuck";
 type ViewMode = "table" | "terminal";
+type TraceWindowMinutes = 5 | 10 | 30 | 60;
+type TraceWindowPreset = TraceWindowMinutes | "custom";
 
 const route = useRoute();
 
+const DEFAULT_TRACE_WINDOW_MINUTES: TraceWindowMinutes = 5;
+const traceWindowOptions: Array<{ value: TraceWindowMinutes; label: string }> = [
+    { value: 5, label: "最近 5 分钟" },
+    { value: 10, label: "最近 10 分钟" },
+    { value: 30, label: "最近 30 分钟" },
+    { value: 60, label: "最近 1 小时" }
+];
+
+function createLatestTraceRange(minutes: TraceWindowMinutes): string[] {
+    const now = dayjs();
+    return [now.subtract(minutes, "minute").format("YYYY-MM-DD HH:mm:ss"), now.format("YYYY-MM-DD HH:mm:ss")];
+}
+
 const filters = ref({
-    range: [dayjs().subtract(15, "minute").format("YYYY-MM-DD HH:mm:ss"), dayjs().format("YYYY-MM-DD HH:mm:ss")] as string[],
+    range: [] as string[],
     scope: "all" as FilterScope,
     diagnosisCode: "" as TraceDiagnosisCode | "",
     keyword: ""
 });
+const traceWindowPreset = ref<TraceWindowPreset>(DEFAULT_TRACE_WINDOW_MINUTES);
+const autoTraceRange = computed(() => traceWindowPreset.value !== "custom");
 
 const sessions = ref<TraceSessionSummary[]>([]);
 const sessionLoading = ref(false);
@@ -61,9 +78,12 @@ const drillSession = computed<TraceSessionSummary | null>(() => {
 const showDetailPanel = computed(() => !!drillCallId.value);
 
 function buildBaseSessionQuery(): TraceSessionQuery {
+    const [from, to] = autoTraceRange.value
+        ? createLatestTraceRange(traceWindowPreset.value as TraceWindowMinutes)
+        : filters.value.range;
     return {
-        from: dayjs(filters.value.range[0]).toISOString(),
-        to: dayjs(filters.value.range[1]).toISOString(),
+        from: dayjs(from).toISOString(),
+        to: dayjs(to).toISOString(),
         keyword: filters.value.keyword.trim() || undefined,
         limit: 200
     };
@@ -159,9 +179,12 @@ async function loadDrillMessages() {
     if (!drillCallId.value) return;
     detailLoading.value = true;
     try {
+        const [from, to] = autoTraceRange.value
+            ? createLatestTraceRange(traceWindowPreset.value as TraceWindowMinutes)
+            : filters.value.range;
         const response = await listTraceSessionMessages(drillCallId.value, {
-            from: dayjs(filters.value.range[0]).toISOString(),
-            to: dayjs(filters.value.range[1]).toISOString(),
+            from: dayjs(from).toISOString(),
+            to: dayjs(to).toISOString(),
             limit: 500
         });
         if (response.code === 0) {
@@ -238,9 +261,26 @@ async function refresh() {
 }
 
 function resetFilters() {
+    traceWindowPreset.value = DEFAULT_TRACE_WINDOW_MINUTES;
+    filters.value.range = [];
     filters.value.scope = "all";
     filters.value.diagnosisCode = "";
     filters.value.keyword = "";
+}
+
+function onRangeChange(range?: string[]) {
+    if (range?.length === 2) {
+        traceWindowPreset.value = "custom";
+        return;
+    }
+    traceWindowPreset.value = DEFAULT_TRACE_WINDOW_MINUTES;
+    filters.value.range = [];
+}
+
+async function selectTimePreset(value: TraceWindowMinutes) {
+    traceWindowPreset.value = value;
+    filters.value.range = [];
+    await refresh();
 }
 
 function search() {
@@ -312,6 +352,7 @@ onMounted(async () => {
     }
     if (from && typeof from === "string" && to && typeof to === "string") {
         filters.value.range = [from, to];
+        traceWindowPreset.value = "custom";
     }
 
     await Promise.all([loadHealth(), loadSessions(), loadStats()]);
@@ -419,7 +460,22 @@ onBeforeUnmount(() => {
                         format="MM-DD HH:mm"
                         style="width: 320px"
                         allow-clear
+                        @change="onRangeChange"
                     />
+                    <a-select
+                        v-model="traceWindowPreset"
+                        class="window-preset-select"
+                        style="width: 160px"
+                        @change="selectTimePreset"
+                    >
+                        <template #prefix><Clock :size="14" stroke-width="2.2" aria-hidden="true" /></template>
+                        <a-option v-for="item in traceWindowOptions" :key="item.value" :value="item.value">
+                            {{ item.label }}
+                        </a-option>
+                        <a-option v-if="traceWindowPreset === 'custom'" value="custom" disabled>
+                            自定义区间
+                        </a-option>
+                    </a-select>
                     <a-input
                         v-model="filters.keyword"
                         allow-clear
@@ -656,6 +712,17 @@ onBeforeUnmount(() => {
 
 /* s-layout-search 内嵌样式微调 */
 .sip-log-search { margin-bottom: 0; }
+.window-preset-select { flex: 0 0 160px; }
+.window-preset-select :deep(.arco-select-view) {
+    color: color-mix(in srgb, var(--uvp-brand) 78%, var(--uvp-text-primary));
+    background: color-mix(in srgb, var(--uvp-brand) 7%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-panel-border));
+    border-radius: 7px;
+    box-shadow: 0 1px 2px rgb(37 99 235 / 6%);
+    font-size: 12px;
+    font-weight: 550;
+}
+.window-preset-select :deep(.arco-select-view-prefix) { color: var(--uvp-brand); }
 
 .workspace {
     display: grid;

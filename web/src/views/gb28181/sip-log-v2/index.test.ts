@@ -1,5 +1,6 @@
 import { flushPromises, shallowMount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import dayjs from "dayjs";
 import SipLogPage from "./index.vue";
 import { sessionStateLabel } from "./helpers";
 
@@ -87,7 +88,7 @@ describe("SIP log workbench storage replacement regression", () => {
         expect(wrapper.find(".toolbar").exists()).toBe(true);
         expect(wrapper.find(".stat-band").exists()).toBe(true);
         expect(wrapper.find(".sip-log-search").exists()).toBe(true);
-        expect(wrapper.find("a-select-stub").exists()).toBe(false);
+        expect(wrapper.findAll("a-select-stub")).toHaveLength(1);
         expect(wrapper.get("a-input-stub").attributes("placeholder")).toBe("搜索设备 ID、名称或 Call-ID");
         expect(wrapper.find(".view-switch").exists()).toBe(true);
         expect(wrapper.findAll(".view-btn").map(button => button.text())).toEqual(["表格", "终端"]);
@@ -98,6 +99,55 @@ describe("SIP log workbench storage replacement regression", () => {
         expect(wrapper.text()).toContain("异常会话");
         expect(traceApi.listTraceSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
         expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    it("tracks the latest five minutes and restores that mode when reset", async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date("2026-08-24T13:57:02+08:00"));
+
+        const wrapper = mountPage();
+        await flushPromises();
+
+        const vm = wrapper.vm as unknown as {
+            filters: { range: string[]; scope: string; diagnosisCode: string; keyword: string };
+            autoTraceRange: boolean;
+            traceWindowPreset: 5 | 10 | 30 | 60 | "custom";
+            refresh: () => Promise<void>;
+            onRangeChange: (range?: string[]) => void;
+            selectTimePreset: (preset: 5 | 10 | 30 | 60) => Promise<void>;
+            resetFilters: () => void;
+        };
+        expect(vm.autoTraceRange).toBe(true);
+        expect(vm.traceWindowPreset).toBe(5);
+        expect(vm.filters.range).toEqual([]);
+
+        vi.setSystemTime(new Date("2026-08-24T13:59:02+08:00"));
+        await vm.refresh();
+        expect(vm.filters.range).toEqual([]);
+        expect(traceApi.listTraceSessions).toHaveBeenLastCalledWith(expect.objectContaining({
+            from: dayjs("2026-08-24 13:54:02").toISOString(),
+            to: dayjs("2026-08-24 13:59:02").toISOString()
+        }));
+
+        await vm.selectTimePreset(30);
+        expect(vm.traceWindowPreset).toBe(30);
+        expect(traceApi.listTraceSessions).toHaveBeenLastCalledWith(expect.objectContaining({
+            from: dayjs("2026-08-24 13:29:02").toISOString(),
+            to: dayjs("2026-08-24 13:59:02").toISOString()
+        }));
+
+        vm.filters.range = ["2026-08-23 09:00:00", "2026-08-23 10:00:00"];
+        vm.onRangeChange(vm.filters.range);
+        expect(vm.autoTraceRange).toBe(false);
+        expect(vm.traceWindowPreset).toBe("custom");
+        vi.setSystemTime(new Date("2026-08-24T14:01:02+08:00"));
+        await vm.refresh();
+        expect(vm.filters.range).toEqual(["2026-08-23 09:00:00", "2026-08-23 10:00:00"]);
+
+        vm.resetFilters();
+        expect(vm.autoTraceRange).toBe(true);
+        expect(vm.traceWindowPreset).toBe(5);
+        expect(vm.filters.range).toEqual([]);
     });
 
     it("shows the existing degraded state when the health API is unavailable", async () => {
@@ -231,6 +281,7 @@ describe("SIP session diagnosis labels", () => {
         firstAt: "2026-08-14T00:00:00Z", lastAt: "2026-08-14T00:00:01Z",
         messageCount: 2, inboundCount: 1, outboundCount: 1, methods: ["REGISTER"],
         finalStatus: 401, firstMethod: "REGISTER", requestCount: 1, finalResponseCount: 1,
+        businessCode: "register" as const, businessType: "注册",
         originalAvailable: true, originalExpiresAt: "2026-08-21T00:00:01Z",
         missingResponse: false, anomaly: false
     };

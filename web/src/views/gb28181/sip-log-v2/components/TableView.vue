@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { TraceSessionSummary as TraceSession } from "@/api/gb28181-trace";
+import type { TraceBusinessCode, TraceSessionSummary as TraceSession } from "@/api/gb28181-trace";
 import { formatDuration, formatFullTime, sessionStateLabel } from "../helpers";
 
 defineProps<{
@@ -14,11 +14,12 @@ const emit = defineEmits<{
 
 const columns = [
     { title: "#", slotName: "idx", width: 52, align: "center" as const },
-    { title: "起始方法", slotName: "method", width: 100 },
-    { title: "Source", slotName: "source", ellipsis: true, tooltip: true, width: 200 },
-    { title: "Destination", slotName: "destination", ellipsis: true, tooltip: true, width: 200 },
-    { title: "From", slotName: "from", ellipsis: true, tooltip: true, width: 200 },
-    { title: "To", slotName: "to", ellipsis: true, tooltip: true, width: 200 },
+    { title: "业务类型", slotName: "business", width: 118 },
+    { title: "起始方法", slotName: "method", width: 92 },
+    { title: "From 国标 ID", slotName: "from", width: 164 },
+    { title: "To 国标 ID", slotName: "to", width: 164 },
+    { title: "Source", slotName: "source", ellipsis: true, tooltip: true, width: 174 },
+    { title: "Destination", slotName: "destination", ellipsis: true, tooltip: true, width: 174 },
     { title: "报文数", slotName: "msgs", width: 76, align: "center" as const },
     { title: "起止时间", slotName: "time", width: 176 },
     { title: "时长", slotName: "duration", width: 84 },
@@ -29,10 +30,19 @@ function firstMethod(session: TraceSession): string {
     return session.firstMethod || (session.methods || [])[0] || "?";
 }
 function fromUri(session: TraceSession): string {
-    return session.fromUri || session.deviceId;
+    return session.fromId || session.deviceId || "-";
 }
 function toUri(session: TraceSession): string {
-    return session.toUri || "-";
+    return session.toId || "-";
+}
+
+function businessTone(code: TraceBusinessCode): string {
+    if (["realtime_play", "playback", "download", "talk", "broadcast"].includes(code)) return "media";
+    if (["keepalive", "register", "subscription", "ack"].includes(code)) return "connection";
+    if (["alarm", "hangup"].includes(code)) return "warning";
+    if (["catalog", "device_info", "device_status", "record_query", "mobile_position"].includes(code)) return "query";
+    if (["device_control", "ptz", "playback_control"].includes(code)) return "control";
+    return "unknown";
 }
 function sourceAddr(session: TraceSession): string {
     return session.sourceAddr || "-";
@@ -63,7 +73,7 @@ function methodTone(method: string): string {
             :loading="loading"
             :bordered="false"
             :pagination="false"
-            :scroll="{ x: 1400, y: '100%' }"
+            :scroll="{ x: 1540, y: '100%' }"
             :row-class="(record: TraceSession) => record.callId === selectedCallId ? 'row-active' : ''"
             @row-click="(record: TraceSession) => emit('select-session', record)"
         >
@@ -73,6 +83,12 @@ function methodTone(method: string): string {
             <template #method="{ record }">
                 <span :class="['method-chip', `chip-${methodTone(firstMethod(record))}`]">
                     {{ firstMethod(record) }}
+                </span>
+            </template>
+            <template #business="{ record }">
+                <span :class="['business-chip', `business-${businessTone(record.businessCode || 'unknown')}`]">
+                    <span class="business-dot" aria-hidden="true" />
+                    {{ record.businessType || "未知业务" }}
                 </span>
             </template>
             <template #source="{ record }">
@@ -129,6 +145,28 @@ function methodTone(method: string): string {
 .uri-cell { color: var(--uvp-text-secondary); font-size: 12px; }
 .addr-cell { color: var(--uvp-text-primary); font-size: 12px; }
 .msg-count { color: var(--uvp-text-primary); font-weight: 500; }
+
+.business-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 9px;
+    color: var(--business-color);
+    background: color-mix(in srgb, var(--business-color) 9%, transparent);
+    border: 1px solid color-mix(in srgb, var(--business-color) 20%, transparent);
+    border-radius: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+.business-dot { width: 5px; height: 5px; background: currentColor; border-radius: 50%; }
+.business-media { --business-color: #0f766e; }
+.business-connection { --business-color: #2563eb; }
+.business-warning { --business-color: #dc2626; }
+.business-query { --business-color: #7c3aed; }
+.business-control { --business-color: #c2410c; }
+.business-unknown { --business-color: var(--uvp-text-tertiary); }
 
 .method-chip {
     display: inline-flex;

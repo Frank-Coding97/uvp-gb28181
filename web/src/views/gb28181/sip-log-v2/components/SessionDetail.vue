@@ -69,27 +69,18 @@ function splitAddr(addr: string): { ip: string; port: string } {
     return { ip: addr.slice(0, idx), port: addr.slice(idx) };
 }
 
-// 后端 SessionSummary 没有 scenario 字段,前端根据 methods + finalStatus 推断
 function deriveScenario(session: TraceSession): string {
     if (session.diagnosis?.category === "register_failure") return "register-fail";
     if (session.diagnosis?.category === "play_stuck") return "invite-stuck";
-    const methods = session.methods || [];
-    const hasInvite = methods.includes("INVITE");
-    const hasRegister = methods.includes("REGISTER");
-    const hasSubscribe = methods.includes("SUBSCRIBE");
-    if (hasInvite) return "invite";
-    if (hasRegister && session.finalStatus === 401) return "register-challenge";
-    if (hasRegister) return "register";
-    if (hasSubscribe) return "subscribe";
-    return "keepalive";
+    return session.businessCode || "unknown";
 }
 
 function scenarioEmoji(session: TraceSession): string {
     const scenario = deriveScenario(session);
     if (scenario.startsWith("register")) return "📱";
-    if (scenario.startsWith("invite")) return "📞";
+    if (["invite-stuck", "realtime_play", "playback", "download", "talk", "broadcast"].includes(scenario)) return "📞";
     if (scenario === "keepalive") return "💓";
-    if (scenario === "subscribe") return "🔔";
+    if (scenario === "subscription") return "🔔";
     return "📋";
 }
 
@@ -97,14 +88,10 @@ function scenarioLabel(session: TraceSession): string {
     const scenario = deriveScenario(session);
     const map: Record<string, string> = {
         "register": "设备注册",
-        "register-challenge": "设备注册",
         "register-fail": "注册失败",
-        "invite": "点播会话",
         "invite-stuck": "点播卡住",
-        "keepalive": "心跳保持",
-        "subscribe": "目录订阅"
     };
-    return map[scenario] || "SIP 会话";
+    return map[scenario] || session.businessType || "未知业务";
 }
 
 function diagnosisStageLabel(stage: TraceSessionDiagnosis["stage"]): string {
@@ -177,6 +164,14 @@ async function copyCallId() {
             <div class="meta-item">
                 <span class="meta-key">设备</span>
                 <span class="meta-val mono">{{ session.deviceId }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-key">业务类型</span>
+                <span class="meta-val">{{ session.businessType || "未知业务" }}</span>
+            </div>
+            <div class="meta-item">
+                <span class="meta-key">From / To</span>
+                <span class="meta-val mono">{{ session.fromUri || "-" }} → {{ session.toUri || "-" }}</span>
             </div>
         </div>
 

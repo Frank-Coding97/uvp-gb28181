@@ -12,24 +12,29 @@ import (
 // StreamEvent 是 SSE 推送给客户端的一条报文摘要(已脱敏 + 元数据抽取)。
 // 主动跟 StoredEvent 分开,避免推送带上加密 payload 之类不需要的字段。
 type StreamEvent struct {
-	EventID    string    `json:"eventId"`
-	OccurredAt time.Time `json:"occurredAt"`
-	Direction  Direction `json:"direction"`
-	Transport  string    `json:"transport"`
-	LocalAddr  string    `json:"localAddr"`
-	RemoteAddr string    `json:"remoteAddr"`
-	DeviceID   string    `json:"deviceId"`
-	Method     string    `json:"method"`
-	StatusCode uint16    `json:"statusCode"`
-	CallID     string    `json:"callId"`
-	CSeq       uint32    `json:"cseq"`
-	CSeqMethod string    `json:"cseqMethod"`
-	FromURI    string    `json:"fromUri,omitempty"`
-	ToURI      string    `json:"toUri,omitempty"`
-	UserAgent  string    `json:"userAgent,omitempty"`
-	Malformed  bool      `json:"malformed"`
-	Payload    string    `json:"payload"` // 已脱敏(默认)或明文(sensitive=true 订阅)
-	Sensitive  bool      `json:"sensitive"`
+	EventID            string       `json:"eventId"`
+	OccurredAt         time.Time    `json:"occurredAt"`
+	Direction          Direction    `json:"direction"`
+	Transport          string       `json:"transport"`
+	LocalAddr          string       `json:"localAddr"`
+	RemoteAddr         string       `json:"remoteAddr"`
+	DeviceID           string       `json:"deviceId"`
+	Method             string       `json:"method"`
+	StatusCode         uint16       `json:"statusCode"`
+	CallID             string       `json:"callId"`
+	CSeq               uint32       `json:"cseq"`
+	CSeqMethod         string       `json:"cseqMethod"`
+	FromURI            string       `json:"fromUri,omitempty"`
+	ToURI              string       `json:"toUri,omitempty"`
+	FromID             string       `json:"fromId,omitempty"`
+	ToID               string       `json:"toId,omitempty"`
+	BusinessCode       BusinessCode `json:"businessCode"`
+	BusinessType       string       `json:"businessType"`
+	BusinessConfidence string       `json:"businessConfidence,omitempty"`
+	UserAgent          string       `json:"userAgent,omitempty"`
+	Malformed          bool         `json:"malformed"`
+	Payload            string       `json:"payload"` // 已脱敏(默认)或明文(sensitive=true 订阅)
+	Sensitive          bool         `json:"sensitive"`
 }
 
 // StreamFilter 是 SSE 客户端订阅时通过 URL 参数指定的过滤条件。

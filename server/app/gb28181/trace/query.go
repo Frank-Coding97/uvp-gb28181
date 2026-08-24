@@ -45,23 +45,28 @@ type MessageCursor struct {
 }
 
 type MessageSummary struct {
-	EventID    string    `json:"eventId"`
-	OccurredAt time.Time `json:"occurredAt"`
-	Direction  Direction `json:"direction"`
-	Transport  string    `json:"transport"`
-	LocalAddr  string    `json:"localAddr"`
-	RemoteAddr string    `json:"remoteAddr"`
-	DeviceID   string    `json:"deviceId"`
-	Method     string    `json:"method"`
-	StatusCode uint16    `json:"statusCode"`
-	CallID     string    `json:"callId"`
-	CSeq       uint32    `json:"cseq"`
-	CSeqMethod string    `json:"cseqMethod"`
-	FromURI    string    `json:"fromUri,omitempty"`
-	ToURI      string    `json:"toUri,omitempty"`
-	UserAgent  string    `json:"userAgent,omitempty"`
-	Malformed  bool      `json:"malformed"`
-	ParseError string    `json:"parseError,omitempty"`
+	EventID            string       `json:"eventId"`
+	OccurredAt         time.Time    `json:"occurredAt"`
+	Direction          Direction    `json:"direction"`
+	Transport          string       `json:"transport"`
+	LocalAddr          string       `json:"localAddr"`
+	RemoteAddr         string       `json:"remoteAddr"`
+	DeviceID           string       `json:"deviceId"`
+	Method             string       `json:"method"`
+	StatusCode         uint16       `json:"statusCode"`
+	CallID             string       `json:"callId"`
+	CSeq               uint32       `json:"cseq"`
+	CSeqMethod         string       `json:"cseqMethod"`
+	FromURI            string       `json:"fromUri,omitempty"`
+	ToURI              string       `json:"toUri,omitempty"`
+	FromID             string       `json:"fromId,omitempty"`
+	ToID               string       `json:"toId,omitempty"`
+	BusinessCode       BusinessCode `json:"businessCode"`
+	BusinessType       string       `json:"businessType"`
+	BusinessConfidence string       `json:"businessConfidence,omitempty"`
+	UserAgent          string       `json:"userAgent,omitempty"`
+	Malformed          bool         `json:"malformed"`
+	ParseError         string       `json:"parseError,omitempty"`
 }
 
 type MessagePage struct {

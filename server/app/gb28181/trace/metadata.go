@@ -2,21 +2,27 @@ package trace
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/emiago/sipgo/sip"
 )
 
 type SIPMetadata struct {
-	DeviceID   string
-	Method     string
-	StatusCode uint16
-	CallID     string
-	CSeq       uint32
-	CSeqMethod string
-	FromURI    string
-	ToURI      string
-	UserAgent  string
-	ParseError string
+	DeviceID           string
+	Method             string
+	StatusCode         uint16
+	CallID             string
+	CSeq               uint32
+	CSeqMethod         string
+	FromURI            string
+	ToURI              string
+	FromID             string
+	ToID               string
+	BusinessCode       BusinessCode
+	BusinessType       string
+	BusinessConfidence string
+	UserAgent          string
+	ParseError         string
 }
 
 func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
@@ -34,9 +40,11 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 	}
 	if from := message.From(); from != nil {
 		metadata.FromURI = fromToString(from.Address)
+		metadata.FromID = strings.TrimSpace(from.Address.User)
 	}
 	if to := message.To(); to != nil {
 		metadata.ToURI = fromToString(to.Address)
+		metadata.ToID = strings.TrimSpace(to.Address.User)
 	}
 	if uas := message.GetHeaders("User-Agent"); len(uas) > 0 {
 		metadata.UserAgent = truncateHeader(uas[0].Value(), 256)
@@ -65,6 +73,10 @@ func extractSIPMetadata(raw []byte, direction Direction) SIPMetadata {
 	default:
 		metadata.ParseError = fmt.Sprintf("unsupported SIP message type")
 	}
+	business := classifySIPBusiness(raw)
+	metadata.BusinessCode = business.Code
+	metadata.BusinessType = business.Label
+	metadata.BusinessConfidence = business.Confidence
 	return metadata
 }
 

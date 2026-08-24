@@ -35,7 +35,8 @@ func TestRelationalStoreInsertBatchPersistsEncryptedEvents(t *testing.T) {
 		EventID: "019f7a0c-a48d-7ddb-a44d-30a8ab2eed39", OccurredAt: time.Date(2026, 8, 10, 10, 0, 0, 123456000, time.FixedZone("CST", 8*60*60)),
 		Direction: DirectionInbound, Transport: "UDP", LocalAddr: "127.0.0.1:5060", RemoteAddr: "127.0.0.1:15060",
 		DeviceID: "34020000001320000001", Method: "REGISTER", StatusCode: 401, CallID: "call-1", CSeq: 7, CSeqMethod: "REGISTER",
-		FromURI: "device@example", ToURI: "platform@example", UserAgent: "fixture", Malformed: true, ParseError: "safe error",
+		FromURI: "device@example", ToURI: "platform@example", FromID: "device", ToID: "platform",
+		BusinessCode: BusinessRegister, BusinessType: "注册", BusinessConfidence: "high", UserAgent: "fixture", Malformed: true, ParseError: "safe error",
 		Payload: EncryptedPayload{Nonce: []byte{1, 2}, Ciphertext: []byte{3, 4}, Algorithm: EncryptionAES256GCM, KeyVersion: "v1", DigestSHA256: strings.Repeat("a", 64)},
 	}
 
@@ -44,6 +45,10 @@ func TestRelationalStoreInsertBatchPersistsEncryptedEvents(t *testing.T) {
 	require.NoError(t, db.First(&row, "event_id = ?", event.EventID).Error)
 	require.Equal(t, event.OccurredAt.UTC(), row.OccurredAt.UTC())
 	require.Equal(t, event.CallID, row.CallID)
+	require.Equal(t, event.FromID, row.FromID)
+	require.Equal(t, event.ToID, row.ToID)
+	require.Equal(t, string(event.BusinessCode), row.BusinessCode)
+	require.Equal(t, event.BusinessType, row.BusinessType)
 	require.Equal(t, event.Payload.Nonce, row.PayloadNonce)
 	require.Equal(t, event.Payload.Ciphertext, row.PayloadCiphertext)
 	require.Equal(t, event.Payload.DigestSHA256, row.PayloadDigestSHA256)
@@ -272,6 +277,38 @@ func TestRelationalStoreListSessionsBoundsCandidateRows(t *testing.T) {
 	for _, rows := range rowsRead {
 		require.LessOrEqual(t, rows, int64(1), "session list query must not load unrelated sessions")
 	}
+}
+
+func TestRelationalStoreListSessionsCorrelatesCrossDeviceDialog(t *testing.T) {
+	db := newRelationalStoreTestDB(t)
+	store, err := NewRelationalStore(db)
+	require.NoError(t, err)
+	at := time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC)
+	invite := testRelationalEvent("cross-invite", at, "media-device", "cross-dialog", "INVITE", 0)
+	invite.Direction = DirectionOutbound
+	invite.FromID, invite.ToID = "platform", "device"
+	invite.BusinessCode, invite.BusinessType, invite.BusinessConfidence = BusinessRealtimePlay, "实时点播", "high"
+	ack := testRelationalEvent("cross-ack", at.Add(time.Millisecond), "signaling-device", "cross-dialog", "ACK", 0)
+	ack.Direction = DirectionOutbound
+	ack.FromID, ack.ToID = "platform", "device"
+	bye := testRelationalEvent("cross-bye", at.Add(time.Second), "signaling-device", "cross-dialog", "BYE", 0)
+	bye.Direction = DirectionOutbound
+	bye.FromID, bye.ToID = "platform", "device"
+	bye.BusinessCode, bye.BusinessType, bye.BusinessConfidence = BusinessHangup, "挂断", "high"
+	byeResponse := testRelationalEvent("cross-bye-response", at.Add(2*time.Second), "media-device", "cross-dialog", "BYE", 200)
+	byeResponse.FromID, byeResponse.ToID = "platform", "device"
+	byeResponse.BusinessCode, byeResponse.BusinessType, byeResponse.BusinessConfidence = BusinessHangup, "挂断", "high"
+	require.NoError(t, store.InsertBatch(t.Context(), []StoredEvent{invite, ack, bye, byeResponse}))
+
+	sessions, err := store.ListSessions(t.Context(), SessionFilter{
+		From: at.Add(-time.Minute), To: at.Add(time.Minute), Limit: 1,
+	})
+	require.NoError(t, err)
+	require.Len(t, sessions, 1)
+	require.Equal(t, "cross-dialog", sessions[0].CallID)
+	require.Equal(t, uint64(4), sessions[0].MessageCount)
+	require.Equal(t, BusinessRealtimePlay, sessions[0].BusinessCode)
+	require.Equal(t, uint16(200), sessions[0].FinalStatus)
 }
 
 func TestRelationalStoreListSessionsHonorsExactTimeRange(t *testing.T) {

@@ -1033,6 +1033,11 @@ CREATE TABLE `gb_sip_trace_message` (
   `cseq_method` varchar(32) NOT NULL,
   `from_uri` varchar(512) NOT NULL,
   `to_uri` varchar(512) NOT NULL,
+  `from_id` varchar(64) NOT NULL DEFAULT '',
+  `to_id` varchar(64) NOT NULL DEFAULT '',
+  `business_code` varchar(64) NOT NULL DEFAULT 'unknown',
+  `business_type` varchar(64) NOT NULL DEFAULT '未知业务',
+  `business_confidence` varchar(16) NOT NULL DEFAULT 'none',
   `user_agent` varchar(512) NOT NULL,
   `malformed` tinyint(1) NOT NULL DEFAULT 0,
   `parse_error` varchar(1024) NOT NULL,
@@ -1044,7 +1049,8 @@ CREATE TABLE `gb_sip_trace_message` (
   PRIMARY KEY (`event_id`),
   KEY `idx_gb_sip_trace_occurred_event` (`occurred_at`, `event_id`),
   KEY `idx_gb_sip_trace_device_occurred` (`device_id`, `occurred_at`, `event_id`),
-  KEY `idx_gb_sip_trace_call_occurred` (`call_id`, `occurred_at`, `event_id`)
+  KEY `idx_gb_sip_trace_call_occurred` (`call_id`, `occurred_at`, `event_id`),
+  KEY `idx_gb_sip_trace_business_occurred` (`business_code`, `occurred_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Table structure for `gb_sip_trace_session_diagnosis`

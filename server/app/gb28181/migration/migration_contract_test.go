@@ -72,3 +72,27 @@ func TestDeviceAssignmentPermissionMigrationsUseMenuAPIBindings(t *testing.T) {
 		})
 	}
 }
+
+func TestSIPTraceBusinessSemanticMigrationsContainEquivalentColumns(t *testing.T) {
+	files := []string{
+		"2026-08-24-sip-trace-business-semantics.sql",
+		"2026-08-24-sip-trace-business-semantics-postgresql.sql",
+		"2026-08-24-sip-trace-business-semantics-sqlserver.sql",
+	}
+
+	for _, name := range files {
+		t.Run(name, func(t *testing.T) {
+			body, err := migrationsfs.FS.ReadFile("migrations/" + name)
+			require.NoError(t, err)
+			normalized := strings.ToLower(string(body))
+			for _, field := range []string{"from_id", "to_id", "business_code", "business_type", "business_confidence"} {
+				require.Contains(t, normalized, field)
+			}
+			require.Contains(t, normalized, "idx_gb_sip_trace_business_occurred")
+		})
+	}
+
+	sqlServer, err := migrationsfs.FS.ReadFile("migrations/2026-08-24-sip-trace-business-semantics-sqlserver.sql")
+	require.NoError(t, err)
+	require.Contains(t, strings.ToLower(string(sqlServer)), "[business_type] nvarchar(64)")
+}

@@ -5,6 +5,27 @@ import type { BaseResult } from "./types";
 
 export type TraceHealthState = "disabled" | "degraded" | "ready";
 export type TraceDirection = "inbound" | "outbound";
+export type TraceBusinessCode =
+    | "register"
+    | "keepalive"
+    | "catalog"
+    | "device_info"
+    | "device_status"
+    | "device_control"
+    | "alarm"
+    | "ptz"
+    | "realtime_play"
+    | "record_query"
+    | "playback"
+    | "download"
+    | "playback_control"
+    | "talk"
+    | "broadcast"
+    | "mobile_position"
+    | "subscription"
+    | "ack"
+    | "hangup"
+    | "unknown";
 export type TraceDiagnosisCategory = "register_failure" | "play_stuck";
 export type TraceDiagnosisCode =
     | "digest_failure"
@@ -64,6 +85,11 @@ export interface TraceMessageSummary {
     cseqMethod: string;
     fromUri?: string;
     toUri?: string;
+    fromId?: string;
+    toId?: string;
+    businessCode: TraceBusinessCode;
+    businessType: string;
+    businessConfidence?: "high" | "medium" | "none";
     userAgent?: string;
     malformed: boolean;
     parseError?: string;
@@ -109,6 +135,11 @@ export interface TraceSessionSummary {
     firstMethod: string;
     fromUri?: string;
     toUri?: string;
+    fromId?: string;
+    toId?: string;
+    businessCode: TraceBusinessCode;
+    businessType: string;
+    businessConfidence?: "high" | "medium" | "none";
     sourceAddr?: string;
     destinationAddr?: string;
     requestCount: number;

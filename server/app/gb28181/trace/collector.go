@@ -26,24 +26,29 @@ type Event struct {
 }
 
 type StoredEvent struct {
-	EventID    string
-	OccurredAt time.Time
-	Direction  Direction
-	Transport  string
-	LocalAddr  string
-	RemoteAddr string
-	DeviceID   string
-	Method     string
-	StatusCode uint16
-	CallID     string
-	CSeq       uint32
-	CSeqMethod string
-	FromURI    string
-	ToURI      string
-	UserAgent  string
-	Malformed  bool
-	ParseError string
-	Payload    EncryptedPayload
+	EventID            string
+	OccurredAt         time.Time
+	Direction          Direction
+	Transport          string
+	LocalAddr          string
+	RemoteAddr         string
+	DeviceID           string
+	Method             string
+	StatusCode         uint16
+	CallID             string
+	CSeq               uint32
+	CSeqMethod         string
+	FromURI            string
+	ToURI              string
+	FromID             string
+	ToID               string
+	BusinessCode       BusinessCode
+	BusinessType       string
+	BusinessConfidence string
+	UserAgent          string
+	Malformed          bool
+	ParseError         string
+	Payload            EncryptedPayload
 }
 
 type Store interface {

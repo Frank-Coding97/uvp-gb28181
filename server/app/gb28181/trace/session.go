@@ -63,6 +63,11 @@ type SessionSummary struct {
 	FirstMethod        string            `json:"firstMethod"`
 	FromURI            string            `json:"fromUri,omitempty"`
 	ToURI              string            `json:"toUri,omitempty"`
+	FromID             string            `json:"fromId,omitempty"`
+	ToID               string            `json:"toId,omitempty"`
+	BusinessCode       BusinessCode      `json:"businessCode"`
+	BusinessType       string            `json:"businessType"`
+	BusinessConfidence string            `json:"businessConfidence,omitempty"`
 	SourceAddr         string            `json:"sourceAddr,omitempty"`
 	DestinationAddr    string            `json:"destinationAddr,omitempty"`
 	RequestCount       uint64            `json:"requestCount"`

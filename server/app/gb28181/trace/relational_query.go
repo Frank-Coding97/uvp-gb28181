@@ -85,13 +85,35 @@ func applyMessageFilter(db *gorm.DB, filter MessageFilter) (*gorm.DB, error) {
 }
 
 func messageSummary(row gbmodels.GbSipTraceMessage) MessageSummary {
+	businessCode := BusinessCode(row.BusinessCode)
+	businessType := row.BusinessType
+	businessConfidence := row.BusinessConfidence
+	if businessCode == "" || businessCode == BusinessUnknown || businessType == "" {
+		fallback := fallbackBusinessForMethod(row.Method)
+		businessCode, businessType, businessConfidence = fallback.Code, fallback.Label, fallback.Confidence
+	}
+	fromID, toID := row.FromID, row.ToID
+	if fromID == "" {
+		fromID = extractNationalID(row.FromURI)
+	}
+	if toID == "" {
+		toID = extractNationalID(row.ToURI)
+	}
 	return MessageSummary{
 		EventID: row.EventID, OccurredAt: row.OccurredAt.UTC(), Direction: Direction(row.Direction),
 		Transport: row.Transport, LocalAddr: row.LocalAddr, RemoteAddr: row.RemoteAddr,
 		DeviceID: row.DeviceID, Method: row.Method, StatusCode: row.StatusCode, CallID: row.CallID,
 		CSeq: row.CSeq, CSeqMethod: row.CSeqMethod, FromURI: row.FromURI, ToURI: row.ToURI,
+		FromID: fromID, ToID: toID, BusinessCode: businessCode, BusinessType: businessType, BusinessConfidence: businessConfidence,
 		UserAgent: row.UserAgent, Malformed: row.Malformed, ParseError: row.ParseError,
 	}
+}
+
+func rowBusiness(row gbmodels.GbSipTraceMessage) businessClassification {
+	if row.BusinessCode != "" && BusinessCode(row.BusinessCode) != BusinessUnknown && row.BusinessType != "" {
+		return businessClassification{BusinessCode(row.BusinessCode), row.BusinessType, row.BusinessConfidence}
+	}
+	return fallbackBusinessForMethod(row.Method)
 }
 
 func (s *RelationalStore) ListMessages(ctx context.Context, filter MessageFilter) (MessagePage, error) {
@@ -153,11 +175,23 @@ type sessionAccumulator struct {
 	methods map[string]struct{}
 }
 
+func businessPriority(code BusinessCode) int {
+	switch code {
+	case BusinessUnknown, "":
+		return 0
+	case BusinessAck:
+		return 1
+	case BusinessRegister, BusinessKeepalive, BusinessCatalog, BusinessDeviceInfo, BusinessDeviceStatus, BusinessDeviceControl, BusinessAlarm, BusinessPTZ, BusinessSubscription, BusinessHangup:
+		return 2
+	default:
+		return 3
+	}
+}
+
 type sessionCandidate struct {
-	Day      time.Time
-	DeviceID string
-	CallID   string
-	LastAt   time.Time
+	Day    time.Time
+	CallID string
+	LastAt time.Time
 }
 
 type databaseTime time.Time
@@ -243,9 +277,8 @@ func (s *RelationalStore) listSessionCandidates(
 			dayEnd = to
 		}
 		var rows []struct {
-			DeviceID string       `gorm:"column:device_id"`
-			CallID   string       `gorm:"column:call_id"`
-			LastAt   databaseTime `gorm:"column:last_at"`
+			CallID string       `gorm:"column:call_id"`
+			LastAt databaseTime `gorm:"column:last_at"`
 		}
 		query := applySessionFilter(
 			s.db.WithContext(ctx).Model(&gbmodels.GbSipTraceMessage{}),
@@ -254,8 +287,8 @@ func (s *RelationalStore) listSessionCandidates(
 			dayEnd,
 		)
 		if err := query.
-			Select("device_id, call_id, MAX(occurred_at) AS last_at").
-			Group("device_id, call_id").
+			Select("call_id, MAX(occurred_at) AS last_at").
+			Group("call_id").
 			Order("MAX(occurred_at) DESC").Order("call_id DESC").
 			Limit(limit).
 			Scan(&rows).Error; err != nil {
@@ -263,7 +296,7 @@ func (s *RelationalStore) listSessionCandidates(
 		}
 		for _, row := range rows {
 			candidates = append(candidates, sessionCandidate{
-				Day: day, DeviceID: row.DeviceID, CallID: row.CallID, LastAt: time.Time(row.LastAt).UTC(),
+				Day: day, CallID: row.CallID, LastAt: time.Time(row.LastAt).UTC(),
 			})
 		}
 	}
@@ -282,8 +315,10 @@ func (s *RelationalStore) listSessionCandidates(
 func applySessionCandidates(query *gorm.DB, candidates []sessionCandidate) *gorm.DB {
 	var scope *gorm.DB
 	for _, candidate := range candidates {
-		condition := "device_id = ? AND call_id = ? AND occurred_at >= ? AND occurred_at < ?"
-		args := []any{candidate.DeviceID, candidate.CallID, candidate.Day, candidate.Day.AddDate(0, 0, 1)}
+		// Call-ID identifies the SIP dialog. Device ID is a collector-side hint and
+		// may change between INVITE and ACK/BYE when both directions are observed.
+		condition := "call_id = ? AND occurred_at >= ? AND occurred_at < ?"
+		args := []any{candidate.CallID, candidate.Day, candidate.Day.AddDate(0, 0, 1)}
 		if scope == nil {
 			scope = query.Session(&gorm.Session{NewDB: true}).Where(condition, args...)
 		} else {
@@ -295,6 +330,14 @@ func applySessionCandidates(query *gorm.DB, candidates []sessionCandidate) *gorm
 
 func sessionIdentity(day time.Time, deviceID, callID string) string {
 	return day.UTC().Format("2006-01-02") + "\x00" + deviceID + "\x00" + callID
+}
+
+func sessionConversationIdentity(day time.Time, callID, fromID, toID, deviceID string) string {
+	dayKey := day.UTC().Format("2006-01-02")
+	if fromID != "" || toID != "" {
+		return dayKey + "\x00call\x00" + callID + "\x00from\x00" + fromID + "\x00to\x00" + toID
+	}
+	return sessionIdentity(day, deviceID, callID)
 }
 
 func applyDiagnosisBaseFilter(query *gorm.DB, filter SessionFilter) *gorm.DB {
@@ -374,19 +417,40 @@ func (s *RelationalStore) loadSessionRows(query *gorm.DB) ([]gbmodels.GbSipTrace
 // summarizeRows 把原始报文行聚合为会话摘要
 func summarizeRows(rows []gbmodels.GbSipTraceMessage, retention time.Duration) []SessionSummary {
 	accumulators := make(map[string]*sessionAccumulator)
+	conversationAliases := make(map[string]string)
 	for _, row := range rows {
 		at := row.OccurredAt.UTC()
 		day := time.Date(at.Year(), at.Month(), at.Day(), 0, 0, 0, 0, time.UTC)
-		key := sessionIdentity(day, row.DeviceID, row.CallID)
+		fromID, toID := row.FromID, row.ToID
+		if fromID == "" {
+			fromID = extractNationalID(row.FromURI)
+		}
+		if toID == "" {
+			toID = extractNationalID(row.ToURI)
+		}
+		key := sessionConversationIdentity(day, row.CallID, fromID, toID, row.DeviceID)
+		if row.CallID != "" {
+			callAlias := day.UTC().Format("2006-01-02") + "\x00" + row.CallID
+			if alias, ok := conversationAliases[callAlias]; ok {
+				// A SIP dialog can be observed with different collector device IDs,
+				// and response/ACK rows may omit From/To metadata. Once a Call-ID has
+				// an evidence-backed identity, keep all of its rows in that session.
+				key = alias
+			} else {
+				conversationAliases[callAlias] = key
+			}
+		}
 		acc := accumulators[key]
 		if acc == nil {
-			source, destination := row.LocalAddr, row.RemoteAddr
+			business := rowBusiness(row)
+			source, destination := normalizeStoredAddr(row.LocalAddr), normalizeStoredAddr(row.RemoteAddr)
 			if row.Direction == string(DirectionInbound) {
-				source, destination = row.RemoteAddr, row.LocalAddr
+				source, destination = normalizeStoredAddr(row.RemoteAddr), normalizeStoredAddr(row.LocalAddr)
 			}
 			acc = &sessionAccumulator{summary: SessionSummary{
 				Day: day, DeviceID: row.DeviceID, CallID: row.CallID, FirstAt: at, LastAt: at,
 				FirstMethod: row.Method, FromURI: row.FromURI, ToURI: row.ToURI,
+				FromID: fromID, ToID: toID, BusinessCode: business.Code, BusinessType: business.Label, BusinessConfidence: business.Confidence,
 				SourceAddr: source, DestinationAddr: destination,
 			}, methods: make(map[string]struct{})}
 			accumulators[key] = acc
@@ -400,6 +464,18 @@ func summarizeRows(rows []gbmodels.GbSipTraceMessage, retention time.Duration) [
 		}
 		if row.Method != "" {
 			acc.methods[row.Method] = struct{}{}
+		}
+		business := rowBusiness(row)
+		if businessPriority(business.Code) > businessPriority(acc.summary.BusinessCode) {
+			acc.summary.BusinessCode = business.Code
+			acc.summary.BusinessType = business.Label
+			acc.summary.BusinessConfidence = business.Confidence
+		}
+		if acc.summary.FromID == "" {
+			acc.summary.FromID = row.FromID
+		}
+		if acc.summary.ToID == "" {
+			acc.summary.ToID = row.ToID
 		}
 		if row.StatusCode >= 200 {
 			acc.summary.FinalStatus = row.StatusCode

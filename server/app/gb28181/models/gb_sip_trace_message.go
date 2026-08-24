@@ -19,6 +19,11 @@ type GbSipTraceMessage struct {
 	CSeqMethod          string    `gorm:"column:cseq_method;type:varchar(32);not null"`
 	FromURI             string    `gorm:"column:from_uri;type:varchar(512);not null"`
 	ToURI               string    `gorm:"column:to_uri;type:varchar(512);not null"`
+	FromID              string    `gorm:"column:from_id;type:varchar(64);not null"`
+	ToID                string    `gorm:"column:to_id;type:varchar(64);not null"`
+	BusinessCode        string    `gorm:"column:business_code;type:varchar(64);not null;index:idx_gb_sip_trace_business_occurred,priority:1"`
+	BusinessType        string    `gorm:"column:business_type;type:varchar(64);not null"`
+	BusinessConfidence  string    `gorm:"column:business_confidence;type:varchar(16);not null"`
 	UserAgent           string    `gorm:"column:user_agent;type:varchar(512);not null"`
 	Malformed           bool      `gorm:"column:malformed;not null"`
 	ParseError          string    `gorm:"column:parse_error;type:varchar(1024);not null"`
