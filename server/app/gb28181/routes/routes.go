@@ -693,6 +693,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/permission-workbench/summary", deviceMgmtController.PermissionWorkbenchSummary)
 			dmgmt.POST("/permission-workbench/devices/resolve", deviceMgmtController.ResolvePermissionWorkbenchDevices)
 			dmgmt.POST("/permission-workbench/grants/query", deviceMgmtController.QueryPermissionWorkbenchGrants)
+			dmgmt.POST("/permission-workbench/grants/apply", deviceMgmtController.ApplyPermissionWorkbenchGrants)
 			dmgmt.GET("/permission-workbench/grant-targets", deviceMgmtController.SearchPermissionWorkbenchGrantTargets)
 			dmgmt.POST("/permission-workbench/assignments", deviceMgmtController.ApplyPermissionWorkbenchAssignments)
 			dmgmt.POST("/permission-workbench/assignments/departments", deviceMgmtController.ApplyPermissionWorkbenchDepartmentAssignment)

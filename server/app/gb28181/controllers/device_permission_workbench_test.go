@@ -2,6 +2,7 @@ package controllers_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,7 +14,9 @@ import (
 	"gorm.io/gorm"
 
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
@@ -25,6 +28,7 @@ func registerPermissionWorkbenchRoutes(r *gin.Engine, db *gorm.DB) {
 	r.GET("/api/gb28181/device-mgmt/permission-workbench/summary", controller.PermissionWorkbenchSummary)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/devices/resolve", controller.ResolvePermissionWorkbenchDevices)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/grants/query", controller.QueryPermissionWorkbenchGrants)
+	r.POST("/api/gb28181/device-mgmt/permission-workbench/grants/apply", controller.ApplyPermissionWorkbenchGrants)
 	r.GET("/api/gb28181/device-mgmt/permission-workbench/grant-targets", controller.SearchPermissionWorkbenchGrantTargets)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/assignments", controller.ApplyPermissionWorkbenchAssignments)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/assignments/departments", controller.ApplyPermissionWorkbenchDepartmentAssignment)
@@ -214,4 +218,64 @@ func TestPermissionWorkbench_GrantTargetsUseTrustedScope(t *testing.T) {
 	list := data["list"].([]any)
 	require.Len(t, list, 1)
 	require.Equal(t, "guard-inside", list[0].(map[string]any)["name"])
+}
+
+func TestPermissionWorkbench_GrantApplyAddsAndRemovesWithoutGlobalRevocation(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t, withClaims(100))
+	registerPermissionWorkbenchRoutes(r, db)
+	active := int8(1)
+	require.NoError(t, db.Create(&basemodels.SysDepartment{BaseModel: basemodels.BaseModel{ID: 10}, Name: "安保部", Status: &active}).Error)
+	require.NoError(t, db.Create(&basemodels.User{BaseModel: basemodels.BaseModel{ID: 100}, Username: "operator", Password: "x", Status: 1, DeptID: 10}).Error)
+	role := basemodels.SysRole{Name: "全部数据", Status: 1, DataScope: 1}
+	require.NoError(t, db.Create(&role).Error)
+	require.NoError(t, db.Create(&basemodels.SysUserRole{UserID: 100, RoleID: role.ID}).Error)
+	devices := []gbmodels.GbDevice{
+		{DeviceID: "grant-apply-a", Name: "授权设备 A", OwnerDeptID: 10},
+		{DeviceID: "grant-apply-b", Name: "授权设备 B", OwnerDeptID: 10},
+	}
+	require.NoError(t, db.Create(&devices).Error)
+	state, err := grant.NewService(db, nil).Query(context.Background(), []uint{devices[0].ID, devices[1].ID})
+	require.NoError(t, err)
+
+	addBody, err := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"deviceId": devices[0].ID, "expectedRevision": state.Devices[0].Revision},
+			{"deviceId": devices[1].ID, "expectedRevision": state.Devices[1].Revision},
+		},
+		"mode":    "add",
+		"targets": []map[string]any{{"type": "dept", "id": 10}},
+	})
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/gb28181/device-mgmt/permission-workbench/grants/apply", bytes.NewReader(addBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	addData := unmarshal(t, w)["data"].(map[string]any)
+	require.EqualValues(t, 2, addData["summary"].(map[string]any)["added"])
+	addResults := addData["results"].([]any)
+
+	beforeRevocation := playauth.RevokedBefore()
+	removeBody, err := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"deviceId": devices[0].ID, "expectedRevision": addResults[0].(map[string]any)["revision"]},
+			{"deviceId": devices[1].ID, "expectedRevision": addResults[1].(map[string]any)["revision"]},
+		},
+		"mode":    "remove",
+		"targets": []map[string]any{{"type": "dept", "id": 10}},
+	})
+	require.NoError(t, err)
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/gb28181/device-mgmt/permission-workbench/grants/apply", bytes.NewReader(removeBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	removeData := unmarshal(t, w)["data"].(map[string]any)
+	require.EqualValues(t, 2, removeData["summary"].(map[string]any)["removed"])
+	require.Equal(t, beforeRevocation, playauth.RevokedBefore())
+
+	var current []gbmodels.GbDevice
+	require.NoError(t, db.Order("id ASC").Find(&current).Error)
+	require.EqualValues(t, 10, current[0].OwnerDeptID)
+	require.EqualValues(t, 10, current[1].OwnerDeptID)
 }

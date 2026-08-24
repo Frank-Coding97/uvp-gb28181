@@ -16,3 +16,9 @@ func ownerDeptScope(c *gin.Context) func(*gorm.DB) *gorm.DB {
 func visibleScope(c *gin.Context) func(*gorm.DB) *gorm.DB {
 	return datascope.VisibilityScope(c, "owner_dept_id", "device_id")
 }
+
+func transactionalVisibleScope(c *gin.Context) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Scopes(datascope.VisibilityScopeWithDB(c, db, "owner_dept_id", "device_id"))
+	}
+}

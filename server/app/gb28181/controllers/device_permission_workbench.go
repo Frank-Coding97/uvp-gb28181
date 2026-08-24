@@ -108,6 +108,44 @@ func (dc *DeviceMgmtController) SearchPermissionWorkbenchGrantTargets(c *gin.Con
 	dc.Success(c, result)
 }
 
+func (dc *DeviceMgmtController) ApplyPermissionWorkbenchGrants(c *gin.Context) {
+	var request grant.ApplyRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		dc.Fail(c, "共享授权请求不合法", err, http.StatusBadRequest)
+		return
+	}
+	db := dc.db()
+	if db == nil {
+		dc.FailAndAbort(c, "DB 未就绪", nil)
+		return
+	}
+	access := datascope.OwnerDeptAccess{}
+	if request.Mode == grant.ApplyModeAdd {
+		var err error
+		access, err = datascope.ResolveOwnerDeptAccessByUserID(c, db, dc.GetCurrentUserID(c))
+		if err != nil {
+			if errors.Is(err, datascope.ErrOwnerDeptAccessDenied) {
+				dc.Fail(c, "无可授权的数据范围", err, http.StatusForbidden)
+				return
+			}
+			dc.Fail(c, "解析可授权范围失败", err, http.StatusInternalServerError)
+			return
+		}
+	}
+	request.CreatedBy = currentOperatorID(c)
+	result, err := grant.NewService(db, transactionalVisibleScope(c)).Apply(c, request, access)
+	if err != nil {
+		if errors.Is(err, grant.ErrApplyRequestInvalid) {
+			dc.Fail(c, err.Error(), err, http.StatusBadRequest)
+			return
+		}
+		dc.Fail(c, "应用共享授权失败", err, http.StatusInternalServerError)
+		return
+	}
+	// 当前播放授权没有目标用户身份，不能用全局 BumpRevocation 误伤其他共享方。
+	dc.Success(c, result)
+}
+
 func (dc *DeviceMgmtController) ApplyPermissionWorkbenchAssignments(c *gin.Context) {
 	var body struct {
 		Items        []assign.AssignmentInput `json:"items"`
