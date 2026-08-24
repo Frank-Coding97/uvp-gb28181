@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
+import { useDebounceFn } from "@vueuse/core";
 import {
     ArrowRight,
     Building2,
@@ -21,6 +22,7 @@ import type { DeviceVO, OnlineStatus } from "@/views/gb28181/device-mgmt/api";
 import {
     applyPermissionWorkbenchAssignments,
     applyPermissionWorkbenchDepartmentAssignment,
+    getPermissionWorkbenchSummary,
     listAssignmentDevices,
     type AssignmentFilter
 } from "./api";
@@ -45,6 +47,8 @@ const filteredDeptTree = computed(() => {
     return match(deptTree.value);
 });
 const selectedDeptId = ref<number | undefined>(undefined);
+const mainView = ref<"assignment" | "sharing">("assignment");
+const summary = ref({ allCount: 0, assignedCount: 0, unassignedCount: 0, departments: [] as Array<{ deptId: number; directCount: number; subtreeCount: number }> });
 
 const deptNameById = computed(() => {
     const map = new Map<number, string>();
@@ -135,6 +139,18 @@ const loadDevices = async () => {
 const onSearch = () => {
     page.value = 1;
     void loadDevices();
+};
+
+const debouncedSearch = useDebounceFn(onSearch, 300);
+watch(keyword, () => debouncedSearch());
+
+const loadSummary = async () => {
+    try {
+        const { data } = await getPermissionWorkbenchSummary();
+        if (data) summary.value = data;
+    } catch (error: unknown) {
+        Message.error(error instanceof Error ? error.message : "加载权限汇总失败");
+    }
 };
 
 const clearKeyword = () => {
@@ -281,6 +297,7 @@ const handleShareChanged = () => {
 
 onMounted(() => {
     void loadDeptTree();
+    void loadSummary();
     void loadDevices();
 });
 </script>
@@ -341,9 +358,25 @@ onMounted(() => {
                     </div>
                 </template>
 
-                <template #content>
-                    <div class="right-box uvp-list-workspace">
-                        <s-layout-search class="account-search-panel">
+                 <template #content>
+                     <div class="right-box uvp-list-workspace">
+                         <div class="workbench-head">
+                             <div>
+                                 <h2 class="workbench-head__title">设备权限工作台</h2>
+                                 <p class="workbench-head__sub">统一管理设备归属与共享授权</p>
+                             </div>
+                             <div class="segmented workbench-views" role="tablist" aria-label="权限视图">
+                                 <button type="button" :class="{ active: mainView === 'assignment' }" @click="mainView = 'assignment'">设备归属</button>
+                                 <button type="button" :class="{ active: mainView === 'sharing' }" @click="mainView = 'sharing'">共享授权</button>
+                             </div>
+                         </div>
+                         <div class="summary-strip" aria-label="设备权限汇总">
+                             <div class="summary-strip__item"><span>全部设备</span><strong>{{ summary.allCount }}</strong></div>
+                             <div class="summary-strip__item"><span>已分配</span><strong>{{ summary.assignedCount }}</strong></div>
+                             <div class="summary-strip__item"><span>未分配</span><strong>{{ summary.unassignedCount }}</strong></div>
+                             <div class="summary-strip__item"><span>部门数</span><strong>{{ summary.departments.length }}</strong></div>
+                         </div>
+                         <s-layout-search class="account-search-panel">
                             <template #fields>
                                 <div class="segmented assignment-tabs">
                                     <button
@@ -387,7 +420,8 @@ onMounted(() => {
                             </template>
                         </s-layout-search>
 
-                        <a-table
+                         <a-table
+                             v-show="mainView === 'assignment'"
                             v-model:selected-keys="selectedRowKeys"
                             :data="devices"
                             :loading="rowsLoading"
@@ -431,7 +465,7 @@ onMounted(() => {
                                         <span class="channel-text">{{ record.channelOnlineCount }}/{{ record.channelCount }}</span>
                                     </template>
                                 </a-table-column>
-                                <a-table-column title="操作" :width="170" align="center">
+                                 <a-table-column title="操作" :width="170" align="center" cell-class="operation-column">
                                     <template #cell="{ record }">
                                         <a-link
                                             v-if="canAssign"
@@ -450,7 +484,13 @@ onMounted(() => {
                                     </template>
                                 </a-table-column>
                             </template>
-                        </a-table>
+                         </a-table>
+
+                         <div v-if="mainView === 'sharing'" class="sharing-view-empty">
+                             <Share2 :size="24" />
+                             <strong>共享授权视图</strong>
+                             <span>请在设备行操作中打开共享管理，批量共享将在此视图统一收口。</span>
+                         </div>
 
                         <!-- 勾选批量操作条 -->
                         <div v-if="selectedCount > 0" class="batch-bar">
@@ -603,9 +643,88 @@ onMounted(() => {
     display: inline;
 }
 
-.assignment-tabs {
-    margin-right: 4px;
-}
+ .assignment-tabs {
+     margin-right: 4px;
+ }
+
+ .workbench-head {
+     display: flex;
+     align-items: flex-start;
+     justify-content: space-between;
+     gap: 16px;
+     margin-bottom: 14px;
+
+     &__title {
+         margin: 0;
+         color: var(--uvp-text-primary);
+         font-size: 20px;
+         line-height: 28px;
+     }
+
+     &__sub {
+         margin: 3px 0 0;
+         color: var(--uvp-text-tertiary);
+         font-size: 12px;
+     }
+ }
+
+ .workbench-views {
+     flex: 0 0 auto;
+ }
+
+ .summary-strip {
+     display: grid;
+     grid-template-columns: repeat(4, minmax(0, 1fr));
+     gap: 10px;
+     margin-bottom: 14px;
+
+     &__item {
+         display: flex;
+         min-height: 58px;
+         flex-direction: column;
+         justify-content: center;
+         gap: 2px;
+         padding: 9px 14px;
+         border: 1px solid var(--uvp-panel-border);
+         border-radius: 8px;
+         background: var(--uvp-dialog-bg);
+
+         span {
+             color: var(--uvp-text-tertiary);
+             font-size: 12px;
+         }
+
+         strong {
+             color: var(--uvp-text-primary);
+             font-size: 20px;
+             line-height: 24px;
+         }
+     }
+ }
+
+ .sharing-view-empty {
+     display: flex;
+     min-height: 280px;
+     flex-direction: column;
+     align-items: center;
+     justify-content: center;
+     gap: 8px;
+     color: var(--uvp-text-tertiary);
+     border: 1px dashed var(--uvp-panel-border);
+     border-radius: 8px;
+
+     strong {
+         color: var(--uvp-text-secondary);
+         font-size: 14px;
+     }
+
+     span {
+         max-width: 420px;
+         text-align: center;
+         font-size: 12px;
+         line-height: 18px;
+     }
+ }
 
 .right-box {
     min-height: 0;
