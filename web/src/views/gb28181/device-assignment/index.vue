@@ -4,13 +4,20 @@ import { Message } from "@arco-design/web-vue";
 import { useDebounceFn } from "@vueuse/core";
 import { useRouter } from "vue-router";
 import {
+    ArrowRight,
     Building2,
+    CheckCircle2,
     ChevronDown,
+    CircleAlert,
     Folder,
     FolderOpen,
+    Info,
+    ListChecks,
+    Monitor,
     RefreshCcw,
     Search,
     Share2,
+    ShieldCheck,
     UserRoundCog,
     X
 } from "lucide-vue-next";
@@ -54,6 +61,7 @@ const filteredDeptTree = computed(() => {
 });
 const selectedDeptId = ref<number | undefined>(undefined);
 const mainView = ref<"assignment" | "sharing">("assignment");
+const guideExpanded = ref(true);
 const summary = ref({ allCount: 0, assignedCount: 0, unassignedCount: 0, departments: [] as Array<{ deptId: number; directCount: number; subtreeCount: number }> });
 
 const deptNameById = computed(() => {
@@ -381,7 +389,7 @@ onMounted(() => {
                                 <template #icon="{ isLeaf, expanded }">
                                     <component
                                         :is="isLeaf ? Building2 : expanded ? FolderOpen : Folder"
-                                        class="uvp-tree-node-icon"
+                                        :class="['uvp-tree-node-icon', isLeaf ? 'uvp-tree-node-icon--leaf' : 'uvp-tree-node-icon--branch']"
                                         :size="15"
                                         :stroke-width="2"
                                     />
@@ -408,24 +416,66 @@ onMounted(() => {
 
                  <template #content>
                      <div class="right-box uvp-list-workspace">
-                         <div class="workbench-head">
-                             <div>
-                                 <h2 class="workbench-head__title">设备权限工作台</h2>
-                                 <p class="workbench-head__sub">统一管理设备归属与共享授权</p>
-                             </div>
-                             <div class="segmented workbench-views" role="tablist" aria-label="权限视图">
-                                 <button type="button" :class="{ active: mainView === 'assignment' }" @click="mainView = 'assignment'">设备归属</button>
-                                 <button type="button" :class="{ active: mainView === 'sharing' }" @click="mainView = 'sharing'">共享授权</button>
-                             </div>
-                         </div>
                          <div class="summary-strip" aria-label="设备权限汇总">
-                             <div class="summary-strip__item"><span>全部设备</span><strong>{{ summary.allCount }}</strong></div>
-                             <div class="summary-strip__item"><span>已分配</span><strong>{{ summary.assignedCount }}</strong></div>
-                             <div class="summary-strip__item"><span>未分配</span><strong>{{ summary.unassignedCount }}</strong></div>
-                             <div class="summary-strip__item"><span>部门数</span><strong>{{ summary.departments.length }}</strong></div>
+                             <div class="summary-strip__item summary-strip__item--all">
+                                 <span class="summary-strip__icon"><Monitor :size="16" /></span>
+                                 <div><span>全部设备</span><strong>{{ summary.allCount }}</strong></div>
+                             </div>
+                             <div class="summary-strip__item summary-strip__item--assigned">
+                                 <span class="summary-strip__icon"><CheckCircle2 :size="16" /></span>
+                                 <div><span>已分配</span><strong>{{ summary.assignedCount }}</strong></div>
+                             </div>
+                             <div class="summary-strip__item summary-strip__item--unassigned">
+                                 <span class="summary-strip__icon"><CircleAlert :size="16" /></span>
+                                 <div><span>未分配</span><strong>{{ summary.unassignedCount }}</strong></div>
+                             </div>
+                             <div class="summary-strip__item summary-strip__item--departments">
+                                 <span class="summary-strip__icon"><Building2 :size="16" /></span>
+                                 <div><span>部门数</span><strong>{{ summary.departments.length }}</strong></div>
+                             </div>
                          </div>
+                         <section class="workbench-guide" :class="{ 'is-collapsed': !guideExpanded }" aria-label="设备权限工作流程">
+                             <div class="workbench-guide__head">
+                                 <div class="workbench-guide__title-wrap">
+                                     <span class="workbench-guide__icon"><Info :size="15" /></span>
+                                     <div>
+                                         <strong>这个工作台是做什么的？</strong>
+                                         <p>先找到设备，再决定它归谁管理，或允许谁共享使用。</p>
+                                     </div>
+                                 </div>
+                                 <button class="workbench-guide__toggle" type="button" @click="guideExpanded = !guideExpanded">
+                                     {{ guideExpanded ? "收起说明" : "查看操作流程" }}
+                                     <ChevronDown :size="14" :class="{ 'is-open': guideExpanded }" />
+                                 </button>
+                             </div>
+                             <div v-if="guideExpanded" class="workbench-guide__body">
+                                 <div class="workbench-guide__meaning">
+                                     <div class="workbench-guide__meaning-item">
+                                         <span class="workbench-guide__meaning-icon workbench-guide__meaning-icon--assign"><ListChecks :size="15" /></span>
+                                         <div><strong>调整归属</strong><span>改变设备的管理部门，影响后续谁负责维护和管理。</span></div>
+                                     </div>
+                                     <div class="workbench-guide__meaning-item">
+                                         <span class="workbench-guide__meaning-icon workbench-guide__meaning-icon--share"><ShieldCheck :size="15" /></span>
+                                         <div><strong>共享授权</strong><span>不改变设备归属，额外允许指定用户或部门使用设备。</span></div>
+                                     </div>
+                                 </div>
+                                 <div class="workbench-guide__flow" aria-label="四步操作流程">
+                                     <div class="workbench-guide__step"><b>1</b><span>选择范围</span><small>部门、状态或搜索设备</small></div>
+                                     <ArrowRight class="workbench-guide__arrow" :size="16" />
+                                     <div class="workbench-guide__step"><b>2</b><span>勾选设备</span><small>支持批量和跨页选择</small></div>
+                                     <ArrowRight class="workbench-guide__arrow" :size="16" />
+                                     <div class="workbench-guide__step"><b>3</b><span>选择操作</span><small>调整归属或共享管理</small></div>
+                                     <ArrowRight class="workbench-guide__arrow" :size="16" />
+                                     <div class="workbench-guide__step"><b>4</b><span>确认提交</span><small>查看成功、跳过和失败项</small></div>
+                                 </div>
+                             </div>
+                         </section>
                          <s-layout-search class="account-search-panel">
                             <template #fields>
+                                <div class="segmented workbench-views" role="tablist" aria-label="权限视图">
+                                    <button type="button" :class="{ active: mainView === 'assignment' }" @click="mainView = 'assignment'">设备归属</button>
+                                    <button type="button" :class="{ active: mainView === 'sharing' }" @click="mainView = 'sharing'">共享授权</button>
+                                </div>
                                 <div class="segmented assignment-tabs">
                                     <button
                                         v-for="tab in assignmentTabs"
@@ -515,22 +565,26 @@ onMounted(() => {
                                         <span class="channel-text">{{ record.channelOnlineCount }}/{{ record.channelCount }}</span>
                                     </template>
                                 </a-table-column>
-                                 <a-table-column title="操作" :width="170" align="center" cell-class="operation-column">
+                                 <a-table-column title="操作" :width="190" align="center" fixed="right" cell-class="operation-column">
                                     <template #cell="{ record }">
-                                        <a-link
-                                            v-if="canAssign"
-                                            class="uvp-table-action uvp-table-action--assign"
-                                            @click="openRowAssign(record)"
-                                        >
-                                            调整归属
-                                        </a-link>
-                                        <a-link
-                                            v-if="canShare"
-                                            class="uvp-table-action uvp-table-action--permission"
-                                            @click="openRowShare(record)"
-                                        >
-                                            共享管理
-                                        </a-link>
+                                        <div class="device-operation-actions">
+                                            <a-link
+                                                v-if="canAssign"
+                                                class="uvp-table-action uvp-table-action--assign"
+                                                @click="openRowAssign(record)"
+                                            >
+                                                <template #icon><UserRoundCog :size="13" /></template>
+                                                调整归属
+                                            </a-link>
+                                            <a-link
+                                                v-if="canShare"
+                                                class="uvp-table-action uvp-table-action--permission"
+                                                @click="openRowShare(record)"
+                                            >
+                                                <template #icon><Share2 :size="13" /></template>
+                                                共享管理
+                                            </a-link>
+                                        </div>
                                     </template>
                                 </a-table-column>
                             </template>
@@ -585,6 +639,19 @@ onMounted(() => {
 </template>
 
 <style scoped lang="less">
+.uvp-tree-panel :deep(.uvp-tree-node-icon--branch) {
+    color: #c47a18;
+}
+
+.uvp-tree-panel :deep(.uvp-tree-node-icon--leaf) {
+    color: #0f8b83;
+}
+
+.uvp-tree-panel :deep(.arco-tree-node-title:hover .uvp-tree-node-icon),
+.uvp-tree-panel :deep(.arco-tree-node-selected .uvp-tree-node-icon) {
+    color: var(--uvp-brand-strong);
+}
+
 .dept-tree-node {
     display: inline-flex;
     align-items: center;
@@ -604,34 +671,244 @@ onMounted(() => {
     display: inline;
 }
 
- .assignment-tabs {
-     margin-right: 4px;
- }
+.workbench-guide {
+    margin-bottom: 14px;
+    padding: 12px 14px;
+    border: 1px solid rgb(37 99 235 / 14%);
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgb(239 246 255 / 88%), var(--uvp-dialog-bg));
+}
 
- .workbench-head {
-     display: flex;
-     align-items: flex-start;
-     justify-content: space-between;
-     gap: 16px;
-     margin-bottom: 14px;
+.workbench-guide__head,
+.workbench-guide__title-wrap,
+.workbench-guide__meaning-item,
+.workbench-guide__flow {
+    display: flex;
+    align-items: center;
+}
 
-     &__title {
-         margin: 0;
-         color: var(--uvp-text-primary);
-         font-size: 20px;
-         line-height: 28px;
-     }
+.workbench-guide__head {
+    justify-content: space-between;
+    gap: 12px;
+}
 
-     &__sub {
-         margin: 3px 0 0;
-         color: var(--uvp-text-tertiary);
-         font-size: 12px;
-     }
- }
+.workbench-guide__title-wrap {
+    min-width: 0;
+    gap: 9px;
+}
 
- .workbench-views {
-     flex: 0 0 auto;
- }
+.workbench-guide__icon,
+.workbench-guide__meaning-icon {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+}
+
+.workbench-guide__icon {
+    width: 28px;
+    height: 28px;
+    color: var(--uvp-brand-strong);
+    background: var(--uvp-brand-soft);
+    border-radius: 8px;
+}
+
+.workbench-guide__title-wrap strong {
+    color: var(--uvp-text-primary);
+    font-size: 13px;
+}
+
+.workbench-guide__title-wrap p {
+    margin: 2px 0 0;
+    color: var(--uvp-text-tertiary);
+    font-size: 11px;
+}
+
+.workbench-guide__toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 6px;
+    color: var(--uvp-brand-strong);
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 11px;
+}
+
+.workbench-guide__toggle:hover {
+    background: rgb(37 99 235 / 8%);
+}
+
+.workbench-guide__toggle svg {
+    transition: transform 0.16s ease;
+}
+
+.workbench-guide__toggle svg.is-open {
+    transform: rotate(180deg);
+}
+
+.workbench-guide__body {
+    display: grid;
+    grid-template-columns: minmax(200px, 0.9fr) minmax(0, 1.6fr);
+    gap: 18px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgb(37 99 235 / 10%);
+}
+
+.workbench-guide__meaning {
+    display: grid;
+    gap: 8px;
+}
+
+.workbench-guide__meaning-item {
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.workbench-guide__meaning-icon {
+    width: 25px;
+    height: 25px;
+    border-radius: 7px;
+}
+
+.workbench-guide__meaning-icon--assign {
+    color: var(--uvp-brand-strong);
+    background: var(--uvp-brand-soft);
+}
+
+.workbench-guide__meaning-icon--share {
+    color: #0b827e;
+    background: #e7f8f5;
+}
+
+.workbench-guide__meaning-item div {
+    display: grid;
+    gap: 2px;
+}
+
+.workbench-guide__meaning-item strong {
+    color: var(--uvp-text-secondary);
+    font-size: 11px;
+}
+
+.workbench-guide__meaning-item span:not(.workbench-guide__meaning-icon) {
+    color: var(--uvp-text-tertiary);
+    font-size: 11px;
+    line-height: 16px;
+}
+
+.workbench-guide__flow {
+    justify-content: space-between;
+    gap: 6px;
+}
+
+.workbench-guide__step {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+    gap: 2px;
+    padding: 8px 9px;
+    border: 1px solid var(--uvp-panel-border);
+    border-radius: 8px;
+    background: rgb(255 255 255 / 70%);
+}
+
+.workbench-guide__step b {
+    display: inline-grid;
+    width: 20px;
+    height: 20px;
+    color: #ffffff;
+    background: var(--uvp-brand);
+    border-radius: 50%;
+    place-items: center;
+    font-size: 10px;
+}
+
+.workbench-guide__step span {
+    color: var(--uvp-text-secondary);
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.workbench-guide__step small {
+    color: var(--uvp-text-tertiary);
+    font-size: 10px;
+    line-height: 14px;
+}
+
+.workbench-guide__arrow {
+    flex: 0 0 auto;
+    color: var(--uvp-brand);
+}
+
+.device-operation-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.device-operation-actions :deep(.uvp-table-action) {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 3px 5px;
+    border-radius: 6px;
+}
+
+.device-operation-actions :deep(.arco-link-icon) {
+    display: inline-flex;
+    align-items: center;
+    margin-right: 0;
+    line-height: 0;
+}
+
+.device-operation-actions :deep(.uvp-table-action--assign) {
+    color: var(--uvp-brand-strong);
+}
+
+.device-operation-actions :deep(.uvp-table-action--assign:hover) {
+    background: var(--uvp-brand-soft);
+}
+
+.device-operation-actions :deep(.uvp-table-action--permission) {
+    color: #0f827c;
+}
+
+.device-operation-actions :deep(.uvp-table-action--permission:hover) {
+    background: #e7f8f5;
+}
+
+@media (max-width: 1100px) {
+    .workbench-guide__body {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
+}
+
+@media (max-width: 720px) {
+    .workbench-guide__flow {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .workbench-guide__arrow {
+        display: none;
+    }
+}
+
+.assignment-tabs,
+.workbench-views {
+    margin-right: 4px;
+}
+
+.workbench-views {
+    flex: 0 0 auto;
+}
 
  .summary-strip {
      display: grid;
@@ -641,16 +918,22 @@ onMounted(() => {
 
      &__item {
          display: flex;
-         min-height: 58px;
-         flex-direction: column;
-         justify-content: center;
-         gap: 2px;
-         padding: 9px 14px;
+         min-height: 66px;
+         align-items: center;
+         gap: 10px;
+         padding: 9px 13px;
          border: 1px solid var(--uvp-panel-border);
          border-radius: 8px;
          background: var(--uvp-dialog-bg);
 
-         span {
+         > div {
+             display: flex;
+             min-width: 0;
+             flex-direction: column;
+             gap: 2px;
+         }
+
+         > div > span {
              color: var(--uvp-text-tertiary);
              font-size: 12px;
          }
@@ -660,6 +943,39 @@ onMounted(() => {
              font-size: 20px;
              line-height: 24px;
          }
+
+         .summary-strip__icon {
+             display: inline-grid;
+             flex: 0 0 30px;
+             width: 30px;
+             height: 30px;
+             border-radius: 9px;
+             place-items: center;
+         }
+     }
+
+     &__item--all {
+         border-color: rgb(37 99 235 / 18%);
+         background: linear-gradient(135deg, #f0f6ff, #ffffff);
+         .summary-strip__icon { color: #2563eb; background: #dceaff; }
+     }
+
+     &__item--assigned {
+         border-color: rgb(22 163 74 / 18%);
+         background: linear-gradient(135deg, #f0fbf3, #ffffff);
+         .summary-strip__icon { color: #16803c; background: #dff5e5; }
+     }
+
+     &__item--unassigned {
+         border-color: rgb(217 119 6 / 20%);
+         background: linear-gradient(135deg, #fff9ed, #ffffff);
+         .summary-strip__icon { color: #b45309; background: #ffedc2; }
+     }
+
+     &__item--departments {
+         border-color: rgb(124 58 237 / 18%);
+         background: linear-gradient(135deg, #f7f2ff, #ffffff);
+         .summary-strip__icon { color: #7c3aed; background: #eadfff; }
      }
  }
 
