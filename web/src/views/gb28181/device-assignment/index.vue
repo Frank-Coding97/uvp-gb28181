@@ -3,11 +3,8 @@ import { computed, onMounted, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { useDebounceFn } from "@vueuse/core";
 import {
-    ArrowRight,
     Building2,
     ChevronDown,
-    CircleAlert,
-    Cctv,
     Folder,
     FolderOpen,
     RefreshCcw,
@@ -20,13 +17,12 @@ import { getDivisionAPI, type DivisionItem } from "@/api/department";
 import { useUserStoreHook } from "@/store/modules/user";
 import type { DeviceVO, OnlineStatus } from "@/views/gb28181/device-mgmt/api";
 import {
-    applyPermissionWorkbenchAssignments,
-    applyPermissionWorkbenchDepartmentAssignment,
     getPermissionWorkbenchSummary,
     listAssignmentDevices,
     type AssignmentFilter
 } from "./api";
 import SharePanel, { type ShareDeviceBrief } from "./components/SharePanel.vue";
+import AssignmentDrawer, { type AssignmentDeviceBrief } from "./components/AssignmentDrawer.vue";
 import { useCrossPageSelection } from "./useCrossPageSelection";
 
 // ---- 权限 ----
@@ -175,47 +171,31 @@ const deptNameText = (device: DeviceVO & { ownerDeptId?: number }): string => {
     return deptNameById.value.get(deptId) ?? `部门 #${deptId}`;
 };
 
-// ---- 分配弹窗(整部门 / 批量 / 单台 三来源共用) ----
-type AssignMode = "dept" | "devices";
+// ---- 分配抽屉(整部门 / 批量 / 单台 三来源共用) ----
 const assignVisible = ref(false);
-const assignMode = ref<AssignMode>("devices");
+const assignMode = ref<"department" | "devices">("devices");
 const assignSourceDeptName = ref("");
 const assignSourceDeptId = ref<number | undefined>(undefined);
 const assignPendingIds = ref<number[]>([]);
-const assignTargetDeptId = ref<number | undefined>(undefined);
-const assignSubmitting = ref(false);
-
-const assignSummary = computed(() => {
-    if (assignMode.value === "dept") {
-        return `源部门「${assignSourceDeptName.value}」的全部设备将流转到目标部门`;
-    }
-    return `已选 ${assignPendingIds.value.length} 台设备将流转到目标部门`;
-});
-
-/** 源栏设备清单:全部展示,超出高度出现垂直滚动条(跨页勾选的设备名回退为编号) */
-const assignPendingDevices = computed(() => {
-    const byId = new Map(selection.selectedDevices.value.map((d) => [d.id, d]));
-    return assignPendingIds.value.map((id) => ({ id, name: byId.get(id)?.name || byId.get(id)?.deviceId || `设备 #${id}` }));
-});
-
-const assignTargetDeptName = computed(() => {
-    if (!assignTargetDeptId.value) return "";
-    return deptNameById.value.get(assignTargetDeptId.value) ?? "";
-});
-
-const confirmAssignText = computed(() =>
-    assignTargetDeptName.value ? `确认流转到「${assignTargetDeptName.value}」` : "请先选择目标部门"
+const assignmentDrawerDevices = computed<AssignmentDeviceBrief[]>(() =>
+    assignPendingIds.value.map((id) => {
+        const device = selection.selectedDevices.value.find((item) => item.id === id) ?? devices.value.find((item) => item.id === id);
+        return {
+            id,
+            deviceId: device?.deviceId ?? `设备-${id}`,
+            name: device?.name ?? `设备 #${id}`,
+            ownerDeptId: devices.value.find((item) => item.id === id)?.ownerDeptId ?? 0,
+            ownerDeptName: deptNameText(devices.value.find((item) => item.id === id) ?? ({ ownerDeptId: 0 } as DeviceVO))
+        };
+    })
 );
 
-const onSelectTargetDept = (keys: Array<string | number>) => {
-    assignTargetDeptId.value = keys.length ? Number(keys[0]) : undefined;
-};
+const assignSourceSummary = computed(() => summary.value.departments.find((item) => item.deptId === assignSourceDeptId.value));
 
 const openDeptAssign = (node: DivisionItem) => {
-    assignMode.value = "dept";
+    assignMode.value = "department";
     assignSourceDeptName.value = node.name;
     assignSourceDeptId.value = node.id;
-    assignTargetDeptId.value = undefined;
     assignVisible.value = true;
 };
 
@@ -226,50 +206,13 @@ const openBatchAssign = () => {
     }
     assignMode.value = "devices";
     assignPendingIds.value = [...selection.selectedIds.value];
-    assignTargetDeptId.value = undefined;
     assignVisible.value = true;
 };
 
 const openRowAssign = (device: DeviceVO) => {
     assignMode.value = "devices";
     assignPendingIds.value = [device.id];
-    assignTargetDeptId.value = undefined;
     assignVisible.value = true;
-};
-
-const submitAssign = async () => {
-    if (!assignTargetDeptId.value) {
-        Message.warning("请选择目标部门");
-        return;
-    }
-    assignSubmitting.value = true;
-    try {
-        if (assignMode.value === "dept") {
-            const { data } = await applyPermissionWorkbenchDepartmentAssignment({
-                sourceDeptId: assignSourceDeptId.value!,
-                targetDeptId: assignTargetDeptId.value,
-                includeChildren: false,
-                expectedCount: total.value
-            });
-            Message.success(`整部门分配完成:${data?.summary.changed ?? 0}/${data?.summary.requested ?? 0} 台`);
-        } else {
-            const items = assignPendingIds.value.map((deviceId) => {
-                const device = devices.value.find((item) => item.id === deviceId);
-                return { deviceId, expectedOwnerDeptId: device?.ownerDeptId ?? 0 };
-            });
-            const { data } = await applyPermissionWorkbenchAssignments({ items, targetDeptId: assignTargetDeptId.value });
-            const succeeded = data?.summary.changed ?? 0;
-            const failed = data?.summary.failed ?? 0;
-            Message.success(`分配完成:成功 ${succeeded} 台${failed > 0 ? `,失败 ${failed} 台` : ""}`);
-        }
-        assignVisible.value = false;
-    selection.clear();
-        await loadDevices();
-    } catch (error: unknown) {
-        Message.error(error instanceof Error ? error.message : "分配失败");
-    } finally {
-        assignSubmitting.value = false;
-    }
 };
 
 // ---- 共享 ----
@@ -292,6 +235,12 @@ const openBatchShare = () => {
 };
 
 const handleShareChanged = () => {
+    void loadDevices();
+};
+
+const handleAssignmentSubmitted = () => {
+    selection.clear();
+    void loadSummary();
     void loadDevices();
 };
 
@@ -510,113 +459,17 @@ onMounted(() => {
             </s-fold-page>
         </div>
 
-        <!-- 分配弹窗:双栏流向(整部门 / 批量 / 单台共用) -->
-        <a-modal
+        <AssignmentDrawer
             v-model:visible="assignVisible"
-            modal-class="uvp-system-dialog"
-            :width="760"
-            :title="assignMode === 'dept' ? '分配本部门设备' : '调整设备归属'"
-            @cancel="assignVisible = false"
-        >
-            <div class="assign-flow">
-                <!-- 源栏 -->
-                <div class="assign-flow__col assign-flow__col--source">
-                    <div class="assign-flow__col-head">
-                        <span class="assign-flow__step">1</span>
-                        <div class="assign-flow__heading">
-                            <strong v-if="assignMode === 'dept'">源部门</strong>
-                            <strong v-else>源设备</strong>
-                            <small>{{ assignMode === "dept" ? "确认待流转范围" : `共 ${assignPendingDevices.length} 台待流转` }}</small>
-                        </div>
-                    </div>
-                    <div v-if="assignMode === 'dept'" class="assign-flow__source-dept">
-                        <span class="assign-flow__source-icon-wrap">
-                            <Folder :size="22" class="assign-flow__source-icon" />
-                        </span>
-                        <span class="assign-flow__source-name">{{ assignSourceDeptName }}</span>
-                        <span class="assign-flow__source-meta">该部门下的全部设备</span>
-                    </div>
-                    <ul
-                        v-else
-                        class="assign-flow__device-list"
-                        :class="{ 'assign-flow__device-list--compact': assignPendingDevices.length <= 3 }"
-                    >
-                        <li v-for="device in assignPendingDevices" :key="device.id" class="assign-flow__device-item">
-                            <span class="assign-flow__device-icon-wrap">
-                                <Cctv :size="14" class="assign-flow__device-icon" />
-                            </span>
-                            <span class="text-ellipsis">{{ device.name }}</span>
-                        </li>
-                    </ul>
-                    <div class="assign-flow__summary">{{ assignSummary }}</div>
-                </div>
-
-                <!-- 流向箭头 -->
-                <div class="assign-flow__arrow">
-                    <span class="assign-flow__arrow-icon">
-                        <ArrowRight :size="18" :stroke-width="2.2" />
-                    </span>
-                    <small>流转</small>
-                </div>
-
-                <!-- 目标栏 -->
-                <div class="assign-flow__col assign-flow__col--target">
-                    <div class="assign-flow__col-head">
-                        <span class="assign-flow__step">2</span>
-                        <div class="assign-flow__heading">
-                            <strong>目标部门</strong>
-                            <small>从组织树中选择接收部门</small>
-                        </div>
-                    </div>
-                    <div v-if="deptTree.length" class="assign-flow__tree">
-                        <a-tree
-                            :data="deptTree"
-                            :field-names="{ key: 'id', title: 'name', children: 'children' }"
-                            :selected-keys="assignTargetDeptId ? [assignTargetDeptId] : []"
-                            default-expand-all
-                            @select="onSelectTargetDept"
-                        >
-                            <template #icon="{ isLeaf, expanded }">
-                                <component
-                                    :is="isLeaf ? Building2 : expanded ? FolderOpen : Folder"
-                                    class="uvp-tree-node-icon"
-                                    :size="15"
-                                    :stroke-width="2"
-                                />
-                            </template>
-                        </a-tree>
-                    </div>
-                    <div v-else class="assign-flow__empty">
-                        <Building2 :size="24" />
-                        <strong>暂无可选部门</strong>
-                        <span>请稍后刷新部门数据</span>
-                    </div>
-                    <div class="assign-flow__target-status" :class="{ 'is-selected': assignTargetDeptName }">
-                        <span class="assign-flow__status-dot"></span>
-                        <span>{{ assignTargetDeptName ? `已选择：${assignTargetDeptName}` : "等待选择目标部门" }}</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="assign-hint">
-                <CircleAlert :size="16" :stroke-width="2" />
-                <span>流转后，设备及通道、录像、告警等数据将归入目标部门；原部门立即失去访问，进行中的会话会被撤销。</span>
-            </div>
-
-            <template #footer>
-                <div class="assign-footer">
-                    <button class="btn-ghost" type="button" @click="assignVisible = false">取消</button>
-                    <button
-                        class="btn-primary"
-                        type="button"
-                        :disabled="!assignTargetDeptId || assignSubmitting"
-                        @click="submitAssign"
-                    >
-                        {{ confirmAssignText }}
-                    </button>
-                </div>
-            </template>
-        </a-modal>
+            :mode="assignMode"
+            :devices="assignmentDrawerDevices"
+            :source-dept-id="assignSourceDeptId"
+            :source-dept-name="assignSourceDeptName"
+            :source-direct-count="assignMode === 'department' ? assignSourceSummary?.directCount : undefined"
+            :source-subtree-count="assignMode === 'department' ? assignSourceSummary?.subtreeCount : undefined"
+            :departments="deptTree"
+            @submitted="handleAssignmentSubmitted"
+        />
 
         <!-- 共享管理面板 -->
         <SharePanel v-model:visible="shareVisible" :devices="shareDevices" @changed="handleShareChanged" />
