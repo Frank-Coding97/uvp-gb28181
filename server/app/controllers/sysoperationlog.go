@@ -38,6 +38,7 @@ func NewSysOperationLogController() *SysOperationLogController {
 // @Param startTime query string false "开始时间"
 // @Param endTime query string false "结束时间"
 // @Param ip query string false "IP地址"
+// @Param path query string false "请求路径"
 // @Success 200 {object} map[string]interface{} "成功返回日志列表"
 // @Failure 500 {object} map[string]interface{} "服务器内部错误"
 // @Router /sysOperationLog/list [get]
@@ -105,6 +106,7 @@ func (c *SysOperationLogController) Delete(ctx *gin.Context) {
 // @Param startTime query string false "开始时间"
 // @Param endTime query string false "结束时间"
 // @Param ip query string false "IP地址"
+// @Param path query string false "请求路径"
 // @Success 200 {file} file "CSV文件"
 // @Failure 500 {object} map[string]interface{} "服务器内部错误"
 // @Router /sysOperationLog/export [get]

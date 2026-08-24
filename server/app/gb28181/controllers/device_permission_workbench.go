@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -13,9 +14,18 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/common"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 )
+
+func deptValidatorFor(c *gin.Context) assign.DeptValidator {
+	return func(_ context.Context, db *gorm.DB) ([]uint, bool, error) {
+		deptIDs, needFilter := datascope.GetOwnerDeptIDsWithDB(c, db)
+		return deptIDs, needFilter, nil
+	}
+}
 
 func (dc *DeviceMgmtController) PermissionWorkbenchSummary(c *gin.Context) {
 	db := dc.db()
@@ -143,6 +153,18 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchGrants(c *gin.Context) {
 		return
 	}
 	// 当前播放授权没有目标用户身份，不能用全局 BumpRevocation 误伤其他共享方。
+	middleware.MarkSensitiveOperation(c, map[string]any{
+		"operation":       "grant_apply",
+		"mode":            string(request.Mode),
+		"targets":         safeGrantTargets(request.Targets),
+		"requested":       result.Summary.Requested,
+		"changed":         result.Summary.Changed,
+		"skipped":         result.Summary.Skipped,
+		"failed":          result.Summary.Failed,
+		"added":           result.Summary.Added,
+		"removed":         result.Summary.Removed,
+		"failedDeviceIds": failedGrantDeviceIDs(result.Results),
+	})
 	dc.Success(c, result)
 }
 
@@ -168,6 +190,16 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchAssignments(c *gin.Conte
 	if result.Summary.Changed > 0 {
 		playauth.BumpRevocation(time.Now())
 	}
+	middleware.MarkSensitiveOperation(c, map[string]any{
+		"operation":       "assignment_apply",
+		"mode":            "devices",
+		"targetDeptId":    body.TargetDeptID,
+		"requested":       result.Summary.Requested,
+		"changed":         result.Summary.Changed,
+		"skipped":         result.Summary.Skipped,
+		"failed":          result.Summary.Failed,
+		"failedDeviceIds": failedAssignmentDeviceIDs(result.Results),
+	})
 	dc.Success(c, result)
 }
 
@@ -224,7 +256,55 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchDepartmentAssignment(c *
 	if result.Summary.Changed > 0 {
 		playauth.BumpRevocation(time.Now())
 	}
+	middleware.MarkSensitiveOperation(c, map[string]any{
+		"operation":       "assignment_apply",
+		"mode":            "department",
+		"sourceDeptId":    body.SourceDeptID,
+		"targetDeptId":    body.TargetDeptID,
+		"includeChildren": body.IncludeChildren,
+		"requested":       result.Summary.Requested,
+		"changed":         result.Summary.Changed,
+		"skipped":         result.Summary.Skipped,
+		"failed":          result.Summary.Failed,
+		"failedDeviceIds": failedAssignmentDeviceIDs(result.Results),
+	})
 	dc.Success(c, result)
+}
+
+func currentOperatorID(c *gin.Context) uint {
+	claims := common.GetClaims(c)
+	if claims == nil {
+		return 0
+	}
+	return claims.UserID
+}
+
+func safeGrantTargets(targets []grant.ApplyTarget) []map[string]any {
+	result := make([]map[string]any, 0, len(targets))
+	for _, target := range targets {
+		result = append(result, map[string]any{"type": target.Type, "id": target.ID})
+	}
+	return result
+}
+
+func failedGrantDeviceIDs(results []grant.ApplyResultItem) []uint {
+	failed := make([]uint, 0)
+	for _, result := range results {
+		if result.Status == "failed" {
+			failed = append(failed, result.DeviceID)
+		}
+	}
+	return failed
+}
+
+func failedAssignmentDeviceIDs(results []assign.AssignmentResultItemV2) []uint {
+	failed := make([]uint, 0)
+	for _, result := range results {
+		if result.Status == assign.AssignmentFailed {
+			failed = append(failed, result.DeviceID)
+		}
+	}
+	return failed
 }
 
 func resolveAssignmentSourceDepartments(c *gin.Context, db *gorm.DB, sourceDeptID uint, includeChildren bool) ([]uint, error) {

@@ -18,6 +18,7 @@ import (
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 )
@@ -278,4 +279,47 @@ func TestPermissionWorkbench_GrantApplyAddsAndRemovesWithoutGlobalRevocation(t *
 	require.NoError(t, db.Order("id ASC").Find(&current).Error)
 	require.EqualValues(t, 10, current[0].OwnerDeptID)
 	require.EqualValues(t, 10, current[1].OwnerDeptID)
+}
+
+func TestPermissionWorkbench_GrantApplyMarksStructuredAuditMetadata(t *testing.T) {
+	var metadata map[string]any
+	capture := func(c *gin.Context) {
+		c.Next()
+		metadata, _ = middleware.SensitiveOperationMetadata(c)
+	}
+	r, db := newDeviceMgmtRouter(t, withClaims(100), capture)
+	registerPermissionWorkbenchRoutes(r, db)
+	active := int8(1)
+	require.NoError(t, db.Create(&basemodels.SysDepartment{BaseModel: basemodels.BaseModel{ID: 10}, Name: "安保部", Status: &active}).Error)
+	require.NoError(t, db.Create(&basemodels.User{BaseModel: basemodels.BaseModel{ID: 100}, Username: "operator-audit", Password: "x", Status: 1, DeptID: 10}).Error)
+	role := basemodels.SysRole{Name: "全部数据-audit", Status: 1, DataScope: 1}
+	require.NoError(t, db.Create(&role).Error)
+	require.NoError(t, db.Create(&basemodels.SysUserRole{UserID: 100, RoleID: role.ID}).Error)
+	devices := []gbmodels.GbDevice{
+		{DeviceID: "audit-a", Name: "审计设备 A", OwnerDeptID: 10},
+		{DeviceID: "audit-b", Name: "审计设备 B", OwnerDeptID: 10},
+	}
+	require.NoError(t, db.Create(&devices).Error)
+	state, err := grant.NewService(db, nil).Query(context.Background(), []uint{devices[0].ID, devices[1].ID})
+	require.NoError(t, err)
+	body, err := json.Marshal(map[string]any{
+		"items": []map[string]any{
+			{"deviceId": devices[0].ID, "expectedRevision": "stale"},
+			{"deviceId": devices[1].ID, "expectedRevision": state.Devices[1].Revision},
+		},
+		"mode":    "add",
+		"targets": []map[string]any{{"type": "dept", "id": 10}},
+	})
+	require.NoError(t, err)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/gb28181/device-mgmt/permission-workbench/grants/apply", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "add", metadata["mode"])
+	require.Equal(t, 2, metadata["requested"])
+	require.Equal(t, 1, metadata["changed"])
+	require.Equal(t, 1, metadata["failed"])
+	require.Equal(t, []uint{devices[0].ID}, metadata["failedDeviceIds"])
+	require.NotContains(t, metadata, "response")
 }
