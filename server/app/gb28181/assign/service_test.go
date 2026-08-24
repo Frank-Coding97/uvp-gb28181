@@ -137,3 +137,38 @@ func TestAssignBatch_TargetDeptNotVisible(t *testing.T) {
 	_, err := NewService(db, validatorVisibleDept1).AssignBatch(context.Background(), []uint{1}, 99)
 	assert.ErrorIs(t, err, ErrTargetDeptInvalid)
 }
+
+func TestAssignBatchV2_SameTargetIsSkippedWithoutCleanup(t *testing.T) {
+	db := newAssignTestDB(t)
+	device := seedAssignedDeviceWithCode(t, db, "34020000002000000021")
+
+	result, err := NewService(db, validatorVisibleDept1).AssignBatchV2(context.Background(), []AssignmentInput{
+		{DeviceID: device.ID, ExpectedOwnerDeptID: 1},
+	}, 1)
+	require.NoError(t, err)
+	require.Equal(t, BatchSummary{Requested: 1, Skipped: 1}, result.Summary)
+	require.Len(t, result.Results, 1)
+	require.Equal(t, AssignmentSkipped, result.Results[0].Status)
+
+	var nodes int64
+	require.NoError(t, db.Model(&gbmodels.GbCatalogNode{}).Where("device_id = ?", device.ID).Count(&nodes).Error)
+	require.EqualValues(t, 1, nodes, "跳过项不能触发关联资源清理")
+}
+
+func TestAssignBatchV2_StaleOwnerFailsClosed(t *testing.T) {
+	db := newAssignTestDB(t)
+	device := seedAssignedDeviceWithCode(t, db, "34020000002000000022")
+
+	result, err := NewService(db, validatorVisibleDept1).AssignBatchV2(context.Background(), []AssignmentInput{
+		{DeviceID: device.ID, ExpectedOwnerDeptID: 9},
+	}, 2)
+	require.NoError(t, err)
+	require.Equal(t, BatchSummary{Requested: 1, Failed: 1}, result.Summary)
+	require.Len(t, result.Results, 1)
+	require.Equal(t, AssignmentFailed, result.Results[0].Status)
+	require.Contains(t, result.Results[0].Message, "其他管理员")
+
+	var persisted gbmodels.GbDevice
+	require.NoError(t, db.First(&persisted, device.ID).Error)
+	require.EqualValues(t, 1, persisted.OwnerDeptID)
+}

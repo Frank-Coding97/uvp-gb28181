@@ -24,6 +24,8 @@ func registerPermissionWorkbenchRoutes(r *gin.Engine, db *gorm.DB) {
 	controller.SetDB(func() *gorm.DB { return db })
 	r.GET("/api/gb28181/device-mgmt/permission-workbench/summary", controller.PermissionWorkbenchSummary)
 	r.POST("/api/gb28181/device-mgmt/permission-workbench/devices/resolve", controller.ResolvePermissionWorkbenchDevices)
+	r.POST("/api/gb28181/device-mgmt/permission-workbench/assignments", controller.ApplyPermissionWorkbenchAssignments)
+	r.POST("/api/gb28181/device-mgmt/permission-workbench/assignments/departments", controller.ApplyPermissionWorkbenchDepartmentAssignment)
 }
 
 func TestPermissionWorkbench_StrictAssignmentFilter(t *testing.T) {
@@ -118,3 +120,43 @@ func TestPermissionWorkbench_ResolveEndpoint(t *testing.T) {
 }
 
 func uintPointer(value uint) *uint { return &value }
+
+func TestPermissionWorkbench_AssignmentSkipsSameOwner(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	registerPermissionWorkbenchRoutes(r, db)
+	active := int8(1)
+	require.NoError(t, db.Create(&basemodels.SysDepartment{BaseModel: basemodels.BaseModel{ID: 10}, Name: "安保部", Status: &active}).Error)
+	device := gbmodels.GbDevice{DeviceID: "assignment-skip", Name: "跳过设备", OwnerDeptID: 10}
+	require.NoError(t, db.Create(&device).Error)
+	body, err := json.Marshal(map[string]any{
+		"items":        []map[string]any{{"deviceId": device.ID, "expectedOwnerDeptId": 10}},
+		"targetDeptId": 10,
+	})
+	require.NoError(t, err)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/gb28181/device-mgmt/permission-workbench/assignments", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	summary := unmarshal(t, w)["data"].(map[string]any)["summary"].(map[string]any)
+	require.EqualValues(t, 1, summary["skipped"])
+}
+
+func TestPermissionWorkbench_DepartmentAssignmentRejectsChangedCount(t *testing.T) {
+	r, db := newDeviceMgmtRouter(t)
+	registerPermissionWorkbenchRoutes(r, db)
+	active := int8(1)
+	require.NoError(t, db.Create(&[]basemodels.SysDepartment{
+		{BaseModel: basemodels.BaseModel{ID: 10}, Name: "源部门", Status: &active},
+		{BaseModel: basemodels.BaseModel{ID: 20}, Name: "目标部门", Status: &active},
+	}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: "department-stale-count", OwnerDeptID: 10}).Error)
+	body := []byte(`{"sourceDeptId":10,"targetDeptId":20,"includeChildren":false,"expectedCount":0}`)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/gb28181/device-mgmt/permission-workbench/assignments/departments", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusConflict, w.Code)
+}
