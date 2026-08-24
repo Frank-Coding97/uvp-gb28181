@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { AlertTriangle, ArrowLeft, Copy } from "lucide-vue-next";
+import { AlertTriangle, ArrowLeft, ArrowRight, Copy, Server, Video } from "lucide-vue-next";
 import { Message } from "@arco-design/web-vue";
 import type {
     TraceMessageSummary as TraceMessage,
@@ -69,6 +69,10 @@ function splitAddr(addr: string): { ip: string; port: string } {
     return { ip: addr.slice(0, idx), port: addr.slice(idx) };
 }
 
+function laneRole(index: number): "设备端" | "平台端" {
+    return index === 0 ? "设备端" : "平台端";
+}
+
 function deriveScenario(session: TraceSession): string {
     if (session.diagnosis?.category === "register_failure") return "register-fail";
     if (session.diagnosis?.category === "play_stuck") return "invite-stuck";
@@ -116,7 +120,7 @@ async function copyCallId() {
     <div class="session-detail">
         <!-- 顶部返回栏 -->
         <div class="detail-topbar">
-            <button class="back-btn" @click="emit('back')">
+            <button class="back-btn action-neutral" @click="emit('back')">
                 <ArrowLeft :size="14" />
                 返回列表
             </button>
@@ -128,7 +132,7 @@ async function copyCallId() {
                     {{ sessionStateLabel(session).label }}
                 </span>
             </div>
-            <button class="copy-btn" @click="copyCallId">
+            <button class="copy-btn action-brand" @click="copyCallId">
                 <Copy :size="13" />
                 复制 Call-ID
             </button>
@@ -143,35 +147,59 @@ async function copyCallId() {
             <span v-if="session.diagnosis.cseq" class="mono">CSeq {{ session.diagnosis.cseq }}</span>
         </div>
 
-        <!-- 元信息横条 -->
+        <!-- 会话元信息 -->
         <div class="detail-meta">
-            <div class="meta-item wide">
-                <span class="meta-key">Call-ID</span>
-                <span class="meta-val mono call-id-val">{{ session.callId }}</span>
+            <div class="meta-identity-row">
+                <div class="meta-item">
+                    <span class="meta-key">Call-ID</span>
+                    <span class="meta-val mono call-id-val">{{ session.callId }}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-key">关联设备</span>
+                    <span class="meta-val mono">{{ session.deviceId || "-" }}</span>
+                </div>
             </div>
-            <div class="meta-item">
-                <span class="meta-key">起止时间</span>
-                <span class="meta-val mono">{{ formatFullTime(session.firstAt) }} → {{ formatFullTime(session.lastAt) }}</span>
+
+            <div class="meta-metrics">
+                <div class="meta-item meta-time-range">
+                    <span class="meta-key">时间范围</span>
+                    <div class="time-range-values">
+                        <span class="time-point">
+                            <small>开始</small>
+                            <span class="meta-val mono">{{ formatFullTime(session.firstAt) }}</span>
+                        </span>
+                        <ArrowRight :size="14" class="time-range-arrow" aria-hidden="true" />
+                        <span class="time-point">
+                            <small>结束</small>
+                            <span class="meta-val mono">{{ formatFullTime(session.lastAt) }}</span>
+                        </span>
+                    </div>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-key">持续时间</span>
+                    <span class="meta-val mono metric-value">{{ formatDuration(computeDuration(session)) }}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-key">报文统计</span>
+                    <span class="meta-val mono metric-value">{{ session.messageCount }} 条</span>
+                    <span class="metric-note">入 {{ session.inboundCount }} · 出 {{ session.outboundCount }}</span>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-key">业务类型</span>
+                    <span class="meta-val metric-value">{{ session.businessType || "未知业务" }}</span>
+                </div>
             </div>
-            <div class="meta-item">
-                <span class="meta-key">时长</span>
-                <span class="meta-val mono">{{ formatDuration(computeDuration(session)) }}</span>
-            </div>
-            <div class="meta-item">
-                <span class="meta-key">报文</span>
-                <span class="meta-val mono">{{ session.messageCount }} 条 · 入 {{ session.inboundCount }} · 出 {{ session.outboundCount }}</span>
-            </div>
-            <div class="meta-item">
-                <span class="meta-key">设备</span>
-                <span class="meta-val mono">{{ session.deviceId }}</span>
-            </div>
-            <div class="meta-item">
-                <span class="meta-key">业务类型</span>
-                <span class="meta-val">{{ session.businessType || "未知业务" }}</span>
-            </div>
-            <div class="meta-item">
-                <span class="meta-key">From / To</span>
-                <span class="meta-val mono">{{ session.fromUri || "-" }} → {{ session.toUri || "-" }}</span>
+
+            <div class="meta-route-row">
+                <div class="route-endpoint">
+                    <span class="meta-key">From</span>
+                    <span class="meta-val mono">{{ session.fromUri || "-" }}</span>
+                </div>
+                <span class="route-arrow" aria-hidden="true"><ArrowRight :size="14" /></span>
+                <div class="route-endpoint">
+                    <span class="meta-key">To</span>
+                    <span class="meta-val mono">{{ session.toUri || "-" }}</span>
+                </div>
             </div>
         </div>
 
@@ -187,6 +215,11 @@ async function copyCallId() {
                         class="lane-header-cell mono"
                         :style="{ gridColumn: `${idx + 2}` }"
                     >
+                        <span :class="['lane-role', idx === 0 ? 'role-device' : 'role-platform']">
+                            <Video v-if="idx === 0" class="lane-role-icon" :size="14" :stroke-width="2" aria-hidden="true" />
+                            <Server v-else class="lane-role-icon" :size="14" :stroke-width="2" aria-hidden="true" />
+                            {{ laneRole(idx) }}
+                        </span>
                         <span class="lane-header-label">
                             <span class="lane-ip">{{ splitAddr(lane).ip }}</span><span class="lane-port">{{ splitAddr(lane).port }}</span>
                         </span>
@@ -263,20 +296,29 @@ async function copyCallId() {
     border-bottom: 1px solid var(--uvp-panel-border);
     flex: 0 0 auto;
 }
-.back-btn {
+.back-btn,
+.copy-btn {
     display: inline-flex;
     align-items: center;
     gap: 5px;
     height: 28px;
     padding: 0 10px;
-    color: var(--uvp-text-secondary);
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
+    border: 1px solid transparent;
     border-radius: 6px;
     font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
+    transition: color 120ms, background 120ms, border-color 120ms;
 }
-.back-btn:hover { color: var(--uvp-brand); border-color: var(--uvp-brand); }
+.action-neutral {
+    color: var(--uvp-text-secondary);
+    background: color-mix(in srgb, var(--uvp-text-tertiary) 9%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-text-tertiary) 18%, var(--uvp-panel-border));
+}
+.action-neutral:hover {
+    color: var(--uvp-text-primary);
+    background: color-mix(in srgb, var(--uvp-text-tertiary) 15%, var(--uvp-panel-bg));
+}
 .topbar-title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .scenario-emoji { font-size: 18px; }
 .scenario-name { color: var(--uvp-text-primary); font-size: 14px; font-weight: 600; }
@@ -295,35 +337,76 @@ async function copyCallId() {
 .state-danger { color: var(--uvp-danger); background: var(--uvp-danger-soft); }
 .state-info { color: var(--uvp-brand); background: var(--uvp-brand-soft); }
 .state-neutral { color: var(--uvp-text-tertiary); background: color-mix(in srgb, var(--uvp-text-tertiary) 12%, transparent); }
-.copy-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    height: 28px;
-    padding: 0 10px;
-    color: var(--uvp-text-secondary);
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 6px;
-    font-size: 12px;
-    cursor: pointer;
+.action-brand {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-color: color-mix(in srgb, var(--uvp-brand) 28%, var(--uvp-panel-border));
 }
-.copy-btn:hover { color: var(--uvp-brand); border-color: var(--uvp-brand); }
+.action-brand:hover {
+    color: #fff;
+    background: var(--uvp-brand);
+    border-color: var(--uvp-brand);
+}
 
-/* 元信息横条 */
+/* 会话元信息 */
 .detail-meta {
     display: flex;
-    gap: 20px;
-    padding: 10px 16px;
+    flex-direction: column;
     background: var(--uvp-list-toolbar-bg);
     border-bottom: 1px solid var(--uvp-panel-border);
-    flex-wrap: wrap;
 }
 .meta-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; max-width: 100%; }
-.meta-item.wide { flex-basis: 100%; }
-.meta-key { color: var(--uvp-text-tertiary); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; }
-.meta-val { color: var(--uvp-text-primary); font-size: 12px; word-break: break-all; }
+.meta-key { color: var(--uvp-text-tertiary); font-size: 10px; font-weight: 600; text-transform: uppercase; }
+.meta-val { color: var(--uvp-text-primary); font-size: 12px; overflow-wrap: anywhere; }
 .call-id-val { color: var(--uvp-brand); font-weight: 500; }
+.meta-identity-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.8fr) minmax(180px, 1fr);
+    gap: 24px;
+    padding: 10px 16px;
+    border-bottom: 1px solid color-mix(in srgb, var(--uvp-panel-border) 75%, transparent);
+}
+.meta-metrics {
+    display: grid;
+    grid-template-columns: minmax(280px, 2.4fr) repeat(3, minmax(86px, 1fr));
+    border-bottom: 1px solid color-mix(in srgb, var(--uvp-panel-border) 75%, transparent);
+}
+.meta-metrics > .meta-item {
+    justify-content: center;
+    min-height: 58px;
+    padding: 8px 14px;
+    border-right: 1px solid color-mix(in srgb, var(--uvp-panel-border) 75%, transparent);
+}
+.meta-metrics > .meta-item:last-child { border-right: 0; }
+.time-range-values {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 18px minmax(0, 1fr);
+    align-items: center;
+    gap: 6px;
+}
+.time-point { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.time-point small,
+.metric-note { color: var(--uvp-text-tertiary); font-size: 10px; }
+.time-range-arrow { color: var(--uvp-text-tertiary); }
+.metric-value { font-size: 13px; font-weight: 600; }
+.meta-route-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 9px 16px 11px;
+}
+.route-endpoint { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.route-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+    border-radius: 50%;
+}
 .diagnosis-summary {
     display: flex;
     align-items: center;
@@ -363,7 +446,7 @@ async function copyCallId() {
     display: grid;
     grid-template-columns: 220px repeat(var(--lane-count), 1fr);
     align-items: end;
-    min-height: 60px;
+    min-height: 72px;
     padding: 12px 16px 0;
     background: var(--uvp-panel-bg);
 }
@@ -372,13 +455,25 @@ async function copyCallId() {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
+    gap: 4px;
     padding: 4px 8px 0;
     font-size: 13px;
     text-align: center;
     letter-spacing: 0.2px;
     word-break: break-all;
 }
+.lane-role {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--uvp-text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+}
+.lane-role-icon { flex: 0 0 auto; }
+.lane-role.role-device { color: #0f766e; }
+.lane-role.role-platform { color: var(--uvp-brand); }
 .lane-header-label { display: inline-flex; align-items: baseline; }
 .lane-ip { color: #ec4899; font-weight: 700; }
 .lane-port { color: var(--uvp-text-primary); font-weight: 700; }
@@ -394,7 +489,7 @@ async function copyCallId() {
 /* 泳道竖线(绝对定位,从托盘下沿贯穿到底) — 位于每个泳道栏位中心 */
 .lane-lines {
     position: absolute;
-    top: 60px;
+    top: 72px;
     bottom: 0;
     left: 236px;
     right: 16px;
@@ -412,7 +507,7 @@ async function copyCallId() {
 /* 时间栏右侧的分隔竖线,同样贯穿到底 */
 .time-col-divider {
     position: absolute;
-    top: 60px;
+    top: 72px;
     bottom: 0;
     left: 220px;
     width: 1px;
@@ -499,4 +594,15 @@ async function copyCallId() {
 .ladder-row.tone-info    { --tone-color: var(--uvp-brand); }
 .ladder-row.tone-accent  { --tone-color: #7c3aed; }
 .ladder-row.tone-neutral { --tone-color: var(--uvp-text-tertiary); }
+
+@media (max-width: 768px) {
+    .detail-topbar { flex-wrap: wrap; height: auto; min-height: 48px; padding: 8px 10px; }
+    .topbar-title { order: -1; flex-basis: 100%; }
+    .meta-identity-row { grid-template-columns: 1fr; gap: 8px; }
+    .meta-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .meta-time-range { grid-column: 1 / -1; }
+    .meta-metrics > .meta-item:nth-child(2) { border-top: 1px solid color-mix(in srgb, var(--uvp-panel-border) 75%, transparent); }
+    .meta-route-row { grid-template-columns: 1fr; }
+    .route-arrow { transform: rotate(90deg); }
+}
 </style>

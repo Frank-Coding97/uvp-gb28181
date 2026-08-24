@@ -92,6 +92,8 @@ describe("SIP log workbench storage replacement regression", () => {
         expect(wrapper.get("a-input-stub").attributes("placeholder")).toBe("搜索设备 ID、名称或 Call-ID");
         expect(wrapper.find(".view-switch").exists()).toBe(true);
         expect(wrapper.findAll(".view-btn").map(button => button.text())).toEqual(["表格", "终端"]);
+        expect(wrapper.find(".toolbar-right .icon-btn").exists()).toBe(false);
+        expect(wrapper.get(".filter-refresh-btn").text()).toContain("刷新");
         expect(wrapper.text().match(/实时/g)).toHaveLength(1);
         expect(wrapper.find(".workspace").exists()).toBe(true);
         expect(wrapper.findComponent({ name: "TableView" }).props("sessions")).toEqual([]);
@@ -99,6 +101,29 @@ describe("SIP log workbench storage replacement regression", () => {
         expect(wrapper.text()).toContain("异常会话");
         expect(traceApi.listTraceSessions).toHaveBeenCalledWith(expect.objectContaining({ limit: 200 }));
         expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    it("hides the page status toolbar while viewing a session detail", async () => {
+        const session = {
+            day: "2026-08-24T00:00:00Z", deviceId: "device-a", callId: "detail-call",
+            firstAt: "2026-08-24T09:00:00Z", lastAt: "2026-08-24T09:00:01Z",
+            messageCount: 2, inboundCount: 1, outboundCount: 1, methods: ["MESSAGE"],
+            finalStatus: 200, firstMethod: "MESSAGE", requestCount: 1, finalResponseCount: 1,
+            businessCode: "keepalive" as const, businessType: "心跳保持",
+            originalAvailable: true, originalExpiresAt: "2026-08-31T09:00:01Z",
+            missingResponse: false, anomaly: false
+        };
+        traceApi.listTraceSessions.mockResolvedValue({ code: 0, data: { items: [session] } });
+        traceApi.listTraceSessionMessages.mockResolvedValue({ code: 0, data: { items: [] } });
+        const wrapper = mountPage();
+        await flushPromises();
+
+        expect(wrapper.find(".toolbar").exists()).toBe(true);
+        wrapper.findComponent({ name: "TableView" }).vm.$emit("select-session", session);
+        await flushPromises();
+
+        expect(wrapper.find(".toolbar").exists()).toBe(false);
+        expect(wrapper.findComponent({ name: "SessionDetail" }).exists()).toBe(true);
     });
 
     it("tracks the latest five minutes and restores that mode when reset", async () => {

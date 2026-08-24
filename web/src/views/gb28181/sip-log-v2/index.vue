@@ -371,7 +371,7 @@ onBeforeUnmount(() => {
     <div class="snow-fill">
         <div class="snow-fill-inner uvp-page-shell-flat sip-log-shell">
             <!-- 顶部工具栏 -->
-            <div class="toolbar">
+            <div v-if="!drillCallId" class="toolbar">
                 <div class="toolbar-left">
                     <span class="page-title">SIP 日志</span>
                     <span :class="['head-badge', `health-${health.state}`]" role="status" aria-live="polite" aria-atomic="true">
@@ -405,11 +405,6 @@ onBeforeUnmount(() => {
                             {{ v.label }}
                         </button>
                     </div>
-                    <a-tooltip content="刷新">
-                        <button class="icon-btn" :disabled="sessionLoading" @click="refresh">
-                            <RefreshCcw :size="15" :class="{ spin: sessionLoading }" />
-                        </button>
-                    </a-tooltip>
                 </div>
             </div>
 
@@ -502,6 +497,10 @@ onBeforeUnmount(() => {
                     <a-button type="primary" @click="search">
                         <template #icon><icon-search /></template>
                         <span>查询</span>
+                    </a-button>
+                    <a-button class="filter-refresh-btn" :disabled="sessionLoading" @click="refresh">
+                        <template #icon><RefreshCcw :size="14" :class="{ spin: sessionLoading }" /></template>
+                        <span>刷新</span>
                     </a-button>
                     <a-button @click="resetFilters">
                         <template #icon><icon-refresh /></template>
@@ -648,21 +647,6 @@ onBeforeUnmount(() => {
     box-shadow: 0 1px 2px rgb(15 23 42 / 8%);
 }
 
-.icon-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    color: var(--uvp-text-secondary);
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: 8px;
-    cursor: pointer;
-}
-.icon-btn:hover:not(:disabled) { color: var(--uvp-brand); border-color: var(--uvp-brand); }
-.icon-btn:disabled { cursor: wait; opacity: 0.6; }
 .spin { animation: rotate 900ms linear infinite; }
 @keyframes rotate { to { transform: rotate(360deg); } }
 

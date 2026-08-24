@@ -192,7 +192,7 @@ function highlightSipStartLine(line: string): string {
     return out;
 }
 
-function highlightHeaderValue(name: string, value: string): string {
+export function highlightSipHeaderValue(name: string, value: string): string {
     let escaped = escapeHtml(value);
     escaped = highlightSipUri(escaped);
     escaped = highlightIpPort(escaped);
@@ -244,7 +244,7 @@ export function highlightSipPayload(payload: string): string {
             const name = line.slice(0, colon);
             const value = line.slice(colon + 1).trimStart();
             const gap = line.slice(colon + 1, colon + 1 + (line.length - (colon + 1) - value.length));
-            result.push(`<span class="tok-header-key">${escapeHtml(name)}</span>:${escapeHtml(gap)}${highlightHeaderValue(name, value)}`);
+            result.push(`<span class="tok-header-key">${escapeHtml(name)}</span>:${escapeHtml(gap)}${highlightSipHeaderValue(name, value)}`);
         } else {
             result.push(escapeHtml(line));
         }

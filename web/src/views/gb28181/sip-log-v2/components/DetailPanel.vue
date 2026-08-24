@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { ArrowDown, ArrowUp, Copy } from "lucide-vue-next";
+import { ArrowDown, ArrowUp, Code2, Copy, FileText, List } from "lucide-vue-next";
 import type { TraceMessageDetail } from "@/api/gb28181-trace";
-import { highlightSdp, highlightSipPayload, highlightXml, isKeyHeader, parsePayload } from "../helpers";
+import { highlightSdp, highlightSipHeaderValue, highlightSipPayload, highlightXml, isKeyHeader, parsePayload } from "../helpers";
 
 type DetailTab = "structured" | "raw" | "sdp" | "xml";
 
@@ -59,16 +59,6 @@ const structuredBodyHtml = computed(() => {
     return "";
 });
 
-function highlightHeaderValueUi(name: string, value: string): string {
-    // 复用完整 payload 的 highlight 提取该 header 值
-    const line = `${name}: ${value}`;
-    const html = highlightSipPayload(line);
-    // 取出 ": " 之后的部分
-    const idx = html.indexOf("</span>:");
-    if (idx >= 0) return html.slice(idx + "</span>:".length).replace(/^\s+/, "");
-    return html;
-}
-
 async function copyPayload() {
     if (!props.message) return;
     try {
@@ -108,24 +98,39 @@ async function copyPayload() {
             <a-spin :loading="loading" class="pane-spin">
                 <div v-if="message && parsedPayload" class="detail-content">
                     <div v-if="detailTab === 'structured'" class="structured-view">
-                        <div class="detail-block">
-                            <span class="block-label">起始行</span>
+                        <section class="structured-section section-start-line">
+                            <div class="block-heading">
+                                <FileText :size="14" aria-hidden="true" />
+                                <span>起始行</span>
+                            </div>
                             <code class="start-line-text mono" v-html="startLineHtml" />
-                        </div>
-                        <div class="detail-block">
-                            <span class="block-label">头部字段</span>
+                        </section>
+                        <section class="structured-section section-headers">
+                            <div class="block-heading">
+                                <List :size="14" aria-hidden="true" />
+                                <span>头部字段</span>
+                                <span class="section-count">{{ parsedPayload.headers.length }}</span>
+                            </div>
                             <dl class="header-list">
-                                <template v-for="(h, idx) in parsedPayload.headers" :key="idx">
+                                <div
+                                    v-for="(h, idx) in parsedPayload.headers"
+                                    :key="idx"
+                                    :class="['header-row', { 'key-header-row': isKeyHeader(h.name) }]"
+                                >
                                     <dt :class="{ 'key-header': isKeyHeader(h.name) }">{{ h.name }}</dt>
-                                    <dd :class="['mono', { 'key-header-val': isKeyHeader(h.name) }]" v-html="highlightHeaderValueUi(h.name, h.value)" />
-                                </template>
+                                    <dd :class="['mono', { 'key-header-val': isKeyHeader(h.name) }]" v-html="highlightSipHeaderValue(h.name, h.value)" />
+                                </div>
                             </dl>
-                        </div>
-                        <div v-if="parsedPayload.bodyType !== 'empty'" class="detail-block">
-                            <span class="block-label">正文 · {{ parsedPayload.bodyType.toUpperCase() }}</span>
+                        </section>
+                        <section v-if="parsedPayload.bodyType !== 'empty'" class="structured-section section-body">
+                            <div class="block-heading">
+                                <Code2 :size="14" aria-hidden="true" />
+                                <span>正文</span>
+                                <span class="body-type">{{ parsedPayload.bodyType.toUpperCase() }}</span>
+                            </div>
                             <pre v-if="structuredBodyHtml" class="body-code mono" v-html="structuredBodyHtml" />
                             <pre v-else class="body-code mono">{{ parsedPayload.body }}</pre>
-                        </div>
+                        </section>
                     </div>
                     <pre v-else-if="detailTab === 'raw'" class="raw-code mono" v-html="rawHtml" />
                     <pre v-else-if="detailTab === 'sdp'" class="raw-code mono" v-html="sdpHtml" />
@@ -195,39 +200,79 @@ async function copyPayload() {
 .detail-tab:hover { color: var(--uvp-text-secondary); }
 .detail-tab.active { color: var(--uvp-brand); border-bottom-color: var(--uvp-brand); }
 
-.pane-body { display: flex; flex: 1; min-height: 0; padding: 12px 14px 18px; overflow: auto; }
+.pane-body { display: flex; flex: 1; min-height: 0; padding: 0 14px 18px; overflow: auto; }
 .pane-spin { display: flex; flex: 1; min-width: 0; min-height: 0; width: 100%; }
 .pane-spin :deep(.arco-spin-children) { display: flex; flex: 1; flex-direction: column; min-width: 0; }
 .pane-spin :deep(.arco-empty) { margin: auto; }
 
-.detail-content { display: flex; flex-direction: column; gap: 14px; width: 100%; }
-.detail-block { display: flex; flex-direction: column; gap: 6px; }
-.block-label {
-    color: var(--uvp-text-tertiary);
-    font-size: 11px;
+.detail-content { display: flex; flex-direction: column; width: 100%; }
+.structured-view { display: flex; flex-direction: column; }
+.structured-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 0 14px;
+    border-bottom: 1px solid color-mix(in srgb, var(--uvp-panel-border) 78%, transparent);
+}
+.structured-section:last-child { border-bottom: 0; }
+.block-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--uvp-text-secondary);
+    font-size: 12px;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.6px;
+}
+.block-heading > svg { color: var(--uvp-brand); }
+.section-count,
+.body-type {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 20px;
+    height: 18px;
+    padding: 0 5px;
+    color: var(--uvp-text-tertiary);
+    background: var(--uvp-list-toolbar-bg);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
 }
 .start-line-text {
-    padding: 8px 10px;
+    display: block;
+    padding: 9px 10px;
     color: var(--uvp-text-primary);
-    background: var(--uvp-list-toolbar-bg);
-    border-radius: 6px;
+    background: color-mix(in srgb, var(--uvp-brand) 4%, var(--uvp-list-toolbar-bg));
+    border-left: 3px solid var(--uvp-brand);
+    border-radius: 0 4px 4px 0;
     font-size: 12px;
     line-height: 1.55;
-    word-break: break-all;
+    overflow-wrap: anywhere;
 }
 .header-list {
-    display: grid;
-    grid-template-columns: 130px 1fr;
-    gap: 4px 12px;
     margin: 0;
+    border-top: 1px solid var(--uvp-panel-border);
+    border-bottom: 1px solid var(--uvp-panel-border);
+}
+.header-row {
+    display: grid;
+    grid-template-columns: 118px minmax(0, 1fr);
+    min-width: 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--uvp-panel-border) 68%, transparent);
+}
+.header-row:last-child { border-bottom: 0; }
+.header-row:hover { background: color-mix(in srgb, var(--uvp-brand) 3%, transparent); }
+.header-list dt,
+.header-list dd {
+    min-width: 0;
+    padding: 6px 10px;
 }
 .header-list dt {
     color: var(--uvp-text-tertiary);
     font-size: 12px;
-    line-height: 1.6;
+    line-height: 1.55;
+    background: color-mix(in srgb, var(--uvp-text-tertiary) 5%, transparent);
+    border-right: 1px solid color-mix(in srgb, var(--uvp-panel-border) 68%, transparent);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -236,8 +281,8 @@ async function copyPayload() {
     margin: 0;
     color: var(--uvp-text-secondary);
     font-size: 12px;
-    line-height: 1.6;
-    word-break: break-all;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
 }
 .header-list dt.key-header { color: var(--uvp-text-primary); font-weight: 600; }
 .header-list dd.key-header-val { color: var(--uvp-text-primary); }
@@ -256,6 +301,7 @@ async function copyPayload() {
     overflow: auto;
 }
 .raw-code { white-space: pre; }
+.detail-content > .raw-code { margin-top: 12px; }
 
 /* ============ 语法高亮 tokens(sngrep 风格) ============ */
 .body-code :deep(.tok-xml-tag), .raw-code :deep(.tok-xml-tag) { color: #2dd4bf; font-weight: 600; }
