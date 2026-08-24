@@ -14,7 +14,8 @@ describe("device permission workbench baseline contracts", () => {
     it("keeps complete device records for cross-page selection", () => {
         const source = read("src/views/gb28181/device-assignment/index.vue");
         expect(source).toContain("useCrossPageSelection");
-        expect(source).not.toContain("const selectedRowKeys = ref<number[]>([])");
+        expect(source).toContain("const selectedRowKeys = ref<number[]>([])");
+        expect(source).toContain('@select-all="onTableSelectAll"');
     });
 
     it("does not write grants from transfer watchers", () => {

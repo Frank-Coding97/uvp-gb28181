@@ -95,6 +95,7 @@ const switchAssignment = (value: AssignmentFilter) => {
     assignmentFilter.value = value;
     page.value = 1;
     selection.clear();
+    selectedRowKeys.value = [];
     void loadDevices();
 };
 
@@ -107,11 +108,32 @@ const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
 const selection = useCrossPageSelection();
-const selectedRowKeys = computed({
-    get: () => selection.currentPageKeys.value,
-    set: (ids: number[]) => selection.applyPageSelection(devices.value, ids)
-});
+const selectedRowKeys = ref<number[]>([]);
 const selectedCount = computed(() => selection.selectedCount.value);
+
+const syncCurrentPageSelection = () => {
+    selectedRowKeys.value = selection.currentPageKeys.value;
+};
+
+const normalizeSelectedIds = (ids: Array<string | number>) =>
+    ids
+        .map((id) => devices.value.find((device) => String(device.id) === String(id))?.id)
+        .filter((id): id is number => id !== undefined);
+
+const onTableSelect = (rowKeys: Array<string | number>) => {
+    const ids = normalizeSelectedIds(rowKeys);
+    selection.applyPageSelection(devices.value, ids);
+    selectedRowKeys.value = ids;
+};
+
+const onTableSelectAll = (checked: boolean) => {
+    const pageIds = devices.value.map((device) => device.id);
+    const nextIds = checked
+        ? [...new Set([...selection.selectedIds.value, ...pageIds])]
+        : selection.selectedIds.value.filter((id) => !pageIds.includes(id));
+    selection.applyPageSelection(devices.value, nextIds);
+    syncCurrentPageSelection();
+};
 
 const tablePagination = computed(() => ({
     total: total.value,
@@ -134,6 +156,7 @@ const loadDevices = async () => {
         });
         devices.value = data?.list ?? [];
         selection.setVisiblePage(devices.value);
+        syncCurrentPageSelection();
         total.value = data?.total ?? 0;
     } catch (error: unknown) {
         Message.error(error instanceof Error ? error.message : "加载设备列表失败");
@@ -263,6 +286,7 @@ const handleShareSubmitted = (result: GrantApplyResult, context: { mode: "add" |
     resultKind.value = "grant";
     resultVisible.value = true;
     applyOperationSelectionResult(result);
+    syncCurrentPageSelection();
     retryOperation.value = async () => {
         const failedIds = result.results.filter((item) => item.status === "failed").map((item) => item.deviceId);
         if (!failedIds.length) return;
@@ -298,6 +322,7 @@ const handleAssignmentSubmitted = (result: AssignmentResult, targetDeptId: numbe
         }
     };
     applyOperationSelectionResult(result);
+    syncCurrentPageSelection();
     void loadSummary();
     void loadDevices();
 };
@@ -453,6 +478,8 @@ onMounted(() => {
                             :scroll="{ x: 1200, y: '85%' }"
                             :row-selection="canAssign || canShare ? { type: 'checkbox', showCheckedAll: true } : undefined"
                             class="uvp-data-table device-data-table"
+                            @select="onTableSelect"
+                            @select-all="onTableSelectAll"
                             @page-change="onPageChange"
                             @page-size-change="onPageSizeChange"
                         >
@@ -526,7 +553,7 @@ onMounted(() => {
                                 <Share2 :size="14" />
                                 共享管理
                             </button>
-                             <a-link class="batch-bar__clear" @click="selection.clear()">清空选择</a-link>
+                             <a-link class="batch-bar__clear" @click="selection.clear(); selectedRowKeys = []">清空选择</a-link>
                         </div>
                     </div>
                 </template>

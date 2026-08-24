@@ -19,4 +19,11 @@ describe("permission workbench page shell", () => {
         expect(content).toContain("operation-column");
         expect(content).not.toContain("scroll.x=1200");
     });
+
+    it("normalizes Arco selection events before updating cross-page state", () => {
+        const content = source();
+        expect(content).toContain("normalizeSelectedIds");
+        expect(content).toContain("@select=\"onTableSelect\"");
+        expect(content).toContain("@select-all=\"onTableSelectAll\"");
+    });
 });
