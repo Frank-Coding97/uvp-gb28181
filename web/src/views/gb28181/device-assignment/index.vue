@@ -25,6 +25,7 @@ import {
     type AssignmentFilter
 } from "./api";
 import SharePanel, { type ShareDeviceBrief } from "./components/SharePanel.vue";
+import { useCrossPageSelection } from "./useCrossPageSelection";
 
 // ---- 权限 ----
 const permissions = computed(() => useUserStoreHook().account?.permissions ?? []);
@@ -83,7 +84,7 @@ const assignmentTabs: Array<{ value: AssignmentFilter; label: string }> = [
 const switchAssignment = (value: AssignmentFilter) => {
     assignmentFilter.value = value;
     page.value = 1;
-    selectedRowKeys.value = [];
+    selection.clear();
     void loadDevices();
 };
 
@@ -95,7 +96,12 @@ const rowsLoading = ref(false);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
-const selectedRowKeys = ref<number[]>([]);
+const selection = useCrossPageSelection();
+const selectedRowKeys = computed({
+    get: () => selection.currentPageKeys.value,
+    set: (ids: number[]) => selection.applyPageSelection(devices.value, ids)
+});
+const selectedCount = computed(() => selection.selectedCount.value);
 
 const tablePagination = computed(() => ({
     total: total.value,
@@ -117,6 +123,7 @@ const loadDevices = async () => {
             ownerDeptId: selectedDeptId.value
         });
         devices.value = data?.list ?? [];
+        selection.setVisiblePage(devices.value);
         total.value = data?.total ?? 0;
     } catch (error: unknown) {
         Message.error(error instanceof Error ? error.message : "加载设备列表失败");
@@ -171,11 +178,8 @@ const assignSummary = computed(() => {
 
 /** 源栏设备清单:全部展示,超出高度出现垂直滚动条(跨页勾选的设备名回退为编号) */
 const assignPendingDevices = computed(() => {
-    const byId = new Map(devices.value.map((d) => [d.id, d]));
-    return assignPendingIds.value.map((id) => ({
-        id,
-        name: byId.get(id)?.name || byId.get(id)?.deviceId || `设备 #${id}`
-    }));
+    const byId = new Map(selection.selectedDevices.value.map((d) => [d.id, d]));
+    return assignPendingIds.value.map((id) => ({ id, name: byId.get(id)?.name || byId.get(id)?.deviceId || `设备 #${id}` }));
 });
 
 const assignTargetDeptName = computed(() => {
@@ -200,12 +204,12 @@ const openDeptAssign = (node: DivisionItem) => {
 };
 
 const openBatchAssign = () => {
-    if (selectedRowKeys.value.length === 0) {
+    if (selection.selectedCount.value === 0) {
         Message.warning("请先勾选设备");
         return;
     }
     assignMode.value = "devices";
-    assignPendingIds.value = [...selectedRowKeys.value];
+    assignPendingIds.value = [...selection.selectedIds.value];
     assignTargetDeptId.value = undefined;
     assignVisible.value = true;
 };
@@ -243,7 +247,7 @@ const submitAssign = async () => {
             Message.success(`分配完成:成功 ${succeeded} 台${failed > 0 ? `,失败 ${failed} 台` : ""}`);
         }
         assignVisible.value = false;
-        selectedRowKeys.value = [];
+    selection.clear();
         await loadDevices();
     } catch (error: unknown) {
         Message.error(error instanceof Error ? error.message : "分配失败");
@@ -262,12 +266,11 @@ const openRowShare = (device: DeviceVO) => {
 };
 
 const openBatchShare = () => {
-    if (selectedRowKeys.value.length === 0) {
+    if (selection.selectedCount.value === 0) {
         Message.warning("请先勾选设备");
         return;
     }
-    shareDevices.value = devices.value
-        .filter((d) => selectedRowKeys.value.includes(d.id))
+    shareDevices.value = selection.selectedDevices.value
         .map((d) => ({ id: d.id, deviceId: d.deviceId, name: d.name }));
     shareVisible.value = true;
 };
@@ -450,8 +453,8 @@ onMounted(() => {
                         </a-table>
 
                         <!-- 勾选批量操作条 -->
-                        <div v-if="selectedRowKeys.length > 0" class="batch-bar">
-                            <span class="batch-bar__count">已选 {{ selectedRowKeys.length }} 台</span>
+                        <div v-if="selectedCount > 0" class="batch-bar">
+                            <span class="batch-bar__count">已选 {{ selectedCount }} 台</span>
                             <button v-if="canAssign" class="btn-primary batch-bar__btn" type="button" @click="openBatchAssign">
                                 <UserRoundCog :size="14" />
                                 批量调整归属
@@ -460,7 +463,7 @@ onMounted(() => {
                                 <Share2 :size="14" />
                                 共享管理
                             </button>
-                            <a-link class="batch-bar__clear" @click="selectedRowKeys = []">清空选择</a-link>
+                             <a-link class="batch-bar__clear" @click="selection.clear()">清空选择</a-link>
                         </div>
                     </div>
                 </template>
