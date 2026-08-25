@@ -31,8 +31,9 @@ describe("cascade platform editor layout", () => {
   it("does not repeat the route title and description above the workspace", () => {
     expect(source).not.toContain("<h2>国标级联</h2>");
     expect(source).not.toContain("管理 UVP 作为下级平台向上级平台的注册、资源共享和运行状态。");
-    expect(source).toContain('class="cascade-header__actions"');
-    expect(source).toMatch(/\.cascade-header\s*\{[^}]*justify-content:\s*flex-end;/s);
+    expect(source).not.toContain('<header class="cascade-header">');
+    expect(source).toContain('<template #actions>');
+    expect(source).toContain('class="cascade-search-actions"');
   });
 
   it("uses centered dialogs with explicit device/channel sharing modes", () => {

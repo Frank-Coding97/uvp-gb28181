@@ -6,19 +6,6 @@
       </a-alert>
 
       <template v-else>
-        <header class="cascade-header">
-          <div class="cascade-header__actions">
-            <a-button :loading="loading" @click="refresh">
-              <template #icon><RefreshCw :size="15" /></template>
-              刷新
-            </a-button>
-            <a-button v-if="canManage" type="primary" @click="openCreate">
-              <template #icon><Plus :size="15" /></template>
-              新增上级
-            </a-button>
-          </div>
-        </header>
-
         <section class="cascade-summary" aria-label="级联平台摘要">
           <article class="cascade-summary-card">
             <span class="cascade-summary-card__icon is-brand"><Building2 :size="19" /></span>
@@ -62,6 +49,18 @@
                 <a-option value="offline">离线</a-option>
                 <a-option value="disabled">已停用</a-option>
               </a-select>
+            </div>
+          </template>
+          <template #actions>
+            <div class="cascade-search-actions">
+              <a-button :loading="loading" @click="refresh">
+                <template #icon><RefreshCw :size="15" /></template>
+                刷新
+              </a-button>
+              <a-button v-if="canManage" type="primary" @click="openCreate">
+                <template #icon><Plus :size="15" /></template>
+                新增上级
+              </a-button>
             </div>
           </template>
         </s-layout-search>
@@ -794,8 +793,7 @@ onMounted(() => {
 <style scoped lang="scss">
 .cascade-page { min-height: 100%; }
 .cascade-shell { display: flex; min-height: 100%; flex-direction: column; gap: 14px; }
-.cascade-header { display: flex; align-items: center; justify-content: flex-end; gap: 18px; }
-.cascade-header__actions, .cascade-actions { display: flex; align-items: center; gap: 8px; }
+.cascade-search-actions, .cascade-actions { display: flex; align-items: center; gap: 8px; }
 .cascade-summary { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: 12px; }
 .cascade-summary-card { display: flex; min-width: 0; min-height: 78px; align-items: center; gap: 12px; padding: 14px 16px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }
 .cascade-summary-card__icon { display: inline-flex; width: 40px; height: 40px; flex: 0 0 40px; align-items: center; justify-content: center; border-radius: 10px; }
@@ -847,8 +845,6 @@ onMounted(() => {
 .share-dialog-footer .dialog-actions { width: auto; flex: 0 0 auto; }
 
 @media (max-width: 900px) {
-  .cascade-header { align-items: stretch; flex-direction: column; }
-  .cascade-header__actions { justify-content: flex-end; }
   .cascade-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .share-toolbar { align-items: stretch; flex-wrap: wrap; }
   .share-mode-hint { display: flex; align-items: center; }
@@ -856,7 +852,8 @@ onMounted(() => {
 }
 
 @media (max-width: 560px) {
-  .cascade-header__actions { align-items: stretch; flex-direction: column; }
+  .cascade-search-actions { width: 100%; align-items: stretch; }
+  .cascade-search-actions :deep(.arco-btn) { flex: 1; }
   .cascade-search, .cascade-status-filter { width: 100%; flex-basis: 100%; }
   .form-grid, .switch-grid { grid-template-columns: 1fr; }
   .cascade-summary-card { min-height: 70px; padding: 12px; }
