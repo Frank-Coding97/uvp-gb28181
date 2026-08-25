@@ -560,6 +560,37 @@ onBeforeUnmount(() => {
 <style scoped lang="scss">
 .cloud-recordings-page { box-sizing: border-box; width: 100%; max-width: 100vw; min-width: 0; overflow-x: hidden; contain: inline-size; color: var(--uvp-text-primary); }
 .cloud-recordings-page > .snow-inner { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+.cloud-recordings-page :deep(.uvp-search-panel .arco-input-wrapper),
+.cloud-recordings-page :deep(.uvp-search-panel .arco-select-view),
+.cloud-recordings-page :deep(.uvp-search-panel .arco-picker) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.cloud-recordings-page :deep(.uvp-search-panel .arco-input-wrapper:focus-within),
+.cloud-recordings-page :deep(.uvp-search-panel .arco-select-view-focus),
+.cloud-recordings-page :deep(.uvp-search-panel .arco-picker-focused) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+.cloud-recordings-page :deep(.uvp-search-panel .arco-input::placeholder),
+.cloud-recordings-page :deep(.uvp-search-panel .arco-select-view-input::placeholder),
+.cloud-recordings-page :deep(.uvp-search-panel .arco-picker input::placeholder) {
+  color: var(--uvp-text-tertiary) !important;
+  opacity: 1;
+}
+.cloud-recordings-page :deep(.uvp-search-panel .arco-btn),
+.cloud-recordings-page :deep(.cloud-recordings-header__actions .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+.cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) { font-size: 14px; line-height: 22px; }
 .cloud-recordings-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .cloud-recordings-header__actions { display: flex; gap: 8px; align-items: center; }
 .recording-date-range { width: 360px; max-width: 100%; }

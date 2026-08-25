@@ -297,6 +297,37 @@ onMounted(refresh);
     gap: 10px;
 }
 
+.config-search-panel :deep(.arco-input-wrapper),
+.config-search-panel :deep(.arco-select-view) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.config-search-panel :deep(.arco-input-wrapper:focus-within),
+.config-search-panel :deep(.arco-select-view.arco-select-view-focus),
+.config-search-panel :deep(.arco-select-view:focus-within) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.config-search-panel :deep(.arco-input::placeholder),
+.config-search-panel :deep(.arco-select-view-input::placeholder) {
+    color: var(--uvp-text-tertiary) !important;
+    opacity: 1;
+}
+
+.config-search-panel :deep(.arco-btn) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    border-radius: 10px;
+}
+
 .search {
     width: 280px;
     flex-shrink: 0;
@@ -545,6 +576,8 @@ onMounted(refresh);
 
 .config-table :deep(.arco-table-td) {
     padding: 12px 16px !important;
+    font-size: 14px;
+    line-height: 22px;
     vertical-align: top;
 }
 
@@ -575,6 +608,16 @@ onMounted(refresh);
     transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out);
     flex: 1;
     min-width: 0;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg);
+    border-color: var(--uvp-search-secondary-btn-border);
+    border-radius: 10px;
+}
+
+.cell-input :deep(.arco-input-wrapper:focus-within) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow);
 }
 
 .cell-input :deep(.arco-input) {

@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-page">
+  <div class="snow-page menu-page">
     <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
@@ -791,6 +791,42 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.menu-page :deep(.uvp-search-panel__fields .arco-input-wrapper),
+.menu-page :deep(.uvp-search-panel__fields .arco-select-view) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.menu-page :deep(.uvp-search-panel__fields .arco-input-wrapper:focus-within),
+.menu-page :deep(.uvp-search-panel__fields .arco-select-view-focus),
+.menu-page :deep(.uvp-search-panel__fields .arco-select-view:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.menu-page :deep(.uvp-search-panel__fields .arco-input::placeholder),
+.menu-page :deep(.uvp-search-panel__fields .arco-select-view-input::placeholder) {
+  color: var(--uvp-text-tertiary);
+  opacity: 1;
+}
+
+.menu-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.menu-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
 :deep(.arco-typography code) {
   font-size: 100%;
 }

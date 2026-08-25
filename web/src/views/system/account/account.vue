@@ -638,6 +638,72 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.account-search-panel {
+  :deep(.arco-input-wrapper),
+  :deep(.arco-select-view-single) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+  }
+
+  :deep(.arco-input-wrapper:focus-within),
+  :deep(.arco-select-view-focus),
+  :deep(.arco-select-view:focus-within) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+  }
+
+  :deep(.arco-input::placeholder),
+  :deep(.arco-select-view-input::placeholder) {
+    color: var(--uvp-text-tertiary);
+    opacity: 1;
+  }
+}
+
+.account-search-panel {
+  :deep(.arco-btn) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    border-radius: 10px;
+  }
+}
+
+.uvp-tree-panel__search {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+
+  &:focus-within {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+  }
+
+  :deep(.arco-input::placeholder) {
+    color: var(--uvp-text-tertiary);
+    opacity: 1;
+  }
+}
+
+.uvp-data-table {
+  :deep(.arco-pagination-item),
+  :deep(.arco-pagination-options .arco-select-view-single),
+  :deep(.arco-pagination-jumper-input) {
+    box-sizing: border-box;
+    min-width: 32px;
+    height: 32px;
+    min-height: 32px;
+  }
+}
+
 .container {
   display: flex;
   min-height: 0;

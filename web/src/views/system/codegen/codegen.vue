@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-page">
+  <div class="snow-page codegen-page">
     <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
@@ -394,4 +394,47 @@ onMounted(() => {
 });
 </script>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+.codegen-page :deep(.uvp-search-panel .arco-input-wrapper),
+.codegen-page :deep(.uvp-search-panel .arco-select-view-single),
+.codegen-page :deep(.uvp-search-panel .arco-picker) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.codegen-page :deep(.uvp-search-panel .arco-input-wrapper:focus-within),
+.codegen-page :deep(.uvp-search-panel .arco-select-view-single.arco-select-view-focus),
+.codegen-page :deep(.uvp-search-panel .arco-picker-focused) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.codegen-page :deep(.uvp-search-panel .arco-input::placeholder),
+.codegen-page :deep(.uvp-search-panel .arco-select-view-input::placeholder),
+.codegen-page :deep(.uvp-search-panel .arco-picker input::placeholder) {
+  color: var(--uvp-text-tertiary) !important;
+  opacity: 1;
+}
+
+.codegen-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.codegen-page :deep(.uvp-data-table .arco-pagination-item),
+.codegen-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
+.codegen-page :deep(.uvp-data-table .arco-pagination-jumper-input) {
+  box-sizing: border-box;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+}
+</style>

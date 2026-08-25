@@ -629,6 +629,38 @@ async function handleBatchActivate() {
     flex-wrap: nowrap;
 }
 
+.node-search-panel :deep(.arco-input-wrapper),
+.node-search-panel :deep(.arco-select-view) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.node-search-panel :deep(.arco-input-wrapper:focus-within),
+.node-search-panel :deep(.arco-select-view.arco-select-view-focus),
+.node-search-panel :deep(.arco-select-view:focus-within) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.node-search-panel :deep(.arco-input::placeholder),
+.node-search-panel :deep(.arco-select-view-input::placeholder) {
+    color: var(--uvp-text-tertiary) !important;
+    opacity: 1;
+}
+
+.node-search-panel :deep(.arco-btn),
+.batch-bar :deep(.arco-btn) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    border-radius: 10px;
+}
+
 .filter-meta {
     display: inline-flex;
     align-items: center;
@@ -664,6 +696,7 @@ async function handleBatchActivate() {
     padding: 10px 16px !important;
     height: 56px;
     font-size: var(--zlm-fs-body);
+    line-height: 22px;
     color: var(--zlm-text-2);
 }
 

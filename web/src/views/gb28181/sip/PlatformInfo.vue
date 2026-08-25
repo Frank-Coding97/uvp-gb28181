@@ -374,6 +374,7 @@ onMounted(refresh);
     gap: 10px;
     min-width: 0;
 }
+.toolbar-actions :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
 
 .status-label {
     color: var(--uvp-text-tertiary);

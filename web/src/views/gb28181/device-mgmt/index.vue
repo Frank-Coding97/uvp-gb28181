@@ -3171,9 +3171,30 @@ onUnmounted(() => {
     flex: 1 1 100%;
     width: 100%;
 }
+.workspace-toolbar :deep(.arco-input-wrapper),
+.workspace-toolbar :deep(.arco-select-view),
+.workspace-toolbar :deep(.arco-picker) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.workspace-toolbar :deep(.arco-input-wrapper:focus-within),
+.workspace-toolbar :deep(.arco-select-view-focus),
+.workspace-toolbar :deep(.arco-picker-focused) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+.workspace-toolbar :deep(.arco-input::placeholder),
+.workspace-toolbar :deep(.arco-select-view-input::placeholder),
+.workspace-toolbar :deep(.arco-picker input::placeholder) { color: var(--uvp-text-tertiary) !important; opacity: 1; }
+.workspace-toolbar :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
 .workspace-toolbar .create-device-btn {
-    height: 40px;
-    border-radius: 8px;
+    height: 44px;
+    border-radius: 10px;
 }
 .catalog-pane,
 .content-pane {

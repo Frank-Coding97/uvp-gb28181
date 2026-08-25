@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-fill">
+  <div class="snow-fill affix-page">
     <div class="snow-fill-inner uvp-page-shell-flat container">
       <s-layout-search>
         <template #fields>
@@ -427,6 +427,47 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.affix-page :deep(.uvp-search-panel .arco-input-wrapper),
+.affix-page :deep(.uvp-search-panel .arco-select-view-single) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.affix-page :deep(.uvp-search-panel .arco-input-wrapper:focus-within),
+.affix-page :deep(.uvp-search-panel .arco-select-view-single.arco-select-view-focus),
+.affix-page :deep(.uvp-search-panel .arco-select-view-single:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.affix-page :deep(.uvp-search-panel .arco-input::placeholder),
+.affix-page :deep(.uvp-search-panel .arco-select-view-input::placeholder) {
+  color: var(--uvp-text-tertiary) !important;
+  opacity: 1;
+}
+
+.affix-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.affix-page :deep(.uvp-data-table .arco-pagination-item),
+.affix-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
+.affix-page :deep(.uvp-data-table .arco-pagination-jumper-input) {
+  box-sizing: border-box;
+  min-width: 32px;
+  height: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+}
+
 .container {
   display: flex;
   flex-direction: column;

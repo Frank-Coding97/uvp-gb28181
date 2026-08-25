@@ -186,6 +186,37 @@ onUnmounted(() => {
     gap: 10px;
 }
 
+.scheduler-log-search :deep(.arco-select-view),
+.scheduler-log-search :deep(.arco-input-wrapper) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.scheduler-log-search :deep(.arco-select-view.arco-select-view-focus),
+.scheduler-log-search :deep(.arco-select-view:focus-within),
+.scheduler-log-search :deep(.arco-input-wrapper:focus-within) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.scheduler-log-search :deep(.arco-select-view-input::placeholder),
+.scheduler-log-search :deep(.arco-input::placeholder) {
+    color: var(--uvp-text-tertiary) !important;
+    opacity: 1;
+}
+
+.scheduler-log-search :deep(.arco-btn) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    border-radius: 10px;
+}
+
 .auto-refresh {
     min-width: 92px;
 }
@@ -193,7 +224,7 @@ onUnmounted(() => {
 .log-count {
     display: inline-flex;
     align-items: center;
-    height: 34px;
+    height: 44px;
     color: var(--uvp-text-tertiary);
     font-size: 12px;
     white-space: nowrap;
@@ -209,6 +240,11 @@ onUnmounted(() => {
 
 .scheduler-log-table :deep(.arco-table-container) {
     border-radius: inherit;
+}
+
+.scheduler-log-table :deep(.arco-table-td) {
+    font-size: 14px;
+    line-height: 22px;
 }
 
 .muted {

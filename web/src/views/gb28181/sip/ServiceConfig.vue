@@ -1408,6 +1408,22 @@ onMounted(() =>
     background: var(--uvp-warning);
     box-shadow: 0 0 0 3px var(--uvp-warning-soft);
 }
+.service-config-tabs__actions :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
+:global(.service-config-page .arco-input-wrapper),
+:global(.service-config-page .arco-input-number),
+:global(.service-config-page .arco-select-view) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border-color: var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+}
+:global(.service-config-page .arco-input-wrapper:focus-within),
+:global(.service-config-page .arco-input-number:focus-within),
+:global(.service-config-page .arco-select-view-focus) { border-color: var(--uvp-brand) !important; box-shadow: var(--uvp-search-control-focus-shadow) !important; }
+:global(.service-config-page .arco-input::placeholder),
+:global(.service-config-page .arco-select-view-input::placeholder) { color: var(--uvp-text-tertiary) !important; opacity: 1; }
 
 :deep(.service-config-number-input) {
     width: min(100%, 260px);

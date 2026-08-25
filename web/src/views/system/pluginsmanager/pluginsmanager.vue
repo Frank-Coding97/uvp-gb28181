@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-page">
+  <div class="snow-page plugins-page">
     <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
@@ -304,6 +304,33 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.plugins-page :deep(.uvp-search-panel .arco-input-wrapper) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.plugins-page :deep(.uvp-search-panel .arco-input-wrapper:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.plugins-page :deep(.uvp-search-panel .arco-input::placeholder) {
+  color: var(--uvp-text-tertiary) !important;
+  opacity: 1;
+}
+
+.plugins-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
 .plugin-grid {
   padding: 16px 0 0;
 }

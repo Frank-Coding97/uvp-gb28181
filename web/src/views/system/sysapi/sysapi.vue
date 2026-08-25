@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-page">
+  <div class="snow-page sysapi-page">
     <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
@@ -344,4 +344,52 @@ onMounted(() => {
 });
 </script>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+.sysapi-page :deep(.uvp-search-panel__fields .arco-input-wrapper),
+.sysapi-page :deep(.uvp-search-panel__fields .arco-select-view) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.sysapi-page :deep(.uvp-search-panel__fields .arco-input-wrapper:focus-within),
+.sysapi-page :deep(.uvp-search-panel__fields .arco-select-view-focus),
+.sysapi-page :deep(.uvp-search-panel__fields .arco-select-view:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.sysapi-page :deep(.uvp-search-panel__fields .arco-input::placeholder),
+.sysapi-page :deep(.uvp-search-panel__fields .arco-select-view-input::placeholder) {
+  color: var(--uvp-text-tertiary);
+  opacity: 1;
+}
+
+.sysapi-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.sysapi-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.sysapi-page :deep(.uvp-data-table .arco-pagination-item),
+.sysapi-page :deep(.uvp-data-table .arco-pagination-jumper-input),
+.sysapi-page :deep(.uvp-data-table .arco-pagination-options .arco-select-view) {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+}
+
+.sysapi-page :deep(.uvp-data-table .arco-pagination-item) {
+  min-width: 32px;
+}
+</style>

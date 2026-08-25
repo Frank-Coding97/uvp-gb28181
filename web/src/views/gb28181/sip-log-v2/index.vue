@@ -696,6 +696,27 @@ onBeforeUnmount(() => {
 
 /* s-layout-search 内嵌样式微调 */
 .sip-log-search { margin-bottom: 0; }
+.sip-log-search :deep(.arco-input-wrapper),
+.sip-log-search :deep(.arco-select-view),
+.sip-log-search :deep(.arco-picker) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.sip-log-search :deep(.arco-input-wrapper:focus-within),
+.sip-log-search :deep(.arco-select-view-focus),
+.sip-log-search :deep(.arco-picker-focused) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+.sip-log-search :deep(.arco-input::placeholder),
+.sip-log-search :deep(.arco-select-view-input::placeholder),
+.sip-log-search :deep(.arco-picker input::placeholder) { color: var(--uvp-text-tertiary) !important; opacity: 1; }
+.sip-log-search :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
 .window-preset-select { flex: 0 0 160px; }
 .window-preset-select :deep(.arco-select-view) {
     color: color-mix(in srgb, var(--uvp-brand) 78%, var(--uvp-text-primary));

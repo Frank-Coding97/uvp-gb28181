@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-fill">
+  <div class="snow-fill sysconfig-page">
     <div class="snow-fill-inner">
       <a-tabs class="uvp-system-tabs sysconfig-tabs" v-model:active-key="activeTab" :animation="true">
         <template #extra>
@@ -263,6 +263,44 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.sysconfig-page :deep(.uvp-system-form .arco-input-wrapper) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.sysconfig-page :deep(.uvp-system-form .arco-input-wrapper:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.sysconfig-page :deep(.uvp-system-form .arco-input::placeholder) {
+  color: var(--uvp-text-tertiary) !important;
+  opacity: 1;
+}
+
+.sysconfig-page :deep(.uvp-system-form .arco-form-item-label) {
+  color: var(--uvp-text-primary);
+  font-weight: 500;
+}
+
+.sysconfig-page :deep(.uvp-system-form .arco-form-item-extra) {
+  color: var(--uvp-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.sysconfig-page :deep(.sysconfig-tabs__actions .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
 .sysconfig-tabs {
   :deep(.arco-tabs-nav) {
     display: flex;

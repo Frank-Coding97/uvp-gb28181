@@ -460,11 +460,11 @@ function fmtTime(s: string | undefined | null): string {
 
 .back-btn {
     flex-shrink: 0;
-    width: 40px;
-    min-width: 40px;
-    height: 40px;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
     padding: 0;
-    border-radius: 8px;
+    border-radius: 10px;
 }
 
 .identity-main {
@@ -518,6 +518,13 @@ function fmtTime(s: string | undefined | null): string {
     gap: 8px;
     flex-wrap: wrap;
     flex-shrink: 0;
+}
+
+.detail-actions :deep(.arco-btn) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    border-radius: 10px;
 }
 
 .refresh-hint {

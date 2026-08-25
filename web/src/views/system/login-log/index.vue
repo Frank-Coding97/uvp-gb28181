@@ -299,8 +299,44 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
 .login-log-filter--compact { width: 120px; flex-basis: 120px; }
 .login-log-filter--reason { width: 160px; flex-basis: 160px; }
 .login-log-filter :deep(.arco-input-wrapper),
-.login-log-filter :deep(.arco-select-view) { width: 100%; min-height: 44px; }
-.login-log-page :deep(.uvp-search-panel .arco-btn) { min-height: 44px; }
+.login-log-filter :deep(.arco-select-view) {
+  box-sizing: border-box;
+  width: 100%;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.login-log-page :deep(.arco-picker) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+.login-log-page :deep(.arco-input::placeholder),
+.login-log-page :deep(.arco-select-view-input::placeholder),
+.login-log-page :deep(.arco-picker-input input::placeholder) {
+  color: var(--uvp-text-tertiary);
+  opacity: 1;
+}
+.login-log-page :deep(.login-log-filter .arco-input-wrapper:focus-within),
+.login-log-page :deep(.login-log-filter .arco-select-view-focus),
+.login-log-page :deep(.arco-picker-focused),
+.login-log-page :deep(.arco-picker:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+.login-log-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
 .login-log-page :deep(.uvp-search-panel__actions .login-log-clear-button) {
   color: var(--uvp-danger);
   background: var(--uvp-danger-soft);
@@ -311,6 +347,17 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
   color: #c53030;
   background: #ffe8e8;
   border-color: #efb7b7;
+}
+.login-log-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+.login-log-page :deep(.arco-pagination-item),
+.login-log-page :deep(.arco-pagination-jumper-input),
+.login-log-page :deep(.arco-pagination-options .arco-select-view) {
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
 }
 .login-log-error { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 12px 0; padding: 12px 14px; color: var(--uvp-danger); background: var(--uvp-danger-soft); border: 1px solid var(--uvp-danger-border); border-radius: 6px; }
 .login-log-batch-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0; padding: 10px 14px; background: var(--uvp-surface-muted); border: 1px solid var(--uvp-border); border-radius: 6px; }

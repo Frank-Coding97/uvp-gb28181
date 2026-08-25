@@ -164,6 +164,36 @@ async function handleSubmit() {
     color: var(--zlm-text-1);
 }
 
+:global(.zlm-node-form .arco-input-wrapper),
+:global(.zlm-node-form .arco-input-number),
+:global(.zlm-node-form .arco-input-password) {
+    box-sizing: border-box;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border-color: var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+:global(.zlm-node-form .arco-input-wrapper:focus-within),
+:global(.zlm-node-form .arco-input-number:focus-within),
+:global(.zlm-node-form .arco-input-password:focus-within) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+:global(.zlm-node-form .arco-input::placeholder) {
+    color: var(--uvp-text-tertiary) !important;
+    opacity: 1;
+}
+
+:global(.zlm-node-form .arco-drawer-footer .arco-btn) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    border-radius: 10px;
+}
+
 .form-hint {
     margin-bottom: var(--zlm-space-4);
     padding: var(--zlm-space-3) var(--zlm-space-4);

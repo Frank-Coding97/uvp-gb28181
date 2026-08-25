@@ -1,7 +1,7 @@
 <template>
   <div class="snow-page">
     <div class="snow-inner uvp-page-shell-flat">
-      <s-layout-search>
+      <s-layout-search class="division-search-panel">
         <template #fields>
           <a-input v-model="form.name" placeholder="请输入部门名称" style="width: 176px" allow-clear @press-enter="search" />
           <a-select placeholder="部门状态" v-model="form.status" style="width: 126px" allow-clear>
@@ -423,6 +423,39 @@ onMounted(() => {
 </script>
 
 <style lang="scss" scoped>
+.division-search-panel {
+  :deep(.arco-input-wrapper),
+  :deep(.arco-select-view-single) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    background: var(--uvp-search-control-bg) !important;
+    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+    border-radius: 10px !important;
+    box-shadow: var(--uvp-search-control-shadow) !important;
+  }
+
+  :deep(.arco-input-wrapper:focus-within),
+  :deep(.arco-select-view-focus),
+  :deep(.arco-select-view:focus-within) {
+    border-color: var(--uvp-brand) !important;
+    box-shadow: var(--uvp-search-control-focus-shadow) !important;
+  }
+
+  :deep(.arco-input::placeholder),
+  :deep(.arco-select-view-input::placeholder) {
+    color: var(--uvp-text-tertiary);
+    opacity: 1;
+  }
+
+  :deep(.arco-btn) {
+    box-sizing: border-box;
+    height: 44px;
+    min-height: 44px;
+    border-radius: 10px;
+  }
+}
+
 /* 树形展开缩进对齐 */
 :deep(.arco-table-expand-icon-cell) {
   vertical-align: middle;

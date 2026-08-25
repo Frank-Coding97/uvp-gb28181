@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-page">
+  <div class="snow-page sysparam-page">
     <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
@@ -312,4 +312,47 @@ const getParamList = async () => {
 getParamList();
 </script>
 
-<style lang="scss" scoped></style>
+<style lang="scss" scoped>
+.sysparam-page :deep(.uvp-search-panel__fields > .arco-input-wrapper),
+.sysparam-page :deep(.uvp-search-panel__fields > .arco-select-view) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.sysparam-page :deep(.arco-input::placeholder),
+.sysparam-page :deep(.arco-select-view-input::placeholder) {
+  color: var(--uvp-text-tertiary);
+  opacity: 1;
+}
+
+.sysparam-page :deep(.uvp-search-panel__fields > .arco-input-wrapper:focus-within),
+.sysparam-page :deep(.uvp-search-panel__fields > .arco-select-view-focus) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.sysparam-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.sysparam-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.sysparam-page :deep(.arco-pagination-item),
+.sysparam-page :deep(.arco-pagination-jumper-input),
+.sysparam-page :deep(.arco-pagination-options .arco-select-view) {
+  min-width: 32px;
+  min-height: 32px;
+  height: 32px;
+}
+</style>

@@ -489,6 +489,45 @@ onMounted(() => {
   border-color: rgb(var(--warning-7));
 }
 
+.alarm-management-page :deep(.uvp-search-panel .arco-input-wrapper),
+.alarm-management-page :deep(.uvp-search-panel .arco-select-view),
+.alarm-management-page :deep(.uvp-search-panel .arco-picker) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.alarm-management-page :deep(.uvp-search-panel .arco-input-wrapper:focus-within),
+.alarm-management-page :deep(.uvp-search-panel .arco-select-view-focus),
+.alarm-management-page :deep(.uvp-search-panel .arco-picker-focused) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.alarm-management-page :deep(.uvp-search-panel .arco-input::placeholder),
+.alarm-management-page :deep(.uvp-search-panel .arco-select-view-input::placeholder),
+.alarm-management-page :deep(.uvp-search-panel .arco-picker input::placeholder) {
+  color: var(--uvp-text-tertiary) !important;
+  opacity: 1;
+}
+
+.alarm-management-page :deep(.uvp-search-panel .arco-btn),
+.alarm-management-page :deep(.alarm-batch-bar .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.alarm-management-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
 .alarm-batch-bar {
   display: flex;
   align-items: center;

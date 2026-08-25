@@ -223,18 +223,18 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
         <template #columns>
           <a-table-column title="用户" :width="160">
             <template #cell="{ record }">
-              <div class="online-user-primary"><strong>{{ record.username }}</strong><span>{{ record.nickName || '-' }}</span></div>
+              <div class="online-user-primary"><strong>{{ record.username }}</strong><span class="online-user-secondary">{{ record.nickName || '-' }}</span></div>
             </template>
           </a-table-column>
           <a-table-column title="部门" data-index="departmentName" :width="150" :ellipsis="true" :tooltip="true" />
           <a-table-column title="IP / 地点" :width="180">
             <template #cell="{ record }">
-              <div class="online-user-primary"><span>{{ record.clientIp }}</span><small>{{ record.loginLocation || '-' }}</small></div>
+              <div class="online-user-primary"><span class="online-user-primary-text">{{ record.clientIp }}</span><span class="online-user-secondary">{{ record.loginLocation || '-' }}</span></div>
             </template>
           </a-table-column>
           <a-table-column title="终端" :width="180">
             <template #cell="{ record }">
-              <div class="online-user-primary"><span>{{ record.browser || '未知浏览器' }}</span><small>{{ record.os || '未知系统' }}</small></div>
+              <div class="online-user-primary"><span class="online-user-primary-text">{{ record.browser || '未知浏览器' }}</span><span class="online-user-secondary">{{ record.os || '未知系统' }}</span></div>
             </template>
           </a-table-column>
           <a-table-column title="登录时间" :width="180"><template #cell="{ record }">{{ formatTime(record.loginAt) }}</template></a-table-column>
@@ -277,8 +277,27 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 
 .online-user-filter :deep(.arco-input-wrapper),
 .online-user-filter :deep(.arco-select-view) {
+  box-sizing: border-box;
   width: 100%;
+  height: 44px;
   min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.online-user-filter :deep(.arco-input-wrapper:focus-within),
+.online-user-filter :deep(.arco-select-view.arco-select-view-focus),
+.online-user-filter :deep(.arco-select-view:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.online-user-filter :deep(.arco-input::placeholder),
+.online-user-filter :deep(.arco-select-view-input::placeholder) {
+  color: var(--uvp-text-tertiary);
+  opacity: 1;
 }
 
 .online-user-refresh {
@@ -288,14 +307,30 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 
 .online-user-page :deep(.uvp-search-panel .arco-btn),
 .online-user-error :deep(.arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
   min-height: 44px;
+  border-radius: 10px;
+}
+
+.online-user-page :deep(.uvp-search-panel__extra .arco-btn) {
+  color: var(--uvp-secondary-action-text) !important;
+  background: var(--uvp-secondary-action-bg) !important;
+  border-color: var(--uvp-secondary-action-border) !important;
+  box-shadow: none !important;
+}
+
+.online-user-page :deep(.uvp-search-panel__extra .arco-btn:hover) {
+  color: var(--uvp-brand-strong) !important;
+  background: var(--uvp-secondary-action-hover-bg) !important;
+  border-color: var(--uvp-brand) !important;
 }
 
 .online-user-page :deep(.arco-pagination-item),
 .online-user-page :deep(.arco-pagination-jumper-input),
 .online-user-page :deep(.arco-pagination-options .arco-select-view) {
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 32px;
+  min-height: 32px;
 }
 
 .online-user-error {
@@ -312,11 +347,17 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
   min-width: 0;
 }
 
+.online-user-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
 .online-user-primary {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
+  line-height: 18px;
 }
 
 .online-user-primary > * {
@@ -325,10 +366,22 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
   white-space: nowrap;
 }
 
-.online-user-primary span,
-.online-user-primary small {
-  color: var(--color-text-3);
-  font-size: 12px;
+.online-user-primary-text {
+  color: var(--uvp-text-primary);
+  font-size: 13px;
+}
+
+.online-user-primary strong {
+  color: var(--uvp-text-primary);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.online-user-secondary {
+  color: var(--uvp-text-secondary);
+  font-size: 13px;
+  line-height: 18px;
 }
 
 .online-user-status {
@@ -347,7 +400,7 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 }
 
 .online-user-status--active { color: rgb(var(--success-6)); }
-.online-user-status--idle { color: var(--color-text-3); }
+.online-user-status--idle { color: var(--uvp-text-secondary); }
 
 .online-user-page :deep(.arco-btn:focus-visible),
 .online-user-page :deep(.arco-input-wrapper:focus-within),

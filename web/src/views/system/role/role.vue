@@ -1,5 +1,5 @@
 <template>
-  <div class="snow-page">
+  <div class="snow-page role-page">
     <div class="snow-inner uvp-page-shell-flat">
       <s-layout-search>
         <template #fields>
@@ -556,6 +556,42 @@ getMenuList();
 </script>
 
 <style lang="scss" scoped>
+.role-page :deep(.uvp-search-panel__fields .arco-input-wrapper),
+.role-page :deep(.uvp-search-panel__fields .arco-select-view) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  background: var(--uvp-search-control-bg) !important;
+  border: 1px solid var(--uvp-search-secondary-btn-border) !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.role-page :deep(.uvp-search-panel__fields .arco-input-wrapper:focus-within),
+.role-page :deep(.uvp-search-panel__fields .arco-select-view-focus),
+.role-page :deep(.uvp-search-panel__fields .arco-select-view:focus-within) {
+  border-color: var(--uvp-brand) !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.role-page :deep(.uvp-search-panel__fields .arco-input::placeholder),
+.role-page :deep(.uvp-search-panel__fields .arco-select-view-input::placeholder) {
+  color: var(--uvp-text-tertiary);
+  opacity: 1;
+}
+
+.role-page :deep(.uvp-search-panel .arco-btn) {
+  box-sizing: border-box;
+  height: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+}
+
+.role-page :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
 /* 分配权限抽屉：控制开关卡片紧凑 */
 :deep(.arco-drawer-body .arco-card) {
   margin-bottom: 12px;
