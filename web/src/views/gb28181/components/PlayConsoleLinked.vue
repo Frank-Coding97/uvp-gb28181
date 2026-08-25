@@ -3342,7 +3342,7 @@ onBeforeUnmount(() => {
                                             </button>
                                             <button
                                                 v-if="homePresentation.showQuery"
-                                                class="btn-ghost sm"
+                                                class="btn-ghost sm uvp-refresh-btn"
                                                 :class="{ 'icon-only': homePresentation.showControls }"
                                                 data-testid="home-refresh"
                                                 :disabled="!homeCanRefresh"
@@ -3769,7 +3769,7 @@ onBeforeUnmount(() => {
                                 <span v-for="fact in alarmFacts" :key="fact.targetCode" :class="`fact-${normalizeGuardState(fact.guardState)}`">{{ alarmFactText(fact) }}</span>
                             </div>
                             <p v-if="deviceStatusError" class="advanced-fact-error">{{ deviceStatusError }}</p>
-                            <button class="btn-ghost xs advanced-status-refresh" :disabled="deviceStatusPending || props.channel?.status !== 1" @click="loadDeviceStatus(props.channel?.id, sessionToken)">
+                            <button class="btn-ghost xs advanced-status-refresh uvp-refresh-btn" :disabled="deviceStatusPending || props.channel?.status !== 1" @click="loadDeviceStatus(props.channel?.id, sessionToken)">
                                 <RefreshCcw :size="11" />刷新事实状态
                             </button>
                         </div>

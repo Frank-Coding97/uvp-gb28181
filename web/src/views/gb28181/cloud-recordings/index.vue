@@ -65,6 +65,7 @@
               对账
             </a-button>
             <a-button
+              class="uvp-refresh-btn"
               data-testid="recording-refresh"
               :loading="loading || activeLoading"
               :title="`自动刷新倒计时 ${autoRefreshCountdown} 秒`"

@@ -154,7 +154,7 @@ onMounted(refresh);
                             复制 SIP 接入信息
                         </a-button>
                         <a-tooltip content="刷新状态">
-                            <a-button shape="circle" :loading="loading" @click="refresh">
+                            <a-button class="uvp-refresh-btn" shape="circle" :loading="loading" @click="refresh">
                                 <RefreshCw :size="16" />
                             </a-button>
                         </a-tooltip>

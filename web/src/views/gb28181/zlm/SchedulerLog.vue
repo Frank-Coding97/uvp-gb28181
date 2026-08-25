@@ -92,7 +92,7 @@ onUnmounted(() => {
                         unchecked-text="手动"
                         @change="(v: boolean | string | number) => toggleAutoRefresh(Boolean(v))"
                     />
-                        <a-button @click="refresh" :loading="loading">
+                        <a-button class="uvp-refresh-btn" @click="refresh" :loading="loading">
                             <template #icon><icon-refresh /></template>
                             刷新
                         </a-button>

@@ -529,7 +529,7 @@ onBeforeUnmount(() => {
         <div class="tab-actions">
           <a-tag :color="liveStatus.color" bordered><span class="live-dot" />{{ liveStatus.label }}</a-tag>
           <a-tooltip content="刷新安全数据">
-            <a-button aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button>
+            <a-button class="uvp-refresh-btn" aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button>
           </a-tooltip>
           <a-button v-if="activeTab === 'policy'" type="primary" @click="savePolicyPreview"><template #icon><Check :size="16" /></template>保存策略</a-button>
           <a-button v-else-if="activeTab === 'bans'" type="primary" @click="activeTab = 'policy'"><template #icon><SlidersHorizontal :size="16" /></template>调整策略</a-button>

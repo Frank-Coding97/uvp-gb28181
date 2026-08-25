@@ -151,7 +151,7 @@ onMounted(refresh);
             </template>
             <template #actions>
                 <a-button :loading="testing" @click="handleTest">测试连通性</a-button>
-                <a-button @click="refresh" :loading="loading">
+                <a-button class="uvp-refresh-btn" @click="refresh" :loading="loading">
                     <template #icon><icon-refresh /></template>
                     刷新
                 </a-button>

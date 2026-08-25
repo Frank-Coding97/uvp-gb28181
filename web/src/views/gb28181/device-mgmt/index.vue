@@ -1725,9 +1725,15 @@ onUnmounted(() => {
                                 </div>
                             </div>
                             <div class="toolbar-actions">
-                                <div v-if="viewMode !== 'map'" class="segmented">
-                                    <button type="button" :class="{ active: assetKind === 'device' }" @click="setAssetKind('device')">设备</button>
-                                    <button type="button" :class="{ active: assetKind === 'channel' }" @click="setAssetKind('channel')">通道</button>
+                                <div v-if="viewMode !== 'map'" class="segmented asset-kind-switch">
+                                    <button type="button" :class="{ active: assetKind === 'device' }" @click="setAssetKind('device')">
+                                        <RadioTower :size="14" aria-hidden="true" />
+                                        <span>设备</span>
+                                    </button>
+                                    <button type="button" :class="{ active: assetKind === 'channel' }" @click="setAssetKind('channel')">
+                                        <Video :size="14" aria-hidden="true" />
+                                        <span>通道</span>
+                                    </button>
                                 </div>
                                 <div class="view-switch" aria-label="展示形态">
                                     <button
@@ -1764,7 +1770,7 @@ onUnmounted(() => {
                                     <a-option value="offline">离线</a-option>
                                 </a-select>
                                 <button
-                                    class="btn-ghost refresh-control"
+                                    class="btn-ghost refresh-control uvp-refresh-btn"
                                     data-testid="refresh-control"
                                     type="button"
                                     :title="`自动刷新倒计时 ${autoRefreshCountdown} 秒`"
@@ -2119,7 +2125,7 @@ onUnmounted(() => {
                                                 <span>通道</span>
                                             </a-link>
                                             <a-link
-                                                class="uvp-table-action uvp-table-action--sync"
+                                                class="uvp-table-action uvp-table-action--sync uvp-refresh-link"
                                                 :disabled="refreshingCatalog[record.id] || !record.online"
                                                 :title="record.online ? '刷新通道目录' : '设备离线,无法刷新'"
                                                 @click="handleRefreshDeviceCatalog(record)"
@@ -2212,7 +2218,7 @@ onUnmounted(() => {
                                     <button class="icon-btn small framed" type="button" @click.stop="openDevice(item)"><Eye :size="13" /></button>
                                 </a-tooltip>
                                 <a-tooltip :content="item.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
-                                    <button class="icon-btn small framed info" :class="{ loading: refreshingCatalog[item.id] }" type="button" :disabled="refreshingCatalog[item.id] || !item.online" @click.stop="handleRefreshDeviceCatalog(item)">
+                                    <button class="icon-btn small framed info uvp-refresh-btn" :class="{ loading: refreshingCatalog[item.id] }" type="button" :disabled="refreshingCatalog[item.id] || !item.online" @click.stop="handleRefreshDeviceCatalog(item)">
                                         <Loader2 v-if="refreshingCatalog[item.id]" :size="13" class="spin" />
                                         <RefreshCcw v-else :size="13" />
                                     </button>
@@ -2382,7 +2388,7 @@ onUnmounted(() => {
                             <span>缩放 {{ mapZoom }}</span>
                             <a-slider :model-value="mapZoom" :min="mapMinZoom" :max="mapMaxZoom" :style="{ width: '180px' }" @change="(value: number) => mapInstance?.setZoom(value)" />
                             <button class="btn-ghost" type="button" @click="fitMapToData">定位点位</button>
-                            <button class="btn-ghost" type="button" @click="loadMapData">刷新地图</button>
+                            <button class="btn-ghost uvp-refresh-btn" type="button" @click="loadMapData">刷新地图</button>
                         </div>
                         <div class="map-canvas">
                             <div ref="mapContainer" class="map-container"></div>
@@ -2579,7 +2585,7 @@ onUnmounted(() => {
                                 <template #icon><Bell :size="14" /></template>
                                 <template #default>管理订阅</template>
                             </a-button>
-                            <a-button @click="handleRefreshDeviceCatalog(deviceDetail)">
+                            <a-button class="uvp-refresh-btn" @click="handleRefreshDeviceCatalog(deviceDetail)">
                                 <template #icon><RefreshCcw :size="14" /></template>
                                 <template #default>刷新目录</template>
                             </a-button>
@@ -3252,6 +3258,13 @@ onUnmounted(() => {
     color: var(--uvp-brand);
     background: var(--uvp-brand-soft);
     font-weight: 620;
+}
+.asset-kind-switch button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    line-height: normal;
 }
 .toolbar-select {
     flex: 0 0 auto;

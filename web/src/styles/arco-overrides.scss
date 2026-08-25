@@ -218,6 +218,51 @@
 
 // ========== 其他 Arco 组件后续在这里扩展 ==========
 
+// ========== 刷新工具按钮 ==========
+// 刷新是中性工具动作,使用独立蓝绿色语义色,与查询/危险操作区分。
+.uvp-refresh-btn {
+  color: var(--uvp-refresh-btn-text) !important;
+  background: var(--uvp-refresh-btn-bg) !important;
+  border-color: var(--uvp-refresh-btn-border) !important;
+  box-shadow: none !important;
+
+  &:hover:not([disabled]):not(.arco-btn-disabled),
+  &:focus-visible:not([disabled]):not(.arco-btn-disabled) {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-hover-bg) !important;
+    border-color: var(--uvp-refresh-btn-border) !important;
+  }
+
+  &:focus-visible:not([disabled]):not(.arco-btn-disabled) {
+    outline: 2px solid color-mix(in srgb, var(--uvp-refresh-btn-text) 34%, transparent);
+    outline-offset: 2px;
+  }
+
+  &:active:not([disabled]):not(.arco-btn-disabled) {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-active-bg) !important;
+    border-color: var(--uvp-refresh-btn-border) !important;
+  }
+
+  &[disabled],
+  &.arco-btn-disabled {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-bg) !important;
+    border-color: var(--uvp-refresh-btn-border) !important;
+    opacity: 0.55;
+  }
+}
+
+.uvp-refresh-link {
+  color: var(--uvp-refresh-btn-text) !important;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--uvp-refresh-btn-text) !important;
+    background: var(--uvp-refresh-btn-hover-bg) !important;
+  }
+}
+
 // ========== uvp 通用组件 class(从 device-mgmt / account 页面提取,供跨页复用) ==========
 // 提取自 web/src/views/gb28181/device-mgmt/index.vue(scoped)与 system/account/account.vue(scoped),
 // 因设备分配页等多页面复用,统一全局化;原页面 scoped 副本保留不受影响。

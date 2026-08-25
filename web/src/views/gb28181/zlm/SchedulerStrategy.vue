@@ -87,7 +87,7 @@ onMounted(refresh);
                         <span v-else class="summary-empty">未装配</span>
                     </div>
                     <div class="strategy-actions">
-                        <a-button @click="refresh" :loading="loading">
+                        <a-button class="uvp-refresh-btn" @click="refresh" :loading="loading">
                             <template #icon><icon-refresh /></template>
                             刷新
                         </a-button>

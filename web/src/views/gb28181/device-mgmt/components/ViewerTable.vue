@@ -146,7 +146,7 @@ onBeforeUnmount(() => {
     <section class="viewer-table" aria-label="当前观看连接">
         <div class="viewer-toolbar">
             <span>当前 {{ streams.length }} 个在播通道 · {{ totalViewers }} 个观看连接</span>
-            <a-button class="viewer-refresh" type="primary" size="small" aria-label="刷新当前观看" :loading="manualRefreshing" @click="load('manual')">
+            <a-button class="viewer-refresh uvp-refresh-btn" type="primary" size="small" aria-label="刷新当前观看" :loading="manualRefreshing" @click="load('manual')">
                 <template #icon><RefreshCw :size="15" /></template>刷新
             </a-button>
         </div>

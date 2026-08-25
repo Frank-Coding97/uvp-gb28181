@@ -53,7 +53,7 @@
           </template>
           <template #actions>
             <div class="cascade-search-actions">
-              <a-button :loading="loading" @click="refresh">
+              <a-button class="uvp-refresh-btn" :loading="loading" @click="refresh">
                 <template #icon><RefreshCw :size="15" /></template>
                 刷新
               </a-button>

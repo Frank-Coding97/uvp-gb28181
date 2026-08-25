@@ -195,7 +195,7 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
         </template>
         <template #extra>
           <a-tooltip content="刷新在线用户" position="top">
-            <a-button class="online-user-refresh" :loading="loading" aria-label="刷新在线用户" @click="load()">
+            <a-button class="online-user-refresh uvp-refresh-btn" :loading="loading" aria-label="刷新在线用户" @click="load()">
               <template #icon><RefreshCw :size="16" /></template>
               刷新
             </a-button>

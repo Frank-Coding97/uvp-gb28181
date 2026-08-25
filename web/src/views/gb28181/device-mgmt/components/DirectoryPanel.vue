@@ -154,7 +154,7 @@ onMounted(() => load(props.modelValue.view));
                     </button>
                 </a-tooltip>
                 <a-tooltip content="刷新目录">
-                    <button class="icon-button" type="button" aria-label="刷新目录" @click="refresh()">
+                    <button class="icon-button uvp-refresh-btn" type="button" aria-label="刷新目录" @click="refresh()">
                         <RefreshCcw :size="13" :class="{ spin: loading }" />
                     </button>
                 </a-tooltip>

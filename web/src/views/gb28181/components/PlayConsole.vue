@@ -654,7 +654,7 @@ onBeforeUnmount(() => {
                 <div v-if="phase === 'playing'" class="stream-info-bar">
                     <div class="stream-overview-header">
                         <strong>概况</strong>
-                        <button class="stream-refresh" title="刷新流信息" @click="Message.info('[Mock] 流信息已刷新')">
+                        <button class="stream-refresh uvp-refresh-btn" title="刷新流信息" @click="Message.info('[Mock] 流信息已刷新')">
                             <RefreshCcw :size="13" />
                         </button>
                     </div>

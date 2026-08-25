@@ -374,7 +374,7 @@ async function handleBatchActivate() {
                     </template>
                     <template #actions>
                         <span class="filter-meta">{{ filteredNodes.length }} / {{ nodes.length }} 节点</span>
-                        <a-button @click="refresh" :loading="loading">
+                        <a-button class="uvp-refresh-btn" @click="refresh" :loading="loading">
                             <template #icon><icon-refresh /></template>
                             刷新
                         </a-button>

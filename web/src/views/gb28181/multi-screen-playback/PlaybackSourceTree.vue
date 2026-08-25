@@ -542,7 +542,7 @@ defineExpose({ openFavoriteDialogForChannels });
                     aria-controls="device-tree-filters"
                     @click="filtersOpen = !filtersOpen"
                 ><ListFilter :size="14" /></button>
-                <button class="tree-icon-button tree-refresh" type="button" aria-label="刷新设备树" title="刷新设备树" @click="refresh()"><RefreshCw :size="14" :class="{ spin: loading }" /></button>
+                <button class="tree-icon-button tree-refresh uvp-refresh-btn" type="button" aria-label="刷新设备树" title="刷新设备树" @click="refresh()"><RefreshCw :size="14" :class="{ spin: loading }" /></button>
             </div>
         </header>
 
@@ -633,9 +633,9 @@ defineExpose({ openFavoriteDialogForChannels });
 .device-total { color: var(--uvp-text-tertiary); font-size: 10px; font-weight: 500; }
 .tree-summary { gap: 12px; color: var(--uvp-text-tertiary); font-size: 10px; }
 .tree-summary span { gap: 5px; }
-.summary-dot, .node-status-dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
-.summary-dot.online, .node-status-dot.online { background: #10B981; box-shadow: 0 0 0 2px rgb(16 185 129 / 12%); }
-.summary-dot.offline, .node-status-dot.offline { background: #EF4444; box-shadow: 0 0 0 2px rgb(239 68 68 / 10%); }
+.summary-dot { display: inline-block; width: 8px; height: 8px; flex: 0 0 8px; border-radius: 50%; }
+.summary-dot.online { background: #10B981; box-shadow: 0 0 0 2px rgb(16 185 129 / 12%); }
+.summary-dot.offline { background: #EF4444; box-shadow: 0 0 0 2px rgb(239 68 68 / 10%); }
 .tree-head-actions { gap: 2px; }
 .tree-icon-button { position: relative; display: inline-grid; width: 26px; height: 26px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 5px; place-items: center; cursor: pointer; }
 .tree-icon-button:hover, .tree-filter-toggle[aria-expanded="true"], .tree-filter-toggle.active { color: var(--uvp-brand); background: var(--uvp-sidebar-active-bg); }
@@ -675,7 +675,7 @@ defineExpose({ openFavoriteDialogForChannels });
 .twist-button:hover:not(:disabled) { color: var(--uvp-brand); background: var(--uvp-sidebar-active-bg); }
 .twist-button.expanded { transform: rotate(90deg); }
 .twist-button.hidden { visibility: hidden; }
-.tree-node { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 7px; padding: 0 4px 0 2px; color: var(--uvp-text-secondary); text-align: left; background: transparent; border: 0; cursor: pointer; font: inherit; }
+.tree-node { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 8px; padding: 0 8px 0 6px; color: var(--uvp-text-secondary); text-align: left; background: transparent; border: 0; cursor: pointer; font: inherit; }
 .tree-node:disabled { cursor: not-allowed; }
 .tree-node > svg { flex: 0 0 auto; color: var(--uvp-brand); }
 .favorite-toggle { display: inline-grid; width: 24px; height: 24px; flex: 0 0 24px; margin-right: 4px; padding: 0; color: var(--uvp-text-tertiary); background: transparent; border: 0; border-radius: 4px; cursor: pointer; place-items: center; }
@@ -688,6 +688,10 @@ defineExpose({ openFavoriteDialogForChannels });
 .tree-row.offline .node-name { color: var(--uvp-text-secondary); }
 .node-name { min-width: 0; flex: 1; overflow: hidden; color: var(--uvp-text-primary); text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .node-status { flex: 0 0 auto; color: var(--uvp-text-tertiary); font-size: 10px; }
+.node-status-dot { position: relative; width: 18px; height: 100%; flex: 0 0 18px; margin-left: 8px; }
+.node-status-dot::after { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; border-radius: 50%; content: ""; transform: translate(-50%, -50%); }
+.node-status-dot.online::after { background: #10B981; }
+.node-status-dot.offline::after { background: #EF4444; }
 .tree-error { display: flex; gap: 8px; align-items: center; padding: 10px 12px; color: var(--uvp-danger); font-size: 12px; }
 .tree-error button { padding: 0; color: var(--uvp-brand); background: transparent; border: 0; cursor: pointer; font: inherit; }
 .tree-empty { display: grid; min-height: 120px; color: var(--uvp-text-tertiary); place-items: center; font-size: 12px; }

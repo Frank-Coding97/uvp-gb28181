@@ -45,7 +45,7 @@
             <strong>{{ lastUpdatedText }}</strong>
           </div>
           <button
-            class="refresh-button"
+            class="refresh-button uvp-refresh-btn"
             type="button"
             :disabled="refreshing"
             :aria-label="refreshing ? '正在刷新仪表盘' : '刷新仪表盘'"

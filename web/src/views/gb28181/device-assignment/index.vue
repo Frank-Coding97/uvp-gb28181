@@ -511,7 +511,7 @@ onMounted(() => {
                                     <a-option value="online">在线</a-option>
                                     <a-option value="offline">离线</a-option>
                                 </a-select>
-                                <button class="btn-ghost" type="button" @click="onSearch">
+                                <button class="btn-ghost uvp-refresh-btn" type="button" @click="onSearch">
                                     <RefreshCcw :size="14" :class="{ spin: rowsLoading }" />
                                     刷新
                                 </button>
