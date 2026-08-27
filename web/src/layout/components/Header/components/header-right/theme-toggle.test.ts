@@ -17,11 +17,11 @@ describe("header theme toggle", () => {
   });
 
   it("switches directly between light and night blue-gray without a style dropdown", () => {
-    const headerSource = readSource("src/layout/components/Header/components/header-right/index.vue");
+    const tabsSource = readSource("src/layout/components/Tabs/index.vue");
     const settingsSource = readSource("src/layout/components/Header/components/theme-settings/index.vue");
 
-    expect(headerSource).toContain('@click="toggleThemeMode"');
-    expect(headerSource).not.toContain("onThemeModeSelect");
+    expect(tabsSource).toContain('@click="toggleThemeMode"');
+    expect(tabsSource).not.toContain("onThemeModeSelect");
     expect(settingsSource).not.toContain("暗色风格");
   });
 
