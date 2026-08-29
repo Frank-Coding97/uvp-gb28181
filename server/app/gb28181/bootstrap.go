@@ -77,6 +77,9 @@ type schedulerLogRepoAdapter struct {
 	inner *gbzlmrepo.GormSchedulerLogRepo
 }
 
+var _ gbzlmsched.SchedulerLogRepo = schedulerLogRepoAdapter{}
+var _ gbzlmsched.SchedulerLogFilteredRepo = schedulerLogRepoAdapter{}
+
 func (a schedulerLogRepoAdapter) Insert(ctx context.Context, l gbzlmsched.SchedulerLog) error {
 	return a.inner.Insert(ctx, gbzlmrepo.SchedulerLogRow{
 		ID:           l.ID,
@@ -96,6 +99,21 @@ func (a schedulerLogRepoAdapter) List(ctx context.Context, limit int) ([]gbzlmsc
 	if err != nil {
 		return nil, err
 	}
+	return schedulerLogRowsToDomain(rows), nil
+}
+
+// ListFiltered keeps the production adapter on the repository's typed,
+// parameterized query path. Without this optional method LogService falls
+// back to List(1000), which can silently miss older matching rows.
+func (a schedulerLogRepoAdapter) ListFiltered(ctx context.Context, filter gbzlmsched.SchedulerLogFilter) ([]gbzlmsched.SchedulerLog, error) {
+	rows, err := a.inner.ListFiltered(ctx, schedulerLogFilterToRepo(filter))
+	if err != nil {
+		return nil, err
+	}
+	return schedulerLogRowsToDomain(rows), nil
+}
+
+func schedulerLogRowsToDomain(rows []gbzlmrepo.SchedulerLogRow) []gbzlmsched.SchedulerLog {
 	out := make([]gbzlmsched.SchedulerLog, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, gbzlmsched.SchedulerLog{
@@ -110,7 +128,24 @@ func (a schedulerLogRepoAdapter) List(ctx context.Context, limit int) ([]gbzlmsc
 			ErrorMessage: r.ErrorMessage,
 		})
 	}
-	return out, nil
+	return out
+}
+
+func schedulerLogFilterToRepo(filter gbzlmsched.SchedulerLogFilter) gbzlmrepo.SchedulerLogFilter {
+	algorithm := filter.Algorithm
+	if algorithm == "" {
+		algorithm = filter.Policy
+	}
+	return gbzlmrepo.SchedulerLogFilter{
+		From:      filter.From,
+		To:        filter.To,
+		NodeID:    filter.NodeID,
+		Algorithm: algorithm,
+		Policy:    filter.Policy,
+		Result:    string(filter.Result),
+		StreamID:  filter.StreamID,
+		Limit:     filter.Limit,
+	}
 }
 
 func (a schedulerLogRepoAdapter) PruneOlderThan(ctx context.Context, t time.Time) (int64, error) {

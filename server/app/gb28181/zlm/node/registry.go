@@ -32,7 +32,24 @@ type Registry struct {
 	nodes             map[int64]*Node  // ID -> Node
 	uuids             map[string]int64 // mediaServerUUID -> ID(Hook 反查)
 	autoOnDemandReady map[int64]bool   // 当前进程已写入并回读确认缺流 Hook
+	admissionBlocked  map[int64]bool   // 显式运维/恢复 gate,不改变普通 active 语义
 	repo              Repo
+}
+
+func cloneTags(tags map[string]string) map[string]string {
+	if tags == nil {
+		return nil
+	}
+	out := make(map[string]string, len(tags))
+	for key, value := range tags {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneNode(n Node) Node {
+	n.Tags = cloneTags(n.Tags)
+	return n
 }
 
 // NewRegistry 构造,不会自动 LoadAll(由调用方控制时机)
@@ -41,6 +58,7 @@ func NewRegistry(repo Repo) *Registry {
 		nodes:             make(map[int64]*Node),
 		uuids:             make(map[string]int64),
 		autoOnDemandReady: make(map[int64]bool),
+		admissionBlocked:  make(map[int64]bool),
 		repo:              repo,
 	}
 }
@@ -56,8 +74,9 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 	r.nodes = make(map[int64]*Node, len(rows))
 	r.uuids = make(map[string]int64, len(rows))
 	r.autoOnDemandReady = make(map[int64]bool, len(rows))
+	r.admissionBlocked = make(map[int64]bool, len(rows))
 	for i := range rows {
-		n := rows[i]
+		n := cloneNode(rows[i])
 		r.nodes[n.ID] = &n
 		if n.MediaServerUUID != "" {
 			r.uuids[n.MediaServerUUID] = n.ID
@@ -69,6 +88,7 @@ func (r *Registry) LoadAll(ctx context.Context) error {
 
 // Add 持久化 + 写内存
 func (r *Registry) Add(ctx context.Context, n Node) (*Node, error) {
+	n = cloneNode(n)
 	now := time.Now()
 	if n.CreatedAt.IsZero() {
 		n.CreatedAt = now
@@ -86,6 +106,7 @@ func (r *Registry) Add(ctx context.Context, n Node) (*Node, error) {
 	stored := n
 	r.nodes[id] = &stored
 	r.autoOnDemandReady[id] = false
+	r.admissionBlocked[id] = false
 	if n.MediaServerUUID != "" {
 		r.uuids[n.MediaServerUUID] = id
 	}
@@ -94,6 +115,7 @@ func (r *Registry) Add(ctx context.Context, n Node) (*Node, error) {
 
 // Update 写 DB + 同步内存(保留 Stats,因为 Stats 只在内存)
 func (r *Registry) Update(ctx context.Context, n Node) error {
+	n = cloneNode(n)
 	n.UpdatedAt = time.Now()
 	if err := r.repo.Update(ctx, n); err != nil {
 		return err
@@ -107,17 +129,20 @@ func (r *Registry) Update(ctx context.Context, n Node) error {
 		if cur.MediaServerUUID != "" && cur.MediaServerUUID != n.MediaServerUUID {
 			delete(r.uuids, cur.MediaServerUUID)
 		}
-		next := n
+		next := cloneNode(n)
 		next.Stats = stats
 		r.nodes[n.ID] = &next
 	} else {
-		next := n
+		next := cloneNode(n)
 		r.nodes[n.ID] = &next
 	}
 	if n.MediaServerUUID != "" {
 		r.uuids[n.MediaServerUUID] = n.ID
 	}
 	r.autoOnDemandReady[n.ID] = false
+	if _, exists := r.admissionBlocked[n.ID]; !exists {
+		r.admissionBlocked[n.ID] = false
+	}
 	return nil
 }
 
@@ -134,6 +159,7 @@ func (r *Registry) Delete(ctx context.Context, id int64) error {
 		}
 		delete(r.nodes, id)
 		delete(r.autoOnDemandReady, id)
+		delete(r.admissionBlocked, id)
 	}
 	return nil
 }
@@ -157,12 +183,32 @@ func (r *Registry) IsAutoOnDemandReady(id int64) bool {
 	return r.autoOnDemandReady[id]
 }
 
+// SetAdmissionBlocked toggles an explicit admission gate. It is intentionally
+// separate from AutoOnDemandReady: existing scheduling keeps its historical
+// active/capacity semantics, while restart and uncertain rollback can opt a
+// node out without pretending that a failed convergence succeeded.
+func (r *Registry) SetAdmissionBlocked(id int64, blocked bool) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.nodes[id]; !ok {
+		return false
+	}
+	r.admissionBlocked[id] = blocked
+	return true
+}
+
+func (r *Registry) IsAdmissionBlocked(id int64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.admissionBlocked[id]
+}
+
 // Get 按 ID 取节点(包含最新 Stats,内存优先)
 func (r *Registry) Get(id int64) (*Node, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if n, ok := r.nodes[id]; ok {
-		copy := *n
+		copy := cloneNode(*n)
 		return &copy, true
 	}
 	return nil, false
@@ -180,7 +226,7 @@ func (r *Registry) GetByUUID(uuid string) (*Node, bool) {
 	if !ok {
 		return nil, false
 	}
-	copy := *n
+	copy := cloneNode(*n)
 	return &copy, true
 }
 
@@ -192,14 +238,14 @@ func (r *Registry) ResolveAutoOnDemandNode(uuid string) (*Node, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	id, ok := r.uuids[uuid]
-	if !ok || !r.autoOnDemandReady[id] {
+	if !ok || !r.autoOnDemandReady[id] || r.admissionBlocked[id] {
 		return nil, false
 	}
 	n, ok := r.nodes[id]
 	if !ok || !n.IsActive() || n.IsNearCapacity() {
 		return nil, false
 	}
-	copy := *n
+	copy := cloneNode(*n)
 	return &copy, true
 }
 
@@ -219,7 +265,7 @@ func (r *Registry) List() []*Node {
 	defer r.mu.RUnlock()
 	out := make([]*Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		copy := *n
+		copy := cloneNode(*n)
 		out = append(out, &copy)
 	}
 	return out
@@ -232,7 +278,7 @@ func (r *Registry) ListActive() []*Node {
 	out := make([]*Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
 		if n.IsActive() {
-			copy := *n
+			copy := cloneNode(*n)
 			out = append(out, &copy)
 		}
 	}
@@ -249,8 +295,8 @@ func (r *Registry) ListSchedulable() []*Node {
 	defer r.mu.RUnlock()
 	out := make([]*Node, 0, len(r.nodes))
 	for _, n := range r.nodes {
-		if n.IsActive() && !n.IsNearCapacity() {
-			copy := *n
+		if n.IsActive() && !n.IsNearCapacity() && !r.admissionBlocked[n.ID] {
+			copy := cloneNode(*n)
 			out = append(out, &copy)
 		}
 	}

@@ -41,12 +41,13 @@ func (r *fakeLogRepo) PruneOlderThan(_ context.Context, _ time.Time) (int64, err
 type fakeSettingWriter struct {
 	algo  string
 	calls int
+	err   error
 }
 
 func (w *fakeSettingWriter) UpdateAlgorithm(_ context.Context, name string) error {
 	w.algo = name
 	w.calls++
-	return nil
+	return w.err
 }
 
 func setupSchedulerRouter(t *testing.T) (*gin.Engine, *scheduler.Manager, *fakeSettingWriter, *fakeLogRepo) {

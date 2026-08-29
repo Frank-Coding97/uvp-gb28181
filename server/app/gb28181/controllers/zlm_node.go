@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"errors"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -95,6 +97,18 @@ func (zc *ZLMNodeController) Delete(c *gin.Context) {
 		zc.FailAndAbort(c, "节点 ID 非法", err)
 		return
 	}
+	if zc.svc.HasNodeImpactProvider() {
+		fingerprint, confirmed := zc.impactConfirmation(c, id, service.NodeImpactActionDelete)
+		if !confirmed {
+			return
+		}
+		if err := zc.svc.DeleteConfirmed(c, id, fingerprint); err != nil {
+			zc.handleNodeActionError(c, "删除节点失败", err)
+			return
+		}
+		zc.Success(c, gin.H{"ok": true})
+		return
+	}
 	if err := zc.svc.Delete(c, id); err != nil {
 		if errors.Is(err, service.ErrNodeNotInMaintenance) {
 			zc.FailAndAbort(c, "请先把节点切到维护态再删除", err)
@@ -115,6 +129,18 @@ func (zc *ZLMNodeController) SetMaintenance(c *gin.Context) {
 	id, err := zc.parseID(c)
 	if err != nil {
 		zc.FailAndAbort(c, "节点 ID 非法", err)
+		return
+	}
+	if zc.svc.HasNodeImpactProvider() {
+		fingerprint, confirmed := zc.impactConfirmation(c, id, service.NodeImpactActionMaintenance)
+		if !confirmed {
+			return
+		}
+		if err := zc.svc.SetMaintenanceConfirmed(c, id, fingerprint); err != nil {
+			zc.handleNodeActionError(c, "切维护态失败", err)
+			return
+		}
+		zc.Success(c, gin.H{"ok": true})
 		return
 	}
 	if err := zc.svc.SetMaintenance(c, id); err != nil {
@@ -156,6 +182,19 @@ func (zc *ZLMNodeController) KickSessions(c *gin.Context) {
 		zc.FailAndAbort(c, "节点 ID 非法", err)
 		return
 	}
+	if zc.svc.HasNodeImpactProvider() {
+		fingerprint, confirmed := zc.impactConfirmation(c, id, service.NodeImpactActionKick)
+		if !confirmed {
+			return
+		}
+		count, err := zc.svc.KickAllSessionsConfirmed(c, id, fingerprint)
+		if err != nil {
+			zc.handleNodeActionError(c, "驱逐会话失败", err)
+			return
+		}
+		zc.Success(c, gin.H{"count": count})
+		return
+	}
 	count, err := zc.svc.KickAllSessions(c, id)
 	if err != nil {
 		if errors.Is(err, service.ErrNodeNotFound) {
@@ -166,6 +205,63 @@ func (zc *ZLMNodeController) KickSessions(c *gin.Context) {
 		return
 	}
 	zc.Success(c, gin.H{"count": count})
+}
+
+// Impact returns the bounded, secret-free preflight snapshot for one
+// high-risk node action. T14 may expose this method from a dedicated route;
+// the legacy action routes also return the same snapshot when no fingerprint
+// header/query value is supplied.
+func (zc *ZLMNodeController) Impact(c *gin.Context) {
+	id, err := zc.parseID(c)
+	if err != nil {
+		zc.FailAndAbort(c, "节点 ID 非法", err)
+		return
+	}
+	action, err := service.ParseNodeImpactAction(c.Query("action"))
+	if err != nil {
+		zc.FailAndAbort(c, "影响预检动作非法", err)
+		return
+	}
+	preflight, err := zc.svc.PreflightNodeImpact(c, id, action)
+	if err != nil {
+		zc.handleNodeActionError(c, "节点影响预检失败", err)
+		return
+	}
+	zc.Success(c, preflight)
+}
+
+func (zc *ZLMNodeController) impactConfirmation(c *gin.Context, id int64, action service.NodeImpactAction) (string, bool) {
+	fingerprint := strings.TrimSpace(c.GetHeader("X-Impact-Fingerprint"))
+	if fingerprint == "" {
+		fingerprint = strings.TrimSpace(c.Query("fingerprint"))
+	}
+	if fingerprint != "" {
+		return fingerprint, true
+	}
+	preflight, err := zc.svc.PreflightNodeImpact(c, id, action)
+	if err != nil {
+		zc.handleNodeActionError(c, "节点影响预检失败", err)
+		return "", false
+	}
+	// Returning the preflight instead of executing is deliberate: clients must
+	// explicitly confirm the exact observed fingerprint in a header/query.
+	zc.Success(c, preflight)
+	return "", false
+}
+
+func (zc *ZLMNodeController) handleNodeActionError(c *gin.Context, message string, err error) {
+	switch {
+	case errors.Is(err, service.ErrNodeImpactChanged):
+		zc.FailAndAbort(c, "节点影响已变化，请重新预检", err, http.StatusConflict)
+	case errors.Is(err, service.ErrNodeImpactConflict):
+		zc.FailAndAbort(c, "节点仍有活动影响，未执行操作", err, http.StatusConflict)
+	case errors.Is(err, service.ErrNodeNotFound):
+		zc.FailAndAbort(c, "节点不存在", err, http.StatusNotFound)
+	case errors.Is(err, service.ErrNodeNotInMaintenance):
+		zc.FailAndAbort(c, "请先把节点切到维护态再删除", err, http.StatusConflict)
+	default:
+		zc.FailAndAbort(c, message, err)
+	}
 }
 
 // restartReq Restart 端点 body
@@ -187,7 +283,8 @@ func (zc *ZLMNodeController) Restart(c *gin.Context) {
 	var req restartReq
 	_ = c.ShouldBindJSON(&req)
 
-	if err := zc.svc.Restart(c, id, req.GraceMS); err != nil {
+	result, err := zc.svc.RestartAccepted(c, id, req.GraceMS)
+	if err != nil {
 		if errors.Is(err, service.ErrNodeNotFound) {
 			zc.FailAndAbort(c, "节点不存在", err)
 			return
@@ -195,7 +292,14 @@ func (zc *ZLMNodeController) Restart(c *gin.Context) {
 		zc.FailAndAbort(c, "重启 ZLM 失败", err)
 		return
 	}
-	zc.Success(c, gin.H{"ok": true})
+	// Accepted means only that ZLM acknowledged the restart command. The
+	// operation continues through offline, heartbeat, convergence and readback.
+	cz := gin.H{
+		"accepted":    result.Accepted,
+		"operationId": result.OperationID,
+		"status":      result.Status,
+	}
+	zc.Success(c, cz)
 }
 
 func (zc *ZLMNodeController) parseID(c *gin.Context) (int64, error) {

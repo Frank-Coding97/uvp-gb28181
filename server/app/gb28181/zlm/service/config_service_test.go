@@ -29,6 +29,12 @@ func (m *mockZLMClient) GetServerConfig(_ context.Context, _ *node.Node) (map[st
 }
 func (m *mockZLMClient) SetServerConfig(_ context.Context, _ *node.Node, params map[string]string) error {
 	m.lastSetParams = params
+	if m.getReturn == nil {
+		m.getReturn = map[string]string{}
+	}
+	for key, value := range params {
+		m.getReturn[key] = value
+	}
 	return m.setErr
 }
 

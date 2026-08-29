@@ -24,10 +24,18 @@ var ErrEmptyMediaServerID = errors.New("heartbeat: empty mediaServerId in payloa
 type Collector struct {
 	registry  *node.Registry
 	scheduler ConfigConvergenceScheduler
+	notifier  NodeEventNotifier
 }
 
 type ConfigConvergenceScheduler interface {
 	ScheduleConfigConvergence(nodeID int64) bool
+}
+
+// RestartPendingChecker is optional. A restart notifier that owns the
+// offline→heartbeat convergence can implement it so the generic config
+// scheduler does not race the operation's verified convergence.
+type RestartPendingChecker interface {
+	RestartPending(nodeID int64) bool
 }
 
 // NewCollector 构造
@@ -38,6 +46,14 @@ func NewCollector(reg *node.Registry) *Collector {
 func NewCollectorWithConfigScheduler(reg *node.Registry, scheduler ConfigConvergenceScheduler) *Collector {
 	return &Collector{registry: reg, scheduler: scheduler}
 }
+
+// NewCollectorWithNotifier wires restart lifecycle events while preserving the
+// existing constructor used by older bootstrap code.
+func NewCollectorWithNotifier(reg *node.Registry, scheduler ConfigConvergenceScheduler, notifier NodeEventNotifier) *Collector {
+	return &Collector{registry: reg, scheduler: scheduler, notifier: notifier}
+}
+
+func (c *Collector) SetNotifier(notifier NodeEventNotifier) { c.notifier = notifier }
 
 // keepalivePayload ZLM on_server_keepalive 回调载荷
 //
@@ -87,10 +103,27 @@ func (c *Collector) Receive(payload []byte) error {
 	if body.MediaServerID == "" {
 		return ErrEmptyMediaServerID
 	}
+	previous, _ := c.registry.GetByUUID(body.MediaServerID)
 	// 锁内字段级更新:与 ThreadLoadPoller 的负载字段互不覆盖
 	c.registry.UpdateHeartbeatFields(body.MediaServerID,
 		body.Data.MediaSource, body.Data.TcpSession+body.Data.UdpSession, time.Now())
-	if current, ok := c.registry.GetByUUID(body.MediaServerID); ok && current.IsActive() &&
+	current, ok := c.registry.GetByUUID(body.MediaServerID)
+	restartHandled := false
+	if previous != nil && previous.State == node.StateOffline && ok && current.IsActive() && c.notifier != nil {
+		// Check before and after delivery. The first check covers notifiers whose
+		// callback is asynchronous; the second covers coordinators that mark the
+		// operation as converging synchronously in OnNodeHeartbeat.
+		if checker, ok := c.notifier.(RestartPendingChecker); ok {
+			restartHandled = checker.RestartPending(current.ID)
+		}
+		c.notifier.OnNodeHeartbeat(current.ID)
+		if !restartHandled {
+			if checker, ok := c.notifier.(RestartPendingChecker); ok {
+				restartHandled = checker.RestartPending(current.ID)
+			}
+		}
+	}
+	if ok && current.IsActive() && !restartHandled &&
 		!c.registry.IsAutoOnDemandReady(current.ID) && c.scheduler != nil {
 		c.scheduler.ScheduleConfigConvergence(current.ID)
 	}

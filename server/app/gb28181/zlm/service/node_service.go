@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +24,20 @@ var ErrNodeNotInMaintenance = errors.New("node must be in maintenance state to d
 var ErrConfigConvergenceInProgress = errors.New("node config convergence in progress")
 
 var ErrNodeConfigChanged = errors.New("node config changed during convergence")
+
+// ErrExternalStateUncertain means that ZLM accepted (or may have accepted) a
+// configuration change, but the post-write readback could not prove the
+// effective state. Callers must not report the node as ready in this case.
+var ErrExternalStateUncertain = errors.New("external_state_uncertain")
+
+// ErrRollbackUncertain means that an update failed and at least one of the
+// external ZLM or local snapshot rollback steps could not be verified.
+// The node is deliberately kept out of admission when this is returned.
+var ErrRollbackUncertain = errors.New("rollback_uncertain")
+
+// ErrRestartPending means a node already has a restart operation waiting for
+// its offline/heartbeat/reconciliation lifecycle to finish.
+var ErrRestartPending = errors.New("restart already pending")
 
 // ZLMProbe 节点连通性探测 + 配置下发抽象
 // 由 zlm.Client 实现(适配器在 bootstrap 注入),测试用 mock。
@@ -84,8 +99,10 @@ type CreateNodeReq struct {
 // UpdateNodeReq 更新节点入参(可选字段用指针)
 type UpdateNodeReq struct {
 	Name         *string           `json:"name,omitempty"`
+	Host         *string           `json:"host,omitempty"`
 	ReceiveHost  *string           `json:"receiveHost,omitempty"`
 	PlaybackHost *string           `json:"playbackHost,omitempty"`
+	APIPort      *int              `json:"apiPort,omitempty"`
 	APISecret    *string           `json:"apiSecret,omitempty"`
 	Weight       *int              `json:"weight,omitempty"`
 	Tags         map[string]string `json:"tags,omitempty"`
@@ -95,23 +112,32 @@ type UpdateNodeReq struct {
 
 // NodeService 节点 CRUD + 状态切换
 type NodeService struct {
-	registry *node.Registry
-	probe    ZLMProbe
-	tuning   MediaTuning
-	applyMu  sync.Mutex
-	applying map[int64]struct{}
-	logger   *zap.Logger
+	registry       *node.Registry
+	probe          ZLMProbe
+	tuning         MediaTuning
+	applyMu        sync.Mutex
+	applying       map[int64]struct{}
+	locksMu        sync.Mutex
+	locks          map[int64]*sync.Mutex
+	impactMu       sync.RWMutex
+	impactProvider NodeImpactProvider
+	logger         *zap.Logger
+	restart        *RestartCoordinator
 }
 
 // NewNodeService 构造
 func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *NodeService {
-	return &NodeService{
+	s := &NodeService{
 		registry: reg,
 		probe:    probe,
 		tuning:   tuning,
 		applying: make(map[int64]struct{}),
+		locks:    make(map[int64]*sync.Mutex),
 		logger:   zap.NewNop(),
 	}
+	s.restart = NewRestartCoordinator(reg)
+	s.restart.SetConverger(s.ConvergeNodeConfig)
+	return s
 }
 
 func (s *NodeService) SetLogger(logger *zap.Logger) {
@@ -133,7 +159,7 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 		APIPort:           n.APIPort,
 		MediaServerUUID:   n.MediaServerUUID,
 		Weight:            n.Weight,
-		Tags:              n.Tags,
+		Tags:              cloneTags(n.Tags),
 		State:             n.State,
 		RTPPortStart:      n.RTPPortStart,
 		RTPPortEnd:        n.RTPPortEnd,
@@ -144,6 +170,59 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 		UpdatedAt:         n.UpdatedAt,
 	}
 }
+
+func cloneTags(tags map[string]string) map[string]string {
+	if tags == nil {
+		return nil
+	}
+	out := make(map[string]string, len(tags))
+	for k, v := range tags {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneNode(n *node.Node) *node.Node {
+	if n == nil {
+		return nil
+	}
+	out := *n
+	out.Tags = cloneTags(n.Tags)
+	return &out
+}
+
+func (s *NodeService) nodeLock(id int64) *sync.Mutex {
+	s.locksMu.Lock()
+	defer s.locksMu.Unlock()
+	if lock, ok := s.locks[id]; ok {
+		return lock
+	}
+	lock := &sync.Mutex{}
+	s.locks[id] = lock
+	return lock
+}
+
+// redactNodeError prevents a node API secret from crossing the service
+// boundary in errors returned by a typed client or an upstream HTTP helper.
+func redactNodeError(err error, n *node.Node) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	if n != nil && n.APISecret != "" {
+		message = strings.ReplaceAll(message, n.APISecret, "***")
+		message = strings.ReplaceAll(message, url.QueryEscape(n.APISecret), "***")
+	}
+	return redactedNodeError{err: err, message: message}
+}
+
+type redactedNodeError struct {
+	err     error
+	message string
+}
+
+func (e redactedNodeError) Error() string { return e.message }
+func (e redactedNodeError) Unwrap() error { return e.err }
 
 // List 全部节点
 func (s *NodeService) List(_ context.Context) ([]*NodeDTO, error) {
@@ -217,7 +296,7 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 		APISecret:       req.APISecret,
 		MediaServerUUID: uuid.NewString(),
 		Weight:          weight,
-		Tags:            req.Tags,
+		Tags:            cloneTags(req.Tags),
 		State:           node.StateActive,
 		RTPPortStart:    rtpStart,
 		RTPPortEnd:      rtpEnd,
@@ -225,7 +304,7 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 
 	// 1. 先 probe 探测连通性
 	if _, err := s.probe.GetServerConfig(ctx, tmp); err != nil {
-		return nil, fmt.Errorf("ZLM 不可达 %s:%d: %w", req.Host, req.APIPort, err)
+		return nil, fmt.Errorf("ZLM 不可达 %s:%d: %w", req.Host, req.APIPort, redactNodeError(err, tmp))
 	}
 
 	// 2. 入库 + 加内存(Registry.Add 内部 Repo.Create)
@@ -236,8 +315,10 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 
 	// 3. 把 mediaServerId + Hook 写到 ZLM(失败则回滚)
 	if err := s.ConvergeNodeConfig(ctx, added.ID); err != nil {
-		_ = s.registry.Delete(ctx, added.ID)
-		return nil, fmt.Errorf("写 ZLM 配置失败,已回滚: %w", err)
+		if rollbackErr := s.registry.Delete(ctx, added.ID); rollbackErr != nil {
+			return nil, fmt.Errorf("%w: 创建失败且本地回滚失败: %v", ErrRollbackUncertain, redactNodeError(rollbackErr, added))
+		}
+		return nil, fmt.Errorf("写 ZLM 配置失败,已回滚: %w", redactNodeError(err, added))
 	}
 
 	return s.toDTO(added), nil
@@ -245,40 +326,71 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 
 // Update 更新可变字段
 func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (*NodeDTO, error) {
+	lock := s.nodeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
+
 	cur, ok := s.registry.Get(id)
 	if !ok {
 		return nil, ErrNodeNotFound
 	}
+	old := cloneNode(cur)
+	candidate := cloneNode(cur)
 	if req.Name != nil {
-		cur.Name = *req.Name
+		candidate.Name = *req.Name
+	}
+	if req.Host != nil {
+		candidate.Host = *req.Host
 	}
 	if req.ReceiveHost != nil {
-		cur.ReceiveHost = *req.ReceiveHost
+		candidate.ReceiveHost = *req.ReceiveHost
 	}
 	if req.PlaybackHost != nil {
-		cur.PlaybackHost = *req.PlaybackHost
+		candidate.PlaybackHost = *req.PlaybackHost
+	}
+	if req.APIPort != nil {
+		candidate.APIPort = *req.APIPort
 	}
 	if req.APISecret != nil {
-		cur.APISecret = *req.APISecret
+		candidate.APISecret = *req.APISecret
 	}
 	if req.Weight != nil {
-		cur.Weight = *req.Weight
+		candidate.Weight = *req.Weight
 	}
 	if req.Tags != nil {
-		cur.Tags = req.Tags
+		candidate.Tags = cloneTags(req.Tags)
 	}
 	if req.RTPPortStart != nil {
-		cur.RTPPortStart = *req.RTPPortStart
+		candidate.RTPPortStart = *req.RTPPortStart
 	}
 	if req.RTPPortEnd != nil {
-		cur.RTPPortEnd = *req.RTPPortEnd
+		candidate.RTPPortEnd = *req.RTPPortEnd
 	}
 	// 合并后整体校验,防 API 绕过前端约束写入倒置端口范围/异常权重
-	if err := validateNodeFields(cur.Host, cur.APIPort, cur.Weight, cur.RTPPortStart, cur.RTPPortEnd, cur.APISecret); err != nil {
+	if err := validateNodeFields(candidate.Host, candidate.APIPort, candidate.Weight, candidate.RTPPortStart, candidate.RTPPortEnd, candidate.APISecret); err != nil {
 		return nil, err
 	}
-	if err := s.registry.Update(ctx, *cur); err != nil {
+
+	connectionChanged := old.Host != candidate.Host || old.APIPort != candidate.APIPort || old.APISecret != candidate.APISecret
+	if connectionChanged {
+		if _, err := s.probe.GetServerConfig(ctx, candidate); err != nil {
+			// candidate has not reached Registry yet: the old snapshot remains
+			// authoritative and no persistence/write-back is attempted.
+			return nil, fmt.Errorf("ZLM 不可达 %s:%d: %w", candidate.Host, candidate.APIPort, redactNodeError(err, candidate))
+		}
+	}
+
+	if err := s.registry.Update(ctx, *candidate); err != nil {
 		return nil, err
+	}
+	if candidate.IsActive() {
+		if err := s.convergeNodeLocked(ctx, id); err != nil {
+			rollbackErr := s.rollbackNodeLocked(ctx, old)
+			if rollbackErr != nil {
+				return nil, rollbackErr
+			}
+			return nil, redactNodeError(err, candidate)
+		}
 	}
 	got, _ := s.registry.Get(id)
 	return s.toDTO(got), nil
@@ -312,33 +424,35 @@ func (s *NodeService) ApplyActiveConfigs(ctx context.Context) []ConfigApplyResul
 }
 
 func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) error {
-	current, ok := s.beginConfigConvergence(nodeID)
-	if !ok {
-		if s.registry.IsAutoOnDemandReady(nodeID) {
-			return nil
-		}
-		return ErrConfigConvergenceInProgress
-	}
-	return s.applyClaimedConfig(ctx, current)
+	lock := s.nodeLock(nodeID)
+	lock.Lock()
+	defer lock.Unlock()
+	return s.convergeNodeLocked(ctx, nodeID)
 }
 
 // ScheduleConfigConvergence is non-blocking and de-duplicates per node. A
 // failed apply leaves readiness false so the next heartbeat retries it.
 func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
+	lock := s.nodeLock(nodeID)
+	lock.Lock()
 	current, ok := s.beginConfigConvergence(nodeID)
+	lock.Unlock()
 	if !ok {
 		return false
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if err := s.applyClaimedConfig(ctx, current); err != nil {
+		lock := s.nodeLock(nodeID)
+		lock.Lock()
+		err := s.applyClaimedConfig(ctx, current)
+		lock.Unlock()
+		if err != nil {
 			s.logger.Warn("GB28181 ZLM 节点配置恢复失败",
-				zap.Int64("nodeId", current.ID), zap.String("name", current.Name), zap.Error(err))
+				zap.Int64("nodeId", nodeID), zap.Error(err))
 			return
 		}
-		s.logger.Info("GB28181 ZLM 节点配置已恢复",
-			zap.Int64("nodeId", current.ID), zap.String("name", current.Name))
+		s.logger.Info("GB28181 ZLM 节点配置已恢复", zap.Int64("nodeId", nodeID))
 	}()
 	return true
 }
@@ -355,7 +469,30 @@ func (s *NodeService) beginConfigConvergence(nodeID int64) (*node.Node, bool) {
 	}
 	s.applying[nodeID] = struct{}{}
 	s.registry.SetAutoOnDemandReady(nodeID, false)
-	return current, true
+	return cloneNode(current), true
+}
+
+func (s *NodeService) convergeNodeLocked(ctx context.Context, nodeID int64) error {
+	current, ok := s.registry.Get(nodeID)
+	if !ok {
+		return ErrNodeNotFound
+	}
+	if !current.IsActive() {
+		s.registry.SetAutoOnDemandReady(nodeID, false)
+		return fmt.Errorf("node %d is not active", nodeID)
+	}
+	if s.registry.IsAutoOnDemandReady(nodeID) {
+		return nil
+	}
+
+	s.applyMu.Lock()
+	if _, exists := s.applying[nodeID]; exists {
+		s.applyMu.Unlock()
+		return ErrConfigConvergenceInProgress
+	}
+	s.applying[nodeID] = struct{}{}
+	s.applyMu.Unlock()
+	return s.applyClaimedConfig(ctx, cloneNode(current))
 }
 
 func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node) error {
@@ -365,7 +502,13 @@ func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node
 		s.applyMu.Unlock()
 	}()
 	if err := s.probe.ApplyConfigForNode(ctx, current, s.tuning); err != nil {
-		return err
+		return redactNodeError(err, current)
+	}
+	// A successful set command is only an acknowledgement. Read the effective
+	// ZLM configuration before admitting this node again.
+	if _, err := s.probe.GetServerConfig(ctx, current); err != nil {
+		s.registry.SetAutoOnDemandReady(current.ID, false)
+		return fmt.Errorf("%w: %v", ErrExternalStateUncertain, redactNodeError(err, current))
 	}
 	latest, ok := s.registry.Get(current.ID)
 	if !ok {
@@ -382,13 +525,49 @@ func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node
 	return nil
 }
 
+// rollbackNodeLocked restores the persisted candidate and makes a best effort
+// to restore the external ZLM state. It is called while the node keyed lock is
+// held, so an older snapshot can never overwrite a newer update.
+func (s *NodeService) rollbackNodeLocked(ctx context.Context, old *node.Node) error {
+	s.registry.SetAutoOnDemandReady(old.ID, false)
+	var externalErr error
+	if err := s.probe.ApplyConfigForNode(ctx, old, s.tuning); err != nil {
+		externalErr = redactNodeError(err, old)
+	} else if _, err := s.probe.GetServerConfig(ctx, old); err != nil {
+		externalErr = fmt.Errorf("%w: %v", ErrExternalStateUncertain, redactNodeError(err, old))
+	}
+
+	localErr := s.registry.Update(ctx, *cloneNode(old))
+	if externalErr != nil || localErr != nil {
+		detail := ""
+		if externalErr != nil {
+			detail = " external=" + externalErr.Error()
+		}
+		if localErr != nil {
+			detail += " local=" + redactNodeError(localErr, old).Error()
+		}
+		// Keep admission closed even if persistence itself failed. The in-memory
+		// snapshot is not claimed to be authoritative in that uncertain case.
+		s.registry.SetAutoOnDemandReady(old.ID, false)
+		s.registry.SetAdmissionBlocked(old.ID, true)
+		return fmt.Errorf("%w:%s", ErrRollbackUncertain, detail)
+	}
+	return nil
+}
+
 // Delete 删除前必须 state=maintenance 且已排空流量:
 // 维护态允许旧流自然结束,但节点上仍有活跃会话/媒体源时删除会让
 // 注册表与监控中留下无法关联的媒体会话
 func (s *NodeService) Delete(ctx context.Context, id int64) error {
+	lock := s.nodeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 	cur, ok := s.registry.Get(id)
 	if !ok {
 		return ErrNodeNotFound
+	}
+	if s.nodeImpactProvider() != nil {
+		return ErrNodeImpactConfirmationRequired
 	}
 	if cur.State != node.StateMaintenance {
 		return ErrNodeNotInMaintenance
@@ -401,6 +580,12 @@ func (s *NodeService) Delete(ctx context.Context, id int64) error {
 
 // SetMaintenance 切到维护态
 func (s *NodeService) SetMaintenance(ctx context.Context, id int64) error {
+	if s.nodeImpactProvider() != nil {
+		if _, ok := s.registry.Get(id); !ok {
+			return ErrNodeNotFound
+		}
+		return ErrNodeImpactConfirmationRequired
+	}
 	return s.setState(ctx, id, node.StateMaintenance)
 }
 
@@ -410,6 +595,9 @@ func (s *NodeService) SetMaintenance(ctx context.Context, id int64) error {
 // 让真实心跳上报。否则刚 Activate 完 Watcher 下一个 Tick 看到旧的
 // LastHeartbeatAt 又把它标回 offline。
 func (s *NodeService) Activate(ctx context.Context, id int64) error {
+	lock := s.nodeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 	cur, ok := s.registry.Get(id)
 	if !ok {
 		return ErrNodeNotFound
@@ -425,6 +613,9 @@ func (s *NodeService) Activate(ctx context.Context, id int64) error {
 }
 
 func (s *NodeService) setState(ctx context.Context, id int64, state node.State) error {
+	lock := s.nodeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 	cur, ok := s.registry.Get(id)
 	if !ok {
 		return ErrNodeNotFound
@@ -438,21 +629,89 @@ func (s *NodeService) setState(ctx context.Context, id int64, state node.State) 
 // 用于"节点隔离前清场"或"应急断流",不改节点状态(状态切换由 SetMaintenance 单独负责)。
 // 节点不存在 → ErrNodeNotFound;ZLM 不可达 → 透传错误。
 func (s *NodeService) KickAllSessions(ctx context.Context, id int64) (int, error) {
+	lock := s.nodeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 	cur, ok := s.registry.Get(id)
 	if !ok {
 		return 0, ErrNodeNotFound
 	}
+	if s.nodeImpactProvider() != nil {
+		return 0, ErrNodeImpactConfirmationRequired
+	}
 	return s.probe.KickSessions(ctx, cur)
 }
 
-// Restart 重启 ZLM 服务
-//
-// graceMS:接口预留(当前 ZLM /restartServer 不支持 grace shutdown,立即重启);
-// 仍透传以便将来 ZLM 升级后直接接入。节点不存在 → ErrNodeNotFound。
-func (s *NodeService) Restart(ctx context.Context, id int64, graceMS int) error {
+// RestartAccepted starts a restart operation and returns only command
+// acceptance. ZLM code=0 is not treated as lifecycle completion.
+func (s *NodeService) RestartAccepted(ctx context.Context, id int64, graceMS int) (*RestartAcceptedResponse, error) {
+	lock := s.nodeLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 	cur, ok := s.registry.Get(id)
 	if !ok {
-		return ErrNodeNotFound
+		return nil, ErrNodeNotFound
 	}
-	return s.probe.RestartServer(ctx, cur, graceMS)
+	if s.restart == nil {
+		s.restart = NewRestartCoordinator(s.registry)
+		s.restart.SetConverger(s.ConvergeNodeConfig)
+	}
+	op, err := s.restart.Begin(id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.probe.RestartServer(ctx, cur, graceMS); err != nil {
+		s.restart.FailGeneration(id, op.Generation, redactNodeError(err, cur))
+		return nil, redactNodeError(err, cur)
+	}
+	s.restart.AdvanceToWaitingOffline(id, op.Generation)
+	return &RestartAcceptedResponse{
+		Accepted:    true,
+		OperationID: op.OperationID,
+		Status:      RestartStatusAccepted,
+	}, nil
+}
+
+// Restart preserves the legacy error-only API while the controller and new
+// callers use RestartAccepted for the operation response.
+func (s *NodeService) Restart(ctx context.Context, id int64, graceMS int) error {
+	_, err := s.RestartAccepted(ctx, id, graceMS)
+	return err
+}
+
+// RestartPending is the explicit admission query used by scheduler/T14. It
+// is intentionally not coupled to ordinary active/readiness semantics.
+func (s *NodeService) RestartPending(id int64) bool {
+	return s.restart != nil && s.restart.IsPending(id)
+}
+
+func (s *NodeService) RestartOperation(id int64) (RestartOperation, bool) {
+	if s.restart == nil {
+		return UnknownOperation(id), true
+	}
+	if operation, ok := s.restart.Get(id); ok {
+		return operation, true
+	}
+	return UnknownOperation(id), true
+}
+
+func (s *NodeService) RestartOperationByID(operationID string) (RestartOperation, bool) {
+	if s.restart == nil {
+		return RestartOperation{}, false
+	}
+	return s.restart.GetByID(operationID)
+}
+
+// RestartNotifier exposes the optional heartbeat event bridge for T14
+// bootstrap wiring without changing existing constructors.
+func (s *NodeService) RestartNotifier() RestartEventNotifier { return s.restart }
+
+// SetRestartCoordinator allows T14/bootstrap to provide a lifecycle policy
+// (for example a shorter test timeout) without changing old constructors.
+func (s *NodeService) SetRestartCoordinator(coordinator *RestartCoordinator) {
+	if coordinator == nil {
+		return
+	}
+	coordinator.SetConverger(s.ConvergeNodeConfig)
+	s.restart = coordinator
 }

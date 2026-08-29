@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +29,27 @@ type SchedulerLog struct {
 	DeviceID     string    `json:"deviceID"`
 	ChannelID    string    `json:"channelID"`
 	ErrorMessage string    `json:"errorMessage"` // 空表示成功,ErrNoActiveNode 等错误填这里
+}
+
+// SchedulerLogResult is a typed query result. Success is derived from an
+// empty ErrorMessage; it is not a separately persisted flag.
+type SchedulerLogResult string
+
+const (
+	SchedulerLogResultSuccess SchedulerLogResult = "success"
+	SchedulerLogResultError   SchedulerLogResult = "error"
+)
+
+// SchedulerLogFilter is the bounded, typed log query contract.
+type SchedulerLogFilter struct {
+	From      *time.Time
+	To        *time.Time
+	NodeID    *int64
+	Algorithm string
+	Policy    string // compatibility alias for Algorithm in log query clients
+	Result    SchedulerLogResult
+	StreamID  string
+	Limit     int
 }
 
 // SchedulerLogRepo 持久化抽象
@@ -201,6 +224,108 @@ func (s *LogService) PruneOlderThan(ctx context.Context, t time.Time) (int64, er
 // List 透传 repo.List(给 Controller 用)
 func (s *LogService) List(ctx context.Context, limit int) ([]SchedulerLog, error) {
 	return s.repo.List(ctx, limit)
+}
+
+// ListFiltered uses the repository's parameterized filter when available. The
+// fallback keeps old injected repositories source-compatible and applies the
+// same filter in memory with the hard limit still enforced.
+func (s *LogService) ListFiltered(ctx context.Context, filter SchedulerLogFilter) ([]SchedulerLog, error) {
+	filter = NormalizeSchedulerLogFilter(filter)
+	if repo, ok := s.repo.(SchedulerLogFilteredRepo); ok {
+		return repo.ListFiltered(ctx, filter)
+	}
+	rows, err := s.repo.List(ctx, 1000)
+	if err != nil {
+		return nil, err
+	}
+	// Older repositories only promise List and may return rows in insertion or
+	// arbitrary order. Sort before applying the requested limit so the fallback
+	// has the same newest-first semantics as the typed query path.
+	SortSchedulerLogsByTime(rows)
+	out := make([]SchedulerLog, 0, len(rows))
+	for _, row := range rows {
+		if !matchesSchedulerLogFilter(row, filter) {
+			continue
+		}
+		out = append(out, row)
+		if len(out) >= filter.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+// SchedulerLogFilteredRepo is optional to preserve the original three-method
+// repository interface used by older bootstrap adapters.
+type SchedulerLogFilteredRepo interface {
+	ListFiltered(ctx context.Context, filter SchedulerLogFilter) ([]SchedulerLog, error)
+}
+
+func matchesSchedulerLogFilter(row SchedulerLog, filter SchedulerLogFilter) bool {
+	if filter.From != nil && row.HappenedAt.Before(*filter.From) {
+		return false
+	}
+	if filter.To != nil && row.HappenedAt.After(*filter.To) {
+		return false
+	}
+	if filter.NodeID != nil && row.NodeID != *filter.NodeID {
+		return false
+	}
+	algorithm := filter.Algorithm
+	if algorithm == "" {
+		algorithm = filter.Policy
+	}
+	if algorithm != "" && row.Algorithm != algorithm {
+		return false
+	}
+	if filter.StreamID != "" && row.StreamID != filter.StreamID {
+		return false
+	}
+	switch filter.Result {
+	case "", SchedulerLogResultSuccess:
+		if filter.Result == SchedulerLogResultSuccess && row.ErrorMessage != "" {
+			return false
+		}
+	case SchedulerLogResultError:
+		if row.ErrorMessage == "" {
+			return false
+		}
+	default:
+		return false
+	}
+	return true
+}
+
+// NormalizeSchedulerLogFilter makes repository/controller integrations
+// deterministic without allowing arbitrary algorithms or unbounded limits.
+func NormalizeSchedulerLogFilter(filter SchedulerLogFilter) SchedulerLogFilter {
+	filter.Algorithm = strings.TrimSpace(filter.Algorithm)
+	filter.Policy = strings.TrimSpace(filter.Policy)
+	if filter.Algorithm == "" {
+		filter.Algorithm = filter.Policy
+	}
+	if filter.Policy == "" {
+		filter.Policy = filter.Algorithm
+	}
+	filter.StreamID = strings.TrimSpace(filter.StreamID)
+	if filter.Limit <= 0 {
+		filter.Limit = 100
+	}
+	if filter.Limit > 1000 {
+		filter.Limit = 1000
+	}
+	return filter
+}
+
+// SortSchedulerLogsByTime is a small deterministic helper for fallback repos
+// that do not promise ordering.
+func SortSchedulerLogsByTime(rows []SchedulerLog) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].HappenedAt.Equal(rows[j].HappenedAt) {
+			return rows[i].ID > rows[j].ID
+		}
+		return rows[i].HappenedAt.After(rows[j].HappenedAt)
+	})
 }
 
 // DropCount 返回当前累计丢弃数(给监控 / 测试用)

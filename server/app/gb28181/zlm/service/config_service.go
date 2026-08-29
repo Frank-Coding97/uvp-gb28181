@@ -5,11 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
+	"strings"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 var ErrManagedConfigKey = errors.New("platform-managed ZLM config key")
+
+var ErrReadOnlyConfig = errors.New("read-only ZLM config key")
+
+var ErrConfigReadbackMismatch = errors.New("config_readback_mismatch")
+
+var ErrConfigReadbackFailed = errors.New("config_readback_failed")
+
+var ErrConfigSetFailed = errors.New("config_set_failed")
 
 // ErrRestartRequiredUnsupported 平台尚未实现待重启配置的持久化与应用流程
 var ErrRestartRequiredUnsupported = errors.New("ZLM config requires restart, not supported yet")
@@ -35,13 +45,25 @@ var platformManagedConfigKeys = map[string]struct{}{
 
 // ConfigItem 单条 ZLM 配置元数据
 type ConfigItem struct {
-	Key             string `json:"key"`             // ZLM 配置 key,如 http.port
-	Value           string `json:"value"`           // 当前值(GetGrouped 时填)
-	Default         string `json:"default"`         // 默认值
-	HotReloadable   bool   `json:"hotReloadable"`   // 是否可在线热改
-	RestartRequired bool   `json:"restartRequired"` // 修改后是否要重启 ZLM
-	Comment         string `json:"comment"`         // 中文说明
+	Key             string     `json:"key"`             // ZLM 配置 key,如 http.port
+	Value           string     `json:"value"`           // 当前值(GetGrouped 时填)
+	Default         string     `json:"default"`         // 默认值
+	Mode            ConfigMode `json:"mode"`            // 权威配置变更模式
+	HotReloadable   bool       `json:"hotReloadable"`   // 是否可在线热改
+	RestartRequired bool       `json:"restartRequired"` // 修改后是否要重启 ZLM
+	Comment         string     `json:"comment"`         // 中文说明
 }
+
+// ConfigMode is the authoritative UI/service policy. The legacy boolean
+// fields remain for old clients and are derived-compatible with this mode.
+type ConfigMode string
+
+const (
+	ConfigModeReadOnly                   ConfigMode = "read_only"
+	ConfigModeHotReload                  ConfigMode = "hot_reload"
+	ConfigModePlatformManaged            ConfigMode = "platform_managed"
+	ConfigModeRestartRequiredUnsupported ConfigMode = "restart_required_unsupported"
+)
 
 // ConfigGroup 产品化分组
 type ConfigGroup struct {
@@ -143,6 +165,7 @@ var configCatalog = []ConfigGroup{
 	{
 		Name: "安全",
 		Items: []ConfigItem{
+			{Key: "api.version", Default: "", HotReloadable: false, RestartRequired: false, Comment: "ZLM 版本信息,只读"},
 			{Key: "api.secret", Default: "", HotReloadable: true, Comment: "API 鉴权 secret"},
 			{Key: "api.apiDebug", Default: "1", HotReloadable: true, Comment: "API 调试模式(生产应关)"},
 			{Key: "general.check_nvr_status", Default: "0", HotReloadable: true, Comment: "NVR 心跳检查"},
@@ -161,6 +184,29 @@ var catalogIndex = func() map[string]ConfigItem {
 	return m
 }()
 
+func configMode(item ConfigItem) ConfigMode {
+	// platformManaged is intentionally authoritative even for legacy catalog
+	// entries that still advertise hotReloadable=true to old clients.
+	if _, managed := platformManagedConfigKeys[item.Key]; managed {
+		return ConfigModePlatformManaged
+	}
+	if item.Mode != "" {
+		return item.Mode
+	}
+	switch {
+	case item.HotReloadable && !item.RestartRequired:
+		return ConfigModeHotReload
+	case !item.HotReloadable && item.RestartRequired:
+		return ConfigModeRestartRequiredUnsupported
+	case !item.HotReloadable && !item.RestartRequired:
+		return ConfigModeReadOnly
+	default:
+		// Mixed legacy booleans are not a valid public mode. Treating them as
+		// restart-required is fail-closed and avoids an accidental Set.
+		return ConfigModeRestartRequiredUnsupported
+	}
+}
+
 // UpdateConfigReq 更新请求
 type UpdateConfigReq struct {
 	Changes map[string]string `json:"changes" binding:"required"`
@@ -171,6 +217,32 @@ type UpdateConfigResp struct {
 	Applied         []string `json:"applied"`         // 已生效(热改成功)
 	RequiresRestart []string `json:"requiresRestart"` // 需要重启 ZLM 才生效
 	Unknown         []string `json:"unknown"`         // 未在 catalog 中的 key(原样下发)
+}
+
+// ConfigReadbackError contains only redacted actual values. It is returned
+// when ZLM accepted a hot-reload command but the effective state cannot be
+// proven by an immediate getServerConfig call.
+type ConfigReadbackError struct {
+	Code   error
+	Actual map[string]string
+	Cause  error
+}
+
+func (e *ConfigReadbackError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Cause != nil {
+		return fmt.Sprintf("%v: %v actual=%v", e.Code, e.Cause, e.Actual)
+	}
+	return fmt.Sprintf("%v actual=%v", e.Code, e.Actual)
+}
+
+func (e *ConfigReadbackError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Code
 }
 
 // TestConnectionResult 探测结果
@@ -205,12 +277,13 @@ func (s *ConfigService) GetGrouped(ctx context.Context, nodeID int64) ([]ConfigG
 	}
 	current, err := s.client.GetServerConfig(ctx, n)
 	if err != nil {
-		return nil, err
+		return nil, redactConfigError(err, n)
 	}
 	out := make([]ConfigGroup, 0, len(configCatalog))
 	for _, g := range configCatalog {
 		items := make([]ConfigItem, 0, len(g.Items))
 		for _, it := range g.Items {
+			it.Mode = configMode(it)
 			if v, ok := current[it.Key]; ok {
 				it.Value = visibleConfigValue(it.Key, v)
 			} else {
@@ -235,9 +308,19 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 		Unknown:         []string{},
 	}
 	hotParams := map[string]string{}
-	for k, v := range req.Changes {
+	keys := make([]string, 0, len(req.Changes))
+	for k := range req.Changes {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var managedKey, readOnlyKey, restartKey string
+	for _, k := range keys {
+		v := req.Changes[k]
 		if _, managed := platformManagedConfigKeys[k]; managed {
-			return nil, fmt.Errorf("%w: %s", ErrManagedConfigKey, k)
+			if managedKey == "" {
+				managedKey = k
+			}
+			continue
 		}
 		meta, known := catalogIndex[k]
 		if !known {
@@ -246,34 +329,116 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 			resp.Unknown = append(resp.Unknown, k)
 			continue
 		}
-		if meta.HotReloadable {
+		switch configMode(meta) {
+		case ConfigModeHotReload:
 			hotParams[k] = v
-			resp.Applied = append(resp.Applied, k)
-		} else {
+		case ConfigModeReadOnly:
+			if readOnlyKey == "" {
+				readOnlyKey = k
+			}
+		case ConfigModeRestartRequiredUnsupported:
 			// 平台尚未实现"重启后应用 desired state"的持久化流程,
 			// 接受这类配置会谎报成功(前端提示需重启,但重启后值并不存在)
-			return nil, fmt.Errorf("%w: %s", ErrRestartRequiredUnsupported, k)
+			if restartKey == "" {
+				restartKey = k
+			}
+		case ConfigModePlatformManaged:
+			if managedKey == "" {
+				managedKey = k
+			}
 		}
+	}
+	// Validate all keys before issuing any command. The order is part of the
+	// API contract and must not depend on map iteration or key spelling.
+	if managedKey != "" {
+		return nil, fmt.Errorf("%w: %s", ErrManagedConfigKey, managedKey)
+	}
+	if readOnlyKey != "" {
+		return nil, fmt.Errorf("%w: %s", ErrReadOnlyConfig, readOnlyKey)
+	}
+	if restartKey != "" {
+		return nil, fmt.Errorf("%w: %s", ErrRestartRequiredUnsupported, restartKey)
 	}
 	if len(hotParams) > 0 {
 		if err := s.client.SetServerConfig(ctx, n, hotParams); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %v", ErrConfigSetFailed, redactConfigError(err, n, hotParams))
 		}
+		actual, err := s.client.GetServerConfig(ctx, n)
+		if err != nil {
+			return nil, &ConfigReadbackError{
+				Code:   ErrConfigReadbackFailed,
+				Actual: visibleConfigValues(actual, hotParams),
+				Cause:  redactConfigError(err, n, hotParams),
+			}
+		}
+		actualVisible := visibleConfigValues(actual, hotParams)
+		mismatch := false
+		for key, expected := range hotParams {
+			if actual[key] != expected {
+				mismatch = true
+				break
+			}
+		}
+		if mismatch {
+			return nil, &ConfigReadbackError{
+				Code:   ErrConfigReadbackMismatch,
+				Actual: actualVisible,
+			}
+		}
+		for key := range hotParams {
+			resp.Applied = append(resp.Applied, key)
+		}
+		sort.Strings(resp.Applied)
 	}
 	return resp, nil
 }
+
+func visibleConfigValues(actual, keys map[string]string) map[string]string {
+	result := make(map[string]string, len(keys))
+	for key := range keys {
+		result[key] = visibleConfigValue(key, actual[key])
+	}
+	return result
+}
+
+func redactConfigError(err error, n *node.Node, values ...map[string]string) error {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	if n != nil && n.APISecret != "" {
+		message = strings.ReplaceAll(message, n.APISecret, "***")
+	}
+	for _, set := range values {
+		for _, value := range set {
+			if value != "" {
+				message = strings.ReplaceAll(message, value, "***")
+			}
+		}
+	}
+	return redactedConfigError{err: err, message: message}
+}
+
+type redactedConfigError struct {
+	err     error
+	message string
+}
+
+func (e redactedConfigError) Error() string { return e.message }
+func (e redactedConfigError) Unwrap() error { return e.err }
 
 func visibleConfigValue(key, value string) string {
 	if key == "api.secret" {
 		return ""
 	}
-	if (key != "hook.on_stream_not_found" && key != "hook.on_flow_report") || value == "" {
+	if !strings.HasPrefix(key, "hook.") || value == "" {
 		return value
 	}
 	parsed, err := url.Parse(value)
-	if err != nil {
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return ""
 	}
+	parsed.User = nil
 	parsed.RawQuery = ""
 	parsed.Fragment = ""
 	return parsed.String()
@@ -288,7 +453,7 @@ func (s *ConfigService) TestConnection(ctx context.Context, nodeID int64) (*Test
 	}
 	conf, err := s.client.GetServerConfig(ctx, n)
 	if err != nil {
-		return &TestConnectionResult{Online: false, Error: err.Error()}, nil
+		return &TestConnectionResult{Online: false, Error: redactConfigError(err, n).Error()}, nil
 	}
 	return &TestConnectionResult{Online: true, HTTPPort: conf["http.port"]}, nil
 }

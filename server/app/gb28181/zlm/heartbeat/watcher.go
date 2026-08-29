@@ -36,6 +36,14 @@ type Watcher struct {
 	clock            Clock
 	checkInterval    time.Duration
 	offlineThreshold time.Duration
+	notifier         NodeEventNotifier
+}
+
+// NodeEventNotifier is optional so existing Watcher construction remains
+// compatible. Restart coordination consumes only successful state changes.
+type NodeEventNotifier interface {
+	OnNodeOffline(nodeID int64)
+	OnNodeHeartbeat(nodeID int64)
 }
 
 // NewWatcher 构造。
@@ -50,6 +58,15 @@ func NewWatcher(reg *node.Registry, clock Clock, checkInterval, offlineThreshold
 		offlineThreshold: offlineThreshold,
 	}
 }
+
+// NewWatcherWithNotifier is the T13-compatible constructor for T14 wiring.
+func NewWatcherWithNotifier(reg *node.Registry, clock Clock, checkInterval, offlineThreshold time.Duration, notifier NodeEventNotifier) *Watcher {
+	w := NewWatcher(reg, clock, checkInterval, offlineThreshold)
+	w.notifier = notifier
+	return w
+}
+
+func (w *Watcher) SetNotifier(notifier NodeEventNotifier) { w.notifier = notifier }
 
 // Tick 一次扫描:遍历 active 节点,LastHeartbeatAt 超阈值 → MarkOffline。
 //
@@ -73,6 +90,9 @@ func (w *Watcher) Tick() {
 					zap.Error(err))
 			}
 			continue
+		}
+		if w.notifier != nil {
+			w.notifier.OnNodeOffline(n.ID)
 		}
 		if app.ZapLog != nil {
 			app.ZapLog.Info("GB28181 ZLM 节点已标记离线",

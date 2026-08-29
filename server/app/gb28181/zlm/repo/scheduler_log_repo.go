@@ -2,6 +2,7 @@ package repo
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -40,6 +41,20 @@ type SchedulerLogRow struct {
 	DeviceID     string
 	ChannelID    string
 	ErrorMessage string
+}
+
+// SchedulerLogFilter is the repository-side typed filter. All optional
+// predicates are represented as values/pointers and are bound as GORM
+// parameters; no query fragment is built from user input.
+type SchedulerLogFilter struct {
+	From      *time.Time
+	To        *time.Time
+	NodeID    *int64
+	Algorithm string
+	Policy    string // compatibility alias for Algorithm
+	Result    string // success = error_message empty; error = non-empty
+	StreamID  string
+	Limit     int
 }
 
 func (r SchedulerLogRow) toDTO() SchedulerLogDTO {
@@ -102,6 +117,53 @@ func (r *GormSchedulerLogRepo) List(ctx context.Context, limit int) ([]Scheduler
 		q = q.Limit(limit)
 	}
 	if err := q.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]SchedulerLogRow, 0, len(rows))
+	for _, d := range rows {
+		out = append(out, d.toRow())
+	}
+	return out, nil
+}
+
+// ListFiltered returns recent logs matching the typed predicates. limit is
+// bounded here as a second line of defence even when the caller is not an HTTP
+// controller.
+func (r *GormSchedulerLogRepo) ListFiltered(ctx context.Context, filter SchedulerLogFilter) ([]SchedulerLogRow, error) {
+	if filter.Limit <= 0 {
+		filter.Limit = 100
+	}
+	if filter.Limit > 1000 {
+		filter.Limit = 1000
+	}
+	q := r.db.WithContext(ctx).Order("happened_at DESC")
+	if filter.From != nil {
+		q = q.Where("happened_at >= ?", *filter.From)
+	}
+	if filter.To != nil {
+		q = q.Where("happened_at <= ?", *filter.To)
+	}
+	if filter.NodeID != nil {
+		q = q.Where("node_id = ?", *filter.NodeID)
+	}
+	algorithm := strings.TrimSpace(filter.Algorithm)
+	if algorithm == "" {
+		algorithm = strings.TrimSpace(filter.Policy)
+	}
+	if algorithm != "" {
+		q = q.Where("algorithm = ?", algorithm)
+	}
+	if filter.StreamID != "" {
+		q = q.Where("stream_id = ?", filter.StreamID)
+	}
+	switch filter.Result {
+	case "success":
+		q = q.Where("error_message = ?", "")
+	case "error":
+		q = q.Where("error_message <> ?", "")
+	}
+	var rows []SchedulerLogDTO
+	if err := q.Limit(filter.Limit).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	out := make([]SchedulerLogRow, 0, len(rows))

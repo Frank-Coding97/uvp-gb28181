@@ -80,7 +80,7 @@ func (m *Manager) Pick(ctx context.Context, inv InviteContext) (*node.Node, erro
 		return nil, ErrNoSchedulerSet
 	}
 	if inv.PreferredNodeID > 0 && m.factory != nil && m.factory.reg != nil {
-		if preferred, ok := m.factory.reg.Get(inv.PreferredNodeID); ok && preferred.IsActive() && !preferred.IsNearCapacity() {
+		if preferred, ok := m.factory.reg.Get(inv.PreferredNodeID); ok && preferred.IsActive() && !preferred.IsNearCapacity() && !m.factory.reg.IsAdmissionBlocked(preferred.ID) {
 			if log != nil {
 				log.Emit(SchedulerLog{HappenedAt: time.Now(), Algorithm: "preferred", NodeID: preferred.ID,
 					NodeName: preferred.Name, StreamID: inv.StreamID, DeviceID: inv.DeviceID, ChannelID: inv.ChannelID})

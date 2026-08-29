@@ -159,7 +159,7 @@ func TestNodeService_Create_ProbesZLM_ThenWritesUUID(t *testing.T) {
 	require.NotEmpty(t, n.MediaServerUUID)
 	require.Equal(t, "203.0.113.10", n.ReceiveHost)
 	require.Equal(t, "play.example.com", n.PlaybackHost)
-	require.Equal(t, []string{"GetServerConfig", "SetServerConfig"}, probe.calls)
+	require.Equal(t, []string{"GetServerConfig", "SetServerConfig", "GetServerConfig"}, probe.calls)
 	require.Equal(t, n.MediaServerUUID, probe.lastSetParams["general.mediaServerId"])
 	require.True(t, n.AutoOnDemandReady)
 }
@@ -181,7 +181,7 @@ func TestNodeService_ApplyActiveConfigsConvergesEveryActiveNode(t *testing.T) {
 	require.True(t, reg.IsAutoOnDemandReady(activeA.ID))
 	require.True(t, reg.IsAutoOnDemandReady(activeB.ID))
 	require.False(t, reg.IsAutoOnDemandReady(maintenance.ID))
-	require.Len(t, probe.calls, 2)
+	require.Len(t, probe.calls, 4)
 }
 
 func TestNodeService_ApplyActiveConfigsStartsNodesInParallel(t *testing.T) {
