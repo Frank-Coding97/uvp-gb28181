@@ -71,6 +71,9 @@ var platformController = gbcontrollers.NewPlatformController()
 var serviceConfigController = gbcontrollers.NewServiceConfigController()
 var securityController = gbcontrollers.NewSecurityController(nil)
 var cascadeManagementController *gbcascadecontroller.ManagementController
+var sourceLeaseMu sync.Mutex
+var cascadeSourceLeaseChecker gbhandler.SourceLeaseChecker
+var recordingPlanSourceLeaseChecker gbhandler.SourceLeaseChecker
 
 var setupController *gbcontrollers.SetupController
 
@@ -307,7 +310,25 @@ func SetKeepaliveCollector(c gbhandler.KeepaliveCollector) {
 // reports no browser readers; the existing none-reader policy remains the
 // final browser/reconciler cleanup authority.
 func SetCascadeSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
-	hookController.SetSourceLeaseChecker(checker)
+	sourceLeaseMu.Lock()
+	cascadeSourceLeaseChecker = checker
+	applySourceLeaseCheckers()
+	sourceLeaseMu.Unlock()
+}
+
+// SetRecordingPlanSourceLeaseChecker composes scheduled recording ownership
+// with cascade ownership instead of letting the last configured consumer win.
+func SetRecordingPlanSourceLeaseChecker(checker gbhandler.SourceLeaseChecker) {
+	sourceLeaseMu.Lock()
+	recordingPlanSourceLeaseChecker = checker
+	applySourceLeaseCheckers()
+	sourceLeaseMu.Unlock()
+}
+
+func applySourceLeaseCheckers() {
+	hookController.SetSourceLeaseChecker(gbhandler.CombinedSourceLeaseChecker{
+		cascadeSourceLeaseChecker, recordingPlanSourceLeaseChecker,
+	})
 }
 
 // SetDeviceMgmtCatalogTrigger 由 bootstrap 在 SIP UAC 就绪后注入

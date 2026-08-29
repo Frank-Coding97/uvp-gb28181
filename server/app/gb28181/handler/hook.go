@@ -53,6 +53,17 @@ type SourceLeaseChecker interface {
 	HasLease(streamID string) bool
 }
 
+type CombinedSourceLeaseChecker []SourceLeaseChecker
+
+func (checkers CombinedSourceLeaseChecker) HasLease(streamID string) bool {
+	for _, checker := range checkers {
+		if checker != nil && checker.HasLease(streamID) {
+			return true
+		}
+	}
+	return false
+}
+
 // KeepaliveCollector 由 heartbeat.Collector 实现:接收 ZLM on_server_keepalive 上报
 // 接口化避免 handler 包反向依赖 heartbeat 包
 type KeepaliveCollector interface {
