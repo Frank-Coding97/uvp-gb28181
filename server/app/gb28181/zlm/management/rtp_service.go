@@ -91,6 +91,10 @@ type RTPServerCloseResult struct {
 	Released bool
 }
 
+func rtpReleaseConfirmed(result *RTPServerCloseResult) bool {
+	return result != nil && (result.Hit || result.Released)
+}
+
 // RTPServerCloseView preserves idempotence for an already released port.
 type RTPServerCloseView struct {
 	NodeID          int64  `json:"nodeId"`
@@ -248,6 +252,9 @@ func (s *RTPService) compensateCreate(ctx context.Context, nodeID int64, request
 	}
 	if result == nil {
 		return errors.New("RTP rollback returned no result")
+	}
+	if !rtpReleaseConfirmed(result) {
+		return errors.New("RTP rollback release could not be confirmed")
 	}
 	return nil
 }
@@ -425,6 +432,9 @@ func (s *RTPService) closeWithPreflight(ctx context.Context, request RTPServerCl
 		}
 		if closed == nil {
 			return NewInternalError(nodeIDString(request.NodeID), "RTP close returned no result")
+		}
+		if !rtpReleaseConfirmed(closed) {
+			return NewInternalError(nodeIDString(request.NodeID), "RTP release could not be confirmed; ledger tombstone was not written")
 		}
 		identity := rtpLedgerIdentity(request.NodeID, request.App, request.Stream)
 		_, tombstoneErr := s.ledger.Tombstone(operationCtx, identity, s.clock())

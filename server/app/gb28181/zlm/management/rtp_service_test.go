@@ -97,6 +97,25 @@ func TestRTPServiceRegistrationFailureCompensatesTypedResource(t *testing.T) {
 	require.Contains(t, err.Error(), "rollback")
 }
 
+func TestRTPServiceRegistrationFailureWithUnconfirmedRollbackIsOrphanUncertain(t *testing.T) {
+	client := &t11RTPClient{
+		openResult:  &RTPServerOpenResult{Key: "stream-rollback-uncertain", Port: 41000},
+		closeResult: &RTPServerCloseResult{Stream: "stream-rollback-uncertain"},
+	}
+	ledger := &t11RTPLedger{registerErr: errors.New("ledger unavailable")}
+	service := NewRTPService(RTPDependencies{Client: client, Ledger: ledger})
+	request := RTPServerCreateRequest{VHost: "__defaultVhost__", App: "rtp", Stream: "stream-rollback-uncertain", Port: 0}
+
+	_, err := service.Create(context.Background(), 7, 42, request)
+	require.Error(t, err)
+	require.Equal(t, CodeInternal, mustT11ManagementError(t, err).Code)
+	require.Contains(t, err.Error(), "orphan")
+	require.Contains(t, err.Error(), "rollback")
+	require.Equal(t, 1, client.closeCalls)
+	require.Equal(t, 1, ledger.registerCalls)
+	require.Nil(t, ledger.rows)
+}
+
 func TestRTPServiceListPageIsBounded(t *testing.T) {
 	list := make([]zlm.RtpServerInfo, MaxResponseItems+17)
 	for i := range list {
@@ -208,6 +227,48 @@ func TestRTPServiceCloseFailureOrChangedFingerprintDoesNotTombstone(t *testing.T
 	require.Equal(t, CodeOwnershipConflict, mustT11ManagementError(t, err).Code)
 	require.Equal(t, 1, client.closeCalls, "changed ownership must not reach ZLM")
 	require.Nil(t, ledger.rows[key].TombstonedAt)
+}
+
+func TestRTPServiceUnconfirmedCloseDoesNotTombstone(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		name := "ordinary"
+		if force {
+			name = "force"
+		}
+		t.Run(name, func(t *testing.T) {
+			stream := "stream-release-uncertain-" + name
+			key := rtpLedgerKey(7, stream)
+			ledger := &t11RTPLedger{rows: map[string]*gbmodels.GbZLMManagedResource{
+				key: {NodeID: 7, ResourceType: ResourceTypeRTPServer, ResourceKey: stream, App: "rtp", Stream: stream},
+			}}
+			client := &t11RTPClient{
+				list:        []zlm.RtpServerInfo{{Key: stream, VHost: "__defaultVhost__", App: "rtp", StreamID: stream, Port: 41000}},
+				closeResult: &RTPServerCloseResult{Stream: stream},
+			}
+			presence := &t11MutablePresence{present: true}
+			resolver := NewOwnershipResolver(OwnershipDependencies{
+				Presence: presence,
+				Sources:  []OwnershipSource{t11ManagedSource{resourceType: ResourceTypeRTPServer, key: stream}},
+			})
+			service := NewRTPService(RTPDependencies{Client: client, Ledger: ledger, Ownership: resolver})
+
+			var err error
+			if force {
+				_, err = service.ForceClose(context.Background(), RTPServerForceCloseRequest{
+					NodeID: 7, VHost: "__defaultVhost__", App: "rtp", Stream: stream, Reason: "incident-release-uncertain",
+				})
+			} else {
+				_, err = service.Close(context.Background(), RTPServerCloseRequest{
+					NodeID: 7, VHost: "__defaultVhost__", App: "rtp", Stream: stream,
+				})
+			}
+			require.Error(t, err)
+			require.Equal(t, CodeInternal, mustT11ManagementError(t, err).Code)
+			require.Contains(t, err.Error(), "release")
+			require.Equal(t, 1, client.closeCalls)
+			require.Nil(t, ledger.rows[key].TombstonedAt)
+		})
+	}
 }
 
 func TestRTPServiceUnsupportedListIs422AndNeverEmptySuccess(t *testing.T) {
