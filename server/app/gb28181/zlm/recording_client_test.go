@@ -39,6 +39,58 @@ func TestStartRecordSendsMP4Parameters(t *testing.T) {
 	}
 }
 
+func TestClientRecorderSupportsHLSAndMP4(t *testing.T) {
+	seenTypes := map[string][]string{}
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		if query.Get("vhost") != "__defaultVhost__" || query.Get("app") != "rtp" || query.Get("stream") != "stream-1" {
+			t.Fatalf("unexpected media tuple: %v", query)
+		}
+		switch r.URL.Path {
+		case "/index/api/startRecord":
+			if query.Get("type") != "0" && query.Get("type") != "1" {
+				t.Fatalf("unexpected recorder type=%q", query.Get("type"))
+			}
+			seenTypes[r.URL.Path] = append(seenTypes[r.URL.Path], query.Get("type"))
+			_, _ = w.Write([]byte(`{"code":0,"result":true}`))
+		case "/index/api/stopRecord":
+			seenTypes[r.URL.Path] = append(seenTypes[r.URL.Path], query.Get("type"))
+			_, _ = w.Write([]byte(`{"code":0,"result":true}`))
+		case "/index/api/isRecording":
+			seenTypes[r.URL.Path] = append(seenTypes[r.URL.Path], query.Get("type"))
+			_, _ = w.Write([]byte(`{"code":0,"status":true}`))
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	})
+	defer server.Close()
+
+	for _, recorderType := range []RecorderType{RecorderHLS, RecorderMP4} {
+		if err := client.StartRecordWithType(context.Background(), "__defaultVhost__", "rtp", "stream-1", recorderType, 0); err != nil {
+			t.Fatalf("StartRecordWithType(%d): %v", recorderType, err)
+		}
+		if err := client.StopRecordWithType(context.Background(), "__defaultVhost__", "rtp", "stream-1", recorderType); err != nil {
+			t.Fatalf("StopRecordWithType(%d): %v", recorderType, err)
+		}
+		got, err := client.IsRecordingWithType(context.Background(), "__defaultVhost__", "rtp", "stream-1", recorderType)
+		if err != nil || !got {
+			t.Fatalf("IsRecordingWithType(%d)=%v err=%v", recorderType, got, err)
+		}
+	}
+	for path, got := range seenTypes {
+		if strings.Join(got, ",") != "0,1" {
+			t.Fatalf("%s types=%v, want [0 1]", path, got)
+		}
+	}
+}
+
+func TestClientRecorderRejectsUnknownType(t *testing.T) {
+	client := &Client{}
+	if err := client.StartRecordWithType(context.Background(), "v", "a", "s", RecorderType(99), 0); err == nil {
+		t.Fatal("unknown recorder type must be rejected")
+	}
+}
+
 func TestIsRecordingAndMissingStream(t *testing.T) {
 	t.Run("recording", func(t *testing.T) {
 		client, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {

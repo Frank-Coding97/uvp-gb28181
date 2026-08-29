@@ -11,10 +11,30 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 )
+
+// RecorderType matches ZLMediaKit's recorder enum: HLS is 0 and MP4 is 1.
+// The legacy StartRecord/StopRecord/IsRecording methods remain MP4-only
+// wrappers for existing GB28181 recording callers.
+type RecorderType int
+
+const (
+	RecorderHLS RecorderType = iota
+	RecorderMP4
+)
+
+// RecorderTypeHLS and RecorderTypeMP4 are explicit aliases for callers that
+// prefer the enum-style names in API contracts.
+const (
+	RecorderTypeHLS = RecorderHLS
+	RecorderTypeMP4 = RecorderMP4
+)
+
+var ErrRecorderTypeInvalid = errors.New("zlm recorder type invalid")
 
 var (
 	ErrRecordingNotFound          = errors.New("zlm recording not found")
@@ -70,6 +90,106 @@ func (c *Client) recordingDownloadHTTPClient() *http.Client {
 		return c.downloadHTTP
 	}
 	return defaultRecordingDownloadHTTPClient
+}
+
+func (t RecorderType) valid() bool {
+	return t == RecorderHLS || t == RecorderMP4
+}
+
+func typedRecordingParams(vhost, appName, stream string, recorderType RecorderType) map[string]string {
+	return map[string]string{
+		"type":   strconv.Itoa(int(recorderType)),
+		"vhost":  vhost,
+		"app":    appName,
+		"stream": stream,
+	}
+}
+
+func validateTypedRecordingRequest(vhost, appName, stream string, recorderType RecorderType) error {
+	if !recorderType.valid() {
+		return fmt.Errorf("%w: %d", ErrRecorderTypeInvalid, recorderType)
+	}
+	if strings.TrimSpace(vhost) == "" || strings.TrimSpace(appName) == "" || strings.TrimSpace(stream) == "" {
+		return fmt.Errorf("%w: vhost、app、stream 不能为空", ErrRecordingPathInvalid)
+	}
+	return nil
+}
+
+// StartRecordWithType starts either HLS or MP4 recording for an existing ZLM
+// media source. maxSecond=0 delegates the slice duration to ZLM config.
+func (c *Client) StartRecordWithType(ctx context.Context, vhost, appName, stream string, recorderType RecorderType, maxSecond int) error {
+	if err := validateTypedRecordingRequest(vhost, appName, stream, recorderType); err != nil {
+		return err
+	}
+	if maxSecond < 0 {
+		return fmt.Errorf("%w: max_second 不能为负数", ErrRecordingPathInvalid)
+	}
+	var response struct {
+		baseResp
+		Result bool `json:"result"`
+	}
+	params := typedRecordingParams(vhost, appName, stream, recorderType)
+	params["max_second"] = strconv.Itoa(maxSecond)
+	if err := c.call(ctx, "startRecord", params, &response); err != nil {
+		return err
+	}
+	if response.Code != 0 || !response.Result {
+		return fmt.Errorf("startRecord type=%d code=%d msg=%s", recorderType, response.Code, response.Msg)
+	}
+	return nil
+}
+
+// StopRecordWithType stops either HLS or MP4 recording. Missing streams are
+// treated as already stopped, matching the legacy MP4 wrapper.
+func (c *Client) StopRecordWithType(ctx context.Context, vhost, appName, stream string, recorderType RecorderType) error {
+	if err := validateTypedRecordingRequest(vhost, appName, stream, recorderType); err != nil {
+		return err
+	}
+	var response struct {
+		baseResp
+		Result bool `json:"result"`
+	}
+	if err := c.call(ctx, "stopRecord", typedRecordingParams(vhost, appName, stream, recorderType), &response); err != nil {
+		return err
+	}
+	if response.Code == -500 {
+		return nil
+	}
+	if response.Code != 0 || !response.Result {
+		return fmt.Errorf("stopRecord type=%d code=%d msg=%s", recorderType, response.Code, response.Msg)
+	}
+	return nil
+}
+
+// IsRecordingWithType reports the actual ZLM recorder state for either HLS or
+// MP4. Missing streams are reported as false without an error.
+func (c *Client) IsRecordingWithType(ctx context.Context, vhost, appName, stream string, recorderType RecorderType) (bool, error) {
+	if err := validateTypedRecordingRequest(vhost, appName, stream, recorderType); err != nil {
+		return false, err
+	}
+	var response struct {
+		baseResp
+		Status bool `json:"status"`
+	}
+	if err := c.call(ctx, "isRecording", typedRecordingParams(vhost, appName, stream, recorderType), &response); err != nil {
+		return false, err
+	}
+	if response.Code == -500 {
+		return false, nil
+	}
+	if response.Code != 0 {
+		return false, fmt.Errorf("isRecording type=%d code=%d msg=%s", recorderType, response.Code, response.Msg)
+	}
+	return response.Status, nil
+}
+
+// StartRecorder/StopRecorder are descriptive aliases for the typed methods.
+func (c *Client) StartRecorder(ctx context.Context, vhost, appName, stream string, recorderType RecorderType, maxSecond int) error {
+	return c.StartRecordWithType(ctx, vhost, appName, stream, recorderType, maxSecond)
+}
+
+func (c *Client) StopRecorder(ctx context.Context, vhost, appName, stream string, recorderType RecorderType) error {
+	return c.StopRecordWithType(ctx, vhost, appName, stream, recorderType)
 }
 
 // GetMP4RecordFiles lists MP4 files for one known ZLM media tuple and date.
