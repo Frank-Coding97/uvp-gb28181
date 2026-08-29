@@ -17,7 +17,7 @@ func TestZLMNodeControllerT13_ImpactPreflightAndFingerprintRace(t *testing.T) {
 	})
 	id := int64(resp["data"].(map[string]any)["id"].(float64))
 
-	impact := service.NodeImpact{Streams: 2, Recordings: 1, Sessions: 3}
+	impact := service.NodeImpact{Streams: 2, Recordings: 1, Sessions: 3, EvidenceFingerprint: "sha256-controller-a"}
 	svc.SetNodeImpactProbe(func(context.Context, *node.Node) (service.NodeImpact, error) {
 		return impact, nil
 	})
@@ -31,7 +31,7 @@ func TestZLMNodeControllerT13_ImpactPreflightAndFingerprintRace(t *testing.T) {
 
 	// The provider changes after confirmation was displayed. The request body
 	// is ignored; only the explicit query/header fingerprint can authorize it.
-	impact = service.NodeImpact{Streams: 3, Recordings: 1, Sessions: 3}
+	impact = service.NodeImpact{Streams: 3, Recordings: 1, Sessions: 3, EvidenceFingerprint: "sha256-controller-b"}
 	failedResponse, failedBody := do(t, r, "DELETE", idPath+"?fingerprint="+fingerprint, nil)
 	require.Equal(t, float64(1), failedBody["code"])
 	require.Contains(t, []int{200, 409}, failedResponse.Code, "the shared response handler may encode business failures as 200")

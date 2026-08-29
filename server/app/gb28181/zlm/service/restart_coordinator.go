@@ -51,6 +51,13 @@ type RestartEventNotifier interface {
 	OnNodeHeartbeat(nodeID int64)
 }
 
+// RestartStartedNotifier is an optional narrow bridge for a process-started
+// Hook. It deliberately stays separate from RestartEventNotifier so existing
+// watcher/collector notifiers remain source-compatible.
+type RestartStartedNotifier interface {
+	OnNodeStarted(nodeID int64)
+}
+
 // RestartCoordinator owns restart state independently of node.State. A node
 // is never put into maintenance merely to wait for a callback; admission is
 // blocked by the explicit Registry gate until the operation reaches ready or
@@ -168,6 +175,23 @@ func (c *RestartCoordinator) OnNodeOffline(nodeID int64) {
 }
 
 func (c *RestartCoordinator) MarkOffline(nodeID int64) { c.OnNodeOffline(nodeID) }
+
+// OnNodeStarted is called by an optional on_server_started Hook. A started
+// event is stronger than the bounded offline watcher for fast restarts, but it
+// still waits for the first heartbeat before verified convergence begins.
+func (c *RestartCoordinator) OnNodeStarted(nodeID int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	op := c.operations[nodeID]
+	if op == nil || !isRestartPending(op.Status) {
+		return
+	}
+	if op.Status == RestartStatusAccepted || op.Status == RestartStatusWaitingOffline {
+		c.setStatusLocked(op, RestartStatusWaitingHeartbeat, "")
+	}
+}
+
+func (c *RestartCoordinator) MarkStarted(nodeID int64) { c.OnNodeStarted(nodeID) }
 
 // OnNodeHeartbeat is called after an offline node is promoted by a received
 // keepalive. Convergence runs asynchronously so the Hook response remains

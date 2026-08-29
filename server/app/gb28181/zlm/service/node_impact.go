@@ -28,6 +28,9 @@ const (
 	// MaxNodeImpactItems bounds data supplied by an optional runtime/business
 	// reader before it crosses the service/controller boundary.
 	MaxNodeImpactItems = 1000
+	// MaxNodeImpactEvidenceFingerprintLength keeps an opaque provider revision
+	// bounded while allowing either a SHA-256 digest or a short revision token.
+	MaxNodeImpactEvidenceFingerprintLength = 128
 )
 
 var (
@@ -52,10 +55,11 @@ var (
 // supplies the authoritative counts for streams, recordings and sessions;
 // Registry Stats remain the legacy fallback when no provider is installed.
 type NodeImpact struct {
-	Streams    int  `json:"streams"`
-	Recordings int  `json:"recordings"`
-	Sessions   int  `json:"sessions"`
-	Truncated  bool `json:"truncated"`
+	Streams             int    `json:"streams"`
+	Recordings          int    `json:"recordings"`
+	Sessions            int    `json:"sessions"`
+	Truncated           bool   `json:"truncated"`
+	EvidenceFingerprint string `json:"-"`
 }
 
 // NodeImpactPreflight is the value returned before a high-risk action. It is
@@ -180,6 +184,9 @@ func normalizeNodeImpact(impact NodeImpact) (NodeImpact, error) {
 	if impact.Streams < 0 || impact.Recordings < 0 || impact.Sessions < 0 {
 		return NodeImpact{}, ErrNodeImpactInvalid
 	}
+	if !validNodeImpactEvidenceFingerprint(impact.EvidenceFingerprint) {
+		return NodeImpact{}, ErrNodeImpactInvalid
+	}
 	if impact.Streams > MaxNodeImpactItems {
 		impact.Streams = MaxNodeImpactItems
 		impact.Truncated = true
@@ -193,6 +200,20 @@ func normalizeNodeImpact(impact NodeImpact) (NodeImpact, error) {
 		impact.Truncated = true
 	}
 	return impact, nil
+}
+
+func validNodeImpactEvidenceFingerprint(value string) bool {
+	if value == "" || len(value) > MaxNodeImpactEvidenceFingerprintLength || strings.TrimSpace(value) != value {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' || char == ':' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func impactHasResources(impact NodeImpact) bool {
@@ -214,7 +235,7 @@ func fingerprintNodeImpact(n *node.Node, action NodeImpactAction, impact NodeImp
 		strconv.Itoa(n.RTPPortStart), strconv.Itoa(n.RTPPortEnd),
 		n.UpdatedAt.UTC().Format(time.RFC3339Nano), hex.EncodeToString(secretHash[:]),
 		strconv.Itoa(impact.Streams), strconv.Itoa(impact.Recordings),
-		strconv.Itoa(impact.Sessions), strconv.FormatBool(impact.Truncated),
+		strconv.Itoa(impact.Sessions), strconv.FormatBool(impact.Truncated), impact.EvidenceFingerprint,
 	}
 	hash := sha256.New()
 	for _, value := range values {

@@ -60,6 +60,23 @@ func TestRestartT13_OnlyCommandAcceptanceThenHeartbeatLifecycle(t *testing.T) {
 	require.True(t, reg.IsAutoOnDemandReady(n.ID))
 }
 
+func TestRestartT13_NodeStartedAdvancesWaitingOffline(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	n := t13Node(t, reg)
+	c := service.NewRestartCoordinator(reg, time.Second)
+
+	accepted, err := c.Begin(n.ID)
+	require.NoError(t, err)
+	require.True(t, c.AdvanceToWaitingOffline(n.ID, accepted.Generation))
+	c.OnNodeStarted(n.ID)
+
+	operation, ok := c.Get(n.ID)
+	require.True(t, ok)
+	require.Equal(t, service.RestartStatusWaitingHeartbeat, operation.Status)
+	c.FailGeneration(n.ID, accepted.Generation, errors.New("test cleanup"))
+}
+
 func TestRestartT13_CommandFailureIsFailedAndNotPending(t *testing.T) {
 	repo := newT13Repo()
 	reg := node.NewRegistry(repo)

@@ -385,6 +385,19 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 	}
 	if candidate.IsActive() {
 		if err := s.convergeNodeLocked(ctx, id); err != nil {
+			if connectionChanged {
+				// The candidate endpoint may have accepted SetConfig before a
+				// readback/convergence failure. The old endpoint cannot prove an
+				// atomic compensation, so restore only the local snapshot and
+				// keep this node out of admission with a stable uncertainty error.
+				localErr := s.registry.Update(ctx, *cloneNode(old))
+				s.registry.SetAutoOnDemandReady(old.ID, false)
+				s.registry.SetAdmissionBlocked(old.ID, true)
+				if localErr != nil {
+					return nil, fmt.Errorf("%w: local snapshot restore failed", ErrRollbackUncertain)
+				}
+				return nil, fmt.Errorf("%w: candidate external state uncertain", ErrRollbackUncertain)
+			}
 			rollbackErr := s.rollbackNodeLocked(ctx, old)
 			if rollbackErr != nil {
 				return nil, rollbackErr

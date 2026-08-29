@@ -199,8 +199,8 @@ func TestNodeServiceT13_ConvergeFailureRollsBackOldSnapshot(t *testing.T) {
 	old := t13Node(t, reg)
 	probe := &t13Probe{applyErrs: []error{errors.New("set failed"), nil}}
 	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
-	host := "new.example"
-	_, err := svc.Update(context.Background(), old.ID, service.UpdateNodeReq{Host: &host})
+	weight := old.Weight + 1
+	_, err := svc.Update(context.Background(), old.ID, service.UpdateNodeReq{Weight: &weight})
 	require.Error(t, err)
 	require.NotErrorIs(t, err, service.ErrRollbackUncertain)
 	got, ok := reg.Get(old.ID)
@@ -222,6 +222,47 @@ func TestNodeServiceT13_RollbackFailureClosesAdmission(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrRollbackUncertain)
 	require.False(t, reg.IsAutoOnDemandReady(old.ID))
 	require.True(t, reg.IsAdmissionBlocked(old.ID))
+}
+
+func TestNodeServiceT13_ConnectionChangeFailureIsRollbackUncertain(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	old := t13Node(t, reg)
+	probe := &t13Probe{applyErrs: []error{errors.New("candidate set may have applied")}}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+	host := "new.example"
+	_, err := svc.Update(context.Background(), old.ID, service.UpdateNodeReq{Host: &host})
+
+	require.ErrorIs(t, err, service.ErrRollbackUncertain)
+	got, ok := reg.Get(old.ID)
+	require.True(t, ok)
+	require.Equal(t, old.Host, got.Host, "local snapshot may be restored, but must be gated")
+	require.False(t, reg.IsAutoOnDemandReady(old.ID))
+	require.True(t, reg.IsAdmissionBlocked(old.ID))
+	probe.mu.Lock()
+	require.Len(t, probe.applyNodes, 1, "connection changes must not claim old-endpoint external rollback")
+	require.Equal(t, host, probe.applyNodes[0].Host)
+	probe.mu.Unlock()
+}
+
+func TestNodeServiceT13_ConnectionChangeReadbackFailureIsUncertain(t *testing.T) {
+	repo := newT13Repo()
+	reg := node.NewRegistry(repo)
+	old := t13Node(t, reg)
+	probe := &t13Probe{
+		getErrs:   []error{nil, errors.New("candidate readback uncertain")},
+		applyErrs: []error{nil},
+	}
+	svc := service.NewNodeService(reg, probe, service.MediaTuning{})
+	host := "new.example"
+	_, err := svc.Update(context.Background(), old.ID, service.UpdateNodeReq{Host: &host})
+
+	require.ErrorIs(t, err, service.ErrRollbackUncertain)
+	require.True(t, reg.IsAdmissionBlocked(old.ID))
+	probe.mu.Lock()
+	require.Len(t, probe.applyNodes, 1, "uncertain candidate endpoint must not receive an old-endpoint rollback")
+	require.Equal(t, host, probe.applyNodes[0].Host)
+	probe.mu.Unlock()
 }
 
 func TestNodeServiceT13_NodeLockSerializesUpdateAndState(t *testing.T) {
