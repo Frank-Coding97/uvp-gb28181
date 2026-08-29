@@ -1632,6 +1632,34 @@ VALUES
 SELECT setval('sys_api_id_seq',253,true);
 SELECT setval('sys_casbin_rule_id_seq',7597,true);
 
+-- ZLM media-node registry and durable endpoint-recovery gate.
+DROP TABLE IF EXISTS meta_node;
+CREATE TABLE meta_node (
+    id BIGSERIAL,
+    revision BIGINT NOT NULL DEFAULT 1,
+    name VARCHAR(64) NOT NULL DEFAULT '',
+    host VARCHAR(64) NOT NULL DEFAULT '',
+    receive_host VARCHAR(255) NOT NULL DEFAULT '',
+    playback_host VARCHAR(255) NOT NULL DEFAULT '',
+    api_port INTEGER NOT NULL DEFAULT 18080,
+    api_secret VARCHAR(128) NOT NULL DEFAULT '',
+    media_server_uuid VARCHAR(64) NOT NULL DEFAULT '',
+    weight INTEGER NOT NULL DEFAULT 50,
+    tags_json TEXT,
+    state VARCHAR(16) NOT NULL DEFAULT 'active',
+    recovery_required BOOLEAN NOT NULL DEFAULT FALSE,
+    recovery_reason VARCHAR(255) NOT NULL DEFAULT '',
+    recovery_fingerprint CHAR(64) NOT NULL DEFAULT '',
+    rtp_port_start INTEGER NOT NULL DEFAULT 30000,
+    rtp_port_end INTEGER NOT NULL DEFAULT 35000,
+    created_at TIMESTAMP,
+    updated_at TIMESTAMP,
+    PRIMARY KEY (id),
+    CONSTRAINT uk_media_server_uuid UNIQUE (media_server_uuid)
+);
+CREATE INDEX idx_state ON meta_node (state);
+CREATE INDEX idx_recovery_required ON meta_node (recovery_required);
+
 -- GB28181 device registry and dual-version profile archive.
 DROP TABLE IF EXISTS gb_device;
 CREATE TABLE gb_device (

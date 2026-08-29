@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
@@ -39,6 +41,12 @@ var ErrRollbackUncertain = errors.New("rollback_uncertain")
 // its offline/heartbeat/reconciliation lifecycle to finish.
 var ErrRestartPending = errors.New("restart already pending")
 
+const (
+	maxNodeRecoveryReason   = 255
+	endpointRecoveryPending = "endpoint convergence pending"
+	endpointRecoveryFailed  = "endpoint convergence failed"
+)
+
 // ZLMProbe 节点连通性探测 + 配置下发抽象
 // 由 zlm.Client 实现(适配器在 bootstrap 注入),测试用 mock。
 type ZLMProbe interface {
@@ -63,23 +71,27 @@ type MediaTuning struct {
 
 // NodeDTO 对外暴露的节点视图(剥掉 secret)
 type NodeDTO struct {
-	ID                int64             `json:"id"`
-	Name              string            `json:"name"`
-	Host              string            `json:"host"`
-	ReceiveHost       string            `json:"receiveHost"`
-	PlaybackHost      string            `json:"playbackHost"`
-	APIPort           int               `json:"apiPort"`
-	MediaServerUUID   string            `json:"mediaServerUUID"`
-	Weight            int               `json:"weight"`
-	Tags              map[string]string `json:"tags,omitempty"`
-	State             node.State        `json:"state"`
-	RTPPortStart      int               `json:"rtpPortStart"`
-	RTPPortEnd        int               `json:"rtpPortEnd"`
-	Stats             node.Stats        `json:"stats"`
-	NearCapacity      bool              `json:"nearCapacity"` // T3.4: port_usage>=80% 或 cpu>=80%,UI 黄色高亮
-	AutoOnDemandReady bool              `json:"autoOnDemandReady"`
-	CreatedAt         time.Time         `json:"createdAt"`
-	UpdatedAt         time.Time         `json:"updatedAt"`
+	ID                  int64             `json:"id"`
+	Revision            uint64            `json:"revision"`
+	Name                string            `json:"name"`
+	Host                string            `json:"host"`
+	ReceiveHost         string            `json:"receiveHost"`
+	PlaybackHost        string            `json:"playbackHost"`
+	APIPort             int               `json:"apiPort"`
+	MediaServerUUID     string            `json:"mediaServerUUID"`
+	Weight              int               `json:"weight"`
+	Tags                map[string]string `json:"tags,omitempty"`
+	State               node.State        `json:"state"`
+	RecoveryRequired    bool              `json:"recoveryRequired"`
+	RecoveryReason      string            `json:"recoveryReason,omitempty"`
+	RecoveryFingerprint string            `json:"recoveryFingerprint,omitempty"`
+	RTPPortStart        int               `json:"rtpPortStart"`
+	RTPPortEnd          int               `json:"rtpPortEnd"`
+	Stats               node.Stats        `json:"stats"`
+	NearCapacity        bool              `json:"nearCapacity"` // T3.4: port_usage>=80% 或 cpu>=80%,UI 黄色高亮
+	AutoOnDemandReady   bool              `json:"autoOnDemandReady"`
+	CreatedAt           time.Time         `json:"createdAt"`
+	UpdatedAt           time.Time         `json:"updatedAt"`
 }
 
 // CreateNodeReq 新建节点入参
@@ -151,23 +163,27 @@ func (s *NodeService) toDTO(n *node.Node) *NodeDTO {
 		return nil
 	}
 	return &NodeDTO{
-		ID:                n.ID,
-		Name:              n.Name,
-		Host:              n.Host,
-		ReceiveHost:       n.ReceiveHost,
-		PlaybackHost:      n.PlaybackHost,
-		APIPort:           n.APIPort,
-		MediaServerUUID:   n.MediaServerUUID,
-		Weight:            n.Weight,
-		Tags:              cloneTags(n.Tags),
-		State:             n.State,
-		RTPPortStart:      n.RTPPortStart,
-		RTPPortEnd:        n.RTPPortEnd,
-		Stats:             n.Stats,
-		NearCapacity:      n.IsNearCapacity(),
-		AutoOnDemandReady: s.registry.IsAutoOnDemandReady(n.ID),
-		CreatedAt:         n.CreatedAt,
-		UpdatedAt:         n.UpdatedAt,
+		ID:                  n.ID,
+		Revision:            n.Revision,
+		Name:                n.Name,
+		Host:                n.Host,
+		ReceiveHost:         n.ReceiveHost,
+		PlaybackHost:        n.PlaybackHost,
+		APIPort:             n.APIPort,
+		MediaServerUUID:     n.MediaServerUUID,
+		Weight:              n.Weight,
+		Tags:                cloneTags(n.Tags),
+		State:               n.State,
+		RecoveryRequired:    n.RecoveryRequired,
+		RecoveryReason:      publicNodeRecoveryReason(n),
+		RecoveryFingerprint: publicNodeRecoveryFingerprint(n),
+		RTPPortStart:        n.RTPPortStart,
+		RTPPortEnd:          n.RTPPortEnd,
+		Stats:               n.Stats,
+		NearCapacity:        n.IsNearCapacity(),
+		AutoOnDemandReady:   s.registry.IsAutoOnDemandReady(n.ID),
+		CreatedAt:           n.CreatedAt,
+		UpdatedAt:           n.UpdatedAt,
 	}
 }
 
@@ -189,6 +205,92 @@ func cloneNode(n *node.Node) *node.Node {
 	out := *n
 	out.Tags = cloneTags(n.Tags)
 	return &out
+}
+
+type nodeRecoveryState struct {
+	required    bool
+	reason      string
+	fingerprint string
+}
+
+func boundedNodeRecoveryReason(reason string) string {
+	runes := []rune(strings.TrimSpace(reason))
+	if len(runes) > maxNodeRecoveryReason {
+		runes = runes[:maxNodeRecoveryReason]
+	}
+	return string(runes)
+}
+
+func publicNodeRecoveryReason(n *node.Node) string {
+	if n == nil || !n.RecoveryRequired {
+		return ""
+	}
+	reason := boundedNodeRecoveryReason(n.RecoveryReason)
+	switch reason {
+	case endpointRecoveryPending,
+		endpointRecoveryFailed + ": external state uncertain",
+		endpointRecoveryFailed + ": node config changed",
+		endpointRecoveryFailed + ": external apply failed",
+		"rollback failed: external state uncertain",
+		"rollback failed: external apply failed",
+		"rollback state changed concurrently":
+		return reason
+	default:
+		// Recovery metadata can be loaded from an older or manually edited row;
+		// never reflect arbitrary text (which may contain credentials) through
+		// the DTO boundary.
+		return "recovery required"
+	}
+}
+
+func publicNodeRecoveryFingerprint(n *node.Node) string {
+	if n == nil || !n.RecoveryRequired || len(n.RecoveryFingerprint) != 64 {
+		return ""
+	}
+	if _, err := hex.DecodeString(n.RecoveryFingerprint); err != nil {
+		return ""
+	}
+	return n.RecoveryFingerprint
+}
+
+func endpointRecoveryFingerprint(n *node.Node) string {
+	if n == nil {
+		return ""
+	}
+	// The fingerprint is an opaque operation marker. It may identify the
+	// candidate host/port, but must never be derived from or reveal APISecret.
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%d\x00%s\x00%d\x00%s", n.ID, n.Revision, n.Host, n.APIPort, uuid.NewString())))
+	return hex.EncodeToString(sum[:])
+}
+
+func pendingEndpointRecovery(candidate *node.Node) nodeRecoveryState {
+	return nodeRecoveryState{
+		required:    true,
+		reason:      endpointRecoveryPending,
+		fingerprint: endpointRecoveryFingerprint(candidate),
+	}
+}
+
+func failedEndpointRecovery(candidate *node.Node, err error) nodeRecoveryState {
+	reason := endpointRecoveryFailed
+	if err != nil {
+		// Keep the durable reason classified and bounded. External client errors
+		// may include URLs, request bodies, or credentials in forms that cannot
+		// be safely redacted for persistence.
+		switch {
+		case errors.Is(err, ErrExternalStateUncertain):
+			reason += ": external state uncertain"
+		case errors.Is(err, ErrNodeConfigChanged):
+			reason += ": node config changed"
+		default:
+			reason += ": external apply failed"
+		}
+	}
+	return nodeRecoveryState{
+		required:    true,
+		reason:      boundedNodeRecoveryReason(reason),
+		fingerprint: endpointRecoveryFingerprint(candidate),
+	}
 }
 
 func (s *NodeService) nodeLock(id int64) *sync.Mutex {
@@ -373,6 +475,10 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 
 	connectionChanged := old.Host != candidate.Host || old.APIPort != candidate.APIPort || old.APISecret != candidate.APISecret
 	if connectionChanged {
+		recovery := pendingEndpointRecovery(candidate)
+		candidate.RecoveryRequired = recovery.required
+		candidate.RecoveryReason = recovery.reason
+		candidate.RecoveryFingerprint = recovery.fingerprint
 		if _, err := s.probe.GetServerConfig(ctx, candidate); err != nil {
 			// candidate has not reached Registry yet: the old snapshot remains
 			// authoritative and no persistence/write-back is attempted.
@@ -387,14 +493,15 @@ func (s *NodeService) Update(ctx context.Context, id int64, req UpdateNodeReq) (
 		if err := s.convergeNodeLocked(ctx, id); err != nil {
 			if connectionChanged {
 				// The candidate endpoint may have accepted SetConfig before a
-				// readback/convergence failure. The old endpoint cannot prove an
-				// atomic compensation, so restore only the local snapshot and
-				// keep this node out of admission with a stable uncertainty error.
-				localErr := s.registry.Update(ctx, *cloneNode(old))
+				// readback/convergence failure. Restore the old endpoint in local
+				// persistence, but retain a bounded recovery marker so a fresh
+				// process remains fail-closed until reconciliation succeeds.
+				recovery := failedEndpointRecovery(candidate, err)
+				localErr := s.restoreNodeSnapshot(ctx, old, recovery)
 				s.registry.SetAutoOnDemandReady(old.ID, false)
 				s.registry.SetAdmissionBlocked(old.ID, true)
 				if localErr != nil {
-					return nil, fmt.Errorf("%w: local snapshot restore failed", ErrRollbackUncertain)
+					return nil, fmt.Errorf("%w: local snapshot restore failed: %v", ErrRollbackUncertain, redactNodeError(localErr, old))
 				}
 				return nil, fmt.Errorf("%w: candidate external state uncertain", ErrRollbackUncertain)
 			}
@@ -532,10 +639,81 @@ func (s *NodeService) applyClaimedConfig(ctx context.Context, current *node.Node
 		s.registry.SetAutoOnDemandReady(current.ID, false)
 		return ErrNodeConfigChanged
 	}
-	if !s.registry.SetAutoOnDemandReady(current.ID, true) {
-		return ErrNodeNotFound
+	if latest.RecoveryRequired || latest.RecoveryReason != "" || latest.RecoveryFingerprint != "" {
+		latest.RecoveryRequired = false
+		latest.RecoveryReason = ""
+		latest.RecoveryFingerprint = ""
+		if err := s.registry.Update(ctx, *latest); err != nil {
+			s.registry.SetAutoOnDemandReady(current.ID, false)
+			return err
+		}
+		latest, ok = s.registry.Get(current.ID)
+		if !ok {
+			return ErrNodeNotFound
+		}
+		if !latest.IsActive() || latest.Host != current.Host || latest.APIPort != current.APIPort ||
+			latest.APISecret != current.APISecret || latest.MediaServerUUID != current.MediaServerUUID {
+			s.registry.SetAutoOnDemandReady(current.ID, false)
+			return ErrNodeConfigChanged
+		}
+	}
+	if !s.registry.SetAutoOnDemandReadyIfRevision(current.ID, latest.Revision, true) {
+		if _, ok := s.registry.Get(current.ID); !ok {
+			return ErrNodeNotFound
+		}
+		return ErrNodeConfigChanged
 	}
 	return nil
+}
+
+// restoreNodeSnapshot performs a CAS restore of the fields changed by the
+// failed update while taking the latest lifecycle state and in-memory stats as
+// the source of truth. A concurrent offline/maintenance transition therefore
+// survives rollback instead of being overwritten by old.State.
+func (s *NodeService) restoreNodeSnapshot(ctx context.Context, old *node.Node, recovery nodeRecoveryState) error {
+	if old == nil {
+		return node.ErrNotFound
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		latest, ok := s.registry.Get(old.ID)
+		if !ok {
+			return node.ErrNotFound
+		}
+		restored := cloneNode(old)
+		restored.Revision = latest.Revision
+		restored.State = latest.State
+		restored.Stats = latest.Stats
+		if recovery.required || recovery.reason != "" || recovery.fingerprint != "" {
+			restored.RecoveryRequired = recovery.required
+			restored.RecoveryReason = boundedNodeRecoveryReason(recovery.reason)
+			restored.RecoveryFingerprint = recovery.fingerprint
+		}
+		if err := s.registry.Update(ctx, *restored); err != nil {
+			if errors.Is(err, node.ErrRevisionConflict) {
+				if !recovery.required {
+					recovery = nodeRecoveryState{
+						required:    true,
+						reason:      "rollback state changed concurrently",
+						fingerprint: endpointRecoveryFingerprint(old),
+					}
+				}
+				if quarantineErr := s.registry.MarkRecoveryRequired(
+					ctx,
+					old.ID,
+					boundedNodeRecoveryReason(recovery.reason),
+					recovery.fingerprint,
+				); quarantineErr != nil {
+					return fmt.Errorf("%w: recovery quarantine failed: %v", err, quarantineErr)
+				}
+				// The old snapshot was not restored. The caller must keep the
+				// node fail-closed even though the latest durable fields won.
+				return err
+			}
+			return err
+		}
+		return nil
+	}
+	return node.ErrRevisionConflict
 }
 
 // rollbackNodeLocked restores the persisted candidate and makes a best effort
@@ -550,7 +728,19 @@ func (s *NodeService) rollbackNodeLocked(ctx context.Context, old *node.Node) er
 		externalErr = fmt.Errorf("%w: %v", ErrExternalStateUncertain, redactNodeError(err, old))
 	}
 
-	localErr := s.registry.Update(ctx, *cloneNode(old))
+	recovery := nodeRecoveryState{}
+	if externalErr != nil {
+		reason := "rollback failed: external apply failed"
+		if errors.Is(externalErr, ErrExternalStateUncertain) {
+			reason = "rollback failed: external state uncertain"
+		}
+		recovery = nodeRecoveryState{
+			required:    true,
+			reason:      reason,
+			fingerprint: endpointRecoveryFingerprint(old),
+		}
+	}
+	localErr := s.restoreNodeSnapshot(ctx, old, recovery)
 	if externalErr != nil || localErr != nil {
 		detail := ""
 		if externalErr != nil {

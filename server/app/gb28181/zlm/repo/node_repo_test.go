@@ -126,3 +126,37 @@ func TestNodeRepo_TagsAsJSON(t *testing.T) {
 	require.Equal(t, "prod", got.Tags["env"])
 	require.Equal(t, "bj", got.Tags["zone"])
 }
+
+func TestNodeRepo_UpdateCASRejectsStaleFullRow(t *testing.T) {
+	db := setupDB(t)
+	r := repo.NewMetaNodeRepo(db)
+	ctx := context.Background()
+
+	id, err := r.Create(ctx, node.Node{
+		Name: "a", Host: "old.example", APISecret: "secret", MediaServerUUID: "u-a",
+		State: node.StateActive, Weight: 50,
+	})
+	require.NoError(t, err)
+	current, err := r.Get(ctx, id)
+	require.NoError(t, err)
+	require.NotNil(t, current)
+	require.EqualValues(t, 1, current.Revision)
+
+	candidate := *current
+	candidate.Weight = 80
+	ok, err := r.UpdateCAS(ctx, candidate, current.Revision)
+	require.NoError(t, err)
+	require.True(t, ok)
+
+	stale := candidate
+	stale.Name = "stale"
+	ok, err = r.UpdateCAS(ctx, stale, current.Revision)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	after, err := r.Get(ctx, id)
+	require.NoError(t, err)
+	require.Equal(t, "a", after.Name)
+	require.Equal(t, 80, after.Weight)
+	require.EqualValues(t, 2, after.Revision)
+}

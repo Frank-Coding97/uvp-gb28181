@@ -604,6 +604,34 @@ INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
 (7578,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'GET',N'*',N'',N''),(7579,N'p',N'role_1',N'/api/gb28181/cascade/platforms',N'POST',N'*',N'',N''),(7580,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'GET',N'*',N'',N''),(7581,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'PUT',N'*',N'',N''),(7582,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id',N'DELETE',N'*',N'',N''),(7583,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enabled',N'PUT',N'*',N'',N''),(7584,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/enable',N'POST',N'*',N'',N''),(7585,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/disable',N'POST',N'*',N'',N''),(7586,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/reconnect',N'POST',N'*',N'',N''),(7587,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'GET',N'*',N'',N''),(7588,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/shares',N'PUT',N'*',N'',N''),(7589,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/share',N'POST',N'*',N'',N''),(7590,N'p',N'role_1',N'/api/gb28181/cascade/platforms/:id/channels/unshare',N'POST',N'*',N'',N'');
 SET IDENTITY_INSERT [sys_casbin_rule] OFF;
 
+-- ZLM media-node registry and durable endpoint-recovery gate.
+IF OBJECT_ID(N'meta_node', N'U') IS NOT NULL DROP TABLE [meta_node];
+CREATE TABLE [meta_node] (
+    [id] BIGINT IDENTITY(1,1) NOT NULL,
+    [revision] BIGINT NOT NULL CONSTRAINT [df_meta_node_revision] DEFAULT 1,
+    [name] NVARCHAR(64) NOT NULL CONSTRAINT [df_meta_node_name] DEFAULT N'',
+    [host] NVARCHAR(64) NOT NULL CONSTRAINT [df_meta_node_host] DEFAULT N'',
+    [receive_host] NVARCHAR(255) NOT NULL CONSTRAINT [df_meta_node_receive_host] DEFAULT N'',
+    [playback_host] NVARCHAR(255) NOT NULL CONSTRAINT [df_meta_node_playback_host] DEFAULT N'',
+    [api_port] INT NOT NULL CONSTRAINT [df_meta_node_api_port] DEFAULT 18080,
+    [api_secret] NVARCHAR(128) NOT NULL CONSTRAINT [df_meta_node_api_secret] DEFAULT N'',
+    [media_server_uuid] NVARCHAR(64) NOT NULL CONSTRAINT [df_meta_node_media_server_uuid] DEFAULT N'',
+    [weight] INT NOT NULL CONSTRAINT [df_meta_node_weight] DEFAULT 50,
+    [tags_json] NVARCHAR(MAX),
+    [state] NVARCHAR(16) NOT NULL CONSTRAINT [df_meta_node_state] DEFAULT N'active',
+    [recovery_required] BIT NOT NULL CONSTRAINT [df_meta_node_recovery_required] DEFAULT 0,
+    [recovery_reason] NVARCHAR(255) NOT NULL CONSTRAINT [df_meta_node_recovery_reason] DEFAULT N'',
+    [recovery_fingerprint] CHAR(64) NOT NULL CONSTRAINT [df_meta_node_recovery_fingerprint] DEFAULT N'',
+    [rtp_port_start] INT NOT NULL CONSTRAINT [df_meta_node_rtp_port_start] DEFAULT 30000,
+    [rtp_port_end] INT NOT NULL CONSTRAINT [df_meta_node_rtp_port_end] DEFAULT 35000,
+    [created_at] DATETIME2 NULL,
+    [updated_at] DATETIME2 NULL,
+    CONSTRAINT [pk_meta_node] PRIMARY KEY ([id]),
+    CONSTRAINT [uk_media_server_uuid] UNIQUE ([media_server_uuid])
+);
+CREATE INDEX [idx_state] ON [meta_node] ([state]);
+CREATE INDEX [idx_recovery_required] ON [meta_node] ([recovery_required]);
+
 -- GB28181 device registry and dual-version profile archive.
 IF OBJECT_ID(N'gb_device', N'U') IS NOT NULL DROP TABLE [gb_device];
 CREATE TABLE [gb_device] (

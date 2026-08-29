@@ -1157,6 +1157,7 @@ CREATE TABLE `gb_talk_session` (
 DROP TABLE IF EXISTS `meta_node`;
 CREATE TABLE `meta_node` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `revision` bigint unsigned NOT NULL DEFAULT '1' COMMENT 'full-row CAS revision',
   `name` varchar(64) NOT NULL DEFAULT '',
   `host` varchar(64) NOT NULL DEFAULT '',
   `receive_host` varchar(255) NOT NULL DEFAULT '',
@@ -1167,6 +1168,9 @@ CREATE TABLE `meta_node` (
   `weight` int NOT NULL DEFAULT 50,
   `tags_json` text,
   `state` varchar(16) NOT NULL DEFAULT 'active',
+  `recovery_required` tinyint(1) NOT NULL DEFAULT '0' COMMENT '外部配置不确定时禁止调度',
+  `recovery_reason` varchar(255) NOT NULL DEFAULT '' COMMENT '安全、有限长的恢复原因',
+  `recovery_fingerprint` char(64) NOT NULL DEFAULT '' COMMENT 'opaque recovery operation marker',
   `rtp_port_start` int NOT NULL DEFAULT 30000,
   `rtp_port_end` int NOT NULL DEFAULT 35000,
   `created_at` datetime DEFAULT NULL,
