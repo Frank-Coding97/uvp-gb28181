@@ -21,7 +21,10 @@ const modalWarning = vi.hoisted(() => vi.fn());
 vi.mock("./api", async importOriginal => ({ ...(await importOriginal<typeof import("./api")>()), ...api }));
 vi.mock("@arco-design/web-vue", () => ({ Modal: { warning: modalWarning } }));
 vi.mock("./recordingDownloadService", () => ({ recordingDownloadCoordinator: { enqueue: enqueueDownload } }));
-vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
+vi.mock("@/store/modules/user", () => ({
+  useUserStoreHook: () => ({ account }),
+  registerUserLogoutCleanup: vi.fn()
+}));
 vi.mock("@/hooks/useGlobalProperties", () => ({ default: () => ({ $message: messages }) }));
 vi.mock("@/hooks/useDevicesSize", () => ({ useDevicesSize: () => ({ isMobile: { value: false } }) }));
 
@@ -77,7 +80,8 @@ const stubs = {
   },
   "a-range-picker": { template: "<div />" },
   RecordingDetailDrawer: { template: "<div />" },
-  RecordingPlayerDialog: { template: "<div />" }
+  RecordingPlayerDialog: { template: "<div />" },
+  RecordingRuntimeControl: { template: "<div data-testid='runtime-control' />" }
 };
 
 describe("cloud recording layout", () => {
@@ -251,6 +255,13 @@ describe("CloudRecordings", () => {
     expect(wrapper.get("[data-testid='active-tab']").attributes("aria-pressed")).toBe("true");
     expect(wrapper.text()).toContain("正在录制");
     expect(wrapper.text()).not.toContain("record.mp4");
+  });
+
+  it("adds typed runtime control without mixing HLS state into the file catalog", () => {
+    expect(source).toContain('data-testid="runtime-tab"');
+    expect(source).toContain("RecordingRuntimeControl");
+    expect(source).toContain("运行控制");
+    expect(source).toContain("activeView === 'runtime'");
   });
 
   it("stops an active ZLMediaKit recording after confirmation when permitted", async () => {

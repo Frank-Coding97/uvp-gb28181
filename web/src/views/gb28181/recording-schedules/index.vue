@@ -16,6 +16,10 @@
         </div>
       </div>
 
+      <a-alert v-if="recordingContextKeyword" type="info" class="recording-context-alert">
+        已从录制控制带入流上下文：<code>{{ recordingContextKeyword }}</code><span v-if="recordingContextNodeId"> · 节点 #{{ recordingContextNodeId }}</span>。这里只将上下文作为现有执行状态查询条件，数据仍由录像计划接口按原权限返回。
+      </a-alert>
+
       <template v-if="activeView === 'plans'">
         <s-layout-search>
           <template #fields>
@@ -177,6 +181,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import { useRoute } from "vue-router";
 import { Message } from "@arco-design/web-vue";
 import dayjs from "dayjs";
 import { Activity, CalendarClock, CalendarDays, Clock3, Eye, Link2, Pencil, Plus, RefreshCw, RotateCcw, Search, Trash2 } from "@lucide/vue";
@@ -190,6 +195,9 @@ import RecordingScheduleEditorDialog from "./components/RecordingScheduleEditorD
 import ChannelAssignmentDialog from "./components/ChannelAssignmentDialog.vue";
 import type { RecordingSchedule, ScheduleChannel, ScheduleDay } from "./types";
 
+const route = useRoute();
+const recordingContextKeyword = (Array.isArray(route.query.stream) ? route.query.stream[0] : route.query.stream)?.trim().slice(0, 128) || "";
+const recordingContextNodeId = (Array.isArray(route.query.nodeId) ? route.query.nodeId[0] : route.query.nodeId)?.trim().slice(0, 20) || "";
 const dayNames = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 const plans = ref<RecordingSchedule[]>([]);
 const executionPlans = ref<RecordingSchedule[]>([]);
@@ -206,7 +214,7 @@ const detailChannelTotal = ref(0);
 const detailChannelPage = ref(1);
 const detailChannelsLoading = ref(false);
 
-const activeView = ref<"plans" | "status">("plans");
+const activeView = ref<"plans" | "status">(recordingContextKeyword ? "status" : "plans");
 const detailVisible = ref(false);
 const editorVisible = ref(false);
 const assignmentVisible = ref(false);
@@ -217,7 +225,7 @@ const executionPlanKeyword = ref("");
 const executionPlanPageSize = 30;
 const executionPlanPage = ref(1);
 const planFilters = reactive({ keyword: "", status: "" });
-const statusFilters = reactive({ keyword: "", online: "", state: "" });
+const statusFilters = reactive({ keyword: recordingContextKeyword, online: "", state: "" });
 const planPageState = reactive({ current: 1, pageSize: 10 });
 const executionPageState = reactive({ current: 1, pageSize: 10 });
 const planTableScroll = { x: "100%", minWidth: 1200 };
@@ -434,6 +442,7 @@ onMounted(() => { void loadPlans(); void loadExecutionPlans(false); });
 .recording-schedules-page { box-sizing: border-box; width: 100%; height: 100%; max-width: 100vw; min-width: 0; min-height: 0; overflow: hidden; contain: inline-size; color: var(--uvp-text-primary); }
 .recording-schedules-shell { box-sizing: border-box; display: flex; width: 100%; height: 100%; max-width: 100%; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .recording-schedules-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.recording-context-alert { flex: 0 0 auto; margin-bottom: 10px; }.recording-context-alert code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .schedule-view-switch button { display: inline-flex; align-items: center; gap: 6px; }
 .schedule-view-switch button > span { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }
 .schedule-view-switch button.active > span { color: currentColor; }

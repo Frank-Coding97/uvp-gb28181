@@ -16,7 +16,13 @@ import {
   listZLMNetworkSessions,
   listZLMStreams,
   preflightCloseZLMStream,
+  preflightForceStopZLMRecording,
+  preflightStartZLMRecording,
+  preflightStopZLMRecording,
   snapshotZLMStreamURL,
+  startZLMRecording,
+  stopZLMRecording,
+  forceStopZLMRecording,
   type ZLMMediaIdentity
 } from "./gb28181-zlm-runtime";
 
@@ -82,6 +88,35 @@ describe("ZLM runtime API", () => {
     await getZLMRecordingStatus(7, media, 1);
     expect(request).toHaveBeenCalledWith("get", "/api/gb28181/zlm/nodes/7/recordings/runtime/status", {
       params: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001", type: 1 }
+    });
+  });
+
+  it("keeps ordinary and force recording controls on separate typed routes", async () => {
+    const base = { media, type: 1 as const };
+    await preflightStartZLMRecording(7, base);
+    await startZLMRecording(7, base);
+    await preflightStopZLMRecording(7, base);
+    await stopZLMRecording(7, { ...base, fingerprint: "stop-fp" });
+    await preflightForceStopZLMRecording(7, { ...base, reason: "incident response" });
+    await forceStopZLMRecording(7, { ...base, fingerprint: "force-fp", reason: "incident response" });
+
+    expect(request).toHaveBeenNthCalledWith(1, "post", "/api/gb28181/zlm/nodes/7/recordings/runtime/start/preflight", {
+      data: { target: { nodeId: 7, media }, type: 1 }
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "post", "/api/gb28181/zlm/nodes/7/recordings/runtime/start", {
+      data: { target: { nodeId: 7, media }, type: 1 }
+    });
+    expect(request).toHaveBeenNthCalledWith(3, "post", "/api/gb28181/zlm/nodes/7/recordings/runtime/stop/preflight", {
+      data: { target: { nodeId: 7, media }, type: 1 }
+    });
+    expect(request).toHaveBeenNthCalledWith(4, "post", "/api/gb28181/zlm/nodes/7/recordings/runtime/stop", {
+      data: { target: { nodeId: 7, media }, type: 1, fingerprint: "stop-fp" }
+    });
+    expect(request).toHaveBeenNthCalledWith(5, "post", "/api/gb28181/zlm/nodes/7/recordings/runtime/force-stop/preflight", {
+      data: { target: { nodeId: 7, media }, type: 1, reason: "incident response" }
+    });
+    expect(request).toHaveBeenNthCalledWith(6, "post", "/api/gb28181/zlm/nodes/7/recordings/runtime/force-stop", {
+      data: { target: { nodeId: 7, media }, type: 1, fingerprint: "force-fp", reason: "incident response" }
     });
   });
 

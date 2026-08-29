@@ -153,4 +153,13 @@ describe("recording schedule prototype", () => {
     expect(source).toContain("showPageSize: true");
     expect(source).toContain("showJumper: true");
   });
+
+  it("accepts recording stream context only as an existing permission-scoped filter", () => {
+    expect(source).toContain("useRoute");
+    expect(source).toContain("recordingContextKeyword");
+    expect(source).toContain("route.query.stream");
+    expect(source).toContain('activeView = ref<"plans" | "status">(recordingContextKeyword ? "status" : "plans")');
+    expect(source).toContain("数据仍由录像计划接口按原权限返回");
+    expect(source).toContain("listRecordingPlanExecutionChannels");
+  });
 });

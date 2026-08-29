@@ -28,6 +28,16 @@
               <CircleDot data-testid="active-tab-icon" :size="14" aria-hidden="true" />
               正在录像 <span class="recording-view-switch__count">{{ activeRecordings.length }}</span>
             </button>
+            <button
+              type="button"
+              data-testid="runtime-tab"
+              :class="{ active: activeView === 'runtime' }"
+              :aria-pressed="activeView === 'runtime'"
+              @click="activeView = 'runtime'"
+            >
+              <SlidersHorizontal :size="14" aria-hidden="true" />
+              运行控制
+            </button>
           </div>
           <div class="cloud-recordings-header__actions">
             <span
@@ -250,7 +260,7 @@
             </div>
         </template>
 
-        <template v-else>
+        <template v-else-if="activeView === 'active'">
             <div v-if="activeView === 'active'" class="active-recordings-view">
               <a-alert v-if="activeError && !activeLoading" type="error" class="cloud-recordings-state">{{ activeError }}</a-alert>
               <div v-else class="cloud-recordings-table-wrap">
@@ -294,6 +304,8 @@
               </div>
             </div>
         </template>
+
+        <RecordingRuntimeControl v-else ref="runtimeControl" />
       </template>
     </div>
   </div>
@@ -309,13 +321,14 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, Trash2, TriangleAlert } from "@lucide/vue";
+import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, SlidersHorizontal, Trash2, TriangleAlert } from "@lucide/vue";
 import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
 import RecordingDetailDrawer from "./components/RecordingDetailDrawer.vue";
 import RecordingPlayerDialog from "./components/RecordingPlayerDialog.vue";
+import RecordingRuntimeControl from "./components/RecordingRuntimeControl.vue";
 import {
   batchDeleteRecordingFiles,
   deleteRecordingFile,
@@ -362,7 +375,8 @@ const files = ref<RecordingFile[]>([]);
 const options = reactive<RecordingOptions>({ channels: [], devices: [], nodes: [] });
 const activeRecordings = ref<ActiveRecording[]>([]);
 const reconciliations = ref<RecordingReconciliation[]>([]);
-const activeView = ref<"files" | "active">("files");
+const activeView = ref<"files" | "active" | "runtime">("files");
+const runtimeControl = ref<{ refresh: () => void } | null>(null);
 const loading = ref(false);
 const activeLoading = ref(false);
 const reconciling = ref(false);
@@ -516,6 +530,7 @@ function resetFilters() {
 function refreshCurrent() {
   resetAutoRefreshCountdown();
   if (activeView.value === "active") void loadActive();
+  else if (activeView.value === "runtime") runtimeControl.value?.refresh();
   else void loadFiles();
   void loadReconciliationStates();
 }
@@ -681,6 +696,7 @@ function formatFileSize(bytes: number | null) {
 watch(activeView, view => {
   resetAutoRefreshCountdown();
   if (view === "active") void loadActive();
+  else if (view === "runtime") runtimeControl.value?.refresh();
   else void loadFiles();
 });
 
@@ -759,6 +775,7 @@ onBeforeUnmount(() => {
 .recording-batch-bar__actions { display: flex; align-items: center; gap: 8px; }
 .recording-files-view,
 .active-recordings-view { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.recording-runtime-control { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .recording-files-view > :deep(.uvp-search-panel) { flex: 0 0 auto; }
 .cloud-recordings-table-wrap { flex: 1; max-width: 100%; min-width: 0; min-height: 0; overflow: hidden; contain: inline-size; border-radius: 6px; }
 .cloud-recordings-table-wrap :deep(.uvp-data-table) { height: 100%; min-height: 0; }
