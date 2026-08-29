@@ -60,6 +60,26 @@ func TestRecordingPlanFreshSchemasContainDomainTables(t *testing.T) {
 	}
 }
 
+func TestRecordingPlanFreshSchemasContainMenusAndAPIPermissions(t *testing.T) {
+	_, sourceFile, _, _ := runtime.Caller(0)
+	serverRoot := filepath.Join(filepath.Dir(sourceFile), "..", "..", "..")
+	for _, name := range []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"} {
+		t.Run(name, func(t *testing.T) {
+			body, err := os.ReadFile(filepath.Join(serverRoot, "resource", "database", name))
+			require.NoError(t, err)
+			text := strings.ToLower(string(body))
+			for _, token := range []string{
+				"gb28181:recording-plan:view", "gb28181:recording-plan:maintain", "gb28181:recording-plan:assign",
+				"/api/gb28181/recording-plans/:id/channels",
+				"/api/gb28181/recording-plans/channels/:channelid/diagnosis",
+				"/api/gb28181/recording-plans/channels/:channelid/timeline",
+			} {
+				require.Containsf(t, text, token, "%s missing recording plan fresh-install permission %s", name, token)
+			}
+		})
+	}
+}
+
 func TestRecordingPlanDownMigrationsExist(t *testing.T) {
 	_, sourceFile, _, _ := runtime.Caller(0)
 	serverRoot := filepath.Join(filepath.Dir(sourceFile), "..", "..", "..")
