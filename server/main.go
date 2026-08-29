@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -33,6 +34,13 @@ import (
 // @host localhost:8080
 // @BasePath /api
 func main() {
+	// 运维入口:-migrate-up 仅执行主数据库待处理迁移并退出,不启动 Casbin、任务调度、HTTP 或 SIP。
+	if migrateUpRequested(os.Args[1:]) {
+		if err := runMigrateUp(); err != nil {
+			log.Fatal("migrate-up 失败: " + err.Error())
+		}
+		return
+	}
 	// 运维入口:-migrate-down=<文件名> 手动回滚单个迁移后退出
 	if downFile := parseArgs(os.Args[1:]); downFile != "" {
 		if err := runMigrateDown(downFile); err != nil {
@@ -53,6 +61,80 @@ func main() {
 	// 优雅关闭 GB28181 SIP 服务
 	gb28181.Stop()
 
+}
+
+func migrateUpRequested(args []string) bool {
+	for _, arg := range args {
+		if arg == "-migrate-up" {
+			return true
+		}
+	}
+	return false
+}
+
+type databaseIdentity struct {
+	DatabaseName    string `gorm:"column:database_name"`
+	DatabaseVersion string `gorm:"column:database_version"`
+}
+
+// runMigrateUp 使用项目迁移器升级主数据库,并输出不含凭据的目标与版本证据。
+func runMigrateUp() error {
+	db, dialect, err := primaryDB()
+	if err != nil {
+		return err
+	}
+	var identity databaseIdentity
+	if err := db.Raw(databaseIdentitySQL(dialect)).Scan(&identity).Error; err != nil {
+		return fmt.Errorf("读取数据库身份失败: %w", err)
+	}
+	log.Printf("migrate-up 目标: database=%s version=%s dialect=%s", identity.DatabaseName, identity.DatabaseVersion, dialect)
+	before, err := appliedMigrationVersions(db)
+	if err != nil {
+		return fmt.Errorf("读取迁移基线失败: %w", err)
+	}
+	if err := migration.Up(db, dialect); err != nil {
+		return err
+	}
+	after, err := appliedMigrationVersions(db)
+	if err != nil {
+		return fmt.Errorf("读取迁移结果失败: %w", err)
+	}
+	log.Printf("migrate-up 完成: before=%d after=%d newly_applied=%v", len(before), len(after), migrationDifference(before, after))
+	return nil
+}
+
+func databaseIdentitySQL(dialect migration.Dialect) string {
+	switch dialect {
+	case migration.DialectPostgres:
+		return "SELECT current_database() AS database_name, version() AS database_version"
+	case migration.DialectSQLServer:
+		return "SELECT DB_NAME() AS database_name, CAST(SERVERPROPERTY('ProductVersion') AS varchar(128)) AS database_version"
+	default:
+		return "SELECT DATABASE() AS database_name, VERSION() AS database_version"
+	}
+}
+
+func appliedMigrationVersions(db *gorm.DB) ([]string, error) {
+	if !db.Migrator().HasTable("gb_schema_migrations") {
+		return nil, nil
+	}
+	var versions []string
+	err := db.Table("gb_schema_migrations").Order("version").Pluck("version", &versions).Error
+	return versions, err
+}
+
+func migrationDifference(before, after []string) []string {
+	existing := make(map[string]struct{}, len(before))
+	for _, version := range before {
+		existing[version] = struct{}{}
+	}
+	added := make([]string, 0)
+	for _, version := range after {
+		if _, ok := existing[version]; !ok {
+			added = append(added, version)
+		}
+	}
+	return added
 }
 
 // parseArgs 解析命令行参数,返回 -migrate-down 指定的迁移文件名(空串=正常启动)。

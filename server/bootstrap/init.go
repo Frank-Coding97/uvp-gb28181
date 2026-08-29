@@ -45,10 +45,10 @@ func init() {
 	// 初始化数据库
 	initDB()
 
-	// -migrate-down=<文件名> 是纯运维回滚入口:只完成配置+DB 初始化,
+	// -migrate-up / -migrate-down=<文件名> 是纯运维入口:只完成配置+DB 初始化,
 	// 不执行 Up/业务初始化(main 解析参数后直接走 Down)。
 	// 否则迁移失败时回滚命令会先重试同一失败的 Up 并 log.Fatal,永远到不了 Down
-	if downFileRequested() {
+	if migrationCommandRequested() {
 		return
 	}
 
@@ -350,10 +350,13 @@ func newScheduler() app.JobSchedulerInterf {
 	return scheduler
 }
 
-// downFileRequested 判断启动参数是否请求 -migrate-down 运维回滚。
-// 空值参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务
-func downFileRequested() bool {
+// migrationCommandRequested 判断启动参数是否请求纯迁移运维入口。
+// 空 down 参数不算请求:否则 bootstrap 跳过迁移但 main 正常启动业务。
+func migrationCommandRequested() bool {
 	for _, arg := range os.Args {
+		if arg == "-migrate-up" {
+			return true
+		}
 		if strings.HasPrefix(arg, "-migrate-down=") && strings.TrimPrefix(arg, "-migrate-down=") != "" {
 			return true
 		}
