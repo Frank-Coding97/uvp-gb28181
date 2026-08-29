@@ -23,6 +23,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
@@ -172,36 +173,41 @@ type AutoOnDemandDispatcher interface {
 
 type AutoOnDemandSettingsProvider func() gbconfig.FixedAddressPlaybackSettings
 
+var ErrPreviewRuntimeIncomplete = errors.New("management preview runtime must provide classifier and verifier together")
+
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
-	notifier       *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
-	stopper        PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
-	policy         NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
-	leaseChecker   SourceLeaseChecker   // 级联 source lease,可为 nil
-	collector      KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
-	resolver       NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
-	binder         StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
-	recordMP4      RecordMP4Indexer
-	recordResolver NodeUUIDResolver
-	observer       StreamObserver
-	playbackMedia  PlaybackMediaSink
-	flowMu         sync.RWMutex
-	flowResolver   FlowReportNodeResolver
-	flowCollector  FlowCollector
-	talkResolver   NodeUUIDResolver
-	talkAuthorizer TalkPublishAuthorizer
-	talkObserver   TalkStreamObserver
-	talkMu         sync.RWMutex
-	playAuthorizer PlayAuthorizer
-	playResolver   PlaybackMediaContextResolver
-	playAuthMu     sync.RWMutex
-	autoMu         sync.RWMutex
-	autoResolver   AutoOnDemandNodeResolver
-	autoValidator  AutoOnDemandTargetValidator
-	autoDispatcher AutoOnDemandDispatcher
-	autoSettings   AutoOnDemandSettingsProvider
-	autoLimiter    *rate.Limiter
+	notifier          *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper           PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	policy            NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
+	leaseChecker      SourceLeaseChecker   // 级联 source lease,可为 nil
+	collector         KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
+	resolver          NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
+	binder            StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
+	recordMP4         RecordMP4Indexer
+	recordResolver    NodeUUIDResolver
+	observer          StreamObserver
+	playbackMedia     PlaybackMediaSink
+	flowMu            sync.RWMutex
+	flowResolver      FlowReportNodeResolver
+	flowCollector     FlowCollector
+	talkResolver      NodeUUIDResolver
+	talkAuthorizer    TalkPublishAuthorizer
+	talkObserver      TalkStreamObserver
+	talkMu            sync.RWMutex
+	playAuthorizer    PlayAuthorizer
+	playResolver      PlaybackMediaContextResolver
+	playAuthMu        sync.RWMutex
+	previewClassifier management.PreviewClassifier
+	previewVerifier   management.PreviewTokenVerifier
+	previewMu         sync.RWMutex
+	autoMu            sync.RWMutex
+	autoResolver      AutoOnDemandNodeResolver
+	autoValidator     AutoOnDemandTargetValidator
+	autoDispatcher    AutoOnDemandDispatcher
+	autoSettings      AutoOnDemandSettingsProvider
+	autoLimiter       *rate.Limiter
 }
 
 func NewHookController(notifier *stream.Notifier) *HookController {
@@ -277,6 +283,20 @@ func (h *HookController) SetPlaybackMediaContextResolver(resolver PlaybackMediaC
 	h.playAuthMu.Lock()
 	defer h.playAuthMu.Unlock()
 	h.playResolver = resolver
+}
+
+// SetPreviewRuntime enables the explicit management preview boundary. Both
+// dependencies must be present; with either one absent OnPlay retains its
+// historical behavior for compatibility with an unassembled T14 runtime.
+func (h *HookController) SetPreviewRuntime(classifier management.PreviewClassifier, verifier management.PreviewTokenVerifier) error {
+	if (classifier == nil) != (verifier == nil) {
+		return ErrPreviewRuntimeIncomplete
+	}
+	h.previewMu.Lock()
+	defer h.previewMu.Unlock()
+	h.previewClassifier = classifier
+	h.previewVerifier = verifier
+	return nil
 }
 
 func (h *HookController) SetAutoOnDemandRuntime(
@@ -602,6 +622,7 @@ type onPlayBody struct {
 	App           string `json:"app"`
 	Stream        string `json:"stream"`
 	Schema        string `json:"schema"`
+	VHost         string `json:"vhost"`
 	Params        string `json:"params"`
 	MediaServerID string `json:"mediaServerId"`
 	IP            string `json:"ip"`
@@ -782,6 +803,52 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		h.denyPlayback(c, "tampered", "invalid playback request")
 		return
 	}
+	if classifier, verifier := h.previewDependencies(); classifier != nil && verifier != nil {
+		class, playToken, mediaToken, ok := classifyPreviewHookParams(classifier, c.Request.Context(), body)
+		if !ok {
+			h.denyPlayback(c, "tampered", "invalid playback authorization")
+			return
+		}
+		switch class {
+		case management.PreviewResourceNonGBPreviewable:
+			if mediaToken == "" {
+				h.denyPlayback(c, "missing", "invalid playback authorization")
+				return
+			}
+			_, err := verifier.Verify(mediaToken, management.PreviewBinding{
+				NodeUUID: body.MediaServerID, VHost: body.VHost, Schema: body.Schema,
+				App: body.App, Stream: body.Stream, ClientIP: body.IP,
+			})
+			if err != nil {
+				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				return
+			}
+			hookOK(c)
+			return
+		case management.PreviewResourceLegacyPublic:
+			if playToken != "" || mediaToken != "" {
+				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				return
+			}
+			hookOK(c)
+			return
+		case management.PreviewResourceGB:
+			if body.App != "rtp" {
+				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				return
+			}
+			if mediaToken != "" {
+				h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+				return
+			}
+		case management.PreviewResourceUnknownConflicted:
+			h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+			return
+		default:
+			h.denyPlayback(c, "wrong_resource", "playback authorization denied")
+			return
+		}
+	}
 	if body.App != "rtp" {
 		hookOK(c)
 		return
@@ -851,6 +918,60 @@ func (h *HookController) OnPlay(c *gin.Context) {
 			zap.String("correlationId", playauth.CorrelationID(claims.AuthorizationGeneration)))
 	}
 	hookOK(c)
+}
+
+func (h *HookController) previewDependencies() (management.PreviewClassifier, management.PreviewTokenVerifier) {
+	h.previewMu.RLock()
+	defer h.previewMu.RUnlock()
+	return h.previewClassifier, h.previewVerifier
+}
+
+func classifyPreviewHookParams(classifier management.PreviewClassifier, ctx context.Context, body onPlayBody) (management.PreviewResourceClass, string, string, bool) {
+	_, playToken, mediaToken, ok := parsePreviewHookParams(body.Params)
+	if !ok {
+		return management.PreviewResourceUnknownConflicted, "", "", false
+	}
+	class, err := classifier.Classify(ctx, management.PreviewResource{
+		NodeUUID: body.MediaServerID, VHost: body.VHost, Schema: body.Schema,
+		App: body.App, Stream: body.Stream,
+	})
+	if err != nil {
+		return management.PreviewResourceUnknownConflicted, "", "", false
+	}
+	return class, playToken, mediaToken, true
+}
+
+func parsePreviewHookParams(raw string) (url.Values, string, string, bool) {
+	raw = strings.TrimPrefix(raw, "?")
+	if raw != "" {
+		if strings.Contains(raw, "?") || strings.HasPrefix(raw, "&") || strings.HasSuffix(raw, "&") || strings.Contains(raw, "&&") {
+			return nil, "", "", false
+		}
+	}
+	params, err := url.ParseQuery(raw)
+	if err != nil {
+		return nil, "", "", false
+	}
+	for key, values := range params {
+		if key == "" || len(values) != 1 || strings.TrimSpace(values[0]) == "" {
+			return nil, "", "", false
+		}
+	}
+	playToken, playPresent := params[playauth.QueryParameter]
+	mediaToken, mediaPresent := params[management.PreviewQueryParameter]
+	if (playPresent && (len(playToken) != 1 || strings.TrimSpace(playToken[0]) == "")) ||
+		(mediaPresent && (len(mediaToken) != 1 || strings.TrimSpace(mediaToken[0]) == "")) ||
+		(playPresent && mediaPresent) {
+		return nil, "", "", false
+	}
+	var playValue, mediaValue string
+	if playPresent {
+		playValue = playToken[0]
+	}
+	if mediaPresent {
+		mediaValue = mediaToken[0]
+	}
+	return params, playValue, mediaValue, true
 }
 
 func (h *HookController) denyPlayback(c *gin.Context, reason, message string) {

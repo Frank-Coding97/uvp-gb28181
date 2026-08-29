@@ -79,7 +79,7 @@ func redactAccessLogPath(path string) string {
 	}
 	query := parsed.Query()
 	redacted := false
-	for _, key := range []string{"play_token", "cap"} {
+	for _, key := range []string{"play_token", "media_access_token", "cap"} {
 		if _, exists := query[key]; exists {
 			query.Set(key, "REDACTED")
 			redacted = true
@@ -94,7 +94,7 @@ func redactAccessLogPath(path string) string {
 
 func redactAccessLogPathFallback(path string) string {
 	lower := strings.ToLower(path)
-	if strings.Contains(lower, "play_token=") || strings.Contains(lower, "cap=") {
+	if strings.Contains(lower, "play_token=") || strings.Contains(lower, "media_access_token=") || strings.Contains(lower, "cap=") {
 		if index := strings.IndexByte(path, '?'); index >= 0 {
 			return path[:index] + "?REDACTED"
 		}
