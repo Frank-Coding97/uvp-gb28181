@@ -120,7 +120,7 @@ const period = ref<SecurityTrendPeriod>("24h");
 const trendPeriods: SecurityTrendPeriod[] = ["1h", "24h", "7d"];
 const eventSeverity = ref("全部风险");
 const eventSearch = ref("");
-const tablePageSizeOptions = [10, 20, 30, 50];
+const tablePageSizeOptions = [10, 20, 50, 100];
 const eventPage = ref(1);
 const eventPageSize = ref(20);
 const eventTotal = ref(0);
@@ -515,19 +515,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="snow-page security-preview">
+  <main :class="['snow-page', 'security-preview', { 'security-preview--workspace': ['events', 'bans', 'blacklist', 'allowlist'].includes(activeTab) }]">
     <div class="snow-inner uvp-page-shell-flat security-shell">
       <div class="security-nav">
         <a-tabs v-model:active-key="activeTab" class="security-tabs" type="line">
-          <a-tab-pane key="overview" title="安全总览" />
-          <a-tab-pane key="events" title="风险事件" />
-          <a-tab-pane key="bans" title="自动封禁" />
-          <a-tab-pane key="blacklist" title="黑名单" />
-          <a-tab-pane key="allowlist" title="白名单" />
-          <a-tab-pane key="policy" title="防护策略" />
+          <a-tab-pane key="overview"><template #title><ShieldCheck :size="14" />安全总览</template></a-tab-pane>
+          <a-tab-pane key="events"><template #title><TriangleAlert :size="14" />风险事件</template></a-tab-pane>
+          <a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>
+          <a-tab-pane key="blacklist"><template #title><ShieldOff :size="14" />黑名单</template></a-tab-pane>
+          <a-tab-pane key="allowlist"><template #title><UserRoundCheck :size="14" />白名单</template></a-tab-pane>
+          <a-tab-pane key="policy"><template #title><SlidersHorizontal :size="14" />防护策略</template></a-tab-pane>
         </a-tabs>
         <div class="tab-actions">
-          <a-tag :color="liveStatus.color" bordered><span class="live-dot" />{{ liveStatus.label }}</a-tag>
+          <span :class="['security-live-status', `security-live-status--${liveStatus.color}`]"><span class="live-dot" />{{ liveStatus.label }}</span>
           <a-tooltip content="刷新安全数据">
             <a-button class="uvp-refresh-btn" aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button>
           </a-tooltip>
@@ -607,9 +607,8 @@ onBeforeUnmount(() => {
         <div class="filter-bar">
           <a-select v-model="eventSeverity" aria-label="风险等级" style="width: 150px"><a-option>全部风险</a-option><a-option>高危</a-option><a-option>中危</a-option><a-option>低危</a-option></a-select>
           <a-input v-model="eventSearch" allow-clear placeholder="搜索 IP、方法或 User-Agent" aria-label="搜索风险事件"><template #prefix><Search :size="15" /></template></a-input>
-          <a-button><template #icon><SlidersHorizontal :size="15" /></template>更多筛选</a-button>
         </div>
-        <a-table class="security-table" :data="filteredEvents" row-key="id" :pagination="eventPagination" :scroll="{ x: 1050 }" @page-change="handleEventPageChange" @page-size-change="handleEventPageSizeChange">
+        <a-table class="security-table uvp-data-table" :data="filteredEvents" row-key="id" :pagination="eventPagination" :scroll="{ x: 1050, y: '100%' }" @page-change="handleEventPageChange" @page-size-change="handleEventPageSizeChange">
           <template #columns>
             <a-table-column title="风险" :width="90"><template #cell="{ record }"><span :class="['severity', record.severity === '高危' ? 'high' : record.severity === '中危' ? 'medium' : 'low']"><i />{{ record.severity }}</span></template></a-table-column>
             <a-table-column title="来源" :width="170"><template #cell="{ record }"><strong class="mono">{{ record.source }}</strong><small class="cell-subline">{{ record.location }}</small></template></a-table-column>
@@ -630,7 +629,7 @@ onBeforeUnmount(() => {
           <div><span>本页仅应用层拦截</span><strong>{{ autoBans.filter(item => item.firewallState !== '已生效').length }}</strong></div>
             <div class="ban-summary-note"><ShieldCheck :size="18" /><span><strong>自动封禁与手动黑名单分开管理</strong><small>自动封禁按风险等级限时生效，手动黑名单可设置永久。</small></span></div>
         </div>
-        <a-table class="security-table ban-table" :data="autoBans" row-key="id" :pagination="banPagination" :scroll="{ x: 1060 }" @page-change="handleBanPageChange" @page-size-change="handleBanPageSizeChange">
+        <a-table class="security-table uvp-data-table ban-table" :data="autoBans" row-key="id" :pagination="banPagination" :scroll="{ x: 1060, y: '100%' }" @page-change="handleBanPageChange" @page-size-change="handleBanPageSizeChange">
           <template #columns>
             <a-table-column title="来源" :width="160"><template #cell="{ record }"><strong class="mono">{{ record.source }}</strong><small class="cell-subline">{{ record.location }}</small></template></a-table-column>
             <a-table-column title="进入原因" :width="280"><template #cell="{ record }"><strong class="ban-reason">{{ record.reason }}</strong><small class="cell-subline">{{ record.evidence }}</small></template></a-table-column>
@@ -650,7 +649,7 @@ onBeforeUnmount(() => {
           <div><span>{{ activeTab === 'blacklist' ? '本页人工添加' : '本页永久可信' }}</span><strong>{{ activeTab === 'blacklist' ? currentRules.length : currentRules.filter(item => item.expires === '永久').length }}</strong></div>
           <div class="rule-safety"><ShieldCheck :size="18" /><span><strong>{{ activeTab === 'blacklist' ? '这里只管理手动黑名单' : '白名单不绕过协议校验' }}</strong><small>{{ activeTab === 'blacklist' ? '策略自动生成的临时封禁请到“自动封禁”查看。' : '异常报文仍会被应用层拒绝。' }}</small></span></div>
         </div>
-        <a-table class="security-table" :data="currentRules" row-key="id" :pagination="rulePagination" :scroll="{ x: 900 }" @page-change="handleRulePageChange" @page-size-change="handleRulePageSizeChange">
+        <a-table class="security-table uvp-data-table" :data="currentRules" row-key="id" :pagination="rulePagination" :scroll="{ x: 900, y: '100%' }" @page-change="handleRulePageChange" @page-size-change="handleRulePageSizeChange">
           <template #columns>
             <a-table-column title="类型" data-index="type" :width="120" />
             <a-table-column title="匹配内容" :width="210"><template #cell="{ record }"><span class="mono">{{ record.value }}</span></template></a-table-column>
@@ -701,8 +700,7 @@ onBeforeUnmount(() => {
       </section>
     </div>
 
-    <a-drawer v-model:visible="ruleDrawerVisible" :width="440" :footer="false" unmount-on-close>
-      <template #title>{{ editingRuleKind === 'blacklist' ? '新增黑名单规则' : '新增白名单规则' }}</template>
+    <a-modal v-model:visible="ruleDrawerVisible" modal-class="uvp-system-dialog security-rule-dialog" :title="editingRuleKind === 'blacklist' ? '新增黑名单规则' : '新增白名单规则'" :width="560" :footer="false" unmount-on-close>
               <div class="drawer-intro"><span :class="editingRuleKind"><Ban v-if="editingRuleKind === 'blacklist'" :size="20" /><UserRoundCheck v-else :size="20" /></span><div><strong>{{ editingRuleKind === 'blacklist' ? '拒绝风险来源' : '放行可信来源' }}</strong><p>规则会写入安全策略并在应用层即时生效；User-Agent 规则不会写入主机防火墙。</p></div></div>
       <a-form :model="ruleFormModel" layout="vertical" class="rule-form">
         <a-form-item label="规则类型"><a-radio-group v-model="ruleType" type="button"><a-radio value="IP">IP</a-radio><a-radio value="CIDR">CIDR</a-radio><a-radio value="User-Agent">User-Agent</a-radio></a-radio-group></a-form-item>
@@ -712,7 +710,7 @@ onBeforeUnmount(() => {
       </a-form>
       <a-alert v-if="editingRuleKind === 'allowlist'" type="warning">白名单只降低来源风险分，不会绕过 SIP 格式、鉴权和设备身份校验。</a-alert>
       <div class="drawer-actions"><a-button @click="ruleDrawerVisible = false">取消</a-button><a-button type="primary" @click="saveRule">保存规则</a-button></div>
-    </a-drawer>
+    </a-modal>
   </main>
 </template>
 
@@ -727,6 +725,17 @@ onBeforeUnmount(() => {
   width: 100%;
   max-width: 100%;
   min-width: 0;
+}
+
+.security-preview--workspace {
+  overflow: hidden;
+}
+
+.security-preview--workspace .security-shell {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .security-nav,
@@ -756,6 +765,7 @@ onBeforeUnmount(() => {
 
 .security-nav {
   align-items: flex-end;
+  flex: 0 0 auto;
   gap: 20px;
   margin-bottom: 16px;
   border-bottom: 1px solid var(--uvp-panel-border);
@@ -780,6 +790,20 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--uvp-brand-cyan) 14%, transparent);
 }
 
+.security-live-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  gap: 6px;
+  padding: 0 4px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.security-live-status--green { color: var(--uvp-success); }
+.security-live-status--orange { color: var(--uvp-warning); }
+.security-live-status--red { color: var(--uvp-danger); }
+
 .security-tabs {
   flex: 1;
   min-width: 0;
@@ -792,6 +816,16 @@ onBeforeUnmount(() => {
 
 :deep(.security-tabs .arco-tabs-nav-tab-list) {
   gap: 12px;
+}
+
+:deep(.security-tabs .arco-tabs-tab) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+:deep(.security-tabs .arco-tabs-tab svg) {
+  transform: translateY(1px);
 }
 
 .uvp-system-panel,
@@ -1267,7 +1301,11 @@ onBeforeUnmount(() => {
 }
 
 .workspace-panel {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   padding: 0;
 }
 
@@ -1300,9 +1338,28 @@ onBeforeUnmount(() => {
 .drawer-actions :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
 
 .security-table {
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--uvp-panel-border);
-  border-radius: 9px;
+  border: 0;
+  border-radius: 0;
+}
+
+.security-preview :deep(.uvp-data-table .arco-table-cell) {
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.security-preview :deep(.uvp-data-table .arco-pagination-item),
+.security-preview :deep(.uvp-data-table .arco-pagination-options .arco-select-view-single),
+.security-preview :deep(.uvp-data-table .arco-pagination-jumper-input) {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+}
+
+.security-preview :deep(.uvp-data-table .arco-pagination-item) {
+  min-width: 32px;
 }
 
 :deep(.security-table .arco-table-th) {

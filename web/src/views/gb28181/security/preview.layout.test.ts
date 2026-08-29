@@ -6,7 +6,7 @@ const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/security/p
 
 describe("security preview system integration", () => {
   it("uses the UVP workspace shell and theme tokens", () => {
-    expect(source).toContain('class="snow-page security-preview"');
+    expect(source).toContain(":class=\"['snow-page', 'security-preview', { 'security-preview--workspace': ['events', 'bans', 'blacklist', 'allowlist'].includes(activeTab) }]\"");
     expect(source).toContain('class="snow-inner uvp-page-shell-flat security-shell"');
     expect(source).toContain("var(--uvp-panel-bg)");
     expect(source).toContain("var(--uvp-brand)");
@@ -20,8 +20,11 @@ describe("security preview system integration", () => {
     expect(source).not.toContain("min-height: 100vh");
   });
 
-  it("binds the rule drawer form to a model", () => {
+  it("opens the rule form in the shared system dialog", () => {
     expect(source).toContain(':model="ruleFormModel"');
+    expect(source).toContain('<a-modal v-model:visible="ruleDrawerVisible"');
+    expect(source).toContain('modal-class="uvp-system-dialog security-rule-dialog"');
+    expect(source).not.toContain('<a-drawer v-model:visible="ruleDrawerVisible"');
   });
 
   it("keeps navigation actions without a duplicate page heading", () => {
@@ -70,8 +73,13 @@ describe("security preview system integration", () => {
     expect(source).toContain(".mode-result-grid");
   });
 
+  it("aligns security navigation icons with their labels", () => {
+    expect(source).toMatch(/\.security-tabs \.arco-tabs-tab\)\s*{[^}]*gap:\s*8px;/s);
+    expect(source).toMatch(/\.security-tabs \.arco-tabs-tab svg\)\s*{[^}]*transform:\s*translateY\(1px\);/s);
+  });
+
   it("separates automatic firewall bans from manual blacklist rules", () => {
-    expect(source).toContain('<a-tab-pane key="bans" title="自动封禁" />');
+    expect(source).toContain('<a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>');
     expect(source).toContain('activeTab === \'bans\'');
     expect(source).toContain("进入原因");
     expect(source).toContain("主机防火墙{{ record.firewallState }}");
@@ -99,7 +107,7 @@ describe("security preview system integration", () => {
   });
 
   it("uses the existing Arco table pagination style for all security lists", () => {
-    expect(source).toContain("const tablePageSizeOptions = [10, 20, 30, 50]");
+    expect(source).toContain("const tablePageSizeOptions = [10, 20, 50, 100]");
     expect(source).toContain(':pagination="eventPagination"');
     expect(source).toContain(':pagination="banPagination"');
     expect(source).toContain(':pagination="rulePagination"');
@@ -110,6 +118,32 @@ describe("security preview system integration", () => {
     expect(source).toContain('@page-change="handleEventPageChange"');
     expect(source).toContain('@page-change="handleBanPageChange"');
     expect(source).toContain('@page-change="handleRulePageChange"');
+  });
+
+  it("keeps list scrolling inside each table workspace", () => {
+    expect(source).toContain(":scroll=\"{ x: 1050, y: '100%' }\"");
+    expect(source).toContain(":scroll=\"{ x: 1060, y: '100%' }\"");
+    expect(source).toContain(":scroll=\"{ x: 900, y: '100%' }\"");
+    expect(source).toMatch(/\.security-preview--workspace\s*{[^}]*overflow:\s*hidden;/s);
+    expect(source).toMatch(/\.workspace-panel\s*{[^}]*display:\s*flex;[^}]*min-height:\s*0;/s);
+    expect(source).toMatch(/\.security-table\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;/s);
+  });
+
+  it("uses the shared data table and pagination treatment", () => {
+    expect(source).toContain("const tablePageSizeOptions = [10, 20, 50, 100]");
+    expect(source).toContain('class="security-table uvp-data-table"');
+    expect(source).toContain('class="security-table uvp-data-table ban-table"');
+    expect(source).toMatch(/\.security-preview :deep\(\.uvp-data-table \.arco-table-cell\)\s*{[^}]*font-size:\s*14px;[^}]*line-height:\s*22px;/s);
+    expect(source).toMatch(/\.security-preview :deep\(\.uvp-data-table \.arco-pagination-item\)/);
+  });
+
+  it("keeps security tables free of an outer frame", () => {
+    expect(source).toMatch(/\.security-table\s*{[^}]*border:\s*0;[^}]*border-radius:\s*0;/s);
+  });
+
+  it("renders the protection status as a non-action indicator", () => {
+    expect(source).toContain("security-live-status");
+    expect(source).not.toContain('<a-tag :color="liveStatus.color" bordered>');
   });
 
   it("keeps later event pages stable during automatic refresh", () => {
