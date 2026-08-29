@@ -3,6 +3,7 @@ package management
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -318,4 +319,136 @@ func TestRuntimeReaderCapabilityProfileIsCopiedFromCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "/index/api/getStatistic", second.APIs[0])
 	require.NotEqual(t, "mutated", second.Reasons["getStatistic"])
+}
+
+func TestRuntimeReaderTypedMediaReadsUseCompleteIdentityAndCloneResults(t *testing.T) {
+	var listCalls atomic.Int32
+	var infoCalls atomic.Int32
+	var playerCalls atomic.Int32
+	reader, current, cleanup := newRuntimeReaderFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		switch r.URL.Path {
+		case "/index/api/getMediaList":
+			listCalls.Add(1)
+			require.Equal(t, "rtsp", q.Get("schema"))
+			require.Equal(t, "__defaultVhost__", q.Get("vhost"))
+			require.Equal(t, "app/北门", q.Get("app"))
+			require.Equal(t, "stream ?/01", q.Get("stream"))
+			_, _ = w.Write([]byte(`{"code":0,"data":[{"schema":"rtsp","vhost":"__defaultVhost__","app":"app/北门","stream":"stream ?/01","tracks":[{"codec_id":0,"loss":0.1}]}]}`))
+		case "/index/api/getMediaInfo":
+			infoCalls.Add(1)
+			require.Equal(t, "rtsp", q.Get("schema"))
+			require.Equal(t, "__defaultVhost__", q.Get("vhost"))
+			require.Equal(t, "app/北门", q.Get("app"))
+			require.Equal(t, "stream ?/01", q.Get("stream"))
+			_, _ = w.Write([]byte(`{"code":0,"schema":"rtsp","vhost":"__defaultVhost__","app":"app/北门","stream":"stream ?/01","tracks":[{"codec_id":0,"loss":0.2}]}`))
+		case "/index/api/getMediaPlayerList":
+			playerCalls.Add(1)
+			require.Equal(t, "rtsp", q.Get("schema"))
+			require.Equal(t, "__defaultVhost__", q.Get("vhost"))
+			require.Equal(t, "app/北门", q.Get("app"))
+			require.Equal(t, "stream ?/01", q.Get("stream"))
+			_, _ = w.Write([]byte(`{"code":0,"data":[{"identifier":"player-1","peer_ip":"10.0.0.8"}]}`))
+		default:
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+	})
+	defer cleanup()
+
+	filter := zlm.MediaFilter{Schema: "rtsp", VHost: "__defaultVhost__", App: "app/北门", Stream: "stream ?/01"}
+	firstList, err := reader.GetMediaListFiltered(context.Background(), current.ID, filter)
+	require.NoError(t, err)
+	require.Len(t, firstList, 1)
+	firstList[0].Tracks[0].CodecID = 99
+	secondList, err := reader.GetMediaListFiltered(context.Background(), current.ID, filter)
+	require.NoError(t, err)
+	require.Equal(t, 0, secondList[0].Tracks[0].CodecID)
+	require.Equal(t, int32(1), listCalls.Load())
+
+	target := zlm.StreamTarget{Schema: "rtsp", VHost: "__defaultVhost__", App: "app/北门", Stream: "stream ?/01"}
+	info, err := reader.GetMediaInfo(context.Background(), current.ID, target)
+	require.NoError(t, err)
+	require.NotNil(t, info)
+	require.Equal(t, "stream ?/01", info.Stream)
+	info.Tracks[0].CodecID = 88
+	infoAgain, err := reader.GetMediaInfo(context.Background(), current.ID, target)
+	require.NoError(t, err)
+	require.Equal(t, 0, infoAgain.Tracks[0].CodecID)
+	require.Equal(t, int32(1), infoCalls.Load())
+
+	players, err := reader.GetMediaPlayerList(context.Background(), current.ID, target)
+	require.NoError(t, err)
+	require.Len(t, players, 1)
+	require.Equal(t, "player-1", players[0].Identifier)
+	require.Equal(t, int32(1), playerCalls.Load())
+}
+
+func TestRuntimeReaderMediaListCacheKeyIncludesSchema(t *testing.T) {
+	var calls atomic.Int32
+	reader, current, cleanup := newRuntimeReaderFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/index/api/getMediaList", r.URL.Path)
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"code":0,"data":[]}`))
+	})
+	defer cleanup()
+
+	filter := zlm.MediaFilter{Schema: "rtsp", VHost: "__defaultVhost__", App: "app", Stream: "stream"}
+	_, err := reader.GetMediaListFiltered(context.Background(), current.ID, filter)
+	require.NoError(t, err)
+	filter.Schema = "rtmp"
+	_, err = reader.GetMediaListFiltered(context.Background(), current.ID, filter)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), calls.Load())
+}
+
+func TestRuntimeReaderMediaInfoStrictMapsNotFound(t *testing.T) {
+	reader, current, cleanup := newRuntimeReaderFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/index/api/getMediaInfo", r.URL.Path)
+		_, _ = w.Write([]byte(`{"code":-500,"msg":"can not find the stream"}`))
+	})
+	defer cleanup()
+
+	_, err := reader.GetMediaInfo(context.Background(), current.ID, zlm.StreamTarget{
+		Schema: "rtsp", VHost: "__defaultVhost__", App: "rtp", Stream: "missing",
+	})
+	got, ok := AsManagementError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeInternal, got.Code)
+	require.NotEqual(t, CodeNodeNotFound, got.Code)
+	require.True(t, errors.Is(err, ErrMediaNotFound))
+	require.True(t, errors.Is(err, zlm.ErrMediaNotFound))
+}
+
+func TestRuntimeReaderMediaPlayerListStrictMapsNotFound(t *testing.T) {
+	reader, current, cleanup := newRuntimeReaderFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/index/api/getMediaPlayerList", r.URL.Path)
+		_, _ = w.Write([]byte(`{"code":-500,"msg":"can not find the stream"}`))
+	})
+	defer cleanup()
+
+	_, err := reader.GetMediaPlayerList(context.Background(), current.ID, zlm.StreamTarget{
+		Schema: "rtsp", VHost: "__defaultVhost__", App: "rtp", Stream: "missing",
+	})
+	got, ok := AsManagementError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeInternal, got.Code)
+	require.NotEqual(t, CodeNodeNotFound, got.Code)
+	require.True(t, errors.Is(err, ErrMediaNotFound))
+	require.True(t, errors.Is(err, zlm.ErrMediaNotFound))
+}
+
+func TestRuntimeReaderMediaInfoStrictMapsOtherFailure(t *testing.T) {
+	reader, current, cleanup := newRuntimeReaderFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/index/api/getMediaInfo", r.URL.Path)
+		_, _ = w.Write([]byte(`{"code":-1,"msg":"backend failed"}`))
+	})
+	defer cleanup()
+
+	_, err := reader.GetMediaInfo(context.Background(), current.ID, zlm.StreamTarget{
+		Schema: "rtsp", VHost: "__defaultVhost__", App: "rtp", Stream: "broken",
+	})
+	got, ok := AsManagementError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeInternal, got.Code)
+	require.NotContains(t, got.Error(), "backend failed")
 }

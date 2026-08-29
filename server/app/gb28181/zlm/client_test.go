@@ -2,6 +2,7 @@ package zlm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -210,6 +211,53 @@ func TestKickSessions_WithFilter(t *testing.T) {
 	}
 }
 
+func TestKickSessionsParsesCountHit(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/kick_sessions" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"count_hit":9}`))
+	})
+	defer srv.Close()
+
+	count, err := c.KickSessions(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("KickSessions 报错: %v", err)
+	}
+	if count != 9 {
+		t.Fatalf("count=%d want 9", count)
+	}
+}
+
+func TestGetMediaListFilteredPassesSchemaAndSpecialValues(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/getMediaList" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		for key, want := range map[string]string{
+			"schema": "rtsp", "vhost": "__defaultVhost__", "app": "app/北门",
+			"stream": "stream ?/01", "secret": "test-secret",
+		} {
+			if got := q.Get(key); got != want {
+				t.Errorf("%s=%q want %q", key, got, want)
+			}
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"schema":"rtsp","vhost":"__defaultVhost__","app":"app/北门","stream":"stream ?/01"}]}`))
+	})
+	defer srv.Close()
+
+	media, err := c.GetMediaListFiltered(context.Background(), MediaFilter{
+		Schema: "rtsp", VHost: "__defaultVhost__", App: "app/北门", Stream: "stream ?/01",
+	})
+	if err != nil {
+		t.Fatalf("GetMediaListFiltered 报错: %v", err)
+	}
+	if len(media) != 1 || media[0].Schema != "rtsp" || media[0].Stream != "stream ?/01" {
+		t.Fatalf("media=%+v", media)
+	}
+}
+
 func TestGetMediaPlayerList_MockedZLM(t *testing.T) {
 	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/index/api/getMediaPlayerList" {
@@ -300,6 +348,90 @@ func TestCloseStreams_MockedZLM(t *testing.T) {
 	}
 	if n != 7 {
 		t.Errorf("期望 count=7 实际=%d", n)
+	}
+}
+
+func TestCloseStreamsDetailedParsesHitAndClosedCounts(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/index/api/close_streams" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("force"); got != "1" {
+			t.Fatalf("force=%q want 1", got)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"count_hit":4,"count_closed":3}`))
+	})
+	defer srv.Close()
+
+	result, err := c.CloseStreamsDetailed(context.Background(), map[string]string{"force": "1"})
+	if err != nil {
+		t.Fatalf("CloseStreamsDetailed 报错: %v", err)
+	}
+	if result.CountHit != 4 || result.CountClosed != 3 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestCloseStreamUsesSingularTypedTargetAndNotFound(t *testing.T) {
+	var calls int
+	c, srv := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path != "/index/api/close_stream" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		q := r.URL.Query()
+		for key, want := range map[string]string{
+			"schema": "rtsp", "vhost": "__defaultVhost__", "app": "rtp", "stream": "stream/01",
+			"force": "1", "secret": "test-secret",
+		} {
+			if got := q.Get(key); got != want {
+				t.Errorf("%s=%q want %q", key, got, want)
+			}
+		}
+		_, _ = w.Write([]byte(`{"code":-500,"msg":"can not find the stream"}`))
+	})
+	defer srv.Close()
+
+	_, err := c.CloseStream(context.Background(), StreamTarget{
+		Schema: "rtsp", VHost: "__defaultVhost__", App: "rtp", Stream: "stream/01",
+	}, true)
+	if !errors.Is(err, ErrMediaNotFound) {
+		t.Fatalf("error=%v want ErrMediaNotFound", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls=%d want 1", calls)
+	}
+}
+
+func TestCloseStreamRejectsIncompleteTargetBeforeHTTP(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		t.Fatal("invalid target must not call ZLM")
+	})
+	defer srv.Close()
+
+	_, err := c.CloseStream(context.Background(), StreamTarget{Schema: "rtsp", VHost: "__defaultVhost__", App: "rtp"}, false)
+	if err == nil {
+		t.Fatal("incomplete target must fail")
+	}
+}
+
+func TestCloseStreamRejectsNonZeroResult(t *testing.T) {
+	c, srv := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":0,"result":-1,"msg":"backend failure test-secret"}`))
+	})
+	defer srv.Close()
+
+	result, err := c.CloseStream(context.Background(), StreamTarget{
+		Schema: "rtsp", VHost: "__defaultVhost__", App: "rtp", Stream: "stream-1",
+	}, false)
+	if err == nil {
+		t.Fatal("non-zero result must fail")
+	}
+	if strings.Contains(err.Error(), "test-secret") || strings.Contains(err.Error(), "backend failure") {
+		t.Fatalf("close error leaked upstream details: %v", err)
+	}
+	if result.Closed {
+		t.Fatalf("failed close result=%+v", result)
 	}
 }
 

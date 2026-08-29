@@ -2,6 +2,7 @@ package zlm
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 )
@@ -57,5 +58,35 @@ func TestGetMediaInfoNotFoundIsOffline(t *testing.T) {
 	}
 	if info.Online || info.App != "rtp" || info.Stream != "missing" {
 		t.Fatalf("unexpected missing result: %+v", info)
+	}
+}
+
+func TestGetMediaInfoStrictPreservesNotFound(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":-500,"msg":"can not find the stream"}`))
+	})
+	defer server.Close()
+
+	info, err := c.GetMediaInfoStrict(context.Background(), "rtsp", "__defaultVhost__", "rtp", "missing")
+	if info != nil {
+		t.Fatalf("strict missing info=%+v want nil", info)
+	}
+	if !errors.Is(err, ErrMediaNotFound) {
+		t.Fatalf("strict error=%v want ErrMediaNotFound", err)
+	}
+}
+
+func TestGetMediaInfoStrictDoesNotConvertOtherFailureToOffline(t *testing.T) {
+	c, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":-1,"msg":"backend failed"}`))
+	})
+	defer server.Close()
+
+	info, err := c.GetMediaInfoStrict(context.Background(), "rtsp", "__defaultVhost__", "rtp", "broken")
+	if info != nil {
+		t.Fatalf("strict failure info=%+v want nil", info)
+	}
+	if err == nil || errors.Is(err, ErrMediaNotFound) {
+		t.Fatalf("strict failure error=%v", err)
 	}
 }

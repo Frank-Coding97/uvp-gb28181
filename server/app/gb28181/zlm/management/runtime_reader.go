@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
@@ -14,6 +15,12 @@ import (
 )
 
 const DefaultRuntimeCacheTTL = 250 * time.Millisecond
+
+// ErrMediaNotFound distinguishes an absent media resource from an absent
+// management node. RuntimeReader preserves this sentinel through the
+// executor's redacted error envelope so callers can map the resource result
+// without exposing ZLM's response text.
+var ErrMediaNotFound = errors.New("media resource not found")
 
 // RuntimeReader is the typed read facade for ZLM runtime data. It has no
 // arbitrary API name, query map or URL forwarding method. All upstream calls
@@ -117,6 +124,117 @@ func (r *RuntimeReader) GetAllSessions(ctx context.Context, nodeID int64, filter
 		return nil, NewInternalError(nodeIDString(nodeID), "runtime session cache type mismatch")
 	}
 	return cloneSessions(sessions), nil
+}
+
+// GetMediaListFiltered returns media sources matching the complete typed
+// filter. Schema is part of the cache key and is passed to ZLM; a result from
+// one protocol view can therefore never be reused for another.
+func (r *RuntimeReader) GetMediaListFiltered(ctx context.Context, nodeID int64, filter zlm.MediaFilter) ([]zlm.MediaInfo, error) {
+	if err := r.guardRead(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	if err := r.rejectUnsupported(nodeID, zlm.CapabilityGetMediaList); err != nil {
+		return nil, err
+	}
+	key := cacheKey("media-list", nodeID, mediaFilterKey(filter))
+	value, err := r.load(ctx, key, func(callCtx context.Context) (interface{}, error) {
+		var media []zlm.MediaInfo
+		err := r.executeRead(callCtx, nodeID, func(operationCtx context.Context, client *zlm.Client) error {
+			var readErr error
+			media, readErr = client.GetMediaListFiltered(operationCtx, filter)
+			return readErr
+		})
+		if err != nil {
+			return nil, err
+		}
+		return cloneMediaInfos(media), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	media, ok := value.([]zlm.MediaInfo)
+	if !ok {
+		return nil, NewInternalError(nodeIDString(nodeID), "runtime media list cache type mismatch")
+	}
+	return cloneMediaInfos(media), nil
+}
+
+// GetMediaInfo returns a typed detail snapshot for one complete media target.
+// The strict client method is used so NotFound and other ZLM failures are not
+// silently converted into an offline-looking value.
+func (r *RuntimeReader) GetMediaInfo(ctx context.Context, nodeID int64, target zlm.StreamTarget) (*zlm.MediaInfo, error) {
+	if err := target.Validate(); err != nil {
+		return nil, NewValidationError(map[string]string{"media": "invalid stream target"})
+	}
+	if err := r.guardRead(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	if err := r.rejectUnsupported(nodeID, zlm.CapabilityGetMediaInfo); err != nil {
+		return nil, err
+	}
+	key := cacheKey("media-info", nodeID, streamTargetKey(target))
+	value, err := r.load(ctx, key, func(callCtx context.Context) (interface{}, error) {
+		var media *zlm.MediaInfo
+		err := r.executeRead(callCtx, nodeID, func(operationCtx context.Context, client *zlm.Client) error {
+			var readErr error
+			media, readErr = client.GetMediaInfoStrict(operationCtx, target.Schema, target.VHost, target.App, target.Stream)
+			if errors.Is(readErr, zlm.ErrMediaNotFound) {
+				return errors.Join(ErrMediaNotFound, readErr)
+			}
+			return readErr
+		})
+		if err != nil {
+			return nil, err
+		}
+		return cloneMediaInfo(media), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	media, ok := value.(*zlm.MediaInfo)
+	if !ok {
+		return nil, NewInternalError(nodeIDString(nodeID), "runtime media info cache type mismatch")
+	}
+	return cloneMediaInfo(media), nil
+}
+
+// GetMediaPlayerList returns the active players for one complete media
+// target. The target is part of the cache key and every returned slice is
+// copied before crossing the management boundary.
+func (r *RuntimeReader) GetMediaPlayerList(ctx context.Context, nodeID int64, target zlm.StreamTarget) ([]zlm.MediaPlayer, error) {
+	if err := target.Validate(); err != nil {
+		return nil, NewValidationError(map[string]string{"media": "invalid stream target"})
+	}
+	if err := r.guardRead(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	if err := r.rejectUnsupported(nodeID, zlm.CapabilityGetMediaPlayerList); err != nil {
+		return nil, err
+	}
+	key := cacheKey("media-players", nodeID, streamTargetKey(target))
+	value, err := r.load(ctx, key, func(callCtx context.Context) (interface{}, error) {
+		var players []zlm.MediaPlayer
+		err := r.executeRead(callCtx, nodeID, func(operationCtx context.Context, client *zlm.Client) error {
+			var readErr error
+			players, readErr = client.GetMediaPlayerList(operationCtx, target.Schema, target.VHost, target.App, target.Stream)
+			if errors.Is(readErr, zlm.ErrMediaNotFound) {
+				return errors.Join(ErrMediaNotFound, readErr)
+			}
+			return readErr
+		})
+		if err != nil {
+			return nil, err
+		}
+		return cloneMediaPlayers(players), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	players, ok := value.([]zlm.MediaPlayer)
+	if !ok {
+		return nil, NewInternalError(nodeIDString(nodeID), "runtime media player cache type mismatch")
+	}
+	return cloneMediaPlayers(players), nil
 }
 
 // GetCapabilityProfile probes getApiList and records supported, unsupported
@@ -336,11 +454,67 @@ func sessionFilterKey(filter zlm.SessionFilter) string {
 	return values.Encode()
 }
 
+func mediaFilterKey(filter zlm.MediaFilter) string {
+	values := url.Values{}
+	values.Set("schema", filter.Schema)
+	values.Set("vhost", filter.VHost)
+	values.Set("app", filter.App)
+	values.Set("stream", filter.Stream)
+	return values.Encode()
+}
+
+func streamTargetKey(target zlm.StreamTarget) string {
+	values := url.Values{}
+	values.Set("schema", target.Schema)
+	values.Set("vhost", target.VHost)
+	values.Set("app", target.App)
+	values.Set("stream", target.Stream)
+	return values.Encode()
+}
+
 func cloneSessions(sessions []zlm.Session) []zlm.Session {
 	if sessions == nil {
 		return []zlm.Session{}
 	}
 	return append([]zlm.Session(nil), sessions...)
+}
+
+func cloneMediaInfos(media []zlm.MediaInfo) []zlm.MediaInfo {
+	if media == nil {
+		return []zlm.MediaInfo{}
+	}
+	cloned := make([]zlm.MediaInfo, len(media))
+	for i := range media {
+		cloned[i] = *cloneMediaInfo(&media[i])
+	}
+	return cloned
+}
+
+func cloneMediaInfo(media *zlm.MediaInfo) *zlm.MediaInfo {
+	if media == nil {
+		return nil
+	}
+	copy := *media
+	copy.Tracks = make([]zlm.MediaTrack, len(media.Tracks))
+	for i := range media.Tracks {
+		copy.Tracks[i] = media.Tracks[i]
+		if media.Tracks[i].Loss != nil {
+			loss := *media.Tracks[i].Loss
+			copy.Tracks[i].Loss = &loss
+		}
+	}
+	if media.OriginSock != nil {
+		sock := *media.OriginSock
+		copy.OriginSock = &sock
+	}
+	return &copy
+}
+
+func cloneMediaPlayers(players []zlm.MediaPlayer) []zlm.MediaPlayer {
+	if players == nil {
+		return []zlm.MediaPlayer{}
+	}
+	return append([]zlm.MediaPlayer(nil), players...)
 }
 
 func cloneCapabilityProfile(profile zlm.CapabilityProfile) zlm.CapabilityProfile {

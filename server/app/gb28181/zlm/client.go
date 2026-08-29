@@ -3,6 +3,7 @@ package zlm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
@@ -244,6 +245,60 @@ type MediaInfo struct {
 	Tracks           []MediaTrack `json:"tracks"`
 }
 
+// MediaFilter is the complete optional filter accepted by getMediaList.
+// Empty fields are omitted, matching ZLM's list-all semantics. Schema is
+// deliberately part of the type: filtering only by app/stream can mix the
+// independent protocol views of one media source.
+type MediaFilter struct {
+	Schema string
+	VHost  string
+	App    string
+	Stream string
+}
+
+// StreamTarget identifies exactly one ZLM media source. All fields are
+// required by close_stream and by the typed runtime detail APIs.
+type StreamTarget struct {
+	Schema string
+	VHost  string
+	App    string
+	Stream string
+}
+
+func (target StreamTarget) Validate() error {
+	if strings.TrimSpace(target.Schema) == "" || strings.TrimSpace(target.VHost) == "" ||
+		strings.TrimSpace(target.App) == "" || strings.TrimSpace(target.Stream) == "" {
+		return errors.New("invalid stream target")
+	}
+	return nil
+}
+
+// CloseStreamResult is the stable result of a singular close_stream call.
+// ZLM uses result=0 for a successful close; Closed is kept explicit for
+// callers that do not need to inspect the wire integer.
+type CloseStreamResult struct {
+	Result int  `json:"result"`
+	Closed bool `json:"closed"`
+}
+
+// BatchCloseResult reports both the number of matching media sources and the
+// number of asynchronous close requests submitted by close_streams.
+type BatchCloseResult struct {
+	CountHit    int `json:"count_hit"`
+	CountClosed int `json:"count_closed"`
+}
+
+// ErrMediaNotFound is returned by strict media detail/close calls when ZLM
+// reports code=-500. The caller may treat this as an idempotent already-absent
+// result while all other non-zero codes remain errors.
+var ErrMediaNotFound = errors.New("media not found")
+
+const (
+	CapabilityGetMediaList       = "getMediaList"
+	CapabilityGetMediaInfo       = "getMediaInfo"
+	CapabilityGetMediaPlayerList = "getMediaPlayerList"
+)
+
 type SockInfo struct {
 	PeerIP     string `json:"peer_ip"`
 	PeerPort   int    `json:"peer_port"`
@@ -393,6 +448,18 @@ func (c *Client) IsRecording(ctx context.Context, vhost, appName, stream string)
 // GetMediaInfo 查询单路流详情(verify-after-hook 用)
 // 返回 online=false 表示流未就绪(包含"流不存在"和"流存在但暂无数据"两种情况)
 func (c *Client) GetMediaInfo(ctx context.Context, schema, vhost, app, stream string) (*MediaInfo, error) {
+	return c.getMediaInfo(ctx, schema, vhost, app, stream, false)
+}
+
+// GetMediaInfoStrict is the typed management-facing detail query. Unlike the
+// legacy GetMediaInfo wrapper, it preserves ZLM NotFound and other non-zero
+// response codes as errors instead of converting every failure into an
+// offline-looking MediaInfo value.
+func (c *Client) GetMediaInfoStrict(ctx context.Context, schema, vhost, app, stream string) (*MediaInfo, error) {
+	return c.getMediaInfo(ctx, schema, vhost, app, stream, true)
+}
+
+func (c *Client) getMediaInfo(ctx context.Context, schema, vhost, app, stream string, strict bool) (*MediaInfo, error) {
 	var r struct {
 		baseResp
 		MediaInfo
@@ -403,10 +470,16 @@ func (c *Client) GetMediaInfo(ctx context.Context, schema, vhost, app, stream st
 		"app":    app,
 		"stream": stream,
 	}
-	if err := c.call(ctx, "getMediaInfo", params, &r); err != nil {
+	if err := c.call(ctx, CapabilityGetMediaInfo, params, &r); err != nil {
 		return nil, err
 	}
 	if r.Code != 0 {
+		if strict {
+			if r.Code == -500 {
+				return nil, ErrMediaNotFound
+			}
+			return nil, c.runtimeResponseError(CapabilityGetMediaInfo, r.Code, r.Msg)
+		}
 		// 流不存在:online=false,不报错
 		return &MediaInfo{Schema: schema, VHost: vhost, App: app, Stream: stream}, nil
 	}
@@ -423,25 +496,45 @@ func (c *Client) GetMediaInfo(ctx context.Context, schema, vhost, app, stream st
 // GetMediaList 查询节点上所有活跃媒体的列表,按 (vhost, app, stream) 过滤(留空则不过滤)。
 // 同一路流在 ZLM 内部会拆成多个 schema(rtsp/rtmp/hls/ts/fmp4 等),每个 schema 独立计数,
 // 想要聚合观众数、码率等指标必须走这个 API,单查 getMediaInfo 会漏统计其他 schema 的下游。
+//
+// This is the legacy wrapper. New management code should use
+// GetMediaListFiltered so schema cannot be accidentally omitted.
 func (c *Client) GetMediaList(ctx context.Context, vhost, app, stream string) ([]MediaInfo, error) {
+	return c.getMediaList(ctx, MediaFilter{VHost: vhost, App: app, Stream: stream}, false)
+}
+
+// GetMediaListFiltered queries getMediaList with the complete typed filter.
+// Unlike the legacy wrapper, a non-zero ZLM response is returned as an error
+// so a management caller cannot mistake a failed query for an empty list.
+func (c *Client) GetMediaListFiltered(ctx context.Context, filter MediaFilter) ([]MediaInfo, error) {
+	return c.getMediaList(ctx, filter, true)
+}
+
+func (c *Client) getMediaList(ctx context.Context, filter MediaFilter, strict bool) ([]MediaInfo, error) {
 	var r struct {
 		baseResp
 		Data []MediaInfo `json:"data"`
 	}
 	params := map[string]string{}
-	if vhost != "" {
-		params["vhost"] = vhost
+	if filter.Schema != "" {
+		params["schema"] = filter.Schema
 	}
-	if app != "" {
-		params["app"] = app
+	if filter.VHost != "" {
+		params["vhost"] = filter.VHost
 	}
-	if stream != "" {
-		params["stream"] = stream
+	if filter.App != "" {
+		params["app"] = filter.App
 	}
-	if err := c.call(ctx, "getMediaList", params, &r); err != nil {
+	if filter.Stream != "" {
+		params["stream"] = filter.Stream
+	}
+	if err := c.call(ctx, CapabilityGetMediaList, params, &r); err != nil {
 		return nil, err
 	}
 	if r.Code != 0 {
+		if strict {
+			return nil, c.runtimeResponseError(CapabilityGetMediaList, r.Code, r.Msg)
+		}
 		return nil, nil
 	}
 	for i := range r.Data {
@@ -480,11 +573,14 @@ func (c *Client) GetMediaPlayerList(ctx context.Context, schema, vhost, app, str
 		"app":    app,
 		"stream": stream,
 	}
-	if err := c.call(ctx, "getMediaPlayerList", params, &r); err != nil {
+	if err := c.call(ctx, CapabilityGetMediaPlayerList, params, &r); err != nil {
 		return nil, err
 	}
 	if r.Code != 0 {
-		return nil, fmt.Errorf("getMediaPlayerList code=%d msg=%s", r.Code, r.Msg)
+		if r.Code == -500 {
+			return nil, ErrMediaNotFound
+		}
+		return nil, c.runtimeResponseError(CapabilityGetMediaPlayerList, r.Code, r.Msg)
 	}
 	return r.Data, nil
 }
@@ -513,7 +609,8 @@ func (c *Client) KickSession(ctx context.Context, identifier string) error {
 func (c *Client) KickSessions(ctx context.Context, filter map[string]string) (int, error) {
 	var r struct {
 		baseResp
-		Count int `json:"count"`
+		CountHit *int `json:"count_hit"`
+		Count    *int `json:"count"` // legacy ZLM response spelling
 	}
 	if err := c.call(ctx, "kick_sessions", filter, &r); err != nil {
 		return 0, err
@@ -521,24 +618,91 @@ func (c *Client) KickSessions(ctx context.Context, filter map[string]string) (in
 	if r.Code != 0 {
 		return 0, fmt.Errorf("kick_sessions code=%d msg=%s", r.Code, r.Msg)
 	}
-	return r.Count, nil
+	if r.CountHit != nil {
+		return *r.CountHit, nil
+	}
+	if r.Count != nil {
+		return *r.Count, nil
+	}
+	return 0, nil
 }
 
 // CloseStreams 关闭(可选 filter)推流,返回被关闭的流数
 //
 // filter 支持 ZLM 的 schema / vhost / app / stream / force,留空踢全部。
 func (c *Client) CloseStreams(ctx context.Context, filter map[string]string) (int, error) {
-	var r struct {
-		baseResp
-		Count int `json:"count"`
-	}
-	if err := c.call(ctx, "close_streams", filter, &r); err != nil {
+	result, err := c.CloseStreamsDetailed(ctx, filter)
+	if err != nil {
 		return 0, err
 	}
-	if r.Code != 0 {
-		return 0, fmt.Errorf("close_streams code=%d msg=%s", r.Code, r.Msg)
+	return result.CountClosed, nil
+}
+
+// CloseStreamsDetailed preserves the two independent counts returned by
+// close_streams: count_hit is the number of matching media sources while
+// count_closed is the number of asynchronous close requests submitted.
+func (c *Client) CloseStreamsDetailed(ctx context.Context, filter map[string]string) (BatchCloseResult, error) {
+	var r struct {
+		baseResp
+		CountHit    *int `json:"count_hit"`
+		CountClosed *int `json:"count_closed"`
+		Count       *int `json:"count"` // legacy response spelling
 	}
-	return r.Count, nil
+	if err := c.call(ctx, "close_streams", filter, &r); err != nil {
+		return BatchCloseResult{}, err
+	}
+	if r.Code != 0 {
+		return BatchCloseResult{}, fmt.Errorf("close_streams code=%d msg=%s", r.Code, r.Msg)
+	}
+	if r.CountHit != nil || r.CountClosed != nil {
+		result := BatchCloseResult{}
+		if r.CountHit != nil {
+			result.CountHit = *r.CountHit
+		}
+		if r.CountClosed != nil {
+			result.CountClosed = *r.CountClosed
+		}
+		return result, nil
+	}
+	if r.Count != nil {
+		return BatchCloseResult{CountHit: *r.Count, CountClosed: *r.Count}, nil
+	}
+	return BatchCloseResult{}, nil
+}
+
+// CloseStream closes exactly one media source through ZLM's singular API.
+// The complete four-field identity is mandatory; callers must not substitute
+// close_streams because its asynchronous batch semantics cannot prove that a
+// particular target was closed.
+func (c *Client) CloseStream(ctx context.Context, target StreamTarget, force bool) (CloseStreamResult, error) {
+	if err := target.Validate(); err != nil {
+		return CloseStreamResult{}, err
+	}
+	params := map[string]string{
+		"schema": target.Schema,
+		"vhost":  target.VHost,
+		"app":    target.App,
+		"stream": target.Stream,
+	}
+	if force {
+		params["force"] = "1"
+	} else {
+		params["force"] = "0"
+	}
+	var r struct {
+		baseResp
+		Result int `json:"result"`
+	}
+	if err := c.call(ctx, "close_stream", params, &r); err != nil {
+		return CloseStreamResult{}, err
+	}
+	if r.Code == -500 {
+		return CloseStreamResult{}, ErrMediaNotFound
+	}
+	if r.Code != 0 || r.Result != 0 {
+		return CloseStreamResult{Result: r.Result}, fmt.Errorf("close_stream code=%d result=%d", r.Code, r.Result)
+	}
+	return CloseStreamResult{Result: r.Result, Closed: true}, nil
 }
 
 // RestartServer 重启 ZLM 服务
