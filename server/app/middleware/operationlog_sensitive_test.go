@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,18 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 )
+
+type countingBody struct {
+	reader io.Reader
+	reads  int
+}
+
+func (b *countingBody) Read(p []byte) (int, error) {
+	b.reads++
+	return b.reader.Read(p)
+}
+
+func (b *countingBody) Close() error { return nil }
 
 func TestResponseWriterDoesNotCaptureSensitivePayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -49,4 +62,22 @@ func TestForceLogoutAuditContainsActorAndMaskedTargetOnly(t *testing.T) {
 	for _, secret := range []string{"1234567890abcdef", "authorization", "refresh_token_hash"} {
 		require.NotContains(t, strings.ToLower(record.RequestData), secret)
 	}
+}
+
+func TestOperationLogDoesNotReadServerStartedPayload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := &countingBody{reader: strings.NewReader(`{"general.mediaServerId":"node-a","api.secret":"must-never-escape"}`)}
+	request := httptest.NewRequest(http.MethodPost, "/index/hook/on_server_started", nil)
+	request.Body = body
+	recorder := httptest.NewRecorder()
+	engine := gin.New()
+	engine.Use(OperationLogMiddleware())
+	engine.POST("/index/hook/on_server_started", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"code": 0})
+	})
+
+	engine.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Zero(t, body.reads, "operation log must not inspect the secret-bearing hook body")
 }

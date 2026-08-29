@@ -110,6 +110,13 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 
 // shouldSkipLog 判断是否需要跳过日志记录
 func shouldSkipLog(c *gin.Context) bool {
+	// ZLM expands its complete INI into this callback, including api.secret.
+	// Skip the exact endpoint before reading the body; handler-time redaction is
+	// too late because this middleware captures requests before c.Next().
+	if c.Request.URL.Path == "/index/hook/on_server_started" {
+		return true
+	}
+
 	// 跳过静态文件、健康检查等请求
 	skipPaths := []string{
 		"/swagger/",

@@ -71,6 +71,13 @@ type KeepaliveCollector interface {
 	Receive(payload []byte) error
 }
 
+// RestartStartedNotifier receives the narrow server-started lifecycle event.
+// The implementation advances a previously accepted node restart; it must not
+// treat this callback as proof that the node is healthy or converged.
+type RestartStartedNotifier interface {
+	OnNodeStarted(nodeID int64)
+}
+
 // NodeUUIDResolver 把 mediaServerUUID 反查为 nodeID(由 node.Registry 实现)
 type NodeUUIDResolver interface {
 	IDForUUID(uuid string) (int64, bool)
@@ -185,6 +192,8 @@ type HookController struct {
 	collector         KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
 	resolver          NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
 	binder            StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
+	restartMu         sync.RWMutex
+	restartNotifier   RestartStartedNotifier
 	recordMP4         RecordMP4Indexer
 	recordResolver    NodeUUIDResolver
 	observer          StreamObserver
@@ -237,6 +246,15 @@ func (h *HookController) SetSourceLeaseChecker(checker SourceLeaseChecker) {
 // SetKeepaliveCollector 注入心跳收集器(bootstrap M2.1 装配 heartbeat.Collector 后调用)
 func (h *HookController) SetKeepaliveCollector(c KeepaliveCollector) {
 	h.collector = c
+}
+
+// SetRestartStartedNotifier connects on_server_started to the node restart
+// coordinator. UUID resolution continues to use the registry installed by
+// SetMultiNode, keeping unknown callbacks fail-closed.
+func (h *HookController) SetRestartStartedNotifier(notifier RestartStartedNotifier) {
+	h.restartMu.Lock()
+	defer h.restartMu.Unlock()
+	h.restartNotifier = notifier
 }
 
 // SetMultiNode 注入多节点路由能力(M2.4 bootstrap 多节点装配后调用)
@@ -1097,10 +1115,64 @@ func autoOnDemandAdmissionReason(err error) string {
 	}
 }
 
-// OnServerStarted ZLM 启动事件
+const maxServerStartedBodyBytes int64 = 64 << 10
+
+var errMultipleServerStartedDocuments = errors.New("multiple server-started documents")
+
+// onServerStartedBody is deliberately narrow. ZLM reportServerStarted expands
+// INI keys into one flat JSON object; its payload also contains api.secret and
+// other configuration values that must never enter logs or responses.
+type onServerStartedBody struct {
+	MediaServerID string `json:"general.mediaServerId"`
+}
+
+// OnServerStarted records only the lifecycle edge. Restart completion still
+// requires a subsequent keepalive and verified configuration convergence.
 func (h *HookController) OnServerStarted(c *gin.Context) {
-	app.ZapLog.Info("ZLM Hook on_server_started")
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxServerStartedBodyBytes)
+	decoder := json.NewDecoder(c.Request.Body)
+	var body onServerStartedBody
+	if err := decoder.Decode(&body); err != nil {
+		h.writeServerStartedDecodeError(c, err)
+		return
+	}
+	var extra interface{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			err = errMultipleServerStartedDocuments
+		}
+		h.writeServerStartedDecodeError(c, err)
+		return
+	}
+
+	if app.ZapLog != nil {
+		app.ZapLog.Info("ZLM Hook on_server_started")
+	}
+	if body.MediaServerID == "" || h.resolver == nil {
+		hookOK(c)
+		return
+	}
+	nodeID, ok := h.resolver.IDForUUID(body.MediaServerID)
+	if !ok {
+		hookOK(c)
+		return
+	}
+	h.restartMu.RLock()
+	notifier := h.restartNotifier
+	h.restartMu.RUnlock()
+	if notifier != nil {
+		notifier.OnNodeStarted(nodeID)
+	}
 	hookOK(c)
+}
+
+func (h *HookController) writeServerStartedDecodeError(c *gin.Context, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": -1, "msg": "on_server_started payload too large"})
+		return
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "invalid on_server_started payload"})
 }
 
 type onRecordMP4Body struct {
