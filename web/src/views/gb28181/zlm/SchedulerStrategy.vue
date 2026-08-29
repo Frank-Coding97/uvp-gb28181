@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { Message } from "@arco-design/web-vue";
+import { useUserStoreHook } from "@/store/modules/user";
 import {
     getScheduler,
     switchScheduler,
-    type SchedulerAlgorithm
+    type SchedulerAlgorithm,
+    type SchedulerEffectiveFrom
 } from "@/api/gb28181-zlm";
 
 // 算法元数据(说明 + 适用场景)
@@ -24,10 +26,14 @@ const algorithmMeta: Record<SchedulerAlgorithm, { title: string; desc: string }>
 };
 
 const current = ref<SchedulerAlgorithm | "">("");
+const userStore = useUserStoreHook();
 const selected = ref<SchedulerAlgorithm | "">("");
 const available = ref<SchedulerAlgorithm[]>([]);
 const loading = ref(false);
 const saving = ref(false);
+const effectiveFrom = ref<SchedulerEffectiveFrom>("next_invite");
+const canManage = computed(() => userStore.account.permissions.includes("*:*:*")
+    || userStore.account.permissions.includes("gb28181:zlm:scheduler:manage"));
 
 // 当前算法标题(空时返"未装配")
 const currentTitle = computed(() => {
@@ -53,13 +59,14 @@ async function refresh() {
 }
 
 async function handleSave() {
-    if (!selected.value || selected.value === current.value) return;
+    if (!canManage.value || !selected.value || selected.value === current.value) return;
     saving.value = true;
     try {
         const algo = selected.value as SchedulerAlgorithm;
         const res = await switchScheduler(algo);
         if (res.code === 0) {
-            Message.success(`已切换到 ${algorithmMeta[algo].title}`);
+            effectiveFrom.value = res.data.effectiveFrom;
+            Message.success(`已切换到 ${algorithmMeta[algo].title}，只影响新点播`);
             await refresh();
         } else {
             Message.error(res.message || "切换失败");
@@ -92,6 +99,7 @@ onMounted(refresh);
                             刷新
                         </a-button>
                         <a-button
+                            v-if="canManage"
                             type="primary"
                             :loading="saving"
                             :disabled="!selected || selected === current"
@@ -105,7 +113,15 @@ onMounted(refresh);
                 <a-spin :loading="loading" class="strategy-panel">
                     <div class="strategy-hint">
                         <span>选择 ZLM 节点调度算法</span>
-                        <span class="strategy-hint__sub">保存后立即生效,无需重启</span>
+                        <span class="strategy-hint__sub">只影响新点播（{{ effectiveFrom }}），现有流保持原节点</span>
+                    </div>
+
+                    <div v-if="!canManage" class="permission-state" role="status">
+                        没有调度策略管理权限，当前页面为只读；现有调度策略仍可查看。
+                    </div>
+
+                    <div class="effective-boundary" role="status">
+                        调度切换只替换后续 INVITE 的选点策略，不迁移、不重启也不中断已经建立的媒体会话。
                     </div>
 
                     <a-radio-group v-model="selected" direction="vertical" class="algo-radios">
@@ -218,6 +234,27 @@ onMounted(refresh);
     color: var(--uvp-text-tertiary);
     font-size: 12px;
     white-space: nowrap;
+}
+
+.effective-boundary {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    color: var(--zlm-text-2);
+    font-size: var(--zlm-fs-caption);
+    line-height: 1.6;
+    background: var(--zlm-brand-50);
+    border: 1px solid var(--zlm-brand-200);
+    border-radius: var(--zlm-radius-md);
+}
+
+.permission-state {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    color: var(--zlm-text-3);
+    font-size: var(--zlm-fs-caption);
+    background: var(--zlm-card);
+    border: 1px dashed var(--zlm-border-strong);
+    border-radius: var(--zlm-radius-md);
 }
 
 .algo-radios {

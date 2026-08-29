@@ -1,906 +1,348 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
-import { Message, Modal } from "@arco-design/web-vue";
+import { computed, ref } from "vue";
+import { Message } from "@arco-design/web-vue";
 import { useRouter } from "vue-router";
 import {
-    listZLMNodes,
-    deleteZLMNode,
-    setZLMNodeMaintenance,
-    activateZLMNode,
-    testZLMNodeConnection,
-    kickZLMNodeSessions,
-    restartZLMNode,
-    type ZLMNode
+  activateZLMNode,
+  listZLMNodes,
+  testZLMNodeConnection,
+  type ZLMNode
 } from "@/api/gb28181-zlm";
+import { useZLMContextStore } from "@/store/modules/zlm-context";
+import { useUserStoreHook } from "@/store/modules/user";
 import NodeForm from "./NodeForm.vue";
+import ZLMNodeActionDialog from "./ZLMNodeActionDialog.vue";
 import StatCard from "./components/StatCard.vue";
 import LifecycleDot from "./components/LifecycleDot.vue";
 import HealthBadge from "./components/HealthBadge.vue";
+import { zlmErrorPresentation } from "./components/zlmFormatters";
+import { useZLMRuntimePolling } from "./composables/useZLMRuntimePolling";
+import type { NodeDangerAction } from "./nodeActionState";
 
 const router = useRouter();
+const context = useZLMContextStore();
+const userStore = useUserStoreHook();
 const nodes = ref<ZLMNode[]>([]);
-const loading = ref(false);
-const drawerVisible = ref(false);
-const refreshTimer = ref<ReturnType<typeof setInterval> | null>(null);
-
-// 搜索 + 过滤
+const loading = ref(true);
+const loadError = ref<unknown>(null);
+const formVisible = ref(false);
+const formNode = ref<ZLMNode | null>(null);
 const search = ref("");
-const filterStates = ref<string | undefined>();
-const filterHealth = ref<string | undefined>();
-
-// 操作 loading(按节点 id 隔离,多节点并发不互相影响)
+const filterState = ref<string>();
+const filterHealth = ref<string>();
 const opLoading = ref<Record<number, string | null>>({});
+const actionVisible = ref(false);
+const actionNode = ref<ZLMNode | null>(null);
+const action = ref<NodeDangerAction | null>(null);
+const singletonScope = ref<number | null>(1);
+const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*")
+  || userStore.account.permissions.includes(permission);
+const canManage = computed(() => hasPermission("gb28181:zlm:node:manage"));
+const canKick = computed(() => hasPermission("gb28181:zlm:node:kick"));
+const canRestart = computed(() => hasPermission("gb28181:zlm:restart"));
 
-// 批量选中
-const selectedIds = ref<number[]>([]);
-
-// ====== 健康度推导(基于现有 nearCapacity / state 字段) ======
-
-function healthOf(n: ZLMNode): "healthy" | "warning" | "critical" | "unknown" {
-    if (n.state === "offline") return "critical";
-    if (n.state === "maintenance") return "unknown";
-    // active
-    return n.nearCapacity ? "warning" : "healthy";
+function healthOf(node: ZLMNode): "healthy" | "warning" | "critical" | "unknown" {
+  if (node.recoveryRequired) return "critical";
+  if (node.state === "offline") return "critical";
+  if (node.state === "maintenance") return "unknown";
+  return node.nearCapacity || !node.autoOnDemandReady ? "warning" : "healthy";
 }
 
-function healthReason(n: ZLMNode): string {
-    if (n.state === "offline") return "节点离线";
-    if (n.state === "active" && n.nearCapacity) return "接近容量";
-    return "";
+function healthReason(node: ZLMNode) {
+  if (node.recoveryRequired) return node.recoveryReason || "配置恢复未完成";
+  if (node.state === "offline") return "节点离线";
+  if (node.state === "maintenance") return "节点处于维护状态";
+  if (!node.autoOnDemandReady) return "自动按需配置尚未收敛";
+  if (node.nearCapacity) return "接近容量";
+  return "";
 }
-
-// ====== KPI 顶部数据 ======
 
 const totalNodes = computed(() => nodes.value.length);
-const onlineCount = computed(() => nodes.value.filter((n) => n.state === "active").length);
-const offlineCount = computed(() => nodes.value.filter((n) => n.state === "offline").length);
-const maintenanceCount = computed(() => nodes.value.filter((n) => n.state === "maintenance").length);
-const totalStreams = computed(() =>
-    nodes.value.reduce((sum, n) => sum + (n.stats?.mediaSourceCount || 0), 0)
-);
-const totalSessions = computed(() =>
-    nodes.value.reduce((sum, n) => sum + (n.stats?.sessionCount || 0), 0)
-);
-const healthRatio = computed(() => {
-    if (totalNodes.value === 0) return 0;
-    const healthy = nodes.value.filter((n) => healthOf(n) === "healthy").length;
-    return Math.round((healthy / totalNodes.value) * 100);
-});
+const activeCount = computed(() => nodes.value.filter(node => node.state === "active").length);
+const offlineCount = computed(() => nodes.value.filter(node => node.state === "offline").length);
+const maintenanceCount = computed(() => nodes.value.filter(node => node.state === "maintenance").length);
+const totalStreams = computed(() => nodes.value.reduce((sum, node) => sum + (node.stats?.mediaSourceCount ?? 0), 0));
+const totalSessions = computed(() => nodes.value.reduce((sum, node) => sum + (node.stats?.sessionCount ?? 0), 0));
+const healthyCount = computed(() => nodes.value.filter(node => healthOf(node) === "healthy").length);
+const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 
-// 过滤后的列表
 const filteredNodes = computed(() => {
-    const q = search.value.trim().toLowerCase();
-    return nodes.value.filter((n) => {
-        if (q && !n.name.toLowerCase().includes(q) && !n.host.toLowerCase().includes(q)) return false;
-        if (filterStates.value && filterStates.value !== n.state) return false;
-        if (filterHealth.value && filterHealth.value !== healthOf(n)) return false;
-        return true;
-    });
+  const query = search.value.trim().toLowerCase();
+  return nodes.value.filter(node => {
+    if (query && !node.name.toLowerCase().includes(query) && !node.host.toLowerCase().includes(query)) return false;
+    if (filterState.value && node.state !== filterState.value) return false;
+    return !filterHealth.value || healthOf(node) === filterHealth.value;
+  });
 });
 
-// 选中节点(给底部 toolbar 用)
-const selectedNodes = computed(() => nodes.value.filter((n) => selectedIds.value.includes(n.id)));
-
-// ====== 工具函数 ======
-
-const ZERO_TIME = "0001-01-01T00:00:00Z";
-
-function isZeroTime(s?: string): boolean {
-    return !s || s === ZERO_TIME || s.startsWith("0001-01-01");
-}
-
-function relTime(s?: string): string {
-    if (!s || isZeroTime(s)) return "—";
-    const ts = new Date(s).getTime();
-    if (Number.isNaN(ts)) return "—";
-    const diff = Math.floor((Date.now() - ts) / 1000);
-    if (diff < 5) return "刚刚";
-    if (diff < 60) return `${diff} 秒前`;
-    if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-    return `${Math.floor(diff / 86400)} 天前`;
-}
-
-function cpuPctOf(n: ZLMNode): number {
-    const net = n.stats?.netThreadLoadAvg || 0;
-    const work = n.stats?.workThreadLoadAvg || 0;
-    return Math.round((net * 0.6 + work * 0.4) * 100);
-}
-
-// ====== 加载 ======
-
-async function refresh() {
+const { refresh } = useZLMRuntimePolling<ZLMNode[]>({
+  nodeId: singletonScope,
+  intervalMs: 30_000,
+  async load() {
     loading.value = true;
-    try {
-        const res = await listZLMNodes();
-        if (res.code === 0) nodes.value = res.data.list || [];
-    } catch (e: any) {
-        Message.error(e?.message || "加载失败");
-    } finally {
-        loading.value = false;
-    }
-}
-
-onMounted(() => {
-    refresh();
-    refreshTimer.value = setInterval(refresh, 30_000);
+    const response = await listZLMNodes();
+    if (response.code !== 0) throw new Error(response.message || "节点列表加载失败");
+    return response.data?.list ?? [];
+  },
+  publish(value) {
+    nodes.value = value;
+    const visible = value.map(node => ({ id: node.id, name: node.name, state: node.state }));
+    if (!context.initialized) context.initialize(visible);
+    else context.reconcileVisibleNodes(visible);
+    loadError.value = null;
+    loading.value = false;
+  },
+  onError(error) {
+    loadError.value = error;
+    loading.value = false;
+  }
 });
-onUnmounted(() => {
-    if (refreshTimer.value) clearInterval(refreshTimer.value);
-});
-
-// ====== 操作 ======
 
 function gotoDetail(node: ZLMNode) {
-    router.push(`/gb28181/zlm/nodes/${node.id}`);
+  context.selectNode(node.id);
+  void router.push({ path: `/gb28181/zlm/nodes/${node.id}`, query: { nodeId: String(node.id) } });
 }
 
 function openCreate() {
-    drawerVisible.value = true;
+  if (!canManage.value) return;
+  formNode.value = null;
+  formVisible.value = true;
 }
 
-async function withOp<T>(node: ZLMNode, op: string, fn: () => Promise<T>) {
-    opLoading.value[node.id] = op;
-    try {
-        await fn();
-    } finally {
-        opLoading.value[node.id] = null;
-    }
+function openEdit(node: ZLMNode) {
+  if (!canManage.value) return;
+  formNode.value = node;
+  formVisible.value = true;
 }
 
-async function handleMaintenance(node: ZLMNode) {
-    Modal.warning({
-        title: "切到维护态?",
-        content: `节点 ${node.name} 将不再接受新流,旧流自然结束。`,
-        okText: "确认",
-        cancelText: "取消",
-        hideCancel: false,
-        onOk: async () => {
-            await withOp(node, "maintenance", async () => {
-                try {
-                    await setZLMNodeMaintenance(node.id);
-                    Message.success("已切到维护态");
-                    refresh();
-                } catch (e: any) {
-                    Message.error(e?.message || "操作失败");
-                }
-            });
-        }
-    });
+function openAction(node: ZLMNode, nextAction: NodeDangerAction) {
+  const allowed = nextAction === "kick"
+    ? canKick.value
+    : nextAction === "restart"
+      ? canRestart.value
+      : canManage.value;
+  if (!allowed) {
+    Message.warning("没有执行该节点操作的权限");
+    return;
+  }
+  context.selectNode(node.id);
+  actionNode.value = node;
+  action.value = nextAction;
+  actionVisible.value = true;
+}
+
+function canShowMore(node: ZLMNode) {
+  return canManage.value || (node.state !== "offline" && (canKick.value || canRestart.value));
+}
+
+async function withOp(node: ZLMNode, op: string, run: () => Promise<void>) {
+  opLoading.value[node.id] = op;
+  try {
+    await run();
+  } finally {
+    opLoading.value[node.id] = null;
+  }
 }
 
 async function handleActivate(node: ZLMNode) {
-    await withOp(node, "activate", async () => {
-        try {
-            await activateZLMNode(node.id);
-            Message.success("已激活");
-            refresh();
-        } catch (e: any) {
-            Message.error(e?.message || "操作失败");
-        }
-    });
+  if (!canManage.value) return;
+  await withOp(node, "activate", async () => {
+    try {
+      const response = await activateZLMNode(node.id);
+      if (response.code !== 0) throw new Error(response.message || "激活失败");
+      Message.success("节点已激活并重新允许调度");
+      refresh();
+    } catch (error) {
+      Message.error((error as Error)?.message || "激活失败");
+    }
+  });
 }
 
 async function handleReprobe(node: ZLMNode) {
-    await withOp(node, "reprobe", async () => {
-        try {
-            const res = await testZLMNodeConnection(node.id);
-            if (res.code === 0 && res.data?.online) {
-                const act = await activateZLMNode(node.id);
-                if (act.code === 0) {
-                    Message.success("节点已恢复并重新加入调度池");
-                } else {
-                    Message.warning("探测可达,但激活失败,请手动激活");
-                }
-            } else {
-                Message.error(`节点仍不可达: ${res.data?.error || "未知"}`);
-            }
-            refresh();
-        } catch (e: any) {
-            Message.error(e?.message || "探测失败");
-        }
-    });
-}
-
-async function handleKick(node: ZLMNode) {
-    Modal.warning({
-        title: "驱逐全部会话?",
-        content: `将断开节点 ${node.name} 的所有连接,正在播放的客户端会立刻断流。`,
-        okText: "驱逐",
-        cancelText: "取消",
-        hideCancel: false,
-        onOk: async () => {
-            await withOp(node, "kick", async () => {
-                try {
-                    const res = await kickZLMNodeSessions(node.id);
-                    if (res.code === 0) {
-                        Message.success(`已驱逐 ${res.data?.count ?? 0} 路会话`);
-                    } else {
-                        Message.error(res.message || "驱逐失败");
-                    }
-                    refresh();
-                } catch (e: any) {
-                    Message.error(e?.message || "驱逐失败");
-                }
-            });
-        }
-    });
-}
-
-async function handleRestart(node: ZLMNode) {
-    Modal.warning({
-        title: "重启 ZLM 服务?",
-        content: `将重启节点 ${node.name} 的 ZLM 进程,所有流将中断,客户端需自行重连。`,
-        okText: "重启",
-        cancelText: "取消",
-        hideCancel: false,
-        onOk: async () => {
-            await withOp(node, "restart", async () => {
-                try {
-                    const res = await restartZLMNode(node.id, 5000);
-                    if (res.code === 0) {
-                        Message.success("已发送重启指令,5 秒后刷新");
-                    } else {
-                        Message.error(res.message || "重启失败");
-                    }
-                    setTimeout(() => refresh(), 5000);
-                } catch (e: any) {
-                    Message.error(e?.message || "重启失败");
-                }
-            });
-        }
-    });
-}
-
-async function handleDelete(node: ZLMNode) {
-    Modal.warning({
-        title: "删除节点?",
-        content: `节点 ${node.name} 将被从注册表删除。仅维护态可删,流数必须为 0。`,
-        okText: "删除",
-        cancelText: "取消",
-        hideCancel: false,
-        onOk: async () => {
-            await withOp(node, "delete", async () => {
-                try {
-                    await deleteZLMNode(node.id);
-                    Message.success("已删除");
-                    refresh();
-                } catch (e: any) {
-                    Message.error(e?.response?.data?.message || "删除失败,可能需要先切维护态");
-                }
-            });
-        }
-    });
-}
-
-// 批量操作:allSettled 汇总成败,失败节点保留选中,不谎报全部成功
-async function runBatchAction(action: (id: number) => Promise<unknown>, verb: string) {
-    const results = await Promise.allSettled(selectedNodes.value.map((n) => action(n.id)));
-    const failed = selectedNodes.value.filter((_, index) => results[index].status === "rejected");
-    const succeeded = selectedNodes.value.length - failed.length;
-    if (failed.length === 0) {
-        Message.success(`已${verb} ${succeeded} 个节点`);
-        selectedIds.value = [];
-    } else {
-        Message.warning(`${verb}成功 ${succeeded} 个,失败 ${failed.length} 个(已保留选中,可重试)`);
-        selectedIds.value = failed.map((n) => n.id);
+  if (!canManage.value) return;
+  await withOp(node, "reprobe", async () => {
+    try {
+      const response = await testZLMNodeConnection(node.id);
+      if (response.code !== 0 || !response.data?.online) {
+        throw new Error(response.data?.error || response.message || "节点仍不可达");
+      }
+      if (node.state === "offline") {
+        const activate = await activateZLMNode(node.id);
+        if (activate.code !== 0) throw new Error(activate.message || "连接已恢复，但激活失败");
+      }
+      Message.success("候选连接探测成功，节点状态已回读");
+      refresh();
+    } catch (error) {
+      Message.error((error as Error)?.message || "重新探测失败");
     }
-    refresh();
+  });
 }
 
-async function handleBatchMaintenance() {
-    Modal.warning({
-        title: `批量切维护态?`,
-        content: `将把 ${selectedNodes.value.length} 个节点切到维护态。`,
-        onOk: async () => {
-            await runBatchAction(setZLMNodeMaintenance, "切维护态");
-        }
-    });
+function actionDone() {
+  refresh();
 }
 
-async function handleBatchActivate() {
-    await runBatchAction(activateZLMNode, "激活");
+function isZeroTime(value?: string) {
+  return !value || value.startsWith("0001-01-01");
+}
+
+function relativeTime(value?: string) {
+  if (isZeroTime(value)) return "从未上报";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value!).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} 秒前`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)} 小时前`;
+  return `${Math.floor(seconds / 86400)} 天前`;
 }
 </script>
 
 <template>
-    <div class="snow-fill">
-        <div class="snow-fill-inner uvp-page-shell-flat zlm-node-shell">
-            <div class="zlm-node-list">
-                <!-- 顶部 KPI 条(4 卡阶梯式) -->
-                <section class="kpi-row">
-                    <StatCard
-                        title="节点总数"
-                        :value="totalNodes"
-                        :trend="offlineCount > 0 ? `${offlineCount} 离线 · ${maintenanceCount} 维护` : `全部在线`"
-                        :trend-type="offlineCount > 0 ? 'danger' : 'up'"
-                        accent="brand"
-                    />
-                    <StatCard
-                        title="活跃流"
-                        :value="totalStreams"
-                        :trend="`${onlineCount} 个节点上`"
-                        accent="accent"
-                    />
-                    <StatCard
-                        title="会话数"
-                        :value="totalSessions"
-                        trend="TCP + UDP 累计"
-                    />
-                    <StatCard
-                        title="健康度"
-                        :value="healthRatio"
-                        unit="%"
-                        :trend="healthRatio === 100 ? '集群健康' : '存在告警'"
-                        :trend-type="healthRatio === 100 ? 'up' : 'down'"
-                        :accent="healthRatio === 100 ? 'accent' : 'warning'"
-                    />
-                </section>
+  <div class="snow-fill">
+    <div class="snow-fill-inner uvp-page-shell-flat zlm-node-shell">
+      <div class="zlm-node-list">
+        <section class="kpi-row" aria-label="节点集群指标">
+          <StatCard title="节点总数" :value="totalNodes" :trend="`${activeCount} 活跃 · ${maintenanceCount} 维护 · ${offlineCount} 离线`" accent="brand" />
+          <StatCard title="活跃流" :value="totalStreams" :trend="`${activeCount} 个调度节点`" accent="accent" />
+          <StatCard title="网络会话" :value="totalSessions" trend="节点心跳登记值" />
+          <StatCard title="健康节点" :value="healthyCount" :trend="`${totalNodes ? Math.round(healthyCount / totalNodes * 100) : 0}% 集群占比`" :accent="healthyCount === totalNodes ? 'accent' : 'warning'" />
+        </section>
 
-                <s-layout-search class="node-search-panel">
-                    <template #fields>
-                        <a-input-search
-                            v-model="search"
-                            placeholder="搜索节点名或 Host"
-                            allow-clear
-                            style="width: 220px"
-                            class="search"
-                        />
-                        <a-select
-                            v-model="filterStates"
-                            placeholder="状态"
-                            allow-clear
-                            style="width: 126px"
-                            class="filter-select"
-                            :options="[
-                                { label: '活跃', value: 'active' },
-                                { label: '维护', value: 'maintenance' },
-                                { label: '离线', value: 'offline' }
-                            ]"
-                        />
-                        <a-select
-                            v-model="filterHealth"
-                            placeholder="健康度"
-                            allow-clear
-                            style="width: 126px"
-                            class="filter-select"
-                            :options="[
-                                { label: 'Healthy', value: 'healthy' },
-                                { label: 'Warning', value: 'warning' },
-                                { label: 'Critical', value: 'critical' },
-                                { label: 'Unknown', value: 'unknown' }
-                            ]"
-                        />
-                    </template>
-                    <template #actions>
-                        <span class="filter-meta">{{ filteredNodes.length }} / {{ nodes.length }} 节点</span>
-                        <a-button class="uvp-refresh-btn" @click="refresh" :loading="loading">
-                            <template #icon><icon-refresh /></template>
-                            刷新
-                        </a-button>
-                    </template>
-                    <template #extra>
-                        <a-button type="primary" @click="openCreate">
-                            <template #icon><icon-plus /></template>
-                            添加节点
-                        </a-button>
-                    </template>
-                </s-layout-search>
-
-                <!-- 节点稀疏表 -->
-                <section class="node-table-wrap">
-                    <a-table
-                        :data="filteredNodes"
-                        :loading="loading"
-                        row-key="id"
-                        :pagination="false"
-                        :row-selection="{
-                            type: 'checkbox',
-                            showCheckedAll: true
-                        }"
-                        v-model:selected-keys="selectedIds"
-                        class="node-table uvp-data-table"
-                    >
-                        <template #columns>
-                            <a-table-column title="节点" :width="220">
-                                <template #cell="{ record }">
-                                    <div class="cell-node" @click="gotoDetail(record)">
-                                        <div class="cell-node-name">{{ record.name }}</div>
-                                        <div class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</div>
-                                    </div>
-                                </template>
-                            </a-table-column>
-                            <a-table-column title="状态" :width="100">
-                                <template #cell="{ record }">
-                                    <LifecycleDot :state="record.state" />
-                                </template>
-                            </a-table-column>
-                            <a-table-column title="健康度" :width="160">
-                                <template #cell="{ record }">
-                                    <HealthBadge :health="healthOf(record)" :reason="healthReason(record)" />
-                                </template>
-                            </a-table-column>
-                            <a-table-column title="权重" :width="160">
-                                <template #cell="{ record }">
-                                    <div class="cell-weight">
-                                        <span class="weight-num zlm-numeric">{{ record.weight }}</span>
-                                        <div class="weight-bar">
-                                            <div class="weight-bar-fill" :style="{ width: `${record.weight}%` }" />
-                                        </div>
-                                    </div>
-                                </template>
-                            </a-table-column>
-                            <a-table-column title="流 / 会话" :width="120">
-                                <template #cell="{ record }">
-                                    <div class="cell-numeric zlm-numeric">
-                                        <span v-if="record.state === 'offline'" class="muted">—</span>
-                                        <span v-else>
-                                            <strong>{{ record.stats?.mediaSourceCount || 0 }}</strong>
-                                            <span class="sep"> / </span>
-                                            <span class="dim">{{ record.stats?.sessionCount || 0 }}</span>
-                                        </span>
-                                    </div>
-                                </template>
-                            </a-table-column>
-                            <a-table-column title="CPU" :width="100">
-                                <template #cell="{ record }">
-                                    <span
-                                        v-if="record.state === 'offline'"
-                                        class="muted"
-                                    >—</span>
-                                    <span
-                                        v-else
-                                        class="cpu-pct zlm-numeric"
-                                        :class="{
-                                            'cpu-high': cpuPctOf(record) >= 80,
-                                            'cpu-mid': cpuPctOf(record) >= 60 && cpuPctOf(record) < 80
-                                        }"
-                                    >{{ cpuPctOf(record) }}%</span>
-                                </template>
-                            </a-table-column>
-                            <a-table-column title="心跳" :width="120">
-                                <template #cell="{ record }">
-                                    <a-tooltip
-                                        v-if="!isZeroTime(record.stats?.lastHeartbeatAt)"
-                                        :content="record.stats?.lastHeartbeatAt"
-                                    >
-                                        <span class="rel-time">{{ relTime(record.stats?.lastHeartbeatAt) }}</span>
-                                    </a-tooltip>
-                                    <span v-else class="muted">从未上报</span>
-                                </template>
-                            </a-table-column>
-                            <a-table-column title="操作" :width="280">
-                                <template #cell="{ record }">
-                                    <div class="cell-ops">
-                                        <a-button size="small" @click="gotoDetail(record)">详情</a-button>
-                                        <a-button
-                                            v-if="record.state === 'active'"
-                                            size="small"
-                                            :loading="opLoading[record.id] === 'maintenance'"
-                                            @click="handleMaintenance(record)"
-                                        >
-                                            隔离
-                                        </a-button>
-                                        <a-button
-                                            v-if="record.state === 'maintenance'"
-                                            size="small"
-                                            type="primary"
-                                            :loading="opLoading[record.id] === 'activate'"
-                                            @click="handleActivate(record)"
-                                        >
-                                            激活
-                                        </a-button>
-                                        <a-button
-                                            v-if="record.state === 'offline'"
-                                            size="small"
-                                            type="primary"
-                                            :loading="opLoading[record.id] === 'reprobe'"
-                                            @click="handleReprobe(record)"
-                                        >
-                                            重新探测
-                                        </a-button>
-                                        <a-dropdown trigger="click" position="br">
-                                            <a-button size="small">
-                                                更多
-                                                <template #icon><icon-down /></template>
-                                            </a-button>
-                                            <template #content>
-                                                <a-doption
-                                                    v-if="record.state !== 'offline'"
-                                                    @click="handleKick(record)"
-                                                >驱逐全部会话</a-doption>
-                                                <a-doption
-                                                    v-if="record.state !== 'offline'"
-                                                    @click="handleRestart(record)"
-                                                >重启 ZLM</a-doption>
-                                                <a-doption
-                                                    class="danger"
-                                                    @click="handleDelete(record)"
-                                                >删除节点</a-doption>
-                                            </template>
-                                        </a-dropdown>
-                                    </div>
-                                </template>
-                            </a-table-column>
-                        </template>
-
-                        <template #empty>
-                            <div class="empty">
-                                <icon-cloud class="empty-icon" />
-                                <div class="empty-title">还没有 ZLM 节点</div>
-                                <div class="empty-sub">点右上角"添加节点"接入第一个 ZLMediaKit 实例</div>
-                            </div>
-                        </template>
-                    </a-table>
-                </section>
-
-                <!-- 批量操作 toolbar(选中节点时浮起底部) -->
-                <transition name="slide-up">
-                    <div v-if="selectedIds.length > 0" class="batch-bar">
-                        <div class="batch-info">
-                            <span class="count">{{ selectedIds.length }}</span> 个节点已选中
-                        </div>
-                        <div class="batch-ops">
-                            <a-button @click="handleBatchMaintenance">批量切维护</a-button>
-                            <a-button type="primary" @click="handleBatchActivate">批量激活</a-button>
-                            <a-button @click="selectedIds = []">取消</a-button>
-                        </div>
-                    </div>
-                </transition>
-
-                <NodeForm v-model:visible="drawerVisible" @saved="refresh" />
-            </div>
+        <div v-if="loadError && nodes.length" class="page-state page-state--warning" role="status">
+          本次刷新失败：{{ errorPresentation.label }}。已保留上一次节点列表。
         </div>
+
+        <s-layout-search class="node-search-panel">
+          <template #fields>
+            <a-input-search v-model="search" allow-clear placeholder="搜索节点名或 Host" class="search" />
+            <a-select
+              v-model="filterState"
+              allow-clear
+              placeholder="生命周期"
+              class="filter-select"
+              :options="[
+                { label: '活跃', value: 'active' },
+                { label: '维护', value: 'maintenance' },
+                { label: '离线', value: 'offline' }
+              ]"
+            />
+            <a-select
+              v-model="filterHealth"
+              allow-clear
+              placeholder="健康度"
+              class="filter-select"
+              :options="[
+                { label: '健康', value: 'healthy' },
+                { label: '告警', value: 'warning' },
+                { label: '严重', value: 'critical' },
+                { label: '未知', value: 'unknown' }
+              ]"
+            />
+          </template>
+          <template #actions>
+            <span class="filter-meta">{{ filteredNodes.length }} / {{ nodes.length }} 节点</span>
+            <a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新节点列表" @click="refresh">
+              <template #icon><icon-refresh /></template>刷新
+            </a-button>
+          </template>
+          <template #extra>
+            <a-button v-if="canManage" type="primary" @click="openCreate"><template #icon><icon-plus /></template>添加节点</a-button>
+          </template>
+        </s-layout-search>
+
+        <div v-if="loading && !nodes.length" class="page-state" role="status" aria-label="正在加载节点列表">
+          <a-spin /><span>正在加载媒体节点…</span>
+        </div>
+        <div v-else-if="loadError && !nodes.length" class="page-state page-state--error" role="alert">
+          <strong>{{ errorPresentation.label }}</strong>
+          <span>{{ errorPresentation.retryable ? "可以刷新重试。" : "请确认账号权限或登录状态。" }}</span>
+          <a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button>
+        </div>
+        <section v-else class="node-table-wrap">
+          <a-table :data="filteredNodes" :loading="loading" row-key="id" :pagination="false" class="node-table uvp-data-table">
+            <template #columns>
+              <a-table-column title="节点" :width="230">
+                <template #cell="{ record }">
+                  <button type="button" class="cell-node" :aria-label="`查看节点 ${record.name}`" @click="gotoDetail(record)">
+                    <span class="cell-node-name">{{ record.name }}</span>
+                    <span class="cell-node-host">{{ record.host }}:{{ record.apiPort }}</span>
+                  </button>
+                </template>
+              </a-table-column>
+              <a-table-column title="状态" :width="110"><template #cell="{ record }"><LifecycleDot :state="record.state" /></template></a-table-column>
+              <a-table-column title="健康度" :width="170"><template #cell="{ record }"><HealthBadge :health="healthOf(record)" :reason="healthReason(record)" /></template></a-table-column>
+              <a-table-column title="流 / 会话" :width="120"><template #cell="{ record }"><span v-if="record.state === 'offline'">—</span><span v-else class="numeric">{{ record.stats?.mediaSourceCount ?? 0 }} / {{ record.stats?.sessionCount ?? 0 }}</span></template></a-table-column>
+              <a-table-column title="调度" :width="130">
+                <template #cell="{ record }">
+                  <span v-if="record.state !== 'active'" class="muted">不参与</span>
+                  <span v-else-if="record.autoOnDemandReady" class="ready">可调度 · {{ record.weight }}</span>
+                  <span v-else class="warning">等待收敛</span>
+                </template>
+              </a-table-column>
+              <a-table-column title="最后心跳" :width="130"><template #cell="{ record }"><span :title="record.stats?.lastHeartbeatAt">{{ relativeTime(record.stats?.lastHeartbeatAt) }}</span></template></a-table-column>
+              <a-table-column title="操作" :width="300" fixed="right">
+                <template #cell="{ record }">
+                  <div class="cell-ops">
+                    <a-button size="small" @click="gotoDetail(record)">详情</a-button>
+                    <a-button v-if="canManage" size="small" @click="openEdit(record)">编辑</a-button>
+                    <a-button v-if="canManage && record.state === 'active'" size="small" @click="openAction(record, 'maintenance')">维护</a-button>
+                    <a-button v-else-if="canManage && record.state === 'maintenance'" size="small" type="primary" :loading="opLoading[record.id] === 'activate'" @click="handleActivate(record)">激活</a-button>
+                    <a-button v-else-if="canManage && record.state === 'offline'" size="small" type="primary" :loading="opLoading[record.id] === 'reprobe'" @click="handleReprobe(record)">探测</a-button>
+                    <a-dropdown v-if="canShowMore(record)" trigger="click" position="br">
+                      <a-button size="small">更多<template #icon><icon-down /></template></a-button>
+                      <template #content>
+                        <a-doption v-if="canKick && record.state !== 'offline'" @click="openAction(record, 'kick')">驱逐全部会话</a-doption>
+                        <a-doption v-if="canRestart && record.state !== 'offline'" @click="openAction(record, 'restart')">重启 ZLM</a-doption>
+                        <a-doption v-if="canManage" class="danger" @click="openAction(record, 'delete')">删除节点</a-doption>
+                      </template>
+                    </a-dropdown>
+                  </div>
+                </template>
+              </a-table-column>
+            </template>
+            <template #empty>
+              <div class="empty" role="status">
+                <icon-cloud class="empty-icon" />
+                <strong>{{ nodes.length ? "没有符合筛选条件的节点" : "还没有 ZLM 节点" }}</strong>
+                <span>{{ nodes.length ? "清空筛选条件后重试。" : "添加第一个节点后，后端会先执行连接探测。" }}</span>
+              </div>
+            </template>
+          </a-table>
+        </section>
+
+        <NodeForm v-model:visible="formVisible" :node="formNode" @saved="refresh" />
+        <ZLMNodeActionDialog v-model:visible="actionVisible" :node="actionNode" :action="action" @done="actionDone" />
+      </div>
     </div>
+  </div>
 </template>
 
 <style scoped>
-
-.zlm-node-shell {
-    padding: 4px 8px;
-    overflow: hidden;
-}
-
-.zlm-node-list {
-    width: 100%;
-    height: 100%;
-    overflow: auto;
-    background: transparent;
-    padding: 0;
-    font-family: var(--zlm-font-body);
-    color: var(--zlm-text-2);
-    box-sizing: border-box;
-}
-
-/* === KPI 条 === */
-.kpi-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 16px;
-    margin-bottom: 16px;
-}
-
-.kpi-row :deep(.stat-card) {
-    min-height: 86px;
-    padding: 16px 18px;
-    background: var(--uvp-panel-bg);
-    border-color: var(--uvp-panel-border);
-    border-radius: var(--uvp-panel-radius);
-    box-shadow: var(--uvp-panel-shadow);
-}
-
-.kpi-row :deep(.title) {
-    font-size: 12px;
-    color: var(--uvp-text-tertiary);
-    letter-spacing: 0;
-}
-
-.kpi-row :deep(.value) {
-    font-size: 30px;
-    letter-spacing: 0;
-}
-
-.kpi-row :deep(.footer) {
-    margin-top: 4px;
-}
-
-.kpi-row :deep(.trend) {
-    line-height: 1.3;
-}
-
-/* === 搜索栏 === */
-.node-search-panel {
-    margin-bottom: 16px;
-}
-
-.search {
-    width: 220px;
-}
-
-.filter-select {
-    width: 126px;
-}
-
-.node-search-panel :deep(.uvp-search-panel__actions) {
-    gap: 10px;
-}
-
-.node-search-panel :deep(.uvp-search-panel__fields) {
-    flex-wrap: nowrap;
-}
-
-.node-search-panel :deep(.arco-input-wrapper),
-.node-search-panel :deep(.arco-select-view) {
-    box-sizing: border-box;
-    background: var(--uvp-search-control-bg) !important;
-    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
-    border-radius: 10px !important;
-    box-shadow: var(--uvp-search-control-shadow) !important;
-}
-
-.node-search-panel :deep(.arco-input-wrapper:focus-within),
-.node-search-panel :deep(.arco-select-view.arco-select-view-focus),
-.node-search-panel :deep(.arco-select-view:focus-within) {
-    border-color: var(--uvp-brand) !important;
-    box-shadow: var(--uvp-search-control-focus-shadow) !important;
-}
-
-.node-search-panel :deep(.arco-input::placeholder),
-.node-search-panel :deep(.arco-select-view-input::placeholder) {
-    color: var(--uvp-text-tertiary) !important;
-    opacity: 1;
-}
-
-.node-search-panel :deep(.arco-btn),
-.batch-bar :deep(.arco-btn) {
-    box-sizing: border-box;
-    border-radius: 10px;
-}
-
-.filter-meta {
-    display: inline-flex;
-    align-items: center;
-    height: 34px;
-    padding-right: 2px;
-    font-size: 12px;
-    color: var(--uvp-text-tertiary);
-    white-space: nowrap;
-}
-
-/* === 节点表 === */
-.node-table-wrap {
-    overflow: hidden;
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: var(--uvp-panel-radius);
-    box-shadow: var(--uvp-panel-shadow);
-}
-
-.node-table-wrap :deep(.arco-table-container) {
-    border-radius: inherit;
-}
-
-.node-table :deep(.arco-table-th) {
-    font-weight: var(--zlm-fw-medium);
-    font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
-    text-transform: none;
-    letter-spacing: 0.02em;
-}
-
-.node-table :deep(.arco-table-td) {
-    padding: 10px 16px !important;
-    height: 56px;
-    font-size: var(--zlm-fs-body);
-    line-height: 22px;
-    color: var(--zlm-text-2);
-}
-
-.node-table :deep(.arco-table-tr:hover .arco-table-td) {
-    background: var(--zlm-card-hover);
-}
-
-/* 节点名 cell */
-.cell-node {
-    cursor: pointer;
-    line-height: 1.3;
-}
-
-.cell-node:focus-visible {
-    outline: 2px solid rgb(37 99 235 / 38%);
-    outline-offset: 3px;
-    border-radius: 8px;
-}
-
-.cell-node-name {
-    font-size: var(--zlm-fs-body);
-    font-weight: var(--zlm-fw-semibold);
-    color: var(--zlm-text-1);
-    transition: color var(--zlm-dur-fast) var(--zlm-ease-out);
-}
-
-.cell-node:hover .cell-node-name {
-    color: var(--zlm-brand-600);
-}
-
-.cell-node-host {
-    font-size: var(--zlm-fs-caption);
-    color: var(--zlm-text-3);
-    font-family: var(--zlm-font-mono);
-    margin-top: 2px;
-}
-
-/* 权重 cell */
-.cell-weight {
-    display: flex;
-    align-items: center;
-    gap: var(--zlm-space-2);
-}
-
-.weight-num {
-    font-weight: var(--zlm-fw-semibold);
-    color: var(--zlm-text-1);
-    min-width: 28px;
-}
-
-.weight-bar {
-    flex: 1;
-    height: 6px;
-    background: var(--zlm-divider);
-    border-radius: var(--zlm-radius-full);
-    overflow: hidden;
-}
-
-.weight-bar-fill {
-    height: 100%;
-    background: var(--zlm-brand-500);
-    border-radius: var(--zlm-radius-full);
-    transition: width var(--zlm-dur-slow) var(--zlm-ease-out);
-}
-
-/* 数字 cell */
-.cell-numeric strong {
-    color: var(--zlm-text-1);
-    font-weight: var(--zlm-fw-semibold);
-}
-.cell-numeric .sep {
-    color: var(--zlm-text-4);
-}
-.cell-numeric .dim {
-    color: var(--zlm-text-3);
-}
-
-/* CPU pct */
-.cpu-pct {
-    font-weight: var(--zlm-fw-medium);
-    color: var(--zlm-text-2);
-}
-.cpu-pct.cpu-mid {
-    color: var(--zlm-warn-600);
-}
-.cpu-pct.cpu-high {
-    color: var(--zlm-danger-600);
-    font-weight: var(--zlm-fw-semibold);
-}
-
-.muted {
-    color: var(--zlm-text-4);
-}
-
-.rel-time {
-    color: var(--zlm-text-3);
-    font-size: var(--zlm-fs-body);
-}
-
-/* 操作 cell */
-.cell-ops {
-    display: flex;
-    gap: var(--zlm-space-2);
-    align-items: center;
-}
-
-/* row offline / maintenance 行染色 */
-.node-table :deep(.arco-table-tr) {
-    transition: background var(--zlm-dur-fast) var(--zlm-ease-out);
-}
-
-/* 空状态 */
-.empty {
-    padding: var(--zlm-space-12) var(--zlm-space-6);
-    text-align: center;
-    color: var(--zlm-text-3);
-}
-
-.empty-icon {
-    font-size: 48px;
-    color: var(--zlm-text-4);
-    margin-bottom: var(--zlm-space-3);
-}
-
-.empty-title {
-    font-size: var(--zlm-fs-h2);
-    font-weight: var(--zlm-fw-semibold);
-    color: var(--zlm-text-2);
-    margin-bottom: var(--zlm-space-2);
-}
-
-.empty-sub {
-    font-size: var(--zlm-fs-body);
-    color: var(--zlm-text-3);
-}
-
-/* === 批量 toolbar(底部浮起) === */
-.batch-bar {
-    position: fixed;
-    bottom: var(--zlm-space-6);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    gap: var(--zlm-space-4);
-    background: #172033;
-    color: var(--zlm-text-inverse);
-    padding: var(--zlm-space-3) var(--zlm-space-4);
-    border-radius: var(--zlm-radius-full);
-    box-shadow: var(--zlm-shadow-lg);
-}
-
-@media (max-width: 1180px) {
-    .kpi-row {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 768px) {
-    .search,
-    .filter-select {
-        width: 100%;
-    }
-
-    .node-search-panel :deep(.uvp-search-panel__actions) {
-        justify-content: flex-start;
-    }
-
-    .filter-meta {
-        height: auto;
-        padding-right: 0;
-    }
-
-    .kpi-row {
-        grid-template-columns: 1fr;
-    }
-}
-
-.batch-info {
-    color: var(--zlm-text-inverse);
-    font-size: var(--zlm-fs-body);
-}
-
-.batch-info .count {
-    font-weight: var(--zlm-fw-bold);
-    color: var(--zlm-brand-500);
-    margin-right: 4px;
-}
-
-.batch-ops {
-    display: flex;
-    gap: var(--zlm-space-2);
-}
-
-/* 进出动画 */
-.slide-up-enter-active,
-.slide-up-leave-active {
-    transition: all var(--zlm-dur-base) var(--zlm-ease-out);
-}
-.slide-up-enter-from,
-.slide-up-leave-to {
-    transform: translate(-50%, 16px);
-    opacity: 0;
-}
-
-/* 危险下拉项 */
-:deep(.danger) {
-    color: var(--zlm-danger-600);
-}
+.zlm-node-shell { padding: 4px 8px; overflow: hidden; }
+.zlm-node-list { width: 100%; height: 100%; overflow: auto; box-sizing: border-box; color: var(--zlm-text-2); }
+.kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+.node-search-panel { margin-bottom: 16px; }
+.search { width: 220px; }
+.filter-select { width: 132px; }
+.filter-meta { display: inline-flex; align-items: center; min-height: 34px; color: var(--uvp-text-tertiary); font-size: 12px; }
+.page-state { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; padding: 16px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }
+.page-state--warning { min-height: auto; align-items: flex-start; color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }
+.page-state--error { color: var(--zlm-danger-600); }
+.node-table-wrap { overflow: hidden; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }
+.cell-node { display: flex; max-width: 100%; flex-direction: column; gap: 2px; padding: 0; text-align: left; background: none; border: 0; cursor: pointer; }
+.cell-node:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 3px; border-radius: 5px; }
+.cell-node-name { overflow: hidden; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.cell-node:hover .cell-node-name { color: var(--zlm-brand-600); }
+.cell-node-host { color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: var(--zlm-fs-caption); }
+.numeric { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }
+.muted { color: var(--zlm-text-4); }
+.ready { color: var(--zlm-success-600); }
+.warning { color: var(--zlm-warn-600); }
+.cell-ops { display: flex; align-items: center; gap: 6px; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }
+.empty strong { color: var(--zlm-text-1); }
+.empty-icon { font-size: 42px; color: var(--zlm-text-4); }
+:deep(.danger) { color: var(--zlm-danger-600); }
+:deep(.arco-btn) { border-radius: 10px; }
+@media (max-width: 1180px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 720px) { .kpi-row { grid-template-columns: 1fr; } .search, .filter-select { width: 100%; } .cell-ops { flex-wrap: wrap; } }
 </style>

@@ -1,270 +1,252 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { computed, onMounted, reactive, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
 import {
-    listSchedulerLogs,
-    type SchedulerLogEntry
+  listSchedulerLogs,
+  listZLMNodes,
+  type SchedulerAlgorithm,
+  type SchedulerLogEntry
 } from "@/api/gb28181-zlm";
+import { useZLMRuntimePolling } from "./composables/useZLMRuntimePolling";
+import { zlmErrorPresentation } from "./components/zlmFormatters";
+import { buildSchedulerLogFilter, type SchedulerLogFilterState } from "./schedulerLogState";
 
 const logs = ref<SchedulerLogEntry[]>([]);
-const loading = ref(false);
-const limit = ref(100);
+const nodes = ref<Array<{ label: string; value: number }>>([]);
+const loading = ref(true);
+const loadError = ref<unknown>(null);
 const autoRefresh = ref(true);
+const singletonScope = ref<number | null>(1);
+const pollingPaused = computed(() => !autoRefresh.value);
+
+const draft = reactive<SchedulerLogFilterState>({
+  timeRange: [],
+  nodeId: undefined,
+  algorithm: undefined,
+  result: undefined,
+  streamId: "",
+  limit: 100
+});
+const applied = ref<SchedulerLogFilterState>({ ...draft, timeRange: [] });
 
 const limitOptions = [
-    { label: "50 条", value: 50 },
-    { label: "100 条", value: 100 },
-    { label: "200 条", value: 200 },
-    { label: "500 条", value: 500 }
+  { label: "50 条", value: 50 },
+  { label: "100 条", value: 100 },
+  { label: "200 条", value: 200 },
+  { label: "500 条", value: 500 }
 ];
+const algorithmOptions: Array<{ label: string; value: SchedulerAlgorithm }> = [
+  { label: "轮询", value: "roundrobin" },
+  { label: "加权轮询", value: "weighted" },
+  { label: "最小负载", value: "leastload" }
+];
+const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
+let manualGeneration = 0;
 
-let refreshTimer: ReturnType<typeof setInterval> | null = null;
+async function fetchLogs(state: SchedulerLogFilterState) {
+  const filter = buildSchedulerLogFilter(state);
+  const response = await listSchedulerLogs(filter);
+  if (response.code !== 0) throw new Error(response.message || "调度日志加载失败");
+  return response.data?.list ?? [];
+}
 
-async function refresh() {
+function publishLogs(value: SchedulerLogEntry[]) {
+  logs.value = value;
+  loadError.value = null;
+  loading.value = false;
+}
+
+function publishError(error: unknown) {
+  loadError.value = error;
+  loading.value = false;
+}
+
+const { refresh } = useZLMRuntimePolling<SchedulerLogEntry[]>({
+  nodeId: singletonScope,
+  paused: pollingPaused,
+  intervalMs: 30_000,
+  async load() {
     loading.value = true;
-    try {
-        const res = await listSchedulerLogs(limit.value);
-        if (res.code === 0) {
-            logs.value = res.data.list || [];
-        }
-    } catch (e: any) {
-        Message.error(e?.message || "加载失败");
-    } finally {
-        loading.value = false;
-    }
-}
-
-function toggleAutoRefresh(val: boolean) {
-    autoRefresh.value = val;
-    if (refreshTimer) {
-        clearInterval(refreshTimer);
-        refreshTimer = null;
-    }
-    if (val) {
-        refreshTimer = setInterval(refresh, 30_000);
-    }
-}
-
-function formatTime(s: string): string {
-    if (!s) return "—";
-    try {
-        return new Date(s).toLocaleString();
-    } catch {
-        return s;
-    }
-}
-
-function rowClass(record: SchedulerLogEntry): string {
-    return record.errorMessage ? "row-error" : "";
-}
-
-onMounted(() => {
-    refresh();
-    if (autoRefresh.value) {
-        refreshTimer = setInterval(refresh, 30_000);
-    }
+    return fetchLogs(applied.value);
+  },
+  publish: publishLogs,
+  onError: publishError
 });
-onUnmounted(() => {
-    if (refreshTimer) clearInterval(refreshTimer);
-});
+
+async function loadNodes() {
+  try {
+    const response = await listZLMNodes();
+    if (response.code === 0) {
+      nodes.value = (response.data?.list ?? []).map(node => ({ label: `${node.name}（#${node.id}）`, value: node.id }));
+    }
+  } catch {
+    nodes.value = [];
+  }
+}
+
+async function manualRefresh() {
+  const currentGeneration = ++manualGeneration;
+  loading.value = true;
+  try {
+    const value = await fetchLogs(applied.value);
+    if (currentGeneration === manualGeneration && !autoRefresh.value) publishLogs(value);
+  } catch (error) {
+    if (currentGeneration === manualGeneration && !autoRefresh.value) publishError(error);
+  }
+}
+
+function applyFilters() {
+  try {
+    buildSchedulerLogFilter(draft);
+    applied.value = { ...draft, timeRange: [...(draft.timeRange ?? [])] };
+    if (autoRefresh.value) refresh();
+    else void manualRefresh();
+  } catch (error) {
+    Message.warning((error as Error)?.message || "筛选条件无效");
+  }
+}
+
+function resetFilters() {
+  Object.assign(draft, {
+    timeRange: [],
+    nodeId: undefined,
+    algorithm: undefined,
+    result: undefined,
+    streamId: "",
+    limit: 100
+  });
+  applyFilters();
+}
+
+function toggleAutoRefresh(value: boolean | string | number) {
+  autoRefresh.value = Boolean(value);
+  if (autoRefresh.value) manualGeneration += 1;
+  else void manualRefresh();
+}
+
+function formatTime(value: string) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+onMounted(loadNodes);
 </script>
 
 <template>
-    <div class="snow-fill">
-        <div class="snow-fill-inner uvp-page-shell-flat scheduler-log-shell">
-            <div class="scheduler-log">
-                <s-layout-search class="scheduler-log-search">
-                    <template #fields>
-                    <a-select
-                        v-model="limit"
-                        :options="limitOptions"
-                        style="width: 126px"
-                        placeholder="日志条数"
-                        @change="refresh"
-                    />
-                        <span class="log-count">{{ logs.length }} 条日志</span>
-                    </template>
-                    <template #actions>
-                    <a-switch
-                            class="auto-refresh"
-                        :model-value="autoRefresh"
-                        checked-text="自动 30s"
-                        unchecked-text="手动"
-                        @change="(v: boolean | string | number) => toggleAutoRefresh(Boolean(v))"
-                    />
-                        <a-button class="uvp-refresh-btn" @click="refresh" :loading="loading">
-                            <template #icon><icon-refresh /></template>
-                            刷新
-                        </a-button>
-                    </template>
-                </s-layout-search>
-
-                <div class="scheduler-log-table">
-            <a-table
-                :data="logs"
-                :loading="loading"
-                row-key="id"
-                :pagination="false"
-                :row-class-name="rowClass"
-                size="small"
-                        class="uvp-data-table"
-            >
-                <template #columns>
-                    <a-table-column title="时间" :width="180">
-                        <template #cell="{ record }">{{ formatTime(record.happenedAt) }}</template>
-                    </a-table-column>
-                    <a-table-column title="算法" :width="100">
-                        <template #cell="{ record }">
-                            <a-tag v-if="record.algorithm" size="small" color="arcoblue">
-                                {{ record.algorithm }}
-                            </a-tag>
-                                    <span v-else class="muted">—</span>
-                        </template>
-                    </a-table-column>
-                    <a-table-column title="命中节点">
-                        <template #cell="{ record }">
-                            <span v-if="record.nodeName">
-                                {{ record.nodeName }}
-                                        <span class="muted">(id={{ record.nodeID }})</span>
-                            </span>
-                                    <span v-else class="muted">—</span>
-                        </template>
-                    </a-table-column>
-                    <a-table-column title="StreamID" :width="200">
-                        <template #cell="{ record }">
-                            <span v-if="record.streamID">{{ record.streamID }}</span>
-                                    <span v-else class="muted">—</span>
-                        </template>
-                    </a-table-column>
-                    <a-table-column title="设备/通道" :width="220">
-                        <template #cell="{ record }">
-                            <span v-if="record.deviceID">
-                                {{ record.deviceID }}
-                                        <span class="muted" v-if="record.channelID">
-                                    / {{ record.channelID }}
-                                </span>
-                            </span>
-                                    <span v-else class="muted">—</span>
-                        </template>
-                    </a-table-column>
-                    <a-table-column title="错误">
-                        <template #cell="{ record }">
-                            <a-tag v-if="record.errorMessage" color="red" size="small">
-                                {{ record.errorMessage }}
-                            </a-tag>
-                                    <span v-else class="success-text">成功</span>
-                        </template>
-                    </a-table-column>
-                </template>
-            </a-table>
-                </div>
-            </div>
+  <div class="snow-fill">
+    <div class="snow-fill-inner uvp-page-shell-flat scheduler-log-shell">
+      <div class="scheduler-log">
+        <div class="log-boundary" role="status">
+          筛选条件由后端数据库查询执行；页面不会先拉取全量日志再做本地过滤。
         </div>
+
+        <s-layout-search class="scheduler-log-search">
+          <template #fields>
+            <a-range-picker
+              v-model="draft.timeRange"
+              show-time
+              allow-clear
+              value-format="timestamp"
+              class="time-filter"
+              aria-label="时间范围"
+              @change="applyFilters"
+            />
+            <a-select v-model="draft.nodeId" :options="nodes" allow-clear placeholder="节点" class="short-filter" @change="applyFilters" />
+            <a-select v-model="draft.algorithm" :options="algorithmOptions" allow-clear placeholder="策略" class="short-filter" @change="applyFilters" />
+            <a-select
+              v-model="draft.result"
+              allow-clear
+              placeholder="结果"
+              class="short-filter"
+              :options="[
+                { label: '成功', value: 'success' },
+                { label: '失败', value: 'failure' }
+              ]"
+              @change="applyFilters"
+            />
+            <a-input-search
+              v-model="draft.streamId"
+              allow-clear
+              placeholder="业务流 StreamID"
+              class="stream-filter"
+              @search="applyFilters"
+              @press-enter="applyFilters"
+            />
+            <a-select v-model="draft.limit" :options="limitOptions" placeholder="日志条数" class="short-filter" @change="applyFilters" />
+          </template>
+          <template #actions>
+            <span class="log-count">{{ logs.length }} 条日志</span>
+            <a-switch
+              :model-value="autoRefresh"
+              checked-text="自动 30s"
+              unchecked-text="手动"
+              class="auto-refresh"
+              @change="toggleAutoRefresh"
+            />
+            <a-button @click="resetFilters">重置</a-button>
+            <a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新调度日志" @click="applyFilters">
+              <template #icon><icon-refresh /></template>查询
+            </a-button>
+          </template>
+        </s-layout-search>
+
+        <div v-if="loadError && logs.length" class="log-state log-state--warning" role="status">
+          本次查询失败：{{ errorPresentation.label }}。已保留上一次结果。
+        </div>
+        <div v-if="loading && !logs.length" class="log-state" role="status" aria-label="正在加载调度日志"><a-spin /><span>正在查询调度日志…</span></div>
+        <div v-else-if="loadError && !logs.length" class="log-state log-state--error" role="alert">
+          <strong>{{ errorPresentation.label }}</strong>
+          <a-button v-if="errorPresentation.retryable" @click="applyFilters">重新查询</a-button>
+        </div>
+
+        <div v-else class="scheduler-log-table">
+          <a-table :data="logs" :loading="loading" row-key="id" :pagination="false" size="small" class="uvp-data-table">
+            <template #columns>
+              <a-table-column title="时间" :width="180"><template #cell="{ record }">{{ formatTime(record.happenedAt) }}</template></a-table-column>
+              <a-table-column title="策略" :width="120"><template #cell="{ record }"><a-tag v-if="record.algorithm" size="small" color="arcoblue">{{ record.algorithm }}</a-tag><span v-else>—</span></template></a-table-column>
+              <a-table-column title="命中节点" :width="190"><template #cell="{ record }"><span v-if="record.nodeName">{{ record.nodeName }} <small>#{{ record.nodeID }}</small></span><span v-else>—</span></template></a-table-column>
+              <a-table-column title="业务流" :width="210"><template #cell="{ record }"><span class="mono">{{ record.streamID || "—" }}</span></template></a-table-column>
+              <a-table-column title="设备 / 通道" :width="220"><template #cell="{ record }">{{ record.deviceID || "—" }}<small v-if="record.channelID"> / {{ record.channelID }}</small></template></a-table-column>
+              <a-table-column title="结果">
+                <template #cell="{ record }">
+                  <div v-if="record.errorMessage" class="result result--error"><strong>失败</strong><span>{{ record.errorMessage }}</span></div>
+                  <span v-else class="result result--success">成功</span>
+                </template>
+              </a-table-column>
+            </template>
+            <template #empty>
+              <div class="empty" role="status"><strong>没有符合条件的调度日志</strong><span>调整时间、结果、节点、策略或业务流条件后重试。</span></div>
+            </template>
+          </a-table>
+        </div>
+      </div>
     </div>
+  </div>
 </template>
 
 <style scoped>
-.scheduler-log-shell {
-    padding: 4px 8px;
-    overflow: hidden;
-}
-
-.scheduler-log {
-    height: 100%;
-    overflow: auto;
-}
-
-.scheduler-log-search {
-    margin-bottom: 16px;
-}
-
-.scheduler-log-search :deep(.uvp-search-panel__fields) {
-    flex-wrap: nowrap;
-}
-
-.scheduler-log-search :deep(.uvp-search-panel__actions) {
-    gap: 10px;
-}
-
-.scheduler-log-search :deep(.arco-select-view),
-.scheduler-log-search :deep(.arco-input-wrapper) {
-    box-sizing: border-box;
-    background: var(--uvp-search-control-bg) !important;
-    border: 1px solid var(--uvp-search-secondary-btn-border) !important;
-    border-radius: 10px !important;
-    box-shadow: var(--uvp-search-control-shadow) !important;
-}
-
-.scheduler-log-search :deep(.arco-select-view.arco-select-view-focus),
-.scheduler-log-search :deep(.arco-select-view:focus-within),
-.scheduler-log-search :deep(.arco-input-wrapper:focus-within) {
-    border-color: var(--uvp-brand) !important;
-    box-shadow: var(--uvp-search-control-focus-shadow) !important;
-}
-
-.scheduler-log-search :deep(.arco-select-view-input::placeholder),
-.scheduler-log-search :deep(.arco-input::placeholder) {
-    color: var(--uvp-text-tertiary) !important;
-    opacity: 1;
-}
-
-.scheduler-log-search :deep(.arco-btn) {
-    box-sizing: border-box;
-    border-radius: 10px;
-}
-
-.auto-refresh {
-    min-width: 92px;
-}
-
-.log-count {
-    display: inline-flex;
-    align-items: center;
-    height: 34px;
-    color: var(--uvp-text-tertiary);
-    font-size: 12px;
-    white-space: nowrap;
-}
-
-.scheduler-log-table {
-    overflow: hidden;
-    background: var(--uvp-panel-bg);
-    border: 1px solid var(--uvp-panel-border);
-    border-radius: var(--uvp-panel-radius);
-    box-shadow: var(--uvp-panel-shadow);
-}
-
-.scheduler-log-table :deep(.arco-table-container) {
-    border-radius: inherit;
-}
-
-.scheduler-log-table :deep(.arco-table-td) {
-    font-size: 14px;
-    line-height: 22px;
-}
-
-.muted {
-    color: var(--uvp-text-tertiary);
-}
-
-.success-text {
-    color: #16845f;
-    font-weight: 500;
-}
-
-:deep(tr.row-error > td),
-:deep(.arco-table-tr.row-error > .arco-table-td),
-:deep(tr.row-error .arco-table-td) {
-    background-color: rgb(248 113 113 / 10%) !important;
-}
-
-@media (max-width: 768px) {
-    .scheduler-log-search :deep(.uvp-search-panel__fields) {
-        flex-wrap: wrap;
-    }
-
-    .scheduler-log-search :deep(.arco-select) {
-        width: 100% !important;
-    }
-}
+.scheduler-log-shell { padding: 4px 8px; overflow: hidden; }
+.scheduler-log { height: 100%; overflow: auto; }
+.log-boundary { margin-bottom: 12px; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-brand-50); border: 1px solid var(--zlm-brand-200); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }
+.scheduler-log-search { margin-bottom: 16px; }
+.time-filter { width: 330px; }
+.short-filter { width: 125px; }
+.stream-filter { width: 190px; }
+.log-count { color: var(--uvp-text-tertiary); font-size: 12px; white-space: nowrap; }
+.auto-refresh { min-width: 92px; }
+.log-state { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }
+.log-state--warning { min-height: auto; align-items: flex-start; margin-bottom: 12px; padding: 10px 12px; color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }
+.log-state--error { color: var(--zlm-danger-600); }
+.scheduler-log-table { overflow: hidden; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }
+.scheduler-log-table small { color: var(--zlm-text-4); }
+.mono { font-family: var(--zlm-font-mono); }
+.result { display: inline-flex; align-items: flex-start; gap: 7px; }
+.result--success { color: var(--zlm-success-600); font-weight: var(--zlm-fw-medium); }
+.result--error { color: var(--zlm-danger-600); }
+.result--error span { color: var(--zlm-text-2); overflow-wrap: anywhere; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }
+.empty strong { color: var(--zlm-text-1); }
+:deep(.arco-btn), :deep(.arco-input-wrapper), :deep(.arco-select-view), :deep(.arco-picker) { border-radius: 10px; }
+@media (max-width: 900px) { .time-filter, .short-filter, .stream-filter { width: 100%; } }
 </style>
