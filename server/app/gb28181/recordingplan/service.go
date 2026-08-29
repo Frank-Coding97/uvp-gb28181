@@ -52,6 +52,17 @@ type PlanDetail struct {
 	UpdatedAt   time.Time         `json:"updatedAt"`
 }
 
+type PlanSummary struct {
+	ID           uint64            `json:"id"`
+	Name         string            `json:"name"`
+	Description  string            `json:"description"`
+	Enabled      bool              `json:"enabled"`
+	Version      uint64            `json:"version"`
+	ChannelCount int64             `json:"channelCount"`
+	Periods      []schedule.Period `json:"periods"`
+	UpdatedAt    time.Time         `json:"updatedAt"`
+}
+
 type Service struct {
 	db  *gorm.DB
 	now func() time.Time
@@ -108,6 +119,56 @@ func (s *Service) Page(ctx context.Context, ownerDeptID uint, keyword string, pa
 	var rows []models.GbRecordingPlan
 	err := query.Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&rows).Error
 	return rows, total, err
+}
+
+func (s *Service) PageSummaries(ctx context.Context, ownerDeptID uint, keyword string, enabled *bool, page, pageSize int) ([]PlanSummary, int64, error) {
+	page, pageSize = normalizePage(page, pageSize)
+	query := s.db.WithContext(ctx).Model(&models.GbRecordingPlan{}).Where("owner_dept_id = ?", ownerDeptID)
+	if keyword = strings.TrimSpace(keyword); keyword != "" {
+		query = query.Where("name LIKE ? OR description LIKE ?", "%"+keyword+"%", "%"+keyword+"%")
+	}
+	if enabled != nil {
+		query = query.Where("status = ?", boolStatus(*enabled))
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []struct {
+		ID           uint64
+		Name         string
+		Description  string
+		Status       int8
+		Version      uint64
+		ChannelCount int64
+		UpdatedAt    time.Time
+	}
+	err := query.Select(`gb_recording_plan.id, gb_recording_plan.name, gb_recording_plan.description,
+		gb_recording_plan.status, gb_recording_plan.version, gb_recording_plan.updated_at,
+		(SELECT COUNT(*) FROM gb_recording_plan_binding b WHERE b.plan_id = gb_recording_plan.id) AS channel_count`).
+		Order("gb_recording_plan.id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error
+	if err != nil {
+		return nil, 0, err
+	}
+	result := make([]PlanSummary, 0, len(rows))
+	periodByPlan := make(map[uint64][]schedule.Period, len(rows))
+	if len(rows) > 0 {
+		ids := make([]uint64, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		var periodRows []models.GbRecordingPlanPeriod
+		if err := s.db.WithContext(ctx).Where("plan_id IN ?", ids).Order("weekday, start_slot, id").Find(&periodRows).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, period := range periodRows {
+			periodByPlan[period.PlanID] = append(periodByPlan[period.PlanID], schedule.Period{Weekday: int(period.Weekday), StartSlot: int(period.StartSlot), EndSlot: int(period.EndSlot)})
+		}
+	}
+	for _, row := range rows {
+		result = append(result, PlanSummary{ID: row.ID, Name: row.Name, Description: row.Description, Enabled: row.Status == 1, Version: row.Version, ChannelCount: row.ChannelCount, Periods: periodByPlan[row.ID], UpdatedAt: row.UpdatedAt})
+	}
+	return result, total, nil
 }
 
 func (s *Service) Update(ctx context.Context, ownerDeptID, actorID uint, planID uint64, input PlanInput) (*PlanDetail, error) {

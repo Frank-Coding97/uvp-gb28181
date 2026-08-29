@@ -34,7 +34,16 @@ func (c *RecordingPlanController) Page(ctx *gin.Context) {
 		return
 	}
 	page, pageSize := pagination(ctx)
-	rows, total, err := recordingplan.NewService(c.dbFunc()).Page(ctx, deptID, ctx.Query("keyword"), page, pageSize)
+	var enabled *bool
+	switch strings.ToLower(strings.TrimSpace(ctx.Query("status"))) {
+	case "enabled":
+		value := true
+		enabled = &value
+	case "disabled":
+		value := false
+		enabled = &value
+	}
+	rows, total, err := recordingplan.NewService(c.dbFunc()).PageSummaries(ctx, deptID, ctx.Query("keyword"), enabled, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -149,7 +158,16 @@ func (c *RecordingPlanController) SearchDevices(ctx *gin.Context) {
 	}
 	_ = planID
 	page, pageSize := pagination(ctx)
-	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchDevices(ctx, deptID, ctx.Query("keyword"), page, pageSize)
+	var online *bool
+	switch strings.ToLower(strings.TrimSpace(ctx.Query("online"))) {
+	case "online", "true", "1":
+		value := true
+		online = &value
+	case "offline", "false", "0":
+		value := false
+		online = &value
+	}
+	result, err := recordingplan.NewAssignmentService(c.dbFunc()).SearchDevicesFiltered(ctx, deptID, ctx.Query("keyword"), online, page, pageSize)
 	if err != nil {
 		c.respondError(ctx, err)
 		return
@@ -232,9 +250,18 @@ func (c *RecordingPlanController) PlanChannels(ctx *gin.Context) {
 		return
 	}
 	page, pageSize := pagination(ctx)
+	var online *bool
+	switch strings.ToLower(strings.TrimSpace(ctx.Query("online"))) {
+	case "online", "true", "1":
+		value := true
+		online = &value
+	case "offline", "false", "0":
+		value := false
+		online = &value
+	}
 	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).PagePlanChannels(ctx, deptID, planID, recordingplan.ChannelStatusQuery{
 		Keyword: ctx.Query("keyword"), DeviceID: ctx.Query("deviceId"), ActualState: ctx.Query("actualState"),
-		ReasonCode: ctx.Query("reasonCode"), Page: page, PageSize: pageSize,
+		ReasonCode: ctx.Query("reasonCode"), Online: online, Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		c.respondError(ctx, err)

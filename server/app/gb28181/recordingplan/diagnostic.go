@@ -18,6 +18,7 @@ type ChannelStatusQuery struct {
 	DeviceID    string
 	ActualState string
 	ReasonCode  string
+	Online      *bool
 	Page        int
 	PageSize    int
 }
@@ -195,6 +196,9 @@ func applyChannelStatusFilters(query *gorm.DB, input ChannelStatusQuery) *gorm.D
 	}
 	if reason := strings.TrimSpace(input.ReasonCode); reason != "" {
 		query = query.Where("s.reason_code = ?", reason)
+	}
+	if input.Online != nil {
+		query = query.Where("c.status = ?", *input.Online)
 	}
 	return query
 }

@@ -70,11 +70,18 @@ func NewAssignmentService(db *gorm.DB) *AssignmentService {
 }
 
 func (s *AssignmentService) SearchDevices(ctx context.Context, ownerDeptID uint, keyword string, page, pageSize int) (*AssignmentOptionPage, error) {
+	return s.SearchDevicesFiltered(ctx, ownerDeptID, keyword, nil, page, pageSize)
+}
+
+func (s *AssignmentService) SearchDevicesFiltered(ctx context.Context, ownerDeptID uint, keyword string, online *bool, page, pageSize int) (*AssignmentOptionPage, error) {
 	page, pageSize = normalizePage(page, pageSize)
 	query := s.db.WithContext(ctx).Model(&models.GbDevice{}).Where("owner_dept_id = ?", ownerDeptID)
 	if keyword = strings.TrimSpace(keyword); keyword != "" {
 		like := "%" + keyword + "%"
 		query = query.Where("name LIKE ? OR alias LIKE ? OR device_id LIKE ?", like, like, like)
+	}
+	if online != nil {
+		query = query.Where("status = ?", *online)
 	}
 	result := &AssignmentOptionPage{List: []AssignmentOption{}, Page: page, PageSize: pageSize}
 	if err := query.Count(&result.Total).Error; err != nil {

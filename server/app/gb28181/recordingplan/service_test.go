@@ -92,3 +92,20 @@ func TestServicePageIsDepartmentScopedAndBounded(t *testing.T) {
 	require.EqualValues(t, 4, total)
 	require.Len(t, rows, 2)
 }
+
+func TestServicePageSummariesFiltersStatusAndCountsBindings(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	service := NewService(db)
+	enabled, err := service.Create(context.Background(), 1, 1, PlanInput{Name: "启用计划", Enabled: true, Periods: []schedule.Period{{Weekday: 1, StartSlot: 0, EndSlot: 1}}})
+	require.NoError(t, err)
+	_, err = service.Create(context.Background(), 1, 1, PlanInput{Name: "停用计划", Enabled: false})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&models.GbRecordingPlanBinding{PlanID: enabled.ID, ChannelID: 9, OwnerDeptID: 1, AssignedAt: time.Now()}).Error)
+	filter := true
+	rows, total, err := service.PageSummaries(context.Background(), 1, "计划", &filter, 1, 500)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Len(t, rows, 1)
+	require.True(t, rows[0].Enabled)
+	require.EqualValues(t, 1, rows[0].ChannelCount)
+}
