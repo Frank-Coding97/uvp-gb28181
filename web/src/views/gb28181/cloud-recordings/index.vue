@@ -1,6 +1,6 @@
 <template>
-  <div class="snow-page cloud-recordings-page">
-    <div class="snow-inner uvp-page-shell-flat">
+  <div class="snow-fill cloud-recordings-page">
+    <div class="snow-fill-inner uvp-page-shell-flat cloud-recordings-shell">
       <a-alert v-if="!canView" type="warning" class="cloud-recordings-state">
         无权查看云端录像，请联系管理员分配录像查看权限。
       </a-alert>
@@ -559,8 +559,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
-.cloud-recordings-page { box-sizing: border-box; width: 100%; max-width: 100vw; min-width: 0; overflow-x: hidden; contain: inline-size; color: var(--uvp-text-primary); }
-.cloud-recordings-page > .snow-inner { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; }
+.cloud-recordings-page { box-sizing: border-box; width: 100%; height: 100%; max-width: 100vw; min-width: 0; min-height: 0; overflow: hidden; contain: inline-size; color: var(--uvp-text-primary); }
+.cloud-recordings-shell { box-sizing: border-box; display: flex; width: 100%; height: 100%; max-width: 100%; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .cloud-recordings-page :deep(.uvp-search-panel .arco-input-wrapper),
 .cloud-recordings-page :deep(.uvp-search-panel .arco-select-view),
 .cloud-recordings-page :deep(.uvp-search-panel .arco-picker) {
@@ -592,7 +592,7 @@ onBeforeUnmount(() => {
   border-radius: 10px;
 }
 .cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) { font-size: 14px; line-height: 22px; }
-.cloud-recordings-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
+.cloud-recordings-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .cloud-recordings-header__actions { display: flex; gap: 8px; align-items: center; }
 .recording-date-range { width: 360px; max-width: 100%; }
 .recording-view-switch button { display: inline-flex; align-items: center; gap: 6px; }
@@ -607,7 +607,11 @@ onBeforeUnmount(() => {
 .reconciliation-summary__icon.is-spinning { animation: reconciliation-spin 900ms linear infinite; }
 @keyframes reconciliation-spin { to { transform: rotate(360deg); } }
 .cloud-recordings-state { margin: 10px 0 12px; }
-.cloud-recordings-table-wrap { max-width: 100%; min-width: 0; overflow-x: auto; contain: inline-size; border-radius: 6px; }
+.recording-files-view,
+.active-recordings-view { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.recording-files-view > :deep(.uvp-search-panel) { flex: 0 0 auto; }
+.cloud-recordings-table-wrap { flex: 1; max-width: 100%; min-width: 0; min-height: 0; overflow: hidden; contain: inline-size; border-radius: 6px; }
+.cloud-recordings-table-wrap :deep(.uvp-data-table) { height: 100%; min-height: 0; }
 .recording-entity-cell { display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }
 .recording-entity-cell span,
 .recording-entity-cell small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

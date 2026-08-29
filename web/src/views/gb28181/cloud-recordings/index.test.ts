@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -20,6 +22,8 @@ vi.mock("@/hooks/useDevicesSize", () => ({ useDevicesSize: () => ({ isMobile: { 
 
 import { getLucideIconComponent } from "@/utils/lucide-menu-icons";
 import CloudRecordings from "./index.vue";
+
+const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/cloud-recordings/index.vue"), "utf8");
 
 const file = (availability = "available", metadataState = "complete") => ({
   id: "9007199254740993",
@@ -69,6 +73,18 @@ const stubs = {
   RecordingDetailDrawer: { template: "<div />" },
   RecordingPlayerDialog: { template: "<div />" }
 };
+
+describe("cloud recording layout", () => {
+  it("keeps vertical scrolling inside the recording table", () => {
+    expect(source).toContain('class="snow-fill cloud-recordings-page"');
+    expect(source).toContain('class="snow-fill-inner uvp-page-shell-flat cloud-recordings-shell"');
+    expect(source).toMatch(/\.cloud-recordings-page\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
+    expect(source).toMatch(/\.cloud-recordings-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
+    expect(source).toMatch(/\.recording-files-view,\s*\.active-recordings-view\s*{[^}]*display:\s*flex;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;/s);
+    expect(source).toMatch(/\.cloud-recordings-table-wrap\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
+    expect(source).toContain("...(files.value.length ? { y: \"100%\" } : {})");
+  });
+});
 
 function pageResult(list = [file()]) {
   return { code: 0, message: "", data: { list, total: list.length, page: 1, pageSize: 20 } };
