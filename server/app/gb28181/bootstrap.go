@@ -25,6 +25,7 @@ import (
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
@@ -48,6 +49,7 @@ import (
 	gbzlmsched "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/scheduler"
 	gbzlmsvc "uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
 
 	"github.com/google/uuid"
@@ -240,6 +242,8 @@ var recordingSvc *gbrecording.Service
 var recordingReconciler *gbrecording.Reconciler
 var recordingCatalogScheduler *gbrecording.CatalogReconcileScheduler
 var recordingCatalogService *gbrecording.CatalogService
+var recordingPlanEngine *recordingplan.Engine
+var recordingPlanLeases *play.SourceLeaseRegistry
 var talkSvc *gbtalk.Service
 var talkCleanupWorker *gbtalk.CleanupWorker
 
@@ -870,6 +874,14 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 		func(n *node.Node) gbrecording.RecorderClient { return gbzlm.NewClientForNode(n) })
 	indexer := gbrecording.NewFileIndexer(repo, zlmLocationMap)
 	gbroutes.SetRecordingService(recordingSvc, zlmRegistry, indexer)
+	recordingPlanLeases = play.NewSourceLeaseRegistry()
+	recordingPlanOrchestrator := recordingplan.NewOrchestrator(playSvc, recordingSvc, recordingPlanLeases, nil)
+	planEnabled := cfg.Recording.PlanEnabled
+	recordingPlanEngine = recordingplan.NewEngine(app.DB(), recordingPlanOrchestrator, recordingplan.EngineOptions{
+		InstanceID: uuid.NewString(), BatchSize: 100, LeaseTTL: 15 * time.Second, Enabled: &planEnabled,
+	})
+	executors.SetRecordingPlanRuntime(recordingPlanEngine)
+	gbroutes.SetRecordingPlanSourceLeaseChecker(recordingPlanLeases)
 	app.ZapLog.Info("GB28181 云端录像 service / Hook 已装配")
 
 	if cfg.Recording.ReconcileIntervalSec <= 0 {
@@ -946,6 +958,10 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 }
 
 func stopRecordingRuntime() {
+	executors.SetRecordingPlanRuntime(nil)
+	gbroutes.SetRecordingPlanSourceLeaseChecker(nil)
+	recordingPlanEngine = nil
+	recordingPlanLeases = nil
 	if recordingCatalogService != nil {
 		recordingCatalogService.CloseDownloads()
 		recordingCatalogService = nil

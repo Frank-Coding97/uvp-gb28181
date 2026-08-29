@@ -20,6 +20,8 @@ func RegisterExecutors() {
 	app.JobScheduler.RegisterExecutor(&executors.DemoExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.SessionCleanupExecutor{})
 	app.JobScheduler.RegisterExecutor(&executors.LoginLogCleanupExecutor{})
+	app.JobScheduler.RegisterExecutor(&executors.RecordingPlanDispatchExecutor{})
+	app.JobScheduler.RegisterExecutor(&executors.RecordingPlanHealExecutor{})
 	if _, err := app.JobScheduler.AddOrUpdateJob(&schedulerhelper.Job{
 		ID: "system-session-cleanup", Group: "system", Name: "登录会话终态清理",
 		Description:  "每日清理撤销或自然过期超过 30 天的登录会话",
@@ -29,6 +31,20 @@ func RegisterExecutors() {
 	}); err != nil && app.ZapLog != nil {
 		app.ZapLog.Error("注册登录会话清理任务失败", zap.Error(err))
 	}
+	registerSystemJob(&schedulerhelper.Job{
+		ID: "system-recording-plan-dispatch", Group: "system", Name: "录像计划调度",
+		Description:  "每 5 秒领取到期通道并执行录像计划",
+		ExecutorName: executors.RecordingPlanDispatchExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+		Status: schedulerhelper.StatusEnabled, CronExpression: "*/5 * * * * *",
+		BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 4 * time.Second,
+	})
+	registerSystemJob(&schedulerhelper.Job{
+		ID: "system-recording-plan-heal", Group: "system", Name: "录像计划自愈",
+		Description:  "每分钟重新请求所有通道对账，修复掉线和漏 Hook",
+		ExecutorName: executors.RecordingPlanHealExecutorName, ExecutionPolicy: schedulerhelper.PolicyRepeat,
+		Status: schedulerhelper.StatusEnabled, CronExpression: "0 * * * * *",
+		BlockingPolicy: schedulerhelper.BlockDiscard, Timeout: 50 * time.Second,
+	})
 	if _, err := app.JobScheduler.AddOrUpdateJob(&schedulerhelper.Job{
 		ID: "system-login-log-cleanup", Group: "system", Name: "登录日志清理",
 		Description:  "每日分批清理 180 天前的登录日志",
@@ -41,6 +57,12 @@ func RegisterExecutors() {
 
 	// 在这里添加更多执行器...
 	// app.JobScheduler.RegisterExecutor(&executors.YourExecutor{})
+}
+
+func registerSystemJob(job *schedulerhelper.Job) {
+	if _, err := app.JobScheduler.AddOrUpdateJob(job); err != nil && app.ZapLog != nil {
+		app.ZapLog.Error("注册系统任务失败", zap.String("jobID", job.ID), zap.Error(err))
+	}
 }
 
 // LoadJobsFromDB 从数据库加载启用的任务并注册到调度器

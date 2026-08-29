@@ -649,6 +649,7 @@ type PlayConfig struct {
 type RecordingConfig struct {
 	// ReconcileIntervalSec 云端录像状态对账周期。0 仅禁用周期任务，手动开关仍可用。
 	ReconcileIntervalSec        int
+	PlanEnabled                 bool
 	CatalogReconcileIntervalSec int
 	CatalogPeriodicLookbackDays int
 	CatalogManualLookbackDays   int
@@ -762,6 +763,7 @@ func loadFrom(c valueSource) (Config, error) {
 		},
 		Recording: RecordingConfig{
 			ReconcileIntervalSec:        c.GetInt("gb28181.recording.reconcile_interval_sec"),
+			PlanEnabled:                 c.Get("gb28181.recording.plan_enabled") == nil || c.GetBool("gb28181.recording.plan_enabled"),
 			CatalogReconcileIntervalSec: intValue(c, "gb28181.recording.catalog_reconcile_interval_sec", 6*60*60),
 			CatalogPeriodicLookbackDays: intValue(c, "gb28181.recording.catalog_periodic_lookback_days", 2),
 			CatalogManualLookbackDays:   intValue(c, "gb28181.recording.catalog_manual_lookback_days", 7),
