@@ -14,7 +14,7 @@ import (
 )
 
 func TestRecordingOpsGBMP4UsesExistingLifecycleAndReadback(t *testing.T) {
-	typed := &recordingOpsTypedRecorder{state: true}
+	typed := &recordingOpsTypedRecorder{state: false}
 	gb := &recordingOpsGBService{typed: typed}
 	ops := newRecordingOpsForTest(t, typed, gb, true, nil)
 
@@ -23,7 +23,7 @@ func TestRecordingOpsGBMP4UsesExistingLifecycleAndReadback(t *testing.T) {
 	require.Equal(t, RecordingStateRecording, result.State)
 	require.True(t, result.Recording)
 	require.Equal(t, 1, gb.startCalls)
-	require.Equal(t, 1, typed.readCalls, "start must read back actual recorder state")
+	require.Equal(t, 2, typed.readCalls, "start must read before and after the existing lifecycle")
 	require.Zero(t, typed.startCalls, "GB MP4 must use the existing recording lifecycle")
 }
 
@@ -40,6 +40,61 @@ func TestRecordingOpsExternalMP4RejectsBeforeAnyRecorderCall(t *testing.T) {
 	require.Contains(t, managementErr.Message, "orphan")
 	require.Zero(t, typed.totalCalls())
 	require.Zero(t, gb.startCalls)
+}
+
+func TestRecordingOpsHLSDoesNotClaimExternalRecording(t *testing.T) {
+	typed := &recordingOpsTypedRecorder{state: true}
+	managed := staticOwnershipSource{evidence: OwnershipEvidence{
+		Type: OwnershipTypeManaged, ResourceType: "managed", Key: "resource-1", Confidence: OwnershipConfidenceProven,
+	}}
+	ops := newRecordingOpsForTest(t, typed, &recordingOpsGBService{}, false, []OwnershipSource{managed})
+	target := testRecordingOpsTarget()
+
+	result, err := ops.Start(context.Background(), 7, recordingStartRequest(target, zlm.RecorderHLS))
+	require.Error(t, err)
+	managementErr, ok := AsManagementError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeOwnershipConflict, managementErr.Code)
+	require.Equal(t, RecordingStateUnknown, result.State)
+	require.Equal(t, RecordingExternalStateRecording, result.ExternalState)
+	require.True(t, result.Recording)
+	require.Empty(t, result.LeaseID)
+	require.Equal(t, 1, typed.readCalls, "external state must be read before any HLS start command")
+	require.Zero(t, typed.startCalls)
+
+	_, err = ops.Stop(context.Background(), 8, recordingStopRequest(target, zlm.RecorderHLS))
+	require.Error(t, err, "another user must not acquire a lease for an external recording")
+	managementErr, ok = AsManagementError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeOwnershipConflict, managementErr.Code)
+	require.Zero(t, typed.stopCalls)
+}
+
+func TestRecordingOpsMP4DoesNotClaimExternalRecording(t *testing.T) {
+	typed := &recordingOpsTypedRecorder{state: true}
+	gb := &recordingOpsGBService{typed: typed}
+	ops := newRecordingOpsForTest(t, typed, gb, true, nil)
+	target := testRecordingOpsTarget()
+
+	result, err := ops.Start(context.Background(), 7, recordingStartRequest(target, zlm.RecorderMP4))
+	require.Error(t, err)
+	managementErr, ok := AsManagementError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeOwnershipConflict, managementErr.Code)
+	require.Equal(t, RecordingStateUnknown, result.State)
+	require.Equal(t, RecordingExternalStateRecording, result.ExternalState)
+	require.True(t, result.Recording)
+	require.Empty(t, result.LeaseID)
+	require.Equal(t, 1, typed.readCalls, "external state must be read before the GB start lifecycle")
+	require.Zero(t, gb.startCalls)
+
+	_, err = ops.Stop(context.Background(), 8, recordingStopRequest(target, zlm.RecorderMP4))
+	require.Error(t, err, "another user must not acquire a lease for an external recording")
+	managementErr, ok = AsManagementError(err)
+	require.True(t, ok)
+	require.Equal(t, CodeOwnershipConflict, managementErr.Code)
+	require.Zero(t, gb.stopCalls)
+	require.Zero(t, typed.stopCalls)
 }
 
 func TestRecordingOpsHLSUsesTypedRecorderWithoutGBLifecycle(t *testing.T) {
@@ -88,7 +143,7 @@ func TestRecordingOpsStatusWithoutManualLeaseFailsClosedAfterRestart(t *testing.
 }
 
 func TestRecordingOpsStopBlocksBusinessOwnerWithoutCallingRecorder(t *testing.T) {
-	typed := &recordingOpsTypedRecorder{state: true}
+	typed := &recordingOpsTypedRecorder{state: false}
 	gb := &recordingOpsGBService{typed: typed}
 	plan := staticOwnershipSource{evidence: OwnershipEvidence{
 		Type: OwnershipTypeRecordingPlan, Key: "plan-1", Confidence: OwnershipConfidenceProven,
@@ -131,7 +186,7 @@ func TestRecordingOpsOrdinaryStopBlocksPlanContinuousUnknownAndConflicted(t *tes
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			typed := &recordingOpsTypedRecorder{state: true}
+			typed := &recordingOpsTypedRecorder{state: false}
 			gb := &recordingOpsGBService{typed: typed}
 			ops := newRecordingOpsForTest(t, typed, gb, true, []OwnershipSource{
 				staticOwnershipSource{evidence: test.evidence},
@@ -310,7 +365,7 @@ func TestExistingRecordingServiceAdapterRollsBackAfterBeginPlaybackFailure(t *te
 }
 
 func TestRecordingOpsAuditRetainsAuthenticatedActor(t *testing.T) {
-	typed := &recordingOpsTypedRecorder{state: true}
+	typed := &recordingOpsTypedRecorder{state: false}
 	gb := &recordingOpsGBService{typed: typed}
 	events := make([]RecordingAuditEvent, 0, 3)
 	ops := NewRecordingOps(RecordingOpsConfig{
@@ -337,7 +392,7 @@ func TestRecordingOpsAuditRetainsAuthenticatedActor(t *testing.T) {
 }
 
 func TestRecordingOpsOnlyCreatorCanStopAndStopFailureRemainsRetryable(t *testing.T) {
-	typed := &recordingOpsTypedRecorder{state: true}
+	typed := &recordingOpsTypedRecorder{state: false}
 	gb := &recordingOpsGBService{typed: typed, stopErr: errors.New("upstream stop failed")}
 	ops := newRecordingOpsForTest(t, typed, gb, true, nil)
 	_, err := ops.Start(context.Background(), 7, recordingStartRequest(testRecordingOpsTarget(), zlm.RecorderMP4))
@@ -371,8 +426,72 @@ func TestRecordingOpsOnlyCreatorCanStopAndStopFailureRemainsRetryable(t *testing
 	require.Equal(t, 2, gb.stopCalls, "stopped manual recording is idempotent")
 }
 
+func TestRecordingOpsMP4StopRequiresReadback(t *testing.T) {
+	testRecordingOpsMP4StopRequiresReadback(t, false)
+}
+
+func TestRecordingOpsMP4ForceStopRequiresReadback(t *testing.T) {
+	testRecordingOpsMP4StopRequiresReadback(t, true)
+}
+
+func testRecordingOpsMP4StopRequiresReadback(t *testing.T, force bool) {
+	t.Helper()
+	for _, test := range []struct {
+		name                   string
+		keepRecordingAfterStop bool
+		readErr                bool
+	}{
+		{name: "still-recording", keepRecordingAfterStop: true},
+		{name: "readback-error", readErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			typed := &recordingOpsTypedRecorder{state: false}
+			gb := &recordingOpsGBService{typed: typed, keepRecordingAfterStop: test.keepRecordingAfterStop}
+			events := make([]RecordingAuditEvent, 0, 2)
+			ops := newRecordingOpsForTest(t, typed, gb, true, nil)
+			ops.auditSink = RecordingAuditFunc(func(_ context.Context, event RecordingAuditEvent) error {
+				events = append(events, event)
+				return nil
+			})
+			target := testRecordingOpsTarget()
+			_, err := ops.Start(context.Background(), 7, recordingStartRequest(target, zlm.RecorderMP4))
+			require.NoError(t, err)
+			require.Len(t, events, 1)
+
+			if test.readErr {
+				typed.readErr = errors.New("readback failed")
+			}
+			var failed RecordingResult
+			if force {
+				failed, err = ops.ForceStop(context.Background(), 99, RecordingForceStopRequest{Target: target, Type: zlm.RecorderMP4, Reason: "incident-42"})
+			} else {
+				failed, err = ops.Stop(context.Background(), 7, recordingStopRequest(target, zlm.RecorderMP4))
+			}
+			require.Error(t, err)
+			require.Equal(t, RecordingStateStopping, failed.State)
+			require.True(t, failed.Retryable)
+			require.NotEqual(t, RecordingStateStopped, failed.State)
+			require.Equal(t, 1, gb.stopCalls)
+			require.Len(t, events, 1, "a failed MP4 readback must not be audited as a successful stop")
+
+			typed.readErr = nil
+			gb.keepRecordingAfterStop = false
+			var retried RecordingResult
+			if force {
+				retried, err = ops.ForceStop(context.Background(), 99, RecordingForceStopRequest{Target: target, Type: zlm.RecorderMP4, Reason: "incident-42"})
+			} else {
+				retried, err = ops.Stop(context.Background(), 7, recordingStopRequest(target, zlm.RecorderMP4))
+			}
+			require.NoError(t, err)
+			require.Equal(t, RecordingStateStopped, retried.State)
+			require.Equal(t, 2, gb.stopCalls)
+			require.Len(t, events, 2)
+		})
+	}
+}
+
 func TestRecordingOpsFingerprintChangePreventsStopExecution(t *testing.T) {
-	typed := &recordingOpsTypedRecorder{state: true}
+	typed := &recordingOpsTypedRecorder{state: false}
 	gb := &recordingOpsGBService{typed: typed}
 	mutable := &recordingOpsMutableOwnership{}
 	ops := newRecordingOpsForTest(t, typed, gb, true, []OwnershipSource{mutable})
@@ -394,7 +513,7 @@ func TestRecordingOpsFingerprintChangePreventsStopExecution(t *testing.T) {
 }
 
 func TestRecordingOpsForceStopIsSeparateAndRequiresReason(t *testing.T) {
-	typed := &recordingOpsTypedRecorder{state: true}
+	typed := &recordingOpsTypedRecorder{state: false}
 	managed := staticOwnershipSource{evidence: OwnershipEvidence{
 		Type: OwnershipTypeManaged, ResourceType: "managed", Key: "resource-1", Confidence: OwnershipConfidenceProven,
 	}}
@@ -418,7 +537,7 @@ func TestRecordingOpsForceStopIsSeparateAndRequiresReason(t *testing.T) {
 }
 
 func TestRecordingOpsForceStopFingerprintChangePreventsExecution(t *testing.T) {
-	typed := &recordingOpsTypedRecorder{state: true}
+	typed := &recordingOpsTypedRecorder{state: false}
 	mutable := &recordingOpsMutableOwnership{evidence: OwnershipEvidence{
 		Type: OwnershipTypeManaged, ResourceType: "managed", Key: "resource-1", Confidence: OwnershipConfidenceProven,
 	}}
@@ -544,11 +663,12 @@ func (r *recordingOpsTypedRecorder) totalCalls() int {
 }
 
 type recordingOpsGBService struct {
-	typed      *recordingOpsTypedRecorder
-	startErr   error
-	stopErr    error
-	startCalls int
-	stopCalls  int
+	typed                  *recordingOpsTypedRecorder
+	keepRecordingAfterStop bool
+	startErr               error
+	stopErr                error
+	startCalls             int
+	stopCalls              int
 }
 
 type recordingOpsExistingService struct {
@@ -589,7 +709,7 @@ func (s *recordingOpsGBService) StartManual(context.Context, GBChannelRef, Media
 
 func (s *recordingOpsGBService) StopManual(context.Context, GBChannelRef, MediaIdentity) error {
 	s.stopCalls++
-	if s.stopErr == nil && s.typed != nil {
+	if s.stopErr == nil && s.typed != nil && !s.keepRecordingAfterStop {
 		s.typed.mu.Lock()
 		s.typed.state = false
 		s.typed.mu.Unlock()

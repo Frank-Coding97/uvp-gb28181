@@ -498,6 +498,13 @@ func (s *RecordingOps) Start(ctx context.Context, userID uint, request Recording
 	}
 	startedByRequest := false
 	if recorderType == zlm.RecorderMP4 {
+		alreadyRecording, readErr := recorder.IsRecordingWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType)
+		if readErr != nil {
+			return s.startFailure(lease, &current, NormalizeError(readErr, nodeIDString(target.NodeID)))
+		}
+		if alreadyRecording {
+			return s.rejectExternalRecording(lease, target, recorderType, &current)
+		}
 		if err := s.recordingService.StartManual(ctx, gbChannel, target.Media); err != nil {
 			return s.startFailure(lease, &current, NormalizeError(err, nodeIDString(target.NodeID)))
 		}
@@ -512,12 +519,13 @@ func (s *RecordingOps) Start(ctx context.Context, userID uint, request Recording
 		if readErr != nil {
 			return s.startFailure(lease, &current, NormalizeError(readErr, nodeIDString(target.NodeID)))
 		}
-		if !alreadyRecording {
-			if startErr := recorder.StartRecordWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType, request.MaxSecond); startErr != nil {
-				return s.startFailure(lease, &current, NormalizeError(startErr, nodeIDString(target.NodeID)))
-			}
-			startedByRequest = true
+		if alreadyRecording {
+			return s.rejectExternalRecording(lease, target, recorderType, &current)
 		}
+		if startErr := recorder.StartRecordWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType, request.MaxSecond); startErr != nil {
+			return s.startFailure(lease, &current, NormalizeError(startErr, nodeIDString(target.NodeID)))
+		}
+		startedByRequest = true
 	}
 
 	confirmed, readErr := recorder.IsRecordingWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType)
@@ -684,6 +692,19 @@ func (s *RecordingOps) ForceStop(ctx context.Context, userID uint, request Recor
 			result.State, result.Retryable, result.Reason = RecordingStateStopping, true, "recording stop is retryable"
 			return result, retryableRecordingError(target, stopErr)
 		}
+		confirmed, readErr := recorder.IsRecordingWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType)
+		if readErr != nil || confirmed {
+			if lease != nil {
+				lease.State = RecordingStateStopping
+			}
+			cause := readErr
+			if cause == nil {
+				cause = errors.New("recording state is still true after stop")
+			}
+			result := s.resultForLeaseOrTarget(lease, target, recorderType, &current)
+			result.State, result.Retryable, result.Reason = RecordingStateStopping, true, "recording stop is retryable"
+			return result, recordingReadbackError(target, cause)
+		}
 	} else {
 		if stopErr := recorder.StopRecordWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType); stopErr != nil {
 			if lease != nil {
@@ -820,6 +841,17 @@ func (s *RecordingOps) stopLocked(ctx context.Context, userID uint, provided *Re
 			result := s.resultForLease(lease, &current)
 			result.State, result.Retryable, result.Reason = RecordingStateStopping, true, "recording stop is retryable"
 			return result, retryableRecordingError(target, stopErr)
+		}
+		confirmed, readErr := recorder.IsRecordingWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType)
+		if readErr != nil || confirmed {
+			lease.State = RecordingStateStopping
+			cause := readErr
+			if cause == nil {
+				cause = errors.New("recording state is still true after stop")
+			}
+			result := s.resultForLease(lease, &current)
+			result.State, result.Retryable, result.Reason = RecordingStateStopping, true, "recording stop is retryable"
+			return result, recordingReadbackError(target, cause)
 		}
 	} else {
 		if stopErr := recorder.StopRecordWithType(ctx, target.Media.Vhost, target.Media.App, target.Media.Stream, recorderType); stopErr != nil {
@@ -1052,6 +1084,20 @@ func (s *RecordingOps) resultForLeaseOrTarget(lease *manualRecordingLease, targe
 		result.Ownership = *snapshot
 	}
 	return result
+}
+
+func (s *RecordingOps) rejectExternalRecording(lease *manualRecordingLease, target OwnershipTarget, recorderType zlm.RecorderType, snapshot *OwnershipSnapshot) (RecordingResult, error) {
+	if s != nil && lease != nil {
+		s.deleteLease(leaseKey(target, recorderType), lease)
+	}
+	if snapshot != nil && lease != nil {
+		clean := snapshotWithoutManualLease(*snapshot, lease.ID)
+		snapshot = &clean
+	}
+	const reason = "recording is already active and is not owned by this request"
+	result := s.resultForLeaseOrTarget(nil, target, recorderType, snapshot)
+	result.ExternalState, result.Recording, result.Reason = RecordingExternalStateRecording, true, reason
+	return result, recordingOwnershipConflict(target, reason)
 }
 
 func (s *RecordingOps) startConfirmationFailure(ctx context.Context, lease *manualRecordingLease, snapshot *OwnershipSnapshot, recorder TypedRecorderClient, gbChannel GBChannelRef, target OwnershipTarget, recorderType zlm.RecorderType, cause error) (RecordingResult, error) {
