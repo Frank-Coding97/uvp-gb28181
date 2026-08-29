@@ -23,6 +23,7 @@ type t14StreamService struct {
 	viewerMedia     management.MediaIdentity
 	viewerPage      management.PageRequest
 	closeErr        error
+	previewErr      error
 }
 
 func (s *t14StreamService) ListStreams(context.Context, management.StreamListRequest) (management.StreamListResult, error) {
@@ -41,7 +42,7 @@ func (s *t14StreamService) ListStreamViewers(_ context.Context, _ int64, media m
 }
 
 func (s *t14StreamService) IssuePreviewGrant(context.Context, uint64, management.PreviewGrantRequest) (*management.PreviewGrantResponse, error) {
-	return nil, nil
+	return nil, s.previewErr
 }
 
 func (s *t14StreamService) PreflightCloseStream(context.Context, management.OwnershipTarget) (management.StreamClosePreview, error) {
@@ -249,4 +250,19 @@ func TestZLMManagementControllerErrorDoesNotEchoSensitiveCause(t *testing.T) {
 	require.NotEqual(t, http.StatusOK, recorder.Code)
 	require.NotContains(t, recorder.Body.String(), "super-secret")
 	require.NotContains(t, recorder.Body.String(), "https://user:pass")
+}
+
+func TestZLMManagementControllerKeepsGBPreviewOnPlayAuthorizationBoundary(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &t14StreamService{previewErr: errors.Join(management.ErrPreviewUnsupported, management.ErrGBPreviewRequiresPlayAuth)}
+	router := gin.New()
+	router.POST("/nodes/:id/streams/playback-grant", NewZLMManagementController(&ZLMManagementBundle{Streams: service}).PreviewGrant)
+	body := `{"media":{"schema":"rtp","vhost":"__defaultVhost__","app":"rtp","stream":"34020000001320000001_34020000001320000002"},"protocol":"https-flv"}`
+	req := httptest.NewRequest(http.MethodPost, "/nodes/1/streams/playback-grant", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusUnprocessableEntity, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "gb28181 play authorization")
 }

@@ -180,3 +180,25 @@ func TestManagementErrorAndDTORedaction(t *testing.T) {
 	require.NotContains(t, string(identityJSON), "apiSecret")
 	require.NotContains(t, string(identityJSON), "secret")
 }
+
+func TestManagementErrorRedactsMediaIdentityInsideImpacts(t *testing.T) {
+	const secret = "impact-super-secret"
+	media := MediaIdentity{
+		Schema: "rtsp",
+		Vhost:  "vhost",
+		App:    "rtsp://user:password@example.test/live?token=" + secret,
+		Stream: "stream?access_token=" + secret,
+	}
+	err := NewOwnershipConflictError("node-1", "resource changed").WithImpacts([]Impact{{
+		ResourceType: "pull_proxy",
+		ResourceKey:  "key",
+		MediaIdentity: &media,
+	}})
+
+	encoded, marshalErr := json.Marshal(err)
+	require.NoError(t, marshalErr)
+	text := string(encoded)
+	require.NotContains(t, text, secret)
+	require.NotContains(t, text, "user:password")
+	require.NotContains(t, text, "?token=")
+}

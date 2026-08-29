@@ -352,12 +352,22 @@ func (e *ManagementError) MarshalJSON() ([]byte, error) {
 	}
 	impacts := make([]wireImpact, 0, len(e.Impacts))
 	for _, impact := range e.Impacts {
+		var media *MediaIdentity
+		if impact.MediaIdentity != nil {
+			safeMedia := MediaIdentity{
+				Schema: sanitizeErrorText(impact.MediaIdentity.Schema),
+				Vhost:  sanitizeErrorText(impact.MediaIdentity.Vhost),
+				App:    sanitizeErrorText(impact.MediaIdentity.App),
+				Stream: sanitizeErrorText(impact.MediaIdentity.Stream),
+			}
+			media = &safeMedia
+		}
 		impacts = append(impacts, wireImpact{
 			ResourceType:  sanitizeErrorText(impact.ResourceType),
 			ResourceKey:   sanitizeErrorText(impact.ResourceKey),
 			Owner:         sanitizeErrorText(impact.Owner),
 			Reason:        sanitizeErrorText(impact.Reason),
-			MediaIdentity: impact.MediaIdentity,
+			MediaIdentity: media,
 		})
 	}
 	return json.Marshal(struct {
