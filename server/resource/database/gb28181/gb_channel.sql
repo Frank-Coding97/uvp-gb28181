@@ -18,6 +18,7 @@ CREATE TABLE `gb_channel` (
   `current_ssrc` varchar(10) NOT NULL DEFAULT '' COMMENT '当前实时媒体会话SSRC',
   `on_demand_live` tinyint(1) NOT NULL DEFAULT '1' COMMENT '按需直播 1=无人观看自动关闭',
   `audio_enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '点播是否接收音频',
+  `recording_mode` varchar(16) NOT NULL DEFAULT 'off' COMMENT '录像模式 off/continuous/scheduled',
   `cloud_recording_enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '云端录像期望开关',
   `cloud_recording_state` varchar(20) NOT NULL DEFAULT 'disabled' COMMENT '云端录像运行状态',
   `cloud_recording_error` varchar(500) NOT NULL DEFAULT '' COMMENT '云端录像最近错误',

@@ -34,6 +34,7 @@ type GbChannel struct {
 	OnDemandLive            bool       `gorm:"column:on_demand_live;default:true;comment:按需直播,无人观看自动关闭" json:"onDemandLive"`
 	StreamTransport         string     `gorm:"column:stream_transport;size:16;default:TCP-Passive;comment:流传输模式 UDP/TCP-Active/TCP-Passive" json:"streamTransport"`
 	AudioEnabled            bool       `gorm:"column:audio_enabled;default:true;comment:点播是否接收音频" json:"audioEnabled"`
+	RecordingMode           string     `gorm:"column:recording_mode;size:16;default:off;comment:录像模式 off/continuous/scheduled" json:"recordingMode"`
 	CloudRecordingEnabled   bool       `gorm:"column:cloud_recording_enabled;default:false;comment:云端录像期望开关" json:"cloudRecordingEnabled"`
 	CloudRecordingState     string     `gorm:"column:cloud_recording_state;size:20;default:disabled;comment:云端录像运行状态" json:"cloudRecordingState"`
 	CloudRecordingError     string     `gorm:"column:cloud_recording_error;size:500;default:'';comment:云端录像最近错误" json:"cloudRecordingError"`
