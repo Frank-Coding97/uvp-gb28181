@@ -916,5 +916,9 @@ func (s *NodeService) SetRestartCoordinator(coordinator *RestartCoordinator) {
 		return
 	}
 	coordinator.SetConverger(s.ConvergeNodeConfig)
+	previous := s.restart
 	s.restart = coordinator
+	if previous != nil && previous != coordinator {
+		previous.Close()
+	}
 }

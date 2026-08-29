@@ -284,6 +284,13 @@ func getOperationType(c *gin.Context) string {
 // getErrorMessage 获取错误信息
 func getErrorMessage(c *gin.Context, responseBody []byte) string {
 	if c.Writer.Status() >= 400 {
+		// Sensitive handlers deliberately replace request/response capture with
+		// bounded metadata. Their raw context error is part of the same boundary:
+		// upstream URLs, config values and credentials must not re-enter the log
+		// through ErrorMsg.
+		if _, sensitive := c.Get(sensitiveOperationContextKey); sensitive {
+			return "请求处理失败"
+		}
 		// 首先尝试从上下文中获取错误信息
 		if err, exists := c.Get("error"); exists {
 			return err.(error).Error()

@@ -49,6 +49,16 @@ func (c *Coordinator) CurrentSession(streamID string) (LiveSession, bool) {
 	return LiveSession{}, false
 }
 
+// CurrentSession exposes the coordinator's immutable ready-generation view
+// through Service so management ownership inspection does not need access to
+// coordinator internals or any mutation capability.
+func (s *Service) CurrentSession(streamID string) (LiveSession, bool) {
+	if s == nil {
+		return LiveSession{}, false
+	}
+	return s.coordinator().CurrentSession(streamID)
+}
+
 // ResolvePlaybackMediaContext produces a trusted token binding from the active
 // coordinator, location map, and node registry. It never trusts token claims to
 // discover media ownership and never queries the business database.

@@ -175,6 +175,7 @@ func diagnosisSinkForServer(server sipRuntimeServer) diagnosis.DiagnosticSink {
 }
 
 var playbackService *gbplayback.Service
+var playbackRegistry *gbplayback.Registry
 
 func SetPlaybackService(service *gbplayback.Service, snapshots gbcontrollers.PlaybackSnapshotResolver) {
 	playbackService = service
@@ -274,12 +275,14 @@ var trafficRealtime *traffic.RealtimeStore
 var playReconciler *reconciler.Reconciler
 
 var recordingSvc *gbrecording.Service
+var recordingRepo *gbrecording.GormRepo
 var recordingReconciler *gbrecording.Reconciler
 var recordingCatalogScheduler *gbrecording.CatalogReconcileScheduler
 var recordingCatalogService *gbrecording.CatalogService
 var recordingPlanEngine *recordingplan.Engine
 var recordingPlanLeases *play.SourceLeaseRegistry
 var talkSvc *gbtalk.Service
+var talkRepo *gbtalk.GormRepo
 var talkCleanupWorker *gbtalk.CleanupWorker
 
 // zlmSchedulerLog 调度日志服务(T3.3 新增,可为 nil 降级)
@@ -370,15 +373,19 @@ func startControlPlane(cfg gbconfig.Config) {
 			RTPServerTimeout:        cfg.Media.RTPServerTimeout,
 		}
 		nodeSvc := gbzlmsvc.NewNodeService(zlmRegistry, adapter, tuning)
+		restartCoordinator := gbzlmsvc.NewRestartCoordinator(zlmRegistry)
+		nodeSvc.SetRestartCoordinator(restartCoordinator)
 		nodeSvc.SetLogger(app.ZapLog)
 		cfgSvc := gbzlmsvc.NewConfigService(zlmRegistry, adapter)
 		gbroutes.SetZLMNodeController(gbcontrollers.NewZLMNodeController(nodeSvc))
 		gbroutes.SetZLMConfigController(gbcontrollers.NewZLMConfigController(cfgSvc))
+		setupZLMManagementCore(nodeSvc, restartCoordinator)
+		gbroutes.SetRestartStartedNotifier(restartCoordinator)
 		app.ZapLog.Info("GB28181 ZLM 节点/配置 controller 已装配")
 
-		collector := heartbeat.NewCollectorWithConfigScheduler(zlmRegistry, nodeSvc)
+		collector := heartbeat.NewCollectorWithNotifier(zlmRegistry, nodeSvc, restartCoordinator)
 		gbroutes.SetKeepaliveCollector(collector)
-		watcher := heartbeat.NewWatcher(zlmRegistry, heartbeat.RealClock(), 30*time.Second, 90*time.Second)
+		watcher := heartbeat.NewWatcherWithNotifier(zlmRegistry, heartbeat.RealClock(), 30*time.Second, 90*time.Second, restartCoordinator)
 		var hbCtx context.Context
 		hbCtx, heartbeatCancel = context.WithCancel(context.Background())
 		watcher.Start(hbCtx)
@@ -713,6 +720,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	setupPlaybackRuntime(cfg, srv.UAC())
 	setupTalkRuntime(cfg, srv)
 	setupRecordingRuntime(cfg)
+	installZLMManagementController()
 
 	// 装配兜底对账 reconciler(通道播放状态显示 T7 新增)
 	// spec AC10-AC16: 5min 定期扫描 gb_channel.stream_id 跟 ZLM 真实流状态对齐,
@@ -779,6 +787,9 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
 func stopSIPDependencies(ctx context.Context) {
+	// Remove the facade before stopping any dependency it can call. Reload
+	// installs a fresh bundle only after all new business runtimes are ready.
+	clearZLMManagementController()
 	stopPlaybackRuntime(ctx)
 	stopRecordQueryRuntime()
 	stopPTZRuntime()
@@ -829,6 +840,7 @@ func stopPlaybackRuntime(ctx context.Context) {
 		playbackService = nil
 	}
 	playbackMetrics = nil
+	playbackRegistry = nil
 	gbroutes.SetDeviceMgmtPlaybackRuntime(nil, nil)
 	gbroutes.SetPlaybackMediaSink(nil)
 	if sipServer != nil {
@@ -843,6 +855,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
 	if inviter == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
 		zlmLocationMap == nil || zlmServerConfigCache == nil {
 		SetPlaybackService(nil, nil)
+		playbackRegistry = nil
 		playbackMetrics = nil
 		app.ZapLog.Info("GB28181 设备录像回放 service 跳过装配(UAC/RecordInfo/ZLM 依赖未就绪)")
 		return
@@ -851,6 +864,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
 		IdleTimeout: cfg.Playback.IdleTimeout(),
 		MaxSession:  cfg.Playback.MaxSession(),
 	})
+	playbackRegistry = registry
 	playbackMetrics = &gbplayback.Metrics{}
 	service := gbplayback.NewService(
 		registry,
@@ -900,11 +914,14 @@ func stopPTZRuntime() {
 
 func setupRecordingRuntime(cfg gbconfig.Config) {
 	if playSvc == nil || zlmRegistry == nil || zlmLocationMap == nil {
+		recordingRepo = nil
+		recordingSvc = nil
 		gbroutes.SetRecordingService(nil, nil, nil)
 		app.ZapLog.Info("GB28181 云端录像 service 跳过装配(play/registry/locationMap 未就绪)")
 		return
 	}
 	repo := gbrecording.NewGormRepo(app.DB())
+	recordingRepo = repo
 	recordingSvc = gbrecording.NewService(repo, zlmLocationMap, zlmRegistry,
 		func(n *node.Node) gbrecording.RecorderClient { return gbzlm.NewClientForNode(n) })
 	indexer := gbrecording.NewFileIndexer(repo, zlmLocationMap)
@@ -1018,6 +1035,7 @@ func stopRecordingRuntime() {
 		recordingReconciler = nil
 	}
 	recordingSvc = nil
+	recordingRepo = nil
 	gbroutes.SetCloudRecordingCatalogService(nil)
 	gbroutes.SetRecordingService(nil, nil, nil)
 }
@@ -1058,17 +1076,20 @@ func setupTalkRuntime(cfg gbconfig.Config, server sipRuntimeServer) {
 		cancel()
 	}
 	if inviter == nil || app.DB() == nil || zlmRegistry == nil || zlmScheduler == nil || zlmLocationMap == nil || zlmServerConfigCache == nil {
+		talkRepo = nil
 		gbroutes.SetTalkService(nil, nil)
 		app.ZapLog.Info("GB28181 语音对讲 service 跳过装配(依赖未就绪)")
 		return
 	}
 	if !app.DB().Migrator().HasTable(&gbmodels.GbTalkSession{}) {
+		talkRepo = nil
 		gbroutes.SetTalkService(nil, nil)
 		app.ZapLog.Warn("GB28181 语音对讲表未迁移,service 跳过装配")
 		return
 	}
+	repo := gbtalk.NewGormRepo(app.DB())
 	service := gbtalk.NewService(
-		gbtalk.NewGormRepo(app.DB()), zlmRegistry, zlmLocationMap,
+		repo, zlmRegistry, zlmLocationMap,
 		schedulerPickerAdapter{m: zlmScheduler}, zlmServerConfigCache, time.Now,
 	)
 	service.ConfigureActivation(gbtalk.ActivationDependencies{
@@ -1082,6 +1103,7 @@ func setupTalkRuntime(cfg gbconfig.Config, server sipRuntimeServer) {
 	}
 	cancel()
 	talkSvc = service
+	talkRepo = repo
 	gbroutes.SetTalkService(service, zlmRegistry)
 	if broadcastRuntime != nil {
 		broadcastRuntime.SetBroadcastMessageProcessor(service)
@@ -1121,6 +1143,7 @@ func stopTalkRuntime(ctx context.Context) {
 		}
 	}
 	talkSvc = nil
+	talkRepo = nil
 	gbroutes.SetTalkService(nil, nil)
 }
 
@@ -1495,6 +1518,7 @@ func Stop() {
 		heartbeatCancel()
 		heartbeatCancel = nil
 	}
+	teardownZLMManagementCore()
 	if trafficCancel != nil {
 		trafficCancel()
 		trafficCancel = nil

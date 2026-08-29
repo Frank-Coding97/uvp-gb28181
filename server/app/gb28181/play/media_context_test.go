@@ -45,6 +45,28 @@ func TestResolvePlaybackMediaContextUsesCurrentCoordinatorGeneration(t *testing.
 	require.ErrorIs(t, err, ErrPlaybackMediaNotCurrent)
 }
 
+func TestServiceCurrentSessionForwardsReadyGeneration(t *testing.T) {
+	mediaNode := &node.Node{ID: 7, MediaServerUUID: "node-a"}
+	service := &Service{registry: fixedTestRegistry{mediaNode}, locationMap: stream.NewLocationMap()}
+	result := &Result{
+		StreamID: "0200000001", SSRC: "0200000001", App: "rtp", Generation: 9,
+		Node: &ResultNode{ID: mediaNode.ID}, ModeAtStart: LiveModeDynamic,
+	}
+	require.True(t, service.coordinator().Restore(Request{
+		DeviceID: "37010301021320000014", ChannelID: "37010301021320000001", RequiredNode: mediaNode.ID,
+	}, result))
+
+	current, ok := service.CurrentSession(result.StreamID)
+	require.True(t, ok)
+	require.Equal(t, result.StreamID, current.StreamID)
+	require.Equal(t, result.Generation, current.Generation)
+	require.Equal(t, mediaNode.ID, current.NodeID)
+
+	var nilService *Service
+	_, ok = nilService.CurrentSession(result.StreamID)
+	require.False(t, ok)
+}
+
 func TestResolvePlaybackMediaContextRejectsStaleOrMissingRegistryState(t *testing.T) {
 	locationMap := stream.NewLocationMap()
 	mediaNode := &node.Node{ID: 7, MediaServerUUID: "node-a"}

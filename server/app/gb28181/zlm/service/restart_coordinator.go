@@ -11,6 +11,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
+var ErrRestartCoordinatorClosed = errors.New("restart coordinator closed")
+
 // RestartStatus is the observable lifecycle of an accepted ZLM restart.
 type RestartStatus string
 
@@ -63,11 +65,14 @@ type RestartStartedNotifier interface {
 // blocked by the explicit Registry gate until the operation reaches ready or
 // failed.
 type RestartCoordinator struct {
-	registry *node.Registry
-	timeout  time.Duration
-	now      func() time.Time
+	registry        *node.Registry
+	timeout         time.Duration
+	now             func() time.Time
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
 
 	mu          sync.Mutex
+	closed      bool
 	operations  map[int64]*RestartOperation
 	generations map[int64]uint64
 	timers      map[int64]*time.Timer
@@ -81,19 +86,26 @@ func NewRestartCoordinator(reg *node.Registry, timeout ...time.Duration) *Restar
 	if len(timeout) > 0 && timeout[0] > 0 {
 		t = timeout[0]
 	}
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	return &RestartCoordinator{
-		registry:    reg,
-		timeout:     t,
-		now:         time.Now,
-		operations:  make(map[int64]*RestartOperation),
-		generations: make(map[int64]uint64),
-		timers:      make(map[int64]*time.Timer),
+		registry:        reg,
+		timeout:         t,
+		now:             time.Now,
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+		operations:      make(map[int64]*RestartOperation),
+		generations:     make(map[int64]uint64),
+		timers:          make(map[int64]*time.Timer),
 	}
 }
 
 // SetConverger injects the service's verified Apply+readback path.
 func (c *RestartCoordinator) SetConverger(fn func(context.Context, int64) error) {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	c.converge = fn
 	c.mu.Unlock()
 }
@@ -105,6 +117,10 @@ func (c *RestartCoordinator) SetClock(now func() time.Time) {
 		return
 	}
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	c.now = now
 	c.mu.Unlock()
 }
@@ -122,6 +138,9 @@ func (c *RestartCoordinator) Begin(nodeID int64) (RestartOperation, error) {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return RestartOperation{}, ErrRestartCoordinatorClosed
+	}
 	if current := c.operations[nodeID]; current != nil && isRestartPending(current.Status) {
 		return RestartOperation{}, ErrRestartPending
 	}
@@ -153,6 +172,9 @@ func (c *RestartCoordinator) Begin(nodeID int64) (RestartOperation, error) {
 func (c *RestartCoordinator) AdvanceToWaitingOffline(nodeID int64, generation uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
 	op := c.operations[nodeID]
 	if op == nil || op.Generation != generation || op.Status != RestartStatusAccepted {
 		return false
@@ -165,6 +187,9 @@ func (c *RestartCoordinator) AdvanceToWaitingOffline(nodeID int64, generation ui
 func (c *RestartCoordinator) OnNodeOffline(nodeID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
 	op := c.operations[nodeID]
 	if op == nil || !isRestartPending(op.Status) {
 		return
@@ -182,6 +207,9 @@ func (c *RestartCoordinator) MarkOffline(nodeID int64) { c.OnNodeOffline(nodeID)
 func (c *RestartCoordinator) OnNodeStarted(nodeID int64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return
+	}
 	op := c.operations[nodeID]
 	if op == nil || !isRestartPending(op.Status) {
 		return
@@ -198,6 +226,10 @@ func (c *RestartCoordinator) MarkStarted(nodeID int64) { c.OnNodeStarted(nodeID)
 // bounded and generation-guarded.
 func (c *RestartCoordinator) OnNodeHeartbeat(nodeID int64) {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	op := c.operations[nodeID]
 	if op == nil || op.Status != RestartStatusWaitingHeartbeat {
 		c.mu.Unlock()
@@ -226,6 +258,9 @@ func (c *RestartCoordinator) MarkHeartbeat(nodeID int64) { c.OnNodeHeartbeat(nod
 func (c *RestartCoordinator) MarkOfflineForGeneration(nodeID int64, generation uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
 	op := c.operations[nodeID]
 	if op == nil || op.Generation != generation || !isRestartPending(op.Status) {
 		return false
@@ -239,6 +274,10 @@ func (c *RestartCoordinator) MarkOfflineForGeneration(nodeID int64, generation u
 
 func (c *RestartCoordinator) MarkHeartbeatForGeneration(nodeID int64, generation uint64) bool {
 	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return false
+	}
 	op := c.operations[nodeID]
 	if op == nil || op.Generation != generation || op.Status != RestartStatusWaitingHeartbeat {
 		c.mu.Unlock()
@@ -262,7 +301,7 @@ func (c *RestartCoordinator) MarkHeartbeatForGeneration(nodeID int64, generation
 // is not itself a restart failure: wait for the existing owner to establish
 // verified readiness, bounded by the operation timeout.
 func (c *RestartCoordinator) runConvergence(nodeID int64, generation uint64, converge func(context.Context, int64) error) {
-	ctx, cancel := context.WithTimeout(context.Background(), c.timeout)
+	ctx, cancel := context.WithTimeout(c.lifecycleCtx, c.timeout)
 	defer cancel()
 	if err := converge(ctx, nodeID); err != nil {
 		if !errors.Is(err, ErrConfigConvergenceInProgress) || !c.waitForReady(ctx, nodeID) {
@@ -299,6 +338,9 @@ func (c *RestartCoordinator) waitForReady(ctx context.Context, nodeID int64) boo
 func (c *RestartCoordinator) CompleteGeneration(nodeID int64, generation uint64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
 	op := c.operations[nodeID]
 	if op == nil || op.Generation != generation || op.Status != RestartStatusConverging {
 		return false
@@ -319,6 +361,9 @@ func (c *RestartCoordinator) CompleteGeneration(nodeID int64, generation uint64)
 func (c *RestartCoordinator) FailGeneration(nodeID int64, generation uint64, err error) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return false
+	}
 	op := c.operations[nodeID]
 	if op == nil || op.Generation != generation || !isRestartPending(op.Status) {
 		return false
@@ -404,4 +449,31 @@ func (c *RestartCoordinator) GetOperation(nodeID int64) (RestartOperation, bool)
 // false ready result.
 func UnknownOperation(nodeID int64) RestartOperation {
 	return RestartOperation{NodeID: nodeID, Status: RestartStatusUnknown}
+}
+
+// Close ends the coordinator process lifecycle. It stops pending deadline
+// callbacks and cancels in-flight convergence without inventing a durable
+// terminal outcome: a process restart has no persisted operation state and is
+// reported as unknown by the next coordinator.
+func (c *RestartCoordinator) Close() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	for nodeID, timer := range c.timers {
+		if timer != nil {
+			timer.Stop()
+		}
+		delete(c.timers, nodeID)
+	}
+	cancel := c.lifecycleCancel
+	c.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }

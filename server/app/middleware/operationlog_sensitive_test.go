@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -40,6 +41,23 @@ func TestResponseWriterDoesNotCaptureSensitivePayload(t *testing.T) {
 	require.Contains(t, underlying.Body.String(), "Authorization: secret")
 	require.NotContains(t, operationLogRequestData(ctx, []byte("ignored")), "Authorization")
 	require.Contains(t, operationLogRequestData(ctx, nil), "incident-42")
+}
+
+func TestSensitiveOperationErrorLogDoesNotPersistRawContextError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPut, "/api/gb28181/zlm/nodes/7/config", strings.NewReader(`{"changes":{"hook.timeoutSec":"secret-value"}}`))
+	MarkSensitiveOperation(ctx, map[string]any{"action": "config.update", "nodeId": int64(7), "result": "failed"})
+	ctx.Set("error", errors.New("upstream rejected secret-value at https://user:pass@example.invalid/?token=secret"))
+	ctx.Status(http.StatusBadGateway)
+
+	record := buildOperationLogRecord(ctx, time.Now(), []byte(`{"changes":{"hook.timeoutSec":"secret-value"}}`), []byte(`{"message":"secret-value"}`))
+	require.Equal(t, "请求处理失败", record.ErrorMsg)
+	encoded := record.RequestData + record.ErrorMsg
+	require.NotContains(t, encoded, "secret-value")
+	require.NotContains(t, encoded, "user:pass")
+	require.NotContains(t, encoded, "token=secret")
 }
 
 func TestForceLogoutAuditContainsActorAndMaskedTargetOnly(t *testing.T) {

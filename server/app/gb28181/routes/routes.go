@@ -747,6 +747,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			zlm.POST("/nodes/:id/maintenance", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.SetMaintenance(c) }))
 			zlm.POST("/nodes/:id/activate", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Activate(c) }))
 			zlm.POST("/nodes/:id/kick", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.KickSessions(c) }))
+			zlm.GET("/nodes/:id/restart", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.RestartStatus(c) }))
 			zlm.POST("/nodes/:id/restart", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Restart(c) }))
 			// 配置子路由(共享同一 group,挂在 /nodes/:id/config)
 			zlm.GET("/nodes/:id/config", zlmConfigRoute(func(ctrl *gbcontrollers.ZLMConfigController, c *gin.Context) { ctrl.Get(c) }))
