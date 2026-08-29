@@ -889,6 +889,14 @@ body[arco-theme="dark"] .zlm-node-form {
     opacity 0.2s ease;
 }
 
+.uvp-data-table .arco-link-icon {
+  margin-right: 0;
+}
+
+.uvp-data-table .arco-btn:not(.arco-btn-only-icon) .arco-btn-icon {
+  margin-right: 4px;
+}
+
 .uvp-data-table .uvp-table-action {
   min-height: 28px;
   padding: 0 5px;
