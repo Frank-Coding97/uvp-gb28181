@@ -76,6 +76,7 @@ func (s *OfflineScanner) scanOnce() {
 			app.ZapLog.Error("GB28181 离线扫描:置离线失败", zap.String("deviceId", d.DeviceID), zap.Error(err))
 			continue
 		}
+		notifyStatusObserver(ctx, d.DeviceID, false, "HEARTBEAT_TIMEOUT")
 		app.ZapLog.Info("GB28181 设备超时离线", zap.String("deviceId", d.DeviceID))
 	}
 }

@@ -46,6 +46,32 @@ func TestEngineDisabledDoesNotPullStreams(t *testing.T) {
 	require.Empty(t, operator.started)
 }
 
+func TestEngineDeviceEventsAdvanceReconcileAndTrackOfflineGapIdempotently(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.GbChannel{}))
+	now := time.Date(2026, 8, 31, 9, 0, 0, 0, schedule.BeijingLocation())
+	channel := models.GbChannel{DeviceID: "D-event", ChannelID: "C", OwnerDeptID: 1, Status: models.ChannelStatusOffline, RecordingMode: models.RecordingModeContinuous}
+	require.NoError(t, db.Create(&channel).Error)
+	state := models.GbRecordingPlanChannelState{ChannelID: channel.ID, DesiredState: models.RecordingDesiredRecording, ActualState: models.RecordingStateRecording, ReconcileAt: now.Add(time.Hour)}
+	require.NoError(t, db.Create(&state).Error)
+	engine := NewEngine(db, &fakeChannelOperator{}, EngineOptions{Now: func() time.Time { return now }})
+	engine.DeviceStatusChanged(context.Background(), "D-event", false, "HEARTBEAT_TIMEOUT")
+	engine.DeviceStatusChanged(context.Background(), "D-event", false, "HEARTBEAT_TIMEOUT")
+	var stored models.GbRecordingPlanChannelState
+	require.NoError(t, db.First(&stored, "channel_id = ?", channel.ID).Error)
+	require.Equal(t, models.RecordingStateWaitingDevice, stored.ActualState)
+	require.True(t, now.Equal(stored.ReconcileAt))
+	var gaps int64
+	require.NoError(t, db.Model(&models.GbRecordingPlanGap{}).Where("channel_id = ? AND ended_at IS NULL", channel.ID).Count(&gaps).Error)
+	require.EqualValues(t, 1, gaps)
+
+	require.NoError(t, db.Model(&models.GbChannel{}).Where("id = ?", channel.ID).Update("status", models.ChannelStatusOnline).Error)
+	engine.DeviceStatusChanged(context.Background(), "D-event", true, "HEARTBEAT_RECOVERED")
+	require.NoError(t, engine.Dispatch(context.Background()))
+	require.NoError(t, db.Model(&models.GbRecordingPlanGap{}).Where("channel_id = ? AND ended_at IS NULL", channel.ID).Count(&gaps).Error)
+	require.Zero(t, gaps)
+}
+
 type fakeChannelOperator struct{ started, stopped []uint }
 
 func (f *fakeChannelOperator) Start(_ context.Context, target ChannelTarget) (*play.Result, error) {

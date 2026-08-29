@@ -64,6 +64,7 @@ func DecideReconcile(input ReconcileInput) ReconcileDecision {
 		return decision
 	}
 	if !desired {
+		decision.CloseGap = true
 		if needsStop(input.ActualState) {
 			decision.ActualState = models.RecordingStateStopping
 			decision.Action = ActionStop

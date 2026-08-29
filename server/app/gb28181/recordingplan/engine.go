@@ -93,6 +93,35 @@ func (e *Engine) Heal(ctx context.Context) error {
 	return e.Dispatch(ctx)
 }
 
+func (e *Engine) DeviceStatusChanged(ctx context.Context, deviceID string, online bool, reason string) {
+	now := e.now()
+	lastID := uint(0)
+	for {
+		var channels []models.GbChannel
+		if err := e.db.WithContext(ctx).Where("device_id = ? AND id > ?", deviceID, lastID).Order("id").Limit(500).Find(&channels).Error; err != nil || len(channels) == 0 {
+			return
+		}
+		for _, channel := range channels {
+			updates := map[string]any{"reconcile_at": now}
+			var state models.GbRecordingPlanChannelState
+			found := e.db.WithContext(ctx).Where("channel_id = ?", channel.ID).Limit(1).Find(&state)
+			if found.Error != nil {
+				return
+			}
+			if found.RowsAffected > 0 && !online && state.DesiredState == models.RecordingDesiredRecording {
+				updates["actual_state"] = models.RecordingStateWaitingDevice
+				updates["reason_code"] = ReasonDeviceOffline
+				updates["reason_message"] = reason
+				_, _ = e.repo.OpenGap(ctx, planIDValue(state.PlanID), channel.ID, ReasonDeviceOffline, reason, now)
+			}
+			if found.RowsAffected > 0 {
+				_ = e.db.WithContext(ctx).Model(&models.GbRecordingPlanChannelState{}).Where("channel_id = ?", channel.ID).Updates(updates).Error
+			}
+			lastID = channel.ID
+		}
+	}
+}
+
 func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanChannelState, now time.Time) error {
 	var channel models.GbChannel
 	result := e.db.WithContext(ctx).First(&channel, state.ChannelID)

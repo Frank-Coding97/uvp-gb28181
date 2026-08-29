@@ -103,6 +103,9 @@ func HandleRegister(ctx context.Context, info RegisterInfo, keepaliveInterval in
 			Transport:         info.Transport,
 		})
 	})
+	if err == nil && isFirst {
+		notifyStatusObserver(ctx, info.DeviceID, true, "REGISTER_ONLINE")
+	}
 	return isFirst, err
 }
 
@@ -180,11 +183,19 @@ func defaultOwnerDeptIDWithDB(ctx context.Context, db *gorm.DB) (uint, error) {
 
 // HandleUnregister 处理注销(Expires=0):即时置离线(事实上停止心跳 + 缓存翻转)
 func HandleUnregister(ctx context.Context, deviceID string) error {
-	return gbmodels.MarkOfflineWithReason(ctx, deviceID, gbmodels.DeviceEventUnregisterOffline, gbmodels.DeviceEventSourceUnregister)
+	if err := gbmodels.MarkOfflineWithReason(ctx, deviceID, gbmodels.DeviceEventUnregisterOffline, gbmodels.DeviceEventSourceUnregister); err != nil {
+		return err
+	}
+	notifyStatusObserver(ctx, deviceID, false, "UNREGISTER_OFFLINE")
+	return nil
 }
 
 // Keepalive 处理心跳:始终更新 keepalive_time，按动态配置决定是否刷新 status 缓存。
 // 返回 true 表示设备从离线恢复,调用方应重新查询 Catalog 恢复通道状态。
 func Keepalive(ctx context.Context, deviceID string) (bool, error) {
-	return gbmodels.TouchKeepalive(ctx, deviceID, gbconfig.OnlineOnHeartbeat())
+	restored, err := gbmodels.TouchKeepalive(ctx, deviceID, gbconfig.OnlineOnHeartbeat())
+	if err == nil && restored {
+		notifyStatusObserver(ctx, deviceID, true, "HEARTBEAT_RECOVERED")
+	}
+	return restored, err
 }
