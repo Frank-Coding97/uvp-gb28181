@@ -32,7 +32,7 @@ type ConfigConvergenceScheduler interface {
 }
 
 // RestartPendingChecker is optional. A restart notifier that owns the
-// offline→heartbeat convergence can implement it so the generic config
+// restart→heartbeat convergence can implement it so the generic config
 // scheduler does not race the operation's verified convergence.
 type RestartPendingChecker interface {
 	RestartPending(nodeID int64) bool
@@ -109,18 +109,21 @@ func (c *Collector) Receive(payload []byte) error {
 		body.Data.MediaSource, body.Data.TcpSession+body.Data.UdpSession, time.Now())
 	current, ok := c.registry.GetByUUID(body.MediaServerID)
 	restartHandled := false
-	if previous != nil && previous.State == node.StateOffline && ok && current.IsActive() && c.notifier != nil {
-		// Check before and after delivery. The first check covers notifiers whose
-		// callback is asynchronous; the second covers coordinators that mark the
-		// operation as converging synchronously in OnNodeHeartbeat.
-		if checker, ok := c.notifier.(RestartPendingChecker); ok {
+	if ok && current.IsActive() && c.notifier != nil {
+		checker, hasChecker := c.notifier.(RestartPendingChecker)
+		if hasChecker {
+			// Keep the pending gate independent from node.State: a fast restart
+			// can receive its first keepalive while Registry still says active.
 			restartHandled = checker.RestartPending(current.ID)
 		}
-		c.notifier.OnNodeHeartbeat(current.ID)
-		if !restartHandled {
-			if checker, ok := c.notifier.(RestartPendingChecker); ok {
-				restartHandled = checker.RestartPending(current.ID)
-			}
+		recoveredFromOffline := previous != nil && previous.State == node.StateOffline
+		if recoveredFromOffline || restartHandled {
+			c.notifier.OnNodeHeartbeat(current.ID)
+		}
+		if hasChecker && !restartHandled && checker.RestartPending(current.ID) {
+			// The callback may have claimed convergence synchronously; keep the
+			// generic scheduler from racing that restart operation.
+			restartHandled = true
 		}
 	}
 	if ok && current.IsActive() && !restartHandled &&
