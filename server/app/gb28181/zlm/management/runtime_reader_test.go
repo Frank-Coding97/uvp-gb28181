@@ -401,6 +401,23 @@ func TestRuntimeReaderMediaListCacheKeyIncludesSchema(t *testing.T) {
 	require.Equal(t, int32(2), calls.Load())
 }
 
+func TestRuntimeReaderGetMediaListUsesTypedListAllRequest(t *testing.T) {
+	reader, current, cleanup := newRuntimeReaderFixture(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/index/api/getMediaList", r.URL.Path)
+		for _, key := range []string{"schema", "vhost", "app", "stream"} {
+			_, present := r.URL.Query()[key]
+			require.False(t, present, "list-all must omit empty %s", key)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"schema":"rtsp","vhost":"v","app":"live","stream":"camera"}]}`))
+	})
+	defer cleanup()
+
+	items, err := reader.GetMediaList(context.Background(), current.ID)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, "camera", items[0].Stream)
+}
+
 func TestRuntimeReaderMediaInfoStrictMapsNotFound(t *testing.T) {
 	reader, current, cleanup := newRuntimeReaderFixture(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/index/api/getMediaInfo", r.URL.Path)

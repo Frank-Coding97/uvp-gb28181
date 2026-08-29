@@ -159,6 +159,13 @@ func (r *RuntimeReader) GetMediaListFiltered(ctx context.Context, nodeID int64, 
 	return cloneMediaInfos(media), nil
 }
 
+// GetMediaList is the typed list-all form used by overview and bootstrap
+// adapters. It delegates to the same bounded/cache-aware implementation and
+// never exposes a generic query map or API name.
+func (r *RuntimeReader) GetMediaList(ctx context.Context, nodeID int64) ([]zlm.MediaInfo, error) {
+	return r.GetMediaListFiltered(ctx, nodeID, zlm.MediaFilter{})
+}
+
 // GetMediaInfo returns a typed detail snapshot for one complete media target.
 // The strict client method is used so NotFound and other ZLM failures are not
 // silently converted into an offline-looking value.
