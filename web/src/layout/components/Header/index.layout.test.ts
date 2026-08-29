@@ -35,4 +35,10 @@ describe("default header workspace layout", () => {
     expect(header).toContain("overflow: hidden;");
     expect(header).not.toContain("margin: -8px 0;");
   });
+
+  it("gives the sidebar collapse control an accessible stateful name", () => {
+    const collapseButton = readSource("src/layout/components/Header/components/button-collapsed/index.vue");
+
+    expect(collapseButton).toContain(':aria-label="collapsed ? \'展开侧栏\' : \'收起侧栏\'"');
+  });
 });

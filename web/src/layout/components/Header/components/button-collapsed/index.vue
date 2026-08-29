@@ -1,6 +1,6 @@
 <template>
   <div class="menu_fold">
-    <a-button size="mini" type="text" class="menu_fold_icon" id="system-collapsed" @click="onCollapsed">
+    <a-button size="mini" type="text" class="menu_fold_icon" id="system-collapsed" :aria-label="collapsed ? '展开侧栏' : '收起侧栏'" @click="onCollapsed">
       <template #icon>
         <icon-menu-fold :size="18" v-if="!collapsed" />
         <icon-menu-unfold :size="18" v-if="collapsed" />
