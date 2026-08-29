@@ -388,6 +388,13 @@ export function snapshotZLMStreamURL(nodeId: number, media: ZLMMediaIdentity) {
   return `${baseUrlApi(`gb28181/zlm/nodes/${nodeId}/streams/snapshot`)}?${params.toString()}`;
 }
 
+export const fetchZLMStreamSnapshot = (nodeId: number, media: ZLMMediaIdentity, signal?: AbortSignal) =>
+  http.request<Blob>("get", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/streams/snapshot`), {
+    params: mediaParams(media),
+    responseType: "blob",
+    ...(signal ? { signal } : {})
+  });
+
 export const preflightCloseZLMStream = (nodeId: number, media: ZLMMediaIdentity) =>
   http.request<BaseResult<ZLMStreamClosePreflight>>("post", baseUrlApi(`gb28181/zlm/nodes/${nodeId}/streams/close/preflight`), {
     data: target(nodeId, media)

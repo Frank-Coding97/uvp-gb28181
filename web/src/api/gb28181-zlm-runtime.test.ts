@@ -8,6 +8,7 @@ vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }))
 
 import {
   closeZLMStream,
+  fetchZLMStreamSnapshot,
   getZLMNodeRuntime,
   getZLMOverview,
   getZLMRecordingStatus,
@@ -71,6 +72,13 @@ describe("ZLM runtime API", () => {
     expect(snapshotZLMStreamURL(7, media)).toBe(
       "/api/gb28181/zlm/nodes/7/streams/snapshot?schema=rtsp&vhost=__defaultVhost__&app=live&stream=34020000001320000001"
     );
+    const controller = new AbortController();
+    await fetchZLMStreamSnapshot(7, media, controller.signal);
+    expect(request).toHaveBeenCalledWith("get", "/api/gb28181/zlm/nodes/7/streams/snapshot", {
+      params: media,
+      responseType: "blob",
+      signal: controller.signal
+    });
     await getZLMRecordingStatus(7, media, 1);
     expect(request).toHaveBeenCalledWith("get", "/api/gb28181/zlm/nodes/7/recordings/runtime/status", {
       params: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001", type: 1 }
