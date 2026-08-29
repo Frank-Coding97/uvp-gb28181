@@ -85,15 +85,29 @@ func TestInitializationDiagnosisSchemaContract(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLInitializationMenuTypeSupportsDirectoryPageAndButton(t *testing.T) {
+	body, err := os.ReadFile("postgresql_converted.sql")
+	require.NoError(t, err)
+	menuSchema := strings.ToLower(string(body))
+	require.Contains(t, menuSchema, "type smallint default 2", "sys_menu.type 必须承载目录/页面/按钮的 1/2/3")
+	require.NotContains(t, menuSchema, "type boolean default 2", "BOOLEAN 无法保存页面和按钮类型")
+}
+
 func diagnosisSchemaSection(text string) string {
-	start := strings.Index(text, "gb_sip_trace_session_diagnosis")
-	if start < 0 {
+	tableStart := -1
+	for _, declaration := range []string{
+		"create table `gb_sip_trace_session_diagnosis`",
+		"create table gb_sip_trace_session_diagnosis",
+		"create table [gb_sip_trace_session_diagnosis]",
+	} {
+		if candidate := strings.Index(text, declaration); candidate >= 0 && (tableStart < 0 || candidate < tableStart) {
+			tableStart = candidate
+		}
+	}
+	if tableStart < 0 {
 		return text
 	}
-	section := text[start:]
-	if tableStart := strings.Index(section, "create table"); tableStart >= 0 {
-		section = section[tableStart:]
-	}
+	section := text[tableStart:]
 	for _, marker := range []string{"\n-- table structure for `", "\ncreate table ", "\nif object_id(n'"} {
 		if end := strings.Index(section[1:], marker); end >= 0 {
 			section = section[:end+1]
