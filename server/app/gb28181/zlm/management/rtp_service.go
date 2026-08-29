@@ -70,10 +70,12 @@ type RTPServerView struct {
 	CreatedBy uint64 `json:"createdBy,omitempty"`
 }
 
-// RTPServerPage is the bounded list contract used by management adapters.
-// The underlying ZLM endpoint has no native pagination, so the shared
-// MaxResponseItems cap is applied before a page is returned.
-type RTPServerPage = Page[RTPServerView]
+// RTPServerPage keeps list data and the node-scoped mutation capability in a
+// single response so clients never infer write support from an empty list.
+type RTPServerPage struct {
+	Page[RTPServerView]
+	Capability RTPCapabilityState `json:"capability"`
+}
 
 type RTPServerDTO = RTPServerView
 
@@ -268,7 +270,8 @@ func (s *RTPService) ListPage(ctx context.Context, nodeID int64, request PageReq
 	if err := s.requireConfigured(nodeID, false); err != nil {
 		return RTPServerPage{}, err
 	}
-	if err := s.checkCapability(ctx, nodeID, "listRtpServer"); err != nil {
+	capability, err := s.capabilityState(ctx, nodeID, "listRtpServer")
+	if err != nil {
 		return RTPServerPage{}, err
 	}
 	items, err := s.client.ListRtpServers(ctx, nodeID)
@@ -297,7 +300,7 @@ func (s *RTPService) ListPage(ctx context.Context, nodeID int64, request PageReq
 		}
 		views = append(views, view)
 	}
-	return Paginate(views, request), nil
+	return RTPServerPage{Page: Paginate(views, request), Capability: capability}, nil
 }
 
 // List is a compatibility wrapper for existing callers. It remains bounded
@@ -493,17 +496,25 @@ func (s *RTPService) requireConfigured(nodeID int64, write bool) error {
 }
 
 func (s *RTPService) checkCapability(ctx context.Context, nodeID int64, capability string) error {
+	_, err := s.capabilityState(ctx, nodeID, capability)
+	return err
+}
+
+func (s *RTPService) capabilityState(ctx context.Context, nodeID int64, capability string) (RTPCapabilityState, error) {
 	if s == nil || s.capability == nil {
-		return nil
+		return RTPCapabilityUnknown, nil
 	}
 	state, err := s.capability.RTPCapability(ctx, nodeID)
+	if state == "" {
+		state = RTPCapabilityUnknown
+	}
 	if state == RTPCapabilityUnsupported {
-		return NewUnsupportedCapabilityError(nodeIDString(nodeID), capability)
+		return state, NewUnsupportedCapabilityError(nodeIDString(nodeID), capability)
 	}
-	if err != nil && state != RTPCapabilityUnknown && state != "" {
-		return normalizeT11RTPError(err, nodeID, capability)
+	if err != nil && state != RTPCapabilityUnknown {
+		return state, normalizeT11RTPError(err, nodeID, capability)
 	}
-	return nil
+	return state, nil
 }
 
 func (request RTPServerCloseRequest) validate() error {

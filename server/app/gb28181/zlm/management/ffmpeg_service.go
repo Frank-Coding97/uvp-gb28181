@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -54,6 +55,17 @@ func (s FFmpegTemplateSet) IsRegistered(key string) bool {
 	return ok
 }
 
+// Keys exposes template identifiers only. The command values remain inside
+// the trusted ZLM/server configuration boundary and never enter a response.
+func (s FFmpegTemplateSet) Keys() []string {
+	keys := make([]string, 0, len(s))
+	for key := range s {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 // FFmpegSourceCreateRequest contains only typed source/target options. Actor
 // identity is deliberately not part of this request: callers must provide it
 // as a trusted method argument obtained from the authenticated context.
@@ -97,10 +109,13 @@ type FFmpegSourceView struct {
 	Managed     bool          `json:"managed"`
 }
 
-// FFmpegSourcePage is the bounded list contract used by management adapters.
-// ZLM's list endpoint has no native pagination, so the service applies the
-// shared MaxResponseItems cap before returning this page.
-type FFmpegSourcePage = Page[FFmpegSourceView]
+// FFmpegSourcePage keeps the list, mutation capability and safe template keys
+// in one node-scoped read. Command text is never part of this contract.
+type FFmpegSourcePage struct {
+	Page[FFmpegSourceView]
+	Capability FFmpegCapabilityState `json:"capability"`
+	Templates  []string              `json:"templates"`
+}
 
 // FFmpegSourceDTO is a descriptive alias used by HTTP adapters.
 type FFmpegSourceDTO = FFmpegSourceView
@@ -295,7 +310,8 @@ func (s *FFmpegService) ListPage(ctx context.Context, nodeID int64, request Page
 	if err := s.requireConfigured(nodeID, false); err != nil {
 		return FFmpegSourcePage{}, err
 	}
-	if err := s.checkCapability(ctx, nodeID, "listFFmpegSource"); err != nil {
+	capability, err := s.capabilityState(ctx, nodeID, "listFFmpegSource")
+	if err != nil {
 		return FFmpegSourcePage{}, err
 	}
 	items, err := s.client.ListFFmpegSources(ctx, nodeID)
@@ -321,7 +337,9 @@ func (s *FFmpegService) ListPage(ctx context.Context, nodeID int64, request Page
 		}
 		views = append(views, view)
 	}
-	return Paginate(views, request), nil
+	return FFmpegSourcePage{
+		Page: Paginate(views, request), Capability: capability, Templates: s.templateKeys(),
+	}, nil
 }
 
 // List is a compatibility wrapper for existing callers. It is still bounded
@@ -484,24 +502,44 @@ func (s *FFmpegService) requireConfigured(nodeID int64, write bool) error {
 }
 
 func (s *FFmpegService) checkCapability(ctx context.Context, nodeID int64, capability string) error {
+	_, err := s.capabilityState(ctx, nodeID, capability)
+	return err
+}
+
+func (s *FFmpegService) capabilityState(ctx context.Context, nodeID int64, capability string) (FFmpegCapabilityState, error) {
 	if s == nil || s.capability == nil {
-		return nil
+		return FFmpegCapabilityUnknown, nil
 	}
 	state, err := s.capability.FFmpegCapability(ctx, nodeID)
+	if state == "" {
+		state = FFmpegCapabilityUnknown
+	}
 	if err != nil {
 		if state == FFmpegCapabilityUnsupported {
-			return NewUnsupportedCapabilityError(nodeIDString(nodeID), capability)
+			return state, NewUnsupportedCapabilityError(nodeIDString(nodeID), capability)
 		}
 		// Unknown capability is deliberately a controlled typed attempt.
-		if state == FFmpegCapabilityUnknown || state == "" {
-			return nil
+		if state == FFmpegCapabilityUnknown {
+			return state, nil
 		}
-		return normalizeT11FFmpegError(err, nodeID, capability)
+		return state, normalizeT11FFmpegError(err, nodeID, capability)
 	}
 	if state == FFmpegCapabilityUnsupported {
-		return NewUnsupportedCapabilityError(nodeIDString(nodeID), capability)
+		return state, NewUnsupportedCapabilityError(nodeIDString(nodeID), capability)
 	}
-	return nil
+	return state, nil
+}
+
+func (s *FFmpegService) templateKeys() []string {
+	if s == nil || s.templates == nil {
+		return []string{}
+	}
+	lister, ok := s.templates.(interface{ Keys() []string })
+	if !ok {
+		return []string{}
+	}
+	keys := lister.Keys()
+	return append([]string(nil), keys...)
 }
 
 func validateFFmpegCreateRequest(nodeID int64, actorUserID uint64, request FFmpegSourceCreateRequest) error {

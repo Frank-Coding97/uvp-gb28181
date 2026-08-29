@@ -156,6 +156,7 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 
 	if core.ledger != nil {
 		proxyExecutor := gbzlmmanagement.NewNodeProxyExecutor(core.executor)
+		ingressCapabilities := gbzlmmanagement.NewIngressCapabilityReader(core.runtime)
 		bundle.Proxies = gbzlmmanagement.NewProxyService(gbzlmmanagement.ProxyDependencies{
 			Executor: proxyExecutor, Ledger: core.ledger, Ownership: ownership, Capability: core.runtime,
 		})
@@ -173,6 +174,7 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 		}
 		bundle.FFmpeg = gbzlmmanagement.NewFFmpegService(gbzlmmanagement.FFmpegDependencies{
 			Client: ffmpegClient, Templates: templates, Ledger: core.ledger, Ownership: ffmpegOwnership,
+			Capability: ingressCapabilities,
 		})
 
 		rtpClient := gbzlmmanagement.NewNodeRTPClientAdapter(core.executor)
@@ -181,6 +183,7 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 		})
 		bundle.RTP = gbzlmmanagement.NewRTPService(gbzlmmanagement.RTPDependencies{
 			Client: rtpClient, Ledger: core.ledger, Ownership: rtpOwnership,
+			Capability: ingressCapabilities,
 		})
 	}
 

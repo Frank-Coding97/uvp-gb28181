@@ -119,6 +119,11 @@ export interface ZLMFFmpegSource {
   managed: boolean;
 }
 
+export interface ZLMFFmpegSourcePage extends ZLMPage<ZLMFFmpegSource> {
+  capability: ZLMCapabilityState;
+  templates: string[];
+}
+
 export interface ZLMFFmpegDeleteResult {
   nodeId: number;
   key: string;
@@ -159,6 +164,10 @@ export interface ZLMRTPServer {
   released: boolean;
   managed: boolean;
   createdBy?: number;
+}
+
+export interface ZLMRTPServerPage extends ZLMPage<ZLMRTPServer> {
+  capability: ZLMCapabilityState;
 }
 
 export interface ZLMRTPServerCloseResult {
@@ -253,7 +262,7 @@ export const deleteZLMPushProxy = (nodeId: number, key: string, request: ZLMProx
   );
 
 export const listZLMFFmpegSources = (nodeId: number, page: ZLMPageQuery = {}, signal?: AbortSignal) =>
-  http.request<BaseResult<ZLMPage<ZLMFFmpegSource>>>(
+  http.request<BaseResult<ZLMFFmpegSourcePage>>(
     "get",
     baseUrlApi(`gb28181/zlm/nodes/${nodeId}/ffmpeg-sources`),
     pageOptions(page, signal)
@@ -275,7 +284,7 @@ export const deleteZLMFFmpegSource = (nodeId: number, key: string) =>
   );
 
 export const listZLMRTPServers = (nodeId: number, page: ZLMPageQuery = {}, signal?: AbortSignal) =>
-  http.request<BaseResult<ZLMPage<ZLMRTPServer>>>(
+  http.request<BaseResult<ZLMRTPServerPage>>(
     "get",
     baseUrlApi(`gb28181/zlm/nodes/${nodeId}/rtp-servers`),
     pageOptions(page, signal)
