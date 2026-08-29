@@ -31,9 +31,63 @@ func managedResourceIdentity() repo.ManagedResourceIdentity {
 		NodeID:       7,
 		ResourceType: "pull_proxy",
 		ResourceKey:  "pull_proxy|camera-1",
+		Schema:       "rtsp",
+		Vhost:        "__defaultVhost__",
 		App:          "proxy",
 		Stream:       "camera-1",
 	}
+}
+
+func TestManagedResourceRepoUsesCompleteMediaIdentityForCRUD(t *testing.T) {
+	db := newManagedResourceDB(t)
+	managed := repo.NewManagedResourceRepo(db)
+	ctx := context.Background()
+	firstIdentity := managedResourceIdentity()
+	secondIdentity := firstIdentity
+	secondIdentity.Schema = "rtmp"
+	secondIdentity.Vhost = "tenant-vhost"
+
+	first, err := managed.Register(ctx, repo.ManagedResourceRegistration{Identity: firstIdentity, CreatedBy: 101})
+	require.NoError(t, err)
+	second, err := managed.Register(ctx, repo.ManagedResourceRegistration{Identity: secondIdentity, CreatedBy: 202})
+	require.NoError(t, err)
+	require.NotEqual(t, first.ID, second.ID, "同 key 的不同 schema/vhost 必须分别持久化")
+	require.Equal(t, firstIdentity.Schema, first.Schema)
+	require.Equal(t, firstIdentity.Vhost, first.Vhost)
+	require.Equal(t, secondIdentity.Schema, second.Schema)
+	require.Equal(t, secondIdentity.Vhost, second.Vhost)
+
+	foundFirst, err := managed.Find(ctx, firstIdentity)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, foundFirst.ID)
+	foundSecond, err := managed.Find(ctx, secondIdentity)
+	require.NoError(t, err)
+	require.Equal(t, second.ID, foundSecond.ID)
+
+	tombstoned, err := managed.Tombstone(ctx, firstIdentity, time.Date(2026, 8, 30, 1, 0, 0, 0, time.UTC))
+	require.NoError(t, err)
+	require.NotNil(t, tombstoned.TombstonedAt)
+	remaining, err := managed.List(ctx, repo.ManagedResourceFilter{NodeID: firstIdentity.NodeID, ResourceType: secondIdentity.ResourceType, ResourceKey: secondIdentity.ResourceKey, Schema: secondIdentity.Schema, Vhost: secondIdentity.Vhost, App: secondIdentity.App, Stream: secondIdentity.Stream})
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	require.Equal(t, second.ID, remaining[0].ID)
+
+	_, err = managed.Observe(ctx, firstIdentity, time.Date(2026, 8, 30, 1, 1, 0, 0, time.UTC))
+	require.NoError(t, err)
+	visible, err := managed.List(ctx, repo.ManagedResourceFilter{NodeID: firstIdentity.NodeID})
+	require.NoError(t, err)
+	require.Len(t, visible, 2)
+}
+
+func TestManagedResourceFingerprintIncludesCompleteMediaIdentity(t *testing.T) {
+	identity := managedResourceIdentity()
+	bySchema := identity
+	bySchema.Schema = "rtmp"
+	byVhost := identity
+	byVhost.Vhost = "tenant-vhost"
+
+	require.NotEqual(t, repo.FingerprintManagedResource(identity), repo.FingerprintManagedResource(bySchema))
+	require.NotEqual(t, repo.FingerprintManagedResource(identity), repo.FingerprintManagedResource(byVhost))
 }
 
 func TestManagedResourceRepoRegisterIsIdempotentAndPreservesCreationSource(t *testing.T) {
@@ -136,10 +190,24 @@ func TestManagedResourceRepoRejectsSensitiveIdentityAndRedactsSummary(t *testing
 	managed := repo.NewManagedResourceRepo(db)
 	ctx := context.Background()
 
-	sensitiveIdentity := managedResourceIdentity()
-	sensitiveIdentity.ResourceKey = "rtsp://user:password@example.invalid/live?token=secret"
-	_, err := managed.Register(ctx, repo.ManagedResourceRegistration{Identity: sensitiveIdentity, CreatedBy: 1})
-	require.ErrorIs(t, err, repo.ErrManagedResourceSensitiveData)
+	for _, mutate := range []func(repo.ManagedResourceIdentity) repo.ManagedResourceIdentity{
+		func(identity repo.ManagedResourceIdentity) repo.ManagedResourceIdentity {
+			identity.ResourceKey = "rtsp://user:password@example.invalid/live?token=secret"
+			return identity
+		},
+		func(identity repo.ManagedResourceIdentity) repo.ManagedResourceIdentity {
+			identity.Vhost = "rtsp://user:password@example.invalid/live"
+			return identity
+		},
+		func(identity repo.ManagedResourceIdentity) repo.ManagedResourceIdentity {
+			identity.App = "live?token=secret"
+			return identity
+		},
+	} {
+		sensitiveIdentity := mutate(managedResourceIdentity())
+		_, err := managed.Register(ctx, repo.ManagedResourceRegistration{Identity: sensitiveIdentity, CreatedBy: 1})
+		require.ErrorIs(t, err, repo.ErrManagedResourceSensitiveData)
+	}
 
 	identity := managedResourceIdentity()
 	row, err := managed.Register(ctx, repo.ManagedResourceRegistration{

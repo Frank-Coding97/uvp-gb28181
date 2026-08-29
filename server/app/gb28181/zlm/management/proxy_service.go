@@ -367,7 +367,7 @@ func (s *ProxyService) CreatePullProxy(ctx context.Context, actorUserID uint64, 
 	}
 	summary := summarizeProxyURL(request.SourceURL, parsed)
 	identity := proxyLedgerIdentity(ProxyKindPull, request.NodeID, key, request.Media)
-	fingerprint := proxyLedgerFingerprint(ProxyKindPull, identity, request.Media.Schema, request.SourceURL)
+	fingerprint := proxyLedgerFingerprint(ProxyKindPull, identity, request.SourceURL)
 	registered, err := s.ledger.Register(opCtx, repo.ManagedResourceRegistration{
 		Identity: identity, CreatedBy: actorUserID, Fingerprint: fingerprint,
 		Summary: "pull source " + summary.Display,
@@ -416,7 +416,7 @@ func (s *ProxyService) CreatePushProxy(ctx context.Context, actorUserID uint64, 
 	}
 	summary := summarizeProxyURL(request.TargetURL, parsed)
 	identity := proxyLedgerIdentity(ProxyKindPush, request.NodeID, key, request.Media)
-	fingerprint := proxyLedgerFingerprint(ProxyKindPush, identity, request.Media.Schema, request.TargetURL)
+	fingerprint := proxyLedgerFingerprint(ProxyKindPush, identity, request.TargetURL)
 	registered, err := s.ledger.Register(opCtx, repo.ManagedResourceRegistration{
 		Identity: identity, CreatedBy: actorUserID, Fingerprint: fingerprint,
 		Summary: "push target " + summary.Display,
@@ -910,7 +910,7 @@ func (s *ProxyService) ledgerRows(ctx context.Context, nodeID int64, kind ProxyK
 		if validateProxyKey(item.ResourceKey) != nil {
 			continue
 		}
-		rows[item.ResourceKey] = item
+		rows[proxyLedgerRowKey(item.ResourceKey, MediaIdentity{Schema: item.Schema, Vhost: item.Vhost, App: item.App, Stream: item.Stream})] = item
 	}
 	return rows, nil
 }
@@ -918,8 +918,8 @@ func (s *ProxyService) ledgerRows(ctx context.Context, nodeID int64, kind ProxyK
 // activeProxyLedgerRow is the exact provenance gate for ordinary deletion.
 // T6 ownership is intentionally stream-scoped because several business
 // owners can share one stream; the ledger row additionally binds kind, key,
-// app and stream so another proxy on the same stream cannot authorize this
-// request.
+// schema, vhost, app and stream so another proxy on the same stream cannot
+// authorize this request.
 func (s *ProxyService) activeProxyLedgerRow(ctx context.Context, kind ProxyKind, request ProxyDeleteRequest) (gbmodels.GbZLMManagedResource, error) {
 	rows, err := s.ledger.List(ctx, repo.ManagedResourceFilter{NodeID: request.NodeID, ResourceType: string(kind)})
 	if err != nil {
@@ -929,7 +929,7 @@ func (s *ProxyService) activeProxyLedgerRow(ctx context.Context, kind ProxyKind,
 		if row.TombstonedAt != nil || row.NodeID != request.NodeID || row.ResourceType != string(kind) {
 			continue
 		}
-		if row.ResourceKey != request.Key || row.App != request.Media.App || row.Stream != request.Media.Stream {
+		if row.ResourceKey != request.Key || row.Schema != request.Media.Schema || row.Vhost != request.Media.Vhost || row.App != request.Media.App || row.Stream != request.Media.Stream {
 			continue
 		}
 		return row, nil
@@ -939,7 +939,7 @@ func (s *ProxyService) activeProxyLedgerRow(ctx context.Context, kind ProxyKind,
 
 func sameProxyLedgerProvenance(left, right gbmodels.GbZLMManagedResource) bool {
 	return left.NodeID == right.NodeID && left.ResourceType == right.ResourceType &&
-		left.ResourceKey == right.ResourceKey && left.App == right.App && left.Stream == right.Stream &&
+		left.ResourceKey == right.ResourceKey && left.Schema == right.Schema && left.Vhost == right.Vhost && left.App == right.App && left.Stream == right.Stream &&
 		left.IdentityFingerprint == right.IdentityFingerprint && left.TombstonedAt == nil && right.TombstonedAt == nil
 }
 
@@ -984,10 +984,25 @@ func applyLedgerProvenance(view *ProxyView, rows map[string]gbmodels.GbZLMManage
 	if view == nil {
 		return
 	}
-	row, ok := rows[view.Key]
-	if !ok || row.App != view.Media.App || row.Stream != view.Media.Stream {
+	var row gbmodels.GbZLMManagedResource
+	found := false
+	for _, candidate := range rows {
+		if candidate.ResourceKey != view.Key || candidate.Schema == "" || candidate.Vhost == "" ||
+			candidate.Vhost != view.Media.Vhost || candidate.App != view.Media.App || candidate.Stream != view.Media.Stream {
+			continue
+		}
+		if found {
+			// The list response does not carry schema. Two ledger rows that
+			// differ only by schema are therefore ambiguous and must not be
+			// presented as managed based on a guessed protocol.
+			return
+		}
+		row, found = candidate, true
+	}
+	if !found {
 		return
 	}
+	view.Media.Schema = row.Schema
 	view.Managed = true
 	view.CreatedBy = row.CreatedBy
 	view.ProvenanceFingerprint = safeFingerprint(row.IdentityFingerprint)
@@ -1059,11 +1074,15 @@ func safeImpacts(impacts []Impact) []Impact {
 }
 
 func proxyLedgerIdentity(kind ProxyKind, nodeID int64, key string, media MediaIdentity) repo.ManagedResourceIdentity {
-	return repo.ManagedResourceIdentity{NodeID: nodeID, ResourceType: string(kind), ResourceKey: key, App: media.App, Stream: media.Stream}
+	return repo.ManagedResourceIdentity{NodeID: nodeID, ResourceType: string(kind), ResourceKey: key, Schema: media.Schema, Vhost: media.Vhost, App: media.App, Stream: media.Stream}
 }
 
-func proxyLedgerFingerprint(kind ProxyKind, identity repo.ManagedResourceIdentity, schema, rawURL string) string {
-	return repo.FingerprintManagedResourceParts(string(kind), strconv.FormatInt(identity.NodeID, 10), identity.ResourceKey, schema, identity.App, identity.Stream, rawURL)
+func proxyLedgerFingerprint(kind ProxyKind, identity repo.ManagedResourceIdentity, rawURL string) string {
+	return repo.FingerprintManagedResourceParts(string(kind), strconv.FormatInt(identity.NodeID, 10), identity.ResourceKey, identity.Schema, identity.Vhost, identity.App, identity.Stream, rawURL)
+}
+
+func proxyLedgerRowKey(key string, media MediaIdentity) string {
+	return repo.FingerprintManagedResourceParts(key, media.Schema, media.Vhost, media.App, media.Stream)
 }
 
 func safeFingerprint(value string) string {

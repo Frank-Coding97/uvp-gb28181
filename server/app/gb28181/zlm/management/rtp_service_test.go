@@ -72,6 +72,8 @@ func TestRTPServicePortZeroRegistersActualPortAndSafeDTO(t *testing.T) {
 	require.Equal(t, 1, view.TCPMode)
 	require.Equal(t, 2, view.OnlyTrack)
 	require.Len(t, ledger.registered, 1)
+	require.Equal(t, "rtp", ledger.registered[0].Identity.Schema)
+	require.Equal(t, request.VHost, ledger.registered[0].Identity.Vhost)
 	require.Contains(t, ledger.registered[0].Summary, "port=41000")
 	require.NotEmpty(t, ledger.registered[0].Fingerprint, "ledger must retain a fingerprint containing the actual allocation identity")
 	encoded, marshalErr := json.Marshal(view)
@@ -151,7 +153,7 @@ func TestRTPServiceRejectsDuplicateStreamAndPortMappings(t *testing.T) {
 func TestRTPServiceNormalCloseRechecksOwnershipAndForceIsSeparate(t *testing.T) {
 	key := rtpLedgerKey(7, "stream-1")
 	ledger := &t11RTPLedger{rows: map[string]*gbmodels.GbZLMManagedResource{
-		key: {NodeID: 7, ResourceType: ResourceTypeRTPServer, ResourceKey: "stream-1", App: "rtp", Stream: "stream-1"},
+		key: {NodeID: 7, ResourceType: ResourceTypeRTPServer, ResourceKey: "stream-1", Schema: "rtp", Vhost: "__defaultVhost__", App: "rtp", Stream: "stream-1"},
 	}}
 	client := &t11RTPClient{list: []zlm.RtpServerInfo{{Key: "stream-1", VHost: "__defaultVhost__", App: "rtp", StreamID: "stream-1", Port: 41000}}}
 	presence := &t11MutablePresence{present: true}
@@ -200,7 +202,7 @@ func TestRTPServiceNormalCloseRechecksOwnershipAndForceIsSeparate(t *testing.T) 
 func TestRTPServiceCloseFailureOrChangedFingerprintDoesNotTombstone(t *testing.T) {
 	key := rtpLedgerKey(7, "stream-1")
 	ledger := &t11RTPLedger{rows: map[string]*gbmodels.GbZLMManagedResource{
-		key: {NodeID: 7, ResourceType: ResourceTypeRTPServer, ResourceKey: "stream-1", App: "rtp", Stream: "stream-1"},
+		key: {NodeID: 7, ResourceType: ResourceTypeRTPServer, ResourceKey: "stream-1", Schema: "rtp", Vhost: "__defaultVhost__", App: "rtp", Stream: "stream-1"},
 	}}
 	client := &t11RTPClient{
 		list:     []zlm.RtpServerInfo{{Key: "stream-1", VHost: "__defaultVhost__", App: "rtp", StreamID: "stream-1", Port: 41000}},
@@ -239,7 +241,7 @@ func TestRTPServiceUnconfirmedCloseDoesNotTombstone(t *testing.T) {
 			stream := "stream-release-uncertain-" + name
 			key := rtpLedgerKey(7, stream)
 			ledger := &t11RTPLedger{rows: map[string]*gbmodels.GbZLMManagedResource{
-				key: {NodeID: 7, ResourceType: ResourceTypeRTPServer, ResourceKey: stream, App: "rtp", Stream: stream},
+				key: {NodeID: 7, ResourceType: ResourceTypeRTPServer, ResourceKey: stream, Schema: "rtp", Vhost: "__defaultVhost__", App: "rtp", Stream: stream},
 			}}
 			client := &t11RTPClient{
 				list:        []zlm.RtpServerInfo{{Key: stream, VHost: "__defaultVhost__", App: "rtp", StreamID: stream, Port: 41000}},
@@ -353,7 +355,7 @@ func (l *t11RTPLedger) Register(_ context.Context, input repo.ManagedResourceReg
 		repo.ManagedResourceRegistration
 		Port int
 	}{ManagedResourceRegistration: input})
-	row := &gbmodels.GbZLMManagedResource{NodeID: input.Identity.NodeID, ResourceType: input.Identity.ResourceType, ResourceKey: input.Identity.ResourceKey, App: input.Identity.App, Stream: input.Identity.Stream, IdentityFingerprint: input.Fingerprint, Summary: input.Summary, CreatedBy: input.CreatedBy}
+	row := &gbmodels.GbZLMManagedResource{NodeID: input.Identity.NodeID, ResourceType: input.Identity.ResourceType, ResourceKey: input.Identity.ResourceKey, Schema: input.Identity.Schema, Vhost: input.Identity.Vhost, App: input.Identity.App, Stream: input.Identity.Stream, IdentityFingerprint: input.Fingerprint, Summary: input.Summary, CreatedBy: input.CreatedBy}
 	l.rows[rtpLedgerKey(input.Identity.NodeID, input.Identity.ResourceKey)] = row
 	return row, nil
 }

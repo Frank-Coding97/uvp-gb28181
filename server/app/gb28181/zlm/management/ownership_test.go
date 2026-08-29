@@ -139,7 +139,7 @@ func TestOwnershipResolverRecordingMatchesExactMediaAndActiveStates(t *testing.T
 func TestOwnershipResolverManagedLedgerDoesNotInventZLMPresence(t *testing.T) {
 	target := testOwnershipTarget(11, "managed-1")
 	ledger := staticManagedReader{rows: []gbmodels.GbZLMManagedResource{{
-		NodeID: target.NodeID, ResourceType: "pull_proxy", ResourceKey: "proxy-1", App: target.Media.App, Stream: target.Media.Stream,
+		NodeID: target.NodeID, ResourceType: "pull_proxy", ResourceKey: "proxy-1", Schema: target.Media.Schema, Vhost: target.Media.Vhost, App: target.Media.App, Stream: target.Media.Stream,
 		CreatedBy: 88,
 	}}}
 	resolver := NewOwnershipResolver(OwnershipDependencies{
@@ -153,6 +153,63 @@ func TestOwnershipResolverManagedLedgerDoesNotInventZLMPresence(t *testing.T) {
 	require.False(t, resolved.Present)
 	require.True(t, resolved.PresenceKnown)
 	require.True(t, resolved.CanNormalClose())
+}
+
+func TestOwnershipResolverManagedLedgerMatchesOnlyCompleteMediaIdentity(t *testing.T) {
+	target := testOwnershipTarget(21, "same-stream")
+	ledger := staticManagedReader{rows: []gbmodels.GbZLMManagedResource{
+		{NodeID: target.NodeID, ResourceType: "pull_proxy", ResourceKey: "exact", Schema: target.Media.Schema, Vhost: target.Media.Vhost, App: target.Media.App, Stream: target.Media.Stream, CreatedBy: 1},
+		{NodeID: target.NodeID, ResourceType: "pull_proxy", ResourceKey: "other-schema", Schema: "rtmp", Vhost: target.Media.Vhost, App: target.Media.App, Stream: target.Media.Stream, CreatedBy: 2},
+		{NodeID: target.NodeID, ResourceType: "pull_proxy", ResourceKey: "other-vhost", Schema: target.Media.Schema, Vhost: "tenant-vhost", App: target.Media.App, Stream: target.Media.Stream, CreatedBy: 3},
+	}}
+	resolver := NewOwnershipResolver(OwnershipDependencies{
+		Presence: staticPresence(true),
+		Sources:  []OwnershipSource{NewManagedResourceOwnershipAdapter(ledger)},
+	})
+
+	resolved, err := resolver.Resolve(context.Background(), target)
+	require.NoError(t, err)
+	require.Equal(t, OwnershipStatusManaged, resolved.Status)
+	require.Len(t, resolved.Owners, 1)
+	require.Equal(t, "exact", resolved.Owners[0].Key)
+	require.Equal(t, OwnershipConfidenceProven, resolved.Owners[0].Confidence)
+	require.True(t, resolved.CanNormalClose())
+
+	otherSchema := target
+	otherSchema.Media.Schema = "rtmp"
+	resolved, err = resolver.Resolve(context.Background(), otherSchema)
+	require.NoError(t, err)
+	require.Equal(t, OwnershipStatusManaged, resolved.Status)
+	require.Len(t, resolved.Owners, 1)
+	require.Equal(t, "other-schema", resolved.Owners[0].Key)
+
+	unknownTuple := target
+	unknownTuple.Media.Vhost = "missing-vhost"
+	resolved, err = resolver.Resolve(context.Background(), unknownTuple)
+	require.NoError(t, err)
+	require.Equal(t, OwnershipStatusUnknown, resolved.Status)
+	require.Empty(t, resolved.Owners)
+	require.False(t, resolved.CanNormalClose())
+}
+
+func TestOwnershipResolverTreatsLegacyManagedRowWithoutSchemaOrVhostAsUncertain(t *testing.T) {
+	target := testOwnershipTarget(22, "legacy-stream")
+	ledger := staticManagedReader{rows: []gbmodels.GbZLMManagedResource{{
+		NodeID: target.NodeID, ResourceType: "pull_proxy", ResourceKey: "legacy", App: target.Media.App, Stream: target.Media.Stream,
+		CreatedBy: 88,
+	}}}
+	resolver := NewOwnershipResolver(OwnershipDependencies{
+		Presence: staticPresence(true),
+		Sources:  []OwnershipSource{NewManagedResourceOwnershipAdapter(ledger)},
+	})
+
+	resolved, err := resolver.Resolve(context.Background(), target)
+	require.NoError(t, err)
+	require.Equal(t, OwnershipStatusUnknown, resolved.Status)
+	require.Len(t, resolved.Owners, 1)
+	require.Equal(t, OwnershipTypeManaged, resolved.Owners[0].Type)
+	require.Equal(t, OwnershipConfidenceUncertain, resolved.Owners[0].Confidence)
+	require.False(t, resolved.CanNormalClose())
 }
 
 func TestOwnershipResolverAggregatesLegitimateBusinessHoldersWithoutConflict(t *testing.T) {

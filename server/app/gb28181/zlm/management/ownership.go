@@ -679,11 +679,20 @@ func (a managedResourceOwnershipAdapter) Resolve(ctx context.Context, target Own
 		if row.TombstonedAt != nil || row.NodeID != target.NodeID || row.App != target.Media.App || row.Stream != target.Media.Stream {
 			continue
 		}
-		evidence = appendUniqueEvidence(evidence, OwnershipEvidence{
+		item := OwnershipEvidence{
 			Type: OwnershipTypeManaged, ResourceType: row.ResourceType, Key: row.ResourceKey,
-			Owner: fmt.Sprintf("user:%d", row.CreatedBy), Confidence: OwnershipConfidenceProven,
-			Reason: "management ledger provenance", Fingerprint: row.IdentityFingerprint,
-		})
+			Owner: fmt.Sprintf("user:%d", row.CreatedBy), Fingerprint: row.IdentityFingerprint,
+		}
+		if row.Schema == "" || row.Vhost == "" {
+			item.Confidence = OwnershipConfidenceUncertain
+			item.Reason = "management ledger row has incomplete media identity"
+		} else if row.Schema != target.Media.Schema || row.Vhost != target.Media.Vhost {
+			continue
+		} else {
+			item.Confidence = OwnershipConfidenceProven
+			item.Reason = "management ledger provenance"
+		}
+		evidence = appendUniqueEvidence(evidence, item)
 	}
 	return evidence, nil
 }

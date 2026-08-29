@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
@@ -26,11 +27,14 @@ var (
 )
 
 // ManagedResourceIdentity is the stable, non-secret identity used by the ledger.
-// ResourceKey must be a canonical key, not a source/target URL or credential.
+// The schema/vhost/app/stream tuple is part of the identity; ResourceKey must
+// be a canonical key, not a source/target URL or credential.
 type ManagedResourceIdentity struct {
 	NodeID       int64
 	ResourceType string
 	ResourceKey  string
+	Schema       string
+	Vhost        string
 	App          string
 	Stream       string
 }
@@ -49,6 +53,11 @@ type ManagedResourceRegistration struct {
 type ManagedResourceFilter struct {
 	NodeID            int64
 	ResourceType      string
+	ResourceKey       string
+	Schema            string
+	Vhost             string
+	App               string
+	Stream            string
 	IncludeTombstoned bool
 }
 
@@ -81,6 +90,8 @@ func (r *ManagedResourceRepo) Register(ctx context.Context, input ManagedResourc
 		NodeID:              input.Identity.NodeID,
 		ResourceType:        input.Identity.ResourceType,
 		ResourceKey:         input.Identity.ResourceKey,
+		Schema:              input.Identity.Schema,
+		Vhost:               input.Identity.Vhost,
 		App:                 input.Identity.App,
 		Stream:              input.Identity.Stream,
 		IdentityFingerprint: fingerprint,
@@ -93,7 +104,7 @@ func (r *ManagedResourceRepo) Register(ctx context.Context, input ManagedResourc
 
 	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing gbmodels.GbZLMManagedResource
-		result := tx.Where("node_id = ? AND resource_type = ? AND resource_key = ?", input.Identity.NodeID, input.Identity.ResourceType, input.Identity.ResourceKey).
+		result := whereManagedResourceIdentity(tx, input.Identity).
 			Limit(1).Find(&existing)
 		if result.Error != nil {
 			return result.Error
@@ -117,9 +128,10 @@ func (r *ManagedResourceRepo) Register(ctx context.Context, input ManagedResourc
 }
 
 func updateManagedResource(db *gorm.DB, identity ManagedResourceIdentity, row gbmodels.GbZLMManagedResource) error {
-	result := db.Model(&gbmodels.GbZLMManagedResource{}).
-		Where("node_id = ? AND resource_type = ? AND resource_key = ?", identity.NodeID, identity.ResourceType, identity.ResourceKey).
+	result := whereManagedResourceIdentity(db.Model(&gbmodels.GbZLMManagedResource{}), identity).
 		Updates(map[string]any{
+			"schema":               row.Schema,
+			"vhost":                row.Vhost,
 			"app":                  row.App,
 			"stream":               row.Stream,
 			"identity_fingerprint": row.IdentityFingerprint,
@@ -150,8 +162,7 @@ func (r *ManagedResourceRepo) Find(ctx context.Context, identity ManagedResource
 		return nil, err
 	}
 	var row gbmodels.GbZLMManagedResource
-	result := r.db.WithContext(ctx).
-		Where("node_id = ? AND resource_type = ? AND resource_key = ?", identity.NodeID, identity.ResourceType, identity.ResourceKey).
+	result := whereManagedResourceIdentity(r.db.WithContext(ctx), identity).
 		Limit(1).Find(&row)
 	if result.Error != nil {
 		return nil, result.Error
@@ -172,8 +183,7 @@ func (r *ManagedResourceRepo) Observe(ctx context.Context, identity ManagedResou
 		observedAt = r.currentTime()
 	}
 	observedAt = observedAt.UTC()
-	result := r.db.WithContext(ctx).Model(&gbmodels.GbZLMManagedResource{}).
-		Where("node_id = ? AND resource_type = ? AND resource_key = ?", identity.NodeID, identity.ResourceType, identity.ResourceKey).
+	result := whereManagedResourceIdentity(r.db.WithContext(ctx).Model(&gbmodels.GbZLMManagedResource{}), identity).
 		Updates(map[string]any{
 			"last_observed_at": observedAt,
 			"tombstoned_at":    nil,
@@ -195,8 +205,7 @@ func (r *ManagedResourceRepo) Tombstone(ctx context.Context, identity ManagedRes
 		tombstonedAt = r.currentTime()
 	}
 	tombstonedAt = tombstonedAt.UTC()
-	result := r.db.WithContext(ctx).Model(&gbmodels.GbZLMManagedResource{}).
-		Where("node_id = ? AND resource_type = ? AND resource_key = ?", identity.NodeID, identity.ResourceType, identity.ResourceKey).
+	result := whereManagedResourceIdentity(r.db.WithContext(ctx).Model(&gbmodels.GbZLMManagedResource{}), identity).
 		Updates(map[string]any{
 			"tombstoned_at": gorm.Expr("COALESCE(tombstoned_at, ?)", tombstonedAt),
 			"updated_at":    r.currentTime(),
@@ -226,11 +235,38 @@ func (r *ManagedResourceRepo) List(ctx context.Context, filter ManagedResourceFi
 		}
 		query = query.Where("resource_type = ?", strings.TrimSpace(filter.ResourceType))
 	}
+	if filter.ResourceKey != "" {
+		if err := validateSafeIdentityPart("resource key", filter.ResourceKey, 255, true); err != nil {
+			return nil, err
+		}
+		query = query.Where(map[string]any{"resource_key": filter.ResourceKey})
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+		limit int
+	}{
+		{name: "schema", value: filter.Schema, limit: 32},
+		{name: "vhost", value: filter.Vhost, limit: 128},
+		{name: "app", value: filter.App, limit: 64},
+		{name: "stream", value: filter.Stream, limit: 255},
+	} {
+		if field.value == "" {
+			continue
+		}
+		if err := validateSafeIdentityPart(field.name, field.value, field.limit, true); err != nil {
+			return nil, err
+		}
+		query = query.Where(map[string]any{field.name: field.value})
+	}
 	if !filter.IncludeTombstoned {
 		query = query.Where("tombstoned_at IS NULL")
 	}
 	var rows []gbmodels.GbZLMManagedResource
-	if err := query.Order("node_id").Order("resource_type").Order("resource_key").Find(&rows).Error; err != nil {
+	for _, field := range []string{"node_id", "resource_type", "resource_key", "schema", "vhost", "app", "stream"} {
+		query = query.Order(clause.OrderByColumn{Column: clause.Column{Name: field}})
+	}
+	if err := query.Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return rows, nil
@@ -242,7 +278,7 @@ func (r *ManagedResourceRepo) List(ctx context.Context, filter ManagedResourceFi
 func FingerprintManagedResource(identity ManagedResourceIdentity) string {
 	return FingerprintManagedResourceParts(
 		strconv.FormatInt(identity.NodeID, 10), identity.ResourceType,
-		identity.ResourceKey, identity.App, identity.Stream,
+		identity.ResourceKey, identity.Schema, identity.Vhost, identity.App, identity.Stream,
 	)
 }
 
@@ -323,10 +359,16 @@ func validateManagedResourceIdentity(identity ManagedResourceIdentity) error {
 	if err := validateSafeIdentityPart("resource key", identity.ResourceKey, 255, true); err != nil {
 		return err
 	}
-	if err := validateSafeIdentityPart("app", identity.App, 64, false); err != nil {
+	if err := validateSafeIdentityPart("schema", identity.Schema, 32, true); err != nil {
 		return err
 	}
-	return validateSafeIdentityPart("stream", identity.Stream, 255, false)
+	if err := validateSafeIdentityPart("vhost", identity.Vhost, 128, true); err != nil {
+		return err
+	}
+	if err := validateSafeIdentityPart("app", identity.App, 64, true); err != nil {
+		return err
+	}
+	return validateSafeIdentityPart("stream", identity.Stream, 255, true)
 }
 
 func validateResourceType(value string) error {
@@ -369,4 +411,16 @@ func (r *ManagedResourceRepo) currentTime() time.Time {
 		return time.Now()
 	}
 	return r.now()
+}
+
+func whereManagedResourceIdentity(db *gorm.DB, identity ManagedResourceIdentity) *gorm.DB {
+	return db.Where(map[string]any{
+		"node_id":       identity.NodeID,
+		"resource_type": identity.ResourceType,
+		"resource_key":  identity.ResourceKey,
+		"schema":        identity.Schema,
+		"vhost":         identity.Vhost,
+		"app":           identity.App,
+		"stream":        identity.Stream,
+	})
 }

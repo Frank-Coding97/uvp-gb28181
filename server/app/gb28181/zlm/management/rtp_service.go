@@ -221,7 +221,7 @@ func (s *RTPService) Create(ctx context.Context, nodeID int64, actorUserID uint6
 		}
 		return RTPServerView{}, NewInternalError(nodeIDString(nodeID), "RTP creation returned an invalid resource key")
 	}
-	identity := rtpLedgerIdentity(nodeID, request.App, request.Stream)
+	identity := rtpLedgerIdentity(nodeID, request.VHost, request.App, request.Stream)
 	_, err = s.ledger.Register(ctx, repo.ManagedResourceRegistration{
 		Identity:    identity,
 		Fingerprint: rtpIdentityFingerprint(request, actualPort),
@@ -290,7 +290,7 @@ func (s *RTPService) ListPage(ctx context.Context, nodeID int64, request PageReq
 			SSRC: safeRTPText(item.SSRC), Port: item.Port, TCPMode: item.TCPMode, OnlyTrack: item.OnlyTrack, Released: item.Released,
 		}
 		if s.ledger != nil && view.App != "" {
-			row, findErr := s.ledger.Find(ctx, rtpLedgerIdentity(nodeID, view.App, stream))
+			row, findErr := s.ledger.Find(ctx, rtpLedgerIdentity(nodeID, view.VHost, view.App, stream))
 			if findErr == nil && row != nil && row.TombstonedAt == nil {
 				view.Managed, view.CreatedBy = true, row.CreatedBy
 			}
@@ -436,7 +436,7 @@ func (s *RTPService) closeWithPreflight(ctx context.Context, request RTPServerCl
 		if !rtpReleaseConfirmed(closed) {
 			return NewInternalError(nodeIDString(request.NodeID), "RTP release could not be confirmed; ledger tombstone was not written")
 		}
-		identity := rtpLedgerIdentity(request.NodeID, request.App, request.Stream)
+		identity := rtpLedgerIdentity(request.NodeID, request.VHost, request.App, request.Stream)
 		_, tombstoneErr := s.ledger.Tombstone(operationCtx, identity, s.clock())
 		if tombstoneErr != nil && !errors.Is(tombstoneErr, repo.ErrManagedResourceNotFound) {
 			return normalizeT11RTPError(tombstoneErr, request.NodeID, "tombstoneRTPServer")
@@ -637,7 +637,7 @@ func rtpListContains(items []zlm.RtpServerInfo, request RTPServerCloseRequest) b
 }
 
 func (s *RTPService) findRTPLedger(ctx context.Context, request RTPServerCloseRequest) (*gbmodels.GbZLMManagedResource, bool, error) {
-	row, err := s.ledger.Find(ctx, rtpLedgerIdentity(request.NodeID, request.App, request.Stream))
+	row, err := s.ledger.Find(ctx, rtpLedgerIdentity(request.NodeID, request.VHost, request.App, request.Stream))
 	if errors.Is(err, repo.ErrManagedResourceNotFound) {
 		return nil, false, nil
 	}
@@ -647,8 +647,8 @@ func (s *RTPService) findRTPLedger(ctx context.Context, request RTPServerCloseRe
 	return row, row != nil, nil
 }
 
-func rtpLedgerIdentity(nodeID int64, app, stream string) repo.ManagedResourceIdentity {
-	return repo.ManagedResourceIdentity{NodeID: nodeID, ResourceType: ResourceTypeRTPServer, ResourceKey: stream, App: app, Stream: stream}
+func rtpLedgerIdentity(nodeID int64, vhost, app, stream string) repo.ManagedResourceIdentity {
+	return repo.ManagedResourceIdentity{NodeID: nodeID, ResourceType: ResourceTypeRTPServer, ResourceKey: stream, Schema: "rtp", Vhost: vhost, App: app, Stream: stream}
 }
 
 func rtpOwnershipTarget(request RTPServerCloseRequest) OwnershipTarget {
@@ -657,7 +657,7 @@ func rtpOwnershipTarget(request RTPServerCloseRequest) OwnershipTarget {
 
 func rtpIdentityFingerprint(request RTPServerCreateRequest, actualPort int) string {
 	return repo.FingerprintManagedResourceParts(
-		request.VHost, request.App, request.Stream, request.SSRC,
+		"rtp", request.VHost, request.App, request.Stream, request.SSRC,
 		strconv.Itoa(actualPort), strconv.Itoa(request.TCPMode), strconv.Itoa(request.OnlyTrack),
 		request.LocalIP, strconv.FormatBool(request.Reuse),
 	)

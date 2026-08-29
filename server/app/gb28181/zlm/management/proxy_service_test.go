@@ -139,6 +139,8 @@ func TestProxyLedgerIsWrittenOnlyAfterExplicitZLMSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, ledger.registrations, 1)
 	require.Equal(t, "success-key", ledger.registrations[0].Identity.ResourceKey)
+	require.Equal(t, "rtsp", ledger.registrations[0].Identity.Schema)
+	require.Equal(t, "__defaultVhost__", ledger.registrations[0].Identity.Vhost)
 	require.Len(t, ledger.registrations[0].Fingerprint, 64)
 }
 
@@ -187,7 +189,7 @@ func TestProxyLedgerFailureCompensatesSuccessfulZLMCreate(t *testing.T) {
 
 func TestProxyDeleteUsesPreflightAndTombstonesOnlyOnSuccessOrAbsent(t *testing.T) {
 	executor := &proxyExecutorFake{deletePullResult: &zlm.ProxyDeleteResult{Key: "pull-key", Hit: true}}
-	ledger := &proxyLedgerFake{rows: []gbmodels.GbZLMManagedResource{{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "pull-key", App: "live", Stream: "camera/1"}}}
+	ledger := &proxyLedgerFake{rows: []gbmodels.GbZLMManagedResource{{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "pull-key", Schema: "rtsp", Vhost: "__defaultVhost__", App: "live", Stream: "camera/1"}}}
 	ownership := &proxyOwnershipFake{}
 	service := newProxyTestService(executor, ledger, ownership, proxyCapabilitiesForAll())
 	req := validDeleteRequest()
@@ -227,8 +229,8 @@ func TestProxyDeleteUsesPreflightAndTombstonesOnlyOnSuccessOrAbsent(t *testing.T
 func TestProxyDeleteRequiresExactActiveLedgerProvenance(t *testing.T) {
 	executor := &proxyExecutorFake{deletePullResult: &zlm.ProxyDeleteResult{Key: "proxy-a", Hit: true}}
 	ledger := &proxyLedgerFake{rows: []gbmodels.GbZLMManagedResource{
-		{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "proxy-a", App: "live", Stream: "same-stream", IdentityFingerprint: strings.Repeat("a", 64)},
-		{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "proxy-b", App: "live", Stream: "same-stream", IdentityFingerprint: strings.Repeat("b", 64)},
+		{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "proxy-a", Schema: "rtsp", Vhost: "__defaultVhost__", App: "live", Stream: "same-stream", IdentityFingerprint: strings.Repeat("a", 64)},
+		{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "proxy-b", Schema: "rtsp", Vhost: "__defaultVhost__", App: "live", Stream: "same-stream", IdentityFingerprint: strings.Repeat("b", 64)},
 	}}
 	service := newProxyTestService(executor, ledger, &proxyOwnershipFake{}, proxyCapabilitiesForAll())
 	unknown := validDeleteRequest()
@@ -267,7 +269,7 @@ func TestProxyListUsesZLMTruthAndRedactsRawURL(t *testing.T) {
 	}}}
 	ledger := &proxyLedgerFake{rows: []gbmodels.GbZLMManagedResource{
 		{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "stale-key", App: "live", Stream: "stale"},
-		{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "live-key", App: "live", Stream: "camera/1", Summary: "source " + secretURL, IdentityFingerprint: strings.Repeat("a", 64)},
+		{NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "live-key", Schema: "rtsp", Vhost: "__defaultVhost__", App: "live", Stream: "camera/1", Summary: "source " + secretURL, IdentityFingerprint: strings.Repeat("a", 64)},
 	}}
 	service := newProxyTestService(executor, ledger, nil, proxyCapabilitiesForAll())
 	page, err := service.ListPullProxies(context.Background(), 7)
@@ -283,6 +285,33 @@ func TestProxyListUsesZLMTruthAndRedactsRawURL(t *testing.T) {
 	for _, secret := range []string{"user", "pass", "list-secret", secretURL} {
 		require.NotContains(t, string(encoded), secret)
 	}
+}
+
+func TestProxyListRestoresSchemaOnlyFromUniqueLedgerProvenance(t *testing.T) {
+	executor := &proxyExecutorFake{listPull: []zlm.StreamProxyInfo{{
+		Key: "live-key", URL: "rtmp://source.example/live", Status: 1,
+		Src: &zlm.ProxyMediaTuple{VHost: "__defaultVhost__", App: "live", Stream: "camera/1"},
+	}}}
+	ledger := &proxyLedgerFake{rows: []gbmodels.GbZLMManagedResource{{
+		NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "live-key",
+		Schema: "rtsp", Vhost: "__defaultVhost__", App: "live", Stream: "camera/1",
+	}}}
+	service := newProxyTestService(executor, ledger, nil, proxyCapabilitiesForAll())
+	page, err := service.ListPullProxies(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, page.List, 1)
+	require.True(t, page.List[0].Managed)
+	require.Equal(t, "rtsp", page.List[0].Media.Schema, "schema must come from the unique exact ledger row, not the rtmp source URL")
+
+	ledger.rows = append(ledger.rows, gbmodels.GbZLMManagedResource{
+		NodeID: 7, ResourceType: string(ProxyKindPull), ResourceKey: "live-key",
+		Schema: "rtmp", Vhost: "__defaultVhost__", App: "live", Stream: "camera/1",
+	})
+	page, err = service.ListPullProxies(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, page.List, 1)
+	require.False(t, page.List[0].Managed, "same key/media with multiple schemas is ambiguous and must fail closed")
+	require.Empty(t, page.List[0].Media.Schema)
 }
 
 func validPullRequest() PullProxyRequest {
@@ -432,7 +461,7 @@ func (f *proxyLedgerFake) Register(_ context.Context, input repo.ManagedResource
 		return nil, f.registerErr
 	}
 	f.registrations = append(f.registrations, input)
-	return &gbmodels.GbZLMManagedResource{NodeID: input.Identity.NodeID, ResourceType: input.Identity.ResourceType, ResourceKey: input.Identity.ResourceKey, App: input.Identity.App, Stream: input.Identity.Stream, IdentityFingerprint: input.Fingerprint}, nil
+	return &gbmodels.GbZLMManagedResource{NodeID: input.Identity.NodeID, ResourceType: input.Identity.ResourceType, ResourceKey: input.Identity.ResourceKey, Schema: input.Identity.Schema, Vhost: input.Identity.Vhost, App: input.Identity.App, Stream: input.Identity.Stream, IdentityFingerprint: input.Fingerprint}, nil
 }
 
 func (f *proxyLedgerFake) List(_ context.Context, filter repo.ManagedResourceFilter) ([]gbmodels.GbZLMManagedResource, error) {
@@ -462,7 +491,7 @@ func (f *proxyLedgerFake) Tombstone(_ context.Context, identity repo.ManagedReso
 		return nil, f.tombstoneErr
 	}
 	f.tombstones = append(f.tombstones, identity)
-	return &gbmodels.GbZLMManagedResource{NodeID: identity.NodeID, ResourceType: identity.ResourceType, ResourceKey: identity.ResourceKey}, nil
+	return &gbmodels.GbZLMManagedResource{NodeID: identity.NodeID, ResourceType: identity.ResourceType, ResourceKey: identity.ResourceKey, Schema: identity.Schema, Vhost: identity.Vhost, App: identity.App, Stream: identity.Stream}, nil
 }
 
 type proxyCapabilityFake struct {

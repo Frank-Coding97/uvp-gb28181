@@ -617,6 +617,7 @@ func ffmpegURLView(raw string) FFmpegURLView {
 func ffmpegIdentityFingerprint(request FFmpegSourceCreateRequest, nodeID int64) string {
 	return repo.FingerprintManagedResourceParts(
 		nodeIDString(nodeID), ResourceTypeFFmpegSource, request.TemplateKey,
+		"ffmpeg", "__defaultVhost__", ffmpegLedgerApp,
 		request.SrcURL, request.DstURL, fmt.Sprint(request.TimeoutMS),
 		fmt.Sprint(request.EnableHLS), fmt.Sprint(request.EnableMP4),
 	)
@@ -625,6 +626,7 @@ func ffmpegIdentityFingerprint(request FFmpegSourceCreateRequest, nodeID int64) 
 func ffmpegLedgerIdentity(nodeID int64, key string) repo.ManagedResourceIdentity {
 	return repo.ManagedResourceIdentity{
 		NodeID: nodeID, ResourceType: ResourceTypeFFmpegSource, ResourceKey: key,
+		Schema: "ffmpeg", Vhost: "__defaultVhost__",
 		App: ffmpegLedgerApp, Stream: key,
 	}
 }

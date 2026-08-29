@@ -88,6 +88,8 @@ func TestFFmpegServiceRegistersOnlyAfterSuccessfulAddAndRedactsURLs(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, "ffmpeg-1", view.Key)
 	require.Len(t, ledger.registered, 1)
+	require.Equal(t, "ffmpeg", ledger.registered[0].Identity.Schema)
+	require.Equal(t, "__defaultVhost__", ledger.registered[0].Identity.Vhost)
 	require.Equal(t, 1, client.addCalls)
 	require.Equal(t, "ffmpeg.cmd_hd", client.addRequest.FFmpegCmdKey)
 	require.Equal(t, src, client.addRequest.SrcURL)
@@ -171,7 +173,7 @@ func TestFFmpegServiceUnsupportedListIs422AndNeverEmptySuccess(t *testing.T) {
 func TestFFmpegServiceDeletePreflightProtectsLedgerTombstone(t *testing.T) {
 	client := &t11FFmpegClient{deleteResult: &zlm.ProxyDeleteResult{Key: "ffmpeg-1", Hit: true}}
 	ledger := &t11Ledger{rows: map[string]*gbmodels.GbZLMManagedResource{
-		ffmpegLedgerKey(7, "ffmpeg-1"): {NodeID: 7, ResourceType: ResourceTypeFFmpegSource, ResourceKey: "ffmpeg-1", App: ffmpegLedgerApp, Stream: "ffmpeg-1"},
+		ffmpegLedgerKey(7, "ffmpeg-1"): {NodeID: 7, ResourceType: ResourceTypeFFmpegSource, ResourceKey: "ffmpeg-1", Schema: "ffmpeg", Vhost: "__defaultVhost__", App: ffmpegLedgerApp, Stream: "ffmpeg-1"},
 	}}
 	resolver := NewOwnershipResolver(OwnershipDependencies{
 		Presence: t11Presence{present: true},
@@ -197,7 +199,7 @@ func TestFFmpegServiceDeletePreflightProtectsLedgerTombstone(t *testing.T) {
 func TestFFmpegServiceDeleteFailureOrChangedFingerprintDoesNotTombstone(t *testing.T) {
 	key := ffmpegLedgerKey(7, "ffmpeg-1")
 	ledger := &t11Ledger{rows: map[string]*gbmodels.GbZLMManagedResource{
-		key: {NodeID: 7, ResourceType: ResourceTypeFFmpegSource, ResourceKey: "ffmpeg-1", App: ffmpegLedgerApp, Stream: "ffmpeg-1"},
+		key: {NodeID: 7, ResourceType: ResourceTypeFFmpegSource, ResourceKey: "ffmpeg-1", Schema: "ffmpeg", Vhost: "__defaultVhost__", App: ffmpegLedgerApp, Stream: "ffmpeg-1"},
 	}}
 	client := &t11FFmpegClient{deleteErr: errors.New("delete failed")}
 	presence := &t11MutablePresence{present: true}
@@ -344,7 +346,7 @@ func (l *t11Ledger) Register(_ context.Context, input repo.ManagedResourceRegist
 	if l.rows == nil {
 		l.rows = make(map[string]*gbmodels.GbZLMManagedResource)
 	}
-	row := &gbmodels.GbZLMManagedResource{NodeID: input.Identity.NodeID, ResourceType: input.Identity.ResourceType, ResourceKey: input.Identity.ResourceKey, App: input.Identity.App, Stream: input.Identity.Stream, IdentityFingerprint: input.Fingerprint, Summary: input.Summary, CreatedBy: input.CreatedBy}
+	row := &gbmodels.GbZLMManagedResource{NodeID: input.Identity.NodeID, ResourceType: input.Identity.ResourceType, ResourceKey: input.Identity.ResourceKey, Schema: input.Identity.Schema, Vhost: input.Identity.Vhost, App: input.Identity.App, Stream: input.Identity.Stream, IdentityFingerprint: input.Fingerprint, Summary: input.Summary, CreatedBy: input.CreatedBy}
 	l.rows[ffmpegLedgerKey(input.Identity.NodeID, input.Identity.ResourceKey)] = row
 	return row, nil
 }
