@@ -83,4 +83,21 @@ describe("user logout cleanup", () => {
     expect(cleanup).toHaveBeenCalledTimes(1);
     expect(authMocks.removeAccessToken).not.toHaveBeenCalled();
   });
+
+  it("keeps independent logout cleanups registered and supports scoped removal", async () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const unregisterFirst = registerUserLogoutCleanup(first);
+    const unregisterSecond = registerUserLogoutCleanup(second);
+
+    await runUserLogoutCleanup();
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+
+    unregisterFirst();
+    await runUserLogoutCleanup();
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(2);
+    unregisterSecond();
+  });
 });

@@ -9,14 +9,15 @@ import { userType } from "@/store/types";
 import { handleUrl } from "@/utils/app";
 import { startSessionHeartbeat, stopSessionHeartbeat } from "@/services/session-heartbeat";
 
-let logoutCleanup: (() => Promise<void> | void) | undefined;
+const logoutCleanups = new Set<() => Promise<void> | void>();
 
 export function registerUserLogoutCleanup(cleanup: () => Promise<void> | void) {
-    logoutCleanup = cleanup;
+    logoutCleanups.add(cleanup);
+    return () => logoutCleanups.delete(cleanup);
 }
 
 export async function runUserLogoutCleanup() {
-    await Promise.resolve(logoutCleanup?.()).catch(() => undefined);
+    await Promise.all(Array.from(logoutCleanups, cleanup => Promise.resolve().then(cleanup).catch(() => undefined)));
 }
 
 export const useUserStore = defineStore("user", () => {

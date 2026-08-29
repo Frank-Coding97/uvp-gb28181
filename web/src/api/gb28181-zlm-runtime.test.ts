@@ -1,0 +1,85 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const request = vi.hoisted(() => vi.fn());
+vi.mock("@/utils/http", () => ({ http: { request } }));
+vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
+
+import {
+  closeZLMStream,
+  getZLMNodeRuntime,
+  getZLMOverview,
+  getZLMRecordingStatus,
+  kickZLMSession,
+  listZLMNetworkSessions,
+  listZLMStreams,
+  preflightCloseZLMStream,
+  snapshotZLMStreamURL,
+  type ZLMMediaIdentity
+} from "./gb28181-zlm-runtime";
+
+const media: ZLMMediaIdentity = { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001" };
+
+describe("ZLM runtime API", () => {
+  beforeEach(() => {
+    request.mockReset();
+    request.mockResolvedValue({ code: 0, message: "", data: {} });
+  });
+
+  it("uses only same-origin typed overview and node runtime routes", async () => {
+    const controller = new AbortController();
+    await getZLMOverview(controller.signal);
+    await getZLMNodeRuntime(7, controller.signal);
+
+    expect(request).toHaveBeenNthCalledWith(1, "get", "/api/gb28181/zlm/overview", { signal: controller.signal });
+    expect(request).toHaveBeenNthCalledWith(2, "get", "/api/gb28181/zlm/nodes/7/runtime", { signal: controller.signal });
+  });
+
+  it("keeps filters in query params and drops empty optional values", async () => {
+    const controller = new AbortController();
+    await listZLMStreams({ nodeId: 7, page: 2, pageSize: 30, app: "live", stream: "" }, controller.signal);
+    await listZLMNetworkSessions(7, { page: 3, pageSize: 20, peerIp: "", localPort: 8000 }, controller.signal);
+
+    expect(request).toHaveBeenNthCalledWith(1, "get", "/api/gb28181/zlm/streams", {
+      params: { nodeId: 7, page: 2, pageSize: 30, app: "live" },
+      signal: controller.signal
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "get", "/api/gb28181/zlm/nodes/7/sessions/network", {
+      params: { page: 3, pageSize: 20, localPort: 8000 },
+      signal: controller.signal
+    });
+  });
+
+  it("uses immutable preflight fingerprints for destructive stream actions", async () => {
+    await preflightCloseZLMStream(7, media);
+    await closeZLMStream(7, media, "sha256:fingerprint");
+    await kickZLMSession(7, media, "opaque-session-id");
+
+    expect(request).toHaveBeenNthCalledWith(1, "post", "/api/gb28181/zlm/nodes/7/streams/close/preflight", {
+      data: { nodeId: 7, media }
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "post", "/api/gb28181/zlm/nodes/7/streams/close", {
+      data: { target: { nodeId: 7, media }, fingerprint: "sha256:fingerprint" }
+    });
+    expect(request).toHaveBeenNthCalledWith(3, "post", "/api/gb28181/zlm/nodes/7/sessions/kick", {
+      data: { nodeId: 7, media, identifier: "opaque-session-id" }
+    });
+  });
+
+  it("builds snapshot and recording status requests without putting media identity in a path", async () => {
+    expect(snapshotZLMStreamURL(7, media)).toBe(
+      "/api/gb28181/zlm/nodes/7/streams/snapshot?schema=rtsp&vhost=__defaultVhost__&app=live&stream=34020000001320000001"
+    );
+    await getZLMRecordingStatus(7, media, 1);
+    expect(request).toHaveBeenCalledWith("get", "/api/gb28181/zlm/nodes/7/recordings/runtime/status", {
+      params: { schema: "rtsp", vhost: "__defaultVhost__", app: "live", stream: "34020000001320000001", type: 1 }
+    });
+  });
+
+  it("contains no browser-side ZLM management endpoint or secret parameter", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/api/gb28181-zlm-runtime.ts"), "utf8");
+    expect(source).not.toMatch(/\/index\/api\//i);
+    expect(source).not.toMatch(/apiSecret|[?&]secret=/i);
+  });
+});

@@ -198,9 +198,9 @@ func (r *OwnershipResolver) Resolve(ctx context.Context, target OwnershipTarget)
 // OwnershipPreflight is an immutable confirmation token for one target. The
 // resolver re-reads all adapters before Execute invokes the supplied action.
 type OwnershipPreflight struct {
-	Target      OwnershipTarget
-	Snapshot    OwnershipSnapshot
-	Fingerprint string
+	Target      OwnershipTarget   `json:"target"`
+	Snapshot    OwnershipSnapshot `json:"snapshot"`
+	Fingerprint string            `json:"fingerprint"`
 }
 
 func (r *OwnershipResolver) Preflight(ctx context.Context, target OwnershipTarget) (OwnershipPreflight, error) {
@@ -260,9 +260,9 @@ func (r *OwnershipResolver) ExecuteForce(ctx context.Context, preflight Ownershi
 // impacts. It is useful for a batch close endpoint that must perform no action
 // when any target changes after the confirmation dialog.
 type OwnershipBatchPreflight struct {
-	Targets     []OwnershipTarget
-	Snapshots   []OwnershipSnapshot
-	Fingerprint string
+	Targets     []OwnershipTarget   `json:"targets"`
+	Snapshots   []OwnershipSnapshot `json:"snapshots"`
+	Fingerprint string              `json:"fingerprint"`
 }
 
 func (r *OwnershipResolver) PreflightBatch(ctx context.Context, targets []OwnershipTarget) (OwnershipBatchPreflight, error) {

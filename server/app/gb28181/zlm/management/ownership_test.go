@@ -2,6 +2,7 @@ package management
 
 import (
 	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 
@@ -399,6 +400,36 @@ func TestOwnershipExecuteBatchRechecksEveryTargetBeforeCallingAction(t *testing.
 	require.ErrorAs(t, err, &managementErr)
 	require.Equal(t, CodeOwnershipConflict, managementErr.Code)
 	require.Zero(t, calls.Load())
+}
+
+func TestOwnershipPreflightJSONUsesStableLowerCamelCaseFields(t *testing.T) {
+	target := testOwnershipTarget(7, "contract")
+	snapshot := OwnershipSnapshot{
+		Target: target, Present: true, PresenceKnown: true, Status: OwnershipStatusManaged,
+		Fingerprint: "snapshot-fingerprint",
+	}
+
+	encoded, err := json.Marshal(OwnershipPreflight{
+		Target: target, Snapshot: snapshot, Fingerprint: "single-fingerprint",
+	})
+	require.NoError(t, err)
+	var single map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &single))
+	require.Contains(t, single, "target")
+	require.Contains(t, single, "snapshot")
+	require.Contains(t, single, "fingerprint")
+	require.NotContains(t, single, "Target")
+
+	encoded, err = json.Marshal(OwnershipBatchPreflight{
+		Targets: []OwnershipTarget{target}, Snapshots: []OwnershipSnapshot{snapshot}, Fingerprint: "batch-fingerprint",
+	})
+	require.NoError(t, err)
+	var batch map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &batch))
+	require.Contains(t, batch, "targets")
+	require.Contains(t, batch, "snapshots")
+	require.Contains(t, batch, "fingerprint")
+	require.NotContains(t, batch, "Targets")
 }
 
 func testOwnershipTarget(nodeID int64, streamID string) OwnershipTarget {
