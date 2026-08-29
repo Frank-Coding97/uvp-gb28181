@@ -360,9 +360,10 @@ func (r *Registry) MarkRecoveryRequired(ctx context.Context, id int64, reason, f
 			currentSnapshot = cloneNode(*current)
 		}
 		r.mu.RUnlock()
-		if currentOK && currentSnapshot.Revision == expectedRevision {
-			// Stats are process-local and are not part of the durable row's
-			// scheduling decision; preserve them when the revision is current.
+		if currentOK {
+			// Stats are process-local and never participate in durable CAS.
+			// Preserve them even when the durable config came from another
+			// process with a newer revision.
 			persisted.Stats = currentSnapshot.Stats
 		}
 
@@ -387,9 +388,10 @@ func (r *Registry) MarkRecoveryRequired(ctx context.Context, id int64, reason, f
 			r.mu.Unlock()
 			continue
 		}
-		if latest.Revision == expectedRevision {
-			persisted.Stats = latest.Stats
-		}
+		// Heartbeats may have advanced while the durable CAS was in flight.
+		// Always retain the latest process-local Stats once revision ordering
+		// has proved that replacing the config snapshot is safe.
+		persisted.Stats = latest.Stats
 		next := cloneNode(*persisted)
 		r.nodes[id] = &next
 		r.autoOnDemandReady[id] = false

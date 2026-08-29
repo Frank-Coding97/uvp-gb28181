@@ -18,6 +18,63 @@ type targetChangingConfigClient struct {
 	once       sync.Once
 }
 
+type revisionOnlyConfigRepo struct {
+	mu   sync.Mutex
+	row  node.Node
+	next int64
+}
+
+func (r *revisionOnlyConfigRepo) List(context.Context) ([]node.Node, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return []node.Node{r.row}, nil
+}
+
+func (r *revisionOnlyConfigRepo) Get(_ context.Context, id int64) (*node.Node, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.row.ID != id {
+		return nil, nil
+	}
+	copy := r.row
+	return &copy, nil
+}
+
+func (r *revisionOnlyConfigRepo) Create(_ context.Context, n node.Node) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.next++
+	n.ID = r.next
+	r.row = n
+	return n.ID, nil
+}
+
+func (r *revisionOnlyConfigRepo) Update(_ context.Context, n node.Node) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.row = n
+	return nil
+}
+
+func (r *revisionOnlyConfigRepo) UpdateCAS(_ context.Context, n node.Node, expectedRevision uint64) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.row.Revision != expectedRevision {
+		return false, nil
+	}
+	n.Revision = expectedRevision + 1
+	r.row = n
+	return true, nil
+}
+
+func (r *revisionOnlyConfigRepo) Delete(context.Context, int64) error { return nil }
+
+func (r *revisionOnlyConfigRepo) advanceRevisionWithoutChangingTarget() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.row.Revision++
+}
+
 func (c *targetChangingConfigClient) SetServerConfig(ctx context.Context, _ *node.Node, _ map[string]string) error {
 	c.once.Do(func() { close(c.setStarted) })
 	select {
@@ -147,4 +204,33 @@ func TestConfigServiceT13_TargetChangeCannotReturnApplied(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrConfigTargetChanged)
 	require.NotContains(t, err.Error(), "old-secret")
 	require.NotContains(t, err.Error(), "new-secret")
+}
+
+func TestConfigServiceT13_RevisionOnlyTargetChangeCannotReturnApplied(t *testing.T) {
+	repo := &revisionOnlyConfigRepo{}
+	reg := node.NewRegistry(repo)
+	added, err := reg.Add(context.Background(), node.Node{
+		Name: "n1", Host: "zlm", APIPort: 18080, APISecret: "secret",
+		MediaServerUUID: "uuid-a", State: node.StateActive,
+	})
+	require.NoError(t, err)
+
+	client := &targetChangingConfigClient{setStarted: make(chan struct{}), releaseSet: make(chan struct{})}
+	svc := service.NewConfigService(reg, client)
+	result := make(chan error, 1)
+	go func() {
+		_, updateErr := svc.Update(context.Background(), added.ID, service.UpdateConfigReq{
+			Changes: map[string]string{"hook.timeoutSec": "12"},
+		})
+		result <- updateErr
+	}()
+
+	<-client.setStarted
+	repo.advanceRevisionWithoutChangingTarget()
+	require.NoError(t, reg.LoadAll(context.Background()))
+	close(client.releaseSet)
+
+	err = <-result
+	require.ErrorIs(t, err, service.ErrConfigTargetChanged)
+	require.NotContains(t, err.Error(), "secret")
 }

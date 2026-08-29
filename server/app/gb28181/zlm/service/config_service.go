@@ -236,6 +236,7 @@ type ConfigReadbackError struct {
 
 type configTargetSnapshot struct {
 	id              int64
+	revision        uint64
 	host            string
 	apiPort         int
 	apiSecret       string
@@ -248,7 +249,7 @@ func snapshotConfigTarget(n *node.Node) configTargetSnapshot {
 		return configTargetSnapshot{}
 	}
 	return configTargetSnapshot{
-		id: n.ID, host: n.Host, apiPort: n.APIPort, apiSecret: n.APISecret,
+		id: n.ID, revision: n.Revision, host: n.Host, apiPort: n.APIPort, apiSecret: n.APISecret,
 		mediaServerUUID: n.MediaServerUUID, updatedAt: n.UpdatedAt,
 	}
 }
@@ -259,7 +260,8 @@ func (s *ConfigService) ensureConfigTargetUnchanged(expected configTargetSnapsho
 		return ErrConfigTargetChanged
 	}
 	actual := snapshotConfigTarget(current)
-	if actual.id != expected.id || actual.host != expected.host || actual.apiPort != expected.apiPort ||
+	if actual.id != expected.id || actual.revision != expected.revision ||
+		actual.host != expected.host || actual.apiPort != expected.apiPort ||
 		actual.apiSecret != expected.apiSecret || actual.mediaServerUUID != expected.mediaServerUUID ||
 		!actual.updatedAt.Equal(expected.updatedAt) {
 		return ErrConfigTargetChanged

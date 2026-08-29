@@ -87,3 +87,30 @@ func TestRegistryT13_LoadAllDoesNotRewindCommittedCAS(t *testing.T) {
 	require.Equal(t, 80, got.Weight)
 	require.EqualValues(t, 2, got.Revision)
 }
+
+func TestRegistryT13_MarkRecoveryRequiredPreservesProcessLocalStatsAfterExternalRevision(t *testing.T) {
+	repo := &staleListRepo{}
+	reg := node.NewRegistry(repo)
+	added, err := reg.Add(context.Background(), node.Node{
+		Name: "n1", Host: "old.example", MediaServerUUID: "uuid-1", State: node.StateActive,
+	})
+	require.NoError(t, err)
+
+	wantStats := node.Stats{MediaSourceCount: 7, SessionCount: 11, TotalBytesIn: 1024}
+	reg.UpdateStats("uuid-1", wantStats)
+
+	// Simulate another process committing a newer durable config without
+	// touching this process's heartbeat-only Stats.
+	repo.mu.Lock()
+	repo.row.Host = "new.example"
+	repo.row.Revision = added.Revision + 1
+	repo.mu.Unlock()
+
+	require.NoError(t, reg.MarkRecoveryRequired(context.Background(), added.ID, "rollback uncertain", "opaque"))
+	got, ok := reg.Get(added.ID)
+	require.True(t, ok)
+	require.Equal(t, "new.example", got.Host, "quarantine must retain the newer durable config")
+	require.Equal(t, wantStats, got.Stats, "durable revision refresh must not erase process-local heartbeat stats")
+	require.True(t, got.RecoveryRequired)
+	require.True(t, reg.IsAdmissionBlocked(added.ID))
+}
