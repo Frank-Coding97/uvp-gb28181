@@ -89,6 +89,18 @@ export interface RecordingDownloadCreation {
   contentUrl: string;
 }
 
+export interface RecordingDeleteResult {
+  id: string;
+  deleted: boolean;
+  errorCode?: string;
+}
+
+export interface RecordingBatchDeleteResult {
+  deletedCount: number;
+  failedCount: number;
+  results: RecordingDeleteResult[];
+}
+
 export interface ActiveRecording {
   id: string;
   channelId: string;
@@ -99,6 +111,12 @@ export interface ActiveRecording {
   state: string;
   startedAt: string | null;
   updatedAt: string;
+}
+
+export interface StopActiveRecordingResult {
+  id: string;
+  channelId: string;
+  stopped: boolean;
 }
 
 export interface RecordingReconciliation {
@@ -152,6 +170,24 @@ export function getRecordingDetail(id: string) {
   );
 }
 
+export function deleteRecordingFile(id: string) {
+  return http.request<BaseResult<RecordingDeleteResult>>(
+    "delete",
+    baseUrlApi(`gb28181/cloud-recordings/files/${encodeURIComponent(id)}`),
+    undefined,
+    { showErrorMessage: false }
+  );
+}
+
+export function batchDeleteRecordingFiles(ids: string[]) {
+  return http.request<BaseResult<RecordingBatchDeleteResult>>(
+    "post",
+    baseUrlApi("gb28181/cloud-recordings/files/batch-delete"),
+    { data: { ids } },
+    { showErrorMessage: false }
+  );
+}
+
 export function issueRecordingAccess(id: string, mode: RecordingAccessMode) {
   return http.request<BaseResult<RecordingAccess>>(
     "post",
@@ -192,6 +228,15 @@ export function listActiveRecordings() {
   return http.request<BaseResult<{ list: ActiveRecording[] }>>(
     "get",
     baseUrlApi("gb28181/cloud-recordings/active"),
+    undefined,
+    { showErrorMessage: false }
+  );
+}
+
+export function stopActiveRecording(id: string) {
+  return http.request<BaseResult<StopActiveRecordingResult>>(
+    "post",
+    baseUrlApi(`gb28181/cloud-recordings/active/${encodeURIComponent(id)}/stop`),
     undefined,
     { showErrorMessage: false }
   );

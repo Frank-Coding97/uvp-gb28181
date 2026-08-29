@@ -127,6 +127,18 @@ func (r *GormRepo) FindSessionByMedia(ctx context.Context, nodeID int64, vhost, 
 	return &session, nil
 }
 
+func (r *GormRepo) FindSessionByID(ctx context.Context, sessionID uint64) (*models.GbRecordingSession, error) {
+	var session models.GbRecordingSession
+	result := r.db.WithContext(ctx).First(&session, sessionID)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &session, nil
+}
+
 func (r *GormRepo) FindLatestSessionByChannel(ctx context.Context, channelID uint) (*models.GbRecordingSession, error) {
 	var session models.GbRecordingSession
 	result := r.db.WithContext(ctx).

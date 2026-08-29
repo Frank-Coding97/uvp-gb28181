@@ -501,12 +501,15 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			cloudRecordings.GET("/files", func(c *gin.Context) { currentCloudRecordingCatalogController().ListFiles(c) })
 			cloudRecordings.GET("/files/options", func(c *gin.Context) { currentCloudRecordingCatalogController().FileOptions(c) })
+			cloudRecordings.POST("/files/batch-delete", func(c *gin.Context) { currentCloudRecordingCatalogController().DeleteFiles(c) })
 			cloudRecordings.GET("/files/:id", func(c *gin.Context) { currentCloudRecordingCatalogController().FileDetail(c) })
+			cloudRecordings.DELETE("/files/:id", func(c *gin.Context) { currentCloudRecordingCatalogController().DeleteFile(c) })
 			cloudRecordings.POST("/files/:id/access", func(c *gin.Context) { currentCloudRecordingCatalogController().IssueAccess(c) })
 			cloudRecordings.POST("/files/:id/downloads", func(c *gin.Context) { currentCloudRecordingCatalogController().CreateDownload(c) })
 			cloudRecordings.GET("/downloads/:taskId", func(c *gin.Context) { currentCloudRecordingCatalogController().DownloadStatus(c) })
 			cloudRecordings.DELETE("/downloads/:taskId", func(c *gin.Context) { currentCloudRecordingCatalogController().CancelDownload(c) })
 			cloudRecordings.GET("/active", func(c *gin.Context) { currentCloudRecordingCatalogController().ActiveSessions(c) })
+			cloudRecordings.POST("/active/:id/stop", func(c *gin.Context) { currentCloudRecordingCatalogController().StopActiveSession(c) })
 			cloudRecordings.GET("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().Reconciliations(c) })
 			cloudRecordings.POST("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().TriggerReconciliation(c) })
 		}

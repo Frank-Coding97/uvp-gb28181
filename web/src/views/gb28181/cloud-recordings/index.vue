@@ -124,6 +124,17 @@
                 </template>
               </s-layout-search>
 
+              <div v-if="canDelete && selectedRowKeys.length" class="recording-batch-bar">
+                <span>已选 <strong>{{ selectedRowKeys.length }}</strong> 个录像文件</span>
+                <div class="recording-batch-bar__actions">
+                  <a-button data-testid="recording-batch-delete" status="danger" :loading="batchDeleting" :disabled="batchDeleting" @click="requestBatchDelete">
+                    <template #icon><Trash2 :size="14" /></template>
+                    批量删除
+                  </a-button>
+                  <a-button :disabled="batchDeleting" @click="selectedRowKeys = []">取消选择</a-button>
+                </div>
+              </div>
+
               <a-alert v-if="errorMessage && !loading" type="error" class="cloud-recordings-state">
                 {{ errorMessage }}
               </a-alert>
@@ -134,6 +145,8 @@
                   data-testid="recording-table"
                   row-key="id"
                   :data="files"
+                  v-model:selected-keys="selectedRowKeys"
+                  :row-selection="rowSelection"
                   :bordered="false"
                   :loading="loading"
                   :pagination="pagination"
@@ -184,7 +197,7 @@
                     <a-table-column
                       title="操作"
                       data-testid="recording-actions-column"
-                      :width="220"
+                      :width="284"
                       align="center"
                       :fixed="isMobile ? '' : 'right'"
                     >
@@ -216,6 +229,17 @@
                               <span>下载</span>
                             </a-link>
                           </template>
+                          <a-link
+                            v-if="canDelete"
+                            :data-testid="`delete-${record.id}`"
+                            class="uvp-table-action uvp-table-action--delete"
+                            :loading="deletingIds.has(record.id)"
+                            :disabled="deletingIds.has(record.id)"
+                            @click="requestDelete(record)"
+                          >
+                            <template #icon><Trash2 :data-testid="`delete-icon-${record.id}`" :size="13" /></template>
+                            <span>删除</span>
+                          </a-link>
                         </div>
                       </template>
                     </a-table-column>
@@ -248,6 +272,22 @@
                     <a-table-column title="节点" :width="180"><template #cell="{ record }">{{ record.node.name || `节点 ${record.node.id}` }}</template></a-table-column>
                     <a-table-column title="状态" :width="120"><template #cell><a-tag color="green">正在录制</a-tag></template></a-table-column>
                     <a-table-column title="更新时间" :width="176"><template #cell="{ record }">{{ formatDateTime(record.updatedAt) }}</template></a-table-column>
+                    <a-table-column v-if="canStop" title="操作" :width="140" align="center" :fixed="isMobile ? '' : 'right'">
+                      <template #cell="{ record }">
+                        <div class="uvp-table-actions cloud-recording-actions">
+                          <a-link
+                            :data-testid="`stop-recording-${record.id}`"
+                            class="uvp-table-action uvp-table-action--stop"
+                            :loading="stoppingIds.has(record.id)"
+                            :disabled="stoppingIds.has(record.id)"
+                            @click="requestStopRecording(record)"
+                          >
+                            <template #icon><CircleStop :size="13" /></template>
+                            <span>停止录像</span>
+                          </a-link>
+                        </div>
+                      </template>
+                    </a-table-column>
                   </template>
                   <template #empty><a-empty description="当前没有正在录像的通道" /></template>
                 </a-table>
@@ -269,17 +309,21 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { CircleCheck, CircleDot, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, TriangleAlert } from "@lucide/vue";
+import { CircleCheck, CircleDot, CircleStop, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, Trash2, TriangleAlert } from "@lucide/vue";
+import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
 import RecordingDetailDrawer from "./components/RecordingDetailDrawer.vue";
 import RecordingPlayerDialog from "./components/RecordingPlayerDialog.vue";
 import {
+  batchDeleteRecordingFiles,
+  deleteRecordingFile,
   listActiveRecordings,
   listReconciliations,
   listRecordingFiles,
   listRecordingOptions,
+  stopActiveRecording,
   triggerReconciliation,
   type ActiveRecording,
   type RecordingAvailability,
@@ -302,6 +346,8 @@ const { isMobile } = useDevicesSize();
 const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:recording:view"));
 const canReconcile = computed(() => hasPermission("gb28181:recording:reconcile"));
+const canDelete = computed(() => hasPermission("gb28181:recording:delete"));
+const canStop = computed(() => hasPermission("gb28181:recording:stop"));
 const AUTO_REFRESH_INTERVAL_SECONDS = 10;
 
 const initialQuery = defaultRecordingQuery();
@@ -327,6 +373,11 @@ const detailVisible = ref(false);
 const detailId = ref<string | null>(null);
 const playerVisible = ref(false);
 const playingRecording = ref<RecordingFile | null>(null);
+const selectedRowKeys = ref<string[]>([]);
+const deletingIds = ref(new Set<string>());
+const batchDeleting = ref(false);
+const stoppingIds = ref(new Set<string>());
+const rowSelection = computed(() => canDelete.value ? { type: "checkbox" as const, showCheckedAll: true } : undefined);
 const pagination = reactive({
   current: initialQuery.page,
   pageSize: initialQuery.pageSize,
@@ -337,7 +388,7 @@ const pagination = reactive({
   pageSizeOptions: [10, 20, 50, 100]
 });
 const fileTableScroll = computed(() => ({ x: "100%", minWidth: 1558, ...(files.value.length ? { y: "100%" } : {}) }));
-const activeTableScroll = computed(() => ({ x: "100%", minWidth: 1082, ...(activeRecordings.value.length ? { y: "100%" } : {}) }));
+const activeTableScroll = computed(() => ({ x: "100%", minWidth: canStop.value ? 1222 : 1082, ...(activeRecordings.value.length ? { y: "100%" } : {}) }));
 const reconciliationSummary = computed(() => {
   const running = reconciliations.value.filter(item => item.status === "queued" || item.status === "running").length;
   if (running) return { text: `${running} 个节点正在对账`, tone: "running" as const };
@@ -442,6 +493,7 @@ async function loadReconciliationStates() {
 function queryFiles() {
   resetAutoRefreshCountdown();
   pagination.current = 1;
+  selectedRowKeys.value = [];
   void loadFiles();
   void loadOptions();
 }
@@ -456,6 +508,7 @@ function resetFilters() {
     keyword: ""
   });
   pagination.current = 1;
+  selectedRowKeys.value = [];
   void loadFiles();
   void loadOptions();
 }
@@ -470,6 +523,7 @@ function refreshCurrent() {
 function handlePageChange(page: number) {
   resetAutoRefreshCountdown();
   pagination.current = page;
+  selectedRowKeys.value = [];
   void loadFiles();
 }
 
@@ -477,6 +531,7 @@ function handlePageSizeChange(pageSize: number) {
   resetAutoRefreshCountdown();
   pagination.current = 1;
   pagination.pageSize = pageSize;
+  selectedRowKeys.value = [];
   void loadFiles();
 }
 
@@ -500,6 +555,90 @@ function download(recording: RecordingFile) {
     fileId: recording.id,
     fileName: recording.fileName || `recording-${recording.id}.mp4`
   });
+}
+
+function requestStopRecording(recording: ActiveRecording) {
+  if (!canStop.value || stoppingIds.value.has(recording.id)) return;
+  Modal.warning({
+    title: "停止录像",
+    content: `将停止“${recording.channelName || recording.channelCode}”在 ZLMediaKit 上的录像，并关闭该通道的云端录像开关。`,
+    okText: "停止录像", cancelText: "取消", hideCancel: false, escToClose: true,
+    okButtonProps: { status: "danger" }, onOk: () => performStopRecording(recording.id)
+  });
+}
+
+async function performStopRecording(id: string) {
+  if (stoppingIds.value.has(id)) return;
+  stoppingIds.value = new Set([...stoppingIds.value, id]);
+  try {
+    await stopActiveRecording(id);
+    proxy.$message.success("录像已停止");
+    await loadActive();
+  } catch (error) {
+    proxy.$message.error(recordingErrorPresentation(error));
+  } finally {
+    const next = new Set(stoppingIds.value);
+    next.delete(id);
+    stoppingIds.value = next;
+  }
+}
+
+function requestDelete(recording: RecordingFile) {
+  if (!canDelete.value || deletingIds.value.has(recording.id)) return;
+  Modal.warning({
+    title: "删除录像文件",
+    content: `将从 ZLMediaKit 节点物理删除“${recording.fileName || recording.id}”，删除后不可恢复。`,
+    okText: "删除", cancelText: "取消", hideCancel: false, escToClose: true,
+    okButtonProps: { status: "danger" }, onOk: () => performDelete(recording.id)
+  });
+}
+
+async function performDelete(id: string) {
+  if (deletingIds.value.has(id)) return;
+  deletingIds.value = new Set([...deletingIds.value, id]);
+  try {
+    await deleteRecordingFile(id);
+    selectedRowKeys.value = selectedRowKeys.value.filter(item => item !== id);
+    if (files.value.length === 1 && pagination.current > 1) pagination.current -= 1;
+    proxy.$message.success("录像文件已删除");
+    await loadFiles();
+  } catch (error) {
+    proxy.$message.error(recordingErrorPresentation(error));
+  } finally {
+    const next = new Set(deletingIds.value);
+    next.delete(id);
+    deletingIds.value = next;
+  }
+}
+
+function requestBatchDelete() {
+  if (!canDelete.value || !selectedRowKeys.value.length || batchDeleting.value) return;
+  Modal.warning({
+    title: "批量删除录像文件",
+    content: `将从 ZLMediaKit 节点物理删除选中的 ${selectedRowKeys.value.length} 个录像文件，删除后不可恢复。`,
+    okText: "删除", cancelText: "取消", hideCancel: false, escToClose: true,
+    okButtonProps: { status: "danger" }, onOk: () => performBatchDelete()
+  });
+}
+
+async function performBatchDelete() {
+  if (batchDeleting.value || !selectedRowKeys.value.length) return;
+  batchDeleting.value = true;
+  const ids = [...selectedRowKeys.value];
+  try {
+    const response = await batchDeleteRecordingFiles(ids);
+    const { deletedCount = 0, failedCount = 0, results = [] } = response.data;
+    const failedIDs = new Set(results.filter(item => !item.deleted).map(item => item.id));
+    selectedRowKeys.value = ids.filter(id => failedIDs.has(id));
+    if (deletedCount >= files.value.length && pagination.current > 1) pagination.current -= 1;
+    if (failedCount) proxy.$message.error(`已删除 ${deletedCount} 个，${failedCount} 个删除失败`);
+    else proxy.$message.success(`已删除 ${deletedCount} 个录像文件`);
+    await loadFiles();
+  } catch (error) {
+    proxy.$message.error(recordingErrorPresentation(error));
+  } finally {
+    batchDeleting.value = false;
+  }
 }
 
 async function reconcile() {
@@ -620,6 +759,8 @@ onBeforeUnmount(() => {
 .reconciliation-summary__icon.is-spinning { animation: reconciliation-spin 900ms linear infinite; }
 @keyframes reconciliation-spin { to { transform: rotate(360deg); } }
 .cloud-recordings-state { margin: 10px 0 12px; }
+.recording-batch-bar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin: 10px 0 12px; padding: 10px 14px; color: var(--uvp-text-secondary); background: color-mix(in srgb, var(--uvp-danger) 6%, var(--uvp-panel-bg)); border: 1px solid color-mix(in srgb, var(--uvp-danger) 20%, var(--uvp-panel-border)); border-radius: 8px; }
+.recording-batch-bar__actions { display: flex; align-items: center; gap: 8px; }
 .recording-files-view,
 .active-recordings-view { display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .recording-files-view > :deep(.uvp-search-panel) { flex: 0 0 auto; }
@@ -637,6 +778,10 @@ onBeforeUnmount(() => {
 .cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--preview:hover) { color: #1d4ed8; background: rgb(37 99 235 / 8%); }
 .cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--download) { color: #16845b; }
 .cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--download:hover) { color: #10704b; background: rgb(22 132 91 / 8%); }
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--delete) { color: var(--uvp-danger); }
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--delete:hover) { color: var(--uvp-danger); background: color-mix(in srgb, var(--uvp-danger) 8%, transparent); }
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--stop) { color: #d97706; }
+.cloud-recordings-page :deep(.cloud-recording-actions .uvp-table-action--stop:hover) { color: #b45309; background: rgb(217 119 6 / 8%); }
 .mono,
 .active-recordings-view code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 @media (max-width: 768px) {

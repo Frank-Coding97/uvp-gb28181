@@ -172,6 +172,33 @@ func TestDisableStopsRecordingAndMarksSessionStopped(t *testing.T) {
 	require.Equal(t, models.RecordingSessionStateStopped, stored.State)
 }
 
+func TestStopSessionTargetsHistoricalActiveSessionWhenChannelAlreadyDisabled(t *testing.T) {
+	repo, channel := seedRecordingChannel(t, true)
+	historical := &models.GbRecordingSession{
+		ChannelID: channel.ID, DeviceID: channel.DeviceID, NodeID: 2,
+		VHost: models.DefaultRecordingVHost, App: models.DefaultRecordingApp,
+		Stream: "historical-stream", State: models.RecordingSessionStateRecording,
+	}
+	require.NoError(t, repo.UpsertSession(context.Background(), historical))
+	latest := &models.GbRecordingSession{
+		ChannelID: channel.ID, DeviceID: channel.DeviceID, NodeID: 2,
+		VHost: models.DefaultRecordingVHost, App: models.DefaultRecordingApp,
+		Stream: "latest-stream", State: models.RecordingSessionStateStopped,
+	}
+	require.NoError(t, repo.UpsertSession(context.Background(), latest))
+	client := &fakeRecorderClient{}
+	service := newRecordingService(repo, client, fakeLocation{}, fakeRegistry{item: &node.Node{ID: 2}})
+
+	got, err := service.StopSession(context.Background(), channel.ID, historical.ID)
+	require.NoError(t, err)
+	require.False(t, got.CloudRecordingEnabled)
+	require.Equal(t, models.CloudRecordingStateDisabled, got.CloudRecordingState)
+	require.EqualValues(t, 1, client.stopCalls.Load())
+	stored, err := repo.FindSessionByID(context.Background(), historical.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RecordingSessionStateStopped, stored.State)
+}
+
 func TestDisableIsIdempotentWithoutSession(t *testing.T) {
 	repo, channel := seedRecordingChannel(t, true)
 	service := newRecordingService(repo, &fakeRecorderClient{}, fakeLocation{}, fakeRegistry{})

@@ -19,12 +19,15 @@ type CloudRecordingCatalogAPI interface {
 	ListFiles(context.Context, uint, gbrecording.FileQuery) (gbrecording.FileDTOPage, error)
 	FileOptions(context.Context, uint, gbrecording.FileQuery) (gbrecording.CatalogOptionsDTO, error)
 	FileDetail(context.Context, uint, uint64) (gbrecording.FileDTO, error)
+	DeleteFile(context.Context, uint, uint64) (gbrecording.DeleteFileResult, error)
+	DeleteFiles(context.Context, uint, []uint64) gbrecording.DeleteBatchResult
 	IssueAccess(context.Context, uint, uint64, string) (gbrecording.AccessDTO, error)
 	CreateDownload(context.Context, uint, uint64) (gbrecording.DownloadTaskView, string, error)
 	DownloadStatus(context.Context, uint, string) (gbrecording.DownloadTaskView, error)
 	CancelDownload(context.Context, uint, string) (gbrecording.DownloadTaskView, error)
 	ClaimDownload(context.Context, http.ResponseWriter, string, string, string, func()) error
 	ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error)
+	StopActiveSession(context.Context, uint, uint64) (gbrecording.StopActiveSessionResult, error)
 	Reconciliations(context.Context) ([]gbrecording.ReconciliationDTO, error)
 	TriggerReconciliation([]int64, *time.Time, *time.Time) ([]int64, error)
 	StreamContent(context.Context, http.ResponseWriter, string, string, string) error
@@ -71,6 +74,55 @@ func (c *CloudRecordingCatalogController) FileDetail(ctx *gin.Context) {
 		return
 	}
 	result, err := c.requireService().FileDetail(ctx.Request.Context(), common.GetCurrentUserID(ctx), id)
+	if err != nil {
+		respondCatalogError(ctx, err)
+		return
+	}
+	catalogSuccess(ctx, http.StatusOK, result)
+}
+
+func (c *CloudRecordingCatalogController) DeleteFile(ctx *gin.Context) {
+	id, ok := catalogFileID(ctx)
+	if !ok {
+		catalogFailure(ctx, http.StatusBadRequest, "文件 ID 不合法")
+		return
+	}
+	result, err := c.requireService().DeleteFile(ctx.Request.Context(), common.GetCurrentUserID(ctx), id)
+	if err != nil {
+		respondCatalogError(ctx, err)
+		return
+	}
+	catalogSuccess(ctx, http.StatusOK, result)
+}
+
+func (c *CloudRecordingCatalogController) DeleteFiles(ctx *gin.Context) {
+	var request struct {
+		IDs []string `json:"ids"`
+	}
+	if err := ctx.ShouldBindJSON(&request); err != nil || len(request.IDs) == 0 || len(request.IDs) > 100 {
+		catalogFailure(ctx, http.StatusBadRequest, "请选择 1 至 100 个录像文件")
+		return
+	}
+	ids := make([]uint64, 0, len(request.IDs))
+	for _, rawID := range request.IDs {
+		id, err := strconv.ParseUint(rawID, 10, 64)
+		if err != nil || id == 0 {
+			catalogFailure(ctx, http.StatusBadRequest, "文件 ID 不合法")
+			return
+		}
+		ids = append(ids, id)
+	}
+	result := c.requireService().DeleteFiles(ctx.Request.Context(), common.GetCurrentUserID(ctx), ids)
+	catalogSuccess(ctx, http.StatusOK, result)
+}
+
+func (c *CloudRecordingCatalogController) StopActiveSession(ctx *gin.Context) {
+	id, ok := catalogFileID(ctx)
+	if !ok {
+		catalogFailure(ctx, http.StatusBadRequest, "录像会话 ID 不合法")
+		return
+	}
+	result, err := c.requireService().StopActiveSession(ctx.Request.Context(), common.GetCurrentUserID(ctx), id)
 	if err != nil {
 		respondCatalogError(ctx, err)
 		return
@@ -232,6 +284,12 @@ func (unavailableCloudRecordingCatalogService) FileOptions(context.Context, uint
 func (unavailableCloudRecordingCatalogService) FileDetail(context.Context, uint, uint64) (gbrecording.FileDTO, error) {
 	return gbrecording.FileDTO{}, gbrecording.ErrCatalogAccessUnavailable
 }
+func (unavailableCloudRecordingCatalogService) DeleteFile(context.Context, uint, uint64) (gbrecording.DeleteFileResult, error) {
+	return gbrecording.DeleteFileResult{}, gbrecording.ErrCatalogAccessUnavailable
+}
+func (unavailableCloudRecordingCatalogService) DeleteFiles(context.Context, uint, []uint64) gbrecording.DeleteBatchResult {
+	return gbrecording.DeleteBatchResult{}
+}
 func (unavailableCloudRecordingCatalogService) IssueAccess(context.Context, uint, uint64, string) (gbrecording.AccessDTO, error) {
 	return gbrecording.AccessDTO{}, gbrecording.ErrCatalogAccessUnavailable
 }
@@ -249,6 +307,9 @@ func (unavailableCloudRecordingCatalogService) ClaimDownload(context.Context, ht
 }
 func (unavailableCloudRecordingCatalogService) ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error) {
 	return nil, gbrecording.ErrCatalogAccessUnavailable
+}
+func (unavailableCloudRecordingCatalogService) StopActiveSession(context.Context, uint, uint64) (gbrecording.StopActiveSessionResult, error) {
+	return gbrecording.StopActiveSessionResult{}, gbrecording.ErrCatalogAccessUnavailable
 }
 func (unavailableCloudRecordingCatalogService) Reconciliations(context.Context) ([]gbrecording.ReconciliationDTO, error) {
 	return nil, gbrecording.ErrCatalogAccessUnavailable
@@ -340,6 +401,8 @@ func catalogFileID(ctx *gin.Context) (uint64, bool) {
 func respondCatalogError(ctx *gin.Context, err error) {
 	status, message := http.StatusInternalServerError, "云端录像请求失败"
 	switch {
+	case errors.Is(err, gbrecording.ErrRecordingSessionNotFound):
+		status, message = http.StatusNotFound, "正在录像会话不存在"
 	case errors.Is(err, gbrecording.ErrRecordingFileNotFound), errors.Is(err, gbrecording.ErrCatalogFileMissing), errors.Is(err, zlm.ErrRecordingNotFound):
 		status, message = http.StatusNotFound, "录像文件不存在"
 	case errors.Is(err, gbrecording.ErrContentTimeout), errors.Is(err, zlm.ErrRecordingResponseTimeout), errors.Is(err, context.DeadlineExceeded):
@@ -360,6 +423,10 @@ func respondCatalogError(ctx *gin.Context, err error) {
 		status, message = http.StatusGone, "录像访问凭据已过期"
 	case errors.Is(err, gbrecording.ErrContentRangeInvalid):
 		status, message = http.StatusRequestedRangeNotSatisfiable, "请求的录像范围无效"
+	case errors.Is(err, zlm.ErrRecordingPathInvalid):
+		status, message = http.StatusUnprocessableEntity, "录像文件索引不完整，无法安全删除"
+	case errors.Is(err, zlm.ErrRecordingDeleteFailed):
+		status, message = http.StatusBadGateway, "ZLMediaKit 未能删除录像文件"
 	case errors.Is(err, gbrecording.ErrCatalogSchedulerStopped):
 		status, message = http.StatusServiceUnavailable, "录像对账服务未就绪"
 	}

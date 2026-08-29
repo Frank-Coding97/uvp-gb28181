@@ -69,6 +69,12 @@ type ActiveSessionDTO struct {
 	UpdatedAt   time.Time  `json:"updatedAt"`
 }
 
+type StopActiveSessionResult struct {
+	ID        string `json:"id"`
+	ChannelID string `json:"channelId"`
+	Stopped   bool   `json:"stopped"`
+}
+
 type ReconciliationDTO struct {
 	Node              NodeDTO    `json:"node"`
 	Status            string     `json:"status"`

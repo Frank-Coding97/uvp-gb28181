@@ -88,6 +88,17 @@ func (r *GormRepo) GetCatalogFile(ctx context.Context, id uint64, allowedDeptIDs
 	return &file, nil
 }
 
+func (r *GormRepo) DeleteCatalogFile(ctx context.Context, id uint64) error {
+	result := r.db.WithContext(ctx).Where("id = ?", id).Delete(&models.GbRecordingFile{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrRecordingFileNotFound
+	}
+	return nil
+}
+
 func (r *GormRepo) ListActiveCatalogSessions(ctx context.Context, allowedDeptIDs []uint, fullAccess bool) ([]ActiveCatalogSession, error) {
 	query := r.db.WithContext(ctx).
 		Table("gb_recording_session AS recording_session").

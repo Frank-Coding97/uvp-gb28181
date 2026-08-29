@@ -156,6 +156,27 @@ func TestGetMP4RecordFilesClassifiesControlFailures(t *testing.T) {
 	})
 }
 
+func TestDeleteMP4RecordFileSendsExactFileParameters(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/index/api/deleteRecordDirectory", r.URL.Path)
+		for key, want := range map[string]string{
+			"secret": "test-secret", "vhost": "__defaultVhost__", "app": "rtp",
+			"stream": "34020000001320000001", "period": "2026-08-10", "name": "090000-091000.mp4",
+		} {
+			require.Equal(t, want, r.URL.Query().Get(key), key)
+		}
+		_, _ = w.Write([]byte(`{"code":0,"result":true}`))
+	})
+	defer server.Close()
+
+	require.NoError(t, client.DeleteMP4RecordFile(context.Background(), "__defaultVhost__", "rtp", "34020000001320000001", "2026-08-10", "090000-091000.mp4"))
+}
+
+func TestDeleteMP4RecordFileRejectsDirectoryTraversal(t *testing.T) {
+	client := NewClientForNode(&node.Node{Host: "127.0.0.1", APIPort: 1, APISecret: "test-secret"})
+	require.ErrorIs(t, client.DeleteMP4RecordFile(context.Background(), "v", "a", "s", "2026-08-10", "../record.mp4"), ErrRecordingPathInvalid)
+}
+
 func TestDownloadFileStreamsFullAndRangeRequests(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

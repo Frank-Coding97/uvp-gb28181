@@ -25,6 +25,28 @@ type catalogTestNodes struct{ nodes map[int64]*node.Node }
 
 type catalogTestScheduler struct{ accepted []int64 }
 
+type catalogDeleteClient struct {
+	deleted []string
+	err     error
+}
+
+type catalogRecordingStopper struct {
+	stoppedChannels []uint
+	stoppedSessions []uint64
+	err             error
+}
+
+func (s *catalogRecordingStopper) StopSession(_ context.Context, channelID uint, sessionID uint64) (*models.GbChannel, error) {
+	s.stoppedChannels = append(s.stoppedChannels, channelID)
+	s.stoppedSessions = append(s.stoppedSessions, sessionID)
+	return &models.GbChannel{ID: channelID, CloudRecordingEnabled: false, CloudRecordingState: models.CloudRecordingStateDisabled}, s.err
+}
+
+func (c *catalogDeleteClient) DeleteMP4RecordFile(_ context.Context, vhost, app, stream, period, name string) error {
+	c.deleted = append(c.deleted, strings.Join([]string{vhost, app, stream, period, name}, "|"))
+	return c.err
+}
+
 func (s *catalogTestScheduler) Enqueue(_ string, nodeIDs []int64, _, _ *time.Time) ([]int64, error) {
 	if len(nodeIDs) == 0 {
 		return append([]int64(nil), s.accepted...), nil
@@ -89,6 +111,67 @@ func TestCatalogServiceScopesQueriesAndIssuesAccess(t *testing.T) {
 	claims, err := signer.Verify(grant.Capability, "101", CapabilityModePlay)
 	require.NoError(t, err)
 	require.Equal(t, uint(7), claims.UserID)
+}
+
+func TestCatalogServiceDeletesPhysicalFileBeforeCatalogIndex(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	file := catalogFile(111, 10, 1, now, "090000-091000.mp4")
+	file.RecordDate = ptrTime(now)
+	require.NoError(t, db.Create(&file).Error)
+	client := &catalogDeleteClient{}
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo:          NewGormRepo(db),
+		Nodes:         catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, State: node.StateActive}}},
+		ResolveAccess: func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+		NewFileClient: func(*node.Node) CatalogFileClient { return client },
+	})
+
+	result, err := service.DeleteFile(context.Background(), 7, 111)
+	require.NoError(t, err)
+	require.Equal(t, DeleteFileResult{ID: "111", Deleted: true}, result)
+	require.Equal(t, []string{"__defaultVhost__|rtp|stream|2026-08-10|090000-091000.mp4"}, client.deleted)
+	_, err = NewGormRepo(db).GetCatalogFile(context.Background(), 111, nil, true)
+	require.ErrorIs(t, err, ErrRecordingFileNotFound)
+}
+
+func TestCatalogServiceKeepsIndexWhenPhysicalDeleteFails(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	file := catalogFile(112, 10, 1, now, "record.mp4")
+	file.RecordDate = ptrTime(now)
+	require.NoError(t, db.Create(&file).Error)
+	client := &catalogDeleteClient{err: zlm.ErrRecordingAccessUnavailable}
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo:          NewGormRepo(db),
+		Nodes:         catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, State: node.StateActive}}},
+		ResolveAccess: func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+		NewFileClient: func(*node.Node) CatalogFileClient { return client },
+	})
+
+	_, err := service.DeleteFile(context.Background(), 7, 112)
+	require.ErrorIs(t, err, zlm.ErrRecordingAccessUnavailable)
+	_, err = NewGormRepo(db).GetCatalogFile(context.Background(), 112, nil, true)
+	require.NoError(t, err)
+}
+
+func TestCatalogServiceBatchDeleteReturnsPartialResults(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	file := catalogFile(113, 10, 1, now, "record.mp4")
+	file.RecordDate = ptrTime(now)
+	require.NoError(t, db.Create(&file).Error)
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo:          NewGormRepo(db),
+		Nodes:         catalogTestNodes{nodes: map[int64]*node.Node{1: {ID: 1, State: node.StateActive}}},
+		ResolveAccess: func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+		NewFileClient: func(*node.Node) CatalogFileClient { return &catalogDeleteClient{} },
+	})
+
+	result := service.DeleteFiles(context.Background(), 7, []uint64{113, 999})
+	require.Equal(t, 1, result.DeletedCount)
+	require.Equal(t, 1, result.FailedCount)
+	require.Equal(t, "not_found", result.Results[1].ErrorCode)
 }
 
 func TestCatalogServiceContentRechecksPermissionAndDataScope(t *testing.T) {
@@ -361,6 +444,33 @@ func TestCatalogServiceActiveAndReconciliationViews(t *testing.T) {
 	accepted, err := service.TriggerReconciliation([]int64{11}, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, []int64{11}, accepted)
+}
+
+func TestCatalogServiceStopsOnlyVisibleActiveRecording(t *testing.T) {
+	db := newCatalogServiceDB(t)
+	now := time.Now().UTC()
+	visible := models.GbChannel{ID: 1, ChannelID: "C1", DeviceID: "D1", Name: "大厅", OwnerDeptID: 10}
+	hidden := models.GbChannel{ID: 2, ChannelID: "C2", DeviceID: "D2", Name: "机房", OwnerDeptID: 20}
+	require.NoError(t, db.Create(&visible).Error)
+	require.NoError(t, db.Create(&hidden).Error)
+	require.NoError(t, db.Create(&models.GbRecordingSession{ID: 11, ChannelID: visible.ID, DeviceID: visible.DeviceID, NodeID: 1, Stream: "visible", State: models.RecordingSessionStateRecording, StartedAt: &now}).Error)
+	require.NoError(t, db.Create(&models.GbRecordingSession{ID: 12, ChannelID: hidden.ID, DeviceID: hidden.DeviceID, NodeID: 1, Stream: "hidden", State: models.RecordingSessionStateRecording, StartedAt: &now}).Error)
+	stopper := &catalogRecordingStopper{}
+	service := NewCatalogService(CatalogServiceConfig{
+		Repo: NewGormRepo(db), Nodes: catalogTestNodes{nodes: map[int64]*node.Node{}}, RecordingStopper: stopper,
+		ResolveAccess: func(context.Context, uint) (CatalogAccess, error) { return CatalogAccess{DeptIDs: []uint{10}}, nil },
+	})
+
+	result, err := service.StopActiveSession(context.Background(), 7, 11)
+	require.NoError(t, err)
+	require.Equal(t, StopActiveSessionResult{ID: "11", ChannelID: "1", Stopped: true}, result)
+	require.Equal(t, []uint{1}, stopper.stoppedChannels)
+	require.Equal(t, []uint64{11}, stopper.stoppedSessions)
+
+	_, err = service.StopActiveSession(context.Background(), 7, 12)
+	require.ErrorIs(t, err, ErrRecordingSessionNotFound)
+	require.Equal(t, []uint{1}, stopper.stoppedChannels)
+	require.Equal(t, []uint64{11}, stopper.stoppedSessions)
 }
 
 func requireJSON(t *testing.T, value any) string {

@@ -18,6 +18,7 @@ type Repository interface {
 	ListEnabledChannels(context.Context) ([]models.GbChannel, error)
 	UpsertSession(context.Context, *models.GbRecordingSession) error
 	FindSessionByMedia(context.Context, int64, string, string, string) (*models.GbRecordingSession, error)
+	FindSessionByID(context.Context, uint64) (*models.GbRecordingSession, error)
 	FindLatestSessionByChannel(context.Context, uint) (*models.GbRecordingSession, error)
 	MarkSessionStopped(context.Context, uint64, string) error
 	ListUnfinishedSessions(context.Context) ([]models.GbRecordingSession, error)
@@ -156,6 +157,28 @@ func (s *Service) Disable(ctx context.Context, channelID uint) (*models.GbChanne
 	return s.disableLocked(ctx, channel)
 }
 
+func (s *Service) StopSession(ctx context.Context, channelID uint, sessionID uint64) (*models.GbChannel, error) {
+	unlock := s.locks.Lock(channelID)
+	defer unlock()
+
+	current, err := s.repo.GetChannel(ctx, channelID)
+	if err != nil {
+		return nil, err
+	}
+	session, err := s.repo.FindSessionByID(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || session.ChannelID != channelID {
+		return nil, ErrRecordingSessionNotFound
+	}
+	channel, err := s.repo.SetDesired(ctx, current.ID, false)
+	if err != nil {
+		return nil, err
+	}
+	return s.stopSessionLocked(ctx, channel, session)
+}
+
 func (s *Service) ReconcileChannel(ctx context.Context, channelID uint) error {
 	unlock := s.locks.Lock(channelID)
 	defer unlock()
@@ -183,7 +206,17 @@ func (s *Service) disableLocked(ctx context.Context, channel *models.GbChannel) 
 		}
 		return s.repo.GetChannel(ctx, channelID)
 	}
+	return s.stopSessionLocked(ctx, channel, session)
+}
 
+func (s *Service) stopSessionLocked(ctx context.Context, channel *models.GbChannel, session *models.GbRecordingSession) (*models.GbChannel, error) {
+	channelID := channel.ID
+	if session.State == models.RecordingSessionStateStopped {
+		if _, err := s.repo.MarkState(ctx, channelID, false, models.CloudRecordingStateDisabled, ""); err != nil {
+			return nil, err
+		}
+		return s.repo.GetChannel(ctx, channelID)
+	}
 	mediaNode, ok := s.registry.Get(session.NodeID)
 	if !ok {
 		return s.markDisableFailure(ctx, channelID, session, fmt.Sprintf("ZLM 节点 %d 不可用", session.NodeID))

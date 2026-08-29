@@ -20,6 +20,7 @@ var (
 	ErrCatalogNodeOffline       = errors.New("cloud recording node offline")
 	ErrCatalogFileMissing       = errors.New("cloud recording file missing")
 	ErrCatalogAccessUnavailable = errors.New("cloud recording access unavailable")
+	ErrRecordingSessionNotFound = errors.New("active recording session not found")
 )
 
 type CatalogAccess struct {
@@ -30,6 +31,13 @@ type CatalogAccess struct {
 type CatalogAccessResolver func(context.Context, uint) (CatalogAccess, error)
 type CatalogPermissionChecker func(context.Context, uint, string, string) (bool, error)
 type CatalogDownloaderFactory func(*node.Node) ContentDownloader
+type CatalogFileClient interface {
+	DeleteMP4RecordFile(context.Context, string, string, string, string, string) error
+}
+type CatalogFileClientFactory func(*node.Node) CatalogFileClient
+type CatalogRecordingStopper interface {
+	StopSession(context.Context, uint, uint64) (*models.GbChannel, error)
+}
 
 type CatalogScheduler interface {
 	Enqueue(string, []int64, *time.Time, *time.Time) ([]int64, error)
@@ -39,32 +47,37 @@ type CatalogQueryRepository interface {
 	ListCatalogFiles(context.Context, FileQuery) (FilePage, error)
 	CatalogOptions(context.Context, FileQuery) (CatalogOptions, error)
 	GetCatalogFile(context.Context, uint64, []uint, bool) (*models.GbRecordingFile, error)
+	DeleteCatalogFile(context.Context, uint64) error
 	ListActiveCatalogSessions(context.Context, []uint, bool) ([]ActiveCatalogSession, error)
 	ListCatalogReconcileStates(context.Context) ([]models.GbRecordingReconcileState, error)
 }
 
 type CatalogServiceConfig struct {
-	Repo            CatalogQueryRepository
-	Nodes           CatalogNodeLookup
-	Scheduler       CatalogScheduler
-	Signer          *CapabilitySigner
-	ResolveAccess   CatalogAccessResolver
-	CheckPermission CatalogPermissionChecker
-	NewDownloader   CatalogDownloaderFactory
-	Proxy           *ContentProxy
-	Downloads       *DownloadRegistry
+	Repo             CatalogQueryRepository
+	Nodes            CatalogNodeLookup
+	Scheduler        CatalogScheduler
+	Signer           *CapabilitySigner
+	ResolveAccess    CatalogAccessResolver
+	CheckPermission  CatalogPermissionChecker
+	NewDownloader    CatalogDownloaderFactory
+	NewFileClient    CatalogFileClientFactory
+	RecordingStopper CatalogRecordingStopper
+	Proxy            *ContentProxy
+	Downloads        *DownloadRegistry
 }
 
 type CatalogService struct {
-	repo            CatalogQueryRepository
-	nodes           CatalogNodeLookup
-	scheduler       CatalogScheduler
-	signer          *CapabilitySigner
-	resolveAccess   CatalogAccessResolver
-	checkPermission CatalogPermissionChecker
-	newDownloader   CatalogDownloaderFactory
-	proxy           *ContentProxy
-	downloads       *DownloadRegistry
+	repo             CatalogQueryRepository
+	nodes            CatalogNodeLookup
+	scheduler        CatalogScheduler
+	signer           *CapabilitySigner
+	resolveAccess    CatalogAccessResolver
+	checkPermission  CatalogPermissionChecker
+	newDownloader    CatalogDownloaderFactory
+	newFileClient    CatalogFileClientFactory
+	recordingStopper CatalogRecordingStopper
+	proxy            *ContentProxy
+	downloads        *DownloadRegistry
 }
 
 type FileDTOPage struct {
@@ -83,7 +96,106 @@ func NewCatalogService(config CatalogServiceConfig) *CatalogService {
 		repo: config.Repo, nodes: config.Nodes, scheduler: config.Scheduler, signer: config.Signer,
 		resolveAccess: config.ResolveAccess, checkPermission: config.CheckPermission,
 		newDownloader: config.NewDownloader, proxy: proxy,
-		downloads: config.Downloads,
+		newFileClient:    config.NewFileClient,
+		recordingStopper: config.RecordingStopper,
+		downloads:        config.Downloads,
+	}
+}
+
+type DeleteFileResult struct {
+	ID        string `json:"id"`
+	Deleted   bool   `json:"deleted"`
+	ErrorCode string `json:"errorCode,omitempty"`
+}
+
+type DeleteBatchResult struct {
+	DeletedCount int                `json:"deletedCount"`
+	FailedCount  int                `json:"failedCount"`
+	Results      []DeleteFileResult `json:"results"`
+}
+
+func (s *CatalogService) DeleteFile(ctx context.Context, userID uint, fileID uint64) (DeleteFileResult, error) {
+	result := DeleteFileResult{ID: strconv.FormatUint(fileID, 10)}
+	access, err := s.access(ctx, userID)
+	if err != nil {
+		return result, err
+	}
+	file, err := s.repo.GetCatalogFile(ctx, fileID, access.DeptIDs, access.FullAccess)
+	if err != nil {
+		return result, err
+	}
+	if file.MissingAt == nil {
+		if s.newFileClient == nil {
+			return result, ErrCatalogAccessUnavailable
+		}
+		n, ok := s.nodes.Get(file.NodeID)
+		if !ok {
+			return result, ErrCatalogNodeMissing
+		}
+		if n.State == node.StateOffline {
+			return result, ErrCatalogNodeOffline
+		}
+		period, ok := recordingFilePeriod(file)
+		if !ok {
+			return result, zlm.ErrRecordingPathInvalid
+		}
+		if err := s.newFileClient(n).DeleteMP4RecordFile(ctx, file.VHost, file.App, file.Stream, period, file.FileName); err != nil {
+			return result, err
+		}
+	}
+	if err := s.repo.DeleteCatalogFile(ctx, file.ID); err != nil {
+		return result, err
+	}
+	result.Deleted = true
+	return result, nil
+}
+
+func (s *CatalogService) DeleteFiles(ctx context.Context, userID uint, fileIDs []uint64) DeleteBatchResult {
+	result := DeleteBatchResult{Results: make([]DeleteFileResult, 0, len(fileIDs))}
+	seen := make(map[uint64]struct{}, len(fileIDs))
+	for _, fileID := range fileIDs {
+		if fileID == 0 {
+			continue
+		}
+		if _, exists := seen[fileID]; exists {
+			continue
+		}
+		seen[fileID] = struct{}{}
+		item, err := s.DeleteFile(ctx, userID, fileID)
+		if err != nil {
+			item.ErrorCode = catalogDeleteErrorCode(err)
+			result.FailedCount++
+		} else {
+			result.DeletedCount++
+		}
+		result.Results = append(result.Results, item)
+	}
+	return result
+}
+
+func recordingFilePeriod(file *models.GbRecordingFile) (string, bool) {
+	if file == nil {
+		return "", false
+	}
+	if file.RecordDate != nil {
+		return file.RecordDate.Format("2006-01-02"), true
+	}
+	if file.StartTime != nil {
+		return file.StartTime.Format("2006-01-02"), true
+	}
+	return "", false
+}
+
+func catalogDeleteErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrRecordingFileNotFound), errors.Is(err, zlm.ErrRecordingNotFound):
+		return "not_found"
+	case errors.Is(err, ErrCatalogNodeMissing), errors.Is(err, ErrCatalogNodeOffline), errors.Is(err, zlm.ErrRecordingNodeUnavailable):
+		return "node_unavailable"
+	case errors.Is(err, zlm.ErrRecordingPathInvalid):
+		return "invalid_metadata"
+	default:
+		return "delete_failed"
 	}
 }
 
@@ -243,6 +355,37 @@ func (s *CatalogService) ActiveSessions(ctx context.Context, userID uint) ([]Act
 			Node: nodes.dto(session.NodeID), State: session.State, StartedAt: cloneTime(session.StartedAt), UpdatedAt: session.UpdatedAt,
 		})
 	}
+	return result, nil
+}
+
+func (s *CatalogService) StopActiveSession(ctx context.Context, userID uint, sessionID uint64) (StopActiveSessionResult, error) {
+	result := StopActiveSessionResult{ID: strconv.FormatUint(sessionID, 10)}
+	access, err := s.access(ctx, userID)
+	if err != nil {
+		return result, err
+	}
+	sessions, err := s.repo.ListActiveCatalogSessions(ctx, access.DeptIDs, access.FullAccess)
+	if err != nil {
+		return result, err
+	}
+	var active *ActiveCatalogSession
+	for i := range sessions {
+		if sessions[i].ID == sessionID {
+			active = &sessions[i]
+			break
+		}
+	}
+	if active == nil {
+		return result, ErrRecordingSessionNotFound
+	}
+	if s.recordingStopper == nil {
+		return result, ErrCatalogAccessUnavailable
+	}
+	if _, err := s.recordingStopper.StopSession(ctx, active.ChannelID, active.ID); err != nil {
+		return result, err
+	}
+	result.ChannelID = strconv.FormatUint(uint64(active.ChannelID), 10)
+	result.Stopped = true
 	return result, nil
 }
 

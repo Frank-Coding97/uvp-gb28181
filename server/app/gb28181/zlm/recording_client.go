@@ -18,6 +18,8 @@ import (
 
 var (
 	ErrRecordingNotFound          = errors.New("zlm recording not found")
+	ErrRecordingPathInvalid       = errors.New("zlm recording path invalid")
+	ErrRecordingDeleteFailed      = errors.New("zlm recording delete failed")
 	ErrRecordingNodeUnavailable   = errors.New("zlm recording node unavailable")
 	ErrRecordingAccessUnavailable = errors.New("zlm recording access unavailable")
 	ErrRecordingResponseTimeout   = errors.New("zlm recording response timeout")
@@ -97,6 +99,34 @@ func (c *Client) GetMP4RecordFiles(ctx context.Context, vhost, appName, stream, 
 		})
 	}
 	return files, nil
+}
+
+// DeleteMP4RecordFile deletes one exact MP4 file. The name parameter is
+// mandatory because omitting it makes ZLM delete the whole recording period.
+func (c *Client) DeleteMP4RecordFile(ctx context.Context, vhost, appName, stream, period, name string) error {
+	if strings.TrimSpace(vhost) == "" || strings.TrimSpace(appName) == "" || strings.TrimSpace(stream) == "" ||
+		strings.TrimSpace(name) == "" || path.Base(name) != name || strings.ContainsAny(name, `/\`) {
+		return ErrRecordingPathInvalid
+	}
+	if parsed, err := time.Parse("2006-01-02", period); err != nil || parsed.Format("2006-01-02") != period {
+		return ErrRecordingPathInvalid
+	}
+	var response struct {
+		baseResp
+		Result bool `json:"result"`
+	}
+	if err := c.call(ctx, "deleteRecordDirectory", map[string]string{
+		"vhost": vhost, "app": appName, "stream": stream, "period": period, "name": name,
+	}, &response); err != nil {
+		return classifyRecordingControlError(err)
+	}
+	if response.Code != 0 {
+		return classifyRecordingCode(response.Code)
+	}
+	if !response.Result {
+		return ErrRecordingDeleteFailed
+	}
+	return nil
 }
 
 func classifyRecordingCode(code int) error {

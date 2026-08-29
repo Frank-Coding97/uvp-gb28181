@@ -25,6 +25,12 @@ func (*routeCatalogService) FileOptions(context.Context, uint, gbrecording.FileQ
 func (*routeCatalogService) FileDetail(context.Context, uint, uint64) (gbrecording.FileDTO, error) {
 	return gbrecording.FileDTO{}, nil
 }
+func (*routeCatalogService) DeleteFile(context.Context, uint, uint64) (gbrecording.DeleteFileResult, error) {
+	return gbrecording.DeleteFileResult{}, nil
+}
+func (*routeCatalogService) DeleteFiles(context.Context, uint, []uint64) gbrecording.DeleteBatchResult {
+	return gbrecording.DeleteBatchResult{}
+}
 func (*routeCatalogService) IssueAccess(context.Context, uint, uint64, string) (gbrecording.AccessDTO, error) {
 	return gbrecording.AccessDTO{}, nil
 }
@@ -47,6 +53,9 @@ func (s *routeCatalogService) ClaimDownload(ctx context.Context, writer http.Res
 }
 func (*routeCatalogService) ActiveSessions(context.Context, uint) ([]gbrecording.ActiveSessionDTO, error) {
 	return nil, nil
+}
+func (*routeCatalogService) StopActiveSession(context.Context, uint, uint64) (gbrecording.StopActiveSessionResult, error) {
+	return gbrecording.StopActiveSessionResult{}, nil
 }
 func (*routeCatalogService) Reconciliations(context.Context) ([]gbrecording.ReconciliationDTO, error) {
 	return nil, nil
@@ -75,12 +84,15 @@ func TestCloudRecordingCatalogRoutesAndContentTimeoutBoundary(t *testing.T) {
 		"GET /api/gb28181/cloud-recordings/files":                     false,
 		"GET /api/gb28181/cloud-recordings/files/options":             false,
 		"GET /api/gb28181/cloud-recordings/files/:id":                 false,
+		"DELETE /api/gb28181/cloud-recordings/files/:id":              false,
+		"POST /api/gb28181/cloud-recordings/files/batch-delete":       false,
 		"POST /api/gb28181/cloud-recordings/files/:id/access":         false,
 		"POST /api/gb28181/cloud-recordings/files/:id/downloads":      false,
 		"GET /api/gb28181/cloud-recordings/downloads/:taskId":         false,
 		"DELETE /api/gb28181/cloud-recordings/downloads/:taskId":      false,
 		"GET /api/gb28181/cloud-recordings/downloads/:taskId/content": false,
 		"GET /api/gb28181/cloud-recordings/active":                    false,
+		"POST /api/gb28181/cloud-recordings/active/:id/stop":          false,
 		"GET /api/gb28181/cloud-recordings/reconciliations":           false,
 		"POST /api/gb28181/cloud-recordings/reconciliations":          false,
 		"GET /api/gb28181/cloud-recordings/content/:id":               false,

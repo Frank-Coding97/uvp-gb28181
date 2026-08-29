@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,13 @@ type fakeCloudRecordingCatalogService struct {
 	claimErr   error
 	claimCalls int
 	triggered  []int64
+	deletedIDs []uint64
+	stoppedIDs []uint64
+}
+
+func (s *fakeCloudRecordingCatalogService) StopActiveSession(_ context.Context, _ uint, id uint64) (gbrecording.StopActiveSessionResult, error) {
+	s.stoppedIDs = append(s.stoppedIDs, id)
+	return gbrecording.StopActiveSessionResult{ID: strconv.FormatUint(id, 10), ChannelID: "12", Stopped: true}, nil
 }
 
 func (s *fakeCloudRecordingCatalogService) ListFiles(_ context.Context, userID uint, query gbrecording.FileQuery) (gbrecording.FileDTOPage, error) {
@@ -41,6 +49,16 @@ func (*fakeCloudRecordingCatalogService) FileOptions(context.Context, uint, gbre
 
 func (s *fakeCloudRecordingCatalogService) FileDetail(context.Context, uint, uint64) (gbrecording.FileDTO, error) {
 	return gbrecording.FileDTO{ID: "41"}, s.detailErr
+}
+
+func (s *fakeCloudRecordingCatalogService) DeleteFile(_ context.Context, _ uint, id uint64) (gbrecording.DeleteFileResult, error) {
+	s.deletedIDs = append(s.deletedIDs, id)
+	return gbrecording.DeleteFileResult{ID: strconv.FormatUint(id, 10), Deleted: true}, nil
+}
+
+func (s *fakeCloudRecordingCatalogService) DeleteFiles(_ context.Context, _ uint, ids []uint64) gbrecording.DeleteBatchResult {
+	s.deletedIDs = append(s.deletedIDs, ids...)
+	return gbrecording.DeleteBatchResult{DeletedCount: len(ids)}
 }
 
 func (s *fakeCloudRecordingCatalogService) IssueAccess(context.Context, uint, uint64, string) (gbrecording.AccessDTO, error) {
@@ -107,6 +125,47 @@ func TestCloudRecordingCatalogControllerListBindsFilters(t *testing.T) {
 	require.Equal(t, int64(7), *service.query.NodeID)
 	require.Equal(t, "D1", service.query.DeviceID)
 	require.Contains(t, recorder.Body.String(), `"id":"41"`)
+}
+
+func TestCloudRecordingCatalogControllerDeletesSingleAndBatchFiles(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app.Response = response.NewResponseHandler()
+	service := &fakeCloudRecordingCatalogService{}
+	controller := NewCloudRecordingCatalogController(service)
+
+	singleRecorder := httptest.NewRecorder()
+	singleCtx, _ := gin.CreateTestContext(singleRecorder)
+	singleCtx.Params = gin.Params{{Key: "id", Value: "41"}}
+	singleCtx.Request = httptest.NewRequest(http.MethodDelete, "/api/gb28181/cloud-recordings/files/41", nil)
+	singleCtx.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: 88}})
+	controller.DeleteFile(singleCtx)
+	require.Equal(t, http.StatusOK, singleRecorder.Code)
+
+	batchRecorder := httptest.NewRecorder()
+	batchCtx, _ := gin.CreateTestContext(batchRecorder)
+	batchCtx.Request = httptest.NewRequest(http.MethodPost, "/api/gb28181/cloud-recordings/files/batch-delete", strings.NewReader(`{"ids":["42","43"]}`))
+	batchCtx.Request.Header.Set("Content-Type", "application/json")
+	batchCtx.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: 88}})
+	controller.DeleteFiles(batchCtx)
+	require.Equal(t, http.StatusOK, batchRecorder.Code, batchRecorder.Body.String())
+	require.Equal(t, []uint64{41, 42, 43}, service.deletedIDs)
+}
+
+func TestCloudRecordingCatalogControllerStopsActiveSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	app.Response = response.NewResponseHandler()
+	service := &fakeCloudRecordingCatalogService{}
+	controller := NewCloudRecordingCatalogController(service)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Params = gin.Params{{Key: "id", Value: "77"}}
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/gb28181/cloud-recordings/active/77/stop", nil)
+	ctx.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: 88}})
+
+	controller.StopActiveSession(ctx)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, []uint64{77}, service.stoppedIDs)
+	require.Contains(t, recorder.Body.String(), `"stopped":true`)
 }
 
 func TestCloudRecordingCatalogControllerMapsDetailAndAccessErrors(t *testing.T) {

@@ -8,13 +8,18 @@ const api = vi.hoisted(() => ({
   listRecordingOptions: vi.fn(),
   listActiveRecordings: vi.fn(),
   listReconciliations: vi.fn(),
-  triggerReconciliation: vi.fn()
+  triggerReconciliation: vi.fn(),
+  deleteRecordingFile: vi.fn(),
+  batchDeleteRecordingFiles: vi.fn(),
+  stopActiveRecording: vi.fn()
 }));
 const enqueueDownload = vi.hoisted(() => vi.fn());
 const account = vi.hoisted(() => ({ permissions: ["gb28181:recording:view", "gb28181:recording:reconcile"] as string[] }));
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const modalWarning = vi.hoisted(() => vi.fn());
 
 vi.mock("./api", async importOriginal => ({ ...(await importOriginal<typeof import("./api")>()), ...api }));
+vi.mock("@arco-design/web-vue", () => ({ Modal: { warning: modalWarning } }));
 vi.mock("./recordingDownloadService", () => ({ recordingDownloadCoordinator: { enqueue: enqueueDownload } }));
 vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 vi.mock("@/hooks/useGlobalProperties", () => ({ default: () => ({ $message: messages }) }));
@@ -49,9 +54,10 @@ const file = (availability = "available", metadataState = "complete") => ({
 });
 
 const tableStub = {
-  props: ["data", "pagination"],
+  props: ["data", "pagination", "selectedKeys", "rowSelection"],
+  emits: ["update:selectedKeys"],
   provide() { return { recordingTable: this }; },
-  template: "<div data-testid='recording-table' :data-count='data.length' :data-total='pagination.total'><slot name='columns' /><slot v-if='!data.length' name='empty' /></div>"
+  template: "<div data-testid='recording-table' :data-count='data.length' :data-total='pagination.total'><button v-if='data.length && rowSelection' data-testid='select-first-recording' @click='$emit(`update:selectedKeys`, [data[0].id])'>选择</button><slot name='columns' /><slot v-if='!data.length' name='empty' /></div>"
 };
 const stubs = {
   "s-layout-search": { template: "<section><slot name='fields' /><slot name='actions' /></section>" },
@@ -99,9 +105,13 @@ describe("CloudRecordings", () => {
     api.listActiveRecordings.mockResolvedValue({ code: 0, message: "", data: { list: [{ id: "77", channelId: "12", channelCode: "c", channelName: "东门", deviceId: "d", node: { id: "8", name: "节点 A" }, state: "recording", startedAt: "2026-08-10T12:00:00Z", updatedAt: "2026-08-10T12:01:00Z" }] } });
     api.listReconciliations.mockResolvedValue({ code: 0, message: "", data: { list: [] } });
     api.triggerReconciliation.mockResolvedValue({ code: 0, message: "", data: { acceptedNodeIds: [8] } });
+    api.deleteRecordingFile.mockResolvedValue({ code: 0, message: "", data: { id: "9007199254740993", deleted: true } });
+    api.batchDeleteRecordingFiles.mockResolvedValue({ code: 0, message: "", data: { deletedCount: 1, failedCount: 0, results: [{ id: "9007199254740993", deleted: true }] } });
+    api.stopActiveRecording.mockResolvedValue({ code: 0, message: "", data: { id: "77", channelId: "12", stopped: true } });
     enqueueDownload.mockReset();
     messages.success.mockReset();
     messages.error.mockReset();
+    modalWarning.mockReset();
   });
 
   afterEach(() => {
@@ -199,7 +209,7 @@ describe("CloudRecordings", () => {
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("220");
+    expect(wrapper.get("[data-testid='recording-actions-column']").attributes("width")).toBe("284");
     expect(wrapper.get(".cloud-recording-actions").classes()).toContain("cloud-recording-actions");
     expect(wrapper.get("[data-testid='detail-9007199254740993']").text()).toContain("详情");
     expect(wrapper.find("[data-testid='detail-icon-9007199254740993']").exists()).toBe(true);
@@ -207,6 +217,25 @@ describe("CloudRecordings", () => {
     expect(wrapper.find("[data-testid='play-icon-9007199254740993']").exists()).toBe(true);
     expect(wrapper.get("[data-testid='download-9007199254740993']").text()).toContain("下载");
     expect(wrapper.find("[data-testid='download-icon-9007199254740993']").exists()).toBe(true);
+  });
+
+  it("shows row selection, batch deletion and a semantic delete action only with delete permission", async () => {
+    account.permissions = ["gb28181:recording:view", "gb28181:recording:delete"];
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='delete-9007199254740993']").exists()).toBe(true);
+    expect(source).toContain('v-model:selected-keys="selectedRowKeys"');
+    expect(source).toContain('data-testid="recording-batch-delete"');
+    expect(source).toContain('class="uvp-table-action uvp-table-action--delete"');
+
+    await wrapper.get("[data-testid='select-first-recording']").trigger("click");
+    await wrapper.get("[data-testid='recording-batch-delete']").trigger("click");
+    const confirmation = modalWarning.mock.calls[0][0];
+    expect(confirmation.content).toContain("1 个录像文件");
+    await confirmation.onOk();
+    await flushPromises();
+    expect(api.batchDeleteRecordingFiles).toHaveBeenCalledWith(["9007199254740993"]);
   });
 
   it("separates active recordings from catalog files", async () => {
@@ -222,6 +251,21 @@ describe("CloudRecordings", () => {
     expect(wrapper.get("[data-testid='active-tab']").attributes("aria-pressed")).toBe("true");
     expect(wrapper.text()).toContain("正在录制");
     expect(wrapper.text()).not.toContain("record.mp4");
+  });
+
+  it("stops an active ZLMediaKit recording after confirmation when permitted", async () => {
+    account.permissions = ["gb28181:recording:view", "gb28181:recording:stop"];
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+    await wrapper.get("[data-testid='active-tab']").trigger("click");
+    await flushPromises();
+    await wrapper.get("[data-testid='stop-recording-77']").trigger("click");
+    const confirmation = modalWarning.mock.calls[0][0];
+    expect(confirmation.content).toContain("关闭该通道的云端录像");
+    await confirmation.onOk();
+    await flushPromises();
+    expect(api.stopActiveRecording).toHaveBeenCalledWith("77");
+    expect(messages.success).toHaveBeenCalledWith("录像已停止");
   });
 
   it("registers Cloud and creates a cookie-bound download task through the coordinator", async () => {

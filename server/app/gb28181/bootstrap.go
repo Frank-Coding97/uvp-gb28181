@@ -935,8 +935,10 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 			}
 			return app.CasbinV2.Enforce(fmt.Sprintf("user_%d", userID), path, method, "")
 		},
-		NewDownloader: func(n *node.Node) gbrecording.ContentDownloader { return gbzlm.NewClientForNode(n) },
-		Downloads:     gbrecording.NewDownloadRegistry(gbrecording.DownloadRegistryConfig{}),
+		NewDownloader:    func(n *node.Node) gbrecording.ContentDownloader { return gbzlm.NewClientForNode(n) },
+		NewFileClient:    func(n *node.Node) gbrecording.CatalogFileClient { return gbzlm.NewClientForNode(n) },
+		RecordingStopper: recordingSvc,
+		Downloads:        gbrecording.NewDownloadRegistry(gbrecording.DownloadRegistryConfig{}),
 	})
 	recordingCatalogService = catalogService
 	gbroutes.SetCloudRecordingCatalogService(catalogService)

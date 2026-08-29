@@ -89,6 +89,18 @@ func TestCatalogRepoDefaultsListWithoutDateFilter(t *testing.T) {
 	require.Equal(t, uint64(22), page.Files[1].ID)
 }
 
+func TestCatalogRepoDeletesOneFileByID(t *testing.T) {
+	db := newRepoTestDB(t)
+	now := time.Now().UTC()
+	file := catalogFile(71, 10, 1, now, "delete-me.mp4")
+	require.NoError(t, db.Create(&file).Error)
+	repo := NewGormRepo(db)
+
+	require.NoError(t, repo.DeleteCatalogFile(context.Background(), file.ID))
+	_, err := repo.GetCatalogFile(context.Background(), file.ID, nil, true)
+	require.ErrorIs(t, err, ErrRecordingFileNotFound)
+}
+
 func TestCatalogRepoOptionsUseFileSnapshotsAndFailClosedScope(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:catalog-options?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
