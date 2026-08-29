@@ -73,10 +73,10 @@ import {
     type TimelineSlot
 } from "./api";
 import { getDictItemsByDictCodeAPI, type SystemDictItem } from "@/api/dictionary";
+import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useUserStoreHook } from "@/store/modules/user";
 import { storeToRefs } from "pinia";
-import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
@@ -295,8 +295,7 @@ const editChannelForm = ref({ channelId: "", deviceId: "", alias: "", name: "", 
 const editingChannel = ref(false);
 const editingChannelId = ref(0);
 const ptzTypeOptions = ref<SystemDictItem[]>([]);
-const controlConsoleVisible = ref(false);
-const controlConsoleChannel = ref<ChannelVO | null>(null);
+const playbackConsole = usePlaybackConsoleStore();
 const cloudRecordingLoading = ref<Set<number>>(new Set());
 const viewOptions: Array<{ label: string; value: ViewMode; icon: any }> = [
     { label: "列表", value: "list", icon: List },
@@ -1162,8 +1161,7 @@ async function handleStopChannel(record: ChannelVO) {
 }
 
 function playChannel(record: ChannelVO) {
-    controlConsoleChannel.value = record;
-    controlConsoleVisible.value = true;
+    playbackConsole.open(record);
 }
 
 function openRecordQuery(record: ChannelVO) {
@@ -2618,11 +2616,6 @@ onUnmounted(() => {
                 v-model:visible="addToGroupVisible"
                 :device-ids="selectedRowKeys"
                 @saved="onDevicesAdded"
-            />
-
-            <PlayConsoleLinked
-                v-model:visible="controlConsoleVisible"
-                :channel="controlConsoleChannel"
             />
 
             <a-modal

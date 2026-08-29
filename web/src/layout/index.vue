@@ -2,6 +2,7 @@
   <div>
     <s-lang-provider>
       <component :is="layouts[resolvedLayoutType]" />
+      <PlaybackConsoleHost />
     </s-lang-provider>
   </div>
 </template>
@@ -9,6 +10,7 @@
 <script setup lang="ts">
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
+import PlaybackConsoleHost from "@/layout/components/PlaybackConsoleHost.vue";
 
 const themeStore = useThemeConfig();
 const { layoutType } = storeToRefs(themeStore);

@@ -10,6 +10,7 @@ import { ref } from "vue";
 import PlayConsoleLinked from "./components/PlayConsoleLinked.vue";
 
 const visible = ref(true);
+const displayMode = ref<"expanded" | "minimized">("expanded");
 
 // mock 通道数据 —— 模拟一个真实的 GB28181 通道
 const mockChannel = ref({
@@ -69,6 +70,7 @@ const currentChannelIndex = ref(0);
 
 function reopenConsole() {
   visible.value = false;
+  displayMode.value = "expanded";
   setTimeout(() => {
     visible.value = true;
   }, 200);
@@ -116,6 +118,7 @@ function switchChannel(index: number) {
     <PlayConsoleLinked
       :visible="visible"
       :channel="mockChannel"
+      v-model:display-mode="displayMode"
       @update:visible="visible = $event"
     />
 

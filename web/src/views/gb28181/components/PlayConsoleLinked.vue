@@ -10,9 +10,10 @@
  * 视觉语言:深色为主,青色作强调,毛玻璃卡片,状态用色带 + 脉冲呼吸
  * 布局:右侧保留高频操作,播放器下方随 Tab 联动展示详情
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from "vue";
 import { Message, Modal } from "@arco-design/web-vue";
 import { copyTextToClipboard } from "@/utils/app";
+import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-console";
 import PlayWindow from "./PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
@@ -78,12 +79,14 @@ import {
     Home,
     Info,
     Loader2,
+    Maximize2,
     Mic,
     Move3d,
     Navigation,
     Inbox,
     Pause,
     Play,
+    PictureInPicture2,
     Plus,
     RadioTower,
     RefreshCcw,
@@ -116,11 +119,111 @@ interface PlaybackChannel {
     streamTransport?: string;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     visible: boolean;
     channel: PlaybackChannel | null;
+    displayMode?: PlaybackConsoleDisplayMode;
+}>(), {
+    displayMode: "expanded",
+});
+const emit = defineEmits<{
+    (event: "update:visible", value: boolean): void;
+    (event: "update:displayMode", value: PlaybackConsoleDisplayMode): void;
 }>();
-const emit = defineEmits<{ (event: "update:visible", value: boolean): void }>();
+
+const MINI_PLAYER_WIDTH = 400;
+const MINI_PLAYER_HEADER_HEIGHT = 48;
+const MINI_PLAYER_MARGIN = 16;
+const isMinimized = computed(() => props.displayMode === "minimized");
+
+function miniPlayerDimensions() {
+    const viewportWidth = window.innerWidth > 0 ? window.innerWidth : 1024;
+    const width = Math.min(MINI_PLAYER_WIDTH, Math.max(240, viewportWidth - MINI_PLAYER_MARGIN * 2));
+    return { width, height: MINI_PLAYER_HEADER_HEIGHT + width * 9 / 16 };
+}
+
+function renderedMiniPlayerDimensions() {
+    const fallback = miniPlayerDimensions();
+    const modal = document.querySelector<HTMLElement>(".play-console-modal--minimized");
+    const rect = modal?.getBoundingClientRect();
+    return {
+        width: rect && rect.width > 0 ? rect.width : fallback.width,
+        height: rect && rect.height > 0 ? rect.height : fallback.height,
+    };
+}
+
+function clampMiniPlayerPosition(x: number, y: number) {
+    const viewportWidth = window.innerWidth > 0 ? window.innerWidth : 1024;
+    const viewportHeight = window.innerHeight > 0 ? window.innerHeight : 768;
+    const size = renderedMiniPlayerDimensions();
+    const maxX = Math.max(MINI_PLAYER_MARGIN, viewportWidth - size.width - MINI_PLAYER_MARGIN);
+    const maxY = Math.max(MINI_PLAYER_MARGIN, viewportHeight - size.height - MINI_PLAYER_MARGIN);
+    return {
+        x: Math.min(maxX, Math.max(MINI_PLAYER_MARGIN, x)),
+        y: Math.min(maxY, Math.max(MINI_PLAYER_MARGIN, y)),
+    };
+}
+
+function defaultMiniPlayerPosition() {
+    const viewportWidth = window.innerWidth > 0 ? window.innerWidth : 1024;
+    const viewportHeight = window.innerHeight > 0 ? window.innerHeight : 768;
+    const size = miniPlayerDimensions();
+    return clampMiniPlayerPosition(
+        viewportWidth - size.width - MINI_PLAYER_MARGIN,
+        viewportHeight - size.height - MINI_PLAYER_MARGIN,
+    );
+}
+
+const miniPlayerPosition = ref(defaultMiniPlayerPosition());
+let miniPlayerDrag: { startX: number; startY: number; originX: number; originY: number } | null = null;
+const playbackModalWidth = computed(() => isMinimized.value
+    ? `${miniPlayerDimensions().width}px`
+    : "min(1280px, calc(100vw - 32px))");
+const miniPlayerModalStyle = computed<CSSProperties | undefined>(() => isMinimized.value ? {
+    position: "fixed",
+    top: `${miniPlayerPosition.value.y}px`,
+    left: `${miniPlayerPosition.value.x}px`,
+    margin: "0",
+    transform: "none",
+} : undefined);
+const miniPlayerBodyStyle = computed<CSSProperties | undefined>(() => isMinimized.value ? {
+    padding: "0",
+    maxHeight: "none",
+    overflow: "hidden",
+} : undefined);
+
+function updateMiniPlayerDrag(event: PointerEvent) {
+    if (!miniPlayerDrag) return;
+    miniPlayerPosition.value = clampMiniPlayerPosition(
+        miniPlayerDrag.originX + event.clientX - miniPlayerDrag.startX,
+        miniPlayerDrag.originY + event.clientY - miniPlayerDrag.startY,
+    );
+}
+
+function finishMiniPlayerDrag() {
+    miniPlayerDrag = null;
+    window.removeEventListener("pointermove", updateMiniPlayerDrag);
+    window.removeEventListener("pointerup", finishMiniPlayerDrag);
+    window.removeEventListener("pointercancel", finishMiniPlayerDrag);
+}
+
+function beginMiniPlayerDrag(event: PointerEvent) {
+    if (!isMinimized.value || event.button !== 0) return;
+    miniPlayerDrag = {
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: miniPlayerPosition.value.x,
+        originY: miniPlayerPosition.value.y,
+    };
+    window.addEventListener("pointermove", updateMiniPlayerDrag);
+    window.addEventListener("pointerup", finishMiniPlayerDrag);
+    window.addEventListener("pointercancel", finishMiniPlayerDrag);
+    event.preventDefault();
+}
+
+function keepMiniPlayerInViewport() {
+    miniPlayerPosition.value = clampMiniPlayerPosition(miniPlayerPosition.value.x, miniPlayerPosition.value.y);
+}
 
 /* ────────────────────────── 会话状态 ────────────────────────── */
 
@@ -1528,7 +1631,23 @@ function reconnect() {
     void startSession();
 }
 
+function handleMinimize() {
+    releaseContinuousControls();
+    dragZoomMode.value = false;
+    assetManagerVisible.value = false;
+    savePresetDialogVisible.value = false;
+    saveCruiseDialogVisible.value = false;
+    keepMiniPlayerInViewport();
+    emit("update:displayMode", "minimized");
+}
+
+function handleRestore() {
+    finishMiniPlayerDrag();
+    emit("update:displayMode", "expanded");
+}
+
 function handleClose() {
+    finishMiniPlayerDrag();
     releasePtzControl();
     cleanupTalkLocally();
     cleanupSessionLocally();
@@ -2840,14 +2959,27 @@ watch(
     { immediate: true },
 );
 
+watch(() => props.displayMode, (mode) => {
+    if (mode === "minimized") {
+        releaseContinuousControls();
+        dragZoomMode.value = false;
+        void nextTick(keepMiniPlayerInViewport);
+    } else {
+        finishMiniPlayerDrag();
+    }
+});
+
 onMounted(() => {
     window.addEventListener("blur", releaseContinuousControls);
+    window.addEventListener("resize", keepMiniPlayerInViewport);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 });
 
 onBeforeUnmount(() => {
     window.removeEventListener("blur", releaseContinuousControls);
+    window.removeEventListener("resize", keepMiniPlayerInViewport);
     document.removeEventListener("visibilitychange", handleVisibilityChange);
+    finishMiniPlayerDrag();
     clearProbeTimers();
     clearTimer();
     clearMonitor();
@@ -2858,29 +2990,89 @@ onBeforeUnmount(() => {
 
 <template>
     <a-modal
+        :class="{ 'play-console-container--minimized': isMinimized }"
         :visible="visible"
-        width="min(1280px, calc(100vw - 32px))"
+        :width="playbackModalWidth"
         :footer="false"
+        :mask="!isMinimized"
         :mask-closable="false"
+        :align-center="!isMinimized"
+        :closable="false"
+        :esc-to-close="!isMinimized"
+        :modal-style="miniPlayerModalStyle"
+        :body-style="miniPlayerBodyStyle"
         unmount-on-close
-        modal-class="uvp-system-dialog play-console-modal"
+        :modal-class="['uvp-system-dialog', 'play-console-modal', { 'play-console-modal--minimized': isMinimized }]"
         @cancel="handleClose"
     >
         <template #title>
-            <div class="console-title">
+            <div
+                class="console-title"
+                :class="{ 'is-minimized': isMinimized }"
+                data-testid="play-console-drag-handle"
+                @pointerdown="beginMiniPlayerDrag"
+            >
                 <span class="title-icon"><RadioTower :size="18" /></span>
                 <div class="title-text">
-                    <strong>播放控制台</strong>
-                    <span>{{ title }} · {{ channel?.channelId || "未选择通道" }}</span>
+                    <strong>{{ isMinimized ? title : "播放控制台" }}</strong>
+                    <span v-if="!isMinimized">{{ title }} · {{ channel?.channelId || "未选择通道" }}</span>
                 </div>
-                <span class="session-badge" :class="sessionStatusClass">
+                <span v-if="!isMinimized" class="session-badge" :class="sessionStatusClass">
                     <span class="dot"></span>{{ sessionStatusText }}
                     <em v-if="phase === 'playing'" class="session-elapsed mono">{{ elapsedText }}</em>
                 </span>
+                <div class="console-window-actions">
+                    <template v-if="!isMinimized">
+                        <button
+                            type="button"
+                            class="console-window-action is-minimize"
+                            data-testid="play-console-minimize"
+                            title="切换为小窗播放"
+                            aria-label="切换为小窗播放"
+                            @pointerdown.stop
+                            @click.stop="handleMinimize"
+                        >
+                            <PictureInPicture2 :size="15" aria-hidden="true" />
+                            <span>小窗</span>
+                        </button>
+                        <button
+                            type="button"
+                            class="console-window-action is-close"
+                            data-testid="play-console-close"
+                            title="关闭并停止播放"
+                            aria-label="关闭并停止播放"
+                            @pointerdown.stop
+                            @click.stop="handleClose"
+                        >
+                            <X :size="15" aria-hidden="true" />
+                            <span>关闭</span>
+                        </button>
+                    </template>
+                    <template v-else>
+                        <button
+                            type="button"
+                            class="console-window-action is-compact"
+                            data-testid="play-console-restore"
+                            title="恢复播放控制台"
+                            aria-label="恢复播放控制台"
+                            @pointerdown.stop
+                            @click.stop="handleRestore"
+                        ><Maximize2 :size="15" /></button>
+                        <button
+                            type="button"
+                            class="console-window-action is-close is-compact"
+                            data-testid="play-console-close-mini"
+                            title="关闭并停止播放"
+                            aria-label="关闭并停止播放"
+                            @pointerdown.stop
+                            @click.stop="handleClose"
+                        ><X :size="15" /></button>
+                    </template>
+                </div>
             </div>
         </template>
 
-        <div class="console-body">
+        <div class="console-body" :class="{ 'is-minimized': isMinimized }" data-testid="play-console-body">
             <!-- 主区(视频 + 控制条 + 会话链路) -->
             <section class="stage" :class="{ 'stage-wide': sideCollapsed }">
                 <!-- 视频画面 -->
@@ -4164,13 +4356,35 @@ onBeforeUnmount(() => {
 
 <style scoped lang="scss">
 /* 主体壳子 —— 具体面板样式在后续 chunk 中追加 */
+:global(.play-console-container--minimized) {
+    pointer-events: none;
+}
+:global(.play-console-container--minimized .arco-modal-wrapper) {
+    overflow: visible;
+    pointer-events: none;
+}
+:global(.play-console-container--minimized .play-console-modal--minimized) {
+    overflow: hidden;
+    pointer-events: auto;
+    border: 1px solid rgb(148 163 184 / 24%);
+    border-radius: 12px;
+    box-shadow: 0 18px 48px rgb(2 6 23 / 42%);
+}
+:global(.play-console-modal--minimized .arco-modal-header) {
+    height: 48px;
+    padding: 0 10px 0 12px;
+    background: var(--uvp-panel-bg);
+}
+
 .play-console-modal :deep(.arco-modal-body) {
     padding: 14px 18px 18px;
     max-height: calc(100vh - 96px);
     overflow-y: auto;
 }
 
-.console-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.console-title { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; }
+.console-title.is-minimized { cursor: grab; user-select: none; }
+.console-title.is-minimized:active { cursor: grabbing; }
 .title-icon {
     display: inline-grid; place-items: center; width: 32px; height: 32px;
     color: var(--uvp-brand); background: var(--uvp-brand-soft); border-radius: 9px;
@@ -4178,6 +4392,46 @@ onBeforeUnmount(() => {
 .title-text { display: grid; gap: 2px; min-width: 0; }
 .title-text strong { color: var(--uvp-text-primary); font-size: 14px; }
 .title-text span { overflow: hidden; color: var(--uvp-text-tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.console-window-actions {
+    display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
+    margin-left: 4px;
+}
+.console-title.is-minimized .console-window-actions { margin-left: auto; }
+.console-window-action {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    min-width: 58px; height: 30px; padding: 0 9px;
+    color: var(--uvp-text-secondary); background: var(--uvp-list-toolbar-bg);
+    border: 1px solid var(--uvp-panel-border); border-radius: 8px; cursor: pointer;
+    font-size: 11px; font-weight: 600; line-height: 1; white-space: nowrap;
+    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.console-window-action svg { flex: 0 0 auto; }
+.console-window-action.is-minimize {
+    color: var(--uvp-brand);
+    background: color-mix(in srgb, var(--uvp-brand) 7%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-brand) 24%, var(--uvp-panel-border));
+}
+.console-window-action.is-minimize:hover {
+    color: var(--uvp-brand-strong); background: var(--uvp-brand-soft); border-color: var(--uvp-brand);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-brand) 14%, transparent);
+}
+.console-window-action.is-close {
+    color: color-mix(in srgb, var(--uvp-danger) 76%, var(--uvp-text-secondary));
+    background: color-mix(in srgb, var(--uvp-danger) 4%, var(--uvp-panel-bg));
+    border-color: color-mix(in srgb, var(--uvp-danger) 18%, var(--uvp-panel-border));
+}
+.console-window-action.is-close:hover {
+    color: var(--uvp-danger); background: var(--uvp-danger-soft); border-color: var(--uvp-danger-border);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--uvp-danger) 12%, transparent);
+}
+.console-window-action:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--uvp-brand) 48%, transparent); outline-offset: 2px;
+}
+.console-window-action:active { transform: translateY(1px); }
+.console-window-action.is-compact {
+    width: 28px; min-width: 28px; height: 28px; padding: 0; gap: 0;
+}
 
 .session-badge {
     display: inline-flex; align-items: center; gap: 6px;
@@ -4212,6 +4466,17 @@ onBeforeUnmount(() => {
     display: grid; grid-template-columns: minmax(0, 1fr) 336px;
     gap: 14px; min-height: 0;
 }
+.console-body.is-minimized { display: block; }
+.console-body.is-minimized .stage { display: block; }
+.console-body.is-minimized .video-frame {
+    display: block; width: 100%; overflow: hidden;
+    border: 0; border-radius: 0; box-shadow: none;
+}
+.console-body.is-minimized .video-canvas { width: 100%; aspect-ratio: 16 / 9; }
+.console-body.is-minimized .protocol-switcher,
+.console-body.is-minimized .linked-info-bar,
+.console-body.is-minimized .sidebar,
+.console-body.is-minimized .asset-manager-layer { display: none; }
 
 .asset-manager-layer {
     position: absolute; z-index: 20; inset: 0;
@@ -5530,6 +5795,8 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 640px) {
     .console-title { flex-wrap: wrap; }
+    .console-title:not(.is-minimized) .console-window-action { width: 30px; min-width: 30px; padding: 0; }
+    .console-title:not(.is-minimized) .console-window-action span { display: none; }
     /* 窄屏保持等分行为,不再硬编码列数(3 个 tab 也可能变);grid-auto-columns 会按 tabs 数量平分。 */
     .lens-grid { grid-template-columns: 1fr; }
     .linked-section .preset-grid { grid-template-columns: 1fr; }

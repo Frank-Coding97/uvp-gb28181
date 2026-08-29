@@ -84,6 +84,15 @@ vi.mock("maplibre-gl", () => {
     };
 });
 
+vi.mock("@visactor/vchart", () => ({
+    default: class {
+        renderSync() {}
+        release() {}
+        resize() {}
+        on() {}
+    }
+}));
+
 vi.mock("vue-router", () => ({
     useRoute: () => ({ query: {}, params: {}, path: "/gb28181/devices" }),
     useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
@@ -114,6 +123,10 @@ vi.mock("@/store/modules/user", () => ({
     useUserStoreHook: () => ({ account: { permissions: [] } })
 }));
 
+vi.mock("@/store/modules/playback-console", () => ({
+    usePlaybackConsoleStore: () => ({ open: vi.fn(), close: vi.fn() })
+}));
+
 vi.mock("@arco-design/web-vue", () => ({
     Message: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
     Modal: { confirm: vi.fn() }
@@ -134,7 +147,6 @@ function mountPage() {
         shallow: true,
         global: {
             stubs: {
-                PlayConsoleLinked: true,
                 SubscriptionDialog: true,
                 DirectoryPanel: true,
                 CustomGroupEditor: true,

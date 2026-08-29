@@ -2,6 +2,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { Message, Modal } from "@arco-design/web-vue";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { defineComponent, nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => {
@@ -276,6 +277,64 @@ describe("PlayConsoleLinked 双区联动", () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("最小化后保留同一个播放器和点播会话，并支持拖动与恢复", async () => {
+    const ModalStub = defineComponent({
+      name: "PlaybackModalStub",
+      inheritAttrs: false,
+      props: {
+        visible: Boolean,
+        modalStyle: Object,
+        modalClass: [String, Array],
+      },
+      template: `
+        <div v-if="visible" data-testid="playback-modal-stub" :class="modalClass" :style="modalStyle">
+          <slot name="title" />
+          <slot />
+        </div>
+      `,
+    });
+    const wrapper = mount(PlayConsoleLinked, {
+      props: { visible: true, channel, displayMode: "expanded" },
+      global: { stubs: { "a-modal": ModalStub } },
+    });
+    await flushPromises();
+
+    const originalPlayer = wrapper.get("[data-testid='play-window']").element;
+    expect(api.startPlay).toHaveBeenCalledTimes(1);
+    expect(wrapper.get("[data-testid='play-console-minimize']").text()).toBe("小窗");
+    expect(wrapper.get("[data-testid='play-console-close']").text()).toBe("关闭");
+
+    await wrapper.get("[data-testid='play-console-minimize']").trigger("click");
+    expect(wrapper.emitted("update:displayMode")?.at(-1)).toEqual(["minimized"]);
+
+    await wrapper.setProps({ displayMode: "minimized" });
+    await nextTick();
+    expect(wrapper.get("[data-testid='play-window']").element).toBe(originalPlayer);
+    expect(wrapper.get("[data-testid='play-console-body']").classes()).toContain("is-minimized");
+    expect(api.startPlay).toHaveBeenCalledTimes(1);
+
+    const modal = wrapper.findAllComponents(ModalStub)[0];
+    const before = modal.props("modalStyle") as Record<string, string>;
+    const title = wrapper.get("[data-testid='play-console-drag-handle']");
+    await title.trigger("pointerdown", { button: 0, clientX: 100, clientY: 100 });
+    window.dispatchEvent(new MouseEvent("pointermove", { bubbles: true, clientX: 60, clientY: 75 }));
+    await nextTick();
+    const after = modal.props("modalStyle") as Record<string, string>;
+    expect([after.left, after.top]).not.toEqual([before.left, before.top]);
+    window.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+
+    await wrapper.get("[data-testid='play-console-restore']").trigger("click");
+    expect(wrapper.emitted("update:displayMode")?.at(-1)).toEqual(["expanded"]);
+    expect(api.startPlay).toHaveBeenCalledTimes(1);
+
+    await wrapper.setProps({ displayMode: "expanded" });
+    await nextTick();
+    expect(wrapper.find(".arco-modal-close-btn").exists()).toBe(false);
+    await wrapper.get("[data-testid='play-console-close']").trigger("click");
+    expect(wrapper.emitted("update:visible")?.at(-1)).toEqual([false]);
+    wrapper.unmount();
   });
 
   it("拖拽摇杆按八方向发送云台指令，松手停止且不展示绝对角度", async () => {
@@ -949,7 +1008,8 @@ describe("PlayConsoleLinked 双区联动", () => {
 
     expect(source).toMatch(/\.linked-info-bar\s*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
     expect(source).toContain("--linked-detail-height: 148px");
-    expect(source).toContain('width="min(1280px, calc(100vw - 32px))"');
+    expect(source).toContain(':width="playbackModalWidth"');
+    expect(source).toContain(': "min(1280px, calc(100vw - 32px))"');
     expect(source).toMatch(/\.console-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s+336px/s);
     // 流信息 tab 已并入探针 tab,原来的 sidebar-stream / linked-detail-stream / linked-stream-metrics
     // 全都退出历史舞台

@@ -5,6 +5,12 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/device-mgmt/index.vue"), "utf8");
 
 describe("device management toolbar layout", () => {
+    it("opens the shared playback console instead of mounting a route-local player", () => {
+        expect(source).toContain('import { usePlaybackConsoleStore } from "@/store/modules/playback-console"');
+        expect(source).toContain("playbackConsole.open(record);");
+        expect(source).not.toContain("<PlayConsoleLinked");
+    });
+
     it("uses one workspace-wide toolbar before the catalog and content panes", () => {
         const toolbarIndex = source.indexOf('class="workspace-toolbar"');
         const catalogIndex = source.indexOf('class="catalog-pane"');

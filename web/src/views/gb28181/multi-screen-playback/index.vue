@@ -15,8 +15,8 @@ import {
 } from "lucide-vue-next";
 import { startPlay, type PlayResult } from "@/api/gb28181";
 import { Message } from "@arco-design/web-vue";
+import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
 import PlayWindow from "../components/PlayWindow.vue";
-import PlayConsoleLinked from "../components/PlayConsoleLinked.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
 import UnplayedCover from "./UnplayedCover.vue";
@@ -45,8 +45,7 @@ interface FavoriteChannelGroup {
 
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
-const consoleVisible = ref(false);
-const consoleChannel = ref<ChannelVO | null>(null);
+const playbackConsole = usePlaybackConsoleStore();
 const monitorAreaRef = ref<HTMLElement | null>(null);
 const isFullscreen = ref(false);
 const pollingVisible = ref(false);
@@ -190,8 +189,7 @@ function handlePtzActionChange(value: { channelId: number; action: string } | nu
 function openConsole(slot: PlaybackSlot) {
     if (!slot.channel) return;
     focusSlot(slot);
-    consoleChannel.value = slot.channel;
-    consoleVisible.value = true;
+    playbackConsole.open(slot.channel);
 }
 
 function setLayout(value: LayoutSize) {
@@ -210,8 +208,7 @@ function stopAll() {
     stopPolling();
     slots.forEach(resetSlot);
     focusedIndex.value = null;
-    consoleVisible.value = false;
-    consoleChannel.value = null;
+    playbackConsole.close();
     Message.info(hadChannels ? "已停止并清空全部画面" : "当前没有可停止的画面");
 }
 
@@ -526,7 +523,7 @@ onBeforeUnmount(() => {
                             <div class="slot-topline">
                                 <div class="slot-title"><span class="status-dot" :class="statusTone(slot)" aria-hidden="true" /><span class="slot-channel-name">{{ slot.channel.name || slot.channel.alias || slot.channel.channelId }}</span><span class="slot-status">{{ statusLabel(slot) }}</span><span v-if="slot.result?.node" class="slot-node-name">节点 {{ slot.result.node.name }}</span></div>
                                 <div class="slot-actions">
-                                    <button class="slot-action" type="button" aria-label="打开通道控制台" title="打开通道控制台" @click.stop="openConsole(slot)"><SlidersHorizontal :size="15" aria-hidden="true" /></button>
+                                    <button class="slot-action" type="button" :data-test="`slot-console-${slot.index}`" aria-label="打开通道控制台" title="打开通道控制台" @click.stop="openConsole(slot)"><SlidersHorizontal :size="15" aria-hidden="true" /></button>
                                     <button class="slot-action danger" type="button" :data-test="`slot-remove-${slot.index}`" aria-label="关闭当前播放" title="关闭当前播放" @click.stop="removeSlot(slot)"><X :size="15" aria-hidden="true" /></button>
                                 </div>
                             </div>
@@ -563,7 +560,6 @@ onBeforeUnmount(() => {
                 </div>
             </main>
         </div>
-        <PlayConsoleLinked v-model:visible="consoleVisible" :channel="consoleChannel" />
     </div>
 </template>
 

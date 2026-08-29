@@ -1,6 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
@@ -56,20 +57,13 @@ vi.mock("../components/PlayWindow.vue", () => ({
         template: "<div class=\"mock-play-window\" :data-url=\"url\" :data-zlm-webrtc=\"String(Boolean(zlmWebrtc))\" />"
     }
 }));
-vi.mock("../components/PlayConsoleLinked.vue", () => ({
-    default: {
-        name: "PlayConsoleLinked",
-        props: ["visible", "channel"],
-        emits: ["update:visible"],
-        template: "<div v-if=\"visible\" data-test=\"linked-console\">{{ channel?.name }}</div>"
-    }
-}));
-
 import MultiScreenPlayback from "./index.vue";
 import type { ChannelVO } from "../device-mgmt/api";
+import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
 
 describe("multi-screen playback page", () => {
     beforeEach(() => {
+        setActivePinia(createPinia());
         api.listChannels.mockReset();
         favoriteDialog.opened = false;
         favoriteDialog.channels = [];
@@ -166,6 +160,21 @@ describe("multi-screen playback page", () => {
         await flushPromises();
 
         expect(wrapper.get(".slot-node-name").text()).toBe("节点 zlm-220");
+    });
+
+    it("opens the singleton playback console and leaves it alive when this route unmounts", async () => {
+        const wrapper = mount(MultiScreenPlayback);
+        await wrapper.get("[data-test=source-channel-1]").trigger("click");
+        await flushPromises();
+
+        await wrapper.get("[data-test=slot-console-0]").trigger("click");
+        const consoleStore = usePlaybackConsoleStore();
+        expect(consoleStore.visible).toBe(true);
+        expect(consoleStore.channel).toEqual(expect.objectContaining({ channelId: "channel-1" }));
+
+        wrapper.unmount();
+        expect(consoleStore.visible).toBe(true);
+        expect(consoleStore.channel?.channelId).toBe("channel-1");
     });
 
     it("opens the favorite group dialog for current playback without changing playback", async () => {
