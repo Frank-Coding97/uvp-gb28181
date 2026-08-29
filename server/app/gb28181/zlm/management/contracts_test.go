@@ -85,6 +85,9 @@ func TestManagementErrorMapsStableHTTPStatusAndRetryability(t *testing.T) {
 		nodeID    string
 	}{
 		{name: "offline", make: func() *ManagementError { return NewNodeOfflineError("node-offline", nil) }, code: CodeNodeOffline, status: http.StatusServiceUnavailable, retryable: true, nodeID: "node-offline"},
+		{name: "not found", make: func() *ManagementError { return NewNodeNotFoundError("node-not-found", nil) }, code: CodeNodeNotFound, status: http.StatusNotFound, retryable: false, nodeID: "node-not-found"},
+		{name: "forbidden", make: func() *ManagementError { return NewForbiddenError("node-forbidden", nil) }, code: CodeForbidden, status: http.StatusForbidden, retryable: false, nodeID: "node-forbidden"},
+		{name: "maintenance", make: func() *ManagementError { return NewNodeMaintenanceError("node-maintenance", nil) }, code: CodeNodeMaintenance, status: http.StatusConflict, retryable: false, nodeID: "node-maintenance"},
 		{name: "timeout", make: func() *ManagementError { return NewUpstreamTimeoutError("node-timeout", nil) }, code: CodeUpstreamTimeout, status: http.StatusGatewayTimeout, retryable: true, nodeID: "node-timeout"},
 		{name: "unsupported", make: func() *ManagementError {
 			return NewUnsupportedCapabilityError("node-unsupported", "getAllSession", nil)

@@ -19,6 +19,9 @@ type ManagementErrorCode string
 
 const (
 	CodeInvalidRequest        ManagementErrorCode = "invalid_request"
+	CodeNodeNotFound          ManagementErrorCode = "node_not_found"
+	CodeForbidden             ManagementErrorCode = "forbidden"
+	CodeNodeMaintenance       ManagementErrorCode = "node_maintenance"
 	CodeNodeOffline           ManagementErrorCode = "node_offline"
 	CodeUpstreamTimeout       ManagementErrorCode = "upstream_timeout"
 	CodeUnsupportedCapability ManagementErrorCode = "unsupported_capability"
@@ -28,6 +31,9 @@ const (
 	// ErrorCode* aliases follow the naming used by existing domain packages
 	// while Code* remains the short wire-contract spelling.
 	ErrorCodeInvalidRequest        = CodeInvalidRequest
+	ErrorCodeNodeNotFound          = CodeNodeNotFound
+	ErrorCodeForbidden             = CodeForbidden
+	ErrorCodeNodeMaintenance       = CodeNodeMaintenance
 	ErrorCodeNodeOffline           = CodeNodeOffline
 	ErrorCodeUpstreamTimeout       = CodeUpstreamTimeout
 	ErrorCodeUnsupportedCapability = CodeUnsupportedCapability
@@ -151,6 +157,12 @@ func HTTPStatusForCode(code ManagementErrorCode) int {
 	switch code {
 	case CodeInvalidRequest:
 		return http.StatusBadRequest
+	case CodeNodeNotFound:
+		return http.StatusNotFound
+	case CodeForbidden:
+		return http.StatusForbidden
+	case CodeNodeMaintenance:
+		return http.StatusConflict
 	case CodeNodeOffline:
 		return http.StatusServiceUnavailable
 	case CodeUpstreamTimeout:
@@ -183,6 +195,18 @@ func NewManagementError(code ManagementErrorCode, nodeID, message string, retrya
 
 func NewNodeOfflineError(nodeID string, causes ...error) *ManagementError {
 	return NewManagementError(CodeNodeOffline, nodeID, "media node is offline", true, causes...)
+}
+
+func NewNodeNotFoundError(nodeID string, causes ...error) *ManagementError {
+	return NewManagementError(CodeNodeNotFound, nodeID, "media node was not found", false, causes...)
+}
+
+func NewForbiddenError(nodeID string, causes ...error) *ManagementError {
+	return NewManagementError(CodeForbidden, nodeID, "media node access is forbidden", false, causes...)
+}
+
+func NewNodeMaintenanceError(nodeID string, causes ...error) *ManagementError {
+	return NewManagementError(CodeNodeMaintenance, nodeID, "media node is in maintenance", false, causes...)
 }
 
 func NewUpstreamTimeoutError(nodeID string, causes ...error) *ManagementError {
