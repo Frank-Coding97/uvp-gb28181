@@ -72,7 +72,7 @@ type SchedulerLogRepo interface {
 //
 // 线程安全:
 //   - Emit 可并发调用
-//   - Start / Stop 只允许调用一次(由 bootstrap 控制)
+//   - Start / Stop 可重复调用(由 bootstrap 控制)
 type LogService struct {
 	repo       SchedulerLogRepo
 	bufferSize int
@@ -101,15 +101,17 @@ func NewLogService(repo SchedulerLogRepo, bufferSize int) *LogService {
 // ctx cancel 后 worker 结束(但 Stop() drain 路径不依赖 ctx,
 // 即便 ctx 已 cancel 仍能 drain 残余条目)。
 func (s *LogService) Start(ctx context.Context) {
-	if !s.started.CompareAndSwap(false, true) {
-		return // 已启动
-	}
 	s.mu.Lock()
+	if s.started.Load() || s.stopped.Load() {
+		s.mu.Unlock()
+		return // 已启动或已停止
+	}
+	s.started.Store(true)
 	s.ch = make(chan SchedulerLog, s.bufferSize)
 	ch := s.ch
+	s.workerWG.Add(1)
 	s.mu.Unlock()
 
-	s.workerWG.Add(1)
 	go s.runWorker(ctx, ch)
 }
 
@@ -177,17 +179,23 @@ func (s *LogService) Emit(entry SchedulerLog) {
 		return
 	}
 	s.mu.Lock()
+	if s.stopped.Load() {
+		s.mu.Unlock()
+		return
+	}
 	ch := s.ch
-	s.mu.Unlock()
 	if ch == nil {
+		s.mu.Unlock()
 		return
 	}
 	select {
 	case ch <- entry:
 		// 入队成功
+		s.mu.Unlock()
 	default:
 		// 满 → drop
 		dropped := s.dropCount.Add(1)
+		s.mu.Unlock()
 		// 每 100 条 drop 警告一次,避免刷屏
 		if dropped%100 == 1 && app.ZapLog != nil {
 			app.ZapLog.Warn("scheduler log buffer full, entry dropped",
@@ -200,19 +208,26 @@ func (s *LogService) Emit(entry SchedulerLog) {
 //
 // 调用后再 Emit 都是 noop;多次 Stop 安全。
 func (s *LogService) Stop() {
-	if !s.stopped.CompareAndSwap(false, true) {
+	s.mu.Lock()
+	if s.stopped.Load() {
+		started := s.started.Load()
+		s.mu.Unlock()
+		if started {
+			s.workerWG.Wait()
+		}
 		return
 	}
+	s.stopped.Store(true)
 	if !s.started.Load() {
+		s.mu.Unlock()
 		return // 未 Start
 	}
-	s.mu.Lock()
 	ch := s.ch
 	s.ch = nil
-	s.mu.Unlock()
 	if ch != nil {
 		close(ch)
 	}
+	s.mu.Unlock()
 	s.workerWG.Wait()
 }
 

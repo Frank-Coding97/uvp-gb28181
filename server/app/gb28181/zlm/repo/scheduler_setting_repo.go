@@ -26,7 +26,7 @@ func (SchedulerSetting) TableName() string { return "scheduler_setting" }
 // SchedulerSettingRepo scheduler_setting 表访问
 //
 // 设计:DB 表单行 id=1。GetCurrent 取该行;未找到返 (nil, nil) 让上层走 fallback。
-// UpdateAlgorithm 用 Save 全字段写。
+// UpdateAlgorithm 只更新 algorithm/updated_at;id=1 不存在时创建该行。
 type SchedulerSettingRepo struct {
 	db *gorm.DB
 }
@@ -52,6 +52,39 @@ func (r *SchedulerSettingRepo) GetCurrent(ctx context.Context) (*SchedulerSettin
 
 // UpdateAlgorithm 写回 algorithm(M2 暂不暴露 controller,先留方法给 M3 用)
 func (r *SchedulerSettingRepo) UpdateAlgorithm(ctx context.Context, name string) error {
-	s := SchedulerSetting{ID: 1, Algorithm: name, UpdatedAt: time.Now()}
-	return r.db.WithContext(ctx).Save(&s).Error
+	now := time.Now()
+	db := r.db.WithContext(ctx)
+	result := db.Model(&SchedulerSetting{}).
+		Where("id = ?", 1).
+		Updates(map[string]interface{}{
+			"algorithm":  name,
+			"updated_at": now,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected > 0 {
+		return nil
+	}
+
+	// Some drivers (notably MySQL without CLIENT_FOUND_ROWS) report zero when
+	// an UPDATE leaves all stored values unchanged. Distinguish that case from
+	// a missing singleton before attempting the compatibility insert.
+	var existing SchedulerSetting
+	lookup := db.Select("id").Where("id = ?", 1).Take(&existing)
+	if lookup.Error != nil && !errors.Is(lookup.Error, gorm.ErrRecordNotFound) {
+		return lookup.Error
+	}
+	if lookup.RowsAffected > 0 {
+		return nil
+	}
+
+	// Keep Save's historical missing-row behavior: a caller can initialize
+	// scheduler_setting id=1 through UpdateAlgorithm without a separate seed.
+	return db.Create(&SchedulerSetting{
+		ID:        1,
+		Algorithm: name,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}).Error
 }

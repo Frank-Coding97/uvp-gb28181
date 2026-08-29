@@ -3,6 +3,7 @@ package repo_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
@@ -39,10 +40,35 @@ func TestSchedulerSettingRepo_UpdateAndGet(t *testing.T) {
 	require.NotNil(t, s)
 	require.Equal(t, int64(1), s.ID)
 	require.Equal(t, "roundrobin", s.Algorithm)
+	require.NotZero(t, s.CreatedAt)
+	require.NotZero(t, s.UpdatedAt)
 
 	// 切到 weighted
 	require.NoError(t, r.UpdateAlgorithm(ctx, "weighted"))
 	s2, err := r.GetCurrent(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "weighted", s2.Algorithm)
+}
+
+func TestSchedulerSettingRepo_UpdateAlgorithmPreservesExistingMetadata(t *testing.T) {
+	db := setupSchedulerDB(t)
+	r := repo.NewSchedulerSettingRepo(db)
+	createdAt := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&repo.SchedulerSetting{
+		ID:         1,
+		Algorithm:  "roundrobin",
+		ConfigJSON: `{"weight":3}`,
+		CreatedAt:  createdAt,
+		UpdatedAt:  createdAt,
+	}).Error)
+
+	before := time.Now()
+	require.NoError(t, r.UpdateAlgorithm(context.Background(), "weighted"))
+
+	var got repo.SchedulerSetting
+	require.NoError(t, db.First(&got, 1).Error)
+	require.Equal(t, "weighted", got.Algorithm)
+	require.Equal(t, `{"weight":3}`, got.ConfigJSON)
+	require.Equal(t, createdAt, got.CreatedAt)
+	require.GreaterOrEqual(t, got.UpdatedAt, before)
 }

@@ -52,6 +52,13 @@ func (w *fakeSettingWriter) UpdateAlgorithm(_ context.Context, name string) erro
 
 func setupSchedulerRouter(t *testing.T) (*gin.Engine, *scheduler.Manager, *fakeSettingWriter, *fakeLogRepo) {
 	t.Helper()
+	setting := &fakeSettingWriter{}
+	r, mgr, logRepo := setupSchedulerRouterWithSetting(t, setting)
+	return r, mgr, setting, logRepo
+}
+
+func setupSchedulerRouterWithSetting(t *testing.T, setting gbcontrollers.SchedulerSettingWriter) (*gin.Engine, *scheduler.Manager, *fakeLogRepo) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	// 给 Manager 一个真实 Registry / Factory
@@ -72,7 +79,6 @@ func setupSchedulerRouter(t *testing.T) (*gin.Engine, *scheduler.Manager, *fakeS
 	logSvc.Start(ctx)
 	t.Cleanup(logSvc.Stop)
 
-	setting := &fakeSettingWriter{}
 	ctrl := gbcontrollers.NewZLMSchedulerController(mgr, logSvc, setting)
 
 	r := gin.New()
@@ -83,7 +89,7 @@ func setupSchedulerRouter(t *testing.T) (*gin.Engine, *scheduler.Manager, *fakeS
 		g.PUT("/scheduler", ctrl.SwitchScheduler)
 		g.GET("/scheduler/logs", ctrl.ListSchedulerLogs)
 	}
-	return r, mgr, setting, logRepo
+	return r, mgr, logRepo
 }
 
 func TestSchedulerController_Get(t *testing.T) {

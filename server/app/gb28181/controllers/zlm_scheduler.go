@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -44,6 +45,12 @@ type ZLMSchedulerController struct {
 	mgr     *scheduler.Manager
 	logSvc  *scheduler.LogService
 	setting SchedulerSettingWriter
+
+	// switchMu serializes the complete in-memory/DB switch transaction. A
+	// compensation must never run after a newer request has already switched
+	// the manager, otherwise an older failed request can overwrite that newer
+	// state.
+	switchMu sync.Mutex
 }
 
 // NewZLMSchedulerController 构造
@@ -96,6 +103,8 @@ func (zc *ZLMSchedulerController) SwitchScheduler(c *gin.Context) {
 		zc.FailAndAbort(c, "Scheduler 未装配,无法切换", nil)
 		return
 	}
+	zc.switchMu.Lock()
+	defer zc.switchMu.Unlock()
 	old := zc.mgr.CurrentName()
 	if err := zc.mgr.Switch(req.Algorithm); err != nil {
 		zc.FailAndAbort(c, "切换算法失败", err)

@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,4 +45,48 @@ func TestSchedulerLogT13_FallbackSortsBeforeApplyingLimit(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 	require.Equal(t, int64(3), rows[0].ID)
+}
+
+func TestSchedulerLogT13_EmitAndStopConcurrentNoPanic(t *testing.T) {
+	repo := newFakeSchedulerLogRepo()
+	repo.sleepOnInsert = 100 * time.Microsecond
+	svc := scheduler.NewLogService(repo, 8)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc.Start(ctx)
+	svc.Start(ctx)
+
+	const emitters = 32
+	const entriesPerEmitter = 1000
+	ready := make(chan struct{})
+	var readyWG sync.WaitGroup
+	var emitWG sync.WaitGroup
+	readyWG.Add(emitters)
+	emitWG.Add(emitters)
+	for emitter := 0; emitter < emitters; emitter++ {
+		emitter := emitter
+		go func() {
+			defer emitWG.Done()
+			readyWG.Done()
+			<-ready
+			for i := 0; i < entriesPerEmitter; i++ {
+				svc.Emit(scheduler.SchedulerLog{HappenedAt: time.Now(), Algorithm: "roundrobin", NodeID: int64(emitter)})
+			}
+		}()
+	}
+	readyWG.Wait()
+	close(ready)
+	stopDone := make(chan struct{})
+	go func() {
+		time.Sleep(time.Millisecond)
+		svc.Stop()
+		close(stopDone)
+	}()
+	emitWG.Wait()
+	<-stopDone
+
+	// Stop is terminal and idempotent; repeated calls must not resurrect a worker.
+	svc.Start(ctx)
+	svc.Stop()
+	svc.Stop()
 }
