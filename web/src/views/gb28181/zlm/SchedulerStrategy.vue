@@ -186,8 +186,6 @@ onMounted(refresh);
 
 .strategy-actions :deep(.arco-btn) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     border-radius: 10px;
 }
 

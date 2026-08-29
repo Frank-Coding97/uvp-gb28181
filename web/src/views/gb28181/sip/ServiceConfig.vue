@@ -1408,13 +1408,11 @@ onMounted(() =>
     background: var(--uvp-warning);
     box-shadow: 0 0 0 3px var(--uvp-warning-soft);
 }
-.service-config-tabs__actions :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
+.service-config-tabs__actions :deep(.arco-btn) { box-sizing: border-box; border-radius: 10px; }
 :global(.service-config-page .arco-input-wrapper),
 :global(.service-config-page .arco-input-number),
 :global(.service-config-page .arco-select-view) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     background: var(--uvp-search-control-bg) !important;
     border-color: var(--uvp-search-secondary-btn-border) !important;
     border-radius: 10px !important;

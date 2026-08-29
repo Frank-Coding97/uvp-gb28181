@@ -189,8 +189,6 @@ onUnmounted(() => {
 .scheduler-log-search :deep(.arco-select-view),
 .scheduler-log-search :deep(.arco-input-wrapper) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     background: var(--uvp-search-control-bg) !important;
     border: 1px solid var(--uvp-search-secondary-btn-border) !important;
     border-radius: 10px !important;
@@ -212,8 +210,6 @@ onUnmounted(() => {
 
 .scheduler-log-search :deep(.arco-btn) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     border-radius: 10px;
 }
 
@@ -224,7 +220,7 @@ onUnmounted(() => {
 .log-count {
     display: inline-flex;
     align-items: center;
-    height: 44px;
+    height: 34px;
     color: var(--uvp-text-tertiary);
     font-size: 12px;
     white-space: nowrap;

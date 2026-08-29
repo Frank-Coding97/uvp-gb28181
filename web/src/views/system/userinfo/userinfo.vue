@@ -301,8 +301,6 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
 
 .userinfo-page :deep(.userinfo-form .arco-input-wrapper) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -334,8 +332,6 @@ routerStore.setTabsTitle(`用户${route.query.userName ? " - " + route.query.use
 
 .userinfo-page :deep(.userinfo-form .arco-btn) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   border-radius: 10px;
 }
 

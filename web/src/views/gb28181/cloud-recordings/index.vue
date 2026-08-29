@@ -706,8 +706,6 @@ onBeforeUnmount(() => {
 .cloud-recordings-page :deep(.uvp-search-panel .arco-select-view),
 .cloud-recordings-page :deep(.uvp-search-panel .arco-picker) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -728,8 +726,6 @@ onBeforeUnmount(() => {
 .cloud-recordings-page :deep(.uvp-search-panel .arco-btn),
 .cloud-recordings-page :deep(.cloud-recordings-header__actions .arco-btn) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   border-radius: 10px;
 }
 .cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) { font-size: 14px; line-height: 22px; }

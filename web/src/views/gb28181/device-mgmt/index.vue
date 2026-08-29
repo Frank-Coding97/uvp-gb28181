@@ -3174,8 +3174,6 @@ onUnmounted(() => {
 .workspace-toolbar :deep(.arco-select-view),
 .workspace-toolbar :deep(.arco-picker) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     background: var(--uvp-search-control-bg) !important;
     border: 1px solid var(--uvp-search-secondary-btn-border) !important;
     border-radius: 10px !important;
@@ -3190,9 +3188,9 @@ onUnmounted(() => {
 .workspace-toolbar :deep(.arco-input::placeholder),
 .workspace-toolbar :deep(.arco-select-view-input::placeholder),
 .workspace-toolbar :deep(.arco-picker input::placeholder) { color: var(--uvp-text-tertiary) !important; opacity: 1; }
-.workspace-toolbar :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
+.workspace-toolbar :deep(.arco-btn) { box-sizing: border-box; border-radius: 10px; }
 .workspace-toolbar .create-device-btn {
-    height: 44px;
+    height: 40px;
     border-radius: 10px;
 }
 .catalog-pane,

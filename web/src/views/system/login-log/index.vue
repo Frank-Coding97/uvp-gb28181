@@ -302,8 +302,6 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
 .login-log-filter :deep(.arco-select-view) {
   box-sizing: border-box;
   width: 100%;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -311,8 +309,6 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
 }
 .login-log-page :deep(.arco-picker) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -333,8 +329,6 @@ defineExpose({ form, dateRange, logs, pagination, loading, error, currentDetail,
 }
 .login-log-page :deep(.uvp-search-panel .arco-btn) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   border-radius: 10px;
 }
 .login-log-page :deep(.uvp-search-panel__actions .login-log-clear-button) {

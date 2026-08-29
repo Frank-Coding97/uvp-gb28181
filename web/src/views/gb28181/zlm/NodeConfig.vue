@@ -300,8 +300,6 @@ onMounted(refresh);
 .config-search-panel :deep(.arco-input-wrapper),
 .config-search-panel :deep(.arco-select-view) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     background: var(--uvp-search-control-bg) !important;
     border: 1px solid var(--uvp-search-secondary-btn-border) !important;
     border-radius: 10px !important;
@@ -323,8 +321,6 @@ onMounted(refresh);
 
 .config-search-panel :deep(.arco-btn) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     border-radius: 10px;
 }
 
@@ -608,8 +604,6 @@ onMounted(refresh);
     transition: border-color var(--zlm-dur-fast) var(--zlm-ease-out);
     flex: 1;
     min-width: 0;
-    height: 44px;
-    min-height: 44px;
     background: var(--uvp-search-control-bg);
     border-color: var(--uvp-search-secondary-btn-border);
     border-radius: 10px;

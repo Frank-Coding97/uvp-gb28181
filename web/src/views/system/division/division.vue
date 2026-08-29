@@ -427,8 +427,6 @@ onMounted(() => {
   :deep(.arco-input-wrapper),
   :deep(.arco-select-view-single) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     background: var(--uvp-search-control-bg) !important;
     border: 1px solid var(--uvp-search-secondary-btn-border) !important;
     border-radius: 10px !important;
@@ -450,8 +448,6 @@ onMounted(() => {
 
   :deep(.arco-btn) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     border-radius: 10px;
   }
 }

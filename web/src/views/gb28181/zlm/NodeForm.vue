@@ -168,7 +168,6 @@ async function handleSubmit() {
 :global(.zlm-node-form .arco-input-number),
 :global(.zlm-node-form .arco-input-password) {
     box-sizing: border-box;
-    min-height: 44px;
     background: var(--uvp-search-control-bg) !important;
     border-color: var(--uvp-search-secondary-btn-border) !important;
     border-radius: 10px !important;
@@ -189,8 +188,6 @@ async function handleSubmit() {
 
 :global(.zlm-node-form .arco-drawer-footer .arco-btn) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     border-radius: 10px;
 }
 

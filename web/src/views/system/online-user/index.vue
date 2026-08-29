@@ -279,8 +279,6 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 .online-user-filter :deep(.arco-select-view) {
   box-sizing: border-box;
   width: 100%;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -302,15 +300,16 @@ defineExpose({ form, sessions, currentSid, pagination, load, search, reset, hand
 
 .online-user-refresh {
   min-width: 88px;
-  min-height: 44px;
 }
 
 .online-user-page :deep(.uvp-search-panel .arco-btn),
 .online-user-error :deep(.arco-btn) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   border-radius: 10px;
+}
+
+.online-user-error :deep(.arco-btn) {
+  min-height: 44px;
 }
 
 .online-user-page :deep(.uvp-search-panel__extra .arco-btn) {

@@ -778,7 +778,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding-bottom: 8px;
 }
-.tab-actions :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
+.tab-actions :deep(.arco-btn) { box-sizing: border-box; border-radius: 10px; }
 
 .live-dot {
   display: inline-block;
@@ -1324,8 +1324,6 @@ onBeforeUnmount(() => {
 .filter-bar :deep(.arco-input-wrapper),
 .filter-bar :deep(.arco-select-view) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -1335,7 +1333,7 @@ onBeforeUnmount(() => {
 .filter-bar :deep(.arco-select-view-focus) { border-color: var(--uvp-brand) !important; box-shadow: var(--uvp-search-control-focus-shadow) !important; }
 .filter-bar :deep(.arco-input::placeholder),
 .filter-bar :deep(.arco-select-view-input::placeholder) { color: var(--uvp-text-tertiary) !important; opacity: 1; }
-.drawer-actions :deep(.arco-btn) { box-sizing: border-box; height: 44px; min-height: 44px; border-radius: 10px; }
+.drawer-actions :deep(.arco-btn) { box-sizing: border-box; border-radius: 10px; }
 
 .security-table {
   flex: 1;

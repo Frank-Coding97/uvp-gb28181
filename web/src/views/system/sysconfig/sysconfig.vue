@@ -265,8 +265,6 @@ onMounted(() => {
 <style lang="scss" scoped>
 .sysconfig-page :deep(.uvp-system-form .arco-input-wrapper) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -296,8 +294,6 @@ onMounted(() => {
 
 .sysconfig-page :deep(.sysconfig-tabs__actions .arco-btn) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   border-radius: 10px;
 }
 

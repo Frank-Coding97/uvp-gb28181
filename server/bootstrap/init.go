@@ -86,6 +86,9 @@ func init() {
 
 	// 注册所有执行器
 	scheduler.RegisterExecutors()
+	if err := scheduler.RegisterSystemJobs(app.DB()); err != nil {
+		log.Fatal("注册系统任务失败: " + err.Error())
+	}
 
 	// 从数据库加载启用的任务到调度器及任务结果处理器
 	scheduler.LoadJobsFromDB()

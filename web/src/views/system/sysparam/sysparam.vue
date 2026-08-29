@@ -316,8 +316,6 @@ getParamList();
 .sysparam-page :deep(.uvp-search-panel__fields > .arco-input-wrapper),
 .sysparam-page :deep(.uvp-search-panel__fields > .arco-select-view) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -338,8 +336,6 @@ getParamList();
 
 .sysparam-page :deep(.uvp-search-panel .arco-btn) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   border-radius: 10px;
 }
 

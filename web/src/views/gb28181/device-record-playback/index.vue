@@ -678,14 +678,14 @@ onUnmounted(() => {
 .query-fields { display: flex; align-items: flex-end; gap: 8px; min-width: 0; margin-left: auto; }
 .query-field { display: flex; flex-direction: column; gap: 4px; color: var(--uvp-text-tertiary); font-size: 11px; }
 .query-field > span:first-child { display: flex; align-items: center; gap: 4px; }
-.query-field input, .query-field select { box-sizing: border-box; height: 44px; color: var(--uvp-text-primary); font: inherit; font-size: 12px; background: var(--uvp-search-control-bg); border: 1px solid var(--uvp-search-secondary-btn-border); border-radius: 10px; outline: none; }
+.query-field input, .query-field select { box-sizing: border-box; height: 32px; color: var(--uvp-text-primary); font: inherit; font-size: 12px; background: var(--uvp-search-control-bg); border: 1px solid var(--uvp-search-secondary-btn-border); border-radius: 10px; outline: none; }
 .query-field input { width: 177px; padding: 0 8px; }
 .query-field select { width: 108px; padding: 0 28px 0 9px; appearance: none; }
 .query-field input:focus, .query-field select:focus { border-color: var(--uvp-brand); box-shadow: var(--uvp-search-control-focus-shadow); }
 .select-wrap { position: relative; display: block; }
 .select-wrap svg { position: absolute; top: 9px; right: 8px; pointer-events: none; }
-.range-separator { align-self: flex-end; height: 44px; color: var(--uvp-text-tertiary); font-size: 11px; line-height: 44px; }
-.query-submit { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 44px; padding: 0 14px; color: #fff; font-size: 12px; font-weight: 600; background: var(--uvp-brand); border: 0; border-radius: 10px; cursor: pointer; transition: background-color 180ms ease; }
+.range-separator { align-self: flex-end; height: 32px; color: var(--uvp-text-tertiary); font-size: 11px; line-height: 32px; }
+.query-submit { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; color: #fff; font-size: 12px; font-weight: 600; background: var(--uvp-brand); border: 0; border-radius: 10px; cursor: pointer; transition: background-color 180ms ease; }
 .query-submit:hover { background: var(--uvp-brand-strong); }
 button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity: .55; }
 .playback-main { display: grid; grid-template-columns: minmax(0, 1fr) 312px; flex: 1; min-height: 0; margin: 0 8px; padding: 12px; background: var(--uvp-shell-muted); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); overflow: hidden; }

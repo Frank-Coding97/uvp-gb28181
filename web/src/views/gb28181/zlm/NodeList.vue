@@ -632,8 +632,6 @@ async function handleBatchActivate() {
 .node-search-panel :deep(.arco-input-wrapper),
 .node-search-panel :deep(.arco-select-view) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     background: var(--uvp-search-control-bg) !important;
     border: 1px solid var(--uvp-search-secondary-btn-border) !important;
     border-radius: 10px !important;
@@ -656,8 +654,6 @@ async function handleBatchActivate() {
 .node-search-panel :deep(.arco-btn),
 .batch-bar :deep(.arco-btn) {
     box-sizing: border-box;
-    height: 44px;
-    min-height: 44px;
     border-radius: 10px;
 }
 

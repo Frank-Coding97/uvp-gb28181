@@ -353,8 +353,6 @@ onMounted(() => {
 .log-page :deep(.uvp-search-panel__fields > .arco-select-view),
 .log-page :deep(.uvp-search-panel__fields > .arco-picker) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   background: var(--uvp-search-control-bg) !important;
   border: 1px solid var(--uvp-search-secondary-btn-border) !important;
   border-radius: 10px !important;
@@ -378,8 +376,6 @@ onMounted(() => {
 
 .log-page :deep(.uvp-search-panel .arco-btn) {
   box-sizing: border-box;
-  height: 44px;
-  min-height: 44px;
   border-radius: 10px;
 }
 

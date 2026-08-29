@@ -3,21 +3,28 @@ package scheduler
 import (
 	"testing"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 )
 
 func TestRecordingPlanSystemJobsAreFixedAndIdempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.SysJobs{}))
 	oldScheduler, oldLog := app.JobScheduler, app.ZapLog
 	t.Cleanup(func() { app.JobScheduler, app.ZapLog = oldScheduler, oldLog })
 	app.JobScheduler = schedulerhelper.NewJobScheduler()
 	app.ZapLog = zap.NewNop()
 	RegisterExecutors()
-	RegisterExecutors()
+	require.NoError(t, RegisterSystemJobs(db))
+	require.NoError(t, RegisterSystemJobs(db))
 	want := map[string]struct{ executor, cron string }{
 		"system-recording-plan-dispatch": {executors.RecordingPlanDispatchExecutorName, "*/5 * * * * *"},
 		"system-recording-plan-heal":     {executors.RecordingPlanHealExecutorName, "0 * * * * *"},
