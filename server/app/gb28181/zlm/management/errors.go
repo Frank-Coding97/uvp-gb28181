@@ -26,6 +26,7 @@ const (
 	CodeUpstreamTimeout       ManagementErrorCode = "upstream_timeout"
 	CodeUnsupportedCapability ManagementErrorCode = "unsupported_capability"
 	CodeOwnershipConflict     ManagementErrorCode = "ownership_conflict"
+	CodeServiceUnavailable    ManagementErrorCode = "service_unavailable"
 	CodeInternal              ManagementErrorCode = "internal_error"
 
 	// ErrorCode* aliases follow the naming used by existing domain packages
@@ -38,6 +39,7 @@ const (
 	ErrorCodeUpstreamTimeout       = CodeUpstreamTimeout
 	ErrorCodeUnsupportedCapability = CodeUnsupportedCapability
 	ErrorCodeOwnershipConflict     = CodeOwnershipConflict
+	ErrorCodeServiceUnavailable    = CodeServiceUnavailable
 	ErrorCodeInternal              = CodeInternal
 )
 
@@ -171,6 +173,8 @@ func HTTPStatusForCode(code ManagementErrorCode) int {
 		return http.StatusUnprocessableEntity
 	case CodeOwnershipConflict:
 		return http.StatusConflict
+	case CodeServiceUnavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -233,6 +237,16 @@ func NewInternalError(nodeID, message string, causes ...error) *ManagementError 
 		message = "internal management error"
 	}
 	return NewManagementError(CodeInternal, nodeID, message, false, causes...)
+}
+
+// NewServiceUnavailableError is used when the HTTP facade is reachable but
+// its management service bundle has not been wired by runtime bootstrap yet.
+// It is intentionally distinct from a remote node being offline.
+func NewServiceUnavailableError(nodeID, message string, causes ...error) *ManagementError {
+	if strings.TrimSpace(message) == "" {
+		message = "media management service is unavailable"
+	}
+	return NewManagementError(CodeServiceUnavailable, nodeID, message, true, causes...)
 }
 
 // WithImpacts returns a copy with safe conflict summaries attached. It keeps

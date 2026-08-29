@@ -103,6 +103,11 @@ var zlmConfigController *gbcontrollers.ZLMConfigController
 // zlmSchedulerController ZLM 调度算法切换 + 日志查询(M3 T3.3,后置注入)
 var zlmSchedulerController *gbcontrollers.ZLMSchedulerController
 
+// zlmManagementController is the single typed management bundle. It is
+// installed once by bootstrap; a nil bundle remains reachable so each
+// protected route returns a stable 503 until runtime dependencies are ready.
+var zlmManagementController atomic.Pointer[gbcontrollers.ZLMManagementController]
+
 // SetMetricsProvider 由 bootstrap 注入聚合器获取函数,绕开循环依赖
 func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
 	dashboardController = gbcontrollers.NewDashboardController(p)
@@ -302,6 +307,31 @@ func SetZLMConfigController(ctrl *gbcontrollers.ZLMConfigController) {
 // SetZLMSchedulerController 由 bootstrap M3 T3.3 注入(算法切换 + 日志)
 func SetZLMSchedulerController(ctrl *gbcontrollers.ZLMSchedulerController) {
 	zlmSchedulerController = ctrl
+}
+
+// SetZLMManagementController injects the typed management HTTP facade after
+// the node/runtime services have been assembled by bootstrap.
+func SetZLMManagementController(ctrl *gbcontrollers.ZLMManagementController) {
+	zlmManagementController.Store(ctrl)
+}
+
+// SetRestartStartedNotifier forwards the process-started lifecycle bridge to
+// the global hook controller. Bootstrap owns the concrete coordinator and
+// installs it after the hook's node UUID resolver is ready.
+func SetRestartStartedNotifier(notifier gbhandler.RestartStartedNotifier) {
+	hookController.SetRestartStartedNotifier(notifier)
+}
+
+func currentZLMManagementController() *gbcontrollers.ZLMManagementController {
+	controller := zlmManagementController.Load()
+	if controller == nil {
+		candidate := gbcontrollers.NewZLMManagementController(nil)
+		if zlmManagementController.CompareAndSwap(nil, candidate) {
+			return candidate
+		}
+		return zlmManagementController.Load()
+	}
+	return controller
 }
 
 // SetKeepaliveCollector 由 bootstrap M2.1 注入(同 SetPlayService 模式)
@@ -708,6 +738,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		// ZLM 集群管理(M1+,后置注入 zlmNodeController)
 		zlm := gb.Group("/zlm")
 		{
+			registerZLMManagementRoutes(zlm)
 			zlm.GET("/nodes", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.List(c) }))
 			zlm.POST("/nodes", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Create(c) }))
 			zlm.GET("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Get(c) }))
@@ -866,6 +897,59 @@ func zlmSchedulerRoute(fn func(*gbcontrollers.ZLMSchedulerController, *gin.Conte
 		}
 		fn(zlmSchedulerController, c)
 	}
+}
+
+// registerZLMManagementRoutes registers only the new typed management
+// surface. Existing nodes/config/restart/scheduler handlers remain the
+// compatibility truth and are intentionally not duplicated here.
+func registerZLMManagementRoutes(zlm *gin.RouterGroup) {
+	zlm.GET("/overview", func(c *gin.Context) { currentZLMManagementController().Overview(c) })
+	zlm.GET("/streams", func(c *gin.Context) { currentZLMManagementController().StreamList(c) })
+	zlm.GET("/nodes/:id/runtime", func(c *gin.Context) { currentZLMManagementController().Runtime(c) })
+	zlm.GET("/nodes/:id/streams", func(c *gin.Context) { currentZLMManagementController().NodeStreams(c) })
+	zlm.GET("/nodes/:id/streams/detail", func(c *gin.Context) { currentZLMManagementController().StreamDetail(c) })
+	zlm.GET("/nodes/:id/streams/viewers", func(c *gin.Context) { currentZLMManagementController().StreamViewers(c) })
+	zlm.POST("/nodes/:id/streams/playback-grant", func(c *gin.Context) { currentZLMManagementController().PreviewGrant(c) })
+	zlm.GET("/nodes/:id/streams/snapshot", func(c *gin.Context) { currentZLMManagementController().Snapshot(c) })
+	zlm.POST("/nodes/:id/streams/close/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightCloseStream(c) })
+	zlm.POST("/nodes/:id/streams/close", func(c *gin.Context) { currentZLMManagementController().CloseStream(c) })
+	zlm.POST("/nodes/:id/streams/force-close", func(c *gin.Context) { currentZLMManagementController().ForceCloseStream(c) })
+	zlm.POST("/nodes/:id/streams/close/batch/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightCloseStreams(c) })
+	zlm.POST("/nodes/:id/streams/close/batch", func(c *gin.Context) { currentZLMManagementController().CloseStreams(c) })
+
+	zlm.GET("/nodes/:id/sessions/network", func(c *gin.Context) { currentZLMManagementController().NetworkSessions(c) })
+	zlm.GET("/nodes/:id/sessions/viewers", func(c *gin.Context) { currentZLMManagementController().SessionViewers(c) })
+	zlm.POST("/nodes/:id/sessions/kick", func(c *gin.Context) { currentZLMManagementController().KickSession(c) })
+
+	zlm.GET("/nodes/:id/proxies/pull", func(c *gin.Context) { currentZLMManagementController().PullProxies(c) })
+	zlm.POST("/nodes/:id/proxies/pull", func(c *gin.Context) { currentZLMManagementController().CreatePullProxy(c) })
+	zlm.GET("/nodes/:id/proxies/pull/:key", func(c *gin.Context) { currentZLMManagementController().PullProxy(c) })
+	zlm.POST("/nodes/:id/proxies/pull/:key/preflight", func(c *gin.Context) { currentZLMManagementController().PreviewDeletePullProxy(c) })
+	zlm.DELETE("/nodes/:id/proxies/pull/:key", func(c *gin.Context) { currentZLMManagementController().DeletePullProxy(c) })
+	zlm.GET("/nodes/:id/proxies/push", func(c *gin.Context) { currentZLMManagementController().PushProxies(c) })
+	zlm.POST("/nodes/:id/proxies/push", func(c *gin.Context) { currentZLMManagementController().CreatePushProxy(c) })
+	zlm.GET("/nodes/:id/proxies/push/:key", func(c *gin.Context) { currentZLMManagementController().PushProxy(c) })
+	zlm.POST("/nodes/:id/proxies/push/:key/preflight", func(c *gin.Context) { currentZLMManagementController().PreviewDeletePushProxy(c) })
+	zlm.DELETE("/nodes/:id/proxies/push/:key", func(c *gin.Context) { currentZLMManagementController().DeletePushProxy(c) })
+
+	zlm.GET("/nodes/:id/ffmpeg-sources", func(c *gin.Context) { currentZLMManagementController().FFmpegSources(c) })
+	zlm.POST("/nodes/:id/ffmpeg-sources", func(c *gin.Context) { currentZLMManagementController().CreateFFmpegSource(c) })
+	zlm.POST("/nodes/:id/ffmpeg-sources/:key/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightDeleteFFmpegSource(c) })
+	zlm.DELETE("/nodes/:id/ffmpeg-sources/:key", func(c *gin.Context) { currentZLMManagementController().DeleteFFmpegSource(c) })
+
+	zlm.GET("/nodes/:id/rtp-servers", func(c *gin.Context) { currentZLMManagementController().RTPServers(c) })
+	zlm.POST("/nodes/:id/rtp-servers", func(c *gin.Context) { currentZLMManagementController().CreateRTPServer(c) })
+	zlm.POST("/nodes/:id/rtp-servers/close/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightCloseRTPServer(c) })
+	zlm.POST("/nodes/:id/rtp-servers/close", func(c *gin.Context) { currentZLMManagementController().CloseRTPServer(c) })
+	zlm.POST("/nodes/:id/rtp-servers/force-close", func(c *gin.Context) { currentZLMManagementController().ForceCloseRTPServer(c) })
+
+	zlm.GET("/nodes/:id/recordings/runtime/status", func(c *gin.Context) { currentZLMManagementController().RecordingStatus(c) })
+	zlm.POST("/nodes/:id/recordings/runtime/start/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightRecording(c) })
+	zlm.POST("/nodes/:id/recordings/runtime/start", func(c *gin.Context) { currentZLMManagementController().StartRecording(c) })
+	zlm.POST("/nodes/:id/recordings/runtime/stop/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightStopRecording(c) })
+	zlm.POST("/nodes/:id/recordings/runtime/stop", func(c *gin.Context) { currentZLMManagementController().StopRecording(c) })
+	zlm.POST("/nodes/:id/recordings/runtime/force-stop/preflight", func(c *gin.Context) { currentZLMManagementController().PreflightForceStopRecording(c) })
+	zlm.POST("/nodes/:id/recordings/runtime/force-stop", func(c *gin.Context) { currentZLMManagementController().ForceStopRecording(c) })
 }
 
 func cascadeRoute(fn func(*gbcascadecontroller.ManagementController, *gin.Context)) gin.HandlerFunc {
