@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -10,6 +11,26 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 )
+
+type targetChangingConfigClient struct {
+	setStarted chan struct{}
+	releaseSet chan struct{}
+	once       sync.Once
+}
+
+func (c *targetChangingConfigClient) SetServerConfig(ctx context.Context, _ *node.Node, _ map[string]string) error {
+	c.once.Do(func() { close(c.setStarted) })
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-c.releaseSet:
+		return nil
+	}
+}
+
+func (c *targetChangingConfigClient) GetServerConfig(context.Context, *node.Node) (map[string]string, error) {
+	return map[string]string{"hook.timeoutSec": "12"}, nil
+}
 
 type t13ConfigClient struct {
 	reads  []map[string]string
@@ -94,4 +115,36 @@ func TestConfigServiceT13_HotReloadAppliedOnlyAfterExactReadback(t *testing.T) {
 	resp, err := service.NewConfigService(reg, okClient).Update(context.Background(), id, service.UpdateConfigReq{Changes: map[string]string{"hook.timeoutSec": "12"}})
 	require.NoError(t, err)
 	require.Equal(t, []string{"hook.timeoutSec"}, resp.Applied)
+}
+
+func TestConfigServiceT13_TargetChangeCannotReturnApplied(t *testing.T) {
+	reg := fakeRegistry(t, node.Node{
+		Name: "n1", Host: "old-zlm", APIPort: 18080, APISecret: "old-secret",
+		MediaServerUUID: "uuid-a", State: node.StateActive,
+	})
+	id := reg.List()[0].ID
+	client := &targetChangingConfigClient{setStarted: make(chan struct{}), releaseSet: make(chan struct{})}
+	svc := service.NewConfigService(reg, client)
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := svc.Update(context.Background(), id, service.UpdateConfigReq{
+			Changes: map[string]string{"hook.timeoutSec": "12"},
+		})
+		result <- err
+	}()
+
+	<-client.setStarted
+	current, ok := reg.Get(id)
+	require.True(t, ok)
+	current.Host = "new-zlm"
+	current.APIPort = 28080
+	current.APISecret = "new-secret"
+	require.NoError(t, reg.Update(context.Background(), *current))
+	close(client.releaseSet)
+
+	err := <-result
+	require.ErrorIs(t, err, service.ErrConfigTargetChanged)
+	require.NotContains(t, err.Error(), "old-secret")
+	require.NotContains(t, err.Error(), "new-secret")
 }

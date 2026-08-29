@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
@@ -20,6 +21,11 @@ var ErrConfigReadbackMismatch = errors.New("config_readback_mismatch")
 var ErrConfigReadbackFailed = errors.New("config_readback_failed")
 
 var ErrConfigSetFailed = errors.New("config_set_failed")
+
+// ErrConfigTargetChanged means the node identity/version changed while a hot
+// update was in flight. The command may have reached the old endpoint, so the
+// service must not report the requested values as applied to the current node.
+var ErrConfigTargetChanged = errors.New("config_target_changed")
 
 // ErrRestartRequiredUnsupported 平台尚未实现待重启配置的持久化与应用流程
 var ErrRestartRequiredUnsupported = errors.New("ZLM config requires restart, not supported yet")
@@ -228,6 +234,39 @@ type ConfigReadbackError struct {
 	Cause  error
 }
 
+type configTargetSnapshot struct {
+	id              int64
+	host            string
+	apiPort         int
+	apiSecret       string
+	mediaServerUUID string
+	updatedAt       time.Time
+}
+
+func snapshotConfigTarget(n *node.Node) configTargetSnapshot {
+	if n == nil {
+		return configTargetSnapshot{}
+	}
+	return configTargetSnapshot{
+		id: n.ID, host: n.Host, apiPort: n.APIPort, apiSecret: n.APISecret,
+		mediaServerUUID: n.MediaServerUUID, updatedAt: n.UpdatedAt,
+	}
+}
+
+func (s *ConfigService) ensureConfigTargetUnchanged(expected configTargetSnapshot) error {
+	current, ok := s.registry.Get(expected.id)
+	if !ok || current == nil {
+		return ErrConfigTargetChanged
+	}
+	actual := snapshotConfigTarget(current)
+	if actual.id != expected.id || actual.host != expected.host || actual.apiPort != expected.apiPort ||
+		actual.apiSecret != expected.apiSecret || actual.mediaServerUUID != expected.mediaServerUUID ||
+		!actual.updatedAt.Equal(expected.updatedAt) {
+		return ErrConfigTargetChanged
+	}
+	return nil
+}
+
 func (e *ConfigReadbackError) Error() string {
 	if e == nil {
 		return ""
@@ -360,8 +399,12 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 		return nil, fmt.Errorf("%w: %s", ErrRestartRequiredUnsupported, restartKey)
 	}
 	if len(hotParams) > 0 {
+		target := snapshotConfigTarget(n)
 		if err := s.client.SetServerConfig(ctx, n, hotParams); err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrConfigSetFailed, redactConfigError(err, n, hotParams))
+		}
+		if err := s.ensureConfigTargetUnchanged(target); err != nil {
+			return nil, err
 		}
 		actual, err := s.client.GetServerConfig(ctx, n)
 		if err != nil {
@@ -370,6 +413,9 @@ func (s *ConfigService) Update(ctx context.Context, nodeID int64, req UpdateConf
 				Actual: visibleConfigValues(actual, hotParams),
 				Cause:  redactConfigError(err, n, hotParams),
 			}
+		}
+		if err := s.ensureConfigTargetUnchanged(target); err != nil {
+			return nil, err
 		}
 		actualVisible := visibleConfigValues(actual, hotParams)
 		mismatch := false
