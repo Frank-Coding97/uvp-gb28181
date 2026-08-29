@@ -57,6 +57,7 @@ var autoOnDemandRegistry autoOnDemandNodeRegistry
 var autoOnDemandDispatcher *gbplay.AutoStartDispatcher
 var recordingService *gbrecording.Service
 var cloudRecordingController = gbcontrollers.NewCloudRecordingController(nil)
+var recordingPlanController = gbcontrollers.NewRecordingPlanController()
 var cloudRecordingCatalogController atomic.Pointer[gbcontrollers.CloudRecordingCatalogController]
 var deviceTrafficController atomic.Pointer[gbcontrollers.DeviceTrafficController]
 
@@ -546,6 +547,19 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			cloudRecordings.POST("/active/:id/stop", func(c *gin.Context) { currentCloudRecordingCatalogController().StopActiveSession(c) })
 			cloudRecordings.GET("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().Reconciliations(c) })
 			cloudRecordings.POST("/reconciliations", func(c *gin.Context) { currentCloudRecordingCatalogController().TriggerReconciliation(c) })
+		}
+		recordingPlans := gb.Group("/recording-plans")
+		{
+			recordingPlans.GET("", recordingPlanController.Page)
+			recordingPlans.POST("", recordingPlanController.Create)
+			recordingPlans.PATCH("/channels/:channelId/recording-mode", recordingPlanController.SetChannelMode)
+			recordingPlans.GET("/:id", recordingPlanController.Detail)
+			recordingPlans.PUT("/:id", recordingPlanController.Update)
+			recordingPlans.DELETE("/:id", recordingPlanController.Delete)
+			recordingPlans.PATCH("/:id/status", recordingPlanController.SetEnabled)
+			recordingPlans.GET("/:id/assignment-options/devices", recordingPlanController.SearchDevices)
+			recordingPlans.GET("/:id/assignment-options/channels", recordingPlanController.SearchChannels)
+			recordingPlans.POST("/:id/assignments", recordingPlanController.Assign)
 		}
 		alarms := gb.Group("/alarms")
 		{
