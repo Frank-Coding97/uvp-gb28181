@@ -163,12 +163,25 @@ func TestOpenRtpServerOnlyTrack_MockedZLM(t *testing.T) {
 		if got := r.URL.Query().Get("ssrc"); got != "0200000001" {
 			t.Errorf("ssrc 没透传: %s", got)
 		}
+		if got := r.URL.Query().Get("vhost"); got != "vhost-1" {
+			t.Errorf("vhost 没透传: %s", got)
+		}
+		if got := r.URL.Query().Get("app"); got != "ingress" {
+			t.Errorf("app 没透传: %s", got)
+		}
+		if got := r.URL.Query().Get("local_ip"); got != "192.0.2.20" {
+			t.Errorf("local_ip 没透传: %s", got)
+		}
+		if got := r.URL.Query().Get("re_use_port"); got != "1" {
+			t.Errorf("re_use_port 没透传: %s", got)
+		}
 		_, _ = w.Write([]byte(`{"code":0,"port":40000}`))
 	})
 	defer srv.Close()
 
 	result, err := c.OpenRtpServerWithSSRC(context.Background(), OpenRtpServerRequest{
-		StreamID: "stream-1", SSRC: "0200000001", Port: 0, TCPMode: 0, OnlyTrack: 2,
+		VHost: "vhost-1", App: "ingress", StreamID: "stream-1", SSRC: "0200000001",
+		Port: 0, TCPMode: 0, OnlyTrack: 2, LocalIP: "192.0.2.20", Reuse: true,
 	})
 	if err != nil {
 		t.Fatalf("OpenRtpServer 报错: %v", err)

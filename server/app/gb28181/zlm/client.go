@@ -148,11 +148,15 @@ type OpenRtpServerResult struct {
 // OpenRtpServerRequest describes one ZLM RTP receiver. StreamID is the media
 // path identity while SSRC belongs to the current GB28181 media session.
 type OpenRtpServerRequest struct {
+	VHost     string
+	App       string
 	StreamID  string
 	SSRC      string
 	Port      int
 	TCPMode   int
 	OnlyTrack int
+	LocalIP   string
+	Reuse     bool
 }
 
 // OpenRtpServer preserves the legacy callers that do not need an independent
@@ -171,13 +175,26 @@ func (c *Client) OpenRtpServerWithSSRC(ctx context.Context, request OpenRtpServe
 		Port int `json:"port"`
 	}
 	params := map[string]string{
-		"stream_id":  request.StreamID,
-		"port":       strconv.Itoa(request.Port),
-		"tcp_mode":   strconv.Itoa(request.TCPMode),   // 0=UDP 1=TCP被动
-		"only_track": strconv.Itoa(request.OnlyTrack), // 0=音视频 2=仅视频
+		"stream_id":   request.StreamID,
+		"port":        strconv.Itoa(request.Port),
+		"tcp_mode":    strconv.Itoa(request.TCPMode),   // 0=UDP 1=TCP被动
+		"only_track":  strconv.Itoa(request.OnlyTrack), // 0=音视频 2=仅视频
+		"re_use_port": "0",
+	}
+	if request.VHost != "" {
+		params["vhost"] = request.VHost
+	}
+	if request.App != "" {
+		params["app"] = request.App
 	}
 	if request.SSRC != "" {
 		params["ssrc"] = request.SSRC
+	}
+	if request.LocalIP != "" {
+		params["local_ip"] = request.LocalIP
+	}
+	if request.Reuse {
+		params["re_use_port"] = "1"
 	}
 	if err := c.call(ctx, "openRtpServer", params, &r); err != nil {
 		return nil, err
