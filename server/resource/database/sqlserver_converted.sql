@@ -3,6 +3,26 @@
 
 SET NOCOUNT ON;
 
+IF OBJECT_ID('gb_zlm_managed_resource','U') IS NOT NULL DROP TABLE gb_zlm_managed_resource;
+CREATE TABLE gb_zlm_managed_resource (
+  id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+  node_id BIGINT NOT NULL,
+  resource_type NVARCHAR(32) NOT NULL,
+  resource_key NVARCHAR(255) NOT NULL,
+  app NVARCHAR(64) NOT NULL DEFAULT '',
+  stream NVARCHAR(255) NOT NULL DEFAULT '',
+  identity_fingerprint CHAR(64) NOT NULL,
+  summary NVARCHAR(512) NOT NULL DEFAULT '',
+  created_by BIGINT NOT NULL DEFAULT 0,
+  created_at DATETIME2(3) NOT NULL,
+  last_observed_at DATETIME2(3) NULL,
+  tombstoned_at DATETIME2(3) NULL,
+  updated_at DATETIME2(3) NOT NULL
+);
+CREATE UNIQUE INDEX uk_gb_zlm_managed_resource_identity ON gb_zlm_managed_resource(node_id,resource_type,resource_key);
+CREATE INDEX idx_gb_zlm_managed_resource_observed ON gb_zlm_managed_resource(node_id,last_observed_at);
+CREATE INDEX idx_gb_zlm_managed_resource_tombstone ON gb_zlm_managed_resource(node_id,tombstoned_at);
+
 IF OBJECT_ID('gb_channel','U') IS NOT NULL AND COL_LENGTH('gb_channel','recording_mode') IS NULL ALTER TABLE gb_channel ADD recording_mode NVARCHAR(16) NOT NULL DEFAULT 'off';
 IF OBJECT_ID('gb_recording_plan_gap','U') IS NOT NULL DROP TABLE gb_recording_plan_gap;
 CREATE TABLE gb_recording_plan_gap (id BIGINT IDENTITY(1,1) PRIMARY KEY, plan_id BIGINT NULL, channel_id BIGINT NOT NULL, started_at DATETIME2(3) NOT NULL, ended_at DATETIME2(3) NULL, duration_ms BIGINT NOT NULL DEFAULT 0, reason_code NVARCHAR(64) NOT NULL, reason_message NVARCHAR(500) NOT NULL DEFAULT '', recovered BIT NOT NULL DEFAULT 0, execution_id BIGINT NULL, created_at DATETIME2(3) NOT NULL, updated_at DATETIME2(3) NOT NULL);
