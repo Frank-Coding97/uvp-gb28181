@@ -21,9 +21,16 @@ type Repository struct {
 func NewRepository(db *gorm.DB) *Repository { return &Repository{db: db} }
 
 func (r *Repository) CreatePlan(ctx context.Context, plan *models.GbRecordingPlan, periods []models.GbRecordingPlanPeriod) error {
+	desiredStatus := plan.Status
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(plan).Error; err != nil {
 			return err
+		}
+		if plan.Status != desiredStatus {
+			if err := tx.Model(plan).Update("status", desiredStatus).Error; err != nil {
+				return err
+			}
+			plan.Status = desiredStatus
 		}
 		if len(periods) == 0 {
 			return nil
