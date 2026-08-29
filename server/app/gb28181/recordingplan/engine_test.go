@@ -2,6 +2,7 @@ package recordingplan
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,13 +104,20 @@ func TestEngineDebouncesMediaLossAndIgnoresLateOldGenerationEvent(t *testing.T) 
 	require.EqualValues(t, 1, gaps)
 }
 
-type fakeChannelOperator struct{ started, stopped []uint }
+type fakeChannelOperator struct {
+	mu               sync.Mutex
+	started, stopped []uint
+}
 
 func (f *fakeChannelOperator) Start(_ context.Context, target ChannelTarget) (*play.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.started = append(f.started, target.ID)
 	return &play.Result{StreamID: target.ChannelCode, SSRC: "1", Generation: 1}, nil
 }
 func (f *fakeChannelOperator) Stop(_ context.Context, channelID uint) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, channelID)
 	return nil
 }

@@ -48,6 +48,11 @@ type activePlanRecording struct {
 	lease  *play.SourceLease
 }
 
+type channelLock struct {
+	mutex sync.Mutex
+	refs  int
+}
+
 type Orchestrator struct {
 	live       LiveEnsurer
 	recording  RecordingLifecycle
@@ -57,14 +62,14 @@ type Orchestrator struct {
 	activeMu   sync.RWMutex
 	active     map[uint]activePlanRecording
 	channelMu  sync.Mutex
-	channelMux map[uint]*sync.Mutex
+	channelMux map[uint]*channelLock
 }
 
 func NewOrchestrator(live LiveEnsurer, recording RecordingLifecycle, leases *play.SourceLeaseRegistry, stopper ConditionalGenerationStopper) *Orchestrator {
 	if leases == nil {
 		leases = play.NewSourceLeaseRegistry()
 	}
-	return &Orchestrator{live: live, recording: recording, leases: leases, stopper: stopper, active: make(map[uint]activePlanRecording), channelMux: make(map[uint]*sync.Mutex)}
+	return &Orchestrator{live: live, recording: recording, leases: leases, stopper: stopper, active: make(map[uint]activePlanRecording), channelMux: make(map[uint]*channelLock)}
 }
 
 func (o *Orchestrator) SetCombinedLeaseChecker(checker SourceLeaseChecker) { o.allLeases = checker }
@@ -92,12 +97,13 @@ func (o *Orchestrator) Start(ctx context.Context, target ChannelTarget) (*play.R
 		return nil, &OrchestrationError{Stage: FailureMediaWait, Err: errors.New("媒体流缺少有效代际")}
 	}
 	lease := o.leases.Acquire(result.StreamID, result.Generation, fmt.Sprintf("recording-plan:%d", target.ID))
+	if err := o.recording.BeginPlayback(ctx, result.StreamID); err != nil {
+		_ = lease.Release()
+		return nil, &OrchestrationError{Stage: FailureRecordStart, Err: err}
+	}
 	o.activeMu.Lock()
 	o.active[target.ID] = activePlanRecording{result: result, lease: lease}
 	o.activeMu.Unlock()
-	if err := o.recording.BeginPlayback(ctx, result.StreamID); err != nil {
-		return nil, &OrchestrationError{Stage: FailureRecordStart, Err: err}
-	}
 	copyResult := *result
 	return &copyResult, nil
 }
@@ -141,12 +147,21 @@ func (o *Orchestrator) current(channelID uint) (activePlanRecording, bool) {
 
 func (o *Orchestrator) lockChannel(channelID uint) func() {
 	o.channelMu.Lock()
-	mutex := o.channelMux[channelID]
-	if mutex == nil {
-		mutex = &sync.Mutex{}
-		o.channelMux[channelID] = mutex
+	lock := o.channelMux[channelID]
+	if lock == nil {
+		lock = &channelLock{}
+		o.channelMux[channelID] = lock
 	}
+	lock.refs++
 	o.channelMu.Unlock()
-	mutex.Lock()
-	return mutex.Unlock
+	lock.mutex.Lock()
+	return func() {
+		lock.mutex.Unlock()
+		o.channelMu.Lock()
+		lock.refs--
+		if lock.refs == 0 && o.channelMux[channelID] == lock {
+			delete(o.channelMux, channelID)
+		}
+		o.channelMu.Unlock()
+	}
 }

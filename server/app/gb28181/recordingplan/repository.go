@@ -105,7 +105,7 @@ func (r *Repository) UpdateStateCAS(ctx context.Context, channelID uint, planVer
 	return result.RowsAffected == 1, result.Error
 }
 
-func (r *Repository) OpenGap(ctx context.Context, planID uint64, channelID uint, reasonCode, reasonMessage string, startedAt time.Time) (*models.GbRecordingPlanGap, error) {
+func (r *Repository) OpenGap(ctx context.Context, planID *uint64, channelID uint, reasonCode, reasonMessage string, startedAt time.Time) (*models.GbRecordingPlanGap, error) {
 	var gap models.GbRecordingPlanGap
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		result := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -117,7 +117,7 @@ func (r *Repository) OpenGap(ctx context.Context, planID uint64, channelID uint,
 			return result.Error
 		}
 		gap = models.GbRecordingPlanGap{
-			PlanID: &planID, ChannelID: channelID, StartedAt: startedAt,
+			PlanID: planID, ChannelID: channelID, StartedAt: startedAt,
 			ReasonCode: reasonCode, ReasonMessage: reasonMessage,
 		}
 		return tx.Create(&gap).Error

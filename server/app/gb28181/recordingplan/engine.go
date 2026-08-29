@@ -25,11 +25,19 @@ type LiveCurrentProvider interface {
 }
 
 type EngineOptions struct {
-	InstanceID string
-	BatchSize  int
-	LeaseTTL   time.Duration
-	Enabled    *bool
-	Now        func() time.Time
+	InstanceID        string
+	BatchSize         int
+	Workers           int
+	DeviceConcurrency int
+	BoundaryJitter    time.Duration
+	LeaseTTL          time.Duration
+	Enabled           *bool
+	Now               func() time.Time
+}
+
+type deviceLimiter struct {
+	semaphore chan struct{}
+	refs      int
 }
 
 type Engine struct {
@@ -39,10 +47,15 @@ type Engine struct {
 	current    LiveCurrentProvider
 	instanceID string
 	batchSize  int
+	workers    int
+	deviceMax  int
+	jitterMax  time.Duration
 	leaseTTL   time.Duration
 	enabled    bool
 	now        func() time.Time
 	runMu      sync.Mutex
+	deviceMu   sync.Mutex
+	devices    map[string]*deviceLimiter
 }
 
 func (e *Engine) SetLiveCurrentProvider(provider LiveCurrentProvider) { e.current = provider }
@@ -62,7 +75,16 @@ func NewEngine(db *gorm.DB, operator ChannelOperator, options EngineOptions) *En
 		options.InstanceID = "recording-plan"
 	}
 	if options.BatchSize <= 0 {
-		options.BatchSize = 100
+		options.BatchSize = 200
+	}
+	if options.Workers <= 0 {
+		options.Workers = 8
+	}
+	if options.DeviceConcurrency <= 0 {
+		options.DeviceConcurrency = 2
+	}
+	if options.BoundaryJitter <= 0 {
+		options.BoundaryJitter = 5 * time.Second
 	}
 	if options.LeaseTTL <= 0 {
 		options.LeaseTTL = 15 * time.Second
@@ -74,7 +96,12 @@ func NewEngine(db *gorm.DB, operator ChannelOperator, options EngineOptions) *En
 	if options.Enabled != nil {
 		enabled = *options.Enabled
 	}
-	return &Engine{db: db, repo: NewRepository(db), operator: operator, instanceID: options.InstanceID, batchSize: options.BatchSize, leaseTTL: options.LeaseTTL, enabled: enabled, now: options.Now}
+	return &Engine{
+		db: db, repo: NewRepository(db), operator: operator, instanceID: options.InstanceID,
+		batchSize: options.BatchSize, workers: options.Workers, deviceMax: options.DeviceConcurrency,
+		jitterMax: options.BoundaryJitter, leaseTTL: options.LeaseTTL, enabled: enabled,
+		now: options.Now, devices: make(map[string]*deviceLimiter),
+	}
 }
 
 func (e *Engine) Dispatch(ctx context.Context) error {
@@ -88,11 +115,33 @@ func (e *Engine) Dispatch(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	var combined error
+	if len(states) == 0 {
+		return nil
+	}
+	workerCount := min(e.workers, len(states))
+	jobs := make(chan *models.GbRecordingPlanChannelState)
+	errs := make(chan error, len(states))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for state := range jobs {
+				if err := e.reconcile(ctx, state, now); err != nil {
+					errs <- err
+				}
+			}
+		}()
+	}
 	for i := range states {
-		if err := e.reconcile(ctx, &states[i], now); err != nil {
-			combined = errors.Join(combined, err)
-		}
+		jobs <- &states[i]
+	}
+	close(jobs)
+	workers.Wait()
+	close(errs)
+	var combined error
+	for err := range errs {
+		combined = errors.Join(combined, err)
 	}
 	return combined
 }
@@ -130,7 +179,7 @@ func (e *Engine) DeviceStatusChanged(ctx context.Context, deviceID string, onlin
 				updates["actual_state"] = models.RecordingStateWaitingDevice
 				updates["reason_code"] = ReasonDeviceOffline
 				updates["reason_message"] = reason
-				_, _ = e.repo.OpenGap(ctx, planIDValue(state.PlanID), channel.ID, ReasonDeviceOffline, reason, now)
+				_, _ = e.repo.OpenGap(ctx, state.PlanID, channel.ID, ReasonDeviceOffline, reason, now)
 			}
 			if found.RowsAffected > 0 {
 				_ = e.db.WithContext(ctx).Model(&models.GbRecordingPlanChannelState{}).Where("channel_id = ?", channel.ID).Updates(updates).Error
@@ -183,13 +232,18 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 	}
 	decision := DecideReconcile(input)
 	if mediaLost {
-		_, _ = e.repo.OpenGap(ctx, planIDValue(state.PlanID), channel.ID, ReasonMediaStreamLost, "媒体流已注销", now)
+		_, _ = e.repo.OpenGap(ctx, state.PlanID, channel.ID, ReasonMediaStreamLost, "媒体流已注销", now)
 	}
 	streamID, generation, nodeID := state.StreamID, state.Generation, state.NodeID
 	execution := models.GbRecordingPlanExecution{PlanID: state.PlanID, ChannelID: channel.ID, DeviceID: channel.DeviceID, TriggerSource: "scheduler", Attempt: state.AttemptCount + 1, StartedAt: now, CreatedAt: now}
 	if decision.Action == ActionStart {
 		execution.Action, execution.Stage = ActionStart, FailureStreamStart
+		releaseDevice, acquireErr := e.acquireDevice(ctx, channel.DeviceID)
+		if acquireErr != nil {
+			return acquireErr
+		}
 		live, err := e.operator.Start(ctx, ChannelTarget{ID: channel.ID, DeviceCode: channel.DeviceID, ChannelCode: channel.ChannelID})
+		releaseDevice()
 		if err != nil {
 			failureStage, message := FailureStreamStart, err.Error()
 			var orchestration *OrchestrationError
@@ -213,7 +267,13 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 		}
 	} else if decision.Action == ActionStop {
 		execution.Action, execution.Stage = ActionStop, "record_stop"
-		if err := e.operator.Stop(ctx, channel.ID); err != nil {
+		releaseDevice, acquireErr := e.acquireDevice(ctx, channel.DeviceID)
+		if acquireErr != nil {
+			return acquireErr
+		}
+		err := e.operator.Stop(ctx, channel.ID)
+		releaseDevice()
+		if err != nil {
 			decision.ActualState, decision.ReasonCode, decision.ReasonMessage = models.RecordingStateStopping, "RECORD_STOP_FAILED", err.Error()
 			retry := now.Add(time.Minute)
 			decision.NextRetryAt = &retry
@@ -225,7 +285,7 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 		}
 	}
 	if decision.OpenGap {
-		_, _ = e.repo.OpenGap(ctx, planIDValue(state.PlanID), channel.ID, decision.ReasonCode, decision.ReasonMessage, now)
+		_, _ = e.repo.OpenGap(ctx, state.PlanID, channel.ID, decision.ReasonCode, decision.ReasonMessage, now)
 	}
 	if decision.CloseGap {
 		_, _ = e.repo.CloseOpenGap(ctx, channel.ID, now, nil)
@@ -241,8 +301,11 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 	reconcileAt := now.Add(time.Minute)
 	if decision.NextRetryAt != nil {
 		reconcileAt = *decision.NextRetryAt
-	} else if nextTransition != nil && nextTransition.Before(reconcileAt) {
-		reconcileAt = *nextTransition
+	} else if nextTransition != nil {
+		jitteredTransition := nextTransition.Add(deterministicJitter(channel.ID, e.jitterMax))
+		if jitteredTransition.Before(reconcileAt) {
+			reconcileAt = jitteredTransition
+		}
 	}
 	updates := map[string]any{
 		"plan_version": planVersion, "desired_state": decision.DesiredState, "actual_state": decision.ActualState,
@@ -253,6 +316,47 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 	}
 	_, err := e.repo.UpdateStateCAS(ctx, channel.ID, state.PlanVersion, state.StateVersion, updates)
 	return err
+}
+
+func (e *Engine) acquireDevice(ctx context.Context, deviceID string) (func(), error) {
+	e.deviceMu.Lock()
+	limiter := e.devices[deviceID]
+	if limiter == nil {
+		limiter = &deviceLimiter{semaphore: make(chan struct{}, e.deviceMax)}
+		e.devices[deviceID] = limiter
+	}
+	limiter.refs++
+	e.deviceMu.Unlock()
+	select {
+	case limiter.semaphore <- struct{}{}:
+		return func() {
+			<-limiter.semaphore
+			e.releaseDeviceRef(deviceID, limiter)
+		}, nil
+	case <-ctx.Done():
+		e.releaseDeviceRef(deviceID, limiter)
+		return nil, ctx.Err()
+	}
+}
+
+func (e *Engine) releaseDeviceRef(deviceID string, limiter *deviceLimiter) {
+	e.deviceMu.Lock()
+	defer e.deviceMu.Unlock()
+	limiter.refs--
+	if limiter.refs == 0 && e.devices[deviceID] == limiter {
+		delete(e.devices, deviceID)
+	}
+}
+
+func deterministicJitter(channelID uint, maximum time.Duration) time.Duration {
+	if maximum <= 0 {
+		return 0
+	}
+	steps := uint64(maximum / time.Millisecond)
+	if steps == 0 {
+		return 0
+	}
+	return time.Duration(uint64(channelID)%steps) * time.Millisecond
 }
 
 func (e *Engine) ensureStateRows(ctx context.Context, now time.Time) error {
@@ -290,11 +394,4 @@ func (e *Engine) requestAllStateReconcile(ctx context.Context, now time.Time) er
 		}
 		lastID = ids[len(ids)-1]
 	}
-}
-
-func planIDValue(planID *uint64) uint64 {
-	if planID == nil {
-		return 0
-	}
-	return *planID
 }

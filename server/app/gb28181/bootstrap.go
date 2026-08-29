@@ -878,7 +878,8 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	recordingPlanOrchestrator := recordingplan.NewOrchestrator(playSvc, recordingSvc, recordingPlanLeases, nil)
 	planEnabled := cfg.Recording.PlanEnabled
 	recordingPlanEngine = recordingplan.NewEngine(app.DB(), recordingPlanOrchestrator, recordingplan.EngineOptions{
-		InstanceID: uuid.NewString(), BatchSize: 100, LeaseTTL: 15 * time.Second, Enabled: &planEnabled,
+		InstanceID: uuid.NewString(), BatchSize: 200, Workers: 8, DeviceConcurrency: 2,
+		BoundaryJitter: 5 * time.Second, LeaseTTL: 15 * time.Second, Enabled: &planEnabled,
 	})
 	recordingPlanEngine.SetLiveCurrentProvider(playSvc)
 	executors.SetRecordingPlanRuntime(recordingPlanEngine)

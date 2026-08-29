@@ -98,9 +98,10 @@ func TestRepositoryGapOpenIsIdempotentAndCloseComputesDuration(t *testing.T) {
 	db := newRepositoryTestDB(t)
 	repo := NewRepository(db)
 	start := time.Date(2026, 8, 29, 17, 0, 0, 0, time.UTC)
-	first, err := repo.OpenGap(context.Background(), 1, 8, "DEVICE_OFFLINE", "设备离线", start)
+	planID := uint64(1)
+	first, err := repo.OpenGap(context.Background(), &planID, 8, "DEVICE_OFFLINE", "设备离线", start)
 	require.NoError(t, err)
-	second, err := repo.OpenGap(context.Background(), 1, 8, "DEVICE_OFFLINE", "设备离线", start.Add(time.Second))
+	second, err := repo.OpenGap(context.Background(), &planID, 8, "DEVICE_OFFLINE", "设备离线", start.Add(time.Second))
 	require.NoError(t, err)
 	require.Equal(t, first.ID, second.ID)
 

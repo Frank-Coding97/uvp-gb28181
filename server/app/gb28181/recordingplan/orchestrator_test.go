@@ -80,6 +80,29 @@ func TestOrchestratorStopKeepsLiveWhenCascadeLeaseRemains(t *testing.T) {
 	require.Zero(t, stopper.calls)
 }
 
+func TestOrchestratorRecordingFailureReleasesLeaseAndAllowsRetry(t *testing.T) {
+	live := &fakePlanLive{result: &play.Result{StreamID: "stream-1", SSRC: "ssrc-1", Generation: 4}}
+	recording := &fakePlanRecording{beginErr: errors.New("zlm unavailable")}
+	leases := play.NewSourceLeaseRegistry()
+	orchestrator := NewOrchestrator(live, recording, leases, nil)
+	_, err := orchestrator.Start(context.Background(), ChannelTarget{ID: 7, DeviceCode: "D", ChannelCode: "C"})
+	require.Error(t, err)
+	require.False(t, leases.HasLease("stream-1"))
+	recording.beginErr = nil
+	_, err = orchestrator.Start(context.Background(), ChannelTarget{ID: 7, DeviceCode: "D", ChannelCode: "C"})
+	require.NoError(t, err)
+	require.Equal(t, 2, recording.recordCalls)
+}
+
+func TestOrchestratorReleasesPerChannelLocksAfterHighCardinalityTraffic(t *testing.T) {
+	orchestrator := NewOrchestrator(&fakePlanLive{}, &fakePlanRecording{}, play.NewSourceLeaseRegistry(), nil)
+	for channelID := uint(1); channelID <= 10000; channelID++ {
+		unlock := orchestrator.lockChannel(channelID)
+		unlock()
+	}
+	require.Empty(t, orchestrator.channelMux)
+}
+
 type fakePlanLive struct {
 	result *play.Result
 	err    error
@@ -97,6 +120,7 @@ type fakePlanRecording struct {
 	order       *[]string
 	recordCalls int
 	disableErr  error
+	beginErr    error
 }
 
 func (f *fakePlanRecording) Enable(context.Context, uint) (*models.GbChannel, error) {
@@ -110,7 +134,7 @@ func (f *fakePlanRecording) BeginPlayback(context.Context, string) error {
 	if f.order != nil {
 		*f.order = append(*f.order, "record")
 	}
-	return nil
+	return f.beginErr
 }
 func (f *fakePlanRecording) Disable(context.Context, uint) (*models.GbChannel, error) {
 	return &models.GbChannel{}, f.disableErr
