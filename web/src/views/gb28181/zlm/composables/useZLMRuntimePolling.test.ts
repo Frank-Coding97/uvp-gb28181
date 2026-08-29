@@ -85,6 +85,44 @@ describe("ZLM runtime polling", () => {
     expect(publish).not.toHaveBeenCalled();
   });
 
+  it("survives 100 slow node switches without stale publish or timer leaks", async () => {
+    vi.useFakeTimers();
+    const requests: Array<{
+      nodeId: number;
+      signal: AbortSignal;
+      task: ReturnType<typeof deferred<number>>;
+    }> = [];
+    const publish = vi.fn();
+    const load = vi.fn((nodeId: number, signal: AbortSignal) => {
+      const task = deferred<number>();
+      requests.push({ nodeId, signal, task });
+      return task.promise;
+    });
+    const polling = createZLMRuntimePollingController({ load, publish, intervalMs: 1000 });
+
+    polling.setNode(1);
+    polling.start();
+    for (let nodeId = 2; nodeId <= 100; nodeId += 1) polling.setNode(nodeId);
+
+    expect(requests).toHaveLength(100);
+    expect(requests.slice(0, -1).every(request => request.signal.aborted)).toBe(true);
+    expect(requests.at(-1)?.signal.aborted).toBe(false);
+
+    requests.at(-1)?.task.resolve(100);
+    await Promise.resolve();
+    await Promise.resolve();
+    for (const request of requests.slice(0, -1).reverse()) request.task.resolve(request.nodeId);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith(100, 100);
+    expect(vi.getTimerCount()).toBe(1);
+
+    polling.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("reports a synchronous loader failure and keeps the polling chain alive", async () => {
     vi.useFakeTimers();
     const failure = new Error("synchronous load failure");

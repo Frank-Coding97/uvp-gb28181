@@ -123,7 +123,6 @@ watch(selectedNodeId, (nodeId, previous) => {
   if (nodeId === previous) return;
   pageData.value = null;
   observedCapability.value = "unknown";
-  page.value = 1;
   formVisible.value = false;
   closeDialog();
   loading.value = nodeId !== null;

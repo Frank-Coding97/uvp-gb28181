@@ -16,6 +16,7 @@ import {
   type NodeFormErrors,
   type NodeFormState
 } from "./nodeFormState";
+import { zlmErrorPresentation } from "./components/zlmFormatters";
 
 const props = defineProps<{
   visible: boolean;
@@ -78,10 +79,7 @@ async function handleSubmit() {
     emit("saved");
     emit("update:visible", false);
   } catch (error) {
-    const message = (error as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message
-      || (error as Error)?.message
-      || "节点保存失败";
-    Message.error(message);
+    Message.error(zlmErrorPresentation(error).label);
   } finally {
     loading.value = false;
   }

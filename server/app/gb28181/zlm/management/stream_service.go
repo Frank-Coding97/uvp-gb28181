@@ -475,6 +475,7 @@ func (s *StreamService) ListStreamViewers(ctx context.Context, nodeID int64, med
 	if err != nil {
 		return result, normalizeRuntimeReadError(err, nodeID)
 	}
+	players = boundedPageInput(players)
 	viewers := make([]StreamViewer, 0, len(players))
 	for _, player := range players {
 		viewers = append(viewers, streamViewer(current, media, player))

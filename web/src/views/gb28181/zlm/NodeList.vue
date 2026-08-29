@@ -153,7 +153,7 @@ async function handleActivate(node: ZLMNode) {
       Message.success("节点已激活并重新允许调度");
       refresh();
     } catch (error) {
-      Message.error((error as Error)?.message || "激活失败");
+      Message.error(zlmErrorPresentation(error).label);
     }
   });
 }
@@ -173,7 +173,7 @@ async function handleReprobe(node: ZLMNode) {
       Message.success("候选连接探测成功，节点状态已回读");
       refresh();
     } catch (error) {
-      Message.error((error as Error)?.message || "重新探测失败");
+      Message.error(zlmErrorPresentation(error).label);
     }
   });
 }

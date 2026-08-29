@@ -115,8 +115,6 @@ watch(selectedNodeId, (nodeId, previous) => {
   kickViewer.value = null;
   networkData.value = null;
   viewerData.value = null;
-  networkFilter.page = 1;
-  viewerPage.value = 1;
   loadError.value = null;
   loading.value = nodeId !== null;
   if (nodeId) void router.replace({ query: { ...route.query, nodeId: String(nodeId) } });

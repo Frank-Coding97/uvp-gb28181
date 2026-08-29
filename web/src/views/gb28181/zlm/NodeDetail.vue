@@ -156,7 +156,7 @@ async function activate() {
       Message.success("节点已激活");
       refresh();
     } catch (error) {
-      Message.error((error as Error)?.message || "激活失败");
+      Message.error(zlmErrorPresentation(error).label);
     }
   });
 }
@@ -174,7 +174,7 @@ async function reprobe() {
       Message.success("连接探测成功，节点状态已回读");
       refresh();
     } catch (error) {
-      Message.error((error as Error)?.message || "探测失败");
+      Message.error(zlmErrorPresentation(error).label);
     }
   });
 }

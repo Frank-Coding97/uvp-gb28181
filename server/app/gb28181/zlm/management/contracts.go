@@ -159,6 +159,17 @@ func Paginate[T any](items []T, request PageRequest) Page[T] {
 	return PaginateWithLimit(items, request, MaxResponseItems)
 }
 
+// boundedPageInput keeps one item beyond the response cap so Paginate can
+// still report truncation without forcing mapping layers to materialize every
+// row from an unpaged upstream response.
+func boundedPageInput[T any](items []T) []T {
+	limit := MaxResponseItems + 1
+	if len(items) > limit {
+		return items[:limit]
+	}
+	return items
+}
+
 // PaginateWithLimit is used when an endpoint has a stricter response limit.
 // A non-positive limit uses the shared cap; no endpoint can raise the global
 // cap accidentally.
@@ -187,7 +198,10 @@ func PaginateWithLimit[T any](items []T, request PageRequest, responseLimit int)
 	if end > len(items) {
 		end = len(items)
 	}
-	page.List = items[start:end]
+	// Copy the visible page into its own bounded backing array. Returning a
+	// subslice would keep an entire unpaged ZLM response alive until the HTTP
+	// response is released (for example 20,000 sessions for a 100-row page).
+	page.List = append(make([]T, 0, end-start), items[start:end]...)
 	return page
 }
 

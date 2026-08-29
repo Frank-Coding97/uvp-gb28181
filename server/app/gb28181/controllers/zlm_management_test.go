@@ -110,7 +110,7 @@ func TestZLMManagementControllerForceBodyNeverSelectsForceService(t *testing.T) 
 	router.POST("/nodes/:id/streams/force-close", NewZLMManagementController(&ZLMManagementBundle{Streams: service}).ForceCloseStream)
 
 	body := `{"target":{"media":{"schema":"rtsp","vhost":"__defaultVhost__","app":"live","stream":"cam-1"}},"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","force":true}`
-	req := httptest.NewRequest(http.MethodPost, "/nodes/1/streams/close", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/nodes/1/streams/close?force=true", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
@@ -118,6 +118,24 @@ func TestZLMManagementControllerForceBodyNeverSelectsForceService(t *testing.T) 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 	require.Equal(t, 1, service.closeCalls)
 	require.Equal(t, 0, service.forceCloseCalls)
+}
+
+func TestT22ZLMManagementControllerRejectsCrossNodeTarget(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service := &t14StreamService{}
+	router := gin.New()
+	router.POST("/nodes/:id/streams/close", NewZLMManagementController(&ZLMManagementBundle{Streams: service}).CloseStream)
+
+	body := `{"target":{"nodeId":2,"media":{"schema":"rtsp","vhost":"__defaultVhost__","app":"live","stream":"cam-1"}},"fingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
+	req := httptest.NewRequest(http.MethodPost, "/nodes/1/streams/close", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "target.nodeId")
+	require.Zero(t, service.closeCalls)
+	require.Zero(t, service.forceCloseCalls)
 }
 
 func TestZLMManagementControllerMediaAndPageQueriesAcceptTogether(t *testing.T) {

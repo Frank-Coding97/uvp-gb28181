@@ -140,6 +140,7 @@ func (s *SessionService) ListNetworkSessions(ctx context.Context, request Networ
 	if err != nil {
 		return result, normalizeRuntimeReadError(err, request.NodeID)
 	}
+	sessions = boundedPageInput(sessions)
 	items := make([]NetworkSession, 0, len(sessions))
 	for _, session := range sessions {
 		items = append(items, NetworkSession{
@@ -179,6 +180,7 @@ func (s *SessionService) listMediaViewers(ctx context.Context, nodeID int64, med
 	if err != nil {
 		return result, normalizeRuntimeReadError(err, nodeID)
 	}
+	players = boundedPageInput(players)
 	viewers := make([]StreamViewer, 0, len(players))
 	for _, player := range players {
 		viewers = append(viewers, streamViewer(current, media, player))

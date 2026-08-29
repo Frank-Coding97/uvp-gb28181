@@ -129,8 +129,6 @@ watch(selectedNodeId, (nodeId, previous) => {
   data.push = null;
   observedCapability.pull = "unknown";
   observedCapability.push = "unknown";
-  pages.pull.page = 1;
-  pages.push.page = 1;
   formVisible.value = false;
   closeDelete();
   loading.value = nodeId !== null;

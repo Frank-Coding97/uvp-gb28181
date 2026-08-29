@@ -15,6 +15,7 @@ import { useZLMContextStore } from "@/store/modules/zlm-context";
 import { useUserStoreHook } from "@/store/modules/user";
 import NodeConfigPanel from "./components/NodeConfigPanel.vue";
 import ZLMNodeContextBar from "./components/ZLMNodeContextBar.vue";
+import { zlmErrorPresentation } from "./components/zlmFormatters";
 
 const route = useRoute();
 const router = useRouter();
@@ -62,7 +63,7 @@ async function loadNodes() {
     if (response.code !== 0) throw new Error(response.message || "媒体节点加载失败");
     nodes.value = response.data?.list ?? [];
   } catch (error) {
-    nodesError.value = error instanceof Error ? error.message : "媒体节点加载失败";
+    nodesError.value = zlmErrorPresentation(error).label;
   } finally {
     nodesLoading.value = false;
   }
@@ -108,7 +109,7 @@ async function pollRestart(nodeId: number, operationId: string, generation: numb
     }
     if (operation.status === "failed" || operation.status === "unknown") {
       restartPolling.value = false;
-      restartError.value = operation.error || restartStatusPresentation(operation.status).description;
+      restartError.value = restartStatusPresentation(operation.status).description;
       Message.error(restartError.value);
       return;
     }
@@ -116,7 +117,7 @@ async function pollRestart(nodeId: number, operationId: string, generation: numb
   } catch (error) {
     if (generation !== restartGeneration) return;
     restartPolling.value = false;
-    restartError.value = error instanceof Error ? error.message : "重启状态读取失败";
+    restartError.value = zlmErrorPresentation(error).label;
   }
 }
 
@@ -141,7 +142,7 @@ async function performRestart() {
     Message.info("重启已受理，正在等待离线、心跳恢复和配置收敛");
     void pollRestart(nodeId, response.data.operationId, generation);
   } catch (error) {
-    restartError.value = error instanceof Error ? error.message : "重启未被后端受理";
+    restartError.value = zlmErrorPresentation(error).label;
   }
 }
 

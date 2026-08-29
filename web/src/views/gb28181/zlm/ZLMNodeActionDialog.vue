@@ -11,6 +11,7 @@ import {
 } from "@/api/gb28181-zlm";
 import { useZLMContextStore, type ZLMContextNode } from "@/store/modules/zlm-context";
 import ZLMDangerActionDialog from "./components/ZLMDangerActionDialog.vue";
+import { zlmErrorPresentation } from "./components/zlmFormatters";
 import {
   isNodeImpactPreflight,
   nodeActionCopy,
@@ -97,9 +98,7 @@ async function loadPreflight() {
     preflight.value = response.data;
   } catch (error) {
     if (currentGeneration !== generation || !props.visible) return;
-    loadError.value = (error as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message
-      || (error as Error)?.message
-      || "影响预检失败";
+    loadError.value = zlmErrorPresentation(error).label;
   } finally {
     if (currentGeneration === generation) preflightLoading.value = false;
   }
@@ -159,9 +158,7 @@ async function confirm(payload: { fingerprint: string }) {
     emit("update:visible", false);
   } catch (error) {
     const status = (error as { response?: { status?: number } })?.response?.status;
-    const message = (error as { response?: { data?: { message?: string } }; message?: string })?.response?.data?.message
-      || (error as Error)?.message
-      || "操作失败";
+    const message = zlmErrorPresentation(error).label;
     if (status === 409) {
       const latestImpacts = nodeImpactItemsFromError(error);
       const impactText = latestImpacts.length ? `；后端返回影响：${latestImpacts.join("，")}` : "";

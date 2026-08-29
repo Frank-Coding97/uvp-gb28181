@@ -16,6 +16,7 @@ import {
   updateResultRows,
   type ConfigUpdateResultRow
 } from "../nodeConfigState";
+import { zlmErrorPresentation } from "./zlmFormatters";
 
 const props = withDefaults(defineProps<{ nodeId: number; editable?: boolean }>(), { editable: true });
 const emit = defineEmits<{
@@ -69,7 +70,7 @@ async function refresh(options: { force?: boolean } = {}) {
     if (!groups.value.some(group => group.name === activeGroup.value)) activeGroup.value = groups.value[0]?.name ?? "";
     return true;
   } catch (error) {
-    loadError.value = error instanceof Error ? error.message : "节点配置加载失败";
+    loadError.value = zlmErrorPresentation(error).label;
     return false;
   } finally {
     loading.value = false;
@@ -129,7 +130,7 @@ async function handleSave() {
     if (rows.some(row => row.tone === "danger")) Message.warning("配置命令已返回，但存在回读不一致或未确认项");
     else Message.success("配置已下发并完成实际值回读");
   } catch (error) {
-    Message.error(error instanceof Error ? error.message : "配置保存失败");
+    Message.error(zlmErrorPresentation(error).label);
   } finally {
     saving.value = false;
   }
@@ -142,9 +143,9 @@ async function handleTest() {
     const response = await testZLMNodeConnection(props.nodeId);
     if (response.code !== 0) throw new Error(response.message || "连通性探测失败");
     if (response.data.online) Message.success(`节点在线，HTTP 端口 ${response.data.httpPort || "未返回"}`);
-    else Message.error(`节点不可达：${response.data.error || "未知原因"}`);
+    else Message.error("节点不可达，请检查候选地址、端口和密钥");
   } catch (error) {
-    Message.error(error instanceof Error ? error.message : "连通性探测失败");
+    Message.error(zlmErrorPresentation(error).label);
   } finally {
     testing.value = false;
   }

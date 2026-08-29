@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { kickZLMSession, type ZLMStreamViewer } from "@/api/gb28181-zlm-runtime";
 import ZLMDangerActionDialog from "./components/ZLMDangerActionDialog.vue";
+import { zlmErrorPresentation } from "./components/zlmFormatters";
 import { streamIdentityKey } from "./streamManagementState";
 
 const props = defineProps<{
@@ -50,7 +51,7 @@ async function confirm(payload: { nodeId: number; targetKey: string }) {
     emit("done", response.data);
     close();
   } catch (error) {
-    Message.error((error as Error)?.message || "踢除观看会话失败");
+    Message.error(zlmErrorPresentation(error).label);
   } finally {
     busy.value = false;
   }

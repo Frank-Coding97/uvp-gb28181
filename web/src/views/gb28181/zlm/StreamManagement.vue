@@ -166,7 +166,6 @@ function closeInteractions() {
 watch(selectedNodeId, (nodeId, previous) => {
   if (nodeId === previous) return;
   closeInteractions();
-  page.value = 1;
   selectedKeys.value = [];
   pageData.value = null;
   loadError.value = null;
