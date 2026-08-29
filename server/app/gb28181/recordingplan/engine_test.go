@@ -10,6 +10,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan/schedule"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
 
 func TestEngineRecoversInsideScheduleAndKeepsOutsideStopped(t *testing.T) {
@@ -72,6 +73,36 @@ func TestEngineDeviceEventsAdvanceReconcileAndTrackOfflineGapIdempotently(t *tes
 	require.Zero(t, gaps)
 }
 
+func TestEngineDebouncesMediaLossAndIgnoresLateOldGenerationEvent(t *testing.T) {
+	db := newRepositoryTestDB(t)
+	require.NoError(t, db.AutoMigrate(&models.GbChannel{}))
+	now := time.Date(2026, 8, 31, 9, 0, 0, 0, schedule.BeijingLocation())
+	channel := models.GbChannel{DeviceID: "D", ChannelID: "C", Status: models.ChannelStatusOnline, RecordingMode: models.RecordingModeContinuous}
+	require.NoError(t, db.Create(&channel).Error)
+	state := models.GbRecordingPlanChannelState{ChannelID: channel.ID, DesiredState: models.RecordingDesiredRecording, ActualState: models.RecordingStateRecording, StreamID: "stream", Generation: 3, ReconcileAt: now.Add(time.Hour)}
+	require.NoError(t, db.Create(&state).Error)
+	operator := &fakeChannelOperator{}
+	current := &fakeLiveCurrent{ref: stream.LiveRef{StreamID: "stream", Generation: 3}, exists: true}
+	engine := NewEngine(db, operator, EngineOptions{Now: func() time.Time { return now }})
+	engine.SetLiveCurrentProvider(current)
+
+	require.NoError(t, engine.ObserveStream(context.Background(), "stream", false))
+	now = now.Add(2 * time.Second)
+	require.NoError(t, engine.Dispatch(context.Background()))
+	require.Empty(t, operator.started, "late unregister for old generation must not restart current live")
+
+	current.exists = false
+	for i := 0; i < 20; i++ {
+		require.NoError(t, engine.ObserveStream(context.Background(), "stream", false))
+	}
+	now = now.Add(2 * time.Second)
+	require.NoError(t, engine.Dispatch(context.Background()))
+	require.Len(t, operator.started, 1)
+	var gaps int64
+	require.NoError(t, db.Model(&models.GbRecordingPlanGap{}).Where("channel_id = ?", channel.ID).Count(&gaps).Error)
+	require.EqualValues(t, 1, gaps)
+}
+
 type fakeChannelOperator struct{ started, stopped []uint }
 
 func (f *fakeChannelOperator) Start(_ context.Context, target ChannelTarget) (*play.Result, error) {
@@ -84,3 +115,10 @@ func (f *fakeChannelOperator) Stop(_ context.Context, channelID uint) error {
 }
 
 func boolPointer(value bool) *bool { return &value }
+
+type fakeLiveCurrent struct {
+	ref    stream.LiveRef
+	exists bool
+}
+
+func (f *fakeLiveCurrent) CurrentLiveRef(string) (stream.LiveRef, bool) { return f.ref, f.exists }

@@ -74,6 +74,9 @@ var cascadeManagementController *gbcascadecontroller.ManagementController
 var sourceLeaseMu sync.Mutex
 var cascadeSourceLeaseChecker gbhandler.SourceLeaseChecker
 var recordingPlanSourceLeaseChecker gbhandler.SourceLeaseChecker
+var streamObserverMu sync.Mutex
+var recordingStreamObserver gbhandler.StreamObserver
+var recordingPlanStreamObserver gbhandler.StreamObserver
 
 var setupController *gbcontrollers.SetupController
 
@@ -485,11 +488,21 @@ func SetRecordingService(service *gbrecording.Service, resolver gbhandler.NodeUU
 	}
 	rebuildPlayController()
 	hookController.SetRecordMP4Indexer(resolver, indexer)
-	if service == nil {
-		hookController.SetStreamObserver(nil)
-		return
-	}
-	hookController.SetStreamObserver(service)
+	streamObserverMu.Lock()
+	recordingStreamObserver = service
+	applyStreamObservers()
+	streamObserverMu.Unlock()
+}
+
+func SetRecordingPlanStreamObserver(observer gbhandler.StreamObserver) {
+	streamObserverMu.Lock()
+	recordingPlanStreamObserver = observer
+	applyStreamObservers()
+	streamObserverMu.Unlock()
+}
+
+func applyStreamObservers() {
+	hookController.SetStreamObserver(gbhandler.CombinedStreamObserver{recordingStreamObserver, recordingPlanStreamObserver})
 }
 
 func SetCloudRecordingCatalogService(service gbcontrollers.CloudRecordingCatalogAPI) {

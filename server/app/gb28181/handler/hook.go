@@ -88,6 +88,18 @@ type StreamObserver interface {
 	ObserveStream(context.Context, string, bool) error
 }
 
+type CombinedStreamObserver []StreamObserver
+
+func (observers CombinedStreamObserver) ObserveStream(ctx context.Context, streamID string, registered bool) error {
+	var combined error
+	for _, observer := range observers {
+		if observer != nil {
+			combined = errors.Join(combined, observer.ObserveStream(ctx, streamID, registered))
+		}
+	}
+	return combined
+}
+
 type PlaybackMediaSink interface {
 	OnPlaybackStreamEnded(context.Context, string, string) error
 }

@@ -12,11 +12,16 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan/schedule"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
 
 type ChannelOperator interface {
 	Start(context.Context, ChannelTarget) (*play.Result, error)
 	Stop(context.Context, uint) error
+}
+
+type LiveCurrentProvider interface {
+	CurrentLiveRef(string) (stream.LiveRef, bool)
 }
 
 type EngineOptions struct {
@@ -31,12 +36,25 @@ type Engine struct {
 	db         *gorm.DB
 	repo       *Repository
 	operator   ChannelOperator
+	current    LiveCurrentProvider
 	instanceID string
 	batchSize  int
 	leaseTTL   time.Duration
 	enabled    bool
 	now        func() time.Time
 	runMu      sync.Mutex
+}
+
+func (e *Engine) SetLiveCurrentProvider(provider LiveCurrentProvider) { e.current = provider }
+
+func (e *Engine) ObserveStream(ctx context.Context, streamID string, registered bool) error {
+	if registered || streamID == "" || !e.enabled {
+		return nil
+	}
+	reconcileAt := e.now().Add(2 * time.Second)
+	return e.db.WithContext(ctx).Model(&models.GbRecordingPlanChannelState{}).
+		Where("stream_id = ? AND actual_state = ?", streamID, models.RecordingStateRecording).
+		Updates(map[string]any{"reconcile_at": reconcileAt, "reason_code": "MEDIA_STREAM_LOST_PENDING"}).Error
 }
 
 func NewEngine(db *gorm.DB, operator ChannelOperator, options EngineOptions) *Engine {
@@ -129,6 +147,14 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 		return result.Error
 	}
 	input := ReconcileInput{Mode: channel.RecordingMode, DeviceOnline: channel.Status == models.ChannelStatusOnline, ActualState: state.ActualState, Attempt: state.AttemptCount, Now: now}
+	mediaLost := false
+	if state.ActualState == models.RecordingStateRecording && state.StreamID != "" && e.current != nil {
+		current, exists := e.current.CurrentLiveRef(state.StreamID)
+		if !exists || (state.Generation > 0 && current.Generation != state.Generation) {
+			mediaLost = true
+			input.ActualState = models.RecordingStateIdle
+		}
+	}
 	var planVersion uint64
 	var nextTransition *time.Time
 	if channel.RecordingMode == models.RecordingModeScheduled {
@@ -156,6 +182,10 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 		}
 	}
 	decision := DecideReconcile(input)
+	if mediaLost {
+		_, _ = e.repo.OpenGap(ctx, planIDValue(state.PlanID), channel.ID, ReasonMediaStreamLost, "媒体流已注销", now)
+	}
+	streamID, generation, nodeID := state.StreamID, state.Generation, state.NodeID
 	execution := models.GbRecordingPlanExecution{PlanID: state.PlanID, ChannelID: channel.ID, DeviceID: channel.DeviceID, TriggerSource: "scheduler", Attempt: state.AttemptCount + 1, StartedAt: now, CreatedAt: now}
 	if decision.Action == ActionStart {
 		execution.Action, execution.Stage = ActionStart, FailureStreamStart
@@ -174,8 +204,10 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 			execution.Result, execution.Stage = "success", FailureRecordStart
 			if live != nil {
 				execution.StreamID, execution.Generation = live.StreamID, live.Generation
+				streamID, generation = live.StreamID, live.Generation
 				if live.Node != nil {
 					execution.NodeID = fmt.Sprint(live.Node.ID)
+					nodeID = execution.NodeID
 				}
 			}
 		}
@@ -217,6 +249,7 @@ func (e *Engine) reconcile(ctx context.Context, state *models.GbRecordingPlanCha
 		"reason_code": decision.ReasonCode, "reason_message": decision.ReasonMessage,
 		"next_transition_at": nextTransition, "next_retry_at": decision.NextRetryAt, "reconcile_at": reconcileAt,
 		"attempt_count": decision.Attempt, "lease_owner": "", "lease_until": nil,
+		"stream_id": streamID, "generation": generation, "node_id": nodeID,
 	}
 	_, err := e.repo.UpdateStateCAS(ctx, channel.ID, state.PlanVersion, state.StateVersion, updates)
 	return err

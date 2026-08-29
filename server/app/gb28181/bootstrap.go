@@ -880,9 +880,11 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	recordingPlanEngine = recordingplan.NewEngine(app.DB(), recordingPlanOrchestrator, recordingplan.EngineOptions{
 		InstanceID: uuid.NewString(), BatchSize: 100, LeaseTTL: 15 * time.Second, Enabled: &planEnabled,
 	})
+	recordingPlanEngine.SetLiveCurrentProvider(playSvc)
 	executors.SetRecordingPlanRuntime(recordingPlanEngine)
 	device.SetStatusObserver(recordingPlanEngine)
 	gbroutes.SetRecordingPlanSourceLeaseChecker(recordingPlanLeases)
+	gbroutes.SetRecordingPlanStreamObserver(recordingPlanEngine)
 	app.ZapLog.Info("GB28181 云端录像 service / Hook 已装配")
 
 	if cfg.Recording.ReconcileIntervalSec <= 0 {
@@ -960,6 +962,7 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 
 func stopRecordingRuntime() {
 	device.SetStatusObserver(nil)
+	gbroutes.SetRecordingPlanStreamObserver(nil)
 	executors.SetRecordingPlanRuntime(nil)
 	gbroutes.SetRecordingPlanSourceLeaseChecker(nil)
 	recordingPlanEngine = nil

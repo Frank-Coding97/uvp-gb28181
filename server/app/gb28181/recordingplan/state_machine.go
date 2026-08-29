@@ -27,6 +27,7 @@ const (
 	ReasonMediaTimeout      = "MEDIA_TIMEOUT"
 	ReasonRecordStartFailed = "RECORD_START_FAILED"
 	ReasonPlanChanged       = "PLAN_CHANGED"
+	ReasonMediaStreamLost   = "MEDIA_STREAM_LOST"
 )
 
 type ReconcileInput struct {
@@ -144,6 +145,8 @@ func failureReason(stage string) string {
 		return ReasonStreamStartFailed
 	case FailureRecordStart:
 		return ReasonRecordStartFailed
+	case "media_lost":
+		return ReasonMediaStreamLost
 	default:
 		return ReasonMediaTimeout
 	}
