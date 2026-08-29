@@ -145,5 +145,9 @@ export default {
         ["codegen"]: "code generation",
         ["plugins-manager"]: "plugins manager",
         ["params-manager"]: "params manager",
+        ["media-section-cluster"]: "Cluster",
+        ["media-section-monitoring"]: "Monitoring",
+        ["media-section-ingress"]: "Ingress",
+        ["media-section-capabilities"]: "Capabilities",
     }
 };
