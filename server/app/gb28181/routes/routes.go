@@ -553,6 +553,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			recordingPlans.GET("", recordingPlanController.Page)
 			recordingPlans.POST("", recordingPlanController.Create)
 			recordingPlans.PATCH("/channels/:channelId/recording-mode", recordingPlanController.SetChannelMode)
+			recordingPlans.GET("/channels/:channelId/diagnosis", recordingPlanController.DiagnoseChannel)
+			recordingPlans.GET("/channels/:channelId/timeline", recordingPlanController.ChannelTimeline)
 			recordingPlans.GET("/:id", recordingPlanController.Detail)
 			recordingPlans.PUT("/:id", recordingPlanController.Update)
 			recordingPlans.DELETE("/:id", recordingPlanController.Delete)
@@ -560,6 +562,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			recordingPlans.GET("/:id/assignment-options/devices", recordingPlanController.SearchDevices)
 			recordingPlans.GET("/:id/assignment-options/channels", recordingPlanController.SearchChannels)
 			recordingPlans.POST("/:id/assignments", recordingPlanController.Assign)
+			recordingPlans.GET("/:id/channels", recordingPlanController.PlanChannels)
 		}
 		alarms := gb.Group("/alarms")
 		{

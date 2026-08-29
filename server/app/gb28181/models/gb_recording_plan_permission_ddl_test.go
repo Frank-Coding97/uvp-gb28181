@@ -13,6 +13,7 @@ func TestRecordingPlanPermissionMigrationsCoverAllDatabases(t *testing.T) {
 		for _, token := range []string{
 			"/api/gb28181/recording-plans", "/api/gb28181/recording-plans/:id/assignments",
 			"/api/gb28181/recording-plans/channels/:channelid/recording-mode",
+			"/api/gb28181/recording-plans/:id/channels", "/api/gb28181/recording-plans/channels/:channelid/diagnosis",
 			"gb28181:recording-plan:view", "gb28181:recording-plan:maintain", "gb28181:recording-plan:assign",
 			"sys_api", "sys_menu_api", "sys_role_menu", "sys_casbin_rule", "not exists",
 		} {

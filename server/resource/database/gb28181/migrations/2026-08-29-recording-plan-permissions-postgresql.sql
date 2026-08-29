@@ -21,11 +21,14 @@ SELECT s.title,s.path,s.method,'GB28181 录像计划',CURRENT_TIMESTAMP,CURRENT_
  ('搜索分配设备','/api/gb28181/recording-plans/:id/assignment-options/devices','GET'),
  ('搜索分配通道','/api/gb28181/recording-plans/:id/assignment-options/channels','GET'),
  ('分配录像计划','/api/gb28181/recording-plans/:id/assignments','POST'),
- ('切换通道录像模式','/api/gb28181/recording-plans/channels/:channelId/recording-mode','PATCH')
+ ('切换通道录像模式','/api/gb28181/recording-plans/channels/:channelId/recording-mode','PATCH'),
+ ('查询计划通道状态','/api/gb28181/recording-plans/:id/channels','GET'),
+ ('诊断通道录像','/api/gb28181/recording-plans/channels/:channelId/diagnosis','GET'),
+ ('查询通道执行时间线','/api/gb28181/recording-plans/channels/:channelId/timeline','GET')
 ) AS s(title,path,method) WHERE NOT EXISTS (SELECT 1 FROM sys_api a WHERE a.path=s.path AND a.method=s.method AND a.deleted_at IS NULL);
 
 INSERT INTO sys_menu_api (menu_id,api_id)
-SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:recording-plan:view' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND a.method='GET' AND a.path IN ('/api/gb28181/recording-plans','/api/gb28181/recording-plans/:id')
+SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:recording-plan:view' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND a.method='GET' AND a.path IN ('/api/gb28181/recording-plans','/api/gb28181/recording-plans/:id','/api/gb28181/recording-plans/:id/channels','/api/gb28181/recording-plans/channels/:channelId/diagnosis','/api/gb28181/recording-plans/channels/:channelId/timeline')
 AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 INSERT INTO sys_menu_api (menu_id,api_id)
 SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission='gb28181:recording-plan:maintain' AND m.deleted_at IS NULL AND a.deleted_at IS NULL

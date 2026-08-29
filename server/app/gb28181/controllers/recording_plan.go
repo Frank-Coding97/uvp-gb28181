@@ -222,6 +222,62 @@ func (c *RecordingPlanController) SetChannelMode(ctx *gin.Context) {
 	c.success(ctx, nil)
 }
 
+func (c *RecordingPlanController) PlanChannels(ctx *gin.Context) {
+	deptID, _, ok := c.identity(ctx)
+	if !ok {
+		return
+	}
+	planID, ok := c.planID(ctx)
+	if !ok {
+		return
+	}
+	page, pageSize := pagination(ctx)
+	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).PagePlanChannels(ctx, deptID, planID, recordingplan.ChannelStatusQuery{
+		Keyword: ctx.Query("keyword"), DeviceID: ctx.Query("deviceId"), ActualState: ctx.Query("actualState"),
+		ReasonCode: ctx.Query("reasonCode"), Page: page, PageSize: pageSize,
+	})
+	if err != nil {
+		c.respondError(ctx, err)
+		return
+	}
+	c.success(ctx, result)
+}
+
+func (c *RecordingPlanController) ChannelTimeline(ctx *gin.Context) {
+	deptID, _, ok := c.identity(ctx)
+	if !ok {
+		return
+	}
+	channelID, ok := c.channelID(ctx)
+	if !ok {
+		return
+	}
+	page, pageSize := pagination(ctx)
+	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).Timeline(ctx, deptID, channelID, page, pageSize)
+	if err != nil {
+		c.respondError(ctx, err)
+		return
+	}
+	c.success(ctx, result)
+}
+
+func (c *RecordingPlanController) DiagnoseChannel(ctx *gin.Context) {
+	deptID, _, ok := c.identity(ctx)
+	if !ok {
+		return
+	}
+	channelID, ok := c.channelID(ctx)
+	if !ok {
+		return
+	}
+	result, err := recordingplan.NewDiagnosticService(c.dbFunc()).DiagnoseChannel(ctx, deptID, channelID)
+	if err != nil {
+		c.respondError(ctx, err)
+		return
+	}
+	c.success(ctx, result)
+}
+
 func (c *RecordingPlanController) assignmentIdentity(ctx *gin.Context) (uint, uint, uint64, bool) {
 	deptID, actorID, ok := c.identity(ctx)
 	if !ok {
@@ -264,6 +320,15 @@ func (c *RecordingPlanController) planID(ctx *gin.Context) (uint64, bool) {
 		return 0, false
 	}
 	return planID, true
+}
+
+func (c *RecordingPlanController) channelID(ctx *gin.Context) (uint, bool) {
+	channelID, err := strconv.ParseUint(ctx.Param("channelId"), 10, 64)
+	if err != nil || channelID == 0 {
+		c.failure(ctx, http.StatusBadRequest, "通道 ID 不合法")
+		return 0, false
+	}
+	return uint(channelID), true
 }
 
 func (c *RecordingPlanController) respondError(ctx *gin.Context, err error) {

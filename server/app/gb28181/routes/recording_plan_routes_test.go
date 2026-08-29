@@ -23,6 +23,9 @@ func TestRegisterRoutesIncludesRecordingPlanEndpoints(t *testing.T) {
 		"GET /api/gb28181/recording-plans/:id/assignment-options/channels":      false,
 		"POST /api/gb28181/recording-plans/:id/assignments":                     false,
 		"PATCH /api/gb28181/recording-plans/channels/:channelId/recording-mode": false,
+		"GET /api/gb28181/recording-plans/channels/:channelId/diagnosis":        false,
+		"GET /api/gb28181/recording-plans/channels/:channelId/timeline":         false,
+		"GET /api/gb28181/recording-plans/:id/channels":                         false,
 	}
 	for _, route := range engine.Routes() {
 		key := route.Method + " " + route.Path
