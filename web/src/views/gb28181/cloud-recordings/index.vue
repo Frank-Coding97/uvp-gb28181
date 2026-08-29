@@ -15,6 +15,7 @@
               :aria-pressed="activeView === 'files'"
               @click="activeView = 'files'"
             >
+              <FileVideo2 data-testid="files-tab-icon" :size="14" aria-hidden="true" />
               录像文件 <span class="recording-view-switch__count">{{ pagination.total }}</span>
             </button>
             <button
@@ -24,6 +25,7 @@
               :aria-pressed="activeView === 'active'"
               @click="activeView = 'active'"
             >
+              <CircleDot data-testid="active-tab-icon" :size="14" aria-hidden="true" />
               正在录像 <span class="recording-view-switch__count">{{ activeRecordings.length }}</span>
             </button>
           </div>
@@ -56,7 +58,7 @@
             </span>
             <a-button
               v-if="canReconcile"
-              type="primary"
+              class="recording-reconcile-button"
               data-testid="recording-reconcile"
               :loading="reconciling"
               @click="reconcile"
@@ -267,7 +269,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
-import { CircleCheck, Download, Eye, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, TriangleAlert } from "@lucide/vue";
+import { CircleCheck, CircleDot, Download, Eye, FileVideo2, LoaderCircle, Play, RefreshCw, RotateCcw, ScanSearch, Search, TriangleAlert } from "@lucide/vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
@@ -594,6 +596,17 @@ onBeforeUnmount(() => {
 .cloud-recordings-page :deep(.uvp-data-table .arco-table-cell) { font-size: 14px; line-height: 22px; }
 .cloud-recordings-toolbar { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 10px; }
 .cloud-recordings-header__actions { display: flex; gap: 8px; align-items: center; }
+.recording-reconcile-button {
+  color: color-mix(in srgb, #7c3aed 82%, var(--uvp-text-primary));
+  background: color-mix(in srgb, #7c3aed 9%, var(--uvp-panel-bg));
+  border-color: color-mix(in srgb, #7c3aed 26%, var(--uvp-panel-border));
+  box-shadow: 0 1px 2px rgb(124 58 237 / 8%);
+}
+.recording-reconcile-button:hover {
+  color: color-mix(in srgb, #6d28d9 88%, var(--uvp-text-primary));
+  background: color-mix(in srgb, #7c3aed 14%, var(--uvp-panel-bg));
+  border-color: color-mix(in srgb, #7c3aed 38%, var(--uvp-panel-border));
+}
 .recording-date-range { width: 360px; max-width: 100%; }
 .recording-view-switch button { display: inline-flex; align-items: center; gap: 6px; }
 .recording-view-switch__count { color: var(--uvp-text-tertiary); font-variant-numeric: tabular-nums; }

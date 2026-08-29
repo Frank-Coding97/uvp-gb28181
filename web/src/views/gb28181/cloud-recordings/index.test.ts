@@ -175,12 +175,14 @@ describe("CloudRecordings", () => {
     expect(api.triggerReconciliation).toHaveBeenCalledTimes(1);
   });
 
-  it("emphasizes reconciliation and renders a success status icon", async () => {
+  it("distinguishes reconciliation from the primary query action and renders a success status icon", async () => {
     api.listReconciliations.mockResolvedValue({ code: 0, message: "", data: { list: [{ status: "success" }] } });
     const wrapper = mount(CloudRecordings, { global: { stubs } });
     await flushPromises();
 
-    expect(wrapper.get("[data-testid='recording-reconcile']").attributes("data-type")).toBe("primary");
+    expect(wrapper.get("[data-testid='recording-reconcile']").classes()).toContain("recording-reconcile-button");
+    expect(wrapper.get("[data-testid='recording-reconcile']").attributes("data-type")).not.toBe("primary");
+    expect(source).toMatch(/\.recording-reconcile-button\s*{[^}]*color-mix\(in srgb, #7c3aed 82%, var\(--uvp-text-primary\)\);[^}]*background:[^;]*#7c3aed 9%/s);
     expect(wrapper.get("[data-testid='reconciliation-summary']").text()).toContain("节点目录已对账");
     expect(wrapper.find("[data-testid='reconciliation-success-icon']").exists()).toBe(true);
   });
@@ -212,6 +214,8 @@ describe("CloudRecordings", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("record.mp4");
     expect(wrapper.get("[data-testid='recording-view-switch']").attributes("role")).toBe("group");
+    expect(wrapper.find("[data-testid='files-tab-icon']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='active-tab-icon']").exists()).toBe(true);
     expect(wrapper.get("[data-testid='files-tab']").attributes("aria-pressed")).toBe("true");
     await wrapper.get("[data-testid='active-tab']").trigger("click");
     await flushPromises();
