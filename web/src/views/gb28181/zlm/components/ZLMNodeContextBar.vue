@@ -143,7 +143,7 @@ function select(value: string | number | undefined) {
   border-radius: 0;
 }
 
-.zlm-node-context[data-minimal="true"] .zlm-node-context__select {
+.zlm-node-context[data-minimal="true"] :deep(.zlm-node-context__select) {
   width: 190px;
 }
 

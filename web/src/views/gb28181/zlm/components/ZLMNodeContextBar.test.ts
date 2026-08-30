@@ -94,7 +94,7 @@ describe("ZLMNodeContextBar", () => {
     expect(source).toMatch(/data-minimal="true"[^}]*border:\s*0/s);
     expect(source).toMatch(/data-minimal="true"[^}]*background:\s*transparent/s);
     expect(source).toContain('class="zlm-node-context__refresh uvp-refresh-btn"');
-    expect(source).toMatch(/data-minimal="true"[^}]*\.zlm-node-context__select\s*\{[^}]*width:\s*190px/s);
+    expect(source).toMatch(/data-minimal="true"[^}]*:deep\(\.zlm-node-context__select\)\s*\{[^}]*width:\s*190px/s);
     expect(source).toMatch(/arco-select-view-single[^}]*min-height:\s*40px/s);
   });
 });
