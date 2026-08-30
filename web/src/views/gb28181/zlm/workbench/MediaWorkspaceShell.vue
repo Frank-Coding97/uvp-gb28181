@@ -96,9 +96,18 @@ const emit = defineEmits<{
     </nav>
 
     <main class="media-workspace-shell__panel" data-shell-block="panel">
-      <slot :name="activeView" :active="true">
-        <div class="media-workspace-shell__empty" role="status">当前视图暂无可展示内容。</div>
-      </slot>
+      <section
+        v-for="view in views"
+        v-show="activeView === view.key"
+        :key="view.key"
+        class="media-workspace-shell__panel-view"
+        :data-panel-view="view.key"
+        :aria-hidden="activeView === view.key ? 'false' : 'true'"
+      >
+        <slot :name="view.key" :active="activeView === view.key">
+          <div class="media-workspace-shell__empty" role="status">当前视图暂无可展示内容。</div>
+        </slot>
+      </section>
     </main>
   </div>
 </template>
@@ -113,6 +122,7 @@ const emit = defineEmits<{
 .media-workspace-shell__tabs strong { font-size: 13px; font-weight: var(--zlm-fw-semibold); }
 .media-workspace-shell__tabs span { font-size: 10px; white-space: nowrap; }
 .media-workspace-shell__panel { min-width: 0; min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; }
+.media-workspace-shell__panel-view { box-sizing: border-box; width: 100%; height: 100%; min-height: 0; }
 .media-workspace-shell__empty { display: grid; min-height: 260px; place-items: center; color: var(--zlm-text-3); background: var(--zlm-card); border: 1px dashed var(--zlm-border); border-radius: var(--zlm-radius-lg); }
 @media (max-width: 768px) { .media-workspace-shell { gap: 10px; padding: 0 0 12px; } .media-workspace-shell__tabs button { min-width: 100px; } }
 </style>

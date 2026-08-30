@@ -15,7 +15,7 @@ const pages = [
 ];
 
 describe("MediaWorkspaceShell", () => {
-  it("renders header, scope, tabs and only the active panel in a stable order", async () => {
+  it("renders header, scope and tabs in order while keeping inactive panels mounted", async () => {
     const wrapper = mount(MediaWorkspaceShell, {
       props: {
         title: "媒体监控",
@@ -37,7 +37,9 @@ describe("MediaWorkspaceShell", () => {
     const blocks = wrapper.findAll("[data-shell-block]").map(block => block.attributes("data-shell-block"));
     expect(blocks).toEqual(["header", "scope", "tabs", "panel"]);
     expect(wrapper.find("[data-panel='streams']").exists()).toBe(true);
-    expect(wrapper.find("[data-panel='sessions']").exists()).toBe(false);
+    expect(wrapper.find("[data-panel='sessions']").exists()).toBe(true);
+    expect(wrapper.get("[data-panel-view='streams']").attributes("aria-hidden")).toBe("false");
+    expect(wrapper.get("[data-panel-view='sessions']").attributes("aria-hidden")).toBe("true");
 
     await wrapper.get("button[data-view='sessions']").trigger("click");
     expect(wrapper.emitted("update:activeView")?.[0]).toEqual(["sessions"]);
