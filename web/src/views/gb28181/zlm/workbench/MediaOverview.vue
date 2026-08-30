@@ -1,9 +1,18 @@
 <script setup lang="ts">
+import { ref } from "vue";
+
 import MediaWorkspaceShell from "./MediaWorkspaceShell.vue";
 import { useMediaWorkspaceRoute } from "./useMediaWorkspaceRoute";
+import MediaOverviewPanel from "./overview/MediaOverviewPanel.vue";
 
 const workspace = useMediaWorkspaceRoute("overview");
+const overviewPanel = ref<InstanceType<typeof MediaOverviewPanel> | null>(null);
 const views = [{ key: "overview", label: "全局态势", description: "节点与媒体健康" }];
+
+function refresh() {
+  void workspace.refreshScope();
+  overviewPanel.value?.refresh();
+}
 </script>
 
 <template>
@@ -23,11 +32,11 @@ const views = [{ key: "overview", label: "全局态势", description: "节点与
     @update:active-view="workspace.setActiveView"
     @update:scope="workspace.setScope"
     @update:auto-refresh="workspace.autoRefresh.value = $event"
-    @refresh="workspace.refreshScope"
+    @refresh="refresh"
     @refresh-scope="workspace.refreshScope"
   >
-    <template #overview><div class="workspace-pending" role="status">正在准备媒体态势面板…</div></template>
+    <template #overview>
+      <MediaOverviewPanel ref="overviewPanel" :active="workspace.activeView.value === 'overview'" :auto-refresh="workspace.autoRefresh.value" />
+    </template>
   </MediaWorkspaceShell>
 </template>
-
-<style scoped>.workspace-pending { display: grid; min-height: 280px; place-items: center; color: var(--zlm-text-3); background: var(--zlm-card); border: 1px dashed var(--zlm-border); border-radius: var(--zlm-radius-lg); }</style>

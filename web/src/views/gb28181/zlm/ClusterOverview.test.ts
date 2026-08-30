@@ -66,10 +66,11 @@ describe("cluster overview presentation", () => {
       nodeId: 9,
       media: { schema: "rtsp", vhost: "__defaultVhost__", app: "live/main", stream: "cam 01" }
     } as ZLMRuntimeMedia;
-    expect(nodeOverviewLocation(9)).toEqual({ path: "/gb28181/zlm/nodes/9", query: { nodeId: "9" } });
+    expect(nodeOverviewLocation(9)).toEqual({ path: "/media/nodes/9", query: { view: "overview", nodeId: "9" } });
     expect(streamOverviewLocation(media)).toEqual({
-      path: "/gb28181/zlm/streams",
+      path: "/media/monitoring",
       query: {
+        view: "streams",
         nodeId: "9",
         schema: "rtsp",
         vhost: "__defaultVhost__",
@@ -79,11 +80,10 @@ describe("cluster overview presentation", () => {
     });
   });
 
-  it("uses the typed overview API and lifecycle-aware polling without clearing partial data", () => {
+  it("keeps the old page as a thin shell over the canonical panel", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/ClusterOverview.vue"), "utf8");
-    expect(source).toContain("getZLMOverview");
-    expect(source).toContain("useZLMRuntimePolling");
-    expect(source).toContain("部分节点不可用");
-    expect(source).toContain("aria-label");
+    expect(source).toContain("MediaOverviewPanel");
+    expect(source).not.toContain("getZLMOverview");
+    expect(source).not.toContain("useZLMRuntimePolling");
   });
 });
