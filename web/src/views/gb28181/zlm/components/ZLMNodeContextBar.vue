@@ -36,10 +36,13 @@ watch(
     if (!context.initialized) context.initialize(nodes, queryNodeId);
     else context.reconcileVisibleNodes(nodes);
     if (props.allowAll && props.defaultAll && !defaultAllApplied.value) {
-      defaultAllApplied.value = true;
       const queryID = Number(Array.isArray(queryNodeId) ? queryNodeId[0] : queryNodeId);
-      if (!Number.isSafeInteger(queryID) || queryID <= 0 || !nodes.some(node => node.id === queryID)) {
+      const hasValidQuery = Number.isSafeInteger(queryID) && queryID > 0 && nodes.some(node => node.id === queryID);
+      if (hasValidQuery) {
+        defaultAllApplied.value = true;
+      } else {
         context.selectAll();
+        if (nodes.length > 0) defaultAllApplied.value = true;
       }
     }
   },

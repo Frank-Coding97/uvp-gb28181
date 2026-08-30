@@ -55,7 +55,7 @@ describe("ZLMNodeContextBar", () => {
     setActivePinia(testPinia);
     const context = useZLMContextStore();
     const wrapper = mount(ZLMNodeContextBar, {
-      props: { nodes, allowAll: true, defaultAll: true },
+      props: { nodes: [], allowAll: true, defaultAll: true },
       global: { plugins: [testPinia] }
     });
 
@@ -63,6 +63,10 @@ describe("ZLMNodeContextBar", () => {
     expect(context.selectedNodeId).toBeNull();
     expect(wrapper.text()).toContain("全部节点");
     expect(wrapper.text()).toContain("聚合全部可见节点");
+
+    await wrapper.setProps({ nodes });
+    await flushPromises();
+    expect(context.selectedNodeId).toBeNull();
 
     context.selectNode(1);
     await wrapper.setProps({ nodes: [...nodes] });
