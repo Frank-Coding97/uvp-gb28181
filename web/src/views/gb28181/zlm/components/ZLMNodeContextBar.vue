@@ -109,7 +109,7 @@ function select(value: string | number | undefined) {
     </div>
 
     <a-button
-      class="zlm-node-context__refresh"
+      class="zlm-node-context__refresh uvp-refresh-btn"
       :loading="loading"
       :disabled="disabled"
       aria-label="刷新媒体节点"
@@ -141,6 +141,31 @@ function select(value: string | number | undefined) {
   background: transparent;
   border: 0;
   border-radius: 0;
+}
+
+.zlm-node-context[data-minimal="true"] .zlm-node-context__select {
+  width: 190px;
+}
+
+.zlm-node-context[data-minimal="true"] :deep(.arco-select-view-single) {
+  box-sizing: border-box;
+  min-height: 40px;
+  background: var(--uvp-search-control-bg) !important;
+  border-color: transparent !important;
+  border-radius: 10px !important;
+  box-shadow: var(--uvp-search-control-shadow) !important;
+}
+
+.zlm-node-context[data-minimal="true"] :deep(.arco-select-view-single:hover),
+.zlm-node-context[data-minimal="true"] :deep(.arco-select-view-focus) {
+  border-color: transparent !important;
+  box-shadow: var(--uvp-search-control-focus-shadow) !important;
+}
+
+.zlm-node-context[data-minimal="true"] .zlm-node-context__refresh {
+  min-width: 88px;
+  height: 40px;
+  border-radius: 8px;
 }
 
 .zlm-node-context__identity {
