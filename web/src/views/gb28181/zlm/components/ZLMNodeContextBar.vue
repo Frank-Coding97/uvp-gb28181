@@ -135,7 +135,12 @@ function select(value: string | number | undefined) {
 }
 
 .zlm-node-context[data-minimal="true"] {
+  min-height: auto;
   justify-content: flex-end;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
 }
 
 .zlm-node-context__identity {

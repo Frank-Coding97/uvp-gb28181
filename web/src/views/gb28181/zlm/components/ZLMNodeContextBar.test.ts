@@ -1,5 +1,7 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { useZLMContextStore } from "@/store/modules/zlm-context";
@@ -87,5 +89,9 @@ describe("ZLMNodeContextBar", () => {
     expect(wrapper.find(".zlm-node-context__label").exists()).toBe(false);
     expect(wrapper.find(".zlm-node-context__status").exists()).toBe(false);
     expect(wrapper.text()).toContain("全部节点");
+
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/components/ZLMNodeContextBar.vue"), "utf8");
+    expect(source).toMatch(/data-minimal="true"[^}]*border:\s*0/s);
+    expect(source).toMatch(/data-minimal="true"[^}]*background:\s*transparent/s);
   });
 });
