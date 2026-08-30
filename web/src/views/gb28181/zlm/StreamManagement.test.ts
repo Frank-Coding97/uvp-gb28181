@@ -72,7 +72,7 @@ describe("stream management state", () => {
   });
 
   it("reuses PlayWindow and typed preview/snapshot/close APIs without direct ZLM access", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/StreamManagement.vue"), "utf8");
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/StreamPanel.vue"), "utf8");
     expect(source).toContain("PlayWindow");
     expect(source).toContain("issueZLMPreviewGrant");
     expect(source).toContain("fetchZLMStreamSnapshot");

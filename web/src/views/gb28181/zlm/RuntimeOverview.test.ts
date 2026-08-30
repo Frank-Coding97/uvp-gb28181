@@ -69,12 +69,11 @@ describe("runtime overview state", () => {
   });
 
   it("uses typed node polling and exposes stream/session drill-downs", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8");
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/RuntimeSummaryPanel.vue"), "utf8");
     expect(source).toContain("getZLMNodeRuntime");
     expect(source).toContain("useZLMRuntimePolling");
-    expect(source).toContain("ZLMNodeContextBar");
     expect(source).toContain("文件描述符");
-    expect(source).toContain("/gb28181/zlm/streams");
-    expect(source).toContain("/gb28181/zlm/sessions");
+    expect(source).toContain("drilldown");
+    expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8")).toContain("ZLMNodeContextBar");
   });
 });

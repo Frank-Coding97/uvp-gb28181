@@ -41,7 +41,7 @@ describe("session management state", () => {
   });
 
   it("uses independent typed server queries and lifecycle-aware polling", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/SessionManagement.vue"), "utf8");
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/NetworkSessionPanel.vue"), "utf8");
     const kickSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/ZLMSessionKickDialog.vue"), "utf8");
     expect(source).toContain("listZLMNetworkSessions");
     expect(source).toContain("listZLMMediaViewers");

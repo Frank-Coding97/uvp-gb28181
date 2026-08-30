@@ -1,12 +1,32 @@
 <script setup lang="ts">
+import { computed, ref } from "vue";
+import { useRoute } from "vue-router";
+
 import MediaWorkspaceShell from "./MediaWorkspaceShell.vue";
+import NetworkSessionPanel from "./monitoring/NetworkSessionPanel.vue";
+import StreamPanel from "./monitoring/StreamPanel.vue";
 import { useMediaWorkspaceRoute } from "./useMediaWorkspaceRoute";
 
 const workspace = useMediaWorkspaceRoute("monitoring");
+const route = useRoute();
+const streamPanel = ref<{ refresh: () => void } | null>(null);
+const sessionPanel = ref<{ refresh: () => void } | null>(null);
 const views = [
   { key: "streams", label: "流媒体", description: "在线媒体与录制态" },
   { key: "sessions", label: "网络会话", description: "连接与资源归属" }
 ];
+const nodeId = computed(() => typeof workspace.scope.value === "number" ? workspace.scope.value : null);
+
+function refreshActivePanel() {
+  if (workspace.activeView.value === "streams") streamPanel.value?.refresh();
+  if (workspace.activeView.value === "sessions") sessionPanel.value?.refresh();
+}
+
+function refreshAll() {
+  void workspace.refreshScope();
+  refreshActivePanel();
+}
+
 </script>
 
 <template>
@@ -18,11 +38,13 @@ const views = [
     :auto-refresh="workspace.autoRefresh.value" :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
     @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
-    @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="workspace.refreshScope" @refresh-scope="workspace.refreshScope"
+    @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="refreshAll" @refresh-scope="workspace.refreshScope"
   >
-    <template #streams><div class="workspace-pending">正在准备流媒体面板…</div></template>
-    <template #sessions><div class="workspace-pending">正在准备网络会话面板…</div></template>
+    <template #streams>
+      <StreamPanel ref="streamPanel" :active="workspace.activeView.value === 'streams'" :scope="workspace.scope.value" :node-id="nodeId" :initial-query="route.query" />
+    </template>
+    <template #sessions>
+      <NetworkSessionPanel ref="sessionPanel" :active="workspace.activeView.value === 'sessions'" :scope="workspace.scope.value" :node-id="nodeId" :initial-query="route.query" />
+    </template>
   </MediaWorkspaceShell>
 </template>
-
-<style scoped>.workspace-pending { display: grid; min-height: 280px; place-items: center; color: var(--zlm-text-3); background: var(--zlm-card); border: 1px dashed var(--zlm-border); border-radius: var(--zlm-radius-lg); }</style>
