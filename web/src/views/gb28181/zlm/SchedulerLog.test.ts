@@ -33,12 +33,14 @@ describe("scheduler log server-side filters", () => {
   });
 
   it("binds the table request to the built filter rather than filtering a full client list", () => {
-    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/SchedulerLog.vue"), "utf8");
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerLogPanel.vue"), "utf8");
+    const legacyShell = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/SchedulerLog.vue"), "utf8");
     expect(source).toContain("buildSchedulerLogFilter");
     expect(source).toMatch(/listSchedulerLogs\(filter/);
     expect(source).toContain("结果");
     expect(source).toContain("节点");
     expect(source).toContain("策略");
     expect(source).toContain("业务流");
+    expect(legacyShell).toContain("SchedulerLogPanel");
   });
 });
