@@ -192,7 +192,9 @@ export function resolveLegacyMediaRoute(
           ["vhost", safeText],
           ...commonIdentityFields,
           ["originType", token],
-          ["recording", enumValue("true", "false")]
+          ["recording", enumValue("true", "false")],
+          ["recordingMp4", enumValue("true", "false")],
+          ["recordingHls", enumValue("true", "false")]
         ])
       });
     case "/gb28181/zlm/sessions":

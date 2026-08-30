@@ -60,6 +60,8 @@ describe("media workbench route contract", () => {
         stream: "camera-01",
         originType: "rtp_push",
         recording: "true",
+        recordingMp4: "false",
+        recordingHls: true,
         unknown: "discard-me"
       })
     ).toEqual({
@@ -70,7 +72,9 @@ describe("media workbench route contract", () => {
         app: "live",
         stream: "camera-01",
         originType: "rtp_push",
-        recording: "true"
+        recording: "true",
+        recordingMp4: "false",
+        recordingHls: "true"
       },
       replace: true
     });
