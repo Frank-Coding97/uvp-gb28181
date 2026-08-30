@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from "vue";
-import { Clock3, Server } from "lucide-vue-next";
+import { Server } from "lucide-vue-next";
 
 import {
   getZLMNodeRuntime,
@@ -168,18 +168,6 @@ defineExpose({ refresh });
 
 <template>
   <div class="monitoring-panel runtime-summary-panel">
-    <header class="monitoring-panel__header">
-      <div>
-        <div class="monitoring-panel__eyebrow"><span class="status-dot" :data-active="runtime ? 'true' : 'false'" />运行态采样</div>
-        <h2>总览</h2>
-        <p>聚合媒体流、观看者、网络会话与线程负载；未知指标保持未知，不将缺失误报为 0。</p>
-      </div>
-      <div class="monitoring-panel__meta">
-        <span>{{ selectedNodeLabel }}</span>
-        <span v-if="runtime"><Clock3 :size="13" />{{ runtime.asOf }}</span>
-      </div>
-    </header>
-
     <div v-if="loadError && runtime" class="monitoring-banner monitoring-banner--warning" role="status">
       本次采样失败：{{ errorPresentation.label }}；页面保留 {{ runtime.asOf }} 的上一次成功结果。
     </div>
@@ -316,11 +304,6 @@ defineExpose({ refresh });
 
 <style scoped>
 .monitoring-panel { box-sizing: border-box; min-width: 0; color: var(--zlm-text-2); }
-.monitoring-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
-.monitoring-panel__eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }
-.status-dot { width: 7px; height: 7px; background: var(--zlm-text-4); border-radius: 50%; }.status-dot[data-active="true"] { background: var(--zlm-success-500); box-shadow: 0 0 0 4px var(--zlm-success-50); }
-.monitoring-panel h2 { margin: 4px 0 0; color: var(--zlm-text-1); font-size: 19px; }.monitoring-panel p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); line-height: 1.55; }
-.monitoring-panel__meta { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: 11px; }.monitoring-panel__meta span { display: inline-flex; align-items: center; gap: 5px; }
 .monitoring-banner { margin: 10px 0; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.monitoring-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.monitoring-banner--danger { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .monitoring-state { display: flex; min-height: 270px; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .runtime-summary-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }.runtime-kpi-button { min-width: 0; padding: 0; text-align: left; background: transparent; border: 0; border-radius: var(--zlm-radius-lg); cursor: pointer; }.runtime-kpi-button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }.runtime-kpi-button:hover :deep(.stat-card) { border-color: var(--zlm-brand-500); }
@@ -330,6 +313,6 @@ defineExpose({ refresh });
 .runtime-object-panel { margin-top: 12px; }.object-stat-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 7px; }.object-stat-chip { min-width: 0; padding: 8px 9px; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }.object-stat-chip span, .object-stat-chip strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.object-stat-chip span { color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 9px; }.object-stat-chip strong { margin-top: 3px; color: var(--zlm-text-1); font-family: var(--zlm-font-mono); font-size: 15px; }.runtime-object-empty { padding: 18px; color: var(--zlm-text-3); text-align: center; font-size: var(--zlm-fs-caption); }
 .runtime-summary-footnote { margin-top: 8px; color: var(--zlm-text-3); font-size: 11px; text-align: right; }.runtime-summary-footnote[data-tone="warning"] { color: var(--zlm-warn-600); }.runtime-summary-footnote[data-tone="danger"] { color: var(--zlm-danger-600); }
 @media (max-width: 1400px) { .runtime-summary-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }.object-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }.media-vchart { min-height: 100%; }
-@media (max-width: 820px) { .monitoring-panel__header, .runtime-thread-panel__header, .runtime-object-panel__header { flex-direction: column; }.monitoring-panel__meta { align-items: flex-start; }.runtime-summary-grid { grid-template-columns: 1fr; }.runtime-summary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }.object-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }.runtime-summary-kpis :deep(.stat-card) { min-height: 88px; }
+@media (max-width: 820px) { .runtime-thread-panel__header, .runtime-object-panel__header { flex-direction: column; }.runtime-summary-grid { grid-template-columns: 1fr; }.runtime-summary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }.object-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }.runtime-summary-kpis :deep(.stat-card) { min-height: 88px; }
 @media (max-width: 560px) { .runtime-summary-kpis { grid-template-columns: 1fr; } }
 </style>

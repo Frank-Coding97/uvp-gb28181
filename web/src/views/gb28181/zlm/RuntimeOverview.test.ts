@@ -84,6 +84,8 @@ describe("runtime overview state", () => {
     expect(source).toContain("objectStatisticItems");
     expect(source).toContain("节点健康");
     expect(source).toContain("selectNode");
+    expect(source).not.toContain("monitoring-panel__header");
+    expect(source).not.toContain("运行态采样</div>");
     expect(source).not.toContain("当前媒体采样");
     expect(source).toContain("drilldown");
     const retiredSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8");
