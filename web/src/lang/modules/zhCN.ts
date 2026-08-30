@@ -145,9 +145,5 @@ export default {
         ["codegen"]: "代码生成",
         ["plugins-manager"]: "插件管理",
         ["params-manager"]: "参数管理",
-        ["media-section-cluster"]: "集群",
-        ["media-section-monitoring"]: "监控",
-        ["media-section-ingress"]: "接入",
-        ["media-section-capabilities"]: "能力",
     },
 };
