@@ -2,6 +2,7 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { useZLMContextStore } from "@/store/modules/zlm-context";
 import ZLMNodeContextBar from "./ZLMNodeContextBar.vue";
 
 const nodes = [
@@ -29,5 +30,23 @@ describe("ZLMNodeContextBar", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("主节点");
     expect(wrapper.text()).toContain("节点在线，运行态数据会自动刷新");
+  });
+
+  it("keeps the current node while an empty node list is still loading", async () => {
+    const testPinia = createPinia();
+    setActivePinia(testPinia);
+    const context = useZLMContextStore();
+    context.initialize(nodes, "2");
+
+    const wrapper = mount(ZLMNodeContextBar, {
+      props: { nodes: [], queryNodeId: "2", loading: true },
+      global: { plugins: [testPinia] }
+    });
+
+    expect(context.selectedNodeId).toBe(2);
+
+    await wrapper.setProps({ loading: false });
+    await flushPromises();
+    expect(context.selectedNodeId).toBeNull();
   });
 });

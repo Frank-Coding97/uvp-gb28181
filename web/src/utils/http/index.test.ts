@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const axiosRequest = vi.hoisted(() => vi.fn());
+const axiosIsCancel = vi.hoisted(() => vi.fn());
 const messageError = vi.hoisted(() => vi.fn());
 const interceptorHandlers = vi.hoisted(() => ({
   responseRejected: undefined as undefined | ((error: any) => Promise<never>)
@@ -21,7 +22,7 @@ vi.mock("axios", () => ({
       },
       request: axiosRequest
     })),
-    isCancel: vi.fn(() => false)
+    isCancel: axiosIsCancel
   }
 }));
 vi.mock("@arco-design/web-vue", () => ({ Message: { error: messageError } }));
@@ -40,6 +41,8 @@ import { http } from "./index";
 describe("HTTP error messages", () => {
   beforeEach(() => {
     axiosRequest.mockReset();
+    axiosIsCancel.mockReset();
+    axiosIsCancel.mockReturnValue(false);
     messageError.mockReset();
     logout.mockReset();
     push.mockReset();
@@ -65,6 +68,17 @@ describe("HTTP error messages", () => {
       http.request("get", "/background-failure", undefined, { showErrorMessage: false })
     ).rejects.toBeTruthy();
 
+    expect(messageError).not.toHaveBeenCalled();
+  });
+
+  it("does not report an intentionally canceled request as an HTTP error", async () => {
+    const canceled = { code: "ERR_CANCELED" };
+    axiosIsCancel.mockImplementation(error => error === canceled);
+    axiosRequest.mockRejectedValueOnce(canceled);
+
+    await expect(http.request("get", "/runtime")).rejects.toBe(canceled);
+
+    expect(console.error).not.toHaveBeenCalled();
     expect(messageError).not.toHaveBeenCalled();
   });
 

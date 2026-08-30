@@ -203,6 +203,10 @@ class Http {
                     resolve(response);
                 })
                 .catch(async error => {
+                    if ((error as HttpError)?.isCancelRequest || Axios.isCancel(error)) {
+                        reject(error);
+                        return;
+                    }
                     console.error("http.error:", error);
                     const { response } = error;
                     if (config.showErrorMessage === false) {

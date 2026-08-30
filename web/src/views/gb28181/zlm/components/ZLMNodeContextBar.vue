@@ -25,8 +25,9 @@ const emit = defineEmits<{
 const context = useZLMContextStore();
 
 watch(
-  () => [props.nodes, props.queryNodeId] as const,
-  ([nodes, queryNodeId]) => {
+  () => [props.nodes, props.queryNodeId, props.loading] as const,
+  ([nodes, queryNodeId, loading]) => {
+    if (loading && nodes.length === 0) return;
     if (!context.initialized) context.initialize(nodes, queryNodeId);
     else context.reconcileVisibleNodes(nodes);
   },
