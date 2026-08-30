@@ -5,7 +5,11 @@
         <router-view v-slot="{ Component, route }">
           <s-main-transition>
             <keep-alive :include="cacheRoutes">
-              <component :is="createComponentWrapper(Component, route)" :key="route.fullPath" v-if="refreshPage" />
+              <component
+                :is="createComponentWrapper(Component, route)"
+                :key="resolveMediaRouteRenderKey(route)"
+                v-if="refreshPage"
+              />
             </keep-alive>
           </s-main-transition>
         </router-view>
@@ -18,6 +22,7 @@
 import { storeToRefs } from "pinia";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { useRouteConfigStore } from "@/store/modules/route-config";
+import { resolveMediaRouteRenderKey } from "./mediaRouteKey";
 const themeStore = useThemeConfig();
 let { refreshPage, watermark, watermarkStyle, watermarkRotate, watermarkGap } = storeToRefs(themeStore);
 const routerStore = useRouteConfigStore();
