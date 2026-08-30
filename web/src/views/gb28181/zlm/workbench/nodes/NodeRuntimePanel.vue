@@ -10,7 +10,7 @@ const props = withDefaults(defineProps<{
 const router = useRouter();
 
 function openMonitoring(view: "streams" | "sessions") {
-  void router.push({ path: "/media/monitoring", query: { view, nodeId: String(props.nodeId) } });
+  void router.push({ path: view === "streams" ? "/gb28181/zlm/streams" : "/gb28181/zlm/sessions", query: { nodeId: String(props.nodeId) } });
 }
 </script>
 

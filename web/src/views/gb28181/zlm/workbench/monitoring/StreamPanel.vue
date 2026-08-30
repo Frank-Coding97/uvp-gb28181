@@ -338,7 +338,7 @@ defineExpose({ refresh });
     <header class="monitoring-panel__header">
       <div>
         <div class="monitoring-panel__eyebrow"><Radio :size="14" />在线媒体</div>
-        <h2>流媒体</h2>
+        <h2>流管理</h2>
         <p>所有列表、详情和危险操作都通过 UVP 后端；媒体身份始终包含节点与完整 Schema / VHost / App / Stream。</p>
       </div>
       <span v-if="pageData" :class="`freshness freshness--${freshness.tone}`" :title="freshness.description">{{ freshness.label }} · {{ pageData.asOf }}</span>

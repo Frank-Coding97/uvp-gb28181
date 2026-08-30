@@ -1,37 +1,52 @@
 import { describe, expect, it } from "vitest";
 
-import { LEGACY_MEDIA_ROUTE_PATHS, MEDIA_NODE_DETAIL, MEDIA_WORKSPACES, resolveLegacyMediaRoute } from "./mediaRoutes";
+import { LEGACY_MEDIA_ROUTE_PATHS, MEDIA_NODE_DETAIL, MEDIA_PAGES, resolveLegacyMediaRoute } from "./mediaRoutes";
 
-describe("media workbench route contract", () => {
-  it("defines six ordered workspaces with stable defaults and unique views", () => {
-    expect(MEDIA_WORKSPACES.map(item => [item.path, item.sort])).toEqual([
-      ["/media/overview", 10],
-      ["/media/monitoring", 20],
-      ["/media/ingress", 30],
-      ["/media/recordings", 40],
-      ["/media/nodes", 50],
-      ["/media/scheduling", 60]
+describe("media direct-page route contract", () => {
+  it("defines eleven ordered direct pages without recording menus", () => {
+    expect(MEDIA_PAGES.map(item => [item.path, item.title, item.sort])).toEqual([
+      ["/gb28181/zlm/overview", "集群总览", 10],
+      ["/gb28181/zlm/nodes", "节点管理", 20],
+      ["/gb28181/zlm/runtime", "总览", 30],
+      ["/gb28181/zlm/streams", "流管理", 40],
+      ["/gb28181/zlm/sessions", "会话管理", 50],
+      ["/gb28181/zlm/proxies", "拉流/推流代理", 60],
+      ["/gb28181/zlm/ffmpeg-sources", "FFmpeg 源", 70],
+      ["/gb28181/zlm/rtp-servers", "RTP 服务", 80],
+      ["/gb28181/zlm/config", "服务器配置", 90],
+      ["/gb28181/zlm/scheduler", "调度策略", 100],
+      ["/gb28181/zlm/scheduler/logs", "调度日志", 110]
     ]);
-    expect(new Set(MEDIA_WORKSPACES.map(item => item.path)).size).toBe(6);
-    for (const workspace of MEDIA_WORKSPACES) {
-      expect(workspace.allowedViews).toContain(workspace.defaultView);
-      expect(new Set(workspace.allowedViews).size).toBe(workspace.allowedViews.length);
-    }
+    expect(new Set(MEDIA_PAGES.map(item => item.path)).size).toBe(11);
+    expect(MEDIA_PAGES.map(item => item.path)).not.toContain("/gb28181/cloud-recordings");
+    expect(MEDIA_PAGES.map(item => item.path)).not.toContain("/gb28181/recording-schedules");
     expect(MEDIA_NODE_DETAIL).toMatchObject({
-      path: "/media/nodes/:id",
+      path: "/gb28181/zlm/nodes/:id",
       defaultView: "overview",
       allowedViews: ["overview", "runtime", "config"]
     });
   });
 
-  it("covers the 13 visible legacy routes plus the hidden node detail", () => {
+  it("keeps all former addresses as compatibility aliases", () => {
     expect(LEGACY_MEDIA_ROUTE_PATHS).toHaveLength(14);
     expect(new Set(LEGACY_MEDIA_ROUTE_PATHS).size).toBe(14);
 
     const destinations = LEGACY_MEDIA_ROUTE_PATHS.map(path => resolveLegacyMediaRoute(path.replace(":id", "23")));
 
     expect(destinations.every(location => location?.replace)).toBe(true);
-    expect(destinations.every(location => location?.path.startsWith("/media/"))).toBe(true);
+    expect(destinations.every(location => location?.path.startsWith("/media/") || location?.path.startsWith("/gb28181/"))).toBe(true);
+  });
+
+  it("maps the six V2 workspaces back to direct pages", () => {
+    expect(resolveLegacyMediaRoute("/media/overview")).toMatchObject({ path: "/gb28181/zlm/overview" });
+    expect(resolveLegacyMediaRoute("/media/monitoring", { view: "sessions", nodeId: 2 })).toEqual({
+      path: "/gb28181/zlm/sessions", query: { nodeId: "2" }, replace: true
+    });
+    expect(resolveLegacyMediaRoute("/media/ingress", { view: "rtp", nodeId: 3 })).toEqual({
+      path: "/gb28181/zlm/rtp-servers", query: { nodeId: "3" }, replace: true
+    });
+    expect(resolveLegacyMediaRoute("/media/recordings", { view: "plans" })).toMatchObject({ path: "/gb28181/recording-schedules" });
+    expect(resolveLegacyMediaRoute("/media/scheduling", { view: "logs" })).toMatchObject({ path: "/gb28181/zlm/scheduler/logs" });
   });
 
   it("maps runtime to node detail only for a valid explicit node", () => {

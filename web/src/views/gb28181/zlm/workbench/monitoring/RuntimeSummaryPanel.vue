@@ -104,7 +104,7 @@ defineExpose({ refresh });
     <header class="monitoring-panel__header">
       <div>
         <div class="monitoring-panel__eyebrow"><span class="status-dot" :data-active="runtime ? 'true' : 'false'" />运行态采样</div>
-        <h2>运行摘要</h2>
+        <h2>总览</h2>
         <p>聚合媒体流、观看者、网络会话与线程负载；未知指标保持未知，不将缺失误报为 0。</p>
       </div>
       <div class="monitoring-panel__meta">
@@ -148,8 +148,6 @@ defineExpose({ refresh });
           </StatCard>
         </button>
         <StatCard title="NetThread 负载" :value="metricsAvailable ? summary.netThreadLoad ?? undefined : undefined" is-percent unit="%" trend="网络线程平均负载" :accent="(summary.netThreadLoad ?? 0) >= .8 ? 'danger' : 'default'" />
-        <StatCard title="WorkThread 负载" :value="metricsAvailable ? summary.workThreadLoad ?? undefined : undefined" is-percent unit="%" trend="工作线程平均负载" :accent="(summary.workThreadLoad ?? 0) >= .8 ? 'danger' : 'default'" />
-        <StatCard title="文件描述符 / Socket" :value="metricsAvailable ? summary.fdCount ?? undefined : undefined" unit="个" trend="socketCount 口径" />
         <StatCard title="正在录制" :value="summary.mediaKnown ? summary.recordingCount ?? undefined : undefined" unit="路" trend="MP4 或 HLS 录制标记" />
       </section>
 
@@ -198,11 +196,11 @@ defineExpose({ refresh });
 .monitoring-panel__meta { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: 11px; }.monitoring-panel__meta span { display: inline-flex; align-items: center; gap: 5px; }
 .monitoring-banner { margin: 10px 0; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.monitoring-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.monitoring-banner--danger { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .monitoring-state { display: flex; min-height: 270px; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
-.runtime-summary-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }.runtime-kpi-button { min-width: 0; padding: 0; text-align: left; background: transparent; border: 0; border-radius: var(--zlm-radius-lg); cursor: pointer; }.runtime-kpi-button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }.runtime-kpi-button:hover :deep(.stat-card) { border-color: var(--zlm-brand-500); }
+.runtime-summary-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }.runtime-kpi-button { min-width: 0; padding: 0; text-align: left; background: transparent; border: 0; border-radius: var(--zlm-radius-lg); cursor: pointer; }.runtime-kpi-button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }.runtime-kpi-button:hover :deep(.stat-card) { border-color: var(--zlm-brand-500); }
 .runtime-summary-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 12px; margin-top: 12px; }.runtime-stream-panel { min-width: 0; padding: 14px 16px 12px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.runtime-stream-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.runtime-stream-panel h3 { margin: 0; color: var(--zlm-text-1); font-size: 14px; }.runtime-stream-panel p { margin: 4px 0 0; }
 .runtime-streams { display: flex; flex-direction: column; gap: 7px; }.runtime-stream { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-width: 0; padding: 9px 10px; color: var(--zlm-text-2); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }.runtime-stream > span { min-width: 0; }.runtime-stream strong, .runtime-stream small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.runtime-stream strong { color: var(--zlm-text-1); }.runtime-stream small { margin-top: 2px; color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 10px; }.runtime-stream__right { display: inline-flex; align-items: center; gap: 4px; color: var(--zlm-text-3); font-size: 11px; }.runtime-empty { display: grid; min-height: 180px; place-items: center; color: var(--zlm-text-3); text-align: center; font-size: var(--zlm-fs-caption); }
 .runtime-summary-footnote { margin-top: 8px; color: var(--zlm-text-3); font-size: 11px; text-align: right; }.runtime-summary-footnote[data-tone="warning"] { color: var(--zlm-warn-600); }.runtime-summary-footnote[data-tone="danger"] { color: var(--zlm-danger-600); }
-@media (max-width: 1180px) { .runtime-summary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }.media-vchart { min-height: 100%; }
-@media (max-width: 820px) { .monitoring-panel__header, .runtime-stream-panel__header { flex-direction: column; }.monitoring-panel__meta { align-items: flex-start; }.runtime-summary-grid { grid-template-columns: 1fr; } }.runtime-summary-kpis :deep(.stat-card) { min-height: 88px; }
+@media (max-width: 1400px) { .runtime-summary-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }.media-vchart { min-height: 100%; }
+@media (max-width: 820px) { .monitoring-panel__header, .runtime-stream-panel__header { flex-direction: column; }.monitoring-panel__meta { align-items: flex-start; }.runtime-summary-grid { grid-template-columns: 1fr; }.runtime-summary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }.runtime-summary-kpis :deep(.stat-card) { min-height: 88px; }
 @media (max-width: 560px) { .runtime-summary-kpis { grid-template-columns: 1fr; } }
 </style>

@@ -6,28 +6,17 @@ import { describe, expect, it } from "vitest";
 import MenuItem from "./menu-item.vue";
 
 const WORKSPACE_PATHS = [
-  "/media/overview",
-  "/media/monitoring",
-  "/media/ingress",
-  "/media/recordings",
-  "/media/nodes",
-  "/media/scheduling"
+  "/gb28181/zlm/overview", "/gb28181/zlm/nodes", "/gb28181/zlm/runtime",
+  "/gb28181/zlm/streams", "/gb28181/zlm/sessions", "/gb28181/zlm/proxies",
+  "/gb28181/zlm/ffmpeg-sources", "/gb28181/zlm/rtp-servers", "/gb28181/zlm/config",
+  "/gb28181/zlm/scheduler", "/gb28181/zlm/scheduler/logs"
 ];
 
 const LEGACY_PATHS = [
-  "/gb28181/zlm/overview",
-  "/gb28181/zlm/runtime",
-  "/gb28181/zlm/streams",
-  "/gb28181/zlm/sessions",
-  "/gb28181/zlm/proxies",
-  "/gb28181/zlm/ffmpeg-sources",
-  "/gb28181/zlm/rtp-servers",
   "/gb28181/cloud-recordings",
   "/gb28181/recording-schedules",
-  "/gb28181/zlm/nodes",
-  "/gb28181/zlm/config",
-  "/gb28181/zlm/scheduler",
-  "/gb28181/zlm/scheduler/logs"
+  "/media/overview", "/media/monitoring", "/media/ingress", "/media/recordings",
+  "/media/nodes", "/media/scheduling"
 ];
 
 function route(path: string, type = 2, hide = false, children?: Menu.MenuOptions[]): Menu.MenuOptions {
@@ -67,7 +56,7 @@ describe("MenuItem media workspaces", () => {
     expect(source).not.toContain("uvp-media-menu-group");
   });
 
-  it("renders six direct workspaces without visual groups or hidden legacy entries", () => {
+  it("renders eleven direct pages without visual groups or recording entries", () => {
     const children = [
       ...WORKSPACE_PATHS.map(path => route(path)),
       ...LEGACY_PATHS.map(path => route(path, 2, true)),
@@ -87,15 +76,15 @@ describe("MenuItem media workspaces", () => {
 
   it("renders only workspaces present in the authorized route tree", () => {
     const wrapper = mountMenu([
-      route("/media/monitoring"),
-      route("/media/ingress"),
-      route("/gb28181/zlm/streams", 2, true)
+      route("/gb28181/zlm/streams"),
+      route("/gb28181/zlm/rtp-servers"),
+      route("/media/monitoring", 2, true)
     ]);
 
     expect(wrapper.findAll(".item-group")).toHaveLength(0);
     expect(wrapper.findAll(".route-item").map(item => item.text())).toEqual([
-      "menu./media/monitoring",
-      "menu./media/ingress"
+      "menu./gb28181/zlm/streams",
+      "menu./gb28181/zlm/rtp-servers"
     ]);
   });
 

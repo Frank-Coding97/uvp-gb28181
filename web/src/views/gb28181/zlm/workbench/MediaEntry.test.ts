@@ -49,7 +49,7 @@ describe("MediaEntry", () => {
     ]);
 
     expect(router.replace).toHaveBeenCalledOnce();
-    expect(router.replace).toHaveBeenCalledWith("/media/overview");
+    expect(router.replace).toHaveBeenCalledWith("/gb28181/zlm/overview");
     wrapper.unmount();
   });
 
@@ -57,7 +57,7 @@ describe("MediaEntry", () => {
     const wrapper = await mountWith(["/gb28181/zlm/rtp-servers"]);
 
     expect(router.replace).toHaveBeenCalledOnce();
-    expect(router.replace).toHaveBeenCalledWith("/media/ingress");
+    expect(router.replace).toHaveBeenCalledWith("/gb28181/zlm/rtp-servers");
     wrapper.unmount();
   });
 

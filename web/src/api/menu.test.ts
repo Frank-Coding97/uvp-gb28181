@@ -33,14 +33,15 @@ function backendMenu(path: string, title: string, options: Partial<MenuItem> = {
 }
 
 describe("media menu route compatibility", () => {
-  it("keeps /media as a two-level route tree with a real overview redirect", () => {
+  it("keeps /media as a two-level direct-page tree without recording menus", () => {
     const media = backendMenu("/media", "流媒体管理", {
       type: 1,
       redirect: "/gb28181/zlm/overview",
       children: [
         backendMenu("/gb28181/zlm/overview", "集群总览"),
-        backendMenu("/gb28181/cloud-recordings", "录制管理"),
-        backendMenu("/gb28181/recording-schedules", "录像计划")
+        backendMenu("/gb28181/zlm/nodes", "节点管理"),
+        backendMenu("/gb28181/zlm/runtime", "总览"),
+        backendMenu("/gb28181/zlm/streams", "流管理")
       ]
     });
 
@@ -50,9 +51,11 @@ describe("media menu route compatibility", () => {
     expect(converted.redirect).toBe("/gb28181/zlm/overview");
     expect(converted.children?.map(item => item.path)).toEqual([
       "/gb28181/zlm/overview",
-      "/gb28181/cloud-recordings",
-      "/gb28181/recording-schedules"
+      "/gb28181/zlm/nodes",
+      "/gb28181/zlm/runtime",
+      "/gb28181/zlm/streams"
     ]);
+    expect(converted.children?.map(item => item.path)).not.toContain("/gb28181/cloud-recordings");
     expect(converted.children?.every(item => item.meta.type === 2)).toBe(true);
   });
 

@@ -7,6 +7,32 @@ export interface MediaWorkspaceDefinition {
   allowedViews: readonly string[];
 }
 
+export interface MediaPageDefinition {
+  key: string;
+  title: string;
+  path: string;
+  component: string;
+  sort: number;
+}
+
+/**
+ * Canonical two-level navigation. The six V2 workspaces remain only as
+ * compatibility destinations during a rolling code/database deployment.
+ */
+export const MEDIA_PAGES: readonly MediaPageDefinition[] = [
+  { key: "cluster", title: "集群总览", path: "/gb28181/zlm/overview", component: "gb28181/zlm/ClusterOverview", sort: 10 },
+  { key: "nodes", title: "节点管理", path: "/gb28181/zlm/nodes", component: "gb28181/zlm/NodeList", sort: 20 },
+  { key: "overview", title: "总览", path: "/gb28181/zlm/runtime", component: "gb28181/zlm/RuntimeOverview", sort: 30 },
+  { key: "streams", title: "流管理", path: "/gb28181/zlm/streams", component: "gb28181/zlm/StreamManagement", sort: 40 },
+  { key: "sessions", title: "会话管理", path: "/gb28181/zlm/sessions", component: "gb28181/zlm/SessionManagement", sort: 50 },
+  { key: "proxies", title: "拉流/推流代理", path: "/gb28181/zlm/proxies", component: "gb28181/zlm/ProxyManagement", sort: 60 },
+  { key: "ffmpeg", title: "FFmpeg 源", path: "/gb28181/zlm/ffmpeg-sources", component: "gb28181/zlm/FFmpegSources", sort: 70 },
+  { key: "rtp", title: "RTP 服务", path: "/gb28181/zlm/rtp-servers", component: "gb28181/zlm/RTPServices", sort: 80 },
+  { key: "config", title: "服务器配置", path: "/gb28181/zlm/config", component: "gb28181/zlm/ServerConfig", sort: 90 },
+  { key: "scheduler", title: "调度策略", path: "/gb28181/zlm/scheduler", component: "gb28181/zlm/SchedulerStrategy", sort: 100 },
+  { key: "scheduler-logs", title: "调度日志", path: "/gb28181/zlm/scheduler/logs", component: "gb28181/zlm/SchedulerLog", sort: 110 }
+];
+
 export interface MediaRouteLocation {
   path: string;
   query: Record<string, string>;
@@ -69,7 +95,7 @@ export const MEDIA_WORKSPACES: readonly MediaWorkspaceDefinition[] = [
 ];
 
 export const MEDIA_NODE_DETAIL = {
-  path: "/media/nodes/:id",
+  path: "/gb28181/zlm/nodes/:id",
   defaultView: "overview",
   allowedViews: ["overview", "runtime", "config"] as const
 };
@@ -95,6 +121,7 @@ type QueryInput = Record<string, unknown>;
 type QueryValidator = (value: unknown) => string | undefined;
 
 const NODE_DETAIL_PATTERN = /^\/gb28181\/zlm\/nodes\/(\d+)$/;
+const V2_NODE_DETAIL_PATTERN = /^\/media\/nodes\/(\d+)$/;
 const SAFE_TEXT_MAX_LENGTH = 128;
 
 function scalarString(value: unknown): string | undefined {
@@ -167,6 +194,11 @@ export function resolveLegacyMediaRoute(
   query: QueryInput = {},
   options: LegacyMediaRouteOptions = {}
 ): MediaRouteLocation | null {
+  const v2NodeDetail = path.match(V2_NODE_DETAIL_PATTERN);
+  if (v2NodeDetail) {
+    const view = enumValue(...MEDIA_NODE_DETAIL.allowedViews)(query.view) ?? MEDIA_NODE_DETAIL.defaultView;
+    return destination(`/gb28181/zlm/nodes/${Number(v2NodeDetail[1])}`, { view });
+  }
   const nodeDetail = path.match(NODE_DETAIL_PATTERN);
   if (nodeDetail) {
     const view = enumValue(...MEDIA_NODE_DETAIL.allowedViews)(query.view) ?? MEDIA_NODE_DETAIL.defaultView;
@@ -175,6 +207,31 @@ export function resolveLegacyMediaRoute(
   if (path.startsWith("/gb28181/zlm/nodes/")) return null;
 
   switch (path) {
+    case "/media/overview":
+      return destination("/gb28181/zlm/overview", selectQuery(query, [nodeField, ["status", token], ["keyword", safeText]]));
+    case "/media/monitoring": {
+      const view = enumValue("runtime", "streams", "sessions")(query.view) ?? "runtime";
+      const target = view === "streams" ? "/gb28181/zlm/streams" : view === "sessions" ? "/gb28181/zlm/sessions" : "/gb28181/zlm/runtime";
+      return destination(target, selectQuery(query, [nodeField, ["schema", token], ["vhost", safeText], ...commonIdentityFields, ["peerIp", safeText], ["localPort", port], ["type", token], ["identifier", safeText]]));
+    }
+    case "/media/ingress": {
+      const view = enumValue("pull", "push", "ffmpeg", "rtp")(query.view) ?? "pull";
+      const target = view === "ffmpeg" ? "/gb28181/zlm/ffmpeg-sources" : view === "rtp" ? "/gb28181/zlm/rtp-servers" : "/gb28181/zlm/proxies";
+      return destination(target, {
+        ...(view === "push" ? { view: "push" } : {}),
+        ...selectQuery(query, [nodeField, ...commonIdentityFields, ["status", token], ["keyword", safeText], ["ssrc", digits]])
+      });
+    }
+    case "/media/recordings":
+      return enumValue("files", "tasks", "plans")(query.view) === "plans"
+        ? destination("/gb28181/recording-schedules", selectQuery(query, [nodeField, ["stream", safeText], ["status", token], ["keyword", safeText]]))
+        : destination("/gb28181/cloud-recordings", selectQuery(query, [nodeField, ["file", safeText], ["deviceId", safeText], ["channelId", safeText], ["from", safeText], ["to", safeText], ["status", token]]));
+    case "/media/nodes":
+      return destination("/gb28181/zlm/nodes", selectQuery(query, [["status", token], ["keyword", safeText]]));
+    case "/media/scheduling":
+      return enumValue("strategy", "logs")(query.view) === "logs"
+        ? destination("/gb28181/zlm/scheduler/logs", selectQuery(query, [["from", safeText], ["to", safeText], ["result", enumValue("success", "failure")], nodeField, ["algorithm", token], ["streamId", safeText]]))
+        : destination("/gb28181/zlm/scheduler", selectQuery(query, [["algorithm", token]]));
     case "/gb28181/zlm/overview":
       return destination("/media/overview", selectQuery(query, [nodeField, ["status", token], ["keyword", safeText]]));
     case "/gb28181/zlm/runtime": {

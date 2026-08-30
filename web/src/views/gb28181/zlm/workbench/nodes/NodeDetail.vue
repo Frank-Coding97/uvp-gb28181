@@ -7,7 +7,6 @@ import { activateZLMNode, getZLMNode, testZLMNodeConnection, type ZLMNode } from
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useZLMContextStore, type ZLMContextNode } from "@/store/modules/zlm-context";
 import { useUserStoreHook } from "@/store/modules/user";
-import { resolveMediaWorkspaceAccess } from "../mediaAccess";
 import HealthBadge from "../../components/HealthBadge.vue";
 import LifecycleDot from "../../components/LifecycleDot.vue";
 import StatCard from "../../components/StatCard.vue";
@@ -43,7 +42,15 @@ const nodeId = computed(() => {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 });
 const legacyPaths = computed(() => routeStore.routeList.map((item: Menu.MenuOptions) => item.path));
-const menuViews = computed(() => resolveMediaWorkspaceAccess(legacyPaths.value).viewsByWorkspace["/media/nodes"] ?? []);
+const menuViews = computed(() => {
+  const paths = new Set(legacyPaths.value);
+  const wildcard = userStore.account.permissions.includes("*:*:*");
+  return [
+    wildcard || paths.has("/gb28181/zlm/nodes") || paths.has("/gb28181/zlm/nodes/:id") ? "overview" : "",
+    wildcard || paths.has("/gb28181/zlm/runtime") ? "runtime" : "",
+    wildcard || paths.has("/gb28181/zlm/config") ? "config" : ""
+  ].filter(Boolean);
+});
 const allowedViews = computed<readonly NodeDetailView[]>(() => {
   // A route-config store is normally ready before this component mounts. During its
   // short bootstrap window retain the safe read-only overview instead of expanding rights.

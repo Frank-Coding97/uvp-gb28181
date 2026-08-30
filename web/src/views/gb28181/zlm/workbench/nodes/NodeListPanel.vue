@@ -14,7 +14,6 @@ import { useZLMContextStore } from "@/store/modules/zlm-context";
 import { useUserStoreHook } from "@/store/modules/user";
 import NodeForm from "../../NodeForm.vue";
 import ZLMNodeActionDialog from "../../ZLMNodeActionDialog.vue";
-import StatCard from "../../components/StatCard.vue";
 import LifecycleDot from "../../components/LifecycleDot.vue";
 import HealthBadge from "../../components/HealthBadge.vue";
 import { zlmErrorPresentation } from "../../components/zlmFormatters";
@@ -82,13 +81,6 @@ const filteredNodes = computed(() => filterNodeRecords(scopedNodes.value, {
 const loading = computed(() => props.nodes === undefined ? legacyLoading.value : props.loading);
 const loadError = computed(() => props.nodes === undefined ? legacyError.value : props.error);
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
-const totalNodes = computed(() => scopedNodes.value.length);
-const activeCount = computed(() => scopedNodes.value.filter(node => node.state === "active").length);
-const offlineCount = computed(() => scopedNodes.value.filter(node => node.state === "offline").length);
-const maintenanceCount = computed(() => scopedNodes.value.filter(node => node.state === "maintenance").length);
-const totalStreams = computed(() => scopedNodes.value.reduce((sum, node) => sum + (node.stats?.mediaSourceCount ?? 0), 0));
-const totalSessions = computed(() => scopedNodes.value.reduce((sum, node) => sum + (node.stats?.sessionCount ?? 0), 0));
-const healthyCount = computed(() => scopedNodes.value.filter(node => nodeHealth(node) === "healthy").length);
 
 function clearRefreshTimer() {
   if (refreshTimer) clearInterval(refreshTimer);
@@ -247,13 +239,6 @@ function relativeTime(value?: string) {
 
 <template>
   <section class="node-list-panel" aria-label="媒体节点治理">
-    <section class="kpi-row" aria-label="节点集群指标">
-      <StatCard title="节点总数" :value="totalNodes" :trend="`${activeCount} 活跃 · ${maintenanceCount} 维护 · ${offlineCount} 离线`" accent="brand" />
-      <StatCard title="活跃流" :value="totalStreams" :trend="`${activeCount} 个调度节点`" accent="accent" />
-      <StatCard title="网络会话" :value="totalSessions" trend="节点心跳登记值" />
-      <StatCard title="健康节点" :value="healthyCount" :trend="`${totalNodes ? Math.round(healthyCount / totalNodes * 100) : 0}% 集群占比`" :accent="healthyCount === totalNodes ? 'accent' : 'warning'" />
-    </section>
-
     <div v-if="loadError && scopedNodes.length" class="page-state page-state--warning" role="status">
       本次刷新失败：{{ errorPresentation.label }}。已保留上一次节点列表。
     </div>
@@ -323,7 +308,6 @@ function relativeTime(value?: string) {
 
 <style scoped>
 .node-list-panel { min-width: 0; color: var(--zlm-text-2); }
-.kpi-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
 .node-search-panel { margin-bottom: 16px; }
 .search { width: 220px; }.filter-select { width: 132px; }.filter-meta { display: inline-flex; align-items: center; min-height: 34px; color: var(--zlm-text-3); font-size: 12px; }
 .scope-hint { margin: -8px 0 14px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.recovery-mark { display: inline-block; margin-left: 6px; color: var(--zlm-danger-600); font-size: 11px; }
@@ -332,6 +316,5 @@ function relativeTime(value?: string) {
 .node-table-wrap { overflow: hidden; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); box-shadow: var(--uvp-panel-shadow); }
 .cell-node { display: flex; max-width: 100%; flex-direction: column; gap: 2px; padding: 0; text-align: left; background: transparent; border: 0; cursor: pointer; }.cell-node:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 3px; border-radius: 5px; }.cell-node-name { overflow: hidden; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); text-overflow: ellipsis; white-space: nowrap; }.cell-node:hover .cell-node-name { color: var(--zlm-brand-600); }.cell-node-host { color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: var(--zlm-fs-caption); }
 .numeric { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.muted { color: var(--zlm-text-4); }.ready { color: var(--zlm-success-600); }.warning { color: var(--zlm-warn-600); }.cell-ops { display: flex; align-items: center; gap: 6px; }.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }.empty strong { color: var(--zlm-text-1); }.empty-icon { font-size: 42px; color: var(--zlm-text-4); }.danger { color: var(--zlm-danger-600); }
- @media (max-width: 1180px) { .kpi-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
- @media (max-width: 720px) { .kpi-row { grid-template-columns: 1fr; } .search, .filter-select { width: 100%; } .cell-ops { flex-wrap: wrap; } }
+ @media (max-width: 720px) { .search, .filter-select { width: 100%; } .cell-ops { flex-wrap: wrap; } }
 </style>

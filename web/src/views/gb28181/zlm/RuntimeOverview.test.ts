@@ -68,11 +68,13 @@ describe("runtime overview state", () => {
     expect(next.at(-1)?.asOf).toBe("2026-08-30T00:01:00.000Z");
   });
 
-  it("uses typed node polling and exposes stream/session drill-downs", () => {
+  it("uses typed polling and keeps exactly six meaningful summary cards", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/RuntimeSummaryPanel.vue"), "utf8");
     expect(source).toContain("getZLMNodeRuntime");
     expect(source).toContain("useZLMRuntimePolling");
-    expect(source).toContain("文件描述符");
+    expect(source.match(/<StatCard/g)).toHaveLength(6);
+    expect(source).not.toContain("文件描述符 / Socket");
+    expect(source).not.toContain("WorkThread 负载");
     expect(source).toContain("drilldown");
     expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8")).toContain("ZLMNodeContextBar");
   });

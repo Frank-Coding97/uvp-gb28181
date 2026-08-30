@@ -44,16 +44,15 @@ export function overviewHealthSummary(overview: ZLMOverview): OverviewHealthSumm
 
 export function nodeOverviewLocation(nodeId: number) {
   return {
-    path: `/media/nodes/${nodeId}`,
+    path: `/gb28181/zlm/nodes/${nodeId}`,
     query: { view: "overview", nodeId: String(nodeId) }
   };
 }
 
 export function streamOverviewLocation(stream: ZLMRuntimeMedia) {
   return {
-    path: "/media/monitoring",
+    path: "/gb28181/zlm/streams",
     query: {
-      view: "streams",
       nodeId: String(stream.nodeId),
       schema: stream.media.schema,
       vhost: stream.media.vhost,

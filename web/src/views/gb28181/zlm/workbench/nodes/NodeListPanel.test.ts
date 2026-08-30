@@ -30,4 +30,9 @@ describe("NodeListPanel", () => {
     expect(source).toContain("impact");
     expect(source).toContain("fingerprint");
   });
+
+  it("does not repeat cluster summary cards above the node table", () => {
+    expect(source).not.toContain("StatCard");
+    expect(source).not.toContain('class="kpi-row"');
+  });
 });
