@@ -2,10 +2,18 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/index.vue"), "utf8");
+const shellSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/index.vue"), "utf8");
+const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/RecordingPlansPanel.vue"), "utf8");
 const drawerSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/recording-schedules/components/RecordingScheduleDrawer.vue"), "utf8");
 
 describe("recording schedule prototype", () => {
+  it("keeps the legacy route as a thin shell over the shared plans panel", () => {
+    expect(shellSource).toContain("RecordingPlansPanel");
+    expect(shellSource).toContain(":active=\"true\"");
+    expect(shellSource).toContain("route.query.stream");
+    expect(shellSource).not.toContain("listRecordingPlans");
+    expect(shellSource).not.toContain("RecordingScheduleEditorDialog");
+  });
   it("uses the system list-page shell while preserving the segmented view switch", () => {
     expect(source).toContain("录像计划");
     expect(source).toContain("计划管理");
@@ -60,7 +68,7 @@ describe("recording schedule prototype", () => {
       source.indexOf('<a-table-column title="状态"'),
       source.indexOf('<a-table-column title="最近更新"')
     );
-    expect(statusColumn).toContain('<a-switch v-model="record.enabled"');
+    expect(statusColumn).toContain('<a-switch v-if="canMaintain" v-model="record.enabled"');
     expect(statusColumn).toContain('@change="notifyPlanStatusChange(record)"');
     expect(statusColumn).not.toContain("<a-tag");
     expect(source).toContain("function notifyPlanStatusChange");
@@ -115,8 +123,9 @@ describe("recording schedule prototype", () => {
   });
 
   it("uses the standard full-height page shell without leaking page scroll", () => {
-    expect(source).toContain('class="snow-fill recording-schedules-page"');
-    expect(source).toContain('class="snow-fill-inner uvp-page-shell-flat recording-schedules-shell"');
+    expect(shellSource).toContain('class="snow-fill recording-schedules-route"');
+    expect(source).toContain('class="recording-schedules-page"');
+    expect(source).toContain('class="recording-schedules-shell"');
     expect(source).toMatch(/\.recording-schedules-page\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
     expect(source).toMatch(/\.recording-schedules-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
   });
@@ -155,11 +164,17 @@ describe("recording schedule prototype", () => {
   });
 
   it("accepts recording stream context only as an existing permission-scoped filter", () => {
-    expect(source).toContain("useRoute");
+    expect(source).not.toContain("useRoute");
     expect(source).toContain("recordingContextKeyword");
-    expect(source).toContain("route.query.stream");
-    expect(source).toContain('activeView = ref<"plans" | "status">(recordingContextKeyword ? "status" : "plans")');
+    expect(source).toContain("props.stream");
     expect(source).toContain("数据仍由录像计划接口按原权限返回");
     expect(source).toContain("listRecordingPlanExecutionChannels");
+  });
+
+  it("uses real readback after assignment and exposes diagnosis plus timeline", () => {
+    expect(source).not.toContain("plan.channelCount +=");
+    expect(source).toContain("diagnoseRecordingPlanChannel");
+    expect(source).toContain("getRecordingPlanChannelTimeline");
+    expect(source).toContain("loadPlans()");
   });
 });
