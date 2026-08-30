@@ -73,4 +73,19 @@ describe("ZLMNodeContextBar", () => {
     await flushPromises();
     expect(context.selectedNodeId).toBe(1);
   });
+
+  it("renders a right-aligned minimal toolbar without descriptive copy", async () => {
+    const testPinia = createPinia();
+    setActivePinia(testPinia);
+    const wrapper = mount(ZLMNodeContextBar, {
+      props: { nodes, allowAll: true, defaultAll: true, minimal: true },
+      global: { plugins: [testPinia] }
+    });
+
+    await flushPromises();
+    expect(wrapper.attributes("data-minimal")).toBe("true");
+    expect(wrapper.find(".zlm-node-context__label").exists()).toBe(false);
+    expect(wrapper.find(".zlm-node-context__status").exists()).toBe(false);
+    expect(wrapper.text()).toContain("全部节点");
+  });
 });

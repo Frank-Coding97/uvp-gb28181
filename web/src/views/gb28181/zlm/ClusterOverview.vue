@@ -66,7 +66,7 @@ onMounted(loadNodes);
         :loading="nodesLoading"
         :allow-all="true"
         :default-all="true"
-        title="查看范围"
+        :minimal="true"
         @change="updateScope"
         @refresh="refreshAll"
       />

@@ -12,13 +12,15 @@ const props = withDefaults(defineProps<{
   title?: string;
   allowAll?: boolean;
   defaultAll?: boolean;
+  minimal?: boolean;
 }>(), {
   queryNodeId: undefined,
   loading: false,
   disabled: false,
   title: "当前媒体节点",
   allowAll: false,
-  defaultAll: false
+  defaultAll: false,
+  minimal: false
 });
 
 const emit = defineEmits<{
@@ -79,9 +81,9 @@ function select(value: string | number | undefined) {
 </script>
 
 <template>
-  <section class="zlm-node-context" aria-label="媒体节点上下文">
+  <section class="zlm-node-context" aria-label="媒体节点上下文" :data-minimal="minimal">
     <div class="zlm-node-context__identity">
-      <span class="zlm-node-context__label">{{ title }}</span>
+      <span v-if="!minimal" class="zlm-node-context__label">{{ title }}</span>
       <a-select
         :model-value="selectedID"
         :loading="loading"
@@ -99,10 +101,10 @@ function select(value: string | number | undefined) {
           <NodeStateBadge :state="node.state" />
         </a-option>
       </a-select>
-      <NodeStateBadge v-if="selectedNode" :state="selectedNode.state" />
+      <NodeStateBadge v-if="!minimal && selectedNode" :state="selectedNode.state" />
     </div>
 
-    <div class="zlm-node-context__status" :data-node-state="selectedNode?.state || 'empty'">
+    <div v-if="!minimal" class="zlm-node-context__status" :data-node-state="selectedNode?.state || 'empty'">
       {{ stateText }}
     </div>
 
@@ -130,6 +132,10 @@ function select(value: string | number | undefined) {
   background: var(--zlm-card);
   border: 1px solid var(--zlm-border);
   border-radius: var(--zlm-radius-lg);
+}
+
+.zlm-node-context[data-minimal="true"] {
+  justify-content: flex-end;
 }
 
 .zlm-node-context__identity {
@@ -189,6 +195,11 @@ function select(value: string | number | undefined) {
   .zlm-node-context {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .zlm-node-context[data-minimal="true"] {
+    align-items: center;
+    flex-direction: row;
   }
 
   .zlm-node-context__select {
