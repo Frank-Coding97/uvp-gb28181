@@ -1,7 +1,7 @@
 import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { resolveInitialZLMNodeID, useZLMContextStore, type ZLMContextNode } from "./zlm-context";
+import { readStoredZLMNodeID, resolveInitialZLMNodeID, useZLMContextStore, type ZLMContextNode } from "./zlm-context";
 
 const nodes: ZLMContextNode[] = [
   { id: 1, name: "主节点", state: "active" },
@@ -64,5 +64,13 @@ describe("ZLM node context", () => {
     expect(store.selectedNodeId).toBeNull();
     expect(store.visibleNodes).toEqual([]);
     expect(sessionStorage.getItem("uvp:zlm:selected-node")).toBeNull();
+  });
+
+  it("exposes only the positive stored node id for legacy compatibility", () => {
+    sessionStorage.setItem("uvp:zlm:selected-node", "2");
+    expect(readStoredZLMNodeID()).toBe(2);
+
+    sessionStorage.setItem("uvp:zlm:selected-node", "https://secret.example/token");
+    expect(readStoredZLMNodeID()).toBeNull();
   });
 });

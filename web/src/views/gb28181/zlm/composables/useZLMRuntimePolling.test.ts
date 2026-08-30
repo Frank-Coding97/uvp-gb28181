@@ -71,6 +71,41 @@ describe("ZLM runtime polling", () => {
     polling.dispose();
   });
 
+  it("pauses for inactive, editing and danger states independently", async () => {
+    const requests: AbortSignal[] = [];
+    const load = vi.fn((_: number, signal: AbortSignal) => {
+      requests.push(signal);
+      return Promise.resolve("ok");
+    });
+    const polling = createZLMRuntimePollingController({ load, publish: vi.fn(), intervalMs: 10_000 });
+
+    polling.setNode(7);
+    polling.start();
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(1);
+
+    polling.setActive(false);
+    expect(requests[0].aborted).toBe(true);
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(1);
+
+    polling.setActive(true);
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(2);
+    polling.setEditing(true);
+    expect(requests[1].aborted).toBe(true);
+    polling.setEditing(false);
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(3);
+
+    polling.setDanger(true);
+    expect(requests[2].aborted).toBe(true);
+    polling.setDanger(false);
+    await Promise.resolve();
+    expect(load).toHaveBeenCalledTimes(4);
+    polling.dispose();
+  });
+
   it("leaves no timer or publish path after dispose", async () => {
     vi.useFakeTimers();
     const pending = deferred<number>();

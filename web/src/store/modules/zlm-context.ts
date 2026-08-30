@@ -41,13 +41,26 @@ export function resolveInitialZLMNodeID(nodes: ZLMContextNode[], queryNodeID?: u
 
 function readStoredNodeID() {
   if (typeof window === "undefined") return null;
-  return window.sessionStorage.getItem(ZLM_CONTEXT_STORAGE_KEY);
+  try {
+    return window.sessionStorage.getItem(ZLM_CONTEXT_STORAGE_KEY);
+  } catch {
+    return null;
+  }
 }
 
 function writeStoredNodeID(nodeID: number | null) {
   if (typeof window === "undefined") return;
-  if (nodeID === null) window.sessionStorage.removeItem(ZLM_CONTEXT_STORAGE_KEY);
-  else window.sessionStorage.setItem(ZLM_CONTEXT_STORAGE_KEY, String(nodeID));
+  try {
+    if (nodeID === null) window.sessionStorage.removeItem(ZLM_CONTEXT_STORAGE_KEY);
+    else window.sessionStorage.setItem(ZLM_CONTEXT_STORAGE_KEY, String(nodeID));
+  } catch {
+    // Storage may be unavailable in a restricted browser context; memory remains authoritative.
+  }
+}
+
+/** Read only the safe, positive node id kept for legacy route compatibility. */
+export function readStoredZLMNodeID(): number | null {
+  return parseNodeID(readStoredNodeID());
 }
 
 function normalizedNodes(nodes: ZLMContextNode[]) {
@@ -97,7 +110,7 @@ export const useZLMContextStore = defineStore("zlm-context", () => {
     }
     visibleNodes.value = next;
     initialized.value = true;
-    applySelection(resolveInitialZLMNodeID(next, queryNodeID, readStoredNodeID()));
+    applySelection(resolveInitialZLMNodeID(next, queryNodeID, readStoredZLMNodeID()));
   }
 
   function reconcileVisibleNodes(nodes: ZLMContextNode[]) {

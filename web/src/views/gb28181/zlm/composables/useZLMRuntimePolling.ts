@@ -12,12 +12,15 @@ export interface ZLMRuntimePollingController {
   setNode: (nodeId: number | null) => void;
   setVisible: (visible: boolean) => void;
   setPaused: (paused: boolean) => void;
+  setActive: (active: boolean) => void;
+  setEditing: (editing: boolean) => void;
+  setDanger: (danger: boolean) => void;
   refresh: () => void;
   dispose: () => void;
 }
 
 function isAbortError(error: unknown) {
-  return error instanceof DOMException
+  return typeof DOMException !== "undefined" && error instanceof DOMException
     ? error.name === "AbortError"
     : (error as { name?: string } | null)?.name === "AbortError";
 }
@@ -28,13 +31,16 @@ export function createZLMRuntimePollingController<T>(options: ZLMRuntimePollingO
   let running = false;
   let visible = true;
   let paused = false;
+  let active = true;
+  let editing = false;
+  let danger = false;
   let disposed = false;
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let request: AbortController | null = null;
 
   function eligible() {
-    return running && !disposed && visible && !paused && nodeId !== null;
+    return running && !disposed && active && visible && !paused && !editing && !danger && nodeId !== null;
   }
 
   function cancelCurrent() {
@@ -101,6 +107,21 @@ export function createZLMRuntimePollingController<T>(options: ZLMRuntimePollingO
       paused = nextPaused;
       restart();
     },
+    setActive(nextActive) {
+      if (active === nextActive) return;
+      active = nextActive;
+      restart();
+    },
+    setEditing(nextEditing) {
+      if (editing === nextEditing) return;
+      editing = nextEditing;
+      restart();
+    },
+    setDanger(nextDanger) {
+      if (danger === nextDanger) return;
+      danger = nextDanger;
+      restart();
+    },
     refresh() {
       restart();
     },
@@ -116,6 +137,9 @@ export function createZLMRuntimePollingController<T>(options: ZLMRuntimePollingO
 export interface UseZLMRuntimePollingOptions<T> extends ZLMRuntimePollingOptions<T> {
   nodeId: Ref<number | null>;
   paused?: Ref<boolean>;
+  active?: Ref<boolean>;
+  editing?: Ref<boolean>;
+  danger?: Ref<boolean>;
 }
 
 export function useZLMRuntimePolling<T>(options: UseZLMRuntimePollingOptions<T>) {
@@ -124,19 +148,35 @@ export function useZLMRuntimePolling<T>(options: UseZLMRuntimePollingOptions<T>)
   const stopPausedWatch = options.paused
     ? watch(options.paused, value => controller.setPaused(value), { immediate: true })
     : undefined;
+  const stopActiveWatch = options.active
+    ? watch(options.active, value => controller.setActive(value), { immediate: true })
+    : undefined;
+  const stopEditingWatch = options.editing
+    ? watch(options.editing, value => controller.setEditing(value), { immediate: true })
+    : undefined;
+  const stopDangerWatch = options.danger
+    ? watch(options.danger, value => controller.setDanger(value), { immediate: true })
+    : undefined;
 
-  const handleVisibilityChange = () => controller.setVisible(document.visibilityState === "visible");
+  const handleVisibilityChange = () => {
+    if (typeof document !== "undefined") controller.setVisible(document.visibilityState === "visible");
+  };
 
   onMounted(() => {
-    controller.setVisible(document.visibilityState === "visible");
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (typeof document !== "undefined") {
+      controller.setVisible(document.visibilityState === "visible");
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
     controller.start();
   });
 
   onBeforeUnmount(() => {
     stopNodeWatch();
     stopPausedWatch?.();
-    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    stopActiveWatch?.();
+    stopEditingWatch?.();
+    stopDangerWatch?.();
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", handleVisibilityChange);
     controller.dispose();
   });
 
