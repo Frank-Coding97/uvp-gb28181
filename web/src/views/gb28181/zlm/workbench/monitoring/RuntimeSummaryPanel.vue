@@ -230,7 +230,7 @@ defineExpose({ refresh });
 
       <section class="runtime-summary-grid">
         <MediaVChart
-          aria-label="实时吞吐趋势"
+          aria-label="实时媒体速率"
           :title="chart.title"
           :spec="chart.spec"
           :status="chart.status"

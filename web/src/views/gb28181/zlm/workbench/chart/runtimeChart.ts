@@ -116,10 +116,11 @@ export function resetRuntimeSnapshots(context: RuntimeTrendContext): RuntimeTren
 }
 
 function trendValues(samples: readonly RuntimeChartSample[]): ChartDatum[] {
-  return samples.flatMap(sample => [
-    { asOf: sample.asOf, metric: "吞吐 KB/s", value: sample.throughput === null ? null : sample.throughput / 1024 },
-    { asOf: sample.asOf, metric: "播放人数", value: sample.viewerCount }
-  ]);
+  return samples.map(sample => ({
+    asOf: sample.asOf,
+    metric: "媒体速率 KB/s",
+    value: sample.throughput === null ? null : sample.throughput / 1024
+  }));
 }
 
 export function createRuntimeTrendSpec(samples: readonly RuntimeChartSample[]): MediaChartSpec {
@@ -136,7 +137,7 @@ export function createRuntimeTrendSpec(samples: readonly RuntimeChartSample[]): 
       point: { visible: samples.length <= 20 }
     }],
     axes: [
-      { orient: "left", title: { text: "KB/s · 人" }, label: { autoHide: true } },
+      { orient: "left", title: { text: "KB/s" }, label: { autoHide: true } },
       { orient: "bottom", label: { autoHide: true, autoRotate: false } }
     ],
     tooltip: { activeType: "dimension" },
@@ -148,7 +149,7 @@ export function buildRuntimeTrendChartState(history: RuntimeTrendHistory | null 
   if (!history) {
     return {
       status: "unknown",
-      title: "实时吞吐趋势",
+      title: "实时媒体速率",
       sampleCount: 0,
       samples: [],
       asOf: null,
@@ -165,7 +166,7 @@ export function buildRuntimeTrendChartState(history: RuntimeTrendHistory | null 
   const last = samples.at(-1);
   return {
     status,
-    title: "实时吞吐趋势",
+    title: "实时媒体速率",
     sampleCount: samples.length,
     samples,
     asOf: last?.asOf ?? null,

@@ -78,7 +78,8 @@ describe("runtime overview state", () => {
     expect(source.match(/<StatCard/g)).toHaveLength(12);
     expect(source).not.toContain("文件描述符 / Socket");
     expect(source).not.toContain("WorkThread 负载");
-    expect(source).toContain("实时吞吐趋势");
+    expect(source).toContain("实时媒体速率");
+    expect(source).not.toContain("实时吞吐趋势");
     expect(source).toContain("事件线程负载");
     expect(source).toContain("对象统计");
     expect(source).toContain("objectStatisticItems");
@@ -94,7 +95,7 @@ describe("runtime overview state", () => {
     expect(retiredSource).not.toContain("getZLMNodeRuntime");
   });
 
-  it("plots throughput and viewers instead of the former count-only trend", async () => {
+  it("plots only the aggregated media rate on a single-unit axis", async () => {
     const { createRuntimeTrendSpec } = await import("./workbench/chart/runtimeChart");
     const spec = createRuntimeTrendSpec([
       {
@@ -113,8 +114,7 @@ describe("runtime overview state", () => {
       }
     ]);
     const values = spec.data?.[0]?.values ?? [];
-    expect(values).toContainEqual(expect.objectContaining({ metric: "吞吐 KB/s", value: 2 }));
-    expect(values).toContainEqual(expect.objectContaining({ metric: "播放人数", value: 2 }));
-    expect(values).not.toContainEqual(expect.objectContaining({ metric: "媒体流" }));
+    expect(values).toEqual([{ asOf: "2026-08-30T00:00:00.000Z", metric: "媒体速率 KB/s", value: 2 }]);
+    expect(spec.axes?.[0]).toMatchObject({ title: { text: "KB/s" } });
   });
 });
