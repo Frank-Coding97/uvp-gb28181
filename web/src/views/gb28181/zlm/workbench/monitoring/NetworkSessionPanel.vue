@@ -23,6 +23,7 @@ import {
   type MonitoringViewerFilters
 } from "./monitoringState";
 import { buildNetworkSessionQuery, buildViewerTarget, canKickViewer } from "../../sessionManagementState";
+import { boundedPageRows } from "../boundedData";
 
 type SessionTab = "network" | "viewers";
 type PollPayload =
@@ -82,8 +83,12 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
     return { kind: "viewers", data: response.data };
   },
   publish(value) {
-    if (value.kind === "network" && activeTab.value === "network") networkData.value = value.data;
-    if (value.kind === "viewers" && activeTab.value === "viewers") viewerData.value = value.data;
+    if (value.kind === "network" && activeTab.value === "network") {
+      networkData.value = { ...value.data, list: boundedPageRows(value.data.list, networkFilter.pageSize) };
+    }
+    if (value.kind === "viewers" && activeTab.value === "viewers") {
+      viewerData.value = { ...value.data, list: boundedPageRows(value.data.list, viewerPageSize.value) };
+    }
     loadError.value = null;
     loading.value = false;
   },

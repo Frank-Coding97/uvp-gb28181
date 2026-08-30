@@ -34,6 +34,7 @@ import {
   proxyDeleteDecision,
   type ProxyTab
 } from "../../proxyManagementState";
+import { boundedPageRows } from "../boundedData";
 
 type PollPayload = { kind: ProxyTab; data: ZLMProxyPage };
 
@@ -104,7 +105,9 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
     return { kind, data: response.data };
   },
   publish(payload) {
-    if (payload.kind === currentKind.value) data[payload.kind] = payload.data;
+    if (payload.kind === currentKind.value) {
+      data[payload.kind] = { ...payload.data, list: boundedPageRows(payload.data.list, pages[payload.kind].pageSize) };
+    }
     observedCapability[payload.kind] = payload.data.capability;
     loadError.value = null;
     loading.value = false;

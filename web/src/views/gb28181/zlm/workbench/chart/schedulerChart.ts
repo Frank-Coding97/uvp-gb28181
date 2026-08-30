@@ -27,6 +27,8 @@ export interface SchedulerChartStateOptions {
   unavailable?: boolean;
 }
 
+export const SCHEDULER_CHART_SAMPLE_LIMIT = 1_000;
+
 const algorithmLabels: Record<SchedulerAlgorithm, string> = {
   roundrobin: "轮询",
   weighted: "加权轮询",
@@ -80,8 +82,11 @@ export function buildSchedulerChartState(
   filter: SchedulerLogFilter = {},
   options: SchedulerChartStateOptions = {}
 ): SchedulerChartState {
-  const sampleCount = Array.isArray(logs) ? logs.length : 0;
   const limit = normalizedLimit(filter);
+  const effectiveLimit = limit ?? SCHEDULER_CHART_SAMPLE_LIMIT;
+  const sourceLogs = Array.isArray(logs) ? logs : [];
+  const sampledLogs = sourceLogs.slice(0, effectiveLimit);
+  const sampleCount = sampledLogs.length;
   const filterText = formatFilter(filter, sampleCount, limit);
   if (options.unavailable) {
     return {
@@ -111,7 +116,7 @@ export function buildSchedulerChartState(
       asOf: null
     };
   }
-  if (logs.length === 0) {
+  if (sourceLogs.length === 0) {
     return {
       status: "empty",
       sampleCount: 0,
@@ -129,7 +134,7 @@ export function buildSchedulerChartState(
   const results = new Map<string, SchedulerChartDistribution>();
   const nodes = new Map<string, SchedulerChartDistribution>();
   let latest: string | null = null;
-  for (const log of logs) {
+  for (const log of sampledLogs) {
     increment(results, resultCategory(log));
     const node = nodeCategory(log);
     increment(nodes, node.category, node.nodeId);
@@ -137,7 +142,7 @@ export function buildSchedulerChartState(
   }
   const resultDistribution = sorted(results);
   const nodeDistribution = sorted(nodes);
-  const sampledAtLimit = limit !== null && logs.length >= limit;
+  const sampledAtLimit = sourceLogs.length > sampledLogs.length || (limit !== null && sampledLogs.length >= limit);
   return {
     status: sampledAtLimit ? "partial" : "ready",
     sampleCount,
@@ -147,7 +152,9 @@ export function buildSchedulerChartState(
     resultDistribution,
     nodeDistribution,
     summary: `当前筛选统计 ${sampleCount} 条样本：${resultDistribution.map(item => `${item.category} ${item.count}`).join("、")}`,
-    warning: sampledAtLimit ? `已达到后端返回上限 ${limit} 条，只代表当前筛选样本，不代表全量历史` : null,
+    warning: sampledAtLimit
+      ? `已达到${limit === null ? "前端统计" : "后端返回"}上限 ${effectiveLimit} 条，只代表当前筛选样本，不代表全量历史`
+      : null,
     asOf: latest
   };
 }

@@ -25,6 +25,7 @@ import { formatZLMByteRate, formatZLMBytes, formatZLMDuration, zlmErrorPresentat
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
 import { streamIdentityKey as mediaIdentityKey } from "../../streamManagementState";
 import { buildStreamRequestQuery, createStreamFilters, sameNodeTargets, type MonitoringStreamFilters } from "./monitoringState";
+import { boundedPageRows } from "../boundedData";
 
 const props = withDefaults(defineProps<{
   active: boolean;
@@ -113,7 +114,7 @@ const { refresh } = useZLMRuntimePolling<ZLMStreamPage>({
     return response.data;
   },
   publish(value) {
-    pageData.value = value;
+    pageData.value = { ...value, list: boundedPageRows(value.list, pageSize.value) };
     loadError.value = null;
     loading.value = false;
   },
@@ -157,7 +158,6 @@ function closeInteractions() {
 watch([() => props.scope, () => props.nodeId], () => {
   closeInteractions();
   selectedKeys.value = [];
-  page.value = 1;
   pageData.value = null;
   loadError.value = null;
   loading.value = props.scope === "all" || props.nodeId !== null;

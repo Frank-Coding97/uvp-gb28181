@@ -327,6 +327,7 @@ import { Modal } from "@arco-design/web-vue";
 import { useDevicesSize } from "@/hooks/useDevicesSize";
 import useGlobalProperties from "@/hooks/useGlobalProperties";
 import { useUserStoreHook } from "@/store/modules/user";
+import { boundedPageRows, boundedPageSize } from "@/views/gb28181/zlm/workbench/boundedData";
 import RecordingDetailDrawer from "./components/RecordingDetailDrawer.vue";
 import RecordingPlayerDialog from "./components/RecordingPlayerDialog.vue";
 import RecordingRuntimeControl from "./components/RecordingRuntimeControl.vue";
@@ -499,10 +500,11 @@ async function loadFiles() {
   try {
     const response = await listRecordingFiles(currentQuery(), request.signal);
     if (!requestCoordinator.isCurrent(request.token)) return;
-    files.value = response.data.list ?? [];
+    const nextPageSize = boundedPageSize(response.data.pageSize, pagination.pageSize);
+    files.value = boundedPageRows(response.data.list, nextPageSize);
     pagination.total = response.data.total ?? 0;
     pagination.current = response.data.page ?? pagination.current;
-    pagination.pageSize = response.data.pageSize ?? pagination.pageSize;
+    pagination.pageSize = nextPageSize;
     emit("stats", { filesTotal: pagination.total });
   } catch (error) {
     if (!requestCoordinator.isCurrent(request.token)) return;

@@ -23,6 +23,7 @@ import { zlmErrorPresentation } from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
 import { ffmpegCreateDecision, ffmpegURLText } from "../../ffmpegSourcesState";
 import { ingressCapabilityFromError } from "../../proxyManagementState";
+import { boundedPageRows } from "../boundedData";
 
 const props = withDefaults(defineProps<{
   active?: boolean;
@@ -93,7 +94,7 @@ const { refresh } = useZLMRuntimePolling<ZLMFFmpegSourcePage>({
     return response.data;
   },
   publish(value) {
-    pageData.value = value;
+    pageData.value = { ...value, list: boundedPageRows(value.list, pageSize.value) };
     observedCapability.value = value.capability;
     loadError.value = null;
     loading.value = false;

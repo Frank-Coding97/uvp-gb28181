@@ -131,7 +131,7 @@ function gotoStream(stream: ZLMRuntimeMedia) {
 
 function gotoMonitoring(protocol?: string) {
   const query: Record<string, string> = { view: "streams" };
-  if (protocol && protocol !== "未知协议") query.schema = protocol;
+  if (protocol && protocol !== "未知协议" && protocol !== "其他") query.schema = protocol;
   void router.push({ path: "/media/monitoring", query });
 }
 

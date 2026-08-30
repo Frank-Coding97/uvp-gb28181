@@ -25,6 +25,7 @@ import { zlmErrorPresentation } from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
 import { ingressCapabilityFromError } from "../../proxyManagementState";
 import { rtpCloseDecision } from "../../rtpServicesState";
+import { boundedPageRows } from "../boundedData";
 
 const props = withDefaults(defineProps<{
   active?: boolean;
@@ -101,7 +102,7 @@ const { refresh } = useZLMRuntimePolling<ZLMRTPServerPage>({
     return response.data;
   },
   publish(value) {
-    pageData.value = value;
+    pageData.value = { ...value, list: boundedPageRows(value.list, pageSize.value) };
     observedCapability.value = value.capability;
     loadError.value = null;
     loading.value = false;

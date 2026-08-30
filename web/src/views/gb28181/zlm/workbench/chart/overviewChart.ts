@@ -67,6 +67,8 @@ export interface OverviewChartState {
   warning: string | null;
 }
 
+export const OVERVIEW_DISTRIBUTION_CATEGORY_LIMIT = 12;
+
 function uniquePositiveIds(values: readonly number[] | undefined): number[] {
   if (!values) return [];
   return [...new Set(values.filter(value => Number.isSafeInteger(value) && value > 0))];
@@ -148,7 +150,11 @@ function distributionFor(
     }
     counts.set(key, { dimension, category, count: 1, ...(nodeId === undefined ? {} : { nodeId }) });
   }
-  return [...counts.values()].sort((left, right) => right.count - left.count || left.category.localeCompare(right.category));
+  const sorted = [...counts.values()].sort((left, right) => right.count - left.count || left.category.localeCompare(right.category));
+  if (sorted.length <= OVERVIEW_DISTRIBUTION_CATEGORY_LIMIT) return sorted;
+  const visible = sorted.slice(0, OVERVIEW_DISTRIBUTION_CATEGORY_LIMIT);
+  const otherCount = sorted.slice(OVERVIEW_DISTRIBUTION_CATEGORY_LIMIT).reduce((sum, item) => sum + item.count, 0);
+  return [...visible, { dimension, category: "其他", count: otherCount }];
 }
 
 function mediaCategory(stream: ZLMRuntimeMedia): string {
