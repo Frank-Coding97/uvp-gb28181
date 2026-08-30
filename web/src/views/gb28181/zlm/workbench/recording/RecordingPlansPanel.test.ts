@@ -41,8 +41,10 @@ describe("RecordingPlansPanel contract", () => {
 
     await wrapper.setProps({ active: true });
     await flushPromises();
-    expect(api.listRecordingPlans).toHaveBeenCalledOnce();
+    expect(api.listRecordingPlans).toHaveBeenCalledTimes(2);
     expect(api.listRecordingPlans).toHaveBeenCalledWith(expect.objectContaining({ page: 1, pageSize: 10 }));
+    expect(api.listRecordingPlans).toHaveBeenCalledWith(expect.objectContaining({ status: "enabled", page: 1, pageSize: 1 }));
+    expect(wrapper.emitted("stats")?.some(([payload]) => (payload as { enabledPlanTotal?: number }).enabledPlanTotal === 0)).toBe(true);
   });
 
   it("is route independent and starts data only while active", () => {

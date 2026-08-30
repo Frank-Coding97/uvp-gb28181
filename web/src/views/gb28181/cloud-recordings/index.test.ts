@@ -30,8 +30,10 @@ vi.mock("@/hooks/useDevicesSize", () => ({ useDevicesSize: () => ({ isMobile: { 
 
 import { getLucideIconComponent } from "@/utils/lucide-menu-icons";
 import CloudRecordings from "./index.vue";
+import RecordingWorkspacePanel from "./RecordingWorkspacePanel.vue";
 
-const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/cloud-recordings/index.vue"), "utf8");
+const shellSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/cloud-recordings/index.vue"), "utf8");
+const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/cloud-recordings/RecordingWorkspacePanel.vue"), "utf8");
 
 const file = (availability = "available", metadataState = "complete") => ({
   id: "9007199254740993",
@@ -85,9 +87,18 @@ const stubs = {
 };
 
 describe("cloud recording layout", () => {
+  it("keeps the old route as a thin shell over the shared business panel", () => {
+    expect(shellSource).toContain("RecordingWorkspacePanel");
+    expect(shellSource).toContain('mode="all"');
+    expect(shellSource).toContain(':active="true"');
+    expect(shellSource).not.toContain("listRecordingFiles");
+    expect(shellSource).not.toContain("RecordingPlayerDialog");
+  });
+
   it("keeps vertical scrolling inside the recording table", () => {
-    expect(source).toContain('class="snow-fill cloud-recordings-page"');
-    expect(source).toContain('class="snow-fill-inner uvp-page-shell-flat cloud-recordings-shell"');
+    expect(shellSource).toContain('class="snow-fill cloud-recordings-route"');
+    expect(source).toContain('class="cloud-recordings-page"');
+    expect(source).toContain('class="cloud-recordings-shell"');
     expect(source).toMatch(/\.cloud-recordings-page\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
     expect(source).toMatch(/\.cloud-recordings-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
     expect(source).toMatch(/\.recording-files-view,\s*\.active-recordings-view\s*{[^}]*display:\s*flex;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;/s);
@@ -120,6 +131,39 @@ describe("CloudRecordings", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("does not request while inactive and activates only the requested files panel", async () => {
+    const wrapper = mount(RecordingWorkspacePanel, {
+      props: { active: false, mode: "files" },
+      global: { stubs }
+    });
+    await flushPromises();
+    expect(api.listRecordingFiles).not.toHaveBeenCalled();
+    expect(api.listActiveRecordings).not.toHaveBeenCalled();
+
+    await wrapper.setProps({ active: true });
+    await flushPromises();
+    expect(api.listRecordingFiles).toHaveBeenCalledOnce();
+    expect(api.listRecordingOptions).toHaveBeenCalledOnce();
+    expect(api.listReconciliations).toHaveBeenCalledOnce();
+    expect(api.listActiveRecordings).not.toHaveBeenCalled();
+    expect(wrapper.emitted("stats")?.some(([payload]) => (payload as { filesTotal?: number }).filesTotal === 1)).toBe(true);
+    wrapper.unmount();
+  });
+
+  it("activates tasks without issuing a recording-file query", async () => {
+    const wrapper = mount(RecordingWorkspacePanel, {
+      props: { active: true, mode: "tasks" },
+      global: { stubs }
+    });
+    await flushPromises();
+    expect(api.listActiveRecordings).toHaveBeenCalledOnce();
+    expect(api.listRecordingFiles).not.toHaveBeenCalled();
+    expect(api.listRecordingOptions).not.toHaveBeenCalled();
+    expect(api.listReconciliations).not.toHaveBeenCalled();
+    expect(wrapper.emitted("stats")?.some(([payload]) => (payload as { activeTotal?: number }).activeTotal === 1)).toBe(true);
+    wrapper.unmount();
   });
 
   it("loads files without a default date range and keeps partial metadata explicit", async () => {

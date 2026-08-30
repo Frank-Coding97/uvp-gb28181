@@ -215,7 +215,7 @@ function clearPrepared() {
 function openSchedules() {
   const target = currentTarget();
   if (!target) return;
-  void router.push({ path: "/gb28181/recording-schedules", query: recordingScheduleQuery(target) });
+  void router.push({ path: "/media/recordings", query: { view: "plans", ...recordingScheduleQuery(target) } });
 }
 
 watch(

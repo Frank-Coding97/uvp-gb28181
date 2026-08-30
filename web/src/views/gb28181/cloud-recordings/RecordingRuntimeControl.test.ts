@@ -30,7 +30,8 @@ describe("recording runtime control", () => {
 
   it("labels HLS as runtime-only and reuses the existing schedule page", () => {
     expect(source).toContain("HLS 仅为节点运行态分片能力，不进入云录像文件目录");
-    expect(source).toContain("/gb28181/recording-schedules");
+    expect(source).toContain("/media/recordings");
+    expect(source).toContain('view: "plans"');
     expect(source).toContain("recordingScheduleQuery");
     expect(source).toContain("router.push");
   });

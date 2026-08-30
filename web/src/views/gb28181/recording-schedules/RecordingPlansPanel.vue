@@ -212,6 +212,10 @@ const props = withDefaults(defineProps<{
   active: false
 });
 
+const emit = defineEmits<{
+  stats: [value: { enabledPlanTotal?: number | null; abnormalChannelTotal?: number | null }];
+}>();
+
 function safeContext(value: unknown, maxLength: number) {
   const scalar = Array.isArray(value) ? value[0] : value;
   if (typeof scalar !== "string" && typeof scalar !== "number") return "";
@@ -328,13 +332,14 @@ function selectInternalView(view: "plans" | "status") {
 }
 function refresh() {
   const request = activeView.value === "plans" ? loadPlans() : loadExecutionPlans(false);
-  void request.then(() => Message.success("录像计划数据已刷新"));
+  void Promise.all([request, loadEnabledPlanTotal()]).then(() => Message.success("录像计划数据已刷新"));
 }
 async function notifyPlanStatusChange(plan: RecordingSchedule) {
 	const next = plan.enabled;
 	try {
 		await setRecordingPlanEnabled(Number(plan.id), next);
 		Message.success(`录像计划“${plan.name}”已${next ? "启用" : "停用"}`);
+		await loadEnabledPlanTotal();
 	} catch {
 		plan.enabled = !next;
 	}
@@ -364,7 +369,7 @@ async function savePlan(plan: RecordingSchedule) {
 	editorVisible.value = false;
 	activePlan.value = toSchedule(response.data);
 	Message.success(editing ? "计划已更新" : "计划已创建");
-	await loadPlans();
+	await Promise.all([loadPlans(), loadEnabledPlanTotal()]);
 }
 async function confirmAssignment(payload: { planId: string; scope: "device" | "channel"; targetIds: number[]; channelCount: number }) {
   assignmentVisible.value = false;
@@ -376,7 +381,7 @@ async function confirmAssignment(payload: { planId: string; scope: "device" | "c
 async function removePlan(plan: RecordingSchedule) {
 	await deleteRecordingPlan(Number(plan.id));
 	Message.success(`录像计划“${plan.name}”已删除`);
-	await loadPlans();
+	await Promise.all([loadPlans(), loadEnabledPlanTotal()]);
 }
 function stateTone(state: ScheduleChannel["state"]) { if (state === "录像中") return "success"; if (state === "等待设备上线") return "warning"; return "neutral"; }
 
@@ -391,6 +396,18 @@ async function loadPlans() {
 		planTotal.value = response.data.total;
 	} finally {
 		if (requestGeneration === generation) plansLoading.value = false;
+	}
+}
+
+async function loadEnabledPlanTotal() {
+	if (!props.active || !canView.value) return;
+	const requestGeneration = generation;
+	try {
+		const response = await listRecordingPlans({ status: "enabled", page: 1, pageSize: 1 });
+		if (requestGeneration !== generation || !props.active) return;
+		emit("stats", { enabledPlanTotal: response.data.total });
+	} catch {
+		if (requestGeneration === generation && props.active) emit("stats", { enabledPlanTotal: null });
 	}
 }
 
@@ -418,6 +435,7 @@ async function loadExecutionChannels() {
 	if (!props.active || !canView.value) return;
 	if (!selectedExecutionPlanId.value) {
 		executionChannels.value = [];
+		emit("stats", { abnormalChannelTotal: null });
 		return;
 	}
 	const requestGeneration = generation;
@@ -430,6 +448,9 @@ async function loadExecutionChannels() {
 		executionChannels.value = response.data.list.map(toScheduleChannel);
 		executionChannelTotal.value = response.data.total;
 		executionStatusCounts.value = response.data.statusCounts;
+		emit("stats", { abnormalChannelTotal: Object.entries(response.data.statusCounts)
+			.filter(([state]) => !["recording", "idle", "outside_schedule"].includes(state))
+			.reduce((sum, [, count]) => sum + count, 0) });
 	} finally {
 		if (requestGeneration === generation) executionChannelsLoading.value = false;
 	}
@@ -517,8 +538,10 @@ watch(
 			editorVisible.value = false;
 			assignmentVisible.value = false;
 			evidenceVisible.value = false;
+			if (!allowed) emit("stats", { enabledPlanTotal: null, abnormalChannelTotal: null });
 			return;
 		}
+		void loadEnabledPlanTotal();
 		if (activeView.value === "plans") void loadPlans();
 		else void loadExecutionPlans(false);
 	},
@@ -533,6 +556,7 @@ watch(recordingContextKeyword, value => {
 });
 
 onBeforeUnmount(() => { generation += 1; });
+defineExpose({ refresh });
 </script>
 
 <style scoped lang="scss">
