@@ -64,13 +64,16 @@ describe("proxy management state", () => {
 
   it("uses one page with pull/push tabs, typed polling, preflight and result refresh", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/ProxyManagement.vue"), "utf8");
-    expect(source).toContain('value="pull"');
-    expect(source).toContain('value="push"');
-    expect(source).toContain("useZLMRuntimePolling");
-    expect(source).toContain("preflightDeleteZLMPullProxy");
-    expect(source).toContain("preflightDeleteZLMPushProxy");
-    expect(source).toContain("refresh");
-    expect(source).not.toContain("index/api");
-    expect(source).not.toContain("http.request");
+    const panel = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/ingress/ProxyPanel.vue"), "utf8");
+    expect(source).toContain("LegacyIngressShell");
+    expect(source).toContain("ProxyPanel");
+    expect(panel).toContain('key=\"pull\"');
+    expect(panel).toContain('key=\"push\"');
+    expect(panel).toContain("useZLMRuntimePolling");
+    expect(panel).toContain("preflightDeleteZLMPullProxy");
+    expect(panel).toContain("preflightDeleteZLMPushProxy");
+    expect(panel).toContain("refresh");
+    expect(panel).not.toContain("index/api");
+    expect(panel).not.toContain("http.request");
   });
 });

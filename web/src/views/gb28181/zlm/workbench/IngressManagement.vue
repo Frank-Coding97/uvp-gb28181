@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import MediaWorkspaceShell from "./MediaWorkspaceShell.vue";
 import { useMediaWorkspaceRoute } from "./useMediaWorkspaceRoute";
+import FFmpegPanel from "./ingress/FFmpegPanel.vue";
+import ProxyPanel from "./ingress/ProxyPanel.vue";
+import RTPPanel from "./ingress/RTPPanel.vue";
 
 const workspace = useMediaWorkspaceRoute("ingress");
 const views = [
@@ -22,8 +25,9 @@ const views = [
     @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
     @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="workspace.refreshScope" @refresh-scope="workspace.refreshScope"
   >
-    <template v-for="view in views" :key="view.key" #[view.key]><div class="workspace-pending">正在准备{{ view.label }}面板…</div></template>
+    <template #pull="{ active }"><ProxyPanel :active="active" kind="pull" :scope="workspace.scope.value" :nodes="workspace.nodes.value" /></template>
+    <template #push="{ active }"><ProxyPanel :active="active" kind="push" :scope="workspace.scope.value" :nodes="workspace.nodes.value" /></template>
+    <template #ffmpeg="{ active }"><FFmpegPanel :active="active" :scope="workspace.scope.value" :nodes="workspace.nodes.value" /></template>
+    <template #rtp="{ active }"><RTPPanel :active="active" :scope="workspace.scope.value" :nodes="workspace.nodes.value" /></template>
   </MediaWorkspaceShell>
 </template>
-
-<style scoped>.workspace-pending { display: grid; min-height: 280px; place-items: center; color: var(--zlm-text-3); background: var(--zlm-card); border: 1px dashed var(--zlm-border); border-radius: var(--zlm-radius-lg); }</style>

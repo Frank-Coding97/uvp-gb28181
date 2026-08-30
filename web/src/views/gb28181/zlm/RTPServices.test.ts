@@ -44,14 +44,17 @@ describe("RTP service state", () => {
 
   it("shows actual port and ownership while closing through preflight APIs", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RTPServices.vue"), "utf8");
+    const panel = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/ingress/RTPPanel.vue"), "utf8");
     const form = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RTPServerForm.vue"), "utf8");
-    expect(source).toContain("record.port");
-    expect(source).toContain("record.managed");
-    expect(source).toContain("preflightCloseZLMRTPServer");
-    expect(source).toContain("forceCloseZLMRTPServer");
-    expect(source).toContain("useZLMRuntimePolling");
+    expect(source).toContain("LegacyIngressShell");
+    expect(source).toContain("RTPPanel");
+    expect(panel).toContain("record.port");
+    expect(panel).toContain("record.managed");
+    expect(panel).toContain("preflightCloseZLMRTPServer");
+    expect(panel).toContain("forceCloseZLMRTPServer");
+    expect(panel).toContain("useZLMRuntimePolling");
     expect(form).not.toContain("a-input-number");
     expect(form).toContain("allow-clear");
-    expect(source).not.toContain("index/api");
+    expect(panel).not.toContain("index/api");
   });
 });

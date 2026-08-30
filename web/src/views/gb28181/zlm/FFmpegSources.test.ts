@@ -45,13 +45,16 @@ describe("FFmpeg source state", () => {
 
   it("contains no shell command input or raw URL disclosure surface", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/FFmpegSources.vue"), "utf8");
+    const panel = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/ingress/FFmpegPanel.vue"), "utf8");
     const form = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/FFmpegSourceForm.vue"), "utf8");
-    expect(source).toContain("listZLMFFmpegSources");
-    expect(source).toContain("preflightDeleteZLMFFmpegSource");
-    expect(source).toContain("useZLMRuntimePolling");
+    expect(source).toContain("LegacyIngressShell");
+    expect(source).toContain("FFmpegPanel");
+    expect(panel).toContain("listZLMFFmpegSources");
+    expect(panel).toContain("preflightDeleteZLMFFmpegSource");
+    expect(panel).toContain("useZLMRuntimePolling");
     expect(form).toContain("templateKey");
     expect(form).not.toMatch(/shell|command|命令文本|textarea/i);
-    expect(source).not.toContain(":title=");
-    expect(source).not.toContain("index/api");
+    expect(panel).not.toContain(":title=");
+    expect(panel).not.toContain("index/api");
   });
 });
