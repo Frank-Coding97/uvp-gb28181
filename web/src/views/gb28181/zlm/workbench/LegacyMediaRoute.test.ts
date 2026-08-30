@@ -34,7 +34,7 @@ describe("LegacyMediaRoute", () => {
       await flushPromises();
 
       expect(routing.replace).toHaveBeenCalledOnce();
-      expect(routing.replace.mock.calls[0]?.[0]).toMatchObject({ path: expect.stringMatching(/^\/media\//) });
+      expect(routing.replace.mock.calls[0]?.[0]).toMatchObject({ path: expect.stringMatching(/^\/(media|gb28181)\//) });
       wrapper.unmount();
       routing.replace.mockReset();
     }

@@ -126,6 +126,10 @@ export const useZLMContextStore = defineStore("zlm-context", () => {
     return true;
   }
 
+  function selectAll() {
+    applySelection(null);
+  }
+
   function requestScope(): ZLMRequestScope | null {
     if (selectedNodeId.value === null) return null;
     if (requestController === null || requestController.signal.aborted) requestController = new AbortController();
@@ -155,6 +159,7 @@ export const useZLMContextStore = defineStore("zlm-context", () => {
     initialize,
     reconcileVisibleNodes,
     selectNode,
+    selectAll,
     requestScope,
     isCurrent,
     clearForLogout

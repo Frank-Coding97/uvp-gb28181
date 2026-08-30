@@ -49,4 +49,24 @@ describe("ZLMNodeContextBar", () => {
     await flushPromises();
     expect(context.selectedNodeId).toBeNull();
   });
+
+  it("supports an explicit all-node scope and defaults to it only once", async () => {
+    const testPinia = createPinia();
+    setActivePinia(testPinia);
+    const context = useZLMContextStore();
+    const wrapper = mount(ZLMNodeContextBar, {
+      props: { nodes, allowAll: true, defaultAll: true },
+      global: { plugins: [testPinia] }
+    });
+
+    await flushPromises();
+    expect(context.selectedNodeId).toBeNull();
+    expect(wrapper.text()).toContain("全部节点");
+    expect(wrapper.text()).toContain("聚合全部可见节点");
+
+    context.selectNode(1);
+    await wrapper.setProps({ nodes: [...nodes] });
+    await flushPromises();
+    expect(context.selectedNodeId).toBe(1);
+  });
 });

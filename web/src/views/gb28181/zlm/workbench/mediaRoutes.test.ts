@@ -3,11 +3,10 @@ import { describe, expect, it } from "vitest";
 import { LEGACY_MEDIA_ROUTE_PATHS, MEDIA_NODE_DETAIL, MEDIA_PAGES, resolveLegacyMediaRoute } from "./mediaRoutes";
 
 describe("media direct-page route contract", () => {
-  it("defines eleven ordered direct pages without recording menus", () => {
+  it("defines ten ordered direct pages with one merged overview", () => {
     expect(MEDIA_PAGES.map(item => [item.path, item.title, item.sort])).toEqual([
-      ["/gb28181/zlm/overview", "集群总览", 10],
+      ["/gb28181/zlm/overview", "总览", 10],
       ["/gb28181/zlm/nodes", "节点管理", 20],
-      ["/gb28181/zlm/runtime", "总览", 30],
       ["/gb28181/zlm/streams", "流管理", 40],
       ["/gb28181/zlm/sessions", "会话管理", 50],
       ["/gb28181/zlm/proxies", "拉流/推流代理", 60],
@@ -17,7 +16,8 @@ describe("media direct-page route contract", () => {
       ["/gb28181/zlm/scheduler", "调度策略", 100],
       ["/gb28181/zlm/scheduler/logs", "调度日志", 110]
     ]);
-    expect(new Set(MEDIA_PAGES.map(item => item.path)).size).toBe(11);
+    expect(new Set(MEDIA_PAGES.map(item => item.path)).size).toBe(10);
+    expect(MEDIA_PAGES.map(item => item.path)).not.toContain("/gb28181/zlm/runtime");
     expect(MEDIA_PAGES.map(item => item.path)).not.toContain("/gb28181/cloud-recordings");
     expect(MEDIA_PAGES.map(item => item.path)).not.toContain("/gb28181/recording-schedules");
     expect(MEDIA_NODE_DETAIL).toMatchObject({
@@ -49,20 +49,20 @@ describe("media direct-page route contract", () => {
     expect(resolveLegacyMediaRoute("/media/scheduling", { view: "logs" })).toMatchObject({ path: "/gb28181/zlm/scheduler/logs" });
   });
 
-  it("maps runtime to node detail only for a valid explicit node", () => {
+  it("maps the retired runtime page into the merged overview and preserves a valid node", () => {
     expect(resolveLegacyMediaRoute("/gb28181/zlm/runtime", { nodeId: "2" })).toEqual({
-      path: "/media/nodes/2",
-      query: { view: "runtime" },
+      path: "/gb28181/zlm/overview",
+      query: { nodeId: "2" },
       replace: true
     });
     expect(resolveLegacyMediaRoute("/gb28181/zlm/runtime", { nodeId: "0" })).toEqual({
-      path: "/media/overview",
-      query: { focus: "runtime" },
+      path: "/gb28181/zlm/overview",
+      query: {},
       replace: true
     });
     expect(resolveLegacyMediaRoute("/gb28181/zlm/runtime")).toEqual({
-      path: "/media/overview",
-      query: { focus: "runtime" },
+      path: "/gb28181/zlm/overview",
+      query: {},
       replace: true
     });
   });

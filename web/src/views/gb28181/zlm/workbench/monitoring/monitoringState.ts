@@ -154,3 +154,13 @@ export function overviewAsRuntime(overview: ZLMOverview): ZLMNodeRuntime {
     errors: overview.errors?.map(item => item.error)
   };
 }
+
+function clusterNodeRisk(node: ZLMNodeRuntime): number {
+  if (node.state === "offline" || node.status === "unavailable") return 0;
+  if (node.state === "maintenance" || node.status === "partial") return 1;
+  return 2;
+}
+
+export function orderClusterNodesByRisk(nodes: readonly ZLMNodeRuntime[]): ZLMNodeRuntime[] {
+  return [...nodes].sort((left, right) => clusterNodeRisk(left) - clusterNodeRisk(right) || left.nodeId - right.nodeId);
+}

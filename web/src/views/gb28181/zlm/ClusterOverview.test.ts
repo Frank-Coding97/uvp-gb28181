@@ -79,12 +79,13 @@ describe("cluster overview presentation", () => {
     });
   });
 
-  it("uses the compact zlm-admin cluster structure without workbench charts", () => {
+  it("merges cluster and node runtime into one scope-aware overview", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/ClusterOverview.vue"), "utf8");
-    expect(source).toContain("getZLMOverview");
-    expect(source).toContain("节点运行态");
-    expect(source).toContain("流分布");
-    expect(source).not.toContain("MediaOverviewPanel");
-    expect(source).not.toContain("MediaVChart");
+    expect(source).toContain("ZLMNodeContextBar");
+    expect(source).toContain("RuntimeSummaryPanel");
+    expect(source).toContain(":allow-all=\"true\"");
+    expect(source).toContain(":default-all=\"true\"");
+    expect(source).toContain("@select-node");
+    expect(source).not.toContain("getZLMOverview");
   });
 });

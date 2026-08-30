@@ -33,13 +33,12 @@ describe("media workbench access contract", () => {
     expect(access.workspacePaths).not.toContain("/gb28181/recording-schedules");
   });
 
-  it("grants all eleven media pages only to an explicit wildcard admin", () => {
+  it("grants all ten media pages only to an explicit wildcard admin", () => {
     const access = resolveMediaWorkspaceAccess([], { wildcard: true });
 
     expect(access.workspacePaths).toEqual([
       "/gb28181/zlm/overview",
       "/gb28181/zlm/nodes",
-      "/gb28181/zlm/runtime",
       "/gb28181/zlm/streams",
       "/gb28181/zlm/sessions",
       "/gb28181/zlm/proxies",

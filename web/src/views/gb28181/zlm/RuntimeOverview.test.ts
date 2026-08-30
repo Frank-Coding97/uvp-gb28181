@@ -68,20 +68,28 @@ describe("runtime overview state", () => {
     expect(next.at(-1)?.asOf).toBe("2026-08-30T00:01:00.000Z");
   });
 
-  it("uses typed polling and keeps exactly six meaningful summary cards", () => {
+  it("uses typed polling and keeps six scope-specific summary cards", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/RuntimeSummaryPanel.vue"), "utf8");
     expect(source).toContain("getZLMNodeRuntime");
     expect(source).toContain("useZLMRuntimePolling");
-    expect(source.match(/<StatCard/g)).toHaveLength(6);
+    expect(source).toContain("v-if=\"scope === 'all'\"");
+    expect(source).toContain("title=\"在线节点\"");
+    expect(source).toContain("title=\"异常节点\"");
+    expect(source.match(/<StatCard/g)).toHaveLength(12);
     expect(source).not.toContain("文件描述符 / Socket");
     expect(source).not.toContain("WorkThread 负载");
     expect(source).toContain("实时吞吐趋势");
     expect(source).toContain("事件线程负载");
     expect(source).toContain("对象统计");
     expect(source).toContain("objectStatisticItems");
+    expect(source).toContain("节点健康");
+    expect(source).toContain("selectNode");
     expect(source).not.toContain("当前媒体采样");
     expect(source).toContain("drilldown");
-    expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8")).toContain("ZLMNodeContextBar");
+    const retiredSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8");
+    expect(retiredSource).toContain("router.replace");
+    expect(retiredSource).toContain("/gb28181/zlm/overview");
+    expect(retiredSource).not.toContain("getZLMNodeRuntime");
   });
 
   it("plots throughput and viewers instead of the former count-only trend", async () => {

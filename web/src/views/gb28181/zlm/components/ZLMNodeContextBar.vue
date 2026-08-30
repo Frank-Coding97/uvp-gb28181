@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { RefreshCw } from "lucide-vue-next";
 import { useZLMContextStore, type ZLMContextNode } from "@/store/modules/zlm-context";
 import NodeStateBadge from "./NodeStateBadge.vue";
@@ -10,11 +10,15 @@ const props = withDefaults(defineProps<{
   loading?: boolean;
   disabled?: boolean;
   title?: string;
+  allowAll?: boolean;
+  defaultAll?: boolean;
 }>(), {
   queryNodeId: undefined,
   loading: false,
   disabled: false,
-  title: "当前媒体节点"
+  title: "当前媒体节点",
+  allowAll: false,
+  defaultAll: false
 });
 
 const emit = defineEmits<{
@@ -23,6 +27,7 @@ const emit = defineEmits<{
 }>();
 
 const context = useZLMContextStore();
+const defaultAllApplied = ref(false);
 
 watch(
   () => [props.nodes, props.queryNodeId, props.loading] as const,
@@ -30,14 +35,22 @@ watch(
     if (loading && nodes.length === 0) return;
     if (!context.initialized) context.initialize(nodes, queryNodeId);
     else context.reconcileVisibleNodes(nodes);
+    if (props.allowAll && props.defaultAll && !defaultAllApplied.value) {
+      defaultAllApplied.value = true;
+      const queryID = Number(Array.isArray(queryNodeId) ? queryNodeId[0] : queryNodeId);
+      if (!Number.isSafeInteger(queryID) || queryID <= 0 || !nodes.some(node => node.id === queryID)) {
+        context.selectAll();
+      }
+    }
   },
   { immediate: true, deep: true }
 );
 
-const selectedID = computed(() => context.selectedNodeId ?? undefined);
+const selectedID = computed(() => context.selectedNodeId ?? (props.allowAll ? "all" : undefined));
 const selectedNode = computed(() => context.selectedNode);
 
 const stateText = computed(() => {
+  if (props.allowAll && context.selectedNodeId === null) return "聚合全部可见节点，可选择单个节点查看运行细节";
   switch (selectedNode.value?.state) {
     case "active":
       return "节点在线，运行态数据会自动刷新";
@@ -51,6 +64,11 @@ const stateText = computed(() => {
 });
 
 function select(value: string | number | undefined) {
+  if (props.allowAll && value === "all") {
+    context.selectAll();
+    emit("change", null);
+    return;
+  }
   const nodeID = Number(value);
   if (!Number.isSafeInteger(nodeID) || nodeID <= 0 || !context.selectNode(nodeID)) return;
   emit("change", nodeID);
@@ -69,6 +87,9 @@ function select(value: string | number | undefined) {
         class="zlm-node-context__select"
         @change="select"
       >
+        <a-option v-if="allowAll" value="all">
+          <span class="zlm-node-context__option-name">全部节点</span>
+        </a-option>
         <a-option v-for="node in context.visibleNodes" :key="node.id" :value="node.id">
           <span class="zlm-node-context__option-name">{{ node.name }}</span>
           <span class="zlm-node-context__option-id">#{{ node.id }}</span>

@@ -20,9 +20,8 @@ export interface MediaPageDefinition {
  * compatibility destinations during a rolling code/database deployment.
  */
 export const MEDIA_PAGES: readonly MediaPageDefinition[] = [
-  { key: "cluster", title: "集群总览", path: "/gb28181/zlm/overview", component: "gb28181/zlm/ClusterOverview", sort: 10 },
+  { key: "cluster", title: "总览", path: "/gb28181/zlm/overview", component: "gb28181/zlm/ClusterOverview", sort: 10 },
   { key: "nodes", title: "节点管理", path: "/gb28181/zlm/nodes", component: "gb28181/zlm/NodeList", sort: 20 },
-  { key: "overview", title: "总览", path: "/gb28181/zlm/runtime", component: "gb28181/zlm/RuntimeOverview", sort: 30 },
   { key: "streams", title: "流管理", path: "/gb28181/zlm/streams", component: "gb28181/zlm/StreamManagement", sort: 40 },
   { key: "sessions", title: "会话管理", path: "/gb28181/zlm/sessions", component: "gb28181/zlm/SessionManagement", sort: 50 },
   { key: "proxies", title: "拉流/推流代理", path: "/gb28181/zlm/proxies", component: "gb28181/zlm/ProxyManagement", sort: 60 },
@@ -236,9 +235,7 @@ export function resolveLegacyMediaRoute(
       return destination("/media/overview", selectQuery(query, [nodeField, ["status", token], ["keyword", safeText]]));
     case "/gb28181/zlm/runtime": {
       const nodeId = positiveInteger(query.nodeId);
-      return nodeId
-        ? destination(`/media/nodes/${nodeId}`, { view: "runtime" })
-        : destination("/media/overview", { focus: "runtime" });
+      return destination("/gb28181/zlm/overview", nodeId ? { nodeId } : {});
     }
     case "/gb28181/zlm/streams":
       return destination("/media/monitoring", {

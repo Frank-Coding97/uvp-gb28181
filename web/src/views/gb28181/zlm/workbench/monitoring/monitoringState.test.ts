@@ -6,6 +6,7 @@ import {
   createStreamFilters,
   createViewerFilters,
   overviewAsRuntime,
+  orderClusterNodesByRisk,
   sameNodeTargets,
   scopeRange
 } from "./monitoringState";
@@ -78,5 +79,16 @@ describe("monitoring panel state", () => {
     expect(runtime.metricsComplete).toBe(false);
     expect(runtime.mediaFreshness).toBe("unavailable");
     expect(runtime.streams).toBeUndefined();
+  });
+
+  it("orders unhealthy cluster nodes before healthy nodes", () => {
+    const nodes = [
+      { nodeId: 1, name: "healthy", state: "active", status: "fresh" },
+      { nodeId: 2, name: "offline", state: "offline", status: "unavailable" },
+      { nodeId: 3, name: "partial", state: "active", status: "partial" }
+    ] as unknown as Parameters<typeof orderClusterNodesByRisk>[0];
+
+    expect(orderClusterNodesByRisk(nodes).map(node => node.nodeId)).toEqual([2, 3, 1]);
+    expect(nodes.map(node => node.nodeId)).toEqual([1, 2, 3]);
   });
 });
