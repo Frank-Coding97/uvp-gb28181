@@ -26,6 +26,7 @@ declare namespace Menu {
     svgIcon?: string;
     sort?: number;
     type?: number;
+    legacyMedia?: boolean;
   }
 }
 /* tabs菜单 */

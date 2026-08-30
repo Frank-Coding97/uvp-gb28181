@@ -52,7 +52,18 @@ export const staticRoutes = [
     name: "layout",
     redirect: HOME_PATH,
     component: () => import(/* webpackChunkName: "layout" */ "@/layout/index.vue"),
-    children: []
+    children: [
+      {
+        path: "/media/:pathMatch(.*)*",
+        name: "media-access-fallback",
+        component: () => import(/* webpackChunkName: "media-workbench" */ "@/views/gb28181/zlm/workbench/MediaEntry.vue"),
+        meta: {
+          title: "流媒体管理",
+          hide: true,
+          legacyMedia: false
+        }
+      }
+    ]
   },
   {
     path: "/play-console-demo",
