@@ -285,9 +285,40 @@ func (r *RuntimeReader) GetCapabilityProfile(ctx context.Context, nodeID int64) 
 // GetThreadsLoad and GetWorkThreadsLoad are typed runtime reads used by node
 // overview aggregation. They intentionally do not accept a generic API name.
 func (r *RuntimeReader) GetThreadsLoad(ctx context.Context, nodeID int64) (float64, error) {
-	return r.readLoad(ctx, nodeID, "getThreadsLoad", func(operationCtx context.Context, client *zlm.Client) (float64, error) {
-		return client.GetThreadsLoad(operationCtx)
+	loads, err := r.GetThreadsLoadDetail(ctx, nodeID)
+	return zlm.AverageThreadLoad(loads), err
+}
+
+// GetThreadsLoadDetail preserves the per-event-poller detail and caches a
+// defensive copy for the same short runtime TTL as the other node reads.
+func (r *RuntimeReader) GetThreadsLoadDetail(ctx context.Context, nodeID int64) ([]zlm.ThreadLoad, error) {
+	if err := r.guardRead(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	if err := r.rejectUnsupported(nodeID, "getThreadsLoad"); err != nil {
+		return nil, err
+	}
+	key := cacheKey("getThreadsLoadDetail", nodeID, "")
+	value, err := r.load(ctx, key, func(callCtx context.Context) (interface{}, error) {
+		var loads []zlm.ThreadLoad
+		err := r.executeRead(callCtx, nodeID, func(operationCtx context.Context, client *zlm.Client) error {
+			var readErr error
+			loads, readErr = client.GetThreadsLoadDetail(operationCtx)
+			return readErr
+		})
+		if err != nil {
+			return nil, err
+		}
+		return append([]zlm.ThreadLoad(nil), loads...), nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	loads, ok := value.([]zlm.ThreadLoad)
+	if !ok {
+		return nil, NewInternalError(nodeIDString(nodeID), "runtime thread load cache type mismatch")
+	}
+	return append([]zlm.ThreadLoad(nil), loads...), nil
 }
 
 func (r *RuntimeReader) GetWorkThreadsLoad(ctx context.Context, nodeID int64) (float64, error) {

@@ -140,7 +140,13 @@ export function overviewAsRuntime(overview: ZLMOverview): ZLMNodeRuntime {
       socketCount: overview.metrics.socketCount,
       networkSessionCount: overview.metrics.networkSessionCount,
       netThreadLoad: overview.metrics.netThreadLoadAvg,
-      workThreadLoad: overview.metrics.workThreadLoadAvg
+      workThreadLoad: overview.metrics.workThreadLoadAvg,
+      objectStatistics: overview.metrics.objectStatistics,
+      eventThreadLoads: overview.nodes.flatMap(node => (node.metrics.eventThreadLoads ?? []).map(thread => ({
+        ...thread,
+        nodeId: node.nodeId,
+        name: `${node.name} · ${thread.name}`
+      })))
     },
     metricsComplete,
     mediaFreshness: allNodesMediaSampled ? "fresh" : mediaKnown ? "stale" : "unavailable",

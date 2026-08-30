@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, toRef, watch } from "vue";
-import { Activity, Clock3, Radio, Server, Users } from "lucide-vue-next";
+import { Clock3, Server } from "lucide-vue-next";
 
-import { getZLMNodeRuntime, getZLMOverview, type ZLMNodeRuntime } from "@/api/gb28181-zlm-runtime";
+import {
+  getZLMNodeRuntime,
+  getZLMOverview,
+  type ZLMNodeRuntime,
+  type ZLMObjectStatistics
+} from "@/api/gb28181-zlm-runtime";
 import type { MediaScope } from "@/store/modules/media-workbench";
 
 import StatCard from "../../components/StatCard.vue";
@@ -40,7 +45,6 @@ const requestNodeId = computed(() => props.scope === "all" ? 1 : props.nodeId);
 const selectedNodeLabel = computed(() => props.scope === "all" ? "全部节点" : `节点 #${props.nodeId ?? "—"}`);
 const summary = computed(() => runtime.value ? runtimeSnapshot(runtime.value) : null);
 const chart = computed(() => buildRuntimeTrendChartState(history.value));
-const mediaAvailable = computed(() => runtime.value?.mediaFreshness !== "unavailable" && runtime.value?.streams !== undefined);
 const metricsAvailable = computed(() => runtime.value?.metricsComplete === true);
 const freshness = computed(() => zlmFreshnessPresentation(runtime.value?.asOf));
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
@@ -48,6 +52,42 @@ const streamTrend = computed(() => history.value.samples.map(point => point.stre
 const viewerTrend = computed(() => history.value.samples.map(point => point.viewerCount ?? undefined).filter((point): point is number => point !== undefined));
 const throughputTrend = computed(() => history.value.samples.map(point => point.throughput ?? undefined).filter((point): point is number => point !== undefined));
 const sessionTrend = computed(() => history.value.samples.map(point => point.sessionCount ?? undefined).filter((point): point is number => point !== undefined));
+const eventThreadLoads = computed(() => runtime.value?.metrics.eventThreadLoads ?? []);
+
+const objectStatisticMeta: Array<{ key: keyof ZLMObjectStatistics; label: string }> = [
+  { key: "mediaSource", label: "MediaSource" },
+  { key: "multiMediaSourceMuxer", label: "MultiMediaSourceMuxer" },
+  { key: "tcpServer", label: "TcpServer" },
+  { key: "tcpSession", label: "TcpSession" },
+  { key: "udpServer", label: "UdpServer" },
+  { key: "udpSession", label: "UdpSession" },
+  { key: "tcpClient", label: "TcpClient" },
+  { key: "socket", label: "Socket" },
+  { key: "frameImp", label: "FrameImp" },
+  { key: "frame", label: "Frame" },
+  { key: "buffer", label: "Buffer" },
+  { key: "bufferRaw", label: "BufferRaw" },
+  { key: "bufferLikeString", label: "BufferLikeString" },
+  { key: "bufferList", label: "BufferList" },
+  { key: "rtpPacket", label: "RtpPacket" },
+  { key: "rtmpPacket", label: "RtmpPacket" }
+];
+
+const objectStatisticItems = computed(() => {
+  const statistics = runtime.value?.metrics.objectStatistics;
+  if (!statistics) return [];
+  return objectStatisticMeta.map(item => ({ ...item, value: statistics[item.key] }));
+});
+
+function threadLoadWidth(load: number) {
+  return `${Math.min(100, Math.max(0, load))}%`;
+}
+
+function threadLoadTone(load: number) {
+  if (load > 80) return "danger";
+  if (load > 50) return "warning";
+  return "normal";
+}
 
 const { refresh } = useZLMRuntimePolling<ZLMNodeRuntime>({
   nodeId: requestNodeId,
@@ -153,6 +193,7 @@ defineExpose({ refresh });
 
       <section class="runtime-summary-grid">
         <MediaVChart
+          aria-label="实时吞吐趋势"
           :title="chart.title"
           :spec="chart.spec"
           :status="chart.status"
@@ -163,21 +204,33 @@ defineExpose({ refresh });
           :active="active"
           status-text="进入页面后等待运行态采样"
         />
-        <section class="runtime-stream-panel" aria-labelledby="runtime-sample-title">
-          <header class="runtime-stream-panel__header">
-            <div><h3 id="runtime-sample-title">当前媒体采样</h3><p>完整媒体身份和来源均由后端返回。</p></div>
-            <a-button size="small" @click="emit('drilldown', 'streams')">查看全部流</a-button>
+        <section class="runtime-thread-panel" aria-labelledby="runtime-thread-title">
+          <header class="runtime-thread-panel__header">
+            <div><h3 id="runtime-thread-title">事件线程负载</h3><p>getThreadsLoad · 单线程负载与 FD 数量</p></div>
+            <span>{{ eventThreadLoads.length }} 条线程</span>
           </header>
-          <div v-if="!mediaAvailable" class="runtime-empty" role="status">媒体采样不可用，不能判断在线流是否为 0。</div>
-          <div v-else-if="runtime.streams?.length" class="runtime-streams">
-            <div v-for="stream in runtime.streams.slice(0, 6)" :key="`${stream.nodeId}/${stream.media.schema}/${stream.media.vhost}/${stream.media.app}/${stream.media.stream}`" class="runtime-stream">
-              <Radio :size="14" />
-              <span><strong>{{ stream.media.app }}/{{ stream.media.stream }}</strong><small>节点 #{{ stream.nodeId }} · {{ stream.media.schema }} · {{ stream.media.vhost }}</small></span>
-              <span class="runtime-stream__right"><Users :size="12" />{{ stream.readerCount }}<Activity :size="12" />{{ formatZLMByteRate(stream.bytesSpeed) }}</span>
+          <div v-if="!metricsAvailable" class="runtime-empty" role="status">线程负载采样不可用。</div>
+          <div v-else-if="eventThreadLoads.length" class="thread-load-list">
+            <div v-for="(thread, index) in eventThreadLoads" :key="`${thread.nodeId ?? runtime.nodeId}/${thread.name}/${index}`" class="thread-load-row" :data-tone="threadLoadTone(thread.load)">
+              <div class="thread-load-row__head"><strong :title="thread.name">{{ thread.name }}</strong><span>{{ thread.load }}% · FD {{ thread.fdCount }}</span></div>
+              <div class="thread-load-track"><i :style="{ width: threadLoadWidth(thread.load) }" /></div>
             </div>
           </div>
-          <div v-else class="runtime-empty" role="status">后端确认当前范围没有在线媒体流。</div>
+          <div v-else class="runtime-empty" role="status">ZLM 当前没有返回事件线程明细。</div>
         </section>
+      </section>
+
+      <section class="runtime-object-panel" aria-labelledby="runtime-object-title">
+        <header class="runtime-object-panel__header">
+          <div><h3 id="runtime-object-title">对象统计</h3><p>getStatistic · ZLM 内存对象实例计数</p></div>
+          <span>当前快照 · {{ objectStatisticItems.length }} 项</span>
+        </header>
+        <div v-if="metricsAvailable && objectStatisticItems.length" class="object-stat-grid">
+          <div v-for="item in objectStatisticItems" :key="item.key" class="object-stat-chip">
+            <span :title="item.label">{{ item.label }}</span><strong>{{ item.value.toLocaleString() }}</strong>
+          </div>
+        </div>
+        <div v-else class="runtime-object-empty" role="status">对象统计暂不可用。</div>
       </section>
 
       <footer class="runtime-summary-footnote" :data-tone="freshness.tone">
@@ -197,10 +250,11 @@ defineExpose({ refresh });
 .monitoring-banner { margin: 10px 0; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.monitoring-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.monitoring-banner--danger { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .monitoring-state { display: flex; min-height: 270px; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
 .runtime-summary-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }.runtime-kpi-button { min-width: 0; padding: 0; text-align: left; background: transparent; border: 0; border-radius: var(--zlm-radius-lg); cursor: pointer; }.runtime-kpi-button:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 2px; }.runtime-kpi-button:hover :deep(.stat-card) { border-color: var(--zlm-brand-500); }
-.runtime-summary-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 12px; margin-top: 12px; }.runtime-stream-panel { min-width: 0; padding: 14px 16px 12px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.runtime-stream-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.runtime-stream-panel h3 { margin: 0; color: var(--zlm-text-1); font-size: 14px; }.runtime-stream-panel p { margin: 4px 0 0; }
-.runtime-streams { display: flex; flex-direction: column; gap: 7px; }.runtime-stream { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-width: 0; padding: 9px 10px; color: var(--zlm-text-2); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }.runtime-stream > span { min-width: 0; }.runtime-stream strong, .runtime-stream small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.runtime-stream strong { color: var(--zlm-text-1); }.runtime-stream small { margin-top: 2px; color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 10px; }.runtime-stream__right { display: inline-flex; align-items: center; gap: 4px; color: var(--zlm-text-3); font-size: 11px; }.runtime-empty { display: grid; min-height: 180px; place-items: center; color: var(--zlm-text-3); text-align: center; font-size: var(--zlm-fs-caption); }
+.runtime-summary-grid { display: grid; grid-template-columns: minmax(0, 1.08fr) minmax(0, .92fr); gap: 12px; margin-top: 12px; }.runtime-thread-panel, .runtime-object-panel { min-width: 0; padding: 13px 15px 12px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.runtime-thread-panel__header, .runtime-object-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }.runtime-thread-panel h3, .runtime-object-panel h3 { margin: 0; color: var(--zlm-text-1); font-size: 14px; }.runtime-thread-panel p, .runtime-object-panel p { margin: 3px 0 0; }.runtime-thread-panel__header > span, .runtime-object-panel__header > span { flex: none; color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 10px; }
+.thread-load-list { display: grid; max-height: 192px; gap: 8px; overflow: auto; }.thread-load-row { min-width: 0; }.thread-load-row__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px; font-size: 11px; }.thread-load-row__head strong { overflow: hidden; color: var(--zlm-text-2); font-weight: var(--zlm-fw-medium); text-overflow: ellipsis; white-space: nowrap; }.thread-load-row__head span { flex: none; color: var(--zlm-text-4); font-family: var(--zlm-font-mono); }.thread-load-track { height: 5px; overflow: hidden; background: var(--zlm-fill-2); border-radius: 999px; }.thread-load-track i { display: block; height: 100%; background: var(--zlm-brand-500); border-radius: inherit; transition: width .2s ease; }.thread-load-row[data-tone="warning"] .thread-load-track i { background: var(--zlm-warn-500); }.thread-load-row[data-tone="danger"] .thread-load-track i { background: var(--zlm-danger-500); }.runtime-empty { display: grid; min-height: 160px; place-items: center; color: var(--zlm-text-3); text-align: center; font-size: var(--zlm-fs-caption); }
+.runtime-object-panel { margin-top: 12px; }.object-stat-grid { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 7px; }.object-stat-chip { min-width: 0; padding: 8px 9px; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }.object-stat-chip span, .object-stat-chip strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.object-stat-chip span { color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 9px; }.object-stat-chip strong { margin-top: 3px; color: var(--zlm-text-1); font-family: var(--zlm-font-mono); font-size: 15px; }.runtime-object-empty { padding: 18px; color: var(--zlm-text-3); text-align: center; font-size: var(--zlm-fs-caption); }
 .runtime-summary-footnote { margin-top: 8px; color: var(--zlm-text-3); font-size: 11px; text-align: right; }.runtime-summary-footnote[data-tone="warning"] { color: var(--zlm-warn-600); }.runtime-summary-footnote[data-tone="danger"] { color: var(--zlm-danger-600); }
-@media (max-width: 1400px) { .runtime-summary-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }.media-vchart { min-height: 100%; }
-@media (max-width: 820px) { .monitoring-panel__header, .runtime-stream-panel__header { flex-direction: column; }.monitoring-panel__meta { align-items: flex-start; }.runtime-summary-grid { grid-template-columns: 1fr; }.runtime-summary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }.runtime-summary-kpis :deep(.stat-card) { min-height: 88px; }
+@media (max-width: 1400px) { .runtime-summary-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }.object-stat-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }.media-vchart { min-height: 100%; }
+@media (max-width: 820px) { .monitoring-panel__header, .runtime-thread-panel__header, .runtime-object-panel__header { flex-direction: column; }.monitoring-panel__meta { align-items: flex-start; }.runtime-summary-grid { grid-template-columns: 1fr; }.runtime-summary-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }.object-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }.runtime-summary-kpis :deep(.stat-card) { min-height: 88px; }
 @media (max-width: 560px) { .runtime-summary-kpis { grid-template-columns: 1fr; } }
 </style>

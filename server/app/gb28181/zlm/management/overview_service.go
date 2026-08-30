@@ -61,6 +61,10 @@ type OverviewRuntimeReader interface {
 	GetWorkThreadsLoad(context.Context, int64) (float64, error)
 }
 
+type overviewRuntimeThreadDetailReader interface {
+	GetThreadsLoadDetail(context.Context, int64) ([]zlm.ThreadLoad, error)
+}
+
 // OverviewMediaListReader is the narrow adapter needed until T4 grows a
 // typed media-list method. Its node ID argument keeps the collection bound to
 // the exact node; implementations must return only typed MediaInfo values.
@@ -162,17 +166,44 @@ type RuntimeMedia struct {
 }
 
 type NodeRuntimeMetrics struct {
-	MediaSourceCount           uint64  `json:"mediaSourceCount"`
-	MultiMediaSourceMuxerCount uint64  `json:"multiMediaSourceMuxerCount"`
-	TCPServerCount             uint64  `json:"tcpServerCount"`
-	TCPSessionCount            uint64  `json:"tcpSessionCount"`
-	UDPServerCount             uint64  `json:"udpServerCount"`
-	UDPSessionCount            uint64  `json:"udpSessionCount"`
-	TCPClientCount             uint64  `json:"tcpClientCount"`
-	SocketCount                uint64  `json:"socketCount"`
-	NetworkSessionCount        int     `json:"networkSessionCount"`
-	NetThreadLoad              float64 `json:"netThreadLoad"`
-	WorkThreadLoad             float64 `json:"workThreadLoad"`
+	MediaSourceCount           uint64                  `json:"mediaSourceCount"`
+	MultiMediaSourceMuxerCount uint64                  `json:"multiMediaSourceMuxerCount"`
+	TCPServerCount             uint64                  `json:"tcpServerCount"`
+	TCPSessionCount            uint64                  `json:"tcpSessionCount"`
+	UDPServerCount             uint64                  `json:"udpServerCount"`
+	UDPSessionCount            uint64                  `json:"udpSessionCount"`
+	TCPClientCount             uint64                  `json:"tcpClientCount"`
+	SocketCount                uint64                  `json:"socketCount"`
+	NetworkSessionCount        int                     `json:"networkSessionCount"`
+	NetThreadLoad              float64                 `json:"netThreadLoad"`
+	WorkThreadLoad             float64                 `json:"workThreadLoad"`
+	EventThreadLoads           []RuntimeThreadLoad     `json:"eventThreadLoads,omitempty"`
+	ObjectStatistics           RuntimeObjectStatistics `json:"objectStatistics"`
+}
+
+type RuntimeThreadLoad struct {
+	Name    string `json:"name"`
+	Load    int    `json:"load"`
+	FDCount int    `json:"fdCount"`
+}
+
+type RuntimeObjectStatistics struct {
+	MediaSource           uint64 `json:"mediaSource"`
+	MultiMediaSourceMuxer uint64 `json:"multiMediaSourceMuxer"`
+	TCPServer             uint64 `json:"tcpServer"`
+	TCPSession            uint64 `json:"tcpSession"`
+	UDPServer             uint64 `json:"udpServer"`
+	UDPSession            uint64 `json:"udpSession"`
+	TCPClient             uint64 `json:"tcpClient"`
+	Socket                uint64 `json:"socket"`
+	FrameImp              uint64 `json:"frameImp"`
+	Frame                 uint64 `json:"frame"`
+	Buffer                uint64 `json:"buffer"`
+	BufferRaw             uint64 `json:"bufferRaw"`
+	BufferLikeString      uint64 `json:"bufferLikeString"`
+	BufferList            uint64 `json:"bufferList"`
+	RtpPacket             uint64 `json:"rtpPacket"`
+	RtmpPacket            uint64 `json:"rtmpPacket"`
 }
 
 type RuntimeNodeError struct {
@@ -200,19 +231,20 @@ type NodeRuntimeView struct {
 }
 
 type OverviewMetrics struct {
-	SampledNodeCount           int64   `json:"sampledNodeCount"`
-	MediaSourceCount           uint64  `json:"mediaSourceCount"`
-	MultiMediaSourceMuxerCount uint64  `json:"multiMediaSourceMuxerCount"`
-	TCPServerCount             uint64  `json:"tcpServerCount"`
-	TCPSessionCount            uint64  `json:"tcpSessionCount"`
-	UDPServerCount             uint64  `json:"udpServerCount"`
-	UDPSessionCount            uint64  `json:"udpSessionCount"`
-	TCPClientCount             uint64  `json:"tcpClientCount"`
-	SocketCount                uint64  `json:"socketCount"`
-	NetworkSessionCount        int64   `json:"networkSessionCount"`
-	NetThreadLoadAvg           float64 `json:"netThreadLoadAvg"`
-	WorkThreadLoadAvg          float64 `json:"workThreadLoadAvg"`
-	StreamCount                int64   `json:"streamCount"`
+	SampledNodeCount           int64                   `json:"sampledNodeCount"`
+	MediaSourceCount           uint64                  `json:"mediaSourceCount"`
+	MultiMediaSourceMuxerCount uint64                  `json:"multiMediaSourceMuxerCount"`
+	TCPServerCount             uint64                  `json:"tcpServerCount"`
+	TCPSessionCount            uint64                  `json:"tcpSessionCount"`
+	UDPServerCount             uint64                  `json:"udpServerCount"`
+	UDPSessionCount            uint64                  `json:"udpSessionCount"`
+	TCPClientCount             uint64                  `json:"tcpClientCount"`
+	SocketCount                uint64                  `json:"socketCount"`
+	NetworkSessionCount        int64                   `json:"networkSessionCount"`
+	NetThreadLoadAvg           float64                 `json:"netThreadLoadAvg"`
+	WorkThreadLoadAvg          float64                 `json:"workThreadLoadAvg"`
+	StreamCount                int64                   `json:"streamCount"`
+	ObjectStatistics           RuntimeObjectStatistics `json:"objectStatistics"`
 }
 
 type NodeRuntimeFailure struct {
@@ -551,6 +583,7 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 
 	var statistic zlm.Statistic
 	var sessions []zlm.Session
+	var eventThreadLoads []zlm.ThreadLoad
 	var netLoad, workLoad float64
 	var statisticErr, sessionsErr, netLoadErr, workLoadErr error
 	var mediaInfos []zlm.MediaInfo
@@ -572,6 +605,11 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 		}()
 		go func() {
 			defer wg.Done()
+			if detailReader, ok := s.runtime.(overviewRuntimeThreadDetailReader); ok {
+				eventThreadLoads, netLoadErr = detailReader.GetThreadsLoadDetail(operationCtx, current.ID)
+				netLoad = zlm.AverageThreadLoad(eventThreadLoads)
+				return
+			}
 			netLoad, netLoadErr = s.runtime.GetThreadsLoad(operationCtx, current.ID)
 		}()
 		go func() {
@@ -591,7 +629,7 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 	wg.Wait()
 
 	if statisticErr == nil && sessionsErr == nil && netLoadErr == nil && workLoadErr == nil {
-		view.Metrics = runtimeMetrics(statistic, len(sessions), netLoad, workLoad)
+		view.Metrics = runtimeMetrics(statistic, len(sessions), netLoad, workLoad, eventThreadLoads)
 		view.MetricsComplete = true
 		view.Freshness = RuntimeFreshnessFresh
 	} else {
@@ -723,7 +761,7 @@ func heartbeatFreshness(now, heartbeat time.Time, staleAfter time.Duration) Runt
 	return RuntimeFreshnessFresh
 }
 
-func runtimeMetrics(statistic zlm.Statistic, sessionCount int, netLoad, workLoad float64) NodeRuntimeMetrics {
+func runtimeMetrics(statistic zlm.Statistic, sessionCount int, netLoad, workLoad float64, eventThreadLoads []zlm.ThreadLoad) NodeRuntimeMetrics {
 	return NodeRuntimeMetrics{
 		MediaSourceCount:           statistic.MediaSource,
 		MultiMediaSourceMuxerCount: statistic.MultiMediaSourceMuxer,
@@ -736,6 +774,29 @@ func runtimeMetrics(statistic zlm.Statistic, sessionCount int, netLoad, workLoad
 		NetworkSessionCount:        sessionCount,
 		NetThreadLoad:              netLoad,
 		WorkThreadLoad:             workLoad,
+		EventThreadLoads:           runtimeThreadLoads(eventThreadLoads),
+		ObjectStatistics:           runtimeObjectStatistics(statistic),
+	}
+}
+
+func runtimeThreadLoads(loads []zlm.ThreadLoad) []RuntimeThreadLoad {
+	result := make([]RuntimeThreadLoad, 0, len(loads))
+	for _, load := range loads {
+		result = append(result, RuntimeThreadLoad{Name: load.Name, Load: load.Load, FDCount: load.FDCount})
+	}
+	return result
+}
+
+func runtimeObjectStatistics(statistic zlm.Statistic) RuntimeObjectStatistics {
+	return RuntimeObjectStatistics{
+		MediaSource: statistic.MediaSource, MultiMediaSourceMuxer: statistic.MultiMediaSourceMuxer,
+		TCPServer: statistic.TcpServer, TCPSession: statistic.TcpSession,
+		UDPServer: statistic.UdpServer, UDPSession: statistic.UdpSession,
+		TCPClient: statistic.TcpClient, Socket: statistic.Socket,
+		FrameImp: statistic.FrameImp, Frame: statistic.Frame,
+		Buffer: statistic.Buffer, BufferRaw: statistic.BufferRaw,
+		BufferLikeString: statistic.BufferLikeString, BufferList: statistic.BufferList,
+		RtpPacket: statistic.RtpPacket, RtmpPacket: statistic.RtmpPacket,
 	}
 }
 
@@ -793,6 +854,29 @@ func addOverviewMetrics(total *OverviewMetrics, current NodeRuntimeMetrics) {
 	total.NetworkSessionCount += int64(current.NetworkSessionCount)
 	total.NetThreadLoadAvg += current.NetThreadLoad
 	total.WorkThreadLoadAvg += current.WorkThreadLoad
+	addRuntimeObjectStatistics(&total.ObjectStatistics, current.ObjectStatistics)
+}
+
+func addRuntimeObjectStatistics(total *RuntimeObjectStatistics, current RuntimeObjectStatistics) {
+	if total == nil {
+		return
+	}
+	total.MediaSource += current.MediaSource
+	total.MultiMediaSourceMuxer += current.MultiMediaSourceMuxer
+	total.TCPServer += current.TCPServer
+	total.TCPSession += current.TCPSession
+	total.UDPServer += current.UDPServer
+	total.UDPSession += current.UDPSession
+	total.TCPClient += current.TCPClient
+	total.Socket += current.Socket
+	total.FrameImp += current.FrameImp
+	total.Frame += current.Frame
+	total.Buffer += current.Buffer
+	total.BufferRaw += current.BufferRaw
+	total.BufferLikeString += current.BufferLikeString
+	total.BufferList += current.BufferList
+	total.RtpPacket += current.RtpPacket
+	total.RtmpPacket += current.RtmpPacket
 }
 
 func sortRuntimeMedia(media []RuntimeMedia) {

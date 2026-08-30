@@ -100,6 +100,34 @@ export interface ZLMNodeRuntimeMetrics {
   networkSessionCount: number;
   netThreadLoad: number;
   workThreadLoad: number;
+  eventThreadLoads?: ZLMThreadLoad[];
+  objectStatistics?: ZLMObjectStatistics;
+}
+
+export interface ZLMThreadLoad {
+  name: string;
+  load: number;
+  fdCount: number;
+  nodeId?: number;
+}
+
+export interface ZLMObjectStatistics {
+  mediaSource: number;
+  multiMediaSourceMuxer: number;
+  tcpServer: number;
+  tcpSession: number;
+  udpServer: number;
+  udpSession: number;
+  tcpClient: number;
+  socket: number;
+  frameImp: number;
+  frame: number;
+  buffer: number;
+  bufferRaw: number;
+  bufferLikeString: number;
+  bufferList: number;
+  rtpPacket: number;
+  rtmpPacket: number;
 }
 
 export interface ZLMRuntimeMedia {
@@ -148,6 +176,7 @@ export interface ZLMOverviewMetrics {
   netThreadLoadAvg: number;
   workThreadLoadAvg: number;
   streamCount: number;
+  objectStatistics?: ZLMObjectStatistics;
 }
 
 export interface ZLMOverview {

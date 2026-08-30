@@ -52,7 +52,8 @@ describe("media runtime chart adapters", () => {
 
     expect(state.samples).toHaveLength(60);
     expect(state.samples[0]?.asOf).toContain("10:01");
-    expect(buildRuntimeTrendChartState(state).title).toContain("进入页面后采样");
+    expect(buildRuntimeTrendChartState(state).title).toBe("实时吞吐趋势");
+    expect(buildRuntimeTrendChartState(state).sampledLabel).toContain("进入页面后采样");
     expect(buildRuntimeTrendChartState(state).sampleCount).toBe(60);
   });
 

@@ -738,13 +738,18 @@ func (c *Client) RestartServer(ctx context.Context, _graceMS int) error {
 	return nil
 }
 
-// threadLoadEntry getThreadsLoad / getWorkThreadsLoad 单条
-type threadLoadEntry struct {
-	Load int `json:"load"`
+// ThreadLoad is one getThreadsLoad/getWorkThreadsLoad entry. Load is the
+// integer percentage reported by ZLM; FDCount is the descriptors owned by the
+// event poller and may be zero on older ZLM versions.
+type ThreadLoad struct {
+	Name    string `json:"name"`
+	Load    int    `json:"load"`
+	FDCount int    `json:"fd_count"`
 }
 
-// avgLoad 取多线程负载平均(load 是 int 0-100,返 0-1 float)
-func avgLoad(entries []threadLoadEntry) float64 {
+// AverageThreadLoad returns the average as 0-1 for the existing scheduler and
+// heartbeat contracts while preserving the original entries for management UI.
+func AverageThreadLoad(entries []ThreadLoad) float64 {
 	if len(entries) == 0 {
 		return 0
 	}
@@ -755,36 +760,43 @@ func avgLoad(entries []threadLoadEntry) float64 {
 	return float64(sum) / float64(len(entries)) / 100.0
 }
 
+func (c *Client) readThreadLoads(ctx context.Context, api string) ([]ThreadLoad, error) {
+	var r struct {
+		baseResp
+		Data []ThreadLoad `json:"data"`
+	}
+	if err := c.call(ctx, api, nil, &r); err != nil {
+		return nil, err
+	}
+	if r.Code != 0 {
+		return nil, fmt.Errorf("%s code=%d msg=%s", api, r.Code, r.Msg)
+	}
+	return append([]ThreadLoad(nil), r.Data...), nil
+}
+
+// GetThreadsLoadDetail keeps the per-event-poller name, load and fd_count
+// needed by the runtime dashboard.
+func (c *Client) GetThreadsLoadDetail(ctx context.Context) ([]ThreadLoad, error) {
+	return c.readThreadLoads(ctx, "getThreadsLoad")
+}
+
+// GetWorkThreadsLoadDetail is the equivalent detailed work-poller snapshot.
+func (c *Client) GetWorkThreadsLoadDetail(ctx context.Context) ([]ThreadLoad, error) {
+	return c.readThreadLoads(ctx, "getWorkThreadsLoad")
+}
+
 // GetThreadsLoad 拉 event poller 网络 I/O 线程负载平均(0-1)
 //
 // ZLM `/index/api/getThreadsLoad` 返 `{"data":[{"load":0,"name":"event poller 0"},...]}`
 func (c *Client) GetThreadsLoad(ctx context.Context) (float64, error) {
-	var r struct {
-		baseResp
-		Data []threadLoadEntry `json:"data"`
-	}
-	if err := c.call(ctx, "getThreadsLoad", nil, &r); err != nil {
-		return 0, err
-	}
-	if r.Code != 0 {
-		return 0, fmt.Errorf("getThreadsLoad code=%d msg=%s", r.Code, r.Msg)
-	}
-	return avgLoad(r.Data), nil
+	loads, err := c.GetThreadsLoadDetail(ctx)
+	return AverageThreadLoad(loads), err
 }
 
 // GetWorkThreadsLoad 拉 work poller 工作线程负载平均(0-1)
 func (c *Client) GetWorkThreadsLoad(ctx context.Context) (float64, error) {
-	var r struct {
-		baseResp
-		Data []threadLoadEntry `json:"data"`
-	}
-	if err := c.call(ctx, "getWorkThreadsLoad", nil, &r); err != nil {
-		return 0, err
-	}
-	if r.Code != 0 {
-		return 0, fmt.Errorf("getWorkThreadsLoad code=%d msg=%s", r.Code, r.Msg)
-	}
-	return avgLoad(r.Data), nil
+	loads, err := c.GetWorkThreadsLoadDetail(ctx)
+	return AverageThreadLoad(loads), err
 }
 
 // GetSnap 从 ZLM /index/api/getSnap 抓取指定流的 JPEG 快照。

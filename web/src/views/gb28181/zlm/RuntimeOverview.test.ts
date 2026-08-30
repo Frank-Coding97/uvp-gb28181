@@ -75,7 +75,36 @@ describe("runtime overview state", () => {
     expect(source.match(/<StatCard/g)).toHaveLength(6);
     expect(source).not.toContain("文件描述符 / Socket");
     expect(source).not.toContain("WorkThread 负载");
+    expect(source).toContain("实时吞吐趋势");
+    expect(source).toContain("事件线程负载");
+    expect(source).toContain("对象统计");
+    expect(source).toContain("objectStatisticItems");
+    expect(source).not.toContain("当前媒体采样");
     expect(source).toContain("drilldown");
     expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8")).toContain("ZLMNodeContextBar");
+  });
+
+  it("plots throughput and viewers instead of the former count-only trend", async () => {
+    const { createRuntimeTrendSpec } = await import("./workbench/chart/runtimeChart");
+    const spec = createRuntimeTrendSpec([
+      {
+        nodeId: 7,
+        asOf: "2026-08-30T00:00:00.000Z",
+        streamCount: 1,
+        viewerCount: 2,
+        throughput: 2048,
+        sessionCount: 3,
+        netThreadLoad: 0.2,
+        workThreadLoad: 0.3,
+        fdCount: 4,
+        recordingCount: 0,
+        mediaKnown: true,
+        metricsKnown: true
+      }
+    ]);
+    const values = spec.data?.[0]?.values ?? [];
+    expect(values).toContainEqual(expect.objectContaining({ metric: "吞吐 KB/s", value: 2 }));
+    expect(values).toContainEqual(expect.objectContaining({ metric: "播放人数", value: 2 }));
+    expect(values).not.toContainEqual(expect.objectContaining({ metric: "媒体流" }));
   });
 });

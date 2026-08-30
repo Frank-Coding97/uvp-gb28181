@@ -60,6 +60,39 @@ func TestOverviewIncludesAllNodeStatesAndReadsOnlyActiveNodes(t *testing.T) {
 	require.Zero(t, tracker.count("statistic", 3))
 }
 
+func TestOverviewPreservesObjectStatisticsAndEventThreadDetails(t *testing.T) {
+	now := time.Date(2026, 8, 30, 12, 0, 30, 0, time.UTC)
+	registry := overviewRegistryFake{nodes: []*node.Node{overviewNode(1, node.StateActive, now)}}
+	base := &overviewRuntimeFake{
+		statistics: map[int64]zlm.Statistic{1: {
+			MediaSource: 1, MultiMediaSourceMuxer: 2, TcpServer: 3, TcpSession: 4,
+			UdpServer: 5, UdpSession: 6, TcpClient: 7, Socket: 8,
+			FrameImp: 9, Frame: 10, Buffer: 11, BufferRaw: 12,
+			BufferLikeString: 13, BufferList: 14, RtpPacket: 15, RtmpPacket: 16,
+		}},
+	}
+	runtime := &overviewRuntimeDetailFake{
+		overviewRuntimeFake: base,
+		threadLoads: map[int64][]zlm.ThreadLoad{1: {
+			{Name: "event poller 0", Load: 20, FDCount: 12},
+			{Name: "event poller 1", Load: 40, FDCount: 18},
+		}},
+	}
+	service := NewOverviewService(OverviewDependencies{Registry: registry, Runtime: runtime, Media: &overviewMediaFake{}}, WithOverviewClock(func() time.Time { return now }))
+
+	result, err := service.GetOverview(context.Background())
+	require.NoError(t, err)
+	item := overviewNodeResult(t, result, 1)
+	require.Equal(t, uint64(16), item.Metrics.ObjectStatistics.RtmpPacket)
+	require.Equal(t, uint64(13), item.Metrics.ObjectStatistics.BufferLikeString)
+	require.Equal(t, []RuntimeThreadLoad{
+		{Name: "event poller 0", Load: 20, FDCount: 12},
+		{Name: "event poller 1", Load: 40, FDCount: 18},
+	}, item.Metrics.EventThreadLoads)
+	require.InDelta(t, 0.30, item.Metrics.NetThreadLoad, 0.0001)
+	require.Equal(t, uint64(15), result.Metrics.ObjectStatistics.RtpPacket)
+}
+
 func TestOverviewPartialNodeFailureKeepsSuccessfulCurrentMetricsOnly(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 1, 0, 0, time.UTC)
 	registry := overviewRegistryFake{nodes: []*node.Node{
@@ -387,6 +420,22 @@ type overviewRuntimeFake struct {
 	errors     map[int64]error
 	block      <-chan struct{}
 	blocked    map[int64]bool
+}
+
+type overviewRuntimeDetailFake struct {
+	*overviewRuntimeFake
+	threadLoads map[int64][]zlm.ThreadLoad
+}
+
+func (r *overviewRuntimeDetailFake) GetThreadsLoadDetail(ctx context.Context, nodeID int64) ([]zlm.ThreadLoad, error) {
+	defer r.enter("threads", nodeID)()
+	if err := r.err(nodeID); err != nil {
+		return nil, err
+	}
+	if err := r.wait(ctx, nodeID); err != nil {
+		return nil, err
+	}
+	return append([]zlm.ThreadLoad(nil), r.threadLoads[nodeID]...), nil
 }
 
 func (r *overviewRuntimeFake) enter(kind string, nodeID int64) func() {

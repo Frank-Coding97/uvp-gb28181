@@ -29,6 +29,22 @@ func TestClientRuntimeStatistic(t *testing.T) {
 	require.Equal(t, uint64(22), statistic.RtmpPacket)
 }
 
+func TestClientRuntimeThreadLoadDetailKeepsNameLoadAndFDCount(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/index/api/getThreadsLoad", r.URL.Path)
+		_, _ = w.Write([]byte(`{"code":0,"data":[{"name":"event poller 0","load":12,"fd_count":31},{"name":"event poller 1","load":48,"fd_count":17}]}`))
+	})
+	defer server.Close()
+
+	loads, err := client.GetThreadsLoadDetail(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, []ThreadLoad{
+		{Name: "event poller 0", Load: 12, FDCount: 31},
+		{Name: "event poller 1", Load: 48, FDCount: 17},
+	}, loads)
+	require.InDelta(t, 0.30, AverageThreadLoad(loads), 0.0001)
+}
+
 func TestClientRuntimeAllSession(t *testing.T) {
 	client, server := newMockClient(t, func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "/index/api/getAllSession", r.URL.Path)
