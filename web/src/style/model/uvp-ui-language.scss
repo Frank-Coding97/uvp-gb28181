@@ -617,6 +617,7 @@ body {
   border-color: rgb(37 99 235 / 22%);
 }
 
+body,
 .gb28181-page,
 .zlm-node-list,
 .node-detail,
@@ -680,6 +681,7 @@ body {
   --zlm-lh-tight: 1.25;
 }
 
+body[arco-theme="dark"],
 body[arco-theme="dark"] .gb28181-page,
 body[arco-theme="dark"] .zlm-node-list,
 body[arco-theme="dark"] .node-detail,

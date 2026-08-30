@@ -11,3 +11,10 @@ describe("table action spacing", () => {
     expect(source).toMatch(/\.uvp-data-table \.arco-btn:not\(\.arco-btn-only-icon\) \.arco-btn-icon\s*\{[^}]*margin-right:\s*4px;/s);
   });
 });
+
+describe("media workbench theme tokens", () => {
+  it("maps ZLM surfaces to the active UVP body theme for legacy and canonical routes", () => {
+    expect(source).toMatch(/body,\s*\.gb28181-page,[^{]*\{[^}]*--zlm-card:\s*var\(--uvp-panel-bg\)/s);
+    expect(source).toMatch(/body\[arco-theme="dark"\],\s*body\[arco-theme="dark"\]\s+\.gb28181-page,[^{]*\{/s);
+  });
+});
