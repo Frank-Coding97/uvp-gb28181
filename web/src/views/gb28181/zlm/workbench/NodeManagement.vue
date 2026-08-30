@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import MediaWorkspaceShell from "./MediaWorkspaceShell.vue";
 import { useMediaWorkspaceRoute } from "./useMediaWorkspaceRoute";
+import NodeListPanel from "./nodes/NodeListPanel.vue";
 
 const workspace = useMediaWorkspaceRoute("nodes");
 const views = [{ key: "list", label: "节点列表", description: "生命周期与容量" }];
@@ -16,8 +17,15 @@ const views = [{ key: "list", label: "节点列表", description: "生命周期�
     @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
     @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="workspace.refreshScope" @refresh-scope="workspace.refreshScope"
   >
-    <template #list><div class="workspace-pending">正在准备节点治理面板…</div></template>
+    <template #list>
+      <NodeListPanel
+        :nodes="workspace.nodes.value"
+        :scope="workspace.scope.value"
+        :loading="workspace.scopeLoading.value"
+        :error="workspace.scopeError.value"
+        :auto-refresh="workspace.autoRefresh.value"
+        @refresh="workspace.refreshScope"
+      />
+    </template>
   </MediaWorkspaceShell>
 </template>
-
-<style scoped>.workspace-pending { display: grid; min-height: 280px; place-items: center; color: var(--zlm-text-3); background: var(--zlm-card); border: 1px dashed var(--zlm-border); border-radius: var(--zlm-radius-lg); }</style>
