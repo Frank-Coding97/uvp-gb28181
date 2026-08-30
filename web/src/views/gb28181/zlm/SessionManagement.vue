@@ -117,7 +117,9 @@ watch(selectedNodeId, (nodeId, previous) => {
   viewerData.value = null;
   loadError.value = null;
   loading.value = nodeId !== null;
-  if (nodeId) void router.replace({ query: { ...route.query, nodeId: String(nodeId) } });
+  if (nodeId && previous !== null && route.query.nodeId !== String(nodeId)) {
+    void router.replace({ query: { ...route.query, nodeId: String(nodeId) } });
+  }
 });
 
 watch(activeTab, () => {

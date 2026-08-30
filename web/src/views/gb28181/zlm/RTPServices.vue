@@ -126,7 +126,9 @@ watch(selectedNodeId, (nodeId, previous) => {
   formVisible.value = false;
   closeDialog();
   loading.value = nodeId !== null;
-  if (nodeId) void router.replace({ query: { ...route.query, nodeId: String(nodeId) } });
+  if (nodeId && previous !== null && route.query.nodeId !== String(nodeId)) {
+    void router.replace({ query: { ...route.query, nodeId: String(nodeId) } });
+  }
 });
 
 async function createServer(request: ZLMRTPServerCreateRequest) {

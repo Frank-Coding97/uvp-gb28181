@@ -10,6 +10,8 @@ const pages = [
   "RTPServices.vue"
 ];
 
+const querySyncPages = ["RuntimeOverview.vue", ...pages];
+
 function selectedNodeWatcher(source: string) {
   const start = source.indexOf("watch(selectedNodeId");
   expect(start).toBeGreaterThanOrEqual(0);
@@ -27,5 +29,12 @@ describe("ZLM runtime page state retention", () => {
     expect(watcher).not.toMatch(/\bviewerPage\.value\s*=\s*1/);
     expect(watcher).not.toMatch(/\bnetworkFilter\.page\s*=\s*1/);
     expect(watcher).not.toMatch(/\bpages\.(?:pull|push)\.page\s*=\s*1/);
+  });
+
+  it.each(querySyncPages)("does not rewrite the route for the initial node selection in %s", file => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm", file), "utf8");
+    const watcher = selectedNodeWatcher(source);
+
+    expect(watcher).toContain("previous !== null");
   });
 });
