@@ -12,8 +12,8 @@ describe("dashboard grid adapter", () => {
   });
 
   it("derives deterministic desktop, tablet and mobile columns", () => {
-    expect(deriveDashboardColumns(1440)).toBe(12);
-    expect(deriveDashboardColumns(1024)).toBe(6);
+    expect(deriveDashboardColumns(1440)).toBe(20);
+    expect(deriveDashboardColumns(1024)).toBe(10);
     expect(deriveDashboardColumns(390)).toBe(1);
   });
 
@@ -37,7 +37,7 @@ describe("dashboard grid adapter", () => {
     const grid = createDashboardGrid(host, factory);
 
     expect(factory).toHaveBeenCalledWith(
-      expect.objectContaining({ column: 12, disableDrag: true, disableResize: true }),
+      expect.objectContaining({ column: 20, disableDrag: true, disableResize: true }),
       host
     );
     grid.setEditing(true);

@@ -26,10 +26,10 @@ const defaultGridFactory: DashboardGridFactory = (options, host) => {
   return engine;
 };
 
-export function deriveDashboardColumns(width: number): 1 | 6 | 12 {
+export function deriveDashboardColumns(width: number): 1 | 10 | 20 {
   if (width < 768) return 1;
-  if (width < 1200) return 6;
-  return 12;
+  if (width < 1200) return 10;
+  return 20;
 }
 
 export function normalizeGridChange(nodes: Array<Pick<GridStackNode, "id" | "x" | "y" | "w" | "h">>): DashboardGridGeometry[] {
@@ -46,7 +46,7 @@ export function createDashboardGrid(
 ): DashboardGridHandle {
   const engine = factory(
     {
-      column: 12,
+      column: 20,
       disableDrag: true,
       disableResize: true,
       float: false,

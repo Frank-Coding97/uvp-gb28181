@@ -17,7 +17,34 @@ func TestDefaultLayoutContainsEveryWidgetOnce(t *testing.T) {
 		require.False(t, seen[widget.ID], "duplicate widget %s", widget.ID)
 		seen[widget.ID] = true
 	}
-	require.False(t, widgetByID(t, layout, "media-traffic-today").Visible)
+	for index, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "device-online-rate", "channel-online-rate"} {
+		widget := widgetByID(t, layout, id)
+		require.True(t, widget.Visible, "%s must be visible in the reference five-card row", id)
+		require.Equal(t, index*4, widget.X)
+		require.Equal(t, 4, widget.W)
+		require.Zero(t, widget.Y)
+	}
+}
+
+func TestNormalizeLayoutMigratesLegacyReferenceRowWithoutGap(t *testing.T) {
+	legacy := Layout{SchemaVersion: 1, Widgets: []WidgetLayout{
+		{ID: "sip-rpm", X: 0, Y: 0, W: 2, H: 2, Visible: true, Settings: map[string]any{}},
+		{ID: "sip-today", X: 2, Y: 0, W: 2, H: 2, Visible: true, Settings: map[string]any{}},
+		{ID: "play-success-24h", X: 4, Y: 0, W: 2, H: 2, Visible: true, Settings: map[string]any{}},
+		{ID: "media-runtime", X: 8, Y: 0, W: 4, H: 2, Visible: true, Settings: map[string]any{}},
+		{ID: "device-online-rate", X: 8, Y: 2, W: 2, H: 5, Visible: true, Settings: map[string]any{}},
+		{ID: "channel-online-rate", X: 10, Y: 2, W: 2, H: 5, Visible: true, Settings: map[string]any{}},
+	}}
+
+	normalized, err := NormalizeLayout(legacy)
+	require.NoError(t, err)
+	require.Equal(t, CurrentSchemaVersion, normalized.SchemaVersion)
+	for index, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "device-online-rate", "channel-online-rate"} {
+		widget := widgetByID(t, normalized, id)
+		require.True(t, widget.Visible)
+		require.Equal(t, index*4, widget.X)
+		require.Equal(t, 4, widget.W)
+	}
 }
 
 func TestNormalizeLayoutRejectsInvalidGeometryAndUnknownWidgets(t *testing.T) {
@@ -48,7 +75,7 @@ func TestNormalizeLayoutMigratesKnownWidgetsAndAddsMissingDefaults(t *testing.T)
 	require.NoError(t, err)
 	require.Equal(t, CurrentSchemaVersion, normalized.SchemaVersion)
 	require.Len(t, normalized.Widgets, 11)
-	require.Equal(t, 3, widgetByID(t, normalized, "sip-rpm").X)
+	require.Equal(t, 5, widgetByID(t, normalized, "sip-rpm").X)
 }
 
 func TestSectionEnvelopeSerializesStableStateContract(t *testing.T) {
