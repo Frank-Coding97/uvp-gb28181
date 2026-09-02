@@ -29,16 +29,16 @@
         <div class="grid-stack-item-content card">
           <span v-if="editing" class="drag"><GripHorizontal :size="16" /></span>
           <template v-if="widget.id === 'sip-rpm'">
-            <CardTitle icon="activity" title="实时 SIP RPM" /><div class="kpi">{{ number(sipRpm) }}<small>/min</small></div><p>最近一分钟处理速率</p><MiniTrend :values="sipTrend" />
+            <CardTitle icon="activity" title="实时 SIP RPM" /><div class="kpi">{{ number(sipRpm) }}<small>/min</small></div><p>最近一分钟处理速率</p><MiniTrend :values="sipTrend" color="var(--uvp-warning)" />
           </template>
           <template v-else-if="widget.id === 'sip-today'">
-            <CardTitle icon="radio" title="今日 SIP 处理数量" /><div class="kpi">{{ number(sipTodayTotal) }}</div><p>{{ sipTodayTotal == null ? "暂无连续采样" : `异常 ${number(sipSnapshot?.todayAbnormal)} 条` }}</p><MiniTrend :values="sipTrend" />
+            <CardTitle icon="radio" title="今日 SIP 处理数量" /><div class="kpi">{{ number(sipTodayTotal) }}</div><p>{{ sipTodayTotal == null ? "暂无连续采样" : `异常 ${number(sipSnapshot?.todayAbnormal)} 条` }}</p><MiniTrend :values="sipTodayTrend" color="var(--uvp-brand-cyan)" />
           </template>
           <template v-else-if="widget.id === 'play-success-24h'">
-            <CardTitle icon="play" title="点播成功率（24H）" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>{{ inviteSuccessRate == null ? "暂无完整 24H 样本" : "近 24 小时媒体可播放成功率" }}</p>
+            <CardTitle icon="play" title="点播成功率（24H）" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>{{ inviteSuccessRate == null ? "暂无完整 24H 样本" : "近 24 小时媒体可播放成功率" }}</p><MiniTrend :values="playSuccessTrend" color="var(--uvp-brand)" />
           </template>
           <template v-else-if="widget.id === 'media-traffic-today'">
-            <CardTitle icon="traffic" title="今日媒体流量" /><div class="kpi">{{ bytes(mediaRate) }}<small>/s</small></div><p>当前聚合吞吐；累计账本完善后切换为今日值</p>
+            <CardTitle icon="traffic" title="今日媒体流量" /><div class="kpi">{{ bytes(mediaRate) }}<small>/s</small></div><p>当前聚合吞吐；累计账本完善后切换为今日值</p><MiniTrend :values="mediaRateTrend" color="var(--uvp-danger)" />
           </template>
           <template v-else-if="widget.id === 'media-runtime'">
             <CardTitle icon="server" title="流媒体运行态" />
@@ -89,11 +89,13 @@ const savedLayout = ref<DashboardLayout>(clone(DEFAULT_DASHBOARD_LAYOUT));
 const revision = ref(0), editing = ref(false), saving = ref(false), refreshing = ref(false), layoutLoading = ref(true);
 const updatedAt = ref<Date | null>(null), sipSnapshot = ref<DashboardSnapshot | null>(null), mediaOverview = ref<ZLMOverview | null>(null);
 const devices = ref({ total: 0, online: 0 }), channels = ref({ total: 0, online: 0 });
+const playSuccessTrend = ref<number[]>([]), mediaRateTrend = ref<number[]>([]);
 let grid: DashboardGridHandle | null = null, timer: ReturnType<typeof setInterval> | null = null;
 
 const visibleWidgets = computed(() => layout.value.widgets.filter(item => item.visible));
 const updatedText = computed(() => updatedAt.value ? dayjs(updatedAt.value).format("HH:mm:ss") : "等待首帧");
 const sipTrend = computed(() => sipSnapshot.value?.pulse.samples.slice(-24).map(item => item.msgPerSec) ?? []);
+const sipTodayTrend = computed(() => { let total = 0; return sipTrend.value.map(value => (total += value * 60)); });
 const sipRpm = computed(() => { const values = sipSnapshot.value?.pulse.samples.slice(-6) ?? []; return values.length ? Math.round(values.reduce((sum, item) => sum + item.msgPerSec, 0) / values.length * 60) : null; });
 const sipTodayTotal = computed(() => sipSnapshot.value && sipSnapshot.value.health !== HEALTH_EMPTY ? sipSnapshot.value.todayTotal : null);
 const inviteSuccessRate = computed<number | null>(() => null);
@@ -124,7 +126,8 @@ async function refreshData() {
   const results = await Promise.allSettled([fetchSipDashboardSnapshot(), getZLMOverview(), listDevices({ page: 1, pageSize: 1 }), listChannels({ page: 1, pageSize: 1 }), listChannels({ status: "online", page: 1, pageSize: 1 })]);
   const [sip, overview, devicePage, channelPage, onlineChannels] = results;
   if (sip.status === "fulfilled") sipSnapshot.value = sip.value.data;
-  if (overview.status === "fulfilled") mediaOverview.value = overview.value.data;
+  if (overview.status === "fulfilled") { mediaOverview.value = overview.value.data; mediaRateTrend.value = [...mediaRateTrend.value.slice(-23), mediaRate.value]; }
+  if (inviteSuccessRate.value != null) playSuccessTrend.value = [...playSuccessTrend.value.slice(-23), inviteSuccessRate.value];
   if (devicePage.status === "fulfilled") devices.value = { total: devicePage.value.data.total ?? 0, online: devicePage.value.data.onlineTotal ?? 0 };
   if (channelPage.status === "fulfilled" && onlineChannels.status === "fulfilled") channels.value = { total: channelPage.value.data.total ?? 0, online: onlineChannels.value.data.total ?? 0 };
   updatedAt.value = new Date(); refreshing.value = false;

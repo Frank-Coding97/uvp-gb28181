@@ -21,6 +21,9 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("<OnlineDonut");
     expect(source).not.toContain("class=\"runtime-title\"");
     expect(source).toContain("<CardTitle icon=\"server\" title=\"流媒体运行态\" />");
+    for (const color of ["--uvp-warning", "--uvp-brand-cyan", "--uvp-brand", "--uvp-danger"]) {
+      expect(source).toContain(`color=\"var(${color})\"`);
+    }
   });
 
   it("supports editing, persistence, conflict messaging and reset", () => {
