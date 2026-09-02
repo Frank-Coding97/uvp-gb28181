@@ -15,6 +15,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/civilcode"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
+	gbdashboard "uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
@@ -367,6 +368,11 @@ func startControlPlane(cfg gbconfig.Config) {
 	metricsCleanupStop = make(chan struct{})
 	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
 	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
+	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbPlayAttempt{}) {
+		gbroutes.SetPlayAttemptStore(gbdashboard.NewPlayAttemptStore(db))
+	} else {
+		gbroutes.SetPlayAttemptStore(nil)
+	}
 	setupTraceController(cfg, nil)
 	setupZLMRegistry(cfg)
 	setupTrafficRuntime()

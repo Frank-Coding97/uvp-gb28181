@@ -27,6 +27,7 @@ type PlayController struct {
 	controllers.Common
 	svc              PlayService
 	recordingStarter PlaybackRecordingStarter
+	attemptStore     PlayAttemptStore
 }
 
 type PlayService interface {
@@ -46,10 +47,19 @@ type PlaybackRecordingStarter interface {
 	BeginPlayback(context.Context, string) error
 }
 
+type PlayAttemptStore interface {
+	Begin(context.Context, uint, string, string) (string, error)
+	Finish(context.Context, string, string, string, int64, bool) error
+}
+
 type PlayControllerOption func(*PlayController)
 
 func WithPlaybackRecordingStarter(starter PlaybackRecordingStarter) PlayControllerOption {
 	return func(controller *PlayController) { controller.recordingStarter = starter }
+}
+
+func WithPlayAttemptStore(store PlayAttemptStore) PlayControllerOption {
+	return func(controller *PlayController) { controller.attemptStore = store }
 }
 
 // NewPlayController 装配点播控制器(svc 由 bootstrap 注入)
@@ -81,6 +91,32 @@ func (pc *PlayController) Start(c *gin.Context) {
 		audit["result"] = "denied"
 		return
 	}
+	attemptID := ""
+	attemptOutcome := "failure"
+	attemptFailureStage := "play_service"
+	var attemptResult *play.Result
+	if pc.attemptStore != nil {
+		var attemptErr error
+		attemptID, attemptErr = pc.attemptStore.Begin(c.Request.Context(), pc.GetCurrentUserID(c), deviceID, channelID)
+		if attemptErr != nil && app.ZapLog != nil {
+			app.ZapLog.Warn("记录点播 attempt 开始失败", zap.Error(attemptErr))
+		}
+	}
+	defer func() {
+		if pc.attemptStore == nil || attemptID == "" {
+			return
+		}
+		nodeID, reused := int64(0), false
+		if attemptResult != nil {
+			reused = attemptResult.Reused
+			if attemptResult.Node != nil {
+				nodeID = attemptResult.Node.ID
+			}
+		}
+		if err := pc.attemptStore.Finish(context.WithoutCancel(c.Request.Context()), attemptID, attemptOutcome, attemptFailureStage, nodeID, reused); err != nil && app.ZapLog != nil {
+			app.ZapLog.Warn("记录点播 attempt 结果失败", zap.Error(err))
+		}
+	}()
 	var res *play.Result
 	var err error
 	if authorized, ok := pc.svc.(AuthorizedPlayService); ok {
@@ -97,6 +133,9 @@ func (pc *PlayController) Start(c *gin.Context) {
 		pc.FailAndAbort(c, mapPlayErr(err), err)
 		return
 	}
+	attemptResult = res
+	attemptOutcome = "success"
+	attemptFailureStage = ""
 	play.ApplyPlaybackSelection(res, res.DefaultProtocol, isSecurePlaybackRequest(c.Request))
 	if pc.recordingStarter != nil && res != nil && res.StreamID != "" {
 		if err := pc.recordingStarter.BeginPlayback(c.Request.Context(), res.StreamID); err != nil && app.ZapLog != nil {

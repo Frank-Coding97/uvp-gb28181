@@ -48,6 +48,7 @@ var hookController = gbhandler.NewHookController(streamNotifier)
 
 // playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
 var playController = gbcontrollers.NewPlayController(nil)
+var playAttemptStore gbcontrollers.PlayAttemptStore
 var streamMonitorController = gbcontrollers.NewStreamMonitorController(nil)
 var streamProbeController = gbcontrollers.NewStreamProbeController(nil)
 var talkController atomic.Pointer[gbcontrollers.TalkController]
@@ -241,6 +242,11 @@ func SetPlayService(svc *gbplay.Service) {
 	configureAutoOnDemandService(svc)
 }
 
+func SetPlayAttemptStore(store gbcontrollers.PlayAttemptStore) {
+	playAttemptStore = store
+	rebuildPlayController()
+}
+
 func SetPlayAuthorizer(authorizer gbhandler.PlayAuthorizer) {
 	hookController.SetPlayAuthorizer(authorizer)
 	gbcontrollers.SetPlayAuthRuntimeReady(authorizer != nil)
@@ -287,12 +293,14 @@ func SetTalkService(service *talk.Service, resolver gbhandler.NodeUUIDResolver) 
 }
 
 func rebuildPlayController() {
+	options := make([]gbcontrollers.PlayControllerOption, 0, 2)
 	if recordingService != nil {
-		playController = gbcontrollers.NewPlayController(playService,
-			gbcontrollers.WithPlaybackRecordingStarter(recordingService))
-		return
+		options = append(options, gbcontrollers.WithPlaybackRecordingStarter(recordingService))
 	}
-	playController = gbcontrollers.NewPlayController(playService)
+	if playAttemptStore != nil {
+		options = append(options, gbcontrollers.WithPlayAttemptStore(playAttemptStore))
+	}
+	playController = gbcontrollers.NewPlayController(playService, options...)
 }
 
 // SetZLMNodeController 由 bootstrap M1.6 注入(同 SetPlayService 模式)
