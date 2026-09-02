@@ -1,6 +1,10 @@
 import { mount } from "@vue/test-utils";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import MediaRateArea from "./MediaRateArea.vue";
+
+const source = readFileSync(resolve(process.cwd(), "src/views/home/components/dashboard/MediaRateArea.vue"), "utf8");
 
 describe("MediaRateArea", () => {
   it("renders a smooth realtime line with a matching gradient area", () => {
@@ -24,5 +28,11 @@ describe("MediaRateArea", () => {
     expect(wrapper.get("path.media-rate-area__line").attributes("d")).toContain("M 0 32");
     expect(wrapper.get(".media-rate-area__y-axis").text()).toContain("--");
     expect(wrapper.get(".media-rate-area__y-axis").text()).toContain("0 B/s");
+  });
+
+  it("constrains the SVG to the remaining card height", () => {
+    expect(source).toContain("grid-template-rows:minmax(0,1fr)");
+    expect(source).toContain("overflow:hidden");
+    expect(source).toContain("min-height:0");
   });
 });
