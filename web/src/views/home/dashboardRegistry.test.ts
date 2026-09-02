@@ -8,9 +8,9 @@ describe("dashboard registry", () => {
     for (const [index, id] of ["sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime"].entries()) {
       expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === id)).toMatchObject({ x: index * 4, y: 0, w: 4, h: 2, visible: true });
     }
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "sip-monitor")).toMatchObject({ x: 0, y: 6, w: 12, h: 8, visible: true });
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-node-health")).toMatchObject({ x: 12, y: 6, w: 8, h: 5, visible: true });
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "platform-info")).toMatchObject({ x: 12, y: 11, w: 8, h: 3, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "sip-monitor")).toMatchObject({ x: 0, y: 6, w: 12, h: 7, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-node-health")).toMatchObject({ x: 12, y: 6, w: 8, h: 4, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "platform-info")).toMatchObject({ x: 12, y: 10, w: 8, h: 3, visible: true });
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "active-stream-ranking")?.visible).toBe(false);
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-rate")).toMatchObject({ x: 0, y: 2, w: 12, h: 4, visible: true });
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "device-online-rate")).toMatchObject({ x: 12, y: 2, w: 4, h: 4, visible: true });
@@ -22,7 +22,7 @@ describe("dashboard registry", () => {
       schemaVersion: 0,
       widgets: [{ id: "sip-rpm", x: 3, y: 2, w: 2, h: 2, visible: true, settings: {} }]
     });
-    expect(normalized.schemaVersion).toBe(7);
+    expect(normalized.schemaVersion).toBe(8);
     expect(normalized.widgets).toHaveLength(12);
     expect(normalized.widgets.find(widget => widget.id === "sip-rpm")?.x).toBe(5);
   });
@@ -136,6 +136,14 @@ describe("dashboard registry", () => {
     expect(normalizeDashboardLayout({ schemaVersion: 6, widgets })).toEqual(DEFAULT_DASHBOARD_LAYOUT);
   });
 
+  it("migrates schema 7 defaults to the compact health stack", () => {
+    const widgets = DEFAULT_DASHBOARD_LAYOUT.widgets.map(widget => ({ ...widget, settings: {} }));
+    Object.assign(widgets.find(widget => widget.id === "sip-monitor")!, { h: 8 });
+    Object.assign(widgets.find(widget => widget.id === "media-node-health")!, { h: 5 });
+    Object.assign(widgets.find(widget => widget.id === "platform-info")!, { y: 11 });
+    expect(normalizeDashboardLayout({ schemaVersion: 7, widgets })).toEqual(DEFAULT_DASHBOARD_LAYOUT);
+  });
+
   const invalidLayouts = [
     [{ id: "unknown", x: 0, y: 0, w: 2, h: 2, visible: true, settings: {} }],
     [
@@ -148,7 +156,7 @@ describe("dashboard registry", () => {
 
   it("rejects unknown, duplicate or invalid widgets", () => {
     for (const widgets of invalidLayouts) {
-      expect(() => normalizeDashboardLayout({ schemaVersion: 7, widgets })).toThrow();
+      expect(() => normalizeDashboardLayout({ schemaVersion: 8, widgets })).toThrow();
     }
   });
 });

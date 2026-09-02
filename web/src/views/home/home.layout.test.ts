@@ -26,6 +26,7 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("getHomeDashboardSummary");
     expect(source).toContain("平台版本");
     expect(source).toContain("平台运行时间");
+    expect(source).not.toContain("网络线程负载");
     for (const color of ["--uvp-warning", "--uvp-brand-cyan", "--uvp-brand"]) {
       expect(source).toContain(`color=\"var(${color})\"`);
     }
@@ -50,6 +51,8 @@ describe("editable realtime dashboard layout", () => {
 
   it("compacts the embedded SIP monitor enough to avoid internal scrolling", () => {
     expect(source).toContain(".embedded{height:100%;gap:10px;");
+    expect(source).toContain(".embedded :deep(.pulse){flex:none}");
+    expect(source).toContain(".embedded :deep(.pulse__chart){flex:none;height:90px;min-height:90px}");
   });
 
   it("keeps cumulative traffic and realtime rate as different metrics", () => {
