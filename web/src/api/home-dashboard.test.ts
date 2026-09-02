@@ -4,7 +4,7 @@ const { request } = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("@/api/utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
-import { getHomeDashboardLayout, resetHomeDashboardLayout, saveHomeDashboardLayout } from "./home-dashboard";
+import { getHomeDashboardLayout, getHomeDashboardSummary, resetHomeDashboardLayout, saveHomeDashboardLayout } from "./home-dashboard";
 import { DEFAULT_DASHBOARD_LAYOUT } from "@/views/home/dashboardRegistry";
 
 describe("home dashboard API", () => {
@@ -19,5 +19,12 @@ describe("home dashboard API", () => {
       ["put", "/api/gb28181/home/layout", { data: { revision: 3, layout: DEFAULT_DASHBOARD_LAYOUT } }],
       ["delete", "/api/gb28181/home/layout"]
     ]);
+  });
+
+  it("requests the aggregate summary used by today's traffic card", () => {
+    getHomeDashboardSummary(["aggregate"]);
+    expect(request).toHaveBeenCalledWith("get", "/api/gb28181/home/summary", {
+      params: { groups: "aggregate" }
+    });
   });
 });

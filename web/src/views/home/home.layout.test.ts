@@ -23,6 +23,7 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("<CardTitle icon=\"server\" title=\"流媒体运行态\" />");
     expect(source).toContain("<CardTitle icon=\"platform\" title=\"平台信息\" />");
     expect(source).toContain("fetchSipPlatformInfo");
+    expect(source).toContain("getHomeDashboardSummary");
     expect(source).toContain("平台版本");
     expect(source).toContain("平台运行时间");
     for (const color of ["--uvp-warning", "--uvp-brand-cyan", "--uvp-brand", "--uvp-danger"]) {
@@ -48,5 +49,13 @@ describe("editable realtime dashboard layout", () => {
 
   it("compacts the embedded SIP monitor enough to avoid internal scrolling", () => {
     expect(source).toContain(".embedded{height:100%;gap:10px;");
+  });
+
+  it("keeps cumulative traffic and realtime rate as different metrics", () => {
+    expect(source).toContain("todayMediaTraffic");
+    expect(source).toContain("今日累计上行 + 下行");
+    expect(source).toContain("<MediaRateArea :values=\"mediaRateTrend\"");
+    expect(source).not.toContain("{{ bytes(mediaRate) }}<small>/s</small>");
+    expect(source).not.toContain("class=\"bars\"");
   });
 });
