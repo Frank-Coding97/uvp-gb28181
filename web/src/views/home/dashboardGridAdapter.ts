@@ -50,7 +50,7 @@ export function createDashboardGrid(
       disableDrag: true,
       disableResize: true,
       float: false,
-      margin: "18px 8px",
+      margin: "10px 8px",
       minRow: 1
     },
     element
