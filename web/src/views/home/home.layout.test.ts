@@ -29,6 +29,10 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("当前时间");
     expect(source).toContain("platformClockDate");
     expect(source).toContain("platformClockTime");
+    expect(source).toContain(":key=\"platformClockHour\"");
+    expect(source).toContain(":key=\"platformClockMinute\"");
+    expect(source).toContain(":key=\"platformClockSecond\"");
+    expect(source).not.toContain(":key=\"platformClockTime\"");
     expect(source).toContain("setInterval(() => { clockNow.value = new Date(); }, 1_000)");
     expect(source).toContain("<Transition name=\"clock-tick\"");
     expect(source).not.toContain("网络线程负载");
