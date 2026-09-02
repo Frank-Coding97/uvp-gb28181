@@ -32,6 +32,12 @@ type AssetSummary struct {
 	AsOf     time.Time           `json:"asOf"`
 }
 
+type AssetOnlineSummary struct {
+	Devices  OnlineRateSummary `json:"devices"`
+	Channels OnlineRateSummary `json:"channels"`
+	AsOf     time.Time         `json:"asOf"`
+}
+
 type AssetSummaryService struct {
 	db       *gorm.DB
 	location *time.Location
@@ -45,14 +51,30 @@ func NewAssetSummaryService(db *gorm.DB, location *time.Location) *AssetSummaryS
 }
 
 func (service *AssetSummaryService) Summary(ctx context.Context, now time.Time, deviceScope, channelScope, trafficScope QueryScope) (AssetSummary, error) {
-	devices, err := aggregateOnline(service.db.WithContext(ctx).Model(&gbmodels.GbDevice{}), gbmodels.DeviceStatusOnline, deviceScope)
+	online, err := service.OnlineSummary(ctx, now, deviceScope, channelScope)
 	if err != nil {
 		return AssetSummary{}, err
+	}
+	traffic, err := service.TrafficSummary(ctx, now, trafficScope)
+	if err != nil {
+		return AssetSummary{}, err
+	}
+	return AssetSummary{Devices: online.Devices, Channels: online.Channels, Traffic: traffic, AsOf: now}, nil
+}
+
+func (service *AssetSummaryService) OnlineSummary(ctx context.Context, now time.Time, deviceScope, channelScope QueryScope) (AssetOnlineSummary, error) {
+	devices, err := aggregateOnline(service.db.WithContext(ctx).Model(&gbmodels.GbDevice{}), gbmodels.DeviceStatusOnline, deviceScope)
+	if err != nil {
+		return AssetOnlineSummary{}, err
 	}
 	channels, err := aggregateOnline(service.db.WithContext(ctx).Model(&gbmodels.GbChannel{}), gbmodels.ChannelStatusOnline, channelScope)
 	if err != nil {
-		return AssetSummary{}, err
+		return AssetOnlineSummary{}, err
 	}
+	return AssetOnlineSummary{Devices: devices, Channels: channels, AsOf: now}, nil
+}
+
+func (service *AssetSummaryService) TrafficSummary(ctx context.Context, now time.Time, trafficScope QueryScope) (TrafficTodaySummary, error) {
 	localNow := now.In(service.location)
 	dayStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, service.location)
 	type trafficRow struct {
@@ -65,17 +87,17 @@ func (service *AssetSummaryService) Summary(ctx context.Context, now time.Time, 
 		trafficQuery = trafficScope(trafficQuery)
 	}
 	if err := trafficQuery.Scan(&traffic).Error; err != nil {
-		return AssetSummary{}, err
+		return TrafficTodaySummary{}, err
 	}
 	trafficSummary := TrafficTodaySummary{UpstreamBytes: traffic.UpstreamBytes, DownstreamBytes: traffic.DownstreamBytes, Status: StatusOK, Coverage: CoverageComplete}
 	var gaps int64
 	if err := service.db.WithContext(ctx).Model(&gbmodels.GbDeviceTrafficGap{}).Where("started_at <= ? AND (ended_at IS NULL OR ended_at >= ?)", localNow, dayStart).Count(&gaps).Error; err != nil {
-		return AssetSummary{}, err
+		return TrafficTodaySummary{}, err
 	}
 	if gaps > 0 {
 		trafficSummary.Status, trafficSummary.Coverage = StatusPartial, CoveragePartial
 	}
-	return AssetSummary{Devices: devices, Channels: channels, Traffic: trafficSummary, AsOf: now}, nil
+	return trafficSummary, nil
 }
 
 func aggregateOnline(query *gorm.DB, onlineStatus int8, scope QueryScope) (OnlineRateSummary, error) {

@@ -324,6 +324,10 @@ func SetZLMManagementController(ctrl *gbcontrollers.ZLMManagementController) {
 	zlmManagementController.Store(ctrl)
 }
 
+func SetHomeDashboardOverview(provider gbcontrollers.HomeDashboardOverview) {
+	homeDashboardController.SetOverview(provider)
+}
+
 // SetRestartStartedNotifier forwards the process-started lifecycle bridge to
 // the global hook controller. Bootstrap owns the concrete coordinator and
 // installs it after the hook's node UUID resolver is ready.
@@ -565,6 +569,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 	{
 		home := gb.Group("/home")
 		{
+			home.GET("/summary", homeDashboardController.Summary)
 			home.GET("/layout", homeDashboardController.GetLayout)
 			home.PUT("/layout", homeDashboardController.SaveLayout)
 			home.DELETE("/layout", homeDashboardController.ResetLayout)

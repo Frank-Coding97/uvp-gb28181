@@ -87,10 +87,12 @@ func installZLMManagementController() {
 		return
 	}
 	gbroutes.SetZLMManagementController(gbcontrollers.NewZLMManagementController(bundle))
+	gbroutes.SetHomeDashboardOverview(bundle.Overview)
 }
 
 func clearZLMManagementController() {
 	gbroutes.SetZLMManagementController(nil)
+	gbroutes.SetHomeDashboardOverview(nil)
 }
 
 func teardownZLMManagementCore() {

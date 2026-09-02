@@ -60,11 +60,25 @@ type PlaySuccessSummary struct {
 }
 
 func (store *PlayAttemptStore) Last24Hours(ctx context.Context, now time.Time) (PlaySuccessSummary, error) {
+	return store.last24Hours(ctx, now, store.db.WithContext(ctx).Model(&gbmodels.GbPlayAttempt{}))
+}
+
+func (store *PlayAttemptStore) Last24HoursScoped(ctx context.Context, now time.Time, scope QueryScope) (PlaySuccessSummary, error) {
+	query := store.db.WithContext(ctx).
+		Table("gb_play_attempt AS attempt").
+		Joins("JOIN gb_device ON gb_device.device_id = attempt.device_code AND gb_device.deleted_at IS NULL")
+	if scope != nil {
+		query = scope(query)
+	}
+	return store.last24Hours(ctx, now, query)
+}
+
+func (store *PlayAttemptStore) last24Hours(ctx context.Context, now time.Time, query *gorm.DB) (PlaySuccessSummary, error) {
 	var rows []struct {
 		Outcome string
 		Count   uint64
 	}
-	if err := store.db.WithContext(ctx).Model(&gbmodels.GbPlayAttempt{}).Select("outcome, COUNT(*) AS count").Where("started_at >= ? AND started_at <= ?", now.Add(-24*time.Hour), now).Where("outcome IN ?", []string{PlayOutcomeSuccess, PlayOutcomeFailure}).Group("outcome").Scan(&rows).Error; err != nil {
+	if err := query.Select("outcome, COUNT(*) AS count").Where("started_at >= ? AND started_at <= ?", now.Add(-24*time.Hour), now).Where("outcome IN ?", []string{PlayOutcomeSuccess, PlayOutcomeFailure}).Group("outcome").Scan(&rows).Error; err != nil {
 		return PlaySuccessSummary{}, err
 	}
 	result := PlaySuccessSummary{Status: StatusEmpty, Coverage: CoverageNotStarted, AsOf: now}

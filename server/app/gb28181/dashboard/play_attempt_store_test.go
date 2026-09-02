@@ -36,3 +36,26 @@ func TestPlayAttemptCountsOnlyMediaReadySuccessAndTerminalFailure(t *testing.T) 
 	require.NotNil(t, result.Rate)
 	require.Equal(t, 0.5, *result.Rate)
 }
+
+func TestPlayAttemptSummaryReappliesCurrentDeviceScope(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbPlayAttempt{}))
+	now := time.Date(2026, 9, 2, 13, 30, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&[]gbmodels.GbDevice{
+		{DeviceID: "D1", OwnerDeptID: 10},
+		{DeviceID: "D2", OwnerDeptID: 20},
+	}).Error)
+	require.NoError(t, db.Create(&[]gbmodels.GbPlayAttempt{
+		{CorrelationID: "visible-success", DeviceCode: "D1", Outcome: PlayOutcomeSuccess, StartedAt: now},
+		{CorrelationID: "hidden-failure", DeviceCode: "D2", Outcome: PlayOutcomeFailure, StartedAt: now},
+	}).Error)
+
+	result, err := NewPlayAttemptStore(db).Last24HoursScoped(context.Background(), now, func(query *gorm.DB) *gorm.DB {
+		return query.Where("gb_device.owner_dept_id = ?", 10)
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Attempts)
+	require.EqualValues(t, 1, result.Success)
+	require.Zero(t, result.Failure)
+}
