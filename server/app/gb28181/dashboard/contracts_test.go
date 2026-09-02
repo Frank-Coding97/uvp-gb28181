@@ -25,10 +25,10 @@ func TestDefaultLayoutContainsEveryWidgetOnce(t *testing.T) {
 		require.Equal(t, 2, widget.H)
 		require.Zero(t, widget.Y)
 	}
-	require.Equal(t, WidgetLayout{ID: "sip-monitor", X: 0, Y: 6, W: 12, H: 5, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "sip-monitor"))
-	require.Equal(t, WidgetLayout{ID: "platform-info", X: 12, Y: 6, W: 8, H: 2, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "platform-info"))
+	require.Equal(t, WidgetLayout{ID: "sip-monitor", X: 0, Y: 6, W: 12, H: 8, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "sip-monitor"))
+	require.Equal(t, WidgetLayout{ID: "media-node-health", X: 12, Y: 6, W: 8, H: 5, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "media-node-health"))
+	require.Equal(t, WidgetLayout{ID: "platform-info", X: 12, Y: 11, W: 8, H: 3, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "platform-info"))
 	require.False(t, widgetByID(t, layout, "active-stream-ranking").Visible)
-	require.False(t, widgetByID(t, layout, "media-node-health").Visible)
 	require.Equal(t, WidgetLayout{ID: "media-rate", X: 0, Y: 2, W: 12, H: 4, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "media-rate"))
 	for index, id := range []string{"device-online-rate", "channel-online-rate"} {
 		widget := widgetByID(t, layout, id)
@@ -62,7 +62,7 @@ func TestNormalizeLayoutMigratesLegacyReferenceRowWithoutGap(t *testing.T) {
 	require.Equal(t, 12, widgetByID(t, normalized, "device-online-rate").X)
 	require.Equal(t, 16, widgetByID(t, normalized, "channel-online-rate").X)
 	require.False(t, widgetByID(t, normalized, "active-stream-ranking").Visible)
-	require.False(t, widgetByID(t, normalized, "media-node-health").Visible)
+	require.True(t, widgetByID(t, normalized, "media-node-health").Visible)
 
 	current := Layout{SchemaVersion: 2, Widgets: DefaultLayout().Widgets}
 	for index := range current.Widgets {
@@ -103,6 +103,30 @@ func TestNormalizeLayoutMigratesSchema4DefaultsToSIPMonitorAndPlatformInfo(t *te
 	legacy := Layout{SchemaVersion: 4}
 	for _, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime", "media-rate", "device-online-rate", "channel-online-rate", "active-stream-ranking", "media-node-health", "sip-monitor"} {
 		item := schema4WidgetDefaults[id]
+		item.Settings = map[string]any{}
+		legacy.Widgets = append(legacy.Widgets, item)
+	}
+	normalized, err := NormalizeLayout(legacy)
+	require.NoError(t, err)
+	require.Equal(t, DefaultLayout(), normalized)
+}
+
+func TestNormalizeLayoutMigratesSchema5DefaultsToEqualHeightSIPAndRightStack(t *testing.T) {
+	legacy := Layout{SchemaVersion: 5}
+	for _, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime", "media-rate", "device-online-rate", "channel-online-rate", "active-stream-ranking", "media-node-health", "sip-monitor", "platform-info"} {
+		item := schema5WidgetDefaults[id]
+		item.Settings = map[string]any{}
+		legacy.Widgets = append(legacy.Widgets, item)
+	}
+	normalized, err := NormalizeLayout(legacy)
+	require.NoError(t, err)
+	require.Equal(t, DefaultLayout(), normalized)
+}
+
+func TestNormalizeLayoutMigratesSchema6DefaultsToTallerSIPAndRightStack(t *testing.T) {
+	legacy := Layout{SchemaVersion: 6}
+	for _, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime", "media-rate", "device-online-rate", "channel-online-rate", "active-stream-ranking", "media-node-health", "sip-monitor", "platform-info"} {
+		item := schema6WidgetDefaults[id]
 		item.Settings = map[string]any{}
 		legacy.Widgets = append(legacy.Widgets, item)
 	}

@@ -8,10 +8,10 @@ describe("dashboard registry", () => {
     for (const [index, id] of ["sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime"].entries()) {
       expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === id)).toMatchObject({ x: index * 4, y: 0, w: 4, h: 2, visible: true });
     }
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "sip-monitor")).toMatchObject({ x: 0, y: 6, w: 12, h: 5, visible: true });
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "platform-info")).toMatchObject({ x: 12, y: 6, w: 8, h: 2, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "sip-monitor")).toMatchObject({ x: 0, y: 6, w: 12, h: 8, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-node-health")).toMatchObject({ x: 12, y: 6, w: 8, h: 5, visible: true });
+    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "platform-info")).toMatchObject({ x: 12, y: 11, w: 8, h: 3, visible: true });
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "active-stream-ranking")?.visible).toBe(false);
-    expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-node-health")?.visible).toBe(false);
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "media-rate")).toMatchObject({ x: 0, y: 2, w: 12, h: 4, visible: true });
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "device-online-rate")).toMatchObject({ x: 12, y: 2, w: 4, h: 4, visible: true });
     expect(DEFAULT_DASHBOARD_LAYOUT.widgets.find(widget => widget.id === "channel-online-rate")).toMatchObject({ x: 16, y: 2, w: 4, h: 4, visible: true });
@@ -22,7 +22,7 @@ describe("dashboard registry", () => {
       schemaVersion: 0,
       widgets: [{ id: "sip-rpm", x: 3, y: 2, w: 2, h: 2, visible: true, settings: {} }]
     });
-    expect(normalized.schemaVersion).toBe(5);
+    expect(normalized.schemaVersion).toBe(7);
     expect(normalized.widgets).toHaveLength(12);
     expect(normalized.widgets.find(widget => widget.id === "sip-rpm")?.x).toBe(5);
   });
@@ -100,6 +100,42 @@ describe("dashboard registry", () => {
     expect(normalizeDashboardLayout({ schemaVersion: 4, widgets })).toEqual(DEFAULT_DASHBOARD_LAYOUT);
   });
 
+  it("migrates schema 5 defaults to the equal-height SIP and right-hand stack", () => {
+    const widgets = [
+      { id: "sip-rpm", x: 0, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "sip-today", x: 4, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "play-success-24h", x: 8, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "media-traffic-today", x: 12, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "media-runtime", x: 16, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "media-rate", x: 0, y: 2, w: 12, h: 4, visible: true, settings: {} },
+      { id: "device-online-rate", x: 12, y: 2, w: 4, h: 4, visible: true, settings: {} },
+      { id: "channel-online-rate", x: 16, y: 2, w: 4, h: 4, visible: true, settings: {} },
+      { id: "active-stream-ranking", x: 0, y: 11, w: 14, h: 4, visible: false, settings: {} },
+      { id: "media-node-health", x: 14, y: 11, w: 6, h: 4, visible: false, settings: {} },
+      { id: "sip-monitor", x: 0, y: 6, w: 12, h: 5, visible: true, settings: {} },
+      { id: "platform-info", x: 12, y: 6, w: 8, h: 2, visible: true, settings: {} }
+    ];
+    expect(normalizeDashboardLayout({ schemaVersion: 5, widgets })).toEqual(DEFAULT_DASHBOARD_LAYOUT);
+  });
+
+  it("migrates schema 6 defaults to the taller SIP and matching right-hand stack", () => {
+    const widgets = [
+      { id: "sip-rpm", x: 0, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "sip-today", x: 4, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "play-success-24h", x: 8, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "media-traffic-today", x: 12, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "media-runtime", x: 16, y: 0, w: 4, h: 2, visible: true, settings: {} },
+      { id: "media-rate", x: 0, y: 2, w: 12, h: 4, visible: true, settings: {} },
+      { id: "device-online-rate", x: 12, y: 2, w: 4, h: 4, visible: true, settings: {} },
+      { id: "channel-online-rate", x: 16, y: 2, w: 4, h: 4, visible: true, settings: {} },
+      { id: "active-stream-ranking", x: 0, y: 13, w: 14, h: 4, visible: false, settings: {} },
+      { id: "media-node-health", x: 12, y: 6, w: 8, h: 4, visible: true, settings: {} },
+      { id: "sip-monitor", x: 0, y: 6, w: 12, h: 7, visible: true, settings: {} },
+      { id: "platform-info", x: 12, y: 10, w: 8, h: 3, visible: true, settings: {} }
+    ];
+    expect(normalizeDashboardLayout({ schemaVersion: 6, widgets })).toEqual(DEFAULT_DASHBOARD_LAYOUT);
+  });
+
   const invalidLayouts = [
     [{ id: "unknown", x: 0, y: 0, w: 2, h: 2, visible: true, settings: {} }],
     [
@@ -112,7 +148,7 @@ describe("dashboard registry", () => {
 
   it("rejects unknown, duplicate or invalid widgets", () => {
     for (const widgets of invalidLayouts) {
-      expect(() => normalizeDashboardLayout({ schemaVersion: 5, widgets })).toThrow();
+      expect(() => normalizeDashboardLayout({ schemaVersion: 7, widgets })).toThrow();
     }
   });
 });

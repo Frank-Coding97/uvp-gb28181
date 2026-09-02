@@ -45,4 +45,8 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("var(--uvp-panel-border)");
     expect(source).toContain("var(--uvp-brand)");
   });
+
+  it("compacts the embedded SIP monitor enough to avoid internal scrolling", () => {
+    expect(source).toContain(".embedded{height:100%;gap:10px;");
+  });
 });
