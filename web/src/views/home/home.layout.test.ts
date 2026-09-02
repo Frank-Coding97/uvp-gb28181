@@ -19,6 +19,8 @@ describe("editable realtime dashboard layout", () => {
     }
     expect(source).toContain("grid-stack-item");
     expect(source).toContain("<OnlineDonut");
+    expect(source).toContain("class=\"runtime-title\"");
+    expect(source).not.toContain("<CardTitle icon=\"server\" title=\"流媒体运行态\" />");
   });
 
   it("supports editing, persistence, conflict messaging and reset", () => {
