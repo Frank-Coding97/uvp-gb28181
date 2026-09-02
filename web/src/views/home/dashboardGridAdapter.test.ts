@@ -37,7 +37,7 @@ describe("dashboard grid adapter", () => {
     const grid = createDashboardGrid(host, factory);
 
     expect(factory).toHaveBeenCalledWith(
-      expect.objectContaining({ column: 20, disableDrag: true, disableResize: true, margin: "10px 8px" }),
+      expect.objectContaining({ column: 20, cellHeight: 80, disableDrag: true, disableResize: true, margin: "10px 8px" }),
       host
     );
     grid.setEditing(true);

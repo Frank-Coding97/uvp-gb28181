@@ -1,4 +1,4 @@
-export const DASHBOARD_SCHEMA_VERSION = 3;
+export const DASHBOARD_SCHEMA_VERSION = 4;
 
 export type DashboardWidgetId =
   | "sip-rpm"
@@ -50,17 +50,17 @@ const widget = (
 ): DashboardWidgetDefinition => ({ minW, maxW, minH, maxH, layout: { id, x, y, w, h, visible, settings: {} } });
 
 export const DASHBOARD_WIDGET_REGISTRY: readonly DashboardWidgetDefinition[] = [
-  widget("sip-rpm", 0, 0, 4, 3, true, 3, 7, 3, 4),
-  widget("sip-today", 4, 0, 4, 3, true, 3, 7, 3, 4),
-  widget("play-success-24h", 8, 0, 4, 3, true, 3, 7, 3, 4),
-  widget("media-traffic-today", 12, 0, 4, 3, true, 3, 7, 3, 4),
-  widget("media-runtime", 16, 0, 4, 3, true, 3, 7, 3, 4),
-  widget("media-rate", 0, 3, 12, 5, true, 10, 20, 4, 8),
-  widget("device-online-rate", 12, 3, 4, 5, true, 3, 7, 3, 7),
-  widget("channel-online-rate", 16, 3, 4, 5, true, 3, 7, 3, 7),
-  widget("active-stream-ranking", 0, 8, 14, 4, true, 7, 20, 3, 7),
-  widget("media-node-health", 14, 8, 6, 4, true, 5, 10, 3, 7),
-  widget("sip-monitor", 0, 12, 14, 5, false, 10, 20, 4, 8)
+  widget("sip-rpm", 0, 0, 4, 2, true, 3, 7, 2, 3),
+  widget("sip-today", 4, 0, 4, 2, true, 3, 7, 2, 3),
+  widget("play-success-24h", 8, 0, 4, 2, true, 3, 7, 2, 3),
+  widget("media-traffic-today", 12, 0, 4, 2, true, 3, 7, 2, 3),
+  widget("media-runtime", 16, 0, 4, 2, true, 3, 7, 2, 3),
+  widget("media-rate", 0, 2, 12, 4, true, 10, 20, 4, 8),
+  widget("device-online-rate", 12, 2, 4, 4, true, 3, 7, 3, 7),
+  widget("channel-online-rate", 16, 2, 4, 4, true, 3, 7, 3, 7),
+  widget("active-stream-ranking", 0, 6, 14, 4, false, 7, 20, 3, 7),
+  widget("media-node-health", 14, 6, 6, 4, false, 5, 10, 3, 7),
+  widget("sip-monitor", 0, 10, 14, 5, false, 10, 20, 4, 8)
 ] as const;
 
 const LEGACY_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidgetLayout>> = {
@@ -91,6 +91,20 @@ const SCHEMA_2_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidge
   "active-stream-ranking": { id: "active-stream-ranking", x: 0, y: 11, w: 20, h: 4, visible: true, settings: {} }
 };
 
+const SCHEMA_3_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidgetLayout>> = {
+  "sip-rpm": { id: "sip-rpm", x: 0, y: 0, w: 4, h: 3, visible: true, settings: {} },
+  "sip-today": { id: "sip-today", x: 4, y: 0, w: 4, h: 3, visible: true, settings: {} },
+  "play-success-24h": { id: "play-success-24h", x: 8, y: 0, w: 4, h: 3, visible: true, settings: {} },
+  "media-traffic-today": { id: "media-traffic-today", x: 12, y: 0, w: 4, h: 3, visible: true, settings: {} },
+  "media-runtime": { id: "media-runtime", x: 16, y: 0, w: 4, h: 3, visible: true, settings: {} },
+  "media-rate": { id: "media-rate", x: 0, y: 3, w: 12, h: 5, visible: true, settings: {} },
+  "device-online-rate": { id: "device-online-rate", x: 12, y: 3, w: 4, h: 5, visible: true, settings: {} },
+  "channel-online-rate": { id: "channel-online-rate", x: 16, y: 3, w: 4, h: 5, visible: true, settings: {} },
+  "active-stream-ranking": { id: "active-stream-ranking", x: 0, y: 8, w: 14, h: 4, visible: true, settings: {} },
+  "media-node-health": { id: "media-node-health", x: 14, y: 8, w: 6, h: 4, visible: true, settings: {} },
+  "sip-monitor": { id: "sip-monitor", x: 0, y: 12, w: 14, h: 5, visible: false, settings: {} }
+};
+
 const cloneWidget = (layout: DashboardWidgetLayout): DashboardWidgetLayout => ({ ...layout, settings: {} });
 
 export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
@@ -99,8 +113,8 @@ export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
 };
 
 function migrateLegacyWidget(item: DashboardWidgetLayout, definition: DashboardWidgetDefinition, schemaVersion: number): DashboardWidgetLayout {
-  const defaults = schemaVersion === 2 ? SCHEMA_2_WIDGET_DEFAULTS : LEGACY_WIDGET_DEFAULTS;
-  const sourceColumns = schemaVersion === 2 ? 20 : 12;
+  const defaults = schemaVersion === 3 ? SCHEMA_3_WIDGET_DEFAULTS : schemaVersion === 2 ? SCHEMA_2_WIDGET_DEFAULTS : LEGACY_WIDGET_DEFAULTS;
+  const sourceColumns = schemaVersion >= 2 ? 20 : 12;
   const legacy = defaults[item.id];
   if (legacy && item.x === legacy.x && item.y === legacy.y && item.w === legacy.w && item.h === legacy.h && item.visible === legacy.visible) {
     return cloneWidget(definition.layout);

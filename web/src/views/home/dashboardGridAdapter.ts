@@ -47,6 +47,7 @@ export function createDashboardGrid(
   const engine = factory(
     {
       column: 20,
+      cellHeight: 80,
       disableDrag: true,
       disableResize: true,
       float: false,

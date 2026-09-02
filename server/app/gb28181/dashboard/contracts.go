@@ -6,7 +6,7 @@ import (
 	"math"
 )
 
-const CurrentSchemaVersion = 3
+const CurrentSchemaVersion = 4
 
 type SectionStatus string
 
@@ -74,17 +74,17 @@ type WidgetDefinition struct {
 }
 
 var widgetDefinitions = []WidgetDefinition{
-	widget("sip-rpm", 0, 0, 4, 3, true, 3, 7, 3, 4),
-	widget("sip-today", 4, 0, 4, 3, true, 3, 7, 3, 4),
-	widget("play-success-24h", 8, 0, 4, 3, true, 3, 7, 3, 4),
-	widget("media-traffic-today", 12, 0, 4, 3, true, 3, 7, 3, 4),
-	widget("media-runtime", 16, 0, 4, 3, true, 3, 7, 3, 4),
-	widget("media-rate", 0, 3, 12, 5, true, 10, 20, 4, 8),
-	widget("device-online-rate", 12, 3, 4, 5, true, 3, 7, 3, 7),
-	widget("channel-online-rate", 16, 3, 4, 5, true, 3, 7, 3, 7),
-	widget("active-stream-ranking", 0, 8, 14, 4, true, 7, 20, 3, 7),
-	widget("media-node-health", 14, 8, 6, 4, true, 5, 10, 3, 7),
-	widget("sip-monitor", 0, 12, 14, 5, false, 10, 20, 4, 8),
+	widget("sip-rpm", 0, 0, 4, 2, true, 3, 7, 2, 3),
+	widget("sip-today", 4, 0, 4, 2, true, 3, 7, 2, 3),
+	widget("play-success-24h", 8, 0, 4, 2, true, 3, 7, 2, 3),
+	widget("media-traffic-today", 12, 0, 4, 2, true, 3, 7, 2, 3),
+	widget("media-runtime", 16, 0, 4, 2, true, 3, 7, 2, 3),
+	widget("media-rate", 0, 2, 12, 4, true, 10, 20, 4, 8),
+	widget("device-online-rate", 12, 2, 4, 4, true, 3, 7, 3, 7),
+	widget("channel-online-rate", 16, 2, 4, 4, true, 3, 7, 3, 7),
+	widget("active-stream-ranking", 0, 6, 14, 4, false, 7, 20, 3, 7),
+	widget("media-node-health", 14, 6, 6, 4, false, 5, 10, 3, 7),
+	widget("sip-monitor", 0, 10, 14, 5, false, 10, 20, 4, 8),
 }
 
 var legacyWidgetDefaults = map[string]WidgetLayout{
@@ -113,6 +113,20 @@ var schema2WidgetDefaults = map[string]WidgetLayout{
 	"media-rate":            {ID: "media-rate", X: 0, Y: 7, W: 14, H: 4, Visible: true},
 	"media-node-health":     {ID: "media-node-health", X: 14, Y: 7, W: 6, H: 4, Visible: true},
 	"active-stream-ranking": {ID: "active-stream-ranking", X: 0, Y: 11, W: 20, H: 4, Visible: true},
+}
+
+var schema3WidgetDefaults = map[string]WidgetLayout{
+	"sip-rpm":               {ID: "sip-rpm", X: 0, Y: 0, W: 4, H: 3, Visible: true},
+	"sip-today":             {ID: "sip-today", X: 4, Y: 0, W: 4, H: 3, Visible: true},
+	"play-success-24h":      {ID: "play-success-24h", X: 8, Y: 0, W: 4, H: 3, Visible: true},
+	"media-traffic-today":   {ID: "media-traffic-today", X: 12, Y: 0, W: 4, H: 3, Visible: true},
+	"media-runtime":         {ID: "media-runtime", X: 16, Y: 0, W: 4, H: 3, Visible: true},
+	"media-rate":            {ID: "media-rate", X: 0, Y: 3, W: 12, H: 5, Visible: true},
+	"device-online-rate":    {ID: "device-online-rate", X: 12, Y: 3, W: 4, H: 5, Visible: true},
+	"channel-online-rate":   {ID: "channel-online-rate", X: 16, Y: 3, W: 4, H: 5, Visible: true},
+	"active-stream-ranking": {ID: "active-stream-ranking", X: 0, Y: 8, W: 14, H: 4, Visible: true},
+	"media-node-health":     {ID: "media-node-health", X: 14, Y: 8, W: 6, H: 4, Visible: true},
+	"sip-monitor":           {ID: "sip-monitor", X: 0, Y: 12, W: 14, H: 5, Visible: false},
 }
 
 func widget(id string, x, y, w, h int, visible bool, minW, maxW, minH, maxH int) WidgetDefinition {
@@ -168,7 +182,9 @@ func NormalizeLayout(layout Layout) (Layout, error) {
 
 func migrateLegacyWidget(item WidgetLayout, definition WidgetDefinition, schemaVersion int) WidgetLayout {
 	defaults, sourceColumns := legacyWidgetDefaults, 12
-	if schemaVersion == 2 {
+	if schemaVersion == 3 {
+		defaults, sourceColumns = schema3WidgetDefaults, 20
+	} else if schemaVersion == 2 {
 		defaults, sourceColumns = schema2WidgetDefaults, 20
 	}
 	legacy, matchesDefault := defaults[item.ID]
