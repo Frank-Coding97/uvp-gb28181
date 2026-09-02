@@ -10,7 +10,7 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("getZLMOverview");
     expect(source).toContain("listDevices");
     expect(source).toContain("listChannels");
-    expect(source).toContain("setInterval(refreshData, 10_000)");
+    expect(source).toContain("setInterval(refreshData, 5_000)");
   });
 
   it("implements the approved widgets and reference composition", () => {

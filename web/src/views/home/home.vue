@@ -32,10 +32,10 @@
             <CardTitle icon="activity" title="实时 SIP RPM" /><div class="kpi">{{ number(sipRpm) }}<small>/min</small></div><p>最近一分钟处理速率</p><MiniTrend :values="sipTrend" />
           </template>
           <template v-else-if="widget.id === 'sip-today'">
-            <CardTitle icon="radio" title="今日 SIP 处理数量" /><div class="kpi">{{ number(sipSnapshot?.todayTotal) }}</div><p>异常 {{ number(sipSnapshot?.todayAbnormal) }} 条</p><MiniTrend :values="sipTrend" />
+            <CardTitle icon="radio" title="今日 SIP 处理数量" /><div class="kpi">{{ number(sipTodayTotal) }}</div><p>{{ sipTodayTotal == null ? "暂无连续采样" : `异常 ${number(sipSnapshot?.todayAbnormal)} 条` }}</p><MiniTrend :values="sipTrend" />
           </template>
           <template v-else-if="widget.id === 'play-success-24h'">
-            <CardTitle icon="play" title="点播成功率" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>当前 INVITE 事务成功率</p><span class="quality" :class="rateTone(inviteSuccessRate)">{{ qualityText(inviteSuccessRate) }}</span>
+            <CardTitle icon="play" title="点播成功率（24H）" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>以媒体可播放为成功；attempt 采集未启用时不估算</p><span class="quality neutral">{{ qualityText(inviteSuccessRate) }}</span>
           </template>
           <template v-else-if="widget.id === 'media-traffic-today'">
             <CardTitle icon="traffic" title="今日媒体流量" /><div class="kpi">{{ bytes(mediaRate) }}<small>/s</small></div><p>当前聚合吞吐；累计账本完善后切换为今日值</p>
@@ -71,7 +71,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { GripHorizontal, LayoutDashboard, LoaderCircle, Pencil, RefreshCw, RotateCcw, Save } from "lucide-vue-next";
 import "gridstack/dist/gridstack.min.css";
-import { fetchSipDashboardSnapshot, type DashboardSnapshot } from "@/api/gb28181";
+import { fetchSipDashboardSnapshot, HEALTH_EMPTY, type DashboardSnapshot } from "@/api/gb28181";
 import { getZLMOverview, type ZLMOverview } from "@/api/gb28181-zlm-runtime";
 import { listChannels, listDevices } from "@/views/gb28181/device-mgmt/api";
 import { getHomeDashboardLayout, resetHomeDashboardLayout, saveHomeDashboardLayout } from "@/api/home-dashboard";
@@ -95,7 +95,8 @@ const visibleWidgets = computed(() => layout.value.widgets.filter(item => item.v
 const updatedText = computed(() => updatedAt.value ? dayjs(updatedAt.value).format("HH:mm:ss") : "等待首帧");
 const sipTrend = computed(() => sipSnapshot.value?.pulse.samples.slice(-24).map(item => item.msgPerSec) ?? []);
 const sipRpm = computed(() => { const values = sipSnapshot.value?.pulse.samples.slice(-6) ?? []; return values.length ? Math.round(values.reduce((sum, item) => sum + item.msgPerSec, 0) / values.length * 60) : null; });
-const inviteSuccessRate = computed(() => sipSnapshot.value?.transactions.find(item => item.kind === "INVITE")?.successRate ?? null);
+const sipTodayTotal = computed(() => sipSnapshot.value && sipSnapshot.value.health !== HEALTH_EMPTY ? sipSnapshot.value.todayTotal : null);
+const inviteSuccessRate = computed<number | null>(() => null);
 const viewers = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.readerCount, 0) ?? 0);
 const recordings = computed(() => mediaOverview.value?.streams.filter(item => item.recordingMp4 || item.recordingHls).length ?? 0);
 const mediaRate = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.bytesSpeed, 0) ?? 0);
@@ -137,9 +138,8 @@ async function resetLayout() { try { const response = await resetHomeDashboardLa
 function number(value: number | null | undefined) { return value == null || !Number.isFinite(value) ? "--" : value.toLocaleString("zh-CN"); }
 function percent(value: number | null | undefined) { return value == null ? "--" : `${(value * 100).toFixed(1)}%`; }
 function bytes(value: number) { if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`; if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`; if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`; return `${value.toFixed(0)} B`; }
-function rateTone(value: number | null) { return value == null ? "neutral" : value >= .95 ? "ok" : value >= .85 ? "warning" : "danger"; }
-function qualityText(value: number | null) { return value == null ? "暂无数据" : value >= .95 ? "运行良好" : value >= .85 ? "需要关注" : "成功率偏低"; }
-onMounted(async () => { await Promise.all([loadLayout(), refreshData()]); timer = setInterval(refreshData, 10_000); });
+function qualityText(value: number | null) { return value == null ? "暂无完整 24H 样本" : value >= .95 ? "运行良好" : value >= .85 ? "需要关注" : "成功率偏低"; }
+onMounted(async () => { await Promise.all([loadLayout(), refreshData()]); timer = setInterval(refreshData, 5_000); });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); grid?.destroy(); });
 </script>
 
