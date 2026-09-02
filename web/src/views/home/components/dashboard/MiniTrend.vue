@@ -37,5 +37,5 @@ const areaPath = computed(() => `${linePath.value} L 100 24 L 0 24 Z`);
 </script>
 
 <style scoped>
-.mini-trend{position:absolute;right:14px;bottom:12px;width:64px;height:30px;overflow:visible}.mini-trend__area,.mini-trend__line{pointer-events:none}.mini-trend__line{fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+.mini-trend{position:absolute;right:14px;bottom:44px;width:64px;height:30px;overflow:visible}.mini-trend__area,.mini-trend__line{pointer-events:none}.mini-trend__line{fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}
 </style>
