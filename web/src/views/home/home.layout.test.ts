@@ -29,7 +29,8 @@ describe("editable realtime dashboard layout", () => {
   });
 
   it("keeps system theme tokens", () => {
-    expect(source).toContain("var(--uvp-shell-muted)");
+    expect(source).not.toContain("background:var(--uvp-shell-muted)");
+    expect(source).not.toContain("height:calc(100% - 2px)");
     expect(source).toContain("var(--uvp-panel-bg)");
     expect(source).toContain("var(--uvp-panel-border)");
     expect(source).toContain("var(--uvp-brand)");
