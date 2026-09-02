@@ -36,6 +36,7 @@ var mapController = gbcontrollers.NewMapController()
 var anomalyController = gbcontrollers.NewAnomalyController()
 var alarmController = gbcontrollers.NewAlarmController()
 var channelFavoriteController = gbcontrollers.NewChannelFavoriteController()
+var homeDashboardController = gbcontrollers.NewHomeDashboardController()
 
 // streamNotifier 全局流就绪事件分发器(hook 端点 publish,点播 service 订阅)
 var streamNotifier = stream.NewNotifier()
@@ -554,6 +555,12 @@ func currentCloudRecordingCatalogController() *gbcontrollers.CloudRecordingCatal
 func RegisterRoutes(protected *gin.RouterGroup) {
 	gb := protected.Group("/gb28181")
 	{
+		home := gb.Group("/home")
+		{
+			home.GET("/layout", homeDashboardController.GetLayout)
+			home.PUT("/layout", homeDashboardController.SaveLayout)
+			home.DELETE("/layout", homeDashboardController.ResetLayout)
+		}
 		favorites := gb.Group("/channel-favorite-groups")
 		{
 			favorites.GET("", channelFavoriteController.List)
