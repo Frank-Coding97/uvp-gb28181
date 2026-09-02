@@ -11,8 +11,9 @@ describe("layout main route identity", () => {
     expect(source).not.toContain(':key="route.fullPath"');
   });
 
-  it("keeps the existing fullPath-based keep-alive wrapper contract", () => {
-    expect(source).toContain("const wrapperName = route.fullPath");
+  it("keeps the wrapper identity aligned with the rendered and cached media route key", () => {
+    expect(source).toContain("const wrapperName = resolveMediaRouteRenderKey(route)");
+    expect(source).not.toContain("const wrapperName = route.fullPath");
     expect(source).toContain("if (!route.meta?.keepAlive) return component");
   });
 });

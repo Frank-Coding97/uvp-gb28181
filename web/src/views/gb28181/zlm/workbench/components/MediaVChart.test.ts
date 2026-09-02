@@ -103,14 +103,20 @@ describe("MediaVChart", () => {
     expect(ResizeObserverStub.latest?.disconnected).toBe(true);
   });
 
-  it("turns off motion for reduced-motion and keeps normal animation within 160-300ms", () => {
-    const wrapper = mount(MediaVChart, { props: { title: "趋势", spec: { type: "line" } } });
-    expect(chart.specs[0]).toMatchObject({ animationAppear: { duration: 220 }, animationUpdate: { duration: 220 } });
+  it("honors chart-specific rolling motion and turns it off for reduced-motion", () => {
+    const rollingSpec = {
+      type: "line",
+      animationAppear: { duration: 300 },
+      animationUpdate: { duration: 450 },
+      animationExit: { duration: 300 }
+    };
+    const wrapper = mount(MediaVChart, { props: { title: "趋势", spec: rollingSpec } });
+    expect(chart.specs[0]).toMatchObject({ animationAppear: { duration: 300 }, animationUpdate: { duration: 450 }, animationExit: { duration: 300 } });
     wrapper.unmount();
 
     chart.specs.length = 0;
     vi.stubGlobal("matchMedia", () => matchMedia(true));
-    const reduced = mount(MediaVChart, { props: { title: "趋势", spec: { type: "line" } } });
+    const reduced = mount(MediaVChart, { props: { title: "趋势", spec: rollingSpec } });
     expect(chart.specs[0]).toMatchObject({ animationAppear: false, animationUpdate: false, animationExit: false });
     reduced.unmount();
   });
@@ -130,6 +136,23 @@ describe("MediaVChart", () => {
     });
     expect(partial.find("[role='img']").exists()).toBe(true);
     partial.unmount();
+  });
+
+  it("renders an optional compact legend and can visually hide the technical summary", () => {
+    const wrapper = mount(MediaVChart, {
+      props: {
+        title: "媒体速率趋势",
+        spec: { type: "line" },
+        legendLabel: "媒体速率（KB/s）",
+        summary: "当前节点已记录 27 个采样点",
+        showSummary: false
+      }
+    });
+
+    expect(wrapper.get(".media-vchart__legend").text()).toBe("媒体速率（KB/s）");
+    expect(wrapper.get(".media-vchart__summary").classes()).toContain("media-vchart__summary--sr-only");
+    expect(wrapper.get("[role='img']").attributes("aria-describedby")).toBeTruthy();
+    wrapper.unmount();
   });
 
   it("releases an inactive chart and can recreate it when explicitly activated", async () => {

@@ -78,4 +78,22 @@ describe("ZLM node form state", () => {
     expect(source).toContain("allow-clear");
     expect(source).toContain("validateNodeForm");
   });
+
+  it("uses the system dialog for both create and edit flows", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
+    expect(source).toContain("<a-modal");
+    expect(source).toContain('modal-class="uvp-system-dialog zlm-node-form"');
+    expect(source).not.toContain("<a-drawer");
+    expect(source).not.toContain("arco-drawer-title");
+  });
+
+  it("guides creation through required connection fields and a real ZLM preview", () => {
+    const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/NodeForm.vue"), "utf8");
+    expect(source).toContain("<a-steps");
+    expect(source).toContain("必填参数");
+    expect(source).toContain("ZL 信息确认");
+    expect(source).toContain("probeZLMNode");
+    expect(source).toContain("连接并读取");
+    expect(source).toContain("确认添加");
+  });
 });

@@ -17,6 +17,7 @@ import (
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbdashboard "uvplatform.cn/uvp-gb28181/app/gb28181/dashboard"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/device"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
@@ -158,6 +159,7 @@ type sipRuntimeServer interface {
 	SetErrorHandler(func(error))
 	SetPTZMessageProcessor(gbhandler.PTZMessageProcessor)
 	SetRecordInfoSink(gbhandler.RecordInfoSink)
+	SetSnapshotSink(gbhandler.SnapshotSink)
 	SetPlaybackEndSink(gbhandler.PlaybackEndSink)
 	SetSubscriptionWaker(gbhandler.SubscriptionWaker)
 	SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)
@@ -177,6 +179,7 @@ func diagnosisSinkForServer(server sipRuntimeServer) diagnosis.DiagnosticSink {
 
 var playbackService *gbplayback.Service
 var playbackRegistry *gbplayback.Registry
+var deviceCaptureRegistry *devicecapture.Registry
 
 func SetPlaybackService(service *gbplayback.Service, snapshots gbcontrollers.PlaybackSnapshotResolver) {
 	playbackService = service
@@ -615,6 +618,13 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		ptzService = newPTZService
 		ptzScheduler = newPTZScheduler
 		gbroutes.SetDeviceMgmtPTZRuntime(u, ptzService)
+		captureRoot := app.ConfigYml.GetString("httpserver.serverroot")
+		if captureRoot == "" {
+			captureRoot = "./resource/public"
+		}
+		deviceCaptureRegistry = devicecapture.NewRegistry(captureRoot)
+		gbroutes.SetDeviceMgmtCaptureRuntime(deviceCaptureRegistry)
+		srv.SetSnapshotSink(deviceCaptureRegistry)
 		ptzScheduler.Start(context.Background())
 		subscriptionService = subscribe.NewService(app.DB(), u, time.Now)
 		gbroutes.SetDeviceMgmtSubscriptionManager(subscriptionService)
@@ -834,6 +844,11 @@ func stopSIPDependencies(ctx context.Context) {
 	gbroutes.SetPlayAuthorizer(nil)
 	gbroutes.SetDeviceMgmtCatalogTrigger(nil)
 	gbroutes.SetDeviceMgmtSubscriptionManager(nil)
+	gbroutes.SetDeviceMgmtCaptureRuntime(nil)
+	deviceCaptureRegistry = nil
+	if sipServer != nil {
+		sipServer.SetSnapshotSink(nil)
+	}
 	stopCascadeRuntime(ctx)
 	if sipServer != nil {
 		if err := sipServer.Shutdown(ctx); err != nil {

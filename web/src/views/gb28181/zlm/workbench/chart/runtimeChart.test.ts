@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { appendRuntimeSnapshot, buildRuntimeTrendChartState, runtimeSnapshot, type RuntimeTrendHistory } from "./runtimeChart";
+import {
+  RUNTIME_TREND_WINDOW_MS,
+  appendRuntimeSnapshot,
+  buildRuntimeTrendChartState,
+  createRuntimeTrendSpec,
+  runtimeSnapshot,
+  type RuntimeTrendHistory
+} from "./runtimeChart";
 
 function runtime(nodeId = 2, asOf = "2026-08-30T10:00:00Z", overrides: Record<string, unknown> = {}) {
   return {
@@ -53,7 +60,7 @@ describe("media runtime chart adapters", () => {
     expect(state.samples).toHaveLength(60);
     expect(state.samples[0]?.asOf).toContain("10:01");
     expect(buildRuntimeTrendChartState(state).title).toBe("实时媒体速率");
-    expect(buildRuntimeTrendChartState(state).sampledLabel).toContain("进入页面后采样");
+    expect(buildRuntimeTrendChartState(state).sampledLabel).toContain("最近 5 分钟");
     expect(buildRuntimeTrendChartState(state).sampleCount).toBe(60);
   });
 
@@ -81,5 +88,72 @@ describe("media runtime chart adapters", () => {
     expect(sample.sessionCount).toBeNull();
     expect(sample.netThreadLoad).toBeNull();
     expect(sample.recordingCount).toBeNull();
+  });
+
+  it("uses a fixed five-minute time window with compact local-time labels", () => {
+    const samples = [
+      runtimeSnapshot(runtime(2, "2026-08-30T10:00:00.000Z")),
+      runtimeSnapshot(runtime(2, "2026-08-30T10:00:05.000Z"))
+    ];
+    const spec = createRuntimeTrendSpec(samples);
+    const latest = Date.parse("2026-08-30T10:00:05.000Z");
+
+    expect(spec.data?.[0]?.values).toEqual([
+      { sampledAt: Date.parse("2026-08-30T10:00:00.000Z"), asOf: "2026-08-30T10:00:00.000Z", metric: "媒体速率 KB/s", value: 1 },
+      { sampledAt: latest, asOf: "2026-08-30T10:00:05.000Z", metric: "媒体速率 KB/s", value: 1 }
+    ]);
+    expect(spec.series?.[0]).toMatchObject({ xField: "sampledAt", point: { visible: false } });
+    expect(spec.axes?.[0]).toMatchObject({ min: 0, softMax: 1 });
+    expect(spec.axes?.[0]).not.toHaveProperty("max");
+    expect(spec.axes?.[1]).toMatchObject({
+      orient: "bottom",
+      type: "time",
+      min: latest - RUNTIME_TREND_WINDOW_MS,
+      max: latest,
+      nice: false,
+      layers: [{ tickCount: 5, timeFormat: "%H:%M:%S", timeFormatMode: "local" }]
+    });
+    expect(spec.tooltip).toMatchObject({
+      activeType: "dimension",
+      dimension: {
+        title: { value: { field: "sampledAt" }, valueTimeFormat: "%Y-%m-%d %H:%M:%S", valueTimeFormatMode: "local" }
+      }
+    });
+  });
+
+  it("drops invalid timestamps instead of corrupting the continuous time axis", () => {
+    const spec = createRuntimeTrendSpec([runtimeSnapshot(runtime(2, "not-a-time"))]);
+
+    expect(spec.data?.[0]?.values).toEqual([]);
+    expect(spec.axes?.[1]).toMatchObject({ type: "time" });
+    expect(spec.axes?.[1]).not.toHaveProperty("min");
+    expect(spec.axes?.[1]).not.toHaveProperty("max");
+  });
+
+  it("clips samples older than the visible five-minute window", () => {
+    const latest = "2026-08-30T10:05:01.000Z";
+    const spec = createRuntimeTrendSpec([
+      runtimeSnapshot(runtime(2, "2026-08-30T10:00:00.000Z")),
+      runtimeSnapshot(runtime(2, "2026-08-30T10:00:01.000Z")),
+      runtimeSnapshot(runtime(2, latest))
+    ]);
+
+    expect(spec.data?.[0]?.values.map(datum => datum.asOf)).toEqual([
+      "2026-08-30T10:00:01.000Z",
+      latest
+    ]);
+  });
+
+  it("describes the chart purpose without exposing implementation sampling details", () => {
+    const state = buildRuntimeTrendChartState({
+      nodeId: 2,
+      range: "session",
+      samples: [runtimeSnapshot(runtime())]
+    });
+
+    expect(state.sampledLabel).toBe("展示最近 5 分钟在线媒体流的实时传输速率合计");
+    expect(state.sampledLabel).not.toContain("采样");
+    expect(state.sampledLabel).not.toContain("60");
+    expect(state.sampledLabel).not.toContain("2026");
   });
 });

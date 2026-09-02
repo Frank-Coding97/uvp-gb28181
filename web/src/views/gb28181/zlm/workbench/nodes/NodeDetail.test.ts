@@ -11,6 +11,14 @@ describe("canonical node detail", () => {
     expect(source).not.toMatch(/watch\([^\n]*route\.query\.view[\s\S]{0,500}router\.replace/);
   });
 
+  it("keeps node detail inside the shared content shell without duplicating the system sidebar", () => {
+    expect(source).toContain("MediaWorkspaceShell");
+    expect(source).toContain('@update:active-view="setView"');
+    expect(source).toContain('@update:scope="switchNode"');
+    expect(source).not.toContain("MediaWorkspaceTabs");
+    expect(source).toMatch(/@container\s+media-workspace-content\s*\(max-width:\s*720px\)/);
+  });
+
   it("uses route id runtime and the shared config/recovery action components", () => {
     expect(source).toContain("NodeRuntimePanel");
     expect(source).toContain("NodeConfigView");

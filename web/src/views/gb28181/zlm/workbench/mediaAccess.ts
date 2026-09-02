@@ -1,4 +1,4 @@
-import { MEDIA_PAGES, MEDIA_WORKSPACES } from "./mediaRoutes";
+import { MEDIA_PAGES, MEDIA_WORKSPACES, ZLM_WORKSPACES } from "./mediaRoutes";
 
 export interface MediaWorkspaceAccess {
   workspacePaths: string[];
@@ -16,7 +16,7 @@ const legacyCapabilityByPage: Readonly<Record<string, { workspace: string; views
   "/gb28181/zlm/overview": { workspace: "/media/overview", views: ["overview"] },
   "/gb28181/zlm/runtime": { workspace: "/media/monitoring", views: [] },
   "/gb28181/zlm/streams": { workspace: "/media/monitoring", views: ["streams"] },
-  "/gb28181/zlm/sessions": { workspace: "/media/monitoring", views: ["sessions"] },
+  "/gb28181/zlm/sessions": { workspace: "/media/monitoring", views: ["sessions", "viewers"] },
   "/gb28181/zlm/proxies": { workspace: "/media/ingress", views: ["pull", "push"] },
   "/gb28181/zlm/ffmpeg-sources": { workspace: "/media/ingress", views: ["ffmpeg"] },
   "/gb28181/zlm/rtp-servers": { workspace: "/media/ingress", views: ["rtp"] },
@@ -30,7 +30,7 @@ const legacyCapabilityByPage: Readonly<Record<string, { workspace: string; views
 
 const allLegacyViews: Readonly<Record<string, readonly string[]>> = {
   "/media/overview": ["overview"],
-  "/media/monitoring": ["streams", "sessions"],
+  "/media/monitoring": ["streams", "sessions", "viewers"],
   "/media/ingress": ["pull", "push", "ffmpeg", "rtp"],
   "/media/recordings": ["files", "tasks", "plans"],
   "/media/nodes": ["list", "overview", "runtime", "config"],
@@ -46,16 +46,15 @@ export function resolveMediaWorkspaceAccess(
   legacyPaths: Iterable<string>,
   options: MediaWorkspaceAccessOptions = {}
 ): MediaWorkspaceAccess {
-  const visible = new Set<string>();
   const legacyViews = new Map<string, Set<string>>();
 
   if (options.wildcard) {
-    MEDIA_PAGES.forEach(page => visible.add(page.path));
     MEDIA_WORKSPACES.forEach(workspace => legacyViews.set(workspace.path, new Set(allLegacyViews[workspace.path])));
   } else {
     for (const path of legacyPaths) {
+      const workspace = MEDIA_WORKSPACES.find(item => item.path === path);
+      if (workspace) legacyViews.set(workspace.path, new Set(allLegacyViews[workspace.path]));
       const page = canonicalPage(path);
-      if (page) visible.add(page);
       const capability = legacyCapabilityByPage[page ?? path];
       if (!capability) continue;
       const views = legacyViews.get(capability.workspace) ?? new Set<string>();
@@ -65,9 +64,10 @@ export function resolveMediaWorkspaceAccess(
     }
   }
 
-  const workspacePaths = MEDIA_PAGES.map(page => page.path).filter(path => visible.has(path));
+  const workspacePaths = ZLM_WORKSPACES
+    .map(workspace => workspace.path)
+    .filter(path => (legacyViews.get(path)?.size ?? 0) > 0);
   const viewsByWorkspace: Record<string, string[]> = {};
-  workspacePaths.forEach(path => { viewsByWorkspace[path] = ["default"]; });
   for (const [workspace, views] of legacyViews) {
     viewsByWorkspace[workspace] = allLegacyViews[workspace].filter(view => views.has(view));
   }

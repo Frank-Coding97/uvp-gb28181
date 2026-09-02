@@ -1,0 +1,33 @@
+-- zlm-single-menu-workbench:start
+-- Expose one media menu and keep five task-oriented workspaces as hidden routes (MySQL).
+SET @media_menu_id := (SELECT MIN(`id`) FROM `sys_menu` WHERE `path`='/media' AND `deleted_at` IS NULL);
+UPDATE `sys_menu` SET `redirect`='/media/overview',`component`='',`title`='流媒体管理',`icon`='lucide:Clapperboard',`sort`=9,`type`=1,`hide`=0,`keep_alive`=1,`updated_at`=NOW()
+WHERE `path`='/media' AND `deleted_at` IS NULL;
+
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/MediaOverview',`title`='运行总览',`sort`=10,`type`=2,`hide`=1,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/overview' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/MediaMonitoring',`title`='流与会话',`sort`=20,`type`=2,`hide`=1,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/monitoring' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/IngressManagement',`title`='接入管理',`sort`=30,`type`=2,`hide`=1,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/ingress' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/NodeManagement',`title`='节点管理',`sort`=40,`type`=2,`hide`=1,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/nodes' AND `deleted_at` IS NULL;
+UPDATE `sys_menu` SET `parent_id`=@media_menu_id,`component`='gb28181/zlm/workbench/SchedulingManagement',`title`='调度管理',`sort`=50,`type`=2,`hide`=1,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/scheduling' AND `deleted_at` IS NULL;
+SET @media_nodes_menu_id := (SELECT MIN(`id`) FROM `sys_menu` WHERE `path`='/media/nodes' AND `deleted_at` IS NULL);
+UPDATE `sys_menu` SET `parent_id`=@media_nodes_menu_id,`component`='gb28181/zlm/workbench/nodes/NodeDetail',`title`='节点详情',`hide`=1,`keep_alive`=1,`updated_at`=NOW() WHERE `path`='/media/nodes/:id' AND `deleted_at` IS NULL;
+
+UPDATE `sys_menu` SET `component`='gb28181/zlm/workbench/LegacyMediaRoute',`hide`=1,`updated_at`=NOW()
+WHERE `path` IN ('/gb28181/zlm/overview','/gb28181/zlm/runtime','/gb28181/zlm/streams','/gb28181/zlm/sessions','/gb28181/zlm/proxies','/gb28181/zlm/ffmpeg-sources','/gb28181/zlm/rtp-servers','/gb28181/zlm/nodes','/gb28181/zlm/nodes/:id','/gb28181/zlm/config','/gb28181/zlm/scheduler','/gb28181/zlm/scheduler/logs') AND `deleted_at` IS NULL;
+
+-- workspace-role-union:/media
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`)
+SELECT DISTINCT rm.`role_id`,target.`id` FROM `sys_role_menu` rm JOIN `sys_menu` source ON source.`id`=rm.`menu_id` AND source.`deleted_at` IS NULL CROSS JOIN `sys_menu` target
+WHERE target.`path`='/media' AND target.`deleted_at` IS NULL AND source.`path` LIKE '/gb28181/zlm/%'
+AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=rm.`role_id` AND x.`menu_id`=target.`id`);
+-- workspace-role-union:/media/overview
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT DISTINCT rm.`role_id`,target.`id` FROM `sys_role_menu` rm JOIN `sys_menu` source ON source.`id`=rm.`menu_id` CROSS JOIN `sys_menu` target WHERE source.`path` IN ('/gb28181/zlm/overview','/gb28181/zlm/runtime') AND source.`deleted_at` IS NULL AND target.`path`='/media/overview' AND target.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=rm.`role_id` AND x.`menu_id`=target.`id`);
+-- workspace-role-union:/media/monitoring
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT DISTINCT rm.`role_id`,target.`id` FROM `sys_role_menu` rm JOIN `sys_menu` source ON source.`id`=rm.`menu_id` CROSS JOIN `sys_menu` target WHERE source.`path` IN ('/gb28181/zlm/streams','/gb28181/zlm/sessions') AND source.`deleted_at` IS NULL AND target.`path`='/media/monitoring' AND target.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=rm.`role_id` AND x.`menu_id`=target.`id`);
+-- workspace-role-union:/media/ingress
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT DISTINCT rm.`role_id`,target.`id` FROM `sys_role_menu` rm JOIN `sys_menu` source ON source.`id`=rm.`menu_id` CROSS JOIN `sys_menu` target WHERE source.`path` IN ('/gb28181/zlm/proxies','/gb28181/zlm/ffmpeg-sources','/gb28181/zlm/rtp-servers') AND source.`deleted_at` IS NULL AND target.`path`='/media/ingress' AND target.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=rm.`role_id` AND x.`menu_id`=target.`id`);
+-- workspace-role-union:/media/nodes
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT DISTINCT rm.`role_id`,target.`id` FROM `sys_role_menu` rm JOIN `sys_menu` source ON source.`id`=rm.`menu_id` CROSS JOIN `sys_menu` target WHERE source.`path` IN ('/gb28181/zlm/nodes','/gb28181/zlm/nodes/:id','/gb28181/zlm/config') AND source.`deleted_at` IS NULL AND target.`path` IN ('/media/nodes','/media/nodes/:id') AND target.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=rm.`role_id` AND x.`menu_id`=target.`id`);
+-- workspace-role-union:/media/scheduling
+INSERT INTO `sys_role_menu` (`role_id`,`menu_id`) SELECT DISTINCT rm.`role_id`,target.`id` FROM `sys_role_menu` rm JOIN `sys_menu` source ON source.`id`=rm.`menu_id` CROSS JOIN `sys_menu` target WHERE source.`path` IN ('/gb28181/zlm/scheduler','/gb28181/zlm/scheduler/logs') AND source.`deleted_at` IS NULL AND target.`path`='/media/scheduling' AND target.`deleted_at` IS NULL AND NOT EXISTS (SELECT 1 FROM `sys_role_menu` x WHERE x.`role_id`=rm.`role_id` AND x.`menu_id`=target.`id`);
+-- zlm-single-menu-workbench:end

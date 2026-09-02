@@ -7,9 +7,9 @@
  *   <HealthBadge health="warning" reason="接近容量" />
  *
  * 健康度对应:
- *   healthy   → 绿色胶囊 "Healthy"
- *   warning   → 黄色胶囊 "Warning"(可附 reason)
- *   critical  → 红色胶囊 "Critical"(可附 reason)
+ *   healthy   → 绿色胶囊 "健康"
+ *   warning   → 黄色胶囊 "告警"(可附 reason)
+ *   critical  → 红色胶囊 "严重"(可附 reason)
  *   unknown / undefined / null → 灰色 "—"(无健康信号,如离线节点)
  */
 import { computed } from "vue";
@@ -28,21 +28,21 @@ const cfg = computed(() => {
                 bg: "var(--zlm-success-50)",
                 color: "var(--zlm-success-600)",
                 border: "var(--zlm-success-500)",
-                text: "Healthy"
+                text: "健康"
             };
         case "warning":
             return {
                 bg: "var(--zlm-warn-50)",
                 color: "var(--zlm-warn-600)",
                 border: "var(--zlm-warn-500)",
-                text: "Warning"
+                text: "告警"
             };
         case "critical":
             return {
                 bg: "var(--zlm-danger-50)",
                 color: "var(--zlm-danger-600)",
                 border: "var(--zlm-danger-500)",
-                text: "Critical"
+                text: "严重"
             };
         default:
             return null;

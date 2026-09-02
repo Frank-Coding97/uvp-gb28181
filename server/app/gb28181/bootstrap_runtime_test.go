@@ -36,6 +36,7 @@ func (f *fakeSIPRuntimeServer) SetRecordInfoSink(sink gbhandler.RecordInfoSink) 
 		*f.events = append(*f.events, "record.sink.clear")
 	}
 }
+func (f *fakeSIPRuntimeServer) SetSnapshotSink(gbhandler.SnapshotSink)                   {}
 func (f *fakeSIPRuntimeServer) SetPlaybackEndSink(gbhandler.PlaybackEndSink)             {}
 func (f *fakeSIPRuntimeServer) SetSubscriptionWaker(gbhandler.SubscriptionWaker)         {}
 func (f *fakeSIPRuntimeServer) SetSubscriptionNotifier(gbhandler.SubscriptionNotifier)   {}

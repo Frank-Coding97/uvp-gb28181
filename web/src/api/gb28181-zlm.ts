@@ -54,6 +54,26 @@ export interface CreateZLMNodeReq {
     rtpPortEnd?: number;
 }
 
+export interface ZLMNodeProbeResult {
+    online: boolean;
+    mediaServerId: string;
+    serverConfig: {
+        httpPort: number;
+        httpsPort: number;
+        rtspPort: number;
+        rtspsPort: number;
+        rtmpPort: number;
+        rtmpsPort: number;
+        rtpProxyPort: number;
+        onvifPort: number;
+        rtspEnabled: boolean;
+        rtmpEnabled: boolean;
+        hlsEnabled: boolean;
+        tsEnabled: boolean;
+        fmp4Enabled: boolean;
+    };
+}
+
 export interface UpdateZLMNodeReq {
     name?: string;
     host?: string;
@@ -75,6 +95,9 @@ export const getZLMNode = (id: number) =>
 
 export const createZLMNode = (body: CreateZLMNodeReq) =>
     http.request<BaseResult<ZLMNode>>("post", baseUrlApi("gb28181/zlm/nodes"), { data: body });
+
+export const probeZLMNode = (body: CreateZLMNodeReq) =>
+    http.request<BaseResult<ZLMNodeProbeResult>>("post", baseUrlApi("gb28181/zlm/nodes/probe"), { data: body });
 
 export const updateZLMNode = (id: number, body: UpdateZLMNodeReq) =>
     http.request<BaseResult<ZLMNode>>("put", baseUrlApi(`gb28181/zlm/nodes/${id}`), { data: body });

@@ -35,7 +35,7 @@ func (f *fakePlaybackHTTPService) Create(_ context.Context, request gbplayback.C
 		return gbplayback.CreateResult{}, f.createErr
 	}
 	if f.session == nil {
-		f.session = &gbplayback.Session{ID: "session-1", OwnerID: request.OwnerID, ChannelID: request.ChannelID, RecordKey: request.RecordKey, State: gbplayback.StatePlaying,
+		f.session = &gbplayback.Session{ID: "session-1", OwnerID: request.OwnerID, ChannelID: request.ChannelID, RecordKey: request.RecordKey, Mode: request.Mode, DownloadSpeed: request.DownloadSpeed, State: gbplayback.StatePlaying,
 			SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd, Deadline: time.Unix(1700003600, 0), Scale: 1, MediaURLs: map[string]string{"wsFlv": "ws://node/live.flv"},
 			DefaultProtocol: request.DefaultProtocol, Protocol: "ws-flv", URL: "wss://node/live.flv"}
 	}
@@ -92,10 +92,27 @@ func newPlaybackHTTPFixture(t *testing.T) (recordQueryFixture, *fakePlaybackHTTP
 	fixture.router.Use(gin.Recovery(), withClaims(100))
 	base := "/channel/:id/playback-sessions"
 	fixture.router.POST(base, fixture.controller.CreatePlaybackSession)
+	fixture.router.POST("/channel/:id/download-sessions", fixture.controller.CreateDownloadSession)
 	fixture.router.GET(base+"/:sessionId", fixture.controller.GetPlaybackSession)
 	fixture.router.POST(base+"/:sessionId/actions", fixture.controller.ActionPlaybackSession)
 	fixture.router.DELETE(base+"/:sessionId", fixture.controller.DeletePlaybackSession)
 	return fixture, service, now
+}
+
+func TestDeviceRecordDownloadCreateContract(t *testing.T) {
+	fixture, service, _ := newPlaybackHTTPFixture(t)
+	path := "/channel/" + uintStr(fixture.channel.ID) + "/download-sessions"
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"recordKey":"opaque-key","playFrom":"2026-08-04T08:00:00","downloadSpeed":4}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Idempotency-Key", "download-1")
+	result := httptest.NewRecorder()
+	fixture.router.ServeHTTP(result, request)
+
+	require.Equal(t, http.StatusOK, result.Code, result.Body.String())
+	require.Equal(t, gbplayback.ModeDownload, service.created.Mode)
+	require.Equal(t, uint32(4), service.created.DownloadSpeed)
+	require.Equal(t, service.created.SegmentStart, service.created.PlayFrom)
+	require.Contains(t, result.Body.String(), `"mode":"download"`)
 }
 
 func TestDeviceRecordPlaybackCreateAndGetContract(t *testing.T) {

@@ -5,11 +5,12 @@ import { useRoute, useRouter } from "vue-router";
 import { useRouteConfigStore } from "@/store/modules/route-config";
 import {
   type MediaScope,
+  resolveDefaultZLMNodeId,
   useMediaWorkbenchStore,
   useZLMNodeCatalog
 } from "@/store/modules/media-workbench";
 import { useZLMContextStore } from "@/store/modules/zlm-context";
-import type { MediaWorkbenchStatus } from "./components/MediaWorkbenchHeader.vue";
+import type { MediaWorkbenchStatus } from "./MediaWorkspaceShell.vue";
 import { resolveMediaWorkspaceAccess } from "./mediaAccess";
 import { MEDIA_WORKSPACES } from "./mediaRoutes";
 
@@ -69,13 +70,21 @@ export function useMediaWorkspaceRoute(key: typeof MEDIA_WORKSPACES[number]["key
     if (!allowedViews.value.includes(view)) return false;
     workbenchStore.setView(definition.path, view, allowedViews.value);
     activeView.value = view;
-    void router.push({ path: definition.path, query: { view } });
+    void router.replace({ path: definition.path, query: { ...route.query, view } });
     return true;
   }
 
   function setScope(next: MediaScope) {
     if (!workbenchStore.setScope(next)) return false;
-    if (typeof next === "number") contextStore.selectNode(next);
+    if (typeof next === "number") {
+      contextStore.selectNode(next);
+      void router.replace({ path: route.path, query: { ...route.query, nodeId: String(next) } });
+    } else {
+      contextStore.selectAll();
+      const query = { ...route.query };
+      delete query.nodeId;
+      void router.replace({ path: route.path, query });
+    }
     return true;
   }
 
@@ -93,10 +102,8 @@ export function useMediaWorkspaceRoute(key: typeof MEDIA_WORKSPACES[number]["key
       const nodes = await catalog.load();
       if (!contextStore.initialized) contextStore.initialize(nodes, route.query.nodeId);
       else contextStore.reconcileVisibleNodes(nodes);
-      const queryNodeId = Number(route.query.nodeId);
-      if (Number.isSafeInteger(queryNodeId) && queryNodeId > 0 && nodes.some(node => node.id === queryNodeId)) {
-        setScope(queryNodeId);
-      }
+      const nodeId = resolveDefaultZLMNodeId(nodes, route.query.nodeId, contextStore.selectedNodeId);
+      if (nodeId !== null) setScope(nodeId);
     } catch {
       // The shared catalog exposes the recoverable error while retaining its last successful nodes.
     }

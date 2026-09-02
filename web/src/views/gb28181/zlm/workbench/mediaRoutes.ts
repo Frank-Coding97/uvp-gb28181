@@ -45,7 +45,7 @@ export interface LegacyMediaRouteOptions {
 export const MEDIA_WORKSPACES: readonly MediaWorkspaceDefinition[] = [
   {
     key: "overview",
-    title: "媒体总览",
+    title: "运行总览",
     path: "/media/overview",
     sort: 10,
     defaultView: "overview",
@@ -53,11 +53,11 @@ export const MEDIA_WORKSPACES: readonly MediaWorkspaceDefinition[] = [
   },
   {
     key: "monitoring",
-    title: "媒体监控",
+    title: "流与会话",
     path: "/media/monitoring",
     sort: 20,
     defaultView: "streams",
-    allowedViews: ["streams", "sessions"]
+    allowedViews: ["streams", "sessions", "viewers"]
   },
   {
     key: "ingress",
@@ -92,6 +92,10 @@ export const MEDIA_WORKSPACES: readonly MediaWorkspaceDefinition[] = [
     allowedViews: ["strategy", "logs"]
   }
 ];
+
+export const ZLM_WORKSPACES: readonly MediaWorkspaceDefinition[] = MEDIA_WORKSPACES.filter(
+  workspace => workspace.key !== "recordings"
+);
 
 export const MEDIA_NODE_DETAIL = {
   path: "/gb28181/zlm/nodes/:id",
@@ -209,8 +213,8 @@ export function resolveLegacyMediaRoute(
     case "/media/overview":
       return destination("/gb28181/zlm/overview", selectQuery(query, [nodeField, ["status", token], ["keyword", safeText]]));
     case "/media/monitoring": {
-      const view = enumValue("runtime", "streams", "sessions")(query.view) ?? "runtime";
-      const target = view === "streams" ? "/gb28181/zlm/streams" : view === "sessions" ? "/gb28181/zlm/sessions" : "/gb28181/zlm/runtime";
+      const view = enumValue("runtime", "streams", "sessions", "viewers")(query.view) ?? "runtime";
+      const target = view === "streams" ? "/gb28181/zlm/streams" : ["sessions", "viewers"].includes(view) ? "/gb28181/zlm/sessions" : "/gb28181/zlm/runtime";
       return destination(target, selectQuery(query, [nodeField, ["schema", token], ["vhost", safeText], ...commonIdentityFields, ["peerIp", safeText], ["localPort", port], ["type", token], ["identifier", safeText]]));
     }
     case "/media/ingress": {

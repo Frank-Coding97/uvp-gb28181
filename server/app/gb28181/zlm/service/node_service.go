@@ -108,6 +108,31 @@ type CreateNodeReq struct {
 	RTPPortEnd   int               `json:"rtpPortEnd"`
 }
 
+// NodeProbeServerConfig 是新增向导可安全回显的 ZLM 配置子集。
+// 原始配置包含 api.secret 等敏感字段，不得直接穿透到控制器。
+type NodeProbeServerConfig struct {
+	HTTPPort     int  `json:"httpPort"`
+	HTTPSPort    int  `json:"httpsPort"`
+	RTSPPort     int  `json:"rtspPort"`
+	RTSPSPort    int  `json:"rtspsPort"`
+	RTMPPort     int  `json:"rtmpPort"`
+	RTMPSPort    int  `json:"rtmpsPort"`
+	RTPProxyPort int  `json:"rtpProxyPort"`
+	ONVIFPort    int  `json:"onvifPort"`
+	RTSPEnabled  bool `json:"rtspEnabled"`
+	RTMPEnabled  bool `json:"rtmpEnabled"`
+	HLSEnabled   bool `json:"hlsEnabled"`
+	TSEnabled    bool `json:"tsEnabled"`
+	FMP4Enabled  bool `json:"fmp4Enabled"`
+}
+
+// NodeProbeResult 是候选节点的只读探测结果，不代表节点已经登记。
+type NodeProbeResult struct {
+	Online        bool                  `json:"online"`
+	MediaServerID string                `json:"mediaServerId"`
+	ServerConfig  NodeProbeServerConfig `json:"serverConfig"`
+}
+
 // UpdateNodeReq 更新节点入参(可选字段用指针)
 type UpdateNodeReq struct {
 	Name         *string           `json:"name,omitempty"`
@@ -372,7 +397,7 @@ func validateNodeFields(host string, apiPort, weight, rtpStart, rtpEnd int, apiS
 	return nil
 }
 
-func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, error) {
+func buildCreateCandidate(req CreateNodeReq) (*node.Node, error) {
 	weight := req.Weight
 	if weight == 0 {
 		weight = 50
@@ -389,7 +414,7 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 		return nil, err
 	}
 
-	tmp := &node.Node{
+	return &node.Node{
 		Name:            req.Name,
 		Host:            req.Host,
 		ReceiveHost:     req.ReceiveHost,
@@ -402,10 +427,43 @@ func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, 
 		State:           node.StateActive,
 		RTPPortStart:    rtpStart,
 		RTPPortEnd:      rtpEnd,
+	}, nil
+}
+
+// ProbeCreate 读取候选 ZLM 的安全配置摘要，不登记节点，也不下发平台配置。
+func (s *NodeService) ProbeCreate(ctx context.Context, req CreateNodeReq) (*NodeProbeResult, error) {
+	candidate, err := buildCreateCandidate(req)
+	if err != nil {
+		return nil, err
+	}
+	config, err := s.probe.GetServerConfig(ctx, candidate)
+	if err != nil {
+		return nil, fmt.Errorf("ZLM 不可达 %s:%d: %w", req.Host, req.APIPort, redactNodeError(err, candidate))
+	}
+	detected := node.ParseServerConfig(config)
+	return &NodeProbeResult{
+		Online:        true,
+		MediaServerID: config["general.mediaServerId"],
+		ServerConfig: NodeProbeServerConfig{
+			HTTPPort: detected.HTTPPort, HTTPSPort: detected.HTTPSPort,
+			RTSPPort: detected.RTSPPort, RTSPSPort: detected.RTSPSPort,
+			RTMPPort: detected.RTMPPort, RTMPSPort: detected.RTMPSPort,
+			RTPProxyPort: detected.RTPProxyPort, ONVIFPort: detected.ONVIFPort,
+			RTSPEnabled: detected.RTSPEnabled, RTMPEnabled: detected.RTMPEnabled,
+			HLSEnabled: detected.HLSEnabled, TSEnabled: detected.TSEnabled,
+			FMP4Enabled: detected.FMP4Enabled,
+		},
+	}, nil
+}
+
+func (s *NodeService) Create(ctx context.Context, req CreateNodeReq) (*NodeDTO, error) {
+	tmp, err := buildCreateCandidate(req)
+	if err != nil {
+		return nil, err
 	}
 
 	// 1. 先 probe 探测连通性
-	if _, err := s.probe.GetServerConfig(ctx, tmp); err != nil {
+	if _, err = s.probe.GetServerConfig(ctx, tmp); err != nil {
 		return nil, fmt.Errorf("ZLM 不可达 %s:%d: %w", req.Host, req.APIPort, redactNodeError(err, tmp))
 	}
 

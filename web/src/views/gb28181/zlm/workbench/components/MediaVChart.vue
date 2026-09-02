@@ -14,6 +14,8 @@ const props = withDefaults(defineProps<{
   warning?: string | null;
   asOf?: string | null;
   sampledLabel?: string;
+  legendLabel?: string;
+  showSummary?: boolean;
   active?: boolean;
 }>(), {
   spec: null,
@@ -23,6 +25,8 @@ const props = withDefaults(defineProps<{
   warning: null,
   asOf: null,
   sampledLabel: "",
+  legendLabel: "",
+  showSummary: true,
   active: true
 });
 
@@ -55,15 +59,24 @@ function prefersReducedMotion(): boolean {
 
 function normalizedSpec(spec: MediaChartSpec): MediaChartSpec {
   const reduced = prefersReducedMotion();
-  const motion = reduced
-    ? { animationAppear: false, animationEnter: false, animationUpdate: false, animationExit: false }
-    : {
-        animationAppear: { duration: 220 },
-        animationEnter: { duration: 220 },
-        animationUpdate: { duration: 220 },
-        animationExit: { duration: 180 }
-      };
-  return { animation: reduced ? false : true, ...spec, ...motion };
+  if (reduced) {
+    return {
+      ...spec,
+      animation: false,
+      animationAppear: false,
+      animationEnter: false,
+      animationUpdate: false,
+      animationExit: false
+    };
+  }
+  return {
+    animation: true,
+    animationAppear: { duration: 220 },
+    animationEnter: { duration: 220 },
+    animationUpdate: { duration: 220 },
+    animationExit: { duration: 180 },
+    ...spec
+  };
 }
 
 function disconnectResizeObserver() {
@@ -138,7 +151,10 @@ onBeforeUnmount(releaseChart);
           <span v-if="asOf">最新 {{ asOf }}</span>
         </p>
       </div>
-      <span v-if="effectiveStatus === 'partial'" class="media-vchart__badge">部分数据</span>
+      <div v-if="legendLabel || effectiveStatus === 'partial'" class="media-vchart__header-aside">
+        <span v-if="legendLabel" class="media-vchart__legend"><i aria-hidden="true" />{{ legendLabel }}</span>
+        <span v-if="effectiveStatus === 'partial'" class="media-vchart__badge">部分数据</span>
+      </div>
     </header>
 
     <div v-if="canRender" ref="chartHost" class="media-vchart__canvas" role="img" tabindex="0" :aria-label="chartAriaLabel" :aria-describedby="summaryId" />
@@ -146,7 +162,7 @@ onBeforeUnmount(releaseChart);
       <span class="media-vchart__state-icon" aria-hidden="true">{{ effectiveStatus === 'empty' ? '∅' : effectiveStatus === 'unavailable' ? '!' : '—' }}</span>
       <strong>{{ stateText }}</strong>
     </div>
-    <p :id="summaryId" class="media-vchart__summary">{{ summary || stateText }}</p>
+    <p :id="summaryId" class="media-vchart__summary" :class="{ 'media-vchart__summary--sr-only': !showSummary }">{{ summary || stateText }}</p>
     <p v-if="warning" class="media-vchart__warning" role="status">{{ warning }}</p>
   </section>
 </template>
@@ -155,8 +171,11 @@ onBeforeUnmount(releaseChart);
 .media-vchart { min-width: 0; padding: 14px 16px 12px; color: var(--zlm-text-2, var(--color-text-2)); background: var(--uvp-panel-bg, var(--color-bg-2)); border: 1px solid var(--uvp-panel-border, var(--color-border-2)); border-radius: var(--uvp-panel-radius, 10px); box-shadow: var(--uvp-panel-shadow, 0 2px 8px rgb(0 0 0 / 4%)); }
 .media-vchart__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .media-vchart h3 { margin: 0; color: var(--zlm-text-1, var(--color-text-1)); font-size: 14px; font-weight: 600; }
-.media-vchart__meta { margin: 4px 0 0; color: var(--zlm-text-4, var(--color-text-3)); font-size: 11px; }
-.media-vchart__badge { flex: none; padding: 2px 7px; color: var(--zlm-warn-600, rgb(var(--warning-6))); background: var(--zlm-warn-50, rgb(var(--warning-1))); border-radius: 999px; font-size: 11px; }
+.media-vchart__meta { margin: 3px 0 0; color: var(--zlm-text-3, var(--color-text-2)); font-size: 12px; line-height: 1.35; }
+.media-vchart__header-aside { display: flex; flex: none; align-items: center; gap: 8px; }
+.media-vchart__legend { display: inline-flex; align-items: center; gap: 6px; color: var(--zlm-text-3, var(--color-text-2)); font-size: 12px; white-space: nowrap; }
+.media-vchart__legend i { width: 8px; height: 8px; background: var(--zlm-brand-500, rgb(var(--primary-6))); border-radius: 50%; }
+.media-vchart__badge { flex: none; padding: 2px 7px; color: var(--zlm-warn-600, rgb(var(--warning-6))); background: var(--zlm-warn-50, rgb(var(--warning-1))); border-radius: 999px; font-size: 12px; }
 .media-vchart__canvas { width: 100%; min-height: 220px; }
 .media-vchart__canvas:focus-visible { outline: 2px solid var(--zlm-brand-500, rgb(var(--primary-6))); outline-offset: 2px; }
 .media-vchart__state { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--zlm-text-3, var(--color-text-3)); text-align: center; }
@@ -164,7 +183,8 @@ onBeforeUnmount(releaseChart);
 .media-vchart__state-icon { display: grid; width: 30px; height: 30px; place-items: center; color: var(--zlm-text-4, var(--color-text-4)); border: 1px solid var(--uvp-panel-border, var(--color-border-2)); border-radius: 50%; font-size: 17px; }
 .media-vchart[data-status="unavailable"] .media-vchart__state-icon { color: var(--zlm-danger-600, rgb(var(--danger-6))); border-color: var(--zlm-danger-500, rgb(var(--danger-5))); }
 .media-vchart[data-status="partial"] .media-vchart__summary { color: var(--zlm-warn-600, rgb(var(--warning-6))); }
-.media-vchart__summary { min-height: 18px; margin: 8px 0 0; color: var(--zlm-text-3, var(--color-text-3)); font-size: 11px; line-height: 1.5; }
-.media-vchart__warning { margin: 4px 0 0; color: var(--zlm-warn-600, rgb(var(--warning-6))); font-size: 11px; line-height: 1.5; }
+.media-vchart__summary { min-height: 18px; margin: 7px 0 0; color: var(--zlm-text-3, var(--color-text-2)); font-size: 12px; line-height: 1.4; }
+.media-vchart__summary--sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.media-vchart__warning { margin: 3px 0 0; color: var(--zlm-warn-600, rgb(var(--warning-6))); font-size: 12px; line-height: 1.4; }
 @media (prefers-reduced-motion: reduce) { .media-vchart__canvas { scroll-behavior: auto; } }
 </style>

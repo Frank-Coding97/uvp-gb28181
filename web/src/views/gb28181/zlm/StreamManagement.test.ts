@@ -80,6 +80,8 @@ describe("stream management state", () => {
     expect(source).not.toContain("index/api");
     expect(source).not.toContain("fetch(");
     expect(source).not.toContain("http.request");
+    expect(source).toContain('row-key="rowKey"');
+    expect(source).not.toContain(':row-key="streamIdentityKey"');
   });
 
   it("executes ordinary close only after preflight and reuses the exact fingerprint", async () => {

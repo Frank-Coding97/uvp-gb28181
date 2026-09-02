@@ -68,6 +68,17 @@ export function normalizeMediaScope(value: unknown): MediaScope | null {
   return positiveNodeID(value);
 }
 
+export function resolveDefaultZLMNodeId(
+  nodes: readonly MediaNodeCatalogNode[],
+  ...candidates: unknown[]
+): number | null {
+  for (const candidate of candidates) {
+    const nodeId = positiveNodeID(candidate);
+    if (nodeId !== null && nodes.some(node => node.id === nodeId)) return nodeId;
+  }
+  return nodes.find(node => node.state === "active")?.id ?? nodes[0]?.id ?? null;
+}
+
 export function canUseMediaScope(value: unknown, policy: MediaScopePolicy = {}) {
   const scope = normalizeMediaScope(value);
   if (scope === null) return false;

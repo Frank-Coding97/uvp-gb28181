@@ -38,6 +38,19 @@ type PlaybackParams struct {
 	Extended  bool
 }
 
+type DownloadParams struct {
+	ServerID      string
+	ChannelID     string
+	RecvIP        string
+	RecvPort      int
+	SSRC          string
+	TCPMode       bool
+	Start         time.Time
+	End           time.Time
+	DownloadSpeed uint32
+	Extended      bool
+}
+
 // BuildPlaybackSDP builds a GB28181 historical playback offer. PlayFrom is
 // optional and defaults to Start; when present it must remain inside [Start, End).
 func BuildPlaybackSDP(params PlaybackParams) (string, error) {
@@ -45,6 +58,31 @@ func BuildPlaybackSDP(params PlaybackParams) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return buildHistoricalSDP(params, "Playback", playFrom, params.End, 0)
+}
+
+// BuildDownloadSDP builds a GB/T 28181 device recording download offer.
+func BuildDownloadSDP(params DownloadParams) (string, error) {
+	speed := params.DownloadSpeed
+	if speed == 0 {
+		speed = 4
+	}
+	if speed != 1 && speed != 2 && speed != 4 && speed != 8 {
+		return "", invalidPlaybackArgument("DownloadSpeed", "must be one of 1, 2, 4, 8")
+	}
+	playback := PlaybackParams{
+		ServerID: params.ServerID, ChannelID: params.ChannelID, RecvIP: params.RecvIP,
+		RecvPort: params.RecvPort, SSRC: params.SSRC, TCPMode: params.TCPMode,
+		Start: params.Start, End: params.End, PlayFrom: params.Start, Extended: params.Extended,
+	}
+	start, err := validatePlaybackParams(playback)
+	if err != nil {
+		return "", err
+	}
+	return buildHistoricalSDP(playback, "Download", start, params.End, speed)
+}
+
+func buildHistoricalSDP(params PlaybackParams, sessionName string, start, end time.Time, downloadSpeed uint32) (string, error) {
 
 	transport := "RTP/AVP"
 	if params.TCPMode {
@@ -53,11 +91,14 @@ func BuildPlaybackSDP(params PlaybackParams) (string, error) {
 	var body strings.Builder
 	body.WriteString("v=0\r\n")
 	body.WriteString(fmt.Sprintf("o=%s 0 0 IN IP4 %s\r\n", params.ServerID, params.RecvIP))
-	body.WriteString("s=Playback\r\n")
+	body.WriteString(fmt.Sprintf("s=%s\r\n", sessionName))
 	body.WriteString(fmt.Sprintf("u=%s:0\r\n", params.ChannelID))
 	body.WriteString(fmt.Sprintf("c=IN IP4 %s\r\n", params.RecvIP))
-	body.WriteString(fmt.Sprintf("t=%d %d\r\n", playFrom.Unix(), params.End.Unix()))
+	body.WriteString(fmt.Sprintf("t=%d %d\r\n", start.Unix(), end.Unix()))
 	writeVideoMediaDescription(&body, params.RecvPort, transport, params.Extended)
+	if downloadSpeed > 0 {
+		body.WriteString(fmt.Sprintf("a=downloadspeed:%d\r\n", downloadSpeed))
+	}
 	if params.TCPMode {
 		body.WriteString("a=setup:passive\r\n")
 		body.WriteString("a=connection:new\r\n")

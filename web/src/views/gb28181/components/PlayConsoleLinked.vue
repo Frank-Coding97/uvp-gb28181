@@ -24,6 +24,7 @@ import {
     controlPtzCruise,
     createCruiseTrack,
     controlPtzPrecise,
+    createDeviceSnapshotSession,
     callPtzPreset,
     createTalkSession,
     createPtzPreset,
@@ -32,6 +33,7 @@ import {
     fetchPTZDefaultSpeedConfig,
     getControlCapabilities,
     getDeviceStatus,
+    getDeviceSnapshotSession,
     getHomePosition,
     getPtzOperation,
     getPtzPreciseStatus,
@@ -50,6 +52,7 @@ import {
     type DeviceAlarmResolution,
     type DeviceControlCapabilities,
     type DeviceStatusResult,
+    type DeviceSnapshotSession,
     type DeviceFactState,
     type HomePositionConfig,
     type HomePositionPatch,
@@ -66,6 +69,7 @@ import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel }
 import {
     Activity,
     AlertTriangle,
+    Camera,
     CheckCircle2,
     ChevronDown,
     Circle,
@@ -1260,6 +1264,11 @@ const advancedStatusToken = ref(0);
 const advancedPending = ref(new Set<string>());
 const advancedOperationStatus = ref<Record<string, string>>({});
 const dragZoomMode = ref(false);
+const snapshotCount = ref(1);
+const snapshotInterval = ref(1);
+const snapshotPending = ref(false);
+const snapshotSession = ref<DeviceSnapshotSession | null>(null);
+let snapshotPollTimer: number | null = null;
 const dragZoomAction = ref<"drag_zoom_in" | "drag_zoom_out">("drag_zoom_in");
 const dragZoomStart = ref<{ x: number; y: number } | null>(null);
 const dragZoomCurrent = ref<{ x: number; y: number } | null>(null);
@@ -1314,6 +1323,54 @@ function clearDeviceStatusState() {
     deviceStatusError.value = "";
     deviceStatusPending.value = false;
     deviceStatusOperationId.value = null;
+}
+
+function clearSnapshotPolling() {
+    if (snapshotPollTimer !== null) window.clearTimeout(snapshotPollTimer);
+    snapshotPollTimer = null;
+}
+
+function snapshotStatusText() {
+    const session = snapshotSession.value;
+    if (!session) return "配置后由设备上传 JPEG";
+    if (session.state === "completed") return `已完成 ${session.receivedCount}/${session.snapNum}`;
+    if (session.state === "failed") return session.error || "抓拍失败";
+    return `接收中 ${session.receivedCount}/${session.snapNum}`;
+}
+
+async function pollSnapshotSession(channelId: number, sessionId: string, token: number) {
+    clearSnapshotPolling();
+    try {
+        const response = await getDeviceSnapshotSession(channelId, sessionId);
+        if (token !== sessionToken || props.channel?.id !== channelId || response.code !== 0 || !response.data) return;
+        snapshotSession.value = response.data;
+        if (response.data.state === "completed" || response.data.state === "failed") return;
+    } catch (error: any) {
+        if (token !== sessionToken) return;
+        if (snapshotSession.value) snapshotSession.value = { ...snapshotSession.value, error: error?.message || "抓拍状态读取失败" };
+    }
+    snapshotPollTimer = window.setTimeout(() => void pollSnapshotSession(channelId, sessionId, token), 800);
+}
+
+async function runDeviceSnapshot() {
+    const channelId = props.channel?.id;
+    if (!channelId || props.channel?.status !== 1 || snapshotPending.value) return;
+    snapshotPending.value = true;
+    snapshotSession.value = null;
+    const token = sessionToken;
+    try {
+        const response = await createDeviceSnapshotSession(channelId, {
+            snapNum: Number(snapshotCount.value),
+            interval: Number(snapshotInterval.value),
+        });
+        if (token !== sessionToken || response.code !== 0 || !response.data) return;
+        snapshotSession.value = response.data;
+        void pollSnapshotSession(channelId, response.data.sessionId, token);
+    } catch (error: any) {
+        Message.error(error?.message || "下发图像抓拍配置失败");
+    } finally {
+        if (token === sessionToken) snapshotPending.value = false;
+    }
 }
 
 function deviceStatusText() {
@@ -1602,6 +1659,9 @@ function resetSessionState() {
     clearCruiseReconcilePolling();
     clearDeviceStatusPolling();
     clearDeviceStatusState();
+    clearSnapshotPolling();
+    snapshotPending.value = false;
+    snapshotSession.value = null;
     probeToken++;
     clearProbeTimers();
     probeState.value = "idle";
@@ -3966,6 +4026,22 @@ onBeforeUnmount(() => {
                             </button>
                         </div>
                         <div class="adv-actions">
+                            <div class="snapshot-config" data-testid="snapshot-config">
+                                <div class="snapshot-config-heading"><span><Camera :size="13" />图像抓拍配置</span><em>GB/T 28181-2022</em></div>
+                                <div class="snapshot-config-fields">
+                                    <label>张数<input v-model.number="snapshotCount" data-testid="snapshot-count" type="number" min="1" max="10" /></label>
+                                    <label>间隔（秒）<input v-model.number="snapshotInterval" data-testid="snapshot-interval" type="number" min="1" max="3600" /></label>
+                                </div>
+                                <button class="btn-primary snapshot-submit" data-testid="snapshot-submit" :disabled="snapshotPending || props.channel?.status !== 1" @click="runDeviceSnapshot">
+                                    <Loader2 v-if="snapshotPending" :size="13" class="spin" /><Camera v-else :size="13" />下发抓拍配置
+                                </button>
+                                <p class="snapshot-status" aria-live="polite">{{ snapshotStatusText() }}</p>
+                                <div v-if="snapshotSession?.files.length" class="snapshot-results">
+                                    <a v-for="file in snapshotSession.files" :key="file.name" :href="file.url" target="_blank" rel="noopener noreferrer">
+                                        <img :src="file.url" :alt="file.name" /><span>{{ file.name }}</span>
+                                    </a>
+                                </div>
+                            </div>
                             <button class="adv-btn" data-testid="advanced-iframe" :title="capabilityActionTitle('iFrame', '请求关键帧')" :disabled="isAdvancedPending('iframe')" @click="runAdvancedAction('iframe')">
                                 <Video :size="14" />
                                 <div><strong>请求关键帧</strong><small>发送到设备,执行结果不回传</small></div>
@@ -5745,6 +5821,18 @@ onBeforeUnmount(() => {
 .advanced-alarm-facts { display: flex; flex-wrap: wrap; gap: 4px 8px; color: var(--uvp-text-secondary); font-size: 9px; }
 .advanced-fact-error { margin: 0; color: var(--uvp-danger); font-size: 9px; line-height: 1.4; }
 .advanced-status-refresh { justify-self: start; }
+.snapshot-config { grid-column: 1 / -1; display: grid; gap: 8px; padding: 10px; background: color-mix(in srgb, var(--uvp-brand) 6%, transparent); border: 1px solid color-mix(in srgb, var(--uvp-brand) 22%, transparent); border-radius: 7px; }
+.snapshot-config-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.snapshot-config-heading span { display: inline-flex; align-items: center; gap: 5px; color: var(--uvp-text-primary); font-size: 11px; font-weight: 600; }
+.snapshot-config-heading em { color: var(--uvp-brand-cyan); font-size: 9px; font-style: normal; }
+.snapshot-config-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.snapshot-config-fields label { display: grid; gap: 4px; color: var(--uvp-text-tertiary); font-size: 9px; }
+.snapshot-config-fields input { width: 100%; min-width: 0; padding: 6px 7px; color: var(--uvp-text-primary); background: var(--uvp-bg); border: 1px solid var(--uvp-border); border-radius: 5px; }
+.snapshot-submit { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; border: 0; border-radius: 5px; cursor: pointer; }
+.snapshot-status { margin: 0; color: var(--uvp-text-tertiary); font-size: 9px; }
+.snapshot-results { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.snapshot-results a { display: grid; gap: 3px; color: var(--uvp-text-secondary); font-size: 8px; text-decoration: none; overflow: hidden; }
+.snapshot-results img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 4px; }
 .adv-actions { display: grid; gap: 6px; }
 .sidebar [data-testid="linked-side-advanced"] .adv-actions { grid-template-columns: 1fr; }
 .sidebar [data-testid="linked-side-advanced"] .adv-btn { gap: 7px; padding: 8px; }

@@ -247,9 +247,16 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	if sipChannelID == "" {
 		sipChannelID = request.ChannelID
 	}
-	body, err := sdp.BuildPlaybackSDP(sdp.PlaybackParams{ServerID: serverID, ChannelID: sipChannelID, RecvIP: node.RecvIP,
-		RecvPort: allocation.Port, SSRC: ssrc, TCPMode: tcpMode, Start: start, End: end, PlayFrom: playFrom,
-		Extended: gbconfig.SDPExtensionEnabled()})
+	var body string
+	if session.Mode == ModeDownload {
+		body, err = sdp.BuildDownloadSDP(sdp.DownloadParams{ServerID: serverID, ChannelID: sipChannelID, RecvIP: node.RecvIP,
+			RecvPort: allocation.Port, SSRC: ssrc, TCPMode: tcpMode, Start: start, End: end,
+			DownloadSpeed: session.DownloadSpeed, Extended: gbconfig.SDPExtensionEnabled()})
+	} else {
+		body, err = sdp.BuildPlaybackSDP(sdp.PlaybackParams{ServerID: serverID, ChannelID: sipChannelID, RecvIP: node.RecvIP,
+			RecvPort: allocation.Port, SSRC: ssrc, TCPMode: tcpMode, Start: start, End: end, PlayFrom: playFrom,
+			Extended: gbconfig.SDPExtensionEnabled()})
+	}
 	if err != nil {
 		return CreateResult{}, s.fail(ctx, session.ID, "invite", "invalid_sdp", err, resources)
 	}

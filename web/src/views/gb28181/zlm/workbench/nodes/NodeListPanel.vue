@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
+import { CirclePower, Eye, MoreHorizontal, Pencil, Radar, Wrench } from "lucide-vue-next";
 import { useRouter } from "vue-router";
 
 import {
@@ -55,6 +56,9 @@ const legacyError = ref<unknown>(null);
 const search = ref("");
 const filterState = ref<string>();
 const filterHealth = ref<NodeHealth>();
+const appliedSearch = ref("");
+const appliedFilterState = ref<string>();
+const appliedFilterHealth = ref<NodeHealth>();
 const formVisible = ref(false);
 const formNode = ref<ZLMNode | null>(null);
 const actionVisible = ref(false);
@@ -74,9 +78,9 @@ const scopedNodes = computed(() => props.scope === "all"
   ? sourceNodes.value
   : sourceNodes.value.filter(node => node.id === props.scope));
 const filteredNodes = computed(() => filterNodeRecords(scopedNodes.value, {
-  keyword: search.value,
-  state: filterState.value as ZLMNode["state"] | undefined,
-  health: filterHealth.value
+  keyword: appliedSearch.value,
+  state: appliedFilterState.value as ZLMNode["state"] | undefined,
+  health: appliedFilterHealth.value
 }));
 const loading = computed(() => props.nodes === undefined ? legacyLoading.value : props.loading);
 const loadError = computed(() => props.nodes === undefined ? legacyError.value : props.error);
@@ -114,6 +118,19 @@ function reconcileContext(nodes: readonly Pick<ZLMNode, "id" | "name" | "state">
 function refreshRows() {
   if (props.nodes === undefined) void loadLegacyNodes();
   else emit("refresh");
+}
+
+function queryRows() {
+  appliedSearch.value = search.value.trim();
+  appliedFilterState.value = filterState.value;
+  appliedFilterHealth.value = filterHealth.value;
+}
+
+function resetFilters() {
+  search.value = "";
+  filterState.value = undefined;
+  filterHealth.value = undefined;
+  queryRows();
 }
 
 function scheduleRefresh() {
@@ -245,13 +262,13 @@ function relativeTime(value?: string) {
 
     <s-layout-search class="node-search-panel">
       <template #fields>
-        <a-input-search v-model="search" allow-clear placeholder="搜索节点名或 Host" class="search" />
-        <a-select v-model="filterState" allow-clear placeholder="生命周期" class="filter-select" :options="[
+        <a-input v-model="search" allow-clear placeholder="节点名称 / Host" style="width: 260px" @press-enter="queryRows" />
+        <a-select v-model="filterState" allow-clear placeholder="生命周期" style="width: 150px" :options="[
           { label: '活跃', value: 'active' },
           { label: '维护', value: 'maintenance' },
           { label: '离线', value: 'offline' }
         ]" />
-        <a-select v-model="filterHealth" allow-clear placeholder="健康度" class="filter-select" :options="[
+        <a-select v-model="filterHealth" allow-clear placeholder="健康度" style="width: 150px" :options="[
           { label: '健康', value: 'healthy' },
           { label: '告警', value: 'warning' },
           { label: '严重', value: 'critical' },
@@ -259,14 +276,15 @@ function relativeTime(value?: string) {
         ]" />
       </template>
       <template #actions>
-        <span class="filter-meta">{{ filteredNodes.length }} / {{ scopedNodes.length }} 节点</span>
-        <a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新节点列表" @click="refreshRows"><template #icon><icon-refresh /></template>刷新</a-button>
+        <a-button type="primary" @click="queryRows"><template #icon><icon-search /></template>查询</a-button>
+        <a-button @click="resetFilters"><template #icon><icon-refresh /></template>重置</a-button>
       </template>
       <template #extra>
+        <span class="filter-meta">{{ filteredNodes.length }} / {{ scopedNodes.length }} 节点</span>
+        <a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新节点列表" @click="refreshRows"><template #icon><icon-refresh /></template>刷新</a-button>
         <a-button v-if="canManage" type="primary" @click="openCreate"><template #icon><icon-plus /></template>添加节点</a-button>
       </template>
     </s-layout-search>
-     <p class="scope-hint">当前范围：{{ props.scope === "all" ? "全部可见节点" : `节点 #${props.scope}` }}；新增、维护、删除和重启等写操作必须作用于明确选择节点。</p>
 
     <div v-if="loading && !scopedNodes.length" class="page-state" role="status" aria-label="正在加载节点列表"><a-spin /><span>正在加载媒体节点…</span></div>
     <div v-else-if="loadError && !scopedNodes.length" class="page-state page-state--error" role="alert">
@@ -283,13 +301,13 @@ function relativeTime(value?: string) {
           <a-table-column title="流 / 会话" :width="120"><template #cell="{ record }"><span v-if="record.state === 'offline'">—</span><span v-else class="numeric">{{ record.stats?.mediaSourceCount ?? 0 }} / {{ record.stats?.sessionCount ?? 0 }}</span></template></a-table-column>
           <a-table-column title="调度" :width="130"><template #cell="{ record }"><span v-if="record.state !== 'active'" class="muted">不参与</span><span v-else-if="record.autoOnDemandReady" class="ready">可调度 · {{ record.weight }}</span><span v-else class="warning">等待收敛</span></template></a-table-column>
           <a-table-column title="最后心跳" :width="130"><template #cell="{ record }"><span :title="record.stats?.lastHeartbeatAt">{{ relativeTime(record.stats?.lastHeartbeatAt) }}</span></template></a-table-column>
-          <a-table-column title="操作" :width="300" fixed="right"><template #cell="{ record }"><div class="cell-ops">
-            <a-button size="small" @click="gotoDetail(record)">详情</a-button>
-            <a-button v-if="canManage" size="small" @click="openEdit(record)">编辑</a-button>
-            <a-button v-if="canManage && record.state === 'active'" size="small" @click="openAction(record, 'maintenance')">维护</a-button>
-            <a-button v-else-if="canManage && record.state === 'maintenance'" size="small" type="primary" :loading="opLoading[record.id] === 'activate'" @click="handleActivate(record)">激活</a-button>
-            <a-button v-else-if="canManage && record.state === 'offline'" size="small" type="primary" :loading="opLoading[record.id] === 'reprobe'" @click="handleReprobe(record)">探测</a-button>
-            <a-dropdown v-if="canShowMore(record)" trigger="click" position="br"><a-button size="small">更多<template #icon><icon-down /></template></a-button><template #content>
+          <a-table-column title="操作" :width="300" align="center" fixed="right"><template #cell="{ record }"><div class="uvp-table-actions">
+            <a-link class="uvp-table-action uvp-table-action--detail" @click="gotoDetail(record)"><template #icon><Eye :size="13" /></template>详情</a-link>
+            <a-link v-if="canManage" class="uvp-table-action uvp-table-action--edit" @click="openEdit(record)"><template #icon><Pencil :size="13" /></template>编辑</a-link>
+            <a-link v-if="canManage && record.state === 'active'" class="uvp-table-action uvp-table-action--scope" @click="openAction(record, 'maintenance')"><template #icon><Wrench :size="13" /></template>维护</a-link>
+            <a-link v-else-if="canManage && record.state === 'maintenance'" class="uvp-table-action uvp-table-action--execute" :loading="opLoading[record.id] === 'activate'" @click="handleActivate(record)"><template #icon><CirclePower :size="13" /></template>激活</a-link>
+            <a-link v-else-if="canManage && record.state === 'offline'" class="uvp-table-action uvp-table-action--sync" :loading="opLoading[record.id] === 'reprobe'" @click="handleReprobe(record)"><template #icon><Radar :size="13" /></template>探测</a-link>
+            <a-dropdown v-if="canShowMore(record)" trigger="click" position="br"><a-link class="uvp-table-action uvp-table-action--more">更多<MoreHorizontal :size="13" /></a-link><template #content>
               <a-doption v-if="canKick && record.state !== 'offline'" @click="openAction(record, 'kick')">驱逐全部会话</a-doption>
               <a-doption v-if="canRestart && record.state !== 'offline'" @click="openAction(record, 'restart')">重启 ZLM</a-doption>
               <a-doption v-if="canManage" class="danger" @click="openAction(record, 'delete')">删除节点</a-doption>
@@ -309,12 +327,13 @@ function relativeTime(value?: string) {
 <style scoped>
 .node-list-panel { min-width: 0; color: var(--zlm-text-2); }
 .node-search-panel { margin-bottom: 16px; }
-.search { width: 220px; }.filter-select { width: 132px; }.filter-meta { display: inline-flex; align-items: center; min-height: 34px; color: var(--zlm-text-3); font-size: 12px; }
-.scope-hint { margin: -8px 0 14px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.recovery-mark { display: inline-block; margin-left: 6px; color: var(--zlm-danger-600); font-size: 11px; }
+.node-search-panel :deep(.arco-select-view) { box-sizing: border-box; background: var(--uvp-search-control-bg) !important; border: 1px solid var(--uvp-search-secondary-btn-border) !important; border-radius: 10px !important; box-shadow: var(--uvp-search-control-shadow) !important; }
+.node-search-panel :deep(.arco-select-view:hover), .node-search-panel :deep(.arco-select-view-focus) { border-color: var(--uvp-brand) !important; box-shadow: var(--uvp-search-control-focus-shadow) !important; }
+.filter-meta { display: inline-flex; align-items: center; min-height: 34px; color: var(--zlm-text-3); font-size: 12px; }
+.recovery-mark { display: inline-block; margin-left: 6px; color: var(--zlm-danger-600); font-size: 11px; }
 .page-state { display: flex; min-height: 220px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; margin-bottom: 16px; padding: 16px; color: var(--zlm-text-3); text-align: center; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); }
 .page-state--warning { min-height: auto; align-items: flex-start; color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.page-state--error { color: var(--zlm-danger-600); }
 .node-table-wrap { overflow: hidden; background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-lg); box-shadow: var(--uvp-panel-shadow); }
 .cell-node { display: flex; max-width: 100%; flex-direction: column; gap: 2px; padding: 0; text-align: left; background: transparent; border: 0; cursor: pointer; }.cell-node:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 3px; border-radius: 5px; }.cell-node-name { overflow: hidden; color: var(--zlm-text-1); font-weight: var(--zlm-fw-semibold); text-overflow: ellipsis; white-space: nowrap; }.cell-node:hover .cell-node-name { color: var(--zlm-brand-600); }.cell-node-host { color: var(--zlm-text-3); font-family: var(--zlm-font-mono); font-size: var(--zlm-fs-caption); }
-.numeric { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.muted { color: var(--zlm-text-4); }.ready { color: var(--zlm-success-600); }.warning { color: var(--zlm-warn-600); }.cell-ops { display: flex; align-items: center; gap: 6px; }.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }.empty strong { color: var(--zlm-text-1); }.empty-icon { font-size: 42px; color: var(--zlm-text-4); }.danger { color: var(--zlm-danger-600); }
- @media (max-width: 720px) { .search, .filter-select { width: 100%; } .cell-ops { flex-wrap: wrap; } }
+.numeric { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.muted { color: var(--zlm-text-4); }.ready { color: var(--zlm-success-600); }.warning { color: var(--zlm-warn-600); }.empty { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 44px 16px; color: var(--zlm-text-3); }.empty strong { color: var(--zlm-text-1); }.empty-icon { font-size: 42px; color: var(--zlm-text-4); }.danger { color: var(--zlm-danger-600); }
 </style>

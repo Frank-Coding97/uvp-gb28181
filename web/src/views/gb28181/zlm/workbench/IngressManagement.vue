@@ -22,6 +22,7 @@ const views = [
     :status-text="workspace.statusText.value" :last-success-at="workspace.lastSuccessAt.value"
     :auto-refresh="workspace.autoRefresh.value" :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
+    :allow-all="false" :requires-node="true"
     @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
     @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="workspace.refreshScope" @refresh-scope="workspace.refreshScope"
   >

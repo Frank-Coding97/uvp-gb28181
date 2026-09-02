@@ -75,6 +75,15 @@ const canPoll = computed(() => props.active && props.scope !== "all");
 const currentKind = computed<ProxyTab>(() => props.showTabs ? activeTab.value : props.kind);
 const currentData = computed(() => data[currentKind.value]);
 const rows = computed(() => currentData.value?.list ?? []);
+const tablePagination = computed(() => currentData.value ? ({
+  current: currentData.value.page,
+  pageSize: currentData.value.pageSize,
+  total: currentData.value.total,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 50, 100]
+}) : false);
 const capability = computed<ZLMCapabilityState>(() => currentData.value?.capability ?? observedCapability[currentKind.value]);
 const capabilityView = computed(() => proxyCapabilityPresentation(capability.value));
 const scopeBlocked = computed(() => props.scope === "all");
@@ -241,23 +250,15 @@ function changePageSize(pageSize: number) {
 <template>
   <section class="ingress-panel" aria-label="代理接入管理">
     <header class="panel-toolbar">
-      <div><h2>{{ showTabs ? "拉流 / 推流代理" : (kind === "pull" ? "拉流代理" : "推流代理") }}</h2><p>请求全部经 UVP 后端；地址只展示安全摘要，完整 URL 不回显。</p></div>
-      <a-space>
-        <a-button :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
+      <div class="toolbar-actions">
+        <a-button class="uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
         <a-button type="primary" :disabled="!props.active || !canManage || !capabilityView.actionable || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建代理</a-button>
-      </a-space>
+      </div>
     </header>
 
     <div v-if="scopeBlocked" class="scope-warning" role="status">
       <strong>全部节点范围</strong><span>代理列表和所有节点级写操作都需要先选择一个具体节点。</span>
     </div>
-    <div class="capability-banner" :data-tone="capabilityView.tone" role="status">
-      <strong>{{ capabilityView.label }}</strong>
-      <span v-if="capability === 'supported'">当前节点明确报告代理管理 API 可用。</span>
-      <span v-else-if="capability === 'unsupported'">当前节点缺少该类代理完整 API，创建和删除均禁用。</span>
-      <span v-else>能力探测未完成；不会用一次失败或空列表猜测节点支持。</span>
-    </div>
-
     <a-tabs v-if="showTabs" v-model:active-key="activeTab" class="proxy-tabs">
       <a-tab-pane key="pull" title="拉流代理"><template #title><span class="tab-title"><ArrowDownToLine :size="15" />拉流代理</span></template></a-tab-pane>
       <a-tab-pane key="push" title="推流代理"><template #title><span class="tab-title"><ArrowUpFromLine :size="15" />推流代理</span></template></a-tab-pane>
@@ -266,7 +267,9 @@ function changePageSize(pageSize: number) {
     <section class="data-panel">
       <div v-if="loadError && !currentData" class="state-box state-box--error" role="alert"><ShieldAlert :size="28" /><strong>{{ errorPresentation.label }}</strong><a-button @click="refresh">重新加载</a-button></div>
       <div v-else-if="scopeBlocked" class="state-box" role="status"><strong>请选择具体节点</strong><span>全部节点模式不会发起逐节点代理查询。</span></div>
-      <a-table v-else :data="rows" :loading="loading" :pagination="false" row-key="key" class="uvp-data-table" :scroll="{ x: 1180 }">
+      <template v-else>
+      <div v-if="currentData?.truncated" class="result-notice">节点返回内容已截断，请缩小范围。</div>
+      <a-table :data="rows" :loading="loading" :pagination="tablePagination" row-key="key" class="uvp-data-table" :scroll="{ x: 1180 }" @page-change="changePage" @page-size-change="changePageSize">
         <template #columns>
           <a-table-column title="媒体身份" :width="250"><template #cell="{ record }"><strong>{{ record.media.app }}/{{ record.media.stream }}</strong><div class="subtle">{{ record.media.schema }} · {{ record.media.vhost }}</div></template></a-table-column>
           <a-table-column title="地址摘要" :width="250"><template #cell="{ record }"><code>{{ proxyAddressText(record.source || record.target) }}</code><div class="subtle">{{ (record.source || record.target)?.hasUserInfo || (record.source || record.target)?.hasSensitiveQuery ? '认证信息已隐藏' : '不返回路径与查询参数' }}</div></template></a-table-column>
@@ -277,7 +280,7 @@ function changePageSize(pageSize: number) {
           <a-table-column title="操作" fixed="right" :width="120"><template #cell="{ record }"><a-button size="small" status="danger" :disabled="!props.active || !canManage || capability !== 'supported' || !record.managed || scopeBlocked" @click="openDelete(record)">删除</a-button></template></a-table-column>
         </template>
       </a-table>
-      <div class="table-footer"><span v-if="currentData?.truncated">节点返回内容已截断，请缩小范围。</span><a-pagination v-if="currentData" :current="currentData.page" :page-size="currentData.pageSize" :total="currentData.total" show-page-size @change="changePage" @page-size-change="changePageSize" /></div>
+      </template>
     </section>
 
     <ProxyForm v-model:visible="formVisible" :kind="currentKind" :capability="capability" :permitted="props.active && canManage && !scopeBlocked" :loading="saving" @submit="createProxy" />
@@ -307,9 +310,11 @@ function changePageSize(pageSize: number) {
 
 <style scoped>
 .ingress-panel { display: flex; min-width: 0; flex-direction: column; gap: 12px; padding-bottom: 12px; color: var(--zlm-text-2); }
-.panel-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.panel-toolbar h2 { margin: 0; color: var(--zlm-text-1); font-size: 18px; }.panel-toolbar p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }
-.scope-warning, .capability-banner { display: flex; align-items: center; gap: 9px; padding: 10px 12px; font-size: var(--zlm-fs-caption); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }.scope-warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.capability-banner[data-tone="warning"] { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.capability-banner[data-tone="danger"] { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
+.panel-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
+.toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.toolbar-actions :deep(.arco-btn) { box-sizing: border-box; min-width: 88px; height: 40px; padding-inline: 14px; border-radius: 10px; font-weight: 600; }
+.scope-warning { display: flex; align-items: center; gap: 9px; padding: 10px 12px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border: 1px solid var(--zlm-warn-500); border-radius: var(--zlm-radius-md); }
 .proxy-tabs { margin-top: -2px; }.tab-title { display: inline-flex; align-items: center; gap: 6px; }.data-panel { padding: 14px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.subtle { margin-top: 4px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); } code { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); overflow-wrap: anywhere; }
-.table-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 38px; padding-top: 12px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); }.state-box, .preflight-state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; }.state-box--error { color: var(--zlm-danger-600); }
-@media (max-width: 760px) { .panel-toolbar { align-items: flex-start; flex-direction: column; }.scope-warning, .capability-banner, .table-footer { align-items: flex-start; flex-direction: column; } }
+.result-notice { padding: 8px 10px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border-radius: 8px; }.state-box, .preflight-state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; }.state-box--error { color: var(--zlm-danger-600); }
+@media (max-width: 760px) { .scope-warning { align-items: flex-start; flex-direction: column; } }
 </style>

@@ -42,9 +42,11 @@ import PlayWindow from "../components/PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import {
     actionPlaybackSession,
+    createDownloadSession,
     createPlaybackSession,
     deletePlaybackSession,
     getPlaybackSession,
+    selectDownloadMediaUrl,
     type PlaybackActionRequest,
     type PlaybackSession
 } from "./api";
@@ -65,6 +67,7 @@ const playbackSource = ref<PlaybackSource | null>(null);
 const playbackHasAudio = ref(false);
 const playbackBuffering = ref(false);
 const controlPending = ref(false);
+const downloadPending = ref(false);
 const downloadNotice = ref("");
 const queryToken = ref(0);
 const viewport = ref<HTMLElement | null>(null);
@@ -221,14 +224,39 @@ function clearPlaybackTimers() {
     sessionPollTimer = null;
 }
 
-function queueDownload(record: RecordQueryItem | null = selectedRecord.value) {
-    if (!record) return;
+async function queueDownload(record: RecordQueryItem | null = selectedRecord.value) {
+    if (!record || !record.startTime || downloadPending.value) return;
     if (downloadTimer !== null) window.clearTimeout(downloadTimer);
-    downloadNotice.value = `已创建下载任务 · ${record.name || "未命名录像"}`;
-    downloadTimer = window.setTimeout(() => {
-        downloadNotice.value = "";
-        downloadTimer = null;
-    }, 2600);
+    downloadPending.value = true;
+    downloadNotice.value = `正在接收设备录像 · ${record.name || "未命名录像"}`;
+    try {
+        const response = await createDownloadSession(playbackChannelId, {
+            recordKey: record.recordKey,
+            playFrom: record.startTime,
+            downloadSpeed: 4
+        }, `download-${encodeURIComponent(`${playbackChannelId}|${recordIdentity(record)}`)}`);
+        const mediaUrl = selectDownloadMediaUrl(response.data?.media?.urls);
+        if (!mediaUrl) throw new Error("设备未返回可下载的录像地址");
+        const mediaResponse = await fetch(mediaUrl, { credentials: "include" });
+        if (!mediaResponse.ok) throw new Error(`录像下载失败（HTTP ${mediaResponse.status}）`);
+        const blob = await mediaResponse.blob();
+        if (blob.size === 0) throw new Error("设备返回的录像内容为空");
+        const objectUrl = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = objectUrl;
+        anchor.download = `${(record.name || "设备录像").replace(/[\\/:*?"<>|]/g, "_")}.flv`;
+        anchor.click();
+        URL.revokeObjectURL(objectUrl);
+        downloadNotice.value = `录像下载完成 · ${record.name || "未命名录像"}`;
+    } catch (error) {
+        downloadNotice.value = playbackErrorMessage(error).replace("设备录像回放", "设备录像下载");
+    } finally {
+        downloadPending.value = false;
+        downloadTimer = window.setTimeout(() => {
+            downloadNotice.value = "";
+            downloadTimer = null;
+        }, 4000);
+    }
 }
 
 function createIdempotencyKey(record: RecordQueryItem) {
@@ -594,7 +622,7 @@ onUnmounted(() => {
                             </select>
                             <ChevronDown :size="13" />
                         </label>
-                        <button data-testid="playback-download" class="control-icon" type="button" aria-label="下载当前录像" title="下载当前录像" :disabled="!selectedRecord" @click="queueDownload()"><Download :size="16" /></button>
+                        <button data-testid="playback-download" class="control-icon" type="button" aria-label="下载当前录像" title="下载当前录像" :disabled="!selectedRecord || downloadPending" @click="queueDownload()"><LoaderCircle v-if="downloadPending" :size="16" class="spin" /><Download v-else :size="16" /></button>
                         <button class="control-icon" type="button" aria-label="全屏" title="全屏" @click="toggleFullscreen"><Fullscreen :size="16" /></button>
                     </div>
                 </section>
@@ -633,6 +661,7 @@ onUnmounted(() => {
                                 type="button"
                                 :aria-label="`下载 ${record.name || `录像段 ${index + 1}`}`"
                                 :title="`下载 ${record.name || `录像段 ${index + 1}`}`"
+                                :disabled="downloadPending"
                                 @click="queueDownload(record)"
                             ><Download :size="15" /></button>
                         </div>

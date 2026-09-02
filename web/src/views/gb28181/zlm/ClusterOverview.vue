@@ -3,7 +3,6 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
-import type { MediaScope } from "@/store/modules/media-workbench";
 import { useZLMContextStore } from "@/store/modules/zlm-context";
 
 import ZLMNodeContextBar from "./components/ZLMNodeContextBar.vue";
@@ -17,7 +16,6 @@ const nodesLoading = ref(false);
 const nodesError = ref<unknown>(null);
 const panel = ref<{ refresh: () => void } | null>(null);
 const selectedNodeId = computed(() => context.selectedNodeId);
-const scope = computed<MediaScope>(() => selectedNodeId.value ?? "all");
 
 async function loadNodes() {
   nodesLoading.value = true;
@@ -49,11 +47,6 @@ function drilldown(view: "streams" | "sessions") {
   void router.push({ path: `/gb28181/zlm/${view}`, query: selectedNodeId.value ? { nodeId: String(selectedNodeId.value) } : {} });
 }
 
-function selectNode(nodeId: number) {
-  if (!context.selectNode(nodeId)) return;
-  updateScope(nodeId);
-}
-
 onMounted(loadNodes);
 </script>
 
@@ -64,8 +57,7 @@ onMounted(loadNodes);
         :nodes="nodes"
         :query-node-id="route.query.nodeId"
         :loading="nodesLoading"
-        :allow-all="true"
-        :default-all="true"
+        :fallback-first="true"
         :minimal="true"
         @change="updateScope"
         @refresh="refreshAll"
@@ -74,10 +66,8 @@ onMounted(loadNodes);
       <RuntimeSummaryPanel
         ref="panel"
         :active="true"
-        :scope="scope"
         :node-id="selectedNodeId"
         @drilldown="drilldown"
-        @select-node="selectNode"
       />
     </div>
   </div>

@@ -5,18 +5,21 @@ import { describe, expect, it } from "vitest";
 
 import MenuItem from "./menu-item.vue";
 
-const WORKSPACE_PATHS = [
+const LEGACY_ZLM_PATHS = [
   "/gb28181/zlm/overview", "/gb28181/zlm/nodes", "/gb28181/zlm/runtime",
   "/gb28181/zlm/streams", "/gb28181/zlm/sessions", "/gb28181/zlm/proxies",
   "/gb28181/zlm/ffmpeg-sources", "/gb28181/zlm/rtp-servers", "/gb28181/zlm/config",
   "/gb28181/zlm/scheduler", "/gb28181/zlm/scheduler/logs"
 ];
 
-const LEGACY_PATHS = [
+const SEPARATE_OR_HIDDEN_PATHS = [
   "/gb28181/cloud-recordings",
   "/gb28181/recording-schedules",
-  "/media/overview", "/media/monitoring", "/media/ingress", "/media/recordings",
-  "/media/nodes", "/media/scheduling"
+  "/media/recordings"
+];
+
+const CANONICAL_MEDIA_PATHS = [
+  "/media/overview", "/media/monitoring", "/media/ingress", "/media/nodes", "/media/scheduling"
 ];
 
 function route(path: string, type = 2, hide = false, children?: Menu.MenuOptions[]): Menu.MenuOptions {
@@ -56,10 +59,11 @@ describe("MenuItem media workspaces", () => {
     expect(source).not.toContain("uvp-media-menu-group");
   });
 
-  it("renders eleven direct pages without visual groups or recording entries", () => {
+  it("renders five canonical workspaces under the global media directory", () => {
     const children = [
-      ...WORKSPACE_PATHS.map(path => route(path)),
-      ...LEGACY_PATHS.map(path => route(path, 2, true)),
+      ...CANONICAL_MEDIA_PATHS.map(path => route(path)),
+      ...LEGACY_ZLM_PATHS.map(path => route(path, 2, true)),
+      ...SEPARATE_OR_HIDDEN_PATHS.map(path => route(path, 2, true)),
       route("/gb28181/zlm/nodes/:id", 2, true)
     ];
     const wrapper = mountMenu(children);
@@ -67,24 +71,24 @@ describe("MenuItem media workspaces", () => {
     expect(wrapper.findAll(".item-group")).toHaveLength(0);
     expect(wrapper.findAll(".sub-menu")).toHaveLength(1);
     expect(wrapper.findAll(".route-item").map(item => item.text())).toEqual(
-      WORKSPACE_PATHS.map(path => `menu.${path}`)
+      CANONICAL_MEDIA_PATHS.map(path => `menu.${path}`)
     );
-    for (const legacyPath of LEGACY_PATHS) {
+    for (const legacyPath of [...LEGACY_ZLM_PATHS, ...SEPARATE_OR_HIDDEN_PATHS]) {
       expect(wrapper.text()).not.toContain(`menu.${legacyPath}`);
     }
   });
 
   it("renders only workspaces present in the authorized route tree", () => {
     const wrapper = mountMenu([
-      route("/gb28181/zlm/streams"),
-      route("/gb28181/zlm/rtp-servers"),
-      route("/media/monitoring", 2, true)
+      route("/media/monitoring"),
+      route("/media/ingress"),
+      route("/gb28181/zlm/streams", 2, true)
     ]);
 
     expect(wrapper.findAll(".item-group")).toHaveLength(0);
     expect(wrapper.findAll(".route-item").map(item => item.text())).toEqual([
-      "menu./gb28181/zlm/streams",
-      "menu./gb28181/zlm/rtp-servers"
+      "menu./media/monitoring",
+      "menu./media/ingress"
     ]);
   });
 

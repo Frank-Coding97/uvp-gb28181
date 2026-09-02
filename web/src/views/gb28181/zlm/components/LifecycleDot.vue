@@ -11,10 +11,10 @@
  */
 import { computed } from "vue";
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     state: "active" | "maintenance" | "offline" | string;
     showText?: boolean; // 默认 true
-}>();
+}>(), { showText: true });
 
 const cfg = computed(() => {
     switch (props.state) {
@@ -33,7 +33,7 @@ const showText = computed(() => props.showText !== false);
 </script>
 
 <template>
-    <span class="lifecycle-dot">
+    <span class="lifecycle-dot" :aria-label="`生命周期：${cfg.text}`">
         <span class="dot" :style="{ background: cfg.color }" />
         <span v-if="showText" class="text">{{ cfg.text }}</span>
     </span>

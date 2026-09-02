@@ -42,6 +42,9 @@ describe("media direct-page route contract", () => {
     expect(resolveLegacyMediaRoute("/media/monitoring", { view: "sessions", nodeId: 2 })).toEqual({
       path: "/gb28181/zlm/sessions", query: { nodeId: "2" }, replace: true
     });
+    expect(resolveLegacyMediaRoute("/media/monitoring", { view: "viewers", nodeId: 2 })).toEqual({
+      path: "/gb28181/zlm/sessions", query: { nodeId: "2" }, replace: true
+    });
     expect(resolveLegacyMediaRoute("/media/ingress", { view: "rtp", nodeId: 3 })).toEqual({
       path: "/gb28181/zlm/rtp-servers", query: { nodeId: "3" }, replace: true
     });

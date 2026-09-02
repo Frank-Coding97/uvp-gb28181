@@ -14,7 +14,7 @@ import type { MediaScope } from "@/store/modules/media-workbench";
 import { useUserStoreHook } from "@/store/modules/user";
 
 import ZLMSessionKickDialog from "../../ZLMSessionKickDialog.vue";
-import { zlmErrorPresentation, zlmFreshnessPresentation } from "../../components/zlmFormatters";
+import { zlmErrorPresentation } from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
 import {
   createNetworkFilters,
@@ -25,7 +25,6 @@ import {
 import { buildNetworkSessionQuery, buildViewerTarget, canKickViewer } from "../../sessionManagementState";
 import { boundedPageRows } from "../boundedData";
 
-type SessionTab = "network" | "viewers";
 type PollPayload =
   | { kind: "network"; data: ZLMNetworkSessionPage }
   | { kind: "viewers"; data: ZLMStreamViewerPage }
@@ -33,6 +32,7 @@ type PollPayload =
 
 const props = withDefaults(defineProps<{
   active: boolean;
+  view: "network" | "viewers";
   scope: MediaScope;
   nodeId: number | null;
   initialQuery?: Record<string, unknown>;
@@ -42,7 +42,6 @@ const props = withDefaults(defineProps<{
 });
 
 const userStore = useUserStoreHook();
-const activeTab = ref<SessionTab>("network");
 const networkFilter = reactive<MonitoringNetworkFilters>(createNetworkFilters(props.initialQuery));
 const viewerFilter = reactive<MonitoringViewerFilters>(createViewerFilters(props.initialQuery));
 const viewerPage = ref(1);
@@ -58,8 +57,6 @@ const scopeLabel = computed(() => props.scope === "all" ? "全部节点" : `节�
 const viewerTarget = computed(() => buildViewerTarget(viewerFilter));
 const hasKickPermission = computed(() => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes("gb28181:zlm:session:kick"));
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
-const activeAsOf = computed(() => activeTab.value === "network" ? networkData.value?.asOf : viewerData.value?.asOf);
-const freshness = computed(() => zlmFreshnessPresentation(activeAsOf.value));
 const paused = computed(() => kickVisible.value);
 const requestNodeId = computed(() => props.nodeId);
 
@@ -70,7 +67,7 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
   intervalMs: 8_000,
   async load(nodeId, signal) {
     loading.value = true;
-    const tab = activeTab.value;
+    const tab = props.view;
     if (tab === "network") {
       const response = await listZLMNetworkSessions(nodeId, buildNetworkSessionQuery(networkFilter), signal);
       if (response.code !== 0 || !response.data) throw new Error(response.message || "网络会话加载失败");
@@ -83,10 +80,10 @@ const { refresh } = useZLMRuntimePolling<PollPayload>({
     return { kind: "viewers", data: response.data };
   },
   publish(value) {
-    if (value.kind === "network" && activeTab.value === "network") {
+    if (value.kind === "network" && props.view === "network") {
       networkData.value = { ...value.data, list: boundedPageRows(value.data.list, networkFilter.pageSize) };
     }
-    if (value.kind === "viewers" && activeTab.value === "viewers") {
+    if (value.kind === "viewers" && props.view === "viewers") {
       viewerData.value = { ...value.data, list: boundedPageRows(value.data.list, viewerPageSize.value) };
     }
     loadError.value = null;
@@ -108,7 +105,7 @@ watch([() => props.scope, () => props.nodeId], () => {
   if (props.active) refresh();
 });
 
-watch(activeTab, () => {
+watch(() => props.view, () => {
   loadError.value = null;
   if (props.active) refresh();
 });
@@ -185,21 +182,11 @@ defineExpose({ refresh });
 
 <template>
   <div class="monitoring-panel session-panel">
-    <header class="monitoring-panel__header">
-      <div>
-        <div class="monitoring-panel__eyebrow"><Network :size="14" />连接与观看</div>
-        <h2>会话管理</h2>
-        <p>网络连接与媒体观看者是两套独立口径；踢除仅对后端标记为可操作且当前账号有权限的观看会话开放。</p>
-      </div>
-      <span v-if="activeAsOf" :class="`freshness freshness--${freshness.tone}`" :title="freshness.description">{{ freshness.label }} · {{ activeAsOf }}</span>
-    </header>
-
     <div v-if="props.scope === 'all'" class="monitoring-banner" role="status">会话接口按节点提供。请选择具体节点后查看网络会话与媒体观看者，避免把跨节点连接误合并。</div>
     <div v-if="loadError && (networkData || viewerData)" class="monitoring-banner monitoring-banner--warning" role="status">本次刷新失败：{{ errorPresentation.label }}；保留当前 Tab 的筛选、分页和上一次数据。</div>
     <div v-if="!hasKickPermission" class="monitoring-banner" role="status">当前账号可查看会话，但没有 `gb28181:zlm:session:kick` 权限；踢除按钮不会显示。</div>
 
-    <a-tabs v-model:active-key="activeTab" class="session-tabs">
-      <a-tab-pane key="network" title="网络会话">
+    <template v-if="props.view === 'network'">
         <s-layout-search class="session-search">
           <template #fields><a-input-search v-model="networkFilter.peerIp" allow-clear placeholder="远端 IP" class="peer-filter" @search="queryNetwork" /><a-input v-model="networkFilter.localPort" allow-clear placeholder="本地端口" class="port-filter" @press-enter="queryNetwork" /></template>
           <template #actions><a-button type="primary" :disabled="props.scope === 'all'" @click="queryNetwork">查询</a-button><a-button @click="resetNetwork">重置</a-button><a-button class="uvp-refresh-btn" :loading="loading" :disabled="props.scope === 'all'" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
@@ -213,9 +200,9 @@ defineExpose({ refresh });
           <a-table :data="networkData?.list || []" :loading="loading" row-key="id" :pagination="false" class="uvp-data-table"><template #columns><a-table-column title="会话 ID" data-index="id" :width="220" /><a-table-column title="远端"><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column><a-table-column title="本地"><template #cell="{ record }">{{ record.localIp }}:{{ record.localPort }}</template></a-table-column><a-table-column title="类型" data-index="type" /><a-table-column title="类型 ID" data-index="typeId" /><a-table-column title="可执行操作" :width="150"><template #cell><span class="muted">仅观测</span></template></a-table-column></template><template #empty><div class="session-empty"><Network :size="38" /><strong>没有符合筛选的网络会话</strong></div></template></a-table>
           <div class="session-pagination"><span>共 {{ networkData?.total ?? 0 }} 个网络会话<span v-if="networkData?.truncated">（后端已截断）</span></span><a-pagination :current="networkFilter.page" :page-size="networkFilter.pageSize" :total="networkData?.total ?? 0" show-page-size :page-size-options="[20, 50, 100]" @change="changeNetworkPage" @page-size-change="changeNetworkPageSize" /></div>
         </section>
-      </a-tab-pane>
+    </template>
 
-      <a-tab-pane key="viewers" title="媒体观看者">
+    <template v-else>
         <s-layout-search class="session-search">
           <template #fields><a-input v-model="viewerFilter.schema" allow-clear placeholder="Schema" class="media-filter-short" /><a-input v-model="viewerFilter.vhost" allow-clear placeholder="VHost" class="media-filter-vhost" /><a-input v-model="viewerFilter.app" allow-clear placeholder="App" class="media-filter-app" /><a-input-search v-model="viewerFilter.stream" allow-clear placeholder="Stream" class="media-filter-stream" @search="queryViewers" /></template>
           <template #actions><a-button type="primary" :disabled="props.scope === 'all'" @click="queryViewers">查询</a-button><a-button @click="resetViewers">重置</a-button><a-button class="uvp-refresh-btn" :loading="loading" :disabled="props.scope === 'all' || !viewerTarget" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
@@ -230,15 +217,14 @@ defineExpose({ refresh });
           <a-table :data="viewerData?.list || []" :loading="loading" row-key="identifier" :pagination="false" class="uvp-data-table"><template #columns><a-table-column title="观看标识" data-index="identifier" :width="240" /><a-table-column title="远端"><template #cell="{ record }">{{ record.peerIp }}:{{ record.peerPort }}</template></a-table-column><a-table-column title="本地"><template #cell="{ record }">{{ record.localIp }}:{{ record.localPort }}</template></a-table-column><a-table-column title="类型" data-index="typeId" /><a-table-column title="操作" :width="150"><template #cell="{ record }"><a-button v-if="canKickViewer(record, hasKickPermission)" size="small" status="danger" @click="openKick(record)">踢除</a-button><span v-else class="muted">{{ record.kickable ? '无权限' : '不可踢除' }}</span></template></a-table-column></template><template #empty><div class="session-empty"><Users :size="38" /><strong>该媒体流当前没有观看者</strong></div></template></a-table>
           <div class="session-pagination"><span>共 {{ viewerData?.total ?? 0 }} 个观看者<span v-if="viewerData?.truncated">（后端已截断）</span></span><a-pagination :current="viewerPage" :page-size="viewerPageSize" :total="viewerData?.total ?? 0" show-page-size :page-size-options="[20, 50, 100]" @change="changeViewerPage" @page-size-change="changeViewerPageSize" /></div>
         </section>
-      </a-tab-pane>
-    </a-tabs>
+    </template>
 
     <ZLMSessionKickDialog v-model:visible="kickVisible" :node-name="scopeLabel" :viewer="kickViewer" @done="kickDone" />
   </div>
 </template>
 
 <style scoped>
-.monitoring-panel { box-sizing: border-box; min-width: 0; color: var(--zlm-text-2); }.monitoring-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }.monitoring-panel__eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.monitoring-panel h2 { margin: 4px 0 0; color: var(--zlm-text-1); font-size: 19px; }.monitoring-panel p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); line-height: 1.55; }.freshness { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.freshness--warning { color: var(--zlm-warn-600); }.freshness--danger { color: var(--zlm-danger-600); }.monitoring-banner { margin: 10px 0; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.monitoring-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }
-.session-tabs { margin-top: 10px; }.session-search { margin-bottom: 12px; }.peer-filter { width: 220px; }.port-filter { width: 130px; }.media-filter-short { width: 100px; }.media-filter-vhost { width: 170px; }.media-filter-app { width: 130px; }.media-filter-stream { width: 190px; }.scope-note { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.monitoring-state { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }.session-table-panel { overflow: hidden; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.session-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 16px; color: var(--zlm-text-3); }.session-empty strong { color: var(--zlm-text-1); }.session-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); border-top: 1px solid var(--zlm-border); }.muted { color: var(--zlm-text-4); }
-@media (max-width: 800px) { .monitoring-panel__header { flex-direction: column; }.peer-filter, .port-filter, .media-filter-short, .media-filter-vhost, .media-filter-app, .media-filter-stream { width: 100%; }.session-pagination { align-items: flex-start; flex-direction: column; } }
+.monitoring-panel { box-sizing: border-box; min-width: 0; color: var(--zlm-text-2); }.monitoring-banner { margin: 10px 0; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.monitoring-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }
+.session-search { margin-bottom: 12px; }.peer-filter { width: 220px; }.port-filter { width: 130px; }.media-filter-short { width: 100px; }.media-filter-vhost { width: 170px; }.media-filter-app { width: 130px; }.media-filter-stream { width: 190px; }.scope-note { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.monitoring-state { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }.session-table-panel { overflow: hidden; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.session-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 16px; color: var(--zlm-text-3); }.session-empty strong { color: var(--zlm-text-1); }.session-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); border-top: 1px solid var(--zlm-border); }.muted { color: var(--zlm-text-4); }
+@media (max-width: 800px) { .peer-filter, .port-filter, .media-filter-short, .media-filter-vhost, .media-filter-app, .media-filter-stream { width: 100%; }.session-pagination { align-items: flex-start; flex-direction: column; } }
 </style>

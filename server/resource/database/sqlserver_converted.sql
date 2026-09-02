@@ -2652,3 +2652,19 @@ WHERE m.[path]='/gb28181/zlm/overview' AND m.[deleted_at] IS NULL AND a.[deleted
 AND a.[path] IN ('/api/gb28181/zlm/overview','/api/gb28181/zlm/nodes','/api/gb28181/zlm/nodes/:id/runtime')
 AND NOT EXISTS (SELECT 1 FROM [sys_casbin_rule] c WHERE c.[ptype]='p' AND c.[v0]='role_'+CAST(rm.[role_id] AS varchar(20)) AND c.[v1]=a.[path] AND c.[v2]=a.[method] AND c.[v3]='*');
 -- zlm-overview-merge:end
+-- zlm-single-menu-workbench:start
+DECLARE @media_menu_id BIGINT;
+SELECT @media_menu_id=MIN([id]) FROM [sys_menu] WHERE [path]='/media' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [redirect]='/media/overview',[component]='',[title]=N'流媒体管理',[icon]='lucide:Clapperboard',[sort]=9,[type]=1,[hide]=0,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/MediaOverview',[title]=N'运行总览',[sort]=10,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/overview' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/MediaMonitoring',[title]=N'流与会话',[sort]=20,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/monitoring' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/IngressManagement',[title]=N'接入管理',[sort]=30,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/ingress' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/NodeManagement',[title]=N'节点管理',[sort]=40,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=@media_menu_id,[component]='gb28181/zlm/workbench/SchedulingManagement',[title]=N'调度管理',[sort]=50,[type]=2,[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/scheduling' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [parent_id]=(SELECT MIN([id]) FROM [sys_menu] WHERE [path]='/media/nodes' AND [deleted_at] IS NULL),[component]='gb28181/zlm/workbench/nodes/NodeDetail',[title]=N'节点详情',[hide]=1,[keep_alive]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes/:id' AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [component]='gb28181/zlm/workbench/LegacyMediaRoute',[hide]=1,[updated_at]=GETDATE() WHERE [path] IN ('/gb28181/zlm/overview','/gb28181/zlm/runtime','/gb28181/zlm/streams','/gb28181/zlm/sessions','/gb28181/zlm/proxies','/gb28181/zlm/ffmpeg-sources','/gb28181/zlm/rtp-servers','/gb28181/zlm/nodes','/gb28181/zlm/nodes/:id','/gb28181/zlm/config','/gb28181/zlm/scheduler','/gb28181/zlm/scheduler/logs') AND [deleted_at] IS NULL;
+-- zlm-single-menu-workbench:end
+-- zlm-global-sidebar-menu:start
+UPDATE [sys_menu] SET [hide]=0,[updated_at]=GETDATE() WHERE [path] IN ('/media/overview','/media/monitoring','/media/ingress','/media/nodes','/media/scheduling') AND [deleted_at] IS NULL;
+UPDATE [sys_menu] SET [hide]=1,[updated_at]=GETDATE() WHERE [path]='/media/nodes/:id' AND [deleted_at] IS NULL;
+-- zlm-global-sidebar-menu:end

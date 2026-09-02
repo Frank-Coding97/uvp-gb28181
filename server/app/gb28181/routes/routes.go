@@ -13,6 +13,7 @@ import (
 	gbcascadeservice "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/service"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
@@ -408,6 +409,10 @@ func SetDeviceMgmtPlaybackRuntime(service gbcontrollers.PlaybackSessionService, 
 	deviceMgmtController.SetPlaybackRuntime(service, snapshots)
 }
 
+func SetDeviceMgmtCaptureRuntime(registry *devicecapture.Registry) {
+	deviceMgmtController.SetCaptureRuntime(registry)
+}
+
 // SetHookMultiNode 由 bootstrap M2.4 注入多节点反向 Bind 能力
 // 让 OnStreamChanged 收到 payload.mediaServerId 后,反查 nodeID 给 LocationMap.Bind 兜底
 func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.StreamLocationBinder) {
@@ -761,6 +766,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			registerZLMManagementRoutes(zlm)
 			zlm.GET("/nodes", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.List(c) }))
 			zlm.POST("/nodes", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Create(c) }))
+			zlm.POST("/nodes/probe", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.ProbeCreate(c) }))
 			zlm.GET("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Get(c) }))
 			zlm.PUT("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Update(c) }))
 			zlm.DELETE("/nodes/:id", zlmNodeRoute(func(ctrl *gbcontrollers.ZLMNodeController, c *gin.Context) { ctrl.Delete(c) }))
@@ -815,6 +821,9 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.GET("/channel/:id/record-query/options", deviceMgmtController.GetRecordQueryOptions)
 			dmgmt.POST("/channel/:id/record-query", deviceMgmtController.QueryDeviceRecords)
 			dmgmt.POST("/channel/:id/playback-sessions", deviceMgmtController.CreatePlaybackSession)
+			dmgmt.POST("/channel/:id/download-sessions", deviceMgmtController.CreateDownloadSession)
+			dmgmt.POST("/channel/:id/snapshot-sessions", deviceMgmtController.CreateSnapshotSession)
+			dmgmt.GET("/channel/:id/snapshot-sessions/:sessionId", deviceMgmtController.GetSnapshotSession)
 			dmgmt.GET("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.GetPlaybackSession)
 			dmgmt.POST("/channel/:id/playback-sessions/:sessionId/actions", deviceMgmtController.ActionPlaybackSession)
 			dmgmt.DELETE("/channel/:id/playback-sessions/:sessionId", deviceMgmtController.DeletePlaybackSession)
@@ -869,6 +878,8 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 // operation-log middleware. Capability verification is performed by the
 // controller on every request; JWT and query-logging middleware are omitted.
 func RegisterContentRoutes(engine *gin.Engine) {
+	engine.PUT("/api/gb28181/device-snapshots/uploads/:token/:filename", deviceMgmtController.UploadDeviceSnapshot)
+	engine.GET("/api/gb28181/device-snapshots/uploads/:token/:filename", deviceMgmtController.DeviceSnapshotContent)
 	engine.GET("/api/gb28181/cloud-recordings/downloads/:taskId/content", func(c *gin.Context) {
 		currentCloudRecordingCatalogController().DownloadContent(c)
 	})

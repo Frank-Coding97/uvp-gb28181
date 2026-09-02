@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
-import { Plus, RadioTower, RefreshCw, ShieldAlert } from "lucide-vue-next";
+import { Plus, RefreshCw, ShieldAlert } from "lucide-vue-next";
 
 import {
   closeZLMRTPServer,
@@ -61,6 +61,15 @@ const closeError = ref<unknown>(null);
 const closing = ref(false);
 
 const rows = computed(() => pageData.value?.list ?? []);
+const tablePagination = computed(() => pageData.value ? ({
+  current: pageData.value.page,
+  pageSize: pageData.value.pageSize,
+  total: pageData.value.total,
+  showTotal: true,
+  showJumper: true,
+  showPageSize: true,
+  pageSizeOptions: [10, 20, 50, 100]
+}) : false);
 const capability = computed<ZLMCapabilityState>(() => pageData.value?.capability ?? observedCapability.value);
 const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canManage = computed(() => hasPermission("gb28181:zlm:rtp:manage"));
@@ -221,19 +230,18 @@ function changePageSize(next: number) { pageSize.value = next; page.value = 1; i
 <template>
   <section class="ingress-panel" aria-label="RTP 服务管理">
     <header class="panel-toolbar">
-      <div><h2>RTP 服务</h2><p>端口 0 由节点自动分配；普通关闭与强制关闭沿用后端归属边界。</p></div>
-      <a-space>
-        <a-button :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
+      <div class="toolbar-actions">
+        <a-button class="uvp-refresh-btn" :loading="loading" :disabled="!canPoll" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
         <a-button type="primary" :disabled="!props.active || !canManage || capability !== 'supported' || scopeBlocked" @click="openCreate"><template #icon><Plus :size="15" /></template>创建服务</a-button>
-      </a-space>
+      </div>
     </header>
     <div v-if="scopeBlocked" class="scope-warning" role="status"><strong>全部节点范围</strong><span>RTP 服务列表和写操作需要先选择一个具体节点。</span></div>
-    <div class="capability-banner" :data-capability="capability" role="status"><RadioTower :size="17" /><strong>{{ capability === 'supported' ? '节点支持' : capability === 'unsupported' ? '节点不支持' : '能力未探测' }}</strong><span>{{ capability === 'supported' ? 'RTP list/open/close 均由节点明确报告可用。' : capability === 'unsupported' ? '节点缺少完整 RTP 管理 API，操作保持禁用。' : '不会把空列表或探测失败当作支持。' }}</span></div>
-
     <section class="data-panel">
       <div v-if="loadError && !pageData" class="state-box state-box--error" role="alert"><ShieldAlert :size="28" /><strong>{{ errorPresentation.label }}</strong><a-button @click="refresh">重新加载</a-button></div>
       <div v-else-if="scopeBlocked" class="state-box" role="status"><strong>请选择具体节点</strong><span>全部节点模式不会发起逐节点 RTP 查询。</span></div>
-      <a-table v-else :data="rows" :loading="loading" :pagination="false" row-key="key" class="uvp-data-table" :scroll="{ x: 1120 }">
+      <template v-else>
+      <div v-if="pageData?.truncated" class="result-notice">结果已被后端有界截断。</div>
+      <a-table :data="rows" :loading="loading" :pagination="tablePagination" row-key="key" class="uvp-data-table" :scroll="{ x: 1120 }" @page-change="changePage" @page-size-change="changePageSize">
         <template #columns>
           <a-table-column title="媒体身份" :width="250"><template #cell="{ record }"><strong>{{ record.app }}/{{ record.stream }}</strong><div class="subtle">{{ record.vhost }} · {{ record.key }}</div></template></a-table-column>
           <a-table-column title="实际端口" :width="130"><template #cell="{ record }"><strong class="port">{{ record.port }}</strong><div class="subtle">{{ record.released ? '已释放' : '监听中' }}</div></template></a-table-column>
@@ -243,7 +251,7 @@ function changePageSize(next: number) { pageSize.value = next; page.value = 1; i
           <a-table-column title="操作" fixed="right" :width="190"><template #cell="{ record }"><a-space><a-button size="small" status="danger" :disabled="!props.active || !canManage || capability !== 'supported' || !record.managed || record.released || scopeBlocked" @click="openClose(record, false)">关闭</a-button><a-button v-if="canForce" size="small" status="danger" type="outline" :disabled="!props.active || capability !== 'supported' || record.released || scopeBlocked" @click="openClose(record, true)">强制</a-button></a-space></template></a-table-column>
         </template>
       </a-table>
-      <div class="table-footer"><span v-if="pageData?.truncated">结果已被后端有界截断。</span><a-pagination v-if="pageData" :current="pageData.page" :page-size="pageData.pageSize" :total="pageData.total" show-page-size @change="changePage" @page-size-change="changePageSize" /></div>
+      </template>
     </section>
 
     <RTPServerForm v-model:visible="formVisible" :capability="capability" :permitted="props.active && canManage && !scopeBlocked" :loading="saving" @submit="createServer" />
@@ -271,8 +279,9 @@ function changePageSize(next: number) { pageSize.value = next; page.value = 1; i
 </template>
 
 <style scoped>
-.ingress-panel { display: flex; min-width: 0; flex-direction: column; gap: 12px; padding-bottom: 12px; color: var(--zlm-text-2); }.panel-toolbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.panel-toolbar h2 { margin: 0; color: var(--zlm-text-1); font-size: 18px; }.panel-toolbar p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }
-.scope-warning, .capability-banner { display: flex; align-items: center; gap: 9px; padding: 10px 12px; font-size: var(--zlm-fs-caption); background: var(--zlm-card); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-md); }.scope-warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.capability-banner[data-capability="unknown"] { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.capability-banner[data-capability="unsupported"] { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
-.data-panel { padding: 14px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.subtle { margin-top: 4px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.port { color: var(--zlm-brand-600); font-family: var(--zlm-font-mono); font-size: 16px; } code { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.table-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 38px; padding-top: 12px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); }.state-box { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; }.state-box--error { color: var(--zlm-danger-600); }
-@media (max-width: 760px) { .panel-toolbar { align-items: flex-start; flex-direction: column; }.scope-warning, .capability-banner, .table-footer { align-items: flex-start; flex-direction: column; } }
+.ingress-panel { display: flex; min-width: 0; flex-direction: column; gap: 12px; padding-bottom: 12px; color: var(--zlm-text-2); }.panel-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 16px; }
+.toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }.toolbar-actions :deep(.arco-btn) { box-sizing: border-box; min-width: 88px; height: 40px; padding-inline: 14px; border-radius: 10px; font-weight: 600; }
+.scope-warning { display: flex; align-items: center; gap: 9px; padding: 10px 12px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border: 1px solid var(--zlm-warn-500); border-radius: var(--zlm-radius-md); }
+.data-panel { padding: 14px; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.subtle { margin-top: 4px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.port { color: var(--zlm-brand-600); font-family: var(--zlm-font-mono); font-size: 16px; } code { color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.result-notice { padding: 8px 10px; color: var(--zlm-warn-600); font-size: var(--zlm-fs-caption); background: var(--zlm-warn-50); border-radius: 8px; }.state-box { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--zlm-text-3); text-align: center; }.state-box--error { color: var(--zlm-danger-600); }
+@media (max-width: 760px) { .scope-warning { align-items: flex-start; flex-direction: column; } }
 </style>

@@ -96,5 +96,21 @@ describe("ZLMNodeContextBar", () => {
     expect(source).toContain('class="zlm-node-context__refresh uvp-refresh-btn"');
     expect(source).toMatch(/data-minimal="true"[^}]*:deep\(\.zlm-node-context__select\)\s*\{[^}]*width:\s*190px/s);
     expect(source).toMatch(/arco-select-view-single[^}]*min-height:\s*40px/s);
+    expect(source).toMatch(/data-minimal="true"[^}]*\.zlm-node-context__refresh\s*\{[^}]*height:\s*40px[^}]*border-radius:\s*10px/s);
+  });
+
+  it("can fall back to the first visible node when no active node exists", async () => {
+    const testPinia = createPinia();
+    setActivePinia(testPinia);
+    const context = useZLMContextStore();
+    const offlineNodes = nodes.map(node => ({ ...node, state: "offline" as const }));
+
+    mount(ZLMNodeContextBar, {
+      props: { nodes: offlineNodes, fallbackFirst: true },
+      global: { plugins: [testPinia] }
+    });
+
+    await flushPromises();
+    expect(context.selectedNodeId).toBe(1);
   });
 });

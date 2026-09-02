@@ -49,6 +49,18 @@ describe("SchedulerLogPanel", () => {
     wrapper.unmount();
   });
 
+  it("keeps a concrete top scope in every scheduler log request", async () => {
+    api.listSchedulerLogs.mockResolvedValue({ code: 0, data: { list: [], total: 0 } });
+    const wrapper = mount(SchedulerLogPanel, {
+      props: { active: true, nodes: [], scope: 2 },
+      global: { stubs }
+    });
+    await flushPromises();
+    expect(api.listSchedulerLogs).toHaveBeenCalledWith(expect.objectContaining({ nodeId: 2 }));
+    expect(wrapper.text()).toContain("跟随顶部节点");
+    wrapper.unmount();
+  });
+
   it("uses server-side filter results as the chart sample and keeps errors safe", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/scheduling/SchedulerLogPanel.vue"), "utf8");
     expect(source).toMatch(/listSchedulerLogs\(filter/);
@@ -57,6 +69,8 @@ describe("SchedulerLogPanel", () => {
     expect(source).toContain("当前筛选");
     expect(source).toContain("sampleCount");
     expect(source).toContain("errorPresentation.label");
+    expect(source).toContain("time-range-controls");
+    expect(source).toContain("@media (max-width: 1200px)");
     expect(source).not.toContain("error.message");
     expect(readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/SchedulerLog.vue"), "utf8")).toContain("SchedulerLogPanel");
   });

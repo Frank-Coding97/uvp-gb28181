@@ -45,6 +45,12 @@ export interface CreatePlaybackSessionRequest {
     playFrom: string;
 }
 
+export interface CreateDownloadSessionRequest {
+    recordKey: string;
+    playFrom: string;
+    downloadSpeed: 1 | 2 | 4 | 8;
+}
+
 export type PlaybackActionRequest =
     | { action: "pause" | "resume" }
     | { action: "seek"; positionSeconds: number }
@@ -65,6 +71,13 @@ export function createPlaybackSession(channelId: number, data: CreatePlaybackSes
     });
 }
 
+export function createDownloadSession(channelId: number, data: CreateDownloadSessionRequest, idempotencyKey: string) {
+    return http.request<BaseResult<PlaybackSession>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/download-sessions`), {
+        data,
+        headers: { "Idempotency-Key": idempotencyKey }
+    });
+}
+
 export function getPlaybackSession(channelId: number, sessionId: string) {
     return http.request<BaseResult<PlaybackSession>>("get", baseUrlApi(sessionPath(channelId, sessionId)));
 }
@@ -79,4 +92,10 @@ export function deletePlaybackSession(channelId: number, sessionId: string) {
 
 export function selectPlaybackMediaUrl(urls: PlaybackMediaUrls | null | undefined) {
     return urls?.wsFlv || urls?.httpFlv || urls?.hls || "";
+}
+
+export function selectDownloadMediaUrl(urls: PlaybackMediaUrls | null | undefined) {
+    return window.location.protocol === "https:"
+        ? urls?.httpsFlv || urls?.httpFlv || ""
+        : urls?.httpFlv || urls?.httpsFlv || "";
 }

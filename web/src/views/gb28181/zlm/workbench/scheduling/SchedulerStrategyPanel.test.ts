@@ -13,6 +13,10 @@ vi.mock("@/api/gb28181-zlm", () => ({
   switchScheduler: api.switchScheduler
 }));
 
+vi.mock("@/store/modules/user", () => ({
+  useUserStoreHook: () => ({ account: { permissions: [] } })
+}));
+
 import SchedulerStrategyPanel from "./SchedulerStrategyPanel.vue";
 
 const stubs = {

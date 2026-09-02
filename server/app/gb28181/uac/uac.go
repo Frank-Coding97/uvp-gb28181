@@ -87,10 +87,19 @@ func resolveRouteLocalIP(destination string) (string, error) {
 		return "", fmt.Errorf("解析 SIP 本地路由地址失败: %w", err)
 	}
 	ip := net.ParseIP(host)
-	if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsLoopback() {
+	if ip == nil || ip.To4() == nil || ip.IsUnspecified() {
 		return "", fmt.Errorf("SIP 本地路由没有可用 IPv4 地址: %s", host)
 	}
 	return ip.To4().String(), nil
+}
+
+func isLoopbackIPv4Destination(destination string) bool {
+	host, _, err := net.SplitHostPort(destination)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.To4() != nil && ip.IsLoopback()
 }
 
 func (u *UAC) outboundIP(destination string) (string, error) {
@@ -109,7 +118,8 @@ func (u *UAC) outboundIP(destination string) (string, error) {
 		return "", err
 	}
 	ip := net.ParseIP(ipText)
-	if ip == nil || ip.To4() == nil || ip.IsUnspecified() || ip.IsLoopback() {
+	if ip == nil || ip.To4() == nil || ip.IsUnspecified() ||
+		(ip.IsLoopback() && !isLoopbackIPv4Destination(destination)) {
 		return "", fmt.Errorf("SIP 本地路由返回不可用 IPv4 地址: %q", ipText)
 	}
 	return ip.To4().String(), nil

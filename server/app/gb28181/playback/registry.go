@@ -87,6 +87,12 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 		request.SegmentEnd.IsZero() || !request.SegmentEnd.After(request.SegmentStart) {
 		return CreateResult{}, ErrInvalidSession
 	}
+	if request.Mode == "" {
+		request.Mode = ModePlayback
+	}
+	if request.Mode != ModePlayback && request.Mode != ModeDownload {
+		return CreateResult{}, ErrInvalidSession
+	}
 	now := request.Now
 	if now.IsZero() {
 		now = r.now()
@@ -112,7 +118,7 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 			record.mu.Lock()
 			active := record.session.clone()
 			record.mu.Unlock()
-			if !active.State.IsTerminal() && active.DeviceID == request.DeviceID &&
+			if !active.State.IsTerminal() && active.DeviceID == request.DeviceID && active.Mode == request.Mode &&
 				active.SegmentStart.Equal(request.SegmentStart) && active.SegmentEnd.Equal(request.SegmentEnd) {
 				if request.IdempotencyKey != "" {
 					r.idempotentByKey[idempotencyKey(request.OwnerID, request.ChannelID, request.IdempotencyKey)] = activeID
@@ -126,11 +132,18 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 	if err != nil {
 		return CreateResult{}, fmt.Errorf("generate playback session id: %w", err)
 	}
+	idleDeadline := now.Add(r.idleTimeout)
+	if request.Mode == ModeDownload {
+		// 下载没有播放器轮询或控制动作可用于续租；以任务总时限作为
+		// deadline，避免长录像在传输途中被按“无人观看”回收。
+		idleDeadline = now.Add(r.maxSession)
+	}
 	session := Session{ID: id, OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID, RecordKey: request.RecordKey,
+		Mode: request.Mode, DownloadSpeed: request.DownloadSpeed,
 		IdempotencyKey: request.IdempotencyKey, SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd,
 		PlayFrom: request.PlayFrom,
 		State:    StateCreating, Scale: 1, CreatedAt: now, LastActivityAt: now,
-		IdleDeadline: now.Add(r.idleTimeout), Deadline: now.Add(r.maxSession), Resources: request.Resources}
+		IdleDeadline: idleDeadline, Deadline: now.Add(r.maxSession), Resources: request.Resources}
 	record := &sessionRecord{session: session}
 	r.sessions[id] = record
 	r.activeByScope[scope] = id

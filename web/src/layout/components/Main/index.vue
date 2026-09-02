@@ -36,8 +36,8 @@ const createComponentWrapper = (component: any, route: any) => {
   if (!component) return;
   // 如果路由未开启 keepAlive 缓存，则无需包装，直接渲染原始组件
   if (!route.meta?.keepAlive) return component;
-  // 使用路由完整路径（含参数）作为包装器的唯一标识名
-  const wrapperName = route.fullPath;
+  // 包装器名称、组件 key 与 keep-alive include 必须使用同一个路由身份。
+  const wrapperName = resolveMediaRouteRenderKey(route);
   // 从缓存 Map 中查找是否已存在该路径对应的包装器
   let wrapper = wrapperMap.get(wrapperName);
   if (!wrapper) {

@@ -120,3 +120,25 @@ func TestBuildPlaybackSDPRejectsInvalidTimeRange(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildDownloadSDP(t *testing.T) {
+	got, err := BuildDownloadSDP(DownloadParams{
+		ServerID: "34020000002000000001", ChannelID: "34020000001320000001",
+		RecvIP: "192.0.2.10", RecvPort: 30000, SSRC: "1402000001",
+		Start: time.Unix(1_000, 0), End: time.Unix(2_000, 0),
+		DownloadSpeed: 4,
+	})
+	if err != nil {
+		t.Fatalf("BuildDownloadSDP() error = %v", err)
+	}
+	for _, want := range []string{
+		"s=Download\r\n",
+		"t=1000 2000\r\n",
+		"a=downloadspeed:4\r\n",
+		"y=1402000001\r\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("BuildDownloadSDP() missing %q:\n%s", want, got)
+		}
+	}
+}

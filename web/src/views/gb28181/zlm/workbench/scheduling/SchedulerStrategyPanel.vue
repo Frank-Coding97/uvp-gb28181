@@ -48,6 +48,7 @@ const canManage = computed(() => props.canManage ?? (
   || userStore.account.permissions.includes("gb28181:zlm:scheduler:manage")
 ));
 const currentTitle = computed(() => current.value ? algorithmMeta[current.value]?.title || current.value : "未装配");
+const effectiveFromText = computed(() => effectiveFrom.value === "next_invite" ? "下次点播请求" : effectiveFrom.value);
 const loadErrorText = computed(() => zlmErrorPresentation(loadError.value).label);
 
 async function refresh() {
@@ -129,7 +130,7 @@ defineExpose({ refresh });
     </header>
 
     <div class="effective-boundary" role="status">
-      切换结果：<strong>{{ effectiveFrom }}</strong>。只影响后续 INVITE 的选点策略，不重启节点、不迁移现有媒体会话。
+      生效范围：<strong>{{ effectiveFromText }}</strong>。只影响后续点播请求（INVITE）的选点策略，不重启节点、不迁移现有媒体会话。
     </div>
     <div v-if="!canManage" class="permission-state" role="status">当前账号没有调度策略管理权限，当前页面为只读。</div>
     <div v-if="switchError" class="switch-error" role="alert">{{ switchError }}</div>

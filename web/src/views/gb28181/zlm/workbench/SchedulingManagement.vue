@@ -28,6 +28,7 @@ async function refreshActive() {
     :status-text="workspace.statusText.value" :last-success-at="workspace.lastSuccessAt.value"
     :auto-refresh="workspace.autoRefresh.value" :scope-loading="workspace.scopeLoading.value"
     :scope-error="workspace.scopeError.value ? '节点目录刷新失败' : ''"
+    :allow-all="false" :requires-node="true"
     @update:active-view="workspace.setActiveView" @update:scope="workspace.setScope"
     @update:auto-refresh="workspace.autoRefresh.value = $event" @refresh="refreshActive" @refresh-scope="workspace.refreshScope"
   >
@@ -35,7 +36,7 @@ async function refreshActive() {
       <SchedulerStrategyPanel ref="strategyPanel" :active="active" />
     </template>
     <template #logs="{ active }">
-      <SchedulerLogPanel ref="logPanel" :active="active" :auto-refresh="workspace.autoRefresh.value" :nodes="workspace.nodes.value" />
+      <SchedulerLogPanel ref="logPanel" :active="active" :auto-refresh="workspace.autoRefresh.value" :nodes="workspace.nodes.value" :scope="workspace.scope.value" />
     </template>
   </MediaWorkspaceShell>
 </template>

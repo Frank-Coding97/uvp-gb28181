@@ -9,6 +9,7 @@ const api = vi.hoisted(() => ({
     getRecordQueryOptions: vi.fn(),
     queryDeviceRecords: vi.fn(),
     createPlaybackSession: vi.fn(),
+    createDownloadSession: vi.fn(),
     getPlaybackSession: vi.fn(),
     actionPlaybackSession: vi.fn(),
     deletePlaybackSession: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("../device-mgmt/api", async importOriginal => ({
 vi.mock("./api", async importOriginal => ({
     ...await importOriginal<typeof import("./api")>(),
     createPlaybackSession: api.createPlaybackSession,
+    createDownloadSession: api.createDownloadSession,
     getPlaybackSession: api.getPlaybackSession,
     actionPlaybackSession: api.actionPlaybackSession,
     deletePlaybackSession: api.deletePlaybackSession
@@ -49,6 +51,13 @@ vi.mock("vue-router", async importOriginal => ({
 describe("device record playback workspace", () => {
     beforeEach(() => {
         vi.useRealTimers();
+        vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            blob: vi.fn().mockResolvedValue(new Blob(["recording"]))
+        }));
+        Object.defineProperty(URL, "createObjectURL", { configurable: true, value: vi.fn(() => "blob:download") });
+        Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
         sessionStorage.clear();
         api.routerPush.mockReset();
         api.getRecordQueryOptions.mockResolvedValue({ code: 0, data: {
@@ -82,6 +91,10 @@ describe("device record playback workspace", () => {
                 recordLocation: "34020000002000000001",
                 streamNumber: 0
             }]
+        }});
+        api.createDownloadSession.mockResolvedValue({ code: 0, data: {
+            sessionId: "download-1", mode: "download", state: "playing",
+            media: { urls: { httpFlv: "http://zlm/download-1.live.flv" } }
         }});
         api.createPlaybackSession.mockResolvedValue({ code: 0, data: {
             sessionId: "session-1",
@@ -504,7 +517,7 @@ describe("device record playback workspace", () => {
         expect(wrapper.get('[data-testid="timeline-playhead"]').text()).toContain("09:12:34");
     });
 
-    it("offers a download entry for the selected recording", async () => {
+    it("creates a real device download session for the selected recording", async () => {
         const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
         await flushPromises();
         await wrapper.get('[data-testid="record-query-submit"]').trigger("click");
@@ -512,8 +525,12 @@ describe("device record playback workspace", () => {
         const download = wrapper.get('[data-testid="playback-download"]');
         expect(download.attributes("disabled")).toBeUndefined();
         await download.trigger("click");
-        expect(wrapper.get('[data-testid="download-notice"]').text()).toContain("已创建下载任务");
-        expect(wrapper.get('[data-testid="download-notice"]').text()).toContain("上午巡检录像");
+        await flushPromises();
+        expect(api.createDownloadSession).toHaveBeenCalledWith(
+            31,
+            { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00", downloadSpeed: 4 },
+            expect.any(String)
+        );
     });
 
     it("offers an independent download entry on every record segment", async () => {
@@ -524,7 +541,11 @@ describe("device record playback workspace", () => {
         const download = wrapper.get('[data-testid="record-segment-download-0"]');
         expect(download.attributes("aria-label")).toBe("下载 上午巡检录像");
         await download.trigger("click");
-        expect(wrapper.get('[data-testid="download-notice"]').text()).toContain("已创建下载任务");
-        expect(wrapper.get('[data-testid="download-notice"]').text()).toContain("上午巡检录像");
+        await flushPromises();
+        expect(api.createDownloadSession).toHaveBeenCalledWith(
+            31,
+            { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00", downloadSpeed: 4 },
+            expect.any(String)
+        );
     });
 });

@@ -228,6 +228,45 @@ func TestDynamicAdvertiseUsesRoutePerDestination(t *testing.T) {
 	}
 }
 
+func TestResolveRouteLocalIPReturnsLoopbackForLoopbackDestination(t *testing.T) {
+	got, err := resolveRouteLocalIP("127.0.0.1:51406")
+	if err != nil {
+		t.Fatalf("resolve loopback route: %v", err)
+	}
+	if got != "127.0.0.1" {
+		t.Fatalf("local IP=%q, want 127.0.0.1", got)
+	}
+}
+
+func TestDynamicAdvertiseAllowsLoopbackOnlyForLoopbackDestination(t *testing.T) {
+	u := &UAC{
+		serverID:         testPlatformID,
+		domain:           "3402000000",
+		sipPort:          5061,
+		dynamicAdvertise: true,
+		resolveLocalIP: func(string) (string, error) {
+			return "127.0.0.1", nil
+		},
+	}
+
+	req, _, err := u.buildTrackedMessageRequest(TrackedMessageRequest{
+		DeviceID:    testDeviceID,
+		Destination: "127.0.0.1:51406",
+		Transport:   "udp",
+		Body:        []byte("<Query/>"),
+	})
+	if err != nil {
+		t.Fatalf("build loopback MESSAGE: %v", err)
+	}
+	if req.Via() == nil || req.Via().Host != "127.0.0.1" {
+		t.Fatalf("Via=%v, want loopback host", req.Via())
+	}
+
+	if _, err := u.outboundIP("192.0.2.10:5060"); err == nil {
+		t.Fatal("non-loopback destination must reject a loopback route")
+	}
+}
+
 func TestDynamicAdvertiseDoesNotFallbackToStaleAddress(t *testing.T) {
 	u := &UAC{
 		serverID:         testPlatformID,

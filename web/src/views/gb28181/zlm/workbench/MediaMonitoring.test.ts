@@ -14,12 +14,13 @@ describe("media monitoring workbench", () => {
     expect(source).not.toContain("workspace-pending");
   });
 
-  it("keeps the three legacy monitoring pages as thin panel wrappers", () => {
-    for (const file of ["RuntimeOverview.vue", "StreamManagement.vue", "SessionManagement.vue"]) {
+  it("keeps the stream and session legacy pages as thin panel wrappers", () => {
+    for (const file of ["StreamManagement.vue", "SessionManagement.vue"]) {
       const source = readFileSync(resolve(root, file), "utf8");
       expect(source).toContain("workbench/monitoring/");
       expect(source.match(/from \"\.\/workbench\/monitoring\//g)?.length ?? 0).toBeGreaterThan(0);
     }
+    expect(readFileSync(resolve(root, "RuntimeOverview.vue"), "utf8")).toContain("/gb28181/zlm/overview");
   });
 
   it("keeps panel files within the monitoring boundary", () => {
@@ -28,12 +29,43 @@ describe("media monitoring workbench", () => {
     }
   });
 
+  it("flattens streams, network sessions and viewers into one workspace tab row", () => {
+    const page = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
+    const panel = readFileSync(resolve(root, "workbench/monitoring/NetworkSessionPanel.vue"), "utf8");
+    expect(page).toContain('{ key: "streams", label: "流媒体"');
+    expect(page).toContain('{ key: "sessions", label: "网络会话"');
+    expect(page).toContain('{ key: "viewers", label: "媒体观看者"');
+    expect(panel).toContain('view: "network" | "viewers"');
+    expect(panel).not.toContain("<a-tabs");
+    expect(panel).not.toContain("<a-tab-pane");
+    expect(panel).not.toContain('class="monitoring-panel__header"');
+  });
+
+  it("starts the stream view directly with actionable content", () => {
+    const panel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
+    expect(panel).not.toContain('class="monitoring-panel__header"');
+    expect(panel).not.toContain("所有列表、详情和危险操作都通过 UVP 后端");
+  });
+
+  it("keeps the recording status select at the system filter width", () => {
+    const panel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
+    expect(panel).toContain('style="width: 132px; min-width: 132px; max-width: 132px; flex: 0 0 132px"');
+    expect(panel).toMatch(/\.filter-recording\s*\{[^}]*width:\s*132px;[^}]*flex:\s*0 0 132px;/s);
+    expect(panel).not.toMatch(/@media\s*\(max-width:\s*900px\)[^{]*\{[^}]*\.filter-recording[^}]*width:\s*100%/s);
+  });
+
+  it("uses the shared search-control colors for the recording select", () => {
+    const panel = readFileSync(resolve(root, "workbench/monitoring/StreamPanel.vue"), "utf8");
+    expect(panel).toMatch(/\.stream-search\s+:deep\(\.arco-select-view\)\s*\{[^}]*background:\s*var\(--uvp-search-control-bg\)\s*!important;/s);
+    expect(panel).toMatch(/\.stream-search\s+:deep\(\.arco-select-view-focus\)\s*\{[^}]*box-shadow:\s*var\(--uvp-search-control-focus-shadow\)\s*!important;/s);
+  });
+
   it("passes active scope and node context into every panel without letting panels own route view state", () => {
     const source = readFileSync(resolve(root, "workbench/MediaMonitoring.vue"), "utf8");
     expect(source).toContain(":active=");
     expect(source).toContain(":scope=");
     expect(source).toContain(":node-id=");
-    for (const file of ["RuntimeSummaryPanel.vue", "StreamPanel.vue", "NetworkSessionPanel.vue"]) {
+    for (const file of ["StreamPanel.vue", "NetworkSessionPanel.vue"]) {
       const panel = readFileSync(resolve(root, "workbench/monitoring", file), "utf8");
       expect(panel).toContain("active: boolean");
       expect(panel).toContain("scope: MediaScope");
@@ -42,6 +74,13 @@ describe("media monitoring workbench", () => {
       expect(panel).not.toContain("useRouter");
       expect(panel).toContain("useZLMRuntimePolling");
     }
+    const runtimePanel = readFileSync(resolve(root, "workbench/monitoring/RuntimeSummaryPanel.vue"), "utf8");
+    expect(runtimePanel).toContain("active: boolean");
+    expect(runtimePanel).toContain("nodeId: number | null");
+    expect(runtimePanel).not.toContain("scope: MediaScope");
+    expect(runtimePanel).not.toContain("useRoute");
+    expect(runtimePanel).not.toContain("useRouter");
+    expect(runtimePanel).toContain("useZLMRuntimePolling");
   });
 
   it("keeps stream filters and ownership actions scoped to backend evidence", () => {

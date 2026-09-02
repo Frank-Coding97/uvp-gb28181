@@ -26,6 +26,7 @@ func TestZLMManagementRoutesExposeStableTypedFamilies(t *testing.T) {
 		routes[route.Path][route.Method] = true
 	}
 	wants := map[string][]string{
+		"/api/gb28181/zlm/nodes/probe":                             {http.MethodPost},
 		"/api/gb28181/zlm/nodes/:id/restart":                       {http.MethodGet, http.MethodPost},
 		"/api/gb28181/zlm/overview":                                {http.MethodGet},
 		"/api/gb28181/zlm/streams":                                 {http.MethodGet},

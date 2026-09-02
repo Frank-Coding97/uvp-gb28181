@@ -31,8 +31,9 @@ const (
 )
 
 type playbackCreateBody struct {
-	RecordKey string `json:"recordKey"`
-	PlayFrom  string `json:"playFrom"`
+	RecordKey     string `json:"recordKey"`
+	PlayFrom      string `json:"playFrom"`
+	DownloadSpeed uint32 `json:"downloadSpeed"`
 }
 
 type playbackActionBody struct {
@@ -42,9 +43,21 @@ type playbackActionBody struct {
 }
 
 func (dc *DeviceMgmtController) CreatePlaybackSession(c *gin.Context) {
+	dc.createHistoricalSession(c, gbplayback.ModePlayback)
+}
+
+func (dc *DeviceMgmtController) CreateDownloadSession(c *gin.Context) {
+	dc.createHistoricalSession(c, gbplayback.ModeDownload)
+}
+
+func (dc *DeviceMgmtController) createHistoricalSession(c *gin.Context, mode gbplayback.Mode) {
 	service, snapshots := dc.playbackRuntime()
 	claims := dc.GetClaims(c)
-	audit := map[string]any{"action": "playback_create", "result": "invalid_argument"}
+	action := "playback_create"
+	if mode == gbplayback.ModeDownload {
+		action = "record_download_create"
+	}
+	audit := map[string]any{"action": action, "result": "invalid_argument"}
 	if claims != nil {
 		audit["userId"] = claims.UserID
 	}
@@ -71,6 +84,15 @@ func (dc *DeviceMgmtController) CreatePlaybackSession(c *gin.Context) {
 		writePlaybackFailure(c, http.StatusUnprocessableEntity, playbackInvalid, "回放参数不合法", "invalid_argument", "invalid_argument")
 		return
 	}
+	if mode == gbplayback.ModeDownload {
+		if body.DownloadSpeed == 0 {
+			body.DownloadSpeed = 4
+		}
+		if body.DownloadSpeed != 1 && body.DownloadSpeed != 2 && body.DownloadSpeed != 4 && body.DownloadSpeed != 8 {
+			writePlaybackFailure(c, http.StatusUnprocessableEntity, playbackInvalid, "下载倍速不合法", "invalid_argument", "invalid_argument")
+			return
+		}
+	}
 	playFrom, err := parsePlaybackTime(body.PlayFrom, dc.recordQueryConfigSnapshot().Location)
 	if err != nil {
 		writePlaybackFailure(c, http.StatusUnprocessableEntity, playbackInvalid, "回放时间不合法", "invalid_argument", "invalid_argument")
@@ -93,7 +115,8 @@ func (dc *DeviceMgmtController) CreatePlaybackSession(c *gin.Context) {
 			Destination:     net.JoinHostPort(target.device.IP, strconv.Itoa(target.device.Port)), Transport: target.device.Transport,
 			TCPMode:         strings.Contains(strings.ToUpper(target.channel.StreamTransport), "TCP"),
 			DefaultProtocol: gbconfig.CurrentDefaultPlaybackProtocol(), Secure: isSecurePlaybackRequest(c.Request),
-			SegmentStart: snapshot.SegmentStart, SegmentEnd: snapshot.SegmentEnd, PlayFrom: playFrom})
+			SegmentStart: snapshot.SegmentStart, SegmentEnd: snapshot.SegmentEnd, PlayFrom: playFrom,
+			Mode: mode, DownloadSpeed: body.DownloadSpeed})
 		if createErr != nil {
 			status, errorCode, stage, msg := mapPlaybackServiceError(createErr)
 			writePlaybackFailure(c, status, errorCode, msg, stage, string(errorCode))
@@ -245,7 +268,7 @@ func playbackSessionView(session *gbplayback.Session) gin.H {
 	if session == nil {
 		return gin.H{}
 	}
-	return gin.H{"sessionId": session.ID, "state": session.State, "channelId": session.ChannelID, "recordKey": session.RecordKey,
+	return gin.H{"sessionId": session.ID, "mode": session.Mode, "downloadSpeed": session.DownloadSpeed, "state": session.State, "channelId": session.ChannelID, "recordKey": session.RecordKey,
 		"segmentStart": session.SegmentStart.Format(time.RFC3339), "segmentEnd": session.SegmentEnd.Format(time.RFC3339),
 		"positionSeconds": session.PositionSeconds, "scale": session.Scale, "hasAudio": session.HasAudio, "media": gin.H{"urls": session.MediaURLs,
 			"defaultProtocol": session.DefaultProtocol, "protocol": session.Protocol, "url": session.URL, "zlmWebrtc": session.ZLMWebRTC},

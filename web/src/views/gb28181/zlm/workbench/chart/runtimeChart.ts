@@ -3,6 +3,7 @@ import type { ZLMNodeRuntime } from "@/api/gb28181-zlm-runtime";
 import type { ChartDatum, MediaChartSpec } from "./overviewChart";
 
 export const RUNTIME_SAMPLE_LIMIT = 60;
+export const RUNTIME_TREND_WINDOW_MS = 5 * 60 * 1000;
 
 export interface RuntimeChartSample {
   nodeId: number;
@@ -116,31 +117,78 @@ export function resetRuntimeSnapshots(context: RuntimeTrendContext): RuntimeTren
 }
 
 function trendValues(samples: readonly RuntimeChartSample[]): ChartDatum[] {
-  return samples.map(sample => ({
-    asOf: sample.asOf,
-    metric: "媒体速率 KB/s",
-    value: sample.throughput === null ? null : sample.throughput / 1024
-  }));
+  return samples.flatMap(sample => {
+    const sampledAt = Date.parse(sample.asOf);
+    if (!Number.isFinite(sampledAt)) return [];
+    return [{
+      sampledAt,
+      asOf: sample.asOf,
+      metric: "媒体速率 KB/s",
+      value: sample.throughput === null ? null : sample.throughput / 1024
+    }];
+  });
 }
 
 export function createRuntimeTrendSpec(samples: readonly RuntimeChartSample[]): MediaChartSpec {
+  const parsedValues = trendValues(samples);
+  const latestSampledAt = parsedValues.reduce<number | null>((latest, datum) => {
+    const sampledAt = typeof datum.sampledAt === "number" ? datum.sampledAt : null;
+    return sampledAt === null ? latest : latest === null ? sampledAt : Math.max(latest, sampledAt);
+  }, null);
+  const windowStart = latestSampledAt === null ? null : latestSampledAt - RUNTIME_TREND_WINDOW_MS;
+  const values = windowStart === null
+    ? parsedValues
+    : parsedValues.filter(datum => typeof datum.sampledAt === "number" && datum.sampledAt >= windowStart);
+  const timeDomain = latestSampledAt === null
+    ? {}
+    : { min: windowStart, max: latestSampledAt };
   return {
     type: "line",
     background: "transparent",
-    data: [{ id: "runtime-session-trend", values: trendValues(samples) }],
+    animationAppear: { duration: 300 },
+    animationEnter: { duration: 300 },
+    animationUpdate: { duration: 450, easing: "linear" },
+    animationExit: { duration: 300 },
+    data: [{ id: "runtime-session-trend", values }],
     series: [{
       type: "line",
       data: { id: "runtime-session-trend" },
-      xField: "asOf",
+      xField: "sampledAt",
       yField: "value",
       seriesField: "metric",
-      point: { visible: samples.length <= 20 }
+      invalidType: "break",
+      point: { visible: false }
     }],
     axes: [
-      { orient: "left", title: { text: "KB/s" }, label: { autoHide: true } },
-      { orient: "bottom", label: { autoHide: true, autoRotate: false } }
+      { orient: "left", min: 0, softMax: 1, title: { text: "KB/s" }, label: { autoHide: true } },
+      {
+        orient: "bottom",
+        type: "time",
+        nice: false,
+        ...timeDomain,
+        layers: [{ tickCount: 5, timeFormat: "%H:%M:%S", timeFormatMode: "local" }],
+        label: { autoHide: true, autoRotate: false }
+      }
     ],
-    tooltip: { activeType: "dimension" },
+    tooltip: {
+      activeType: "dimension",
+      dimension: {
+        title: {
+          value: { field: "sampledAt" },
+          valueTimeFormat: "%Y-%m-%d %H:%M:%S",
+          valueTimeFormatMode: "local"
+        },
+        content: [{
+          key: "媒体速率",
+          value: (datum?: ChartDatum) => {
+            const value = datum?.value;
+            if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+            if (value < 1) return `${Math.round(value * 1024)} B/s`;
+            return `${value.toFixed(value >= 100 ? 0 : 1)} KB/s`;
+          }
+        }]
+      }
+    },
     padding: { left: 8, right: 12, top: 8, bottom: 8 }
   };
 }
@@ -153,7 +201,7 @@ export function buildRuntimeTrendChartState(history: RuntimeTrendHistory | null 
       sampleCount: 0,
       samples: [],
       asOf: null,
-      sampledLabel: "进入页面后采样，最多保留 60 点",
+      sampledLabel: "展示最近 5 分钟在线媒体流的实时传输速率合计",
       summary: "当前没有可用的运行态采样",
       warning: "节点运行态尚未返回",
       spec: createRuntimeTrendSpec([])
@@ -170,7 +218,7 @@ export function buildRuntimeTrendChartState(history: RuntimeTrendHistory | null 
     sampleCount: samples.length,
     samples,
     asOf: last?.asOf ?? null,
-    sampledLabel: `进入页面后采样，已记录 ${samples.length} / ${RUNTIME_SAMPLE_LIMIT} 点`,
+    sampledLabel: "展示最近 5 分钟在线媒体流的实时传输速率合计",
     summary: samples.length === 0
       ? "进入页面后等待运行态采样"
       : `当前节点 ${history.nodeId ?? "—"} 已记录 ${samples.length} 个采样点，最新 ${last?.asOf ?? "—"}`,

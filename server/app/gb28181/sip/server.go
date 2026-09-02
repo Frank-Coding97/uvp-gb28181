@@ -403,6 +403,12 @@ func (s *Server) SetRecordInfoSink(sink handler.RecordInfoSink) {
 	}
 }
 
+func (s *Server) SetSnapshotSink(sink handler.SnapshotSink) {
+	if s.msgH != nil {
+		s.msgH.SetSnapshotSink(sink)
+	}
+}
+
 func (s *Server) SetPlaybackEndSink(sink handler.PlaybackEndSink) {
 	if s.msgH != nil {
 		s.msgH.SetPlaybackEndSink(sink)

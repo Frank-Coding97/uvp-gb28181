@@ -4,6 +4,7 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { useThemeConfig } from "@/store/modules/theme-config";
 import { deepClone } from "@/utils/index";
 import { arrayFlattened } from "@/utils/tree-tools";
+import { resolveMediaRouteRenderKey } from "./media-route-identity";
 
 /** Compatibility routes exist only long enough to replace into a canonical workbench URL. */
 export const shouldSkipRouteHistory = (route: { meta?: { legacyMedia?: boolean } }) => route.meta?.legacyMedia === true;
@@ -34,7 +35,7 @@ export const currentlyRoute = (current: any) => {
     if (isTabs.value && !route.meta.isFull) store.setTabs(route);
     // 不缓存路由 || 不渲染tabs ，符合任意条件则不缓存路由
     if (!route.meta.keepAlive || !isTabs.value) return;
-    store.setRoutePaths(route.path); // 缓存路由
+    store.setRoutePaths(resolveMediaRouteRenderKey(current)); // 缓存路由
 };
 
 /**

@@ -124,6 +124,7 @@ func setupRouter(t *testing.T) (*gin.Engine, *service.NodeService) {
 	{
 		g.GET("/nodes", ctrl.List)
 		g.POST("/nodes", ctrl.Create)
+		g.POST("/nodes/probe", ctrl.ProbeCreate)
 		g.GET("/nodes/:id", ctrl.Get)
 		g.PUT("/nodes/:id", ctrl.Update)
 		g.DELETE("/nodes/:id", ctrl.Delete)
@@ -131,6 +132,22 @@ func setupRouter(t *testing.T) (*gin.Engine, *service.NodeService) {
 		g.POST("/nodes/:id/activate", ctrl.Activate)
 	}
 	return r, svc
+}
+
+func TestZLMNodeAPI_ProbeCreateReturnsDetectedConfigWithoutPersisting(t *testing.T) {
+	r, svc := setupRouter(t)
+
+	w, resp := do(t, r, "POST", "/api/gb28181/zlm/nodes/probe", service.CreateNodeReq{
+		Name: "edge-a", Host: "10.0.0.8", APIPort: 18080, APISecret: "secret",
+	})
+
+	require.Equal(t, http.StatusOK, w.Code)
+	preview := resp["data"].(map[string]any)
+	require.Equal(t, true, preview["online"])
+	require.Equal(t, float64(80), preview["serverConfig"].(map[string]any)["httpPort"])
+	list, err := svc.List(context.Background())
+	require.NoError(t, err)
+	require.Empty(t, list)
 }
 
 func do(t *testing.T, r http.Handler, method, path string, body interface{}) (*httptest.ResponseRecorder, map[string]any) {

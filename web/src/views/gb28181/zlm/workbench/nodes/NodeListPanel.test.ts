@@ -19,7 +19,7 @@ describe("NodeListPanel", () => {
   it("accepts canonical scope data and does not use a guessed node for writes", () => {
     expect(source).toContain("defineProps");
     expect(source).toContain("scope");
-    expect(source).toContain("明确选择节点");
+    expect(source).toContain("context.selectNode(node.id)");
     expect(source).toMatch(/setScope|nodeId/);
     expect(source).not.toContain("nodes[0]");
   });
@@ -34,5 +34,27 @@ describe("NodeListPanel", () => {
   it("does not repeat cluster summary cards above the node table", () => {
     expect(source).not.toContain("StatCard");
     expect(source).not.toContain('class="kpi-row"');
+  });
+
+  it("uses the system search panel controls and explicit query actions", () => {
+    expect(source).toContain("<s-layout-search");
+    expect(source).toContain("<a-input");
+    expect(source).not.toContain("<a-input-search");
+    expect(source).toContain('@press-enter="queryRows"');
+    expect(source).toContain('type="primary" @click="queryRows"');
+    expect(source).toContain('@click="resetFilters"');
+    expect(source).not.toContain("flex-wrap: nowrap");
+    expect(source).not.toContain(".search, .filter-select { width: 100%; }");
+    expect(source).toContain("background: var(--uvp-search-control-bg) !important");
+    expect(source).toContain("border: 1px solid var(--uvp-search-secondary-btn-border) !important");
+  });
+
+  it("uses the system table action language without the redundant scope hint", () => {
+    expect(source).not.toContain("当前范围：");
+    expect(source).not.toContain('class="scope-hint"');
+    expect(source).toContain('class="uvp-table-actions"');
+    expect(source).toContain('class="uvp-table-action uvp-table-action--detail"');
+    expect(source).toContain('class="uvp-table-action uvp-table-action--edit"');
+    expect(source).not.toContain('class="cell-ops"');
   });
 });

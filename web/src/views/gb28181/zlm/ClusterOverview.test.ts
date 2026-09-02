@@ -79,13 +79,14 @@ describe("cluster overview presentation", () => {
     });
   });
 
-  it("merges cluster and node runtime into one scope-aware overview", () => {
+  it("opens the runtime overview on one concrete node instead of a cluster scope", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/ClusterOverview.vue"), "utf8");
     expect(source).toContain("ZLMNodeContextBar");
     expect(source).toContain("RuntimeSummaryPanel");
-    expect(source).toContain(":allow-all=\"true\"");
-    expect(source).toContain(":default-all=\"true\"");
-    expect(source).toContain("@select-node");
+    expect(source).toContain(":fallback-first=\"true\"");
+    expect(source).not.toContain(":allow-all=\"true\"");
+    expect(source).not.toContain(":default-all=\"true\"");
+    expect(source).not.toContain("@select-node");
     expect(source).not.toContain("getZLMOverview");
   });
 });

@@ -146,6 +146,29 @@ func TestRegistrySweepExpiresIdleAndMaxDeadline(t *testing.T) {
 	}
 }
 
+func TestRegistryDownloadUsesTaskDeadlineInsteadOfViewerIdleTimeout(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	r := NewRegistry(RegistryConfig{Now: func() time.Time { return now }, IdleTimeout: 10 * time.Second, MaxSession: time.Minute})
+	request := playbackRequest(now, "u1", "c1", "download")
+	request.Mode = ModeDownload
+	download, err := r.Create(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Sweep(context.Background(), now.Add(11*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if r.MustGet(download.Session.ID).State != StateCreating {
+		t.Fatalf("download expired on viewer idle timeout: %+v", r.MustGet(download.Session.ID))
+	}
+	if err := r.Sweep(context.Background(), now.Add(time.Minute+time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if r.MustGet(download.Session.ID).State != StateStopped {
+		t.Fatalf("download ignored max task deadline: %+v", r.MustGet(download.Session.ID))
+	}
+}
+
 func TestRegistryCloseRejectsNewAndCleansAllSessions(t *testing.T) {
 	now := time.Unix(1700000000, 0)
 	resources := &fakeCleanupResources{}

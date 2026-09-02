@@ -128,6 +128,8 @@ const api = vi.hoisted(() => {
     controlPtzCruise: vi.fn(),
     createCruiseTrack: vi.fn(),
     controlDevice: vi.fn(),
+    createDeviceSnapshotSession: vi.fn(),
+    getDeviceSnapshotSession: vi.fn(),
     createTalkSession: vi.fn(),
     getTalkSession: vi.fn(),
     deleteTalkSession: vi.fn()
@@ -212,6 +214,8 @@ describe("PlayConsoleLinked 双区联动", () => {
     api.getPtzOperation.mockReset();
     api.getDeviceStatus.mockReset();
     api.updateHomePosition.mockReset();
+    api.createDeviceSnapshotSession.mockReset();
+    api.getDeviceSnapshotSession.mockReset();
     api.fetchPTZDefaultSpeedConfig.mockReset();
     api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, message: "", data: { level: 6 } });
     api.startPlay.mockResolvedValue({
@@ -263,6 +267,16 @@ describe("PlayConsoleLinked 双区联动", () => {
       code: 0,
       message: "",
       data: { operationId: "home-default", sn: 1, channelId: channel.channelId, action: "home_position", status: "queued" }
+    });
+    api.createDeviceSnapshotSession.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { sessionId: "snap-1", channelId: "1", channelCode: channel.channelId, deviceCode: channel.deviceId, snapNum: 2, interval: 3, state: "waiting", receivedCount: 0, notifiedCount: 0, files: [] }
+    });
+    api.getDeviceSnapshotSession.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { sessionId: "snap-1", channelId: "1", channelCode: channel.channelId, deviceCode: channel.deviceId, snapNum: 2, interval: 3, state: "completed", receivedCount: 2, notifiedCount: 2, files: [{ name: "shot-1.jpg", size: 1024, receivedAt: "2026-08-30T23:30:00+08:00", url: "/api/gb28181/device-snapshots/uploads/token/shot-1.jpg" }] }
     });
     api.createTalkSession.mockResolvedValue({
       code: 0,
@@ -388,6 +402,22 @@ describe("PlayConsoleLinked 双区联动", () => {
     await flushPromises();
 
     expect(wrapper.get("input[type='range'][max='10']").element).toHaveProperty("value", "6");
+    wrapper.unmount();
+  });
+
+  it("在高级控制中下发 2022 图像抓拍配置并展示设备上传结果", async () => {
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await wrapper.get("[data-testid='linked-tab-advanced']").trigger("click");
+    await wrapper.get("[data-testid='snapshot-count']").setValue("2");
+    await wrapper.get("[data-testid='snapshot-interval']").setValue("3");
+    await wrapper.get("[data-testid='snapshot-submit']").trigger("click");
+    await flushPromises();
+
+    expect(api.createDeviceSnapshotSession).toHaveBeenCalledWith(channel.id, { snapNum: 2, interval: 3 });
+    expect(api.getDeviceSnapshotSession).toHaveBeenCalledWith(channel.id, "snap-1");
+    expect(wrapper.get(".snapshot-status").text()).toContain("已完成 2/2");
+    expect(wrapper.get(".snapshot-results img").attributes("src")).toContain("shot-1.jpg");
     wrapper.unmount();
   });
 

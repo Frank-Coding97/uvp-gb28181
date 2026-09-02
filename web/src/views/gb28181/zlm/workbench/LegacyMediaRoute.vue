@@ -2,18 +2,23 @@
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
-import { readStoredZLMNodeID } from "@/store/modules/zlm-context";
+import { readStoredZLMNodeID, useZLMContextStore } from "@/store/modules/zlm-context";
 import { resolveLegacyMediaRoute } from "./mediaRoutes";
 
 const route = useRoute();
 const router = useRouter();
+const contextStore = useZLMContextStore();
 const invalid = ref(false);
 
 onMounted(() => {
+  const recentNodeId = contextStore.selectedNodeId ?? readStoredZLMNodeID();
+  const query = route.query.nodeId === undefined && recentNodeId !== null
+    ? { ...route.query, nodeId: String(recentNodeId) }
+    : route.query;
   const destination = resolveLegacyMediaRoute(
     route.path,
-    route.query as Record<string, unknown>,
-    { recentNodeId: readStoredZLMNodeID() }
+    query as Record<string, unknown>,
+    { recentNodeId }
   );
   if (!destination) {
     invalid.value = true;

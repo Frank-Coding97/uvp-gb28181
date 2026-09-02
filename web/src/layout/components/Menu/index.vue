@@ -35,7 +35,15 @@ const props = withDefaults(defineProps<Props>(), {
   routeTree: () => []
 });
 
-const onMenuItem = (path: string) => router.push(path);
+const onMenuItem = (path: string) => {
+  const nodeId = typeof route.query.nodeId === "string" && /^\d+$/.test(route.query.nodeId)
+    ? route.query.nodeId
+    : undefined;
+  if (path.startsWith("/media/") && nodeId) {
+    return router.push({ path, query: { nodeId } });
+  }
+  return router.push(path);
+};
 
 const routePathList = computed(() => {
   const { getAllParentRoute } = useRoutingMethod();

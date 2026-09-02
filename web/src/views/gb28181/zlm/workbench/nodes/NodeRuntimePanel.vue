@@ -18,7 +18,6 @@ function openMonitoring(view: "streams" | "sessions") {
   <!-- T8 owns runtime polling/chart lifecycle; this adapter only binds the canonical route id. -->
   <RuntimeSummaryPanel
     :active="active"
-    :scope="nodeId"
     :node-id="nodeId"
     @drilldown="openMonitoring"
   />

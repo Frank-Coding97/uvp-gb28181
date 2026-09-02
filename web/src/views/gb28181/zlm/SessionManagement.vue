@@ -45,7 +45,7 @@ onMounted(loadNodes);
     <div class="snow-fill-inner uvp-page-shell-flat legacy-session-management">
       <ZLMNodeContextBar :nodes="nodes" :query-node-id="route.query.nodeId" :loading="nodesLoading" title="会话所在节点" @refresh="refreshAll" />
       <div v-if="nodesError && !nodes.length" class="legacy-session-error" role="alert">节点目录加载失败，请刷新重试。</div>
-      <NetworkSessionPanel ref="panel" :active="true" :scope="scope" :node-id="selectedNodeId" :initial-query="route.query" />
+      <NetworkSessionPanel ref="panel" :active="true" view="network" :scope="scope" :node-id="selectedNodeId" :initial-query="route.query" />
     </div>
   </div>
 </template>

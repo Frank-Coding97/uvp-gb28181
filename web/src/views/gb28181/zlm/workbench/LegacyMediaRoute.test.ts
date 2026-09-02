@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { flushPromises, mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const routing = vi.hoisted(() => ({
@@ -15,14 +16,29 @@ vi.mock("vue-router", async importOriginal => ({
 }));
 
 import { LEGACY_MEDIA_ROUTE_PATHS } from "./mediaRoutes";
+import { useZLMContextStore } from "@/store/modules/zlm-context";
 import LegacyMediaRoute from "./LegacyMediaRoute.vue";
 
 describe("LegacyMediaRoute", () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     routing.current.path = "/gb28181/zlm/overview";
     routing.current.query = {};
     routing.replace.mockReset();
     sessionStorage.clear();
+  });
+
+  it("carries the active global node into a legacy route without a node query", async () => {
+    useZLMContextStore().initialize([{ id: 9, name: "node-9", state: "active" }]);
+    routing.current.path = "/gb28181/zlm/ffmpeg-sources";
+    const wrapper = mount(LegacyMediaRoute);
+    await flushPromises();
+
+    expect(routing.replace).toHaveBeenCalledWith({
+      path: "/media/ingress",
+      query: { view: "ffmpeg", nodeId: "9" }
+    });
+    wrapper.unmount();
   });
 
   it("replaces every legacy route exactly once without starting business requests", async () => {

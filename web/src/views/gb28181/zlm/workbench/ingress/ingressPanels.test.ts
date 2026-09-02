@@ -28,4 +28,33 @@ describe("ingress panels", () => {
       expect(source, file).toContain("scope !== \"all\"");
     }
   });
+
+  it("starts every ingress panel with actions instead of a redundant title block", () => {
+    for (const file of ["ProxyPanel.vue", "FFmpegPanel.vue", "RTPPanel.vue"]) {
+      const source = readFileSync(resolve(root, file), "utf8");
+      expect(source, file).not.toMatch(/<header class="panel-toolbar">\s*<div><h2>/);
+      expect(source, file).toMatch(/\.panel-toolbar\s*\{[^}]*justify-content:\s*flex-end;/s);
+    }
+  });
+
+  it("keeps capability checks functional without persistent support banners", () => {
+    for (const file of ["ProxyPanel.vue", "FFmpegPanel.vue", "RTPPanel.vue"]) {
+      const source = readFileSync(resolve(root, file), "utf8");
+      expect(source, file).not.toContain('class="capability-banner"');
+      expect(source, file).toContain("capability");
+    }
+  });
+
+  it("uses the system list button and table pagination language", () => {
+    for (const file of ["ProxyPanel.vue", "FFmpegPanel.vue", "RTPPanel.vue"]) {
+      const source = readFileSync(resolve(root, file), "utf8");
+      expect(source, file).toContain('class="uvp-refresh-btn"');
+      expect(source, file).toContain(':pagination="tablePagination"');
+      expect(source, file).toContain("showTotal: true");
+      expect(source, file).toContain("showJumper: true");
+      expect(source, file).toContain("showPageSize: true");
+      expect(source, file).toContain("pageSizeOptions: [10, 20, 50, 100]");
+      expect(source, file).not.toContain("<a-pagination");
+    }
+  });
 });

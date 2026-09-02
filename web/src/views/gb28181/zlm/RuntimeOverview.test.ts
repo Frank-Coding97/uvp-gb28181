@@ -68,27 +68,51 @@ describe("runtime overview state", () => {
     expect(next.at(-1)?.asOf).toBe("2026-08-30T00:01:00.000Z");
   });
 
-  it("uses typed polling and keeps six scope-specific summary cards", () => {
+  it("uses typed polling and keeps a single-node operational overview", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/monitoring/RuntimeSummaryPanel.vue"), "utf8");
     expect(source).toContain("getZLMNodeRuntime");
     expect(source).toContain("useZLMRuntimePolling");
-    expect(source).toContain("v-if=\"scope === 'all'\"");
-    expect(source).toContain("title=\"在线节点\"");
-    expect(source).toContain("title=\"异常节点\"");
-    expect(source.match(/<StatCard/g)).toHaveLength(12);
+    expect(source).not.toContain("getZLMOverview");
+    expect(source).not.toContain("scope === 'all'");
+    expect(source).not.toContain("title=\"在线节点\"");
+    expect(source).not.toContain("title=\"异常节点\"");
+    expect(source.match(/<StatCard/g)).toHaveLength(6);
     expect(source).not.toContain("文件描述符 / Socket");
     expect(source).not.toContain("WorkThread 负载");
     expect(source).toContain("实时媒体速率");
+    expect(source).toContain('legend-label="媒体速率（KB/s）"');
+    expect(source).toContain(":show-summary=\"false\"");
+    expect(source).not.toContain(':as-of="chart.asOf"');
     expect(source).not.toContain("实时吞吐趋势");
     expect(source).toContain("事件线程负载");
-    expect(source).toContain("对象统计");
+    expect(source).toContain("thread-heatmap");
+    expect(source).toContain("平均负载");
+    expect(source).toContain("最高负载");
+    expect(source).toContain("高负载线程");
+    expect(source).toContain("对象实例");
     expect(source).toContain("objectStatisticItems");
-    expect(source).toContain("节点健康");
-    expect(source).toContain("selectNode");
+    expect(source).toContain("objectStatisticHistory");
+    expect(source).toContain("object-stat-sparkline");
+    expect(source).toContain("查看全部对象");
+    expect(source).toContain("媒体源");
+    expect(source).toContain("网络套接字");
+    expect(source).toContain("runtime-object-panel--summary");
+    expect(source).toContain("runtime-thread-panel--full");
+    expect(source).toContain("thread-load-distribution");
+    expect(source).toContain("热点线程排行");
+    expect(source).not.toContain("节点健康");
+    expect(source).not.toContain("selectNode");
     expect(source).not.toContain("monitoring-panel__header");
     expect(source).not.toContain("运行态采样</div>");
     expect(source).not.toContain("当前媒体采样");
     expect(source).toContain("drilldown");
+    expect(source).toContain("align-items: stretch");
+    expect(source).not.toContain(".media-vchart { min-height: 100%; }");
+    expect(source).not.toMatch(/font-size:\s*(?:8|9|10|11)px/);
+    expect(source).not.toContain("color: var(--zlm-text-4)");
+    const chartSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/workbench/components/MediaVChart.vue"), "utf8");
+    expect(chartSource).not.toMatch(/font-size:\s*11px/);
+    expect(chartSource).not.toContain("var(--zlm-text-4, var(--color-text-3))");
     const retiredSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/RuntimeOverview.vue"), "utf8");
     expect(retiredSource).toContain("router.replace");
     expect(retiredSource).toContain("/gb28181/zlm/overview");
@@ -114,7 +138,13 @@ describe("runtime overview state", () => {
       }
     ]);
     const values = spec.data?.[0]?.values ?? [];
-    expect(values).toEqual([{ asOf: "2026-08-30T00:00:00.000Z", metric: "媒体速率 KB/s", value: 2 }]);
+    expect(values).toEqual([{
+      sampledAt: Date.parse("2026-08-30T00:00:00.000Z"),
+      asOf: "2026-08-30T00:00:00.000Z",
+      metric: "媒体速率 KB/s",
+      value: 2
+    }]);
     expect(spec.axes?.[0]).toMatchObject({ title: { text: "KB/s" } });
+    expect(spec.axes?.[1]).toMatchObject({ type: "time", layers: [{ timeFormat: "%H:%M:%S" }] });
   });
 });

@@ -40,6 +40,13 @@ func (e *ServiceError) Unwrap() error {
 
 type State string
 
+type Mode string
+
+const (
+	ModePlayback Mode = "playback"
+	ModeDownload Mode = "download"
+)
+
 const (
 	StateCreating  State = "creating"
 	StateBuffering State = "buffering"
@@ -67,6 +74,8 @@ type Session struct {
 	DeviceID        string
 	ChannelID       string
 	RecordKey       string
+	Mode            Mode
+	DownloadSpeed   uint32
 	IdempotencyKey  string
 	NodeID          string
 	StreamID        string
@@ -101,6 +110,8 @@ type CreateRequest struct {
 	PreferredNodeID                                   int64
 	SegmentStart, SegmentEnd                          time.Time
 	PlayFrom                                          time.Time
+	Mode                                              Mode
+	DownloadSpeed                                     uint32
 	TCPMode                                           bool
 	DefaultProtocol                                   string
 	Secure                                            bool

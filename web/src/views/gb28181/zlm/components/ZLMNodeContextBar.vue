@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
   title?: string;
   allowAll?: boolean;
   defaultAll?: boolean;
+  fallbackFirst?: boolean;
   minimal?: boolean;
 }>(), {
   queryNodeId: undefined,
@@ -20,6 +21,7 @@ const props = withDefaults(defineProps<{
   title: "当前媒体节点",
   allowAll: false,
   defaultAll: false,
+  fallbackFirst: false,
   minimal: false
 });
 
@@ -37,6 +39,10 @@ watch(
     if (loading && nodes.length === 0) return;
     if (!context.initialized) context.initialize(nodes, queryNodeId);
     else context.reconcileVisibleNodes(nodes);
+    if (props.fallbackFirst && context.selectedNodeId === null && nodes.length > 0) {
+      const fallback = nodes.find(node => node.state === "active") ?? nodes[0];
+      context.selectNode(fallback.id);
+    }
     if (props.allowAll && props.defaultAll && !defaultAllApplied.value) {
       const queryID = Number(Array.isArray(queryNodeId) ? queryNodeId[0] : queryNodeId);
       const hasValidQuery = Number.isSafeInteger(queryID) && queryID > 0 && nodes.some(node => node.id === queryID);
@@ -165,7 +171,7 @@ function select(value: string | number | undefined) {
 .zlm-node-context[data-minimal="true"] .zlm-node-context__refresh {
   min-width: 88px;
   height: 40px;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
 .zlm-node-context__identity {

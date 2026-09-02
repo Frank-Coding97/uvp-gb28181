@@ -14,7 +14,8 @@ describe("NodeRuntimePanel", () => {
 
   it("clears trend samples when the canonical node changes and keeps unavailable values honest", () => {
     expect(source).toContain("active");
-    expect(source).toContain("scope");
+    expect(source).toContain(":node-id=\"nodeId\"");
+    expect(source).not.toContain(":scope=");
     expect(source).toContain("drilldown");
   });
 });

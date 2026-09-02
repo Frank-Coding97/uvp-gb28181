@@ -71,6 +71,26 @@ func (zc *ZLMNodeController) Create(c *gin.Context) {
 	zc.Success(c, n)
 }
 
+// ProbeCreate POST /api/gb28181/zlm/nodes/probe
+// 只读取候选 ZLM 的安全配置摘要，不登记节点、不下发配置。
+func (zc *ZLMNodeController) ProbeCreate(c *gin.Context) {
+	markManagementAudit(c, "node.probe", 0, nil, "", "", "requested")
+	var req service.CreateNodeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		markManagementAudit(c, "node.probe", 0, nil, "", "", "failed")
+		zc.FailAndAbort(c, "请求参数非法", err)
+		return
+	}
+	result, err := zc.svc.ProbeCreate(c, req)
+	if err != nil {
+		markManagementAudit(c, "node.probe", 0, nil, "", "", "failed")
+		zc.FailAndAbort(c, "读取 ZLM 信息失败", err)
+		return
+	}
+	markManagementAudit(c, "node.probe", 0, nil, "", "", "success")
+	zc.Success(c, result)
+}
+
 // Update PUT /api/gb28181/zlm/nodes/:id
 func (zc *ZLMNodeController) Update(c *gin.Context) {
 	markManagementAudit(c, "node.update", 0, nil, "", "", "requested")

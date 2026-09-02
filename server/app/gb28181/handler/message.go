@@ -26,6 +26,8 @@ type MessageHandler struct {
 	ptzProcessor       PTZMessageProcessor
 	recordInfoMu       sync.RWMutex
 	recordInfoSink     RecordInfoSink
+	snapshotMu         sync.RWMutex
+	snapshotSink       SnapshotSink
 	playbackEndMu      sync.RWMutex
 	playbackEndSink    PlaybackEndSink
 	broadcastMu        sync.RWMutex
@@ -48,6 +50,10 @@ type RecordInfoSink interface {
 
 type PlaybackEndSink interface {
 	OnPlaybackFileToEnd(context.Context, string, string, []byte) error
+}
+
+type SnapshotSink interface {
+	OnSnapshotNotify(context.Context, string, []byte) error
 }
 
 type BroadcastMessageProcessor interface {
@@ -104,6 +110,18 @@ func (h *MessageHandler) getRecordInfoSink() RecordInfoSink {
 	h.recordInfoMu.RLock()
 	defer h.recordInfoMu.RUnlock()
 	return h.recordInfoSink
+}
+
+func (h *MessageHandler) SetSnapshotSink(sink SnapshotSink) {
+	h.snapshotMu.Lock()
+	h.snapshotSink = sink
+	h.snapshotMu.Unlock()
+}
+
+func (h *MessageHandler) getSnapshotSink() SnapshotSink {
+	h.snapshotMu.RLock()
+	defer h.snapshotMu.RUnlock()
+	return h.snapshotSink
 }
 
 func (h *MessageHandler) SetPlaybackEndSink(sink PlaybackEndSink) {
@@ -177,6 +195,15 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			if processor := h.getBroadcastProcessor(); processor != nil {
 				if err := processor.OnBroadcastMessage(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
 					app.ZapLog.Warn("GB28181 Broadcast Response 处理失败", zap.Error(err))
+				}
+			}
+			return
+		}
+		if head.CmdType == manscdp.CmdNotify && manscdp.IsSnapshotNotify(req.Body()) {
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			if sink := h.getSnapshotSink(); sink != nil {
+				if err := sink.OnSnapshotNotify(ctx, ptzDeviceCode(req, head.DeviceID), req.Body()); err != nil {
+					app.ZapLog.Warn("GB28181 SnapShot Notify 处理失败", zap.String("deviceId", head.DeviceID), zap.Error(err))
 				}
 			}
 			return

@@ -16,6 +16,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
 	gbdirectory "uvplatform.cn/uvp-gb28181/app/gb28181/directory"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
@@ -49,6 +50,8 @@ type DeviceMgmtController struct {
 	playbackRuntimeMu   sync.RWMutex
 	playbackService     PlaybackSessionService
 	playbackSnapshots   PlaybackSnapshotResolver
+	captureRuntimeMu    sync.RWMutex
+	captureRegistry     *devicecapture.Registry
 }
 
 // CatalogTrigger 由 handler 包实现,注入进来用于手动触发 Catalog 查询
@@ -86,6 +89,18 @@ func (dc *DeviceMgmtController) playbackRuntime() (PlaybackSessionService, Playb
 	dc.playbackRuntimeMu.RLock()
 	defer dc.playbackRuntimeMu.RUnlock()
 	return dc.playbackService, dc.playbackSnapshots
+}
+
+func (dc *DeviceMgmtController) SetCaptureRuntime(registry *devicecapture.Registry) {
+	dc.captureRuntimeMu.Lock()
+	dc.captureRegistry = registry
+	dc.captureRuntimeMu.Unlock()
+}
+
+func (dc *DeviceMgmtController) captureRuntime() *devicecapture.Registry {
+	dc.captureRuntimeMu.RLock()
+	defer dc.captureRuntimeMu.RUnlock()
+	return dc.captureRegistry
 }
 
 // SetCatalogTrigger 后置注入(bootstrap 里 SIP UAC 就绪后调用)

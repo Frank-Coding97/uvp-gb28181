@@ -6,6 +6,7 @@ vi.mock("@/utils/http", () => ({ http: { request } }));
 vi.mock("./utils", () => ({ baseUrlApi: (path: string) => `/api/${path}` }));
 
 import {
+  createDeviceSnapshotSession,
   fetchPTZDefaultSpeedConfig,
   fetchDefaultChannelStreamTransportConfig,
   fetchDefaultPlaybackProtocolConfig,
@@ -24,6 +25,7 @@ import {
   fetchPreallocationModeConfig,
   getControlCapabilities,
   getDeviceStatus,
+  getDeviceSnapshotSession,
   getHomePosition,
   getPtzOperation,
   getStreamMonitor,
@@ -103,6 +105,21 @@ describe("国标服务配置 API", () => {
       "put",
       "/api/gb28181/sip/service-config/ptz-default-speed",
       { data: { level: 10 } }
+    );
+  });
+
+  it("创建并读取设备图像抓拍任务", async () => {
+    await createDeviceSnapshotSession(31, { snapNum: 2, interval: 3 });
+    expect(request).toHaveBeenLastCalledWith(
+      "post",
+      "/api/gb28181/device-mgmt/channel/31/snapshot-sessions",
+      { data: { snapNum: 2, interval: 3 }, headers: { "Idempotency-Key": expect.stringMatching(/^snapshot-31-/) } }
+    );
+
+    await getDeviceSnapshotSession(31, "snap/1");
+    expect(request).toHaveBeenLastCalledWith(
+      "get",
+      "/api/gb28181/device-mgmt/channel/31/snapshot-sessions/snap%2F1"
     );
   });
 

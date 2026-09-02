@@ -65,6 +65,7 @@ func (r *memoryRepo) Delete(_ context.Context, id int64) error {
 type mockProbe struct {
 	mu                 sync.Mutex
 	getServerConfigErr error
+	getServerConfig    map[string]string
 	setServerConfigErr error
 	calls              []string
 	lastSetParams      map[string]string
@@ -117,6 +118,9 @@ func (m *mockProbe) GetServerConfig(_ context.Context, _ *node.Node) (map[string
 	if m.getServerConfigErr != nil {
 		return nil, m.getServerConfigErr
 	}
+	if m.getServerConfig != nil {
+		return m.getServerConfig, nil
+	}
 	return map[string]string{"api.secret": "x", "http.port": "80"}, nil
 }
 func (m *mockProbe) ApplyConfigForNode(_ context.Context, n *node.Node, _ service.MediaTuning) error {
@@ -162,6 +166,37 @@ func TestNodeService_Create_ProbesZLM_ThenWritesUUID(t *testing.T) {
 	require.Equal(t, []string{"GetServerConfig", "SetServerConfig", "GetServerConfig"}, probe.calls)
 	require.Equal(t, n.MediaServerUUID, probe.lastSetParams["general.mediaServerId"])
 	require.True(t, n.AutoOnDemandReady)
+}
+
+func TestNodeService_ProbeCreateReadsZLMWithoutPersistingOrReturningSecret(t *testing.T) {
+	repo := newMemoryRepo()
+	probe := &mockProbe{getServerConfig: map[string]string{
+		"api.secret":            "must-not-leak",
+		"general.mediaServerId": "existing-zlm-id",
+		"http.port":             "18080",
+		"rtsp.port":             "10554",
+		"rtmp.port":             "11935",
+		"rtp_proxy.port":        "10000",
+		"protocol.enable_rtsp":  "1",
+		"protocol.enable_rtmp":  "1",
+		"protocol.enable_hls":   "0",
+		"protocol.enable_ts":    "1",
+		"protocol.enable_fmp4":  "1",
+	}}
+	svc := newSvc(repo, probe)
+
+	preview, err := svc.ProbeCreate(context.Background(), service.CreateNodeReq{
+		Name: "edge-a", Host: "10.0.0.8", APIPort: 18080, APISecret: "must-not-leak",
+	})
+
+	require.NoError(t, err)
+	require.True(t, preview.Online)
+	require.Equal(t, "existing-zlm-id", preview.MediaServerID)
+	require.Equal(t, 18080, preview.ServerConfig.HTTPPort)
+	require.Equal(t, 10554, preview.ServerConfig.RTSPPort)
+	require.False(t, preview.ServerConfig.HLSEnabled)
+	require.Empty(t, repo.rows, "预检不得登记节点")
+	require.Equal(t, []string{"GetServerConfig"}, probe.calls, "预检不得下发 ZLM 配置")
 }
 
 func TestNodeService_ApplyActiveConfigsConvergesEveryActiveNode(t *testing.T) {

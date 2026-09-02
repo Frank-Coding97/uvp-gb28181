@@ -16,7 +16,7 @@ describe("transient legacy media route history", () => {
     const currentIndex = source.indexOf("store.setCurrentRoute(route)");
     const legacyIndex = source.indexOf("shouldSkipRouteHistory(route)", currentIndex);
     const tabsIndex = source.indexOf("store.setTabs(route)", legacyIndex);
-    const cacheIndex = source.indexOf("store.setRoutePaths(route.path)");
+    const cacheIndex = source.indexOf("store.setRoutePaths(resolveMediaRouteRenderKey(current))");
 
     expect(currentIndex).toBeGreaterThan(-1);
     expect(legacyIndex).toBeGreaterThan(currentIndex);

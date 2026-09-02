@@ -563,6 +563,43 @@ export const controlDevice = (channelId: number, data: Record<string, unknown>) 
     data
   });
 
+export type DeviceSnapshotState = "creating" | "waiting" | "receiving" | "completed" | "failed";
+
+export interface DeviceSnapshotFile {
+  name: string;
+  size: number;
+  receivedAt: string;
+  url: string;
+}
+
+export interface DeviceSnapshotSession {
+  sessionId: string;
+  operationId?: string;
+  channelId: string;
+  channelCode: string;
+  deviceCode: string;
+  snapNum: number;
+  interval: number;
+  state: DeviceSnapshotState;
+  receivedCount: number;
+  notifiedCount: number;
+  files: DeviceSnapshotFile[];
+  error?: string;
+}
+
+export const createDeviceSnapshotSession = (channelId: number, data: { snapNum: number; interval: number }) =>
+  http.request<BaseResult<DeviceSnapshotSession>>(
+    "post",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/snapshot-sessions`),
+    { data, headers: { "Idempotency-Key": `snapshot-${channelId}-${Date.now()}` } }
+  );
+
+export const getDeviceSnapshotSession = (channelId: number, sessionId: string) =>
+  http.request<BaseResult<DeviceSnapshotSession>>(
+    "get",
+    baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/snapshot-sessions/${encodeURIComponent(sessionId)}`)
+  );
+
 export const controlPtz = (channelId: number, data: Record<string, unknown>) =>
   http.request<BaseResult<DeviceOperationResult>>("post", baseUrlApi(`gb28181/device-mgmt/channel/${channelId}/ptz`), { data });
 

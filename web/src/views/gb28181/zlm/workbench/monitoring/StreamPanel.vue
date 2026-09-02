@@ -21,7 +21,7 @@ import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "@/views/gb28181/components/PlayWindow.vue";
 
 import ZLMStreamCloseDialog from "../../ZLMStreamCloseDialog.vue";
-import { formatZLMByteRate, formatZLMBytes, formatZLMDuration, zlmErrorPresentation, zlmFreshnessPresentation } from "../../components/zlmFormatters";
+import { formatZLMByteRate, formatZLMBytes, formatZLMDuration, zlmErrorPresentation } from "../../components/zlmFormatters";
 import { useZLMRuntimePolling } from "../../composables/useZLMRuntimePolling";
 import { streamIdentityKey as mediaIdentityKey } from "../../streamManagementState";
 import { buildStreamRequestQuery, createStreamFilters, sameNodeTargets, type MonitoringStreamFilters } from "./monitoringState";
@@ -74,8 +74,11 @@ let snapshotGeneration = 0;
 
 const requestNodeId = computed(() => props.scope === "all" ? 1 : props.nodeId);
 const scopeLabel = computed(() => props.scope === "all" ? "全部节点" : `节点 #${props.nodeId ?? "—"}`);
-const rows = computed(() => pageData.value?.list ?? []);
-const freshness = computed(() => zlmFreshnessPresentation(pageData.value?.asOf));
+type StreamTableRow = ZLMStream & { rowKey: string };
+const rows = computed<StreamTableRow[]>(() => (pageData.value?.list ?? []).map(stream => ({
+  ...stream,
+  rowKey: streamIdentityKey(stream)
+})));
 const errorPresentation = computed(() => zlmErrorPresentation(loadError.value));
 const detailErrorPresentation = computed(() => zlmErrorPresentation(detailError.value));
 const previewErrorPresentation = computed(() => zlmErrorPresentation(previewError.value));
@@ -335,15 +338,6 @@ defineExpose({ refresh });
 
 <template>
   <div class="monitoring-panel stream-panel">
-    <header class="monitoring-panel__header">
-      <div>
-        <div class="monitoring-panel__eyebrow"><Radio :size="14" />在线媒体</div>
-        <h2>流管理</h2>
-        <p>所有列表、详情和危险操作都通过 UVP 后端；媒体身份始终包含节点与完整 Schema / VHost / App / Stream。</p>
-      </div>
-      <span v-if="pageData" :class="`freshness freshness--${freshness.tone}`" :title="freshness.description">{{ freshness.label }} · {{ pageData.asOf }}</span>
-    </header>
-
     <div v-if="readOnly" class="monitoring-banner" role="status">当前账号仅可查看流运行态；预览、普通关闭和强制关闭按钮按独立权限隐藏。</div>
     <div v-if="pageData?.partial" class="monitoring-banner monitoring-banner--warning" role="status">部分节点采集失败，仍展示已返回的 {{ pageData.list.length }} 条数据，不清空整页。</div>
     <div v-else-if="loadError && pageData" class="monitoring-banner monitoring-banner--warning" role="status">本次刷新失败：{{ errorPresentation.label }}；保留上一次分页与筛选结果。</div>
@@ -354,7 +348,7 @@ defineExpose({ refresh });
         <a-input v-model="filters.vhost" allow-clear placeholder="VHost" class="filter-vhost" @press-enter="applyFilters" />
         <a-input v-model="filters.app" allow-clear placeholder="App" class="filter-app" @press-enter="applyFilters" />
         <a-input-search v-model="filters.stream" allow-clear placeholder="Stream ID" class="filter-stream" @search="applyFilters" />
-        <a-select v-model="filters.recording" allow-clear placeholder="录制状态" class="filter-recording"><a-option value="mp4">MP4 录制</a-option><a-option value="hls">HLS 录制</a-option></a-select>
+        <a-select v-model="filters.recording" allow-clear placeholder="录制状态" class="filter-recording" style="width: 132px; min-width: 132px; max-width: 132px; flex: 0 0 132px"><a-option value="mp4">MP4 录制</a-option><a-option value="hls">HLS 录制</a-option></a-select>
       </template>
       <template #actions><a-button type="primary" @click="applyFilters">查询</a-button><a-button @click="clearFilters">重置</a-button><a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新媒体流" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
       <template #extra><span class="selection-meta">已选 {{ selectedTargets.length }} 路</span><a-button v-if="canClose" status="danger" :disabled="!canBatchClose" @click="openBatchClose">批量普通关闭</a-button><span v-if="selectedTargets.length > 0 && !canBatchClose" class="selection-warning">跨节点选择不可批量关闭</span></template>
@@ -363,7 +357,7 @@ defineExpose({ refresh });
     <div v-if="loading && !pageData" class="monitoring-state" role="status"><a-spin />正在读取{{ scopeLabel }}媒体流…</div>
     <div v-else-if="loadError && !pageData" class="monitoring-state monitoring-state--error" role="alert"><ShieldAlert :size="34" /><strong>{{ errorPresentation.label }}</strong><a-button v-if="errorPresentation.retryable" @click="refresh">重新加载</a-button></div>
     <section v-else class="stream-table-panel">
-      <a-table v-model:selected-keys="selectedKeys" :data="rows" :loading="loading" :row-key="streamIdentityKey" :row-selection="canClose ? { type: 'checkbox', showCheckedAll: true } : undefined" :pagination="false" class="uvp-data-table">
+      <a-table v-model:selected-keys="selectedKeys" :data="rows" :loading="loading" row-key="rowKey" :row-selection="canClose ? { type: 'checkbox', showCheckedAll: true } : undefined" :pagination="false" class="uvp-data-table">
         <template #columns>
           <a-table-column title="媒体身份" :width="310"><template #cell="{ record }"><button type="button" class="identity-link" :aria-label="`查看流 ${record.media.app}/${record.media.stream} 详情`" @click="openDetail(record)"><Radio :size="14" /><span><strong>{{ record.media.app }}/{{ record.media.stream }}</strong><small>{{ record.media.schema }} · {{ record.media.vhost }}</small></span></button></template></a-table-column>
           <a-table-column title="来源" :width="130"><template #cell="{ record }"><span>{{ record.originTypeName || `类型 ${record.originType}` }}</span><small class="subline">#{{ record.nodeId }}</small></template></a-table-column>
@@ -404,10 +398,12 @@ defineExpose({ refresh });
 </template>
 
 <style scoped>
-.monitoring-panel { box-sizing: border-box; min-width: 0; color: var(--zlm-text-2); }.monitoring-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 12px; }.monitoring-panel__eyebrow { display: inline-flex; align-items: center; gap: 7px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.monitoring-panel h2 { margin: 4px 0 0; color: var(--zlm-text-1); font-size: 19px; }.monitoring-panel p { margin: 5px 0 0; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); line-height: 1.55; }.freshness { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.freshness--warning { color: var(--zlm-warn-600); }.freshness--danger { color: var(--zlm-danger-600); }
+.monitoring-panel { box-sizing: border-box; min-width: 0; color: var(--zlm-text-2); }
 .monitoring-banner { margin: 10px 0; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.monitoring-banner--warning { color: var(--zlm-warn-600); background: var(--zlm-warn-50); border-color: var(--zlm-warn-500); }.monitoring-state { display: flex; min-height: 280px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); }.monitoring-state strong { color: var(--zlm-text-1); }.monitoring-state--error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }
-.stream-search { margin: 12px 0; }.filter-short { width: 100px; }.filter-vhost { width: 170px; }.filter-app { width: 130px; }.filter-stream { width: 190px; }.filter-recording { width: 130px; }.selection-meta, .selection-warning { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.selection-warning { color: var(--zlm-warn-600); }
+.stream-search { margin: 0 0 12px; }.filter-short { width: 100px; }.filter-vhost { width: 170px; }.filter-app { width: 130px; }.filter-stream { width: 190px; }.filter-recording { width: 132px; flex: 0 0 132px; }.selection-meta, .selection-warning { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.selection-warning { color: var(--zlm-warn-600); }
+.stream-search :deep(.arco-select-view) { box-sizing: border-box; background: var(--uvp-search-control-bg) !important; border: 1px solid var(--uvp-search-secondary-btn-border) !important; border-radius: 10px !important; box-shadow: var(--uvp-search-control-shadow) !important; }
+.stream-search :deep(.arco-select-view-focus) { border-color: var(--uvp-brand) !important; box-shadow: var(--uvp-search-control-focus-shadow) !important; }
 .stream-table-panel { overflow: hidden; background: var(--uvp-panel-bg); border: 1px solid var(--uvp-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-panel-shadow); }.identity-link { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 0; color: var(--zlm-brand-600); text-align: left; background: none; border: 0; cursor: pointer; }.identity-link > span { min-width: 0; }.identity-link strong, .identity-link small, .subline { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.identity-link small, .subline { margin-top: 2px; color: var(--zlm-text-4); font-family: var(--zlm-font-mono); font-size: 11px; }.identity-link:focus-visible { outline: 2px solid var(--zlm-brand-500); outline-offset: 3px; }.numeric { display: inline-flex; align-items: center; gap: 4px; font-family: var(--zlm-font-mono); }.recording { color: var(--zlm-danger-600); }.muted { color: var(--zlm-text-4); }.ownership { font-size: var(--zlm-fs-caption); }.ownership--managed { color: var(--zlm-success-600); }.ownership--owned, .ownership--conflicted { color: var(--zlm-warn-600); }.ownership--unknown { color: var(--zlm-danger-600); }.row-actions { display: flex; align-items: center; gap: 5px; }.row-actions svg { vertical-align: -2px; }.stream-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px 16px; color: var(--zlm-text-3); }.stream-empty strong { color: var(--zlm-text-1); }.stream-pagination { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 16px; color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); border-top: 1px solid var(--zlm-border); }
 .drawer-state { display: flex; min-height: 260px; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }.drawer-state--error { color: var(--zlm-danger-600); }.detail-body { display: flex; flex-direction: column; gap: 18px; color: var(--zlm-text-2); }.detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; margin: 0; }.detail-grid div { min-width: 0; }.detail-grid dt { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.detail-grid dd { margin: 4px 0 0; overflow-wrap: anywhere; color: var(--zlm-text-1); font-family: var(--zlm-font-mono); }.detail-body h3 { margin: 0 0 8px; color: var(--zlm-text-1); font-size: 14px; }.detail-body p { color: var(--zlm-text-3); }.ownership-list { display: flex; flex-wrap: wrap; gap: 8px; }.ownership-list span { padding: 4px 8px; background: var(--zlm-fill-2); border: 1px solid var(--zlm-border); border-radius: var(--zlm-radius-sm); font-size: var(--zlm-fs-caption); }.preview-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }.preview-expiry, .preview-error { margin-bottom: 12px; padding: 9px 12px; color: var(--zlm-text-2); background: var(--zlm-info-50); border: 1px solid var(--zlm-info-500); border-radius: var(--zlm-radius-md); font-size: var(--zlm-fs-caption); }.preview-error { color: var(--zlm-danger-600); background: var(--zlm-danger-50); border-color: var(--zlm-danger-500); }.snapshot-body p { color: var(--zlm-text-3); font-size: var(--zlm-fs-caption); }.snapshot-body img { display: block; max-width: 100%; max-height: 70vh; margin: 0 auto; background: #020617; border-radius: var(--zlm-radius-md); }
-@media (max-width: 900px) { .monitoring-panel__header { flex-direction: column; }.filter-short, .filter-vhost, .filter-app, .filter-stream, .filter-recording { width: 100%; }.detail-grid { grid-template-columns: 1fr; } }.stream-pagination { flex-wrap: wrap; }
+@media (max-width: 900px) { .filter-short, .filter-vhost, .filter-app, .filter-stream { width: 100%; }.detail-grid { grid-template-columns: 1fr; } }.stream-pagination { flex-wrap: wrap; }
 </style>
