@@ -8,12 +8,16 @@ export interface DashboardGridGeometry {
   h: number;
 }
 
-export type DashboardGridEngine = Pick<GridStack, "enableMove" | "enableResize" | "destroy">;
+export type DashboardGridEngine = Pick<GridStack, "enableMove" | "enableResize" | "destroy" | "on" | "off">;
 export type DashboardGridFactory = (options: GridStackOptions, element: HTMLElement) => DashboardGridEngine;
 
 export interface DashboardGridHandle {
   setEditing(editing: boolean): void;
   destroy(): void;
+}
+
+export interface DashboardGridCallbacks {
+  onChange?(items: DashboardGridGeometry[]): void;
 }
 
 const defaultGridFactory: DashboardGridFactory = (options, host) => {
@@ -37,7 +41,8 @@ export function normalizeGridChange(nodes: Array<Pick<GridStackNode, "id" | "x" 
 
 export function createDashboardGrid(
   element: HTMLElement,
-  factory: DashboardGridFactory = defaultGridFactory
+  factory: DashboardGridFactory = defaultGridFactory,
+  callbacks: DashboardGridCallbacks = {}
 ): DashboardGridHandle {
   const engine = factory(
     {
@@ -50,6 +55,8 @@ export function createDashboardGrid(
     },
     element
   );
+  const changeHandler = (_event: Event, nodes: GridStackNode[]) => callbacks.onChange?.(normalizeGridChange(nodes));
+  engine.on("change", changeHandler);
 
   return {
     setEditing(editing: boolean) {
@@ -57,6 +64,7 @@ export function createDashboardGrid(
       engine.enableResize(editing);
     },
     destroy() {
+      engine.off("change");
       engine.destroy(false);
     }
   };

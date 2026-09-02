@@ -29,7 +29,9 @@ describe("dashboard grid adapter", () => {
     const enableMove = vi.fn();
     const enableResize = vi.fn();
     const destroy = vi.fn();
-    const engine = { enableMove, enableResize, destroy } as unknown as DashboardGridEngine;
+    const on = vi.fn();
+    const off = vi.fn();
+    const engine = { enableMove, enableResize, destroy, on, off } as unknown as DashboardGridEngine;
     const factory = vi.fn(() => engine);
 
     const grid = createDashboardGrid(host, factory);
@@ -45,6 +47,7 @@ describe("dashboard grid adapter", () => {
     expect(enableMove).toHaveBeenLastCalledWith(false);
     expect(enableResize).toHaveBeenLastCalledWith(false);
     grid.destroy();
+    expect(off).toHaveBeenCalledWith("change");
     expect(destroy).toHaveBeenCalledWith(false);
   });
 
