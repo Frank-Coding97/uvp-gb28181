@@ -26,6 +26,11 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("getHomeDashboardSummary");
     expect(source).toContain("平台版本");
     expect(source).toContain("平台运行时间");
+    expect(source).toContain("当前时间");
+    expect(source).toContain("platformClockDate");
+    expect(source).toContain("platformClockTime");
+    expect(source).toContain("setInterval(() => { clockNow.value = new Date(); }, 1_000)");
+    expect(source).toContain("<Transition name=\"clock-tick\"");
     expect(source).not.toContain("网络线程负载");
     for (const color of ["--uvp-warning", "--uvp-brand-cyan", "--uvp-brand"]) {
       expect(source).toContain(`color=\"var(${color})\"`);
@@ -53,6 +58,13 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain(".embedded{height:100%;gap:10px;");
     expect(source).toContain(".embedded :deep(.pulse){flex:none}");
     expect(source).toContain(".embedded :deep(.pulse__chart){flex:none;height:90px;min-height:90px}");
+  });
+
+  it("centers the media health and platform information contents", () => {
+    expect(source).toContain("class=\"health-content\"");
+    expect(source).toContain(".widget-media-node-health .card,.widget-platform-info .card{display:flex;flex-direction:column}");
+    expect(source).toContain(".health-content{display:flex;flex:1;flex-direction:column;justify-content:center}");
+    expect(source).toContain(".platform-info{display:grid;flex:1;");
   });
 
   it("keeps cumulative traffic and realtime rate as different metrics", () => {
