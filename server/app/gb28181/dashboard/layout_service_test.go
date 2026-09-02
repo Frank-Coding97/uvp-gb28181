@@ -26,7 +26,7 @@ func TestLayoutServiceDefaultsIsolationCASAndReset(t *testing.T) {
 	initial, err := service.Get(ctx, 7)
 	require.NoError(t, err)
 	require.Zero(t, initial.Revision)
-	require.Len(t, initial.Layout.Widgets, 11)
+	require.Len(t, initial.Layout.Widgets, 12)
 
 	aLayout := initial.Layout
 	aLayout.Widgets[0].X = 3

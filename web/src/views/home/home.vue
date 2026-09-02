@@ -47,6 +47,10 @@
           <template v-else-if="widget.id === 'sip-monitor'"><SipDashboardCard class="embedded" /></template>
           <template v-else-if="widget.id === 'device-online-rate'"><CardTitle icon="device" title="设备在线率" /><OnlineDonut :online="devices.online" :total="devices.total" label="设备在线率" /></template>
           <template v-else-if="widget.id === 'channel-online-rate'"><CardTitle icon="channel" title="通道在线率" /><OnlineDonut :online="channels.online" :total="channels.total" label="通道在线率" /></template>
+          <template v-else-if="widget.id === 'platform-info'">
+            <CardTitle icon="platform" title="平台信息" />
+            <div class="platform-info"><span><small>平台版本</small><strong>{{ platformInfo?.version ? `v${platformInfo.version}` : "--" }}</strong></span><span><small>平台运行时间</small><strong>{{ platformUptime }}</strong></span></div>
+          </template>
           <template v-else-if="widget.id === 'media-rate'">
             <CardTitle icon="rate" title="媒体实时速率" /><div class="rate-head"><strong>{{ bytes(mediaRate) }}/s</strong><span>全部媒体节点</span></div>
             <div class="bars"><div v-for="item in streamRanking.slice(0, 6)" :key="item.key"><span>{{ item.name }}</span><i><b :style="{ width: `${item.bar}%` }" /></i><strong>{{ bytes(item.bytesSpeed) }}/s</strong></div><p v-if="!streamRanking.length" class="empty">暂无在线媒体流</p></div>
@@ -71,7 +75,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { GripHorizontal, LayoutDashboard, LoaderCircle, Pencil, RefreshCw, RotateCcw, Save } from "lucide-vue-next";
 import "gridstack/dist/gridstack.min.css";
-import { fetchSipDashboardSnapshot, HEALTH_EMPTY, type DashboardSnapshot } from "@/api/gb28181";
+import { fetchSipDashboardSnapshot, fetchSipPlatformInfo, HEALTH_EMPTY, type DashboardSnapshot, type SipPlatformInfo } from "@/api/gb28181";
 import { getZLMOverview, type ZLMOverview } from "@/api/gb28181-zlm-runtime";
 import { listChannels, listDevices } from "@/views/gb28181/device-mgmt/api";
 import { getHomeDashboardLayout, resetHomeDashboardLayout, saveHomeDashboardLayout } from "@/api/home-dashboard";
@@ -88,6 +92,7 @@ const layout = ref<DashboardLayout>(clone(DEFAULT_DASHBOARD_LAYOUT));
 const savedLayout = ref<DashboardLayout>(clone(DEFAULT_DASHBOARD_LAYOUT));
 const revision = ref(0), editing = ref(false), saving = ref(false), refreshing = ref(false), layoutLoading = ref(true);
 const updatedAt = ref<Date | null>(null), sipSnapshot = ref<DashboardSnapshot | null>(null), mediaOverview = ref<ZLMOverview | null>(null);
+const platformInfo = ref<SipPlatformInfo | null>(null);
 const devices = ref({ total: 0, online: 0 }), channels = ref({ total: 0, online: 0 });
 const playSuccessTrend = ref<number[]>([]), mediaRateTrend = ref<number[]>([]);
 let grid: DashboardGridHandle | null = null, timer: ReturnType<typeof setInterval> | null = null;
@@ -102,6 +107,11 @@ const inviteSuccessRate = computed<number | null>(() => null);
 const viewers = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.readerCount, 0) ?? 0);
 const recordings = computed(() => mediaOverview.value?.streams.filter(item => item.recordingMp4 || item.recordingHls).length ?? 0);
 const mediaRate = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.bytesSpeed, 0) ?? 0);
+const platformUptime = computed(() => {
+  const startedAt = Date.parse(platformInfo.value?.runtime.startedAt ?? "");
+  if (!Number.isFinite(startedAt)) return platformInfo.value?.runtime.state === "running" ? "等待启动时间" : "未运行";
+  return duration(Math.max(0, (updatedAt.value?.getTime() ?? Date.now()) - startedAt));
+});
 const healthyNodes = computed(() => mediaOverview.value?.nodes.filter(item => item.state === "active" && item.status === "fresh").length ?? 0);
 const maintenanceNodes = computed(() => mediaOverview.value?.nodes.filter(item => item.state === "maintenance").length ?? 0);
 const offlineNodes = computed(() => mediaOverview.value?.nodes.filter(item => item.state === "offline").length ?? 0);
@@ -114,7 +124,7 @@ const streamRanking = computed(() => {
 
 function clone(value: DashboardLayout): DashboardLayout { return { schemaVersion: value.schemaVersion, widgets: value.widgets.map(item => ({ ...item, settings: {} })) }; }
 function definition(id: DashboardWidgetId) { return DASHBOARD_WIDGET_REGISTRY.find(item => item.layout.id === id)!; }
-function widgetTitle(id: DashboardWidgetId): string { return ({ "sip-rpm": "实时 SIP RPM", "sip-today": "今日 SIP 处理数量", "play-success-24h": "点播成功率", "media-traffic-today": "今日媒体流量", "media-runtime": "流媒体运行态", "sip-monitor": "GB28181 SIP 协议监控", "device-online-rate": "设备在线率", "channel-online-rate": "通道在线率", "media-rate": "媒体实时速率", "media-node-health": "媒体节点健康", "active-stream-ranking": "活跃流排行" })[id]; }
+function widgetTitle(id: DashboardWidgetId): string { return ({ "sip-rpm": "实时 SIP RPM", "sip-today": "今日 SIP 处理数量", "play-success-24h": "点播成功率", "media-traffic-today": "今日媒体流量", "media-runtime": "流媒体运行态", "sip-monitor": "GB28181 SIP 协议监控", "device-online-rate": "设备在线率", "channel-online-rate": "通道在线率", "media-rate": "媒体实时速率", "media-node-health": "媒体节点健康", "active-stream-ranking": "活跃流排行", "platform-info": "平台信息" })[id]; }
 
 async function loadLayout() {
   try { const response = await getHomeDashboardLayout(); layout.value = normalizeDashboardLayout(response.data.layout); revision.value = response.data.revision; }
@@ -123,13 +133,14 @@ async function loadLayout() {
 }
 async function refreshData() {
   if (refreshing.value) return; refreshing.value = true;
-  const results = await Promise.allSettled([fetchSipDashboardSnapshot(), getZLMOverview(), listDevices({ page: 1, pageSize: 1 }), listChannels({ page: 1, pageSize: 1 }), listChannels({ status: "online", page: 1, pageSize: 1 })]);
-  const [sip, overview, devicePage, channelPage, onlineChannels] = results;
+  const results = await Promise.allSettled([fetchSipDashboardSnapshot(), getZLMOverview(), listDevices({ page: 1, pageSize: 1 }), listChannels({ page: 1, pageSize: 1 }), listChannels({ status: "online", page: 1, pageSize: 1 }), fetchSipPlatformInfo()]);
+  const [sip, overview, devicePage, channelPage, onlineChannels, platform] = results;
   if (sip.status === "fulfilled") sipSnapshot.value = sip.value.data;
   if (overview.status === "fulfilled") { mediaOverview.value = overview.value.data; mediaRateTrend.value = [...mediaRateTrend.value.slice(-23), mediaRate.value]; }
   if (inviteSuccessRate.value != null) playSuccessTrend.value = [...playSuccessTrend.value.slice(-23), inviteSuccessRate.value];
   if (devicePage.status === "fulfilled") devices.value = { total: devicePage.value.data.total ?? 0, online: devicePage.value.data.onlineTotal ?? 0 };
   if (channelPage.status === "fulfilled" && onlineChannels.status === "fulfilled") channels.value = { total: channelPage.value.data.total ?? 0, online: onlineChannels.value.data.total ?? 0 };
+  if (platform.status === "fulfilled") platformInfo.value = platform.value.data;
   updatedAt.value = new Date(); refreshing.value = false;
 }
 function initGrid() { grid?.destroy(); grid = gridElement.value ? createDashboardGrid(gridElement.value, undefined, { onChange(items) { for (const value of items) { const item = layout.value.widgets.find(widget => widget.id === value.id); if (item) Object.assign(item, value); } } }) : null; grid?.setEditing(editing.value); }
@@ -141,6 +152,7 @@ async function resetLayout() { try { const response = await resetHomeDashboardLa
 function number(value: number | null | undefined) { return value == null || !Number.isFinite(value) ? "--" : value.toLocaleString("zh-CN"); }
 function percent(value: number | null | undefined) { return value == null ? "--" : `${(value * 100).toFixed(1)}%`; }
 function bytes(value: number) { if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB`; if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB`; if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`; return `${value.toFixed(0)} B`; }
+function duration(milliseconds: number) { const totalMinutes = Math.floor(milliseconds / 60_000); const days = Math.floor(totalMinutes / 1440), hours = Math.floor(totalMinutes % 1440 / 60), minutes = totalMinutes % 60; return days ? `${days} 天 ${hours} 小时` : hours ? `${hours} 小时 ${minutes} 分钟` : `${minutes} 分钟`; }
 onMounted(async () => { await Promise.all([loadLayout(), refreshData()]); timer = setInterval(refreshData, 5_000); });
 onBeforeUnmount(() => { if (timer) clearInterval(timer); grid?.destroy(); });
 </script>
@@ -148,7 +160,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); grid?.destroy(); });
 <style scoped lang="scss">
 .dashboard-shell{min-height:100%;padding:18px;color:var(--uvp-text-primary)}.dashboard-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.dashboard-title{display:flex;gap:12px;align-items:center}.dashboard-title h1{margin:1px 0 0;font-size:24px}.dashboard-title small,.card p{color:var(--uvp-text-tertiary)}.title-icon{display:grid;width:42px;height:42px;color:var(--uvp-brand);background:var(--uvp-brand-soft);border-radius:9px;place-items:center}.actions{display:flex;gap:8px;align-items:center}.actions button{display:inline-flex;gap:6px;align-items:center;height:36px;padding:0 13px;font:inherit;cursor:pointer;border-radius:8px}.secondary{color:var(--uvp-text-primary);background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border)}.primary{color:#fff;background:var(--uvp-brand);border:1px solid var(--uvp-brand)}.live{display:flex;gap:7px;align-items:center;margin-right:4px;font-size:12px;color:var(--uvp-text-secondary)}.live i{width:7px;height:7px;background:var(--uvp-brand-cyan);border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,var(--uvp-brand-cyan) 12%,transparent)}
 .widget-picker{display:flex;gap:14px;align-items:center;padding:10px 14px;margin-bottom:12px;overflow-x:auto;font-size:12px;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:9px}.widget-picker label{display:inline-flex;gap:5px;align-items:center;white-space:nowrap}.widget-picker>span{margin-left:auto;color:var(--uvp-text-tertiary);white-space:nowrap}.loading{display:grid;min-height:420px;color:var(--uvp-text-secondary);place-content:center;justify-items:center;gap:10px}.dashboard-grid{margin:-6px}.card{position:relative;box-sizing:border-box;padding:15px;overflow:hidden;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:var(--uvp-panel-radius);box-shadow:var(--uvp-panel-shadow)}.editing .card{border-color:color-mix(in srgb,var(--uvp-brand) 45%,var(--uvp-panel-border))}.drag{position:absolute;top:4px;right:7px;z-index:3;color:var(--uvp-text-tertiary);cursor:move}.kpi{margin-top:25px;font-size:29px;font-weight:700;line-height:1}.kpi small{margin-left:3px;font-size:12px;font-weight:500;color:var(--uvp-text-tertiary)}.card p{margin-top:9px;font-size:11px}
-.runtime{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 12px;margin-top:10px}.runtime span{display:flex;flex-direction:column;gap:2px}.runtime small{font-size:10px;line-height:1;color:var(--uvp-text-tertiary)}.runtime strong{font-size:20px;line-height:1.05}.embedded{height:100%;padding:0;border:0;box-shadow:none}.rate-head{display:flex;align-items:baseline;justify-content:space-between;margin:18px 0 12px}.rate-head strong{font-size:22px}.rate-head span{font-size:11px;color:var(--uvp-text-tertiary)}.bars{display:flex;flex-direction:column;gap:9px}.bars>div{display:grid;grid-template-columns:120px 1fr 90px;gap:10px;align-items:center;font-size:11px}.bars span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bars i{height:7px;overflow:hidden;background:var(--uvp-list-toolbar-bg);border-radius:6px}.bars b{display:block;height:100%;background:var(--uvp-brand);border-radius:inherit}.bars>div>strong{text-align:right}
+.runtime{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 12px;margin-top:10px}.runtime span{display:flex;flex-direction:column;gap:2px}.runtime small{font-size:10px;line-height:1;color:var(--uvp-text-tertiary)}.runtime strong{font-size:20px;line-height:1.05}.platform-info{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:18px}.platform-info span{display:flex;flex-direction:column;gap:5px}.platform-info small{font-size:11px;color:var(--uvp-text-tertiary)}.platform-info strong{font-size:20px}.embedded{height:100%;padding:0;border:0;box-shadow:none}.rate-head{display:flex;align-items:baseline;justify-content:space-between;margin:18px 0 12px}.rate-head strong{font-size:22px}.rate-head span{font-size:11px;color:var(--uvp-text-tertiary)}.bars{display:flex;flex-direction:column;gap:9px}.bars>div{display:grid;grid-template-columns:120px 1fr 90px;gap:10px;align-items:center;font-size:11px}.bars span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bars i{height:7px;overflow:hidden;background:var(--uvp-list-toolbar-bg);border-radius:6px}.bars b{display:block;height:100%;background:var(--uvp-brand);border-radius:inherit}.bars>div>strong{text-align:right}
 .health-total{display:flex;align-items:baseline;justify-content:center;gap:7px;margin:28px 0 20px}.health-total strong{font-size:32px}.health-total span{font-size:11px;color:var(--uvp-text-tertiary)}.health-legend{display:flex;justify-content:space-around;font-size:11px;color:var(--uvp-text-secondary)}.health-legend i{display:inline-block;width:7px;height:7px;margin-right:4px;border-radius:50%}.health-legend .ok{background:var(--uvp-brand-cyan)}.health-legend .warn{background:var(--uvp-warning)}.health-legend .bad{background:var(--uvp-danger)}.load{display:flex;justify-content:space-between;padding-top:14px;margin-top:16px;font-size:11px;border-top:1px solid var(--uvp-panel-border)}.ranking{margin-top:14px}.ranking>div{display:grid;grid-template-columns:26px 1fr 90px 110px;gap:10px;align-items:center;min-height:38px;font-size:11px;border-bottom:1px solid var(--uvp-panel-border)}.rank{color:var(--uvp-text-tertiary);text-align:center}.stream{display:flex;flex-direction:column;min-width:0}.stream strong,.stream small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stream small{color:var(--uvp-text-tertiary)}.viewer{color:var(--uvp-brand-cyan)}.ranking>div>strong{text-align:right}.empty{display:grid;min-height:90px;color:var(--uvp-text-tertiary);place-items:center}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.dashboard-header{align-items:flex-start}.actions{flex-wrap:wrap;justify-content:flex-end}.live{width:100%;justify-content:flex-end}}
 </style>

@@ -10,7 +10,7 @@ import (
 func TestDefaultLayoutContainsEveryWidgetOnce(t *testing.T) {
 	layout := DefaultLayout()
 	require.Equal(t, CurrentSchemaVersion, layout.SchemaVersion)
-	require.Len(t, layout.Widgets, 11)
+	require.Len(t, layout.Widgets, 12)
 
 	seen := make(map[string]bool, len(layout.Widgets))
 	for _, widget := range layout.Widgets {
@@ -25,7 +25,8 @@ func TestDefaultLayoutContainsEveryWidgetOnce(t *testing.T) {
 		require.Equal(t, 2, widget.H)
 		require.Zero(t, widget.Y)
 	}
-	require.False(t, widgetByID(t, layout, "sip-monitor").Visible)
+	require.Equal(t, WidgetLayout{ID: "sip-monitor", X: 0, Y: 6, W: 12, H: 5, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "sip-monitor"))
+	require.Equal(t, WidgetLayout{ID: "platform-info", X: 12, Y: 6, W: 8, H: 2, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "platform-info"))
 	require.False(t, widgetByID(t, layout, "active-stream-ranking").Visible)
 	require.False(t, widgetByID(t, layout, "media-node-health").Visible)
 	require.Equal(t, WidgetLayout{ID: "media-rate", X: 0, Y: 2, W: 12, H: 4, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "media-rate"))
@@ -57,7 +58,7 @@ func TestNormalizeLayoutMigratesLegacyReferenceRowWithoutGap(t *testing.T) {
 		require.Equal(t, index*4, widget.X)
 		require.Equal(t, 4, widget.W)
 	}
-	require.False(t, widgetByID(t, normalized, "sip-monitor").Visible)
+	require.True(t, widgetByID(t, normalized, "sip-monitor").Visible)
 	require.Equal(t, 12, widgetByID(t, normalized, "device-online-rate").X)
 	require.Equal(t, 16, widgetByID(t, normalized, "channel-online-rate").X)
 	require.False(t, widgetByID(t, normalized, "active-stream-ranking").Visible)
@@ -98,6 +99,18 @@ func TestNormalizeLayoutMigratesSchema3DefaultsToCompactOptionalLayout(t *testin
 	require.Equal(t, DefaultLayout(), normalized)
 }
 
+func TestNormalizeLayoutMigratesSchema4DefaultsToSIPMonitorAndPlatformInfo(t *testing.T) {
+	legacy := Layout{SchemaVersion: 4}
+	for _, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime", "media-rate", "device-online-rate", "channel-online-rate", "active-stream-ranking", "media-node-health", "sip-monitor"} {
+		item := schema4WidgetDefaults[id]
+		item.Settings = map[string]any{}
+		legacy.Widgets = append(legacy.Widgets, item)
+	}
+	normalized, err := NormalizeLayout(legacy)
+	require.NoError(t, err)
+	require.Equal(t, DefaultLayout(), normalized)
+}
+
 func TestNormalizeLayoutRejectsInvalidGeometryAndUnknownWidgets(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -125,7 +138,7 @@ func TestNormalizeLayoutMigratesKnownWidgetsAndAddsMissingDefaults(t *testing.T)
 	normalized, err := NormalizeLayout(legacy)
 	require.NoError(t, err)
 	require.Equal(t, CurrentSchemaVersion, normalized.SchemaVersion)
-	require.Len(t, normalized.Widgets, 11)
+	require.Len(t, normalized.Widgets, 12)
 	require.Equal(t, 5, widgetByID(t, normalized, "sip-rpm").X)
 }
 
@@ -143,6 +156,7 @@ func schema2WidgetByID(t *testing.T, id string) WidgetLayout {
 		"media-rate":            {ID: "media-rate", X: 0, Y: 7, W: 14, H: 4, Visible: true, Settings: map[string]any{}},
 		"media-node-health":     {ID: "media-node-health", X: 14, Y: 7, W: 6, H: 4, Visible: true, Settings: map[string]any{}},
 		"active-stream-ranking": {ID: "active-stream-ranking", X: 0, Y: 11, W: 20, H: 4, Visible: true, Settings: map[string]any{}},
+		"platform-info":         {ID: "platform-info", X: 12, Y: 6, W: 8, H: 2, Visible: true, Settings: map[string]any{}},
 	}
 	widget, ok := widgets[id]
 	require.True(t, ok, "schema 2 widget %s not found", id)

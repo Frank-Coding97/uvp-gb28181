@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
+	globalapp "uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 type platformInterfaceProvider struct {
@@ -24,6 +26,9 @@ func (p platformInterfaceProvider) Addrs(iface net.Interface) ([]net.Addr, error
 }
 
 func TestPlatformController_UsesPersistedAdvertiseAddress(t *testing.T) {
+	previousVersion := globalapp.AppVersion
+	globalapp.AppVersion.Version = "1.2.3"
+	t.Cleanup(func() { globalapp.AppVersion = previousVersion })
 	db := newSetupControllerDB(t)
 	password := "Sec12345Aa!!"
 	_, err := gbsetup.NewSIPConfigService(db).Save(t.Context(), gbsetup.SaveSIPConfigRequest{
@@ -61,6 +66,8 @@ func TestPlatformController_UsesPersistedAdvertiseAddress(t *testing.T) {
 	require.Equal(t, []string{"192.168.126.126", "10.8.0.3"}, response.Data.SIPIPs)
 	require.Equal(t, "sip:34020000002000000001@192.168.126.126:5061", response.Data.RegisterURI)
 	require.Equal(t, "configured", response.Data.ConfigStatus)
+	require.Equal(t, "1.2.3", response.Data.Version)
+	require.WithinDuration(t, time.Now(), *response.Data.Runtime.StartedAt, time.Second)
 }
 
 func TestPlatformController_MissingConfigIsSuccessful(t *testing.T) {

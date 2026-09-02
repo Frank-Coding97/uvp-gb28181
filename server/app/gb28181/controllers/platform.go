@@ -10,10 +10,12 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
+	globalapp "uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // PlatformInfo 是本级 GB28181 平台对外接入参数。
 type PlatformInfo struct {
+	Version         string                  `json:"version"`
 	Enabled         bool                    `json:"enabled"`
 	ServerID        string                  `json:"serverId"`
 	Domain          string                  `json:"domain"`
@@ -66,7 +68,7 @@ func (pc *PlatformController) Info(c *gin.Context) {
 	runtime := pc.runtime.Snapshot()
 	if config == nil {
 		pc.Success(c, PlatformInfo{
-			Enabled: pc.enabled, Transport: pc.transport, ConfigStatus: "unconfigured",
+			Version: globalapp.AppVersion.Version, Enabled: pc.enabled, Transport: pc.transport, ConfigStatus: "unconfigured",
 			Runtime: runtime, RestartRequired: runtime.State == gbsetup.RuntimeRestartRequired,
 		})
 		return
@@ -77,7 +79,7 @@ func (pc *PlatformController) Info(c *gin.Context) {
 		sipIP = addresses[0]
 	}
 	pc.Success(c, PlatformInfo{
-		Enabled: pc.enabled, ServerID: config.ServerID, Domain: config.Domain,
+		Version: globalapp.AppVersion.Version, Enabled: pc.enabled, ServerID: config.ServerID, Domain: config.Domain,
 		SIPIP: sipIP, SIPIPs: addresses, SIPPort: config.Port, Transport: pc.transport,
 		PasswordMasked: maskStoredPassword(config.HasPassword),
 		RegisterURI:    registerURI(config.ServerID, config.Domain, sipIP, config.Port),

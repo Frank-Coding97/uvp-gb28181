@@ -854,6 +854,7 @@ export const updateDevice = (
 // ===== SIP 平台接入信息 =====
 
 export interface SipPlatformInfo {
+  version: string;
   enabled: boolean;
   serverId: string;
   domain: string;
@@ -1143,6 +1144,7 @@ export interface SipRuntimeStatus {
   state: SipRuntimeState;
   errorSummary?: string;
   updatedAt: string;
+  startedAt?: string;
 }
 
 export interface SipConfigSummary {

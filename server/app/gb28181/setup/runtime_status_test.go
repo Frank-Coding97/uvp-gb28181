@@ -23,14 +23,19 @@ func TestRuntimeStatus_Transitions(t *testing.T) {
 	snapshot := status.Snapshot()
 	require.Equal(t, RuntimeRunning, snapshot.State)
 	require.Equal(t, now, snapshot.UpdatedAt)
+	require.NotNil(t, snapshot.StartedAt)
+	require.Equal(t, now, *snapshot.StartedAt)
 	require.Empty(t, snapshot.ErrorSummary)
 }
 
 func TestRuntimeStatus_ConfigSavedRequiresRestart(t *testing.T) {
 	status := NewRuntimeStatus()
-	status.MarkUnconfigured()
+	status.MarkRunning()
+	startedAt := status.Snapshot().StartedAt
 	status.MarkConfigSaved()
-	require.Equal(t, RuntimeRestartRequired, status.Snapshot().State)
+	snapshot := status.Snapshot()
+	require.Equal(t, RuntimeRestartRequired, snapshot.State)
+	require.Equal(t, startedAt, snapshot.StartedAt)
 }
 
 func TestRuntimeStatus_RedactsPasswordFromFailure(t *testing.T) {

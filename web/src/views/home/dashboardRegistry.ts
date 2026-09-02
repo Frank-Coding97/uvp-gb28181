@@ -1,4 +1,4 @@
-export const DASHBOARD_SCHEMA_VERSION = 4;
+export const DASHBOARD_SCHEMA_VERSION = 5;
 
 export type DashboardWidgetId =
   | "sip-rpm"
@@ -11,7 +11,8 @@ export type DashboardWidgetId =
   | "channel-online-rate"
   | "media-rate"
   | "media-node-health"
-  | "active-stream-ranking";
+  | "active-stream-ranking"
+  | "platform-info";
 
 export interface DashboardWidgetLayout {
   id: DashboardWidgetId;
@@ -58,9 +59,10 @@ export const DASHBOARD_WIDGET_REGISTRY: readonly DashboardWidgetDefinition[] = [
   widget("media-rate", 0, 2, 12, 4, true, 10, 20, 4, 8),
   widget("device-online-rate", 12, 2, 4, 4, true, 3, 7, 3, 7),
   widget("channel-online-rate", 16, 2, 4, 4, true, 3, 7, 3, 7),
-  widget("active-stream-ranking", 0, 6, 14, 4, false, 7, 20, 3, 7),
-  widget("media-node-health", 14, 6, 6, 4, false, 5, 10, 3, 7),
-  widget("sip-monitor", 0, 10, 14, 5, false, 10, 20, 4, 8)
+  widget("active-stream-ranking", 0, 11, 14, 4, false, 7, 20, 3, 7),
+  widget("media-node-health", 14, 11, 6, 4, false, 5, 10, 3, 7),
+  widget("sip-monitor", 0, 6, 12, 5, true, 10, 20, 4, 8),
+  widget("platform-info", 12, 6, 8, 2, true, 6, 10, 2, 3)
 ] as const;
 
 const LEGACY_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidgetLayout>> = {
@@ -105,6 +107,20 @@ const SCHEMA_3_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidge
   "sip-monitor": { id: "sip-monitor", x: 0, y: 12, w: 14, h: 5, visible: false, settings: {} }
 };
 
+const SCHEMA_4_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidgetLayout>> = {
+  "sip-rpm": { id: "sip-rpm", x: 0, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "sip-today": { id: "sip-today", x: 4, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "play-success-24h": { id: "play-success-24h", x: 8, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "media-traffic-today": { id: "media-traffic-today", x: 12, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "media-runtime": { id: "media-runtime", x: 16, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "media-rate": { id: "media-rate", x: 0, y: 2, w: 12, h: 4, visible: true, settings: {} },
+  "device-online-rate": { id: "device-online-rate", x: 12, y: 2, w: 4, h: 4, visible: true, settings: {} },
+  "channel-online-rate": { id: "channel-online-rate", x: 16, y: 2, w: 4, h: 4, visible: true, settings: {} },
+  "active-stream-ranking": { id: "active-stream-ranking", x: 0, y: 6, w: 14, h: 4, visible: false, settings: {} },
+  "media-node-health": { id: "media-node-health", x: 14, y: 6, w: 6, h: 4, visible: false, settings: {} },
+  "sip-monitor": { id: "sip-monitor", x: 0, y: 10, w: 14, h: 5, visible: false, settings: {} }
+};
+
 const cloneWidget = (layout: DashboardWidgetLayout): DashboardWidgetLayout => ({ ...layout, settings: {} });
 
 export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
@@ -113,7 +129,7 @@ export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
 };
 
 function migrateLegacyWidget(item: DashboardWidgetLayout, definition: DashboardWidgetDefinition, schemaVersion: number): DashboardWidgetLayout {
-  const defaults = schemaVersion === 3 ? SCHEMA_3_WIDGET_DEFAULTS : schemaVersion === 2 ? SCHEMA_2_WIDGET_DEFAULTS : LEGACY_WIDGET_DEFAULTS;
+  const defaults = schemaVersion === 4 ? SCHEMA_4_WIDGET_DEFAULTS : schemaVersion === 3 ? SCHEMA_3_WIDGET_DEFAULTS : schemaVersion === 2 ? SCHEMA_2_WIDGET_DEFAULTS : LEGACY_WIDGET_DEFAULTS;
   const sourceColumns = schemaVersion >= 2 ? 20 : 12;
   const legacy = defaults[item.id];
   if (legacy && item.x === legacy.x && item.y === legacy.y && item.w === legacy.w && item.h === legacy.h && item.visible === legacy.visible) {

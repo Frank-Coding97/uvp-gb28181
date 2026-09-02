@@ -21,6 +21,10 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("<OnlineDonut");
     expect(source).not.toContain("class=\"runtime-title\"");
     expect(source).toContain("<CardTitle icon=\"server\" title=\"流媒体运行态\" />");
+    expect(source).toContain("<CardTitle icon=\"platform\" title=\"平台信息\" />");
+    expect(source).toContain("fetchSipPlatformInfo");
+    expect(source).toContain("平台版本");
+    expect(source).toContain("平台运行时间");
     for (const color of ["--uvp-warning", "--uvp-brand-cyan", "--uvp-brand", "--uvp-danger"]) {
       expect(source).toContain(`color=\"var(${color})\"`);
     }
