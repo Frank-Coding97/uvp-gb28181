@@ -261,6 +261,8 @@ var playSessions = uac.NewSessionManager()
 
 // metricsAgg 全局指标聚合器(供 controllers/dashboard 暴露,供 SIP 路径埋点)
 var metricsAgg *metrics.Aggregator
+var metricsRecorder metrics.Recorder
+var metricsPersistCancel context.CancelFunc
 
 // metricsCleanupStop 控制 TTL 清理 goroutine 退出
 var metricsCleanupStop chan struct{}
@@ -354,6 +356,14 @@ func startControlPlane(cfg gbconfig.Config) {
 	))
 
 	metricsAgg = metrics.NewAggregator()
+	metricsRecorder = metricsAgg
+	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbSipMetricMinute{}) && db.Migrator().HasTable(&gbmodels.GbSipMetricFlush{}) {
+		persistent := metrics.NewPersistentRecorder(db, metricsAgg)
+		persistCtx, cancel := context.WithCancel(context.Background())
+		metricsPersistCancel = cancel
+		metricsRecorder = persistent
+		go persistent.Run(persistCtx, time.Second)
+	}
 	metricsCleanupStop = make(chan struct{})
 	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
 	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
@@ -537,7 +547,7 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
 func startSIPDependencies(cfg gbconfig.Config) error {
 	runtime := setupSecurityRuntime()
-	srv, err := startSIPRuntime(cfg, metricsAgg, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
+	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
 		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(runtime))
 	})
 	if err != nil {
@@ -1534,6 +1544,10 @@ func Stop() {
 	if metricsCleanupStop != nil {
 		close(metricsCleanupStop)
 		metricsCleanupStop = nil
+	}
+	if metricsPersistCancel != nil {
+		metricsPersistCancel()
+		metricsPersistCancel = nil
 	}
 }
 
