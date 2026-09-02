@@ -13,12 +13,16 @@ describe("MediaRateArea", () => {
     expect(line.attributes("stroke")).toBe("#2563eb");
     expect(area.attributes("d")).toContain("L 100 36 L 0 36 Z");
     expect(area.attributes("fill")).toBe(`url(#${gradientId})`);
-    expect(wrapper.text()).toContain("最近 2 分钟");
+    expect(wrapper.get(".media-rate-area__y-axis").text()).toContain("B/s");
+    expect(wrapper.get(".media-rate-area__x-axis").text()).toContain("2 分钟前");
+    expect(wrapper.get(".media-rate-area__x-axis").text()).toContain("1 分钟前");
     expect(wrapper.text()).toContain("现在");
   });
 
   it("renders an empty realtime series on the baseline", () => {
     const wrapper = mount(MediaRateArea, { props: { values: [] } });
     expect(wrapper.get("path.media-rate-area__line").attributes("d")).toContain("M 0 32");
+    expect(wrapper.get(".media-rate-area__y-axis").text()).toContain("--");
+    expect(wrapper.get(".media-rate-area__y-axis").text()).toContain("0 B/s");
   });
 });

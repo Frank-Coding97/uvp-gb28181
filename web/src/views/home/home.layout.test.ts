@@ -26,9 +26,10 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("getHomeDashboardSummary");
     expect(source).toContain("平台版本");
     expect(source).toContain("平台运行时间");
-    for (const color of ["--uvp-warning", "--uvp-brand-cyan", "--uvp-brand", "--uvp-danger"]) {
+    for (const color of ["--uvp-warning", "--uvp-brand-cyan", "--uvp-brand"]) {
       expect(source).toContain(`color=\"var(${color})\"`);
     }
+    expect(source).toContain("var(--uvp-danger)");
   });
 
   it("supports editing, persistence, conflict messaging and reset", () => {
@@ -52,8 +53,13 @@ describe("editable realtime dashboard layout", () => {
   });
 
   it("keeps cumulative traffic and realtime rate as different metrics", () => {
-    expect(source).toContain("todayMediaTraffic");
-    expect(source).toContain("今日累计上行 + 下行");
+    expect(source).toContain("selectedTrafficValue");
+    expect(source).toContain("trafficDirection");
+    expect(source).toContain("今日累计{{ trafficDirectionLabel }}流量");
+    expect(source).toContain("上行");
+    expect(source).toContain("下行");
+    expect(source).toContain("role=\"tablist\"");
+    expect(source).toContain("aria-selected");
     expect(source).toContain("<MediaRateArea :values=\"mediaRateTrend\"");
     expect(source).not.toContain("{{ bytes(mediaRate) }}<small>/s</small>");
     expect(source).not.toContain("class=\"bars\"");

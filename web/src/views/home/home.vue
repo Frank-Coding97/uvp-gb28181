@@ -38,7 +38,10 @@
             <CardTitle icon="play" title="点播成功率（24H）" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>{{ inviteSuccessRate == null ? "暂无完整 24H 样本" : "近 24 小时媒体可播放成功率" }}</p><MiniTrend :values="playSuccessTrend" color="var(--uvp-brand)" />
           </template>
           <template v-else-if="widget.id === 'media-traffic-today'">
-            <CardTitle icon="traffic" title="今日媒体流量" /><div class="kpi">{{ todayMediaTraffic == null ? "--" : bytes(todayMediaTraffic) }}</div><p>{{ trafficTodayNote }}</p><MiniTrend :values="mediaTrafficTrend" color="var(--uvp-danger)" />
+            <CardTitle icon="traffic" title="今日媒体流量" /><div class="kpi">{{ selectedTrafficValue == null ? "--" : bytes(selectedTrafficValue) }}</div>
+            <p v-if="selectedTrafficValue != null">今日累计{{ trafficDirectionLabel }}流量<span v-if="trafficCoveragePartial"> · 统计覆盖不完整</span></p><p v-else>今日累计{{ trafficDirectionLabel }}流量暂不可用</p>
+            <div class="traffic-legend" role="tablist" aria-label="今日媒体流量方向"><button type="button" role="tab" :aria-selected="trafficDirection === 'upstream'" :class="{ active: trafficDirection === 'upstream' }" @click="trafficDirection = 'upstream'"><i class="up" />上行</button><button type="button" role="tab" :aria-selected="trafficDirection === 'downstream'" :class="{ active: trafficDirection === 'downstream' }" @click="trafficDirection = 'downstream'"><i class="down" />下行</button></div>
+            <MiniTrend :values="selectedTrafficTrend" :color="trafficTrendColor" />
           </template>
           <template v-else-if="widget.id === 'media-runtime'">
             <CardTitle icon="server" title="流媒体运行态" />
@@ -96,7 +99,9 @@ const updatedAt = ref<Date | null>(null), sipSnapshot = ref<DashboardSnapshot | 
 const platformInfo = ref<SipPlatformInfo | null>(null);
 const dashboardSummary = ref<HomeDashboardSummary | null>(null);
 const devices = ref({ total: 0, online: 0 }), channels = ref({ total: 0, online: 0 });
-const playSuccessTrend = ref<number[]>([]), mediaRateTrend = ref<number[]>([]), mediaTrafficTrend = ref<number[]>([]);
+type TrafficDirection = "upstream" | "downstream";
+const trafficDirection = ref<TrafficDirection>("upstream");
+const playSuccessTrend = ref<number[]>([]), mediaRateTrend = ref<number[]>([]), upstreamTrafficTrend = ref<number[]>([]), downstreamTrafficTrend = ref<number[]>([]);
 let grid: DashboardGridHandle | null = null, timer: ReturnType<typeof setInterval> | null = null;
 
 const visibleWidgets = computed(() => layout.value.widgets.filter(item => item.visible));
@@ -109,12 +114,16 @@ const inviteSuccessRate = computed<number | null>(() => null);
 const viewers = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.readerCount, 0) ?? 0);
 const recordings = computed(() => mediaOverview.value?.streams.filter(item => item.recordingMp4 || item.recordingHls).length ?? 0);
 const mediaRate = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.bytesSpeed, 0) ?? 0);
-const todayMediaTraffic = computed<number | null>(() => {
+const todayTraffic = computed(() => {
   const traffic = dashboardSummary.value?.traffic;
   if (!traffic || !["ok", "partial"].includes(traffic.status)) return null;
-  return traffic.data.upstreamBytes + traffic.data.downstreamBytes;
+  return traffic.data;
 });
-const trafficTodayNote = computed(() => dashboardSummary.value?.traffic?.status === "partial" ? "今日累计上行 + 下行 · 统计覆盖不完整" : todayMediaTraffic.value == null ? "今日累计流量暂不可用" : "今日累计上行 + 下行");
+const selectedTrafficValue = computed<number | null>(() => todayTraffic.value?.[trafficDirection.value === "upstream" ? "upstreamBytes" : "downstreamBytes"] ?? null);
+const selectedTrafficTrend = computed(() => trafficDirection.value === "upstream" ? upstreamTrafficTrend.value : downstreamTrafficTrend.value);
+const trafficDirectionLabel = computed(() => trafficDirection.value === "upstream" ? "上行" : "下行");
+const trafficTrendColor = computed(() => trafficDirection.value === "upstream" ? "var(--uvp-brand-cyan)" : "var(--uvp-danger)");
+const trafficCoveragePartial = computed(() => dashboardSummary.value?.traffic?.status === "partial");
 const platformUptime = computed(() => {
   const startedAt = Date.parse(platformInfo.value?.runtime.startedAt ?? "");
   if (!Number.isFinite(startedAt)) return platformInfo.value?.runtime.state === "running" ? "等待启动时间" : "未运行";
@@ -149,7 +158,13 @@ async function refreshData() {
   if (devicePage.status === "fulfilled") devices.value = { total: devicePage.value.data.total ?? 0, online: devicePage.value.data.onlineTotal ?? 0 };
   if (channelPage.status === "fulfilled" && onlineChannels.status === "fulfilled") channels.value = { total: channelPage.value.data.total ?? 0, online: onlineChannels.value.data.total ?? 0 };
   if (platform.status === "fulfilled") platformInfo.value = platform.value.data;
-  if (summary.status === "fulfilled") { dashboardSummary.value = summary.value.data; if (todayMediaTraffic.value != null) mediaTrafficTrend.value = [...mediaTrafficTrend.value.slice(-23), todayMediaTraffic.value]; }
+  if (summary.status === "fulfilled") {
+    dashboardSummary.value = summary.value.data;
+    if (todayTraffic.value) {
+      upstreamTrafficTrend.value = [...upstreamTrafficTrend.value.slice(-23), todayTraffic.value.upstreamBytes];
+      downstreamTrafficTrend.value = [...downstreamTrafficTrend.value.slice(-23), todayTraffic.value.downstreamBytes];
+    }
+  }
   updatedAt.value = new Date(); refreshing.value = false;
 }
 function initGrid() { grid?.destroy(); grid = gridElement.value ? createDashboardGrid(gridElement.value, undefined, { onChange(items) { for (const value of items) { const item = layout.value.widgets.find(widget => widget.id === value.id); if (item) Object.assign(item, value); } } }) : null; grid?.setEditing(editing.value); }
@@ -169,6 +184,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); grid?.destroy(); });
 <style scoped lang="scss">
 .dashboard-shell{min-height:100%;padding:18px;color:var(--uvp-text-primary)}.dashboard-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.dashboard-title{display:flex;gap:12px;align-items:center}.dashboard-title h1{margin:1px 0 0;font-size:24px}.dashboard-title small,.card p{color:var(--uvp-text-tertiary)}.title-icon{display:grid;width:42px;height:42px;color:var(--uvp-brand);background:var(--uvp-brand-soft);border-radius:9px;place-items:center}.actions{display:flex;gap:8px;align-items:center}.actions button{display:inline-flex;gap:6px;align-items:center;height:36px;padding:0 13px;font:inherit;cursor:pointer;border-radius:8px}.secondary{color:var(--uvp-text-primary);background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border)}.primary{color:#fff;background:var(--uvp-brand);border:1px solid var(--uvp-brand)}.live{display:flex;gap:7px;align-items:center;margin-right:4px;font-size:12px;color:var(--uvp-text-secondary)}.live i{width:7px;height:7px;background:var(--uvp-brand-cyan);border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,var(--uvp-brand-cyan) 12%,transparent)}
 .widget-picker{display:flex;gap:14px;align-items:center;padding:10px 14px;margin-bottom:12px;overflow-x:auto;font-size:12px;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:9px}.widget-picker label{display:inline-flex;gap:5px;align-items:center;white-space:nowrap}.widget-picker>span{margin-left:auto;color:var(--uvp-text-tertiary);white-space:nowrap}.loading{display:grid;min-height:420px;color:var(--uvp-text-secondary);place-content:center;justify-items:center;gap:10px}.dashboard-grid{margin:-6px}.card{position:relative;box-sizing:border-box;padding:15px;overflow:hidden;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:var(--uvp-panel-radius);box-shadow:var(--uvp-panel-shadow)}.editing .card{border-color:color-mix(in srgb,var(--uvp-brand) 45%,var(--uvp-panel-border))}.drag{position:absolute;top:4px;right:7px;z-index:3;color:var(--uvp-text-tertiary);cursor:move}.kpi{margin-top:25px;font-size:29px;font-weight:700;line-height:1}.kpi small{margin-left:3px;font-size:12px;font-weight:500;color:var(--uvp-text-tertiary)}.card p{margin-top:9px;font-size:11px}
+.traffic-legend{position:absolute;bottom:13px;left:15px;display:flex;gap:10px}.traffic-legend button{display:inline-flex;gap:4px;align-items:center;padding:0;font:inherit;font-size:10px;color:var(--uvp-text-tertiary);cursor:pointer;background:none;border:0}.traffic-legend button.active{color:var(--uvp-text-primary)}.traffic-legend i{width:7px;height:7px;border-radius:50%}.traffic-legend .up{background:var(--uvp-brand-cyan)}.traffic-legend .down{background:var(--uvp-danger)}
 .runtime{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 12px;margin-top:10px}.runtime span{display:flex;flex-direction:column;gap:2px}.runtime small{font-size:10px;line-height:1;color:var(--uvp-text-tertiary)}.runtime strong{font-size:20px;line-height:1.05}.platform-info{display:grid;grid-template-columns:repeat(2,1fr);gap:20px;margin-top:18px}.platform-info span{display:flex;flex-direction:column;gap:5px}.platform-info small{font-size:11px;color:var(--uvp-text-tertiary)}.platform-info strong{font-size:20px}.embedded{height:100%;gap:10px;padding:0;border:0;box-shadow:none}.rate-head{display:flex;align-items:baseline;justify-content:space-between;margin:18px 0 10px}.rate-head strong{font-size:22px}.rate-head span{font-size:11px;color:var(--uvp-text-tertiary)}
 .health-total{display:flex;align-items:baseline;justify-content:center;gap:7px;margin:28px 0 20px}.health-total strong{font-size:32px}.health-total span{font-size:11px;color:var(--uvp-text-tertiary)}.health-legend{display:flex;justify-content:space-around;font-size:11px;color:var(--uvp-text-secondary)}.health-legend i{display:inline-block;width:7px;height:7px;margin-right:4px;border-radius:50%}.health-legend .ok{background:var(--uvp-brand-cyan)}.health-legend .warn{background:var(--uvp-warning)}.health-legend .bad{background:var(--uvp-danger)}.load{display:flex;justify-content:space-between;padding-top:14px;margin-top:16px;font-size:11px;border-top:1px solid var(--uvp-panel-border)}.ranking{margin-top:14px}.ranking>div{display:grid;grid-template-columns:26px 1fr 90px 110px;gap:10px;align-items:center;min-height:38px;font-size:11px;border-bottom:1px solid var(--uvp-panel-border)}.rank{color:var(--uvp-text-tertiary);text-align:center}.stream{display:flex;flex-direction:column;min-width:0}.stream strong,.stream small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stream small{color:var(--uvp-text-tertiary)}.viewer{color:var(--uvp-brand-cyan)}.ranking>div>strong{text-align:right}.empty{display:grid;min-height:90px;color:var(--uvp-text-tertiary);place-items:center}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:900px){.dashboard-header{align-items:flex-start}.actions{flex-wrap:wrap;justify-content:flex-end}.live{width:100%;justify-content:flex-end}}
