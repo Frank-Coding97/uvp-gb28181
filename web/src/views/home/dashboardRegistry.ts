@@ -1,4 +1,4 @@
-export const DASHBOARD_SCHEMA_VERSION = 2;
+export const DASHBOARD_SCHEMA_VERSION = 3;
 
 export type DashboardWidgetId =
   | "sip-rpm"
@@ -50,17 +50,17 @@ const widget = (
 ): DashboardWidgetDefinition => ({ minW, maxW, minH, maxH, layout: { id, x, y, w, h, visible, settings: {} } });
 
 export const DASHBOARD_WIDGET_REGISTRY: readonly DashboardWidgetDefinition[] = [
-  widget("sip-rpm", 0, 0, 4, 2, true, 3, 7, 2, 3),
-  widget("sip-today", 4, 0, 4, 2, true, 3, 7, 2, 3),
-  widget("play-success-24h", 8, 0, 4, 2, true, 3, 7, 2, 3),
-  widget("device-online-rate", 12, 0, 4, 2, true, 3, 7, 2, 3),
-  widget("channel-online-rate", 16, 0, 4, 2, true, 3, 7, 2, 3),
-  widget("media-traffic-today", 0, 15, 4, 2, false, 3, 7, 2, 3),
-  widget("media-runtime", 14, 2, 6, 5, true, 5, 10, 2, 6),
-  widget("sip-monitor", 0, 2, 14, 5, true, 10, 20, 4, 8),
-  widget("media-rate", 0, 7, 14, 4, true, 10, 20, 3, 7),
-  widget("media-node-health", 14, 7, 6, 4, true, 5, 10, 3, 7),
-  widget("active-stream-ranking", 0, 11, 20, 4, true, 7, 20, 3, 7)
+  widget("sip-rpm", 0, 0, 4, 3, true, 3, 7, 3, 4),
+  widget("sip-today", 4, 0, 4, 3, true, 3, 7, 3, 4),
+  widget("play-success-24h", 8, 0, 4, 3, true, 3, 7, 3, 4),
+  widget("media-traffic-today", 12, 0, 4, 3, true, 3, 7, 3, 4),
+  widget("media-runtime", 16, 0, 4, 3, true, 3, 7, 3, 4),
+  widget("media-rate", 0, 3, 12, 5, true, 10, 20, 4, 8),
+  widget("device-online-rate", 12, 3, 4, 5, true, 3, 7, 3, 7),
+  widget("channel-online-rate", 16, 3, 4, 5, true, 3, 7, 3, 7),
+  widget("active-stream-ranking", 0, 8, 14, 4, true, 7, 20, 3, 7),
+  widget("media-node-health", 14, 8, 6, 4, true, 5, 10, 3, 7),
+  widget("sip-monitor", 0, 12, 14, 5, false, 10, 20, 4, 8)
 ] as const;
 
 const LEGACY_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidgetLayout>> = {
@@ -77,6 +77,20 @@ const LEGACY_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidgetL
   "active-stream-ranking": { id: "active-stream-ranking", x: 0, y: 11, w: 12, h: 4, visible: true, settings: {} }
 };
 
+const SCHEMA_2_WIDGET_DEFAULTS: Partial<Record<DashboardWidgetId, DashboardWidgetLayout>> = {
+  "sip-rpm": { id: "sip-rpm", x: 0, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "sip-today": { id: "sip-today", x: 4, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "play-success-24h": { id: "play-success-24h", x: 8, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "device-online-rate": { id: "device-online-rate", x: 12, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "channel-online-rate": { id: "channel-online-rate", x: 16, y: 0, w: 4, h: 2, visible: true, settings: {} },
+  "media-traffic-today": { id: "media-traffic-today", x: 0, y: 15, w: 4, h: 2, visible: false, settings: {} },
+  "media-runtime": { id: "media-runtime", x: 14, y: 2, w: 6, h: 5, visible: true, settings: {} },
+  "sip-monitor": { id: "sip-monitor", x: 0, y: 2, w: 14, h: 5, visible: true, settings: {} },
+  "media-rate": { id: "media-rate", x: 0, y: 7, w: 14, h: 4, visible: true, settings: {} },
+  "media-node-health": { id: "media-node-health", x: 14, y: 7, w: 6, h: 4, visible: true, settings: {} },
+  "active-stream-ranking": { id: "active-stream-ranking", x: 0, y: 11, w: 20, h: 4, visible: true, settings: {} }
+};
+
 const cloneWidget = (layout: DashboardWidgetLayout): DashboardWidgetLayout => ({ ...layout, settings: {} });
 
 export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
@@ -84,14 +98,17 @@ export const DEFAULT_DASHBOARD_LAYOUT: DashboardLayout = {
   widgets: DASHBOARD_WIDGET_REGISTRY.map(definition => cloneWidget(definition.layout))
 };
 
-function migrateLegacyWidget(item: DashboardWidgetLayout, definition: DashboardWidgetDefinition): DashboardWidgetLayout {
-  const legacy = LEGACY_WIDGET_DEFAULTS[item.id];
+function migrateLegacyWidget(item: DashboardWidgetLayout, definition: DashboardWidgetDefinition, schemaVersion: number): DashboardWidgetLayout {
+  const defaults = schemaVersion === 2 ? SCHEMA_2_WIDGET_DEFAULTS : LEGACY_WIDGET_DEFAULTS;
+  const sourceColumns = schemaVersion === 2 ? 20 : 12;
+  const legacy = defaults[item.id];
   if (legacy && item.x === legacy.x && item.y === legacy.y && item.w === legacy.w && item.h === legacy.h && item.visible === legacy.visible) {
     return cloneWidget(definition.layout);
   }
-  const width = Math.min(definition.maxW, Math.max(definition.minW, Math.round(item.w * 20 / 12)));
-  const x = Math.min(20 - width, Math.round(item.x * 20 / 12));
-  return { ...item, x, w: width, settings: {} };
+  const width = Math.min(definition.maxW, Math.max(definition.minW, Math.round(item.w * 20 / sourceColumns)));
+  const height = Math.min(definition.maxH, Math.max(definition.minH, item.h));
+  const x = Math.min(20 - width, Math.round(item.x * 20 / sourceColumns));
+  return { ...item, x, w: width, h: height, settings: {} };
 }
 
 export function normalizeDashboardLayout(input: { schemaVersion: number; widgets: unknown[] }): DashboardLayout {
@@ -109,7 +126,7 @@ export function normalizeDashboardLayout(input: { schemaVersion: number; widgets
     if (!definition) throw new Error(`未知仪表盘组件: ${String(rawItem.id)}`);
     if (seen.has(definition.layout.id)) throw new Error(`仪表盘组件重复: ${definition.layout.id}`);
     const item = input.schemaVersion < DASHBOARD_SCHEMA_VERSION
-      ? migrateLegacyWidget(rawItem as DashboardWidgetLayout, definition)
+      ? migrateLegacyWidget(rawItem as DashboardWidgetLayout, definition, input.schemaVersion)
       : rawItem;
     if (
       ![item.x, item.y, item.w, item.h].every(Number.isInteger) ||

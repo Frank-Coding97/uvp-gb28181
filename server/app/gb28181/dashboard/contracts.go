@@ -6,7 +6,7 @@ import (
 	"math"
 )
 
-const CurrentSchemaVersion = 2
+const CurrentSchemaVersion = 3
 
 type SectionStatus string
 
@@ -74,17 +74,17 @@ type WidgetDefinition struct {
 }
 
 var widgetDefinitions = []WidgetDefinition{
-	widget("sip-rpm", 0, 0, 4, 2, true, 3, 7, 2, 3),
-	widget("sip-today", 4, 0, 4, 2, true, 3, 7, 2, 3),
-	widget("play-success-24h", 8, 0, 4, 2, true, 3, 7, 2, 3),
-	widget("device-online-rate", 12, 0, 4, 2, true, 3, 7, 2, 3),
-	widget("channel-online-rate", 16, 0, 4, 2, true, 3, 7, 2, 3),
-	widget("media-traffic-today", 0, 15, 4, 2, false, 3, 7, 2, 3),
-	widget("media-runtime", 14, 2, 6, 5, true, 5, 10, 2, 6),
-	widget("sip-monitor", 0, 2, 14, 5, true, 10, 20, 4, 8),
-	widget("media-rate", 0, 7, 14, 4, true, 10, 20, 3, 7),
-	widget("media-node-health", 14, 7, 6, 4, true, 5, 10, 3, 7),
-	widget("active-stream-ranking", 0, 11, 20, 4, true, 7, 20, 3, 7),
+	widget("sip-rpm", 0, 0, 4, 3, true, 3, 7, 3, 4),
+	widget("sip-today", 4, 0, 4, 3, true, 3, 7, 3, 4),
+	widget("play-success-24h", 8, 0, 4, 3, true, 3, 7, 3, 4),
+	widget("media-traffic-today", 12, 0, 4, 3, true, 3, 7, 3, 4),
+	widget("media-runtime", 16, 0, 4, 3, true, 3, 7, 3, 4),
+	widget("media-rate", 0, 3, 12, 5, true, 10, 20, 4, 8),
+	widget("device-online-rate", 12, 3, 4, 5, true, 3, 7, 3, 7),
+	widget("channel-online-rate", 16, 3, 4, 5, true, 3, 7, 3, 7),
+	widget("active-stream-ranking", 0, 8, 14, 4, true, 7, 20, 3, 7),
+	widget("media-node-health", 14, 8, 6, 4, true, 5, 10, 3, 7),
+	widget("sip-monitor", 0, 12, 14, 5, false, 10, 20, 4, 8),
 }
 
 var legacyWidgetDefaults = map[string]WidgetLayout{
@@ -99,6 +99,20 @@ var legacyWidgetDefaults = map[string]WidgetLayout{
 	"media-rate":            {ID: "media-rate", X: 0, Y: 7, W: 8, H: 4, Visible: true},
 	"media-node-health":     {ID: "media-node-health", X: 8, Y: 7, W: 4, H: 4, Visible: true},
 	"active-stream-ranking": {ID: "active-stream-ranking", X: 0, Y: 11, W: 12, H: 4, Visible: true},
+}
+
+var schema2WidgetDefaults = map[string]WidgetLayout{
+	"sip-rpm":               {ID: "sip-rpm", X: 0, Y: 0, W: 4, H: 2, Visible: true},
+	"sip-today":             {ID: "sip-today", X: 4, Y: 0, W: 4, H: 2, Visible: true},
+	"play-success-24h":      {ID: "play-success-24h", X: 8, Y: 0, W: 4, H: 2, Visible: true},
+	"device-online-rate":    {ID: "device-online-rate", X: 12, Y: 0, W: 4, H: 2, Visible: true},
+	"channel-online-rate":   {ID: "channel-online-rate", X: 16, Y: 0, W: 4, H: 2, Visible: true},
+	"media-traffic-today":   {ID: "media-traffic-today", X: 0, Y: 15, W: 4, H: 2, Visible: false},
+	"media-runtime":         {ID: "media-runtime", X: 14, Y: 2, W: 6, H: 5, Visible: true},
+	"sip-monitor":           {ID: "sip-monitor", X: 0, Y: 2, W: 14, H: 5, Visible: true},
+	"media-rate":            {ID: "media-rate", X: 0, Y: 7, W: 14, H: 4, Visible: true},
+	"media-node-health":     {ID: "media-node-health", X: 14, Y: 7, W: 6, H: 4, Visible: true},
+	"active-stream-ranking": {ID: "active-stream-ranking", X: 0, Y: 11, W: 20, H: 4, Visible: true},
 }
 
 func widget(id string, x, y, w, h int, visible bool, minW, maxW, minH, maxH int) WidgetDefinition {
@@ -136,7 +150,7 @@ func NormalizeLayout(layout Layout) (Layout, error) {
 			return Layout{}, fmt.Errorf("duplicate dashboard widget %q", item.ID)
 		}
 		if layout.SchemaVersion < CurrentSchemaVersion {
-			item = migrateLegacyWidget(item, definition)
+			item = migrateLegacyWidget(item, definition, layout.SchemaVersion)
 		}
 		if err := validateWidget(item, definition); err != nil {
 			return Layout{}, err
@@ -152,21 +166,31 @@ func NormalizeLayout(layout Layout) (Layout, error) {
 	return normalized, nil
 }
 
-func migrateLegacyWidget(item WidgetLayout, definition WidgetDefinition) WidgetLayout {
-	legacy, matchesDefault := legacyWidgetDefaults[item.ID]
+func migrateLegacyWidget(item WidgetLayout, definition WidgetDefinition, schemaVersion int) WidgetLayout {
+	defaults, sourceColumns := legacyWidgetDefaults, 12
+	if schemaVersion == 2 {
+		defaults, sourceColumns = schema2WidgetDefaults, 20
+	}
+	legacy, matchesDefault := defaults[item.ID]
 	if matchesDefault && sameWidgetPlacement(item, legacy) {
 		migrated := cloneWidget(definition.Base)
 		migrated.Settings = item.Settings
 		return migrated
 	}
 	migrated := cloneWidget(item)
-	migrated.X = int(math.Round(float64(item.X) * 20 / 12))
-	migrated.W = int(math.Round(float64(item.W) * 20 / 12))
+	migrated.X = int(math.Round(float64(item.X) * 20 / float64(sourceColumns)))
+	migrated.W = int(math.Round(float64(item.W) * 20 / float64(sourceColumns)))
 	if migrated.W < definition.MinW {
 		migrated.W = definition.MinW
 	}
 	if migrated.W > definition.MaxW {
 		migrated.W = definition.MaxW
+	}
+	if migrated.H < definition.MinH {
+		migrated.H = definition.MinH
+	}
+	if migrated.H > definition.MaxH {
+		migrated.H = definition.MaxH
 	}
 	if migrated.X+migrated.W > 20 {
 		migrated.X = 20 - migrated.W

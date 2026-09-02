@@ -17,12 +17,22 @@ func TestDefaultLayoutContainsEveryWidgetOnce(t *testing.T) {
 		require.False(t, seen[widget.ID], "duplicate widget %s", widget.ID)
 		seen[widget.ID] = true
 	}
-	for index, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "device-online-rate", "channel-online-rate"} {
+	for index, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime"} {
 		widget := widgetByID(t, layout, id)
-		require.True(t, widget.Visible, "%s must be visible in the reference five-card row", id)
+		require.True(t, widget.Visible, "%s must be visible in the reference first row", id)
 		require.Equal(t, index*4, widget.X)
 		require.Equal(t, 4, widget.W)
+		require.Equal(t, 3, widget.H)
 		require.Zero(t, widget.Y)
+	}
+	require.False(t, widgetByID(t, layout, "sip-monitor").Visible)
+	require.Equal(t, WidgetLayout{ID: "media-rate", X: 0, Y: 3, W: 12, H: 5, Visible: true, Settings: map[string]any{}}, widgetByID(t, layout, "media-rate"))
+	for index, id := range []string{"device-online-rate", "channel-online-rate"} {
+		widget := widgetByID(t, layout, id)
+		require.Equal(t, 12+index*4, widget.X)
+		require.Equal(t, 3, widget.Y)
+		require.Equal(t, 4, widget.W)
+		require.Equal(t, 5, widget.H)
 	}
 }
 
@@ -39,12 +49,30 @@ func TestNormalizeLayoutMigratesLegacyReferenceRowWithoutGap(t *testing.T) {
 	normalized, err := NormalizeLayout(legacy)
 	require.NoError(t, err)
 	require.Equal(t, CurrentSchemaVersion, normalized.SchemaVersion)
-	for index, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "device-online-rate", "channel-online-rate"} {
+	for index, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime"} {
 		widget := widgetByID(t, normalized, id)
 		require.True(t, widget.Visible)
 		require.Equal(t, index*4, widget.X)
 		require.Equal(t, 4, widget.W)
 	}
+	require.False(t, widgetByID(t, normalized, "sip-monitor").Visible)
+	require.Equal(t, 12, widgetByID(t, normalized, "device-online-rate").X)
+	require.Equal(t, 16, widgetByID(t, normalized, "channel-online-rate").X)
+
+	current := Layout{SchemaVersion: 2, Widgets: DefaultLayout().Widgets}
+	for index := range current.Widgets {
+		current.Widgets[index] = schema2WidgetByID(t, current.Widgets[index].ID)
+	}
+	normalized, err = NormalizeLayout(current)
+	require.NoError(t, err)
+	for index, id := range []string{"sip-rpm", "sip-today", "play-success-24h", "media-traffic-today", "media-runtime"} {
+		widget := widgetByID(t, normalized, id)
+		require.Equal(t, index*4, widget.X)
+		require.Zero(t, widget.Y)
+		require.True(t, widget.Visible)
+	}
+	require.Equal(t, 12, widgetByID(t, normalized, "device-online-rate").X)
+	require.Equal(t, 16, widgetByID(t, normalized, "channel-online-rate").X)
 }
 
 func TestNormalizeLayoutRejectsInvalidGeometryAndUnknownWidgets(t *testing.T) {
@@ -76,6 +104,26 @@ func TestNormalizeLayoutMigratesKnownWidgetsAndAddsMissingDefaults(t *testing.T)
 	require.Equal(t, CurrentSchemaVersion, normalized.SchemaVersion)
 	require.Len(t, normalized.Widgets, 11)
 	require.Equal(t, 5, widgetByID(t, normalized, "sip-rpm").X)
+}
+
+func schema2WidgetByID(t *testing.T, id string) WidgetLayout {
+	t.Helper()
+	widgets := map[string]WidgetLayout{
+		"sip-rpm":               {ID: "sip-rpm", X: 0, Y: 0, W: 4, H: 2, Visible: true, Settings: map[string]any{}},
+		"sip-today":             {ID: "sip-today", X: 4, Y: 0, W: 4, H: 2, Visible: true, Settings: map[string]any{}},
+		"play-success-24h":      {ID: "play-success-24h", X: 8, Y: 0, W: 4, H: 2, Visible: true, Settings: map[string]any{}},
+		"device-online-rate":    {ID: "device-online-rate", X: 12, Y: 0, W: 4, H: 2, Visible: true, Settings: map[string]any{}},
+		"channel-online-rate":   {ID: "channel-online-rate", X: 16, Y: 0, W: 4, H: 2, Visible: true, Settings: map[string]any{}},
+		"media-traffic-today":   {ID: "media-traffic-today", X: 0, Y: 15, W: 4, H: 2, Visible: false, Settings: map[string]any{}},
+		"media-runtime":         {ID: "media-runtime", X: 14, Y: 2, W: 6, H: 5, Visible: true, Settings: map[string]any{}},
+		"sip-monitor":           {ID: "sip-monitor", X: 0, Y: 2, W: 14, H: 5, Visible: true, Settings: map[string]any{}},
+		"media-rate":            {ID: "media-rate", X: 0, Y: 7, W: 14, H: 4, Visible: true, Settings: map[string]any{}},
+		"media-node-health":     {ID: "media-node-health", X: 14, Y: 7, W: 6, H: 4, Visible: true, Settings: map[string]any{}},
+		"active-stream-ranking": {ID: "active-stream-ranking", X: 0, Y: 11, W: 20, H: 4, Visible: true, Settings: map[string]any{}},
+	}
+	widget, ok := widgets[id]
+	require.True(t, ok, "schema 2 widget %s not found", id)
+	return widget
 }
 
 func TestSectionEnvelopeSerializesStableStateContract(t *testing.T) {

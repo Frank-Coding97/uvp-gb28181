@@ -18,6 +18,7 @@ describe("editable realtime dashboard layout", () => {
       expect(source).toContain(title);
     }
     expect(source).toContain("grid-stack-item");
+    expect(source).toContain("<OnlineDonut");
   });
 
   it("supports editing, persistence, conflict messaging and reset", () => {
