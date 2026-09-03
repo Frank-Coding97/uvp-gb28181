@@ -25,6 +25,9 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("fetchSipPlatformInfo");
     expect(source).toContain("getHomeDashboardSummary");
     expect(source).toContain("平台版本");
+    expect(source).toContain("APP_VERSION_TEXT");
+    expect(source).toContain("{{ APP_VERSION_TEXT }}");
+    expect(source).not.toContain("platformInfo?.version ?");
     expect(source).toContain("平台运行时间");
     expect(source).toContain("当前时间");
     expect(source).toContain("platformClockDate");

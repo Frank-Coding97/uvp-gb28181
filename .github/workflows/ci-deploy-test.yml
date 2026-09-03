@@ -75,6 +75,9 @@ jobs:
           cache: pnpm
           cache-dependency-path: web/pnpm-lock.yaml
 
+      - name: Check product version consistency
+        run: node scripts/version.mjs check
+
       - name: Install frontend dependencies
         working-directory: web
         run: pnpm install --frozen-lockfile

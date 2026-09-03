@@ -79,7 +79,7 @@
         <!-- Top brand bar -->
         <header class="brand-bar">
             <span class="brand-logo-text">UVP 统一视频接入平台</span>
-            <span class="brand-meta">v2.3.0 · GB/T 28181-2022</span>
+            <span class="brand-meta">{{ APP_VERSION_TEXT }} · GB/T 28181-2022</span>
         </header>
 
         <!-- Floating card -->
@@ -163,6 +163,7 @@ import {
     getDisplaySystemCopyright,
     getDisplaySystemRecordNo
 } from "@/utils/system-footer";
+import { APP_VERSION_TEXT } from "@/config/version";
 
 const sysConfigStore = useSysConfigStore();
 const { systemConfig } = storeToRefs(sysConfigStore);

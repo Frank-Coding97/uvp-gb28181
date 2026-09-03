@@ -6,6 +6,7 @@ WORKDIR /app
 ENV TZ=Asia/Shanghai
 
 COPY uvp-gb28181 /app/uvp-gb28181
+COPY version.json /app/version.json
 COPY resource/database /app/resource/database
 COPY resource/public /app/resource/public
 RUN mkdir -p /app/resource/logs /app/resource/public/uploads \

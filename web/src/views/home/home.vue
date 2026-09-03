@@ -53,7 +53,7 @@
           <template v-else-if="widget.id === 'platform-info'">
             <CardTitle icon="platform" title="平台信息" />
             <div class="platform-info">
-              <span><small>平台版本</small><strong>{{ platformInfo?.version ? `v${platformInfo.version}` : "--" }}</strong></span>
+              <span><small>平台版本</small><strong>{{ APP_VERSION_TEXT }}</strong></span>
               <span><small>平台运行时间</small><strong>{{ platformUptime }}</strong></span>
               <span class="platform-clock"><small>当前时间</small><em>{{ platformClockDate }}</em><span class="clock-time-shell" role="timer" :aria-label="platformClockTime"><span class="clock-unit-shell"><Transition name="clock-tick"><strong :key="platformClockHour" class="clock-unit">{{ platformClockHour }}</strong></Transition></span><b>:</b><span class="clock-unit-shell"><Transition name="clock-tick"><strong :key="platformClockMinute" class="clock-unit">{{ platformClockMinute }}</strong></Transition></span><b>:</b><span class="clock-unit-shell"><Transition name="clock-tick"><strong :key="platformClockSecond" class="clock-unit">{{ platformClockSecond }}</strong></Transition></span></span></span>
             </div>
@@ -86,6 +86,7 @@ import { getZLMOverview, type ZLMOverview } from "@/api/gb28181-zlm-runtime";
 import { listChannels, listDevices } from "@/views/gb28181/device-mgmt/api";
 import { getHomeDashboardLayout, getHomeDashboardSummary, resetHomeDashboardLayout, saveHomeDashboardLayout, type HomeDashboardSummary } from "@/api/home-dashboard";
 import { createDashboardGrid, type DashboardGridHandle } from "./dashboardGridAdapter";
+import { APP_VERSION_TEXT } from "@/config/version";
 import { DASHBOARD_WIDGET_REGISTRY, DEFAULT_DASHBOARD_LAYOUT, normalizeDashboardLayout, type DashboardLayout, type DashboardWidgetId } from "./dashboardRegistry";
 import CardTitle from "./components/dashboard/CardTitle.vue";
 import MiniTrend from "./components/dashboard/MiniTrend.vue";

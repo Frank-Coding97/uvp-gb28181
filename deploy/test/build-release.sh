@@ -15,6 +15,8 @@ fail() {
 actual_sha=$(git -C "$SOURCE_ROOT" rev-parse HEAD)
 [[ "$actual_sha" == "$SHA" ]] || fail "source HEAD $actual_sha does not match $SHA"
 
+node "$SOURCE_ROOT/scripts/version.mjs" check >&2
+
 if [[ "${UVP_SKIP_TESTS:-0}" != "1" ]]; then
   (cd "$SOURCE_ROOT/server" && go test ./... -count=1)
 fi
@@ -32,7 +34,7 @@ mkdir -p "$SOURCE_ROOT/server/bin"
 # pnpm progress goes to stderr: the caller captures stdout via command
 # substitution and treats it as the archive path
 (cd "$SOURCE_ROOT/web" && pnpm install --frozen-lockfile >&2)
-(cd "$SOURCE_ROOT/web" && NODE_OPTIONS=--max-old-space-size=1536 pnpm run build:prod >&2)
+(cd "$SOURCE_ROOT/web" && NODE_OPTIONS="${NODE_OPTIONS:---max-old-space-size=1536}" pnpm run build:prod >&2)
 
 UVP_SOURCE_ROOT="$SOURCE_ROOT" \
   "$SOURCE_ROOT/deploy/test/assemble-release.sh" "$SHA" "$OUTPUT_DIR"
