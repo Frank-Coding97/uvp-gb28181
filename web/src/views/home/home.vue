@@ -26,7 +26,10 @@
         :gs-id="widget.id" :gs-x="widget.x" :gs-y="widget.y" :gs-w="widget.w" :gs-h="widget.h"
         :gs-min-w="definition(widget.id).minW" :gs-max-w="definition(widget.id).maxW"
         :gs-min-h="definition(widget.id).minH" :gs-max-h="definition(widget.id).maxH">
-        <div class="grid-stack-item-content card">
+        <div class="grid-stack-item-content card" :class="{ 'drilldown-card': isHistoryDrilldownWidget(widget.id) }"
+          :role="!editing && isHistoryDrilldownWidget(widget.id) ? 'button' : undefined"
+          :tabindex="!editing && isHistoryDrilldownWidget(widget.id) ? 0 : undefined"
+          @click="openWidgetDrilldown(widget.id)" @keydown="onWidgetDrilldownKeydown($event, widget.id)">
           <span v-if="editing" class="drag"><GripHorizontal :size="16" /></span>
           <template v-if="widget.id === 'sip-rpm'">
             <CardTitle icon="activity" title="实时 SIP RPM" /><div class="kpi">{{ number(sipRpm) }}<small>/min</small></div><p>最近一分钟处理速率</p><MiniTrend :values="sipTrend" color="var(--uvp-warning)" />
@@ -40,7 +43,7 @@
           <template v-else-if="widget.id === 'media-traffic-today'">
             <CardTitle icon="traffic" title="今日媒体流量" /><div class="kpi">{{ selectedTrafficValue == null ? "--" : bytes(selectedTrafficValue) }}</div>
             <p v-if="selectedTrafficValue != null">今日累计{{ trafficDirectionLabel }}流量<span v-if="trafficCoveragePartial"> · 统计覆盖不完整</span></p><p v-else>今日累计{{ trafficDirectionLabel }}流量暂不可用</p>
-            <div class="traffic-legend" role="tablist" aria-label="今日媒体流量方向"><button type="button" role="tab" :aria-selected="trafficDirection === 'upstream'" :class="{ active: trafficDirection === 'upstream' }" @click="trafficDirection = 'upstream'"><i class="up" />上行</button><button type="button" role="tab" :aria-selected="trafficDirection === 'downstream'" :class="{ active: trafficDirection === 'downstream' }" @click="trafficDirection = 'downstream'"><i class="down" />下行</button></div>
+            <div class="traffic-legend" role="tablist" aria-label="今日媒体流量方向"><button type="button" role="tab" :aria-selected="trafficDirection === 'upstream'" :class="{ active: trafficDirection === 'upstream' }" @click.stop="trafficDirection = 'upstream'"><i class="up" />上行</button><button type="button" role="tab" :aria-selected="trafficDirection === 'downstream'" :class="{ active: trafficDirection === 'downstream' }" @click.stop="trafficDirection = 'downstream'"><i class="down" />下行</button></div>
             <MiniTrend :values="selectedTrafficTrend" :color="trafficTrendColor" />
           </template>
           <template v-else-if="widget.id === 'media-runtime'">
@@ -72,6 +75,11 @@
         </div>
       </article>
     </main>
+    <DashboardDrilldownDialog
+      :visible="drilldown.visible.value" :metric="drilldown.metric.value" :range="drilldown.range.value" :ranges="drilldown.ranges.value"
+      :loading="drilldown.loading.value" :stale="drilldown.stale.value" :error="drilldown.error.value" :result="drilldown.result.value"
+      @close="drilldown.close" @range="drilldown.setRange" @retry="drilldown.reload"
+    />
   </div>
 </template>
 
@@ -93,6 +101,9 @@ import MiniTrend from "./components/dashboard/MiniTrend.vue";
 import MediaRateArea from "./components/dashboard/MediaRateArea.vue";
 import OnlineDonut from "./components/dashboard/OnlineDonut.vue";
 import SipDashboardCard from "./components/sip-dashboard/index.vue";
+import DashboardDrilldownDialog from "./components/drilldown/DashboardDrilldownDialog.vue";
+import { handleHistoryDrilldownKeydown, isHistoryDrilldownWidget, openHistoryDrilldown } from "./dashboardCardDrilldown";
+import { useDashboardDrilldown } from "./useDashboardDrilldown";
 
 defineOptions({ name: "Home" });
 const gridElement = ref<HTMLElement | null>(null);
@@ -106,6 +117,7 @@ const dashboardSummary = ref<HomeDashboardSummary | null>(null);
 const devices = ref({ total: 0, online: 0 }), channels = ref({ total: 0, online: 0 });
 type TrafficDirection = "upstream" | "downstream";
 const trafficDirection = ref<TrafficDirection>("upstream");
+const drilldown = useDashboardDrilldown();
 const playSuccessTrend = ref<number[]>([]), mediaRateTrend = ref<number[]>([]), upstreamTrafficTrend = ref<number[]>([]), downstreamTrafficTrend = ref<number[]>([]);
 let grid: DashboardGridHandle | null = null, timer: ReturnType<typeof setInterval> | null = null, clockTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -152,6 +164,8 @@ const streamRanking = computed(() => {
 function clone(value: DashboardLayout): DashboardLayout { return { schemaVersion: value.schemaVersion, widgets: value.widgets.map(item => ({ ...item, settings: {} })) }; }
 function definition(id: DashboardWidgetId) { return DASHBOARD_WIDGET_REGISTRY.find(item => item.layout.id === id)!; }
 function widgetTitle(id: DashboardWidgetId): string { return ({ "sip-rpm": "实时 SIP RPM", "sip-today": "今日 SIP 处理数量", "play-success-24h": "点播成功率", "media-traffic-today": "今日媒体流量", "media-runtime": "流媒体运行态", "sip-monitor": "GB28181 SIP 协议监控", "device-online-rate": "设备在线率", "channel-online-rate": "通道在线率", "media-rate": "媒体实时速率", "media-node-health": "媒体节点健康", "active-stream-ranking": "活跃流排行", "platform-info": "平台信息" })[id]; }
+function openWidgetDrilldown(id: DashboardWidgetId) { openHistoryDrilldown(id, editing.value, metric => { void drilldown.open(metric); }); }
+function onWidgetDrilldownKeydown(event: KeyboardEvent, id: DashboardWidgetId) { handleHistoryDrilldownKeydown(event, id, editing.value, metric => { void drilldown.open(metric); }); }
 
 async function loadLayout() {
   try { const response = await getHomeDashboardLayout(); layout.value = normalizeDashboardLayout(response.data.layout); revision.value = response.data.revision; }
@@ -193,7 +207,7 @@ onBeforeUnmount(() => { if (timer) clearInterval(timer); if (clockTimer) clearIn
 
 <style scoped lang="scss">
 .dashboard-shell{min-height:100%;padding:18px;color:var(--uvp-text-primary)}.dashboard-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}.dashboard-title{display:flex;gap:12px;align-items:center}.dashboard-title h1{margin:1px 0 0;font-size:24px}.dashboard-title small,.card p{color:var(--uvp-text-tertiary)}.title-icon{display:grid;width:42px;height:42px;color:var(--uvp-brand);background:var(--uvp-brand-soft);border-radius:9px;place-items:center}.actions{display:flex;gap:8px;align-items:center}.actions button{display:inline-flex;gap:6px;align-items:center;height:36px;padding:0 13px;font:inherit;cursor:pointer;border-radius:8px}.secondary{color:var(--uvp-text-primary);background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border)}.primary{color:#fff;background:var(--uvp-brand);border:0}.actions .primary{font-weight:600}.live{display:flex;gap:7px;align-items:center;margin-right:4px;font-size:12px;color:var(--uvp-text-secondary)}.live i{width:7px;height:7px;background:var(--uvp-brand-cyan);border-radius:50%;box-shadow:0 0 0 4px color-mix(in srgb,var(--uvp-brand-cyan) 12%,transparent)}
-.widget-picker{display:flex;gap:14px;align-items:center;padding:10px 14px;margin-bottom:12px;overflow-x:auto;font-size:12px;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:9px}.widget-picker label{display:inline-flex;gap:5px;align-items:center;white-space:nowrap}.widget-picker>span{margin-left:auto;color:var(--uvp-text-tertiary);white-space:nowrap}.loading{display:grid;min-height:420px;color:var(--uvp-text-secondary);place-content:center;justify-items:center;gap:10px}.dashboard-grid{margin:-6px}.card{position:relative;box-sizing:border-box;padding:15px;overflow:hidden;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:var(--uvp-panel-radius);box-shadow:var(--uvp-panel-shadow)}.editing .card{border-color:color-mix(in srgb,var(--uvp-brand) 45%,var(--uvp-panel-border))}.drag{position:absolute;top:4px;right:7px;z-index:3;color:var(--uvp-text-tertiary);cursor:move}.kpi{margin-top:25px;font-size:29px;font-weight:700;line-height:1}.kpi small{margin-left:3px;font-size:12px;font-weight:500;color:var(--uvp-text-tertiary)}.card p{margin-top:9px;font-size:11px}
+.widget-picker{display:flex;gap:14px;align-items:center;padding:10px 14px;margin-bottom:12px;overflow-x:auto;font-size:12px;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:9px}.widget-picker label{display:inline-flex;gap:5px;align-items:center;white-space:nowrap}.widget-picker>span{margin-left:auto;color:var(--uvp-text-tertiary);white-space:nowrap}.loading{display:grid;min-height:420px;color:var(--uvp-text-secondary);place-content:center;justify-items:center;gap:10px}.dashboard-grid{margin:-6px}.card{position:relative;box-sizing:border-box;padding:15px;overflow:hidden;background:var(--uvp-panel-bg);border:1px solid var(--uvp-panel-border);border-radius:var(--uvp-panel-radius);box-shadow:var(--uvp-panel-shadow)}.drilldown-card[role="button"]{cursor:pointer;transition:border-color .16s ease,box-shadow .16s ease}.drilldown-card[role="button"]:hover{border-color:color-mix(in srgb,var(--uvp-brand) 45%,var(--uvp-panel-border))}.drilldown-card[role="button"]:focus-visible{outline:2px solid var(--uvp-brand);outline-offset:2px}.editing .card{border-color:color-mix(in srgb,var(--uvp-brand) 45%,var(--uvp-panel-border))}.editing .drilldown-card{cursor:move}.drag{position:absolute;top:4px;right:7px;z-index:3;color:var(--uvp-text-tertiary);cursor:move}.kpi{margin-top:25px;font-size:29px;font-weight:700;line-height:1}.kpi small{margin-left:3px;font-size:12px;font-weight:500;color:var(--uvp-text-tertiary)}.card p{margin-top:9px;font-size:11px}
 .traffic-legend{position:absolute;bottom:13px;left:15px;display:flex;gap:10px}.traffic-legend button{display:inline-flex;gap:4px;align-items:center;padding:0;font:inherit;font-size:10px;color:var(--uvp-text-tertiary);cursor:pointer;background:none;border:0}.traffic-legend button.active{color:var(--uvp-text-primary)}.traffic-legend i{width:7px;height:7px;border-radius:50%}.traffic-legend .up{background:var(--uvp-brand-cyan)}.traffic-legend .down{background:var(--uvp-danger)}
 .runtime{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 12px;margin-top:10px}.runtime span{display:flex;flex-direction:column;gap:2px}.runtime small{font-size:10px;line-height:1;color:var(--uvp-text-tertiary)}.runtime strong{font-size:20px;line-height:1.05}.widget-media-node-health .card,.widget-platform-info .card{display:flex;flex-direction:column}.platform-info{display:grid;flex:1;grid-template-columns:.8fr .9fr 1.3fr;gap:18px;align-items:center;margin-top:7px}.platform-info>span{display:flex;flex-direction:column;gap:5px;align-items:center;min-width:0;text-align:center}.platform-info small{font-size:11px;color:var(--uvp-text-tertiary)}.platform-info strong{font-size:20px;white-space:nowrap}.platform-clock em{font-size:10px;font-style:normal;color:var(--uvp-text-tertiary);white-space:nowrap}.clock-time-shell{display:flex;align-items:center;justify-content:center;width:108px;height:24px;font-variant-numeric:tabular-nums}.clock-time-shell>b{width:8px;font-size:20px;font-weight:600;line-height:24px}.clock-unit-shell{position:relative;width:28px;height:24px;overflow:hidden}.clock-unit{position:absolute;inset:0;display:block;font-size:20px;line-height:24px;letter-spacing:.04em}.clock-tick-enter-active,.clock-tick-leave-active{transition:opacity .18s ease,transform .18s ease,filter .18s ease}.clock-tick-enter-from{opacity:0;filter:blur(2px);transform:translateY(6px)}.clock-tick-leave-to{opacity:0;filter:blur(2px);transform:translateY(-6px)}.embedded{height:100%;gap:10px;padding:0;border:0;box-shadow:none}.embedded :deep(.pulse){flex:none}.embedded :deep(.pulse__chart){flex:none;height:90px;min-height:90px}.rate-head{display:flex;align-items:baseline;justify-content:space-between;margin:18px 0 10px}.rate-head strong{font-size:22px}.rate-head span{font-size:11px;color:var(--uvp-text-tertiary)}
 .health-content{display:flex;flex:1;flex-direction:column;justify-content:center}.health-total{display:flex;align-items:baseline;justify-content:center;gap:7px;margin:0 0 24px}.health-total strong{font-size:32px}.health-total span{font-size:11px;color:var(--uvp-text-tertiary)}.health-legend{display:flex;justify-content:space-around;font-size:11px;color:var(--uvp-text-secondary)}.health-legend i{display:inline-block;width:7px;height:7px;margin-right:4px;border-radius:50%}.health-legend .ok{background:var(--uvp-brand-cyan)}.health-legend .warn{background:var(--uvp-warning)}.health-legend .bad{background:var(--uvp-danger)}.ranking{margin-top:14px}.ranking>div{display:grid;grid-template-columns:26px 1fr 90px 110px;gap:10px;align-items:center;min-height:38px;font-size:11px;border-bottom:1px solid var(--uvp-panel-border)}.rank{color:var(--uvp-text-tertiary);text-align:center}.stream{display:flex;flex-direction:column;min-width:0}.stream strong,.stream small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.stream small{color:var(--uvp-text-tertiary)}.viewer{color:var(--uvp-brand-cyan)}.ranking>div>strong{text-align:right}.empty{display:grid;min-height:90px;color:var(--uvp-text-tertiary);place-items:center}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
