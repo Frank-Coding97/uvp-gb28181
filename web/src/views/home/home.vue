@@ -38,7 +38,7 @@
             <CardTitle icon="radio" title="今日 SIP 处理数量" /><div class="kpi">{{ number(sipTodayTotal) }}</div><p>{{ sipTodayTotal == null ? "暂无连续采样" : `异常 ${number(sipSnapshot?.todayAbnormal)} 条` }}</p><MiniTrend :values="sipTodayTrend" color="var(--uvp-brand-cyan)" />
           </template>
           <template v-else-if="widget.id === 'play-success-24h'">
-            <CardTitle icon="play" title="点播成功率（24H）" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>{{ inviteSuccessRate == null ? "暂无完整 24H 样本" : "近 24 小时媒体可播放成功率" }}</p><MiniTrend :values="playSuccessTrend" color="var(--uvp-brand)" />
+            <CardTitle icon="play" title="点播成功率（24H）" /><div class="kpi">{{ percent(inviteSuccessRate) }}</div><p>{{ playSuccessDescription }}</p><MiniTrend :values="playSuccessTrend" color="var(--uvp-brand)" />
           </template>
           <template v-else-if="widget.id === 'media-traffic-today'">
             <CardTitle icon="traffic" title="今日媒体流量" /><div class="kpi">{{ selectedTrafficValue == null ? "--" : bytes(selectedTrafficValue) }}</div>
@@ -131,7 +131,21 @@ const sipTrend = computed(() => sipSnapshot.value?.pulse.samples.slice(-24).map(
 const sipTodayTrend = computed(() => { let total = 0; return sipTrend.value.map(value => (total += value * 60)); });
 const sipRpm = computed(() => { const values = sipSnapshot.value?.pulse.samples.slice(-6) ?? []; return values.length ? Math.round(values.reduce((sum, item) => sum + item.msgPerSec, 0) / values.length * 60) : null; });
 const sipTodayTotal = computed(() => sipSnapshot.value && sipSnapshot.value.health !== HEALTH_EMPTY ? sipSnapshot.value.todayTotal : null);
-const inviteSuccessRate = computed<number | null>(() => null);
+const playSummary = computed(() => {
+  const play = dashboardSummary.value?.play;
+  if (!play || !["ok", "partial"].includes(play.status)) return null;
+  return play.data;
+});
+const inviteSuccessRate = computed<number | null>(() => {
+  const rate = playSummary.value?.rate;
+  return typeof rate === "number" && Number.isFinite(rate) ? Math.min(1, Math.max(0, rate)) : null;
+});
+const playSuccessDescription = computed(() => {
+  const play = dashboardSummary.value?.play;
+  if (play?.status === "empty") return "近 24 小时暂无点播样本";
+  if (!playSummary.value || inviteSuccessRate.value == null) return "近 24 小时点播统计暂不可用";
+  return `近 24 小时 ${number(playSummary.value.success)}/${number(playSummary.value.attempts)} 次媒体流就绪`;
+});
 const mediaRate = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.bytesSpeed, 0) ?? 0);
 const todayTraffic = computed(() => {
   const traffic = dashboardSummary.value?.traffic;
@@ -182,17 +196,17 @@ async function refreshData() {
   const [sip, overview, devicePage, channelPage, onlineChannels, platform, summary] = results;
   if (sip.status === "fulfilled") sipSnapshot.value = sip.value.data;
   if (overview.status === "fulfilled") { mediaOverview.value = overview.value.data; mediaRateTrend.value = [...mediaRateTrend.value.slice(-23), mediaRate.value]; }
-  if (inviteSuccessRate.value != null) playSuccessTrend.value = [...playSuccessTrend.value.slice(-23), inviteSuccessRate.value];
   if (devicePage.status === "fulfilled") devices.value = { total: devicePage.value.data.total ?? 0, online: devicePage.value.data.onlineTotal ?? 0 };
   if (channelPage.status === "fulfilled" && onlineChannels.status === "fulfilled") channels.value = { total: channelPage.value.data.total ?? 0, online: onlineChannels.value.data.total ?? 0 };
   if (platform.status === "fulfilled") platformInfo.value = platform.value.data;
   if (summary.status === "fulfilled") {
     dashboardSummary.value = summary.value.data;
+    if (inviteSuccessRate.value != null) playSuccessTrend.value = [...playSuccessTrend.value.slice(-23), inviteSuccessRate.value];
     if (todayTraffic.value) {
       upstreamTrafficTrend.value = [...upstreamTrafficTrend.value.slice(-23), todayTraffic.value.upstreamBytes];
       downstreamTrafficTrend.value = [...downstreamTrafficTrend.value.slice(-23), todayTraffic.value.downstreamBytes];
     }
-  }
+  } else dashboardSummary.value = null;
   updatedAt.value = new Date(); refreshing.value = false;
 }
 function initGrid() { grid?.destroy(); grid = gridElement.value ? createDashboardGrid(gridElement.value, undefined, { onChange(items) { for (const value of items) { const item = layout.value.widgets.find(widget => widget.id === value.id); if (item) Object.assign(item, value); } } }) : null; grid?.setEditing(editing.value); }

@@ -24,7 +24,18 @@ export interface TodayTrafficSummary {
   coverage: HomeDashboardSection<unknown>["coverage"];
 }
 
+export interface PlaySuccessSummary {
+  attempts: number;
+  success: number;
+  failure: number;
+  rate: number | null;
+  status: HomeDashboardSection<unknown>["status"];
+  coverage: HomeDashboardSection<unknown>["coverage"];
+  asOf: string;
+}
+
 export interface HomeDashboardSummary {
+  play?: HomeDashboardSection<PlaySuccessSummary>;
   traffic?: HomeDashboardSection<TodayTrafficSummary>;
 }
 

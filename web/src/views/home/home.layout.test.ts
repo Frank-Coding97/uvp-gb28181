@@ -95,4 +95,12 @@ describe("editable realtime dashboard layout", () => {
     expect(source).not.toContain("{{ bytes(mediaRate) }}<small>/s</small>");
     expect(source).not.toContain("class=\"bars\"");
   });
+
+  it("renders the real rolling 24-hour play success summary", () => {
+    expect(source).toContain("dashboardSummary.value?.play");
+    expect(source).toContain("playSummary.value?.rate");
+    expect(source).toContain("近 24 小时暂无点播样本");
+    expect(source).toContain("次媒体流就绪");
+    expect(source).not.toContain("computed<number | null>(() => null)");
+  });
 });
