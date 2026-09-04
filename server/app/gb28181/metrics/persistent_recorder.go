@@ -126,22 +126,24 @@ func (recorder *PersistentRecorder) Flush(ctx context.Context) error {
 		}
 		for key, delta := range batch {
 			var row gbmodels.GbSipMetricMinute
-			err := tx.Where("bucket_start = ? AND method = ? AND direction = ?", key.BucketStart, key.Method, key.Direction).Take(&row).Error
+			result := tx.Where("bucket_start = ? AND method = ? AND direction = ?", key.BucketStart, key.Method, key.Direction).Take(&row)
 			switch {
-			case errors.Is(err, gorm.ErrRecordNotFound):
+			case errors.Is(result.Error, gorm.ErrRecordNotFound) || (result.Error == nil && result.RowsAffected == 0):
 				row = gbmodels.GbSipMetricMinute{BucketStart: key.BucketStart, Method: key.Method, Direction: key.Direction, RequestCount: delta.Requests, TransactionCount: delta.Transactions, TransactionSuccess: delta.Success, TransactionFailure: delta.Failure}
 				if err := tx.Create(&row).Error; err != nil {
 					return err
 				}
-			case err != nil:
-				return err
+			case result.Error != nil:
+				return result.Error
 			default:
-				if err := tx.Model(&row).Updates(map[string]any{
-					"request_count":       gorm.Expr("request_count + ?", delta.Requests),
-					"transaction_count":   gorm.Expr("transaction_count + ?", delta.Transactions),
-					"transaction_success": gorm.Expr("transaction_success + ?", delta.Success),
-					"transaction_failure": gorm.Expr("transaction_failure + ?", delta.Failure),
-				}).Error; err != nil {
+				if err := tx.Model(&gbmodels.GbSipMetricMinute{}).
+					Where("bucket_start = ? AND method = ? AND direction = ?", key.BucketStart, key.Method, key.Direction).
+					Updates(map[string]any{
+						"request_count":       gorm.Expr("request_count + ?", delta.Requests),
+						"transaction_count":   gorm.Expr("transaction_count + ?", delta.Transactions),
+						"transaction_success": gorm.Expr("transaction_success + ?", delta.Success),
+						"transaction_failure": gorm.Expr("transaction_failure + ?", delta.Failure),
+					}).Error; err != nil {
 					return err
 				}
 			}

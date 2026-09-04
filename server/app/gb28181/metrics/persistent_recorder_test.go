@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 )
 
 func TestPersistentRecorderBatchesRequestsAndTransactionsByMinute(t *testing.T) {
@@ -48,4 +49,33 @@ func TestPersistentRecorderRetainsBatchWhenFlushFails(t *testing.T) {
 	var row gbmodels.GbSipMetricMinute
 	require.NoError(t, db.First(&row).Error)
 	require.EqualValues(t, 1, row.RequestCount)
+}
+
+func TestPersistentRecorderCreatesAndUpdatesWhenRecordNotFoundIsMasked(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipMetricMinute{}, &gbmodels.GbSipMetricFlush{}))
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", gormhelper.MaskNotDataError))
+
+	now := time.Date(2026, 9, 4, 9, 17, 38, 0, time.Local)
+	recorder := NewPersistentRecorder(db, nil)
+	recorder.SetClock(func() time.Time { return now })
+
+	recorder.Begin(Transaction{Kind: TxRegister, Direction: DirIn, CallID: "first", CSeq: "1", StartedAt: now})
+	recorder.End("first", "1", 200, true)
+	require.NoError(t, recorder.Flush(context.Background()))
+
+	recorder.Begin(Transaction{Kind: TxRegister, Direction: DirIn, CallID: "second", CSeq: "1", StartedAt: now})
+	recorder.End("second", "1", 200, true)
+	require.NoError(t, recorder.Flush(context.Background()))
+
+	var count int64
+	require.NoError(t, db.Model(&gbmodels.GbSipMetricMinute{}).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+
+	var row gbmodels.GbSipMetricMinute
+	require.NoError(t, db.First(&row).Error)
+	require.EqualValues(t, 2, row.RequestCount)
+	require.EqualValues(t, 2, row.TransactionCount)
+	require.EqualValues(t, 2, row.TransactionSuccess)
 }
