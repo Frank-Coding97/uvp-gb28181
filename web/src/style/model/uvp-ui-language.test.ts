@@ -18,3 +18,9 @@ describe("media workbench theme tokens", () => {
     expect(source).toMatch(/body\[arco-theme="dark"\],\s*body\[arco-theme="dark"\]\s+\.gb28181-page,[^{]*\{/s);
   });
 });
+
+describe("table loading mask theme", () => {
+  it("uses a dark translucent surface instead of the light loading mask in dark mode", () => {
+    expect(source).toMatch(/body\[arco-theme="dark"\]\s+\.uvp-data-table\s+\.arco-spin-mask\s*\{[^}]*background:\s*rgb\(16 25 35\s*\/\s*78%\)/s);
+  });
+});

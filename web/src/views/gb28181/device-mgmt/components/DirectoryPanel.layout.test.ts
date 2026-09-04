@@ -28,6 +28,11 @@ describe("device directory panel layout", () => {
 
     it("uses the theme-aware accessible success color for online counts", () => {
         expect(source).toContain(".node-online-count { color: #158052;");
-        expect(source).toContain(':global(body[arco-theme="dark"]) .node-online-count { color: #86efac; }');
+        expect(source).toContain(':global(body[arco-theme="dark"] .directory-panel .node-online-count) { color: #86efac; }');
+    });
+
+    it("uses the dark workspace surface for the directory loading mask", () => {
+        expect(source).toContain(':global(body[arco-theme="dark"] .directory-tree-wrap.arco-spin .arco-spin-mask)');
+        expect(source).toContain("background-color: rgb(16 25 35 / 78%) !important;");
     });
 });

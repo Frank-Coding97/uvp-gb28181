@@ -334,6 +334,7 @@ onMounted(() => load(props.modelValue.view));
 .directory-search:focus-within { border-color: var(--uvp-brand); }
 .directory-search input { width: 100%; min-width: 0; color: var(--uvp-text-primary); font-size: 12px; outline: none; background: transparent; border: 0; }
 .directory-tree-wrap { min-height: 0; flex: 1; }
+:global(body[arco-theme="dark"] .directory-tree-wrap.arco-spin .arco-spin-mask) { background-color: rgb(16 25 35 / 78%) !important; }
 .directory-tree { box-sizing: border-box; height: 100%; padding: 2px 6px 10px; overflow: auto; scrollbar-gutter: stable; }
 .directory-row { display: flex; height: 32px; min-width: 0; align-items: center; border-radius: 5px; }
 .directory-row:hover,
@@ -346,7 +347,7 @@ onMounted(() => load(props.modelValue.view));
 .node-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-count { display: inline-flex; min-width: 32px; justify-content: flex-end; color: var(--uvp-text-tertiary); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .node-online-count { color: #158052; font-weight: 600; }
-:global(body[arco-theme="dark"]) .node-online-count { color: #86efac; }
+:global(body[arco-theme="dark"] .directory-panel .node-online-count) { color: #86efac; }
 .more-button { width: 24px; height: 24px; margin-right: 3px; flex: 0 0 24px; }
 .directory-empty { display: grid; min-height: 120px; place-items: center; color: var(--uvp-text-tertiary); font-size: 12px; }
 .spin { animation: directory-spin 0.9s linear infinite; }
