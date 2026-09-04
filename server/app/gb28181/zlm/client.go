@@ -82,7 +82,10 @@ func (c *Client) call(ctx context.Context, api string, params map[string]string,
 	resp, err := c.http.Do(req)
 	if err != nil {
 		secrets := []string{c.secret}
-		if rawHook := params["hook.on_stream_not_found"]; rawHook != "" {
+		for key, rawHook := range params {
+			if !strings.HasPrefix(key, "hook.") || rawHook == "" {
+				continue
+			}
 			if parsedHook, parseErr := url.Parse(rawHook); parseErr == nil {
 				secrets = append(secrets, parsedHook.Query().Get("cap"))
 			}

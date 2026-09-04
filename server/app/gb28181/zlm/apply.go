@@ -10,9 +10,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 )
 
-// hookPath Hook 端点统一前缀(挂在后端 HTTP 服务下)
-const HookBasePath = "/index/hook"
-
 const AutoOnDemandStreamWaitMS = 30000
 
 // ApplyConfigForNode 启动时把运行时策略动态下发给 ZLM,并写入 mediaServerId
@@ -20,41 +17,15 @@ const AutoOnDemandStreamWaitMS = 30000
 //
 // 多节点场景:每节点首次启动调用一次。
 func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaConfig) error {
-	base := fmt.Sprintf("http://%s:%d%s", media.HookHost, media.HookPort, HookBasePath)
 	if c.node == nil {
 		return fmt.Errorf("ZLM 节点未绑定")
 	}
-	capability, err := playauth.CallbackCapability(c.node.APISecret, c.node.MediaServerUUID)
+	base, err := media.EffectiveHookBaseURL()
 	if err != nil {
-		return fmt.Errorf("生成 ZLM 回调凭据失败: %w", err)
+		return fmt.Errorf("ZLM Hook 回调基址不可用: %w", err)
 	}
-	notFoundURL, err := url.Parse(base + "/on_stream_not_found")
-	if err != nil {
-		return fmt.Errorf("构造 ZLM 缺流回调地址失败: %w", err)
-	}
-	query := notFoundURL.Query()
-	query.Set("cap", capability)
-	notFoundURL.RawQuery = query.Encode()
-	flowReportURL, err := url.Parse(base + "/on_flow_report")
-	if err != nil {
-		return fmt.Errorf("构造 ZLM 流量回调地址失败: %w", err)
-	}
-	query = flowReportURL.Query()
-	query.Set("cap", capability)
-	flowReportURL.RawQuery = query.Encode()
 	params := map[string]string{
-		// Hook 全套回调地址
-		"hook.enable":                "1",
-		"hook.on_server_started":     base + "/on_server_started",
-		"hook.on_server_keepalive":   base + "/on_server_keepalive",
-		"hook.on_stream_changed":     base + "/on_stream_changed",
-		"hook.on_stream_none_reader": base + "/on_stream_none_reader",
-		"hook.on_rtp_server_timeout": base + "/on_rtp_server_timeout",
-		"hook.on_publish":            base + "/on_publish",
-		"hook.on_play":               base + "/on_play",
-		"hook.on_record_mp4":         base + "/on_record_mp4",
-		"hook.on_stream_not_found":   notFoundURL.String(),
-		"hook.on_flow_report":        flowReportURL.String(),
+		"hook.enable": "1",
 		// 心跳周期(秒)
 		"hook.alive_interval":     "30.0",
 		"protocol.mp4_max_second": "3600",
@@ -64,6 +35,13 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 		"general.flowThreshold":           "0",
 	}
 	params["general.mediaServerId"] = c.node.MediaServerUUID
+	for _, event := range playauth.ManagedHookEvents() {
+		hookURL, buildErr := buildManagedHookURL(base, c.node.APISecret, c.node.MediaServerUUID, event)
+		if buildErr != nil {
+			return buildErr
+		}
+		params["hook."+string(event)] = hookURL
+	}
 	if err := c.SetServerConfig(ctx, params); err != nil {
 		return err
 	}
@@ -71,10 +49,34 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 	if err != nil {
 		return fmt.Errorf("回读 ZLM 配置失败: %w", err)
 	}
-	for _, key := range []string{"hook.enable", "hook.on_stream_not_found", "hook.on_flow_report", "general.flowThreshold", "general.maxStreamWaitMS", "general.mediaServerId"} {
+	readbackKeys := []string{"hook.enable", "general.flowThreshold", "general.maxStreamWaitMS", "general.mediaServerId"}
+	for _, event := range playauth.ManagedHookEvents() {
+		readbackKeys = append(readbackKeys, "hook."+string(event))
+	}
+	for _, key := range readbackKeys {
 		if applied[key] != params[key] {
 			return fmt.Errorf("ZLM 配置回读不一致: %s", key)
 		}
 	}
 	return nil
+}
+
+func buildManagedHookURL(base *url.URL, apiSecret, mediaServerID string, event playauth.HookEvent) (string, error) {
+	capability, err := playauth.HookCapability(apiSecret, mediaServerID, event)
+	if err != nil {
+		return "", fmt.Errorf("生成 ZLM Hook 回调凭据失败: %s", event)
+	}
+	raw, err := url.JoinPath(base.String(), string(event))
+	if err != nil {
+		return "", fmt.Errorf("构造 ZLM Hook 回调地址失败: %s", event)
+	}
+	hookURL, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("构造 ZLM Hook 回调地址失败: %s", event)
+	}
+	query := hookURL.Query()
+	query.Set("node", mediaServerID)
+	query.Set("cap", capability)
+	hookURL.RawQuery = query.Encode()
+	return hookURL.String(), nil
 }

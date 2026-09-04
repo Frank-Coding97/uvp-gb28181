@@ -49,8 +49,10 @@ func TestSetServerConfigTransportErrorRedactsCallbackCapability(t *testing.T) {
 
 	err := client.SetServerConfig(context.Background(), map[string]string{
 		"hook.on_stream_not_found": "http://platform/index/hook/on_stream_not_found?cap=" + capability,
+		"hook.on_record_mp4":       "http://platform/index/hook/on_record_mp4?cap=record-capability",
 	})
 	require.Error(t, err)
 	require.NotContains(t, err.Error(), capability)
+	require.NotContains(t, err.Error(), "record-capability")
 	require.NotContains(t, err.Error(), apiSecret)
 }

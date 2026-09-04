@@ -42,6 +42,10 @@ func TestApplyConfigForNodeIncludesRecordMP4Hook(t *testing.T) {
 
 	err = client.ApplyConfigForNode(context.Background(), gbconfig.MediaConfig{HookHost: "platform", HookPort: 8280})
 	require.NoError(t, err)
-	require.Equal(t, "http://platform:8280/index/hook/on_record_mp4", query.Get("hook.on_record_mp4"))
+	recordHook, err := url.Parse(query.Get("hook.on_record_mp4"))
+	require.NoError(t, err)
+	require.Equal(t, "http://platform:8280/index/hook/on_record_mp4", recordHook.Scheme+"://"+recordHook.Host+recordHook.Path)
+	require.Equal(t, "node-uuid", recordHook.Query().Get("node"))
+	require.NotEmpty(t, recordHook.Query().Get("cap"))
 	require.Equal(t, "3600", query.Get("protocol.mp4_max_second"))
 }
