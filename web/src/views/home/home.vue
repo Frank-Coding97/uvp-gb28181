@@ -132,8 +132,6 @@ const sipTodayTrend = computed(() => { let total = 0; return sipTrend.value.map(
 const sipRpm = computed(() => { const values = sipSnapshot.value?.pulse.samples.slice(-6) ?? []; return values.length ? Math.round(values.reduce((sum, item) => sum + item.msgPerSec, 0) / values.length * 60) : null; });
 const sipTodayTotal = computed(() => sipSnapshot.value && sipSnapshot.value.health !== HEALTH_EMPTY ? sipSnapshot.value.todayTotal : null);
 const inviteSuccessRate = computed<number | null>(() => null);
-const viewers = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.readerCount, 0) ?? 0);
-const recordings = computed(() => mediaOverview.value?.streams.filter(item => item.recordingMp4 || item.recordingHls).length ?? 0);
 const mediaRate = computed(() => mediaOverview.value?.streams.reduce((sum, item) => sum + item.bytesSpeed, 0) ?? 0);
 const todayTraffic = computed(() => {
   const traffic = dashboardSummary.value?.traffic;
