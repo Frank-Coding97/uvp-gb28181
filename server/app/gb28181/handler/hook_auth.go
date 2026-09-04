@@ -100,6 +100,20 @@ func AuthenticatedHookNode(c *gin.Context) (HookNodeIdentity, bool) {
 	return identity, ok && identity.MediaServerUUID != ""
 }
 
+func hookPayloadNodeMatches(c *gin.Context, event playauth.HookEvent, payloadNodeID string) bool {
+	identity, authenticated := AuthenticatedHookNode(c)
+	if !authenticated || payloadNodeID == "" || identity.MediaServerUUID == payloadNodeID {
+		return true
+	}
+	if app.ZapLog != nil {
+		app.ZapLog.Warn("ZLM Hook 载荷节点不匹配",
+			zap.String("event", string(event)),
+			zap.String("node", identity.MediaServerUUID),
+			zap.String("payloadNode", payloadNodeID))
+	}
+	return false
+}
+
 func rejectHook(c *gin.Context, event playauth.HookEvent, mode HookRejectMode, reason string, authenticator *HookAuthenticator) {
 	if shouldLogHookRejection(authenticator) && app.ZapLog != nil {
 		app.ZapLog.Warn("ZLM Hook 认证已拒绝",

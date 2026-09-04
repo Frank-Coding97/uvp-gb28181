@@ -40,6 +40,10 @@ func (f *fakeAutoNodeResolver) ResolveAutoOnDemandNode(uuid string) (*node.Node,
 	return &copy, true
 }
 
+func (f *fakeAutoNodeResolver) GetByUUID(uuid string) (*node.Node, bool) {
+	return f.ResolveAutoOnDemandNode(uuid)
+}
+
 type fakeAutoTargetValidator struct {
 	err   error
 	calls int
@@ -127,7 +131,7 @@ func newAutoOnDemandFixture(t *testing.T, bindClientIP ...bool) *autoOnDemandFix
 		BindClientIP: bindIP, ClientIP: "203.0.113.9",
 	})
 	require.NoError(t, err)
-	capability, err := playauth.CallbackCapability(mediaNode.APISecret, mediaNode.MediaServerUUID)
+	capability, err := playauth.HookCapability(mediaNode.APISecret, mediaNode.MediaServerUUID, playauth.HookOnStreamNotFound)
 	require.NoError(t, err)
 
 	resolver := &fakeAutoNodeResolver{node: mediaNode}
@@ -138,8 +142,12 @@ func newAutoOnDemandFixture(t *testing.T, bindClientIP ...bool) *autoOnDemandFix
 	controller.SetPlayAuthorizer(authorization)
 	controller.SetAutoOnDemandSettingsProvider(func() gbconfig.FixedAddressPlaybackSettings { return settings })
 	controller.SetAutoOnDemandRuntime(resolver, validator, dispatcher)
+	authenticator := handler.NewHookAuthenticator()
+	authenticator.SetResolver(resolver)
 	engine := gin.New()
-	engine.POST("/index/hook/on_stream_not_found", controller.OnStreamNotFound)
+	engine.POST("/index/hook/on_stream_not_found",
+		authenticator.Middleware(playauth.HookOnStreamNotFound, handler.HookRejectAdmission),
+		controller.OnStreamNotFound)
 
 	fixture := &autoOnDemandFixture{
 		controller: controller, engine: engine, resolver: resolver,
@@ -149,7 +157,7 @@ func newAutoOnDemandFixture(t *testing.T, bindClientIP ...bool) *autoOnDemandFix
 		streamID: streamID, capability: capability, token: grant.Token,
 		peer: "192.0.2.1:1234", clientIP: "203.0.113.9",
 	}
-	fixture.path = "/index/hook/on_stream_not_found?cap=" + url.QueryEscape(capability)
+	fixture.path = "/index/hook/on_stream_not_found?node=" + url.QueryEscape(mediaNode.MediaServerUUID) + "&cap=" + url.QueryEscape(capability)
 	fixture.body = map[string]interface{}{
 		"mediaServerId": mediaNode.MediaServerUUID,
 		"vhost":         "__defaultVhost__",
@@ -268,17 +276,13 @@ func TestOnStreamNotFoundFailsClosedBeforeDispatch(t *testing.T) {
 		{name: "wrong schema", mutate: func(f *autoOnDemandFixture) { f.body["schema"] = "file" }},
 		{name: "invalid fixed stream", mutate: func(f *autoOnDemandFixture) { f.body["stream"] = "0200000001" }},
 		{name: "unknown node", mutate: func(f *autoOnDemandFixture) { f.body["mediaServerId"] = "unknown" }},
-		{name: "node host is not literal ip", mutate: func(f *autoOnDemandFixture) { f.resolver.node.Host = "zlm.local" }},
-		{name: "peer mismatch", mutate: func(f *autoOnDemandFixture) { f.peer = "192.0.2.99:1234" }},
-		{name: "forwarded header ignored", mutate: func(f *autoOnDemandFixture) {
-			f.peer = "192.0.2.99:1234"
-			f.xff = f.resolver.node.Host
-		}},
 		{name: "fixed disabled", mutate: func(f *autoOnDemandFixture) { f.settings.FixedAddressEnabled = false }},
 		{name: "auto disabled", mutate: func(f *autoOnDemandFixture) { f.settings.AutoOnDemandEnabled = false }},
 		{name: "cap missing", mutate: func(f *autoOnDemandFixture) { f.path = "/index/hook/on_stream_not_found" }},
 		{name: "cap duplicated", mutate: func(f *autoOnDemandFixture) { f.path += "&cap=" + url.QueryEscape(f.capability) }},
-		{name: "cap invalid", mutate: func(f *autoOnDemandFixture) { f.path = "/index/hook/on_stream_not_found?cap=invalid" }},
+		{name: "cap invalid", mutate: func(f *autoOnDemandFixture) {
+			f.path = "/index/hook/on_stream_not_found?node=node-a&cap=invalid"
+		}},
 		{name: "play token missing", mutate: func(f *autoOnDemandFixture) { f.body["params"] = "" }},
 		{name: "play token duplicated", mutate: func(f *autoOnDemandFixture) {
 			f.body["params"] = url.Values{playauth.QueryParameter: {f.token, f.token}}.Encode()
@@ -340,7 +344,7 @@ func TestOnStreamNotFoundGlobalLimiterBoundsPreAuthenticationWork(t *testing.T) 
 func TestOnStreamNotFoundInvalidCallbackDoesNotConsumeAuthorizedQuota(t *testing.T) {
 	fixture := newAutoOnDemandFixture(t)
 	validPath := fixture.path
-	fixture.path = "/index/hook/on_stream_not_found?cap=invalid"
+	fixture.path = "/index/hook/on_stream_not_found?node=node-a&cap=invalid"
 	for i := 0; i < 40; i++ {
 		response := fixture.serve(t)
 		assertHookCode(t, response.Code, response.Body.Bytes(), -1)
@@ -394,20 +398,20 @@ func TestOnStreamNotFoundReturnsBeforeBackgroundEnsureLiveCompletes(t *testing.T
 }
 
 func TestOnStreamNotFoundLogsStableReasonWithoutCredentials(t *testing.T) {
-	core, observed := observer.New(zap.DebugLevel)
+	core, observed := observer.New(zap.WarnLevel)
 	previousLogger := app.ZapLog
 	app.ZapLog = zap.New(core)
 	t.Cleanup(func() { app.ZapLog = previousLogger })
 
 	fixture := newAutoOnDemandFixture(t)
-	fixture.path = "/index/hook/on_stream_not_found?cap=do-not-log-capability"
+	fixture.path = "/index/hook/on_stream_not_found?node=node-a&cap=do-not-log-capability"
 	response := fixture.serve(t)
 	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
 
-	entries := observed.FilterMessage("自动点播 Hook 已拒绝").All()
+	entries := observed.FilterMessage("ZLM Hook 认证已拒绝").All()
 	require.Len(t, entries, 1)
 	fields := entries[0].ContextMap()
-	require.Equal(t, "callback-auth-invalid", fields["reason"])
+	require.Equal(t, "capability-invalid", fields["reason"])
 	encoded, err := json.Marshal(fields)
 	require.NoError(t, err)
 	require.NotContains(t, string(encoded), "do-not-log-capability")

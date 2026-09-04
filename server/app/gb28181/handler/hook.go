@@ -6,9 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -359,6 +357,10 @@ type onStreamChangedBody struct {
 func (h *HookController) OnStreamChanged(c *gin.Context) {
 	var body onStreamChangedBody
 	_ = c.ShouldBindJSON(&body)
+	if !hookPayloadNodeMatches(c, playauth.HookOnStreamChanged, body.MediaServerID) {
+		hookOK(c)
+		return
+	}
 	app.ZapLog.Info("ZLM Hook on_stream_changed",
 		zap.String("app", body.App),
 		zap.String("stream", body.Stream),
@@ -523,6 +525,10 @@ func (s *hookSSRC) UnmarshalJSON(data []byte) error {
 func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 	var body onRtpServerTimeoutBody
 	_ = c.ShouldBindJSON(&body)
+	if !hookPayloadNodeMatches(c, playauth.HookOnRTPServerTimeout, body.MediaServerID) {
+		hookOK(c)
+		return
+	}
 	app.ZapLog.Info("ZLM Hook on_rtp_server_timeout",
 		zap.String("stream_id", body.StreamID), zap.String("ssrc", string(body.SSRC)),
 		zap.String("mediaServerId", body.MediaServerID))
@@ -600,6 +606,10 @@ type onPublishBody struct {
 func (h *HookController) OnPublish(c *gin.Context) {
 	var body onPublishBody
 	_ = c.ShouldBindJSON(&body)
+	if !hookPayloadNodeMatches(c, playauth.HookOnPublish, body.MediaServerID) {
+		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "hook payload node mismatch"})
+		return
+	}
 	if body.App != "talk" {
 		hookOK(c)
 		return
@@ -670,28 +680,18 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 		hookOK(c)
 		return
 	}
+	if !hookPayloadNodeMatches(c, playauth.HookOnFlowReport, body.MediaServerID) {
+		h.ignoreFlowReport(c, "payload-node-mismatch")
+		return
+	}
 	resolver, collector := h.flowDependencies()
 	if resolver == nil || collector == nil {
 		hookOK(c)
 		return
 	}
-	peerIP, ok := parsePeerIP(c.Request.RemoteAddr)
-	if !ok {
-		h.ignoreFlowReport(c, "source-invalid")
-		return
-	}
 	mediaNode, ok := resolver.GetByUUID(body.MediaServerID)
 	if !ok || mediaNode == nil || mediaNode.MediaServerUUID != body.MediaServerID {
 		h.ignoreFlowReport(c, "node-unknown")
-		return
-	}
-	if !sourceIPMatchesNode(peerIP, mediaNode.Host) {
-		h.ignoreFlowReport(c, "source-mismatch")
-		return
-	}
-	capability, ok := singleValue(c.Request.URL.Query(), "cap")
-	if !ok || !playauth.VerifyCallbackCapability(mediaNode.APISecret, body.MediaServerID, capability) {
-		h.ignoreFlowReport(c, "callback-auth-invalid")
 		return
 	}
 	err := collector.CollectFlow(c.Request.Context(), FlowReport{
@@ -721,12 +721,6 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		h.denyAutoOnDemand(c, "runtime-unavailable")
 		return
 	}
-	peerIP, ok := parsePeerIP(c.Request.RemoteAddr)
-	if !ok {
-		h.denyAutoOnDemand(c, "source-invalid")
-		return
-	}
-
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
 	var body onStreamNotFoundBody
 	decoder := json.NewDecoder(c.Request.Body)
@@ -736,6 +730,10 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
 		h.denyAutoOnDemand(c, "payload-invalid")
+		return
+	}
+	if !hookPayloadNodeMatches(c, playauth.HookOnStreamNotFound, body.MediaServerID) {
+		h.denyAutoOnDemand(c, "payload-node-mismatch")
 		return
 	}
 	deviceID, channelID, err := play.ParseFixedStreamID(body.Stream)
@@ -754,15 +752,6 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 	if !ok || mediaNode == nil || mediaNode.ID == 0 || !mediaNode.IsActive() || mediaNode.IsNearCapacity() ||
 		mediaNode.MediaServerUUID != body.MediaServerID {
 		h.denyAutoOnDemand(c, "node-unavailable")
-		return
-	}
-	if !sourceIPMatchesNode(peerIP, mediaNode.Host) {
-		h.denyAutoOnDemand(c, "source-mismatch")
-		return
-	}
-	capability, ok := singleValue(c.Request.URL.Query(), "cap")
-	if !ok || !playauth.VerifyCallbackCapability(mediaNode.APISecret, body.MediaServerID, capability) {
-		h.denyAutoOnDemand(c, "callback-auth-invalid")
 		return
 	}
 	if h.autoLimiter == nil || !h.autoLimiter.Allow() {
@@ -819,6 +808,10 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	var body onPlayBody
 	if err := c.ShouldBindJSON(&body); err != nil {
 		h.denyPlayback(c, "tampered", "invalid playback request")
+		return
+	}
+	if !hookPayloadNodeMatches(c, playauth.HookOnPlay, body.MediaServerID) {
+		h.denyPlayback(c, "wrong_resource", "hook payload node mismatch")
 		return
 	}
 	if classifier, verifier := h.previewDependencies(); classifier != nil && verifier != nil {
@@ -1067,23 +1060,6 @@ func singleValue(values url.Values, key string) (string, bool) {
 	return returnValue, ok && len(items) == 1 && returnValue != ""
 }
 
-func parsePeerIP(remoteAddr string) (netip.Addr, bool) {
-	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddr))
-	if err != nil {
-		return netip.Addr{}, false
-	}
-	address, err := netip.ParseAddr(host)
-	if err != nil {
-		return netip.Addr{}, false
-	}
-	return address.Unmap(), true
-}
-
-func sourceIPMatchesNode(peerIP netip.Addr, nodeHost string) bool {
-	nodeIP, err := netip.ParseAddr(strings.TrimSpace(nodeHost))
-	return err == nil && nodeIP.Unmap() == peerIP
-}
-
 func validAutoOnDemandSchema(schema string) bool {
 	switch strings.ToLower(strings.TrimSpace(schema)) {
 	case "fmp4", "http", "https", "ws", "wss", "rtsp", "rtsps", "rtmp", "rtmps", "webrtc":
@@ -1144,6 +1120,10 @@ func (h *HookController) OnServerStarted(c *gin.Context) {
 		h.writeServerStartedDecodeError(c, err)
 		return
 	}
+	if !hookPayloadNodeMatches(c, playauth.HookOnServerStarted, body.MediaServerID) {
+		hookOK(c)
+		return
+	}
 
 	if app.ZapLog != nil {
 		app.ZapLog.Info("ZLM Hook on_server_started")
@@ -1195,6 +1175,10 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "invalid on_record_mp4 payload"})
 		return
 	}
+	if !hookPayloadNodeMatches(c, playauth.HookOnRecordMP4, body.MediaServerID) {
+		hookOK(c)
+		return
+	}
 	if h.recordResolver == nil || h.recordMP4 == nil {
 		hookOK(c)
 		return
@@ -1232,6 +1216,13 @@ func (h *HookController) OnServerKeepalive(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		app.ZapLog.Warn("ZLM Hook on_server_keepalive 读 body 失败", zap.Error(err))
+		hookOK(c)
+		return
+	}
+	var identity struct {
+		MediaServerID string `json:"mediaServerId"`
+	}
+	if json.Unmarshal(body, &identity) == nil && !hookPayloadNodeMatches(c, playauth.HookOnServerKeepalive, identity.MediaServerID) {
 		hookOK(c)
 		return
 	}
