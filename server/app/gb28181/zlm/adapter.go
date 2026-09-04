@@ -32,12 +32,20 @@ func (a *ServiceAdapter) SetServerConfig(ctx context.Context, n *node.Node, para
 // ApplyConfigForNode 实现 service.ZLMProbe
 func (a *ServiceAdapter) ApplyConfigForNode(ctx context.Context, n *node.Node, t service.MediaTuning) error {
 	media := gbconfig.MediaConfig{
+		HookBaseURL:             a.tuning.HookBaseURL,
+		HookRequireTLS:          a.tuning.HookRequireTLS,
 		HookHost:                a.tuning.HookHost,
 		HookPort:                a.tuning.HookPort,
 		StreamNoneReaderTimeout: a.tuning.StreamNoneReaderTimeout,
 		RTPServerTimeout:        a.tuning.RTPServerTimeout,
 	}
 	// 优先用传入的 tuning(允许 service 层覆盖默认值)
+	if t.HookBaseURL != "" {
+		media.HookBaseURL = t.HookBaseURL
+	}
+	if t.HookRequireTLS {
+		media.HookRequireTLS = true
+	}
 	if t.HookHost != "" {
 		media.HookHost = t.HookHost
 	}

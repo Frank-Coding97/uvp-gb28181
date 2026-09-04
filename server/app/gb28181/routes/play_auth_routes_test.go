@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 func TestSetPlayAuthorizerWiresOnPlayHook(t *testing.T) {
@@ -20,6 +21,8 @@ func TestSetPlayAuthorizerWiresOnPlayHook(t *testing.T) {
 	}
 	SetPlayAuthorizer(signer)
 	t.Cleanup(func() { SetPlayAuthorizer(nil) })
+	mediaNode := &node.Node{MediaServerUUID: "node-a", APISecret: "zlm-secret"}
+	installRouteHookAuth(t, mediaNode)
 
 	deviceID := "37010301021320000014"
 	channelID := "37010301021320000001"
@@ -41,7 +44,7 @@ func TestSetPlayAuthorizerWiresOnPlayHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := httptest.NewRequest(http.MethodPost, "/index/hook/on_play", bytes.NewReader(body))
+	request := httptest.NewRequest(http.MethodPost, authenticatedHookPath(t, "/index/hook/on_play", mediaNode, playauth.HookOnPlay), bytes.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	engine.ServeHTTP(response, request)

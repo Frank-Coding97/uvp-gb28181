@@ -386,6 +386,8 @@ func startControlPlane(cfg gbconfig.Config) {
 	if zlmRegistry != nil {
 		adapter := gbzlm.NewServiceAdapter(cfg.Media)
 		tuning := gbzlmsvc.MediaTuning{
+			HookBaseURL:             cfg.Media.HookBaseURL,
+			HookRequireTLS:          cfg.Media.HookRequireTLS,
 			HookHost:                cfg.Media.HookHost,
 			HookPort:                cfg.Media.HookPort,
 			StreamNoneReaderTimeout: cfg.Media.StreamNoneReaderTimeout,
@@ -1274,6 +1276,7 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 		}
 	}
 	zlmRegistry = reg
+	gbroutes.SetHookAuthResolver(reg)
 	zlmServerConfigCache = gbzlm.NewServerConfigCache(gbzlm.FetchViaRegistry(reg))
 	app.ZapLog.Info("GB28181 ZLM Registry 已装配", zap.Int("nodes", len(reg.List())))
 

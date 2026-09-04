@@ -63,6 +63,8 @@ type ZLMProbe interface {
 // MediaTuning 平台级 hook / 媒体调优参数(从 yaml gb28181.media.* 来)
 // 跟 gbconfig.MediaConfig 字段一致,但解耦避免 service 直依赖 config 包。
 type MediaTuning struct {
+	HookBaseURL             string
+	HookRequireTLS          bool
 	HookHost                string
 	HookPort                int
 	StreamNoneReaderTimeout int

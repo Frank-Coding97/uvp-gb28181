@@ -16,6 +16,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/devicecapture"
 	gbhandler "uvplatform.cn/uvp-gb28181/app/gb28181/handler"
 	gbplay "uvplatform.cn/uvp-gb28181/app/gb28181/play"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	gbrecording "uvplatform.cn/uvp-gb28181/app/gb28181/recording"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
@@ -46,6 +47,7 @@ var streamNotifier = stream.NewNotifier()
 func StreamNotifier() *stream.Notifier { return streamNotifier }
 
 var hookController = gbhandler.NewHookController(streamNotifier)
+var hookAuthenticator = gbhandler.NewHookAuthenticator()
 
 // playController 点播控制器(注入式:bootstrap 在 SIP/ZLM 初始化完成后通过 SetPlayService 设置 svc)
 var playController = gbcontrollers.NewPlayController(nil)
@@ -419,6 +421,10 @@ func SetHookMultiNode(resolver gbhandler.NodeUUIDResolver, binder gbhandler.Stre
 	hookController.SetMultiNode(resolver, binder)
 	registry, _ := resolver.(autoOnDemandNodeRegistry)
 	configureAutoOnDemandRegistry(registry)
+}
+
+func SetHookAuthResolver(resolver gbhandler.HookAuthNodeResolver) {
+	hookAuthenticator.SetResolver(resolver)
 }
 
 type autoOnDemandNodeRegistry interface {
@@ -994,21 +1000,21 @@ func cascadeRoute(fn func(*gbcascadecontroller.ManagementController, *gin.Contex
 	}
 }
 
-// RegisterHookRoutes 注册 ZLMediaKit Hook 回调端点到 engine 根(无 /api 前缀,无鉴权)
-// ZLM 以 POST JSON 回调,路径 /index/hook/*
+// RegisterHookRoutes 注册 ZLMediaKit Hook 回调端点到 engine 根(无 /api 前缀)。
+// ZLM 以 POST JSON 回调,路径 /index/hook/*；每个事件使用节点专属、事件专属能力凭证。
 func RegisterHookRoutes(engine *gin.Engine) {
 	hook := engine.Group("/index/hook")
 	{
-		hook.POST("/on_server_started", hookController.OnServerStarted)
-		hook.POST("/on_server_keepalive", hookController.OnServerKeepalive)
-		hook.POST("/on_stream_changed", hookController.OnStreamChanged)
-		hook.POST("/on_stream_none_reader", hookController.OnStreamNoneReader)
-		hook.POST("/on_rtp_server_timeout", hookController.OnRtpServerTimeout)
-		hook.POST("/on_publish", hookController.OnPublish)
-		hook.POST("/on_play", hookController.OnPlay)
-		hook.POST("/on_flow_report", hookController.OnFlowReport)
-		hook.POST("/on_stream_not_found", hookController.OnStreamNotFound)
-		hook.POST("/on_record_mp4", hookController.OnRecordMP4)
+		hook.POST("/on_server_started", hookAuthenticator.Middleware(playauth.HookOnServerStarted, gbhandler.HookRejectNotification), hookController.OnServerStarted)
+		hook.POST("/on_server_keepalive", hookAuthenticator.Middleware(playauth.HookOnServerKeepalive, gbhandler.HookRejectNotification), hookController.OnServerKeepalive)
+		hook.POST("/on_stream_changed", hookAuthenticator.Middleware(playauth.HookOnStreamChanged, gbhandler.HookRejectNotification), hookController.OnStreamChanged)
+		hook.POST("/on_stream_none_reader", hookAuthenticator.Middleware(playauth.HookOnStreamNoneReader, gbhandler.HookRejectNoneReader), hookController.OnStreamNoneReader)
+		hook.POST("/on_rtp_server_timeout", hookAuthenticator.Middleware(playauth.HookOnRTPServerTimeout, gbhandler.HookRejectNotification), hookController.OnRtpServerTimeout)
+		hook.POST("/on_publish", hookAuthenticator.Middleware(playauth.HookOnPublish, gbhandler.HookRejectAdmission), hookController.OnPublish)
+		hook.POST("/on_play", hookAuthenticator.Middleware(playauth.HookOnPlay, gbhandler.HookRejectAdmission), hookController.OnPlay)
+		hook.POST("/on_flow_report", hookAuthenticator.Middleware(playauth.HookOnFlowReport, gbhandler.HookRejectNotification), hookController.OnFlowReport)
+		hook.POST("/on_stream_not_found", hookAuthenticator.Middleware(playauth.HookOnStreamNotFound, gbhandler.HookRejectAdmission), hookController.OnStreamNotFound)
+		hook.POST("/on_record_mp4", hookAuthenticator.Middleware(playauth.HookOnRecordMP4, gbhandler.HookRejectNotification), hookController.OnRecordMP4)
 	}
 }
 
