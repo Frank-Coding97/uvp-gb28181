@@ -549,3 +549,49 @@ func TestLoadFromRecordingCatalogConfig(t *testing.T) {
 	require.Equal(t, 8, cfg.Recording.CatalogManualLookbackDays)
 	require.Equal(t, "UVP_TEST_RECORDING_CAPABILITY_KEY", cfg.Recording.CapabilityKeyEnv)
 }
+
+func TestMediaConfigEffectiveHookBaseURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  MediaConfig
+		want    string
+		wantErr bool
+	}{
+		{name: "https", config: MediaConfig{HookBaseURL: "https://hook.example.com/index/hook"}, want: "https://hook.example.com/index/hook"},
+		{name: "path prefix and trailing slash", config: MediaConfig{HookBaseURL: "https://edge.example.com/uvp/index/hook/"}, want: "https://edge.example.com/uvp/index/hook"},
+		{name: "legacy", config: MediaConfig{HookHost: "10.8.0.3", HookPort: 8280}, want: "http://10.8.0.3:8280/index/hook"},
+		{name: "base wins", config: MediaConfig{HookBaseURL: "https://hook.example.com/index/hook", HookHost: "10.8.0.3", HookPort: 8280}, want: "https://hook.example.com/index/hook"},
+		{name: "tls required", config: MediaConfig{HookBaseURL: "http://hook.example.com/index/hook", HookRequireTLS: true}, wantErr: true},
+		{name: "relative", config: MediaConfig{HookBaseURL: "/index/hook"}, wantErr: true},
+		{name: "userinfo", config: MediaConfig{HookBaseURL: "https://user:pass@hook.example.com/index/hook"}, wantErr: true},
+		{name: "query", config: MediaConfig{HookBaseURL: "https://hook.example.com/index/hook?secret=x"}, wantErr: true},
+		{name: "fragment", config: MediaConfig{HookBaseURL: "https://hook.example.com/index/hook#x"}, wantErr: true},
+		{name: "unsupported scheme", config: MediaConfig{HookBaseURL: "ftp://hook.example.com/index/hook"}, wantErr: true},
+		{name: "missing", config: MediaConfig{}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := tc.config.EffectiveHookBaseURL()
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got.String())
+		})
+	}
+}
+
+func TestLoadFromReadsHookBaseURLAndTLSRequirement(t *testing.T) {
+	src := fakeSource{
+		values: map[string]interface{}{
+			"gb28181.media.hookbaseurl":    "https://hook.example.com/index/hook",
+			"gb28181.media.hookrequiretls": true,
+		},
+		strings: map[string]string{"gb28181.media.hookbaseurl": "https://hook.example.com/index/hook"},
+		bools:   map[string]bool{"gb28181.media.hookrequiretls": true},
+	}
+	cfg := LoadFrom(src)
+	require.Equal(t, "https://hook.example.com/index/hook", cfg.Media.HookBaseURL)
+	require.True(t, cfg.Media.HookRequireTLS)
+}

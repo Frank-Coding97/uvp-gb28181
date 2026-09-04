@@ -3,8 +3,12 @@ package config
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -632,10 +636,40 @@ func (c ZLMConfig) EffectivePlaybackHost() string {
 
 // MediaConfig 媒体/Hook 配置
 type MediaConfig struct {
+	HookBaseURL             string // 完整 Hook 回调根；非空时优先于旧 host/port
+	HookRequireTLS          bool   // 公网部署要求 HTTPS
 	HookHost                string // ZLM Hook 回调可达的本机地址
 	HookPort                int    // 后端 HTTP 端口(Hook 端点)
 	StreamNoneReaderTimeout int    // 无人观看断流秒数
 	RTPServerTimeout        int    // RTP 收流超时(秒)
+}
+
+func (c MediaConfig) EffectiveHookBaseURL() (*url.URL, error) {
+	raw := strings.TrimSpace(c.HookBaseURL)
+	if raw == "" {
+		host := strings.Trim(strings.TrimSpace(c.HookHost), "[]")
+		if host == "" || c.HookPort <= 0 || c.HookPort > 65535 {
+			return nil, errors.New("ZLM Hook 回调地址未完整配置")
+		}
+		raw = "http://" + net.JoinHostPort(host, strconv.Itoa(c.HookPort)) + "/index/hook"
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed == nil || parsed.IsAbs() == false || parsed.Host == "" || parsed.Opaque != "" {
+		return nil, errors.New("ZLM Hook 回调基址无效")
+	}
+	parsed.Scheme = strings.ToLower(parsed.Scheme)
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, errors.New("ZLM Hook 回调基址仅支持 HTTP 或 HTTPS")
+	}
+	if parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return nil, errors.New("ZLM Hook 回调基址不得包含用户信息、查询参数或片段")
+	}
+	if c.HookRequireTLS && parsed.Scheme != "https" {
+		return nil, errors.New("ZLM Hook 回调已要求 TLS")
+	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = strings.TrimRight(parsed.RawPath, "/")
+	return parsed, nil
 }
 
 // PlayConfig 点播运行时配置
@@ -753,6 +787,8 @@ func loadFrom(c valueSource) (Config, error) {
 			RTPPort:      c.GetInt("gb28181.zlm.rtpport"),
 		},
 		Media: MediaConfig{
+			HookBaseURL:             c.GetString("gb28181.media.hookbaseurl"),
+			HookRequireTLS:          c.GetBool("gb28181.media.hookrequiretls"),
 			HookHost:                c.GetString("gb28181.media.hookhost"),
 			HookPort:                c.GetInt("gb28181.media.hookport"),
 			StreamNoneReaderTimeout: c.GetInt("gb28181.media.streamnonereadertimeout"),

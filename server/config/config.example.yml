@@ -275,8 +275,10 @@ gb28181:
     rtpport: 40000                # RTP 单端口收流
   # 媒体/Hook 配置
   media:
-    hookhost: "127.0.0.1"         # ZLM Hook 回调可达的本机地址(跨机部署填本机局域网IP)
-    hookport: 8280                # 后端 HTTP 端口
+    hookbaseurl: ""               # 推荐:完整回调根,如 https://hook.example.com/index/hook
+    hookrequiretls: false          # 公网部署必须设 true；内网/VPN 可按安全边界保留 false
+    hookhost: "127.0.0.1"         # 兼容旧配置:hookbaseurl 为空时与 hookport 派生 HTTP 回调根
+    hookport: 8280                 # 兼容旧配置:后端 HTTP 端口
     streamnonereadertimeout: 20   # 无人观看多少秒后断流
     rtpservertimeout: 15          # RTP 收流超时(秒)
   # 设备/NVR 本地录像查询。时间输入按平台时区墙钟解释，不按浏览器时区转换。
