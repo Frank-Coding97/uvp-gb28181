@@ -55,6 +55,13 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("grid?.setEditing(true)");
   });
 
+  it("reuses the shared primary button treatment for dashboard editing actions", () => {
+    expect(source).toMatch(/<button v-if="!editing" class="btn-primary primary"[^>]*>.*编辑仪表盘<\/button>/s);
+    expect(source).toMatch(/<button class="btn-primary primary"[^>]*>.*保存布局.*<\/button>/s);
+    expect(source).toContain(".primary{color:#fff;background:var(--uvp-brand);border:0}");
+    expect(source).toContain(".actions .primary{font-weight:600}");
+  });
+
   it("keeps system theme tokens", () => {
     expect(source).not.toContain("background:var(--uvp-shell-muted)");
     expect(source).not.toContain("height:calc(100% - 2px)");
