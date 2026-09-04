@@ -56,6 +56,7 @@ import (
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 // schedulerPickerAdapter 把 scheduler.Manager 适配为 play.NodePicker(避免反向依赖 play 包)
@@ -267,6 +268,7 @@ var playSessions = uac.NewSessionManager()
 var metricsAgg *metrics.Aggregator
 var metricsRecorder metrics.Recorder
 var metricsPersistCancel context.CancelFunc
+var dashboardRetentionCancel context.CancelFunc
 
 // metricsCleanupStop 控制 TTL 清理 goroutine 退出
 var metricsCleanupStop chan struct{}
@@ -361,7 +363,7 @@ func startControlPlane(cfg gbconfig.Config) {
 
 	metricsAgg = metrics.NewAggregator()
 	metricsRecorder = metricsAgg
-	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbSipMetricMinute{}) && db.Migrator().HasTable(&gbmodels.GbSipMetricFlush{}) {
+	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbSipMetricMinute{}) && db.Migrator().HasTable(&gbmodels.GbSipMetricFlush{}) && db.Migrator().HasTable(&gbmodels.GbSipMetricGap{}) {
 		persistent := metrics.NewPersistentRecorder(db, metricsAgg)
 		persistCtx, cancel := context.WithCancel(context.Background())
 		metricsPersistCancel = cancel
@@ -373,6 +375,15 @@ func startControlPlane(cfg gbconfig.Config) {
 	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
 	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbPlayAttempt{}) {
 		gbroutes.SetPlayAttemptStore(gbdashboard.NewPlayAttemptStore(db))
+		dashboardRetentionCancel = startDashboardRetentionRuntime(db, 24*time.Hour, func(result gbdashboard.RetentionResult, err error) {
+			if err != nil {
+				app.ZapLog.Warn("清理仪表盘历史事实失败", zap.Error(err))
+				return
+			}
+			if result.Total() > 0 {
+				app.ZapLog.Info("清理过期仪表盘历史事实", zap.Int64("deleted", result.Total()))
+			}
+		})
 	} else {
 		gbroutes.SetPlayAttemptStore(nil)
 	}
@@ -453,6 +464,16 @@ func startControlPlane(cfg gbconfig.Config) {
 		app.ZapLog.Warn("GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发")
 		return
 	}
+}
+
+func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report func(gbdashboard.RetentionResult, error)) context.CancelFunc {
+	if db == nil || !db.Migrator().HasTable(&gbmodels.GbSipMetricMinute{}) || !db.Migrator().HasTable(&gbmodels.GbSipMetricFlush{}) ||
+		!db.Migrator().HasTable(&gbmodels.GbSipMetricGap{}) || !db.Migrator().HasTable(&gbmodels.GbPlayAttempt{}) {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go gbdashboard.NewDashboardRetention(db, 500).Run(ctx, interval, report)
+	return cancel
 }
 
 // Start 启动 GB28181 SIP 服务 + 离线扫描器(在 HTTP 服务阻塞等待信号之前调用)
@@ -1572,6 +1593,10 @@ func Stop() {
 	if metricsPersistCancel != nil {
 		metricsPersistCancel()
 		metricsPersistCancel = nil
+	}
+	if dashboardRetentionCancel != nil {
+		dashboardRetentionCancel()
+		dashboardRetentionCancel = nil
 	}
 }
 
