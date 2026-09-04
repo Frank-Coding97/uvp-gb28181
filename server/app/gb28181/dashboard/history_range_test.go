@@ -45,6 +45,12 @@ func TestResolveTrafficHistoryWindowRejectsMinuteHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, time.Hour, window.Bucket)
 	require.Equal(t, 24, window.MaxPoints)
+	location := time.FixedZone("CST", 8*3600)
+	now := time.Date(2026, 9, 4, 10, 3, 0, 0, location)
+	window, err = ResolveTrafficHistoryWindow("7d", now, location)
+	require.NoError(t, err)
+	require.Equal(t, time.Date(2026, 8, 29, 0, 0, 0, 0, location), window.From)
+	require.Equal(t, 7, window.MaxPoints)
 }
 
 func (value HistoryRange) String() string { return string(value) }

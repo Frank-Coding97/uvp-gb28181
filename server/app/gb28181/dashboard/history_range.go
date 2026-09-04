@@ -14,12 +14,12 @@ const (
 )
 
 type HistoryWindow struct {
-	Range         HistoryRange
-	From          time.Time
-	To            time.Time
-	Bucket        time.Duration
-	MaxPoints     int
-	Timezone      string
+	Range     HistoryRange
+	From      time.Time
+	To        time.Time
+	Bucket    time.Duration
+	MaxPoints int
+	Timezone  string
 }
 
 func ResolveHistoryWindow(raw string, now time.Time, location *time.Location) (HistoryWindow, error) {
@@ -56,6 +56,9 @@ func ResolveTrafficHistoryWindow(raw string, now time.Time, location *time.Locat
 	if window.Range == HistoryRange24H {
 		window.Bucket, window.MaxPoints = time.Hour, 24
 	} else {
+		localTo := window.To.In(location)
+		dayStart := time.Date(localTo.Year(), localTo.Month(), localTo.Day(), 0, 0, 0, 0, location)
+		window.From = dayStart.AddDate(0, 0, -6)
 		window.Bucket, window.MaxPoints = 24*time.Hour, 7
 	}
 	return window, nil

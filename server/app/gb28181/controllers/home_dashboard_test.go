@@ -146,6 +146,14 @@ func TestHomeDrilldownPlayHistoryRejectsInvalidRange(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, result.Code)
 }
 
+func TestHomeDrilldownTrafficHistoryRejectsMinuteRangeAndInvalidPage(t *testing.T) {
+	controller := NewHomeDashboardController(func() *gorm.DB { return nil })
+	router := gin.New()
+	router.GET("/drilldown/traffic", controller.TrafficHistory)
+	require.Equal(t, http.StatusBadRequest, performDashboardRequest(router, http.MethodGet, "/drilldown/traffic?range=1h", nil).Code)
+	require.Equal(t, http.StatusBadRequest, performDashboardRequest(router, http.MethodGet, "/drilldown/traffic?range=24h&page=0", nil).Code)
+}
+
 type dashboardSectionStatus struct {
 	Status string `json:"status"`
 }
