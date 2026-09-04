@@ -29,9 +29,53 @@ const (
 	playKeyContext           = "uvp-gb28181/play-authorization/v2"
 	ipKeyContext             = "uvp-gb28181/play-ip-binding/v1"
 	callbackCapabilityDomain = "uvp-gb28181/on-stream-not-found-callback/v1"
+	hookCapabilityDomain     = "uvp-gb28181/zlm-hook-callback/v2"
 	maxClockSkew             = 30 * time.Second
 	minimumRootKeyBytes      = 32
 )
+
+type HookEvent string
+
+const (
+	HookOnServerStarted    HookEvent = "on_server_started"
+	HookOnServerKeepalive  HookEvent = "on_server_keepalive"
+	HookOnStreamChanged    HookEvent = "on_stream_changed"
+	HookOnStreamNoneReader HookEvent = "on_stream_none_reader"
+	HookOnRTPServerTimeout HookEvent = "on_rtp_server_timeout"
+	HookOnPublish          HookEvent = "on_publish"
+	HookOnPlay             HookEvent = "on_play"
+	HookOnFlowReport       HookEvent = "on_flow_report"
+	HookOnStreamNotFound   HookEvent = "on_stream_not_found"
+	HookOnRecordMP4        HookEvent = "on_record_mp4"
+)
+
+var managedHookEvents = [...]HookEvent{
+	HookOnServerStarted,
+	HookOnServerKeepalive,
+	HookOnStreamChanged,
+	HookOnStreamNoneReader,
+	HookOnRTPServerTimeout,
+	HookOnPublish,
+	HookOnPlay,
+	HookOnFlowReport,
+	HookOnStreamNotFound,
+	HookOnRecordMP4,
+}
+
+func ManagedHookEvents() []HookEvent {
+	events := make([]HookEvent, len(managedHookEvents))
+	copy(events, managedHookEvents[:])
+	return events
+}
+
+func (event HookEvent) Valid() bool {
+	for _, known := range managedHookEvents {
+		if event == known {
+			return true
+		}
+	}
+	return false
+}
 
 var (
 	ErrKeyInvalid                   = errors.New("invalid play authorization key")
@@ -377,6 +421,25 @@ func CallbackCapability(apiSecret, mediaServerID string) (string, error) {
 
 func VerifyCallbackCapability(apiSecret, mediaServerID, capability string) bool {
 	want, err := CallbackCapability(apiSecret, mediaServerID)
+	return err == nil && capability != "" && hmac.Equal([]byte(want), []byte(capability))
+}
+
+func HookCapability(apiSecret, mediaServerID string, event HookEvent) (string, error) {
+	apiSecret = strings.TrimSpace(apiSecret)
+	mediaServerID = strings.TrimSpace(mediaServerID)
+	if apiSecret == "" || mediaServerID == "" || !event.Valid() {
+		return "", ErrCapabilityInvalid
+	}
+	key, err := deriveKey([]byte(apiSecret), hookCapabilityDomain)
+	if err != nil {
+		return "", ErrCapabilityInvalid
+	}
+	payload := mediaServerID + "\n" + string(event)
+	return base64.RawURLEncoding.EncodeToString(signature(key, []byte(payload))), nil
+}
+
+func VerifyHookCapability(apiSecret, mediaServerID string, event HookEvent, capability string) bool {
+	want, err := HookCapability(apiSecret, mediaServerID, event)
 	return err == nil && capability != "" && hmac.Equal([]byte(want), []byte(capability))
 }
 

@@ -166,6 +166,46 @@ func TestCallbackCapabilityIsNodeBoundAndDomainSeparated(t *testing.T) {
 	}
 }
 
+func TestHookCapabilityIsBoundToNodeAndEvent(t *testing.T) {
+	capability, err := HookCapability("zlm-api-secret", "node-a", HookOnFlowReport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if capability == "" || strings.Contains(capability, "zlm-api-secret") {
+		t.Fatalf("hook capability must be opaque: %q", capability)
+	}
+	if !VerifyHookCapability("zlm-api-secret", "node-a", HookOnFlowReport, capability) {
+		t.Fatal("matching hook capability was rejected")
+	}
+	if VerifyHookCapability("zlm-api-secret", "node-b", HookOnFlowReport, capability) {
+		t.Fatal("hook capability was reusable across node identity")
+	}
+	if VerifyHookCapability("zlm-api-secret", "node-a", HookOnStreamNoneReader, capability) {
+		t.Fatal("hook capability was reusable across hook event")
+	}
+	if VerifyHookCapability("other-secret", "node-a", HookOnFlowReport, capability) {
+		t.Fatal("hook capability was reusable across node secret")
+	}
+}
+
+func TestHookCapabilityRejectsInvalidInputs(t *testing.T) {
+	for _, tc := range []struct {
+		name, secret, node string
+		event              HookEvent
+	}{
+		{name: "empty secret", node: "node-a", event: HookOnFlowReport},
+		{name: "empty node", secret: "secret", event: HookOnFlowReport},
+		{name: "empty event", secret: "secret", node: "node-a"},
+		{name: "unknown event", secret: "secret", node: "node-a", event: HookEvent("unknown")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := HookCapability(tc.secret, tc.node, tc.event); !errors.Is(err, ErrCapabilityInvalid) {
+				t.Fatalf("error=%v, want ErrCapabilityInvalid", err)
+			}
+		})
+	}
+}
+
 func TestDecorateURLsRejectsMissingOrInvalidPlaybackURL(t *testing.T) {
 	if _, err := DecorateURLs(playurl.URLs{}, "token"); !errors.Is(err, ErrURLInvalid) {
 		t.Fatalf("empty URLs error=%v, want ErrURLInvalid", err)
