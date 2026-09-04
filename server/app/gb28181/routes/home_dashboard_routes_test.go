@@ -17,6 +17,7 @@ func TestHomeDashboardRoutesAreRegisteredInProtectedGroup(t *testing.T) {
 		routes[route.Method+" "+route.Path] = true
 	}
 	require.True(t, routes["GET /api/gb28181/home/summary"])
+	require.True(t, routes["GET /api/gb28181/home/drilldown/sip"])
 	require.True(t, routes["GET /api/gb28181/home/layout"])
 	require.True(t, routes["PUT /api/gb28181/home/layout"])
 	require.True(t, routes["DELETE /api/gb28181/home/layout"])

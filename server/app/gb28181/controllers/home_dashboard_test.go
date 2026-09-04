@@ -127,6 +127,17 @@ func TestHomeSummaryReturnsServiceUnavailableWhenDatabaseIsMissing(t *testing.T)
 	require.Equal(t, http.StatusServiceUnavailable, result.Code)
 }
 
+func TestHomeDrilldownSIPHistoryRejectsInvalidAndDuplicateRanges(t *testing.T) {
+	controller := NewHomeDashboardController(func() *gorm.DB { return nil })
+	router := gin.New()
+	router.GET("/drilldown/sip", controller.SIPHistory)
+
+	invalid := performDashboardRequest(router, http.MethodGet, "/drilldown/sip?range=30d", nil)
+	require.Equal(t, http.StatusBadRequest, invalid.Code)
+	duplicate := performDashboardRequest(router, http.MethodGet, "/drilldown/sip?range=1h&range=7d", nil)
+	require.Equal(t, http.StatusBadRequest, duplicate.Code)
+}
+
 type dashboardSectionStatus struct {
 	Status string `json:"status"`
 }
