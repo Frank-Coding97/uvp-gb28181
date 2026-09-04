@@ -50,7 +50,7 @@ function formatBytes(value: number) {
 </script>
 
 <template>
-  <a-modal :visible="visible" :title="title" :width="980" :footer="false" unmount-on-close @cancel="emit('close')">
+  <a-modal :visible="visible" modal-class="uvp-system-dialog" :title="title" :width="980" :footer="false" unmount-on-close @cancel="emit('close')">
     <div class="drilldown-dialog" :aria-busy="loading">
       <div class="drilldown-toolbar">
         <div class="drilldown-ranges" aria-label="时间范围">

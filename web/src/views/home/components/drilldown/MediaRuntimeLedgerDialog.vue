@@ -36,7 +36,7 @@ watch(query, () => { page.value = 1; });
 </script>
 
 <template>
-  <a-modal :visible="visible" :title="title" :width="900" :footer="false" unmount-on-close @cancel="emit('close')">
+  <a-modal :visible="visible" modal-class="uvp-system-dialog" :title="title" :width="900" :footer="false" unmount-on-close @cancel="emit('close')">
     <div class="media-ledger-dialog">
       <div class="media-ledger-toolbar">
         <div class="media-ledger-tabs" role="tablist" aria-label="运行态台账类型">

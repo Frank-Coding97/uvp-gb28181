@@ -7,7 +7,7 @@ vi.mock("@/views/gb28181/zlm/workbench/components/MediaVChart.vue", () => ({
 
 import DashboardDrilldownDialog from "./DashboardDrilldownDialog.vue";
 
-const AModal = { props: ["visible", "title"], emits: ["cancel"], template: `<section v-if="visible" class="modal-stub"><h2>{{ title }}</h2><slot /></section>` };
+const AModal = { props: ["visible", "title", "modalClass"], emits: ["cancel"], template: `<section v-if="visible" class="modal-stub" :data-modal-class="modalClass"><h2>{{ title }}</h2><slot /></section>` };
 const result = {
   status: "partial" as const, asOf: "2026-09-04T10:00:00+08:00", scope: { type: "platform" as const }, coverage: "partial" as const,
   data: {
@@ -20,10 +20,11 @@ describe("DashboardDrilldownDialog", () => {
   it("shows range controls, partial state, chart and ledger", async () => {
     const wrapper = mount(DashboardDrilldownDialog, {
       props: { visible: true, metric: "sip-rpm", range: "24h", ranges: ["1h", "24h", "7d"], loading: false, stale: false, error: "", result },
-      global: { stubs: { AModal } }
+      global: { stubs: { "a-modal": AModal } }
     });
     expect(wrapper.text()).toContain("统计覆盖不完整");
     expect(wrapper.text()).toContain("REGISTER");
+    expect(wrapper.get(".modal-stub").attributes("data-modal-class")).toBe("uvp-system-dialog");
     expect(wrapper.get(".chart-stub").attributes("data-status")).toBe("partial");
     const buttons = wrapper.findAll(".drilldown-ranges button");
     expect(buttons).toHaveLength(3);
@@ -34,7 +35,7 @@ describe("DashboardDrilldownDialog", () => {
   it("keeps last successful result visible when refresh becomes stale", () => {
     const wrapper = mount(DashboardDrilldownDialog, {
       props: { visible: true, metric: "sip-today", range: "24h", ranges: ["1h", "24h", "7d"], loading: false, stale: true, error: "network", result },
-      global: { stubs: { AModal } }
+      global: { stubs: { "a-modal": AModal } }
     });
     expect(wrapper.text()).toContain("继续展示上次数据");
     expect(wrapper.text()).toContain("REGISTER");

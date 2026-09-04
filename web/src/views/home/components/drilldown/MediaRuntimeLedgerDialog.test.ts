@@ -2,7 +2,7 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import MediaRuntimeLedgerDialog from "./MediaRuntimeLedgerDialog.vue";
 
-const AModal = { props: ["visible"], emits: ["cancel"], template: `<section v-if="visible"><slot /></section>` };
+const AModal = { props: ["visible", "modalClass"], emits: ["cancel"], template: `<section v-if="visible" class="modal-stub" :data-modal-class="modalClass"><slot /></section>` };
 function stream(index: number) {
   return { nodeId: 1, media: { schema: "rtmp", vhost: "v", app: "live", stream: `stream-${index}` }, online: true, aliveSecond: 1, bytesSpeed: index, readerCount: 1, totalReaderCount: 1, originType: 1, recordingMp4: index === 0, recordingHls: false, trackCount: 2 };
 }
@@ -14,16 +14,17 @@ const ledger = {
 
 describe("MediaRuntimeLedgerDialog", () => {
   it("renders at most one page and exposes all four ledgers without a network dependency", async () => {
-    const wrapper = mount(MediaRuntimeLedgerDialog, { props: { visible: true, kind: "streams", ledger }, global: { stubs: { AModal } } });
+    const wrapper = mount(MediaRuntimeLedgerDialog, { props: { visible: true, kind: "streams", ledger }, global: { stubs: { "a-modal": AModal } } });
     expect(wrapper.findAll(".media-ledger-list article")).toHaveLength(20);
     expect(wrapper.text()).toContain("节点明细不完整");
+    expect(wrapper.get(".modal-stub").attributes("data-modal-class")).toBe("uvp-system-dialog");
     expect(wrapper.findAll("[role='tab']")).toHaveLength(4);
     await wrapper.findAll("[role='tab']")[1].trigger("click");
     expect(wrapper.emitted("kind")?.[0]).toEqual(["viewers"]);
   });
 
   it("filters the current snapshot instead of rendering every row", async () => {
-    const wrapper = mount(MediaRuntimeLedgerDialog, { props: { visible: true, kind: "streams", ledger }, global: { stubs: { AModal } } });
+    const wrapper = mount(MediaRuntimeLedgerDialog, { props: { visible: true, kind: "streams", ledger }, global: { stubs: { "a-modal": AModal } } });
     await wrapper.get("input").setValue("stream-20");
     expect(wrapper.findAll(".media-ledger-list article")).toHaveLength(1);
     expect(wrapper.text()).toContain("stream-20");
