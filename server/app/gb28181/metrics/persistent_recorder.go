@@ -33,11 +33,18 @@ type PersistentRecorder struct {
 	inner Recorder
 	clock func() time.Time
 
+	flushMu sync.Mutex
 	mu      sync.Mutex
 	pairs   map[string]Transaction
 	pending map[metricBucketKey]metricDelta
-	seq     atomic.Uint64
+
+	lastHeartbeatMinute time.Time
+	failureStarted      time.Time
+	restartChecked      bool
+	seq                 atomic.Uint64
 }
+
+const restartGapTolerance = 2 * time.Minute
 
 func NewPersistentRecorder(db *gorm.DB, inner Recorder) *PersistentRecorder {
 	return &PersistentRecorder{db: db, inner: inner, clock: time.Now, pairs: map[string]Transaction{}, pending: map[metricBucketKey]metricDelta{}}
@@ -93,6 +100,8 @@ func (recorder *PersistentRecorder) Run(ctx context.Context, interval time.Durat
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	_ = recorder.recordRestartGap(ctx)
+	_ = recorder.Flush(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -106,23 +115,79 @@ func (recorder *PersistentRecorder) Run(ctx context.Context, interval time.Durat
 	}
 }
 
-func (recorder *PersistentRecorder) Flush(ctx context.Context) error {
+func (recorder *PersistentRecorder) recordRestartGap(ctx context.Context) error {
 	if recorder.db == nil {
 		return errors.New("SIP metric database is unavailable")
 	}
 	recorder.mu.Lock()
-	if len(recorder.pending) == 0 {
+	if recorder.restartChecked {
+		recorder.mu.Unlock()
+		return nil
+	}
+	recorder.restartChecked = true
+	recorder.mu.Unlock()
+
+	var latest gbmodels.GbSipMetricFlush
+	result := recorder.db.WithContext(ctx).Order("created_at DESC").Take(&latest)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return nil
+	}
+	if result.Error != nil {
+		recorder.mu.Lock()
+		recorder.restartChecked = false
+		recorder.mu.Unlock()
+		return result.Error
+	}
+
+	now := recorder.clock()
+	lastMinute := minuteStart(latest.CreatedAt)
+	recorder.mu.Lock()
+	recorder.lastHeartbeatMinute = lastMinute
+	recorder.mu.Unlock()
+	if now.Sub(latest.CreatedAt) <= restartGapTolerance {
+		return nil
+	}
+	startedAt := lastMinute.Add(time.Minute)
+	endedAt := minuteStart(now)
+	if !endedAt.After(startedAt) {
+		return nil
+	}
+	return recorder.db.WithContext(ctx).Create(&gbmodels.GbSipMetricGap{
+		StartedAt: startedAt,
+		EndedAt:   endedAt,
+		Reason:    "restart",
+	}).Error
+}
+
+func (recorder *PersistentRecorder) Flush(ctx context.Context) error {
+	if recorder.db == nil {
+		return errors.New("SIP metric database is unavailable")
+	}
+	recorder.flushMu.Lock()
+	defer recorder.flushMu.Unlock()
+
+	now := recorder.clock()
+	heartbeatMinute := minuteStart(now)
+	recorder.mu.Lock()
+	needsHeartbeat := recorder.lastHeartbeatMinute.IsZero() || heartbeatMinute.After(recorder.lastHeartbeatMinute)
+	if len(recorder.pending) == 0 && !needsHeartbeat && recorder.failureStarted.IsZero() {
 		recorder.mu.Unlock()
 		return nil
 	}
 	batch := recorder.pending
 	recorder.pending = map[metricBucketKey]metricDelta{}
+	failureStarted := recorder.failureStarted
 	recorder.mu.Unlock()
 
-	flushID := fmt.Sprintf("%d-%d", recorder.clock().UnixNano(), recorder.seq.Add(1))
+	flushID := fmt.Sprintf("%d-%d", now.UnixNano(), recorder.seq.Add(1))
 	err := recorder.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&gbmodels.GbSipMetricFlush{FlushID: flushID, CreatedAt: recorder.clock()}).Error; err != nil {
+		if err := tx.Create(&gbmodels.GbSipMetricFlush{FlushID: flushID, CreatedAt: now}).Error; err != nil {
 			return err
+		}
+		if !failureStarted.IsZero() && now.After(failureStarted) {
+			if err := tx.Create(&gbmodels.GbSipMetricGap{StartedAt: failureStarted, EndedAt: now, Reason: "persist_failure"}).Error; err != nil {
+				return err
+			}
 		}
 		for key, delta := range batch {
 			var row gbmodels.GbSipMetricMinute
@@ -152,6 +217,9 @@ func (recorder *PersistentRecorder) Flush(ctx context.Context) error {
 	})
 	if err != nil {
 		recorder.mu.Lock()
+		if recorder.failureStarted.IsZero() {
+			recorder.failureStarted = now
+		}
 		for key, delta := range batch {
 			current := recorder.pending[key]
 			current.Requests += delta.Requests
@@ -161,8 +229,13 @@ func (recorder *PersistentRecorder) Flush(ctx context.Context) error {
 			recorder.pending[key] = current
 		}
 		recorder.mu.Unlock()
+		return err
 	}
-	return err
+	recorder.mu.Lock()
+	recorder.lastHeartbeatMinute = heartbeatMinute
+	recorder.failureStarted = time.Time{}
+	recorder.mu.Unlock()
+	return nil
 }
 
 func minuteStart(value time.Time) time.Time { return value.Truncate(time.Minute) }
