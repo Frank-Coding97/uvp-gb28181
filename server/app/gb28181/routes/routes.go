@@ -582,6 +582,7 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 		{
 			home.GET("/summary", homeDashboardController.Summary)
 			home.GET("/drilldown/sip", homeDashboardController.SIPHistory)
+			home.GET("/drilldown/play", homeDashboardController.PlayHistory)
 			home.GET("/layout", homeDashboardController.GetLayout)
 			home.PUT("/layout", homeDashboardController.SaveLayout)
 			home.DELETE("/layout", homeDashboardController.ResetLayout)

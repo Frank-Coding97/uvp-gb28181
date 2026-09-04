@@ -138,6 +138,14 @@ func TestHomeDrilldownSIPHistoryRejectsInvalidAndDuplicateRanges(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, duplicate.Code)
 }
 
+func TestHomeDrilldownPlayHistoryRejectsInvalidRange(t *testing.T) {
+	controller := NewHomeDashboardController(func() *gorm.DB { return nil })
+	router := gin.New()
+	router.GET("/drilldown/play", controller.PlayHistory)
+	result := performDashboardRequest(router, http.MethodGet, "/drilldown/play?range=30d", nil)
+	require.Equal(t, http.StatusBadRequest, result.Code)
+}
+
 type dashboardSectionStatus struct {
 	Status string `json:"status"`
 }
