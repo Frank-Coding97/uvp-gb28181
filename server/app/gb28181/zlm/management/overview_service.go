@@ -65,6 +65,10 @@ type overviewRuntimeThreadDetailReader interface {
 	GetThreadsLoadDetail(context.Context, int64) ([]zlm.ThreadLoad, error)
 }
 
+type overviewMediaTrafficReader interface {
+	GetMediaTrafficStatistic(context.Context, int64) (zlm.MediaTrafficStatistic, error)
+}
+
 // OverviewMediaListReader is the narrow adapter needed until T4 grows a
 // typed media-list method. Its node ID argument keeps the collection bound to
 // the exact node; implementations must return only typed MediaInfo values.
@@ -179,6 +183,9 @@ type NodeRuntimeMetrics struct {
 	WorkThreadLoad             float64                 `json:"workThreadLoad"`
 	EventThreadLoads           []RuntimeThreadLoad     `json:"eventThreadLoads,omitempty"`
 	ObjectStatistics           RuntimeObjectStatistics `json:"objectStatistics"`
+	UpstreamBytesPerSecond     uint64                  `json:"upstreamBytesPerSecond"`
+	DownstreamBytesPerSecond   uint64                  `json:"downstreamBytesPerSecond"`
+	MediaTrafficAvailable      bool                    `json:"mediaTrafficAvailable"`
 }
 
 type RuntimeThreadLoad struct {
@@ -245,6 +252,9 @@ type OverviewMetrics struct {
 	WorkThreadLoadAvg          float64                 `json:"workThreadLoadAvg"`
 	StreamCount                int64                   `json:"streamCount"`
 	ObjectStatistics           RuntimeObjectStatistics `json:"objectStatistics"`
+	UpstreamBytesPerSecond     uint64                  `json:"upstreamBytesPerSecond"`
+	DownstreamBytesPerSecond   uint64                  `json:"downstreamBytesPerSecond"`
+	MediaTrafficSampledNodes   int64                   `json:"mediaTrafficSampledNodes"`
 }
 
 type NodeRuntimeFailure struct {
@@ -586,6 +596,8 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 	var eventThreadLoads []zlm.ThreadLoad
 	var netLoad, workLoad float64
 	var statisticErr, sessionsErr, netLoadErr, workLoadErr error
+	var mediaTraffic zlm.MediaTrafficStatistic
+	var mediaTrafficErr error
 	var mediaInfos []zlm.MediaInfo
 	var mediaErr error
 
@@ -599,6 +611,13 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 			defer wg.Done()
 			statistic, statisticErr = s.runtime.GetStatistic(operationCtx, current.ID)
 		}()
+		if trafficReader, ok := s.runtime.(overviewMediaTrafficReader); ok {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				mediaTraffic, mediaTrafficErr = trafficReader.GetMediaTrafficStatistic(operationCtx, current.ID)
+			}()
+		}
 		go func() {
 			defer wg.Done()
 			sessions, sessionsErr = s.runtime.GetAllSessions(operationCtx, current.ID, zlm.SessionFilter{})
@@ -630,6 +649,9 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 
 	if statisticErr == nil && sessionsErr == nil && netLoadErr == nil && workLoadErr == nil {
 		view.Metrics = runtimeMetrics(statistic, len(sessions), netLoad, workLoad, eventThreadLoads)
+		if mediaTrafficErr == nil {
+			applyMediaTraffic(&view.Metrics, mediaTraffic)
+		}
 		view.MetricsComplete = true
 		view.Freshness = RuntimeFreshnessFresh
 	} else {
@@ -779,6 +801,15 @@ func runtimeMetrics(statistic zlm.Statistic, sessionCount int, netLoad, workLoad
 	}
 }
 
+func applyMediaTraffic(metrics *NodeRuntimeMetrics, statistic zlm.MediaTrafficStatistic) {
+	if metrics == nil {
+		return
+	}
+	metrics.UpstreamBytesPerSecond = statistic.UpstreamBytesPerSecond
+	metrics.DownstreamBytesPerSecond = statistic.DownstreamBytesPerSecond
+	metrics.MediaTrafficAvailable = true
+}
+
 func runtimeThreadLoads(loads []zlm.ThreadLoad) []RuntimeThreadLoad {
 	result := make([]RuntimeThreadLoad, 0, len(loads))
 	for _, load := range loads {
@@ -852,6 +883,11 @@ func addOverviewMetrics(total *OverviewMetrics, current NodeRuntimeMetrics) {
 	total.TCPClientCount += current.TCPClientCount
 	total.SocketCount += current.SocketCount
 	total.NetworkSessionCount += int64(current.NetworkSessionCount)
+	if current.MediaTrafficAvailable {
+		total.UpstreamBytesPerSecond += current.UpstreamBytesPerSecond
+		total.DownstreamBytesPerSecond += current.DownstreamBytesPerSecond
+		total.MediaTrafficSampledNodes++
+	}
 	total.NetThreadLoadAvg += current.NetThreadLoad
 	total.WorkThreadLoadAvg += current.WorkThreadLoad
 	addRuntimeObjectStatistics(&total.ObjectStatistics, current.ObjectStatistics)

@@ -94,6 +94,36 @@ func (r *RuntimeReader) GetStatistic(ctx context.Context, nodeID int64) (zlm.Sta
 	return statistic, nil
 }
 
+// GetMediaTrafficStatistic returns the exact socket-level media rates exposed
+// by ZLMediaKit-UVP. Older nodes return an error and callers may fall back to
+// the legacy media-source rate.
+func (r *RuntimeReader) GetMediaTrafficStatistic(ctx context.Context, nodeID int64) (zlm.MediaTrafficStatistic, error) {
+	var zero zlm.MediaTrafficStatistic
+	if err := r.guardRead(ctx, nodeID); err != nil {
+		return zero, err
+	}
+	value, err := r.load(ctx, cacheKey("media-traffic", nodeID, ""), func(callCtx context.Context) (interface{}, error) {
+		var statistic zlm.MediaTrafficStatistic
+		err := r.executeRead(callCtx, nodeID, func(operationCtx context.Context, client *zlm.Client) error {
+			var readErr error
+			statistic, readErr = client.GetMediaTrafficStatistic(operationCtx)
+			return readErr
+		})
+		if err != nil {
+			return nil, err
+		}
+		return statistic, nil
+	})
+	if err != nil {
+		return zero, err
+	}
+	statistic, ok := value.(zlm.MediaTrafficStatistic)
+	if !ok {
+		return zero, NewInternalError(nodeIDString(nodeID), "media traffic cache type mismatch")
+	}
+	return statistic, nil
+}
+
 // GetAllSessions returns typed network sessions. Filter values form part of
 // the cache key, so two distinct queries can never reuse each other's result.
 func (r *RuntimeReader) GetAllSessions(ctx context.Context, nodeID int64, filter zlm.SessionFilter) ([]zlm.Session, error) {

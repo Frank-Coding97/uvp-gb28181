@@ -93,6 +93,29 @@ func TestOverviewPreservesObjectStatisticsAndEventThreadDetails(t *testing.T) {
 	require.Equal(t, uint64(15), result.Metrics.ObjectStatistics.RtpPacket)
 }
 
+func TestOverviewAggregatesExactMediaTraffic(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	registry := overviewRegistryFake{nodes: []*node.Node{
+		overviewNode(1, node.StateActive, now),
+		overviewNode(2, node.StateActive, now),
+	}}
+	runtime := &overviewRuntimeTrafficFake{
+		overviewRuntimeFake: &overviewRuntimeFake{statistics: map[int64]zlm.Statistic{}},
+		traffic: map[int64]zlm.MediaTrafficStatistic{
+			1: {UpstreamBytesPerSecond: 1024, DownstreamBytesPerSecond: 2048},
+			2: {UpstreamBytesPerSecond: 512, DownstreamBytesPerSecond: 256},
+		},
+	}
+	service := NewOverviewService(OverviewDependencies{Registry: registry, Runtime: runtime, Media: &overviewMediaFake{}}, WithOverviewClock(func() time.Time { return now }))
+
+	result, err := service.GetOverview(context.Background())
+	require.NoError(t, err)
+	require.EqualValues(t, 1536, result.Metrics.UpstreamBytesPerSecond)
+	require.EqualValues(t, 2304, result.Metrics.DownstreamBytesPerSecond)
+	require.EqualValues(t, 2, result.Metrics.MediaTrafficSampledNodes)
+	require.True(t, overviewNodeResult(t, result, 1).Metrics.MediaTrafficAvailable)
+}
+
 func TestOverviewPartialNodeFailureKeepsSuccessfulCurrentMetricsOnly(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 1, 0, 0, time.UTC)
 	registry := overviewRegistryFake{nodes: []*node.Node{
@@ -523,6 +546,15 @@ type overviewMediaFake struct {
 	errors  map[int64]error
 }
 
+type overviewRuntimeTrafficFake struct {
+	*overviewRuntimeFake
+	traffic map[int64]zlm.MediaTrafficStatistic
+}
+
+func (r *overviewRuntimeTrafficFake) GetMediaTrafficStatistic(_ context.Context, nodeID int64) (zlm.MediaTrafficStatistic, error) {
+	return r.traffic[nodeID], nil
+}
+
 func (r *overviewMediaFake) GetMediaList(_ context.Context, nodeID int64) ([]zlm.MediaInfo, error) {
 	var done func()
 	if r.tracker != nil {
@@ -533,4 +565,16 @@ func (r *overviewMediaFake) GetMediaList(_ context.Context, nodeID int64) ([]zlm
 		return nil, err
 	}
 	return append([]zlm.MediaInfo(nil), r.media[nodeID]...), nil
+}
+
+func TestApplyMediaTrafficUsesExactSocketRates(t *testing.T) {
+	metrics := NodeRuntimeMetrics{}
+	applyMediaTraffic(&metrics, zlm.MediaTrafficStatistic{
+		UpstreamBytesPerSecond:   1024,
+		DownstreamBytesPerSecond: 2048,
+	})
+
+	require.True(t, metrics.MediaTrafficAvailable)
+	require.EqualValues(t, 1024, metrics.UpstreamBytesPerSecond)
+	require.EqualValues(t, 2048, metrics.DownstreamBytesPerSecond)
 }

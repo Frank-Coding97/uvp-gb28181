@@ -102,6 +102,9 @@ export interface ZLMNodeRuntimeMetrics {
   workThreadLoad: number;
   eventThreadLoads?: ZLMThreadLoad[];
   objectStatistics?: ZLMObjectStatistics;
+  upstreamBytesPerSecond?: number;
+  downstreamBytesPerSecond?: number;
+  mediaTrafficAvailable?: boolean;
 }
 
 export interface ZLMThreadLoad {
@@ -177,6 +180,9 @@ export interface ZLMOverviewMetrics {
   workThreadLoadAvg: number;
   streamCount: number;
   objectStatistics?: ZLMObjectStatistics;
+  upstreamBytesPerSecond?: number;
+  downstreamBytesPerSecond?: number;
+  mediaTrafficSampledNodes?: number;
 }
 
 export interface ZLMOverview {
