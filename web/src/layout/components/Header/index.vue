@@ -1,7 +1,7 @@
 <template>
-  <a-layout-header class="header">
+  <a-layout-header class="header" :class="{ 'header--compact': !isTabs || isMobile }">
     <HeaderLeft />
-    <div v-if="isTabs" class="header_tabs">
+    <div v-if="isTabs && !isMobile" class="header_tabs">
       <Tabs />
     </div>
     <HeaderRight />
@@ -12,8 +12,10 @@ import { storeToRefs } from "pinia";
 import HeaderLeft from "@/layout/components/Header/components/header-left/index.vue";
 import HeaderRight from "@/layout/components/Header/components/header-right/index.vue";
 import Tabs from "@/layout/components/Tabs/index.vue";
+import { useDevicesSize } from "@/hooks/useDevicesSize";
 import { useThemeConfig } from "@/store/modules/theme-config";
 
+const { isMobile } = useDevicesSize();
 const { isTabs } = storeToRefs(useThemeConfig());
 </script>
 
@@ -44,14 +46,7 @@ const { isTabs } = storeToRefs(useThemeConfig());
   border-bottom: 0;
 }
 
-@media (max-width: 768px) {
-  .header {
-    grid-template-columns: auto minmax(0, 1fr);
-    padding-right: 76px;
-  }
-
-  .header_tabs {
-    min-width: 0;
-  }
+.header--compact {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 </style>

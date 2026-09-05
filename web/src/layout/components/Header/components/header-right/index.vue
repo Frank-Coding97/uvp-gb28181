@@ -1,7 +1,29 @@
 <template>
-  <div class="header_setting" :class="isMobile && 'head-absolute-fix'">
+  <div class="header_setting">
     <!-- SIP 引导提醒:未配置/启动失败时才显示 -->
     <SipSetupBell />
+    <div v-if="isMobile" class="header-display-actions">
+      <button
+        id="system-header-fullscreen"
+        class="header-display-action"
+        type="button"
+        :aria-label="$t(`system.${fullScreen ? 'full-screen' : 'exit-full-screen'}`)"
+        @click="onFullScreen"
+      >
+        <icon-fullscreen v-if="fullScreen" :size="18" />
+        <icon-fullscreen-exit v-else :size="18" />
+      </button>
+      <button
+        id="system-header-theme"
+        class="header-display-action"
+        type="button"
+        :aria-label="darkMode ? '明亮' : '暗色'"
+        @click="toggleThemeMode"
+      >
+        <icon-sun-fill v-if="!darkMode" :size="18" />
+        <icon-moon-fill v-else :size="18" />
+      </button>
+    </div>
     <!-- 我的 -->
     <a-dropdown trigger="click" position="br" :popup-max-height="false">
       <button class="my_setting" id="system-my-setting" type="button" aria-label="账号">
@@ -65,6 +87,7 @@
 </template>
 
 <script setup lang="ts">
+import { useHeaderDisplayActions } from "../../useHeaderDisplayActions";
 import SipSetupBell from "@/layout/components/Header/components/SipSetupBell.vue";
 import RecordingDownloadCenter from "@/layout/components/Header/components/RecordingDownloadCenter.vue";
 import SystemSettings from "@/layout/components/Header/components/system-settings/index.vue";
@@ -77,6 +100,7 @@ import { useRouteConfigStore } from "@/store/modules/route-config";
 import { logout } from "@/api/user";
 const router = useRouter();
 const { isMobile } = useDevicesSize();
+const { darkMode, toggleThemeMode, fullScreen, onFullScreen } = useHeaderDisplayActions();
 //const userStore = useUserInfoStore();
 //const { account } = storeToRefs(userStore);
 import { runUserLogoutCleanup, useUserStoreHook } from "@/store/modules/user";
@@ -140,12 +164,6 @@ const logOut = () => {
 </script>
 
 <style lang="scss" scoped>
-.head-absolute-fix {
-  position: absolute;
-  top: 0;
-  right: $padding;
-}
-
 .header_setting {
   display: flex;
   align-items: center;
@@ -328,5 +346,40 @@ const logOut = () => {
 :global(.arco-dropdown:has(.uvp-user-menu-profile) .arco-divider) {
   margin: 4px 0;
   border-color: color-mix(in srgb, var(--uvp-text-primary) 9%, transparent);
+}
+.header-display-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+
+.header-display-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: var(--uvp-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--uvp-brand);
+    background: var(--uvp-brand-soft);
+  }
+}
+
+@media (max-width: 768px) {
+  .header_setting .my_setting {
+    margin-left: 0;
+    padding: 4px;
+  }
+
+  .header_setting .user-nickname {
+    display: none;
+  }
 }
 </style>

@@ -70,6 +70,10 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("var(--uvp-brand)");
   });
 
+  it("overrides GridStack content scrolling inside dashboard cards", () => {
+    expect(source).toContain(".dashboard-grid>.grid-stack-item>.grid-stack-item-content.card{overflow:hidden}");
+  });
+
   it("compacts the embedded SIP monitor enough to avoid internal scrolling", () => {
     expect(source).toContain(".embedded{height:100%;gap:10px;");
     expect(source).toContain(".embedded :deep(.pulse){flex:none}");

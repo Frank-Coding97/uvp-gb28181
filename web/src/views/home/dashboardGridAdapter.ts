@@ -8,7 +8,7 @@ export interface DashboardGridGeometry {
   h: number;
 }
 
-export type DashboardGridEngine = Pick<GridStack, "enableMove" | "enableResize" | "destroy" | "on" | "off">;
+export type DashboardGridEngine = Pick<GridStack, "enableMove" | "enableResize" | "destroy" | "on" | "off" | "getColumn" | "isIgnoreChangeCB">;
 export type DashboardGridFactory = (options: GridStackOptions, element: HTMLElement) => DashboardGridEngine;
 
 export interface DashboardGridHandle {
@@ -21,16 +21,13 @@ export interface DashboardGridCallbacks {
 }
 
 const defaultGridFactory: DashboardGridFactory = (options, host) => {
-  const engine = GridStack.init(options, host);
+  // Cache the saved 20-column geometry before applying a smaller viewport.
+  const { columnOpts, ...desktopOptions } = options;
+  const engine = GridStack.init(desktopOptions, host);
   if (!engine) throw new Error("仪表盘网格初始化失败");
+  engine.updateOptions({ columnOpts });
   return engine;
 };
-
-export function deriveDashboardColumns(width: number): 1 | 10 | 20 {
-  if (width < 768) return 1;
-  if (width < 1200) return 10;
-  return 20;
-}
 
 export function normalizeGridChange(nodes: Array<Pick<GridStackNode, "id" | "x" | "y" | "w" | "h">>): DashboardGridGeometry[] {
   return nodes.flatMap(node => {
@@ -47,6 +44,7 @@ export function createDashboardGrid(
   const engine = factory(
     {
       column: 20,
+      columnOpts: { columnMax: 20, breakpointForWindow: true, layout: "move", breakpoints: [{ w: 1279, c: 8, layout: "list" }, { w: 767, c: 1 }] },
       cellHeight: 80,
       disableDrag: true,
       disableResize: true,
@@ -56,16 +54,28 @@ export function createDashboardGrid(
     },
     element
   );
-  const changeHandler = (_event: Event, nodes: GridStackNode[]) => callbacks.onChange?.(normalizeGridChange(nodes));
+  let editing = false;
+  const syncEditing = () => {
+    const canDrag = editing && engine.getColumn() === 20;
+    engine.enableMove(canDrag);
+    engine.enableResize(canDrag);
+  };
+  const changeHandler = (_event: Event, nodes: GridStackNode[]) => {
+    syncEditing();
+    // Responsive coordinates are presentation only; never save them over the desktop layout.
+    if (editing && engine.getColumn() === 20 && !engine.isIgnoreChangeCB()) callbacks.onChange?.(normalizeGridChange(nodes));
+  };
   engine.on("change", changeHandler);
+  engine.on("resizecontent", syncEditing);
 
   return {
-    setEditing(editing: boolean) {
-      engine.enableMove(editing);
-      engine.enableResize(editing);
+    setEditing(value: boolean) {
+      editing = value;
+      syncEditing();
     },
     destroy() {
       engine.off("change");
+      engine.off("resizecontent");
       engine.destroy(false);
     }
   };

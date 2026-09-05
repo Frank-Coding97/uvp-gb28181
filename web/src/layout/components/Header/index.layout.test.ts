@@ -10,7 +10,7 @@ describe("default header workspace layout", () => {
     const headerLeft = readSource("src/layout/components/Header/components/header-left/index.vue");
     const main = readSource("src/layout/components/Main/index.vue");
 
-    expect(header).toContain('<div v-if="isTabs" class="header_tabs">');
+    expect(header).toContain('<div v-if="isTabs && !isMobile" class="header_tabs">');
     expect(header).toContain("<Tabs />");
     expect(header).toContain("grid-template-columns: auto minmax(0, 1fr) auto;");
     expect(headerLeft).not.toContain("Breadcrumb");

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync(resolve(process.cwd(), "src/layout/components/Tabs/index.vue"), "utf8");
 
 describe("workspace tabs", () => {
-  it("exposes fullscreen and theme actions in the tab bar instead of the account menu", () => {
+  it("exposes display actions in desktop tabs and directly in the mobile header", () => {
     const headerRightSource = readFileSync(
       resolve(process.cwd(), "src/layout/components/Header/components/header-right/index.vue"),
       "utf8"
@@ -15,18 +15,21 @@ describe("workspace tabs", () => {
     const refreshIndex = source.indexOf('id="system-tabs-refresh"');
     const settingIndex = source.indexOf('id="system-tabs-setting"');
 
-    expect(refreshIndex).toBeGreaterThan(-1);
-    expect(settingIndex).toBeGreaterThan(refreshIndex);
-    expect(fullscreenIndex).toBeGreaterThan(settingIndex);
+    expect(refreshIndex).toBe(-1);
+    expect(settingIndex).toBe(-1);
+    expect(fullscreenIndex).toBeGreaterThan(-1);
+    expect(source).toContain('trigger="contextMenu"');
     expect(themeIndex).toBeGreaterThan(fullscreenIndex);
     expect(source).toContain("@click=\"onFullScreen\"");
     expect(source).toContain("@click=\"toggleThemeMode\"");
     expect(source).toContain("darkMode ? '明亮' : '暗色'");
     expect(source).not.toContain("切换至夜间蓝灰");
     expect(source).not.toContain("切换至明亮模式");
-    expect(source).toContain('document.addEventListener("fullscreenchange", syncFullScreen)');
-    expect(headerRightSource).not.toContain("@click=\"onFullScreen\"");
-    expect(headerRightSource).not.toContain("@click=\"toggleThemeMode\"");
+    const actions = readFileSync(resolve(process.cwd(), "src/layout/components/Header/useHeaderDisplayActions.ts"), "utf8");
+    expect(actions).toContain('document.addEventListener("fullscreenchange", syncFullScreen)');
+    expect(headerRightSource).toContain('<div v-if="isMobile" class="header-display-actions">');
+    expect(headerRightSource).toContain('@click="onFullScreen"');
+    expect(headerRightSource).toContain('@click="toggleThemeMode"');
     expect(headerRightSource).toContain("@click=\"onSystemSetting\"");
   });
 
