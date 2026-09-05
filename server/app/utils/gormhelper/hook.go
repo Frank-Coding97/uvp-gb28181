@@ -19,10 +19,12 @@ func MaskNotDataError(gormDB *gorm.DB) {
 // InterceptCreatePramsNotPtrError 拦截 create 函数参数如果是非指针类型的错误,新用户最容犯此错误
 
 func CreateBeforeHook(gormDB *gorm.DB) {
-	if reflect.TypeOf(gormDB.Statement.Dest).Kind() != reflect.Ptr {
+	// CreateInBatches 将指针切片拆成普通切片传给回调；其元素仍可写。
+	kind := reflect.TypeOf(gormDB.Statement.Dest).Kind()
+	if kind != reflect.Ptr && kind != reflect.Slice {
 		app.ZapLog.Warn(myerrors.ErrorsGormDBCreateParamsNotPtr)
 	} else {
-		destValueOf := reflect.ValueOf(gormDB.Statement.Dest).Elem()
+		destValueOf := reflect.Indirect(reflect.ValueOf(gormDB.Statement.Dest))
 		if destValueOf.Type().Kind() == reflect.Slice || destValueOf.Type().Kind() == reflect.Array {
 			inLen := destValueOf.Len()
 			for i := 0; i < inLen; i++ {
@@ -32,7 +34,10 @@ func CreateBeforeHook(gormDB *gorm.DB) {
 					if b, column := structHasSpecialField("CreatedBy", row); b {
 						// 从上下文中获取用户ID
 						if userID := GetCurrentUserIDFromContext(gormDB.Statement.Context); userID > 0 {
-							destValueOf.Index(i).FieldByName(column).Set(reflect.ValueOf(userID))
+							// column 可能是数据库列名，使用 GORM 字段映射设置当前行。
+							if field := gormDB.Statement.Schema.LookUpField(column); field != nil {
+								gormDB.AddError(field.Set(gormDB.Statement.Context, row, userID))
+							}
 						}
 					}
 				} else if row.Type().Kind() == reflect.Map {
