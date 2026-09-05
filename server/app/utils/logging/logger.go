@@ -5,7 +5,6 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"io"
-	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -24,6 +23,9 @@ type Options struct {
 }
 type Runtime struct {
 	Root                  *zap.Logger
+	gate                  sync.RWMutex
+	tracked               map[string]*trackedSink
+	emergency             *emergencyWriter
 	config                Config
 	sinks                 []zapcore.WriteSyncer
 	closed                atomic.Bool
@@ -57,13 +59,20 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	opts.Service, _ = clipJSON(opts.Service, 256)
 	opts.Version, _ = clipJSON(opts.Version, 256)
 	opts.Instance, _ = clipJSON(opts.Instance, 256)
-	r := &Runtime{config: cfg}
+	now := time.Now
+	if opts.Clock != nil {
+		now = opts.Clock.Now
+	}
+	r := &Runtime{config: cfg, tracked: make(map[string]*trackedSink), emergency: newEmergencyWriter(opts.ErrorOutput, now)}
 	cores := make([]zapcore.Core, 0, len(cfg.Outputs))
 	for _, target := range cfg.Outputs {
 		sink := opts.Sinks[target]
 		if sink == nil {
 			return nil, errors.New("configured logging sink is unavailable")
 		}
+		tracked := &trackedSink{target: target, writer: sink, emergency: r.emergency}
+		r.tracked[target] = tracked
+		sink = tracked
 		format := cfg.FileFormat
 		if target == "stdout" {
 			format = cfg.StdoutFormat
@@ -87,12 +96,8 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		r.sinks = append(r.sinks, sink)
 	}
 	inner := zapcore.NewTee(cores...).With([]zap.Field{zap.String("service", opts.Service), zap.String("version", opts.Version), zap.String("instance", opts.Instance)})
-	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, closed: &r.closed, bound: map[string]bool{}}
-	errorOutput := opts.ErrorOutput
-	if errorOutput == nil {
-		errorOutput = zapcore.AddSync(os.Stderr)
-	}
-	options := []zap.Option{zap.ErrorOutput(errorOutput)}
+	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, closed: &r.closed, gate: &r.gate, bound: map[string]bool{}}
+	options := []zap.Option{zap.ErrorOutput(r.emergency)}
 	if opts.Clock != nil {
 		options = append(options, zap.WithClock(opts.Clock))
 	}
@@ -104,6 +109,8 @@ func (r *Runtime) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		r.gate.Lock()
+		defer r.gate.Unlock()
 		r.closed.Store(true)
 		r.closeErr = r.Root.Sync()
 		for _, sink := range r.sinks {
@@ -111,6 +118,7 @@ func (r *Runtime) Close() error {
 				r.closeErr = errors.Join(r.closeErr, c.Close())
 			}
 		}
+		r.closeErr = errors.Join(r.closeErr, r.emergency.flush(true))
 	})
 	return r.closeErr
 }
@@ -143,6 +151,7 @@ type runtimeCore struct {
 	config    Config
 	min       zapcore.Level
 	closed    *atomic.Bool
+	gate      *sync.RWMutex
 	bound     map[string]bool
 	used      int
 	truncated bool
@@ -200,6 +209,8 @@ func (c *runtimeCore) with(fields []zap.Field, trusted bool) *runtimeCore {
 	return &clone
 }
 func (c *runtimeCore) Write(e zapcore.Entry, fields []zap.Field) error {
+	c.gate.RLock()
+	defer c.gate.RUnlock()
 	if c.closed.Load() {
 		return errors.New("logging runtime is closed")
 	}
