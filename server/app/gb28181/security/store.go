@@ -17,6 +17,7 @@ import (
 const globalPolicyScope = "global"
 
 type Store interface {
+	LoadAuthenticatedEndpoints(context.Context) ([]Endpoint, error)
 	LoadPolicy(context.Context) (Policy, error)
 	SavePolicy(context.Context, Policy, string) error
 	IncrementEvents(context.Context, []EventAggregate) error
@@ -138,8 +139,9 @@ func (s *GormStore) LoadPolicy(ctx context.Context) (Policy, error) {
 		return DefaultPolicy(), errors.New("security store unavailable")
 	}
 	var row securityPolicyRow
-	err := s.db.WithContext(ctx).Where("scope_key = ?", globalPolicyScope).First(&row).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	result := s.db.WithContext(ctx).Where("scope_key = ?", globalPolicyScope).First(&row)
+	err := result.Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && result.RowsAffected == 0) {
 		return DefaultPolicy(), nil
 	}
 	if err != nil {
@@ -172,8 +174,9 @@ func (s *GormStore) IncrementEvents(ctx context.Context, items []EventAggregate)
 		for _, item := range items {
 			row := eventRow(item)
 			var existing securityEventRow
-			err := tx.Where("bucket_at = ? AND source_ip = ? AND device_id = ? AND risk_scope = ? AND transport = ? AND method = ? AND reason = ? AND action = ?", row.BucketAt, row.SourceIP, row.DeviceID, row.RiskScope, row.Transport, row.Method, row.Reason, row.Action).First(&existing).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			result := tx.Where("bucket_at = ? AND source_ip = ? AND device_id = ? AND risk_scope = ? AND transport = ? AND method = ? AND reason = ? AND action = ?", row.BucketAt, row.SourceIP, row.DeviceID, row.RiskScope, row.Transport, row.Method, row.Reason, row.Action).First(&existing)
+			err := result.Error
+			if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && result.RowsAffected == 0) {
 				if err := tx.Create(&row).Error; err != nil {
 					return err
 				}
@@ -249,8 +252,9 @@ func (s *GormStore) RecentBans(ctx context.Context, limit int, now time.Time) ([
 func (s *GormStore) Unban(ctx context.Context, identifier, actor string, at time.Time) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var row securityBanRow
-		err := tx.Where("(source_ip = ? OR decision_id = ?) AND status IN ?", identifier, identifier, []string{string(BanActive), string(BanAgentFailed)}).Order("created_at DESC").First(&row).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		result := tx.Where("(source_ip = ? OR decision_id = ?) AND status IN ?", identifier, identifier, []string{string(BanActive), string(BanAgentFailed)}).Order("created_at DESC").First(&row)
+		err := result.Error
+		if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && result.RowsAffected == 0) {
 			return nil
 		}
 		if err != nil {

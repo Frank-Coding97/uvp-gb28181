@@ -14,10 +14,10 @@ func TestScorerAccumulatesAndBansOnlyAfterThreshold(t *testing.T) {
 	p.BanTTLs = []TTLStep{{Score: 30, TTL: time.Minute}}
 	agent := &fakeAgent{}
 	s := NewScorer(p, clock, agent, []byte("test-secret"))
-	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.10", Reason: ReasonDigestFailure})
+	_, decision, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", Reason: ReasonDigestFailure})
 	require.NoError(t, err)
 	require.Nil(t, decision)
-	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.10", Reason: ReasonServerMismatch})
+	_, decision, err = s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", Reason: ReasonServerMismatch})
 	require.NoError(t, err)
 	require.NotNil(t, decision)
 	require.Equal(t, 25+10, decision.Score)
@@ -29,7 +29,7 @@ func TestScorerObserveModeNeverCallsAgent(t *testing.T) {
 	p := DefaultPolicy()
 	p.BanScore = 1
 	s := NewScorer(p, &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
-	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.10", Reason: ReasonNonceReplay})
+	_, decision, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", Reason: ReasonNonceReplay})
 	require.NoError(t, err)
 	require.Nil(t, decision)
 	require.Empty(t, agent.banCalls)
@@ -41,11 +41,11 @@ func TestProtectPolicyProducesFiniteAutoBan(t *testing.T) {
 	p.BanScore = 40
 	p.BanTTLs = []TTLStep{{Score: 40, TTL: time.Minute}}
 	s := NewScorer(p, clock, nil, []byte("secret"))
-	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.11", Method: "INVITE", Reason: ReasonInviteRate})
+	_, decision, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.11", Method: "INVITE", Reason: ReasonInviteRate})
 	require.NoError(t, err)
 	// A single INVITE is below the default repeated-risk threshold.
 	require.Nil(t, decision)
-	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.11", Method: "INVITE", Reason: ReasonInviteRate})
+	_, decision, err = s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.11", Method: "INVITE", Reason: ReasonInviteRate})
 	require.NoError(t, err)
 	require.NotNil(t, decision)
 	require.False(t, decision.Permanent)
@@ -61,19 +61,19 @@ func TestTrustedEndpointUpdatesOnlyWithValidAddress(t *testing.T) {
 	require.Equal(t, "198.51.100.12", e.Address)
 }
 
-func TestTrustedEndpointClearsSourceScore(t *testing.T) {
+func TestTrustedEndpointProtectsSharedSourceFromAutomaticBan(t *testing.T) {
 	p := DefaultPolicyWithMode(ModeProtect)
 	p.BanScore = 30
 	p.BanTTLs = []TTLStep{{Score: 30, TTL: time.Minute}}
 	s := NewScorer(p, &fakeClock{now: time.Unix(100, 0)}, nil, []byte("secret"))
 
-	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.12", Reason: ReasonDigestFailure})
+	_, decision, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.12", Reason: ReasonDigestFailure})
 	require.NoError(t, err)
 	require.Nil(t, decision)
 	require.NoError(t, s.UpdateTrustedEndpoint("34020000001320000001", "udp", "198.51.100.12", time.Time{}))
-	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.12", Reason: ReasonServerMismatch})
+	_, decision, err = s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.12", Reason: ReasonServerMismatch})
 	require.NoError(t, err)
-	require.NotNil(t, decision, "a valid REGISTER must not clear a shared source bucket")
+	require.Nil(t, decision, "authenticated shared egress must not be automatically IP-banned")
 }
 
 func TestNonceIsSignedExpiringAndSingleUse(t *testing.T) {
@@ -151,7 +151,7 @@ func TestKnownDeviceRiskDoesNotCreateNATSourceBan(t *testing.T) {
 	s := NewScorer(p, clock, nil, []byte("secret"))
 	for _, deviceID := range []string{"device-a", "device-b"} {
 		for i := 0; i < 3; i++ {
-			_, decision, err := s.Observe(Event{SourceIP: "198.51.100.10", DeviceID: deviceID, Reason: ReasonNonceReplay})
+			_, decision, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", DeviceID: deviceID, Reason: ReasonNonceReplay})
 			require.NoError(t, err)
 			require.Nil(t, decision)
 		}
@@ -169,10 +169,10 @@ func TestTransportRiskCanStillBanSourceIP(t *testing.T) {
 	p.BanScore = 20
 	p.BanTTLs = []TTLStep{{Score: 20, TTL: time.Minute}}
 	s := NewScorer(p, clock, nil, []byte("secret"))
-	_, decision, err := s.Observe(Event{SourceIP: "198.51.100.11", Reason: ReasonPacketTooLarge})
+	_, decision, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.11", Reason: ReasonPacketTooLarge})
 	require.NoError(t, err)
 	require.Nil(t, decision)
-	_, decision, err = s.Observe(Event{SourceIP: "198.51.100.11", Reason: ReasonPacketTooLarge})
+	_, decision, err = s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.11", Reason: ReasonPacketTooLarge})
 	require.NoError(t, err)
 	require.NotNil(t, decision)
 	require.Equal(t, ScopeSource, decision.RiskScope)

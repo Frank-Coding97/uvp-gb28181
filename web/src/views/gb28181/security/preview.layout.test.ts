@@ -51,7 +51,28 @@ describe("security preview system integration", () => {
     expect(source).toContain("协议鉴权");
     expect(source).toContain("风险升级");
     expect(source).toContain("REGISTER、MESSAGE");
-    expect(source).toContain("Digest、Nonce");
+    expect(source).toContain("REGISTER 始终校验格式、鉴权和设备身份");
+  });
+
+  it("explains registration rejection and the shared source-verification gate", () => {
+    expect(source).toContain("formatSecurityAction");
+    expect(source).toContain("isHighRiskSecurityReason");
+    expect(source).toContain("action: formatSecurityAction(event.action)");
+    expect(source).toContain("仍校验协议，仅关闭自动封 IP");
+    expect(source).toContain("仍校验 REGISTER，仅关闭自动封 IP");
+    expect(source).toContain("无效 REGISTER 仍会拒绝并记录，观察模式只关闭自动封 IP");
+    expect(source).toContain("REGISTER 始终校验格式、鉴权和设备身份；无效请求拒绝，修正后可重新注册");
+    expect(source).toContain("所有模式都校验 REGISTER 格式、鉴权和设备 ID；密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册。");
+    expect(source).toContain("<a-tag color=\"blue\">可修正重试</a-tag>");
+    expect(source).not.toContain("保护/严格模式下，密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册；观察模式只记录。");
+    expect(source).not.toContain("观察模式只记录");
+    expect(source).not.toContain("{{ selectedMode === 'observe' ? '仅记录' : '可重试' }}");
+    expect(source).toContain("发现非法 ID 枚举只代表高危并拒绝，不直接永久封 IP");
+    expect(source).toContain("真实 TCP 或平台回程验证");
+    expect(source).toContain("成功认证共享出口");
+    expect(source).toContain("单向 UDP 未验证来源只拒绝并记录");
+    expect(source).toContain("INVITE 自动 IP 封禁同样适用");
+    expect(source).toContain("扫描枚举即使结果为“已拒绝”也属正常");
   });
 
   it("renders firewall agent health from the live snapshot instead of demo text", () => {

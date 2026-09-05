@@ -1,11 +1,6 @@
 package security
 
 import (
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"net"
 	"strings"
@@ -43,11 +38,13 @@ type Scorer struct {
 	agent  FirewallAgentClient
 	nonce  *NonceManager
 
-	mu        sync.Mutex
-	buckets   map[string]scoreBucket
-	endpoints map[string]Endpoint
-	decisions map[string]BanDecision
-	invites   map[string][]inviteObservation
+	mu              sync.Mutex
+	buckets         map[string]scoreBucket
+	endpoints       map[string]Endpoint
+	decisions       map[string]BanDecision
+	invites         map[string][]inviteObservation
+	registrations   map[string][]registerObservation
+	autoBanDisabled bool
 }
 
 func NewScorer(policy Policy, clock Clock, agent FirewallAgentClient, nonceSecret []byte) *Scorer {
@@ -58,14 +55,15 @@ func NewScorer(policy Policy, clock Clock, agent FirewallAgentClient, nonceSecre
 		policy = DefaultPolicy()
 	}
 	return &Scorer{
-		policy:    policy,
-		clock:     clock,
-		agent:     agent,
-		nonce:     NewNonceManager(nonceSecret, policy.NonceTTL, clock),
-		buckets:   make(map[string]scoreBucket),
-		endpoints: make(map[string]Endpoint),
-		decisions: make(map[string]BanDecision),
-		invites:   make(map[string][]inviteObservation),
+		policy:        policy,
+		clock:         clock,
+		agent:         agent,
+		nonce:         NewNonceManager(nonceSecret, policy.NonceTTL, clock),
+		buckets:       make(map[string]scoreBucket),
+		endpoints:     make(map[string]Endpoint),
+		decisions:     make(map[string]BanDecision),
+		invites:       make(map[string][]inviteObservation),
+		registrations: make(map[string][]registerObservation),
 	}
 }
 
@@ -92,18 +90,24 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	policy := s.policy
+	// Authentication rejection is an observed fact even in observe mode or
+	// for allowlisted sources; neither setting bypasses REGISTER Digest.
+	alreadyRejected := event.Action == ActionDrop
 	if policy.IsAllowlisted(event.SourceIP) {
-		event.Action = ActionAllow
+		if !alreadyRejected {
+			event.Action = ActionAllow
+		}
 		return event, nil, nil
 	}
 	event.Action = ActionDrop
-	if policy.Mode == ModeObserve {
+	if policy.Mode == ModeObserve && !alreadyRejected {
 		event.Action = ActionAllow
 	}
-	s.prune(event.Occurred, event.SourceIP, riskBucketKey(event))
+	sourceKey := scoringBucketKey(Event{SourceIP: event.SourceIP, RiskScope: ScopeSource, Transport: event.Transport, SourceVerified: event.SourceVerified})
+	s.prune(event.Occurred, sourceKey, scoringBucketKey(event))
 	persistent := false
 	if event.Reason == ReasonInviteRate && event.RiskScope == ScopeSource {
-		observations := s.invites[event.SourceIP]
+		observations := s.invites[sourceKey]
 		// SIP retransmissions within the transaction lifetime carry no new risk.
 		// An identical probe sent after that lifetime is counted again.
 		for _, previous := range observations {
@@ -116,12 +120,17 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 		if len(observations) > persistentInviteThreshold {
 			observations = observations[len(observations)-persistentInviteThreshold:]
 		}
-		s.invites[event.SourceIP] = observations
+		s.invites[sourceKey] = observations
 		persistent = len(observations) >= persistentInviteThreshold
+	}
+	registerScan := false
+	verifiedRegisterScan := false
+	if event.Reason == ReasonRegisterIDInvalid {
+		registerScan, verifiedRegisterScan = s.observeInvalidRegister(event)
 	}
 	delta := reasonScore(event.Reason)
 	event.Score = delta
-	key := riskBucketKey(event)
+	key := scoringBucketKey(event)
 	b := s.buckets[key]
 	if b.started.IsZero() || event.Occurred.Sub(b.started) >= policy.Window {
 		b = scoreBucket{started: event.Occurred}
@@ -130,10 +139,17 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	b.count++
 	s.buckets[key] = b
 	total := b.score
-	if persistent && total < policy.BanScore {
+	if (persistent || verifiedRegisterScan) && total < policy.BanScore {
 		total = policy.BanScore
 	}
-	if total < policy.BanScore || policy.Mode == ModeObserve || event.RiskScope != ScopeSource {
+	if persistent {
+		event.Reason = ReasonInvitePersistent
+	}
+	if registerScan {
+		event.Reason = ReasonRegisterEnumeration
+	}
+	if total < policy.BanScore || policy.Mode == ModeObserve || event.RiskScope != ScopeSource ||
+		s.autoBanDisabled || !verifiedEventSource(event) || s.protectedSource(event.SourceIP) {
 		return event, nil, nil
 	}
 	ttl, shouldBan := policy.BanForScore(total)
@@ -153,9 +169,15 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	if persistent {
 		decision.Reason = ReasonInvitePersistent
 		event.Reason = ReasonInvitePersistent
-		decision.TriggerCount = len(s.invites[event.SourceIP])
+		decision.TriggerCount = len(s.invites[sourceKey])
 		decision.TriggerThreshold = persistentInviteThreshold
 		decision.WindowSeconds = int(persistentInviteWindow / time.Second)
+	}
+	if verifiedRegisterScan {
+		decision.Reason = ReasonRegisterEnumeration
+		decision.TriggerCount = len(s.registrations["verified|"+event.SourceIP])
+		decision.TriggerThreshold = registerScanThreshold
+		decision.WindowSeconds = int(registerScanWindow / time.Second)
 	}
 	s.decisions[event.SourceIP] = decision
 	return event, &decision, nil
@@ -220,12 +242,17 @@ func (s *Scorer) Unban(source string) {
 	delete(s.decisions, source)
 	delete(s.buckets, riskBucketKey(Event{SourceIP: source, RiskScope: ScopeSource}))
 	delete(s.invites, source)
+	delete(s.invites, "source|"+source)
+	delete(s.invites, "verified|source|"+source)
+	delete(s.buckets, "verified|source|"+source)
+	delete(s.registrations, source)
+	delete(s.registrations, "verified|"+source)
 }
 
 func (s *Scorer) HasDecision(decision BanDecision) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.decisions[decision.SourceIP].DecisionID == decision.DecisionID
+	return !s.autoBanDisabled && !s.protectedSource(decision.SourceIP) && s.decisions[decision.SourceIP].DecisionID == decision.DecisionID
 }
 
 func triggerThreshold(policy Policy, reason Reason) int {
@@ -252,7 +279,7 @@ func reasonScore(reason Reason) int {
 		return 5
 	case ReasonPacketTooLarge, ReasonConnectionRate, ReasonUnknownMethod:
 		return 10
-	case ReasonNonceStale, ReasonManualBlacklist, ReasonActiveBan:
+	case ReasonNonceStale, ReasonManualBlacklist, ReasonActiveBan, ReasonRegisterIDInvalid, ReasonRegisterEnumeration:
 		return 0
 	default:
 		return 1
@@ -275,6 +302,9 @@ func (s *Scorer) UpdateTrustedEndpoint(deviceID, transport, address string, expi
 }
 
 func riskScopeForEvent(event Event) RiskScope {
+	if event.Reason == ReasonRegisterIDInvalid || event.Reason == ReasonRegisterEnumeration {
+		return ScopeSource
+	}
 	if strings.TrimSpace(string(event.RiskScope)) == string(ScopeSource) || event.RiskScope == ScopeSource {
 		return ScopeSource
 	}
@@ -297,109 +327,9 @@ func (s *Scorer) TrustedEndpoint(deviceID string) (Endpoint, bool) {
 	defer s.mu.Unlock()
 	e, ok := s.endpoints[deviceID]
 	if ok && !e.ExpiresAt.IsZero() && !s.clock.Now().Before(e.ExpiresAt) {
-		delete(s.endpoints, deviceID)
 		return Endpoint{}, false
 	}
 	return e, ok
-}
-
-// NonceManager issues signed, short-lived and single-use nonces for SIP Digest.
-type NonceManager struct {
-	secret []byte
-	ttl    time.Duration
-	clock  Clock
-	mu     sync.Mutex
-	used   map[string]nonceUse
-}
-
-type nonceUse struct {
-	transactionFingerprint string
-	expiresAt              time.Time
-}
-
-const (
-	noncePayloadSize = 24
-	nonceMACSize     = 16
-)
-
-func NewNonceManager(secret []byte, ttl time.Duration, clock Clock) *NonceManager {
-	if clock == nil {
-		clock = RealClock()
-	}
-	if len(secret) == 0 {
-		secret = make([]byte, 32)
-		_, _ = rand.Read(secret)
-	}
-	return &NonceManager{secret: append([]byte(nil), secret...), ttl: ttl, clock: clock, used: make(map[string]nonceUse)}
-}
-
-func (m *NonceManager) SetTTL(ttl time.Duration) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.ttl != ttl {
-		// Retire outstanding challenges on a TTL change. Otherwise increasing
-		// TTL can revive consumed nonces whose replay entries were pruned.
-		m.secret = m.sign([]byte("nonce-policy-change"))
-		clear(m.used)
-		m.ttl = ttl
-	}
-}
-
-func (m *NonceManager) Issue() (string, error) {
-	random := make([]byte, 16)
-	if _, err := rand.Read(random); err != nil {
-		return "", err
-	}
-	buf := make([]byte, noncePayloadSize)
-	binary.BigEndian.PutUint64(buf[:8], uint64(m.clock.Now().Unix()))
-	copy(buf[8:], random)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	// A 128-bit HMAC tag keeps the nonce below legacy devices' 64-byte limit.
-	sig := m.sign(buf)[:nonceMACSize]
-	return base64.RawURLEncoding.EncodeToString(append(buf, sig...)), nil
-}
-
-func (m *NonceManager) Validate(nonce, nonceCount string) error {
-	return m.ValidateForTransaction(nonce, nonceCount, "")
-}
-
-func (m *NonceManager) ValidateForTransaction(nonce, nonceCount, transactionFingerprint string) error {
-	raw, err := base64.RawURLEncoding.DecodeString(nonce)
-	if err != nil || len(raw) != noncePayloadSize+nonceMACSize || base64.RawURLEncoding.EncodeToString(raw) != nonce {
-		return ErrNonceInvalid
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	payload, sig := raw[:noncePayloadSize], raw[noncePayloadSize:]
-	if !hmac.Equal(sig, m.sign(payload)[:nonceMACSize]) {
-		return ErrNonceInvalid
-	}
-	issued := time.Unix(int64(binary.BigEndian.Uint64(payload[:8])), 0)
-	now := m.clock.Now()
-	if now.Before(issued) || now.Sub(issued) >= m.ttl {
-		return ErrNonceExpired
-	}
-	key := nonce + "|" + strings.TrimSpace(nonceCount)
-	for usedKey, use := range m.used {
-		if !use.expiresAt.After(now) {
-			delete(m.used, usedKey)
-		}
-	}
-	if use, exists := m.used[key]; exists {
-		if transactionFingerprint != "" && hmac.Equal([]byte(use.transactionFingerprint), []byte(transactionFingerprint)) {
-			return nil
-		}
-		return ErrNonceReplay
-	}
-	m.used[key] = nonceUse{transactionFingerprint: transactionFingerprint, expiresAt: issued.Add(m.ttl)}
-	return nil
-}
-
-func (m *NonceManager) sign(payload []byte) []byte {
-	h := hmac.New(sha256.New, m.secret)
-	_, _ = h.Write(payload)
-	return h.Sum(nil)
 }
 
 func endpointIP(address string) string {

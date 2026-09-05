@@ -75,6 +75,15 @@ func NewPersistentRuntime(ctx context.Context, store Store, clock Clock, agent F
 	policy = policy.WithPermanentAutoBan()
 	r := NewRuntime(policy, clock, agent, nonceSecret)
 	r.store = store
+	endpoints, err := store.LoadAuthenticatedEndpoints(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, endpoint := range endpoints {
+		if err := r.scorer.UpdateTrustedEndpoint(endpoint.DeviceID, endpoint.Transport, endpoint.Address, endpoint.ExpiresAt); err != nil {
+			return nil, err
+		}
+	}
 	if rules, loadErr := store.ListAccessRules(ctx, ""); loadErr != nil {
 		return nil, loadErr
 	} else {
@@ -110,6 +119,16 @@ func (r *Runtime) Admission() *Admission { return r.admit }
 func (r *Runtime) IssueNonce() (string, error) {
 	return r.scorer.Nonce().Issue()
 }
+func (r *Runtime) IssueNonceForSource(source string) (string, error) {
+	return r.scorer.Nonce().IssueForSource(source)
+}
+func (r *Runtime) VerifyNonceSource(nonce, source string) error {
+	return r.scorer.Nonce().VerifySource(nonce, source)
+}
+func (r *Runtime) ValidateNonceForSourceTransaction(nonce, nc, transaction, source string) error {
+	return r.scorer.Nonce().ValidateForSourceTransaction(nonce, nc, transaction, source)
+}
+func (r *Runtime) SetAutoBanEnabled(enabled bool) { r.scorer.SetAutoBanEnabled(enabled) }
 func (r *Runtime) ValidateNonce(nonce, nonceCount string) error {
 	return r.scorer.Nonce().Validate(nonce, nonceCount)
 }
@@ -117,6 +136,8 @@ func (r *Runtime) ValidateNonceForTransaction(nonce, nonceCount, transactionFing
 	return r.scorer.Nonce().ValidateForTransaction(nonce, nonceCount, transactionFingerprint)
 }
 func (r *Runtime) TrustEndpoint(deviceID, transport, address string, expires time.Duration) error {
+	r.enforcementMu.Lock()
+	defer r.enforcementMu.Unlock()
 	return r.scorer.UpdateTrustedEndpoint(deviceID, transport, address, r.clock.Now().Add(expires))
 }
 func (r *Runtime) TrustedEndpoint(deviceID string) (Endpoint, bool) {

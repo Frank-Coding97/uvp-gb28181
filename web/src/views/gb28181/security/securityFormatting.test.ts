@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAutomaticBanTTL, formatRemaining, formatSecurityReason, formatShortWindowInviteRule } from "./securityFormatting";
+import { formatAutomaticBanTTL, formatRemaining, formatSecurityAction, formatSecurityReason, formatShortWindowInviteRule, isHighRiskSecurityReason } from "./securityFormatting";
 import { buildAccessRuleTogglePayload } from "./securityRules";
 
 describe("security formatting", () => {
@@ -31,6 +31,19 @@ describe("security formatting", () => {
   it("maps the persistent unauthorized INVITE reason and keeps unknown reasons visible", () => {
     expect(formatSecurityReason("unauthorized_invite_accumulation")).toBe("10 分钟累计 10 次未授权 INVITE");
     expect(formatSecurityReason("future_security_reason")).toBe("future_security_reason");
+  });
+
+  it("explains registration configuration failures and ID enumeration", () => {
+    expect(formatSecurityReason("digest_failure")).toBe("密码或鉴权配置错误，请检查配置后重新注册");
+    expect(formatSecurityReason("register_id_invalid")).toBe("设备 ID 非 20 位数字，请检查配置后重新注册");
+    expect(formatSecurityReason("register_id_enumeration")).toBe("10 分钟内至少 10 个不同 REGISTER 事务，枚举至少 3 个不同非法设备 ID");
+  });
+
+  it("keeps high-risk enumeration separate from the normal drop action", () => {
+    expect(isHighRiskSecurityReason("register_id_enumeration")).toBe(true);
+    expect(isHighRiskSecurityReason("register_id_invalid")).toBe(false);
+    expect(formatSecurityAction("drop")).toBe("已拒绝");
+    expect(formatSecurityAction("ban")).toBe("已拒绝并封禁");
   });
 
   it("formats the short-window INVITE count from the live policy score", () => {

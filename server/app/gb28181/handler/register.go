@@ -166,10 +166,9 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	h.recordBegin(req, metrics.TxRegister, deviceID)
 	advertised := advertisedRegisterVersion(req)
-	if deviceID == "" {
-		_ = tx.Respond(h.newResponse(req, 400, "Missing device id", nil))
-		h.recordEnd(req, 400, false)
-		h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeInvalidRequest, 400)
+	if !gbsecurity.ValidDeviceID(deviceID) {
+		status := h.rejectInvalidDeviceID(req, tx, deviceID)
+		h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeInvalidRequest, status)
 		return
 	}
 
@@ -277,7 +276,7 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if strings.TrimSpace(cred.QOP) != "" {
 		nonceCount = digestNonceCount(cred.Nc)
 	}
-	if err := h.validateNonce(cred.Nonce, nonceCount, transactionKey, deviceID); err != nil {
+	if err := h.validateNonce(req, cred.Nonce, nonceCount, transactionKey, deviceID); err != nil {
 		h.recordSecurity(req, deviceID, nonceFailureReason(err))
 		status, freshNonce := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
@@ -379,9 +378,12 @@ type transactionNonceValidator interface {
 	ValidateNonceForTransaction(nonce, nonceCount, transactionFingerprint string) error
 }
 
-func (h *RegisterHandler) validateNonce(nonce, nonceCount, transactionFingerprint, deviceID string) error {
+func (h *RegisterHandler) validateNonce(req *sip.Request, nonce, nonceCount, transactionFingerprint, deviceID string) error {
 	var err error
-	if validator, ok := h.security.(transactionNonceValidator); ok {
+	if validator, ok := h.security.(sourceBoundRegisterSecurity); ok {
+		source, _ := splitHostPort(req.Source())
+		err = validator.ValidateNonceForSourceTransaction(nonce, nonceCount, transactionFingerprint, source)
+	} else if validator, ok := h.security.(transactionNonceValidator); ok {
 		err = validator.ValidateNonceForTransaction(nonce, nonceCount, transactionFingerprint)
 	} else {
 		err = h.security.ValidateNonce(nonce, nonceCount)
@@ -393,7 +395,14 @@ func (h *RegisterHandler) validateNonce(nonce, nonceCount, transactionFingerprin
 }
 
 func (h *RegisterHandler) respondChallenge(req *sip.Request, tx sip.ServerTransaction) (int, string) {
-	nonce, err := h.security.IssueNonce()
+	var nonce string
+	var err error
+	if security, ok := h.security.(sourceBoundRegisterSecurity); ok {
+		source, _ := splitHostPort(req.Source())
+		nonce, err = security.IssueNonceForSource(source)
+	} else {
+		nonce, err = h.security.IssueNonce()
+	}
 	if err != nil {
 		_ = tx.Respond(h.newResponse(req, sip.StatusInternalServerError, "Server error", nil))
 		return sip.StatusInternalServerError, ""
@@ -409,7 +418,8 @@ func (h *RegisterHandler) recordSecurity(req *sip.Request, deviceID string, reas
 	sourceIP, _ := splitHostPort(req.Source())
 	_ = h.security.Record(gbsecurity.Event{
 		SourceIP: sourceIP, Transport: req.Transport(), Method: string(req.Method),
-		DeviceID: deviceID, Reason: reason, Action: gbsecurity.ActionSample,
+		DeviceID: securityDeviceID(deviceID), Reason: reason, Action: gbsecurity.ActionDrop,
+		TransactionID: registerSecurityTransaction(req), SourceVerified: h.verifiedRegisterSource(req),
 	})
 }
 

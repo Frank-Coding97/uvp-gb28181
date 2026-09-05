@@ -167,7 +167,7 @@ func registerTransactionKey(req *sip.Request, deviceID string) string {
 		sum := sha256.Sum256([]byte(strings.TrimSpace(header.Value())))
 		authorization = hex.EncodeToString(sum[:])
 	}
-	return fmt.Sprintf("%s|%s|%d|%s|%s", deviceID, callID, cseq, branch, authorization)
+	return fmt.Sprintf("%s|%s|%s|%s|%d|%s|%s", req.Source(), req.Transport(), deviceID, callID, cseq, branch, authorization)
 }
 
 type capturingRegisterTransaction struct {

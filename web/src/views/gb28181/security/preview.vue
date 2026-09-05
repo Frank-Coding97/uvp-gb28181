@@ -46,7 +46,7 @@ import {
   type SecuritySnapshot
 } from "@/api/gb28181-security";
 import { buildSecurityTrend, type SecurityTrendPeriod } from "./securityTrend";
-import { formatAutomaticBanTTL, formatRemaining, formatSecurityReason, formatShortWindowInviteRule } from "./securityFormatting";
+import { formatAutomaticBanTTL, formatRemaining, formatSecurityAction, formatSecurityReason, formatShortWindowInviteRule, isHighRiskSecurityReason } from "./securityFormatting";
 import { buildAccessRuleTogglePayload } from "./securityRules";
 
 type TabKey = "overview" | "events" | "bans" | "blacklist" | "allowlist" | "policy";
@@ -135,17 +135,18 @@ const blackRuleTotal = ref(0);
 const allowRulePage = ref(1);
 const allowRulePageSize = ref(20);
 const allowRuleTotal = ref(0);
+const registerValidationNote = "REGISTER 始终校验格式、鉴权和设备身份；无效请求拒绝，修正后可重新注册";
 const protectionModes: ProtectionModeOption[] = [
   {
     key: "observe",
     title: "观察",
-    badge: "仅记录",
-    desc: "不影响现有 SIP 通信",
-    headline: "发现 SIP 风险，但不执行拦截",
-    summary: "适合上线前校准规则。公网攻击仍会进入服务，不建议长期用于生产环境。",
-    entryResult: "记录入口包大小、来源和未知方法风险，不拦截",
-    protocolResult: "记录 REGISTER 的 Digest、Nonce、设备身份风险，以及 MESSAGE 解析结果",
-    banResult: "只累计风险，不写入主机防火墙",
+    badge: "不自动封 IP",
+    desc: "仍校验协议，仅关闭自动封 IP",
+    headline: "仍校验 REGISTER，仅关闭自动封 IP",
+    summary: "适合上线前校准规则。无效 REGISTER 仍会拒绝并记录，观察模式只关闭自动封 IP。",
+    entryResult: "记录入口包大小、来源和速率风险；REGISTER 无效请求仍拒绝",
+    protocolResult: `${registerValidationNote}；MESSAGE 继续解析`,
+    banResult: "只累计风险并记录，不执行自动 IP 封禁",
     icon: Globe2
   },
   {
@@ -156,8 +157,8 @@ const protectionModes: ProtectionModeOption[] = [
     headline: "陌生 INVITE 与异常入口先拦截，重复风险自动封禁",
     summary: "兼顾公网防护与设备兼容性，适合大多数国标平台。",
     entryResult: "陌生 INVITE、超大包和未知方法风险先丢弃，不进入业务处理",
-    protocolResult: "REGISTER 执行 Digest、Nonce 和设备身份校验；MESSAGE 继续经过协议解析链路",
-    banResult: "多类风险累计达到阈值后封禁来源 IP，并同步 Agent",
+    protocolResult: `${registerValidationNote}；MESSAGE 继续经过协议解析链路`,
+    banResult: "风险达到阈值先拒绝；自动永久 IP 封禁还需来源验证并排除成功认证共享出口",
     icon: ShieldCheck
   },
   {
@@ -168,8 +169,8 @@ const protectionModes: ProtectionModeOption[] = [
     headline: "仅允许认证注册和可信 SIP 端点",
     summary: "适合设备与上级平台来源固定的封闭部署，启用前需要补齐信任关系。",
     entryResult: "对陌生 INVITE、超大包和连接异常更早拒绝，可信来源需提前加入名单",
-    protocolResult: "REGISTER 必须通过 Digest、Nonce 和设备身份校验；其他方法仍走协议处理",
-    banResult: "任一来源的组合风险更快升级为主机封禁",
+    protocolResult: `${registerValidationNote}；其他方法仍走协议处理`,
+    banResult: "组合风险更快先拒绝；自动永久 IP 封禁仍需来源验证并排除成功认证共享出口",
     icon: LockKeyhole
   }
 ];
@@ -225,10 +226,11 @@ const enabledDefenseLayers = computed(() => 1 + (securityAgent.value.connected ?
 const policyWindowLabel = computed(() => securityPolicy.value ? `${securityPolicy.value.window} 秒窗口` : "策略窗口读取中");
 const shortWindowInviteRuleLabel = computed(() => formatShortWindowInviteRule(securityPolicy.value?.window, securityPolicy.value?.banScore));
 const lowFrequencyInviteRuleLabel = "10 分钟累计 10 次未授权 INVITE";
+const sourceVerificationNote = "发现非法 ID 枚举只代表高危并拒绝，不直接永久封 IP；自动永久 IP 封禁需来源可验证（真实 TCP 或平台回程验证），并排除有成功认证记录的共享出口。单向 UDP 未验证来源只拒绝并记录，INVITE 自动 IP 封禁同样适用。";
 const automaticBanTTLLabel = computed(() => formatAutomaticBanTTL(securityPolicy.value?.banTTLs || [], securityPolicy.value?.permanentAutoBan === true, securityPolicy.value?.banScore));
 const liveStatus = computed(() => {
   if (dataUnavailable.value) return { label: "数据不可用", color: "red" as const };
-  if (selectedMode.value === "observe") return { label: "仅观察", color: "orange" as const };
+  if (selectedMode.value === "observe") return { label: "观察（不自动封 IP）", color: "orange" as const };
   return { label: securityAgent.value.connected ? "防护运行中" : "应用层防护运行中", color: securityAgent.value.connected ? "green" as const : "orange" as const };
 });
 const agentStatus = computed(() => {
@@ -324,9 +326,9 @@ function expiryToIso(expiry: string) {
 }
 
 function mapEvent(event: SecurityEventAggregate, index: number, offset = 0): SecurityEvent {
-  const highRisk = event.action === "ban" || event.reason.includes("nonce") || event.reason.includes("digest");
+  const highRisk = event.action === "ban" || isHighRiskSecurityReason(event.reason);
   const location = event.riskScope === "device" ? `设备 ${event.deviceId || "未知"}` : "来源 IP";
-  return { id: offset + index + 1, severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危", source: event.sourceIp, location, method: event.method || "未知", userAgent: event.userAgent || "未上报", rule: formatSecurityReason(event.reason), action: event.action, count: event.count, time: new Date(event.lastSeenAt).toLocaleString() };
+  return { id: offset + index + 1, severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危", source: event.sourceIp, location, method: event.method || "未知", userAgent: event.userAgent || "未上报", rule: formatSecurityReason(event.reason), action: formatSecurityAction(event.action), count: event.count, time: new Date(event.lastSeenAt).toLocaleString() };
 }
 
 function mapBan(ban: FirewallBan, index: number, offset = 0): AutoBanRecord {
@@ -556,7 +558,7 @@ onBeforeUnmount(() => {
 
         <section class="metric-grid" aria-label="安全指标">
           <article><span>已识别安全事件</span><strong>{{ recognizedCount }}</strong><small class="warning"><Activity :size="13" />来自安全事件接口聚合</small></article>
-          <article><span>应用层已拦截</span><strong>{{ blockedCount }}</strong><small class="success"><ShieldCheck :size="13" />丢弃与封禁动作累计</small></article>
+          <article><span>应用层已拦截</span><strong>{{ blockedCount }}</strong><small class="success"><ShieldCheck :size="13" />拒绝与封禁动作累计</small></article>
           <article><span>生效中自动封禁</span><strong>{{ banTotal }}</strong><small><Ban :size="13" />主机防火墙已生效 {{ overviewBans.filter(item => item.firewallState === '已生效').length }}</small></article>
             <article><span>主机防火墙</span><strong class="status-value">{{ securityAgent.connected ? '在线' : '降级' }}</strong><small :class="securityAgent.connected ? 'success' : 'warning'"><BrickWall :size="13" />{{ securityAgent.appliedRules }} 条动态规则</small></article>
         </section>
@@ -583,7 +585,8 @@ onBeforeUnmount(() => {
               <i class="chain-line active" />
               <div class="defense-item active"><span><Fingerprint :size="19" /></span><div><strong>应用协议防护</strong><small>限速 · 鉴权 · 风险评分</small></div><a-tag color="green"><Check :size="12" />保护</a-tag></div>
             </div>
-            <div class="panel-note"><Zap :size="16" /><span>明确恶意来源会按风险等级短期封禁，到期自动解除。</span></div>
+            <div class="panel-note"><Zap :size="16" /><span>命中自动封禁策略的来源将永久封禁，需人工解封。</span></div>
+            <div class="panel-note"><ShieldCheck :size="16" /><span>{{ sourceVerificationNote }}</span></div>
           </article>
         </section>
 
@@ -600,7 +603,7 @@ onBeforeUnmount(() => {
 
           <article class="uvp-system-panel attention-panel">
             <div class="panel-heading"><div><span class="section-label">待处理</span><h3>安全建议</h3></div><span class="attention-count">{{ attentionCount }}</span></div>
-            <button v-if="banTotal" class="attention-row" type="button" @click="activeTab = 'bans'"><span class="attention-icon danger"><Ban :size="18" /></span><span><strong>{{ banTotal }} 条自动封禁待复核</strong><small>自动封禁会按策略到期，必要时可转为人工黑名单。</small></span><ChevronRight :size="16" /></button>
+            <button v-if="banTotal" class="attention-row" type="button" @click="activeTab = 'bans'"><span class="attention-icon danger"><Ban :size="18" /></span><span><strong>{{ banTotal }} 条自动封禁待复核</strong><small>新自动封禁永久生效，请核对来源后决定是否人工解封。</small></span><ChevronRight :size="16" /></button>
             <button v-if="allowRuleTotal" class="attention-row" type="button" @click="activeTab = 'allowlist'"><span class="attention-icon warning"><UserRoundCheck :size="18" /></span><span><strong>{{ allowRuleTotal }} 条白名单规则</strong><small>可信出口加入白名单后可减少误判。</small></span><ChevronRight :size="16" /></button>
             <div v-if="!attentionCount" class="empty-state attention-empty" role="status"><span class="empty-state-icon"><CheckCircle2 :size="22" /></span><strong>当前没有待处理项</strong><small>安全事件、自动封禁和访问名单会在接口刷新后更新。</small></div>
           </article>
@@ -612,6 +615,7 @@ onBeforeUnmount(() => {
           <a-select v-model="eventSeverity" aria-label="风险等级" style="width: 150px"><a-option>全部风险</a-option><a-option>高危</a-option><a-option>中危</a-option><a-option>低危</a-option></a-select>
           <a-input v-model="eventSearch" allow-clear placeholder="搜索 IP、方法或 User-Agent" aria-label="搜索风险事件"><template #prefix><Search :size="15" /></template></a-input>
         </div>
+        <div class="panel-note event-note"><ShieldCheck :size="16" /><span>高危是风险等级；扫描枚举即使结果为“已拒绝”也属正常，永久封 IP 仍需通过来源验证门禁。</span></div>
         <a-table class="security-table uvp-data-table" :data="filteredEvents" row-key="id" :pagination="eventPagination" :scroll="{ x: 1050, y: '100%' }" @page-change="handleEventPageChange" @page-size-change="handleEventPageSizeChange">
           <template #columns>
             <a-table-column title="风险" :width="90"><template #cell="{ record }"><span :class="['severity', record.severity === '高危' ? 'high' : record.severity === '中危' ? 'medium' : 'low']"><i />{{ record.severity }}</span></template></a-table-column>
@@ -688,14 +692,16 @@ onBeforeUnmount(() => {
         <div class="policy-grid">
           <div class="policy-section">
             <div class="policy-title"><span><Activity :size="18" /></span><div><h3>自动防护规则</h3><p>控制异常来源何时被识别并升级处理。</p></div></div>
-            <div class="setting-row"><span><strong>重复攻击自动封禁</strong><small>{{ selectedMode === 'observe' ? '观察模式仅记录' : '保护/严格模式实际封禁' }}；短期 {{ shortWindowInviteRuleLabel }}；固定低频 {{ lowFrequencyInviteRuleLabel }}。</small></span><a-tag :color="selectedMode === 'observe' ? 'orange' : 'green'">{{ selectedMode === 'observe' ? '观察模式不执行' : automaticBanTTLLabel }}</a-tag></div>
-            <div class="setting-row"><span><strong>扫描器特征识别</strong><small>User-Agent 仅作为辅助信号，不作为可信身份</small></span><a-tag color="green">协议事件接口</a-tag></div>
+            <div class="setting-row"><span><strong>重复攻击自动封禁</strong><small>{{ selectedMode === 'observe' ? '观察模式仅记录' : '保护/严格模式先拒绝；自动永久 IP 封禁仍需来源验证门禁' }}；短期 {{ shortWindowInviteRuleLabel }}；固定低频 {{ lowFrequencyInviteRuleLabel }}。</small></span><a-tag :color="selectedMode === 'observe' ? 'orange' : 'green'">{{ selectedMode === 'observe' ? '观察模式不执行' : automaticBanTTLLabel }}</a-tag></div>
+            <div class="setting-row"><span><strong>注册失败处理</strong><small>所有模式都校验 REGISTER 格式、鉴权和设备 ID；密码错误或单一非法 ID 会拒绝并提示检查配置，修正后可重新注册。</small></span><a-tag color="blue">可修正重试</a-tag></div>
+            <div class="setting-row"><span><strong>扫描器特征识别</strong><small>User-Agent 仅作为辅助信号，不作为可信身份；非法 ID 枚举单独计为高危，不直接等同于永久封 IP。</small></span><a-tag color="green">协议事件接口</a-tag></div>
             <div class="setting-row"><span><strong>入口速率阈值</strong><small>当前策略窗口内允许的 UDP 包数量 · {{ policyWindowLabel }}</small></span><div class="threshold-control"><a-input-number v-model="maxUdpThreshold" :min="1" :max="100000" /><span>包/窗口</span></div></div>
-            <div class="setting-row"><span><strong>风险累计封禁阈值</strong><small>INVITE、REGISTER、MESSAGE 等风险按评分累计，达到阈值后加入主机防火墙</small></span><div class="threshold-control"><a-input-number v-model="banThreshold" :min="1" :max="10000" /><span>风险分</span></div></div>
+            <div class="setting-row"><span><strong>风险累计封禁阈值</strong><small>INVITE、REGISTER、MESSAGE 等风险按评分累计；达到阈值后仍需通过来源验证门禁，才加入主机防火墙</small></span><div class="threshold-control"><a-input-number v-model="banThreshold" :min="1" :max="10000" /><span>风险分</span></div></div>
+            <div class="setting-row"><span><strong>来源验证门禁</strong><small>{{ sourceVerificationNote }}</small></span><a-tag color="blue">自动校验</a-tag></div>
           </div>
           <div class="policy-section">
             <div class="policy-title"><span><BrickWall :size="18" /></span><div><h3>主机防火墙</h3><p>阻止已确认的攻击流量继续进入服务进程。</p></div></div>
-            <div class="setting-row"><span><strong>联动主机防火墙</strong><small>应用层确认攻击后，在操作系统网络入口封禁来源 IP</small></span><a-tag :color="securityAgent.connected ? 'green' : 'orange'">{{ securityAgent.connected ? 'Agent 已连接' : 'Agent 未连接' }}</a-tag></div>
+            <div class="setting-row"><span><strong>联动主机防火墙</strong><small>应用层确认攻击后，只有来源通过验证门禁且不是成功认证共享出口，才在操作系统网络入口永久封禁来源 IP</small></span><a-tag :color="securityAgent.connected ? 'green' : 'orange'">{{ securityAgent.connected ? 'Agent 已连接' : 'Agent 未连接' }}</a-tag></div>
             <div class="agent-status"><span :class="['agent-icon', { warning: !securityAgent.connected }]" ><CheckCircle2 v-if="securityAgent.connected" :size="22" /><TriangleAlert v-else :size="22" /></span><span><strong>{{ agentStatus.title }}</strong><small>{{ agentStatus.detail }}</small></span><a-tag :color="agentStatus.color">{{ agentStatus.label }}</a-tag></div>
             <div class="ttl-row"><span><strong>自动封禁有效期</strong><small>新自动封禁永久生效，需人工解封；历史限时记录保留原到期时间。</small></span><a-tag color="orange">{{ automaticBanTTLLabel }}</a-tag></div>
             <div class="cloud-roadmap"><CloudCog :size="18" /><span><strong>云厂商防火墙联动</strong><small>当前系统未接入云厂商 API，暂不宣称已生效。</small></span><a-tag color="orange">未接入</a-tag></div>

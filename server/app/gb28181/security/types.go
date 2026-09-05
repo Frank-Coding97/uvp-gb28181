@@ -36,20 +36,22 @@ const (
 type Reason string
 
 const (
-	ReasonUnknownMethod    Reason = "unknown_method"
-	ReasonInviteRate       Reason = "unknown_invite_rate"
-	ReasonInvitePersistent Reason = "unauthorized_invite_accumulation"
-	ReasonServerMismatch   Reason = "server_id_mismatch"
-	ReasonDigestFailure    Reason = "digest_failure"
-	ReasonNonceInvalid     Reason = "nonce_invalid"
-	ReasonNonceExpired     Reason = "nonce_expired"
-	ReasonNonceReplay      Reason = "nonce_replay"
-	ReasonNonceStale       Reason = "nonce_stale"
-	ReasonUnregisteredMsg  Reason = "unregistered_message"
-	ReasonPacketTooLarge   Reason = "packet_too_large"
-	ReasonConnectionRate   Reason = "connection_rate"
-	ReasonManualBlacklist  Reason = "manual_blacklist"
-	ReasonActiveBan        Reason = "active_ban"
+	ReasonUnknownMethod       Reason = "unknown_method"
+	ReasonInviteRate          Reason = "unknown_invite_rate"
+	ReasonInvitePersistent    Reason = "unauthorized_invite_accumulation"
+	ReasonRegisterIDInvalid   Reason = "register_id_invalid"
+	ReasonRegisterEnumeration Reason = "register_id_enumeration"
+	ReasonServerMismatch      Reason = "server_id_mismatch"
+	ReasonDigestFailure       Reason = "digest_failure"
+	ReasonNonceInvalid        Reason = "nonce_invalid"
+	ReasonNonceExpired        Reason = "nonce_expired"
+	ReasonNonceReplay         Reason = "nonce_replay"
+	ReasonNonceStale          Reason = "nonce_stale"
+	ReasonUnregisteredMsg     Reason = "unregistered_message"
+	ReasonPacketTooLarge      Reason = "packet_too_large"
+	ReasonConnectionRate      Reason = "connection_rate"
+	ReasonManualBlacklist     Reason = "manual_blacklist"
+	ReasonActiveBan           Reason = "active_ban"
 )
 
 var (
@@ -182,17 +184,20 @@ func ValidateSource(raw string) (net.IP, error) {
 }
 
 type Event struct {
-	TransactionID string    `json:"-"`
-	SourceIP      string    `json:"sourceIp"`
-	Transport     string    `json:"transport"`
-	Method        string    `json:"method"`
-	DeviceID      string    `json:"deviceId"`
-	RiskScope     RiskScope `json:"riskScope"`
-	UserAgent     string    `json:"userAgent"`
-	Reason        Reason    `json:"reason"`
-	Action        Action    `json:"action"`
-	Score         int       `json:"score"`
-	Occurred      time.Time `json:"occurredAt"`
+	// SourceVerified is set only after this request returns an IP-bound nonce.
+	// Stream transport is independently verified by the accepted connection.
+	SourceVerified bool      `json:"-"`
+	TransactionID  string    `json:"-"`
+	SourceIP       string    `json:"sourceIp"`
+	Transport      string    `json:"transport"`
+	Method         string    `json:"method"`
+	DeviceID       string    `json:"deviceId"`
+	RiskScope      RiskScope `json:"riskScope"`
+	UserAgent      string    `json:"userAgent"`
+	Reason         Reason    `json:"reason"`
+	Action         Action    `json:"action"`
+	Score          int       `json:"score"`
+	Occurred       time.Time `json:"occurredAt"`
 }
 
 type BanDecision struct {

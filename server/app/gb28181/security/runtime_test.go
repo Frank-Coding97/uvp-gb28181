@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 func TestRuntimeObserveAggregatesWithoutFirewallSideEffect(t *testing.T) {
 	agent := &fakeAgent{}
 	r := NewRuntime(DefaultPolicyWithMode(ModeObserve), &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
-	require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonUnknownMethod, Action: ActionDrop}))
+	require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonUnknownMethod, Action: ActionDrop}))
 	snapshot := r.Snapshot()
 	require.Len(t, snapshot.Events, 1)
 	require.Empty(t, agent.banCalls)
@@ -22,15 +23,17 @@ func TestRuntimeProtectBansOnFifthUnknownInviteButNotBefore(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	agent := &fakeAgent{}
 	r := NewRuntime(DefaultPolicy(), clock, agent, []byte("secret"))
-	packet := []byte("INVITE sip:x SIP/2.0\r\n")
+	props := readProps()
+	props.Transport = "TCP"
+	packet := admissionSIPFrame("TCP", "INVITE", "scanner", "fifth", "")
 
 	for i := 0; i < 4; i++ {
-		out, err := r.Admission().Filter(readProps(), packet)
+		out, err := r.Admission().Filter(props, admissionSIPFrame("TCP", "INVITE", "scanner", fmt.Sprint(i), ""))
 		require.NoError(t, err)
 		require.Empty(t, out)
 		require.Empty(t, agent.banCalls)
 	}
-	out, err := r.Admission().Filter(readProps(), packet)
+	out, err := r.Admission().Filter(props, packet)
 	require.NoError(t, err)
 	require.Empty(t, out)
 	require.Len(t, agent.banCalls, 1)
@@ -43,7 +46,7 @@ func TestRuntimeProtectBansOnFifthUnknownInviteButNotBefore(t *testing.T) {
 	require.Equal(t, 10, agent.banCalls[0].WindowSeconds)
 	require.Equal(t, ModeProtect, agent.banCalls[0].PolicyMode)
 
-	_, err = r.Admission().Filter(readProps(), packet)
+	_, err = r.Admission().Filter(props, packet)
 	require.NoError(t, err)
 	bans := r.Bans()
 	require.Len(t, bans, 1)
@@ -57,7 +60,7 @@ func TestRuntimeProtectPropagatesBanToAdmissionAndAgent(t *testing.T) {
 	p.BanTTLs = []TTLStep{{Score: 1, TTL: time.Minute}}
 	agent := &fakeAgent{}
 	r := NewRuntime(p, &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
-	require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonUnknownMethod, Action: ActionDrop}))
+	require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonUnknownMethod, Action: ActionDrop}))
 	require.Len(t, agent.banCalls, 1)
 	require.True(t, r.Admission().IsBanned("198.51.100.10"))
 }
@@ -70,10 +73,12 @@ func TestRuntimeAdmissionFeedsScorerAndSnapshot(t *testing.T) {
 	agent := &fakeAgent{}
 	r := NewRuntime(p, &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
 
-	packet := []byte("INVITE sip:x SIP/2.0\r\n")
-	_, err := r.Admission().Filter(readProps(), packet)
+	props := readProps()
+	props.Transport = "TCP"
+	packet := admissionSIPFrame("TCP", "INVITE", "scanner", "1", "")
+	_, err := r.Admission().Filter(props, packet)
 	require.NoError(t, err)
-	out, err := r.Admission().Filter(readProps(), packet)
+	out, err := r.Admission().Filter(props, packet)
 	require.NoError(t, err)
 	require.Empty(t, out)
 	require.Len(t, r.Events(), 2)
@@ -95,7 +100,7 @@ func TestRuntimeKeepsFailedAgentDecisionVisible(t *testing.T) {
 	agent := &fakeAgent{banErr: errors.New("socket unavailable")}
 	r := NewRuntime(p, &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
 
-	err := r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonUnknownMethod})
+	err := r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonUnknownMethod})
 	require.Error(t, err)
 	require.Len(t, r.Bans(), 1)
 	require.Equal(t, BanAgentFailed, r.Bans()[0].Status)
@@ -150,7 +155,7 @@ func TestRuntimePolicySwitchToObserveClearsAgentRules(t *testing.T) {
 	p.BanTTLs = []TTLStep{{Score: 1, TTL: time.Minute}}
 	agent := &fakeAgent{}
 	r := NewRuntime(p, &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
-	require.NoError(t, r.Record(Event{SourceIP: "198.51.100.30", Method: "INVITE", Reason: ReasonInviteRate}))
+	require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.30", Method: "INVITE", Reason: ReasonInviteRate}))
 
 	next := p
 	next.Mode = ModeObserve
@@ -165,7 +170,7 @@ func TestRuntimeUnbanAcceptsDecisionIDFromAPI(t *testing.T) {
 	p.BanTTLs = []TTLStep{{Score: 1, TTL: time.Minute}}
 	agent := &fakeAgent{}
 	r := NewRuntime(p, &fakeClock{now: time.Unix(100, 0)}, agent, []byte("secret"))
-	require.NoError(t, r.Record(Event{SourceIP: "198.51.100.30", Method: "INVITE", Reason: ReasonInviteRate}))
+	require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.30", Method: "INVITE", Reason: ReasonInviteRate}))
 	bans := r.Bans()
 	require.Len(t, bans, 1)
 	require.NoError(t, r.Unban(bans[0].Decision.DecisionID, "admin"))

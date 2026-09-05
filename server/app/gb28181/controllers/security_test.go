@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
 )
 
 type securityControllerProvider struct {
@@ -18,6 +20,7 @@ type securityControllerProvider struct {
 	rules         []gbsecurity.AccessRule
 	policy        gbsecurity.SecurityPolicy
 	updatedPolicy *gbsecurity.SecurityPolicy
+	actor         string
 }
 
 func (p *securityControllerProvider) Snapshot() SecuritySnapshot          { return SecuritySnapshot{} }
@@ -29,11 +32,15 @@ func (p *securityControllerProvider) Policy() gbsecurity.SecurityPolicy {
 	}
 	return gbsecurity.DefaultPolicy()
 }
-func (p *securityControllerProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy, _ string) error {
+func (p *securityControllerProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy, actor string) error {
 	p.updatedPolicy = &policy
+	p.actor = actor
 	return nil
 }
-func (p *securityControllerProvider) Unban(string, string) error { return nil }
+func (p *securityControllerProvider) Unban(_ string, actor string) error {
+	p.actor = actor
+	return nil
+}
 func (p *securityControllerProvider) AccessRules(listType gbsecurity.AccessListType) []gbsecurity.AccessRule {
 	items := make([]gbsecurity.AccessRule, 0, len(p.rules))
 	for _, item := range p.rules {
@@ -43,13 +50,18 @@ func (p *securityControllerProvider) AccessRules(listType gbsecurity.AccessListT
 	}
 	return items
 }
-func (p *securityControllerProvider) CreateAccessRule(*gbsecurity.AccessRule, string) error {
+func (p *securityControllerProvider) CreateAccessRule(_ *gbsecurity.AccessRule, actor string) error {
+	p.actor = actor
 	return nil
 }
-func (p *securityControllerProvider) UpdateAccessRule(gbsecurity.AccessRule, string) error {
+func (p *securityControllerProvider) UpdateAccessRule(_ gbsecurity.AccessRule, actor string) error {
+	p.actor = actor
 	return nil
 }
-func (p *securityControllerProvider) DeleteAccessRule(uint64, string) error { return nil }
+func (p *securityControllerProvider) DeleteAccessRule(_ uint64, actor string) error {
+	p.actor = actor
+	return nil
+}
 func (p *securityControllerProvider) AgentStatus() gbsecurity.AgentStatus {
 	return gbsecurity.AgentStatus{}
 }
@@ -198,4 +210,35 @@ func serveSecurityList(t *testing.T, target string, handler gin.HandlerFunc) *ht
 	router.ServeHTTP(recorder, httptest.NewRequest("GET", target, nil))
 	require.Equal(t, 200, recorder.Code)
 	return recorder
+}
+
+func TestSecurityControllerMutationsUseAuthenticatedActor(t *testing.T) {
+	policy, err := json.Marshal(securityPolicyView(gbsecurity.DefaultPolicy()))
+	require.NoError(t, err)
+	for _, tc := range []struct{ method, path, body string }{
+		{"PUT", "/policy", string(policy)},
+		{"POST", "/bans/test-ban/unban", ""},
+		{"POST", "/access-rules", `{ "listType":"blacklist", "matchType":"ip", "matchValue":"198.51.100.7", "scope":"all_sip", "status":"enabled" }`},
+		{"PUT", "/access-rules/7", `{ "listType":"blacklist", "matchType":"ip", "matchValue":"198.51.100.7", "scope":"all_sip", "status":"enabled" }`},
+		{"DELETE", "/access-rules/7", ""},
+	} {
+		t.Run(tc.method+tc.path, func(t *testing.T) {
+			provider := &securityControllerProvider{}
+			controller := NewSecurityController(provider)
+			router := gin.New()
+			router.Use(func(ctx *gin.Context) {
+				ctx.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: 42}})
+				ctx.Next()
+			})
+			router.PUT("/policy", controller.UpdatePolicy)
+			router.POST("/bans/:id/unban", controller.Unban)
+			router.POST("/access-rules", controller.CreateAccessRule)
+			router.PUT("/access-rules/:id", controller.UpdateAccessRule)
+			router.DELETE("/access-rules/:id", controller.DeleteAccessRule)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body)))
+			require.Equal(t, 200, response.Code, response.Body.String())
+			require.Equal(t, "42", provider.actor)
+		})
+	}
 }

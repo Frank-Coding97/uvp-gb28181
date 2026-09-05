@@ -14,7 +14,7 @@ import (
 
 func TestRegisterQoplessDigestReplayCannotChangeNonceCountAndUnregister(t *testing.T) {
 	handler, registerCalls, unregisterCalls := newRealNonceRegisterHandler()
-	nonce, err := handler.security.IssueNonce()
+	nonce, err := handler.security.(sourceBoundRegisterSecurity).IssueNonceForSource("198.51.100.23")
 	require.NoError(t, err)
 
 	first := authorizedRegisterRequest(t, nonce, securityTestPassword)
@@ -41,7 +41,7 @@ func TestRegisterQoplessDigestReplayCannotChangeNonceCountAndUnregister(t *testi
 
 func TestRegisterRealNonceManagerAllowsMultipleSameTransactionRetransmissions(t *testing.T) {
 	handler, registerCalls, unregisterCalls := newRealNonceRegisterHandler()
-	nonce, err := handler.security.IssueNonce()
+	nonce, err := handler.security.(sourceBoundRegisterSecurity).IssueNonceForSource("198.51.100.23")
 	require.NoError(t, err)
 	request := authorizedRegisterRequest(t, nonce, securityTestPassword)
 
@@ -57,7 +57,7 @@ func TestRegisterRealNonceManagerAllowsMultipleSameTransactionRetransmissions(t 
 
 func TestRegisterQoplessDigestReplayWithDifferentCSeqIsRejected(t *testing.T) {
 	handler, registerCalls, unregisterCalls := newRealNonceRegisterHandler()
-	nonce, err := handler.security.IssueNonce()
+	nonce, err := handler.security.(sourceBoundRegisterSecurity).IssueNonceForSource("198.51.100.23")
 	require.NoError(t, err)
 
 	first := authorizedRegisterRequest(t, nonce, securityTestPassword)
@@ -77,7 +77,7 @@ func TestRegisterQoplessDigestReplayWithDifferentCSeqIsRejected(t *testing.T) {
 
 func TestRegisterQopAuthBindsNonceCountAndAllowsNewNonce(t *testing.T) {
 	handler, registerCalls, unregisterCalls := newRealNonceRegisterHandler()
-	nonce, err := handler.security.IssueNonce()
+	nonce, err := handler.security.(sourceBoundRegisterSecurity).IssueNonceForSource("198.51.100.23")
 	require.NoError(t, err)
 
 	first := authorizedQopAuthRegisterRequest(t, nonce, securityTestPassword, 1)
@@ -103,7 +103,7 @@ func TestRegisterQopAuthBindsNonceCountAndAllowsNewNonce(t *testing.T) {
 	handler.Handle(changedCount, changedCountTx)
 	require.Equal(t, sip.StatusOK, changedCountTx.response.StatusCode)
 
-	newNonce, err := handler.security.IssueNonce()
+	newNonce, err := handler.security.(sourceBoundRegisterSecurity).IssueNonceForSource("198.51.100.23")
 	require.NoError(t, err)
 	newNonceRequest := authorizedQopAuthRegisterRequest(t, newNonce, securityTestPassword, 1)
 	setRegisterCSeq(newNonceRequest, 3)

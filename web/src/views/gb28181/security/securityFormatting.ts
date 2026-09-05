@@ -8,21 +8,40 @@ const securityReasonLabels: Record<string, string> = {
   unknown_invite_rate: "短窗口未授权 INVITE",
   unauthorized_invite_accumulation: "10 分钟累计 10 次未授权 INVITE",
   server_id_mismatch: "Server-ID 不匹配",
-  digest_failure: "Digest 鉴权失败",
+  digest_failure: "密码或鉴权配置错误，请检查配置后重新注册",
   nonce_invalid: "Nonce 无效",
   nonce_expired: "Nonce 已过期",
   nonce_replay: "Nonce 重放",
   nonce_stale: "Nonce 已陈旧",
+  register_id_invalid: "设备 ID 非 20 位数字，请检查配置后重新注册",
+  register_id_enumeration: "10 分钟内至少 10 个不同 REGISTER 事务，枚举至少 3 个不同非法设备 ID",
   unregistered_message: "未注册 MESSAGE",
   packet_too_large: "SIP 报文过大",
   connection_rate: "连接速率过高",
   manual_blacklist: "手动黑名单",
   active_ban: "已有自动封禁"
 };
+const securityActionLabels: Record<string, string> = {
+  allow: "已放行",
+  drop: "已拒绝",
+  sample: "已记录",
+  ban: "已拒绝并封禁",
+  unban: "已解除封禁",
+  expired: "已到期"
+};
+const highRiskSecurityReasons = new Set(["register_id_enumeration"]);
 const inviteRateScore = 20;
 
 export function formatSecurityReason(reason: string) {
   return securityReasonLabels[reason] || reason;
+}
+
+export function formatSecurityAction(action: string) {
+  return securityActionLabels[action] || action;
+}
+
+export function isHighRiskSecurityReason(reason: string) {
+  return highRiskSecurityReasons.has(reason) || reason.includes("nonce") || reason.includes("digest");
 }
 
 export function formatShortWindowInviteRule(window?: number, banScore?: number) {

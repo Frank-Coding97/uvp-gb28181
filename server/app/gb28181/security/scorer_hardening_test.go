@@ -15,7 +15,7 @@ func TestPersistentInviteProbeTriggersPermanentBan(t *testing.T) {
 			clock := &fakeClock{now: time.Unix(100, 0)}
 			s := NewScorer(DefaultPolicy(), clock, nil, []byte("test"))
 			for i := 0; i < 10; i++ {
-				observed, d, err := s.Observe(Event{SourceIP: "198.51.100.10", Transport: "UDP", Method: "INVITE", Reason: ReasonInviteRate, TransactionID: fmt.Sprint(i)})
+				observed, d, err := s.Observe(Event{SourceIP: "198.51.100.10", Transport: "TCP", Method: "INVITE", Reason: ReasonInviteRate, TransactionID: fmt.Sprint(i)})
 				require.NoError(t, err)
 				if i < 9 {
 					require.Nil(t, d)
@@ -38,7 +38,7 @@ func TestInviteRetransmissionsDoNotTriggerBan(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	s := NewScorer(DefaultPolicy(), clock, nil, []byte("test"))
 	for i := 0; i < 30; i++ {
-		_, d, err := s.Observe(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate, TransactionID: "same-transaction"})
+		_, d, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate, TransactionID: "same-transaction"})
 		require.NoError(t, err)
 		require.Nil(t, d)
 		clock.now = clock.now.Add(time.Second)
@@ -51,13 +51,13 @@ func TestInviteWindowExpiresAndIsBounded(t *testing.T) {
 	p.MaxEventKeys = 20
 	s := NewScorer(p, clock, nil, []byte("test"))
 	for i := 0; i < 40; i++ {
-		_, _, err := s.Observe(Event{SourceIP: fmt.Sprintf("198.51.100.%d", i+1), Method: "INVITE", Reason: ReasonInviteRate})
+		_, _, err := s.Observe(Event{Transport: "TCP", SourceIP: fmt.Sprintf("198.51.100.%d", i+1), Method: "INVITE", Reason: ReasonInviteRate})
 		require.NoError(t, err)
 	}
 	require.LessOrEqual(t, len(s.invites), 20)
 	require.LessOrEqual(t, len(s.buckets), 20)
 	clock.now = clock.now.Add(11 * time.Minute)
-	_, d, err := s.Observe(Event{SourceIP: "198.51.100.40", Method: "INVITE", Reason: ReasonInviteRate})
+	_, d, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.40", Method: "INVITE", Reason: ReasonInviteRate})
 	require.NoError(t, err)
 	require.Nil(t, d)
 	require.Len(t, s.invites, 1)
@@ -88,7 +88,7 @@ func TestRepeatedIdenticalSlowProbeStillTriggersWithinTenMinutes(t *testing.T) {
 		s := NewScorer(DefaultPolicy(), clock, nil, []byte("test"))
 		var ban *BanDecision
 		for clock.now.Sub(start) < 10*time.Minute {
-			_, d, err := s.Observe(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate, TransactionID: "same-probe"})
+			_, d, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate, TransactionID: "same-probe"})
 			require.NoError(t, err)
 			if d != nil {
 				ban = d

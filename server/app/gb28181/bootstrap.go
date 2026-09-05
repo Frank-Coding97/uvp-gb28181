@@ -576,9 +576,12 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 			gbroutes.SetSecurityRuntime(runtime)
 			return runtime
 		}
-		app.ZapLog.Warn("GB28181 安全持久化运行时装配失败,降级为内存 protect", zap.Error(err))
+		app.ZapLog.Warn("GB28181 安全持久化运行时装配失败,降级为内存 protect 并关闭新增IP自动封禁", zap.Error(err))
 	}
 	runtime := gbsecurity.NewRuntime(gbsecurity.DefaultPolicy(), clock, agent, secret)
+	// Without authenticated-device history an automatic source ban could lock
+	// out a legitimate shared egress. Admission still rejects unsafe packets.
+	runtime.SetAutoBanEnabled(false)
 	gbroutes.SetSecurityRuntime(runtime)
 	return runtime
 }

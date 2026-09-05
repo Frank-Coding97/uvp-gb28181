@@ -53,11 +53,11 @@ func TestSecurityHardeningBanDecisionIDsMustIdentifyEachDecision(t *testing.T) {
 	p.BanScore = 10
 	p.BanTTLs = []TTLStep{{Score: 10, TTL: time.Minute}}
 	s := NewScorer(p, clock, nil, []byte("review-test"))
-	_, first, err := s.Observe(Event{SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod})
+	_, first, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod})
 	require.NoError(t, err)
 	require.NotNil(t, first)
 	clock.now = clock.now.Add(2 * time.Minute)
-	_, second, err := s.Observe(Event{SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod})
+	_, second, err := s.Observe(Event{Transport: "TCP", SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod})
 	require.NoError(t, err)
 	require.NotNil(t, second)
 	require.NotEqual(t, first.DecisionID, second.DecisionID, "new ban must not overwrite expired decision")
@@ -69,7 +69,7 @@ func TestSecurityHardeningAggregateMustRecoverAfterCapacityReached(t *testing.T)
 	clock := &fakeClock{now: time.Unix(120, 0)}
 	r := NewRuntime(p, clock, nil, []byte("review-test"))
 	for i := 0; i < 3; i++ {
-		require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
+		require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
 		clock.now = clock.now.Add(time.Minute)
 	}
 	events := r.Events()
@@ -96,9 +96,9 @@ func TestSecurityHardeningRepeatBanMustRemainActiveInPersistentStore(t *testing.
 	store := NewGormStore(newSecurityStoreTestDB(t))
 	r := NewRuntime(p, clock, &fakeAgent{}, []byte("review-test"))
 	r.store = store
-	require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod}))
+	require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod}))
 	clock.now = clock.now.Add(2 * time.Minute)
-	require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod}))
+	require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Reason: ReasonUnknownMethod}))
 	require.True(t, r.Admission().IsBanned("198.51.100.10"))
 	active, err := store.ActiveBans(context.Background(), clock.now)
 	require.NoError(t, err)

@@ -17,24 +17,25 @@ interface TrendBucket {
 
 const PERIOD_CONFIG: Record<SecurityTrendPeriod, { windowMs: number; bucketMs: number; label: (time: number) => string }> = {
   "1h": { windowMs: 60 * 60 * 1000, bucketMs: 10 * 60 * 1000, label: formatClock },
-  "24h": { windowMs: 24 * 60 * 60 * 1000, bucketMs: 2 * 60 * 60 * 1000, label: formatClock },
+  "24h": { windowMs: 24 * 60 * 60 * 1000, bucketMs: 2 * 60 * 60 * 1000, label: time => `${formatDate(time)} ${formatClock(time)}` },
   "7d": { windowMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 24 * 60 * 60 * 1000, label: formatDate }
 };
 
 export function buildSecurityTrend(events: SecurityEventAggregate[], period: SecurityTrendPeriod, now = Date.now()): { points: SecurityTrendPoint[]; hasData: boolean } {
   const config = PERIOD_CONFIG[period];
-  const firstBucket = Math.floor((now - config.windowMs) / config.bucketMs) * config.bucketMs;
+  const windowStart = now - config.windowMs;
+  const firstBucket = Math.floor(windowStart / config.bucketMs) * config.bucketMs;
   const bucketCount = Math.ceil(config.windowMs / config.bucketMs);
   const buckets = new Map<number, TrendBucket>();
 
-  for (let index = 0; index < bucketCount; index += 1) {
+  for (let index = 0; index <= bucketCount; index += 1) {
     const start = firstBucket + index * config.bucketMs;
     buckets.set(start, { start, detected: 0, blocked: 0 });
   }
 
   for (const event of events) {
     const occurredAt = Date.parse(event.lastSeenAt || event.bucketAt);
-    if (!Number.isFinite(occurredAt) || occurredAt < firstBucket || occurredAt > now) continue;
+    if (!Number.isFinite(occurredAt) || occurredAt < windowStart || occurredAt > now) continue;
     const start = Math.floor(occurredAt / config.bucketMs) * config.bucketMs;
     const bucket = buckets.get(start);
     if (!bucket) continue;

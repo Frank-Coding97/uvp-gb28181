@@ -13,7 +13,7 @@ func TestPermanentBanManualUnbanResetsScores(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	r := NewRuntime(DefaultPolicy(), clock, &fakeAgent{}, []byte("test"))
 	for i := 0; i < 5; i++ {
-		require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
+		require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
 	}
 	first := r.Bans()[0].Decision
 	require.True(t, first.Permanent)
@@ -22,10 +22,10 @@ func TestPermanentBanManualUnbanResetsScores(t *testing.T) {
 	require.NoError(t, r.Unban(first.SourceIP, "operator"))
 	require.False(t, r.Admission().IsBanned(first.SourceIP))
 	for i := 0; i < 4; i++ {
-		require.NoError(t, r.Record(Event{SourceIP: first.SourceIP, Method: "INVITE", Reason: ReasonInviteRate}))
+		require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: first.SourceIP, Method: "INVITE", Reason: ReasonInviteRate}))
 		require.False(t, r.Admission().IsBanned(first.SourceIP))
 	}
-	require.NoError(t, r.Record(Event{SourceIP: first.SourceIP, Method: "INVITE", Reason: ReasonInviteRate}))
+	require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: first.SourceIP, Method: "INVITE", Reason: ReasonInviteRate}))
 	require.True(t, r.Admission().IsBanned(first.SourceIP))
 	require.NotEqual(t, first.DecisionID, r.Bans()[0].Decision.DecisionID)
 }
@@ -36,7 +36,7 @@ func TestPermanentBanRestoresAndLegacyBanKeepsExpiry(t *testing.T) {
 	r := NewRuntime(DefaultPolicy(), clock, agent, []byte("test"))
 	r.store = store
 	for i := 0; i < 5; i++ {
-		require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
+		require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
 	}
 	legacy := FirewallBan{Decision: BanDecision{DecisionID: "legacy", SourceIP: "198.51.100.11", CreatedAt: clock.now, TTL: time.Hour}, Status: BanActive, Origin: "auto"}
 	require.NoError(t, store.SaveBan(context.Background(), legacy))
@@ -68,9 +68,9 @@ func TestBanPersistenceFailureRetriesBeforeEnforcement(t *testing.T) {
 	r := NewRuntime(DefaultPolicy(), clock, agent, []byte("test"))
 	r.store = store
 	for i := 0; i < 4; i++ {
-		require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
+		require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
 	}
-	require.Error(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
+	require.Error(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
 	require.Empty(t, agent.banCalls)
 	require.True(t, r.Admission().IsBanned("198.51.100.10"))
 	store.fail = false
@@ -89,7 +89,7 @@ func TestPersisterBacklogIsBoundedOnDatabaseFailure(t *testing.T) {
 	p := &eventPersister{clock: &fakeClock{now: time.Now()}}
 	pending := map[string]EventAggregate{}
 	for i := 0; i < securityEventQueueCapacity+50; i++ {
-		p.aggregate(pending, Event{SourceIP: "198.51.100.10", Method: fmt.Sprint(i)})
+		p.aggregate(pending, Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: fmt.Sprint(i)})
 	}
 	require.Len(t, pending, securityEventQueueCapacity)
 	require.EqualValues(t, 50, p.dropped.Load())
@@ -101,7 +101,7 @@ func TestRepeatPermanentBanAtSameTimestampRestoresNewestActiveDecision(t *testin
 	agent := &fakeAgent{}
 	r := NewRuntime(DefaultPolicy(), clock, agent, []byte("test"))
 	r.store = store
-	probe := Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}
+	probe := Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}
 	for i := 0; i < 5; i++ {
 		require.NoError(t, r.Record(probe))
 	}
@@ -139,11 +139,15 @@ func TestRuntimeAdmissionLowRateInviteAndTrustedDevice(t *testing.T) {
 					out, err := r.Admission().Filter(props, packet)
 					require.NoError(t, err)
 					require.Empty(t, out)
-					require.Equal(t, i == 9, r.Admission().IsBanned("198.51.100.10"))
+					require.Equal(t, transport == "TCP" && i == 9, r.Admission().IsBanned("198.51.100.10"))
 					clock.now = clock.now.Add(interval)
 				}
-				require.Equal(t, ReasonInvitePersistent, r.Bans()[0].Decision.Reason)
-				require.True(t, r.Bans()[0].Decision.Permanent)
+				if transport == "TCP" {
+					require.Equal(t, ReasonInvitePersistent, r.Bans()[0].Decision.Reason)
+					require.True(t, r.Bans()[0].Decision.Permanent)
+				} else {
+					require.Empty(t, r.Bans())
+				}
 			})
 		}
 	}
@@ -179,7 +183,7 @@ func TestManualUnbanSerializesWithPendingAgentReconcile(t *testing.T) {
 	agent := &blockingReconcileAgent{entered: make(chan struct{}), release: make(chan struct{}), block: true}
 	r := NewRuntime(DefaultPolicy(), RealClock(), agent, []byte("test"))
 	for i := 0; i < 5; i++ {
-		require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
+		require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
 	}
 	syncDone := make(chan error, 1)
 	go func() { syncDone <- r.reconcileAgent() }()
@@ -199,7 +203,7 @@ func TestManualUnbanSerializesWithPendingAgentReconcile(t *testing.T) {
 func TestPolicyUpdatePreservesTCPFrameForPreviouslyUnbannedSource(t *testing.T) {
 	r := NewRuntime(DefaultPolicy(), RealClock(), &fakeAgent{}, []byte("test"))
 	for i := 0; i < 5; i++ {
-		require.NoError(t, r.Record(Event{SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
+		require.NoError(t, r.Record(Event{Transport: "TCP", SourceIP: "198.51.100.10", Method: "INVITE", Reason: ReasonInviteRate}))
 	}
 	require.NoError(t, r.Unban("198.51.100.10", "operator"))
 	props := admissionTCPProps(5060)

@@ -32,6 +32,7 @@ func TestRegisterTransactionLedgerEvictsOldCompletedEntries(t *testing.T) {
 		_, finish, execute := ledger.begin(key)
 		require.True(t, execute)
 		finish(registerTransactionResult{status: 200, reason: "OK"}, true)
+		clock.now = clock.now.Add(time.Millisecond)
 	}
 	_, finish, execute := ledger.begin("three")
 	require.True(t, execute)

@@ -169,7 +169,7 @@ func (c *SecurityController) UpdatePolicy(ctx *gin.Context) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "security provider unavailable"})
 		return
 	}
-	if err := c.provider.UpdatePolicy(policy, ctx.GetString("userId")); err != nil {
+	if err := c.provider.UpdatePolicy(policy, strconv.FormatUint(uint64(c.GetCurrentUserID(ctx)), 10)); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -181,7 +181,7 @@ func (c *SecurityController) Unban(ctx *gin.Context) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "security provider unavailable"})
 		return
 	}
-	if err := c.provider.Unban(ctx.Param("id"), ctx.GetString("userId")); err != nil {
+	if err := c.provider.Unban(ctx.Param("id"), strconv.FormatUint(uint64(c.GetCurrentUserID(ctx)), 10)); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -252,7 +252,7 @@ func (c *SecurityController) CreateAccessRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
-	if err := c.provider.CreateAccessRule(&rule, ctx.GetString("userId")); err != nil {
+	if err := c.provider.CreateAccessRule(&rule, strconv.FormatUint(uint64(c.GetCurrentUserID(ctx)), 10)); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -275,7 +275,7 @@ func (c *SecurityController) UpdateAccessRule(ctx *gin.Context) {
 		return
 	}
 	rule.ID = id
-	if err := c.provider.UpdateAccessRule(rule, ctx.GetString("userId")); err != nil {
+	if err := c.provider.UpdateAccessRule(rule, strconv.FormatUint(uint64(c.GetCurrentUserID(ctx)), 10)); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -292,7 +292,7 @@ func (c *SecurityController) DeleteAccessRule(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid access rule id"})
 		return
 	}
-	if err := c.provider.DeleteAccessRule(id, ctx.GetString("userId")); err != nil {
+	if err := c.provider.DeleteAccessRule(id, strconv.FormatUint(uint64(c.GetCurrentUserID(ctx)), 10)); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}

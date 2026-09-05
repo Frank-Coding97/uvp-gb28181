@@ -9,14 +9,24 @@ import (
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 )
 
 func newSecurityStoreTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", gormhelper.MaskNotDataError))
 	require.NoError(t, db.AutoMigrate(&securityEventRow{}, &securityBanRow{}, &securityPolicyRow{}, &securityAuditRow{}, &securityAccessRuleRow{}))
+	require.NoError(t, db.Exec(`CREATE TABLE IF NOT EXISTS gb_device (device_id TEXT, transport TEXT, ip TEXT, register_time DATETIME, register_expire_at DATETIME, deleted_at DATETIME)`).Error)
 	return db
+}
+
+func TestGormStoreMissingPolicyUsesDefaultsWithProductionQueryHook(t *testing.T) {
+	store := NewGormStore(newSecurityStoreTestDB(t))
+	policy, err := store.LoadPolicy(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, DefaultPolicy(), policy)
 }
 
 func TestGormStoreLoadsPolicyAndPersistsUpdateAudit(t *testing.T) {
