@@ -90,7 +90,7 @@ type deviceRow struct {
 	Alias        string
 	Manufacturer string
 	Model        string
-	Status       int8
+	Status       *int8
 }
 
 type channelRow struct {
@@ -100,7 +100,7 @@ type channelRow struct {
 	Alias        string
 	Manufacturer string
 	Model        string
-	Status       int8
+	Status       *int8
 	PTZType      int8
 }
 
@@ -313,6 +313,9 @@ func normalizeDeviceOptions(options DeviceListOptions) (DeviceListOptions, error
 	if options.PageSize == 0 {
 		options.PageSize = 20
 	}
+	if !validPageOffset(options.Page, options.PageSize) {
+		return DeviceListOptions{}, ErrInvalidListOptions
+	}
 	return options, nil
 }
 
@@ -326,7 +329,18 @@ func normalizeChannelOptions(options ChannelListOptions) (ChannelListOptions, er
 	if options.PageSize == 0 {
 		options.PageSize = 20
 	}
+	if !validPageOffset(options.Page, options.PageSize) {
+		return ChannelListOptions{}, ErrInvalidListOptions
+	}
 	return options, nil
+}
+
+func validPageOffset(page, pageSize int) bool {
+	if page < 1 || pageSize < 1 {
+		return false
+	}
+	maxInt := int(^uint(0) >> 1)
+	return page-1 <= maxInt/pageSize
 }
 
 func validStatus(status string) bool {
@@ -353,8 +367,11 @@ func channelFromRow(row channelRow) Channel {
 	return Channel{DeviceID: row.DeviceID, ChannelID: row.ChannelID, Name: row.Name, Alias: row.Alias, Manufacturer: row.Manufacturer, Model: row.Model, Status: normalizedStatus(row.Status), PTZType: row.PTZType}
 }
 
-func normalizedStatus(status int8) string {
-	switch status {
+func normalizedStatus(status *int8) string {
+	if status == nil {
+		return "unknown"
+	}
+	switch *status {
 	case 1:
 		return "online"
 	case 0:

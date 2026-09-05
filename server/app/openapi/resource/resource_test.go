@@ -172,6 +172,39 @@ func TestOpenAPIResourceListPaginationAndStatusWhitelist(t *testing.T) {
 	assert.ErrorIs(t, err, ErrInvalidListOptions)
 }
 
+func TestOpenAPIResourcePreservesUnknownStatusAndRejectsOffsetOverflow(t *testing.T) {
+	db := newResourceTestDB(t)
+	svc := New(db)
+	ctx := context.Background()
+
+	require.NoError(t, db.Exec("UPDATE gb_device SET status = NULL WHERE device_id = ?", resourceDevice).Error)
+	require.NoError(t, db.Exec("UPDATE gb_channel SET status = NULL WHERE device_id = ? AND channel_id = ?", resourceDevice, resourceChannel).Error)
+
+	device, err := svc.GetDevice(ctx, resourceOwnerDept, resourceDevice)
+	require.NoError(t, err)
+	assert.Equal(t, "unknown", device.Status)
+	devices, err := svc.ListDevices(ctx, resourceOwnerDept, DeviceListOptions{Status: "unknown"})
+	require.NoError(t, err)
+	require.Len(t, devices.Items, 1)
+	assert.Equal(t, resourceDevice, devices.Items[0].DeviceID)
+	assert.Equal(t, "unknown", devices.Items[0].Status)
+
+	channel, err := svc.GetChannel(ctx, resourceOwnerDept, resourceDevice, resourceChannel)
+	require.NoError(t, err)
+	assert.Equal(t, "unknown", channel.Status)
+	channels, err := svc.ListChannels(ctx, resourceOwnerDept, resourceDevice, ChannelListOptions{Status: "unknown"})
+	require.NoError(t, err)
+	require.Len(t, channels.Items, 1)
+	assert.Equal(t, resourceChannel, channels.Items[0].ChannelID)
+	assert.Equal(t, "unknown", channels.Items[0].Status)
+
+	maxInt := int(^uint(0) >> 1)
+	_, err = svc.ListDevices(ctx, resourceOwnerDept, DeviceListOptions{Page: maxInt, PageSize: 100})
+	assert.ErrorIs(t, err, ErrInvalidListOptions)
+	_, err = svc.ListChannels(ctx, resourceOwnerDept, resourceDevice, ChannelListOptions{Page: maxInt, PageSize: 100})
+	assert.ErrorIs(t, err, ErrInvalidListOptions)
+}
+
 func TestOpenAPIResourceSQLRechecksCurrentOwner(t *testing.T) {
 	db := newResourceTestDB(t)
 	svc := New(db)

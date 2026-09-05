@@ -82,6 +82,48 @@ func TestOpenAPIMetadataControllersExposeAllSixOperations(t *testing.T) {
 	}
 }
 
+func TestOpenAPIMetadataControllersRejectQueryOnGetAndStatus(t *testing.T) {
+	db := newControllerTestDB(t)
+	svc := resource.New(db)
+	resolver := func(*gin.Context) (uint, bool) { return 10, true }
+	deviceController := NewDeviceController(svc, resolver)
+	channelController := NewChannelController(svc, resolver)
+	r := gin.New()
+	r.GET("/devices/:deviceId", deviceController.Get)
+	r.GET("/devices/:deviceId/status", deviceController.Status)
+	r.GET("/devices/:deviceId/channels/:channelId", channelController.Get)
+	r.GET("/devices/:deviceId/channels/:channelId/status", channelController.Status)
+
+	paths := []string{
+		"/devices/34020000002000000010?ownerDeptId=10",
+		"/devices/34020000002000000010/status?userId=backend-user",
+		"/devices/34020000002000000010/channels/37011200001310000010?ownerDeptId=10",
+		"/devices/34020000002000000010/channels/37011200001310000010/status?userId=backend-user",
+	}
+	for _, path := range paths {
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
+		assert.Equal(t, http.StatusBadRequest, resp.Code, path)
+		assert.Equal(t, "INVALID_REQUEST", decodeControllerResponse(t, resp).Code, path)
+	}
+}
+
+func TestOpenAPIMetadataControllersDoNotTrustRequestIDHeader(t *testing.T) {
+	db := newControllerTestDB(t)
+	svc := resource.New(db)
+	controller := NewDeviceController(svc, func(*gin.Context) (uint, bool) { return 10, true })
+	r := gin.New()
+	r.GET("/devices/:deviceId", controller.Get)
+
+	req := httptest.NewRequest(http.MethodGet, "/devices/34020000002000000010", nil)
+	req.Header.Set("X-Request-Id", "attacker-controlled")
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+
+	assert.Equal(t, http.StatusOK, resp.Code)
+	assert.Empty(t, decodeControllerResponse(t, resp).RequestID)
+}
+
 func TestOpenAPIMetadataControllersExposeWhitelistAndUniformNotFound(t *testing.T) {
 	db := newControllerTestDB(t)
 	svc := resource.New(db)

@@ -54,6 +54,9 @@ func (dc *DeviceController) Get(c *gin.Context) {
 		writeOpenAPIError(c, http.StatusForbidden, "AUTH_REQUIRED", "authentication required")
 		return
 	}
+	if rejectNonListQuery(c) {
+		return
+	}
 	device, err := dc.service.GetDevice(c.Request.Context(), ownerDeptID, c.Param("deviceId"))
 	if err != nil {
 		writeResourceError(c, err)
@@ -66,6 +69,9 @@ func (dc *DeviceController) Status(c *gin.Context) {
 	ownerDeptID, ok := dc.trustedOwner(c)
 	if !ok {
 		writeOpenAPIError(c, http.StatusForbidden, "AUTH_REQUIRED", "authentication required")
+		return
+	}
+	if rejectNonListQuery(c) {
 		return
 	}
 	status, err := dc.service.GetDeviceStatus(c.Request.Context(), ownerDeptID, c.Param("deviceId"))
@@ -150,6 +156,14 @@ func positiveQueryInt(value string, defaultValue int) (int, error) {
 	return parsed, nil
 }
 
+func rejectNonListQuery(c *gin.Context) bool {
+	if c.Request != nil && c.Request.URL != nil && c.Request.URL.RawQuery == "" {
+		return false
+	}
+	writeOpenAPIError(c, http.StatusBadRequest, "INVALID_REQUEST", "invalid request")
+	return true
+}
+
 type openAPIResponse struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
@@ -183,5 +197,5 @@ func requestID(c *gin.Context) string {
 	if value := c.GetString("requestId"); value != "" {
 		return value
 	}
-	return c.GetHeader("X-Request-Id")
+	return ""
 }

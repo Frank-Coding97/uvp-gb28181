@@ -52,6 +52,9 @@ func (cc *ChannelController) Get(c *gin.Context) {
 		writeOpenAPIError(c, http.StatusForbidden, "AUTH_REQUIRED", "authentication required")
 		return
 	}
+	if rejectNonListQuery(c) {
+		return
+	}
 	result, err := cc.service.GetChannel(c.Request.Context(), ownerDeptID, c.Param("deviceId"), c.Param("channelId"))
 	if err != nil {
 		writeResourceError(c, err)
@@ -64,6 +67,9 @@ func (cc *ChannelController) Status(c *gin.Context) {
 	ownerDeptID, ok := cc.trustedOwner(c)
 	if !ok {
 		writeOpenAPIError(c, http.StatusForbidden, "AUTH_REQUIRED", "authentication required")
+		return
+	}
+	if rejectNonListQuery(c) {
 		return
 	}
 	result, err := cc.service.GetChannelStatus(c.Request.Context(), ownerDeptID, c.Param("deviceId"), c.Param("channelId"))
