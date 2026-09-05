@@ -63,7 +63,7 @@
           </template>
           <template v-else-if="widget.id === 'media-rate'">
             <CardTitle icon="rate" title="媒体实时速率" /><div class="rate-head"><strong>{{ bytes(mediaRate) }}/s</strong><span>全部媒体节点 · 5 秒采样</span></div>
-            <MediaRateArea :values="mediaRateTrend" color="var(--uvp-brand)" />
+            <MediaRateArea :samples="mediaRateTrend" color="var(--uvp-brand)" />
           </template>
           <template v-else-if="widget.id === 'media-node-health'">
             <CardTitle icon="health" title="媒体节点健康" /><div class="health-content"><div class="health-total"><strong>{{ healthyNodes }}/{{ mediaOverview?.nodes.length ?? 0 }}</strong><span>节点正常</span></div>
@@ -122,7 +122,8 @@ type TrafficDirection = "upstream" | "downstream";
 const trafficDirection = ref<TrafficDirection>("upstream");
 const drilldown = useDashboardDrilldown();
 const mediaLedgerVisible = ref(false), mediaLedgerKind = ref<MediaRuntimeLedgerKind>("streams");
-const playSuccessTrend = ref<number[]>([]), mediaRateTrend = ref<number[]>([]), upstreamTrafficTrend = ref<number[]>([]), downstreamTrafficTrend = ref<number[]>([]);
+interface MediaRateSample { value: number; sampledAt: number; }
+const playSuccessTrend = ref<number[]>([]), mediaRateTrend = ref<MediaRateSample[]>([]), upstreamTrafficTrend = ref<number[]>([]), downstreamTrafficTrend = ref<number[]>([]);
 let grid: DashboardGridHandle | null = null, timer: ReturnType<typeof setInterval> | null = null, clockTimer: ReturnType<typeof setInterval> | null = null;
 
 const visibleWidgets = computed(() => layout.value.widgets.filter(item => item.visible));
@@ -195,7 +196,11 @@ async function refreshData() {
   const results = await Promise.allSettled([fetchSipDashboardSnapshot(), getZLMOverview(), listDevices({ page: 1, pageSize: 1 }), listChannels({ page: 1, pageSize: 1 }), listChannels({ status: "online", page: 1, pageSize: 1 }), fetchSipPlatformInfo(), getHomeDashboardSummary(["aggregate"])]);
   const [sip, overview, devicePage, channelPage, onlineChannels, platform, summary] = results;
   if (sip.status === "fulfilled") sipSnapshot.value = sip.value.data;
-  if (overview.status === "fulfilled") { mediaOverview.value = overview.value.data; mediaRateTrend.value = [...mediaRateTrend.value.slice(-23), mediaRate.value]; }
+  if (overview.status === "fulfilled") {
+    mediaOverview.value = overview.value.data;
+    const sampledAt = Date.now(), cutoff = sampledAt - 5 * 60 * 1000;
+    mediaRateTrend.value = [...mediaRateTrend.value, { value: mediaRate.value, sampledAt }].filter(sample => sample.sampledAt >= cutoff);
+  }
   if (devicePage.status === "fulfilled") devices.value = { total: devicePage.value.data.total ?? 0, online: devicePage.value.data.onlineTotal ?? 0 };
   if (channelPage.status === "fulfilled" && onlineChannels.status === "fulfilled") channels.value = { total: channelPage.value.data.total ?? 0, online: onlineChannels.value.data.total ?? 0 };
   if (platform.status === "fulfilled") platformInfo.value = platform.value.data;

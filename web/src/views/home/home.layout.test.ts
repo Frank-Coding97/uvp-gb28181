@@ -91,7 +91,7 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("下行");
     expect(source).toContain("role=\"tablist\"");
     expect(source).toContain("aria-selected");
-    expect(source).toContain("<MediaRateArea :values=\"mediaRateTrend\"");
+    expect(source).toContain("<MediaRateArea :samples=\"mediaRateTrend\"");
     expect(source).not.toContain("{{ bytes(mediaRate) }}<small>/s</small>");
     expect(source).not.toContain("class=\"bars\"");
   });

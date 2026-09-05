@@ -8,6 +8,8 @@ const chart = vi.hoisted(() => ({
   updated: 0,
   resized: 0,
   released: 0,
+  crosshairActive: false,
+  layoutStart: null as (() => void) | null,
   specs: [] as Array<Record<string, unknown>>,
   instances: [] as Array<{ release: () => void }>
 }));
@@ -24,7 +26,12 @@ vi.mock("@visactor/vchart", () => ({
       chart.rendered += 1;
     }
 
+    on(event: string, callback: () => void) {
+      if (event === "layoutStart") chart.layoutStart = callback;
+    }
+
     updateSpecSync(spec: Record<string, unknown>) {
+      if (chart.crosshairActive) throw new Error("stale crosshair references previous series data");
       chart.updated += 1;
       chart.specs.push(spec);
     }
@@ -32,6 +39,12 @@ vi.mock("@visactor/vchart", () => ({
     resize() {
       chart.resized += 1;
     }
+
+    getComponents() {
+      return [{ hideCrosshair: () => { chart.crosshairActive = false; } }];
+    }
+
+    hideTooltip() { return true; }
 
     release() {
       chart.released += 1;
@@ -71,6 +84,8 @@ describe("MediaVChart", () => {
     chart.updated = 0;
     chart.resized = 0;
     chart.released = 0;
+    chart.crosshairActive = false;
+    chart.layoutStart = null;
     chart.specs.length = 0;
     chart.instances.length = 0;
     ResizeObserverStub.latest = undefined;
@@ -101,6 +116,18 @@ describe("MediaVChart", () => {
     wrapper.unmount();
     expect(chart.released).toBe(1);
     expect(ResizeObserverStub.latest?.disconnected).toBe(true);
+  });
+
+  it("clears hovered crosshair state before replacing series data or theme colors", async () => {
+    const wrapper = mount(MediaVChart, { props: { title: "实时曲线", spec: { type: "area", color: ["#2563eb"] } } });
+    chart.crosshairActive = true;
+    await wrapper.setProps({ spec: { type: "area", color: ["#60a5fa"] } });
+    expect(chart.crosshairActive).toBe(false);
+    expect(chart.updated).toBe(1);
+    chart.crosshairActive = true;
+    chart.layoutStart?.();
+    expect(chart.crosshairActive).toBe(false);
+    wrapper.unmount();
   });
 
   it("honors chart-specific rolling motion and turns it off for reduced-motion", () => {

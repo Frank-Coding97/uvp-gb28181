@@ -105,8 +105,17 @@ function observeResize() {
 function mountChart(spec: MediaChartSpec) {
   if (!chartHost.value) return;
   chart = new VChart(normalizedSpec(spec) as never, { dom: chartHost.value, autoFit: false });
+  chart.on("layoutStart", clearHoverState);
   chart.renderSync();
   observeResize();
+}
+
+function clearHoverState() {
+  if (!chart) return;
+  chart.hideTooltip();
+  for (const component of chart.getComponents()) {
+    if ("hideCrosshair" in component && typeof component.hideCrosshair === "function") component.hideCrosshair();
+  }
 }
 
 function syncChart() {
@@ -123,6 +132,8 @@ function syncChart() {
   }
   // A stale watcher should never update a released chart after deactivation.
   if (version !== syncVersion || !props.active) return;
+  // Crosshair caches reference the old series while updateSpec rebuilds its data.
+  clearHoverState();
   chart.updateSpecSync(nextSpec as never, true);
   chart.renderSync();
   observeResize();

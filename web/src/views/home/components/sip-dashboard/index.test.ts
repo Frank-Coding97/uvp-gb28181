@@ -2,6 +2,8 @@ import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SipDashboardCard from "./index.vue";
 
+vi.mock("../dashboard/DashboardChart.vue", () => ({ default: { template: "<div />" } }));
+
 const apiMocks = vi.hoisted(() => ({
   fetchSnapshot: vi.fn()
 }));

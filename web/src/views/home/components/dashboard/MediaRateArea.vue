@@ -1,58 +1,139 @@
 <template>
   <div class="media-rate-area">
     <div class="media-rate-area__plot">
-      <div class="media-rate-area__y-axis"><span>{{ yAxisLabels[0] }}</span><span>{{ yAxisLabels[1] }}</span><span>{{ yAxisLabels[2] }}</span></div>
-      <svg viewBox="0 0 100 36" preserveAspectRatio="none" aria-label="媒体实时速率趋势">
-        <defs>
-          <linearGradient :id="gradientId" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" :stop-color="color" stop-opacity="0.3" />
-            <stop offset="100%" :stop-color="color" stop-opacity="0.02" />
-          </linearGradient>
-        </defs>
-        <path v-for="y in [8, 20, 32]" :key="y" class="media-rate-area__grid" :d="`M 0 ${y} L 100 ${y}`" />
-        <path class="media-rate-area__fill" :d="areaPath" :fill="`url(#${gradientId})`" />
-        <path class="media-rate-area__line" :d="linePath" :stroke="color" />
-        <circle v-if="points.length" class="media-rate-area__point" :cx="points.at(-1)?.x" :cy="points.at(-1)?.y" r="1.25" :fill="color" />
-      </svg>
+      <DashboardChart
+        v-if="props.samples.length"
+        :spec="chartSpec"
+        title="媒体实时速率"
+        :summary="summary"
+      />
+      <div v-else class="media-rate-area__empty" role="status">暂无采样</div>
     </div>
-    <div class="media-rate-area__x-axis"><span>2 分钟前</span><span>1 分钟前</span><span>现在</span></div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, getCurrentInstance } from "vue";
+import { computed } from "vue";
+import type { ChartDatum, MediaChartSpec } from "@/views/gb28181/zlm/workbench/chart/overviewChart";
+import DashboardChart from "./DashboardChart.vue";
 
-const props = withDefaults(defineProps<{ values: number[]; color?: string }>(), {
+interface MediaRateSample {
+  value: number;
+  sampledAt: number;
+}
+
+const props = withDefaults(defineProps<{ samples: MediaRateSample[]; color?: string }>(), {
   color: "var(--uvp-brand)"
 });
-const gradientId = `media-rate-area-${getCurrentInstance()?.uid ?? 0}`;
-const axisMax = computed(() => props.values.length ? Math.max(...props.values, 1) : null);
-const yAxisLabels = computed(() => axisMax.value == null ? ["--", "--", "0 B/s"] : [formatRate(axisMax.value), formatRate(axisMax.value / 2), "0 B/s"]);
 
-const points = computed(() => {
-  if (!props.values.length) return [{ x: 0, y: 32 }, { x: 100, y: 32 }];
-  const max = Math.max(...props.values, 1);
-  const step = 100 / Math.max(props.values.length - 1, 1);
-  const values = props.values.map((value, index) => ({ x: index * step, y: 32 - Math.max(0, value) / max * 26 }));
-  return values.length === 1 ? [{ x: 0, y: values[0].y }, { x: 100, y: values[0].y }] : values;
+const WINDOW_MS = 5 * 60 * 1000;
+const DATA_ID = "dashboard-media-rate";
+
+const latestSampledAt = computed(() => props.samples.at(-1)?.sampledAt ?? null);
+const windowStart = computed(() => latestSampledAt.value === null ? null : latestSampledAt.value - WINDOW_MS);
+const axisMax = computed(() => props.samples.length ? Math.max(1, ...props.samples.map(sample => sample.value)) : 1);
+const values = computed<ChartDatum[]>(() => props.samples.map(sample => ({
+  sampledAt: sample.sampledAt,
+  value: sample.value,
+  metric: "实时速率"
+})));
+const summary = computed(() => props.samples.length ? `最近 5 分钟已记录 ${props.samples.length} 个采样点` : "暂无采样");
+
+const chartSpec = computed<MediaChartSpec>(() => {
+  const latest = latestSampledAt.value;
+  const start = windowStart.value;
+  const timeDomain = start === null || latest === null ? {} : { min: start, max: latest };
+  return {
+    type: "area",
+    background: "transparent",
+    color: [props.color],
+    data: [{ id: DATA_ID, values: values.value }],
+    xField: "sampledAt",
+    yField: "value",
+    seriesField: "metric",
+    line: { style: { curveType: "monotone", stroke: props.color } },
+    area: {
+      style: {
+        curveType: "monotone",
+        fillOpacity: 0.28,
+        fill: {
+          gradient: "linear",
+          x0: 0,
+          y0: 0,
+          x1: 0,
+          y1: 1,
+          stops: [{ offset: 0, color: props.color }, { offset: 1, color: "transparent" }]
+        }
+      }
+    },
+    point: {
+      visible: true,
+      style: {
+        size: (datum: ChartDatum) => datum.sampledAt === latest ? 6 : 0,
+        fill: props.color,
+        stroke: "var(--uvp-panel-bg)",
+        lineWidth: 1
+      },
+      state: { dimension_hover: { size: 6.4 } }
+    },
+    invalidType: "break",
+    axes: [
+      {
+        orient: "left",
+        type: "linear",
+        min: 0,
+        max: axisMax.value,
+        nice: false,
+        label: { formatMethod: (value: number) => formatRate(value), autoHide: true, style: { fill: "var(--uvp-text-tertiary)" } },
+        grid: { visible: true, style: { stroke: "var(--uvp-panel-border)" } },
+        domainLine: { visible: false },
+        tick: { visible: false, tickCount: 3 }
+      },
+      {
+        orient: "bottom",
+        type: "time",
+        nice: false,
+        ...timeDomain,
+        layers: [{ tickCount: 3, timeFormat: "%H:%M", timeFormatMode: "local" }],
+        label: { autoHide: false, autoRotate: false, style: { fill: "var(--uvp-text-tertiary)" } },
+        grid: { visible: false },
+        domainLine: { visible: false },
+        tick: { visible: false }
+      }
+    ],
+    legends: { visible: false },
+    tooltip: {
+      activeType: "dimension",
+      dimension: {
+        title: {
+          value: { field: "sampledAt" },
+          valueTimeFormat: "%H:%M:%S",
+          valueTimeFormatMode: "local"
+        },
+        content: [{
+          key: "实时速率",
+          value: (datum?: ChartDatum) => formatRate(datum?.value)
+        }]
+      }
+    },
+    crosshair: { xField: { visible: true, line: { type: "line", style: { stroke: "var(--uvp-text-tertiary)", lineDash: [2, 2] } } } },
+    padding: { left: 8, right: 12, top: 8, bottom: 8 },
+    animationAppear: { duration: 220 },
+    animationUpdate: { duration: 220, easing: "linear" }
+  };
 });
 
-const linePath = computed(() => points.value.reduce((path, point, index, values) => {
-  if (!index) return `M ${point.x} ${point.y}`;
-  const previous = values[index - 1];
-  const middle = (previous.x + point.x) / 2;
-  return `${path} C ${middle} ${previous.y}, ${middle} ${point.y}, ${point.x} ${point.y}`;
-}, ""));
-const areaPath = computed(() => `${linePath.value} L 100 36 L 0 36 Z`);
-
-function formatRate(value: number): string {
-  if (value >= 1024 ** 3) return `${(value / 1024 ** 3).toFixed(1)} GB/s`;
-  if (value >= 1024 ** 2) return `${(value / 1024 ** 2).toFixed(1)} MB/s`;
-  if (value >= 1024) return `${(value / 1024).toFixed(1)} KB/s`;
-  return `${value.toFixed(0)} B/s`;
+function formatRate(value: unknown): string {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return "—";
+  const rate = Math.max(0, numeric);
+  if (rate >= 1024 ** 3) return `${(rate / 1024 ** 3).toFixed(1)} GB/s`;
+  if (rate >= 1024 ** 2) return `${(rate / 1024 ** 2).toFixed(1)} MB/s`;
+  if (rate >= 1024) return `${(rate / 1024).toFixed(1)} KB/s`;
+  return `${rate.toFixed(rate > 0 && rate < 1 ? 1 : 0)} B/s`;
 }
 </script>
 
 <style scoped>
-.media-rate-area{display:flex;flex-direction:column;height:calc(100% - 74px);min-height:150px;overflow:hidden}.media-rate-area__plot{display:grid;flex:1;grid-template-rows:minmax(0,1fr);grid-template-columns:54px minmax(0,1fr);min-height:0;overflow:hidden}.media-rate-area__plot svg{width:100%;height:100%;min-height:0;overflow:hidden}.media-rate-area__y-axis{display:flex;flex-direction:column;justify-content:space-between;min-height:0;padding:1px 8px 9px 0;font-size:10px;color:var(--uvp-text-tertiary);text-align:right;white-space:nowrap}.media-rate-area__grid{fill:none;stroke:var(--uvp-panel-border);stroke-width:.45;vector-effect:non-scaling-stroke}.media-rate-area__fill,.media-rate-area__line{pointer-events:none}.media-rate-area__line{fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.media-rate-area__point{stroke:var(--uvp-panel-bg);stroke-width:1;vector-effect:non-scaling-stroke}.media-rate-area__x-axis{display:flex;justify-content:space-between;padding-left:54px;margin-top:5px;font-size:10px;color:var(--uvp-text-tertiary)}
+.media-rate-area{display:flex;flex-direction:column;height:calc(100% - 74px);min-height:150px;min-width:0;overflow:hidden}.media-rate-area__plot{display:grid;flex:1;grid-template-rows:minmax(0,1fr);min-height:0;overflow:hidden}.media-rate-area__plot :deep(.dashboard-chart){width:100%;height:100%;min-height:0}.media-rate-area__empty{display:flex;align-items:center;justify-content:center;min-height:150px;color:var(--uvp-text-tertiary);font-size:12px}
 </style>

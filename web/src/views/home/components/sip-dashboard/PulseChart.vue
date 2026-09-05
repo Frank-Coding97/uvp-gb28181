@@ -12,243 +12,67 @@
         <span><i class="pulse__legend-line pulse__legend-line--red" />失败率</span>
       </div>
     </div>
-    <div
-      class="pulse__chart"
-      @mousemove="onMove"
-      @mouseleave="hoverIdx = -1"
-    >
-      <svg
-        v-if="hasData"
-        ref="svgEl"
-        class="pulse__svg"
-        :viewBox="`0 0 ${W} ${H}`"
-        preserveAspectRatio="none"
-      >
-        <!-- 顶蓝到底透明的渐变,给面积一点呼吸感 -->
-        <defs>
-          <linearGradient id="pulseMsgGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="var(--uvp-brand)" stop-opacity="0.28" />
-            <stop offset="100%" stop-color="var(--uvp-brand)" stop-opacity="0.02" />
-          </linearGradient>
-        </defs>
-
-        <!-- 异常时间窗背景 -->
-        <rect
-          v-for="(win, i) in abnormalRects"
-          :key="i"
-          :x="win.x"
-          y="0"
-          :width="win.w"
-          :height="H"
-          fill="var(--uvp-danger-soft)"
-        />
-        <!-- 主脉搏面积(消息数/分钟) -->
-        <polygon
-          :points="msgArea"
-          fill="url(#pulseMsgGradient)"
-          stroke="none"
-        />
-        <!-- 面积顶边(描边,让轮廓清晰) -->
-        <polyline
-          :points="msgLine"
-          fill="none"
-          stroke="var(--uvp-brand)"
-          stroke-width="1.5"
-          opacity="0.9"
-          vector-effect="non-scaling-stroke"
-        />
-        <!-- 失败率虚线(不填充,保持对比) -->
-        <polyline
-          :points="failLine"
-          fill="none"
-          stroke="var(--uvp-danger)"
-          stroke-width="1"
-          stroke-dasharray="2,2"
-          opacity="0.7"
-          vector-effect="non-scaling-stroke"
-        />
-        <!-- 当前点 — 描白边避免被面积遮 -->
-        <circle
-          v-if="lastPt"
-          :cx="lastPt.x"
-          :cy="lastPt.y"
-          r="2.8"
-          fill="var(--uvp-brand)"
-          stroke="var(--uvp-panel-bg)"
-          stroke-width="1"
-        />
-        <!-- hover 竖辅助线 + 高亮圆点 -->
-        <template v-if="hoverPt">
-          <line
-            :x1="hoverPt.x"
-            y1="0"
-            :x2="hoverPt.x"
-            :y2="H"
-            stroke="var(--uvp-text-tertiary)"
-            stroke-width="1"
-            stroke-dasharray="2,2"
-            vector-effect="non-scaling-stroke"
-          />
-          <circle :cx="hoverPt.x" :cy="hoverPt.y" r="3.2" fill="var(--uvp-brand)" stroke="var(--uvp-panel-bg)" stroke-width="1.2" />
-        </template>
-      </svg>
+    <div class="pulse__chart">
+      <DashboardChart v-if="hasData" :spec="spec" title="SIP 信令脉搏" :summary="`峰值 ${maxMsg}，当前 ${currentMsg} 条/分钟`" />
       <div v-else class="pulse__empty">暂无信令</div>
-
-      <!-- hover tooltip -->
-      <div
-        v-if="hoverIdx >= 0 && hoverInfo"
-        class="pulse__tip"
-        :style="tipStyle"
-      >
-        <div class="pulse__tip-time">{{ hoverInfo.time }}</div>
-        <div class="pulse__tip-row">
-          <i class="pulse__tip-dot pulse__tip-dot--blue" />
-          消息 <b>{{ hoverInfo.msg }}</b> 条/分钟
-        </div>
-        <div class="pulse__tip-row">
-          <i class="pulse__tip-dot pulse__tip-dot--red" />
-          失败率 <b>{{ hoverInfo.failPct }}</b>
-        </div>
-      </div>
     </div>
     <div class="pulse__hint">采样 1m · 仅显示 GB28181 信令</div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import type { PulseSample, AbnormalWindow } from "@/api/gb28181";
+import type { MediaChartSpec } from "@/views/gb28181/zlm/workbench/chart/overviewChart";
+import DashboardChart from "../dashboard/DashboardChart.vue";
 
-interface Props {
-  samples: PulseSample[];
-  abnormalWindows: AbnormalWindow[];
-}
-const props = defineProps<Props>();
+const props = defineProps<{ samples: PulseSample[]; abnormalWindows: AbnormalWindow[] }>();
+const hasData = computed(() => props.samples.some(sample => sample.msgPerSec > 0 || sample.failPct > 0));
+const maxMsg = computed(() => Math.max(1, ...props.samples.map(sample => sample.msgPerSec)));
+const currentMsg = computed(() => props.samples.at(-1)?.msgPerSec ?? 0);
 
-const W = 600;
-const H = 90;
-
-const svgEl = ref<SVGSVGElement | null>(null);
-const hoverIdx = ref<number>(-1);
-const hoverX = ref<number>(0);
-
-const hasData = computed((): boolean =>
-  props.samples.some((s) => s.msgPerSec > 0 || s.failPct > 0)
-);
-
-const maxMsg = computed((): number => {
-  return Math.max(1, ...props.samples.map((s) => s.msgPerSec));
-});
-
-const currentMsg = computed((): number => {
-  if (props.samples.length === 0) return 0;
-  return props.samples[props.samples.length - 1].msgPerSec;
-});
-
-interface Pt {
-  x: number;
-  y: number;
+interface PulseDatum { time: number; messages: number; failure: number; }
+function timeLabel(datum: PulseDatum): string {
+  return new Date(datum.time).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
-const points = computed((): { msg: Pt[]; fail: Pt[] } => {
-  const n = props.samples.length;
-  if (n === 0) return { msg: [], fail: [] };
-  const xStep = n > 1 ? W / (n - 1) : W;
-  const msg: Pt[] = [];
-  const fail: Pt[] = [];
-  for (let i = 0; i < n; i++) {
-    const s = props.samples[i];
-    const x = i * xStep;
-    msg.push({ x, y: H - (s.msgPerSec / maxMsg.value) * (H - 8) - 4 });
-    const failNorm = Math.min(1, s.failPct / 200);
-    fail.push({ x, y: H - failNorm * 8 - 2 });
-  }
-  return { msg, fail };
-});
-
-const msgLine = computed((): string =>
-  points.value.msg.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")
-);
-
-// 面积多边形:折线 + 右下角 + 左下角,闭合包面积
-const msgArea = computed((): string => {
-  const m = points.value.msg;
-  if (m.length === 0) return "";
-  const line = m.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
-  const right = m[m.length - 1].x.toFixed(1);
-  const left = m[0].x.toFixed(1);
-  return `${line} ${right},${H} ${left},${H}`;
-});
-
-const failLine = computed((): string =>
-  points.value.fail.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ")
-);
-
-const lastPt = computed((): Pt | null => {
-  const m = points.value.msg;
-  return m.length ? m[m.length - 1] : null;
-});
-
-const hoverPt = computed((): Pt | null => {
-  if (hoverIdx.value < 0 || hoverIdx.value >= points.value.msg.length) return null;
-  return points.value.msg[hoverIdx.value];
-});
-
-interface HoverInfo {
-  time: string;
-  msg: number;
-  failPct: string;
-}
-
-const hoverInfo = computed((): HoverInfo | null => {
-  if (hoverIdx.value < 0 || hoverIdx.value >= props.samples.length) return null;
-  const s = props.samples[hoverIdx.value];
-  const d = new Date(s.t * 1000);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  // failPct 是千分位整数,转成百分号显示
-  const fpStr = s.failPct === 0 ? "0%" : `${(s.failPct / 10).toFixed(1)}%`;
+const spec = computed<MediaChartSpec>(() => {
+  const values = props.samples.map(sample => ({ time: sample.t * 1000, messages: sample.msgPerSec, failure: sample.failPct / 10 }));
+  const first = values[0]?.time ?? 0;
+  const last = values.at(-1)?.time ?? first;
   return {
-    time: `${hh}:${mm}`,
-    msg: s.msgPerSec,
-    failPct: fpStr
+    type: "common",
+    background: "transparent",
+    animation: false,
+    padding: { left: 4, right: 4, top: 5, bottom: 5 },
+    data: [{ id: "pulse", values }],
+    series: [
+      {
+        type: "area", data: { id: "pulse" }, xField: "time", yField: "messages",
+        line: { style: { curveType: "monotone", stroke: "var(--uvp-brand)", lineWidth: 1.5 } },
+        area: { style: { curveType: "monotone", fillOpacity: 0.28, fill: { gradient: "linear", x0: 0, y0: 0, x1: 0, y1: 1, stops: [{ offset: 0, color: "var(--uvp-brand)" }, { offset: 1, color: "transparent" }] } } },
+        point: { visible: true, style: { size: (datum: PulseDatum) => datum.time === last ? 5.6 : 0, fill: "var(--uvp-brand)", stroke: "var(--uvp-panel-bg)", lineWidth: 1 }, state: { dimension_hover: { size: 6.4 } } },
+        tooltip: { dimension: { title: { value: timeLabel }, content: [{ key: "消息", value: (datum: PulseDatum) => `${datum.messages} 条/分钟` }] } }
+      },
+      {
+        type: "line", data: { id: "pulse" }, xField: "time", yField: "failure",
+        line: { style: { curveType: "monotone", stroke: "var(--uvp-danger)", lineWidth: 1, lineDash: [2, 2], opacity: 0.7 } },
+        point: { visible: false },
+        tooltip: { dimension: { title: { value: timeLabel }, content: [{ key: "失败率", value: (datum: PulseDatum) => datum.failure === 0 ? "0%" : `${datum.failure.toFixed(1)}%` }] } }
+      }
+    ],
+    axes: [
+      { orient: "bottom", type: "linear", visible: false, min: first === last ? first - 60000 : first, max: last, zero: false, nice: false },
+      { orient: "left", type: "linear", visible: false, seriesIndex: [0], min: 0, max: maxMsg.value, nice: false },
+      { orient: "right", type: "linear", visible: false, seriesIndex: [1], min: 0, max: 100, nice: false }
+    ],
+    markArea: props.abnormalWindows
+      .filter(win => win.endT * 1000 > first && win.startT * 1000 < last)
+      .map(win => ({ x: Math.max(first, win.startT * 1000), x1: Math.min(last, win.endT * 1000), relativeSeriesIndex: 0, area: { style: { fill: "var(--uvp-danger-soft)" } }, label: { visible: false }, interactive: false })),
+    crosshair: { xField: { visible: true, line: { type: "line", style: { stroke: "var(--uvp-text-tertiary)", lineDash: [2, 2] } } } },
+    tooltip: { activeType: "dimension", confine: true },
+    legends: { visible: false }
   };
-});
-
-// tooltip 跟随鼠标,但靠近右边缘时翻到左侧避免溢出
-const tipStyle = computed(() => {
-  const ratio = hoverX.value / W;
-  if (ratio > 0.7) {
-    return { right: `${(1 - ratio) * 100}%`, transform: "translateX(8px)" };
-  }
-  return { left: `${ratio * 100}%`, transform: "translateX(8px)" };
-});
-
-function onMove(ev: MouseEvent): void {
-  if (!hasData.value || !svgEl.value) return;
-  const rect = svgEl.value.getBoundingClientRect();
-  const relX = ev.clientX - rect.left;
-  // 等比换算到 viewBox 坐标
-  const vbX = (relX / rect.width) * W;
-  // 找最近样本索引
-  const n = props.samples.length;
-  if (n === 0) return;
-  const xStep = n > 1 ? W / (n - 1) : W;
-  const idx = Math.round(vbX / xStep);
-  hoverIdx.value = Math.max(0, Math.min(n - 1, idx));
-  hoverX.value = vbX;
-}
-
-const abnormalRects = computed((): { x: number; w: number }[] => {
-  if (props.samples.length === 0 || props.abnormalWindows.length === 0) return [];
-  const first = props.samples[0].t;
-  const last = props.samples[props.samples.length - 1].t;
-  const span = Math.max(1, last - first);
-  return props.abnormalWindows.map((w) => {
-    const x = ((w.startT - first) / span) * W;
-    const x2 = ((w.endT - first) / span) * W;
-    return { x: Math.max(0, x), w: Math.max(1, x2 - x) };
-  });
 });
 </script>
 
@@ -317,10 +141,9 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   min-height: 90px;
 }
 
-.pulse__svg {
-  display: block;
-  width: 100%;
-  height: 100%;
+.pulse__chart > .dashboard-chart {
+  position: absolute;
+  inset: 0;
 }
 
 .pulse__empty {
@@ -331,52 +154,6 @@ const abnormalRects = computed((): { x: number; w: number }[] => {
   min-height: 90px;
   font-size: 12px;
   color: var(--uvp-text-tertiary);
-}
-
-.pulse__tip {
-  position: absolute;
-  top: 0;
-  z-index: 10;
-  padding: 6px 8px;
-  font-size: 11px;
-  color: #ffffff;
-  white-space: nowrap;
-  pointer-events: none;
-  background: rgb(15 23 42 / 88%);
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
-
-  b {
-    margin: 0 2px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    color: #ffffff;
-  }
-}
-
-.pulse__tip-time {
-  margin-bottom: 4px;
-  font-size: 10px;
-  color: #d9d9d9;
-}
-
-.pulse__tip-row {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  line-height: 1.5;
-}
-
-.pulse__tip-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: var(--uvp-brand);
-  border-radius: 50%;
-}
-
-.pulse__tip-dot--red {
-  background: var(--uvp-danger);
 }
 
 .pulse__hint {
