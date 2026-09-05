@@ -3,6 +3,7 @@ package loggingcontract
 import (
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -102,6 +103,19 @@ func TestLoggingInventory(t *testing.T) {
 		}
 		if len(report.Unassigned) != 0 {
 			t.Fatalf("unassigned candidates = %#v", report.Unassigned[:min(5, len(report.Unassigned))])
+		}
+
+		for _, site := range report.Sites {
+			want := ""
+			if strings.HasPrefix(site.File, "app/controllers/") {
+				want = "T08"
+			}
+			if strings.HasPrefix(site.File, "app/gb28181/controllers/") || strings.HasPrefix(site.File, "app/gb28181/cascade/controller/") {
+				want = "T09"
+			}
+			if want != "" && site.OwnerTask != want {
+				t.Errorf("HTTP controller %s:%d assigned %s, want %s", site.File, site.Line, site.OwnerTask, want)
+			}
 		}
 		allowed := map[string]bool{
 			"T05": true, "T08": true, "T09": true, "T10": true,

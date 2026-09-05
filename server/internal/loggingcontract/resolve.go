@@ -95,7 +95,6 @@ func assignReachabilityAndOwnership(state *scanState, report *Report) {
 
 	for index := range report.Sites {
 		site := &report.Sites[index]
-		site.OwnerTask, site.OwnerReason = ownerForSite(site.File, site.Function, site.Kind, site.ContextSource)
 		site.RouteNames = append(site.RouteNames, routeNamesFor(site.functionID, reachable)...)
 		if len(site.RouteNames) > 0 {
 			site.ContextSource = ContextHTTP
@@ -104,13 +103,13 @@ func assignReachabilityAndOwnership(state *scanState, report *Report) {
 			site.ContextSource = ContextBackground
 			site.ResolutionNote = "no bounded route path proven; SIP/background/unresolved code remains separate"
 		}
+		site.OwnerTask, site.OwnerReason = ownerForSite(site.File, site.Function, site.Kind, site.ContextSource)
 		if site.OwnerTask == "" {
 			report.Unassigned = append(report.Unassigned, *site)
 		}
 	}
 	for index := range report.DBBoundaries {
 		boundary := &report.DBBoundaries[index]
-		boundary.OwnerTask, boundary.OwnerReason = ownerForSite(boundary.File, boundary.Function, KindDBBoundary, boundary.ContextSource)
 		boundary.RouteNames = append(boundary.RouteNames, routeNamesFor(functionIDFor(state, boundary.File, boundary.Function), reachable)...)
 		if len(boundary.RouteNames) > 0 {
 			boundary.ContextSource = ContextHTTP
@@ -119,6 +118,10 @@ func assignReachabilityAndOwnership(state *scanState, report *Report) {
 			boundary.ContextSource = ContextBackground
 			boundary.ResolutionNote += "; no bounded HTTP route path was proven"
 		}
+	}
+	for index := range report.DBBoundaries {
+		b := &report.DBBoundaries[index]
+		b.OwnerTask, b.OwnerReason = ownerForSite(b.File, b.Function, KindDBBoundary, b.ContextSource)
 	}
 	for index := range report.Issues {
 		issue := &report.Issues[index]
@@ -184,7 +187,15 @@ func firstCallLine(state *scanState, fn *functionDecl, target string) int {
 
 func ownerForSite(file, function string, kind SiteKind, context ContextSource) (string, string) {
 	file = filepath.ToSlash(file)
-	if strings.HasPrefix(file, "bootstrap/") || file == "service/zaphooks.go" || strings.HasPrefix(file, "app/gb28181/bootstrap") {
+	// Controller ownership is explicit in the migration plan, including handlers
+	// whose interface calls cannot be proven by this name-based inventory.
+	if strings.HasPrefix(file, "app/controllers/") {
+		return "T08", "base HTTP controller; unresolved call edges still require inspection"
+	}
+	if strings.HasPrefix(file, "app/gb28181/controllers/") || strings.HasPrefix(file, "app/gb28181/cascade/controller/") {
+		return "T09", "GB HTTP controller; unresolved call edges still require inspection"
+	}
+	if strings.HasPrefix(file, "bootstrap/") || file == "app/service/zaphooks.go" || strings.HasPrefix(file, "app/gb28181/bootstrap") {
 		return "T05", "bootstrap, legacy bridge or GB bootstrap logging is owned by T05"
 	}
 	if kind == KindDBBoundary && (strings.HasPrefix(file, "app/utils/gormhelper/") || strings.HasPrefix(file, "app/global/app/")) {
