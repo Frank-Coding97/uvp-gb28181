@@ -3,10 +3,10 @@ package gormhelper
 import (
 	"errors"
 	"fmt"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/myerrors"
 
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
@@ -78,6 +78,8 @@ func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*go
 			return nil, err
 		}
 	}
+
+	installLogContext(gormDb)
 
 	// 查询没有数据，屏蔽 gorm v2 包中会爆出的错误
 	// https://github.com/go-gorm/gorm/issues/3789  此 issue 所反映的问题就是我们本次解决掉的
@@ -193,8 +195,4 @@ func getDsn(sqlType, readWrite string, dbConf ...ConfigParams) string {
 }
 
 // 创建自定义日志模块，对 gorm 日志进行拦截、
-func redefineLog(sqlType string) gormLog.Interface {
-	return createCustomGormLog(sqlType,
-		SetInfoStrFormat("[info] %s\n"), SetWarnStrFormat("[warn] %s\n"), SetTraceErrStrFormat("[error] %s\n"),
-		SetTraceStrFormat("[traceStr] %s [%.3fms] [rows:%v] %s\n"), SetTraceWarnStrFormat("[traceWarn] %s %s [%.3fms] [rows:%v] %s\n"), SetTracErrStrFormat("[traceErr] %s %s [%.3fms] [rows:%v] %s\n"))
-}
+func redefineLog(sqlType string) gormLog.Interface { return createCustomGormLog(sqlType) }
