@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 )
 
 func TestDeviceControlCapabilitiesAreInformationalAndDoNotBlockDispatch(t *testing.T) {
@@ -123,10 +125,12 @@ func TestDeviceControlExecutesWhitelistedActionsDespiteUnsupportedCapabilityMeta
 
 func TestDeviceControlTeleBootRequiresConfirmationAndDeduplicatesSixtySeconds(t *testing.T) {
 	controller, db, channel, sender := newPTZResourceController(t)
+	setupTeleBootTestAuth(t, db)
 	caps := `{"teleboot":false}`
 	require.NoError(t, db.Model(channel).Update("capabilities", caps).Error)
 	router := gin.New()
 	router.Use(gin.Recovery())
+	router.Use(maintenanceClaims(17))
 	router.POST("/channel/:id/device-control", controller.ControlDevice)
 
 	request := func(body string) *httptest.ResponseRecorder {
@@ -145,6 +149,33 @@ func TestDeviceControlTeleBootRequiresConfirmationAndDeduplicatesSixtySeconds(t 
 	require.Len(t, sender.bodies, 1)
 	require.Contains(t, sender.bodies[0], "<TeleBoot>Boot</TeleBoot>")
 }
+
+func setupTeleBootTestAuth(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	previousConfig := app.ConfigYml
+	app.ConfigYml = teleBootTestConfig{}
+	t.Cleanup(func() { app.ConfigYml = previousConfig })
+	require.NoError(t, db.AutoMigrate(&basemodels.User{}))
+	require.NoError(t, db.Create(&basemodels.User{
+		BaseModel: basemodels.BaseModel{ID: 17}, Username: "teleboot", Password: "x", DeptID: 1,
+	}).Error)
+}
+
+type teleBootTestConfig struct{}
+
+func (teleBootTestConfig) ConfigFileChangeListen(...func()) {}
+func (teleBootTestConfig) Get(string) interface{}           { return nil }
+func (teleBootTestConfig) GetBool(string) bool              { return false }
+func (teleBootTestConfig) GetInt(string) int                { return 0 }
+func (teleBootTestConfig) GetInt32(string) int32            { return 0 }
+func (teleBootTestConfig) GetInt64(string) int64            { return 0 }
+func (teleBootTestConfig) GetFloat64(string) float64        { return 0 }
+func (teleBootTestConfig) GetDuration(string) time.Duration { return 0 }
+func (teleBootTestConfig) GetStringSlice(string) []string   { return nil }
+func (teleBootTestConfig) GetUintSlice(string) []uint       { return []uint{17} }
+func (teleBootTestConfig) Set(string, interface{})          {}
+func (teleBootTestConfig) SaveConfig() error                { return nil }
+func (teleBootTestConfig) GetString(string) string          { return "" }
 
 func TestDeviceControlRejectsOppositeActionWhileResourceOperationIsActive(t *testing.T) {
 	controller, db, channel, sender := newPTZResourceController(t)

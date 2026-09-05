@@ -62,3 +62,21 @@ func TestPlayHistoryDoesNotInventRateWithoutTerminalAttempts(t *testing.T) {
 	require.EqualValues(t, 1, history.Summary.Started)
 	require.Equal(t, StatusOK, history.Status)
 }
+
+func TestPlayHistoryMarksStaleStartedAttemptAsPartial(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbDevice{}, &gbmodels.GbPlayAttempt{}))
+	now := time.Date(2026, 9, 4, 10, 3, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: "visible", OwnerDeptID: 10}).Error)
+	require.NoError(t, db.Create(&gbmodels.GbPlayAttempt{CorrelationID: "stale", DeviceCode: "visible", Outcome: PlayOutcomeStarted, StartedAt: now.Add(-10 * time.Minute)}).Error)
+	window, err := ResolveHistoryWindow("1h", now, time.UTC)
+	require.NoError(t, err)
+
+	history, err := NewPlayAttemptStore(db).HistoryScoped(context.Background(), window, nil)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, history.Summary.Started)
+	require.EqualValues(t, 1, history.Summary.StaleStarted)
+	require.Equal(t, StatusPartial, history.Status)
+	require.Equal(t, CoveragePartial, history.Coverage)
+}

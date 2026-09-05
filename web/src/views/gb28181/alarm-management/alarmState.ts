@@ -2,6 +2,7 @@ import type { AlarmEntitySummary, AlarmEnumValue, AlarmQuery } from "./api";
 
 const VIEW_PERMISSION = "gb28181:alarm:view";
 const DELETE_PERMISSION = "gb28181:alarm:delete";
+const CLEAR_PERMISSION = "gb28181:alarm:clear";
 const ALL_PERMISSION = "*:*:*";
 
 export interface AlarmTypeOption {
@@ -48,6 +49,10 @@ export function mayViewAlarms(permissions: string[]): boolean {
 
 export function mayDeleteAlarms(permissions: string[]): boolean {
   return permissions.includes(ALL_PERMISSION) || permissions.includes(DELETE_PERMISSION);
+}
+
+export function mayClearAlarms(permissions: string[]): boolean {
+  return permissions.includes(ALL_PERMISSION) || permissions.includes(CLEAR_PERMISSION);
 }
 
 export function normalizeAlarmQuery(query: AlarmQuery): AlarmQuery {

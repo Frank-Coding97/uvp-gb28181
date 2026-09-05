@@ -1,9 +1,20 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { reactive } from "vue";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import PlayWindow from "./PlayWindow.vue";
 import playWindowSource from "./PlayWindow.vue?raw";
 
+const userState = vi.hoisted(() => ({
+    account: { permissions: [] as string[] }
+}));
+
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userState }));
+
 describe("PlayWindow playback embedding", () => {
+    beforeEach(() => {
+        userState.account = reactive({ permissions: ["*:*:*"] });
+    });
+
     afterEach(() => {
         delete (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro;
     });
@@ -32,6 +43,58 @@ describe("PlayWindow playback embedding", () => {
         });
         expect(playWindowSource).not.toContain(".play-window.playback :deep(.easyplayer-controls)");
         expect(playWindowSource).not.toContain(".play-window.playback :deep(.easyplayer-zoom-controls)");
+    });
+
+    it("hides EasyPlayer screenshot control when the user lacks snapshot permission", async () => {
+        userState.account.permissions = ["gb28181:play:start"];
+        const options: Record<string, any>[] = [];
+        class FakeEasyPlayer {
+            constructor(_element: HTMLElement, value: Record<string, any>) {
+                options.push(value);
+            }
+            on = vi.fn();
+            play = vi.fn();
+            destroy = vi.fn();
+        }
+        (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+        mount(PlayWindow, { props: { url: "ws://zlm/live.flv" } });
+        await flushPromises();
+
+        expect(options[0]).toMatchObject({ btns: { screenshot: false } });
+    });
+
+    it("rebuilds the player when snapshot permission changes", async () => {
+        const options: Record<string, any>[] = [];
+        const instances: FakeEasyPlayer[] = [];
+        class FakeEasyPlayer {
+            constructor(_element: HTMLElement, value: Record<string, any>) {
+                options.push(value);
+                instances.push(this);
+            }
+            on = vi.fn();
+            play = vi.fn();
+            destroy = vi.fn();
+        }
+        (globalThis as { EasyPlayerPro?: unknown }).EasyPlayerPro = FakeEasyPlayer;
+
+        const wrapper = mount(PlayWindow, { props: { url: "ws://zlm/live.flv", hasAudio: false } });
+        await flushPromises();
+        expect(options[0]).toMatchObject({ hasAudio: false, btns: { screenshot: true } });
+
+        userState.account.permissions = ["gb28181:play:start"];
+        await flushPromises();
+        expect(instances[0].destroy).toHaveBeenCalledTimes(1);
+        expect(options[1]).toMatchObject({ hasAudio: false, btns: { screenshot: false } });
+        expect(instances[1].play).toHaveBeenCalledWith("ws://zlm/live.flv");
+
+        userState.account.permissions = ["gb28181:play:start", "gb28181:play:snapshot"];
+        await flushPromises();
+        expect(instances[1].destroy).toHaveBeenCalledTimes(1);
+        expect(options[2]).toMatchObject({ hasAudio: false, btns: { screenshot: true } });
+        expect(instances[2].play).toHaveBeenCalledWith("ws://zlm/live.flv");
+
+        wrapper.unmount();
     });
 
     it("enables the ZLM WebRTC adapter only when requested by the caller", async () => {

@@ -15,11 +15,12 @@ type PlayHistoryPoint struct {
 }
 
 type PlayHistorySummary struct {
-	Attempts uint64   `json:"attempts"`
-	Success  uint64   `json:"success"`
-	Failure  uint64   `json:"failure"`
-	Started  uint64   `json:"started"`
-	Rate     *float64 `json:"rate"`
+	Attempts     uint64   `json:"attempts"`
+	Success      uint64   `json:"success"`
+	Failure      uint64   `json:"failure"`
+	Started      uint64   `json:"started"`
+	StaleStarted uint64   `json:"staleStarted"`
+	Rate         *float64 `json:"rate"`
 }
 
 type CountDistribution struct {
@@ -90,6 +91,9 @@ func (store *PlayAttemptStore) HistoryScoped(ctx context.Context, window History
 		case PlayOutcomeStarted:
 			point.Started++
 			result.Summary.Started++
+			if !row.StartedAt.After(window.To.Add(-playAttemptStaleAfter)) {
+				result.Summary.StaleStarted++
+			}
 		}
 		if row.Outcome == PlayOutcomeSuccess || row.Outcome == PlayOutcomeFailure {
 			if row.Reused {
@@ -131,6 +135,9 @@ func (store *PlayAttemptStore) HistoryScoped(ctx context.Context, window History
 	sort.Slice(result.Reuse, func(i, j int) bool { return result.Reuse[i].Key < result.Reuse[j].Key })
 	if len(rows) > 0 {
 		result.Status, result.Coverage = StatusOK, CoverageComplete
+	}
+	if result.Summary.StaleStarted > 0 {
+		result.Status, result.Coverage = StatusPartial, CoveragePartial
 	}
 	return result, nil
 }

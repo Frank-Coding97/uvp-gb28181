@@ -370,6 +370,16 @@ func (s *Server) SetPTZMessageProcessor(processor handler.PTZMessageProcessor) {
 	}
 }
 
+func (s *Server) SetUpgradeProcessor(processor handler.UpgradeMessageProcessor) {
+	if s.msgH != nil {
+		s.msgH.SetUpgradeProcessor(processor)
+	}
+}
+
+func (s *Server) SetUpgradeMessageProcessor(processor handler.UpgradeMessageProcessor) {
+	s.SetUpgradeProcessor(processor)
+}
+
 func (s *Server) SetBroadcastMessageProcessor(processor handler.BroadcastMessageProcessor) {
 	if s.msgH != nil {
 		s.msgH.SetBroadcastProcessor(processor)

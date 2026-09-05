@@ -20,7 +20,32 @@ describe("dashboard drilldown trend spec", () => {
       ledger: { rows: [], total: 0, page: 1, pageSize: 20 }, gaps: []
     });
     const values = (spec.data?.[0] as { values: Array<{ series: string }> }).values;
-    expect(values.map(item => item.series)).toEqual(["上行", "下行"]);
+    expect(values.map(item => item.series)).toEqual(["上行", "已结算下行"]);
+    expect(spec.color).toEqual(["var(--uvp-brand)", "var(--uvp-brand-cyan)"]);
+    expect(spec.line).toMatchObject({ style: { curveType: "monotone" } });
+    expect(spec.area).toMatchObject({ style: { curveType: "monotone" } });
+    const yAxis = spec.axes?.[1] as { title: { text: string }; label: { formatMethod: (value: number) => string } };
+    expect(yAxis.title.text).toBe("流量");
+    expect(yAxis.label.formatMethod(800000)).toBe("781.3 KB");
+    const tooltipValue = ((spec.tooltip as { dimension: { content: Array<{ value: (datum: { value: number }) => string }> } }).dimension.content[0]).value;
+    expect(tooltipValue({ value: 800000 })).toBe("781.3 KB");
+  });
+
+  it("keeps zero-filled 7-day traffic buckets so both lines stay continuous", () => {
+    const spec = buildDashboardTrendSpec("media-traffic-today", {
+      range: "7d", from: "", to: "", bucketSeconds: 86400, timezone: "Asia/Shanghai", status: "partial", coverage: "partial",
+      points: [
+        { bucketStart: "2026-08-31T00:00:00+08:00", upstreamBytes: 10, downstreamBytes: 20 },
+        { bucketStart: "2026-09-01T00:00:00+08:00", upstreamBytes: 0, downstreamBytes: 0 },
+        { bucketStart: "2026-09-02T00:00:00+08:00", upstreamBytes: 0, downstreamBytes: 0 },
+        { bucketStart: "2026-09-03T00:00:00+08:00", upstreamBytes: 0, downstreamBytes: 0 },
+        { bucketStart: "2026-09-04T00:00:00+08:00", upstreamBytes: 30, downstreamBytes: 40 }
+      ],
+      summary: { upstreamBytes: 40, downstreamBytes: 60 },
+      ledger: { rows: [], total: 0, page: 1, pageSize: 20 }, gaps: []
+    });
+    const values = (spec.data?.[0] as { values: Array<{ value: number | null }> }).values;
+    expect(values.map(item => item.value)).toEqual([10, 20, 0, 0, 0, 0, 0, 0, 30, 40]);
   });
 
   it("uses compact x-axis labels and reserves bottom space so time is not clipped", () => {

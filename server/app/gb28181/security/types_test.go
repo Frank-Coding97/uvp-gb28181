@@ -9,23 +9,23 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDefaultPolicyUsesFiniteEscalatingAutoBanTTL(t *testing.T) {
+func TestDefaultPolicyUsesPermanentAutoBan(t *testing.T) {
 	p := DefaultPolicy()
 	require.NoError(t, p.Validate())
 	require.Equal(t, ModeProtect, p.Mode)
 	require.Equal(t, 10*time.Second, p.Window)
 	ttl, matched := p.BanForScore(100)
 	require.True(t, matched)
-	require.Equal(t, time.Minute, ttl)
-	require.Equal(t, 10*time.Minute, p.TTLForScore(200))
-	require.Equal(t, time.Hour, p.TTLForScore(500))
-	require.False(t, p.PermanentForScore(500))
+	require.Zero(t, ttl)
+	require.Zero(t, p.TTLForScore(200))
+	require.Zero(t, p.TTLForScore(500))
+	require.True(t, p.PermanentForScore(500))
 	require.Zero(t, p.TTLForScore(99))
 }
 
 func TestPolicyRejectsInvalidValues(t *testing.T) {
 	p := DefaultPolicy()
-	p.BanTTLs = []TTLStep{{Score: 100, TTL: 0}}
+	p.BanTTLs = []TTLStep{{Score: 100, TTL: -time.Second}}
 	require.ErrorIs(t, p.Validate(), ErrInvalidPolicy)
 	p.BanTTLs = []TTLStep{{Score: 100, TTL: 0}, {Score: 200, TTL: time.Minute}}
 	require.ErrorIs(t, p.Validate(), ErrInvalidPolicy)
@@ -83,12 +83,12 @@ func TestReasonScoresNonceStaleWithoutBanWeight(t *testing.T) {
 	require.Equal(t, 20, reasonScore(ReasonNonceReplay))
 }
 
-func TestTTLForScoreNeverUsesPermanentAutomaticBan(t *testing.T) {
+func TestTTLForScoreUsesPermanentAutomaticBan(t *testing.T) {
 	p := DefaultPolicy()
-	require.Equal(t, time.Hour, p.TTLForScore(10000))
-	require.False(t, p.PermanentForScore(10000))
+	require.Zero(t, p.TTLForScore(10000))
+	require.True(t, p.PermanentForScore(10000))
 	for _, step := range p.BanTTLs {
-		require.Greater(t, step.TTL, time.Duration(0))
+		require.Zero(t, step.TTL)
 	}
 }
 

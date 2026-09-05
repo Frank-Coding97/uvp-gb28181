@@ -69,4 +69,31 @@ describe("ZLMDangerActionDialog", () => {
     expect(wrapper.emitted("stale")).toHaveLength(1);
     expect(wrapper.emitted("update:visible")?.at(-1)).toEqual([false]);
   });
+
+  it("can validate a dashboard target independently from the workbench node selection", async () => {
+    const testPinia = createPinia();
+    setActivePinia(testPinia);
+    const context = useZLMContextStore();
+    context.initialize([
+      { id: 7, name: "边缘节点 A", state: "active" },
+      { id: 8, name: "边缘节点 B", state: "active" }
+    ], "7");
+    const wrapper = mount(ZLMDangerActionDialog, {
+      props: {
+        visible: true,
+        nodeId: 8,
+        nodeName: "边缘节点 B",
+        targetKey: "target-b",
+        targetLabel: "目标 B",
+        confirmPhrase: "确认",
+        contextBound: false
+      },
+      global: { plugins: [testPinia], stubs }
+    });
+
+    context.selectNode(8);
+    await flushPromises();
+    expect(wrapper.emitted("stale")).toBeUndefined();
+    expect(wrapper.text()).toContain("边缘节点 B（#8）");
+  });
 });

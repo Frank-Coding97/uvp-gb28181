@@ -17,31 +17,28 @@ const offline = computed(() => Math.max(0, props.total - props.online));
 const ratio = computed(() => props.total > 0 ? Math.min(100, props.online / props.total * 100) : 0);
 const summary = computed(() => `${props.label}：在线 ${props.online}，离线 ${offline.value}，总计 ${props.total}，在线率 ${ratio.value.toFixed(1)}%`);
 const chartSpec = computed<MediaChartSpec>(() => ({
-  type: "pie",
+  type: "circularProgress",
   background: "transparent",
   data: [{
     id: "online-donut",
-    values: [
-      { category: "在线", value: props.online },
-      { category: "离线", value: offline.value }
-    ]
+    values: [{ category: "在线率", value: ratio.value / 100 }]
   }],
   categoryField: "category",
   valueField: "value",
-  color: ["var(--uvp-brand-cyan)", "var(--uvp-list-toolbar-bg)"],
-  outerRadius: 1,
-  innerRadius: 78 / 112,
+  color: ["var(--uvp-brand-cyan)"],
+  outerRadius: 0.94,
+  innerRadius: 0.7,
   startAngle: -90,
   endAngle: 270,
+  roundCap: true,
+  cornerRadius: 8,
   padding: 0,
-  minAngle: 0,
-  padAngle: 0,
-  showAllZero: false,
-  emptyPlaceholder: {
-    showEmptyCircle: true,
-    emptyCircle: { style: { fill: "var(--uvp-list-toolbar-bg)", cornerRadius: 0 } }
-  },
-  pie: { style: { cornerRadius: 0 } },
+  progress: { style: { fill: "var(--uvp-brand-cyan)", fillOpacity: 1 } },
+  track: { style: { fill: "var(--uvp-panel-border)", fillOpacity: 0.82 } },
+  axes: [
+    { orient: "angle", type: "linear", min: 0, max: 1, visible: false },
+    { orient: "radius", type: "band", visible: false }
+  ],
   legends: { visible: false },
   label: { visible: false },
   tooltip: { visible: false }

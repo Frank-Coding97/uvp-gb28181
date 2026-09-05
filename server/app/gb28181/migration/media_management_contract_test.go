@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -195,6 +196,29 @@ func TestMediaManagementPermissionManifestMatchesProtectedRoutes(t *testing.T) {
 	want := make(map[string]struct{}, len(mediaManagementAPIs))
 	for _, api := range mediaManagementAPIs {
 		want[api.method+" "+api.path] = struct{}{}
+	}
+	// 历史迁移保持原始契约；后续受保护路由由当前按钮目录补齐。
+	body, err := os.ReadFile(filepath.Join("..", "..", "..", "resource", "database", "gb28181", "button-permissions.json"))
+	require.NoError(t, err)
+	var catalog struct {
+		Buttons []struct {
+			APIs []struct {
+				Method string `json:"method"`
+				Path   string `json:"path"`
+			} `json:"apis"`
+		} `json:"buttons"`
+	}
+	require.NoError(t, json.Unmarshal(body, &catalog))
+	require.NotEmpty(t, catalog.Buttons)
+	for _, button := range catalog.Buttons {
+		for _, api := range button.APIs {
+			if strings.HasPrefix(api.Path, "/api/gb28181/zlm/") ||
+				strings.HasPrefix(api.Path, "/api/gb28181/cloud-recordings/") ||
+				api.Path == "/api/gb28181/recording-plans" ||
+				strings.HasPrefix(api.Path, "/api/gb28181/recording-plans/") {
+				want[api.Method+" "+api.Path] = struct{}{}
+			}
+		}
 	}
 	got := make(map[string]struct{}, len(want))
 	for _, route := range engine.Routes() {

@@ -232,6 +232,7 @@
                               <span>播放</span>
                             </a-link>
                             <a-link
+                              v-if="canDownload"
                               :data-testid="`download-${record.id}`"
                               class="uvp-table-action uvp-table-action--download"
                               @click="download(record)"
@@ -314,6 +315,8 @@
   <RecordingDetailDrawer
     v-model:visible="detailVisible"
     :recording-id="detailId"
+    :can-play="canView"
+    :can-download="canDownload"
     @play="playFromDetail"
     @download="download"
   />
@@ -379,6 +382,7 @@ const { isMobile } = useDevicesSize();
 const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canView = computed(() => hasPermission("gb28181:recording:view"));
 const canReconcile = computed(() => hasPermission("gb28181:recording:reconcile"));
+const canDownload = computed(() => hasPermission("gb28181:recording:download"));
 const canDelete = computed(() => hasPermission("gb28181:recording:delete"));
 const canStop = computed(() => hasPermission("gb28181:recording:stop"));
 const AUTO_REFRESH_INTERVAL_SECONDS = 10;
@@ -544,7 +548,7 @@ async function loadActive() {
 }
 
 async function loadReconciliationStates() {
-  if (!props.active || !canView.value) return;
+  if (!props.active || !canReconcile.value) return;
   const requestGeneration = panelGeneration;
   try {
     const response = await listReconciliations();
@@ -614,6 +618,7 @@ function openDetail(id: string) {
 }
 
 function play(recording: RecordingFile) {
+  if (!canView.value || !availabilityPresentation(recording.availability).canAccess) return;
   playingRecording.value = recording;
   playerVisible.value = true;
 }
@@ -624,6 +629,7 @@ function playFromDetail(recording: RecordingFile) {
 }
 
 function download(recording: RecordingFile) {
+  if (!canDownload.value || !availabilityPresentation(recording.availability).canAccess) return;
   void recordingDownloadCoordinator.enqueue({
     fileId: recording.id,
     fileName: recording.fileName || `recording-${recording.id}.mp4`
@@ -641,7 +647,7 @@ function requestStopRecording(recording: ActiveRecording) {
 }
 
 async function performStopRecording(id: string) {
-  if (stoppingIds.value.has(id)) return;
+  if (!canStop.value || stoppingIds.value.has(id)) return;
   stoppingIds.value = new Set([...stoppingIds.value, id]);
   try {
     await stopActiveRecording(id);
@@ -667,7 +673,7 @@ function requestDelete(recording: RecordingFile) {
 }
 
 async function performDelete(id: string) {
-  if (deletingIds.value.has(id)) return;
+  if (!canDelete.value || deletingIds.value.has(id)) return;
   deletingIds.value = new Set([...deletingIds.value, id]);
   try {
     await deleteRecordingFile(id);
@@ -695,7 +701,7 @@ function requestBatchDelete() {
 }
 
 async function performBatchDelete() {
-  if (batchDeleting.value || !selectedRowKeys.value.length) return;
+  if (!canDelete.value || batchDeleting.value || !selectedRowKeys.value.length) return;
   batchDeleting.value = true;
   const ids = [...selectedRowKeys.value];
   try {

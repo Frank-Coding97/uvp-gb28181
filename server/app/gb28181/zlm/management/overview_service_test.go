@@ -116,6 +116,29 @@ func TestOverviewAggregatesExactMediaTraffic(t *testing.T) {
 	require.True(t, overviewNodeResult(t, result, 1).Metrics.MediaTrafficAvailable)
 }
 
+func TestOverviewMarksMediaTrafficFailureAsPartial(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	registry := overviewRegistryFake{nodes: []*node.Node{overviewNode(1, node.StateActive, now)}}
+	runtime := &overviewRuntimeTrafficFake{
+		overviewRuntimeFake: &overviewRuntimeFake{statistics: map[int64]zlm.Statistic{1: {MediaSource: 1}}},
+		trafficErrors:       map[int64]error{1: errors.New("traffic endpoint unavailable")},
+	}
+	service := NewOverviewService(OverviewDependencies{Registry: registry, Runtime: runtime, Media: &overviewMediaFake{}}, WithOverviewClock(func() time.Time { return now }))
+
+	result, err := service.GetOverview(context.Background())
+	require.NoError(t, err)
+	require.True(t, result.Partial)
+	require.Empty(t, result.SuccessfulNodeIDs)
+	require.Equal(t, []int64{1}, result.FailedNodeIDs)
+	require.EqualValues(t, 0, result.Metrics.MediaTrafficSampledNodes)
+
+	view := overviewNodeResult(t, result, 1)
+	require.Equal(t, RuntimeNodeStatusPartial, view.Status)
+	require.False(t, view.Metrics.MediaTrafficAvailable)
+	require.NotEmpty(t, view.Errors)
+	require.Equal(t, "media-traffic", view.Errors[0].Stage)
+}
+
 func TestOverviewPartialNodeFailureKeepsSuccessfulCurrentMetricsOnly(t *testing.T) {
 	now := time.Date(2026, 8, 30, 12, 1, 0, 0, time.UTC)
 	registry := overviewRegistryFake{nodes: []*node.Node{
@@ -548,10 +571,14 @@ type overviewMediaFake struct {
 
 type overviewRuntimeTrafficFake struct {
 	*overviewRuntimeFake
-	traffic map[int64]zlm.MediaTrafficStatistic
+	traffic       map[int64]zlm.MediaTrafficStatistic
+	trafficErrors map[int64]error
 }
 
 func (r *overviewRuntimeTrafficFake) GetMediaTrafficStatistic(_ context.Context, nodeID int64) (zlm.MediaTrafficStatistic, error) {
+	if err := r.trafficErrors[nodeID]; err != nil {
+		return zlm.MediaTrafficStatistic{}, err
+	}
 	return r.traffic[nodeID], nil
 }
 

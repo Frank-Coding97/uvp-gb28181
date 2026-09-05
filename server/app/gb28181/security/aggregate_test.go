@@ -18,7 +18,7 @@ func TestAggregateStoreUpsertsWithinMinuteAndBoundsKeys(t *testing.T) {
 	require.Len(t, items, 1)
 	require.EqualValues(t, 2, items[0].Count)
 	require.EqualValues(t, 5, items[0].ScoreDelta)
-	require.False(t, s.Record(Event{SourceIP: "198.51.100.11", Method: "BYE", Reason: ReasonUnknownMethod, Action: ActionDrop, Occurred: now}))
+	require.True(t, s.Record(Event{SourceIP: "198.51.100.11", Method: "BYE", Reason: ReasonUnknownMethod, Action: ActionDrop, Occurred: now}))
 	require.EqualValues(t, 1, s.Dropped())
 }
 

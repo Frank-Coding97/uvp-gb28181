@@ -7,6 +7,10 @@ export function hasSipUpdatePermission(permissions: string[]): boolean {
     return permissions.includes("*:*:*") || permissions.includes("gb28181:sip:config:update");
 }
 
+export function hasSipStatusPermission(permissions: string[]): boolean {
+    return hasSipUpdatePermission(permissions) || permissions.includes("gb28181:sip:config:view");
+}
+
 // 组合判定:未配置/失败 + 有权限 → 应该打开引导.
 // 主要供测试引用,生产代码通过 useSipSetupStore().shouldAutoOpen 调用.
 export function shouldOpenSipSetup(status: SipSetupStatus, permissions: string[]): boolean {

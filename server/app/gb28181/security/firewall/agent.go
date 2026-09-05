@@ -150,19 +150,33 @@ func (a *Agent) Reconcile(decisions []security.BanDecision) error {
 	if err != nil {
 		return err
 	}
+	existingSet := make(map[string]struct{}, len(existing))
 	for _, sourceIP := range existing {
+		existingSet[sourceIP] = struct{}{}
 		if _, ok := desired[sourceIP]; !ok {
 			if err := a.Unban(sourceIP); err != nil {
 				return err
 			}
 		}
 	}
-	for _, decision := range desired {
+	for sourceIP, decision := range desired {
+		if _, ok := existingSet[sourceIP]; ok {
+			a.mu.Lock()
+			applied, tracked := a.rules[sourceIP]
+			a.mu.Unlock()
+			if tracked && sameReconcileDecision(applied, decision) {
+				continue
+			}
+		}
 		if err := a.Ban(decision); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func sameReconcileDecision(applied, desired security.BanDecision) bool {
+	return applied.DecisionID == desired.DecisionID && applied.ExpiresAt().Equal(desired.ExpiresAt())
 }
 
 func (a *Agent) setError(err error) { a.mu.Lock(); a.lastError = err.Error(); a.mu.Unlock() }

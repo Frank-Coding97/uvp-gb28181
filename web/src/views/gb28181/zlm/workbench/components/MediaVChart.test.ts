@@ -94,7 +94,29 @@ describe("MediaVChart", () => {
   });
 
   afterEach(() => {
+    document.documentElement.style.removeProperty("--media-vchart-test-primary");
+    document.documentElement.style.removeProperty("--media-vchart-test-secondary");
     vi.unstubAllGlobals();
+  });
+
+  it("resolves CSS theme variables before passing a spec to the canvas renderer", async () => {
+    document.documentElement.style.setProperty("--media-vchart-test-primary", "#2563eb");
+    document.documentElement.style.setProperty("--media-vchart-test-secondary", "#0faaa6");
+
+    const wrapper = mount(MediaVChart, {
+      attachTo: document.body,
+      props: {
+        title: "媒体流量",
+        spec: {
+          type: "area",
+          color: ["var(--media-vchart-test-primary)", "var(--media-vchart-test-secondary)"]
+        }
+      }
+    });
+    await flushPromises();
+
+    expect(chart.specs[0]?.color).toEqual(["#2563eb", "#0faaa6"]);
+    wrapper.unmount();
   });
 
   it("creates once, updates synchronously, resizes, and releases on unmount", async () => {

@@ -83,11 +83,11 @@ describe("security preview system integration", () => {
     expect(source).toContain('activeTab === \'bans\'');
     expect(source).toContain("进入原因");
     expect(source).toContain("主机防火墙{{ record.firewallState }}");
-    expect(source).toContain("转为手动黑名单");
-    expect(source).toContain("这里只管理手动黑名单");
+		expect(source).toContain("转为手动黑名单");
+		expect(source).toContain("这里只管理手动黑名单");
 		expect(source).toContain("record.location");
-		expect(source).not.toContain("自动封禁永久生效");
-		expect(source).not.toContain("自动永久封禁");
+		expect(source).toContain("新自动封禁永久生效，需人工解封");
+		expect(source).toContain("历史限时记录保留原到期时间");
   });
 
   it("uses security events for the trend and provides explicit empty states", () => {
@@ -169,5 +169,27 @@ describe("security preview system integration", () => {
     expect(source).not.toContain('<strong>86</strong>');
     expect(source).not.toContain('<span class="attention-count">2</span>');
     expect(source).not.toContain('<a-tag>10 分钟</a-tag><ChevronRight');
+  });
+
+  it("sends the rule expiry through the real toggle payload path", () => {
+    expect(source).toContain("buildAccessRuleTogglePayload");
+    expect(source).toContain("buildAccessRuleTogglePayload(rule, enabled)");
+  });
+
+  it("explains the short window, fixed low-frequency INVITE rule and manual permanent release", () => {
+    expect(source).toContain("formatShortWindowInviteRule");
+    expect(source).toContain("shortWindowInviteRuleLabel");
+    expect(source).toContain("10 分钟累计 10 次未授权 INVITE");
+    expect(source).toContain("观察模式仅记录");
+    expect(source).not.toContain("默认未知 INVITE 示例");
+    expect(source).not.toContain("10 秒内 5 次");
+    expect(source).not.toContain("有限 TTL");
+    expect(source).not.toContain("有限TTL");
+  });
+
+  it("uses one Chinese reason formatter for event and ban records", () => {
+    expect(source).toContain("formatSecurityReason");
+    expect(source).toContain("rule: formatSecurityReason(event.reason)");
+    expect(source).toContain("reason: formatSecurityReason(decision.reason)");
   });
 });

@@ -147,4 +147,18 @@ describe("device management toolbar layout", () => {
         expect(source).toContain("listZLMNodes");
         expect(source).toContain("zlmNodesError");
     });
+
+    it("exposes one shared device maintenance entry and keeps it out of playback", () => {
+        expect(source).toContain("DeviceMaintenanceDialog");
+        expect(source).toContain("canViewMaintenance");
+        expect(source).toContain("设备维护");
+        expect(source).toContain("openDeviceMaintenance(record)");
+        expect(source).toContain("openDeviceMaintenance(item)");
+        expect(source).toContain("openDeviceMaintenance(deviceDetail)");
+        expect(source).toContain("v-model:visible=\"maintenanceVisible\"");
+
+        const playback = readFileSync(resolve(process.cwd(), "src/views/gb28181/components/PlayConsoleLinked.vue"), "utf8");
+        expect(playback).not.toContain("远程重启父设备");
+        expect(playback).not.toContain("runAdvancedAction('teleboot')");
+    });
 });

@@ -1,12 +1,12 @@
 <template>
-  <a-doption v-if="props.menu" class="uvp-user-menu-option" @click="visible = true">
+  <a-doption v-if="canDownload && props.menu" class="uvp-user-menu-option" @click="visible = true">
     <template #default>
       <span class="uvp-user-menu-icon"><Download :size="16" /></span>
       <span class="uvp-user-menu-label">下载任务</span>
       <span v-if="store.activeCount" class="uvp-user-menu-count">{{ store.activeCount }}</span>
     </template>
   </a-doption>
-  <a-badge v-else :count="store.activeCount" :max-count="9" dot>
+  <a-badge v-else-if="canDownload" :count="store.activeCount" :max-count="9" dot>
     <a-tooltip content="下载任务">
       <a-button
         type="text"
@@ -21,7 +21,7 @@
     </a-tooltip>
   </a-badge>
 
-  <a-drawer v-model:visible="visible" width="min(440px, 100vw)" :footer="false" unmount-on-close class="recording-download-drawer">
+  <a-drawer v-if="canDownload" v-model:visible="visible" width="min(440px, 100vw)" :footer="false" unmount-on-close class="recording-download-drawer">
     <template #title>下载任务</template>
     <div class="recording-download-toolbar">
       <span>{{ store.activeCount ? `${store.activeCount} 个进行中` : "暂无进行中的下载" }}</span>
@@ -50,14 +50,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { Download, RefreshCw, X } from "@lucide/vue";
 import { useRecordingDownloadStore, type RecordingDownloadItem } from "@/store/modules/recording-downloads";
 import { recordingDownloadCoordinator } from "@/views/gb28181/cloud-recordings/recordingDownloadService";
+import { useUserStoreHook } from "@/store/modules/user";
 
 const visible = ref(false);
 const props = defineProps<{ menu?: boolean }>();
 const store = useRecordingDownloadStore();
+const permissions = computed(() => useUserStoreHook().account.permissions);
+const canDownload = computed(() => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:recording:download"));
 const activeStatuses = new Set<RecordingDownloadItem["status"]>(["queued", "ready", "streaming"]);
 const terminalStatuses = new Set<RecordingDownloadItem["status"]>(["completed", "failed", "cancelled", "expired"]);
 
@@ -99,9 +102,18 @@ function statusText(status: RecordingDownloadItem["status"]) {
 
 function canCancel(status: RecordingDownloadItem["status"]) { return activeStatuses.has(status); }
 function canRetry(status: RecordingDownloadItem["status"]) { return status === "ready" || terminalStatuses.has(status); }
-async function cancel(taskId: string) { await Promise.resolve(recordingDownloadCoordinator.cancel(taskId)).catch(() => undefined); }
-async function retry(taskId: string) { await Promise.resolve(recordingDownloadCoordinator.retry(taskId)).catch(() => undefined); }
-function clearTerminal() { recordingDownloadCoordinator.clearTerminal(); }
+async function cancel(taskId: string) {
+  if (!canDownload.value) return;
+  await Promise.resolve(recordingDownloadCoordinator.cancel(taskId)).catch(() => undefined);
+}
+async function retry(taskId: string) {
+  if (!canDownload.value) return;
+  await Promise.resolve(recordingDownloadCoordinator.retry(taskId)).catch(() => undefined);
+}
+function clearTerminal() {
+  if (!canDownload.value) return;
+  recordingDownloadCoordinator.clearTerminal();
+}
 </script>
 
 <style scoped lang="scss">

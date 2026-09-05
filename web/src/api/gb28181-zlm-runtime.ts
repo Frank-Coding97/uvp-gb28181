@@ -185,10 +185,17 @@ export interface ZLMOverviewMetrics {
   mediaTrafficSampledNodes?: number;
 }
 
+export interface ZLMMediaRateSample {
+  sampledAt: number;
+  upstream: number;
+  downstream: number;
+}
+
 export interface ZLMOverview {
   nodes: ZLMNodeRuntime[];
   streams: ZLMRuntimeMedia[];
   metrics: ZLMOverviewMetrics;
+  mediaRateSamples?: ZLMMediaRateSample[];
   partial: boolean;
   asOf: string;
   metricsSampledNodeIds: number[];

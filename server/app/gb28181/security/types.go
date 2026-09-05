@@ -36,19 +36,20 @@ const (
 type Reason string
 
 const (
-	ReasonUnknownMethod   Reason = "unknown_method"
-	ReasonInviteRate      Reason = "unknown_invite_rate"
-	ReasonServerMismatch  Reason = "server_id_mismatch"
-	ReasonDigestFailure   Reason = "digest_failure"
-	ReasonNonceInvalid    Reason = "nonce_invalid"
-	ReasonNonceExpired    Reason = "nonce_expired"
-	ReasonNonceReplay     Reason = "nonce_replay"
-	ReasonNonceStale      Reason = "nonce_stale"
-	ReasonUnregisteredMsg Reason = "unregistered_message"
-	ReasonPacketTooLarge  Reason = "packet_too_large"
-	ReasonConnectionRate  Reason = "connection_rate"
-	ReasonManualBlacklist Reason = "manual_blacklist"
-	ReasonActiveBan       Reason = "active_ban"
+	ReasonUnknownMethod    Reason = "unknown_method"
+	ReasonInviteRate       Reason = "unknown_invite_rate"
+	ReasonInvitePersistent Reason = "unauthorized_invite_accumulation"
+	ReasonServerMismatch   Reason = "server_id_mismatch"
+	ReasonDigestFailure    Reason = "digest_failure"
+	ReasonNonceInvalid     Reason = "nonce_invalid"
+	ReasonNonceExpired     Reason = "nonce_expired"
+	ReasonNonceReplay      Reason = "nonce_replay"
+	ReasonNonceStale       Reason = "nonce_stale"
+	ReasonUnregisteredMsg  Reason = "unregistered_message"
+	ReasonPacketTooLarge   Reason = "packet_too_large"
+	ReasonConnectionRate   Reason = "connection_rate"
+	ReasonManualBlacklist  Reason = "manual_blacklist"
+	ReasonActiveBan        Reason = "active_ban"
 )
 
 var (
@@ -90,12 +91,8 @@ func DefaultPolicy() Policy {
 		MaxEventKeys:      4096,
 		SamplePerSource:   3,
 		NonceTTL:          60 * time.Second,
-		BanTTLs: []TTLStep{
-			{Score: 100, TTL: time.Minute},
-			{Score: 200, TTL: 10 * time.Minute},
-			{Score: 500, TTL: time.Hour},
-		},
-		Allowlist: defaultAllowlist(),
+		BanTTLs:           []TTLStep{{Score: 100, TTL: 0}},
+		Allowlist:         defaultAllowlist(),
 	}
 }
 
@@ -125,8 +122,8 @@ func (p Policy) Validate() error {
 		return ErrInvalidPolicy
 	}
 	lastScore := 0
-	for _, step := range p.BanTTLs {
-		if step.Score <= lastScore || step.TTL <= 0 {
+	for i, step := range p.BanTTLs {
+		if step.Score <= lastScore || step.TTL < 0 || (step.TTL == 0 && i != len(p.BanTTLs)-1) {
 			return ErrInvalidPolicy
 		}
 		lastScore = step.Score
@@ -156,9 +153,10 @@ func (p Policy) PermanentForScore(score int) bool {
 	return matched && ttl == 0
 }
 
-// WithPermanentAutoBan is retained for source compatibility. Automatic bans
-// are always finite; permanent rules belong to the manual access-rule model.
+// WithPermanentAutoBan applies the current automatic-ban policy. Historical
+// decisions retain their original expiry.
 func (p Policy) WithPermanentAutoBan() Policy {
+	p.BanTTLs = []TTLStep{{Score: p.BanScore, TTL: 0}}
 	return p
 }
 
@@ -184,16 +182,17 @@ func ValidateSource(raw string) (net.IP, error) {
 }
 
 type Event struct {
-	SourceIP  string    `json:"sourceIp"`
-	Transport string    `json:"transport"`
-	Method    string    `json:"method"`
-	DeviceID  string    `json:"deviceId"`
-	RiskScope RiskScope `json:"riskScope"`
-	UserAgent string    `json:"userAgent"`
-	Reason    Reason    `json:"reason"`
-	Action    Action    `json:"action"`
-	Score     int       `json:"score"`
-	Occurred  time.Time `json:"occurredAt"`
+	TransactionID string    `json:"-"`
+	SourceIP      string    `json:"sourceIp"`
+	Transport     string    `json:"transport"`
+	Method        string    `json:"method"`
+	DeviceID      string    `json:"deviceId"`
+	RiskScope     RiskScope `json:"riskScope"`
+	UserAgent     string    `json:"userAgent"`
+	Reason        Reason    `json:"reason"`
+	Action        Action    `json:"action"`
+	Score         int       `json:"score"`
+	Occurred      time.Time `json:"occurredAt"`
 }
 
 type BanDecision struct {

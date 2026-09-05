@@ -7,9 +7,12 @@ const source = readFileSync(resolve(process.cwd(), "src/views/home/home.vue"), "
 describe("editable realtime dashboard layout", () => {
   it("uses authoritative realtime sources", () => {
     expect(source).toContain("fetchSipDashboardSnapshot");
+		expect(source).toContain('fetchSipDashboardSnapshot({ window: "60s", precision: "1s" })');
     expect(source).toContain("getZLMOverview");
-    expect(source).toContain("listDevices");
-    expect(source).toContain("listChannels");
+    expect(source).toContain('getHomeDashboardSummary(["assets", "aggregate"])');
+    expect(source).toContain("dashboardSummary.value.assets");
+    expect(source).not.toContain("listDevices");
+    expect(source).not.toContain("listChannels");
     expect(source).toContain("setInterval(refreshData, 5_000)");
   });
 
@@ -47,17 +50,38 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("var(--uvp-danger)");
   });
 
-  it("supports editing, persistence, conflict messaging and reset", () => {
-    expect(source).toContain("编辑仪表盘");
-    expect(source).toContain("saveHomeDashboardLayout");
-    expect(source).toContain("resetHomeDashboardLayout");
-    expect(source).toContain("status === 409");
-    expect(source).toContain("grid?.setEditing(true)");
-  });
+	it("supports editing, persistence, conflict messaging and reset", () => {
+		expect(source).toContain("编辑仪表盘");
+		expect(source).toContain("saveHomeDashboardLayout");
+		expect(source).toContain("resetHomeDashboardLayout");
+		expect(source).toContain("status === 409");
+		expect(source).toContain("grid?.setEditing(true)");
+	});
+
+	it("guards dashboard layout entry points and write functions by permission", () => {
+		expect(source).toContain("useUserStoreHook");
+		expect(source).toContain('v-if="!editing && canEditLayout"');
+		expect(source).toContain('<template v-if="editing">');
+		expect(source).toContain('v-if="canResetLayout"');
+		expect(source).toContain('v-if="canSaveLayout"');
+		expect(source).toContain('if (!canEditLayout.value) return;');
+		expect(source).toContain('if (!canSaveLayout.value) return;');
+		expect(source).toContain('if (!canResetLayout.value) return;');
+	});
+
+	it("does not fetch or expose SIP platform details without explicit view permission", () => {
+		expect(source).toContain('const canViewSipConfig = computed(() => hasPermission("gb28181:sip:config:view"));');
+		expect(source).toContain("canViewSipConfig.value ? fetchSipPlatformInfo() : Promise.resolve(null)");
+		expect(source).toContain('if (!canViewSipConfig.value) return "--";');
+		expect(source).toContain("if (!canViewSipConfig.value) platformInfo.value = null;");
+		expect(source).toContain("fetchSipDashboardSnapshot");
+		expect(source).toContain("getZLMOverview");
+		expect(source).toContain("getHomeDashboardSummary");
+	});
 
   it("reuses the shared primary button treatment for dashboard editing actions", () => {
-    expect(source).toMatch(/<button v-if="!editing" class="btn-primary primary"[^>]*>.*编辑仪表盘<\/button>/s);
-    expect(source).toMatch(/<button class="btn-primary primary"[^>]*>.*保存布局.*<\/button>/s);
+		expect(source).toMatch(/<button v-if="!editing && canEditLayout" class="btn-primary primary"[^>]*>.*编辑仪表盘<\/button>/s);
+		expect(source).toMatch(/<button v-if="canSaveLayout" class="btn-primary primary"[^>]*>.*保存布局.*<\/button>/s);
     expect(source).toContain(".primary{color:#fff;background:var(--uvp-brand);border:0}");
     expect(source).toContain(".actions .primary{font-weight:600}");
   });
@@ -90,12 +114,28 @@ describe("editable realtime dashboard layout", () => {
   it("keeps cumulative traffic and realtime rate as different metrics", () => {
     expect(source).toContain("selectedTrafficValue");
     expect(source).toContain("trafficDirection");
-    expect(source).toContain("今日累计{{ trafficDirectionLabel }}流量");
+    expect(source).toContain("今日累计上行流量");
+    expect(source).toContain("今日已结算下行流量");
     expect(source).toContain("上行");
     expect(source).toContain("下行");
     expect(source).toContain("role=\"tablist\"");
     expect(source).toContain("aria-selected");
-    expect(source).toContain("<MediaRateArea :samples=\"mediaRateTrend\"");
+    expect(source).toContain("<MediaRateArea :samples=\"mediaRateSamples\"");
+    expect(source).toContain("overview.value.data.mediaRateSamples");
+    expect(source).not.toContain("[...mediaRateSamples.value");
+    expect(source).toContain("bytes(mediaRateSnapshot.upstream)");
+    expect(source).toContain("bytes(mediaRateSnapshot.downstream)");
+    expect(source).toContain("upstreamBytesPerSecond");
+    expect(source).toContain("downstreamBytesPerSecond");
+    expect(source).toContain("实时上行");
+    expect(source).toContain("实时下行");
+    expect(source).toContain("数据不完整 · 等待全部媒体节点");
+    expect(source).not.toContain("兼容模式 · 媒体源码率");
+    expect(source).not.toContain("mediaOverview.value?.streams.reduce");
+    expect(source).toContain('trafficDirection.value === "upstream" ? "var(--uvp-brand)" : "var(--uvp-brand-cyan)"');
+    expect(source).toContain(".traffic-legend .up{background:var(--uvp-brand)}");
+    expect(source).toContain(".traffic-legend .down{background:var(--uvp-brand-cyan)}");
+    expect(source).not.toContain("mediaRateDirection");
     expect(source).not.toContain("{{ bytes(mediaRate) }}<small>/s</small>");
     expect(source).not.toContain("class=\"bars\"");
   });
@@ -105,6 +145,22 @@ describe("editable realtime dashboard layout", () => {
     expect(source).toContain("playSummary.value?.rate");
     expect(source).toContain("近 24 小时暂无点播样本");
     expect(source).toContain("次媒体流就绪");
+		expect(source).toContain("staleStarted");
     expect(source).not.toContain("computed<number | null>(() => null)");
   });
+
+	it("uses a rolling 60-second SIP rate and durable daily transaction totals", () => {
+		expect(source).toContain("dashboardSummary.value?.sip");
+		expect(source).toContain("sipSummary.value?.transactions");
+		expect(source).toContain("sipSummary.value?.failure");
+		expect(source).toContain("reduce((sum, item) => sum + item.msgPerSec, 0)");
+		expect(source).not.toContain("item.msgPerSec, 0) / values.length * 60");
+		expect(source).not.toContain("sipSnapshot.value.todayTotal");
+	});
+
+	it("surfaces incomplete and unavailable media runtime snapshots", () => {
+		expect(source).toContain("mediaRuntimeStatus");
+		expect(source).toContain("部分数据");
+		expect(source).toContain("数据不可用");
+	});
 });

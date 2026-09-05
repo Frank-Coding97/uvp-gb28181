@@ -40,6 +40,7 @@ describe("RecordingPlayerDialog", () => {
     await flushPromises();
     const video = wrapper.get("video");
     expect(video.attributes("src")).toBe("/content/9007199254740993?cap=first");
+    expect(video.attributes("controlslist")).toBe("nodownload");
     Object.defineProperty(video.element, "currentTime", { configurable: true, writable: true, value: 37.5 });
     await video.trigger("error");
     await flushPromises();

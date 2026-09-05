@@ -23,6 +23,8 @@ import (
 const maxDashboardLayoutBody = 64 << 10
 const homeDashboardSectionTimeout = 4 * time.Second
 
+var homeDashboardLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
 type HomeDashboardController struct {
 	basecontrollers.Common
 	db         func() *gorm.DB
@@ -33,6 +35,14 @@ type HomeDashboardController struct {
 
 type HomeDashboardOverview interface {
 	GetOverview(context.Context) (management.OverviewResult, error)
+}
+
+type homeRuntimeBinding struct {
+	StreamID    string `json:"streamId"`
+	DeviceID    string `json:"deviceId"`
+	DeviceName  string `json:"deviceName"`
+	ChannelID   string `json:"channelId"`
+	ChannelName string `json:"channelName"`
 }
 
 func NewHomeDashboardController(provider ...func() *gorm.DB) *HomeDashboardController {
@@ -47,6 +57,22 @@ func (controller *HomeDashboardController) SetOverview(provider HomeDashboardOve
 	controller.overviewMu.Lock()
 	controller.overview = provider
 	controller.overviewMu.Unlock()
+}
+
+func queryHomeRuntimeBindings(ctx context.Context, db *gorm.DB, scope func(*gorm.DB) *gorm.DB) ([]homeRuntimeBinding, error) {
+	rows := make([]homeRuntimeBinding, 0)
+	err := db.WithContext(ctx).Table("gb_channel").
+		Scopes(scope).
+		Select(`gb_channel.stream_id AS stream_id,
+			gb_channel.device_id AS device_id,
+			COALESCE(NULLIF(gb_device.alias, ''), NULLIF(gb_device.name, ''), gb_channel.device_id) AS device_name,
+			gb_channel.channel_id AS channel_id,
+			COALESCE(NULLIF(gb_channel.alias, ''), NULLIF(gb_channel.name, ''), gb_channel.channel_id) AS channel_name`).
+		Joins("LEFT JOIN gb_device ON gb_device.device_id = gb_channel.device_id AND gb_device.deleted_at IS NULL").
+		Where("gb_channel.stream_id IS NOT NULL AND gb_channel.stream_id <> '' AND gb_channel.deleted_at IS NULL").
+		Order("gb_channel.stream_id, gb_channel.id").
+		Scan(&rows).Error
+	return rows, err
 }
 
 func (controller *HomeDashboardController) Summary(c *gin.Context) {
@@ -82,7 +108,7 @@ func (controller *HomeDashboardController) Summary(c *gin.Context) {
 	}
 
 	scopeContext := c.Copy()
-	assetService := dashboard.NewAssetSummaryService(db, time.Local)
+	assetService := dashboard.NewAssetSummaryService(db, homeDashboardLocation)
 	deviceScope := datascope.VisibilityScope(scopeContext, "gb_device.owner_dept_id", "gb_device.device_id")
 	channelScope := datascope.VisibilityScope(scopeContext, "gb_channel.owner_dept_id", "gb_channel.device_id")
 	trafficScope := datascope.VisibilityScope(scopeContext, "traffic.owner_dept_id", "traffic.device_code")
@@ -95,8 +121,12 @@ func (controller *HomeDashboardController) Summary(c *gin.Context) {
 		})
 	}
 	if groups["aggregate"] {
+		launch("bindings", func(ctx context.Context) any {
+			bindings, queryErr := queryHomeRuntimeBindings(ctx, db, channelScope)
+			return homeSection(asOf, dashboard.Scope{Type: dashboard.ScopeUserVisible}, bindings, queryErr)
+		})
 		launch("sip", func(ctx context.Context) any {
-			sip, queryErr := dashboard.NewSIPMetricQuery(db, time.Local).Summary(ctx, now)
+			sip, queryErr := dashboard.NewSIPMetricQuery(db, homeDashboardLocation).Summary(ctx, now)
 			return homeSection(asOf, dashboard.Scope{Type: dashboard.ScopePlatform}, sip, queryErr)
 		})
 		launch("play", func(ctx context.Context) any {

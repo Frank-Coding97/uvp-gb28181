@@ -51,15 +51,15 @@ export interface PlayHistoryPoint {
 
 export interface PlayHistory extends DashboardHistoryBase {
   points: PlayHistoryPoint[];
-  summary: { attempts: number; success: number; failure: number; started: number; rate: number | null };
+  summary: { attempts: number; success: number; failure: number; started: number; staleStarted: number; rate: number | null };
   failureStages: Array<{ key: string; count: number; rate: number }>;
   reuse: Array<{ key: string; count: number; rate: number }>;
 }
 
 export interface TrafficHistoryPoint {
   bucketStart: string;
-  upstreamBytes: number | null;
-  downstreamBytes: number | null;
+  upstreamBytes: number;
+  downstreamBytes: number;
 }
 
 export interface TrafficHistory extends DashboardHistoryBase {

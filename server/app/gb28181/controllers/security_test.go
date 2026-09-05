@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http/httptest"
 	"testing"
@@ -12,18 +13,24 @@ import (
 )
 
 type securityControllerProvider struct {
-	events []gbsecurity.EventAggregate
-	bans   []gbsecurity.FirewallBan
-	rules  []gbsecurity.AccessRule
+	events        []gbsecurity.EventAggregate
+	bans          []gbsecurity.FirewallBan
+	rules         []gbsecurity.AccessRule
+	policy        gbsecurity.SecurityPolicy
+	updatedPolicy *gbsecurity.SecurityPolicy
 }
 
 func (p *securityControllerProvider) Snapshot() SecuritySnapshot          { return SecuritySnapshot{} }
 func (p *securityControllerProvider) Events() []gbsecurity.EventAggregate { return p.events }
 func (p *securityControllerProvider) Bans() []gbsecurity.FirewallBan      { return p.bans }
 func (p *securityControllerProvider) Policy() gbsecurity.SecurityPolicy {
+	if p.policy.BanScore != 0 {
+		return p.policy
+	}
 	return gbsecurity.DefaultPolicy()
 }
-func (p *securityControllerProvider) UpdatePolicy(gbsecurity.SecurityPolicy, string) error {
+func (p *securityControllerProvider) UpdatePolicy(policy gbsecurity.SecurityPolicy, _ string) error {
+	p.updatedPolicy = &policy
 	return nil
 }
 func (p *securityControllerProvider) Unban(string, string) error { return nil }
@@ -125,20 +132,59 @@ func TestSecurityControllerAccessRulesPaginatesFilteredListNewestFirst(t *testin
 	require.Equal(t, uint64(3), response.Data.Items[0].ID)
 }
 
-func TestSecurityPolicyViewExposesFiniteAutomaticTTLs(t *testing.T) {
+func TestSecurityPolicyViewExposesPermanentAutomaticBan(t *testing.T) {
 	view := securityPolicyView(gbsecurity.DefaultPolicy())
-	require.False(t, view.PermanentAutoBan)
-	require.Len(t, view.BanTTLs, 3)
-	require.Equal(t, 60, view.BanTTLs[0].TTL)
-	require.Equal(t, 600, view.BanTTLs[1].TTL)
-	require.Equal(t, 3600, view.BanTTLs[2].TTL)
+	require.True(t, view.PermanentAutoBan)
+	require.Len(t, view.BanTTLs, 1)
+	require.Equal(t, view.BanScore, view.BanTTLs[0].Score)
+	require.Zero(t, view.BanTTLs[0].TTL)
 }
 
-func TestPolicyFromViewRejectsPermanentAutomaticBan(t *testing.T) {
+func TestSecurityControllerPolicyReturnsPermanentAutomaticBan(t *testing.T) {
+	router := gin.New()
+	router.GET("/policy", NewSecurityController(&securityControllerProvider{policy: gbsecurity.DefaultPolicy()}).Policy)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest("GET", "/policy", nil))
+
+	var response struct {
+		Code int                `json:"code"`
+		Data SecurityPolicyView `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, 200, recorder.Code)
+	require.Equal(t, 0, response.Code)
+	require.True(t, response.Data.PermanentAutoBan)
+	require.Equal(t, []struct {
+		Score int `json:"score"`
+		TTL   int `json:"ttl"`
+	}{{Score: response.Data.BanScore, TTL: 0}}, response.Data.BanTTLs)
+}
+
+func TestPolicyFromViewNormalizesLegacyFiniteAutomaticBan(t *testing.T) {
 	view := securityPolicyView(gbsecurity.DefaultPolicy())
-	view.PermanentAutoBan = true
+	view.PermanentAutoBan = false
+	view.BanTTLs[0].TTL = 3600
 	policy := policyFromView(view)
-	require.Error(t, policy.Validate())
+	require.NoError(t, policy.Validate())
+	require.Equal(t, []gbsecurity.TTLStep{{Score: view.BanScore, TTL: 0}}, policy.BanTTLs)
+}
+
+func TestSecurityControllerUpdatePolicyNormalizesLegacyFiniteAutomaticBan(t *testing.T) {
+	provider := &securityControllerProvider{policy: gbsecurity.DefaultPolicy()}
+	router := gin.New()
+	router.PUT("/policy", NewSecurityController(provider).UpdatePolicy)
+
+	view := securityPolicyView(gbsecurity.DefaultPolicy())
+	view.PermanentAutoBan = false
+	view.BanTTLs[0].TTL = 3600
+	payload, err := json.Marshal(view)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest("PUT", "/policy", bytes.NewReader(payload)))
+
+	require.Equal(t, 200, recorder.Code)
+	require.NotNil(t, provider.updatedPolicy)
+	require.Equal(t, []gbsecurity.TTLStep{{Score: view.BanScore, TTL: 0}}, provider.updatedPolicy.BanTTLs)
 }
 
 func serveSecurityList(t *testing.T, target string, handler gin.HandlerFunc) *httptest.ResponseRecorder {

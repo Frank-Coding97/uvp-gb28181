@@ -48,7 +48,7 @@
               <template #icon><RotateCcw :size="15" /></template>
               重置
             </a-button>
-            <a-button v-if="canDelete" data-testid="alarm-clear-all" class="alarm-clear-all-btn" type="primary" status="warning" :loading="clearDeleting" :disabled="clearDeleting" @click="requestClearAll">
+            <a-button v-if="canClear" data-testid="alarm-clear-all" class="alarm-clear-all-btn" type="primary" status="warning" :loading="clearDeleting" :disabled="clearDeleting" @click="requestClearAll">
               <template #icon><Eraser :size="15" /></template>
               一键清理
             </a-button>
@@ -185,6 +185,7 @@ import {
   alarmPriorityTagColor,
   alarmTypeOptionsForMethod,
   displayAlarmEntityName,
+  mayClearAlarms,
   mayDeleteAlarms,
   mayViewAlarms,
   normalizeAlarmQuery,
@@ -197,6 +198,7 @@ const proxy = useGlobalProperties();
 const userStore = useUserStoreHook();
 const canView = computed(() => mayViewAlarms(userStore.account.permissions));
 const canDelete = computed(() => mayDeleteAlarms(userStore.account.permissions));
+const canClear = computed(() => mayClearAlarms(userStore.account.permissions));
 
 const form = reactive({
   alarmRange: [] as string[],
@@ -327,7 +329,7 @@ function requestSingleDelete(alarm: AlarmListItem) {
 }
 
 async function performSingleDelete(id: string) {
-  if (deletingIds.value.has(id)) return;
+  if (!canDelete.value || deletingIds.value.has(id)) return;
   deletingIds.value = new Set([...deletingIds.value, id]);
   try {
     const response = await deleteAlarm(id);
@@ -363,7 +365,7 @@ function requestBatchDelete() {
 }
 
 async function performBatchDelete() {
-  if (batchDeleting.value) return;
+  if (!canDelete.value || batchDeleting.value) return;
   batchDeleting.value = true;
   const ids = [...selectedRowKeys.value];
   try {
@@ -381,7 +383,7 @@ async function performBatchDelete() {
 }
 
 function requestClearAll() {
-  if (!canDelete.value || clearDeleting.value) return;
+  if (!canClear.value || clearDeleting.value) return;
   Modal.warning({
     title: "一键清理告警",
     content: "将清除您数据权限范围内的所有告警记录，删除后不可恢复。",
@@ -395,7 +397,7 @@ function requestClearAll() {
 }
 
 async function performClearAll() {
-  if (clearDeleting.value) return;
+  if (!canClear.value || clearDeleting.value) return;
   clearDeleting.value = true;
   try {
     const response = await clearAllAlarms();

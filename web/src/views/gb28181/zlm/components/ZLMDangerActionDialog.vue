@@ -20,12 +20,14 @@ const props = withDefaults(defineProps<{
   requireReason?: boolean;
   actionLabel?: string;
   busy?: boolean;
+  contextBound?: boolean;
 }>(), {
   fingerprint: "",
   impacts: () => [],
   requireReason: true,
   actionLabel: "确认执行",
-  busy: false
+  busy: false,
+  contextBound: true
 });
 
 const emit = defineEmits<{
@@ -41,8 +43,8 @@ const typedPhrase = ref("");
 
 function currentIdentity() {
   return {
-    contextVersion: context.dialogRevision,
-    nodeId: context.selectedNodeId ?? props.nodeId,
+    contextVersion: props.contextBound ? context.dialogRevision : 0,
+    nodeId: props.contextBound ? context.selectedNodeId ?? props.nodeId : props.nodeId,
     targetKey: props.targetKey,
     fingerprint: props.fingerprint
   };
@@ -50,7 +52,7 @@ function currentIdentity() {
 
 function capture() {
   snapshot.value = createDangerActionSnapshot({
-    contextVersion: context.dialogRevision,
+    contextVersion: props.contextBound ? context.dialogRevision : 0,
     nodeId: props.nodeId,
     nodeName: props.nodeName,
     targetKey: props.targetKey,

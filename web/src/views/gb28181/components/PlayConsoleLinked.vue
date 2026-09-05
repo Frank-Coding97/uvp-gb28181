@@ -14,6 +14,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSPro
 import { Message, Modal } from "@arco-design/web-vue";
 import { copyTextToClipboard } from "@/utils/app";
 import type { PlaybackConsoleDisplayMode } from "@/store/modules/playback-console";
+import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "./PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
 import { assertPCMA8000, preferPCMA8000, waitForIceGatheringComplete } from "./talkPublisher";
@@ -257,6 +258,27 @@ function isCurrentChannelContext(channelId: number, token: number, contextKey: s
 
 /* ────────────────────────── Tab 切换 ────────────────────────── */
 
+const userStore = useUserStoreHook();
+const permissions = computed(() => userStore.account.permissions ?? []);
+const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
+const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
+const canMonitorPlayback = computed(() => hasPermission("gb28181:play:monitor"));
+const canDiagnosePlayback = computed(() => hasPermission("gb28181:play:diagnose"));
+const canSharePlayback = computed(() => hasPermission("gb28181:play:share"));
+const canViewPtz = computed(() => hasPermission("gb28181:ptz:view"));
+const canControlPtz = computed(() => hasPermission("gb28181:ptz:control"));
+const canSavePtzPreset = computed(() => hasPermission("gb28181:ptz:preset:save"));
+const canCallPtzPreset = computed(() => hasPermission("gb28181:ptz:preset:call"));
+const canDeletePtzPreset = computed(() => hasPermission("gb28181:ptz:preset:delete"));
+const canControlPtzCruise = computed(() => hasPermission("gb28181:ptz:cruise"));
+const canUpdatePtzHome = computed(() => hasPermission("gb28181:ptz:home"));
+const canSnapshot = computed(() => hasPermission("gb28181:device:snapshot"));
+const canControlDevice = computed(() => hasPermission("gb28181:device:control"));
+const canTalk = computed(() => hasPermission("gb28181:talk:control"));
+const canReadPtzSpeed = computed(() => hasPermission("gb28181:sip:config:view"));
+const canPtzPanel = computed(() => canViewPtz.value || canControlPtz.value || canSavePtzPreset.value || canCallPtzPreset.value || canDeletePtzPreset.value || canControlPtzCruise.value || canUpdatePtzHome.value);
+const canAdvancedPanel = computed(() => canControlDevice.value || canSnapshot.value);
+
 /* "流信息"tab 已并入"视频探针":概览卡承担全部实时监视信息(媒体节点/流 ID/视频音频参数/
  * 数据速率/丢包/当前观看)。删掉独立 tab 让侧栏窄一档、层级也更清爽。 */
 type TabKey = "ptz" | "probe" | "advanced";
@@ -268,6 +290,14 @@ const tabs: Array<{ key: TabKey; label: string; icon: any; description: string }
     { key: "probe", label: "视频探针", icon: Activity, description: "实时监视 + 逐帧采样" },
     { key: "advanced", label: "高级", icon: Settings, description: "关键帧 · 布防 · 重启" },
 ];
+const visibleTabs = computed(() => tabs.filter(tab => (
+    (tab.key === "ptz" && canPtzPanel.value)
+    || (tab.key === "probe" && (canMonitorPlayback.value || canDiagnosePlayback.value))
+    || (tab.key === "advanced" && canAdvancedPanel.value)
+)));
+watch(visibleTabs, nextTabs => {
+    if (nextTabs.length > 0 && !nextTabs.some(tab => tab.key === activeTab.value)) activeTab.value = nextTabs[0].key;
+}, { immediate: true });
 
 /* ────────────────────────── 视频区状态 ────────────────────────── */
 
@@ -436,8 +466,8 @@ function capabilityActionTitle(key: keyof DeviceControlCapabilities, action: str
     const stateText = value.state === "unsupported" ? "设备上报不支持" : "设备未明确声明支持";
     return `${action} · ${stateText}${value.reason ? ` (${value.reason})` : ""},仍可尝试,以设备响应为准`;
 }
-const isAudioCapable = computed(() => props.channel?.status === 1);
-const talkAvailable = computed(() => props.channel?.status === 1);
+const isAudioCapable = computed(() => props.channel?.status === 1 && canTalk.value);
+const talkAvailable = computed(() => props.channel?.status === 1 && canTalk.value);
 
 const ptzMode = ref<"speed" | "precise">("speed"); // 速度模式 / 精准模式
 const moveSpeed = ref(DEFAULT_PTZ_SPEED_LEVEL);
@@ -663,7 +693,7 @@ const cruiseDraftError = computed(() => {
     return "";
 });
 function openSaveCruiseDialog() {
-    if (!props.channel || presets.value.length === 0) return;
+    if (!canControlPtzCruise.value || !props.channel || presets.value.length === 0) return;
     const firstPreset = presets.value[0].id;
     cruiseDraft.value = {
         trackId: nextCruiseTrackId(),
@@ -713,7 +743,7 @@ function moveCruiseStop(index: number, delta: number) {
     stops.splice(target, 0, item);
 }
 async function handleSaveCruiseBeforeOk(done: (closable?: boolean) => void) {
-    if (!cruiseDraft.value || !props.channel) { done(false); return; }
+    if (!canControlPtzCruise.value || !cruiseDraft.value || !props.channel) { done(false); return; }
     if (cruiseDraft.value.submitting) { done(false); return; }
     cruiseDraftTouched.value = true;
     if (cruiseDraftError.value) { done(false); return; }
@@ -1339,6 +1369,7 @@ function snapshotStatusText() {
 }
 
 async function pollSnapshotSession(channelId: number, sessionId: string, token: number) {
+    if (!canSnapshot.value) return;
     clearSnapshotPolling();
     try {
         const response = await getDeviceSnapshotSession(channelId, sessionId);
@@ -1354,7 +1385,7 @@ async function pollSnapshotSession(channelId: number, sessionId: string, token: 
 
 async function runDeviceSnapshot() {
     const channelId = props.channel?.id;
-    if (!channelId || props.channel?.status !== 1 || snapshotPending.value) return;
+    if (!canSnapshot.value || !channelId || props.channel?.status !== 1 || snapshotPending.value) return;
     snapshotPending.value = true;
     snapshotSession.value = null;
     const token = sessionToken;
@@ -1474,7 +1505,7 @@ function clearProbeTimers() {
 }
 
 async function startProbe() {
-    if (phase.value !== "playing" || probeState.value === "sampling" || !playResult.value?.streamId) return;
+    if (!canDiagnosePlayback.value || phase.value !== "playing" || probeState.value === "sampling" || !playResult.value?.streamId) return;
     const streamId = playResult.value.streamId;
     const session = sessionToken;
     const token = ++probeToken;
@@ -1554,7 +1585,7 @@ function applyMonitor(snapshot: StreamMonitorSnapshot) {
 async function refreshMonitor() {
     const streamId = playResult.value?.streamId;
     const token = sessionToken;
-    if (!streamId || phase.value !== "playing") return;
+    if (!canMonitorPlayback.value || !streamId || phase.value !== "playing") return;
     try {
         const response = await getStreamMonitor(streamId);
         if (token !== sessionToken || playResult.value?.streamId !== streamId) return;
@@ -1576,7 +1607,7 @@ async function refreshMonitor() {
 }
 
 function beginMonitor() {
-    if (monitorTimer) return;
+    if (!canMonitorPlayback.value || monitorTimer) return;
     void refreshMonitor();
     monitorTimer = window.setInterval(() => void refreshMonitor(), 2000);
 }
@@ -1593,12 +1624,12 @@ function clearMonitor() {
 
 async function startSession() {
     const channel = props.channel;
-    if (!channel || !props.visible) return;
+    if (!canStartPlayback.value || !channel || !props.visible) return;
     const previousStreamId = playResult.value?.streamId;
     const token = ++sessionToken;
     resetSessionState();
     await stopTalk();
-    if (previousStreamId) await stopPlay(previousStreamId).catch(() => undefined);
+    if (hasPermission("gb28181:play:stop") && previousStreamId) await stopPlay(previousStreamId).catch(() => undefined);
     if (token !== sessionToken || !props.visible || props.channel?.id !== channel.id) return;
     phase.value = "requesting";
     errorMessage.value = "";
@@ -1608,7 +1639,7 @@ async function startSession() {
     try {
         const response = await startPlay(channel.deviceId, channel.channelId);
         if (token !== sessionToken || !props.visible) {
-            if (token > localCleanupThroughToken && response.data?.streamId) {
+            if (hasPermission("gb28181:play:stop") && token > localCleanupThroughToken && response.data?.streamId) {
                 await stopPlay(response.data.streamId).catch(() => undefined);
             }
             return;
@@ -1765,6 +1796,7 @@ function deviceStatusOperationErrors() {
 }
 
 function getDeviceStatusOperationWithInsurance(channelId: number, tracked: DeviceStatusPollOperation) {
+    if (!canViewPtz.value) return Promise.reject(new Error("当前账号没有云台状态查看权限"));
     const remainingMs = tracked.deadlineAt - Date.now();
     if (remainingMs <= 0) return Promise.reject(new Error("设备状态查询超时,结果未知"));
     const request = getPtzOperation(channelId, tracked.operationId);
@@ -1803,6 +1835,7 @@ function getDeviceStatusOperationWithInsurance(channelId: number, tracked: Devic
 }
 
 function getDeviceStatusFactWithInsurance(channelId: number) {
+    if (!canViewPtz.value) return Promise.reject(new Error("当前账号没有云台状态查看权限"));
     const request = getDeviceStatus(channelId, false);
     return new Promise<Awaited<ReturnType<typeof getDeviceStatus>>>((resolve, reject) => {
         let settled = false;
@@ -1908,7 +1941,7 @@ async function loadDeviceStatus(
     preserveUnknownFacts = false,
     contextKey = channelContextKey(),
 ) {
-    if (!channelId || !isCurrentChannelContext(channelId, token, contextKey)) return;
+    if (!canViewPtz.value || !channelId || !isCurrentChannelContext(channelId, token, contextKey)) return;
     clearDeviceStatusPolling();
     const generation = deviceStatusPollGeneration;
     deviceStatusPending.value = true;
@@ -1945,7 +1978,7 @@ async function loadDeviceStatus(
 
 async function loadPanelData() {
     const channel = props.channel;
-    if (!channel) return;
+    if (!canViewPtz.value || !channel) return;
     const token = sessionToken;
     try {
         const response = await getControlCapabilities(channel.id);
@@ -1963,7 +1996,7 @@ async function loadPanelData() {
 }
 
 async function loadPresets(channelId = props.channel?.id, token = sessionToken) {
-    if (!channelId) return;
+    if (!canViewPtz.value || !channelId) return;
     try {
         const response = await listPtzPresets(channelId);
         if (token === sessionToken && props.channel?.id === channelId && response.code === 0 && response.data) {
@@ -1977,7 +2010,7 @@ async function loadPresets(channelId = props.channel?.id, token = sessionToken) 
 }
 
 async function loadCruises(channelId = props.channel?.id, token = sessionToken, refresh = true) {
-    if (!channelId || token !== sessionToken || props.channel?.id !== channelId) return;
+    if (!canViewPtz.value || !channelId || token !== sessionToken || props.channel?.id !== channelId) return;
     cruiseRefreshPending.value = false;
     cruiseLoadError.value = "";
     cruiseRefreshError.value = "";
@@ -2020,7 +2053,7 @@ async function loadCruises(channelId = props.channel?.id, token = sessionToken, 
 }
 
 async function loadHomePosition(channelId = props.channel?.id, token = sessionToken) {
-    if (!channelId) return;
+    if (!canViewPtz.value || !channelId) return;
     const generation = homePositionGeneration;
     if (token === sessionToken && generation === homePositionGeneration && props.channel?.id === channelId) {
         homePhase.value = "loading";
@@ -2051,7 +2084,7 @@ const ptzActions: Record<string, string> = {
 let activePtzAction = "";
 
 async function sendPtz(action: string) {
-    if (!props.channel) return;
+    if (!canControlPtz.value || !props.channel) return;
     if (action === "停止") activePtzAction = "";
     else activePtzAction = action;
     try {
@@ -2068,6 +2101,7 @@ async function sendPtz(action: string) {
 
 async function loadDefaultPtzSpeed() {
     moveSpeed.value = DEFAULT_PTZ_SPEED_LEVEL;
+    if (!canReadPtzSpeed.value) return;
     try {
         const response = await fetchPTZDefaultSpeedConfig();
         if (response.code === 0 && response.data) moveSpeed.value = normalizePtzSpeedLevel(response.data.level);
@@ -2129,7 +2163,7 @@ function updateJoystick(event: PointerEvent, stage: HTMLElement) {
     }
 }
 function startJoystick(event: PointerEvent) {
-    if (!props.channel) return;
+    if (!canControlPtz.value || !props.channel) return;
     const stage = event.currentTarget as HTMLElement;
     joystickDragging.value = true;
     joystickPointerId.value = event.pointerId;
@@ -2150,6 +2184,7 @@ function endJoystick(event?: PointerEvent) {
     resetJoystickPosition();
 }
 function handleJoystickKeydown(event: KeyboardEvent) {
+    if (!canControlPtz.value) return;
     const direction = joystickDirectionMap[event.key];
     if (!direction) return;
     event.preventDefault();
@@ -2170,7 +2205,7 @@ function releasePtzControl() {
 }
 
 async function sendPrecise() {
-    if (!props.channel) return;
+    if (!canControlPtz.value || !props.channel) return;
     try {
         const response = await controlPtzPrecise(props.channel.id, { pan: precisePan.value, tilt: preciseTilt.value, zoom: preciseZoom.value });
         if (response.code !== 0) throw new Error(response.message || "精准定位失败");
@@ -2181,7 +2216,7 @@ async function sendPrecise() {
 }
 
 async function callPreset(id: number) {
-    if (!props.channel) return;
+    if (!canCallPtzPreset.value || !props.channel) return;
     try {
         const response = await callPtzPreset(props.channel.id, id);
         if (response.code !== 0) throw new Error(response.message || "调用预置位失败");
@@ -2189,7 +2224,7 @@ async function callPreset(id: number) {
     } catch (error: any) { Message.error(error?.message || "调用预置位失败"); }
 }
 function openSavePresetDialog() {
-    if (!props.channel) return;
+    if (!canSavePtzPreset.value || !props.channel) return;
     const nextId = nextPresetId();
     presetDraft.value = { id: nextId, name: `预置位 ${nextId}`, submitting: false };
     presetNameTouched.value = false;
@@ -2208,7 +2243,7 @@ const presetNameError = computed(() => {
     return "";
 });
 async function handleSavePresetBeforeOk(done: (closable?: boolean) => void) {
-    if (!presetDraft.value || !props.channel) { done(false); return; }
+    if (!canSavePtzPreset.value || !presetDraft.value || !props.channel) { done(false); return; }
     presetNameTouched.value = true;
     if (presetNameError.value) { done(false); return; }
     const name = presetDraft.value.name.trim() || `预置位 ${presetDraft.value.id}`;
@@ -2229,8 +2264,9 @@ async function handleSavePresetBeforeOk(done: (closable?: boolean) => void) {
     }
 }
 async function deletePreset(id: number) {
-    if (!props.channel) return;
+    if (!canDeletePtzPreset.value || !props.channel) return;
     Modal.warning({ title: `确认删除预置位 #${id}?`, content: "删除命令会下发到设备。", okText: "确认删除", cancelText: "取消", onOk: async () => {
+        if (!hasPermission("gb28181:ptz:preset:delete") || !props.channel) return;
         try {
             const response = await deletePtzPreset(props.channel!.id, id);
             if (response.code !== 0) throw new Error(response.message || "删除预置位失败");
@@ -2241,7 +2277,7 @@ async function deletePreset(id: number) {
 }
 
 async function executeCruiseToggle(id: number) {
-    if (!props.channel) return;
+    if (!canControlPtzCruise.value || !props.channel) return;
     const isCurrent = activeCruiseId.value === id;
     const action = isCurrent && cruiseState.value === "start-sent" ? "stop" : "start";
     const unconfirmed = cruiseTracks.value.some((track) => track.id === id && track.pending);
@@ -2268,6 +2304,7 @@ async function executeCruiseToggle(id: number) {
     } catch (error: any) { Message.error(error?.message || "巡航指令失败"); }
 }
 function toggleCruise(id: number) {
+    if (!canControlPtzCruise.value) return;
     const isCurrent = activeCruiseId.value === id && cruiseState.value === "start-sent";
     const unconfirmed = cruiseTracks.value.some((track) => track.id === id && track.pending);
     if (!isCurrent && unconfirmed) {
@@ -2277,7 +2314,7 @@ function toggleCruise(id: number) {
             hideCancel: false,
             okText: "继续试运行",
             cancelText: "取消",
-            onOk: () => executeCruiseToggle(id),
+            onOk: () => hasPermission("gb28181:ptz:cruise") ? executeCruiseToggle(id) : undefined,
         });
         return;
     }
@@ -2285,7 +2322,7 @@ function toggleCruise(id: number) {
 }
 async function stopCruise() {
     const trackId = activeCruiseId.value;
-    if (!props.channel || trackId === null) return;
+    if (!canControlPtzCruise.value || !props.channel || trackId === null) return;
     const channelId = props.channel.id;
     const token = sessionToken;
     try {
@@ -2298,10 +2335,11 @@ async function stopCruise() {
     } catch (error: any) { Message.error(error?.message || "停止巡航失败"); }
 }
 async function deleteCruise(id: number) {
-    if (!props.channel) return;
+    if (!canControlPtzCruise.value || !props.channel) return;
     const channelId = props.channel.id;
     const token = sessionToken;
     Modal.warning({ title: "删除巡航轨迹", content: `确认删除巡航轨迹 #${id}?此操作会下发到设备,不可撤销。`, hideCancel: false, okText: "删除", cancelText: "取消", onOk: async () => {
+        if (!hasPermission("gb28181:ptz:cruise") || !props.channel) return;
         try {
             const response = await controlPtzCruise(channelId, { action: "delete", trackId: id });
             if (token !== sessionToken || props.channel?.id !== channelId) return;
@@ -2332,7 +2370,7 @@ function closeAssetManager() {
 }
 
 async function saveHomePosition() {
-    if (!props.channel || !homeCanSubmit.value) return;
+    if (!canUpdatePtzHome.value || !props.channel || !homeCanSubmit.value) return;
     const channelId = props.channel.id;
     const token = sessionToken;
     const generation = beginHomePositionOperation();
@@ -2385,7 +2423,7 @@ async function saveHomePosition() {
 }
 
 async function refreshHomePosition() {
-    if (!props.channel || !homeCanRefresh.value) return;
+    if (!canViewPtz.value || !props.channel || !homeCanRefresh.value) return;
     const channelId = props.channel.id;
     const token = sessionToken;
     const generation = beginHomePositionOperation();
@@ -2414,7 +2452,7 @@ async function refreshHomePosition() {
 }
 
 async function readPreciseStatus() {
-    if (!props.channel) return;
+    if (!canViewPtz.value || !props.channel) return;
     try {
         const response = await getPtzPreciseStatus(props.channel.id, true);
         if (response.code !== 0) throw new Error(response.message || "读取当前位置失败");
@@ -2526,6 +2564,7 @@ function advancedOperationUnknown(action: string, message: string) {
 }
 
 function getAdvancedOperationWithInsurance(action: string, channelId: number, operationId: string) {
+    if (!canControlDevice.value) return Promise.reject(new Error("当前账号没有设备控制权限"));
     const context = advancedOperationPollContexts.get(action);
     if (!context || context.operationId !== operationId) {
         return Promise.reject(new Error("操作轮询已失效"));
@@ -2586,7 +2625,7 @@ function scheduleAdvancedOperationPoll(
 }
 
 async function pollAdvancedOperation(action: string, operationId: string, channelId: number, token: number, contextKey: string) {
-    if (!isCurrentChannelContext(channelId, token, contextKey) || !hasCurrentAdvancedOperationPoll(action, operationId)) return;
+    if (!canControlDevice.value || !isCurrentChannelContext(channelId, token, contextKey) || !hasCurrentAdvancedOperationPoll(action, operationId)) return;
     const activeToken = advancedStatusToken.value;
     try {
         const response = await getAdvancedOperationWithInsurance(action, channelId, operationId);
@@ -2668,6 +2707,7 @@ function pointInDragLayer(event: PointerEvent) {
 }
 
 function toggleDragZoomMode(action: "drag_zoom_in" | "drag_zoom_out") {
+    if (!canControlDevice.value) return;
     if (dragZoomMode.value && dragZoomAction.value === action) {
         dragZoomMode.value = false;
     } else {
@@ -2703,7 +2743,7 @@ function cancelDragZoom(event?: PointerEvent) {
 }
 
 async function finishDragZoom(event: PointerEvent) {
-    if (!dragZoomStart.value || dragZoomPointerId !== event.pointerId) return;
+    if (!canControlDevice.value || !dragZoomStart.value || dragZoomPointerId !== event.pointerId) return;
     updateDragZoom(event);
     const layer = event.currentTarget as HTMLElement;
     const rect = dragZoomPlaybackRect(layer);
@@ -2736,7 +2776,7 @@ async function finishDragZoom(event: PointerEvent) {
 }
 
 async function runAdvancedAction(action: string, region?: Record<string, number>) {
-    if (!props.channel) return;
+    if (!canControlDevice.value || !props.channel) return;
     if (isAdvancedPending(action)) return;
     const execute = async () => {
         const channelId = props.channel!.id;
@@ -2748,7 +2788,6 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
         try {
             const response = await controlDevice(channelId, {
                 action,
-                confirmed: action === "teleboot",
                 idempotencyKey: `${channelId}-${action}-${Date.now()}`,
                 ...((action === "drag_zoom_in" || action === "drag_zoom_out") && region ? { region } : {}),
             });
@@ -2799,7 +2838,7 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
                     setAdvancedPending(action, false);
                 }
             } else {
-                // Key-frame, TeleBoot and DragZoom are SIP-delivery operations; no fake accepted state.
+                // Key-frame and DragZoom are SIP-delivery operations; no fake accepted state.
                 setAdvancedPending(action, false);
                 Message.info(operation?.deduplicated ? "请求已合并到设备级操作" : "请求已发送,设备执行结果未回传");
             }
@@ -2810,10 +2849,6 @@ async function runAdvancedAction(action: string, region?: Record<string, number>
             Message.error(error?.message || "设备控制失败");
         }
     };
-    if (action === "teleboot") {
-        Modal.warning({ title: "确认远程重启设备?", content: "设备会短暂离线，正在观看的画面将中断。", okText: "确认重启", cancelText: "取消", onOk: execute });
-        return;
-    }
     await execute();
 }
 
@@ -2844,24 +2879,35 @@ function clearTalkPoll() {
 }
 
 async function waitTalkActive(channelId: number, sessionId: string, token: number) {
+    if (!hasPermission("gb28181:talk:control")) return false;
     talkState.value = "signaling";
     for (let attempt = 0; attempt < 100; attempt++) {
-        if (token !== talkToken) return false;
+        if (!hasPermission("gb28181:talk:control") || token !== talkToken) return false;
         const response = await getTalkSession(channelId, sessionId);
-        if (token !== talkToken) return false;
+        if (!hasPermission("gb28181:talk:control") || token !== talkToken) return false;
         const state = response.data?.state;
         if (state === "active") return true;
         if (["failed", "expired", "ended"].includes(String(state))) throw new Error(response.data?.error || `对讲会话已${state}`);
+        if (!hasPermission("gb28181:talk:control") || token !== talkToken) return false;
         await new Promise((resolve) => window.setTimeout(resolve, 300));
     }
     throw new Error("等待设备对讲信令超时");
 }
 
 function beginTalkPoll(channelId: number, sessionId: string) {
+    if (!hasPermission("gb28181:talk:control")) return;
     clearTalkPoll();
     talkPollTimer = window.setInterval(async () => {
+        if (!hasPermission("gb28181:talk:control")) {
+            await stopTalk();
+            return;
+        }
         try {
             const response = await getTalkSession(channelId, sessionId);
+            if (!hasPermission("gb28181:talk:control")) {
+                await stopTalk();
+                return;
+            }
             if (["failed", "expired", "ended"].includes(String(response.data?.state))) await stopTalk();
         } catch {
             // 短暂轮询失败不打断正在说话，租约超时由后端最终收敛。
@@ -2870,6 +2916,7 @@ function beginTalkPoll(channelId: number, sessionId: string) {
 }
 
 async function startTalk() {
+    if (!canTalk.value) return;
     if (talkState.value !== "idle") return;
     if (!isAudioCapable.value) {
         Message.warning("设备离线，无法建立语音会话");
@@ -2951,7 +2998,7 @@ async function stopTalk() {
     const channelId = talkSessionChannelId;
     talkState.value = "stopping";
     cleanupTalkLocally();
-    if (channelId && session?.sessionId) await deleteTalkSession(channelId, session.sessionId).catch(() => undefined);
+    if (hasPermission("gb28181:talk:control") && channelId && session?.sessionId) await deleteTalkSession(channelId, session.sessionId).catch(() => undefined);
     talkState.value = "idle";
 }
 
@@ -2970,6 +3017,7 @@ function switchProtocol(proto: StreamProtocol) {
 }
 
 async function copyProtocolUrl(proto: StreamProtocol) {
+    if (!canSharePlayback.value) return;
     let url = protocolUrls.value[proto];
     if (!url) { Message.warning("当前协议地址不可用"); return; }
 
@@ -3222,6 +3270,7 @@ onBeforeUnmount(() => {
                                         <strong>{{ opt.label }}:</strong>
                                         <span class="protocol-url" :title="protocolUrls[opt.value] || ''">{{ protocolUrls[opt.value] }}</span>
                                         <button
+                                            v-if="canSharePlayback"
                                             type="button"
                                             class="protocol-copy-btn"
                                             :title="`复制 ${opt.label} 地址`"
@@ -3253,7 +3302,7 @@ onBeforeUnmount(() => {
 
                 <!-- 双区联动详情:所有 Tab 共用下方详情区，保持结构与高度稳定 -->
                 <div v-if="phase === 'playing'" class="stream-info-bar linked-info-bar">
-                    <div v-show="activeTab === 'ptz'" class="linked-detail" data-testid="linked-detail-ptz">
+                    <div v-if="canPtzPanel" v-show="activeTab === 'ptz'" class="linked-detail" data-testid="linked-detail-ptz">
                         <div class="linked-ptz-layout">
                             <section class="linked-section linked-card">
                                 <header class="linked-card-hd">
@@ -3615,7 +3664,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
 
-                    <div v-show="activeTab === 'probe'" class="linked-detail" data-testid="linked-detail-probe">
+                    <div v-if="canMonitorPlayback || canDiagnosePlayback" v-show="activeTab === 'probe'" class="linked-detail" data-testid="linked-detail-probe">
                         <div class="linked-probe-layout">
                             <!-- 轨道明细:视频音频合成一张卡。
                                  音频原来的「采样率」「声道」是从 monitorSnapshot 借来的、不是探针数据,
@@ -3693,7 +3742,7 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
 
-                    <div v-show="activeTab === 'advanced'" class="linked-detail" data-testid="linked-detail-advanced">
+                    <div v-if="canAdvancedPanel" v-show="activeTab === 'advanced'" class="linked-detail" data-testid="linked-detail-advanced">
                         <div class="linked-standard-note">
                             <Info :size="14" />
                             <div>
@@ -3707,14 +3756,14 @@ onBeforeUnmount(() => {
             </section>
             <!-- 右侧功能栏 -->
             <aside
-                v-if="!sideCollapsed"
+                v-if="!sideCollapsed && visibleTabs.length"
                 class="sidebar"
                 :class="{ 'sidebar-probe': activeTab === 'probe' }"
             >
                 <!-- Tabs -->
                 <div class="tabs">
                     <button
-                        v-for="t in tabs"
+                        v-for="t in visibleTabs"
                         :key="t.key"
                         class="tab"
                         :class="{ active: activeTab === t.key }"
@@ -3729,7 +3778,7 @@ onBeforeUnmount(() => {
                 <!-- Tab 面板容器 -->
                 <div class="panels">
                     <!-- ═══════════ 云台控制 ═══════════ -->
-                    <div v-show="activeTab === 'ptz'" class="panel" data-testid="linked-side-ptz">
+                    <div v-if="canPtzPanel" v-show="activeTab === 'ptz'" class="panel" data-testid="linked-side-ptz">
                         <!-- 模式切换:速度控制 / 精准控制(2022) -->
                         <div class="mode-switch">
                             <button :class="{ active: ptzMode === 'speed' }" @click="ptzMode = 'speed'">
@@ -3880,7 +3929,7 @@ onBeforeUnmount(() => {
 
                     </div>
                     <!-- ═══════════ 视频探针 ═══════════ -->
-                    <div v-show="activeTab === 'probe'" class="panel probe-panel" data-testid="linked-side-probe">
+                    <div v-if="canMonitorPlayback || canDiagnosePlayback" v-show="activeTab === 'probe'" class="panel probe-panel" data-testid="linked-side-probe">
                         <!-- 流信息:2 秒轮询的实时指标。和探针放同一个面板 —— 两者回答的是同一个问题
                              ("这路流健康吗"),区别只在一个持续刷新、一个手动采样。所以两块的标题上
                              都写明刷新语义,免得把十分钟前那次采样的数字当成当下的值。 -->
@@ -3951,6 +4000,7 @@ onBeforeUnmount(() => {
                             </div>
 
                             <button
+                                v-if="canDiagnosePlayback"
                                 class="probe-action"
                                 data-testid="probe-start"
                                 :disabled="phase !== 'playing' || probeState === 'sampling'"
@@ -4001,7 +4051,7 @@ onBeforeUnmount(() => {
 
                     </div>
                     <!-- ═══════════ 高级 ═══════════ -->
-                    <div v-show="activeTab === 'advanced'" class="panel" data-testid="linked-side-advanced">
+                    <div v-if="canAdvancedPanel" v-show="activeTab === 'advanced'" class="panel" data-testid="linked-side-advanced">
                         <div class="section-hd first">
                             <span class="section-title"><Settings :size="13" />设备控制</span>
                             <span class="section-meta">GB28181 DeviceControl</span>
@@ -4066,10 +4116,6 @@ onBeforeUnmount(() => {
                                 <AlertTriangle :size="14" />
                                 <div><strong>报警复位</strong><small>等待设备业务应答</small></div>
                             </button>
-                            <button class="adv-btn" :title="capabilityActionTitle('teleBoot', '远程重启父设备')" :disabled="isAdvancedPending('teleboot')" @click="runAdvancedAction('teleboot')">
-                                <RefreshCcw :size="14" />
-                                <div><strong>远程重启父设备</strong><small>设备级发送,结果不回传</small></div>
-                            </button>
                             <button class="adv-btn" data-testid="advanced-drag-zoom" :title="capabilityActionTitle('dragZoom', '3D 放大')" :disabled="isAdvancedPending('drag_zoom_in')" @click="toggleDragZoomMode('drag_zoom_in')">
                                 <Move3d :size="14" />
                                 <div><strong>{{ dragZoomMode && dragZoomAction === 'drag_zoom_in' ? '取消 3D 放大' : '3D 放大' }}</strong><small>按显示窗口像素拖框</small></div>
@@ -4085,7 +4131,7 @@ onBeforeUnmount(() => {
             </aside>
 
             <Transition name="asset-drawer">
-                <div v-if="assetManagerVisible" class="asset-manager-layer" data-testid="asset-manager">
+                <div v-if="canPtzPanel && assetManagerVisible" class="asset-manager-layer" data-testid="asset-manager">
                     <button class="asset-manager-mask" aria-label="关闭资源管理" @click="closeAssetManager"></button>
                     <aside class="asset-manager-drawer" role="dialog" aria-modal="true" aria-label="云台资源管理">
                         <header class="asset-manager-header">
@@ -4203,6 +4249,7 @@ onBeforeUnmount(() => {
             </Transition>
 
             <a-modal
+                v-if="canSavePtzPreset && savePresetDialogVisible"
                 v-model:visible="savePresetDialogVisible"
                 title="保存预置位"
                 ok-text="保存"
@@ -4249,6 +4296,7 @@ onBeforeUnmount(() => {
             </a-modal>
 
             <a-modal
+                v-if="canControlPtzCruise && saveCruiseDialogVisible"
                 v-model:visible="saveCruiseDialogVisible"
                 title="新建巡航轨迹"
                 ok-text="创建并下发"

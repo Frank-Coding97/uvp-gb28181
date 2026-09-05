@@ -19,6 +19,7 @@ import {
     ZoomOut
 } from "@lucide/vue";
 import { controlPtz, fetchPTZDefaultSpeedConfig, getControlCapabilities } from "@/api/gb28181";
+import { useUserStoreHook } from "@/store/modules/user";
 import type { ChannelVO } from "../device-mgmt/api";
 import { DEFAULT_PTZ_SPEED_LEVEL, levelToProtocolSpeed, normalizePtzSpeedLevel } from "../ptzSpeed";
 
@@ -29,6 +30,14 @@ const emit = defineEmits<{
     actionChange: [value: { channelId: number; action: string } | null];
 }>();
 
+const userStore = useUserStoreHook();
+const permissions = computed(() => userStore.account.permissions ?? []);
+const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
+const canViewPtz = computed(() => hasPermission("gb28181:ptz:view"));
+const canControlPtz = computed(() => hasPermission("gb28181:ptz:control"));
+const canReadSpeed = computed(() => hasPermission("gb28181:sip:config:view"));
+const canRenderPanel = computed(() => canViewPtz.value || canControlPtz.value);
+
 const speed = ref(DEFAULT_PTZ_SPEED_LEVEL);
 const collapsed = ref(false);
 const capabilityState = ref("unknown");
@@ -37,6 +46,7 @@ let activeAction: { channelId: number; action: string } | null = null;
 
 const focusedName = computed(() => props.channel?.name || props.channel?.alias || props.channel?.channelId || "未选择画面");
 const disabledReason = computed(() => {
+    if (!canControlPtz.value) return "当前账号没有云台控制权限";
     if (!props.channel) return "请先聚焦一个播放画面";
     if (props.channel.status !== 1) return "当前通道离线";
     if (capabilityState.value === "unsupported") return "当前设备不支持基础云台控制";
@@ -53,6 +63,7 @@ function payload(channelId: number, action: string) {
 }
 
 async function send(channelId: number, action: string) {
+    if (!canControlPtz.value) return;
     try {
         const response = await controlPtz(channelId, payload(channelId, action));
         if (response.code !== 0) throw new Error(response.message || "云台指令失败");
@@ -80,6 +91,7 @@ async function startAction(action: string) {
 }
 
 async function loadCapability(channelId: number, token: number) {
+    if (!canViewPtz.value) return;
     try {
         const response = await getControlCapabilities(channelId);
         if (token !== capabilityToken || props.channel?.id !== channelId) return;
@@ -94,6 +106,7 @@ async function loadCapability(channelId: number, token: number) {
 
 async function loadDefaultSpeed() {
     speed.value = DEFAULT_PTZ_SPEED_LEVEL;
+    if (!canReadSpeed.value) return;
     try {
         const response = await fetchPTZDefaultSpeedConfig();
         if (response.code === 0 && response.data) speed.value = normalizePtzSpeedLevel(response.data.level);
@@ -126,7 +139,7 @@ watch(collapsed, value => {
 });
 
 onMounted(() => {
-    void loadDefaultSpeed();
+    if (canReadSpeed.value) void loadDefaultSpeed();
     window.addEventListener("blur", handleWindowBlur);
     document.addEventListener("visibilitychange", handleVisibilityChange);
 });
@@ -140,7 +153,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <section class="basic-ptz" :class="{ collapsed }" aria-label="基础云台控制">
+    <section v-if="canRenderPanel" class="basic-ptz" :class="{ collapsed }" aria-label="基础云台控制">
         <header class="ptz-head">
             <div class="ptz-head-info">
                 <div class="ptz-title"><Compass :size="14" aria-hidden="true" /><span>云台控制</span></div>

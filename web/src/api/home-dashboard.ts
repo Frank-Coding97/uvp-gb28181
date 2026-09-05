@@ -24,19 +24,64 @@ export interface TodayTrafficSummary {
   coverage: HomeDashboardSection<unknown>["coverage"];
 }
 
+export interface OnlineRateSummary {
+  total: number;
+  online: number;
+  offline: number;
+  rate: number;
+}
+
+export interface AssetOnlineSummary {
+  devices: OnlineRateSummary;
+  channels: OnlineRateSummary;
+  asOf: string;
+}
+
 export interface PlaySuccessSummary {
   attempts: number;
   success: number;
   failure: number;
+  started: number;
+  staleStarted: number;
   rate: number | null;
   status: HomeDashboardSection<unknown>["status"];
   coverage: HomeDashboardSection<unknown>["coverage"];
   asOf: string;
 }
 
+export interface SIPMinuteSummary {
+  bucketStart: string;
+  requests: number;
+  success: number;
+  failure: number;
+}
+
+export interface SIPMetricSummary {
+  rpm: number;
+  todayRequests: number;
+  transactions: number;
+  success: number;
+  failure: number;
+  series: SIPMinuteSummary[];
+  status: HomeDashboardSection<unknown>["status"];
+  coverage: HomeDashboardSection<unknown>["coverage"];
+  asOf: string;
+}
+
 export interface HomeDashboardSummary {
+  assets?: HomeDashboardSection<AssetOnlineSummary>;
+  sip?: HomeDashboardSection<SIPMetricSummary>;
   play?: HomeDashboardSection<PlaySuccessSummary>;
   traffic?: HomeDashboardSection<TodayTrafficSummary>;
+  bindings?: HomeDashboardSection<HomeRuntimeBinding[]>;
+}
+
+export interface HomeRuntimeBinding {
+  streamId: string;
+  deviceId: string;
+  deviceName: string;
+  channelId: string;
+  channelName: string;
 }
 
 export const getHomeDashboardLayout = () =>

@@ -40,6 +40,7 @@ import { positionToTime } from "./timeline";
 import RecordTimeline, { type TimelineLocateEvent } from "./components/RecordTimeline.vue";
 import PlayWindow from "../components/PlayWindow.vue";
 import { resolvePlaybackSource, type PlaybackSource } from "../playbackProtocol";
+import { useUserStoreHook } from "@/store/modules/user";
 import {
     actionPlaybackSession,
     createDownloadSession,
@@ -53,6 +54,7 @@ import {
 
 const route = useRoute();
 const router = useRouter();
+const userStore = useUserStoreHook();
 const channelId = computed(() => Number(route.params.channelId || 31));
 const playbackChannelId = channelId.value;
 const options = ref<RecordQueryOptions | null>(null);
@@ -89,7 +91,11 @@ const queryRange = computed(() => ({
 }));
 const isPlaying = computed(() => playback.value.status === "playing");
 const isPlaybackLoading = computed(() => ["creating", "buffering", "stopping"].includes(playback.value.status));
-const canPlay = computed(() => Boolean(selectedRecord.value) && !controlPending.value && !["creating", "buffering", "stopping"].includes(playback.value.status));
+const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
+const canQuery = computed(() => hasPermission("gb28181:device-record:query"));
+const canPlayPermission = computed(() => hasPermission("gb28181:device-record:play"));
+const canDownload = computed(() => hasPermission("gb28181:device-record:download"));
+const canStartPlayback = computed(() => canPlayPermission.value && Boolean(selectedRecord.value) && !controlPending.value && !["creating", "buffering", "stopping"].includes(playback.value.status));
 const statusText = computed(() => ({
     unselected: "请选择录像段",
     selected: "已选择，等待播放",
@@ -157,6 +163,7 @@ function saveLastRecordIdentity(record: RecordQueryItem) {
 }
 
 async function loadOptions() {
+    if (!canQuery.value) return;
     try {
         const response = await getRecordQueryOptions(playbackChannelId);
         options.value = response.data;
@@ -170,7 +177,7 @@ async function loadOptions() {
 }
 
 async function runQuery() {
-    if (!form.value || !options.value) return;
+    if (!canQuery.value || !form.value || !options.value) return;
     const errors = validateRecordQueryForm(form.value, options.value);
     const firstError = Object.values(errors)[0];
     if (firstError) {
@@ -178,7 +185,7 @@ async function runQuery() {
         queryMessage.value = firstError;
         return;
     }
-    await stopPlayback(false);
+    await stopPlayback(false, false);
     queryAbort?.abort();
     const token = ++queryToken.value;
     queryAbort = new AbortController();
@@ -192,7 +199,7 @@ async function runQuery() {
         queryState.value = response.data.status;
         const lastIdentity = readLastRecordIdentity();
         const record = records.value.find(item => recordIdentity(item) === lastIdentity) || defaultRecord(records.value);
-        if (record) await playRecord(record);
+        if (record && canPlayPermission.value) await playRecord(record);
     } catch (error) {
         if ((error as Error)?.name === "AbortError" || token !== queryToken.value) return;
         const mapped = mapRecordQueryError(error);
@@ -205,15 +212,17 @@ async function runQuery() {
 }
 
 async function selectRecord(record: RecordQueryItem) {
+    if (!canPlayPermission.value) return false;
     if (playback.value.recordKey === record.recordKey) return true;
     if (["creating", "buffering", "playing", "paused", "stopping"].includes(playback.value.status) && playback.value.recordKey !== record.recordKey) {
-        if (!await stopPlayback(false)) return false;
+        if (!await stopPlayback(false, false)) return false;
     }
     playback.value = reducePlaybackState(playback.value, { type: "select", recordKey: record.recordKey });
     return true;
 }
 
 async function playRecord(record: RecordQueryItem) {
+    if (!canPlayPermission.value) return;
     if (playback.value.recordKey === record.recordKey && ["creating", "buffering", "playing"].includes(playback.value.status)) return;
     if (!await selectRecord(record)) return;
     await startPlayback();
@@ -225,7 +234,7 @@ function clearPlaybackTimers() {
 }
 
 async function queueDownload(record: RecordQueryItem | null = selectedRecord.value) {
-    if (!record || !record.startTime || downloadPending.value) return;
+    if (!canDownload.value || !record || !record.startTime || downloadPending.value) return;
     if (downloadTimer !== null) window.clearTimeout(downloadTimer);
     downloadPending.value = true;
     downloadNotice.value = `正在接收设备录像 · ${record.name || "未命名录像"}`;
@@ -371,7 +380,7 @@ function applySession(session: PlaybackSession, token: number, syncPosition = fa
 }
 
 async function startPlayback() {
-    if (!selectedRecord.value || !canPlay.value) return;
+    if (!selectedRecord.value || !canStartPlayback.value) return;
     if (playback.value.status === "paused" && playback.value.sessionId) {
         await sendPlaybackAction({ action: "resume" });
         return;
@@ -399,7 +408,7 @@ async function startPlayback() {
 
 async function sendPlaybackAction(action: PlaybackActionRequest, syncPosition = false) {
     const sessionId = playback.value.sessionId;
-    if (!sessionId || controlPending.value) return;
+    if (!canPlayPermission.value || !sessionId || controlPending.value) return;
     const token = sessionToken;
     controlPending.value = true;
     try {
@@ -416,7 +425,8 @@ async function pausePlayback() {
     await sendPlaybackAction({ action: "pause" });
 }
 
-async function stopPlayback(keepSelection = true) {
+async function stopPlayback(keepSelection = true, enforcePermission = true) {
+    if (enforcePermission && !canPlayPermission.value) return false;
     const sessionId = playback.value.sessionId;
     const selectedKey = playback.value.recordKey;
     ++sessionToken;
@@ -444,6 +454,7 @@ async function stopPlayback(keepSelection = true) {
 }
 
 async function setScale(scale: number) {
+    if (!canPlayPermission.value) return;
     if (playback.value.sessionId && ["playing", "paused"].includes(playback.value.status)) {
         await sendPlaybackAction({ action: "scale", scale });
         return;
@@ -452,6 +463,7 @@ async function setScale(scale: number) {
 }
 
 async function handleTimelineLocate(event: TimelineLocateEvent) {
+    if (!canPlayPermission.value) return;
     if (!event.recordKey) return;
     const record = records.value.find(item => item.recordKey === event.recordKey);
     if (!record) return;
@@ -527,6 +539,10 @@ onUnmounted(() => {
 <template>
     <div class="snow-fill record-playback-page">
         <div class="snow-fill-inner uvp-page-shell-flat playback-workspace">
+            <div v-if="!canQuery" class="record-playback-permission-state" data-testid="record-playback-permission-denied">
+                无权查询设备录像，请联系管理员分配设备录像查询权限。
+            </div>
+            <template v-else>
             <header class="query-bar" data-testid="playback-query-bar">
                 <button class="icon-command back-command" type="button" aria-label="返回设备管理" title="返回设备管理" @click="goBack">
                     <ArrowLeft :size="18" />
@@ -607,22 +623,22 @@ onUnmounted(() => {
                             data-testid="playback-primary-action"
                             class="control-primary"
                             type="button"
-                            :disabled="!canPlay"
+                            :disabled="!canStartPlayback"
                             :aria-label="isPlaying ? '暂停' : '播放'"
                             @click="isPlaying ? pausePlayback() : startPlayback()"
                         >
                             <Pause v-if="isPlaying" :size="17" fill="currentColor" />
                             <Play v-else :size="17" fill="currentColor" />
                         </button>
-                        <button class="control-icon" type="button" aria-label="停止" title="停止" :disabled="!selectedRecord" @click="stopPlayback()"><Square :size="15" fill="currentColor" /></button>
+                        <button class="control-icon" type="button" aria-label="停止" title="停止" :disabled="!selectedRecord || !canPlayPermission" @click="stopPlayback()"><Square :size="15" fill="currentColor" /></button>
                         <div class="control-spacer"></div>
                         <label class="scale-select" title="播放倍速">
-                            <select :value="playback.scale" @change="setScale(Number(($event.target as HTMLSelectElement).value))">
+                            <select :value="playback.scale" :disabled="!canPlayPermission" @change="setScale(Number(($event.target as HTMLSelectElement).value))">
                                 <option v-for="scale in [0.25, 0.5, 1, 2, 4]" :key="scale" :value="scale">{{ scale }}x</option>
                             </select>
                             <ChevronDown :size="13" />
                         </label>
-                        <button data-testid="playback-download" class="control-icon" type="button" aria-label="下载当前录像" title="下载当前录像" :disabled="!selectedRecord || downloadPending" @click="queueDownload()"><LoaderCircle v-if="downloadPending" :size="16" class="spin" /><Download v-else :size="16" /></button>
+                        <button v-if="canDownload" data-testid="playback-download" class="control-icon" type="button" aria-label="下载当前录像" title="下载当前录像" :disabled="!selectedRecord || downloadPending" @click="queueDownload()"><LoaderCircle v-if="downloadPending" :size="16" class="spin" /><Download v-else :size="16" /></button>
                         <button class="control-icon" type="button" aria-label="全屏" title="全屏" @click="toggleFullscreen"><Fullscreen :size="16" /></button>
                     </div>
                 </section>
@@ -642,6 +658,8 @@ onUnmounted(() => {
                                 :data-testid="`record-segment-${index}`"
                                 :class="['segment-item', { selected: playback.recordKey === record.recordKey }]"
                                 :aria-current="playback.recordKey === record.recordKey ? 'true' : undefined"
+                                :aria-disabled="!canPlayPermission ? 'true' : undefined"
+                                :disabled="!canPlayPermission"
                                 type="button"
                                 @click="playRecord(record)"
                             >
@@ -656,6 +674,7 @@ onUnmounted(() => {
                                 </span>
                             </button>
                             <button
+                                v-if="canDownload"
                                 :data-testid="`record-segment-download-${index}`"
                                 class="segment-download"
                                 type="button"
@@ -687,6 +706,7 @@ onUnmounted(() => {
                 :current-time="playback.currentTime"
                 @locate="handleTimelineLocate"
             />
+            </template>
         </div>
     </div>
 </template>
@@ -694,6 +714,7 @@ onUnmounted(() => {
 <style scoped>
 .record-playback-page { height: 100%; min-height: 0; color: var(--uvp-text-primary); overflow: hidden; }
 .playback-workspace { display: flex; flex-direction: column; height: 100%; min-height: 0; padding: 0; overflow: hidden; }
+.record-playback-permission-state { margin: 12px; padding: 18px; color: var(--uvp-text-secondary); background: var(--uvp-search-panel-bg); border: 1px solid var(--uvp-list-panel-border); border-radius: var(--uvp-panel-radius); }
 .query-bar { display: flex; flex: none; align-items: center; gap: 14px; min-height: 72px; margin: 0 8px 10px; padding: 10px 16px; background: var(--uvp-search-panel-bg); border: 1px solid var(--uvp-list-panel-border); border-radius: var(--uvp-panel-radius); box-shadow: var(--uvp-search-panel-shadow); }
 .icon-command, .control-icon, .segment-header button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; color: var(--uvp-text-secondary); background: var(--uvp-search-secondary-btn-bg); border: 1px solid var(--uvp-search-secondary-btn-border); border-radius: 6px; cursor: pointer; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease; }
 .icon-command:hover, .control-icon:hover, .segment-header button:hover { color: var(--uvp-brand); background: var(--uvp-search-secondary-btn-hover-bg); border-color: var(--uvp-brand); }

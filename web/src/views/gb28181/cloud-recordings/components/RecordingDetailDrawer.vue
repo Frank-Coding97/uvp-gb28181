@@ -68,12 +68,12 @@
             </a-descriptions>
           </section>
 
-          <div v-if="availability.canAccess" class="recording-detail-actions">
-            <a-button data-testid="detail-download" @click="emit('download', detail)">
+          <div v-if="availability.canAccess && (canPlay || canDownload)" class="recording-detail-actions">
+            <a-button v-if="canDownload" data-testid="detail-download" @click="emit('download', detail)">
               <template #icon><Download :size="15" /></template>
               下载
             </a-button>
-            <a-button type="primary" data-testid="detail-play" @click="emit('play', detail)">
+            <a-button v-if="canPlay" type="primary" data-testid="detail-play" @click="emit('play', detail)">
               <template #icon><Play :size="15" /></template>
               播放
             </a-button>
@@ -95,7 +95,12 @@ import { Download, FileVideo2, Play } from "@lucide/vue";
 import { getRecordingDetail, type RecordingFile } from "../api";
 import { availabilityPresentation, recordingErrorPresentation } from "../recordingState";
 
-const props = defineProps<{ visible: boolean; recordingId: string | null }>();
+const props = defineProps<{
+  visible: boolean;
+  recordingId: string | null;
+  canPlay: boolean;
+  canDownload: boolean;
+}>();
 const emit = defineEmits<{
   (event: "update:visible", value: boolean): void;
   (event: "play", value: RecordingFile): void;

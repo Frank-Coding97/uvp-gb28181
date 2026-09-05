@@ -61,3 +61,15 @@ func TestBuildMediaDashboardMarksPartialAndUsesDeterministicRanking(t *testing.T
 	require.Equal(t, "a", summary.Streams[0].Stream)
 	require.Equal(t, "b", summary.Streams[1].Stream)
 }
+
+func TestBuildMediaDashboardDoesNotTreatHLSOutputAsRecording(t *testing.T) {
+	result := management.OverviewResult{
+		Streams: []management.RuntimeMedia{
+			{NodeID: 1, Media: management.MediaIdentity{Schema: "hls", Vhost: "v", App: "rtp", Stream: "stream-1"}, Online: true, RecordingHLS: true},
+		},
+	}
+
+	summary := BuildMediaDashboard(result)
+	require.Zero(t, summary.Runtime.Recording)
+	require.False(t, summary.Streams[0].Recording)
+}

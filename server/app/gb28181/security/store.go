@@ -240,7 +240,7 @@ func (s *GormStore) RecentBans(ctx context.Context, limit int, now time.Time) ([
 		return nil, err
 	}
 	var rows []securityBanRow
-	if err := s.db.WithContext(ctx).Order("created_at DESC").Limit(boundedLimit(limit, 500)).Find(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).Order("created_at DESC, id DESC").Limit(boundedLimit(limit, 500)).Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	return bansFromRows(rows), nil

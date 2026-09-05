@@ -441,7 +441,7 @@ export interface ProbeSnapshot {
 }
 
 export const runStreamProbe = (streamId: string) =>
-  http.request<BaseResult<ProbeSnapshot>>("post", baseUrlApi(`gb28181/play/${streamId}/probe`));
+  http.request<BaseResult<ProbeSnapshot>>("post", baseUrlApi(`gb28181/stream-probes/${streamId}`));
 
 export interface ControlCapability {
   state: "supported" | "unsupported" | "unknown" | string;

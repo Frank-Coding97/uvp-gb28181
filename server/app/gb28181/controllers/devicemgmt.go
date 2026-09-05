@@ -22,6 +22,7 @@ import (
 	gbplayback "uvplatform.cn/uvp-gb28181/app/gb28181/playback"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/ptz"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordquery"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/upgrade"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
@@ -42,6 +43,8 @@ type DeviceMgmtController struct {
 	ptzSender           DeviceControlSender
 	ptzService          *ptz.Service
 	ptzSN               atomic.Uint64
+	firmwareUpgradeMu   sync.RWMutex
+	firmwareUpgrade     *upgrade.Service
 	deviceControlLocks  sync.Map
 	recordQueryMu       sync.RWMutex
 	recordQueryService  RecordQueryService
@@ -147,6 +150,18 @@ func (dc *DeviceMgmtController) ptzRuntimeSnapshot() (DeviceControlSender, *ptz.
 	dc.ptzRuntimeMu.RLock()
 	defer dc.ptzRuntimeMu.RUnlock()
 	return dc.ptzSender, dc.ptzService
+}
+
+func (dc *DeviceMgmtController) SetFirmwareUpgradeService(service *upgrade.Service) {
+	dc.firmwareUpgradeMu.Lock()
+	dc.firmwareUpgrade = service
+	dc.firmwareUpgradeMu.Unlock()
+}
+
+func (dc *DeviceMgmtController) firmwareUpgradeServiceSnapshot() *upgrade.Service {
+	dc.firmwareUpgradeMu.RLock()
+	defer dc.firmwareUpgradeMu.RUnlock()
+	return dc.firmwareUpgrade
 }
 
 func (dc *DeviceMgmtController) nextPTZSN() int {

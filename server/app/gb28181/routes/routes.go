@@ -25,6 +25,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streammonitor"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/streamprobe"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/talk"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/upgrade"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
@@ -403,6 +404,10 @@ func SetDeviceMgmtPTZRuntime(sender gbcontrollers.DeviceControlSender, service *
 	deviceMgmtController.SetPTZRuntime(sender, service)
 }
 
+func SetDeviceMgmtFirmwareUpgradeService(service *upgrade.Service) {
+	deviceMgmtController.SetFirmwareUpgradeService(service)
+}
+
 func SetDeviceMgmtRecordQueryRuntime(service gbcontrollers.RecordQueryService, cfg gbconfig.RecordQueryConfig, metrics *recordquery.Metrics) {
 	deviceMgmtController.SetRecordQueryRuntime(service, cfg, metrics)
 }
@@ -653,6 +658,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dev.PATCH("/:deviceId", deviceController.Update)
 			dev.GET("/:deviceId/channels", deviceController.ListChannels)
 		}
+		streamProbes := gb.Group("/stream-probes")
+		{
+			streamProbes.POST("/:streamId", func(c *gin.Context) { streamProbeController.Run(c) })
+		}
 		// 点播:用闭包间接调用,以便后置注入的 playController 也能命中
 		play := gb.Group("/play")
 		{
@@ -660,8 +669,6 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			play.POST("/:deviceId/:channelId/authorization", func(c *gin.Context) { playController.Authorize(c) })
 			play.DELETE("/:streamId", func(c *gin.Context) { playController.Stop(c) })
 			play.GET("/:streamId/monitor", func(c *gin.Context) { streamMonitorController.Get(c) })
-			// Gin requires wildcard names at the same path depth to match the start-play route.
-			play.POST("/:deviceId/probe", func(c *gin.Context) { streamProbeController.Run(c) })
 		}
 		// SIP 信令看板(只读快照接口,后续 T2.1 加 SSE /stream)
 		sipGroup := gb.Group("/sip/dashboard")
@@ -820,6 +827,10 @@ func RegisterRoutes(protected *gin.RouterGroup) {
 			dmgmt.POST("/permission-workbench/assignments/departments", deviceMgmtController.ApplyPermissionWorkbenchDepartmentAssignment)
 			dmgmt.POST("/device", deviceMgmtController.CreateDevice)
 			dmgmt.GET("/device/:id", deviceMgmtController.GetDevice)
+			dmgmt.POST("/device/:id/reboot", deviceMgmtController.RebootDevice)
+			dmgmt.GET("/device/:id/maintenance-operations", deviceMgmtController.ListMaintenanceOperations)
+			dmgmt.POST("/device/:id/firmware-upgrade", deviceMgmtController.UpgradeDeviceFirmware)
+			dmgmt.GET("/device/:id/firmware-upgrades", deviceMgmtController.ListFirmwareUpgrades)
 			dmgmt.GET("/device/:id/status-events", deviceMgmtController.ListDeviceStatusEvents)
 			dmgmt.GET("/device/:id/subscriptions", deviceMgmtController.ListSubscriptions)
 			dmgmt.PATCH("/device/:id/subscriptions/:kind", deviceMgmtController.UpdateSubscription)

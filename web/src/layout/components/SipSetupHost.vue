@@ -4,6 +4,7 @@ import { Message } from "@arco-design/web-vue";
 import { fetchSipSetupStatus } from "@/api/gb28181";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useSipSetupStore } from "@/store/modules/sip-setup";
+import { hasSipStatusPermission, hasSipUpdatePermission } from "./sipSetupHostRules";
 import SipSetupModal from "./SipSetupModal.vue";
 
 const props = defineProps<{
@@ -14,23 +15,47 @@ const props = defineProps<{
 }>();
 
 const store = useSipSetupStore();
-const checkedSessionKeys = new Set<string>();
+let checkedSessionKey = "";
 const account = useUserStoreHook().account;
 const currentUserId = computed(() => props.userId ?? account.id);
 const currentPermissions = computed(() => props.permissions ?? account.permissions);
+const canViewStatus = computed(() => hasSipStatusPermission(currentPermissions.value));
+const canUpdateConfig = computed(() => hasSipUpdatePermission(currentPermissions.value));
+let requestVersion = 0;
+
+const permissionKey = (permissions: string[]) => permissions.slice().sort().join("|");
+
+function refreshAfterSave() {
+    if (!hasSipStatusPermission(currentPermissions.value)) {
+        store.reset();
+        return;
+    }
+    void store.refresh();
+}
 
 // 登录后拉一次 status,决定是否自动弹 Modal.
 // 拉不到时:store.loadFailed=true → shouldAutoOpen 返 false → 不阻塞用户进入系统.
 watch(
-    () => [currentUserId.value, currentPermissions.value.slice().sort().join("|")] as const,
-    async ([userId, permissionKey]) => {
-        if (!userId) return;
-        const sessionKey = `${userId}:${permissionKey}`;
-        if (checkedSessionKeys.has(sessionKey)) return;
-        checkedSessionKeys.add(sessionKey);
+    () => [currentUserId.value, permissionKey(currentPermissions.value)] as const,
+    async ([userId, permissionsKey]) => {
+        const sessionKey = `${userId}:${permissionsKey}`;
+        if (checkedSessionKey === sessionKey) return;
+        checkedSessionKey = sessionKey;
+        const version = ++requestVersion;
+        const permissions = currentPermissions.value.slice();
+        store.reset();
+        if (!userId || !hasSipStatusPermission(permissions)) {
+            return;
+        }
+        const isCurrentSession = () =>
+            version === requestVersion &&
+            currentUserId.value === userId &&
+            permissionKey(currentPermissions.value) === permissionsKey &&
+            hasSipStatusPermission(currentPermissions.value);
         try {
             if (props.statusLoader) {
                 const response = await props.statusLoader();
+                if (!isCurrentSession()) return;
                 if (response.code === 0) {
                     store.$patch({ status: response.data, loadFailed: false });
                 } else {
@@ -39,10 +64,18 @@ watch(
             } else {
                 await store.refresh();
             }
+            if (!isCurrentSession()) {
+                if (!hasSipStatusPermission(currentPermissions.value)) store.reset();
+                return;
+            }
             if (store.shouldAutoOpen(currentPermissions.value)) {
                 store.openModal();
             }
         } catch (error: any) {
+            if (!isCurrentSession()) {
+                if (!hasSipStatusPermission(currentPermissions.value)) store.reset();
+                return;
+            }
             Message.warning(error?.message || "SIP 配置状态暂时不可用");
         }
     },
@@ -52,8 +85,9 @@ watch(
 
 <template>
     <SipSetupModal
-        :visible="store.modalOpen"
+        v-if="canViewStatus"
+        :visible="canUpdateConfig && store.modalOpen"
         @close="store.closeModal({ suppressThisSession: true })"
-        @saved="() => store.refresh()"
+        @saved="refreshAfterSave"
     />
 </template>

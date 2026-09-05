@@ -27,7 +27,7 @@ func TestAdmissionDropsBannedBeforeTrace(t *testing.T) {
 	require.Zero(t, traceCalls)
 }
 
-func TestAdmissionAllowsPartialTCPAndDelegatesOriginalBytes(t *testing.T) {
+func TestAdmissionBuffersPartialTCPAndDelegatesCompleteFrame(t *testing.T) {
 	clock := &fakeClock{now: time.Unix(100, 0)}
 	var got []byte
 	a := NewAdmission(DefaultPolicyWithMode(ModeProtect), clock, func(_ sip.TransportReadProps, data []byte) ([]byte, error) {
@@ -36,11 +36,16 @@ func TestAdmissionAllowsPartialTCPAndDelegatesOriginalBytes(t *testing.T) {
 	}, nil)
 	props := readProps()
 	props.Transport = "tcp"
-	chunk := []byte("REGIS")
-	out, err := a.Filter(props, chunk)
+	frame := []byte("REGISTER sip:x SIP/2.0\r\nContent-Length: 0\r\n\r\n")
+	out, err := a.Filter(props, frame[:5])
 	require.NoError(t, err)
-	require.Equal(t, chunk, out)
-	require.Equal(t, chunk, got)
+	require.Empty(t, out)
+	require.Empty(t, got)
+
+	out, err = a.Filter(props, frame[5:])
+	require.NoError(t, err)
+	require.Equal(t, frame, out)
+	require.Equal(t, frame, got)
 }
 
 func TestAdmissionRejectsOversizedPacket(t *testing.T) {
@@ -148,21 +153,22 @@ func TestAdmissionCountsTCPConnectionsByRemoteEndpointNotRead(t *testing.T) {
 	props := readProps()
 	props.Transport = "tcp"
 	props.RemoteAddr = &net.TCPAddr{IP: net.ParseIP("198.51.100.10"), Port: 5060}
+	packet := []byte("REGISTER sip:x SIP/2.0\r\nContent-Length: 0\r\n\r\n")
 
 	for i := 0; i < 3; i++ {
-		out, err := a.Filter(props, []byte("REGISTER sip:x SIP/2.0\r\n"))
+		out, err := a.Filter(props, packet)
 		require.NoError(t, err)
 		require.NotEmpty(t, out)
 	}
 
 	second := props
 	second.RemoteAddr = &net.TCPAddr{IP: net.ParseIP("198.51.100.10"), Port: 5061}
-	out, err := a.Filter(second, []byte("REGISTER sip:x SIP/2.0\r\n"))
+	out, err := a.Filter(second, packet)
 	require.NoError(t, err)
 	require.Empty(t, out)
 
 	a.ConnectionClosed(props)
-	out, err = a.Filter(second, []byte("REGISTER sip:x SIP/2.0\r\n"))
+	out, err = a.Filter(second, packet)
 	require.NoError(t, err)
 	require.NotEmpty(t, out)
 }

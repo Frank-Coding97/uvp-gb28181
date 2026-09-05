@@ -84,14 +84,14 @@ type PreciseNotify struct {
 }
 
 type Service struct {
-	db           *gorm.DB
-	sender       TrackedSender
-	now          func() time.Time
-	sn           atomic.Uint64
+	db     *gorm.DB
+	sender TrackedSender
+	now    func() time.Time
+	sn     atomic.Uint64
 	// locks + lockTableMu 组成可回收的通道锁表:acquire 与删除都在表锁内完成,
 	// 保证同一 channel 永远只有一个有效锁,且锁表不随历史通道无限累积
-	lockTableMu   sync.Mutex
-	locks         map[uint]*channelLockEntry
+	lockTableMu  sync.Mutex
+	locks        map[uint]*channelLockEntry
 	queryStageMu sync.Mutex
 	queryStages  map[string]queryResponseStage
 	lifecycleMu  sync.RWMutex
@@ -108,6 +108,18 @@ func NewService(db *gorm.DB, sender TrackedSender, now func() time.Time) (*Servi
 	var maxSN int64
 	if err := ptzWriter(db).Model(&gbmodels.GbPTZOperation{}).Select("COALESCE(MAX(sn), 0)").Scan(&maxSN).Error; err != nil {
 		return nil, operationError(ErrorCodeHomePositionUnavailable, "读取 PTZ operation SN 失败", err)
+	}
+	// Firmware upgrades share the platform-wide DeviceControl SN allocator.
+	// Older test databases and pre-upgrade installations may not have the new
+	// table yet, so keep the PTZ service loadable until that migration exists.
+	if db.Migrator().HasTable(&gbmodels.GbDeviceFirmwareUpgrade{}) {
+		var upgradeMaxSN int64
+		if err := ptzWriter(db).Model(&gbmodels.GbDeviceFirmwareUpgrade{}).Select("COALESCE(MAX(sn), 0)").Scan(&upgradeMaxSN).Error; err != nil {
+			return nil, operationError(ErrorCodeHomePositionUnavailable, "读取设备升级 SN 失败", err)
+		}
+		if upgradeMaxSN > maxSN {
+			maxSN = upgradeMaxSN
+		}
 	}
 	if maxSN < 0 || uint64(maxSN) >= uint64(^uint(0)>>1) {
 		return nil, operationError(ErrorCodeHomePositionUnavailable, "PTZ operation SN 非法", nil)
@@ -156,6 +168,32 @@ func (s *Service) unlockChannel(channelID uint, entry *channelLockEntry) {
 
 func (s *Service) nextSN() int {
 	return int(s.sn.Add(1))
+}
+
+// NextSN allocates the same monotonic sequence used by every PTZ and
+// device-maintenance DeviceControl sender in this running platform process.
+func (s *Service) NextSN() int {
+	if s == nil {
+		return 0
+	}
+	return s.nextSN()
+}
+
+// EnsureSNFloor raises the shared outbound DeviceControl sequence floor when
+// another durable sender has a higher persisted SN. It is used while a new
+// firmware-upgrade service is assembled after a restart, before that service
+// can allocate its first command.
+func (s *Service) EnsureSNFloor(floor int) error {
+	if s == nil || floor < 0 {
+		return fmt.Errorf("PTZ SN floor 非法")
+	}
+	want := uint64(floor)
+	for {
+		current := s.sn.Load()
+		if current >= want || s.sn.CompareAndSwap(current, want) {
+			return nil
+		}
+	}
 }
 
 // Retire prevents future operation creation and waits for every Execute that

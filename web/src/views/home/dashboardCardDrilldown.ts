@@ -1,7 +1,7 @@
 import type { DashboardWidgetId } from "./dashboardRegistry";
 import type { DashboardDrilldownMetric } from "./dashboardDrilldownState";
 
-const historyCards = new Set<DashboardWidgetId>(["sip-rpm", "sip-today", "play-success-24h", "media-traffic-today"]);
+const historyCards = new Set<DashboardWidgetId>(["media-traffic-today"]);
 
 export function isHistoryDrilldownWidget(id: DashboardWidgetId): id is DashboardDrilldownMetric {
   return historyCards.has(id);

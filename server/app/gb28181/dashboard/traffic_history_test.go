@@ -53,7 +53,7 @@ func TestTrafficHistoryUsesDailyFor7DaysAndPaginatesLedger(t *testing.T) {
 	require.EqualValues(t, 33, history.Summary.UpstreamBytes)
 }
 
-func TestTrafficHistoryMarksGapBucketUnknown(t *testing.T) {
+func TestTrafficHistoryFillsGapBucketWithZeroAndKeepsPartialCoverage(t *testing.T) {
 	db := newTrafficHistoryDB(t)
 	now := time.Date(2026, 9, 4, 10, 3, 0, 0, time.UTC)
 	gapStart := now.Add(-time.Hour).Truncate(time.Hour)
@@ -64,9 +64,12 @@ func TestTrafficHistoryMarksGapBucketUnknown(t *testing.T) {
 	history, err := NewAssetSummaryService(db, time.UTC).TrafficHistory(context.Background(), window, 1, 20, nil)
 	require.NoError(t, err)
 	require.Equal(t, CoveragePartial, history.Coverage)
+	require.Equal(t, StatusPartial, history.Status)
+	require.Len(t, history.Gaps, 1)
 	for _, point := range history.Points {
 		if point.BucketStart.Unix() == gapStart.Unix() {
-			require.Nil(t, point.UpstreamBytes)
+			require.Zero(t, point.UpstreamBytes)
+			require.Zero(t, point.DownstreamBytes)
 			return
 		}
 	}

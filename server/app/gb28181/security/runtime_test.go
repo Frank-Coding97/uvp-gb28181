@@ -173,12 +173,12 @@ func TestRuntimeUnbanAcceptsDecisionIDFromAPI(t *testing.T) {
 	require.Equal(t, BanUnbanned, r.Bans()[0].Status)
 }
 
-func TestRuntimeUpdatePolicyPreservesFiniteBanTTLs(t *testing.T) {
+func TestRuntimeUpdatePolicyUsesPermanentBan(t *testing.T) {
 	r := NewRuntime(DefaultPolicy(), &fakeClock{now: time.Unix(100, 0)}, nil, []byte("secret"))
 	next := DefaultPolicy()
 	require.NoError(t, r.UpdatePolicy(next, "admin"))
 	require.Equal(t, next.BanTTLs, r.Policy().BanTTLs)
 	for _, step := range r.Policy().BanTTLs {
-		require.Greater(t, step.TTL, time.Duration(0))
+		require.Zero(t, step.TTL)
 	}
 }

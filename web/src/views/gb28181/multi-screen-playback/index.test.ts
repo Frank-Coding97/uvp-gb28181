@@ -20,9 +20,11 @@ const message = vi.hoisted(() => ({
     warning: vi.fn(),
     error: vi.fn()
 }));
+const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
 
 vi.mock("../device-mgmt/api", () => api);
 vi.mock("@/api/gb28181", () => playback);
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 vi.mock("@arco-design/web-vue", () => ({ Message: message }));
 vi.mock("./PlaybackSourceTree.vue", () => ({
     default: {
@@ -63,6 +65,7 @@ import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
 
 describe("multi-screen playback page", () => {
     beforeEach(() => {
+        account.permissions = ["*:*:*"];
         setActivePinia(createPinia());
         api.listChannels.mockReset();
         favoriteDialog.opened = false;
@@ -101,6 +104,38 @@ describe("multi-screen playback page", () => {
         expect(wrapper.findAll(".unplayed-cover")).toHaveLength(4);
         expect(wrapper.find("[data-test=layout-9]").exists()).toBe(true);
         expect(wrapper.find("[data-test=my-favorites] .lucide-star").exists()).toBe(true);
+    });
+
+    it("keeps guest batch viewing and polling while hiding favorite persistence and PTZ", async () => {
+        account.permissions = [
+            "gb28181:device:view",
+            "gb28181:play:start",
+            "gb28181:play:monitor",
+            "gb28181:device-record:query",
+            "gb28181:device-record:play"
+        ];
+        const wrapper = mount(MultiScreenPlayback);
+        await flushPromises();
+
+        expect(wrapper.find("[data-test=play-all]").exists()).toBe(true);
+        expect(wrapper.find("[data-test=polling-settings]").exists()).toBe(true);
+        expect(wrapper.find("[data-test=my-favorites]").exists()).toBe(false);
+        expect(wrapper.find(".basic-ptz").exists()).toBe(false);
+
+        api.listChannels.mockResolvedValue({
+            code: 0,
+            data: {
+                list: [{ id: 11, channelId: "channel-1", deviceId: "device-1", name: "东门", status: 1, audioEnabled: false }],
+                total: 1,
+                page: 1,
+                pageSize: 200
+            }
+        });
+        await wrapper.get("[data-test=play-all]").trigger("click");
+        await flushPromises();
+        expect(api.listChannels).toHaveBeenCalled();
+        expect(playback.startPlay).toHaveBeenCalled();
+        wrapper.unmount();
     });
 
     it("keeps the monitor toolbar clickable when the mobile workspace shrinks", () => {

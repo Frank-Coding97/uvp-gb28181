@@ -66,7 +66,8 @@ func BuildMediaDashboard(result management.OverviewResult) MediaDashboard {
 		item.Viewers += stream.ReaderCount
 		item.TotalReaders += stream.TotalReaderCount
 		item.BytesPerSecond += stream.BytesSpeed
-		item.Recording = item.Recording || stream.RecordingMP4 || stream.RecordingHLS
+		// HLS 表示正在生成播放切片，不等于正在进行可归档录像。
+		item.Recording = item.Recording || stream.RecordingMP4
 		if stream.AliveSecond > item.AliveSecond {
 			item.AliveSecond = stream.AliveSecond
 		}

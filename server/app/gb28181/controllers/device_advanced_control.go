@@ -70,63 +70,68 @@ func (dc *DeviceMgmtController) ControlDevice(c *gin.Context) {
 		return
 	}
 
+	key := strings.TrimSpace(request.IdempotencyKey)
+	if key == "" {
+		key = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	}
 	if request.Action == "teleboot" {
-		// TeleBoot targets the registered device, so de-duplicate and serialize
-		// at device scope rather than per playback channel.
-		lock := dc.deviceControlDeviceLock(target.DeviceID)
-		lock.Lock()
-		defer lock.Unlock()
 		if !request.Confirmed {
 			dc.FailAndAbort(c, "远程重启需要显式确认", nil)
 			return
 		}
-		if existing, found := dc.recentTeleBoot(c, target.DeviceID); found {
-			dc.deviceControlSuccess(c, existing, request.Action, true)
+		if _, owner := dc.loadMaintenanceDeviceByID(c, target.DeviceID); !owner {
 			return
 		}
-	}
-	key := strings.TrimSpace(request.IdempotencyKey)
-	if key == "" {
-		key = strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+		if !dc.checkDeviceRebootPermission(c, target.DeviceID) {
+			return
+		}
+		actorID, actorDeptID, err := dc.maintenanceActor(c)
+		if err != nil {
+			dc.FailAndAbort(c, "读取操作者部门失败", err)
+			return
+		}
+		op, deduplicated, err := service.ExecuteDeviceRebootDetailed(c.Request.Context(), ptz.DeviceRebootTarget{
+			DeviceID: target.DeviceID, DeviceCode: target.DeviceCode, IP: target.IP, Port: target.Port,
+			Transport: target.Transport, DeviceOnline: target.DeviceOnline, Profile: target.Profile,
+		}, key, actorID, actorDeptID)
+		if err != nil {
+			dc.FailAndAbort(c, "下发设备重启失败", err)
+			return
+		}
+		dc.deviceControlSuccess(c, op, request.Action, deduplicated)
+		return
 	}
 	profile := target.Profile
 	responsePolicy := profile.ResponseFor(advancedResponseAction(request.Action))
 	targetScope := gbmodels.ControlTargetScopeChannel
 	targetCode := target.ChannelCode
-	if request.Action == "teleboot" || request.Action == "guard_set" || request.Action == "guard_reset" || request.Action == "alarm_reset" {
-		if request.Action == "teleboot" {
-			targetScope = gbmodels.ControlTargetScopeDevice
-		} else {
-			targetScope = gbmodels.ControlTargetScopeAlarm
-			resolution, err := catalog.ResolveAlarmTarget(
-				c.Request.Context(), dc.db(), target.DeviceID, target.DeviceCode, target.ChannelCode,
-			)
-			if err != nil {
-				dc.FailAndAbort(c, "解析报警输入目标失败", err)
-				return
-			}
-			switch resolution.Status {
-			case catalog.AlarmTargetResolved:
-				if resolution.Target == nil || strings.TrimSpace(resolution.Target.AlarmCode) == "" {
-					dc.FailAndAbort(c, "当前通道未关联报警输入，无法执行报警控制", nil)
-					return
-				}
-				targetCode = strings.TrimSpace(resolution.Target.AlarmCode)
-			case catalog.AlarmTargetAmbiguous:
-				dc.FailAndAbort(c, "当前通道关联多个报警输入，请先绑定唯一报警输入", nil)
-				return
-			case catalog.AlarmTargetUnavailable:
-				// Some 2016 devices expose alarm control only on the registered
-				// parent code and publish no catalog node. Keep the alarm scope
-				// for operation/audit semantics, but target the parent device.
-				targetCode = target.DeviceCode
-			default:
+	if request.Action == "guard_set" || request.Action == "guard_reset" || request.Action == "alarm_reset" {
+		targetScope = gbmodels.ControlTargetScopeAlarm
+		resolution, err := catalog.ResolveAlarmTarget(
+			c.Request.Context(), dc.db(), target.DeviceID, target.DeviceCode, target.ChannelCode,
+		)
+		if err != nil {
+			dc.FailAndAbort(c, "解析报警输入目标失败", err)
+			return
+		}
+		switch resolution.Status {
+		case catalog.AlarmTargetResolved:
+			if resolution.Target == nil || strings.TrimSpace(resolution.Target.AlarmCode) == "" {
 				dc.FailAndAbort(c, "当前通道未关联报警输入，无法执行报警控制", nil)
 				return
 			}
-		}
-		if request.Action == "teleboot" {
+			targetCode = strings.TrimSpace(resolution.Target.AlarmCode)
+		case catalog.AlarmTargetAmbiguous:
+			dc.FailAndAbort(c, "当前通道关联多个报警输入，请先绑定唯一报警输入", nil)
+			return
+		case catalog.AlarmTargetUnavailable:
+			// Some 2016 devices expose alarm control only on the registered
+			// parent code and publish no catalog node. Keep the alarm scope
+			// for operation/audit semantics, but target the parent device.
 			targetCode = target.DeviceCode
+		default:
+			dc.FailAndAbort(c, "当前通道未关联报警输入，无法执行报警控制", nil)
+			return
 		}
 	}
 	if resource, found := advancedControlResourceFor(request.Action); found {
@@ -189,11 +194,6 @@ func advancedResponseAction(action string) protocol.Action {
 
 func (dc *DeviceMgmtController) deviceControlLock(channelID uint) *sync.Mutex {
 	value, _ := dc.deviceControlLocks.LoadOrStore(deviceControlLockKey{scope: gbmodels.ControlTargetScopeChannel, id: channelID}, &sync.Mutex{})
-	return value.(*sync.Mutex)
-}
-
-func (dc *DeviceMgmtController) deviceControlDeviceLock(deviceID uint) *sync.Mutex {
-	value, _ := dc.deviceControlLocks.LoadOrStore(deviceControlLockKey{scope: gbmodels.ControlTargetScopeDevice, id: deviceID}, &sync.Mutex{})
 	return value.(*sync.Mutex)
 }
 
@@ -268,16 +268,6 @@ func buildAdvancedControl(profile protocol.Profile, targetCode string, sn int, r
 	default:
 		return nil, fmt.Errorf("不支持的设备控制动作: %q", request.Action)
 	}
-}
-
-func (dc *DeviceMgmtController) recentTeleBoot(c *gin.Context, deviceID uint) (gbmodels.GbPTZOperation, bool) {
-	var operation gbmodels.GbPTZOperation
-	result := dc.db().WithContext(c.Request.Context()).
-		Where("device_id = ? AND action = ? AND status IN ? AND created_at >= ?", deviceID, "teleboot", []gbmodels.PTZOperationStatus{
-			gbmodels.PTZOperationQueued, gbmodels.PTZOperationSent, gbmodels.PTZOperationAccepted, gbmodels.PTZOperationUnknown,
-		}, time.Now().Add(-time.Minute)).
-		Order("id DESC").Limit(1).Find(&operation)
-	return operation, result.Error == nil && result.RowsAffected > 0
 }
 
 func (dc *DeviceMgmtController) deviceControlSuccess(c *gin.Context, operation gbmodels.GbPTZOperation, action string, deduplicated bool) {

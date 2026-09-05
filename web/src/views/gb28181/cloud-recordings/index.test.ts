@@ -14,7 +14,7 @@ const api = vi.hoisted(() => ({
   stopActiveRecording: vi.fn()
 }));
 const enqueueDownload = vi.hoisted(() => vi.fn());
-const account = vi.hoisted(() => ({ permissions: ["gb28181:recording:view", "gb28181:recording:reconcile"] as string[] }));
+const account = vi.hoisted(() => ({ permissions: ["gb28181:recording:view", "gb28181:recording:reconcile", "gb28181:recording:download"] as string[] }));
 const messages = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const modalWarning = vi.hoisted(() => vi.fn());
 
@@ -81,7 +81,10 @@ const stubs = {
     template: `<input :value="modelValue" :placeholder="placeholder" @input="$emit('update:modelValue', $event.target.value)" @keyup.enter="$emit('pressEnter')" />`
   },
   "a-range-picker": { template: "<div />" },
-  RecordingDetailDrawer: { template: "<div />" },
+  RecordingDetailDrawer: {
+    emits: ["download"],
+    template: "<div><button data-testid='force-detail-download' @click='$emit(`download`, { id: `9007199254740993`, fileName: `record.mp4`, availability: `available` })' /></div>"
+  },
   RecordingPlayerDialog: { template: "<div />" },
   RecordingRuntimeControl: { template: "<div data-testid='runtime-control' />" }
 };
@@ -113,7 +116,7 @@ function pageResult(list = [file()]) {
 
 describe("CloudRecordings", () => {
   beforeEach(() => {
-    account.permissions = ["gb28181:recording:view", "gb28181:recording:reconcile"];
+    account.permissions = ["gb28181:recording:view", "gb28181:recording:reconcile", "gb28181:recording:download"];
     Object.values(api).forEach(mock => mock.mockReset());
     api.listRecordingFiles.mockResolvedValue(pageResult());
     api.listRecordingOptions.mockResolvedValue({ code: 0, message: "", data: { channels: [], devices: [], nodes: [] } });
@@ -251,6 +254,30 @@ describe("CloudRecordings", () => {
     await flushPromises();
     expect(wrapper.find("[data-testid='play-9007199254740993']").exists()).toBe(false);
     expect(wrapper.find("[data-testid='download-9007199254740993']").exists()).toBe(false);
+  });
+
+  it("does not request reconciliation status for view-only users on mount or refresh", async () => {
+    account.permissions = ["gb28181:recording:view"];
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(api.listReconciliations).not.toHaveBeenCalled();
+    await wrapper.get("[data-testid='recording-refresh']").trigger("click");
+    await flushPromises();
+    expect(api.listReconciliations).not.toHaveBeenCalled();
+  });
+
+  it("keeps playback available but hides and rejects download for view-only users", async () => {
+    account.permissions = ["gb28181:recording:view"];
+    const wrapper = mount(CloudRecordings, { global: { stubs } });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='play-9007199254740993']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='download-9007199254740993']").exists()).toBe(false);
+
+    await wrapper.get("[data-testid='play-9007199254740993']").trigger("click");
+    await wrapper.get("[data-testid='force-detail-download']").trigger("click");
+    expect(enqueueDownload).not.toHaveBeenCalled();
   });
 
   it("renders operation icons alongside their text labels", async () => {

@@ -266,8 +266,12 @@ type OverviewResult struct {
 	Nodes   []NodeRuntimeView `json:"nodes"`
 	Streams []RuntimeMedia    `json:"streams"`
 	Metrics OverviewMetrics   `json:"metrics"`
-	Partial bool              `json:"partial"`
-	AsOf    time.Time         `json:"asOf"`
+	// MediaRateSamples is the shared backend-owned five-minute history. It is
+	// intentionally absent from raw OverviewService results and attached by
+	// OverviewSampler at the HTTP boundary.
+	MediaRateSamples []MediaRateSample `json:"mediaRateSamples"`
+	Partial          bool              `json:"partial"`
+	AsOf             time.Time         `json:"asOf"`
 	// The two scopes are intentionally separate: runtime counters may be
 	// current even when a media-list read fails, and callers must not infer
 	// either scope from SuccessfulNodeIDs or FailedNodeIDs.
@@ -350,10 +354,9 @@ func (s *OverviewService) GetOverview(ctx context.Context) (OverviewResult, erro
 			result.MediaSampledNodeIDs = append(result.MediaSampledNodeIDs, view.NodeID)
 			result.Streams = append(result.Streams, view.Streams...)
 		}
-		if view.MetricsComplete && view.MediaFreshness == RuntimeFreshnessFresh {
+		if view.Status == RuntimeNodeStatusFresh {
 			result.SuccessfulNodeIDs = append(result.SuccessfulNodeIDs, view.NodeID)
-		}
-		if !view.MetricsComplete || view.MediaFreshness != RuntimeFreshnessFresh {
+		} else {
 			result.FailedNodeIDs = append(result.FailedNodeIDs, view.NodeID)
 			result.Partial = true
 		}
@@ -651,6 +654,8 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 		view.Metrics = runtimeMetrics(statistic, len(sessions), netLoad, workLoad, eventThreadLoads)
 		if mediaTrafficErr == nil {
 			applyMediaTraffic(&view.Metrics, mediaTraffic)
+		} else {
+			view.Errors = append(view.Errors, *s.nodeError(current.ID, "media-traffic", mediaTrafficErr))
 		}
 		view.MetricsComplete = true
 		view.Freshness = RuntimeFreshnessFresh
@@ -683,7 +688,7 @@ func (s *OverviewService) collectActiveNodeView(ctx context.Context, current *no
 		view.Error = &first
 	}
 	switch {
-	case view.MetricsComplete && view.MediaFreshness == RuntimeFreshnessFresh:
+	case view.MetricsComplete && view.MediaFreshness == RuntimeFreshnessFresh && len(view.Errors) == 0:
 		view.Status = RuntimeNodeStatusFresh
 	case view.MetricsComplete:
 		view.Status = RuntimeNodeStatusPartial

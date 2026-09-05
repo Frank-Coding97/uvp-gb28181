@@ -127,6 +127,37 @@ func TestHomeSummaryReturnsServiceUnavailableWhenDatabaseIsMissing(t *testing.T)
 	require.Equal(t, http.StatusServiceUnavailable, result.Code)
 }
 
+func TestHomeRuntimeBindingsReturnsPlayingChannelWithDeviceDisplayName(t *testing.T) {
+	app.Response = response.NewResponseHandler()
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&models.GbDevice{}, &models.GbChannel{}))
+	require.NoError(t, db.Create(&models.GbDevice{DeviceID: "34020000002000000001", Name: "设备原名", Alias: "南门摄像机"}).Error)
+	require.NoError(t, db.Create(&models.GbChannel{DeviceID: "34020000002000000001", ChannelID: "34020000001320000001", Name: "通道原名", Alias: "南门通道", StreamID: "0200000000"}).Error)
+	require.NoError(t, db.Create(&models.GbChannel{DeviceID: "34020000002000000001", ChannelID: "34020000001320000002", Name: "未播放", StreamID: ""}).Error)
+
+	controller := NewHomeDashboardController(func() *gorm.DB { return db })
+	result := performDashboardRequest(dashboardSummaryRouter(controller), http.MethodGet, "/summary?groups=aggregate", nil)
+	require.Equal(t, http.StatusOK, result.Code, result.Body.String())
+	var body struct {
+		Data struct {
+			Bindings struct {
+				Data []struct {
+					StreamID    string `json:"streamId"`
+					DeviceName  string `json:"deviceName"`
+					ChannelName string `json:"channelName"`
+				} `json:"data"`
+			} `json:"bindings"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(result.Body.Bytes(), &body))
+	bindings := body.Data.Bindings.Data
+	require.Len(t, bindings, 1)
+	require.Equal(t, "0200000000", bindings[0].StreamID)
+	require.Equal(t, "南门摄像机", bindings[0].DeviceName)
+	require.Equal(t, "南门通道", bindings[0].ChannelName)
+}
+
 func TestHomeDrilldownSIPHistoryRejectsInvalidAndDuplicateRanges(t *testing.T) {
 	controller := NewHomeDashboardController(func() *gorm.DB { return nil })
 	router := gin.New()

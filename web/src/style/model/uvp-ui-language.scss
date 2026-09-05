@@ -892,7 +892,15 @@ body[arco-theme="dark"] .zlm-node-form {
 }
 
 .uvp-data-table .arco-link-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
   margin-right: 0;
+}
+
+.uvp-data-table .arco-link-icon > svg {
+  display: block;
 }
 
 .uvp-data-table .arco-btn:not(.arco-btn-only-icon) .arco-btn-icon {

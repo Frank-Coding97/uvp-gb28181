@@ -31,8 +31,10 @@ const props = withDefaults(defineProps<{
 });
 
 const chartHost = ref<HTMLElement | null>(null);
+const themeRevision = ref(0);
 let chart: VChart | null = null;
 let resizeObserver: ResizeObserver | null = null;
+let themeObserver: MutationObserver | null = null;
 let syncVersion = 0;
 const instance = getCurrentInstance();
 const idPrefix = `media-vchart-${instance?.uid ?? Math.random().toString(36).slice(2)}`;
@@ -52,6 +54,23 @@ const stateText = computed(() => {
   return props.statusText;
 });
 const chartAriaLabel = computed(() => `${props.title}，${props.summary || stateText.value}`);
+
+// VChart renders to Canvas, so CSS custom properties must be resolved first.
+const resolvedSpec = computed(() => {
+  void themeRevision.value;
+  if (!props.spec || !chartHost.value) return props.spec;
+  const styles = getComputedStyle(chartHost.value);
+  const rootStyles = getComputedStyle(document.documentElement);
+  function resolve(value: unknown): unknown {
+    if (typeof value === "string") {
+      return value.replace(/var\((--[\w-]+)\)/g, (original, name: string) => styles.getPropertyValue(name).trim() || rootStyles.getPropertyValue(name).trim() || original);
+    }
+    if (Array.isArray(value)) return value.map(resolve);
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, resolve(item)]));
+    return value;
+  }
+  return resolve(props.spec) as MediaChartSpec;
+});
 
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -121,13 +140,13 @@ function clearHoverState() {
 function syncChart() {
   syncVersion += 1;
   const version = syncVersion;
-  if (!canRender.value || !props.spec || !chartHost.value) {
+  if (!canRender.value || !resolvedSpec.value || !chartHost.value) {
     releaseChart();
     return;
   }
-  const nextSpec = normalizedSpec(props.spec);
+  const nextSpec = normalizedSpec(resolvedSpec.value);
   if (!chart) {
-    mountChart(props.spec);
+    mountChart(resolvedSpec.value);
     return;
   }
   // A stale watcher should never update a released chart after deactivation.
@@ -140,15 +159,26 @@ function syncChart() {
 }
 
 watch(
-  () => [props.spec, props.status, props.active],
+  () => [props.spec, props.status, props.active, themeRevision.value],
   syncChart,
   { deep: true, flush: "post" }
 );
 
-onMounted(syncChart);
+onMounted(() => {
+  if (typeof MutationObserver !== "undefined") {
+    themeObserver = new MutationObserver(() => { themeRevision.value += 1; });
+    const options = { attributes: true, attributeFilter: ["class", "style", "arco-theme", "data-theme"] };
+    themeObserver.observe(document.body, options);
+    themeObserver.observe(document.documentElement, options);
+  }
+  syncChart();
+});
 onActivated(() => void nextTick(syncChart));
 onDeactivated(releaseChart);
-onBeforeUnmount(releaseChart);
+onBeforeUnmount(() => {
+  themeObserver?.disconnect();
+  releaseChart();
+});
 </script>
 
 <template>

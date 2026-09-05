@@ -40,7 +40,7 @@ type SecurityPolicyView struct {
 }
 
 func securityPolicyView(policy gbsecurity.SecurityPolicy) SecurityPolicyView {
-	view := SecurityPolicyView{Mode: policy.Mode, Window: int(policy.Window / time.Second), BanScore: policy.BanScore, MaxPacketBytes: policy.MaxPacketBytes, MaxUDPPerWindow: policy.MaxUDPPerWindow, MaxTCPConnections: policy.MaxTCPConnections, SamplePerSource: policy.SamplePerSource, NonceTTL: int(policy.NonceTTL / time.Second)}
+	view := SecurityPolicyView{Mode: policy.Mode, Window: int(policy.Window / time.Second), BanScore: policy.BanScore, MaxPacketBytes: policy.MaxPacketBytes, MaxUDPPerWindow: policy.MaxUDPPerWindow, MaxTCPConnections: policy.MaxTCPConnections, SamplePerSource: policy.SamplePerSource, NonceTTL: int(policy.NonceTTL / time.Second), PermanentAutoBan: policy.PermanentForScore(policy.BanScore)}
 	for _, step := range policy.BanTTLs {
 		view.BanTTLs = append(view.BanTTLs, struct {
 			Score int `json:"score"`
@@ -58,14 +58,7 @@ func policyFromView(view SecurityPolicyView) gbsecurity.SecurityPolicy {
 	policy.Mode, policy.Window, policy.BanScore = view.Mode, time.Duration(view.Window)*time.Second, view.BanScore
 	policy.MaxPacketBytes, policy.MaxUDPPerWindow, policy.MaxTCPConnections = view.MaxPacketBytes, view.MaxUDPPerWindow, view.MaxTCPConnections
 	policy.SamplePerSource, policy.NonceTTL = view.SamplePerSource, time.Duration(view.NonceTTL)*time.Second
-	if view.PermanentAutoBan {
-		policy.BanTTLs = []gbsecurity.TTLStep{{Score: policy.BanScore, TTL: 0}}
-	} else if len(view.BanTTLs) > 0 {
-		policy.BanTTLs = make([]gbsecurity.TTLStep, 0, len(view.BanTTLs))
-		for _, step := range view.BanTTLs {
-			policy.BanTTLs = append(policy.BanTTLs, gbsecurity.TTLStep{Score: step.Score, TTL: time.Duration(step.TTL) * time.Second})
-		}
-	}
+	policy = policy.WithPermanentAutoBan()
 	if view.Allowlist != nil {
 		policy.Allowlist = nil
 		for _, raw := range view.Allowlist {

@@ -7,11 +7,12 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"net"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -46,7 +47,7 @@ type Scorer struct {
 	buckets   map[string]scoreBucket
 	endpoints map[string]Endpoint
 	decisions map[string]BanDecision
-	seq       uint64
+	invites   map[string][]inviteObservation
 }
 
 func NewScorer(policy Policy, clock Clock, agent FirewallAgentClient, nonceSecret []byte) *Scorer {
@@ -64,6 +65,7 @@ func NewScorer(policy Policy, clock Clock, agent FirewallAgentClient, nonceSecre
 		buckets:   make(map[string]scoreBucket),
 		endpoints: make(map[string]Endpoint),
 		decisions: make(map[string]BanDecision),
+		invites:   make(map[string][]inviteObservation),
 	}
 }
 
@@ -72,6 +74,7 @@ func (s *Scorer) SetPolicy(policy Policy) {
 	if policy.Validate() == nil {
 		s.mu.Lock()
 		s.policy = policy
+		s.nonce.SetTTL(policy.NonceTTL)
 		s.mu.Unlock()
 	}
 }
@@ -87,23 +90,38 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 		event.Occurred = s.clock.Now()
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	policy := s.policy
-	s.mu.Unlock()
 	if policy.IsAllowlisted(event.SourceIP) {
 		event.Action = ActionAllow
 		return event, nil, nil
 	}
+	event.Action = ActionDrop
+	if policy.Mode == ModeObserve {
+		event.Action = ActionAllow
+	}
+	s.prune(event.Occurred, event.SourceIP, riskBucketKey(event))
+	persistent := false
+	if event.Reason == ReasonInviteRate && event.RiskScope == ScopeSource {
+		observations := s.invites[event.SourceIP]
+		// SIP retransmissions within the transaction lifetime carry no new risk.
+		// An identical probe sent after that lifetime is counted again.
+		for _, previous := range observations {
+			if event.TransactionID != "" && previous.transaction == event.TransactionID && event.Occurred.Sub(previous.at) < 32*time.Second {
+				event.Score = 0
+				return event, nil, nil
+			}
+		}
+		observations = append(observations, inviteObservation{at: event.Occurred, transaction: event.TransactionID})
+		if len(observations) > persistentInviteThreshold {
+			observations = observations[len(observations)-persistentInviteThreshold:]
+		}
+		s.invites[event.SourceIP] = observations
+		persistent = len(observations) >= persistentInviteThreshold
+	}
 	delta := reasonScore(event.Reason)
 	event.Score = delta
-	event.Action = ActionAllow
-	if policy.Mode != ModeObserve {
-		event.Action = ActionDrop
-	}
-
-	// Aggregate a source across reasons within the same window so a mixed
-	// sequence of mismatch, digest and replay signals reaches a threshold.
 	key := riskBucketKey(event)
-	s.mu.Lock()
 	b := s.buckets[key]
 	if b.started.IsZero() || event.Occurred.Sub(b.started) >= policy.Window {
 		b = scoreBucket{started: event.Occurred}
@@ -112,44 +130,102 @@ func (s *Scorer) Observe(event Event) (Event, *BanDecision, error) {
 	b.count++
 	s.buckets[key] = b
 	total := b.score
-	s.mu.Unlock()
-
+	if persistent && total < policy.BanScore {
+		total = policy.BanScore
+	}
 	if total < policy.BanScore || policy.Mode == ModeObserve || event.RiskScope != ScopeSource {
 		return event, nil, nil
 	}
-
 	ttl, shouldBan := policy.BanForScore(total)
 	if !shouldBan {
 		return event, nil, nil
 	}
-	decision := BanDecision{
-		DecisionID:       s.nextDecisionID(event.SourceIP, event.Occurred),
-		SourceIP:         event.SourceIP,
-		DeviceID:         event.DeviceID,
-		RiskScope:        event.RiskScope,
-		Reason:           event.Reason,
-		Score:            total,
-		TTL:              ttl,
-		Permanent:        ttl == 0,
-		CreatedAt:        event.Occurred,
-		TriggerMethod:    strings.ToUpper(event.Method),
-		TriggerCount:     b.count,
-		TriggerThreshold: triggerThreshold(policy, event.Reason),
-		WindowSeconds:    int(policy.Window / time.Second),
-		PolicyMode:       policy.Mode,
-	}
 	event.Action = ActionBan
-	s.mu.Lock()
-	if previous, exists := s.decisions[event.SourceIP]; exists {
-		if previous.ActiveAt(event.Occurred) {
-			s.mu.Unlock()
-			return event, nil, nil
-		}
-		delete(s.decisions, event.SourceIP)
+	if previous, exists := s.decisions[event.SourceIP]; exists && previous.ActiveAt(event.Occurred) {
+		return event, nil, nil
+	}
+	decision := BanDecision{
+		DecisionID: "ban-" + uuid.NewString(), SourceIP: event.SourceIP, DeviceID: event.DeviceID,
+		RiskScope: event.RiskScope, Reason: event.Reason, Score: total, TTL: ttl, Permanent: ttl == 0, CreatedAt: event.Occurred,
+		TriggerMethod: strings.ToUpper(event.Method), TriggerCount: b.count,
+		TriggerThreshold: triggerThreshold(policy, event.Reason), WindowSeconds: int(policy.Window / time.Second), PolicyMode: policy.Mode,
+	}
+	if persistent {
+		decision.Reason = ReasonInvitePersistent
+		event.Reason = ReasonInvitePersistent
+		decision.TriggerCount = len(s.invites[event.SourceIP])
+		decision.TriggerThreshold = persistentInviteThreshold
+		decision.WindowSeconds = int(persistentInviteWindow / time.Second)
 	}
 	s.decisions[event.SourceIP] = decision
-	s.mu.Unlock()
 	return event, &decision, nil
+}
+
+const persistentInviteWindow = 10 * time.Minute
+const persistentInviteThreshold = 10
+
+type inviteObservation struct {
+	at          time.Time
+	transaction string
+}
+
+// prune bounds transient attacker-controlled state; active bans are retained.
+func (s *Scorer) prune(now time.Time, source, bucketKey string) {
+	for key, b := range s.buckets {
+		if now.Sub(b.started) >= s.policy.Window {
+			delete(s.buckets, key)
+		}
+	}
+	for source, entries := range s.invites {
+		i := 0
+		for i < len(entries) && now.Sub(entries[i].at) >= persistentInviteWindow {
+			i++
+		}
+		if i == len(entries) {
+			delete(s.invites, source)
+		} else {
+			s.invites[source] = entries[i:]
+		}
+	}
+	for source, d := range s.decisions {
+		if !d.ActiveAt(now) {
+			delete(s.decisions, source)
+		}
+	}
+	if _, exists := s.buckets[bucketKey]; !exists && len(s.buckets) >= s.policy.MaxEventKeys {
+		var oldest string
+		var at time.Time
+		for key, b := range s.buckets {
+			if at.IsZero() || b.started.Before(at) {
+				oldest, at = key, b.started
+			}
+		}
+		delete(s.buckets, oldest)
+	}
+	if _, exists := s.invites[source]; !exists && len(s.invites) >= s.policy.MaxEventKeys {
+		var oldest string
+		var at time.Time
+		for key, b := range s.invites {
+			if at.IsZero() || b[len(b)-1].at.Before(at) {
+				oldest, at = key, b[len(b)-1].at
+			}
+		}
+		delete(s.invites, oldest)
+	}
+}
+
+func (s *Scorer) Unban(source string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.decisions, source)
+	delete(s.buckets, riskBucketKey(Event{SourceIP: source, RiskScope: ScopeSource}))
+	delete(s.invites, source)
+}
+
+func (s *Scorer) HasDecision(decision BanDecision) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.decisions[decision.SourceIP].DecisionID == decision.DecisionID
 }
 
 func triggerThreshold(policy Policy, reason Reason) int {
@@ -181,14 +257,6 @@ func reasonScore(reason Reason) int {
 	default:
 		return 1
 	}
-}
-
-func (s *Scorer) nextDecisionID(source string, now time.Time) string {
-	s.mu.Lock()
-	s.seq++
-	seq := s.seq
-	s.mu.Unlock()
-	return fmt.Sprintf("ban-%x-%d", sha256.Sum256([]byte(source)), seq)[:28]
 }
 
 func (s *Scorer) UpdateTrustedEndpoint(deviceID, transport, address string, expiresAt time.Time) error {
@@ -265,6 +333,18 @@ func NewNonceManager(secret []byte, ttl time.Duration, clock Clock) *NonceManage
 	return &NonceManager{secret: append([]byte(nil), secret...), ttl: ttl, clock: clock, used: make(map[string]nonceUse)}
 }
 
+func (m *NonceManager) SetTTL(ttl time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ttl != ttl {
+		// Retire outstanding challenges on a TTL change. Otherwise increasing
+		// TTL can revive consumed nonces whose replay entries were pruned.
+		m.secret = m.sign([]byte("nonce-policy-change"))
+		clear(m.used)
+		m.ttl = ttl
+	}
+}
+
 func (m *NonceManager) Issue() (string, error) {
 	random := make([]byte, 16)
 	if _, err := rand.Read(random); err != nil {
@@ -273,6 +353,8 @@ func (m *NonceManager) Issue() (string, error) {
 	buf := make([]byte, noncePayloadSize)
 	binary.BigEndian.PutUint64(buf[:8], uint64(m.clock.Now().Unix()))
 	copy(buf[8:], random)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	// A 128-bit HMAC tag keeps the nonce below legacy devices' 64-byte limit.
 	sig := m.sign(buf)[:nonceMACSize]
 	return base64.RawURLEncoding.EncodeToString(append(buf, sig...)), nil
@@ -284,21 +366,21 @@ func (m *NonceManager) Validate(nonce, nonceCount string) error {
 
 func (m *NonceManager) ValidateForTransaction(nonce, nonceCount, transactionFingerprint string) error {
 	raw, err := base64.RawURLEncoding.DecodeString(nonce)
-	if err != nil || len(raw) != noncePayloadSize+nonceMACSize {
+	if err != nil || len(raw) != noncePayloadSize+nonceMACSize || base64.RawURLEncoding.EncodeToString(raw) != nonce {
 		return ErrNonceInvalid
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	payload, sig := raw[:noncePayloadSize], raw[noncePayloadSize:]
 	if !hmac.Equal(sig, m.sign(payload)[:nonceMACSize]) {
 		return ErrNonceInvalid
 	}
 	issued := time.Unix(int64(binary.BigEndian.Uint64(payload[:8])), 0)
 	now := m.clock.Now()
-	if now.Before(issued) || now.Sub(issued) > m.ttl {
+	if now.Before(issued) || now.Sub(issued) >= m.ttl {
 		return ErrNonceExpired
 	}
 	key := nonce + "|" + strings.TrimSpace(nonceCount)
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	for usedKey, use := range m.used {
 		if !use.expiresAt.After(now) {
 			delete(m.used, usedKey)

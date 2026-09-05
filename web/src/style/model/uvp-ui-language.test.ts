@@ -10,6 +10,11 @@ describe("table action spacing", () => {
     expect(source).toMatch(/\.uvp-data-table \.arco-link-icon\s*\{[^}]*margin-right:\s*0;/s);
     expect(source).toMatch(/\.uvp-data-table \.arco-btn:not\(\.arco-btn-only-icon\) \.arco-btn-icon\s*\{[^}]*margin-right:\s*4px;/s);
   });
+
+  it("centers slotted SVG icons against action labels without baseline drift", () => {
+    expect(source).toMatch(/\.uvp-data-table \.arco-link-icon\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*center;[^}]*justify-content:\s*center;[^}]*line-height:\s*1;/s);
+    expect(source).toMatch(/\.uvp-data-table \.arco-link-icon\s*>\s*svg\s*\{[^}]*display:\s*block;/s);
+  });
 });
 
 describe("media workbench theme tokens", () => {

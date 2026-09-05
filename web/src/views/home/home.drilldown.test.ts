@@ -1,15 +1,19 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { handleDashboardCardDrilldownKeydown, handleHistoryDrilldownKeydown, openDashboardCardDrilldown, openHistoryDrilldown } from "./dashboardCardDrilldown";
+import { handleDashboardCardDrilldownKeydown, handleHistoryDrilldownKeydown, isDashboardDrilldownWidget, openDashboardCardDrilldown, openHistoryDrilldown } from "./dashboardCardDrilldown";
 
 describe("home dashboard card drilldown", () => {
-  it("opens all four history cards in browse mode and never in edit mode", () => {
+  it("opens only media traffic history in browse mode and never in edit mode", () => {
     const open = vi.fn();
     for (const id of ["sip-rpm", "sip-today", "play-success-24h", "media-traffic-today"] as const) openHistoryDrilldown(id, false, open);
-    expect(open.mock.calls.map(call => call[0])).toEqual(["sip-rpm", "sip-today", "play-success-24h", "media-traffic-today"]);
-    openHistoryDrilldown("sip-rpm", true, open);
-    expect(open).toHaveBeenCalledTimes(4);
+    expect(open.mock.calls.map(call => call[0])).toEqual(["media-traffic-today"]);
+    openHistoryDrilldown("media-traffic-today", true, open);
+    expect(open).toHaveBeenCalledOnce();
+    expect(isDashboardDrilldownWidget("sip-rpm")).toBe(false);
+    expect(isDashboardDrilldownWidget("sip-today")).toBe(false);
+    expect(isDashboardDrilldownWidget("play-success-24h")).toBe(false);
+    expect(isDashboardDrilldownWidget("media-traffic-today")).toBe(true);
   });
 
   it("treats Enter and Space like click and prevents Space scrolling", () => {
@@ -17,9 +21,10 @@ describe("home dashboard card drilldown", () => {
     const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
     const space = new KeyboardEvent("keydown", { key: " ", cancelable: true });
     handleHistoryDrilldownKeydown(enter, "sip-rpm", false, open);
-    handleHistoryDrilldownKeydown(space, "sip-today", false, open);
-    expect(open).toHaveBeenCalledTimes(2);
-    expect(enter.defaultPrevented).toBe(true);
+    handleHistoryDrilldownKeydown(space, "media-traffic-today", false, open);
+    expect(open).toHaveBeenCalledOnce();
+    expect(open).toHaveBeenCalledWith("media-traffic-today");
+    expect(enter.defaultPrevented).toBe(false);
     expect(space.defaultPrevented).toBe(true);
   });
 
@@ -52,6 +57,7 @@ describe("home dashboard card drilldown", () => {
     }
     const ledgerSource = readFileSync(resolve(process.cwd(), "src/views/home/components/drilldown/MediaRuntimeLedgerDialog.vue"), "utf8");
     expect(ledgerSource).not.toContain("getZLM");
-    expect(ledgerSource).not.toContain("@/api/");
+    expect(ledgerSource).toContain("stopPlay");
+    expect(source).toContain("dashboardSummary.value?.bindings?.data");
   });
 });

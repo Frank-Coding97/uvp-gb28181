@@ -36,9 +36,6 @@ func (c *StreamProbeController) Run(ctx *gin.Context) {
 		return
 	}
 	streamID := ctx.Param("streamId")
-	if streamID == "" {
-		streamID = ctx.Param("deviceId")
-	}
 	var channel gbmodels.GbChannel
 	result := c.dbFunc().WithContext(ctx).Scopes(ownerDeptScope(ctx)).Select("id").Where("stream_id = ?", streamID).Limit(1).Find(&channel)
 	if result.Error != nil {

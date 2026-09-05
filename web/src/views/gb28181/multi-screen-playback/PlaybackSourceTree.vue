@@ -10,6 +10,7 @@ import {
     type DirectoryNode,
 } from "../device-mgmt/api";
 import { appendChannelFavoriteGroup, createChannelFavoriteGroup, deleteChannelFavoriteGroup, listChannelFavoriteGroups, removeChannelFavoriteItem, type ChannelFavoriteGroup as ApiFavoriteGroup, type ChannelFavoriteInput } from "@/api/gb28181";
+import { useUserStoreHook } from "@/store/modules/user";
 
 type SourceView = "devices" | "national" | "custom" | "favorites";
 type SourceNodeKind = "directory" | "device" | "channel" | "favorite-group";
@@ -54,7 +55,12 @@ const emit = defineEmits<{
     "update:view": [view: SourceView];
 }>();
 
-const view = ref<SourceView>(props.view || "devices");
+const userStore = useUserStoreHook();
+const permissions = computed(() => userStore.account.permissions ?? []);
+const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
+const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
+const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
+const view = ref<SourceView>(props.view === "favorites" && !canManageFavorites.value ? "devices" : (props.view || "devices"));
 const trees = ref<Record<SourceView, SourceTreeNode[]>>({ devices: [], national: [], custom: [], favorites: [] });
 const loaded = ref<Record<SourceView, boolean>>({ devices: false, national: false, custom: false, favorites: false });
 const loading = ref(false);
@@ -75,12 +81,13 @@ let deviceSearchTimer: number | null = null;
 let refreshInFlight = false;
 let unmounted = false;
 
-const viewOptions: Array<{ value: SourceView; label: string; icon: Component }> = [
+const allViewOptions: Array<{ value: SourceView; label: string; icon: Component }> = [
     { value: "devices", label: "设备树", icon: Cctv },
     { value: "national", label: "国标目录", icon: MapPin },
     { value: "custom", label: "自定义目录", icon: Folder },
     { value: "favorites", label: "我的收藏", icon: Star }
 ];
+const viewOptions = computed(() => allViewOptions.filter(option => option.value !== "favorites" || canManageFavorites.value));
 
 const favoriteDialogVisible = ref(false);
 const favoriteDialogChannel = ref<ChannelVO | null>(null);
@@ -118,21 +125,22 @@ function favoriteGroupNode(group: FavoriteChannelGroup, index: number): SourceTr
 }
 
 async function removeFavoriteChannel(node: SourceTreeNode) {
-    if (!node.channel || !node.favoriteGroupId) return;
+    if (!canManageFavorites.value || !node.channel || !node.favoriteGroupId) return;
     try { await removeChannelFavoriteItem(node.favoriteGroupId, { deviceCode: node.channel.deviceId, channelCode: node.channel.channelId }); await loadFavorites(); } catch { error.value = "移除收藏失败，请稍后重试"; }
 }
 
 async function removeFavoriteGroup(node: SourceTreeNode) {
-    if (!node.favoriteGroup) return;
+    if (!canManageFavorites.value || !node.favoriteGroup) return;
     try { await deleteChannelFavoriteGroup(node.favoriteGroup.id); await loadFavorites(); } catch { error.value = "删除收藏组失败，请稍后重试"; }
 }
 
 function openFavoriteDialog(node: SourceTreeNode) {
-    if (!node.channel) return;
+    if (!canManageFavorites.value || !node.channel) return;
     openFavoriteDialogForChannels([node.channel]);
 }
 
 function openFavoriteDialogForChannels(channels: ChannelVO[]) {
+    if (!canManageFavorites.value) return;
     const uniqueChannels = channels.filter((channel, index, list) => channel && list.findIndex(item => item.id === channel.id) === index);
     if (!uniqueChannels.length) return;
     favoriteDialogChannels.value = uniqueChannels;
@@ -154,6 +162,7 @@ function closeFavoriteDialog() {
 }
 
 async function saveFavoriteGroup() {
+    if (!canManageFavorites.value) return;
     const channels = favoriteDialogChannels.value;
     if (!channels.length) return;
     let group: FavoriteChannelGroup | undefined;
@@ -195,6 +204,12 @@ async function saveFavoriteGroup() {
 }
 
 async function loadFavorites() {
+    if (!canManageFavorites.value) {
+        favoriteGroups.value = [];
+        trees.value.favorites = [];
+        loaded.value.favorites = true;
+        return;
+    }
     try {
         const response = await listChannelFavoriteGroups();
         const groups = response.data?.list || [];
@@ -342,6 +357,11 @@ function preserveNodeState(nextNodes: SourceTreeNode[], previousNodes: SourceTre
 
 async function loadRoot(nextView: SourceView = view.value, force = false, silent = false) {
     if (loaded.value[nextView] && !force) return;
+    if (nextView === "favorites" && !canManageFavorites.value) return;
+    if (nextView !== "favorites" && !canViewDevices.value) {
+        error.value = "当前账号没有设备查看权限";
+        return;
+    }
     if (!silent) loading.value = true;
     error.value = "";
     try {
@@ -375,7 +395,7 @@ async function loadRoot(nextView: SourceView = view.value, force = false, silent
 }
 
 async function loadNodeChildren(node: SourceTreeNode) {
-    if (node.loaded || node.loading || !node.hasChildren) return;
+    if (!canViewDevices.value || node.loaded || node.loading || !node.hasChildren) return;
     node.loading = true;
     error.value = "";
     try {
@@ -419,6 +439,7 @@ async function choose(node: SourceTreeNode) {
 
 async function changeView(nextView: SourceView) {
     if (nextView === view.value) return;
+    if (nextView === "favorites" && !canManageFavorites.value) return;
     view.value = nextView;
     emit("update:view", nextView);
     await loadRoot(nextView);
@@ -431,7 +452,7 @@ function scrollViewTabs(direction: -1 | 1) {
 }
 
 async function changeDevicePage(page: number) {
-    if (page === devicePage.value) return;
+    if (!canViewDevices.value || page === devicePage.value) return;
     devicePage.value = page;
     await loadRoot("devices", true);
 }
@@ -443,6 +464,7 @@ function cancelDeviceSearch() {
 }
 
 async function applyDeviceSearch() {
+    if (!canViewDevices.value) return;
     cancelDeviceSearch();
     const keyword = deviceKeyword.value.trim();
     deviceKeyword.value = keyword;
@@ -460,18 +482,20 @@ function scheduleDeviceSearch() {
 }
 
 async function clearDeviceSearch() {
+    if (!canViewDevices.value) return;
     deviceKeyword.value = "";
     await applyDeviceSearch();
 }
 
 async function changeDeviceStatus(status: "" | "online" | "offline") {
-    if (status === deviceStatusFilter.value) return;
+    if (!canViewDevices.value || status === deviceStatusFilter.value) return;
     deviceStatusFilter.value = status;
     devicePage.value = 1;
     await loadRoot("devices", true);
 }
 
 async function refresh(silent = false) {
+    if (view.value === "favorites" ? !canManageFavorites.value : !canViewDevices.value) return;
     if (refreshInFlight) return;
     refreshInFlight = true;
     try {
@@ -496,7 +520,7 @@ function nodeStatus(node: SourceTreeNode) {
 }
 
 onMounted(async () => {
-    await loadFavorites();
+    if (canManageFavorites.value) await loadFavorites();
     await loadRoot();
     if (unmounted) return;
     refreshTimer = window.setInterval(() => {
@@ -507,6 +531,7 @@ onMounted(async () => {
 
 watch(() => props.view, nextView => {
     if (!nextView || nextView === view.value) return;
+    if (nextView === "favorites" && !canManageFavorites.value) return;
     view.value = nextView;
     void loadRoot(nextView);
 });
@@ -578,16 +603,16 @@ defineExpose({ openFavoriteDialogForChannels });
                         <span v-if="node.kind === 'directory' || node.kind === 'favorite-group'" class="node-status">{{ nodeStatus(node) }}</span>
                         <span v-else class="node-status-dot" :class="node.status === 1 ? 'online' : 'offline'" role="img" :aria-label="nodeStatus(node)" :title="nodeStatus(node)" />
                     </button>
-                    <button v-if="node.kind === 'channel' && node.channel && !isChannelFavorite(node.channel)" class="favorite-toggle" type="button" aria-label="收藏通道" title="收藏通道" @click.stop="openFavoriteDialog(node)">
+                    <button v-if="canManageFavorites && node.kind === 'channel' && node.channel && !isChannelFavorite(node.channel)" class="favorite-toggle" type="button" aria-label="收藏通道" title="收藏通道" @click.stop="openFavoriteDialog(node)">
                         <Star :size="14" aria-hidden="true" />
                     </button>
-                    <a-popconfirm v-if="node.kind === 'channel' && node.favoriteGroupId" :content="`确认移除“${node.channel ? displayChannelName(node.channel) : ''}”吗？`" type="warning" @ok="removeFavoriteChannel(node)">
+                    <a-popconfirm v-if="canManageFavorites && node.kind === 'channel' && node.favoriteGroupId" :content="`确认移除“${node.channel ? displayChannelName(node.channel) : ''}”吗？`" type="warning" @ok="removeFavoriteChannel(node)">
                         <button class="favorite-remove" type="button" aria-label="移除收藏通道" title="移除收藏通道" @click.stop><Trash2 :size="13" aria-hidden="true" /></button>
                     </a-popconfirm>
-                    <button v-if="node.kind === 'favorite-group' && node.favoriteGroup" class="favorite-play" type="button" :data-test="`favorite-group-play-${node.favoriteGroup.id}`" aria-label="播放收藏组" title="播放收藏组" @click.stop="emit('select-group', node.favoriteGroup)">
+                    <button v-if="canManageFavorites && node.kind === 'favorite-group' && node.favoriteGroup" class="favorite-play" type="button" :data-test="`favorite-group-play-${node.favoriteGroup.id}`" aria-label="播放收藏组" title="播放收藏组" @click.stop="emit('select-group', node.favoriteGroup)">
                         <Play :size="14" aria-hidden="true" />
                     </button>
-                    <a-popconfirm v-if="node.kind === 'favorite-group' && node.favoriteGroup" :content="`确认删除收藏组“${node.favoriteGroup.name}”吗？`" type="warning" @ok="removeFavoriteGroup(node)">
+                    <a-popconfirm v-if="canManageFavorites && node.kind === 'favorite-group' && node.favoriteGroup" :content="`确认删除收藏组“${node.favoriteGroup.name}”吗？`" type="warning" @ok="removeFavoriteGroup(node)">
                         <button class="favorite-remove" type="button" aria-label="删除收藏组" title="删除收藏组" @click.stop><Trash2 :size="13" aria-hidden="true" /></button>
                     </a-popconfirm>
                 </div>
@@ -598,7 +623,7 @@ defineExpose({ openFavoriteDialogForChannels });
             <span class="device-total">共 {{ deviceListTotal }} 台</span>
             <a-pagination v-if="deviceListTotal > devicePageSize" simple size="mini" :current="devicePage" :page-size="devicePageSize" :total="deviceListTotal" @change="changeDevicePage" />
         </div>
-        <div v-if="favoriteDialogVisible" class="favorite-dialog-backdrop" @click.self="closeFavoriteDialog">
+        <div v-if="canManageFavorites && favoriteDialogVisible" class="favorite-dialog-backdrop" @click.self="closeFavoriteDialog">
             <section class="favorite-dialog" role="dialog" aria-modal="true" aria-labelledby="favorite-dialog-title">
                 <header><strong id="favorite-dialog-title">收藏通道</strong><button type="button" aria-label="关闭收藏组弹窗" title="关闭" @click="closeFavoriteDialog"><X :size="16" aria-hidden="true" /></button></header>
                 <p>{{ favoriteDialogChannels.length > 1 ? `将当前 ${favoriteDialogChannels.length} 个播放通道加入收藏组` : `将“${favoriteDialogChannel ? displayChannelName(favoriteDialogChannel) : ''}”加入收藏组` }}</p>

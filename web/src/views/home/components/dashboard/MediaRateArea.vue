@@ -18,24 +18,25 @@ import type { ChartDatum, MediaChartSpec } from "@/views/gb28181/zlm/workbench/c
 import DashboardChart from "./DashboardChart.vue";
 
 interface MediaRateSample {
-  value: number;
+  upstream: number;
+  downstream: number;
   sampledAt: number;
 }
 
-const props = withDefaults(defineProps<{ samples: MediaRateSample[]; color?: string }>(), {
-  color: "var(--uvp-brand)"
-});
+const props = defineProps<{ samples: MediaRateSample[] }>();
 
 const WINDOW_MS = 5 * 60 * 1000;
 const DATA_ID = "dashboard-media-rate";
 
 const latestSampledAt = computed(() => props.samples.at(-1)?.sampledAt ?? null);
 const windowStart = computed(() => latestSampledAt.value === null ? null : latestSampledAt.value - WINDOW_MS);
-const axisMax = computed(() => props.samples.length ? Math.max(1, ...props.samples.map(sample => sample.value)) : 1);
+const axisMax = computed(() => props.samples.length
+  ? Math.max(1, ...props.samples.flatMap(sample => [sample.upstream, sample.downstream]))
+  : 1);
 const values = computed<ChartDatum[]>(() => props.samples.map(sample => ({
-  sampledAt: sample.sampledAt,
-  value: sample.value,
-  metric: "实时速率"
+  upstream: sample.upstream,
+  downstream: sample.downstream,
+  sampledAt: sample.sampledAt
 })));
 const summary = computed(() => props.samples.length ? `最近 5 分钟已记录 ${props.samples.length} 个采样点` : "暂无采样");
 
@@ -44,39 +45,13 @@ const chartSpec = computed<MediaChartSpec>(() => {
   const start = windowStart.value;
   const timeDomain = start === null || latest === null ? {} : { min: start, max: latest };
   return {
-    type: "area",
+    type: "common",
     background: "transparent",
-    color: [props.color],
     data: [{ id: DATA_ID, values: values.value }],
-    xField: "sampledAt",
-    yField: "value",
-    seriesField: "metric",
-    line: { style: { curveType: "monotone", stroke: props.color } },
-    area: {
-      style: {
-        curveType: "monotone",
-        fillOpacity: 0.28,
-        fill: {
-          gradient: "linear",
-          x0: 0,
-          y0: 0,
-          x1: 0,
-          y1: 1,
-          stops: [{ offset: 0, color: props.color }, { offset: 1, color: "transparent" }]
-        }
-      }
-    },
-    point: {
-      visible: true,
-      style: {
-        size: (datum: ChartDatum) => datum.sampledAt === latest ? 6 : 0,
-        fill: props.color,
-        stroke: "var(--uvp-panel-bg)",
-        lineWidth: 1
-      },
-      state: { dimension_hover: { size: 6.4 } }
-    },
-    invalidType: "break",
+    series: [
+      createRateSeries("upstream", "实时上行", "var(--uvp-brand)", 0.22, latest),
+      createRateSeries("downstream", "实时下行", "var(--uvp-brand-cyan)", 0.18, latest)
+    ],
     axes: [
       {
         orient: "left",
@@ -102,26 +77,58 @@ const chartSpec = computed<MediaChartSpec>(() => {
       }
     ],
     legends: { visible: false },
-    tooltip: {
-      activeType: "dimension",
-      dimension: {
-        title: {
-          value: { field: "sampledAt" },
-          valueTimeFormat: "%H:%M:%S",
-          valueTimeFormatMode: "local"
-        },
-        content: [{
-          key: "实时速率",
-          value: (datum?: ChartDatum) => formatRate(datum?.value)
-        }]
-      }
-    },
+    tooltip: { activeType: "dimension", confine: true },
     crosshair: { xField: { visible: true, line: { type: "line", style: { stroke: "var(--uvp-text-tertiary)", lineDash: [2, 2] } } } },
     padding: { left: 8, right: 12, top: 8, bottom: 8 },
     animationAppear: { duration: 220 },
     animationUpdate: { duration: 220, easing: "linear" }
   };
 });
+
+function createRateSeries(field: "upstream" | "downstream", label: string, color: string, fillOpacity: number, latest: number | null) {
+  return {
+    type: "area",
+    data: { id: DATA_ID },
+    xField: "sampledAt",
+    yField: field,
+    invalidType: "break",
+    line: { style: { curveType: "monotone", stroke: color, lineWidth: 1.5 } },
+    area: {
+      style: {
+        curveType: "monotone",
+        fillOpacity,
+        fill: {
+          gradient: "linear",
+          x0: 0,
+          y0: 0,
+          x1: 0,
+          y1: 1,
+          stops: [
+            { offset: 0, color, opacity: 0.78 },
+            { offset: 0.68, color, opacity: 0.24 },
+            { offset: 1, color, opacity: 0.04 }
+          ]
+        }
+      }
+    },
+    point: {
+      visible: true,
+      style: {
+        size: (datum: ChartDatum) => datum.sampledAt === latest ? 6 : 0,
+        fill: color,
+        stroke: "var(--uvp-panel-bg)",
+        lineWidth: 1
+      },
+      state: { dimension_hover: { size: 6.4 } }
+    },
+    tooltip: {
+      dimension: {
+        title: { value: { field: "sampledAt" }, valueTimeFormat: "%H:%M:%S", valueTimeFormatMode: "local" },
+        content: [{ key: label, value: (datum?: ChartDatum) => formatRate(datum?.[field]) }]
+      }
+    }
+  };
+}
 
 function formatRate(value: unknown): string {
   const numeric = typeof value === "number" ? value : Number(value);

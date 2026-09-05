@@ -271,7 +271,13 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeDigestFailure, status)
 		return
 	}
-	if err := h.validateNonce(cred.Nonce, digestNonceCount(cred.Nc), transactionKey, deviceID); err != nil {
+	// qopless Digest does not sign nc. Ignore any such parameter so a copied
+	// response cannot turn each nc value into a fresh nonce-consumption key.
+	nonceCount := ""
+	if strings.TrimSpace(cred.QOP) != "" {
+		nonceCount = digestNonceCount(cred.Nc)
+	}
+	if err := h.validateNonce(cred.Nonce, nonceCount, transactionKey, deviceID); err != nil {
 		h.recordSecurity(req, deviceID, nonceFailureReason(err))
 		status, freshNonce := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)

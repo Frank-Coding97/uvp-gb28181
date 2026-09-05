@@ -50,7 +50,7 @@ describe("RecordingDetailDrawer", () => {
 
   it("keeps opaque IDs, renders public metadata and emits available actions", async () => {
     const wrapper = mount(RecordingDetailDrawer, {
-      props: { visible: true, recordingId: "9007199254740993" },
+      props: { visible: true, recordingId: "9007199254740993", canPlay: true, canDownload: true },
       global: { stubs }
     });
     await flushPromises();
@@ -64,10 +64,21 @@ describe("RecordingDetailDrawer", () => {
     expect(wrapper.emitted("download")?.[0]?.[0]).toMatchObject({ id: "9007199254740993" });
   });
 
+  it("keeps playback but hides download for a view-only account", async () => {
+    const wrapper = mount(RecordingDetailDrawer, {
+      props: { visible: true, recordingId: "9007199254740993", canPlay: true, canDownload: false },
+      global: { stubs }
+    });
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='detail-play']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='detail-download']").exists()).toBe(false);
+  });
+
   it("shows partial metadata as pending and hides unsupported actions", async () => {
     getRecordingDetail.mockResolvedValue({ code: 0, message: "", data: recording("node_offline", "partial") });
     const wrapper = mount(RecordingDetailDrawer, {
-      props: { visible: true, recordingId: "41" },
+      props: { visible: true, recordingId: "41", canPlay: false, canDownload: false },
       global: { stubs }
     });
     await flushPromises();

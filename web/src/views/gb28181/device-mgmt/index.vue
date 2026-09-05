@@ -31,7 +31,8 @@ import {
     X,
     Plus,
     FolderPlus,
-    FolderMinus
+    FolderMinus,
+    Wrench
 } from "@lucide/vue";
 import { stopPlay } from "@/api/gb28181";
 import { listZLMNodes, type ZLMNode } from "@/api/gb28181-zlm";
@@ -78,6 +79,7 @@ import { useThemeConfig } from "@/store/modules/theme-config";
 import { useUserStoreHook } from "@/store/modules/user";
 import { storeToRefs } from "pinia";
 import SubscriptionDialog from "./SubscriptionDialog.vue";
+import DeviceMaintenanceDialog from "./DeviceMaintenanceDialog.vue";
 import DirectoryPanel from "./components/DirectoryPanel.vue";
 import CustomGroupEditor, { type CustomGroupEditorMode } from "./components/CustomGroupEditor.vue";
 import AddToGroupDialog from "./components/AddToGroupDialog.vue";
@@ -126,6 +128,8 @@ const memberMutationLoading = ref(false);
 const drawerVisible = ref(false);
 const subscriptionDialogVisible = ref(false);
 const subscriptionDevice = ref<DeviceVO | null>(null);
+const maintenanceVisible = ref(false);
+const maintenanceDevice = ref<DeviceVO | null>(null);
 const drawerTarget = ref<DrawerTarget | null>(null);
 const drawerLoading = ref(false);
 const rowsLoading = ref(false);
@@ -171,8 +175,26 @@ const mapFirstRender = ref(false);
 const mapError = ref("");
 const themeStore = useThemeConfig();
 const { darkMode } = storeToRefs(themeStore);
-const permissions = computed(() => useUserStoreHook().account.permissions);
-const canManageGroups = computed(() => permissions.value.includes("*:*:*") || permissions.value.includes("gb28181:device-group:manage"));
+const permissions = computed(() => useUserStoreHook().account.permissions ?? []);
+const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
+const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
+const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
+const canQueryDeviceRecords = computed(() => hasPermission("gb28181:device-record:query"));
+const canViewTraffic = computed(() => hasPermission("gb28181:traffic:view"));
+const canManageGroups = computed(() => hasPermission("gb28181:device-group:manage"));
+const canViewMaintenance = computed(() => hasPermission("gb28181:device:maintenance:view"));
+const canRebootDevice = computed(() => hasPermission("gb28181:device:reboot"));
+const canUpgradeDevice = computed(() => hasPermission("gb28181:device:upgrade"));
+const canAddDevice = computed(() => hasPermission("gb28181:device:add"));
+const canEditDevice = computed(() => hasPermission("gb28181:device:edit"));
+const canDeleteDevice = computed(() => hasPermission("gb28181:device:delete"));
+const canDeleteChannel = computed(() => hasPermission("gb28181:channel:delete"));
+const canRefreshCatalog = computed(() => hasPermission("gb28181:device:catalog:refresh"));
+const canManageSubscriptions = computed(() => hasPermission("gb28181:device:subscription:manage"));
+const canEditChannel = computed(() => hasPermission("gb28181:channel:edit"));
+const canEditTransport = computed(() => hasPermission("gb28181:channel:stream-transport:update"));
+const canUpdateRecording = computed(() => hasPermission("gb28181:channel:recording:update"));
+const canStopPlayback = computed(() => hasPermission("gb28181:play:stop"));
 const mapStyleUrls = {
     light: (import.meta.env.VITE_MAP_STYLE_LIGHT_URL as string | undefined) || "https://tiles.openfreemap.org/styles/bright",
     dark: (import.meta.env.VITE_MAP_STYLE_DARK_URL as string | undefined) || "https://tiles.openfreemap.org/styles/dark"
@@ -455,6 +477,7 @@ function keepaliveIntervalText(seconds?: number) {
     return s === 0 ? `${m} 分钟` : `${m} 分 ${s} 秒`;
 }
 function showDeviceChannels(record: DeviceVO) {
+    if (!canViewDevices.value) return;
     setKeywordWithoutSearch("");
     deviceIdFilter.value = record.deviceId;
     channelEntrySource.value = "device-drilldown";
@@ -465,6 +488,7 @@ function showDeviceChannels(record: DeviceVO) {
 }
 
 async function loadPtzTypeDict() {
+    if (!canEditChannel.value) return;
     try {
         const res = await getDictItemsByDictCodeAPI("ptz_type");
         if (res.code === 0) {
@@ -476,12 +500,14 @@ async function loadPtzTypeDict() {
 }
 
 function onDirectorySelect(node: DirectoryNode) {
+    if (!canViewDevices.value) return;
     selectedDirectories.value = { ...selectedDirectories.value, [directoryState.value.view]: node };
     page.value = 1;
     selectedRowKeys.value = [];
     refreshMainData();
 }
 async function onDirectoryViewChange() {
+    if (!canViewDevices.value) return;
     page.value = 1;
     selectedRowKeys.value = [];
     await nextTick();
@@ -493,7 +519,7 @@ function clearDirectorySelection(refresh = true) {
     selectedDirectories.value = { ...selectedDirectories.value, [view]: null };
     page.value = 1;
     selectedRowKeys.value = [];
-    if (refresh) refreshMainData();
+    if (refresh && canViewDevices.value) refreshMainData();
 }
 function onDirectoryTreeLoaded(view: "national" | "administrative" | "business" | "custom", tree: DirectoryNode[]) {
     if (view === "custom") customTree.value = tree;
@@ -506,6 +532,7 @@ function onDirectoryTreeLoaded(view: "national" | "administrative" | "business" 
     }
 }
 function openGroupEditor(mode: CustomGroupEditorMode, node: DirectoryNode | null) {
+    if (!canManageGroups.value) return;
     groupEditorMode.value = mode;
     groupEditorNode.value = node;
     groupEditorVisible.value = true;
@@ -517,6 +544,7 @@ async function onGroupSaved(result: {
     parentKey: string | null;
     removedDeviceCount?: number;
 }) {
+    if (!canManageGroups.value) return;
     const currentKey = directoryState.value.selectedKey.custom;
     if (result.action === "create" && result.group) {
         const created: DirectoryNode = {
@@ -552,17 +580,20 @@ async function onGroupSaved(result: {
     refreshMainData();
 }
 async function refreshAfterMemberMutation() {
+    if (!canManageGroups.value) return;
     selectedRowKeys.value = [];
     await directoryPanelRef.value?.refresh("custom");
     refreshMainData();
 }
 async function onDevicesAdded(result: { addedCount: number; skippedCount: number }) {
+    if (!canManageGroups.value) return;
     Message.success(result.skippedCount
         ? `已添加 ${result.addedCount} 台，${result.skippedCount} 台已在分组中`
         : `已添加 ${result.addedCount} 台设备`);
     await refreshAfterMemberMutation();
 }
 function removeSelectedFromCurrentGroup() {
+    if (!canManageGroups.value) return;
     const groupId = groupBatchActions.value.removeGroupId;
     const ids = [...selectedRowKeys.value];
     if (!groupId || ids.length === 0 || memberMutationLoading.value) return;
@@ -654,6 +685,7 @@ function onPageChange(next: number) { page.value = next; refreshMainData(); }
 function onPageSizeChange(next: number) { pageSize.value = next; page.value = 1; refreshMainData(); }
 
 async function refreshMainData() {
+    if (!canViewDevices.value) return;
     if (viewMode.value === "map") return loadMapData();
     return assetKind.value === "device" ? loadDevicesData() : loadChannelsData();
 }
@@ -814,6 +846,7 @@ function attachMapLifecycle() {
 }
 
 async function loadChannelsData() {
+    if (!canViewDevices.value) return;
     rowsLoading.value = true;
     try {
         const res = await listChannels({
@@ -836,6 +869,7 @@ async function loadChannelsData() {
 }
 
 async function loadDevicesData() {
+    if (!canViewDevices.value) return;
     rowsLoading.value = true;
     try {
         const res = await listDevices({
@@ -858,6 +892,7 @@ async function loadDevicesData() {
 }
 
 async function loadMapData() {
+    if (!canViewDevices.value) return;
     if (viewMode.value !== "map") return;
     // 记录本次请求代次:响应返回时若已有更新的请求或地图已销毁,丢弃旧结果,
     // 避免慢响应把过期的点位/数量覆盖到当前视图
@@ -892,6 +927,7 @@ async function loadMapData() {
 }
 
 async function refreshStats() {
+    if (!canViewDevices.value) return;
     // 只拉当前资产类型的统计:UI 只展示当前 assetKind 的在线/离线数字,
     // 一次轮询不应为另一类型额外执行全量计数查询
     const isDevice = assetKind.value === "device";
@@ -913,6 +949,7 @@ async function refreshStats() {
 }
 
 async function openChannel(record: ChannelVO | MapMarker) {
+    if (!canViewDevices.value) return;
     drawerTarget.value = { type: "channel", id: record.id };
     drawerVisible.value = true;
     drawerLoading.value = true;
@@ -933,6 +970,7 @@ async function openChannel(record: ChannelVO | MapMarker) {
 }
 
 async function openDevice(record: DeviceVO) {
+    if (!canViewDevices.value) return;
     drawerTarget.value = { type: "device", id: record.id };
     drawerVisible.value = true;
     drawerLoading.value = true;
@@ -940,10 +978,10 @@ async function openDevice(record: DeviceVO) {
     try {
         const [detailRes, subscriptionsRes] = await Promise.all([
             getDevice(record.id),
-            listDeviceSubscriptions(record.id)
+            canManageSubscriptions.value ? listDeviceSubscriptions(record.id) : Promise.resolve(null)
         ]);
         if (detailRes.code === 0) deviceDetail.value = detailRes.data;
-        if (subscriptionsRes.code === 0) deviceSubscriptions.value = subscriptionsRes.data?.list || [];
+        if (subscriptionsRes?.code === 0) deviceSubscriptions.value = subscriptionsRes.data?.list || [];
     } catch (error: any) {
         Message.error(error?.message || "详情加载失败");
     } finally {
@@ -951,12 +989,27 @@ async function openDevice(record: DeviceVO) {
     }
 }
 
+function openDeviceMaintenance(record: DeviceVO) {
+    if (!canViewMaintenance.value) return;
+    maintenanceDevice.value = record;
+    maintenanceVisible.value = true;
+}
+
+function onMaintenanceDeviceUpdated(updatedDevice: DeviceVO) {
+    const row = devices.value.find(device => device.id === updatedDevice.id);
+    if (row) Object.assign(row, updatedDevice);
+    if (deviceDetail.value?.id === updatedDevice.id) deviceDetail.value = updatedDevice;
+    maintenanceDevice.value = updatedDevice;
+}
+
 function openSubscriptionManager(record: DeviceVO) {
+    if (!canManageSubscriptions.value) return;
     subscriptionDevice.value = record;
     subscriptionDialogVisible.value = true;
 }
 
 async function handleSubscriptionChanged() {
+    if (!canManageSubscriptions.value) return;
     loadDevicesData();
     if (!deviceDetail.value || subscriptionDevice.value?.id !== deviceDetail.value.id) return;
     try {
@@ -968,6 +1021,7 @@ async function handleSubscriptionChanged() {
 }
 
 async function loadStatusEvents(append = false) {
+    if (!canViewTraffic.value) return;
     const device = statusEventDevice.value;
     if (!device || statusEventLoading.value || statusEventLoadingMore.value) return;
     const requestVersion = statusEventRequestVersion;
@@ -1015,6 +1069,7 @@ async function loadStatusEvents(append = false) {
 }
 
 async function loadRuntimeChannels(record: DeviceVO) {
+    if (!canViewTraffic.value) return;
     const requestVersion = statusEventRequestVersion;
     runtimeChannelsLoading.value = true;
     runtimeChannelsError.value = "";
@@ -1034,6 +1089,7 @@ async function loadRuntimeChannels(record: DeviceVO) {
 }
 
 function openStatusEvents(record: DeviceVO) {
+    if (!canViewTraffic.value) return;
     statusEventRequestVersion += 1;
     statusEventDevice.value = record;
     statusEventPage.value = 1;
@@ -1053,6 +1109,7 @@ function openStatusEvents(record: DeviceVO) {
 }
 
 function loadMoreStatusEvents() {
+    if (!canViewTraffic.value) return;
     if (!statusEventHasMore.value || statusEventLoading.value || statusEventLoadingMore.value) return;
     loadStatusEvents(true);
 }
@@ -1080,6 +1137,7 @@ function closeStatusEvents() {
 }
 
 watch(runtimeActiveTab, tab => {
+    if (!canViewTraffic.value) return;
     if (tab === "status" && statusEventVisible.value && statusEventList.value.length === 0 && !statusEventLoading.value && !statusEventError.value) {
         loadStatusEvents();
     }
@@ -1137,6 +1195,7 @@ const stoppingChannels = ref<Set<number>>(new Set());
 // 那一路"当前主流" —— 如果有其他人正在通过该流观看,他们会被同时断开.
 // Modal 里必须有明确警告让点击者知道副作用.
 async function handleStopChannel(record: ChannelVO) {
+    if (!canStopPlayback.value) return;
     if (!record.streamId) return;
     Modal.warning({
         title: `确认强制停止通道 ${record.name} 的当前直播?`,
@@ -1161,10 +1220,12 @@ async function handleStopChannel(record: ChannelVO) {
 }
 
 function playChannel(record: ChannelVO) {
+    if (!canStartPlayback.value) return;
     playbackConsole.open(record);
 }
 
 function openRecordQuery(record: ChannelVO) {
+    if (!canQueryDeviceRecords.value) return;
     const returnKey = saveDeviceMgmtReturnSnapshot({
         version: 1,
         viewMode: viewMode.value,
@@ -1218,6 +1279,7 @@ function afterDeleteSuccess() {
 }
 
 async function handleRefreshDeviceCatalog(record: DeviceVO) {
+    if (!canRefreshCatalog.value) return;
     if (refreshingCatalog[record.id]) return;
     if (!record.online) {
         Message.warning("设备离线,无法下发 Catalog 查询");
@@ -1241,6 +1303,7 @@ async function handleRefreshDeviceCatalog(record: DeviceVO) {
 }
 
 function openCreateDeviceModal() {
+    if (!canAddDevice.value) return;
     createDeviceForm.deviceId = "";
     createDeviceForm.name = "";
     createDeviceForm.password = "";
@@ -1249,6 +1312,7 @@ function openCreateDeviceModal() {
 }
 
 async function handleCreateDevice() {
+    if (!canAddDevice.value) return;
     const errors = await createDeviceFormRef.value?.validate?.();
     if (errors) return;
     creatingDevice.value = true;
@@ -1274,6 +1338,7 @@ async function handleCreateDevice() {
 }
 
 function openEditDeviceModal(record: DeviceVO) {
+    if (!canEditDevice.value) return;
     originalProtocolOverride = normalizeProtocolOverride(record.protocolOverride);
     originalZLMNodeID = record.zlmNodeId || 0;
     editDeviceForm.value = {
@@ -1289,6 +1354,7 @@ function openEditDeviceModal(record: DeviceVO) {
 }
 
 async function loadZLMNodeOptions() {
+    if (!canEditDevice.value) return;
     zlmNodesLoading.value = true;
     zlmNodesError.value = "";
     try {
@@ -1304,6 +1370,7 @@ async function loadZLMNodeOptions() {
 }
 
 function openEditChannelModal(record: ChannelVO) {
+    if (!canEditChannel.value) return;
     editChannelForm.value = {
         channelId: record.channelId,
         deviceId: record.deviceId,
@@ -1326,12 +1393,15 @@ function cancelEditChannel() {
 }
 
 async function handleEditChannel() {
+    if (!canEditChannel.value) return;
     if (!editingChannelId.value) return;
     editingChannel.value = true;
     try {
         const [ptzRes, transportRes] = await Promise.all([
             updateChannel(editingChannelId.value, { alias: editChannelForm.value.alias, ptzType: editChannelForm.value.ptzType, onDemandLive: editChannelForm.value.onDemandLive }),
-            updateChannelStreamTransport(editingChannelId.value, editChannelForm.value.streamTransport as any)
+            canEditTransport.value
+                ? updateChannelStreamTransport(editingChannelId.value, editChannelForm.value.streamTransport as any)
+                : Promise.resolve({ code: 0, message: "" })
         ]);
         if (ptzRes.code !== 0 || transportRes.code !== 0) {
             Message.error(ptzRes.code !== 0 ? ptzRes.message || "摄像头类型更新失败" : transportRes.message || "流传输模式更新失败");
@@ -1341,7 +1411,7 @@ async function handleEditChannel() {
         if (item) {
             item.alias = editChannelForm.value.alias;
             item.ptzType = editChannelForm.value.ptzType;
-            item.streamTransport = editChannelForm.value.streamTransport;
+            if (canEditTransport.value) item.streamTransport = editChannelForm.value.streamTransport;
             item.onDemandLive = editChannelForm.value.onDemandLive;
         }
         if (channelDetail.value?.id === editingChannelId.value) {
@@ -1349,7 +1419,7 @@ async function handleEditChannel() {
                 ...channelDetail.value,
                 alias: editChannelForm.value.alias,
                 ptzType: editChannelForm.value.ptzType,
-                streamTransport: editChannelForm.value.streamTransport,
+                ...(canEditTransport.value ? { streamTransport: editChannelForm.value.streamTransport } : {}),
                 onDemandLive: editChannelForm.value.onDemandLive
             };
         }
@@ -1380,6 +1450,7 @@ function rollbackProtocolOverride() {
 }
 
 async function handleEditDevice() {
+    if (!canEditDevice.value) return;
     if (!editingDeviceId.value) return;
     editingDevice.value = true;
     try {
@@ -1437,6 +1508,7 @@ function reportBatchResult(res: BatchDeleteResult, total: number) {
 }
 
 async function handleDeleteDevice(record: DeviceVO) {
+    if (!canDeleteDevice.value) return;
     Modal.warning({
         title: "删除设备",
         content: `即将删除设备「${deviceNameText(record)}(${record.deviceId})」及其所有通道、目录挂载。此操作不可恢复,是否继续?`,
@@ -1464,6 +1536,7 @@ async function handleDeleteDevice(record: DeviceVO) {
 }
 
 async function handleDeleteChannel(record: ChannelVO) {
+    if (!canDeleteChannel.value) return;
     Modal.warning({
         title: "删除通道",
         content: `即将删除通道「${displayName(record)}(${record.channelId})」及其所有目录挂载。此操作不可恢复,是否继续?`,
@@ -1491,6 +1564,7 @@ async function handleDeleteChannel(record: ChannelVO) {
 }
 
 async function handleStreamTransportChange(channelId: number, streamTransport: string) {
+    if (!canEditTransport.value) return;
     try {
         const res = await updateChannelStreamTransport(channelId, streamTransport as any);
         if (res.code === 0) {
@@ -1509,6 +1583,7 @@ async function handleStreamTransportChange(channelId: number, streamTransport: s
 }
 
 async function handlePtzTypeChange(channelId: number, ptzTypeValue: string) {
+    if (!canEditChannel.value) return;
     try {
         const ptzType = Number(ptzTypeValue);
         const res = await updateChannel(channelId, { ptzType });
@@ -1528,6 +1603,7 @@ async function handlePtzTypeChange(channelId: number, ptzTypeValue: string) {
 }
 
 async function handleAudioEnabledChange(channelId: number, audioEnabled: boolean) {
+    if (!canEditChannel.value) return;
     try {
         const res = await updateChannel(channelId, { audioEnabled });
         if (res.code === 0) {
@@ -1548,6 +1624,7 @@ async function handleAudioEnabledChange(channelId: number, audioEnabled: boolean
 }
 
 async function handleOnDemandLiveChange(channelId: number, onDemandLive: boolean) {
+    if (!canEditChannel.value) return;
     try {
         const res = await updateChannel(channelId, { onDemandLive });
         if (res.code === 0) {
@@ -1584,6 +1661,7 @@ function recordingMeta(record: ChannelVO) {
 }
 
 async function handleCloudRecordingChange(channelId: number, enabled: boolean) {
+    if (!canUpdateRecording.value) return;
     if (isCloudRecordingLoading(channelId)) return;
     setCloudRecordingLoading(channelId, true);
     try {
@@ -1608,6 +1686,8 @@ async function handleCloudRecordingChange(channelId: number, enabled: boolean) {
 }
 
 async function handleBatchDelete() {
+    if (assetKind.value === "device" && !canDeleteDevice.value) return;
+    if (assetKind.value === "channel" && !canDeleteChannel.value) return;
     const ids = [...selectedRowKeys.value];
     if (ids.length === 0) return;
     const target = assetKind.value === "device" ? "设备" : "通道";
@@ -1664,6 +1744,7 @@ function stopAutoRefresh() {
 }
 
 async function refreshCurrent() {
+    if (!canViewDevices.value) return;
     resetAutoRefreshCountdown();
     await Promise.all([refreshMainData(), refreshStats()]);
 }
@@ -1689,9 +1770,9 @@ onMounted(async () => {
     }
     await Promise.all([
         viewMode.value === "map" ? Promise.resolve() : refreshMainData(),
-        refreshStats(),
-        loadPtzTypeDict()
+        refreshStats()
     ]);
+    if (canEditChannel.value) await loadPtzTypeDict();
     startAutoRefresh();
 });
 
@@ -1768,6 +1849,7 @@ onUnmounted(() => {
                                     <a-option value="offline">离线</a-option>
                                 </a-select>
                                 <button
+                                    v-if="canViewDevices"
                                     class="btn-ghost refresh-control uvp-refresh-btn"
                                     data-testid="refresh-control"
                                     type="button"
@@ -1778,7 +1860,7 @@ onUnmounted(() => {
                                     <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
                                     刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
                                 </button>
-                                <button class="btn-primary create-device-btn" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
+                                <button v-if="canAddDevice" class="btn-primary create-device-btn" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
                             </div>
                         </div>
                     </template>
@@ -1848,7 +1930,13 @@ onUnmounted(() => {
                             >
                                 <FolderMinus :size="14" /> 从当前分组移除
                             </button>
-                            <button class="btn-danger" type="button" :disabled="deleting" @click="handleBatchDelete">批量删除</button>
+                            <button
+                                v-if="(assetKind === 'device' && canDeleteDevice) || (assetKind === 'channel' && canDeleteChannel)"
+                                class="btn-danger"
+                                type="button"
+                                :disabled="deleting"
+                                @click="handleBatchDelete"
+                            >批量删除</button>
                         </div>
                     </div>
 
@@ -1915,65 +2003,79 @@ onUnmounted(() => {
                                 </a-table-column>
                                 <a-table-column title="摄像头类型" :width="150">
                                     <template #cell="{ record }">
-                                        <a-select
-                                            :model-value="String(record.ptzType || 0)"
-                                            size="small"
-                                            style="width: 130px"
-                                            @change="(value: string) => handlePtzTypeChange(record.id, value)"
-                                        >
-                                            <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
-                                                {{ opt.name }}
-                                            </a-option>
-                                        </a-select>
+                                        <template v-if="canEditChannel">
+                                            <a-select
+                                                :model-value="String(record.ptzType || 0)"
+                                                size="small"
+                                                style="width: 130px"
+                                                @change="(value: string) => handlePtzTypeChange(record.id, value)"
+                                            >
+                                                <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
+                                                    {{ opt.name }}
+                                                </a-option>
+                                            </a-select>
+                                        </template>
+                                        <span v-else>{{ cameraTypeText(record.ptzType) }}</span>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="流传输模式" :width="150">
                                     <template #cell="{ record }">
-                                        <a-select
-                                            :model-value="record.streamTransport || 'UDP'"
-                                            size="small"
-                                            style="width: 130px"
-                                            @change="(value: string) => handleStreamTransportChange(record.id, value)"
-                                        >
-                                            <a-option value="UDP">UDP</a-option>
-                                            <a-option value="TCP-Active">TCP-Active</a-option>
-                                            <a-option value="TCP-Passive">TCP-Passive</a-option>
-                                        </a-select>
+                                        <template v-if="canEditTransport">
+                                            <a-select
+                                                :model-value="record.streamTransport || 'UDP'"
+                                                size="small"
+                                                style="width: 130px"
+                                                @change="(value: string) => handleStreamTransportChange(record.id, value)"
+                                            >
+                                                <a-option value="UDP">UDP</a-option>
+                                                <a-option value="TCP-Active">TCP-Active</a-option>
+                                                <a-option value="TCP-Passive">TCP-Passive</a-option>
+                                            </a-select>
+                                        </template>
+                                        <span v-else>{{ streamTransportText(record.streamTransport) }}</span>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="音频" :width="90" align="center">
                                     <template #cell="{ record }">
-                                        <a-switch
-                                            :model-value="record.audioEnabled"
-                                            size="small"
-                                            checked-text="开"
-                                            unchecked-text="关"
-                                            @change="(value: boolean) => handleAudioEnabledChange(record.id, value)"
-                                        />
+                                        <template v-if="canEditChannel">
+                                            <a-switch
+                                                :model-value="record.audioEnabled"
+                                                size="small"
+                                                checked-text="开"
+                                                unchecked-text="关"
+                                                @change="(value: boolean) => handleAudioEnabledChange(record.id, value)"
+                                            />
+                                        </template>
+                                        <span v-else>{{ record.audioEnabled ? '开' : '关' }}</span>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="按需直播" :width="110" align="center">
                                     <template #cell="{ record }">
-                                        <a-switch
-                                            :model-value="record.onDemandLive !== false"
-                                            size="small"
-                                            checked-text="开"
-                                            unchecked-text="关"
-                                            @change="(value: boolean) => handleOnDemandLiveChange(record.id, value)"
-                                        />
+                                        <template v-if="canEditChannel">
+                                            <a-switch
+                                                :model-value="record.onDemandLive !== false"
+                                                size="small"
+                                                checked-text="开"
+                                                unchecked-text="关"
+                                                @change="(value: boolean) => handleOnDemandLiveChange(record.id, value)"
+                                            />
+                                        </template>
+                                        <span v-else>{{ record.onDemandLive !== false ? '开' : '关' }}</span>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="云端录像" :width="160">
                                     <template #cell="{ record }">
                                         <div class="cloud-recording-control">
-                                            <a-switch
-                                                :model-value="record.cloudRecordingEnabled"
-                                                :loading="recordingMeta(record).loading"
-                                                :disabled="recordingMeta(record).loading"
-                                                :aria-label="`云端录像:${recordingMeta(record).label}`"
-                                                size="small"
-                                                @change="(value: boolean) => handleCloudRecordingChange(record.id, value)"
-                                            />
+                                            <template v-if="canUpdateRecording">
+                                                <a-switch
+                                                    :model-value="record.cloudRecordingEnabled"
+                                                    :loading="recordingMeta(record).loading"
+                                                    :disabled="recordingMeta(record).loading"
+                                                    :aria-label="`云端录像:${recordingMeta(record).label}`"
+                                                    size="small"
+                                                    @change="(value: boolean) => handleCloudRecordingChange(record.id, value)"
+                                                />
+                                            </template>
                                             <a-tooltip :content="recordingMeta(record).tooltip || recordingMeta(record).label" position="top">
                                                 <span class="cloud-recording-state" :class="`tone-${recordingMeta(record).tone}`">
                                                     {{ recordingMeta(record).label }}
@@ -2000,16 +2102,16 @@ onUnmounted(() => {
                                 <a-table-column title="操作" :width="350" fixed="right">
                                     <template #cell="{ record }">
                                         <div class="uvp-table-actions">
-                                            <a-link class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
+                                            <a-link v-if="canStartPlayback" class="uvp-table-action uvp-table-action--preview" @click="playChannel(record)">
                                                 <template #icon><Play :size="13" /></template>
                                                 <span>播放</span>
                                             </a-link>
-                                            <a-link class="uvp-table-action uvp-table-action--record" @click="openRecordQuery(record)">
+                                            <a-link v-if="canQueryDeviceRecords" class="uvp-table-action uvp-table-action--record" @click="openRecordQuery(record)">
                                                 <template #icon><History :size="13" /></template>
                                                 <span>录像</span>
                                             </a-link>
                                             <a-link
-                                                v-if="isChannelPlaying(record)"
+                                                v-if="canStopPlayback && isChannelPlaying(record)"
                                                 class="uvp-table-action uvp-table-action--stop"
                                                 :loading="stoppingChannels.has(record.id)"
                                                 @click="handleStopChannel(record)"
@@ -2021,11 +2123,11 @@ onUnmounted(() => {
                                                 <template #icon><Eye :size="13" /></template>
                                                 <span>详情</span>
                                             </a-link>
-                                            <a-link class="uvp-table-action uvp-table-action--edit" @click="openEditChannelModal(record)">
+                                            <a-link v-if="canEditChannel" class="uvp-table-action uvp-table-action--edit" @click="openEditChannelModal(record)">
                                                 <template #icon><Pencil :size="13" /></template>
                                                 <span>编辑</span>
                                             </a-link>
-                                            <a-link class="uvp-table-action uvp-table-action--delete" :disabled="deleting" @click="handleDeleteChannel(record)">
+                                            <a-link v-if="canDeleteChannel" class="uvp-table-action uvp-table-action--delete" :disabled="deleting" @click="handleDeleteChannel(record)">
                                                 <template #icon><Trash2 :size="13" /></template>
                                                 <span>删除</span>
                                             </a-link>
@@ -2075,10 +2177,14 @@ onUnmounted(() => {
                                 </a-table-column>
                                 <a-table-column title="状态" :width="100" align="center">
                                     <template #cell="{ record }">
-                                        <button class="status-inline status-trigger" :class="{ online: record.online }" type="button" title="运行监控" :aria-label="`查看设备${record.deviceId}运行监控`" @click.stop="openStatusEvents(record)">
+                                        <button v-if="canViewTraffic" class="status-inline status-trigger" :class="{ online: record.online }" type="button" title="运行监控" :aria-label="`查看设备${record.deviceId}运行监控`" @click.stop="openStatusEvents(record)">
                                             <History class="status-trigger-icon" :size="13" aria-hidden="true" />
                                             <span class="status-trigger-label">{{ record.online ? '在线' : '离线' }}</span>
                                         </button>
+                                        <span v-else class="status-inline status-readonly" :class="{ online: record.online }">
+                                            <span class="status-dot"></span>
+                                            <span>{{ record.online ? '在线' : '离线' }}</span>
+                                        </span>
                                     </template>
                                 </a-table-column>
                                 <a-table-column title="通道数" :width="140">
@@ -2123,6 +2229,7 @@ onUnmounted(() => {
                                                 <span>通道</span>
                                             </a-link>
                                             <a-link
+                                                v-if="canRefreshCatalog"
                                                 class="uvp-table-action uvp-table-action--sync uvp-refresh-link"
                                                 :disabled="refreshingCatalog[record.id] || !record.online"
                                                 :title="record.online ? '刷新通道目录' : '设备离线,无法刷新'"
@@ -2131,7 +2238,7 @@ onUnmounted(() => {
                                                 <template #icon><Loader2 v-if="refreshingCatalog[record.id]" :size="13" class="spin" /><RefreshCcw v-else :size="13" /></template>
                                                 <span>刷新</span>
                                             </a-link>
-                                            <a-link class="uvp-table-action uvp-table-action--subscribe" @click.stop="openSubscriptionManager(record)">
+                                            <a-link v-if="canManageSubscriptions" class="uvp-table-action uvp-table-action--subscribe" @click.stop="openSubscriptionManager(record)">
                                                 <template #icon><Bell :size="13" /></template>
                                                 <span>订阅</span>
                                             </a-link>
@@ -2141,15 +2248,19 @@ onUnmounted(() => {
                                                     <MoreHorizontal :size="13" />
                                                 </a-link>
                                                 <template #content>
+                                                    <a-doption v-if="canViewMaintenance" class="device-action-menu-item" @click="openDeviceMaintenance(record)">
+                                                        <Wrench :size="14" />
+                                                        <span>设备维护</span>
+                                                    </a-doption>
                                                     <a-doption class="device-action-menu-item" @click="openDevice(record)">
                                                         <Eye :size="14" />
                                                         <span>详情</span>
                                                     </a-doption>
-                                                    <a-doption class="device-action-menu-item" @click="openEditDeviceModal(record)">
+                                                    <a-doption v-if="canEditDevice" class="device-action-menu-item" @click="openEditDeviceModal(record)">
                                                         <Pencil :size="14" />
                                                         <span>编辑</span>
                                                     </a-doption>
-                                                    <a-doption class="device-action-menu-item device-action-menu-item--danger" :disabled="deleting" @click="handleDeleteDevice(record)">
+                                                    <a-doption v-if="canDeleteDevice" class="device-action-menu-item device-action-menu-item--danger" :disabled="deleting" @click="handleDeleteDevice(record)">
                                                         <Trash2 :size="14" />
                                                         <span>删除</span>
                                                     </a-doption>
@@ -2178,7 +2289,7 @@ onUnmounted(() => {
                                     </a-tooltip>
                                 </div>
                             </div>
-                            <a-tooltip content="运行监控" position="top">
+                            <a-tooltip v-if="canViewTraffic" content="运行监控" position="top">
                                 <button
                                     class="device-status-ribbon"
                                     :class="{ online: item.online }"
@@ -2189,6 +2300,9 @@ onUnmounted(() => {
                                     {{ item.online ? '在线' : '离线' }}
                                 </button>
                             </a-tooltip>
+                            <span v-else class="device-status-ribbon device-status-readonly" :class="{ online: item.online }">
+                                {{ item.online ? '在线' : '离线' }}
+                            </span>
                             <div class="device-card-info">
                                 <div><span>设备 ID</span><a-tooltip :content="item.deviceId" position="top"><strong class="mono text-ellipsis">{{ item.deviceId }}</strong></a-tooltip></div>
                                 <div><span>厂商</span><strong class="text-ellipsis">{{ item.manufacturer || '未上报' }}</strong></div>
@@ -2215,19 +2329,22 @@ onUnmounted(() => {
                                 <a-tooltip content="查看详情" position="top">
                                     <button class="icon-btn small framed" type="button" @click.stop="openDevice(item)"><Eye :size="13" /></button>
                                 </a-tooltip>
-                                <a-tooltip :content="item.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
+                                <a-tooltip v-if="canRefreshCatalog" :content="item.online ? '刷新通道目录' : '设备离线,无法刷新'" position="top">
                                     <button class="icon-btn small framed info uvp-refresh-btn" :class="{ loading: refreshingCatalog[item.id] }" type="button" :disabled="refreshingCatalog[item.id] || !item.online" @click.stop="handleRefreshDeviceCatalog(item)">
                                         <Loader2 v-if="refreshingCatalog[item.id]" :size="13" class="spin" />
                                         <RefreshCcw v-else :size="13" />
                                     </button>
                                 </a-tooltip>
-                                <a-tooltip content="订阅管理" position="top">
+                                <a-tooltip v-if="canManageSubscriptions" content="订阅管理" position="top">
                                     <button class="icon-btn small framed subscription" type="button" @click.stop="openSubscriptionManager(item)"><Bell :size="13" /></button>
                                 </a-tooltip>
-                                <a-tooltip content="编辑设备" position="top">
+                                <a-tooltip v-if="canViewMaintenance" content="设备维护" position="top">
+                                    <button class="icon-btn small framed" type="button" aria-label="设备维护" @click.stop="openDeviceMaintenance(item)"><Wrench :size="13" /></button>
+                                </a-tooltip>
+                                <a-tooltip v-if="canEditDevice" content="编辑设备" position="top">
                                     <button class="icon-btn small framed warning" type="button" @click.stop="openEditDeviceModal(item)"><Pencil :size="13" /></button>
                                 </a-tooltip>
-                                <a-tooltip content="删除设备" position="top">
+                                <a-tooltip v-if="canDeleteDevice" content="删除设备" position="top">
                                     <button class="icon-btn small framed danger" type="button" :disabled="deleting" @click.stop="handleDeleteDevice(item)"><Trash2 :size="13" /></button>
                                 </a-tooltip>
                             </div>
@@ -2261,84 +2378,98 @@ onUnmounted(() => {
                                     <div><span>位置</span><strong>{{ locationText(item) }}</strong></div>
                                     <div>
                                         <span>摄像头类型</span>
-                                        <a-select
-                                            :model-value="String(item.ptzType || 0)"
-                                            size="small"
-                                            class="channel-card-inline-select"
-                                            @click.stop
-                                            @dblclick.stop
-                                            @change="(value: string) => handlePtzTypeChange(item.id, value)"
-                                        >
-                                            <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
-                                                {{ opt.name }}
-                                            </a-option>
-                                        </a-select>
+                                        <template v-if="canEditChannel">
+                                            <a-select
+                                                :model-value="String(item.ptzType || 0)"
+                                                size="small"
+                                                class="channel-card-inline-select"
+                                                @click.stop
+                                                @dblclick.stop
+                                                @change="(value: string) => handlePtzTypeChange(item.id, value)"
+                                            >
+                                                <a-option v-for="opt in ptzTypeOptions" :key="opt.value" :value="opt.value">
+                                                    {{ opt.name }}
+                                                </a-option>
+                                            </a-select>
+                                        </template>
+                                        <strong v-else>{{ cameraTypeText(item.ptzType) }}</strong>
                                     </div>
                                     <div>
                                         <span>流传输模式</span>
-                                        <a-select
-                                            :model-value="item.streamTransport || 'UDP'"
-                                            size="small"
-                                            class="channel-card-inline-select"
-                                            @click.stop
-                                            @dblclick.stop
-                                            @change="(value: string) => handleStreamTransportChange(item.id, value)"
-                                        >
-                                            <a-option value="UDP">UDP</a-option>
-                                            <a-option value="TCP-Active">TCP-Active</a-option>
-                                            <a-option value="TCP-Passive">TCP-Passive</a-option>
-                                        </a-select>
+                                        <template v-if="canEditTransport">
+                                            <a-select
+                                                :model-value="item.streamTransport || 'UDP'"
+                                                size="small"
+                                                class="channel-card-inline-select"
+                                                @click.stop
+                                                @dblclick.stop
+                                                @change="(value: string) => handleStreamTransportChange(item.id, value)"
+                                            >
+                                                <a-option value="UDP">UDP</a-option>
+                                                <a-option value="TCP-Active">TCP-Active</a-option>
+                                                <a-option value="TCP-Passive">TCP-Passive</a-option>
+                                            </a-select>
+                                        </template>
+                                        <strong v-else>{{ streamTransportText(item.streamTransport) }}</strong>
                                     </div>
                                 </div>
                                 <div class="channel-card-switches">
                                     <div class="switch-item">
                                         <span>音频</span>
-                                        <a-switch
-                                            :model-value="item.audioEnabled"
-                                            size="small"
-                                            checked-text="开"
-                                            unchecked-text="关"
-                                            @click.stop
-                                            @dblclick.stop
-                                            @change="(value: boolean) => handleAudioEnabledChange(item.id, value)"
-                                        />
+                                        <template v-if="canEditChannel">
+                                            <a-switch
+                                                :model-value="item.audioEnabled"
+                                                size="small"
+                                                checked-text="开"
+                                                unchecked-text="关"
+                                                @click.stop
+                                                @dblclick.stop
+                                                @change="(value: boolean) => handleAudioEnabledChange(item.id, value)"
+                                            />
+                                        </template>
+                                        <span v-else>{{ item.audioEnabled ? '开' : '关' }}</span>
                                     </div>
                                     <div class="switch-item">
                                         <span>按需直播</span>
-                                        <a-switch
-                                            :model-value="item.onDemandLive !== false"
-                                            size="small"
-                                            checked-text="开"
-                                            unchecked-text="关"
-                                            @click.stop
-                                            @dblclick.stop
-                                            @change="(value: boolean) => handleOnDemandLiveChange(item.id, value)"
-                                        />
+                                        <template v-if="canEditChannel">
+                                            <a-switch
+                                                :model-value="item.onDemandLive !== false"
+                                                size="small"
+                                                checked-text="开"
+                                                unchecked-text="关"
+                                                @click.stop
+                                                @dblclick.stop
+                                                @change="(value: boolean) => handleOnDemandLiveChange(item.id, value)"
+                                            />
+                                        </template>
+                                        <span v-else>{{ item.onDemandLive !== false ? '开' : '关' }}</span>
                                     </div>
                                     <div class="switch-item">
                                         <a-tooltip :content="recordingMeta(item).tooltip || recordingMeta(item).label" position="top">
                                             <span :class="`tone-${recordingMeta(item).tone}`">云端录像</span>
                                         </a-tooltip>
-                                        <a-switch
-                                            :model-value="item.cloudRecordingEnabled"
-                                            :loading="recordingMeta(item).loading"
-                                            :disabled="recordingMeta(item).loading"
-                                            :aria-label="`云端录像:${recordingMeta(item).label}`"
-                                            size="small"
-                                            @click.stop
-                                            @dblclick.stop
-                                            @change="(value: boolean) => handleCloudRecordingChange(item.id, value)"
-                                        />
+                                        <template v-if="canUpdateRecording">
+                                            <a-switch
+                                                :model-value="item.cloudRecordingEnabled"
+                                                :loading="recordingMeta(item).loading"
+                                                :disabled="recordingMeta(item).loading"
+                                                :aria-label="`云端录像:${recordingMeta(item).label}`"
+                                                size="small"
+                                                @click.stop
+                                                @dblclick.stop
+                                                @change="(value: boolean) => handleCloudRecordingChange(item.id, value)"
+                                            />
+                                        </template>
                                     </div>
                                 </div>
                                 <div class="card-actions channel-card-actions">
                                     <span class="channel-card-status" :class="{ online: item.status === 1 }">{{ item.status === 1 ? '在线' : '离线' }}</span>
-                                <a-tooltip content="点播" position="top">
+                                <a-tooltip v-if="canStartPlayback" content="点播" position="top">
                                         <button class="icon-btn small framed primary" type="button" @click.stop="playChannel(item)">
                                             <Play :size="13" />
                                         </button>
                                 </a-tooltip>
-                                <a-tooltip content="查询设备录像" position="top">
+                                <a-tooltip v-if="canQueryDeviceRecords" content="查询设备录像" position="top">
                                     <button
                                         class="icon-btn small framed record-query-entry"
                                         type="button"
@@ -2349,7 +2480,7 @@ onUnmounted(() => {
                                         <History :size="13" />
                                     </button>
                                 </a-tooltip>
-                                    <a-tooltip v-if="isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
+                                    <a-tooltip v-if="canStopPlayback && isChannelPlaying(item)" content="强制停止当前直播(会断开其他观看者)" position="top">
                                         <button
                                             class="icon-btn small framed stop"
                                             type="button"
@@ -2359,8 +2490,8 @@ onUnmounted(() => {
                                             <Square :size="13" />
                                         </button>
                                     </a-tooltip>
-                                    <a-tooltip content="编辑通道" position="top"><button class="icon-btn small framed warning" type="button" @click.stop="openEditChannelModal(item)"><Pencil :size="13" /></button></a-tooltip>
-                                    <a-tooltip content="删除通道" position="top"><button class="icon-btn small framed danger" type="button" :disabled="deleting" @click.stop="handleDeleteChannel(item)"><Trash2 :size="13" /></button></a-tooltip>
+                                    <a-tooltip v-if="canEditChannel" content="编辑通道" position="top"><button class="icon-btn small framed warning" type="button" @click.stop="openEditChannelModal(item)"><Pencil :size="13" /></button></a-tooltip>
+                                    <a-tooltip v-if="canDeleteChannel" content="删除通道" position="top"><button class="icon-btn small framed danger" type="button" :disabled="deleting" @click.stop="handleDeleteChannel(item)"><Trash2 :size="13" /></button></a-tooltip>
                                 </div>
                             </div>
                         </article>
@@ -2419,13 +2550,16 @@ onUnmounted(() => {
                             <span>坐标</span><strong>{{ locationText(channelDetail) }}</strong>
                             <span>流传输模式</span><strong>{{ streamTransportText(channelDetail.streamTransport) }}</strong>
                             <span>按需直播</span>
-                            <a-switch
-                                :model-value="channelDetail.onDemandLive !== false"
-                                size="small"
-                                checked-text="开"
-                                unchecked-text="关"
-                                @change="(value: boolean) => channelDetail && handleOnDemandLiveChange(channelDetail.id, value)"
-                            />
+                            <template v-if="canEditChannel">
+                                <a-switch
+                                    :model-value="channelDetail.onDemandLive !== false"
+                                    size="small"
+                                    checked-text="开"
+                                    unchecked-text="关"
+                                    @change="(value: boolean) => channelDetail && handleOnDemandLiveChange(channelDetail.id, value)"
+                                />
+                            </template>
+                            <strong v-else>{{ channelDetail.onDemandLive !== false ? '开' : '关' }}</strong>
                             <span>当前流</span><strong>{{ channelDetail.streamId || '未播放' }}</strong>
                         </div>
                         <div v-if="channelMounts.length" class="mount-list">
@@ -2450,7 +2584,7 @@ onUnmounted(() => {
                             </div>
                         </section>
                         <div class="drawer-foot">
-                            <a-button type="primary" @click="openEditChannelModal(channelDetail)">
+                            <a-button v-if="canEditChannel" type="primary" @click="openEditChannelModal(channelDetail)">
                                 <template #icon><Pencil :size="14" /></template>
                                 <template #default>编辑通道</template>
                             </a-button>
@@ -2481,7 +2615,7 @@ onUnmounted(() => {
                             </span>
                         </div>
 
-                        <section class="info-group">
+                        <section v-if="canManageSubscriptions" class="info-group">
                             <div class="group-label">订阅状态</div>
                             <div class="subscription-summary">
                                 <span v-for="subscription in deviceSubscriptionSummary" :key="subscription.kind" class="subscription-chip" :class="`status-${subscription.status}`">
@@ -2579,11 +2713,15 @@ onUnmounted(() => {
                         </section>
 
                         <div class="drawer-foot">
-                            <a-button type="primary" @click="openSubscriptionManager(deviceDetail)">
+                            <a-button v-if="canViewMaintenance" type="primary" data-testid="device-maintenance-open" @click="openDeviceMaintenance(deviceDetail)">
+                                <template #icon><Wrench :size="14" /></template>
+                                <template #default>设备维护</template>
+                            </a-button>
+                            <a-button v-if="canManageSubscriptions" type="primary" @click="openSubscriptionManager(deviceDetail)">
                                 <template #icon><Bell :size="14" /></template>
                                 <template #default>管理订阅</template>
                             </a-button>
-                            <a-button class="uvp-refresh-btn" @click="handleRefreshDeviceCatalog(deviceDetail)">
+                            <a-button v-if="canRefreshCatalog" class="uvp-refresh-btn" @click="handleRefreshDeviceCatalog(deviceDetail)">
                                 <template #icon><RefreshCcw :size="14" /></template>
                                 <template #default>刷新目录</template>
                             </a-button>
@@ -2596,7 +2734,17 @@ onUnmounted(() => {
                 </a-spin>
             </a-drawer>
 
+            <DeviceMaintenanceDialog
+                v-if="canViewMaintenance"
+                v-model:visible="maintenanceVisible"
+                :device="maintenanceDevice"
+                :can-reboot="canRebootDevice"
+                :can-upgrade="canUpgradeDevice"
+                @deviceUpdated="onMaintenanceDeviceUpdated"
+            />
+
             <SubscriptionDialog
+                v-if="canManageSubscriptions"
                 v-model:visible="subscriptionDialogVisible"
                 :device-id="subscriptionDevice?.id"
                 :device-name="subscriptionDevice ? displayName(subscriptionDevice) : ''"
@@ -2604,6 +2752,7 @@ onUnmounted(() => {
             />
 
             <CustomGroupEditor
+                v-if="canManageGroups"
                 v-model:visible="groupEditorVisible"
                 :can-manage="canManageGroups"
                 :mode="groupEditorMode"
@@ -2613,12 +2762,14 @@ onUnmounted(() => {
             />
 
             <AddToGroupDialog
+                v-if="canManageGroups"
                 v-model:visible="addToGroupVisible"
                 :device-ids="selectedRowKeys"
                 @saved="onDevicesAdded"
             />
 
             <a-modal
+                v-if="canViewTraffic"
                 v-model:visible="statusEventVisible"
                 modal-class="uvp-system-dialog status-event-dialog"
                 title="设备运行监控"
@@ -2731,6 +2882,7 @@ onUnmounted(() => {
             </a-modal>
 
             <a-modal
+                v-if="canAddDevice"
                 v-model:visible="createDeviceVisible"
                 modal-class="uvp-system-dialog"
                 title="新建设备"
@@ -2782,6 +2934,7 @@ onUnmounted(() => {
 
             <!-- 编辑设备 Modal -->
             <a-modal
+                v-if="canEditDevice"
                 v-model:visible="editDeviceVisible"
                 modal-class="uvp-system-dialog"
                 title="编辑设备"
@@ -2856,6 +3009,7 @@ onUnmounted(() => {
 
             <!-- 编辑通道 Modal -->
             <a-modal
+                v-if="canEditChannel"
                 v-model:visible="editChannelVisible"
                 modal-class="uvp-system-dialog"
                 title="编辑通道"
@@ -2889,11 +3043,14 @@ onUnmounted(() => {
                         </a-select>
                     </a-form-item>
                     <a-form-item label="流传输模式">
-                        <a-select v-model="editChannelForm.streamTransport">
-                            <a-option value="UDP">UDP</a-option>
-                            <a-option value="TCP-Active">TCP-Active</a-option>
-                            <a-option value="TCP-Passive">TCP-Passive</a-option>
-                        </a-select>
+                        <template v-if="canEditTransport">
+                            <a-select v-model="editChannelForm.streamTransport">
+                                <a-option value="UDP">UDP</a-option>
+                                <a-option value="TCP-Active">TCP-Active</a-option>
+                                <a-option value="TCP-Passive">TCP-Passive</a-option>
+                            </a-select>
+                        </template>
+                        <span v-else>{{ streamTransportText(editChannelForm.streamTransport) }}</span>
                     </a-form-item>
                     <a-form-item label="按需直播">
                         <a-switch v-model="editChannelForm.onDemandLive" checked-text="无人观看自动关闭" unchecked-text="持续保持直播" />

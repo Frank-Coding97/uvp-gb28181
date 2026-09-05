@@ -10,8 +10,8 @@ import (
 
 type TrafficHistoryPoint struct {
 	BucketStart     time.Time `json:"bucketStart"`
-	UpstreamBytes   *uint64   `json:"upstreamBytes"`
-	DownstreamBytes *uint64   `json:"downstreamBytes"`
+	UpstreamBytes   uint64    `json:"upstreamBytes"`
+	DownstreamBytes uint64    `json:"downstreamBytes"`
 }
 
 type TrafficHistorySummary struct {
@@ -143,13 +143,10 @@ func (service *AssetSummaryService) TrafficHistory(ctx context.Context, window H
 
 	first, last := service.trafficBucketStart(window.From, window), service.trafficBucketStart(window.To, window)
 	for start := first; !start.After(last); start = service.nextTrafficBucket(start, window) {
-		point := TrafficHistoryPoint{BucketStart: start}
-		if !trafficBucketOverlapsGap(start, service.nextTrafficBucket(start, window), gapRows) {
-			current := buckets[start.Unix()]
-			upstream, downstream := current.Upstream, current.Downstream
-			point.UpstreamBytes, point.DownstreamBytes = &upstream, &downstream
-		}
-		result.Points = append(result.Points, point)
+		current := buckets[start.Unix()]
+		result.Points = append(result.Points, TrafficHistoryPoint{
+			BucketStart: start, UpstreamBytes: current.Upstream, DownstreamBytes: current.Downstream,
+		})
 	}
 	if len(result.Points) > window.MaxPoints {
 		result.Points = result.Points[len(result.Points)-window.MaxPoints:]
@@ -176,16 +173,4 @@ func (service *AssetSummaryService) nextTrafficBucket(value time.Time, window Hi
 		return value.AddDate(0, 0, 1)
 	}
 	return value.Add(time.Hour)
-}
-
-func trafficBucketOverlapsGap(start, end time.Time, gaps []gbmodels.GbDeviceTrafficGap) bool {
-	for _, gap := range gaps {
-		if !gap.StartedAt.Before(end) {
-			continue
-		}
-		if gap.EndedAt == nil || gap.EndedAt.After(start) {
-			return true
-		}
-	}
-	return false
 }

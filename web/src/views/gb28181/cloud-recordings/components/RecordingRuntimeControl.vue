@@ -64,6 +64,7 @@ const selectedNodeName = computed(() => context.selectedNode?.name ?? `节点 #$
 const hasPermission = (permission: string) => userStore.account.permissions.includes("*:*:*") || userStore.account.permissions.includes(permission);
 const canControl = computed(() => hasPermission("gb28181:recording:control"));
 const canForceStop = computed(() => hasPermission("gb28181:recording:force-stop"));
+const canViewPlans = computed(() => hasPermission("gb28181:recording-plan:view"));
 const statusView = computed(() => recordingStatusPresentation(status.value));
 const targetLabel = computed(() => preparedTarget.value ? recordingTargetLabel(preparedTarget.value) : "未选择媒体目标");
 const impactItems = computed(() => preflight.value ? recordingImpactItems(preflight.value.snapshot) : []);
@@ -176,6 +177,11 @@ async function execute(payload: { fingerprint: string; reason: string }) {
   const target = preparedTarget.value;
   const action = preparedAction.value;
   const opening = preflight.value;
+  const allowed = action === "force-stop" ? canForceStop.value : canControl.value;
+  if (!allowed) {
+    clearPrepared();
+    return;
+  }
   if (!target || !action || !opening || payload.fingerprint !== opening.fingerprint) {
     dangerVisible.value = false;
     Message.warning("录制目标或影响指纹已变化，请重新预检");
@@ -213,6 +219,7 @@ function clearPrepared() {
 }
 
 function openSchedules() {
+  if (!canViewPlans.value) return;
   const target = currentTarget();
   if (!target) return;
   void router.push({ path: "/gb28181/recording-schedules", query: recordingScheduleQuery(target) });
@@ -237,7 +244,7 @@ defineExpose({ refresh });
   <section class="recording-runtime-control">
     <header class="runtime-heading">
       <div><h2>录制运行控制</h2><p>按完整媒体身份控制单个节点的 MP4 / HLS recorder；所有状态均以后端回读为准。</p></div>
-      <a-button :disabled="!selectedNodeId || !form.stream.trim()" @click="openSchedules"><template #icon><CalendarClock :size="15" /></template>查看录像计划</a-button>
+      <a-button v-if="canViewPlans" :disabled="!selectedNodeId || !form.stream.trim()" @click="openSchedules"><template #icon><CalendarClock :size="15" /></template>查看录像计划</a-button>
     </header>
 
     <ZLMNodeContextBar :nodes="contextNodes" :loading="nodesLoading || statusLoading" title="录制所在节点" @refresh="loadNodes(); refresh()" />

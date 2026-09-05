@@ -19,6 +19,12 @@ const api = vi.hoisted(() => ({
     ])
 }));
 
+const account = vi.hoisted(() => ({
+    permissions: ["gb28181:device-record:query", "gb28181:device-record:play", "gb28181:device-record:download"] as string[]
+}));
+
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
+
 vi.mock("../device-mgmt/api", async importOriginal => ({
     ...await importOriginal<typeof import("../device-mgmt/api")>(),
     ...api
@@ -51,6 +57,7 @@ vi.mock("vue-router", async importOriginal => ({
 describe("device record playback workspace", () => {
     beforeEach(() => {
         vi.useRealTimers();
+        account.permissions = ["gb28181:device-record:query", "gb28181:device-record:play", "gb28181:device-record:download"];
         vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
             ok: true,
             status: 200,
@@ -199,6 +206,26 @@ describe("device record playback workspace", () => {
             expect.objectContaining({ type: "all" }),
             expect.any(AbortSignal)
         );
+    });
+
+    it("does not query or render the playback workspace without query permission", async () => {
+        account.permissions = ["gb28181:device-record:play"];
+        const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await flushPromises();
+
+        expect(api.getRecordQueryOptions).not.toHaveBeenCalled();
+        expect(api.queryDeviceRecords).not.toHaveBeenCalled();
+        expect(wrapper.text()).toContain("无权查询设备录像");
+    });
+
+    it("allows query-only users to inspect results without opening a playback session", async () => {
+        account.permissions = ["gb28181:device-record:query"];
+        const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await flushPromises();
+
+        expect(api.queryDeviceRecords).toHaveBeenCalledTimes(1);
+        expect(api.createPlaybackSession).not.toHaveBeenCalled();
+        expect(wrapper.find('[data-testid="record-segment-0"]').attributes("aria-disabled")).toBe("true");
     });
 
     it("automatically plays the first playable recording instead of a one-second boundary fragment", async () => {
@@ -531,6 +558,19 @@ describe("device record playback workspace", () => {
             { recordKey: "opaque-record-key", playFrom: "2026-08-02T08:10:00+08:00", downloadSpeed: 4 },
             expect.any(String)
         );
+    });
+
+    it("keeps playback controls for the visitor but hides every device-record download entry", async () => {
+        account.permissions = ["gb28181:device-record:query", "gb28181:device-record:play"];
+        const wrapper = mount(DeviceRecordPlayback, { global: { stubs: { teleport: true } } });
+        await flushPromises();
+
+        expect(api.createPlaybackSession).toHaveBeenCalledTimes(1);
+        expect(wrapper.find('[data-testid="playback-primary-action"]').exists()).toBe(true);
+        expect(wrapper.find('[aria-label="停止"]').exists()).toBe(true);
+        expect(wrapper.find('.scale-select select').exists()).toBe(true);
+        expect(wrapper.find('[data-testid="playback-download"]').exists()).toBe(false);
+        expect(wrapper.find('[data-testid="record-segment-download-0"]').exists()).toBe(false);
     });
 
     it("offers an independent download entry on every record segment", async () => {

@@ -1,9 +1,13 @@
 import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { reactive } from "vue";
 
-const coordinator = vi.hoisted(() => ({ cancel: vi.fn(), retry: vi.fn() }));
+const coordinator = vi.hoisted(() => ({ cancel: vi.fn(), retry: vi.fn(), cancelAll: vi.fn(), refreshAll: vi.fn() }));
 vi.mock("@/views/gb28181/cloud-recordings/recordingDownloadService", () => ({ recordingDownloadCoordinator: coordinator }));
+const accountState = vi.hoisted(() => ({ permissions: ["gb28181:recording:download"] as string[] }));
+const account = reactive(accountState);
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 
 import { useRecordingDownloadStore } from "@/store/modules/recording-downloads";
 import RecordingDownloadCenter from "./RecordingDownloadCenter.vue";
@@ -21,8 +25,48 @@ const stubs = {
 describe("RecordingDownloadCenter", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
+    account.permissions = ["gb28181:recording:download"];
     coordinator.cancel.mockReset();
     coordinator.retry.mockReset();
+    coordinator.cancelAll.mockReset();
+    coordinator.refreshAll.mockReset();
+  });
+
+  it("hides the download center for users without recording download permission", () => {
+    account.permissions = [];
+
+    const headerWrapper = mount(RecordingDownloadCenter, { global: { stubs } });
+    const menuWrapper = mount(RecordingDownloadCenter, { props: { menu: true }, global: { stubs } });
+
+    expect(headerWrapper.find("button[aria-label='下载任务']").exists()).toBe(false);
+    expect(menuWrapper.find(".menu-option").exists()).toBe(false);
+    expect(coordinator.cancelAll).not.toHaveBeenCalled();
+    expect(coordinator.refreshAll).not.toHaveBeenCalled();
+  });
+
+  it("accepts the administrator wildcard permission", () => {
+    account.permissions = ["*:*:*"];
+
+    const wrapper = mount(RecordingDownloadCenter, { global: { stubs } });
+
+    expect(wrapper.find("button[aria-label='下载任务']").exists()).toBe(true);
+  });
+
+  it("rechecks download permission before mutating a task after access is revoked", async () => {
+    const store = useRecordingDownloadStore();
+    store.upsert({ taskId: "one", fileId: "file-1", fileName: "one.mp4", status: "streaming", bytesSent: 50, totalBytes: 100, createdAt: "now", expiresAt: "later" });
+    store.upsert({ taskId: "two", fileId: "file-2", fileName: "two.mp4", status: "failed", bytesSent: 0, createdAt: "now", expiresAt: "later" });
+    const wrapper = mount(RecordingDownloadCenter, { global: { stubs } });
+    await wrapper.get("button[aria-label='下载任务']").trigger("click");
+    const cancelButton = wrapper.get("button[aria-label='取消下载']");
+    const retryButton = wrapper.get("button[aria-label='重新下载']");
+
+    account.permissions = [];
+    await cancelButton.trigger("click");
+    await retryButton.trigger("click");
+
+    expect(coordinator.cancel).not.toHaveBeenCalled();
+    expect(coordinator.retry).not.toHaveBeenCalled();
   });
 
   it("shows in-memory task progress and delegates cancel/retry without exposing URLs", async () => {

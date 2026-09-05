@@ -34,9 +34,9 @@ func TestStreamProbeControllerScopesStream(t *testing.T) {
 	app.Response = response.NewResponseHandler()
 	router := gin.New()
 	router.Use(gin.Recovery(), withClaims(100))
-	router.POST("/play/:streamId/probe", controller.Run)
+	router.POST("/stream-probes/:streamId", controller.Run)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/play/hidden/probe", nil))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/stream-probes/hidden", nil))
 	require.Equal(t, 0, service.calls)
 	require.Equal(t, "流不存在", unmarshal(t, recorder)["message"])
 }
@@ -44,8 +44,8 @@ func TestStreamProbeControllerScopesStream(t *testing.T) {
 func TestStreamProbeControllerReturns503WhenUnconfigured(t *testing.T) {
 	controller := gbcontrollers.NewStreamProbeController(nil)
 	router := gin.New()
-	router.POST("/play/:streamId/probe", controller.Run)
+	router.POST("/stream-probes/:streamId", controller.Run)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/play/stream/probe", nil))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, "/stream-probes/stream", nil))
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
 }

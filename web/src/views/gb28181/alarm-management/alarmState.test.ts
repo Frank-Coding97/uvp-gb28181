@@ -4,6 +4,7 @@ import {
   alarmPriorityTagColor,
   alarmTypeOptionsForMethod,
   displayAlarmEntityName,
+  mayClearAlarms,
   mayDeleteAlarms,
   mayViewAlarms,
   normalizeAlarmQuery,
@@ -27,6 +28,10 @@ describe("alarm permissions", () => {
     expect(mayViewAlarms(["gb28181:alarm:view"])).toBe(true);
     expect(mayDeleteAlarms(["gb28181:alarm:view"])).toBe(false);
     expect(mayDeleteAlarms(["gb28181:alarm:delete"])).toBe(true);
+    expect(mayClearAlarms(["*:*:*"])).toBe(true);
+    expect(mayClearAlarms(["gb28181:alarm:delete"])).toBe(false);
+    expect(mayClearAlarms(["gb28181:alarm:clear"])).toBe(true);
+    expect(mayClearAlarms(["gb28181:alarm:view"])).toBe(false);
     expect(mayViewAlarms(["unrelated"])).toBe(false);
   });
 });

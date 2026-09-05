@@ -31,6 +31,7 @@ import {
   getStreamMonitor,
   listCruiseTracks,
   listPtzPresets,
+  runStreamProbe,
   startPlay,
   updateHomePosition,
   updatePositionHistoryConfig,
@@ -68,6 +69,12 @@ describe("国标服务配置 API", () => {
       undefined,
       { showErrorMessage: false }
     );
+  });
+
+  it("视频探针使用独立的流探针路径", async () => {
+    await runStreamProbe("stream-1");
+
+    expect(request).toHaveBeenCalledWith("post", "/api/gb28181/stream-probes/stream-1");
   });
 
   it("读取移动位置历史轨迹开关", async () => {

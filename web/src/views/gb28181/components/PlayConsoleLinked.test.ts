@@ -2,7 +2,7 @@ import { flushPromises, mount, type VueWrapper } from "@vue/test-utils";
 import { Message, Modal } from "@arco-design/web-vue";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { defineComponent, nextTick } from "vue";
+import { defineComponent, nextTick, reactive } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => {
@@ -76,7 +76,6 @@ const api = vi.hoisted(() => {
           record: { state: "supported", reason: "" },
           guard: { state: "supported", reason: "" },
           alarmReset: { state: "supported", reason: "" },
-          teleBoot: { state: "supported", reason: "" },
           dragZoom: { state: "supported", reason: "" },
           broadcast: { state: "supported", reason: "" },
           talk: { state: "supported", reason: "" }
@@ -136,7 +135,10 @@ const api = vi.hoisted(() => {
   };
 });
 
+const userState = vi.hoisted(() => ({ account: { permissions: ["*:*:*"] as string[] } }));
+
 vi.mock("@/api/gb28181", () => api);
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => userState }));
 vi.mock("./PlayWindow.vue", () => ({
   default: {
     props: ["url", "zlmWebrtc"],
@@ -209,6 +211,7 @@ async function requestDeviceStatus(wrapper: VueWrapper) {
 
 describe("PlayConsoleLinked 双区联动", () => {
   beforeEach(() => {
+    userState.account = reactive({ permissions: ["*:*:*"] });
     api.authorizeFixedPlayback.mockReset();
     api.getHomePosition.mockReset();
     api.getPtzOperation.mockReset();
@@ -1225,7 +1228,6 @@ describe("PlayConsoleLinked 双区联动", () => {
         record: { state: "unsupported", reason: "厂商上报不支持" },
         guard: { state: "unsupported", reason: "厂商上报不支持" },
         alarmReset: { state: "unsupported", reason: "厂商上报不支持" },
-        teleBoot: { state: "unsupported", reason: "厂商上报不支持" },
         dragZoom: { state: "unsupported", reason: "厂商上报不支持" },
         broadcast: { state: "unsupported", reason: "厂商上报不支持" },
         talk: { state: "unsupported", reason: "厂商上报不支持" }
@@ -3479,6 +3481,120 @@ describe("PlayConsoleLinked 双区联动", () => {
       { enabled: true, resetTime: 10, presetId: 1 },
       expect.stringMatching(/^home-control-/)
     );
+    wrapper.unmount();
+  });
+
+  it("游客只显示实时播放和流监控，不挂载控制或分享入口", async () => {
+    userState.account.permissions = ["gb28181:play:start", "gb28181:play:monitor"];
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    expect(api.startPlay).toHaveBeenCalledTimes(1);
+    expect(api.getStreamMonitor).toHaveBeenCalled();
+    expect(wrapper.find("[data-testid='linked-tab-probe']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='linked-tab-ptz']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-tab-advanced']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-side-ptz']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-side-advanced']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-detail-ptz']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='linked-detail-advanced']").exists()).toBe(false);
+    expect(wrapper.find("[data-testid='probe-start']").exists()).toBe(false);
+    expect(wrapper.find(".protocol-copy-btn").exists()).toBe(false);
+    expect(api.getControlCapabilities).not.toHaveBeenCalled();
+    expect(api.getHomePosition).not.toHaveBeenCalled();
+    expect(api.controlPtz).not.toHaveBeenCalled();
+    expect(api.createTalkSession).not.toHaveBeenCalled();
+    expect(api.runStreamProbe).not.toHaveBeenCalled();
+    expect(api.createDeviceSnapshotSession).not.toHaveBeenCalled();
+
+    wrapper.unmount();
+  });
+
+  it("游客没有共享停播权限时切换和迟到点播响应都不调用 stopPlay", async () => {
+    userState.account.permissions = ["gb28181:play:start", "gb28181:play:monitor"];
+    let resolveInitial!: (value: any) => void;
+    api.startPlay.mockReturnValueOnce(new Promise(resolve => { resolveInitial = resolve; }));
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.setProps({ visible: false });
+    resolveInitial({
+      code: 0,
+      message: "",
+      data: { streamId: "late-stream", ssrc: "late-ssrc", app: "rtp", wsflvUrl: "ws://zlm/late.live.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+    });
+    await flushPromises();
+    expect(api.stopPlay).not.toHaveBeenCalled();
+    wrapper.unmount();
+
+    api.stopPlay.mockClear();
+    api.startPlay.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: { streamId: "stream-current", ssrc: "ssrc", app: "rtp", wsflvUrl: "ws://zlm/current.live.flv", httpFlvUrl: "", hlsUrl: "", expireAt: 0 }
+    });
+    const nextWrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    await nextWrapper.setProps({ channel: { ...channel, id: 2, channelId: "0411212756" } });
+    await flushPromises();
+    expect(api.stopPlay).not.toHaveBeenCalled();
+    nextWrapper.unmount();
+  });
+
+  it("确认删除回调执行时重新校验预置位和巡航权限", async () => {
+    let warningConfig: any;
+    const warning = vi.spyOn(Modal, "warning").mockImplementation((config: any) => {
+      warningConfig = config;
+      return {} as any;
+    });
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+
+    await wrapper.get(".preset-tile-del").trigger("click");
+    userState.account.permissions = ["gb28181:ptz:view"];
+    await nextTick();
+    await warningConfig.onOk?.();
+    expect(api.deletePtzPreset).not.toHaveBeenCalled();
+
+    userState.account.permissions = ["*:*:*"];
+    await nextTick();
+    await wrapper.get(".cruise-tile .preset-tile-del").trigger("click");
+    userState.account.permissions = ["gb28181:ptz:view"];
+    await nextTick();
+    await warningConfig.onOk?.();
+    expect(api.controlPtzCruise).not.toHaveBeenCalled();
+
+    warning.mockRestore();
+    wrapper.unmount();
+  });
+
+  it("权限撤销后停止对讲轮询和等待循环的后续请求", async () => {
+    vi.useFakeTimers();
+    const wrapper = mount(PlayConsoleLinked, { props: { visible: true, channel } });
+    await flushPromises();
+    const vm = wrapper.vm as unknown as {
+      beginTalkPoll: (channelId: number, sessionId: string) => void;
+      waitTalkActive: (channelId: number, sessionId: string, token: number) => Promise<boolean>;
+      talkToken: number;
+    };
+
+    api.getTalkSession.mockClear();
+    vm.beginTalkPoll(channel.id, "talk-poll");
+    userState.account.permissions = [];
+    await vi.advanceTimersByTimeAsync(10000);
+    await flushPromises();
+    expect(api.getTalkSession).not.toHaveBeenCalled();
+
+    let resolveStatus!: (value: any) => void;
+    api.getTalkSession.mockReturnValueOnce(new Promise(resolve => { resolveStatus = resolve; }));
+    userState.account.permissions = ["gb28181:talk:control"];
+    const waiting = vm.waitTalkActive(channel.id, "talk-wait", vm.talkToken);
+    userState.account.permissions = [];
+    resolveStatus({ code: 0, message: "", data: { sessionId: "talk-wait", state: "pending" } });
+    await flushPromises();
+    await expect(waiting).resolves.toBe(false);
+    expect(api.getTalkSession).toHaveBeenCalledTimes(1);
+
     wrapper.unmount();
   });
 

@@ -17,7 +17,7 @@ func (controller *HomeDashboardController) SIPHistory(c *gin.Context) {
 		return
 	}
 	now := time.Now()
-	window, err := dashboard.ResolveHistoryWindow(c.Query("range"), now, time.Local)
+	window, err := dashboard.ResolveHistoryWindow(c.Query("range"), now, homeDashboardLocation)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
@@ -27,7 +27,7 @@ func (controller *HomeDashboardController) SIPHistory(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"code": 1, "message": "仪表盘聚合服务未初始化"})
 		return
 	}
-	history, err := dashboard.NewSIPMetricQuery(db, time.Local).History(c.Request.Context(), window)
+	history, err := dashboard.NewSIPMetricQuery(db, homeDashboardLocation).History(c.Request.Context(), window)
 	if err != nil {
 		controller.Fail(c, "SIP 历史查询失败", err, http.StatusServiceUnavailable)
 		return
@@ -44,7 +44,7 @@ func (controller *HomeDashboardController) TrafficHistory(c *gin.Context) {
 		return
 	}
 	now := time.Now()
-	window, err := dashboard.ResolveTrafficHistoryWindow(c.Query("range"), now, time.Local)
+	window, err := dashboard.ResolveTrafficHistoryWindow(c.Query("range"), now, homeDashboardLocation)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
@@ -65,7 +65,7 @@ func (controller *HomeDashboardController) TrafficHistory(c *gin.Context) {
 		return
 	}
 	trafficScope := datascope.VisibilityScope(c.Copy(), "traffic.owner_dept_id", "traffic.device_code")
-	history, err := dashboard.NewAssetSummaryService(db, time.Local).TrafficHistory(c.Request.Context(), window, page, pageSize, trafficScope)
+	history, err := dashboard.NewAssetSummaryService(db, homeDashboardLocation).TrafficHistory(c.Request.Context(), window, page, pageSize, trafficScope)
 	if err != nil {
 		controller.Fail(c, "媒体流量历史查询失败", err, http.StatusServiceUnavailable)
 		return
@@ -98,7 +98,7 @@ func (controller *HomeDashboardController) PlayHistory(c *gin.Context) {
 		return
 	}
 	now := time.Now()
-	window, err := dashboard.ResolveHistoryWindow(c.Query("range"), now, time.Local)
+	window, err := dashboard.ResolveHistoryWindow(c.Query("range"), now, homeDashboardLocation)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return

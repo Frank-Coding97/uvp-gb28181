@@ -43,6 +43,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/traffic"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/upgrade"
 	gbzlm "uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/heartbeat"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -228,6 +229,7 @@ var subscriptionService *subscribe.Service
 var subscriptionScheduler *subscribe.Scheduler
 var ptzService *ptz.Service
 var ptzScheduler ptzSchedulerLifecycle
+var firmwareUpgradeService *upgrade.Service
 var recordQueryService *recordquery.Service
 var recordQueryMetrics *recordquery.Metrics
 var playbackMetrics *gbplayback.Metrics
@@ -596,6 +598,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 	securityRuntime = runtime
 	var newPTZService *ptz.Service
 	var newPTZScheduler ptzSchedulerLifecycle
+	var newFirmwareUpgradeService *upgrade.Service
 	if u := srv.UAC(); u != nil {
 		newRecordQueryService, queryErr := recordquery.NewService(u, recordquery.Options{
 			Timeout:            cfg.RecordQuery.Timeout(),
@@ -630,6 +633,37 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		}
 		newPTZScheduler = ptz.NewScheduler(newPTZService)
 		srv.SetPTZMessageProcessor(newPTZService)
+		if app.DB() != nil {
+			newFirmwareUpgradeService, err = upgrade.NewService(app.DB(), u, newPTZService, time.Now)
+			if err != nil {
+				newRecordQueryService.Close()
+				recordQueryService = nil
+				recordQueryMetrics = nil
+				gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
+				srv.SetRecordInfoSink(nil)
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_ = srv.Shutdown(shutdownCtx)
+				cancel()
+				sipRuntimeStatus.MarkFailed(err.Error())
+				return fmt.Errorf("装配设备固件升级 service 失败: %w", err)
+			}
+			setter, ok := srv.(interface {
+				SetUpgradeProcessor(gbhandler.UpgradeMessageProcessor)
+			})
+			if !ok {
+				newRecordQueryService.Close()
+				recordQueryService = nil
+				recordQueryMetrics = nil
+				gbroutes.SetDeviceMgmtRecordQueryRuntime(nil, gbconfig.RecordQueryConfig{}, nil)
+				srv.SetRecordInfoSink(nil)
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				_ = srv.Shutdown(shutdownCtx)
+				cancel()
+				sipRuntimeStatus.MarkFailed("SIP server 未提供设备升级消息路由")
+				return errors.New("SIP server 未提供设备升级消息路由")
+			}
+			setter.SetUpgradeProcessor(newFirmwareUpgradeService)
+		}
 	}
 	sipServer = srv
 	if err := startCascadeRuntime(cfg, srv); err != nil {
@@ -646,7 +680,9 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		gbroutes.SetDeviceMgmtCatalogTrigger(gbhandler.NewUACCatalogTrigger(u))
 		ptzService = newPTZService
 		ptzScheduler = newPTZScheduler
+		firmwareUpgradeService = newFirmwareUpgradeService
 		gbroutes.SetDeviceMgmtPTZRuntime(u, ptzService)
+		gbroutes.SetDeviceMgmtFirmwareUpgradeService(firmwareUpgradeService)
 		captureRoot := app.ConfigYml.GetString("httpserver.serverroot")
 		if captureRoot == "" {
 			captureRoot = "./resource/public"
@@ -847,6 +883,7 @@ func stopSIPDependencies(ctx context.Context) {
 	clearZLMManagementController()
 	stopPlaybackRuntime(ctx)
 	stopRecordQueryRuntime()
+	stopFirmwareUpgradeRuntime()
 	stopPTZRuntime()
 	stopTalkRuntime(ctx)
 	stopRecordingRuntime()
@@ -970,6 +1007,24 @@ func stopPTZRuntime() {
 	}
 	ptzService = nil
 	gbroutes.SetDeviceMgmtPTZRuntime(nil, nil)
+}
+
+func stopFirmwareUpgradeRuntime() {
+	oldService := firmwareUpgradeService
+	// Detach inbound routing and the HTTP facade first. Once detached, Retire
+	// can safely drain the old generation without admitting new work.
+	if sipServer != nil {
+		if setter, ok := sipServer.(interface {
+			SetUpgradeProcessor(gbhandler.UpgradeMessageProcessor)
+		}); ok {
+			setter.SetUpgradeProcessor(nil)
+		}
+	}
+	gbroutes.SetDeviceMgmtFirmwareUpgradeService(nil)
+	if oldService != nil {
+		oldService.Retire()
+	}
+	firmwareUpgradeService = nil
 }
 
 func setupRecordingRuntime(cfg gbconfig.Config) {

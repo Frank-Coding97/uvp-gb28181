@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onBeforeUnmount, shallowRef, nextTick } from "vue";
+import { computed, ref, watch, onBeforeUnmount, shallowRef, nextTick } from "vue";
+import { useUserStoreHook } from "@/store/modules/user";
 
 interface Props {
     /** 流地址(http-flv / ws-flv / hls 等),传空字符串关闭播放器 */
@@ -24,6 +25,11 @@ declare const EasyPlayerPro: any;
 const containerRef = ref<HTMLDivElement | null>(null);
 const player = shallowRef<any>(null);
 const errorMsg = ref("");
+const userStore = useUserStoreHook();
+const canScreenshot = computed(() => {
+    const permissions = userStore.account.permissions ?? [];
+    return permissions.includes("*:*:*") || permissions.includes("gb28181:play:snapshot");
+});
 
 function destroy() {
     if (player.value) {
@@ -80,7 +86,7 @@ async function play(u: string) {
             isBand: true,
             btns: {
                 fullscreen: true,
-                screenshot: true,
+                screenshot: canScreenshot.value,
                 play: true,
                 audio: true,
                 record: false,
@@ -111,6 +117,12 @@ async function play(u: string) {
 }
 
 watch(() => props.url, (u) => play(u), { immediate: true });
+watch(canScreenshot, () => {
+    if (!player.value || !props.url) return;
+    const currentUrl = props.url;
+    destroy();
+    void play(currentUrl);
+});
 onBeforeUnmount(destroy);
 
 defineExpose({ stop: destroy });

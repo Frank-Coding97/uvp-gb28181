@@ -3,18 +3,20 @@ package security
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 const securityEventQueueCapacity = 4096
 
 type eventPersister struct {
-	store Store
-	clock Clock
-	queue chan Event
-	stop  chan struct{}
-	done  chan struct{}
-	once  sync.Once
+	store   Store
+	clock   Clock
+	queue   chan Event
+	stop    chan struct{}
+	done    chan struct{}
+	once    sync.Once
+	dropped atomic.Int64
 }
 
 func newEventPersister(store Store, clock Clock) *eventPersister {
@@ -55,7 +57,9 @@ func (p *eventPersister) run() {
 		for _, item := range pending {
 			items = append(items, item)
 		}
-		if p.store.IncrementEvents(context.Background(), items) == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if p.store.IncrementEvents(ctx, items) == nil {
 			clear(pending)
 		}
 	}
@@ -92,6 +96,10 @@ func (p *eventPersister) aggregate(pending map[string]EventAggregate, event Even
 	key := aggregateKey(bucket, ip.String(), event.DeviceID, riskScopeForEvent(event), event.Transport, event.Method, event.Reason, event.Action)
 	item, ok := pending[key]
 	if !ok {
+		if len(pending) >= securityEventQueueCapacity {
+			p.dropped.Add(1)
+			return
+		}
 		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), DeviceID: event.DeviceID, RiskScope: riskScopeForEvent(event), Transport: event.Transport, Method: event.Method, Reason: event.Reason, Action: event.Action, FirstSeenAt: at}
 	}
 	item.Count++

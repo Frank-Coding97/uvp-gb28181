@@ -1,9 +1,11 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { reactive } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const alarmApi = vi.hoisted(() => ({ listAlarms: vi.fn(), deleteAlarm: vi.fn(), batchDeleteAlarms: vi.fn(), clearAllAlarms: vi.fn() }));
 const deviceApi = vi.hoisted(() => ({ listDevices: vi.fn() }));
-const account = vi.hoisted(() => ({ permissions: ["gb28181:alarm:view"] as string[] }));
+const accountState = vi.hoisted(() => ({ permissions: ["gb28181:alarm:view"] as string[] }));
+const account = reactive(accountState);
 const modal = vi.hoisted(() => ({ warning: vi.fn() }));
 const messages = vi.hoisted(() => ({ error: vi.fn(), warning: vi.fn(), success: vi.fn() }));
 
@@ -157,12 +159,12 @@ describe("AlarmManagement", () => {
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("false");
   });
 
-  it("shows row selection and a clear-all button for delete users", async () => {
+  it("shows row selection for delete users but keeps clear-all separate", async () => {
     account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
     const wrapper = mountPage();
     await flushPromises();
     expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("true");
-    expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(true);
+    expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(false);
   });
 
   it("batch deletes selected rows after confirmation", async () => {
@@ -182,7 +184,7 @@ describe("AlarmManagement", () => {
   });
 
   it("clears all alarms after confirmation", async () => {
-    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:clear"];
     const wrapper = mountPage();
     await flushPromises();
     await wrapper.get("[data-testid='alarm-clear-all']").trigger("click");
@@ -191,6 +193,23 @@ describe("AlarmManagement", () => {
     await flushPromises();
     expect(alarmApi.clearAllAlarms).toHaveBeenCalledTimes(1);
     expect(messages.success).toHaveBeenCalledWith("已清空 41 条告警");
+  });
+
+  it("allows clear-all without granting single or batch delete", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:clear"];
+    const wrapper = mountPage();
+    await flushPromises();
+
+    expect(wrapper.find("[data-testid='alarm-clear-all']").exists()).toBe(true);
+    expect(wrapper.get("[data-testid='alarm-table']").attributes("data-has-row-selection")).toBe("false");
+    expect(wrapper.find("[data-testid='single-delete-9007199254740993']").exists()).toBe(false);
+
+    await wrapper.get("[data-testid='alarm-clear-all']").trigger("click");
+    await modal.warning.mock.calls[0][0].onOk();
+    await flushPromises();
+    expect(alarmApi.clearAllAlarms).toHaveBeenCalledTimes(1);
+    expect(alarmApi.deleteAlarm).not.toHaveBeenCalled();
+    expect(alarmApi.batchDeleteAlarms).not.toHaveBeenCalled();
   });
 
   it("loads the first page and renders the server total", async () => {
@@ -291,6 +310,20 @@ describe("AlarmManagement", () => {
     await flushPromises();
     expect(alarmApi.deleteAlarm).toHaveBeenCalledWith("9007199254740993");
     expect(messages.success).toHaveBeenCalledWith("已物理删除 1 条告警");
+  });
+
+  it("rechecks delete permission when a previously opened confirmation is submitted", async () => {
+    account.permissions = ["gb28181:alarm:view", "gb28181:alarm:delete"];
+    const wrapper = mountPage();
+    await flushPromises();
+    await wrapper.get("[data-testid='single-delete-9007199254740993']").trigger("click");
+    expect(modal.warning).toHaveBeenCalledTimes(1);
+
+    account.permissions = ["gb28181:alarm:view"];
+    await modal.warning.mock.calls[0][0].onOk();
+    await flushPromises();
+
+    expect(alarmApi.deleteAlarm).not.toHaveBeenCalled();
   });
 
   it("opens alarm detail from the keyboard", async () => {

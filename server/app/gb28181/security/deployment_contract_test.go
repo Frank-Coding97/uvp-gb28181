@@ -22,7 +22,16 @@ func TestFirewallAgentReleaseAndDeploymentContract(t *testing.T) {
 
 	workflow := read(".github/workflows/ci-deploy-test.yml")
 	require.Contains(t, workflow, "uvp-firewall-agent-linux-amd64")
-	require.Contains(t, workflow, "uvp-firewall-agent.service")
+
+	build := read("deploy/test/build-release.sh")
+	require.Contains(t, build, "uvp-firewall-agent-linux-amd64")
+	require.Contains(t, build, "assemble-release.sh")
+
+	assemble := read("deploy/test/assemble-release.sh")
+	require.Contains(t, assemble, "uvp-firewall-agent-linux-amd64")
+	require.Contains(t, assemble, `install -m 0755 "$SOURCE_ROOT/server/bin/uvp-firewall-agent-linux-amd64" "$release_dir/agent/uvp-firewall-agent"`)
+	require.Contains(t, assemble, `install -m 0644 "$SOURCE_ROOT/deploy/test/uvp-firewall-agent.service" "$release_dir/agent/uvp-firewall-agent.service"`)
+	require.Contains(t, assemble, `install -m 0644 "$SOURCE_ROOT/deploy/test/uvp-firewall-agent.default" "$release_dir/agent/uvp-firewall-agent.default"`)
 
 	compose := read("deploy/test/compose.yml")
 	require.Contains(t, compose, "/run/uvp:/run/uvp")

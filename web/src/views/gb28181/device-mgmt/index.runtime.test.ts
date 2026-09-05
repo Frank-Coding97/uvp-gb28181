@@ -43,6 +43,10 @@ const api = vi.hoisted(() => ({
     stopPlay: vi.fn()
 }));
 
+const user = vi.hoisted(() => ({
+    account: { permissions: ["gb28181:device:view"] as string[] }
+}));
+
 vi.mock("./api", () => api);
 
 vi.mock("maplibre-gl", () => {
@@ -120,7 +124,7 @@ vi.mock("@/store/modules/theme-config", async () => {
 });
 
 vi.mock("@/store/modules/user", () => ({
-    useUserStoreHook: () => ({ account: { permissions: [] } })
+    useUserStoreHook: () => user
 }));
 
 vi.mock("@/store/modules/playback-console", () => ({

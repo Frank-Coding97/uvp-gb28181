@@ -46,7 +46,8 @@ import {
   type SecuritySnapshot
 } from "@/api/gb28181-security";
 import { buildSecurityTrend, type SecurityTrendPeriod } from "./securityTrend";
-import { formatAutomaticBanTTL, formatRemaining } from "./securityFormatting";
+import { formatAutomaticBanTTL, formatRemaining, formatSecurityReason, formatShortWindowInviteRule } from "./securityFormatting";
+import { buildAccessRuleTogglePayload } from "./securityRules";
 
 type TabKey = "overview" | "events" | "bans" | "blacklist" | "allowlist" | "policy";
 type RuleKind = "blacklist" | "allowlist";
@@ -74,6 +75,7 @@ interface AccessRule {
   note: string;
   scope: string;
   expires: string;
+  expiresAt?: SecurityAccessRule["expiresAt"];
   enabled: boolean;
 }
 
@@ -221,7 +223,9 @@ const overviewBans = computed(() => (securitySnapshot.value?.bans || []).filter(
 const attentionCount = computed(() => banTotal.value + (allowRuleTotal.value > 0 ? 1 : 0));
 const enabledDefenseLayers = computed(() => 1 + (securityAgent.value.connected ? 1 : 0));
 const policyWindowLabel = computed(() => securityPolicy.value ? `${securityPolicy.value.window} 秒窗口` : "策略窗口读取中");
-const automaticBanTTLLabel = computed(() => formatAutomaticBanTTL(securityPolicy.value?.banTTLs || []));
+const shortWindowInviteRuleLabel = computed(() => formatShortWindowInviteRule(securityPolicy.value?.window, securityPolicy.value?.banScore));
+const lowFrequencyInviteRuleLabel = "10 分钟累计 10 次未授权 INVITE";
+const automaticBanTTLLabel = computed(() => formatAutomaticBanTTL(securityPolicy.value?.banTTLs || [], securityPolicy.value?.permanentAutoBan === true, securityPolicy.value?.banScore));
 const liveStatus = computed(() => {
   if (dataUnavailable.value) return { label: "数据不可用", color: "red" as const };
   if (selectedMode.value === "observe") return { label: "仅观察", color: "orange" as const };
@@ -310,7 +314,7 @@ function uiRuleType(type: SecurityAccessRule["matchType"]): AccessRule["type"] {
 }
 
 function mapRule(rule: SecurityAccessRule): AccessRule {
-  return { id: rule.id, listType: rule.listType, matchType: rule.matchType, type: uiRuleType(rule.matchType), value: rule.matchValue, note: rule.note, scope: rule.scope, expires: rule.expiresAt ? new Date(rule.expiresAt).toLocaleString() : "永久", enabled: rule.status === "enabled" };
+  return { id: rule.id, listType: rule.listType, matchType: rule.matchType, type: uiRuleType(rule.matchType), value: rule.matchValue, note: rule.note, scope: rule.scope, expires: rule.expiresAt ? new Date(rule.expiresAt).toLocaleString() : "永久", expiresAt: rule.expiresAt, enabled: rule.status === "enabled" };
 }
 
 function expiryToIso(expiry: string) {
@@ -322,14 +326,14 @@ function expiryToIso(expiry: string) {
 function mapEvent(event: SecurityEventAggregate, index: number, offset = 0): SecurityEvent {
   const highRisk = event.action === "ban" || event.reason.includes("nonce") || event.reason.includes("digest");
   const location = event.riskScope === "device" ? `设备 ${event.deviceId || "未知"}` : "来源 IP";
-  return { id: offset + index + 1, severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危", source: event.sourceIp, location, method: event.method || "未知", userAgent: event.userAgent || "未上报", rule: event.reason, action: event.action, count: event.count, time: new Date(event.lastSeenAt).toLocaleString() };
+  return { id: offset + index + 1, severity: highRisk ? "高危" : event.action === "drop" ? "中危" : "低危", source: event.sourceIp, location, method: event.method || "未知", userAgent: event.userAgent || "未上报", rule: formatSecurityReason(event.reason), action: event.action, count: event.count, time: new Date(event.lastSeenAt).toLocaleString() };
 }
 
 function mapBan(ban: FirewallBan, index: number, offset = 0): AutoBanRecord {
   const decision = ban.decision;
   const applied = ban.agentState === "applied";
   const location = decision.riskScope === "device" ? `设备 ${decision.deviceId || "未知"}` : "来源 IP";
-  return { id: offset + index + 1, decisionId: decision.decisionId, source: decision.sourceIp, location, method: decision.triggerMethod || "未知", reason: decision.reason, evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`, mode: decision.policyMode === "strict" ? "严格" : "保护", firewallState: applied ? "已生效" : ban.agentState === "failed" ? "同步失败" : "待同步", createdAt: new Date(decision.createdAt).toLocaleTimeString(), expires: formatRemaining(decision.createdAt, decision.ttl), blocked: ban.blockedCountAfterBan || 0 };
+  return { id: offset + index + 1, decisionId: decision.decisionId, source: decision.sourceIp, location, method: decision.triggerMethod || "未知", reason: formatSecurityReason(decision.reason), evidence: `${decision.windowSeconds || 0} 秒内 ${decision.triggerCount || 0} 次，阈值 ${decision.triggerThreshold || decision.score}，累计评分 ${decision.score}`, mode: decision.policyMode === "strict" ? "严格" : "保护", firewallState: applied ? "已生效" : ban.agentState === "failed" ? "同步失败" : "待同步", createdAt: new Date(decision.createdAt).toLocaleTimeString(), expires: formatRemaining(decision.createdAt, decision.ttl, Date.now(), decision.permanent === true), blocked: ban.blockedCountAfterBan || 0 };
 }
 
 async function refreshPreview(showMessage = false, forceLists = false) {
@@ -436,7 +440,7 @@ async function saveRule() {
 async function toggleRule(rule: AccessRule, enabled: boolean) {
   const previous = rule.enabled;
   rule.enabled = enabled;
-  const result = await updateSecurityAccessRule(rule.id, { listType: rule.listType, matchType: rule.matchType, matchValue: rule.value, scope: rule.scope, status: enabled ? "enabled" : "disabled", note: rule.note });
+  const result = await updateSecurityAccessRule(rule.id, buildAccessRuleTogglePayload(rule, enabled));
   if (result.code !== 0) {
     rule.enabled = previous;
     Message.error(result.message || "规则状态更新失败");
@@ -627,7 +631,7 @@ onBeforeUnmount(() => {
           <div><span>正在封禁</span><strong>{{ banTotal }}</strong></div>
           <div><span>本页主机防火墙生效</span><strong>{{ autoBans.filter(item => item.firewallState === '已生效').length }}</strong></div>
           <div><span>本页仅应用层拦截</span><strong>{{ autoBans.filter(item => item.firewallState !== '已生效').length }}</strong></div>
-            <div class="ban-summary-note"><ShieldCheck :size="18" /><span><strong>自动封禁与手动黑名单分开管理</strong><small>自动封禁按风险等级限时生效，手动黑名单可设置永久。</small></span></div>
+            <div class="ban-summary-note"><ShieldCheck :size="18" /><span><strong>自动封禁与手动黑名单分开管理</strong><small>新自动封禁永久生效，需人工解封；历史限时记录保留原到期时间。手动黑名单可设置永久。</small></span></div>
         </div>
         <a-table class="security-table uvp-data-table ban-table" :data="autoBans" row-key="id" :pagination="banPagination" :scroll="{ x: 1060, y: '100%' }" @page-change="handleBanPageChange" @page-size-change="handleBanPageSizeChange">
           <template #columns>
@@ -684,7 +688,7 @@ onBeforeUnmount(() => {
         <div class="policy-grid">
           <div class="policy-section">
             <div class="policy-title"><span><Activity :size="18" /></span><div><h3>自动防护规则</h3><p>控制异常来源何时被识别并升级处理。</p></div></div>
-            <div class="setting-row"><span><strong>重复攻击自动封禁</strong><small>短时间持续攻击达到阈值后，按风险等级临时封禁来源 IP</small></span><a-tag :color="selectedMode === 'observe' ? 'orange' : 'green'">{{ selectedMode === 'observe' ? '观察模式不执行' : '限时封禁' }}</a-tag></div>
+            <div class="setting-row"><span><strong>重复攻击自动封禁</strong><small>{{ selectedMode === 'observe' ? '观察模式仅记录' : '保护/严格模式实际封禁' }}；短期 {{ shortWindowInviteRuleLabel }}；固定低频 {{ lowFrequencyInviteRuleLabel }}。</small></span><a-tag :color="selectedMode === 'observe' ? 'orange' : 'green'">{{ selectedMode === 'observe' ? '观察模式不执行' : automaticBanTTLLabel }}</a-tag></div>
             <div class="setting-row"><span><strong>扫描器特征识别</strong><small>User-Agent 仅作为辅助信号，不作为可信身份</small></span><a-tag color="green">协议事件接口</a-tag></div>
             <div class="setting-row"><span><strong>入口速率阈值</strong><small>当前策略窗口内允许的 UDP 包数量 · {{ policyWindowLabel }}</small></span><div class="threshold-control"><a-input-number v-model="maxUdpThreshold" :min="1" :max="100000" /><span>包/窗口</span></div></div>
             <div class="setting-row"><span><strong>风险累计封禁阈值</strong><small>INVITE、REGISTER、MESSAGE 等风险按评分累计，达到阈值后加入主机防火墙</small></span><div class="threshold-control"><a-input-number v-model="banThreshold" :min="1" :max="10000" /><span>风险分</span></div></div>
@@ -693,7 +697,7 @@ onBeforeUnmount(() => {
             <div class="policy-title"><span><BrickWall :size="18" /></span><div><h3>主机防火墙</h3><p>阻止已确认的攻击流量继续进入服务进程。</p></div></div>
             <div class="setting-row"><span><strong>联动主机防火墙</strong><small>应用层确认攻击后，在操作系统网络入口封禁来源 IP</small></span><a-tag :color="securityAgent.connected ? 'green' : 'orange'">{{ securityAgent.connected ? 'Agent 已连接' : 'Agent 未连接' }}</a-tag></div>
             <div class="agent-status"><span :class="['agent-icon', { warning: !securityAgent.connected }]" ><CheckCircle2 v-if="securityAgent.connected" :size="22" /><TriangleAlert v-else :size="22" /></span><span><strong>{{ agentStatus.title }}</strong><small>{{ agentStatus.detail }}</small></span><a-tag :color="agentStatus.color">{{ agentStatus.label }}</a-tag></div>
-            <div class="ttl-row"><span><strong>自动封禁有效期</strong><small>风险越高封禁时间越长，到期自动解除</small></span><a-tag color="orange">{{ automaticBanTTLLabel }}</a-tag></div>
+            <div class="ttl-row"><span><strong>自动封禁有效期</strong><small>新自动封禁永久生效，需人工解封；历史限时记录保留原到期时间。</small></span><a-tag color="orange">{{ automaticBanTTLLabel }}</a-tag></div>
             <div class="cloud-roadmap"><CloudCog :size="18" /><span><strong>云厂商防火墙联动</strong><small>当前系统未接入云厂商 API，暂不宣称已生效。</small></span><a-tag color="orange">未接入</a-tag></div>
           </div>
         </div>

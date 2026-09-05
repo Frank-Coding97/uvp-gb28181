@@ -1,6 +1,8 @@
 package gb28181
 
 import (
+	"go.uber.org/zap"
+
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
@@ -20,6 +22,7 @@ type zlmManagementCoreRuntime struct {
 	runtime         *gbzlmmanagement.RuntimeReader
 	ledger          *gbzlmrepo.ManagedResourceRepo
 	restart         *gbzlmsvc.RestartCoordinator
+	overview        *gbzlmmanagement.OverviewSampler
 	ffmpegTemplates gbzlmmanagement.FFmpegTemplateRegistry
 }
 
@@ -40,8 +43,13 @@ var zlmManagementCore *zlmManagementCoreRuntime
 
 func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc.RestartCoordinator) {
 	clearZLMManagementController()
-	if zlmManagementCore != nil && zlmManagementCore.restart != nil && zlmManagementCore.restart != restart {
-		zlmManagementCore.restart.Close()
+	if zlmManagementCore != nil {
+		if zlmManagementCore.overview != nil {
+			zlmManagementCore.overview.Close()
+		}
+		if zlmManagementCore.restart != nil && zlmManagementCore.restart != restart {
+			zlmManagementCore.restart.Close()
+		}
 	}
 	zlmManagementCore = nil
 	if zlmRegistry == nil || nodeService == nil || restart == nil {
@@ -51,9 +59,22 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 	executor := gbzlmmanagement.NewNodeExecutor(zlmRegistry, zlm.NewClientForNode)
 	runtime := gbzlmmanagement.NewRuntimeReader(executor)
 	ledger := gbzlmrepo.NewManagedResourceRepo(app.DB())
+	overview := gbzlmmanagement.NewOverviewSampler(
+		gbzlmmanagement.NewOverviewService(gbzlmmanagement.OverviewDependencies{
+			Registry: zlmRegistry,
+			Runtime:  runtime,
+			Media:    runtime,
+		}),
+		app.Cache,
+	)
+	overview.Start(func(err error) {
+		if app.ZapLog != nil {
+			app.ZapLog.Warn("ZLM 媒体实时速率采样失败", zap.Error(err))
+		}
+	})
 	zlmManagementCore = &zlmManagementCoreRuntime{
 		registry: zlmRegistry, executor: executor,
-		runtime: runtime, ledger: ledger, restart: restart,
+		runtime: runtime, ledger: ledger, restart: restart, overview: overview,
 		// No production allow-list source exists yet. An explicit empty set
 		// keeps FFmpeg listing available while create rejects every template
 		// instead of accepting arbitrary command text.
@@ -98,6 +119,9 @@ func clearZLMManagementController() {
 func teardownZLMManagementCore() {
 	clearZLMManagementController()
 	gbroutes.SetRestartStartedNotifier(nil)
+	if zlmManagementCore != nil && zlmManagementCore.overview != nil {
+		zlmManagementCore.overview.Close()
+	}
 	if zlmManagementCore != nil && zlmManagementCore.restart != nil {
 		zlmManagementCore.restart.Close()
 	}
@@ -136,11 +160,7 @@ func newZLMManagementBundle(core *zlmManagementCoreRuntime, business zlmManageme
 	})
 
 	bundle := &gbcontrollers.ZLMManagementBundle{
-		Overview: gbzlmmanagement.NewOverviewService(gbzlmmanagement.OverviewDependencies{
-			Registry: core.registry,
-			Runtime:  core.runtime,
-			Media:    core.runtime,
-		}),
+		Overview: core.overview,
 		Streams: gbzlmmanagement.NewStreamService(gbzlmmanagement.StreamServiceDependencies{
 			Registry:     core.registry,
 			Runtime:      core.runtime,

@@ -112,6 +112,76 @@ export interface DeviceVO {
     ownerDeptName?: string;
 }
 
+export type DeviceOperationStatus = "queued" | "pending" | "sent" | "accepted" | "rejected" | "cancelled" | "failed" | "timeout" | "unknown" | string;
+
+/** 设备级操作响应。sent 只代表平台已发出请求，不代表设备已完成重启。 */
+export interface DeviceOperationResult {
+    operationId?: string;
+    action: string;
+    sn?: number;
+    status?: DeviceOperationStatus;
+    responseRequired?: boolean;
+    deadlineAt?: string | null;
+    targetScope?: "channel" | "device" | "alarm" | string;
+    targetCode?: string | null;
+    profileVersion?: "2016" | "2022" | string;
+    deduplicated?: boolean;
+    errorMessage?: string | null;
+    completedAt?: string | null;
+}
+
+export interface MaintenanceOperation {
+    operationId: string;
+    action: "teleboot" | string;
+    status: DeviceOperationStatus;
+    sipStatus?: number | null;
+    errorMessage?: string | null;
+    actorId?: number | null;
+    createdAt: string;
+    sentAt?: string | null;
+    completedAt?: string | null;
+    responseRequired?: boolean;
+    targetCode?: string | null;
+}
+
+export interface MaintenanceOperationsQuery {
+    page?: number;
+    pageSize?: number;
+}
+
+export type FirmwareUpgradeStatus = "queued" | "sent" | "accepted" | "succeeded" | "failed" | "rejected" | "unknown" | string;
+
+export interface UpgradeOperation {
+    operationId: string;
+    sessionId: string;
+    deviceId: number;
+    status: FirmwareUpgradeStatus;
+    firmware: string;
+    currentFirmware?: string | null;
+    manufacturer: string;
+    sipStatus?: number | null;
+    errorCode?: string | null;
+    errorMessage?: string | null;
+    failedReason?: string | null;
+    actorId?: number | null;
+    createdAt: string;
+    sentAt?: string | null;
+    acceptedAt?: string | null;
+    completedAt?: string | null;
+    deadlineAt?: string | null;
+    deduplicated?: boolean;
+}
+
+export interface FirmwareUpgradeRequest {
+    confirmed: true;
+    idempotencyKey: string;
+    firmware: string;
+    fileUrl: string;
+    manufacturer: string;
+}
+
+export type FirmwareUpgradeQuery = MaintenanceOperationsQuery;
+
 export type DeviceStatusEventType =
     | "register_online"
     | "unregister_offline"
@@ -360,6 +430,34 @@ export const listDevices = (params: DeviceQuery) =>
 
 export const getDevice = (id: number) =>
     http.request<BaseResult<DeviceVO>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}`));
+
+export const rebootDevice = (id: number, data: { confirmed: true; idempotencyKey: string }) =>
+    http.request<BaseResult<DeviceOperationResult>>(
+        "post",
+        baseUrlApi(`gb28181/device-mgmt/device/${id}/reboot`),
+        { data }
+    );
+
+export const listMaintenanceOperations = (id: number, params: MaintenanceOperationsQuery = {}) =>
+    http.request<BaseResult<PageResult<MaintenanceOperation>>>(
+        "get",
+        baseUrlApi(`gb28181/device-mgmt/device/${id}/maintenance-operations`),
+        { params }
+    );
+
+export const upgradeDeviceFirmware = (id: number, data: FirmwareUpgradeRequest) =>
+    http.request<BaseResult<UpgradeOperation>>(
+        "post",
+        baseUrlApi(`gb28181/device-mgmt/device/${id}/firmware-upgrade`),
+        { data }
+    );
+
+export const listFirmwareUpgrades = (id: number, params: FirmwareUpgradeQuery = {}) =>
+    http.request<BaseResult<PageResult<UpgradeOperation>>>(
+        "get",
+        baseUrlApi(`gb28181/device-mgmt/device/${id}/firmware-upgrades`),
+        { params }
+    );
 
 export const listDeviceSubscriptions = (id: number) =>
     http.request<BaseResult<{ list: DeviceSubscription[] }>>("get", baseUrlApi(`gb28181/device-mgmt/device/${id}/subscriptions`));

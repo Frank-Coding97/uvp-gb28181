@@ -59,10 +59,10 @@ func (u *User) GetUserProfile(c *gin.Context, userID uint) (profile *models.User
 			menuIDs := roleMenuList.Map(func(roleMenu *models.SysRoleMenu) uint {
 				return roleMenu.MenuID
 			})
-			// 查询按钮类型的菜单（type=3）
+			// 查询已授权且带权限标识的菜单和按钮
 			buttonMenus := models.NewSysMenuList()
 			err = buttonMenus.Find(c, func(db *gorm.DB) *gorm.DB {
-				return db.Select("permission").Where("id IN ? AND type = ? AND permission !=''", menuIDs, 3)
+				return db.Select("permission").Where("id IN ? AND type IN ? AND permission !=''", menuIDs, []int{2, 3})
 			})
 			if err != nil {
 				return

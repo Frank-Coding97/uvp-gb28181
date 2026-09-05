@@ -52,8 +52,15 @@ func (s *AggregateStore) Record(event Event) bool {
 	item, ok := s.items[key]
 	if !ok {
 		if len(s.items) >= s.maxKeys {
+			var oldest string
+			var at time.Time
+			for key, value := range s.items {
+				if at.IsZero() || value.LastSeenAt.Before(at) {
+					oldest, at = key, value.LastSeenAt
+				}
+			}
+			delete(s.items, oldest)
 			s.dropped++
-			return false
 		}
 		item = EventAggregate{BucketAt: bucket, SourceIP: ip.String(), DeviceID: event.DeviceID, RiskScope: riskScopeForEvent(event), Transport: event.Transport, Method: event.Method, UserAgent: event.UserAgent, Reason: event.Reason, Action: event.Action, FirstSeenAt: now}
 	}
@@ -133,7 +140,7 @@ func (s *BanStore) Seed(items []FirewallBan) {
 	defer s.mu.Unlock()
 	for _, item := range items {
 		current, ok := s.items[item.Decision.SourceIP]
-		if !ok || current.Decision.CreatedAt.Before(item.Decision.CreatedAt) {
+		if !ok || current.Decision.CreatedAt.Before(item.Decision.CreatedAt) || (current.Decision.CreatedAt.Equal(item.Decision.CreatedAt) && (item.Status == BanActive || item.Status == BanAgentFailed)) {
 			s.items[item.Decision.SourceIP] = item
 		}
 	}
@@ -196,7 +203,7 @@ func (s *BanStore) Get(sourceIP string, now time.Time) (FirewallBan, bool) {
 	if !ok {
 		return FirewallBan{}, false
 	}
-	if item.Status == BanActive && !item.Decision.ActiveAt(now) {
+	if (item.Status == BanActive || item.Status == BanAgentFailed) && !item.Decision.ActiveAt(now) {
 		item.Status = BanExpired
 		s.items[sourceIP] = item
 	}
@@ -210,7 +217,7 @@ func (s *BanStore) Find(identifier string, now time.Time) (FirewallBan, bool) {
 		if sourceIP != identifier && item.Decision.DecisionID != identifier {
 			continue
 		}
-		if item.Status == BanActive && !item.Decision.ActiveAt(now) {
+		if (item.Status == BanActive || item.Status == BanAgentFailed) && !item.Decision.ActiveAt(now) {
 			item.Status = BanExpired
 			s.items[sourceIP] = item
 		}
@@ -241,7 +248,7 @@ func (s *BanStore) List(now time.Time) []FirewallBan {
 	items := make([]FirewallBan, 0, len(s.items))
 	for source := range s.items {
 		item := s.items[source]
-		if item.Status == BanActive && !item.Decision.ActiveAt(now) {
+		if (item.Status == BanActive || item.Status == BanAgentFailed) && !item.Decision.ActiveAt(now) {
 			item.Status = BanExpired
 			s.items[source] = item
 		}

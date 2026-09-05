@@ -6,8 +6,10 @@ const api = vi.hoisted(() => ({
     getControlCapabilities: vi.fn(),
     fetchPTZDefaultSpeedConfig: vi.fn()
 }));
+const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
 
 vi.mock("@/api/gb28181", () => api);
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 
@@ -21,12 +23,25 @@ const onlineChannel = {
 
 describe("BasicPtzPanel", () => {
     beforeEach(() => {
+        account.permissions = ["*:*:*"];
         api.getControlCapabilities.mockResolvedValue({
             code: 0,
             data: { basicPtz: { state: "supported", reason: "" } }
         });
         api.controlPtz.mockResolvedValue({ code: 0, data: { action: "accepted" } });
         api.fetchPTZDefaultSpeedConfig.mockResolvedValue({ code: 0, data: { level: 6 } });
+    });
+
+    it("does not mount or initialize for a guest without PTZ permissions", async () => {
+        account.permissions = ["gb28181:device:view", "gb28181:play:start"];
+        const wrapper = mount(BasicPtzPanel, { props: { channel: onlineChannel } });
+        await flushPromises();
+
+        expect(wrapper.find(".basic-ptz").exists()).toBe(false);
+        expect(api.getControlCapabilities).not.toHaveBeenCalled();
+        expect(api.fetchPTZDefaultSpeedConfig).not.toHaveBeenCalled();
+        expect(api.controlPtz).not.toHaveBeenCalled();
+        wrapper.unmount();
     });
 
     it("collapses the controls while keeping the panel header available", async () => {

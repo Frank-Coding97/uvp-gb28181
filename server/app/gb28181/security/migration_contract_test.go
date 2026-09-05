@@ -45,7 +45,7 @@ func TestSecurityFreshSchemaAndDefaultAllowlistStayInSync(t *testing.T) {
 		require.Contains(t, string(fresh), table)
 	}
 	require.Contains(t, strings.ToLower(string(fresh)), "`expires_at` datetime default null")
-	require.Contains(t, strings.ToLower(string(fresh)), "'100:60;200:600;500:3600'")
+	require.Contains(t, strings.ToLower(string(fresh)), "'100:0'")
 	require.Contains(t, strings.ToLower(string(fresh)), "`device_id` varchar(64)")
 	require.Contains(t, strings.ToLower(string(fresh)), "`risk_scope` varchar(16)")
 

@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	PlayOutcomeStarted = "started"
-	PlayOutcomeSuccess = "success"
-	PlayOutcomeFailure = "failure"
+	PlayOutcomeStarted    = "started"
+	PlayOutcomeSuccess    = "success"
+	PlayOutcomeFailure    = "failure"
+	playAttemptStaleAfter = 5 * time.Minute
 )
 
 type PlayAttemptStore struct {
@@ -50,13 +51,15 @@ func (store *PlayAttemptStore) Finish(ctx context.Context, correlationID, outcom
 }
 
 type PlaySuccessSummary struct {
-	Attempts uint64        `json:"attempts"`
-	Success  uint64        `json:"success"`
-	Failure  uint64        `json:"failure"`
-	Rate     *float64      `json:"rate"`
-	Status   SectionStatus `json:"status"`
-	Coverage Coverage      `json:"coverage"`
-	AsOf     time.Time     `json:"asOf"`
+	Attempts     uint64        `json:"attempts"`
+	Success      uint64        `json:"success"`
+	Failure      uint64        `json:"failure"`
+	Started      uint64        `json:"started"`
+	StaleStarted uint64        `json:"staleStarted"`
+	Rate         *float64      `json:"rate"`
+	Status       SectionStatus `json:"status"`
+	Coverage     Coverage      `json:"coverage"`
+	AsOf         time.Time     `json:"asOf"`
 }
 
 func (store *PlayAttemptStore) Last24Hours(ctx context.Context, now time.Time) (PlaySuccessSummary, error) {
@@ -75,18 +78,26 @@ func (store *PlayAttemptStore) Last24HoursScoped(ctx context.Context, now time.T
 
 func (store *PlayAttemptStore) last24Hours(ctx context.Context, now time.Time, query *gorm.DB) (PlaySuccessSummary, error) {
 	var rows []struct {
-		Outcome string
-		Count   uint64
+		Outcome    string
+		Count      uint64
+		StaleCount uint64
 	}
-	if err := query.Select("outcome, COUNT(*) AS count").Where("started_at >= ? AND started_at <= ?", now.Add(-24*time.Hour), now).Where("outcome IN ?", []string{PlayOutcomeSuccess, PlayOutcomeFailure}).Group("outcome").Scan(&rows).Error; err != nil {
+	windowStart := now.Add(-24 * time.Hour)
+	if err := query.Select("outcome, COUNT(*) AS count, COALESCE(SUM(CASE WHEN outcome = ? AND started_at <= ? THEN 1 ELSE 0 END), 0) AS stale_count", PlayOutcomeStarted, now.Add(-playAttemptStaleAfter)).
+		Where("started_at >= ? AND started_at <= ?", windowStart, now).
+		Where("outcome IN ?", []string{PlayOutcomeSuccess, PlayOutcomeFailure, PlayOutcomeStarted}).
+		Group("outcome").Scan(&rows).Error; err != nil {
 		return PlaySuccessSummary{}, err
 	}
 	result := PlaySuccessSummary{Status: StatusEmpty, Coverage: CoverageNotStarted, AsOf: now}
 	for _, row := range rows {
 		if row.Outcome == PlayOutcomeSuccess {
 			result.Success = row.Count
-		} else {
+		} else if row.Outcome == PlayOutcomeFailure {
 			result.Failure = row.Count
+		} else {
+			result.Started = row.Count
+			result.StaleStarted = row.StaleCount
 		}
 	}
 	result.Attempts = result.Success + result.Failure
@@ -94,6 +105,9 @@ func (store *PlayAttemptStore) last24Hours(ctx context.Context, now time.Time, q
 		rate := float64(result.Success) / float64(result.Attempts)
 		result.Rate = &rate
 		result.Status, result.Coverage = StatusOK, CoverageComplete
+	}
+	if result.StaleStarted > 0 {
+		result.Status, result.Coverage = StatusPartial, CoveragePartial
 	}
 	return result, nil
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import {
     AlertTriangle,
     CircleStop,
@@ -16,6 +16,7 @@ import {
 import { startPlay, type PlayResult } from "@/api/gb28181";
 import { Message } from "@arco-design/web-vue";
 import { usePlaybackConsoleStore } from "@/store/modules/playback-console";
+import { useUserStoreHook } from "@/store/modules/user";
 import PlayWindow from "../components/PlayWindow.vue";
 import BasicPtzPanel from "./BasicPtzPanel.vue";
 import PlaybackSourceTree from "./PlaybackSourceTree.vue";
@@ -46,6 +47,13 @@ interface FavoriteChannelGroup {
 const layout = ref<LayoutSize>(4);
 const focusedIndex = ref<number | null>(null);
 const playbackConsole = usePlaybackConsoleStore();
+const userStore = useUserStoreHook();
+const permissions = computed(() => userStore.account.permissions ?? []);
+const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
+const canViewDevices = computed(() => hasPermission("gb28181:device:view"));
+const canStartPlayback = computed(() => hasPermission("gb28181:play:start"));
+const canManageFavorites = computed(() => hasPermission("gb28181:channel-favorite:manage"));
+const canRenderPtz = computed(() => hasPermission("gb28181:ptz:view") || hasPermission("gb28181:ptz:control"));
 const monitorAreaRef = ref<HTMLElement | null>(null);
 const isFullscreen = ref(false);
 const pollingVisible = ref(false);
@@ -118,7 +126,7 @@ function resetSlot(slot: PlaybackSlot) {
 }
 
 async function playSlot(target: PlaybackSlot, silentRequestError = false) {
-    if (!target.channel) return false;
+    if (!canStartPlayback.value || !target.channel) return false;
     const channel = target.channel;
     const token = target.token + 1;
     target.token = token;
@@ -130,7 +138,7 @@ async function playSlot(target: PlaybackSlot, silentRequestError = false) {
         const response = silentRequestError
             ? await startPlay(channel.deviceId, channel.channelId, { silent: true })
             : await startPlay(channel.deviceId, channel.channelId);
-        if (target.token !== token || target.channel?.id !== channel.id) return false;
+        if (!canStartPlayback.value || target.token !== token || target.channel?.id !== channel.id) return false;
         if (response.code !== 0 || !response.data) throw new Error(response.message || "点播失败");
         target.result = response.data;
         target.source = resolvePlaybackSource(response.data, window.location.protocol === "https:");
@@ -146,6 +154,7 @@ async function playSlot(target: PlaybackSlot, silentRequestError = false) {
 }
 
 async function assignChannel(channel: ChannelVO) {
+    if (!canStartPlayback.value) return;
     playAllToken += 1;
     if (pollingSettings.enabled) stopPolling();
     if (channelIsUsed(channel)) {
@@ -173,7 +182,7 @@ function removeSlot(slot: PlaybackSlot) {
 }
 
 async function retrySlot(slot: PlaybackSlot) {
-    if (!slot.channel) return;
+    if (!canStartPlayback.value || !slot.channel) return;
     await playSlot(slot);
 }
 
@@ -187,7 +196,7 @@ function handlePtzActionChange(value: { channelId: number; action: string } | nu
 }
 
 function openConsole(slot: PlaybackSlot) {
-    if (!slot.channel) return;
+    if (!canStartPlayback.value || !slot.channel) return;
     focusSlot(slot);
     playbackConsole.open(slot.channel);
 }
@@ -213,7 +222,7 @@ function stopAll() {
 }
 
 async function playAll() {
-    if (playAllLoading.value) return;
+    if (!canStartPlayback.value || !canViewDevices.value || playAllLoading.value) return;
     const token = playAllToken + 1;
     playAllToken = token;
     stopPolling();
@@ -241,6 +250,7 @@ async function playAll() {
 }
 
 async function openFavorites() {
+    if (!canManageFavorites.value) return;
     const channels = slots.flatMap(slot => slot.channel ? [slot.channel] : []);
     if (!channels.length) {
         Message.info("请先播放至少一路通道，再收藏当前播放通道");
@@ -262,7 +272,7 @@ function handleFavoriteSaved(groupName: string, addedCount: number, skippedCount
 }
 
 async function playFavoriteGroup(group: FavoriteChannelGroup) {
-    if (playAllLoading.value) return;
+    if (!canManageFavorites.value || !canStartPlayback.value || playAllLoading.value) return;
     const token = playAllToken + 1;
     playAllToken = token;
     stopPolling();
@@ -311,6 +321,7 @@ function syncFullscreenState() {
 }
 
 function openPollingSettings() {
+    if (!canStartPlayback.value || !canViewDevices.value) return;
     pollingDraft.enabled = pollingSettings.enabled;
     pollingDraft.intervalSeconds = pollingSettings.intervalSeconds;
     pollingDraft.skipOffline = pollingSettings.skipOffline;
@@ -328,7 +339,12 @@ function stopPolling() {
     pollingSettings.enabled = false;
 }
 
+watch([canStartPlayback, canViewDevices], ([canPlay, canView]) => {
+    if (!canPlay || !canView) stopPolling();
+});
+
 function togglePolling() {
+    if (!canStartPlayback.value || !canViewDevices.value) return;
     if (!pollingSettings.enabled) {
         openPollingSettings();
         return;
@@ -367,6 +383,7 @@ function channelPage(response: any) {
 }
 
 async function loadPlaybackChannels(onlineOnly: boolean) {
+    if (!canViewDevices.value) return [];
     const params = { status: onlineOnly ? "online" as const : undefined, page: 1, pageSize: 200 };
     const firstPage = channelPage(await listChannels(params));
     const channels = [...(firstPage?.list || [])] as ChannelVO[];
@@ -381,7 +398,7 @@ async function loadPlaybackChannels(onlineOnly: boolean) {
 }
 
 async function runPollingCycle() {
-    if (!pollingSettings.enabled || pollingCycleRunning || !pollingChannels.value.length) return;
+    if (!canStartPlayback.value || !canViewDevices.value || !pollingSettings.enabled || pollingCycleRunning || !pollingChannels.value.length) return;
     pollingCycleRunning = true;
     try {
         const channelCount = pollingChannels.value.length;
@@ -422,6 +439,7 @@ async function runPollingCycle() {
 }
 
 async function savePollingSettings() {
+    if (!canStartPlayback.value || !canViewDevices.value) return;
     pollingError.value = "";
     const intervalSeconds = Math.min(3600, Math.max(5, Number(pollingDraft.intervalSeconds) || 30));
     pollingSettings.intervalSeconds = intervalSeconds;
@@ -491,7 +509,7 @@ onBeforeUnmount(() => {
         <div class="workspace">
             <section class="source-panel" aria-label="设备树和云台控制">
                 <PlaybackSourceTree ref="sourceTreeRef" v-model:view="sourceView" :used-channel-ids="usedChannelIds" @select="assignChannel" @select-group="playFavoriteGroup" @favorite-saved="handleFavoriteSaved" />
-                <BasicPtzPanel :channel="focusedSlot?.channel || null" @action-change="handlePtzActionChange" />
+                <BasicPtzPanel v-if="canRenderPtz" :channel="focusedSlot?.channel || null" @action-change="handlePtzActionChange" />
             </section>
 
             <main ref="monitorAreaRef" class="monitor-area" :class="{ fullscreen: isFullscreen }">
@@ -503,7 +521,7 @@ onBeforeUnmount(() => {
                     </div>
                     <span class="toolbar-divider" aria-hidden="true" />
                     <div class="playback-actions" role="group" aria-label="批量播放控制">
-                        <button type="button" data-test="my-favorites" aria-label="收藏当前播放通道" title="收藏当前播放通道" @click="openFavorites"><Star :size="17" aria-hidden="true" /></button>
+                        <button v-if="canManageFavorites" type="button" data-test="my-favorites" aria-label="收藏当前播放通道" title="收藏当前播放通道" @click="openFavorites"><Star :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="play-all" :disabled="playAllLoading || pollingSaving" :aria-label="playAllLoading ? '正在播放全部' : '播放全部'" :title="playAllLoading ? '正在加载在线通道' : '播放全部'" @click="playAll"><RefreshCw v-if="playAllLoading" :size="17" class="spin" aria-hidden="true" /><Play v-else :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="stop-all" :disabled="!hasPlayingSlots" aria-label="停止全部" title="停止全部" @click="stopAll"><CircleStop :size="17" aria-hidden="true" /></button>
                         <button type="button" data-test="fullscreen" :aria-label="isFullscreen ? '退出全屏' : '视频墙全屏'" :title="isFullscreen ? '退出全屏' : '视频墙全屏'" @click="toggleFullscreen"><Minimize2 v-if="isFullscreen" :size="17" aria-hidden="true" /><Maximize2 v-else :size="17" aria-hidden="true" /></button>

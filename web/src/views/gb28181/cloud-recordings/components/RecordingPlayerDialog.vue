@@ -27,6 +27,7 @@
             ref="videoRef"
             :src="source"
             controls
+            controlsList="nodownload"
             playsinline
             preload="metadata"
             @error="handleMediaError"

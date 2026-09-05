@@ -59,3 +59,23 @@ func TestPlayAttemptSummaryReappliesCurrentDeviceScope(t *testing.T) {
 	require.EqualValues(t, 1, result.Success)
 	require.Zero(t, result.Failure)
 }
+
+func TestPlayAttemptSummaryMarksStaleStartedAttemptAsPartial(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbPlayAttempt{}))
+	now := time.Date(2026, 9, 5, 10, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Create(&[]gbmodels.GbPlayAttempt{
+		{CorrelationID: "success", DeviceCode: "D1", ChannelCode: "C1", Outcome: PlayOutcomeSuccess, StartedAt: now.Add(-time.Minute)},
+		{CorrelationID: "current", DeviceCode: "D1", ChannelCode: "C2", Outcome: PlayOutcomeStarted, StartedAt: now.Add(-time.Minute)},
+		{CorrelationID: "stale", DeviceCode: "D1", ChannelCode: "C3", Outcome: PlayOutcomeStarted, StartedAt: now.Add(-10 * time.Minute)},
+	}).Error)
+
+	result, err := NewPlayAttemptStore(db).Last24Hours(context.Background(), now)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, result.Attempts)
+	require.EqualValues(t, 2, result.Started)
+	require.EqualValues(t, 1, result.StaleStarted)
+	require.Equal(t, StatusPartial, result.Status)
+	require.Equal(t, CoveragePartial, result.Coverage)
+}

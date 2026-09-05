@@ -10,9 +10,11 @@ const api = vi.hoisted(() => ({
     listDirectoryTree: vi.fn()
 }));
 const favoritesApi = vi.hoisted(() => ({ listChannelFavoriteGroups: vi.fn(), createChannelFavoriteGroup: vi.fn(), appendChannelFavoriteGroup: vi.fn(), removeChannelFavoriteItem: vi.fn(), deleteChannelFavoriteGroup: vi.fn() }));
+const account = vi.hoisted(() => ({ permissions: ["*:*:*"] as string[] }));
 
 vi.mock("../device-mgmt/api", () => api);
 vi.mock("@/api/gb28181", () => favoritesApi);
+vi.mock("@/store/modules/user", () => ({ useUserStoreHook: () => ({ account }) }));
 
 const device = (id: number, deviceId: string, name: string) => ({
     id, deviceId, name, alias: "", status: 1, channelCount: 1, channelOnlineCount: 1,
@@ -52,7 +54,8 @@ function mountTree() {
 
 describe("PlaybackSourceTree", () => {
     beforeEach(() => {
-        window.localStorage.clear();
+        account.permissions = ["*:*:*"];
+        window.localStorage?.clear?.();
         api.listDevices.mockReset();
         api.listChannels.mockReset();
         api.listDirectoryTree.mockReset();
@@ -109,6 +112,18 @@ describe("PlaybackSourceTree", () => {
         expect(wrapper.get('[data-node-key="root:device:1:channel:11"] .tree-node svg').classes()).toContain("lucide-camera");
         await wrapper.get('[data-node-key="root:device:1:channel:11"] .tree-node').trigger("click");
         expect(wrapper.emitted("select")?.[0]?.[0]).toMatchObject({ id: 11, name: "东门" });
+    });
+
+    it("does not load or expose persistent favorites for a guest", async () => {
+        account.permissions = ["gb28181:device:view", "gb28181:play:start"];
+        const wrapper = mountTree();
+        await flushPromises();
+
+        expect(wrapper.find("[data-test=source-view-favorites]").exists()).toBe(false);
+        expect(favoritesApi.listChannelFavoriteGroups).not.toHaveBeenCalled();
+        expect(wrapper.find(".favorite-toggle").exists()).toBe(false);
+        expect(wrapper.find(".favorite-dialog-backdrop").exists()).toBe(false);
+        wrapper.unmount();
     });
 
     it("keeps the selected source view visually and semantically distinct", async () => {

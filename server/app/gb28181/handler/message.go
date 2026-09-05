@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,8 @@ type MessageHandler struct {
 	subscriptionWaker  SubscriptionWaker
 	alarmProcessor     AlarmMessageProcessor
 	ptzProcessor       PTZMessageProcessor
+	upgradeMu          sync.RWMutex
+	upgradeProcessor   UpgradeMessageProcessor
 	recordInfoMu       sync.RWMutex
 	recordInfoSink     RecordInfoSink
 	snapshotMu         sync.RWMutex
@@ -40,6 +43,22 @@ type AlarmMessageProcessor interface {
 
 type PTZMessageProcessor interface {
 	OnPTZMessage(context.Context, string, string, string, []byte) error
+}
+
+// UpgradeMessageProcessor gets first routing priority for DeviceControl
+// responses and DeviceUpgradeResult notifications. The bool tells the
+// handler whether a DeviceControl SN belonged to an upgrade operation and
+// therefore must not be handed to PTZ.
+type UpgradeMessageProcessor interface {
+	OnUpgradeMessage(context.Context, string, string, string, []byte) (bool, error)
+}
+
+// UpgradeResultMessageProcessor is an optional stronger boundary for the
+// final DeviceUpgradeResult notification. The response status is selected by
+// the durable processor: 200 after persistence, 400 for a protocol error, or
+// 503 when the platform could not persist the result.
+type UpgradeResultMessageProcessor interface {
+	OnUpgradeResultMessage(context.Context, string, string, string, []byte) (bool, int, error)
 }
 
 // RecordInfoSink receives the original payload after the SIP transaction has
@@ -86,6 +105,26 @@ func (h *MessageHandler) SetAlarmProcessor(processor AlarmMessageProcessor) {
 
 func (h *MessageHandler) SetPTZProcessor(processor PTZMessageProcessor) {
 	h.ptzProcessor = processor
+}
+
+// SetUpgradeProcessor installs the upgrade response router. It is safe to
+// swap during SIP runtime reloads and is intentionally named after the
+// processor role used by the integration boundary.
+func (h *MessageHandler) SetUpgradeProcessor(processor UpgradeMessageProcessor) {
+	h.upgradeMu.Lock()
+	h.upgradeProcessor = processor
+	h.upgradeMu.Unlock()
+}
+
+// SetUpgradeMessageProcessor is the descriptive alias used by SIP bootstrap.
+func (h *MessageHandler) SetUpgradeMessageProcessor(processor UpgradeMessageProcessor) {
+	h.SetUpgradeProcessor(processor)
+}
+
+func (h *MessageHandler) getUpgradeProcessor() UpgradeMessageProcessor {
+	h.upgradeMu.RLock()
+	defer h.upgradeMu.RUnlock()
+	return h.upgradeProcessor
 }
 
 func (h *MessageHandler) SetBroadcastProcessor(processor BroadcastMessageProcessor) {
@@ -167,14 +206,25 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	// 解析 MANSCDP body(兼容 GB2312/GB18030 编码)
 	head, err := manscdp.ParseHead(req.Body())
 	if err != nil {
-		// 非法/畸形 XML 不报错,回 200 避免设备重发风暴(不更新状态)
+		// A malformed final upgrade notification must be retried/fixed by the
+		// device and therefore gets 400. Other legacy malformed MESSAGE bodies
+		// retain the historical 200 response to avoid a retry storm.
+		normalizedBody := strings.ToLower(strings.Join(strings.Fields(string(req.Body())), ""))
+		status := 200
+		reason := "OK"
+		if strings.Contains(normalizedBody, "<cmdtype>deviceupgraderesult</cmdtype>") {
+			status = http.StatusBadRequest
+			reason = http.StatusText(status)
+		}
 		app.ZapLog.Warn("GB28181 MESSAGE 解析失败,忽略", zap.Error(err))
-		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+		_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
 		return
 	}
 
 	kind := txKindFromCmd(head.CmdType)
 	callID, cseq := sipPairKey(req)
+	ctx := context.Background()
+	responseSent := false
 	// 已知 Kind 的入向事件:Begin + End 一起打(瞬时事务,server 端立刻应答)
 	// Catalog Response 也走入向计数,即便 UAC 端没埋点也至少有一条
 	if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
@@ -187,9 +237,66 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			StartedAt: time.Now(),
 		})
 	}
+	if head.CmdType == manscdp.CmdDeviceControl || head.CmdType == manscdp.CmdDeviceUpgradeResult {
+		processor := h.getUpgradeProcessor()
+		if head.CmdType == manscdp.CmdDeviceUpgradeResult && processor == nil {
+			// During a SIP runtime detach the final result must be retried by
+			// the device; a generic 200 would acknowledge and lose it.
+			_ = tx.Respond(sip.NewResponseFromRequest(req, http.StatusServiceUnavailable, http.StatusText(http.StatusServiceUnavailable), nil))
+			responseSent = true
+			if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+				h.recorder.End(callID, cseq, http.StatusServiceUnavailable, false)
+			}
+			return
+		}
+		if processor != nil {
+			if head.CmdType == manscdp.CmdDeviceUpgradeResult {
+				if resultProcessor, ok := processor.(UpgradeResultMessageProcessor); ok {
+					// A final result is acknowledged only after its durable
+					// state transition has succeeded. The processor maps syntax
+					// errors to 400 and persistence failures to 503.
+					consumed, status, processErr := resultProcessor.OnUpgradeResultMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body())
+					if status < 100 {
+						status = http.StatusOK
+					}
+					reason := http.StatusText(status)
+					if reason == "" {
+						reason = "OK"
+					}
+					_ = tx.Respond(sip.NewResponseFromRequest(req, status, reason, nil))
+					responseSent = true
+					if processErr != nil {
+						app.ZapLog.Warn("GB28181 设备升级最终结果处理失败", zap.String("deviceId", head.DeviceID), zap.Int("status", status), zap.Error(processErr))
+					}
+					if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+						h.recorder.End(callID, cseq, status, processErr == nil)
+					}
+					// DeviceUpgradeResult has no PTZ fallback. An unmatched
+					// result is still fully handled by the generic SIP 200.
+					_ = consumed
+					return
+				}
+			}
+			// Ordinary DeviceControl keeps the fast transport ACK before
+			// durable work; this also remains the compatibility path for a
+			// processor that has not implemented the stronger final-result
+			// boundary.
+			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+			responseSent = true
+			consumed, processErr := processor.OnUpgradeMessage(ctx, ptzDeviceCode(req, head.DeviceID), callID, cseq, req.Body())
+			if consumed || processErr != nil {
+				if processErr != nil {
+					app.ZapLog.Warn("GB28181 设备升级响应处理失败", zap.String("deviceId", head.DeviceID), zap.Error(processErr))
+				}
+				if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
+					h.recorder.End(callID, cseq, 200, processErr == nil)
+				}
+				return
+			}
+		}
+	}
 
 	if head.DeviceID != "" {
-		ctx := context.Background()
 		if head.CmdType == manscdp.CmdBroadcast {
 			_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
 			if processor := h.getBroadcastProcessor(); processor != nil {
@@ -281,7 +388,9 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		}
 	}
 	// 其它 CmdType 本期不处理,统一回 200
-	_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	if !responseSent {
+		_ = tx.Respond(sip.NewResponseFromRequest(req, 200, "OK", nil))
+	}
 
 	if h.recorder != nil && kind != metrics.TxUnknown && callID != "" {
 		h.recorder.End(callID, cseq, 200, true)
