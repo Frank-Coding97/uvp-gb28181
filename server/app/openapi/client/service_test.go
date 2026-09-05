@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	appmodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
@@ -63,6 +64,7 @@ func newClientTestService(t *testing.T, store RevocationIntentStore) (*Service, 
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.Audit{}))
+	require.NoError(t, db.AutoMigrate(&appmodels.SysOperationLog{}))
 
 	masterKey := bytes.Repeat([]byte{0xA5}, 32)
 	secrets, err := NewSecretManager(masterKey, "test-key-1")
@@ -74,6 +76,22 @@ func newClientTestService(t *testing.T, store RevocationIntentStore) (*Service, 
 	)
 	require.NoError(t, err)
 	return service, db
+}
+
+func maskRecordNotFound(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("openapi_mask_record_not_found", func(query *gorm.DB) {
+		query.Statement.RaiseErrorOnNotFound = false
+	}))
+}
+
+func failManagementAuditCreate(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("openapi_fail_management_audit", func(query *gorm.DB) {
+		if _, ok := query.Statement.Dest.(*appmodels.SysOperationLog); ok {
+			query.AddError(errors.New("management audit unavailable"))
+		}
+	}))
 }
 
 func createTestClient(t *testing.T, service *Service) (ClientView, string) {
@@ -108,6 +126,16 @@ func TestOpenAPIClientCreateGeneratesIndependentCredentials(t *testing.T) {
 	var auditCount int64
 	require.NoError(t, db.Model(&models.Audit{}).Count(&auditCount).Error)
 	require.Equal(t, int64(2), auditCount, "creation only writes OpenAPI audit rows")
+	var managementLogs []appmodels.SysOperationLog
+	require.NoError(t, db.Where("user_id = ?", 7).Find(&managementLogs).Error)
+	require.Len(t, managementLogs, 2)
+	for _, log := range managementLogs {
+		require.Equal(t, appmodels.OperationCreate, log.Operation)
+		require.Contains(t, log.RequestData, "clientId")
+		require.Contains(t, log.RequestData, "client.create")
+		require.NotContains(t, log.RequestData, firstSecret)
+		require.NotContains(t, log.RequestData, secondSecret)
+	}
 }
 
 func TestOpenAPIClientSecretIsShownOnlyOnSuccessfulCreateOrRotate(t *testing.T) {
@@ -200,6 +228,8 @@ func TestOpenAPIClientStatusEpochsAreTerminalAndRequireRevocationStore(t *testin
 	denied.managementBoundary = nil
 	_, _, err := denied.Create(context.Background(), CreateRequest{Name: "denied", OwnerDeptID: 10, CreatedBy: 7})
 	require.ErrorIs(t, err, ErrAuthorizationUnavailable)
+	_, _, err = service.Create(context.Background(), CreateRequest{Name: "no-actor", OwnerDeptID: 10, CreatedBy: 0})
+	require.Error(t, err)
 	view, secret := createTestClient(t, service)
 
 	disabled, err := service.SetStatus(context.Background(), view.ID, models.StatusDisabled, view.RowVersion, 7)
@@ -296,6 +326,18 @@ func TestOpenAPIClientMutationsUseRowVersionCASAndAuditTransaction(t *testing.T)
 	require.Equal(t, view.RowVersion, got.RowVersion, "intent failure must roll back version")
 	require.NoError(t, db.Model(&models.Audit{}).Where("client_id = ? AND reason_class = ?", view.ID, "client.disable").Count(&auditCount).Error)
 	require.Zero(t, auditCount)
+
+	service, db = newClientTestService(t, &recordingRevocationStore{})
+	view, _ = createTestClient(t, service)
+	failManagementAuditCreate(t, db)
+	_, err = service.SetStatus(context.Background(), view.ID, models.StatusDisabled, view.RowVersion, 7)
+	require.Error(t, err)
+	got, err = service.Get(context.Background(), view.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusActive, got.Status)
+	require.Equal(t, view.RowVersion, got.RowVersion)
+	require.NoError(t, db.Model(&appmodels.SysOperationLog{}).Where("user_id = ? AND path LIKE ?", 7, "%"+fmt.Sprint(view.ID)+"%").Count(&auditCount).Error)
+	require.Equal(t, int64(1), auditCount, "only the successful create audit remains")
 }
 
 func TestOpenAPIClientOwnerDepartmentIsImmutableAndResponsibleUserIsNonAuthoritative(t *testing.T) {
@@ -312,4 +354,26 @@ func TestOpenAPIClientOwnerDepartmentIsImmutableAndResponsibleUserIsNonAuthorita
 	material := mustLoadMaterial(t, service, view.AK)
 	require.Equal(t, int64(view.ID), material.ClientID)
 	require.Equal(t, int64(1), material.AuthEpoch)
+}
+
+func TestOpenAPIClientHandlesMaskedRecordNotFoundAndMissingScope(t *testing.T) {
+	service, db := newClientTestService(t, &recordingRevocationStore{})
+	view, _ := createTestClient(t, service)
+	maskRecordNotFound(t, db)
+
+	_, err := service.Get(context.Background(), view.ID+100)
+	require.ErrorIs(t, err, ErrNotFound)
+	_, err = service.GetScope(context.Background(), view.ID, "device:list")
+	require.ErrorIs(t, err, ErrNotFound)
+	_, err = service.SetStatus(context.Background(), view.ID+100, models.StatusDisabled, 1, 7)
+	require.ErrorIs(t, err, ErrNotFound)
+	_, _, err = service.RotateSecret(context.Background(), view.ID+100, 1, 7)
+	require.ErrorIs(t, err, ErrNotFound)
+
+	updated, err := service.SetScope(context.Background(), view.ID, "device:list", true, view.RowVersion, 7)
+	require.NoError(t, err, "first scope grant must create a row when missing is masked")
+	require.Equal(t, view.RowVersion+1, updated.RowVersion)
+	scope, err := service.GetScope(context.Background(), view.ID, "device:list")
+	require.NoError(t, err)
+	require.True(t, scope.Enabled)
 }

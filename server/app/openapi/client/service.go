@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	appmodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
@@ -156,6 +158,9 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (ClientView
 	if strings.TrimSpace(request.Name) == "" || request.OwnerDeptID == 0 {
 		return ClientView{}, "", ErrInvalidArgument
 	}
+	if request.CreatedBy == 0 {
+		return ClientView{}, "", ErrAuthorizationUnavailable
+	}
 	if s.managementBoundary == nil {
 		return ClientView{}, "", ErrAuthorizationUnavailable
 	}
@@ -233,11 +238,8 @@ func (s *Service) Get(ctx context.Context, id int64) (ClientView, error) {
 	if id <= 0 {
 		return ClientView{}, ErrInvalidArgument
 	}
-	var row models.Client
-	if err := s.db.WithContext(normalizeContext(ctx)).First(&row, id).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return ClientView{}, ErrNotFound
-		}
+	row, err := loadClient(s.db, normalizeContext(ctx), id)
+	if err != nil {
 		return ClientView{}, err
 	}
 	return toClientView(row), nil
@@ -259,6 +261,9 @@ func (s *Service) ListScopes(ctx context.Context, clientID int64) ([]ScopeView, 
 	if clientID <= 0 {
 		return nil, ErrInvalidArgument
 	}
+	if _, err := loadClient(s.db, normalizeContext(ctx), clientID); err != nil {
+		return nil, err
+	}
 	var rows []models.ClientScope
 	if err := s.db.WithContext(normalizeContext(ctx)).Where("client_id = ?", clientID).Order("scope ASC").Find(&rows).Error; err != nil {
 		return nil, err
@@ -275,11 +280,15 @@ func (s *Service) GetScope(ctx context.Context, clientID int64, scope string) (S
 		return ScopeView{}, ErrInvalidArgument
 	}
 	var row models.ClientScope
-	if err := s.db.WithContext(normalizeContext(ctx)).Where("client_id = ? AND scope = ?", clientID, scope).First(&row).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	result := s.db.WithContext(normalizeContext(ctx)).Where("client_id = ? AND scope = ?", clientID, scope).First(&row)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return ScopeView{}, ErrNotFound
 		}
-		return ScopeView{}, err
+		return ScopeView{}, result.Error
+	}
+	if result.RowsAffected == 0 || row.ClientID == 0 {
+		return ScopeView{}, ErrNotFound
 	}
 	return toScopeView(row), nil
 }
@@ -288,7 +297,11 @@ func (s *Service) GetScope(ctx context.Context, clientID int64, scope string) (S
 // layer. It only returns a secret after the current client is active.
 func (s *Service) LoadVerificationMaterial(ctx context.Context, accessKey string) (VerificationMaterial, error) {
 	var row models.Client
-	if accessKey == "" || s.db.WithContext(normalizeContext(ctx)).Where("ak = ?", accessKey).First(&row).Error != nil {
+	if accessKey == "" {
+		return VerificationMaterial{}, ErrAuthenticationFailed
+	}
+	result := s.db.WithContext(normalizeContext(ctx)).Where("ak = ?", accessKey).First(&row)
+	if result.Error != nil || result.RowsAffected == 0 || row.ID == 0 {
 		return VerificationMaterial{}, ErrAuthenticationFailed
 	}
 	if row.Status != models.StatusActive {
@@ -316,6 +329,9 @@ func (s *Service) ValidateSecret(ctx context.Context, accessKey, presentedSecret
 }
 
 func (s *Service) RotateSecret(ctx context.Context, id int64, expectedRowVersion int64, actorID uint) (ClientView, string, error) {
+	if actorID == 0 {
+		return ClientView{}, "", ErrAuthorizationUnavailable
+	}
 	if id <= 0 || expectedRowVersion <= 0 {
 		return ClientView{}, "", ErrInvalidArgument
 	}
@@ -326,9 +342,9 @@ func (s *Service) RotateSecret(ctx context.Context, id int64, expectedRowVersion
 	now := s.currentTime()
 	var view ClientView
 	err = s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
-		var row models.Client
-		if err := tx.First(&row, id).Error; err != nil {
-			return mapClientLookupError(err)
+		row, err := loadClient(tx, normalizeContext(ctx), id)
+		if err != nil {
+			return err
 		}
 		if row.Status == models.StatusRevoked {
 			return ErrRevoked
@@ -380,15 +396,18 @@ func (s *Service) RotateSecret(ctx context.Context, id int64, expectedRowVersion
 }
 
 func (s *Service) SetStatus(ctx context.Context, id int64, status string, expectedRowVersion int64, actorID uint) (ClientView, error) {
+	if actorID == 0 {
+		return ClientView{}, ErrAuthorizationUnavailable
+	}
 	if id <= 0 || expectedRowVersion <= 0 || !validStatus(status) {
 		return ClientView{}, ErrInvalidArgument
 	}
 	now := s.currentTime()
 	var view ClientView
 	err := s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
-		var row models.Client
-		if err := tx.First(&row, id).Error; err != nil {
-			return mapClientLookupError(err)
+		row, err := loadClient(tx, normalizeContext(ctx), id)
+		if err != nil {
+			return err
 		}
 		if row.Status == models.StatusRevoked {
 			return ErrRevoked
@@ -451,6 +470,9 @@ func (s *Service) SetStatus(ctx context.Context, id int64, status string, expect
 }
 
 func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled bool, expectedRowVersion int64, actorID uint) (ClientView, error) {
+	if actorID == 0 {
+		return ClientView{}, ErrAuthorizationUnavailable
+	}
 	if id <= 0 || expectedRowVersion <= 0 || !isSupportedScope(scope) {
 		if !isSupportedScope(scope) {
 			return ClientView{}, ErrUnknownScope
@@ -460,9 +482,9 @@ func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled 
 	now := s.currentTime()
 	var view ClientView
 	err := s.db.WithContext(normalizeContext(ctx)).Transaction(func(tx *gorm.DB) error {
-		var row models.Client
-		if err := tx.First(&row, id).Error; err != nil {
-			return mapClientLookupError(err)
+		row, err := loadClient(tx, normalizeContext(ctx), id)
+		if err != nil {
+			return err
 		}
 		if row.Status == models.StatusRevoked {
 			return ErrRevoked
@@ -477,9 +499,13 @@ func (s *Service) SetScope(ctx context.Context, id int64, scope string, enabled 
 			return err
 		}
 		var scopeRow models.ClientScope
-		scopeErr := tx.Where("client_id = ? AND scope = ?", id, scope).First(&scopeRow).Error
+		scopeResult := tx.Where("client_id = ? AND scope = ?", id, scope).First(&scopeRow)
+		scopeErr := scopeResult.Error
 		if scopeErr != nil && !errors.Is(scopeErr, gorm.ErrRecordNotFound) {
 			return scopeErr
+		}
+		if scopeErr == nil && (scopeResult.RowsAffected == 0 || scopeRow.ClientID == 0) {
+			scopeErr = gorm.ErrRecordNotFound
 		}
 		if scopeErr == nil && scopeRow.Enabled == enabled {
 			view = toClientView(row)
@@ -576,12 +602,12 @@ func (s *Service) authorizeClient(ctx context.Context, actorID uint, action stri
 }
 
 func (s *Service) recordAudit(tx *gorm.DB, row *models.Client, reason string, actorID uint, now time.Time) error {
-	if tx == nil || row == nil {
+	if tx == nil || row == nil || actorID == 0 {
 		return ErrDependencyUnavailable
 	}
 	fingerprint := sha256.Sum256([]byte(row.AK))
 	clientID := row.ID
-	return tx.Create(&models.Audit{
+	if err := tx.Create(&models.Audit{
 		RequestID:     uuid.NewString(),
 		ClientID:      &clientID,
 		AKFingerprint: hex.EncodeToString(fingerprint[:]),
@@ -592,6 +618,30 @@ func (s *Service) recordAudit(tx *gorm.DB, row *models.Client, reason string, ac
 		Source:        "openapi-client-service",
 		CreatedAt:     now,
 		CompletedAt:   &now,
+	}).Error; err != nil {
+		return err
+	}
+	requestData, err := json.Marshal(struct {
+		ClientID int64  `json:"clientId"`
+		Action   string `json:"action"`
+	}{ClientID: row.ID, Action: reason})
+	if err != nil {
+		return err
+	}
+	operation := appmodels.OperationUpdate
+	if reason == "client.create" {
+		operation = appmodels.OperationCreate
+	}
+	path := "/api/gb28181/openapi-clients/" + strconv.FormatInt(row.ID, 10)
+	return tx.Create(&appmodels.SysOperationLog{
+		BaseModel:   appmodels.BaseModel{CreatedAt: now, UpdatedAt: now},
+		UserID:      actorID,
+		Module:      "openapi-client",
+		Operation:   operation,
+		Method:      "SERVICE",
+		Path:        path,
+		RequestData: string(requestData),
+		StatusCode:  200,
 	}).Error
 }
 
@@ -606,11 +656,19 @@ func normalizeContext(ctx context.Context) context.Context {
 	return ctx
 }
 
-func mapClientLookupError(err error) error {
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return ErrNotFound
+func loadClient(db *gorm.DB, ctx context.Context, id int64) (models.Client, error) {
+	var row models.Client
+	result := db.WithContext(ctx).First(&row, id)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return models.Client{}, ErrNotFound
+		}
+		return models.Client{}, result.Error
 	}
-	return err
+	if result.RowsAffected == 0 || row.ID == 0 {
+		return models.Client{}, ErrNotFound
+	}
+	return row, nil
 }
 
 func validStatus(status string) bool {
