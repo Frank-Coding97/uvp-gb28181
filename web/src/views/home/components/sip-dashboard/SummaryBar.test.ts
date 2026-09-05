@@ -13,7 +13,7 @@ describe("SIP summary bar", () => {
     });
 
     expect(wrapper.find(".summary-bar__num").text()).toBe("98.5");
-    expect(wrapper.findAll(".summary-bar__caption").map(item => item.text())).toEqual(["今日信令", "异常事务"]);
+    expect(wrapper.findAll(".summary-bar__caption").map(item => item.text())).toEqual(["今日事务", "异常事务"]);
     expect(wrapper.text()).not.toContain("待处理");
   });
 

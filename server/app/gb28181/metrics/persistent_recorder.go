@@ -26,6 +26,12 @@ type metricDelta struct {
 	Failure      uint64
 }
 
+type metricFlushBatch struct {
+	ID             string
+	Deltas         map[metricBucketKey]metricDelta
+	FailureStarted time.Time
+}
+
 // PersistentRecorder keeps the low-latency in-memory recorder and batches the
 // durable minute ledger behind it. SIP request paths never wait for a DB write.
 type PersistentRecorder struct {
@@ -33,10 +39,11 @@ type PersistentRecorder struct {
 	inner Recorder
 	clock func() time.Time
 
-	flushMu sync.Mutex
-	mu      sync.Mutex
-	pairs   map[string]Transaction
-	pending map[metricBucketKey]metricDelta
+	flushMu  sync.Mutex
+	mu       sync.Mutex
+	pairs    map[string]Transaction
+	pending  map[metricBucketKey]metricDelta
+	inflight *metricFlushBatch
 
 	lastHeartbeatMinute time.Time
 	failureStarted      time.Time
@@ -169,27 +176,72 @@ func (recorder *PersistentRecorder) Flush(ctx context.Context) error {
 	now := recorder.clock()
 	heartbeatMinute := minuteStart(now)
 	recorder.mu.Lock()
-	needsHeartbeat := recorder.lastHeartbeatMinute.IsZero() || heartbeatMinute.After(recorder.lastHeartbeatMinute)
-	if len(recorder.pending) == 0 && !needsHeartbeat && recorder.failureStarted.IsZero() {
-		recorder.mu.Unlock()
-		return nil
+	batch := recorder.inflight
+	if batch == nil {
+		needsHeartbeat := recorder.lastHeartbeatMinute.IsZero() || heartbeatMinute.After(recorder.lastHeartbeatMinute)
+		if len(recorder.pending) == 0 && !needsHeartbeat && recorder.failureStarted.IsZero() {
+			recorder.mu.Unlock()
+			return nil
+		}
+		batch = &metricFlushBatch{
+			ID:             fmt.Sprintf("%d-%d", now.UnixNano(), recorder.seq.Add(1)),
+			Deltas:         recorder.pending,
+			FailureStarted: recorder.failureStarted,
+		}
+		recorder.pending = map[metricBucketKey]metricDelta{}
+		recorder.inflight = batch
 	}
-	batch := recorder.pending
-	recorder.pending = map[metricBucketKey]metricDelta{}
-	failureStarted := recorder.failureStarted
 	recorder.mu.Unlock()
 
-	flushID := fmt.Sprintf("%d-%d", now.UnixNano(), recorder.seq.Add(1))
+	committedAt, err := recorder.persistBatch(ctx, batch, now)
+	if err != nil {
+		recorder.mu.Lock()
+		if recorder.failureStarted.IsZero() {
+			recorder.failureStarted = now
+		}
+		if batch.FailureStarted.IsZero() {
+			batch.FailureStarted = recorder.failureStarted
+		}
+		recorder.mu.Unlock()
+		return err
+	}
+	recorder.mu.Lock()
+	if recorder.inflight == batch {
+		recorder.inflight = nil
+	}
+	recorder.lastHeartbeatMinute = minuteStart(committedAt)
+	recorder.failureStarted = time.Time{}
+	recorder.mu.Unlock()
+	return nil
+}
+
+// persistBatch applies a stable flush id and its metric deltas atomically. A
+// retry after an ambiguous commit observes the existing id and does not apply
+// the same counters twice.
+func (recorder *PersistentRecorder) persistBatch(ctx context.Context, batch *metricFlushBatch, now time.Time) (time.Time, error) {
+	if recorder == nil || recorder.db == nil || batch == nil {
+		return time.Time{}, errors.New("SIP metric flush batch is unavailable")
+	}
+	committedAt := now
 	err := recorder.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&gbmodels.GbSipMetricFlush{FlushID: flushID, CreatedAt: now}).Error; err != nil {
+		var existing gbmodels.GbSipMetricFlush
+		result := tx.Select("created_at").Where("flush_id = ?", batch.ID).Limit(1).Find(&existing)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected > 0 {
+			committedAt = existing.CreatedAt
+			return nil
+		}
+		if err := tx.Create(&gbmodels.GbSipMetricFlush{FlushID: batch.ID, CreatedAt: now}).Error; err != nil {
 			return err
 		}
-		if !failureStarted.IsZero() && now.After(failureStarted) {
-			if err := tx.Create(&gbmodels.GbSipMetricGap{StartedAt: failureStarted, EndedAt: now, Reason: "persist_failure"}).Error; err != nil {
+		if !batch.FailureStarted.IsZero() && now.After(batch.FailureStarted) {
+			if err := tx.Create(&gbmodels.GbSipMetricGap{StartedAt: batch.FailureStarted, EndedAt: now, Reason: "persist_failure"}).Error; err != nil {
 				return err
 			}
 		}
-		for key, delta := range batch {
+		for key, delta := range batch.Deltas {
 			var row gbmodels.GbSipMetricMinute
 			result := tx.Where("bucket_start = ? AND method = ? AND direction = ?", key.BucketStart, key.Method, key.Direction).Take(&row)
 			switch {
@@ -215,27 +267,7 @@ func (recorder *PersistentRecorder) Flush(ctx context.Context) error {
 		}
 		return nil
 	})
-	if err != nil {
-		recorder.mu.Lock()
-		if recorder.failureStarted.IsZero() {
-			recorder.failureStarted = now
-		}
-		for key, delta := range batch {
-			current := recorder.pending[key]
-			current.Requests += delta.Requests
-			current.Transactions += delta.Transactions
-			current.Success += delta.Success
-			current.Failure += delta.Failure
-			recorder.pending[key] = current
-		}
-		recorder.mu.Unlock()
-		return err
-	}
-	recorder.mu.Lock()
-	recorder.lastHeartbeatMinute = heartbeatMinute
-	recorder.failureStarted = time.Time{}
-	recorder.mu.Unlock()
-	return nil
+	return committedAt, err
 }
 
 func minuteStart(value time.Time) time.Time { return value.Truncate(time.Minute) }

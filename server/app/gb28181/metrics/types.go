@@ -135,8 +135,9 @@ type TransactionStat struct {
 // PulseSample 脉搏图单个采样点
 type PulseSample struct {
 	T         int64 `json:"t"`         // unix 秒
-	MsgPerSec int   `json:"msgPerSec"` // 该窗口内平均 msg/s
+	MsgPerSec int   `json:"msgPerSec"` // 兼容字段名；实际值为该采样桶内完成的事务数
 	FailPct   int   `json:"failPct"`   // 该窗口内失败率 ‰(0-1000)便于前端整数格式化
+	Known     bool  `json:"known"`     // false 表示该时间桶缺少统计覆盖，不能解释为 0
 }
 
 // AbnormalWindow 异常时间窗(失败率 > 5% 的连续段)
@@ -147,19 +148,20 @@ type AbnormalWindow struct {
 
 // PulseData 脉搏图完整数据
 type PulseData struct {
-	WindowMinutes    int              `json:"windowMinutes"`
-	Samples          []PulseSample    `json:"samples"`
-	AbnormalWindows  []AbnormalWindow `json:"abnormalWindows"`
+	WindowMinutes   int              `json:"windowMinutes"`
+	Samples         []PulseSample    `json:"samples"`
+	AbnormalWindows []AbnormalWindow `json:"abnormalWindows"`
 }
 
 // DashboardSnapshot 卡片 API 完整响应(plan §4.1)
 type DashboardSnapshot struct {
-	Health        float64           `json:"health"`        // 0-100,sentinel -1 表示空数据态(前端显示 "--")
+	Health        float64           `json:"health"` // 0-100,sentinel -1 表示空数据态(前端显示 "--")
 	TodayTotal    int64             `json:"todayTotal"`
 	TodayAbnormal int64             `json:"todayAbnormal"`
 	Pending       int64             `json:"pending"`
 	Transactions  []TransactionStat `json:"transactions"`
 	Pulse         PulseData         `json:"pulse"`
+	Partial       bool              `json:"partial"`
 	AsOf          int64             `json:"asOf"`
 }
 

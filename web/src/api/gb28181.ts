@@ -1281,6 +1281,7 @@ export interface PulseSample {
   t: number; // unix 秒
   msgPerSec: number;
   failPct: number; // 千分位 (0-1000)
+  known?: boolean; // false 表示该时间桶统计覆盖未知，不能当作 0
 }
 
 export interface AbnormalWindow {
@@ -1301,6 +1302,7 @@ export interface DashboardSnapshot {
   pending: number;
   transactions: TransactionStat[];
   pulse: PulseData;
+  partial?: boolean;
   asOf: number;
 }
 

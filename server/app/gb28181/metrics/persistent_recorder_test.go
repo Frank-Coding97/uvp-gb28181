@@ -38,6 +38,33 @@ func TestPersistentRecorderBatchesRequestsAndTransactionsByMinute(t *testing.T) 
 	require.EqualValues(t, 1, flushes)
 }
 
+func TestPersistentRecorderFlushBatchIsIdempotent(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipMetricMinute{}, &gbmodels.GbSipMetricFlush{}, &gbmodels.GbSipMetricGap{}))
+	now := time.Date(2026, 9, 5, 13, 5, 23, 0, time.UTC)
+	recorder := NewPersistentRecorder(db, nil)
+	batch := &metricFlushBatch{
+		ID: "stable-flush-id",
+		Deltas: map[metricBucketKey]metricDelta{
+			{BucketStart: minuteStart(now), Method: "REGISTER", Direction: "in"}: {Requests: 1, Transactions: 1, Success: 1},
+		},
+	}
+
+	_, err = recorder.persistBatch(context.Background(), batch, now)
+	require.NoError(t, err)
+	_, err = recorder.persistBatch(context.Background(), batch, now.Add(time.Second))
+	require.NoError(t, err)
+
+	var row gbmodels.GbSipMetricMinute
+	require.NoError(t, db.First(&row).Error)
+	require.EqualValues(t, 1, row.RequestCount)
+	require.EqualValues(t, 1, row.TransactionCount)
+	var flushes int64
+	require.NoError(t, db.Model(&gbmodels.GbSipMetricFlush{}).Count(&flushes).Error)
+	require.EqualValues(t, 1, flushes)
+}
+
 func TestPersistentRecorderRetainsBatchWhenFlushFails(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
@@ -49,6 +76,30 @@ func TestPersistentRecorderRetainsBatchWhenFlushFails(t *testing.T) {
 	var row gbmodels.GbSipMetricMinute
 	require.NoError(t, db.First(&row).Error)
 	require.EqualValues(t, 1, row.RequestCount)
+}
+
+func TestPersistentRecorderKeepsNewEventsSeparateFromRetryBatch(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	now := time.Date(2026, 9, 5, 13, 5, 23, 0, time.UTC)
+	recorder := NewPersistentRecorder(db, nil)
+	recorder.SetClock(func() time.Time { return now })
+	recorder.Begin(Transaction{Kind: TxRegister, Direction: DirIn, CallID: "first", CSeq: "1", StartedAt: now})
+	recorder.End("first", "1", 200, true)
+	require.Error(t, recorder.Flush(context.Background()))
+
+	require.NoError(t, db.AutoMigrate(&gbmodels.GbSipMetricMinute{}, &gbmodels.GbSipMetricFlush{}, &gbmodels.GbSipMetricGap{}))
+	recorder.Begin(Transaction{Kind: TxRegister, Direction: DirIn, CallID: "second", CSeq: "1", StartedAt: now})
+	recorder.End("second", "1", 200, true)
+	require.NoError(t, recorder.Flush(context.Background()))
+	require.NoError(t, recorder.Flush(context.Background()))
+
+	var row gbmodels.GbSipMetricMinute
+	require.NoError(t, db.First(&row).Error)
+	require.EqualValues(t, 2, row.TransactionCount)
+	var flushes int64
+	require.NoError(t, db.Model(&gbmodels.GbSipMetricFlush{}).Count(&flushes).Error)
+	require.EqualValues(t, 2, flushes)
 }
 
 func TestPersistentRecorderCreatesAndUpdatesWhenRecordNotFoundIsMasked(t *testing.T) {

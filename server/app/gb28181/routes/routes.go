@@ -114,8 +114,8 @@ var zlmSchedulerController *gbcontrollers.ZLMSchedulerController
 var zlmManagementController atomic.Pointer[gbcontrollers.ZLMManagementController]
 
 // SetMetricsProvider 由 bootstrap 注入聚合器获取函数,绕开循环依赖
-func SetMetricsProvider(p gbcontrollers.AggregatorProvider) {
-	dashboardController = gbcontrollers.NewDashboardController(p)
+func SetMetricsProvider(p gbcontrollers.AggregatorProvider, snapshots ...gbcontrollers.DashboardSnapshotProvider) {
+	dashboardController = gbcontrollers.NewDashboardController(p, snapshots...)
 }
 
 func SetSetupController(controller *gbcontrollers.SetupController) { setupController = controller }

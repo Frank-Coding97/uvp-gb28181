@@ -63,8 +63,8 @@ const connectionLabel = computed(() => {
   if (loading.value) return "读取中";
   if (loadState.value === "forbidden") return "无权限";
   if (loadState.value === "disabled") return "未启用";
-  if (connected.value) return "实时连接";
-  if (snapshot.value) return "连接中断";
+  if (connected.value) return snapshot.value?.partial ? "实时连接 · 统计部分覆盖" : "实时连接";
+  if (snapshot.value) return snapshot.value.partial ? "连接中断 · 统计部分覆盖" : "连接中断";
   return "加载失败";
 });
 

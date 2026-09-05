@@ -363,16 +363,22 @@ func startControlPlane(cfg gbconfig.Config) {
 
 	metricsAgg = metrics.NewAggregator()
 	metricsRecorder = metricsAgg
+	var persistentDashboard *metrics.PersistentDashboardSnapshot
 	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbSipMetricMinute{}) && db.Migrator().HasTable(&gbmodels.GbSipMetricFlush{}) && db.Migrator().HasTable(&gbmodels.GbSipMetricGap{}) {
 		persistent := metrics.NewPersistentRecorder(db, metricsAgg)
 		persistCtx, cancel := context.WithCancel(context.Background())
 		metricsPersistCancel = cancel
 		metricsRecorder = persistent
 		go persistent.Run(persistCtx, time.Second)
+		persistentDashboard = metrics.NewPersistentDashboardSnapshot(db, metricsAgg, time.Local)
 	}
 	metricsCleanupStop = make(chan struct{})
 	go runMetricsCleanup(metricsAgg, metricsCleanupStop)
-	gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
+	if persistentDashboard != nil {
+		gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg }, persistentDashboard)
+	} else {
+		gbroutes.SetMetricsProvider(func() *metrics.Aggregator { return metricsAgg })
+	}
 	if db := app.DB(); db != nil && db.Migrator().HasTable(&gbmodels.GbPlayAttempt{}) {
 		gbroutes.SetPlayAttemptStore(gbdashboard.NewPlayAttemptStore(db))
 		dashboardRetentionCancel = startDashboardRetentionRuntime(db, 24*time.Hour, func(result gbdashboard.RetentionResult, err error) {

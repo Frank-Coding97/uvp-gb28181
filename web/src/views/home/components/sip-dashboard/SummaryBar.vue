@@ -8,7 +8,7 @@
     <div class="summary-bar__stats">
       <div class="summary-bar__stat">
         <div class="summary-bar__value">{{ summaryValue(todayTotal) }}</div>
-        <div class="summary-bar__caption">今日信令</div>
+        <div class="summary-bar__caption">今日事务</div>
       </div>
       <div class="summary-bar__stat">
         <div

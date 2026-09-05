@@ -8,7 +8,7 @@
         </span>
       </div>
       <div class="pulse__legend">
-        <span><i class="pulse__legend-line pulse__legend-line--blue" />消息数 / 分钟</span>
+        <span><i class="pulse__legend-line pulse__legend-line--blue" />事务数 / 分钟</span>
         <span><i class="pulse__legend-line pulse__legend-line--red" />失败率</span>
       </div>
     </div>
@@ -16,7 +16,7 @@
       <DashboardChart v-if="hasData" :spec="spec" title="SIP 信令脉搏" :summary="`峰值 ${maxMsg}，当前 ${currentMsg} 条/分钟`" />
       <div v-else class="pulse__empty">暂无信令</div>
     </div>
-    <div class="pulse__hint">采样 1m · 仅显示 GB28181 信令</div>
+    <div class="pulse__hint">采样 1m · {{ hasGap ? "统计存在缺口" : "仅显示 GB28181 事务" }}</div>
   </div>
 </template>
 
@@ -27,17 +27,25 @@ import type { MediaChartSpec } from "@/views/gb28181/zlm/workbench/chart/overvie
 import DashboardChart from "../dashboard/DashboardChart.vue";
 
 const props = defineProps<{ samples: PulseSample[]; abnormalWindows: AbnormalWindow[] }>();
-const hasData = computed(() => props.samples.some(sample => sample.msgPerSec > 0 || sample.failPct > 0));
-const maxMsg = computed(() => Math.max(1, ...props.samples.map(sample => sample.msgPerSec)));
-const currentMsg = computed(() => props.samples.at(-1)?.msgPerSec ?? 0);
+const knownSamples = computed(() => props.samples.filter(sample => sample.known !== false));
+const hasGap = computed(() => props.samples.some(sample => sample.known === false));
+const hasData = computed(() => knownSamples.value.some(sample => sample.msgPerSec > 0 || sample.failPct > 0));
+const maxMsg = computed(() => Math.max(1, ...knownSamples.value.map(sample => sample.msgPerSec)));
+const currentMsg = computed(() => {
+  const current = props.samples.at(-1);
+  return current && current.known !== false ? current.msgPerSec : "--";
+});
 
-interface PulseDatum { time: number; messages: number; failure: number; }
+interface PulseDatum { time: number; messages: number | null; failure: number | null; known: boolean; }
 function timeLabel(datum: PulseDatum): string {
   return new Date(datum.time).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 const spec = computed<MediaChartSpec>(() => {
-  const values = props.samples.map(sample => ({ time: sample.t * 1000, messages: sample.msgPerSec, failure: sample.failPct / 10 }));
+  const values = props.samples.map(sample => {
+    const known = sample.known !== false;
+    return { time: sample.t * 1000, messages: known ? sample.msgPerSec : null, failure: known ? sample.failPct / 10 : null, known };
+  });
   const first = values[0]?.time ?? 0;
   const last = values.at(-1)?.time ?? first;
   return {
@@ -50,15 +58,28 @@ const spec = computed<MediaChartSpec>(() => {
       {
         type: "area", data: { id: "pulse" }, xField: "time", yField: "messages",
         line: { style: { curveType: "monotone", stroke: "var(--uvp-brand)", lineWidth: 1.5 } },
-        area: { style: { curveType: "monotone", fillOpacity: 0.28, fill: { gradient: "linear", x0: 0, y0: 0, x1: 0, y1: 1, stops: [{ offset: 0, color: "var(--uvp-brand)" }, { offset: 1, color: "transparent" }] } } },
-        point: { visible: true, style: { size: (datum: PulseDatum) => datum.time === last ? 5.6 : 0, fill: "var(--uvp-brand)", stroke: "var(--uvp-panel-bg)", lineWidth: 1 }, state: { dimension_hover: { size: 6.4 } } },
-        tooltip: { dimension: { title: { value: timeLabel }, content: [{ key: "消息", value: (datum: PulseDatum) => `${datum.messages} 条/分钟` }] } }
+        area: {
+          style: {
+            curveType: "monotone",
+            fillOpacity: 0.28,
+            fill: {
+              gradient: "linear", x0: 0, y0: 0, x1: 0, y1: 1,
+              stops: [
+                { offset: 0, color: "var(--uvp-brand)", opacity: 0.78 },
+                { offset: 0.68, color: "var(--uvp-brand)", opacity: 0.24 },
+                { offset: 1, color: "var(--uvp-brand)", opacity: 0.04 }
+              ]
+            }
+          }
+        },
+        point: { visible: true, style: { size: (datum: PulseDatum) => datum.known && datum.time === last ? 5.6 : 0, fill: "var(--uvp-brand)", stroke: "var(--uvp-panel-bg)", lineWidth: 1 }, state: { dimension_hover: { size: 6.4 } } },
+        tooltip: { dimension: { title: { value: timeLabel }, content: [{ key: "事务", value: (datum: PulseDatum) => datum.messages == null ? "统计未知" : `${datum.messages} 条/分钟` }] } }
       },
       {
         type: "line", data: { id: "pulse" }, xField: "time", yField: "failure",
         line: { style: { curveType: "monotone", stroke: "var(--uvp-danger)", lineWidth: 1, lineDash: [2, 2], opacity: 0.7 } },
         point: { visible: false },
-        tooltip: { dimension: { title: { value: timeLabel }, content: [{ key: "失败率", value: (datum: PulseDatum) => datum.failure === 0 ? "0%" : `${datum.failure.toFixed(1)}%` }] } }
+        tooltip: { dimension: { title: { value: timeLabel }, content: [{ key: "失败率", value: (datum: PulseDatum) => datum.failure == null ? "统计未知" : datum.failure === 0 ? "0%" : `${datum.failure.toFixed(1)}%` }] } }
       }
     ],
     axes: [

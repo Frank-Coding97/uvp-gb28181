@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/metrics"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
@@ -109,6 +111,31 @@ func TestDashboard_Snapshot_WithAggregator(t *testing.T) {
 	if resp.Data.Transactions[0].KindStr != "REGISTER" {
 		t.Errorf("first tx kindStr=%q, want REGISTER", resp.Data.Transactions[0].KindStr)
 	}
+}
+
+type dashboardSnapshotProviderFake struct {
+	snapshot *metrics.DashboardSnapshot
+}
+
+func (provider dashboardSnapshotProviderFake) Snapshot(context.Context, time.Duration, time.Duration) (*metrics.DashboardSnapshot, error) {
+	return provider.snapshot, nil
+}
+
+func TestDashboardSnapshotPrefersDurableSnapshotProvider(t *testing.T) {
+	agg := metrics.NewAggregator()
+	durable := &metrics.DashboardSnapshot{TodayTotal: 4902, Transactions: []metrics.TransactionStat{}, Pulse: metrics.PulseData{Samples: []metrics.PulseSample{}, AbnormalWindows: []metrics.AbnormalWindow{}}}
+	dc := NewDashboardController(func() *metrics.Aggregator { return agg }, dashboardSnapshotProviderFake{snapshot: durable})
+	router := newTestRouter(dc)
+
+	req := httptest.NewRequest(http.MethodGet, "/snapshot?window=60m&precision=1m", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	var response struct {
+		Data metrics.DashboardSnapshot `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.EqualValues(t, 4902, response.Data.TodayTotal)
 }
 
 // T1.8 parsePulseParams 覆盖

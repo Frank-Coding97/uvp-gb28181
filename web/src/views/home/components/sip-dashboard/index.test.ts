@@ -39,7 +39,28 @@ describe("SIP dashboard card", () => {
     await flushPromises();
 
     expect(wrapper.find("[role='alert']").text()).toContain("无权查看 SIP 协议监控");
-    expect(wrapper.text()).not.toContain("今日信令");
+    expect(wrapper.text()).not.toContain("今日事务");
     expect(wrapper.text()).not.toContain("异常事务");
+  });
+
+  it("surfaces durable snapshot coverage without treating the SSE connection as data completeness", async () => {
+    apiMocks.fetchSnapshot.mockResolvedValue({
+      data: {
+        health: 100,
+        todayTotal: 4902,
+        todayAbnormal: 0,
+        pending: 0,
+        transactions: [],
+        pulse: { windowMinutes: 60, samples: [], abnormalWindows: [] },
+        partial: true,
+        asOf: 0
+      }
+    });
+
+    const wrapper = mount(SipDashboardCard);
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("4,902");
+    expect(wrapper.text()).toContain("统计部分覆盖");
   });
 });
