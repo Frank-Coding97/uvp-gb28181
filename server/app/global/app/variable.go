@@ -2,6 +2,7 @@ package app
 
 import (
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"log"
 
@@ -10,6 +11,7 @@ import (
 )
 
 var (
+	LogRuntime       *logging.Runtime          // startup-owned logging runtime
 	BasePath         string                    // 定义项目的根目录
 	ConfigYml        YmlConfigInterf           // 全局配置文件指针
 	GormDbMysql      *gorm.DB                  // mysql数据库连接

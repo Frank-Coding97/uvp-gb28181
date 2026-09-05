@@ -71,16 +71,19 @@ redis:
   connfailretrytimes: 3    #从连接池获取连接失败，最大重试次数
   reconnectinterval: 1     # 从连接池获取连接失败，每次重试之间间隔的秒数
 logs:
-  ginlogname: "/resource/logs/gin.log"                  #设置 gin 框架的接口访问日志，v1.5.xx 以后的版本不再生成gin原生的接口访问日志
-  zaplogname: "/resource/logs/ginfast.log"    #设置项目骨架运行时日志文件名，注意该名称不要与上一条重复 ,避免和 gin 框架的日志掺杂一起，造成混乱。
-  textformat: "console"                                   #记录日志的格式，参数选项：console、json ， console 表示一般的文本格式
-  console: true                                            #是否同时输出到控制台（带 ANSI 彩色级别），生产环境若不需要彩色可设为 false
-  timeprecision: "second"                   #记录日志时，相关的时间精度，该参数选项：second  、 millisecond ， 分别表示 秒 和 毫秒 ,默认为毫秒级别
-  level: "info"                                      #日志级别，参数选项：debug、info、warn、error、fatal、panic，默认为 info, 开发、测试及生产环境建议分别设置为 debug、info、warn
-  maxsize: 5                                             #每个日志的最大尺寸(以MB为单位）， 超过该值，系统将会自动进行切割
-  maxbackups: 7                                        #保留旧日志最大个数
-  maxage: 15                                            #保留旧日志最大天数
-  compress: false                                      #日志备份时，是否进行压缩
+  outputs: [file, stdout]     # 开发默认；直接部署用 [file]，容器用 [stdout]
+  filepath: "./resource/logs/ginfast.log" # 显式绝对路径也支持；不再生成独立 gin 日志
+  textformat: "console"      # 文件：console/json；生产建议 json
+  stdoutformat: "console"    # stdout：console/json；容器建议 json
+  level: "info"              # debug/info/warn/error；变更日志配置需重启
+  modules:
+    access: "info"           # 独立于根 level，保留访问摘要
+    scheduler: "info"
+  routes: false               # 是否输出路由登记日志，不控制调试接口
+  maxsize: 5                  # 单文件 MiB
+  maxbackups: 7               # 归属当前 writer 的备份上限，旧历史文件保留
+  maxage: 15                  # 备份保留天数
+  compress: false
 casbin:
   autoloadpolicyseconds: 120 # 扫描数据库策略的频率(单位：秒)
   tableprefix: "sys_"

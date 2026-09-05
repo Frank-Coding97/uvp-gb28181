@@ -3,8 +3,10 @@ package sip
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/emiago/sipgo"
 	siplib "github.com/emiago/sipgo/sip"
@@ -22,6 +24,7 @@ import (
 
 // Server 封装 GB28181 SIP 服务(双栈 UDP+TCP)
 type Server struct {
+	logger             *slog.Logger
 	cfg                gbconfig.Config
 	ua                 *sipgo.UserAgent
 	srv                *sipgo.Server
@@ -90,7 +93,7 @@ func (s *Server) NewCascadeClient() (*sipgo.Client, error) {
 	if s == nil || s.ua == nil {
 		return nil, fmt.Errorf("GB28181 shared SIP UA is unavailable")
 	}
-	return sipgo.NewClient(s.ua)
+	return sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger))
 }
 
 // TraceRuntime returns the optional trace runtime for controller bootstrap wiring.
@@ -118,8 +121,13 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 		option(&opts)
 	}
 
+	root := app.ZapLog
+	if root == nil {
+		root = zap.NewNop()
+	}
+	logger := slog.New(logging.NewSlogHandler(root.Named("sipgo")))
 	var traceRuntime gbtrace.Runtime
-	uaOptions := []sipgo.UserAgentOption{sipgo.WithUserAgent("UVP-GB28181")}
+	uaOptions := []sipgo.UserAgentOption{sipgo.WithUserAgent("UVP-GB28181"), sipgo.WithUserAgentTransactionLayerOptions(siplib.WithTransactionLayerLogger(logger))}
 	if cfg.Trace.Enabled && opts.traceFactory != nil {
 		traceRuntime = opts.traceFactory(cfg.Trace)
 		if traceRuntime != nil {
@@ -147,8 +155,8 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 			}
 		}
 	}
-	if readFilter != nil || closeObserver != nil || traceRuntime != nil {
-		transportOptions := []siplib.TransportLayerOption{}
+	{
+		transportOptions := []siplib.TransportLayerOption{siplib.WithTransportLayerLogger(logger)}
 		if readFilter != nil {
 			transportOptions = append(transportOptions, siplib.WithTransportLayerReadFilter(readFilter))
 		}
@@ -168,11 +176,11 @@ func NewServer(cfg gbconfig.Config, options ...ServerOption) (*Server, error) {
 		}
 		return nil, fmt.Errorf("创建 SIP UA 失败: %w", err)
 	}
-	srv, err := sipgo.NewServer(ua)
+	srv, err := sipgo.NewServer(ua, sipgo.WithServerLogger(logger))
 	if err != nil {
 		return nil, fmt.Errorf("创建 SIP server 失败: %w", err)
 	}
-	s := &Server{cfg: cfg, ua: ua, srv: srv, trace: traceRuntime, security: opts.registerSecurity}
+	s := &Server{logger: logger, cfg: cfg, ua: ua, srv: srv, trace: traceRuntime, security: opts.registerSecurity}
 	s.registerHandlers()
 	return s, nil
 }
@@ -186,7 +194,7 @@ func (s *Server) registerHandlers() {
 
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
 	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
-	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port, s.cfg.SIP.DynamicAdvertise); err != nil {
+	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port, s.cfg.SIP.DynamicAdvertise, sipgo.WithClientLogger(s.logger)); err != nil {
 		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
 	} else {
 		s.uac = u
@@ -199,7 +207,7 @@ func (s *Server) registerHandlers() {
 			contactHost = strings.TrimSpace(s.cfg.SIP.ListenIP)
 		}
 		if contactHost != "" && contactHost != "0.0.0.0" && contactHost != "::" {
-			if client, clientErr := sipgo.NewClient(s.ua); clientErr == nil {
+			if client, clientErr := sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger)); clientErr == nil {
 				s.broadcastDialogs = sipgo.NewDialogServerCache(client, siplib.ContactHeader{Address: siplib.Uri{User: s.cfg.SIP.ServerID, Host: contactHost, Port: s.cfg.SIP.Port}})
 			} else {
 				app.ZapLog.Warn("GB28181 Broadcast UAS client 初始化失败", zap.Error(clientErr))

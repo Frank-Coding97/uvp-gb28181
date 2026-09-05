@@ -6,9 +6,11 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
-	"log"
+	"go.uber.org/zap"
+	"os"
 	"sync"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 var lastChangeTime time.Time
@@ -18,6 +20,18 @@ func init() {
 }
 
 func CreateYamlFactory(path string, fileName ...string) app.YmlConfigInterf {
+	config, err := LoadYamlFactory(path, fileName...)
+	if err != nil {
+		logging.ReportStartupFailure(nil, app.ZapLog, "config", err)
+		if app.LogRuntime != nil {
+			_ = app.LogRuntime.Close()
+		}
+		os.Exit(1)
+	}
+	return config
+}
+
+func LoadYamlFactory(path string, fileName ...string) (app.YmlConfigInterf, error) {
 
 	yamlConfig := viper.New()
 	// 配置文件所在目录
@@ -33,13 +47,13 @@ func CreateYamlFactory(path string, fileName ...string) app.YmlConfigInterf {
 
 	// 读取配置文件
 	if err := yamlConfig.ReadInConfig(); err != nil {
-		log.Fatal("ReadInConfig err: " + err.Error())
+		return nil, err
 	}
 
 	return &ymlConfig{
 		viper: yamlConfig,
 		mu:    new(sync.RWMutex),
-	}
+	}, nil
 }
 
 type ymlConfig struct {
@@ -57,9 +71,11 @@ func (y *ymlConfig) ConfigFileChangeListen(fns ...func()) {
 				// 重新读取配置文件（使用写锁保护）
 				y.mu.Lock()
 				if err := y.viper.ReadInConfig(); err != nil {
-					log.Printf("重新读取配置文件失败: %v", err)
+					logging.ReportStartupFailure(nil, app.ZapLog, "config", err)
 				} else {
-					log.Println("配置文件重新加载成功")
+					if app.ZapLog != nil {
+						app.ZapLog.Named("config").Info("configuration reloaded", zap.String("event", "config.reloaded"))
+					}
 				}
 				y.mu.Unlock()
 				// 执行自定义回调函数
