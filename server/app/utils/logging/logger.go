@@ -54,6 +54,9 @@ func NewRuntime(opts Options) (*Runtime, error) {
 	if opts.Instance == "" {
 		opts.Instance = "unknown"
 	}
+	opts.Service, _ = clipJSON(opts.Service, 256)
+	opts.Version, _ = clipJSON(opts.Version, 256)
+	opts.Instance, _ = clipJSON(opts.Instance, 256)
 	r := &Runtime{config: cfg}
 	cores := make([]zapcore.Core, 0, len(cfg.Outputs))
 	for _, target := range cfg.Outputs {
@@ -136,11 +139,13 @@ func WithIdentity(logger *zap.Logger, fields ...zap.Field) *zap.Logger {
 }
 
 type runtimeCore struct {
-	inner  zapcore.Core
-	config Config
-	min    zapcore.Level
-	closed *atomic.Bool
-	bound  map[string]bool
+	inner     zapcore.Core
+	config    Config
+	min       zapcore.Level
+	closed    *atomic.Bool
+	bound     map[string]bool
+	used      int
+	truncated bool
 }
 
 func (c *runtimeCore) Enabled(l zapcore.Level) bool { return l >= c.min }
@@ -170,7 +175,7 @@ func (c *runtimeCore) with(fields []zap.Field, trusted bool) *runtimeCore {
 	for k, v := range c.bound {
 		clone.bound[k] = v
 	}
-	clean := make([]zap.Field, 0, len(fields))
+	clean := make([]zap.Field, 0, min(len(fields), maxFields))
 	for _, f := range fields {
 		if clone.bound[f.Key] || fixedKey(f.Key) || (!trusted && identityKey(f.Key)) {
 			continue
@@ -181,6 +186,16 @@ func (c *runtimeCore) with(fields []zap.Field, trusted bool) *runtimeCore {
 		clean = append(clean, f)
 		clone.bound[f.Key] = true
 	}
+	clone.bound = make(map[string]bool, len(c.bound))
+	for k, v := range c.bound {
+		clone.bound[k] = v
+	}
+	clean, used, truncated := sanitizeFields(clean, max(0, fieldBudget-c.used-128), max(0, maxFields-len(c.bound)-1))
+	for _, f := range clean {
+		clone.bound[f.Key] = true
+	}
+	clone.used += used
+	clone.truncated = c.truncated || truncated
 	clone.inner = c.inner.With(clean)
 	return &clone
 }
@@ -205,12 +220,20 @@ func (c *runtimeCore) Write(e zapcore.Entry, fields []zap.Field) error {
 	if !hasEvent {
 		clean = append(clean, zap.String("event", "legacy.log"))
 	}
+	var cutMessage, cutName, cutStack bool
+	e.Message, cutMessage = clipJSON(e.Message, 1024)
+	e.LoggerName, cutName = clipJSON(e.LoggerName, 256)
+	e.Stack, cutStack = clipJSON(e.Stack, min(MaxStackBytes, max(0, fieldBudget-c.used-128)))
+	clean, _, cutFields := sanitizeFields(clean, fieldBudget-c.used-encodedStringSize(e.Stack), maxFields-len(c.bound))
+	if c.truncated || cutMessage || cutName || cutStack || cutFields {
+		clean = append(clean, zap.Bool("truncated", true))
+	}
 	return c.inner.Write(e, clean)
 }
 func (c *runtimeCore) Sync() error { return c.inner.Sync() }
 func fixedKey(k string) bool {
 	switch k {
-	case "created_at", "level", "service", "version", "instance", "component", "message":
+	case "created_at", "level", "service", "version", "instance", "component", "message", "truncated":
 		return true
 	}
 	return false
