@@ -2,10 +2,10 @@ package models
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -38,7 +38,7 @@ func (d *SysDepartment) IsEmpty() bool {
 }
 
 func (d *SysDepartment) Find(ctx context.Context, funcs ...func(*gorm.DB) *gorm.DB) error {
-	return app.DB().WithContext(ctx).Scopes(funcs...).Find(d).Error
+	return app.DBContext(ctx).Scopes(funcs...).Find(d).Error
 }
 
 func (d *SysDepartment) GetDepartmentByID(ctx context.Context, id uint) (err error) {
@@ -48,16 +48,16 @@ func (d *SysDepartment) GetDepartmentByID(ctx context.Context, id uint) (err err
 }
 
 func (d *SysDepartment) Create(ctx context.Context, funcs ...func(*gorm.DB) *gorm.DB) (err error) {
-	return app.DB().WithContext(ctx).Scopes(funcs...).Create(d).Error
+	return app.DBContext(ctx).Scopes(funcs...).Create(d).Error
 }
 
 func (d *SysDepartment) Update(ctx context.Context) (err error) {
-	err = app.DB().WithContext(ctx).Save(d).Error
+	err = app.DBContext(ctx).Save(d).Error
 	return
 }
 
 func (d *SysDepartment) Delete(ctx context.Context) (err error) {
-	err = app.DB().WithContext(ctx).Delete(d).Error
+	err = app.DBContext(ctx).Delete(d).Error
 	return
 }
 
@@ -68,7 +68,7 @@ func NewSysDepartmentList() SysDepartmentList {
 }
 
 func (list *SysDepartmentList) Find(ctx context.Context, funcs ...func(*gorm.DB) *gorm.DB) (err error) {
-	err = app.DB().WithContext(ctx).Scopes(funcs...).Find(list).Error
+	err = app.DBContext(ctx).Scopes(funcs...).Find(list).Error
 	return
 }
 
@@ -76,7 +76,8 @@ func (list SysDepartmentList) IsEmpty() bool {
 	return len(list) == 0
 }
 
-func (list SysDepartmentList) BuildTree() SysDepartmentList {
+func (list SysDepartmentList) BuildTree(contexts ...context.Context) SysDepartmentList {
+	ctx := modelLogContext(contexts...)
 	// 哈希表存储所有节点
 	nodeMap := make(map[uint]*SysDepartment)
 	// 存储顶层节点
@@ -88,7 +89,10 @@ func (list SysDepartmentList) BuildTree() SysDepartmentList {
 
 		// 循环引用检测 - 处理ParentID为指针类型
 		if node.ParentID != nil && node.ID == *node.ParentID {
-			app.ZapLog.Error(fmt.Sprintf("部门循环引用: %d -> %d", node.ID, *node.ParentID))
+			app.Log(ctx).Error("department tree cycle detected",
+				zap.String("event", "models.sysdepartment.tree_cycle"),
+				zap.Uint("node_id", node.ID),
+				zap.Uint("parent_id", *node.ParentID))
 			continue
 		}
 
@@ -112,7 +116,10 @@ func (list SysDepartmentList) BuildTree() SysDepartmentList {
 				}
 				parent.Children = append(parent.Children, node)
 			} else {
-				app.ZapLog.Warn(fmt.Sprintf("独立部门节点 %d: parentId=%d 不存在", node.ID, parentID))
+				app.Log(ctx).Warn("department tree orphan detected",
+					zap.String("event", "models.sysdepartment.tree_orphan"),
+					zap.Uint("node_id", node.ID),
+					zap.Uint("parent_id", parentID))
 			}
 		}
 	}
