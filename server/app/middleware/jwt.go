@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -8,6 +9,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -23,9 +25,8 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		}
 		tokenString, err := common.GetAccessToken(c)
 		if err != nil {
-			if app.ZapLog != nil {
-				app.ZapLog.Error("Get access token failed", zap.Error(err))
-			}
+			app.Log(c.Request.Context()).Named("auth").Error("Get access token failed",
+				zap.String("event", "auth.access_token.read_failed"), logging.Error(err))
 			// 401 未认证
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
 			c.Abort()
@@ -35,9 +36,8 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		// 验证token
 		claims, err := app.TokenService.ValidateTokenWithCache(tokenString)
 		if err != nil {
-			if app.ZapLog != nil {
-				app.ZapLog.Error("Invalid token", zap.Error(err))
-			}
+			app.Log(c.Request.Context()).Named("auth").Error("Invalid token",
+				zap.String("event", "auth.access_token.invalid"), logging.Error(err))
 			// 401 未认证
 			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
 			c.Abort()
@@ -52,10 +52,13 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		// 将用户信息存储到上下文中
+		// 将用户信息同时存储到Gin和标准请求上下文中，保留既有日志scope。
 		c.Set(consts.BindContextKeyName, claims)
-		if err := app.SessionValidator.TouchSession(c.Request.Context(), claims.SID); err != nil && app.ZapLog != nil {
-			app.ZapLog.Warn("Update session activity failed", zap.Error(err))
+		requestContext := context.WithValue(c.Request.Context(), consts.BindContextKeyName, claims)
+		c.Request = c.Request.WithContext(requestContext)
+		if err := app.SessionValidator.TouchSession(c.Request.Context(), claims.SID); err != nil {
+			app.Log(c.Request.Context()).Named("auth").Warn("Update session activity failed",
+				zap.String("event", "auth.session.touch_failed"), logging.Error(err))
 		}
 		// 继续处理请求
 		c.Next()

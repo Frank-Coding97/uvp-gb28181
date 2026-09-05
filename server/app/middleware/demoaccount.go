@@ -1,10 +1,10 @@
 package middleware
 
 import (
-	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"net/http"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/global/consts"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -69,7 +69,8 @@ func DemoAccountMiddleware() gin.HandlerFunc {
 				for _, prefix := range allowPathPrefixes {
 					if strings.HasPrefix(currentPath, prefix) {
 						// 路径在白名单中，允许通过
-						app.ZapLog.Info("演示账号访问白名单路径",
+						app.Log(c.Request.Context()).Named("auth").Info("演示账号访问白名单路径",
+							zap.String("event", "auth.demo_account.allow_path"),
 							zap.Uint("userID", claims.UserID),
 							zap.String("method", c.Request.Method),
 							zap.String("path", currentPath),
@@ -81,7 +82,8 @@ func DemoAccountMiddleware() gin.HandlerFunc {
 			}
 
 			// 非GET请求且不在白名单中，拒绝访问
-			app.ZapLog.Warn("演示账号尝试执行非GET操作",
+			app.Log(c.Request.Context()).Named("auth").Warn("演示账号尝试执行非GET操作",
+				zap.String("event", "auth.demo_account.denied"),
 				zap.Uint("userID", claims.UserID),
 				zap.String("method", c.Request.Method),
 				zap.String("path", c.Request.URL.Path))
