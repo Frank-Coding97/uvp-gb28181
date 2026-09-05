@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/robfig/cron/v3"
@@ -21,6 +22,7 @@ type JobScheduler struct {
 	jobResults chan *JobResult     // 任务结果通道
 	logger     JobLogger           // 日志记录器
 	wg         sync.WaitGroup      // 等待正在执行的任务完成
+	lastExecNS atomic.Int64        // 防止同一调度器内快速执行生成重复ID
 }
 
 // NewJobScheduler 创建新的调度器
@@ -66,7 +68,7 @@ func NewJobScheduler(opts ...Option) *JobScheduler {
 // 启动调度器
 func (s *JobScheduler) Start() {
 	s.cron.Start()
-	s.logger.Info("system", "调度器已启动")
+	s.logger.Debug("system", "调度器已启动")
 }
 
 // 停止调度器
@@ -89,7 +91,7 @@ func (s *JobScheduler) RegisterExecutor(executor Executor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.executors[executor.Name()] = executor
-	s.logger.Info("system", "注册执行器: %s", executor.Name())
+	s.logger.Debug("system", "注册执行器: %s", executor.Name())
 }
 
 // 添加/更新任务
@@ -207,6 +209,7 @@ func (s *JobScheduler) ExecuteNow(jobID string) error {
 	if !s.canExecute(job) {
 		return fmt.Errorf("job cannot execute due to blocking policy")
 	}
+	s.logger.LogJobLifecycle(job, "手动触发")
 
 	// 异步执行
 	go func() {
@@ -224,16 +227,23 @@ func (s *JobScheduler) executeJob(job *Job) {
 	defer s.wg.Done()
 
 	startTime := time.Now()
-	jobExecutionID := fmt.Sprintf("%s-%d", job.ID, startTime.UnixNano())
+	jobExecutionID := s.newExecutionID(job.ID, startTime)
 
 	var err error
 	for currentRetry := 0; currentRetry <= job.MaxRetry; currentRetry++ {
-		s.logger.Debug(job.ID, "开始执行 | 执行ID: %s | 重试次数: %d", jobExecutionID, currentRetry)
+		attempt := currentRetry + 1
+		if logger, ok := s.logger.(*ZapJobLogger); ok {
+			logger.logExecutionStart(job.ID, jobExecutionID, attempt)
+		} else {
+			s.logger.Debug(job.ID, "开始执行 | 执行ID: %s | 重试次数: %d", jobExecutionID, currentRetry)
+		}
 
 		result := &JobResult{
 			JobID:           job.ID,
+			ExecutionID:     jobExecutionID,
 			StartTime:       time.Now(),
 			RetryCount:      currentRetry,
+			Attempt:         attempt,
 			ExecutionPolicy: job.ExecutionPolicy,
 		}
 
@@ -245,12 +255,16 @@ func (s *JobScheduler) executeJob(job *Job) {
 		if !exists {
 			result.Status = "FAILED"
 			result.Error = fmt.Errorf("executor not found: %s", job.ExecutorName)
+			result.EndTime = time.Now()
+			result.Duration = result.EndTime.Sub(result.StartTime)
+			s.logExecutionResult(result)
 			s.sendResult(result)
 			return
 		}
 
 		// 创建带超时的上下文
 		ctx, cancel := context.WithTimeout(context.Background(), job.Timeout)
+		ctx = WithExecutionContext(ctx, jobExecutionID, attempt, job.ExecutorName)
 
 		// 执行任务（传递 job 的深拷贝，避免并发修改）
 		jobCopy := job.Clone()
@@ -263,20 +277,28 @@ func (s *JobScheduler) executeJob(job *Job) {
 		if err != nil {
 			result.Status = "FAILED"
 			result.Error = err
-			s.logger.Warn(job.ID, "执行失败 | 错误: %v", err)
+			if logger, ok := s.logger.(*ZapJobLogger); ok {
+				logger.logExecutionFailure(job.ID, jobExecutionID, attempt, err)
+			} else {
+				s.logger.Warn(job.ID, "执行失败 | 错误: %v", err)
+			}
 
 			if currentRetry < job.MaxRetry {
-				s.logger.Info(job.ID, "准备重试 | 第%d次重试 | 等待 %v", currentRetry+1, job.RetryInterval)
+				if logger, ok := s.logger.(*ZapJobLogger); ok {
+					logger.logExecutionRetry(job.ID, jobExecutionID, attempt+1, job.RetryInterval)
+				} else {
+					s.logger.Info(job.ID, "准备重试 | 第%d次重试 | 等待 %v", currentRetry+1, job.RetryInterval)
+				}
 				time.Sleep(job.RetryInterval)
 				continue
 			} else {
-				s.logger.Error(job.ID, "达到最大重试次数")
+				s.logExecutionResult(result)
 				s.sendResult(result)
 				return
 			}
 		} else {
 			result.Status = "SUCCESS"
-			s.logger.Info(job.ID, "执行成功")
+			s.logExecutionResult(result)
 			s.sendResult(result)
 
 			// 单次执行策略：执行成功后自动禁用
@@ -284,12 +306,38 @@ func (s *JobScheduler) executeJob(job *Job) {
 				if disableErr := s.DisableJob(job.ID); disableErr != nil {
 					s.logger.Error(job.ID, "自动禁用任务失败: %v", disableErr)
 				} else {
-					s.logger.Info(job.ID, "单次执行任务已完成，已自动禁用")
+					s.logger.Debug(job.ID, "单次执行任务已完成，已自动禁用")
 				}
 			}
 			return
 		}
 	}
+}
+
+func (s *JobScheduler) newExecutionID(jobID string, now time.Time) string {
+	nanoseconds := now.UnixNano()
+	for {
+		last := s.lastExecNS.Load()
+		candidate := nanoseconds
+		if candidate <= last {
+			candidate = last + 1
+		}
+		if s.lastExecNS.CompareAndSwap(last, candidate) {
+			return fmt.Sprintf("%s-%d", jobID, candidate)
+		}
+	}
+}
+
+func (s *JobScheduler) logExecutionResult(result *JobResult) {
+	if logger, ok := s.logger.(*ZapJobLogger); ok {
+		logger.logExecutionResult(result)
+		return
+	}
+	if result.Status == "SUCCESS" {
+		s.logger.Debug(result.JobID, "执行成功")
+		return
+	}
+	s.logger.Error(result.JobID, "达到最大重试次数")
 }
 
 // 新增：安全发送结果
