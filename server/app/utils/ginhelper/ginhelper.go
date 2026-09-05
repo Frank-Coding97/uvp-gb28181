@@ -2,18 +2,14 @@ package ginhelper
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/scheduler"
 
 	"io"
@@ -24,118 +20,28 @@ import (
 )
 
 func GetEngine() *gin.Engine {
-	var engine *gin.Engine
-	if !app.ConfigYml.GetBool("server.appdebug") {
-		// 生产环境下，关闭调试模式，提高性能
-		gin.SetMode(gin.ReleaseMode)
-		// 生产环境下，关闭gin框架默认的日志输出，避免日志重复输出
-		gin.DefaultWriter = io.Discard
-		engine = gin.New()
-		engine.Use(accessLogger(gin.DefaultWriter), CustomRecovery())
-	} else {
-		// 开发环境下，开启调试模式，方便开发调试
+	debug := app.ConfigYml.GetBool("server.appdebug")
+	if debug {
 		gin.SetMode(gin.DebugMode)
-		engine = gin.New()
-		engine.Use(accessLogger(gin.DefaultWriter), CustomRecovery())
-
-		/**
-		注册pprof后，可以通过以下HTTP端点访问性能数据：
-		- /debug/pprof/ - 性能分析首页
-		- /debug/pprof/profile - CPU性能分析
-		- /debug/pprof/heap - 堆内存分析
-		- /debug/pprof/goroutine - Goroutine信息
-		- /debug/pprof/block - 阻塞分析
-		- /debug/pprof/threadcreate - 线程创建分析
-		**/
+	} else {
+		gin.SetMode(gin.ReleaseMode)
+	}
+	root := app.ZapLog
+	if root == nil {
+		root = zap.NewNop()
+	}
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
+	gin.DebugPrintFunc = func(string, ...interface{}) {
+		root.Named("gin").Debug("Gin framework diagnostic", zap.String("event", "gin.diagnostic"))
+	}
+	gin.DebugPrintRouteFunc = func(string, string, string, int) {}
+	engine := gin.New()
+	engine.Use(RequestLogging(root), CustomRecovery())
+	if debug {
 		pprof.Register(engine)
 	}
 	return engine
-
-}
-
-func accessLogger(output io.Writer) gin.HandlerFunc {
-	return gin.LoggerWithConfig(gin.LoggerConfig{
-		Formatter: accessLogFormatter,
-		Output:    output,
-	})
-}
-
-func accessLogFormatter(param gin.LogFormatterParams) string {
-	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
-		param.TimeStamp.Format("2006/01/02 - 15:04:05"),
-		param.StatusCode,
-		param.Latency,
-		param.ClientIP,
-		param.Method,
-		redactAccessLogPath(param.Path),
-		param.ErrorMessage,
-	)
-}
-
-func redactAccessLogPath(path string) string {
-	parsed, err := url.ParseRequestURI(path)
-	if err != nil {
-		return redactAccessLogPathFallback(path)
-	}
-	query := parsed.Query()
-	redacted := false
-	for _, key := range []string{"play_token", "media_access_token", "cap"} {
-		if _, exists := query[key]; exists {
-			query.Set(key, "REDACTED")
-			redacted = true
-		}
-	}
-	if !redacted {
-		return path
-	}
-	parsed.RawQuery = query.Encode()
-	return parsed.RequestURI()
-}
-
-func redactAccessLogPathFallback(path string) string {
-	lower := strings.ToLower(path)
-	if strings.Contains(lower, "play_token=") || strings.Contains(lower, "media_access_token=") || strings.Contains(lower, "cap=") {
-		if index := strings.IndexByte(path, '?'); index >= 0 {
-			return path[:index] + "?REDACTED"
-		}
-	}
-	return path
-}
-
-// CustomRecovery 自定义错误(panic等)拦截中间件、对可能发生的错误进行拦截、统一记录
-func CustomRecovery() gin.HandlerFunc {
-	DefaultErrorWriter := &PanicExceptionRecord{}
-	return gin.RecoveryWithWriter(DefaultErrorWriter, func(c *gin.Context, err interface{}) {
-		// 检查是否为请求中止类型的panic
-		if err == consts.RequestAborted {
-			// 这是由FailAndAbort方法触发的panic，已经处理了响应，不需要额外处理
-			return
-		}
-
-		// 其他类型的 panic 使用默认处理
-		app.ZapLog.Error("服务器内部错误",
-			zap.Any("panic", err),
-			zap.String("path", c.Request.URL.Path),
-			zap.String("method", c.Request.Method),
-		)
-
-		// 对于其他类型的panic，记录错误并返回系统错误响应
-		// 但需要检查是否已经发送过响应，避免重复响应
-		if !c.Writer.Written() {
-			// 这里的 err 数据类型为 ：runtime.boundsError  ，需要转为普通数据类型才可以输出
-			app.Response.ErrorSystem(c, "", fmt.Sprintf("%s", err))
-		}
-	})
-}
-
-// PanicExceptionRecord  panic等异常记录
-type PanicExceptionRecord struct{}
-
-func (p *PanicExceptionRecord) Write(b []byte) (n int, err error) {
-	errStr := string(b)
-	err = errors.New(errStr)
-	//app.ZapLog.Error(consts.ServerOccurredErrorMsg, zap.String("errStrace", errStr))
-	return len(errStr), err
 }
 
 // PluginRouteFunc 插件路由函数类型
@@ -220,6 +126,7 @@ func PrintStartupBanner() {
 
 // StartServer 配置并启动HTTP服务器，支持优雅关闭
 func StartServer(engine *gin.Engine) error {
+	logRoutes(engine)
 	// 打印启动横幅
 	PrintStartupBanner()
 
@@ -276,4 +183,15 @@ func StartServer(engine *gin.Engine) error {
 
 	app.ZapLog.Info("服务器已优雅关闭")
 	return nil
+}
+
+// Emit registered routes after registration, including release mode. This does
+// not change which routes are registered or their access control.
+func logRoutes(engine *gin.Engine) {
+	if !app.ConfigYml.GetBool("logs.routes") {
+		return
+	}
+	for _, route := range engine.Routes() {
+		app.Log(context.Background()).Named("routes").Info("HTTP route registered", zap.String("event", "http.route_registered"), zap.String("method", route.Method), zap.String("route", route.Path))
+	}
 }

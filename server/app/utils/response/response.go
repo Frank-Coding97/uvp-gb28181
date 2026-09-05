@@ -1,9 +1,9 @@
 package response
 
 import (
+	"net/http"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
@@ -44,7 +44,7 @@ func (r *DefaultResponseConfig) GetSystemErrorCode() int {
 // data interface{} 业务逻辑数据
 func (r *DefaultResponseHandler) ReturnJson(Context *gin.Context, httpCode int, dataCode int, msg string, data interface{}) {
 
-	//Context.Header("key2020","value2020")  	//可以根据实际情况在头部添加额外的其他信息
+	SetBusinessResult(Context, dataCode, dataCode == 0)
 	Context.JSON(httpCode, gin.H{
 		"code":    dataCode,
 		"message": msg,
@@ -130,4 +130,24 @@ func Fail(c *gin.Context, msg string, data ...interface{}) {
 // ErrorSystem 全局函数，保持向后兼容
 func ErrorSystem(c *gin.Context, msg string, data interface{}) {
 	defaultHandler.ErrorSystem(c, msg, data)
+}
+
+// ResultMetadata records the declared business outcome without reading response bodies.
+type ResultMetadata struct {
+	Code    int
+	Success bool
+}
+
+const resultMetadataKey = "uvp.logging.business_result"
+
+func SetBusinessResult(c *gin.Context, code int, success bool) {
+	c.Set(resultMetadataKey, ResultMetadata{code, success})
+}
+func BusinessResult(c *gin.Context) (ResultMetadata, bool) {
+	value, ok := c.Get(resultMetadataKey)
+	if !ok {
+		return ResultMetadata{}, false
+	}
+	result, ok := value.(ResultMetadata)
+	return result, ok
 }
