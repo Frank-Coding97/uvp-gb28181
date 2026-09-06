@@ -27,14 +27,14 @@ func TestNodeRuntimeStoreConfirmProbeBindsNodeAndPersistsIdentity(t *testing.T) 
 	store := NewNodeRuntimeStore(db, func() time.Time { return now })
 
 	got, err := store.ConfirmProbe(context.Background(), NodeRuntimeObservation{
-		NodeRuntimeRef:  NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 7},
+		NodeRuntimeRef:  NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 7},
 		BootNonce:       testBootA,
 		ProtocolVersion: 1,
 	})
 	require.NoError(t, err)
 	require.Equal(t, int64(1), got.NodeID)
 	require.Equal(t, "node-a", got.NodeUUID)
-	require.Equal(t, uint64(7), got.ConfigRevision)
+	require.Equal(t, uint64(7), got.NodeRevision)
 	require.Equal(t, testBootA, got.CurrentBootNonce)
 	require.Empty(t, got.RetiredBootHistory)
 	require.Equal(t, int64(1), got.RuntimeEpoch)
@@ -42,15 +42,15 @@ func TestNodeRuntimeStoreConfirmProbeBindsNodeAndPersistsIdentity(t *testing.T) 
 	require.Equal(t, uint64(7), got.RuntimeConfirmedRevision)
 	require.Equal(t, NodeRuntimeStatusActive, got.IdentityStatus)
 	require.NotNil(t, got.RuntimeConfirmedAt)
-	require.Equal(t, now.UTC().Round(0), *got.RuntimeConfirmedAt)
+	require.Equal(t, now.UTC().Truncate(time.Microsecond), *got.RuntimeConfirmedAt)
 
 	requireNodeRuntimeRow(t, db, nodeRuntimeFixture{
 		revision: 7, uuid: "node-a", current: testBootA, history: "[]", epoch: 1,
-		protocol: 1, confirmedRevision: 7, confirmedAt: timePtr(now.UTC().Round(0)), status: NodeRuntimeStatusActive,
+		protocol: 1, confirmedRevision: 7, confirmedAt: timePtr(now.UTC().Truncate(time.Microsecond)), status: NodeRuntimeStatusActive,
 	})
 }
 
-func TestNodeRuntimeStoreRejectsStaleNodeConfiguration(t *testing.T) {
+func TestNodeRuntimeStoreRejectsStaleNodeRevision(t *testing.T) {
 	db := newNodeRuntimeTestDB(t, "stale")
 	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 8, uuid: "node-a", history: "[]"})
 	store := NewNodeRuntimeStore(db, nil)
@@ -59,9 +59,9 @@ func TestNodeRuntimeStoreRejectsStaleNodeConfiguration(t *testing.T) {
 		ref  NodeRuntimeRef
 		want error
 	}{
-		{ref: NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 7}, want: ErrNodeRuntimeStale},
-		{ref: NodeRuntimeRef{NodeID: 1, NodeUUID: "node-b", ConfigRevision: 8}, want: ErrNodeRuntimeStale},
-		{ref: NodeRuntimeRef{NodeID: 2, NodeUUID: "node-a", ConfigRevision: 8}, want: ErrNodeRuntimeUnavailable},
+		{ref: NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 7}, want: ErrNodeRuntimeStale},
+		{ref: NodeRuntimeRef{NodeID: 1, NodeUUID: "node-b", NodeRevision: 8}, want: ErrNodeRuntimeStale},
+		{ref: NodeRuntimeRef{NodeID: 2, NodeUUID: "node-a", NodeRevision: 8}, want: ErrNodeRuntimeUnavailable},
 	} {
 		ref := tc.ref
 		_, err := store.ConfirmProbe(context.Background(), NodeRuntimeObservation{
@@ -69,7 +69,7 @@ func TestNodeRuntimeStoreRejectsStaleNodeConfiguration(t *testing.T) {
 		})
 		require.ErrorIs(t, err, tc.want, "case %d", i)
 	}
-	_, err := store.Load(context.Background(), NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 7})
+	_, err := store.Load(context.Background(), NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 7})
 	require.ErrorIs(t, err, ErrNodeRuntimeStale)
 }
 
@@ -78,7 +78,7 @@ func TestNodeRuntimeStoreSameBootIsIdempotentAndNewBootRetiresOld(t *testing.T) 
 	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 7, uuid: "node-a", history: "[]"})
 	now := time.Date(2026, 9, 6, 15, 1, 0, 0, time.UTC)
 	store := NewNodeRuntimeStore(db, func() time.Time { return now })
-	ref7 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 7}
+	ref7 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 7}
 	first, err := store.ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref7, BootNonce: testBootA, ProtocolVersion: 1})
 	require.NoError(t, err)
 
@@ -89,10 +89,10 @@ func TestNodeRuntimeStoreSameBootIsIdempotentAndNewBootRetiresOld(t *testing.T) 
 	require.Equal(t, first.CurrentBootNonce, repeated.CurrentBootNonce)
 	require.Empty(t, repeated.RetiredBootHistory)
 
-	// A node config update must be observed with the new revision before the
+	// A node revision update must be observed with the new revision before the
 	// probe may replace the current identity.
 	require.NoError(t, db.Model(&nodeRuntimeTestRow{}).Where("id = ?", 1).Update("revision", 8).Error)
-	ref8 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 8}
+	ref8 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 8}
 	rotated, err := store.ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref8, BootNonce: testBootB, ProtocolVersion: 1})
 	require.NoError(t, err)
 	require.Equal(t, int64(2), rotated.RuntimeEpoch)
@@ -100,13 +100,55 @@ func TestNodeRuntimeStoreSameBootIsIdempotentAndNewBootRetiresOld(t *testing.T) 
 	require.Equal(t, []string{testBootA}, rotated.RetiredBootHistory)
 
 	// A retired identity can never become current again, even with the latest
-	// configuration revision.
+	// node revision.
 	_, err = store.ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref8, BootNonce: testBootA, ProtocolVersion: 1})
 	require.ErrorIs(t, err, ErrNodeRuntimeRetired)
 	requireNodeRuntimeRow(t, db, nodeRuntimeFixture{
 		revision: 8, uuid: "node-a", current: testBootB, history: `["` + testBootA + `"]`, epoch: 2,
-		protocol: 1, confirmedRevision: 8, confirmedAt: timePtr(now.UTC().Round(0)), status: NodeRuntimeStatusActive,
+		protocol: 1, confirmedRevision: 8, confirmedAt: timePtr(now.UTC().Truncate(time.Microsecond)), status: NodeRuntimeStatusActive,
 	})
+}
+
+func TestNodeRuntimeStoreSameTimestampReplayDoesNotUpdate(t *testing.T) {
+	db := newNodeRuntimeTestDB(t, "same-timestamp-replay")
+	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 1, uuid: "node-a", history: "[]"})
+	now := time.Date(2026, 9, 6, 15, 1, 30, 123456789, time.UTC)
+	store := NewNodeRuntimeStore(db, func() time.Time { return now })
+	ref := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 1}
+	_, err := store.ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref, BootNonce: testBootA, ProtocolVersion: NodeRuntimeProtocolV1})
+	require.NoError(t, err)
+	// MySQL may report changed rows (0) for an identical UPDATE. Make any
+	// second UPDATE fail so this test proves the replay takes the no-op path.
+	require.NoError(t, db.Exec(`CREATE TRIGGER reject_same_timestamp_replay BEFORE UPDATE ON meta_node
+BEGIN SELECT RAISE(ABORT, 'same timestamp replay must not update'); END`).Error)
+	replayed, err := store.ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref, BootNonce: testBootA, ProtocolVersion: NodeRuntimeProtocolV1})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), replayed.RuntimeEpoch)
+	require.Equal(t, now.UTC().Truncate(time.Microsecond), *replayed.RuntimeConfirmedAt)
+}
+
+func TestNodeRuntimeStoreOnlyAcceptsProtocolV1(t *testing.T) {
+	db := newNodeRuntimeTestDB(t, "protocol-input")
+	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 1, uuid: "node-a", history: "[]"})
+	ref := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 1}
+	for _, version := range []int64{0, 2} {
+		_, err := NewNodeRuntimeStore(db, nil).ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref, BootNonce: testBootA, ProtocolVersion: version})
+		require.ErrorIs(t, err, ErrNodeRuntimeInvalid)
+	}
+
+	db = newNodeRuntimeTestDB(t, "protocol-persisted")
+	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 1, uuid: "node-a", current: testBootA, history: "[]", epoch: 1, protocol: 2, confirmedRevision: 1, confirmedAt: timePtr(time.Unix(1, 0).UTC()), status: NodeRuntimeStatusActive})
+	_, err := NewNodeRuntimeStore(db, nil).Load(context.Background(), ref)
+	require.ErrorIs(t, err, ErrNodeRuntimeUnavailable)
+}
+
+func TestNodeRuntimeStoreRejectsInvalidNodeUUID(t *testing.T) {
+	db := newNodeRuntimeTestDB(t, "invalid-node-uuid")
+	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 1, uuid: "node-a", history: "[]"})
+	for _, uuid := range []string{"node-\x00a", string([]byte{'n', 0xff, 'e'})} {
+		_, err := NewNodeRuntimeStore(db, nil).Load(context.Background(), NodeRuntimeRef{NodeID: 1, NodeUUID: uuid, NodeRevision: 1})
+		require.ErrorIs(t, err, ErrNodeRuntimeInvalid)
+	}
 }
 
 func TestNodeRuntimeStoreRecreatedAndUnknownPreserveMapping(t *testing.T) {
@@ -114,12 +156,12 @@ func TestNodeRuntimeStoreRecreatedAndUnknownPreserveMapping(t *testing.T) {
 	db := openNodeRuntimeFileDB(t, path)
 	require.NoError(t, db.Exec(nodeRuntimeCreateTableSQL).Error)
 	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 7, uuid: "node-a", history: "[]"})
-	ref := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 7}
+	ref := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 7}
 	confirmedAt := time.Date(2026, 9, 6, 15, 2, 0, 0, time.UTC)
 	first, err := NewNodeRuntimeStore(db, func() time.Time { return confirmedAt }).ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref, BootNonce: testBootA, ProtocolVersion: 1})
 	require.NoError(t, err)
 	require.NoError(t, db.Exec("UPDATE meta_node SET revision = 8").Error)
-	ref.ConfigRevision = 8
+	ref.NodeRevision = 8
 	_, err = NewNodeRuntimeStore(db, func() time.Time { return confirmedAt.Add(time.Minute) }).ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref, BootNonce: testBootB, ProtocolVersion: 1})
 	require.NoError(t, err)
 
@@ -141,11 +183,11 @@ func TestNodeRuntimeStoreDoesNotTreatOldConfirmationAsCurrentRevision(t *testing
 	insertNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 7, uuid: "node-a", history: "[]"})
 	clock := time.Date(2026, 9, 6, 15, 3, 0, 0, time.UTC)
 	store := NewNodeRuntimeStore(db, func() time.Time { return clock })
-	ref7 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 7}
+	ref7 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 7}
 	_, err := store.ConfirmProbe(context.Background(), NodeRuntimeObservation{NodeRuntimeRef: ref7, BootNonce: testBootA, ProtocolVersion: 1})
 	require.NoError(t, err)
 	require.NoError(t, db.Model(&nodeRuntimeTestRow{}).Where("id = ?", 1).Update("revision", 8).Error)
-	ref8 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 8}
+	ref8 := NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 8}
 
 	_, err = store.Load(context.Background(), ref8)
 	require.ErrorIs(t, err, ErrNodeRuntimeStale)
@@ -166,7 +208,7 @@ func TestNodeRuntimeStoreDoesNotTreatOldConfirmationAsCurrentRevision(t *testing
 func TestNodeRuntimeStoreMalformedOrMissingStateFailsClosed(t *testing.T) {
 	t.Run("missing table", func(t *testing.T) {
 		db := newNodeRuntimeBareDB(t, "missing-table")
-		_, err := NewNodeRuntimeStore(db, nil).Load(context.Background(), NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 1})
+		_, err := NewNodeRuntimeStore(db, nil).Load(context.Background(), NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 1})
 		require.ErrorIs(t, err, ErrNodeRuntimeUnavailable)
 	})
 
@@ -182,6 +224,7 @@ func TestNodeRuntimeStoreMalformedOrMissingStateFailsClosed(t *testing.T) {
 		{name: "broken history", row: nodeRuntimeFixture{revision: 1, uuid: "node-a", history: "{"}},
 		{name: "duplicate history", row: nodeRuntimeFixture{revision: 1, uuid: "node-a", history: `["` + testBootA + `","` + testBootA + `"]`}},
 		{name: "current in history", row: nodeRuntimeFixture{revision: 1, uuid: "node-a", current: testBootA, history: `["` + testBootA + `"]`, epoch: 1, protocol: 1, confirmedRevision: 1, confirmedAt: timePtr(time.Unix(1, 0).UTC()), status: NodeRuntimeStatusActive}},
+		{name: "unsupported protocol", row: nodeRuntimeFixture{revision: 1, uuid: "node-a", current: testBootA, history: "[]", epoch: 1, protocol: 2, confirmedRevision: 1, confirmedAt: timePtr(time.Unix(1, 0).UTC()), status: NodeRuntimeStatusActive}},
 		{name: "confirmed revision ahead", row: nodeRuntimeFixture{revision: 1, uuid: "node-a", current: testBootA, history: "[]", epoch: 1, protocol: 1, confirmedRevision: 2, confirmedAt: timePtr(time.Unix(1, 0).UTC()), status: NodeRuntimeStatusActive}},
 		{name: "zero confirmed timestamp", row: nodeRuntimeFixture{revision: 1, uuid: "node-a", current: testBootA, history: "[]", epoch: 1, protocol: 1, confirmedRevision: 1, confirmedAt: timePtr(time.Time{}), status: NodeRuntimeStatusActive}},
 		{name: "unknown with current but no history", row: nodeRuntimeFixture{revision: 1, uuid: "node-a", current: testBootA, historyNull: true, epoch: 1, protocol: 1, confirmedRevision: 1, confirmedAt: timePtr(time.Unix(1, 0).UTC()), status: NodeRuntimeStatusUnknown}},
@@ -193,7 +236,7 @@ func TestNodeRuntimeStoreMalformedOrMissingStateFailsClosed(t *testing.T) {
 			if !tc.row.omit {
 				insertNodeRuntimeRow(t, db, tc.row)
 			}
-			_, err := NewNodeRuntimeStore(db, nil).Load(context.Background(), NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 1})
+			_, err := NewNodeRuntimeStore(db, nil).Load(context.Background(), NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 1})
 			require.ErrorIs(t, err, ErrNodeRuntimeUnavailable)
 		})
 	}
@@ -207,7 +250,7 @@ WHEN NEW.current_boot_nonce IS NOT NULL
 BEGIN SELECT RAISE(ABORT, 'test runtime update rejected'); END`).Error)
 
 	_, err := NewNodeRuntimeStore(db, func() time.Time { return time.Unix(10, 0).UTC() }).ConfirmProbe(context.Background(), NodeRuntimeObservation{
-		NodeRuntimeRef: NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", ConfigRevision: 1}, BootNonce: testBootA, ProtocolVersion: 1,
+		NodeRuntimeRef: NodeRuntimeRef{NodeID: 1, NodeUUID: "node-a", NodeRevision: 1}, BootNonce: testBootA, ProtocolVersion: 1,
 	})
 	require.ErrorIs(t, err, ErrNodeRuntimeUnavailable)
 	requireNodeRuntimeRow(t, db, nodeRuntimeFixture{revision: 1, uuid: "node-a", history: "[]"})
@@ -244,6 +287,7 @@ func newNodeRuntimeBareDB(t *testing.T, name string) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open("file:"+name+"?mode=memory&cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", gormhelper.MaskNotDataError))
+	closeNodeRuntimeDB(t, db)
 	return db
 }
 
@@ -252,6 +296,7 @@ func openNodeRuntimeFileDB(t *testing.T, path string) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open("file:"+path+"?cache=shared"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
 	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("disable_raise_record_not_found", gormhelper.MaskNotDataError))
+	closeNodeRuntimeDB(t, db)
 	return db
 }
 
@@ -377,7 +422,7 @@ func requireNodeRuntimeRow(t *testing.T, db *gorm.DB, want nodeRuntimeFixture) {
 	}
 	if want.confirmedAt != nil {
 		require.NotNil(t, got.RuntimeConfirmedAt)
-		require.Equal(t, want.confirmedAt.UTC().Round(0), got.RuntimeConfirmedAt.UTC().Round(0))
+		require.Equal(t, want.confirmedAt.UTC().Truncate(time.Microsecond), got.RuntimeConfirmedAt.UTC().Truncate(time.Microsecond))
 	}
 	if want.status != "" {
 		require.NotNil(t, got.RuntimeIdentityStatus)
@@ -389,7 +434,15 @@ func dryRunNodeRuntimeDB(t *testing.T, dialector gorm.Dialector) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(dialector, &gorm.Config{DryRun: true, DisableAutomaticPing: true, Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
+	closeNodeRuntimeDB(t, db)
 	return db
+}
+
+func closeNodeRuntimeDB(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	conn, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 }
 
 func mysqlDialector() gorm.Dialector {

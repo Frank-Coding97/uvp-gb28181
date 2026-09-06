@@ -8,6 +8,8 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -17,6 +19,7 @@ import (
 const (
 	NodeRuntimeStatusUnknown = "unknown"
 	NodeRuntimeStatusActive  = "active"
+	NodeRuntimeProtocolV1    = int64(1)
 
 	maxRetiredBootHistoryEntries = 1024
 	maxRetiredBootHistoryBytes   = 64 * 1024
@@ -24,18 +27,19 @@ const (
 
 var (
 	ErrNodeRuntimeUnavailable = errors.New("openapi node runtime unavailable")
-	ErrNodeRuntimeStale       = errors.New("openapi node runtime configuration is stale")
+	ErrNodeRuntimeStale       = errors.New("openapi node runtime node revision is stale")
 	ErrNodeRuntimeRetired     = errors.New("openapi node runtime boot identity is retired")
 	ErrNodeRuntimeInvalid     = errors.New("openapi node runtime observation is invalid")
 )
 
-// NodeRuntimeRef is the caller's already-resolved node identity. The store
-// rechecks all three values against the locked meta_node row; a UUID or
-// configuration revision supplied by an old probe is never accepted.
+// NodeRuntimeRef is the caller's already-resolved node identity. NodeRevision
+// is meta_node.revision, which advances for ordinary node state mutations such
+// as MarkActive/Offline as well as endpoint edits; it is not a pure config
+// revision. The store rechecks all three values against the locked row.
 type NodeRuntimeRef struct {
-	NodeID         int64
-	NodeUUID       string
-	ConfigRevision uint64
+	NodeID       int64
+	NodeUUID     string
+	NodeRevision uint64
 }
 
 // NodeRuntimeObservation is produced only after a trusted, one-to-one media
@@ -75,7 +79,7 @@ func NewNodeRuntimeStore(db *gorm.DB, now func() time.Time) *NodeRuntimeStore {
 }
 
 // Load reads a runtime mapping only when the persisted node still matches the
-// caller's exact ID, UUID, and configuration revision.
+// caller's exact ID, UUID, and node revision.
 func (s *NodeRuntimeStore) Load(ctx context.Context, ref NodeRuntimeRef) (NodeRuntimeSnapshot, error) {
 	if err := validateNodeRuntimeRef(ctx, ref); err != nil {
 		return NodeRuntimeSnapshot{}, err
@@ -89,7 +93,9 @@ func (s *NodeRuntimeStore) Load(ctx context.Context, ref NodeRuntimeRef) (NodeRu
 // ConfirmProbe commits a trusted media-process identity. A repeated boot is
 // idempotent; a new boot retires the old nonce and advances the observation
 // epoch in the same short transaction. A nonce present in retired history can
-// never become current again.
+// never become current again. The caller must serialize probes per node: the
+// store cannot identify an out-of-order first response before any boot is
+// durably current.
 func (s *NodeRuntimeStore) ConfirmProbe(ctx context.Context, observation NodeRuntimeObservation) (NodeRuntimeSnapshot, error) {
 	if err := validateNodeRuntimeObservation(ctx, observation); err != nil {
 		return NodeRuntimeSnapshot{}, err
@@ -97,7 +103,7 @@ func (s *NodeRuntimeStore) ConfirmProbe(ctx context.Context, observation NodeRun
 	if s == nil || s.db == nil || s.now == nil {
 		return NodeRuntimeSnapshot{}, ErrNodeRuntimeUnavailable
 	}
-	confirmedAt := s.now().UTC().Round(0)
+	confirmedAt := s.now().UTC().Truncate(time.Microsecond)
 	if confirmedAt.IsZero() {
 		return NodeRuntimeSnapshot{}, ErrNodeRuntimeUnavailable
 	}
@@ -130,20 +136,30 @@ func (s *NodeRuntimeStore) ConfirmProbe(ctx context.Context, observation NodeRun
 		if err != nil {
 			return ErrNodeRuntimeUnavailable
 		}
-		if observation.ConfigRevision > math.MaxInt64 {
-			return ErrNodeRuntimeInvalid
-		}
 		updates := map[string]any{
 			"current_boot_nonce":         observation.BootNonce,
 			"retired_boot_history":       historyJSON,
 			"runtime_epoch":              epoch,
 			"runtime_protocol_version":   observation.ProtocolVersion,
-			"runtime_confirmed_revision": int64(observation.ConfigRevision),
+			"runtime_confirmed_revision": int64(observation.NodeRevision),
 			"runtime_confirmed_at":       confirmedAt,
 			"runtime_identity_status":    NodeRuntimeStatusActive,
 		}
+		if nodeRuntimeUpdateMatches(current, observation, epoch, history, confirmedAt) {
+			result = NodeRuntimeSnapshot{
+				NodeRuntimeRef:           observation.NodeRuntimeRef,
+				CurrentBootNonce:         observation.BootNonce,
+				RetiredBootHistory:       history,
+				RuntimeEpoch:             epoch,
+				RuntimeProtocolVersion:   observation.ProtocolVersion,
+				RuntimeConfirmedRevision: observation.NodeRevision,
+				RuntimeConfirmedAt:       timePtrUTC(confirmedAt),
+				IdentityStatus:           NodeRuntimeStatusActive,
+			}
+			return nil
+		}
 		updated := tx.Model(&models.MediaNodeSecurity{}).
-			Where("id = ? AND media_server_uuid = ? AND revision = ?", observation.NodeID, observation.NodeUUID, observation.ConfigRevision).
+			Where("id = ? AND media_server_uuid = ? AND revision = ?", observation.NodeID, observation.NodeUUID, observation.NodeRevision).
 			Updates(updates)
 		if updated.Error != nil || updated.RowsAffected != 1 {
 			return ErrNodeRuntimeUnavailable
@@ -154,7 +170,7 @@ func (s *NodeRuntimeStore) ConfirmProbe(ctx context.Context, observation NodeRun
 			RetiredBootHistory:       history,
 			RuntimeEpoch:             epoch,
 			RuntimeProtocolVersion:   observation.ProtocolVersion,
-			RuntimeConfirmedRevision: observation.ConfigRevision,
+			RuntimeConfirmedRevision: observation.NodeRevision,
 			RuntimeConfirmedAt:       timePtrUTC(confirmedAt),
 			IdentityStatus:           NodeRuntimeStatusActive,
 		}
@@ -164,6 +180,25 @@ func (s *NodeRuntimeStore) ConfirmProbe(ctx context.Context, observation NodeRun
 		return NodeRuntimeSnapshot{}, normalizeNodeRuntimeError(err)
 	}
 	return result, nil
+}
+
+func nodeRuntimeUpdateMatches(current NodeRuntimeSnapshot, observation NodeRuntimeObservation, epoch int64, history []string, confirmedAt time.Time) bool {
+	if current.CurrentBootNonce != observation.BootNonce || current.RuntimeEpoch != epoch || current.RuntimeProtocolVersion != observation.ProtocolVersion || current.RuntimeConfirmedRevision != observation.NodeRevision || current.IdentityStatus != NodeRuntimeStatusActive || !sameBootHistory(current.RetiredBootHistory, history) {
+		return false
+	}
+	return current.RuntimeConfirmedAt != nil && current.RuntimeConfirmedAt.Equal(confirmedAt)
+}
+
+func sameBootHistory(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // MarkUnknown records loss of trustworthy runtime continuity without changing
@@ -186,7 +221,7 @@ func (s *NodeRuntimeStore) MarkUnknown(ctx context.Context, ref NodeRuntimeRef) 
 			return nil
 		}
 		updated := tx.Model(&models.MediaNodeSecurity{}).
-			Where("id = ? AND media_server_uuid = ? AND revision = ?", ref.NodeID, ref.NodeUUID, ref.ConfigRevision).
+			Where("id = ? AND media_server_uuid = ? AND revision = ?", ref.NodeID, ref.NodeUUID, ref.NodeRevision).
 			Update("runtime_identity_status", NodeRuntimeStatusUnknown)
 		if updated.Error != nil || updated.RowsAffected != 1 {
 			return ErrNodeRuntimeUnavailable
@@ -237,14 +272,14 @@ func loadNodeRuntime(db *gorm.DB, ref NodeRuntimeRef, lock bool, requireFreshCon
 	if row.ID == nil || *row.ID != ref.NodeID || row.MediaServerUUID == nil || *row.MediaServerUUID == "" || row.Revision == nil || *row.Revision == 0 {
 		return NodeRuntimeSnapshot{}, ErrNodeRuntimeUnavailable
 	}
-	if *row.MediaServerUUID != ref.NodeUUID || *row.Revision != ref.ConfigRevision {
+	if *row.MediaServerUUID != ref.NodeUUID || *row.Revision != ref.NodeRevision {
 		return NodeRuntimeSnapshot{}, ErrNodeRuntimeStale
 	}
 	snapshot, err := snapshotFromProjection(row, ref)
 	if err != nil {
 		return NodeRuntimeSnapshot{}, err
 	}
-	if requireFreshConfirmation && snapshot.CurrentBootNonce != "" && snapshot.RuntimeConfirmedRevision != ref.ConfigRevision {
+	if requireFreshConfirmation && snapshot.CurrentBootNonce != "" && snapshot.RuntimeConfirmedRevision != ref.NodeRevision {
 		return NodeRuntimeSnapshot{}, ErrNodeRuntimeStale
 	}
 	return snapshot, nil
@@ -280,7 +315,7 @@ func snapshotFromProjection(row nodeRuntimeProjection, ref NodeRuntimeRef) (Node
 			return NodeRuntimeSnapshot{}, ErrNodeRuntimeUnavailable
 		}
 	} else {
-		if *row.RuntimeEpoch <= 0 || *row.RuntimeProtocolVersion <= 0 || *row.RuntimeConfirmedRevision <= 0 || row.RuntimeConfirmedAt == nil || row.RuntimeConfirmedAt.IsZero() {
+		if *row.RuntimeEpoch <= 0 || *row.RuntimeProtocolVersion != NodeRuntimeProtocolV1 || *row.RuntimeConfirmedRevision <= 0 || row.RuntimeConfirmedAt == nil || row.RuntimeConfirmedAt.IsZero() {
 			return NodeRuntimeSnapshot{}, ErrNodeRuntimeUnavailable
 		}
 		if historyWasNull {
@@ -290,11 +325,11 @@ func snapshotFromProjection(row nodeRuntimeProjection, ref NodeRuntimeRef) (Node
 			return NodeRuntimeSnapshot{}, ErrNodeRuntimeUnavailable
 		}
 	}
-	if *row.RuntimeConfirmedRevision > math.MaxInt64 || uint64(*row.RuntimeConfirmedRevision) > ref.ConfigRevision {
+	if uint64(*row.RuntimeConfirmedRevision) > ref.NodeRevision {
 		return NodeRuntimeSnapshot{}, ErrNodeRuntimeUnavailable
 	}
 	if row.RuntimeConfirmedAt != nil {
-		confirmedAt := row.RuntimeConfirmedAt.UTC().Round(0)
+		confirmedAt := row.RuntimeConfirmedAt.UTC().Truncate(time.Microsecond)
 		row.RuntimeConfirmedAt = &confirmedAt
 	}
 	return NodeRuntimeSnapshot{
@@ -371,7 +406,7 @@ func validateNodeRuntimeRef(ctx context.Context, ref NodeRuntimeRef) error {
 	if ctx == nil {
 		return ErrNodeRuntimeInvalid
 	}
-	if ref.NodeID <= 0 || ref.ConfigRevision == 0 || ref.ConfigRevision > math.MaxInt64 || ref.NodeUUID == "" || ref.NodeUUID != strings.TrimSpace(ref.NodeUUID) || len(ref.NodeUUID) > 64 {
+	if ref.NodeID <= 0 || ref.NodeRevision == 0 || ref.NodeRevision > math.MaxInt64 || !validNodeUUID(ref.NodeUUID) {
 		return ErrNodeRuntimeInvalid
 	}
 	return nil
@@ -381,7 +416,7 @@ func validateNodeRuntimeObservation(ctx context.Context, observation NodeRuntime
 	if err := validateNodeRuntimeRef(ctx, observation.NodeRuntimeRef); err != nil {
 		return err
 	}
-	if !validBootNonce(observation.BootNonce) || observation.ProtocolVersion <= 0 {
+	if !validBootNonce(observation.BootNonce) || observation.ProtocolVersion != NodeRuntimeProtocolV1 {
 		return ErrNodeRuntimeInvalid
 	}
 	return nil
@@ -393,6 +428,18 @@ func validBootNonce(value string) bool {
 	}
 	_, err := hex.DecodeString(value)
 	return err == nil
+}
+
+func validNodeUUID(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > 64 || !utf8.ValidString(value) {
+		return false
+	}
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func containsBootNonce(history []string, nonce string) bool {
@@ -419,7 +466,7 @@ func normalizeNodeRuntimeError(err error) error {
 }
 
 func timePtrUTC(value time.Time) *time.Time {
-	value = value.UTC().Round(0)
+	value = value.UTC().Truncate(time.Microsecond)
 	return &value
 }
 
