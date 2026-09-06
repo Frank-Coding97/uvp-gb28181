@@ -309,15 +309,20 @@ func TestLoggingAcceptanceDatabaseIsolation(t *testing.T) {
 	if got != 42 {
 		t.Fatalf("TCP 读取结果错误: got=%d", got)
 	}
+	conn, err := database.DB.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
 	probeTable := "t16_tcp_probe_" + acceptanceRandomHex(t, 4)
-	if _, err := database.DB.ExecContext(ctx, "CREATE TEMPORARY TABLE "+quoteMySQLIdentifier(probeTable)+" (value VARCHAR(32) NOT NULL)"); err != nil {
+	if _, err := conn.ExecContext(ctx, "CREATE TEMPORARY TABLE "+quoteMySQLIdentifier(probeTable)+" (value VARCHAR(32) NOT NULL)"); err != nil {
 		t.Fatalf("TCP 写入准备失败: %v", err)
 	}
-	if _, err := database.DB.ExecContext(ctx, "INSERT INTO "+quoteMySQLIdentifier(probeTable)+" (value) VALUES (?)", "isolated"); err != nil {
+	if _, err := conn.ExecContext(ctx, "INSERT INTO "+quoteMySQLIdentifier(probeTable)+" (value) VALUES (?)", "isolated"); err != nil {
 		t.Fatalf("TCP 写入失败: %v", err)
 	}
 	var value string
-	if err := database.DB.QueryRowContext(ctx, "SELECT value FROM "+quoteMySQLIdentifier(probeTable)).Scan(&value); err != nil {
+	if err := conn.QueryRowContext(ctx, "SELECT value FROM "+quoteMySQLIdentifier(probeTable)).Scan(&value); err != nil {
 		t.Fatalf("TCP 回读失败: %v", err)
 	}
 	if value != "isolated" {
