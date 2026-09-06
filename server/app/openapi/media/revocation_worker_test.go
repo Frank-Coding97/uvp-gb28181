@@ -78,16 +78,19 @@ type stubRevocationControl struct {
 	blockPlayers   bool
 	playersEntered chan struct{}
 	releasePlayers chan struct{}
+	onPlayers      func(int)
 }
 
 func (c *stubRevocationControl) GetRuntimeMediaPlayers(_ context.Context, _ zlm.StreamTarget) (zlm.RuntimePlayers, error) {
 	c.mu.Lock()
 	c.playerCalls++
+	playerCall := c.playerCalls
 	err := c.playersErr
 	players := cloneRuntimePlayers(c.players)
 	block := c.blockPlayers
 	entered := c.playersEntered
 	release := c.releasePlayers
+	onPlayers := c.onPlayers
 	if block && entered != nil {
 		select {
 		case <-entered:
@@ -98,6 +101,9 @@ func (c *stubRevocationControl) GetRuntimeMediaPlayers(_ context.Context, _ zlm.
 	c.mu.Unlock()
 	if block && release != nil {
 		<-release
+	}
+	if onPlayers != nil {
+		onPlayers(playerCall)
 	}
 	return players, err
 }
@@ -299,6 +305,78 @@ func TestRevocationWorkerLostKickResponseNeverClaimsKicked(t *testing.T) {
 	require.Equal(t, "awaiting_late_session", f.loadViewer(t, viewer.ID).LastErrorClass)
 }
 
+func TestRevocationWorkerPendingPastFiveSecondsRaisesSanitizedAlarm(t *testing.T) {
+	f := newRevocationWorkerFixture(t, 500*time.Millisecond)
+	viewer := f.seed(t, 13, models.ViewerStateRevokePending)
+	var before models.PlayGrant
+	require.NoError(t, f.db.First(&before, "grant_id = ?", viewer.GrantID).Error)
+	f.clock = f.clock.Add(6 * time.Second)
+	f.control.mu.Lock()
+	f.control.playersErr = errors.New("transport detail must not be persisted")
+	f.control.mu.Unlock()
+
+	result, err := f.worker(10).Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Pending)
+	require.Equal(t, 1, result.Alarms)
+	after := f.loadViewer(t, viewer.ID)
+	require.Equal(t, models.ViewerStateRevokePending, after.State)
+	require.Equal(t, "network_unavailable", after.LastErrorClass)
+	var grant models.PlayGrant
+	require.NoError(t, f.db.First(&grant, "grant_id = ?", viewer.GrantID).Error)
+	require.Equal(t, before.UpdatedAt, grant.UpdatedAt)
+	require.Equal(t, before.Reason, grant.Reason)
+}
+
+func TestRevocationWorkerLimitPrioritizesEarliestDueRetry(t *testing.T) {
+	f := newRevocationWorkerFixture(t, 500*time.Millisecond)
+	laterID := f.seed(t, 14, models.ViewerStateRevokePending)
+	earlierID := f.seed(t, 15, models.ViewerStateRevokePending)
+	laterRetry := f.clock.Add(-time.Second)
+	earlierRetry := f.clock.Add(-2 * time.Second)
+	require.NoError(t, f.db.Model(&models.Viewer{}).Where("id = ?", laterID.ID).Updates(map[string]any{
+		"retry_at": laterRetry, "updated_at": f.clock,
+	}).Error)
+	require.NoError(t, f.db.Model(&models.Viewer{}).Where("id = ?", earlierID.ID).Updates(map[string]any{
+		"retry_at": earlierRetry, "updated_at": f.clock,
+	}).Error)
+	f.control.mu.Lock()
+	f.control.playersErr = errors.New("controlled transient failure")
+	f.control.mu.Unlock()
+
+	result, err := f.worker(1).Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Scanned)
+	require.Equal(t, 1, result.Claimed)
+	require.Equal(t, "revocation_pending", f.loadViewer(t, laterID.ID).LastErrorClass)
+	require.Equal(t, "network_unavailable", f.loadViewer(t, earlierID.ID).LastErrorClass)
+}
+
+func TestRevocationWorkerClaimsEachViewerAtCurrentTime(t *testing.T) {
+	f := newRevocationWorkerFixture(t, 500*time.Millisecond)
+	f.seed(t, 16, models.ViewerStateRevokePending)
+	second := f.seed(t, 17, models.ViewerStateRevokePending)
+	var secondLease time.Time
+	f.control.mu.Lock()
+	f.control.onPlayers = func(call int) {
+		switch call {
+		case 1:
+			f.clock = f.clock.Add(defaultRevocationLease + time.Second)
+		case 2:
+			row := f.loadViewer(t, second.ID)
+			require.NotNil(t, row.RetryAt)
+			secondLease = row.RetryAt.UTC()
+		}
+	}
+	f.control.mu.Unlock()
+
+	result, err := f.worker(10).Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, result.Claimed)
+	require.WithinDuration(t, f.clock.Add(defaultRevocationLease), secondLease, time.Microsecond)
+	require.True(t, secondLease.After(normalizeRevocationTime(f.clock)), "second claim lease must be after its current claim time")
+}
+
 func TestRevocationWorkerFailsClosedForRuntimeTrustAndHookBudget(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -446,23 +524,32 @@ func installMicrosecondPersistence(t *testing.T, db *gorm.DB) {
 func TestRevocationWorkerStaleCompletionCannotApplyLateNetworkResult(t *testing.T) {
 	f := newRevocationWorkerFixture(t, 500*time.Millisecond)
 	viewer := f.seed(t, 30, models.ViewerStateRevokePending)
+	f.clock = f.clock.Add(6 * time.Second)
 	f.setSnapshot([]string{viewer.Identifier}, []string{viewer.Identifier})
 	f.control.mu.Lock()
 	f.control.blockPlayers = true
 	f.control.playersEntered = make(chan struct{})
 	f.control.releasePlayers = make(chan struct{})
 	f.control.mu.Unlock()
-	done := make(chan error, 1)
+	done := make(chan struct {
+		result RevocationTickResult
+		err    error
+	}, 1)
 	go func() {
-		_, err := f.worker(10).Tick(context.Background())
-		done <- err
+		result, err := f.worker(10).Tick(context.Background())
+		done <- struct {
+			result RevocationTickResult
+			err    error
+		}{result: result, err: err}
 	}()
 	<-f.control.playersEntered
 	require.NoError(t, f.db.Model(&models.Viewer{}).Where("id = ?", viewer.ID).Updates(map[string]any{
 		"attempts": 99, "updated_at": f.clock.Add(time.Minute), "last_error_class": "external_update",
 	}).Error)
 	close(f.control.releasePlayers)
-	require.NoError(t, <-done)
+	tick := <-done
+	require.NoError(t, tick.err)
+	require.Equal(t, 0, tick.result.Alarms, "a stale CAS must not report a successful alarm write")
 	row := f.loadViewer(t, viewer.ID)
 	require.Equal(t, models.ViewerStateRevokePending, row.State)
 	require.Equal(t, "external_update", row.LastErrorClass)

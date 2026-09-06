@@ -162,7 +162,7 @@ func (w *RevocationWorker) Tick(ctx context.Context) (RevocationTickResult, erro
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		claim, changed, err := w.claim(ctx, candidate, now)
+		claim, changed, err := w.claim(ctx, candidate, w.currentTime())
 		if err != nil {
 			return result, err
 		}
@@ -202,6 +202,8 @@ func (w *RevocationWorker) dueCandidates(ctx context.Context, now time.Time) ([]
 	err := w.db.WithContext(ctx).Model(&models.Viewer{}).
 		Select("id, grant_id").
 		Where("state = ? AND (retry_at IS NULL OR retry_at <= ?)", models.ViewerStateRevokePending, now).
+		Order("CASE WHEN retry_at IS NULL THEN 0 ELSE 1 END ASC").
+		Order("retry_at ASC").
 		Order("id ASC").Limit(w.limit).Find(&candidates).Error
 	return candidates, err
 }
@@ -351,6 +353,7 @@ func (w *RevocationWorker) processAbsent(ctx context.Context, claim *revocationC
 func (w *RevocationWorker) pending(ctx context.Context, claim *revocationClaim, class string, retryAt *time.Time, alarm bool) (revocationOutcome, error) {
 	class = sanitizeRevocationClass(class)
 	now := w.currentTime()
+	elapsedAlarm := now.Sub(claim.grantUpdatedAt) > maximumHookBudget
 	if retryAt == nil {
 		next := normalizeRevocationTime(now.Add(minimumRevocationRetry))
 		retryAt = &next
@@ -359,7 +362,7 @@ func (w *RevocationWorker) pending(ctx context.Context, claim *revocationClaim, 
 	if err != nil {
 		return revocationOutcome{}, err
 	}
-	return revocationOutcome{stale: !applied, alarm: alarm}, nil
+	return revocationOutcome{stale: !applied, alarm: applied && (alarm || elapsedAlarm)}, nil
 }
 
 func (w *RevocationWorker) close(ctx context.Context, claim *revocationClaim, class string) (revocationOutcome, error) {
