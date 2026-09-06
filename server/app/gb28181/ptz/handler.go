@@ -65,7 +65,7 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 			zap.String("event", "ptz.response.unexpected"),
 			zap.String("operationId", operation.OperationID),
 			zap.String("action", operation.Action),
-			zap.String("bodySummary", summarizePTZBody(body)),
+			zap.Int("body_bytes", len(body)),
 		)
 		return nil
 	}
@@ -200,7 +200,7 @@ func logUnmatchedPTZResponse(ctx context.Context, deviceCode, callID, cseq strin
 		zap.String("responseCseq", cseq),
 		zap.Strings("candidateOperationIds", candidateIDs),
 		zap.String("reason", reason),
-		zap.String("bodySummary", summarizePTZBody(body)),
+		zap.Int("body_bytes", len(body)),
 	)
 }
 
@@ -212,7 +212,7 @@ func logIgnoredPTZResponse(ctx context.Context, operation gbmodels.GbPTZOperatio
 		zap.String("responseCallId", callID),
 		zap.String("responseCseq", cseq),
 		zap.String("status", string(operation.Status)),
-		zap.String("bodySummary", summarizePTZBody(body)),
+		zap.Int("body_bytes", len(body)),
 	)
 }
 
@@ -286,7 +286,7 @@ func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmo
 		app.Log(ctx).Named("ptz").Warn("GB28181 DeviceControl 应答协议非法",
 			zap.String("event", "ptz.response.protocol_invalid"),
 			zap.String("operationId", operation.OperationID),
-			zap.String("bodySummary", summarizePTZBody(body)),
+			zap.Int("body_bytes", len(body)),
 			zap.Error(parseErr),
 		)
 		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "", ptzErrorProtocolInvalid, parseErr.Error())
