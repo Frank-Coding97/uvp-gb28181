@@ -793,7 +793,7 @@ INSERT INTO sys_gen_field VALUES (213, 24, 'created_by', 'int', '创建人', '',
 DROP TABLE IF EXISTS sys_jobs;
 CREATE TABLE sys_jobs (
     id VARCHAR(255) NOT NULL,
-    group VARCHAR(100) NOT NULL,
+    "group" VARCHAR(100) NOT NULL,
     name VARCHAR(200) NOT NULL,
     description TEXT,
     executor_name VARCHAR(100) NOT NULL,
@@ -825,7 +825,7 @@ COMMENT ON COLUMN sys_jobs.executor_name IS '执行器名称';
 COMMENT ON COLUMN sys_jobs.parameters IS '任务参数(JSON格式)';
 COMMENT ON COLUMN sys_jobs.timeout IS '超时时间(纳秒)';
 COMMENT ON COLUMN sys_jobs.running_count IS '当前运行中的任务数';
-COMMENT ON COLUMN sys_jobs.group IS '任务分组名称';
+COMMENT ON COLUMN sys_jobs."group" IS '任务分组名称';
 COMMENT ON COLUMN sys_jobs.execution_policy IS '执行策略: 0=单次执行, 1=重复执行';
 COMMENT ON COLUMN sys_jobs.status IS '任务状态: 0=禁用, 1=启用';
 COMMENT ON COLUMN sys_jobs.cron_expression IS 'Cron表达式';

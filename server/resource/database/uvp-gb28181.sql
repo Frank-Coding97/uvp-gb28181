@@ -771,7 +771,7 @@ CREATE TABLE `gb_ptz_state` (
   UNIQUE KEY `uk_ptz_state_channel` (`channel_id`),
   KEY `idx_ptz_state_device` (`device_id`),
   KEY `idx_ptz_state_received` (`received_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 latest PTZ state';;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='GB28181 latest PTZ state';
 
 -- Recording plan domain tables
 DROP TABLE IF EXISTS `gb_recording_plan_gap`;
