@@ -301,15 +301,40 @@ func TestLoggingBootstrapRunningReloadPromotesToProcessStop(t *testing.T) {
 	require.NoError(t, err)
 	stopResult := make(chan error, 1)
 	go func() { stopResult <- StopContext(context.Background()) }()
-	<-server.quiesceStarted
-	require.True(t, run.process.Load())
-	sipLifecycleMu.Lock()
-	controlGeneration := run.controlGeneration
-	sipLifecycleMu.Unlock()
+	controlGeneration := waitForBootstrapControlGeneration(t, run, server.quiesceRelease, stopResult)
 	require.NotNil(t, controlGeneration)
 	close(server.quiesceRelease)
 	require.NoError(t, <-stopResult)
 	require.Equal(t, 1, server.shutdownCount)
+}
+
+func waitForBootstrapControlGeneration(t *testing.T, run *bootstrapShutdownRun, quiesceRelease chan struct{}, stopResult <-chan error) *shutdownGeneration {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		sipLifecycleMu.Lock()
+		controlGeneration := run.controlGeneration
+		process := run.process.Load()
+		sipLifecycleMu.Unlock()
+		if controlGeneration != nil {
+			require.True(t, process)
+			return controlGeneration
+		}
+		select {
+		case <-ticker.C:
+		case <-deadline.C:
+			close(quiesceRelease)
+			select {
+			case <-stopResult:
+			case <-time.After(time.Second):
+				t.Fatal("StopContext did not finish after releasing quiesce")
+			}
+			t.Fatal("StopContext did not bind control generation")
+		}
+	}
 }
 
 func TestLoggingBootstrapCompletedReloadStopDoesNotRecloseSIP(t *testing.T) {
