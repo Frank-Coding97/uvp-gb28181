@@ -12,6 +12,9 @@ import (
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
+	openapiauth "uvplatform.cn/uvp-gb28181/app/openapi/auth"
+	openapicontrollers "uvplatform.cn/uvp-gb28181/app/openapi/controllers"
+	openapiroutes "uvplatform.cn/uvp-gb28181/app/openapi/routes"
 )
 
 var userControllers = controllers.NewUserController()                       // 用户控制器
@@ -38,6 +41,20 @@ var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // �
 func InitRoutes(engine *gin.Engine) {
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())
+	}
+	var openAPIGateway *openapiauth.Gateway
+	var openAPIAdmin *openapicontrollers.ClientAdminController
+	if app.ConfigYml.GetBool("openapi.enabled") {
+		startupContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		var err error
+		openAPIGateway, openAPIAdmin, err = openapiroutes.InitializeRuntime(startupContext, app.DB(), app.CasbinV2, app.ConfigYml)
+		cancel()
+		if err != nil {
+			panic("OpenAPI initialization failed; ingress remains closed")
+		}
+	}
+	if err := openapiroutes.InstallPublicBoundary(engine, openAPIGateway, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
+		panic("invalid OpenAPI proxy configuration")
 	}
 	// 全局跨域中间件
 	if app.ConfigYml.GetBool("httpserver.allowcrossdomain") {
@@ -101,6 +118,7 @@ func InitRoutes(engine *gin.Engine) {
 		protected.Use(middleware.JWTAuthMiddleware())
 		protected.Use(middleware.DemoAccountMiddleware()) // 添加演示账号中间件
 		protected.Use(middleware.CasbinMiddleware())
+		openapiroutes.RegisterAdminRoutes(protected, openAPIAdmin)
 		{
 			sysOnlineUser := protected.Group("/sysOnlineUser")
 			{

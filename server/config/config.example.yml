@@ -54,6 +54,13 @@ httpserver:
   idle_timeout: 60    # TCP空闲连接超时(秒)
   handler_timeout: 30 #  请求处理超时(秒)，超过该时间，将返回超时错误
   trustedproxies: [] # 明确配置反向代理 IP/CIDR；为空时不信任 X-Forwarded-For
+openapi:
+  enabled: false # 首版单 API 进程；启动时决定，默认关闭；媒体申请仍受独立门禁
+  audience: "" # 部署固定的随机环境标识，不同环境不得共享
+  master_key_id: "" # 必须与已有密文 keyId 匹配；不在此文件存主密钥
+  # 主密钥仅从 UVP_OPENAPI_MASTER_KEY 注入：32 随机字节的无填充 base64url
+  tls_terminator_proxies: [] # 单独授权的 TLS 终止代理 IP/CIDR，不自动继承 trustedproxies
+  request_timeout_seconds: 5 # 预留末尾 1 秒同步审计；HTTP write_timeout 必须大于此值+1
 token:
   jwttokensignkey:  "CHANGE_ME_TO_A_RANDOM_SECRET"   # ⚠️ 部署前必须改成项目专属随机字符串(token 加密签名,泄露=任何人可伪造 token)
   jwttokenexpire:  43200    #设置token过期时间，单位秒 示例:43200=12小时
