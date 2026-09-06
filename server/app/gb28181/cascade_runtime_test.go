@@ -9,6 +9,8 @@ import (
 
 	"github.com/emiago/sipgo/sip"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/cascade/securestore"
@@ -16,6 +18,7 @@ import (
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 func TestCascadeKeepaliveEncoderUsesProfileCharsetAndRequiredFields(t *testing.T) {
@@ -110,6 +113,26 @@ func TestCascadeCredentialWarningNeededIsPerAssembly(t *testing.T) {
 			require.Equal(t, tc.want, cascadeCredentialWarningNeeded(tc.err, tc.alreadyReported))
 		})
 	}
+}
+
+func TestLoggingCascadeWarningOutput(t *testing.T) {
+	core, observed := observer.New(zap.DebugLevel)
+	previousLogger := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = previousLogger })
+
+	warnCascadeCredentialKeyUnavailable()
+
+	require.Len(t, observed.All(), 1)
+	entry := observed.All()[0]
+	require.Equal(t, zap.WarnLevel, entry.Level)
+	require.Equal(t, cascadeCredentialKeyWarningMessage, entry.Message)
+	require.Empty(t, entry.Stack)
+	fields := entry.ContextMap()
+	require.Equal(t, cascadeCredentialKeyWarningEvent, fields["event"])
+	require.Equal(t, cascadeCredentialKeyEnv, fields["env"])
+	require.Equal(t, "restricted", fields["config_write"])
+	require.Equal(t, "restricted", fields["encrypted_platform_runtime"])
 }
 
 func TestCascadeResourceAcquirerOnlyUsesExistingSharedListener(t *testing.T) {

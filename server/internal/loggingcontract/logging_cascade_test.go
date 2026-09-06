@@ -67,20 +67,30 @@ func TestLoggingCascadeWarning(t *testing.T) {
 	}
 
 	start := requireLoggingCascadeFunction(t, bootstrap, "Start")
+	warningState := requireLoggingCascadeAssignmentResult(t, start.Body, "startControlPlane")
+	startDependenciesCall := requireLoggingCascadeCall(t, start.Body, "startSIPDependencies")
 	if got := loggingCascadeCallArgCounts(start.Body, "startSIPDependencies"); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("Start startSIPDependencies args = %v, want [2]", got)
 	}
+	if got := loggingCascadeIdentArg(startDependenciesCall, 1); got != warningState {
+		t.Fatalf("Start warning state arg = %q, want %q", got, warningState)
+	}
 	reload := requireLoggingCascadeFunction(t, bootstrap, "ReloadSIP")
+	reloadDependenciesCall := requireLoggingCascadeCall(t, reload.Body, "startSIPDependencies")
 	if got := loggingCascadeCallArgCounts(reload.Body, "startSIPDependencies"); len(got) != 1 || got[0] != 2 {
 		t.Fatalf("ReloadSIP startSIPDependencies args = %v, want [2]", got)
 	}
+	if !loggingCascadeIsFalse(reloadDependenciesCall.Args[1]) {
+		t.Fatalf("ReloadSIP warning state arg = %s, want false", loggingCascadeExprName(reloadDependenciesCall.Args[1]))
+	}
+	if got := loggingCascadeIdentArg(requireLoggingCascadeCall(t, startDeps.Body, "startCascadeRuntime"), 2); got != warningState {
+		t.Fatalf("startCascadeRuntime warning state arg = %q, want %q", got, warningState)
+	}
 
-	for _, source := range []string{
-		loggingCascadeSource(t, filepath.Join(root, "app", "gb28181", "bootstrap.go")),
-		loggingCascadeSource(t, filepath.Join(root, "app", "gb28181", "cascade_runtime.go")),
-	} {
-		if strings.Contains(source, "sync.Once") {
-			t.Error("cascade warning must not use process-global sync.Once")
+	warningNeeded := requireLoggingCascadeFunction(t, cascade, "cascadeCredentialWarningNeeded")
+	for _, fn := range []*ast.FuncDecl{warningNeeded, warning} {
+		if loggingCascadeHasSyncOnce(fn) {
+			t.Errorf("cascade warning scope %s must not use sync.Once", fn.Name.Name)
 		}
 	}
 }
@@ -124,27 +134,94 @@ func requireLoggingCascadeFunction(t *testing.T, file *ast.File, name string) *a
 }
 
 func countLoggingCascadeCalls(body *ast.BlockStmt, name string) int {
-	count := 0
-	ast.Inspect(body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if ok && loggingCascadeCallName(call.Fun) == name {
-			count++
-		}
-		return true
-	})
-	return count
+	return len(loggingCascadeCalls(body, name))
 }
 
 func loggingCascadeCallArgCounts(body *ast.BlockStmt, name string) []int {
 	counts := make([]int, 0)
+	for _, call := range loggingCascadeCalls(body, name) {
+		counts = append(counts, len(call.Args))
+	}
+	return counts
+}
+
+func loggingCascadeCalls(body *ast.BlockStmt, name string) []*ast.CallExpr {
+	calls := make([]*ast.CallExpr, 0)
 	ast.Inspect(body, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if ok && loggingCascadeCallName(call.Fun) == name {
-			counts = append(counts, len(call.Args))
+			calls = append(calls, call)
 		}
 		return true
 	})
-	return counts
+	return calls
+}
+
+func requireLoggingCascadeCall(t *testing.T, body *ast.BlockStmt, name string) *ast.CallExpr {
+	t.Helper()
+	calls := loggingCascadeCalls(body, name)
+	if len(calls) != 1 {
+		t.Fatalf("function call %s count = %d, want 1", name, len(calls))
+	}
+	return calls[0]
+}
+
+func requireLoggingCascadeAssignmentResult(t *testing.T, body *ast.BlockStmt, calledName string) string {
+	t.Helper()
+	var result string
+	ast.Inspect(body, func(node ast.Node) bool {
+		assignment, ok := node.(*ast.AssignStmt)
+		if !ok || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
+			return true
+		}
+		call, ok := assignment.Rhs[0].(*ast.CallExpr)
+		if !ok || loggingCascadeCallName(call.Fun) != calledName {
+			return true
+		}
+		if identifier, ok := assignment.Lhs[0].(*ast.Ident); ok {
+			result = identifier.Name
+		}
+		return true
+	})
+	if result == "" {
+		t.Fatalf("function result assigned from %s is missing", calledName)
+	}
+	return result
+}
+
+func loggingCascadeIdentArg(call *ast.CallExpr, index int) string {
+	if call == nil || index < 0 || index >= len(call.Args) {
+		return ""
+	}
+	return loggingCascadeExprName(call.Args[index])
+}
+
+func loggingCascadeExprName(expression ast.Expr) string {
+	if identifier, ok := expression.(*ast.Ident); ok {
+		return identifier.Name
+	}
+	return ""
+}
+
+func loggingCascadeIsFalse(expression ast.Expr) bool {
+	return loggingCascadeExprName(expression) == "false"
+}
+
+func loggingCascadeHasSyncOnce(fn *ast.FuncDecl) bool {
+	if fn == nil || fn.Body == nil {
+		return false
+	}
+	found := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		selector, ok := node.(*ast.SelectorExpr)
+		if ok && selector.Sel.Name == "Once" {
+			if packageName, ok := selector.X.(*ast.Ident); ok && packageName.Name == "sync" {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
 }
 
 func loggingCascadeCallName(expression ast.Expr) string {
