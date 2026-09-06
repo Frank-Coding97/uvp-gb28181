@@ -1,0 +1,631 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { Modal, Message } from "@arco-design/web-vue";
+import { Ban, Eye, KeyRound, Plus, RefreshCw, RotateCcw, ScrollText, Search, ShieldCheck, ShieldOff } from "lucide-vue-next";
+import { useUserStoreHook } from "@/store/modules/user";
+import {
+  createOpenAPIClient,
+  disableOpenAPIClient,
+  enableOpenAPIClient,
+  getOpenAPIClient,
+  getOpenAPIClientCapabilities,
+  getOpenAPIClientRevocationStatus,
+  isOpenAPISuccess,
+  listOpenAPIClientAudits,
+  listOpenAPIClients,
+  revokeOpenAPIClient,
+  rotateOpenAPIClientSecret,
+  updateOpenAPIClientScopes,
+  type OpenAPIClientAudit,
+  type OpenAPIClientCreateInput,
+  type OpenAPIClientListParams,
+  type OpenAPIClientStatus,
+  type OpenAPIClientView,
+  type OpenAPIManagedDepartment,
+  type OpenAPIRevocationStatus,
+  type OpenAPIScopeView
+} from "@/api/gb28181-openapi";
+import OpenAPIClientDrawer from "./OpenAPIClientDrawer.vue";
+import OpenAPISecretDialog from "./OpenAPISecretDialog.vue";
+
+type StatusAction = "enable" | "disable" | "revoke";
+
+const userStore = useUserStoreHook();
+const permissions = computed(() => userStore.account?.permissions || []);
+const hasPermission = (permission: string) => permissions.value.includes("*:*:*") || permissions.value.includes(permission);
+const canRead = computed(() => hasPermission("gb28181:openapi:client:read"));
+const canCreate = computed(() => hasPermission("gb28181:openapi:client:create"));
+const canGrant = computed(() => hasPermission("gb28181:openapi:client:grant"));
+const canRotate = computed(() => hasPermission("gb28181:openapi:client:rotate"));
+const canStatus = computed(() => hasPermission("gb28181:openapi:client:status"));
+const canAudit = computed(() => hasPermission("gb28181:openapi:client:audit"));
+
+const clients = ref<OpenAPIClientView[]>([]);
+const ownerDepartments = ref<OpenAPIManagedDepartment[]>([]);
+const capabilities = ref<string[]>([]);
+const loading = ref(false);
+const capabilitiesLoading = ref(false);
+const error = ref("");
+const capabilitiesError = ref("");
+const form = reactive({ ownerDeptId: undefined as number | undefined });
+const pagination = reactive({ current: 1, pageSize: 20, total: 0, showTotal: true, showJumper: true, showPageSize: true });
+const tableScroll = computed(() => ({ x: "100%", minWidth: 1120 }));
+
+const drawerVisible = ref(false);
+const drawerMode = ref<"create" | "detail">("detail");
+const drawerLoading = ref(false);
+const drawerError = ref("");
+const currentClient = ref<OpenAPIClientView | null>(null);
+const currentScopes = ref<OpenAPIScopeView[]>([]);
+const revocationStatus = ref<OpenAPIRevocationStatus | null>(null);
+const revocationError = ref("");
+const revocationLoading = ref(false);
+const auditItems = ref<OpenAPIClientAudit[]>([]);
+const auditLoading = ref(false);
+
+const secretPayload = ref<{ accessKey: string; secretKey: string } | null>(null);
+const secretOperation = ref<"create" | "rotate">("create");
+const secretVisible = computed(() => secretPayload.value !== null);
+const authStatus = computed(() => currentClient.value?.status || null);
+
+let requestVersion = 0;
+
+function buildParams(): OpenAPIClientListParams {
+  const params: OpenAPIClientListParams = { page: pagination.current, pageSize: pagination.pageSize };
+  if (form.ownerDeptId) params.ownerDeptId = form.ownerDeptId;
+  return params;
+}
+
+function errorMessage(cause: unknown, fallback: string) {
+  if (cause && typeof cause === "object" && "response" in cause) {
+    const response = (cause as { response?: { data?: { message?: string } } }).response;
+    const message = response?.data?.message;
+    if (message) return String(message);
+  }
+  if (cause instanceof Error && cause.message) return cause.message;
+  if (typeof cause === "string") return cause;
+  return fallback;
+}
+
+function responseError<T>(response: { code: string; message: string; data: T }, fallback: string) {
+  return isOpenAPISuccess(response) ? null : new Error(response.message || fallback);
+}
+
+function httpStatus(cause: unknown) {
+  if (!cause || typeof cause !== "object" || !("response" in cause)) return 0;
+  return Number((cause as { response?: { status?: number } }).response?.status || 0);
+}
+
+function conflictMessage(rowVersion: number) {
+  return `版本冲突：页面提交的 rowVersion=${rowVersion} 已失效，已刷新当前详情，请确认最新状态后重试。`;
+}
+
+function departmentName(id: number) {
+  return ownerDepartments.value.find(item => item.id === id)?.name || `部门 #${id}`;
+}
+
+function statusLabel(status: OpenAPIClientStatus) {
+  return status === "active" ? "启用" : status === "disabled" ? "停用" : "已撤销";
+}
+
+function statusColor(status: OpenAPIClientStatus) {
+  return status === "active" ? "green" : status === "disabled" ? "orange" : "red";
+}
+
+async function loadCapabilities() {
+  if (!canRead.value) return;
+  capabilitiesLoading.value = true;
+  capabilitiesError.value = "";
+  try {
+    const result = await getOpenAPIClientCapabilities();
+    const failure = responseError(result, "能力目录加载失败");
+    if (failure) throw failure;
+    capabilities.value = Array.isArray(result.data) ? result.data : [];
+  } catch (cause: unknown) {
+    capabilities.value = [];
+    capabilitiesError.value = errorMessage(cause, "能力目录加载失败");
+  } finally {
+    capabilitiesLoading.value = false;
+  }
+}
+
+async function load() {
+  if (!canRead.value) {
+    clients.value = [];
+    ownerDepartments.value = [];
+    return;
+  }
+  const version = ++requestVersion;
+  loading.value = true;
+  error.value = "";
+  try {
+    const result = await listOpenAPIClients(buildParams());
+    if (version !== requestVersion) return;
+    const failure = responseError(result, "OpenAPI 客户端加载失败");
+    if (failure) throw failure;
+    clients.value = result.data?.items || [];
+    ownerDepartments.value = result.data?.ownerDepartments || [];
+    pagination.total = result.data?.total || 0;
+  } catch (cause: unknown) {
+    if (version !== requestVersion) return;
+    clients.value = [];
+    ownerDepartments.value = [];
+    pagination.total = 0;
+    error.value = errorMessage(cause, "OpenAPI 客户端加载失败");
+  } finally {
+    if (version === requestVersion) loading.value = false;
+  }
+}
+
+async function search() {
+  pagination.current = 1;
+  await load();
+}
+
+async function reset() {
+  form.ownerDeptId = undefined;
+  pagination.current = 1;
+  await load();
+}
+
+async function handlePageChange(current: number) {
+  pagination.current = current;
+  await load();
+}
+
+async function handlePageSizeChange(pageSize: number) {
+  pagination.pageSize = pageSize;
+  pagination.current = 1;
+  await load();
+}
+
+function updateListClient(updated: OpenAPIClientView) {
+  const index = clients.value.findIndex(item => item.id === updated.id);
+  if (index >= 0) clients.value.splice(index, 1, updated);
+}
+
+async function loadRevocationStatus(id = currentClient.value?.id) {
+  if (!canStatus.value || !id) return;
+  revocationLoading.value = true;
+  revocationError.value = "";
+  try {
+    const result = await getOpenAPIClientRevocationStatus(id);
+    const failure = responseError(result, "撤销清退进度暂不可用");
+    if (failure) throw failure;
+    revocationStatus.value = result.data;
+  } catch (cause: unknown) {
+    revocationStatus.value = null;
+    revocationError.value = `撤销清退进度暂不可用：${errorMessage(cause, "服务未就绪")}`;
+  } finally {
+    revocationLoading.value = false;
+  }
+}
+
+async function refreshDetail(id: number) {
+  drawerLoading.value = true;
+  try {
+    const result = await getOpenAPIClient(id);
+    const failure = responseError(result, "客户端详情加载失败");
+    if (failure) throw failure;
+    currentClient.value = result.data.client;
+    currentScopes.value = result.data.scopes || [];
+    updateListClient(result.data.client);
+    await loadRevocationStatus(id);
+  } finally {
+    drawerLoading.value = false;
+  }
+}
+
+async function openDetail(record: OpenAPIClientView) {
+  if (!canRead.value || drawerLoading.value) return;
+  drawerMode.value = "detail";
+  currentClient.value = record;
+  currentScopes.value = [];
+  revocationStatus.value = null;
+  revocationError.value = "";
+  auditItems.value = [];
+  drawerError.value = "";
+  drawerVisible.value = true;
+  try {
+    await refreshDetail(record.id);
+  } catch (cause: unknown) {
+    drawerError.value = errorMessage(cause, "客户端详情加载失败");
+  }
+}
+
+function openCreate() {
+  if (!canCreate.value) return;
+  drawerMode.value = "create";
+  currentClient.value = null;
+  currentScopes.value = [];
+  drawerError.value = "";
+  drawerVisible.value = true;
+}
+
+function closeDrawer() {
+  drawerVisible.value = false;
+  drawerError.value = "";
+  currentClient.value = null;
+  currentScopes.value = [];
+  revocationStatus.value = null;
+  revocationError.value = "";
+  auditItems.value = [];
+}
+
+async function performCreate(input: OpenAPIClientCreateInput) {
+  if (!canCreate.value || drawerLoading.value) return;
+  drawerLoading.value = true;
+  drawerError.value = "";
+  try {
+    const result = await createOpenAPIClient(input);
+    const failure = responseError(result, "创建 OpenAPI 客户端失败");
+    if (failure || !result.data?.client || !result.data.secretKey) throw failure || new Error("创建响应缺少一次性 SK");
+    secretOperation.value = "create";
+    secretPayload.value = { accessKey: result.data.client.ak, secretKey: result.data.secretKey };
+    closeDrawer();
+    Message.success("客户端创建成功，请安全保存一次性 SK");
+    await load();
+  } catch (cause: unknown) {
+    drawerError.value = errorMessage(cause, "创建 OpenAPI 客户端失败");
+  } finally {
+    drawerLoading.value = false;
+  }
+}
+
+async function saveScopes(id: number, scopes: string[], rowVersion: number) {
+  if (!canGrant.value || drawerLoading.value) return;
+  drawerLoading.value = true;
+  drawerError.value = "";
+  try {
+    const result = await updateOpenAPIClientScopes(id, { rowVersion, scopes });
+    const failure = responseError(result, "保存客户端能力失败");
+    if (failure) throw failure;
+    if (result.data) updateListClient(result.data);
+    await refreshDetail(id);
+    Message.success("客户端能力已更新");
+  } catch (cause: unknown) {
+    if (httpStatus(cause) === 409) {
+      drawerError.value = conflictMessage(rowVersion);
+      try { await refreshDetail(id); } catch { /* keep the explicit conflict message */ }
+    } else {
+      drawerError.value = errorMessage(cause, "保存客户端能力失败");
+    }
+  } finally {
+    drawerLoading.value = false;
+  }
+}
+
+async function performRotate(record: OpenAPIClientView = currentClient.value as OpenAPIClientView) {
+  if (!canRotate.value || !record || drawerLoading.value) return;
+  drawerLoading.value = true;
+  drawerError.value = "";
+  try {
+    const result = await rotateOpenAPIClientSecret(record.id, record.rowVersion);
+    const failure = responseError(result, "轮换 SK 失败");
+    if (failure || !result.data?.client || !result.data.secretKey) throw failure || new Error("轮换响应缺少一次性 SK");
+    secretOperation.value = "rotate";
+    secretPayload.value = { accessKey: result.data.client.ak, secretKey: result.data.secretKey };
+    currentClient.value = result.data.client;
+    updateListClient(result.data.client);
+    Message.success("SK 已轮换，请安全保存新的密钥");
+  } catch (cause: unknown) {
+    if (httpStatus(cause) === 409) {
+      drawerError.value = conflictMessage(record.rowVersion);
+      try { await refreshDetail(record.id); } catch { /* keep the explicit conflict message */ }
+    } else {
+      drawerError.value = errorMessage(cause, "轮换 SK 失败");
+    }
+  } finally {
+    drawerLoading.value = false;
+  }
+}
+
+async function performStatus(action: StatusAction, record: OpenAPIClientView = currentClient.value as OpenAPIClientView) {
+  if (!canStatus.value || !record || drawerLoading.value) return;
+  drawerLoading.value = true;
+  drawerError.value = "";
+  try {
+    const request = action === "enable" ? enableOpenAPIClient : action === "disable" ? disableOpenAPIClient : revokeOpenAPIClient;
+    const result = await request(record.id, record.rowVersion);
+    const failure = responseError(result, `${action === "enable" ? "启用" : action === "disable" ? "停用" : "撤销"}客户端失败`);
+    if (failure || !result.data?.client) throw failure || new Error("状态变更响应缺少客户端");
+    currentClient.value = result.data.client;
+    updateListClient(result.data.client);
+    if (action !== "enable") {
+      revocationStatus.value = { status: result.data.revocationStatus || "pending", pending: 0, closed: 0 };
+      revocationError.value = "";
+      await loadRevocationStatus(record.id);
+    } else {
+      revocationStatus.value = null;
+      revocationError.value = "";
+    }
+    Message.success(action === "enable" ? "客户端已启用" : action === "disable" ? "客户端认证已停用，清退进度另行确认" : "客户端已撤销，清退进度另行确认");
+    if (action !== "enable") drawerVisible.value = true;
+  } catch (cause: unknown) {
+    if (httpStatus(cause) === 409) {
+      drawerError.value = conflictMessage(record.rowVersion);
+      try { await refreshDetail(record.id); } catch { /* keep the explicit conflict message */ }
+    } else {
+      drawerError.value = errorMessage(cause, "客户端状态变更失败");
+    }
+  } finally {
+    drawerLoading.value = false;
+  }
+}
+
+function requestStatus(action: StatusAction, record: OpenAPIClientView) {
+  if (!canStatus.value) return;
+  const isRevoke = action === "revoke";
+  Modal.confirm({
+    title: isRevoke ? "撤销 OpenAPI 客户端" : action === "disable" ? "停用 OpenAPI 客户端" : "启用 OpenAPI 客户端",
+    content: isRevoke
+      ? "撤销不可恢复，认证会立即失败；观看连接清退需以服务端进度确认，不会自动误伤其他客户端。"
+      : action === "disable"
+        ? "停用会立即阻止新请求；观看连接不会被前端虚报为已清退，请在详情中查看服务端进度。"
+        : "启用不会恢复旧的播放授权，请确认客户端仍属于有效部门。",
+    okText: isRevoke ? "确认撤销" : action === "disable" ? "确认停用" : "确认启用",
+    cancelText: "取消",
+    okButtonProps: isRevoke || action === "disable" ? { status: "danger" } : undefined,
+    onOk: () => performStatus(action, record)
+  });
+}
+
+async function refreshRevocation() {
+  await loadRevocationStatus();
+}
+
+async function loadAudits() {
+  if (!canAudit.value || !currentClient.value) return;
+  auditLoading.value = true;
+  try {
+    const result = await listOpenAPIClientAudits(currentClient.value.id);
+    const failure = responseError(result, "审计加载失败");
+    if (failure) throw failure;
+    auditItems.value = result.data?.items || [];
+  } catch (cause: unknown) {
+    drawerError.value = errorMessage(cause, "审计加载失败");
+  } finally {
+    auditLoading.value = false;
+  }
+}
+
+function closeSecret() {
+  secretPayload.value = null;
+  secretOperation.value = "create";
+}
+
+onMounted(() => {
+  if (canRead.value) {
+    void load();
+    void loadCapabilities();
+  }
+});
+
+onBeforeUnmount(() => {
+  requestVersion += 1;
+  secretPayload.value = null;
+});
+
+defineExpose({
+  clients,
+  ownerDepartments,
+  capabilities,
+  form,
+  pagination,
+  error,
+  drawerError,
+  authStatus,
+  revocationStatus,
+  revocationError,
+  secretPayload,
+  load,
+  search,
+  reset,
+  handlePageChange,
+  handlePageSizeChange,
+  openDetail,
+  openCreate,
+  closeDrawer,
+  performCreate,
+  saveScopes,
+  performRotate,
+  performStatus,
+  refreshRevocation,
+  loadAudits,
+  closeSecret
+});
+</script>
+
+<template>
+  <div class="snow-page openapi-client-page">
+    <div class="snow-inner uvp-page-shell-flat openapi-client-page__inner">
+      <template v-if="canRead">
+        <s-layout-search>
+          <template #fields>
+            <div class="openapi-client-filter">
+              <a-select v-model="form.ownerDeptId" placeholder="归属部门" allow-clear allow-search>
+                <a-option v-for="department in ownerDepartments" :key="department.id" :value="department.id">{{ department.name }}</a-option>
+              </a-select>
+            </div>
+          </template>
+          <template #actions>
+            <a-button type="primary" @click="search"><template #icon><Search :size="16" /></template>查询</a-button>
+            <a-button @click="reset"><template #icon><RotateCcw :size="16" /></template>重置</a-button>
+          </template>
+          <template #extra>
+            <a-tooltip content="刷新 OpenAPI 客户端" position="top">
+              <a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新 OpenAPI 客户端" @click="load">
+                <template #icon><RefreshCw :size="16" /></template>刷新
+              </a-button>
+            </a-tooltip>
+            <a-button v-if="canCreate" type="primary" @click="openCreate"><template #icon><Plus :size="16" /></template>新建客户端</a-button>
+          </template>
+        </s-layout-search>
+
+        <div v-if="error" class="openapi-client-page__error" role="alert">
+          <span>{{ error }}</span>
+          <a-button size="small" @click="load">重试</a-button>
+        </div>
+        <div v-if="capabilitiesError" class="openapi-client-page__notice" role="status">{{ capabilitiesError }}；能力授权暂不可用。</div>
+        <div v-if="!error" class="openapi-client-page__boundary-note">
+          所有客户端只允许访问归属部门的设备，不包含下级部门或共享设备；认证状态与观看连接清退状态分别确认。
+        </div>
+
+        <a-table
+          v-if="!error"
+          class="uvp-data-table openapi-client-table"
+          row-key="id"
+          :data="clients"
+          :loading="loading || capabilitiesLoading"
+          :pagination="pagination"
+          :scroll="tableScroll"
+          :bordered="false"
+          @page-change="handlePageChange"
+          @page-size-change="handlePageSizeChange"
+        >
+          <template #empty><a-empty description="暂无 OpenAPI 客户端" /></template>
+          <a-table-column title="客户端" :width="220">
+            <template #cell="{ record }">
+              <div class="openapi-client-table__name">{{ record.name }}</div>
+              <code class="openapi-client-table__ak">{{ record.ak }}</code>
+            </template>
+          </a-table-column>
+          <a-table-column title="归属部门（精确）" :width="190">
+            <template #cell="{ record }">
+              <span>{{ departmentName(record.ownerDeptId) }}</span>
+              <small class="openapi-client-table__hint">不含下级 / 共享设备</small>
+            </template>
+          </a-table-column>
+          <a-table-column title="认证状态" :width="110">
+            <template #cell="{ record }"><a-tag :color="statusColor(record.status)">{{ statusLabel(record.status) }}</a-tag></template>
+          </a-table-column>
+          <a-table-column title="密钥版本" data-index="secretVersion" :width="100" />
+          <a-table-column title="rowVersion" data-index="rowVersion" :width="100" />
+          <a-table-column title="操作" :width="520" fixed="right">
+            <template #cell="{ record }">
+              <div class="openapi-client-table__actions">
+                <a-button v-if="canRead" type="text" class="uvp-table-action" @click="openDetail(record)"><template #icon><Eye :size="15" /></template>详情</a-button>
+                <a-button v-if="canGrant" type="text" class="uvp-table-action uvp-table-action--permission" @click="openDetail(record)"><template #icon><ShieldCheck :size="15" /></template>能力</a-button>
+                <a-button v-if="canRotate && record.status !== 'revoked'" type="text" class="uvp-table-action" @click="performRotate(record)"><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button>
+                <a-button v-if="canStatus && record.status === 'active'" type="text" status="warning" @click="requestStatus('disable', record)"><template #icon><ShieldOff :size="15" /></template>停用</a-button>
+                <a-button v-if="canStatus && record.status === 'disabled'" type="text" @click="requestStatus('enable', record)"><template #icon><ShieldCheck :size="15" /></template>启用</a-button>
+                <a-button v-if="canStatus && record.status !== 'revoked'" type="text" status="danger" @click="requestStatus('revoke', record)"><template #icon><Ban :size="15" /></template>撤销</a-button>
+                <a-button v-if="canAudit" type="text" class="uvp-table-action" @click="openDetail(record); loadAudits()"><template #icon><ScrollText :size="15" /></template>审计</a-button>
+              </div>
+            </template>
+          </a-table-column>
+        </a-table>
+      </template>
+      <a-empty v-else description="没有 OpenAPI 客户端查看权限" />
+    </div>
+
+    <OpenAPIClientDrawer
+      :visible="drawerVisible"
+      :mode="drawerMode"
+      :client="currentClient"
+      :scopes="currentScopes"
+      :capabilities="capabilities"
+      :departments="ownerDepartments"
+      :submitting="drawerLoading"
+      :error="drawerError"
+      :can-grant="canGrant"
+      :can-status="canStatus"
+      :can-audit="canAudit"
+      :revocation-status="revocationStatus"
+      :revocation-error="revocationError"
+      :revocation-loading="revocationLoading"
+      :audit-items="auditItems"
+      :audit-loading="auditLoading"
+      @close="closeDrawer"
+      @create="performCreate"
+      @save-scopes="scopes => currentClient && saveScopes(currentClient.id, scopes, currentClient.rowVersion)"
+      @refresh-revocation="refreshRevocation"
+      @load-audits="loadAudits"
+    />
+    <OpenAPISecretDialog
+      :visible="secretVisible"
+      :access-key="secretPayload?.accessKey || ''"
+      :secret-key="secretPayload?.secretKey || ''"
+      :operation="secretOperation"
+      @close="closeSecret"
+    />
+  </div>
+</template>
+
+<style scoped>
+.openapi-client-page__inner {
+  min-width: 0;
+}
+
+.openapi-client-filter {
+  width: 220px;
+}
+
+.openapi-client-page__error,
+.openapi-client-page__notice,
+.openapi-client-page__boundary-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.openapi-client-page__error {
+  justify-content: space-between;
+  color: rgb(var(--danger-6));
+  background: rgb(var(--danger-1));
+}
+
+.openapi-client-page__notice {
+  color: rgb(var(--warning-7));
+  background: rgb(var(--warning-1));
+}
+
+.openapi-client-page__boundary-note {
+  color: var(--color-text-3);
+  background: var(--color-fill-1);
+}
+
+.openapi-client-table__name {
+  color: var(--color-text-1);
+  font-weight: 600;
+}
+
+.openapi-client-table__ak {
+  display: block;
+  margin-top: 4px;
+  color: var(--color-text-3);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.openapi-client-table__hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--color-text-3);
+  font-size: 11px;
+}
+
+.openapi-client-table__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 4px;
+}
+
+.openapi-client-table :deep(.arco-btn) {
+  min-height: 34px;
+}
+
+@media (max-width: 768px) {
+  .openapi-client-filter {
+    width: 100%;
+  }
+
+  .openapi-client-page__boundary-note {
+    align-items: flex-start;
+  }
+}
+</style>
