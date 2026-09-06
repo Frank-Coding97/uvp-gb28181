@@ -3,9 +3,17 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"go.uber.org/zap"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+)
+
+const (
+	snapshotEventPanic         = "gb28181.snapshot.panic"
+	snapshotEventCaptureFailed = "gb28181.snapshot.capture_failed"
+	snapshotEventCaptured      = "gb28181.snapshot.captured"
 )
 
 // ZLMClient 抓帧客户端接口(只包含 Service 需要的方法,方便单测 mock)
@@ -43,6 +51,17 @@ type Service struct {
 	log *zap.Logger
 }
 
+func detachedContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		return context.Background()
+	}
+	return context.WithoutCancel(ctx)
+}
+
+func (s *Service) logger(ctx context.Context) *zap.Logger {
+	return logging.FromContext(ctx, s.log)
+}
+
 // New 构造 Service。cfg 各字段为 0/空时给合理默认。
 func New(cfg Config) *Service {
 	if cfg.DelayBefore == 0 {
@@ -68,7 +87,8 @@ func New(cfg Config) *Service {
 }
 
 // FireAfterPlay 由 play.Service 在新流 WaitReady 之后 fire-and-forget 调。
-// 内部起 goroutine 异步抓帧,不阻塞调用方;任何失败都是 warn 级不 panic。
+// 内部起 goroutine 异步抓帧,不阻塞调用方;普通抓帧失败记录 warn,真实 panic
+// 记录 error 后由 defer 吞掉,不影响播放主链路。
 //
 // nodeID:   多节点场景传 pickedNode.ID.string(),单节点传空串
 // streamID: ZLM 内部 stream 标识(通常 = ssrc)
@@ -77,24 +97,34 @@ func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID,
 	if s == nil {
 		return
 	}
+	captureCtx := detachedContext(ctx)
+	logger := s.logger(captureCtx)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.log.Warn("通道快照 goroutine panic",
-					zap.Any("panic", r),
+				logger.Error("通道快照 goroutine panic",
+					zap.String("event", snapshotEventPanic),
+					zap.String("panic_type", logging.TypeName(r)),
+					zap.String("stack", string(debug.Stack())),
 					zap.String("device", deviceID), zap.String("channel", channelID))
 			}
 		}()
-		if err := s.doCapture(nodeID, streamID, deviceID, channelID, playToken); err != nil {
-			s.log.Warn("通道快照抓取失败",
-				zap.Error(err),
+		if err := s.doCaptureContext(captureCtx, nodeID, streamID, deviceID, channelID, playToken); err != nil {
+			logger.Warn("通道快照抓取失败",
+				zap.String("event", snapshotEventCaptureFailed), logging.Error(err),
 				zap.String("device", deviceID), zap.String("channel", channelID))
 		}
 	}()
 }
 
-// doCapture 独立于 ctx 跑(播放请求 ctx 会 cancel),内部走独立 context.Background
+// doCapture 保留旧的同步测试/内部调用语义,不携带请求上下文。
 func (s *Service) doCapture(nodeID, streamID, deviceID, channelID, playToken string) error {
+	return s.doCaptureContext(context.Background(), nodeID, streamID, deviceID, channelID, playToken)
+}
+
+// doCaptureContext 在独立的、有界上下文中执行抓拍。父上下文只用于传递
+// 不可变日志 scope,请求取消不会中断播放成功后的快照补偿。
+func (s *Service) doCaptureContext(parentCtx context.Context, nodeID, streamID, deviceID, channelID, playToken string) error {
 	// 延迟 2s,给 ZLM 收流稳画面
 	time.Sleep(s.cfg.DelayBefore)
 
@@ -113,7 +143,7 @@ func (s *Service) doCapture(nodeID, streamID, deviceID, channelID, playToken str
 	}
 
 	// ZLM 抓帧本身超时 cfg.ZLMTimeout 秒,外层再加 2 秒兜底
-	ctx, cancel := context.WithTimeout(context.Background(),
+	ctx, cancel := context.WithTimeout(detachedContext(parentCtx),
 		time.Duration(s.cfg.ZLMTimeout+2)*time.Second)
 	defer cancel()
 
@@ -137,13 +167,14 @@ func (s *Service) doCapture(nodeID, streamID, deviceID, channelID, playToken str
 	}
 
 	if s.cfg.Repo != nil {
-		if err := s.cfg.Repo.UpdateSnapshot(context.Background(), deviceID, channelID, relURL, now); err != nil {
+		if err := s.cfg.Repo.UpdateSnapshot(detachedContext(ctx), deviceID, channelID, relURL, now); err != nil {
 			// 文件已经落盘;DB 更新失败只 warn,下次抓拍会重试(覆盖式)
 			return fmt.Errorf("UPDATE gb_channel 失败: %w", err)
 		}
 	}
 
-	s.log.Info("通道快照成功",
+	s.logger(ctx).Info("通道快照成功",
+		zap.String("event", snapshotEventCaptured),
 		zap.String("device", deviceID),
 		zap.String("channel", channelID),
 		zap.Int("bytes", len(bytes)),
