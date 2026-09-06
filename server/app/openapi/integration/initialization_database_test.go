@@ -221,6 +221,12 @@ func TestOpenAPIDatabaseFullInitialization(t *testing.T) {
 		t.Fatalf("full initialization SQL failed for %s (%s%s): %v", cfg.dialect, cfg.fileName, initializationErrorLocation(err, string(body)), err)
 	}
 	assertFullInitializationState(t, connection.conn, ctx, cfg.dialect)
+	// A dedicated initialization database may be replayed during provisioning;
+	// the second execution must complete without duplicating security objects.
+	if _, err := connection.conn.ExecContext(ctx, string(body)); err != nil {
+		t.Fatalf("second full initialization SQL failed for %s (%s%s): %v", cfg.dialect, cfg.fileName, initializationErrorLocation(err, string(body)), err)
+	}
+	assertFullInitializationState(t, connection.conn, ctx, cfg.dialect)
 	t.Logf("%s full initialization executed on dedicated %s database; no default OpenAPI client/nonce/grant/viewer rows", cfg.dialect, databaseName)
 }
 
@@ -361,6 +367,7 @@ func assertFullInitializationState(t *testing.T, conn *sql.Conn, ctx context.Con
 
 	for _, column := range []struct{ table, name string }{
 		{table: "gb_device", name: "access_epoch"},
+		{table: "gb_device", name: "cleanup_completed_epoch"},
 		{table: "gb_device", name: "legacy_revoked_before"},
 		{table: "meta_node", name: "current_boot_nonce"},
 		{table: "meta_node", name: "retired_boot_history"},
@@ -374,6 +381,7 @@ func assertFullInitializationState(t *testing.T, conn *sql.Conn, ctx context.Con
 		require.NoError(t, queryErr, column.table+"."+column.name)
 		require.EqualValues(t, 1, count, "missing security column %s.%s", column.table, column.name)
 	}
+	require.EqualValues(t, 1, cleanupBarrierConstraintCount(t, ctx, conn, dialect), "missing cleanup barrier constraint")
 
 	securityRows, err := initializationRowCount(ctx, conn, "sys_openapi_security_state")
 	require.NoError(t, err)
