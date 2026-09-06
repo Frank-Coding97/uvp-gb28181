@@ -34,9 +34,10 @@ const (
 // for a real media session; issued and bound rows must carry every field in
 // the binding tuple.
 type PlayGrant struct {
-	GrantID  string `gorm:"column:grant_id;type:char(36);primaryKey" json:"grantId"`
-	ClientID int64  `gorm:"column:client_id;not null;index:idx_openapi_grant_client_state,priority:1" json:"clientId"`
-	Scope    string `gorm:"column:scope;size:64;not null" json:"scope"`
+	GrantID  string   `gorm:"column:grant_id;type:char(36);primaryKey" json:"grantId"`
+	ClientID int64    `gorm:"column:client_id;not null;index:idx_openapi_grant_client_state,priority:1" json:"clientId"`
+	Scope    string   `gorm:"column:scope;size:64;not null" json:"scope"`
+	Viewers  []Viewer `gorm:"foreignKey:GrantID;references:GrantID;constraint:OnDelete:RESTRICT,OnUpdate:CASCADE" json:"-"`
 
 	DeviceID        *string `gorm:"column:device_id;size:20" json:"deviceId,omitempty"`
 	ChannelID       *string `gorm:"column:channel_id;size:20" json:"channelId,omitempty"`
@@ -54,7 +55,7 @@ type PlayGrant struct {
 
 	IssuedAt  time.Time  `gorm:"column:issued_at;not null;index:idx_openapi_grant_expires" json:"issuedAt"`
 	ExpiresAt time.Time  `gorm:"column:expires_at;not null;index:idx_openapi_grant_expires" json:"expiresAt"`
-	State     GrantState `gorm:"column:state;size:16;not null;default:pending;index:idx_openapi_grant_client_state,priority:2;check:ck_openapi_grant_binding,state NOT IN ('issued','bound') OR (device_id IS NOT NULL AND channel_id IS NOT NULL AND node_uuid IS NOT NULL AND boot_nonce IS NOT NULL AND length(boot_nonce) = 32 AND schema IS NOT NULL AND vhost IS NOT NULL AND app IS NOT NULL AND stream IS NOT NULL AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL)" json:"state"`
+	State     GrantState `gorm:"column:state;size:16;not null;default:pending;index:idx_openapi_grant_client_state,priority:2;check:ck_openapi_grant_binding,state NOT IN ('issued','bound') OR (device_id IS NOT NULL AND device_id <> '' AND channel_id IS NOT NULL AND channel_id <> '' AND node_uuid IS NOT NULL AND node_uuid <> '' AND boot_nonce IS NOT NULL AND boot_nonce <> '' AND length(boot_nonce) = 32 AND schema IS NOT NULL AND schema <> '' AND vhost IS NOT NULL AND vhost <> '' AND app IS NOT NULL AND app <> '' AND stream IS NOT NULL AND stream <> '' AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL AND protocol <> '')" json:"state"`
 	Reason    string     `gorm:"column:reason;size:64;not null;default:'';check:ck_openapi_grant_state,state IN ('pending','issued','bound','revoked','expired','failed')" json:"reason,omitempty"`
 	CreatedAt time.Time  `gorm:"column:created_at;not null" json:"createdAt"`
 	UpdatedAt time.Time  `gorm:"column:updated_at;not null" json:"updatedAt"`
@@ -71,11 +72,11 @@ type Viewer struct {
 	NodeUUID        string      `gorm:"column:node_uuid;size:64;not null;uniqueIndex:uk_openapi_viewer_identity,priority:1;check:ck_openapi_viewer_identity,node_uuid <> '' AND boot_nonce <> '' AND length(boot_nonce) = 32 AND identifier <> ''" json:"nodeUuid"`
 	BootNonce       string      `gorm:"column:boot_nonce;type:char(32);not null;uniqueIndex:uk_openapi_viewer_identity,priority:2" json:"bootNonce"`
 	Identifier      string      `gorm:"column:identifier;size:128;not null;uniqueIndex:uk_openapi_viewer_identity,priority:3" json:"identifier"`
-	Schema          string      `gorm:"column:schema;size:32;not null" json:"schema"`
+	Schema          string      `gorm:"column:schema;size:32;not null;check:ck_openapi_viewer_media_binding,schema <> '' AND vhost <> '' AND app <> '' AND stream <> ''" json:"schema"`
 	VHost           string      `gorm:"column:vhost;size:128;not null" json:"vhost"`
 	App             string      `gorm:"column:app;size:64;not null" json:"app"`
 	Stream          string      `gorm:"column:stream;size:255;not null" json:"stream"`
-	MediaGeneration uint64      `gorm:"column:media_generation;not null;default:0;check:ck_openapi_viewer_media_generation,media_generation >= 0" json:"mediaGeneration"`
+	MediaGeneration uint64      `gorm:"column:media_generation;not null;check:ck_openapi_viewer_media_generation,media_generation > 0" json:"mediaGeneration"`
 	State           ViewerState `gorm:"column:state;size:16;not null;default:pending;index:idx_openapi_viewer_state_retry,priority:1;check:ck_openapi_viewer_state,state IN ('pending','active','revoke_pending','closed')" json:"state"`
 	LastSeenAt      *time.Time  `gorm:"column:last_seen_at" json:"lastSeenAt,omitempty"`
 	RetryAt         *time.Time  `gorm:"column:retry_at;index:idx_openapi_viewer_state_retry,priority:2" json:"retryAt,omitempty"`
@@ -91,8 +92,12 @@ func (Viewer) TableName() string { return "gb_openapi_viewer" }
 // later device-assignment code must update atomically. It must not be used as
 // a full GbDevice replacement or passed to a broad Save operation.
 type DeviceSecurity struct {
-	ID                  uint       `gorm:"column:id;primaryKey"`
-	AccessEpoch         int64      `gorm:"column:access_epoch;not null;default:1;check:ck_gb_device_access_epoch,access_epoch > 0"`
+	ID          uint  `gorm:"column:id;primaryKey"`
+	AccessEpoch int64 `gorm:"column:access_epoch;not null;default:1;check:ck_gb_device_access_epoch,access_epoch > 0"`
+	// LegacyRevokedBefore is stored as a UTC whole-second boundary because the
+	// legacy v2 iat is an integer Unix second. Callers must convert with
+	// time.Unix(iat, 0).UTC(); to reject tokens issued in the same second as a
+	// revocation event, persist the next Unix second as the boundary.
 	LegacyRevokedBefore *time.Time `gorm:"column:legacy_revoked_before"`
 }
 
@@ -102,7 +107,7 @@ func (DeviceSecurity) TableName() string { return "gb_device" }
 // It stores observed runtime identity only; it does not alter tags_json or
 // claim protocol support before a trusted probe confirms it.
 type MediaNodeSecurity struct {
-	ID                       uint       `gorm:"column:id;primaryKey"`
+	ID                       int64      `gorm:"column:id;primaryKey"`
 	CurrentBootNonce         *string    `gorm:"column:current_boot_nonce;type:char(32)"`
 	RetiredBootHistory       *string    `gorm:"column:retired_boot_history;type:text"`
 	RuntimeEpoch             int64      `gorm:"column:runtime_epoch;not null;default:0"`

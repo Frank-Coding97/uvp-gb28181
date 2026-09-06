@@ -4884,7 +4884,7 @@ CREATE TABLE dbo.gb_openapi_play_grant (
     CONSTRAINT pk_openapi_play_grant PRIMARY KEY (grant_id),
     CONSTRAINT ck_openapi_grant_state CHECK (state IN (N'pending',N'issued',N'bound',N'revoked',N'expired',N'failed')),
     CONSTRAINT ck_openapi_grant_epochs CHECK (client_epoch > 0 AND scope_epoch > 0 AND device_epoch > 0),
-    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN (N'issued',N'bound') OR (device_id IS NOT NULL AND channel_id IS NOT NULL AND node_uuid IS NOT NULL AND boot_nonce IS NOT NULL AND LEN(boot_nonce) = 32 AND [schema] IS NOT NULL AND vhost IS NOT NULL AND app IS NOT NULL AND stream IS NOT NULL AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL))
+    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN (N'issued',N'bound') OR (device_id IS NOT NULL AND device_id <> N'' AND channel_id IS NOT NULL AND channel_id <> N'' AND node_uuid IS NOT NULL AND node_uuid <> N'' AND boot_nonce IS NOT NULL AND boot_nonce <> N'' AND LEN(boot_nonce) = 32 AND [schema] IS NOT NULL AND [schema] <> N'' AND vhost IS NOT NULL AND vhost <> N'' AND app IS NOT NULL AND app <> N'' AND stream IS NOT NULL AND stream <> N'' AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL AND protocol <> N''))
 );
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_client_state' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_client_state ON dbo.gb_openapi_play_grant (client_id,state);
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_expires' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_expires ON dbo.gb_openapi_play_grant (expires_at);
@@ -4900,7 +4900,7 @@ CREATE TABLE dbo.gb_openapi_viewer (
     vhost NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
     app NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
     stream NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
-    media_generation BIGINT NOT NULL DEFAULT 0,
+    media_generation BIGINT NOT NULL,
     state NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'pending',
     last_seen_at DATETIME2(6) NULL,
     retry_at DATETIME2(6) NULL,
@@ -4910,10 +4910,12 @@ CREATE TABLE dbo.gb_openapi_viewer (
     updated_at DATETIME2(6) NOT NULL,
     CONSTRAINT pk_openapi_viewer PRIMARY KEY (id),
     CONSTRAINT uk_openapi_viewer_grant UNIQUE (grant_id),
+    CONSTRAINT fk_openapi_viewer_grant FOREIGN KEY (grant_id) REFERENCES dbo.gb_openapi_play_grant (grant_id) ON DELETE NO ACTION,
     CONSTRAINT uk_openapi_viewer_identity UNIQUE (node_uuid,boot_nonce,identifier),
     CONSTRAINT ck_openapi_viewer_identity CHECK (node_uuid <> N'' AND boot_nonce <> N'' AND LEN(boot_nonce)=32 AND identifier <> N''),
+    CONSTRAINT ck_openapi_viewer_media_binding CHECK ([schema] <> N'' AND vhost <> N'' AND app <> N'' AND stream <> N'' AND media_generation > 0),
     CONSTRAINT ck_openapi_viewer_state CHECK (state IN (N'pending',N'active',N'revoke_pending',N'closed')),
-    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation >= 0),
+    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation > 0),
     CONSTRAINT ck_openapi_viewer_attempts CHECK (attempts >= 0)
 );
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_viewer_state_retry' AND object_id=OBJECT_ID(N'dbo.gb_openapi_viewer')) CREATE INDEX idx_openapi_viewer_state_retry ON dbo.gb_openapi_viewer (state,retry_at);

@@ -5003,7 +5003,7 @@ CREATE TABLE IF NOT EXISTS gb_openapi_play_grant (
     CONSTRAINT pk_openapi_play_grant PRIMARY KEY (grant_id),
     CONSTRAINT ck_openapi_grant_state CHECK (state IN ('pending','issued','bound','revoked','expired','failed')),
     CONSTRAINT ck_openapi_grant_epochs CHECK (client_epoch > 0 AND scope_epoch > 0 AND device_epoch > 0),
-    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN ('issued','bound') OR (device_id IS NOT NULL AND channel_id IS NOT NULL AND node_uuid IS NOT NULL AND boot_nonce IS NOT NULL AND char_length(boot_nonce) = 32 AND "schema" IS NOT NULL AND vhost IS NOT NULL AND app IS NOT NULL AND stream IS NOT NULL AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL))
+    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN ('issued','bound') OR (device_id IS NOT NULL AND device_id <> '' AND channel_id IS NOT NULL AND channel_id <> '' AND node_uuid IS NOT NULL AND node_uuid <> '' AND boot_nonce IS NOT NULL AND boot_nonce <> '' AND char_length(boot_nonce) = 32 AND "schema" IS NOT NULL AND "schema" <> '' AND vhost IS NOT NULL AND vhost <> '' AND app IS NOT NULL AND app <> '' AND stream IS NOT NULL AND stream <> '' AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL AND protocol <> ''))
 );
 CREATE INDEX IF NOT EXISTS idx_openapi_grant_client_state ON gb_openapi_play_grant (client_id, state);
 CREATE INDEX IF NOT EXISTS idx_openapi_grant_expires ON gb_openapi_play_grant (expires_at);
@@ -5018,7 +5018,7 @@ CREATE TABLE IF NOT EXISTS gb_openapi_viewer (
     vhost VARCHAR(128) COLLATE "C" NOT NULL,
     app VARCHAR(64) COLLATE "C" NOT NULL,
     stream VARCHAR(255) COLLATE "C" NOT NULL,
-    media_generation BIGINT NOT NULL DEFAULT 0,
+    media_generation BIGINT NOT NULL,
     state VARCHAR(16) COLLATE "C" NOT NULL DEFAULT 'pending',
     last_seen_at TIMESTAMPTZ(6) NULL,
     retry_at TIMESTAMPTZ(6) NULL,
@@ -5028,10 +5028,12 @@ CREATE TABLE IF NOT EXISTS gb_openapi_viewer (
     updated_at TIMESTAMPTZ(6) NOT NULL,
     CONSTRAINT pk_openapi_viewer PRIMARY KEY (id),
     CONSTRAINT uk_openapi_viewer_grant UNIQUE (grant_id),
+    CONSTRAINT fk_openapi_viewer_grant FOREIGN KEY (grant_id) REFERENCES gb_openapi_play_grant (grant_id) ON DELETE RESTRICT,
     CONSTRAINT uk_openapi_viewer_identity UNIQUE (node_uuid, boot_nonce, identifier),
     CONSTRAINT ck_openapi_viewer_identity CHECK (node_uuid <> '' AND boot_nonce <> '' AND char_length(boot_nonce) = 32 AND identifier <> ''),
+    CONSTRAINT ck_openapi_viewer_media_binding CHECK ("schema" <> '' AND vhost <> '' AND app <> '' AND stream <> '' AND media_generation > 0),
     CONSTRAINT ck_openapi_viewer_state CHECK (state IN ('pending','active','revoke_pending','closed')),
-    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation >= 0),
+    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation > 0),
     CONSTRAINT ck_openapi_viewer_attempts CHECK (attempts >= 0)
 );
 CREATE INDEX IF NOT EXISTS idx_openapi_viewer_state_retry ON gb_openapi_viewer (state, retry_at);

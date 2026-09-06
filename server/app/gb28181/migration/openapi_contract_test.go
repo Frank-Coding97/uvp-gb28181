@@ -28,6 +28,11 @@ func TestOpenAPICoreSchemaMigrations(t *testing.T) {
 			for _, column := range []string{"secret_ciphertext", "secret_iv", "secret_key_id", "secret_version", "auth_epoch", "scope_epoch", "row_version", "expires_at", "uk_openapi_nonce", "idx_openapi_audit_client_time", "grant_id", "client_epoch", "scope_epoch", "device_epoch", "node_uuid", "boot_nonce", "media_generation", "runtime_epoch", "runtime_protocol_version", "runtime_confirmed_revision", "runtime_confirmed_at", "runtime_identity_status", "access_epoch", "legacy_revoked_before"} {
 				require.Contains(t, sql, column)
 			}
+			require.Contains(t, sql, "fk_openapi_viewer_grant")
+			require.Contains(t, sql, "on delete")
+			require.Contains(t, sql, "media_generation > 0")
+			require.Contains(t, sql, "device_id <>")
+			require.Contains(t, sql, "stream <>")
 			require.Contains(t, sql, "gb_device")
 			require.Contains(t, sql, "meta_node")
 			require.NotContains(t, sql, "secret_plaintext")
@@ -53,7 +58,7 @@ func TestOpenAPICoreInitializationParity(t *testing.T) {
 			lower := strings.ToLower(string(body))
 			require.Contains(t, lower, "-- openapi-aksk-media:begin")
 			require.Contains(t, lower, "-- openapi-aksk-media:end")
-			for _, table := range []string{"sys_openapi_client", "sys_openapi_client_scope", "sys_openapi_nonce", "sys_openapi_audit", "gb_openapi_play_grant", "gb_openapi_viewer"} {
+			for _, table := range []string{"sys_openapi_client", "sys_openapi_client_scope", "sys_openapi_nonce", "sys_openapi_audit", "gb_openapi_play_grant", "gb_openapi_viewer", "fk_openapi_viewer_grant"} {
 				require.Contains(t, lower, table)
 			}
 		})
