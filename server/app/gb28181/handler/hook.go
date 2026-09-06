@@ -24,6 +24,8 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/management"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"go.uber.org/zap"
 )
@@ -339,7 +341,24 @@ func (h *HookController) SetAutoOnDemandSettingsProvider(provider AutoOnDemandSe
 
 // hookOK ZLM 期望的标准成功响应
 func hookOK(c *gin.Context) {
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(200, gin.H{"code": 0, "msg": "success"})
+}
+
+func hookLog(c *gin.Context) *zap.Logger {
+	if c == nil || c.Request == nil {
+		return app.Log(context.Background()).Named("hook")
+	}
+	return app.Log(c.Request.Context()).Named("hook")
+}
+
+// hookAsyncContext keeps the request's immutable logger scope while giving
+// detached hook work an independent lifetime from Gin's request context.
+func hookAsyncContext(c *gin.Context) context.Context {
+	if c == nil || c.Request == nil {
+		return context.Background()
+	}
+	return logging.WithContext(context.Background(), app.Log(c.Request.Context()))
 }
 
 // onStreamChangedBody on_stream_changed 回调载荷(只取我们需要的字段)
@@ -361,7 +380,8 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 		hookOK(c)
 		return
 	}
-	app.ZapLog.Info("ZLM Hook on_stream_changed",
+	hookLog(c).Info("ZLM Hook on_stream_changed",
+		zap.String("event", "gb28181.hook.stream.changed"),
 		zap.String("app", body.App),
 		zap.String("stream", body.Stream),
 		zap.String("schema", body.Schema),
@@ -380,16 +400,19 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 		}
 	}
 	if body.App != "talk" && h.observer != nil && body.Stream != "" {
-		go func(streamID string, registered bool) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		asyncContext := hookAsyncContext(c)
+		go func(base context.Context, streamID string, registered bool) {
+			ctx, cancel := context.WithTimeout(base, 10*time.Second)
 			defer cancel()
 			if err := h.observer.ObserveStream(ctx, streamID, registered); err != nil {
-				app.ZapLog.Warn("录像流状态联动失败", zap.String("stream", streamID), zap.Bool("regist", registered), zap.Error(err))
+				app.Log(ctx).Named("hook").Warn("录像流状态联动失败",
+					zap.String("event", "gb28181.hook.stream.observer_failed"),
+					zap.String("stream", streamID), zap.Bool("regist", registered), logging.Error(err))
 			}
-		}(body.Stream, body.Regist)
+		}(asyncContext, body.Stream, body.Regist)
 	}
 	if !body.Regist && h.playbackMedia != nil && body.Stream != "" {
-		h.notifyPlaybackEnded(body.Stream, "media-offline")
+		h.notifyPlaybackEnded(hookAsyncContext(c), body.Stream, "media-offline")
 	}
 	if !body.Regist && body.App == "rtp" && body.Stream != "" && body.MediaServerID != "" {
 		if _, _, err := play.ParseFixedStreamID(body.Stream); err == nil {
@@ -400,7 +423,7 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 			}
 			if stopperOK && nodeOK {
 				if pending, ok := stopper.CleanupPendingLiveRef(body.Stream); ok && pending.NodeID == nodeID {
-					go h.stopCleanupPending(pending, "流注销清理失败")
+					go h.stopCleanupPending(hookAsyncContext(c), pending, "流注销清理失败")
 				}
 			}
 		}
@@ -408,13 +431,16 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 	talkResolver, _, talkObserver := h.talkDependencies()
 	if body.App == "talk" && talkObserver != nil && talkResolver != nil && body.Stream != "" && body.MediaServerID != "" {
 		if nodeID, ok := talkResolver.IDForUUID(body.MediaServerID); ok {
-			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			asyncContext := hookAsyncContext(c)
+			go func(base context.Context) {
+				ctx, cancel := context.WithTimeout(base, 15*time.Second)
 				defer cancel()
 				if err := talkObserver.ObserveTalkStream(ctx, nodeID, body.App, body.Stream, body.Regist); err != nil {
-					app.ZapLog.Warn("对讲流状态联动失败", zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), zap.Error(err))
+					app.Log(ctx).Named("hook").Warn("对讲流状态联动失败",
+						zap.String("event", "gb28181.hook.talk.observer_failed"),
+						zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), logging.Error(err))
 				}
-			}()
+			}(asyncContext)
 		}
 	}
 	hookOK(c)
@@ -432,7 +458,8 @@ type onStreamNoneReaderBody struct {
 func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 	var body onStreamNoneReaderBody
 	_ = c.ShouldBindJSON(&body)
-	app.ZapLog.Info("ZLM Hook on_stream_none_reader",
+	hookLog(c).Info("ZLM Hook on_stream_none_reader",
+		zap.String("event", "gb28181.hook.stream.none_reader"),
 		zap.String("app", body.App), zap.String("stream", body.Stream))
 
 	closeStream := true
@@ -443,8 +470,9 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		var err error
 		closeStream, err = h.policy.ShouldCloseOnNoneReader(c.Request.Context(), body.Stream)
 		if err != nil {
-			app.ZapLog.Warn("查询无人观看断流策略失败,沿用默认关闭策略",
-				zap.String("stream", body.Stream), zap.Error(err))
+			hookLog(c).Warn("查询无人观看断流策略失败,沿用默认关闭策略",
+				zap.String("event", "gb28181.hook.stream.none_reader_policy_failed"),
+				zap.String("stream", body.Stream), logging.Error(err))
 			closeStream = true
 			policyFailed = true
 		}
@@ -452,6 +480,7 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 
 	_, _, fixedErr := play.ParseFixedStreamID(body.Stream)
 	isFixedLive := body.App == "rtp" && fixedErr == nil
+	asyncContext := hookAsyncContext(c)
 	if closeStream && isFixedLive {
 		// 固定 stream ID 会跨代复用，不能让 ZLM 按裸 stream 名立即关闭。
 		// 捕获当前代并由 service 复查 readerCount 后执行条件清理。
@@ -459,41 +488,48 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		if !policyFailed {
 			if stopper, ok := h.stopper.(GenerationPlayStopper); ok {
 				if captured, exists := stopper.CurrentLiveRef(body.Stream); exists {
-					go func(ref stream.LiveRef) {
-						ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+					go func(base context.Context, ref stream.LiveRef) {
+						ctx, cancel := context.WithTimeout(base, 5*time.Second)
 						defer cancel()
 						if _, err := stopper.StopOnNoneReader(ctx, ref); err != nil {
-							app.ZapLog.Warn("固定流无人观看条件断流失败", zap.String("stream", ref.StreamID), zap.Error(err))
+							app.Log(ctx).Named("hook").Warn("固定流无人观看条件断流失败",
+								zap.String("event", "gb28181.hook.stream.fixed_stop_failed"),
+								zap.String("stream", ref.StreamID), logging.Error(err))
 						}
-					}(captured)
+					}(asyncContext, captured)
 				} else if pending, exists := stopper.CleanupPendingLiveRef(body.Stream); exists {
-					go h.stopCleanupPending(pending, "固定流无人观看清理失败")
+					go h.stopCleanupPending(asyncContext, pending, "固定流无人观看清理失败")
 				}
 			}
 		}
 	} else if closeStream && body.App == "rtp" && h.stopper != nil && body.Stream != "" {
 		// 动态 GB 实时流也必须走受控关闭，避免 ZLM 在 StopRecord 前先销毁媒体源。
 		closeStream = false
-		go func(streamID string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		go func(base context.Context, streamID string) {
+			ctx, cancel := context.WithTimeout(base, 5*time.Second)
 			defer cancel()
 			if err := h.stopper.Stop(ctx, streamID); err != nil {
-				app.ZapLog.Warn("无人观看自动断流失败",
-					zap.String("stream", streamID), zap.Error(err))
+				app.Log(ctx).Named("hook").Warn("无人观看自动断流失败",
+					zap.String("event", "gb28181.hook.stream.stop_failed"),
+					zap.String("stream", streamID), logging.Error(err))
 			} else {
-				app.ZapLog.Info("无人观看自动断流", zap.String("stream", streamID))
+				app.Log(ctx).Named("hook").Info("无人观看自动断流",
+					zap.String("event", "gb28181.hook.stream.stopped"), zap.String("stream", streamID))
 			}
-		}(body.Stream)
+		}(asyncContext, body.Stream)
 	} else if closeStream && h.stopper != nil && body.Stream != "" {
-		go func(streamID string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		go func(base context.Context, streamID string) {
+			ctx, cancel := context.WithTimeout(base, 5*time.Second)
 			defer cancel()
 			if err := h.stopper.Stop(ctx, streamID); err != nil {
-				app.ZapLog.Warn("无人观看自动断流失败", zap.String("stream", streamID), zap.Error(err))
+				app.Log(ctx).Named("hook").Warn("无人观看自动断流失败",
+					zap.String("event", "gb28181.hook.stream.stop_failed"),
+					zap.String("stream", streamID), logging.Error(err))
 			}
-		}(body.Stream)
+		}(asyncContext, body.Stream)
 	}
 
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(200, gin.H{"code": 0, "close": closeStream})
 }
 
@@ -529,7 +565,8 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 		hookOK(c)
 		return
 	}
-	app.ZapLog.Info("ZLM Hook on_rtp_server_timeout",
+	hookLog(c).Info("ZLM Hook on_rtp_server_timeout",
+		zap.String("event", "gb28181.hook.rtp_timeout"),
 		zap.String("stream_id", body.StreamID), zap.String("ssrc", string(body.SSRC)),
 		zap.String("mediaServerId", body.MediaServerID))
 
@@ -547,49 +584,58 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 				current, ok = stopper.CleanupPendingLiveRef(body.StreamID)
 			}
 			if ok && current.NodeID == nodeID && current.SSRC == string(body.SSRC) {
-				go func(ref stream.LiveRef) {
-					ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				asyncContext := hookAsyncContext(c)
+				go func(base context.Context, ref stream.LiveRef) {
+					ctx, cancel := context.WithTimeout(base, 5*time.Second)
 					defer cancel()
 					if _, err := stopper.StopIfCurrent(ctx, ref); err != nil {
-						app.ZapLog.Warn("RTP 超时条件清理会话失败", zap.String("stream", ref.StreamID), zap.Error(err))
+						app.Log(ctx).Named("hook").Warn("RTP 超时条件清理会话失败",
+							zap.String("event", "gb28181.hook.rtp_timeout_stop_failed"),
+							zap.String("stream", ref.StreamID), logging.Error(err))
 					}
-				}(current)
+				}(asyncContext, current)
 			}
 		}
 	} else if h.stopper != nil && body.StreamID != "" {
-		go func(streamID string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		asyncContext := hookAsyncContext(c)
+		go func(base context.Context, streamID string) {
+			ctx, cancel := context.WithTimeout(base, 5*time.Second)
 			defer cancel()
 			if err := h.stopper.Stop(ctx, streamID); err != nil {
-				app.ZapLog.Warn("RTP 超时清理会话失败",
-					zap.String("stream", streamID), zap.Error(err))
+				app.Log(ctx).Named("hook").Warn("RTP 超时清理会话失败",
+					zap.String("event", "gb28181.hook.rtp_timeout_stop_failed"),
+					zap.String("stream", streamID), logging.Error(err))
 			}
-		}(body.StreamID)
+		}(asyncContext, body.StreamID)
 	}
 	if h.playbackMedia != nil && body.StreamID != "" {
-		h.notifyPlaybackEnded(body.StreamID, "rtp-timeout")
+		h.notifyPlaybackEnded(hookAsyncContext(c), body.StreamID, "rtp-timeout")
 	}
 	hookOK(c)
 }
 
-func (h *HookController) stopCleanupPending(ref stream.LiveRef, failureMessage string) {
+func (h *HookController) stopCleanupPending(base context.Context, ref stream.LiveRef, failureMessage string) {
 	stopper, ok := h.stopper.(GenerationPlayStopper)
 	if !ok {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(base, 5*time.Second)
 	defer cancel()
 	if _, err := stopper.StopIfCurrent(ctx, ref); err != nil {
-		app.ZapLog.Warn(failureMessage, zap.String("stream", ref.StreamID), zap.Error(err))
+		app.Log(ctx).Named("hook").Warn("Hook cleanup failed",
+			zap.String("event", "gb28181.hook.stream.cleanup_failed"),
+			zap.String("stream", ref.StreamID), zap.String("reason", failureMessage), logging.Error(err))
 	}
 }
 
-func (h *HookController) notifyPlaybackEnded(streamID, reason string) {
+func (h *HookController) notifyPlaybackEnded(base context.Context, streamID, reason string) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(base, 5*time.Second)
 		defer cancel()
 		if err := h.playbackMedia.OnPlaybackStreamEnded(ctx, streamID, reason); err != nil && !errors.Is(err, context.Canceled) {
-			app.ZapLog.Debug("回放媒体终态未命中活动会话", zap.String("stream", streamID), zap.String("reason", reason), zap.Error(err))
+			app.Log(ctx).Named("hook").Debug("回放媒体终态未命中活动会话",
+				zap.String("event", "gb28181.hook.playback_ended_unmatched"),
+				zap.String("stream", streamID), zap.String("reason", reason), logging.Error(err))
 		}
 	}()
 }
@@ -607,7 +653,7 @@ func (h *HookController) OnPublish(c *gin.Context) {
 	var body onPublishBody
 	_ = c.ShouldBindJSON(&body)
 	if !hookPayloadNodeMatches(c, playauth.HookOnPublish, body.MediaServerID) {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "hook payload node mismatch"})
+		hookDenied(c, "hook payload node mismatch")
 		return
 	}
 	if body.App != "talk" {
@@ -616,17 +662,17 @@ func (h *HookController) OnPublish(c *gin.Context) {
 	}
 	talkResolver, talkAuthorizer, _ := h.talkDependencies()
 	if talkResolver == nil || talkAuthorizer == nil || body.MediaServerID == "" {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "talk publish authorization unavailable"})
+		hookDenied(c, "talk publish authorization unavailable")
 		return
 	}
 	nodeID, ok := talkResolver.IDForUUID(body.MediaServerID)
 	if !ok {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "unknown media server"})
+		hookDenied(c, "unknown media server")
 		return
 	}
 	params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "invalid talk publish parameters"})
+		hookDenied(c, "invalid talk publish parameters")
 		return
 	}
 	allowed, err := talkAuthorizer.AuthorizeTalkPublish(c.Request.Context(), TalkPublishRequest{
@@ -634,7 +680,7 @@ func (h *HookController) OnPublish(c *gin.Context) {
 		PublishToken: params.Get("token"), PublishID: body.ID,
 	})
 	if err != nil || !allowed {
-		c.JSON(http.StatusOK, gin.H{"code": -1, "msg": "talk publish denied"})
+		hookDenied(c, "talk publish denied")
 		return
 	}
 	hookOK(c)
@@ -700,8 +746,10 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 		Player: body.Player, TotalBytes: body.TotalBytes, Duration: body.Duration,
 		IP: body.IP, Port: body.Port,
 	})
-	if err != nil && app.ZapLog != nil {
-		app.ZapLog.Warn("ZLM on_flow_report 计量失败", zap.Error(err), zap.String("stream", body.Stream), zap.Bool("player", body.Player))
+	if err != nil {
+		hookLog(c).Warn("ZLM on_flow_report 计量失败",
+			zap.String("event", "gb28181.hook.flow.collect_failed"),
+			logging.Error(err), zap.String("stream", body.Stream), zap.Bool("player", body.Player))
 	}
 	hookOK(c)
 }
@@ -791,13 +839,13 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		h.denyAutoOnDemand(c, autoOnDemandAdmissionReason(err))
 		return
 	}
-	if app.ZapLog != nil {
-		app.ZapLog.Info("自动点播 Hook 已接收",
-			zap.String("reason", "accepted"),
-			zap.String("deviceId", deviceID),
-			zap.String("channelId", channelID),
-			zap.Int64("nodeId", mediaNode.ID))
-	}
+	hookLog(c).Info("自动点播 Hook 已接收",
+		zap.String("event", "gb28181.hook.auto_on_demand.accepted"),
+		zap.String("reason", "accepted"),
+		zap.String("deviceId", deviceID),
+		zap.String("channelId", channelID),
+		zap.Int64("nodeId", mediaNode.ID))
+	response.SetBusinessResult(c, 0, true)
 	c.JSON(http.StatusOK, gin.H{"code": 0, "msg": "success", "close": false})
 }
 
@@ -921,13 +969,12 @@ func (h *HookController) OnPlay(c *gin.Context) {
 			return
 		}
 	}
-	if app.ZapLog != nil {
-		app.ZapLog.Info("播放鉴权 Hook 已放行",
-			zap.String("result", "verified"),
-			zap.String("stream", body.Stream),
-			zap.String("mediaServerId", body.MediaServerID),
-			zap.String("correlationId", playauth.CorrelationID(claims.AuthorizationGeneration)))
-	}
+	hookLog(c).Info("播放鉴权 Hook 已放行",
+		zap.String("event", "gb28181.hook.play.authorized"),
+		zap.String("result", "verified"),
+		zap.String("stream", body.Stream),
+		zap.String("mediaServerId", body.MediaServerID),
+		zap.String("correlationId", playauth.CorrelationID(claims.AuthorizationGeneration)))
 	hookOK(c)
 }
 
@@ -986,13 +1033,13 @@ func parsePreviewHookParams(raw string) (url.Values, string, string, bool) {
 }
 
 func (h *HookController) denyPlayback(c *gin.Context, reason, message string) {
-	if app.ZapLog != nil {
-		app.ZapLog.Info("播放鉴权 Hook 已拒绝", zap.String("reason", reason))
-	}
+	hookLog(c).Info("播放鉴权 Hook 已拒绝",
+		zap.String("event", "gb28181.hook.play.denied"), zap.String("reason", reason))
 	hookDenied(c, message)
 }
 
 func hookDenied(c *gin.Context, message string) {
+	response.SetBusinessResult(c, -1, false)
 	c.JSON(http.StatusOK, gin.H{"code": -1, "msg": message})
 }
 
@@ -1014,9 +1061,8 @@ func (h *HookController) flowDependencies() (FlowReportNodeResolver, FlowCollect
 }
 
 func (h *HookController) ignoreFlowReport(c *gin.Context, reason string) {
-	if app.ZapLog != nil {
-		app.ZapLog.Debug("ZLM on_flow_report 已忽略", zap.String("reason", reason))
-	}
+	hookLog(c).Debug("ZLM on_flow_report 已忽略",
+		zap.String("event", "gb28181.hook.flow.ignored"), zap.String("reason", reason))
 	hookOK(c)
 }
 
@@ -1070,9 +1116,8 @@ func validAutoOnDemandSchema(schema string) bool {
 }
 
 func (h *HookController) denyAutoOnDemand(c *gin.Context, reason string) {
-	if app.ZapLog != nil {
-		app.ZapLog.Debug("自动点播 Hook 已拒绝", zap.String("reason", reason))
-	}
+	hookLog(c).Debug("自动点播 Hook 已拒绝",
+		zap.String("event", "gb28181.hook.auto_on_demand.denied"), zap.String("reason", reason))
 	hookDenied(c, "automatic playback unavailable")
 }
 
@@ -1125,9 +1170,8 @@ func (h *HookController) OnServerStarted(c *gin.Context) {
 		return
 	}
 
-	if app.ZapLog != nil {
-		app.ZapLog.Info("ZLM Hook on_server_started")
-	}
+	hookLog(c).Info("ZLM Hook on_server_started",
+		zap.String("event", "gb28181.hook.server_started"))
 	if body.MediaServerID == "" || h.resolver == nil {
 		hookOK(c)
 		return
@@ -1149,9 +1193,11 @@ func (h *HookController) OnServerStarted(c *gin.Context) {
 func (h *HookController) writeServerStartedDecodeError(c *gin.Context, err error) {
 	var tooLarge *http.MaxBytesError
 	if errors.As(err, &tooLarge) {
+		response.SetBusinessResult(c, -1, false)
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": -1, "msg": "on_server_started payload too large"})
 		return
 	}
+	response.SetBusinessResult(c, -1, false)
 	c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "invalid on_server_started payload"})
 }
 
@@ -1172,6 +1218,7 @@ type onRecordMP4Body struct {
 func (h *HookController) OnRecordMP4(c *gin.Context) {
 	var body onRecordMP4Body
 	if err := c.ShouldBindJSON(&body); err != nil || body.StartTime <= 0 || body.TimeLen < 0 {
+		response.SetBusinessResult(c, -1, false)
 		c.JSON(http.StatusBadRequest, gin.H{"code": -1, "msg": "invalid on_record_mp4 payload"})
 		return
 	}
@@ -1185,7 +1232,9 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 	}
 	nodeID, ok := h.recordResolver.IDForUUID(body.MediaServerID)
 	if !ok {
-		app.ZapLog.Warn("忽略未知 ZLM 节点的录像文件", zap.String("mediaServerId", body.MediaServerID))
+		hookLog(c).Warn("忽略未知 ZLM 节点的录像文件",
+			zap.String("event", "gb28181.hook.recording.node_unknown"),
+			zap.String("mediaServerId", body.MediaServerID))
 		hookOK(c)
 		return
 	}
@@ -1195,12 +1244,16 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 		StartTime: time.Unix(body.StartTime, 0), TimeLen: body.TimeLen, FileSize: body.FileSize,
 	})
 	if err != nil {
-		app.ZapLog.Error("写入 ZLM 录像文件索引失败", zap.Error(err), zap.Int64("nodeId", nodeID))
+		hookLog(c).Error("写入 ZLM 录像文件索引失败",
+			zap.String("event", "gb28181.hook.recording.index_failed"),
+			logging.Error(err), zap.Int64("nodeId", nodeID))
+		response.SetBusinessResult(c, -1, false)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": -1, "msg": "persist recording file failed"})
 		return
 	}
 	if !indexed {
-		app.ZapLog.Warn("忽略无法归属的 ZLM MP4 文件", zap.Int64("nodeId", nodeID))
+		hookLog(c).Warn("忽略无法归属的 ZLM MP4 文件",
+			zap.String("event", "gb28181.hook.recording.unassigned"), zap.Int64("nodeId", nodeID))
 	}
 	hookOK(c)
 }
@@ -1215,7 +1268,8 @@ func (h *HookController) OnRecordMP4(c *gin.Context) {
 func (h *HookController) OnServerKeepalive(c *gin.Context) {
 	body, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		app.ZapLog.Warn("ZLM Hook on_server_keepalive 读 body 失败", zap.Error(err))
+		hookLog(c).Warn("ZLM Hook on_server_keepalive 读 body 失败",
+			zap.String("event", "gb28181.hook.keepalive.read_failed"), logging.Error(err))
 		hookOK(c)
 		return
 	}
@@ -1227,13 +1281,15 @@ func (h *HookController) OnServerKeepalive(c *gin.Context) {
 		return
 	}
 	if h.collector == nil {
-		app.ZapLog.Debug("ZLM Hook on_server_keepalive 收到但 Collector 未装配,忽略")
+		hookLog(c).Debug("ZLM Hook on_server_keepalive 收到但 Collector 未装配,忽略",
+			zap.String("event", "gb28181.hook.keepalive.collector_unavailable"))
 		hookOK(c)
 		return
 	}
 	if err := h.collector.Receive(body); err != nil {
-		app.ZapLog.Warn("ZLM Hook on_server_keepalive 处理失败",
-			zap.Error(err), zap.Int("bodyLen", len(body)))
+		hookLog(c).Warn("ZLM Hook on_server_keepalive 处理失败",
+			zap.String("event", "gb28181.hook.keepalive.process_failed"),
+			logging.Error(err), zap.Int("bodyLen", len(body)))
 	}
 	hookOK(c)
 }
