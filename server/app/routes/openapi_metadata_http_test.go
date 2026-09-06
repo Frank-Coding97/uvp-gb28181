@@ -53,6 +53,7 @@ func (c openAPIEnabledConfig) GetInt(key string) int {
 func TestOpenAPIRootMetadataUsesHMACAndExactOwner(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "http.sqlite")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 	require.NoError(t, err)
+	seedOpenAPISecurity(t, db)
 	raw, err := db.DB()
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = raw.Close() })

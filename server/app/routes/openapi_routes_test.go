@@ -45,11 +45,15 @@ func (c openAPIRootConfig) GetStringSlice(string) []string { return nil }
 
 func TestOpenAPIRootDefaultClosedAndIsolatedFromCORS(t *testing.T) {
 	old := app.ConfigYml
+	oldDB := app.GormDbMysql
+	app.GormDbMysql = openAPISecurityDB(t)
+	seedOpenAPISecurity(t, app.GormDbMysql)
 	oldCasbin, oldTokens, oldSessions := app.CasbinV2, app.TokenService, app.SessionValidator
 	app.CasbinV2, app.TokenService, app.SessionValidator = openAPIRootCasbin{}, openAPIRootTokens{}, openAPIRootSessions{}
 	app.ConfigYml = openAPIRootConfig{staticDir: t.TempDir()}
 	t.Cleanup(func() {
 		app.ConfigYml = old
+		app.GormDbMysql = oldDB
 		app.CasbinV2, app.TokenService, app.SessionValidator = oldCasbin, oldTokens, oldSessions
 	})
 	gin.SetMode(gin.TestMode)

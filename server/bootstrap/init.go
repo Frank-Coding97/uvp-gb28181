@@ -12,6 +12,7 @@ import (
 	"go.uber.org/zap/zapcore"
 	"gorm.io/gorm"
 
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
@@ -38,7 +39,9 @@ func init() {
 	// 配置文件
 	app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
 	app.ConfigYml.ConfigFileChangeListen(func() {
-		//配置文件发生变化
+		if gbconfig.PlayAuthConfigConflict() && app.ZapLog != nil {
+			app.ZapLog.Warn("OpenAPI security lock overrides authoff configuration; media authorization remains required")
+		}
 	})
 	// 日志
 	app.ZapLog = createZapFactory(service.ZapLogHandler)

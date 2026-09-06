@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"errors"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -237,6 +238,10 @@ func (sc *ServiceConfigController) UpdatePlayAuth(c *gin.Context) {
 		return
 	}
 	if err := gbconfig.SavePlayAuthSettings(app.ConfigYml, settings); err != nil {
+		if errors.Is(err, gbconfig.ErrPlayAuthRequired) {
+			sc.Fail(c, "OpenAPI 播放隔离已锁定媒体鉴权，停用接入不会解除该保护", nil, http.StatusConflict)
+			return
+		}
 		sc.Fail(c, "保存播放鉴权配置失败", err, http.StatusInternalServerError)
 		return
 	}

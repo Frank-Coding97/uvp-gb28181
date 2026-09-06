@@ -9,6 +9,7 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 
 	"uvplatform.cn/uvp-gb28181/app/controllers"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
@@ -39,12 +40,21 @@ var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // �
 
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
+	securityContext, cancelSecurity := context.WithTimeout(context.Background(), 5*time.Second)
+	securityErr := openapiroutes.RestoreMediaSecurity(securityContext, app.DB(), gbconfig.RequirePlayAuth)
+	cancelSecurity()
+	if securityErr != nil {
+		panic("OpenAPI media security state unavailable; HTTP and GB startup remain closed")
+	}
+	if gbconfig.PlayAuthConfigConflict() && app.ZapLog != nil {
+		app.ZapLog.Warn("OpenAPI security lock overrides authoff configuration; media authorization remains required")
+	}
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())
 	}
 	var openAPIGateway *openapiauth.Gateway
 	var openAPIAdmin *openapicontrollers.ClientAdminController
-	if app.ConfigYml.GetBool("openapi.enabled") {
+	if app.ConfigYml.GetBool("openapi.enabled") || app.ConfigYml.GetBool("openapi.play_enabled") {
 		startupContext, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		var err error
 		openAPIGateway, openAPIAdmin, err = openapiroutes.InitializeRuntime(startupContext, app.DB(), app.CasbinV2, app.ConfigYml)

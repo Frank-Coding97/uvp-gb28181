@@ -332,6 +332,7 @@ func (f *openAPIAdminHTTPFixture) do(t *testing.T, token, method, path, body str
 
 func seedOpenAPIAdminHTTPSchema(db *gorm.DB) error {
 	return db.AutoMigrate(
+		&openapimodels.SecurityState{},
 		&openapimodels.Client{}, &openapimodels.ClientScope{}, &openapimodels.Nonce{}, &openapimodels.Audit{},
 		&appmodels.SysDepartment{}, &appmodels.User{}, &appmodels.SysRole{}, &appmodels.SysUserRole{}, &appmodels.SysUserSession{}, &appmodels.SysOperationLog{},
 		&gbmodels.GbDevice{}, &gbmodels.GbChannel{},
@@ -339,6 +340,9 @@ func seedOpenAPIAdminHTTPSchema(db *gorm.DB) error {
 }
 
 func seedOpenAPIAdminHTTPData(db *gorm.DB) error {
+	if err := db.Create(&openapimodels.SecurityState{ID: 1}).Error; err != nil {
+		return err
+	}
 	active := int8(1)
 	departments := []appmodels.SysDepartment{
 		{BaseModel: appmodels.BaseModel{ID: 10}, Name: "现场部门", Status: &active},

@@ -17,9 +17,10 @@ import (
 )
 
 type runtimeTestSettings struct {
-	enabled  bool
-	values   map[string]string
-	integers map[string]int
+	enabled     bool
+	playEnabled bool
+	values      map[string]string
+	integers    map[string]int
 }
 
 type runtimePermissions struct{}
@@ -76,7 +77,12 @@ func TestOpenAPIStartupRejectsMissingSchemaAndInvalidConfiguration(t *testing.T)
 	}
 }
 
-func (s runtimeTestSettings) GetBool(string) bool            { return s.enabled }
+func (s runtimeTestSettings) GetBool(key string) bool {
+	if key == "openapi.play_enabled" {
+		return s.playEnabled
+	}
+	return key == "openapi.enabled" && s.enabled
+}
 func (s runtimeTestSettings) GetString(key string) string    { return s.values[key] }
 func (s runtimeTestSettings) GetInt(key string) int          { return s.integers[key] }
 func (s runtimeTestSettings) GetStringSlice(string) []string { return nil }

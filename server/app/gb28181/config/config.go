@@ -228,7 +228,9 @@ func playAuthTTLSecondsFrom(c valueSource) int {
 func CurrentPlayAuthSettings() PlayAuthSettings {
 	fixedAddressPlaybackMu.RLock()
 	defer fixedAddressPlaybackMu.RUnlock()
-	return PlayAuthSettingsFrom(app.ConfigYml)
+	settings := PlayAuthSettingsFrom(app.ConfigYml)
+	settings.Enabled = settings.Enabled || mustAuthRequired.Load()
+	return settings
 }
 
 func ValidatePlayAuthSettings(settings PlayAuthSettings, fixed FixedAddressPlaybackSettings) error {
@@ -248,6 +250,9 @@ func SavePlayAuthSettings(c mutableValueSource, settings PlayAuthSettings) error
 	}
 	fixedAddressPlaybackMu.Lock()
 	defer fixedAddressPlaybackMu.Unlock()
+	if !settings.Enabled && mustAuthRequired.Load() {
+		return ErrPlayAuthRequired
+	}
 	if err := ValidatePlayAuthSettings(settings, FixedAddressPlaybackSettingsFrom(c)); err != nil {
 		return err
 	}

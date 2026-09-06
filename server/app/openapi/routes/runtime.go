@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
 	"uvplatform.cn/uvp-gb28181/app/openapi/client"
+	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
 	"uvplatform.cn/uvp-gb28181/app/openapi/controllers"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
@@ -21,10 +22,17 @@ type RuntimeSettings interface {
 }
 
 // InitializeRuntime is startup-only, after DB migrations and Casbin initialization.
-// Disabled startup needs neither a database nor a master key. Enabled startup
+// The disabled machine gateway needs neither a database nor a master key.
+// RestoreMediaSecurity still runs unconditionally at the application root.
+// Enabled gateway startup
 // cannot silently fall back after recovery/configuration/dependency failure.
 func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.ManagementPermissionAuthorizer, settings RuntimeSettings) (*auth.Gateway, *controllers.ClientAdminController, error) {
 	if settings == nil {
+		return nil, nil, auth.ErrUnavailable
+	}
+	// T10--T12 are not wired yet. A hot/raw flag never activates media, and no
+	// sticky commitment is written until the full startup preflight succeeds.
+	if settings.GetBool("openapi.play_enabled") {
 		return nil, nil, auth.ErrUnavailable
 	}
 	if !settings.GetBool("openapi.enabled") {
@@ -63,6 +71,23 @@ func InitializeRuntime(ctx context.Context, db *gorm.DB, permissions client.Mana
 	// Until the durable T12 store/worker is wired, revoking mutations and progress
 	// return 503 rather than advertising a successful media cleanup.
 	return gate, controllers.NewClientAdminController(db, service, permissions, nil), nil
+}
+
+// RestoreMediaSecurity is mandatory before GB/HTTP startup even when OpenAPI
+// is disabled. Missing/unreadable persistent state stops startup; there is no
+// inference from YAML, clients, grants or an empty viewer list.
+func RestoreMediaSecurity(ctx context.Context, db *gorm.DB, requireAuth func()) error {
+	if requireAuth == nil {
+		return openapiconfig.ErrUnavailable
+	}
+	state, err := openapiconfig.NewMustAuthStore(db, time.Now).Load(ctx)
+	if err != nil {
+		return err
+	}
+	if state.MustAuthLocked {
+		requireAuth()
+	}
+	return nil
 }
 
 // Read-only, zero-row probes check actual columns, not merely table existence.
