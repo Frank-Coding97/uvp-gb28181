@@ -39,3 +39,10 @@ func TestPostgreSQLInitializationQuotesSysJobsGroupIdentifier(t *testing.T) {
 	require.NotContains(t, body, "\n    group VARCHAR(100) NOT NULL,")
 	require.NotContains(t, body, "COMMENT ON COLUMN sys_jobs.group IS")
 }
+
+func TestPostgreSQLInitializationRestoresJobResultsForeignKey(t *testing.T) {
+	body := readInitializationContractSQL(t, "postgresql_converted.sql")
+
+	require.Contains(t, body, "CONSTRAINT sys_job_results_ibfk_1 FOREIGN KEY (job_id) REFERENCES sys_jobs (id) ON DELETE CASCADE ON UPDATE CASCADE")
+	require.NotContains(t, body, "CONSTRAINT TEXT")
+}

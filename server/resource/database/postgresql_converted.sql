@@ -846,7 +846,7 @@ CREATE TABLE sys_job_results (
     retry_count INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
-    CONSTRAINT TEXT
+    CONSTRAINT sys_job_results_ibfk_1 FOREIGN KEY (job_id) REFERENCES sys_jobs (id) ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 COMMENT ON COLUMN sys_job_results.id IS '自增主键';
