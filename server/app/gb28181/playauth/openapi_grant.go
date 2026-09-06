@@ -124,7 +124,7 @@ func (s *OpenAPIGrantService) Issue(ctx context.Context, request OpenAPIGrantIss
 		if !scope.Enabled || scope.ScopeEpoch <= 0 {
 			return ErrOpenAPIGrantDenied
 		}
-		deviceEpoch, err := lockOpenAPIRootDevice(tx.WithContext(ctx), *hint.DeviceID)
+		deviceEpoch, err := loadGrantDeviceEpoch(tx.WithContext(ctx), *hint.DeviceID)
 		if err != nil {
 			return err
 		}
@@ -206,9 +206,10 @@ func (s *OpenAPIGrantService) Issue(ctx context.Context, request OpenAPIGrantIss
 const openAPIPlayScope = "play:live:apply"
 
 type openAPIDeviceRow struct {
-	ID          uint   `gorm:"column:id"`
-	DeviceID    string `gorm:"column:device_id"`
-	AccessEpoch int64  `gorm:"column:access_epoch"`
+	ID                    uint   `gorm:"column:id"`
+	DeviceID              string `gorm:"column:device_id"`
+	AccessEpoch           int64  `gorm:"column:access_epoch"`
+	CleanupCompletedEpoch *int64 `gorm:"column:cleanup_completed_epoch"`
 }
 
 func lockOpenAPIClient(tx *gorm.DB, clientID int64) (models.Client, error) {
@@ -237,6 +238,22 @@ func lockOpenAPIRootDevice(tx *gorm.DB, deviceID string) (int64, error) {
 	result := query.Select("id, device_id, access_epoch").
 		Where("device_id = ? AND deleted_at IS NULL", deviceID).Limit(2).Find(&rows)
 	if result.Error != nil || result.RowsAffected != 1 || len(rows) != 1 || rows[0].ID == 0 || rows[0].DeviceID != deviceID || rows[0].AccessEpoch <= 0 {
+		return 0, normalizeOpenAPIGrantError(result.Error)
+	}
+	return rows[0].AccessEpoch, nil
+}
+
+// loadGrantDeviceEpoch is the media-admission projection of the device row.
+// A transfer records a new access epoch before its asynchronous cleanup has
+// completed; that device must not admit a new external grant or viewer until
+// the durable cleanup watermark catches up. The transfer-revocation path uses
+// lockOpenAPIRootDevice and intentionally does not apply this gate.
+func loadGrantDeviceEpoch(tx *gorm.DB, deviceID string) (int64, error) {
+	var rows []openAPIDeviceRow
+	query := lockedOpenAPITable(tx, "gb_device")
+	result := query.Select("id, device_id, access_epoch, cleanup_completed_epoch").
+		Where("device_id = ? AND deleted_at IS NULL", deviceID).Limit(2).Find(&rows)
+	if result.Error != nil || result.RowsAffected != 1 || len(rows) != 1 || rows[0].ID == 0 || rows[0].DeviceID != deviceID || rows[0].AccessEpoch <= 0 || rows[0].CleanupCompletedEpoch == nil || *rows[0].CleanupCompletedEpoch <= 0 || *rows[0].CleanupCompletedEpoch != rows[0].AccessEpoch {
 		return 0, normalizeOpenAPIGrantError(result.Error)
 	}
 	return rows[0].AccessEpoch, nil

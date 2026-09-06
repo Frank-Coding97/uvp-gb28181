@@ -80,7 +80,7 @@ func (s *OpenAPIGrantService) BindViewer(ctx context.Context, token string, requ
 		if !scope.Enabled || scope.ScopeEpoch != claims.ScopeEpoch || scope.Scope != openAPIPlayScope {
 			return ErrOpenAPIViewerDenied
 		}
-		deviceEpoch, err := lockOpenAPIRootDevice(tx.WithContext(ctx), claims.DeviceID)
+		deviceEpoch, err := loadGrantDeviceEpoch(tx.WithContext(ctx), claims.DeviceID)
 		if err != nil {
 			return err
 		}

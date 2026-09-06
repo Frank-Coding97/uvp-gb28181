@@ -235,9 +235,9 @@ func quotaFixture(t *testing.T, viewerQuota int) *gorm.DB {
 	t.Helper()
 	db := mustQuotaDB(t)
 	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.PlayGrant{}, &models.Viewer{}))
-	require.NoError(t, db.Exec("CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id TEXT NOT NULL UNIQUE, access_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL)").Error)
-	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, access_epoch) VALUES (1, 'device-a', 3)").Error)
-	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, access_epoch, deleted_at) VALUES (2, 'device-deleted', 3, ?)", quotaTestNow).Error)
+	require.NoError(t, db.Exec("CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id TEXT NOT NULL UNIQUE, access_epoch INTEGER NOT NULL DEFAULT 1, cleanup_completed_epoch INTEGER DEFAULT 1, deleted_at DATETIME NULL)").Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, access_epoch, cleanup_completed_epoch) VALUES (1, 'device-a', 3, 3)").Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, access_epoch, cleanup_completed_epoch, deleted_at) VALUES (2, 'device-deleted', 3, 3, ?)", quotaTestNow).Error)
 	client := models.Client{ID: 1, AK: "ak-1", Name: "client-1", OwnerDeptID: 1, Status: models.StatusActive,
 		SecretCiphertext: []byte("cipher"), SecretIV: []byte("iv"), SecretKeyID: "key", SecretVersion: 1,
 		AuthEpoch: 1, RateLimit: 10, Burst: 20, ViewerQuota: viewerQuota, RowVersion: 1, CreatedAt: quotaTestNow, UpdatedAt: quotaTestNow}

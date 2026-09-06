@@ -88,12 +88,13 @@ type Viewer struct {
 
 func (Viewer) TableName() string { return "gb_openapi_viewer" }
 
-// DeviceSecurity is a same-table projection for the two security fields that
+// DeviceSecurity is a same-table projection for the security fields that
 // later device-assignment code must update atomically. It must not be used as
 // a full GbDevice replacement or passed to a broad Save operation.
 type DeviceSecurity struct {
-	ID          uint  `gorm:"column:id;primaryKey"`
-	AccessEpoch int64 `gorm:"column:access_epoch;not null;default:1;check:ck_gb_device_access_epoch,access_epoch > 0"`
+	ID                    uint  `gorm:"column:id;primaryKey"`
+	AccessEpoch           int64 `gorm:"column:access_epoch;not null;default:1;check:ck_gb_device_access_epoch,access_epoch > 0"`
+	CleanupCompletedEpoch int64 `gorm:"column:cleanup_completed_epoch;not null;default:1;check:ck_gb_device_cleanup_completed_epoch,cleanup_completed_epoch > 0 AND cleanup_completed_epoch <= access_epoch"`
 	// LegacyRevokedBefore is stored as a UTC whole-second boundary because the
 	// legacy v2 iat is an integer Unix second. Callers must convert with
 	// time.Unix(iat, 0).UTC(); the revocation contract must reject tokens issued

@@ -275,18 +275,19 @@ func lockScopeRow(tx *gorm.DB, clientID int64, scopeName string) (models.ClientS
 func lockDeviceRow(tx *gorm.DB, deviceID string) (int64, error) {
 	query := lockedTable(tx, "gb_device")
 	var row struct {
-		ID          uint   `gorm:"column:id"`
-		DeviceID    string `gorm:"column:device_id"`
-		AccessEpoch int64  `gorm:"column:access_epoch"`
+		ID                    uint   `gorm:"column:id"`
+		DeviceID              string `gorm:"column:device_id"`
+		AccessEpoch           int64  `gorm:"column:access_epoch"`
+		CleanupCompletedEpoch *int64 `gorm:"column:cleanup_completed_epoch"`
 	}
-	result := query.Select("id, device_id, access_epoch").Where("device_id = ? AND deleted_at IS NULL", deviceID).Take(&row)
+	result := query.Select("id, device_id, access_epoch, cleanup_completed_epoch").Where("device_id = ? AND deleted_at IS NULL", deviceID).Take(&row)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return 0, ErrQuotaUnavailable
 		}
 		return 0, result.Error
 	}
-	if result.RowsAffected != 1 || row.ID == 0 || row.DeviceID != deviceID || row.AccessEpoch <= 0 {
+	if result.RowsAffected != 1 || row.ID == 0 || row.DeviceID != deviceID || row.AccessEpoch <= 0 || row.CleanupCompletedEpoch == nil || *row.CleanupCompletedEpoch <= 0 || *row.CleanupCompletedEpoch != row.AccessEpoch {
 		return 0, ErrQuotaUnavailable
 	}
 	return row.AccessEpoch, nil

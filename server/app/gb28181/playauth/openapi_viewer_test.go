@@ -242,7 +242,7 @@ func TestOpenAPIViewerRejectsEpochOwnerAndRuntimeInvalidation(t *testing.T) {
 	fixture = newOpenAPIGrantFixture(t)
 	defer fixture.close(t)
 	service, token, _ = issueOpenAPITestGrant(t, fixture)
-	require.NoError(t, fixture.db.Table("gb_device").Where("device_id = ?", testDeviceID).Update("access_epoch", 5).Error)
+	require.NoError(t, fixture.db.Table("gb_device").Where("device_id = ?", testDeviceID).Updates(map[string]any{"access_epoch": 5, "cleanup_completed_epoch": 5}).Error)
 	_, err = service.BindViewer(context.Background(), token, openAPIViewerRequest("epoch-device"))
 	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
 
@@ -263,7 +263,7 @@ func TestOpenAPIViewerRegrantAfterEpochChangeDoesNotReviveOldGrant(t *testing.T)
 
 	require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).Update("auth_epoch", 3).Error)
 	require.NoError(t, fixture.db.Model(&models.ClientScope{}).Where("client_id = ? AND scope = ?", testClientID, limit.PlayLiveApplyScope).Updates(map[string]any{"scope_epoch": 4}).Error)
-	require.NoError(t, fixture.db.Table("gb_device").Where("device_id = ?", testDeviceID).Update("access_epoch", 5).Error)
+	require.NoError(t, fixture.db.Table("gb_device").Where("device_id = ?", testDeviceID).Updates(map[string]any{"access_epoch": 5, "cleanup_completed_epoch": 5}).Error)
 	_, err = service.BindViewer(context.Background(), oldToken, openAPIViewerRequest("old-epoch-reconnect"))
 	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
 

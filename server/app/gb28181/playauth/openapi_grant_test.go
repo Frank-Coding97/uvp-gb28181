@@ -243,7 +243,7 @@ func newOpenAPIGrantFixture(t *testing.T) *openAPIGrantFixture {
 	createOpenAPIResourceFixtureTables(t, db)
 	now := time.Date(2026, 9, 6, 1, 0, 0, 123456000, time.UTC)
 	require.NoError(t, db.Create(&departmentRow{ID: testDeptID, Status: 1}).Error)
-	require.NoError(t, db.Exec("INSERT INTO gb_device (id, device_id, owner_dept_id, access_epoch, deleted_at) VALUES (?, ?, ?, ?, NULL)", 11, testDeviceID, testDeptID, 4).Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_device (id, device_id, owner_dept_id, access_epoch, cleanup_completed_epoch, deleted_at) VALUES (?, ?, ?, ?, ?, NULL)", 11, testDeviceID, testDeptID, 4, 4).Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel (id, device_id, channel_id, owner_dept_id, deleted_at) VALUES (?, ?, ?, ?, NULL)", 12, testDeviceID, testChannelID, testDeptID).Error)
 	require.NoError(t, db.Exec("INSERT INTO meta_node (id, revision, media_server_uuid, current_boot_nonce, runtime_epoch, runtime_protocol_version, runtime_confirmed_revision, runtime_confirmed_at, runtime_identity_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 3, 9, testNodeUUID, testBootNonce, 1, 1, 9, now, "active").Error)
 	require.NoError(t, db.Create(&models.Client{ID: testClientID, AK: "uvp_test_client", Name: "test", OwnerDeptID: testDeptID, Status: models.StatusActive, SecretCiphertext: []byte("ciphertext"), SecretIV: []byte("0123456789ab"), SecretKeyID: "fixture", SecretVersion: 1, AuthEpoch: 2, ViewerQuota: 10, RateLimit: 10, Burst: 20, RowVersion: 1, CreatedAt: now, UpdatedAt: now}).Error)
@@ -308,7 +308,7 @@ func createOpenAPIResourceFixtureTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	for _, statement := range []string{
 		`CREATE TABLE sys_department (id INTEGER PRIMARY KEY, status INTEGER NOT NULL, deleted_at DATETIME NULL)`,
-		`CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id VARCHAR(20) NOT NULL, owner_dept_id INTEGER NOT NULL, name VARCHAR(100) NOT NULL DEFAULT '', alias VARCHAR(100) NOT NULL DEFAULT '', manufacturer VARCHAR(100) NOT NULL DEFAULT '', model VARCHAR(100) NOT NULL DEFAULT '', status INTEGER NULL, access_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL)`,
+		`CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id VARCHAR(20) NOT NULL, owner_dept_id INTEGER NOT NULL, name VARCHAR(100) NOT NULL DEFAULT '', alias VARCHAR(100) NOT NULL DEFAULT '', manufacturer VARCHAR(100) NOT NULL DEFAULT '', model VARCHAR(100) NOT NULL DEFAULT '', status INTEGER NULL, access_epoch INTEGER NOT NULL DEFAULT 1, cleanup_completed_epoch INTEGER DEFAULT 1, deleted_at DATETIME NULL)`,
 		`CREATE TABLE gb_channel (id INTEGER PRIMARY KEY, device_id VARCHAR(20) NOT NULL, channel_id VARCHAR(20) NOT NULL, owner_dept_id INTEGER NOT NULL, name VARCHAR(100) NOT NULL DEFAULT '', alias VARCHAR(100) NOT NULL DEFAULT '', manufacturer VARCHAR(100) NOT NULL DEFAULT '', model VARCHAR(100) NOT NULL DEFAULT '', status INTEGER NULL, ptz_type INTEGER NOT NULL DEFAULT 0, deleted_at DATETIME NULL)`,
 		`CREATE TABLE meta_node (id INTEGER PRIMARY KEY, revision INTEGER NOT NULL, media_server_uuid VARCHAR(64) NOT NULL, current_boot_nonce VARCHAR(32), runtime_epoch INTEGER NOT NULL, runtime_protocol_version INTEGER NOT NULL, runtime_confirmed_revision INTEGER NOT NULL, runtime_confirmed_at DATETIME NULL, runtime_identity_status VARCHAR(16) NOT NULL)`,
 	} {
