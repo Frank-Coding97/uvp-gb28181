@@ -60,6 +60,27 @@ x-uvp-signature-contract:
 x-uvp-retry-policy:
   GET: Retry only with a fresh timestamp, nonce, and signature.
   POST: Do not automatically retry after a timeout; callers must decide whether to retry.
+x-uvp-transport-contract:
+  httpVersion: HTTP/1.1
+  post:
+    body:
+      contentLength:
+        required: true
+        minimum: 1
+        maximum: 65536
+        value: exact body byte length
+        signed: false
+      transferEncoding:
+        allowed: false
+        chunked: false
+      contentEncoding:
+        allowed: false
+      contentType: application/json
+      json:
+        exactFields: [protocol]
+        rejectUnknownFields: true
+        rejectDuplicateFields: true
+    automaticRetry: false
 x-uvp-error-classification:
   missingRequiredAuthHeader: 401
   malformedAuthHeader: 400
