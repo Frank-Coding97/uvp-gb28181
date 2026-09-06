@@ -16,11 +16,18 @@ func main() {
 	root := flag.String("root", ".", "Go source root to scan")
 	includeTests := flag.Bool("include-tests", false, "include *_test.go files")
 	failOnIssues := flag.Bool("fail-on-issues", false, "exit 1 when policy findings are present")
+	repository := flag.Bool("repository", false, "apply reviewed application call identities and adapter source contracts")
 	policy := flag.Bool("policy", false, "run the type-aware logging policy gate")
 	failOnFindings := flag.Bool("fail-on-findings", false, "exit 1 when type-aware policy findings are present")
 	flag.Parse()
-	if *policy || *failOnFindings {
-		report, err := loggingcontract.CheckPolicy(*root, loggingcontract.PolicyOptions{IncludeTests: *includeTests})
+	if *policy || *repository || *failOnFindings {
+		var report interface{ HasFindings() bool }
+		var err error
+		if *repository {
+			report, err = loggingcontract.CheckRepositoryPolicy(*root)
+		} else {
+			report, err = loggingcontract.CheckPolicy(*root, loggingcontract.PolicyOptions{IncludeTests: *includeTests})
+		}
 		if err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)

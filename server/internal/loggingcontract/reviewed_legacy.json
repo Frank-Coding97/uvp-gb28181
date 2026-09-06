@@ -1,0 +1,932 @@
+[
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Warn",
+    "message": "清理仪表盘历史事实失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Info",
+    "message": "清理过期仪表盘历史事实",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM 节点/配置 controller 已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM 心跳 Collector / Watcher 已启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM 线程负载 Poller 已启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 ZLM 节点配置启动收敛失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM 节点配置启动收敛完成",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startControlPlane",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 SIP 已进入停止流程,拒绝重复启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 SIP 已运行,忽略重复启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 未启用,跳过 SIP 服务启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 SIP YAML 一次性迁移失败,忽略继续",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 SIP 老 stack YAML 配置已迁移到 gb_sip_config,可在 config.yml 移除 gb28181.sip.* 段",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Error",
+    "message": "GB28181 SIP 配置加载失败,后台继续启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 SIP 尚未配置,跳过 SIP 依赖并继续启动后台(等待引导页录入)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Error",
+    "message": "GB28181 播放鉴权密钥初始化失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 播放鉴权密钥初始化失败,鉴权保持关闭",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "Start",
+    "receiver": "",
+    "method": "Error",
+    "message": "GB28181 SIP 服务启动失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupSecurityRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 安全持久化运行时装配失败,降级为内存 protect",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Error",
+    "message": "国标级联运行时装配失败,设备侧 SIP 继续运行",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "国标级联运行时已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 离线扫描器已启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 播放鉴权 signer 未装配，播放鉴权保持关闭",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 播放鉴权服务已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 通道快照 service 已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 点播 service 已装配(多节点 + scheduler)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 点播 service 已装配(单节点 deprecated;通道快照仅多节点路径启用)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 UAC 不可用,点播 service 跳过装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 点播对账 reconciler 已启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 点播对账 reconciler 跳过装配(单节点路径 deprecated,无 registry/locationMap)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startSIPDependencies",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 点播对账 reconciler 未启用(reconcile_interval_sec=0)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupPlaybackRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 设备录像回放 service 跳过装配(UAC/RecordInfo/ZLM 依赖未就绪)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupPlaybackRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 设备录像回放 service 已装配(ZLM scheduler + Playback UAC)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 云端录像 service 跳过装配(play/registry/locationMap 未就绪)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 云端录像 service / Hook 已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 云端录像周期对账未启用(reconcile_interval_sec=0)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 云端录像 reconciler 已启动",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 云端录像 capability 密钥无法派生(JWT 根密钥为空)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 云端录像 capability 密钥拒绝装配(禁止复用 JWT/ZLM secret)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 云端录像 capability 密钥未配置或长度不足",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 云端录像 capability signer 已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupRecordingRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 云端录像目录对账已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTalkRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 语音对讲 service 跳过装配(依赖未就绪)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTalkRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 语音对讲表未迁移,service 跳过装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTalkRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 语音对讲启动恢复存在清理失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTalkRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "设备 TALK BYE 清理失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTalkRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 语音对讲 service / Hook / 租约扫描已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "ReloadSIP",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 播放鉴权密钥初始化失败,鉴权保持关闭",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMRegistry",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 DB 不可用,跳过 ZLM Registry 装配(走 deprecated 单节点路径)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMRegistry",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 ZLM Registry LoadAll 失败,可能 meta_node 表未建",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMRegistry",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 ZLM 默认节点 seed 失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMRegistry",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM Registry 已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTrafficRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 流量统计跳过装配(DB/ZLM Registry 未就绪)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTrafficRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 流量统计表未迁移,运行时跳过装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTrafficRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 流量统计仓储装配失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTrafficRuntime",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 终态流量会话清理失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupTrafficRuntime",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 流量统计 Hook / 采样器已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMScheduler",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 ZLM Registry 未装配,跳过 Scheduler 装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMScheduler",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 scheduler_setting 读取失败,fallback roundrobin",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMScheduler",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 scheduler_setting 表空,fallback roundrobin",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMScheduler",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 Scheduler.Switch 失败,fallback roundrobin",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMScheduler",
+    "receiver": "",
+    "method": "Error",
+    "message": "GB28181 Scheduler 装配失败(roundrobin fallback 也失败,Manager 留空)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMScheduler",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM Scheduler 已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMSchedulerLog",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 Scheduler 未装配,跳过调度日志服务",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMSchedulerLog",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 DB 不可用,跳过调度日志服务",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMSchedulerLog",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM 调度日志服务已启动(buffer=1000, retention=7d)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "pruneSchedulerLogDaily",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 调度日志 prune 失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "pruneSchedulerLogDaily",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 调度日志 prune 完成",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMSchedulerController",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 Scheduler 未装配,跳过 Scheduler Controller",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupZLMSchedulerController",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 ZLM Scheduler Controller 已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "runMetricsCleanup",
+    "receiver": "",
+    "method": "Debug",
+    "message": "GB28181 metrics 配对清理",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupCivilCodeService",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 DB 不可用,跳过 CivilCode 字典服务(catalog 4 层兜底降级 L4:000000)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupCivilCodeService",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 CivilCode 字典 seed 失败,catalog 4 层兜底可能降级 L4",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupCivilCodeService",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 CivilCode 字典 seed 完成",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupCivilCodeService",
+    "receiver": "",
+    "method": "Warn",
+    "message": "GB28181 CivilCode WarmCache 失败(可能 sys_civil_code 表未建),catalog 4 层兜底降级 L4",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "setupCivilCodeService",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 CivilCode 字典服务已装配",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startPositionHistoryPruner",
+    "receiver": "",
+    "method": "Warn",
+    "message": "清理位置历史失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "startPositionHistoryPruner",
+    "receiver": "",
+    "method": "Info",
+    "message": "清理过期位置历史",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/gb28181",
+    "file": "app/gb28181/bootstrap.go",
+    "function": "buildSnapshotService",
+    "receiver": "",
+    "method": "Info",
+    "message": "GB28181 通道快照 skip:zlmRegistry 未初始化(单节点部署?)",
+    "count": 1,
+    "reason": "Reviewed T12 historical startup/background site: static message and typed safe errors or primitive status fields; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/scheduler",
+    "file": "app/scheduler/register.go",
+    "function": "LoadJobsFromDB",
+    "receiver": "",
+    "method": "Error",
+    "message": "从数据库加载任务失败",
+    "count": 1,
+    "reason": "Reviewed T10 historical scheduler startup site: static messages and typed safe error or primitive job metadata only; raw job parameters are not logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/scheduler",
+    "file": "app/scheduler/register.go",
+    "function": "LoadJobsFromDB",
+    "receiver": "",
+    "method": "Info",
+    "message": "从数据库加载启用的任务",
+    "count": 1,
+    "reason": "Reviewed T10 historical scheduler startup site: static messages and typed safe error or primitive job metadata only; raw job parameters are not logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/scheduler",
+    "file": "app/scheduler/register.go",
+    "function": "LoadJobsFromDB",
+    "receiver": "",
+    "method": "Error",
+    "message": "解析任务参数失败",
+    "count": 1,
+    "reason": "Reviewed T10 historical scheduler startup site: static messages and typed safe error or primitive job metadata only; raw job parameters are not logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/scheduler",
+    "file": "app/scheduler/register.go",
+    "function": "LoadJobsFromDB",
+    "receiver": "",
+    "method": "Error",
+    "message": "添加任务到调度器失败",
+    "count": 1,
+    "reason": "Reviewed T10 historical scheduler startup site: static messages and typed safe error or primitive job metadata only; raw job parameters are not logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/scheduler",
+    "file": "app/scheduler/register.go",
+    "function": "LoadJobsFromDB",
+    "receiver": "",
+    "method": "Info",
+    "message": "成功加载任务到调度器",
+    "count": 1,
+    "reason": "Reviewed T10 historical scheduler startup site: static messages and typed safe error or primitive job metadata only; raw job parameters are not logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "file": "app/utils/ginhelper/ginhelper.go",
+    "function": "RegisterPluginRoutes",
+    "receiver": "",
+    "method": "Info",
+    "message": "插件路由函数注册成功",
+    "count": 1,
+    "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "file": "app/utils/ginhelper/ginhelper.go",
+    "function": "RegisterPluginRoutes",
+    "receiver": "",
+    "method": "Warn",
+    "message": "插件路由函数为空，注册失败",
+    "count": 1,
+    "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "file": "app/utils/ginhelper/ginhelper.go",
+    "function": "InitPluginRoutes",
+    "receiver": "",
+    "method": "Info",
+    "message": "没有注册的插件路由函数",
+    "count": 1,
+    "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "file": "app/utils/ginhelper/ginhelper.go",
+    "function": "InitPluginRoutes",
+    "receiver": "",
+    "method": "Info",
+    "message": "插件路由初始化成功",
+    "count": 1,
+    "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "file": "app/utils/ginhelper/ginhelper.go",
+    "function": "InitPluginRoutes",
+    "receiver": "",
+    "method": "Warn",
+    "message": "插件路由函数为空，跳过初始化",
+    "count": 1,
+    "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/ginhelper",
+    "file": "app/utils/ginhelper/ginhelper.go",
+    "function": "InitPluginRoutes",
+    "receiver": "",
+    "method": "Info",
+    "message": "所有插件路由初始化完成",
+    "count": 1,
+    "reason": "Reviewed T12 historical plugin-route startup site: static messages and primitive plugin index/count fields only; no request or payload data is logged, and plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/gormhelper",
+    "file": "app/utils/gormhelper/hook.go",
+    "function": "CreateBeforeHook",
+    "receiver": "",
+    "method": "Warn",
+    "message": "gorm Create 函数的参数必须是一个指针, 为了完美支持 gorm 的所有回调函数,请在参数前面添加 & ",
+    "count": 1,
+    "reason": "Reviewed T07 historical GORM hook warning site: static message constants and no dynamic fields or payload data; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/utils/gormhelper",
+    "file": "app/utils/gormhelper/hook.go",
+    "function": "UpdateBeforeHook",
+    "receiver": "",
+    "method": "Warn",
+    "message": "gorm 的 Update、Save 函数的参数必须是一个指针",
+    "count": 1,
+    "reason": "Reviewed T07 historical GORM hook warning site: static message constants and no dynamic fields or payload data; plan 4.3 permits legacy.log."
+  },
+  {
+    "package_path": "uvplatform.cn/uvp-gb28181/app/global/app",
+    "file": "app/global/app/variable.go",
+    "function": "DB",
+    "receiver": "",
+    "method": "Fatal",
+    "message": "数据库连接失败",
+    "count": 1,
+    "reason": "Reviewed historical static database invariant failure; installed one-way standard bridge omits free text. Existing process termination semantics are outside the logging-only migration."
+  }
+]
