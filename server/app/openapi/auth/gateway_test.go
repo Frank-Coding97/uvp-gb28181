@@ -40,6 +40,7 @@ func gatewayCall(t *testing.T, gate *Gateway, secret, nonce string, mutate func(
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
+	require.NoError(t, router.SetTrustedProxies(nil))
 	router.GET("/openapi/v1/devices", gate.Handler("device:list"))
 	now := fmt.Sprint(time.Now().Unix())
 	input := SignatureInput{Method: "GET", Path: "/openapi/v1/devices", AccessKey: fmt.Sprintf("uvp_%032x", 1), Timestamp: now, Nonce: nonce, Audience: "test-audience"}

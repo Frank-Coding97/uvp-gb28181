@@ -38,15 +38,19 @@ type Gateway struct {
 	run       func(context.Context, gatewayRequest) gatewayResponse
 	read      func(context.Context, *gorm.DB, metadataInput) (any, error)
 	complete  func(context.Context, string, string, time.Duration) error
+	rejected  *audit.RejectedCollector
 }
 type gatewayRequest struct {
 	method, path, rawURI, rawQuery, pattern, scope, deviceID, channelID, requestID, source string
 	headers                                                                                HeaderValues
 }
 type gatewayResponse struct {
-	status     int
-	body       []byte
-	retryAfter int
+	status           int
+	body             []byte
+	retryAfter       int
+	code             string
+	verifiedClientID int64
+	admitted         bool
 }
 
 func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, config GatewayConfig) (*Gateway, error) {
@@ -67,15 +71,22 @@ func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, co
 	}
 	g := &Gateway{config: config, db: db, clients: service, admission: NewAdmission(db, time.Now), limiter: limit.New(time.Now), tls: transport, slots: make(chan struct{}, config.MaxInFlight), complete: store.Complete, read: readMetadata}
 	g.run = g.process
+	g.rejected = audit.NewRejectedCollector()
 	return g, nil
 }
 
 func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
+		respond := func(response gatewayResponse) {
+			if g != nil && response.status >= 400 && !response.admitted {
+				g.rejected.Record(audit.RejectedInput{RequestID: c.GetString("requestId"), ClientID: response.verifiedClientID, Scope: scope, Source: c.ClientIP(), Reason: response.code})
+			}
+			writeGateway(c, response)
+		}
 		var id [16]byte
 		if _, err := rand.Read(id[:]); err != nil {
-			writeGateway(c, gatewayError("", 503, "SERVICE_UNAVAILABLE"))
+			respond(gatewayError("", 503, "SERVICE_UNAVAILABLE"))
 			return
 		}
 		requestID := hex.EncodeToString(id[:])
@@ -83,15 +94,15 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 		// The media branch remains unavailable before T09--T12; no nonce, quota,
 		// audit-started row, or business dispatch is created by this stub.
 		if g == nil || scope == "play:live:apply" {
-			writeGateway(c, gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
+			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
 			return
 		}
 		if !g.tls.IsHTTPS(c.Request) {
-			writeGateway(c, gatewayError(requestID, 401, "AUTHENTICATION_FAILED"))
+			respond(gatewayError(requestID, 401, "AUTHENTICATION_FAILED"))
 			return
 		}
 		if c.Request.ContentLength != 0 || len(c.Request.TransferEncoding) != 0 || c.Request.URL.RawPath != "" {
-			writeGateway(c, gatewayError(requestID, 400, "INVALID_REQUEST"))
+			respond(gatewayError(requestID, 400, "INVALID_REQUEST"))
 			return
 		}
 		r := c.Request
@@ -103,7 +114,7 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 		select {
 		case g.slots <- struct{}{}:
 		default:
-			writeGateway(c, gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
+			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
 			return
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), g.config.Timeout)
@@ -120,12 +131,12 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 		}()
 		select {
 		case <-ctx.Done():
-			writeGateway(c, gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
+			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
 		case response := <-finished:
 			if ctx.Err() != nil {
 				response = gatewayError(requestID, 503, "SERVICE_UNAVAILABLE")
 			}
-			writeGateway(c, response)
+			respond(response)
 		}
 	}
 }
@@ -151,10 +162,13 @@ func encodeGateway(id string, status int, code string, data any) gatewayResponse
 	if err != nil {
 		return gatewayError(id, 503, "SERVICE_UNAVAILABLE")
 	}
-	return gatewayResponse{status: status, body: body}
+	return gatewayResponse{status: status, body: body, code: code}
 }
 
-func (g *Gateway) process(hardContext context.Context, q gatewayRequest) gatewayResponse {
+func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output gatewayResponse) {
+	var verifiedClientID int64
+	admitted := false
+	defer func() { output.verifiedClientID = verifiedClientID; output.admitted = admitted }()
 	start := time.Now()
 	deadline, _ := hardContext.Deadline()
 	ctx, cancel := context.WithDeadline(hardContext, deadline.Add(-g.config.AuditReserve))
@@ -181,6 +195,7 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) gateway
 	if err != nil || Verify(input, material.SecretKey, headers.Signature) != nil {
 		return invalid(401, "AUTHENTICATION_FAILED")
 	}
+	verifiedClientID = material.ClientID
 	now, err := g.admission.clock()
 	if err != nil {
 		return invalid(503, "SERVICE_UNAVAILABLE")
@@ -229,6 +244,7 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) gateway
 			return invalid(503, "SERVICE_UNAVAILABLE")
 		}
 	}
+	admitted = true
 	var response gatewayResponse
 	code := "SERVICE_UNAVAILABLE"
 	if ctx.Err() == nil {
@@ -252,6 +268,16 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) gateway
 		return invalid(503, "SERVICE_UNAVAILABLE")
 	}
 	return response
+}
+
+// RejectedSummary is a bounded process-local diagnostic view, not a public
+// route or a replacement for the durable admission audit. Any future admin
+// exposure must apply its own department/client authorization filter.
+func (g *Gateway) RejectedSummary() audit.RejectedSnapshot {
+	if g == nil {
+		return (*audit.RejectedCollector)(nil).Snapshot()
+	}
+	return g.rejected.Snapshot()
 }
 
 func metadataFailure(id string, err error) gatewayResponse {
