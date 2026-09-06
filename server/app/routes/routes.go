@@ -38,7 +38,7 @@ var sysParamControllers = controllers.NewSysParamController()               // �
 var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // 在线用户控制器
 
 // InitRoutes 初始化路由
-func InitRoutes(engine *gin.Engine) {
+func InitRoutes(engine *gin.Engine) *openapiauth.Gateway {
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())
 	}
@@ -427,5 +427,5 @@ func InitRoutes(engine *gin.Engine) {
 			gbroutes.RegisterRoutes(protected)
 		}
 	}
-
+	return openAPIGateway
 }

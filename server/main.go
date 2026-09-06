@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181"
@@ -51,13 +53,24 @@ func main() {
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
 	// 初始化系统路由
-	routes.InitRoutes(engine)
+	openAPI := routes.InitRoutes(engine)
 	// 初始化插件路由
 	ginhelper.InitPluginRoutes(engine)
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
 	gb28181.Start()
+	maintenanceContext, cancelMaintenance := context.WithCancel(context.Background())
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		openAPI.RunMaintenance(maintenanceContext, func(err error) {
+			app.ZapLog.Error("OpenAPI maintenance unavailable", zap.Error(err))
+		})
+	}()
+	defer func() { cancelMaintenance(); <-maintenanceDone }()
 	// 启动服务器(阻塞直到收到退出信号)
 	_ = ginhelper.StartServer(engine)
+	cancelMaintenance()
+	<-maintenanceDone
 	// 优雅关闭 GB28181 SIP 服务
 	gb28181.Stop()
 
