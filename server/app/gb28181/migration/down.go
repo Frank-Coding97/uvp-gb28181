@@ -12,12 +12,15 @@ import (
 )
 
 const (
-	openAPIDownGuardSwitch          = "UVP_OPENAPI_ALLOW_TEST_DOWN"
-	openAPITestDatabasePrefix       = "uvp_openapi_test_"
-	openAPISchemaMigration          = "2026-09-05-openapi-aksk-schema.sql"
-	openAPISchemaMigrationPostgres  = "2026-09-05-openapi-aksk-schema-postgresql.sql"
-	openAPISchemaMigrationSQLServer = "2026-09-05-openapi-aksk-schema-sqlserver.sql"
-	openAPIDownGuardTimeout         = time.Second
+	openAPIDownGuardSwitch                = "UVP_OPENAPI_ALLOW_TEST_DOWN"
+	openAPITestDatabasePrefix             = "uvp_openapi_test_"
+	openAPISchemaMigration                = "2026-09-05-openapi-aksk-schema.sql"
+	openAPISchemaMigrationPostgres        = "2026-09-05-openapi-aksk-schema-postgresql.sql"
+	openAPISchemaMigrationSQLServer       = "2026-09-05-openapi-aksk-schema-sqlserver.sql"
+	openAPIMustAuthLockMigration          = "2026-09-06-openapi-must-auth-lock.sql"
+	openAPIMustAuthLockMigrationPostgres  = "2026-09-06-openapi-must-auth-lock-postgresql.sql"
+	openAPIMustAuthLockMigrationSQLServer = "2026-09-06-openapi-must-auth-lock-sqlserver.sql"
+	openAPIDownGuardTimeout               = time.Second
 )
 
 var errOpenAPIDownDenied = errors.New("openapi schema destructive down denied")
@@ -68,6 +71,8 @@ func isOpenAPISchemaMigration(name string) bool {
 	switch name {
 	case openAPISchemaMigration, openAPISchemaMigrationPostgres, openAPISchemaMigrationSQLServer:
 		return true
+	case openAPIMustAuthLockMigration, openAPIMustAuthLockMigrationPostgres, openAPIMustAuthLockMigrationSQLServer:
+		return true
 	default:
 		return false
 	}
@@ -115,6 +120,15 @@ func rejectNonEmptyOpenAPISafetyState(db *gorm.DB) error {
 		if err := db.Raw("SELECT COUNT(*) FROM " + table).Scan(&count).Error; err != nil || count != 0 {
 			return errOpenAPIDownDenied
 		}
+	}
+
+	var securityStateRows int64
+	if err := db.Raw("SELECT COUNT(*) FROM sys_openapi_security_state").Scan(&securityStateRows).Error; err != nil || securityStateRows != 1 {
+		return errOpenAPIDownDenied
+	}
+	var safeSecurityStateRows int64
+	if err := db.Raw("SELECT COUNT(*) FROM sys_openapi_security_state WHERE id = ? AND must_auth_locked = ? AND lock_version = ? AND locked_at IS NULL", 1, false, 0).Scan(&safeSecurityStateRows).Error; err != nil || safeSecurityStateRows != 1 {
+		return errOpenAPIDownDenied
 	}
 
 	var deviceUnsafe int64

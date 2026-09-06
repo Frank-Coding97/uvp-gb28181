@@ -30,6 +30,9 @@ var openAPIDownGuardTargets = []struct {
 	{dialect: DialectMySQL, name: "2026-09-05-openapi-aksk-schema.sql", query: "select database()"},
 	{dialect: DialectPostgres, name: "2026-09-05-openapi-aksk-schema-postgresql.sql", query: "select current_database()"},
 	{dialect: DialectSQLServer, name: "2026-09-05-openapi-aksk-schema-sqlserver.sql", query: "select db_name()"},
+	{dialect: DialectMySQL, name: "2026-09-06-openapi-must-auth-lock.sql", query: "select database()"},
+	{dialect: DialectPostgres, name: "2026-09-06-openapi-must-auth-lock-postgresql.sql", query: "select current_database()"},
+	{dialect: DialectSQLServer, name: "2026-09-06-openapi-must-auth-lock-sqlserver.sql", query: "select db_name()"},
 }
 
 func TestOpenAPIDownGuardDefaultDeny(t *testing.T) {
@@ -63,6 +66,18 @@ func TestOpenAPIDownGuardAllowsOnlyEmptyIsolatedDatabase(t *testing.T) {
 			}
 			require.Contains(t, queries, "select count(*) from gb_device where (access_epoch is null or access_epoch <> 1) or legacy_revoked_before is not null")
 			require.Contains(t, queries, "select count(*) from meta_node where current_boot_nonce is not null or (retired_boot_history is not null and retired_boot_history <> '[]') or runtime_epoch is null or runtime_epoch <> 0 or runtime_protocol_version is null or runtime_protocol_version <> 0 or runtime_confirmed_revision is null or runtime_confirmed_revision <> 0 or runtime_confirmed_at is not null or runtime_identity_status is null or runtime_identity_status <> 'unknown'")
+			require.Contains(t, queries, "select count(*) from sys_openapi_security_state")
+			securityQuery := "select count(*) from sys_openapi_security_state where id = ? and must_auth_locked = ? and lock_version = ? and locked_at is null"
+			switch target.dialect {
+			case DialectPostgres:
+				securityQuery = "select count(*) from sys_openapi_security_state where id = $1 and must_auth_locked = $2 and lock_version = $3 and locked_at is null"
+			case DialectSQLServer:
+				securityQuery = "select count(*) from sys_openapi_security_state where id = @p1 and must_auth_locked = @p2 and lock_version = @p3 and locked_at is null"
+			}
+			require.Contains(t, queries, securityQuery)
+			securityQuerySeen, securityBoolArgIsFalse := state.securityProbeSnapshot()
+			require.True(t, securityQuerySeen)
+			require.True(t, securityBoolArgIsFalse, "must_auth_locked must be bound as boolean false")
 		})
 	}
 }
@@ -180,6 +195,26 @@ func TestOpenAPIDownGuardRejectsProbeFailuresAndNonEmptySafetyState(t *testing.T
 		db := newOpenAPIDownGuardDB(t, state, DialectMySQL)
 		require.ErrorIs(t, checkOpenAPIDownGuard(db, DialectMySQL, openAPIDownGuardTargets[0].name), errOpenAPIDownDenied)
 	})
+
+	for _, tt := range []struct {
+		name string
+		rows int64
+		safe int64
+	}{
+		{name: "security singleton missing", rows: 0, safe: 0},
+		{name: "security singleton has extra row", rows: 2, safe: 1},
+		{name: "security singleton is locked", rows: 1, safe: 0},
+		{name: "security singleton lock version advanced", rows: 1, safe: 0},
+		{name: "security singleton locked at set", rows: 1, safe: 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			state := newOpenAPIDownGuardDBState()
+			state.securityStateRows = tt.rows
+			state.securityStateSafeRows = tt.safe
+			db := newOpenAPIDownGuardDB(t, state, DialectMySQL)
+			require.ErrorIs(t, checkOpenAPIDownGuard(db, DialectMySQL, openAPIDownGuardTargets[0].name), errOpenAPIDownDenied)
+		})
+	}
 }
 
 func TestDownBlocksOpenAPISchemaBeforeOpeningDatabase(t *testing.T) {
@@ -268,6 +303,34 @@ func TestOpenAPIDownGuardRejectsSQLiteEvenWithSwitch(t *testing.T) {
 	require.ErrorIs(t, checkOpenAPIDownGuard(db, DialectUnknown, openAPISchemaMigration), errOpenAPIDownDenied)
 }
 
+func TestOpenAPIDownSafetyStateSQLiteSecurityMatrix(t *testing.T) {
+	tests := []struct {
+		name   string
+		update string
+	}{
+		{name: "missing singleton", update: "DELETE FROM sys_openapi_security_state"},
+		{name: "extra row", update: "INSERT INTO sys_openapi_security_state(id,must_auth_locked,locked_at,lock_version) VALUES(2,0,NULL,0)"},
+		{name: "wrong singleton id", update: "UPDATE sys_openapi_security_state SET id=2"},
+		{name: "locked", update: "UPDATE sys_openapi_security_state SET must_auth_locked=1"},
+		{name: "NULL lock flag", update: "UPDATE sys_openapi_security_state SET must_auth_locked=NULL"},
+		{name: "advanced lock version", update: "UPDATE sys_openapi_security_state SET lock_version=1"},
+		{name: "NULL lock version", update: "UPDATE sys_openapi_security_state SET lock_version=NULL"},
+		{name: "locked at set", update: "UPDATE sys_openapi_security_state SET locked_at='2026-09-06T00:00:00Z'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newOpenAPISafetySQLite(t, "")
+			require.NoError(t, db.Exec(tt.update).Error)
+			require.ErrorIs(t, rejectNonEmptyOpenAPISafetyState(db), errOpenAPIDownDenied)
+		})
+	}
+}
+
+func TestOpenAPIDownSafetyStateSQLiteMissingSecurityTableRejects(t *testing.T) {
+	db := newOpenAPISafetySQLite(t, "sys_openapi_security_state")
+	require.ErrorIs(t, rejectNonEmptyOpenAPISafetyState(db), errOpenAPIDownDenied)
+}
+
 func newOpenAPISafetySQLite(t *testing.T, omitColumn string) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard})
@@ -286,6 +349,9 @@ func newOpenAPISafetySQLite(t *testing.T, omitColumn string) *gorm.DB {
 		"gb_openapi_viewer",
 	} {
 		require.NoError(t, db.Exec("CREATE TABLE "+table+"(id INTEGER PRIMARY KEY)").Error)
+	}
+	if omitColumn != "sys_openapi_security_state" {
+		require.NoError(t, db.Exec("CREATE TABLE sys_openapi_security_state(id INTEGER PRIMARY KEY,must_auth_locked BOOLEAN,locked_at TEXT,lock_version INTEGER)").Error)
 	}
 
 	deviceColumns := []string{"access_epoch INTEGER NULL", "legacy_revoked_before TEXT NULL"}
@@ -318,27 +384,34 @@ func newOpenAPISafetySQLite(t *testing.T, omitColumn string) *gorm.DB {
 	if omitColumn == "" {
 		require.NoError(t, db.Exec("INSERT INTO gb_device(access_epoch,legacy_revoked_before) VALUES(1,NULL)").Error)
 		require.NoError(t, db.Exec("INSERT INTO meta_node(current_boot_nonce,retired_boot_history,runtime_epoch,runtime_protocol_version,runtime_confirmed_revision,runtime_confirmed_at,runtime_identity_status) VALUES(NULL,NULL,0,0,0,NULL,'unknown')").Error)
+		require.NoError(t, db.Exec("INSERT INTO sys_openapi_security_state(id,must_auth_locked,locked_at,lock_version) VALUES(1,FALSE,NULL,0)").Error)
 	}
 	return db
 }
 
 type openAPIDownGuardDBState struct {
-	mu                sync.Mutex
-	databaseName      string
-	counts            map[string]int64
-	missingTables     map[string]bool
-	deviceUnsafeCount int64
-	nodeUnsafeCount   int64
-	blockQueries      bool
-	queryError        error
-	queries           []string
+	mu                     sync.Mutex
+	databaseName           string
+	counts                 map[string]int64
+	missingTables          map[string]bool
+	deviceUnsafeCount      int64
+	nodeUnsafeCount        int64
+	securityStateRows      int64
+	securityStateSafeRows  int64
+	securitySafeQuerySeen  bool
+	securityBoolArgIsFalse bool
+	blockQueries           bool
+	queryError             error
+	queries                []string
 }
 
 func newOpenAPIDownGuardDBState() *openAPIDownGuardDBState {
 	return &openAPIDownGuardDBState{
-		databaseName:  "uvp_openapi_test_empty",
-		counts:        make(map[string]int64),
-		missingTables: make(map[string]bool),
+		databaseName:          "uvp_openapi_test_empty",
+		counts:                make(map[string]int64),
+		missingTables:         make(map[string]bool),
+		securityStateRows:     1,
+		securityStateSafeRows: 1,
 	}
 }
 
@@ -348,11 +421,17 @@ func (s *openAPIDownGuardDBState) queriesSnapshot() []string {
 	return append([]string(nil), s.queries...)
 }
 
-func (s *openAPIDownGuardDBState) query(query string) ([][]driver.Value, error) {
-	return s.queryContext(context.Background(), query)
+func (s *openAPIDownGuardDBState) securityProbeSnapshot() (bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.securitySafeQuerySeen, s.securityBoolArgIsFalse
 }
 
-func (s *openAPIDownGuardDBState) queryContext(ctx context.Context, query string) ([][]driver.Value, error) {
+func (s *openAPIDownGuardDBState) query(query string) ([][]driver.Value, error) {
+	return s.queryContext(context.Background(), query, nil)
+}
+
+func (s *openAPIDownGuardDBState) queryContext(ctx context.Context, query string, args []driver.NamedValue) ([][]driver.Value, error) {
 	normalized := normalizeOpenAPIDownGuardSQL(query)
 	s.mu.Lock()
 	s.queries = append(s.queries, normalized)
@@ -380,6 +459,21 @@ func (s *openAPIDownGuardDBState) queryContext(ctx context.Context, query string
 	}
 	if strings.HasPrefix(normalized, "select count(*) from meta_node where ") {
 		return [][]driver.Value{{s.nodeUnsafeCount}}, nil
+	}
+	if strings.HasPrefix(normalized, "select count(*) from sys_openapi_security_state where ") {
+		securityBoolArgIsFalse := false
+		if len(args) >= 2 {
+			value, ok := args[1].Value.(bool)
+			securityBoolArgIsFalse = ok && !value
+		}
+		s.mu.Lock()
+		s.securitySafeQuerySeen = true
+		s.securityBoolArgIsFalse = securityBoolArgIsFalse
+		s.mu.Unlock()
+		return [][]driver.Value{{s.securityStateSafeRows}}, nil
+	}
+	if normalized == "select count(*) from sys_openapi_security_state" {
+		return [][]driver.Value{{s.securityStateRows}}, nil
 	}
 	if strings.HasPrefix(normalized, "select count(*) from ") {
 		table := strings.TrimPrefix(normalized, "select count(*) from ")
@@ -420,8 +514,8 @@ func (c *openAPIDownGuardConn) Begin() (driver.Tx, error) {
 
 func (c *openAPIDownGuardConn) Ping(context.Context) error { return nil }
 
-func (c *openAPIDownGuardConn) QueryContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
-	values, err := c.state.queryContext(ctx, query)
+func (c *openAPIDownGuardConn) QueryContext(ctx context.Context, query string, args []driver.NamedValue) (driver.Rows, error) {
+	values, err := c.state.queryContext(ctx, query, args)
 	if err != nil {
 		return nil, err
 	}
