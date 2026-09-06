@@ -26,8 +26,7 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 			name := mode + "/" + outcome
 			failViewer := outcome == "rollback"
 			t.Run(name, func(t *testing.T) {
-				// The existing controller still bumps the legacy global threshold;
-				// removal is verified separately with the v4 production wiring.
+				// A device transfer must not revoke other devices' authorizations.
 				previousCutoff := playauth.RevokedBefore()
 				t.Cleanup(func() { playauth.BumpRevocation(time.Unix(previousCutoff, 0)) })
 				r, db := newDeviceMgmtRouter(t)
@@ -128,6 +127,7 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 				require.EqualValues(t, 30, states[1].OwnerDeptID)
 				require.EqualValues(t, 1, states[1].AccessEpoch)
 				require.Nil(t, states[1].LegacyRevokedBefore)
+				require.Equal(t, previousCutoff, playauth.RevokedBefore(), "device assignment must not change the global playback cutoff")
 			})
 		}
 	}

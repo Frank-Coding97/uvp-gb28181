@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -13,7 +12,6 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/assign"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/grant"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
@@ -187,9 +185,6 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchAssignments(c *gin.Conte
 		dc.FailAndAbort(c, "调整设备归属失败", err)
 		return
 	}
-	if result.Summary.Changed > 0 {
-		playauth.BumpRevocation(time.Now())
-	}
 	middleware.MarkSensitiveOperation(c, map[string]any{
 		"operation":       "assignment_apply",
 		"mode":            "devices",
@@ -252,9 +247,6 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchDepartmentAssignment(c *
 	if err != nil {
 		dc.FailAndAbort(c, "整部门调整归属失败", err)
 		return
-	}
-	if result.Summary.Changed > 0 {
-		playauth.BumpRevocation(time.Now())
 	}
 	middleware.MarkSensitiveOperation(c, map[string]any{
 		"operation":       "assignment_apply",
