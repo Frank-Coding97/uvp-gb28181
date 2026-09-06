@@ -127,6 +127,62 @@ func TestLoggingShutdownGenerationDeadlineStartsRemainingAndWaitTimeoutListsUnfi
 	requireClosed(t, generation.Done())
 }
 
+func TestLoggingShutdownGenerationTimeoutJoinsCompletedErrorsAndExposesUnfinished(t *testing.T) {
+	failedErr := errors.New("eager stop failed")
+	blockedStarted := make(chan struct{})
+	blockedRelease := make(chan struct{})
+	failedDone := make(chan struct{})
+	generation := newShutdownGeneration(context.Background(), nil, []shutdownStep{
+		{
+			name: "blocked",
+			stop: func(context.Context) error {
+				close(blockedStarted)
+				<-blockedRelease
+				return nil
+			},
+		},
+		{
+			name:  "eager",
+			eager: true,
+			stop: func(context.Context) error {
+				close(failedDone)
+				return failedErr
+			},
+		},
+	})
+
+	select {
+	case <-blockedStarted:
+	case <-time.After(time.Second):
+		t.Fatal("blocked stop did not start")
+	}
+	select {
+	case <-failedDone:
+	case <-time.After(time.Second):
+		t.Fatal("failed eager stop did not finish")
+	}
+
+	waitContext, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := generation.Wait(waitContext)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.ErrorIs(t, err, failedErr)
+	require.Contains(t, err.Error(), "eager")
+
+	var waitErr *shutdownWaitError
+	require.ErrorAs(t, err, &waitErr)
+	unfinished := waitErr.UnfinishedComponents()
+	require.Equal(t, []string{"blocked"}, unfinished)
+	unfinished[0] = "mutated"
+	require.Equal(t, []string{"blocked"}, waitErr.UnfinishedComponents())
+	requireNotClosed(t, generation.Done())
+
+	close(blockedRelease)
+	finalErr := generation.Wait(context.Background())
+	require.ErrorIs(t, finalErr, failedErr)
+	requireClosed(t, generation.Done())
+}
+
 func TestLoggingShutdownGenerationPreservesDependencyOrder(t *testing.T) {
 	firstStarted := make(chan struct{})
 	firstRelease := make(chan struct{})

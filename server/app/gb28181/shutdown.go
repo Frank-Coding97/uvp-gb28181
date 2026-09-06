@@ -52,6 +52,10 @@ func (e *shutdownWaitError) Unwrap() error {
 	return e.cause
 }
 
+func (e *shutdownWaitError) UnfinishedComponents() []string {
+	return append([]string(nil), e.unfinished...)
+}
+
 func newShutdownGeneration(ctx context.Context, signal func(), steps []shutdownStep) *shutdownGeneration {
 	if ctx == nil {
 		ctx = context.Background()
@@ -193,11 +197,17 @@ func (g *shutdownGeneration) waitError(cause error) error {
 		return err
 	}
 	unfinished := make([]string, 0, len(g.steps))
+	failures := make([]error, 0, len(g.steps)+1)
+	failures = append(failures, cause)
 	for i := range g.steps {
 		if !g.steps[i].completed {
 			unfinished = append(unfinished, g.steps[i].name)
+			continue
+		}
+		if g.steps[i].err != nil {
+			failures = append(failures, shutdownComponentError(g.steps[i].name, g.steps[i].err))
 		}
 	}
 	g.mu.Unlock()
-	return &shutdownWaitError{cause: cause, unfinished: unfinished}
+	return &shutdownWaitError{cause: errors.Join(failures...), unfinished: unfinished}
 }
