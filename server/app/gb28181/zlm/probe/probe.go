@@ -127,7 +127,7 @@ func (p *Prober) Run(ctx context.Context) []Result {
 				p.logger.Warn("GB28181 ZLM 启动探活 fail", zap.String("event", "zlm.probe.failed"),
 					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
-					zap.String("host", target.Host),
+					zap.String("endpoint", target.HTTPEndpoint()),
 					zap.Int64("duration_ms", r.DurationMS),
 					zap.String("state_before", string(r.StateBefore)),
 					zap.Error(err))
@@ -150,13 +150,13 @@ func (p *Prober) Run(ctx context.Context) []Result {
 				p.logger.Info("GB28181 ZLM 节点启动探活翻转 offline→active", zap.String("event", "zlm.probe.node_active"),
 					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
-					zap.String("host", target.Host),
+					zap.String("endpoint", target.HTTPEndpoint()),
 					zap.Int64("duration_ms", r.DurationMS))
 			} else {
 				p.logger.Info("GB28181 ZLM 启动探活 pass", zap.String("event", "zlm.probe.passed"),
 					zap.Int64("node_id", target.ID),
 					zap.String("name", target.Name),
-					zap.String("host", target.Host),
+					zap.String("endpoint", target.HTTPEndpoint()),
 					zap.Int64("duration_ms", r.DurationMS),
 					zap.String("state_before", string(r.StateBefore)))
 			}

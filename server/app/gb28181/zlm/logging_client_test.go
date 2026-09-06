@@ -1,6 +1,7 @@
 package zlm
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
@@ -99,4 +102,25 @@ func TestLoggingBackgroundEventsZLMNotReadyDoesNotFloodInfo(t *testing.T) {
 		require.False(t, online)
 	}
 	require.Zero(t, observed.Len(), "expected readiness polling must remain DEBUG")
+}
+
+func TestLoggingBackgroundEventsZLMEndpointCredentials(t *testing.T) {
+	const secret = "zlm-host-private-credential"
+	var output bytes.Buffer
+	cfg, err := logging.ParseConfig(nil, "/app")
+	require.NoError(t, err)
+	cfg.Outputs, cfg.StdoutFormat = []string{"stdout"}, "json"
+	runtime, err := logging.NewRuntime(logging.Options{Config: cfg, Sinks: map[string]zapcore.WriteSyncer{"stdout": zapcore.Lock(zapcore.AddSync(&output))}})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
+	client := NewClientForNode(&node.Node{Host: "operator:" + secret + "@127.0.0.1", APIPort: 80})
+	client.http = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("connection unavailable")
+	})}
+	online, err := client.IsMediaOnline(logging.WithContext(context.Background(), runtime.Root), "rtp", "safe-stream")
+	require.Error(t, err)
+	require.False(t, online)
+	require.NoError(t, runtime.Close())
+	require.NotContains(t, output.String(), secret)
+	require.Contains(t, output.String(), `"endpoint":"http://127.0.0.1:80"`)
 }

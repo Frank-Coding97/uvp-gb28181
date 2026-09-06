@@ -24,7 +24,7 @@ func TestLoggingBackgroundEventsProbe(t *testing.T) {
 	runtime, err := logging.NewRuntime(logging.Options{Config: cfg, Sinks: map[string]zapcore.WriteSyncer{"stdout": zapcore.Lock(zapcore.AddSync(&output))}})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, runtime.Close()) })
-	reg := newFakeRegistry(&node.Node{ID: 7, State: node.StateOffline}, &node.Node{ID: 8, State: node.StateOffline})
+	reg := newFakeRegistry(&node.Node{ID: 7, Host: "operator:" + secret + "@127.0.0.1", State: node.StateOffline}, &node.Node{ID: 8, State: node.StateOffline})
 	p := probe.New(reg, func(n *node.Node) probe.Client {
 		if n.ID == 7 {
 			return &fakeClient{err: errors.New(secret)}

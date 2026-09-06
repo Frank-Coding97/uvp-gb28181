@@ -379,7 +379,7 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 	if err := c.call(ctx, "isMediaOnline", params, &r); err != nil {
 		logger.Warn("IsMediaOnline 请求失败",
 			zap.String("event", "zlm.media_online.request_failed"),
-			zap.String("host", c.node.Host),
+			zap.String("endpoint", c.baseURL),
 			zap.String("app", appName),
 			zap.String("stream", stream),
 			logging.Error(err))
@@ -389,7 +389,7 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 	if r.Code != 0 {
 		logger.Debug("IsMediaOnline 返回非0 code(流不存在或未就绪)",
 			zap.String("event", "zlm.media_online.not_ready"),
-			zap.String("host", c.node.Host),
+			zap.String("endpoint", c.baseURL),
 			zap.String("app", appName),
 			zap.String("stream", stream),
 			zap.Int("code", r.Code))
@@ -397,7 +397,7 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 	}
 	logger.Debug("IsMediaOnline 成功",
 		zap.String("event", "zlm.media_online.ready"),
-		zap.String("host", c.node.Host),
+		zap.String("endpoint", c.baseURL),
 		zap.String("app", appName),
 		zap.String("stream", stream),
 		zap.Bool("online", r.Online))
