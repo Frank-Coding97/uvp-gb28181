@@ -345,12 +345,12 @@ func startSIPRuntime(cfg gbconfig.Config, recorder metrics.Recorder, status *gbs
 	return server, nil
 }
 
-func startControlPlane(cfg gbconfig.Config) {
+func startControlPlane(cfg gbconfig.Config) bool {
 	setupCivilCodeService()
 	cascadeCipher, err := loadCascadeCredentialCipher()
-	if err != nil {
-		app.ZapLog.Warn("国标级联凭据密钥未配置,列表可用但密码写入和启用受限",
-			zap.String("env", cascadeCredentialKeyEnv))
+	credentialWarningReported := cascadeCredentialWarningNeeded(err, false)
+	if credentialWarningReported {
+		warnCascadeCredentialKeyUnavailable()
 	}
 	setupCascadeManagement(nil, cascadeCipher)
 	gbroutes.SetSetupController(gbcontrollers.NewSetupController(app.DB(), sipRuntimeStatus, nil, ReloadSIP))
@@ -470,8 +470,9 @@ func startControlPlane(cfg gbconfig.Config) {
 	zlmClient = pickInitialClient(cfg)
 	if zlmClient == nil {
 		app.ZapLog.Warn("GB28181 ZLM 初始 Client 未构造(Registry 空),跳过 Hook 配置下发")
-		return
+		return credentialWarningReported
 	}
+	return credentialWarningReported
 }
 
 func startDashboardRetentionRuntime(db *gorm.DB, interval time.Duration, report func(gbdashboard.RetentionResult, error)) context.CancelFunc {
@@ -496,7 +497,7 @@ func Start() {
 		app.ZapLog.Info("GB28181 未启用,跳过 SIP 服务启动")
 		return
 	}
-	startControlPlane(cfg)
+	credentialWarningReported := startControlPlane(cfg)
 
 	// 老 stack 升级迁移:如果 DB 空 + YAML 有 SIP 段 + gb_device 有历史数据 → 一次性 seed.
 	// 幂等,首启后 DB 有数据下次调用直接 skip.
@@ -526,7 +527,7 @@ func Start() {
 		app.ZapLog.Warn("GB28181 播放鉴权密钥初始化失败,鉴权保持关闭", zap.Error(err))
 	}
 
-	if err := startSIPDependencies(sipCfg); err != nil {
+	if err := startSIPDependencies(sipCfg, credentialWarningReported); err != nil {
 		app.ZapLog.Error("GB28181 SIP 服务启动失败", zap.Error(err))
 		return
 	}
@@ -585,7 +586,7 @@ func setupSecurityRuntime() *gbsecurity.Runtime {
 
 // startSIPDependencies 启动 SIP server + 所有依赖 UAC 的服务(点播/订阅/离线扫描等).
 // 幂等:reload 时可先 stopSIPDependencies 再调这里.
-func startSIPDependencies(cfg gbconfig.Config) error {
+func startSIPDependencies(cfg gbconfig.Config, credentialWarningReported bool) error {
 	runtime := setupSecurityRuntime()
 	srv, err := startSIPRuntime(cfg, metricsRecorder, sipRuntimeStatus, func(cfg gbconfig.Config) (sipRuntimeServer, error) {
 		return gbsip.NewServer(cfg, gbsip.WithSecurityRuntime(runtime))
@@ -666,7 +667,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 		}
 	}
 	sipServer = srv
-	if err := startCascadeRuntime(cfg, srv); err != nil {
+	if err := startCascadeRuntime(cfg, srv, credentialWarningReported); err != nil {
 		app.ZapLog.Error("国标级联运行时装配失败,设备侧 SIP 继续运行", zap.Error(err))
 	} else {
 		app.ZapLog.Info("国标级联运行时已装配")
@@ -1292,7 +1293,7 @@ func ReloadSIP() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	stopSIPDependencies(ctx)
-	return startSIPDependencies(sipCfg)
+	return startSIPDependencies(sipCfg, false)
 }
 
 func setupTraceController(cfg gbconfig.Config, runtime gbtrace.Runtime) {

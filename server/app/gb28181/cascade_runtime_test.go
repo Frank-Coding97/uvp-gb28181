@@ -94,6 +94,24 @@ func TestCascadePlatformClientFactoryRejectsEncryptedCredentialWithoutKey(t *tes
 	require.NotContains(t, err.Error(), "encrypted")
 }
 
+func TestCascadeCredentialWarningNeededIsPerAssembly(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		err             error
+		alreadyReported bool
+		want            bool
+	}{
+		{name: "no error", want: false},
+		{name: "first missing key", err: securestore.ErrKeyUnavailable, want: true},
+		{name: "same assembly already reported", err: securestore.ErrKeyUnavailable, alreadyReported: true, want: false},
+		{name: "invalid key first report", err: securestore.ErrInvalidKey, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, cascadeCredentialWarningNeeded(tc.err, tc.alreadyReported))
+		})
+	}
+}
+
 func TestCascadeResourceAcquirerOnlyUsesExistingSharedListener(t *testing.T) {
 	acquirer := newCascadeResourceAcquirer(gbconfig.Config{SIP: gbconfig.SIPConfig{
 		ListenIP: "0.0.0.0", AdvertiseIP: "192.0.2.20", Port: 5060, Transport: []string{"udp", "tcp"},
