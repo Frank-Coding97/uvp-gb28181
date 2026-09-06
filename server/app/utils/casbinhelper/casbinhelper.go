@@ -570,6 +570,20 @@ func (s *CasbinHelper) CloseContext(ctx context.Context) error {
 		return nil
 	}
 
+	// Prefer an already completed stop when both channels are ready. A plain
+	// two-way select is deliberately random in that case and can report the
+	// caller's deadline after the reload has already finished.
+	select {
+	case <-state.done:
+		s.reloadMu.Lock()
+		if s.reloadState == state {
+			s.reloadState = nil
+		}
+		s.reloadMu.Unlock()
+		return nil
+	default:
+	}
+
 	select {
 	case <-state.done:
 		s.reloadMu.Lock()
@@ -579,6 +593,19 @@ func (s *CasbinHelper) CloseContext(ctx context.Context) error {
 		s.reloadMu.Unlock()
 		return nil
 	case <-ctx.Done():
+		// Completion may have raced with context cancellation between the
+		// first check and this select. Check once more before returning the
+		// timeout so a completed stop is never reported as incomplete.
+		select {
+		case <-state.done:
+			s.reloadMu.Lock()
+			if s.reloadState == state {
+				s.reloadState = nil
+			}
+			s.reloadMu.Unlock()
+			return nil
+		default:
+		}
 		return ctx.Err()
 	}
 }

@@ -120,6 +120,22 @@ func waitForCasbinEvent(t *testing.T, observed *observer.ObservedLogs, event str
 	return observer.LoggedEntry{}
 }
 
+func TestLoggingCasbinCloseContextPrefersCompletedStop(t *testing.T) {
+	for round := 0; round < 100; round++ {
+		helper := &CasbinHelper{}
+		state := &policyReloadState{
+			stop: make(chan struct{}),
+			done: make(chan struct{}),
+		}
+		close(state.done)
+		helper.reloadState = state
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		require.NoError(t, helper.CloseContext(ctx), "completed stop must win round %d", round)
+	}
+}
+
 func TestLoggingCasbinCloseContextWaitsForInFlightPolicyReload(t *testing.T) {
 	observed := installCasbinObserver(t)
 	adapter := newBlockingPolicyAdapter()
