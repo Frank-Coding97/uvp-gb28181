@@ -2,6 +2,7 @@ package schedulerhelper
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -17,15 +18,22 @@ import (
 
 // 任务调度器
 type JobScheduler struct {
-	mu         sync.RWMutex
-	cron       *cron.Cron
-	jobs       map[string]*Job     // 任务存储
-	executors  map[string]Executor // 执行器存储
-	jobResults chan *JobResult     // 任务结果通道
-	logger     JobLogger           // 日志记录器
-	wg         sync.WaitGroup      // 等待正在执行的任务完成
-	lastExecNS atomic.Int64        // 防止同一调度器内快速执行生成重复ID
+	mu            sync.RWMutex
+	cron          *cron.Cron
+	jobs          map[string]*Job     // 任务存储
+	executors     map[string]Executor // 执行器存储
+	jobResults    chan *JobResult     // 任务结果通道
+	logger        JobLogger           // 日志记录器
+	wg            sync.WaitGroup      // 等待已接纳的任务
+	lastExecNS    atomic.Int64        // 防止同一调度器内快速执行生成重复ID
+	stopping      bool
+	stopDone      chan struct{}
+	stopErr       error
+	resultsMu     sync.RWMutex
+	resultsClosed bool
 }
+
+var errSchedulerStopping = errors.New("scheduler is stopping")
 
 // NewJobScheduler 创建新的调度器
 // 使用函数选项模式进行配置，例如：
@@ -69,29 +77,92 @@ func NewJobScheduler(opts ...Option) *JobScheduler {
 
 // 启动调度器
 func (s *JobScheduler) Start() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return
+	}
 	s.cron.Start()
 	s.logger.Debug("system", "调度器已启动")
 }
 
 // 停止调度器
 func (s *JobScheduler) Stop() {
-	s.cron.Stop()
-	s.logger.Info("system", "调度器已停止")
+	if err := s.StopContext(context.Background()); err != nil {
+		log.Printf("Failed to stop scheduler: %v", err)
+	}
+}
 
-	// 等待所有正在执行的任务完成
+// StopContext stops admitting new work and waits for the cron loop and all
+// admitted executions to finish. A timed-out caller does not interrupt the
+// shutdown; a later call can continue waiting for the same completion.
+func (s *JobScheduler) StopContext(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	s.mu.Lock()
+	if !s.stopping {
+		s.stopping = true
+		s.stopDone = make(chan struct{})
+		cron := s.cron
+		done := s.stopDone
+		go func() { s.finishStop(cron.Stop(), done) }()
+	}
+	done := s.stopDone
+	s.mu.Unlock()
+
+	select {
+	case <-done:
+		return s.stopResult()
+	default:
+	}
+	select {
+	case <-done:
+		return s.stopResult()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *JobScheduler) finishStop(cronDone context.Context, done chan struct{}) {
+	<-cronDone.Done()
 	s.wg.Wait()
 
-	close(s.jobResults)
-	// 关闭日志记录器
-	if err := s.logger.Close(); err != nil {
-		log.Printf("Failed to close logger: %v", err)
+	s.resultsMu.Lock()
+	if !s.resultsClosed {
+		close(s.jobResults)
+		s.resultsClosed = true
 	}
+	s.resultsMu.Unlock()
+
+	if s.logger != nil {
+		s.logger.Info("system", "调度器已停止")
+	}
+	var stopErr error
+	if s.logger != nil {
+		stopErr = s.logger.Close()
+	}
+
+	s.mu.Lock()
+	s.stopErr = stopErr
+	close(done)
+	s.mu.Unlock()
+}
+
+func (s *JobScheduler) stopResult() error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.stopErr
 }
 
 // 注册执行器
 func (s *JobScheduler) RegisterExecutor(executor Executor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopping {
+		return
+	}
 	s.executors[executor.Name()] = executor
 	s.logger.Debug("system", "注册执行器: %s", executor.Name())
 }
@@ -100,6 +171,9 @@ func (s *JobScheduler) RegisterExecutor(executor Executor) {
 func (s *JobScheduler) AddOrUpdateJob(job *Job) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopping {
+		return "", errSchedulerStopping
+	}
 	action := "更新"
 	if _, exists := s.jobs[job.ID]; !exists {
 		action = "创建"
@@ -138,18 +212,15 @@ func (s *JobScheduler) AddOrUpdateJob(job *Job) (string, error) {
 // 创建任务执行函数
 func (s *JobScheduler) createJobFunc(job *Job) func() {
 	return func() {
-		// 检查阻塞策略
-		if !s.canExecute(job) {
-			s.logger.LogJobLifecycle(job, "跳过")
+		if !s.admitExecution(job) {
 			return
 		}
 
-		// 增加运行计数
-		s.incrementRunningCount(job.ID)
-		defer s.decrementRunningCount(job.ID)
-
-		// 执行任务
-		s.executeJob(job)
+		go func() {
+			defer s.wg.Done()
+			defer s.decrementRunningCount(job.ID)
+			s.executeJob(job)
+		}()
 	}
 }
 
@@ -157,7 +228,10 @@ func (s *JobScheduler) createJobFunc(job *Job) func() {
 func (s *JobScheduler) canExecute(job *Job) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.canExecuteLocked(job)
+}
 
+func (s *JobScheduler) canExecuteLocked(job *Job) bool {
 	currentJob, exists := s.jobs[job.ID]
 	if !exists {
 		s.logger.Warn(job.ID, "任务不存在，无法执行")
@@ -198,24 +272,44 @@ func (s *JobScheduler) canExecute(job *Job) bool {
 	}
 }
 
+func (s *JobScheduler) admitExecution(job *Job) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	if !s.canExecuteLocked(job) {
+		s.logger.LogJobLifecycle(job, "跳过")
+		return false
+	}
+	s.incrementRunningCountLocked(job.ID)
+	s.wg.Add(1)
+	return true
+}
+
 // 立即执行一次任务
 func (s *JobScheduler) ExecuteNow(jobID string) error {
-	s.mu.RLock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return errSchedulerStopping
+	}
 	job, exists := s.jobs[jobID]
-	s.mu.RUnlock()
 
 	if !exists {
 		return fmt.Errorf("job not found: %s", jobID)
 	}
 
-	if !s.canExecute(job) {
+	if !s.canExecuteLocked(job) {
 		return fmt.Errorf("job cannot execute due to blocking policy")
 	}
+	s.incrementRunningCountLocked(job.ID)
+	s.wg.Add(1)
 	s.logger.LogJobLifecycle(job, "手动触发")
 
 	// 异步执行
 	go func() {
-		s.incrementRunningCount(job.ID)
+		defer s.wg.Done()
 		defer s.decrementRunningCount(job.ID)
 		s.executeJob(job)
 	}()
@@ -225,9 +319,6 @@ func (s *JobScheduler) ExecuteNow(jobID string) error {
 
 // 执行任务（非递归版本）
 func (s *JobScheduler) executeJob(job *Job) {
-	s.wg.Add(1)
-	defer s.wg.Done()
-
 	startTime := time.Now()
 	jobExecutionID := s.newExecutionID(job.ID, startTime)
 
@@ -347,17 +438,23 @@ func (s *JobScheduler) logExecutionResult(result *JobResult) {
 
 // 新增：安全发送结果
 func (s *JobScheduler) sendResult(result *JobResult) {
-	select {
-	case s.jobResults <- result:
-	default:
+	// Keep the result lock (rather than the admission lock) across backpressure
+	// so a timed StopContext can still mark the scheduler as stopping.
+	s.resultsMu.RLock()
+	defer s.resultsMu.RUnlock()
+	if s.resultsClosed {
 		return
 	}
+	s.jobResults <- result
 }
 
 // 启用任务
 func (s *JobScheduler) EnableJob(jobID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.stopping {
+		return errSchedulerStopping
+	}
 
 	job, exists := s.jobs[jobID]
 	if !exists {
@@ -397,10 +494,10 @@ func (s *JobScheduler) DisableJob(jobID string) error {
 	}
 
 	// 从cron调度移除
-	if job.cronEntryID != 0 {
+	if job.cronEntryID != 0 && !s.stopping {
 		s.cron.Remove(job.cronEntryID)
-		job.cronEntryID = 0
 	}
+	job.cronEntryID = 0
 
 	job.Status = StatusDisabled
 	job.UpdatedAt = time.Now()
@@ -419,7 +516,7 @@ func (s *JobScheduler) DeleteJob(jobID string) error {
 	}
 
 	// 如果任务已启用，先从cron移除
-	if job.Status == StatusEnabled && job.cronEntryID != 0 {
+	if job.Status == StatusEnabled && job.cronEntryID != 0 && !s.stopping {
 		s.cron.Remove(job.cronEntryID)
 	}
 
@@ -470,6 +567,10 @@ func (s *JobScheduler) GetResults() <-chan *JobResult {
 func (s *JobScheduler) incrementRunningCount(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.incrementRunningCountLocked(jobID)
+}
+
+func (s *JobScheduler) incrementRunningCountLocked(jobID string) {
 	if job, exists := s.jobs[jobID]; exists {
 		job.RunningCount++
 	}
