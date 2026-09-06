@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -138,7 +137,11 @@ func runMigrateUp() error {
 	if err := db.Raw(databaseIdentitySQL(dialect)).Scan(&identity).Error; err != nil {
 		return fmt.Errorf("读取数据库身份失败: %w", err)
 	}
-	log.Printf("migrate-up 目标: database=%s version=%s dialect=%s", identity.DatabaseName, identity.DatabaseVersion, dialect)
+	app.Log(context.Background()).Named("migration").Info("migrate-up 目标",
+		zap.String("event", "migration.target"),
+		zap.String("database", identity.DatabaseName),
+		zap.String("database_version", identity.DatabaseVersion),
+		zap.String("dialect", string(dialect)))
 	before, err := appliedMigrationVersions(db)
 	if err != nil {
 		return fmt.Errorf("读取迁移基线失败: %w", err)
@@ -150,7 +153,10 @@ func runMigrateUp() error {
 	if err != nil {
 		return fmt.Errorf("读取迁移结果失败: %w", err)
 	}
-	log.Printf("migrate-up 完成: before=%d after=%d newly_applied=%v", len(before), len(after), migrationDifference(before, after))
+	app.Log(context.Background()).Named("migration").Info("migrate-up 完成",
+		zap.String("event", "migration.completed"),
+		zap.Int("before_count", len(before)), zap.Int("after_count", len(after)),
+		zap.Strings("newly_applied", migrationDifference(before, after)))
 	return nil
 }
 
