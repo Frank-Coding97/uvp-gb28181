@@ -84,19 +84,21 @@ func TestOnPlayAuthorizesDynamicAndFixedCurrentMedia(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	authority := newHookDeviceAuthority(1)
+	authorization := newHookAuthorization(t, signer, func() time.Time { return now }, authority)
 	for _, streamID := range []string{"0200000001", "37010301021320000014_37010301021320000001"} {
 		t.Run(streamID, func(t *testing.T) {
 			binding := playauth.Binding{
 				DeviceID: "37010301021320000014", ChannelID: "37010301021320000001",
 				App: "rtp", Stream: streamID, MediaServerID: "node-a", MediaGeneration: 9,
-				BindClientIP: true, ClientIP: "203.0.113.9",
+				BindClientIP: true, ClientIP: "203.0.113.9", DeviceEpoch: 1,
 			}
-			grant, issueErr := signer.IssueDirect(binding)
+			grant, issueErr := authorization.IssueDirect(binding)
 			if issueErr != nil {
 				t.Fatal(issueErr)
 			}
 			h := handler.NewHookController(stream.NewNotifier())
-			h.SetPlayAuthorizer(signer)
+			h.SetPlayAuthorizer(authorization)
 			h.SetPlaybackMediaContextResolver(hookMediaResolver{binding: binding})
 			e := gin.New()
 			e.POST("/index/hook/on_play", h.OnPlay)
@@ -142,8 +144,10 @@ func TestOnPlayAuthorizesColdFixedPreauthorizationBeforeLiveMediaExists(t *testi
 	binding := playauth.Binding{
 		DeviceID: deviceID, ChannelID: channelID,
 		App: "rtp", Stream: streamID, MediaServerID: "node-a",
+		DeviceEpoch: 1,
 	}
-	authorization := playauth.NewAuthorizationService(signer, playauth.NewAuthorizationRegistry())
+	authority := newHookDeviceAuthority(1)
+	authorization := newHookAuthorization(t, signer, time.Now, authority)
 	grant, err := authorization.IssueDirect(binding)
 	if err != nil {
 		t.Fatal(err)
@@ -179,8 +183,10 @@ func TestOnPlayRejectsColdFallbackWhenMediaAbsenceIsNotProven(t *testing.T) {
 	binding := playauth.Binding{
 		DeviceID: deviceID, ChannelID: channelID,
 		App: "rtp", Stream: streamID, MediaServerID: "node-a",
+		DeviceEpoch: 1,
 	}
-	authorization := playauth.NewAuthorizationService(signer, playauth.NewAuthorizationRegistry())
+	authority := newHookDeviceAuthority(1)
+	authorization := newHookAuthorization(t, signer, time.Now, authority)
 	grant, err := authorization.IssueDirect(binding)
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +268,7 @@ func TestOnPlayLogsStableDenialReasonWithoutToken(t *testing.T) {
 
 type rejectingPlayAuthorizer struct{}
 
-func (*rejectingPlayAuthorizer) Verify(string, playauth.Binding) (playauth.Claims, error) {
+func (*rejectingPlayAuthorizer) VerifyContext(context.Context, string, playauth.Binding) (playauth.Claims, error) {
 	return playauth.Claims{}, playauth.ErrTokenInvalid
 }
 

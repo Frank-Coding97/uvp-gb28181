@@ -152,7 +152,7 @@ type TalkStreamObserver interface {
 }
 
 type PlayAuthorizer interface {
-	Verify(string, playauth.Binding) (playauth.Claims, error)
+	VerifyContext(context.Context, string, playauth.Binding) (playauth.Claims, error)
 }
 
 type PlaybackMediaContextResolver interface {
@@ -769,6 +769,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		h.denyAutoOnDemand(c, "global-rate-limited")
 		return
 	}
+	var claims playauth.Claims
 	var authorizationID string
 	if authSettings.Enabled {
 		params, err := url.ParseQuery(strings.TrimPrefix(body.Params, "?"))
@@ -777,7 +778,8 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 			return
 		}
 		playToken, ok := singleValue(params, playauth.QueryParameter)
-		claims, verified := h.verifyAutoStartToken(playToken, playauth.Binding{
+		var verified bool
+		claims, verified = h.verifyAutoStartToken(c.Request.Context(), playToken, playauth.Binding{
 			DeviceID: deviceID, ChannelID: channelID, App: body.App,
 			Stream: body.Stream, MediaServerID: body.MediaServerID,
 		})
@@ -795,7 +797,7 @@ func (h *HookController) OnStreamNotFound(c *gin.Context) {
 		return
 	}
 	if err := dispatcher.Submit(play.Request{
-		DeviceID: deviceID, ChannelID: channelID,
+		DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: claims.DeviceEpoch,
 		Trigger: "on_stream_not_found", RequiredNode: mediaNode.ID,
 		AuthorizationID: authorizationID,
 	}); err != nil {
@@ -923,14 +925,14 @@ func (h *HookController) OnPlay(c *gin.Context) {
 		h.denyPlayback(c, "missing", "invalid playback authorization")
 		return
 	}
-	claims, err := authorizer.Verify(playToken, binding)
+	claims, err := authorizer.VerifyContext(c.Request.Context(), playToken, binding)
 	if err != nil {
 		h.denyPlayback(c, string(playauth.MetricOutcomeForError(playToken, err)), "playback authorization denied")
 		return
 	}
 	if binding.MediaGeneration == 0 && binding.BindClientIP {
-		verifier, ok := authorizer.(playauth.VerifiedClientAutoStartVerifier)
-		if !ok || verifier.MarkVerifiedClientSource(playToken, claims, binding) != nil {
+		verifier, ok := authorizer.(playauth.ContextVerifiedClientAutoStartVerifier)
+		if !ok || verifier.MarkVerifiedClientSourceContext(c.Request.Context(), playToken, claims, binding) != nil {
 			h.denyPlayback(c, "unavailable", "playback authorization unavailable")
 			return
 		}
@@ -1034,23 +1036,23 @@ func (h *HookController) ignoreFlowReport(c *gin.Context, reason string) {
 	hookOK(c)
 }
 
-func (h *HookController) verifyAutoStartToken(token string, binding playauth.Binding) (playauth.Claims, bool) {
+func (h *HookController) verifyAutoStartToken(ctx context.Context, token string, binding playauth.Binding) (playauth.Claims, bool) {
 	h.playAuthMu.RLock()
 	authorizer := h.playAuthorizer
 	h.playAuthMu.RUnlock()
-	verifier, ok := authorizer.(playauth.AutoStartVerifier)
+	verifier, ok := authorizer.(playauth.ContextAutoStartVerifier)
 	if !ok || verifier == nil || token == "" {
 		return playauth.Claims{}, false
 	}
-	claims, err := verifier.VerifyForAutoStart(token, binding)
+	claims, err := verifier.VerifyForAutoStartContext(ctx, token, binding)
 	if err == nil {
 		return claims, true
 	}
-	verifiedClientVerifier, ok := authorizer.(playauth.VerifiedClientAutoStartVerifier)
+	verifiedClientVerifier, ok := authorizer.(playauth.ContextVerifiedClientAutoStartVerifier)
 	if !ok {
 		return playauth.Claims{}, false
 	}
-	claims, err = verifiedClientVerifier.VerifyForVerifiedClientAutoStart(token, binding)
+	claims, err = verifiedClientVerifier.VerifyForVerifiedClientAutoStartContext(ctx, token, binding)
 	return claims, err == nil
 }
 

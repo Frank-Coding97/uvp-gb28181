@@ -63,19 +63,21 @@ func TestOpenAPIHookRequiresAuthenticatedNodeAndDurableBinding(t *testing.T) {
 					now := time.Unix(1800000000, 0).UTC()
 					signer, err := playauth.NewSigner([]byte(strings.Repeat("s", 32)), playauth.WithNow(func() time.Time { return now }))
 					require.NoError(t, err)
+					authority := newHookDeviceAuthority(1)
+					authorization := newHookAuthorization(t, signer, func() time.Time { return now }, authority)
 					binding := playauth.OpenAPIBinding{GrantID: "00000000-0000-4000-8000-000000000001", ClientID: 1, ClientEpoch: 1, Scope: "play:live:apply", ScopeEpoch: 1, DeviceEpoch: 1, DeviceID: "37010301021320000014", ChannelID: "37010301021320000001", NodeUUID: "node-a", BootNonce: strings.Repeat("a", 32), Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: "0200000001", MediaGeneration: 9, Protocol: protocol.grant}
 					grant, err := signer.IssueOpenAPI(binding)
 					require.NoError(t, err)
 					h := handler.NewHookController(stream.NewNotifier())
-					legacyBinding := playauth.Binding{DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, App: binding.App, Stream: binding.Stream, MediaServerID: binding.NodeUUID, MediaGeneration: binding.MediaGeneration}
+					legacyBinding := playauth.Binding{DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, DeviceEpoch: 1, App: binding.App, Stream: binding.Stream, MediaServerID: binding.NodeUUID, MediaGeneration: binding.MediaGeneration}
 					if tc.legacy {
-						grant, err = signer.IssueDirect(legacyBinding)
+						grant, err = authorization.IssueDirect(legacyBinding)
 						require.NoError(t, err)
 					}
 					if tc.wrongGeneration {
 						legacyBinding.MediaGeneration++
 					}
-					h.SetPlayAuthorizer(signer)
+					h.SetPlayAuthorizer(authorization)
 					h.SetPlaybackMediaContextResolver(hookMediaResolver{binding: legacyBinding})
 					binder := &openAPIHookBinder{}
 					if tc.storeFailure {
