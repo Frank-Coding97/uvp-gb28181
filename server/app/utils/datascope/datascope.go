@@ -29,6 +29,14 @@ func ensureContext(ctx context.Context) context.Context {
 	return ctx
 }
 
+// bindScopeContext updates the per-query statement in place so a scope can
+// preserve both request cancellation and the query value returned by GORM.
+func bindScopeContext(db *gorm.DB, ctx context.Context) {
+	if db != nil && db.Statement != nil {
+		db.Statement.Context = ensureContext(ctx)
+	}
+}
+
 // 获取用户角色列表
 func getUserRoles(ctx context.Context, userID uint) ([]*models.SysRole, error) {
 	return getUserRolesWithDB(ctx, app.DB(), userID)
@@ -242,11 +250,18 @@ func OwnerDeptScope(c *gin.Context, column string) func(db *gorm.DB) *gorm.DB {
 // OwnerDeptScopeWithDB 按 owner_dept_id 过滤,并用 lookupDB 查询当前用户的部门权限。
 func OwnerDeptScopeWithDB(c *gin.Context, lookupDB *gorm.DB, column string) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
-		db = db.WithContext(requestContext(c))
-		if lookupDB == nil {
-			lookupDB = db
+		ctx := requestContext(c)
+		bindScopeContext(db, ctx)
+		lookup := lookupDB
+		if lookup == nil {
+			lookup = db
 		}
-		deptIDs, needFilter := GetOwnerDeptIDsWithDB(c, lookupDB)
+		// Do not replace the scoped query with the WithContext clone: callers
+		// commonly reuse it for Count and Find, and GORM does not copy the
+		// returned clone's clauses back to the original query. Bind the context
+		// above in place and use the clone only for permission lookups.
+		lookup = lookup.WithContext(ctx)
+		deptIDs, needFilter := GetOwnerDeptIDsWithDB(c, lookup)
 		if !needFilter {
 			return db
 		}
@@ -265,7 +280,7 @@ func GetDataScope(c *gin.Context) func(db *gorm.DB) *gorm.DB {
 	// 定义数据权限函数
 	return func(db *gorm.DB) *gorm.DB {
 		ctx := requestContext(c)
-		db = db.WithContext(ctx)
+		bindScopeContext(db, ctx)
 		claims := common.GetClaims(c)
 		if claims == nil {
 			return db.Where("1 = 0")

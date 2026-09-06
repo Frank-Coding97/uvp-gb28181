@@ -25,10 +25,18 @@ func VisibilityScope(c *gin.Context, ownerColumn, deviceIDColumn string) func(db
 // VisibilityScopeWithDB 同上,权限查询走 lookupDB(事务内共享同一连接)。
 func VisibilityScopeWithDB(c *gin.Context, lookupDB *gorm.DB, ownerColumn, deviceIDColumn string) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
-		db = db.WithContext(requestContext(c))
-		if lookupDB == nil {
-			lookupDB = db
+		ctx := requestContext(c)
+		bindScopeContext(db, ctx)
+		lookup := lookupDB
+		if lookup == nil {
+			lookup = db
 		}
+		// Keep the DB passed to the scope as the return value. GORM reuses a
+		// scoped query (for example Count followed by Find); replacing it with
+		// WithContext here returns a clone whose WHERE clauses are not written
+		// back to that reused query. Bind the context above in place and use the
+		// clone only for permission lookups.
+		lookup = lookup.WithContext(ctx)
 		if ownerColumn == "" {
 			ownerColumn = "owner_dept_id"
 		}
@@ -37,12 +45,12 @@ func VisibilityScopeWithDB(c *gin.Context, lookupDB *gorm.DB, ownerColumn, devic
 			deviceIDColumn = "device_id"
 		}
 
-		deptIDs, needFilter := GetOwnerDeptIDsWithDB(c, lookupDB)
+		deptIDs, needFilter := GetOwnerDeptIDsWithDB(c, lookup)
 		if !needFilter {
 			return db
 		}
 
-		grantSub := grantDeviceCodeSubquery(lookupDB, c)
+		grantSub := grantDeviceCodeSubquery(lookup, c)
 
 		if len(deptIDs) == 0 {
 			// 归属维度不可见:只剩共享维度(无共享则 fail-closed)
