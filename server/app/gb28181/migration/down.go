@@ -1,10 +1,12 @@
 package migration
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -15,6 +17,7 @@ const (
 	openAPISchemaMigration          = "2026-09-05-openapi-aksk-schema.sql"
 	openAPISchemaMigrationPostgres  = "2026-09-05-openapi-aksk-schema-postgresql.sql"
 	openAPISchemaMigrationSQLServer = "2026-09-05-openapi-aksk-schema-sqlserver.sql"
+	openAPIDownGuardTimeout         = time.Second
 )
 
 var errOpenAPIDownDenied = errors.New("openapi schema destructive down denied")
@@ -46,13 +49,16 @@ func checkOpenAPIDownGuard(db *gorm.DB, d Dialect, upFileName string) error {
 	if !ok {
 		return errOpenAPIDownDenied
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), openAPIDownGuardTimeout)
+	defer cancel()
+	guardDB := db.WithContext(ctx)
 	var databaseName string
-	identity := db.Raw(identityQuery)
+	identity := guardDB.Raw(identityQuery)
 	row := identity.Row()
 	if identity.Error != nil || row == nil || row.Scan(&databaseName) != nil || !isOpenAPITestDatabase(databaseName) {
 		return errOpenAPIDownDenied
 	}
-	if err := rejectNonEmptyOpenAPISafetyState(db); err != nil {
+	if err := rejectNonEmptyOpenAPISafetyState(guardDB); err != nil {
 		return errOpenAPIDownDenied
 	}
 	return nil
@@ -85,7 +91,8 @@ func isOpenAPITestDatabase(name string) bool {
 		return false
 	}
 	for i := 0; i < len(name); i++ {
-		if name[i] > 0x7f {
+		b := name[i]
+		if !(b >= 'a' && b <= 'z') && !(b >= '0' && b <= '9') && b != '_' {
 			return false
 		}
 	}
@@ -111,12 +118,12 @@ func rejectNonEmptyOpenAPISafetyState(db *gorm.DB) error {
 	}
 
 	var deviceUnsafe int64
-	if err := db.Raw("SELECT COUNT(*) FROM gb_device WHERE access_epoch <> 1 OR legacy_revoked_before IS NOT NULL").Scan(&deviceUnsafe).Error; err != nil || deviceUnsafe != 0 {
+	if err := db.Raw("SELECT COUNT(*) FROM gb_device WHERE (access_epoch IS NULL OR access_epoch <> 1) OR legacy_revoked_before IS NOT NULL").Scan(&deviceUnsafe).Error; err != nil || deviceUnsafe != 0 {
 		return errOpenAPIDownDenied
 	}
 
 	var nodeUnsafe int64
-	if err := db.Raw("SELECT COUNT(*) FROM meta_node WHERE (current_boot_nonce IS NOT NULL AND current_boot_nonce <> '') OR (retired_boot_history IS NOT NULL AND retired_boot_history <> '' AND retired_boot_history <> '[]' AND retired_boot_history <> '{}') OR COALESCE(runtime_epoch, 0) <> 0").Scan(&nodeUnsafe).Error; err != nil || nodeUnsafe != 0 {
+	if err := db.Raw("SELECT COUNT(*) FROM meta_node WHERE current_boot_nonce IS NOT NULL OR (retired_boot_history IS NOT NULL AND retired_boot_history <> '[]') OR runtime_epoch IS NULL OR runtime_epoch <> 0 OR runtime_protocol_version IS NULL OR runtime_protocol_version <> 0 OR runtime_confirmed_revision IS NULL OR runtime_confirmed_revision <> 0 OR runtime_confirmed_at IS NOT NULL OR runtime_identity_status IS NULL OR runtime_identity_status <> 'unknown'").Scan(&nodeUnsafe).Error; err != nil || nodeUnsafe != 0 {
 		return errOpenAPIDownDenied
 	}
 	return nil

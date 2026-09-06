@@ -11,7 +11,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -59,8 +61,8 @@ func TestOpenAPIDownGuardAllowsOnlyEmptyIsolatedDatabase(t *testing.T) {
 			} {
 				require.Contains(t, queries, "select count(*) from "+table)
 			}
-			require.Contains(t, queries, "select count(*) from gb_device where access_epoch <> 1 or legacy_revoked_before is not null")
-			require.Contains(t, queries, "select count(*) from meta_node where (current_boot_nonce is not null and current_boot_nonce <> '') or (retired_boot_history is not null and retired_boot_history <> '' and retired_boot_history <> '[]' and retired_boot_history <> '{}') or coalesce(runtime_epoch, 0) <> 0")
+			require.Contains(t, queries, "select count(*) from gb_device where (access_epoch is null or access_epoch <> 1) or legacy_revoked_before is not null")
+			require.Contains(t, queries, "select count(*) from meta_node where current_boot_nonce is not null or (retired_boot_history is not null and retired_boot_history <> '[]') or runtime_epoch is null or runtime_epoch <> 0 or runtime_protocol_version is null or runtime_protocol_version <> 0 or runtime_confirmed_revision is null or runtime_confirmed_revision <> 0 or runtime_confirmed_at is not null or runtime_identity_status is null or runtime_identity_status <> 'unknown'")
 		})
 	}
 }
@@ -95,12 +97,22 @@ func TestOpenAPIDownGuardRequiresExactSwitchAndDatabasePrefix(t *testing.T) {
 	t.Setenv("UVP_OPENAPI_ALLOW_TEST_DOWN", "1")
 	for _, databaseName := range []string{
 		"uvp_openapi_test_", "UVP_openapi_test_case", "uvp_openapi_test", "uvp_openapi_test_\uFF41",
+		"uvp_openapi_test_case-foo", "uvp_openapi_test_case with space", "uvp_openapi_test_case\n", "uvp_openapi_test_Case",
 	} {
 		t.Run("database="+databaseName, func(t *testing.T) {
 			state := newOpenAPIDownGuardDBState()
 			state.databaseName = databaseName
 			db := newOpenAPIDownGuardDB(t, state, DialectMySQL)
 			require.ErrorIs(t, checkOpenAPIDownGuard(db, DialectMySQL, openAPIDownGuardTargets[0].name), errOpenAPIDownDenied)
+		})
+	}
+
+	for _, databaseName := range []string{"uvp_openapi_test_case_1", "uvp_openapi_test_abc123"} {
+		t.Run("valid database="+databaseName, func(t *testing.T) {
+			state := newOpenAPIDownGuardDBState()
+			state.databaseName = databaseName
+			db := newOpenAPIDownGuardDB(t, state, DialectMySQL)
+			require.NoError(t, checkOpenAPIDownGuard(db, DialectMySQL, openAPIDownGuardTargets[0].name))
 		})
 	}
 }
@@ -176,6 +188,140 @@ func TestDownBlocksOpenAPISchemaBeforeOpeningDatabase(t *testing.T) {
 	require.ErrorIs(t, err, errOpenAPIDownDenied)
 }
 
+func TestOpenAPIDownGuardUsesBoundedContext(t *testing.T) {
+	t.Setenv(openAPIDownGuardSwitch, "1")
+	state := newOpenAPIDownGuardDBState()
+	state.blockQueries = true
+	db := newOpenAPIDownGuardDB(t, state, DialectMySQL)
+
+	started := time.Now()
+	err := checkOpenAPIDownGuard(db, DialectMySQL, openAPISchemaMigration)
+	require.ErrorIs(t, err, errOpenAPIDownDenied)
+	require.Less(t, time.Since(started), 3*time.Second, "the destructive-down probe must have a bounded total deadline")
+}
+
+func TestOpenAPIDownSafetyStateSQLiteInitialValuesAndUpdates(t *testing.T) {
+	tests := []struct {
+		name   string
+		update string
+		wantOK bool
+	}{
+		{name: "initial values", wantOK: true},
+		{name: "device access epoch NULL", update: "UPDATE gb_device SET access_epoch=NULL", wantOK: false},
+		{name: "device access epoch advanced", update: "UPDATE gb_device SET access_epoch=2", wantOK: false},
+		{name: "legacy revoked before", update: "UPDATE gb_device SET legacy_revoked_before='2026-09-06T00:00:00Z'", wantOK: false},
+		{name: "current boot nonce empty", update: "UPDATE meta_node SET current_boot_nonce=''", wantOK: false},
+		{name: "current boot nonce set", update: "UPDATE meta_node SET current_boot_nonce='boot-1'", wantOK: false},
+		{name: "retired history empty array", update: "UPDATE meta_node SET retired_boot_history='[]'", wantOK: true},
+		{name: "retired history object", update: "UPDATE meta_node SET retired_boot_history='{}'", wantOK: false},
+		{name: "retired history empty string", update: "UPDATE meta_node SET retired_boot_history=''", wantOK: false},
+		{name: "runtime epoch NULL", update: "UPDATE meta_node SET runtime_epoch=NULL", wantOK: false},
+		{name: "runtime epoch advanced", update: "UPDATE meta_node SET runtime_epoch=1", wantOK: false},
+		{name: "runtime protocol version NULL", update: "UPDATE meta_node SET runtime_protocol_version=NULL", wantOK: false},
+		{name: "runtime protocol version advanced", update: "UPDATE meta_node SET runtime_protocol_version=1", wantOK: false},
+		{name: "runtime confirmed revision NULL", update: "UPDATE meta_node SET runtime_confirmed_revision=NULL", wantOK: false},
+		{name: "runtime confirmed revision advanced", update: "UPDATE meta_node SET runtime_confirmed_revision=1", wantOK: false},
+		{name: "runtime confirmed at set", update: "UPDATE meta_node SET runtime_confirmed_at='2026-09-06T00:00:00Z'", wantOK: false},
+		{name: "runtime identity status NULL", update: "UPDATE meta_node SET runtime_identity_status=NULL", wantOK: false},
+		{name: "runtime identity status active", update: "UPDATE meta_node SET runtime_identity_status='active'", wantOK: false},
+		{name: "runtime identity status unknown", update: "UPDATE meta_node SET runtime_identity_status='unknown'", wantOK: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newOpenAPISafetySQLite(t, "")
+			if tt.update != "" {
+				require.NoError(t, db.Exec(tt.update).Error)
+			}
+			err := rejectNonEmptyOpenAPISafetyState(db)
+			if tt.wantOK {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, errOpenAPIDownDenied)
+		})
+	}
+}
+
+func TestOpenAPIDownSafetyStateSQLiteMissingRequiredFieldRejects(t *testing.T) {
+	for _, column := range []string{
+		"access_epoch",
+		"legacy_revoked_before",
+		"current_boot_nonce",
+		"retired_boot_history",
+		"runtime_epoch",
+		"runtime_protocol_version",
+		"runtime_confirmed_revision",
+		"runtime_confirmed_at",
+		"runtime_identity_status",
+	} {
+		t.Run(column, func(t *testing.T) {
+			db := newOpenAPISafetySQLite(t, column)
+			require.ErrorIs(t, rejectNonEmptyOpenAPISafetyState(db), errOpenAPIDownDenied)
+		})
+	}
+}
+
+func TestOpenAPIDownGuardRejectsSQLiteEvenWithSwitch(t *testing.T) {
+	t.Setenv(openAPIDownGuardSwitch, "1")
+	db := newOpenAPISafetySQLite(t, "")
+	require.ErrorIs(t, checkOpenAPIDownGuard(db, DialectUnknown, openAPISchemaMigration), errOpenAPIDownDenied)
+}
+
+func newOpenAPISafetySQLite(t *testing.T, omitColumn string) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Discard})
+	require.NoError(t, err)
+	raw, err := db.DB()
+	require.NoError(t, err)
+	raw.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = raw.Close() })
+
+	for _, table := range []string{
+		"sys_openapi_client",
+		"sys_openapi_client_scope",
+		"sys_openapi_nonce",
+		"sys_openapi_audit",
+		"gb_openapi_play_grant",
+		"gb_openapi_viewer",
+	} {
+		require.NoError(t, db.Exec("CREATE TABLE "+table+"(id INTEGER PRIMARY KEY)").Error)
+	}
+
+	deviceColumns := []string{"access_epoch INTEGER NULL", "legacy_revoked_before TEXT NULL"}
+	if omitColumn == "access_epoch" {
+		deviceColumns = deviceColumns[1:]
+	}
+	if omitColumn == "legacy_revoked_before" {
+		deviceColumns = deviceColumns[:1]
+	}
+	require.NoError(t, db.Exec("CREATE TABLE gb_device("+strings.Join(deviceColumns, ",")+")").Error)
+
+	nodeColumns := []string{
+		"current_boot_nonce TEXT NULL",
+		"retired_boot_history TEXT NULL",
+		"runtime_epoch INTEGER NULL",
+		"runtime_protocol_version INTEGER NULL",
+		"runtime_confirmed_revision INTEGER NULL",
+		"runtime_confirmed_at TEXT NULL",
+		"runtime_identity_status TEXT NULL",
+	}
+	filteredNodeColumns := make([]string, 0, len(nodeColumns))
+	for _, definition := range nodeColumns {
+		if strings.HasPrefix(definition, omitColumn+" ") {
+			continue
+		}
+		filteredNodeColumns = append(filteredNodeColumns, definition)
+	}
+	require.NoError(t, db.Exec("CREATE TABLE meta_node("+strings.Join(filteredNodeColumns, ",")+")").Error)
+
+	if omitColumn == "" {
+		require.NoError(t, db.Exec("INSERT INTO gb_device(access_epoch,legacy_revoked_before) VALUES(1,NULL)").Error)
+		require.NoError(t, db.Exec("INSERT INTO meta_node(current_boot_nonce,retired_boot_history,runtime_epoch,runtime_protocol_version,runtime_confirmed_revision,runtime_confirmed_at,runtime_identity_status) VALUES(NULL,NULL,0,0,0,NULL,'unknown')").Error)
+	}
+	return db
+}
+
 type openAPIDownGuardDBState struct {
 	mu                sync.Mutex
 	databaseName      string
@@ -183,6 +329,7 @@ type openAPIDownGuardDBState struct {
 	missingTables     map[string]bool
 	deviceUnsafeCount int64
 	nodeUnsafeCount   int64
+	blockQueries      bool
 	queryError        error
 	queries           []string
 }
@@ -202,11 +349,24 @@ func (s *openAPIDownGuardDBState) queriesSnapshot() []string {
 }
 
 func (s *openAPIDownGuardDBState) query(query string) ([][]driver.Value, error) {
+	return s.queryContext(context.Background(), query)
+}
+
+func (s *openAPIDownGuardDBState) queryContext(ctx context.Context, query string) ([][]driver.Value, error) {
 	normalized := normalizeOpenAPIDownGuardSQL(query)
 	s.mu.Lock()
 	s.queries = append(s.queries, normalized)
+	blockQueries := s.blockQueries
 	err := s.queryError
 	s.mu.Unlock()
+	if blockQueries {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(5 * time.Second):
+			return nil, errors.New("probe did not finish")
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -260,8 +420,8 @@ func (c *openAPIDownGuardConn) Begin() (driver.Tx, error) {
 
 func (c *openAPIDownGuardConn) Ping(context.Context) error { return nil }
 
-func (c *openAPIDownGuardConn) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
-	values, err := c.state.query(query)
+func (c *openAPIDownGuardConn) QueryContext(ctx context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+	values, err := c.state.queryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
