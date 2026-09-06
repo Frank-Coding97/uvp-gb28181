@@ -33,8 +33,10 @@ type Gateway struct {
 	clients   *client.Service
 	admission *Admission
 	limiter   *limit.Manager
+	quota     *limit.Quota
 	tls       *TLSBoundary
 	slots     chan struct{}
+	media     MediaDispatcher
 	run       func(context.Context, gatewayRequest) gatewayResponse
 	read      func(context.Context, *gorm.DB, metadataInput) (any, error)
 	complete  func(context.Context, string, string, time.Duration) error
@@ -43,6 +45,8 @@ type Gateway struct {
 type gatewayRequest struct {
 	method, path, rawURI, rawQuery, pattern, scope, deviceID, channelID, requestID, source string
 	headers                                                                                HeaderValues
+	contentType                                                                            string
+	body                                                                                   []byte
 }
 type gatewayResponse struct {
 	status           int
@@ -53,7 +57,7 @@ type gatewayResponse struct {
 	admitted         bool
 }
 
-func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, config GatewayConfig) (*Gateway, error) {
+func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, config GatewayConfig, options ...GatewayOption) (*Gateway, error) {
 	if db == nil || keys == nil || validateLineField(config.Audience) != nil || config.Timeout <= 0 || config.AuditReserve <= 0 || config.AuditReserve >= config.Timeout || config.MaxInFlight <= 0 {
 		return nil, ErrUnavailable
 	}
@@ -69,7 +73,12 @@ func NewGateway(ctx context.Context, db *gorm.DB, keys *client.SecretManager, co
 	if err = store.RecoverInterrupted(ctx); err != nil {
 		return nil, ErrUnavailable
 	}
-	g := &Gateway{config: config, db: db, clients: service, admission: NewAdmission(db, time.Now), limiter: limit.New(time.Now), tls: transport, slots: make(chan struct{}, config.MaxInFlight), complete: store.Complete, read: readMetadata}
+	g := &Gateway{config: config, db: db, clients: service, admission: NewAdmission(db, time.Now), limiter: limit.New(time.Now), quota: limit.NewQuota(db, time.Now), tls: transport, slots: make(chan struct{}, config.MaxInFlight), complete: store.Complete, read: readMetadata}
+	for _, option := range options {
+		if option != nil {
+			option(g)
+		}
+	}
 	g.run = g.process
 	g.rejected = audit.NewRejectedCollector()
 	return g, nil
@@ -79,7 +88,7 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		respond := func(response gatewayResponse) {
-			if g != nil && response.status >= 400 && !response.admitted {
+			if g != nil && g.rejected != nil && response.status >= 400 && !response.admitted {
 				g.rejected.Record(audit.RejectedInput{RequestID: c.GetString("requestId"), ClientID: response.verifiedClientID, Scope: scope, Source: c.ClientIP(), Reason: response.code})
 			}
 			writeGateway(c, response)
@@ -91,9 +100,15 @@ func (g *Gateway) Handler(scope string) gin.HandlerFunc {
 		}
 		requestID := hex.EncodeToString(id[:])
 		c.Set("requestId", requestID)
-		// The media branch remains unavailable before T09--T12; no nonce, quota,
-		// audit-started row, or business dispatch is created by this stub.
-		if g == nil || scope == "play:live:apply" {
+		if scope == mediaScope {
+			if g == nil {
+				respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
+				return
+			}
+			g.handleMedia(c, requestID, respond)
+			return
+		}
+		if g == nil {
 			respond(gatewayError(requestID, 503, "SERVICE_UNAVAILABLE"))
 			return
 		}
@@ -152,7 +167,7 @@ func gatewayError(id string, status int, code string) gatewayResponse {
 	return encodeGateway(id, status, code, nil)
 }
 func encodeGateway(id string, status int, code string, data any) gatewayResponse {
-	messages := map[string]string{"OK": "success", "INVALID_REQUEST": "invalid request", "AUTHENTICATION_FAILED": "authentication failed", "REQUEST_EXPIRED": "request expired", "REQUEST_REPLAYED": "request replayed", "CAPABILITY_DENIED": "capability denied", "RESOURCE_NOT_FOUND": "resource not found", "RATE_LIMITED": "rate limited", "SERVICE_UNAVAILABLE": "service unavailable"}
+	messages := map[string]string{"OK": "success", "INVALID_REQUEST": "invalid request", "AUTHENTICATION_FAILED": "authentication failed", "REQUEST_EXPIRED": "request expired", "REQUEST_REPLAYED": "request replayed", "CAPABILITY_DENIED": "capability denied", "RESOURCE_NOT_FOUND": "resource not found", "RATE_LIMITED": "rate limited", "QUOTA_EXCEEDED": "quota exceeded", "SERVICE_UNAVAILABLE": "service unavailable"}
 	body, err := json.Marshal(struct {
 		Code      string `json:"code"`
 		Message   string `json:"message"`
@@ -166,6 +181,9 @@ func encodeGateway(id string, status int, code string, data any) gatewayResponse
 }
 
 func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output gatewayResponse) {
+	if q.scope == mediaScope {
+		return g.processMedia(hardContext, q)
+	}
 	var verifiedClientID int64
 	admitted := false
 	defer func() { output.verifiedClientID = verifiedClientID; output.admitted = admitted }()
@@ -276,6 +294,9 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) (output
 func (g *Gateway) RejectedSummary() audit.RejectedSnapshot {
 	if g == nil {
 		return (*audit.RejectedCollector)(nil).Snapshot()
+	}
+	if g.rejected == nil {
+		return audit.RejectedSnapshot{}
 	}
 	return g.rejected.Snapshot()
 }
