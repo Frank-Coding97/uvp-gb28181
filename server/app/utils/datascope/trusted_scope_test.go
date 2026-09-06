@@ -70,6 +70,19 @@ func newTrustedScopeDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestResolveOwnerDeptAccessMaskedNotFoundFailsClosed(t *testing.T) {
+	db := newTrustedScopeDB(t)
+	seedTrustedScopeUser(t, db, 301, 10, 1, "", false)
+	seedTrustedScopeUser(t, db, 302, 10, 1, "", true)
+	require.NoError(t, db.Delete(&models.User{BaseModel: models.BaseModel{ID: 302}}).Error)
+	require.NoError(t, db.Callback().Query().Before("gorm:query").Register("mask_not_found", func(query *gorm.DB) { query.Statement.RaiseErrorOnNotFound = false }))
+	for _, id := range []uint{301, 302} {
+		access, err := ResolveOwnerDeptAccessByUserID(context.Background(), db, id)
+		require.ErrorIs(t, err, ErrOwnerDeptAccessDenied)
+		require.False(t, access.FullAccess)
+	}
+}
+
 func seedTrustedScopeUser(t *testing.T, db *gorm.DB, userID, deptID uint, dataScope int8, checked string, userEnabled bool) {
 	t.Helper()
 	status := int8(0)
