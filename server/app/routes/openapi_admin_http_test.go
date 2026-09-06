@@ -138,11 +138,16 @@ func TestOpenAPIAdminRootRealHTTPBoundary(t *testing.T) {
 	require.Equal(t, http.StatusOK, list.status)
 	var listBody struct {
 		Data struct {
-			Total int `json:"total"`
+			Total            int `json:"total"`
+			OwnerDepartments []struct {
+				ID uint `json:"id"`
+			} `json:"ownerDepartments"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(list.body, &listBody))
 	require.Equal(t, 1, listBody.Data.Total)
+	require.Len(t, listBody.Data.OwnerDepartments, 1)
+	require.EqualValues(t, 10, listBody.Data.OwnerDepartments[0].ID)
 	require.False(t, strings.Contains(string(list.body), "hidden-admin-client"))
 	require.False(t, strings.Contains(string(list.body), initialSecret))
 

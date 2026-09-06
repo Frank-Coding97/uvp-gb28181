@@ -220,6 +220,12 @@ func (a *ClientAdminController) scopedClients(c *gin.Context, access datascope.O
 	}
 	return query
 }
+
+type adminOwnerDepartment struct {
+	ID   uint   `json:"id"`
+	Name string `json:"name"`
+}
+
 func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptAccess) {
 	values, err := url.ParseQuery(c.Request.URL.RawQuery)
 	if err != nil {
@@ -246,6 +252,7 @@ func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptA
 		return
 	}
 	items := []client.ClientView{}
+	departments := []adminOwnerDepartment{}
 	var total int64
 	err = a.db.WithContext(c.Request.Context()).Transaction(func(tx *gorm.DB) error {
 		scoped := *a
@@ -260,13 +267,22 @@ func (a *ClientAdminController) list(c *gin.Context, access datascope.OwnerDeptA
 		if err := query().Select("count(*)").Count(&total).Error; err != nil {
 			return err
 		}
-		return query().Order("id ASC").Offset((page - 1) * size).Limit(size).Find(&items).Error
+		if err := query().Order("id ASC").Offset((page - 1) * size).Limit(size).Find(&items).Error; err != nil {
+			return err
+		}
+		// Options are scoped server-side, independent from the current client
+		// page/filter. Never expose the general unscoped department tree here.
+		options := tx.Table("sys_department").Select("id, name").Where("status = ? AND deleted_at IS NULL", 1)
+		if !access.FullAccess {
+			options = options.Where("id IN ?", access.DeptIDs)
+		}
+		return options.Order("id ASC").Find(&departments).Error
 	})
 	if err != nil {
 		adminError(c, err)
 		return
 	}
-	writeOpenAPISuccess(c, gin.H{"items": items, "page": page, "pageSize": size, "total": total})
+	writeOpenAPISuccess(c, gin.H{"items": items, "page": page, "pageSize": size, "total": total, "ownerDepartments": departments})
 }
 
 type adminAuditView struct {
