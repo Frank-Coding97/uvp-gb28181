@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -56,8 +57,7 @@ func (a *NodeAuthority) AuthorizeOpenAPI(ctx context.Context, tx *gorm.DB, reque
 	}
 
 	var rows []nodeAuthorityProjection
-	result := tx.WithContext(ctx).
-		Table((models.MediaNodeSecurity{}).TableName()).
+	result := lockNodeAuthorityRow(tx.WithContext(ctx)).
 		Select("id, revision, state, media_server_uuid, current_boot_nonce, runtime_epoch, runtime_protocol_version, runtime_confirmed_revision, runtime_confirmed_at, runtime_identity_status").
 		Where("media_server_uuid = ?", request.NodeUUID).
 		Limit(2).
@@ -100,6 +100,19 @@ func validNodeAuthorityBootNonce(value string) bool {
 		}
 	}
 	return true
+}
+
+// lockNodeAuthorityRow mirrors the runtime store's dialect strategy. The
+// caller owns the surrounding transaction; this lock remains held until that
+// transaction commits or rolls back.
+func lockNodeAuthorityRow(db *gorm.DB) *gorm.DB {
+	if db == nil {
+		return nil
+	}
+	if db.Dialector.Name() == "sqlserver" {
+		return db.Table("meta_node WITH (UPDLOCK, HOLDLOCK)")
+	}
+	return db.Table((models.MediaNodeSecurity{}).TableName()).Clauses(clause.Locking{Strength: "UPDATE"})
 }
 
 func validNodeAuthorityProjection(row nodeAuthorityProjection, request playauth.OpenAPINodeAuthorization) bool {

@@ -9,6 +9,9 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
@@ -136,6 +139,33 @@ func TestNodeAuthorityRejectsNilAndCanceledInputs(t *testing.T) {
 	require.ErrorIs(t, authority.AuthorizeOpenAPI(ctx, db, validNodeAuthorityRequest()), playauth.ErrOpenAPIGrantUnavailable)
 }
 
+func TestNodeAuthorityUsesDialectSpecificRowLocks(t *testing.T) {
+	cases := []struct {
+		name   string
+		db     *gorm.DB
+		needle string
+	}{
+		{name: "mysql", db: dryRunNodeAuthorityDB(t, mysql.New(mysql.Config{DSN: "runtime:runtime@tcp(localhost:3306)/runtime", SkipInitializeWithVersion: true})), needle: "FOR UPDATE"},
+		{name: "postgres", db: dryRunNodeAuthorityDB(t, postgres.New(postgres.Config{DSN: "host=localhost user=runtime dbname=runtime", PreferSimpleProtocol: true})), needle: "FOR UPDATE"},
+		{name: "sqlserver", db: dryRunNodeAuthorityDB(t, sqlserver.Open("sqlserver://localhost:1433?database=runtime")), needle: "UPDLOCK"},
+		{name: "sqlite", db: dryRunNodeAuthorityDB(t, sqlite.Open(":memory:")), needle: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var rows []nodeAuthorityProjection
+			stmt := lockNodeAuthorityRow(tc.db).Select("id").Where("media_server_uuid = ?", testAuthorityNodeUUID).Limit(2).Find(&rows)
+			require.NoError(t, stmt.Error)
+			sql := strings.ToUpper(stmt.Statement.SQL.String())
+			if tc.needle == "" {
+				require.NotContains(t, sql, "FOR UPDATE")
+				require.NotContains(t, sql, "UPDLOCK")
+				return
+			}
+			require.Contains(t, sql, tc.needle)
+		})
+	}
+}
+
 func validNodeAuthorityRequest() playauth.OpenAPINodeAuthorization {
 	return playauth.OpenAPINodeAuthorization{NodeUUID: testAuthorityNodeUUID, BootNonce: testAuthorityBoot, Protocol: "https-flv"}
 }
@@ -187,6 +217,16 @@ func newNodeAuthorityDBWithoutRuntimeStatus(t *testing.T) *gorm.DB {
 	raw.SetMaxOpenConns(1)
 	t.Cleanup(func() { _ = raw.Close() })
 	require.NoError(t, db.Exec(nodeAuthorityTableWithoutRuntimeStatusSQL).Error)
+	return db
+}
+
+func dryRunNodeAuthorityDB(t *testing.T, dialector gorm.Dialector) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(dialector, &gorm.Config{DryRun: true, DisableAutomaticPing: true, Logger: logger.Default.LogMode(logger.Silent)})
+	require.NoError(t, err)
+	conn, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
 	return db
 }
 
