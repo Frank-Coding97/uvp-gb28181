@@ -62,7 +62,10 @@ func TestOpenAPIMediaLifecycle(t *testing.T) {
 	now := func() time.Time { return clock }
 	signer, err := playauth.NewSigner([]byte(strings.Repeat("m", 32)), playauth.WithNow(now))
 	require.NoError(t, err)
-	grantService, err := playauth.NewOpenAPIGrantService(db, signer, nativeGrantViewerNodeAuthority{}, now)
+	// NodeAuthority is the real SQL-only runtime identity check. It is not the
+	// future T18 topology/qualification provider; that proof remains the fake
+	// QualificationProvider below.
+	grantService, err := playauth.NewOpenAPIGrantService(db, signer, media.NewNodeAuthority(), now)
 	require.NoError(t, err)
 	quota := limit.NewQuota(db, now)
 	store := playauth.NewOpenAPIRevocationStore(db, now)
@@ -70,14 +73,14 @@ func TestOpenAPIMediaLifecycle(t *testing.T) {
 	bClient, err := insertNativeRevocationClient(db, "uvp_lifecycle_b", "lifecycle B", clock)
 	require.NoError(t, err)
 	extraClientIDs = append(extraClientIDs, bClient.ID)
-	uClient, err := insertNativeRevocationClient(db, "uvp_lifecycle_u", "lifecycle U", clock)
+	cClient, err := insertNativeRevocationClient(db, "uvp_lifecycle_c", "lifecycle C", clock)
 	require.NoError(t, err)
-	extraClientIDs = append(extraClientIDs, uClient.ID)
+	extraClientIDs = append(extraClientIDs, cClient.ID)
 
 	provider := &mediaLifecycleQualificationProvider{ticket: media.QualificationTicket{
-		QualificationID: "lifecycle-ticket-10m", NodeID: 1, NodeUUID: mediaLifecycleNode,
+		QualificationID: "lifecycle-ticket-10s", NodeID: 1, NodeUUID: mediaLifecycleNode,
 		NodeRevision: 1, BootNonce: mediaLifecycleBoot, Protocol: play.QualifiedProtocolHTTPSFLV,
-		MediaOrigin: "https://media.example:8443", ExpiresAt: clock.Add(10 * time.Minute),
+		MediaOrigin: "https://media.example:8443", ExpiresAt: clock.Add(10 * time.Second),
 	}}
 	player := &mediaLifecyclePlayer{result: &play.Result{
 		StreamID: mediaLifecycleStream, App: "rtp", Generation: 9,
@@ -86,18 +89,17 @@ func TestOpenAPIMediaLifecycle(t *testing.T) {
 	}}
 	live := media.NewLiveApplication(provider, player, grantService, true, media.WithLiveApplicationClock(now))
 
-	// The ten-minute qualification ticket deliberately exceeds the real
-	// two-minute v3 grant TTL, which is the current conservative upper bound.
+	// The qualification window is intentionally short; the fixed v3 grant TTL
+	// remains independently enforced by the real Signer/OpenAPIGrantService.
 	ticket, err := live.Preflight(ctx, mediaLifecycleDevice, mediaLifecycleChannel, play.QualifiedProtocolHTTPSFLV)
 	require.NoError(t, err)
-	require.Equal(t, 10*time.Minute, ticket.ExpiresAt.Sub(clock))
+	require.Equal(t, 10*time.Second, ticket.ExpiresAt.Sub(clock))
 
 	aNormal := applyLifecycleGrant(t, ctx, live, quota, fixture.client.ID, ticket)
 	bGrant := applyLifecycleGrant(t, ctx, live, quota, bClient.ID, ticket)
-	uGrant := applyLifecycleGrant(t, ctx, live, quota, uClient.ID, ticket)
+	cGrant := applyLifecycleGrant(t, ctx, live, quota, cClient.ID, ticket)
 	require.NotEqual(t, aNormal.token, bGrant.token)
-	require.NotEqual(t, bGrant.token, uGrant.token)
-	require.LessOrEqual(t, aNormal.expiresAt, ticket.ExpiresAt)
+	require.NotEqual(t, bGrant.token, cGrant.token)
 	require.Equal(t, playauth.OpenAPIPlayTTL, aNormal.expiresAt.Sub(clock.Truncate(time.Second)))
 
 	previousConfig := app.ConfigYml
@@ -121,10 +123,10 @@ func TestOpenAPIMediaLifecycle(t *testing.T) {
 
 	bindLifecycleViewer(t, playEngine, playPath, "1-1", aNormal.token)
 	bindLifecycleViewer(t, playEngine, playPath, "1-2", bGrant.token)
-	bindLifecycleViewer(t, playEngine, playPath, "1-3", uGrant.token)
+	bindLifecycleViewer(t, playEngine, playPath, "1-3", cGrant.token)
 	require.Equal(t, int64(1), occupiedLifecycle(t, quota, fixture.client.ID))
 	require.Equal(t, int64(1), occupiedLifecycle(t, quota, bClient.ID))
-	require.Equal(t, int64(1), occupiedLifecycle(t, quota, uClient.ID))
+	require.Equal(t, int64(1), occupiedLifecycle(t, quota, cClient.ID))
 
 	// A's first session exits normally through the authenticated flow Hook.
 	hook.SetOpenAPIFlowObserver(grantService)
@@ -135,8 +137,7 @@ func TestOpenAPIMediaLifecycle(t *testing.T) {
 	require.Equal(t, models.ViewerStateClosed, lifecycleViewerState(t, db, aNormal.grantID))
 	require.Zero(t, occupiedLifecycle(t, quota, fixture.client.ID), "normal flow releases A's bound quota")
 	require.Equal(t, models.ViewerStateActive, lifecycleViewerState(t, db, bGrant.grantID))
-	require.Equal(t, models.ViewerStateActive, lifecycleViewerState(t, db, uGrant.grantID))
-	require.Zero(t, player.stopCalls, "the live application exposes no Stop path to this flow")
+	require.Equal(t, models.ViewerStateActive, lifecycleViewerState(t, db, cGrant.grantID))
 
 	// A obtains a second independent grant for the revoke/worker half. This
 	// keeps the normal-flow and revoke-flow assertions independently durable.
@@ -182,26 +183,28 @@ func TestOpenAPIMediaLifecycle(t *testing.T) {
 	require.Equal(t, models.ViewerStateRevokePending, lifecycleViewerState(t, db, aRevoke.grantID))
 	require.Equal(t, media.RevocationErrorShutdownScheduled, lifecycleViewerError(t, db, aRevoke.grantID))
 	require.Equal(t, []string{"1-4"}, control.kickCalls)
-	require.Zero(t, player.stopCalls, "revocation control has no Stop operation")
 
 	// The worker obtains a fresh player and session snapshot after the lease;
-	// only exact-A absence closes A. B/U remain active and are never kicked.
-	control.setEmptySnapshots()
+	// only exact-A absence closes A. B/C remain in the runtime snapshots and
+	// are never kicked.
+	control.setTargetAbsent("1-4")
+	players, sessions := control.snapshotIdentifiers()
+	require.Equal(t, []string{"1-2", "1-3"}, players)
+	require.Equal(t, []string{"1-2", "1-3"}, sessions)
 	clock = clock.Add(7 * time.Second)
 	secondTick, err := worker.Tick(ctx)
 	require.NoError(t, err)
 	require.Equal(t, 1, secondTick.Closed)
 	require.Equal(t, models.ViewerStateClosed, lifecycleViewerState(t, db, aRevoke.grantID))
 	require.Equal(t, media.RevocationErrorKicked, lifecycleViewerError(t, db, aRevoke.grantID))
-	require.Equal(t, []string{"1-4"}, control.kickCalls, "B/U and unrelated stream identifiers are untouched")
+	require.Equal(t, []string{"1-4"}, control.kickCalls, "B/C and unrelated stream identifiers are untouched")
 	require.Equal(t, 2, control.playerCalls, "worker used a fresh player snapshot for both phases")
 	require.Equal(t, 2, control.sessionCalls, "worker used a fresh session snapshot for both phases")
-	require.Zero(t, player.stopCalls, "bottom stream has no Stop side effect")
 	require.Zero(t, occupiedLifecycle(t, quota, fixture.client.ID))
 	require.Equal(t, models.ViewerStateActive, lifecycleViewerState(t, db, bGrant.grantID))
-	require.Equal(t, models.ViewerStateActive, lifecycleViewerState(t, db, uGrant.grantID))
+	require.Equal(t, models.ViewerStateActive, lifecycleViewerState(t, db, cGrant.grantID))
 
-	t.Log("internal composition fixture: 10m qualification ticket covered the real 120s grant; A normal flow released quota, late revoked flow stayed pending, exact-A fresh kick/absence closed A, and B/U/bottom stream had no Stop")
+	t.Log("internal composition fixture: 10s qualification window remained independent from the real 120s grant; A normal flow released quota, late revoked flow stayed pending, exact-A fresh kick/absence closed A, and B/C remained in snapshots")
 }
 
 type mediaLifecycleQualificationProvider struct{ ticket media.QualificationTicket }
@@ -215,9 +218,10 @@ func (p *mediaLifecycleQualificationProvider) Validate(context.Context, media.Qu
 }
 
 type mediaLifecyclePlayer struct {
-	result    *play.Result
-	ensureN   int
-	stopCalls int
+	// LivePlayer deliberately exposes only EnsureLive. This composition test
+	// therefore has no Stop capability to exercise or accidentally wire.
+	result  *play.Result
+	ensureN int
 }
 
 func (p *mediaLifecyclePlayer) EnsureLive(context.Context, play.Request) (*play.Result, error) {
@@ -331,11 +335,43 @@ func (c *mediaLifecycleRevocationControl) KickSessionIfMatch(_ context.Context, 
 	return zlm.KickShutdownScheduled, nil
 }
 
-func (c *mediaLifecycleRevocationControl) setEmptySnapshots() {
+func (c *mediaLifecycleRevocationControl) setTargetAbsent(identifier string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.players = []zlm.MediaPlayer{}
-	c.sessions = []zlm.Session{}
+	originalPlayers := append([]zlm.MediaPlayer(nil), c.players...)
+	players := make([]zlm.MediaPlayer, 0, len(originalPlayers))
+	for _, player := range originalPlayers {
+		if player.Identifier != identifier {
+			players = append(players, player)
+		}
+	}
+	c.players = players
+	originalSessions := append([]zlm.Session(nil), c.sessions...)
+	sessions := make([]zlm.Session, 0, len(originalSessions))
+	for _, session := range originalSessions {
+		if session.Identifier != identifier && session.ID != identifier {
+			sessions = append(sessions, session)
+		}
+	}
+	c.sessions = sessions
+}
+
+func (c *mediaLifecycleRevocationControl) snapshotIdentifiers() ([]string, []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	players := make([]string, 0, len(c.players))
+	for _, player := range c.players {
+		players = append(players, player.Identifier)
+	}
+	sessions := make([]string, 0, len(c.sessions))
+	for _, session := range c.sessions {
+		identifier := session.Identifier
+		if identifier == "" {
+			identifier = session.ID
+		}
+		sessions = append(sessions, identifier)
+	}
+	return players, sessions
 }
 
 type mediaLifecycleGrant struct {
@@ -419,7 +455,7 @@ func openMediaLifecycleDB(t *testing.T) *gorm.DB {
 		status INTEGER, owner_dept_id INTEGER NOT NULL DEFAULT 0, access_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL)`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE meta_node (
 		id INTEGER PRIMARY KEY, fixture_label TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
-		media_server_uuid TEXT NOT NULL DEFAULT '', current_boot_nonce TEXT, retired_boot_history TEXT,
+		state TEXT NOT NULL DEFAULT 'active', media_server_uuid TEXT NOT NULL DEFAULT '', current_boot_nonce TEXT, retired_boot_history TEXT,
 		runtime_epoch INTEGER NOT NULL DEFAULT 0, runtime_protocol_version INTEGER NOT NULL DEFAULT 0,
 		runtime_confirmed_revision INTEGER NOT NULL DEFAULT 0, runtime_confirmed_at DATETIME NULL,
 		runtime_identity_status TEXT NOT NULL DEFAULT 'unknown')`).Error)
