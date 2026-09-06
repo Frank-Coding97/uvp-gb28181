@@ -4,10 +4,8 @@ import (
 	"context"
 	"time"
 
-	"go.uber.org/zap"
-
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
-	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 // ThreadLoadFetcher 从 ZLM 拉 NetThread / WorkThread 负载(0-1)
@@ -48,15 +46,20 @@ func (p *ThreadLoadPoller) fetchOne(ctx context.Context, n *node.Node) {
 	defer cancel()
 
 	netLoad, errNet := p.fetcher.GetThreadsLoad(fetchCtx, n)
+	netKey := logging.RepeatKey{Component: "zlm", Event: threadLoadNetFailedEvent, NodeID: n.ID}
+	if errNet != nil {
+		repeatFailure(fetchCtx, netKey, errNet)
+	} else {
+		repeatRecovered(netKey)
+	}
 	workLoad, errWork := p.fetcher.GetWorkThreadsLoad(fetchCtx, n)
+	workKey := logging.RepeatKey{Component: "zlm", Event: threadLoadWorkFailedEvent, NodeID: n.ID}
+	if errWork != nil {
+		repeatFailure(fetchCtx, workKey, errWork)
+	} else {
+		repeatRecovered(workKey)
+	}
 	if errNet != nil || errWork != nil {
-		if app.ZapLog != nil {
-			app.ZapLog.Debug("GB28181 ZLM 拉线程负载失败(可能 ZLM 不可达)",
-				zap.Int64("nodeId", n.ID),
-				zap.String("uuid", n.MediaServerUUID),
-				zap.NamedError("netErr", errNet),
-				zap.NamedError("workErr", errWork))
-		}
 		return
 	}
 	// 锁内字段级更新:与 Collector 的心跳字段互不覆盖
