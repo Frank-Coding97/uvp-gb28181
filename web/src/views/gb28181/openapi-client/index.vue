@@ -45,6 +45,7 @@ const ownerDepartments = ref<OpenAPIManagedDepartment[]>([]);
 const capabilities = ref<string[]>([]);
 const loading = ref(false);
 const capabilitiesLoading = ref(false);
+const capabilitiesReady = ref(false);
 const error = ref("");
 const capabilitiesError = ref("");
 const form = reactive({ ownerDeptId: undefined as number | undefined });
@@ -57,6 +58,9 @@ const drawerLoading = ref(false);
 const drawerError = ref("");
 const currentClient = ref<OpenAPIClientView | null>(null);
 const currentScopes = ref<OpenAPIScopeView[]>([]);
+const detailReady = ref(false);
+const detailClientId = ref<number | null>(null);
+const detailRowVersion = ref<number | null>(null);
 const revocationStatus = ref<OpenAPIRevocationStatus | null>(null);
 const revocationError = ref("");
 const revocationLoading = ref(false);
@@ -67,8 +71,33 @@ const secretPayload = ref<{ accessKey: string; secretKey: string } | null>(null)
 const secretOperation = ref<"create" | "rotate">("create");
 const secretVisible = computed(() => secretPayload.value !== null);
 const authStatus = computed(() => currentClient.value?.status || null);
+const canSaveScopes = computed(
+  () =>
+    canGrant.value &&
+    !drawerLoading.value &&
+    capabilitiesReady.value &&
+    detailReady.value &&
+    !!currentClient.value &&
+    currentClient.value.id === detailClientId.value &&
+    currentClient.value.rowVersion === detailRowVersion.value
+);
 
 let requestVersion = 0;
+let lifecycleGeneration = 0;
+let mounted = true;
+
+function nextGeneration() {
+  lifecycleGeneration += 1;
+  return lifecycleGeneration;
+}
+
+function isCurrentGeneration(generation: number) {
+  return mounted && generation === lifecycleGeneration;
+}
+
+function isCurrentClient(generation: number, id: number) {
+  return isCurrentGeneration(generation) && currentClient.value?.id === id;
+}
 
 function buildParams(): OpenAPIClientListParams {
   const params: OpenAPIClientListParams = { page: pagination.current, pageSize: pagination.pageSize };
@@ -115,17 +144,22 @@ function statusColor(status: OpenAPIClientStatus) {
 async function loadCapabilities() {
   if (!canRead.value) return;
   capabilitiesLoading.value = true;
+  capabilitiesReady.value = false;
   capabilitiesError.value = "";
   try {
     const result = await getOpenAPIClientCapabilities();
+    if (!mounted) return;
     const failure = responseError(result, "能力目录加载失败");
     if (failure) throw failure;
     capabilities.value = Array.isArray(result.data) ? result.data : [];
+    capabilitiesReady.value = true;
   } catch (cause: unknown) {
+    if (!mounted) return;
     capabilities.value = [];
+    capabilitiesReady.value = false;
     capabilitiesError.value = errorMessage(cause, "能力目录加载失败");
   } finally {
-    capabilitiesLoading.value = false;
+    if (mounted) capabilitiesLoading.value = false;
   }
 }
 
@@ -184,123 +218,164 @@ function updateListClient(updated: OpenAPIClientView) {
   if (index >= 0) clients.value.splice(index, 1, updated);
 }
 
-async function loadRevocationStatus(id = currentClient.value?.id) {
-  if (!canStatus.value || !id) return;
+async function loadRevocationStatus(id = currentClient.value?.id, generation = lifecycleGeneration) {
+  if (!canStatus.value || !id || !isCurrentClient(generation, id)) return;
   revocationLoading.value = true;
   revocationError.value = "";
   try {
     const result = await getOpenAPIClientRevocationStatus(id);
+    if (!isCurrentClient(generation, id)) return;
     const failure = responseError(result, "撤销清退进度暂不可用");
     if (failure) throw failure;
     revocationStatus.value = result.data;
   } catch (cause: unknown) {
+    if (!isCurrentClient(generation, id)) return;
     revocationStatus.value = null;
     revocationError.value = `撤销清退进度暂不可用：${errorMessage(cause, "服务未就绪")}`;
   } finally {
-    revocationLoading.value = false;
+    if (isCurrentClient(generation, id)) revocationLoading.value = false;
   }
 }
 
-async function refreshDetail(id: number) {
+async function refreshDetail(id: number, generation = lifecycleGeneration) {
+  if (!isCurrentClient(generation, id)) return false;
+  detailReady.value = false;
+  detailClientId.value = null;
+  detailRowVersion.value = null;
   drawerLoading.value = true;
   try {
     const result = await getOpenAPIClient(id);
+    if (!isCurrentClient(generation, id)) return false;
     const failure = responseError(result, "客户端详情加载失败");
-    if (failure) throw failure;
+    if (failure || !result.data?.client || !Array.isArray(result.data.scopes)) throw failure || new Error("客户端详情响应不完整");
     currentClient.value = result.data.client;
     currentScopes.value = result.data.scopes || [];
+    detailClientId.value = result.data.client.id;
+    detailRowVersion.value = result.data.client.rowVersion;
+    detailReady.value = true;
     updateListClient(result.data.client);
-    await loadRevocationStatus(id);
+    await loadRevocationStatus(id, generation);
+    return true;
   } finally {
-    drawerLoading.value = false;
+    if (isCurrentClient(generation, id)) drawerLoading.value = false;
   }
 }
 
 async function openDetail(record: OpenAPIClientView) {
   if (!canRead.value || drawerLoading.value) return;
+  const generation = nextGeneration();
   drawerMode.value = "detail";
   currentClient.value = record;
   currentScopes.value = [];
+  detailReady.value = false;
+  detailClientId.value = null;
+  detailRowVersion.value = null;
   revocationStatus.value = null;
   revocationError.value = "";
   auditItems.value = [];
   drawerError.value = "";
   drawerVisible.value = true;
   try {
-    await refreshDetail(record.id);
+    await refreshDetail(record.id, generation);
   } catch (cause: unknown) {
-    drawerError.value = errorMessage(cause, "客户端详情加载失败");
+    if (isCurrentClient(generation, record.id)) drawerError.value = errorMessage(cause, "客户端详情加载失败");
   }
 }
 
 function openCreate() {
   if (!canCreate.value) return;
+  nextGeneration();
   drawerMode.value = "create";
   currentClient.value = null;
   currentScopes.value = [];
+  detailReady.value = false;
+  detailClientId.value = null;
+  detailRowVersion.value = null;
   drawerError.value = "";
   drawerVisible.value = true;
 }
 
 function closeDrawer() {
+  nextGeneration();
   drawerVisible.value = false;
+  drawerLoading.value = false;
+  auditLoading.value = false;
+  revocationLoading.value = false;
   drawerError.value = "";
   currentClient.value = null;
   currentScopes.value = [];
+  detailReady.value = false;
+  detailClientId.value = null;
+  detailRowVersion.value = null;
   revocationStatus.value = null;
   revocationError.value = "";
   auditItems.value = [];
 }
 
 async function performCreate(input: OpenAPIClientCreateInput) {
-  if (!canCreate.value || drawerLoading.value) return;
+  if (!mounted || !canCreate.value || drawerLoading.value) return;
+  const generation = lifecycleGeneration;
   drawerLoading.value = true;
   drawerError.value = "";
   try {
     const result = await createOpenAPIClient(input);
+    if (!isCurrentGeneration(generation)) return;
     const failure = responseError(result, "创建 OpenAPI 客户端失败");
     if (failure || !result.data?.client || !result.data.secretKey) throw failure || new Error("创建响应缺少一次性 SK");
     secretOperation.value = "create";
     secretPayload.value = { accessKey: result.data.client.ak, secretKey: result.data.secretKey };
+    drawerLoading.value = false;
     closeDrawer();
     Message.success("客户端创建成功，请安全保存一次性 SK");
     await load();
   } catch (cause: unknown) {
-    drawerError.value = errorMessage(cause, "创建 OpenAPI 客户端失败");
+    if (isCurrentGeneration(generation)) drawerError.value = errorMessage(cause, "创建 OpenAPI 客户端失败");
   } finally {
-    drawerLoading.value = false;
+    if (isCurrentGeneration(generation)) drawerLoading.value = false;
   }
 }
 
 async function saveScopes(id: number, scopes: string[], rowVersion: number) {
-  if (!canGrant.value || drawerLoading.value) return;
+  if (
+    !mounted ||
+    !canSaveScopes.value ||
+    !currentClient.value ||
+    currentClient.value.id !== id ||
+    currentClient.value.rowVersion !== rowVersion
+  ) return;
+  const generation = lifecycleGeneration;
   drawerLoading.value = true;
   drawerError.value = "";
   try {
     const result = await updateOpenAPIClientScopes(id, { rowVersion, scopes });
+    if (!isCurrentClient(generation, id)) return;
     const failure = responseError(result, "保存客户端能力失败");
     if (failure) throw failure;
     if (result.data) updateListClient(result.data);
-    await refreshDetail(id);
+    await refreshDetail(id, generation);
+    if (!isCurrentClient(generation, id)) return;
     Message.success("客户端能力已更新");
   } catch (cause: unknown) {
+    if (!isCurrentClient(generation, id)) return;
     if (httpStatus(cause) === 409) {
       drawerError.value = conflictMessage(rowVersion);
-      try { await refreshDetail(id); } catch { /* keep the explicit conflict message */ }
+      try { await refreshDetail(id, generation); } catch { /* keep the explicit conflict message */ }
     } else {
       drawerError.value = errorMessage(cause, "保存客户端能力失败");
     }
   } finally {
-    drawerLoading.value = false;
+    if (isCurrentClient(generation, id)) drawerLoading.value = false;
   }
 }
 
 async function performRotate(record: OpenAPIClientView = currentClient.value as OpenAPIClientView) {
-  if (!canRotate.value || !record || drawerLoading.value) return;
+  if (!mounted || !canRotate.value || !record || drawerLoading.value) return;
+  const generation = lifecycleGeneration;
   drawerLoading.value = true;
   drawerError.value = "";
   try {
     const result = await rotateOpenAPIClientSecret(record.id, record.rowVersion);
+    if (!isCurrentGeneration(generation)) return;
     const failure = responseError(result, "轮换 SK 失败");
     if (failure || !result.data?.client || !result.data.secretKey) throw failure || new Error("轮换响应缺少一次性 SK");
     secretOperation.value = "rotate";
@@ -309,24 +384,27 @@ async function performRotate(record: OpenAPIClientView = currentClient.value as 
     updateListClient(result.data.client);
     Message.success("SK 已轮换，请安全保存新的密钥");
   } catch (cause: unknown) {
+    if (!isCurrentGeneration(generation)) return;
     if (httpStatus(cause) === 409) {
       drawerError.value = conflictMessage(record.rowVersion);
-      try { await refreshDetail(record.id); } catch { /* keep the explicit conflict message */ }
+      try { await refreshDetail(record.id, generation); } catch { /* keep the explicit conflict message */ }
     } else {
       drawerError.value = errorMessage(cause, "轮换 SK 失败");
     }
   } finally {
-    drawerLoading.value = false;
+    if (isCurrentGeneration(generation)) drawerLoading.value = false;
   }
 }
 
 async function performStatus(action: StatusAction, record: OpenAPIClientView = currentClient.value as OpenAPIClientView) {
-  if (!canStatus.value || !record || drawerLoading.value) return;
+  if (!mounted || !canStatus.value || !record || drawerLoading.value) return;
+  const generation = lifecycleGeneration;
   drawerLoading.value = true;
   drawerError.value = "";
   try {
     const request = action === "enable" ? enableOpenAPIClient : action === "disable" ? disableOpenAPIClient : revokeOpenAPIClient;
     const result = await request(record.id, record.rowVersion);
+    if (!isCurrentGeneration(generation)) return;
     const failure = responseError(result, `${action === "enable" ? "启用" : action === "disable" ? "停用" : "撤销"}客户端失败`);
     if (failure || !result.data?.client) throw failure || new Error("状态变更响应缺少客户端");
     currentClient.value = result.data.client;
@@ -334,23 +412,37 @@ async function performStatus(action: StatusAction, record: OpenAPIClientView = c
     if (action !== "enable") {
       revocationStatus.value = { status: result.data.revocationStatus || "pending", pending: 0, closed: 0 };
       revocationError.value = "";
-      await loadRevocationStatus(record.id);
+      await loadRevocationStatus(record.id, generation);
     } else {
       revocationStatus.value = null;
       revocationError.value = "";
     }
+    if (!isCurrentGeneration(generation)) return;
     Message.success(action === "enable" ? "客户端已启用" : action === "disable" ? "客户端认证已停用，清退进度另行确认" : "客户端已撤销，清退进度另行确认");
     if (action !== "enable") drawerVisible.value = true;
   } catch (cause: unknown) {
+    if (!isCurrentGeneration(generation)) return;
     if (httpStatus(cause) === 409) {
       drawerError.value = conflictMessage(record.rowVersion);
-      try { await refreshDetail(record.id); } catch { /* keep the explicit conflict message */ }
+      try { await refreshDetail(record.id, generation); } catch { /* keep the explicit conflict message */ }
     } else {
       drawerError.value = errorMessage(cause, "客户端状态变更失败");
     }
   } finally {
-    drawerLoading.value = false;
+    if (isCurrentGeneration(generation)) drawerLoading.value = false;
   }
+}
+
+function requestRotate(record: OpenAPIClientView) {
+  if (!mounted || !canRotate.value || drawerLoading.value) return;
+  Modal.confirm({
+    title: "轮换 OpenAPI 客户端 SK",
+    content: "轮换会立即使旧 SK 失效，新的 SK 只展示一次。确认继续吗？",
+    okText: "确认轮换 SK",
+    cancelText: "取消",
+    okButtonProps: { status: "warning" },
+    onOk: () => performRotate(record)
+  });
 }
 
 function requestStatus(action: StatusAction, record: OpenAPIClientView) {
@@ -371,21 +463,24 @@ function requestStatus(action: StatusAction, record: OpenAPIClientView) {
 }
 
 async function refreshRevocation() {
-  await loadRevocationStatus();
+  await loadRevocationStatus(currentClient.value?.id, lifecycleGeneration);
 }
 
 async function loadAudits() {
   if (!canAudit.value || !currentClient.value) return;
+  const generation = lifecycleGeneration;
+  const clientId = currentClient.value.id;
   auditLoading.value = true;
   try {
-    const result = await listOpenAPIClientAudits(currentClient.value.id);
+    const result = await listOpenAPIClientAudits(clientId);
+    if (!isCurrentClient(generation, clientId)) return;
     const failure = responseError(result, "审计加载失败");
     if (failure) throw failure;
     auditItems.value = result.data?.items || [];
   } catch (cause: unknown) {
-    drawerError.value = errorMessage(cause, "审计加载失败");
+    if (isCurrentClient(generation, clientId)) drawerError.value = errorMessage(cause, "审计加载失败");
   } finally {
-    auditLoading.value = false;
+    if (isCurrentClient(generation, clientId)) auditLoading.value = false;
   }
 }
 
@@ -395,6 +490,7 @@ function closeSecret() {
 }
 
 onMounted(() => {
+  mounted = true;
   if (canRead.value) {
     void load();
     void loadCapabilities();
@@ -402,6 +498,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  mounted = false;
+  nextGeneration();
   requestVersion += 1;
   secretPayload.value = null;
 });
@@ -410,10 +508,18 @@ defineExpose({
   clients,
   ownerDepartments,
   capabilities,
+  capabilitiesReady,
   form,
   pagination,
   error,
   drawerError,
+  currentClient,
+  currentScopes,
+  detailReady,
+  detailClientId,
+  detailRowVersion,
+  canSaveScopes,
+  auditItems,
   authStatus,
   revocationStatus,
   revocationError,
@@ -428,6 +534,7 @@ defineExpose({
   closeDrawer,
   performCreate,
   saveScopes,
+  requestRotate,
   performRotate,
   performStatus,
   refreshRevocation,
@@ -458,7 +565,7 @@ defineExpose({
                 <template #icon><RefreshCw :size="16" /></template>刷新
               </a-button>
             </a-tooltip>
-            <a-button v-if="canCreate" type="primary" @click="openCreate"><template #icon><Plus :size="16" /></template>新建客户端</a-button>
+            <a-button v-if="canCreate" type="text" class="uvp-table-action uvp-table-action--add" @click="openCreate"><template #icon><Plus :size="16" /></template>新建客户端</a-button>
           </template>
         </s-layout-search>
 
@@ -506,7 +613,7 @@ defineExpose({
               <div class="openapi-client-table__actions">
                 <a-button v-if="canRead" type="text" class="uvp-table-action" @click="openDetail(record)"><template #icon><Eye :size="15" /></template>详情</a-button>
                 <a-button v-if="canGrant" type="text" class="uvp-table-action uvp-table-action--permission" @click="openDetail(record)"><template #icon><ShieldCheck :size="15" /></template>能力</a-button>
-                <a-button v-if="canRotate && record.status !== 'revoked'" type="text" class="uvp-table-action" @click="performRotate(record)"><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button>
+                <a-button v-if="canRotate && record.status !== 'revoked'" type="text" class="uvp-table-action" @click="requestRotate(record)"><template #icon><KeyRound :size="15" /></template>轮换 SK</a-button>
                 <a-button v-if="canStatus && record.status === 'active'" type="text" status="warning" @click="requestStatus('disable', record)"><template #icon><ShieldOff :size="15" /></template>停用</a-button>
                 <a-button v-if="canStatus && record.status === 'disabled'" type="text" @click="requestStatus('enable', record)"><template #icon><ShieldCheck :size="15" /></template>启用</a-button>
                 <a-button v-if="canStatus && record.status !== 'revoked'" type="text" status="danger" @click="requestStatus('revoke', record)"><template #icon><Ban :size="15" /></template>撤销</a-button>
@@ -525,6 +632,10 @@ defineExpose({
       :client="currentClient"
       :scopes="currentScopes"
       :capabilities="capabilities"
+      :capabilities-ready="capabilitiesReady"
+      :detail-ready="detailReady"
+      :detail-client-id="detailClientId"
+      :detail-row-version="detailRowVersion"
       :departments="ownerDepartments"
       :submitting="drawerLoading"
       :error="drawerError"
@@ -613,6 +724,15 @@ defineExpose({
   display: flex;
   flex-wrap: wrap;
   gap: 2px 4px;
+}
+
+.openapi-client-page :deep(.uvp-table-action--add) {
+  color: #246b55;
+}
+
+.openapi-client-page :deep(.uvp-table-action--add:hover) {
+  color: #14704d;
+  background: rgb(20 128 74 / 8%);
 }
 
 .openapi-client-table :deep(.arco-btn) {

@@ -15,6 +15,10 @@ const props = defineProps<{
   client: OpenAPIClientView | null;
   scopes: OpenAPIScopeView[];
   capabilities: string[];
+  capabilitiesReady: boolean;
+  detailReady: boolean;
+  detailClientId: number | null;
+  detailRowVersion: number | null;
   departments: OpenAPIManagedDepartment[];
   submitting: boolean;
   error: string;
@@ -43,8 +47,25 @@ const touched = reactive({ name: false, ownerDeptId: false });
 const title = computed(() => (props.mode === "create" ? "新建 OpenAPI 客户端" : "OpenAPI 客户端详情"));
 const canSubmit = computed(() => {
   if (props.mode === "create") return form.name.trim().length > 0 && form.ownerDeptId > 0 && !props.submitting;
-  return props.canGrant && !!props.client && !props.submitting;
+  return (
+    props.canGrant &&
+    !!props.client &&
+    props.capabilitiesReady &&
+    props.detailReady &&
+    props.client.id === props.detailClientId &&
+    props.client.rowVersion === props.detailRowVersion &&
+    !props.submitting
+  );
 });
+
+const detailBindingReady = computed(
+  () =>
+    props.capabilitiesReady &&
+    props.detailReady &&
+    !!props.client &&
+    props.client.id === props.detailClientId &&
+    props.client.rowVersion === props.detailRowVersion
+);
 
 const scopeLabels: Record<string, string> = {
   "device:list": "设备列表",
@@ -143,10 +164,14 @@ defineExpose({ form, selectedScopes, resetForm, submit, canSubmit });
       </a-descriptions>
       <a-divider>已授权能力</a-divider>
       <p class="openapi-client-drawer__scope-note">能力授权与后台按钮权限独立；这里只提交外部 API scope。</p>
-      <a-checkbox-group v-model="selectedScopes" :disabled="!props.canGrant || props.submitting" class="openapi-client-drawer__scopes">
+      <a-alert v-if="props.canGrant && !detailBindingReady" type="warning" class="openapi-client-drawer__warning" role="alert">
+        详情、能力目录或 rowVersion 尚未确认，暂不能保存能力配置。
+      </a-alert>
+      <a-checkbox-group v-model="selectedScopes" :disabled="!props.canGrant || !canSubmit || props.submitting" class="openapi-client-drawer__scopes">
         <a-checkbox v-for="scope in props.capabilities" :key="scope" :value="scope">{{ scopeLabel(scope) }}（{{ scope }}）</a-checkbox>
       </a-checkbox-group>
-      <a-empty v-if="!props.capabilities.length" description="能力目录暂不可用" />
+      <a-empty v-if="!props.capabilitiesReady" description="能力目录暂不可用" />
+      <a-empty v-else-if="!props.capabilities.length" description="当前暂无可授权能力" />
 
       <a-divider>观看连接清退</a-divider>
       <div class="openapi-client-drawer__revocation">

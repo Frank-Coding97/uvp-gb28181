@@ -1,6 +1,8 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { Message, Modal } from "@arco-design/web-vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import OpenAPIClientPage from "./index.vue";
+import OpenAPIClientDrawer from "./OpenAPIClientDrawer.vue";
 
 const userStore = vi.hoisted(() => ({ account: { permissions: [] as string[] } }));
 const api = vi.hoisted(() => ({
@@ -95,6 +97,63 @@ function mountPage() {
   });
 }
 
+function mountDrawer(overrides: Record<string, unknown> = {}) {
+  return mount(OpenAPIClientDrawer, {
+    props: {
+      visible: true,
+      mode: "detail",
+      client,
+      scopes: [{ clientId: client.id, scope: "device:list", enabled: true, scopeEpoch: 1, updatedBy: 7, updatedAt: client.updatedAt }],
+      capabilities: ["device:list"],
+      departments: [{ id: 10, name: "平台运维部" }],
+      submitting: false,
+      error: "",
+      canGrant: true,
+      canStatus: true,
+      canAudit: true,
+      revocationStatus: null,
+      revocationError: "",
+      revocationLoading: false,
+      auditItems: [],
+      auditLoading: false,
+      capabilitiesReady: true,
+      detailReady: true,
+      detailClientId: client.id,
+      detailRowVersion: client.rowVersion,
+      ...overrides
+    } as any,
+    global: {
+      stubs: {
+        "a-drawer": { template: "<div v-if='visible'><slot /><slot name='footer' /></div>", props: ["visible"] },
+        "a-form": { template: "<form><slot /></form>" },
+        "a-form-item": { template: "<label><slot /></label>" },
+        "a-input": { template: "<input />" },
+        "a-select": { template: "<select><slot /></select>" },
+        "a-option": { template: "<option><slot /></option>" },
+        "a-button": { template: "<button :disabled='disabled'><slot /></button>", props: ["disabled"] },
+        "a-alert": { template: "<div role='alert'><slot /></div>" },
+        "a-descriptions": { template: "<div><slot /></div>" },
+        "a-descriptions-item": { template: "<div><slot /></div>" },
+        "a-divider": { template: "<hr />" },
+        "a-tag": { template: "<span><slot /></span>" },
+        "a-checkbox-group": { template: "<div><slot /></div>" },
+        "a-checkbox": { template: "<label><slot /></label>", props: ["value"] },
+        "a-empty": { template: "<span>{{ description }}</span>", props: ["description"] }
+      }
+    }
+  });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("OpenAPI client page", () => {
   beforeEach(() => {
     userStore.account.permissions = ["*:*:*"];
@@ -144,6 +203,8 @@ describe("OpenAPI client page", () => {
     api.scopes.mockRejectedValueOnce(conflict);
     const wrapper = mountPage();
     await flushPromises();
+    await (wrapper.vm as any).openDetail(client);
+    await flushPromises();
     await (wrapper.vm as any).saveScopes(client.id, ["device:list"], client.rowVersion);
     await flushPromises();
     expect(api.get).toHaveBeenCalledWith(client.id);
@@ -163,5 +224,167 @@ describe("OpenAPI client page", () => {
     expect((wrapper.vm as any).revocationError).toContain("撤销清退进度暂不可用");
     expect((wrapper.vm as any).authStatus).toBe("active");
     expect((wrapper.vm as any).revocationStatus).toBeNull();
+  });
+
+  it("does not PUT scopes when the capability catalog is unavailable", async () => {
+    userStore.account.permissions = ["gb28181:openapi:client:read", "gb28181:openapi:client:grant"];
+    api.capabilities.mockRejectedValueOnce(Object.assign(new Error("能力目录不可用"), { response: { status: 503 } }));
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).openDetail(client);
+    await flushPromises();
+    await (wrapper.vm as any).saveScopes(client.id, ["device:list"], client.rowVersion);
+    expect((wrapper.vm as any).capabilitiesReady).toBe(false);
+    expect((wrapper.vm as any).detailReady).toBe(true);
+    expect(api.scopes).not.toHaveBeenCalled();
+  });
+
+  it("does not PUT scopes when the current detail failed to load", async () => {
+    userStore.account.permissions = ["gb28181:openapi:client:read", "gb28181:openapi:client:grant"];
+    api.get.mockRejectedValueOnce(Object.assign(new Error("详情不可用"), { response: { status: 503 } }));
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).openDetail(client);
+    await flushPromises();
+    await (wrapper.vm as any).saveScopes(client.id, ["device:list"], client.rowVersion);
+    expect((wrapper.vm as any).detailReady).toBe(false);
+    expect(api.scopes).not.toHaveBeenCalled();
+  });
+
+  it("ignores a late create response after the drawer is closed", async () => {
+    const pending = deferred<ReturnType<typeof ok>>();
+    api.create.mockReturnValueOnce(pending.promise);
+    const success = vi.spyOn(Message, "success").mockImplementation(() => undefined as any);
+    const wrapper = mountPage();
+    await flushPromises();
+    const createTask = (wrapper.vm as any).performCreate({ name: "新客户端", ownerDeptId: 10 });
+    await flushPromises();
+    await (wrapper.vm as any).closeDrawer();
+    pending.resolve(ok({ client, secretKey: "late-secret" }));
+    await createTask;
+    await flushPromises();
+    expect((wrapper.vm as any).secretPayload).toBeNull();
+    expect(success).not.toHaveBeenCalled();
+    success.mockRestore();
+  });
+
+  it("ignores a late rotate response after unmount and does not show SK", async () => {
+    const pending = deferred<ReturnType<typeof ok>>();
+    api.rotate.mockReturnValueOnce(pending.promise);
+    const success = vi.spyOn(Message, "success").mockImplementation(() => undefined as any);
+    const wrapper = mountPage();
+    await flushPromises();
+    const rotateTask = (wrapper.vm as any).performRotate(client);
+    await flushPromises();
+    wrapper.unmount();
+    pending.resolve(ok({ client, secretKey: "late-rotate-secret" }));
+    await rotateTask;
+    await flushPromises();
+    expect((wrapper.vm as any).secretPayload).toBeNull();
+    expect(success).not.toHaveBeenCalled();
+    success.mockRestore();
+  });
+
+  it("keeps the latest detail when an older detail response arrives late", async () => {
+    const first = deferred<ReturnType<typeof ok>>();
+    const second = deferred<ReturnType<typeof ok>>();
+    const secondClient = { ...client, id: 8, name: "第二客户端", rowVersion: 4 };
+    api.get.mockImplementation((id: number) => (id === client.id ? first.promise : second.promise));
+    const wrapper = mountPage();
+    await flushPromises();
+    const firstTask = (wrapper.vm as any).openDetail(client);
+    await flushPromises();
+    await (wrapper.vm as any).closeDrawer();
+    const secondTask = (wrapper.vm as any).openDetail(secondClient);
+    await flushPromises();
+    second.resolve(ok({ client: secondClient, scopes: [] }));
+    await secondTask;
+    first.resolve(ok({ client, scopes: [{ clientId: client.id, scope: "device:list", enabled: true, scopeEpoch: 1, updatedBy: 7, updatedAt: client.updatedAt }] }));
+    await firstTask;
+    expect((wrapper.vm as any).currentClient).toEqual(secondClient);
+    expect((wrapper.vm as any).currentScopes).toEqual([]);
+  });
+
+  it("drops a late revocation response after the detail drawer closes", async () => {
+    const pending = deferred<ReturnType<typeof ok>>();
+    api.revocation.mockReturnValueOnce(pending.promise);
+    const wrapper = mountPage();
+    await flushPromises();
+    const detailTask = (wrapper.vm as any).openDetail(client);
+    await flushPromises();
+    await (wrapper.vm as any).closeDrawer();
+    pending.resolve(ok({ status: "closed", pending: 0, closed: 2 }));
+    await detailTask;
+    await flushPromises();
+    expect((wrapper.vm as any).revocationStatus).toBeNull();
+    expect((wrapper.vm as any).currentClient).toBeNull();
+  });
+
+  it("does not put an older audit response into a newly selected client", async () => {
+    const pending = deferred<ReturnType<typeof ok>>();
+    const secondClient = { ...client, id: 8, name: "第二客户端", rowVersion: 4 };
+    api.audits.mockReturnValueOnce(pending.promise);
+    api.get.mockImplementation((id: number) => ok({ client: id === secondClient.id ? secondClient : client, scopes: [] }));
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).openDetail(client);
+    await flushPromises();
+    const auditTask = (wrapper.vm as any).loadAudits();
+    await flushPromises();
+    await (wrapper.vm as any).closeDrawer();
+    await (wrapper.vm as any).openDetail(secondClient);
+    await flushPromises();
+    pending.resolve(ok({ items: [{ requestId: "old", scope: "device:list" }] }));
+    await auditTask;
+    await flushPromises();
+    expect((wrapper.vm as any).currentClient).toEqual(secondClient);
+    expect((wrapper.vm as any).auditItems).toEqual([]);
+  });
+
+  it("requires confirmation before rotating an active SK", async () => {
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(() => ({ close: vi.fn() }) as any);
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).requestRotate(client);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(api.rotate).not.toHaveBeenCalled();
+    confirm.mockRestore();
+  });
+
+  it("guards every mutation behind its matching UI permission", async () => {
+    const cases = [
+      { permission: "gb28181:openapi:client:create", api: api.create, invoke: (vm: any) => vm.performCreate({ name: "新客户端", ownerDeptId: 10 }) },
+      { permission: "gb28181:openapi:client:rotate", api: api.rotate, invoke: (vm: any) => vm.performRotate(client) },
+      { permission: "gb28181:openapi:client:status", api: api.disable, invoke: (vm: any) => vm.performStatus("disable", client) },
+      { permission: "gb28181:openapi:client:grant", api: api.scopes, invoke: (vm: any) => vm.saveScopes(client.id, ["device:list"], client.rowVersion) },
+      { permission: "gb28181:openapi:client:audit", api: api.audits, invoke: (vm: any) => vm.loadAudits() }
+    ];
+    for (const item of cases) {
+      userStore.account.permissions = ["gb28181:openapi:client:read"];
+      const wrapper = mountPage();
+      await flushPromises();
+      item.api.mockClear();
+      await item.invoke(wrapper.vm as any);
+      expect(item.api, item.permission).not.toHaveBeenCalled();
+      wrapper.unmount();
+    }
+  });
+
+  it("blocks Drawer scope save until both detail and capabilities are fresh", () => {
+    const unavailable = mountDrawer({ capabilitiesReady: false });
+    expect((unavailable.vm as any).canSubmit).toBe(false);
+    unavailable.unmount();
+
+    const staleDetail = mountDrawer({ detailReady: false });
+    expect((staleDetail.vm as any).canSubmit).toBe(false);
+    staleDetail.unmount();
+
+    const mismatchedRow = mountDrawer({ detailRowVersion: client.rowVersion - 1 });
+    expect((mismatchedRow.vm as any).canSubmit).toBe(false);
+    mismatchedRow.unmount();
+
+    const ready = mountDrawer();
+    expect((ready.vm as any).canSubmit).toBe(true);
+    ready.unmount();
   });
 });
