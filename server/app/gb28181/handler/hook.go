@@ -183,29 +183,33 @@ var ErrPreviewRuntimeIncomplete = errors.New("management preview runtime must pr
 // HookController 接收 ZLMediaKit 的 Hook 回调
 // ZLM 以 POST JSON 调用,响应需返回 {"code":0,"msg":"success"}
 type HookController struct {
-	notifier          *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
-	stopper           PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
-	policy            NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
-	leaseChecker      SourceLeaseChecker   // 级联 source lease,可为 nil
-	collector         KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
-	resolver          NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
-	binder            StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
-	restartMu         sync.RWMutex
-	restartNotifier   RestartStartedNotifier
-	recordMP4         RecordMP4Indexer
-	recordResolver    NodeUUIDResolver
-	observer          StreamObserver
-	playbackMedia     PlaybackMediaSink
-	flowMu            sync.RWMutex
-	flowResolver      FlowReportNodeResolver
-	flowCollector     FlowCollector
-	talkResolver      NodeUUIDResolver
-	talkAuthorizer    TalkPublishAuthorizer
-	talkObserver      TalkStreamObserver
-	talkMu            sync.RWMutex
-	playAuthorizer    PlayAuthorizer
-	playResolver      PlaybackMediaContextResolver
-	playAuthMu        sync.RWMutex
+	notifier        *stream.Notifier     // 流就绪事件分发(由点播 service 订阅,T6 创新3)
+	stopper         PlayStopper          // 无人观看/超时时调用,可为 nil(降级:仅返回 close=true,不发 BYE)
+	policy          NoneReaderPolicy     // 通道级无人观看断流策略,可为 nil(兼容旧行为)
+	leaseChecker    SourceLeaseChecker   // 级联 source lease,可为 nil
+	collector       KeepaliveCollector   // on_server_keepalive 转发目标,可为 nil(降级:仅 200 OK)
+	resolver        NodeUUIDResolver     // M2 多节点 UUID 反查,可为 nil(降级:单节点不 Bind)
+	binder          StreamLocationBinder // M2 LocationMap 反向 Bind(防 service.Start 漏 Bind)
+	restartMu       sync.RWMutex
+	restartNotifier RestartStartedNotifier
+	recordMP4       RecordMP4Indexer
+	recordResolver  NodeUUIDResolver
+	observer        StreamObserver
+	playbackMedia   PlaybackMediaSink
+	flowMu          sync.RWMutex
+	flowResolver    FlowReportNodeResolver
+	flowCollector   FlowCollector
+	talkResolver    NodeUUIDResolver
+	talkAuthorizer  TalkPublishAuthorizer
+	talkObserver    TalkStreamObserver
+	talkMu          sync.RWMutex
+	playAuthorizer  PlayAuthorizer
+	playResolver    PlaybackMediaContextResolver
+	playAuthMu      sync.RWMutex
+
+	openAPIPlayVerifier OpenAPIPlayTokenVerifier
+	openAPIPlayBinder   OpenAPIViewerBinder
+
 	previewClassifier management.PreviewClassifier
 	previewVerifier   management.PreviewTokenVerifier
 	previewMu         sync.RWMutex
@@ -647,6 +651,9 @@ func (h *HookController) talkDependencies() (NodeUUIDResolver, TalkPublishAuthor
 }
 
 type onPlayBody struct {
+	ID            string `json:"id"`
+	BootNonce     string `json:"bootNonce"`
+	Protocol      string `json:"protocol"`
 	App           string `json:"app"`
 	Stream        string `json:"stream"`
 	Schema        string `json:"schema"`
@@ -812,6 +819,9 @@ func (h *HookController) OnPlay(c *gin.Context) {
 	}
 	if !hookPayloadNodeMatches(c, playauth.HookOnPlay, body.MediaServerID) {
 		h.denyPlayback(c, "wrong_resource", "hook payload node mismatch")
+		return
+	}
+	if h.handleOpenAPIPlay(c, body) {
 		return
 	}
 	if classifier, verifier := h.previewDependencies(); classifier != nil && verifier != nil {
