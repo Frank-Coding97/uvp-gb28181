@@ -81,12 +81,16 @@ func (e *dbExecutor) ExecSQL(sqlText string) error {
 		db.Statement.ConnPool = prepared.ConnPool
 		db.Config.ConnPool = prepared.ConnPool
 	}
-	for _, stmt := range splitStatements(sqlText) {
-		if err := db.Exec(stmt).Error; err != nil {
-			return err
+	// Session variables and PREPARE handles belong to a physical connection.
+	// Pin the entire file; separate pool calls may silently switch sessions.
+	return db.Connection(func(conn *gorm.DB) error {
+		for _, stmt := range splitStatements(sqlText) {
+			if err := conn.Exec(stmt).Error; err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // splitStatements 按分号拆分 SQL 文本为独立语句:
