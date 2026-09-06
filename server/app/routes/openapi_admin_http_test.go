@@ -45,6 +45,8 @@ e = some(where (p.eft == allow))
 m = g(r.sub, p.sub, r.dom) && keyMatch2(r.obj, p.obj) && regexMatch(r.act, p.act) && (r.dom == p.dom || p.dom == "*")
 `
 
+const openAPIAdminHTTPPathPrefix = "/api/gb28181/openapi-clients"
+
 type openAPIAdminHTTPConfig struct {
 	app.YmlConfigInterf
 	staticDir string
@@ -203,6 +205,17 @@ func TestOpenAPIAdminRootRealHTTPBoundary(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, revokedSession.status)
 
 	logs := waitForAdminOperationLogs(t, fixture.db, fixture.requestCount.Load())
+	var httpLogCount, serviceLogCount int64
+	for _, log := range logs {
+		if isOpenAPIAdminHTTPLog(log) {
+			httpLogCount++
+		}
+		if log.Method == "SERVICE" && isOpenAPIAdminHTTPPath(log.Path) {
+			serviceLogCount++
+		}
+	}
+	require.Equal(t, fixture.requestCount.Load(), httpLogCount)
+	require.Equal(t, int64(3), serviceLogCount, "create, scope grant, and rotate write synchronous SERVICE logs")
 	serializedLogs, err := json.Marshal(logs)
 	require.NoError(t, err)
 	require.False(t, strings.Contains(string(serializedLogs), initialSecret))
@@ -278,7 +291,7 @@ type openAPIAdminHTTPRoute struct {
 }
 
 func openAPIAdminHTTPRoutes() []openAPIAdminHTTPRoute {
-	const base = "/api/gb28181/openapi-clients"
+	const base = openAPIAdminHTTPPathPrefix
 	return []openAPIAdminHTTPRoute{
 		{path: base, method: http.MethodGet},
 		{path: base, method: http.MethodPost},
@@ -375,25 +388,47 @@ func waitForAdminOperationLogs(t *testing.T, db *gorm.DB, minimum int64) []appmo
 	t.Helper()
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		var logs []appmodels.SysOperationLog
-		if err := db.Order("id ASC").Find(&logs).Error; err == nil && int64(len(logs)) >= minimum {
-			return logs
+		logs, err := queryOpenAPIAdminHTTPLogs(db)
+		if err == nil && int64(len(logs)) >= minimum {
+			var allLogs []appmodels.SysOperationLog
+			require.NoError(t, db.Order("id ASC").Find(&allLogs).Error)
+			return allLogs
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	var logs []appmodels.SysOperationLog
 	require.NoError(t, db.Order("id ASC").Find(&logs).Error)
-	require.GreaterOrEqual(t, int64(len(logs)), minimum)
+	var httpLogCount int64
+	for _, log := range logs {
+		if isOpenAPIAdminHTTPLog(log) {
+			httpLogCount++
+		}
+	}
+	require.GreaterOrEqual(t, httpLogCount, minimum)
 	return logs
 }
 
 func waitForAdminOperationLogsBestEffort(db *gorm.DB, minimum int64) {
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		var count int64
-		if db.Model(&appmodels.SysOperationLog{}).Count(&count).Error == nil && count >= minimum {
+		logs, err := queryOpenAPIAdminHTTPLogs(db)
+		if err == nil && int64(len(logs)) >= minimum {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func queryOpenAPIAdminHTTPLogs(db *gorm.DB) ([]appmodels.SysOperationLog, error) {
+	var logs []appmodels.SysOperationLog
+	result := db.Where("method <> ? AND (path = ? OR path LIKE ?)", "SERVICE", openAPIAdminHTTPPathPrefix, openAPIAdminHTTPPathPrefix+"/%").Order("id ASC").Find(&logs)
+	return logs, result.Error
+}
+
+func isOpenAPIAdminHTTPPath(path string) bool {
+	return path == openAPIAdminHTTPPathPrefix || strings.HasPrefix(path, openAPIAdminHTTPPathPrefix+"/")
+}
+
+func isOpenAPIAdminHTTPLog(log appmodels.SysOperationLog) bool {
+	return log.Method != "SERVICE" && isOpenAPIAdminHTTPPath(log.Path)
 }
