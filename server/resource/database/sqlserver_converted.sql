@@ -4921,6 +4921,8 @@ CREATE TABLE dbo.gb_openapi_viewer (
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_viewer_state_retry' AND object_id=OBJECT_ID(N'dbo.gb_openapi_viewer')) CREATE INDEX idx_openapi_viewer_state_retry ON dbo.gb_openapi_viewer (state,retry_at);
 IF COL_LENGTH(N'dbo.gb_device',N'access_epoch') IS NULL ALTER TABLE dbo.gb_device ADD access_epoch BIGINT NOT NULL CONSTRAINT df_gb_device_access_epoch DEFAULT 1, CONSTRAINT ck_gb_device_access_epoch CHECK (access_epoch > 0);
 IF COL_LENGTH(N'dbo.gb_device',N'legacy_revoked_before') IS NULL ALTER TABLE dbo.gb_device ADD legacy_revoked_before DATETIME2(0) NULL;
+IF COL_LENGTH(N'dbo.gb_device',N'cleanup_completed_epoch') IS NULL ALTER TABLE dbo.gb_device ADD cleanup_completed_epoch BIGINT NOT NULL CONSTRAINT df_gb_device_cleanup_completed_epoch DEFAULT 1;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE parent_object_id = OBJECT_ID(N'dbo.gb_device') AND name = N'ck_gb_device_cleanup_completed_epoch') ALTER TABLE dbo.gb_device ADD CONSTRAINT ck_gb_device_cleanup_completed_epoch CHECK (cleanup_completed_epoch > 0 AND cleanup_completed_epoch <= access_epoch);
 IF COL_LENGTH(N'dbo.meta_node',N'current_boot_nonce') IS NULL ALTER TABLE dbo.meta_node ADD current_boot_nonce CHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
 IF COL_LENGTH(N'dbo.meta_node',N'retired_boot_history') IS NULL ALTER TABLE dbo.meta_node ADD retired_boot_history NVARCHAR(MAX) NULL;
 IF COL_LENGTH(N'dbo.meta_node',N'runtime_epoch') IS NULL ALTER TABLE dbo.meta_node ADD runtime_epoch BIGINT NOT NULL CONSTRAINT df_meta_node_runtime_epoch DEFAULT 0;

@@ -5023,6 +5023,8 @@ CREATE TABLE IF NOT EXISTS gb_openapi_viewer (
 CREATE INDEX IF NOT EXISTS idx_openapi_viewer_state_retry ON gb_openapi_viewer (state, retry_at);
 ALTER TABLE IF EXISTS gb_device ADD COLUMN IF NOT EXISTS access_epoch BIGINT NOT NULL DEFAULT 1 CHECK (access_epoch > 0);
 ALTER TABLE IF EXISTS gb_device ADD COLUMN IF NOT EXISTS legacy_revoked_before TIMESTAMPTZ(0) NULL;
+ALTER TABLE IF EXISTS gb_device ADD COLUMN IF NOT EXISTS cleanup_completed_epoch BIGINT NOT NULL DEFAULT 1;
+DO $$ BEGIN IF to_regclass('gb_device') IS NOT NULL AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'gb_device'::regclass AND conname = 'ck_gb_device_cleanup_completed_epoch') THEN ALTER TABLE gb_device ADD CONSTRAINT ck_gb_device_cleanup_completed_epoch CHECK (cleanup_completed_epoch > 0 AND cleanup_completed_epoch <= access_epoch); END IF; END $$;
 ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS current_boot_nonce CHAR(32) COLLATE "C" NULL;
 ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS retired_boot_history TEXT NULL;
 ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS runtime_epoch BIGINT NOT NULL DEFAULT 0;
