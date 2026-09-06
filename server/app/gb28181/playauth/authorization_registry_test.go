@@ -12,7 +12,8 @@ import (
 func registryBinding(mediaGeneration uint64) Binding {
 	return Binding{
 		DeviceID: "37010301021320000014", ChannelID: "37010301021320000001",
-		App: "rtp", Stream: "37010301021320000014_37010301021320000001",
+		DeviceEpoch: 1,
+		App:         "rtp", Stream: "37010301021320000014_37010301021320000001",
 		MediaServerID: "node-a", MediaGeneration: mediaGeneration,
 	}
 }
@@ -26,7 +27,7 @@ func registryPrepared(now time.Time, generation string, lifetime time.Duration) 
 
 func registryClaims(prepared Prepared, binding Binding) Claims {
 	return Claims{
-		DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, App: binding.App,
+		Version: tokenVersionV4, DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, DeviceEpoch: binding.DeviceEpoch, App: binding.App,
 		Stream: binding.Stream, MediaServerID: binding.MediaServerID, MediaGeneration: binding.MediaGeneration,
 		IssuedAt: prepared.IssuedAt.Unix(), ExpiresAt: prepared.ExpiresAt.Unix(), Nonce: prepared.Nonce,
 		AuthorizationGeneration: prepared.AuthorizationGeneration,
@@ -153,7 +154,7 @@ func TestAuthorizationServiceBindsPreauthorizationToCurrentMediaGeneration(t *te
 		t.Fatal(err)
 	}
 	registry := NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now }))
-	service := NewAuthorizationService(signer, registry)
+	service := NewAuthorizationService(signer, registry, withBackendTestAuthority())
 	preauthorized := registryBinding(0)
 	prepared, err := service.Prepare()
 	if err != nil {
@@ -198,7 +199,7 @@ func TestAuthorizationServiceRejectsConflictingPreauthorizationBeforeBinding(t *
 		t.Fatal(err)
 	}
 	registry := NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now }))
-	service := NewAuthorizationService(signer, registry)
+	service := NewAuthorizationService(signer, registry, withBackendTestAuthority())
 	binding := registryBinding(0)
 	prepared, err := service.Prepare()
 	if err != nil {
@@ -231,7 +232,7 @@ func TestAuthorizationServiceAutoStartRequiresThirtySecondsRemaining(t *testing.
 		t.Fatal(err)
 	}
 	registry := NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now }))
-	service := NewAuthorizationService(signer, registry)
+	service := NewAuthorizationService(signer, registry, withBackendTestAuthority())
 	binding := registryBinding(0)
 	prepared, err := service.Prepare()
 	if err != nil {
@@ -255,7 +256,7 @@ func TestAuthorizationServiceExplicitAuthorizationRemainsStatelessAcrossRestart(
 	}
 	binding := registryBinding(8)
 	registry := NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now }))
-	service := NewAuthorizationService(signer, registry)
+	service := NewAuthorizationService(signer, registry, withBackendTestAuthority())
 	prepared, err := service.Prepare()
 	if err != nil {
 		t.Fatal(err)
@@ -270,11 +271,11 @@ func TestAuthorizationServiceExplicitAuthorizationRemainsStatelessAcrossRestart(
 	if registry.Size() != 0 {
 		t.Fatalf("explicit authorization unexpectedly entered lifecycle registry: size=%d", registry.Size())
 	}
-	restarted := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })))
+	restarted := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })), withBackendTestAuthority())
 	if _, err := restarted.Verify(grant.Token, binding); err != nil {
 		t.Fatalf("restart rejected stateless explicit token: %v", err)
 	}
-	withoutRegistry := NewAuthorizationService(signer, nil)
+	withoutRegistry := NewAuthorizationService(signer, nil, withBackendTestAuthority())
 	preparedWithoutRegistry, err := withoutRegistry.Prepare()
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +295,7 @@ func TestAuthorizationServicePreauthorizationFailsClosedAfterRegistryRestart(t *
 		t.Fatal(err)
 	}
 	binding := registryBinding(0)
-	service := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })))
+	service := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })), withBackendTestAuthority())
 	prepared, err := service.Prepare()
 	if err != nil {
 		t.Fatal(err)
@@ -306,7 +307,7 @@ func TestAuthorizationServicePreauthorizationFailsClosedAfterRegistryRestart(t *
 	if _, err := service.VerifyForAutoStart(grant.Token, binding); err != nil {
 		t.Fatalf("registered preauthorization rejected: %v", err)
 	}
-	restarted := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })))
+	restarted := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })), withBackendTestAuthority())
 	if _, err := restarted.VerifyForAutoStart(grant.Token, binding); !errors.Is(err, ErrAuthorizationNotFound) {
 		t.Fatalf("restart accepted untracked preauthorization: %v", err)
 	}
@@ -318,7 +319,7 @@ func TestAuthorizationServiceVerifiedClientAutoStartRequiresFreshOnPlayProof(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })))
+	service := NewAuthorizationService(signer, NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })), withBackendTestAuthority())
 	binding := registryBinding(0)
 	binding.BindClientIP = true
 	binding.ClientIP = "203.0.113.9"

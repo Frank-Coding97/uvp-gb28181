@@ -34,7 +34,7 @@ func TestOpenAPITokenBindingAndDomain(t *testing.T) {
 	require.Equal(t, binding, claims.OpenAPIBinding)
 	require.Equal(t, 3, claims.Version)
 	require.Equal(t, "gb28181-openapi-play", claims.Audience)
-	backend := Binding{DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, App: binding.App, Stream: binding.Stream, MediaServerID: binding.NodeUUID, MediaGeneration: binding.MediaGeneration}
+	backend := Binding{DeviceID: binding.DeviceID, ChannelID: binding.ChannelID, DeviceEpoch: binding.DeviceEpoch, App: binding.App, Stream: binding.Stream, MediaServerID: binding.NodeUUID, MediaGeneration: binding.MediaGeneration}
 	_, err = signer.Verify(grant.Token, backend)
 	require.Error(t, err)
 	old, err := signer.IssueDirect(backend)

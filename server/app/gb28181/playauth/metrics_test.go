@@ -40,6 +40,7 @@ func TestAuthorizationServiceRecordsIssueAndVerificationOutcomes(t *testing.T) {
 	service := NewAuthorizationService(
 		signer,
 		NewAuthorizationRegistry(WithAuthorizationRegistryNow(func() time.Time { return now })),
+		withBackendTestAuthority(),
 		WithAuthorizationMetrics(metrics),
 	)
 	binding := versionedBinding()
