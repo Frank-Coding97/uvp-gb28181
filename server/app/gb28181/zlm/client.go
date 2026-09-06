@@ -17,6 +17,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 // Client ZLMediaKit HTTP API 客户端(控制面)
@@ -374,25 +375,28 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 		"stream": stream,
 		"schema": "rtsp", // rtp 推流后首先注册 rtsp,用 rtsp 探测即可
 	}
+	logger := app.Log(ctx).Named("zlm")
 	if err := c.call(ctx, "isMediaOnline", params, &r); err != nil {
-		app.ZapLog.Warn("IsMediaOnline 请求失败",
+		logger.Warn("IsMediaOnline 请求失败",
+			zap.String("event", "zlm.media_online.request_failed"),
 			zap.String("host", c.node.Host),
 			zap.String("app", appName),
 			zap.String("stream", stream),
-			zap.Error(err))
+			logging.Error(err))
 		return false, err
 	}
 	// code != 0(如 -500 流不存在)视为未就绪,不视为错误
 	if r.Code != 0 {
-		app.ZapLog.Info("IsMediaOnline 返回非0 code(流不存在或未就绪)",
+		logger.Info("IsMediaOnline 返回非0 code(流不存在或未就绪)",
+			zap.String("event", "zlm.media_online.not_ready"),
 			zap.String("host", c.node.Host),
 			zap.String("app", appName),
 			zap.String("stream", stream),
-			zap.Int("code", r.Code),
-			zap.String("msg", r.Msg))
+			zap.Int("code", r.Code))
 		return false, nil
 	}
-	app.ZapLog.Debug("IsMediaOnline 成功",
+	logger.Debug("IsMediaOnline 成功",
+		zap.String("event", "zlm.media_online.ready"),
 		zap.String("host", c.node.Host),
 		zap.String("app", appName),
 		zap.String("stream", stream),
