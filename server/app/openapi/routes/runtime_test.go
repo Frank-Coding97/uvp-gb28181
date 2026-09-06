@@ -30,7 +30,7 @@ func (runtimePermissions) Enforce(string, string, string, ...string) (bool, erro
 }
 
 func TestOpenAPIStartupRejectsMissingSchemaAndInvalidConfiguration(t *testing.T) {
-	for _, failure := range []string{"none", "client", "scope", "nonce", "audit", "department", "device", "channel", "column", "master-key", "key-id", "audience", "timeout", "write-timeout", "recovery"} {
+	for _, failure := range []string{"none", "client", "scope", "nonce", "audit", "department", "department-name", "device", "channel", "column", "master-key", "key-id", "audience", "timeout", "write-timeout", "recovery"} {
 		t.Run(failure, func(t *testing.T) {
 			db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "startup.sqlite")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
 			require.NoError(t, err)
@@ -46,6 +46,8 @@ func TestOpenAPIStartupRejectsMissingSchemaAndInvalidConfiguration(t *testing.T)
 			settings := runtimeTestSettings{enabled: true, values: map[string]string{"openapi.audience": "test-audience", "openapi.master_key_id": "test"}, integers: map[string]int{"httpserver.write_timeout": 30}}
 			t.Setenv("UVP_OPENAPI_MASTER_KEY", base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)))
 			switch failure {
+			case "department-name":
+				require.NoError(t, db.Exec("ALTER TABLE sys_department DROP COLUMN name").Error)
 			case "column":
 				require.NoError(t, db.Exec("ALTER TABLE sys_openapi_client DROP COLUMN auth_epoch").Error)
 			case "master-key":

@@ -99,7 +99,7 @@ func checkRuntimeSchema(ctx context.Context, db *gorm.DB) error {
 		}
 	}
 	for _, probe := range []struct{ table, columns string }{
-		{"sys_department", "id,status,deleted_at"},
+		{"sys_department", "id,name,status,deleted_at"},
 		{"gb_device", "id,device_id,owner_dept_id,deleted_at,name,alias,manufacturer,model,status"},
 		{"gb_channel", "id,device_id,channel_id,owner_dept_id,deleted_at,name,alias,manufacturer,model,status,ptz_type"},
 	} {
