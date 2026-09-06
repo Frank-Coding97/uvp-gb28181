@@ -107,7 +107,7 @@ func (s *Service) read(ctx context.Context, streamID string, mediaNode *node.Nod
 			zap.String("event", "streammonitor.media_read_failed"),
 			zap.String("streamId", streamID),
 			zap.Int64("nodeId", mediaNode.ID),
-			zap.String("host", mediaNode.Host),
+			zap.String("endpoint", mediaNode.HTTPEndpoint()),
 			zap.Int("apiPort", mediaNode.APIPort),
 			zap.Error(err))
 		return nil, fmt.Errorf("%w: %v", ErrNodeUnavailable, err)
