@@ -126,6 +126,13 @@ func NewLiveApplication(provider QualificationProvider, player LivePlayer, grant
 	return application
 }
 
+// Ready reports only whether the application has its required local
+// dependencies and feature flag. It is a startup/configuration check; it
+// does not qualify a node or assert T18 media-runtime eligibility.
+func (application *LiveApplication) Ready() bool {
+	return application != nil && application.authEnable && !interfaceIsNil(application.provider) && !interfaceIsNil(application.player) && !interfaceIsNil(application.grants)
+}
+
 // Preflight obtains a fresh immutable qualification ticket. It never picks
 // from a node registry, opens media, or creates a grant.
 func (application *LiveApplication) Preflight(ctx context.Context, deviceID, channelID, protocol string) (QualificationTicket, error) {
