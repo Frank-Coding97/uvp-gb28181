@@ -1,5 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
 import { Message, Modal } from "@arco-design/web-vue";
+import { defineComponent, h, KeepAlive, nextTick } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import OpenAPIClientPage from "./index.vue";
 import OpenAPIClientDrawer from "./OpenAPIClientDrawer.vue";
@@ -58,43 +59,55 @@ function ok<T>(data: T) {
   return { code: "OK", message: "success", requestId: "req-1", data };
 }
 
+const pageStubs = {
+  "s-layout-search": { template: "<section><slot name='fields'/><slot name='actions'/><slot name='extra'/></section>" },
+  "a-input": { template: "<input />" },
+  "a-select": { template: "<select><slot /></select>" },
+  "a-option": { template: "<option><slot /></option>" },
+  "a-button": { template: "<button :disabled='disabled'><slot name='icon'/><slot /></button>", props: ["disabled"] },
+  "a-table": { template: "<div data-testid='client-table'><slot name='columns'/><slot name='empty'/></div>" },
+  "a-table-column": { template: "<div />" },
+  "a-drawer": { template: "<div v-if='visible'><slot /></div>", props: ["visible"] },
+  "a-modal": { template: "<div v-if='visible'><slot /></div>", props: ["visible"] },
+  "a-form": { template: "<form><slot /></form>" },
+  "a-form-item": { template: "<label><slot /></label>" },
+  "a-tag": { template: "<span><slot /></span>" },
+  "a-empty": { template: "<span>{{ description }}</span>", props: ["description"] },
+  "a-alert": { template: "<div role='alert'><slot /></div>" },
+  "a-tooltip": { template: "<span><slot /></span>" },
+  "a-spin": { template: "<div><slot /></div>" },
+  "a-checkbox-group": { template: "<div><slot /></div>" },
+  "a-checkbox": { template: "<label><slot /></label>", props: ["value"] },
+  "OpenAPIClientDrawer": { template: "<div />", props: ["visible"] },
+  "OpenAPISecretDialog": { template: "<div />", props: ["visible"] },
+  Search: true,
+  RotateCcw: true,
+  RefreshCw: true,
+  Eye: true,
+  Plus: true,
+  KeyRound: true,
+  ShieldCheck: true,
+  ShieldOff: true,
+  Ban: true,
+  ScrollText: true
+};
+
 function mountPage() {
   return mount(OpenAPIClientPage, {
-    global: {
-      stubs: {
-        "s-layout-search": { template: "<section><slot name='fields'/><slot name='actions'/><slot name='extra'/></section>" },
-        "a-input": { template: "<input />" },
-        "a-select": { template: "<select><slot /></select>" },
-        "a-option": { template: "<option><slot /></option>" },
-        "a-button": { template: "<button :disabled='disabled'><slot name='icon'/><slot /></button>", props: ["disabled"] },
-        "a-table": { template: "<div data-testid='client-table'><slot name='columns'/><slot name='empty'/></div>" },
-        "a-table-column": { template: "<div />" },
-        "a-drawer": { template: "<div v-if='visible'><slot /></div>", props: ["visible"] },
-        "a-modal": { template: "<div v-if='visible'><slot /></div>", props: ["visible"] },
-        "a-form": { template: "<form><slot /></form>" },
-        "a-form-item": { template: "<label><slot /></label>" },
-        "a-tag": { template: "<span><slot /></span>" },
-        "a-empty": { template: "<span>{{ description }}</span>", props: ["description"] },
-        "a-alert": { template: "<div role='alert'><slot /></div>" },
-        "a-tooltip": { template: "<span><slot /></span>" },
-        "a-spin": { template: "<div><slot /></div>" },
-        "a-checkbox-group": { template: "<div><slot /></div>" },
-        "a-checkbox": { template: "<label><slot /></label>", props: ["value"] },
-        "OpenAPIClientDrawer": { template: "<div />", props: ["visible"] },
-        "OpenAPISecretDialog": { template: "<div />", props: ["visible"] },
-        Search: true,
-        RotateCcw: true,
-        RefreshCw: true,
-        Eye: true,
-        Plus: true,
-        KeyRound: true,
-        ShieldCheck: true,
-        ShieldOff: true,
-        Ban: true,
-        ScrollText: true
-      }
+    global: { stubs: pageStubs }
+  });
+}
+
+function mountKeepAlivePage() {
+  const Host = defineComponent({
+    data: () => ({ active: true }),
+    render() {
+      return h(KeepAlive, null, {
+        default: () => (this.active ? h(OpenAPIClientPage) : null)
+      });
     }
   });
+  return mount(Host, { global: { stubs: pageStubs } });
 }
 
 function mountDrawer(overrides: Record<string, unknown> = {}) {
@@ -251,6 +264,18 @@ describe("OpenAPI client page", () => {
     expect(api.scopes).not.toHaveBeenCalled();
   });
 
+  it("keeps an in-flight capability catalog when the create drawer opens", async () => {
+    const pending = deferred<ReturnType<typeof ok>>();
+    api.capabilities.mockReturnValueOnce(pending.promise);
+    const wrapper = mountPage();
+    await flushPromises();
+    (wrapper.vm as any).openCreate();
+    pending.resolve(ok(["device:list"]));
+    await flushPromises();
+    expect((wrapper.vm as any).capabilitiesReady).toBe(true);
+    expect((wrapper.vm as any).capabilities).toEqual(["device:list"]);
+  });
+
   it("ignores a late create response after the drawer is closed", async () => {
     const pending = deferred<ReturnType<typeof ok>>();
     api.create.mockReturnValueOnce(pending.promise);
@@ -339,6 +364,86 @@ describe("OpenAPI client page", () => {
     await flushPromises();
     expect((wrapper.vm as any).currentClient).toEqual(secondClient);
     expect((wrapper.vm as any).auditItems).toEqual([]);
+  });
+
+  it("opens the list status result in detail mode after a create drawer was closed", async () => {
+    const disabledClient = { ...client, status: "disabled" as const, rowVersion: 4 };
+    api.disable.mockResolvedValueOnce({ ...ok({ client: disabledClient, revocationStatus: "pending" }), status: 202 });
+    api.get.mockResolvedValueOnce(ok({ client: disabledClient, scopes: [] }));
+    const wrapper = mountPage();
+    await flushPromises();
+    (wrapper.vm as any).openCreate();
+    await (wrapper.vm as any).closeDrawer();
+    await (wrapper.vm as any).performStatus("disable", client);
+    await flushPromises();
+    expect((wrapper.vm as any).drawerMode).toBe("detail");
+    expect((wrapper.vm as any).drawerVisible).toBe(true);
+    expect((wrapper.vm as any).currentClient).toEqual(disabledClient);
+  });
+
+  it("binds a list rotate conflict to that client's refreshed detail", async () => {
+    const conflict = Object.assign(new Error("conflict"), { response: { status: 409, data: { message: "conflict" } } });
+    const freshClient = { ...client, rowVersion: 4 };
+    api.rotate.mockRejectedValueOnce(conflict);
+    api.get.mockResolvedValueOnce(ok({ client: freshClient, scopes: [] }));
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).performRotate(client);
+    await flushPromises();
+    expect(api.get).toHaveBeenCalledWith(client.id);
+    expect((wrapper.vm as any).drawerMode).toBe("detail");
+    expect((wrapper.vm as any).drawerVisible).toBe(true);
+    expect((wrapper.vm as any).currentClient).toEqual(freshClient);
+    expect((wrapper.vm as any).drawerError).toContain("rowVersion=3");
+  });
+
+  it("binds a list status conflict to that client's refreshed detail", async () => {
+    const conflict = Object.assign(new Error("conflict"), { response: { status: 409, data: { message: "conflict" } } });
+    const freshClient = { ...client, rowVersion: 4 };
+    api.disable.mockRejectedValueOnce(conflict);
+    api.get.mockResolvedValueOnce(ok({ client: freshClient, scopes: [] }));
+    const wrapper = mountPage();
+    await flushPromises();
+    await (wrapper.vm as any).performStatus("disable", client);
+    await flushPromises();
+    expect(api.get).toHaveBeenCalledWith(client.id);
+    expect((wrapper.vm as any).drawerMode).toBe("detail");
+    expect((wrapper.vm as any).drawerVisible).toBe(true);
+    expect((wrapper.vm as any).currentClient).toEqual(freshClient);
+    expect((wrapper.vm as any).drawerError).toContain("rowVersion=3");
+  });
+
+  it("clears SK and drops late mutations when a KeepAlive page is deactivated", async () => {
+    const success = vi.spyOn(Message, "success").mockImplementation(() => undefined as any);
+    const wrapper = mountKeepAlivePage();
+    await flushPromises();
+    const page = wrapper.findComponent(OpenAPIClientPage);
+    const vm = page.vm as any;
+    await vm.performRotate(client);
+    await flushPromises();
+    expect(vm.secretPayload).toEqual({ accessKey: client.ak, secretKey: "rotated-secret" });
+
+    const pending = deferred<ReturnType<typeof ok>>();
+    api.rotate.mockReturnValueOnce(pending.promise);
+    success.mockClear();
+    const rotateTask = vm.performRotate(client);
+    await flushPromises();
+    await wrapper.setData({ active: false });
+    await nextTick();
+    expect(vm.secretPayload).toBeNull();
+    pending.resolve(ok({ client, secretKey: "late-deactivated-secret" }));
+    await rotateTask;
+    await flushPromises();
+    expect(vm.secretPayload).toBeNull();
+    expect(success).not.toHaveBeenCalled();
+
+    const listCalls = api.list.mock.calls.length;
+    const capabilityCalls = api.capabilities.mock.calls.length;
+    await wrapper.setData({ active: true });
+    await flushPromises();
+    expect(api.list.mock.calls.length).toBeGreaterThan(listCalls);
+    expect(api.capabilities.mock.calls.length).toBeGreaterThan(capabilityCalls);
+    success.mockRestore();
   });
 
   it("requires confirmation before rotating an active SK", async () => {

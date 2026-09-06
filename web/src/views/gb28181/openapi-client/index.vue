@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from "vue";
 import { Modal, Message } from "@arco-design/web-vue";
 import { Ban, Eye, KeyRound, Plus, RefreshCw, RotateCcw, ScrollText, Search, ShieldCheck, ShieldOff } from "lucide-vue-next";
 import { useUserStoreHook } from "@/store/modules/user";
@@ -84,6 +84,7 @@ const canSaveScopes = computed(
 
 let requestVersion = 0;
 let lifecycleGeneration = 0;
+let pageGeneration = 0;
 let mounted = true;
 
 function nextGeneration() {
@@ -93,6 +94,10 @@ function nextGeneration() {
 
 function isCurrentGeneration(generation: number) {
   return mounted && generation === lifecycleGeneration;
+}
+
+function isCurrentPage(page: number) {
+  return mounted && page === pageGeneration;
 }
 
 function isCurrentClient(generation: number, id: number) {
@@ -125,8 +130,10 @@ function httpStatus(cause: unknown) {
   return Number((cause as { response?: { status?: number } }).response?.status || 0);
 }
 
-function conflictMessage(rowVersion: number) {
-  return `版本冲突：页面提交的 rowVersion=${rowVersion} 已失效，已刷新当前详情，请确认最新状态后重试。`;
+function conflictMessage(rowVersion: number, refreshed = true) {
+  return refreshed
+    ? `版本冲突：页面提交的 rowVersion=${rowVersion} 已失效，已刷新当前详情，请确认最新状态后重试。`
+    : `版本冲突：页面提交的 rowVersion=${rowVersion} 已失效，但当前详情刷新失败，请重试。`;
 }
 
 function departmentName(id: number) {
@@ -143,23 +150,24 @@ function statusColor(status: OpenAPIClientStatus) {
 
 async function loadCapabilities() {
   if (!canRead.value) return;
+  const page = pageGeneration;
   capabilitiesLoading.value = true;
   capabilitiesReady.value = false;
   capabilitiesError.value = "";
   try {
     const result = await getOpenAPIClientCapabilities();
-    if (!mounted) return;
+    if (!isCurrentPage(page)) return;
     const failure = responseError(result, "能力目录加载失败");
     if (failure) throw failure;
     capabilities.value = Array.isArray(result.data) ? result.data : [];
     capabilitiesReady.value = true;
   } catch (cause: unknown) {
-    if (!mounted) return;
+    if (!isCurrentPage(page)) return;
     capabilities.value = [];
     capabilitiesReady.value = false;
     capabilitiesError.value = errorMessage(cause, "能力目录加载失败");
   } finally {
-    if (mounted) capabilitiesLoading.value = false;
+    if (isCurrentPage(page)) capabilitiesLoading.value = false;
   }
 }
 
@@ -170,24 +178,25 @@ async function load() {
     return;
   }
   const version = ++requestVersion;
+  const page = pageGeneration;
   loading.value = true;
   error.value = "";
   try {
     const result = await listOpenAPIClients(buildParams());
-    if (version !== requestVersion) return;
+    if (version !== requestVersion || !isCurrentPage(page)) return;
     const failure = responseError(result, "OpenAPI 客户端加载失败");
     if (failure) throw failure;
     clients.value = result.data?.items || [];
     ownerDepartments.value = result.data?.ownerDepartments || [];
     pagination.total = result.data?.total || 0;
   } catch (cause: unknown) {
-    if (version !== requestVersion) return;
+    if (version !== requestVersion || !isCurrentPage(page)) return;
     clients.value = [];
     ownerDepartments.value = [];
     pagination.total = 0;
     error.value = errorMessage(cause, "OpenAPI 客户端加载失败");
   } finally {
-    if (version === requestVersion) loading.value = false;
+    if (version === requestVersion && isCurrentPage(page)) loading.value = false;
   }
 }
 
@@ -261,9 +270,8 @@ async function refreshDetail(id: number, generation = lifecycleGeneration) {
   }
 }
 
-async function openDetail(record: OpenAPIClientView) {
-  if (!canRead.value || drawerLoading.value) return;
-  const generation = nextGeneration();
+function openDetailContext(record: OpenAPIClientView, generation: number) {
+  if (!isCurrentGeneration(generation)) return false;
   drawerMode.value = "detail";
   currentClient.value = record;
   currentScopes.value = [];
@@ -275,6 +283,22 @@ async function openDetail(record: OpenAPIClientView) {
   auditItems.value = [];
   drawerError.value = "";
   drawerVisible.value = true;
+  return true;
+}
+
+async function refreshDetailContext(record: OpenAPIClientView, generation: number) {
+  if (!openDetailContext(record, generation)) return false;
+  try {
+    return await refreshDetail(record.id, generation);
+  } catch {
+    return false;
+  }
+}
+
+async function openDetail(record: OpenAPIClientView) {
+  if (!canRead.value || drawerLoading.value) return;
+  const generation = nextGeneration();
+  openDetailContext(record, generation);
   try {
     await refreshDetail(record.id, generation);
   } catch (cause: unknown) {
@@ -295,9 +319,9 @@ function openCreate() {
   drawerVisible.value = true;
 }
 
-function closeDrawer() {
-  nextGeneration();
+function clearDrawerState() {
   drawerVisible.value = false;
+  drawerMode.value = "detail";
   drawerLoading.value = false;
   auditLoading.value = false;
   revocationLoading.value = false;
@@ -310,6 +334,11 @@ function closeDrawer() {
   revocationStatus.value = null;
   revocationError.value = "";
   auditItems.value = [];
+}
+
+function closeDrawer() {
+  nextGeneration();
+  clearDrawerState();
 }
 
 async function performCreate(input: OpenAPIClientCreateInput) {
@@ -386,8 +415,8 @@ async function performRotate(record: OpenAPIClientView = currentClient.value as 
   } catch (cause: unknown) {
     if (!isCurrentGeneration(generation)) return;
     if (httpStatus(cause) === 409) {
-      drawerError.value = conflictMessage(record.rowVersion);
-      try { await refreshDetail(record.id, generation); } catch { /* keep the explicit conflict message */ }
+      const refreshed = await refreshDetailContext(record, generation);
+      if (isCurrentGeneration(generation)) drawerError.value = conflictMessage(record.rowVersion, refreshed);
     } else {
       drawerError.value = errorMessage(cause, "轮换 SK 失败");
     }
@@ -407,12 +436,19 @@ async function performStatus(action: StatusAction, record: OpenAPIClientView = c
     if (!isCurrentGeneration(generation)) return;
     const failure = responseError(result, `${action === "enable" ? "启用" : action === "disable" ? "停用" : "撤销"}客户端失败`);
     if (failure || !result.data?.client) throw failure || new Error("状态变更响应缺少客户端");
-    currentClient.value = result.data.client;
+    const shouldShowDrawer = action !== "enable" || drawerVisible.value;
+    openDetailContext(result.data.client, generation);
+    if (action === "enable" && !shouldShowDrawer) drawerVisible.value = false;
     updateListClient(result.data.client);
     if (action !== "enable") {
       revocationStatus.value = { status: result.data.revocationStatus || "pending", pending: 0, closed: 0 };
       revocationError.value = "";
-      await loadRevocationStatus(record.id, generation);
+      try {
+        const refreshed = await refreshDetail(result.data.client.id, generation);
+        if (!refreshed && isCurrentGeneration(generation)) drawerError.value = "状态已更新，但当前详情刷新失败，请重试。";
+      } catch (detailCause: unknown) {
+        if (isCurrentGeneration(generation)) drawerError.value = `状态已更新，但当前详情刷新失败：${errorMessage(detailCause, "请重试")}`;
+      }
     } else {
       revocationStatus.value = null;
       revocationError.value = "";
@@ -423,8 +459,8 @@ async function performStatus(action: StatusAction, record: OpenAPIClientView = c
   } catch (cause: unknown) {
     if (!isCurrentGeneration(generation)) return;
     if (httpStatus(cause) === 409) {
-      drawerError.value = conflictMessage(record.rowVersion);
-      try { await refreshDetail(record.id, generation); } catch { /* keep the explicit conflict message */ }
+      const refreshed = await refreshDetailContext(record, generation);
+      if (isCurrentGeneration(generation)) drawerError.value = conflictMessage(record.rowVersion, refreshed);
     } else {
       drawerError.value = errorMessage(cause, "客户端状态变更失败");
     }
@@ -489,6 +525,17 @@ function closeSecret() {
   secretOperation.value = "create";
 }
 
+function deactivatePage() {
+  mounted = false;
+  nextGeneration();
+  pageGeneration += 1;
+  requestVersion += 1;
+  secretPayload.value = null;
+  loading.value = false;
+  capabilitiesLoading.value = false;
+  clearDrawerState();
+}
+
 onMounted(() => {
   mounted = true;
   if (canRead.value) {
@@ -497,12 +544,17 @@ onMounted(() => {
   }
 });
 
-onBeforeUnmount(() => {
-  mounted = false;
-  nextGeneration();
-  requestVersion += 1;
-  secretPayload.value = null;
+onActivated(() => {
+  if (mounted) return;
+  mounted = true;
+  if (canRead.value) {
+    void load();
+    void loadCapabilities();
+  }
 });
+
+onDeactivated(deactivatePage);
+onBeforeUnmount(deactivatePage);
 
 defineExpose({
   clients,
@@ -518,6 +570,8 @@ defineExpose({
   detailReady,
   detailClientId,
   detailRowVersion,
+  drawerMode,
+  drawerVisible,
   canSaveScopes,
   auditItems,
   authStatus,
@@ -565,7 +619,7 @@ defineExpose({
                 <template #icon><RefreshCw :size="16" /></template>刷新
               </a-button>
             </a-tooltip>
-            <a-button v-if="canCreate" type="text" class="uvp-table-action uvp-table-action--add" @click="openCreate"><template #icon><Plus :size="16" /></template>新建客户端</a-button>
+            <a-button v-if="canCreate" type="primary" @click="openCreate"><template #icon><Plus :size="16" /></template>新建客户端</a-button>
           </template>
         </s-layout-search>
 
@@ -724,15 +778,6 @@ defineExpose({
   display: flex;
   flex-wrap: wrap;
   gap: 2px 4px;
-}
-
-.openapi-client-page :deep(.uvp-table-action--add) {
-  color: #246b55;
-}
-
-.openapi-client-page :deep(.uvp-table-action--add:hover) {
-  color: #14704d;
-  background: rgb(20 128 74 / 8%);
 }
 
 .openapi-client-table :deep(.arco-btn) {
