@@ -391,6 +391,9 @@ func encodeRFC3986(value []byte) string {
 }
 
 func validateJSONBody(body []byte) error {
+	if !utf8.Valid(body) {
+		return errInvalidInput
+	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.UseNumber()
 	if err := validateJSONValue(decoder); err != nil {
