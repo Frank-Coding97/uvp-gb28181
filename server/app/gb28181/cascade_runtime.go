@@ -21,6 +21,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -295,17 +296,17 @@ func startCascadeRuntime(cfg gbconfig.Config, server sipRuntimeServer, credentia
 	return nil
 }
 
-func stopCascadeRuntime(ctx context.Context) {
+func stopCascadeRuntime(ctx context.Context) error {
 	manager := cascadeRuntimeManager
 	cascadeRuntimeManager = nil
 	if manager == nil {
-		return
+		return nil
 	}
-	if err := manager.Shutdown(ctx); err != nil {
-		if app.ZapLog != nil {
-			app.ZapLog.Warn("国标级联运行时关闭失败,忽略继续关闭共享 SIP", zap.Error(err))
-		}
+	err := manager.Shutdown(ctx)
+	if err != nil {
+		app.Log(ctx).Named("cascade").Error("Cascade shutdown incomplete", zap.String("event", "cascade.shutdown_incomplete"), logging.Error(err))
 	}
+	return err
 }
 
 var _ cascaderuntime.ClientFactory = (*cascadePlatformClientFactory)(nil)

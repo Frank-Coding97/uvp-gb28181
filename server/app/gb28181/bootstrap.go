@@ -54,6 +54,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/scheduler/executors"
 	"uvplatform.cn/uvp-gb28181/app/utils/datascope"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -878,16 +879,17 @@ func buildPlaySigner(settings gbconfig.PlayAuthSettings, active, previous, jwtSe
 
 // stopSIPDependencies 反向拆解 startSIPDependencies 建立的运行时状态.
 // 用于配置热重启 —— 供 Reload 调用,不涉及 control plane 组件.
-func stopSIPDependencies(ctx context.Context) {
+func stopSIPDependencies(ctx context.Context) error {
+	var stopErr error
 	// Remove the facade before stopping any dependency it can call. Reload
 	// installs a fresh bundle only after all new business runtimes are ready.
 	clearZLMManagementController()
-	stopPlaybackRuntime(ctx)
+	stopErr = errors.Join(stopErr, shutdownComponentError("playback", stopPlaybackRuntime(ctx)))
 	stopRecordQueryRuntime()
 	stopFirmwareUpgradeRuntime()
 	stopPTZRuntime()
-	stopTalkRuntime(ctx)
-	stopRecordingRuntime()
+	stopErr = errors.Join(stopErr, shutdownComponentError("talk", stopTalkRuntime(ctx)))
+	stopErr = errors.Join(stopErr, shutdownComponentError("recording", stopRecordingRuntime()))
 	if positionHistoryPruneCancel != nil {
 		positionHistoryPruneCancel()
 		positionHistoryPruneCancel = nil
@@ -916,25 +918,29 @@ func stopSIPDependencies(ctx context.Context) {
 	if sipServer != nil {
 		sipServer.SetSnapshotSink(nil)
 	}
-	stopCascadeRuntime(ctx)
+	stopErr = errors.Join(stopErr, shutdownComponentError("cascade", stopCascadeRuntime(ctx)))
 	if sipServer != nil {
 		if err := sipServer.Shutdown(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 SIP 服务优雅关闭失败,忽略继续", zap.Error(err))
+			stopErr = errors.Join(stopErr, shutdownComponentError("sip", err))
+			app.Log(ctx).Named("sip").Error("SIP shutdown incomplete", zap.String("event", "sip.shutdown_incomplete"), logging.Error(err))
 		}
 		sipServer = nil
 	}
 	if securityRuntime != nil {
 		if err := securityRuntime.Close(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 安全事件持久化停止失败,忽略继续", zap.Error(err))
+			stopErr = errors.Join(stopErr, shutdownComponentError("security", err))
+			app.Log(ctx).Named("security").Error("Security persistence shutdown incomplete", zap.String("event", "security.shutdown_incomplete"), logging.Error(err))
 		}
 		securityRuntime = nil
 	}
 	gbroutes.SetSecurityRuntime(nil)
+	return stopErr
 }
 
-func stopPlaybackRuntime(ctx context.Context) {
+func stopPlaybackRuntime(ctx context.Context) error {
+	var stopErr error
 	if playbackService != nil {
-		_ = playbackService.Close(ctx)
+		stopErr = playbackService.Close(ctx)
 		playbackService = nil
 	}
 	playbackMetrics = nil
@@ -947,6 +953,7 @@ func stopPlaybackRuntime(ctx context.Context) {
 			u.SetPlaybackEndHook(nil)
 		}
 	}
+	return stopErr
 }
 
 func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
@@ -1129,7 +1136,8 @@ func setupRecordingRuntime(cfg gbconfig.Config) {
 	app.ZapLog.Info("GB28181 云端录像目录对账已装配", zap.Duration("interval", catalogInterval))
 }
 
-func stopRecordingRuntime() {
+func stopRecordingRuntime() error {
+	var stopErr error
 	device.SetStatusObserver(nil)
 	gbroutes.SetRecordingPlanStreamObserver(nil)
 	executors.SetRecordingPlanRuntime(nil)
@@ -1142,7 +1150,8 @@ func stopRecordingRuntime() {
 	}
 	if recordingCatalogScheduler != nil {
 		if err := recordingCatalogScheduler.Stop(); err != nil {
-			app.ZapLog.Warn("GB28181 云端录像目录对账停止超时", zap.Error(err))
+			stopErr = err
+			app.Log(context.Background()).Named("recording").Error("Recording catalog shutdown incomplete", zap.String("event", "recording.catalog_shutdown_incomplete"), logging.Error(err))
 		}
 		recordingCatalogScheduler = nil
 	}
@@ -1154,6 +1163,7 @@ func stopRecordingRuntime() {
 	recordingRepo = nil
 	gbroutes.SetCloudRecordingCatalogService(nil)
 	gbroutes.SetRecordingService(nil, nil, nil)
+	return stopErr
 }
 
 type broadcastSIPAdapter struct{ service *gbtalk.Service }
@@ -1238,7 +1248,8 @@ func setupTalkRuntime(cfg gbconfig.Config, server sipRuntimeServer) {
 	app.ZapLog.Info("GB28181 语音对讲 service / Hook / 租约扫描已装配")
 }
 
-func stopTalkRuntime(ctx context.Context) {
+func stopTalkRuntime(ctx context.Context) error {
+	var stopErr error
 	if talkCleanupWorker != nil {
 		talkCleanupWorker.Stop()
 		talkCleanupWorker = nil
@@ -1255,12 +1266,14 @@ func stopTalkRuntime(ctx context.Context) {
 	}
 	if service != nil {
 		if err := service.Shutdown(ctx); err != nil {
-			app.ZapLog.Warn("GB28181 语音对讲关闭清理存在失败", zap.Error(err))
+			stopErr = err
+			app.Log(ctx).Named("talk").Error("Talk shutdown incomplete", zap.String("event", "talk.shutdown_incomplete"), logging.Error(err))
 		}
 	}
 	talkSvc = nil
 	talkRepo = nil
 	gbroutes.SetTalkService(nil, nil)
+	return stopErr
 }
 
 // ReloadSIP 触发一次热重启:关旧 SIP 依赖 → 从 DB 重新读配置 → 启新的.
@@ -1292,7 +1305,10 @@ func ReloadSIP() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	stopSIPDependencies(ctx)
+	if err := stopSIPDependencies(ctx); err != nil {
+		sipRuntimeStatus.MarkFailed(err.Error())
+		return err
+	}
 	return startSIPDependencies(sipCfg, false)
 }
 
