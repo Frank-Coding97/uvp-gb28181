@@ -32,6 +32,11 @@ func TestOpenAPIDeviceTransferInvalidatesBackendTokensWithoutGlobalRevocation(t 
 		target  bool
 	}
 	var cases []tokenCase
+	type queuedCase struct {
+		request playauth.QueuedAuthorization
+		target  bool
+	}
+	var queuedCases []queuedCase
 	for _, deviceID := range []string{device.DeviceID, other.DeviceID} {
 		for _, generation := range []uint64{0, 17} {
 			binding := playauth.Binding{DeviceID: deviceID, ChannelID: "34020000002000110021",
@@ -45,8 +50,15 @@ func TestOpenAPIDeviceTransferInvalidatesBackendTokensWithoutGlobalRevocation(t 
 		}
 	}
 	for _, test := range cases {
-		_, err := authorization.VerifyContext(ctx, test.token, test.binding)
+		claims, err := authorization.VerifyContext(ctx, test.token, test.binding)
 		require.NoError(t, err)
+		if test.binding.MediaGeneration == 0 {
+			queued := playauth.QueuedAuthorization{AuthorizationGeneration: claims.AuthorizationGeneration,
+				DeviceID: claims.DeviceID, ChannelID: claims.ChannelID, DeviceEpoch: claims.DeviceEpoch,
+				App: claims.App, Stream: claims.Stream, MediaServerID: claims.MediaServerID}
+			require.NoError(t, authorization.ValidateQueuedAuthorizationContext(ctx, queued))
+			queuedCases = append(queuedCases, queuedCase{request: queued, target: test.target})
+		}
 	}
 	globalCutoff := playauth.RevokedBefore()
 	transfer := NewService(db, validatorVisibleDept1, WithTransferClock(func() time.Time { return now }))
@@ -58,6 +70,14 @@ func TestOpenAPIDeviceTransferInvalidatesBackendTokensWithoutGlobalRevocation(t 
 	verifyCases := func() {
 		for _, test := range cases {
 			_, err := authorization.VerifyContext(ctx, test.token, test.binding)
+			if test.target {
+				require.ErrorIs(t, err, playauth.ErrTokenRevoked)
+			} else {
+				require.NoError(t, err)
+			}
+		}
+		for _, test := range queuedCases {
+			err := authorization.ValidateQueuedAuthorizationContext(ctx, test.request)
 			if test.target {
 				require.ErrorIs(t, err, playauth.ErrTokenRevoked)
 			} else {
@@ -87,6 +107,16 @@ func TestOpenAPIDeviceTransferInvalidatesBackendTokensWithoutGlobalRevocation(t 
 	current.DeviceEpoch = 3
 	_, err = authorization.IssueDirectContext(ctx, current)
 	require.NoError(t, err, "a newly authorized snapshot can issue without reviving old tokens")
+	for _, test := range queuedCases {
+		err := authorization.BindAuthorizationContext(ctx, test.request, 17)
+		if test.target {
+			require.ErrorIs(t, err, playauth.ErrTokenRevoked)
+		} else {
+			require.NoError(t, err)
+		}
+		require.ErrorIs(t, restarted.ValidateQueuedAuthorizationContext(ctx, test.request), playauth.ErrAuthorizationNotFound,
+			"a lost in-memory queue record must not be reconstructed from caller fields")
+	}
 }
 
 // Legacy issuance exists only in this test fixture. Production issues v4.
