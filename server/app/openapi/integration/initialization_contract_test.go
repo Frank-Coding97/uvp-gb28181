@@ -46,3 +46,11 @@ func TestPostgreSQLInitializationRestoresJobResultsForeignKey(t *testing.T) {
 	require.Contains(t, body, "CONSTRAINT sys_job_results_ibfk_1 FOREIGN KEY (job_id) REFERENCES sys_jobs (id) ON DELETE CASCADE ON UPDATE CASCADE")
 	require.NotContains(t, body, "CONSTRAINT TEXT")
 }
+
+func TestPostgreSQLInitializationDoesNotContainRemovedTenantSchema(t *testing.T) {
+	body := readInitializationContractSQL(t, "postgresql_converted.sql")
+
+	for _, removedToken := range []string{"sys_tenants", "sys_user_tenant", "tenant_id", "platform_domain", "menu_permission"} {
+		require.NotContains(t, body, removedToken, "removed tenant schema token %q", removedToken)
+	}
+}

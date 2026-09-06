@@ -1308,22 +1308,6 @@ INSERT INTO sys_role_menu VALUES (2, 140336);
 INSERT INTO sys_role_menu VALUES (2, 140338);
 INSERT INTO sys_role_menu VALUES (2, 140339);
 INSERT INTO sys_role_menu VALUES (2, 140340);
-    id SERIAL,
-    created_at TIMESTAMP,
-    updated_at TIMESTAMP,
-    deleted_at TIMESTAMP,
-    created_by INTEGER NOT NULL DEFAULT 0,
-    name VARCHAR(100) NOT NULL,
-    code VARCHAR(50) NOT NULL,
-    description VARCHAR(500),
-    status SMALLINT NOT NULL DEFAULT 1,
-    domain VARCHAR(255),
-    platform_domain VARCHAR(255),
-    menu_permission VARCHAR(1000),
-    PRIMARY KEY (id)
-);
-
-
 -- Table structure for sys_users
 DROP TABLE IF EXISTS sys_users;
 CREATE TABLE sys_users (
