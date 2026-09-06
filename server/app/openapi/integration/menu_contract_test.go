@@ -72,19 +72,38 @@ func TestOpenAPIClientMenuMigrationSQLiteLifecycle(t *testing.T) {
 	require.Equal(t, snapshotBefore, openAPIClientMenuSnapshot(t, db), "re-running up must be idempotent")
 	require.Equal(t, apiLinksBefore, openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_menu_api"), "up must not create or rewrite button API links")
 
+	snapshotBeforeDown := openAPIClientMenuSnapshot(t, db)
 	runOpenAPIClientMenuSQL(t, db, openAPIClientMenuStem+"-down.sql")
-	require.Equal(t, int64(0), openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_menu WHERE path=? AND deleted_at IS NULL", openAPIClientMenuPath))
-	require.Equal(t, int64(0), openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_role_menu WHERE menu_id=?", pageID))
+	require.Equal(t, snapshotBeforeDown, openAPIClientMenuSnapshot(t, db), "down is forward-only and must preserve menu and role assignments")
 	require.Equal(t, apiLinksBefore, openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_menu_api"), "down must preserve button API links")
 	for _, button := range openAPIClientMenuButtons {
 		var parentID int64
 		require.NoError(t, db.Raw("SELECT parent_id FROM sys_menu WHERE permission=? AND deleted_at IS NULL", button.permission).Scan(&parentID).Error)
-		require.Zero(t, parentID, button.permission)
+		require.Equal(t, pageID, parentID, button.permission)
 	}
 	require.Equal(t, int64(1), openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_menu WHERE permission='unrelated:permission' AND deleted_at IS NULL"))
 
 	runOpenAPIClientMenuSQL(t, db, openAPIClientMenuStem+".sql")
-	require.Equal(t, int64(1), openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_menu WHERE path=? AND deleted_at IS NULL", openAPIClientMenuPath))
+	require.Equal(t, snapshotBeforeDown, openAPIClientMenuSnapshot(t, db), "re-running up after no-op down must remain idempotent")
+}
+
+func TestOpenAPIClientMenuDownPreservesPreexistingExactRows(t *testing.T) {
+	db := openAPIClientMenuFixture(t)
+	require.NoError(t, db.Exec(`
+INSERT INTO sys_menu
+  (parent_id,path,name,redirect,component,title,is_full,hide,disable,keep_alive,affix,link,iframe,svg_icon,icon,sort,type,is_link,permission,deleted_at)
+VALUES
+  (0,? ,?, '', ?, ?, 0,0,0,0,0,'',0,'','lucide:KeyRound',15,2,0,'',NULL)
+`, openAPIClientMenuPath, openAPIClientMenuName, openAPIClientMenuComponent, "OpenAPI 客户端").Error)
+	pageID := openAPIClientMenuPageID(t, db)
+	require.NoError(t, db.Exec("INSERT INTO sys_role_menu(role_id,menu_id) VALUES(2,?)", pageID).Error)
+
+	runOpenAPIClientMenuSQL(t, db, openAPIClientMenuStem+".sql")
+	snapshotBeforeDown := openAPIClientMenuSnapshot(t, db)
+	runOpenAPIClientMenuSQL(t, db, openAPIClientMenuStem+"-down.sql")
+
+	require.Equal(t, snapshotBeforeDown, openAPIClientMenuSnapshot(t, db), "down must not remove a pre-existing exact page or manual role assignment")
+	require.Equal(t, int64(1), openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_role_menu WHERE role_id=2 AND menu_id=?", pageID))
 }
 
 func TestOpenAPIClientMenuMigrationRejectsTargetPageConflict(t *testing.T) {
@@ -117,6 +136,15 @@ func TestOpenAPIClientMenuMigrationDoesNotGrantInactiveRoot(t *testing.T) {
 	require.Equal(t, int64(0), openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM sys_role_menu WHERE menu_id=?", pageID))
 }
 
+func TestOpenAPIClientMenuMySQLGuardDoesNotDropPermanentTable(t *testing.T) {
+	db := openAPIClientMenuFixture(t)
+	require.NoError(t, db.Exec("CREATE TABLE __openapi_client_menu_guard(id INTEGER PRIMARY KEY)").Error)
+	require.NoError(t, db.Exec("INSERT INTO __openapi_client_menu_guard(id) VALUES(7)").Error)
+
+	runOpenAPIClientMenuSQL(t, db, openAPIClientMenuStem+".sql")
+	require.Equal(t, int64(1), openAPIClientMenuCount(t, db, "SELECT COUNT(*) FROM __openapi_client_menu_guard WHERE id=7"), "temporary guard cleanup must not drop a permanent same-name table")
+}
+
 func TestOpenAPIClientMenuMigrationDialectContracts(t *testing.T) {
 	for _, suffix := range []string{"", "-postgresql", "-sqlserver"} {
 		t.Run(suffix, func(t *testing.T) {
@@ -132,11 +160,10 @@ func TestOpenAPIClientMenuMigrationDialectContracts(t *testing.T) {
 			require.NotContains(t, up, "insert into sys_api")
 			require.NotContains(t, up, "sys_menu_api")
 			require.NotContains(t, up, "sys_casbin")
-			require.NotContains(t, down, "delete from sys_menu_api")
-			require.NotContains(t, down, "delete from sys_api")
+			downWithoutComments := regexp.MustCompile(`(?m)^\s*--.*$`).ReplaceAllString(down, "")
+			require.Equal(t, "select 1;", strings.TrimSpace(downWithoutComments), "down must be a forward-only no-op")
 			for _, button := range openAPIClientMenuButtons {
 				require.Contains(t, up, strings.ToLower(button.permission))
-				require.Contains(t, down, strings.ToLower(button.permission))
 			}
 			// Existing T04 root identity is deliberately stable and status-gated.
 			normalized := strings.NewReplacer("[", "", "]", "", "`", "").Replace(up)
@@ -147,6 +174,18 @@ func TestOpenAPIClientMenuMigrationDialectContracts(t *testing.T) {
 			// A conditional duplicate-key guard is required so a foreign page or
 			// button parent cannot be silently skipped or overwritten.
 			require.Regexp(t, regexp.MustCompile(`(?s)insert[[:space:]]+into[[:space:]].*guard`), up)
+			switch suffix {
+			case "":
+				require.Contains(t, up, "drop temporary table if exists `__openapi_client_menu_guard`")
+				require.NotContains(t, up, "drop table `__openapi_client_menu_guard`")
+			case "-postgresql":
+				require.Contains(t, up, "create temp table if not exists pg_temp.__openapi_client_menu_guard")
+				require.Contains(t, up, "from pg_temp.__openapi_client_menu_guard")
+				require.Contains(t, up, "drop table if exists pg_temp.__openapi_client_menu_guard")
+			case "-sqlserver":
+				require.Contains(t, up, "object_id('tempdb..#openapi_client_menu_guard')")
+				require.Contains(t, up, "drop table #openapi_client_menu_guard")
+			}
 		})
 	}
 }
@@ -199,6 +238,10 @@ func runOpenAPIClientMenuSQLResult(db *gorm.DB, path string) error {
 		return err
 	}
 	sql := regexp.MustCompile(`(?m)^\s*--.*$`).ReplaceAllString(string(body), "")
+	// The contract test runs the MySQL script against SQLite. Keep the
+	// production DROP TEMPORARY semantics while translating only this
+	// dialect-specific statement for the SQLite fixture.
+	sql = strings.ReplaceAll(sql, "DROP TEMPORARY TABLE IF EXISTS", "DROP TABLE IF EXISTS")
 	for _, statement := range strings.Split(sql, ";") {
 		statement = strings.TrimSpace(statement)
 		if statement == "" {
@@ -248,6 +291,14 @@ func openAPIClientMenuSnapshot(t *testing.T, db *gorm.DB) string {
 			deleted = *row.Deleted
 		}
 		rowsText = append(rowsText, fmt.Sprintf("%d|%d|%s|%s|%s", row.ID, row.ParentID, row.Path, row.Name, deleted))
+	}
+	var roleRows []struct {
+		RoleID int64
+		MenuID int64
+	}
+	require.NoError(t, db.Raw("SELECT role_id,menu_id FROM sys_role_menu ORDER BY role_id,menu_id").Scan(&roleRows).Error)
+	for _, row := range roleRows {
+		rowsText = append(rowsText, fmt.Sprintf("role-menu:%d|%d", row.RoleID, row.MenuID))
 	}
 	return strings.TrimSpace(strings.ReplaceAll(strings.Join(rowsText, "\n"), "\r", ""))
 }

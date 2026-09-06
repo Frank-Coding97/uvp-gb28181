@@ -49,7 +49,7 @@ WHERE
       AND (NOT EXISTS (SELECT 1 FROM `sys_menu` p WHERE p.`deleted_at` IS NULL AND p.`path`='/gb28181/openapi-client' AND p.`name`='gb28181-openapi-client' AND p.`component`='gb28181/openapi-client/index' AND p.`parent_id`=0 AND p.`type`=2)
         OR b.`parent_id`<>(SELECT MIN(p.`id`) FROM `sys_menu` p WHERE p.`deleted_at` IS NULL AND p.`path`='/gb28181/openapi-client' AND p.`name`='gb28181-openapi-client' AND p.`component`='gb28181/openapi-client/index' AND p.`parent_id`=0 AND p.`type`=2))
   );
-DROP TABLE `__openapi_client_menu_guard`;
+DROP TEMPORARY TABLE IF EXISTS `__openapi_client_menu_guard`;
 
 INSERT INTO `sys_menu` (`parent_id`,`path`,`name`,`redirect`,`component`,`title`,`is_full`,`hide`,`disable`,`keep_alive`,`affix`,`link`,`iframe`,`svg_icon`,`icon`,`sort`,`type`,`is_link`,`permission`,`created_at`,`updated_at`,`created_by`)
 SELECT 0,'/gb28181/openapi-client','gb28181-openapi-client','','gb28181/openapi-client/index','OpenAPI 客户端',0,0,0,0,0,'',0,'','lucide:KeyRound',15,2,0,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1

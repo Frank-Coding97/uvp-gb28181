@@ -4,12 +4,12 @@
 -- The temporary duplicate-key guard makes a foreign page/button collision fail
 -- before any persistent row is changed.
 
-CREATE TEMP TABLE IF NOT EXISTS __openapi_client_menu_guard (
+CREATE TEMP TABLE IF NOT EXISTS pg_temp.__openapi_client_menu_guard (
   id SMALLINT PRIMARY KEY
 );
-INSERT INTO __openapi_client_menu_guard (id)
-SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM __openapi_client_menu_guard WHERE id=1);
-INSERT INTO __openapi_client_menu_guard (id)
+INSERT INTO pg_temp.__openapi_client_menu_guard (id)
+SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM pg_temp.__openapi_client_menu_guard WHERE id=1);
+INSERT INTO pg_temp.__openapi_client_menu_guard (id)
 SELECT 1
 WHERE
   EXISTS (
@@ -49,7 +49,7 @@ WHERE
       AND (NOT EXISTS (SELECT 1 FROM sys_menu p WHERE p.deleted_at IS NULL AND p.path='/gb28181/openapi-client' AND p.name='gb28181-openapi-client' AND p.component='gb28181/openapi-client/index' AND p.parent_id=0 AND p.type=2)
         OR b.parent_id<>(SELECT MIN(p.id) FROM sys_menu p WHERE p.deleted_at IS NULL AND p.path='/gb28181/openapi-client' AND p.name='gb28181-openapi-client' AND p.component='gb28181/openapi-client/index' AND p.parent_id=0 AND p.type=2))
   );
-DROP TABLE IF EXISTS __openapi_client_menu_guard;
+DROP TABLE IF EXISTS pg_temp.__openapi_client_menu_guard;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,is_full,hide,disable,keep_alive,affix,link,iframe,svg_icon,icon,sort,type,is_link,permission,created_at,updated_at,created_by)
 SELECT 0,'/gb28181/openapi-client','gb28181-openapi-client','','gb28181/openapi-client/index','OpenAPI 客户端',0,0,0,0,0,'',0,'','lucide:KeyRound',15,2,0,'',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
