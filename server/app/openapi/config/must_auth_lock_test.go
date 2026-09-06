@@ -99,6 +99,22 @@ func TestMustAuthStoreLoadRequiresExactlyOneHealthyRow(t *testing.T) {
 			require.NotContains(t, err.Error(), "constraint")
 		})
 	}
+
+	t.Run("extra singleton row", func(t *testing.T) {
+		db := newMustAuthTestDB(t, "load-extra-row")
+		createUnconstrainedSecurityTable(t, db)
+		require.NoError(t, db.Exec("INSERT INTO sys_openapi_security_state (id, must_auth_locked, locked_at, lock_version) VALUES (?, ?, ?, ?), (?, ?, ?, ?)", 1, false, nil, 0, 2, false, nil, 0).Error)
+		_, err := NewMustAuthStore(db, nil).Load(context.Background())
+		require.ErrorIs(t, err, ErrUnavailable)
+	})
+
+	t.Run("duplicate singleton row", func(t *testing.T) {
+		db := newMustAuthTestDB(t, "load-duplicate-row")
+		createUnconstrainedSecurityTable(t, db)
+		require.NoError(t, db.Exec("INSERT INTO sys_openapi_security_state (id, must_auth_locked, locked_at, lock_version) VALUES (?, ?, ?, ?), (?, ?, ?, ?)", 1, false, nil, 0, 1, false, nil, 0).Error)
+		_, err := NewMustAuthStore(db, nil).Load(context.Background())
+		require.ErrorIs(t, err, ErrUnavailable)
+	})
 }
 
 func TestMustAuthStoreLatchIsPersistentAndIdempotent(t *testing.T) {
@@ -226,10 +242,18 @@ func TestMustAuthStoreNilAndCanceledInputsFailClosed(t *testing.T) {
 	require.ErrorIs(t, err, ErrUnavailable)
 	_, err = (*MustAuthStore)(nil).Latch(context.Background())
 	require.ErrorIs(t, err, ErrUnavailable)
+	db := newMustAuthTestDB(t, "nil-context")
+	require.NoError(t, db.AutoMigrate(&models.SecurityState{}))
+	require.NoError(t, db.Create(&models.SecurityState{ID: 1}).Error)
+	store := NewMustAuthStore(db, nil)
+	_, err = store.Load(nil)
+	require.ErrorIs(t, err, ErrUnavailable)
+	_, err = store.Latch(nil)
+	require.ErrorIs(t, err, ErrUnavailable)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	db := newMustAuthTestDB(t, "canceled")
+	db = newMustAuthTestDB(t, "canceled")
 	require.NoError(t, db.AutoMigrate(&models.SecurityState{}))
 	require.NoError(t, db.Create(&models.SecurityState{ID: 1}).Error)
 	_, err = NewMustAuthStore(db, nil).Latch(ctx)
@@ -258,7 +282,7 @@ func openMustAuthFileDB(t *testing.T, path string) *gorm.DB {
 func createUnconstrainedSecurityTable(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	require.NoError(t, db.Exec(`CREATE TABLE sys_openapi_security_state (
-id INTEGER PRIMARY KEY,
+id INTEGER,
 must_auth_locked INTEGER NULL,
 locked_at DATETIME NULL,
 lock_version INTEGER NULL

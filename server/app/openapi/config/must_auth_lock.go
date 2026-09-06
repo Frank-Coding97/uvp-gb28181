@@ -21,7 +21,7 @@ var ErrUnavailable = errors.New("openapi must-auth security state unavailable")
 
 // State is the validated public snapshot returned by Load and Latch. LockedAt
 // is nil only for the valid, initial unlocked state; once latched it is a UTC
-// timestamp and LockVersion is exactly one for this one-way latch.
+// timestamp and LockVersion is positive for this one-way latch.
 type State struct {
 	ID             int64
 	MustAuthLocked bool
@@ -49,7 +49,7 @@ func NewMustAuthStore(db *gorm.DB, now func() time.Time) *MustAuthStore {
 // be read. Every failure is generalized to ErrUnavailable for fail-closed
 // composition by the HTTP/media root.
 func (s *MustAuthStore) Load(ctx context.Context) (State, error) {
-	if s == nil || s.db == nil {
+	if s == nil || s.db == nil || ctx == nil {
 		return State{}, ErrUnavailable
 	}
 	row, err := loadRow(s.db.WithContext(ctx))
@@ -65,7 +65,7 @@ func (s *MustAuthStore) Load(ctx context.Context) (State, error) {
 // second time. A pre-existing locked row is returned idempotently. No network
 // or other external I/O occurs while the short transaction is open.
 func (s *MustAuthStore) Latch(ctx context.Context) (State, error) {
-	if s == nil || s.db == nil {
+	if s == nil || s.db == nil || ctx == nil {
 		return State{}, ErrUnavailable
 	}
 
@@ -109,22 +109,41 @@ func loadRow(db *gorm.DB) (models.SecurityState, error) {
 	if db == nil {
 		return models.SecurityState{}, ErrUnavailable
 	}
-	// GORM maps a NULL database integer/bool into a Go zero value in some
-	// drivers. Probe the NOT NULL columns explicitly before scanning so a
-	// damaged table cannot masquerade as the valid unlocked state.
-	var nullableRows int64
-	nullCheck := db.Model(&models.SecurityState{}).
-		Where("id = ? AND (must_auth_locked IS NULL OR lock_version IS NULL)", mustAuthSecurityStateID).
-		Count(&nullableRows)
-	if nullCheck.Error != nil || nullableRows != 0 {
+	// Read exactly the security columns once. Pointer fields preserve NULL so a
+	// weak or damaged table cannot turn a missing value into Go's zero value.
+	var rows []securityStateProjection
+	result := db.Model(&models.SecurityState{}).
+		Select("id, must_auth_locked, locked_at, lock_version").
+		Order("id ASC").
+		Limit(2).
+		Find(&rows)
+	if result.Error != nil || result.RowsAffected != 1 || len(rows) != 1 {
 		return models.SecurityState{}, ErrUnavailable
 	}
-	var row models.SecurityState
-	result := db.Where("id = ?", mustAuthSecurityStateID).First(&row)
-	if result.Error != nil || result.RowsAffected != 1 || row.ID != mustAuthSecurityStateID || !validModelState(row) {
+	projection := rows[0]
+	if projection.ID == nil || *projection.ID != mustAuthSecurityStateID || projection.MustAuthLocked == nil || projection.LockVersion == nil {
+		return models.SecurityState{}, ErrUnavailable
+	}
+	row := models.SecurityState{
+		ID:             *projection.ID,
+		MustAuthLocked: *projection.MustAuthLocked,
+		LockVersion:    *projection.LockVersion,
+	}
+	if projection.LockedAt != nil {
+		lockedAt := projection.LockedAt.UTC().Round(0)
+		row.LockedAt = &lockedAt
+	}
+	if !validModelState(row) {
 		return models.SecurityState{}, ErrUnavailable
 	}
 	return row, nil
+}
+
+type securityStateProjection struct {
+	ID             *int64     `gorm:"column:id"`
+	MustAuthLocked *bool      `gorm:"column:must_auth_locked"`
+	LockedAt       *time.Time `gorm:"column:locked_at"`
+	LockVersion    *int64     `gorm:"column:lock_version"`
 }
 
 func validModelState(row models.SecurityState) bool {
