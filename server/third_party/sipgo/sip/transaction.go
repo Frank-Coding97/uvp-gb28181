@@ -171,6 +171,7 @@ type baseTx struct {
 
 	log         *slog.Logger
 	onTerminate FnTxTerminate
+	work        *lifecycleGate
 }
 
 func (tx *baseTx) String() string {
@@ -277,6 +278,26 @@ func (tx *baseTx) spinFsmWithError(in fsmInput, err error) {
 	tx.fsmErr = err
 	tx.spinFsmUnsafe(in)
 	tx.fsmMu.Unlock()
+}
+
+func (tx *baseTx) runTracked(fn func()) {
+	if tx.work == nil {
+		fn()
+		return
+	}
+	tx.work.run(fn)
+}
+
+func (tx *baseTx) goTracked(fn func()) {
+	if tx.work == nil {
+		go fn()
+		return
+	}
+	tx.work.goRun(fn)
+}
+
+func (tx *baseTx) afterFunc(duration time.Duration, fn func()) *time.Timer {
+	return time.AfterFunc(duration, func() { tx.runTracked(fn) })
 }
 
 func (tx *baseTx) Err() error {

@@ -19,7 +19,7 @@ type ClientTx struct {
 	onRetransmission FnTxResponse
 }
 
-func NewClientTx(key string, origin *Request, conn Connection, logger *slog.Logger) *ClientTx {
+func NewClientTx(key string, origin *Request, conn Connection, logger *slog.Logger, work ...*lifecycleGate) *ClientTx {
 	tx := &ClientTx{}
 	tx.key = key
 	// tx.conn = tpl
@@ -28,6 +28,9 @@ func NewClientTx(key string, origin *Request, conn Connection, logger *slog.Logg
 	tx.responses = make(chan *Response)
 	tx.done = make(chan struct{})
 	tx.log = logger
+	if len(work) > 0 {
+		tx.work = work[0]
+	}
 
 	tx.origin = origin // TODO:Due to subsequent request like ack we need to use clone to avoid races
 	return tx
@@ -56,7 +59,7 @@ func (tx *ClientTx) Init() error {
 		tx.mu.Lock()
 		tx.timer_a_time = Timer_A
 
-		tx.timer_a = time.AfterFunc(tx.timer_a_time, func() {
+		tx.timer_a = tx.afterFunc(tx.timer_a_time, func() {
 			tx.spinFsm(client_input_timer_a)
 		})
 		// Timer D is set to 32 seconds for unreliable transports
@@ -66,7 +69,7 @@ func (tx *ClientTx) Init() error {
 
 	// Timer B - timeout
 	tx.mu.Lock()
-	tx.timer_b = time.AfterFunc(Timer_B, func() {
+	tx.timer_b = tx.afterFunc(Timer_B, func() {
 		tx.spinFsmWithError(client_input_timer_b, fmt.Errorf("Timer_B timed out. %w", ErrTransactionTimeout))
 	})
 	tx.mu.Unlock()
@@ -199,7 +202,7 @@ func (tx *ClientTx) ack() {
 			slog.String("cancel_request", ack.Short()),
 		)
 		err := wrapTransportError(err)
-		go tx.spinFsmWithError(client_input_transport_err, err)
+		tx.goTracked(func() { tx.spinFsmWithError(client_input_transport_err, err) })
 	}
 }
 
@@ -216,7 +219,7 @@ func (tx *ClientTx) resend() {
 	if err != nil {
 		tx.log.Debug("Fail to resend request", "error", err, "req", tx.origin.StartLine())
 		err := wrapTransportError(err)
-		go tx.spinFsmWithError(client_input_transport_err, err)
+		tx.goTracked(func() { tx.spinFsmWithError(client_input_transport_err, err) })
 	}
 }
 

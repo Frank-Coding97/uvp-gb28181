@@ -275,7 +275,7 @@ func (tx *ClientTx) actInviteFinal() fsmInput {
 		tx.timer_b = nil
 	}
 
-	tx.timer_d = time.AfterFunc(tx.timer_d_time, func() {
+	tx.timer_d = tx.afterFunc(tx.timer_d_time, func() {
 		tx.spinFsm(client_input_timer_d)
 	})
 
@@ -303,7 +303,7 @@ func (tx *ClientTx) actFinal() fsmInput {
 
 	// tx.Log().Tracef("timer_d set to %v", tx.timer_d_time)
 	if tx.timer_d_time > 0 {
-		tx.timer_d = time.AfterFunc(tx.timer_d_time, func() {
+		tx.timer_d = tx.afterFunc(tx.timer_d_time, func() {
 			tx.spinFsm(client_input_timer_d)
 		})
 		return FsmInputNone
@@ -402,7 +402,7 @@ func (tx *ClientTx) actPassupAccept() fsmInput {
 		tx.timer_b = nil
 	}
 
-	tx.timer_m = time.AfterFunc(Timer_M, func() {
+	tx.timer_m = tx.afterFunc(Timer_M, func() {
 		tx.spinFsm(client_input_timer_m)
 	})
 	tx.mu.Unlock()

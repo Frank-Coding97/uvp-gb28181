@@ -18,15 +18,26 @@ type DeviceInfoTrigger interface {
 	Trigger(ctx context.Context, deviceID, dest, transport string)
 }
 
+// DeviceInfoAsyncOwner admits the post-200 query and lets the SIP owner close
+// admission and wait for accepted sends during shutdown.
+type DeviceInfoAsyncOwner interface {
+	Go(func()) bool
+}
+
 // uacDeviceInfoTrigger 默认实现:用 UAC 发 MESSAGE(承载 DeviceInfo Query XML)
 type uacDeviceInfoTrigger struct {
-	uac *uac.UAC
-	sn  atomic.Int64
+	uac   *uac.UAC
+	sn    atomic.Int64
+	owner DeviceInfoAsyncOwner
 }
 
 // NewUACDeviceInfoTrigger 包装 UAC 为 DeviceInfoTrigger
-func NewUACDeviceInfoTrigger(u *uac.UAC) DeviceInfoTrigger {
-	return &uacDeviceInfoTrigger{uac: u}
+func NewUACDeviceInfoTrigger(u *uac.UAC, owners ...DeviceInfoAsyncOwner) DeviceInfoTrigger {
+	var owner DeviceInfoAsyncOwner
+	if len(owners) > 0 {
+		owner = owners[0]
+	}
+	return &uacDeviceInfoTrigger{uac: u, owner: owner}
 }
 
 // Trigger 异步向设备发 DeviceInfo 查询(失败仅记日志,不阻塞注册响应)
@@ -34,7 +45,7 @@ func (t *uacDeviceInfoTrigger) Trigger(_ context.Context, deviceID, dest, transp
 	if t.uac == nil {
 		return
 	}
-	go func() {
+	work := func() {
 		sn := int(t.sn.Add(1))
 		body, err := manscdp.BuildDeviceInfoQuery(deviceID, sn)
 		if err != nil {
@@ -49,5 +60,10 @@ func (t *uacDeviceInfoTrigger) Trigger(_ context.Context, deviceID, dest, transp
 		}
 		app.ZapLog.Info("DeviceInfo 查询已发出",
 			zap.String("deviceId", deviceID), zap.String("transport", transport), zap.Int("sn", sn))
-	}()
+	}
+	if t.owner != nil {
+		_ = t.owner.Go(work)
+		return
+	}
+	go work()
 }
