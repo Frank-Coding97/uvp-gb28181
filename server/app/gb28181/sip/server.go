@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/emiago/sipgo"
 	siplib "github.com/emiago/sipgo/sip"
@@ -20,6 +19,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/asyncgroup"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -394,7 +394,9 @@ func (s *Server) registerHandlers() {
 	// UAC:用于注册成功后向设备发 MESSAGE(Catalog 查询等),也供 play service 发 INVITE/BYE
 	// 创建失败仅警告:注册仍可工作,只是没有 Catalog 自动触发,点播也不可用
 	if u, err := uac.New(s.ua, s.cfg.SIP.ServerID, s.cfg.SIP.Domain, s.cfg.SIP.AdvertiseIP, s.cfg.SIP.Port, s.cfg.SIP.DynamicAdvertise, sipgo.WithClientLogger(s.logger)); err != nil {
-		app.ZapLog.Warn("GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发", zap.Error(err))
+		app.Log(context.Background()).Named("gb28181.sip").Warn(
+			"GB28181 UAC 初始化失败,跳过注册→Catalog 自动触发",
+			zap.String("event", "gb28181.sip.uac_init_failed"), logging.Error(err))
 	} else {
 		s.uac = u
 		catalogTrigger := handler.NewUACCatalogTrigger(u)
@@ -409,7 +411,9 @@ func (s *Server) registerHandlers() {
 			if client, clientErr := sipgo.NewClient(s.ua, sipgo.WithClientLogger(s.logger)); clientErr == nil {
 				s.broadcastDialogs = sipgo.NewDialogServerCache(client, siplib.ContactHeader{Address: siplib.Uri{User: s.cfg.SIP.ServerID, Host: contactHost, Port: s.cfg.SIP.Port}})
 			} else {
-				app.ZapLog.Warn("GB28181 Broadcast UAS client 初始化失败", zap.Error(clientErr))
+				app.Log(context.Background()).Named("gb28181.sip").Warn(
+					"GB28181 Broadcast UAS client 初始化失败",
+					zap.String("event", "gb28181.sip.broadcast_client_init_failed"), logging.Error(clientErr))
 			}
 		}
 	}
@@ -476,38 +480,49 @@ func (s *Server) handleBroadcastAck(req *siplib.Request, tx siplib.ServerTransac
 		return
 	}
 	callID := requestCallID(req)
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.sip")
 	if _, ok := s.broadcastSessions.Load(callID); !ok {
 		return
 	}
 	if err := s.broadcastDialogs.ReadAck(req, tx); err != nil {
-		app.ZapLog.Warn("处理设备 Broadcast ACK 失败", zap.String("callId", callID), zap.Error(err))
+		logger.Warn("处理设备 Broadcast ACK 失败",
+			zap.String("event", "gb28181.sip.broadcast_ack_failed"), zap.String("call_id", callID), logging.Error(err))
 		return
 	}
 	if s.broadcastProcessor != nil {
 		if err := s.broadcastProcessor.OnBroadcastAck(context.Background(), callID); err != nil {
-			app.ZapLog.Warn("激活 Broadcast 会话失败", zap.String("callId", callID), zap.Error(err))
+			logger.Warn("激活 Broadcast 会话失败",
+				zap.String("event", "gb28181.sip.broadcast_activation_failed"), zap.String("call_id", callID),
+				logging.Error(err))
 		}
 	}
 }
 
 func (s *Server) handleBye(req *siplib.Request, tx siplib.ServerTransaction) {
 	callID := requestCallID(req)
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.sip")
 	if _, ok := s.broadcastSessions.Load(callID); ok && s.broadcastDialogs != nil {
 		if err := s.broadcastDialogs.ReadBye(req, tx); err != nil {
-			app.ZapLog.Warn("处理设备 Broadcast BYE 失败", zap.String("callId", callID), zap.Error(err))
+			logger.Warn("处理设备 Broadcast BYE 失败",
+				zap.String("event", "gb28181.sip.broadcast_bye_failed"), zap.String("call_id", callID), logging.Error(err))
 			return
 		}
 		s.broadcastSessions.Delete(callID)
 		if s.broadcastProcessor != nil {
 			if err := s.broadcastProcessor.OnBroadcastBye(context.Background(), callID); err != nil {
-				app.ZapLog.Warn("设备 Broadcast BYE 清理失败", zap.String("callId", callID), zap.Error(err))
+				logger.Warn("设备 Broadcast BYE 清理失败",
+					zap.String("event", "gb28181.sip.broadcast_bye_cleanup_failed"), zap.String("call_id", callID),
+					logging.Error(err))
 			}
 		}
 		return
 	}
 	if strings.HasPrefix(callID, "talk-") && s.uac != nil {
 		if _, err := s.uac.HandleTalkBye(req, tx); err != nil {
-			app.ZapLog.Warn("处理设备 TALK BYE 失败", zap.String("callId", callID), zap.Error(err))
+			logger.Warn("处理设备 TALK BYE 失败",
+				zap.String("event", "gb28181.sip.talk_bye_failed"), zap.String("call_id", callID), logging.Error(err))
 		}
 		return
 	}
@@ -645,9 +660,14 @@ func (s *Server) Start() error {
 			s.listenerWork = &asyncgroup.Group{}
 		}
 		s.listenerWork.Go(func() {
-			app.ZapLog.Info("GB28181 SIP 监听启动", zap.String("transport", t), zap.String("addr", addr))
+			logger := app.Log(ctx).Named("gb28181.sip")
+			logger.Info("GB28181 SIP 监听启动",
+				zap.String("event", "gb28181.sip.listener_started"),
+				zap.String("transport", t), zap.String("address", addr))
 			if err := s.srv.ListenAndServe(ctx, t, addr); err != nil && ctx.Err() == nil {
-				app.ZapLog.Error("GB28181 SIP 监听失败", zap.String("transport", t), zap.Error(err))
+				logger.Error("GB28181 SIP 监听失败",
+					zap.String("event", "gb28181.sip.listener_failed"),
+					zap.String("transport", t), zap.String("address", addr), logging.Error(err))
 				if s.onError != nil {
 					s.onError(err)
 				}
@@ -703,10 +723,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		}
 		// Trace must be the final producer closed by the SIP owner.
 		err = errors.Join(err, s.shutdownTrace(ctx))
+		logger := app.Log(ctx).Named("gb28181.sip")
 		if err == nil {
-			app.ZapLog.Info("GB28181 SIP 服务已优雅关闭")
+			logger.Info("GB28181 SIP 服务已优雅关闭",
+				zap.String("event", "gb28181.sip.shutdown_complete"))
 		} else {
-			app.ZapLog.Warn("GB28181 SIP 服务关闭未完成", zap.Error(err))
+			logger.Warn("GB28181 SIP 服务关闭未完成",
+				zap.String("event", "gb28181.sip.shutdown_incomplete"), logging.Error(err))
 		}
 		return err
 	})

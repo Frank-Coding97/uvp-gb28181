@@ -19,6 +19,7 @@ import (
 	gbsecurity "uvplatform.cn/uvp-gb28181/app/gb28181/security"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/trace/diagnosis"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"go.uber.org/zap"
 )
@@ -164,6 +165,9 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	if from := req.From(); from != nil {
 		deviceID = from.Address.User
 	}
+	callID, cseq := sipPairKey(req)
+	ctx := context.Background()
+	logger := app.Log(ctx).Named("gb28181.register")
 	h.recordBegin(req, metrics.TxRegister, deviceID)
 	advertised := advertisedRegisterVersion(req)
 	if deviceID == "" {
@@ -190,10 +194,10 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	}
 	if claimedServerID != h.cfg.SIP.ServerID {
 		h.recordSecurity(req, deviceID, gbsecurity.ReasonServerMismatch)
-		app.ZapLog.Warn("GB28181 注册拒绝:上级平台编码与平台 ServerID 不匹配",
-			zap.String("deviceId", deviceID),
-			zap.String("gotServerId", claimedServerID),
-			zap.String("wantServerId", h.cfg.SIP.ServerID))
+		logger.Warn("GB28181 注册拒绝:上级平台编码与平台 ServerID 不匹配",
+			zap.String("event", "gb28181.register.server_id_mismatch"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			zap.String("server_id", claimedServerID), zap.String("expected_server_id", h.cfg.SIP.ServerID))
 		_ = tx.Respond(h.newResponse(req, 403, "Server ID mismatch", nil))
 		h.recordEnd(req, 403, false)
 		h.emitRegisterFailure(req, deviceID, "", diagnosis.CodeServerIDMismatch, 403)
@@ -265,7 +269,9 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	})
 	if err != nil || expected.Response != cred.Response {
 		h.recordSecurity(req, deviceID, gbsecurity.ReasonDigestFailure)
-		app.ZapLog.Warn("GB28181 注册鉴权失败", zap.String("deviceId", deviceID))
+		logger.Warn("GB28181 注册鉴权失败",
+			zap.String("event", "gb28181.register.digest_failed"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		status, _ := h.respondChallenge(req, tx)
 		h.recordEnd(req, status, false)
 		h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeDigestFailure, status)
@@ -290,17 +296,21 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 
 	// 鉴权通过:判断注册 or 注销
 	expires := parseExpires(req)
-	ctx := context.Background()
 	if expires == 0 {
 		// 注销
 		if err := h.handleUnregister(ctx, deviceID); err != nil {
-			app.ZapLog.Error("GB28181 注销处理失败", zap.String("deviceId", deviceID), zap.Error(err))
+			logger.Error("GB28181 注销处理失败",
+				zap.String("event", "gb28181.register.unregister_failed"),
+				zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+				logging.Error(err))
 			_ = tx.Respond(h.newResponse(req, 500, "Server error", nil))
 			h.recordEnd(req, 500, false)
 			h.failAndEmitRegister(req, deviceID, cred.Nonce, diagnosis.CodeInternalError, 500)
 			return
 		}
-		app.ZapLog.Info("GB28181 设备注销", zap.String("deviceId", deviceID))
+		logger.Info("GB28181 设备注销",
+			zap.String("event", "gb28181.register.unregistered"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
 		_ = tx.Respond(h.buildOKWithExpires(req, 0))
 		h.recordEnd(req, 200, true)
 		h.finishRegisterAttempt(req, deviceID, cred.Nonce)
@@ -320,7 +330,10 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 	isFirst, err := h.handleRegister(ctx, info, h.keepaliveInterval)
 	if err != nil {
 		status, reason := registerFailureResponse(err)
-		app.ZapLog.Error("GB28181 注册状态更新失败", zap.String("deviceId", deviceID), zap.Error(err))
+		logger.Error("GB28181 注册状态更新失败",
+			zap.String("event", "gb28181.register.state_update_failed"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			logging.Error(err))
 		_ = tx.Respond(h.newResponse(req, status, reason, nil))
 		h.recordEnd(req, status, false)
 		code := diagnosis.CodeInternalError
@@ -331,12 +344,16 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		return
 	}
 	if err := h.security.TrustEndpoint(deviceID, req.Transport(), ip, time.Duration(expires)*time.Second); err != nil {
-		app.ZapLog.Warn("GB28181 注册安全端点更新失败", zap.String("deviceId", deviceID), zap.Error(err))
+		logger.Warn("GB28181 注册安全端点更新失败",
+			zap.String("event", "gb28181.register.endpoint_trust_failed"),
+			zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+			logging.Error(err))
 	}
-	app.ZapLog.Info("GB28181 设备注册成功",
-		zap.String("deviceId", deviceID),
+	logger.Info("GB28181 设备注册成功",
+		zap.String("event", "gb28181.register.succeeded"),
+		zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
 		zap.String("transport", req.Transport()),
-		zap.Bool("isFirst", isFirst))
+		zap.Bool("is_first", isFirst))
 	_ = tx.Respond(h.buildOKWithExpires(req, expires))
 	h.recordEnd(req, 200, true)
 	h.finishRegisterAttempt(req, deviceID, cred.Nonce)
@@ -349,7 +366,10 @@ func (h *RegisterHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 		transport := req.Transport()
 		if h.subscriptionWaker != nil {
 			if err := h.subscriptionWaker.WakeDeviceByCode(ctx, deviceID); err != nil {
-				app.ZapLog.Warn("GB28181 设备恢复订阅失败", zap.String("deviceId", deviceID), zap.Error(err))
+				logger.Warn("GB28181 设备恢复订阅失败",
+					zap.String("event", "gb28181.register.subscription_wake_failed"),
+					zap.String("device_id", deviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+					logging.Error(err))
 			}
 		}
 		if h.catalogTrigger != nil && gbconfig.SyncChannelsOnOnline() {

@@ -39,19 +39,20 @@ func (t *uacCatalogTrigger) Trigger(ctx context.Context, deviceID, dest, transpo
 	}
 	scope := context.WithoutCancel(ctx)
 	app.BackgroundWork.Go(func() {
+		logger := app.Log(scope).Named("gb28181.catalog")
 		sn := int(t.sn.Add(1))
 		body, err := manscdp.BuildCatalogQuery(deviceID, sn)
 		if err != nil {
-			app.Log(scope).Named("catalog").Warn("Catalog 查询 XML 构造失败", zap.String("event", "catalog.query_build_failed"), zap.String("deviceId", deviceID), logging.Error(err))
+			logger.Warn("Catalog 查询 XML 构造失败", zap.String("event", "catalog.query_build_failed"), zap.String("device_id", deviceID), logging.Error(err))
 			return
 		}
 		if err := t.uac.SendMessage(scope, deviceID, dest, transport, body); err != nil {
-			app.Log(scope).Named("catalog").Warn("Catalog 查询发送失败", zap.String("event", "catalog.query_send_failed"),
-				zap.String("deviceId", deviceID), zap.String("dest", dest),
+			logger.Warn("Catalog 查询发送失败", zap.String("event", "catalog.query_send_failed"),
+				zap.String("device_id", deviceID), zap.String("destination", dest),
 				zap.String("transport", transport), logging.Error(err))
 			return
 		}
-		app.Log(scope).Named("catalog").Info("Catalog 查询已发出", zap.String("event", "catalog.query_sent"),
-			zap.String("deviceId", deviceID), zap.String("transport", transport), zap.Int("sn", sn))
+		logger.Info("Catalog 查询已发出", zap.String("event", "catalog.query_sent"),
+			zap.String("device_id", deviceID), zap.String("transport", transport), zap.Int("sn", sn))
 	})
 }
