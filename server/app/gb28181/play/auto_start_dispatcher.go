@@ -241,7 +241,7 @@ func (d *AutoStartDispatcher) worker() {
 		ctx, cancel := context.WithTimeout(context.Background(), d.deadline)
 		result, err := d.ensure.EnsureLive(ctx, job.req)
 		cancel()
-		logAutoStartResult(job, result, err)
+		logAutoStartResult(job, result, err, ctx)
 		d.finish(job.key)
 	}
 }
@@ -274,10 +274,12 @@ func (b *autoStartBucket) refund(burst int) {
 	}
 }
 
-func logAutoStartResult(job autoStartJob, result *Result, err error) {
-	if app.ZapLog == nil {
-		return
+func logAutoStartResult(job autoStartJob, result *Result, err error, requestContexts ...context.Context) {
+	ctx := context.Background()
+	if len(requestContexts) > 0 && requestContexts[0] != nil {
+		ctx = requestContexts[0]
 	}
+	logger := app.Log(ctx).Named("play.auto_start")
 	fields := []zap.Field{
 		zap.String("reason", autoStartResultReason(err)),
 		zap.String("deviceId", job.key.deviceID),
@@ -285,13 +287,15 @@ func logAutoStartResult(job autoStartJob, result *Result, err error) {
 		zap.Int64("nodeId", job.key.requiredNode),
 	}
 	if err != nil {
-		app.ZapLog.Warn("自动点播后台启动失败", fields...)
+		fields = append(fields, zap.String("event", "play.auto_start.failed"))
+		logger.Warn("自动点播后台启动失败", fields...)
 		return
 	}
 	if result != nil {
 		fields = append(fields, zap.String("streamId", result.StreamID))
 	}
-	app.ZapLog.Info("自动点播后台启动成功", fields...)
+	fields = append(fields, zap.String("event", "play.auto_start.succeeded"))
+	logger.Info("自动点播后台启动成功", fields...)
 }
 
 func autoStartResultReason(err error) string {

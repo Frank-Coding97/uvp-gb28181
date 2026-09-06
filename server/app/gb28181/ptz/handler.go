@@ -57,17 +57,16 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		return err
 	}
 	if !matched {
-		logUnmatchedPTZResponse(deviceCode, callID, cseq, *head, candidates, reason, body)
+		logUnmatchedPTZResponse(deviceCode, callID, cseq, *head, candidates, reason, body, ctx)
 		return nil
 	}
 	if operation.CmdType == manscdp.CmdDeviceControl && !operation.ResponseRequired {
-		if app.ZapLog != nil {
-			app.ZapLog.Warn("GB28181 单向操作收到非预期业务应答，保持 sent",
-				zap.String("operationId", operation.OperationID),
-				zap.String("action", operation.Action),
-				zap.String("bodySummary", summarizePTZBody(body)),
-			)
-		}
+		app.Log(ctx).Named("ptz").Warn("GB28181 单向操作收到非预期业务应答，保持 sent",
+			zap.String("event", "ptz.response.unexpected"),
+			zap.String("operationId", operation.OperationID),
+			zap.String("action", operation.Action),
+			zap.String("bodySummary", summarizePTZBody(body)),
+		)
 		return nil
 	}
 	if reason == "attempt" && (operation.DeviceCode != deviceCode || operationTargetCode(operation) != head.DeviceID ||
@@ -190,11 +189,13 @@ func operationProtocolProfile(operation gbmodels.GbPTZOperation) protocol.Profil
 	return profile
 }
 
-func logUnmatchedPTZResponse(deviceCode, callID, cseq string, head manscdp.MessageHead, candidateIDs []string, reason string, body []byte) {
-	if app.ZapLog == nil {
-		return
+func logUnmatchedPTZResponse(deviceCode, callID, cseq string, head manscdp.MessageHead, candidateIDs []string, reason string, body []byte, requestContexts ...context.Context) {
+	ctx := context.Background()
+	if len(requestContexts) > 0 && requestContexts[0] != nil {
+		ctx = requestContexts[0]
 	}
-	app.ZapLog.Warn("GB28181 PTZ 应答无法唯一关联",
+	app.Log(ctx).Named("ptz").Warn("GB28181 PTZ 应答无法唯一关联",
+		zap.String("event", "ptz.response.unmatched"),
 		zap.String("deviceCode", deviceCode),
 		zap.String("channelCode", head.DeviceID),
 		zap.Int("sn", headSN(head)),
@@ -207,11 +208,13 @@ func logUnmatchedPTZResponse(deviceCode, callID, cseq string, head manscdp.Messa
 	)
 }
 
-func logIgnoredPTZResponse(operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte) {
-	if app.ZapLog == nil {
-		return
+func logIgnoredPTZResponse(operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte, requestCtx ...context.Context) {
+	ctx := context.Background()
+	if len(requestCtx) > 0 && requestCtx[0] != nil {
+		ctx = requestCtx[0]
 	}
-	app.ZapLog.Warn("GB28181 PTZ 应答已关联但 operation 未推进，忽略事实写入",
+	app.Log(ctx).Named("ptz").Warn("GB28181 PTZ 应答已关联但 operation 未推进，忽略事实写入",
+		zap.String("event", "ptz.response.ignored"),
 		zap.String("operationId", operation.OperationID),
 		zap.String("cmdType", head.CmdType),
 		zap.String("responseCallId", callID),
@@ -288,13 +291,12 @@ func (s *Service) applyDeviceControlResponse(ctx context.Context, operation gbmo
 		if parseErr == nil {
 			parseErr = fmt.Errorf("DeviceControl 应答标识与 operation 不一致")
 		}
-		if app.ZapLog != nil {
-			app.ZapLog.Warn("GB28181 DeviceControl 应答协议非法",
-				zap.String("operationId", operation.OperationID),
-				zap.String("bodySummary", summarizePTZBody(body)),
-				zap.Error(parseErr),
-			)
-		}
+		app.Log(ctx).Named("ptz").Warn("GB28181 DeviceControl 应答协议非法",
+			zap.String("event", "ptz.response.protocol_invalid"),
+			zap.String("operationId", operation.OperationID),
+			zap.String("bodySummary", summarizePTZBody(body)),
+			zap.Error(parseErr),
+		)
 		return s.applyRejectedPTZResponse(ctx, operation, callID, cseq, "", ptzErrorProtocolInvalid, parseErr.Error())
 	}
 	if response.Result == manscdp.DeviceControlResultError {
