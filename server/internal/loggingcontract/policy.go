@@ -20,6 +20,7 @@ import (
 
 const (
 	zapPackagePath     = "go.uber.org/zap"
+	zapCorePackagePath = "go.uber.org/zap/zapcore"
 	logPackagePath     = "log"
 	slogPackagePath    = "log/slog"
 	fmtPackagePath     = "fmt"
@@ -248,6 +249,7 @@ type policyAnalyzer struct {
 	usage      []int
 	report     *PolicyReport
 	origins    map[types.Object][]ast.Expr
+	fieldFuncs map[*types.Func][]ast.Expr
 }
 
 func analyzePackage(root string, pkg *packages.Package, exceptions []LegacyException, usage []int, report *PolicyReport) {
@@ -272,13 +274,14 @@ func analyzePackage(root string, pkg *packages.Package, exceptions []LegacyExcep
 			Description: "package was reported ill-typed without a detailed loader error",
 		})
 	}
-	analyzer := policyAnalyzer{pkg: pkg, exceptions: exceptions, usage: usage, report: report, origins: make(map[types.Object][]ast.Expr)}
+	analyzer := policyAnalyzer{pkg: pkg, exceptions: exceptions, usage: usage, report: report, origins: make(map[types.Object][]ast.Expr), fieldFuncs: make(map[*types.Func][]ast.Expr)}
 	for _, syntaxFile := range pkg.Syntax {
 		path := analyzer.filePath(syntaxFile)
 		if path == "" || !analyzer.compiledFile(path) {
 			continue
 		}
 		analyzer.collectOrigins(syntaxFile, pkg.TypesInfo)
+		analyzer.collectFieldFunctions(syntaxFile, pkg.TypesInfo)
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			continue
@@ -352,6 +355,47 @@ func (a policyAnalyzer) collectOrigins(file *ast.File, info *types.Info) {
 	})
 }
 
+// collectFieldFunctions keeps helper analysis one hop deep and intra-package.
+// A helper with a zap.Field/slog.Attr result is inspected at its return
+// expressions when it is used as a logger field. This catches wrappers such
+// as func(payload any) zap.Field { return zap.Any(...)} without attempting a
+// general interprocedural call graph.
+func (a policyAnalyzer) collectFieldFunctions(file *ast.File, info *types.Info) {
+	if file == nil || info == nil || a.fieldFuncs == nil {
+		return
+	}
+	for _, declaration := range file.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil || function.Name == nil {
+			continue
+		}
+		object, ok := info.Defs[function.Name].(*types.Func)
+		if !ok || !returnsLoggingField(object) {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if _, nested := node.(*ast.FuncLit); nested {
+				return false
+			}
+			if statement, ok := node.(*ast.ReturnStmt); ok {
+				a.fieldFuncs[object] = append(a.fieldFuncs[object], statement.Results...)
+			}
+			return true
+		})
+	}
+}
+
+func returnsLoggingField(function *types.Func) bool {
+	if function == nil {
+		return false
+	}
+	signature, ok := function.Type().(*types.Signature)
+	if !ok || signature.Results() == nil || signature.Results().Len() == 0 {
+		return false
+	}
+	return isLoggingFieldType(signature.Results().At(0).Type())
+}
+
 func (a policyAnalyzer) walkBody(file *ast.File, rel string, body *ast.BlockStmt, function, receiver string, info *types.Info) {
 	a.walkNode(file, rel, body, function, receiver, info)
 }
@@ -371,14 +415,22 @@ func (a policyAnalyzer) walkNode(file *ast.File, rel string, node ast.Node, func
 				a.addFinding(PolicyFinding{Kind: PolicyStdoutBypass, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Line: position.Line, Column: position.Column, Description: "stdout/stderr write bypasses the unified logger"})
 			}
 		}
-		if isLoggerConstructor(call, info) {
+		if isLoggerConstructor(call, info, a.origins) {
 			if !a.allowed(rel, function, receiver, PolicyLoggerConstructor) {
 				a.addFinding(PolicyFinding{Kind: PolicyLoggerConstructor, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Line: position.Line, Column: position.Column, Description: "logger is constructed at a business call site instead of being injected or using the shared bridge"})
 			}
+		} else if likelyUnresolvedLoggerFactory(call, info, a.origins) {
+			if a.allowed(rel, function, receiver, PolicyUnresolvedLogger) {
+				return true
+			}
+			a.addFinding(PolicyFinding{Kind: PolicyUnresolvedLogger, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Line: position.Line, Column: position.Column, Description: "logger-returning function value could not be traced to a reviewed constructor"})
 		}
 		if loggerCall, ok := identifyLoggerCall(call, info); ok {
 			a.inspectLoggerCall(call, loggerCall, rel, function, receiver, position, info)
 		} else if likelyUnresolvedLoggerCall(call, info) {
+			if a.allowed(rel, function, receiver, PolicyUnresolvedLogger) {
+				return true
+			}
 			a.addFinding(PolicyFinding{Kind: PolicyUnresolvedLogger, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Method: selectorMethod(call), Line: position.Line, Column: position.Column, Description: "suspected logger call could not be resolved by go/types"})
 		}
 		return true
@@ -392,6 +444,9 @@ func (a policyAnalyzer) inspectLoggerCall(call *ast.CallExpr, loggerCall policyL
 		if !isStringConstant(info, call.Args[loggerCall.messageIndex]) && !a.allowed(rel, function, receiver, PolicyDynamicMessage) {
 			a.addFinding(PolicyFinding{Kind: PolicyDynamicMessage, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Method: loggerCall.method, Argument: "message", Line: position.Line, Column: position.Column, Description: "logger message is not a compile-time string constant"})
 		}
+	}
+	if isDynamicSugaredFormat(loggerCall, call) && !a.allowed(rel, function, receiver, PolicyDynamicMessage) {
+		a.addFinding(PolicyFinding{Kind: PolicyDynamicMessage, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Method: loggerCall.method, Argument: "format", Line: position.Line, Column: position.Column, Description: "formatted logger message has runtime arguments; use a static message with typed fields"})
 	}
 	for index := loggerCall.inspectStart; index < len(call.Args); index++ {
 		if containsErrorStringFlow(call.Args[index], info, a.origins, make(map[types.Object]bool)) {
@@ -479,6 +534,7 @@ func (a policyAnalyzer) inspectFieldExpression(expression ast.Expr, mode policyF
 	}
 	if isUnknownLogField(expression, info) {
 		a.addFinding(PolicyFinding{Kind: PolicyUnknownField, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Method: method, Argument: "field", Line: position.Line, Column: position.Column, Description: "unknown logger field requires an explicit safe representation"})
+		return
 	}
 	if info == nil {
 		return
@@ -515,6 +571,30 @@ func (a policyAnalyzer) inspectFieldExpression(expression ast.Expr, mode policyF
 			for _, argument := range value.Args {
 				a.inspectFieldExpression(argument, mode, rel, function, receiver, method, position, info, seen)
 			}
+			return
+		}
+		fieldFunction, _ := functionObject(value.Fun, info)
+		if fieldFunction == nil || !returnsLoggingField(fieldFunction) {
+			if isLoggingFieldType(infoTypeOf(info, value)) {
+				a.addFinding(PolicyFinding{Kind: PolicyUnresolvedLogger, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Method: method, Argument: "field", Line: position.Line, Column: position.Column, Description: "logger field helper could not be resolved to an inspectable or trusted field constructor"})
+			}
+			return
+		}
+		if origins := a.fieldFuncs[fieldFunction]; len(origins) != 0 {
+			if seen[fieldFunction] {
+				return
+			}
+			seen[fieldFunction] = true
+			for _, origin := range origins {
+				if containsErrorStringFlow(origin, info, a.origins, make(map[types.Object]bool)) {
+					a.addFinding(PolicyFinding{Kind: PolicyDynamicErrorString, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Method: method, Argument: "field", Line: position.Line, Column: position.Column, Description: "error text is rendered inside a logger field; use a typed safe error field"})
+				}
+				a.inspectFieldExpression(origin, mode, rel, function, receiver, method, position, info, seen)
+			}
+			return
+		}
+		if !isTrustedLoggingFieldFunction(fieldFunction) {
+			a.addFinding(PolicyFinding{Kind: PolicyUnresolvedLogger, File: rel, PackagePath: a.pkg.PkgPath, Package: a.pkg.Name, Function: function, Receiver: receiver, Method: method, Argument: "field", Line: position.Line, Column: position.Column, Description: "logger field helper could not be inspected or matched to a trusted field constructor"})
 		}
 	}
 }
@@ -554,6 +634,9 @@ func (a policyAnalyzer) allowed(file, function, receiver string, kind PolicyFind
 		return true
 	}
 	if isLoggingInfrastructureSymbol(file, function, receiver) {
+		if kind == PolicyUnresolvedLogger {
+			return filepath.ToSlash(file) == "app/utils/logging/logger.go" && receiver == "" && function == "WithIdentity"
+		}
 		return kind == PolicyLoggerConstructor || kind == PolicyStdlibLog || kind == PolicyStdoutBypass
 	}
 	if isFileJobLoggerSymbol(file, function, receiver) {
@@ -742,10 +825,39 @@ func selectorObject(info *types.Info, selector *ast.SelectorExpr) types.Object {
 	return nil
 }
 
-func isLoggerConstructor(call *ast.CallExpr, info *types.Info) bool {
-	object := callObject(info, call)
-	function, ok := object.(*types.Func)
-	if !ok || function.Pkg() == nil {
+func isLoggerConstructor(call *ast.CallExpr, info *types.Info, origins map[types.Object][]ast.Expr) bool {
+	functions := loggerConstructorFunctions(call, info, origins)
+	for _, function := range functions {
+		if isIndependentLoggerConstructor(call, info, function) {
+			return true
+		}
+	}
+	return false
+}
+
+func loggerConstructorFunctions(call *ast.CallExpr, info *types.Info, origins map[types.Object][]ast.Expr) []*types.Func {
+	if call == nil || info == nil {
+		return nil
+	}
+	if function, ok := callObject(info, call).(*types.Func); ok {
+		return []*types.Func{function}
+	}
+	ident, ok := call.Fun.(*ast.Ident)
+	if !ok {
+		return nil
+	}
+	object := info.ObjectOf(ident)
+	functions := make([]*types.Func, 0, len(origins[object]))
+	for _, origin := range origins[object] {
+		if function, ok := functionObject(origin, info); ok {
+			functions = append(functions, function)
+		}
+	}
+	return functions
+}
+
+func isIndependentLoggerConstructor(call *ast.CallExpr, info *types.Info, function *types.Func) bool {
+	if function == nil || function.Pkg() == nil {
 		return false
 	}
 	path := function.Pkg().Path()
@@ -776,6 +888,99 @@ func isLoggerConstructor(call *ast.CallExpr, info *types.Info) bool {
 	default:
 		return false
 	}
+}
+
+func functionObject(expression ast.Expr, info *types.Info) (*types.Func, bool) {
+	if expression == nil || info == nil {
+		return nil, false
+	}
+	for {
+		paren, ok := expression.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		expression = paren.X
+	}
+	var object types.Object
+	switch value := expression.(type) {
+	case *ast.SelectorExpr:
+		object = selectorObject(info, value)
+	case *ast.Ident:
+		object = info.ObjectOf(value)
+	}
+	function, ok := object.(*types.Func)
+	return function, ok
+}
+
+func likelyUnresolvedLoggerFactory(call *ast.CallExpr, info *types.Info, origins map[types.Object][]ast.Expr) bool {
+	if call == nil || info == nil {
+		return false
+	}
+	if functions := loggerConstructorFunctions(call, info, origins); len(functions) != 0 {
+		// zap.NewNop is a deliberate no-output fallback. Preserve its safe
+		// classification when it is assigned to a local function variable.
+		allNoOutput := true
+		for _, function := range functions {
+			if function == nil || function.Pkg() == nil || function.Pkg().Path() != zapPackagePath || function.Name() != "NewNop" {
+				allNoOutput = false
+				break
+			}
+		}
+		if allNoOutput {
+			return false
+		}
+	}
+	ident, ok := call.Fun.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	signature, ok := info.TypeOf(ident).(*types.Signature)
+	if !ok || signature.Results() == nil || signature.Results().Len() == 0 {
+		return false
+	}
+	for _, packagePath := range []string{zapPackagePath, slogPackagePath, logPackagePath} {
+		if isLoggerType(signature.Results().At(0).Type(), packagePath) {
+			return true
+		}
+	}
+	return false
+}
+
+func isTrustedLoggingFieldFunction(function *types.Func) bool {
+	if function == nil || function.Pkg() == nil || !returnsLoggingField(function) {
+		return false
+	}
+	path := function.Pkg().Path()
+	name := function.Name()
+	switch path {
+	case zapPackagePath:
+		return !isUnknownLoggingFieldFunction(path, name)
+	case slogPackagePath:
+		return !isUnknownLoggingFieldFunction(path, name)
+	case loggingPackagePath:
+		// This is the shared typed error bridge. Its implementation may live in
+		// a package dependency that is not part of the current syntax package.
+		return name == "Error"
+	default:
+		return false
+	}
+}
+
+func isDynamicSugaredFormat(loggerCall policyLoggerCall, call *ast.CallExpr) bool {
+	if call == nil || loggerCall.kind != policyZapLogger || !strings.HasSuffix(loggerCall.method, "f") {
+		return false
+	}
+	return loggerCall.messageIndex >= 0 && len(call.Args) > loggerCall.messageIndex+1
+}
+
+func isUnknownLoggingFieldFunction(packagePath, name string) bool {
+	if packagePath == zapPackagePath {
+		switch name {
+		case "Any", "Object", "Array", "Reflect", "Stringer", "Interface":
+			return true
+		}
+	}
+	return packagePath == slogPackagePath && name == "Any"
 }
 
 func isZapConfigBuild(function *types.Func) bool {
@@ -818,9 +1023,11 @@ func isLoggerType(typ types.Type, packagePath string) bool {
 		}
 		typ = tuple.At(0).Type()
 	}
+	typ = types.Unalias(typ)
 	if pointer, ok := typ.(*types.Pointer); ok {
 		typ = pointer.Elem()
 	}
+	typ = types.Unalias(typ)
 	named, ok := typ.(*types.Named)
 	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != packagePath {
 		return false
@@ -856,7 +1063,13 @@ func infoTypeOf(info *types.Info, expression ast.Expr) types.Type {
 
 func likelyUnresolvedLoggerCall(call *ast.CallExpr, info *types.Info) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || !loggerMethodName(selector.Sel.Name) {
+	if !ok {
+		return false
+	}
+	if isUnresolvedLoggingExit(selector, info) {
+		return true
+	}
+	if !loggerMethodName(selector.Sel.Name) {
 		return false
 	}
 	if syntacticAppZapLog(selector) {
@@ -879,6 +1092,45 @@ func likelyUnresolvedLoggerCall(call *ast.CallExpr, info *types.Info) bool {
 	}
 	path := function.Pkg().Path()
 	return path != zapPackagePath && path != slogPackagePath && path != logPackagePath
+}
+
+func isUnresolvedLoggingExit(selector *ast.SelectorExpr, info *types.Info) bool {
+	if selector == nil {
+		return false
+	}
+	function, ok := selectorObject(info, selector).(*types.Func)
+	if !ok || function.Pkg() == nil {
+		return false
+	}
+	switch function.Pkg().Path() {
+	case zapPackagePath:
+		if function.Name() == "WrapCore" {
+			signature, _ := function.Type().(*types.Signature)
+			return signature != nil && signature.Recv() == nil
+		}
+		return function.Name() == "Check" && zapLoggerReceiver(function) == "Logger"
+	case zapCorePackagePath:
+		return function.Name() == "Write" && zapCoreCheckedEntryReceiver(function)
+	default:
+		return false
+	}
+}
+
+func zapCoreCheckedEntryReceiver(function *types.Func) bool {
+	if function == nil {
+		return false
+	}
+	signature, ok := function.Type().(*types.Signature)
+	if !ok || signature.Recv() == nil {
+		return false
+	}
+	typ := signature.Recv().Type()
+	if pointer, ok := typ.(*types.Pointer); ok {
+		typ = pointer.Elem()
+	}
+	typ = types.Unalias(typ)
+	named, ok := typ.(*types.Named)
+	return ok && named.Obj() != nil && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == zapCorePackagePath && named.Obj().Name() == "CheckedEntry"
 }
 
 func isErrorStringMethod(function *types.Func) bool {
@@ -1146,15 +1398,26 @@ func isLoggingFieldType(typ types.Type) bool {
 	if typ == nil {
 		return false
 	}
+	if alias, ok := typ.(*types.Alias); ok && isLoggingFieldName(alias.Obj()) {
+		return true
+	}
+	typ = types.Unalias(typ)
 	if pointer, ok := typ.(*types.Pointer); ok {
 		typ = pointer.Elem()
 	}
+	typ = types.Unalias(typ)
 	named, ok := typ.(*types.Named)
-	if !ok || named.Obj() == nil || named.Obj().Pkg() == nil {
+	return ok && isLoggingFieldName(named.Obj())
+}
+
+func isLoggingFieldName(name *types.TypeName) bool {
+	if name == nil || name.Pkg() == nil {
 		return false
 	}
-	path, name := named.Obj().Pkg().Path(), named.Obj().Name()
-	return (path == zapPackagePath && name == "Field") || (path == slogPackagePath && name == "Attr")
+	path, typeName := name.Pkg().Path(), name.Name()
+	return (path == zapPackagePath && typeName == "Field") ||
+		(path == zapCorePackagePath && typeName == "Field") ||
+		(path == slogPackagePath && typeName == "Attr")
 }
 
 func isLoggingContainerType(typ types.Type, mode policyFieldMode) bool {

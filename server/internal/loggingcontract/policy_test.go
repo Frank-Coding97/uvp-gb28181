@@ -59,14 +59,50 @@ func TestLoggingPolicy(t *testing.T) {
 		if countPolicyFindings(report, PolicyMissingEvent) != 1 {
 			t.Fatalf("only the unstructured sugared Infof lacks a structured event: %#v", report.Findings)
 		}
-		if countPolicyFindings(report, PolicyDynamicMessage) != 0 {
-			t.Fatalf("zap.Logger.Log must treat level as the first argument and message as the second: %#v", report.Findings)
+		if countPolicyFindings(report, PolicyDynamicMessage) != 1 {
+			t.Fatalf("only formatted sugared logging with runtime arguments should be dynamic: %#v", report.Findings)
 		}
 		if countPolicyFindings(report, PolicyUnknownField) < 3 {
 			t.Fatalf("zap With, local fields, and slog raw values must be checked: %#v", report.Findings)
 		}
 		if countPolicyFindings(report, PolicyDynamicErrorString) != 2 {
 			t.Fatalf("sugared Infof and standard Printf format errors must be checked: %#v", report.Findings)
+		}
+	})
+
+	t.Run("functionVariableCannotHideLoggerConstructor", func(t *testing.T) {
+		report := mustCheckPolicyFixture(t, "policy_function_alias")
+		if countPolicyFindings(report, PolicyLoggerConstructor) != 1 {
+			t.Fatalf("function variable alias to zap.NewProduction must be a constructor finding: %#v", report.Findings)
+		}
+		if hasPolicyFinding(report, PolicyUnresolvedLogger) {
+			t.Fatalf("resolved zap constructor alias must not also be unresolved: %#v", report.Findings)
+		}
+	})
+
+	t.Run("helperCannotHideUnknownZapField", func(t *testing.T) {
+		report := mustCheckPolicyFixture(t, "policy_helper_field")
+		if !hasPolicyFinding(report, PolicyUnknownField) {
+			t.Fatalf("helper returning zap.Field around zap.Any must be inspected: %#v", report.Findings)
+		}
+		if countPolicyFindings(report, PolicyUnknownField) != 1 {
+			t.Fatalf("logging.Error must remain a safe typed field: %#v", report.Findings)
+		}
+		if hasPolicyFinding(report, PolicyUnresolvedLogger) {
+			t.Fatalf("logging.Error and the inspected helper must be resolved: %#v", report.Findings)
+		}
+	})
+
+	t.Run("formattedAndCoreEscapeHatchesAreExplicit", func(t *testing.T) {
+		report := mustCheckPolicyFixture(t, "policy_exit_boundaries")
+		if countPolicyFindings(report, PolicyDynamicMessage) != 1 {
+			t.Fatalf("formatted sugared logger with runtime argument must be rejected: %#v", report.Findings)
+		}
+		if countPolicyFindings(report, PolicyUnresolvedLogger) != 3 {
+			t.Fatalf("Check, CheckedEntry.Write, and WrapCore must remain explicit unresolved exits: %#v", report.Findings)
+		}
+		if hasPolicyFinding(report, PolicyPackageError) {
+			t.Fatalf("boundary fixture must typecheck: %#v", report.Findings)
 		}
 	})
 
