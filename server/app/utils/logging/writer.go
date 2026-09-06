@@ -35,6 +35,8 @@ type fileWriter struct {
 	lastStamp    int64
 	historical   int64
 	failed       error
+	recoverable  bool
+	failedSize   int64
 	closed       bool
 	closeErr     error
 }
@@ -144,27 +146,25 @@ func (w *fileWriter) Write(p []byte) (int, error) {
 		return 0, errors.New("log record exceeds file capacity")
 	}
 	if e := w.dir.matches(w.base, w.active); e != nil {
-		w.failed = e
-		return 0, e
+		return 0, w.rememberFailure(e, false, -1)
 	}
 	stat, e := w.active.Stat()
 	if e != nil {
-		w.failed = e
-		return 0, e
+		return 0, w.rememberFailure(e, false, -1)
 	}
+	writeSize := stat.Size()
 	if stat.Size()+int64(len(p)) > w.options.maxBytes {
+		w.recoverable = true // rotate narrows this at namespace mutation boundaries.
 		if e = w.rotate(); e != nil {
-			w.failed = e
-			return 0, e
+			return 0, w.rememberFailure(e, w.recoverable, -1)
 		}
+		writeSize = 0 // rotate created this active file exclusively.
 	}
 	if e = w.call("write"); e != nil {
-		w.failed = e
-		return 0, e
+		return 0, w.rememberFailure(e, true, writeSize)
 	}
 	if e = w.dir.matches(w.base, w.active); e != nil {
-		w.failed = e
-		return 0, e
+		return 0, w.rememberFailure(e, false, -1)
 	}
 	var n int
 	if w.options.write != nil {
@@ -176,7 +176,7 @@ func (w *fileWriter) Write(p []byte) (int, error) {
 		e = io.ErrShortWrite
 	}
 	if e != nil {
-		w.failed = e
+		w.rememberFailure(e, n == 0, writeSize)
 	}
 	return n, e
 }
@@ -186,12 +186,15 @@ func (w *fileWriter) Sync() error {
 	if w.closed {
 		return errLogWriterClosed
 	}
+	if w.failed != nil {
+		return w.failed
+	}
 	e := w.call("sync")
 	if e == nil && w.active != nil {
 		e = w.active.Sync()
 	}
 	if e != nil {
-		w.failed = e
+		return w.rememberFailure(e, true, -1)
 	}
 	return e
 }
@@ -215,14 +218,63 @@ func (w *fileWriter) Maintain() error {
 		return errLogWriterClosed
 	}
 	if w.failed != nil {
-		return w.failed
+		return w.recoverFailure()
 	}
 	e := w.cleanup(w.options.maxBackups)
 	if e != nil {
-		w.failed = e
+		return w.rememberFailure(e, true, -1)
 	}
 	return e
 }
+
+// Only the existing periodic maintenance retries a failed writer. Failed
+// records are never retained or replayed, including when another Tee sink won.
+func (w *fileWriter) rememberFailure(err error, recoverable bool, expectedSize int64) error {
+	if w.failed != nil && !w.recoverable {
+		return w.failed
+	}
+	w.failed = err
+	w.recoverable = recoverable && !errors.Is(err, errUnsafeLogFile) && w.active != nil
+	if w.recoverable {
+		stat, e := w.active.Stat()
+		if e != nil || (expectedSize >= 0 && stat.Size() != expectedSize) {
+			w.recoverable = false
+		} else {
+			w.failedSize = stat.Size()
+		}
+	}
+	return err
+}
+
+func (w *fileWriter) recoverFailure() error {
+	if !w.recoverable {
+		return w.failed
+	}
+	if e := w.dir.matches(w.base, w.active); e != nil {
+		return w.rememberFailure(e, false, -1)
+	}
+	stat, e := w.active.Stat()
+	if e != nil || stat.Size() != w.failedSize || stat.Size() > w.options.maxBytes {
+		return w.rememberFailure(errUnsafeLogFile, false, -1)
+	}
+	// Finish durability and interrupted compression before permitting another
+	// rotation. A renamed/closed/missing active is never adopted or reopened.
+	for _, repair := range []func() error{w.dir.sync, w.recoverTemps, func() error { return w.cleanup(w.options.maxBackups) }, func() error {
+		if e := w.call("sync"); e != nil {
+			return e
+		}
+		return w.active.Sync()
+	}} {
+		if e := repair(); e != nil {
+			w.failed = e
+			w.recoverable = !errors.Is(e, errUnsafeLogFile)
+			return e
+		}
+	}
+	w.failed, w.recoverable = nil, false
+	return nil
+}
+
 func (w *fileWriter) rotate() error {
 	if e := w.cleanup(w.options.maxBackups - 1); e != nil {
 		return e
@@ -242,6 +294,7 @@ func (w *fileWriter) rotate() error {
 	if e := w.call("rename"); e != nil {
 		return e
 	}
+	w.recoverable = false // rename may commit before directory sync reports failure.
 	if e := w.dir.rename(w.base, name, w.active); e != nil {
 		return e
 	}
@@ -257,6 +310,7 @@ func (w *fileWriter) rotate() error {
 		return e
 	}
 	w.active = f
+	w.recoverable = true // a fresh active exists; compression can be repaired.
 	if w.options.compress {
 		return w.compress(name)
 	}
@@ -296,7 +350,7 @@ func (w *fileWriter) backups() ([]backup, error) {
 			return nil, errors.New("unfinished log compression")
 		}
 		if s.Size > w.options.maxBytes {
-			return nil, errors.New("managed backup exceeds capacity")
+			return nil, fmt.Errorf("%w: managed backup exceeds capacity", errUnsafeLogFile)
 		}
 		out = append(out, backup{entry.Name(), stamp, s.Size, identity(s)})
 	}
@@ -451,14 +505,17 @@ func (w *fileWriter) validateGzip(name string) error {
 	}
 	z, e := gzip.NewReader(f)
 	if e != nil {
-		return e
+		return errors.Join(errUnsafeLogFile, e)
 	}
 	n, readErr := io.Copy(io.Discard, io.LimitReader(z, w.options.maxBytes+1))
 	e = errors.Join(readErr, z.Close())
 	if n > w.options.maxBytes {
 		return errUnsafeLogFile
 	}
-	return e
+	if e != nil {
+		return errors.Join(errUnsafeLogFile, e)
+	}
+	return nil
 }
 func (w *fileWriter) recoverTemps() error {
 	entries, e := w.dir.entries()
@@ -477,7 +534,7 @@ func (w *fileWriter) recoverTemps() error {
 		case strings.HasSuffix(name, ".tmp"):
 			raw := strings.TrimSuffix(name, ".tmp")
 			if _, e = w.dir.stat(raw); e != nil {
-				return errors.Join(errors.New("orphan log compression temporary file"), e)
+				return errors.Join(errUnsafeLogFile, errors.New("orphan log compression temporary file"), e)
 			}
 			if e = w.remove(name); e != nil {
 				return e
