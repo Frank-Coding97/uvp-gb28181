@@ -48,6 +48,7 @@ func TestOpenAPIRuntimeSnapshotsRejectAmbiguousIdentity(t *testing.T) {
 		`{"code":0,"bootNonce":` + boot + `,"data":null}`,
 		`{"code":0,"bootNonce":` + boot + `,"data":[{"identifier":""}]}`,
 		`{"code":0,"bootNonce":` + boot + `,"data":[{"identifier":"12-9","identifier":"13-9"}]}`,
+		`{"code":0,"bootNonce":` + boot + `,"data":[{"identifier":"12-9","Identifier":"13-9"}]}`,
 		`{"code":0,"bootNonce":` + boot + `,"data":[{"identifier":"12-9"},{"identifier":"12-9"}]}`,
 		`{"code":0,"bootNonce":` + boot + `,"bootNonce":` + boot + `,"data":[]}`,
 		`{"code":0,"bootNonce":` + boot + `,"data":[{"identifier":"12-9","id":"13-9","type":"tcp"}]}`,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"strings"
 )
 
 // RuntimePlayers and RuntimeSessions bind a complete fresh snapshot to the
@@ -31,7 +32,7 @@ func (c *Client) GetRuntimeMediaPlayers(ctx context.Context, target StreamTarget
 	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		var player MediaPlayer
-		if _, err := runtimeObject(row); err != nil {
+		if err := runtimeRowKeys(row, "identifier"); err != nil {
 			return RuntimePlayers{}, err
 		}
 		if json.Unmarshal(row, &player) != nil || !validRuntimeSessionID(player.Identifier) || seen[player.Identifier] {
@@ -52,7 +53,7 @@ func (c *Client) GetRuntimeSessions(ctx context.Context) (RuntimeSessions, error
 	seen := make(map[string]bool, len(rows))
 	for _, row := range rows {
 		var session Session
-		if _, err := runtimeObject(row); err != nil {
+		if err := runtimeRowKeys(row, "id", "identifier", "type"); err != nil {
 			return RuntimeSessions{}, err
 		}
 		if json.Unmarshal(row, &session) != nil || !validRuntimeSessionID(session.ID) || session.Identifier != session.ID || seen[session.ID] || (session.Type != "tcp" && session.Type != "udp") {
@@ -62,6 +63,26 @@ func (c *Client) GetRuntimeSessions(ctx context.Context) (RuntimeSessions, error
 		result.Sessions = append(result.Sessions, session)
 	}
 	return result, nil
+}
+
+// encoding/json accepts case-insensitive struct keys. Security identity must
+// instead use the exact wire names, without case-variant shadow fields.
+func runtimeRowKeys(row []byte, required ...string) error {
+	fields, err := runtimeObject(row)
+	if err != nil {
+		return err
+	}
+	for _, name := range required {
+		if fields[name] == nil {
+			return ErrRuntimeControlUnavailable
+		}
+		for key := range fields {
+			if key != name && strings.EqualFold(key, name) {
+				return ErrRuntimeControlUnavailable
+			}
+		}
+	}
+	return nil
 }
 
 func (c *Client) runtimeRows(ctx context.Context, api string, query url.Values) (string, []json.RawMessage, error) {
