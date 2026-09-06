@@ -27,7 +27,7 @@ type probePlayer struct {
 func (f *mediaProbeFixture) player(t *testing.T, protocol, stream, label string) *probePlayer {
 	t.Helper()
 	token := f.authorize(label)
-	path := fmt.Sprintf("127.0.0.1:%d/live/%s.live.flv?probe_auth=%s&bootNonce=attacker", f.tlsPort, stream, url.QueryEscape(token))
+	path := fmt.Sprintf("127.0.0.1:%d/live/%s.live.flv?probe_auth=%s&bootNonce=attacker&protocol=attacker", f.tlsPort, stream, url.QueryEscape(token))
 	var reader io.ReadCloser
 	var cleanup func()
 	if protocol == "https-flv" {
@@ -67,6 +67,24 @@ func (f *mediaProbeFixture) player(t *testing.T, protocol, stream, label string)
 	}()
 	require.Eventually(t, func() bool { return p.bytes.Load() > 4096 }, 5*time.Second, 20*time.Millisecond, "actual media payload required")
 	return p
+}
+
+func TestOpenAPIProbeProtocolReportedFromSocket(t *testing.T) {
+	f := newMediaProbeFixture(t)
+	for _, protocol := range []struct{ player, hook string }{{"https-flv", "https"}, {"wss-flv", "wss"}} {
+		t.Run(protocol.player, func(t *testing.T) {
+			stream := "socket-protocol-" + protocol.player
+			f.publish(t, stream)
+			player := f.player(t, protocol.player, stream, protocol.player)
+			var event probeEvent
+			require.Eventually(t, func() bool { var ok bool; event, ok = f.event("/play", protocol.player); return ok }, time.Second, 10*time.Millisecond)
+			require.Equal(t, "rtmp", event.Schema, "FLV media schema is not the connection protocol")
+			require.Equal(t, protocol.hook, event.Protocol, "query cannot override actual TLS socket protocol")
+			player.close()
+			require.Eventually(t, func() bool { var ok bool; event, ok = f.event("/flow", protocol.player); return ok }, 3*time.Second, 10*time.Millisecond)
+			require.Equal(t, protocol.hook, event.Protocol, "flow and play must identify the same connection protocol")
+		})
+	}
 }
 
 func TestOpenAPIProbeActualTLSMedia(t *testing.T) {

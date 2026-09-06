@@ -54,6 +54,7 @@ type mediaProbeFixture struct {
 }
 type probeEvent struct {
 	Kind, Label, ID, Boot, Schema, VHost, App, Stream string
+	Protocol                                          string
 }
 
 func newMediaProbeFixture(t *testing.T) *mediaProbeFixture {
@@ -184,13 +185,14 @@ func (f *mediaProbeFixture) authorize(label string) string {
 }
 func (f *mediaProbeFixture) hook(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		ID     string `json:"id"`
-		Boot   string `json:"bootNonce"`
-		Params string `json:"params"`
-		Schema string `json:"schema"`
-		VHost  string `json:"vhost"`
-		App    string `json:"app"`
-		Stream string `json:"stream"`
+		ID       string `json:"id"`
+		Boot     string `json:"bootNonce"`
+		Params   string `json:"params"`
+		Schema   string `json:"schema"`
+		VHost    string `json:"vhost"`
+		App      string `json:"app"`
+		Stream   string `json:"stream"`
+		Protocol string `json:"protocol"`
 	}
 	if json.NewDecoder(io.LimitReader(r.Body, 16384)).Decode(&body) != nil {
 		w.WriteHeader(400)
@@ -202,7 +204,7 @@ func (f *mediaProbeFixture) hook(w http.ResponseWriter, r *http.Request) {
 	delay := f.delays[label]
 	allowed := label != "" && body.ID != "" && len(body.Boot) == 32 && body.App == "live"
 	if allowed {
-		f.events = append(f.events, probeEvent{r.URL.Path, label, body.ID, body.Boot, body.Schema, body.VHost, body.App, body.Stream})
+		f.events = append(f.events, probeEvent{Kind: r.URL.Path, Label: label, ID: body.ID, Boot: body.Boot, Schema: body.Schema, VHost: body.VHost, App: body.App, Stream: body.Stream, Protocol: body.Protocol})
 	}
 	f.mu.Unlock()
 	if allowed && r.URL.Path == "/play" && delay != nil {
