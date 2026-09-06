@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
 	"sort"
 	"sync"
@@ -22,11 +23,11 @@ import (
 )
 
 const (
-	budgetWarmup   = 200
-	budgetBatches  = 12
-	budgetBatchN   = 500
-	budgetP95Limit = 200 * time.Microsecond
-	budgetReport   = "/tmp/uvp-logging-t15-http-budget.json"
+	budgetWarmup    = 200
+	budgetBatches   = 12
+	budgetBatchN    = 500
+	budgetP95Limit  = 200 * time.Microsecond
+	budgetReportEnv = "UVP_LOGGING_BUDGET_REPORT"
 )
 
 type budgetSink struct {
@@ -171,6 +172,14 @@ func budgetRows(t *testing.T, sink *budgetSink) []map[string]interface{} {
 	return rows
 }
 
+func budgetReportPath(t *testing.T) string {
+	t.Helper()
+	if path := os.Getenv(budgetReportEnv); path != "" {
+		return path
+	}
+	return filepath.Join(t.TempDir(), "logging-http-budget.json")
+}
+
 func budgetPercentile(values []time.Duration, fraction float64) time.Duration {
 	ordered := append([]time.Duration(nil), values...)
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
@@ -220,18 +229,27 @@ func assertBudgetRow(t *testing.T, row map[string]interface{}, wantID string) {
 }
 
 func TestLoggingHTTPBudget(t *testing.T) {
+	oldMode := gin.Mode()
 	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
 	baselineRuntime, baselineSink := budgetRuntime(t)
 	requestRuntime, requestSink := budgetRuntime(t)
 	baseline := budgetRouter(t, baselineRuntime.Root, true)
 	requestLogging := budgetRouter(t, requestRuntime.Root, false)
 
+	var firstRequestID string
 	for i := 0; i < budgetWarmup; i++ {
 		if i%2 == 0 {
 			budgetServe(t, baseline, "/budget")
-			budgetServe(t, requestLogging, "/budget")
+			_, id := budgetServe(t, requestLogging, "/budget")
+			if firstRequestID == "" {
+				firstRequestID = id
+			}
 		} else {
-			budgetServe(t, requestLogging, "/budget")
+			_, id := budgetServe(t, requestLogging, "/budget")
+			if firstRequestID == "" {
+				firstRequestID = id
+			}
 			budgetServe(t, baseline, "/budget")
 		}
 	}
@@ -270,15 +288,16 @@ func TestLoggingHTTPBudget(t *testing.T) {
 	}
 	assertBudgetRow(t, baselineStats.Samples[0], "baseline-fixed")
 	requestID, _ := requestStats.Samples[0]["request_id"].(string)
-	if requestID == "" || requestID == "baseline-fixed" {
-		t.Fatalf("production request ID missing or fixed: %q", requestID)
+	if firstRequestID == "" || firstRequestID == "baseline-fixed" {
+		t.Fatalf("production response request ID missing or fixed: %q", firstRequestID)
 	}
-	assertBudgetRow(t, requestStats.Samples[0], requestID)
-	if got := requestStats.Samples[0]["request_id"]; got != requestID {
-		t.Fatalf("request correlation changed: %v", got)
+	if requestID != firstRequestID {
+		t.Fatalf("request response/log correlation changed: response=%q log=%q", firstRequestID, requestID)
 	}
+	assertBudgetRow(t, requestStats.Samples[0], firstRequestID)
 
 	delta := time.Duration(requestStats.P95NS - baselineStats.P95NS)
+	reportPath := budgetReportPath(t)
 	report := budgetReportData{
 		Warmup:         budgetWarmup,
 		Batches:        budgetBatches,
@@ -292,10 +311,10 @@ func TestLoggingHTTPBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(budgetReport, encoded, 0600); err != nil {
-		t.Fatalf("write raw measurement report %s: %v", budgetReport, err)
+	if err := os.WriteFile(reportPath, encoded, 0600); err != nil {
+		t.Fatalf("write raw measurement report %s: %v", reportPath, err)
 	}
-	t.Logf("HTTP budget report=%s baseline p50=%s p95=%s emitted=%d request_logging p50=%s p95=%s emitted=%d p95_delta=%s budget=%s", budgetReport, time.Duration(baselineStats.P50NS), time.Duration(baselineStats.P95NS), baselineStats.Emitted, time.Duration(requestStats.P50NS), time.Duration(requestStats.P95NS), requestStats.Emitted, delta, budgetP95Limit)
+	t.Logf("HTTP budget report=%s baseline p50=%s p95=%s emitted=%d request_logging p50=%s p95=%s emitted=%d p95_delta=%s budget=%s", reportPath, time.Duration(baselineStats.P50NS), time.Duration(baselineStats.P95NS), baselineStats.Emitted, time.Duration(requestStats.P50NS), time.Duration(requestStats.P95NS), requestStats.Emitted, delta, budgetP95Limit)
 	if delta > budgetP95Limit {
 		t.Fatalf("RequestLogging p95 overhead %s exceeds budget %s", delta, budgetP95Limit)
 	}
