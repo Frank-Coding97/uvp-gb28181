@@ -12,12 +12,15 @@ import (
 	"time"
 )
 
-type SinkStats struct{ Attempted, Written, Failed, DurabilityUnknown uint64 }
+type SinkStats struct {
+	// Attempted/Written/Failed count records; maintenance is an independent operation.
+	Attempted, Written, Failed, DurabilityUnknown, MaintenanceFailed uint64
+}
 type trackedSink struct {
-	target                                 string
-	writer                                 zapcore.WriteSyncer
-	emergency                              *emergencyWriter
-	attempted, written, failed, durability atomic.Uint64
+	target                                              string
+	writer                                              zapcore.WriteSyncer
+	emergency                                           *emergencyWriter
+	attempted, written, failed, durability, maintenance atomic.Uint64
 }
 
 const reportedSinkFailure = "logging sink failure already reported"
@@ -57,10 +60,10 @@ func (s *trackedSink) Close() error {
 	return nil
 }
 func (s *trackedSink) report(e error) {
-	s.emergency.report(s.target, ErrorClass(e), s.failed.Load(), s.durability.Load())
+	s.emergency.report(s.target, ErrorClass(e), s.failed.Load(), s.durability.Load(), s.maintenance.Load())
 }
 func (s *trackedSink) snapshot() SinkStats {
-	return SinkStats{s.attempted.Load(), s.written.Load(), s.failed.Load(), s.durability.Load()}
+	return SinkStats{s.attempted.Load(), s.written.Load(), s.failed.Load(), s.durability.Load(), s.maintenance.Load()}
 }
 func (r *Runtime) Stats() map[string]SinkStats {
 	out := make(map[string]SinkStats, len(r.tracked))
@@ -71,11 +74,11 @@ func (r *Runtime) Stats() map[string]SinkStats {
 }
 
 type emergencyState struct {
-	last               time.Time
-	failed, durability uint64
-	class              string
-	pending            bool
-	emitted            bool
+	last                            time.Time
+	failed, durability, maintenance uint64
+	class                           string
+	pending                         bool
+	emitted                         bool
 }
 type emergencyWriter struct {
 	mu        sync.Mutex
@@ -95,19 +98,21 @@ func newEmergencyWriter(out io.Writer, now func() time.Time) *emergencyWriter {
 	}
 	return &emergencyWriter{out: out, now: now, states: map[string]*emergencyState{}}
 }
-func (e *emergencyWriter) report(target, class string, failed, durability uint64) {
+func (e *emergencyWriter) report(target, class string, failed, durability, maintenance uint64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.reportLocked(target, class, failed, durability)
+	e.reportLocked(target, class, failed, durability, maintenance)
 }
-func (e *emergencyWriter) reportLocked(target, class string, failed, durability uint64) {
+func (e *emergencyWriter) reportLocked(target, class string, failed, durability, maintenance uint64) {
 	s := e.states[target]
 	if s == nil {
 		s = &emergencyState{}
 		e.states[target] = s
 	}
-	s.failed = failed
-	s.durability = durability
+	// Concurrent reporters can arrive out of snapshot order. Totals never reset.
+	s.failed = max(s.failed, failed)
+	s.durability = max(s.durability, durability)
+	s.maintenance = max(s.maintenance, maintenance)
 	s.class = class
 	s.pending = true
 	now := e.now()
@@ -117,13 +122,14 @@ func (e *emergencyWriter) reportLocked(target, class string, failed, durability 
 }
 func (e *emergencyWriter) emit(target string, s *emergencyState, now time.Time) {
 	row := struct {
-		Time       string `json:"created_at"`
-		Event      string `json:"event"`
-		Sink       string `json:"sink"`
-		Class      string `json:"error_class"`
-		Failed     uint64 `json:"failed"`
-		Durability uint64 `json:"durability_unknown"`
-	}{now.Format("2006-01-02T15:04:05.000Z07:00"), "logging.sink_failure", target, s.class, s.failed, s.durability}
+		Time        string `json:"created_at"`
+		Event       string `json:"event"`
+		Sink        string `json:"sink"`
+		Class       string `json:"error_class"`
+		Failed      uint64 `json:"failed"`
+		Durability  uint64 `json:"durability_unknown"`
+		Maintenance uint64 `json:"maintenance_failed"`
+	}{now.Format("2006-01-02T15:04:05.000Z07:00"), "logging.sink_failure", target, s.class, s.failed, s.durability, s.maintenance}
 	p, err := json.Marshal(row)
 	if err == nil {
 		p = append(p, '\n')
@@ -150,7 +156,7 @@ func (e *emergencyWriter) Write(p []byte) (int, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.zapErrors++
-	e.reportLocked("zap", "internal", e.zapErrors, 0)
+	e.reportLocked("zap", "internal", e.zapErrors, 0, 0)
 	return len(p), nil
 }
 func (e *emergencyWriter) Sync() error { return nil }
@@ -218,6 +224,7 @@ func (r *Runtime) Maintain() error {
 	for _, s := range r.tracked {
 		if w, ok := s.writer.(interface{ Maintain() error }); ok {
 			if e := w.Maintain(); e != nil {
+				s.maintenance.Add(1)
 				s.report(e)
 				result = errors.Join(result, errReportedSink)
 			}

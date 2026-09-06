@@ -331,8 +331,11 @@ func TestLoggingResourceBounds(t *testing.T) {
 			t.Fatalf("maintain flush: %v", err)
 		}
 		rows := records(t, emergency)
-		if len(rows) != 2 || rows[1]["failed"] != float64(100) {
+		if len(rows) != 2 || rows[1]["maintenance_failed"] != float64(100) || rows[1]["failed"] != float64(0) {
 			t.Fatalf("maintain failure count: %v", rows)
+		}
+		if stats := r.Stats()["stdout"]; stats.MaintenanceFailed != 100 || stats.Failed != 0 || stats.Attempted != 0 {
+			t.Fatalf("maintenance mixed with record accounting: %+v", stats)
 		}
 		if strings.Contains(emergency.String(), secret) {
 			t.Fatal("maintain error leaked")

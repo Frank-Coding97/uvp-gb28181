@@ -133,3 +133,19 @@ func TestLoggingSinkFailureWindow(t *testing.T) {
 		t.Fatalf("window counts: %v", rows)
 	}
 }
+
+func TestLoggingEmergencyCountersNeverRegress(t *testing.T) {
+	output := &memorySink{}
+	now := time.Unix(0, 0)
+	emergency := newEmergencyWriter(output, func() time.Time { return now })
+	emergency.report("file", "storage_full", 3, 4, 5)
+	emergency.report("file", "storage_full", 1, 2, 1) // A concurrent older snapshot arrived later.
+	now = now.Add(time.Minute)
+	if err := emergency.flush(false); err != nil {
+		t.Fatal(err)
+	}
+	rows := records(t, output)
+	if len(rows) != 2 || rows[1]["failed"] != float64(3) || rows[1]["durability_unknown"] != float64(4) || rows[1]["maintenance_failed"] != float64(5) {
+		t.Fatalf("cumulative counters regressed: %v", rows)
+	}
+}
