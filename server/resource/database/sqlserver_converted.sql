@@ -4856,6 +4856,78 @@ CREATE INDEX idx_openapi_audit_time ON dbo.sys_openapi_audit (created_at);
 
 -- openapi-aksk-core:end
 
+-- openapi-aksk-media:begin
+IF OBJECT_ID(N'dbo.gb_openapi_play_grant', N'U') IS NULL
+CREATE TABLE dbo.gb_openapi_play_grant (
+    grant_id CHAR(36) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    client_id BIGINT NOT NULL,
+    scope NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    device_id NVARCHAR(20) COLLATE Latin1_General_100_BIN2 NULL,
+    channel_id NVARCHAR(20) COLLATE Latin1_General_100_BIN2 NULL,
+    client_epoch BIGINT NOT NULL DEFAULT 1,
+    scope_epoch BIGINT NOT NULL DEFAULT 1,
+    device_epoch BIGINT NOT NULL DEFAULT 1,
+    node_uuid NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NULL,
+    boot_nonce CHAR(32) COLLATE Latin1_General_100_BIN2 NULL,
+    [schema] NVARCHAR(32) COLLATE Latin1_General_100_BIN2 NULL,
+    vhost NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NULL,
+    app NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NULL,
+    stream NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NULL,
+    media_generation BIGINT NULL,
+    protocol NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NULL,
+    issued_at DATETIME2(6) NOT NULL,
+    expires_at DATETIME2(6) NOT NULL,
+    state NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'pending',
+    reason NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'',
+    created_at DATETIME2(6) NOT NULL,
+    updated_at DATETIME2(6) NOT NULL,
+    CONSTRAINT pk_openapi_play_grant PRIMARY KEY (grant_id),
+    CONSTRAINT ck_openapi_grant_state CHECK (state IN (N'pending',N'issued',N'bound',N'revoked',N'expired',N'failed')),
+    CONSTRAINT ck_openapi_grant_epochs CHECK (client_epoch > 0 AND scope_epoch > 0 AND device_epoch > 0),
+    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN (N'issued',N'bound') OR (device_id IS NOT NULL AND channel_id IS NOT NULL AND node_uuid IS NOT NULL AND boot_nonce IS NOT NULL AND LEN(boot_nonce) = 32 AND [schema] IS NOT NULL AND vhost IS NOT NULL AND app IS NOT NULL AND stream IS NOT NULL AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL))
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_client_state' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_client_state ON dbo.gb_openapi_play_grant (client_id,state);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_expires' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_expires ON dbo.gb_openapi_play_grant (expires_at);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_grant_node_boot' AND object_id=OBJECT_ID(N'dbo.gb_openapi_play_grant')) CREATE INDEX idx_openapi_grant_node_boot ON dbo.gb_openapi_play_grant (node_uuid,boot_nonce);
+IF OBJECT_ID(N'dbo.gb_openapi_viewer', N'U') IS NULL
+CREATE TABLE dbo.gb_openapi_viewer (
+    id BIGINT IDENTITY(1,1) NOT NULL,
+    grant_id CHAR(36) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    node_uuid NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    boot_nonce CHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    identifier NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    [schema] NVARCHAR(32) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    vhost NVARCHAR(128) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    app NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    stream NVARCHAR(255) COLLATE Latin1_General_100_BIN2 NOT NULL,
+    media_generation BIGINT NOT NULL DEFAULT 0,
+    state NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'pending',
+    last_seen_at DATETIME2(6) NULL,
+    retry_at DATETIME2(6) NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error_class NVARCHAR(64) COLLATE Latin1_General_100_BIN2 NOT NULL DEFAULT N'',
+    created_at DATETIME2(6) NOT NULL,
+    updated_at DATETIME2(6) NOT NULL,
+    CONSTRAINT pk_openapi_viewer PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_viewer_grant UNIQUE (grant_id),
+    CONSTRAINT uk_openapi_viewer_identity UNIQUE (node_uuid,boot_nonce,identifier),
+    CONSTRAINT ck_openapi_viewer_identity CHECK (node_uuid <> N'' AND boot_nonce <> N'' AND LEN(boot_nonce)=32 AND identifier <> N''),
+    CONSTRAINT ck_openapi_viewer_state CHECK (state IN (N'pending',N'active',N'revoke_pending',N'closed')),
+    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation >= 0),
+    CONSTRAINT ck_openapi_viewer_attempts CHECK (attempts >= 0)
+);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name=N'idx_openapi_viewer_state_retry' AND object_id=OBJECT_ID(N'dbo.gb_openapi_viewer')) CREATE INDEX idx_openapi_viewer_state_retry ON dbo.gb_openapi_viewer (state,retry_at);
+IF COL_LENGTH(N'dbo.gb_device',N'access_epoch') IS NULL ALTER TABLE dbo.gb_device ADD access_epoch BIGINT NOT NULL CONSTRAINT df_gb_device_access_epoch DEFAULT 1, CONSTRAINT ck_gb_device_access_epoch CHECK (access_epoch > 0);
+IF COL_LENGTH(N'dbo.gb_device',N'legacy_revoked_before') IS NULL ALTER TABLE dbo.gb_device ADD legacy_revoked_before DATETIME2(0) NULL;
+IF COL_LENGTH(N'dbo.meta_node',N'current_boot_nonce') IS NULL ALTER TABLE dbo.meta_node ADD current_boot_nonce CHAR(32) COLLATE Latin1_General_100_BIN2 NULL;
+IF COL_LENGTH(N'dbo.meta_node',N'retired_boot_history') IS NULL ALTER TABLE dbo.meta_node ADD retired_boot_history NVARCHAR(MAX) NULL;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_epoch') IS NULL ALTER TABLE dbo.meta_node ADD runtime_epoch BIGINT NOT NULL CONSTRAINT df_meta_node_runtime_epoch DEFAULT 0;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_protocol_version') IS NULL ALTER TABLE dbo.meta_node ADD runtime_protocol_version BIGINT NOT NULL CONSTRAINT df_meta_node_runtime_protocol_version DEFAULT 0;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_confirmed_revision') IS NULL ALTER TABLE dbo.meta_node ADD runtime_confirmed_revision BIGINT NOT NULL CONSTRAINT df_meta_node_runtime_confirmed_revision DEFAULT 0;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_confirmed_at') IS NULL ALTER TABLE dbo.meta_node ADD runtime_confirmed_at DATETIME2(6) NULL;
+IF COL_LENGTH(N'dbo.meta_node',N'runtime_identity_status') IS NULL ALTER TABLE dbo.meta_node ADD runtime_identity_status NVARCHAR(16) COLLATE Latin1_General_100_BIN2 NOT NULL CONSTRAINT df_meta_node_runtime_identity_status DEFAULT N'unknown';
+-- openapi-aksk-media:end
+
 -- openapi-aksk-permissions:begin
 -- T04 management permission catalog. IDs are resolved by natural keys; only
 -- the existing system-admin role receives the initial grant.

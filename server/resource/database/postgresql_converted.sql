@@ -4976,6 +4976,76 @@ CREATE INDEX IF NOT EXISTS idx_openapi_audit_time ON sys_openapi_audit (created_
 
 -- openapi-aksk-core:end
 
+-- openapi-aksk-media:begin
+CREATE TABLE IF NOT EXISTS gb_openapi_play_grant (
+    grant_id CHAR(36) COLLATE "C" NOT NULL,
+    client_id BIGINT NOT NULL,
+    scope VARCHAR(64) COLLATE "C" NOT NULL,
+    device_id VARCHAR(20) COLLATE "C" NULL,
+    channel_id VARCHAR(20) COLLATE "C" NULL,
+    client_epoch BIGINT NOT NULL DEFAULT 1,
+    scope_epoch BIGINT NOT NULL DEFAULT 1,
+    device_epoch BIGINT NOT NULL DEFAULT 1,
+    node_uuid VARCHAR(64) COLLATE "C" NULL,
+    boot_nonce CHAR(32) COLLATE "C" NULL,
+    "schema" VARCHAR(32) COLLATE "C" NULL,
+    vhost VARCHAR(128) COLLATE "C" NULL,
+    app VARCHAR(64) COLLATE "C" NULL,
+    stream VARCHAR(255) COLLATE "C" NULL,
+    media_generation BIGINT NULL,
+    protocol VARCHAR(16) COLLATE "C" NULL,
+    issued_at TIMESTAMPTZ(6) NOT NULL,
+    expires_at TIMESTAMPTZ(6) NOT NULL,
+    state VARCHAR(16) COLLATE "C" NOT NULL DEFAULT 'pending',
+    reason VARCHAR(64) COLLATE "C" NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ(6) NOT NULL,
+    updated_at TIMESTAMPTZ(6) NOT NULL,
+    CONSTRAINT pk_openapi_play_grant PRIMARY KEY (grant_id),
+    CONSTRAINT ck_openapi_grant_state CHECK (state IN ('pending','issued','bound','revoked','expired','failed')),
+    CONSTRAINT ck_openapi_grant_epochs CHECK (client_epoch > 0 AND scope_epoch > 0 AND device_epoch > 0),
+    CONSTRAINT ck_openapi_grant_binding CHECK (state NOT IN ('issued','bound') OR (device_id IS NOT NULL AND channel_id IS NOT NULL AND node_uuid IS NOT NULL AND boot_nonce IS NOT NULL AND char_length(boot_nonce) = 32 AND "schema" IS NOT NULL AND vhost IS NOT NULL AND app IS NOT NULL AND stream IS NOT NULL AND media_generation IS NOT NULL AND media_generation > 0 AND protocol IS NOT NULL))
+);
+CREATE INDEX IF NOT EXISTS idx_openapi_grant_client_state ON gb_openapi_play_grant (client_id, state);
+CREATE INDEX IF NOT EXISTS idx_openapi_grant_expires ON gb_openapi_play_grant (expires_at);
+CREATE INDEX IF NOT EXISTS idx_openapi_grant_node_boot ON gb_openapi_play_grant (node_uuid, boot_nonce);
+CREATE TABLE IF NOT EXISTS gb_openapi_viewer (
+    id BIGSERIAL NOT NULL,
+    grant_id CHAR(36) COLLATE "C" NOT NULL,
+    node_uuid VARCHAR(64) COLLATE "C" NOT NULL,
+    boot_nonce CHAR(32) COLLATE "C" NOT NULL,
+    identifier VARCHAR(128) COLLATE "C" NOT NULL,
+    "schema" VARCHAR(32) COLLATE "C" NOT NULL,
+    vhost VARCHAR(128) COLLATE "C" NOT NULL,
+    app VARCHAR(64) COLLATE "C" NOT NULL,
+    stream VARCHAR(255) COLLATE "C" NOT NULL,
+    media_generation BIGINT NOT NULL DEFAULT 0,
+    state VARCHAR(16) COLLATE "C" NOT NULL DEFAULT 'pending',
+    last_seen_at TIMESTAMPTZ(6) NULL,
+    retry_at TIMESTAMPTZ(6) NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error_class VARCHAR(64) COLLATE "C" NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ(6) NOT NULL,
+    updated_at TIMESTAMPTZ(6) NOT NULL,
+    CONSTRAINT pk_openapi_viewer PRIMARY KEY (id),
+    CONSTRAINT uk_openapi_viewer_grant UNIQUE (grant_id),
+    CONSTRAINT uk_openapi_viewer_identity UNIQUE (node_uuid, boot_nonce, identifier),
+    CONSTRAINT ck_openapi_viewer_identity CHECK (node_uuid <> '' AND boot_nonce <> '' AND char_length(boot_nonce) = 32 AND identifier <> ''),
+    CONSTRAINT ck_openapi_viewer_state CHECK (state IN ('pending','active','revoke_pending','closed')),
+    CONSTRAINT ck_openapi_viewer_media_generation CHECK (media_generation >= 0),
+    CONSTRAINT ck_openapi_viewer_attempts CHECK (attempts >= 0)
+);
+CREATE INDEX IF NOT EXISTS idx_openapi_viewer_state_retry ON gb_openapi_viewer (state, retry_at);
+ALTER TABLE IF EXISTS gb_device ADD COLUMN IF NOT EXISTS access_epoch BIGINT NOT NULL DEFAULT 1 CHECK (access_epoch > 0);
+ALTER TABLE IF EXISTS gb_device ADD COLUMN IF NOT EXISTS legacy_revoked_before TIMESTAMPTZ(0) NULL;
+ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS current_boot_nonce CHAR(32) COLLATE "C" NULL;
+ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS retired_boot_history TEXT NULL;
+ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS runtime_epoch BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS runtime_protocol_version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS runtime_confirmed_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS runtime_confirmed_at TIMESTAMPTZ(6) NULL;
+ALTER TABLE IF EXISTS meta_node ADD COLUMN IF NOT EXISTS runtime_identity_status VARCHAR(16) COLLATE "C" NOT NULL DEFAULT 'unknown';
+-- openapi-aksk-media:end
+
 -- openapi-aksk-permissions:begin
 -- T04 management permission catalog. IDs are resolved by natural keys; only
 -- the existing system-admin role receives the initial grant.
