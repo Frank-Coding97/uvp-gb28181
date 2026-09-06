@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -17,6 +18,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/service"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/casbinhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
@@ -169,6 +171,38 @@ func initLogging() {
 
 func startupFail(phase string, err error) {
 	logging.ReportStartupFailure(nil, app.ZapLog, phase, err)
+	cleanupContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cleanupRoot := app.ZapLog
+	if cleanupRoot == nil {
+		cleanupRoot = zap.NewNop()
+	}
+	steps := make([]ginhelper.ShutdownStep, 0, 3)
+	if stopper, ok := app.ConfigYml.(interface {
+		StopContext(context.Context) error
+	}); ok {
+		steps = append(steps, ginhelper.ShutdownStep{
+			Component: "config",
+			Stop: func(ctx context.Context) error {
+				return stopper.StopContext(ctx)
+			},
+		})
+	}
+	if app.JobScheduler != nil {
+		steps = append(steps, ginhelper.ShutdownStep{
+			Component: "scheduler",
+			Stop: func(ctx context.Context) error {
+				return app.JobScheduler.StopContext(ctx)
+			},
+		})
+	}
+	steps = append(steps, ginhelper.ShutdownStep{
+		Component: "scheduler.results",
+		Stop: func(ctx context.Context) error {
+			return scheduler.StopResultHandlerContext(ctx)
+		},
+	})
+	_ = ginhelper.Shutdown(cleanupContext, cleanupRoot, steps...)
 	if app.LogRuntime != nil {
 		_ = app.LogRuntime.Close()
 	}
