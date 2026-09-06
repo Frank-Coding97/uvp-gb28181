@@ -371,7 +371,11 @@ func countOccupied(tx *gorm.DB, clientID int64, now time.Time) (int64, error) {
 	err := tx.Model(&models.PlayGrant{}).
 		Where("client_id = ?", clientID).
 		Where(tx.Where("state IN ? AND expires_at > ?", []models.GrantState{models.GrantStatePending, models.GrantStateIssued}, now).
-			Or("state = ?", models.GrantStateBound).
+			Or("state = ? AND NOT EXISTS (?)", models.GrantStateBound,
+				tx.Model(&models.Viewer{}).
+					Select("1").
+					Where("gb_openapi_viewer.grant_id = gb_openapi_play_grant.grant_id").
+					Where("state = ?", models.ViewerStateClosed)).
 			Or("EXISTS (?)", live)).
 		Count(&occupied).Error
 	return occupied, err
