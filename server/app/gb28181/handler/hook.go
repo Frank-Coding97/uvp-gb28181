@@ -209,6 +209,7 @@ type HookController struct {
 
 	openAPIPlayVerifier OpenAPIPlayTokenVerifier
 	openAPIPlayBinder   OpenAPIViewerBinder
+	openAPIFlowObserver OpenAPIFlowObserver
 
 	previewClassifier management.PreviewClassifier
 	previewVerifier   management.PreviewTokenVerifier
@@ -666,6 +667,8 @@ type onPlayBody struct {
 type onFlowReportBody struct {
 	ID            string `json:"id"`
 	MediaServerID string `json:"mediaServerId"`
+	BootNonce     string `json:"bootNonce"`
+	Protocol      string `json:"protocol"`
 	Schema        string `json:"schema"`
 	VHost         string `json:"vhost"`
 	App           string `json:"app"`
@@ -691,6 +694,7 @@ func (h *HookController) OnFlowReport(c *gin.Context) {
 		h.ignoreFlowReport(c, "payload-node-mismatch")
 		return
 	}
+	h.observeOpenAPIFlow(c, body)
 	resolver, collector := h.flowDependencies()
 	if resolver == nil || collector == nil {
 		hookOK(c)
