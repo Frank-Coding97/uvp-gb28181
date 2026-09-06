@@ -37,7 +37,7 @@ type PlayGrant struct {
 	GrantID  string   `gorm:"column:grant_id;type:char(36);primaryKey" json:"grantId"`
 	ClientID int64    `gorm:"column:client_id;not null;index:idx_openapi_grant_client_state,priority:1" json:"clientId"`
 	Scope    string   `gorm:"column:scope;size:64;not null" json:"scope"`
-	Viewers  []Viewer `gorm:"foreignKey:GrantID;references:GrantID;constraint:OnDelete:RESTRICT,OnUpdate:CASCADE" json:"-"`
+	Viewers  []Viewer `gorm:"foreignKey:GrantID;references:GrantID;constraint:OnDelete:RESTRICT" json:"-"`
 
 	DeviceID        *string `gorm:"column:device_id;size:20" json:"deviceId,omitempty"`
 	ChannelID       *string `gorm:"column:channel_id;size:20" json:"channelId,omitempty"`
@@ -96,8 +96,8 @@ type DeviceSecurity struct {
 	AccessEpoch int64 `gorm:"column:access_epoch;not null;default:1;check:ck_gb_device_access_epoch,access_epoch > 0"`
 	// LegacyRevokedBefore is stored as a UTC whole-second boundary because the
 	// legacy v2 iat is an integer Unix second. Callers must convert with
-	// time.Unix(iat, 0).UTC(); to reject tokens issued in the same second as a
-	// revocation event, persist the next Unix second as the boundary.
+	// time.Unix(iat, 0).UTC(); the revocation contract must reject tokens issued
+	// in the same second. Comparison and assignment details remain in T13.
 	LegacyRevokedBefore *time.Time `gorm:"column:legacy_revoked_before"`
 }
 

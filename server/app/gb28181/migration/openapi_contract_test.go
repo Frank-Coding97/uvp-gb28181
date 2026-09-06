@@ -64,3 +64,40 @@ func TestOpenAPICoreInitializationParity(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAPIDownStatementsRespectRunnerBoundaries(t *testing.T) {
+	const dir = "../../../resource/database/gb28181/migrations"
+
+	mysqlDown, err := os.ReadFile(filepath.Join(dir, "2026-09-05-openapi-aksk-schema-down.sql"))
+	require.NoError(t, err)
+	prepareCount, executeCount, deallocateCount := 0, 0, 0
+	for _, statement := range splitStatements(string(mysqlDown)) {
+		normalized := strings.ToLower(strings.TrimSpace(statement))
+		switch {
+		case strings.HasPrefix(normalized, "prepare openapi_stmt from"):
+			prepareCount++
+			require.NotContains(t, normalized, "execute openapi_stmt")
+		case strings.HasPrefix(normalized, "execute openapi_stmt"):
+			executeCount++
+			require.NotContains(t, normalized, "deallocate prepare")
+		case strings.HasPrefix(normalized, "deallocate prepare openapi_stmt"):
+			deallocateCount++
+		}
+	}
+	require.Positive(t, prepareCount)
+	require.Equal(t, prepareCount, executeCount)
+	require.Equal(t, prepareCount, deallocateCount)
+
+	sqlServerDown, err := os.ReadFile(filepath.Join(dir, "2026-09-05-openapi-aksk-schema-sqlserver-down.sql"))
+	require.NoError(t, err)
+	statements := splitStatements(string(sqlServerDown))
+	require.NotEmpty(t, statements)
+	for _, statement := range statements {
+		normalized := strings.ToLower(strings.TrimSpace(statement))
+		require.NotContains(t, normalized, "begin")
+		require.NotContains(t, normalized, "end")
+		if strings.HasPrefix(normalized, "if ") && (strings.Contains(normalized, "drop column") || strings.Contains(normalized, "drop constraint")) {
+			require.Contains(t, normalized, "alter table")
+		}
+	}
+}
