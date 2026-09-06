@@ -77,6 +77,10 @@ func (r *Repeater) Fail(key RepeatKey, err error) {
 	now := r.now()
 	storage := repeatStorageKey(key, ErrorClass(err))
 	r.sequence++
+	if state, ok := r.states[storage]; ok && now.Sub(state.last) >= 10*time.Minute {
+		r.emit(storage, state, "idle")
+		delete(r.states, storage)
+	}
 	if state, ok := r.states[storage]; ok {
 		state.last = now
 		state.pending++

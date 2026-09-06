@@ -180,3 +180,19 @@ func TestLoggingRepeatConcurrentCloseAndMaintain(t *testing.T) {
 		t.Fatal("closed state leaked")
 	}
 }
+
+func TestLoggingRepeatLateFailureExpiresIdleState(t *testing.T) {
+	r, rows, now := repeatFixture()
+	key := RepeatKey{Component: "zlm", Event: "poll.failed", NodeID: 1}
+	r.Fail(key, context.Canceled)
+	r.Fail(key, context.Canceled)
+	*now = now.Add(11 * time.Minute)
+	// A delayed maintenance tick must not merge a new outage into expired state.
+	r.Fail(key, context.Canceled)
+	if rows.Len() != 3 {
+		t.Fatalf("expected first/idle settlement/new first, got %d", rows.Len())
+	}
+	if rows.All()[1].ContextMap()["settlement"] != "idle" || rows.All()[2].ContextMap()["settlement"] != "first" {
+		t.Fatal("idle state reused")
+	}
+}
