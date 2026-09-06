@@ -263,17 +263,28 @@ func TestLoggingTransportCloseUnblocksTransactionFSMBeforeJoin(t *testing.T) {
 	tx.OnTerminate(txl.serverTxTerminate)
 
 	respondDone := make(chan error, 1)
+	t.Cleanup(func() {
+		// Release the fake socket even when an assertion fails before shutdown.
+		_ = conn.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = tp.CloseContext(ctx)
+		_ = txl.CloseContext(ctx)
+	})
 	go func() {
 		respondDone <- tx.Respond(NewResponseFromRequest(req, StatusOK, "OK", nil))
 	}()
-	<-conn.started
+	select {
+	case <-conn.started:
+	case <-time.After(time.Second):
+		t.Fatal("transaction response did not enter the blocked write")
+	}
 
-	closeDone := make(chan struct{})
+	closeDone := make(chan error, 1)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		_ = txl.CloseContext(ctx)
-		close(closeDone)
+		closeDone <- txl.CloseContext(ctx)
 	}()
 	select {
 	case <-closeDone:
@@ -286,9 +297,19 @@ func TestLoggingTransportCloseUnblocksTransactionFSMBeforeJoin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	require.NoError(t, tp.CloseContext(ctx))
 	cancel()
-	require.NoError(t, <-respondDone)
 	select {
-	case <-closeDone:
+	case err := <-respondDone:
+		// Respond reads tx.Err after the write returns. Concurrent Terminate
+		// can set this precise terminal result before that read completes.
+		if err != nil {
+			require.ErrorIs(t, err, ErrTransactionTerminated)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("response did not return after transport close")
+	}
+	select {
+	case err := <-closeDone:
+		require.NoError(t, err)
 	case <-time.After(time.Second):
 		t.Fatal("transaction lifecycle did not join after transport close")
 	}
