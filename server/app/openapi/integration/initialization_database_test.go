@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-sql-driver/mysql"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/microsoft/go-mssqldb"
 	"github.com/stretchr/testify/require"
@@ -217,10 +218,36 @@ func TestOpenAPIDatabaseFullInitialization(t *testing.T) {
 	// multiStatements. Each dialect is configured for one physical connection
 	// and the complete file is sent as one native driver Exec.
 	if _, err := connection.conn.ExecContext(ctx, string(body)); err != nil {
-		t.Fatalf("full initialization SQL failed for %s (%s): %v", cfg.dialect, cfg.fileName, err)
+		t.Fatalf("full initialization SQL failed for %s (%s%s): %v", cfg.dialect, cfg.fileName, initializationErrorLocation(err, string(body)), err)
 	}
 	assertFullInitializationState(t, connection.conn, ctx, cfg.dialect)
 	t.Logf("%s full initialization executed on dedicated %s database; no default OpenAPI client/nonce/grant/viewer rows", cfg.dialect, databaseName)
+}
+
+// PostgreSQL positions are one-based character offsets, not byte offsets.
+// Report only the source line, never the failing statement or seed values.
+func initializationErrorLocation(err error, body string) string {
+	var pgError *pgconn.PgError
+	if !errors.As(err, &pgError) || pgError.Position <= 0 {
+		return ""
+	}
+	line, position := 1, int32(1)
+	for _, r := range body {
+		if position == pgError.Position {
+			return fmt.Sprintf(":%d", line)
+		}
+		if r == '\n' {
+			line++
+		}
+		position++
+	}
+	return ""
+}
+
+func TestFullInitializationErrorLocationDoesNotExposeSQL(t *testing.T) {
+	err := &pgconn.PgError{Position: 6}
+	require.Equal(t, ":2", initializationErrorLocation(err, "中文;\n( ) secret-seed"))
+	require.Empty(t, initializationErrorLocation(errors.New("driver failed"), "secret-seed"))
 }
 
 func openFullInitializationConnection(ctx context.Context, cfg fullInitializationConfig) (*fullInitializationConnection, error) {
