@@ -11,6 +11,7 @@ import (
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
+	openapimodels "uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
 func newAssignTestDB(t *testing.T) *gorm.DB {
@@ -22,7 +23,10 @@ func newAssignTestDB(t *testing.T) *gorm.DB {
 		&gbmodels.GbAlarmResource{}, &gbmodels.GbAnomalyRecord{},
 		&gbmodels.GbCatalogNode{}, &gbmodels.GbChannelMount{},
 		&gbmodels.GbCustomGroupDevice{}, &basemodels.SysDepartment{},
+		&openapimodels.PlayGrant{}, &openapimodels.Viewer{},
 	))
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch INTEGER NOT NULL DEFAULT 1").Error)
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 	require.NoError(t, db.Exec("CREATE TABLE IF NOT EXISTS gb_cascade_device_projection (id INTEGER PRIMARY KEY AUTOINCREMENT, source_device_id INTEGER)").Error)
 	// 目标部门(id=2,启用)+ 源部门(id=1)
 	require.NoError(t, db.Create(&basemodels.SysDepartment{Name: "源部门", Status: int8Ptr(1)}).Error)
