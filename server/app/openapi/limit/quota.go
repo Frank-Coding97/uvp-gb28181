@@ -12,7 +12,11 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
-const PendingGrantTTL = 30 * time.Second
+const (
+	PendingGrantTTL    = 30 * time.Second
+	QuotaReleaseBatch  = 500
+	PlayLiveApplyScope = "play:live:apply"
+)
 
 var (
 	ErrQuotaUnavailable   = errors.New("openapi quota unavailable")
@@ -22,8 +26,9 @@ var (
 
 // ReservationRequest contains only already-authorized target metadata. It is
 // deliberately not an HTTP DTO and must be built after HMAC, scope, owner and
-// nonce checks. DeviceID/ChannelID are optional while a grant is pending; when
-// provided they are locked in the same order used by the admission path.
+// nonce checks. A pending grant is always tied to the requested device/channel
+// and those rows are locked in the same order used by the admission path; it
+// is not an unscoped placeholder.
 type ReservationRequest struct {
 	ClientID  int64
 	Scope     string
@@ -115,12 +120,9 @@ func (q *Quota) reservePendingTx(ctx context.Context, tx *gorm.DB, request Reser
 	if !scope.Enabled || scope.ScopeEpoch <= 0 {
 		return Reservation{}, ErrQuotaUnavailable
 	}
-	deviceEpoch := int64(1)
-	if request.DeviceID != "" {
-		deviceEpoch, err = lockDeviceRow(tx.WithContext(ctx), request.DeviceID)
-		if err != nil {
-			return Reservation{}, err
-		}
+	deviceEpoch, err := lockDeviceRow(tx.WithContext(ctx), request.DeviceID)
+	if err != nil {
+		return Reservation{}, err
 	}
 
 	// Expired pending/issued rows become releasable only when no real viewer is
@@ -137,8 +139,12 @@ func (q *Quota) reservePendingTx(ctx context.Context, tx *gorm.DB, request Reser
 		return Reservation{}, ErrQuotaExceeded
 	}
 
+	grantID, err := uuid.NewRandom()
+	if err != nil {
+		return Reservation{}, ErrQuotaUnavailable
+	}
 	grant := models.PlayGrant{
-		GrantID:     uuid.NewString(),
+		GrantID:     grantID.String(),
 		ClientID:    request.ClientID,
 		Scope:       request.Scope,
 		ClientEpoch: client.AuthEpoch,
@@ -150,12 +156,8 @@ func (q *Quota) reservePendingTx(ctx context.Context, tx *gorm.DB, request Reser
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}
-	if request.DeviceID != "" {
-		grant.DeviceID = stringPtr(request.DeviceID)
-	}
-	if request.ChannelID != "" {
-		grant.ChannelID = stringPtr(request.ChannelID)
-	}
+	grant.DeviceID = stringPtr(request.DeviceID)
+	grant.ChannelID = stringPtr(request.ChannelID)
 	if err := tx.WithContext(ctx).Create(&grant).Error; err != nil {
 		return Reservation{}, err
 	}
@@ -183,9 +185,10 @@ func (q *Quota) Occupied(ctx context.Context, clientID int64) (int64, error) {
 	return occupied, nil
 }
 
-// ReleaseExpired marks expired pending/issued grants as expired when no live
-// viewer references them. It is safe to call from a bounded maintenance job;
-// active/bound/revoke_pending viewers are never released or kicked here.
+// ReleaseExpired marks expired pending grants failed and expired issued grants
+// expired when no live viewer references them. It is safe to call from a
+// bounded maintenance job; active/bound/revoke_pending viewers are never
+// released or kicked here.
 func (q *Quota) ReleaseExpired(ctx context.Context, clientID int64) (int64, error) {
 	if ctx == nil || clientID <= 0 {
 		return 0, ErrInvalidReservation
@@ -213,13 +216,10 @@ func (q *Quota) ReleaseExpired(ctx context.Context, clientID int64) (int64, erro
 }
 
 func validateReservation(ctx context.Context, request ReservationRequest) error {
-	if ctx == nil || request.ClientID <= 0 || request.Scope == "" || request.Scope != strings.TrimSpace(request.Scope) || len(request.Scope) > 64 {
+	if ctx == nil || request.ClientID <= 0 || request.Scope != PlayLiveApplyScope || request.Scope != strings.TrimSpace(request.Scope) || len(request.Scope) > 64 {
 		return ErrInvalidReservation
 	}
-	if len(request.DeviceID) > 20 || request.DeviceID != strings.TrimSpace(request.DeviceID) || len(request.ChannelID) > 20 || request.ChannelID != strings.TrimSpace(request.ChannelID) {
-		return ErrInvalidReservation
-	}
-	if request.ChannelID != "" && request.DeviceID == "" {
+	if request.DeviceID == "" || request.ChannelID == "" || len(request.DeviceID) > 20 || request.DeviceID != strings.TrimSpace(request.DeviceID) || len(request.ChannelID) > 20 || request.ChannelID != strings.TrimSpace(request.ChannelID) {
 		return ErrInvalidReservation
 	}
 	return nil
@@ -242,11 +242,15 @@ func normalizeQuotaError(err error) error {
 func lockClientRow(tx *gorm.DB, clientID int64) (models.Client, error) {
 	var client models.Client
 	query := lockedModel(tx, &models.Client{}, "sys_openapi_client")
-	if err := query.Where("id = ?", clientID).Take(&client).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	result := query.Where("id = ?", clientID).Take(&client)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return models.Client{}, ErrQuotaUnavailable
 		}
-		return models.Client{}, err
+		return models.Client{}, result.Error
+	}
+	if result.RowsAffected != 1 || client.ID != clientID || client.ID <= 0 || client.AK == "" {
+		return models.Client{}, ErrQuotaUnavailable
 	}
 	return client, nil
 }
@@ -254,11 +258,15 @@ func lockClientRow(tx *gorm.DB, clientID int64) (models.Client, error) {
 func lockScopeRow(tx *gorm.DB, clientID int64, scopeName string) (models.ClientScope, error) {
 	var scope models.ClientScope
 	query := lockedModel(tx, &models.ClientScope{}, "sys_openapi_client_scope")
-	if err := query.Where("client_id = ? AND scope = ?", clientID, scopeName).Take(&scope).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	result := query.Where("client_id = ? AND scope = ?", clientID, scopeName).Take(&scope)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return models.ClientScope{}, ErrQuotaUnavailable
 		}
-		return models.ClientScope{}, err
+		return models.ClientScope{}, result.Error
+	}
+	if result.RowsAffected != 1 || scope.ClientID != clientID || scope.Scope != scopeName || scope.Scope == "" {
+		return models.ClientScope{}, ErrQuotaUnavailable
 	}
 	return scope, nil
 }
@@ -266,16 +274,18 @@ func lockScopeRow(tx *gorm.DB, clientID int64, scopeName string) (models.ClientS
 func lockDeviceRow(tx *gorm.DB, deviceID string) (int64, error) {
 	query := lockedTable(tx, "gb_device")
 	var row struct {
-		ID          uint  `gorm:"column:id"`
-		AccessEpoch int64 `gorm:"column:access_epoch"`
+		ID          uint   `gorm:"column:id"`
+		DeviceID    string `gorm:"column:device_id"`
+		AccessEpoch int64  `gorm:"column:access_epoch"`
 	}
-	if err := query.Select("id, access_epoch").Where("device_id = ?", deviceID).Take(&row).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+	result := query.Select("id, device_id, access_epoch").Where("device_id = ? AND deleted_at IS NULL", deviceID).Take(&row)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return 0, ErrQuotaUnavailable
 		}
-		return 0, err
+		return 0, result.Error
 	}
-	if row.AccessEpoch <= 0 {
+	if result.RowsAffected != 1 || row.ID == 0 || row.DeviceID != deviceID || row.AccessEpoch <= 0 {
 		return 0, ErrQuotaUnavailable
 	}
 	return row.AccessEpoch, nil
@@ -296,22 +306,66 @@ func lockedTable(tx *gorm.DB, table string) *gorm.DB {
 }
 
 func expireReleasable(tx *gorm.DB, clientID int64, now time.Time) (int64, error) {
-	live := tx.Model(&models.Viewer{}).
+	live := liveViewerSubquery(tx)
+	var candidates []struct {
+		GrantID string            `gorm:"column:grant_id"`
+		State   models.GrantState `gorm:"column:state"`
+	}
+	if err := tx.Model(&models.PlayGrant{}).
+		Select("grant_id, state").
+		Where("client_id = ? AND state IN ? AND expires_at <= ?", clientID, []models.GrantState{models.GrantStatePending, models.GrantStateIssued}, now).
+		Where("NOT EXISTS (?)", live).
+		Order("grant_id ASC").
+		Limit(QuotaReleaseBatch).
+		Find(&candidates).Error; err != nil {
+		return 0, err
+	}
+	if len(candidates) == 0 {
+		return 0, nil
+	}
+	pendingIDs := make([]string, 0, len(candidates))
+	issuedIDs := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		switch candidate.State {
+		case models.GrantStatePending:
+			pendingIDs = append(pendingIDs, candidate.GrantID)
+		case models.GrantStateIssued:
+			issuedIDs = append(issuedIDs, candidate.GrantID)
+		}
+	}
+	var released int64
+	if len(pendingIDs) > 0 {
+		result := tx.Model(&models.PlayGrant{}).
+			Where("client_id = ? AND grant_id IN ? AND state = ? AND expires_at <= ?", clientID, pendingIDs, models.GrantStatePending, now).
+			Where("NOT EXISTS (?)", liveViewerSubquery(tx)).
+			Updates(map[string]any{"state": models.GrantStateFailed, "reason": "pending_timeout", "updated_at": now})
+		if result.Error != nil {
+			return released, result.Error
+		}
+		released += result.RowsAffected
+	}
+	if len(issuedIDs) > 0 {
+		result := tx.Model(&models.PlayGrant{}).
+			Where("client_id = ? AND grant_id IN ? AND state = ? AND expires_at <= ?", clientID, issuedIDs, models.GrantStateIssued, now).
+			Where("NOT EXISTS (?)", liveViewerSubquery(tx)).
+			Updates(map[string]any{"state": models.GrantStateExpired, "reason": "issued_timeout", "updated_at": now})
+		if result.Error != nil {
+			return released, result.Error
+		}
+		released += result.RowsAffected
+	}
+	return released, nil
+}
+
+func liveViewerSubquery(tx *gorm.DB) *gorm.DB {
+	return tx.Model(&models.Viewer{}).
 		Select("1").
 		Where("gb_openapi_viewer.grant_id = gb_openapi_play_grant.grant_id").
 		Where("state IN ?", []models.ViewerState{models.ViewerStatePending, models.ViewerStateActive, models.ViewerStateRevokePending})
-	result := tx.Model(&models.PlayGrant{}).
-		Where("client_id = ? AND state IN ? AND expires_at <= ?", clientID, []models.GrantState{models.GrantStatePending, models.GrantStateIssued}, now).
-		Where("NOT EXISTS (?)", live).
-		Updates(map[string]any{"state": models.GrantStateExpired, "reason": "quota_expired", "updated_at": now})
-	return result.RowsAffected, result.Error
 }
 
 func countOccupied(tx *gorm.DB, clientID int64, now time.Time) (int64, error) {
-	live := tx.Model(&models.Viewer{}).
-		Select("1").
-		Where("gb_openapi_viewer.grant_id = gb_openapi_play_grant.grant_id").
-		Where("state IN ?", []models.ViewerState{models.ViewerStatePending, models.ViewerStateActive, models.ViewerStateRevokePending})
+	live := liveViewerSubquery(tx)
 	var occupied int64
 	err := tx.Model(&models.PlayGrant{}).
 		Where("client_id = ?", clientID).

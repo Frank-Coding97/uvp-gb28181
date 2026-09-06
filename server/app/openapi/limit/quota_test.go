@@ -3,6 +3,7 @@ package limit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -24,7 +25,7 @@ func TestOpenAPIQuotaReservesAtMostConfiguredLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+			_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 			results <- err
 		}()
 	}
@@ -59,21 +60,21 @@ func TestOpenAPIQuotaClientIsolationAndServiceRebuild(t *testing.T) {
 
 	quota := NewQuota(db, func() time.Time { return quotaTestNow })
 	for i := 0; i < 10; i++ {
-		_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply"})
+		_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 		require.NoError(t, err)
 	}
-	_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+	_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.ErrorIs(t, err, ErrQuotaExceeded)
 
 	for i := 0; i < 2; i++ {
-		_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 2, Scope: "play:live:apply", DeviceID: "device-a"})
+		_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 2, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 		require.NoError(t, err)
 	}
-	_, err = quota.ReservePending(context.Background(), ReservationRequest{ClientID: 2, Scope: "play:live:apply", DeviceID: "device-a"})
+	_, err = quota.ReservePending(context.Background(), ReservationRequest{ClientID: 2, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.ErrorIs(t, err, ErrQuotaExceeded)
 
 	rebuilt := NewQuota(db, func() time.Time { return quotaTestNow })
-	_, err = rebuilt.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+	_, err = rebuilt.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.ErrorIs(t, err, ErrQuotaExceeded)
 }
 
@@ -82,19 +83,23 @@ func TestOpenAPIQuotaExpiryReleasesPendingButNotLiveViewer(t *testing.T) {
 	db := quotaFixture(t, 1)
 	quota := NewQuota(db, func() time.Time { return now })
 
-	first, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+	first, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.NoError(t, err)
 	var firstGrant models.PlayGrant
 	require.NoError(t, db.First(&firstGrant, "grant_id = ?", first.GrantID).Error)
 	require.EqualValues(t, 3, firstGrant.DeviceEpoch)
 	now = now.Add(31 * time.Second)
-	second, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+	second, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.NoError(t, err)
 	require.NotEqual(t, first.GrantID, second.GrantID)
 
 	var grants []models.PlayGrant
 	require.NoError(t, db.Find(&grants).Error)
 	require.Len(t, grants, 2)
+	var expiredPending models.PlayGrant
+	require.NoError(t, db.First(&expiredPending, "grant_id = ?", first.GrantID).Error)
+	require.Equal(t, models.GrantStateFailed, expiredPending.State)
+	require.Equal(t, "pending_timeout", expiredPending.Reason)
 
 	// A bound grant remains occupied even after its grant TTL. A revoked grant
 	// with a real pending viewer is also retained until that viewer is closed.
@@ -121,14 +126,14 @@ func TestOpenAPIQuotaExpiryReleasesPendingButNotLiveViewer(t *testing.T) {
 	occupied, err := quota.Occupied(context.Background(), 1)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, occupied)
-	_, err = quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+	_, err = quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.ErrorIs(t, err, ErrQuotaExceeded)
 }
 
 func TestOpenAPIQuotaCountsGrantOnceAcrossPendingToBound(t *testing.T) {
 	db := quotaFixture(t, 1)
 	quota := NewQuota(db, func() time.Time { return quotaTestNow })
-	reservation, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+	reservation, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.NoError(t, err)
 
 	grant := quotaMediaGrant(reservation.GrantID, models.GrantStateBound, quotaTestNow)
@@ -141,22 +146,29 @@ func TestOpenAPIQuotaCountsGrantOnceAcrossPendingToBound(t *testing.T) {
 	occupied, err := quota.Occupied(context.Background(), 1)
 	require.NoError(t, err)
 	require.EqualValues(t, 1, occupied)
-	_, err = quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply", DeviceID: "device-a"})
+	_, err = quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.ErrorIs(t, err, ErrQuotaExceeded)
 }
 
 func TestOpenAPIQuotaReleaseExpiredIssuedGrantKeepsLiveViewer(t *testing.T) {
 	db := quotaFixture(t, 2)
+	pending := quotaMediaGrant("00000000-0000-4000-8000-000000000200", models.GrantStatePending, quotaTestNow.Add(-time.Minute))
+	require.NoError(t, db.Create(&pending).Error)
 	expired := quotaMediaGrant("00000000-0000-4000-8000-000000000201", models.GrantStateIssued, quotaTestNow.Add(-time.Minute))
 	require.NoError(t, db.Create(&expired).Error)
 
 	quota := NewQuota(db, func() time.Time { return quotaTestNow })
 	released, err := quota.ReleaseExpired(context.Background(), 1)
 	require.NoError(t, err)
-	require.EqualValues(t, 1, released)
+	require.EqualValues(t, 2, released)
 	var stored models.PlayGrant
+	require.NoError(t, db.First(&stored, "grant_id = ?", pending.GrantID).Error)
+	require.Equal(t, models.GrantStateFailed, stored.State)
+	require.Equal(t, "pending_timeout", stored.Reason)
+	stored = models.PlayGrant{}
 	require.NoError(t, db.First(&stored, "grant_id = ?", expired.GrantID).Error)
 	require.Equal(t, models.GrantStateExpired, stored.State)
+	require.Equal(t, "issued_timeout", stored.Reason)
 
 	protected := quotaMediaGrant("00000000-0000-4000-8000-000000000202", models.GrantStateIssued, quotaTestNow.Add(-time.Minute))
 	require.NoError(t, db.Create(&protected).Error)
@@ -169,20 +181,49 @@ func TestOpenAPIQuotaReleaseExpiredIssuedGrantKeepsLiveViewer(t *testing.T) {
 	require.Equal(t, models.GrantStateIssued, stored.State)
 }
 
+func TestOpenAPIQuotaReleaseExpiredIsBoundedToOneBatch(t *testing.T) {
+	db := quotaFixture(t, 1)
+	grants := make([]models.PlayGrant, 0, 501)
+	for i := 0; i < 501; i++ {
+		grants = append(grants, quotaMediaGrant(fmt.Sprintf("00000000-0000-4000-8000-%012d", i+300), models.GrantStatePending, quotaTestNow.Add(-time.Minute)))
+	}
+	require.NoError(t, db.CreateInBatches(&grants, 100).Error)
+
+	quota := NewQuota(db, func() time.Time { return quotaTestNow })
+	released, err := quota.ReleaseExpired(context.Background(), 1)
+	require.NoError(t, err)
+	require.EqualValues(t, 500, released)
+	var pending int64
+	require.NoError(t, db.Model(&models.PlayGrant{}).Where("client_id = ? AND state = ?", 1, models.GrantStatePending).Count(&pending).Error)
+	require.EqualValues(t, 1, pending)
+	occupied, err := quota.Occupied(context.Background(), 1)
+	require.NoError(t, err)
+	require.Zero(t, occupied)
+}
+
 func TestOpenAPIQuotaRejectsInvalidInputAndDatabaseFailure(t *testing.T) {
 	db := quotaFixture(t, 1)
 	quota := NewQuota(db, func() time.Time { return quotaTestNow })
-	for _, request := range []ReservationRequest{{}, {ClientID: 1}, {ClientID: 0, Scope: "play:live:apply"}} {
+	for _, request := range []ReservationRequest{
+		{},
+		{ClientID: 1},
+		{ClientID: 0, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"},
+		{ClientID: 1, Scope: PlayLiveApplyScope},
+		{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a"},
+		{ClientID: 1, Scope: "device:list", DeviceID: "device-a", ChannelID: "channel-a"},
+	} {
 		_, err := quota.ReservePending(context.Background(), request)
 		require.ErrorIs(t, err, ErrInvalidReservation)
 	}
+	_, err := quota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-deleted", ChannelID: "channel-a"})
+	require.ErrorIs(t, err, ErrQuotaUnavailable)
 
 	missing := NewQuota(mustQuotaDB(t), func() time.Time { return quotaTestNow })
-	_, err := missing.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply"})
+	_, err = missing.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.ErrorIs(t, err, ErrQuotaUnavailable)
 
 	var nilQuota *Quota
-	_, err = nilQuota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: "play:live:apply"})
+	_, err = nilQuota.ReservePending(context.Background(), ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"})
 	require.ErrorIs(t, err, ErrQuotaUnavailable)
 }
 
@@ -194,8 +235,9 @@ func quotaFixture(t *testing.T, viewerQuota int) *gorm.DB {
 	t.Helper()
 	db := mustQuotaDB(t)
 	require.NoError(t, db.AutoMigrate(&models.Client{}, &models.ClientScope{}, &models.PlayGrant{}, &models.Viewer{}))
-	require.NoError(t, db.Exec("CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id TEXT NOT NULL UNIQUE, access_epoch INTEGER NOT NULL DEFAULT 1)").Error)
+	require.NoError(t, db.Exec("CREATE TABLE gb_device (id INTEGER PRIMARY KEY, device_id TEXT NOT NULL UNIQUE, access_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL)").Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, access_epoch) VALUES (1, 'device-a', 3)").Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_device(id, device_id, access_epoch, deleted_at) VALUES (2, 'device-deleted', 3, ?)", quotaTestNow).Error)
 	client := models.Client{ID: 1, AK: "ak-1", Name: "client-1", OwnerDeptID: 1, Status: models.StatusActive,
 		SecretCiphertext: []byte("cipher"), SecretIV: []byte("iv"), SecretKeyID: "key", SecretVersion: 1,
 		AuthEpoch: 1, RateLimit: 10, Burst: 20, ViewerQuota: viewerQuota, RowVersion: 1, CreatedAt: quotaTestNow, UpdatedAt: quotaTestNow}
