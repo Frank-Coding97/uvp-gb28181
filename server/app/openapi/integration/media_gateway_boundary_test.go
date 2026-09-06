@@ -164,7 +164,42 @@ type boundaryGlobalCounters struct {
 	records   atomic.Int32
 }
 
-func newBoundaryTLSServer(t *testing.T, fixture boundaryMediaFixture, counters *boundaryGlobalCounters) (*httptest.Server, *http.Client) {
+type boundaryResponseObserver struct {
+	writes     atomic.Int32
+	lateWrites atomic.Int32
+	returned   atomic.Bool
+}
+
+type boundaryObservedResponseWriter struct {
+	http.ResponseWriter
+	observer *boundaryResponseObserver
+}
+
+func (w *boundaryObservedResponseWriter) WriteHeader(status int) {
+	w.observe()
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *boundaryObservedResponseWriter) Write(body []byte) (int, error) {
+	w.observe()
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *boundaryObservedResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
+}
+
+func (w *boundaryObservedResponseWriter) observe() {
+	if w.observer == nil {
+		return
+	}
+	w.observer.writes.Add(1)
+	if w.observer.returned.Load() {
+		w.observer.lateWrites.Add(1)
+	}
+}
+
+func newBoundaryTLSServer(t *testing.T, fixture boundaryMediaFixture, counters *boundaryGlobalCounters) (*httptest.Server, *http.Client, *boundaryResponseObserver) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	root := gin.New()
@@ -180,13 +215,18 @@ func newBoundaryTLSServer(t *testing.T, fixture boundaryMediaFixture, counters *
 		}
 		c.Next()
 	})
-	server := httptest.NewTLSServer(root)
+	observer := &boundaryResponseObserver{}
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		observer.returned.Store(false)
+		root.ServeHTTP(&boundaryObservedResponseWriter{ResponseWriter: writer, observer: observer}, request)
+		observer.returned.Store(true)
+	}))
 	t.Cleanup(server.Close)
 	httpClient := server.Client()
 	if transport, ok := httpClient.Transport.(*http.Transport); ok {
 		transport.ForceAttemptHTTP2 = false
 	}
-	return server, httpClient
+	return server, httpClient, observer
 }
 
 func boundarySignedRequest(t *testing.T, serverURL, secret, path string, body []byte, nonce string) *http.Request {
@@ -232,7 +272,7 @@ func TestOpenAPIMediaGatewayBoundarySuccessCommitsBeforeApply(t *testing.T) {
 	dispatcher.ready.Store(true)
 	fixture := newBoundaryMediaFixture(t, dispatcher, 500*time.Millisecond, 100*time.Millisecond)
 	counters := &boundaryGlobalCounters{}
-	server, httpClient := newBoundaryTLSServer(t, fixture, counters)
+	server, httpClient, _ := newBoundaryTLSServer(t, fixture, counters)
 
 	request := boundarySignedRequest(t, server.URL, fixture.secret, boundaryMediaPath, []byte(`{"protocol":"https-flv"}`), strings.Repeat("a", 32))
 	response, err := httpClient.Do(request)
@@ -272,7 +312,7 @@ func TestOpenAPIMediaGatewayBoundarySlowBodyFailsBeforeAdmission(t *testing.T) {
 	dispatcher := &boundaryMediaDispatcher{}
 	dispatcher.ready.Store(true)
 	fixture := newBoundaryMediaFixture(t, dispatcher, 120*time.Millisecond, 40*time.Millisecond)
-	server, httpClient := newBoundaryTLSServer(t, fixture, nil)
+	server, httpClient, _ := newBoundaryTLSServer(t, fixture, nil)
 	body := []byte(`{"protocol":"https-flv"}`)
 	request := boundarySignedRequest(t, server.URL, fixture.secret, boundaryMediaPath, body, strings.Repeat("b", 32))
 	request.Body = &boundarySlowBody{first: body[:1], rest: body[1:], delay: 300 * time.Millisecond}
@@ -295,7 +335,7 @@ func TestOpenAPIMediaGatewayBoundaryRejectsChunkedAndEncodedBeforeRead(t *testin
 	dispatcher := &boundaryMediaDispatcher{}
 	dispatcher.ready.Store(true)
 	fixture := newBoundaryMediaFixture(t, dispatcher, 500*time.Millisecond, 100*time.Millisecond)
-	server, _ := newBoundaryTLSServer(t, fixture, nil)
+	server, _, _ := newBoundaryTLSServer(t, fixture, nil)
 	body := []byte(`{"protocol":"https-flv"}`)
 
 	chunked := boundarySignedRequest(t, server.URL, fixture.secret, boundaryMediaPath, body, strings.Repeat("c", 32))
@@ -322,7 +362,7 @@ func TestOpenAPIMediaGatewayBoundaryBindsHMACToRawBodyAndExactTarget(t *testing.
 	dispatcher := &boundaryMediaDispatcher{}
 	dispatcher.ready.Store(true)
 	fixture := newBoundaryMediaFixture(t, dispatcher, 500*time.Millisecond, 100*time.Millisecond)
-	server, httpClient := newBoundaryTLSServer(t, fixture, nil)
+	server, httpClient, _ := newBoundaryTLSServer(t, fixture, nil)
 	compact := []byte(`{"protocol":"https-flv"}`)
 
 	whitespace := boundarySignedRequest(t, server.URL, fixture.secret, boundaryMediaPath, compact, strings.Repeat("e", 32))
@@ -362,14 +402,17 @@ func TestOpenAPIMediaGatewayBoundaryBindsHMACToRawBodyAndExactTarget(t *testing.
 }
 
 func TestOpenAPIMediaGatewayBoundaryLateApplyReturnsOnceWithoutSuccessAudit(t *testing.T) {
+	var releaseOnce sync.Once
 	dispatcher := &boundaryMediaDispatcher{
 		applyStarted: make(chan struct{}),
 		applyRelease: make(chan struct{}),
 		applyDone:    make(chan struct{}),
 	}
+	release := func() { releaseOnce.Do(func() { close(dispatcher.applyRelease) }) }
+	defer release()
 	dispatcher.ready.Store(true)
 	fixture := newBoundaryMediaFixture(t, dispatcher, 250*time.Millisecond, 50*time.Millisecond)
-	server, httpClient := newBoundaryTLSServer(t, fixture, nil)
+	server, httpClient, observer := newBoundaryTLSServer(t, fixture, nil)
 	request := boundarySignedRequest(t, server.URL, fixture.secret, boundaryMediaPath, []byte(`{"protocol":"https-flv"}`), strings.Repeat("0", 32))
 
 	response, err := httpClient.Do(request)
@@ -392,9 +435,7 @@ func TestOpenAPIMediaGatewayBoundaryLateApplyReturnsOnceWithoutSuccessAudit(t *t
 	require.Zero(t, successAudits)
 	require.EqualValues(t, 1, grants)
 
-	var releaseOnce sync.Once
-	release := func() { releaseOnce.Do(func() { close(dispatcher.applyRelease) }) }
-	defer release()
+	writesBeforeRelease := observer.writes.Load()
 	release()
 	require.Eventually(t, func() bool {
 		select {
@@ -404,7 +445,10 @@ func TestOpenAPIMediaGatewayBoundaryLateApplyReturnsOnceWithoutSuccessAudit(t *t
 			return false
 		}
 	}, time.Second, time.Millisecond)
-	require.NotContains(t, body, "authorizationId", "late worker must not add a second response")
+	require.Equal(t, writesBeforeRelease, observer.writes.Load(), "late worker must not write a second response")
+	require.Zero(t, observer.lateWrites.Load(), "late worker must not write after the handler returned")
+	_, _, successAudits, _ = countBoundaryRows(t, fixture.db)
+	require.Zero(t, successAudits, "late Apply must not turn the audit into success")
 }
 
 type boundarySlowBody struct {
