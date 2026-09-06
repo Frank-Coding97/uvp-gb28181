@@ -1,5 +1,5 @@
 server:
-  appdebug: true   # 调试模式开关：影响 gin Mode 和调试路由(swagger/pprof)；日志输出由 logs.level / logs.console 控制，与本开关无关
+  appdebug: true   # 调试模式开关：影响 gin Mode 和调试路由(swagger/pprof)；日志由 logs.level / logs.outputs 控制，与本开关无关
   cachetype: "redis" #缓存模式 memory OR redis
   syslog: false  # 是否开启系统日志
   notcheckuser: []    # 不检查权限的用户（api、菜单及数据权限均不检查），例如：[1]
@@ -222,10 +222,7 @@ gen:
 
 # 任务调度器配置
 scheduler:
-  # 日志配置
-  log:
-    dir: "/resource/logs/scheduler"  # 日志目录
-    level: "info"                     # 日志级别: debug, info, warn, error, fatal
+  # 调度日志统一使用 logs.outputs；级别在 logs.modules.scheduler 配置
   # 任务结果通道缓冲大小
   job_results_buffer_size: 1000       # 任务结果通道缓冲大小，默认1000
 
