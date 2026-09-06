@@ -146,7 +146,7 @@ func (s *Service) applyQueryResponse(ctx context.Context, operation gbmodels.GbP
 		applied, err = applyPTZResponseObservation(tx, operation, callID, cseq, completedAt)
 		if err != nil || !applied {
 			if !applied && err == nil {
-				logIgnoredPTZResponse(operation, callID, cseq, head, body)
+				logIgnoredPTZResponse(ctx, operation, callID, cseq, head, body)
 			}
 			return err
 		}
@@ -179,7 +179,7 @@ func (s *Service) applyQueryResponse(ctx context.Context, operation gbmodels.GbP
 			return err
 		}
 		if !terminalApplied {
-			logIgnoredPTZResponse(operation, callID, cseq, head, body)
+			logIgnoredPTZResponse(ctx, operation, callID, cseq, head, body)
 			return fmt.Errorf("PTZ 查询响应 operation 状态推进失败")
 		}
 		return nil

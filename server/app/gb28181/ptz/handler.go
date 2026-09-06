@@ -57,7 +57,7 @@ func (s *Service) OnPTZMessage(ctx context.Context, deviceCode, callID, cseq str
 		return err
 	}
 	if !matched {
-		logUnmatchedPTZResponse(deviceCode, callID, cseq, *head, candidates, reason, body, ctx)
+		logUnmatchedPTZResponse(ctx, deviceCode, callID, cseq, *head, candidates, reason, body)
 		return nil
 	}
 	if operation.CmdType == manscdp.CmdDeviceControl && !operation.ResponseRequired {
@@ -189,11 +189,7 @@ func operationProtocolProfile(operation gbmodels.GbPTZOperation) protocol.Profil
 	return profile
 }
 
-func logUnmatchedPTZResponse(deviceCode, callID, cseq string, head manscdp.MessageHead, candidateIDs []string, reason string, body []byte, requestContexts ...context.Context) {
-	ctx := context.Background()
-	if len(requestContexts) > 0 && requestContexts[0] != nil {
-		ctx = requestContexts[0]
-	}
+func logUnmatchedPTZResponse(ctx context.Context, deviceCode, callID, cseq string, head manscdp.MessageHead, candidateIDs []string, reason string, body []byte) {
 	app.Log(ctx).Named("ptz").Warn("GB28181 PTZ 应答无法唯一关联",
 		zap.String("event", "ptz.response.unmatched"),
 		zap.String("deviceCode", deviceCode),
@@ -208,11 +204,7 @@ func logUnmatchedPTZResponse(deviceCode, callID, cseq string, head manscdp.Messa
 	)
 }
 
-func logIgnoredPTZResponse(operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte, requestCtx ...context.Context) {
-	ctx := context.Background()
-	if len(requestCtx) > 0 && requestCtx[0] != nil {
-		ctx = requestCtx[0]
-	}
+func logIgnoredPTZResponse(ctx context.Context, operation gbmodels.GbPTZOperation, callID, cseq string, head manscdp.MessageHead, body []byte) {
 	app.Log(ctx).Named("ptz").Warn("GB28181 PTZ 应答已关联但 operation 未推进，忽略事实写入",
 		zap.String("event", "ptz.response.ignored"),
 		zap.String("operationId", operation.OperationID),
