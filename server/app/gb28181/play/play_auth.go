@@ -6,7 +6,6 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
@@ -18,7 +17,8 @@ type preparedTokenIssuer interface {
 
 type authorizationLifecycle interface {
 	preparedTokenIssuer
-	BindAuthorization(string, uint64) error
+	ValidateQueuedAuthorizationContext(context.Context, playauth.QueuedAuthorization) error
+	BindAuthorizationContext(context.Context, playauth.QueuedAuthorization, uint64) error
 	TerminateMediaGeneration(uint64) int
 }
 
@@ -126,12 +126,63 @@ func (s *Service) AuthorizeFixedPlayback(ctx context.Context, req AuthorizedRequ
 	return result, nil
 }
 
-func (s *Service) bindAuthorization(authorizationID string, generation uint64) error {
+// queuedAuthorization derives the expected resource from the dispatch target,
+// not from mutable authorization data or a newly loaded device epoch.
+func (s *Service) queuedAuthorization(req Request) (playauth.QueuedAuthorization, error) {
+	if req.AuthorizationID == "" || req.RequiredNode <= 0 || s.registry == nil ||
+		!gbconfig.CurrentFixedAddressPlaybackSettings().FixedAddressEnabled {
+		return playauth.QueuedAuthorization{}, ErrPlayAuthorizationUnavailable
+	}
+	streamID, err := FixedStreamID(req.DeviceID, req.ChannelID)
+	if err != nil {
+		return playauth.QueuedAuthorization{}, ErrPlayAuthorizationUnavailable
+	}
+	mediaNode, ok := s.registry.Get(req.RequiredNode)
+	if !ok || mediaNode == nil || mediaNode.MediaServerUUID == "" {
+		return playauth.QueuedAuthorization{}, ErrPlayAuthorizationUnavailable
+	}
+	return playauth.QueuedAuthorization{
+		AuthorizationGeneration: req.AuthorizationID,
+		DeviceID:                req.DeviceID, ChannelID: req.ChannelID, DeviceEpoch: req.DeviceEpoch,
+		App: zlmApp, Stream: streamID, MediaServerID: mediaNode.MediaServerUUID,
+	}, nil
+}
+
+func (s *Service) validateQueuedAuthorization(ctx context.Context, req Request) error {
 	lifecycle, ok := s.tokenIssuer.(authorizationLifecycle)
 	if !ok || lifecycle == nil {
 		return ErrPlayAuthorizationUnavailable
 	}
-	return lifecycle.BindAuthorization(authorizationID, generation)
+	queued, err := s.queuedAuthorization(req)
+	if err != nil {
+		return err
+	}
+	return lifecycle.ValidateQueuedAuthorizationContext(ctx, queued)
+}
+
+func (s *Service) bindAuthorization(ctx context.Context, req Request, generation uint64) error {
+	lifecycle, ok := s.tokenIssuer.(authorizationLifecycle)
+	if !ok || lifecycle == nil {
+		return ErrPlayAuthorizationUnavailable
+	}
+	queued, err := s.queuedAuthorization(req)
+	if err != nil {
+		return err
+	}
+	return lifecycle.BindAuthorizationContext(ctx, queued, generation)
+}
+
+func (s *Service) bindResultAuthorization(ctx context.Context, req Request, result *Result) error {
+	queued, err := s.queuedAuthorization(req)
+	if err != nil || result == nil || result.Generation == 0 || result.Node == nil ||
+		result.Node.ID != req.RequiredNode || result.App != queued.App || result.StreamID != queued.Stream {
+		return ErrPlayAuthorizationUnavailable
+	}
+	lifecycle, ok := s.tokenIssuer.(authorizationLifecycle)
+	if !ok || lifecycle == nil {
+		return ErrPlayAuthorizationUnavailable
+	}
+	return lifecycle.BindAuthorizationContext(ctx, queued, result.Generation)
 }
 
 func (s *Service) terminateAuthorizationGeneration(generation uint64) {
@@ -169,13 +220,9 @@ func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*
 		return nil, err
 	}
 	if err := s.authorizePreparedResult(ctx, result, req, settings, issuer, prepared); err != nil {
-		if result != nil && !result.Reused {
-			ref := stream.LiveRef{StreamID: result.StreamID, SSRC: result.SSRC, Generation: result.Generation}
-			if result.Node != nil {
-				ref.NodeID = result.Node.ID
-			}
-			_, _ = s.coordinator().StopIfCurrent(context.WithoutCancel(ctx), ref)
-		}
+		// The generation may already serve another authorized caller even
+		// when this request created it. Caller denial is not media ownership;
+		// transfer cleanup and actual start failure compensation remain separate.
 		return nil, err
 	}
 	return result, nil

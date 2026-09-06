@@ -528,6 +528,13 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	// 媒体等待全部纳入同一 deadline,任一阶段阻塞都不能超过 PlayTimeout
 	playCtx, playCancel := context.WithTimeout(ctx, gbconfig.CurrentPlaybackSettings().PlayTimeout())
 	defer playCancel()
+	if req.AuthorizationID != "" {
+		// Waiting for an earlier generation to stop can outlive the entry
+		// preflight. Recheck before probes, location repairs or stale cleanup.
+		if err := s.validateQueuedAuthorization(playCtx, req); err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+	}
 
 	// 1. 校验设备 + 通道
 	dev, err := s.devices.FindByDeviceID(playCtx, deviceID)
@@ -656,7 +663,7 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	authorizationBound := false
 	startCompleted := false
 	if req.AuthorizationID != "" {
-		if err := s.bindAuthorization(req.AuthorizationID, generation); err != nil {
+		if err := s.bindAuthorization(playCtx, req, generation); err != nil {
 			return nil, ErrPlayAuthorizationUnavailable
 		}
 		authorizationBound = true

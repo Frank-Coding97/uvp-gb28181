@@ -240,9 +240,9 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 				c.mu.Unlock()
 				return nil, true, err
 			}
-			if req.IsQualified() {
-				// A qualified external request must not turn an uncertain prior
-				// cleanup into a destructive retry.  The caller reports the
+			if req.IsQualified() || req.AuthorizationID != "" {
+				// A qualified or queued authorized request must not turn an
+				// uncertain prior cleanup into a destructive retry. The caller reports the
 				// durable barrier and the dedicated cleanup/recovery path owns
 				// any subsequent stop attempt.
 				c.mu.Unlock()
@@ -495,6 +495,13 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 			return nil, err
 		}
 	}
+	if req.AuthorizationID != "" {
+		// Revalidate after queue delay, before reuse probes or cleanup in the
+		// coordinator. A preflight denial must not touch a shared generation.
+		if err := s.validateQueuedAuthorization(ctx, req); err != nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+	}
 	result, reused, err := c.ensureLive(ctx, req)
 	if err != nil {
 		return nil, err
@@ -508,7 +515,9 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 		}
 	}
 	if req.AuthorizationID != "" {
-		if result == nil || result.Generation == 0 || s.bindAuthorization(req.AuthorizationID, result.Generation) != nil {
+		if s.bindResultAuthorization(ctx, req, result) != nil {
+			// Even the coordinator owner may have valid waiters. Deny this
+			// authorization only; device cleanup owns any transfer teardown.
 			return nil, ErrPlayAuthorizationUnavailable
 		}
 	}

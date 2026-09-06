@@ -188,7 +188,7 @@ func TestAutoStartAuthorizationBindsBeforeMediaAndTerminatesOnFailure(t *testing
 	_, err = service.EnsureLive(context.Background(), Request{
 		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID,
 		Trigger: "on_stream_not_found", RequiredNode: 1,
-		AuthorizationID: claims.AuthorizationGeneration,
+		AuthorizationID: claims.AuthorizationGeneration, DeviceEpoch: claims.DeviceEpoch,
 	})
 	if err == nil {
 		t.Fatal("auto start unexpectedly succeeded")
@@ -227,7 +227,7 @@ func TestAutoStartAuthorizationTerminatesWhenGenerationStops(t *testing.T) {
 	result, err := service.EnsureLive(context.Background(), Request{
 		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID,
 		Trigger: "on_stream_not_found", RequiredNode: 1,
-		AuthorizationID: claims.AuthorizationGeneration,
+		AuthorizationID: claims.AuthorizationGeneration, DeviceEpoch: claims.DeviceEpoch,
 	})
 	if err != nil {
 		t.Fatal(err)

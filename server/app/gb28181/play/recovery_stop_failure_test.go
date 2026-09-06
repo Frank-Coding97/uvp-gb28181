@@ -166,7 +166,7 @@ func TestServiceStopCloseFailureKeepsGenerationTrackableAndRetryable(t *testing.
 	}
 	result, err := service.EnsureLive(context.Background(), Request{
 		DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, Trigger: "test", RequiredNode: 1,
-		AuthorizationID: claims.AuthorizationGeneration,
+		AuthorizationID: claims.AuthorizationGeneration, DeviceEpoch: claims.DeviceEpoch,
 	})
 	if err != nil {
 		t.Fatal(err)
