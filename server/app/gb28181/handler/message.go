@@ -355,13 +355,17 @@ func (h *MessageHandler) Handle(req *sip.Request, tx sip.ServerTransaction) {
 			if sink == nil {
 				logger.Warn("GB28181 RecordInfo sink 未装配,忽略响应",
 					zap.String("event", "gb28181.message.record_info_sink_unavailable"),
-					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq))
+					zap.String("device_id", head.DeviceID),
+					zap.String("sender_device_id", ptzDeviceCode(req, "")),
+					zap.String("call_id", callID), zap.String("cseq", cseq))
 				return
 			}
 			if err := sink.OnRecordInfoMessage(ctx, ptzDeviceCode(req, ""), req.Body()); err != nil {
 				logger.Warn("GB28181 RecordInfo 响应处理失败",
 					zap.String("event", "gb28181.message.record_info_failed"),
-					zap.String("device_id", head.DeviceID), zap.String("call_id", callID), zap.String("cseq", cseq),
+					zap.String("device_id", head.DeviceID),
+					zap.String("sender_device_id", ptzDeviceCode(req, "")),
+					zap.String("call_id", callID), zap.String("cseq", cseq),
 					logging.Error(err))
 			}
 			return

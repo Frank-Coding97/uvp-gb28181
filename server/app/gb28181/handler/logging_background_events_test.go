@@ -153,8 +153,13 @@ func TestLoggingBackgroundEventsDeviceInfo(t *testing.T) {
 		DeviceID: deviceID, Name: "old-name", Manufacturer: "old-maker", Model: "old-model", Firmware: "old-firmware",
 	}).Error)
 	oldDB := app.GormDbMysql
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
 	app.GormDbMysql = db
-	t.Cleanup(func() { app.GormDbMysql = oldDB })
+	t.Cleanup(func() {
+		app.GormDbMysql = oldDB
+		require.NoError(t, sqlDB.Close())
+	})
 
 	HandleDeviceInfoResponse(context.Background(), []byte(`<Response><CmdType>DeviceInfo</CmdType><SN>8</SN><DeviceID>34020000001320000090</DeviceID><DeviceName>new-name</DeviceName><Manufacturer>new-maker</Manufacturer><Model>new-model</Model><Firmware>firmware-secret-t14</Firmware></Response>`))
 
@@ -167,4 +172,10 @@ func TestLoggingBackgroundEventsDeviceInfo(t *testing.T) {
 	require.Equal(t, true, row["firmware_updated"])
 	require.NotContains(t, sink.String(), "firmware-secret-t14")
 	require.NotContains(t, sink.String(), `"updates"`)
+	var got gbmodels.GbDevice
+	require.NoError(t, db.Where("device_id = ?", deviceID).First(&got).Error)
+	require.Equal(t, "new-name", got.Name)
+	require.Equal(t, "new-maker", got.Manufacturer)
+	require.Equal(t, "new-model", got.Model)
+	require.Equal(t, "firmware-secret-t14", got.Firmware)
 }
