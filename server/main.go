@@ -78,6 +78,12 @@ func stopApplication(ctx context.Context) error {
 		ginhelper.ShutdownStep{Component: "sip_requests", Stop: gb28181.QuiesceRequests},
 		ginhelper.ShutdownStep{Component: "http_background", Stop: app.BackgroundWork.StopContext},
 		ginhelper.ShutdownStep{Component: "gb28181", Stop: gb28181.StopContext},
+		ginhelper.ShutdownStep{Component: "casbin", Stop: func(ctx context.Context) error {
+			if policy, ok := app.CasbinV2.(interface{ CloseContext(context.Context) error }); ok {
+				return policy.CloseContext(ctx)
+			}
+			return nil
+		}},
 	)
 }
 

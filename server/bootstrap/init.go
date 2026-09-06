@@ -177,7 +177,7 @@ func startupFail(phase string, err error) {
 	if cleanupRoot == nil {
 		cleanupRoot = zap.NewNop()
 	}
-	steps := make([]ginhelper.ShutdownStep, 0, 3)
+	steps := make([]ginhelper.ShutdownStep, 0, 4)
 	if stopper, ok := app.ConfigYml.(interface {
 		StopContext(context.Context) error
 	}); ok {
@@ -202,6 +202,9 @@ func startupFail(phase string, err error) {
 			return scheduler.StopResultHandlerContext(ctx)
 		},
 	})
+	if policy, ok := app.CasbinV2.(interface{ CloseContext(context.Context) error }); ok {
+		steps = append(steps, ginhelper.ShutdownStep{Component: "casbin", Stop: policy.CloseContext})
+	}
 	_ = ginhelper.Shutdown(cleanupContext, cleanupRoot, steps...)
 	if app.LogRuntime != nil {
 		_ = app.LogRuntime.Close()

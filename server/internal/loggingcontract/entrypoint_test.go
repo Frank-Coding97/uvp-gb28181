@@ -46,7 +46,7 @@ func TestLoggingEntrypointShutdownOwnership(t *testing.T) {
 		}
 		return true
 	})
-	want := []string{"config_callbacks", "scheduler", "job_results", "sip_requests", "http_background", "gb28181"}
+	want := []string{"config_callbacks", "scheduler", "job_results", "sip_requests", "http_background", "gb28181", "casbin"}
 	if len(components) != len(want) {
 		t.Fatalf("shutdown steps = %v", components)
 	}

@@ -32,7 +32,7 @@ func TestLoggingStartupFailureCleanupWiring(t *testing.T) {
 	}
 
 	functionText := nodeText(t, fset, startupFail)
-	for _, required := range []string{"app.ConfigYml", "app.JobScheduler", "StopContext", "StopResultHandlerContext"} {
+	for _, required := range []string{"app.ConfigYml", "app.JobScheduler", "StopContext", "StopResultHandlerContext", "app.CasbinV2", "CloseContext"} {
 		if !strings.Contains(functionText, required) {
 			t.Errorf("startupFail missing %s cleanup wiring", required)
 		}
