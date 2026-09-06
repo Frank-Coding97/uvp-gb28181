@@ -1,6 +1,7 @@
 package gormhelper
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -43,7 +44,9 @@ func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*go
 
 	var dbDialector gorm.Dialector
 	if val, err := getDbDialector(sqlType, "Write", dbConf...); err != nil {
-		app.ZapLog.Error(myerrors.ErrorsDialectorDbInitFail+sqlType, zap.Error(err))
+		app.Log(context.Background()).Named("db").Error("数据库驱动初始化失败",
+			zap.String("event", "db.dialector.init_failed"),
+			zap.String("dialect", sqlType), zap.String("role", "write"), zap.Error(err))
 	} else {
 		dbDialector = val
 	}
@@ -61,7 +64,9 @@ func GetSqlDriver(sqlType string, readDbIsOpen int, dbConf ...ConfigParams) (*go
 	// 读写分离配置只
 	if readDbIsOpen == 1 {
 		if val, err := getDbDialector(sqlType, "Read", dbConf...); err != nil {
-			app.ZapLog.Error(myerrors.ErrorsDialectorDbInitFail+sqlType, zap.Error(err))
+			app.Log(context.Background()).Named("db").Error("数据库驱动初始化失败",
+				zap.String("event", "db.dialector.init_failed"),
+				zap.String("dialect", sqlType), zap.String("role", "read"), zap.Error(err))
 		} else {
 			dbDialector = val
 		}

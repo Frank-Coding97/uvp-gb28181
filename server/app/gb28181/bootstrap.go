@@ -1395,7 +1395,9 @@ func setupZLMRegistry(cfg gbconfig.Config) {
 		if err != nil {
 			app.ZapLog.Warn("GB28181 ZLM 默认节点 seed 失败", zap.Error(err))
 		} else {
-			app.ZapLog.Info("GB28181 ZLM 已 seed 默认节点", zap.String("uuid", uuidStr), zap.String("host", cfg.ZLM.Host))
+			app.Log(ctx).Named("zlm.node").Info("GB28181 ZLM 已 seed 默认节点",
+				zap.String("event", "zlm.node.default_seeded"), zap.String("uuid", uuidStr),
+				zap.String("endpoint", (node.Node{Host: cfg.ZLM.Host, APIPort: cfg.ZLM.HTTPPort}).HTTPEndpoint()))
 		}
 	}
 	zlmRegistry = reg

@@ -120,3 +120,43 @@ func TestLoggingEntrypointShutdownOwnership(t *testing.T) {
 		t.Errorf("main must finish run result: %v", mainCalls)
 	}
 }
+
+// Node addresses may contain URL userinfo. The known source must use the
+// endpoint field so the common sanitizer strips authentication information.
+func TestLoggingSeedNodeUsesSanitizedEndpoint(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "../../app/gb28181/bootstrap.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		message, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || message.Value != strconv.Quote("GB28181 ZLM 已 seed 默认节点") {
+			return true
+		}
+		for _, arg := range call.Args[1:] {
+			field, ok := arg.(*ast.CallExpr)
+			if !ok || len(field.Args) < 2 {
+				continue
+			}
+			key, ok := field.Args[0].(*ast.BasicLit)
+			if !ok {
+				continue
+			}
+			if key.Value == `"host"` {
+				t.Error("raw node host may expose URL userinfo")
+			}
+			if key.Value == `"endpoint"` {
+				found = true
+			}
+		}
+		return true
+	})
+	if !found {
+		t.Error("seed event must retain a sanitized endpoint")
+	}
+}
