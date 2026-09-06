@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -32,7 +33,7 @@ func (c *ManagementController) List(ctx *gin.Context) {
 	if !c.ready(ctx) {
 		return
 	}
-	items, err := c.service.List(ctx)
+	items, err := c.service.List(ctx.Request.Context())
 	if err != nil {
 		c.fail(ctx, err)
 		return
@@ -48,7 +49,7 @@ func (c *ManagementController) Get(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	item, err := c.service.Get(ctx, id)
+	item, err := c.service.Get(ctx.Request.Context(), id)
 	if err != nil {
 		c.fail(ctx, err)
 		return
@@ -66,7 +67,7 @@ func (c *ManagementController) Create(ctx *gin.Context) {
 		return
 	}
 	middleware.MarkSensitiveOperation(ctx, map[string]any{"resource": "cascade_platform", "operation": "create"})
-	item, err := c.service.Create(ctx, req.input())
+	item, err := c.service.Create(ctx.Request.Context(), req.input())
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
 			// 配置已持久化,仅运行时未同步:返回已提交资源,附降级提示
@@ -93,7 +94,7 @@ func (c *ManagementController) Update(ctx *gin.Context) {
 		return
 	}
 	middleware.MarkSensitiveOperation(ctx, map[string]any{"resource": "cascade_platform", "platformId": id, "operation": "update"})
-	item, err := c.service.Update(ctx, id, req.ExpectedRevision, req.input())
+	item, err := c.service.Update(ctx.Request.Context(), id, req.ExpectedRevision, req.input())
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
 			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
@@ -113,7 +114,7 @@ func (c *ManagementController) Delete(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := c.service.Delete(ctx, id); err != nil {
+	if err := c.service.Delete(ctx.Request.Context(), id); err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) {
 			// 删除/禁用已提交,仅运行时未同步:返回已提交结果附降级提示
 			ctx.JSON(http.StatusOK, gin.H{"ok": true, "runtimeSynced": false, "warning": err.Error()})
@@ -138,7 +139,7 @@ func (c *ManagementController) SetEnabled(ctx *gin.Context) {
 		// POST /enable and /disable have no body; PUT /enabled uses this DTO.
 		req.Enabled = strings.HasSuffix(ctx.FullPath(), "/enable")
 	}
-	item, err := c.service.SetEnabled(ctx, id, req.ExpectedRevision, req.Enabled)
+	item, err := c.service.SetEnabled(ctx.Request.Context(), id, req.ExpectedRevision, req.Enabled)
 	if err != nil {
 		if errors.Is(err, service.ErrRuntimeSyncFailed) && item != nil {
 			ctx.JSON(http.StatusOK, gin.H{"platform": item, "runtimeSynced": false, "warning": err.Error()})
@@ -158,7 +159,7 @@ func (c *ManagementController) Reconnect(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := c.service.Reconnect(ctx, id); err != nil {
+	if err := c.service.Reconnect(ctx.Request.Context(), id); err != nil {
 		c.fail(ctx, err)
 		return
 	}
@@ -173,7 +174,7 @@ func (c *ManagementController) GetShares(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	snapshot, err := c.service.Projection(ctx, id)
+	snapshot, err := c.service.Projection(ctx.Request.Context(), id)
 	if err != nil {
 		c.fail(ctx, err)
 		return
@@ -204,11 +205,11 @@ func (c *ManagementController) ReplaceShares(ctx *gin.Context) {
 		return
 	}
 	middleware.MarkSensitiveOperation(ctx, map[string]any{"resource": "cascade_projection", "platformId": id, "operation": "replace"})
-	if err := c.service.ReplaceProjection(ctx, id, req.ExpectedProjectionRevision, devices, channels); err != nil {
+	if err := c.service.ReplaceProjection(ctx.Request.Context(), id, req.ExpectedProjectionRevision, devices, channels); err != nil {
 		c.fail(ctx, err)
 		return
 	}
-	snapshot, err := c.service.Projection(ctx, id)
+	snapshot, err := c.service.Projection(ctx.Request.Context(), id)
 	if err != nil {
 		c.fail(ctx, err)
 		return
@@ -218,6 +219,7 @@ func (c *ManagementController) ReplaceShares(ctx *gin.Context) {
 
 func (c *ManagementController) ready(ctx *gin.Context) bool {
 	if c == nil || c.service == nil {
+		response.SetBusinessResult(ctx, http.StatusServiceUnavailable, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "msg": "国标级联服务尚未装配"})
 		return false
 	}
@@ -245,7 +247,7 @@ func (c *ManagementController) authorizeSources(ctx *gin.Context, devices []repo
 	}
 	if len(deviceIDs) > 0 {
 		var rows []gbmodels.GbDevice
-		query := c.db.WithContext(ctx).Model(&gbmodels.GbDevice{}).Where("id IN ?", deviceIDs).Scopes(datascope.VisibilityScopeWithDB(ctx, c.db, "owner_dept_id", "device_id"))
+		query := c.db.WithContext(ctx.Request.Context()).Model(&gbmodels.GbDevice{}).Where("id IN ?", deviceIDs).Scopes(datascope.VisibilityScopeWithDB(ctx, c.db, "owner_dept_id", "device_id"))
 		if err := query.Find(&rows).Error; err != nil {
 			return err
 		}
@@ -261,7 +263,7 @@ func (c *ManagementController) authorizeSources(ctx *gin.Context, devices []repo
 			}
 		}
 		var rows []gbmodels.GbChannel
-		query := c.db.WithContext(ctx).Model(&gbmodels.GbChannel{}).Where("id IN ?", ids).Scopes(datascope.VisibilityScopeWithDB(ctx, c.db, "owner_dept_id", "device_id"))
+		query := c.db.WithContext(ctx.Request.Context()).Model(&gbmodels.GbChannel{}).Where("id IN ?", ids).Scopes(datascope.VisibilityScopeWithDB(ctx, c.db, "owner_dept_id", "device_id"))
 		if err := query.Find(&rows).Error; err != nil {
 			return err
 		}
@@ -297,12 +299,14 @@ func (c *ManagementController) fail(ctx *gin.Context, err error) {
 	if status == http.StatusServiceUnavailable {
 		message = "国标级联服务暂不可用"
 	}
+	response.SetBusinessResult(ctx, status, false)
 	ctx.JSON(status, gin.H{"code": status, "msg": message})
 }
 
 func parseID(ctx *gin.Context) (uint64, bool) {
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil || id == 0 {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "msg": "平台 ID 非法"})
 		return 0, false
 	}
@@ -327,7 +331,7 @@ type enabledRequest struct {
 }
 
 type shareRequest struct {
-	Scope                     string         `json:"scope"`
+	Scope                      string         `json:"scope"`
 	Devices                    []shareDevice  `json:"devices"`
 	Channels                   []shareChannel `json:"channels"`
 	ExpectedProjectionRevision uint64         `json:"expectedProjectionRevision"`

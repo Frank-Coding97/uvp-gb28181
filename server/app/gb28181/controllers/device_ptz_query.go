@@ -37,7 +37,7 @@ func (dc *DeviceMgmtController) refreshPTZ(c *gin.Context, channel *gbmodels.GbC
 	if !ok {
 		return "", "", errors.New("PTZ 目标不可用")
 	}
-	op, err := service.Refresh(c, target, kind, trackID, c.GetHeader("Idempotency-Key"))
+	op, err := service.Refresh(c.Request.Context(), target, kind, trackID, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		return op.OperationID, "刷新请求未发送成功", err
 	}
@@ -71,7 +71,7 @@ func (dc *DeviceMgmtController) ptzChannel(c *gin.Context) (*gbmodels.GbChannel,
 		return nil, false
 	}
 	var channel gbmodels.GbChannel
-	result := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
+	result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&channel)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询通道失败", result.Error)
 		return nil, false
@@ -89,7 +89,7 @@ func (dc *DeviceMgmtController) ListPTZPresets(c *gin.Context) {
 		return
 	}
 	var list []gbmodels.GbPTZPreset
-	if err := dc.db().WithContext(c).Where("channel_id = ? AND status <> ?", channel.ID, gbmodels.PTZPresetDeleted).Order("preset_id").Find(&list).Error; err != nil {
+	if err := dc.db().WithContext(c.Request.Context()).Where("channel_id = ? AND status <> ?", channel.ID, gbmodels.PTZPresetDeleted).Order("preset_id").Find(&list).Error; err != nil {
 		dc.FailAndAbort(c, "查询预置位失败", err)
 		return
 	}
@@ -112,7 +112,7 @@ func (dc *DeviceMgmtController) GetPTZState(c *gin.Context) {
 		return
 	}
 	var state gbmodels.GbPTZState
-	result := dc.db().WithContext(c).Where("channel_id = ?", channel.ID).Limit(1).Find(&state)
+	result := dc.db().WithContext(c.Request.Context()).Where("channel_id = ?", channel.ID).Limit(1).Find(&state)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询精准状态失败", result.Error)
 		return
@@ -184,7 +184,7 @@ func (dc *DeviceMgmtController) ListCruiseTracks(c *gin.Context) {
 		return
 	}
 	var list []gbmodels.GbPTZCruiseTrack
-	if err := dc.db().WithContext(c).Where("channel_id = ?", channel.ID).Order("track_id").Find(&list).Error; err != nil {
+	if err := dc.db().WithContext(c.Request.Context()).Where("channel_id = ?", channel.ID).Order("track_id").Find(&list).Error; err != nil {
 		dc.FailAndAbort(c, "查询巡航轨迹失败", err)
 		return
 	}
@@ -212,7 +212,7 @@ func (dc *DeviceMgmtController) GetCruiseTrack(c *gin.Context) {
 		return
 	}
 	var track gbmodels.GbPTZCruiseTrack
-	result := dc.db().WithContext(c).Where("channel_id = ? AND track_id = ?", channel.ID, trackID).Limit(1).Find(&track)
+	result := dc.db().WithContext(c.Request.Context()).Where("channel_id = ? AND track_id = ?", channel.ID, trackID).Limit(1).Find(&track)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询巡航轨迹失败", result.Error)
 		return
@@ -240,7 +240,7 @@ func (dc *DeviceMgmtController) GetPTZOperation(c *gin.Context) {
 		return
 	}
 	var operation gbmodels.GbPTZOperation
-	result := dc.db().WithContext(c).Clauses(dbresolver.Write).
+	result := dc.db().WithContext(c.Request.Context()).Clauses(dbresolver.Write).
 		Where("operation_id = ? AND channel_id = ?", operationID, channel.ID).Limit(1).Find(&operation)
 	if result.Error != nil {
 		writeHomePositionFailure(c, homePositionReadFailure(result.Error))

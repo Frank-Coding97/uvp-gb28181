@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -73,7 +74,7 @@ func (dc *DeviceTrafficController) scope(c *gin.Context, requireChannel bool) (t
 		return trafficScope{}, false
 	}
 	var device gbmodels.GbDevice
-	result := dc.db.WithContext(c).Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
+	result := dc.db.WithContext(c.Request.Context()).Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ?", deviceCode).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "设备不存在", result.Error)
@@ -88,7 +89,7 @@ func (dc *DeviceTrafficController) scope(c *gin.Context, requireChannel bool) (t
 		return scope, true
 	}
 	var channel gbmodels.GbChannel
-	result = dc.db.WithContext(c).Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
+	result = dc.db.WithContext(c.Request.Context()).Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ? AND channel_id = ?", device.DeviceID, channelCode).Limit(1).Find(&channel)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "通道不存在", result.Error)
@@ -122,7 +123,7 @@ func trafficRange(c *gin.Context) (time.Time, time.Time, error) {
 }
 
 func (dc *DeviceTrafficController) dailyQuery(c *gin.Context, scope trafficScope, from, to time.Time) *gorm.DB {
-	query := dc.db.WithContext(c).Model(&gbmodels.GbDeviceTrafficDaily{}).
+	query := dc.db.WithContext(c.Request.Context()).Model(&gbmodels.GbDeviceTrafficDaily{}).
 		Where("device_code = ? AND stat_date >= ? AND stat_date <= ?", scope.DeviceCode, from, to)
 	if scope.ChannelCode != "" {
 		query = query.Where("channel_code = ?", scope.ChannelCode)
@@ -136,7 +137,7 @@ func trafficHourlyRange(now time.Time) (time.Time, time.Time) {
 }
 
 func (dc *DeviceTrafficController) hourlyQuery(c *gin.Context, scope trafficScope, from, to time.Time) *gorm.DB {
-	query := dc.db.WithContext(c).Model(&gbmodels.GbDeviceTrafficHourly{}).
+	query := dc.db.WithContext(c.Request.Context()).Model(&gbmodels.GbDeviceTrafficHourly{}).
 		Where("device_code = ? AND stat_hour >= ? AND stat_hour <= ?", scope.DeviceCode, from, to)
 	if scope.ChannelCode != "" {
 		query = query.Where("channel_code = ?", scope.ChannelCode)
@@ -282,7 +283,7 @@ func (dc *DeviceTrafficController) Sessions(c *gin.Context) {
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	query := dc.db.WithContext(c).Model(&gbmodels.GbDeviceTrafficSession{}).Where("device_code = ?", scope.DeviceCode)
+	query := dc.db.WithContext(c.Request.Context()).Model(&gbmodels.GbDeviceTrafficSession{}).Where("device_code = ?", scope.DeviceCode)
 	if scope.ChannelCode != "" {
 		query = query.Where("channel_code = ?", scope.ChannelCode)
 	}
@@ -323,13 +324,13 @@ func (dc *DeviceTrafficController) Coverage(c *gin.Context) {
 	}
 	toExclusive := to.Add(24 * time.Hour)
 	var gaps []gbmodels.GbDeviceTrafficGap
-	if err := dc.db.WithContext(c).Where("started_at < ? AND (ended_at IS NULL OR ended_at >= ?)", toExclusive, from).Order("started_at").Find(&gaps).Error; err != nil {
+	if err := dc.db.WithContext(c.Request.Context()).Where("started_at < ? AND (ended_at IS NULL OR ended_at >= ?)", toExclusive, from).Order("started_at").Find(&gaps).Error; err != nil {
 		dc.FailAndAbort(c, "查询采集覆盖范围失败", err)
 		return
 	}
 	var startedAt *time.Time
 	var first gbmodels.GbDeviceTrafficSession
-	if result := dc.db.WithContext(c).Order("created_at").Limit(1).Find(&first); result.Error == nil && result.RowsAffected > 0 {
+	if result := dc.db.WithContext(c.Request.Context()).Order("created_at").Limit(1).Find(&first); result.Error == nil && result.RowsAffected > 0 {
 		startedAt = &first.CreatedAt
 	}
 	coverage := "complete"
@@ -397,7 +398,7 @@ func (dc *DeviceTrafficController) listViewerStreams(c *gin.Context, scope traff
 	channels := make([]gbmodels.GbChannel, 0)
 	if scope.Channel != nil {
 		channels = append(channels, *scope.Channel)
-	} else if err := dc.db.WithContext(c).Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
+	} else if err := dc.db.WithContext(c.Request.Context()).Scopes(datascope.VisibilityScope(c, "owner_dept_id", "device_id")).
 		Where("device_id = ? AND stream_id <> ''", scope.DeviceCode).Order("channel_id").Find(&channels).Error; err != nil {
 		return nil, err
 	}
@@ -547,6 +548,7 @@ func (dc *DeviceTrafficController) Viewers(c *gin.Context) {
 
 func (dc *DeviceTrafficController) KickViewer(c *gin.Context) {
 	if !trafficSuperAdmin(c) {
+		response.SetBusinessResult(c, http.StatusForbidden, false)
 		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": http.StatusForbidden, "msg": "仅超级管理员可强退观看连接"})
 		return
 	}
@@ -575,6 +577,7 @@ func (dc *DeviceTrafficController) KickViewer(c *gin.Context) {
 		}
 	}
 	if !allowed {
+		response.SetBusinessResult(c, http.StatusConflict, false)
 		c.AbortWithStatusJSON(http.StatusConflict, gin.H{"code": http.StatusConflict, "msg": "连接已断开或当前协议不支持单连接强退"})
 		return
 	}
@@ -587,10 +590,8 @@ func (dc *DeviceTrafficController) KickViewer(c *gin.Context) {
 		dc.FailAndAbort(c, "强退观看连接失败", err)
 		return
 	}
-	if app.ZapLog != nil {
-		app.ZapLog.Info("GB28181 当前观看连接已强退", zap.Uint("operatorId", common.GetCurrentUserID(c)),
-			zap.String("deviceId", scope.DeviceCode), zap.String("channelId", scope.ChannelCode), zap.Int64("nodeId", mediaNode.ID))
-	}
+	app.Log(c.Request.Context()).Info("GB28181 当前观看连接已强退", zap.String("event", "device_traffic.kickviewer.info"), zap.Uint("operatorId", common.GetCurrentUserID(c)),
+		zap.String("deviceId", scope.DeviceCode), zap.String("channelId", scope.ChannelCode), zap.Int64("nodeId", mediaNode.ID))
 	dc.Success(c, gin.H{"kicked": true})
 }
 

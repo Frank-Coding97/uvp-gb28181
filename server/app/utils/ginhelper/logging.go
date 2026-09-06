@@ -55,7 +55,11 @@ func RequestLogging(root *zap.Logger) gin.HandlerFunc {
 		}
 		fields = []zap.Field{zap.String("event", "http.access"), zap.String("method", method), zap.String("route", route), zap.Int("http_status", c.Writer.Status()), zap.Float64("duration_ms", float64(time.Since(started))/float64(time.Millisecond)), zap.Int("response_bytes", size)}
 		if result, ok := response.BusinessResult(c); ok {
-			fields = append(fields, zap.Int("business_code", result.Code), zap.Bool("business_success", result.Success))
+			code := zap.Int("business_code", result.Code)
+			if result.StringCode != "" {
+				code = zap.String("business_code", result.StringCode)
+			}
+			fields = append(fields, code, zap.Bool("business_success", result.Success))
 		}
 		logger.Named("access").Info("HTTP request completed", fields...)
 	}

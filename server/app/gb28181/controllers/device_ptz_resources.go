@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -125,14 +127,15 @@ func writeHomePositionFailure(c *gin.Context, failure *homePositionHTTPFailure) 
 	if failure == nil {
 		return
 	}
-	if failure.err != nil && app.ZapLog != nil {
-		app.ZapLog.Warn(failure.message, zap.String("errorCode", string(failure.code)), zap.Error(failure.err))
+	if failure.err != nil {
+		app.Log(c.Request.Context()).Warn("PTZ home position failed", zap.String("event", "device_ptz_resources.writehomepositionfailure.warn"), zap.String("errorCode", string(failure.code)), logging.Error(failure.err))
 	}
 	data := gin.H{"errorCode": string(failure.code)}
 	if app.Response != nil {
 		app.Response.Fail(c, failure.message, failure.status, 1, data)
 		return
 	}
+	response.SetBusinessResult(c, 1, false)
 	c.AbortWithStatusJSON(failure.status, gin.H{"code": 1, "message": failure.message, "data": data})
 }
 
@@ -209,7 +212,7 @@ func (dc *DeviceMgmtController) loadPTZTarget(c *gin.Context, channel *gbmodels.
 		return ptz.Target{}, false
 	}
 	var device gbmodels.GbDevice
-	result := dc.db().WithContext(c).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
+	result := dc.db().WithContext(c.Request.Context()).Scopes(visibleScope(c)).Where("device_id = ?", channel.DeviceID).Limit(1).Find(&device)
 	if result.Error != nil || result.RowsAffected == 0 {
 		dc.FailAndAbort(c, "所属设备不存在或无权限", result.Error)
 		return ptz.Target{}, false
@@ -229,6 +232,7 @@ func (dc *DeviceMgmtController) executePTZExtendedResource(c *gin.Context, actio
 func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, protocolAction manscdp.PTZExtendedAction, operationAction string, id int, name, idempotencyKey string) {
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
 		return
 	}
@@ -262,7 +266,7 @@ func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, pro
 	lock := dc.deviceControlLock(channel.ID)
 	lock.Lock()
 	defer lock.Unlock()
-	op, err := service.Execute(c, target, ptz.Command{
+	op, err := service.Execute(c.Request.Context(), target, ptz.Command{
 		CmdType: manscdp.CmdDeviceControl, Action: operationAction, IdempotencyKey: idempotencyKey,
 		Profile: target.Profile, Payload: payload,
 		Build: func(sn int) ([]byte, error) {
@@ -277,18 +281,18 @@ func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, pro
 	// 后台异步下发一次 PresetQuery,把设备真实状态同步过来。persistQueryCache 会 UPSERT
 	// gb_ptz_preset 并按 SumNum 对账——设备端实际没存住或已删除的会被自动纠正。
 	if protocolAction == manscdp.PTZActionSetPreset || protocolAction == manscdp.PTZActionDeletePreset {
-		dc.reconcilePresetsAsync(target)
+		dc.reconcilePresetsAsync(c.Request.Context(), target)
 	}
 	if protocolAction == manscdp.PTZActionCruiseDelete || protocolAction == manscdp.PTZActionCruiseDeletePath {
 		if db := dc.db(); db != nil {
-			if err := db.WithContext(c).Where("channel_id = ? AND track_id = ?", channel.ID, id).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil && app.ZapLog != nil {
-				app.ZapLog.Warn("删除巡航本地缓存失败",
+			if err := db.WithContext(c.Request.Context()).Where("channel_id = ? AND track_id = ?", channel.ID, id).Delete(&gbmodels.GbPTZCruiseTrack{}).Error; err != nil {
+				app.Log(c.Request.Context()).Warn("删除巡航本地缓存失败", zap.String("event", "device_ptz_resources.executeptzextendedresourceas.warn"),
 					zap.Uint("channelId", channel.ID),
 					zap.Int("trackId", id),
-					zap.Error(err))
+					logging.Error(err))
 			}
 		}
-		dc.reconcileCruiseAsync(target, id, false)
+		dc.reconcileCruiseAsync(c.Request.Context(), target, id, false)
 	}
 	dc.Success(c, gin.H{
 		"operationId": op.OperationID, "channelId": channel.ChannelID, "action": operationAction,
@@ -298,21 +302,20 @@ func (dc *DeviceMgmtController) executePTZExtendedResourceAs(c *gin.Context, pro
 
 // reconcilePresetsAsync 用独立 context 后台下发 PresetQuery,不阻塞主响应。
 // 独立 idempotency_key 保证多次调用能各自建 operation 记录,不会跟主操作冲突。
-func (dc *DeviceMgmtController) reconcilePresetsAsync(target ptz.Target) {
+func (dc *DeviceMgmtController) reconcilePresetsAsync(parent context.Context, target ptz.Target) {
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
 		return
 	}
+	scope := context.WithoutCancel(parent)
 	go func(service *ptz.Service) {
-		ctx, cancel := context.WithTimeout(context.Background(), gbconfig.SIPCommandTimeout())
+		ctx, cancel := context.WithTimeout(scope, gbconfig.SIPCommandTimeout())
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryPreset, 0, "reconcile-"+uuid.NewString()); err != nil {
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("预置位对账查询下发失败",
-					zap.Uint("channelId", target.ChannelID),
-					zap.String("channelCode", target.ChannelCode),
-					zap.Error(err))
-			}
+			app.Log(ctx).Named("ptz").Warn("预置位对账查询下发失败", zap.String("event", "ptz.preset_reconcile_failed"),
+				zap.Uint("channelId", target.ChannelID),
+				zap.String("channelCode", target.ChannelCode),
+				logging.Error(err))
 		}
 	}(service)
 }
@@ -376,6 +379,7 @@ func (dc *DeviceMgmtController) ControlPTZCruise(c *gin.Context) {
 func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, 503, false)
 		c.JSON(503, gin.H{"code": 503, "message": "PTZ Service 未就绪"})
 		return
 	}
@@ -428,7 +432,7 @@ func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 	}
 
 	dispatch := func(step string, seq int, action manscdp.PTZExtendedAction, cmd manscdp.PTZExtendedCommand) (gbmodels.GbPTZOperation, error) {
-		return service.Execute(c, target, ptz.Command{
+		return service.Execute(c.Request.Context(), target, ptz.Command{
 			CmdType:        manscdp.CmdDeviceControl,
 			Action:         string(action),
 			IdempotencyKey: baseKey + "-" + step + "-" + strconv.Itoa(seq),
@@ -448,7 +452,7 @@ func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 		op, err := dispatch("clear", 0, manscdp.PTZActionCruiseDeletePath, manscdp.PTZExtendedCommand{ID: trackID})
 		steps = append(steps, gin.H{"step": "clear", "operationId": op.OperationID, "sn": op.SN, "status": op.Status})
 		if err != nil {
-			dc.reconcileCruiseAsync(target, trackID, true)
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
 			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "clear_failed", err.Error(), false)
 			return
 		}
@@ -458,7 +462,7 @@ func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 		op, err := dispatch("add_stop", i+1, manscdp.PTZActionCruiseAddStop, manscdp.PTZExtendedCommand{ID: trackID, SubID: stop.PresetID})
 		steps = append(steps, gin.H{"step": "add_stop", "operationId": op.OperationID, "sn": op.SN, "status": op.Status, "presetId": stop.PresetID, "index": i + 1})
 		if err != nil {
-			dc.reconcileCruiseAsync(target, trackID, true)
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
 			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "add_stop_failed", err.Error(), false)
 			return
 		}
@@ -469,7 +473,7 @@ func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 		op, err := dispatch("set_speed", 0, manscdp.PTZActionCruiseSetSpeed, manscdp.PTZExtendedCommand{ID: trackID, Value16: request.Speed})
 		steps = append(steps, gin.H{"step": "set_speed", "operationId": op.OperationID, "sn": op.SN, "status": op.Status, "speed": request.Speed})
 		if err != nil {
-			dc.reconcileCruiseAsync(target, trackID, true)
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
 			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "set_speed_failed", err.Error(), false)
 			return
 		}
@@ -478,21 +482,21 @@ func (dc *DeviceMgmtController) CreateCruiseTrack(c *gin.Context) {
 		op, err := dispatch("set_dwell", 0, manscdp.PTZActionCruiseSetDwell, manscdp.PTZExtendedCommand{ID: trackID, Value16: request.DwellSec})
 		steps = append(steps, gin.H{"step": "set_dwell", "operationId": op.OperationID, "sn": op.SN, "status": op.Status, "dwellSec": request.DwellSec})
 		if err != nil {
-			dc.reconcileCruiseAsync(target, trackID, true)
+			dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
 			dc.respondCruiseCreate(c, channel, request, steps, completedStops, "set_dwell_failed", err.Error(), false)
 			return
 		}
 	}
 
 	// 只有全部控制指令都成功发送后才写入待对账记录,避免中途失败留下幽灵轨迹。
-	if err := dc.upsertOptimisticCruise(c, target, request); err != nil && app.ZapLog != nil {
-		app.ZapLog.Warn("巡航待对账记录写入失败",
+	if err := dc.upsertOptimisticCruise(c, target, request); err != nil {
+		app.Log(c.Request.Context()).Warn("巡航待对账记录写入失败", zap.String("event", "device_ptz_resources.createcruisetrack.warn"),
 			zap.Uint("channelId", target.ChannelID),
 			zap.Int("trackId", trackID),
-			zap.Error(err))
+			logging.Error(err))
 	}
 	// 异步对账,主流程立即返回 —— HTTP 成功只表示控制指令已发送
-	dc.reconcileCruiseAsync(target, trackID, true)
+	dc.reconcileCruiseAsync(c.Request.Context(), target, trackID, true)
 	dc.respondCruiseCreate(c, channel, request, steps, completedStops, "sent", "", false)
 }
 
@@ -522,7 +526,7 @@ func (dc *DeviceMgmtController) upsertOptimisticCruise(c *gin.Context, target pt
 		Name: name, Enabled: &enabled, DetailJSON: string(detail),
 		RawSummary: "reconcile-pending", UpdatedAt: time.Now(),
 	}
-	return dc.db().WithContext(c).Clauses(clause.OnConflict{
+	return dc.db().WithContext(c.Request.Context()).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "channel_id"}, {Name: "track_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{"device_id", "name", "enabled", "detail_json", "raw_summary", "updated_at"}),
 	}).Create(&track).Error
@@ -530,33 +534,30 @@ func (dc *DeviceMgmtController) upsertOptimisticCruise(c *gin.Context, target pt
 
 // reconcileCruiseAsync 用独立 context 后台下发列表查询,创建/失败批次再查询对应轨迹详情。
 // 删除只查列表;创建与部分失败同时查详情,用设备真实点位覆盖客户端提交的待对账数据。
-func (dc *DeviceMgmtController) reconcileCruiseAsync(target ptz.Target, trackID int, includeDetail bool) {
+func (dc *DeviceMgmtController) reconcileCruiseAsync(parent context.Context, target ptz.Target, trackID int, includeDetail bool) {
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
 		return
 	}
+	scope := context.WithoutCancel(parent)
 	go func(service *ptz.Service) {
-		ctx, cancel := context.WithTimeout(context.Background(), gbconfig.SIPCommandTimeout())
+		ctx, cancel := context.WithTimeout(scope, gbconfig.SIPCommandTimeout())
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrackList, 0, "reconcile-cruise-"+uuid.NewString()); err != nil {
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("巡航轨迹对账查询下发失败",
-					zap.Uint("channelId", target.ChannelID),
-					zap.String("channelCode", target.ChannelCode),
-					zap.Error(err))
-			}
+			app.Log(ctx).Named("ptz").Warn("巡航轨迹对账查询下发失败", zap.String("event", "ptz.cruise_reconcile_failed"),
+				zap.Uint("channelId", target.ChannelID),
+				zap.String("channelCode", target.ChannelCode),
+				logging.Error(err))
 		}
 		if !includeDetail {
 			return
 		}
 		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrack, trackID, "reconcile-cruise-detail-"+uuid.NewString()); err != nil {
-			if app.ZapLog != nil {
-				app.ZapLog.Warn("巡航轨迹详情对账查询下发失败",
-					zap.Uint("channelId", target.ChannelID),
-					zap.String("channelCode", target.ChannelCode),
-					zap.Int("trackId", trackID),
-					zap.Error(err))
-			}
+			app.Log(ctx).Named("ptz").Warn("巡航轨迹详情对账查询下发失败", zap.String("event", "ptz.cruise_detail_reconcile_failed"),
+				zap.Uint("channelId", target.ChannelID),
+				zap.String("channelCode", target.ChannelCode),
+				zap.Int("trackId", trackID),
+				logging.Error(err))
 		}
 	}(service)
 }
@@ -574,6 +575,7 @@ func (dc *DeviceMgmtController) respondCruiseCreate(c *gin.Context, channel *gbm
 	}
 	if errMsg != "" {
 		body["error"] = errMsg
+		response.SetBusinessResult(c, 4200, false)
 		c.JSON(200, gin.H{"code": 4200, "message": "巡航建立部分失败", "data": body})
 		return
 	}

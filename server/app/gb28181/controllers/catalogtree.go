@@ -53,7 +53,7 @@ func (cc *CatalogTreeController) Tree(c *gin.Context) {
 	}
 
 	var roots []gbmodels.GbCatalogNode
-	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
+	if err := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).
 		Where("parent_id IS NULL").
 		Order("sort_order, id").
 		Find(&roots).Error; err != nil {
@@ -78,7 +78,7 @@ func (cc *CatalogTreeController) Children(c *gin.Context) {
 	}
 
 	var children []gbmodels.GbCatalogNode
-	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
+	if err := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).
 		Where("parent_id = ?", parentID).
 		Order("sort_order, id").
 		Find(&children).Error; err != nil {
@@ -110,7 +110,7 @@ func (cc *CatalogTreeController) Subtree(c *gin.Context) {
 	}
 
 	var root gbmodels.GbCatalogNode
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root)
+	res := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&root)
 	if res.Error != nil {
 		cc.FailAndAbort(c, "查询节点失败", res.Error)
 		return
@@ -121,7 +121,7 @@ func (cc *CatalogTreeController) Subtree(c *gin.Context) {
 	}
 
 	var sub []gbmodels.GbCatalogNode
-	if err := db.WithContext(c).Scopes(ownerDeptScope(c)).
+	if err := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).
 		Where("path LIKE ?", root.Path+"%").
 		Order("depth, sort_order, id").
 		Find(&sub).Error; err != nil {
@@ -146,7 +146,7 @@ func (cc *CatalogTreeController) Node(c *gin.Context) {
 	}
 
 	var n gbmodels.GbCatalogNode
-	res := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&n)
+	res := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&n)
 	if res.Error != nil {
 		cc.FailAndAbort(c, "查询失败", res.Error)
 		return
@@ -167,7 +167,7 @@ func (cc *CatalogTreeController) AnomalyCount(c *gin.Context) {
 		return
 	}
 	var count int64
-	if err := db.WithContext(c).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c)).
+	if err := db.WithContext(c.Request.Context()).Model(&gbmodels.GbAnomalyRecord{}).Scopes(ownerDeptScope(c)).
 		Where("resolved = ?", false).
 		Count(&count).Error; err != nil {
 		cc.FailAndAbort(c, "查 anomaly count 失败", err)
@@ -186,7 +186,7 @@ func (cc *CatalogTreeController) attachMountCount(c *gin.Context, db *gorm.DB, n
 		n := nodes[i]
 		var cnt int64
 		// 节点子树下所有 channel 节点
-		_ = db.WithContext(c).
+		_ = db.WithContext(c.Request.Context()).
 			Model(&gbmodels.GbCatalogNode{}).Scopes(ownerDeptScope(c)).
 			Where("node_type = ? AND path LIKE ?", gbmodels.NodeTypeChannel, n.Path+"%").
 			Count(&cnt).Error

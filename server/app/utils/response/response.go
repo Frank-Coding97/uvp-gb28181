@@ -134,14 +134,15 @@ func ErrorSystem(c *gin.Context, msg string, data interface{}) {
 
 // ResultMetadata records the declared business outcome without reading response bodies.
 type ResultMetadata struct {
-	Code    int
-	Success bool
+	Code       int
+	Success    bool
+	StringCode string
 }
 
 const resultMetadataKey = "uvp.logging.business_result"
 
 func SetBusinessResult(c *gin.Context, code int, success bool) {
-	c.Set(resultMetadataKey, ResultMetadata{code, success})
+	c.Set(resultMetadataKey, ResultMetadata{Code: code, Success: success})
 }
 func BusinessResult(c *gin.Context) (ResultMetadata, bool) {
 	value, ok := c.Get(resultMetadataKey)
@@ -150,4 +151,9 @@ func BusinessResult(c *gin.Context) (ResultMetadata, bool) {
 	}
 	result, ok := value.(ResultMetadata)
 	return result, ok
+}
+
+// SetBusinessStringResult preserves symbolic codes in existing management APIs.
+func SetBusinessStringResult(c *gin.Context, code string, success bool) {
+	c.Set(resultMetadataKey, ResultMetadata{StringCode: code, Success: success})
 }

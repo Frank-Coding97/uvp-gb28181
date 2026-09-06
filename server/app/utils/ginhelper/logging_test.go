@@ -359,3 +359,18 @@ func TestLoggingHTTPDebugRoutes(t *testing.T) {
 		}
 	}
 }
+
+func TestLoggingGBHTTPStringCode(t *testing.T) {
+	g, b := loggingRouter(t)
+	g.GET("/management", func(c *gin.Context) {
+		// Existing management responses use symbolic codes rather than numeric codes.
+		response.SetBusinessStringResult(c, "INVALID_REQUEST", false)
+		c.JSON(400, gin.H{"code": "INVALID_REQUEST", "message": "invalid"})
+	})
+	w := httptest.NewRecorder()
+	g.ServeHTTP(w, httptest.NewRequest("GET", "/management", nil))
+	rows := b.rows(t)
+	if len(rows) != 1 || rows[0]["business_code"] != "INVALID_REQUEST" || rows[0]["business_success"] != false {
+		t.Fatalf("symbolic business code lost: %v", rows)
+	}
+}

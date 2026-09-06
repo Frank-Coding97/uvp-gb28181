@@ -25,7 +25,7 @@ func NewZLMNodeController(svc *service.NodeService) *ZLMNodeController {
 
 // List GET /api/gb28181/zlm/nodes
 func (zc *ZLMNodeController) List(c *gin.Context) {
-	list, err := zc.svc.List(c)
+	list, err := zc.svc.List(c.Request.Context())
 	if err != nil {
 		zc.FailAndAbort(c, "获取节点列表失败", err)
 		return
@@ -40,7 +40,7 @@ func (zc *ZLMNodeController) Get(c *gin.Context) {
 		zc.FailAndAbort(c, "节点 ID 非法", err)
 		return
 	}
-	n, err := zc.svc.Get(c, id)
+	n, err := zc.svc.Get(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, service.ErrNodeNotFound) {
 			zc.FailAndAbort(c, "节点不存在", err)
@@ -61,7 +61,7 @@ func (zc *ZLMNodeController) Create(c *gin.Context) {
 		zc.FailAndAbort(c, "请求参数非法", err)
 		return
 	}
-	n, err := zc.svc.Create(c, req)
+	n, err := zc.svc.Create(c.Request.Context(), req)
 	if err != nil {
 		markManagementAudit(c, "node.create", 0, nil, "", "", "failed")
 		zc.FailAndAbort(c, "创建节点失败", err)
@@ -81,7 +81,7 @@ func (zc *ZLMNodeController) ProbeCreate(c *gin.Context) {
 		zc.FailAndAbort(c, "请求参数非法", err)
 		return
 	}
-	result, err := zc.svc.ProbeCreate(c, req)
+	result, err := zc.svc.ProbeCreate(c.Request.Context(), req)
 	if err != nil {
 		markManagementAudit(c, "node.probe", 0, nil, "", "", "failed")
 		zc.FailAndAbort(c, "读取 ZLM 信息失败", err)
@@ -107,7 +107,7 @@ func (zc *ZLMNodeController) Update(c *gin.Context) {
 		zc.FailAndAbort(c, "请求参数非法", err)
 		return
 	}
-	n, err := zc.svc.Update(c, id, req)
+	n, err := zc.svc.Update(c.Request.Context(), id, req)
 	if err != nil {
 		markManagementAudit(c, "node.update", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {
@@ -136,7 +136,7 @@ func (zc *ZLMNodeController) Delete(c *gin.Context) {
 		if !confirmed {
 			return
 		}
-		if err := zc.svc.DeleteConfirmed(c, id, fingerprint); err != nil {
+		if err := zc.svc.DeleteConfirmed(c.Request.Context(), id, fingerprint); err != nil {
 			markManagementAudit(c, "node.delete", id, nil, fingerprint, "", "failed")
 			zc.handleNodeActionError(c, "删除节点失败", err)
 			return
@@ -145,7 +145,7 @@ func (zc *ZLMNodeController) Delete(c *gin.Context) {
 		zc.Success(c, gin.H{"ok": true})
 		return
 	}
-	if err := zc.svc.Delete(c, id); err != nil {
+	if err := zc.svc.Delete(c.Request.Context(), id); err != nil {
 		markManagementAudit(c, "node.delete", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotInMaintenance) {
 			zc.FailAndAbort(c, "请先把节点切到维护态再删除", err)
@@ -177,7 +177,7 @@ func (zc *ZLMNodeController) SetMaintenance(c *gin.Context) {
 		if !confirmed {
 			return
 		}
-		if err := zc.svc.SetMaintenanceConfirmed(c, id, fingerprint); err != nil {
+		if err := zc.svc.SetMaintenanceConfirmed(c.Request.Context(), id, fingerprint); err != nil {
 			markManagementAudit(c, "node.maintenance", id, nil, fingerprint, "", "failed")
 			zc.handleNodeActionError(c, "切维护态失败", err)
 			return
@@ -186,7 +186,7 @@ func (zc *ZLMNodeController) SetMaintenance(c *gin.Context) {
 		zc.Success(c, gin.H{"ok": true})
 		return
 	}
-	if err := zc.svc.SetMaintenance(c, id); err != nil {
+	if err := zc.svc.SetMaintenance(c.Request.Context(), id); err != nil {
 		markManagementAudit(c, "node.maintenance", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {
 			zc.FailAndAbort(c, "节点不存在", err)
@@ -209,7 +209,7 @@ func (zc *ZLMNodeController) Activate(c *gin.Context) {
 		return
 	}
 	markManagementAudit(c, "node.activate", id, nil, "", "", "requested")
-	if err := zc.svc.Activate(c, id); err != nil {
+	if err := zc.svc.Activate(c.Request.Context(), id); err != nil {
 		markManagementAudit(c, "node.activate", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {
 			zc.FailAndAbort(c, "节点不存在", err)
@@ -240,7 +240,7 @@ func (zc *ZLMNodeController) KickSessions(c *gin.Context) {
 		if !confirmed {
 			return
 		}
-		count, err := zc.svc.KickAllSessionsConfirmed(c, id, fingerprint)
+		count, err := zc.svc.KickAllSessionsConfirmed(c.Request.Context(), id, fingerprint)
 		if err != nil {
 			markManagementAudit(c, "node.kick", id, nil, fingerprint, "", "failed")
 			zc.handleNodeActionError(c, "驱逐会话失败", err)
@@ -250,7 +250,7 @@ func (zc *ZLMNodeController) KickSessions(c *gin.Context) {
 		zc.Success(c, gin.H{"count": count})
 		return
 	}
-	count, err := zc.svc.KickAllSessions(c, id)
+	count, err := zc.svc.KickAllSessions(c.Request.Context(), id)
 	if err != nil {
 		markManagementAudit(c, "node.kick", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {
@@ -279,7 +279,7 @@ func (zc *ZLMNodeController) Impact(c *gin.Context) {
 		zc.FailAndAbort(c, "影响预检动作非法", err)
 		return
 	}
-	preflight, err := zc.svc.PreflightNodeImpact(c, id, action)
+	preflight, err := zc.svc.PreflightNodeImpact(c.Request.Context(), id, action)
 	if err != nil {
 		zc.handleNodeActionError(c, "节点影响预检失败", err)
 		return
@@ -297,7 +297,7 @@ func (zc *ZLMNodeController) impactConfirmation(c *gin.Context, id int64, action
 		markManagementAudit(c, auditAction, id, nil, fingerprint, "", "requested")
 		return fingerprint, true
 	}
-	preflight, err := zc.svc.PreflightNodeImpact(c, id, action)
+	preflight, err := zc.svc.PreflightNodeImpact(c.Request.Context(), id, action)
 	if err != nil {
 		markManagementAudit(c, auditAction, id, nil, "", "", "failed")
 		zc.handleNodeActionError(c, "节点影响预检失败", err)
@@ -361,7 +361,7 @@ func (zc *ZLMNodeController) RestartStatus(c *gin.Context) {
 		zc.FailAndAbort(c, "节点 ID 非法", err)
 		return
 	}
-	if _, err := zc.svc.Get(c, id); err != nil {
+	if _, err := zc.svc.Get(c.Request.Context(), id); err != nil {
 		if errors.Is(err, service.ErrNodeNotFound) {
 			zc.FailAndAbort(c, "节点不存在", err, http.StatusNotFound)
 			return
@@ -411,7 +411,7 @@ func (zc *ZLMNodeController) Restart(c *gin.Context) {
 	var req restartReq
 	_ = c.ShouldBindJSON(&req)
 
-	result, err := zc.svc.RestartAccepted(c, id, req.GraceMS)
+	result, err := zc.svc.RestartAccepted(c.Request.Context(), id, req.GraceMS)
 	if err != nil {
 		markManagementAudit(c, "node.restart", id, nil, "", "", "failed")
 		if errors.Is(err, service.ErrNodeNotFound) {

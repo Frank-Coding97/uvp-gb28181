@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/plugin/dbresolver"
@@ -63,7 +64,7 @@ func (dc *DeviceMgmtController) loadMaintenanceDeviceByID(c *gin.Context, id uin
 		return nil, false
 	}
 	var device gbmodels.GbDevice
-	result := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&device)
+	result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&device)
 	if result.Error != nil {
 		dc.FailAndAbort(c, "查询设备失败", result.Error)
 		return nil, false
@@ -123,7 +124,7 @@ func (dc *DeviceMgmtController) maintenanceActor(c *gin.Context) (uint, uint, er
 	}
 	db := dc.db()
 	var user basemodels.User
-	result := db.WithContext(c).Select("id, dept_id").Where("id = ?", actorID).Limit(1).Find(&user)
+	result := db.WithContext(c.Request.Context()).Select("id, dept_id").Where("id = ?", actorID).Limit(1).Find(&user)
 	if result.Error != nil {
 		return 0, 0, result.Error
 	}
@@ -142,6 +143,7 @@ func (dc *DeviceMgmtController) RebootDevice(c *gin.Context) {
 	}
 	service := dc.ptzServiceSnapshot()
 	if service == nil {
+		response.SetBusinessResult(c, http.StatusServiceUnavailable, false)
 		c.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "设备控制服务未就绪"})
 		return
 	}
@@ -195,7 +197,7 @@ func (dc *DeviceMgmtController) ListMaintenanceOperations(c *gin.Context) {
 		pageSize = maintenanceOperationPageSizeMax
 	}
 	deviceID, _ := strconv.ParseUint(strings.TrimSpace(c.Param("id")), 10, 64)
-	query := db.Clauses(dbresolver.Write).WithContext(c).
+	query := db.Clauses(dbresolver.Write).WithContext(c.Request.Context()).
 		Model(&gbmodels.GbPTZOperation{}).
 		Where("device_id = ? AND action = ?", deviceID, "teleboot")
 	var total int64

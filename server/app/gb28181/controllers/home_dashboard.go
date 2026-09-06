@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -78,12 +79,14 @@ func queryHomeRuntimeBindings(ctx context.Context, db *gorm.DB, scope func(*gorm
 func (controller *HomeDashboardController) Summary(c *gin.Context) {
 	groups, nodeID, err := parseHomeSummaryQuery(c)
 	if err != nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": 1, "message": err.Error()})
 		return
 	}
 	now := time.Now()
 	db := controller.db()
 	if db == nil {
+		response.SetBusinessResult(c, 1, false)
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"code": 1, "message": "仪表盘聚合服务未初始化"})
 		return
 	}

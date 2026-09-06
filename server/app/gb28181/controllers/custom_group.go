@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -54,16 +55,16 @@ func (cc *CustomGroupController) Create(c *gin.Context) {
 		owner = group.OwnerDeptID
 	} else {
 		var user basemodels.User
-		if db.Select("dept_id").Where("id = ?", actor).Limit(1).Find(&user).RowsAffected > 0 {
+		if db.WithContext(c.Request.Context()).Select("dept_id").Where("id = ?", actor).Limit(1).Find(&user).RowsAffected > 0 {
 			owner = user.DeptID
 		}
 	}
-	group, err := gbdirectory.NewCustomGroupService(db).Create(c, owner, actor, parent, body.Name)
+	group, err := gbdirectory.NewCustomGroupService(db).Create(c.Request.Context(), owner, actor, parent, body.Name)
 	if err != nil {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit("创建自定义分组", actor, group.ID, zap.Uint("parentId", parent))
+	cc.audit(c.Request.Context(), "创建自定义分组", actor, group.ID, zap.Uint("parentId", parent))
 	cc.Success(c, group)
 }
 
@@ -79,11 +80,11 @@ func (cc *CustomGroupController) Rename(c *gin.Context) {
 		cc.writeError(c, gbdirectory.ErrGroupNameInvalid)
 		return
 	}
-	if err := gbdirectory.NewCustomGroupService(cc.db()).Rename(c, group.OwnerDeptID, id, body.Name); err != nil {
+	if err := gbdirectory.NewCustomGroupService(cc.db()).Rename(c.Request.Context(), group.OwnerDeptID, id, body.Name); err != nil {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit("重命名自定义分组", cc.GetCurrentUserID(c), id)
+	cc.audit(c.Request.Context(), "重命名自定义分组", cc.GetCurrentUserID(c), id)
 	cc.Success(c, gin.H{"id": id, "name": body.Name})
 }
 
@@ -110,11 +111,11 @@ func (cc *CustomGroupController) Move(c *gin.Context) {
 			}
 		}
 	}
-	if err := gbdirectory.NewCustomGroupService(cc.db()).Move(c, group.OwnerDeptID, id, target); err != nil {
+	if err := gbdirectory.NewCustomGroupService(cc.db()).Move(c.Request.Context(), group.OwnerDeptID, id, target); err != nil {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit("移动自定义分组", cc.GetCurrentUserID(c), id, zap.Uint("targetParentId", target))
+	cc.audit(c.Request.Context(), "移动自定义分组", cc.GetCurrentUserID(c), id, zap.Uint("targetParentId", target))
 	cc.Success(c, gin.H{"id": id, "parentId": target})
 }
 
@@ -123,12 +124,12 @@ func (cc *CustomGroupController) Delete(c *gin.Context) {
 	if !ok {
 		return
 	}
-	result, err := gbdirectory.NewCustomGroupService(cc.db()).Delete(c, group.OwnerDeptID, id)
+	result, err := gbdirectory.NewCustomGroupService(cc.db()).Delete(c.Request.Context(), group.OwnerDeptID, id)
 	if err != nil {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit("删除自定义分组", cc.GetCurrentUserID(c), id, zap.Int("removedDeviceCount", result.RemovedDeviceCount))
+	cc.audit(c.Request.Context(), "删除自定义分组", cc.GetCurrentUserID(c), id, zap.Int("removedDeviceCount", result.RemovedDeviceCount))
 	cc.Success(c, result)
 }
 
@@ -150,21 +151,21 @@ func (cc *CustomGroupController) mutateDevices(c *gin.Context, remove bool) {
 	svc := gbdirectory.NewCustomMemberService(cc.db())
 	requested := len(body.DeviceIDs)
 	if remove {
-		result, err := svc.Remove(c, group.OwnerDeptID, id, body.DeviceIDs)
+		result, err := svc.Remove(c.Request.Context(), group.OwnerDeptID, id, body.DeviceIDs)
 		if err != nil {
 			cc.writeError(c, err)
 			return
 		}
-		cc.audit("从自定义分组移除设备", cc.GetCurrentUserID(c), id, zap.Int("requested", requested), zap.Int("removed", result.Removed), zap.Int("skipped", result.Skipped))
+		cc.audit(c.Request.Context(), "从自定义分组移除设备", cc.GetCurrentUserID(c), id, zap.Int("requested", requested), zap.Int("removed", result.Removed), zap.Int("skipped", result.Skipped))
 		cc.Success(c, gin.H{"requestedCount": requested, "removedCount": result.Removed, "skippedCount": result.Skipped})
 		return
 	}
-	result, err := svc.Add(c, group.OwnerDeptID, cc.GetCurrentUserID(c), id, body.DeviceIDs)
+	result, err := svc.Add(c.Request.Context(), group.OwnerDeptID, cc.GetCurrentUserID(c), id, body.DeviceIDs)
 	if err != nil {
 		cc.writeError(c, err)
 		return
 	}
-	cc.audit("添加设备到自定义分组", cc.GetCurrentUserID(c), id, zap.Int("added", result.Added))
+	cc.audit(c.Request.Context(), "添加设备到自定义分组", cc.GetCurrentUserID(c), id, zap.Int("added", result.Added))
 	cc.Success(c, gin.H{"requestedCount": requested, "addedCount": result.Added, "skippedCount": result.Skipped})
 }
 
@@ -184,7 +185,7 @@ func (cc *CustomGroupController) groupFromPath(c *gin.Context) (*gbmodels.GbCust
 
 func (cc *CustomGroupController) visibleGroup(c *gin.Context, db *gorm.DB, id uint) (*gbmodels.GbCustomGroup, error) {
 	var group gbmodels.GbCustomGroup
-	result := db.WithContext(c).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&group)
+	result := db.WithContext(c.Request.Context()).Scopes(ownerDeptScope(c)).Where("id = ?", id).Limit(1).Find(&group)
 	if result.Error != nil {
 		return nil, result.Error
 	}
@@ -210,7 +211,7 @@ func (cc *CustomGroupController) writeError(c *gin.Context, err error) {
 	cc.Fail(c, "自定义分组操作失败", err, http.StatusInternalServerError)
 }
 
-func (cc *CustomGroupController) audit(message string, actor, groupID uint, fields ...zap.Field) {
-	fields = append(fields, zap.Uint("actorId", actor), zap.Uint("groupId", groupID))
-	app.ZapLog.Info(message, fields...)
+func (cc *CustomGroupController) audit(ctx context.Context, action string, actor, groupID uint, fields ...zap.Field) {
+	fields = append(fields, zap.String("event", "directory.custom_group_changed"), zap.String("action", action), zap.Uint("actorId", actor), zap.Uint("groupId", groupID))
+	app.Log(ctx).Named("directory").Info("Custom group changed", fields...)
 }

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 	appcontrollers "uvplatform.cn/uvp-gb28181/app/controllers"
@@ -157,19 +158,23 @@ func (c *SecurityController) Policy(ctx *gin.Context) {
 func (c *SecurityController) UpdatePolicy(ctx *gin.Context) {
 	var view SecurityPolicyView
 	if err := ctx.ShouldBindJSON(&view); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
 	policy := policyFromView(view)
 	if err := policy.Validate(); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
 	if c.provider == nil {
+		response.SetBusinessResult(ctx, http.StatusServiceUnavailable, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "security provider unavailable"})
 		return
 	}
 	if err := c.provider.UpdatePolicy(policy, ctx.GetString("userId")); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -178,10 +183,12 @@ func (c *SecurityController) UpdatePolicy(ctx *gin.Context) {
 
 func (c *SecurityController) Unban(ctx *gin.Context) {
 	if c.provider == nil {
+		response.SetBusinessResult(ctx, http.StatusServiceUnavailable, false)
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "security provider unavailable"})
 		return
 	}
 	if err := c.provider.Unban(ctx.Param("id"), ctx.GetString("userId")); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -203,6 +210,7 @@ func (c *SecurityController) AccessRules(ctx *gin.Context) {
 	}
 	listType := gbsecurity.AccessListType(ctx.Query("listType"))
 	if listType != "" && listType != gbsecurity.ListBlacklist && listType != gbsecurity.ListAllowlist {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid listType"})
 		return
 	}
@@ -249,10 +257,12 @@ func (c *SecurityController) CreateAccessRule(ctx *gin.Context) {
 	}
 	var rule gbsecurity.AccessRule
 	if err := ctx.ShouldBindJSON(&rule); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
 	if err := c.provider.CreateAccessRule(&rule, ctx.GetString("userId")); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -266,16 +276,19 @@ func (c *SecurityController) UpdateAccessRule(ctx *gin.Context) {
 	}
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil || id == 0 {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid access rule id"})
 		return
 	}
 	var rule gbsecurity.AccessRule
 	if err := ctx.ShouldBindJSON(&rule); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
 	rule.ID = id
 	if err := c.provider.UpdateAccessRule(rule, ctx.GetString("userId")); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -289,10 +302,12 @@ func (c *SecurityController) DeleteAccessRule(ctx *gin.Context) {
 	}
 	id, err := strconv.ParseUint(ctx.Param("id"), 10, 64)
 	if err != nil || id == 0 {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": "invalid access rule id"})
 		return
 	}
 	if err := c.provider.DeleteAccessRule(id, ctx.GetString("userId")); err != nil {
+		response.SetBusinessResult(ctx, http.StatusBadRequest, false)
 		ctx.JSON(http.StatusBadRequest, gin.H{"code": http.StatusBadRequest, "message": err.Error()})
 		return
 	}
@@ -329,5 +344,6 @@ func (c *SecurityController) Stream(ctx *gin.Context) {
 }
 
 func securityUnavailable(ctx *gin.Context) {
+	response.SetBusinessResult(ctx, http.StatusServiceUnavailable, false)
 	ctx.JSON(http.StatusServiceUnavailable, gin.H{"code": http.StatusServiceUnavailable, "message": "security runtime unavailable"})
 }

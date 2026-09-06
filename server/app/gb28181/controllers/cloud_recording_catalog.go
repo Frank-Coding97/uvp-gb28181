@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"uvplatform.cn/uvp-gb28181/app/utils/response"
 
 	"github.com/gin-gonic/gin"
 
@@ -434,10 +435,12 @@ func respondCatalogError(ctx *gin.Context, err error) {
 }
 
 func catalogSuccess(ctx *gin.Context, status int, data any) {
+	response.SetBusinessResult(ctx, 0, true)
 	ctx.JSON(status, gin.H{"code": 0, "message": "", "data": data})
 }
 
 func catalogFailure(ctx *gin.Context, status int, message string) {
+	response.SetBusinessResult(ctx, 1, false)
 	ctx.JSON(status, gin.H{"code": 1, "message": message, "data": nil})
 	ctx.Abort()
 }
