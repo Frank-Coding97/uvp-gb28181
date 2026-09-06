@@ -41,6 +41,9 @@ func parseMetadata(q gatewayRequest, owner uint) (metadataInput, error) {
 		if !list || len(items) != 1 || (key != "page" && key != "pageSize" && key != "keyword" && key != "status") {
 			return m, ErrDenied
 		}
+		if key != "keyword" && items[0] == "" {
+			return m, ErrDenied
+		}
 	}
 	for key, target := range map[string]*int{"page": &m.page, "pageSize": &m.size} {
 		if value := values.Get(key); value != "" {

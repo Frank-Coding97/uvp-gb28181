@@ -301,7 +301,10 @@ func (s *Service) LoadVerificationMaterial(ctx context.Context, accessKey string
 		return VerificationMaterial{}, ErrAuthenticationFailed
 	}
 	result := s.db.WithContext(normalizeContext(ctx)).Where("ak = ?", accessKey).First(&row)
-	if result.Error != nil || result.RowsAffected == 0 || row.ID == 0 {
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return VerificationMaterial{}, ErrDependencyUnavailable
+	}
+	if result.RowsAffected == 0 || row.ID == 0 {
 		return VerificationMaterial{}, ErrAuthenticationFailed
 	}
 	if row.Status != models.StatusActive {
@@ -309,7 +312,7 @@ func (s *Service) LoadVerificationMaterial(ctx context.Context, accessKey string
 	}
 	secret, err := s.secretManager.Decrypt(row.ID, row.AK, row.SecretKeyID, row.SecretVersion, row.SecretCiphertext, row.SecretIV)
 	if err != nil {
-		return VerificationMaterial{}, ErrAuthenticationFailed
+		return VerificationMaterial{}, ErrDependencyUnavailable
 	}
 	return VerificationMaterial{
 		ClientID:      row.ID,

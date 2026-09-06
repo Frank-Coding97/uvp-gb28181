@@ -83,13 +83,18 @@ func TestOpenAPIGatewayDeadlineNeverWritesLateResult(t *testing.T) {
 }
 
 func TestOpenAPIGatewayRejectsBeforeBusinessOrNonce(t *testing.T) {
-	for _, kind := range []string{"signature", "jwt-only", "duplicate-header", "expired", "no-scope", "inactive-dept", "untrusted-proxy", "audit-start-failure"} {
+	for _, kind := range []string{"signature", "jwt-only", "duplicate-header", "expired", "no-scope", "inactive-dept", "untrusted-proxy", "audit-start-failure", "client-store-failure"} {
 		t.Run(kind, func(t *testing.T) {
 			gate, db, secret := gatewayFixture(t)
 			var calls atomic.Int32
 			gate.read = func(context.Context, *gorm.DB, metadataInput) (any, error) { calls.Add(1); return nil, nil }
 			status := 401
 			switch kind {
+			case "duplicate-header":
+				status = 400
+			case "client-store-failure":
+				require.NoError(t, db.Migrator().DropTable(&models.Client{}))
+				status = 503
 			case "no-scope":
 				require.NoError(t, db.Where("client_id = ?", 1).Delete(&models.ClientScope{}).Error)
 				status = 403
@@ -164,5 +169,80 @@ func TestOpenAPIGatewayAuditFailureSuppressesSuccess(t *testing.T) {
 	require.NoError(t, db.Model(&models.Nonce{}).Count(&count).Error)
 	require.EqualValues(t, 1, count)
 	replay := gatewayCall(t, gate, secret, strings.Repeat("b", 32), nil)
-	require.Equal(t, 409, replay.Code, replay.Body.String())
+	require.Equal(t, 401, replay.Code, replay.Body.String())
+	require.Contains(t, replay.Body.String(), "REQUEST_REPLAYED")
+}
+
+func TestOpenAPIMetadataRejectsExplicitEmptyNumbersAndEnums(t *testing.T) {
+	for _, query := range []string{"page=", "pageSize=", "status="} {
+		_, err := parseMetadata(gatewayRequest{scope: "device:list", rawQuery: query}, 10)
+		require.Error(t, err, query)
+	}
+	m, err := parseMetadata(gatewayRequest{scope: "device:list", rawQuery: "keyword="}, 10)
+	require.NoError(t, err)
+	require.Empty(t, m.keyword)
+	require.Equal(t, 1, m.page)
+	require.Equal(t, 20, m.size)
+}
+
+func TestOpenAPIGatewayCredentialFailureClasses(t *testing.T) {
+	for _, kind := range []string{"unknown-ak", "inactive", "key-id", "iv", "ciphertext", "aad", "master-key"} {
+		t.Run(kind, func(t *testing.T) {
+			gate, db, secret := gatewayFixture(t)
+			expected := 503
+			switch kind {
+			case "unknown-ak":
+				require.NoError(t, db.Where("id = ?", 1).Delete(&models.Client{}).Error)
+				expected = 401
+			case "inactive":
+				require.NoError(t, db.Model(&models.Client{}).Where("id = ?", 1).Update("status", models.StatusDisabled).Error)
+				expected = 401
+			case "key-id":
+				require.NoError(t, db.Model(&models.Client{}).Where("id = ?", 1).Update("secret_key_id", "unavailable-key").Error)
+			case "iv":
+				require.NoError(t, db.Model(&models.Client{}).Where("id = ?", 1).Update("secret_iv", []byte{1}).Error)
+			case "ciphertext":
+				require.NoError(t, db.Model(&models.Client{}).Where("id = ?", 1).Update("secret_ciphertext", bytes.Repeat([]byte{0}, 64)).Error)
+			case "aad":
+				require.NoError(t, db.Model(&models.Client{}).Where("id = ?", 1).Update("secret_version", 2).Error)
+			case "master-key":
+				keys, err := client.NewSecretManager(bytes.Repeat([]byte{9}, 32), "test")
+				require.NoError(t, err)
+				gate.clients, err = client.NewService(db, keys)
+				require.NoError(t, err)
+			}
+			out := gatewayCall(t, gate, secret, strings.Repeat("f", 32), nil)
+			require.Equal(t, expected, out.Code, kind)
+			require.NotContains(t, out.Body.String(), secret)
+			require.NotContains(t, out.Body.String(), "unavailable-key")
+			// Legacy verifier continues to hide all dependency classifications.
+			require.ErrorIs(t, gate.clients.ValidateSecret(context.Background(), fmt.Sprintf("uvp_%032x", 1), secret), client.ErrAuthenticationFailed)
+			var count int64
+			require.NoError(t, db.Model(&models.Nonce{}).Count(&count).Error)
+			require.Zero(t, count)
+		})
+	}
+}
+
+func TestOpenAPIGatewayMissingVersusMalformedHeaders(t *testing.T) {
+	gate, db, secret := gatewayFixture(t)
+	for _, name := range []string{"X-UVP-Sign-Version", "X-UVP-Access-Key", "X-UVP-Timestamp", "X-UVP-Nonce", "X-UVP-Signature"} {
+		for _, value := range []string{"<absent>", "", "bad,header", " whitespace "} {
+			out := gatewayCall(t, gate, secret, strings.Repeat("e", 32), func(r *http.Request) {
+				if value == "<absent>" {
+					r.Header.Del(name)
+				} else {
+					r.Header.Set(name, value)
+				}
+			})
+			expected := 400
+			if value == "<absent>" {
+				expected = 401
+			}
+			require.Equal(t, expected, out.Code, name)
+		}
+	}
+	var count int64
+	require.NoError(t, db.Model(&models.Nonce{}).Count(&count).Error)
+	require.Zero(t, count)
 }

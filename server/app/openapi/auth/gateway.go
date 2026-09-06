@@ -163,15 +163,21 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) gateway
 	if !metadataRouteMatches(q) {
 		return invalid(400, "INVALID_REQUEST")
 	}
+	if len(q.headers.SignVersion) == 0 || len(q.headers.AccessKey) == 0 || len(q.headers.Timestamp) == 0 || len(q.headers.Nonce) == 0 || len(q.headers.Signature) == 0 {
+		return invalid(401, "AUTHENTICATION_FAILED")
+	}
 	headers, err := ParseHeaders(q.method, q.headers)
 	if err != nil {
-		return invalid(401, "AUTHENTICATION_FAILED")
+		return invalid(400, "INVALID_REQUEST")
 	}
 	input := SignatureInput{Method: q.method, Path: q.path, RawQuery: q.rawQuery, AccessKey: headers.AccessKey, Timestamp: headers.Timestamp, Nonce: headers.Nonce, Audience: g.config.Audience}
 	if _, err = CanonicalString(input); err != nil {
 		return invalid(400, "INVALID_REQUEST")
 	}
 	material, err := g.clients.LoadVerificationMaterial(ctx, headers.AccessKey)
+	if errors.Is(err, client.ErrDependencyUnavailable) {
+		return invalid(503, "SERVICE_UNAVAILABLE")
+	}
 	if err != nil || Verify(input, material.SecretKey, headers.Signature) != nil {
 		return invalid(401, "AUTHENTICATION_FAILED")
 	}
@@ -214,7 +220,7 @@ func (g *Gateway) process(hardContext context.Context, q gatewayRequest) gateway
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrReplay):
-			return invalid(409, "REQUEST_REPLAYED")
+			return invalid(401, "REQUEST_REPLAYED")
 		case errors.Is(err, ErrExpired):
 			return invalid(401, "REQUEST_EXPIRED")
 		case errors.Is(err, ErrDenied):
