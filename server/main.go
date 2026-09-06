@@ -1,19 +1,24 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log"
 	"os"
 	"strings"
+	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/routes"
+	"uvplatform.cn/uvp-gb28181/app/scheduler"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 	_ "uvplatform.cn/uvp-gb28181/bootstrap"
 
 	_ "uvplatform.cn/uvp-gb28181/docs/swagger" // swagger docs
@@ -34,19 +39,62 @@ import (
 // @host localhost:8080
 // @BasePath /api
 func main() {
-	// 运维入口:-migrate-up 仅执行主数据库待处理迁移并退出,不启动 Casbin、任务调度、HTTP 或 SIP。
-	if migrateUpRequested(os.Args[1:]) {
-		if err := runMigrateUp(); err != nil {
-			log.Fatal("migrate-up 失败: " + err.Error())
-		}
-		return
+	finishApplication(runApplication())
+}
+
+func finishApplication(err error) {
+	if app.LogRuntime != nil {
+		app.LogRuntime.Repeats().Close()
 	}
-	// 运维入口:-migrate-down=<文件名> 手动回滚单个迁移后退出
-	if downFile := parseArgs(os.Args[1:]); downFile != "" {
-		if err := runMigrateDown(downFile); err != nil {
-			log.Fatal("migrate-down 失败: " + err.Error())
+	root := app.Log(context.Background()).Named("lifecycle")
+	if err != nil {
+		root.Error("Application shutdown incomplete", zap.String("event", "lifecycle.shutdown_incomplete"), logging.Error(err))
+	} else {
+		root.Info("Application work stopped", zap.String("event", "lifecycle.stopped"))
+	}
+	if app.LogRuntime != nil {
+		err = errors.Join(err, app.LogRuntime.Close())
+	}
+	if err != nil {
+		os.Exit(1)
+	}
+}
+
+func stopApplication(ctx context.Context) error {
+	return ginhelper.Shutdown(ctx, app.Log(ctx),
+		ginhelper.ShutdownStep{Component: "config_callbacks", Stop: func(ctx context.Context) error {
+			if config, ok := app.ConfigYml.(interface{ StopContext(context.Context) error }); ok {
+				return config.StopContext(ctx)
+			}
+			return nil
+		}},
+		ginhelper.ShutdownStep{Component: "scheduler", Stop: func(ctx context.Context) error {
+			if app.JobScheduler == nil {
+				return nil
+			}
+			return app.JobScheduler.StopContext(ctx)
+		}},
+		ginhelper.ShutdownStep{Component: "job_results", Stop: scheduler.StopResultHandlerContext},
+		ginhelper.ShutdownStep{Component: "sip_requests", Stop: gb28181.QuiesceRequests},
+		ginhelper.ShutdownStep{Component: "http_background", Stop: app.BackgroundWork.StopContext},
+		ginhelper.ShutdownStep{Component: "gb28181", Stop: gb28181.StopContext},
+	)
+}
+
+func runApplication() (err error) {
+	// 迁移入口同样等待配置回调退出，然后由 main 关闭根日志。
+	migrateUp := migrateUpRequested(os.Args[1:])
+	downFile := parseArgs(os.Args[1:])
+	if migrateUp || downFile != "" {
+		defer func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			err = errors.Join(err, stopApplication(ctx))
+		}()
+		if migrateUp {
+			return runMigrateUp()
 		}
-		return
+		return runMigrateDown(downFile)
 	}
 	// 获取Gin引擎实例
 	engine := ginhelper.GetEngine()
@@ -57,10 +105,7 @@ func main() {
 	// 启动 GB28181 SIP 服务(双栈 UDP+TCP,在 HTTP 阻塞前旁挂)
 	gb28181.Start()
 	// 启动服务器(阻塞直到收到退出信号)
-	_ = ginhelper.StartServer(engine)
-	// 优雅关闭 GB28181 SIP 服务
-	gb28181.Stop()
-
+	return ginhelper.StartServer(engine, stopApplication)
 }
 
 func migrateUpRequested(args []string) bool {
