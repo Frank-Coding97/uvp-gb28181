@@ -308,7 +308,7 @@ func (dc *DeviceMgmtController) reconcilePresetsAsync(parent context.Context, ta
 		return
 	}
 	scope := context.WithoutCancel(parent)
-	go func(service *ptz.Service) {
+	app.BackgroundWork.Go(func() {
 		ctx, cancel := context.WithTimeout(scope, gbconfig.SIPCommandTimeout())
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryPreset, 0, "reconcile-"+uuid.NewString()); err != nil {
@@ -317,7 +317,7 @@ func (dc *DeviceMgmtController) reconcilePresetsAsync(parent context.Context, ta
 				zap.String("channelCode", target.ChannelCode),
 				logging.Error(err))
 		}
-	}(service)
+	})
 }
 
 func (dc *DeviceMgmtController) CreatePTZPreset(c *gin.Context) {
@@ -540,7 +540,7 @@ func (dc *DeviceMgmtController) reconcileCruiseAsync(parent context.Context, tar
 		return
 	}
 	scope := context.WithoutCancel(parent)
-	go func(service *ptz.Service) {
+	app.BackgroundWork.Go(func() {
 		ctx, cancel := context.WithTimeout(scope, gbconfig.SIPCommandTimeout())
 		defer cancel()
 		if _, err := service.Refresh(ctx, target, ptz.QueryCruiseTrackList, 0, "reconcile-cruise-"+uuid.NewString()); err != nil {
@@ -559,7 +559,7 @@ func (dc *DeviceMgmtController) reconcileCruiseAsync(parent context.Context, tar
 				zap.Int("trackId", trackID),
 				logging.Error(err))
 		}
-	}(service)
+	})
 }
 
 func (dc *DeviceMgmtController) respondCruiseCreate(c *gin.Context, channel *gbmodels.GbChannel, request cruiseTrackCreateRequest, steps []gin.H, completed int, status, errMsg string, reconciled bool) {

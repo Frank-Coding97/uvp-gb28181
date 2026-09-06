@@ -38,7 +38,7 @@ func (t *uacCatalogTrigger) Trigger(ctx context.Context, deviceID, dest, transpo
 		ctx = context.Background()
 	}
 	scope := context.WithoutCancel(ctx)
-	go func() {
+	app.BackgroundWork.Go(func() {
 		sn := int(t.sn.Add(1))
 		body, err := manscdp.BuildCatalogQuery(deviceID, sn)
 		if err != nil {
@@ -53,5 +53,5 @@ func (t *uacCatalogTrigger) Trigger(ctx context.Context, deviceID, dest, transpo
 		}
 		app.Log(scope).Named("catalog").Info("Catalog 查询已发出", zap.String("event", "catalog.query_sent"),
 			zap.String("deviceId", deviceID), zap.String("transport", transport), zap.Int("sn", sn))
-	}()
+	})
 }

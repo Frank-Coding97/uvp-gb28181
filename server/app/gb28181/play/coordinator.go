@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 )
 
 // Request identifies one channel-level live ensure operation.
@@ -255,7 +257,9 @@ func (c *Coordinator) runStart(ctx context.Context, req Request, key coordinator
 	close(entry.done)
 	c.mu.Unlock()
 	if retryCleanup {
-		go c.retryCleanupPending(startCtx, retryReq)
+		app.BackgroundWork.Go(func() {
+			c.retryCleanupPending(startCtx, retryReq)
+		})
 	}
 	return result, err
 }

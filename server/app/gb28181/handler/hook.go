@@ -401,15 +401,15 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 	}
 	if body.App != "talk" && h.observer != nil && body.Stream != "" {
 		asyncContext := hookAsyncContext(c)
-		go func(base context.Context, streamID string, registered bool) {
-			ctx, cancel := context.WithTimeout(base, 10*time.Second)
+		app.BackgroundWork.Go(func() {
+			ctx, cancel := context.WithTimeout(asyncContext, 10*time.Second)
 			defer cancel()
-			if err := h.observer.ObserveStream(ctx, streamID, registered); err != nil {
+			if err := h.observer.ObserveStream(ctx, body.Stream, body.Regist); err != nil {
 				app.Log(ctx).Named("hook").Warn("录像流状态联动失败",
 					zap.String("event", "gb28181.hook.stream.observer_failed"),
-					zap.String("stream", streamID), zap.Bool("regist", registered), logging.Error(err))
+					zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), logging.Error(err))
 			}
-		}(asyncContext, body.Stream, body.Regist)
+		})
 	}
 	if !body.Regist && h.playbackMedia != nil && body.Stream != "" {
 		h.notifyPlaybackEnded(hookAsyncContext(c), body.Stream, "media-offline")
@@ -423,7 +423,10 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 			}
 			if stopperOK && nodeOK {
 				if pending, ok := stopper.CleanupPendingLiveRef(body.Stream); ok && pending.NodeID == nodeID {
-					go h.stopCleanupPending(hookAsyncContext(c), pending, "流注销清理失败")
+					cleanupContext := hookAsyncContext(c)
+					app.BackgroundWork.Go(func() {
+						h.stopCleanupPending(cleanupContext, pending, "流注销清理失败")
+					})
 				}
 			}
 		}
@@ -432,15 +435,15 @@ func (h *HookController) OnStreamChanged(c *gin.Context) {
 	if body.App == "talk" && talkObserver != nil && talkResolver != nil && body.Stream != "" && body.MediaServerID != "" {
 		if nodeID, ok := talkResolver.IDForUUID(body.MediaServerID); ok {
 			asyncContext := hookAsyncContext(c)
-			go func(base context.Context) {
-				ctx, cancel := context.WithTimeout(base, 15*time.Second)
+			app.BackgroundWork.Go(func() {
+				ctx, cancel := context.WithTimeout(asyncContext, 15*time.Second)
 				defer cancel()
 				if err := talkObserver.ObserveTalkStream(ctx, nodeID, body.App, body.Stream, body.Regist); err != nil {
 					app.Log(ctx).Named("hook").Warn("对讲流状态联动失败",
 						zap.String("event", "gb28181.hook.talk.observer_failed"),
 						zap.String("stream", body.Stream), zap.Bool("regist", body.Regist), logging.Error(err))
 				}
-			}(asyncContext)
+			})
 		}
 	}
 	hookOK(c)
@@ -488,45 +491,47 @@ func (h *HookController) OnStreamNoneReader(c *gin.Context) {
 		if !policyFailed {
 			if stopper, ok := h.stopper.(GenerationPlayStopper); ok {
 				if captured, exists := stopper.CurrentLiveRef(body.Stream); exists {
-					go func(base context.Context, ref stream.LiveRef) {
-						ctx, cancel := context.WithTimeout(base, 5*time.Second)
+					app.BackgroundWork.Go(func() {
+						ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 						defer cancel()
-						if _, err := stopper.StopOnNoneReader(ctx, ref); err != nil {
+						if _, err := stopper.StopOnNoneReader(ctx, captured); err != nil {
 							app.Log(ctx).Named("hook").Warn("固定流无人观看条件断流失败",
 								zap.String("event", "gb28181.hook.stream.fixed_stop_failed"),
-								zap.String("stream", ref.StreamID), logging.Error(err))
+								zap.String("stream", captured.StreamID), logging.Error(err))
 						}
-					}(asyncContext, captured)
+					})
 				} else if pending, exists := stopper.CleanupPendingLiveRef(body.Stream); exists {
-					go h.stopCleanupPending(asyncContext, pending, "固定流无人观看清理失败")
+					app.BackgroundWork.Go(func() {
+						h.stopCleanupPending(asyncContext, pending, "固定流无人观看清理失败")
+					})
 				}
 			}
 		}
 	} else if closeStream && body.App == "rtp" && h.stopper != nil && body.Stream != "" {
 		// 动态 GB 实时流也必须走受控关闭，避免 ZLM 在 StopRecord 前先销毁媒体源。
 		closeStream = false
-		go func(base context.Context, streamID string) {
-			ctx, cancel := context.WithTimeout(base, 5*time.Second)
+		app.BackgroundWork.Go(func() {
+			ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 			defer cancel()
-			if err := h.stopper.Stop(ctx, streamID); err != nil {
+			if err := h.stopper.Stop(ctx, body.Stream); err != nil {
 				app.Log(ctx).Named("hook").Warn("无人观看自动断流失败",
 					zap.String("event", "gb28181.hook.stream.stop_failed"),
-					zap.String("stream", streamID), logging.Error(err))
+					zap.String("stream", body.Stream), logging.Error(err))
 			} else {
 				app.Log(ctx).Named("hook").Info("无人观看自动断流",
-					zap.String("event", "gb28181.hook.stream.stopped"), zap.String("stream", streamID))
+					zap.String("event", "gb28181.hook.stream.stopped"), zap.String("stream", body.Stream))
 			}
-		}(asyncContext, body.Stream)
+		})
 	} else if closeStream && h.stopper != nil && body.Stream != "" {
-		go func(base context.Context, streamID string) {
-			ctx, cancel := context.WithTimeout(base, 5*time.Second)
+		app.BackgroundWork.Go(func() {
+			ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 			defer cancel()
-			if err := h.stopper.Stop(ctx, streamID); err != nil {
+			if err := h.stopper.Stop(ctx, body.Stream); err != nil {
 				app.Log(ctx).Named("hook").Warn("无人观看自动断流失败",
 					zap.String("event", "gb28181.hook.stream.stop_failed"),
-					zap.String("stream", streamID), logging.Error(err))
+					zap.String("stream", body.Stream), logging.Error(err))
 			}
-		}(asyncContext, body.Stream)
+		})
 	}
 
 	response.SetBusinessResult(c, 0, true)
@@ -585,28 +590,28 @@ func (h *HookController) OnRtpServerTimeout(c *gin.Context) {
 			}
 			if ok && current.NodeID == nodeID && current.SSRC == string(body.SSRC) {
 				asyncContext := hookAsyncContext(c)
-				go func(base context.Context, ref stream.LiveRef) {
-					ctx, cancel := context.WithTimeout(base, 5*time.Second)
+				app.BackgroundWork.Go(func() {
+					ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 					defer cancel()
-					if _, err := stopper.StopIfCurrent(ctx, ref); err != nil {
+					if _, err := stopper.StopIfCurrent(ctx, current); err != nil {
 						app.Log(ctx).Named("hook").Warn("RTP 超时条件清理会话失败",
 							zap.String("event", "gb28181.hook.rtp_timeout_stop_failed"),
-							zap.String("stream", ref.StreamID), logging.Error(err))
+							zap.String("stream", current.StreamID), logging.Error(err))
 					}
-				}(asyncContext, current)
+				})
 			}
 		}
 	} else if h.stopper != nil && body.StreamID != "" {
 		asyncContext := hookAsyncContext(c)
-		go func(base context.Context, streamID string) {
-			ctx, cancel := context.WithTimeout(base, 5*time.Second)
+		app.BackgroundWork.Go(func() {
+			ctx, cancel := context.WithTimeout(asyncContext, 5*time.Second)
 			defer cancel()
-			if err := h.stopper.Stop(ctx, streamID); err != nil {
+			if err := h.stopper.Stop(ctx, body.StreamID); err != nil {
 				app.Log(ctx).Named("hook").Warn("RTP 超时清理会话失败",
 					zap.String("event", "gb28181.hook.rtp_timeout_stop_failed"),
-					zap.String("stream", streamID), logging.Error(err))
+					zap.String("stream", body.StreamID), logging.Error(err))
 			}
-		}(asyncContext, body.StreamID)
+		})
 	}
 	if h.playbackMedia != nil && body.StreamID != "" {
 		h.notifyPlaybackEnded(hookAsyncContext(c), body.StreamID, "rtp-timeout")
@@ -629,7 +634,7 @@ func (h *HookController) stopCleanupPending(base context.Context, ref stream.Liv
 }
 
 func (h *HookController) notifyPlaybackEnded(base context.Context, streamID, reason string) {
-	go func() {
+	app.BackgroundWork.Go(func() {
 		ctx, cancel := context.WithTimeout(base, 5*time.Second)
 		defer cancel()
 		if err := h.playbackMedia.OnPlaybackStreamEnded(ctx, streamID, reason); err != nil && !errors.Is(err, context.Canceled) {
@@ -637,7 +642,7 @@ func (h *HookController) notifyPlaybackEnded(base context.Context, streamID, rea
 				zap.String("event", "gb28181.hook.playback_ended_unmatched"),
 				zap.String("stream", streamID), zap.String("reason", reason), logging.Error(err))
 		}
-	}()
+	})
 }
 
 type onPublishBody struct {

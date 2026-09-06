@@ -89,7 +89,10 @@ func OperationLogMiddleware() gin.HandlerFunc {
 			// Gin Context 会在 Context 回收复用时产生竞态/跨请求错配
 			record := buildOperationLogRecord(c, startTime, requestBody, writer.body.Bytes())
 			if record != nil {
-				go persistOperationLog(operationLogContext(c), record)
+				persistContext := operationLogContext(c)
+				app.BackgroundWork.Go(func() {
+					persistOperationLog(persistContext, record)
+				})
 			}
 		}()
 

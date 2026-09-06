@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
@@ -99,7 +100,7 @@ func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID,
 	}
 	captureCtx := detachedContext(ctx)
 	logger := s.logger(captureCtx)
-	go func() {
+	app.BackgroundWork.Go(func() {
 		defer func() {
 			if r := recover(); r != nil {
 				logger.Error("通道快照 goroutine panic",
@@ -114,7 +115,7 @@ func (s *Service) FireAfterPlay(ctx context.Context, nodeID, streamID, deviceID,
 				zap.String("event", snapshotEventCaptureFailed), logging.Error(err),
 				zap.String("device", deviceID), zap.String("channel", channelID))
 		}
-	}()
+	})
 }
 
 // doCapture 保留旧的同步测试/内部调用语义,不携带请求上下文。
