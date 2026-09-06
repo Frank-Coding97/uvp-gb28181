@@ -2,6 +2,7 @@ package playauth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -41,7 +42,7 @@ func TestOpenAPIGrantIssuePersistsV3BindingAndRejectsUnqualifiedNode(t *testing.
 	require.NoError(t, err)
 	issued, err := service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
 		MediaGeneration: 9, Protocol: "https-flv",
 	})
 	require.NoError(t, err)
@@ -62,6 +63,8 @@ func TestOpenAPIGrantIssuePersistsV3BindingAndRejectsUnqualifiedNode(t *testing.
 	require.Equal(t, models.GrantStateIssued, grant.State)
 	require.Equal(t, claims.IssuedAt, grant.IssuedAt.Unix())
 	require.Equal(t, claims.ExpiresAt, grant.ExpiresAt.Unix())
+	require.Equal(t, time.Unix(claims.IssuedAt, 0).UTC(), grant.IssuedAt.UTC())
+	require.Equal(t, time.Unix(claims.ExpiresAt, 0).UTC(), grant.ExpiresAt.UTC())
 	require.Equal(t, claims.GrantID, grant.GrantID)
 	require.Equal(t, claims.ClientEpoch, grant.ClientEpoch)
 	require.Equal(t, claims.ScopeEpoch, grant.ScopeEpoch)
@@ -84,7 +87,7 @@ func TestOpenAPIGrantIssuePersistsV3BindingAndRejectsUnqualifiedNode(t *testing.
 	require.NoError(t, err)
 	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation2.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
 		MediaGeneration: 10, Protocol: "https-flv",
 	})
 	require.Error(t, err)
@@ -107,7 +110,7 @@ func TestOpenAPIGrantIssueRequiresExactPendingTargetAndCurrentEpochs(t *testing.
 	require.NoError(t, err)
 	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: "34020000001310000002", NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: "wrong-stream",
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: "wrong-stream",
 		MediaGeneration: 9, Protocol: "https-flv",
 	})
 	require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
@@ -119,7 +122,7 @@ func TestOpenAPIGrantIssueRequiresExactPendingTargetAndCurrentEpochs(t *testing.
 	require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).Update("auth_epoch", 99).Error)
 	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
 		MediaGeneration: 9, Protocol: "https-flv",
 	})
 	require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
@@ -139,7 +142,7 @@ func TestOpenAPIGrantIssueRollbackReturnsZeroTokenWhenGrantWriteFails(t *testing
 	require.NoError(t, err)
 	issued, err := service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
 		MediaGeneration: 9, Protocol: "https-flv",
 	})
 	require.Error(t, err)
@@ -170,7 +173,7 @@ func TestOpenAPIGrantIssueRequiresCurrentOwnerAndDepartment(t *testing.T) {
 	require.NoError(t, fixture.db.Model(&departmentRow{}).Where("id = ?", testDeptID).Update("status", 0).Error)
 	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID,
 		MediaGeneration: 9, Protocol: "https-flv",
 	})
 	require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
@@ -187,14 +190,33 @@ func TestOpenAPIGrantIssueFailsClosedWhenResourceSQLDependencyIsMissing(t *testi
 	require.NoError(t, err)
 	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9, Protocol: "https-flv",
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9, Protocol: "https-flv",
 	})
 	require.ErrorIs(t, err, ErrOpenAPIGrantUnavailable)
 }
 
+func TestOpenAPIGrantNormalizesWrappedSecurityErrors(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	quota := limit.NewQuota(fixture.db, func() time.Time { return fixture.now })
+	reservation, err := quota.ReservePending(context.Background(), limit.ReservationRequest{ClientID: testClientID, Scope: limit.PlayLiveApplyScope, DeviceID: testDeviceID, ChannelID: testChannelID})
+	require.NoError(t, err)
+	fixture.authority = wrappedGrantErrorAuthority{err: fmt.Errorf("fixture-secret: %w", ErrOpenAPIGrantDenied)}
+	service, err := NewOpenAPIGrantService(fixture.db, fixture.signer, fixture.authority, func() time.Time { return fixture.now })
+	require.NoError(t, err)
+	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{
+		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
+		Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9, Protocol: "https-flv",
+	})
+	require.ErrorIs(t, err, ErrOpenAPIGrantDenied)
+	require.Equal(t, ErrOpenAPIGrantDenied.Error(), err.Error())
+	require.NotContains(t, err.Error(), "fixture-secret")
+	require.Equal(t, ErrOpenAPIGrantUnavailable, normalizeOpenAPIGrantError(fmt.Errorf("context-secret: %w", context.Canceled)))
+}
+
 type openAPIGrantFixture struct {
 	db        *gorm.DB
-	sqlDB     interface{ Close() error }
+	sqlDB     *sql.DB
 	signer    *Signer
 	authority OpenAPINodeAuthority
 	now       time.Time
@@ -226,9 +248,12 @@ func newOpenAPIGrantFixture(t *testing.T) *openAPIGrantFixture {
 	require.NoError(t, db.Exec("INSERT INTO meta_node (id, revision, media_server_uuid, current_boot_nonce, runtime_epoch, runtime_protocol_version, runtime_confirmed_revision, runtime_confirmed_at, runtime_identity_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", 3, 9, testNodeUUID, testBootNonce, 1, 1, 9, now, "active").Error)
 	require.NoError(t, db.Create(&models.Client{ID: testClientID, AK: "uvp_test_client", Name: "test", OwnerDeptID: testDeptID, Status: models.StatusActive, SecretCiphertext: []byte("ciphertext"), SecretIV: []byte("0123456789ab"), SecretKeyID: "fixture", SecretVersion: 1, AuthEpoch: 2, ViewerQuota: 10, RateLimit: 10, Burst: 20, RowVersion: 1, CreatedAt: now, UpdatedAt: now}).Error)
 	require.NoError(t, db.Create(&models.ClientScope{ClientID: testClientID, Scope: limit.PlayLiveApplyScope, Enabled: true, ScopeEpoch: 3, UpdatedAt: now}).Error)
-	signer, err := NewSigner([]byte(strings.Repeat("s", 32)), WithNow(func() time.Time { return now }))
+	fixture := &openAPIGrantFixture{db: db, sqlDB: sqlDB, now: now}
+	signer, err := NewSigner([]byte(strings.Repeat("s", 32)), WithNow(func() time.Time { return fixture.now }))
 	require.NoError(t, err)
-	return &openAPIGrantFixture{db: db, sqlDB: sqlDB, signer: signer, authority: fixtureNodeAuthority{}, now: now}
+	fixture.signer = signer
+	fixture.authority = fixtureNodeAuthority{}
+	return fixture
 }
 
 // fixtureNodeAuthority is intentionally test-only. It proves the service calls
@@ -257,6 +282,14 @@ func (fixtureNodeAuthority) AuthorizeOpenAPI(ctx context.Context, tx *gorm.DB, r
 		return ErrOpenAPIGrantUnavailable
 	}
 	return nil
+}
+
+type wrappedGrantErrorAuthority struct {
+	err error
+}
+
+func (a wrappedGrantErrorAuthority) AuthorizeOpenAPI(context.Context, *gorm.DB, OpenAPINodeAuthorization) error {
+	return a.err
 }
 
 func (f *openAPIGrantFixture) close(t *testing.T) {
@@ -298,7 +331,7 @@ func TestOpenAPIGrantHelpersRejectMalformedInput(t *testing.T) {
 	require.NoError(t, err)
 	_, err = service.Issue(nil, OpenAPIGrantIssueRequest{})
 	require.Error(t, err)
-	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{GrantID: uuid.Nil.String(), DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce, Schema: "https", VHost: "v", App: "a", Stream: "s", MediaGeneration: 1, Protocol: "ftp"})
+	_, err = service.Issue(context.Background(), OpenAPIGrantIssueRequest{GrantID: uuid.Nil.String(), DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce, Schema: "rtmp", VHost: "v", App: "a", Stream: "s", MediaGeneration: 1, Protocol: "ftp"})
 	require.Error(t, err)
 	require.NotErrorIs(t, err, context.Canceled)
 }

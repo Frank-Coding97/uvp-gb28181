@@ -2,6 +2,8 @@ package playauth
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -19,7 +21,7 @@ func TestOpenAPIViewerFirstBindAndSameConnectionRemainsIdempotentAfterTokenTTL(t
 	service, token, reservation := issueOpenAPITestGrant(t, fixture)
 	viewer, err := service.BindViewer(context.Background(), token, OpenAPIViewerBindRequest{
 		NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-a",
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
+		Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
 	})
 	require.NoError(t, err)
 	require.NotZero(t, viewer.ID)
@@ -30,7 +32,7 @@ func TestOpenAPIViewerFirstBindAndSameConnectionRemainsIdempotentAfterTokenTTL(t
 	fixture.now = fixture.now.Add(OpenAPIPlayTTL + time.Second)
 	repeated, err := service.BindViewer(context.Background(), token, OpenAPIViewerBindRequest{
 		NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-a",
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
+		Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
 	})
 	require.NoError(t, err, "ordinary token TTL must not kick an existing bound viewer")
 	require.Equal(t, viewer.ID, repeated.ID)
@@ -39,19 +41,38 @@ func TestOpenAPIViewerFirstBindAndSameConnectionRemainsIdempotentAfterTokenTTL(t
 	require.NoError(t, err)
 	recovered, err := recreated.BindViewer(context.Background(), token, OpenAPIViewerBindRequest{
 		NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-a",
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
+		Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
 	})
 	require.NoError(t, err, "a recreated service must recover the durable bound viewer")
 	require.Equal(t, viewer.ID, recovered.ID)
 
 	_, err = service.BindViewer(context.Background(), token, OpenAPIViewerBindRequest{
 		NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-b",
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
+		Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
 	})
 	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
 	var count int64
 	require.NoError(t, fixture.db.Model(&models.Viewer{}).Where("grant_id = ?", reservation.GrantID).Count(&count).Error)
 	require.Equal(t, int64(1), count)
+}
+
+func TestOpenAPIViewerBoundSameMicrosecondDoesNotIssueDuplicateUpdate(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, _ := issueOpenAPITestGrant(t, fixture)
+	request := openAPIViewerRequest("same-microsecond")
+	first, err := service.BindViewer(context.Background(), token, request)
+	require.NoError(t, err)
+
+	// The duplicate path must succeed even when MySQL reports changed rows as
+	// zero. A trigger makes any actual UPDATE fail, proving this exact-time
+	// retry takes the no-op path instead of issuing a redundant write.
+	require.NoError(t, fixture.db.Exec("CREATE TRIGGER reject_openapi_viewer_update BEFORE UPDATE ON gb_openapi_viewer BEGIN SELECT RAISE(ABORT, 'fixture duplicate viewer update'); END").Error)
+	repeated, err := service.BindViewer(context.Background(), token, request)
+	require.NoError(t, err)
+	require.Equal(t, first.ID, repeated.ID)
+	require.Equal(t, first.LastSeenAt.UTC(), repeated.LastSeenAt.UTC())
+	require.Equal(t, first.UpdatedAt.UTC(), repeated.UpdatedAt.UTC())
 }
 
 func TestOpenAPIViewerIssuedGrantNeedsFreshTokenAndMatchingMediaTuple(t *testing.T) {
@@ -61,7 +82,7 @@ func TestOpenAPIViewerIssuedGrantNeedsFreshTokenAndMatchingMediaTuple(t *testing
 	fixture.now = fixture.now.Add(OpenAPIPlayTTL + time.Second)
 	_, err := service.BindViewer(context.Background(), token, OpenAPIViewerBindRequest{
 		NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "late-session",
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
+		Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
 	})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrOpenAPIViewerExpired)
@@ -71,8 +92,60 @@ func TestOpenAPIViewerIssuedGrantNeedsFreshTokenAndMatchingMediaTuple(t *testing
 	service, token, _ = issueOpenAPITestGrant(t, fixture)
 	_, err = service.BindViewer(context.Background(), token, OpenAPIViewerBindRequest{
 		NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "wrong-media",
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: "other-stream", MediaGeneration: 9,
+		Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: "other-stream", MediaGeneration: 9,
 	})
+	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+}
+
+func TestOpenAPIViewerRequiresTrustedTransportProtocolMatch(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, _ := issueOpenAPITestGrantWithProtocol(t, fixture, "https-flv")
+	_, err := service.BindViewer(context.Background(), token, openAPIViewerRequestWithProtocol("empty-protocol", ""))
+	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+	_, err = service.BindViewer(context.Background(), token, openAPIViewerRequestWithProtocol("wrong-transport", "wss-flv"))
+	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+	otherNode := openAPIViewerRequest("wrong-node")
+	otherNode.NodeUUID = "node-openapi-b"
+	_, err = service.BindViewer(context.Background(), token, otherNode)
+	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+	otherBoot := openAPIViewerRequest("wrong-boot")
+	otherBoot.BootNonce = strings.Repeat("b", 32)
+	_, err = service.BindViewer(context.Background(), token, otherBoot)
+	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+
+	fixture = newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, _ = issueOpenAPITestGrantWithProtocol(t, fixture, "wss-flv")
+	_, err = service.BindViewer(context.Background(), token, openAPIViewerRequestWithProtocol("https-against-wss", "https-flv"))
+	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+	viewer, err := service.BindViewer(context.Background(), token, openAPIViewerRequestWithProtocol("wss-correct", "wss-flv"))
+	require.NoError(t, err)
+	require.Equal(t, models.ViewerStateActive, viewer.State)
+}
+
+func TestOpenAPIViewerDoesNotAuthorizeNonActiveExistingStates(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, reservation := issueOpenAPITestGrant(t, fixture)
+	_, err := service.BindViewer(context.Background(), token, openAPIViewerRequest("state-check"))
+	require.NoError(t, err)
+	for _, state := range []models.ViewerState{models.ViewerStatePending, models.ViewerStateRevokePending, models.ViewerStateClosed} {
+		require.NoError(t, fixture.db.Model(&models.Viewer{}).Where("grant_id = ?", reservation.GrantID).Update("state", state).Error)
+		_, err = service.BindViewer(context.Background(), token, openAPIViewerRequest("state-check"))
+		require.ErrorIs(t, err, ErrOpenAPIViewerDenied, "state %s must not be treated as an active idempotent viewer", state)
+	}
+}
+
+func TestOpenAPIViewerRejectsSubsecondGrantTimestampDrift(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, reservation := issueOpenAPITestGrant(t, fixture)
+	var grant models.PlayGrant
+	require.NoError(t, fixture.db.First(&grant, "grant_id = ?", reservation.GrantID).Error)
+	drifted := grant.IssuedAt.Add(time.Microsecond)
+	require.NoError(t, fixture.db.Model(&models.PlayGrant{}).Where("grant_id = ?", reservation.GrantID).Update("issued_at", drifted).Error)
+	_, err := service.BindViewer(context.Background(), token, openAPIViewerRequest("timestamp-drift"))
 	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
 }
 
@@ -81,8 +154,8 @@ func TestOpenAPIViewerConcurrentIdentifiersAllowAtMostOneBinding(t *testing.T) {
 	defer fixture.close(t)
 	service, token, reservation := issueOpenAPITestGrant(t, fixture)
 	requests := []OpenAPIViewerBindRequest{
-		{NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-a", Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9},
-		{NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-b", Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9},
+		{NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-a", Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9},
+		{NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: "session-b", Protocol: "https-flv", Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9},
 	}
 	var wg sync.WaitGroup
 	errs := make(chan error, len(requests))
@@ -108,6 +181,46 @@ func TestOpenAPIViewerConcurrentIdentifiersAllowAtMostOneBinding(t *testing.T) {
 	var count int64
 	require.NoError(t, fixture.db.Model(&models.Viewer{}).Where("grant_id = ?", reservation.GrantID).Count(&count).Error)
 	require.LessOrEqual(t, count, int64(1))
+}
+
+func TestOpenAPIViewerConcurrentIdentifiersWithSingleSQLiteConnectionHaveOneWinner(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	fixture.sqlDB.SetMaxOpenConns(1)
+	service, token, reservation := issueOpenAPITestGrant(t, fixture)
+	requests := []OpenAPIViewerBindRequest{
+		openAPIViewerRequest("single-connection-a"),
+		openAPIViewerRequest("single-connection-b"),
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(requests))
+	for _, request := range requests {
+		wg.Add(1)
+		go func(request OpenAPIViewerBindRequest) {
+			defer wg.Done()
+			_, bindErr := service.BindViewer(context.Background(), token, request)
+			errs <- bindErr
+		}(request)
+	}
+	wg.Wait()
+	close(errs)
+	success := 0
+	denied := 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrOpenAPIViewerDenied):
+			denied++
+		default:
+			t.Fatalf("unexpected concurrent bind error: %v", err)
+		}
+	}
+	require.Equal(t, 1, success)
+	require.Equal(t, 1, denied)
+	var count int64
+	require.NoError(t, fixture.db.Model(&models.Viewer{}).Where("grant_id = ?", reservation.GrantID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
 }
 
 func TestOpenAPIViewerRejectsEpochOwnerAndRuntimeInvalidation(t *testing.T) {
@@ -178,6 +291,20 @@ func TestOpenAPIViewerInsertFailureRollsBackGrantBoundTransition(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestOpenAPIViewerNormalizesWrappedSecurityErrors(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, _ := issueOpenAPITestGrant(t, fixture)
+	fixture.authority = wrappedGrantErrorAuthority{err: fmt.Errorf("viewer-fixture-secret: %w", ErrOpenAPIGrantUnavailable)}
+	service, err := NewOpenAPIGrantService(fixture.db, fixture.signer, fixture.authority, func() time.Time { return fixture.now })
+	require.NoError(t, err)
+	_, err = service.BindViewer(context.Background(), token, openAPIViewerRequest("wrapped-error"))
+	require.ErrorIs(t, err, ErrOpenAPIViewerUnavailable)
+	require.Equal(t, ErrOpenAPIViewerUnavailable.Error(), err.Error())
+	require.NotContains(t, err.Error(), "viewer-fixture-secret")
+	require.Equal(t, ErrOpenAPIViewerUnavailable, normalizeOpenAPIViewerError(fmt.Errorf("context-secret: %w", context.Canceled)))
+}
+
 func TestOpenAPIViewerRejectsForeignOwnerAndOldBootIdentity(t *testing.T) {
 	fixture := newOpenAPIGrantFixture(t)
 	defer fixture.close(t)
@@ -196,6 +323,10 @@ func TestOpenAPIViewerRejectsForeignOwnerAndOldBootIdentity(t *testing.T) {
 }
 
 func issueOpenAPITestGrant(t *testing.T, fixture *openAPIGrantFixture) (*OpenAPIGrantService, string, limit.Reservation) {
+	return issueOpenAPITestGrantWithProtocol(t, fixture, "https-flv")
+}
+
+func issueOpenAPITestGrantWithProtocol(t *testing.T, fixture *openAPIGrantFixture, protocol string) (*OpenAPIGrantService, string, limit.Reservation) {
 	t.Helper()
 	quota := limit.NewQuota(fixture.db, func() time.Time { return fixture.now })
 	reservation, err := quota.ReservePending(context.Background(), limit.ReservationRequest{ClientID: testClientID, Scope: limit.PlayLiveApplyScope, DeviceID: testDeviceID, ChannelID: testChannelID})
@@ -204,15 +335,19 @@ func issueOpenAPITestGrant(t *testing.T, fixture *openAPIGrantFixture) (*OpenAPI
 	require.NoError(t, err)
 	issued, err := service.Issue(context.Background(), OpenAPIGrantIssueRequest{
 		GrantID: reservation.GrantID, DeviceID: testDeviceID, ChannelID: testChannelID, NodeUUID: testNodeUUID, BootNonce: testBootNonce,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9, Protocol: "https-flv",
+		Protocol: protocol, Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
 	})
 	require.NoError(t, err)
 	return service, issued.Token, reservation
 }
 
 func openAPIViewerRequest(identifier string) OpenAPIViewerBindRequest {
+	return openAPIViewerRequestWithProtocol(identifier, "https-flv")
+}
+
+func openAPIViewerRequestWithProtocol(identifier, protocol string) OpenAPIViewerBindRequest {
 	return OpenAPIViewerBindRequest{
 		NodeUUID: testNodeUUID, BootNonce: testBootNonce, Identifier: identifier,
-		Schema: "https", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
+		Protocol: protocol, Schema: "rtmp", VHost: "__defaultVhost__", App: "rtp", Stream: testDeviceID + "_" + testChannelID, MediaGeneration: 9,
 	}
 }

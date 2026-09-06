@@ -24,6 +24,7 @@ type OpenAPIViewerBindRequest struct {
 	NodeUUID        string
 	BootNonce       string
 	Identifier      string
+	Protocol        string
 	Schema          string
 	VHost           string
 	App             string
@@ -61,7 +62,7 @@ func (s *OpenAPIGrantService) BindViewer(ctx context.Context, token string, requ
 
 	var bound models.Viewer
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := s.now().UTC().Round(0)
+		now := s.now().UTC().Truncate(time.Microsecond)
 		if now.IsZero() {
 			return ErrOpenAPIViewerUnavailable
 		}
@@ -139,12 +140,16 @@ func (s *OpenAPIGrantService) BindViewer(ctx context.Context, token string, requ
 			if !exists || !sameOpenAPIViewerBinding(existing, claims, request) {
 				return ErrOpenAPIViewerDenied
 			}
-			if existing.State != models.ViewerStateActive && existing.State != models.ViewerStatePending {
+			if existing.State != models.ViewerStateActive {
 				return ErrOpenAPIViewerDenied
+			}
+			if existing.LastSeenAt != nil && existing.LastSeenAt.UTC().Equal(now) && existing.UpdatedAt.UTC().Equal(now) {
+				bound = existing
+				return nil
 			}
 			seen := now
 			updated := tx.Model(&models.Viewer{}).
-				Where("id = ? AND grant_id = ? AND state IN ?", existing.ID, claims.GrantID, []models.ViewerState{models.ViewerStateActive, models.ViewerStatePending}).
+				Where("id = ? AND grant_id = ? AND state = ?", existing.ID, claims.GrantID, models.ViewerStateActive).
 				Updates(map[string]any{"last_seen_at": seen, "updated_at": now})
 			if updated.Error != nil || updated.RowsAffected != 1 {
 				return ErrOpenAPIViewerUnavailable
@@ -185,7 +190,10 @@ func validateOpenAPIViewerRequest(claims OpenAPIClaims, request OpenAPIViewerBin
 	if !validOpenAPINodeUUID(request.NodeUUID) || !validOpenAPIBootNonce(request.BootNonce) || !validOpenAPIField(request.Identifier, 128) || !validOpenAPIField(request.Schema, 32) || !validOpenAPIField(request.VHost, 128) || !validOpenAPIField(request.App, 64) || !validOpenAPIField(request.Stream, 255) || request.MediaGeneration == 0 {
 		return ErrOpenAPIViewerDenied
 	}
-	if request.NodeUUID != claims.NodeUUID || request.BootNonce != claims.BootNonce || request.Schema != claims.Schema || request.VHost != claims.VHost || request.App != claims.App || request.Stream != claims.Stream || request.MediaGeneration != claims.MediaGeneration {
+	if request.Protocol != "https-flv" && request.Protocol != "wss-flv" {
+		return ErrOpenAPIViewerDenied
+	}
+	if request.NodeUUID != claims.NodeUUID || request.BootNonce != claims.BootNonce || request.Protocol != claims.Protocol || request.Schema != claims.Schema || request.VHost != claims.VHost || request.App != claims.App || request.Stream != claims.Stream || request.MediaGeneration != claims.MediaGeneration {
 		return ErrOpenAPIViewerDenied
 	}
 	return nil
@@ -198,7 +206,7 @@ func validateViewerGrant(grant models.PlayGrant, claims OpenAPIClaims, now time.
 	if *grant.DeviceID != claims.DeviceID || *grant.ChannelID != claims.ChannelID || *grant.NodeUUID != claims.NodeUUID || *grant.BootNonce != claims.BootNonce || *grant.Schema != claims.Schema || *grant.VHost != claims.VHost || *grant.App != claims.App || *grant.Stream != claims.Stream || *grant.MediaGeneration != claims.MediaGeneration || *grant.Protocol != claims.Protocol {
 		return ErrOpenAPIViewerDenied
 	}
-	if grant.IssuedAt.Unix() != claims.IssuedAt || grant.ExpiresAt.Unix() != claims.ExpiresAt {
+	if !grant.IssuedAt.UTC().Equal(time.Unix(claims.IssuedAt, 0).UTC()) || !grant.ExpiresAt.UTC().Equal(time.Unix(claims.ExpiresAt, 0).UTC()) {
 		return ErrOpenAPIViewerDenied
 	}
 	if grant.State == models.GrantStateIssued && !now.Before(grant.ExpiresAt) {
@@ -219,8 +227,12 @@ func normalizeOpenAPIViewerError(err error) error {
 		return ErrOpenAPIViewerUnavailable
 	}
 	switch {
-	case errors.Is(err, ErrOpenAPIViewerUnavailable), errors.Is(err, ErrOpenAPIViewerDenied), errors.Is(err, ErrOpenAPIViewerExpired):
-		return err
+	case errors.Is(err, ErrOpenAPIViewerUnavailable):
+		return ErrOpenAPIViewerUnavailable
+	case errors.Is(err, ErrOpenAPIViewerDenied):
+		return ErrOpenAPIViewerDenied
+	case errors.Is(err, ErrOpenAPIViewerExpired):
+		return ErrOpenAPIViewerExpired
 	case errors.Is(err, ErrOpenAPIGrantUnavailable):
 		return ErrOpenAPIViewerUnavailable
 	case errors.Is(err, ErrOpenAPIGrantDenied):
@@ -228,7 +240,7 @@ func normalizeOpenAPIViewerError(err error) error {
 	case errors.Is(err, ErrOpenAPIGrantExpired):
 		return ErrOpenAPIViewerExpired
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return err
+		return ErrOpenAPIViewerUnavailable
 	default:
 		return ErrOpenAPIViewerUnavailable
 	}

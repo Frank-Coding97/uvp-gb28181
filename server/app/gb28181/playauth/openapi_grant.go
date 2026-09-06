@@ -106,7 +106,7 @@ func (s *OpenAPIGrantService) Issue(ctx context.Context, request OpenAPIGrantIss
 
 	var issued Grant
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		now := s.now().UTC().Round(0)
+		now := s.now().UTC().Truncate(time.Microsecond)
 		if now.IsZero() {
 			return ErrOpenAPIGrantUnavailable
 		}
@@ -320,10 +320,14 @@ func normalizeOpenAPIGrantError(err error) error {
 		return ErrOpenAPIGrantUnavailable
 	}
 	switch {
-	case errors.Is(err, ErrOpenAPIGrantUnavailable), errors.Is(err, ErrOpenAPIGrantDenied), errors.Is(err, ErrOpenAPIGrantExpired):
-		return err
+	case errors.Is(err, ErrOpenAPIGrantUnavailable):
+		return ErrOpenAPIGrantUnavailable
+	case errors.Is(err, ErrOpenAPIGrantDenied):
+		return ErrOpenAPIGrantDenied
+	case errors.Is(err, ErrOpenAPIGrantExpired):
+		return ErrOpenAPIGrantExpired
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return err
+		return ErrOpenAPIGrantUnavailable
 	default:
 		return ErrOpenAPIGrantUnavailable
 	}
