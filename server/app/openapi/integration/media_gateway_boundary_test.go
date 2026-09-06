@@ -120,7 +120,7 @@ func newBoundaryMediaFixture(t *testing.T, dispatcher *boundaryMediaDispatcher, 
         name TEXT NOT NULL DEFAULT '', alias TEXT NOT NULL DEFAULT '',
         manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
         status INTEGER NOT NULL DEFAULT 1, owner_dept_id INTEGER NOT NULL,
-        access_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL
+        access_epoch INTEGER NOT NULL DEFAULT 1, cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL
     )`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE gb_channel (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,7 +131,7 @@ func newBoundaryMediaFixture(t *testing.T, dispatcher *boundaryMediaDispatcher, 
         owner_dept_id INTEGER NOT NULL, deleted_at DATETIME NULL,
         UNIQUE(device_id, channel_id)
     )`).Error)
-	require.NoError(t, db.Exec("INSERT INTO gb_device(device_id,owner_dept_id,access_epoch) VALUES(?,?,?)", boundaryMediaDevice, 10, 3).Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_device(device_id,owner_dept_id,access_epoch,cleanup_completed_epoch) VALUES(?,?,?,?)", boundaryMediaDevice, 10, 3, 3).Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel(device_id,channel_id,owner_dept_id) VALUES(?,?,?)", boundaryMediaDevice, boundaryMediaChannel, 10).Error)
 
 	keys, err := client.NewSecretManager(bytes.Repeat([]byte{1}, 32), "test")

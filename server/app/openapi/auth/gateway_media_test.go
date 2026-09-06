@@ -20,6 +20,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	"uvplatform.cn/uvp-gb28181/app/openapi/limit"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
@@ -96,7 +97,7 @@ func mediaGatewayFixture(t *testing.T, dispatcher MediaDispatcher) (*Gateway, *g
         name TEXT NOT NULL DEFAULT '', alias TEXT NOT NULL DEFAULT '',
         manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
         status INTEGER NOT NULL DEFAULT 1, owner_dept_id INTEGER NOT NULL,
-        access_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL
+        access_epoch INTEGER NOT NULL DEFAULT 1, cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL
     )`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE gb_channel (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,7 +107,7 @@ func mediaGatewayFixture(t *testing.T, dispatcher MediaDispatcher) (*Gateway, *g
         status INTEGER NOT NULL DEFAULT 1, ptz_type INTEGER NOT NULL DEFAULT 0,
         owner_dept_id INTEGER NOT NULL, deleted_at DATETIME NULL
     )`).Error)
-	require.NoError(t, db.Exec("INSERT INTO gb_device(device_id,owner_dept_id,access_epoch) VALUES(?,?,?)", mediaTestDevice, 10, 3).Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_device(device_id,owner_dept_id,access_epoch,cleanup_completed_epoch) VALUES(?,?,?,?)", mediaTestDevice, 10, 3, 3).Error)
 	require.NoError(t, db.Exec("INSERT INTO gb_channel(device_id,channel_id,owner_dept_id) VALUES(?,?,?)", mediaTestDevice, mediaTestChannel, 10).Error)
 	gate.media = dispatcher
 	return gate, db, secret
@@ -196,6 +197,52 @@ func TestOpenAPIMediaPOSTAdmitsOnceAndAppliesAfterCommit(t *testing.T) {
 	require.Equal(t, dispatcher.prepared, dispatcher.applied.Target)
 	require.Equal(t, MediaTicket("ticket-1"), dispatcher.applied.Ticket)
 	require.NotEmpty(t, dispatcher.applied.GrantID)
+}
+
+func TestOpenAPIMediaCleanupBarrierRejectsBeforeAdmissionAndOnlyTargetDevice(t *testing.T) {
+	dispatcher := &mediaDispatcherStub{ticket: "cleanup-ticket", authorize: MediaAuthorization{
+		Protocol: "https-flv", URL: "https://media.example.test/live/stream?token=opaque", ExpiresAt: time.Now().UTC().Add(time.Minute),
+	}}
+	dispatcher.ready.Store(true)
+	gate, db, secret := mediaGatewayFixture(t, dispatcher)
+	dispatcher.db = db
+	require.NoError(t, db.Exec("UPDATE gb_device SET cleanup_completed_epoch=2 WHERE device_id=?", mediaTestDevice).Error)
+	require.NoError(t, db.Model(&models.Client{}).Where("id=1").Update("viewer_quota", 10).Error)
+	var rateSeconds atomic.Int64
+	rateNow := time.Now()
+	gate.limiter = limit.New(func() time.Time { return rateNow.Add(time.Duration(rateSeconds.Load()) * time.Second) })
+	body := []byte(`{"protocol":"https-flv"}`)
+	nonce := strings.Repeat("c", 32)
+	denied := sendMediaRequest(t, gate, secret, body, nonce)
+	require.Equal(t, http.StatusServiceUnavailable, denied.Code, denied.Body.String())
+	require.Zero(t, dispatcher.applyCall.Load(), "pending cleanup must not reach media side effects")
+	var nonces, grants, successes int64
+	require.NoError(t, db.Model(&models.Nonce{}).Count(&nonces).Error)
+	require.NoError(t, db.Model(&models.PlayGrant{}).Count(&grants).Error)
+	require.NoError(t, db.Model(&models.Audit{}).Where("result = ?", "success").Count(&successes).Error)
+	require.Equal(t, []int64{0, 0, 0}, []int64{nonces, grants, successes})
+
+	// Another stable device stays usable while the first device is pending.
+	otherDevice, otherChannel := "34020000001320000098", "34020000001320000099"
+	require.NoError(t, db.Exec("INSERT INTO gb_device(device_id,owner_dept_id) VALUES(?,10)", otherDevice).Error)
+	require.NoError(t, db.Exec("INSERT INTO gb_channel(device_id,channel_id,owner_dept_id) VALUES(?,?,10)", otherDevice, otherChannel).Error)
+	server := httptest.NewTLSServer(mediaRouter(gate))
+	defer server.Close()
+	path := "/openapi/v1/devices/" + otherDevice + "/channels/" + otherChannel + "/live-authorizations"
+	request := signedMediaRequestPath(t, server.URL, secret, path, body, strings.Repeat("d", 32))
+	request.RequestURI = ""
+	response, err := server.Client().Do(request)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode, readBody(t, response))
+	require.EqualValues(t, 1, dispatcher.applyCall.Load())
+
+	// This is a fixture acknowledgement, not evidence of real media teardown.
+	require.NoError(t, db.Exec("UPDATE gb_device SET cleanup_completed_epoch=3 WHERE device_id=?", mediaTestDevice).Error)
+	rateSeconds.Store(1) // Refill the independent fixed 1/s, burst-2 playback budget.
+	allowed := sendMediaRequest(t, gate, secret, body, nonce)
+	require.Equal(t, http.StatusOK, allowed.Code, allowed.Body.String())
+	require.EqualValues(t, 2, dispatcher.applyCall.Load(), "rolled-back admission did not burn the nonce")
 }
 
 func TestOpenAPIMediaNotReadyDoesNotReadOrAdmit(t *testing.T) {

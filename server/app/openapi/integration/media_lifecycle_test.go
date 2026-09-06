@@ -452,7 +452,7 @@ func openMediaLifecycleDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(`CREATE TABLE gb_device (
 		id INTEGER PRIMARY KEY, fixture_label TEXT NOT NULL, device_id TEXT NOT NULL UNIQUE,
 		name TEXT NOT NULL DEFAULT '', alias TEXT NOT NULL DEFAULT '', manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
-		status INTEGER, owner_dept_id INTEGER NOT NULL DEFAULT 0, access_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL)`).Error)
+		status INTEGER, owner_dept_id INTEGER NOT NULL DEFAULT 0, access_epoch INTEGER NOT NULL DEFAULT 1, cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1, deleted_at DATETIME NULL)`).Error)
 	require.NoError(t, db.Exec(`CREATE TABLE meta_node (
 		id INTEGER PRIMARY KEY, fixture_label TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
 		state TEXT NOT NULL DEFAULT 'active', media_server_uuid TEXT NOT NULL DEFAULT '', current_boot_nonce TEXT, retired_boot_history TEXT,
