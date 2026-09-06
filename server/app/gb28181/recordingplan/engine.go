@@ -63,19 +63,20 @@ type Engine struct {
 }
 
 func logRecordingAction(ctx context.Context, action, result string, err error, fields ...zap.Field) {
-	if action == "" || app.ZapLog == nil {
+	if action == "" {
 		return
 	}
-	logger := app.ZapLog.Named("scheduler.recordingplan")
-	executionID := ""
+	logger := app.Log(ctx).Named("scheduler.recordingplan")
 	if execution, ok := schedulerhelper.ExecutionContextFromContext(ctx); ok {
-		executionID = execution.ExecutionID
-		logger = logging.WithIdentity(logger, zap.String("execution_id", executionID))
+		logger = logging.WithIdentity(logger, zap.String("execution_id", execution.ExecutionID))
 		fields = append(fields,
 			zap.Int("attempt", execution.Attempt),
 			zap.String("executor", execution.ExecutorName),
 			zap.String("trigger", recordingActionTrigger(execution.ExecutorName)),
 		)
+		if execution.JobID != "" {
+			fields = append(fields, zap.String("job_id", execution.JobID))
+		}
 	}
 	fields = append([]zap.Field{
 		zap.String("event", "recording_plan.action"),

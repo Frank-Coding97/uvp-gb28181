@@ -22,14 +22,14 @@ func NewZapJobLogger(logger *zap.Logger) *ZapJobLogger {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
-	return &ZapJobLogger{logger: logger.Named("scheduler")}
+	return &ZapJobLogger{logger: logger}
 }
 
 func (l *ZapJobLogger) emit(level zapcore.Level, event, message, jobID, executionID string, fields ...zap.Field) {
 	if l == nil || l.logger == nil {
 		return
 	}
-	logger := l.logger
+	logger := l.logger.Named("scheduler")
 	if executionID != "" {
 		logger = logging.WithIdentity(logger, zap.String("execution_id", executionID))
 	}
@@ -47,6 +47,18 @@ func (l *ZapJobLogger) emit(level zapcore.Level, event, message, jobID, executio
 	default:
 		logger.Error(message, fields...)
 	}
+}
+
+func (l *ZapJobLogger) executionScope(jobID, executionID string, attempt int, executorName string) *zap.Logger {
+	if l == nil || l.logger == nil {
+		return zap.NewNop()
+	}
+	scope := logging.WithIdentity(l.logger, zap.String("execution_id", executionID))
+	return scope.With(
+		zap.String("job_id", jobID),
+		zap.Int("attempt", attempt),
+		zap.String("executor", executorName),
+	)
 }
 
 func safeErrorField(args []interface{}) (zap.Field, bool) {

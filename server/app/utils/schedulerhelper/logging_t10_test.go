@@ -282,10 +282,10 @@ func TestLoggingJobSharedLoggerSurvivesAdapterClose(t *testing.T) {
 }
 
 func TestLoggingJobExecutionContextCarriesRetryMetadata(t *testing.T) {
-	ctx := WithExecutionContext(context.Background(), "job-1-123", 3, "executor")
+	ctx := WithExecutionContext(context.Background(), "job-1-123", 3, "executor", "job-1")
 	got, ok := ExecutionContextFromContext(ctx)
 	require.True(t, ok)
-	require.Equal(t, ExecutionContext{ExecutionID: "job-1-123", Attempt: 3, ExecutorName: "executor"}, got)
+	require.Equal(t, ExecutionContext{ExecutionID: "job-1-123", JobID: "job-1", Attempt: 3, ExecutorName: "executor"}, got)
 	_, ok = ExecutionContextFromContext(context.Background())
 	require.False(t, ok)
 	require.False(t, strings.Contains(fmt.Sprint(got), "raw secret"))

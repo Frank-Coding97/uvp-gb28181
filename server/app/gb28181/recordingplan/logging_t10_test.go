@@ -25,7 +25,7 @@ func TestLoggingRecordingActionStartStopHaveExecutionCorrelation(t *testing.T) {
 	oldLogger := app.ZapLog
 	app.ZapLog = zap.New(core)
 	t.Cleanup(func() { app.ZapLog = oldLogger })
-	ctx := schedulerhelper.WithExecutionContext(context.Background(), "recording-1", 1, "recording-plan-dispatch-executor")
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "recording-1", 1, "recording-plan-dispatch-executor", "job-recording")
 
 	logRecordingAction(ctx, ActionStart, "success", nil, zap.String("channel_id", "C1"))
 	logRecordingAction(ctx, ActionStop, "success", nil, zap.String("channel_id", "C1"))
@@ -34,11 +34,13 @@ func TestLoggingRecordingActionStartStopHaveExecutionCorrelation(t *testing.T) {
 	require.Len(t, entries, 2)
 	for i, action := range []string{ActionStart, ActionStop} {
 		require.Equal(t, zap.InfoLevel, entries[i].Level)
+		require.Equal(t, "scheduler.recordingplan", entries[i].LoggerName)
 		fields := entries[i].ContextMap()
 		require.Equal(t, "recording_plan.action", fields["event"])
 		require.Equal(t, action, fields["action"])
 		require.Equal(t, "success", fields["result"])
 		require.Equal(t, "recording-1", fields["execution_id"])
+		require.Equal(t, "job-recording", fields["job_id"])
 		require.Equal(t, "dispatch", fields["trigger"])
 	}
 }
@@ -48,7 +50,7 @@ func TestLoggingRecordingActionHealKeepsExecutionCorrelation(t *testing.T) {
 	oldLogger := app.ZapLog
 	app.ZapLog = zap.New(core)
 	t.Cleanup(func() { app.ZapLog = oldLogger })
-	ctx := schedulerhelper.WithExecutionContext(context.Background(), "heal-1", 2, "recording-plan-heal-executor")
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "heal-1", 2, "recording-plan-heal-executor", "job-heal")
 
 	logRecordingAction(ctx, ActionStart, "success", nil)
 
@@ -56,6 +58,7 @@ func TestLoggingRecordingActionHealKeepsExecutionCorrelation(t *testing.T) {
 	fields := logs.All()[0].ContextMap()
 	require.Equal(t, "heal", fields["trigger"])
 	require.Equal(t, "heal-1", fields["execution_id"])
+	require.Equal(t, "job-heal", fields["job_id"])
 	require.EqualValues(t, 2, fields["attempt"])
 }
 
@@ -67,7 +70,7 @@ func TestLoggingRecordingActionFailureDoesNotExposeRawError(t *testing.T) {
 	oldLogger := app.ZapLog
 	app.ZapLog = zap.New(core)
 	t.Cleanup(func() { app.ZapLog = oldLogger })
-	ctx := schedulerhelper.WithExecutionContext(context.Background(), "failed-1", 1, "recording-plan-dispatch-executor")
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "failed-1", 1, "recording-plan-dispatch-executor", "job-failed")
 
 	logRecordingAction(ctx, ActionStop, "failed", errors.New("raw recording secret"))
 
@@ -91,7 +94,7 @@ func TestLoggingRecordingActionEngineLogsOnlyCompletedActions(t *testing.T) {
 	t.Cleanup(func() { app.ZapLog = oldLogger })
 	operator := &fakeChannelOperator{}
 	engine := NewEngine(db, operator, EngineOptions{Now: func() time.Time { return now }})
-	ctx := schedulerhelper.WithExecutionContext(context.Background(), "recording-engine-1", 1, "recording-plan-dispatch-executor")
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "recording-engine-1", 1, "recording-plan-dispatch-executor", "job-engine")
 
 	require.NoError(t, engine.reconcile(ctx, &state, now))
 	require.Len(t, logs.All(), 1)
@@ -153,7 +156,7 @@ func TestLoggingRecordingActionDispatchLogsOperatorCompletion(t *testing.T) {
 	app.ZapLog = zap.New(core)
 	t.Cleanup(func() { app.ZapLog = oldLogger })
 	db, engine, operator, channelID, now := newLoggingT10RecordingFixture(t)
-	ctx := schedulerhelper.WithExecutionContext(context.Background(), "dispatch-1", 1, "recording-plan-dispatch-executor")
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "dispatch-1", 1, "recording-plan-dispatch-executor", "job-dispatch")
 
 	require.NoError(t, engine.Dispatch(ctx))
 	require.Equal(t, []uint{channelID}, operator.started)
@@ -162,6 +165,7 @@ func TestLoggingRecordingActionDispatchLogsOperatorCompletion(t *testing.T) {
 	require.Equal(t, zap.InfoLevel, actions[0].Level)
 	require.Equal(t, "dispatch", actions[0].ContextMap()["trigger"])
 	require.Equal(t, "dispatch-1", actions[0].ContextMap()["execution_id"])
+	require.Equal(t, "job-dispatch", actions[0].ContextMap()["job_id"])
 
 	var executions []models.GbRecordingPlanExecution
 	require.NoError(t, db.Find(&executions).Error)
@@ -177,7 +181,7 @@ func TestLoggingRecordingActionHealLogsOperatorCompletion(t *testing.T) {
 	app.ZapLog = zap.New(core)
 	t.Cleanup(func() { app.ZapLog = oldLogger })
 	_, engine, operator, channelID, _ := newLoggingT10RecordingFixture(t)
-	ctx := schedulerhelper.WithExecutionContext(context.Background(), "heal-1", 2, "recording-plan-heal-executor")
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "heal-1", 2, "recording-plan-heal-executor", "job-heal")
 
 	require.NoError(t, engine.Heal(ctx))
 	require.Equal(t, []uint{channelID}, operator.started)
@@ -186,4 +190,5 @@ func TestLoggingRecordingActionHealLogsOperatorCompletion(t *testing.T) {
 	require.Equal(t, zap.InfoLevel, actions[0].Level)
 	require.Equal(t, "heal", actions[0].ContextMap()["trigger"])
 	require.Equal(t, "heal-1", actions[0].ContextMap()["execution_id"])
+	require.Equal(t, "job-heal", actions[0].ContextMap()["job_id"])
 }

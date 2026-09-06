@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/robfig/cron/v3"
+
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
 
 // 任务调度器
@@ -264,7 +266,10 @@ func (s *JobScheduler) executeJob(job *Job) {
 
 		// 创建带超时的上下文
 		ctx, cancel := context.WithTimeout(context.Background(), job.Timeout)
-		ctx = WithExecutionContext(ctx, jobExecutionID, attempt, job.ExecutorName)
+		ctx = WithExecutionContext(ctx, jobExecutionID, attempt, job.ExecutorName, job.ID)
+		if logger, ok := s.logger.(*ZapJobLogger); ok {
+			ctx = logging.WithContext(ctx, logger.executionScope(job.ID, jobExecutionID, attempt, job.ExecutorName))
+		}
 
 		// 执行任务（传递 job 的深拷贝，避免并发修改）
 		jobCopy := job.Clone()
