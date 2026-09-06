@@ -16,6 +16,7 @@ import (
 	"gorm.io/driver/sqlserver"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
@@ -32,18 +33,22 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	}
 	var dialector gorm.Dialector
 	var query, suffix string
+	var migrationDialect migration.Dialect
 	switch dialect {
 	case "mysql":
 		dialector = mysql.Open(dsn)
 		query = "SELECT DATABASE()"
+		migrationDialect = migration.DialectMySQL
 	case "postgresql":
 		dialector = postgres.Open(dsn)
 		query = "SELECT current_database()"
 		suffix = "-postgresql"
+		migrationDialect = migration.DialectPostgres
 	case "sqlserver":
 		dialector = sqlserver.Open(dsn)
 		query = "SELECT DB_NAME()"
 		suffix = "-sqlserver"
+		migrationDialect = migration.DialectSQLServer
 	default:
 		t.Fatal("unsupported test dialect")
 	}
@@ -74,6 +79,16 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	if len(tables) != 0 {
 		t.Fatal("refusing non-empty database; never drops pre-existing tables")
 	}
+	// Model an existing application database without importing business data.
+	// The schema upgrade only adds security columns to these fixture tables.
+	for _, table := range []string{"gb_device", "meta_node"} {
+		if err := db.Exec("CREATE TABLE " + table + " (id BIGINT PRIMARY KEY, fixture_label VARCHAR(32) NOT NULL)").Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec("INSERT INTO " + table + " (id,fixture_label) VALUES (1,'keep-fixture')").Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	dir := os.Getenv("UVP_OPENAPI_TEST_MIGRATION_DIR")
 	if dir == "" {
 		dir = "../../../resource/database/gb28181/migrations"
@@ -85,13 +100,15 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for i, sql := range strings.Split(string(body), ";") {
-			if strings.TrimSpace(sql) == "" {
-				continue
+		if err := db.Connection(func(conn *gorm.DB) error {
+			for i, statement := range nativeSchemaStatements(string(body)) {
+				if err := conn.Exec(statement).Error; err != nil {
+					return fmt.Errorf("migration statement %d failed: %w", i, err)
+				}
 			}
-			if err := db.Exec(sql).Error; err != nil {
-				t.Fatalf("migration statement %d failed: %v", i, err)
-			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
 		}
 	}
 	run(stem + ".sql")
@@ -101,6 +118,12 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 			t.Fatal("core table missing")
 		}
 	}
+	for _, table := range []string{"gb_openapi_play_grant", "gb_openapi_viewer"} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatal("media table missing")
+		}
+	}
+	checkNativeMediaSchema(t, db)
 	now := time.Now().UTC()
 	c := models.Client{AK: "uvp_000102030405060708090a0b0c0d0e0f", Name: "isolated", OwnerDeptID: 10, Status: models.StatusActive, SecretCiphertext: []byte("test-only-ciphertext"), SecretIV: []byte("test-only-iv"), SecretKeyID: "test", CreatedAt: now, UpdatedAt: now}
 	if err := db.Create(&c).Error; err != nil {
@@ -148,13 +171,103 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	if nonce.ExpiresAt.Sub(nonce.AcceptedAt) < 660*time.Second {
 		t.Fatal("retention below 660 seconds")
 	}
+	other := c
+	other.ID = 0
+	other.AK = "uvp_100102030405060708090a0b0c0d0e0f"
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherScope := scope
+	otherScope.ClientID = other.ID
+	if err := db.Create(&otherScope).Error; err != nil {
+		t.Fatal(err)
+	}
+	request := auth.AdmissionRequest{ClientID: other.ID, SecretVersion: 1, AuthEpoch: 1, ScopeEpoch: 1, Scope: "device:list", Timestamp: fmt.Sprint(now.Unix()), Nonce: nonce.Value, RequestID: "native-other-client"}
+	if err := gate.Admit(ctx, request, func(*gorm.DB) error { return nil }); err != nil {
+		t.Fatal("different client could not reuse nonce:", err)
+	}
+	if err := db.Model(&models.Client{}).Where("id = ?", c.ID).Update("secret_version", 2).Error; err != nil {
+		t.Fatal(err)
+	}
+	request.ClientID, request.SecretVersion, request.RequestID = c.ID, 2, "native-rotated-client"
+	if err := gate.Admit(ctx, request, func(*gorm.DB) error { return nil }); err != auth.ErrReplay {
+		t.Fatal("secret rotation did not preserve nonce:", err)
+	}
 	if err := db.Exec("CREATE TABLE openapi_test_sentinel (id INT PRIMARY KEY)").Error; err != nil {
 		t.Fatal(err)
 	}
-	run(stem + "-down.sql")
+	store := migration.NewStore(db)
+	if err := store.EnsureTable(); err != nil {
+		t.Fatal(err)
+	}
+	upName := filepath.Base(stem) + ".sql"
+	if err := store.MarkApplied([]string{upName}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("UVP_OPENAPI_ALLOW_TEST_DOWN", "")
+	if err := migration.Down(db, migrationDialect, upName); err == nil {
+		t.Fatal("destructive down allowed without explicit test switch")
+	}
+	t.Setenv("UVP_OPENAPI_ALLOW_TEST_DOWN", "1")
+	if err := migration.Down(db, migrationDialect, upName); err == nil {
+		t.Fatal("destructive down allowed with live safety rows")
+	}
+	// These rows were created only by this test after verifying an empty DB.
+	// Remove fixture state, never arbitrary pre-existing data, then exercise
+	// the real guarded operational Down entry point (not raw down SQL).
+	for _, table := range []string{"gb_openapi_viewer", "gb_openapi_play_grant", "sys_openapi_nonce", "sys_openapi_audit", "sys_openapi_client_scope", "sys_openapi_client"} {
+		if err := db.Exec("DELETE FROM " + table).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, update := range []struct{ set, reset string }{
+		{"UPDATE gb_device SET access_epoch=2", "UPDATE gb_device SET access_epoch=1"},
+		{"UPDATE meta_node SET current_boot_nonce='000102030405060708090a0b0c0d0e0f'", "UPDATE meta_node SET current_boot_nonce=NULL"},
+	} {
+		if err := db.Exec(update.set).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := migration.Down(db, migrationDialect, upName); err == nil {
+			t.Fatal("down erased advanced security state")
+		}
+		if err := db.Exec(update.reset).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := migration.Down(db, migrationDialect, upName); err != nil {
+		t.Fatal(err)
+	}
 	if !db.Migrator().HasTable("openapi_test_sentinel") {
 		t.Fatal("down removed unrelated table")
 	}
+	for _, table := range []string{"gb_device", "meta_node"} {
+		var count int64
+		if err := db.Table(table).Where("fixture_label = ?", "keep-fixture").Count(&count).Error; err != nil || count != 1 {
+			t.Fatal("down altered existing fixture rows")
+		}
+	}
 	run(stem + ".sql")
-	t.Logf("%s core up/up, unique keys, 100-way nonce admission, down/up passed; HTTP/media/full-schema not covered", dialect)
+	t.Logf("%s schema up/up, media constraints, 100-way nonce, guarded down/up passed; full initialization/HTTP/media runtime not covered", dialect)
+}
+
+// Match the production runner's line-terminated statements, so semicolons
+// inside SQL strings do not split a PREPARE body into a different program.
+func nativeSchemaStatements(body string) []string {
+	var statements []string
+	var pending strings.Builder
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		pending.WriteString(line + "\n")
+		if strings.HasSuffix(trimmed, ";") {
+			statements = append(statements, pending.String())
+			pending.Reset()
+		}
+	}
+	if strings.TrimSpace(pending.String()) != "" {
+		statements = append(statements, pending.String())
+	}
+	return statements
 }
