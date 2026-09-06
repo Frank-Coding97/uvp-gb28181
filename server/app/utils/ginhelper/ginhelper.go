@@ -62,21 +62,36 @@ func accessLogger(output io.Writer) gin.HandlerFunc {
 
 func accessLogFormatter(param gin.LogFormatterParams) string {
 	path := redactAccessLogPath(param.Path)
+	method := param.Method
 	errorMessage := param.ErrorMessage
 	if isOpenAPIAccessLogPath(param.Path) {
 		// OpenAPI authentication material is not safe to copy into the general
 		// access log, including through Gin's error string.
 		errorMessage = ""
+		if !isStandardAccessLogMethod(method) {
+			method = "UNKNOWN"
+		}
 	}
 	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
 		param.TimeStamp.Format("2006/01/02 - 15:04:05"),
 		param.StatusCode,
 		param.Latency,
 		param.ClientIP,
-		param.Method,
+		method,
 		path,
 		errorMessage,
 	)
+}
+
+func isStandardAccessLogMethod(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut,
+		http.MethodPatch, http.MethodDelete, http.MethodConnect, http.MethodOptions,
+		http.MethodTrace:
+		return true
+	default:
+		return false
+	}
 }
 
 func redactAccessLogPath(path string) string {

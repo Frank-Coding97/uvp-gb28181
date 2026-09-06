@@ -98,3 +98,25 @@ func TestAccessLogFormatterPreservesNonOpenAPIPathAndError(t *testing.T) {
 		t.Fatalf("non-OpenAPI access log changed unexpectedly: %s", got)
 	}
 }
+
+func TestAccessLogFormatterHidesOpenAPICustomMethod(t *testing.T) {
+	got := accessLogFormatter(gin.LogFormatterParams{
+		StatusCode:   405,
+		Method:       "SK-secret",
+		Path:         "/openapi/v1/unknown",
+		ErrorMessage: "method rejected",
+	})
+	if strings.Contains(got, "SK-secret") {
+		t.Fatalf("OpenAPI access log leaked custom method: %s", got)
+	}
+	if !strings.Contains(got, "UNKNOWN") {
+		t.Fatalf("OpenAPI access log did not use UNKNOWN for custom method: %s", got)
+	}
+}
+
+func TestRedactAccessLogPathDoesNotTreatOpenAPI2AsNamespace(t *testing.T) {
+	path := "/openapi2/v1?signature=secret"
+	if got := redactAccessLogPath(path); got != path {
+		t.Fatalf("non-OpenAPI namespace was redacted: got %q, want %q", got, path)
+	}
+}
