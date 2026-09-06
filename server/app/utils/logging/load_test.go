@@ -273,22 +273,36 @@ func TestLoggingResourceBounds(t *testing.T) {
 		r := newT15FaultRuntime(t, sink, emergency, clock)
 		for i := 0; i < 100; i++ {
 			r.Root.Info("sync record", zap.String("event", "logging.test.fault"))
-		}
-		if err := r.Root.Sync(); err == nil {
-			t.Fatal("sync failure hidden")
+			if err := r.Root.Sync(); err == nil {
+				t.Fatal("sync failure hidden")
+			}
 		}
 		stats := r.Stats()["stdout"]
-		if stats.Attempted != 100 || stats.Written != 100 || stats.Failed != 0 || stats.DurabilityUnknown != 1 {
+		if stats.Attempted != 100 || stats.Written != 100 || stats.Failed != 0 || stats.DurabilityUnknown != 100 {
 			t.Fatalf("sync stats: %+v", stats)
+		}
+		if sink.syncs.Load() != 100 {
+			t.Fatalf("sync calls: %d", sink.syncs.Load())
 		}
 		if rows := records(t, emergency); len(rows) != 1 {
 			t.Fatalf("sync emergency rate: %d", len(rows))
+		}
+		clock.Advance(time.Minute)
+		if err := r.Maintain(); err != nil {
+			t.Fatalf("sync summary flush: %v", err)
+		}
+		rows := records(t, emergency)
+		if len(rows) != 2 || rows[1]["durability_unknown"] != float64(100) {
+			t.Fatalf("sync durability summary: %v", rows)
 		}
 		if strings.Contains(emergency.String(), secret) {
 			t.Fatal("sync error leaked")
 		}
 		if err := r.Close(); err == nil {
 			t.Fatal("close hid sync failure")
+		}
+		if stats := r.Stats()["stdout"]; stats.DurabilityUnknown != 101 || sink.syncs.Load() != 101 {
+			t.Fatalf("close sync accounting: %+v calls=%d", stats, sink.syncs.Load())
 		}
 	})
 
@@ -308,6 +322,17 @@ func TestLoggingResourceBounds(t *testing.T) {
 		}
 		if rows := records(t, emergency); len(rows) != 1 {
 			t.Fatalf("maintain emergency rate: %d", len(rows))
+		}
+		// Stop injecting after the measured 100 failures so the next Maintain
+		// only flushes the one-minute emergency summary.
+		sink.maintainErr = nil
+		clock.Advance(time.Minute)
+		if err := r.Maintain(); err != nil {
+			t.Fatalf("maintain flush: %v", err)
+		}
+		rows := records(t, emergency)
+		if len(rows) != 2 || rows[1]["failed"] != float64(100) {
+			t.Fatalf("maintain failure count: %v", rows)
 		}
 		if strings.Contains(emergency.String(), secret) {
 			t.Fatal("maintain error leaked")
@@ -347,6 +372,11 @@ func TestLoggingResourceBounds(t *testing.T) {
 	t.Run("blocking_sink", func(t *testing.T) {
 		sink := &t15BlockingSink{entered: make(chan struct{}), release: make(chan struct{})}
 		r := newT15CountingRuntime(t, sink)
+		var releaseOnce sync.Once
+		release := func() { releaseOnce.Do(func() { close(sink.release) }) }
+		// If an assertion fails while Write is blocked, release before the
+		// runtime cleanup calls Close; otherwise cleanup would wait forever.
+		t.Cleanup(release)
 		returned := make(chan struct{})
 		go func() {
 			r.Root.Info("blocking record", zap.String("event", "logging.test.blocking"))
@@ -372,7 +402,7 @@ func TestLoggingResourceBounds(t *testing.T) {
 			t.Fatal("Close returned while sink was blocked")
 		case <-time.After(50 * time.Millisecond):
 		}
-		close(sink.release)
+		release()
 		select {
 		case <-returned:
 		case <-time.After(time.Second):
