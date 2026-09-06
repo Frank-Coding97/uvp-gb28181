@@ -118,6 +118,62 @@ func TestQualifiedRequestShapeFailsClosedBeforeCoordinator(t *testing.T) {
 	}
 }
 
+func TestQualifiedCanceledContextDoesNotValidateOrTouchMedia(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
+	z := &mockZLM{}
+	inviter := &mockInviter{}
+	validator := &countingQualifiedValidator{}
+	service, _ := newQualifiedTestService(t, map[int64]ZLM{1: z}, inviter, &fakeChannels{c: aChannel()}, qualifiedTestRegistry{
+		nodes: []*node.Node{qualifiedTestNode(1, "node-a")},
+	}, stream.NewLocationMap(), validator)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := service.EnsureLive(ctx, qualifiedTestRequest("ticket-canceled"))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled qualified request error=%v, want context.Canceled", err)
+	}
+	if validator.calls.Load() != 0 || z.onlineCalls.Load() != 0 || z.openCalls.Load() != 0 || inviter.inviteCalls.Load() != 0 {
+		t.Fatalf("canceled qualified request touched validator/media: validator=%d online=%d open=%d invite=%d",
+			validator.calls.Load(), z.onlineCalls.Load(), z.openCalls.Load(), inviter.inviteCalls.Load())
+	}
+}
+
+func TestQualifiedNilContextUsesBackground(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
+	channel := aChannel()
+	channel.StreamID = "nil-context-stream"
+	locations := stream.NewLocationMap()
+	z := &mockZLM{}
+	z.online.Store(true)
+	service, _ := newQualifiedTestService(t, map[int64]ZLM{1: z}, &mockInviter{}, &fakeChannels{c: channel}, qualifiedTestRegistry{
+		nodes: []*node.Node{qualifiedTestNode(1, "node-a")},
+	}, locations, &countingQualifiedValidator{})
+
+	if _, err := service.EnsureLive(nil, qualifiedTestRequest("ticket-nil-context")); err != nil {
+		t.Fatalf("nil context qualified reuse: %v", err)
+	}
+}
+
+func TestQualifiedInactiveNodeFailsBeforeValidator(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
+	mediaNode := qualifiedTestNode(1, "node-a")
+	mediaNode.State = node.StateOffline
+	z := &mockZLM{}
+	validator := &countingQualifiedValidator{}
+	service, _ := newQualifiedTestService(t, map[int64]ZLM{1: z}, &mockInviter{}, &fakeChannels{c: aChannel()}, qualifiedTestRegistry{
+		nodes: []*node.Node{mediaNode},
+	}, stream.NewLocationMap(), validator)
+
+	_, err := service.EnsureLive(context.Background(), qualifiedTestRequest("ticket-inactive"))
+	if !errors.Is(err, ErrQualifiedPlaybackUnavailable) {
+		t.Fatalf("inactive node error=%v, want ErrQualifiedPlaybackUnavailable", err)
+	}
+	if validator.calls.Load() != 0 || z.onlineCalls.Load() != 0 {
+		t.Fatalf("inactive node reached validator/probe: validator=%d online=%d", validator.calls.Load(), z.onlineCalls.Load())
+	}
+}
+
 func TestQualifiedCleanupPendingDoesNotTriggerStop(t *testing.T) {
 	var stopCalls atomic.Int32
 	coordinator := NewCoordinatorWithStop(func(context.Context, Request) (*Result, error) {
@@ -165,8 +221,8 @@ func TestQualifiedOwnerMismatchDoesNotProbeOrCleanup(t *testing.T) {
 	if !errors.As(err, &mismatch) || !errors.Is(err, ErrOwnerNodeMismatch) {
 		t.Fatalf("owner mismatch error=%v", err)
 	}
-	if validator.calls.Load() != 0 || z1.onlineCalls.Load() != 0 || z2.onlineCalls.Load() != 0 {
-		t.Fatalf("owner mismatch performed qualification/probes: validator=%d z1=%d z2=%d", validator.calls.Load(), z1.onlineCalls.Load(), z2.onlineCalls.Load())
+	if z1.onlineCalls.Load() != 0 || z2.onlineCalls.Load() != 0 {
+		t.Fatalf("owner mismatch performed probes: z1=%d z2=%d (validator calls=%d)", z1.onlineCalls.Load(), z2.onlineCalls.Load(), validator.calls.Load())
 	}
 	if z1.closeCalls.Load() != 0 || z2.closeCalls.Load() != 0 || inviter.byeCalls.Load() != 0 {
 		t.Fatalf("owner mismatch performed cleanup: z1=%d z2=%d bye=%d", z1.closeCalls.Load(), z2.closeCalls.Load(), inviter.byeCalls.Load())
@@ -194,6 +250,28 @@ func TestQualifiedUnknownOwnerProbesOnlyRequiredNode(t *testing.T) {
 	}
 	if z1.closeCalls.Load() != 0 || z2.closeCalls.Load() != 0 || inviter.byeCalls.Load() != 0 {
 		t.Fatalf("unknown owner performed cleanup: z1=%d z2=%d bye=%d", z1.closeCalls.Load(), z2.closeCalls.Load(), inviter.byeCalls.Load())
+	}
+}
+
+func TestQualifiedBoundOwnerOfflineFailsClosedWithoutCleanup(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
+	channel := aChannel()
+	channel.StreamID = "bound-offline-stream"
+	locations := stream.NewLocationMap()
+	locations.Bind(channel.StreamID, 1)
+	z := &mockZLM{}
+	inviter := &mockInviter{}
+	service, _ := newQualifiedTestService(t, map[int64]ZLM{1: z}, inviter, &fakeChannels{c: channel}, qualifiedTestRegistry{
+		nodes: []*node.Node{qualifiedTestNode(1, "node-a")},
+	}, locations, &countingQualifiedValidator{})
+
+	_, err := service.EnsureLive(context.Background(), qualifiedTestRequest("ticket-bound-offline"))
+	if !errors.Is(err, ErrQualifiedOwnerUnknown) {
+		t.Fatalf("bound offline owner error=%v, want ErrQualifiedOwnerUnknown", err)
+	}
+	if z.onlineCalls.Load() != 1 || z.openCalls.Load() != 0 || z.closeCalls.Load() != 0 || inviter.inviteCalls.Load() != 0 || inviter.byeCalls.Load() != 0 {
+		t.Fatalf("bound offline owner caused media side effects: online=%d open=%d close=%d invite=%d bye=%d",
+			z.onlineCalls.Load(), z.openCalls.Load(), z.closeCalls.Load(), inviter.inviteCalls.Load(), inviter.byeCalls.Load())
 	}
 }
 
@@ -235,15 +313,16 @@ func TestQualifiedMissingOwnerOnlineRestoresBindingAndReturnsIndependentClones(t
 	}
 }
 
-func TestQualifiedValidationRunsAtThreeGates(t *testing.T) {
+func TestQualifiedValidationRunsAtEntryAndMediaGates(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		failAt   int32
 		wantOpen int32
 	}{
-		{name: "before reuse", failAt: 1, wantOpen: 0},
-		{name: "after select", failAt: 2, wantOpen: 0},
-		{name: "after ensure", failAt: 3, wantOpen: 1},
+		{name: "entry", failAt: 1, wantOpen: 0},
+		{name: "after device and channel", failAt: 2, wantOpen: 0},
+		{name: "after node selection", failAt: 3, wantOpen: 0},
+		{name: "after ensure", failAt: 4, wantOpen: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			withFixedAddressPlaybackSettings(t, false, false)
@@ -263,8 +342,8 @@ func TestQualifiedValidationRunsAtThreeGates(t *testing.T) {
 			if !errors.Is(err, ErrQualifiedPlaybackUnavailable) {
 				t.Fatalf("error=%v, want ErrQualifiedPlaybackUnavailable", err)
 			}
-			if got := validator.calls.Load(); got != 3 && test.failAt == 3 {
-				t.Fatalf("validation calls=%d, want 3", got)
+			if got := validator.calls.Load(); got != test.failAt {
+				t.Fatalf("validation calls=%d, want failure at call %d", got, test.failAt)
 			}
 			if got := z.openCalls.Load(); got != test.wantOpen {
 				t.Fatalf("open calls=%d, want %d", got, test.wantOpen)
@@ -339,5 +418,35 @@ func TestQualifiedReuseIgnoresNearCapacityForExistingOwner(t *testing.T) {
 	}
 	if !result.Reused || z.openCalls.Load() != 0 || inviter.inviteCalls.Load() != 0 {
 		t.Fatalf("near-capacity owner was not reused safely: result=%+v open=%d invite=%d", result, z.openCalls.Load(), inviter.inviteCalls.Load())
+	}
+}
+
+func TestQualifiedResultMetadataMustMatchFreshNodeSnapshot(t *testing.T) {
+	withFixedAddressPlaybackSettings(t, false, false)
+	z := &mockZLM{port: 40000}
+	inviter := &mockInviter{}
+	mediaNode := qualifiedTestNode(1, "node-a")
+	nodes := qualifiedTestRegistry{nodes: []*node.Node{mediaNode}}
+	validator := &countingQualifiedValidator{}
+	service, notifier := newQualifiedTestService(t, map[int64]ZLM{1: z}, inviter, &fakeChannels{c: aChannel()}, nodes,
+		stream.NewLocationMap(), validator)
+	inviter.onInvite = func(session *uac.Session) {
+		z.online.Store(true)
+		notifier.Publish(session.StreamID)
+	}
+	// The result is built from revision 7. Change the registry after the
+	// media generation is ready but before EnsureLive's final fresh read.
+	service.liveReady = func(LiveSession) { mediaNode.Revision = 8 }
+
+	_, err := service.EnsureLive(context.Background(), qualifiedTestRequest("ticket-stale-result"))
+	if !errors.Is(err, ErrQualifiedPlaybackUnavailable) {
+		t.Fatalf("stale result metadata error=%v, want ErrQualifiedPlaybackUnavailable", err)
+	}
+	if validator.calls.Load() != 3 {
+		t.Fatalf("metadata mismatch should stop before final validator, calls=%d", validator.calls.Load())
+	}
+	if z.openCalls.Load() != 1 || inviter.inviteCalls.Load() != 1 || z.closeCalls.Load() != 0 || inviter.byeCalls.Load() != 0 {
+		t.Fatalf("metadata mismatch caused unexpected media compensation: open=%d invite=%d close=%d bye=%d",
+			z.openCalls.Load(), inviter.inviteCalls.Load(), z.closeCalls.Load(), inviter.byeCalls.Load())
 	}
 }

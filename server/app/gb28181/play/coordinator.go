@@ -459,6 +459,12 @@ func (c *Coordinator) ownerConflict(req Request) error {
 // Existing Start callers remain compatible; new REST/Hook integrations can
 // migrate to this method without changing the underlying Start transaction.
 func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if req.IsQualified() && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
 	c := s.coordinator()
 	if req.IsQualified() {
 		if err := validateQualifiedRequestShape(req); err != nil {
@@ -471,6 +477,19 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 		}
 		if s.qualifiedValidator == nil {
 			return nil, ErrQualifiedPlaybackUnavailable
+		}
+		if s.registry == nil {
+			return nil, ErrQualifiedPlaybackUnavailable
+		}
+		mediaNode, ok := s.registry.Get(req.RequiredNode)
+		if !ok || mediaNode == nil {
+			return nil, ErrQualifiedPlaybackUnavailable
+		}
+		// Validate the ticket before entering the shared lane. This is a
+		// local snapshot check outside coordinator.mu; the later checks in
+		// startDirect and after EnsureLive close the device/node/result races.
+		if err := s.validateQualifiedNode(ctx, req, mediaNode); err != nil {
+			return nil, err
 		}
 	}
 	result, reused, err := c.ensureLive(ctx, req)

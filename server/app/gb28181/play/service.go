@@ -107,9 +107,11 @@ type Result struct {
 }
 
 type ResultNode struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-	Host string `json:"host"`
+	ID              int64  `json:"id"`
+	Name            string `json:"name"`
+	Host            string `json:"host"`
+	MediaServerUUID string `json:"-"`
+	Revision        uint64 `json:"-"`
 }
 
 // 常量
@@ -435,15 +437,11 @@ func (s *Service) tryReuseQualifiedStream(ctx context.Context, ch *gbmodels.GbCh
 		return nil, ErrQualifiedOwnerUnknown
 	}
 	if !online {
-		if !bound {
-			// ch.StreamID is a residual persisted value but no trusted owner
-			// binding exists. Do not clean it or search another node.
-			return nil, ErrQualifiedOwnerUnknown
-		}
-		// A bound owner explicitly reports the stream absent. This is the
-		// one safe case in which the caller may continue through normal
-		// stale-row cleanup and cold-start handling.
-		return nil, nil
+		// Both a missing binding and a stale binding are fail-closed here.
+		// A false probe is not authority to drive StopIfPersistedCurrent;
+		// the dedicated recovery/cleanup owner must establish exact
+		// generation ownership before clearing a residual row.
+		return nil, ErrQualifiedOwnerUnknown
 	}
 	if !bound {
 		s.locationMap.Bind(streamID, mediaNode.ID)
@@ -452,10 +450,17 @@ func (s *Service) tryReuseQualifiedStream(ctx context.Context, ch *gbmodels.GbCh
 }
 
 func (s *Service) validateQualifiedNode(ctx context.Context, req Request, mediaNode *node.Node) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := validateQualifiedRequestShape(req); err != nil {
 		return err
 	}
-	if s.qualifiedValidator == nil || mediaNode == nil || mediaNode.ID != req.RequiredNode {
+	if s.qualifiedValidator == nil || mediaNode == nil || mediaNode.ID != req.RequiredNode ||
+		mediaNode.MediaServerUUID == "" || !mediaNode.IsActive() {
 		return ErrQualifiedPlaybackUnavailable
 	}
 	snapshot := NodeQualificationSnapshot{
@@ -476,6 +481,9 @@ func (s *Service) validateQualifiedResult(ctx context.Context, req Request, resu
 	}
 	mediaNode, ok := s.registry.Get(result.Node.ID)
 	if !ok || mediaNode == nil {
+		return ErrQualifiedPlaybackUnavailable
+	}
+	if result.Node.MediaServerUUID != mediaNode.MediaServerUUID || result.Node.Revision != mediaNode.Revision {
 		return ErrQualifiedPlaybackUnavailable
 	}
 	return s.validateQualifiedNode(ctx, req, mediaNode)
@@ -1100,12 +1108,15 @@ func (s *Service) buildResultFor(streamID, ssrc, host string) *Result {
 func (s *Service) buildNodeResult(ctx context.Context, streamID, ssrc string, mediaNode *node.Node, reused bool) *Result {
 	urls, warnings := s.urlResolver.Resolve(ctx, mediaNode, zlmApp, streamID)
 	result := &Result{
-		StreamID:    streamID,
-		SSRC:        ssrc,
-		App:         zlmApp,
-		Reused:      reused,
-		Status:      "online",
-		Node:        &ResultNode{ID: mediaNode.ID, Name: mediaNode.Name, Host: mediaNode.Host},
+		StreamID: streamID,
+		SSRC:     ssrc,
+		App:      zlmApp,
+		Reused:   reused,
+		Status:   "online",
+		Node: &ResultNode{
+			ID: mediaNode.ID, Name: mediaNode.Name, Host: mediaNode.Host,
+			MediaServerUUID: mediaNode.MediaServerUUID, Revision: mediaNode.Revision,
+		},
 		URLs:        urls,
 		URLWarnings: warnings,
 		ExpireAt:    time.Now().Add(time.Duration(s.cfg.Media.StreamNoneReaderTimeout) * time.Second).Unix(),
