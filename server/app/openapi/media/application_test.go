@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -173,11 +174,12 @@ func newTestApplication(provider *qualificationFake, player *playerFake, issuer 
 
 func testApplyRequest(ticket QualificationTicket, grantID string) ApplyRequest {
 	return ApplyRequest{
-		ClientID:  81,
-		GrantID:   grantID,
-		DeviceID:  testApplicationDevice,
-		ChannelID: testApplicationChannel,
-		Ticket:    ticket,
+		ClientID:    81,
+		GrantID:     grantID,
+		DeviceID:    testApplicationDevice,
+		ChannelID:   testApplicationChannel,
+		DeviceEpoch: 3,
+		Ticket:      ticket,
 	}
 }
 
@@ -266,6 +268,42 @@ func TestLiveApplicationApplySupportsWSSFLVIndependently(t *testing.T) {
 	require.Equal(t, play.QualifiedProtocolWSSFLV, data.Protocol)
 	require.True(t, strings.HasPrefix(data.URL, "wss://media.example:8443/rtp/"))
 	require.Contains(t, data.URL, "play_token=wss-token")
+}
+
+func TestLiveApplicationApplyPropagatesAdmittedDeviceEpochToPlayer(t *testing.T) {
+	ticket := applicationTicket(play.QualifiedProtocolHTTPSFLV)
+	provider := &qualificationFake{ticket: ticket}
+	player := &playerFake{result: applicationResult(ticket)}
+	issuer := &grantFake{grants: []playauth.Grant{applicationGrant(testApplicationGrantA, "epoch-token")}}
+	app := newTestApplication(provider, player, issuer, true)
+	request := testApplyRequest(ticket, testApplicationGrantA)
+	request.DeviceEpoch = 4
+
+	_, err := app.Apply(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, int64(4), player.request.DeviceEpoch)
+}
+
+func TestLiveApplicationApplyRejectsMissingOrNonPositiveDeviceEpochWithCompensation(t *testing.T) {
+	ticket := applicationTicket(play.QualifiedProtocolHTTPSFLV)
+	for _, epoch := range []int64{0, -1} {
+		t.Run(fmt.Sprintf("epoch-%d", epoch), func(t *testing.T) {
+			provider := &qualificationFake{ticket: ticket}
+			player := &playerFake{result: applicationResult(ticket)}
+			issuer := &grantFake{grants: []playauth.Grant{applicationGrant(testApplicationGrantA, "epoch-token")}}
+			app := newTestApplication(provider, player, issuer, true)
+			request := testApplyRequest(ticket, testApplicationGrantA)
+			request.DeviceEpoch = epoch
+
+			_, err := app.Apply(context.Background(), request)
+			requireFixedApplicationError(t, err)
+			require.Zero(t, player.ensureN)
+			require.Zero(t, issuer.issueN)
+			require.Equal(t, 1, issuer.cleanupN)
+			require.Equal(t, int64(81), issuer.cleanupClient)
+			require.Equal(t, testApplicationGrantA, issuer.cleanupGrant)
+		})
+	}
 }
 
 func TestLiveApplicationApplyRejectsWithoutEnsureOrIssueForDisabledMalformedOrCanceled(t *testing.T) {

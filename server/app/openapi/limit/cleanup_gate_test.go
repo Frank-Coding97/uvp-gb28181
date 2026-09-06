@@ -47,6 +47,23 @@ func TestOpenAPIQuotaAllowsDeviceOnlyAfterCleanupAcknowledgesCurrentEpoch(t *tes
 	reservation, err := quota.ReservePending(context.Background(), request)
 	require.NoError(t, err)
 	require.NotEmpty(t, reservation.GrantID)
+	require.Equal(t, int64(3), reservation.DeviceEpoch)
+	var grant models.PlayGrant
+	require.NoError(t, db.First(&grant, "grant_id = ?", reservation.GrantID).Error)
+	require.Equal(t, int64(3), grant.DeviceEpoch)
+}
+
+func TestOpenAPIQuotaReservationKeepsAdmissionEpochAfterDeviceEpochBump(t *testing.T) {
+	db := quotaFixture(t, 1)
+	quota := NewQuota(db, func() time.Time { return quotaTestNow })
+	request := ReservationRequest{ClientID: 1, Scope: PlayLiveApplyScope, DeviceID: "device-a", ChannelID: "channel-a"}
+
+	reservation, err := quota.ReservePending(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, int64(3), reservation.DeviceEpoch)
+	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=4, cleanup_completed_epoch=4 WHERE device_id=?", request.DeviceID).Error)
+
+	require.Equal(t, int64(3), reservation.DeviceEpoch, "a committed admission must not be upgraded from a later device epoch")
 	var grant models.PlayGrant
 	require.NoError(t, db.First(&grant, "grant_id = ?", reservation.GrantID).Error)
 	require.Equal(t, int64(3), grant.DeviceEpoch)

@@ -75,11 +75,12 @@ type GrantIssuer interface {
 }
 
 type ApplyRequest struct {
-	ClientID  int64
-	GrantID   string
-	DeviceID  string
-	ChannelID string
-	Ticket    QualificationTicket
+	ClientID    int64
+	GrantID     string
+	DeviceID    string
+	ChannelID   string
+	DeviceEpoch int64
+	Ticket      QualificationTicket
 }
 
 // ApplicationData is the complete external media-application response. It
@@ -162,6 +163,9 @@ func (application *LiveApplication) Apply(ctx context.Context, request ApplyRequ
 	if !validApplyIdentifiers(request) {
 		return ApplicationData{}, ErrLiveApplicationUnavailable
 	}
+	if request.DeviceEpoch <= 0 {
+		return application.failApply(ctx, request)
+	}
 	if ctx.Err() != nil {
 		return application.failApply(ctx, request)
 	}
@@ -178,6 +182,7 @@ func (application *LiveApplication) Apply(ctx context.Context, request ApplyRequ
 	result, err := application.player.EnsureLive(ctx, play.Request{
 		DeviceID:         request.DeviceID,
 		ChannelID:        request.ChannelID,
+		DeviceEpoch:      request.DeviceEpoch,
 		Trigger:          "openapi-live-apply",
 		RequiredNode:     request.Ticket.NodeID,
 		RequiredProtocol: request.Ticket.Protocol,

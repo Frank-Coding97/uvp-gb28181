@@ -38,8 +38,9 @@ type ReservationRequest struct {
 }
 
 type Reservation struct {
-	GrantID   string
-	ExpiresAt time.Time
+	GrantID     string
+	ExpiresAt   time.Time
+	DeviceEpoch int64
 }
 
 // Quota owns durable viewer reservations. The database is the source of truth;
@@ -162,7 +163,7 @@ func (q *Quota) reservePendingTx(ctx context.Context, tx *gorm.DB, request Reser
 	if err := tx.WithContext(ctx).Create(&grant).Error; err != nil {
 		return Reservation{}, err
 	}
-	return Reservation{GrantID: grant.GrantID, ExpiresAt: grant.ExpiresAt}, nil
+	return Reservation{GrantID: grant.GrantID, ExpiresAt: grant.ExpiresAt, DeviceEpoch: deviceEpoch}, nil
 }
 
 // Occupied reports durable occupancy at the supplied service clock. It is a

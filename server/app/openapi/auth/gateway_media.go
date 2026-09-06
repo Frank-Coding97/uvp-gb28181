@@ -39,10 +39,11 @@ type MediaTicket string
 // MediaAdmittedRequest is the post-commit handoff to the media application.
 // ClientID and GrantID are server-derived; neither can be supplied by HTTP.
 type MediaAdmittedRequest struct {
-	ClientID int64
-	GrantID  string
-	Target   MediaTarget
-	Ticket   MediaTicket
+	ClientID    int64
+	GrantID     string
+	DeviceEpoch int64
+	Target      MediaTarget
+	Ticket      MediaTicket
 }
 
 // MediaAuthorization is the public allowlisted response data. Internal node,
@@ -431,7 +432,7 @@ func (g *Gateway) processMedia(hardContext context.Context, q gatewayRequest) (o
 	if reservation.GrantID == "" || !g.mediaReady() || ctx.Err() != nil {
 		return g.completeMedia(hardContext, q, invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE"), "SERVICE_UNAVAILABLE", start)
 	}
-	authorization, err := applyMedia(g.media, ctx, MediaAdmittedRequest{ClientID: view.ID, GrantID: reservation.GrantID, Target: target, Ticket: ticket})
+	authorization, err := applyMedia(g.media, ctx, MediaAdmittedRequest{ClientID: view.ID, GrantID: reservation.GrantID, DeviceEpoch: reservation.DeviceEpoch, Target: target, Ticket: ticket})
 	if err != nil || validateMediaAuthorization(authorization, reservation.GrantID, target) != nil || ctx.Err() != nil {
 		return g.completeMedia(hardContext, q, invalid(http.StatusServiceUnavailable, "SERVICE_UNAVAILABLE"), "SERVICE_UNAVAILABLE", start)
 	}

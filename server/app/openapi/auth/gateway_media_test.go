@@ -39,6 +39,7 @@ type mediaDispatcherStub struct {
 	applyCall    atomic.Int32
 	applyStarted chan struct{}
 	applyBlock   chan struct{}
+	beforeApply  func()
 	mu           sync.Mutex
 	prepared     MediaTarget
 	applied      MediaAdmittedRequest
@@ -61,6 +62,9 @@ func (s *mediaDispatcherStub) Prepare(_ context.Context, target MediaTarget) (Me
 
 func (s *mediaDispatcherStub) Apply(_ context.Context, request MediaAdmittedRequest) (MediaAuthorization, error) {
 	s.applyCall.Add(1)
+	if s.beforeApply != nil {
+		s.beforeApply()
+	}
 	s.mu.Lock()
 	s.applied = request
 	authorization := s.authorize
@@ -168,6 +172,9 @@ func TestOpenAPIMediaPOSTAdmitsOnceAndAppliesAfterCommit(t *testing.T) {
 	dispatcher.ready.Store(true)
 	gate, db, secret := mediaGatewayFixture(t, dispatcher)
 	dispatcher.db = db
+	dispatcher.beforeApply = func() {
+		require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=4, cleanup_completed_epoch=4 WHERE device_id=?", mediaTestDevice).Error)
+	}
 
 	server := httptest.NewTLSServer(mediaRouter(gate))
 	defer server.Close()
@@ -197,6 +204,7 @@ func TestOpenAPIMediaPOSTAdmitsOnceAndAppliesAfterCommit(t *testing.T) {
 	require.Equal(t, dispatcher.prepared, dispatcher.applied.Target)
 	require.Equal(t, MediaTicket("ticket-1"), dispatcher.applied.Ticket)
 	require.NotEmpty(t, dispatcher.applied.GrantID)
+	require.Equal(t, int64(3), dispatcher.applied.DeviceEpoch, "post-admission device epoch must remain the reservation snapshot")
 }
 
 func TestOpenAPIMediaCleanupBarrierRejectsBeforeAdmissionAndOnlyTargetDevice(t *testing.T) {

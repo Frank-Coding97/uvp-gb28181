@@ -60,10 +60,11 @@ func TestGatewayDispatcherPrepareAndApplyPreserveExactEnvelope(t *testing.T) {
 	require.Equal(t, original, envelope.Ticket)
 
 	authorization, err := dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
-		ClientID: 81,
-		GrantID:  testApplicationGrantA,
-		Target:   target,
-		Ticket:   ticket,
+		ClientID:    81,
+		GrantID:     testApplicationGrantA,
+		DeviceEpoch: 3,
+		Target:      target,
+		Ticket:      ticket,
 	})
 	require.NoError(t, err)
 	require.Equal(t, testApplicationGrantA, authorization.AuthorizationID)
@@ -71,6 +72,7 @@ func TestGatewayDispatcherPrepareAndApplyPreserveExactEnvelope(t *testing.T) {
 	require.Contains(t, authorization.URL, "token-a")
 	require.Equal(t, testApplicationNow.Add(time.Minute), authorization.ExpiresAt)
 	require.Equal(t, 1, player.ensureN)
+	require.Equal(t, int64(3), player.request.DeviceEpoch)
 	require.Equal(t, 1, issuer.issueN)
 	require.Equal(t, 0, issuer.cleanupN)
 	require.Equal(t, target.DeviceID, issuer.issueRequests[0].DeviceID)
@@ -84,10 +86,11 @@ func TestGatewayDispatcherShortQualificationDoesNotShortenGrant(t *testing.T) {
 	require.NoError(t, err)
 
 	authorization, err := dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
-		ClientID: 81,
-		GrantID:  testApplicationGrantA,
-		Target:   target,
-		Ticket:   ticket,
+		ClientID:    81,
+		GrantID:     testApplicationGrantA,
+		DeviceEpoch: 3,
+		Target:      target,
+		Ticket:      ticket,
 	})
 	require.NoError(t, err)
 	require.Equal(t, testApplicationNow.Add(120*time.Second), authorization.ExpiresAt)
@@ -100,10 +103,11 @@ func TestGatewayDispatcherAppliesWSSAuthorization(t *testing.T) {
 	require.NoError(t, err)
 
 	authorization, err := dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
-		ClientID: 81,
-		GrantID:  testApplicationGrantA,
-		Target:   target,
-		Ticket:   ticket,
+		ClientID:    81,
+		GrantID:     testApplicationGrantA,
+		DeviceEpoch: 3,
+		Target:      target,
+		Ticket:      ticket,
 	})
 	require.NoError(t, err)
 	require.Equal(t, play.QualifiedProtocolWSSFLV, authorization.Protocol)
@@ -139,10 +143,11 @@ func TestGatewayDispatcherRejectsBadTicketAndTargetWithCompensation(t *testing.T
 			}
 
 			_, err = dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
-				ClientID: 81,
-				GrantID:  testApplicationGrantA,
-				Target:   target,
-				Ticket:   ticket,
+				ClientID:    81,
+				GrantID:     testApplicationGrantA,
+				DeviceEpoch: 3,
+				Target:      target,
+				Ticket:      ticket,
 			})
 			requireFixedApplicationError(t, err)
 			require.Equal(t, 0, player.ensureN)
@@ -191,10 +196,11 @@ func TestGatewayDispatcherRejectsInvalidEnvelopeWithCompensation(t *testing.T) {
 			ticket = test.mutate(t, ticket)
 
 			_, err = dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
-				ClientID: 81,
-				GrantID:  testApplicationGrantA,
-				Target:   target,
-				Ticket:   ticket,
+				ClientID:    81,
+				GrantID:     testApplicationGrantA,
+				DeviceEpoch: 3,
+				Target:      target,
+				Ticket:      ticket,
 			})
 			requireFixedApplicationError(t, err)
 			require.Equal(t, 0, player.ensureN)
@@ -249,10 +255,11 @@ func TestGatewayDispatcherCanceledApplyCompensatesAdmission(t *testing.T) {
 	cancel()
 
 	_, err = dispatcher.Apply(ctx, auth.MediaAdmittedRequest{
-		ClientID: 81,
-		GrantID:  testApplicationGrantA,
-		Target:   target,
-		Ticket:   ticket,
+		ClientID:    81,
+		GrantID:     testApplicationGrantA,
+		DeviceEpoch: 3,
+		Target:      target,
+		Ticket:      ticket,
 	})
 	requireFixedApplicationError(t, err)
 	require.Equal(t, 0, player.ensureN)

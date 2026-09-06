@@ -389,7 +389,7 @@ func applyLifecycleGrant(t *testing.T, ctx context.Context, live *media.LiveAppl
 	require.NoError(t, err)
 	data, err := live.Apply(ctx, media.ApplyRequest{
 		ClientID: clientID, GrantID: reservation.GrantID, DeviceID: mediaLifecycleDevice,
-		ChannelID: mediaLifecycleChannel, Ticket: ticket,
+		ChannelID: mediaLifecycleChannel, DeviceEpoch: reservation.DeviceEpoch, Ticket: ticket,
 	})
 	require.NoError(t, err)
 	parsed, err := url.Parse(data.URL)

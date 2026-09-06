@@ -77,11 +77,12 @@ func (dispatcher *GatewayDispatcher) Apply(ctx context.Context, request auth.Med
 	}
 
 	data, err := dispatcher.application.Apply(ctx, ApplyRequest{
-		ClientID:  request.ClientID,
-		GrantID:   request.GrantID,
-		DeviceID:  request.Target.DeviceID,
-		ChannelID: request.Target.ChannelID,
-		Ticket:    envelope.Ticket,
+		ClientID:    request.ClientID,
+		GrantID:     request.GrantID,
+		DeviceEpoch: request.DeviceEpoch,
+		DeviceID:    request.Target.DeviceID,
+		ChannelID:   request.Target.ChannelID,
+		Ticket:      envelope.Ticket,
 	})
 	if err != nil {
 		return auth.MediaAuthorization{}, err
@@ -116,10 +117,11 @@ func (dispatcher *GatewayDispatcher) failAdmission(ctx context.Context, request 
 		return auth.MediaAuthorization{}, ErrLiveApplicationUnavailable
 	}
 	applyRequest := ApplyRequest{
-		ClientID:  request.ClientID,
-		GrantID:   request.GrantID,
-		DeviceID:  request.Target.DeviceID,
-		ChannelID: request.Target.ChannelID,
+		ClientID:    request.ClientID,
+		GrantID:     request.GrantID,
+		DeviceEpoch: request.DeviceEpoch,
+		DeviceID:    request.Target.DeviceID,
+		ChannelID:   request.Target.ChannelID,
 	}
 	if !validApplyIdentifiers(applyRequest) {
 		return auth.MediaAuthorization{}, ErrLiveApplicationUnavailable
