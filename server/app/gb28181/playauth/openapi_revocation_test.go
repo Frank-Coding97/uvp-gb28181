@@ -37,7 +37,7 @@ type revocationFixture struct {
 	clock time.Time
 }
 
-func newOpenAPIRevocationFixture(t *testing.T) revocationFixture {
+func newOpenAPIRevocationFixture(t *testing.T) *revocationFixture {
 	t.Helper()
 	clock := time.Date(2026, 9, 6, 4, 0, 0, 123456000, time.UTC)
 	dsn := fmt.Sprintf("file:openapi_revocation_%d?mode=memory&cache=shared", openAPIRevocationTestDBID.Add(1))
@@ -53,10 +53,10 @@ func newOpenAPIRevocationFixture(t *testing.T) revocationFixture {
 	))
 	fixture := revocationFixture{db: db, clock: clock}
 	fixture.store = NewOpenAPIRevocationStore(db, func() time.Time { return fixture.clock })
-	return fixture
+	return &fixture
 }
 
-func (f revocationFixture) newService(t *testing.T, store openapiclient.RevocationIntentStore) *openapiclient.Service {
+func (f *revocationFixture) newService(t *testing.T, store openapiclient.RevocationIntentStore) *openapiclient.Service {
 	t.Helper()
 	secretManager, err := openapiclient.NewSecretManager(bytes.Repeat([]byte{0xA5}, 32), "revocation-test-key")
 	require.NoError(t, err)
@@ -69,7 +69,7 @@ func (f revocationFixture) newService(t *testing.T, store openapiclient.Revocati
 	return service
 }
 
-func (f revocationFixture) createClient(t *testing.T, service *openapiclient.Service, name string) openapiclient.ClientView {
+func (f *revocationFixture) createClient(t *testing.T, service *openapiclient.Service, name string) openapiclient.ClientView {
 	t.Helper()
 	view, _, err := service.Create(context.Background(), openapiclient.CreateRequest{
 		Name: name, OwnerDeptID: 10, ResponsibleUserID: 101, CreatedBy: 7,
@@ -78,7 +78,7 @@ func (f revocationFixture) createClient(t *testing.T, service *openapiclient.Ser
 	return view
 }
 
-func (f revocationFixture) enableScope(t *testing.T, service *openapiclient.Service, view openapiclient.ClientView, scope string) openapiclient.ClientView {
+func (f *revocationFixture) enableScope(t *testing.T, service *openapiclient.Service, view openapiclient.ClientView, scope string) openapiclient.ClientView {
 	t.Helper()
 	updated, err := service.SetScope(context.Background(), view.ID, scope, true, view.RowVersion, 7)
 	require.NoError(t, err)
@@ -295,6 +295,7 @@ func TestOpenAPIRevocationStoreReplayPreservesGrantTombstoneAndWorkerRetry(t *te
 	f.clock = f.clock.Add(time.Minute)
 	require.NotEqual(t, f.clock, firstUpdatedAt)
 	require.NotEqual(t, f.clock, firstRetryAt.UTC())
+	require.Equal(t, f.clock, f.store.now(), "replay must use the advanced fixture clock")
 
 	require.NoError(t, f.db.Transaction(func(tx *gorm.DB) error {
 		return f.store.RecordRevocationIntent(context.Background(), tx, intent)
