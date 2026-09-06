@@ -99,16 +99,23 @@ describe("security preview system integration", () => {
     expect(source).toMatch(/\.security-tabs \.arco-tabs-tab svg\)\s*{[^}]*transform:\s*translateY\(1px\);/s);
   });
 
+  it("places protection policy immediately after the overview", () => {
+    const overviewIndex = source.indexOf('<a-tab-pane key="overview">');
+    const policyIndex = source.indexOf('<a-tab-pane key="policy">');
+    const eventsIndex = source.indexOf('<a-tab-pane key="events">');
+
+    expect(overviewIndex).toBeGreaterThan(-1);
+    expect(policyIndex).toBeGreaterThan(overviewIndex);
+    expect(eventsIndex).toBeGreaterThan(policyIndex);
+  });
+
   it("separates automatic firewall bans from manual blacklist rules", () => {
     expect(source).toContain('<a-tab-pane key="bans"><template #title><Ban :size="14" />自动封禁</template></a-tab-pane>');
     expect(source).toContain('activeTab === \'bans\'');
     expect(source).toContain("进入原因");
     expect(source).toContain("主机防火墙{{ record.firewallState }}");
-		expect(source).toContain("转为手动黑名单");
-		expect(source).toContain("这里只管理手动黑名单");
-		expect(source).toContain("record.location");
-		expect(source).toContain("新自动封禁永久生效，需人工解封");
-		expect(source).toContain("历史限时记录保留原到期时间");
+    expect(source).toContain("转为手动黑名单");
+    expect(source).toContain("record.location");
   });
 
   it("uses security events for the trend and provides explicit empty states", () => {
@@ -131,6 +138,33 @@ describe("security preview system integration", () => {
     expect(source).toContain('class="uvp-page-action-btn uvp-refresh-btn" aria-label="刷新安全数据"');
     expect(source).toContain('<a-button v-else class="uvp-page-action-btn uvp-create-btn" type="primary"');
     expect(source).not.toContain("security-create-action");
+  });
+
+  it("keeps ban and access-list workspaces focused on their tables", () => {
+    expect(source).not.toContain('class="ban-summary"');
+    expect(source).not.toContain('class="rule-summary"');
+    expect(source).not.toContain("自动封禁与手动黑名单分开管理");
+    expect(source).not.toContain("这里只管理手动黑名单");
+    expect(source).not.toContain("白名单不绕过协议校验");
+  });
+
+  it("uses the shared search panel for all four security lists", () => {
+    expect(source).toContain('<s-layout-search class="security-list-search event-search-panel">');
+    expect(source).toContain('<s-layout-search class="security-list-search ban-search-panel">');
+    expect(source).toContain('<s-layout-search class="security-list-search rule-search-panel">');
+    expect(source).toContain('placeholder="筛选本页来源、原因或策略"');
+    expect(source).toContain('placeholder="筛选本页匹配内容或备注"');
+    expect(source).toContain(':data="filteredAutoBans"');
+    expect(source).toContain(':data="filteredCurrentRules"');
+  });
+
+  it("aligns list filters with the online-user search controls", () => {
+    expect(source.match(/class="security-list-filter/g)).toHaveLength(7);
+    expect(source).toContain('class="security-list-filter security-list-filter--keyword"');
+    expect(source).toContain('class="security-list-filter security-list-filter--status"');
+    expect(source).not.toMatch(/<a-(?:input|select)[^>]*style="width:/);
+    expect(source).toMatch(/\.security-list-filter\s*{[^}]*flex:\s*0 1 176px;[^}]*width:\s*176px;/s);
+    expect(source).toMatch(/\.security-list-filter :deep\(\.arco-input-wrapper\),\s*\.security-list-filter :deep\(\.arco-select-view\)\s*{[^}]*width:\s*100%;/s);
   });
 
   it("uses the existing Arco table pagination style for all security lists", () => {

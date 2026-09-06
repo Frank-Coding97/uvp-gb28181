@@ -1,4 +1,6 @@
 import { flushPromises, mount } from "@vue/test-utils";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { reactive } from "vue";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,6 +30,8 @@ vi.mock("@/hooks/useGlobalProperties", () => ({
 
 import { getLucideIconComponent } from "@/utils/lucide-menu-icons";
 import AlarmManagement from "./index.vue";
+
+const pageSource = readFileSync(resolve(process.cwd(), "src/views/gb28181/alarm-management/index.vue"), "utf8");
 
 const listResult = (id = "9007199254740993") => ({
   code: 0,
@@ -136,6 +140,16 @@ describe("AlarmManagement", () => {
     expect(wrapper.find(".alarm-page-header").exists()).toBe(false);
     expect(wrapper.text()).not.toContain("集中查看权限范围内的设备告警");
     expect(wrapper.find("[data-testid='alarm-refresh']").exists()).toBe(false);
+  });
+
+  it("keeps vertical scrolling inside the Arco table body", () => {
+    expect(pageSource).toContain('<div class="snow-fill alarm-management-page">');
+    expect(pageSource).toContain('<div class="snow-fill-inner uvp-page-shell-flat alarm-management-shell">');
+    expect(pageSource).toMatch(/\.alarm-management-page\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
+    expect(pageSource).toMatch(/\.alarm-management-shell\s*{[^}]*display:\s*flex;[^}]*height:\s*100%;[^}]*min-height:\s*0;[^}]*flex-direction:\s*column;[^}]*overflow:\s*hidden;/s);
+    expect(pageSource).toMatch(/\.alarm-table-wrap\s*{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/s);
+    expect(pageSource).toMatch(/\.alarm-table-wrap :deep\(\.uvp-data-table\)\s*{[^}]*height:\s*100%;[^}]*min-height:\s*0;/s);
+    expect(pageSource).toContain('alarms.value.length ? { y: "100%" } : {}');
   });
 
   it("uses one text search for device, channel and alarm description", async () => {
