@@ -12,6 +12,7 @@ func TestDeviceSecurityLegacyCutoffCoversSameSecondAndOnlyTargetDevice(t *testin
 	f := newOpenAPIRevocationFixture(t)
 	prepareTransferDevice(t, f)
 	require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+	require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1").Error)
 	other := "34020000001320000002"
 	require.NoError(t, f.db.Exec("INSERT INTO gb_device(id, device_id, owner_dept_id, access_epoch) VALUES (2, ?, 20, 1)", other).Error)
 	store := NewDeviceSecurityStore(f.db)
@@ -22,7 +23,9 @@ func TestDeviceSecurityLegacyCutoffCoversSameSecondAndOnlyTargetDevice(t *testin
 	require.ErrorIs(t, store.AuthorizeLegacy(context.Background(), transferDevice, issued), ErrTokenRevoked)
 	require.NoError(t, store.AuthorizeLegacy(context.Background(), other, issued))
 	// Equality retains the historical iat < cutoff rule; new code will stop
-	// issuing legacy tokens rather than exploiting this compatibility path.
+	// issuing legacy tokens. Pending cleanup still blocks current authority.
+	require.ErrorIs(t, store.AuthorizeLegacy(context.Background(), transferDevice, issued+1), ErrDeviceSecurityUnavailable)
+	require.NoError(t, f.db.Exec("UPDATE gb_device SET cleanup_completed_epoch=2 WHERE id=1").Error)
 	require.NoError(t, store.AuthorizeLegacy(context.Background(), transferDevice, issued+1))
 	require.ErrorIs(t, store.AuthorizeEpoch(context.Background(), transferDevice, 1), ErrTokenRevoked)
 	require.NoError(t, store.AuthorizeEpoch(context.Background(), transferDevice, 2))
@@ -33,11 +36,14 @@ func TestDeviceSecurityReloadsAfterTransferAndReturn(t *testing.T) {
 	f := newOpenAPIRevocationFixture(t)
 	prepareTransferDevice(t, f)
 	require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+	require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1").Error)
 	store := NewDeviceSecurityStore(f.db)
 	require.NoError(t, store.AuthorizeEpoch(context.Background(), transferDevice, 1))
 	require.NoError(t, f.db.Exec("UPDATE gb_device SET access_epoch=3 WHERE id=1").Error)
 	require.ErrorIs(t, store.AuthorizeEpoch(context.Background(), transferDevice, 1), ErrTokenRevoked)
 	require.ErrorIs(t, NewDeviceSecurityStore(f.db).AuthorizeEpoch(context.Background(), transferDevice, 2), ErrTokenRevoked)
+	require.ErrorIs(t, store.AuthorizeEpoch(context.Background(), transferDevice, 3), ErrDeviceSecurityUnavailable)
+	require.NoError(t, f.db.Exec("UPDATE gb_device SET cleanup_completed_epoch=3 WHERE id=1").Error)
 	require.NoError(t, store.AuthorizeEpoch(context.Background(), transferDevice, 3))
 }
 
@@ -57,6 +63,7 @@ func TestDeviceSecurityFailsClosedOnMissingOrInvalidPersistentState(t *testing.T
 			prepareTransferDevice(t, f)
 			if test.name != "missing column" {
 				require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+				require.NoError(t, f.db.Exec("ALTER TABLE gb_device ADD COLUMN cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1").Error)
 				require.NoError(t, f.db.Exec(test.statement).Error)
 			}
 			store := NewDeviceSecurityStore(f.db)
@@ -87,7 +94,7 @@ func TestDeviceSecurityRequiresContextAndValidInputs(t *testing.T) {
 
 func TestDeviceSecurityRejectsAmbiguousOrMalformedAuthorityRows(t *testing.T) {
 	f := newOpenAPIRevocationFixture(t)
-	require.NoError(t, f.db.Exec(`CREATE TABLE gb_device (device_id TEXT, access_epoch INTEGER NULL, legacy_revoked_before DATETIME NULL, deleted_at DATETIME NULL)`).Error)
+	require.NoError(t, f.db.Exec(`CREATE TABLE gb_device (device_id TEXT, access_epoch INTEGER NULL, cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1, legacy_revoked_before DATETIME NULL, deleted_at DATETIME NULL)`).Error)
 	store := NewDeviceSecurityStore(f.db)
 	require.NoError(t, f.db.Exec("INSERT INTO gb_device(device_id) VALUES (?)", transferDevice).Error)
 	require.ErrorIs(t, store.AuthorizeEpoch(context.Background(), transferDevice, 1), ErrDeviceSecurityUnavailable)

@@ -18,8 +18,9 @@ var ErrDeviceSecurityUnavailable = errors.New("device media security state unava
 type DeviceSecurityStore struct{ db *gorm.DB }
 
 type DeviceSecurityState struct {
-	AccessEpoch         int64
-	LegacyRevokedBefore *time.Time
+	AccessEpoch           int64
+	CleanupCompletedEpoch int64
+	LegacyRevokedBefore   *time.Time
 }
 
 func NewDeviceSecurityStore(db *gorm.DB) *DeviceSecurityStore {
@@ -31,16 +32,20 @@ func (s *DeviceSecurityStore) Load(ctx context.Context, deviceID string) (Device
 		return DeviceSecurityState{}, ErrDeviceSecurityUnavailable
 	}
 	var rows []struct {
-		AccessEpoch         *int64     `gorm:"column:access_epoch"`
-		LegacyRevokedBefore *time.Time `gorm:"column:legacy_revoked_before"`
+		AccessEpoch           *int64     `gorm:"column:access_epoch"`
+		CleanupCompletedEpoch *int64     `gorm:"column:cleanup_completed_epoch"`
+		LegacyRevokedBefore   *time.Time `gorm:"column:legacy_revoked_before"`
 	}
 	result := s.db.WithContext(ctx).Table("gb_device").
-		Select("access_epoch, legacy_revoked_before").
+		Select("access_epoch, cleanup_completed_epoch, legacy_revoked_before").
 		Where("device_id = ? AND deleted_at IS NULL", deviceID).Limit(2).Find(&rows)
 	if result.Error != nil || result.RowsAffected != 1 || len(rows) != 1 || rows[0].AccessEpoch == nil || *rows[0].AccessEpoch <= 0 {
 		return DeviceSecurityState{}, ErrDeviceSecurityUnavailable
 	}
-	state := DeviceSecurityState{AccessEpoch: *rows[0].AccessEpoch}
+	if rows[0].CleanupCompletedEpoch == nil || *rows[0].CleanupCompletedEpoch <= 0 || *rows[0].CleanupCompletedEpoch > *rows[0].AccessEpoch {
+		return DeviceSecurityState{}, ErrDeviceSecurityUnavailable
+	}
+	state := DeviceSecurityState{AccessEpoch: *rows[0].AccessEpoch, CleanupCompletedEpoch: *rows[0].CleanupCompletedEpoch}
 	if rows[0].LegacyRevokedBefore != nil {
 		cutoff := rows[0].LegacyRevokedBefore.UTC()
 		// Assignment writes Unix-second-aligned cutoffs because legacy iat has
@@ -66,6 +71,9 @@ func (s *DeviceSecurityStore) AuthorizeLegacy(ctx context.Context, deviceID stri
 	if state.LegacyRevokedBefore != nil && issuedAt < state.LegacyRevokedBefore.Unix() {
 		return ErrTokenRevoked
 	}
+	if state.CleanupCompletedEpoch != state.AccessEpoch {
+		return ErrDeviceSecurityUnavailable
+	}
 	return nil
 }
 
@@ -79,6 +87,9 @@ func (s *DeviceSecurityStore) AuthorizeEpoch(ctx context.Context, deviceID strin
 	}
 	if state.AccessEpoch != epoch {
 		return ErrTokenRevoked
+	}
+	if state.CleanupCompletedEpoch != state.AccessEpoch {
+		return ErrDeviceSecurityUnavailable
 	}
 	return nil
 }

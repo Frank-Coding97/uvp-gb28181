@@ -35,6 +35,7 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 					&openapimodels.PlayGrant{}, &openapimodels.Viewer{}))
 				require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch INTEGER NOT NULL DEFAULT 1").Error)
 				require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+				require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1").Error)
 				require.NoError(t, db.Exec("CREATE TABLE gb_cascade_device_projection (id INTEGER PRIMARY KEY, source_device_id INTEGER)").Error)
 				active := int8(1)
 				require.NoError(t, db.Create(&[]basemodels.SysDepartment{
@@ -94,11 +95,12 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 				}
 				require.NotContains(t, w.Body.String(), "receipt")
 				var states []struct {
-					OwnerDeptID         uint
-					AccessEpoch         int64
-					LegacyRevokedBefore *time.Time
+					OwnerDeptID           uint
+					AccessEpoch           int64
+					CleanupCompletedEpoch int64
+					LegacyRevokedBefore   *time.Time
 				}
-				require.NoError(t, db.Table("gb_device").Select("owner_dept_id, access_epoch, legacy_revoked_before").Order("id").Find(&states).Error)
+				require.NoError(t, db.Table("gb_device").Select("owner_dept_id, access_epoch, cleanup_completed_epoch, legacy_revoked_before").Order("id").Find(&states).Error)
 				require.Len(t, states, 2)
 				var grant openapimodels.PlayGrant
 				var viewer openapimodels.Viewer
@@ -125,6 +127,8 @@ func TestOpenAPIAssignmentControllerCommitsOrRollsBackSecurity(t *testing.T) {
 					require.Equal(t, openapimodels.ViewerStateRevokePending, viewer.State)
 				}
 				require.EqualValues(t, 30, states[1].OwnerDeptID)
+				require.EqualValues(t, 1, states[0].CleanupCompletedEpoch, "assignment must not acknowledge cleanup")
+				require.EqualValues(t, 1, states[1].CleanupCompletedEpoch)
 				require.EqualValues(t, 1, states[1].AccessEpoch)
 				require.Nil(t, states[1].LegacyRevokedBefore)
 				require.Equal(t, previousCutoff, playauth.RevokedBefore(), "device assignment must not change the global playback cutoff")

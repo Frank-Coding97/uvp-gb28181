@@ -106,6 +106,10 @@ func TestOpenAPIDeviceTransferInvalidatesBackendTokensWithoutGlobalRevocation(t 
 	current := cases[0].binding
 	current.DeviceEpoch = 3
 	_, err = authorization.IssueDirectContext(ctx, current)
+	require.ErrorIs(t, err, playauth.ErrDeviceSecurityUnavailable, "new owner must wait for the device cleanup barrier")
+	// Isolated fixture acknowledgement, not evidence of real media teardown.
+	require.NoError(t, db.Exec("UPDATE gb_device SET cleanup_completed_epoch=3 WHERE device_id=?", device.DeviceID).Error)
+	_, err = authorization.IssueDirectContext(ctx, current)
 	require.NoError(t, err, "a newly authorized snapshot can issue without reviving old tokens")
 	for _, test := range queuedCases {
 		err := authorization.BindAuthorizationContext(ctx, test.request, 17)

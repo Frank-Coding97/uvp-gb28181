@@ -116,15 +116,19 @@ func lockAssignmentDevice(tx *gorm.DB, deviceID uint, visibleDeptIDs []uint, nee
 
 func loadAssignmentSecurity(tx *gorm.DB, deviceID uint) (int64, *time.Time, error) {
 	var rows []struct {
-		AccessEpoch         *int64     `gorm:"column:access_epoch"`
-		LegacyRevokedBefore *time.Time `gorm:"column:legacy_revoked_before"`
+		AccessEpoch           *int64     `gorm:"column:access_epoch"`
+		CleanupCompletedEpoch *int64     `gorm:"column:cleanup_completed_epoch"`
+		LegacyRevokedBefore   *time.Time `gorm:"column:legacy_revoked_before"`
 	}
 	query := lockedAssignmentDeviceTable(tx)
-	result := query.Select("access_epoch, legacy_revoked_before").Where("id = ? AND deleted_at IS NULL", deviceID).Limit(2).Find(&rows)
+	result := query.Select("access_epoch, cleanup_completed_epoch, legacy_revoked_before").Where("id = ? AND deleted_at IS NULL", deviceID).Limit(2).Find(&rows)
 	if result.Error != nil {
 		return 0, nil, ErrAssignmentSecurityUnavailable
 	}
 	if result.RowsAffected != 1 || len(rows) != 1 || rows[0].AccessEpoch == nil || *rows[0].AccessEpoch <= 0 {
+		return 0, nil, ErrAssignmentSecurityUnavailable
+	}
+	if rows[0].CleanupCompletedEpoch == nil || *rows[0].CleanupCompletedEpoch <= 0 || *rows[0].CleanupCompletedEpoch > *rows[0].AccessEpoch {
 		return 0, nil, ErrAssignmentSecurityUnavailable
 	}
 	if rows[0].LegacyRevokedBefore != nil {

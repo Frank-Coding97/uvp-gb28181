@@ -27,6 +27,7 @@ func newAssignTestDB(t *testing.T) *gorm.DB {
 	))
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch INTEGER NOT NULL DEFAULT 1").Error)
 	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN cleanup_completed_epoch INTEGER NOT NULL DEFAULT 1").Error)
 	require.NoError(t, db.Exec("CREATE TABLE IF NOT EXISTS gb_cascade_device_projection (id INTEGER PRIMARY KEY AUTOINCREMENT, source_device_id INTEGER)").Error)
 	// 目标部门(id=2,启用)+ 源部门(id=1)
 	require.NoError(t, db.Create(&basemodels.SysDepartment{Name: "源部门", Status: int8Ptr(1)}).Error)
