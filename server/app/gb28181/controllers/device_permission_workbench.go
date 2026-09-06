@@ -182,7 +182,7 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchAssignments(c *gin.Conte
 		dc.FailAndAbort(c, "DB 未就绪", nil)
 		return
 	}
-	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c, body.Items, body.TargetDeptID)
+	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c.Request.Context(), body.Items, body.TargetDeptID)
 	if err != nil {
 		dc.FailAndAbort(c, "调整设备归属失败", err)
 		return
@@ -248,7 +248,7 @@ func (dc *DeviceMgmtController) ApplyPermissionWorkbenchDepartmentAssignment(c *
 	for _, device := range devices {
 		items = append(items, assign.AssignmentInput{DeviceID: device.ID, ExpectedOwnerDeptID: device.OwnerDeptID})
 	}
-	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c, items, body.TargetDeptID)
+	result, err := assign.NewService(db, deptValidatorFor(c)).AssignBatchV2(c.Request.Context(), items, body.TargetDeptID)
 	if err != nil {
 		dc.FailAndAbort(c, "整部门调整归属失败", err)
 		return
