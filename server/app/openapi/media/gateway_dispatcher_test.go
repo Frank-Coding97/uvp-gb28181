@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -22,12 +23,18 @@ func gatewayTestTarget(protocol string) auth.MediaTarget {
 }
 
 func gatewayTestDispatcher(t *testing.T, enabled bool) (*GatewayDispatcher, *qualificationFake, *playerFake, *grantFake, auth.MediaTarget) {
+	return gatewayTestDispatcherWithLifetimes(t, enabled, play.QualifiedProtocolHTTPSFLV, 2*time.Minute, time.Minute)
+}
+
+func gatewayTestDispatcherWithLifetimes(t *testing.T, enabled bool, protocol string, ticketTTL, grantTTL time.Duration) (*GatewayDispatcher, *qualificationFake, *playerFake, *grantFake, auth.MediaTarget) {
 	t.Helper()
-	protocol := play.QualifiedProtocolHTTPSFLV
 	ticket := applicationTicket(protocol)
+	ticket.ExpiresAt = testApplicationNow.Add(ticketTTL)
 	provider := &qualificationFake{ticket: ticket}
 	player := &playerFake{result: applicationResult(ticket)}
-	issuer := &grantFake{grants: []playauth.Grant{applicationGrant(testApplicationGrantA, "token-a")}}
+	grant := applicationGrant(testApplicationGrantA, "token-a")
+	grant.ExpiresAt = testApplicationNow.Add(grantTTL)
+	issuer := &grantFake{grants: []playauth.Grant{grant}}
 	application := newTestApplication(provider, player, issuer, enabled)
 	return NewGatewayDispatcher(application), provider, player, issuer, gatewayTestTarget(protocol)
 }
@@ -48,18 +55,9 @@ func TestGatewayDispatcherPrepareAndApplyPreserveExactEnvelope(t *testing.T) {
 	var envelope gatewayTicketEnvelope
 	require.NoError(t, json.Unmarshal([]byte(ticket), &envelope))
 	require.Equal(t, uint8(1), envelope.Version)
-	require.Equal(t, target.DeviceID, envelope.Target.DeviceID)
-	require.Equal(t, target.ChannelID, envelope.Target.ChannelID)
-	require.Equal(t, target.Protocol, envelope.Target.Protocol)
 	original := applicationTicket(target.Protocol)
-	require.Equal(t, original.QualificationID, envelope.Ticket.QualificationID)
-	require.Equal(t, original.NodeID, envelope.Ticket.NodeID)
-	require.Equal(t, original.NodeUUID, envelope.Ticket.NodeUUID)
-	require.Equal(t, original.NodeRevision, envelope.Ticket.NodeRevision)
-	require.Equal(t, original.BootNonce, envelope.Ticket.BootNonce)
-	require.Equal(t, original.Protocol, envelope.Ticket.Protocol)
-	require.Equal(t, original.MediaOrigin, envelope.Ticket.MediaOrigin)
-	require.True(t, original.ExpiresAt.Equal(envelope.Ticket.ExpiresAt))
+	require.Equal(t, target, envelope.Target)
+	require.Equal(t, original, envelope.Ticket)
 
 	authorization, err := dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
 		ClientID: 81,
@@ -71,13 +69,45 @@ func TestGatewayDispatcherPrepareAndApplyPreserveExactEnvelope(t *testing.T) {
 	require.Equal(t, testApplicationGrantA, authorization.AuthorizationID)
 	require.Equal(t, target.Protocol, authorization.Protocol)
 	require.Contains(t, authorization.URL, "token-a")
-	require.Equal(t, testApplicationNow.Add(1*60*1e9), authorization.ExpiresAt)
+	require.Equal(t, testApplicationNow.Add(time.Minute), authorization.ExpiresAt)
 	require.Equal(t, 1, player.ensureN)
 	require.Equal(t, 1, issuer.issueN)
 	require.Equal(t, 0, issuer.cleanupN)
 	require.Equal(t, target.DeviceID, issuer.issueRequests[0].DeviceID)
 	require.Equal(t, target.ChannelID, issuer.issueRequests[0].ChannelID)
 	require.Equal(t, target.Protocol, issuer.issueRequests[0].Protocol)
+}
+
+func TestGatewayDispatcherShortQualificationDoesNotShortenGrant(t *testing.T) {
+	dispatcher, _, _, issuer, target := gatewayTestDispatcherWithLifetimes(t, true, play.QualifiedProtocolHTTPSFLV, 10*time.Second, 120*time.Second)
+	ticket, err := dispatcher.Prepare(context.Background(), target)
+	require.NoError(t, err)
+
+	authorization, err := dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
+		ClientID: 81,
+		GrantID:  testApplicationGrantA,
+		Target:   target,
+		Ticket:   ticket,
+	})
+	require.NoError(t, err)
+	require.Equal(t, testApplicationNow.Add(120*time.Second), authorization.ExpiresAt)
+	require.Equal(t, 1, issuer.issueN)
+}
+
+func TestGatewayDispatcherAppliesWSSAuthorization(t *testing.T) {
+	dispatcher, _, _, _, target := gatewayTestDispatcherWithLifetimes(t, true, play.QualifiedProtocolWSSFLV, 10*time.Second, 120*time.Second)
+	ticket, err := dispatcher.Prepare(context.Background(), target)
+	require.NoError(t, err)
+
+	authorization, err := dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
+		ClientID: 81,
+		GrantID:  testApplicationGrantA,
+		Target:   target,
+		Ticket:   ticket,
+	})
+	require.NoError(t, err)
+	require.Equal(t, play.QualifiedProtocolWSSFLV, authorization.Protocol)
+	require.Contains(t, authorization.URL, "wss://media.example:8443/")
 }
 
 func TestGatewayDispatcherRejectsBadTicketAndTargetWithCompensation(t *testing.T) {
@@ -121,6 +151,57 @@ func TestGatewayDispatcherRejectsBadTicketAndTargetWithCompensation(t *testing.T
 			require.Equal(t, int64(81), issuer.cleanupClient)
 			require.Equal(t, testApplicationGrantA, issuer.cleanupGrant)
 			require.NoError(t, issuer.cleanupCtxErr)
+		})
+	}
+}
+
+func TestGatewayDispatcherRejectsInvalidEnvelopeWithCompensation(t *testing.T) {
+	mutateEnvelope := func(t *testing.T, raw auth.MediaTicket, mutate func(*gatewayTicketEnvelope)) auth.MediaTicket {
+		t.Helper()
+		var envelope gatewayTicketEnvelope
+		require.NoError(t, json.Unmarshal([]byte(raw), &envelope))
+		mutate(&envelope)
+		encoded, err := json.Marshal(envelope)
+		require.NoError(t, err)
+		return auth.MediaTicket(string(encoded))
+	}
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, auth.MediaTicket) auth.MediaTicket
+	}{
+		{name: "unknown field", mutate: func(_ *testing.T, raw auth.MediaTicket) auth.MediaTicket {
+			return auth.MediaTicket(strings.TrimSuffix(string(raw), "}") + `,"unknown":true}`)
+		}},
+		{name: "trailing json", mutate: func(_ *testing.T, raw auth.MediaTicket) auth.MediaTicket {
+			return auth.MediaTicket(string(raw) + `{"trailing":true}`)
+		}},
+		{name: "version mismatch", mutate: func(t *testing.T, raw auth.MediaTicket) auth.MediaTicket {
+			return mutateEnvelope(t, raw, func(envelope *gatewayTicketEnvelope) { envelope.Version++ })
+		}},
+		{name: "protocol mismatch", mutate: func(t *testing.T, raw auth.MediaTicket) auth.MediaTicket {
+			return mutateEnvelope(t, raw, func(envelope *gatewayTicketEnvelope) { envelope.Ticket.Protocol = play.QualifiedProtocolWSSFLV })
+		}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dispatcher, _, player, issuer, target := gatewayTestDispatcher(t, true)
+			ticket, err := dispatcher.Prepare(context.Background(), target)
+			require.NoError(t, err)
+			ticket = test.mutate(t, ticket)
+
+			_, err = dispatcher.Apply(context.Background(), auth.MediaAdmittedRequest{
+				ClientID: 81,
+				GrantID:  testApplicationGrantA,
+				Target:   target,
+				Ticket:   ticket,
+			})
+			requireFixedApplicationError(t, err)
+			require.Equal(t, 0, player.ensureN)
+			require.Equal(t, 0, issuer.issueN)
+			require.Equal(t, 1, issuer.cleanupN)
+			require.Equal(t, int64(81), issuer.cleanupClient)
+			require.Equal(t, testApplicationGrantA, issuer.cleanupGrant)
 		})
 	}
 }

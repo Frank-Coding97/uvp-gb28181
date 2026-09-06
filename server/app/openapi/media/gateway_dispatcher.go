@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
-	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
 )
@@ -25,26 +24,9 @@ type GatewayDispatcher struct {
 var _ auth.MediaDispatcher = (*GatewayDispatcher)(nil)
 
 type gatewayTicketEnvelope struct {
-	Version uint8                      `json:"version"`
-	Target  gatewayTicketTarget        `json:"target"`
-	Ticket  gatewayQualificationTicket `json:"ticket"`
-}
-
-type gatewayTicketTarget struct {
-	DeviceID  string `json:"deviceId"`
-	ChannelID string `json:"channelId"`
-	Protocol  string `json:"protocol"`
-}
-
-type gatewayQualificationTicket struct {
-	QualificationID string    `json:"qualificationId"`
-	NodeID          int64     `json:"nodeId"`
-	NodeUUID        string    `json:"nodeUuid"`
-	NodeRevision    uint64    `json:"nodeRevision"`
-	BootNonce       string    `json:"bootNonce"`
-	Protocol        string    `json:"protocol"`
-	MediaOrigin     string    `json:"mediaOrigin"`
-	ExpiresAt       time.Time `json:"expiresAt"`
+	Version uint8               `json:"version"`
+	Target  auth.MediaTarget    `json:"target"`
+	Ticket  QualificationTicket `json:"ticket"`
 }
 
 // NewGatewayDispatcher constructs the fixed application adapter. The auth
@@ -72,21 +54,8 @@ func (dispatcher *GatewayDispatcher) Prepare(ctx context.Context, target auth.Me
 	}
 	envelope := gatewayTicketEnvelope{
 		Version: gatewayTicketVersion,
-		Target: gatewayTicketTarget{
-			DeviceID:  target.DeviceID,
-			ChannelID: target.ChannelID,
-			Protocol:  target.Protocol,
-		},
-		Ticket: gatewayQualificationTicket{
-			QualificationID: ticket.QualificationID,
-			NodeID:          ticket.NodeID,
-			NodeUUID:        ticket.NodeUUID,
-			NodeRevision:    ticket.NodeRevision,
-			BootNonce:       ticket.BootNonce,
-			Protocol:        ticket.Protocol,
-			MediaOrigin:     ticket.MediaOrigin,
-			ExpiresAt:       ticket.ExpiresAt,
-		},
+		Target:  target,
+		Ticket:  ticket,
 	}
 	raw, err := json.Marshal(envelope)
 	if err != nil || len(raw) > maxGatewayTicketBytes {
@@ -103,11 +72,7 @@ func (dispatcher *GatewayDispatcher) Apply(ctx context.Context, request auth.Med
 		return auth.MediaAuthorization{}, ErrLiveApplicationUnavailable
 	}
 	envelope, err := decodeGatewayTicket(request.Ticket)
-	if err != nil || envelope.Version != gatewayTicketVersion || envelope.Target != (gatewayTicketTarget{
-		DeviceID:  request.Target.DeviceID,
-		ChannelID: request.Target.ChannelID,
-		Protocol:  request.Target.Protocol,
-	}) || envelope.Ticket.Protocol != request.Target.Protocol || !validApplicationProtocol(request.Target.Protocol) {
+	if err != nil || envelope.Version != gatewayTicketVersion || envelope.Target != request.Target || envelope.Ticket.Protocol != request.Target.Protocol || !validApplicationProtocol(request.Target.Protocol) {
 		return dispatcher.failAdmission(ctx, request)
 	}
 
@@ -116,16 +81,7 @@ func (dispatcher *GatewayDispatcher) Apply(ctx context.Context, request auth.Med
 		GrantID:   request.GrantID,
 		DeviceID:  request.Target.DeviceID,
 		ChannelID: request.Target.ChannelID,
-		Ticket: QualificationTicket{
-			QualificationID: envelope.Ticket.QualificationID,
-			NodeID:          envelope.Ticket.NodeID,
-			NodeUUID:        envelope.Ticket.NodeUUID,
-			NodeRevision:    envelope.Ticket.NodeRevision,
-			BootNonce:       envelope.Ticket.BootNonce,
-			Protocol:        envelope.Ticket.Protocol,
-			MediaOrigin:     envelope.Ticket.MediaOrigin,
-			ExpiresAt:       envelope.Ticket.ExpiresAt,
-		},
+		Ticket:    envelope.Ticket,
 	})
 	if err != nil {
 		return auth.MediaAuthorization{}, err
