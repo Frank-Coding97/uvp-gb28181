@@ -56,8 +56,17 @@ type Module struct {
 	retryQueue     chan retryBatch
 	pendingRetries atomic.Int64
 	shutdownOnce   sync.Once
+	cleanupOnce    sync.Once
+	cleanupDone    chan struct{}
+	shutdownErr    error
 	storeCloseOnce sync.Once
 	storeCloseErr  error
+	lifecycleCtx   context.Context
+	probeMu        sync.Mutex
+	probeWG        sync.WaitGroup
+	probeStopped   bool
+	probeDone      chan struct{}
+	probeWaitOnce  sync.Once
 }
 
 // StreamHub 暴露给 controller 挂 SSE 端点使用。启动即创建,非采集必需。
@@ -127,12 +136,12 @@ func NewRuntimeWithDB(cfg gbconfig.TraceConfig, db *gorm.DB) Runtime {
 	diagnosisService, diagnosisFallback := traceDiagnosisService(cfg, db)
 	module := NewModuleWithDiagnosis(cfg, store, payloadCipher, diagnosisService)
 	module.diagnosisFallback = diagnosisFallback
-	startDiagnosisHealthProbe(db, diagnosisService)
+	module.startDiagnosisHealthProbe(db, diagnosisService)
 	if cipherErr != nil {
 		module.health.degraded("trace encryption key is unavailable")
 	} else {
 		module.health.degraded(ErrTraceStoreUnavailable.Error())
-		startRelationalHealthProbe(store, module)
+		module.startRelationalHealthProbe(store)
 	}
 	return module
 }
@@ -155,7 +164,7 @@ func traceRelationalStore(cfg gbconfig.TraceConfig, db *gorm.DB, cipherErr error
 		if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
 			return nil, fmt.Errorf("connect relational SIP trace store: %w", pingErr)
 		}
-		if !db.Migrator().HasTable(&gbmodels.GbSipTraceMessage{}) {
+		if !db.WithContext(ctx).Migrator().HasTable(&gbmodels.GbSipTraceMessage{}) {
 			return nil, fmt.Errorf("relational SIP trace table is unavailable")
 		}
 		return NewRelationalStoreWithRetention(db, cfg.RetentionDays)
@@ -181,18 +190,22 @@ func traceDiagnosisService(cfg gbconfig.TraceConfig, db *gorm.DB) (*diagnosis.Se
 }
 
 // startDiagnosisHealthProbe 启动异步诊断表健康探测
-func startDiagnosisHealthProbe(db *gorm.DB, service *diagnosis.Service) {
+func (m *Module) startDiagnosisHealthProbe(db *gorm.DB, service *diagnosis.Service) {
 	if db == nil || service == nil {
 		return
 	}
+	if !m.admitProbe() {
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer m.probeWG.Done()
+		ctx, cancel := context.WithTimeout(m.lifecycleCtx, 10*time.Second)
 		defer cancel()
 		if pingErr := db.WithContext(ctx).Exec("SELECT 1").Error; pingErr != nil {
 			service.MarkDegraded(fmt.Errorf("connect diagnosis store: %w", pingErr))
 			return
 		}
-		if !db.Migrator().HasTable(&gbmodels.GbSipTraceSessionDiagnosis{}) {
+		if !db.WithContext(ctx).Migrator().HasTable(&gbmodels.GbSipTraceSessionDiagnosis{}) {
 			service.MarkDegraded(errors.New("diagnosis table is unavailable"))
 		}
 	}()
@@ -200,20 +213,32 @@ func startDiagnosisHealthProbe(db *gorm.DB, service *diagnosis.Service) {
 
 // startRelationalHealthProbe 启动异步关系型存储健康探测(不阻塞 bootstrap,
 // 避免第一次 UI 查询才 dial 的冷启动)
-func startRelationalHealthProbe(store Store, module *Module) {
+func (m *Module) startRelationalHealthProbe(store Store) {
 	rs, ok := store.(*ReconnectingStore)
 	if !ok {
 		return
 	}
+	if !m.admitProbe() {
+		return
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer m.probeWG.Done()
+		ctx, cancel := context.WithTimeout(m.lifecycleCtx, 10*time.Second)
 		defer cancel()
 		if _, err := rs.ensure(ctx); err != nil {
-			module.health.degraded(err.Error())
+			m.health.degraded(err.Error())
 		} else {
-			module.health.ready(time.Now())
+			m.health.ready(time.Now())
 		}
 	}()
+}
+
+// startRelationalHealthProbe keeps the package-local call shape used by older
+// tests while routing ownership through Module's lifecycle.
+func startRelationalHealthProbe(store Store, module *Module) {
+	if module != nil {
+		module.startRelationalHealthProbe(store)
+	}
 }
 
 func NewModule(cfg gbconfig.TraceConfig, store Store, payloadCipher PayloadCipher) *Module {
@@ -252,11 +277,14 @@ func NewModuleWithDiagnosis(cfg gbconfig.TraceConfig, store Store, payloadCipher
 		retryDone:         make(chan struct{}),
 		prunerDone:        make(chan struct{}),
 		retryQueue:        make(chan retryBatch, 32),
+		cleanupDone:       make(chan struct{}),
+		probeDone:         make(chan struct{}),
 	}
 	module.collector = NewCollector(cfg.QueueCapacity, func() {
 		module.health.degraded("trace queue is full; events were dropped")
 	})
 	ctx, cancel := context.WithCancel(context.Background())
+	module.lifecycleCtx = ctx
 	module.cancel = cancel
 	go module.runWriter(ctx)
 	go module.runRetryWriter(ctx)
@@ -367,38 +395,59 @@ func (m *Module) Shutdown(ctx context.Context) error {
 		m.closed.Store(true)
 		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	m.shutdownOnce.Do(func() {
 		m.closed.Store(true)
+		m.stopProbeAdmission()
 		m.collector.Close()
 	})
+	m.cleanupOnce.Do(func() { go m.finishShutdown() })
 	select {
-	case <-m.done:
-		select {
-		case <-m.retryDone:
-			m.cancel()
-			<-m.prunerDone
-			if err := m.stopDiagnosis(ctx); err != nil {
-				_ = m.closeStore()
-				return err
-			}
-			return m.closeStore()
-		case <-ctx.Done():
-			m.cancel()
-			<-m.retryDone
-			<-m.prunerDone
-			_ = m.stopDiagnosis(ctx)
-			_ = m.closeStore()
-			return ctx.Err()
-		}
+	case <-m.cleanupDone:
+		return m.shutdownErr
 	case <-ctx.Done():
 		m.cancel()
-		<-m.done
-		<-m.retryDone
-		<-m.prunerDone
-		_ = m.stopDiagnosis(ctx)
-		_ = m.closeStore()
 		return ctx.Err()
 	}
+}
+
+func (m *Module) finishShutdown() {
+	<-m.done
+	<-m.retryDone
+	<-m.prunerDone
+	m.cancel()
+	m.waitProbes()
+	_ = m.stopDiagnosis(context.Background())
+	m.shutdownErr = m.closeStore()
+	close(m.cleanupDone)
+}
+
+func (m *Module) admitProbe() bool {
+	m.probeMu.Lock()
+	defer m.probeMu.Unlock()
+	if m.probeStopped {
+		return false
+	}
+	m.probeWG.Add(1)
+	return true
+}
+
+func (m *Module) stopProbeAdmission() {
+	m.probeMu.Lock()
+	m.probeStopped = true
+	m.probeMu.Unlock()
+}
+
+func (m *Module) waitProbes() {
+	m.probeWaitOnce.Do(func() {
+		go func() {
+			m.probeWG.Wait()
+			close(m.probeDone)
+		}()
+	})
+	<-m.probeDone
 }
 
 func (m *Module) stopDiagnosis(ctx context.Context) error {
