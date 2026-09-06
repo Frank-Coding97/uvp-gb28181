@@ -206,6 +206,9 @@ func OpenRuntime(opts Options) (*Runtime, error) {
 // Maintain is called by the one shared maintenance loop (retention and repeat
 // summaries); it never starts its own goroutine.
 func (r *Runtime) Maintain() error {
+	// Never recursively acquire gate.RLock while emitting a summary; Close may
+	// already be waiting for the write lock.
+	r.repeats.maintain()
 	r.gate.RLock()
 	defer r.gate.RUnlock()
 	if r.closed.Load() {

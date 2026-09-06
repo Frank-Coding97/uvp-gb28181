@@ -22,15 +22,17 @@ type Options struct {
 	ErrorOutput zapcore.WriteSyncer
 }
 type Runtime struct {
-	Root                  *zap.Logger
-	gate                  sync.RWMutex
-	tracked               map[string]*trackedSink
-	emergency             *emergencyWriter
-	config                Config
-	sinks                 []zapcore.WriteSyncer
-	closed                atomic.Bool
-	closeOnce, reloadOnce sync.Once
-	closeErr              error
+	Root                             *zap.Logger
+	gate                             sync.RWMutex
+	tracked                          map[string]*trackedSink
+	emergency                        *emergencyWriter
+	config                           Config
+	sinks                            []zapcore.WriteSyncer
+	closed                           atomic.Bool
+	closeOnce, reloadOnce            sync.Once
+	closeErr                         error
+	repeats                          *Repeater
+	maintenanceStop, maintenanceDone chan struct{}
 }
 
 func NewRuntime(opts Options) (*Runtime, error) {
@@ -102,6 +104,26 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		options = append(options, zap.WithClock(opts.Clock))
 	}
 	r.Root = zap.New(core, options...)
+	r.repeats = newRepeater(r.Root, now)
+	r.maintenanceStop = make(chan struct{})
+	r.maintenanceDone = make(chan struct{})
+	clock := opts.Clock
+	if clock == nil {
+		clock = zapcore.DefaultClock
+	}
+	ticker := clock.NewTicker(time.Minute)
+	go func() {
+		defer close(r.maintenanceDone)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.maintenanceStop:
+				return
+			case <-ticker.C:
+				_ = r.Maintain()
+			}
+		}
+	}()
 	return r, nil
 }
 func (r *Runtime) Close() error {
@@ -109,6 +131,10 @@ func (r *Runtime) Close() error {
 		return nil
 	}
 	r.closeOnce.Do(func() {
+		close(r.maintenanceStop)
+		<-r.maintenanceDone
+		// Flush before taking the write gate: summary emission takes its read lock.
+		r.repeats.close()
 		r.gate.Lock()
 		defer r.gate.Unlock()
 		r.closed.Store(true)
@@ -121,6 +147,14 @@ func (r *Runtime) Close() error {
 		r.closeErr = errors.Join(r.closeErr, r.emergency.flush(true))
 	})
 	return r.closeErr
+}
+
+// Repeats provides explicit background-state aggregation; ordinary logs bypass it.
+func (r *Runtime) Repeats() *Repeater {
+	if r == nil {
+		return nil
+	}
+	return r.repeats
 }
 func (r *Runtime) Config() Config { return r.config.clone() }
 func (r *Runtime) NoticeReload(cfg Config) {
