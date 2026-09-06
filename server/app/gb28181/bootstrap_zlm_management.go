@@ -47,9 +47,6 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 		if zlmManagementCore.overview != nil {
 			zlmManagementCore.overview.Close()
 		}
-		if zlmManagementCore.restart != nil && zlmManagementCore.restart != restart {
-			zlmManagementCore.restart.Close()
-		}
 	}
 	zlmManagementCore = nil
 	if zlmRegistry == nil || nodeService == nil || restart == nil {
@@ -121,9 +118,6 @@ func teardownZLMManagementCore() {
 	gbroutes.SetRestartStartedNotifier(nil)
 	if zlmManagementCore != nil && zlmManagementCore.overview != nil {
 		zlmManagementCore.overview.Close()
-	}
-	if zlmManagementCore != nil && zlmManagementCore.restart != nil {
-		zlmManagementCore.restart.Close()
 	}
 	zlmManagementCore = nil
 }
