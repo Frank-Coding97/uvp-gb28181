@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -104,10 +105,15 @@ func TestPostgreSQLInitializationMatchesIntegerFlagModels(t *testing.T) {
 		require.NotContains(t, section, "BOOLEAN", "%s must match its integer-backed Go model", table.name)
 	}
 
+	legacyBooleanAssignment := regexp.MustCompile(`(?i)\b(?:is_full|hide|disable|keep_alive|affix|is_link|iframe)\s*=\s*(?:true|false)\b`)
 	for _, statement := range strings.Split(body, ";") {
-		if strings.Contains(statement, "INSERT INTO sys_menu ") || strings.Contains(statement, "INSERT INTO sys_menu(") {
-			require.NotContains(t, statement, "TRUE", "sys_menu data seed must use integer flags")
-			require.NotContains(t, statement, "FALSE", "sys_menu data seed must use integer flags")
+		lowerStatement := strings.ToLower(statement)
+		if strings.Contains(lowerStatement, "insert into sys_menu ") || strings.Contains(lowerStatement, "insert into sys_menu(") {
+			require.NotContains(t, lowerStatement, "true", "sys_menu data seed must use integer flags")
+			require.NotContains(t, lowerStatement, "false", "sys_menu data seed must use integer flags")
+		}
+		if strings.Contains(lowerStatement, "update sys_menu ") {
+			require.NotRegexp(t, legacyBooleanAssignment, statement, "sys_menu updates must use integer flags")
 		}
 	}
 	require.Contains(t, body, "FROM sys_menu m JOIN sys_api a ON TRUE", "SQL predicate TRUE must remain unchanged")

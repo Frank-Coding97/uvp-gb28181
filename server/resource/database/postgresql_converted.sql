@@ -2574,100 +2574,100 @@ AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0='role
 -- media-workbench-v2:start
 -- Flatten media management into six visible workspaces while preserving legacy permission anchors (PostgreSQL).
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT 0,'/media','Media','','gb28181/zlm/workbench/MediaEntry','流媒体管理','lucide:Clapperboard',9,1,'',false,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
+SELECT 0,'/media','Media','','gb28181/zlm/workbench/MediaEntry','流媒体管理','lucide:Clapperboard',9,1,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1
 WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=0,name='Media',redirect='',component='gb28181/zlm/workbench/MediaEntry',title='流媒体管理',icon='lucide:Clapperboard',sort=9,type=1,permission='',hide=false,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=0,name='Media',redirect='',component='gb28181/zlm/workbench/MediaEntry',title='流媒体管理',icon='lucide:Clapperboard',sort=9,type=1,permission='',hide=0,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media' AND deleted_at IS NULL;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT p.id,'/media/overview','media-overview','','gb28181/zlm/workbench/MediaOverview','媒体总览','lucide:LayoutDashboard',10,2,'',false,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
+SELECT p.id,'/media/overview','media-overview','','gb28181/zlm/workbench/MediaOverview','媒体总览','lucide:LayoutDashboard',10,2,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
 WHERE p.path='/media' AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media/overview' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-overview',redirect='',component='gb28181/zlm/workbench/MediaOverview',title='媒体总览',icon='lucide:LayoutDashboard',sort=10,type=2,permission='',hide=false,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-overview',redirect='',component='gb28181/zlm/workbench/MediaOverview',title='媒体总览',icon='lucide:LayoutDashboard',sort=10,type=2,permission='',hide=0,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media/overview' AND deleted_at IS NULL;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT p.id,'/media/monitoring','media-monitoring','','gb28181/zlm/workbench/MediaMonitoring','媒体监控','lucide:Activity',20,2,'',false,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
+SELECT p.id,'/media/monitoring','media-monitoring','','gb28181/zlm/workbench/MediaMonitoring','媒体监控','lucide:Activity',20,2,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
 WHERE p.path='/media' AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media/monitoring' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-monitoring',redirect='',component='gb28181/zlm/workbench/MediaMonitoring',title='媒体监控',icon='lucide:Activity',sort=20,type=2,permission='',hide=false,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-monitoring',redirect='',component='gb28181/zlm/workbench/MediaMonitoring',title='媒体监控',icon='lucide:Activity',sort=20,type=2,permission='',hide=0,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media/monitoring' AND deleted_at IS NULL;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT p.id,'/media/ingress','media-ingress','','gb28181/zlm/workbench/IngressManagement','接入管理','lucide:RadioTower',30,2,'',false,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
+SELECT p.id,'/media/ingress','media-ingress','','gb28181/zlm/workbench/IngressManagement','接入管理','lucide:RadioTower',30,2,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
 WHERE p.path='/media' AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media/ingress' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-ingress',redirect='',component='gb28181/zlm/workbench/IngressManagement',title='接入管理',icon='lucide:RadioTower',sort=30,type=2,permission='',hide=false,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-ingress',redirect='',component='gb28181/zlm/workbench/IngressManagement',title='接入管理',icon='lucide:RadioTower',sort=30,type=2,permission='',hide=0,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media/ingress' AND deleted_at IS NULL;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT p.id,'/media/recordings','media-recordings','','gb28181/zlm/workbench/RecordingCenter','录制中心','lucide:Cloud',40,2,'',false,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
+SELECT p.id,'/media/recordings','media-recordings','','gb28181/zlm/workbench/RecordingCenter','录制中心','lucide:Cloud',40,2,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
 WHERE p.path='/media' AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media/recordings' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-recordings',redirect='',component='gb28181/zlm/workbench/RecordingCenter',title='录制中心',icon='lucide:Cloud',sort=40,type=2,permission='',hide=false,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-recordings',redirect='',component='gb28181/zlm/workbench/RecordingCenter',title='录制中心',icon='lucide:Cloud',sort=40,type=2,permission='',hide=0,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media/recordings' AND deleted_at IS NULL;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT p.id,'/media/nodes','media-nodes','','gb28181/zlm/workbench/NodeManagement','节点管理','lucide:Server',50,2,'',false,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
+SELECT p.id,'/media/nodes','media-nodes','','gb28181/zlm/workbench/NodeManagement','节点管理','lucide:Server',50,2,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
 WHERE p.path='/media' AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media/nodes' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-nodes',redirect='',component='gb28181/zlm/workbench/NodeManagement',title='节点管理',icon='lucide:Server',sort=50,type=2,permission='',hide=false,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-nodes',redirect='',component='gb28181/zlm/workbench/NodeManagement',title='节点管理',icon='lucide:Server',sort=50,type=2,permission='',hide=0,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media/nodes' AND deleted_at IS NULL;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT p.id,'/media/scheduling','media-scheduling','','gb28181/zlm/workbench/SchedulingManagement','调度管理','lucide:Workflow',60,2,'',false,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
+SELECT p.id,'/media/scheduling','media-scheduling','','gb28181/zlm/workbench/SchedulingManagement','调度管理','lucide:Workflow',60,2,'',0,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
 WHERE p.path='/media' AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media/scheduling' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-scheduling',redirect='',component='gb28181/zlm/workbench/SchedulingManagement',title='调度管理',icon='lucide:Workflow',sort=60,type=2,permission='',hide=false,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),name='media-scheduling',redirect='',component='gb28181/zlm/workbench/SchedulingManagement',title='调度管理',icon='lucide:Workflow',sort=60,type=2,permission='',hide=0,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media/scheduling' AND deleted_at IS NULL;
 
 INSERT INTO sys_menu (parent_id,path,name,redirect,component,title,icon,sort,type,permission,hide,keep_alive,created_at,updated_at,created_by)
-SELECT p.id,'/media/nodes/:id','media-node-detail','','gb28181/zlm/workbench/nodes/NodeDetail','节点详情','lucide:Server',99,2,'',true,true,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
+SELECT p.id,'/media/nodes/:id','media-node-detail','','gb28181/zlm/workbench/nodes/NodeDetail','节点详情','lucide:Server',99,2,'',1,1,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1 FROM sys_menu p
 WHERE p.path='/media/nodes' AND p.deleted_at IS NULL
 AND NOT EXISTS (SELECT 1 FROM sys_menu WHERE path='/media/nodes/:id' AND deleted_at IS NULL);
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media/nodes' AND deleted_at IS NULL),name='media-node-detail',redirect='',component='gb28181/zlm/workbench/nodes/NodeDetail',title='节点详情',icon='lucide:Server',sort=99,type=2,permission='',hide=true,keep_alive=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media/nodes' AND deleted_at IS NULL),name='media-node-detail',redirect='',component='gb28181/zlm/workbench/nodes/NodeDetail',title='节点详情',icon='lucide:Server',sort=99,type=2,permission='',hide=1,keep_alive=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/media/nodes/:id' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/overview' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/runtime' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/streams' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/sessions' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/proxies' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/ffmpeg-sources' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/rtp-servers' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/cloud-recordings' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/recording-schedules' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/nodes' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/nodes/:id' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/config' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/scheduler' AND deleted_at IS NULL;
 
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP
 WHERE path='/gb28181/zlm/scheduler/logs' AND deleted_at IS NULL;
 
 -- workspace-role-union:/media
@@ -2745,27 +2745,27 @@ AND NOT EXISTS (SELECT 1 FROM sys_role_menu existing WHERE existing.role_id=rm.r
 -- media-workbench-v2:end
 -- zlm-admin-parity-v3:start
 -- Restore zlm-admin-style direct pages and keep GB28181 recordings independent (PostgreSQL).
-UPDATE sys_menu SET redirect='/gb28181/zlm/overview',component='',title='流媒体管理',icon='lucide:Clapperboard',hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/media' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/ClusterOverview',title='集群总览',icon='lucide:LayoutDashboard',sort=10,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/overview' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/NodeList',title='节点管理',icon='lucide:Server',sort=20,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/nodes' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/RuntimeOverview',title='总览',icon='lucide:Gauge',sort=30,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/runtime' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/StreamManagement',title='流管理',icon='lucide:RadioTower',sort=40,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/streams' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SessionManagement',title='会话管理',icon='lucide:Users',sort=50,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/sessions' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/ProxyManagement',title='拉流/推流代理',icon='lucide:Network',sort=60,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/proxies' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/FFmpegSources',title='FFmpeg 源',icon='lucide:Clapperboard',sort=70,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/ffmpeg-sources' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/RTPServices',title='RTP 服务',icon='lucide:Waypoints',sort=80,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/rtp-servers' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/ServerConfig',title='服务器配置',icon='lucide:Settings2',sort=90,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/config' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SchedulerStrategy',title='调度策略',icon='lucide:Workflow',sort=100,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/scheduler' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SchedulerLog',title='调度日志',icon='lucide:History',sort=110,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/scheduler/logs' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=0,component='gb28181/zlm/NodeDetail',title='节点详情',hide=true,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/nodes/:id' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),component='gb28181/cloud-recordings/index',title='云端录像',icon='lucide:Cloud',sort=35,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/cloud-recordings' AND deleted_at IS NULL;
-UPDATE sys_menu SET parent_id=(SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),component='gb28181/recording-schedules/index',title='录像计划',icon='lucide:CalendarClock',sort=36,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/recording-schedules' AND deleted_at IS NULL;
-UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=true,updated_at=CURRENT_TIMESTAMP WHERE path IN ('/media/overview','/media/monitoring','/media/ingress','/media/recordings','/media/nodes','/media/scheduling','/media/nodes/:id') AND deleted_at IS NULL;
+UPDATE sys_menu SET redirect='/gb28181/zlm/overview',component='',title='流媒体管理',icon='lucide:Clapperboard',hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/media' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/ClusterOverview',title='集群总览',icon='lucide:LayoutDashboard',sort=10,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/overview' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/NodeList',title='节点管理',icon='lucide:Server',sort=20,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/nodes' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/RuntimeOverview',title='总览',icon='lucide:Gauge',sort=30,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/runtime' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/StreamManagement',title='流管理',icon='lucide:RadioTower',sort=40,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/streams' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SessionManagement',title='会话管理',icon='lucide:Users',sort=50,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/sessions' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/ProxyManagement',title='拉流/推流代理',icon='lucide:Network',sort=60,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/proxies' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/FFmpegSources',title='FFmpeg 源',icon='lucide:Clapperboard',sort=70,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/ffmpeg-sources' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/RTPServices',title='RTP 服务',icon='lucide:Waypoints',sort=80,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/rtp-servers' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/ServerConfig',title='服务器配置',icon='lucide:Settings2',sort=90,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/config' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SchedulerStrategy',title='调度策略',icon='lucide:Workflow',sort=100,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/scheduler' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT MIN(id) FROM sys_menu WHERE path='/media' AND deleted_at IS NULL),component='gb28181/zlm/SchedulerLog',title='调度日志',icon='lucide:History',sort=110,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/scheduler/logs' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=0,component='gb28181/zlm/NodeDetail',title='节点详情',hide=1,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/nodes/:id' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),component='gb28181/cloud-recordings/index',title='云端录像',icon='lucide:Cloud',sort=35,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/cloud-recordings' AND deleted_at IS NULL;
+UPDATE sys_menu SET parent_id=(SELECT dm.parent_id FROM sys_menu dm WHERE dm.path IN ('/gb28181/device-mgmt/index','/gb28181/device-mgmt') AND dm.deleted_at IS NULL ORDER BY CASE WHEN dm.path='/gb28181/device-mgmt/index' THEN 0 ELSE 1 END,dm.id LIMIT 1),component='gb28181/recording-schedules/index',title='录像计划',icon='lucide:CalendarClock',sort=36,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/recording-schedules' AND deleted_at IS NULL;
+UPDATE sys_menu SET component='gb28181/zlm/workbench/LegacyMediaRoute',hide=1,updated_at=CURRENT_TIMESTAMP WHERE path IN ('/media/overview','/media/monitoring','/media/ingress','/media/recordings','/media/nodes','/media/scheduling','/media/nodes/:id') AND deleted_at IS NULL;
 -- zlm-admin-parity-v3:end
 
 -- zlm-overview-merge:start
-UPDATE sys_menu SET component='gb28181/zlm/ClusterOverview',title='总览',icon='lucide:LayoutDashboard',sort=10,hide=false,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/overview' AND deleted_at IS NULL;
-UPDATE sys_menu SET component='gb28181/zlm/RuntimeOverview',hide=true,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/runtime' AND deleted_at IS NULL;
+UPDATE sys_menu SET component='gb28181/zlm/ClusterOverview',title='总览',icon='lucide:LayoutDashboard',sort=10,hide=0,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/overview' AND deleted_at IS NULL;
+UPDATE sys_menu SET component='gb28181/zlm/RuntimeOverview',hide=1,updated_at=CURRENT_TIMESTAMP WHERE path='/gb28181/zlm/runtime' AND deleted_at IS NULL;
 INSERT INTO sys_role_menu (role_id,menu_id)
 SELECT rm.role_id,o.id FROM sys_role_menu rm JOIN sys_menu r ON r.id=rm.menu_id AND r.path='/gb28181/zlm/runtime' AND r.deleted_at IS NULL CROSS JOIN sys_menu o
 WHERE o.path='/gb28181/zlm/overview' AND o.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=rm.role_id AND x.menu_id=o.id);
