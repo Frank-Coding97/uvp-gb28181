@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/handler"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/play"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/stream"
 )
@@ -48,6 +49,12 @@ func (a *hookDeviceAuthority) blockEpochAt(call int, started chan struct{}) {
 	a.blockAt = call
 	a.epochStarted = started
 	a.mu.Unlock()
+}
+
+func (a *hookDeviceAuthority) epochCallCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.epochCalls
 }
 
 func (a *hookDeviceAuthority) Load(ctx context.Context, _ string) (playauth.DeviceSecurityState, error) {
@@ -117,6 +124,36 @@ func waitHookAuthorityCall(t *testing.T, started <-chan struct{}) {
 	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("device authority was not reached")
+	}
+}
+
+func serveAutoOnDemandWithContext(t *testing.T, fixture *autoOnDemandFixture, ctx context.Context) *httptest.ResponseRecorder {
+	t.Helper()
+	raw := fixture.raw
+	if raw == nil {
+		var err error
+		raw, err = json.Marshal(fixture.body)
+		require.NoError(t, err)
+	}
+	request := httptest.NewRequestWithContext(ctx, http.MethodPost, fixture.path, bytes.NewReader(raw))
+	request.Header.Set("Content-Type", "application/json")
+	request.RemoteAddr = fixture.peer
+	if fixture.xff != "" {
+		request.Header.Set("X-Forwarded-For", fixture.xff)
+	}
+	response := httptest.NewRecorder()
+	fixture.engine.ServeHTTP(response, request)
+	return response
+}
+
+func waitHookResponse(t *testing.T, results <-chan *httptest.ResponseRecorder) *httptest.ResponseRecorder {
+	t.Helper()
+	select {
+	case response := <-results:
+		return response
+	case <-time.After(time.Second):
+		t.Fatal("hook request did not return")
+		return nil
 	}
 }
 
@@ -232,6 +269,64 @@ func TestOnPlayMarkPassesRequestContextToDeviceAuthority(t *testing.T) {
 	response := <-result
 	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
 	require.True(t, authority.canceled.Load())
+}
+
+func TestOnStreamNotFoundPassesRequestContextToAutoAuthority(t *testing.T) {
+	fixture := newAutoOnDemandFixture(t)
+	started := make(chan struct{})
+	// Fixture issuance consumes the first epoch check; on_stream_not_found
+	// consumes the second check in VerifyForAutoStartContext.
+	fixture.authority.blockEpochAt(2, started)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		results <- serveAutoOnDemandWithContext(t, fixture, ctx)
+	}()
+	waitHookAuthorityCall(t, started)
+	cancel()
+	response := waitHookResponse(t, results)
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+	require.Zero(t, fixture.dispatcher.count())
+	require.True(t, fixture.authority.canceled.Load())
+}
+
+func TestOnStreamNotFoundPassesRequestContextToVerifiedClientAuthority(t *testing.T) {
+	fixture := newAutoOnDemandFixture(t, true)
+	fixture.controller.SetPlaybackMediaContextResolver(hookMediaResolver{
+		err: play.ErrPlaybackMediaNotCurrent,
+		coldBinding: playauth.Binding{
+			DeviceID: fixture.deviceID, ChannelID: fixture.channelID,
+			App: "rtp", Stream: fixture.streamID, MediaServerID: fixture.resolver.node.MediaServerUUID,
+			BindClientIP: true, ClientIP: fixture.clientIP, DeviceEpoch: fixture.deviceEpoch,
+		},
+	})
+	fixture.engine.POST("/index/hook/on_play", fixture.controller.OnPlay)
+	response := postJSON(t, fixture.engine, "/index/hook/on_play", gin.H{
+		"app": "rtp", "stream": fixture.streamID, "schema": "fmp4",
+		"mediaServerId": fixture.resolver.node.MediaServerUUID, "ip": fixture.clientIP,
+		"params": url.Values{playauth.QueryParameter: {fixture.token}}.Encode(),
+	})
+	assertHookCode(t, response.Code, response.Body.Bytes(), 0)
+	require.Zero(t, fixture.dispatcher.count())
+	require.Equal(t, 3, fixture.authority.epochCallCount(), "issuance plus VerifyContext and MarkVerifiedClientSourceContext")
+
+	started := make(chan struct{})
+	// The auto verifier cannot use an IP-bound token without the client IP, so
+	// the verified-client fallback reaches its fourth, fresh epoch check.
+	fixture.authority.blockEpochAt(4, started)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	results := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		results <- serveAutoOnDemandWithContext(t, fixture, ctx)
+	}()
+	waitHookAuthorityCall(t, started)
+	cancel()
+	response = waitHookResponse(t, results)
+	assertHookCode(t, response.Code, response.Body.Bytes(), -1)
+	require.Zero(t, fixture.dispatcher.count())
+	require.True(t, fixture.authority.canceled.Load())
 }
 
 type v2AutoStartAuthorizer struct{ claims playauth.Claims }
