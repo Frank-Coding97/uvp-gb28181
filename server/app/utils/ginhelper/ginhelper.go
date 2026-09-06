@@ -61,18 +61,29 @@ func accessLogger(output io.Writer) gin.HandlerFunc {
 }
 
 func accessLogFormatter(param gin.LogFormatterParams) string {
+	path := redactAccessLogPath(param.Path)
+	errorMessage := param.ErrorMessage
+	if isOpenAPIAccessLogPath(param.Path) {
+		// OpenAPI authentication material is not safe to copy into the general
+		// access log, including through Gin's error string.
+		errorMessage = ""
+	}
 	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
 		param.TimeStamp.Format("2006/01/02 - 15:04:05"),
 		param.StatusCode,
 		param.Latency,
 		param.ClientIP,
 		param.Method,
-		redactAccessLogPath(param.Path),
-		param.ErrorMessage,
+		path,
+		errorMessage,
 	)
 }
 
 func redactAccessLogPath(path string) string {
+	if isOpenAPIAccessLogPath(path) {
+		return "/openapi"
+	}
+
 	parsed, err := url.ParseRequestURI(path)
 	if err != nil {
 		return redactAccessLogPathFallback(path)
@@ -100,6 +111,39 @@ func redactAccessLogPathFallback(path string) string {
 		}
 	}
 	return path
+}
+
+func isOpenAPIAccessLogPath(path string) bool {
+	pathEnd := len(path)
+	if index := strings.IndexAny(path, "?#"); index >= 0 {
+		pathEnd = index
+	}
+	rawPath := path[:pathEnd]
+	if rawPath == "" || rawPath[0] != '/' {
+		return false
+	}
+
+	if decodedPath, err := url.PathUnescape(rawPath); err == nil {
+		return isOpenAPIAccessLogPathValue(decodedPath)
+	}
+
+	// A malformed suffix must not bypass the namespace redaction. Decode only
+	// the first segment, which is enough to identify the fixed namespace.
+	firstSegment := rawPath[1:]
+	if separator := strings.IndexByte(firstSegment, '/'); separator >= 0 {
+		firstSegment = firstSegment[:separator]
+	}
+	if separator := strings.Index(strings.ToLower(firstSegment), "%2f"); separator >= 0 {
+		firstSegment = firstSegment[:separator]
+	}
+	if decodedSegment, err := url.PathUnescape(firstSegment); err == nil {
+		return strings.EqualFold(decodedSegment, "openapi") || strings.HasPrefix(strings.ToLower(decodedSegment), "openapi/")
+	}
+	return strings.EqualFold(firstSegment, "openapi") || strings.HasPrefix(strings.ToLower(firstSegment), "openapi%")
+}
+
+func isOpenAPIAccessLogPathValue(path string) bool {
+	return strings.EqualFold(path, "/openapi") || strings.HasPrefix(strings.ToLower(path), "/openapi/")
 }
 
 // CustomRecovery 自定义错误(panic等)拦截中间件、对可能发生的错误进行拦截、统一记录
