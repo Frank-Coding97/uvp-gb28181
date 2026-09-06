@@ -17,6 +17,8 @@ const (
 	defaultRevocationLease     = 6 * time.Second
 	minimumRevocationRetry     = time.Second
 	maximumHookBudget          = 5 * time.Second
+	playLiveApplyScope         = "play:live:apply"
+	resolverTimeout            = maximumHookBudget
 
 	RevocationErrorPending             = "revocation_pending"
 	RevocationErrorAwaitingLateSession = "awaiting_late_session"
@@ -195,6 +197,7 @@ type revocationCandidate struct {
 }
 
 func (w *RevocationWorker) dueCandidates(ctx context.Context, now time.Time) ([]revocationCandidate, error) {
+	now = normalizeRevocationTime(now)
 	var candidates []revocationCandidate
 	err := w.db.WithContext(ctx).Model(&models.Viewer{}).
 		Select("id, grant_id").
@@ -237,8 +240,8 @@ func (w *RevocationWorker) claim(ctx context.Context, candidate revocationCandid
 			return err
 		}
 		newAttempts := viewer.Attempts + 1
-		claimAt := now.UTC()
-		leaseAt := claimAt.Add(w.lease)
+		claimAt := normalizeRevocationTime(now)
+		leaseAt := normalizeRevocationTime(claimAt.Add(w.lease))
 		oldToken := viewerToken(viewer)
 		updates := map[string]any{"attempts": newAttempts, "retry_at": leaseAt, "updated_at": claimAt}
 		write := withViewerToken(tx.Model(&models.Viewer{}), oldToken).Updates(updates)
@@ -252,7 +255,7 @@ func (w *RevocationWorker) claim(ctx context.Context, candidate revocationCandid
 		claimToken.Attempts = newAttempts
 		claimToken.RetryAt = timePtr(leaseAt)
 		claimToken.UpdatedAt = claimAt
-		claim = &revocationClaim{token: claimToken, binding: grantBinding, grantUpdatedAt: grant.UpdatedAt.UTC(), grantReason: grant.Reason, priorErrorClass: viewer.LastErrorClass}
+		claim = &revocationClaim{token: claimToken, binding: grantBinding, grantUpdatedAt: normalizeRevocationTime(grant.UpdatedAt), grantReason: grant.Reason, priorErrorClass: viewer.LastErrorClass}
 		return nil
 	})
 	return claim, changed, err
@@ -262,7 +265,13 @@ func (w *RevocationWorker) processClaim(ctx context.Context, claim *revocationCl
 	if w.factory == nil {
 		return w.pending(ctx, claim, RevocationErrorRuntimeUnavailable, nil, false)
 	}
-	runtime, err := w.factory.Resolve(ctx, claim.binding.NodeUUID)
+	resolveCtx, cancelResolve := context.WithTimeout(ctx, resolverTimeout)
+	runtime, err := w.factory.Resolve(resolveCtx, claim.binding.NodeUUID)
+	resolveDeadlineErr := resolveCtx.Err()
+	cancelResolve()
+	if err == nil && resolveDeadlineErr != nil {
+		err = resolveDeadlineErr
+	}
 	if err != nil {
 		return w.pending(ctx, claim, classifyContextError(err), nil, false)
 	}
@@ -325,16 +334,16 @@ func (w *RevocationWorker) processClaim(ctx context.Context, claim *revocationCl
 
 func (w *RevocationWorker) processAbsent(ctx context.Context, claim *revocationClaim, hookBudget time.Duration) (revocationOutcome, error) {
 	now := w.currentTime()
-	windowEnd := claim.grantUpdatedAt.Add(hookBudget)
+	windowEnd := normalizeRevocationTime(claim.grantUpdatedAt.Add(hookBudget))
 	if claim.priorErrorClass == RevocationErrorShutdownScheduled {
 		return w.close(ctx, claim, RevocationErrorKicked)
 	}
 	if claim.priorErrorClass == RevocationErrorAwaitingLateSession && now.After(windowEnd) {
 		return w.close(ctx, claim, RevocationErrorAlreadyGone)
 	}
-	retryAt := now.Add(minimumRevocationRetry)
+	retryAt := normalizeRevocationTime(now.Add(minimumRevocationRetry))
 	if !retryAt.After(windowEnd) {
-		retryAt = windowEnd.Add(time.Nanosecond)
+		retryAt = normalizeRevocationTime(windowEnd.Add(time.Microsecond))
 	}
 	return w.pending(ctx, claim, RevocationErrorAwaitingLateSession, &retryAt, false)
 }
@@ -343,7 +352,7 @@ func (w *RevocationWorker) pending(ctx context.Context, claim *revocationClaim, 
 	class = sanitizeRevocationClass(class)
 	now := w.currentTime()
 	if retryAt == nil {
-		next := now.Add(minimumRevocationRetry)
+		next := normalizeRevocationTime(now.Add(minimumRevocationRetry))
 		retryAt = &next
 	}
 	applied, err := w.finish(ctx, claim, models.ViewerStateRevokePending, class, retryAt)
@@ -374,14 +383,14 @@ func (w *RevocationWorker) finish(ctx context.Context, claim *revocationClaim, s
 		}
 		grantBinding, grantOK := bindingFromGrant(grant)
 		viewerBinding, viewerOK := bindingFromViewer(viewer)
-		if grant.State != models.GrantStateRevoked || !grant.UpdatedAt.UTC().Equal(claim.grantUpdatedAt) || grant.Reason != claim.grantReason || !grantOK || !viewerOK || !grantBinding.equal(claim.binding) || !viewerBinding.equal(claim.binding) {
+		if grant.State != models.GrantStateRevoked || !normalizeRevocationTime(grant.UpdatedAt).Equal(claim.grantUpdatedAt) || grant.Reason != claim.grantReason || !grantOK || !viewerOK || !grantBinding.equal(claim.binding) || !viewerBinding.equal(claim.binding) {
 			return nil
 		}
 		updates := map[string]any{"state": state, "last_error_class": class, "updated_at": w.currentTime()}
 		if retryAt == nil {
 			updates["retry_at"] = nil
 		} else {
-			updates["retry_at"] = retryAt.UTC()
+			updates["retry_at"] = normalizeRevocationTime(*retryAt)
 		}
 		write := withViewerToken(tx.Model(&models.Viewer{}), claim.token).Updates(updates)
 		if write.Error != nil {
@@ -425,18 +434,18 @@ func lockedRevocationModel(tx *gorm.DB, model any, table string) *gorm.DB {
 }
 
 func markRevocationPending(tx *gorm.DB, viewer models.Viewer, now time.Time, class string) (bool, error) {
-	retryAt := now.Add(minimumRevocationRetry)
-	updates := map[string]any{"last_error_class": sanitizeRevocationClass(class), "retry_at": retryAt, "updated_at": now.UTC()}
+	retryAt := normalizeRevocationTime(now.Add(minimumRevocationRetry))
+	updates := map[string]any{"last_error_class": sanitizeRevocationClass(class), "retry_at": retryAt, "updated_at": normalizeRevocationTime(now)}
 	write := withViewerToken(tx.Model(&models.Viewer{}), viewerToken(viewer)).Updates(updates)
 	return write.RowsAffected == 1, write.Error
 }
 
 func withViewerToken(query *gorm.DB, token revocationViewerToken) *gorm.DB {
-	query = query.Where("id = ? AND grant_id = ? AND state = ? AND attempts = ? AND node_uuid = ? AND boot_nonce = ? AND identifier = ? AND schema = ? AND vhost = ? AND app = ? AND stream = ? AND media_generation = ? AND updated_at = ?", token.ID, token.GrantID, token.State, token.Attempts, token.NodeUUID, token.BootNonce, token.Identifier, token.Schema, token.VHost, token.App, token.Stream, token.MediaGeneration, token.UpdatedAt)
+	query = query.Where("id = ? AND grant_id = ? AND state = ? AND attempts = ? AND node_uuid = ? AND boot_nonce = ? AND identifier = ? AND schema = ? AND vhost = ? AND app = ? AND stream = ? AND media_generation = ? AND updated_at = ?", token.ID, token.GrantID, token.State, token.Attempts, token.NodeUUID, token.BootNonce, token.Identifier, token.Schema, token.VHost, token.App, token.Stream, token.MediaGeneration, normalizeRevocationTime(token.UpdatedAt))
 	if token.RetryAt == nil {
 		return query.Where("retry_at IS NULL")
 	}
-	return query.Where("retry_at = ?", token.RetryAt.UTC())
+	return query.Where("retry_at = ?", normalizeRevocationTime(*token.RetryAt))
 }
 
 func viewerToken(viewer models.Viewer) revocationViewerToken {
@@ -444,12 +453,12 @@ func viewerToken(viewer models.Viewer) revocationViewerToken {
 		ID: viewer.ID, GrantID: viewer.GrantID, NodeUUID: viewer.NodeUUID, BootNonce: viewer.BootNonce,
 		Identifier: viewer.Identifier, Schema: viewer.Schema, VHost: viewer.VHost, App: viewer.App,
 		Stream: viewer.Stream, MediaGeneration: viewer.MediaGeneration, State: viewer.State,
-		Attempts: viewer.Attempts, RetryAt: copyTime(viewer.RetryAt), UpdatedAt: viewer.UpdatedAt.UTC(),
+		Attempts: viewer.Attempts, RetryAt: copyTime(viewer.RetryAt), UpdatedAt: normalizeRevocationTime(viewer.UpdatedAt),
 	}
 }
 
 func bindingFromGrant(grant models.PlayGrant) (revocationBinding, bool) {
-	if grant.NodeUUID == nil || grant.BootNonce == nil || grant.Schema == nil || grant.VHost == nil || grant.App == nil || grant.Stream == nil || grant.MediaGeneration == nil {
+	if grant.Scope != playLiveApplyScope || grant.Protocol == nil || (*grant.Protocol != "https-flv" && *grant.Protocol != "wss-flv") || grant.NodeUUID == nil || grant.BootNonce == nil || grant.Schema == nil || grant.VHost == nil || grant.App == nil || grant.Stream == nil || grant.MediaGeneration == nil {
 		return revocationBinding{}, false
 	}
 	binding := revocationBinding{NodeUUID: *grant.NodeUUID, BootNonce: *grant.BootNonce, Schema: *grant.Schema, VHost: *grant.VHost, App: *grant.App, Stream: *grant.Stream, MediaGeneration: *grant.MediaGeneration}
@@ -518,24 +527,28 @@ func sanitizeRevocationClass(class string) string {
 
 func (w *RevocationWorker) currentTime() time.Time {
 	if w == nil || w.now == nil {
-		return time.Now().UTC()
+		return normalizeRevocationTime(time.Now())
 	}
 	now := w.now()
 	if now.IsZero() {
-		return time.Now().UTC()
+		return normalizeRevocationTime(time.Now())
 	}
-	return now.UTC()
+	return normalizeRevocationTime(now)
 }
 
 func copyTime(value *time.Time) *time.Time {
 	if value == nil {
 		return nil
 	}
-	copy := value.UTC()
+	copy := normalizeRevocationTime(*value)
 	return &copy
 }
 
 func timePtr(value time.Time) *time.Time {
-	value = value.UTC()
+	value = normalizeRevocationTime(value)
 	return &value
+}
+
+func normalizeRevocationTime(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
 }

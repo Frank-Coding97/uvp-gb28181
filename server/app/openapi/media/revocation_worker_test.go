@@ -30,17 +30,38 @@ type revocationWorkerFixture struct {
 }
 
 type stubRevocationRuntimeFactory struct {
-	mu      sync.Mutex
-	runtime RevocationRuntime
-	err     error
-	calls   int
+	mu                sync.Mutex
+	runtime           RevocationRuntime
+	err               error
+	calls             int
+	resolveDeadline   chan time.Time
+	resolveStarted    chan struct{}
+	resolveWaitCancel bool
 }
 
-func (f *stubRevocationRuntimeFactory) Resolve(_ context.Context, _ string) (RevocationRuntime, error) {
+func (f *stubRevocationRuntimeFactory) Resolve(ctx context.Context, _ string) (RevocationRuntime, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.calls++
-	return f.runtime, f.err
+	runtime, err := f.runtime, f.err
+	deadlineChannel := f.resolveDeadline
+	startedChannel := f.resolveStarted
+	waitCancel := f.resolveWaitCancel
+	f.mu.Unlock()
+	if deadline, ok := ctx.Deadline(); ok && deadlineChannel != nil {
+		deadlineChannel <- deadline
+	}
+	if startedChannel != nil {
+		select {
+		case <-startedChannel:
+		default:
+			close(startedChannel)
+		}
+	}
+	if waitCancel {
+		<-ctx.Done()
+		return RevocationRuntime{}, ctx.Err()
+	}
+	return runtime, err
 }
 
 type stubRevocationControl struct {
@@ -324,6 +345,102 @@ func TestRevocationWorkerRejectsRevokedGrantBindingMismatchWithoutNetwork(t *tes
 	require.NoError(t, err)
 	require.Equal(t, 0, result.Claimed)
 	require.Equal(t, "grant_not_revoked", f.loadViewer(t, active.ID).LastErrorClass)
+}
+
+func TestRevocationWorkerRejectsUnknownScopeOrProtocolWithoutNetwork(t *testing.T) {
+	cases := []struct {
+		name     string
+		scope    string
+		protocol string
+	}{
+		{name: "unknown scope", scope: "play:live:other", protocol: "https-flv"},
+		{name: "unknown protocol", scope: "play:live:apply", protocol: "rtmp"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newRevocationWorkerFixture(t, 500*time.Millisecond)
+			viewer := f.seed(t, int(revocationWorkerDBID.Add(1)), models.ViewerStateRevokePending)
+			require.NoError(t, f.db.Model(&models.PlayGrant{}).Where("grant_id = ?", viewer.GrantID).Updates(map[string]any{
+				"scope": tc.scope, "protocol": tc.protocol,
+			}).Error)
+			result, err := f.worker(10).Tick(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, 0, result.Claimed)
+			require.Equal(t, "binding_mismatch", f.loadViewer(t, viewer.ID).LastErrorClass)
+			players, sessions := f.control.calls()
+			require.Equal(t, 0, players)
+			require.Equal(t, 0, sessions)
+		})
+	}
+}
+
+func TestRevocationWorkerNormalizesMicrosecondPersistenceBeforeCAS(t *testing.T) {
+	f := newRevocationWorkerFixture(t, 500*time.Millisecond)
+	viewer := f.seed(t, 22, models.ViewerStateRevokePending)
+	installMicrosecondPersistence(t, f.db)
+	f.clock = f.clock.Add(789 * time.Nanosecond)
+	f.setSnapshot([]string{viewer.Identifier}, []string{viewer.Identifier})
+
+	result, err := f.worker(10).Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, result.Stale, "a persisted microsecond claim must still CAS successfully")
+	row := f.loadViewer(t, viewer.ID)
+	require.Equal(t, models.ViewerStateRevokePending, row.State)
+	require.Equal(t, "shutdown_scheduled", row.LastErrorClass)
+	require.Equal(t, row.UpdatedAt, normalizeRevocationTime(row.UpdatedAt))
+	require.NotNil(t, row.RetryAt)
+	require.Equal(t, row.RetryAt.UTC(), normalizeRevocationTime(*row.RetryAt))
+}
+
+func TestRevocationWorkerResolverGetsIndependentBoundedContext(t *testing.T) {
+	f := newRevocationWorkerFixture(t, 500*time.Millisecond)
+	viewer := f.seed(t, 23, models.ViewerStateRevokePending)
+	deadlineSeen := make(chan time.Time, 1)
+	f.factory.mu.Lock()
+	f.factory.resolveDeadline = deadlineSeen
+	f.factory.mu.Unlock()
+	result, err := f.worker(10).Tick(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, result.Pending)
+	deadline := <-deadlineSeen
+	require.Greater(t, deadline.Sub(time.Now()), time.Duration(0))
+	require.LessOrEqual(t, deadline.Sub(time.Now()), maximumHookBudget)
+	require.Equal(t, "awaiting_late_session", f.loadViewer(t, viewer.ID).LastErrorClass)
+
+	f = newRevocationWorkerFixture(t, 500*time.Millisecond)
+	f.seed(t, 24, models.ViewerStateRevokePending)
+	resolveStarted := make(chan struct{})
+	f.factory.mu.Lock()
+	f.factory.resolveStarted = resolveStarted
+	f.factory.resolveWaitCancel = true
+	f.factory.mu.Unlock()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.worker(10).Tick(ctx)
+		done <- err
+	}()
+	<-resolveStarted
+	cancel()
+	require.ErrorIs(t, <-done, context.Canceled)
+}
+
+func installMicrosecondPersistence(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	name := fmt.Sprintf("test:truncate_revocation_times_%d", revocationWorkerDBID.Add(1))
+	err := db.Callback().Update().Before("gorm:update").Register(name, func(tx *gorm.DB) {
+		values, ok := tx.Statement.Dest.(map[string]any)
+		if !ok {
+			return
+		}
+		for _, key := range []string{"updated_at", "retry_at"} {
+			if value, ok := values[key].(time.Time); ok {
+				values[key] = normalizeRevocationTime(value)
+			}
+		}
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(name) })
 }
 
 func TestRevocationWorkerStaleCompletionCannotApplyLateNetworkResult(t *testing.T) {
