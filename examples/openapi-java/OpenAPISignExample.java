@@ -325,6 +325,10 @@ public final class OpenAPISignExample {
     }
 
     private static int fromHex(byte value) {
+        return fromHexAscii((char) (value & 0xff));
+    }
+
+    private static int fromHexAscii(char value) {
         if (value >= '0' && value <= '9') {
             return value - '0';
         }
@@ -335,6 +339,10 @@ public final class OpenAPISignExample {
             return value - 'A' + 10;
         }
         return -1;
+    }
+
+    private static boolean asciiDigit(char value) {
+        return value >= '0' && value <= '9';
     }
 
     private static String encodeRfc3986(String value) {
@@ -572,7 +580,7 @@ public final class OpenAPISignExample {
             require(position + 4 <= text.length());
             int value = 0;
             for (int i = 0; i < 4; i++) {
-                int digit = fromHex((byte) text.charAt(position++));
+                int digit = fromHexAscii(text.charAt(position++));
                 require(digit >= 0);
                 value = (value << 4) | digit;
             }
@@ -585,16 +593,16 @@ public final class OpenAPISignExample {
                 require(position < text.length());
             }
             if (consume('0')) {
-                require(position >= text.length() || !Character.isDigit(text.charAt(position)));
+                require(position >= text.length() || !asciiDigit(text.charAt(position)));
             } else {
                 require(position < text.length() && text.charAt(position) >= '1' && text.charAt(position) <= '9');
-                while (position < text.length() && Character.isDigit(text.charAt(position))) {
+                while (position < text.length() && asciiDigit(text.charAt(position))) {
                     position++;
                 }
             }
             if (consume('.')) {
-                require(position < text.length() && Character.isDigit(text.charAt(position)));
-                while (position < text.length() && Character.isDigit(text.charAt(position))) {
+                require(position < text.length() && asciiDigit(text.charAt(position)));
+                while (position < text.length() && asciiDigit(text.charAt(position))) {
                     position++;
                 }
             }
@@ -603,8 +611,8 @@ public final class OpenAPISignExample {
                 if (position < text.length() && (text.charAt(position) == '+' || text.charAt(position) == '-')) {
                     position++;
                 }
-                require(position < text.length() && Character.isDigit(text.charAt(position)));
-                while (position < text.length() && Character.isDigit(text.charAt(position))) {
+                require(position < text.length() && asciiDigit(text.charAt(position)));
+                while (position < text.length() && asciiDigit(text.charAt(position))) {
                     position++;
                 }
             }
@@ -738,6 +746,26 @@ public final class OpenAPISignExample {
                 sign(loneSurrogate, secretKey);
             }
         });
+        final Request nonAsciiUnicodeEscape = new Request(post.method, post.path, post.rawQuery, post.contentType,
+                utf8("{\"protocol\":\"" + "\\u" + "İ234\"}"),
+                post.accessKey, post.timestamp, post.nonce, post.audience);
+        expectFailure(new Action() {
+            @Override
+            public void run() {
+                sign(nonAsciiUnicodeEscape, secretKey);
+            }
+        });
+        for (final String nonAsciiNumber : new String[] {"١", "１"}) {
+            final Request nonAsciiNumberBody = new Request(post.method, post.path, post.rawQuery, post.contentType,
+                    utf8("{\"number\":" + nonAsciiNumber + "}"),
+                    post.accessKey, post.timestamp, post.nonce, post.audience);
+            expectFailure(new Action() {
+                @Override
+                public void run() {
+                    sign(nonAsciiNumberBody, secretKey);
+                }
+            });
+        }
         final Request invalidUtf8 = new Request(post.method, post.path, post.rawQuery, post.contentType,
                 new byte[] {'{', '"', 'p', 'r', 'o', 't', 'o', 'c', 'o', 'l', '"', ':', '"', (byte) 0xff, '"', '}'},
                 post.accessKey, post.timestamp, post.nonce, post.audience);
