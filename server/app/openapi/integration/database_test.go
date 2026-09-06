@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm/logger"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/migration"
 	"uvplatform.cn/uvp-gb28181/app/openapi/auth"
+	openapiconfig "uvplatform.cn/uvp-gb28181/app/openapi/config"
 	"uvplatform.cn/uvp-gb28181/app/openapi/models"
 )
 
@@ -113,6 +114,9 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	}
 	run(stem + ".sql")
 	run(stem + ".sql")
+	lockStem := filepath.Join(dir, "2026-09-06-openapi-must-auth-lock"+suffix)
+	run(lockStem + ".sql")
+	run(lockStem + ".sql")
 	for _, table := range []any{&models.Client{}, &models.ClientScope{}, &models.Nonce{}, &models.Audit{}} {
 		if !db.Migrator().HasTable(table) {
 			t.Fatal("core table missing")
@@ -247,6 +251,27 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 		}
 	}
 	run(stem + ".sql")
+	// The lock's own down is permitted only while this entire fixture is neutral.
+	lockName := filepath.Base(lockStem) + ".sql"
+	if err := store.MarkApplied([]string{lockName}); err != nil {
+		t.Fatal(err)
+	}
+	if err := migration.Down(db, migrationDialect, lockName); err != nil {
+		t.Fatal(err)
+	}
+	run(lockStem + ".sql")
+	checkNativeQuota(t, db)
+	checkNativeMustAuthLatch(t, db)
+	run(lockStem + ".sql") // upgrades must never reset the latch
+	state, err := openapiconfig.NewMustAuthStore(db, time.Now).Load(ctx)
+	if err != nil || !state.MustAuthLocked || state.LockVersion != 1 {
+		t.Fatal("upgrade reset or damaged the persistent security commitment")
+	}
+	for _, name := range []string{upName, lockName} {
+		if err := migration.Down(db, migrationDialect, name); err == nil {
+			t.Fatal("down allowed after the security commitment was latched")
+		}
+	}
 	t.Logf("%s schema up/up, media constraints, 100-way nonce, guarded down/up passed; full initialization/HTTP/media runtime not covered", dialect)
 }
 

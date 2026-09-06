@@ -27,8 +27,9 @@ var (
 // ReservationRequest contains only already-authorized target metadata. It is
 // deliberately not an HTTP DTO and must be built after HMAC, scope, owner and
 // nonce checks. A pending grant is always tied to the requested device/channel
-// and those rows are locked in the same order used by the admission path; it
-// is not an unscoped placeholder.
+// with client, scope and root-device rows locked in admission order. Channel
+// authorization remains the admission caller's responsibility; this is not
+// an unscoped placeholder.
 type ReservationRequest struct {
 	ClientID  int64
 	Scope     string

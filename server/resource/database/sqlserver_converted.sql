@@ -4959,3 +4959,21 @@ INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS 
 INSERT INTO sys_menu_api(menu_id,api_id) SELECT m.id,a.id FROM sys_menu m CROSS JOIN sys_api a WHERE m.permission=N'gb28181:openapi:client:audit' AND a.path=N'/api/gb28181/openapi-clients/:id/audits' AND a.method=N'GET' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_menu_api x WHERE x.menu_id=m.id AND x.api_id=a.id);
 INSERT INTO sys_casbin_rule(ptype,v0,v1,v2,v3,v4,v5) SELECT DISTINCT N'p',CONCAT(N'role_',rm.role_id),a.path,a.method,N'*',N'',N'' FROM sys_role_menu rm JOIN sys_menu m ON m.id=rm.menu_id JOIN sys_menu_api ma ON ma.menu_id=m.id JOIN sys_api a ON a.id=ma.api_id WHERE rm.role_id=1 AND EXISTS (SELECT 1 FROM sys_role r WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL) AND m.permission LIKE N'gb28181:openapi:client:%' AND m.deleted_at IS NULL AND a.deleted_at IS NULL AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype=N'p' AND c.v0=CONCAT(N'role_',rm.role_id) AND c.v1=a.path AND c.v2=a.method AND c.v3=N'*');
 -- openapi-aksk-permissions:end
+
+-- openapi-must-auth:begin
+-- Append-only security commitment: never reset an existing row during upgrade.
+IF OBJECT_ID(N'dbo.sys_openapi_security_state', N'U') IS NULL
+CREATE TABLE dbo.sys_openapi_security_state (
+    id BIGINT NOT NULL PRIMARY KEY,
+    must_auth_locked BIT NOT NULL DEFAULT 0,
+    locked_at DATETIME2(6) NULL,
+    lock_version BIGINT NOT NULL DEFAULT 0,
+    CONSTRAINT ck_openapi_security_singleton CHECK (id = 1),
+    CONSTRAINT ck_openapi_security_state CHECK (
+        (must_auth_locked = 0 AND lock_version = 0 AND locked_at IS NULL)
+        OR (must_auth_locked = 1 AND lock_version > 0 AND locked_at IS NOT NULL)
+    )
+);
+INSERT INTO sys_openapi_security_state (id, must_auth_locked, locked_at, lock_version)
+SELECT 1, 0, NULL, 0 WHERE NOT EXISTS (SELECT 1 FROM sys_openapi_security_state WHERE id = 1);
+-- openapi-must-auth:end
