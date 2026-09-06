@@ -350,7 +350,7 @@ defineExpose({ refresh });
         <a-input-search v-model="filters.stream" allow-clear placeholder="Stream ID" class="filter-stream" @search="applyFilters" />
         <a-select v-model="filters.recording" allow-clear placeholder="录制状态" class="filter-recording" style="width: 132px; min-width: 132px; max-width: 132px; flex: 0 0 132px"><a-option value="mp4">MP4 录制</a-option><a-option value="hls">HLS 录制</a-option></a-select>
       </template>
-      <template #actions><a-button type="primary" @click="applyFilters">查询</a-button><a-button @click="clearFilters">重置</a-button><a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新媒体流" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
+      <template #actions><a-button type="primary" @click="applyFilters">查询</a-button><a-button @click="clearFilters">重置</a-button><a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" aria-label="刷新媒体流" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button></template>
       <template #extra><span class="selection-meta">已选 {{ selectedTargets.length }} 路</span><a-button v-if="canClose" status="danger" :disabled="!canBatchClose" @click="openBatchClose">批量普通关闭</a-button><span v-if="selectedTargets.length > 0 && !canBatchClose" class="selection-warning">跨节点选择不可批量关闭</span></template>
     </s-layout-search>
 

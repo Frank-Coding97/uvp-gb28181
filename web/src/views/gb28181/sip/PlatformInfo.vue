@@ -149,16 +149,17 @@ onMounted(refresh);
                         </a-tag>
                     </div>
                     <div class="toolbar-actions">
-                        <a-button v-if="config" @click="copyAll">
+                        <a-button v-if="config" class="uvp-page-action-btn" @click="copyAll">
                             <template #icon><Copy :size="15" /></template>
                             复制 SIP 接入信息
                         </a-button>
                         <a-tooltip content="刷新状态">
-                            <a-button class="uvp-refresh-btn" shape="circle" :loading="loading" @click="refresh">
-                                <RefreshCw :size="16" />
+                            <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" @click="refresh">
+                                <template #icon><RefreshCw :size="16" /></template>
+                                刷新状态
                             </a-button>
                         </a-tooltip>
-                        <a-button v-if="canEdit && status?.config" type="primary" @click="wizardVisible = true">
+                        <a-button v-if="canEdit && status?.config" class="uvp-page-action-btn" type="primary" @click="wizardVisible = true">
                             <template #icon><Settings2 :size="16" /></template>
                             编辑配置
                         </a-button>

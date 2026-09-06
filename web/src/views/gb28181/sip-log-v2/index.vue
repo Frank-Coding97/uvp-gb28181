@@ -498,7 +498,7 @@ onBeforeUnmount(() => {
                         <template #icon><icon-search /></template>
                         <span>查询</span>
                     </a-button>
-                    <a-button class="filter-refresh-btn uvp-refresh-btn" :disabled="sessionLoading" @click="refresh">
+                    <a-button class="filter-refresh-btn uvp-page-action-btn uvp-refresh-btn" :disabled="sessionLoading" @click="refresh">
                         <template #icon><RefreshCcw :size="14" :class="{ spin: sessionLoading }" /></template>
                         <span>刷新</span>
                     </a-button>

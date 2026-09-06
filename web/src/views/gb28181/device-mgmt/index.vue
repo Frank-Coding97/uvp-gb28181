@@ -1850,7 +1850,7 @@ onUnmounted(() => {
                                 </a-select>
                                 <button
                                     v-if="canViewDevices"
-                                    class="btn-ghost refresh-control uvp-refresh-btn"
+                                    class="btn-ghost refresh-control uvp-page-action-btn uvp-refresh-btn"
                                     data-testid="refresh-control"
                                     type="button"
                                     :title="`自动刷新倒计时 ${autoRefreshCountdown} 秒`"
@@ -1860,7 +1860,7 @@ onUnmounted(() => {
                                     <RefreshCcw :size="14" :class="{ spin: rowsLoading || mapLoading }" />
                                     刷新 <span class="refresh-countdown">{{ autoRefreshCountdown }}s</span>
                                 </button>
-                                <button v-if="canAddDevice" class="btn-primary create-device-btn" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
+                                <button v-if="canAddDevice" class="btn-primary create-device-btn uvp-page-action-btn uvp-create-btn" type="button" @click="openCreateDeviceModal"><Plus :size="14" /> 新建设备</button>
                             </div>
                         </div>
                     </template>

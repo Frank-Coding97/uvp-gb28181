@@ -176,7 +176,7 @@ defineExpose({ refresh, discardDrafts });
       </template>
       <template #actions>
         <a-button :loading="testing" @click="handleTest">测试连通性</a-button>
-        <a-button class="uvp-refresh-btn" :loading="loading" :disabled="dirtyCount > 0" @click="refresh()"><template #icon><icon-refresh /></template>刷新</a-button>
+        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" :disabled="dirtyCount > 0" @click="refresh()"><template #icon><icon-refresh /></template>刷新</a-button>
         <a-button v-if="dirtyCount" @click="discardDrafts">放弃草稿</a-button>
         <a-button v-if="editable" type="primary" :loading="saving" :disabled="dirtyCount === 0" @click="handleSave">保存热更新</a-button>
       </template>

@@ -852,11 +852,12 @@ onMounted(() =>
                             <i class="service-config-unsaved__dot" />
                             未保存
                         </span>
-                        <a-button :disabled="configSaving || !hasChanges" @click="resetDraft">
+                        <a-button class="uvp-page-action-btn" :disabled="configSaving || !hasChanges" @click="resetDraft">
                             <template #icon><RotateCcw :size="15" /></template>
                             重置
                         </a-button>
                         <a-button
+                            class="uvp-page-action-btn"
                             type="primary"
                             :loading="configSaving"
                             :disabled="configSaving || !configReady || !hasChanges || !sipLogRetentionValid || !playTimeoutValid || !playAuthTTLValid"

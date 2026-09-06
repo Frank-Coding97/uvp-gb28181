@@ -127,6 +127,12 @@ describe("security preview system integration", () => {
     expect(source).toContain('{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}');
   });
 
+  it("matches the shared system toolbar sizing for refresh and rule actions", () => {
+    expect(source).toContain('class="uvp-page-action-btn uvp-refresh-btn" aria-label="刷新安全数据"');
+    expect(source).toContain('<a-button v-else class="uvp-page-action-btn uvp-create-btn" type="primary"');
+    expect(source).not.toContain("security-create-action");
+  });
+
   it("uses the existing Arco table pagination style for all security lists", () => {
     expect(source).toContain("const tablePageSizeOptions = [10, 20, 50, 100]");
     expect(source).toContain(':pagination="eventPagination"');

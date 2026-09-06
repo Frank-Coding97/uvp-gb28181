@@ -535,11 +535,11 @@ onBeforeUnmount(() => {
         <div class="tab-actions">
           <span :class="['security-live-status', `security-live-status--${liveStatus.color}`]"><span class="live-dot" />{{ liveStatus.label }}</span>
           <a-tooltip content="刷新安全数据">
-            <a-button class="uvp-refresh-btn" aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button>
+            <a-button class="uvp-page-action-btn uvp-refresh-btn" aria-label="刷新安全数据" @click="refreshPreview(true)"><template #icon><RefreshCw :size="16" /></template>{{ live ? `刷新 ${refreshCountdown}s` : "刷新" }}</a-button>
           </a-tooltip>
           <a-button v-if="activeTab === 'policy'" type="primary" @click="savePolicyPreview"><template #icon><Check :size="16" /></template>保存策略</a-button>
           <a-button v-else-if="activeTab === 'bans'" type="primary" @click="activeTab = 'policy'"><template #icon><SlidersHorizontal :size="16" /></template>调整策略</a-button>
-          <a-button v-else type="primary" @click="openRuleDrawer(activeTab === 'allowlist' ? 'allowlist' : 'blacklist')"><template #icon><Plus :size="16" /></template>{{ activeTab === 'allowlist' ? '添加白名单' : '添加黑名单' }}</a-button>
+          <a-button v-else class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openRuleDrawer(activeTab === 'allowlist' ? 'allowlist' : 'blacklist')"><template #icon><Plus :size="16" /></template>{{ activeTab === 'allowlist' ? '添加白名单' : '添加黑名单' }}</a-button>
         </div>
       </div>
 
@@ -788,8 +788,6 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding-bottom: 8px;
 }
-.tab-actions :deep(.arco-btn) { box-sizing: border-box; border-radius: 10px; }
-
 .live-dot {
   display: inline-block;
   width: 7px;

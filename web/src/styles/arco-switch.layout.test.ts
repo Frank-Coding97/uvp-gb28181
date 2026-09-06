@@ -16,4 +16,10 @@ describe("global switch styling", () => {
         expect(source).toMatch(/\.uvp-refresh-btn\s*\{[^}]*border-color:\s*var\(--uvp-refresh-btn-border\)/s);
         expect(source).toMatch(/\.uvp-refresh-btn[\s\S]*&:hover[^}]*background:\s*var\(--uvp-refresh-btn-hover-bg\)/s);
     });
+
+    it("defines shared page-action sizing and create semantics", () => {
+        expect(source).toMatch(/\.uvp-page-action-btn\s*\{[^}]*min-width:\s*88px;[^}]*height:\s*40px;[^}]*border-radius:\s*10px;/s);
+        expect(source).toMatch(/\.uvp-create-btn\s*\{[^}]*background:\s*#16845f[^}]*border-color:\s*#16845f/s);
+        expect(source).toMatch(/\.uvp-create-btn[\s\S]*&:hover[^}]*background:\s*#0f6f4f[^}]*border-color:\s*#0f6f4f/s);
+    });
 });

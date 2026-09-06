@@ -48,7 +48,8 @@ describe("ingress panels", () => {
   it("uses the system list button and table pagination language", () => {
     for (const file of ["ProxyPanel.vue", "FFmpegPanel.vue", "RTPPanel.vue"]) {
       const source = readFileSync(resolve(root, file), "utf8");
-      expect(source, file).toContain('class="uvp-refresh-btn"');
+      expect(source, file).toContain('class="uvp-page-action-btn uvp-refresh-btn"');
+      expect(source, file).toContain('class="uvp-page-action-btn uvp-create-btn"');
       expect(source, file).toContain(':pagination="tablePagination"');
       expect(source, file).toContain("showTotal: true");
       expect(source, file).toContain("showJumper: true");

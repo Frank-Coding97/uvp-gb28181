@@ -220,6 +220,30 @@
 
 // ========== 刷新工具按钮 ==========
 // 刷新是中性工具动作,使用独立蓝绿色语义色,与查询/危险操作区分。
+.uvp-page-action-btn {
+  box-sizing: border-box;
+  min-width: 88px;
+  height: 40px;
+  padding-inline: 14px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+.uvp-create-btn {
+  color: #ffffff !important;
+  background: #16845f !important;
+  border-color: #16845f !important;
+  box-shadow: 0 10px 18px -15px rgb(22 132 95 / 58%) !important;
+
+  &:hover:not([disabled]):not(.arco-btn-disabled),
+  &:focus-visible:not([disabled]):not(.arco-btn-disabled) {
+    color: #ffffff !important;
+    background: #0f6f4f !important;
+    border-color: #0f6f4f !important;
+    box-shadow: 0 12px 20px -15px rgb(15 111 79 / 64%) !important;
+  }
+}
+
 .uvp-refresh-btn {
   color: var(--uvp-refresh-btn-text) !important;
   background: var(--uvp-refresh-btn-bg) !important;

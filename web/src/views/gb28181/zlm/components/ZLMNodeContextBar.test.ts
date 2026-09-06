@@ -93,7 +93,7 @@ describe("ZLMNodeContextBar", () => {
     const source = readFileSync(resolve(process.cwd(), "src/views/gb28181/zlm/components/ZLMNodeContextBar.vue"), "utf8");
     expect(source).toMatch(/data-minimal="true"[^}]*border:\s*0/s);
     expect(source).toMatch(/data-minimal="true"[^}]*background:\s*transparent/s);
-    expect(source).toContain('class="zlm-node-context__refresh uvp-refresh-btn"');
+    expect(source).toContain('class="zlm-node-context__refresh uvp-page-action-btn uvp-refresh-btn"');
     expect(source).toMatch(/data-minimal="true"[^}]*:deep\(\.zlm-node-context__select\)\s*\{[^}]*width:\s*190px/s);
     expect(source).toMatch(/arco-select-view-single[^}]*min-height:\s*40px/s);
     expect(source).toMatch(/data-minimal="true"[^}]*\.zlm-node-context__refresh\s*\{[^}]*height:\s*40px[^}]*border-radius:\s*10px/s);

@@ -12,8 +12,8 @@
           </button>
         </div>
         <div class="toolbar-actions">
-          <a-button class="uvp-refresh-btn" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
-          <a-button v-if="activeView === 'plans' && canMaintain" type="primary" @click="openCreate"><template #icon><Plus :size="15" /></template>新建计划</a-button>
+          <a-button class="uvp-page-action-btn uvp-refresh-btn" @click="refresh"><template #icon><RefreshCw :size="15" /></template>刷新</a-button>
+          <a-button v-if="activeView === 'plans' && canMaintain" class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openCreate"><template #icon><Plus :size="15" /></template>新建计划</a-button>
         </div>
       </div>
 

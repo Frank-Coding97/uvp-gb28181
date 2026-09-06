@@ -281,8 +281,8 @@ function relativeTime(value?: string) {
       </template>
       <template #extra>
         <span class="filter-meta">{{ filteredNodes.length }} / {{ scopedNodes.length }} 节点</span>
-        <a-button class="uvp-refresh-btn" :loading="loading" aria-label="刷新节点列表" @click="refreshRows"><template #icon><icon-refresh /></template>刷新</a-button>
-        <a-button v-if="canManage" type="primary" @click="openCreate"><template #icon><icon-plus /></template>添加节点</a-button>
+        <a-button class="uvp-page-action-btn uvp-refresh-btn" :loading="loading" aria-label="刷新节点列表" @click="refreshRows"><template #icon><icon-refresh /></template>刷新</a-button>
+        <a-button v-if="canManage" class="uvp-page-action-btn uvp-create-btn" type="primary" @click="openCreate"><template #icon><icon-plus /></template>添加节点</a-button>
       </template>
     </s-layout-search>
 
