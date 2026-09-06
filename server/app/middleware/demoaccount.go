@@ -73,8 +73,8 @@ func DemoAccountMiddleware() gin.HandlerFunc {
 							zap.String("event", "auth.demo_account.allow_path"),
 							zap.Uint("userID", claims.UserID),
 							zap.String("method", c.Request.Method),
-							zap.String("path", currentPath),
-							zap.String("matchedPrefix", prefix))
+							zap.String("route", c.FullPath()),
+							zap.Bool("matched_prefix", true))
 						c.Next()
 						return
 					}
@@ -86,7 +86,7 @@ func DemoAccountMiddleware() gin.HandlerFunc {
 				zap.String("event", "auth.demo_account.denied"),
 				zap.Uint("userID", claims.UserID),
 				zap.String("method", c.Request.Method),
-				zap.String("path", c.Request.URL.Path))
+				zap.String("route", c.FullPath()))
 
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":    http.StatusForbidden,
