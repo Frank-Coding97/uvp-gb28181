@@ -180,6 +180,7 @@ func TestOpenAPIViewerConcurrentIdentifiersAllowAtMostOneBinding(t *testing.T) {
 	require.LessOrEqual(t, success, 1)
 	var count int64
 	require.NoError(t, fixture.db.Model(&models.Viewer{}).Where("grant_id = ?", reservation.GrantID).Count(&count).Error)
+	require.Equal(t, int64(success), count)
 	require.LessOrEqual(t, count, int64(1))
 }
 
