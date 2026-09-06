@@ -3,6 +3,7 @@ package trace
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -41,7 +42,92 @@ func (f *t12BlockingFactory) open(context.Context) (Store, error) {
 	return f.store, nil
 }
 
-func TestModuleT12ShutdownDeadlineDoesNotCloseBlockingStore(t *testing.T) {
+type t12HealthyPrunableStore struct {
+	pruneCalls atomic.Int64
+	closed     chan struct{}
+	closeOnce  sync.Once
+}
+
+func (s *t12HealthyPrunableStore) InsertBatch(context.Context, []StoredEvent) error {
+	return nil
+}
+
+func (s *t12HealthyPrunableStore) Prune(ctx context.Context, _ time.Time, _ int) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	s.pruneCalls.Add(1)
+	return 0, nil
+}
+
+func (s *t12HealthyPrunableStore) Close() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}
+
+func TestLoggingPrunableShutdownCompletes(t *testing.T) {
+	store := &t12HealthyPrunableStore{closed: make(chan struct{})}
+	lifecycleCtx, cancel := context.WithCancel(context.Background())
+	prunerDone := make(chan struct{})
+	go func() {
+		defer close(prunerDone)
+		NewTracePruner(store, 7, DefaultTracePruneBatchSize, time.Now).Run(lifecycleCtx, time.Millisecond, nil)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-prunerDone
+	})
+	require.Eventually(t, func() bool { return store.pruneCalls.Load() > 0 }, time.Second, time.Millisecond)
+
+	done := make(chan struct{})
+	close(done)
+	retryDone := make(chan struct{})
+	close(retryDone)
+	module := &Module{
+		health:       newHealthTracker(HealthReady, ""),
+		collector:    NewCollector(1, nil),
+		store:        store,
+		lifecycleCtx: lifecycleCtx,
+		cancel:       cancel,
+		done:         done,
+		retryDone:    retryDone,
+		prunerDone:   prunerDone,
+		cleanupDone:  make(chan struct{}),
+		probeDone:    make(chan struct{}),
+	}
+
+	shutdown := make(chan error, 1)
+	go func() { shutdown <- module.Shutdown(context.Background()) }()
+	select {
+	case err := <-shutdown:
+		require.NoError(t, err)
+	case <-time.After(200 * time.Millisecond):
+		cancel()
+		select {
+		case <-shutdown:
+		case <-time.After(time.Second):
+			t.Fatal("prunable module shutdown did not finish after cancellation")
+		}
+		t.Fatal("Shutdown waited for pruner before canceling its lifecycle")
+	}
+	select {
+	case <-store.closed:
+	case <-time.After(time.Second):
+		t.Fatal("healthy prunable store was not closed after shutdown")
+	}
+}
+
+func TestLoggingCompletedShutdownWinsOverExpiredContext(t *testing.T) {
+	store := &t12HealthyPrunableStore{closed: make(chan struct{})}
+	module := NewModule(testTraceConfig(1, 1, 1), store, testPayloadCipher())
+	require.NoError(t, module.Shutdown(context.Background()))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.NoError(t, module.Shutdown(ctx))
+}
+
+func TestLoggingShutdownDeadlineDoesNotCloseBlockingStore(t *testing.T) {
 	store := &t12BlockingStore{
 		started: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{}),
 	}
@@ -83,7 +169,7 @@ func TestModuleT12ShutdownDeadlineDoesNotCloseBlockingStore(t *testing.T) {
 	require.NoError(t, module.Shutdown(ctx2))
 }
 
-func TestModuleT12ShutdownWaitsForRelationalHealthProbe(t *testing.T) {
+func TestLoggingShutdownWaitsForRelationalHealthProbe(t *testing.T) {
 	store := &t12BlockingStore{
 		started: make(chan struct{}), release: make(chan struct{}), closed: make(chan struct{}),
 	}

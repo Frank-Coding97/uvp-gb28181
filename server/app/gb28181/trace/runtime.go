@@ -407,7 +407,17 @@ func (m *Module) Shutdown(ctx context.Context) error {
 	select {
 	case <-m.cleanupDone:
 		return m.shutdownErr
+	default:
+	}
+	select {
+	case <-m.cleanupDone:
+		return m.shutdownErr
 	case <-ctx.Done():
+		select {
+		case <-m.cleanupDone:
+			return m.shutdownErr
+		default:
+		}
 		m.cancel()
 		return ctx.Err()
 	}
@@ -416,11 +426,11 @@ func (m *Module) Shutdown(ctx context.Context) error {
 func (m *Module) finishShutdown() {
 	<-m.done
 	<-m.retryDone
-	<-m.prunerDone
 	m.cancel()
+	<-m.prunerDone
 	m.waitProbes()
-	_ = m.stopDiagnosis(context.Background())
-	m.shutdownErr = m.closeStore()
+	diagnosisErr := m.stopDiagnosis(context.Background())
+	m.shutdownErr = errors.Join(diagnosisErr, m.closeStore())
 	close(m.cleanupDone)
 }
 
