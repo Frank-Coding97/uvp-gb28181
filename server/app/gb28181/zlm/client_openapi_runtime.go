@@ -62,6 +62,16 @@ func (c *Client) KickSessionIfMatch(ctx context.Context, bootNonce, identifier s
 }
 
 func (c *Client) runtimeControl(ctx context.Context, api string, body []byte) (map[string]json.RawMessage, error) {
+	envelope, err := c.runtimeEnvelope(ctx, api, nil, body, 4096)
+	if err != nil {
+		return nil, err
+	}
+	return runtimeObject(envelope["data"])
+}
+
+// runtimeEnvelope never returns a partial/truncated snapshot. An oversized
+// node stays unavailable rather than falsely reporting a viewer absent.
+func (c *Client) runtimeEnvelope(ctx context.Context, api string, query url.Values, body []byte, maxBytes int64) (map[string]json.RawMessage, error) {
 	if c == nil || c.http == nil || c.secret == "" {
 		return nil, ErrRuntimeControlUnavailable
 	}
@@ -73,7 +83,9 @@ func (c *Client) runtimeControl(ctx context.Context, api string, body []byte) (m
 	if body != nil {
 		method = http.MethodPost
 	}
-	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+"/"+api, bytes.NewReader(body))
+	endpoint.Path += "/" + api
+	endpoint.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, ErrRuntimeControlUnavailable
 	}
@@ -99,8 +111,8 @@ func (c *Client) runtimeControl(ctx context.Context, api string, body []byte) (m
 	if response.StatusCode != http.StatusOK || response.Header.Get("Cache-Control") != "no-store" || response.Header.Get("Age") != "" {
 		return nil, ErrRuntimeControlUnavailable
 	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, 4097))
-	if err != nil || len(content) > 4096 {
+	content, err := io.ReadAll(io.LimitReader(response.Body, maxBytes+1))
+	if err != nil || int64(len(content)) > maxBytes {
 		return nil, ErrRuntimeControlUnavailable
 	}
 	envelope, err := runtimeObject(content)
@@ -108,7 +120,7 @@ func (c *Client) runtimeControl(ctx context.Context, api string, body []byte) (m
 	if err != nil || envelope["code"] == nil || string(envelope["code"]) == "null" || json.Unmarshal(envelope["code"], &code) != nil || code != 0 {
 		return nil, ErrRuntimeControlUnavailable
 	}
-	return runtimeObject(envelope["data"])
+	return envelope, nil
 }
 
 // Duplicate keys are rejected at both the envelope and security-data levels.
