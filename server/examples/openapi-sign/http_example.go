@@ -15,7 +15,12 @@ import (
 	"time"
 )
 
-const defaultHTTPTimeout = 10 * time.Second
+const (
+	defaultHTTPTimeout   = 10 * time.Second
+	maxHTTPResponseBytes = 1 << 20
+	retryBackoff         = 100 * time.Millisecond
+	maxRetryWait         = time.Second
+)
 
 var errHTTPExampleCall = errors.New("OpenAPI HTTP example call failed")
 
@@ -43,6 +48,7 @@ type httpExampleCaller struct {
 	client *http.Client
 	now    func() time.Time
 	nonce  func() (string, error)
+	wait   func(context.Context, time.Duration) error
 }
 
 func newHTTPExampleCaller(client *http.Client) *httpExampleCaller {
@@ -50,6 +56,9 @@ func newHTTPExampleCaller(client *http.Client) *httpExampleCaller {
 		client = &http.Client{Timeout: defaultHTTPTimeout}
 	}
 	copy := *client
+	if copy.Timeout <= 0 || copy.Timeout > defaultHTTPTimeout {
+		copy.Timeout = defaultHTTPTimeout
+	}
 	copy.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
@@ -57,6 +66,7 @@ func newHTTPExampleCaller(client *http.Client) *httpExampleCaller {
 		client: &copy,
 		now:    time.Now,
 		nonce:  randomNonce,
+		wait:   waitContext,
 	}
 }
 
@@ -76,6 +86,17 @@ func (c *httpExampleCaller) get(ctx context.Context, baseURL, path, rawQuery, ac
 		}
 		result := HTTPResult{StatusCode: response.StatusCode, Body: body, Attempts: attempt}
 		if attempt < maxAttempts && (response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable) {
+			delay, retry := retryDelay(response)
+			if !retry {
+				return result, nil
+			}
+			wait := c.wait
+			if wait == nil {
+				wait = waitContext
+			}
+			if err := wait(ctx, delay); err != nil {
+				return result, err
+			}
 			continue
 		}
 		return result, nil
@@ -149,7 +170,7 @@ func (c *httpExampleCaller) do(request *http.Request) (*http.Response, []byte, e
 	if response.Body == nil {
 		return nil, nil, errHTTPExampleCall
 	}
-	body, readErr := io.ReadAll(response.Body)
+	body, readErr := io.ReadAll(io.LimitReader(response.Body, maxHTTPResponseBytes+1))
 	closeErr := response.Body.Close()
 	if readErr != nil {
 		return nil, nil, readErr
@@ -157,7 +178,47 @@ func (c *httpExampleCaller) do(request *http.Request) (*http.Response, []byte, e
 	if closeErr != nil {
 		return nil, nil, closeErr
 	}
+	if len(body) > maxHTTPResponseBytes {
+		return nil, nil, errHTTPExampleCall
+	}
 	return response, body, nil
+}
+
+func retryDelay(response *http.Response) (time.Duration, bool) {
+	if response.StatusCode != http.StatusTooManyRequests {
+		return retryBackoff, true
+	}
+	value := strings.TrimSpace(response.Header.Get("Retry-After"))
+	if value == "" {
+		return retryBackoff, true
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < '0' || value[i] > '9' {
+			return retryBackoff, true
+		}
+	}
+	seconds, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || seconds > uint64(maxRetryWait/time.Second) {
+		return 0, false
+	}
+	return time.Duration(seconds) * time.Second, true
+}
+
+func waitContext(ctx context.Context, delay time.Duration) error {
+	if ctx == nil {
+		return errInvalidInput
+	}
+	if delay <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
 }
 
 func exampleRequestURL(baseURL, path, rawQuery string) (string, error) {

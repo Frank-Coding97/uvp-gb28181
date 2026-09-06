@@ -2,6 +2,7 @@ package openapisign
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -44,6 +45,7 @@ func TestOpenAPIHTTPExampleGETRetries429And503WithFreshSignatures(t *testing.T) 
 			}))
 
 			caller := newHTTPExampleCaller(server.Client())
+			caller.wait = func(context.Context, time.Duration) error { return nil }
 			clockValue := int64(1700000000)
 			caller.now = func() time.Time {
 				value := clockValue
@@ -150,6 +152,162 @@ func TestOpenAPIHTTPExampleGETTimeoutRetriesOnceWithFreshSignature(t *testing.T)
 	}
 }
 
+func TestOpenAPIHTTPExampleClientTimeoutIsBoundedInCopy(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		input time.Duration
+		want  time.Duration
+	}{
+		{name: "zero", input: 0, want: defaultHTTPTimeout},
+		{name: "too-long", input: defaultHTTPTimeout + time.Second, want: defaultHTTPTimeout},
+		{name: "short", input: time.Second, want: time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Timeout: tc.input}
+			caller := newHTTPExampleCaller(client)
+			if caller.client.Timeout != tc.want {
+				t.Fatalf("copied timeout = %s, want %s", caller.client.Timeout, tc.want)
+			}
+			if client.Timeout != tc.input {
+				t.Fatalf("caller mutated input client timeout to %s", client.Timeout)
+			}
+		})
+	}
+}
+
+func TestOpenAPIHTTPExampleRejectsOversizedResponseBodyAndClosesIt(t *testing.T) {
+	fixture := loadFixture(t)
+	closed := false
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body: &trackingReadCloser{
+				Reader: strings.NewReader(strings.Repeat("x", maxHTTPResponseBytes+1)),
+				closed: &closed,
+			},
+		}, nil
+	})
+	caller := newHTTPExampleCaller(&http.Client{Transport: transport})
+	result, err := caller.get(context.Background(), "https://example.invalid", "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
+	if err == nil || result.Attempts != 1 || !closed {
+		t.Fatalf("oversized response = %#v, err=%v, closed=%v, want one generic failure and a closed body", result, err, closed)
+	}
+}
+
+func TestOpenAPIHTTPExampleGETHonorsRetryAfter(t *testing.T) {
+	fixture := loadFixture(t)
+	count := 0
+	waits := make([]time.Duration, 0, 1)
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		verifySignedRequest(t, fixture, r, body)
+		if count == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer server.Close()
+
+	caller := newHTTPExampleCaller(server.Client())
+	caller.wait = func(ctx context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		return nil
+	}
+	result, err := caller.get(context.Background(), server.URL, "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
+	if err != nil || result.StatusCode != http.StatusOK || result.Attempts != 2 || count != 2 {
+		t.Fatalf("Retry-After result = %#v, err=%v, count=%d, want two attempts ending 200", result, err, count)
+	}
+	if len(waits) != 1 || waits[0] != time.Second {
+		t.Fatalf("Retry-After waits = %v, want [1s]", waits)
+	}
+}
+
+func TestOpenAPIHTTPExampleGETTooLongRetryAfterReturnsOriginalResponse(t *testing.T) {
+	fixture := loadFixture(t)
+	count := 0
+	waitCalled := false
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		w.Header().Set("Retry-After", "2")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("retry later"))
+	}))
+	defer server.Close()
+
+	caller := newHTTPExampleCaller(server.Client())
+	caller.wait = func(context.Context, time.Duration) error {
+		waitCalled = true
+		return nil
+	}
+	result, err := caller.get(context.Background(), server.URL, "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
+	if err != nil || result.StatusCode != http.StatusTooManyRequests || result.Attempts != 1 || count != 1 || waitCalled {
+		t.Fatalf("long Retry-After result = %#v, err=%v, count=%d, waitCalled=%v, want original 429 without wait/retry", result, err, count, waitCalled)
+	}
+}
+
+func TestOpenAPIHTTPExampleGETRetryWaitHonorsContextCancellation(t *testing.T) {
+	fixture := loadFixture(t)
+	count := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		w.Header().Set("Retry-After", "1")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("retry later"))
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	caller := newHTTPExampleCaller(server.Client())
+	caller.wait = func(ctx context.Context, delay time.Duration) error {
+		cancel()
+		return waitContext(ctx, delay)
+	}
+	result, err := caller.get(ctx, server.URL, "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
+	if !errors.Is(err, context.Canceled) || result.StatusCode != http.StatusTooManyRequests || result.Attempts != 1 || count != 1 {
+		t.Fatalf("canceled Retry-After result = %#v, err=%v, count=%d, want canceled one-attempt response", result, err, count)
+	}
+}
+
+func TestOpenAPIHTTPExampleGETRetryBoundStopsAfterTwoFailures(t *testing.T) {
+	fixture := loadFixture(t)
+	count := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count++
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("unavailable"))
+	}))
+	defer server.Close()
+
+	caller := newHTTPExampleCaller(server.Client())
+	caller.wait = func(context.Context, time.Duration) error { return nil }
+	result, err := caller.get(context.Background(), server.URL, "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
+	if err != nil || result.StatusCode != http.StatusServiceUnavailable || result.Attempts != 2 || count != 2 {
+		t.Fatalf("two failed GET responses = %#v, err=%v, count=%d, want exactly two attempts", result, err, count)
+	}
+}
+
+func TestOpenAPIHTTPExampleRejectsPlainHTTP(t *testing.T) {
+	fixture := loadFixture(t)
+	count := 0
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		count++
+		return nil, errors.New("transport must not be called")
+	})}
+	result, err := Get(context.Background(), client, "http://example.invalid", "/openapi/v1/devices", "", fixture.AccessKey, fixture.SecretKey, fixture.Audience)
+	if err == nil || result.Attempts != 1 || count != 0 {
+		t.Fatalf("plain HTTP result = %#v, err=%v, transport calls=%d, want rejection before transport", result, err, count)
+	}
+}
+
 func TestOpenAPIHTTPExamplePOSTDoesNotRetryStatusResponses(t *testing.T) {
 	fixture := loadFixture(t)
 	body := []byte(`{"protocol":"https-flv"}`)
@@ -239,4 +397,14 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closed *bool
+}
+
+func (r *trackingReadCloser) Close() error {
+	*r.closed = true
+	return nil
 }
