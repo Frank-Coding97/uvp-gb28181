@@ -42,6 +42,7 @@ import javax.crypto.spec.SecretKeySpec;
 public final class OpenAPISignExample {
     private static final int MAX_BODY_BYTES = 64 * 1024;
     private static final int MAX_QUERY_BYTES = 8 * 1024;
+    private static final int MAX_JSON_DEPTH = 64;
     private static final Charset UTF8 = StandardCharsets.UTF_8;
 
     private OpenAPISignExample() {
@@ -57,7 +58,8 @@ public final class OpenAPISignExample {
         System.exit(2);
     }
 
-    private static final class Request {
+    /** The request fields covered by the v1 signature. The body is raw bytes. */
+    public static final class Request {
         private final String method;
         private final String path;
         private final String rawQuery;
@@ -68,7 +70,7 @@ public final class OpenAPISignExample {
         private final String nonce;
         private final String audience;
 
-        private Request(String method, String path, String rawQuery, String contentType,
+        public Request(String method, String path, String rawQuery, String contentType,
                 byte[] body, String accessKey, String timestamp, String nonce, String audience) {
             this.method = method;
             this.path = path;
@@ -92,25 +94,6 @@ public final class OpenAPISignExample {
         private String[] contentType = new String[0];
         private String[] contentEncoding = new String[0];
         private String[] methodOverride = new String[0];
-    }
-
-    private static final class Headers {
-        private final String signVersion;
-        private final String accessKey;
-        private final String timestamp;
-        private final String nonce;
-        private final String signature;
-        private final String contentType;
-
-        private Headers(String signVersion, String accessKey, String timestamp,
-                String nonce, String signature, String contentType) {
-            this.signVersion = signVersion;
-            this.accessKey = accessKey;
-            this.timestamp = timestamp;
-            this.nonce = nonce;
-            this.signature = signature;
-            this.contentType = contentType;
-        }
     }
 
     private static String canonical(Request input) {
@@ -139,13 +122,14 @@ public final class OpenAPISignExample {
                 method, input.path, query, contentType, bodyHash, input.audience);
     }
 
-    private static String sign(Request input, String secretKey) {
+    /** Signs one request with the decoded 32-byte base64url-no-padding SK. */
+    public static String sign(Request input, String secretKey) {
         byte[] key = decodeSecretKey(secretKey);
         byte[] canonical = utf8(canonical(input));
         return hex(hmacSha256(key, canonical));
     }
 
-    private static Headers parseHeaders(String method, HeaderValues values) {
+    private static void validateHeaders(String method, HeaderValues values) {
         String normalizedMethod = normalizeMethod(method);
         require(values != null);
         String signVersion = oneHeader(values.signVersion);
@@ -161,8 +145,6 @@ public final class OpenAPISignExample {
         } else {
             require(values.contentType.length == 1 && "application/json".equals(values.contentType[0]));
         }
-        String contentType = values.contentType.length == 1 ? values.contentType[0] : "";
-        return new Headers(signVersion, accessKey, timestamp, nonce, signature, contentType);
     }
 
     private static String oneHeader(String[] values) {
@@ -439,7 +421,12 @@ public final class OpenAPISignExample {
         new JsonParser(strictDecode(body)).parseDocument();
     }
 
-    /** A small strict streaming JSON parser used only to reject duplicate keys. */
+    /*
+     * This is not a general JSON library. It is a small, strict, bounded
+     * validator for the published flat request body and the local fixture.
+     * The depth limit is intentional: callers must not treat this example as
+     * proof that arbitrary deep JSON is supported by the service.
+     */
     private static final class JsonParser {
         private final String text;
         private int position;
@@ -449,13 +436,14 @@ public final class OpenAPISignExample {
         }
 
         private Object parseDocument() {
-            Object value = parseValue();
+            Object value = parseValue(0);
             skipWhitespace();
             require(position == text.length());
             return value;
         }
 
-        private Object parseValue() {
+        private Object parseValue(int depth) {
+            require(depth <= MAX_JSON_DEPTH);
             skipWhitespace();
             require(position < text.length());
             char current = text.charAt(position);
@@ -463,10 +451,10 @@ public final class OpenAPISignExample {
                 return parseString();
             }
             if (current == '{') {
-                return parseObject();
+                return parseObject(depth);
             }
             if (current == '[') {
-                return parseArray();
+                return parseArray(depth);
             }
             if (text.startsWith("true", position)) {
                 position += 4;
@@ -483,7 +471,7 @@ public final class OpenAPISignExample {
             return parseNumber();
         }
 
-        private Map<String, Object> parseObject() {
+        private Map<String, Object> parseObject(int depth) {
             require(text.charAt(position++) == '{');
             Map<String, Object> result = new LinkedHashMap<String, Object>();
             skipWhitespace();
@@ -497,7 +485,7 @@ public final class OpenAPISignExample {
                 require(!result.containsKey(key));
                 skipWhitespace();
                 require(consume(':'));
-                result.put(key, parseValue());
+                result.put(key, parseValue(depth + 1));
                 skipWhitespace();
                 if (consume('}')) {
                     return result;
@@ -506,7 +494,7 @@ public final class OpenAPISignExample {
             }
         }
 
-        private List<Object> parseArray() {
+        private List<Object> parseArray(int depth) {
             require(text.charAt(position++) == '[');
             List<Object> result = new ArrayList<Object>();
             skipWhitespace();
@@ -514,7 +502,7 @@ public final class OpenAPISignExample {
                 return result;
             }
             while (true) {
-                result.add(parseValue());
+                result.add(parseValue(depth + 1));
                 skipWhitespace();
                 if (consume(']')) {
                     return result;
@@ -560,7 +548,18 @@ public final class OpenAPISignExample {
                         result.append('\t');
                         break;
                     case 'u':
-                        result.append(parseUnicodeEscape());
+                        char escapedCode = parseUnicodeEscape();
+                        if (Character.isHighSurrogate(escapedCode)) {
+                            require(position + 1 < text.length() && text.charAt(position) == '\\'
+                                    && text.charAt(position + 1) == 'u');
+                            position += 2;
+                            char lowCode = parseUnicodeEscape();
+                            require(Character.isLowSurrogate(lowCode));
+                            result.append(escapedCode).append(lowCode);
+                        } else {
+                            require(!Character.isLowSurrogate(escapedCode));
+                            result.append(escapedCode);
+                        }
                         break;
                     default:
                         throw invalid();
@@ -730,6 +729,41 @@ public final class OpenAPISignExample {
                 sign(duplicateBody, secretKey);
             }
         });
+        final Request loneSurrogate = new Request(post.method, post.path, post.rawQuery, post.contentType,
+                utf8("{\"protocol\":\"" + "\\u" + "D800\"}"),
+                post.accessKey, post.timestamp, post.nonce, post.audience);
+        expectFailure(new Action() {
+            @Override
+            public void run() {
+                sign(loneSurrogate, secretKey);
+            }
+        });
+        final Request invalidUtf8 = new Request(post.method, post.path, post.rawQuery, post.contentType,
+                new byte[] {'{', '"', 'p', 'r', 'o', 't', 'o', 'c', 'o', 'l', '"', ':', '"', (byte) 0xff, '"', '}'},
+                post.accessKey, post.timestamp, post.nonce, post.audience);
+        expectFailure(new Action() {
+            @Override
+            public void run() {
+                sign(invalidUtf8, secretKey);
+            }
+        });
+        StringBuilder deeplyNestedBody = new StringBuilder();
+        for (int i = 0; i < 16384; i++) {
+            deeplyNestedBody.append('[');
+        }
+        deeplyNestedBody.append('0');
+        for (int i = 0; i < 16384; i++) {
+            deeplyNestedBody.append(']');
+        }
+        final Request deeplyNested = new Request(post.method, post.path, post.rawQuery, post.contentType,
+                utf8(deeplyNestedBody.toString()), post.accessKey, post.timestamp, post.nonce, post.audience);
+        require(deeplyNested.body.length <= MAX_BODY_BYTES);
+        expectFailure(new Action() {
+            @Override
+            public void run() {
+                sign(deeplyNested, secretKey);
+            }
+        });
 
         Request lowerMethod = new Request("get", base.path, base.rawQuery, base.contentType, base.body,
                 base.accessKey, base.timestamp, base.nonce, base.audience);
@@ -747,7 +781,7 @@ public final class OpenAPISignExample {
         valid.timestamp = new String[] {timestamp};
         valid.nonce = new String[] {nonce};
         valid.signature = new String[] {stringField(first, "signature")};
-        parseHeaders("GET", valid);
+        validateHeaders("GET", valid);
         HeaderValues duplicateHeader = copyHeaders(valid);
         duplicateHeader.accessKey = new String[] {accessKey, accessKey};
         expectHeaderFailure(duplicateHeader, "GET");
@@ -764,7 +798,7 @@ public final class OpenAPISignExample {
         HeaderValues validPost = copyHeaders(valid);
         validPost.signature = new String[] {stringField(mapAt(vectors, 1), "signature")};
         validPost.contentType = new String[] {"application/json"};
-        parseHeaders("POST", validPost);
+        validateHeaders("POST", validPost);
         HeaderValues duplicateContentType = copyHeaders(validPost);
         duplicateContentType.contentType = new String[] {"application/json", "application/json"};
         expectHeaderFailure(duplicateContentType, "POST");
@@ -839,7 +873,7 @@ public final class OpenAPISignExample {
         expectFailure(new Action() {
             @Override
             public void run() {
-                parseHeaders(method, values);
+                validateHeaders(method, values);
             }
         });
     }
