@@ -147,37 +147,43 @@ func (s *OpenAPIRevocationStore) Progress(ctx context.Context, clientID int64) (
 		return OpenAPIRevocationProgress{}, ErrOpenAPIRevocationUnavailable
 	}
 	ctx = normalizeOpenAPIRevocationContext(ctx)
-	var grantIDs []string
-	if result := s.db.WithContext(ctx).Model(&models.PlayGrant{}).
-		Where("client_id = ? AND state = ?", clientID, models.GrantStateRevoked).
-		Order("grant_id ASC").Pluck("grant_id", &grantIDs); result.Error != nil {
-		return OpenAPIRevocationProgress{}, ErrOpenAPIRevocationUnavailable
-	}
-	if len(grantIDs) == 0 {
-		return OpenAPIRevocationProgress{Status: OpenAPIRevocationStatusUnknown}, nil
-	}
-
-	var pending int64
-	if result := s.db.WithContext(ctx).Model(&models.Viewer{}).
-		Where("grant_id IN ? AND state IN ?", grantIDs, openAPIPendingViewerStates).
-		Count(&pending); result.Error != nil {
-		return OpenAPIRevocationProgress{}, ErrOpenAPIRevocationUnavailable
-	}
-	var closed int64
-	if result := s.db.WithContext(ctx).Model(&models.Viewer{}).
-		Where("grant_id IN ? AND state = ?", grantIDs, models.ViewerStateClosed).
-		Count(&closed); result.Error != nil {
+	// Keep this as one aggregate statement. The previous grant-ID list plus
+	// two IN queries could exceed SQL Server's 2100-parameter limit and could
+	// observe different snapshots between the three reads. The LEFT JOIN also
+	// preserves revoked grants without a viewer row so the Hook-before-bind
+	// window remains conservatively unknown.
+	var summary openAPIRevocationProgressSummary
+	result := s.db.WithContext(ctx).
+		Table((models.PlayGrant{}).TableName()+" AS g").
+		Select(`
+			COUNT(DISTINCT g.grant_id) AS total_grants,
+			COUNT(DISTINCT CASE WHEN v.id IS NULL THEN g.grant_id END) AS missing_viewers,
+			COUNT(DISTINCT CASE WHEN v.state IN ('pending', 'active', 'revoke_pending') THEN v.id END) AS pending_viewers,
+			COUNT(DISTINCT CASE WHEN v.state = 'closed' THEN v.id END) AS closed_viewers,
+			COUNT(DISTINCT CASE WHEN v.id IS NOT NULL AND v.state NOT IN ('pending', 'active', 'revoke_pending', 'closed') THEN v.id END) AS unknown_viewers`).
+		Joins("LEFT JOIN "+(models.Viewer{}).TableName()+" AS v ON v.grant_id = g.grant_id").
+		Where("g.client_id = ? AND g.state = ?", clientID, models.GrantStateRevoked).
+		Scan(&summary)
+	if result.Error != nil {
 		return OpenAPIRevocationProgress{}, ErrOpenAPIRevocationUnavailable
 	}
 
 	status := OpenAPIRevocationStatusUnknown
 	switch {
-	case pending > 0:
+	case summary.Pending > 0:
 		status = OpenAPIRevocationStatusPending
-	case closed == int64(len(grantIDs)):
+	case summary.Total > 0 && summary.Missing == 0 && summary.Unknown == 0 && summary.Closed == summary.Total:
 		status = OpenAPIRevocationStatusClosed
 	}
-	return OpenAPIRevocationProgress{Pending: pending, Closed: closed, Status: status}, nil
+	return OpenAPIRevocationProgress{Pending: summary.Pending, Closed: summary.Closed, Status: status}, nil
+}
+
+type openAPIRevocationProgressSummary struct {
+	Total   int64 `gorm:"column:total_grants"`
+	Missing int64 `gorm:"column:missing_viewers"`
+	Pending int64 `gorm:"column:pending_viewers"`
+	Closed  int64 `gorm:"column:closed_viewers"`
+	Unknown int64 `gorm:"column:unknown_viewers"`
 }
 
 var openAPINonTerminalGrantStates = []models.GrantState{

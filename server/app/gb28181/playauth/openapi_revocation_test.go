@@ -51,8 +51,9 @@ func newOpenAPIRevocationFixture(t *testing.T) revocationFixture {
 		&models.Client{}, &models.ClientScope{}, &models.Audit{},
 		&models.PlayGrant{}, &models.Viewer{}, &appmodels.SysOperationLog{},
 	))
-	store := NewOpenAPIRevocationStore(db, func() time.Time { return clock })
-	return revocationFixture{db: db, store: store, clock: clock}
+	fixture := revocationFixture{db: db, clock: clock}
+	fixture.store = NewOpenAPIRevocationStore(db, func() time.Time { return fixture.clock })
+	return fixture
 }
 
 func (f revocationFixture) newService(t *testing.T, store openapiclient.RevocationIntentStore) *openapiclient.Service {
@@ -290,8 +291,11 @@ func TestOpenAPIRevocationStoreReplayPreservesGrantTombstoneAndWorkerRetry(t *te
 	firstUpdatedAt := firstGrant.UpdatedAt
 	firstRetryAt := firstViewer.RetryAt
 	require.NotNil(t, firstRetryAt)
-
 	intent := openapiclient.RevocationIntent{ClientID: disabled.ID, ClientEpoch: disabled.AuthEpoch, Reason: "client.disabled", CreatedAt: f.clock}
+	f.clock = f.clock.Add(time.Minute)
+	require.NotEqual(t, f.clock, firstUpdatedAt)
+	require.NotEqual(t, f.clock, firstRetryAt.UTC())
+
 	require.NoError(t, f.db.Transaction(func(tx *gorm.DB) error {
 		return f.store.RecordRevocationIntent(context.Background(), tx, intent)
 	}))
@@ -372,4 +376,96 @@ func TestOpenAPIRevocationProgressIsConservativeWithoutWorkerEvidence(t *testing
 	require.EqualValues(t, 0, progress.Pending)
 	require.EqualValues(t, 1, progress.Closed)
 	require.Equal(t, OpenAPIRevocationStatusClosed, progress.Status)
+}
+
+func TestOpenAPIRevocationProgressUsesAggregateForLargeGrantSetAndUnknownViewer(t *testing.T) {
+	f := newOpenAPIRevocationFixture(t)
+	const grantCount = 2305
+	grants := make([]models.PlayGrant, grantCount)
+	for i := range grants {
+		grants[i] = revocationGrant(fmt.Sprintf("10000000-0000-4000-8000-%012d", i+1), testClientID, openAPIPlayScope, 1, 1, models.GrantStateRevoked, f.clock)
+	}
+	// Keep each INSERT below SQLite's variable limit. The resulting dataset is
+	// intentionally larger than SQL Server's 2100-parameter limit for the old
+	// grant-ID IN-list implementation.
+	require.NoError(t, f.db.CreateInBatches(&grants, 20).Error)
+
+	progress, err := f.store.Progress(context.Background(), testClientID)
+	require.NoError(t, err)
+	require.Zero(t, progress.Pending)
+	require.Zero(t, progress.Closed)
+	require.Equal(t, OpenAPIRevocationStatusUnknown, progress.Status, "missing viewer rows are not proof of clean closure")
+
+	unknown := revocationViewer(grants[0].GrantID, 9001, models.ViewerStateClosed, f.clock)
+	require.NoError(t, f.db.Create(&unknown).Error)
+	require.NoError(t, f.db.Exec("PRAGMA ignore_check_constraints = ON").Error)
+	require.NoError(t, f.db.Model(&models.Viewer{}).Where("id = ?", unknown.ID).Update("state", "worker_unknown").Error)
+	require.NoError(t, f.db.Exec("PRAGMA ignore_check_constraints = OFF").Error)
+	progress, err = f.store.Progress(context.Background(), testClientID)
+	require.NoError(t, err)
+	require.Zero(t, progress.Pending)
+	require.Zero(t, progress.Closed)
+	require.Equal(t, OpenAPIRevocationStatusUnknown, progress.Status, "an unrecognized viewer state must remain conservative")
+
+	closed := revocationViewer(grants[1].GrantID, 9002, models.ViewerStateClosed, f.clock)
+	require.NoError(t, f.db.Create(&closed).Error)
+	progress, err = f.store.Progress(context.Background(), testClientID)
+	require.NoError(t, err)
+	require.Zero(t, progress.Pending)
+	require.EqualValues(t, 1, progress.Closed)
+	require.Equal(t, OpenAPIRevocationStatusUnknown, progress.Status, "unknown and missing rows prevent a clear result")
+
+	active := revocationViewer(grants[2].GrantID, 9003, models.ViewerStateActive, f.clock)
+	require.NoError(t, f.db.Create(&active).Error)
+	progress, err = f.store.Progress(context.Background(), testClientID)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, progress.Pending)
+	require.EqualValues(t, 1, progress.Closed)
+	require.Equal(t, OpenAPIRevocationStatusPending, progress.Status)
+}
+
+func disableOpenAPIRevocationFixtureClient(t *testing.T, fixture *openAPIGrantFixture) openapiclient.RevocationIntent {
+	t.Helper()
+	nextEpoch := int64(3)
+	require.NoError(t, fixture.db.Model(&models.Client{}).Where("id = ?", testClientID).Updates(map[string]any{
+		"status": models.StatusDisabled, "auth_epoch": nextEpoch, "updated_at": fixture.now,
+	}).Error)
+	return openapiclient.RevocationIntent{ClientID: testClientID, ClientEpoch: nextEpoch, Reason: "client.disabled", CreatedAt: fixture.now}
+}
+
+func TestOpenAPIRevocationStoreBindThenRevokeQueuesBoundViewer(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, reservation := issueOpenAPITestGrant(t, fixture)
+	bound, err := service.BindViewer(context.Background(), token, openAPIViewerRequest("bind-before-revoke"))
+	require.NoError(t, err)
+	require.Equal(t, models.ViewerStateActive, bound.State)
+
+	store := NewOpenAPIRevocationStore(fixture.db, func() time.Time { return fixture.now })
+	intent := disableOpenAPIRevocationFixtureClient(t, fixture)
+	require.NoError(t, fixture.db.Transaction(func(tx *gorm.DB) error {
+		return store.RecordRevocationIntent(context.Background(), tx, intent)
+	}))
+	require.Equal(t, models.GrantStateRevoked, requireGrantState(t, fixture.db, reservation.GrantID, models.GrantStateRevoked).State)
+	viewer := requireViewer(t, fixture.db, reservation.GrantID)
+	require.Equal(t, models.ViewerStateRevokePending, viewer.State)
+	require.Equal(t, 0, viewer.Attempts)
+}
+
+func TestOpenAPIRevocationStoreRevokeThenBindRejectsWithoutViewer(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, reservation := issueOpenAPITestGrant(t, fixture)
+	store := NewOpenAPIRevocationStore(fixture.db, func() time.Time { return fixture.now })
+	intent := disableOpenAPIRevocationFixtureClient(t, fixture)
+	require.NoError(t, fixture.db.Transaction(func(tx *gorm.DB) error {
+		return store.RecordRevocationIntent(context.Background(), tx, intent)
+	}))
+	require.Equal(t, models.GrantStateRevoked, requireGrantState(t, fixture.db, reservation.GrantID, models.GrantStateRevoked).State)
+
+	_, err := service.BindViewer(context.Background(), token, openAPIViewerRequest("bind-after-revoke"))
+	require.ErrorIs(t, err, ErrOpenAPIViewerDenied)
+	var viewerCount int64
+	require.NoError(t, fixture.db.Model(&models.Viewer{}).Where("grant_id = ?", reservation.GrantID).Count(&viewerCount).Error)
+	require.Zero(t, viewerCount)
 }
