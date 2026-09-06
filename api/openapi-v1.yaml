@@ -4,13 +4,16 @@ info:
   version: 1.0.0
   description: >-
     Server-to-server machine-client boundary. The access key identifies a
-    client and the server resolves its owner and enabled scopes; the secret
-    key is never returned to a client or accepted from a browser.
+    client and the server resolves its owner and enabled scopes. The external
+    business API never returns SK; controlled administrative creation or
+    rotation displays it once for secure server-side delivery.
 servers:
   - url: /
 x-uvp-secret-handling: >-
-  SK is stored and used by the server only; it must never be returned to a
-  browser, frontend, mobile app, or API response.
+  The external business API never returns SK. The controlled administrative
+  create or rotate response is the sole one-time display for secure delivery;
+  the receiving backend must store it server-side. Never embed SK in a browser,
+  frontend, mobile app, or browser persistent storage.
 x-uvp-signature-contract:
   algorithm: HMAC-SHA256
   requiredHeaders:
@@ -25,12 +28,44 @@ x-uvp-signature-contract:
     - pageSize
     - status
   pathRule: ASCII literal paths only; encoded paths and ambiguous percent escapes are rejected.
-  queryRule: Parse key=value pairs, reject raw +, duplicate or empty keys, missing equals, semicolons, and invalid percent escapes; decode once, RFC3986-encode, then sort.
-  duplicateRule: Duplicate headers or query keys, comma-joined values, and whitespace are rejected.
+  queryRule: Parse key=value pairs, reject raw +, duplicate or empty keys, missing equals, semicolons, and invalid percent escapes; spaces must be encoded as %20 and remain valid; decode once, RFC3986-encode, then sort.
+  duplicateRule: Duplicate headers or query keys and comma-joined header values are rejected; leading/trailing whitespace is rejected only in headers.
   utf8Rule: Query and JSON strings must be valid UTF-8; invalid UTF-8 is rejected.
+  canonical:
+    lineSeparator: LF
+    finalLineHasNoLF: true
+    lines:
+      - 'UVP-HMAC-SHA256/1'
+      - '<AK>'
+      - '<Timestamp>'
+      - '<Nonce>'
+      - '<UPPERCASE HTTP Method>'
+      - '<CanonicalPath>'
+      - '<CanonicalQuery, possibly empty>'
+      - '<ContentType: application/json or empty>'
+      - '<BodySHA256, lowercase hexadecimal>'
+      - '<ServiceAudience, deployment-fixed OpenAPI audience>'
+    hmacKey: Decode the base64url-without-padding SK to 32 bytes before HMAC; never use the displayed SK text bytes.
+    audience:
+      source: deployment-fixed
+      clientSupplied: false
+    timestamp:
+      maxSkewSeconds: 300
+      rule: absolute difference from server time must be at most maxSkewSeconds
+    nonce:
+      uniqueBy: (client_id, nonce)
+      persistent: true
+      survivesSecretRotation: true
 x-uvp-retry-policy:
   GET: Retry only with a fresh timestamp, nonce, and signature.
   POST: Do not automatically retry after a timeout; callers must decide whether to retry.
+x-uvp-error-classification:
+  missingRequiredAuthHeader: 401
+  malformedAuthHeader: 400
+  unknownInactiveOrInvalidHMAC: 401
+  expired: 401
+  replayed: 401
+  dependencyUnavailable: 503
 x-uvp-request-limits:
   bodyBytes: 65536
   queryBytes: 8192
@@ -83,7 +118,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
         '401': &authenticationFailedResponse
-          description: Authentication failed, expired, or replayed
+          description: Authentication failed (AUTHENTICATION_FAILED), expired (REQUEST_EXPIRED), or replayed (REQUEST_REPLAYED).
           headers: *noStoreHeader
           content: *errorContent
         '403': &capabilityDeniedResponse
@@ -95,13 +130,8 @@ paths:
           headers: *noStoreHeader
           content: *errorContent
         '405': &methodNotAllowedResponse
-          description: Method not allowed
+          description: Method not allowed; an HTTP HEAD response has no body.
           headers: *noStoreHeader
-          content: *errorContent
-        '409': &conflictResponse
-          description: Conflict
-          headers: *noStoreHeader
-          content: *errorContent
         '429': &rateLimitedResponse
           description: Rate limited or quota exceeded
           headers:
@@ -153,7 +183,6 @@ paths:
         '403': *capabilityDeniedResponse
         '404': *resourceNotFoundResponse
         '405': *methodNotAllowedResponse
-        '409': *conflictResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/status:
@@ -189,7 +218,6 @@ paths:
         '403': *capabilityDeniedResponse
         '404': *resourceNotFoundResponse
         '405': *methodNotAllowedResponse
-        '409': *conflictResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/channels:
@@ -229,7 +257,6 @@ paths:
         '403': *capabilityDeniedResponse
         '404': *resourceNotFoundResponse
         '405': *methodNotAllowedResponse
-        '409': *conflictResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/channels/{channelId}:
@@ -266,7 +293,6 @@ paths:
         '403': *capabilityDeniedResponse
         '404': *resourceNotFoundResponse
         '405': *methodNotAllowedResponse
-        '409': *conflictResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/channels/{channelId}/status:
@@ -303,7 +329,6 @@ paths:
         '403': *capabilityDeniedResponse
         '404': *resourceNotFoundResponse
         '405': *methodNotAllowedResponse
-        '409': *conflictResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
   /openapi/v1/devices/{deviceId}/channels/{channelId}/live-authorizations:
@@ -354,7 +379,6 @@ paths:
         '403': *capabilityDeniedResponse
         '404': *resourceNotFoundResponse
         '405': *methodNotAllowedResponse
-        '409': *conflictResponse
         '429': *rateLimitedResponse
         '503': *serviceUnavailableResponse
 components:
@@ -385,10 +409,10 @@ components:
       name: X-UVP-Timestamp
       in: header
       required: true
-      description: Unix timestamp in seconds used in the canonical request.
+      description: Unix timestamp in seconds, decimal without leading zero, at most 19 digits and no greater than 9223372036854775807.
       schema:
         type: string
-        pattern: '^(0|[1-9][0-9]{0,19})$'
+        pattern: '^(0|[1-9][0-9]{0,18})$'
     Nonce:
       name: X-UVP-Nonce
       in: header
@@ -423,7 +447,7 @@ components:
       name: page
       in: query
       required: false
-      description: Positive one-based page number; defaults to 1.
+      description: Positive one-based page number; defaults to 1 when omitted; an explicit empty value is rejected.
       schema:
         type: integer
         format: int32
@@ -433,7 +457,7 @@ components:
       name: pageSize
       in: query
       required: false
-      description: Positive page size, at most 100; defaults to 20.
+      description: Positive page size, at most 100; defaults to 20 when omitted; an explicit empty value is rejected.
       schema:
         type: integer
         format: int32
@@ -444,7 +468,7 @@ components:
       name: keyword
       in: query
       required: false
-      description: Valid UTF-8 search text, limited to 100 Unicode characters.
+      description: Valid UTF-8 search text, limited to 100 Unicode characters; an empty value is valid.
       schema:
         type: string
         maxLength: 100
@@ -452,7 +476,7 @@ components:
       name: status
       in: query
       required: false
-      description: Optional device or channel status filter.
+      description: Optional device or channel status filter; an explicit empty value is rejected.
       schema:
         type: string
         enum: [online, offline, unknown]

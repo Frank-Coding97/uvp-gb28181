@@ -2,12 +2,17 @@ package integration
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -20,14 +25,15 @@ import (
 )
 
 type openAPIContract struct {
-	OpenAPI           string                                  `yaml:"openapi"`
-	Info              contractInfo                            `yaml:"info"`
-	SecretHandling    string                                  `yaml:"x-uvp-secret-handling"`
-	SignatureContract contractSignatureContract               `yaml:"x-uvp-signature-contract"`
-	RetryPolicy       map[string]string                       `yaml:"x-uvp-retry-policy"`
-	RequestLimits     contractRequestLimits                   `yaml:"x-uvp-request-limits"`
-	Paths             map[string]map[string]contractOperation `yaml:"paths"`
-	Components        contractComponents                      `yaml:"components"`
+	OpenAPI             string                                  `yaml:"openapi"`
+	Info                contractInfo                            `yaml:"info"`
+	SecretHandling      string                                  `yaml:"x-uvp-secret-handling"`
+	SignatureContract   contractSignatureContract               `yaml:"x-uvp-signature-contract"`
+	RetryPolicy         map[string]string                       `yaml:"x-uvp-retry-policy"`
+	ErrorClassification map[string]int                          `yaml:"x-uvp-error-classification"`
+	RequestLimits       contractRequestLimits                   `yaml:"x-uvp-request-limits"`
+	Paths               map[string]map[string]contractOperation `yaml:"paths"`
+	Components          contractComponents                      `yaml:"components"`
 }
 
 type contractInfo struct {
@@ -48,13 +54,40 @@ type contractSecurity struct {
 }
 
 type contractSignatureContract struct {
-	Algorithm       string   `yaml:"algorithm"`
-	RequiredHeaders []string `yaml:"requiredHeaders"`
-	QueryAllowlist  []string `yaml:"queryAllowlist"`
-	PathRule        string   `yaml:"pathRule"`
-	QueryRule       string   `yaml:"queryRule"`
-	DuplicateRule   string   `yaml:"duplicateRule"`
-	UTF8Rule        string   `yaml:"utf8Rule"`
+	Algorithm       string            `yaml:"algorithm"`
+	RequiredHeaders []string          `yaml:"requiredHeaders"`
+	QueryAllowlist  []string          `yaml:"queryAllowlist"`
+	PathRule        string            `yaml:"pathRule"`
+	QueryRule       string            `yaml:"queryRule"`
+	DuplicateRule   string            `yaml:"duplicateRule"`
+	UTF8Rule        string            `yaml:"utf8Rule"`
+	Canonical       canonicalContract `yaml:"canonical"`
+}
+
+type canonicalContract struct {
+	LineSeparator    string            `yaml:"lineSeparator"`
+	FinalLineHasNoLF bool              `yaml:"finalLineHasNoLF"`
+	Lines            []string          `yaml:"lines"`
+	HMACKey          string            `yaml:"hmacKey"`
+	Audience         audienceContract  `yaml:"audience"`
+	Timestamp        timestampContract `yaml:"timestamp"`
+	Nonce            nonceContract     `yaml:"nonce"`
+}
+
+type audienceContract struct {
+	Source         string `yaml:"source"`
+	ClientSupplied bool   `yaml:"clientSupplied"`
+}
+
+type timestampContract struct {
+	MaxSkewSeconds int    `yaml:"maxSkewSeconds"`
+	Rule           string `yaml:"rule"`
+}
+
+type nonceContract struct {
+	UniqueBy               string `yaml:"uniqueBy"`
+	Persistent             bool   `yaml:"persistent"`
+	SurvivesSecretRotation bool   `yaml:"survivesSecretRotation"`
 }
 
 type contractRequestLimits struct {
@@ -86,10 +119,11 @@ type contractParameterRef struct {
 }
 
 type contractParameter struct {
-	Name     string         `yaml:"name"`
-	In       string         `yaml:"in"`
-	Required bool           `yaml:"required"`
-	Schema   contractSchema `yaml:"schema"`
+	Name        string         `yaml:"name"`
+	In          string         `yaml:"in"`
+	Required    bool           `yaml:"required"`
+	Description string         `yaml:"description"`
+	Schema      contractSchema `yaml:"schema"`
 }
 
 type contractRequestBody struct {
@@ -159,8 +193,12 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Equal(t, "3.0.3", doc.OpenAPI)
 	require.NotEmpty(t, doc.Info.Title)
 	require.NotEmpty(t, doc.Info.Version)
-	require.Contains(t, strings.ToLower(doc.SecretHandling), "server")
-	require.Contains(t, strings.ToLower(doc.SecretHandling), "never")
+	secretHandling := strings.ToLower(doc.SecretHandling)
+	require.Contains(t, secretHandling, "external business api")
+	require.Contains(t, secretHandling, "administrative")
+	require.Contains(t, secretHandling, "one-time")
+	require.Contains(t, secretHandling, "server-side")
+	require.Contains(t, secretHandling, "browser")
 	require.Equal(t, "HMAC-SHA256", doc.SignatureContract.Algorithm)
 	require.Equal(t, requiredSignatureHeaders, doc.SignatureContract.RequiredHeaders)
 	require.Equal(t, []string{"keyword", "page", "pageSize", "status"}, doc.SignatureContract.QueryAllowlist)
@@ -169,13 +207,46 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Contains(t, strings.ToLower(doc.SignatureContract.QueryRule), "rfc3986")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.QueryRule), "raw +")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.QueryRule), "semicolon")
+	require.Contains(t, strings.ToLower(doc.SignatureContract.QueryRule), "%20")
+	require.Contains(t, strings.ToLower(doc.SignatureContract.QueryRule), "valid")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.DuplicateRule), "duplicate")
-	require.Contains(t, strings.ToLower(doc.SignatureContract.DuplicateRule), "whitespace")
+	require.Contains(t, strings.ToLower(doc.SignatureContract.DuplicateRule), "only in headers")
 	require.Contains(t, strings.ToLower(doc.SignatureContract.UTF8Rule), "utf-8")
+	require.Equal(t, "LF", doc.SignatureContract.Canonical.LineSeparator)
+	require.True(t, doc.SignatureContract.Canonical.FinalLineHasNoLF)
+	require.Equal(t, []string{
+		"UVP-HMAC-SHA256/1",
+		"<AK>",
+		"<Timestamp>",
+		"<Nonce>",
+		"<UPPERCASE HTTP Method>",
+		"<CanonicalPath>",
+		"<CanonicalQuery, possibly empty>",
+		"<ContentType: application/json or empty>",
+		"<BodySHA256, lowercase hexadecimal>",
+		"<ServiceAudience, deployment-fixed OpenAPI audience>",
+	}, doc.SignatureContract.Canonical.Lines)
+	require.Contains(t, strings.ToLower(doc.SignatureContract.Canonical.HMACKey), "base64url")
+	require.Contains(t, strings.ToLower(doc.SignatureContract.Canonical.HMACKey), "32 bytes")
+	require.Equal(t, "deployment-fixed", doc.SignatureContract.Canonical.Audience.Source)
+	require.False(t, doc.SignatureContract.Canonical.Audience.ClientSupplied)
+	require.Equal(t, 300, doc.SignatureContract.Canonical.Timestamp.MaxSkewSeconds)
+	require.Contains(t, strings.ToLower(doc.SignatureContract.Canonical.Timestamp.Rule), "absolute difference")
+	require.Equal(t, "(client_id, nonce)", doc.SignatureContract.Canonical.Nonce.UniqueBy)
+	require.True(t, doc.SignatureContract.Canonical.Nonce.Persistent)
+	require.True(t, doc.SignatureContract.Canonical.Nonce.SurvivesSecretRotation)
 	require.Contains(t, strings.ToLower(doc.RetryPolicy["GET"]), "fresh")
 	require.Contains(t, strings.ToLower(doc.RetryPolicy["GET"]), "nonce")
 	require.Contains(t, strings.ToLower(doc.RetryPolicy["POST"]), "do not")
 	require.Contains(t, strings.ToLower(doc.RetryPolicy["POST"]), "timeout")
+	require.Equal(t, map[string]int{
+		"missingRequiredAuthHeader":    401,
+		"malformedAuthHeader":          400,
+		"unknownInactiveOrInvalidHMAC": 401,
+		"expired":                      401,
+		"replayed":                     401,
+		"dependencyUnavailable":        503,
+	}, doc.ErrorClassification)
 	require.Equal(t, 65536, doc.RequestLimits.BodyBytes)
 	require.Equal(t, 8192, doc.RequestLimits.QueryBytes)
 	require.Contains(t, strings.ToLower(doc.RequestLimits.BodyHash), "original request bytes")
@@ -205,6 +276,7 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Equal(t, wantScopes, gotScopes, "contract scopes must equal the published capability catalog")
 
 	checkPublicDTOs(t, doc)
+	checkPublicRouteAST(t, doc)
 	checkInstalledBoundary(t, doc)
 }
 
@@ -248,7 +320,8 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		case "X-UVP-Access-Key":
 			require.Equal(t, "^uvp_[0-9a-f]{32}$", schema.Pattern)
 		case "X-UVP-Timestamp":
-			require.Equal(t, "^(0|[1-9][0-9]{0,19})$", schema.Pattern)
+			require.Equal(t, "^(0|[1-9][0-9]{0,18})$", schema.Pattern)
+			require.Contains(t, parameter.Description, "9223372036854775807")
 		case "X-UVP-Nonce":
 			require.Equal(t, "^[0-9a-f]{32}$", schema.Pattern)
 		case "X-UVP-Signature":
@@ -293,17 +366,21 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 			require.Equal(t, "string", schema.Type)
 			require.NotNil(t, schema.MaxLength)
 			require.Equal(t, 100, *schema.MaxLength)
+			require.Contains(t, parameter.Description, "empty value is valid")
 		case "page":
 			require.Equal(t, "integer", schema.Type)
 			require.Equal(t, 1, intValue(schema.Default))
 			require.Equal(t, 1, *schema.Minimum)
+			require.Contains(t, parameter.Description, "empty value is rejected")
 		case "pageSize":
 			require.Equal(t, "integer", schema.Type)
 			require.Equal(t, 20, intValue(schema.Default))
 			require.Equal(t, 1, *schema.Minimum)
 			require.Equal(t, 100, *schema.Maximum)
+			require.Contains(t, parameter.Description, "empty value is rejected")
 		case "status":
 			require.Equal(t, []string{"online", "offline", "unknown"}, schema.Enum)
+			require.Contains(t, parameter.Description, "empty value is rejected")
 		}
 	}
 	for _, name := range []string{"deviceId", "channelId"} {
@@ -316,12 +393,18 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 
 	require.NotEmpty(t, operation.Security)
 	require.Contains(t, operation.Security[0], "uvpHmac")
-	for _, status := range []string{"200", "400", "401", "403", "404", "405", "409", "429", "503"} {
+	require.NotContains(t, operation.Responses, "409", "metadata/media public contract must not classify replay as 409")
+	require.Contains(t, operation.Responses["401"].Description, "REQUEST_REPLAYED")
+	for _, status := range []string{"200", "400", "401", "403", "404", "405", "429", "503"} {
 		response, ok := operation.Responses[status]
 		require.Truef(t, ok, "%s %s missing response %s", route.method, route.path, status)
 		cacheControl, ok := response.Headers["Cache-Control"]
 		require.True(t, ok)
 		require.Equal(t, []string{"no-store"}, cacheControl.Schema.Enum)
+		if status == "405" {
+			require.Empty(t, response.Content, "HEAD/405 must not promise a response body")
+			continue
+		}
 		require.Len(t, response.Content, 1)
 		require.Contains(t, response.Content, "application/json")
 		if status == "429" {
@@ -347,7 +430,7 @@ func checkOperationContract(t *testing.T, doc openAPIContract, route contractRou
 		require.NotNil(t, operation.Responses["200"].Enabled)
 		require.False(t, *operation.Responses["200"].Enabled)
 	}
-	for _, status := range []string{"400", "401", "403", "404", "405", "409", "429", "503"} {
+	for _, status := range []string{"400", "401", "403", "404", "429", "503"} {
 		require.Equal(t, "#/components/schemas/ErrorResponse", operation.Responses[status].Content["application/json"].Schema.Ref)
 		schema := resolveResponseSchema(t, doc, operation.Responses[status])
 		require.Equal(t, "object", schema.Type)
@@ -435,6 +518,83 @@ func propertyNames(properties map[string]contractSchema) map[string]struct{} {
 	return names
 }
 
+type publicRouteRegistration struct {
+	method string
+	path   string
+	scope  string
+}
+
+func checkPublicRouteAST(t *testing.T, doc openAPIContract) {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	routeFile := filepath.Join(filepath.Dir(file), "..", "routes", "public.go")
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, routeFile, nil, 0)
+	require.NoError(t, err, "parse real public route registrar")
+
+	registrations := make([]publicRouteRegistration, 0, len(doc.Paths))
+	ast.Inspect(parsed, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || (selector.Sel.Name != "GET" && selector.Sel.Name != "POST") {
+			return true
+		}
+		receiver, ok := selector.X.(*ast.Ident)
+		if !ok || receiver.Name != "private" || len(call.Args) < 2 {
+			return true
+		}
+		pathLiteral, ok := call.Args[0].(*ast.BasicLit)
+		if !ok || pathLiteral.Kind != token.STRING {
+			return true
+		}
+		path, err := strconv.Unquote(pathLiteral.Value)
+		require.NoError(t, err)
+		handler, ok := call.Args[len(call.Args)-1].(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		handlerSelector, ok := handler.Fun.(*ast.SelectorExpr)
+		if !ok || handlerSelector.Sel.Name != "Handler" {
+			return true
+		}
+		gateway, ok := handlerSelector.X.(*ast.Ident)
+		if !ok || gateway.Name != "gateway" || len(handler.Args) != 1 {
+			return true
+		}
+		scopeLiteral, ok := handler.Args[0].(*ast.BasicLit)
+		if !ok || scopeLiteral.Kind != token.STRING {
+			return true
+		}
+		scope, err := strconv.Unquote(scopeLiteral.Value)
+		require.NoError(t, err)
+		registrations = append(registrations, publicRouteRegistration{
+			method: strings.ToLower(selector.Sel.Name),
+			path:   path,
+			scope:  scope,
+		})
+		return true
+	})
+
+	require.Len(t, registrations, len(doc.Paths), "real public registrar route count drifted from the contract")
+	seen := make(map[string]struct{}, len(registrations))
+	for _, registration := range registrations {
+		path := strings.NewReplacer(":deviceId", "{deviceId}", ":channelId", "{channelId}").Replace(registration.path)
+		key := registration.method + " " + path
+		_, duplicate := seen[key]
+		require.Falsef(t, duplicate, "duplicate real public route %s", key)
+		seen[key] = struct{}{}
+		operations, ok := doc.Paths[path]
+		require.Truef(t, ok, "real public route %s is absent from the contract", key)
+		operation, ok := operations[registration.method]
+		require.Truef(t, ok, "real public route %s has no contract operation", key)
+		require.Equal(t, registration.scope, operation.Scope, "real public route scope drifted for %s", key)
+	}
+}
+
 func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -460,6 +620,16 @@ func checkInstalledBoundary(t *testing.T, doc openAPIContract) {
 			require.False(t, *operation.Enabled)
 		}
 	}
+	wireServer := httptest.NewServer(root)
+	defer wireServer.Close()
+	headResponse, err := wireServer.Client().Head(wireServer.URL + "/openapi/v1/devices")
+	require.NoError(t, err)
+	defer headResponse.Body.Close()
+	require.Equal(t, 405, headResponse.StatusCode)
+	require.Equal(t, "no-store", headResponse.Header.Get("Cache-Control"))
+	headBody, err := io.ReadAll(headResponse.Body)
+	require.NoError(t, err)
+	require.Empty(t, headBody)
 	response := httptest.NewRecorder()
 	root.ServeHTTP(response, httptest.NewRequest("GET", "/api/gb28181/openapi-clients", nil))
 	require.Equal(t, 404, response.Code, "private management routes must not enter the public contract")
