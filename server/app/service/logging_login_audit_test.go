@@ -24,7 +24,7 @@ func (r *loggingLoginRecorder) RecordLogin(ctx context.Context, _ app.LoginLogEv
 	return r.err
 }
 
-func TestLoggingLoginAuditFailureUsesScopedSafeEvent(t *testing.T) {
+func TestLoggingAuditContextLoginFailureUsesScopedSafeEvent(t *testing.T) {
 	oldLog := app.ZapLog
 	t.Cleanup(func() { app.ZapLog = oldLog })
 	core, observed := observer.New(zap.InfoLevel)
@@ -52,7 +52,7 @@ func TestLoggingLoginAuditFailureUsesScopedSafeEvent(t *testing.T) {
 	require.Equal(t, "login-rid", failure.ContextMap()["request_id"])
 }
 
-func TestLoggingLoginAuditPanicIsIsolatedAndTyped(t *testing.T) {
+func TestLoggingAuditContextLoginPanicIsIsolatedAndTyped(t *testing.T) {
 	oldLog := app.ZapLog
 	t.Cleanup(func() { app.ZapLog = oldLog })
 	core, observed := observer.New(zap.InfoLevel)

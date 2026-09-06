@@ -76,7 +76,7 @@ func (s *SysJobsService) Create(c *gin.Context, req models.SysJobsCreateRequest)
 	sysJobs.RetryInterval = req.RetryInterval
 	sysJobs.ParallelNum = req.ParallelNum
 	// 保存到数据库
-	if err := sysJobs.Create(c); err != nil {
+	if err := sysJobs.Create(c.Request.Context()); err != nil {
 		return nil, err
 	}
 
@@ -124,7 +124,7 @@ func (s *SysJobsService) Update(c *gin.Context, req models.SysJobsUpdateRequest)
 
 	// 查找sys_jobs记录
 	sysJobs := models.NewSysJobs()
-	if err := sysJobs.GetByID(c, req.Id); err != nil {
+	if err := sysJobs.GetByID(c.Request.Context(), req.Id); err != nil {
 		return err
 	}
 	// 更新sys_jobs信息
@@ -142,7 +142,7 @@ func (s *SysJobsService) Update(c *gin.Context, req models.SysJobsUpdateRequest)
 	sysJobs.RetryInterval = req.RetryInterval
 	sysJobs.ParallelNum = req.ParallelNum
 	// 保存到数据库
-	if err := sysJobs.Update(c); err != nil {
+	if err := sysJobs.Update(c.Request.Context()); err != nil {
 		return err
 	}
 	return nil
@@ -152,7 +152,7 @@ func (s *SysJobsService) Update(c *gin.Context, req models.SysJobsUpdateRequest)
 func (s *SysJobsService) Delete(c *gin.Context, id string) error {
 	// 查找sys_jobs记录
 	sysJobs := models.NewSysJobs()
-	if err := sysJobs.GetByID(c, id); err != nil {
+	if err := sysJobs.GetByID(c.Request.Context(), id); err != nil {
 		return err
 	}
 
@@ -162,7 +162,7 @@ func (s *SysJobsService) Delete(c *gin.Context, id string) error {
 	}
 
 	// 删除数据库记录
-	if err := sysJobs.Delete(c); err != nil {
+	if err := sysJobs.Delete(c.Request.Context()); err != nil {
 		return err
 	}
 
@@ -173,7 +173,7 @@ func (s *SysJobsService) Delete(c *gin.Context, id string) error {
 func (s *SysJobsService) GetByID(c *gin.Context, id string) (*models.SysJobs, error) {
 	// 查找sys_jobs记录
 	sysJobs := models.NewSysJobs()
-	if err := sysJobs.GetByID(c, id); err != nil {
+	if err := sysJobs.GetByID(c.Request.Context(), id); err != nil {
 		return nil, err
 	}
 
@@ -185,13 +185,13 @@ func (s *SysJobsService) List(c *gin.Context, req models.SysJobsListRequest) (*m
 	// 获取总数
 	sysJobsList := models.NewSysJobsList()
 	scopes := []func(*gorm.DB) *gorm.DB{req.Handle()}
-	total, err := sysJobsList.GetTotal(c, scopes...)
+	total, err := sysJobsList.GetTotal(c.Request.Context(), scopes...)
 	if err != nil {
 		return nil, 0, err
 	}
 	scopes = append(scopes, req.Paginate())
 	// 获取分页数据
-	err = sysJobsList.Find(c, scopes...)
+	err = sysJobsList.Find(c.Request.Context(), scopes...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -203,7 +203,7 @@ func (s *SysJobsService) List(c *gin.Context, req models.SysJobsListRequest) (*m
 func (s *SysJobsService) SetStatus(c *gin.Context, id string, status int) error {
 	// 查找sys_jobs记录
 	sysJobs := models.NewSysJobs()
-	if err := sysJobs.GetByID(c, id); err != nil {
+	if err := sysJobs.GetByID(c.Request.Context(), id); err != nil {
 		return err
 	}
 
@@ -255,7 +255,7 @@ func (s *SysJobsService) SetStatus(c *gin.Context, id string, status int) error 
 
 	// 更新数据库状态
 	sysJobs.Status = status
-	if err := sysJobs.Update(c); err != nil {
+	if err := sysJobs.Update(c.Request.Context()); err != nil {
 		return err
 	}
 
@@ -266,7 +266,7 @@ func (s *SysJobsService) SetStatus(c *gin.Context, id string, status int) error 
 func (s *SysJobsService) ExecuteNow(c *gin.Context, id string) error {
 	// 查找sys_jobs记录
 	sysJobs := models.NewSysJobs()
-	if err := sysJobs.GetByID(c, id); err != nil {
+	if err := sysJobs.GetByID(c.Request.Context(), id); err != nil {
 		return err
 	}
 

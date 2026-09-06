@@ -94,7 +94,7 @@ func TestLoggingClaims(t *testing.T) {
 	require.NotEmpty(t, claimEntry.ContextMap()["request_id"], "JWT must retain RequestLogging scope")
 }
 
-func TestLoggingJWTFailureUsesScopedSafeEvent(t *testing.T) {
+func TestLoggingClaimsJWTFailureUsesScopedSafeEvent(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oldToken, oldValidator, oldLog := app.TokenService, app.SessionValidator, app.ZapLog
 	t.Cleanup(func() { app.TokenService, app.SessionValidator, app.ZapLog = oldToken, oldValidator, oldLog })
@@ -124,7 +124,7 @@ func TestLoggingJWTFailureUsesScopedSafeEvent(t *testing.T) {
 	require.NotEmpty(t, failure.ContextMap()["request_id"])
 }
 
-func TestLoggingDemoAccountUsesRequestScope(t *testing.T) {
+func TestLoggingClaimsDemoAccountUsesRequestScope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oldConfig, oldLog := app.ConfigYml, app.ZapLog
 	t.Cleanup(func() { app.ConfigYml, app.ZapLog = oldConfig, oldLog })

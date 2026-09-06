@@ -108,3 +108,50 @@ func TestLoggingAuditContext(t *testing.T) {
 		return false
 	}, time.Second, 10*time.Millisecond)
 }
+
+func TestLoggingAuditContextPersistsAfterCancel(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	conn, err := db.DB()
+	require.NoError(t, err)
+	conn.SetMaxOpenConns(1)
+	defer conn.Close()
+	require.NoError(t, db.AutoMigrate(&models.SysOperationLog{}))
+	oldDB, oldConfig, oldLog := app.GormDbMysql, app.ConfigYml, app.ZapLog
+	defer func() { app.GormDbMysql, app.ConfigYml, app.ZapLog = oldDB, oldConfig, oldLog }()
+	core, observed := observer.New(zap.InfoLevel)
+	root := zap.New(core)
+	app.GormDbMysql, app.ConfigYml, app.ZapLog = db, loggingAuditConfig{}, root
+	require.NoError(t, db.Callback().Create().After("gorm:create").Register("test:stored_audit_scope", func(tx *gorm.DB) {
+		record := tx.Statement.Dest.(*models.SysOperationLog)
+		claims := tx.Statement.Context.Value(consts.BindContextKeyName).(*app.Claims)
+		if claims.UserID != record.UserID {
+			t.Error("audit Claims crossed requests")
+		}
+		app.Log(tx.Statement.Context).Info("audit database write", zap.Uint("expected_user", record.UserID))
+	}))
+	var wg sync.WaitGroup
+	c, _ := gin.CreateTestContext(nil)
+	for id := uint(1); id <= 64; id++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		c.Request = httptest.NewRequest("POST", "/audit", nil).WithContext(logging.WithContext(ctx, logging.WithIdentity(root, zap.Uint("request_id", id))))
+		c.Set(consts.BindContextKeyName, &app.Claims{ClaimsUser: app.ClaimsUser{UserID: id, Username: "operator"}})
+		detached := operationLogContext(c)
+		cancel()
+		record := &models.SysOperationLog{UserID: id, Username: "operator", Method: "POST", Path: "/audit", StatusCode: 204}
+		wg.Add(1)
+		go func() { defer wg.Done(); persistOperationLog(detached, record) }()
+	}
+	// Reuse the Gin context while detached writes are pending.
+	c.Request = httptest.NewRequest("GET", "/unrelated", nil)
+	c.Set(consts.BindContextKeyName, &app.Claims{})
+	wg.Wait()
+	var count int64
+	require.NoError(t, db.Model(&models.SysOperationLog{}).Count(&count).Error)
+	require.Equal(t, int64(64), count)
+	require.Len(t, observed.All(), 64)
+	for _, entry := range observed.All() {
+		fields := entry.ContextMap()
+		require.Equal(t, fields["expected_user"], fields["request_id"])
+	}
+}

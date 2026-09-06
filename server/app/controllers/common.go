@@ -2,10 +2,10 @@ package controllers
 
 import (
 	"errors"
-	"fmt"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
 	"uvplatform.cn/uvp-gb28181/app/utils/common"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -16,18 +16,13 @@ type Common struct {
 
 // Fail 返回失败响应，支持可变参数：第一个参数为HTTP状态码（默认400）, 第二个参数为业务状态码, 第三个参数为响应数据
 func (c Common) Fail(ctx *gin.Context, msg string, err error, data ...interface{}) {
-	app.ZapLog.Error("请求失败", zap.Error(err))
+	app.Log(ctx.Request.Context()).Error("请求失败", zap.String("event", "http.operation_failed"), logging.Error(err))
 	app.Response.Fail(ctx, msg, data...)
 }
 
 // FailAndAbort 失败并自动终止执行，无需手动 return ，支持可变参数：第一个参数为HTTP状态码（默认400）, 第二个参数为业务状态码, 第三个参数为响应数据
 func (c Common) FailAndAbort(ctx *gin.Context, msg string, err error, data ...interface{}) {
-	if err != nil {
-		// 使用 %+v 格式化输出 pkg/errors 捕获的完整调用栈
-		app.ZapLog.Error(msg, zap.String("error", fmt.Sprintf("%+v", err)))
-	} else {
-		app.ZapLog.Error(msg, zap.Error(errors.New(msg)))
-	}
+	app.Log(ctx.Request.Context()).Error("请求失败", zap.String("event", "http.operation_failed"), logging.Error(err))
 	app.Response.Fail(ctx, msg, data...)
 	if err != nil {
 		ctx.Set("error", err)

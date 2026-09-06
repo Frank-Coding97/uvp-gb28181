@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -58,6 +59,7 @@ func newUserProfileTestDB(t *testing.T, config userProfileTestConfig) *gorm.DB {
 
 func userProfileTestContext() *gin.Context {
 	c, _ := gin.CreateTestContext(nil)
+	c.Request = httptest.NewRequest("GET", "/profile", nil)
 	return c
 }
 
