@@ -38,8 +38,9 @@ type QualificationRequest struct {
 
 // QualificationTicket is an immutable, value-owned proof for one live
 // application. MediaOrigin is a secure scheme plus host origin only; it is
-// not a general URL prefix. The provider owns how the qualification ID and
-// boot/revision proof are established.
+// not a general URL prefix. ExpiresAt bounds this application window, not the
+// lifetime of a successfully issued grant. The provider owns how the
+// qualification ID and boot/revision proof are established.
 type QualificationTicket struct {
 	QualificationID string
 	NodeID          int64
@@ -202,7 +203,13 @@ func (application *LiveApplication) Apply(ctx context.Context, request ApplyRequ
 		MediaGeneration: result.Generation,
 		Protocol:        request.Ticket.Protocol,
 	})
-	if err != nil || ctx.Err() != nil || !validIssuedGrant(grant, request.GrantID, request.Ticket.ExpiresAt, application.nowUTC()) {
+	if err != nil || ctx.Err() != nil || !validIssuedGrant(grant, request.GrantID, application.nowUTC()) {
+		return application.failApply(ctx, request)
+	}
+	// Issue can take long enough for the request's qualification to expire or
+	// be withdrawn. Never release its URL until this final check passes. The
+	// ticket does not shorten the independently enforced fixed v3 grant TTL.
+	if err := application.provider.Validate(ctx, target, request.Ticket); err != nil || ctx.Err() != nil || !validQualificationTicket(request.Ticket, target.Protocol, application.nowUTC()) {
 		return application.failApply(ctx, request)
 	}
 	parsedURL.RawQuery = url.Values{playauth.QueryParameter: []string{grant.Token}}.Encode()
@@ -366,6 +373,6 @@ func validateFLVURL(raw string, result *play.Result, ticket QualificationTicket)
 	return parsed, true
 }
 
-func validIssuedGrant(grant playauth.Grant, grantID string, ticketExpiresAt, now time.Time) bool {
-	return grant.Token != "" && grant.Token == strings.TrimSpace(grant.Token) && grant.AuthorizationGeneration == grantID && !grant.ExpiresAt.IsZero() && now.Before(grant.ExpiresAt) && !grant.ExpiresAt.After(ticketExpiresAt)
+func validIssuedGrant(grant playauth.Grant, grantID string, now time.Time) bool {
+	return grant.Token != "" && grant.Token == strings.TrimSpace(grant.Token) && grant.AuthorizationGeneration == grantID && !grant.ExpiresAt.IsZero() && now.Before(grant.ExpiresAt)
 }

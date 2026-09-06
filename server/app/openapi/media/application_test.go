@@ -56,14 +56,18 @@ func (f *qualificationFake) Validate(context.Context, QualificationRequest, Qual
 }
 
 type playerFake struct {
-	mu      sync.Mutex
-	ensureN int
-	request play.Request
-	result  *play.Result
-	err     error
+	mu       sync.Mutex
+	ensureN  int
+	request  play.Request
+	result   *play.Result
+	err      error
+	onEnsure func()
 }
 
 func (f *playerFake) EnsureLive(_ context.Context, request play.Request) (*play.Result, error) {
+	if f.onEnsure != nil {
+		f.onEnsure()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.ensureN++
@@ -420,4 +424,55 @@ func TestLiveApplicationDoesNotReleaseURLAfterCancellationDuringIssue(t *testing
 	require.Empty(t, data.URL)
 	require.Equal(t, 1, issuer.cleanupN)
 	require.NoError(t, issuer.cleanupCtxErr)
+}
+
+func TestLiveApplicationShortTicketDoesNotShortenFixedGrantTTL(t *testing.T) {
+	ticket := applicationTicket(play.QualifiedProtocolHTTPSFLV)
+	ticket.ExpiresAt = testApplicationNow.Add(10 * time.Second)
+	provider := &qualificationFake{ticket: ticket}
+	player := &playerFake{result: applicationResult(ticket)}
+	grant := applicationGrant(testApplicationGrantA, "fixed-ttl-token")
+	grant.ExpiresAt = testApplicationNow.Add(playauth.OpenAPIPlayTTL)
+	issuer := &grantFake{grants: []playauth.Grant{grant}}
+	app := newTestApplication(provider, player, issuer, true)
+	data, err := app.Apply(context.Background(), testApplyRequest(ticket, testApplicationGrantA))
+	require.NoError(t, err)
+	require.Equal(t, grant.ExpiresAt, data.ExpiresAt)
+	require.True(t, data.ExpiresAt.After(ticket.ExpiresAt))
+	require.Equal(t, 3, provider.validateN, "revalidate after Issue before releasing the URL")
+	require.Zero(t, issuer.cleanupN)
+}
+
+func TestLiveApplicationRejectsTicketInvalidationAtEveryReturnBoundary(t *testing.T) {
+	for _, phase := range []string{"media-expired", "issue-expired", "issue-invalidated"} {
+		t.Run(phase, func(t *testing.T) {
+			now := testApplicationNow
+			ticket := applicationTicket(play.QualifiedProtocolHTTPSFLV)
+			ticket.ExpiresAt = now.Add(10 * time.Second)
+			provider := &qualificationFake{ticket: ticket}
+			player := &playerFake{result: applicationResult(ticket)}
+			grant := applicationGrant(testApplicationGrantA, "unreleased-final-token")
+			grant.ExpiresAt = now.Add(playauth.OpenAPIPlayTTL)
+			issuer := &grantFake{grants: []playauth.Grant{grant}}
+			switch phase {
+			case "media-expired":
+				player.onEnsure = func() { now = ticket.ExpiresAt }
+			case "issue-expired":
+				issuer.onIssue = func() { now = ticket.ExpiresAt }
+			case "issue-invalidated":
+				provider.validate = []error{nil, nil, errors.New("qualification withdrawn")}
+			}
+			app := NewLiveApplication(provider, player, issuer, true, WithLiveApplicationClock(func() time.Time { return now }))
+			data, err := app.Apply(context.Background(), testApplyRequest(ticket, testApplicationGrantA))
+			requireFixedApplicationError(t, err)
+			require.Empty(t, data.URL)
+			require.Equal(t, 1, issuer.cleanupN)
+			if phase == "media-expired" {
+				require.Zero(t, issuer.issueN)
+			} else {
+				require.Equal(t, 1, issuer.issueN)
+				require.Equal(t, 3, provider.validateN)
+			}
+		})
+	}
 }
