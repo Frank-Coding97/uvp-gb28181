@@ -12,8 +12,11 @@ import (
 // Trigger is diagnostic metadata only; it never creates a separate
 // coordination lane for the same device/channel pair.
 type Request struct {
-	DeviceID     string
-	ChannelID    string
+	DeviceID  string
+	ChannelID string
+	// DeviceEpoch is the caller's already-authorized snapshot, never a request
+	// to load the latest device authority after media side effects.
+	DeviceEpoch  int64
 	Trigger      string
 	RequiredNode int64
 	// RequiredProtocol and QualificationID are populated only by the
