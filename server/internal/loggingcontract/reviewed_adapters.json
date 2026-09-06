@@ -201,5 +201,26 @@
         "count": 1
       }
     ]
+  },
+  {
+    "file": "app/utils/gormhelper/log.go",
+    "sha256": "38666e11c78312c4edf0435677678a7aa7d950fd64d842dcd372762158b54727",
+    "reason": "Reviewed T07 Trace: shared context logger Check filters before fc/Explain; static message, three constant events, SQL structure fingerprint and typed safe fields only. CheckedEntry.Write retains SafeCore; no raw SQL or parameters. Exact Check/Write calls and source digest require re-review on change.",
+    "calls": [
+      {
+        "function": "Trace",
+        "receiver": "*logger",
+        "method": "Check",
+        "kind": "unresolved_logger",
+        "count": 1
+      },
+      {
+        "function": "Trace",
+        "receiver": "*logger",
+        "method": "Write",
+        "kind": "unresolved_logger",
+        "count": 1
+      }
+    ]
   }
 ]

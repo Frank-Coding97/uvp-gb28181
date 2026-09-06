@@ -29,3 +29,10 @@ func (s *Service) Run(err error, payload any) error {
 func (s *Service) Slog(ctx context.Context) {
 	s.slogger.InfoContext(ctx, "slog operation", "event", "fixture.slog")
 }
+
+// A named helper only derives an injected logger; its body is checked normally.
+func scope(root *zap.Logger) *zap.Logger { return root.Named("fixture") }
+
+func (s *Service) NamedHelper() {
+	scope(s.logger).Info("operation completed", zap.String("event", eventName))
+}

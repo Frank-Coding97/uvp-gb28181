@@ -934,6 +934,11 @@ func likelyUnresolvedLoggerFactory(call *ast.CallExpr, info *types.Info, origins
 	if !ok {
 		return false
 	}
+	// Named functions are checked at their declarations. Only function values
+	// need this unresolved-factory fallback.
+	if _, variable := info.ObjectOf(ident).(*types.Var); !variable {
+		return false
+	}
 	signature, ok := info.TypeOf(ident).(*types.Signature)
 	if !ok || signature.Results() == nil || signature.Results().Len() == 0 {
 		return false
