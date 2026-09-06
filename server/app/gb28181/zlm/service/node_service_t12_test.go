@@ -12,7 +12,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/service"
 )
 
-func TestNodeServiceT12StopContextWaitsForScheduledConvergence(t *testing.T) {
+func TestLoggingNodeServiceT12StopContextWaitsForScheduledConvergence(t *testing.T) {
 	repo := newT13Repo()
 	reg := node.NewRegistry(repo)
 	n := t13Node(t, reg)
@@ -44,7 +44,7 @@ func TestNodeServiceT12StopContextWaitsForScheduledConvergence(t *testing.T) {
 	require.False(t, svc.ScheduleConfigConvergence(n.ID))
 }
 
-func TestNodeServiceT12StopContextDoesNotBlockBehindSecondSchedule(t *testing.T) {
+func TestLoggingNodeServiceT12StopContextDoesNotBlockBehindSecondSchedule(t *testing.T) {
 	repo := newT13Repo()
 	reg := node.NewRegistry(repo)
 	n := t13Node(t, reg)

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestGroupWaitsForAcceptedWorkAndClosesAdmission(t *testing.T) {
+func TestLoggingGroupWaitsForAcceptedWorkAndClosesAdmission(t *testing.T) {
 	var group Group
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -43,7 +43,7 @@ func TestGroupWaitsForAcceptedWorkAndClosesAdmission(t *testing.T) {
 	}
 }
 
-func TestGroupCompletionWinsOverExpiredContext(t *testing.T) {
+func TestLoggingGroupCompletionWinsOverExpiredContext(t *testing.T) {
 	var group Group
 	finished := make(chan struct{})
 	if !group.Go(func() { close(finished) }) {
@@ -68,7 +68,7 @@ func TestGroupCompletionWinsOverExpiredContext(t *testing.T) {
 	}
 }
 
-func TestGroupConcurrentStopIsIdempotent(t *testing.T) {
+func TestLoggingGroupConcurrentStopIsIdempotent(t *testing.T) {
 	var group Group
 	release := make(chan struct{})
 	if !group.Go(func() { <-release }) {
@@ -98,7 +98,7 @@ func TestGroupConcurrentStopIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestGroupPanicStillReleasesCount(t *testing.T) {
+func TestLoggingGroupPanicStillReleasesCount(t *testing.T) {
 	var group Group
 	var recovered atomic.Bool
 	if !group.Go(func() {
@@ -119,7 +119,7 @@ func TestGroupPanicStillReleasesCount(t *testing.T) {
 	}
 }
 
-func TestGroupStartStopOneHundredRounds(t *testing.T) {
+func TestLoggingGroupStartStopOneHundredRounds(t *testing.T) {
 	for round := 0; round < 100; round++ {
 		var group Group
 		release := make(chan struct{})

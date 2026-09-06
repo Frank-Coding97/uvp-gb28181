@@ -44,7 +44,7 @@ func (f *blockingFetch) GetWorkThreadsLoad(context.Context, *node.Node) (float64
 	return 0.2, nil
 }
 
-func TestWatcherT12StartDoneWaitsForInFlightTick(t *testing.T) {
+func TestLoggingWatcherT12StartDoneWaitsForInFlightTick(t *testing.T) {
 	baseRepo := newMemoryRepo()
 	repo := &blockingUpdateRepo{
 		memoryRepo: baseRepo,
@@ -88,7 +88,7 @@ func TestWatcherT12StartDoneWaitsForInFlightTick(t *testing.T) {
 	require.True(t, ok)
 }
 
-func TestThreadLoadPollerT12StartDoneWaitsForTickFetch(t *testing.T) {
+func TestLoggingThreadLoadPollerT12StartDoneWaitsForTickFetch(t *testing.T) {
 	reg, _ := setupRegistry(t, "uuid-1")
 	fetcher := &blockingFetch{started: make(chan struct{}), release: make(chan struct{})}
 	releaseFetcher := func() { fetcher.close.Do(func() { close(fetcher.release) }) }
@@ -122,7 +122,7 @@ func TestThreadLoadPollerT12StartDoneWaitsForTickFetch(t *testing.T) {
 	}
 }
 
-func TestThreadLoadPollerT12TickCancelAdmission100Rounds(t *testing.T) {
+func TestLoggingThreadLoadPollerT12TickCancelAdmission100Rounds(t *testing.T) {
 	for round := 0; round < 100; round++ {
 		reg, _ := setupRegistry(t, "uuid-1")
 		fetcher := &blockingFetch{started: make(chan struct{}), release: make(chan struct{})}
@@ -171,7 +171,7 @@ func TestThreadLoadPollerT12TickCancelAdmission100Rounds(t *testing.T) {
 	}
 }
 
-func TestThreadLoadPollerT12TickAfterStartDoneIsIgnored(t *testing.T) {
+func TestLoggingThreadLoadPollerT12TickAfterStartDoneIsIgnored(t *testing.T) {
 	reg, _ := setupRegistry(t, "uuid-1")
 	fetcher := &blockingFetch{started: make(chan struct{}), release: make(chan struct{})}
 	t.Cleanup(func() { fetcher.close.Do(func() { close(fetcher.release) }) })

@@ -32,7 +32,7 @@ func advanceT12Coordinator(t *testing.T, coordinator *service.RestartCoordinator
 	return accepted
 }
 
-func TestRestartT12StopContextReportsDeadlineUntilConvergenceReturns(t *testing.T) {
+func TestLoggingRestartT12StopContextReportsDeadlineUntilConvergenceReturns(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
@@ -58,7 +58,7 @@ func TestRestartT12StopContextReportsDeadlineUntilConvergenceReturns(t *testing.
 	require.NoError(t, coordinator.StopContext(expired), "completed stop wins over an already expired context")
 }
 
-func TestRestartT12CloseWaitsForAcceptedConvergence(t *testing.T) {
+func TestLoggingRestartT12CloseWaitsForAcceptedConvergence(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var releaseOnce sync.Once
@@ -93,7 +93,7 @@ func TestRestartT12CloseWaitsForAcceptedConvergence(t *testing.T) {
 	require.ErrorIs(t, err, service.ErrRestartCoordinatorClosed)
 }
 
-func TestRestartT12AdmissionStopOrdered100Rounds(t *testing.T) {
+func TestLoggingRestartT12AdmissionStopOrdered100Rounds(t *testing.T) {
 	for round := 0; round < 100; round++ {
 		started := make(chan struct{})
 		release := make(chan struct{})

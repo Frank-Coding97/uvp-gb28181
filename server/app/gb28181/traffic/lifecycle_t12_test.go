@@ -23,7 +23,7 @@ func (c *blockingSamplerClient) GetMediaList(context.Context, string, string, st
 	return nil, nil
 }
 
-func TestSamplerT12StartDoneWaitsForInFlightSample(t *testing.T) {
+func TestLoggingSamplerT12StartDoneWaitsForInFlightSample(t *testing.T) {
 	repo := newTrafficTestRepo(t)
 	client := &blockingSamplerClient{started: make(chan struct{}), release: make(chan struct{})}
 	release := func() { client.close.Do(func() { close(client.release) }) }
@@ -60,7 +60,7 @@ func TestSamplerT12StartDoneWaitsForInFlightSample(t *testing.T) {
 	}
 }
 
-func TestSessionPrunerT12StartDoneClosesAfterCancellation(t *testing.T) {
+func TestLoggingSessionPrunerT12StartDoneClosesAfterCancellation(t *testing.T) {
 	repo := newTrafficTestRepo(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := StartSessionPruner(ctx, repo, time.Now, nil)
@@ -73,7 +73,7 @@ func TestSessionPrunerT12StartDoneClosesAfterCancellation(t *testing.T) {
 	}
 }
 
-func TestSessionPrunerT12NilRepositoryReturnsClosedDone(t *testing.T) {
+func TestLoggingSessionPrunerT12NilRepositoryReturnsClosedDone(t *testing.T) {
 	done := StartSessionPruner(context.Background(), nil, nil, nil)
 	select {
 	case <-done:
