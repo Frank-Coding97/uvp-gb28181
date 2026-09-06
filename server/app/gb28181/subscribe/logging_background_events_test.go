@@ -83,6 +83,9 @@ func TestLoggingSubscribeStateEventsUseRequestScope(t *testing.T) {
 		require.Equal(t, "subscribe", record["component"])
 		require.Equal(t, deviceID, record["device_id"])
 		require.Equal(t, requestID, record["request_id"])
+		if event == "subscribe.capability.probe" || event == "subscribe.capability.retry" {
+			require.Equal(t, true, record["simulated"], "legacy state machine does not send real SUBSCRIBE")
+		}
 	}
 	degraded := subscribeLogRecord(t, records, "subscribe.capability.degraded")
 	require.Equal(t, true, degraded["reason_present"])

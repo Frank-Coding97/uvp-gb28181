@@ -61,8 +61,8 @@ func (sm *StateMachine) OnRegister(ctx context.Context, deviceID string) {
 	case gbmodels.SubscribeUnknown:
 		// Phase 1 简化:模拟 SUBSCRIBE 失败 → 直接 fallback
 		// Phase 2 真正发 SIP SUBSCRIBE 请求 + 等 200 OK,根据 response 决定
-		logging.FromContext(ctx, sm.logger).Named("subscribe").Info("SUBSCRIBE capability probe",
-			zap.String("event", "subscribe.capability.probe"),
+		logging.FromContext(ctx, sm.logger).Named("subscribe").Info("SUBSCRIBE capability probe (simulated)",
+			zap.String("event", "subscribe.capability.probe"), zap.Bool("simulated", true),
 			zap.String("device_id", deviceID),
 			zap.String("from", string(gbmodels.SubscribeUnknown)),
 			zap.String("to", string(gbmodels.SubscribeFallback)))
@@ -73,8 +73,8 @@ func (sm *StateMachine) OnRegister(ctx context.Context, deviceID string) {
 		if dev.SubscribeLastTest != nil && time.Since(*dev.SubscribeLastTest) < 24*time.Hour {
 			return
 		}
-		logging.FromContext(ctx, sm.logger).Named("subscribe").Info("SUBSCRIBE capability retry",
-			zap.String("event", "subscribe.capability.retry"),
+		logging.FromContext(ctx, sm.logger).Named("subscribe").Info("SUBSCRIBE capability retry (simulated)",
+			zap.String("event", "subscribe.capability.retry"), zap.Bool("simulated", true),
 			zap.String("device_id", deviceID),
 			zap.String("from", string(gbmodels.SubscribeFallback)),
 			zap.String("to", string(gbmodels.SubscribeFallback)))
