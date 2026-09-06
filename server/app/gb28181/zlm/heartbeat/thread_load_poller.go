@@ -2,6 +2,7 @@ package heartbeat
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
@@ -25,6 +26,7 @@ type ThreadLoadPoller struct {
 	registry *node.Registry
 	fetcher  ThreadLoadFetcher
 	interval time.Duration
+	fetchWG  sync.WaitGroup
 }
 
 // NewThreadLoadPoller 构造
@@ -37,7 +39,11 @@ func (p *ThreadLoadPoller) Tick(ctx context.Context) {
 	active := p.registry.ListActive()
 	for _, n := range active {
 		nCopy := n
-		go p.fetchOne(ctx, nCopy)
+		p.fetchWG.Add(1)
+		go func() {
+			defer p.fetchWG.Done()
+			p.fetchOne(ctx, nCopy)
+		}()
 	}
 }
 
@@ -67,8 +73,12 @@ func (p *ThreadLoadPoller) fetchOne(ctx context.Context, n *node.Node) {
 }
 
 // Start 启动 goroutine,周期跑 Tick;ctx 取消 → 退出
-func (p *ThreadLoadPoller) Start(ctx context.Context) {
+// 返回的 channel 会在调度循环和 Tick 已启动的 fetch 全部退出后关闭。
+func (p *ThreadLoadPoller) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
+		defer p.fetchWG.Wait()
 		// 启动 5s 后立即跑一次(让 UI 不用等 30s 才看到负载值)
 		select {
 		case <-ctx.Done():
@@ -87,4 +97,5 @@ func (p *ThreadLoadPoller) Start(ctx context.Context) {
 			}
 		}
 	}()
+	return done
 }

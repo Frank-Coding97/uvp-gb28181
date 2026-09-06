@@ -138,6 +138,7 @@ func (w *Watcher) Tick() {
 }
 
 // Start 启动后台 goroutine,周期跑 Tick,直到 ctx 取消。
+// 返回的 channel 会在 Tick 不再执行后关闭,调用方可用它完成有界停机。
 //
 // 用法:
 //
@@ -145,8 +146,10 @@ func (w *Watcher) Tick() {
 //	ctx, cancel := context.WithCancel(context.Background())
 //	watcher.Start(ctx)
 //	// ... cancel() 时停止
-func (w *Watcher) Start(ctx context.Context) {
+func (w *Watcher) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		tk := time.NewTicker(w.checkInterval)
 		defer tk.Stop()
 		for {
@@ -158,4 +161,5 @@ func (w *Watcher) Start(ctx context.Context) {
 			}
 		}
 	}()
+	return done
 }

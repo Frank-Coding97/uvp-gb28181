@@ -151,17 +151,20 @@ type UpdateNodeReq struct {
 
 // NodeService 节点 CRUD + 状态切换
 type NodeService struct {
-	registry       *node.Registry
-	probe          ZLMProbe
-	tuning         MediaTuning
-	applyMu        sync.Mutex
-	applying       map[int64]struct{}
-	locksMu        sync.Mutex
-	locks          map[int64]*sync.Mutex
-	impactMu       sync.RWMutex
-	impactProvider NodeImpactProvider
-	logger         *zap.Logger
-	restart        *RestartCoordinator
+	registry        *node.Registry
+	probe           ZLMProbe
+	tuning          MediaTuning
+	scheduleMu      sync.Mutex
+	scheduleWG      sync.WaitGroup
+	scheduleStopped bool
+	applyMu         sync.Mutex
+	applying        map[int64]struct{}
+	locksMu         sync.Mutex
+	locks           map[int64]*sync.Mutex
+	impactMu        sync.RWMutex
+	impactProvider  NodeImpactProvider
+	logger          *zap.Logger
+	restart         *RestartCoordinator
 }
 
 // NewNodeService 构造
@@ -613,14 +616,26 @@ func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) erro
 // ScheduleConfigConvergence is non-blocking and de-duplicates per node. A
 // failed apply leaves readiness false so the next heartbeat retries it.
 func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
+	// Admission and WaitGroup.Add must be serialized with StopContext's
+	// WaitGroup.Wait. Keep the existing per-node locking and the asynchronous
+	// apply unchanged while preventing a new worker after shutdown begins.
+	s.scheduleMu.Lock()
+	if s.scheduleStopped {
+		s.scheduleMu.Unlock()
+		return false
+	}
 	lock := s.nodeLock(nodeID)
 	lock.Lock()
 	current, ok := s.beginConfigConvergence(nodeID)
 	lock.Unlock()
 	if !ok {
+		s.scheduleMu.Unlock()
 		return false
 	}
+	s.scheduleWG.Add(1)
+	s.scheduleMu.Unlock()
 	go func() {
+		defer s.scheduleWG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 		lock := s.nodeLock(nodeID)
@@ -635,6 +650,34 @@ func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
 		s.logger.Info("GB28181 ZLM 节点配置已恢复", zap.Int64("nodeId", nodeID))
 	}()
 	return true
+}
+
+// StopContext prevents new scheduled convergence workers and waits for every
+// worker admitted before shutdown. The workers retain their historical
+// detached 15-second timeout, so a caller deadline can report an incomplete
+// stop while the in-flight apply continues to its own bounded conclusion.
+func (s *NodeService) StopContext(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.scheduleMu.Lock()
+	s.scheduleStopped = true
+	s.scheduleMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		s.scheduleWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *NodeService) beginConfigConvergence(nodeID int64) (*node.Node, bool) {
