@@ -25,6 +25,7 @@ func ResolveOwnerDeptAccessByUserID(ctx context.Context, db *gorm.DB, userID uin
 	if db == nil || userID == 0 {
 		return OwnerDeptAccess{}, ErrOwnerDeptAccessDenied
 	}
+	ctx = ensureContext(ctx)
 
 	var user models.User
 	result := db.WithContext(ctx).Where("id = ? AND status = ?", userID, 1).First(&user)
@@ -68,7 +69,7 @@ func ResolveOwnerDeptAccessByUserID(ctx context.Context, db *gorm.DB, userID uin
 				if err := db.WithContext(ctx).Find(&departments).Error; err != nil {
 					return OwnerDeptAccess{}, fmt.Errorf("resolve owner department tree: %w", err)
 				}
-				departmentTree = departments.BuildTree()
+				departmentTree = departments.BuildTree(ctx)
 				treeLoaded = true
 			}
 			ids, err := getDepartmentAndChildrenIDs(departmentTree, user.DeptID)

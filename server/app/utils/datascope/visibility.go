@@ -25,6 +25,7 @@ func VisibilityScope(c *gin.Context, ownerColumn, deviceIDColumn string) func(db
 // VisibilityScopeWithDB 同上,权限查询走 lookupDB(事务内共享同一连接)。
 func VisibilityScopeWithDB(c *gin.Context, lookupDB *gorm.DB, ownerColumn, deviceIDColumn string) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
+		db = db.WithContext(requestContext(c))
 		if lookupDB == nil {
 			lookupDB = db
 		}
@@ -54,17 +55,18 @@ func VisibilityScopeWithDB(c *gin.Context, lookupDB *gorm.DB, ownerColumn, devic
 // grantDeviceCodeSubquery 构造"共享给当前用户或其本部门"的设备**编码**(20位国标ID)子查询。
 // grant 表存 gb_device.id,而业务表(设备/通道/告警)按编码列 device_id 关联,故 join gb_device 转换。
 func grantDeviceCodeSubquery(db *gorm.DB, c *gin.Context) *gorm.DB {
+	ctx := requestContext(c)
 	claims := common.GetClaims(c)
 	userID := uint(0)
 	userDeptID := uint(0)
 	if claims != nil {
 		userID = claims.UserID
-		if deptID, err := getUserDepartmentIDWithDB(db, userID); err == nil {
+		if deptID, err := getUserDepartmentIDWithDB(ctx, db, userID); err == nil {
 			userDeptID = deptID
 		}
 	}
 
-	return db.Session(&gorm.Session{NewDB: true}).Model(&gbmodels.GbDeviceGrant{}).
+	return db.Session(&gorm.Session{NewDB: true, Initialized: true}).WithContext(ctx).Model(&gbmodels.GbDeviceGrant{}).
 		Select("d.device_id").
 		Joins("JOIN gb_device d ON d.id = gb_device_grant.device_id AND d.deleted_at IS NULL").
 		Where("gb_device_grant.deleted_at IS NULL AND ((gb_device_grant.target_type = ? AND gb_device_grant.target_id = ?) OR (gb_device_grant.target_type = ? AND gb_device_grant.target_id = ?))",
