@@ -67,22 +67,30 @@ func TestLoggingJobNoopProducesDebugResultWithExecutionID(t *testing.T) {
 	}
 
 	seenIDs := make(map[string]struct{}, 100)
+	resultCount := 0
 	for range 100 {
 		result := <-scheduler.GetResults()
+		resultCount++
 		require.Equal(t, "SUCCESS", result.Status)
 		require.NotEmpty(t, result.ExecutionID)
 		require.Equal(t, 1, result.Attempt)
 		seenIDs[result.ExecutionID] = struct{}{}
 	}
+	require.Equal(t, 100, resultCount)
 	require.Len(t, seenIDs, 100)
 
+	infoSuccessCount := 0
 	for _, entry := range logs.All() {
 		fields := entry.ContextMap()
 		if fields["event"] == "scheduler.execution.completed" && fields["status"] == "SUCCESS" {
 			require.Equal(t, zap.DebugLevel, entry.Level)
 			require.NotEmpty(t, fields["execution_id"])
+			if entry.Level == zap.InfoLevel {
+				infoSuccessCount++
+			}
 		}
 	}
+	require.Zero(t, infoSuccessCount)
 }
 
 func TestLoggingJobRetryKeepsExecutionIDAndIncrementsAttempt(t *testing.T) {
@@ -188,6 +196,57 @@ func TestLoggingJobLifecycleUsesDebugForSetupAndInfoForUserAction(t *testing.T) 
 	require.Equal(t, zap.DebugLevel, entries[0].Level)
 	require.Equal(t, zap.InfoLevel, entries[1].Level)
 	require.Equal(t, zap.InfoLevel, entries[2].Level)
+}
+
+func TestLoggingJobSchedulerManualTriggerUsesInfo(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	logger := NewZapJobLogger(zap.New(core))
+	executor := &loggingT10Executor{name: "manual"}
+	scheduler, job := newLoggingT10Scheduler(t, logger, executor)
+
+	require.NoError(t, scheduler.ExecuteNow(job.ID))
+	result := <-scheduler.GetResults()
+	require.Equal(t, "SUCCESS", result.Status)
+
+	var manual observer.LoggedEntry
+	for _, entry := range logs.All() {
+		fields := entry.ContextMap()
+		if fields["event"] == "scheduler.job.lifecycle" && fields["action"] == "手动触发" {
+			manual = entry
+		}
+	}
+	require.Equal(t, zap.InfoLevel, manual.Level)
+	require.Equal(t, job.ID, manual.ContextMap()["job_id"])
+}
+
+func TestLoggingJobSchedulerEnableDisableUseInfo(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	logger := NewZapJobLogger(zap.New(core))
+	scheduler := NewJobScheduler(WithLogger(logger))
+	job := &Job{
+		ID: "lifecycle-enable-disable", Group: "logging", Name: "enable-disable",
+		ExecutorName: "unused", Status: StatusDisabled, CronExpression: "*/5 * * * * *",
+		Timeout: time.Second,
+	}
+	scheduler.jobs[job.ID] = job
+
+	require.NoError(t, scheduler.EnableJob(job.ID))
+	require.Equal(t, StatusEnabled, job.Status)
+	require.NoError(t, scheduler.DisableJob(job.ID))
+	require.Equal(t, StatusDisabled, job.Status)
+
+	var actions []observer.LoggedEntry
+	for _, entry := range logs.All() {
+		fields := entry.ContextMap()
+		if fields["event"] == "scheduler.job.lifecycle" && (fields["action"] == "启用" || fields["action"] == "禁用") {
+			actions = append(actions, entry)
+		}
+	}
+	require.Len(t, actions, 2)
+	require.Equal(t, zap.InfoLevel, actions[0].Level)
+	require.Equal(t, zap.InfoLevel, actions[1].Level)
+	require.Equal(t, "启用", actions[0].ContextMap()["action"])
+	require.Equal(t, "禁用", actions[1].ContextMap()["action"])
 }
 
 func TestLoggingJobErrorSummaryDoesNotExposeRawError(t *testing.T) {

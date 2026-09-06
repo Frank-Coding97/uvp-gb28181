@@ -7,10 +7,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
+	"gorm.io/gorm"
 
 	"uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/recordingplan/schedule"
@@ -76,8 +78,7 @@ func TestLoggingRecordingActionFailureDoesNotExposeRawError(t *testing.T) {
 }
 
 func TestLoggingRecordingActionEngineLogsOnlyCompletedActions(t *testing.T) {
-	db := newRepositoryTestDB(t)
-	require.NoError(t, db.AutoMigrate(&models.GbChannel{}))
+	db := newLoggingT10RecordingDB(t)
 	now := time.Date(2026, 9, 5, 9, 0, 0, 0, schedule.BeijingLocation())
 	channel := models.GbChannel{DeviceID: "D-t10", ChannelID: "C-t10", OwnerDeptID: 1, Status: models.ChannelStatusOnline, RecordingMode: models.RecordingModeContinuous}
 	require.NoError(t, db.Create(&channel).Error)
@@ -109,4 +110,80 @@ func TestLoggingRecordingActionEngineLogsOnlyCompletedActions(t *testing.T) {
 	var executions []models.GbRecordingPlanExecution
 	require.NoError(t, db.Find(&executions).Error)
 	require.Len(t, executions, 1, "action persistence remains the business record")
+}
+
+func newLoggingT10RecordingFixture(t *testing.T) (*gorm.DB, *Engine, *fakeChannelOperator, uint, time.Time) {
+	t.Helper()
+	db := newLoggingT10RecordingDB(t)
+	now := time.Date(2026, 9, 5, 9, 0, 0, 0, schedule.BeijingLocation())
+	channel := models.GbChannel{
+		DeviceID: "D-t10", ChannelID: "C-t10", OwnerDeptID: 1,
+		Status: models.ChannelStatusOnline, RecordingMode: models.RecordingModeContinuous,
+	}
+	require.NoError(t, db.Create(&channel).Error)
+	state := models.GbRecordingPlanChannelState{
+		ChannelID: channel.ID, DesiredState: models.RecordingDesiredRecording,
+		ActualState: models.RecordingStateIdle, ReconcileAt: now,
+	}
+	require.NoError(t, db.Create(&state).Error)
+	operator := &fakeChannelOperator{}
+	engine := NewEngine(db, operator, EngineOptions{Now: func() time.Time { return now }})
+	return db, engine, operator, channel.ID, now
+}
+
+func newLoggingT10RecordingDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{TranslateError: true})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&models.GbRecordingPlan{}, &models.GbRecordingPlanPeriod{}, &models.GbRecordingPlanBinding{},
+		&models.GbRecordingPlanChannelState{}, &models.GbRecordingPlanExecution{}, &models.GbRecordingPlanGap{},
+		&models.GbChannel{},
+	))
+	raw, err := db.DB()
+	require.NoError(t, err)
+	raw.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = raw.Close() })
+	return db
+}
+
+func TestLoggingRecordingActionDispatchLogsOperatorCompletion(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	oldLogger := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = oldLogger })
+	db, engine, operator, channelID, now := newLoggingT10RecordingFixture(t)
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "dispatch-1", 1, "recording-plan-dispatch-executor")
+
+	require.NoError(t, engine.Dispatch(ctx))
+	require.Equal(t, []uint{channelID}, operator.started)
+	actions := logs.All()
+	require.Len(t, actions, 1)
+	require.Equal(t, zap.InfoLevel, actions[0].Level)
+	require.Equal(t, "dispatch", actions[0].ContextMap()["trigger"])
+	require.Equal(t, "dispatch-1", actions[0].ContextMap()["execution_id"])
+
+	var executions []models.GbRecordingPlanExecution
+	require.NoError(t, db.Find(&executions).Error)
+	require.Len(t, executions, 1)
+	require.Equal(t, ActionStart, executions[0].Action)
+	require.Equal(t, "success", executions[0].Result)
+	require.WithinDuration(t, now, executions[0].StartedAt, time.Second)
+}
+
+func TestLoggingRecordingActionHealLogsOperatorCompletion(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	oldLogger := app.ZapLog
+	app.ZapLog = zap.New(core)
+	t.Cleanup(func() { app.ZapLog = oldLogger })
+	_, engine, operator, channelID, _ := newLoggingT10RecordingFixture(t)
+	ctx := schedulerhelper.WithExecutionContext(context.Background(), "heal-1", 2, "recording-plan-heal-executor")
+
+	require.NoError(t, engine.Heal(ctx))
+	require.Equal(t, []uint{channelID}, operator.started)
+	actions := logs.All()
+	require.Len(t, actions, 1)
+	require.Equal(t, zap.InfoLevel, actions[0].Level)
+	require.Equal(t, "heal", actions[0].ContextMap()["trigger"])
+	require.Equal(t, "heal-1", actions[0].ContextMap()["execution_id"])
 }
