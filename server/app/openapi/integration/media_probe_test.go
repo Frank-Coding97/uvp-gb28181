@@ -80,9 +80,20 @@ func TestOpenAPIProbeProtocolReportedFromSocket(t *testing.T) {
 			require.Eventually(t, func() bool { var ok bool; event, ok = f.event("/play", protocol.player); return ok }, time.Second, 10*time.Millisecond)
 			require.Equal(t, "rtmp", event.Schema, "FLV media schema is not the connection protocol")
 			require.Equal(t, protocol.hook, event.Protocol, "query cannot override actual TLS socket protocol")
+			playEvent := event
+			before := player.bytes.Load()
+			require.Never(t, func() bool { _, ok := f.event("/flow", protocol.player); return ok }, time.Second, 20*time.Millisecond,
+				"an active original player must not emit a final flow report")
+			require.Greater(t, player.bytes.Load(), before, "the original player must keep receiving media during the observation")
 			player.close()
 			require.Eventually(t, func() bool { var ok bool; event, ok = f.event("/flow", protocol.player); return ok }, 3*time.Second, 10*time.Millisecond)
 			require.Equal(t, protocol.hook, event.Protocol, "flow and play must identify the same connection protocol")
+			require.Equal(t, playEvent.ID, event.ID)
+			require.Equal(t, playEvent.Boot, event.Boot)
+			require.Equal(t, playEvent.Schema, event.Schema)
+			require.Equal(t, playEvent.VHost, event.VHost)
+			require.Equal(t, playEvent.App, event.App)
+			require.Equal(t, playEvent.Stream, event.Stream)
 		})
 	}
 }
