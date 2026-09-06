@@ -6,6 +6,12 @@ services:
     image: "uvp-gb28181-backend:${IMAGE_TAG:-test}"
     container_name: wvp-backend
     restart: unless-stopped
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "8"
     env_file:
       - ${UVP_ROOT:-/opt/uvp-gb28181}/config/sip-trace-backend.env
     environment:
