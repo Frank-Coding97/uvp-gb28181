@@ -48,5 +48,16 @@ func TestOpenAPIPlayAuthControllerRejectsUnlock(t *testing.T) {
 	router.ServeHTTP(read, httptest.NewRequest(http.MethodGet, "/play-auth", nil))
 	require.Equal(t, http.StatusOK, read.Code)
 	require.Equal(t, true, serviceConfigData(t, read)["authEnabled"])
+	require.Equal(t, true, serviceConfigData(t, read)["authRequiredByOpenAPI"])
+	require.Equal(t, true, serviceConfigData(t, read)["authConfigConflict"])
 	require.False(t, config.GetBool(gbconfig.PlayAuthEnabledConfigKey), "GET reports effective policy without rewriting YAML")
+	SetPlayAuthRuntimeReady(true)
+	saved := httptest.NewRecorder()
+	router.ServeHTTP(saved, httptest.NewRequest(http.MethodPut, "/play-auth", jsonBody(t, map[string]interface{}{
+		"authEnabled": true, "authBindClientIP": false, "authTTLSeconds": 120,
+		"authRequiredByOpenAPI": false, "authConfigConflict": true,
+	})))
+	require.Equal(t, http.StatusOK, saved.Code)
+	require.Equal(t, true, serviceConfigData(t, saved)["authRequiredByOpenAPI"], "request cannot overwrite server-owned protection metadata")
+	require.Equal(t, false, serviceConfigData(t, saved)["authConfigConflict"])
 }

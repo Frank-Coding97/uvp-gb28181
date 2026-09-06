@@ -77,6 +77,8 @@ const fixedAddressPlaybackReady = ref(false);
 const playAuthLoading = ref(true);
 const playAuthSaving = ref(false);
 const playAuthReady = ref(false);
+const playAuthRequiredByOpenAPI = ref(false);
+const playAuthConfigConflict = ref(false);
 const globalSubscriptionLoading = ref(true);
 const globalSubscriptionSaving = ref(false);
 const globalSubscriptionReady = ref(false);
@@ -373,6 +375,8 @@ function restoreFixedAddressPlaybackDraft() {
 }
 
 function applyPlayAuthConfig(config: PlayAuthConfig) {
+    playAuthRequiredByOpenAPI.value = config.authRequiredByOpenAPI === true;
+    playAuthConfigConflict.value = config.authConfigConflict === true;
     const normalized = normalizePlayAuthConfig(config);
     draft.playback.authEnabled = normalized.authEnabled;
     draft.playback.authBindClientIP = normalized.authBindClientIP;
@@ -609,6 +613,7 @@ watch(
 );
 
 function handlePlayAuthEnabledChange(enabled: boolean) {
+    if (!enabled && playAuthRequiredByOpenAPI.value) return;
     const normalized = normalizePlayAuthConfig({
         authEnabled: enabled,
         authBindClientIP: draft.playback.authBindClientIP,
@@ -1219,9 +1224,13 @@ onMounted(() =>
                                         <a-switch
                                             :model-value="draft.playback.authEnabled"
                                             :loading="playAuthLoading || playAuthSaving"
-                                            :disabled="playAuthLoading || playAuthSaving || !playAuthReady"
+                                            :disabled="playAuthLoading || playAuthSaving || !playAuthReady || playAuthRequiredByOpenAPI"
                                             @update:model-value="handlePlayAuthEnabledChange"
                                         />
+                                        <template v-if="playAuthRequiredByOpenAPI" #extra>
+                                            <span>OpenAPI 播放隔离要求持续鉴权，停用 OpenAPI 不会解除此保护；历史裸播放地址不再放行。</span>
+                                            <span v-if="playAuthConfigConflict">配置文件请求关闭鉴权，当前仍强制开启；请核对配置文件。</span>
+                                        </template>
                                     </a-form-item>
                                 </a-col>
                                 <a-col :span="isMobile ? 24 : 12">

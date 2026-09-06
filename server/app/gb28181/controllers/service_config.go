@@ -251,7 +251,7 @@ func (sc *ServiceConfigController) UpdatePlayAuth(c *gin.Context) {
 			return
 		}
 	}
-	sc.SuccessWithMessage(c, "播放鉴权配置已更新", settings)
+	sc.SuccessWithMessage(c, "播放鉴权配置已更新", gbconfig.CurrentPlayAuthSettings())
 }
 
 // GetSIPLog GET /api/gb28181/sip/service-config/sip-log
