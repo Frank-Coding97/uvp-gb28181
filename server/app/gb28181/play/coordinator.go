@@ -12,11 +12,16 @@ import (
 // Trigger is diagnostic metadata only; it never creates a separate
 // coordination lane for the same device/channel pair.
 type Request struct {
-	DeviceID        string
-	ChannelID       string
-	Trigger         string
-	RequiredNode    int64
-	AuthorizationID string
+	DeviceID     string
+	ChannelID    string
+	Trigger      string
+	RequiredNode int64
+	// RequiredProtocol and QualificationID are populated only by the
+	// externally-qualified playback path.  Keeping them as request data makes
+	// the coordinator lane independent from the caller's token/grant object.
+	RequiredProtocol string
+	QualificationID  string
+	AuthorizationID  string
 }
 
 // EnsureRequest is kept as a descriptive alias for callers that prefer the
@@ -57,10 +62,64 @@ func stopReachedMediaTerminal(err error) bool {
 }
 
 var (
-	ErrOwnerNodeMismatch  = errors.New("owner-node-mismatch")
-	ErrLiveStartNilResult = errors.New("live start returned nil result")
-	ErrLiveCleanupPending = errors.New("live start cleanup pending")
+	ErrOwnerNodeMismatch            = errors.New("owner-node-mismatch")
+	ErrLiveStartNilResult           = errors.New("live start returned nil result")
+	ErrLiveCleanupPending           = errors.New("live start cleanup pending")
+	ErrQualifiedRequestInvalid      = errors.New("qualified playback request invalid")
+	ErrQualifiedPlaybackUnavailable = errors.New("qualified playback unavailable")
+	ErrQualifiedOwnerUnknown        = errors.New("qualified playback owner unknown")
 )
+
+const (
+	QualifiedProtocolHTTPSFLV = "https-flv"
+	QualifiedProtocolWSSFLV   = "wss-flv"
+)
+
+// NodeQualificationSnapshot is the immutable subset of a managed node that a
+// local qualification adapter may compare with its ticket.  In particular,
+// the adapter never receives a mutable registry pointer and cannot perform
+// node selection or media I/O through this contract.
+type NodeQualificationSnapshot struct {
+	ID              int64
+	Revision        uint64
+	MediaServerUUID string
+	State           string
+}
+
+// QualifiedNodeValidator validates an already-issued, immutable node
+// qualification ticket.  Callers must keep implementations local and
+// bounded; the play service deliberately does not build a qualification pool
+// or perform network I/O under the coordinator mutex.
+type QualifiedNodeValidator interface {
+	Validate(context.Context, Request, NodeQualificationSnapshot) error
+}
+
+// QualifiedNodeValidatorFunc adapts a function to QualifiedNodeValidator.
+type QualifiedNodeValidatorFunc func(context.Context, Request, NodeQualificationSnapshot) error
+
+func (f QualifiedNodeValidatorFunc) Validate(ctx context.Context, req Request, snapshot NodeQualificationSnapshot) error {
+	return f(ctx, req, snapshot)
+}
+
+// IsQualified reports whether the request opts into the externally-qualified
+// playback contract.  A partially populated request is intentionally still
+// considered restricted and is rejected fail-closed by the shape check.
+func (r Request) IsQualified() bool {
+	return r.RequiredProtocol != "" || r.QualificationID != ""
+}
+
+func validateQualifiedRequestShape(req Request) error {
+	if !req.IsQualified() {
+		return nil
+	}
+	if req.RequiredNode <= 0 || req.QualificationID == "" || req.AuthorizationID != "" {
+		return ErrQualifiedRequestInvalid
+	}
+	if req.RequiredProtocol != QualifiedProtocolHTTPSFLV && req.RequiredProtocol != QualifiedProtocolWSSFLV {
+		return ErrQualifiedRequestInvalid
+	}
+	return nil
+}
 
 const cleanupPendingRetryTimeout = 5 * time.Second
 
@@ -177,6 +236,14 @@ func (c *Coordinator) ensureLive(ctx context.Context, req Request) (*Result, boo
 			if err := ownerNodeConflict(req, entry); err != nil {
 				c.mu.Unlock()
 				return nil, true, err
+			}
+			if req.IsQualified() {
+				// A qualified external request must not turn an uncertain prior
+				// cleanup into a destructive retry.  The caller reports the
+				// durable barrier and the dedicated cleanup/recovery path owns
+				// any subsequent stop attempt.
+				c.mu.Unlock()
+				return nil, true, ErrLiveCleanupPending
 			}
 			entry.state = LiveStateStopping
 			entry.done = make(chan struct{})
@@ -378,14 +445,45 @@ func waitFor(ctx context.Context, done <-chan struct{}) error {
 	}
 }
 
+func (c *Coordinator) ownerConflict(req Request) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry := c.entries[coordinatorKey{deviceID: req.DeviceID, channelID: req.ChannelID}]
+	if entry == nil {
+		return nil
+	}
+	return ownerNodeConflict(req, entry)
+}
+
 // EnsureLive exposes the channel coordinator through the existing Service.
 // Existing Start callers remain compatible; new REST/Hook integrations can
 // migrate to this method without changing the underlying Start transaction.
 func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) {
 	c := s.coordinator()
+	if req.IsQualified() {
+		if err := validateQualifiedRequestShape(req); err != nil {
+			return nil, err
+		}
+		// Preserve the existing owner-mismatch contract before waiting on a
+		// shared lane or invoking any external qualification adapter.
+		if err := c.ownerConflict(req); err != nil {
+			return nil, err
+		}
+		if s.qualifiedValidator == nil {
+			return nil, ErrQualifiedPlaybackUnavailable
+		}
+	}
 	result, reused, err := c.ensureLive(ctx, req)
 	if err != nil {
 		return nil, err
+	}
+	if req.IsQualified() {
+		if err := s.validateQualifiedResult(ctx, req, result); err != nil {
+			// Keep the shared generation alive.  This is a caller/grant
+			// qualification failure after EnsureLive, not a media failure;
+			// stopping here could interrupt already-authorized viewers.
+			return nil, err
+		}
 	}
 	if req.AuthorizationID != "" {
 		if result == nil || result.Generation == 0 || s.bindAuthorization(req.AuthorizationID, result.Generation) != nil {
