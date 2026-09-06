@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"golang.org/x/net/websocket"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
-	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 type probePlayer struct {
@@ -174,7 +173,7 @@ func TestOpenAPIProbeActualTLSMedia(t *testing.T) {
 	}
 	// A new API adapter is not a new media runtime. Only actual process exit and
 	// restart may replace the nonce; no Hook count or local process ID is used.
-	recreated := zlm.NewClientForNode(&node.Node{Host: "127.0.0.1", APIPort: f.apiPort, APISecret: f.secret})
+	recreated := f.newControl()
 	same, err := recreated.GetRuntimeIdentity(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, identity, same)

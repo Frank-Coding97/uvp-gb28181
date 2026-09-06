@@ -42,7 +42,8 @@ type mediaProbeFixture struct {
 	dir, binary, secret        string
 	apiPort, tlsPort, rtmpPort int
 	tlsConfig                  *tls.Config
-	client                     *zlm.Client
+	client                     *zlm.OpenAPIRuntimeControl
+	controlPin                 [32]byte
 	process                    *exec.Cmd
 	processDone                chan error
 	hooks                      *httptest.Server
@@ -75,10 +76,19 @@ func newMediaProbeFixture(t *testing.T) *mediaProbeFixture {
 	f.writeCertificate()
 	config := fmt.Sprintf("[api]\nsecret=%s\napiDebug=0\n[general]\nlisten_ip=127.0.0.1\nmediaServerId=openapi-isolated-probe\nflowThreshold=0\n[http]\nport=%d\nsslport=%d\nallow_ip_range=127.0.0.1\n[rtmp]\nport=%d\nsslport=0\n[rtsp]\nport=0\nsslport=0\n[rtp_proxy]\nport=0\n[rtc]\nport=0\ntcpPort=0\n[srt]\nport=0\n[shell]\nport=0\n[onvif]\nport=0\n[hook]\nenable=1\non_play=%s/play\non_flow_report=%s/flow\n", f.secret, f.apiPort, f.tlsPort, f.rtmpPort, f.hooks.URL, f.hooks.URL)
 	require.NoError(t, os.WriteFile(filepath.Join(f.dir, "probe.ini"), []byte(config), 0600))
-	f.client = zlm.NewClientForNode(&node.Node{Host: "127.0.0.1", APIPort: f.apiPort, APISecret: f.secret})
+	f.client = f.newControl()
 	t.Cleanup(f.stop)
 	f.start()
 	return f
+}
+
+func (f *mediaProbeFixture) newControl() *zlm.OpenAPIRuntimeControl {
+	control, err := zlm.NewOpenAPIRuntimeControl(node.Node{ID: 1, Revision: 1, MediaServerUUID: "openapi-isolated-probe", APISecret: f.secret}, zlm.OpenAPIControlTLS{
+		Endpoint: fmt.Sprintf("https://127.0.0.1:%d/index/api", f.tlsPort), Roots: f.tlsConfig.RootCAs, SPKISHA256: f.controlPin,
+	})
+	require.NoError(f.t, err)
+	f.t.Cleanup(control.Close)
+	return control
 }
 
 func probeRandom(t *testing.T) string {
@@ -104,6 +114,9 @@ func (f *mediaProbeFixture) writeCertificate() {
 	cert := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: "isolated-loopback"}, NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(time.Hour), IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	der, err := x509.CreateCertificate(rand.Reader, cert, cert, &key.PublicKey, key)
 	require.NoError(f.t, err)
+	parsed, err := x509.ParseCertificate(der)
+	require.NoError(f.t, err)
+	f.controlPin = sha256.Sum256(parsed.RawSubjectPublicKeyInfo)
 	keyDER, err := x509.MarshalECPrivateKey(key)
 	require.NoError(f.t, err)
 	pemCert := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
