@@ -260,6 +260,7 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	run(lockStem + ".sql")
+	checkNativeNodeRuntime(t, db)
 	checkNativeQuota(t, db)
 	checkNativeMustAuthLatch(t, db)
 	run(lockStem + ".sql") // upgrades must never reset the latch
