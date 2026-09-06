@@ -148,8 +148,9 @@ type Verifier interface {
 type Option func(*Signer) error
 
 type derivedKey struct {
-	sign []byte
-	ip   []byte
+	sign    []byte
+	ip      []byte
+	openapi []byte
 }
 
 type Signer struct {
@@ -215,7 +216,11 @@ func buildKey(material KeyMaterial) (string, derivedKey, error) {
 	if err != nil {
 		return "", derivedKey{}, err
 	}
-	return id, derivedKey{sign: signKey, ip: ipKey}, nil
+	openAPIKey, err := deriveKey(material.Secret, openAPIPlayKeyContext)
+	if err != nil {
+		return "", derivedKey{}, err
+	}
+	return id, derivedKey{sign: signKey, ip: ipKey, openapi: openAPIKey}, nil
 }
 
 func WithTTL(ttl time.Duration) Option {
