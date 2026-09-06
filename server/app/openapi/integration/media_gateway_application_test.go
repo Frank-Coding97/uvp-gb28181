@@ -119,6 +119,15 @@ func TestOpenAPIMediaGatewayApplicationComposition(t *testing.T) {
 			require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=4 WHERE device_id=?", boundaryMediaDevice).Error)
 			denied := postMediaLifecycleJSON(t, router, path, hookBody)
 			require.NotContains(t, denied.Body.String(), `"code":0`, "even the same Hook connection must recheck current device epoch")
+			require.NoError(t, db.Exec("UPDATE gb_device SET owner_dept_id=20 WHERE device_id=?", boundaryMediaDevice).Error)
+			require.NoError(t, db.Exec("UPDATE gb_channel SET owner_dept_id=20 WHERE device_id=?", boundaryMediaDevice).Error)
+			request = boundarySignedRequest(t, server.URL, fixture.secret, boundaryMediaPath, body, strings.Repeat("b", 32))
+			response, err = httpClient.Do(request)
+			require.NoError(t, err)
+			raw = readBoundaryResponse(t, response)
+			require.Equal(t, http.StatusNotFound, response.StatusCode, raw)
+			nonces, audits, success, count = countBoundaryRows(t, db)
+			require.Equal(t, []int64{1, 1, 1, 1}, []int64{nonces, audits, success, count}, "old owner must not consume another admission or grant")
 		})
 	}
 }
