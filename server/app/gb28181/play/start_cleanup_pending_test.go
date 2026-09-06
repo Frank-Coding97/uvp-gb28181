@@ -17,7 +17,7 @@ func TestStartRollbackCloseFailureQuarantinesGenerationUntilRetry(t *testing.T) 
 	z := &mockZLM{port: 40000, closeErr: errors.New("close failed")}
 	inviter := &mockInviter{inviteErr: errors.New("invite failed")}
 	service, authorization, _, _, _ := newFixedAuthorizationService(t, true, z, inviter)
-	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

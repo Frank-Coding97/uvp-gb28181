@@ -58,7 +58,7 @@ func TestStaleRTPCloseFailureKeepsSSRCLeased(t *testing.T) {
 	}
 	service := NewWithScheduler(testCfg(), fixedTestPicker{mediaNode: mediaNode}, fixedTestRegistry{mediaNode}, loc,
 		inviter, uac.NewSessionManager(), stream.NewNotifier(), fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()},
-		WithPlayTokenIssuer(signer),
+		WithPlayTokenIssuer(testPlayAuthorization(signer)),
 		WithURLResolver(NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 80}})),
 		WithNodeClientFactory(func(*node.Node) ZLM { return z }),
 	)

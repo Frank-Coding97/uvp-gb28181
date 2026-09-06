@@ -31,7 +31,7 @@ func TestStartStaleInviteGenerationDoesNotKillCurrentSession(t *testing.T) {
 	}
 	service := NewWithScheduler(testCfg(), picker, fixedTestRegistry{mediaNode}, stream.NewLocationMap(),
 		inviter, uac.NewSessionManager(), stream.NewNotifier(), fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()},
-		WithPlayTokenIssuer(signer),
+		WithPlayTokenIssuer(testPlayAuthorization(signer)),
 		WithURLResolver(NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 80}})),
 		WithNodeClientFactory(func(*node.Node) ZLM { return z }),
 	)
@@ -74,7 +74,7 @@ func staleService(t *testing.T, inviter *mockInviter, loc LocationStore) (*Servi
 	}
 	service := NewWithScheduler(testCfg(), picker, fixedTestRegistry{mediaNode}, loc,
 		inviter, uac.NewSessionManager(), stream.NewNotifier(), fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()},
-		WithPlayTokenIssuer(signer),
+		WithPlayTokenIssuer(testPlayAuthorization(signer)),
 		WithURLResolver(NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 80}})),
 		WithNodeClientFactory(func(*node.Node) ZLM { return z }),
 	)

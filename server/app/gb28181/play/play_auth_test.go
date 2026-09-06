@@ -42,11 +42,11 @@ func TestDynamicPlaybackGetsIndependentGenerationBoundAuthorization(t *testing.T
 		go notifier.Publish(session.StreamID)
 	}
 
-	first, err := service.StartAuthorized(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "203.0.113.9")
+	first, err := service.StartAuthorized(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "203.0.113.9", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.StartAuthorized(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "203.0.113.9")
+	second, err := service.StartAuthorized(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "203.0.113.9", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,9 +95,9 @@ func TestAuthorizationPrepareFailureHasNoMediaSideEffects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service.tokenIssuer = signer
+	service.tokenIssuer = testPlayAuthorization(signer)
 
-	_, err = service.StartAuthorized(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "203.0.113.9")
+	_, err = service.StartAuthorized(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "203.0.113.9", DeviceEpoch: 1})
 	if !errors.Is(err, ErrPlayAuthorizationUnavailable) {
 		t.Fatalf("error=%v", err)
 	}
@@ -108,7 +108,7 @@ func TestAuthorizationPrepareFailureHasNoMediaSideEffects(t *testing.T) {
 
 type failingPlayTokenIssuer struct{}
 
-func (failingPlayTokenIssuer) IssueDirect(playauth.Binding) (playauth.Grant, error) {
+func (failingPlayTokenIssuer) IssueDirectContext(context.Context, playauth.Binding) (playauth.Grant, error) {
 	return playauth.Grant{}, errors.New("signing unavailable")
 }
 
@@ -120,7 +120,7 @@ func TestFixedPlaybackResultUsesShortLivedAuthorizationOnEveryURL(t *testing.T) 
 	}
 	mediaNode := &node.Node{ID: 22, Name: "edge-22", Host: "10.0.0.22", MediaServerUUID: "node-a"}
 	service := &Service{
-		cfg: testCfg(), sessions: uac.NewSessionManager(), tokenIssuer: signer,
+		cfg: testCfg(), sessions: uac.NewSessionManager(), tokenIssuer: testPlayAuthorization(signer),
 		urlResolver: NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{
 			HTTPPort: 28080, HTTPSPort: 28443, RTSPPort: 10554, RTMPPort: 11935,
 			RTSPEnabled: true, RTMPEnabled: true, HLSEnabled: true, TSEnabled: true, FMP4Enabled: true,
@@ -134,7 +134,7 @@ func TestFixedPlaybackResultUsesShortLivedAuthorizationOnEveryURL(t *testing.T) 
 	}
 	result := service.buildNodeResult(context.Background(), streamID, "0200000001", mediaNode, false)
 	result.ModeAtStart = LiveModeFixed
-	if err := service.authorizeFixedResult(result, deviceID, channelID, mediaNode); err != nil {
+	if err := service.authorizeFixedResult(context.Background(), result, AuthorizedRequest{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: 1}, mediaNode); err != nil {
 		t.Fatalf("authorize fixed result: %v", err)
 	}
 
@@ -149,6 +149,7 @@ func TestFixedPlaybackResultUsesShortLivedAuthorizationOnEveryURL(t *testing.T) 
 		}
 		if _, err := signer.Verify(token, playauth.Binding{
 			DeviceID: deviceID, ChannelID: channelID, App: "rtp", Stream: streamID, MediaServerID: mediaNode.MediaServerUUID,
+			DeviceEpoch: 1,
 		}); err != nil {
 			t.Fatalf("%s token verify: %v", protocol, err)
 		}
@@ -166,10 +167,10 @@ func TestDynamicPlaybackResultIsNotChangedByFixedAddressAuthorization(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := &Service{tokenIssuer: signer}
+	service := &Service{tokenIssuer: testPlayAuthorization(signer)}
 	raw := "http://node/rtp/0200000001.live.flv"
 	result := &Result{StreamID: "0200000001", App: "rtp", ModeAtStart: LiveModeDynamic, URLs: PlaybackURLs{HTTPFLV: &raw}}
-	if err := service.authorizeFixedResult(result, "37010301021320000014", "37010301021320000001", &node.Node{MediaServerUUID: "node-a"}); err != nil {
+	if err := service.authorizeFixedResult(context.Background(), result, AuthorizedRequest{DeviceID: "37010301021320000014", ChannelID: "37010301021320000001", DeviceEpoch: 1}, &node.Node{MediaServerUUID: "node-a"}); err != nil {
 		t.Fatal(err)
 	}
 	if *result.URLs.HTTPFLV != raw {
@@ -182,7 +183,7 @@ func TestFixedPlaybackAuthorizationFailsBeforeMediaSideEffects(t *testing.T) {
 	withPlayAuthorization(t, true, false)
 	tests := []struct {
 		name   string
-		issuer playauth.DirectIssuer
+		issuer playauth.ContextDirectIssuer
 		want   error
 	}{
 		{name: "missing issuer", want: ErrPlayAuthorizationUnavailable},
@@ -217,7 +218,7 @@ func TestFixedPlaybackDeprecatedSingleNodeFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(testCfg(), z, inv, uac.NewSessionManager(), stream.NewNotifier(), fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()}, WithPlayTokenIssuer(signer))
+	s := New(testCfg(), z, inv, uac.NewSessionManager(), stream.NewNotifier(), fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()}, WithPlayTokenIssuer(testPlayAuthorization(signer)))
 
 	_, err = s.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)
 	if !errors.Is(err, ErrFixedPlaybackRequiresManagedNode) {
@@ -238,11 +239,11 @@ func TestFixedPlaybackReadyReuseRefreshesAuthorization(t *testing.T) {
 		z.online.Store(true)
 		go notifier.Publish(session.StreamID)
 	}
-	first, err := service.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)
+	first, err := service.StartAuthorized(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := service.Start(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID)
+	second, err := service.StartAuthorized(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

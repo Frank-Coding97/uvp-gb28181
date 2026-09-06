@@ -739,6 +739,7 @@ func startSIPDependencies(cfg gbconfig.Config) error {
 			playSigner,
 			playauth.NewAuthorizationRegistry(),
 			playauth.WithAuthorizationMetrics(playAuthMetrics),
+			playauth.WithDeviceSecurityAuthority(playauth.NewDeviceSecurityStore(app.DB())),
 		)
 		gbroutes.SetPlayAuthorizer(playAuthorization)
 		app.ZapLog.Info("GB28181 播放鉴权服务已装配")

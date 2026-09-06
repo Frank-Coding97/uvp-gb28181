@@ -11,9 +11,9 @@ import (
 )
 
 type preparedTokenIssuer interface {
-	playauth.DirectIssuer
-	Prepare() (playauth.Prepared, error)
-	Bind(playauth.Prepared, playauth.Binding) (playauth.Grant, error)
+	playauth.ContextDirectIssuer
+	playauth.ContextPreparedIssuer
+	AuthorizeDeviceEpochContext(context.Context, string, int64) error
 }
 
 type authorizationLifecycle interface {
@@ -47,7 +47,8 @@ var (
 
 // AuthorizeFixedPlayback resolves a fixed URL without opening RTP, sending
 // INVITE, or creating live ownership. Playback auth decorates it when enabled.
-func (s *Service) AuthorizeFixedPlayback(ctx context.Context, deviceID, channelID, clientIP string) (*Result, error) {
+func (s *Service) AuthorizeFixedPlayback(ctx context.Context, req AuthorizedRequest) (*Result, error) {
+	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentFixedAddressPlaybackSettings()
 	authSettings := gbconfig.CurrentPlayAuthSettings()
 	if !settings.FixedAddressEnabled || !s.useMultiNode() {
@@ -63,6 +64,9 @@ func (s *Service) AuthorizeFixedPlayback(ctx context.Context, deviceID, channelI
 		var ok bool
 		issuer, ok = s.tokenIssuer.(authorizationLifecycle)
 		if !ok || issuer == nil {
+			return nil, ErrPlayAuthorizationUnavailable
+		}
+		if err := issuer.AuthorizeDeviceEpochContext(ctx, deviceID, req.DeviceEpoch); err != nil {
 			return nil, ErrPlayAuthorizationUnavailable
 		}
 		prepared, err = issuer.Prepare()
@@ -98,9 +102,10 @@ func (s *Service) AuthorizeFixedPlayback(ctx context.Context, deviceID, channelI
 		ModeAtStart: LiveModeFixed,
 	}
 	if authSettings.Enabled {
-		grant, err := issuer.Bind(prepared, playauth.Binding{
+		grant, err := issuer.BindContext(ctx, prepared, playauth.Binding{
 			DeviceID: deviceID, ChannelID: channelID, App: zlmApp,
-			Stream: streamID, MediaServerID: mediaNode.MediaServerUUID,
+			DeviceEpoch: req.DeviceEpoch,
+			Stream:      streamID, MediaServerID: mediaNode.MediaServerUUID,
 			BindClientIP: authSettings.BindClientIP, ClientIP: clientIP,
 		})
 		if err != nil {
@@ -137,13 +142,17 @@ func (s *Service) terminateAuthorizationGeneration(generation uint64) {
 
 // StartAuthorized issues a fresh authorization for every explicit play call.
 // Randomness and optional client-IP validation happen before media side effects.
-func (s *Service) StartAuthorized(ctx context.Context, deviceID, channelID, clientIP string) (*Result, error) {
+func (s *Service) StartAuthorized(ctx context.Context, req AuthorizedRequest) (*Result, error) {
+	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	settings := gbconfig.CurrentPlayAuthSettings()
 	if !settings.Enabled {
 		return s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, Trigger: "explicit"})
 	}
 	issuer, ok := s.tokenIssuer.(preparedTokenIssuer)
 	if !ok || issuer == nil {
+		return nil, ErrPlayAuthorizationUnavailable
+	}
+	if err := issuer.AuthorizeDeviceEpochContext(ctx, deviceID, req.DeviceEpoch); err != nil {
 		return nil, ErrPlayAuthorizationUnavailable
 	}
 	if settings.BindClientIP {
@@ -155,11 +164,11 @@ func (s *Service) StartAuthorized(ctx context.Context, deviceID, channelID, clie
 	if err != nil {
 		return nil, ErrPlayAuthorizationUnavailable
 	}
-	result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, Trigger: "explicit"})
+	result, err := s.EnsureLive(ctx, Request{DeviceID: deviceID, ChannelID: channelID, DeviceEpoch: req.DeviceEpoch, Trigger: "explicit"})
 	if err != nil {
 		return nil, err
 	}
-	if err := s.authorizePreparedResult(result, deviceID, channelID, clientIP, settings, issuer, prepared); err != nil {
+	if err := s.authorizePreparedResult(ctx, result, req, settings, issuer, prepared); err != nil {
 		if result != nil && !result.Reused {
 			ref := stream.LiveRef{StreamID: result.StreamID, SSRC: result.SSRC, Generation: result.Generation}
 			if result.Node != nil {
@@ -173,12 +182,14 @@ func (s *Service) StartAuthorized(ctx context.Context, deviceID, channelID, clie
 }
 
 func (s *Service) authorizePreparedResult(
+	ctx context.Context,
 	result *Result,
-	deviceID, channelID, clientIP string,
+	req AuthorizedRequest,
 	settings gbconfig.PlayAuthSettings,
 	issuer preparedTokenIssuer,
 	prepared playauth.Prepared,
 ) error {
+	deviceID, channelID, clientIP := req.DeviceID, req.ChannelID, req.ClientIP
 	if result == nil || result.Node == nil || s.registry == nil {
 		return ErrPlayAuthorizationUnavailable
 	}
@@ -192,7 +203,8 @@ func (s *Service) authorizePreparedResult(
 	}
 	binding.BindClientIP = settings.BindClientIP
 	binding.ClientIP = clientIP
-	grant, err := issuer.Bind(prepared, binding)
+	binding.DeviceEpoch = req.DeviceEpoch
+	grant, err := issuer.BindContext(ctx, prepared, binding)
 	if err != nil {
 		return ErrPlayAuthorizationUnavailable
 	}
@@ -212,7 +224,7 @@ func (s *Service) authorizePreparedResult(
 
 // authorizeFixedResult remains as a narrow compatibility helper for unit
 // tests; production explicit playback uses StartAuthorized for both modes.
-func (s *Service) authorizeFixedResult(result *Result, deviceID, channelID string, mediaNode *node.Node) error {
+func (s *Service) authorizeFixedResult(ctx context.Context, result *Result, req AuthorizedRequest, mediaNode *node.Node) error {
 	if result == nil || result.ModeAtStart != LiveModeFixed {
 		return nil
 	}
@@ -224,8 +236,8 @@ func (s *Service) authorizeFixedResult(result *Result, deviceID, channelID strin
 	if err != nil {
 		return ErrPlayAuthorizationUnavailable
 	}
-	grant, err := issuer.Bind(prepared, playauth.Binding{
-		DeviceID: deviceID, ChannelID: channelID, App: result.App,
+	grant, err := issuer.BindContext(ctx, prepared, playauth.Binding{
+		DeviceID: req.DeviceID, ChannelID: req.ChannelID, DeviceEpoch: req.DeviceEpoch, App: result.App,
 		Stream: result.StreamID, MediaServerID: mediaNode.MediaServerUUID,
 		MediaGeneration: result.Generation,
 	})

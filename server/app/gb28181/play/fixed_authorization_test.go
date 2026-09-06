@@ -33,7 +33,8 @@ func newFixedAuthorizationService(t *testing.T, ready bool, z *mockZLM, inviter 
 		t.Fatal(err)
 	}
 	authorizationRegistry := playauth.NewAuthorizationRegistry()
-	authorization := playauth.NewAuthorizationService(signer, authorizationRegistry)
+	authorization := playauth.NewAuthorizationService(signer, authorizationRegistry,
+		playauth.WithDeviceSecurityAuthority(newTestPlayEpochAuthority()))
 	picker := &countingFixedPicker{mediaNode: mediaNode}
 	notifier := stream.NewNotifier()
 	service := NewWithScheduler(
@@ -67,7 +68,7 @@ func TestAuthorizeFixedPlaybackHasNoMediaSideEffects(t *testing.T) {
 	inviter := &mockInviter{}
 	service, authorization, registry, picker, _ := newFixedAuthorizationService(t, true, z, inviter)
 
-	result, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "203.0.113.9")
+	result, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "203.0.113.9", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatalf("authorize fixed playback: %v", err)
 	}
@@ -97,7 +98,7 @@ func TestAuthorizeFixedPlaybackWithoutAuthReturnsBareURLs(t *testing.T) {
 	inviter := &mockInviter{}
 	service, _, registry, picker, _ := newFixedAuthorizationService(t, true, z, inviter)
 
-	result, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	result, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatalf("authorize fixed playback without auth: %v", err)
 	}
@@ -123,7 +124,7 @@ func TestAuthorizeFixedPlaybackDoesNotRequireAutoOnDemand(t *testing.T) {
 	withPlayAuthorization(t, true, false)
 	service, _, _, _, _ := newFixedAuthorizationService(t, false, &mockZLM{port: 40000}, &mockInviter{})
 
-	result, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	result, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatalf("fixed playback authorization with auto on-demand disabled: %v", err)
 	}
@@ -150,7 +151,7 @@ func TestAuthorizeFixedPlaybackRequiresAllRuntimeGates(t *testing.T) {
 			inviter := &mockInviter{}
 			service, _, registry, picker, _ := newFixedAuthorizationService(t, tt.nodeReady, z, inviter)
 
-			_, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+			_, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "", DeviceEpoch: 1})
 			if !errors.Is(err, ErrPlayAuthorizationUnavailable) {
 				t.Fatalf("error=%v, want ErrPlayAuthorizationUnavailable", err)
 			}
@@ -170,7 +171,7 @@ func TestAutoStartAuthorizationBindsBeforeMediaAndTerminatesOnFailure(t *testing
 	z := &mockZLM{openErr: errors.New("open failed")}
 	inviter := &mockInviter{}
 	service, authorization, _, _, _ := newFixedAuthorizationService(t, true, z, inviter)
-	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -210,7 +211,7 @@ func TestAutoStartAuthorizationTerminatesWhenGenerationStops(t *testing.T) {
 		z.online.Store(true)
 		go notifier.Publish(session.StreamID)
 	}
-	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), onlineDevice().DeviceID, aChannel().ChannelID, "")
+	preauthorized, err := service.AuthorizeFixedPlayback(context.Background(), AuthorizedRequest{DeviceID: onlineDevice().DeviceID, ChannelID: aChannel().ChannelID, ClientIP: "", DeviceEpoch: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

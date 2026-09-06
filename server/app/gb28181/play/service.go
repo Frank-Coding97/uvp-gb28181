@@ -156,7 +156,7 @@ type Service struct {
 
 	snapshotSvc        SnapshotService // 通道快照(播放触发),可为 nil
 	urlResolver        *URLResolver
-	tokenIssuer        playauth.DirectIssuer
+	tokenIssuer        playauth.ContextDirectIssuer
 	nodeClient         func(*node.Node) ZLM
 	qualifiedValidator QualifiedNodeValidator
 	diagnosticSink     diagnosis.DiagnosticSink
@@ -195,7 +195,7 @@ func WithURLResolver(resolver *URLResolver) Option {
 	return func(s *Service) { s.urlResolver = resolver }
 }
 
-func WithPlayTokenIssuer(issuer playauth.DirectIssuer) Option {
+func WithPlayTokenIssuer(issuer playauth.ContextDirectIssuer) Option {
 	return func(s *Service) { s.tokenIssuer = issuer }
 }
 
@@ -510,10 +510,10 @@ func (s *Service) buildReuseResult(ctx context.Context, ch *gbmodels.GbChannel, 
 
 // Start 发起点播并通过通道级协调器合并并发请求。
 //
-// 旧调用方继续使用这个签名；实际副作用由 startDirect 执行，避免
-// REST、级联等多个入口在同一通道重复 openRtpServer/INVITE。
+// 兼容无播放鉴权的旧调用方。鉴权开启时，签发入口必须改用携带
+// 已授权设备版本的 StartAuthorized；此方法不会自动读取最新版本。
 func (s *Service) Start(ctx context.Context, deviceID, channelID string) (*Result, error) {
-	return s.StartAuthorized(ctx, deviceID, channelID, "")
+	return s.StartAuthorized(ctx, AuthorizedRequest{DeviceID: deviceID, ChannelID: channelID})
 }
 
 // startDirect 发起一次不经过协调器的点播事务。调用方必须已经持有通道
@@ -871,7 +871,8 @@ func (s *Service) startDirect(ctx context.Context, req Request) (*Result, error)
 	return result, nil
 }
 
-func (s *Service) fireSnapshot(result *Result, deviceID, channelID string) {
+func (s *Service) fireSnapshot(ctx context.Context, result *Result, req Request) {
+	deviceID, channelID := req.DeviceID, req.ChannelID
 	if s.snapshotSvc == nil || result == nil || result.StreamID == "" {
 		return
 	}
@@ -899,9 +900,12 @@ func (s *Service) fireSnapshot(result *Result, deviceID, channelID string) {
 				zap.Int64("nodeId", result.Node.ID))
 			return
 		}
-		grant, err := s.tokenIssuer.IssueDirect(playauth.Binding{
+		tokenCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		grant, err := s.tokenIssuer.IssueDirectContext(tokenCtx, playauth.Binding{
 			DeviceID: deviceID, ChannelID: channelID, App: zlmApp,
-			Stream: result.StreamID, MediaServerID: mediaNode.MediaServerUUID,
+			DeviceEpoch: req.DeviceEpoch,
+			Stream:      result.StreamID, MediaServerID: mediaNode.MediaServerUUID,
 			MediaGeneration: result.Generation,
 			BindClientIP:    authSettings.BindClientIP,
 			ClientIP:        "127.0.0.1",

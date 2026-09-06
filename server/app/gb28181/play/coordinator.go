@@ -517,7 +517,7 @@ func (s *Service) EnsureLive(ctx context.Context, req Request) (*Result, error) 
 		callerResult.Reused = true
 	}
 	if err == nil && !reused && result != nil && !result.Reused {
-		s.fireSnapshot(result, req.DeviceID, req.ChannelID)
+		s.fireSnapshot(ctx, result, req)
 	}
 	return callerResult, err
 }

@@ -67,6 +67,7 @@ func buildStopRouter(t *testing.T, svc gbcontrollers.PlayService, opts ...gbcont
 	gin.SetMode(gin.TestMode)
 	db := newScopedDeviceDB(t)
 	app.Response = response.NewResponseHandler()
+	require.NoError(t, db.Create(&gbmodels.GbDevice{DeviceID: "device"}).Error)
 	require.NoError(t, db.Create(&gbmodels.GbChannel{DeviceID: "device", ChannelID: "channel", StreamID: "dept10-stream"}).Error)
 	controller := gbcontrollers.NewPlayController(svc, opts...)
 	router := gin.New()

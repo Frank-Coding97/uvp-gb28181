@@ -509,6 +509,18 @@ func (s *AuthorizationService) Prepare() (prepared Prepared, err error) {
 	return s.signer.Prepare()
 }
 
+// AuthorizeDeviceEpochContext checks the caller's immutable authority snapshot
+// before media work. It never loads a newer epoch into the caller's request.
+func (s *AuthorizationService) AuthorizeDeviceEpochContext(ctx context.Context, deviceID string, epoch int64) error {
+	if err := s.requireAuthorityContext(ctx); err != nil {
+		return err
+	}
+	if epoch <= 0 {
+		return ErrAuthorizationDeviceEpoch
+	}
+	return s.authority.AuthorizeEpoch(ctx, deviceID, epoch)
+}
+
 func (s *AuthorizationService) Bind(prepared Prepared, binding Binding) (grant Grant, err error) {
 	ctx, cancel := context.WithTimeout(context.Background(), authorizationContextTimeout)
 	defer cancel()

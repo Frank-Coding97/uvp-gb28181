@@ -67,7 +67,7 @@ func newFixedSvc(t *testing.T, z ZLM, inv Inviter, dev *gbmodels.GbDevice, ch *g
 	}
 	service := NewWithScheduler(testCfg(), fixedTestPicker{mediaNode}, fixedTestRegistry{mediaNode}, stream.NewLocationMap(),
 		inv, uac.NewSessionManager(), notifier, fakeDevices{dev}, channels,
-		WithPlayTokenIssuer(signer),
+		WithPlayTokenIssuer(testPlayAuthorization(signer)),
 		WithURLResolver(NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 80, HLSEnabled: true, FMP4Enabled: true}})),
 		WithNodeClientFactory(func(*node.Node) ZLM { return z }),
 	)
@@ -271,7 +271,7 @@ func TestEnsureLiveRequiredNodeRejectsInactiveNodeBeforeMediaSideEffects(t *test
 	}
 	service := NewWithScheduler(testCfg(), picker, fixedTestRegistry{mediaNode}, stream.NewLocationMap(),
 		inviter, uac.NewSessionManager(), stream.NewNotifier(), fakeDevices{onlineDevice()}, &fakeChannels{c: aChannel()},
-		WithPlayTokenIssuer(signer),
+		WithPlayTokenIssuer(testPlayAuthorization(signer)),
 		WithURLResolver(NewURLResolver(fakeServerConfigProvider{cfg: node.ServerConfig{HTTPPort: 80}})),
 		WithNodeClientFactory(func(*node.Node) ZLM { return z }),
 	)

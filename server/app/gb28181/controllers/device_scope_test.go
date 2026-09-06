@@ -36,6 +36,8 @@ func newScopedDeviceDB(t *testing.T) *gorm.DB {
 		&basemodels.SysUserRole{},
 		&basemodels.User{},
 	))
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN access_epoch INTEGER DEFAULT 1").Error)
+	require.NoError(t, db.Exec("ALTER TABLE gb_device ADD COLUMN legacy_revoked_before DATETIME NULL").Error)
 
 	prevDB := app.GormDbMysql
 	prevConfig := app.ConfigYml
