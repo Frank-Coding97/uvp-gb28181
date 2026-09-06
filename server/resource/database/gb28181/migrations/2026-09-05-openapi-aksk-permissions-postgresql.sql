@@ -59,7 +59,7 @@ WHERE NOT EXISTS (SELECT 1 FROM sys_menu WHERE permission='gb28181:openapi:clien
 INSERT INTO sys_role_menu(role_id,menu_id)
 SELECT r.id,m.id
 FROM sys_role r CROSS JOIN sys_menu m
-WHERE r.name='系统管理员' AND r.deleted_at IS NULL
+WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL
   AND m.permission IN ('gb28181:openapi:client:read','gb28181:openapi:client:create','gb28181:openapi:client:grant','gb28181:openapi:client:rotate','gb28181:openapi:client:status','gb28181:openapi:client:audit')
   AND m.deleted_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM sys_role_menu x WHERE x.role_id=r.id AND x.menu_id=m.id);
@@ -99,7 +99,7 @@ FROM sys_role_menu rm
 JOIN sys_menu m ON m.id=rm.menu_id
 JOIN sys_menu_api ma ON ma.menu_id=m.id
 JOIN sys_api a ON a.id=ma.api_id
-WHERE rm.role_id IN (SELECT id FROM sys_role WHERE name='系统管理员' AND deleted_at IS NULL)
+WHERE rm.role_id=1 AND EXISTS (SELECT 1 FROM sys_role r WHERE r.id=1 AND r.status=1 AND r.deleted_at IS NULL)
   AND m.permission LIKE 'gb28181:openapi:client:%'
   AND m.deleted_at IS NULL AND a.deleted_at IS NULL
   AND NOT EXISTS (SELECT 1 FROM sys_casbin_rule c WHERE c.ptype='p' AND c.v0=CONCAT('role_',rm.role_id) AND c.v1=a.path AND c.v2=a.method AND c.v3='*');
