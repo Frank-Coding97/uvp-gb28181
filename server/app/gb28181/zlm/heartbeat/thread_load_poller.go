@@ -23,10 +23,12 @@ type ThreadLoadFetcher interface {
 // NetThreadLoad / WorkThreadLoad 字段,只能调 REST `/index/api/getThreadsLoad`
 // + `/getWorkThreadsLoad` 拿。Poller 跟 Watcher 同频率(30s)运行。
 type ThreadLoadPoller struct {
-	registry *node.Registry
-	fetcher  ThreadLoadFetcher
-	interval time.Duration
-	fetchWG  sync.WaitGroup
+	registry     *node.Registry
+	fetcher      ThreadLoadFetcher
+	interval     time.Duration
+	fetchMu      sync.Mutex
+	fetchWG      sync.WaitGroup
+	fetchStopped bool
 }
 
 // NewThreadLoadPoller 构造
@@ -37,6 +39,11 @@ func NewThreadLoadPoller(reg *node.Registry, fetcher ThreadLoadFetcher, interval
 // Tick 一次轮询:并发拉所有 active 节点的 2 个负载,写回 Stats
 func (p *ThreadLoadPoller) Tick(ctx context.Context) {
 	active := p.registry.ListActive()
+	p.fetchMu.Lock()
+	defer p.fetchMu.Unlock()
+	if p.fetchStopped {
+		return
+	}
 	for _, n := range active {
 		nCopy := n
 		p.fetchWG.Add(1)
@@ -78,7 +85,7 @@ func (p *ThreadLoadPoller) Start(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer p.fetchWG.Wait()
+		defer p.stopFetches()
 		// 启动 5s 后立即跑一次(让 UI 不用等 30s 才看到负载值)
 		select {
 		case <-ctx.Done():
@@ -98,4 +105,11 @@ func (p *ThreadLoadPoller) Start(ctx context.Context) <-chan struct{} {
 		}
 	}()
 	return done
+}
+
+func (p *ThreadLoadPoller) stopFetches() {
+	p.fetchMu.Lock()
+	p.fetchStopped = true
+	p.fetchMu.Unlock()
+	p.fetchWG.Wait()
 }

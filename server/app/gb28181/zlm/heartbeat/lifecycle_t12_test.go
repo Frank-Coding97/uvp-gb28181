@@ -2,6 +2,7 @@ package heartbeat_test
 
 import (
 	"context"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -118,5 +119,79 @@ func TestThreadLoadPollerT12StartDoneWaitsForTickFetch(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("poller did not report completion after fetch returned")
+	}
+}
+
+func TestThreadLoadPollerT12TickCancelAdmission100Rounds(t *testing.T) {
+	for round := 0; round < 100; round++ {
+		reg, _ := setupRegistry(t, "uuid-1")
+		fetcher := &blockingFetch{started: make(chan struct{}), release: make(chan struct{})}
+		poller := heartbeat.NewThreadLoadPoller(reg, fetcher, time.Hour)
+		poller.Tick(context.Background())
+		select {
+		case <-fetcher.started:
+		case <-time.After(time.Second):
+			t.Fatalf("round %d: initial poll did not start", round)
+		}
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := poller.Start(ctx)
+		startTicks := make(chan struct{})
+		ready := make(chan struct{}, 4)
+		var ticks sync.WaitGroup
+		for worker := 0; worker < 4; worker++ {
+			ticks.Add(1)
+			go func() {
+				defer ticks.Done()
+				ready <- struct{}{}
+				<-startTicks
+				for i := 0; i < 50; i++ {
+					poller.Tick(context.Background())
+					runtime.Gosched()
+				}
+			}()
+		}
+		for worker := 0; worker < 4; worker++ {
+			<-ready
+		}
+		close(startTicks)
+		time.Sleep(time.Millisecond)
+		cancel()
+		// Let Start enter its fetch wait, then release the admitted calls while
+		// external Tick callers are still racing that wait.
+		time.Sleep(time.Millisecond)
+		fetcher.close.Do(func() { close(fetcher.release) })
+		ticks.Wait()
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatalf("round %d: poller did not report completion", round)
+		}
+	}
+}
+
+func TestThreadLoadPollerT12TickAfterStartDoneIsIgnored(t *testing.T) {
+	reg, _ := setupRegistry(t, "uuid-1")
+	fetcher := &blockingFetch{started: make(chan struct{}), release: make(chan struct{})}
+	t.Cleanup(func() { fetcher.close.Do(func() { close(fetcher.release) }) })
+	poller := heartbeat.NewThreadLoadPoller(reg, fetcher, time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := poller.Start(ctx)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("poller did not report completion after cancellation")
+	}
+
+	// Tick is an externally callable method, but once Start has closed its
+	// lifecycle it must not admit a fetch that the completion signal cannot
+	// cover.
+	poller.Tick(context.Background())
+	select {
+	case <-fetcher.started:
+		t.Fatal("Tick admitted work after the poller lifecycle ended")
+	case <-time.After(20 * time.Millisecond):
 	}
 }

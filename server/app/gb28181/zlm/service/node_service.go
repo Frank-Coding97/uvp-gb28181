@@ -157,6 +157,8 @@ type NodeService struct {
 	scheduleMu      sync.Mutex
 	scheduleWG      sync.WaitGroup
 	scheduleStopped bool
+	scheduleDone    chan struct{}
+	scheduleWait    sync.Once
 	applyMu         sync.Mutex
 	applying        map[int64]struct{}
 	locksMu         sync.Mutex
@@ -170,12 +172,13 @@ type NodeService struct {
 // NewNodeService 构造
 func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *NodeService {
 	s := &NodeService{
-		registry: reg,
-		probe:    probe,
-		tuning:   tuning,
-		applying: make(map[int64]struct{}),
-		locks:    make(map[int64]*sync.Mutex),
-		logger:   zap.NewNop(),
+		registry:     reg,
+		probe:        probe,
+		tuning:       tuning,
+		applying:     make(map[int64]struct{}),
+		locks:        make(map[int64]*sync.Mutex),
+		logger:       zap.NewNop(),
+		scheduleDone: make(chan struct{}),
 	}
 	s.restart = NewRestartCoordinator(reg)
 	s.restart.SetConverger(s.ConvergeNodeConfig)
@@ -617,23 +620,24 @@ func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) erro
 // failed apply leaves readiness false so the next heartbeat retries it.
 func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
 	// Admission and WaitGroup.Add must be serialized with StopContext's
-	// WaitGroup.Wait. Keep the existing per-node locking and the asynchronous
-	// apply unchanged while preventing a new worker after shutdown begins.
+	// WaitGroup.Wait. Do not hold this lifecycle lock while waiting for the
+	// per-node lock: an in-flight apply may hold it for the full ZLM timeout.
 	s.scheduleMu.Lock()
 	if s.scheduleStopped {
 		s.scheduleMu.Unlock()
 		return false
 	}
+	s.scheduleWG.Add(1)
+	s.scheduleMu.Unlock()
+
 	lock := s.nodeLock(nodeID)
 	lock.Lock()
 	current, ok := s.beginConfigConvergence(nodeID)
 	lock.Unlock()
 	if !ok {
-		s.scheduleMu.Unlock()
+		s.scheduleWG.Done()
 		return false
 	}
-	s.scheduleWG.Add(1)
-	s.scheduleMu.Unlock()
 	go func() {
 		defer s.scheduleWG.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -665,18 +669,34 @@ func (s *NodeService) StopContext(ctx context.Context) error {
 	}
 	s.scheduleMu.Lock()
 	s.scheduleStopped = true
+	done := s.scheduleDone
+	if done == nil {
+		done = make(chan struct{})
+		s.scheduleDone = done
+	}
 	s.scheduleMu.Unlock()
 
-	done := make(chan struct{})
-	go func() {
-		s.scheduleWG.Wait()
-		close(done)
-	}()
+	s.scheduleWait.Do(func() {
+		go func() {
+			s.scheduleWG.Wait()
+			close(done)
+		}()
+	})
+	select {
+	case <-done:
+		return nil
+	default:
+	}
 	select {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
 	}
 }
 

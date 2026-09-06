@@ -71,13 +71,15 @@ type RestartCoordinator struct {
 	lifecycleCtx    context.Context
 	lifecycleCancel context.CancelFunc
 
-	mu            sync.Mutex
-	closed        bool
-	operations    map[int64]*RestartOperation
-	generations   map[int64]uint64
-	timers        map[int64]*time.Timer
-	converge      func(context.Context, int64) error
-	convergenceWG sync.WaitGroup
+	mu              sync.Mutex
+	closed          bool
+	operations      map[int64]*RestartOperation
+	generations     map[int64]uint64
+	timers          map[int64]*time.Timer
+	converge        func(context.Context, int64) error
+	convergenceWG   sync.WaitGroup
+	convergenceDone chan struct{}
+	convergenceWait sync.Once
 }
 
 // NewRestartCoordinator constructs an in-memory coordinator. timeout is
@@ -97,6 +99,7 @@ func NewRestartCoordinator(reg *node.Registry, timeout ...time.Duration) *Restar
 		operations:      make(map[int64]*RestartOperation),
 		generations:     make(map[int64]uint64),
 		timers:          make(map[int64]*time.Timer),
+		convergenceDone: make(chan struct{}),
 	}
 }
 
@@ -485,16 +488,34 @@ func (c *RestartCoordinator) StopContext(ctx context.Context) error {
 	if cancel != nil {
 		cancel()
 	}
-	done := make(chan struct{})
-	go func() {
-		c.convergenceWG.Wait()
-		close(done)
-	}()
+	c.mu.Lock()
+	done := c.convergenceDone
+	if done == nil {
+		done = make(chan struct{})
+		c.convergenceDone = done
+	}
+	c.mu.Unlock()
+	c.convergenceWait.Do(func() {
+		go func() {
+			c.convergenceWG.Wait()
+			close(done)
+		}()
+	})
+	select {
+	case <-done:
+		return nil
+	default:
+	}
 	select {
 	case <-done:
 		return nil
 	case <-ctx.Done():
-		return ctx.Err()
+		select {
+		case <-done:
+			return nil
+		default:
+			return ctx.Err()
+		}
 	}
 }
 

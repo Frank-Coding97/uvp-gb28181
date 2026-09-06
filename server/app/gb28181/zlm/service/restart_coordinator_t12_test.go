@@ -53,6 +53,9 @@ func TestRestartT12StopContextReportsDeadlineUntilConvergenceReturns(t *testing.
 
 	releaseConvergence()
 	require.NoError(t, coordinator.StopContext(context.Background()))
+	expired, cancelExpired := context.WithCancel(context.Background())
+	cancelExpired()
+	require.NoError(t, coordinator.StopContext(expired), "completed stop wins over an already expired context")
 }
 
 func TestRestartT12CloseWaitsForAcceptedConvergence(t *testing.T) {
