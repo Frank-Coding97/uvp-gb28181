@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/viper"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoggingDeploymentTemplate(t *testing.T) {
@@ -40,6 +41,40 @@ func TestLoggingDeploymentTemplate(t *testing.T) {
 			t.Fatal("logging migration changed the result queue capacity")
 		}
 	}
+}
+
+func TestLoggingDeploymentCompose(t *testing.T) {
+	data, err := os.ReadFile("../../../../deploy/test/compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compose struct {
+		Services map[string]struct {
+			Logging struct {
+				Driver  string
+				Options map[string]string
+			}
+			Volumes         []string
+			StopGracePeriod string `yaml:"stop_grace_period"`
+		}
+	}
+	if err := yaml.Unmarshal(data, &compose); err != nil {
+		t.Fatal(err)
+	}
+	backend, ok := compose.Services["backend"]
+	if !ok || backend.Logging.Driver != "json-file" || backend.Logging.Options["max-size"] != "5m" || backend.Logging.Options["max-file"] != "8" {
+		t.Fatalf("missing bounded backend logging driver: %+v", backend.Logging)
+	}
+	if backend.StopGracePeriod != "45s" {
+		t.Fatalf("container grace must cover the application's 30s drain: %q", backend.StopGracePeriod)
+	}
+	wantMount := "${UVP_ROOT:-/opt/uvp-gb28181}/data/logs:/app/resource/logs"
+	for _, mount := range backend.Volumes {
+		if mount == wantMount {
+			return
+		}
+	}
+	t.Fatal("existing persistent log mount must survive the output migration")
 }
 
 func TestLoggingDeploymentBasePaths(t *testing.T) {

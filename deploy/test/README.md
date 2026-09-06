@@ -22,8 +22,8 @@ profile 才覆盖为部署路径。
 `/app/resource/logs/uvp-gb28181.log`，systemd 服务的落点是
 `/opt/uvp-gb28181/current/backend/resource/logs/uvp-gb28181.log`，不会把
 `/app` 与 `./resource` 直接拼成 `/app./resource`。旧字段里的
-`/resource/logs/...` 仍按项目相对路径处理；只有显式写 `/var/...` 等绝对路径
-才是绝对落点。
+`/resource/logs/...` 仍按项目相对路径处理；新字段 `logs.filepath` 中的
+`/var/...` 等绝对路径则直接作为绝对落点。
 
 新旧字段同时存在时，优先级固定为：
 
@@ -32,7 +32,7 @@ profile 才覆盖为部署路径。
 - `logs.modules.scheduler > scheduler.log.level`
 
 Compose backend 使用有界的 Docker `json-file` 驱动：`max-size: "5m"`、
-`max-file: "8"`，并设置 `stop_grace_period: 45s`。应用 T12 共用 30 秒优雅
+`max-file: "8"`，并设置 `stop_grace_period: 45s`。应用共用 30 秒优雅
 退出窗口，45 秒部署窗口可避免 Compose 默认的较短窗口提前强制终止；具体
 语义见 [Compose stop_grace_period 文档](https://docs.docker.com/reference/compose-file/services/#stop_grace_period)。
 容器驱动的容量预算独立于应用文件预算，不能把两者相加后宣称总量仍为
