@@ -152,6 +152,14 @@ func (r *Repeater) maintain() {
 		}
 	}
 }
+
+// Close settles all remaining counts before the application's final status.
+// The owning Runtime also invokes it; repeated calls are harmless.
+func (r *Repeater) Close() {
+	if r != nil {
+		r.close()
+	}
+}
 func (r *Repeater) close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()

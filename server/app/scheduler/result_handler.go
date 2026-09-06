@@ -3,60 +3,111 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/models"
+	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 	"uvplatform.cn/uvp-gb28181/app/utils/schedulerhelper"
 
 	"go.uber.org/zap"
 )
 
-// resultHandlerCancel 用于取消结果处理协程
-var resultHandlerCancel context.CancelFunc
+// A result handler owns its consumer until the producer closes the channel.
+// A shutdown deadline only bounds waiting; it does not cancel persistence.
+type resultHandler struct {
+	done   chan struct{}
+	failed int
+}
 
-// StartResultHandler 启动任务结果处理器
-// 该函数会启动一个后台协程，从调度器的结果通道中读取任务执行结果，
-// 并将结果保存到数据库的 sys_job_results 表中
-func StartResultHandler() {
-	ctx, cancel := context.WithCancel(context.Background())
-	resultHandlerCancel = cancel
+type resultDrainError struct{ failed int }
 
+func (e resultDrainError) Error() string {
+	return fmt.Sprintf("%d job results failed to persist", e.failed)
+}
+
+var resultHandlers struct {
+	sync.Mutex
+	current *resultHandler
+	results <-chan *schedulerhelper.JobResult
+}
+
+func newResultHandler(results <-chan *schedulerhelper.JobResult, save func(context.Context, *schedulerhelper.JobResult) error, root *zap.Logger) *resultHandler {
+	h := &resultHandler{done: make(chan struct{})}
 	go func() {
-		app.ZapLog.Info("任务结果处理器已启动")
-		defer app.ZapLog.Info("任务结果处理器已停止")
-
-		resultsChan := app.JobScheduler.GetResults()
-
-		for {
-			select {
-			case <-ctx.Done():
-				// 处理剩余的结果
-				app.ZapLog.Info("正在处理剩余的任务结果...")
-				drainResults(resultsChan)
-				return
-
-			case result, ok := <-resultsChan:
-				if !ok {
-					// 通道已关闭
-					app.ZapLog.Info("任务结果通道已关闭，处理器退出")
-					return
-				}
-
-				// 保存结果到数据库
-				if err := saveJobResult(result); err != nil {
-					app.ZapLog.Error("保存任务结果失败",
-						zap.String("jobID", result.JobID),
-						zap.String("status", result.Status),
-						zap.Error(err))
-				}
+		defer close(h.done)
+		for result := range results {
+			scope := logging.WithIdentity(root, zap.String("job_id", result.JobID), zap.String("execution_id", result.ExecutionID), zap.Int("attempt", result.Attempt))
+			ctx := logging.WithContext(context.Background(), scope)
+			if err := save(ctx, result); err != nil {
+				h.failed++
+				scope.Named("scheduler").Error("Job result persistence failed", zap.String("event", "scheduler.result.persist_failed"), logging.Error(err))
 			}
 		}
 	}()
+	return h
 }
 
-// saveJobResult 将任务执行结果保存到数据库
-func saveJobResult(result *schedulerhelper.JobResult) error {
+func (h *resultHandler) wait(ctx context.Context) error {
+	if h == nil {
+		return nil
+	}
+	// Completion wins over a deadline that has already expired.
+	select {
+	case <-h.done:
+	default:
+		select {
+		case <-h.done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	if h.failed != 0 {
+		return resultDrainError{failed: h.failed}
+	}
+	return nil
+}
+
+// StartResultHandler attaches one consumer to the scheduler's result channel.
+func StartResultHandler() {
+	if app.JobScheduler == nil {
+		return
+	}
+	results := app.JobScheduler.GetResults()
+	resultHandlers.Lock()
+	defer resultHandlers.Unlock()
+	if resultHandlers.current != nil && resultHandlers.results == results {
+		return
+	}
+	if resultHandlers.current != nil {
+		select {
+		case <-resultHandlers.current.done:
+		default:
+			return
+		}
+	}
+	resultHandlers.results = results
+	resultHandlers.current = newResultHandler(results, saveJobResultContext, app.Log(context.Background()))
+}
+
+// StopResultHandlerContext waits after the scheduler has stopped all producers
+// and closed results. Timeout never claims that queued results were saved.
+func StopResultHandlerContext(ctx context.Context) error {
+	resultHandlers.Lock()
+	h := resultHandlers.current
+	resultHandlers.Unlock()
+	return h.wait(ctx)
+}
+
+func StopResultHandler() {
+	if err := StopResultHandlerContext(context.Background()); err != nil {
+		app.Log(context.Background()).Named("scheduler").Error("Job result drain failed", zap.String("event", "scheduler.result.drain_failed"), logging.Error(err))
+	}
+}
+
+// saveJobResultContext 将任务执行结果保存到数据库
+func saveJobResultContext(ctx context.Context, result *schedulerhelper.JobResult) error {
 	// 转换 JobResult 为 SysJobResults 模型
 	jobResult := &models.SysJobResults{
 		JobId:      result.JobID,
@@ -77,34 +128,33 @@ func saveJobResult(result *schedulerhelper.JobResult) error {
 	jobResult.CreatedAt = &now
 
 	// 保存到数据库
-	ctx := context.Background()
 	if err := jobResult.Create(ctx); err != nil {
 		return fmt.Errorf("保存任务结果到数据库失败: %w", err)
 	}
 
-	app.ZapLog.Debug("任务结果已保存到数据库",
-		zap.String("jobID", result.JobID),
+	app.Log(ctx).Named("scheduler").Debug("任务结果已保存到数据库", zap.String("event", "scheduler.result.persisted"),
+		zap.String("job_id", result.JobID),
 		zap.String("status", result.Status),
 		zap.Duration("duration", result.Duration),
-		zap.Int("retryCount", result.RetryCount))
+		zap.Int("retry_count", result.RetryCount))
 
 	// 如果是单次执行策略且执行成功，更新 sys_jobs 表的 status 为 0
 	if result.ExecutionPolicy == schedulerhelper.PolicyOnce && result.Status == "SUCCESS" {
 		job := &models.SysJobs{}
 		if err := job.GetByID(ctx, result.JobID); err != nil {
-			app.ZapLog.Error("获取任务信息失败",
-				zap.String("jobID", result.JobID),
-				zap.Error(err))
+			app.Log(ctx).Named("scheduler").Error("获取任务信息失败", zap.String("event", "scheduler.once.lookup_failed"),
+				zap.String("job_id", result.JobID),
+				logging.Error(err))
 		} else {
 			if job.Status == 1 {
 				job.Status = 0
 				if err := job.Update(ctx); err != nil {
-					app.ZapLog.Error("更新单次执行任务状态失败",
-						zap.String("jobID", result.JobID),
-						zap.Error(err))
+					app.Log(ctx).Named("scheduler").Error("更新单次执行任务状态失败", zap.String("event", "scheduler.once.disable_failed"),
+						zap.String("job_id", result.JobID),
+						logging.Error(err))
 				} else {
-					app.ZapLog.Info("单次执行任务已完成，已更新数据库状态为禁用",
-						zap.String("jobID", result.JobID))
+					app.Log(ctx).Named("scheduler").Info("单次执行任务已完成，已更新数据库状态为禁用", zap.String("event", "scheduler.once.disabled"),
+						zap.String("job_id", result.JobID))
 				}
 			}
 
@@ -112,40 +162,4 @@ func saveJobResult(result *schedulerhelper.JobResult) error {
 	}
 
 	return nil
-}
-
-// StopResultHandler 停止任务结果处理器
-// 该函数会优雅地停止结果处理协程，确保所有待处理的结果都被保存
-func StopResultHandler() {
-	if resultHandlerCancel != nil {
-		app.ZapLog.Info("正在停止任务结果处理器...")
-		resultHandlerCancel()
-		resultHandlerCancel = nil
-	}
-}
-
-// drainResults 处理结果通道中剩余的所有结果
-func drainResults(resultsChan <-chan *schedulerhelper.JobResult) {
-	count := 0
-	for {
-		select {
-		case result, ok := <-resultsChan:
-			if !ok {
-				app.ZapLog.Info("所有剩余任务结果已处理完成", zap.Int("count", count))
-				return
-			}
-			count++
-			if err := saveJobResult(result); err != nil {
-				app.ZapLog.Error("保存剩余任务结果失败",
-					zap.String("jobID", result.JobID),
-					zap.Error(err))
-			}
-		default:
-			// 通道为空，退出
-			if count > 0 {
-				app.ZapLog.Info("所有剩余任务结果已处理完成", zap.Int("count", count))
-			}
-			return
-		}
-	}
 }
