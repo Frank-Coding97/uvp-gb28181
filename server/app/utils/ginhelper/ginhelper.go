@@ -2,15 +2,12 @@ package ginhelper
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
-	"uvplatform.cn/uvp-gb28181/app/scheduler"
 
 	"io"
 
@@ -91,46 +88,10 @@ func GetPluginRouteFuncs() []PluginRouteFunc {
 	return pluginRouteFuncs
 }
 
-// PrintStartupBanner 打印启动横幅信息
-func PrintStartupBanner() {
-	// 从配置获取信息
-	port := app.ConfigYml.GetString("httpserver.port")
-	serverRoot := app.ConfigYml.GetString("httpserver.serverroot")
-	dbType := app.ConfigYml.GetString("gormv2.usedbtype")
-
-	// 获取数据库名称
-	dbName := app.ConfigYml.GetString("gormv2." + dbType + ".write.database")
-	if dbName == "" {
-		dbName = "unknown"
-	}
-
-	// 版本信息
-	version := app.AppVersion.Version
-	if version == "" {
-		version = "unknown"
-	}
-
-	// 打印启动信息（简洁纯文本格式）
-	fmt.Println()
-	fmt.Println("===========================================")
-	fmt.Println("  GinFast Framework")
-	fmt.Println("===========================================")
-	fmt.Printf("  Version    : %s\n", version)
-	fmt.Printf("  Port       : %s\n", port)
-	fmt.Printf("  ServerRoot : %s\n", serverRoot)
-	fmt.Printf("  DbType     : %s\n", dbType)
-	fmt.Printf("  Database   : %s\n", dbName)
-	fmt.Println("===========================================")
-	fmt.Println()
-}
-
-// StartServer 配置并启动HTTP服务器，支持优雅关闭
-func StartServer(engine *gin.Engine) error {
+// StartServer binds HTTP before announcing readiness. Application shutdown is
+// supplied by main so SIP remains available to in-flight HTTP and job work.
+func StartServer(engine *gin.Engine, stop func(context.Context) error) error {
 	logRoutes(engine)
-	// 打印启动横幅
-	PrintStartupBanner()
-
-	// 配置HTTP服务器超时设置
 	server := &http.Server{
 		Addr:         app.ConfigYml.GetString("httpserver.port"),
 		Handler:      engine,
@@ -138,51 +99,9 @@ func StartServer(engine *gin.Engine) error {
 		WriteTimeout: time.Duration(app.ConfigYml.GetInt("httpserver.write_timeout")) * time.Second,
 		IdleTimeout:  time.Duration(app.ConfigYml.GetInt("httpserver.idle_timeout")) * time.Second,
 	}
-
-	// 在 goroutine 中启动服务器
-	go func() {
-		app.ZapLog.Info("服务器启动", zap.String("addr", server.Addr))
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			app.ZapLog.Fatal("服务器启动失败", zap.Error(err))
-		}
-	}()
-
-	// 监听系统信号
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit,
-		syscall.SIGINT,  // Ctrl+C
-		syscall.SIGTERM, // kill 命令
-		syscall.SIGQUIT, // Ctrl+\
-	)
-
-	sig := <-quit
-	app.ZapLog.Info("收到退出信号，开始优雅关闭...", zap.String("signal", sig.String()))
-
-	// 设置超时上下文，防止关闭时间过长
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer cancel()
-
-	// 优雅关闭服务器
-	if err := server.Shutdown(ctx); err != nil {
-		app.ZapLog.Error("服务器关闭失败", zap.Error(err))
-		return err
-	}
-
-	// 停止任务结果处理器
-	// 注意：必须在停止调度器之前停止，确保所有结果都被保存
-	app.ZapLog.Info("正在停止任务结果处理器...")
-	scheduler.StopResultHandler()
-	app.ZapLog.Info("任务结果处理器已停止")
-
-	// 停止任务调度器
-	if app.JobScheduler != nil {
-		app.ZapLog.Info("正在停止任务调度器...")
-		app.JobScheduler.Stop()
-		app.ZapLog.Info("任务调度器已停止")
-	}
-
-	app.ZapLog.Info("服务器已优雅关闭")
-	return nil
+	return serveUntilCanceled(ctx, server, app.Log(context.Background()), stop)
 }
 
 // Emit registered routes after registration, including release mode. This does
