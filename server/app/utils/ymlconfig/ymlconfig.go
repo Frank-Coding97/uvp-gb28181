@@ -1,23 +1,19 @@
 package ymlconfig
 
 import (
+	"context"
+	"os"
+	"sync"
+	"time"
+
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 
 	"go.uber.org/zap"
-	"os"
-	"sync"
-	"time"
 	"uvplatform.cn/uvp-gb28181/app/utils/logging"
 )
-
-var lastChangeTime time.Time
-
-func init() {
-	lastChangeTime = time.Now()
-}
 
 func CreateYamlFactory(path string, fileName ...string) app.YmlConfigInterf {
 	config, err := LoadYamlFactory(path, fileName...)
@@ -51,21 +47,84 @@ func LoadYamlFactory(path string, fileName ...string) (app.YmlConfigInterf, erro
 	}
 
 	return &ymlConfig{
-		viper: yamlConfig,
-		mu:    new(sync.RWMutex),
+		viper:          yamlConfig,
+		mu:             new(sync.RWMutex),
+		callbackState:  newConfigCallbackState(),
+		lastChangeTime: time.Now(),
 	}, nil
 }
 
 type ymlConfig struct {
-	viper *viper.Viper
-	mu    *sync.RWMutex
+	viper          *viper.Viper
+	mu             *sync.RWMutex
+	callbackState  *configCallbackState
+	callbackOrder  sync.Mutex
+	lastChangeTime time.Time
+}
+
+type configCallbackState struct {
+	mu        sync.Mutex
+	stopping  bool
+	inFlight  int
+	callbacks chan struct{}
+}
+
+func newConfigCallbackState() *configCallbackState {
+	return &configCallbackState{callbacks: make(chan struct{})}
+}
+
+func (s *configCallbackState) admit() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.inFlight++
+	return true
+}
+
+func (s *configCallbackState) finish() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inFlight--
+	if s.stopping && s.inFlight == 0 {
+		close(s.callbacks)
+	}
+}
+
+func (s *configCallbackState) stop(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.mu.Lock()
+	s.stopping = true
+	if s.inFlight == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	done := s.callbacks
+	s.mu.Unlock()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // ConfigFileChangeListen 监听文件变化
 func (y *ymlConfig) ConfigFileChangeListen(fns ...func()) {
 
 	y.viper.OnConfigChange(func(changeEvent fsnotify.Event) {
-		if time.Since(lastChangeTime).Seconds() >= 1 {
+		if !y.callbackState.admit() {
+			return
+		}
+		defer y.callbackState.finish()
+
+		y.callbackOrder.Lock()
+		defer y.callbackOrder.Unlock()
+		if time.Since(y.lastChangeTime).Seconds() >= 1 {
 			if changeEvent.Op.String() == "WRITE" {
 
 				// 重新读取配置文件（使用写锁保护）
@@ -82,11 +141,17 @@ func (y *ymlConfig) ConfigFileChangeListen(fns ...func()) {
 				for _, f := range fns {
 					f()
 				}
-				lastChangeTime = time.Now()
+				y.lastChangeTime = time.Now()
 			}
 		}
 	})
 	y.viper.WatchConfig()
+}
+
+// StopContext stops admitting configuration callbacks and waits for callbacks
+// already admitted to finish. It does not stop Viper's configuration reader.
+func (y *ymlConfig) StopContext(ctx context.Context) error {
+	return y.callbackState.stop(ctx)
 }
 
 func (y *ymlConfig) Get(keyName string) interface{} {
