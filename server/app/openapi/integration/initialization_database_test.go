@@ -85,10 +85,10 @@ var forbiddenInitializationSQL = []struct {
 	name    string
 	pattern *regexp.Regexp
 }{
-	{name: "USE", pattern: regexp.MustCompile(`(?im)^\s*USE\s+`)},
-	{name: "CREATE DATABASE/SCHEMA", pattern: regexp.MustCompile(`(?im)^\s*CREATE\s+(?:DATABASE|SCHEMA)\b`)},
-	{name: "ALTER DATABASE", pattern: regexp.MustCompile(`(?im)^\s*ALTER\s+DATABASE\b`)},
-	{name: "DROP DATABASE/SCHEMA", pattern: regexp.MustCompile(`(?im)^\s*DROP\s+(?:DATABASE|SCHEMA)\b`)},
+	{name: "USE", pattern: regexp.MustCompile(`(?im)(?:^|;)[\t \r\n]*USE\b`)},
+	{name: "CREATE DATABASE/SCHEMA", pattern: regexp.MustCompile(`(?im)(?:^|;)[\t \r\n]*CREATE\s+(?:DATABASE|SCHEMA)\b`)},
+	{name: "ALTER DATABASE", pattern: regexp.MustCompile(`(?im)(?:^|;)[\t \r\n]*ALTER\s+DATABASE\b`)},
+	{name: "DROP DATABASE/SCHEMA", pattern: regexp.MustCompile(`(?im)(?:^|;)[\t \r\n]*DROP\s+(?:DATABASE|SCHEMA)\b`)},
 	{name: "user permission", pattern: regexp.MustCompile(`(?i)\b(?:GRANT|REVOKE|CREATE\s+USER|ALTER\s+USER|DROP\s+USER|CREATE\s+LOGIN|ALTER\s+LOGIN|DROP\s+LOGIN|CREATE\s+ROLE|ALTER\s+ROLE|DROP\s+ROLE|SET\s+ROLE)\b`)},
 	{name: "external file", pattern: regexp.MustCompile(`(?i)\b(?:LOAD\s+DATA|BULK\s+INSERT|COPY\s+[^;\n]+\s+(?:FROM|TO)|INTO\s+(?:OUTFILE|DUMPFILE)|OPENROWSET|OPENDATASOURCE|XP_CMDSHELL|BACKUP\s+DATABASE|RESTORE\s+DATABASE)\b`)},
 }
@@ -185,7 +185,7 @@ func TestOpenAPIDatabaseFullInitialization(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	connection, err := openFullInitializationConnection(cfg)
+	connection, err := openFullInitializationConnection(ctx, cfg)
 	if err != nil {
 		t.Fatal("full initialization database connection failed (DSN suppressed)")
 	}
@@ -223,7 +223,7 @@ func TestOpenAPIDatabaseFullInitialization(t *testing.T) {
 	t.Logf("%s full initialization executed on dedicated %s database; no default OpenAPI client/nonce/grant/viewer rows", cfg.dialect, databaseName)
 }
 
-func openFullInitializationConnection(cfg fullInitializationConfig) (*fullInitializationConnection, error) {
+func openFullInitializationConnection(ctx context.Context, cfg fullInitializationConfig) (*fullInitializationConnection, error) {
 	var db *sql.DB
 	var err error
 	switch cfg.dialect {
@@ -252,7 +252,7 @@ func openFullInitializationConnection(cfg fullInitializationConfig) (*fullInitia
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(0)
-	conn, err := db.Conn(context.Background())
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -279,7 +279,7 @@ func listInitializationTables(ctx context.Context, conn *sql.Conn, dialect strin
 	case "mysql":
 		query = "SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema = DATABASE()"
 	case "postgresql":
-		query = "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_schema = current_schema()"
+		query = "SELECT table_schema || '.' || table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_schema NOT LIKE 'pg_toast%'"
 	case "sqlserver":
 		query = "SELECT TABLE_SCHEMA + '.' + TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_CATALOG = DB_NAME()"
 	default:
@@ -386,10 +386,12 @@ func assertFullInitializationState(t *testing.T, conn *sql.Conn, ctx context.Con
 		require.NoError(t, conn.QueryRowContext(ctx, query, route.path, route.method).Scan(&count), "route %d", i)
 		require.EqualValues(t, 1, count, "missing OpenAPI route %s %s", route.method, route.path)
 	}
-	rootQuery := "SELECT COUNT(*) FROM sys_casbin_rule WHERE ptype = " + initializationPlaceholder(dialect, 1) + " AND v0 = " + initializationPlaceholder(dialect, 2) + " AND v1 LIKE " + initializationPlaceholder(dialect, 3)
-	var rootRoutes int64
-	require.NoError(t, conn.QueryRowContext(ctx, rootQuery, "p", "role_1", "/api/gb28181/openapi-clients%").Scan(&rootRoutes))
-	require.EqualValues(t, len(routes), rootRoutes, "root OpenAPI permission route count")
+	for i, route := range routes {
+		rootTupleQuery := "SELECT COUNT(*) FROM sys_casbin_rule WHERE ptype = " + initializationPlaceholder(dialect, 1) + " AND v0 = " + initializationPlaceholder(dialect, 2) + " AND v1 = " + initializationPlaceholder(dialect, 3) + " AND v2 = " + initializationPlaceholder(dialect, 4) + " AND v3 = " + initializationPlaceholder(dialect, 5)
+		var rootTupleCount int64
+		require.NoError(t, conn.QueryRowContext(ctx, rootTupleQuery, "p", "role_1", route.path, route.method, "*").Scan(&rootTupleCount), "root tuple %d", i)
+		require.EqualValues(t, 1, rootTupleCount, "missing or duplicate root tuple %s %s", route.method, route.path)
+	}
 }
 
 func initializationColumnCount(ctx context.Context, conn *sql.Conn, dialect, table, column string) (int64, error) {
@@ -497,6 +499,14 @@ func TestFullInitializationSQLSafetyGate(t *testing.T) {
 		"COPY sys_user FROM '/tmp/users.csv';",
 		"COPY sys_user TO '/tmp/users.csv';",
 		"SELECT * INTO OUTFILE '/tmp/users.csv' FROM sys_user;",
+	} {
+		require.Error(t, validateInitializationSQL(sql), sql)
+	}
+	for _, sql := range []string{
+		"CREATE TABLE safe_table (id BIGINT); USE uvp_openapi_test_mysql;",
+		"CREATE TABLE safe_table (id BIGINT); CREATE DATABASE another;",
+		"CREATE TABLE safe_table (id BIGINT); ALTER DATABASE uvp_openapi_test_mysql SET READ_ONLY;",
+		"CREATE TABLE safe_table (id BIGINT); DROP DATABASE uvp_openapi_test_mysql;",
 	} {
 		require.Error(t, validateInitializationSQL(sql), sql)
 	}
