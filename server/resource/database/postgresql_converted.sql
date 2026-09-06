@@ -596,7 +596,7 @@ CREATE TABLE sys_department (
     id SERIAL,
     parent_id INTEGER DEFAULT 0,
     name VARCHAR(255),
-    status BOOLEAN,
+    status SMALLINT,
     leader VARCHAR(255),
     phone VARCHAR(255),
     email VARCHAR(255),
@@ -626,7 +626,7 @@ CREATE TABLE sys_dict (
     id SERIAL,
     name VARCHAR(255),
     code VARCHAR(255),
-    status BOOLEAN,
+    status SMALLINT,
     description VARCHAR(500),
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
@@ -651,7 +651,7 @@ CREATE TABLE sys_dict_item (
     id SERIAL,
     name VARCHAR(255),
     value VARCHAR(255),
-    status BOOLEAN,
+    status SMALLINT,
     dict_id INTEGER,
     PRIMARY KEY (id)
 );
@@ -870,18 +870,18 @@ CREATE TABLE sys_menu (
     redirect VARCHAR(255),
     component VARCHAR(255),
     title VARCHAR(100),
-    is_full BOOLEAN DEFAULT false,
-    hide BOOLEAN DEFAULT false,
-    disable BOOLEAN DEFAULT false,
-    keep_alive BOOLEAN DEFAULT false,
-    affix BOOLEAN DEFAULT false,
+    is_full SMALLINT DEFAULT 0,
+    hide SMALLINT DEFAULT 0,
+    disable SMALLINT DEFAULT 0,
+    keep_alive SMALLINT DEFAULT 0,
+    affix SMALLINT DEFAULT 0,
     link VARCHAR(500) DEFAULT '',
-    iframe BOOLEAN DEFAULT false,
+    iframe SMALLINT DEFAULT 0,
     svg_icon VARCHAR(100) DEFAULT '',
     icon VARCHAR(100) DEFAULT '',
     sort INTEGER DEFAULT 0,
     type SMALLINT DEFAULT 2,
-    is_link BOOLEAN DEFAULT false,
+    is_link SMALLINT DEFAULT 0,
     permission VARCHAR(255) DEFAULT '',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1315,7 +1315,7 @@ CREATE TABLE sys_users (
     username VARCHAR(50) NOT NULL DEFAULT '',
     password VARCHAR(255) NOT NULL DEFAULT '',
     email VARCHAR(100) DEFAULT '',
-    status BOOLEAN DEFAULT true,
+    status SMALLINT DEFAULT 1,
     dept_id INTEGER DEFAULT 0,
     phone VARCHAR(64) DEFAULT '',
     sex VARCHAR(64) DEFAULT '',
@@ -1571,9 +1571,9 @@ SELECT setval('sys_casbin_rule_id_seq',7577,true);
 INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
 (234,'查看级联平台列表','/api/gb28181/cascade/platforms','GET','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(235,'创建级联平台','/api/gb28181/cascade/platforms','POST','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(236,'查看级联平台','/api/gb28181/cascade/platforms/:id','GET','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(237,'修改级联平台','/api/gb28181/cascade/platforms/:id','PUT','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(238,'删除级联平台','/api/gb28181/cascade/platforms/:id','DELETE','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(239,'启停级联平台','/api/gb28181/cascade/platforms/:id/enabled','PUT','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(240,'启用级联平台','/api/gb28181/cascade/platforms/:id/enable','POST','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(241,'停用级联平台','/api/gb28181/cascade/platforms/:id/disable','POST','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(242,'重连级联平台','/api/gb28181/cascade/platforms/:id/reconnect','POST','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(243,'查看级联共享','/api/gb28181/cascade/platforms/:id/shares','GET','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(244,'更新级联共享','/api/gb28181/cascade/platforms/:id/shares','PUT','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(245,'共享级联通道','/api/gb28181/cascade/platforms/:id/channels/share','POST','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(246,'取消级联通道共享','/api/gb28181/cascade/platforms/:id/channels/unshare','POST','GB28181 国标级联',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
 INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
-(140370,0,'/gb28181/cascade','gb28181-cascade','gb28181/cascade/index','国标级联',FALSE,FALSE,13,2,'','lucide:GitBranch',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+(140370,0,'/gb28181/cascade','gb28181-cascade','gb28181/cascade/index','国标级联',0,0,13,2,'','lucide:GitBranch',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
 INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
-(140363,140370,'','','','查看国标级联',TRUE,3,'gb28181:cascade:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140364,140370,'','','','管理国标级联',TRUE,3,'gb28181:cascade:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140365,140370,'','','','启停国标级联',TRUE,3,'gb28181:cascade:enable',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140366,140370,'','','','共享国标级联资源',TRUE,3,'gb28181:cascade:share',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140367,140370,'','','','重连国标级联',TRUE,3,'gb28181:cascade:reconnect',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+(140363,140370,'','','','查看国标级联',1,3,'gb28181:cascade:view',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140364,140370,'','','','管理国标级联',1,3,'gb28181:cascade:manage',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140365,140370,'','','','启停国标级联',1,3,'gb28181:cascade:enable',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140366,140370,'','','','共享国标级联资源',1,3,'gb28181:cascade:share',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140367,140370,'','','','重连国标级联',1,3,'gb28181:cascade:reconnect',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
 INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140370),(1,140363),(1,140364),(1,140365),(1,140366),(1,140367);
 INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140363,234),(140363,236),(140363,243),(140364,235),(140364,237),(140364,238),(140365,239),(140365,240),(140365,241),(140366,244),(140366,245),(140366,246),(140367,242);
 INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
@@ -1586,7 +1586,7 @@ INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,delete
 (249,'发起实时点播','/api/gb28181/play/:deviceId/:channelId','POST','GB28181 播放鉴权',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
 (250,'申请固定播放地址授权','/api/gb28181/play/:deviceId/:channelId/authorization','POST','GB28181 播放鉴权',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
 INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,type,permission,created_at,updated_at,created_by) VALUES
-(140371,140355,'','','','发起实时点播',TRUE,3,'gb28181:play:start',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+(140371,140355,'','','','发起实时点播',1,3,'gb28181:play:start',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
 INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140371);
 INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140359,247),(140360,248),(140371,249),(140371,250);
 INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
@@ -2038,8 +2038,8 @@ INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,delete
 (339,'查询在线用户','/api/sysOnlineUser/list','GET','系统管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
 (340,'强制下线会话','/api/sysOnlineUser/forceLogout','POST','系统管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
 INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
-(140382,10,'/system/online-user','SystemOnlineUser','system/online-user/index','在线用户',FALSE,FALSE,8,2,'system:online-user:list','lucide:UsersRound',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
-(140383,140382,'','SystemOnlineUserForceLogout','','强制下线',TRUE,FALSE,1,3,'system:online-user:force-logout','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+(140382,10,'/system/online-user','SystemOnlineUser','system/online-user/index','在线用户',0,0,8,2,'system:online-user:list','lucide:UsersRound',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),
+(140383,140382,'','SystemOnlineUserForceLogout','','强制下线',1,0,1,3,'system:online-user:force-logout','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
 INSERT INTO sys_role_menu (role_id,menu_id) VALUES (1,140382),(1,140383);
 INSERT INTO sys_menu_api (menu_id,api_id) VALUES (140382,339),(140383,340);
 INSERT INTO sys_casbin_rule (id,ptype,v0,v1,v2,v3,v4,v5) VALUES
@@ -2062,8 +2062,8 @@ CREATE INDEX idx_login_logs_ip ON sys_login_logs(ip); CREATE INDEX idx_login_log
 INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
 (341,'登录日志列表','/api/sysLoginLog/list','GET','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,'登录日志详情','/api/sysLoginLog/:id','GET','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(343,'删除登录日志','/api/sysLoginLog/delete','DELETE','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(344,'清空登录日志','/api/sysLoginLog/clear','POST','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(345,'解锁登录账号','/api/sysLoginLog/unlock','POST','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
 INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
-(140384,10,'/system/login-log','SystemLoginLog','system/login-log/index','登录日志',FALSE,FALSE,1,2,'system:login-log:list','lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
-INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES (140385,140384,'','SystemLoginLogDelete','','删除登录日志',TRUE,FALSE,1,3,'system:login-log:delete','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140386,140384,'','SystemLoginLogClear','','清空登录日志',TRUE,FALSE,2,3,'system:login-log:clear','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140387,140384,'','SystemLoginLogUnlock','','解锁登录账号',TRUE,FALSE,3,3,'system:login-log:unlock','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+(140384,10,'/system/login-log','SystemLoginLog','system/login-log/index','登录日志',0,0,1,2,'system:login-log:list','lucide:FileClock',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
+INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES (140385,140384,'','SystemLoginLogDelete','','删除登录日志',1,0,1,3,'system:login-log:delete','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140386,140384,'','SystemLoginLogClear','','清空登录日志',1,0,2,3,'system:login-log:clear','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1),(140387,140384,'','SystemLoginLogUnlock','','解锁登录账号',1,0,3,3,'system:login-log:unlock','',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,1);
 INSERT INTO sys_role_menu(role_id,menu_id) VALUES (1,140384),(1,140385),(1,140386),(1,140387); INSERT INTO sys_menu_api(menu_id,api_id) VALUES (140384,341),(140384,342),(140385,343),(140386,344),(140387,345);
 INSERT INTO sys_casbin_rule(id,ptype,v0,v1,v2,v3,v4,v5) VALUES (7808,'p','role_1','/api/sysLoginLog/list','GET','*','',''),(7809,'p','role_1','/api/sysLoginLog/:id','GET','*','',''),(7810,'p','role_1','/api/sysLoginLog/delete','DELETE','*','',''),(7811,'p','role_1','/api/sysLoginLog/clear','POST','*','',''),(7812,'p','role_1','/api/sysLoginLog/unlock','POST','*','','');
 SELECT setval('sys_api_id_seq',345,true); SELECT setval('sys_menu_id_seq',140387,true); SELECT setval('sys_casbin_rule_id_seq',7812,true);
