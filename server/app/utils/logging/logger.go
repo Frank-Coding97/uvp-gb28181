@@ -44,7 +44,9 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		cfg.Modules["access"] = zapcore.InfoLevel
 	}
 	minLevel := cfg.Level
+	uniformLevel := true
 	for _, l := range cfg.Modules {
+		uniformLevel = uniformLevel && l == cfg.Level
 		if l < minLevel {
 			minLevel = l
 		}
@@ -98,7 +100,7 @@ func NewRuntime(opts Options) (*Runtime, error) {
 		r.sinks = append(r.sinks, sink)
 	}
 	inner := zapcore.NewTee(cores...).With([]zap.Field{zap.String("service", opts.Service), zap.String("version", opts.Version), zap.String("instance", opts.Instance)})
-	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, closed: &r.closed, gate: &r.gate, bound: map[string]bool{}}
+	core := &runtimeCore{inner: inner, config: cfg, min: minLevel, uniformLevel: uniformLevel, keyPolicies: &fieldKeyCache{}, closed: &r.closed, gate: &r.gate, bound: map[string]bool{}}
 	options := []zap.Option{zap.ErrorOutput(r.emergency)}
 	if opts.Clock != nil {
 		options = append(options, zap.WithClock(opts.Clock))
@@ -181,14 +183,16 @@ func WithIdentity(logger *zap.Logger, fields ...zap.Field) *zap.Logger {
 }
 
 type runtimeCore struct {
-	inner     zapcore.Core
-	config    Config
-	min       zapcore.Level
-	closed    *atomic.Bool
-	gate      *sync.RWMutex
-	bound     map[string]bool
-	used      int
-	truncated bool
+	inner        zapcore.Core
+	config       Config
+	min          zapcore.Level
+	uniformLevel bool
+	keyPolicies  *fieldKeyCache
+	closed       *atomic.Bool
+	gate         *sync.RWMutex
+	bound        map[string]bool
+	used         int
+	truncated    bool
 }
 
 func (c *runtimeCore) Enabled(l zapcore.Level) bool { return l >= c.min }
@@ -206,7 +210,7 @@ func (c *runtimeCore) level(name string) zapcore.Level {
 	return c.config.Level
 }
 func (c *runtimeCore) Check(e zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
-	if e.Level >= c.level(e.LoggerName) {
+	if (c.uniformLevel && e.Level >= c.config.Level) || (!c.uniformLevel && e.Level >= c.level(e.LoggerName)) {
 		return ce.AddCore(e, c)
 	}
 	return ce
@@ -250,6 +254,9 @@ func (c *runtimeCore) Write(e zapcore.Entry, fields []zap.Field) error {
 	}
 	if e.LoggerName == "" {
 		e.LoggerName = "app"
+	}
+	if c.canWriteUnchanged(e, fields) {
+		return c.inner.Write(e, fields)
 	}
 	clean := make([]zap.Field, 0, len(fields)+1)
 	hasEvent := c.bound["event"]

@@ -185,9 +185,31 @@ func sensitiveKey(key string) bool {
 		n++
 	}
 	k := string(normalized[:n])
-	for _, part := range []string{"password", "passwd", "secret", "token", "authorization", "cookie", "credential", "privatekey", "accesskey", "apikey"} {
-		if strings.Contains(k, part) {
-			return true
+	// Check candidate starts in one pass instead of rescanning the whole key
+	// separately for every sensitive fragment. Normalization remains shared.
+	for i := 0; i < len(k); i++ {
+		tail := k[i:]
+		switch k[i] {
+		case 'p':
+			if strings.HasPrefix(tail, "password") || strings.HasPrefix(tail, "passwd") || strings.HasPrefix(tail, "privatekey") {
+				return true
+			}
+		case 's':
+			if strings.HasPrefix(tail, "secret") {
+				return true
+			}
+		case 't':
+			if strings.HasPrefix(tail, "token") {
+				return true
+			}
+		case 'a':
+			if strings.HasPrefix(tail, "authorization") || strings.HasPrefix(tail, "accesskey") || strings.HasPrefix(tail, "apikey") {
+				return true
+			}
+		case 'c':
+			if strings.HasPrefix(tail, "cookie") || strings.HasPrefix(tail, "credential") {
+				return true
+			}
 		}
 	}
 	switch k {
@@ -196,6 +218,29 @@ func sensitiveKey(key string) bool {
 	}
 	return false
 }
+
+type stringFieldRule uint8
+
+const (
+	stringFieldPlain stringFieldRule = iota
+	stringFieldOmit
+	stringFieldURL
+)
+
+// Shared by normalization and the unchanged-entry proof; adding a special
+// string source here automatically keeps it out of the fast path.
+func stringFieldPolicy(key string) stringFieldRule {
+	k := strings.ToLower(key)
+	switch k {
+	case "error", "err", "reason", "panic", "recover", "detail":
+		return stringFieldOmit
+	}
+	if strings.Contains(k, "url") || k == "uri" || k == "endpoint" {
+		return stringFieldURL
+	}
+	return stringFieldPlain
+}
+
 func sanitizeField(f zap.Field) zap.Field {
 	if sensitiveKey(f.Key) {
 		return zap.String(f.Key, "[REDACTED]")
@@ -212,11 +257,11 @@ func sanitizeField(f zap.Field) zap.Field {
 	case zapcore.ArrayMarshalerType, zapcore.ReflectType, zapcore.StringerType, zapcore.InlineMarshalerType, zapcore.BinaryType, zapcore.ByteStringType:
 		return zap.String(f.Key, "[omitted:"+TypeName(f.Interface)+"]")
 	case zapcore.StringType:
-		k := strings.ToLower(f.Key)
-		if k == "error" || k == "err" || k == "reason" || k == "panic" || k == "recover" || k == "detail" {
+		policy := stringFieldPolicy(f.Key)
+		if policy == stringFieldOmit {
 			return zap.String(f.Key, "[text omitted]")
 		}
-		if strings.Contains(k, "url") || k == "uri" || k == "endpoint" {
+		if policy == stringFieldURL {
 			u, e := url.Parse(f.String)
 			if e != nil || u.Scheme == "" || u.Host == "" {
 				f.String = "[url omitted]"
