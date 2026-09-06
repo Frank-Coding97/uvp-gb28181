@@ -263,6 +263,7 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	checkNativeNodeRuntime(t, db)
 	checkNativeQuota(t, db)
 	checkNativeGrantViewer(t, db)
+	checkNativeRevocation(t, db)
 	checkNativeMustAuthLatch(t, db)
 	run(lockStem + ".sql") // upgrades must never reset the latch
 	state, err := openapiconfig.NewMustAuthStore(db, time.Now).Load(ctx)
