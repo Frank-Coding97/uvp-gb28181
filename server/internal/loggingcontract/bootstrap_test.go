@@ -39,3 +39,31 @@ func TestLoggingBootstrapWiring(t *testing.T) {
 		t.Error("empty per-entry goroutine hook remains")
 	}
 }
+
+func TestLoggingJobBootstrapWiring(t *testing.T) {
+	f, err := parser.ParseFile(token.NewFileSet(), "../../bootstrap/init.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		if sel.Sel.Name == "WithLoggerConfig" {
+			t.Error("scheduler still opens independent log files")
+		}
+		if sel.Sel.Name == "NewZapJobLogger" {
+			found = true
+		}
+		return true
+	})
+	if !found {
+		t.Error("scheduler root logging adapter missing")
+	}
+}

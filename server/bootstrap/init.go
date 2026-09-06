@@ -219,26 +219,6 @@ func newUploadService() app.FileUploadService {
 
 // newScheduler 初始化任务调度器
 func newScheduler() app.JobSchedulerInterf {
-	logDir := app.BasePath + app.ConfigYml.GetString("scheduler.log.dir")
-
-	// 解析日志级别
-	levelStr := app.ConfigYml.GetString("scheduler.log.level")
-	var level schedulerhelper.LogLevel
-	switch levelStr {
-	case "debug":
-		level = schedulerhelper.LevelDebug
-	case "info":
-		level = schedulerhelper.LevelInfo
-	case "warn":
-		level = schedulerhelper.LevelWarn
-	case "error":
-		level = schedulerhelper.LevelError
-	case "fatal":
-		level = schedulerhelper.LevelFatal
-	default:
-		level = schedulerhelper.LevelInfo
-	}
-
 	// 获取结果通道缓冲大小
 	bufferSize := app.ConfigYml.GetInt("scheduler.job_results_buffer_size")
 	if bufferSize <= 0 {
@@ -246,7 +226,7 @@ func newScheduler() app.JobSchedulerInterf {
 	}
 
 	scheduler := schedulerhelper.NewJobScheduler(
-		schedulerhelper.WithLoggerConfig(logDir, level),
+		schedulerhelper.WithLogger(schedulerhelper.NewZapJobLogger(app.ZapLog)),
 		schedulerhelper.WithJobResultsBufferSize(bufferSize),
 	)
 
