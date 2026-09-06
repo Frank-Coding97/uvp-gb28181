@@ -212,15 +212,14 @@ func (s *JobScheduler) AddOrUpdateJob(job *Job) (string, error) {
 // 创建任务执行函数
 func (s *JobScheduler) createJobFunc(job *Job) func() {
 	return func() {
-		if !s.admitExecution(job) {
+		jobSnapshot, ok := s.admitExecution(job)
+		if !ok {
 			return
 		}
 
-		go func() {
-			defer s.wg.Done()
-			defer s.decrementRunningCount(job.ID)
-			s.executeJob(job)
-		}()
+		defer s.wg.Done()
+		defer s.decrementRunningCount(jobSnapshot.ID)
+		s.executeJob(jobSnapshot)
 	}
 }
 
@@ -272,19 +271,20 @@ func (s *JobScheduler) canExecuteLocked(job *Job) bool {
 	}
 }
 
-func (s *JobScheduler) admitExecution(job *Job) bool {
+func (s *JobScheduler) admitExecution(job *Job) (*Job, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.stopping {
-		return false
+		return nil, false
 	}
 	if !s.canExecuteLocked(job) {
 		s.logger.LogJobLifecycle(job, "跳过")
-		return false
+		return nil, false
 	}
 	s.incrementRunningCountLocked(job.ID)
+	jobSnapshot := job.Clone()
 	s.wg.Add(1)
-	return true
+	return jobSnapshot, true
 }
 
 // 立即执行一次任务
@@ -304,14 +304,15 @@ func (s *JobScheduler) ExecuteNow(jobID string) error {
 		return fmt.Errorf("job cannot execute due to blocking policy")
 	}
 	s.incrementRunningCountLocked(job.ID)
+	jobSnapshot := job.Clone()
 	s.wg.Add(1)
 	s.logger.LogJobLifecycle(job, "手动触发")
 
 	// 异步执行
 	go func() {
 		defer s.wg.Done()
-		defer s.decrementRunningCount(job.ID)
-		s.executeJob(job)
+		defer s.decrementRunningCount(jobSnapshot.ID)
+		s.executeJob(jobSnapshot)
 	}()
 
 	return nil

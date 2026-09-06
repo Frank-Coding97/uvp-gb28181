@@ -3,6 +3,7 @@ package schedulerhelper
 import (
 	"context"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -331,4 +332,108 @@ func TestLoggingStopConcurrentCallsCloseOnce(t *testing.T) {
 	}
 	require.Len(t, collectLoggingStopResults(t, scheduler.GetResults()), 1)
 	require.Equal(t, int32(1), logger.closeCount.Load())
+}
+
+func TestLoggingStopCronChainWaitsForCallback(t *testing.T) {
+	release := make(chan struct{})
+	executor := &loggingStopExecutor{name: "cron-chain", started: make(chan struct{}, 1), release: release}
+	logger := &loggingStopLogger{}
+	scheduler, job := newLoggingStopScheduler(t, executor, logger, 4, WithCronOptions(
+		cron.WithParser(loggingStopScheduleParser{}),
+		cron.WithChain(cron.SkipIfStillRunning(cron.DiscardLogger)),
+	))
+	scheduler.Start()
+	_, err := scheduler.AddOrUpdateJob(&Job{
+		ID:              job.ID,
+		Group:           job.Group,
+		Name:            job.Name,
+		ExecutorName:    job.ExecutorName,
+		ExecutionPolicy: PolicyRepeat,
+		Status:          StatusEnabled,
+		CronExpression:  job.CronExpression,
+		BlockingPolicy:  BlockDiscard,
+		Timeout:         time.Second,
+	})
+	require.NoError(t, err)
+	waitLoggingStopExecution(t, executor)
+
+	cronDone := scheduler.cron.Stop()
+	select {
+	case <-cronDone.Done():
+		t.Fatal("cron chain released before callback finished")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(release)
+	select {
+	case <-cronDone.Done():
+	case <-time.After(time.Second):
+		t.Fatal("cron did not wait for callback completion")
+	}
+
+	require.NoError(t, scheduler.StopContext(context.Background()))
+	require.Len(t, collectLoggingStopResults(t, scheduler.GetResults()), 1)
+}
+
+func TestLoggingStopExecuteNowSnapshotUnderBackpressure(t *testing.T) {
+	executor := &loggingStopExecutor{name: "snapshot", started: make(chan struct{}, 20)}
+	logger := &loggingStopLogger{}
+	scheduler, job := newLoggingStopScheduler(t, executor, logger, 1)
+	job.BlockingPolicy = BlockParallel
+	job.ParallelNum = 32
+
+	const executions = 20
+	consumerEntered := make(chan struct{})
+	consumerRelease := make(chan struct{})
+	consumerDone := make(chan int, 1)
+	go func() {
+		count := 0
+		first := true
+		for range scheduler.GetResults() {
+			if first {
+				close(consumerEntered)
+				<-consumerRelease
+				first = false
+			}
+			count++
+		}
+		consumerDone <- count
+	}()
+
+	start := make(chan struct{})
+	errs := make(chan error, executions)
+	var launch sync.WaitGroup
+	launch.Add(executions)
+	for range executions {
+		go func() {
+			defer launch.Done()
+			<-start
+			errs <- scheduler.ExecuteNow(job.ID)
+		}()
+	}
+	close(start)
+	launch.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for executor.executionCnt.Load() != executions && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	require.Equal(t, int32(executions), executor.executionCnt.Load())
+	select {
+	case <-consumerEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for slow result consumer")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, scheduler.StopContext(ctx), context.DeadlineExceeded)
+
+	close(consumerRelease)
+	require.NoError(t, <-waitLoggingStopCompletion(scheduler))
+	require.Equal(t, executions, <-consumerDone)
 }
