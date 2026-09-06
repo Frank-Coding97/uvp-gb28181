@@ -46,6 +46,9 @@ func (loggingRegisterExecutor) Execute(context.Context, *schedulerhelper.Job) er
 func TestLoggingRegisterStartsResultHandlerBeforeLoadFailure(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 	// Keep sys_jobs absent so LoadJobsFromDB takes its real query-error path.
 	require.NoError(t, db.AutoMigrate(&models.SysJobResults{}))
 
