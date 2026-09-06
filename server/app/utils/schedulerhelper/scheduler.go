@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -57,19 +54,10 @@ func NewJobScheduler(opts ...Option) *JobScheduler {
 		opt(s)
 	}
 
-	// 如果没有设置日志记录器，优先使用容器持久化目录；本地/CI 无权
-	// 创建根目录时回退到系统临时目录，避免构造器直接终止进程。
+	// 应用启动时由调用者通过 WithLogger 注入共享根 logger。独立工具如需
+	// 文件输出，必须显式使用 WithLoggerConfig；默认构造不创建旁路文件。
 	if s.logger == nil {
-		logger, err := NewFileJobLogger("/resource/logs/scheduler", LevelInfo)
-		if err != nil {
-			fallbackDir := filepath.Join(os.TempDir(), "uvp-gb28181", "scheduler")
-			log.Printf("Scheduler log directory unavailable, falling back to %s: %v", fallbackDir, err)
-			logger, err = NewFileJobLogger(fallbackDir, LevelInfo)
-			if err != nil {
-				panic(fmt.Sprintf("failed to create scheduler logger: %v", err))
-			}
-		}
-		s.logger = logger
+		s.logger = NewZapJobLogger(nil)
 	}
 
 	return s
@@ -89,7 +77,9 @@ func (s *JobScheduler) Start() {
 // 停止调度器
 func (s *JobScheduler) Stop() {
 	if err := s.StopContext(context.Background()); err != nil {
-		log.Printf("Failed to stop scheduler: %v", err)
+		if s.logger != nil {
+			s.logger.Error("system", "调度器停止失败: %v", err)
+		}
 	}
 }
 
