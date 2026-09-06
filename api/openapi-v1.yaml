@@ -53,6 +53,7 @@ x-uvp-signature-contract:
       maxSkewSeconds: 300
       rule: absolute difference from server time must be at most maxSkewSeconds
     nonce:
+      minimumRetentionSeconds: 660
       uniqueBy: (client_id, nonce)
       persistent: true
       survivesSecretRotation: true

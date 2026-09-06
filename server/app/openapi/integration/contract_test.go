@@ -85,9 +85,10 @@ type timestampContract struct {
 }
 
 type nonceContract struct {
-	UniqueBy               string `yaml:"uniqueBy"`
-	Persistent             bool   `yaml:"persistent"`
-	SurvivesSecretRotation bool   `yaml:"survivesSecretRotation"`
+	MinimumRetentionSeconds int    `yaml:"minimumRetentionSeconds"`
+	UniqueBy                string `yaml:"uniqueBy"`
+	Persistent              bool   `yaml:"persistent"`
+	SurvivesSecretRotation  bool   `yaml:"survivesSecretRotation"`
 }
 
 type contractRequestLimits struct {
@@ -235,6 +236,7 @@ func TestOpenAPIContract(t *testing.T) {
 	require.Equal(t, "(client_id, nonce)", doc.SignatureContract.Canonical.Nonce.UniqueBy)
 	require.True(t, doc.SignatureContract.Canonical.Nonce.Persistent)
 	require.True(t, doc.SignatureContract.Canonical.Nonce.SurvivesSecretRotation)
+	require.Equal(t, 660, doc.SignatureContract.Canonical.Nonce.MinimumRetentionSeconds)
 	require.Contains(t, strings.ToLower(doc.RetryPolicy["GET"]), "fresh")
 	require.Contains(t, strings.ToLower(doc.RetryPolicy["GET"]), "nonce")
 	require.Contains(t, strings.ToLower(doc.RetryPolicy["POST"]), "do not")
