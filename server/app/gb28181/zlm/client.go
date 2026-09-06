@@ -387,7 +387,7 @@ func (c *Client) IsMediaOnline(ctx context.Context, appName, stream string) (boo
 	}
 	// code != 0(如 -500 流不存在)视为未就绪,不视为错误
 	if r.Code != 0 {
-		logger.Info("IsMediaOnline 返回非0 code(流不存在或未就绪)",
+		logger.Debug("IsMediaOnline 返回非0 code(流不存在或未就绪)",
 			zap.String("event", "zlm.media_online.not_ready"),
 			zap.String("host", c.node.Host),
 			zap.String("app", appName),

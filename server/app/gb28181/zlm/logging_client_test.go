@@ -85,3 +85,18 @@ func findZLMLog(t *testing.T, observed *observer.ObservedLogs, event string) obs
 	t.Fatalf("ZLM log event not found: %s", event)
 	return observer.LoggedEntry{}
 }
+
+func TestLoggingBackgroundEventsZLMNotReadyDoesNotFloodInfo(t *testing.T) {
+	client, server := newMockClient(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"code":-500,"online":false}`))
+	})
+	defer server.Close()
+	core, observed := observer.New(zap.InfoLevel)
+	ctx := logging.WithContext(context.Background(), zap.New(core))
+	for i := 0; i < 100; i++ {
+		online, err := client.IsMediaOnline(ctx, "rtp", "stream-awaiting-media")
+		require.NoError(t, err)
+		require.False(t, online)
+	}
+	require.Zero(t, observed.Len(), "expected readiness polling must remain DEBUG")
+}

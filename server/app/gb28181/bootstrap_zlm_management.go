@@ -66,7 +66,7 @@ func setupZLMManagementCore(nodeService *gbzlmsvc.NodeService, restart *gbzlmsvc
 	)
 	overview.Start(func(err error) {
 		if app.ZapLog != nil {
-			app.ZapLog.Warn("ZLM 媒体实时速率采样失败", zap.Error(err))
+			app.ZapLog.Named("zlm.metrics").Warn("ZLM 媒体实时速率采样失败", zap.String("event", "zlm.metrics.sample_failed"), zap.Error(err))
 		}
 	})
 	zlmManagementCore = &zlmManagementCoreRuntime{

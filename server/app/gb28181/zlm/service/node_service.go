@@ -187,7 +187,7 @@ func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *Nod
 
 func (s *NodeService) SetLogger(logger *zap.Logger) {
 	if logger != nil {
-		s.logger = logger
+		s.logger = logger.Named("zlm.node")
 	}
 }
 
@@ -647,11 +647,11 @@ func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
 		err := s.applyClaimedConfig(ctx, current)
 		lock.Unlock()
 		if err != nil {
-			s.logger.Warn("GB28181 ZLM 节点配置恢复失败",
-				zap.Int64("nodeId", nodeID), zap.Error(err))
+			s.logger.Warn("GB28181 ZLM 节点配置恢复失败", zap.String("event", "zlm.node.restore_failed"),
+				zap.Int64("node_id", nodeID), zap.Error(err))
 			return
 		}
-		s.logger.Info("GB28181 ZLM 节点配置已恢复", zap.Int64("nodeId", nodeID))
+		s.logger.Info("GB28181 ZLM 节点配置已恢复", zap.String("event", "zlm.node.restored"), zap.Int64("node_id", nodeID))
 	}()
 	return true
 }
