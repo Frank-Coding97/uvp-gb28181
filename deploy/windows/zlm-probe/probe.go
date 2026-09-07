@@ -235,9 +235,12 @@ func runProbe(opts probeOptions) (report probeReport) {
 		report.Checks = append(report.Checks, checkMediaLifecycle(client, secret, stage, fixturePath, receiver))
 		report.Checks = append(report.Checks, checkHookMediaEvents(receiver, mediaEventsBefore, mediaCodesBefore))
 		report.Checks = append(report.Checks, checkStreamNotFound(client, receiver))
-		if _, noneReaderErr := receiver.waitFor(hookOnStreamNoneReader, mediaEventsBefore[hookOnStreamNoneReader], 4*time.Second); noneReaderErr != nil {
+		noneReaderObservation, noneReaderErr := receiver.waitFor(hookOnStreamNoneReader, mediaEventsBefore[hookOnStreamNoneReader], 4*time.Second)
+		if noneReaderErr != nil {
 			report.Unexecuted = append(report.Unexecuted, hookOnStreamNoneReader)
 			report.Checks = append(report.Checks, notExecutedCheck(hookOnStreamNoneReader, "the loaded source did not emit on_stream_none_reader within the bounded wait"))
+		} else if noneReaderObservation.close == nil || *noneReaderObservation.close {
+			report.Checks = append(report.Checks, failedCheck(hookOnStreamNoneReader, "on_stream_none_reader did not return close:false"))
 		} else {
 			report.Checks = append(report.Checks, passedCheck(hookOnStreamNoneReader, map[string]any{"close": false}))
 		}
@@ -845,7 +848,12 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, recei
 	if err != nil {
 		return failedCheck("media_and_recording", "HTTP fmp4 player could not be opened")
 	}
-	defer player.stop(5 * time.Second)
+	playerStopped := false
+	defer func() {
+		if !playerStopped {
+			_ = player.stop(5 * time.Second)
+		}
+	}()
 	select {
 	case readyErr := <-player.ready:
 		if readyErr != nil {
@@ -963,12 +971,20 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, recei
 	if err := waitMediaOnline(client, secret, vhost, app, recordedStream); err != nil {
 		return failedCheck("media_and_recording", "recorded MP4 did not become readable media")
 	}
-	for _, mediaStream := range []string{stream, recordedStream} {
-		closed, err := client.call(context.Background(), "/index/api/close_streams", url.Values{"vhost": {vhost}, "app": {app}, "stream": {mediaStream}, "force": {"1"}, "secret": {secret}})
-		var count int
-		if err != nil || closed.Code != 0 || json.Unmarshal(closed.CountClosed, &count) != nil || count < 1 {
-			return failedCheck("media_and_recording", "test media did not close")
-		}
+	recordedClosed, err := closeMediaStream(client, secret, vhost, app, recordedStream)
+	if err != nil || !recordedClosed {
+		return failedCheck("media_and_recording", "recorded test media did not close")
+	}
+	noneBefore := receiver.count(hookOnStreamNoneReader)
+	if err := player.stop(5 * time.Second); err != nil {
+		return failedCheck("media_and_recording", "HTTP fmp4 player cleanup timed out")
+	}
+	playerStopped = true
+	noneObservation, noneErr := receiver.waitFor(hookOnStreamNoneReader, noneBefore, 4*time.Second)
+	noneObserved := noneErr == nil && noneObservation.close != nil && !*noneObservation.close
+	originalClosed, err := closeMediaStream(client, secret, vhost, app, stream)
+	if err != nil || (!originalClosed && !noneObserved) {
+		return failedCheck("media_and_recording", "test media did not close")
 	}
 	return passedCheck("media_and_recording", map[string]any{
 		"duration_ms":               loadedData.DurationMS,
@@ -980,8 +996,22 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, recei
 		"traffic_unit":              unit,
 		"media_api_secret_rejected": true,
 		"recorded_duration_ms":      recordedData.DurationMS,
-		"media_closed":              true,
+		"media_closed":              originalClosed || noneObserved,
 	})
+}
+
+func closeMediaStream(client *apiClient, secret, vhost, app, stream string) (bool, error) {
+	closed, err := client.call(context.Background(), "/index/api/close_streams", url.Values{
+		"vhost": {vhost}, "app": {app}, "stream": {stream}, "force": {"1"}, "secret": {secret},
+	})
+	if err != nil || closed.Code != 0 {
+		return false, err
+	}
+	var count int
+	if json.Unmarshal(closed.CountClosed, &count) != nil {
+		return false, errors.New("close_streams did not return a count")
+	}
+	return count >= 1, nil
 }
 
 func waitMediaOnline(client *apiClient, secret, vhost, app, stream string) error {
