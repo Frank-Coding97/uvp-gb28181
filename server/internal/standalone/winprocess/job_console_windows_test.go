@@ -23,6 +23,7 @@ import (
 const (
 	consoleHelperModeEnv = "UVP_WINPROCESS_CONSOLE_HELPER"
 	consoleHelperDirEnv  = "UVP_WINPROCESS_CONSOLE_DIR"
+	consoleBootstrapMode = "bootstrap"
 	consoleHelperMode    = "owner"
 	consoleChildMode     = "child"
 	consoleHelperTestRun = "^TestWindowsJobConsoleHelper$"
@@ -83,7 +84,7 @@ func TestWindowsJobConsoleCtrlCIsolation(t *testing.T) {
 
 	cmd := exec.Command(os.Args[0], "-test.run="+consoleHelperTestRun, "-test.count=1")
 	cmd.Env = replaceEnvironment(os.Environ(), map[string]string{
-		consoleHelperModeEnv: consoleHelperMode,
+		consoleHelperModeEnv: consoleBootstrapMode,
 		consoleHelperDirEnv:  dir,
 	})
 	// DETACHED_PROCESS prevents this helper from inheriting the test runner's
@@ -95,7 +96,6 @@ func TestWindowsJobConsoleCtrlCIsolation(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	ownerPID := uint32(cmd.Process.Pid)
 	if err := waitExternalCommand(cmd, 30*time.Second); err != nil {
 		t.Fatalf("private-console helper failed: %v\n%s", err, readConsoleDiagnostics(dir, stdoutPath, stderrPath))
 	}
@@ -108,8 +108,8 @@ func TestWindowsJobConsoleCtrlCIsolation(t *testing.T) {
 	if err := json.Unmarshal(raw, &result); err != nil {
 		t.Fatalf("decode helper result: %v; raw=%q", err, raw)
 	}
-	if result.OwnerPID != ownerPID {
-		t.Fatalf("owner pid = %d, helper pid = %d", result.OwnerPID, ownerPID)
+	if result.OwnerPID == 0 {
+		t.Fatal("owner did not report a process id")
 	}
 	if result.ChildPID == 0 || result.ChildPID == result.OwnerPID {
 		t.Fatalf("invalid child pid %d", result.ChildPID)
@@ -148,6 +148,8 @@ func TestWindowsJobConsoleHelper(t *testing.T) {
 	}
 	var err error
 	switch mode {
+	case consoleBootstrapMode:
+		err = runConsoleBootstrap(dir)
 	case consoleHelperMode:
 		var result consoleJobResult
 		result, err = runConsoleOwner(dir)
@@ -169,13 +171,12 @@ func TestWindowsJobConsoleHelper(t *testing.T) {
 	}
 }
 
-func runConsoleOwner(dir string) (consoleJobResult, error) {
-	var result consoleJobResult
+func runConsoleBootstrap(dir string) error {
 	if _, err := consoleProcessIDs(); err == nil {
-		return result, errors.New("detached owner already has a console")
+		return errors.New("detached bootstrap already has a console")
 	}
 	if err := allocPrivateConsole(); err != nil {
-		return result, err
+		return err
 	}
 	consoleAllocated := true
 	defer func() {
@@ -183,6 +184,47 @@ func runConsoleOwner(dir string) (consoleJobResult, error) {
 			_ = freePrivateConsole()
 		}
 	}()
+
+	// The top-level helper is deliberately DETACHED_PROCESS. Starting the Go
+	// owner after AllocConsole lets the Go runtime install its console handler
+	// while a console is already present. The owner inherits this private
+	// console and then becomes the only attached process before the event test.
+	owner := exec.Command(os.Args[0], "-test.run="+consoleHelperTestRun, "-test.count=1")
+	owner.Env = replaceEnvironment(os.Environ(), map[string]string{
+		consoleHelperModeEnv: consoleHelperMode,
+		consoleHelperDirEnv:  dir,
+	})
+	owner.SysProcAttr = &windows.SysProcAttr{}
+	if err := owner.Start(); err != nil {
+		return fmt.Errorf("start console owner: %w", err)
+	}
+
+	// Once the owner has been created, it has inherited the console. Leaving
+	// it here keeps the owner process list limited to owner and Job child.
+	if err := freePrivateConsole(); err != nil {
+		_ = owner.Process.Kill()
+		_ = waitExternalCommand(owner, 5*time.Second)
+		return fmt.Errorf("detach bootstrap from private console: %w", err)
+	}
+	consoleAllocated = false
+
+	if err := waitExternalCommand(owner, 30*time.Second); err != nil {
+		if helperError, readErr := os.ReadFile(filepath.Join(dir, consoleOwnerErrorMarker)); readErr == nil {
+			return fmt.Errorf("console owner failed: %s", strings.TrimSpace(string(helperError)))
+		}
+		return fmt.Errorf("console owner failed: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, consoleOwnerResultMarker)); err != nil {
+		return fmt.Errorf("console owner result missing: %w", err)
+	}
+	return nil
+}
+
+func runConsoleOwner(dir string) (consoleJobResult, error) {
+	var result consoleJobResult
+	if _, err := consoleProcessIDs(); err != nil {
+		return result, fmt.Errorf("owner does not have an inherited private console: %w", err)
+	}
 
 	result.OwnerPID = windows.GetCurrentProcessId()
 	if err := writeConsoleMarker(dir, consoleOwnerReadyMarker, fmt.Sprintf("pid=%d", result.OwnerPID)); err != nil {
@@ -276,7 +318,6 @@ func runConsoleOwner(dir string) (consoleJobResult, error) {
 	if err := freePrivateConsole(); err != nil {
 		return result, err
 	}
-	consoleAllocated = false
 	result.ConsoleFreed = true
 	if _, err := consoleProcessIDs(); err == nil {
 		return result, errors.New("owner still has a console after FreeConsole")
