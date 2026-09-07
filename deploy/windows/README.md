@@ -44,11 +44,13 @@ names. It does not install software, start/stop processes or change services.
 .\environment-probe.exe -role runtime > runtime-environment.json
 ```
 
-The runtime preflight rejects non-Windows-11/native-x64 hosts and detected
+The runtime preflight rejects non-Windows-10-22H2/native-x64 hosts and detected
 build tools or existing running components. Passing is **inventory only**:
 software absent from PATH or not running can remain installed. T01-C still
 requires a known clean OS image. P0 additionally requires actual native component
 execution; the final package is tested later in T30. ARM64
 Windows running x64 emulation does not satisfy the native-x64 test requirement.
-Exit code 1 means blocked/failed, never a skip/pass. Windows PowerShell execution
-has not been verified on the current macOS host.
+Exit code 1 means blocked/failed, never a skip/pass. The probe has been executed through native Windows PowerShell 5.1 on Windows 10
+22H2: build inventory passed, and runtime inventory correctly rejected an
+existing development machine with running MySQL/Redis. This does not qualify
+that machine as a clean runtime environment.
