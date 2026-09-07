@@ -118,11 +118,17 @@ func (s *Service) applyOne(ctx context.Context, input ApplyDevice, mode ApplyMod
 			deviceQuery = deviceQuery.Scopes(s.scope)
 		}
 		var device gbmodels.GbDevice
-		if err := deviceQuery.Where("id = ?", input.DeviceID).First(&device).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+		deviceResult := deviceQuery.Where("id = ?", input.DeviceID).First(&device)
+		if deviceResult.Error != nil {
+			if errors.Is(deviceResult.Error, gorm.ErrRecordNotFound) {
 				return errApplyNotVisible
 			}
-			return err
+			return deviceResult.Error
+		}
+		if deviceResult.RowsAffected == 0 {
+			// The configured query hook may mask ErrRecordNotFound; the row count
+			// remains the portable way to distinguish an invisible device.
+			return errApplyNotVisible
 		}
 		item.DeviceCode = device.DeviceID
 		item.Name = device.Name
@@ -250,18 +256,37 @@ func validateAddTargets(tx *gorm.DB, targets []ApplyTarget, access datascope.Own
 
 func addGrant(tx *gorm.DB, deviceID uint, target ApplyTarget, createdBy uint) (bool, error) {
 	var existing gbmodels.GbDeviceGrant
-	err := tx.Unscoped().Where("device_id = ? AND target_type = ? AND target_id = ?", deviceID, target.Type, target.ID).First(&existing).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		current := gbmodels.GbDeviceGrant{DeviceID: deviceID, TargetType: target.Type, TargetID: target.ID, CreatedBy: createdBy}
-		return true, tx.Create(&current).Error
+	result := tx.Unscoped().Where("device_id = ? AND target_type = ? AND target_id = ?", deviceID, target.Type, target.ID).First(&existing)
+	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return false, result.Error
 	}
-	if err != nil {
-		return false, err
+	if result.RowsAffected == 0 {
+		current := gbmodels.GbDeviceGrant{DeviceID: deviceID, TargetType: target.Type, TargetID: target.ID, CreatedBy: createdBy}
+		if !isSQLiteDialect(tx) {
+			return true, tx.Create(&current).Error
+		}
+		created := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "device_id"}, {Name: "target_type"}, {Name: "target_id"}},
+			DoNothing: true,
+		}).Create(&current)
+		if created.Error != nil {
+			return false, created.Error
+		}
+		if created.RowsAffected > 0 {
+			return true, nil
+		}
+		result = tx.Unscoped().Where("device_id = ? AND target_type = ? AND target_id = ?", deviceID, target.Type, target.ID).First(&existing)
+		if result.Error != nil {
+			return false, result.Error
+		}
+		if result.RowsAffected == 0 {
+			return false, errors.New("授权冲突后未找到目标记录")
+		}
 	}
 	if !existing.DeletedAt.Valid {
 		return false, nil
 	}
-	err = tx.Unscoped().Model(&gbmodels.GbDeviceGrant{}).Where("id = ?", existing.ID).
+	err := tx.Unscoped().Model(&gbmodels.GbDeviceGrant{}).Where("id = ?", existing.ID).
 		Updates(map[string]any{"deleted_at": nil, "created_by": createdBy}).Error
 	return true, err
 }

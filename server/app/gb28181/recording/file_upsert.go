@@ -38,7 +38,7 @@ func loadRecordingSnapshots(tx *gorm.DB, file *models.GbRecordingFile) error {
 	if result.Error != nil && !errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return result.Error
 	}
-	if result.Error == nil {
+	if result.Error == nil && result.RowsAffected > 0 {
 		file.ChannelCode = channel.ChannelID
 		file.ChannelName = preferredName(channel.Alias, channel.Name)
 		file.OwnerDeptID = channel.OwnerDeptID
@@ -93,8 +93,12 @@ func upsertCatalogFile(tx *gorm.DB, file *models.GbRecordingFile, now time.Time)
 		if insert.RowsAffected > 0 {
 			return true, false, nil
 		}
-		if err := tx.Where("file_key = ?", file.FileKey).First(&existing).Error; err != nil {
-			return false, false, err
+		lookup := tx.Where("file_key = ?", file.FileKey).Limit(1).Find(&existing)
+		if lookup.Error != nil {
+			return false, false, lookup.Error
+		}
+		if lookup.RowsAffected == 0 {
+			return false, false, errors.New("recording file missing after upsert conflict")
 		}
 	}
 

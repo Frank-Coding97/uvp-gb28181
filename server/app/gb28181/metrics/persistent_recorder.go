@@ -145,6 +145,12 @@ func (recorder *PersistentRecorder) recordRestartGap(ctx context.Context) error 
 		recorder.mu.Unlock()
 		return result.Error
 	}
+	if result.RowsAffected == 0 {
+		// The configured query hook may mask ErrRecordNotFound. An empty ledger
+		// means there is no restart boundary to record; do not manufacture a gap
+		// from the zero time value.
+		return nil
+	}
 
 	now := recorder.clock()
 	lastMinute := minuteStart(latest.CreatedAt)

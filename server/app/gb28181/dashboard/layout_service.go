@@ -31,14 +31,14 @@ func NewLayoutService(db *gorm.DB) *LayoutService {
 
 func (service *LayoutService) Get(ctx context.Context, userID uint) (StoredLayout, error) {
 	var record gbmodels.GbDashboardLayout
-	err := service.db.WithContext(ctx).
+	result := service.db.WithContext(ctx).
 		Where("user_id = ? AND dashboard_key = ?", userID, homeDashboardKey).
-		Take(&record).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+		Take(&record)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) || result.RowsAffected == 0 {
 		return StoredLayout{Layout: DefaultLayout()}, nil
 	}
-	if err != nil {
-		return StoredLayout{}, err
+	if result.Error != nil {
+		return StoredLayout{}, result.Error
 	}
 	var layout Layout
 	if err := json.Unmarshal([]byte(record.LayoutJSON), &layout); err != nil {
