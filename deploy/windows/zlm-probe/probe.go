@@ -113,8 +113,6 @@ type rtpEntry struct {
 
 func runProbe(opts probeOptions) (report probeReport) {
 	report = newReport(opts)
-	report.Unexecuted = append(report.Unexecuted, "hook_callback_auth")
-	report.Checks = append(report.Checks, notExecutedCheck("hook_callback_auth", "requires the real UVP hook receiver and its node credential contract"))
 	defer func() {
 		report.FinishedAt = time.Now().UTC().Format(time.RFC3339Nano)
 		report.Passed = allChecksPassed(report.Checks)
@@ -127,7 +125,7 @@ func runProbe(opts probeOptions) (report probeReport) {
 			report.Status = "partial"
 		}
 		if !report.Passed && len(report.Errors) == 0 {
-			report.Errors = []string{"one or more required ZLMediaKit checks did not pass"}
+			report.Errors = []string{"one or more ZLMediaKit checks did not pass or execute"}
 		}
 	}()
 
@@ -172,9 +170,6 @@ func runProbe(opts probeOptions) (report probeReport) {
 		if hash, hashErr := sha256File(opts.fixture); hashErr == nil {
 			report.FixtureSHA256 = hash
 		}
-	} else {
-		report.Unexecuted = append(report.Unexecuted, "media_and_recording")
-		report.Checks = append(report.Checks, notExecutedCheck("media_and_recording", "an MP4 fixture is required for the media lifecycle checks"))
 	}
 
 	port, err := reserveTCPPort()
@@ -182,11 +177,32 @@ func runProbe(opts probeOptions) (report probeReport) {
 		report.Checks = append(report.Checks, failedCheck("http_port", "could not reserve a local HTTP port"))
 		return report
 	}
+	rtspPort, err := reserveTCPPort()
+	if err != nil {
+		report.Checks = append(report.Checks, failedCheck("rtsp_port", "could not reserve a local RTSP port"))
+		return report
+	}
 	secret := randomToken("zlm-")
-	if err := configureRuntime(filepath.Join(stage, "config.ini"), port, secret); err != nil {
+	node := randomToken("probe-server-")
+	receiver, err := newHookReceiver(node, secret)
+	if err != nil {
+		report.Checks = append(report.Checks, failedCheck("hook_receiver", "controlled Hook receiver could not be started"))
+		return report
+	}
+	defer func() {
+		if closeErr := receiver.close(5 * time.Second); closeErr != nil {
+			report.Errors = append(report.Errors, "controlled Hook receiver did not stop within the bounded cleanup window")
+		}
+	}()
+	playToken := randomToken("fixture-play-")
+	publishToken := randomToken("fixture-publish-")
+	receiver.setTokens(playToken, publishToken)
+	if err := configureRuntime(filepath.Join(stage, "config.ini"), port, rtspPort, secret, node, receiver); err != nil {
 		report.Checks = append(report.Checks, failedCheck("runtime_config", "isolated ZLMediaKit config could not be prepared"))
 		return report
 	}
+	report.Checks = append(report.Checks, checkHookAuthNegative(receiver))
+	receiver.clearValidationFailures()
 
 	server, err := startZLM(stageExecutable, stage, filepath.Join(stage, "config.ini"))
 	if err != nil {
@@ -209,10 +225,32 @@ func runProbe(opts probeOptions) (report probeReport) {
 	report.Checks = append(report.Checks, checkAPIs(client, secret, opts.expectedCommit))
 	report.Checks = append(report.Checks, checkServerConfig(client, secret, port))
 	report.Checks = append(report.Checks, checkWrongSecret(client))
+	report.Checks = append(report.Checks, checkHookServerEvents(receiver))
+	report.Checks = append(report.Checks, checkPublishHook(rtspPort, receiver))
 	report.Checks = append(report.Checks, checkRTPLifecycle(client, secret))
+	report.Checks = append(report.Checks, checkRTPTimeout(client, secret, receiver))
 	if fixturePath != "" {
-		report.Checks = append(report.Checks, checkMediaLifecycle(client, secret, stage, fixturePath))
+		mediaEventsBefore := receiver.snapshotCounts()
+		mediaCodesBefore := receiver.snapshotCodeCounts()
+		report.Checks = append(report.Checks, checkMediaLifecycle(client, secret, stage, fixturePath, receiver))
+		report.Checks = append(report.Checks, checkHookMediaEvents(receiver, mediaEventsBefore, mediaCodesBefore))
+		report.Checks = append(report.Checks, checkStreamNotFound(client, receiver))
+		if _, noneReaderErr := receiver.waitFor(hookOnStreamNoneReader, mediaEventsBefore[hookOnStreamNoneReader], 4*time.Second); noneReaderErr != nil {
+			report.Unexecuted = append(report.Unexecuted, hookOnStreamNoneReader)
+			report.Checks = append(report.Checks, notExecutedCheck(hookOnStreamNoneReader, "the loaded source did not emit on_stream_none_reader within the bounded wait"))
+		} else {
+			report.Checks = append(report.Checks, passedCheck(hookOnStreamNoneReader, map[string]any{"close": false}))
+		}
+	} else {
+		report.Unexecuted = append(report.Unexecuted, "media_hook_events", hookOnStreamNotFound, hookOnStreamNoneReader)
+		report.Unexecuted = append(report.Unexecuted, "media_and_recording")
+		report.Checks = append(report.Checks, notExecutedCheck("media_and_recording", "an MP4 fixture is required for the media lifecycle checks"))
+		report.Checks = append(report.Checks, notExecutedCheck("media_hook_events", "an MP4 fixture is required for the media Hook lifecycle checks"))
+		report.Checks = append(report.Checks, notExecutedCheck(hookOnStreamNotFound, "an MP4 fixture is required to issue the controlled missing-stream request"))
+		report.Checks = append(report.Checks, notExecutedCheck(hookOnStreamNoneReader, "an MP4 fixture is required to create a no-reader media source"))
 	}
+	report.Checks = append(report.Checks, hookEventSummary(receiver))
+	report.Checks = append(report.Checks, checkHookPayloadValidation(receiver))
 
 	if err := server.stop(10 * time.Second); err != nil {
 		report.Checks = append(report.Checks, failedCheck("server_stop", "the first MediaServer.exe instance did not stop"))
@@ -368,21 +406,28 @@ func copyFile(source, destination string, entry os.DirEntry) error {
 	return out.Close()
 }
 
-func configureRuntime(path string, httpPort int, secret string) error {
+func configureRuntime(path string, httpPort, rtspPort int, secret, node string, receiver *hookReceiver) error {
+	hookValues := make(map[string]string, len(managedHookEvents))
+	for _, event := range managedHookEvents {
+		hookValues[event] = receiver.hookURL(event)
+	}
 	values := map[string]map[string]string{
 		"api": {
 			"apiDebug": "0",
 			"secret":   secret,
 		},
 		"general": {
-			"listen_ip":     "127.0.0.1",
-			"mediaServerId": randomToken("probe-server-"),
+			"listen_ip":               "127.0.0.1",
+			"mediaServerId":           node,
+			"streamNoneReaderDelayMS": "1000",
+			"maxStreamWaitMS":         "1000",
+			"flowThreshold":           "0",
 		},
 		"protocol": {
 			"enable_hls":      "0",
 			"enable_hls_fmp4": "0",
 			"enable_mp4":      "0",
-			"enable_rtsp":     "0",
+			"enable_rtsp":     "1",
 			"enable_rtmp":     "0",
 			"enable_ts":       "0",
 			"enable_fmp4":     "1",
@@ -396,17 +441,24 @@ func configureRuntime(path string, httpPort int, secret string) error {
 			"rootPath": "./www",
 		},
 		"rtsp": {
-			"port":    "0",
+			"port":    strconv.Itoa(rtspPort),
 			"sslport": "0",
 		},
 		"rtmp": {
 			"port":    "0",
 			"sslport": "0",
 		},
-		"rtp_proxy": {"port": "0"},
-		"shell":     {"port": "0"},
-		"onvif":     {"port": "0"},
-		"srt":       {"port": "0"},
+		"rtp_proxy": {"port": "0", "timeoutSec": "2"},
+		"hook": {
+			"enable":         "1",
+			"alive_interval": "1.0",
+			"retry":          "1",
+			"retry_delay":    "0.1",
+			"timeoutSec":     "5",
+		},
+		"shell": {"port": "0"},
+		"onvif": {"port": "0"},
+		"srt":   {"port": "0"},
 		"rtc": {
 			"signalingPort":    "0",
 			"signalingSslPort": "0",
@@ -415,6 +467,9 @@ func configureRuntime(path string, httpPort int, secret string) error {
 			"port":             "0",
 			"tcpPort":          "0",
 		},
+	}
+	for event, hookURL := range hookValues {
+		values["hook"][event] = hookURL
 	}
 	return rewriteINI(path, values)
 }
@@ -645,12 +700,21 @@ func checkAPIs(client *apiClient, secret, expectedCommit string) checkResult {
 		var info struct {
 			CommitHash string `json:"commitHash"`
 		}
-		if json.Unmarshal(version.Data, &info) != nil || info.CommitHash == "" || !strings.HasPrefix(strings.ToLower(expectedCommit), strings.ToLower(info.CommitHash)) {
+		if json.Unmarshal(version.Data, &info) != nil || info.CommitHash == "" || !commitMatches(expectedCommit, info.CommitHash) {
 			return failedCheck("api_inventory", "ZLMediaKit version does not match the locked commit prefix")
 		}
 		details["commit_prefix"] = info.CommitHash
 	}
 	return passedCheck("api_inventory", details)
+}
+
+func commitMatches(expected, reported string) bool {
+	expected = strings.ToLower(strings.TrimSpace(expected))
+	reported = strings.ToLower(strings.TrimSpace(reported))
+	if expected == "" || reported == "" {
+		return false
+	}
+	return strings.HasPrefix(expected, reported) || strings.HasPrefix(reported, expected)
 }
 
 func checkServerConfig(client *apiClient, secret string, expectedHTTPPort int) checkResult {
@@ -752,7 +816,7 @@ func checkRTPLifecycle(client *apiClient, secret string) checkResult {
 	return passedCheck("rtp_lifecycle", map[string]any{"allocated_port": port, "listed_before_close": true, "close_hit": hit, "listed_after_close": false})
 }
 
-func checkMediaLifecycle(client *apiClient, secret, stage, fixture string) checkResult {
+func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, receiver *hookReceiver) checkResult {
 	vhost := "__defaultVhost__"
 	app := "live"
 	stream := randomToken("mp4-")
@@ -777,7 +841,7 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string) check
 	if err := waitMediaOnline(client, secret, vhost, app, stream); err != nil {
 		return failedCheck("media_and_recording", "the loaded MP4 did not become an online fmp4 source")
 	}
-	player, err := openPlayer(client.baseURL, app, stream)
+	player, err := openPlayerWithQuery(client.baseURL, app, stream, url.Values{"play_token": {receiver.playToken}})
 	if err != nil {
 		return failedCheck("media_and_recording", "HTTP fmp4 player could not be opened")
 	}
@@ -789,6 +853,27 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string) check
 		}
 	case <-time.After(mediaReadyTimeout):
 		return failedCheck("media_and_recording", "HTTP fmp4 player readiness timed out")
+	}
+	fixturePlayer, err := openPlayerWithQuery(client.baseURL, app, stream, url.Values{"play_token": {receiver.playToken}})
+	if err != nil {
+		return failedCheck("media_and_recording", "fixture-token HTTP fmp4 player could not be opened")
+	}
+	select {
+	case readyErr := <-fixturePlayer.ready:
+		if readyErr != nil {
+			_ = fixturePlayer.stop(5 * time.Second)
+			return failedCheck("media_and_recording", "fixture-token HTTP fmp4 player was rejected")
+		}
+	case <-time.After(mediaReadyTimeout):
+		_ = fixturePlayer.stop(5 * time.Second)
+		return failedCheck("media_and_recording", "fixture-token HTTP fmp4 player readiness timed out")
+	}
+	if err := fixturePlayer.stop(5 * time.Second); err != nil {
+		return failedCheck("media_and_recording", "fixture-token HTTP fmp4 player cleanup timed out")
+	}
+	deniedStatus, err := requestPlayerStatus(client.baseURL, app, stream, url.Values{"play_token": {"invalid-fixture-token"}})
+	if err != nil || deniedStatus == http.StatusOK {
+		return failedCheck("media_and_recording", "invalid fixture playback token was not rejected")
 	}
 
 	baseQuery := url.Values{"schema": {"fmp4"}, "vhost": {vhost}, "app": {app}, "stream": {stream}, "secret": {secret}}
@@ -915,8 +1000,15 @@ func waitMediaOnline(client *apiClient, secret, vhost, app, stream string) error
 }
 
 func openPlayer(baseURL, app, stream string) (*playerSession, error) {
+	return openPlayerWithQuery(baseURL, app, stream, nil)
+}
+
+func openPlayerWithQuery(baseURL, app, stream string, query url.Values) (*playerSession, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	requestURL := baseURL + "/" + url.PathEscape(app) + "/" + url.PathEscape(stream) + ".live.mp4"
+	if encoded := query.Encode(); encoded != "" {
+		requestURL += "?" + encoded
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
 	if err != nil {
 		cancel()
@@ -957,6 +1049,26 @@ func openPlayer(baseURL, app, stream string) (*playerSession, error) {
 		done <- nil
 	}()
 	return &playerSession{cancel: cancel, ready: ready, done: done}, nil
+}
+
+func requestPlayerStatus(baseURL, app, stream string, query url.Values) (int, error) {
+	requestURL := baseURL + "/" + url.PathEscape(app) + "/" + url.PathEscape(stream) + ".live.mp4"
+	if encoded := query.Encode(); encoded != "" {
+		requestURL += "?" + encoded
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), mediaReadyTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return 0, err
+	}
+	response, err := (&http.Client{}).Do(request)
+	if err != nil {
+		return 0, err
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 32*1024))
+	return response.StatusCode, nil
 }
 
 func (player *playerSession) stop(timeout time.Duration) error {

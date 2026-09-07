@@ -135,6 +135,18 @@ func TestProbeReportNeverSerializesSecretFields(t *testing.T) {
 	}
 }
 
+func TestCommitMatchesFullAndShortVersionForms(t *testing.T) {
+	if !commitMatches("b422fb016da1c3989b725dde3bd0292613b12060", "b422fb0") {
+		t.Fatal("full expected commit did not match the short ZLM version commit")
+	}
+	if !commitMatches("b422fb0", "b422fb016da1c3989b725dde3bd0292613b12060") {
+		t.Fatal("short expected commit did not match the full ZLM version commit")
+	}
+	if commitMatches("b422fb0", "296dceb") {
+		t.Fatal("different ZLM commits were treated as equal")
+	}
+}
+
 func TestRTPLifecycleAcceptsOmittedDataOnlyForEmptyList(t *testing.T) {
 	var stream string
 	closed := false

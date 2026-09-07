@@ -38,9 +38,14 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o z
 `probe-stdout.log` 和 `probe-stderr.log`；默认运行结束后删除临时目录，排查失败时
 可使用 `-keep-temp` 保留它。
 
-Hook 回调鉴权需要 UVP 的真实 Hook 接收端和节点凭据派生契约，探针会明确输出
-`hook_callback_auth: not_executed`，不会用模拟 HTTP 响应冒充通过。没有提供
-`-fixture` 时媒体/录制用例同样标记为 `not_executed`，整体不会返回通过。
+Hook 回调使用探针自身的受控 HTTP receiver，按真实节点 secret 派生每个事件的
+capability，并验证实际 ZLMediaKit POST 的方法、JSON、node/cap、mediaServerId、
+hook_index、事件字段和 `X-VHOST`。它会实际覆盖 server started/keepalive、RTSP
+publish、RTP timeout，以及提供 fixture 时的 stream changed/play/flow/record/
+stream-not-found。播放和推流 token 只是探针 fixture token，不是 UVP 生产授权；这
+一项不等同于完整 UVP 业务验收。`on_stream_none_reader` 若当前 ZLM 媒体源未触发会
+明确列为 `not_executed`。没有提供 `-fixture` 时媒体和相关 Hook 用例同样标记为
+`not_executed`。
 
 测试 fixture 可由 FFmpeg 生成（FFmpeg 只是测试输入工具，不属于 Windows 运行依赖）：
 
