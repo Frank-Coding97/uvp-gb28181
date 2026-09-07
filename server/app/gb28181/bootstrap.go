@@ -838,7 +838,7 @@ func startSIPDependenciesWithFactory(cfg gbconfig.Config, factory sipRuntimeFact
 	} else {
 		app.ZapLog.Warn("GB28181 UAC 不可用,点播 service 跳过装配")
 	}
-	setupPlaybackRuntime(cfg, srv.UAC())
+	setupPlaybackRuntime(cfg, srv.UAC(), deviceOperations)
 	setupTalkRuntime(cfg, srv)
 	setupRecordingRuntime(cfg)
 	installZLMManagementController()
@@ -989,8 +989,8 @@ func stopPlaybackRuntime(ctx context.Context) error {
 	return nil
 }
 
-func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
-	if inviter == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
+func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC, deviceOperations *playauth.DeviceOperationBarrier) {
+	if inviter == nil || deviceOperations == nil || recordQueryService == nil || zlmRegistry == nil || zlmScheduler == nil ||
 		zlmLocationMap == nil || zlmServerConfigCache == nil {
 		SetPlaybackService(nil, nil)
 		playbackRegistry = nil
@@ -1010,7 +1010,7 @@ func setupPlaybackRuntime(cfg gbconfig.Config, inviter *uac.UAC) {
 		gbplayback.NewZLMRTPOpener(zlmRegistry, zlmLocationMap, nil),
 		uac.NewPlaybackAdapter(inviter),
 		gbplayback.NewZLMMediaWaiter(zlmRegistry, zlmLocationMap, gbroutes.StreamNotifier(), zlmServerConfigCache, nil),
-		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics},
+		gbplayback.ServiceConfig{ServerID: cfg.SIP.ServerID, MediaWait: cfg.Playback.MediaWait(), Metrics: playbackMetrics, DeviceOperations: deviceOperations},
 	)
 	if trafficResolver != nil {
 		service.SetMediaReadyObserver(func(session gbplayback.Session) {

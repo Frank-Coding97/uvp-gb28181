@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playurl"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/sdp"
 )
@@ -91,9 +93,12 @@ type MediaWaiter interface {
 }
 
 type ServiceConfig struct {
-	ServerID  string
-	Metrics   *Metrics
-	MediaWait time.Duration
+	// Production uses the application's shared barrier. The preflight is read
+	// only; this field does not yet establish an operation lease or recovery.
+	DeviceOperations *playauth.DeviceOperationBarrier
+	ServerID         string
+	Metrics          *Metrics
+	MediaWait        time.Duration
 }
 
 type Service struct {
@@ -245,6 +250,20 @@ func (s *Service) Create(ctx context.Context, request CreateRequest) (CreateResu
 	}
 	defer finish()
 	ctx = operationCtx
+	// Older component-only callers have no authorization snapshot. A real
+	// controller request or configured runtime must never fall back to that path.
+	if request.Authorization != (AuthorizationSnapshot{}) || s.config.DeviceOperations != nil {
+		a := request.Authorization
+		if s.config.DeviceOperations == nil || a.DevicePK <= 0 || a.ChannelPK <= 0 || a.DeviceEpoch <= 0 ||
+			a.CleanupCompletedEpoch != a.DeviceEpoch || a.DeviceCode != request.DeviceID || a.ChannelCode != request.SIPChannelID ||
+			len(a.ChannelCode) != 20 || strings.Trim(a.ChannelCode, "0123456789") != "" ||
+			strconv.FormatInt(a.ChannelPK, 10) != request.ChannelID {
+			return CreateResult{}, playauth.ErrDeviceOperationUnavailable
+		}
+		if err := s.config.DeviceOperations.AuthorizeEpoch(ctx, a.DeviceCode, a.DeviceEpoch); err != nil {
+			return CreateResult{}, err
+		}
+	}
 	created, err := s.registry.Create(ctx, request)
 	if err != nil {
 		return CreateResult{}, err

@@ -114,6 +114,9 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 				record.mu.Lock()
 				session := record.session.clone()
 				record.mu.Unlock()
+				if session.Authorization != request.Authorization || session.DeviceID != request.DeviceID || session.Mode != request.Mode {
+					return CreateResult{}, ErrPlaybackBusy
+				}
 				return CreateResult{Session: session, Existing: true}, nil
 			}
 		}
@@ -124,7 +127,7 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 			record.mu.Lock()
 			active := record.session.clone()
 			record.mu.Unlock()
-			if !active.State.IsTerminal() && active.DeviceID == request.DeviceID && active.Mode == request.Mode &&
+			if !active.State.IsTerminal() && active.Authorization == request.Authorization && active.DeviceID == request.DeviceID && active.Mode == request.Mode &&
 				active.SegmentStart.Equal(request.SegmentStart) && active.SegmentEnd.Equal(request.SegmentEnd) {
 				if request.IdempotencyKey != "" {
 					r.idempotentByKey[idempotencyKey(request.OwnerID, request.ChannelID, request.IdempotencyKey)] = activeID
@@ -145,7 +148,8 @@ func (r *Registry) Create(ctx context.Context, request CreateRequest) (CreateRes
 		idleDeadline = now.Add(r.maxSession)
 	}
 	session := Session{ID: id, OwnerID: request.OwnerID, DeviceID: request.DeviceID, ChannelID: request.ChannelID, RecordKey: request.RecordKey,
-		Mode: request.Mode, DownloadSpeed: request.DownloadSpeed,
+		Authorization: request.Authorization,
+		Mode:          request.Mode, DownloadSpeed: request.DownloadSpeed,
 		IdempotencyKey: request.IdempotencyKey, SegmentStart: request.SegmentStart, SegmentEnd: request.SegmentEnd,
 		PlayFrom: request.PlayFrom,
 		State:    StateCreating, Scale: 1, CreatedAt: now, LastActivityAt: now,
