@@ -151,12 +151,10 @@ func waitForCrashReady(path string, timeout time.Duration) error {
 	for {
 		data, err := os.ReadFile(path)
 		if err == nil {
-			if string(data) != crashReadyText {
-				return errors.New("crash helper wrote an invalid readiness marker")
+			if string(data) == crashReadyText {
+				return nil
 			}
-			return nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
+		} else if !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		select {
