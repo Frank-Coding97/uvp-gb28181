@@ -131,6 +131,9 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 				return DeviceSIPInviteSteps{}, err
 			}
 			step.KnownBranch = branch
+			if len(branch.InfoSteps) != 0 && (id.Kind != "playback" || id.TargetScope != "channel") {
+				return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
+			}
 			for _, info := range branch.InfoSteps {
 				if infoIDs[info.Identity.InfoID] {
 					return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable

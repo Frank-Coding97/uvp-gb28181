@@ -117,6 +117,9 @@ func lastSIPINFOCSeq(step DeviceSIPInviteStep) uint32 {
 // new CAS and a still-owned, actually ACKed dialog permit the caller to proceed.
 // Neither this store nor Load proves the original ACK write succeeded.
 func (s *DeviceOperationIntentStore) PrepareSIPINFO(ctx context.Context, id DeviceOperationIntentIdentity, version int64, identity DeviceSIPINFOIdentity) (DeviceSIPInviteSteps, error) {
+	if id.Kind != "playback" || id.TargetScope != "channel" {
+		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
+	}
 	runID, err := sipCleanupProcessID()
 	if err != nil {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
@@ -168,7 +171,7 @@ func (s *DeviceOperationIntentStore) PrepareSIPINFO(ctx context.Context, id Devi
 }
 
 func (s *DeviceOperationIntentStore) mutateSIPINFO(ctx context.Context, id DeviceOperationIntentIdentity, version int64, infoID string, observation bool, mutate func(*DeviceSIPINFOStep, time.Time, string) (bool, error)) (DeviceSIPInviteSteps, error) {
-	if !validIntentID(infoID) {
+	if !validIntentID(infoID) || id.Kind != "playback" || id.TargetScope != "channel" {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentInvalid
 	}
 	runID, err := sipCleanupProcessID()

@@ -26,6 +26,9 @@ func sipINFOIdentity(t *testing.T, n int, command DeviceSIPINFOCommand) DeviceSI
 func sipINFOFixture(t *testing.T) (*deviceCleanupFixture, *DeviceOperationIntentStore, DeviceOperationIntentIdentity) {
 	t.Helper()
 	f, store, id := sipCleanupFixture(t)
+	// The shared SIP fixture starts as a live intent. INFO is playback-only.
+	id.Kind = "playback"
+	require.NoError(t, f.db.Model(&DeviceOperationIntent{}).Where("operation_id = ?", id.OperationID).Update("kind", id.Kind).Error)
 	branch := sipKnownBranch()
 	branch.RouteSet = []string{}
 	_, err := store.DispatchSIPKnownBranchACK(context.Background(), id, 5, branch)
@@ -150,4 +153,16 @@ func TestDeviceSIPINFOAndCleanupPrepareHaveOneCASWinner(t *testing.T) {
 	require.NoError(t, err)
 	b := out.Steps[0].KnownBranch
 	require.Equal(t, 1, len(b.InfoSteps)+len(b.CleanupAttempts))
+}
+
+func TestDeviceSIPINFOCannotAttachPlaybackControlToOtherIntentKinds(t *testing.T) {
+	for _, kind := range []string{"live", "download", "talk", "ptz"} {
+		t.Run(kind, func(t *testing.T) {
+			f, store, id := sipINFOFixture(t)
+			id.Kind = kind
+			require.NoError(t, f.db.Model(&DeviceOperationIntent{}).Where("operation_id = ?", id.OperationID).Update("kind", kind).Error)
+			_, err := store.PrepareSIPINFO(context.Background(), id, 6, sipINFOIdentity(t, 1, DeviceSIPINFOCommand{Action: "pause"}))
+			require.Error(t, err)
+		})
+	}
 }
