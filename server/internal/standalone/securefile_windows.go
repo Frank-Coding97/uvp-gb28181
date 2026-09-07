@@ -274,7 +274,7 @@ func writeSecureConfigFile(path string, data []byte, replace bool, hook func(sta
 	if err := callSecureHook(hook, "publish", path); err != nil {
 		return err
 	}
-	if replace {
+	if replace && exists {
 		if err := replaceWindowsFile(path, tempPath); err != nil {
 			return fmt.Errorf("publish secure file %q: %w", path, err)
 		}
