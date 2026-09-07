@@ -36,6 +36,9 @@ var sysOnlineUserControllers = controllers.NewSysOnlineUserController()     // �
 
 // InitRoutes 初始化路由
 func InitRoutes(engine *gin.Engine) {
+	if app.DataPath != "" {
+		registerStandaloneReadiness(engine, app.ConfigYml.GetString("token.jwttokensignkey"), probeStandaloneBackend)
+	}
 	if err := middleware.ConfigureTrustedProxies(engine, app.ConfigYml.GetStringSlice("httpserver.trustedproxies")); err != nil {
 		panic("invalid httpserver.trustedproxies: " + err.Error())
 	}
