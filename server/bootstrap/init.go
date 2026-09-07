@@ -44,6 +44,9 @@ func init() {
 	if standalonePaths.Explicit {
 		app.ConfigYml = ymlconfig.CreateYamlFactoryFromFile(standalonePaths.ConfigFile)
 		normalizeStandaloneConfigPaths()
+		if app.ConfigYml.GetBool("server.appdebug") {
+			log.Fatal("standalone configuration invalid: server.appdebug must be false")
+		}
 	} else {
 		app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
 	}
