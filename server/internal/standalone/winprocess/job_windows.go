@@ -156,7 +156,7 @@ func (j *Job) start(spec StartSpec, afterCreate func(windows.ProcessInformation)
 		nil,
 		nil,
 		true,
-		windows.CREATE_UNICODE_ENVIRONMENT|windows.EXTENDED_STARTUPINFO_PRESENT,
+		windows.CREATE_UNICODE_ENVIRONMENT|windows.EXTENDED_STARTUPINFO_PRESENT|windows.CREATE_NEW_PROCESS_GROUP,
 		&environment[0],
 		directory,
 		&startup.StartupInfo,
