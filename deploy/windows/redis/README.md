@@ -38,3 +38,15 @@ Redis COPYING, Cygwin/Newlib licenses, OpenSSL and zlib licenses, their exact
 corresponding sources and packaging patches must accompany a distributable
 candidate. Keep the Cygwin DLL replaceable. The P0 build alone does not close
 the distribution checklist or T02-C.
+
+The optional native disk-full probe requires a disposable local volume labeled
+`UVP_P0_TEST` no larger than 128 MiB. `prepare-disk-full.ps1` creates a new
+64 MiB VHD and refuses existing paths or occupied drive letters. Windows
+Sandbox may lack the virtual-disk provider; in that case use the isolated
+build host for this fault injection and retain separate Sandbox command/AOF
+evidence. Do not substitute a normal system or data drive.
+
+After the probe has stopped its own Redis process, detach only the test VHD
+using DiskPart `select vdisk file="<exact test VHD path>"` and `detach vdisk`.
+The VHD file may be retained. Never select a physical disk by number for this
+procedure. This helper is test tooling and is not part of product startup.
