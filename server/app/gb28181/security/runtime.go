@@ -19,6 +19,8 @@ type RuntimeSnapshot struct {
 	AsOf    time.Time
 }
 
+const startupBanStatePersistenceError = "startup ban state persistence unavailable"
+
 // Runtime is the application-side composition root for security state. It
 // is safe for transport callbacks and controller reads to run concurrently.
 type Runtime struct {
@@ -38,6 +40,7 @@ type Runtime struct {
 	subs           map[chan RuntimeSnapshot]struct{}
 	enforcementMu  sync.Mutex
 	agentHealth    AgentStatus
+	startupError   string
 	lastPublished  time.Time
 	stop           chan struct{}
 	done           chan struct{}
@@ -103,14 +106,18 @@ func NewPersistentRuntime(ctx context.Context, store Store, clock Clock, agent F
 	if err != nil {
 		return nil, err
 	}
+	var startupError bool
 	if isFirewallUnsupported(r.agent) {
 		for i := range active {
 			normalized, changed := normalizeUnsupportedBan(active[i])
 			active[i] = normalized
 			if changed {
 				// Admission must remain effective even when a legacy row cannot
-				// be rewritten during startup. The next startup retries it.
-				_ = store.SaveBan(ctx, normalized)
+				// be rewritten during startup. Keep the warning visible through
+				// AgentStatus; the next startup retries the write.
+				if saveErr := store.SaveBan(ctx, normalized); saveErr != nil {
+					startupError = true
+				}
 			}
 		}
 	}
@@ -120,6 +127,11 @@ func NewPersistentRuntime(ctx context.Context, store Store, clock Clock, agent F
 	}
 	// Admission is effective even while the privileged agent is recovering.
 	_ = r.reconcileAgent()
+	if startupError {
+		r.mu.Lock()
+		r.startupError = startupBanStatePersistenceError
+		r.mu.Unlock()
+	}
 	r.stop, r.done = make(chan struct{}), make(chan struct{})
 	r.persist = newEventPersister(store, r.clock)
 	go r.runAgentMaintenance()
@@ -395,7 +407,15 @@ func (r *Runtime) Close(ctx context.Context) error {
 	}
 	return nil
 }
-func (r *Runtime) AgentStatus() AgentStatus { r.mu.RLock(); defer r.mu.RUnlock(); return r.agentHealth }
+func (r *Runtime) AgentStatus() AgentStatus {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	status := r.agentHealth
+	if r.startupError != "" {
+		status.LastError = r.startupError
+	}
+	return status
+}
 
 func (r *Runtime) runAgentMaintenance() {
 	defer close(r.done)

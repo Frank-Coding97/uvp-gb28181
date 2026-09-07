@@ -128,11 +128,42 @@ func TestUnsupportedRuntimeReconcileSkipsAgentAndPersistence(t *testing.T) {
 type countingBanStore struct {
 	Store
 	banSaves int
+	saveErr  error
 }
 
 func (s *countingBanStore) SaveBan(ctx context.Context, item FirewallBan) error {
 	s.banSaves++
+	if s.saveErr != nil {
+		return s.saveErr
+	}
 	return s.Store.SaveBan(ctx, item)
+}
+
+func TestPersistentUnsupportedNormalizationFailureKeepsAdmissionAndReportsPersistenceError(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(100, 0)}
+	base := NewGormStore(newSecurityStoreTestDB(t))
+	require.NoError(t, base.SavePolicy(context.Background(), unsupportedBanPolicy(), "system"))
+	old := FirewallBan{
+		Decision: BanDecision{DecisionID: "old", SourceIP: "198.51.100.10", Score: 1, CreatedAt: clock.Now(), Permanent: true},
+		Status:   BanAgentFailed, AgentState: AgentStateFailed, FirewallAppliedAt: clock.Now(),
+	}
+	require.NoError(t, base.SaveBan(context.Background(), old))
+	store := &countingBanStore{Store: base, saveErr: errors.New("injected save failure")}
+	agent := &capabilityCountingAgent{capability: AgentCapabilityUnsupported}
+
+	runtime, err := NewPersistentRuntime(context.Background(), store, clock, agent, nil)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, runtime.Close(context.Background())) }()
+	require.True(t, runtime.Admission().IsBanned(old.Decision.SourceIP))
+	status := runtime.AgentStatus()
+	require.Equal(t, startupBanStatePersistenceError, status.LastError)
+	require.NotContains(t, status.LastError, "injected save failure")
+
+	persisted, err := base.ActiveBans(context.Background(), clock.Now())
+	require.NoError(t, err)
+	require.Len(t, persisted, 1)
+	require.Equal(t, BanAgentFailed, persisted[0].Status)
+	require.Equal(t, AgentStateFailed, persisted[0].AgentState)
 }
 
 type unbanErrorAgent struct{}
