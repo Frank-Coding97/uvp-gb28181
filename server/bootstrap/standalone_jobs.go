@@ -6,6 +6,7 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/scheduler"
+	"uvplatform.cn/uvp-gb28181/internal/standalone/runtimeexecutor"
 )
 
 // runtimeJobsHooks keeps the startup sequence injectable for the bootstrap
@@ -67,10 +68,12 @@ func StartRuntimeJobs() error {
 
 	cleanup := func() {
 		runtimeScheduler.Stop()
+		runtimeexecutor.Rollback()
 		app.JobScheduler = previousScheduler
 	}
 
 	hooks.registerExecutors()
+	runtimeexecutor.Apply(runtimeScheduler)
 	if err := hooks.registerSystemJobs(); err != nil {
 		cleanup()
 		return fmt.Errorf("register runtime system jobs: %w", err)
@@ -80,6 +83,7 @@ func StartRuntimeJobs() error {
 		return fmt.Errorf("load runtime jobs: %w", err)
 	}
 
+	runtimeexecutor.Commit(runtimeScheduler)
 	runtimeJobsStarted = true
 	return nil
 }
