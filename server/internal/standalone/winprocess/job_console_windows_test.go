@@ -46,6 +46,7 @@ var (
 	consoleAllocConsole          = consoleKernel32.NewProc("AllocConsole")
 	consoleFreeConsole           = consoleKernel32.NewProc("FreeConsole")
 	consoleGetConsoleProcessList = consoleKernel32.NewProc("GetConsoleProcessList")
+	consoleSetConsoleCtrlHandler = consoleKernel32.NewProc("SetConsoleCtrlHandler")
 )
 
 type consoleJobResult struct {
@@ -271,6 +272,12 @@ func runConsoleOwner(dir string) (consoleJobResult, error) {
 	}
 	if err := writeConsoleMarker(dir, consoleOwnerVerifiedMarker, "verified"); err != nil {
 		return result, err
+	}
+	// Clear the owner's inherited ignore flag after creating the isolated child.
+	// Unlike AllocConsole in an already-running Go process, this leaves the Go
+	// handler installed during the owner's console-attached initialization intact.
+	if ok, _, callErr := consoleSetConsoleCtrlHandler.Call(0, 0); ok == 0 {
+		return result, fmt.Errorf("clear owner Ctrl+C ignore flag: %v", callErr)
 	}
 
 	// The owner is attached to the newly allocated console and has verified its
