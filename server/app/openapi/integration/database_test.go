@@ -261,6 +261,12 @@ func TestOpenAPIDatabaseCoreMigration(t *testing.T) {
 	}
 	run(lockStem + ".sql")
 	checkNativeNodeRuntime(t, db)
+	// Quota and Hook authorization now require the cleanup barrier. Exercise
+	// its real idempotent migration before those consumers, rather than using
+	// an obsolete pre-barrier fixture schema or weakening the product guard.
+	barrierStem := filepath.Join(dir, "2026-09-06-device-cleanup-barrier"+suffix)
+	run(barrierStem + ".sql")
+	run(barrierStem + ".sql")
 	checkNativeQuota(t, db)
 	checkNativeGrantViewer(t, db)
 	checkNativeRevocation(t, db)
