@@ -40,15 +40,27 @@ func main() {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+	componentReadyPrinted := false
+	managementURLPrinted := false
+	previousUncleanPrinted := false
 	err = launcher.LaunchWithBrowser(ctx, *root, *recordings, func(status launcher.Status) {
 		if status.State == launcher.Ready {
-			if status.PreviousUnclean {
-				fmt.Println("检测到上次异常退出；本次启动检查已通过，录像完整性仍需核对")
+			if !componentReadyPrinted {
+				componentReadyPrinted = true
+				fmt.Println("基础组件已就绪")
 			}
-			fmt.Println("管理地址：", status.ManagementURL)
-		}
-		if status.State == launcher.Ready && !status.BusinessReady {
-			fmt.Println("基础组件已就绪，SIP 待配置或待就绪")
+			if status.PreviousUnclean && !previousUncleanPrinted {
+				fmt.Println("检测到上次异常退出；本次启动检查已通过，录像完整性仍需核对")
+				previousUncleanPrinted = true
+			}
+			if managementURL, ok := takeManagementURL(&managementURLPrinted, status); ok {
+				fmt.Println("管理地址：", managementURL)
+			}
+			if status.BusinessReady {
+				fmt.Println("业务服务已就绪")
+			} else {
+				fmt.Println("业务状态：", displayBusinessReason(status.BusinessReason))
+			}
 			return
 		}
 		fmt.Printf("UVP: %s\n", status.State)
@@ -63,4 +75,25 @@ func main() {
 		fmt.Fprintln(os.Stderr, "启动器退出：", err)
 		os.Exit(1)
 	}
+}
+
+func displayBusinessReason(reason string) string {
+	switch reason {
+	case "status_unavailable":
+		return "业务状态暂不可用"
+	case "installation_pending":
+		return "安装尚未完成"
+	case "":
+		return "业务状态待就绪"
+	default:
+		return reason
+	}
+}
+
+func takeManagementURL(printed *bool, status launcher.Status) (string, bool) {
+	if printed == nil || *printed || status.ManagementURL == "" {
+		return "", false
+	}
+	*printed = true
+	return status.ManagementURL, true
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestLifecycleStopsAtEachFailureAndCleansOnlyOwnedResources(t *testing.T) {
@@ -117,5 +118,69 @@ func TestLifecycleUnexpectedExitDoesNotClaimGracefulStop(t *testing.T) {
 	})
 	if called || !errors.Is(err, failure) {
 		t.Fatalf("graceful=%v err=%v", called, err)
+	}
+}
+
+func TestLifecyclePublishesChangedBusinessStatusAndWaitsForObserver(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	updates := make(chan BusinessStatus, 8)
+	observerDone := make(chan struct{})
+	var stopCalled bool
+	var statuses []Status
+	steps := Steps{
+		Preflight: func(context.Context) error { return nil },
+		Redis:     func(context.Context) error { return nil },
+		Database:  func(context.Context) error { return nil },
+		Backend:   func(context.Context) (string, error) { return "starting", nil },
+		Media:     func(context.Context) error { return nil },
+		ObserveBusiness: func(observeCtx context.Context) <-chan BusinessStatus {
+			go func() {
+				<-observeCtx.Done()
+				close(updates)
+				close(observerDone)
+			}()
+			return updates
+		},
+		Stop: func(context.Context) error {
+			stopCalled = true
+			return nil
+		},
+	}
+
+	updates <- BusinessStatus{SIPState: "starting", BusinessReason: "SIP 正在启动"}
+	updates <- BusinessStatus{SIPState: "starting", BusinessReason: "SIP 正在启动"}
+	updates <- BusinessStatus{SIPState: "ready", BusinessReady: true}
+	updates <- BusinessStatus{SIPState: "ready", BusinessReady: true}
+	updates <- BusinessStatus{SIPState: "failed", BusinessReason: "SIP 已停止"}
+
+	err := Run(ctx, steps, func(status Status) {
+		statuses = append(statuses, status)
+		if status.State == Ready && status.SIPState == "failed" {
+			cancel()
+		}
+	})
+	if err != nil || !stopCalled {
+		t.Fatalf("run err=%v stop=%v", err, stopCalled)
+	}
+	select {
+	case <-observerDone:
+	case <-time.After(time.Second):
+		t.Fatal("business observer was not stopped")
+	}
+
+	var business []BusinessStatus
+	for _, status := range statuses {
+		if status.State == Ready {
+			business = append(business, BusinessStatus{SIPState: status.SIPState, BusinessReady: status.BusinessReady, BusinessReason: status.BusinessReason})
+		}
+	}
+	want := []BusinessStatus{
+		{SIPState: "starting", BusinessReason: "SIP 正在启动"},
+		{SIPState: "ready", BusinessReady: true},
+		{SIPState: "failed", BusinessReason: "SIP 已停止"},
+	}
+	if !reflect.DeepEqual(business, want) {
+		t.Fatalf("business updates=%v, want %v", business, want)
 	}
 }

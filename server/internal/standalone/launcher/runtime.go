@@ -19,6 +19,96 @@ import (
 	"uvplatform.cn/uvp-gb28181/internal/standalone/winprocess"
 )
 
+const (
+	businessReadinessInterval       = 3 * time.Second
+	businessReadinessRequestTimeout = time.Second
+)
+
+type businessProbe func(context.Context) (readiness.Status, error)
+
+func observeBusiness(ctx context.Context, interval, requestTimeout time.Duration, probe businessProbe) <-chan BusinessStatus {
+	updates := make(chan BusinessStatus, 1)
+	if ctx == nil {
+		close(updates)
+		return updates
+	}
+	if interval <= 0 {
+		interval = businessReadinessInterval
+	}
+	if requestTimeout <= 0 {
+		requestTimeout = businessReadinessRequestTimeout
+	}
+	go func() {
+		defer close(updates)
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			probeCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+			var state readiness.Status
+			var err error
+			if probe == nil {
+				err = errors.New("business readiness probe is missing")
+			} else {
+				state, err = probe(probeCtx)
+			}
+			cancel()
+			update := businessStatusFromReadiness(state, err)
+			select {
+			case updates <- update:
+			case <-ctx.Done():
+				return
+			}
+			timer := time.NewTimer(interval)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+		}
+	}()
+	return updates
+}
+
+func businessStatusFromReadiness(state readiness.Status, err error) BusinessStatus {
+	if err != nil {
+		return BusinessStatus{SIPState: state.SIPState, BusinessReason: "status_unavailable"}
+	}
+	if !state.BusinessReady && state.BusinessReason == "" {
+		state.BusinessReason = businessReasonForSIPState(state.SIPState)
+	}
+	return BusinessStatus{SIPState: state.SIPState, BusinessReady: state.BusinessReady, BusinessReason: state.BusinessReason}
+}
+
+func businessReasonForSIPState(state string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "", "unconfigured", "pending", "pending_sip":
+		return "SIP 尚未配置"
+	case "starting", "starting...":
+		return "SIP 正在启动"
+	case "failed", "error":
+		return "SIP 启动失败"
+	default:
+		return "业务状态未就绪"
+	}
+}
+
+func managementEntry(baseURL, installationPhase, bootstrapToken string) string {
+	if installationPhase == "pending_admin" {
+		return baseURL + "#/standalone-setup?bootstrap_token=" + bootstrapToken
+	}
+	return baseURL
+}
+
+func readyBrowserEntry(opened *bool, status Status, installationPhase, bootstrapToken string) (string, bool) {
+	if opened == nil || *opened || status.State != Ready {
+		return "", false
+	}
+	*opened = true
+	return managementEntry(status.ManagementURL, installationPhase, bootstrapToken), true
+}
+
 // Launch holds installation ownership until all created components terminate.
 // A normal stop drains the backend around media shutdown, then stops Redis.
 func Launch(ctx context.Context, installDir, recordingsDir string, notify func(Status)) error {
@@ -56,7 +146,9 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 	var paths standalone.Paths
 	var config standalone.InstanceConfig
 	var backendAddress string
+	var backendPID int
 	var bootstrapToken, installationPhase string
+	browserOpened := false
 	start := func(name, path, dir string, args []string, stdin *os.File, monitor bool) (*winprocess.Process, <-chan error, error) {
 		log, err := os.OpenFile(filepath.Join(paths.LogsDir, name+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
@@ -207,6 +299,7 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		if err != nil {
 			return "", err
 		}
+		backendPID = process.PID()
 		var status readiness.Status
 		err = awaitReady(ctx, exits, 30*time.Second, func(ctx context.Context) error {
 			var err error
@@ -241,6 +334,11 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		}
 		return awaitReady(ctx, exits, 30*time.Second, func(ctx context.Context) error {
 			return checkMedia(ctx, "http://"+config.MediaAddress(), config.ZLMSecret())
+		})
+	}
+	steps.ObserveBusiness = func(ctx context.Context) <-chan BusinessStatus {
+		return observeBusiness(ctx, businessReadinessInterval, businessReadinessRequestTimeout, func(ctx context.Context) (readiness.Status, error) {
+			return readiness.Check(ctx, nil, "http://"+backendAddress, config.JWTSecret(), backendPID)
 		})
 	}
 	backendCommand := func(ctx context.Context, command control.Command, expected control.Reply) error {
@@ -292,11 +390,7 @@ func LaunchWithBrowser(ctx context.Context, installDir, recordingsDir string, no
 		if notify != nil {
 			notify(status)
 		}
-		if status.State == Ready {
-			entry := status.ManagementURL
-			if installationPhase == "pending_admin" {
-				entry += "#/standalone-setup?bootstrap_token=" + bootstrapToken
-			}
+		if entry, ok := readyBrowserEntry(&browserOpened, status, installationPhase, bootstrapToken); ok {
 			if openBrowser != nil {
 				openBrowser(entry)
 			}
