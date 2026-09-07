@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -111,6 +114,26 @@ func TestOpenAPIAdmissionRejectionDoesNotConsume(t *testing.T) {
 	// Business work is a later transaction: its rollback cannot restore the nonce.
 	require.Error(t, db.Transaction(func(tx *gorm.DB) error { return errors.New("business failed") }))
 	require.ErrorIs(t, gate.Admit(context.Background(), req, allowed), ErrReplay)
+}
+
+func TestOpenAPIAdmissionAuditFingerprint(t *testing.T) {
+	now := time.Unix(1790000000, 0)
+	db := admissionDB(t)
+	gate := NewAdmission(db, func() time.Time { return now })
+	req := admissionRequest(now)
+	require.NoError(t, gate.Admit(context.Background(), req, allowed))
+
+	var current models.Client
+	require.NoError(t, db.First(&current, req.ClientID).Error)
+	expected := sha256.Sum256([]byte(current.AK))
+	var audit models.Audit
+	require.NoError(t, db.Where("request_id = ?", req.RequestID).First(&audit).Error)
+	require.Equal(t, hex.EncodeToString(expected[:]), audit.AKFingerprint)
+
+	serialized, err := json.Marshal(audit)
+	require.NoError(t, err)
+	require.NotContains(t, string(serialized), current.AK)
+	require.NotContains(t, string(serialized), "test-secret-key")
 }
 
 func TestOpenAPIAdmissionAuditAndCommitFailure(t *testing.T) {

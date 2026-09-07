@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strconv"
 	"sync"
@@ -124,7 +126,8 @@ func (a *Admission) Admit(ctx context.Context, r AdmissionRequest, authorize fun
 			}
 			return err
 		}
-		return tx.Create(&models.Audit{RequestID: r.RequestID, ClientID: &r.ClientID, Scope: r.Scope, ResourceType: r.ResourceType, ResourceID: r.ResourceID, Source: r.Source, Result: "started", CreatedAt: now}).Error
+		fingerprint := sha256.Sum256([]byte(current.AK))
+		return tx.Create(&models.Audit{RequestID: r.RequestID, ClientID: &r.ClientID, AKFingerprint: hex.EncodeToString(fingerprint[:]), Scope: r.Scope, ResourceType: r.ResourceType, ResourceID: r.ResourceID, Source: r.Source, Result: "started", CreatedAt: now}).Error
 	})
 	switch {
 	case err == nil:
