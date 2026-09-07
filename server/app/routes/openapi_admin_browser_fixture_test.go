@@ -65,13 +65,32 @@ func waitForBrowserSessionLogs(t *testing.T, f *openAPIAdminHTTPFixture, minimum
 	require.Eventually(t, func() bool {
 		var count int64
 		return f.db.Model(&appmodels.SysOperationLog{}).Where("path IN ?", []string{
-			"/api/users/profile", "/api/sysMenu/getRouters", "/api/users/session/heartbeat",
+			"/api/users/profile", "/api/sysMenu/getRouters",
 		}).Count(&count).Error == nil && count >= minimum
 	}, 3*time.Second, 10*time.Millisecond, "wait for asynchronous fixture session logs before restoring global DB")
 }
 
 func TestOpenAPIAdminBrowserProfileAndMenu(t *testing.T) {
 	newOpenAPIAdminBrowserFixture(t)
+}
+
+func recordBrowserFixtureRequest(f *openAPIAdminHTTPFixture, sessionRequests *atomic.Int64, path string) {
+	if strings.HasPrefix(path, openAPIAdminHTTPPathPrefix) {
+		f.requestCount.Add(1)
+	} else if path == "/api/users/profile" || path == "/api/sysMenu/getRouters" {
+		sessionRequests.Add(1)
+	}
+}
+
+func TestOpenAPIAdminBrowserHeartbeatDoesNotAwaitAudit(t *testing.T) {
+	f := &openAPIAdminHTTPFixture{}
+	var sessionRequests atomic.Int64
+	recordBrowserFixtureRequest(f, &sessionRequests, "/api/users/profile")
+	recordBrowserFixtureRequest(f, &sessionRequests, "/api/sysMenu/getRouters")
+	recordBrowserFixtureRequest(f, &sessionRequests, "/api/users/session/heartbeat")
+	recordBrowserFixtureRequest(f, &sessionRequests, openAPIAdminHTTPPathPrefix)
+	require.Equal(t, int64(2), sessionRequests.Load(), "heartbeat is intentionally excluded by OperationLogMiddleware")
+	require.Equal(t, int64(1), f.requestCount.Load())
 }
 
 // To drive the built SPA, explicitly set UVP_OPENAPI_BROWSER_DIST to web/dist
@@ -116,11 +135,7 @@ func TestOpenAPIAdminBrowserFixture(t *testing.T) {
 			http.Error(w, "outside browser fixture scope", http.StatusNotFound)
 			return
 		}
-		if strings.HasPrefix(r.URL.Path, openAPIAdminHTTPPathPrefix) {
-			f.requestCount.Add(1)
-		} else {
-			sessionRequests.Add(1)
-		}
+		recordBrowserFixtureRequest(f, &sessionRequests, r.URL.Path)
 		proxy.ServeHTTP(w, r)
 	})
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -146,6 +161,16 @@ func TestOpenAPIAdminBrowserFixture(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 			once.Do(func() { close(finished) })
+		case "/__fixture/missing-permission":
+			if r.Method != http.MethodPost || r.Header.Get("Origin") != "http://"+r.Host {
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			if err := setBrowserMissingPermission(f, r.URL.Query().Get("action")); err != nil {
+				http.Error(w, "invalid fixture permission change", http.StatusBadRequest)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			files.ServeHTTP(w, r)
 		}
