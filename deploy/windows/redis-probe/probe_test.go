@@ -19,6 +19,17 @@ func TestAggregateStatusKeepsUnexecutedEvidenceVisible(t *testing.T) {
 	}
 }
 
+func TestRedisConfigArgumentIsRelativeToManagedWorkingDirectory(t *testing.T) {
+	configPath := filepath.Join("C:\\Users\\测试 用户\\primary with spaces 中文", "redis.conf")
+	argument := redisConfigArgument(configPath)
+	if argument != "redis.conf" {
+		t.Fatalf("Redis config argument = %q, want redis.conf", argument)
+	}
+	if filepath.IsAbs(argument) {
+		t.Fatalf("Redis config argument must be relative: %q", argument)
+	}
+}
+
 func TestVerifyLicenseDistinguishesMissingAndEmptyMaterial(t *testing.T) {
 	missing := verifyLicense(filepath.Join(t.TempDir(), "COPYING"))
 	if missing["status"] != "failed" {

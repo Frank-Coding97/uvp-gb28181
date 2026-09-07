@@ -220,16 +220,9 @@ func (instance *redisInstance) writeConfig() error {
 			return "maxmemory " + instance.maxMemory
 		}(),
 		"requirepass " + instance.password,
-		"dir " + quoteRedisConfigPath(instance.workspace),
+		"dir .",
 	}, "\n") + "\n"
 	return os.WriteFile(instance.configPath, []byte(config), 0o600)
-}
-
-func quoteRedisConfigPath(path string) string {
-	path = filepath.ToSlash(path)
-	path = strings.ReplaceAll(path, `\`, `/`)
-	path = strings.ReplaceAll(path, `"`, `\"`)
-	return `"` + path + `"`
 }
 
 func (instance *redisInstance) start(ctx context.Context) (*redisClient, error) {
@@ -243,7 +236,7 @@ func (instance *redisInstance) start(ctx context.Context) (*redisClient, error) 
 		return nil, fmt.Errorf("write Redis config: %w", err)
 	}
 	instance.output.Reset()
-	command := exec.Command(instance.binary, instance.configPath)
+	command := exec.Command(instance.binary, redisConfigArgument(instance.configPath))
 	command.Dir = instance.workspace
 	command.Stdout = &instance.output
 	command.Stderr = &instance.output
@@ -286,6 +279,10 @@ func (instance *redisInstance) start(ctx context.Context) (*redisClient, error) 
 		case <-time.After(40 * time.Millisecond):
 		}
 	}
+}
+
+func redisConfigArgument(configPath string) string {
+	return filepath.Base(configPath)
 }
 
 func (instance *redisInstance) startupError() error {
@@ -649,11 +646,9 @@ func concurrentConsume(address, password, key string, luaFallback bool) (consume
 
 func checkRedisPersistence(instance *redisInstance, opts options, workspace string) checkResult {
 	details := map[string]any{
-		"appendfsync":         "always",
-		"maxmemory_policy":    "noeviction",
-		"forced_kill_rounds":  persistenceRounds,
-		"disk_full_injection": "not_executed",
-		"disk_full_reason":    "OS disk-full injection is intentionally excluded because it can damage unrelated host data",
+		"appendfsync":        "always",
+		"maxmemory_policy":   "noeviction",
+		"forced_kill_rounds": persistenceRounds,
 	}
 	failures := make([]string, 0)
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
@@ -737,10 +732,16 @@ func checkRedisPersistence(instance *redisInstance, opts options, workspace stri
 		failures = append(failures, "license material: "+licenseResult["reason"].(string))
 	}
 
+	diskFullResult := runDiskFullCheck(opts.redisServer, opts.diskFullRoot)
+	details["disk_full"] = diskFullResult
+	if diskFullResult["status"] == "failed" {
+		failures = append(failures, "disk-full: "+diskFullResult["reason"].(string))
+	}
+
 	if len(failures) > 0 {
 		return checkResult{Name: "t02-c", Status: "failed", Details: details, Error: strings.Join(failures, "; ")}
 	}
-	if details["disk_full_injection"] == "not_executed" || licenseResult["status"] != "passed" {
+	if diskFullResult["status"] != "passed" || licenseResult["status"] != "passed" {
 		return checkResult{Name: "t02-c", Status: "not_executed", Details: details}
 	}
 	return checkResult{Name: "t02-c", Status: "passed", Details: details}

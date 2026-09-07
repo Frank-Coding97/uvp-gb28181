@@ -13,6 +13,7 @@ type options struct {
 	expectedVersion string
 	sourceSHA       string
 	licenseFile     string
+	diskFullRoot    string
 	keepTemp        bool
 }
 
@@ -44,6 +45,7 @@ func main() {
 	flag.StringVar(&opts.expectedVersion, "expected-version", "", "exact Redis server version to require")
 	flag.StringVar(&opts.sourceSHA, "source-sha", "", "locked Redis source commit SHA to record")
 	flag.StringVar(&opts.licenseFile, "license-file", "", "Redis license/COPYING file to verify")
+	flag.StringVar(&opts.diskFullRoot, "disk-full-root", "", "marked small Windows volume root for the disk-full test")
 	flag.BoolVar(&opts.keepTemp, "keep-temp", false, "keep the temporary probe workspace after completion")
 	flag.Parse()
 
