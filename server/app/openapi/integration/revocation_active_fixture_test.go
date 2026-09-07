@@ -37,9 +37,15 @@ type activeRevocationFixture struct {
 	node         node.Node
 	service      *openapiclient.Service
 	bindingsPath string
+	hookServer   *httptest.Server
 }
 
 func newActiveRevocationFixture(t *testing.T) *activeRevocationFixture {
+	t.Helper()
+	return newActiveRevocationFixtureWithAdmission(t, nil)
+}
+
+func newActiveRevocationFixtureWithAdmission(t *testing.T, admission http.Handler) *activeRevocationFixture {
 	t.Helper()
 	p := newMediaProbeFixture(t)
 	p.stop()
@@ -59,6 +65,10 @@ func newActiveRevocationFixture(t *testing.T) *activeRevocationFixture {
 			return
 		}
 		if event == "on_play" || event == "on_flow_report" {
+			if admission != nil {
+				admission.ServeHTTP(w, r)
+				return
+			}
 			r.URL.Path = "/play"
 			if event == "on_flow_report" {
 				r.URL.Path = "/flow"
@@ -119,7 +129,7 @@ func newActiveRevocationFixture(t *testing.T) *activeRevocationFixture {
 	require.NoError(t, err)
 	bindingsPath := filepath.Join(t.TempDir(), "revocation.yml")
 	require.NoError(t, os.WriteFile(bindingsPath, data, 0600))
-	return &activeRevocationFixture{probe: p, db: db, node: n, service: service, bindingsPath: bindingsPath}
+	return &activeRevocationFixture{probe: p, db: db, node: n, service: service, bindingsPath: bindingsPath, hookServer: hooks}
 }
 
 // Personnel/RBAC admission is explicitly outside this media runner test.

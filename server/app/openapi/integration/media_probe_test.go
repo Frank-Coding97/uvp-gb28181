@@ -28,12 +28,21 @@ func (f *mediaProbeFixture) player(t *testing.T, protocol, stream, label string)
 	t.Helper()
 	token := f.authorize(label)
 	path := fmt.Sprintf("127.0.0.1:%d/live/%s.live.flv?probe_auth=%s&bootNonce=attacker&protocol=attacker", f.tlsPort, stream, url.QueryEscape(token))
+	scheme := "https://"
+	if protocol == "wss-flv" {
+		scheme = "wss://"
+	}
+	return f.playerURL(t, protocol, scheme+path)
+}
+
+func (f *mediaProbeFixture) playerURL(t *testing.T, protocol, rawURL string) *probePlayer {
+	t.Helper()
 	var reader io.ReadCloser
 	var cleanup func()
 	if protocol == "https-flv" {
 		transport := &http.Transport{TLSClientConfig: f.tlsConfig.Clone(), ForceAttemptHTTP2: false, DisableKeepAlives: true, Proxy: nil, DialContext: (&net.Dialer{Timeout: 3 * time.Second}).DialContext, ResponseHeaderTimeout: 3 * time.Second}
 		client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-		response, err := client.Get("https://" + path)
+		response, err := client.Get(rawURL)
 		// Do not expose the request URL (fixture authorization) on errors.
 		require.True(t, err == nil, "HTTPS fixture player must connect")
 		require.Equal(t, 200, response.StatusCode)
@@ -41,7 +50,7 @@ func (f *mediaProbeFixture) player(t *testing.T, protocol, stream, label string)
 		reader = response.Body
 		cleanup = func() { _ = reader.Close(); transport.CloseIdleConnections() }
 	} else {
-		config, err := websocket.NewConfig("wss://"+path, "https://127.0.0.1")
+		config, err := websocket.NewConfig(rawURL, "https://127.0.0.1")
 		require.NoError(t, err)
 		config.TlsConfig = f.tlsConfig.Clone()
 		config.Dialer = &net.Dialer{Timeout: 3 * time.Second}

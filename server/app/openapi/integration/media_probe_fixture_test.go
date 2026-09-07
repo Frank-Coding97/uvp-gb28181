@@ -164,12 +164,18 @@ func (f *mediaProbeFixture) stop() {
 	f.process = nil
 }
 func (f *mediaProbeFixture) publish(t *testing.T, stream string) {
-	cmd := exec.Command("ffmpeg", "-nostdin", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=10", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "10", "-f", "flv", fmt.Sprintf("rtmp://127.0.0.1:%d/live/%s", f.rtmpPort, stream))
+	t.Helper()
+	f.publishApp(t, "live", stream)
+}
+
+func (f *mediaProbeFixture) publishApp(t *testing.T, appName, stream string) {
+	t.Helper()
+	cmd := exec.Command("ffmpeg", "-nostdin", "-loglevel", "error", "-re", "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=10", "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency", "-g", "10", "-f", "flv", fmt.Sprintf("rtmp://127.0.0.1:%d/%s/%s", f.rtmpPort, appName, stream))
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
 	require.NoError(f.t, cmd.Start())
 	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
 	require.Eventually(f.t, func() bool {
-		_, err := f.client.GetRuntimeMediaPlayers(context.Background(), probeTarget(stream))
+		_, err := f.client.GetRuntimeMediaPlayers(context.Background(), zlm.StreamTarget{Schema: "rtmp", VHost: "__defaultVhost__", App: appName, Stream: stream})
 		return err == nil
 	}, 10*time.Second, 50*time.Millisecond)
 }
@@ -232,8 +238,12 @@ func (f *mediaProbeFixture) event(kind, label string) (probeEvent, bool) {
 	return probeEvent{}, false
 }
 func (f *mediaProbeFixture) generation(stream string) int64 {
+	return f.generationApp("live", stream)
+}
+
+func (f *mediaProbeFixture) generationApp(appName, stream string) int64 {
 	// Read-only fixture observation; never used by product authority decisions.
-	request, err := http.NewRequest("GET", "http://127.0.0.1:"+strconv.Itoa(f.apiPort)+"/index/api/getMediaInfo?schema=rtmp&vhost=__defaultVhost__&app=live&stream="+url.QueryEscape(stream), nil)
+	request, err := http.NewRequest("GET", "http://127.0.0.1:"+strconv.Itoa(f.apiPort)+"/index/api/getMediaInfo?schema=rtmp&vhost=__defaultVhost__&app="+url.QueryEscape(appName)+"&stream="+url.QueryEscape(stream), nil)
 	require.NoError(f.t, err)
 	request.Header.Set("secret", f.secret)
 	client := &http.Client{Timeout: 2 * time.Second}
