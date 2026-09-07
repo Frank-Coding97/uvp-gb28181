@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"net/netip"
 	"sort"
 	"strconv"
@@ -32,16 +33,17 @@ const (
 type Reason string
 
 const (
-	ReasonInstallationPending Reason = "installation_pending"
-	ReasonNodeMissing         Reason = "node_missing"
-	ReasonNodeAmbiguous       Reason = "node_ambiguous"
-	ReasonNodeInactive        Reason = "node_inactive"
-	ReasonMediaUnreachable    Reason = "media_unreachable"
-	ReasonIdentityMismatch    Reason = "identity_mismatch"
-	ReasonConfigNotConverged  Reason = "config_not_converged"
-	ReasonHookUnconfirmed     Reason = "hook_unconfirmed"
-	ReasonSIPNotRunning       Reason = "sip_not_running"
-	ReasonReady               Reason = "ready"
+	ReasonInstallationPending     Reason = "installation_pending"
+	ReasonNodeMissing             Reason = "node_missing"
+	ReasonNodeAmbiguous           Reason = "node_ambiguous"
+	ReasonNodeInactive            Reason = "node_inactive"
+	ReasonMediaUnreachable        Reason = "media_unreachable"
+	ReasonMediaAddressUnavailable Reason = "media_address_unavailable"
+	ReasonIdentityMismatch        Reason = "identity_mismatch"
+	ReasonConfigNotConverged      Reason = "config_not_converged"
+	ReasonHookUnconfirmed         Reason = "hook_unconfirmed"
+	ReasonSIPNotRunning           Reason = "sip_not_running"
+	ReasonReady                   Reason = "ready"
 )
 
 // Result is the complete public result. No raw external error, secret,
@@ -59,10 +61,13 @@ type ConfigClient interface {
 }
 
 // ProbeConfig supplies dependencies. Now and Client are injectable for
-// deterministic tests; a nil Now uses time.Now.
+// deterministic tests; a nil Now uses time.Now. A nonnil
+// LocalAddressAvailable receives a canonical concrete IPv4 address and
+// reports whether it is currently assigned to a local interface.
 type ProbeConfig struct {
-	Client ConfigClient
-	Now    func() time.Time
+	Client                ConfigClient
+	Now                   func() time.Time
+	LocalAddressAvailable func(string) bool
 }
 
 // Input is the complete runtime state needed for a standalone business
@@ -70,16 +75,20 @@ type ProbeConfig struct {
 type Input struct {
 	InstallationPhase string
 	SIPState          string
-	ZLM               gbconfig.ZLMConfig
-	Media             gbconfig.MediaConfig
-	Registry          *node.Registry
+	// LAN mode requires the selected node's concrete media addresses to be
+	// assigned locally. The zero value preserves public/deployment behavior.
+	RequireLocalMediaAddresses bool
+	ZLM                        gbconfig.ZLMConfig
+	Media                      gbconfig.MediaConfig
+	Registry                   *node.Registry
 }
 
 // Probe is safe for concurrent callers. Checks are serialized so a stale
 // external read cannot clear a newer convergence generation.
 type Probe struct {
-	client ConfigClient
-	now    func() time.Time
+	client                ConfigClient
+	now                   func() time.Time
+	localAddressAvailable func(string) bool
 
 	checkMu sync.Mutex
 	stateMu sync.Mutex
@@ -97,7 +106,11 @@ func NewProbe(config ProbeConfig) *Probe {
 	if now == nil {
 		now = time.Now
 	}
-	return &Probe{client: config.Client, now: now}
+	localAddressAvailable := config.LocalAddressAvailable
+	if localAddressAvailable == nil {
+		localAddressAvailable = defaultLocalAddressAvailable
+	}
+	return &Probe{client: config.Client, now: now, localAddressAvailable: localAddressAvailable}
 }
 
 // Check samples the registry and the current ZLM configuration. It never
@@ -123,6 +136,10 @@ func (p *Probe) Check(ctx context.Context, input Input) Result {
 	if reason != "" {
 		p.reset()
 		return Result{Reason: reason}
+	}
+	if input.RequireLocalMediaAddresses && !p.mediaAddressesAvailable(candidate) {
+		p.reset()
+		return Result{Reason: ReasonMediaAddressUnavailable}
 	}
 	if !candidate.IsActive() || candidate.RecoveryRequired {
 		p.reset()
@@ -238,6 +255,58 @@ func normalizeLiteralHost(raw string) (string, bool) {
 		return "", false
 	}
 	return addr.Unmap().String(), true
+}
+
+func (p *Probe) mediaAddressesAvailable(candidate *node.Node) bool {
+	if p == nil || p.localAddressAvailable == nil || candidate == nil {
+		return false
+	}
+	return mediaAddressAvailable(candidate.ReceiveHost, p.localAddressAvailable) &&
+		mediaAddressAvailable(candidate.PlaybackHost, p.localAddressAvailable)
+}
+
+func mediaAddressAvailable(raw string, available func(string) bool) bool {
+	host, ok := concreteIPv4(raw)
+	if !ok {
+		return false
+	}
+	return available(host)
+}
+
+func concreteIPv4(raw string) (string, bool) {
+	addr, err := netip.ParseAddr(strings.TrimSpace(raw))
+	if err != nil || !addr.Is4() || addr.IsUnspecified() || addr.IsMulticast() || addr == netip.MustParseAddr("255.255.255.255") {
+		return "", false
+	}
+	return addr.String(), true
+}
+
+func defaultLocalAddressAvailable(raw string) bool {
+	host, ok := concreteIPv4(raw)
+	if !ok {
+		return false
+	}
+	want := netip.MustParseAddr(host)
+	addresses, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, address := range addresses {
+		text := address.String()
+		if prefix, prefixErr := netip.ParsePrefix(text); prefixErr == nil {
+			if candidate := prefix.Addr().Unmap(); candidate.Is4() && candidate == want {
+				return true
+			}
+			continue
+		}
+		if candidate, addrErr := netip.ParseAddr(text); addrErr == nil {
+			candidate = candidate.Unmap()
+			if candidate.Is4() && candidate == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func managedConfigMatches(actual, expected map[string]string) bool {
