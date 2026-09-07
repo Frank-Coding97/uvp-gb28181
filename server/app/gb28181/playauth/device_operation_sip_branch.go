@@ -29,6 +29,7 @@ type DeviceSIPKnownBranch struct {
 	ACKState             string                       `json:"-"`
 	ACKRowVersion        int64                        `json:"-"`
 	ACKDispatchStartedAt *time.Time                   `json:"-"`
+	CleanupAttempts      []DeviceSIPCleanupAttempt    `json:"-"`
 }
 
 type sipKnownBranchIdentityWire struct {
@@ -49,13 +50,14 @@ type sipKnownBranchWire struct {
 	ACKState             string                     `json:"ackState"`
 	ACKRowVersion        int64                      `json:"ackRowVersion"`
 	ACKDispatchStartedAt *time.Time                 `json:"ackDispatchStartedAt"`
+	CleanupAttempts      []sipCleanupAttemptWire    `json:"cleanupAttempts,omitempty"`
 }
 
 func sipKnownBranchToWire(b *DeviceSIPKnownBranch) *sipKnownBranchWire {
 	if b == nil {
 		return nil
 	}
-	return &sipKnownBranchWire{1, sipKnownBranchIdentityWire(b.Identity), b.ObservedAt, b.ACKState, b.ACKRowVersion, b.ACKDispatchStartedAt}
+	return &sipKnownBranchWire{1, sipKnownBranchIdentityWire(b.Identity), b.ObservedAt, b.ACKState, b.ACKRowVersion, b.ACKDispatchStartedAt, sipCleanupAttemptsToWire(b.CleanupAttempts)}
 }
 
 // Preserve parsed URI order and spelling. The accepted bounded profile is not
@@ -135,7 +137,11 @@ func readSIPKnownBranch(w *sipKnownBranchWire, step DeviceSIPInviteStep, updated
 	default:
 		return nil, ErrDeviceIntentUnavailable
 	}
-	return &DeviceSIPKnownBranch{i, w.ObservedAt, w.ACKState, w.ACKRowVersion, w.ACKDispatchStartedAt}, nil
+	b := &DeviceSIPKnownBranch{Identity: i, ObservedAt: w.ObservedAt, ACKState: w.ACKState, ACKRowVersion: w.ACKRowVersion, ACKDispatchStartedAt: w.ACKDispatchStartedAt}
+	step.KnownBranch = b
+	var err error
+	b.CleanupAttempts, err = readSIPCleanupAttempts(w.CleanupAttempts, step, updatedAt)
+	return b, err
 }
 
 func observeSIPBranchDevice(tx *gorm.DB, ctx context.Context, id DeviceOperationIntentIdentity) error {
@@ -193,7 +199,7 @@ func (s *DeviceOperationIntentStore) DispatchSIPKnownBranchACK(ctx context.Conte
 				continue
 			}
 			b := step.KnownBranch
-			if b == nil || !equalSIPKnownBranch(b.Identity, identity) || b.ACKState != SIPStepPrepared {
+			if b == nil || !equalSIPKnownBranch(b.Identity, identity) || b.ACKState != SIPStepPrepared || len(b.CleanupAttempts) != 0 {
 				return false, ErrDeviceIntentConflict
 			}
 			b.ACKState, b.ACKRowVersion, b.ACKDispatchStartedAt = SIPStepMayHaveDispatched, 2, &now

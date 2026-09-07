@@ -129,6 +129,7 @@ func verifySIPInviteStepsNative(t *testing.T, ctx context.Context, db *gorm.DB, 
 	require.Equal(t, playauth.SIPStepMayHaveDispatched, loaded.Steps[0].KnownBranch.ACKState)
 	require.Equal(t, playauth.SIPStepPrepared, loaded.Steps[1].KnownBranch.ACKState)
 	require.Equal(t, playauth.SIPStepMayHaveDispatched, loaded.Steps[1].Cancel.State)
+	loaded = verifySIPCleanupNative(t, ctx, db, store, id, loaded)
 	loadedAfter, err := playauth.NewDeviceOperationIntentStore(db).LoadSIPInviteSteps(ctx, id)
 	require.NoError(t, err)
 	// PostgreSQL returns a fixed-offset location, whereas the successful
@@ -143,7 +144,9 @@ func verifySIPInviteStepsNative(t *testing.T, ctx context.Context, db *gorm.DB, 
 	// A newer cleanup watermark covers the original operation. Even another
 	// transfer must not make its old cancellation eligible again.
 	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=3, cleanup_completed_epoch=2 WHERE id=?", id.DevicePK).Error)
-	_, err = store.PrepareSIPCancel(ctx, id, 25, cancel)
+	_, err = store.PrepareSIPCancel(ctx, id, loaded.Intent.RowVersion, cancel)
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
+	_, err = store.PrepareSIPBranchCleanup(ctx, id, loaded.Intent.RowVersion, loaded.Steps[1].KnownBranch.CleanupAttempts[0].Identity)
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
 	t.Log("SIP steps: 16 immutable INVITEs; 20 concurrent INVITE, ACK and old-epoch CANCEL single winners; late branch retained; consumed/covered cleanup cannot reacquire; native byte constraints and reconstructed store passed")
 }
