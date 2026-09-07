@@ -97,12 +97,12 @@ func TestWindowsJobConsoleCtrlCIsolation(t *testing.T) {
 	}
 	ownerPID := uint32(cmd.Process.Pid)
 	if err := waitExternalCommand(cmd, 30*time.Second); err != nil {
-		t.Fatalf("private-console helper failed: %v\nstderr: %s", err, readDiagnostic(stderrPath))
+		t.Fatalf("private-console helper failed: %v\n%s", err, readConsoleDiagnostics(dir, stdoutPath, stderrPath))
 	}
 
 	raw, err := os.ReadFile(filepath.Join(dir, consoleOwnerResultMarker))
 	if err != nil {
-		t.Fatalf("read helper result: %v; stderr: %s", err, readDiagnostic(stderrPath))
+		t.Fatalf("read helper result: %v\n%s", err, readConsoleDiagnostics(dir, stdoutPath, stderrPath))
 	}
 	var result consoleJobResult
 	if err := json.Unmarshal(raw, &result); err != nil {
@@ -164,7 +164,7 @@ func TestWindowsJobConsoleHelper(t *testing.T) {
 		err = fmt.Errorf("unknown console helper mode %q", mode)
 	}
 	if err != nil {
-		_ = writeConsoleMarker(dir, consoleOwnerErrorMarker, err.Error())
+		_ = writeConsoleError(dir, err.Error())
 		t.Fatal(err)
 	}
 }
@@ -383,6 +383,21 @@ func writeConsoleMarker(dir, name, content string) error {
 	return nil
 }
 
+func writeConsoleError(dir, content string) error {
+	file, err := os.OpenFile(filepath.Join(dir, consoleOwnerErrorMarker), os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return nil
+		}
+		return err
+	}
+	if _, err := io.WriteString(file, content); err != nil {
+		_ = file.Close()
+		return err
+	}
+	return file.Close()
+}
+
 func waitConsoleMarker(dir, name string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	ticker := time.NewTicker(20 * time.Millisecond)
@@ -394,6 +409,11 @@ func waitConsoleMarker(dir, name string, timeout time.Duration) (string, error) 
 		}
 		if !errors.Is(err, os.ErrNotExist) {
 			return "", err
+		}
+		if name != consoleOwnerErrorMarker {
+			if helperError, helperErr := os.ReadFile(filepath.Join(dir, consoleOwnerErrorMarker)); helperErr == nil {
+				return "", fmt.Errorf("console helper reported failure: %s", strings.TrimSpace(string(helperError)))
+			}
 		}
 		if !time.Now().Before(deadline) {
 			return "", fmt.Errorf("timed out waiting for %s", name)
@@ -527,4 +547,8 @@ func readDiagnostic(path string) string {
 		return err.Error()
 	}
 	return string(content)
+}
+
+func readConsoleDiagnostics(dir, stdoutPath, stderrPath string) string {
+	return fmt.Sprintf("owner-error: %s\nowner-stdout: %s\nowner-stderr: %s", readDiagnostic(filepath.Join(dir, consoleOwnerErrorMarker)), readDiagnostic(stdoutPath), readDiagnostic(stderrPath))
 }
