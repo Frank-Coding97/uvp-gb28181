@@ -340,7 +340,19 @@ func TestPipeListenerUsesEffectiveUserAndSystemSDDL(t *testing.T) {
 
 	path, err := pipePath(name)
 	require.NoError(t, err)
+	// GetNamedSecurityInfo opens the named object through the pipe namespace.
+	// Keep a raw Accept pending so that this metadata query has a free pipe
+	// instance instead of receiving ERROR_PIPE_BUSY from the sentinel handle.
+	acceptResult := acceptPipe(listener)
 	assertPipeSecurityDescriptor(t, path, sid)
+	select {
+	case accepted := <-acceptResult:
+		if accepted.conn != nil {
+			_ = accepted.conn.Close()
+		}
+		require.Error(t, accepted.err)
+	case <-time.After(2 * time.Second):
+	}
 }
 
 func TestPipeRejectsDifferentWindowsUser(t *testing.T) {
