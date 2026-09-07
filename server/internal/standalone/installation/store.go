@@ -27,6 +27,12 @@ const (
 	adminRoleName     = "系统管理员"
 )
 
+var standaloneAdministratorHomepagePermissions = []string{
+	"gb28181:home:view",
+	"gb28181:home:layout:save",
+	"gb28181:home:layout:reset",
+}
+
 type Phase string
 
 const (
@@ -166,6 +172,9 @@ func (s *Store) CreateAdmin(ctx context.Context, username, password string) (Sta
 		}
 		if err := tx.WithContext(ctx).Table("sys_casbin_rule").Create(&relation).Error; err != nil {
 			return fmt.Errorf("link administrator permission role: %w", err)
+		}
+		if err := ensureStandaloneAdministratorHomepagePermissions(ctx, tx); err != nil {
+			return err
 		}
 
 		updatedAt := time.Now().UTC()
@@ -456,6 +465,73 @@ func countUsers(ctx context.Context, db *gorm.DB) (int64, error) {
 	var count int64
 	result := db.WithContext(ctx).Unscoped().Table("sys_users").Count(&count)
 	return count, result.Error
+}
+
+// ensureStandaloneAdministratorHomepagePermissions repairs the SQLite seed
+// for the first administrator while it is being created. The baseline is
+// checksum-protected, so this keeps existing databases valid while making the
+// role/menu and Casbin policy rows agree for the homepage APIs.
+func ensureStandaloneAdministratorHomepagePermissions(ctx context.Context, tx *gorm.DB) error {
+	if tx.Dialector.Name() != "sqlite" {
+		return nil
+	}
+
+	var menuIDs []uint
+	if err := tx.WithContext(ctx).Table("sys_menu").
+		Where("permission IN ? AND deleted_at IS NULL AND disable = ?", standaloneAdministratorHomepagePermissions, 0).
+		Pluck("id", &menuIDs).Error; err != nil {
+		return fmt.Errorf("read standalone administrator homepage permissions: %w", err)
+	}
+	for _, menuID := range menuIDs {
+		var count int64
+		if err := tx.WithContext(ctx).Model(&models.SysRoleMenu{}).
+			Where("role_id = ? AND menu_id = ?", adminRoleID, menuID).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("check standalone administrator menu permission: %w", err)
+		}
+		if count != 0 {
+			continue
+		}
+		if err := tx.WithContext(ctx).Create(&models.SysRoleMenu{RoleID: adminRoleID, MenuID: menuID}).Error; err != nil {
+			return fmt.Errorf("seed standalone administrator menu permission: %w", err)
+		}
+	}
+
+	type apiPermission struct {
+		Path   string `gorm:"column:path"`
+		Method string `gorm:"column:method"`
+	}
+	var apis []apiPermission
+	if err := tx.WithContext(ctx).Table("sys_menu_api AS menu_api").
+		Select("DISTINCT api.path, api.method").
+		Joins("JOIN sys_api AS api ON api.id = menu_api.api_id").
+		Joins("JOIN sys_menu AS menu ON menu.id = menu_api.menu_id").
+		Where("menu.permission IN ? AND menu.deleted_at IS NULL AND menu.disable = ? AND api.deleted_at IS NULL", standaloneAdministratorHomepagePermissions, 0).
+		Find(&apis).Error; err != nil {
+		return fmt.Errorf("read standalone administrator homepage API permissions: %w", err)
+	}
+	for _, api := range apis {
+		relation := casbinRelation{
+			PType: "p",
+			V0:    fmt.Sprintf("role_%d", adminRoleID),
+			V1:    api.Path,
+			V2:    api.Method,
+			V3:    "*",
+		}
+		var count int64
+		if err := tx.WithContext(ctx).Table("sys_casbin_rule").
+			Where("ptype = ? AND v0 = ? AND v1 = ? AND v2 = ? AND v3 = ?", relation.PType, relation.V0, relation.V1, relation.V2, relation.V3).
+			Count(&count).Error; err != nil {
+			return fmt.Errorf("check standalone administrator API permission: %w", err)
+		}
+		if count != 0 {
+			continue
+		}
+		if err := tx.WithContext(ctx).Table("sys_casbin_rule").Create(&relation).Error; err != nil {
+			return fmt.Errorf("seed standalone administrator API permission: %w", err)
+		}
+	}
+	return nil
 }
 
 func stateFromRow(row installationRow) State {

@@ -2,11 +2,17 @@ package installation
 
 import (
 	"context"
+	"fmt"
+	"net/http"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/casbin/casbin/v2"
+	"github.com/casbin/casbin/v2/model"
+	"github.com/casbin/casbin/v2/util"
+	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/bcrypt"
@@ -18,6 +24,23 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/gormhelper"
 	"uvplatform.cn/uvp-gb28181/internal/sqlitebootstrap"
 )
+
+const installationCasbinModel = `
+[request_definition]
+r = sub, obj, act, dom
+
+[policy_definition]
+p = sub, obj, act, dom
+
+[role_definition]
+g = _, _, _
+
+[policy_effect]
+e = some(where (p.eft == allow))
+
+[matchers]
+m = g(r.sub, p.sub, r.dom) && keyMatch2(r.obj, p.obj) && regexMatch(r.act, p.act) && (r.dom == p.dom || p.dom == "*")
+`
 
 func newInstallationDB(t *testing.T) (*gorm.DB, string) {
 	t.Helper()
@@ -92,6 +115,65 @@ func TestCreateAdminPersistsHashRoleAndCasbinRelation(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, PhasePendingSIP, read.Phase)
 	require.Equal(t, state.AdministratorID, read.AdministratorID)
+}
+
+func TestCreateAdminGrantsHomepageAdministratorPermissions(t *testing.T) {
+	db, _ := newInstallationDB(t)
+	ctx := installationContext(t)
+	var guest models.SysRole
+	require.NoError(t, db.Where("name = ? AND deleted_at IS NULL", "游客").Take(&guest).Error)
+	guestMenuCount := countTable(t, db, fmt.Sprintf("sys_role_menu WHERE role_id = %d", guest.ID))
+	guestPolicyCount := countTable(t, db, fmt.Sprintf("sys_casbin_rule WHERE ptype = 'p' AND v0 = 'role_%d'", guest.ID))
+
+	state, err := NewStore(db).CreateAdmin(ctx, "first-admin", "Admin!Passw0rd#2026")
+	require.NoError(t, err)
+	require.NotNil(t, state.AdministratorID)
+
+	enforcer := newInstallationCasbinEnforcer(t, db)
+	subject := fmt.Sprintf("user_%d", *state.AdministratorID)
+	for _, permission := range []string{
+		"gb28181:home:view",
+		"gb28181:home:layout:save",
+		"gb28181:home:layout:reset",
+	} {
+		var count int64
+		require.NoError(t, db.Table("sys_role_menu rm").Joins("JOIN sys_menu m ON m.id = rm.menu_id").Where("rm.role_id = ? AND m.permission = ?", adminRoleID, permission).Count(&count).Error)
+		require.EqualValues(t, 1, count, "system administrator menu permission %s", permission)
+	}
+
+	for _, request := range []struct {
+		path   string
+		method string
+	}{
+		{path: "/api/gb28181/home/layout", method: http.MethodGet},
+		{path: "/api/gb28181/home/layout", method: http.MethodPut},
+		{path: "/api/gb28181/home/layout", method: http.MethodDelete},
+		{path: "/api/gb28181/home/summary", method: http.MethodGet},
+		{path: "/api/gb28181/home/drilldown/play", method: http.MethodGet},
+		{path: "/api/gb28181/home/drilldown/sip", method: http.MethodGet},
+		{path: "/api/gb28181/home/drilldown/traffic", method: http.MethodGet},
+		{path: "/api/gb28181/sip/dashboard/snapshot", method: http.MethodGet},
+		{path: "/api/gb28181/zlm/overview", method: http.MethodGet},
+	} {
+		allowed, err := enforcer.Enforce(subject, request.path, request.method, "*")
+		require.NoError(t, err)
+		require.True(t, allowed, "system administrator must be allowed %s %s", request.method, request.path)
+	}
+	require.Equal(t, guestMenuCount, countTable(t, db, fmt.Sprintf("sys_role_menu WHERE role_id = %d", guest.ID)))
+	require.Equal(t, guestPolicyCount, countTable(t, db, fmt.Sprintf("sys_casbin_rule WHERE ptype = 'p' AND v0 = 'role_%d'", guest.ID)))
+}
+
+func newInstallationCasbinEnforcer(t *testing.T, db *gorm.DB) *casbin.Enforcer {
+	t.Helper()
+	m, err := model.NewModelFromString(installationCasbinModel)
+	require.NoError(t, err)
+	adapter, err := gormadapter.NewAdapterByDBUseTableName(db, "", "sys_casbin_rule")
+	require.NoError(t, err)
+	enforcer, err := casbin.NewEnforcer(m, adapter)
+	require.NoError(t, err)
+	enforcer.AddNamedDomainMatchingFunc("g", "KeyMatch2", util.KeyMatch2)
+	require.NoError(t, enforcer.LoadPolicy())
+	return enforcer
 }
 
 func TestCreateAdminSerializesConcurrentFirstUse(t *testing.T) {
@@ -185,6 +267,8 @@ func TestCreateAdminRollsBackAllWritesOnStateFailure(t *testing.T) {
 	require.Zero(t, countTable(t, db, "sys_users"))
 	require.Zero(t, countTable(t, db, "sys_user_role"))
 	require.Zero(t, countTable(t, db, "sys_casbin_rule WHERE ptype = 'g' AND v0 LIKE 'user_%'"))
+	require.Zero(t, countTable(t, db, "sys_role_menu WHERE role_id = 1 AND menu_id IN (SELECT id FROM sys_menu WHERE permission IN ('gb28181:home:view','gb28181:home:layout:save','gb28181:home:layout:reset'))"))
+	require.Zero(t, countTable(t, db, "sys_casbin_rule WHERE ptype = 'p' AND v0 = 'role_1' AND v1 IN ('/api/gb28181/home/layout','/api/gb28181/home/summary','/api/gb28181/sip/dashboard/snapshot')"))
 	state, err = NewStore(db).State(installationContext(t))
 	require.NoError(t, err)
 	require.Equal(t, PhasePendingAdmin, state.Phase)
