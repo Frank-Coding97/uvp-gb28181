@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -136,6 +137,32 @@ func TestProbeDefaultAddressScannerSupportsLoopback(t *testing.T) {
 
 	result := probe.Check(context.Background(), input)
 	require.Equal(t, businessreadiness.ReasonHookUnconfirmed, result.Reason)
+}
+
+func TestProbeDoesNotTreatMarkActiveAsAuthenticatedKeepalive(t *testing.T) {
+	registry, added, media, _, client, _, _ := setupProbe(t)
+	require.NoError(t, registry.MarkActive(context.Background(), added.ID))
+	marked, ok := registry.Get(added.ID)
+	require.True(t, ok)
+	require.False(t, marked.Stats.LastHeartbeatAt.IsZero())
+	require.True(t, marked.Stats.LastAuthenticatedKeepaliveAt.IsZero())
+
+	markedAt := marked.Stats.LastHeartbeatAt
+	nowCalls := 0
+	probe := businessreadiness.NewProbe(businessreadiness.ProbeConfig{
+		Client: client,
+		Now: func() time.Time {
+			nowCalls++
+			if nowCalls == 1 {
+				return markedAt.Add(-time.Second)
+			}
+			return markedAt.Add(time.Second)
+		},
+	})
+	input := probeInput(registry, media)
+	result := probe.Check(context.Background(), input)
+	require.Equal(t, businessreadiness.ReasonHookUnconfirmed, result.Reason)
+	require.Equal(t, 2, nowCalls)
 }
 
 func TestProbeDoesNotAssumePublicAddressesAreLocalWhenRequirementDisabled(t *testing.T) {

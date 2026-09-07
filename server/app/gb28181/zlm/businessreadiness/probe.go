@@ -197,7 +197,7 @@ func (p *Probe) Check(ctx context.Context, input Input) Result {
 		return Result{Reason: ReasonConfigNotConverged}
 	}
 
-	if !heartbeatConfirmed(p.now(), latest.Stats.LastHeartbeatAt, convergedAt) {
+	if !heartbeatConfirmed(p.now(), latest.Stats.LastAuthenticatedKeepaliveAt, convergedAt) {
 		return Result{Reason: ReasonHookUnconfirmed}
 	}
 	return Result{BusinessReady: true, Reason: ReasonReady}
