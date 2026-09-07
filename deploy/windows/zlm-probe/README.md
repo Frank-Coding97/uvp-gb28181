@@ -30,11 +30,12 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o z
 .\zlm-probe.exe -root 'D:\UVP\media' -keepalive-probe
 ```
 
-该模式先以空的 `on_server_keepalive` 启动并等待静默窗口，再通过认证的
-`setServerConfig` 热启用并等待真实回调；随后清空配置确认不再回调，最后再次热启用
-确认恢复。它复用同一份隔离资源复制和受控 Hook receiver，标准输出只包含脱敏 JSON，
-并在进程退出后检查隔离日志中是否出现 capability URL。这个探针只验证 Windows 原生
-运行时行为，不代替 C++ 修复或完整业务验收。
+该模式先以 `hook.enable=1` 且空的 `on_server_keepalive` 启动并等待静默窗口，再通过认证的
+`setServerConfig` 热启用并等待真实回调；随后以 `hook.enable=0` 清空配置确认不再回调，
+再切换到新的 Hook URL 代次并确认恢复。它还热改 `alive_interval`，并执行一次无关配置
+reload，检查心跳继续且没有重复 timer。探针复用同一份隔离资源复制和受控 Hook receiver，
+标准输出只包含脱敏 JSON，并在进程退出后检查隔离日志中是否出现实际运行时 credential
+或 capability 值。这个探针只验证 Windows 原生运行时行为，不代替 C++ 修复或完整业务验收。
 
 探针覆盖：
 
