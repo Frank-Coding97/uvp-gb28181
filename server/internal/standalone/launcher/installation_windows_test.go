@@ -157,9 +157,69 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 	}
 	t18AssertSetupStatus(t, body, true, "pending_sip")
 
+	if sipIP := os.Getenv("UVP_T18_SIP_IP"); sipIP != "" {
+		sipPassword := t18RandomPassword(t)
+		configBody, err := json.Marshal(map[string]any{"deploymentMode": "lan", "listenIp": sipIP, "advertiseIp": sipIP, "port": 15070, "domain": "3402000000", "serverId": "34020000002000000001", "password": sipPassword})
+		if err != nil {
+			t.Fatal("could not encode SIP test settings")
+		}
+		status, headers, body = client.request(t, http.MethodPut, "/api/gb28181/sip/setup/config", "", configBody)
+		// Authorized SIP settings intentionally return the device registration
+		// password for device provisioning. Bootstrap/admin secrets remain private.
+		t18AssertResponseSafe(t, headers, body, bootstrapToken, password)
+		var saved struct {
+			Data struct {
+				ReloadedOK bool `json:"reloadedOk"`
+			} `json:"data"`
+		}
+		if status != http.StatusOK || json.Unmarshal(body, &saved) != nil || !saved.Data.ReloadedOK {
+			t.Fatalf("SIP setup activation failed, HTTP=%d", status)
+		}
+		status, _, body = client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
+		if status != http.StatusOK {
+			t.Fatal("completed setup state unavailable")
+		}
+		t18AssertSetupStatus(t, body, true, "complete")
+	}
+
 	second.cancel()
 	if !t18WaitFinished(t, second, 90*time.Second) {
 		t.Fatal("second t18 launch did not stop cleanly")
+	}
+
+	if os.Getenv("UVP_T18_SIP_IP") != "" {
+		thirdURLs := make(chan string, 1)
+		third := t18Start(t, installDir, thirdURLs)
+		runs = append(runs, third)
+		entry, ok := t18WaitBrowserEntry(third, thirdURLs, 90*time.Second)
+		if !ok {
+			t.Fatal("completed installation did not restart")
+		}
+		base, origin, _, ok := t18BrowserEndpoint(entry, false)
+		if !ok {
+			t.Fatal("completed installation reopened bootstrap")
+		}
+		client.baseURL, client.origin = base, origin
+		status, _, body = client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
+		if status != http.StatusOK {
+			t.Fatal("completed installation state unavailable after restart")
+		}
+		t18AssertSetupStatus(t, body, true, "complete")
+		status, _, body = client.request(t, http.MethodGet, "/api/gb28181/sip/setup/status", "", nil)
+		var config struct {
+			Data struct {
+				Config struct {
+					Port int `json:"port"`
+				} `json:"config"`
+			} `json:"data"`
+		}
+		if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.Data.Config.Port != 15070 {
+			t.Fatal("SIP settings did not survive restart")
+		}
+		third.cancel()
+		if !t18WaitFinished(t, third, 90*time.Second) {
+			t.Fatal("completed installation did not stop cleanly")
+		}
 	}
 }
 
