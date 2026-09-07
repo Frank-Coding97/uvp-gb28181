@@ -35,6 +35,11 @@ func Quiesce(ctx context.Context) error {
 			return err
 		}
 	}
+	// Stop configuration/restart producers before the launcher shuts down media.
+	// Keep the registry and recording Hook dependencies installed through finalize.
+	if err := quiesceZLMBackground(ctx); err != nil {
+		return err
+	}
 	var result error
 	if recordingSvc != nil {
 		result = errors.Join(result, recordingSvc.Shutdown(ctx))

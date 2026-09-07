@@ -37,3 +37,18 @@ func waitControlPlaneBackground(ctx context.Context) error {
 		startupProbeDone, positionHistoryPruneDone, schedulerLogPruneDone,
 		heartbeatDone, threadPollerDone, nodeConvergenceDone, trafficSamplerDone, trafficPrunerDone)
 }
+
+func quiesceZLMBackground(ctx context.Context) error {
+	if startupProbeCancel != nil {
+		startupProbeCancel()
+		startupProbeCancel = nil
+	}
+	if heartbeatCancel != nil {
+		heartbeatCancel()
+		heartbeatCancel = nil
+	}
+	if err := waitBackground(ctx, startupProbeDone, heartbeatDone, threadPollerDone, nodeConvergenceDone); err != nil {
+		return err
+	}
+	return drainZLMManagementCore(ctx)
+}
