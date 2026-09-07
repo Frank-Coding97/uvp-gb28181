@@ -54,3 +54,38 @@ Exit code 1 means blocked/failed, never a skip/pass. The probe has been executed
 22H2: build inventory passed, and runtime inventory correctly rejected an
 existing development machine with running MySQL/Redis. This does not qualify
 that machine as a clean runtime environment.
+
+## Standalone path verification
+
+`server/cmd/standalone-path-probe/` is a small CGO-free Windows executable for T05. It
+accepts the explicit `UVP_INSTALL_DIR`, `UVP_CONFIG_DIR`, `UVP_RESOURCE_DIR`,
+`UVP_WEB_DIR`, `UVP_DATA_DIR`, and optional `UVP_RECORDINGS_DIR` inputs (the
+same values may be passed as `-uvp-*-dir` arguments). The package root is
+always supplied explicitly because the server binary lives below a versioned
+release directory.
+
+```sh
+cd server
+GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o ../release-output/t05/standalone-path-probe.exe ./cmd/standalone-path-probe
+```
+
+Run the resulting executable from another working directory after setting the
+six `UVP_*_DIR` variables above. It reports the current working directory and
+the resolved config/data/web/recordings paths as JSON; it rejects relative,
+UNC, escaped, missing, and non-writable roots without changing the working
+directory or selecting a hidden fallback. Native Win10 execution is required
+for T05 acceptance.
+
+Example on the target machine (the `D:` recordings root is optional and may
+be on another local drive):
+
+```powershell
+$env:UVP_INSTALL_DIR = 'C:\UVP-Windows'
+$env:UVP_CONFIG_DIR = 'C:\UVP-Windows\config'
+$env:UVP_RESOURCE_DIR = 'C:\UVP-Windows\resource'
+$env:UVP_WEB_DIR = 'C:\UVP-Windows\web'
+$env:UVP_DATA_DIR = 'C:\UVP-Windows\data'
+$env:UVP_RECORDINGS_DIR = 'D:\UVP Recordings 中文'
+Set-Location $env:TEMP
+& "$env:UVP_INSTALL_DIR\standalone-path-probe.exe"
+```

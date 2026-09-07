@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/viper"
 
 	"log"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -36,6 +37,21 @@ func CreateYamlFactory(path string, fileName ...string) app.YmlConfigInterf {
 		log.Fatal("ReadInConfig err: " + err.Error())
 	}
 
+	return &ymlConfig{
+		viper: yamlConfig,
+		mu:    new(sync.RWMutex),
+	}
+}
+
+// CreateYamlFactoryFromFile loads exactly filePath. It is used by the
+// standalone launcher so config lookup cannot change when the process cwd
+// changes. The legacy directory-based factory above remains unchanged.
+func CreateYamlFactoryFromFile(filePath string) app.YmlConfigInterf {
+	yamlConfig := viper.New()
+	yamlConfig.SetConfigFile(filepath.Clean(filePath))
+	if err := yamlConfig.ReadInConfig(); err != nil {
+		log.Fatal("ReadInConfig err: " + err.Error())
+	}
 	return &ymlConfig{
 		viper: yamlConfig,
 		mu:    new(sync.RWMutex),

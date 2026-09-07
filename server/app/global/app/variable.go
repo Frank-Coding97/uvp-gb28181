@@ -10,7 +10,15 @@ import (
 )
 
 var (
-	BasePath         string                    // 定义项目的根目录
+	BasePath         string                    // 定义项目的根目录（兼容旧部署）
+	ConfigPath       string                    // 显式配置目录
+	ResourcePath     string                    // 显式资源目录
+	WebPath          string                    // 显式前端资源目录
+	DataPath         string                    // 显式实例数据目录
+	UploadPath       string                    // 显式上传目录
+	RecordingsPath   string                    // 显式录像目录
+	LogsPath         string                    // 显式日志目录
+	SchedulerLogPath string                    // 显式调度器日志目录
 	ConfigYml        YmlConfigInterf           // 全局配置文件指针
 	GormDbMysql      *gorm.DB                  // mysql数据库连接
 	GormDbSqlserver  *gorm.DB                  // sqlserver数据库连接

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,7 +27,10 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/uploadhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
+	"uvplatform.cn/uvp-gb28181/internal/standalone"
 )
+
+var standalonePaths standalone.Paths
 
 func init() {
 	// 检查必要的文件夹是否存在
@@ -36,10 +40,19 @@ func init() {
 		log.Println("警告: 加载版本信息失败:", err)
 	}
 	// 配置文件
-	app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
-	app.ConfigYml.ConfigFileChangeListen(func() {
-		//配置文件发生变化
-	})
+	if standalonePaths.Explicit {
+		app.ConfigYml = ymlconfig.CreateYamlFactoryFromFile(standalonePaths.ConfigFile)
+		normalizeStandaloneConfigPaths()
+	} else {
+		app.ConfigYml = ymlconfig.CreateYamlFactory(app.BasePath + "/config")
+	}
+	if standalonePaths.Explicit {
+		app.ConfigYml.ConfigFileChangeListen(normalizeStandaloneConfigPaths)
+	} else {
+		app.ConfigYml.ConfigFileChangeListen(func() {
+			//配置文件发生变化
+		})
+	}
 	// 日志
 	app.ZapLog = createZapFactory(service.ZapLogHandler)
 	// 初始化数据库
@@ -127,6 +140,28 @@ func initDB() {
 
 // 检查必要的文件夹是否存在
 func checkRequiredFolders() {
+	paths, err := standalone.ResolveStartupPaths(os.Args[1:], os.Getenv)
+	if err != nil {
+		log.Fatal("单机路径参数无效: " + err.Error())
+	}
+	if paths.Explicit {
+		if err := paths.Validate(); err != nil {
+			log.Fatal("单机路径不可用: " + err.Error())
+		}
+		standalonePaths = paths
+		app.BasePath = paths.InstallDir
+		app.ConfigPath = paths.ConfigDir
+		app.ResourcePath = paths.ResourceDir
+		app.WebPath = paths.WebDir
+		app.DataPath = paths.DataDir
+		app.UploadPath = paths.UploadDir
+		app.RecordingsPath = paths.RecordingsDir
+		app.LogsPath = paths.LogsDir
+		app.SchedulerLogPath = paths.SchedulerLogDir
+		log.Println("单机显式路径根目录:", app.BasePath)
+		return
+	}
+
 	// 初始化程序根目录
 	if path, err := os.Getwd(); err == nil {
 		// 路径进行处理，兼容单元测试程序程序启动时的奇怪路径
@@ -135,6 +170,8 @@ func checkRequiredFolders() {
 		} else {
 			app.BasePath = path
 		}
+		app.ConfigPath = app.BasePath + "/config"
+		app.ResourcePath = app.BasePath + "/resource"
 		log.Println("当前项目根目录:", app.BasePath)
 	} else {
 		log.Fatal("获取当前目录失败")
@@ -143,6 +180,20 @@ func checkRequiredFolders() {
 	if _, err := os.Stat(app.BasePath + consts.ConfigFilePath); err != nil {
 		log.Fatal(consts.ConfigFilePath + " not exists: " + err.Error())
 	}
+}
+
+// normalizeStandaloneConfigPaths resolves the path-valued legacy YAML keys
+// before any service reads them. In legacy mode these keys intentionally keep
+// their existing relative behavior.
+func normalizeStandaloneConfigPaths() {
+	// The standalone package owns these roots. Keep uploads under data and
+	// expose only the resource public directory through the legacy static root;
+	// T17 will add the dedicated upload mapping. Do not publish DataPath or use
+	// the versioned WebPath as this old static root.
+	app.ConfigYml.Set("upload.local_path", app.UploadPath)
+	app.ConfigYml.Set("httpserver.serverroot", filepath.Join(app.ResourcePath, "public"))
+	app.ConfigYml.Set("logs.zaplogname", filepath.Join(app.LogsPath, "server.log"))
+	app.ConfigYml.Set("scheduler.log.dir", app.SchedulerLogPath)
 }
 
 // createZapFactory 创建zap日志工厂
@@ -179,6 +230,9 @@ func createZapFactory(entry func(zapcore.Entry) error) *zap.Logger {
 	}
 	// 写入器
 	fileName := app.BasePath + app.ConfigYml.GetString("logs.zaplogname")
+	if standalonePaths.Explicit {
+		fileName = app.ConfigYml.GetString("logs.zaplogname")
+	}
 	lumberJackLogger := &lumberjack.Logger{
 		Filename:   fileName,                                //日志文件的位置
 		MaxSize:    app.ConfigYml.GetInt("logs.maxsize"),    //在进行切割之前，日志文件的最大大小（以MB为单位）
@@ -317,6 +371,9 @@ func newUploadService() app.FileUploadService {
 // newScheduler 初始化任务调度器
 func newScheduler() app.JobSchedulerInterf {
 	logDir := app.BasePath + app.ConfigYml.GetString("scheduler.log.dir")
+	if standalonePaths.Explicit {
+		logDir = app.ConfigYml.GetString("scheduler.log.dir")
+	}
 
 	// 解析日志级别
 	levelStr := app.ConfigYml.GetString("scheduler.log.level")
