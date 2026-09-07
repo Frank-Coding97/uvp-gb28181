@@ -35,8 +35,8 @@ func TestDeviceRTPCleanupWorkCallsNeedNewConfirmedDispatch(t *testing.T) {
 	require.ErrorIs(t, err, ErrDeviceIntentConflict)
 	require.NoError(t, work.Prepare(ctx))
 	duplicate, err := barrier.ReserveRTPCleanup(ctx, NewDeviceOperationIntentStore(f.db), id, identity.StepID)
-	require.NoError(t, err)
-	require.Same(t, work, duplicate)
+	require.ErrorIs(t, err, ErrDeviceIntentConflict)
+	require.Nil(t, duplicate, "a second factory cannot acquire this owner's execution or shutdown authority")
 	calls := 0
 	for _, result := range []string{"rtp_ingress_drained", "close_pending"} {
 		got, err := work.CloseIngress(ctx, func(_ context.Context, target DeviceRTPResourceIdentity) (string, error) {
@@ -324,8 +324,8 @@ func TestDeviceRTPCleanupWorkRegistryBoundDoesNotEvictOnCancellation(t *testing.
 	}
 	cancel()
 	duplicate, err := b.ReserveRTPCleanup(context.Background(), store, owners[0].work.id, rtpStepIdentity(1).StepID)
-	require.NoError(t, err)
-	require.Same(t, owners[0], duplicate, "existing work is retained, not replaced by a fresh context")
+	require.ErrorIs(t, err, ErrDeviceIntentConflict)
+	require.Nil(t, duplicate, "existing work is retained without handing its authority to a second caller")
 	id.OperationID = fmt.Sprintf("%032x", 65)
 	_, err = b.ReserveRTPCleanup(context.Background(), store, id, rtpStepIdentity(1).StepID)
 	require.ErrorIs(t, err, ErrDeviceIntentUnavailable)
@@ -365,10 +365,14 @@ func TestDeviceRTPCleanupWorkConcurrentReservationAndPrepareAreSingleOwner(t *te
 	wg.Wait()
 	close(results)
 	close(errs)
-	w := <-results
-	for other := range results {
-		require.Same(t, w, other)
+	var w *RTPRecoveryWork
+	for owner := range results {
+		if owner != nil {
+			require.Nil(t, w)
+			w = owner
+		}
 	}
+	require.NotNil(t, w)
 	passed := 0
 	for e := range errs {
 		if e == nil {

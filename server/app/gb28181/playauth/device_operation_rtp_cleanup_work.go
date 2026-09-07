@@ -29,11 +29,21 @@ type rtpRecoveryWork struct {
 	before, durable, recovery     *DeviceRTPRecovery
 	beforeCall                    *DeviceRTPRecovery
 	lease                         DeviceOperationLease
+	cancel                        context.CancelFunc
+	runGate                       chan struct{}
+	runtime                       RTPCleanupRuntime
+	resolveAttempted              bool
+	resolveErr                    error
+	runtimeReleased               bool
+	resourceAttempted             bool
+	ingressAttempted              bool
 }
 
 // ReserveRTPCleanup publishes a bounded, process-local strong owner, without
-// touching persistent state or granting HTTP permission. Repeated callers join
-// the same object. The application must use its one shared barrier.
+// touching persistent state or granting HTTP permission. A repeated caller gets
+// no handle to another owner's Run/Quiesce authority. The original creator must
+// retain its handle for retries. Use the worker lifetime context, not a page's
+// timeout, and the application's one shared barrier.
 func (b *DeviceOperationBarrier) ReserveRTPCleanup(ctx context.Context, store *DeviceOperationIntentStore, id DeviceOperationIntentIdentity, stepID string) (*RTPRecoveryWork, error) {
 	if b == nil || b.store == nil || b.store.db == nil || !store.available(ctx) {
 		return nil, ErrDeviceIntentUnavailable
@@ -61,10 +71,7 @@ func (b *DeviceOperationBarrier) ReserveRTPCleanup(ctx context.Context, store *D
 	b.rtpCleanupMu.Lock()
 	defer b.rtpCleanupMu.Unlock()
 	if old := b.rtpCleanupOwners[key]; old != nil {
-		if old.work.id != id {
-			return nil, ErrDeviceIntentConflict
-		}
-		return old, nil
+		return nil, ErrDeviceIntentConflict
 	}
 	if len(b.rtpCleanupOwners) >= 64 {
 		return nil, ErrDeviceIntentUnavailable
@@ -72,7 +79,8 @@ func (b *DeviceOperationBarrier) ReserveRTPCleanup(ctx context.Context, store *D
 	if b.rtpCleanupOwners == nil {
 		b.rtpCleanupOwners = make(map[string]*RTPRecoveryWork)
 	}
-	h := &RTPRecoveryWork{work: &rtpRecoveryWork{barrier: b, store: store, id: id, stepID: stepID, key: key, processID: processID, runID: runID, ctx: ctx, gate: make(chan struct{}, 1)}}
+	ownerCtx, cancel := context.WithCancel(ctx)
+	h := &RTPRecoveryWork{work: &rtpRecoveryWork{barrier: b, store: store, id: id, stepID: stepID, key: key, processID: processID, runID: runID, ctx: ownerCtx, cancel: cancel, gate: make(chan struct{}, 1), runGate: make(chan struct{}, 1)}}
 	b.rtpCleanupOwners[key] = h
 	return h, nil
 }
@@ -412,11 +420,24 @@ func (h *RTPRecoveryWork) Quiesce(ctx context.Context) error {
 		return ErrDeviceIntentUnavailable
 	}
 	h.work.sealed.Store(true)
+	h.work.cancel()
+	// Resolve and the entire typed run are part of this owner's actual join
+	// domain. Cancellation alone cannot release a late-returned runtime.
+	select {
+	case h.work.runGate <- struct{}{}:
+		defer func() { <-h.work.runGate }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	w, err := h.enter(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { <-w.gate }()
+	if !isNilInterface(w.runtime) && !w.runtimeReleased {
+		w.runtime.Release()
+		w.runtimeReleased = true
+	}
 	if w.recovery != nil && w.recovery.LocalQuiescedAt == nil {
 		now := time.Now().UTC().Truncate(time.Microsecond)
 		w.recovery.LocalQuiescedAt = &now
