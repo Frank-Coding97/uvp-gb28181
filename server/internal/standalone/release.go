@@ -93,11 +93,8 @@ func LoadRelease(installDir string) (Release, error) {
 	if err != nil {
 		return Release{}, fmt.Errorf("read release manifest: %w", err)
 	}
-	if _, err := decodeStrictJSONObject(manifestRaw); err != nil {
-		return Release{}, fmt.Errorf("release manifest: %w", err)
-	}
-	var manifest releaseManifest
-	if err := decodeReleaseJSON(manifestRaw, &manifest); err != nil {
+	manifest, err := decodeReleaseManifest(manifestRaw)
+	if err != nil {
 		return Release{}, fmt.Errorf("release manifest: %w", err)
 	}
 	if err := validateReleaseManifest(manifest, version); err != nil {
@@ -188,7 +185,7 @@ func validateReleaseManifest(manifest releaseManifest, version string) error {
 	if strings.TrimSpace(manifest.SourceCommit) == "" {
 		return fmt.Errorf("release manifest source commit: %w", errInvalidRelease)
 	}
-	if manifest.SchemaMin < releaseSchemaMinSupported || manifest.SchemaMax > releaseSchemaMaxSupported || manifest.SchemaMin > manifest.SchemaMax {
+	if manifest.SchemaMin < releaseSchemaMinSupported || manifest.SchemaMax < releaseSchemaMaxSupported || manifest.SchemaMax > releaseSchemaMaxSupported || manifest.SchemaMin > manifest.SchemaMax {
 		return fmt.Errorf("release manifest schema range: %w", errInvalidRelease)
 	}
 	if len(manifest.Files) == 0 {
@@ -199,6 +196,9 @@ func validateReleaseManifest(manifest releaseManifest, version string) error {
 
 func validReleaseVersion(version string) bool {
 	if version == "" || version == "." || version == ".." {
+		return false
+	}
+	if !validWindowsPathComponent(version) {
 		return false
 	}
 	for index, r := range version {
@@ -227,7 +227,7 @@ func validateReleaseManifestPath(value string) (string, error) {
 		return "", errInvalidRelease
 	}
 	for _, part := range strings.Split(value, "/") {
-		if part == "" || part == "." || part == ".." {
+		if part == "" || part == "." || part == ".." || !validWindowsPathComponent(part) {
 			return "", errInvalidRelease
 		}
 	}
@@ -236,6 +236,24 @@ func validateReleaseManifestPath(value string) (string, error) {
 
 func isWindowsDrivePath(value string) bool {
 	return len(value) >= 2 && isASCIIAlphaNumeric(rune(value[0])) && value[1] == ':'
+}
+
+func validWindowsPathComponent(value string) bool {
+	return value != "" && strings.TrimRight(value, " .") == value && !strings.ContainsRune(value, ':') && !isWindowsReservedDeviceName(value)
+}
+
+func isWindowsReservedDeviceName(value string) bool {
+	value = strings.TrimRight(value, " .")
+	if dot := strings.IndexByte(value, '.'); dot >= 0 {
+		value = value[:dot]
+	}
+	value = strings.ToUpper(value)
+	switch value {
+	case "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9", "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³":
+		return true
+	default:
+		return false
+	}
 }
 
 func releasePath(root, manifestPath string) (string, error) {
@@ -262,6 +280,52 @@ func decodeReleaseJSON(raw []byte, destination any) error {
 	return nil
 }
 
+func decodeReleaseManifest(raw []byte) (releaseManifest, error) {
+	fields, err := decodeStrictJSONObject(raw)
+	if err != nil {
+		return releaseManifest{}, err
+	}
+	if err := requireExactJSONKeys(fields, "format_version", "version", "source_commit", "files", "schema_min", "schema_max"); err != nil {
+		return releaseManifest{}, err
+	}
+	var manifest releaseManifest
+	if err := decodeReleaseJSON(raw, &manifest); err != nil {
+		return releaseManifest{}, err
+	}
+
+	var rawFiles []json.RawMessage
+	if err := decodeReleaseJSON(fields["files"], &rawFiles); err != nil {
+		return releaseManifest{}, err
+	}
+	manifest.Files = make([]releaseManifestFile, len(rawFiles))
+	for index, rawFile := range rawFiles {
+		fileFields, err := decodeStrictJSONObject(rawFile)
+		if err != nil {
+			return releaseManifest{}, err
+		}
+		if err := requireExactJSONKeys(fileFields, "path", "sha256"); err != nil {
+			return releaseManifest{}, err
+		}
+		if err := decodeReleaseJSON(rawFile, &manifest.Files[index]); err != nil {
+			return releaseManifest{}, err
+		}
+	}
+	return manifest, nil
+}
+
+func requireExactJSONKeys(fields map[string]json.RawMessage, allowed ...string) error {
+	allowedKeys := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		allowedKeys[key] = struct{}{}
+	}
+	for key := range fields {
+		if _, ok := allowedKeys[key]; !ok {
+			return errInvalidRelease
+		}
+	}
+	return nil
+}
+
 func decodeStrictJSONObject(raw []byte) (map[string]json.RawMessage, error) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	start, err := decoder.Token()
@@ -272,6 +336,7 @@ func decodeStrictJSONObject(raw []byte) (map[string]json.RawMessage, error) {
 		return nil, errInvalidRelease
 	}
 	fields := make(map[string]json.RawMessage)
+	caseFoldedFields := make(map[string]struct{})
 	for decoder.More() {
 		keyToken, err := decoder.Token()
 		if err != nil {
@@ -284,6 +349,11 @@ func decodeStrictJSONObject(raw []byte) (map[string]json.RawMessage, error) {
 		if _, exists := fields[key]; exists {
 			return nil, errInvalidRelease
 		}
+		caseFolded := strings.ToLower(key)
+		if _, exists := caseFoldedFields[caseFolded]; exists {
+			return nil, errInvalidRelease
+		}
+		caseFoldedFields[caseFolded] = struct{}{}
 		var value json.RawMessage
 		if err := decoder.Decode(&value); err != nil {
 			return nil, err

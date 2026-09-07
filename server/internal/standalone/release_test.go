@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,6 +49,17 @@ func TestLoadReleaseAcceptsVerifiedManifest(t *testing.T) {
 	require.Equal(t, filepath.Join(fixture.releaseDir, "resource"), release.ResourceDir)
 }
 
+func TestLoadReleaseAcceptsSchemaV2Only(t *testing.T) {
+	fixture := newTestReleaseFixture(t, "1.2.3-win10")
+	fixture.manifest.SchemaMin = 2
+	fixture.manifest.SchemaMax = 2
+	writeTestReleaseManifest(t, fixture)
+
+	_, err := LoadRelease(fixture.installDir)
+
+	require.NoError(t, err)
+}
+
 func TestLoadReleaseRejectsInvalidCurrentJSON(t *testing.T) {
 	tests := []struct {
 		name string
@@ -61,6 +73,11 @@ func TestLoadReleaseRejectsInvalidCurrentJSON(t *testing.T) {
 		{name: "array", raw: `[]`},
 		{name: "dot", raw: `{"version":"."}`},
 		{name: "dot dot", raw: `{"version":".."}`},
+		{name: "trailing dot", raw: `{"version":"1.2.3."}`},
+		{name: "trailing space", raw: `{"version":"1.2.3 "}`},
+		{name: "reserved device", raw: `{"version":"CON"}`},
+		{name: "reserved device with extension", raw: `{"version":"CON.txt"}`},
+		{name: "reserved numbered device", raw: `{"version":"COM1"}`},
 		{name: "relative escape", raw: `{"version":"../outside"}`},
 		{name: "slash", raw: `{"version":"1/2"}`},
 		{name: "backslash", raw: `{"version":"1\\2"}`},
@@ -114,6 +131,12 @@ func TestLoadReleaseRejectsInvalidManifest(t *testing.T) {
 			},
 		},
 		{
+			name: "schema maximum below supported",
+			mutate: func(fixture *testReleaseFixture) {
+				fixture.manifest.SchemaMax = 1
+			},
+		},
+		{
 			name: "schema range reversed",
 			mutate: func(fixture *testReleaseFixture) {
 				fixture.manifest.SchemaMin = 2
@@ -162,12 +185,89 @@ func TestLoadReleaseRejectsInvalidManifest(t *testing.T) {
 				fixture.manifest.Files = append(fixture.manifest.Files, testReleaseFile{Path: "./readme.txt", SHA256: testSHA256([]byte("readme"))})
 			},
 		},
+		{
+			name: "ADS manifest path",
+			mutate: func(fixture *testReleaseFixture) {
+				fixture.manifest.Files = append(fixture.manifest.Files, testReleaseFile{Path: "resource/state:metadata", SHA256: testSHA256([]byte("state"))})
+			},
+		},
+		{
+			name: "trailing dot manifest path",
+			mutate: func(fixture *testReleaseFixture) {
+				fixture.manifest.Files = append(fixture.manifest.Files, testReleaseFile{Path: "resource/state.", SHA256: testSHA256([]byte("state"))})
+			},
+		},
+		{
+			name: "trailing space manifest path",
+			mutate: func(fixture *testReleaseFixture) {
+				fixture.manifest.Files = append(fixture.manifest.Files, testReleaseFile{Path: "resource/state ", SHA256: testSHA256([]byte("state"))})
+			},
+		},
+		{
+			name: "reserved device manifest path",
+			mutate: func(fixture *testReleaseFixture) {
+				fixture.manifest.Files = append(fixture.manifest.Files, testReleaseFile{Path: "resource/CON.txt", SHA256: testSHA256([]byte("state"))})
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fixture := newTestReleaseFixture(t, "1.2.3-win10")
 			tt.mutate(&fixture)
 			writeTestReleaseManifest(t, fixture)
+
+			_, err := LoadRelease(fixture.installDir)
+
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestLoadReleaseRejectsDuplicateManifestAndFileKeys(t *testing.T) {
+	tests := []struct {
+		name     string
+		manifest func(testReleaseFixture) string
+	}{
+		{
+			name: "manifest metadata case alias",
+			manifest: func(fixture testReleaseFixture) string {
+				return fmt.Sprintf(`{"format_version":1,"FORMAT_VERSION":1,"version":%q,"source_commit":%q,"files":%s,"schema_min":1,"schema_max":2}`,
+					fixture.manifest.Version, fixture.manifest.SourceCommit, testReleaseFilesJSON(fixture))
+			},
+		},
+		{
+			name: "file path duplicate",
+			manifest: func(fixture testReleaseFixture) string {
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","path":"backend/uvp-server.exe","sha256":%q},%s],"schema_min":1,"schema_max":2}`,
+					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
+			},
+		},
+		{
+			name: "file path case alias",
+			manifest: func(fixture testReleaseFixture) string {
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","PATH":"backend/uvp-server.exe","sha256":%q},%s],"schema_min":1,"schema_max":2}`,
+					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
+			},
+		},
+		{
+			name: "file checksum duplicate",
+			manifest: func(fixture testReleaseFixture) string {
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","sha256":%q,"sha256":%q},%s],"schema_min":1,"schema_max":2}`,
+					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
+			},
+		},
+		{
+			name: "file checksum case alias",
+			manifest: func(fixture testReleaseFixture) string {
+				return fmt.Sprintf(`{"format_version":1,"version":%q,"source_commit":%q,"files":[{"path":"backend/uvp-server.exe","sha256":%q,"SHA256":%q},%s],"schema_min":1,"schema_max":2}`,
+					fixture.manifest.Version, fixture.manifest.SourceCommit, fixture.manifest.Files[0].SHA256, fixture.manifest.Files[0].SHA256, testReleaseFilesTailJSON(fixture))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newTestReleaseFixture(t, "1.2.3-win10")
+			writeTestReleaseManifestRaw(t, fixture, tt.manifest(fixture))
 
 			_, err := LoadRelease(fixture.installDir)
 
@@ -294,7 +394,28 @@ func writeTestReleaseManifest(t *testing.T, fixture testReleaseFixture) {
 	raw, err := json.MarshalIndent(fixture.manifest, "", "  ")
 	require.NoError(t, err)
 	raw = append(raw, '\n')
-	require.NoError(t, os.WriteFile(filepath.Join(fixture.releaseDir, "manifest.json"), raw, 0o600))
+	writeTestReleaseManifestRaw(t, fixture, string(raw))
+}
+
+func writeTestReleaseManifestRaw(t *testing.T, fixture testReleaseFixture, raw string) {
+	t.Helper()
+	require.NoError(t, os.WriteFile(filepath.Join(fixture.releaseDir, "manifest.json"), []byte(raw), 0o600))
+}
+
+func testReleaseFilesJSON(fixture testReleaseFixture) string {
+	raw, err := json.Marshal(fixture.manifest.Files)
+	if err != nil {
+		panic(err)
+	}
+	return string(raw)
+}
+
+func testReleaseFilesTailJSON(fixture testReleaseFixture) string {
+	raw, err := json.Marshal(fixture.manifest.Files[1:])
+	if err != nil {
+		panic(err)
+	}
+	return string(raw[1 : len(raw)-1])
 }
 
 func testSHA256(data []byte) string {
