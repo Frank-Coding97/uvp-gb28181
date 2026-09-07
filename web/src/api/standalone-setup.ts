@@ -165,6 +165,13 @@ export function isBcryptPasswordLengthValid(password: string): boolean {
   return new TextEncoder().encode(password).byteLength <= BCRYPT_MAX_PASSWORD_BYTES;
 }
 
+export function stripBootstrapTokenQuery(query: Record<string, unknown>): Record<string, unknown> {
+  return Object.entries(query).reduce<Record<string, unknown>>((cleanQuery, [key, value]) => {
+    if (key !== BOOTSTRAP_TOKEN_QUERY) cleanQuery[key] = value;
+    return cleanQuery;
+  }, {});
+}
+
 export function standaloneSetupNavigation(
   path: string,
   query: Record<string, unknown>,
@@ -172,7 +179,7 @@ export function standaloneSetupNavigation(
 ): { path: string; query?: Record<string, unknown> } | null {
   if (probe.kind !== "standalone") return null;
   if (probe.status.phase === "pending_admin" && path !== STANDALONE_SETUP_PATH) {
-    return { path: STANDALONE_SETUP_PATH, query };
+    return { path: STANDALONE_SETUP_PATH, query: stripBootstrapTokenQuery(query) };
   }
   if (probe.status.phase !== "pending_admin" && path === STANDALONE_SETUP_PATH) {
     return { path: "/login" };

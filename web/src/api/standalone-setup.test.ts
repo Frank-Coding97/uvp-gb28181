@@ -12,6 +12,7 @@ import {
   readBootstrapTokenOnce,
   requestStandaloneSetupStatus,
   resetStandaloneSetupStateForTests,
+  stripBootstrapTokenQuery,
   standaloneSetupNavigation,
   type Fetcher
 } from "./standalone-setup";
@@ -72,7 +73,7 @@ describe("standalone setup API contract", () => {
         kind: "standalone",
         status: { phase: "pending_admin", standalone: true }
       })
-    ).toEqual({ path: "/standalone-setup", query });
+    ).toEqual({ path: "/standalone-setup", query: { target: "home" } });
     expect(
       standaloneSetupNavigation("/standalone-setup", query, {
         kind: "standalone",
@@ -90,6 +91,7 @@ describe("standalone setup API contract", () => {
       )
     ).toEqual({ path: "/login" });
     expect(standaloneSetupNavigation("/home", {}, { kind: "legacy" })).toBeNull();
+    expect(stripBootstrapTokenQuery({ bootstrap_token: "secret", target: "home" })).toEqual({ target: "home" });
   });
 
   it("reads the launcher token once, removes it from the hash, and never persists it", () => {

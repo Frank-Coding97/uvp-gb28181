@@ -10,7 +10,10 @@ import { hasRefreshToken } from "@/utils/auth";
 import { useUserStoreHook } from "@/store/modules/user";
 import { useSystemStore } from "@/store/modules/system";
 import {
+    BOOTSTRAP_TOKEN_QUERY,
     loadStandaloneSetupStatus,
+    readBootstrapTokenOnce,
+    stripBootstrapTokenQuery,
     standaloneSetupNavigation,
     STANDALONE_SETUP_PATH
 } from "@/api/standalone-setup";
@@ -46,6 +49,15 @@ const router = createRouter({
  */
 router.beforeEach(async (to: any, _: any, next: any) => {
     NProgress.start(); // 开启进度条
+    readBootstrapTokenOnce(to.query);
+    if (Object.prototype.hasOwnProperty.call(to.query, BOOTSTRAP_TOKEN_QUERY)) {
+        return next({
+            path: to.path,
+            query: stripBootstrapTokenQuery(to.query),
+            hash: to.hash,
+            replace: true
+        });
+    }
     const standaloneProbe = await loadStandaloneSetupStatus();
     const standaloneNavigation = standaloneSetupNavigation(to.path, to.query, standaloneProbe);
     if (standaloneNavigation) return next(standaloneNavigation);

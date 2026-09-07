@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { STANDALONE_SETUP_PATH } from "@/api/standalone-setup";
 import { staticRoutes } from "./route";
 
@@ -17,8 +17,49 @@ describe("standalone setup route", () => {
 
   it("probes setup status before applying the legacy refresh-token guard", () => {
     const source = readFileSync(resolve(process.cwd(), "src/router/index.ts"), "utf8");
+    expect(source).toContain("readBootstrapTokenOnce(to.query);");
+    expect(source.indexOf("readBootstrapTokenOnce(to.query);")).toBeLessThan(
+      source.indexOf("const standaloneProbe = await loadStandaloneSetupStatus();")
+    );
     expect(source).toContain("const standaloneProbe = await loadStandaloneSetupStatus();");
     expect(source.indexOf("standaloneProbe")).toBeLessThan(source.indexOf("const tokenExist = hasRefreshToken();"));
     expect(source).toContain("if (standaloneNavigation) return next(standaloneNavigation);");
+  });
+
+  it("scrubs the token before an unresolved status probe in the real router flow", async () => {
+    vi.resetModules();
+    const actualApi = await vi.importActual<typeof import("@/api/standalone-setup")>("@/api/standalone-setup");
+    actualApi.resetStandaloneSetupStateForTests();
+
+    type StandaloneSetupProbe = import("@/api/standalone-setup").StandaloneSetupProbe;
+    let resolveStatus!: (probe: StandaloneSetupProbe) => void;
+    const statusProbe = new Promise<StandaloneSetupProbe>(resolve => {
+      resolveStatus = resolve;
+    });
+    vi.doMock("@/api/standalone-setup", () => ({
+      ...actualApi,
+      loadStandaloneSetupStatus: vi.fn(() => statusProbe)
+    }));
+    vi.doMock("vue-router", async () => {
+      const actualRouter = await vi.importActual<typeof import("vue-router")>("vue-router");
+      return { ...actualRouter, createWebHashHistory: actualRouter.createMemoryHistory };
+    });
+
+    window.history.replaceState({}, "", "/#/home?bootstrap_token=secret-token");
+    const { default: router } = await import("./index");
+    const navigation = router.push({ path: "/home", query: { bootstrap_token: "secret-token" } });
+    let navigationSettled = false;
+    void navigation.then(() => {
+      navigationSettled = true;
+    });
+    await vi.waitFor(() => {
+      expect(window.location.href).not.toContain("bootstrap_token");
+    });
+    expect(navigationSettled).toBe(false);
+
+    resolveStatus({ kind: "standalone", status: { phase: "pending_admin", standalone: true } });
+    await navigation;
+    expect(router.currentRoute.value.path).toBe(STANDALONE_SETUP_PATH);
+    expect(router.currentRoute.value.fullPath).not.toContain("bootstrap_token");
   });
 });
