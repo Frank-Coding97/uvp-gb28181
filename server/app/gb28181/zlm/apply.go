@@ -8,6 +8,7 @@ import (
 
 	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/node"
 )
 
 const AutoOnDemandStreamWaitMS = 30000
@@ -20,27 +21,9 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 	if c.node == nil {
 		return fmt.Errorf("ZLM 节点未绑定")
 	}
-	base, err := media.EffectiveHookBaseURL()
+	params, err := ExpectedConfigForNode(c.node, media)
 	if err != nil {
-		return fmt.Errorf("ZLM Hook 回调基址不可用: %w", err)
-	}
-	params := map[string]string{
-		"hook.enable": "1",
-		// 心跳周期(秒)
-		"hook.alive_interval":     "30.0",
-		"protocol.mp4_max_second": "3600",
-		// 运行时策略
-		"general.streamNoneReaderDelayMS": strconv.Itoa(media.StreamNoneReaderTimeout * 1000),
-		"general.maxStreamWaitMS":         strconv.Itoa(AutoOnDemandStreamWaitMS),
-		"general.flowThreshold":           "0",
-	}
-	params["general.mediaServerId"] = c.node.MediaServerUUID
-	for _, event := range playauth.ManagedHookEvents() {
-		hookURL, buildErr := buildManagedHookURL(base, c.node.APISecret, c.node.MediaServerUUID, event)
-		if buildErr != nil {
-			return buildErr
-		}
-		params["hook."+string(event)] = hookURL
+		return err
 	}
 	if err := c.SetServerConfig(ctx, params); err != nil {
 		return err
@@ -59,6 +42,40 @@ func (c *Client) ApplyConfigForNode(ctx context.Context, media gbconfig.MediaCon
 		}
 	}
 	return nil
+}
+
+// ExpectedConfigForNode builds the runtime values that ApplyConfigForNode
+// writes to ZLM. Callers that only need to validate external state can reuse
+// the exact Hook capability calculation without issuing a SetServerConfig.
+// The returned map is new on every call and may be freely modified by the
+// caller.
+func ExpectedConfigForNode(n *node.Node, media gbconfig.MediaConfig) (map[string]string, error) {
+	if n == nil {
+		return nil, fmt.Errorf("ZLM 节点未绑定")
+	}
+	base, err := media.EffectiveHookBaseURL()
+	if err != nil {
+		return nil, fmt.Errorf("ZLM Hook 回调基址不可用: %w", err)
+	}
+	params := map[string]string{
+		"hook.enable": "1",
+		// 心跳周期(秒)
+		"hook.alive_interval":     "30.0",
+		"protocol.mp4_max_second": "3600",
+		// 运行时策略
+		"general.streamNoneReaderDelayMS": strconv.Itoa(media.StreamNoneReaderTimeout * 1000),
+		"general.maxStreamWaitMS":         strconv.Itoa(AutoOnDemandStreamWaitMS),
+		"general.flowThreshold":           "0",
+		"general.mediaServerId":           n.MediaServerUUID,
+	}
+	for _, event := range playauth.ManagedHookEvents() {
+		hookURL, buildErr := buildManagedHookURL(base, n.APISecret, n.MediaServerUUID, event)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		params["hook."+string(event)] = hookURL
+	}
+	return params, nil
 }
 
 func buildManagedHookURL(base *url.URL, apiSecret, mediaServerID string, event playauth.HookEvent) (string, error) {
