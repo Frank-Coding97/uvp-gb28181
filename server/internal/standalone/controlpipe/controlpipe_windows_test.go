@@ -7,18 +7,31 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/Microsoft/go-winio"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sys/windows"
 )
 
 var pipeTestSequence uint64
+
+var controlPipeAdvapi = windows.NewLazySystemDLL("advapi32.dll")
+
+var (
+	controlPipeImpersonateLoggedOnUser = controlPipeAdvapi.NewProc("ImpersonateLoggedOnUser")
+	controlPipeLogonUser               = controlPipeAdvapi.NewProc("LogonUserW")
+)
 
 func TestAuthenticatedPipeRoundTrip(t *testing.T) {
 	const secret = "round-trip-secret"
@@ -31,25 +44,52 @@ func TestAuthenticatedPipeRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	defer client.Close()
 
-	accepted := <-acceptResult
+	var accepted acceptPipeResult
+	select {
+	case accepted = <-acceptResult:
+	case <-time.After(6 * time.Second):
+		t.Fatal("server did not finish the handshake before the deadline")
+	}
 	require.NoError(t, accepted.err)
 	require.NotNil(t, accepted.conn)
 	defer accepted.conn.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	require.NoError(t, client.SetDeadline(deadline))
+	require.NoError(t, accepted.conn.SetDeadline(deadline))
 
 	message := []byte("authenticated control data")
+	serverRead := make(chan readPipeResult, 1)
+	go func() {
+		got := make([]byte, len(message))
+		_, err := io.ReadFull(accepted.conn, got)
+		serverRead <- readPipeResult{data: got, err: err}
+	}()
 	_, err = client.Write(message)
 	require.NoError(t, err)
-	got := make([]byte, len(message))
-	_, err = io.ReadFull(accepted.conn, got)
-	require.NoError(t, err)
-	require.Equal(t, message, got)
+	var readResult readPipeResult
+	select {
+	case readResult = <-serverRead:
+	case <-time.After(6 * time.Second):
+		t.Fatal("server read did not finish before the deadline")
+	}
+	require.NoError(t, readResult.err)
+	require.Equal(t, message, readResult.data)
 
+	clientRead := make(chan readPipeResult, 1)
+	go func() {
+		got := make([]byte, len(message))
+		_, err := io.ReadFull(client, got)
+		clientRead <- readPipeResult{data: got, err: err}
+	}()
 	_, err = accepted.conn.Write(message)
 	require.NoError(t, err)
-	got = make([]byte, len(message))
-	_, err = io.ReadFull(client, got)
-	require.NoError(t, err)
-	require.Equal(t, message, got)
+	select {
+	case readResult = <-clientRead:
+	case <-time.After(6 * time.Second):
+		t.Fatal("client read did not finish before the deadline")
+	}
+	require.NoError(t, readResult.err)
+	require.Equal(t, message, readResult.data)
 }
 
 func TestWrongSecretIsRejectedOnBothSides(t *testing.T) {
@@ -64,10 +104,14 @@ func TestWrongSecretIsRejectedOnBothSides(t *testing.T) {
 	require.ErrorIs(t, err, ErrAuthentication)
 	require.NotContains(t, err.Error(), secret)
 
-	accepted := <-acceptResult
-	require.Nil(t, accepted.conn)
-	require.ErrorIs(t, accepted.err, ErrAuthentication)
-	require.NotContains(t, accepted.err.Error(), secret)
+	select {
+	case accepted := <-acceptResult:
+		require.Nil(t, accepted.conn)
+		require.ErrorIs(t, accepted.err, ErrAuthentication)
+		require.NotContains(t, accepted.err.Error(), secret)
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not reject the wrong secret before the deadline")
+	}
 }
 
 func TestDialRejectsFakeServerProof(t *testing.T) {
@@ -115,7 +159,12 @@ func TestDialRejectsFakeServerProof(t *testing.T) {
 	require.Nil(t, conn)
 	require.ErrorIs(t, err, ErrAuthentication)
 	require.NotContains(t, err.Error(), secret)
-	require.NoError(t, <-serverResult)
+	select {
+	case serverErr := <-serverResult:
+		require.NoError(t, serverErr)
+	case <-time.After(2 * time.Second):
+		t.Fatal("fake server did not finish before the deadline")
+	}
 }
 
 func TestServerRejectsMalformedAndOversizeFrames(t *testing.T) {
@@ -147,14 +196,22 @@ func TestServerRejectsMalformedAndOversizeFrames(t *testing.T) {
 			acceptResult := acceptPipe(listener)
 			path, err := pipePath(name)
 			require.NoError(t, err)
-			raw, err := winio.DialPipeContext(context.Background(), path)
+			dialCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			raw, err := winio.DialPipeContext(dialCtx, path)
+			cancel()
 			require.NoError(t, err)
+			require.NoError(t, raw.SetWriteDeadline(time.Now().Add(2*time.Second)))
 
 			require.NoError(t, tt.writeFrame(raw))
-			accepted := <-acceptResult
-			_ = raw.Close()
-			require.Nil(t, accepted.conn)
-			require.ErrorIs(t, accepted.err, tt.want)
+			select {
+			case accepted := <-acceptResult:
+				_ = raw.Close()
+				require.Nil(t, accepted.conn)
+				require.ErrorIs(t, accepted.err, tt.want)
+			case <-time.After(2 * time.Second):
+				_ = raw.Close()
+				t.Fatal("server did not reject the frame before the deadline")
+			}
 		})
 	}
 }
@@ -183,12 +240,42 @@ func TestListenerCloseInterruptsAccept(t *testing.T) {
 	}
 }
 
+func TestListenerCloseInterruptsHandshake(t *testing.T) {
+	listener, name := requirePipeListenerNamed(t, "close-handshake-secret")
+	acceptResult := acceptPipe(listener)
+	path, err := pipePath(name)
+	require.NoError(t, err)
+	dialCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	raw, err := winio.DialPipeContext(dialCtx, path)
+	cancel()
+	require.NoError(t, err)
+	defer raw.Close()
+	require.NoError(t, raw.SetWriteDeadline(time.Now().Add(2*time.Second)))
+
+	header := make([]byte, frameHeaderSize)
+	binary.BigEndian.PutUint32(header, 1+controlNonceSize)
+	require.NoError(t, writeAll(raw, append(header, frameHello)))
+	authenticated := listener.(*authenticatedListener)
+	waitForActiveHandshake(t, authenticated)
+
+	require.NoError(t, listener.Close())
+	select {
+	case accepted := <-acceptResult:
+		require.Nil(t, accepted.conn)
+		require.ErrorIs(t, accepted.err, net.ErrClosed)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Accept did not return after listener Close during handshake")
+	}
+}
+
 func TestServerHandshakeDeadlineIsBounded(t *testing.T) {
 	listener, name := requirePipeListenerNamed(t, "deadline-secret")
 	acceptResult := acceptPipe(listener)
 	path, err := pipePath(name)
 	require.NoError(t, err)
-	raw, err := winio.DialPipeContext(context.Background(), path)
+	dialCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	raw, err := winio.DialPipeContext(dialCtx, path)
+	cancel()
 	require.NoError(t, err)
 	start := time.Now()
 
@@ -239,13 +326,194 @@ func TestDialContextCancelsHandshake(t *testing.T) {
 }
 
 func TestPipeListenerUsesEffectiveUserAndSystemSDDL(t *testing.T) {
-	sid, err := effectiveUserSIDString()
-	require.NoError(t, err)
+	// The effective token is thread-local. Keep identity lookup and Listen on
+	// the same OS thread so this test also covers an impersonated caller.
+	runtime.LockOSThread()
+	sid, sidErr := effectiveUserSIDString()
+	name := pipeTestName()
+	listener, listenErr := Listen(name, "sddl-secret")
+	runtime.UnlockOSThread()
+	require.NoError(t, sidErr)
 	require.NotEmpty(t, sid)
-
-	listener, _ := requirePipeListenerNamed(t, "sddl-secret")
+	require.NoError(t, listenErr)
 	defer listener.Close()
-	require.Equal(t, "D:P(A;;GA;;;"+sid+")(A;;GA;;;SY)", protectedPipeSDDL(sid))
+
+	path, err := pipePath(name)
+	require.NoError(t, err)
+	assertPipeSecurityDescriptor(t, path, sid)
+}
+
+func TestPipeRejectsDifferentWindowsUser(t *testing.T) {
+	credentialPath := os.Getenv("UVP_CONTROLPIPE_OTHER_USER_CREDENTIAL_FILE")
+	if credentialPath == "" {
+		t.Skip("set UVP_CONTROLPIPE_OTHER_USER_CREDENTIAL_FILE to opt in with a pre-provisioned ordinary account; this test creates no accounts")
+	}
+	credentials := readControlPipeTestCredentials(t, credentialPath)
+
+	runtime.LockOSThread()
+	ownerSID, ownerErr := effectiveUserSIDString()
+	name := pipeTestName()
+	listener, listenErr := Listen(name, "different-user-secret")
+	runtime.UnlockOSThread()
+	require.NoError(t, ownerErr)
+	require.NoError(t, listenErr)
+	defer listener.Close()
+
+	token, err := logonControlPipeTestUser(credentials)
+	require.NoError(t, err)
+	defer token.Close()
+	user, err := token.GetTokenUser()
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	require.NotNil(t, user.User.Sid)
+	require.NotEqual(t, ownerSID, user.User.Sid.String())
+	administrators, err := windows.CreateWellKnownSid(windows.WinBuiltinAdministratorsSid)
+	require.NoError(t, err)
+	isAdministrator, err := token.IsMember(administrators)
+	require.NoError(t, err)
+	require.False(t, isAdministrator, "the opt-in account must be an ordinary user")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = withImpersonatedControlPipeTestToken(token, func() error {
+		conn, dialErr := Dial(ctx, name, "different-user-secret")
+		if conn != nil {
+			_ = conn.Close()
+		}
+		return dialErr
+	})
+	require.Error(t, err)
+	require.ErrorIs(t, err, windows.ERROR_ACCESS_DENIED)
+}
+
+type readPipeResult struct {
+	data []byte
+	err  error
+}
+
+type controlPipeTestCredentials struct {
+	Domain   string `json:"domain"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+}
+
+func readControlPipeTestCredentials(t *testing.T, path string) controlPipeTestCredentials {
+	t.Helper()
+	file, err := os.Open(path)
+	require.NoError(t, err)
+	defer file.Close()
+	var credentials controlPipeTestCredentials
+	decoder := json.NewDecoder(io.LimitReader(file, 16*1024))
+	decoder.DisallowUnknownFields()
+	require.NoError(t, decoder.Decode(&credentials))
+	require.NotEmpty(t, credentials.User)
+	require.NotEmpty(t, credentials.Password)
+	if credentials.Domain == "" {
+		credentials.Domain = "."
+	}
+	return credentials
+}
+
+func logonControlPipeTestUser(credentials controlPipeTestCredentials) (windows.Token, error) {
+	user, err := windows.UTF16PtrFromString(credentials.User)
+	if err != nil {
+		return 0, errors.New("invalid test account name")
+	}
+	domain, err := windows.UTF16PtrFromString(credentials.Domain)
+	if err != nil {
+		return 0, errors.New("invalid test account domain")
+	}
+	password, err := windows.UTF16PtrFromString(credentials.Password)
+	if err != nil {
+		return 0, errors.New("invalid test account password")
+	}
+	var token windows.Token
+	ok, _, callErr := controlPipeLogonUser.Call(
+		uintptr(unsafe.Pointer(user)),
+		uintptr(unsafe.Pointer(domain)),
+		uintptr(unsafe.Pointer(password)),
+		2,
+		0,
+		uintptr(unsafe.Pointer(&token)),
+	)
+	if ok == 0 {
+		if callErr == nil {
+			callErr = windows.ERROR_GEN_FAILURE
+		}
+		return 0, callErr
+	}
+	return token, nil
+}
+
+func withImpersonatedControlPipeTestToken(token windows.Token, fn func() error) (err error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	ok, _, callErr := controlPipeImpersonateLoggedOnUser.Call(uintptr(token))
+	if ok == 0 {
+		if callErr == nil {
+			callErr = windows.ERROR_GEN_FAILURE
+		}
+		return errors.New("impersonate test account: " + callErr.Error())
+	}
+	defer func() {
+		if revertErr := windows.RevertToSelf(); revertErr != nil && err == nil {
+			err = errors.New("revert test account: " + revertErr.Error())
+		}
+	}()
+	return fn()
+}
+
+func waitForActiveHandshake(t *testing.T, listener *authenticatedListener) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		listener.mu.Lock()
+		active := len(listener.active)
+		listener.mu.Unlock()
+		if active > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("server did not track the connected pipe before the deadline")
+}
+
+func assertPipeSecurityDescriptor(t *testing.T, path, userSID string) {
+	t.Helper()
+	descriptor, err := windows.GetNamedSecurityInfo(
+		path,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, descriptor)
+	control, _, err := descriptor.Control()
+	require.NoError(t, err)
+	require.NotZero(t, control&windows.SE_DACL_PRESENT)
+	require.NotZero(t, control&windows.SE_DACL_PROTECTED)
+
+	dacl, _, err := descriptor.DACL()
+	require.NoError(t, err)
+	require.NotNil(t, dacl)
+	require.Equal(t, uint16(2), dacl.AceCount)
+	expected := map[string]int{"S-1-5-18": 1}
+	expected[userSID]++
+	actual := make(map[string]int, len(expected))
+	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		require.NoError(t, windows.GetAce(dacl, index, &ace))
+		require.NotNil(t, ace)
+		require.Equal(t, uint8(windows.ACCESS_ALLOWED_ACE_TYPE), ace.Header.AceType)
+		require.Zero(t, ace.Header.AceFlags)
+		require.NotZero(t, ace.Mask)
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		require.True(t, sid.IsValid())
+		key := sid.String()
+		_, ok := expected[key]
+		require.True(t, ok, "unexpected pipe DACL principal %s", key)
+		actual[key]++
+	}
+	require.Equal(t, expected, actual)
 }
 
 type acceptPipeResult struct {
