@@ -2,6 +2,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -50,6 +51,95 @@ func TestStandaloneReadinessRequiresLocalProofAndSignsActualState(t *testing.T) 
 				require.Contains(t, out.Body.String(), `"sip_state":"unconfigured"`)
 			}
 			require.NotContains(t, out.Body.String(), secret)
+		})
+	}
+}
+
+func TestStandaloneReadinessSignsInstallationStateAndFailsClosed(t *testing.T) {
+	const secret = "standalone-readiness-secret"
+	challenge, err := readiness.NewChallenge()
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name, phase           string
+		credentialAccepted    bool
+		installationReady     bool
+		wantStatus            int
+		wantBackend, wantAuth bool
+	}{
+		{
+			name:               "pending admin remains ready",
+			phase:              "pending_admin",
+			credentialAccepted: true,
+			installationReady:  true,
+			wantStatus:         http.StatusOK,
+			wantBackend:        true,
+			wantAuth:           true,
+		},
+		{
+			name:               "pending sip remains ready",
+			phase:              "pending_sip",
+			credentialAccepted: true,
+			installationReady:  true,
+			wantStatus:         http.StatusOK,
+			wantBackend:        true,
+			wantAuth:           true,
+		},
+		{
+			name:               "reload failure fails closed",
+			phase:              "pending_sip",
+			credentialAccepted: true,
+			installationReady:  false,
+			wantStatus:         http.StatusServiceUnavailable,
+			wantBackend:        false,
+			wantAuth:           false,
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			engine := gin.New()
+			engine.Use(func(c *gin.Context) {
+				c.Set("standalone.installation_phase", tc.phase)
+				c.Set("standalone.credential_accepted", tc.credentialAccepted)
+				c.Set("standalone.installation_ready", tc.installationReady)
+				c.Next()
+			})
+			registerStandaloneReadiness(engine, secret, func(context.Context) readiness.Status {
+				return readiness.Status{
+					BackendReady:       true,
+					DatabaseReady:      true,
+					RedisReady:         true,
+					AuthorizationReady: true,
+					SIPState:           "unconfigured",
+					PID:                42,
+				}
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/api/standalone/ready", nil)
+			req.RemoteAddr = "127.0.0.1:5000"
+			req.Header.Set(readiness.ChallengeHeader, challenge)
+			req.Header.Set(readiness.ProofHeader, readiness.RequestProof(secret, challenge))
+			out := httptest.NewRecorder()
+			engine.ServeHTTP(out, req)
+
+			require.Equal(t, tc.wantStatus, out.Code)
+			body := append([]byte(nil), out.Body.Bytes()...)
+			var state readiness.Status
+			require.NoError(t, json.Unmarshal(body, &state))
+			require.Equal(t, tc.phase, state.InstallationPhase)
+			require.Equal(t, tc.credentialAccepted, state.CredentialAccepted)
+			require.Equal(t, tc.wantBackend, state.BackendReady)
+			require.Equal(t, tc.wantAuth, state.AuthorizationReady)
+			require.True(t, state.DatabaseReady)
+			require.True(t, state.RedisReady)
+
+			signature := out.Header().Get(readiness.ProofHeader)
+			require.True(t, readiness.VerifyResponse(secret, challenge, body, signature))
+			state.InstallationPhase = "tampered"
+			tampered, err := json.Marshal(state)
+			require.NoError(t, err)
+			require.False(t, readiness.VerifyResponse(secret, challenge, tampered, signature))
+			require.NotContains(t, string(body), secret)
 		})
 	}
 }
