@@ -41,8 +41,12 @@ func prepareStandaloneSetup(engine *gin.Engine) (*standaloneSetup, error) {
 	if err != nil {
 		return nil, err
 	}
+	origin, err := standaloneSetupOrigin(app.ConfigYml.GetString("httpserver.port"))
+	if err != nil {
+		return nil, err
+	}
 	s := &standaloneSetup{store: store}
-	s.handler, err = installationhttp.New("http://"+app.ConfigYml.GetString("httpserver.port"), string(state.Phase), verifier,
+	s.handler, err = installationhttp.New(origin, string(state.Phase), verifier,
 		func(ctx context.Context, username, password string) error {
 			if !validStandaloneAdmin(username, password, app.ConfigYml.GetInt("safe.minpasswordlength"), app.ConfigYml.GetBool("safe.requirespecialchar")) {
 				return installationhttp.ErrInvalidInput

@@ -23,3 +23,21 @@ func TestStandaloneAdminPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestStandaloneSetupOriginMatchesLauncher(t *testing.T) {
+	for _, tc := range []struct{ address, origin string }{
+		{"127.0.0.1:8280", "http://127.0.0.1:8280"},
+		{":8280", "http://127.0.0.1:8280"},
+		{"0.0.0.0:8280", "http://127.0.0.1:8280"},
+		{"[::]:8280", "http://[::1]:8280"},
+		{"192.168.10.52:8280", ""},
+		{"127.0.0.1:0", ""},
+	} {
+		t.Run(tc.address, func(t *testing.T) {
+			origin, err := standaloneSetupOrigin(tc.address)
+			if origin != tc.origin || (err != nil) != (tc.origin == "") {
+				t.Fatalf("origin=%q err=%v", origin, err)
+			}
+		})
+	}
+}
