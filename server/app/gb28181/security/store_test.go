@@ -70,8 +70,8 @@ func TestGormStoreIncrementsAggregatesAcrossFlushes(t *testing.T) {
 	require.Len(t, items, 1)
 	require.Equal(t, int64(5), items[0].Count)
 	require.Equal(t, int64(50), items[0].ScoreDelta)
-	require.Equal(t, at, items[0].FirstSeenAt)
-	require.Equal(t, at.Add(3*time.Second), items[0].LastSeenAt)
+	require.True(t, at.Equal(items[0].FirstSeenAt))
+	require.True(t, at.Add(3*time.Second).Equal(items[0].LastSeenAt))
 }
 
 func TestGormStoreRestoresAndUnbansActiveDecision(t *testing.T) {

@@ -68,14 +68,14 @@ func TestGormStoreLoadsAuthenticatedEndpointsFromRegisteredDevices(t *testing.T)
 	valid := byDeviceID["34020000001320000001"]
 	require.Equal(t, "UDP", valid.Transport)
 	require.Equal(t, "192.0.2.1", valid.Address)
-	require.Equal(t, validUntil, valid.ExpiresAt)
-	require.Equal(t, registeredAt, valid.UpdatedAt)
+	require.True(t, validUntil.Equal(valid.ExpiresAt))
+	require.True(t, registeredAt.Equal(valid.UpdatedAt))
 
 	expiredOffline := byDeviceID["34020000001320000002"]
 	require.Equal(t, "TCP", expiredOffline.Transport)
 	require.Equal(t, "2001:db8::2", expiredOffline.Address)
-	require.Equal(t, expiredAt, expiredOffline.ExpiresAt)
-	require.Equal(t, registeredAt, expiredOffline.UpdatedAt)
+	require.True(t, expiredAt.Equal(expiredOffline.ExpiresAt))
+	require.True(t, registeredAt.Equal(expiredOffline.UpdatedAt))
 	require.True(t, expiredOffline.ExpiresAt.Before(time.Now()))
 
 	withoutExpiry := byDeviceID["34020000001320000003"]
@@ -83,7 +83,7 @@ func TestGormStoreLoadsAuthenticatedEndpointsFromRegisteredDevices(t *testing.T)
 	require.Equal(t, "2001:db8::3", withoutExpiry.Address)
 	require.False(t, withoutExpiry.ExpiresAt.IsZero())
 	require.True(t, withoutExpiry.ExpiresAt.Before(time.Now()))
-	require.Equal(t, registeredAt, withoutExpiry.UpdatedAt)
+	require.True(t, registeredAt.Equal(withoutExpiry.UpdatedAt))
 }
 
 func TestGormStoreLoadAuthenticatedEndpointsReturnsQueryError(t *testing.T) {
