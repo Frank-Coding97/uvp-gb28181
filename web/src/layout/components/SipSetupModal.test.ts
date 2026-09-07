@@ -10,6 +10,8 @@ const setupMock = vi.hoisted(() => ({
     listenIp: "192.168.1.10",
     advertiseIp: "192.168.1.10",
     advertiseIpInferred: false,
+    mediaReceiveHost: "192.168.1.10",
+    mediaPlaybackHost: "192.168.1.10",
     port: 5061,
     domain: "3402000000",
     serverId: "34020000002000000001",
@@ -101,7 +103,10 @@ describe("SIP setup modal", () => {
     Object.assign(setupMock.form, {
       deploymentMode: "lan",
       listenIp: "192.168.1.10",
-      advertiseIp: "192.168.1.10"
+      advertiseIp: "192.168.1.10",
+      mediaReceiveHost: "192.168.1.10",
+      mediaPlaybackHost: "192.168.1.10",
+      password: ""
     });
     standaloneStatusLoader.mockReset().mockResolvedValue({ kind: "legacy" });
     vi.clearAllMocks();
@@ -242,5 +247,53 @@ describe("SIP setup modal", () => {
     await openModal(wrapper);
 
     expect(wrapper.find(".sip-modal-address-warning").exists()).toBe(false);
+  });
+
+  it("opts into media hosts only for required standalone onboarding", async () => {
+    setupMock.form.password = "Sec12345Aa!!";
+    setupMock.save.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        config: {},
+        reloadedOk: true,
+        reloadError: "",
+        runtime: { state: "running", updatedAt: "" }
+      }
+    });
+    const wrapper = mountModal(false, true, true);
+    await openModal(wrapper);
+
+    for (let step = 1; step < 4; step++) {
+      const next = wrapper.findAll("button").find(button => button.text() === "下一步");
+      await next?.trigger("click");
+    }
+    await wrapper.findAll("button").find(button => button.text() === "保存并启动")?.trigger("click");
+
+    expect(setupMock.save).toHaveBeenCalledWith({ includeMediaHosts: true });
+  });
+
+  it("does not opt into media hosts for legacy onboarding", async () => {
+    setupMock.form.password = "Sec12345Aa!!";
+    setupMock.save.mockResolvedValue({
+      code: 0,
+      message: "",
+      data: {
+        config: {},
+        reloadedOk: true,
+        reloadError: "",
+        runtime: { state: "running", updatedAt: "" }
+      }
+    });
+    const wrapper = mountModal();
+    await openModal(wrapper);
+
+    for (let step = 1; step < 4; step++) {
+      const next = wrapper.findAll("button").find(button => button.text() === "下一步");
+      await next?.trigger("click");
+    }
+    await wrapper.findAll("button").find(button => button.text() === "保存并启动")?.trigger("click");
+
+    expect(setupMock.save).toHaveBeenCalledWith({ includeMediaHosts: false });
   });
 });

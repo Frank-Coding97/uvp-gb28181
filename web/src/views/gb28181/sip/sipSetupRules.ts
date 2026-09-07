@@ -6,6 +6,29 @@ export function isConcreteIPv4(value: string): boolean {
     return parts.every(part => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255 && String(Number(part)) === part);
 }
 
+// Media endpoints may intentionally use loopback during local verification;
+// unspecified, multicast, reserved and broadcast ranges are not concrete hosts.
+export function isMediaIPv4(value: string): boolean {
+    const parts = value.split(".");
+    if (parts.length !== 4 || value === "0.0.0.0") return false;
+    if (!parts.every(part => /^\d{1,3}$/.test(part) && Number(part) >= 0 && Number(part) <= 255 && String(Number(part)) === part)) {
+        return false;
+    }
+    const firstOctet = Number(parts[0]);
+    return firstOctet > 0 && firstOctet < 224;
+}
+
+export function validateMediaHost(value: string, label: string): string {
+    if (!value) return `${label}必须填写具体 IPv4 地址`;
+    if (!isMediaIPv4(value)) return `${label}必须是具体 IPv4 地址，不允许 0.0.0.0、组播或广播地址`;
+    return "";
+}
+
+export function mediaHostsCanContinue(required: boolean, receiveHost: string, playbackHost: string): boolean {
+    if (!required) return true;
+    return !validateMediaHost(receiveHost, "媒体接收地址") && !validateMediaHost(playbackHost, "媒体播放地址");
+}
+
 export function deriveNetworkSelection(
     mode: SipDeploymentMode,
     listenIp: string,

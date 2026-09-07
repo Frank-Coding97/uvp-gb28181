@@ -1,3 +1,4 @@
+import { nextTick } from "vue";
 import { describe, expect, it, vi } from "vitest";
 import { useSipSetup, type SipSetupApi } from "./useSipSetup";
 
@@ -111,5 +112,30 @@ describe("useSipSetup", () => {
         const result = await setup.save();
         expect(result.reloadedOk).toBe(false);
         expect(result.reloadError).toContain("bind failed");
+    });
+
+    it("sends media hosts only when the required standalone flow opts in", () => {
+        const setup = useSipSetup(fakeApi());
+        setup.form.mediaReceiveHost = "192.168.1.10";
+        setup.form.mediaPlaybackHost = "127.0.0.1";
+
+        expect(setup.payload()).not.toHaveProperty("mediaReceiveHost");
+        expect(setup.payload()).not.toHaveProperty("mediaPlaybackHost");
+        expect(setup.payload({ includeMediaHosts: true })).toEqual(expect.objectContaining({
+            mediaReceiveHost: "192.168.1.10",
+            mediaPlaybackHost: "127.0.0.1"
+        }));
+    });
+
+    it("clears a LAN media prefill when the user switches to public deployment", async () => {
+        const setup = useSipSetup(fakeApi());
+        setup.form.deploymentMode = "lan";
+        setup.form.mediaReceiveHost = "192.168.1.10";
+        setup.form.mediaPlaybackHost = "192.168.1.11";
+        setup.form.deploymentMode = "public";
+        await nextTick();
+
+        expect(setup.form.mediaReceiveHost).toBe("");
+        expect(setup.form.mediaPlaybackHost).toBe("");
     });
 });

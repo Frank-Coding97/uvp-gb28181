@@ -9,7 +9,7 @@ import NetworkStep from "@/views/gb28181/sip/steps/NetworkStep.vue";
 import IdentityStep from "@/views/gb28181/sip/steps/IdentityStep.vue";
 import ConfirmStep from "@/views/gb28181/sip/steps/ConfirmStep.vue";
 import { useSipSetup } from "@/views/gb28181/sip/useSipSetup";
-import { identityCanContinue, networkCanContinue, networkOptions, sipAddressAvailability } from "@/views/gb28181/sip/sipSetupRules";
+import { identityCanContinue, mediaHostsCanContinue, networkCanContinue, networkOptions, sipAddressAvailability } from "@/views/gb28181/sip/sipSetupRules";
 
 const props = withDefaults(defineProps<{
     visible: boolean;
@@ -59,7 +59,14 @@ const networkForStep = computed<SipNetworkInterfaces | null>(() => {
 
 const canNext = computed(() => {
     if (step.value === 1) return setup.form.deploymentMode !== "";
-    if (step.value === 2) return networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp);
+    if (step.value === 2) {
+        return networkCanContinue(setup.form.deploymentMode, setup.form.listenIp, setup.form.advertiseIp) &&
+            mediaHostsCanContinue(
+                props.required && standaloneMode.value,
+                setup.form.mediaReceiveHost,
+                setup.form.mediaPlaybackHost
+            );
+    }
     if (step.value === 3) return identityCanContinue(
         setup.form.port,
         setup.form.serverId,
@@ -100,7 +107,7 @@ async function save() {
     if (setup.saving.value) return;
     reloadError.value = "";
     try {
-        const result = await setup.save();
+        const result = await setup.save({ includeMediaHosts: props.required && standaloneMode.value });
         if (result.reloadedOk) {
             Message.success("SIP 配置已保存并成功启动");
             emit("saved");
@@ -179,6 +186,7 @@ function closeModal() {
                 v-else-if="step === 2"
                 :form="setup.form"
                 :network="networkForStep"
+                :media-required="required && standaloneMode"
                 @update="Object.assign(setup.form, $event)"
             />
             <IdentityStep
@@ -192,6 +200,7 @@ function closeModal() {
                 :form="setup.form"
                 :has-password="setup.hasExistingPassword.value"
                 :network="setup.network.value"
+                :media-required="required && standaloneMode"
             />
         </div>
 

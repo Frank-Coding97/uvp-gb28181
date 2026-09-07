@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { SipNetworkAddress } from "@/api/gb28181";
 import {
     activeSipAddresses, deriveDomain, deriveNetworkSelection, evaluatePasswordStrength, formatRegisterUri,
-    identityCanContinue, networkCanContinue, networkOptions, passwordAcceptable, sipAddressAvailability
+    identityCanContinue, isMediaIPv4, mediaHostsCanContinue, networkCanContinue, networkOptions, passwordAcceptable,
+    sipAddressAvailability, validateMediaHost
 } from "./sipSetupRules";
 
 const items: SipNetworkAddress[] = [
@@ -90,6 +91,25 @@ describe("SIP network rules", () => {
         ]);
         expect(activeSipAddresses("lan", "192.168.1.10", "192.168.10.106", currentItems)).toEqual(["192.168.1.10"]);
         expect(activeSipAddresses("public", "0.0.0.0", "203.0.113.10", currentItems)).toEqual(["203.0.113.10"]);
+    });
+});
+
+describe("standalone media address rules", () => {
+    it("accepts concrete unicast IPv4 including loopback for local verification", () => {
+        expect(isMediaIPv4("127.0.0.1")).toBe(true);
+        expect(isMediaIPv4("192.168.1.10")).toBe(true);
+        expect(isMediaIPv4("0.0.0.0")).toBe(false);
+        expect(isMediaIPv4("224.0.0.1")).toBe(false);
+        expect(isMediaIPv4("255.255.255.255")).toBe(false);
+    });
+
+    it("requires two confirmed media addresses only for the standalone required flow", () => {
+        expect(mediaHostsCanContinue(false, "", "")).toBe(true);
+        expect(mediaHostsCanContinue(true, "192.168.1.10", "127.0.0.1")).toBe(true);
+        expect(mediaHostsCanContinue(true, "", "192.168.1.11")).toBe(false);
+        expect(mediaHostsCanContinue(true, "0.0.0.0", "192.168.1.11")).toBe(false);
+        expect(mediaHostsCanContinue(true, "192.168.1.10", "239.1.1.1")).toBe(false);
+        expect(validateMediaHost("224.0.0.1", "媒体接收地址")).toContain("具体 IPv4");
     });
 });
 

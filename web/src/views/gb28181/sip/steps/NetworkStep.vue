@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import type { SipNetworkAddress, SipNetworkInterfaces } from "@/api/gb28181";
 import type { SipSetupForm } from "../useSipSetup";
+import { isConcreteIPv4, validateMediaHost } from "../sipSetupRules";
 
-const props = defineProps<{ form: SipSetupForm; network: SipNetworkInterfaces | null }>();
+const props = defineProps<{ form: SipSetupForm; network: SipNetworkInterfaces | null; mediaRequired?: boolean }>();
 const emit = defineEmits<{ update: [patch: Partial<SipSetupForm>] }>();
+const mediaTouched = ref({ receive: false, playback: false });
 
 // 只暴露"能对外提供服务"的网卡:排除 loopback (127.x) 和 listenOnly=true 的 0.0.0.0 伪条目.
 // 局域网模式下这些是允许用户选的具体网卡;公网模式下 listen 也用这个列表 (选内网侧网卡).
@@ -42,7 +44,14 @@ function onNicChange(nicIp: string) {
                 advertiseIpInferred: false
             });
         } else {
-            emit("update", { listenIp: nicIp, advertiseIp: nicIp, advertiseIpInferred: false });
+            emit("update", {
+                listenIp: nicIp,
+                advertiseIp: nicIp,
+                advertiseIpInferred: false,
+                ...(props.mediaRequired
+                    ? { mediaReceiveHost: nicIp, mediaPlaybackHost: nicIp }
+                    : {})
+            });
         }
         return;
     }
@@ -54,22 +63,39 @@ function onAdvertiseInputChange(value: string) {
     emit("update", { advertiseIp: value, advertiseIpInferred: false });
 }
 
+function onMediaInputChange(field: "mediaReceiveHost" | "mediaPlaybackHost", value: string) {
+    emit("update", { [field]: value });
+}
+
 // 选中当前 nicIp: 局域网 listen 是权威(advertise 从属);公网 listen 是权威.
 const currentNic = computed(() => props.form.listenIp);
 
 // 每次 network 数据到达 / 部署模式变化时,如果当前 nic 不在下拉可选列表 → 自动选推荐网卡填进去.
 // 判据用 nicOptions(含 0.0.0.0)而不是 usableNics,否则用户主动选 0.0.0.0 会被 watcher 立刻改回具体网卡.
 watch(
-    () => [nicOptions.value.length, props.form.deploymentMode, currentNic.value] as const,
-    ([count, mode, nic]) => {
+    () => [nicOptions.value.length, props.form.deploymentMode, currentNic.value, props.mediaRequired] as const,
+    ([count, mode, nic, mediaRequired]) => {
         if (!count || !mode) return;
         const stillValid = nicOptions.value.some(item => item.ip === nic);
-        if (stillValid) return;
+        if (stillValid) {
+            if (mediaRequired && mode === "lan" && isConcreteIPv4(nic) &&
+                (!props.form.mediaReceiveHost || !props.form.mediaPlaybackHost)) {
+                emit("update", { mediaReceiveHost: nic, mediaPlaybackHost: nic });
+            }
+            return;
+        }
         const recommended = usableNics.value.find(item => item.recommended) || usableNics.value[0];
         if (!recommended) return;
         onNicChange(recommended.ip);
     },
     { immediate: true }
+);
+
+const mediaReceiveError = computed(() =>
+    mediaTouched.value.receive ? validateMediaHost(props.form.mediaReceiveHost, "媒体接收地址") : ""
+);
+const mediaPlaybackError = computed(() =>
+    mediaTouched.value.playback ? validateMediaHost(props.form.mediaPlaybackHost, "媒体播放地址") : ""
 );
 </script>
 
@@ -120,6 +146,45 @@ watch(
                     设备通过公网接入平台时使用的地址(NAT 场景下填映射后的公网 IPv4)。
                 </template>
             </a-form-item>
+
+            <section v-if="mediaRequired" class="media-addresses" aria-labelledby="media-addresses-title">
+                <header class="media-addresses__header">
+                    <div>
+                        <h3 id="media-addresses-title">媒体地址</h3>
+                        <p>请确认两个具体 IPv4。支持 127.0.0.1 本机验证，不接受 0.0.0.0、组播或广播地址。</p>
+                    </div>
+                </header>
+                <div class="media-addresses__grid">
+                    <a-form-item
+                        label="媒体接收地址 (ReceiveHost)"
+                        required
+                        :validate-status="mediaReceiveError ? 'error' : ''"
+                        :help="mediaReceiveError"
+                    >
+                        <a-input
+                            :model-value="form.mediaReceiveHost"
+                            placeholder="例如 192.168.1.10"
+                            allow-clear
+                            @update:model-value="onMediaInputChange('mediaReceiveHost', $event)"
+                            @blur="mediaTouched.receive = true"
+                        />
+                    </a-form-item>
+                    <a-form-item
+                        label="媒体播放地址 (PlaybackHost)"
+                        required
+                        :validate-status="mediaPlaybackError ? 'error' : ''"
+                        :help="mediaPlaybackError"
+                    >
+                        <a-input
+                            :model-value="form.mediaPlaybackHost"
+                            placeholder="例如 192.168.1.10"
+                            allow-clear
+                            @update:model-value="onMediaInputChange('mediaPlaybackHost', $event)"
+                            @blur="mediaTouched.playback = true"
+                        />
+                    </a-form-item>
+                </div>
+            </section>
         </a-form>
     </div>
 </template>
@@ -135,5 +200,39 @@ watch(
 .option-meta {
     margin-left: 2px;
     color: var(--uvp-text-tertiary);
+}
+
+.media-addresses {
+    display: grid;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--uvp-brand-soft, #dbeafe);
+    border-radius: 10px;
+    background: var(--uvp-brand-soft, #f5f9ff);
+}
+
+.media-addresses__header h3 {
+    margin: 0;
+    color: var(--uvp-text-primary);
+    font-size: 13px;
+}
+
+.media-addresses__header p {
+    margin: 4px 0 0;
+    color: var(--uvp-text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.media-addresses__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+@media (max-width: 640px) {
+    .media-addresses__grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>

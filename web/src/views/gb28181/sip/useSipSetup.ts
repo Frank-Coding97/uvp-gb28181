@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { reactive, ref, watch } from "vue";
 import {
     fetchSipNetworkInterfaces,
     fetchSipSetupStatus,
@@ -17,6 +17,8 @@ export interface SipSetupForm {
     listenIp: string;
     advertiseIp: string;
     advertiseIpInferred: boolean;
+    mediaReceiveHost: string;
+    mediaPlaybackHost: string;
     port: number;
     domain: string;
     serverId: string;
@@ -37,6 +39,10 @@ export interface SipSetupApi {
     skip: () => Promise<BaseResult<{ acknowledged: boolean }>>;
 }
 
+export interface SipSaveOptions {
+    includeMediaHosts?: boolean;
+}
+
 const defaultApi: SipSetupApi = {
     status: fetchSipSetupStatus,
     interfaces: fetchSipNetworkInterfaces,
@@ -52,6 +58,8 @@ function initialForm(): SipSetupForm {
         listenIp: "",
         advertiseIp: "",
         advertiseIpInferred: false,
+        mediaReceiveHost: "",
+        mediaPlaybackHost: "",
         port: 5061,
         domain: "",
         serverId: "",
@@ -72,8 +80,22 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
     const hasExistingPassword = ref(false);
     const form = reactive<SipSetupForm>(initialForm());
 
+    // Switching deployment mode starts a fresh media-address confirmation.
+    // This prevents a LAN prefill from silently becoming a public value.
+    watch(
+        () => form.deploymentMode,
+        (mode, previousMode) => {
+            if (mode !== previousMode) {
+                form.mediaReceiveHost = "";
+                form.mediaPlaybackHost = "";
+            }
+        }
+    );
+
     function applyStatus(next: SipSetupStatus) {
         status.value = next;
+        form.mediaReceiveHost = "";
+        form.mediaPlaybackHost = "";
         if (!next.config) return;
         Object.assign(form, {
             deploymentMode: next.config.deploymentMode,
@@ -115,7 +137,7 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
         return response.data;
     }
 
-    function payload(): SaveSipConfigPayload {
+    function payload(options: SipSaveOptions = {}): SaveSipConfigPayload {
         const wildcardLAN = form.deploymentMode === "lan" && form.listenIp === "0.0.0.0";
         const result: SaveSipConfigPayload = {
             deploymentMode: form.deploymentMode as SipDeploymentMode,
@@ -127,14 +149,18 @@ export function useSipSetup(api: SipSetupApi = defaultApi) {
             serverId: form.serverId
         };
         if (form.password !== "") result.password = form.password;
+        if (options.includeMediaHosts) {
+            result.mediaReceiveHost = form.mediaReceiveHost.trim();
+            result.mediaPlaybackHost = form.mediaPlaybackHost.trim();
+        }
         return result;
     }
 
-    async function save() {
+    async function save(options: SipSaveOptions = {}) {
         saving.value = true;
         error.value = "";
         try {
-            const response = await api.save(payload());
+            const response = await api.save(payload(options));
             if (response.code !== 0) throw new Error(response.message || "保存 SIP 配置失败");
             hasExistingPassword.value = response.data.config.hasPassword;
             form.password = "";

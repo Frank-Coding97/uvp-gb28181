@@ -11,6 +11,7 @@ const props = defineProps<{
     form: SipSetupForm;
     hasPassword: boolean;
     network: SipNetworkInterfaces | null;
+    mediaRequired?: boolean;
 }>();
 
 const copiedKey = ref<string>("");
@@ -52,6 +53,11 @@ const fields = computed(() => [
     { key: "serverId", label: "平台 ID", value: props.form.serverId },
     { key: "password", label: "SIP 密码", value: passwordDisplay.value }
 ]);
+
+const mediaFields = computed(() => [
+    { key: "mediaReceiveHost", label: "媒体接收地址 (ReceiveHost)", value: props.form.mediaReceiveHost },
+    { key: "mediaPlaybackHost", label: "媒体播放地址 (PlaybackHost)", value: props.form.mediaPlaybackHost }
+]);
 </script>
 
 <template>
@@ -90,6 +96,35 @@ const fields = computed(() => [
                         <code class="confirm-value">{{ field.value || "-" }}</code>
                         <button
                             v-if="field.value && field.value !== '-' && field.value !== '(保留原密码)'"
+                            type="button"
+                            class="confirm-copy"
+                            :class="{ 'is-copied': copiedKey === field.key }"
+                            :title="copiedKey === field.key ? '已复制' : `复制${field.label}`"
+                            @click="copyValue(field.key, field.value)"
+                        >
+                            <Check v-if="copiedKey === field.key" :size="14" />
+                            <Copy v-else :size="14" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section v-if="mediaRequired" class="confirm-card confirm-card--media">
+            <header class="confirm-card__header">
+                <span class="confirm-card__icon confirm-card__icon--soft">
+                    <Server :size="16" />
+                </span>
+                <h4>媒体地址</h4>
+                <span class="confirm-card__header-hint">已确认的本机 IPv4</span>
+            </header>
+            <div class="confirm-card__rows">
+                <div v-for="field in mediaFields" :key="field.key" class="confirm-row">
+                    <span class="confirm-row__label">{{ field.label }}</span>
+                    <div class="confirm-row__body">
+                        <code class="confirm-value">{{ field.value || "-" }}</code>
+                        <button
+                            v-if="field.value"
                             type="button"
                             class="confirm-copy"
                             :class="{ 'is-copied': copiedKey === field.key }"
