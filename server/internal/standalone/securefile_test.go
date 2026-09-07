@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -132,9 +133,6 @@ func TestSecureFileLockReleasesAfterCallbackError(t *testing.T) {
 }
 
 func TestSecureFileRejectsReparseOrSymlinkTargets(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("symlink creation requires privileges on Windows; native ACL probe covers this")
-	}
 	dir := t.TempDir()
 	require.NoError(t, protectConfigDir(dir, true))
 	outside := filepath.Join(t.TempDir(), "outside.txt")
@@ -189,24 +187,66 @@ func TestSecureFileConcurrentReplaceReadersSeeCompleteValues(t *testing.T) {
 	target := filepath.Join(dir, "concurrent.yml")
 	require.NoError(t, writeSecureConfigFile(target, []byte("initial"), false, nil))
 
-	var wg sync.WaitGroup
-	errs := make(chan error, 8)
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			payload := []byte(fmt.Sprintf("value-%d", i))
-			if err := writeSecureConfigFile(target, payload, true, nil); err != nil {
-				errs <- err
-			}
-		}(i)
+	const readerCount = 8
+	const writeCount = 32
+	expected := map[string]struct{}{"initial": {}}
+	for i := 0; i < writeCount; i++ {
+		expected[fmt.Sprintf("value-%03d", i)] = struct{}{}
 	}
+
+	var wg sync.WaitGroup
+	errs := make(chan error, readerCount)
+	ready := make(chan struct{}, readerCount)
+	start := make(chan struct{})
+	done := make(chan struct{})
+	var readCount atomic.Int64
+	for i := 0; i < readerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ready <- struct{}{}
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				payload, err := readSecureConfigFile(target)
+				if err != nil {
+					errs <- fmt.Errorf("concurrent read: %w", err)
+					return
+				}
+				if _, ok := expected[string(payload)]; !ok {
+					errs <- fmt.Errorf("concurrent read returned incomplete payload %q", payload)
+					return
+				}
+				readCount.Add(1)
+			}
+		}()
+	}
+	close(start)
+	for i := 0; i < readerCount; i++ {
+		<-ready
+	}
+	var writerErr error
+	for i := 0; i < writeCount; i++ {
+		payload := []byte(fmt.Sprintf("value-%03d", i))
+		if err := writeSecureConfigFile(target, payload, true, nil); err != nil {
+			writerErr = err
+			break
+		}
+	}
+	close(done)
 	wg.Wait()
 	close(errs)
+	require.NoError(t, writerErr)
+	require.Positive(t, readCount.Load())
 	for err := range errs {
 		require.NoError(t, err)
 	}
 	got, err := readSecureConfigFile(target)
 	require.NoError(t, err)
-	require.Regexp(t, `^value-[0-7]$`, string(got))
+	_, ok := expected[string(got)]
+	require.True(t, ok, "final payload = %q", got)
 }
