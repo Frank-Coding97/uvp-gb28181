@@ -23,12 +23,23 @@ func cleanupBranchResponse(req *sip.Request, port int) *sip.Response {
 }
 
 func TestOwnedBranchCleanupActualUDP(t *testing.T) {
+	testOwnedBranchCleanupActualUDP(t, false)
+}
+
+func testOwnedBranchCleanupActualUDP(t *testing.T, fixed bool) {
+	t.Helper()
 	peer, err := net.ListenPacket("udp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peer.Close()
 	dua, req := ownedInviteRequest(t, peer.LocalAddr().String())
 	owner, err := dua.NewBranchCleanup(req, cleanupBranchResponse(req, peer.LocalAddr().(*net.UDPAddr).Port), req.CSeq().SeqNo+1)
 	require.NoError(t, err)
+	if fixed {
+		built := owner
+		owner, err = dua.NewFixedBranchCleanup(built.ACKRequest(), built.BYERequest())
+		built.Terminate()
+		require.NoError(t, err)
+	}
 	defer owner.Terminate()
 	ack, bye := owner.ACKRequest(), owner.BYERequest()
 	require.Equal(t, sip.ACK, ack.Method)
@@ -123,6 +134,11 @@ func TestOwnedBranchCleanupACKFailureCannotStartBYE(t *testing.T) {
 }
 
 func TestOwnedBranchCleanupActualTCP(t *testing.T) {
+	testOwnedBranchCleanupActualTCP(t, false)
+}
+
+func testOwnedBranchCleanupActualTCP(t *testing.T, fixed bool) {
+	t.Helper()
 	peer, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer peer.Close()
@@ -131,6 +147,12 @@ func TestOwnedBranchCleanupActualTCP(t *testing.T) {
 	req.Via().Transport = "TCP"
 	owner, err := dua.NewBranchCleanup(req, cleanupBranchResponse(req, peer.Addr().(*net.TCPAddr).Port), req.CSeq().SeqNo+1)
 	require.NoError(t, err)
+	if fixed {
+		built := owner
+		owner, err = dua.NewFixedBranchCleanup(built.ACKRequest(), built.BYERequest())
+		built.Terminate()
+		require.NoError(t, err)
+	}
 	defer owner.Terminate()
 	_, err = owner.PrepareBYE(context.Background())
 	require.NoError(t, err)
