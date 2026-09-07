@@ -162,17 +162,29 @@ type NodeService struct {
 	impactProvider NodeImpactProvider
 	logger         *zap.Logger
 	restart        *RestartCoordinator
+
+	lifecycleMu     sync.Mutex
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	lifecycleWG     sync.WaitGroup
+	lifecycleClosed bool
+	shutdownOnce    sync.Once
+	shutdownDone    chan struct{}
 }
 
 // NewNodeService 构造
 func NewNodeService(reg *node.Registry, probe ZLMProbe, tuning MediaTuning) *NodeService {
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	s := &NodeService{
-		registry: reg,
-		probe:    probe,
-		tuning:   tuning,
-		applying: make(map[int64]struct{}),
-		locks:    make(map[int64]*sync.Mutex),
-		logger:   zap.NewNop(),
+		registry:        reg,
+		probe:           probe,
+		tuning:          tuning,
+		applying:        make(map[int64]struct{}),
+		locks:           make(map[int64]*sync.Mutex),
+		logger:          zap.NewNop(),
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
+		shutdownDone:    make(chan struct{}),
 	}
 	s.restart = NewRestartCoordinator(reg)
 	s.restart.SetConverger(s.ConvergeNodeConfig)
@@ -583,9 +595,42 @@ type ConfigApplyResult struct {
 	Err    error
 }
 
+// acceptLifecycleTask admits one service-owned background operation. The
+// admission decision and WaitGroup increment are serialized with Shutdown so
+// Shutdown never races a later Add.
+func (s *NodeService) acceptLifecycleTask() (context.Context, func(), bool) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.lifecycleClosed {
+		return nil, nil, false
+	}
+	s.lifecycleWG.Add(1)
+	return s.lifecycleCtx, s.lifecycleWG.Done, true
+}
+
+func withLifecycleContext(parent, lifecycle context.Context) (context.Context, func()) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	stopLifecycle := context.AfterFunc(lifecycle, cancel)
+	return ctx, func() {
+		stopLifecycle()
+		cancel()
+	}
+}
+
 // ApplyActiveConfigs converges every active node through the same verified
 // configuration path used by node creation and heartbeat recovery.
 func (s *NodeService) ApplyActiveConfigs(ctx context.Context) []ConfigApplyResult {
+	lifecycleCtx, done, ok := s.acceptLifecycleTask()
+	if !ok {
+		return nil
+	}
+	defer done()
+	applyCtx, stop := withLifecycleContext(ctx, lifecycleCtx)
+	defer stop()
+
 	nodes := s.registry.ListActive()
 	results := make([]ConfigApplyResult, len(nodes))
 	var wg sync.WaitGroup
@@ -594,7 +639,7 @@ func (s *NodeService) ApplyActiveConfigs(ctx context.Context) []ConfigApplyResul
 		go func() {
 			defer wg.Done()
 			result := ConfigApplyResult{NodeID: current.ID, Name: current.Name}
-			result.Err = s.ConvergeNodeConfig(ctx, current.ID)
+			result.Err = s.ConvergeNodeConfig(applyCtx, current.ID)
 			result.Ready = result.Err == nil && s.registry.IsAutoOnDemandReady(current.ID)
 			results[index] = result
 		}()
@@ -613,15 +658,21 @@ func (s *NodeService) ConvergeNodeConfig(ctx context.Context, nodeID int64) erro
 // ScheduleConfigConvergence is non-blocking and de-duplicates per node. A
 // failed apply leaves readiness false so the next heartbeat retries it.
 func (s *NodeService) ScheduleConfigConvergence(nodeID int64) bool {
+	lifecycleCtx, done, ok := s.acceptLifecycleTask()
+	if !ok {
+		return false
+	}
 	lock := s.nodeLock(nodeID)
 	lock.Lock()
 	current, ok := s.beginConfigConvergence(nodeID)
 	lock.Unlock()
 	if !ok {
+		done()
 		return false
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer done()
+		ctx, cancel := context.WithTimeout(lifecycleCtx, 15*time.Second)
 		defer cancel()
 		lock := s.nodeLock(nodeID)
 		lock.Lock()
@@ -980,5 +1031,41 @@ func (s *NodeService) SetRestartCoordinator(coordinator *RestartCoordinator) {
 	s.restart = coordinator
 	if previous != nil && previous != coordinator {
 		previous.Close()
+	}
+}
+
+// Shutdown permanently closes service-owned background admission, cancels
+// accepted convergence work, and waits for both this service and its restart
+// coordinator. A context deadline reports that some accepted work is still
+// running; a later call can continue waiting for the same shutdown.
+func (s *NodeService) Shutdown(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.shutdownOnce.Do(func() {
+		s.lifecycleMu.Lock()
+		s.lifecycleClosed = true
+		cancel := s.lifecycleCancel
+		restart := s.restart
+		s.lifecycleMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+		go func() {
+			if restart != nil {
+				_ = restart.Shutdown(context.Background())
+			}
+			s.lifecycleWG.Wait()
+			close(s.shutdownDone)
+		}()
+	})
+	select {
+	case <-s.shutdownDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
