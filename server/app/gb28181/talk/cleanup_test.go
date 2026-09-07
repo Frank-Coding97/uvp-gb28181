@@ -129,6 +129,9 @@ func TestCleanupCancelledWaiterCannotReportFalseSuccess(t *testing.T) {
 	session := activateSessionForCleanup(t, repo, "cleanup-waiter", 84, "call-waiter", time.Now().Add(time.Minute))
 
 	ownerDone := make(chan error, 1)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(media.release) }) }
+	defer release()
 	go func() {
 		ownerDone <- service.Cleanup(context.Background(), session.SessionID, models.TalkSessionEnded, "owner")
 	}()
@@ -142,8 +145,15 @@ func TestCleanupCancelledWaiterCannotReportFalseSuccess(t *testing.T) {
 	require.Equal(t, models.TalkSessionStopping, stored.State)
 	require.NotNil(t, stored.LeaseKey)
 
-	close(media.release)
-	require.NoError(t, <-ownerDone)
+	release()
+	ownerTimer := time.NewTimer(time.Second)
+	defer ownerTimer.Stop()
+	select {
+	case ownerErr := <-ownerDone:
+		require.NoError(t, ownerErr)
+	case <-ownerTimer.C:
+		t.Fatal("cleanup owner did not finish after media release")
+	}
 	stored, err = repo.FindBySession(context.Background(), session.SessionID)
 	require.NoError(t, err)
 	require.Equal(t, models.TalkSessionEnded, stored.State)

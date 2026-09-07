@@ -110,18 +110,12 @@ func (s *Service) executeCleanup(ctx context.Context, sessionID string, terminal
 	if client != nil && session.SourceStream != "" {
 		record("close source", client.CloseTalkSource(ctx, defaultTalkVHost, session.App, session.SourceStream))
 	}
-	message := strings.TrimSpace(reason)
-	if firstErr != nil {
-		if message != "" {
-			message += "; "
-		}
-		message += firstErr.Error()
-	}
-	if len(message) > 500 {
-		message = message[:500]
-	}
 	if firstErr != nil {
 		return firstErr
+	}
+	message := strings.TrimSpace(reason)
+	if len(message) > 500 {
+		message = message[:500]
 	}
 	finishCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
