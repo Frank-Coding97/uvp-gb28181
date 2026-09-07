@@ -31,6 +31,7 @@ var controlPipeAdvapi = windows.NewLazySystemDLL("advapi32.dll")
 var (
 	controlPipeImpersonateLoggedOnUser = controlPipeAdvapi.NewProc("ImpersonateLoggedOnUser")
 	controlPipeLogonUser               = controlPipeAdvapi.NewProc("LogonUserW")
+	controlPipeWaitNamedPipe           = windows.NewLazySystemDLL("kernel32.dll").NewProc("WaitNamedPipeW")
 )
 
 func TestAuthenticatedPipeRoundTrip(t *testing.T) {
@@ -340,19 +341,7 @@ func TestPipeListenerUsesEffectiveUserAndSystemSDDL(t *testing.T) {
 
 	path, err := pipePath(name)
 	require.NoError(t, err)
-	// GetNamedSecurityInfo opens the named object through the pipe namespace.
-	// Keep a raw Accept pending so that this metadata query has a free pipe
-	// instance instead of receiving ERROR_PIPE_BUSY from the sentinel handle.
-	acceptResult := acceptPipe(listener)
-	assertPipeSecurityDescriptor(t, path, sid)
-	select {
-	case accepted := <-acceptResult:
-		if accepted.conn != nil {
-			_ = accepted.conn.Close()
-		}
-		require.Error(t, accepted.err)
-	case <-time.After(2 * time.Second):
-	}
+	assertPipeSecurityDescriptor(t, listener, path, sid)
 }
 
 func TestPipeRejectsDifferentWindowsUser(t *testing.T) {
@@ -454,7 +443,19 @@ func logonControlPipeTestUser(credentials controlPipeTestCredentials) (windows.T
 		}
 		return 0, callErr
 	}
-	return token, nil
+	defer token.Close()
+	var impersonationToken windows.Token
+	if err := windows.DuplicateTokenEx(
+		token,
+		windows.TOKEN_QUERY|windows.TOKEN_IMPERSONATE,
+		nil,
+		windows.SecurityImpersonation,
+		windows.TokenImpersonation,
+		&impersonationToken,
+	); err != nil {
+		return 0, err
+	}
+	return impersonationToken, nil
 }
 
 func withImpersonatedControlPipeTestToken(token windows.Token, fn func() error) (err error) {
@@ -490,12 +491,32 @@ func waitForActiveHandshake(t *testing.T, listener *authenticatedListener) {
 	t.Fatal("server did not track the connected pipe before the deadline")
 }
 
-func assertPipeSecurityDescriptor(t *testing.T, path, userSID string) {
+func assertPipeSecurityDescriptor(t *testing.T, listener net.Listener, path, userSID string) {
 	t.Helper()
-	descriptor, err := windows.GetNamedSecurityInfo(
-		path,
+	authenticated, ok := listener.(*authenticatedListener)
+	require.True(t, ok)
+	// Query the metadata through a real client handle while a raw server
+	// Accept is pending. This bypasses only the test authentication wrapper;
+	// the listener and its kernel-created pipe instance are production ones.
+	acceptResult := acceptPipe(authenticated.raw)
+	metadataHandle, err := openPipeSecurityHandle(path)
+	require.NoError(t, err)
+	defer windows.Close(metadataHandle)
+	var serverConn net.Conn
+	select {
+	case accepted := <-acceptResult:
+		require.NoError(t, accepted.err)
+		serverConn = accepted.conn
+		require.NotNil(t, serverConn)
+	case <-time.After(2 * time.Second):
+		t.Fatal("raw server Accept did not complete the metadata connection")
+	}
+	defer serverConn.Close()
+
+	descriptor, err := windows.GetSecurityInfo(
+		metadataHandle,
 		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, descriptor)
@@ -526,6 +547,63 @@ func assertPipeSecurityDescriptor(t *testing.T, path, userSID string) {
 		actual[key]++
 	}
 	require.Equal(t, expected, actual)
+}
+
+func openPipeSecurityHandle(path string) (windows.Handle, error) {
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return windows.InvalidHandle, err
+	}
+	deadline := time.Now().Add(time.Second)
+	var lastErr error
+	for {
+		waitErr := waitNamedPipe(name, 1000)
+		if waitErr != nil {
+			if !isPipeAvailabilityError(waitErr) {
+				return windows.InvalidHandle, waitErr
+			}
+			lastErr = waitErr
+		} else {
+			handle, openErr := windows.CreateFile(
+				name,
+				windows.READ_CONTROL,
+				0,
+				nil,
+				windows.OPEN_EXISTING,
+				0,
+				0,
+			)
+			if openErr == nil {
+				return handle, nil
+			}
+			if !isPipeAvailabilityError(openErr) {
+				return windows.InvalidHandle, openErr
+			}
+			lastErr = openErr
+		}
+		if !time.Now().Before(deadline) {
+			if lastErr == nil {
+				lastErr = windows.ERROR_PIPE_BUSY
+			}
+			return windows.InvalidHandle, lastErr
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitNamedPipe(name *uint16, timeoutMS uint32) error {
+	result, _, callErr := controlPipeWaitNamedPipe.Call(uintptr(unsafe.Pointer(name)), uintptr(timeoutMS))
+	if result != 0 {
+		return nil
+	}
+	if callErr == nil {
+		return windows.ERROR_GEN_FAILURE
+	}
+	return callErr
+}
+
+func isPipeAvailabilityError(err error) bool {
+	return errors.Is(err, windows.ERROR_FILE_NOT_FOUND) || errors.Is(err, windows.ERROR_PIPE_BUSY)
 }
 
 type acceptPipeResult struct {
