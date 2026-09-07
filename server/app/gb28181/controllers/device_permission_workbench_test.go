@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -20,8 +19,16 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/middleware"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"
-	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 )
+
+type permissionWorkbenchConfig struct{ scopedTestConfig }
+
+func (permissionWorkbenchConfig) GetInt(key string) int {
+	if key == "gb28181.device.default_owner_dept_id" {
+		return 1
+	}
+	return 0
+}
 
 func registerPermissionWorkbenchRoutes(r *gin.Engine, db *gorm.DB) {
 	controller := gbcontrollers.NewDeviceMgmtController()
@@ -38,8 +45,7 @@ func registerPermissionWorkbenchRoutes(r *gin.Engine, db *gorm.DB) {
 func TestPermissionWorkbench_StrictAssignmentFilter(t *testing.T) {
 	r, db := newDeviceMgmtRouter(t)
 	previousConfig := app.ConfigYml
-	app.ConfigYml = ymlconfig.CreateYamlFactory(filepath.Join("..", "..", "..", "config"))
-	app.ConfigYml.Set("gb28181.device.default_owner_dept_id", 1)
+	app.ConfigYml = permissionWorkbenchConfig{}
 	t.Cleanup(func() { app.ConfigYml = previousConfig })
 
 	active := int8(1)
