@@ -14,7 +14,6 @@ import (
 
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/global/consts"
-	"uvplatform.cn/uvp-gb28181/app/scheduler"
 
 	"io"
 
@@ -261,17 +260,10 @@ func StartServer(engine *gin.Engine) error {
 		return err
 	}
 
-	// 停止任务结果处理器
-	// 注意：必须在停止调度器之前停止，确保所有结果都被保存
-	app.ZapLog.Info("正在停止任务结果处理器...")
-	scheduler.StopResultHandler()
-	app.ZapLog.Info("任务结果处理器已停止")
-
-	// 停止任务调度器
-	if app.JobScheduler != nil {
-		app.ZapLog.Info("正在停止任务调度器...")
-		app.JobScheduler.Stop()
-		app.ZapLog.Info("任务调度器已停止")
+	// Keep the result consumer alive until all accepted jobs have produced
+	// their final results and the producer has closed its channel.
+	if err := ShutdownScheduler(ctx); err != nil {
+		return err
 	}
 
 	app.ZapLog.Info("服务器已优雅关闭")

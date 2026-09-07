@@ -2,6 +2,7 @@ package sip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -44,6 +45,12 @@ type Server struct {
 	quiescing          bool
 	activeInvites      int
 	invitesDrained     chan struct{}
+	handlerMu          sync.Mutex
+	handlersClosing    bool
+	activeHandlers     int
+	handlersDrained    chan struct{}
+	uaCloseOnce        sync.Once
+	uaCloseErr         error
 }
 
 type TraceFactory func(gbconfig.TraceConfig) gbtrace.Runtime
@@ -212,14 +219,14 @@ func (s *Server) registerHandlers() {
 	}
 
 	s.regH = regHandler
-	s.srv.OnRegister(regHandler.Handle)
+	s.srv.OnRegister(s.drainHandler(regHandler.Handle))
 	s.msgH = msgHandler
-	s.srv.OnMessage(msgHandler.Handle)
+	s.srv.OnMessage(s.drainHandler(msgHandler.Handle))
 	s.notifyH = handler.NewNotifyHandler(nil)
-	s.srv.OnNotify(s.notifyH.Handle)
-	s.srv.OnInvite(s.handleBroadcastInvite)
-	s.srv.OnAck(s.handleBroadcastAck)
-	s.srv.OnBye(s.handleBye)
+	s.srv.OnNotify(s.drainHandler(s.notifyH.Handle))
+	s.srv.OnInvite(s.drainHandler(s.handleBroadcastInvite))
+	s.srv.OnAck(s.drainHandler(s.handleBroadcastAck))
+	s.srv.OnBye(s.drainHandler(s.handleBye))
 }
 
 func (s *Server) handleBroadcastInvite(req *siplib.Request, tx siplib.ServerTransaction) {
@@ -460,27 +467,27 @@ func (s *Server) Start() error {
 
 // Shutdown 优雅关闭
 func (s *Server) Shutdown(ctx context.Context) error {
-	if !s.started {
-		return s.shutdownTrace(ctx)
-	}
+	drainErr := s.drainHandlers(ctx)
 	if s.cancel != nil {
 		s.cancel()
 	}
-	if s.srv != nil {
-		_ = s.srv.Close()
+	// sipgo.Server.Close is a no-op. Close the owned UA to terminate established
+	// TCP connections and transaction pools as well as listening sockets.
+	s.uaCloseOnce.Do(func() {
+		if s.ua != nil {
+			s.uaCloseErr = s.ua.Close()
+		}
+	})
+	if !s.started {
+		return errors.Join(drainErr, s.uaCloseErr, s.shutdownTrace(ctx))
 	}
 	done := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(done)
-	}()
+	go func() { s.wg.Wait(); close(done) }()
 	select {
 	case <-done:
-		app.ZapLog.Info("GB28181 SIP 服务已优雅关闭")
-		return s.shutdownTrace(ctx)
+		return errors.Join(drainErr, s.uaCloseErr, s.shutdownTrace(ctx))
 	case <-ctx.Done():
-		_ = s.shutdownTrace(ctx)
-		return ctx.Err()
+		return errors.Join(drainErr, s.uaCloseErr, ctx.Err(), s.shutdownTrace(ctx))
 	}
 }
 
