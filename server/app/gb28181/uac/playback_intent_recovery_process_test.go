@@ -111,7 +111,7 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 		out, err := f.store.LoadSIPInviteSteps(ctx, f.id)
 		return err == nil && len(out.Steps[0].AdditionalBranches) == 1
 	}, 2*time.Second, time.Millisecond)
-	f.noACK(t) // Restoring observation must not revive any original SIP work.
+	requirePlaybackNoPacket(t, f.peer) // Includes INVITE: observation never revives original SIP work.
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, f.store, f.barrier, f.id, stepID, "recovery-remote")
 	require.NoError(t, err)
 	defer r.CloseLocal(ctx)
@@ -142,5 +142,5 @@ func TestPlaybackRecoveryActualProcessDeathThenFreshWireAttempt(t *testing.T) {
 	require.Equal(t, playauth.IntentDispatched, loaded.Intent.State)
 	_, err = f.barrier.BeginEpoch(ctx, f.id.DeviceCode, 2)
 	require.Error(t, err, "one branch's response cannot open the device completion gate")
-	f.noACK(t)
+	requirePlaybackNoPacket(t, f.peer)
 }
