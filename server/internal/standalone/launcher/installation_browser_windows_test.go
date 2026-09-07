@@ -31,11 +31,11 @@ const (
 )
 
 // TestWindowsStandaloneT18InstallationBrowserFlow is an opt-in native Edge
-// headless smoke test for the first-install UI. It intentionally covers only
-// the browser-facing pending_admin -> login transition; SIP setup is out of
-// scope. Edge is an independently owned process Job, with a temporary clean
-// profile and no bootstrap credential in its command line. This is native
-// headless Edge automation, not Explorer automation.
+// headless smoke test for the first-install UI. It covers the browser-facing
+// pending_admin -> login -> required SIP setup transition; SIP configuration
+// completion is out of scope. Edge is an independently owned process Job,
+// with a temporary clean profile and no bootstrap credential in its command
+// line. This is native headless Edge automation, not Explorer automation.
 func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	installDir := strings.TrimSpace(os.Getenv(t18BrowserInstallDirEnv))
 	if installDir == "" {
@@ -67,6 +67,7 @@ func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	status, headers, body := client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
 	t18AssertResponseSafe(t, headers, body, bootstrapToken, "")
 	if status != http.StatusOK {
+		t.Logf("initial setup status HTTP status=%d", status)
 		t.Fatal("initial setup status request failed")
 	}
 	t18AssertSetupStatus(t, body, true, "pending_admin")
@@ -84,30 +85,46 @@ func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	}()
 
 	if err := browser.navigate(browserContext, entry); err != nil {
+		t18LogBrowserState(t, browser.cdp)
 		t.Fatal("could not navigate the owned browser")
 	}
 	entry = ""
 	bootstrapToken = ""
 	if err := t18WaitSetupForm(browserContext, browser.cdp); err != nil {
+		t18LogBrowserState(t, browser.cdp)
 		t.Fatal("first-install form did not become ready with a scrubbed URL")
 	}
 
 	username := "t18-browser-admin"
 	password := t18BrowserPassword(t)
 	if err := browser.fillAndSubmit(browserContext, username, password); err != nil {
+		t18LogBrowserState(t, browser.cdp)
 		t.Fatal("first-install form submission could not be dispatched")
 	}
-	password = ""
 	if err := t18WaitLoginRoute(browserContext, browser.cdp); err != nil {
+		t18LogBrowserState(t, browser.cdp)
 		t.Fatal("first-install UI did not transition to the login route")
 	}
-
+	if err := browser.loginAndSubmit(browserContext, username, password); err != nil {
+		t18LogBrowserState(t, browser.cdp)
+		t.Fatal("administrator login form submission could not be dispatched")
+	}
+	password = ""
+	if err := t18WaitSIPRequired(browserContext, browser.cdp); err != nil {
+		t18LogBrowserState(t, browser.cdp)
+		t.Fatal("SIP required setup modal did not become visible")
+	}
 	status, headers, body = client.request(t, http.MethodGet, "/api/standalone/setup/status", "", nil)
 	t18AssertResponseSafe(t, headers, body, "", "")
 	if status != http.StatusOK {
-		t.Fatal("post-install setup status request failed")
+		t18LogBrowserState(t, browser.cdp)
+		t.Logf("post-login setup status HTTP status=%d", status)
+		t.Fatal("post-login setup status request failed")
 	}
 	t18AssertSetupStatus(t, body, true, "pending_sip")
+	if err := browser.captureScreenshot(browserContext, filepath.Join(installDir, "t18-sip-onboarding.png")); err != nil {
+		t.Log("SIP onboarding screenshot was unavailable")
+	}
 }
 
 func t18BrowserPassword(t *testing.T) string {
@@ -263,6 +280,62 @@ func (browser *t18EdgeBrowser) fillAndSubmit(ctx context.Context, username, pass
 		"submit.click(); return true;" +
 		"})()"
 	return browser.cdp.evalBool(ctx, expression)
+}
+
+func (browser *t18EdgeBrowser) loginAndSubmit(ctx context.Context, username, password string) error {
+	usernameJSON, err := json.Marshal(username)
+	if err != nil {
+		return errors.New("encode browser username")
+	}
+	passwordJSON, err := json.Marshal(password)
+	if err != nil {
+		return errors.New("encode browser password")
+	}
+	expression := "(() => {" +
+		"const form = Array.from(document.querySelectorAll('form')).find(candidate => " +
+		"candidate.querySelector('input[type=password]') && " +
+		"(candidate.querySelector('input[placeholder=\\\"请输入账号\\\"]') || candidate.querySelector('input[type=text]')));" +
+		"if (!form) return false;" +
+		"const setValue = (selector, value) => {" +
+		"const input = form.querySelector(selector);" +
+		"if (!input) return false;" +
+		"const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;" +
+		"setter.call(input, value);" +
+		"input.dispatchEvent(new Event('input', {bubbles: true}));" +
+		"input.dispatchEvent(new Event('change', {bubbles: true}));" +
+		"return true;};" +
+		"if (!setValue('input[placeholder=\\\"请输入账号\\\"]', " + string(usernameJSON) + ") &&" +
+		"!setValue('input[type=text]', " + string(usernameJSON) + ")) return false;" +
+		"if (!setValue('input[type=password]', " + string(passwordJSON) + ")) return false;" +
+		"const submit = form.querySelector('button[type=submit]');" +
+		"if (!submit || submit.disabled) return false;" +
+		"submit.click(); return true;" +
+		"})()"
+	return browser.cdp.evalBool(ctx, expression)
+}
+
+func (browser *t18EdgeBrowser) captureScreenshot(ctx context.Context, path string) error {
+	if browser == nil || browser.cdp == nil {
+		return errors.New("browser protocol is unavailable")
+	}
+	result, err := browser.cdp.call(ctx, "Page.captureScreenshot", map[string]string{"format": "png"})
+	if err != nil {
+		return err
+	}
+	var payload struct {
+		Data string `json:"data"`
+	}
+	if json.Unmarshal(result, &payload) != nil || payload.Data == "" {
+		return errors.New("invalid browser screenshot response")
+	}
+	png, err := base64.StdEncoding.DecodeString(payload.Data)
+	if err != nil || len(png) == 0 {
+		return errors.New("invalid browser screenshot data")
+	}
+	if err := os.WriteFile(path, png, 0600); err != nil {
+		return errors.New("write browser screenshot")
+	}
+	return nil
 }
 
 func t18FindEdgeExecutable() (string, error) {
@@ -502,9 +575,14 @@ func (cdp *t18CDP) close() error {
 }
 
 type t18BrowserDOMState struct {
-	URLScrubbed bool `json:"urlScrubbed"`
-	SetupForm   bool `json:"setupForm"`
-	LoginRoute  bool `json:"loginRoute"`
+	URLScrubbed     bool `json:"urlScrubbed"`
+	SetupForm       bool `json:"setupForm"`
+	LoginRoute      bool `json:"loginRoute"`
+	LoginForm       bool `json:"loginForm"`
+	SIPModalVisible bool `json:"sipModalVisible"`
+	SIPRequired     bool `json:"sipRequired"`
+	SIPSkipVisible  bool `json:"sipSkipVisible"`
+	SIPCloseVisible bool `json:"sipCloseVisible"`
 }
 
 const t18BrowserDOMStateExpression = `(() => {
@@ -513,10 +591,31 @@ const t18BrowserDOMStateExpression = `(() => {
  const setupForm = Boolean(document.querySelector("form.standalone-setup-form input[name=username]")) &&
    Boolean(document.querySelector("form.standalone-setup-form input[name=password]")) &&
    Boolean(document.querySelector("form.standalone-setup-form input[name=passwordConfirmation]"));
+ const loginForm = Array.from(document.querySelectorAll("form")).some(form =>
+   Boolean(form.querySelector("input[type=password]")) &&
+   Boolean(form.querySelector("input[placeholder='请输入账号'], input[type=text]"))
+ );
+ const visible = node => {
+   if (!node) return false;
+   const style = getComputedStyle(node);
+   return style.display !== "none" && style.visibility !== "hidden" &&
+     (node.offsetWidth > 0 || node.offsetHeight > 0 || node.getClientRects().length > 0);
+ };
+ const sipDialog = document.querySelector(".sip-setup-dialog");
+ const sipModalVisible = visible(sipDialog);
+ const requiredCopy = sipModalVisible && Array.from(sipDialog.querySelectorAll(".sip-modal-intro-text span"))
+   .some(node => String(node.textContent || "").includes("请完成配置后再使用系统"));
+ const sipSkip = sipDialog && sipDialog.querySelector(".sip-modal-skip");
+ const sipClose = sipDialog && sipDialog.querySelector(".arco-modal-close-btn, .arco-modal-close, [aria-label='Close']");
  return {
    urlScrubbed: !href.includes("bootstrap_token="),
    setupForm: setupForm,
-   loginRoute: route.includes("/login")
+   loginRoute: route.includes("/login"),
+   loginForm: loginForm,
+   sipModalVisible: sipModalVisible,
+   sipRequired: requiredCopy,
+   sipSkipVisible: visible(sipSkip),
+   sipCloseVisible: visible(sipClose)
  };
 })()`
 
@@ -535,11 +634,36 @@ func t18WaitSetupForm(ctx context.Context, cdp *t18CDP) error {
 func t18WaitLoginRoute(ctx context.Context, cdp *t18CDP) error {
 	for {
 		state, err := cdp.evalState(ctx)
-		if err == nil && state.URLScrubbed && state.LoginRoute {
+		if err == nil && state.URLScrubbed && state.LoginRoute && state.LoginForm {
 			return nil
 		}
 		if err := t18WaitPoll(ctx); err != nil {
 			return err
 		}
 	}
+}
+
+func t18WaitSIPRequired(ctx context.Context, cdp *t18CDP) error {
+	for {
+		state, err := cdp.evalState(ctx)
+		if err == nil && !state.LoginRoute && state.URLScrubbed && state.SIPModalVisible && state.SIPRequired && !state.SIPSkipVisible && !state.SIPCloseVisible {
+			return nil
+		}
+		if err := t18WaitPoll(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+func t18LogBrowserState(t *testing.T, cdp *t18CDP) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	state, err := cdp.evalState(ctx)
+	if err != nil {
+		t.Log("browser DOM state unavailable")
+		return
+	}
+	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t login_form=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t",
+		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.LoginForm, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible)
 }
