@@ -146,6 +146,7 @@ func TestWindowsStandaloneT18InstallationBrowserFlow(t *testing.T) {
 	}
 	sipPassword = ""
 	if err := t19WaitStandaloneComplete(t, sipContext, client, browser.cdp); err != nil {
+		t19CaptureFailureScreenshot(t, browser, filepath.Join(installDir, "t19-sip-failure.png"))
 		t18LogBrowserState(t, browser.cdp)
 		t.Fatal("standalone SIP browser flow did not reach the completed home page")
 	}
@@ -907,6 +908,7 @@ type t18BrowserDOMState struct {
 	DashboardVisible        bool `json:"dashboardVisible"`
 	DashboardAPIRequested   bool `json:"dashboardAPIRequested"`
 	ServerErrorToastVisible bool `json:"serverErrorToastVisible"`
+	PermissionDeniedVisible bool `json:"permissionDeniedVisible"`
 }
 
 const t18BrowserDOMStateExpression = `(() => {
@@ -980,7 +982,8 @@ const t18BrowserDOMStateExpression = `(() => {
    sipCloseVisible: visible(sipClose),
    dashboardVisible: dashboardVisible,
    dashboardAPIRequested: dashboardAPIRequested,
-   serverErrorToastVisible: serverErrorToastVisible
+   serverErrorToastVisible: serverErrorToastVisible,
+   permissionDeniedVisible: Array.from(document.querySelectorAll(".arco-message, .arco-notification, [role=alert]")).some(node => visible(node) && String(node.textContent || "").includes("您没有权限访问此资源"))
  };
 })()`
 
@@ -1036,7 +1039,11 @@ func t19WaitStandaloneComplete(t *testing.T, ctx context.Context, client t18HTTP
 			}
 		}
 		state, stateErr := cdp.evalState(ctx)
-		if phaseComplete && stateErr == nil && state.URLScrubbed && state.HomeRoute && state.DashboardVisible && !state.ServerErrorToastVisible {
+		if stateErr == nil && (state.ServerErrorToastVisible || state.PermissionDeniedVisible) {
+			return errors.New("completed administrator page reported an API error")
+		}
+		if phaseComplete && stateErr == nil && state.URLScrubbed && state.HomeRoute && state.DashboardVisible && !state.ServerErrorToastVisible &&
+			cdp.evalBool(ctx, "Boolean(document.querySelector('.dashboard-grid .grid-stack-item')) && !document.querySelector('.dashboard-shell > .loading')") == nil {
 			return nil
 		}
 		if err := t18WaitPoll(ctx); err != nil {
@@ -1088,6 +1095,6 @@ func t18LogBrowserState(t *testing.T, cdp *t18CDP) {
 		t.Log("browser DOM state unavailable")
 		return
 	}
-	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t home_route=%t login_form=%t deployment=%t network=%t select=%t media=%t media_inputs=%d options=%d identity=%t confirm=%t next=%t save=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t dashboard=%t dashboard_api=%t server_error_toast=%t",
-		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.HomeRoute, state.LoginForm, state.DeploymentVisible, state.NetworkFormVisible, state.NetworkSelectVisible, state.MediaAddressesVisible, state.MediaInputCount, state.VisibleOptionCount, state.IdentityFormVisible, state.ConfirmGroupsVisible, state.NextEnabled, state.SaveEnabled, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible, state.DashboardVisible, state.DashboardAPIRequested, state.ServerErrorToastVisible)
+	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t home_route=%t login_form=%t deployment=%t network=%t select=%t media=%t media_inputs=%d options=%d identity=%t confirm=%t next=%t save=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t dashboard=%t dashboard_api=%t server_error_toast=%t permission_denied=%t",
+		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.HomeRoute, state.LoginForm, state.DeploymentVisible, state.NetworkFormVisible, state.NetworkSelectVisible, state.MediaAddressesVisible, state.MediaInputCount, state.VisibleOptionCount, state.IdentityFormVisible, state.ConfirmGroupsVisible, state.NextEnabled, state.SaveEnabled, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible, state.DashboardVisible, state.DashboardAPIRequested, state.ServerErrorToastVisible, state.PermissionDeniedVisible)
 }
