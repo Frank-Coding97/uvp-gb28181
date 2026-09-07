@@ -352,7 +352,9 @@ func cloneRequest(req *Request) *Request {
 	newReq.SetSource(req.Source())
 	newReq.SetDestination(req.Destination())
 	newReq.raddr = req.raddr
+	newReq.raddr.IP = slices.Clone(req.raddr.IP)
 	newReq.Laddr = req.Laddr
+	newReq.Laddr.IP = slices.Clone(req.Laddr.IP)
 
 	return newReq
 }

@@ -95,7 +95,8 @@ func snapshotPlaybackIntentRequest(r *sip.Request) (playbackIntentSnapshot, erro
 }
 
 func snapshotPlaybackRequest(r *sip.Request, method sip.RequestMethod) (playbackIntentSnapshot, error) {
-	if (method != sip.INVITE && method != sip.CANCEL) || !fixedPlaybackRequestIdentity(r, method) {
+	dialogRequest := method == sip.ACK || method == sip.BYE
+	if (method != sip.INVITE && method != sip.CANCEL && !dialogRequest) || !fixedPlaybackRequestIdentity(r, method) {
 		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 	}
 	for _, header := range []string{"To", "Max-Forwards", "Content-Length"} {
@@ -103,7 +104,10 @@ func snapshotPlaybackRequest(r *sip.Request, method sip.RequestMethod) (playback
 			return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 		}
 	}
-	if r.To() == nil || r.To().Address.Host == "" || len(r.To().Params) != 0 || r.MaxForwards() == nil || r.ContentLength() == nil || int(*r.ContentLength()) != len(r.Body()) {
+	if r.To() == nil || r.To().Address.Host == "" || r.MaxForwards() == nil || r.ContentLength() == nil || int(*r.ContentLength()) != len(r.Body()) {
+		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
+	}
+	if (dialogRequest && (len(r.To().Params) != 1 || singlePlaybackBranchTag(r.To().Params) == "")) || (!dialogRequest && len(r.To().Params) != 0) {
 		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 	}
 	contentType := ""
