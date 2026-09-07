@@ -2,17 +2,17 @@ package main
 
 import "testing"
 
-func TestRuntimeRequiresWindows11NativeX64(t *testing.T) {
-	good := inventory{Caption: "Microsoft Windows 11 Pro", Build: 22631, ProductType: 1, Architecture: 9}
+func TestRuntimeRequiresWindows10NativeX64(t *testing.T) {
+	good := inventory{Caption: "Microsoft Windows 10 Pro", Build: 19045, ProductType: 1, Architecture: 9}
 	if err := validate("runtime", good); err != nil {
 		t.Fatal(err)
 	}
 	for _, change := range []func(*inventory){
-		func(i *inventory) { i.Build = 19045 },
+		func(i *inventory) { i.Build = 19044 },
 		func(i *inventory) { i.ProductType = 3 },
 		func(i *inventory) { i.Architecture = 12 },
 		func(i *inventory) { i.Caption = "" },
-		func(i *inventory) { i.Caption = "Microsoft Windows 12 Pro" },
+		func(i *inventory) { i.Caption = "Microsoft Windows 11 Pro" },
 		func(i *inventory) { i.BuildTools = []string{"go"} },
 		func(i *inventory) { i.RunningComponents = []string{"redis-server"} },
 	} {
