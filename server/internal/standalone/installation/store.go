@@ -33,6 +33,17 @@ var standaloneAdministratorHomepagePermissions = []string{
 	"gb28181:home:layout:reset",
 }
 
+type standaloneAdministratorHomepageAPI struct {
+	Path   string `gorm:"column:path"`
+	Method string `gorm:"column:method"`
+}
+
+var standaloneAdministratorHomepageAPIFallbacks = []standaloneAdministratorHomepageAPI{
+	// The live dashboard stream predates the API catalog entry, but is an
+	// exact homepage dependency alongside the cataloged snapshot endpoint.
+	{Path: "/api/gb28181/sip/dashboard/stream", Method: "GET"},
+}
+
 type Phase string
 
 const (
@@ -497,11 +508,7 @@ func ensureStandaloneAdministratorHomepagePermissions(ctx context.Context, tx *g
 		}
 	}
 
-	type apiPermission struct {
-		Path   string `gorm:"column:path"`
-		Method string `gorm:"column:method"`
-	}
-	var apis []apiPermission
+	var apis []standaloneAdministratorHomepageAPI
 	if err := tx.WithContext(ctx).Table("sys_menu_api AS menu_api").
 		Select("DISTINCT api.path, api.method").
 		Joins("JOIN sys_api AS api ON api.id = menu_api.api_id").
@@ -510,6 +517,7 @@ func ensureStandaloneAdministratorHomepagePermissions(ctx context.Context, tx *g
 		Find(&apis).Error; err != nil {
 		return fmt.Errorf("read standalone administrator homepage API permissions: %w", err)
 	}
+	apis = append(apis, standaloneAdministratorHomepageAPIFallbacks...)
 	for _, api := range apis {
 		relation := casbinRelation{
 			PType: "p",

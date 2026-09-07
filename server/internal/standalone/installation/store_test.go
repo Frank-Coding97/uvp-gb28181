@@ -153,12 +153,27 @@ func TestCreateAdminGrantsHomepageAdministratorPermissions(t *testing.T) {
 		{path: "/api/gb28181/home/drilldown/sip", method: http.MethodGet},
 		{path: "/api/gb28181/home/drilldown/traffic", method: http.MethodGet},
 		{path: "/api/gb28181/sip/dashboard/snapshot", method: http.MethodGet},
+		{path: "/api/gb28181/sip/dashboard/stream", method: http.MethodGet},
 		{path: "/api/gb28181/zlm/overview", method: http.MethodGet},
 	} {
 		allowed, err := enforcer.Enforce(subject, request.path, request.method, "*")
 		require.NoError(t, err)
 		require.True(t, allowed, "system administrator must be allowed %s %s", request.method, request.path)
 	}
+	for _, request := range []struct {
+		path   string
+		method string
+	}{
+		{path: "/api/gb28181/sip/dashboard/stream", method: http.MethodPost},
+		{path: "/api/gb28181/sip/dashboard/stream/other", method: http.MethodGet},
+	} {
+		allowed, err := enforcer.Enforce(subject, request.path, request.method, "*")
+		require.NoError(t, err)
+		require.False(t, allowed, "homepage grant must remain exact for %s %s", request.method, request.path)
+	}
+	guestAllowed, err := enforcer.Enforce(fmt.Sprintf("role_%d", guest.ID), "/api/gb28181/sip/dashboard/stream", http.MethodGet, "*")
+	require.NoError(t, err)
+	require.False(t, guestAllowed, "guest must not inherit the administrator-only stream grant")
 	require.Equal(t, guestMenuCount, countTable(t, db, fmt.Sprintf("sys_role_menu WHERE role_id = %d", guest.ID)))
 	require.Equal(t, guestPolicyCount, countTable(t, db, fmt.Sprintf("sys_casbin_rule WHERE ptype = 'p' AND v0 = 'role_%d'", guest.ID)))
 }
