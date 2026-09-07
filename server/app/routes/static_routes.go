@@ -98,6 +98,10 @@ func serveWebFileOrNotFound(config staticRouteConfig) gin.HandlerFunc {
 			c.Status(http.StatusNotFound)
 			return
 		}
+		if isWebSocketUpgrade(c.Request) {
+			c.Status(http.StatusNotFound)
+			return
+		}
 
 		requestPath, ok := decodedRequestPath(c.Request)
 		if !ok || isNonSPARoute(requestPath, config.PublicPath) {
@@ -138,6 +142,9 @@ func decodedRequestPath(request *http.Request) (string, bool) {
 	}
 	for _, segment := range strings.Split(decoded, "/") {
 		if segment == "." || segment == ".." {
+			return "", false
+		}
+		if strings.HasSuffix(segment, ".") || strings.HasSuffix(segment, " ") {
 			return "", false
 		}
 		// A colon is not valid in a URL path component for this package and
@@ -197,6 +204,14 @@ func acceptsHTML(request *http.Request) bool {
 	return strings.Contains(strings.ToLower(request.Header.Get("Accept")), "text/html")
 }
 
+func isWebSocketUpgrade(request *http.Request) bool {
+	if request == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(request.Header.Get("Upgrade")), "websocket") &&
+		strings.Contains(strings.ToLower(request.Header.Get("Connection")), "upgrade")
+}
+
 func isPageRequest(requestPath string, request *http.Request) bool {
 	if requestPath == "/" {
 		return true
@@ -223,6 +238,9 @@ func resolveStaticFile(root, relative string) (string, error) {
 	candidateAbs := filepath.Join(rootAbs, filepath.FromSlash(relative))
 	if !withinStaticRoot(rootAbs, candidateAbs) {
 		return "", errors.New("static file escapes root")
+	}
+	if err := rejectStaticPathReparsePoints(candidateAbs); err != nil {
+		return "", err
 	}
 
 	rootReal, err := filepath.EvalSymlinks(rootAbs)
