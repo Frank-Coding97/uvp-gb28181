@@ -27,6 +27,10 @@ type OwnedClientInvite struct {
 	ack                                 *sip.Request
 	unmatched                           chan *sip.Response
 	writeErrors                         chan error
+	provisionalObserved, finalObserved  bool
+	cancelPrepared, cancelStarted       bool
+	cancelTx                            *sip.ClientTx
+	cancelExited                        bool
 }
 
 // PrepareWriteInviteOwned accepts an already fixed request. It may establish a
@@ -76,8 +80,12 @@ func newOwnedClientInvite(ua *DialogUA, request *sip.Request, tx *sip.ClientTx) 
 		<-tx.Quiesced()
 		o.mu.Lock()
 		o.transactionExited, o.closing = true, true
+		cancelTx := o.cancelTx
 		o.closeQuiescedLocked()
 		o.mu.Unlock()
+		if cancelTx != nil {
+			cancelTx.Terminate()
+		}
 	}()
 	return o
 }
@@ -114,7 +122,7 @@ func (o *OwnedClientInvite) endWork() {
 }
 
 func (o *OwnedClientInvite) closeQuiescedLocked() {
-	if o.transactionExited && o.active == 0 && !o.quiescedClosed {
+	if o.transactionExited && o.active == 0 && (o.cancelTx == nil || o.cancelExited) && !o.quiescedClosed {
 		o.quiescedClosed = true
 		close(o.quiesced)
 	}
@@ -125,11 +133,16 @@ func (o *OwnedClientInvite) closeQuiescedLocked() {
 func (o *OwnedClientInvite) Terminate() {
 	o.mu.Lock()
 	o.closing = true
+	cancelTx := o.cancelTx
 	o.mu.Unlock()
 	o.tx.Terminate()
+	if cancelTx != nil {
+		cancelTx.Terminate()
+	}
 }
 
-// Quiesced joins both the concrete transaction and an entered Start call.
+// Quiesced joins both concrete transactions and all entered owned work,
+// including CANCEL connection preparation and explicit first writes.
 // It does not mean the remote dialog, media, or device operation is complete.
 func (o *OwnedClientInvite) Quiesced() <-chan struct{} { return o.quiesced }
 
@@ -158,6 +171,13 @@ func (o *OwnedClientInvite) NextResponse(ctx context.Context) (*sip.Response, er
 		}
 		copy := response.Clone()
 		copy.SetBody(append([]byte(nil), response.Body()...))
+		o.mu.Lock()
+		if response.StatusCode >= 200 {
+			o.finalObserved = true
+		} else if response.StatusCode >= 100 {
+			o.provisionalObserved = true
+		}
+		o.mu.Unlock()
 		return copy, nil
 	case <-o.tx.Done():
 		return nil, errors.Join(ErrOwnedInviteState, o.tx.Err())
@@ -182,7 +202,7 @@ func (o *OwnedClientInvite) AcceptResponse(response *sip.Response) error {
 		o.mu.Unlock()
 		return ErrOwnedInviteState
 	}
-	o.accepted = true
+	o.accepted, o.finalObserved = true, true
 	o.active++
 	o.mu.Unlock()
 	defer o.endWork()
