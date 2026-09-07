@@ -363,7 +363,7 @@ func cyanCallerEncoder(c zapcore.EntryCaller, enc zapcore.PrimitiveArrayEncoder)
 
 // newCache 初始化缓存
 func newCache() app.CacheInterf {
-	cacheType := app.ConfigYml.GetString("server.cachetype")
+	cacheType := strings.ToLower(strings.TrimSpace(app.ConfigYml.GetString("server.cachetype")))
 	if cacheType == "redis" {
 		redisHelper, err := cachehelper.NewRedisHelper(
 			app.ConfigYml.GetString("redis.host")+":"+app.ConfigYml.GetString("redis.port"),
@@ -375,6 +375,9 @@ func newCache() app.CacheInterf {
 		}
 
 		return redisHelper
+	}
+	if standalonePaths.Explicit {
+		panic("standalone requires Redis cache; memory cache is not supported")
 	}
 	return cachehelper.NewMemoryHelper()
 }
