@@ -147,6 +147,33 @@ func TestShutdownHookGateCleanupReleasesBlockedRequest(t *testing.T) {
 	}
 }
 
+func TestWaitForMP4SizeWaitsPastSmallHeader(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "record.mp4")
+	if err := os.WriteFile(path, make([]byte, 44), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, size := waitForMP4Size(root, shutdownRecordingDataMinBytes, 50*time.Millisecond)
+	if files != 1 || size != 44 {
+		t.Fatalf("small MP4 header inventory = files %d, bytes %d; want 1, 44", files, size)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write(make([]byte, shutdownRecordingDataMinBytes-44)); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	files, size = waitForMP4Size(root, shutdownRecordingDataMinBytes, time.Second)
+	if files != 1 || size < shutdownRecordingDataMinBytes {
+		t.Fatalf("grown MP4 inventory = files %d, bytes %d; want 1 and at least %d", files, size, shutdownRecordingDataMinBytes)
+	}
+}
+
 func shutdownProbeRecordBody(t *testing.T) []byte {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{

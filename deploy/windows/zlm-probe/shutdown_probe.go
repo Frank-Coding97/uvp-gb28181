@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 const (
 	shutdownProbeName             = "windows-zlm-shutdown-probe"
 	shutdownBarrierMarker         = "uvp-finalization-barrier-waiting"
+	shutdownBarrierFailureMarker  = "uvp-finalization-barrier-failed"
 	shutdownHookWait              = 12 * time.Second
 	shutdownBarrierWait           = 30 * time.Second
 	shutdownBarrierAliveProof     = 500 * time.Millisecond
@@ -39,6 +41,8 @@ type shutdownProbeScenario struct {
 	mode                shutdownHookMode
 	expectCleanExit     bool
 	requireBarrier      bool
+	requireBarrierAlive bool
+	requireBarrierFail  bool
 	expectedHookAttempt int
 }
 
@@ -81,9 +85,9 @@ func runShutdownProbe(opts probeOptions) (report probeReport) {
 	}
 
 	scenarios := []shutdownProbeScenario{
-		{name: "shutdown_hook_blocked", mode: shutdownHookBlockThenSuccess, expectCleanExit: true, requireBarrier: true, expectedHookAttempt: 1},
-		{name: "shutdown_hook_retry", mode: shutdownHookRetryThenSuccess, expectCleanExit: true, requireBarrier: true, expectedHookAttempt: 2},
-		{name: "shutdown_hook_failure", mode: shutdownHookAlwaysFailure, expectCleanExit: false, expectedHookAttempt: 2},
+		{name: "shutdown_hook_blocked", mode: shutdownHookBlockThenSuccess, expectCleanExit: true, requireBarrier: true, requireBarrierAlive: true, expectedHookAttempt: 1},
+		{name: "shutdown_hook_retry", mode: shutdownHookRetryThenSuccess, expectCleanExit: true, requireBarrier: true, requireBarrierAlive: true, expectedHookAttempt: 2},
+		{name: "shutdown_hook_failure", mode: shutdownHookAlwaysFailure, expectCleanExit: false, requireBarrier: true, requireBarrierFail: true, expectedHookAttempt: 2},
 	}
 	for _, scenario := range scenarios {
 		check, stage, stats := runShutdownScenario(opts, scenario, root, relExecutable)
@@ -110,11 +114,18 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 
 	var receiver *hookReceiver
 	var gate *shutdownHookGate
+	var player *playerSession
+	playerStopped := false
 	var inputReader, inputWriter *os.File
 	var server *zlmProcess
 	defer func() {
 		if gate != nil {
 			gate.release()
+		}
+		if player != nil && !playerStopped {
+			if stopErr := player.stop(5 * time.Second); stopErr != nil && result.Status == "passed" {
+				result = failedCheck(scenario.name, "HTTP fmp4 player cleanup timed out")
+			}
 		}
 		if server != nil {
 			if stopErr := server.stop(10 * time.Second); stopErr != nil && result.Status == "passed" {
@@ -158,7 +169,9 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if err != nil {
 		return failedCheck(scenario.name, "controlled Hook receiver could not be started"), stage, stats
 	}
-	receiver.setTokens(randomToken("fixture-play-"), randomToken("fixture-publish-"))
+	playToken := randomToken("fixture-play-")
+	publishToken := randomToken("fixture-publish-")
+	receiver.setTokens(playToken, publishToken)
 	configPath := filepath.Join(stage, "config.ini")
 	if err := configureRuntime(configPath, httpPort, rtspPort, secret, node, receiver); err != nil {
 		return failedCheck(scenario.name, "isolated ZLMediaKit config could not be prepared"), stage, stats
@@ -201,6 +214,18 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if err := waitMediaOnline(client, secret, vhost, app, stream); err != nil {
 		return failedCheck(scenario.name, "the loaded fixture did not become an online fmp4 source"), stage, stats
 	}
+	player, err = openPlayerWithQuery(client.baseURL, app, stream, url.Values{"play_token": {playToken}})
+	if err != nil {
+		return failedCheck(scenario.name, "HTTP fmp4 player could not be opened for the shutdown fixture"), stage, stats
+	}
+	select {
+	case readyErr := <-player.ready:
+		if readyErr != nil {
+			return failedCheck(scenario.name, "HTTP fmp4 player did not receive fixture media bytes"), stage, stats
+		}
+	case <-time.After(mediaReadyTimeout):
+		return failedCheck(scenario.name, "HTTP fmp4 player readiness timed out"), stage, stats
+	}
 
 	recordRoot := filepath.Join(stage, "录像 输出 中文 space")
 	if err := os.MkdirAll(recordRoot, 0o700); err != nil {
@@ -216,7 +241,7 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if err := waitRecording(client, secret, vhost, app, stream, true); err != nil {
 		return failedCheck(scenario.name, "isRecording did not report the active MP4 recorder"), stage, stats
 	}
-	files, bytes := waitForMP4(recordRoot, recordWaitTimeout)
+	files, bytes := waitForMP4Size(recordRoot, shutdownRecordingDataMinBytes, recordWaitTimeout)
 	if files == 0 || bytes < shutdownRecordingDataMinBytes {
 		return failedCheck(scenario.name, "recording produced no confirmed temporary MP4 data"), stage, stats
 	}
@@ -230,8 +255,27 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if err := waitRecording(client, secret, vhost, app, stream, false); err != nil {
 		return failedCheck(scenario.name, "isRecording did not report the stopped MP4 recorder"), stage, stats
 	}
+	if err := player.stop(5 * time.Second); err != nil {
+		return failedCheck(scenario.name, "HTTP fmp4 player cleanup timed out before shutdown"), stage, stats
+	}
+	playerStopped = true
 	if err := gate.waitForAttempt(scenario.expectedHookAttempt, shutdownHookWait); err != nil {
 		return failedCheck(scenario.name, "on_record_mp4 did not reach the controlled Hook gate"), stage, stats
+	}
+	formalPath, ok := gate.recordPath()
+	if !ok {
+		return failedCheck(scenario.name, "on_record_mp4 did not provide a formal MP4 path before shutdown"), stage, stats
+	}
+	formalPath, ok = shutdownPathInStage(stage, formalPath)
+	if !ok {
+		return failedCheck(scenario.name, "recording Hook returned a path outside the isolated workspace before shutdown"), stage, stats
+	}
+	if err := waitForShutdownFileSize(formalPath, shutdownRecordingDataMinBytes, recordWaitTimeout); err != nil {
+		return failedCheck(scenario.name, "formal MP4 was not complete before shutdown"), stage, stats
+	}
+	temporaryPath := filepath.Join(filepath.Dir(formalPath), "."+filepath.Base(formalPath))
+	if err := waitForShutdownFileAbsent(temporaryPath, recordWaitTimeout); err != nil {
+		return failedCheck(scenario.name, "temporary MP4 remained when the recording Hook was entered"), stage, stats
 	}
 	if server.pollExit() {
 		return failedCheck(scenario.name, "MediaServer.exe exited before stdin shutdown"), stage, stats
@@ -241,11 +285,18 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	}
 
 	if scenario.requireBarrier {
-		if err := waitForShutdownBarrier(stage, shutdownBarrierMarker, shutdownBarrierWait); err != nil {
+		if err := waitForShutdownBarrier(server, stage, shutdownBarrierMarker, shutdownBarrierWait); err != nil {
 			return failedCheck(scenario.name, "finalization barrier event was not observed"), stage, stats
 		}
-		if err := waitForShutdownProcessAlive(server, shutdownBarrierAliveProof); err != nil {
-			return failedCheck(scenario.name, "MediaServer.exe exited while the finalization barrier was waiting"), stage, stats
+		if scenario.requireBarrierAlive {
+			if err := waitForShutdownProcessAlive(server, shutdownBarrierAliveProof); err != nil {
+				return failedCheck(scenario.name, "MediaServer.exe exited while the finalization barrier was waiting"), stage, stats
+			}
+		}
+	}
+	if scenario.requireBarrierFail {
+		if err := waitForShutdownBarrier(server, stage, shutdownBarrierFailureMarker, shutdownBarrierWait); err != nil {
+			return failedCheck(scenario.name, "finalization barrier failure event was not observed"), stage, stats
 		}
 	}
 
@@ -254,14 +305,20 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 		if exitErr == nil || !server.pollExit() || server.waitErr == nil {
 			return failedCheck(scenario.name, "MediaServer.exe did not exit with a nonzero status after Hook failure"), stage, stats
 		}
+		var processExit *exec.ExitError
+		if !errors.As(server.waitErr, &processExit) || processExit.ExitCode() != 2 {
+			return failedCheck(scenario.name, "MediaServer.exe did not exit with status 2 after Hook failure"), stage, stats
+		}
 		if gate.successes() != 0 {
 			return failedCheck(scenario.name, "failed recording Hook scenario reported a successful index"), stage, stats
 		}
 		return passedCheck(scenario.name, map[string]any{
-			"hook_attempts":         gate.attempts(),
-			"hook_successes":        gate.successes(),
-			"expected_nonzero_exit": true,
-			"index_written":         false,
+			"hook_attempts":      gate.attempts(),
+			"hook_successes":     gate.successes(),
+			"expected_exit_code": 2,
+			"barrier_observed":   scenario.requireBarrier,
+			"barrier_failed":     scenario.requireBarrierFail,
+			"index_written":      false,
 		}), stage, stats
 	}
 
@@ -272,18 +329,10 @@ func runShutdownScenario(opts probeOptions, scenario shutdownProbeScenario, root
 	if gate.successes() != 1 {
 		return failedCheck(scenario.name, "recording Hook did not write exactly one successful index"), stage, stats
 	}
-	formalPath, ok := gate.recordPath()
-	if !ok {
-		return failedCheck(scenario.name, "successful recording Hook did not provide a formal MP4 path"), stage, stats
-	}
-	formalPath, ok = shutdownPathInStage(stage, formalPath)
-	if !ok {
-		return failedCheck(scenario.name, "recording Hook returned a path outside the isolated workspace"), stage, stats
-	}
 	if err := waitForShutdownFileSize(formalPath, shutdownRecordingDataMinBytes, recordWaitTimeout); err != nil {
 		return failedCheck(scenario.name, "formal MP4 was not present after clean exit"), stage, stats
 	}
-	temporaryPath := filepath.Join(filepath.Dir(formalPath), "."+filepath.Base(formalPath))
+	temporaryPath = filepath.Join(filepath.Dir(formalPath), "."+filepath.Base(formalPath))
 	if err := waitForShutdownFileAbsent(temporaryPath, recordWaitTimeout); err != nil {
 		return failedCheck(scenario.name, "temporary MP4 remained after clean exit"), stage, stats
 	}
@@ -459,14 +508,44 @@ func (gate *shutdownHookGate) recordPath() (string, bool) {
 	return gate.recordFilePath, gate.recordFilePath != ""
 }
 
-func waitForShutdownBarrier(stage, marker string, timeout time.Duration) error {
+func waitForMP4Size(root string, minimum int64, timeout time.Duration) (files int, bytes int64) {
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		for _, name := range []string{"probe-stdout.log", "probe-stderr.log"} {
-			data, err := os.ReadFile(filepath.Join(stage, name))
-			if err == nil && bytes.Contains(data, []byte(marker)) {
+	for {
+		files, bytes = findMP4(root)
+		if bytes >= minimum || !time.Now().Before(deadline) {
+			return files, bytes
+		}
+		timer := time.NewTimer(200 * time.Millisecond)
+		<-timer.C
+	}
+}
+
+func shutdownLogContains(stage, marker string) bool {
+	for _, name := range []string{"probe-stdout.log", "probe-stderr.log"} {
+		data, err := os.ReadFile(filepath.Join(stage, name))
+		if err == nil && bytes.Contains(data, []byte(marker)) {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForShutdownBarrier(process *zlmProcess, stage, marker string, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		if shutdownLogContains(stage, marker) {
+			return nil
+		}
+		if process != nil && process.pollExit() {
+			// The final log write can race with cmd.Wait; inspect both streams once
+			// after observing process exit before reporting a missing barrier.
+			if shutdownLogContains(stage, marker) {
 				return nil
 			}
+			return errors.New("shutdown barrier event missing after process exit")
+		}
+		if !time.Now().Before(deadline) {
+			break
 		}
 		timer := time.NewTimer(50 * time.Millisecond)
 		<-timer.C
