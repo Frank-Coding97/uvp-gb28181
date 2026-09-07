@@ -1,3 +1,5 @@
 module uvplatform.cn/windows-zlm-probe
 
-go 1.25
+go 1.25.0
+
+require golang.org/x/net v0.57.0

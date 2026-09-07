@@ -1,6 +1,6 @@
 # Windows ZLMediaKit 原生契约 probe
 
-这个独立模块用于 T04 的 Windows 原生验证。它要求一个完整的
+这个独立模块用于 T04 和 T17 媒体边界的 Windows 原生验证。它要求一个完整的
 `MediaServer.exe` 运行目录，先复制整个目录到系统临时目录下带有中文和空格的
 隔离路径，再生成只绑定 `127.0.0.1` 的临时配置和 HTTP 端口，最后启动、检查和
 停止它自己的进程。不会安装服务，也不会按进程名停止已有的 ZLMediaKit。
@@ -20,7 +20,7 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o z
   -root 'D:\UVP\media' `
   -exe 'D:\UVP\media\MediaServer.exe' `
   -fixture 'D:\UVP\input\zlm-fixture.mp4' `
-  -expected-commit 'b422fb016da1c3989b725dde3bd0292613b12060'
+  -expected-commit '318726bd94f168d988fb2127042e74b4be207fd7'
 ```
 
 探针覆盖：
@@ -30,6 +30,8 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o z
 - `openRtpServer`、`listRtpServer`、`closeRtpServer` 的真实生命周期；
 - MP4 加载后的 HTTP-FMP4 播放者、`getMediaPlayerList`、
   `getMediaTrafficStatistic` 和 `addProbe`；
+- 真实 WebSocket-FMP4：缺失/错误播放 token 被 Hook 拒绝，合法连接持续收到至少两秒
+  MP4 数据，关闭后播放者计数有界恢复，媒体 URL 不含管理 secret；
 - 中文/空格目录下的 `startRecord`、`isRecording`、`stopRecord` 及非空 MP4
   文件；
 - 无 Cookie 重放的错误 secret 拒绝，响应码必须为 ZLMediaKit 的 `-100`。

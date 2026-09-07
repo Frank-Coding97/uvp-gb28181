@@ -862,6 +862,10 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, recei
 	case <-time.After(mediaReadyTimeout):
 		return failedCheck("media_and_recording", "HTTP fmp4 player readiness timed out")
 	}
+	wsDetails, err := checkWebSocketMedia(client, secret, app, stream, receiver)
+	if err != nil {
+		return failedCheck("media_and_recording", err.Error())
+	}
 	fixturePlayer, err := openPlayerWithQuery(client.baseURL, app, stream, url.Values{"play_token": {receiver.playToken}})
 	if err != nil {
 		return failedCheck("media_and_recording", "fixture-token HTTP fmp4 player could not be opened")
@@ -993,6 +997,7 @@ func checkMediaLifecycle(client *apiClient, secret, stage, fixture string, recei
 		mediaClosed = true
 	}
 	return passedCheck("media_and_recording", map[string]any{
+		"websocket":                 wsDetails,
 		"duration_ms":               loadedData.DurationMS,
 		"players":                   len(playerEntries),
 		"probe_frames":              len(frames),
