@@ -52,9 +52,13 @@ func isNoSpaceError(err error) bool {
 		strings.Contains(message, "not enough space") ||
 		strings.Contains(message, "disk full") ||
 		strings.Contains(message, "disk is full") ||
+		strings.Contains(message, "device is full") ||
+		strings.Contains(message, "device full") ||
 		strings.Contains(message, "磁盘空间不足") ||
 		strings.Contains(message, "空间不足") ||
 		strings.Contains(message, "没有剩余空间") ||
+		strings.Contains(message, "设备已满") ||
+		strings.Contains(message, "设备上没有足够的空间") ||
 		platformNoSpaceError(err)
 }
 

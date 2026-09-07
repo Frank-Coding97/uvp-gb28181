@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -27,6 +28,27 @@ func TestRedisConfigArgumentIsRelativeToManagedWorkingDirectory(t *testing.T) {
 	}
 	if filepath.IsAbs(argument) {
 		t.Fatalf("Redis config argument must be relative: %q", argument)
+	}
+}
+
+func TestRedisConfigKeepsDataDirectoryRelativeToManagedWorkingDirectory(t *testing.T) {
+	instance, err := newRedisInstance("redis-server", t.TempDir(), "primary", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := instance.writeConfig(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(instance.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := string(data)
+	if !strings.Contains(config, "dir .\n") {
+		t.Fatalf("Redis config does not use relative dir: %q", config)
+	}
+	if strings.Contains(config, instance.workspace) {
+		t.Fatalf("Redis config leaked an absolute workspace path: %q", config)
 	}
 }
 
