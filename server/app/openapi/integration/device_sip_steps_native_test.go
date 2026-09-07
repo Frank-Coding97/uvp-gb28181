@@ -56,16 +56,59 @@ func verifySIPInviteStepsNative(t *testing.T, ctx context.Context, db *gorm.DB, 
 	for n, step := range loaded.Steps {
 		require.Equal(t, identity(n+1), step.Identity)
 	}
+	knownBranch := func(n int) playauth.DeviceSIPKnownBranchIdentity {
+		i := identity(n)
+		return playauth.DeviceSIPKnownBranchIdentity{InviteStepID: i.StepID, CallID: i.CallID, LocalTag: i.LocalTag,
+			RemoteTag: fmt.Sprintf("native-remote-%d", n), CSeq: i.CSeq, StatusCode: 200,
+			RemoteTarget: "sip:device@127.0.0.1:5062", RouteSet: []string{"sip:proxy.example:5060;lr"}}
+	}
+	_, err = store.ObserveSIPKnownBranch(ctx, id, 19, knownBranch(1))
+	require.NoError(t, err)
+	wins.Store(0)
+	errs = make(chan error, 20)
+	for n := 0; n < 20; n++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := store.DispatchSIPKnownBranchACK(ctx, id, 20, knownBranch(1))
+			if err == nil {
+				wins.Add(1)
+			} else {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	require.EqualValues(t, 1, wins.Load())
+	for err := range errs {
+		require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict)
+	}
+	_, err = store.DispatchSIPKnownBranchACK(ctx, id, 21, knownBranch(1))
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentConflict)
+	_, err = store.DispatchSIPInviteStep(ctx, id, 21, identity(2).StepID)
+	require.NoError(t, err)
 	for _, raw := range []string{"", strings.Repeat("x", 32769)} {
 		require.Error(t, db.Table("gb_device_operation_intent").Where("operation_id=?", id.OperationID).Update("sip_steps_json", raw).Error)
 	}
 	require.NoError(t, db.Exec("UPDATE gb_device SET access_epoch=2 WHERE id=?", id.DevicePK).Error)
-	_, err = store.DispatchSIPInviteStep(ctx, id, 19, identity(2).StepID)
+	_, err = store.DispatchSIPInviteStep(ctx, id, 22, identity(3).StepID)
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
-	_, err = store.AddSIPInviteStep(ctx, id, 19, identity(17))
+	_, err = store.AddSIPInviteStep(ctx, id, 22, identity(17))
 	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
+	loaded, err = store.ObserveSIPKnownBranch(ctx, id, 22, knownBranch(2))
+	require.NoError(t, err, "retain a dispatched transaction's late response after transfer")
+	_, err = store.DispatchSIPKnownBranchACK(ctx, id, 23, knownBranch(2))
+	require.ErrorIs(t, err, playauth.ErrDeviceIntentRevoked)
+	require.Equal(t, playauth.SIPStepMayHaveDispatched, loaded.Steps[0].KnownBranch.ACKState)
+	require.Equal(t, playauth.SIPStepPrepared, loaded.Steps[1].KnownBranch.ACKState)
 	loadedAfter, err := playauth.NewDeviceOperationIntentStore(db).LoadSIPInviteSteps(ctx, id)
 	require.NoError(t, err)
+	// PostgreSQL returns a fixed-offset location, whereas the successful
+	// mutation returns UTC. Compare the instant, not time.Location pointers.
+	require.True(t, loaded.Intent.UpdatedAt.Equal(loadedAfter.Intent.UpdatedAt))
+	loaded.Intent.UpdatedAt = loaded.Intent.UpdatedAt.UTC()
+	loadedAfter.Intent.UpdatedAt = loadedAfter.Intent.UpdatedAt.UTC()
 	require.Equal(t, loaded, loadedAfter)
-	t.Log("SIP steps: 16 immutable INVITEs, bounded growth, 20 concurrent single-step CAS, native byte constraints and old-epoch read-only recovery passed")
+	t.Log("SIP steps: 16 immutable INVITEs, 20 concurrent INVITE/ACK single winners, native byte constraints, persistent first-known branches and old-epoch observation without reauthorization passed")
 }

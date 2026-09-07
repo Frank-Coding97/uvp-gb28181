@@ -27,7 +27,15 @@ func (u *UAC) prepareStoredPlaybackInvite(ctx context.Context, store *playauth.D
 	if err != nil {
 		return nil, playauth.DeviceSIPInviteSteps{}, err
 	}
-	identity := playauth.DeviceSIPInviteIdentity{
+	stored, err := store.AddSIPInviteStep(ctx, id, version, playbackIntentStorageIdentity(stepID, snapshot))
+	if err != nil {
+		return nil, playauth.DeviceSIPInviteSteps{}, err
+	}
+	return prepared, stored, nil
+}
+
+func playbackIntentStorageIdentity(stepID string, snapshot playbackIntentSnapshot) playauth.DeviceSIPInviteIdentity {
+	return playauth.DeviceSIPInviteIdentity{
 		StepID: stepID, CallID: snapshot.callID, CSeq: snapshot.cseq,
 		RequestURI: snapshot.requestURI, FromURI: snapshot.fromURI, LocalTag: snapshot.localTag,
 		ToURI: snapshot.toURI, ContactURI: snapshot.contactURI,
@@ -37,9 +45,4 @@ func (u *UAC) prepareStoredPlaybackInvite(ctx context.Context, store *playauth.D
 		MaxForwards: snapshot.maxForwards, ContentType: snapshot.contentType,
 		BodyLength: snapshot.bodyLength, BodySHA256: hex.EncodeToString(snapshot.bodySHA256[:]),
 	}
-	stored, err := store.AddSIPInviteStep(ctx, id, version, identity)
-	if err != nil {
-		return nil, playauth.DeviceSIPInviteSteps{}, err
-	}
-	return prepared, stored, nil
 }

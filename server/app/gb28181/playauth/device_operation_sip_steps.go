@@ -23,10 +23,11 @@ type DeviceSIPInviteStep struct {
 	RowVersion        int64                   `json:"-"`
 	PreparedAt        time.Time               `json:"-"`
 	DispatchStartedAt *time.Time              `json:"-"`
+	KnownBranch       *DeviceSIPKnownBranch   `json:"-"`
 }
 
-// No remote branches, terminal state or coverage are represented here. In
-// particular, empty/NULL steps do not prove that no INVITE was ever sent.
+// At most the first observed branch is represented, never complete branch
+// coverage or terminal state. Empty/NULL steps prove no absence of side effects.
 type DeviceSIPInviteSteps struct {
 	Intent DeviceOperationIntent `json:"-"`
 	Steps  []DeviceSIPInviteStep `json:"-"`
@@ -40,6 +41,7 @@ type sipInviteStepWire struct {
 	RowVersion        int64                 `json:"rowVersion"`
 	PreparedAt        time.Time             `json:"preparedAt"`
 	DispatchStartedAt *time.Time            `json:"dispatchStartedAt"`
+	KnownBranch       *sipKnownBranchWire   `json:"knownBranch,omitempty"`
 }
 
 type sipInviteStepsWire struct {
@@ -53,7 +55,7 @@ type sipIntentRow struct {
 }
 
 func sipStepToWire(s DeviceSIPInviteStep) sipInviteStepWire {
-	return sipInviteStepWire{1, "invite", s.Identity.wire(), s.State, s.RowVersion, s.PreparedAt, s.DispatchStartedAt}
+	return sipInviteStepWire{1, "invite", s.Identity.wire(), s.State, s.RowVersion, s.PreparedAt, s.DispatchStartedAt, sipKnownBranchToWire(s.KnownBranch)}
 }
 
 func validSIPStepTime(value time.Time) bool {
@@ -118,7 +120,15 @@ func readSIPInviteSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceSI
 			return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 		}
 		ids[i.StepID], invites[key] = true, true
-		out.Steps = append(out.Steps, DeviceSIPInviteStep{i, w.State, w.RowVersion, w.PreparedAt, w.DispatchStartedAt})
+		step := DeviceSIPInviteStep{Identity: i, State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt}
+		if w.KnownBranch != nil {
+			branch, err := readSIPKnownBranch(w.KnownBranch, step, row.UpdatedAt)
+			if err != nil {
+				return DeviceSIPInviteSteps{}, err
+			}
+			step.KnownBranch = branch
+		}
+		out.Steps = append(out.Steps, step)
 	}
 	return out, nil
 }
@@ -184,6 +194,13 @@ func (s *DeviceOperationIntentStore) DispatchSIPInviteStep(ctx context.Context, 
 }
 
 func (s *DeviceOperationIntentStore) mutateSIPInviteStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
+	return s.mutateSIPStep(ctx, id, version, false, mutate)
+}
+
+// observationOnly permits recording a late branch for an already dispatched
+// INVITE after transfer. Only ObserveSIPKnownBranch uses this private path;
+// every network permission continues to require current-epoch authorization.
+func (s *DeviceOperationIntentStore) mutateSIPStep(ctx context.Context, id DeviceOperationIntentIdentity, version int64, observationOnly bool, mutate func(*DeviceSIPInviteSteps, time.Time) (bool, error)) (DeviceSIPInviteSteps, error) {
 	if !s.available(ctx) {
 		return DeviceSIPInviteSteps{}, ErrDeviceIntentUnavailable
 	}
@@ -192,7 +209,11 @@ func (s *DeviceOperationIntentStore) mutateSIPInviteStep(ctx context.Context, id
 	}
 	var out DeviceSIPInviteSteps
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := authorizeIntentDevice(tx, ctx, id); err != nil {
+		check := authorizeIntentDevice
+		if observationOnly {
+			check = observeSIPBranchDevice
+		}
+		if err := check(tx, ctx, id); err != nil {
 			return err
 		}
 		var err error
