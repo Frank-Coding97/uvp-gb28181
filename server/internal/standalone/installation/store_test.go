@@ -154,6 +154,7 @@ func TestCreateAdminGrantsHomepageAdministratorPermissions(t *testing.T) {
 		{path: "/api/gb28181/home/drilldown/traffic", method: http.MethodGet},
 		{path: "/api/gb28181/sip/dashboard/snapshot", method: http.MethodGet},
 		{path: "/api/gb28181/sip/dashboard/stream", method: http.MethodGet},
+		{path: "/api/gb28181/sip/platform", method: http.MethodGet},
 		{path: "/api/gb28181/zlm/overview", method: http.MethodGet},
 	} {
 		allowed, err := enforcer.Enforce(subject, request.path, request.method, "*")
