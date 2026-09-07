@@ -36,11 +36,13 @@ func installationRouteAllowed(phase, method, requestPath string) bool {
 		}
 	}
 	key := method + " " + requestPath
-	if key == "GET /api/standalone/ready" || key == "GET /api/standalone/setup/status" {
+	// Let the coordinator return a safe conflict after a committed admin request
+	// whose response was lost. It cannot create another user in pending_sip.
+	if key == "GET /api/standalone/ready" || key == "GET /api/standalone/setup/status" || key == "POST /api/standalone/setup/admin" {
 		return true
 	}
 	if phase == "pending_admin" {
-		return key == "POST /api/standalone/setup/admin"
+		return false
 	}
 	switch key {
 	case "POST /api/login", "POST /api/refreshToken", "GET /api/captcha/verify", "GET /api/config/get",

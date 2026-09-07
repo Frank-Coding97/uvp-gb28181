@@ -19,6 +19,7 @@ func TestInstallationGatePhasesAndExactRoutes(t *testing.T) {
 		{"pending_admin", "GET", "/api/standalone/setup/admin", 503},
 		{"pending_admin", "POST", "/api/login", 503},
 		{"pending_admin", "POST", "/index/hook/on_record_mp4", 503},
+		{"pending_sip", "POST", "/api/standalone/setup/admin", 204},
 		{"pending_sip", "POST", "/api/login", 204},
 		{"pending_sip", "GET", "/api/users/profile", 204},
 		{"pending_sip", "PUT", "/api/gb28181/sip/setup/config", 204},

@@ -29,9 +29,10 @@ type t18Launch struct {
 }
 
 type t18HTTPClient struct {
-	client  *http.Client
-	baseURL string
-	origin  string
+	client      *http.Client
+	baseURL     string
+	origin      string
+	accessToken string
 }
 
 // TestWindowsStandaloneT18InstallationHTTPFlow is an opt-in end-to-end test
@@ -107,6 +108,23 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 		t.Fatalf("administrator setup = %d, want %d", status, http.StatusCreated)
 	}
 	t18AssertSetupStatus(t, body, true, "pending_sip")
+
+	status, headers, body = client.request(t, http.MethodPost, "/api/login", "", adminBody)
+	t18AssertResponseSafe(t, headers, body, bootstrapToken, password)
+	var login struct {
+		Data struct {
+			AccessToken string `json:"accessToken"`
+		} `json:"data"`
+	}
+	if status != http.StatusOK || json.Unmarshal(body, &login) != nil || login.Data.AccessToken == "" {
+		t.Fatal("new administrator could not log in")
+	}
+	client.accessToken = login.Data.AccessToken
+	status, headers, body = client.request(t, http.MethodGet, "/api/gb28181/sip/setup/status", "", nil)
+	t18AssertResponseSafe(t, headers, body, bootstrapToken, password)
+	if status != http.StatusOK {
+		t.Fatalf("authenticated SIP setup status = %d", status)
+	}
 
 	status, headers, body = client.request(t, http.MethodPost, "/api/standalone/setup/admin", bootstrapToken, adminBody)
 	t18AssertResponseSafe(t, headers, body, bootstrapToken, password)
@@ -210,6 +228,9 @@ func (client t18HTTPClient) request(t *testing.T, method, path, token string, bo
 	}
 	if client.origin != "" {
 		request.Header.Set("Origin", client.origin)
+	}
+	if client.accessToken != "" {
+		request.Header.Set("Authorization", "Bearer "+client.accessToken)
 	}
 	if token != "" {
 		request.Header.Set("X-UVP-Setup-Token", token)
