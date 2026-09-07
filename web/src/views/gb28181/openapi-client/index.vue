@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref } from "vue";
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, reactive, ref, watch } from "vue";
 import { Modal, Message } from "@arco-design/web-vue";
 import { Ban, Eye, KeyRound, Plus, RefreshCw, RotateCcw, ScrollText, Search, ShieldCheck, ShieldOff } from "lucide-vue-next";
 import { useUserStoreHook } from "@/store/modules/user";
@@ -130,6 +130,30 @@ function httpStatus(cause: unknown) {
   return Number((cause as { response?: { status?: number } }).response?.status || 0);
 }
 
+function clearAccessState() {
+  nextGeneration();
+  pageGeneration += 1;
+  requestVersion += 1;
+  closeSecret();
+  clearDrawerState();
+  clients.value = [];
+  ownerDepartments.value = [];
+  capabilities.value = [];
+  capabilitiesReady.value = false;
+  capabilitiesLoading.value = false;
+  capabilitiesError.value = "";
+  loading.value = false;
+  pagination.total = 0;
+}
+
+function handleAccessDenied(cause: unknown) {
+  if (![401, 403, 404].includes(httpStatus(cause))) return false;
+  // A masked 404 also means this client is no longer in the operator's scope.
+  clearAccessState();
+  error.value = "当前访问已被拒绝或对象已不可访问，已清空缓存，请刷新后重试。";
+  return true;
+}
+
 function conflictMessage(rowVersion: number, refreshed = true) {
   return refreshed
     ? `版本冲突：页面提交的 rowVersion=${rowVersion} 已失效，已刷新当前详情，请确认最新状态后重试。`
@@ -163,6 +187,7 @@ async function loadCapabilities() {
     capabilitiesReady.value = true;
   } catch (cause: unknown) {
     if (!isCurrentPage(page)) return;
+    if (handleAccessDenied(cause)) return;
     capabilities.value = [];
     capabilitiesReady.value = false;
     capabilitiesError.value = errorMessage(cause, "能力目录加载失败");
@@ -191,6 +216,7 @@ async function load() {
     pagination.total = result.data?.total || 0;
   } catch (cause: unknown) {
     if (version !== requestVersion || !isCurrentPage(page)) return;
+    if (handleAccessDenied(cause)) return;
     clients.value = [];
     ownerDepartments.value = [];
     pagination.total = 0;
@@ -239,6 +265,7 @@ async function loadRevocationStatus(id = currentClient.value?.id, generation = l
     revocationStatus.value = result.data;
   } catch (cause: unknown) {
     if (!isCurrentClient(generation, id)) return;
+    if (handleAccessDenied(cause)) return;
     revocationStatus.value = null;
     revocationError.value = `撤销清退进度暂不可用：${errorMessage(cause, "服务未就绪")}`;
   } finally {
@@ -264,7 +291,11 @@ async function refreshDetail(id: number, generation = lifecycleGeneration) {
     detailReady.value = true;
     updateListClient(result.data.client);
     await loadRevocationStatus(id, generation);
-    return true;
+    return isCurrentClient(generation, id);
+  } catch (cause: unknown) {
+    if (!isCurrentClient(generation, id)) return false;
+    if (handleAccessDenied(cause)) return false;
+    throw cause;
   } finally {
     if (isCurrentClient(generation, id)) drawerLoading.value = false;
   }
@@ -358,7 +389,9 @@ async function performCreate(input: OpenAPIClientCreateInput) {
     Message.success("客户端创建成功，请安全保存一次性 SK");
     await load();
   } catch (cause: unknown) {
-    if (isCurrentGeneration(generation)) drawerError.value = errorMessage(cause, "创建 OpenAPI 客户端失败");
+    if (!isCurrentGeneration(generation)) return;
+    if (handleAccessDenied(cause)) return;
+    drawerError.value = errorMessage(cause, "创建 OpenAPI 客户端失败");
   } finally {
     if (isCurrentGeneration(generation)) drawerLoading.value = false;
   }
@@ -386,6 +419,7 @@ async function saveScopes(id: number, scopes: string[], rowVersion: number) {
     Message.success("客户端能力已更新");
   } catch (cause: unknown) {
     if (!isCurrentClient(generation, id)) return;
+    if (handleAccessDenied(cause)) return;
     if (httpStatus(cause) === 409) {
       drawerError.value = conflictMessage(rowVersion);
       try { await refreshDetail(id, generation); } catch { /* keep the explicit conflict message */ }
@@ -414,6 +448,7 @@ async function performRotate(record: OpenAPIClientView = currentClient.value as 
     Message.success("SK 已轮换，请安全保存新的密钥");
   } catch (cause: unknown) {
     if (!isCurrentGeneration(generation)) return;
+    if (handleAccessDenied(cause)) return;
     if (httpStatus(cause) === 409) {
       const refreshed = await refreshDetailContext(record, generation);
       if (isCurrentGeneration(generation)) drawerError.value = conflictMessage(record.rowVersion, refreshed);
@@ -458,6 +493,7 @@ async function performStatus(action: StatusAction, record: OpenAPIClientView = c
     if (action !== "enable") drawerVisible.value = true;
   } catch (cause: unknown) {
     if (!isCurrentGeneration(generation)) return;
+    if (handleAccessDenied(cause)) return;
     if (httpStatus(cause) === 409) {
       const refreshed = await refreshDetailContext(record, generation);
       if (isCurrentGeneration(generation)) drawerError.value = conflictMessage(record.rowVersion, refreshed);
@@ -471,18 +507,20 @@ async function performStatus(action: StatusAction, record: OpenAPIClientView = c
 
 function requestRotate(record: OpenAPIClientView) {
   if (!mounted || !canRotate.value || drawerLoading.value) return;
+  const generation = lifecycleGeneration;
   Modal.confirm({
     title: "轮换 OpenAPI 客户端 SK",
     content: "轮换会立即使旧 SK 失效，新的 SK 只展示一次。确认继续吗？",
     okText: "确认轮换 SK",
     cancelText: "取消",
     okButtonProps: { status: "warning" },
-    onOk: () => performRotate(record)
+    onOk: () => isCurrentGeneration(generation) ? performRotate(record) : undefined
   });
 }
 
 function requestStatus(action: StatusAction, record: OpenAPIClientView) {
-  if (!canStatus.value) return;
+  if (!mounted || !canStatus.value || drawerLoading.value) return;
+  const generation = lifecycleGeneration;
   const isRevoke = action === "revoke";
   Modal.confirm({
     title: isRevoke ? "撤销 OpenAPI 客户端" : action === "disable" ? "停用 OpenAPI 客户端" : "启用 OpenAPI 客户端",
@@ -494,7 +532,7 @@ function requestStatus(action: StatusAction, record: OpenAPIClientView) {
     okText: isRevoke ? "确认撤销" : action === "disable" ? "确认停用" : "确认启用",
     cancelText: "取消",
     okButtonProps: isRevoke || action === "disable" ? { status: "danger" } : undefined,
-    onOk: () => performStatus(action, record)
+    onOk: () => isCurrentGeneration(generation) ? performStatus(action, record) : undefined
   });
 }
 
@@ -514,7 +552,10 @@ async function loadAudits() {
     if (failure) throw failure;
     auditItems.value = result.data?.items || [];
   } catch (cause: unknown) {
-    if (isCurrentClient(generation, clientId)) drawerError.value = errorMessage(cause, "审计加载失败");
+    if (!isCurrentClient(generation, clientId)) return;
+    if (handleAccessDenied(cause)) return;
+    auditItems.value = [];
+    drawerError.value = errorMessage(cause, "审计加载失败");
   } finally {
     if (isCurrentClient(generation, clientId)) auditLoading.value = false;
   }
@@ -527,14 +568,22 @@ function closeSecret() {
 
 function deactivatePage() {
   mounted = false;
-  nextGeneration();
-  pageGeneration += 1;
-  requestVersion += 1;
-  secretPayload.value = null;
-  loading.value = false;
-  capabilitiesLoading.value = false;
-  clearDrawerState();
+  clearAccessState();
 }
+
+watch(
+  () => JSON.stringify([userStore.account?.id, [...(userStore.account?.roles || [])].sort(), [...permissions.value].sort()]),
+  () => {
+    clearAccessState();
+    form.ownerDeptId = undefined;
+    pagination.current = 1;
+    if (mounted && canRead.value) {
+      void load();
+      void loadCapabilities();
+    }
+  },
+  { flush: "sync" }
+);
 
 onMounted(() => {
   mounted = true;

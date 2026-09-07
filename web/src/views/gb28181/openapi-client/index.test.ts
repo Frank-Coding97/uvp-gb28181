@@ -1,11 +1,13 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { Message, Modal } from "@arco-design/web-vue";
-import { defineComponent, h, KeepAlive, nextTick } from "vue";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { defineComponent, h, KeepAlive, nextTick, reactive } from "vue";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import OpenAPIClientPage from "./index.vue";
 import OpenAPIClientDrawer from "./OpenAPIClientDrawer.vue";
 
-const userStore = vi.hoisted(() => ({ account: { permissions: [] as string[] } }));
+const userState = vi.hoisted(() => ({ account: { id: 7, permissions: [] as string[] } }));
+const userStore = reactive(userState);
+enableAutoUnmount(afterEach);
 const api = vi.hoisted(() => ({
   list: vi.fn(),
   capabilities: vi.fn(),
@@ -169,6 +171,7 @@ function deferred<T>() {
 
 describe("OpenAPI client page", () => {
   beforeEach(() => {
+    userStore.account.id = 7;
     userStore.account.permissions = ["*:*:*"];
     api.list.mockReset().mockResolvedValue(ok({ items: [client], page: 1, pageSize: 20, total: 1, ownerDepartments: [{ id: 10, name: "平台运维部" }] }));
     api.capabilities.mockReset().mockResolvedValue(ok(["device:list", "play:live:apply"]));
@@ -491,5 +494,129 @@ describe("OpenAPI client page", () => {
     const ready = mountDrawer();
     expect((ready.vm as any).canSubmit).toBe(true);
     ready.unmount();
+  });
+
+  it("clears cached management data and SK immediately when read permission is lost", async () => {
+    const wrapper = mountPage();
+    const vm = wrapper.vm as any;
+    await flushPromises();
+    await vm.openDetail(client);
+    await vm.performRotate(client);
+    expect(vm.secretPayload).not.toBeNull();
+    userStore.account.permissions = [];
+    await nextTick();
+    expect(vm.secretPayload).toBeNull();
+    expect(vm.currentClient).toBeNull();
+    expect(vm.clients).toEqual([]);
+    expect(vm.ownerDepartments).toEqual([]);
+    expect(vm.capabilities).toEqual([]);
+    expect(vm.pagination.total).toBe(0);
+    expect(vm.drawerVisible).toBe(false);
+  });
+
+  it("does not accept an in-flight secret after losing only rotate permission", async () => {
+    const wrapper = mountPage();
+    const vm = wrapper.vm as any;
+    await flushPromises();
+    const pending = deferred<ReturnType<typeof ok>>();
+    api.rotate.mockReturnValueOnce(pending.promise);
+    const operation = vm.performRotate(client);
+    userStore.account.permissions = ["gb28181:openapi:client:read"];
+    pending.resolve(ok({ client, secretKey: "revoked-permission-secret" }));
+    await operation;
+    await flushPromises();
+    expect(vm.secretPayload).toBeNull();
+  });
+
+  it("keeps the one-time SK when an unchanged permission profile is refreshed", async () => {
+    const wrapper = mountPage();
+    const vm = wrapper.vm as any;
+    await flushPromises();
+    await vm.performRotate(client);
+    userStore.account.permissions = [...userStore.account.permissions];
+    await nextTick();
+    expect(vm.secretPayload).toEqual({ accessKey: client.ak, secretKey: "rotated-secret" });
+  });
+
+  it.each(["list", "capabilities", "get", "create", "scopes", "rotate", "disable", "revocation"])(
+    "invalidates cached access on a %s HTTP denial",
+    async endpoint => {
+      const wrapper = mountPage();
+      const vm = wrapper.vm as any;
+      await flushPromises();
+      await vm.openDetail(client);
+      api[endpoint as keyof typeof api].mockRejectedValueOnce(Object.assign(new Error("denied"), { response: { status: 403 } }));
+      if (endpoint === "capabilities") {
+        userStore.account.permissions = ["gb28181:openapi:client:read"];
+      } else if (endpoint === "list") await vm.load();
+      else if (endpoint === "get") await vm.openDetail(client);
+      else if (endpoint === "create") await vm.performCreate({ name: "接入", ownerDeptId: 10 });
+      else if (endpoint === "scopes") await vm.saveScopes(client.id, ["device:list"], client.rowVersion);
+      else if (endpoint === "rotate") await vm.performRotate(client);
+      else if (endpoint === "disable") await vm.performStatus("disable", client);
+      else await vm.refreshRevocation();
+      await flushPromises();
+      expect(vm.currentClient).toBeNull();
+      expect(vm.clients).toEqual([]);
+      expect(vm.secretPayload).toBeNull();
+      expect(vm.error).toContain("访问");
+    }
+  );
+
+  it("invalidates cached data and pending list responses on account switch with identical permissions", async () => {
+    const wrapper = mountPage();
+    const vm = wrapper.vm as any;
+    await flushPromises();
+    const old = deferred<ReturnType<typeof ok>>();
+    api.list.mockReturnValueOnce(old.promise);
+    const oldLoad = vm.load();
+    api.list.mockResolvedValueOnce(ok({ items: [], ownerDepartments: [], total: 0 }));
+    userStore.account.id = 8;
+    await flushPromises();
+    old.resolve(ok({ items: [client], ownerDepartments: [{ id: 10, name: "旧范围" }], total: 1 }));
+    await oldLoad;
+    expect(vm.clients).toEqual([]);
+    expect(vm.ownerDepartments).toEqual([]);
+    expect(vm.pagination.total).toBe(0);
+  });
+
+  it.each([401, 403, 404])("clears the entire stale client context on an audit HTTP %s denial", async status => {
+    const wrapper = mountPage();
+    const vm = wrapper.vm as any;
+    await flushPromises();
+    await vm.openDetail(client);
+    api.audits.mockResolvedValueOnce(ok({ items: [{ requestId: "cached-audit", scope: "device:list" }] }));
+    await vm.loadAudits();
+    expect(vm.auditItems).toHaveLength(1);
+    const old = deferred<ReturnType<typeof ok>>();
+    api.list.mockReturnValueOnce(old.promise);
+    const oldLoad = vm.load();
+    api.audits.mockRejectedValueOnce(Object.assign(new Error("denied"), { response: { status } }));
+    await vm.loadAudits();
+    old.resolve(ok({ items: [client], total: 1 }));
+    await oldLoad;
+    expect(vm.auditItems).toEqual([]);
+    expect(vm.currentClient).toBeNull();
+    expect(vm.clients).toEqual([]);
+    expect(vm.drawerVisible).toBe(false);
+    expect(vm.error).toContain("访问");
+  });
+
+  it("does not execute an old confirmation after the page is deactivated and reactivated", async () => {
+    let confirmOptions: any;
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(options => {
+      confirmOptions = options;
+      return { close: vi.fn() } as any;
+    });
+    const wrapper = mountKeepAlivePage();
+    await flushPromises();
+    const vm = wrapper.findComponent(OpenAPIClientPage).vm as any;
+    vm.requestRotate(client);
+    await wrapper.setData({ active: false });
+    await wrapper.setData({ active: true });
+    await flushPromises();
+    await confirmOptions.onOk();
+    expect(api.rotate).not.toHaveBeenCalled();
+    confirm.mockRestore();
   });
 });
