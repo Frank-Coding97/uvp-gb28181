@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emiago/sipgo"
 	"github.com/emiago/sipgo/sip"
 	"github.com/emiago/sipgo/siptest"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/mansrtsp"
@@ -16,6 +17,7 @@ import (
 
 type fakePlaybackDialog struct {
 	waitErr, ackErr, byeErr, doErr error
+	closeErr, readByeErr           error
 	waitBlock                      <-chan struct{}
 	doWaitForContext               bool
 	statusCode                     int
@@ -46,10 +48,18 @@ func (d *fakePlaybackDialog) Bye(context.Context) error {
 	d.mu.Unlock()
 	return d.byeErr
 }
-func (d *fakePlaybackDialog) Close() error                     { d.mu.Lock(); d.closeCalls++; d.mu.Unlock(); return nil }
+func (d *fakePlaybackDialog) Close() error {
+	d.mu.Lock()
+	d.closeCalls++
+	d.mu.Unlock()
+	return d.closeErr
+}
 func (d *fakePlaybackDialog) StatusCode() int                  { return d.statusCode }
 func (d *fakePlaybackDialog) Metadata() PlaybackDialogMetadata { return d.metadata }
 func (d *fakePlaybackDialog) ReadBye(req *sip.Request, tx sip.ServerTransaction) error {
+	if d.readByeErr != nil {
+		return d.readByeErr
+	}
 	return tx.Respond(sip.NewResponseFromRequest(req, sip.StatusOK, "OK", nil))
 }
 func (d *fakePlaybackDialog) Do(ctx context.Context, req *sip.Request) (*sip.Response, error) {
@@ -331,6 +341,104 @@ func TestTeardownPlaybackUnansweredInfoStillBYEsAndSucceeds(t *testing.T) {
 	}
 	if dialog.byeCalls != 1 || dialog.closeCalls != 1 {
 		t.Fatalf("bye=%d close=%d", dialog.byeCalls, dialog.closeCalls)
+	}
+}
+
+func TestTeardownPlaybackRetainsFailedBYEForRetry(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("BYE acknowledgement lost")
+	dialog.byeErr = want
+	if err := u.TeardownPlayback(context.Background(), metadata.CallID); !errors.Is(err, want) {
+		t.Fatalf("first teardown=%v", err)
+	}
+	if u.playbackDialogs.get(metadata.CallID) == nil || dialog.closeCalls != 0 {
+		t.Fatalf("failed BYE lost original dialog: close=%d", dialog.closeCalls)
+	}
+	if _, err := u.SendPlaybackInfo(context.Background(), metadata.CallID, PlaybackInfoRequest{Action: PlaybackInfoResume}); !errors.Is(err, ErrPlaybackClosed) {
+		t.Fatalf("closing dialog accepted control: %v", err)
+	}
+	if err := u.TeardownPlayback(context.Background(), metadata.CallID); !errors.Is(err, want) || dialog.byeCalls != 2 {
+		t.Fatalf("repeat failure swallowed: err=%v bye=%d", err, dialog.byeCalls)
+	}
+	dialog.byeErr = nil
+	if err := u.TeardownPlayback(context.Background(), metadata.CallID); err != nil || dialog.byeCalls != 3 || dialog.closeCalls != 1 {
+		t.Fatalf("retry: err=%v bye=%d close=%d", err, dialog.byeCalls, dialog.closeCalls)
+	}
+	if len(dialog.requests) != 1 {
+		t.Fatalf("retry resent INFO: %d", len(dialog.requests))
+	}
+}
+
+func TestTeardownPlaybackRetriesOnlyLocalCloseAfterConfirmedBYE(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("local close failed")
+	dialog.closeErr = want
+	if err := u.TeardownPlayback(context.Background(), metadata.CallID); !errors.Is(err, want) {
+		t.Fatalf("first teardown=%v", err)
+	}
+	if u.playbackDialogs.get(metadata.CallID) == nil {
+		t.Fatal("local failure lost retry record")
+	}
+	dialog.closeErr = nil
+	if err := u.TeardownPlayback(context.Background(), metadata.CallID); err != nil || dialog.byeCalls != 1 || dialog.closeCalls != 2 {
+		t.Fatalf("retry: err=%v bye=%d close=%d", err, dialog.byeCalls, dialog.closeCalls)
+	}
+}
+
+func TestHandlePlaybackByeRetainsResponseFailure(t *testing.T) {
+	dialog := establishedPlaybackDialog()
+	u, _ := newPlaybackTestUAC(dialog)
+	metadata, err := u.InvitePlayback(context.Background(), validPlaybackInvite())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := errors.New("BYE response write failed")
+	dialog.readByeErr = want
+	request := newTalkByeRequest(metadata.CallID)
+	handled, err := u.HandlePlaybackBye(request, siptest.NewServerTxRecorder(request))
+	if !handled || !errors.Is(err, want) {
+		t.Fatalf("handled=%v err=%v", handled, err)
+	}
+	if u.playbackDialogs.get(metadata.CallID) == nil || dialog.closeCalls != 0 {
+		t.Fatalf("failed inbound response lost dialog: close=%d", dialog.closeCalls)
+	}
+}
+
+type playbackResponseFailureTx struct {
+	sip.ServerTransaction
+	err error
+}
+
+func (tx playbackResponseFailureTx) Respond(*sip.Response) error { return tx.err }
+
+func TestSipgoPlaybackByeDoesNotTrustEndedAfterResponseFailure(t *testing.T) {
+	session := &sipgo.DialogClientSession{}
+	dialog := &sipgoPlaybackDialog{session: session}
+	want := errors.New("response transport failure")
+	request := newTalkByeRequest("exact-old-dialog")
+	session.InviteRequest = request.Clone()
+	session.InviteRequest.Method = sip.INVITE
+	session.InviteResponse = sip.NewResponseFromRequest(session.InviteRequest, sip.StatusOK, "OK", nil)
+	session.InitWithState(sip.DialogStateConfirmed)
+	if err := dialog.ReadBye(request, playbackResponseFailureTx{err: want}); !errors.Is(err, want) {
+		t.Fatalf("ReadBye=%v", err)
+	}
+	if session.LoadState() != sip.DialogStateEnded {
+		t.Fatal("fixture did not reproduce real sipgo's early Ended state")
+	}
+	// A local Ended state without an acknowledged exchange is not a receipt.
+	if err := dialog.Bye(context.Background()); err == nil {
+		t.Fatal("unacknowledged inbound BYE became outbound success")
 	}
 }
 
