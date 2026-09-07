@@ -219,6 +219,18 @@ func TestPlaybackRecoveryReservesBeforeLoad(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
+	// Recovery pages may find a reservation while Load is still blocked.
+	// They must wait for publication, not dereference a partial owner/branch.
+	f.u.playbackIntentMu.Lock()
+	reserved := f.u.playbackRecoveries[f.id.OperationID]
+	f.u.playbackIntentMu.Unlock()
+	require.NotNil(t, reserved)
+	readyCtx, readyCancel := context.WithTimeout(ctx, 15*time.Millisecond)
+	require.ErrorIs(t, reserved.Run(readyCtx), context.DeadlineExceeded)
+	readyCancel()
+	readyCtx, readyCancel = context.WithTimeout(ctx, 15*time.Millisecond)
+	require.ErrorIs(t, reserved.CloseLocal(readyCtx), context.DeadlineExceeded)
+	readyCancel()
 	r, err := f.u.beginRecoveredPlaybackCleanup(ctx, f.store, f.barrier, f.id, stepID, "recovery-remote")
 	require.Error(t, err)
 	require.Nil(t, r)
@@ -227,6 +239,11 @@ func TestPlaybackRecoveryReservesBeforeLoad(t *testing.T) {
 	close(release)
 	r = <-result
 	require.NotNil(t, r)
+	require.ErrorIs(t, r.Run(ctx), ErrPlaybackCleanupUnknown, "resume canceled preparation must only drain the unused owner")
+	f.u.playbackIntentMu.Lock()
+	retained := f.u.playbackRecoveries[f.id.OperationID]
+	f.u.playbackIntentMu.Unlock()
+	require.Nil(t, retained, "a timed-out Close during initialization must not leave permanent busy")
 	require.NoError(t, r.CloseLocal(ctx))
 	f.noACK(t)
 }

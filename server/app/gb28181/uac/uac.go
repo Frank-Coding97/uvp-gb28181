@@ -44,6 +44,7 @@ type UAC struct {
 	playbackIntents       map[string]*playbackIntentOperation
 	playbackRecoveries    map[string]*playbackIntentRecovery
 	playbackObservations  map[string]*playbackRecoveredObservation
+	playbackRecoveryScans map[int64]bool
 	playbackIntentBarrier *playauth.DeviceOperationBarrier
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,

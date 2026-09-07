@@ -2,6 +2,7 @@ package uac
 
 import (
 	"context"
+	"errors"
 
 	"github.com/emiago/sipgo"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/playauth"
@@ -11,13 +12,15 @@ import (
 // actual quiescence, persisted facts and lease release. This is one branch's
 // compensation, never proof of complete fork coverage or device completion.
 type playbackIntentRecovery struct {
-	u       *UAC
-	op      *playbackIntentOperation
-	owner   *sipgo.OwnedBranchCleanup
-	branch  *playauth.DeviceSIPKnownBranch
-	started bool // Protected by op.work.
-	closed  bool
-	unknown bool
+	u          *UAC
+	op         *playbackIntentOperation
+	owner      *sipgo.OwnedBranchCleanup
+	branch     *playauth.DeviceSIPKnownBranch
+	ready      chan struct{}
+	prepareErr error // Published by closing ready; immutable afterwards.
+	started    bool  // Protected by op.work.
+	closed     bool
+	unknown    bool
 }
 
 // Caller holds playbackIntentMu. The composition root must share one UAC and
@@ -30,7 +33,7 @@ func (u *UAC) reservePlaybackBarrierLocked(barrier *playauth.DeviceOperationBarr
 	return true
 }
 
-func (u *UAC) beginRecoveredPlaybackCleanup(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, stepID, remoteTag string) (*playbackIntentRecovery, error) {
+func (u *UAC) beginRecoveredPlaybackCleanup(ctx context.Context, store *playauth.DeviceOperationIntentStore, barrier *playauth.DeviceOperationBarrier, id playauth.DeviceOperationIntentIdentity, stepID, remoteTag string) (_ *playbackIntentRecovery, err error) {
 	if ctx == nil || u == nil || u.client == nil || u.client.TxRequester != nil || store == nil || barrier == nil || id.Kind != "playback" || id.TargetScope != "channel" {
 		return nil, ErrPlaybackUnavailable
 	}
@@ -39,7 +42,7 @@ func (u *UAC) beginRecoveredPlaybackCleanup(ctx context.Context, store *playauth
 	}
 	o := &playbackIntentOperation{store: store, barrier: barrier, id: id, work: make(chan struct{}, 1), originalReleased: true}
 	o.cleanupClose, o.cleanupCancel = context.WithCancel(context.Background())
-	r := &playbackIntentRecovery{u: u, op: o}
+	r := &playbackIntentRecovery{u: u, op: o, ready: make(chan struct{})}
 	u.playbackIntentMu.Lock()
 	if !u.reservePlaybackBarrierLocked(barrier) || len(u.playbackIntents)+len(u.playbackRecoveries) >= maxPlaybackIntentOperations || u.playbackIntents[id.OperationID] != nil || u.playbackRecoveries[id.OperationID] != nil {
 		u.playbackIntentMu.Unlock()
@@ -51,6 +54,7 @@ func (u *UAC) beginRecoveredPlaybackCleanup(ctx context.Context, store *playauth
 	}
 	u.playbackRecoveries[id.OperationID] = r
 	u.playbackIntentMu.Unlock()
+	defer func() { r.prepareErr = err; close(r.ready) }()
 	owner, loaded, err := u.prepareRecoveredPlaybackCleanup(ctx, store, id, stepID, remoteTag)
 	if err != nil {
 		o.cleanupCancel()
@@ -72,10 +76,25 @@ func (u *UAC) beginRecoveredPlaybackCleanup(ctx context.Context, store *playauth
 		}
 	}
 	if r.branch == nil {
-		_ = r.CloseLocal(context.Background())
+		r.owner.Terminate() // Pure preparation has not entered network work.
+		<-r.owner.Quiesced()
+		o.cleanupCancel()
+		r.removeReservation()
 		return nil, ErrPlaybackCleanupUnknown
 	}
 	return r, nil
+}
+
+func (r *playbackIntentRecovery) waitReady(ctx context.Context) error {
+	if ctx == nil {
+		return ErrPlaybackUnavailable
+	}
+	select {
+	case <-r.ready:
+		return r.prepareErr
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (r *playbackIntentRecovery) removeReservation() {
@@ -87,6 +106,9 @@ func (r *playbackIntentRecovery) removeReservation() {
 }
 
 func (r *playbackIntentRecovery) Run(ctx context.Context) error {
+	if err := r.waitReady(ctx); err != nil {
+		return err
+	}
 	o := r.op
 	if err := o.enter(ctx); err != nil {
 		return err
@@ -96,7 +118,7 @@ func (r *playbackIntentRecovery) Run(ctx context.Context) error {
 		return r.finish(ctx)
 	}
 	if r.closed || o.cleanupClose.Err() != nil {
-		return ErrPlaybackCleanupUnknown
+		return errors.Join(ErrPlaybackCleanupUnknown, r.closeUnused(ctx))
 	}
 	r.started = true
 	callCtx, cancel := context.WithCancel(ctx)
@@ -131,6 +153,9 @@ func (r *playbackIntentRecovery) finish(ctx context.Context) error {
 func (r *playbackIntentRecovery) CloseLocal(ctx context.Context) error {
 	o := r.op
 	o.cleanupCancel() // Interrupt active network work before waiting for work.
+	if err := r.waitReady(ctx); err != nil {
+		return err
+	}
 	if err := o.enter(ctx); err != nil {
 		return err
 	}
@@ -139,6 +164,14 @@ func (r *playbackIntentRecovery) CloseLocal(ctx context.Context) error {
 	if r.started {
 		return r.finish(ctx)
 	}
+	return r.closeUnused(ctx)
+}
+
+// Caller holds op.work after readiness. A Close that timed out while Load
+// was initializing still prevents all sends; a later scan can drain this
+// pure owner rather than retaining an unusable reservation forever.
+func (r *playbackIntentRecovery) closeUnused(ctx context.Context) error {
+	r.closed = true
 	r.owner.Terminate()
 	select {
 	case <-r.owner.Quiesced():
