@@ -199,8 +199,9 @@ func runDiskFullCheck(binary, root string) (result map[string]any) {
 		return diskFullFailure(result, "volume did not report ENOSPC before 128 MiB fill cap")
 	}
 
-	writeResult, writeErr := writeAOFUntilRejected(client, instance, token)
+	writeResult, writeErr := writeAOFUntilRejected(client, instance, token, &confirmedWrites)
 	result["aof_write_under_full"] = writeResult
+	result["confirmed_writes"] = len(confirmedWrites)
 	removeFillErr := os.RemoveAll(fillerDir)
 	result["filler_released"] = removeFillErr == nil
 	if removeFillErr != nil {
@@ -341,15 +342,17 @@ func fillDiskUntilFull(ctx context.Context, directory string, capBytes uint64) (
 	}
 }
 
-func writeAOFUntilRejected(client *redisClient, instance *redisInstance, token string) (map[string]any, error) {
+func writeAOFUntilRejected(client *redisClient, instance *redisInstance, token string, confirmed *[]diskFullConfirmedWrite) (map[string]any, error) {
 	result := map[string]any{"attempts": 0, "status": "failed"}
 	payload := strings.Repeat("a", 64*1024)
 	for attempt := 1; attempt <= 16; attempt++ {
 		result["attempts"] = attempt
 		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-		_, err := client.do(ctx, "SET", "__uvp_disk_full_write_"+token, payload)
+		key := fmt.Sprintf("__uvp_disk_full_write_%s_%d", token, attempt)
+		_, err := client.do(ctx, "SET", key, payload)
 		cancel()
 		if err == nil {
+			*confirmed = append(*confirmed, diskFullConfirmedWrite{Key: key, Value: payload})
 			info, infoErr := redisInfo(client, "persistence")
 			if infoErr != nil {
 				result["reason"] = "SET replied success but persistence status could not be read: " + infoErr.Error()
