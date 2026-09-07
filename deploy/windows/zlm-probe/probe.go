@@ -1029,8 +1029,8 @@ func waitMediaOffline(client *apiClient, secret, vhost, app, stream string) erro
 		query := url.Values{"schema": {"fmp4"}, "vhost": {vhost}, "app": {app}, "stream": {stream}, "secret": {secret}}
 		response, err := client.call(context.Background(), "/index/api/isMediaOnline", query)
 		if err == nil && response.Code == 0 {
-			var online bool
-			if len(response.Online) > 0 && json.Unmarshal(response.Online, &online) == nil && !online {
+			var online *bool
+			if json.Unmarshal(response.Online, &online) == nil && online != nil && !*online {
 				return nil
 			}
 		}
