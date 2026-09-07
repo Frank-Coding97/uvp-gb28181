@@ -231,7 +231,7 @@ def integer_check(column_name: str, source_column: str) -> str | None:
 
 
 def length_check(column_name: str, source_column: str) -> str | None:
-    """Keep source VARCHAR/CHAR/VARBINARY length limits after TEXT mapping."""
+    """Keep source VARCHAR/CHAR/VARBINARY length limits after SQLite mapping."""
     base, arguments = source_column_type(source_column)
     if base not in {"VARCHAR", "CHAR", "VARBINARY"} or arguments is None or not arguments.isdigit():
         return None
@@ -269,7 +269,8 @@ def normalize_column(column: str) -> tuple[str, bool]:
         (r"(?i)\b(?:DECIMAL|NUMERIC)\s*\(\s*\d+\s*,\s*\d+\s*\)(?![A-Za-z0-9_])", "NUMERIC"),
         (r"(?i)\b(?:DOUBLE|REAL|FLOAT)(?:\s*\(\s*\d+\s*,\s*\d+\s*\))?(?![A-Za-z0-9_])", "REAL"),
         (r"(?i)\b(?:BOOLEAN|BOOL|BIT)(?:\(\d+\))?(?![A-Za-z0-9_])", "INTEGER"),
-        (r"(?i)\b(?:VARCHAR|CHAR|VARBINARY|TINYTEXT|MEDIUMTEXT|LONGTEXT|JSON|TEXT)(?:\(\d+\))?(?![A-Za-z0-9_])", "TEXT"),
+        (r"(?i)\bVARBINARY(?:\(\d+\))?(?![A-Za-z0-9_])", "BLOB"),
+        (r"(?i)\b(?:VARCHAR|CHAR|TINYTEXT|MEDIUMTEXT|LONGTEXT|JSON|TEXT)(?:\(\d+\))?(?![A-Za-z0-9_])", "TEXT"),
         (r"(?i)\b(?:DATETIME|TIMESTAMP|DATE)(?:\(\d+\))?(?![A-Za-z0-9_])", lambda match: match.group(0).split("(", 1)[0].upper()),
         # modernc.org/sqlite parses DATE, DATETIME and TIMESTAMP as time.Time
         # when _time_format=sqlite is enabled.  TIME is deliberately TEXT:
@@ -516,7 +517,8 @@ def main() -> None:
         for original, columns, unique in indexes
     ]
     index_count = len(index_manifest)
-    insert_count = sum(1 for statement in seed_statements if re.match(r"(?is)INSERT", statement))
+    seed_counts = Counter(classify(statement) for statement in seed_statements)
+    seed_count = sum(seed_counts.values())
     manifest = {
         "version": VERSION,
         "source_commit": "e07857cce505d0ef6201bafe4a93306c2b84dbc2",
@@ -525,7 +527,10 @@ def main() -> None:
         "table_names": tables,
         "indexes": index_count,
         "index_manifest": index_manifest,
-        "seed_statements": insert_count,
+        "seed_statements": seed_count,
+        "seed_inserts": seed_counts["INSERT"],
+        "seed_updates": seed_counts["UPDATE"],
+        "seed_deletes": seed_counts["DELETE"],
         "seeded_tables": sorted({table for statement in seed_statements if (table := insert_table(statement))}),
         "inputs": {
             "uvp-gb28181.sql": hashlib.sha256(SOURCE.read_bytes()).hexdigest(),

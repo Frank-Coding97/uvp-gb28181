@@ -1,6 +1,7 @@
 package sqlitebaseline
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -19,7 +20,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
-const expectedBaselineSHA256 = "cf94b8273725744a3a85ef78a39d9360b69477f85f508dfe61ea8d58e19576fd"
+const expectedBaselineSHA256 = "785a700f94513851de4b2c4f4ee6854275b6cfec6840d3bdb6ec3f7252db569a"
 
 func openBaselineDB(t *testing.T) (*gorm.DB, *sql.DB) {
 	t.Helper()
@@ -56,6 +57,9 @@ func TestBaselineArtifactAndManifestAreLocked(t *testing.T) {
 			Name  string `json:"name"`
 		} `json:"index_manifest"`
 		SeedStatements int               `json:"seed_statements"`
+		SeedInserts    int               `json:"seed_inserts"`
+		SeedUpdates    int               `json:"seed_updates"`
+		SeedDeletes    int               `json:"seed_deletes"`
 		Inputs         map[string]string `json:"inputs"`
 	}
 	require.NoError(t, json.Unmarshal(body, &manifest))
@@ -66,7 +70,10 @@ func TestBaselineArtifactAndManifestAreLocked(t *testing.T) {
 	require.Len(t, manifest.TableNames, 86)
 	require.Equal(t, 242, manifest.Indexes)
 	require.Len(t, manifest.IndexManifest, 242)
-	require.Equal(t, 912, manifest.SeedStatements)
+	require.Equal(t, 1143, manifest.SeedStatements)
+	require.Equal(t, 912, manifest.SeedInserts)
+	require.Equal(t, 224, manifest.SeedUpdates)
+	require.Equal(t, 7, manifest.SeedDeletes)
 	require.Equal(t, map[string]string{
 		"uvp-gb28181.sql":                      "3edc18d3d73510602101c633bb940dc044560ba3e80627e08726749d98fe2f09",
 		"2026-08-15-device-grant-table.sql":    "1bed8dabb71f168b72fde28540f25b53b9c92bcddae5d06400d61a1d84dd4bfb",
@@ -275,6 +282,37 @@ func TestBaselinePreservesModernSQLiteTemporalReadWrite(t *testing.T) {
 	var dateType string
 	require.NoError(t, raw.QueryRow(`SELECT type FROM pragma_table_info('gb_recording_file') WHERE name='record_date'`).Scan(&dateType))
 	require.Equal(t, "DATE", dateType)
+}
+
+func TestSecretNonceUsesBlobAffinityAndPreservesBytes(t *testing.T) {
+	db, raw := openBaselineDB(t)
+	var declaredType string
+	require.NoError(t, raw.QueryRow(`SELECT type FROM pragma_table_info('gb_cascade_platform') WHERE name='secret_nonce'`).Scan(&declaredType))
+	require.Equal(t, "BLOB", declaredType)
+
+	payload := bytes.Repeat([]byte{0xff}, 64)
+	payload[0] = 0x00
+	payload[1] = 0x80
+	payload[2] = 0xc3
+	payload[3] = 0x28
+	insert := `INSERT INTO gb_cascade_platform(name,upstream_server_id,upstream_domain,host,port,local_device_id,local_domain,local_sip_ip,local_sip_port,secret_nonce,created_at,updated_at) VALUES ('blob-test','upstream','domain','127.0.0.1',5060,'local-device','local-domain','127.0.0.1',5061,?,'2026-09-07 00:00:00','2026-09-07 00:00:00')`
+	require.NoError(t, db.Exec(insert, payload).Error)
+	var id int64
+	require.NoError(t, raw.QueryRow(`SELECT last_insert_rowid()`).Scan(&id))
+	require.NotZero(t, id)
+	update := `UPDATE gb_cascade_platform SET secret_nonce=? WHERE id=?`
+	var storageClass string
+	require.NoError(t, raw.QueryRow(`SELECT typeof(secret_nonce) FROM gb_cascade_platform WHERE id=?`, id).Scan(&storageClass))
+	require.Equal(t, "blob", storageClass)
+	var roundTripped []byte
+	require.NoError(t, raw.QueryRow(`SELECT secret_nonce FROM gb_cascade_platform WHERE id=?`, id).Scan(&roundTripped))
+	require.Equal(t, payload, roundTripped)
+	err := db.Exec(update, bytes.Repeat([]byte{0xff}, 65), id).Error
+	require.Error(t, err)
+	require.Contains(t, strings.ToLower(err.Error()), "check")
+	var retained []byte
+	require.NoError(t, raw.QueryRow(`SELECT secret_nonce FROM gb_cascade_platform WHERE id=?`, id).Scan(&retained))
+	require.Equal(t, payload, retained)
 }
 
 func TestBaselineHasNoTransactionBoundary(t *testing.T) {

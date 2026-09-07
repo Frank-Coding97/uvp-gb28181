@@ -2,7 +2,7 @@
 
 这是 Windows 单机版使用的受审核 SQLite 基线。`baseline.sql` 来自发布输入
 `e07857cc`（`uvp-gb28181.sql` 加四个已接受的 GB28181 迁移），包含 86 张表、
-242 个显式索引和 912 条确定性系统种子语句。`manifest.json` 保存输入摘要、完整
+242 个显式索引和 1143 条确定性系统种子语句（912 INSERT、224 UPDATE、7 DELETE）。`manifest.json` 保存输入摘要、完整
 表清单和索引清单；`generate.py` 只是这组固定输入的审计辅助工具，不是通用的
 MySQL 转 SQLite 转换器。
 
@@ -28,8 +28,8 @@ SQLite 映射和已保留的约束如下：
   `UNSIGNED` 上下界都保留。SQLite 只有有符号 64 位整数，因此 `BIGINT UNSIGNED`
   的基线范围是 `0..9223372036854775807`；超过该范围的数据与单机版不兼容，需要
   单独的数据模型决策。
-- `VARCHAR`、`CHAR` 和 `VARBINARY` 映射为 TEXT，并以 CHECK 保留源长度上限；
-  VARBINARY 的检查按存储字节长度计算。
+- `VARCHAR`、`CHAR` 映射为 TEXT，`VARBINARY` 映射为 BLOB，并以 CHECK 保留源长度上限；
+  VARBINARY 的检查按存储字节长度计算，`secret_nonce` 因此可原样保存零字节和非 UTF-8 字节。
 - `BLOB`/`MEDIUMBLOB` 保留 SQLite 的 BLOB affinity；当前输入没有其他二进制类型。
 - JSON 映射为 TEXT，并以 `json_valid` CHECK 保留有效 JSON 约束；可空列仍接受 NULL。
 - 当前输入没有 `ENUM` 列；后续若加入，必须为每个枚举值补充显式 CHECK，不能按普通 TEXT
@@ -40,7 +40,9 @@ SQLite 映射和已保留的约束如下：
 - 重复的 MySQL 索引名按表名前缀改名以满足 SQLite 的 schema 级命名空间；唯一且有
   对外依赖的名称（例如 `username`、`idx_recovery_required`）保持不变。
 - MySQL `ON UPDATE CURRENT_TIMESTAMP` 没有伪造为触发器；应用层负责更新 `updated_at`。
-  这组输入只涉及更新时间列，若未来代码依赖数据库自动更新时间，应先补充专门决策和回归。
+  当前涉及 `gb_sip_config`、`sys_jobs`、`gb_device_traffic_session`、
+  `gb_device_traffic_daily`、`gb_device_traffic_gap` 五个表；现有保存仓储负责写入
+  `updated_at`，其运行时行为仍由后续仓储回归覆盖。
 
 重新生成并核对锁定产物：
 

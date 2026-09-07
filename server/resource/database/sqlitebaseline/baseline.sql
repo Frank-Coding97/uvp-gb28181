@@ -279,7 +279,7 @@ CREATE TABLE IF NOT EXISTS "gb_cascade_platform" (
   "local_sip_port" INTEGER NOT NULL,
   "media_advertise_ip" TEXT DEFAULT NULL,
   "auth_username" TEXT DEFAULT NULL,
-  "secret_nonce" TEXT DEFAULT NULL,
+  "secret_nonce" BLOB DEFAULT NULL,
   "secret_ciphertext" blob,
   "secret_alg" TEXT DEFAULT NULL,
   "secret_key_version" TEXT DEFAULT NULL,

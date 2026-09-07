@@ -1,7 +1,7 @@
 {
   "version": "sqlite-baseline-20260907-e07857cc",
   "source_commit": "e07857cce505d0ef6201bafe4a93306c2b84dbc2",
-  "sha256": "cf94b8273725744a3a85ef78a39d9360b69477f85f508dfe61ea8d58e19576fd",
+  "sha256": "785a700f94513851de4b2c4f4ee6854275b6cfec6840d3bdb6ec3f7252db569a",
   "tables": 86,
   "table_names": [
     "gb_alarm_binding",
@@ -1788,7 +1788,10 @@
       "unique": false
     }
   ],
-  "seed_statements": 912,
+  "seed_statements": 1143,
+  "seed_inserts": 912,
+  "seed_updates": 224,
+  "seed_deletes": 7,
   "seeded_tables": [
     "gb_sip_security_policy",
     "sys_api",

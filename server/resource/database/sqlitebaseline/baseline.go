@@ -12,5 +12,5 @@ var SQL string
 
 const (
 	Version = "sqlite-baseline-20260907-e07857cc"
-	SHA256  = "cf94b8273725744a3a85ef78a39d9360b69477f85f508dfe61ea8d58e19576fd"
+	SHA256  = "785a700f94513851de4b2c4f4ee6854275b6cfec6840d3bdb6ec3f7252db569a"
 )
