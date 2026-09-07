@@ -159,6 +159,7 @@ func TestOpenAPIObserveFlowPreservesRevokedAndRevokePendingStates(t *testing.T) 
 	require.NoError(t, fixture.db.Model(&models.PlayGrant{}).Where("grant_id = ?", reservation.GrantID).Updates(map[string]any{
 		"state": models.GrantStateRevoked, "reason": "client.revoked",
 	}).Error)
+	abnormalBefore := requireViewer(t, fixture.db, reservation.GrantID)
 	fixture.now = fixture.now.Add(time.Second)
 	expectedNow := fixture.now.UTC().Truncate(time.Microsecond)
 	require.NoError(t, service.ObserveFlow(context.Background(), openAPIFlowReport(request)))
@@ -166,6 +167,7 @@ func TestOpenAPIObserveFlowPreservesRevokedAndRevokePendingStates(t *testing.T) 
 	require.NoError(t, fixture.db.First(&viewer, "grant_id = ?", reservation.GrantID).Error)
 	require.Equal(t, models.ViewerStateActive, viewer.State)
 	require.Equal(t, expectedNow, viewer.LastSeenAt.UTC())
+	require.Equal(t, abnormalBefore.UpdatedAt.UTC(), viewer.UpdatedAt.UTC())
 
 	// A normal revocation store marks the viewer for the worker. Flow reports
 	// may refresh liveness, but may not consume the worker's retry lease.
@@ -190,10 +192,18 @@ func TestOpenAPIObserveFlowPreservesRevokedAndRevokePendingStates(t *testing.T) 
 	require.Equal(t, viewerBefore.Attempts, viewer.Attempts)
 	require.Equal(t, viewerBefore.LastErrorClass, viewer.LastErrorClass)
 	require.Equal(t, expectedNow, viewer.LastSeenAt.UTC())
-	require.Equal(t, expectedNow, viewer.UpdatedAt.UTC())
+	require.Equal(t, viewerBefore.UpdatedAt.UTC(), viewer.UpdatedAt.UTC(), "final flow cannot rewrite the worker lease token")
 	require.Equal(t, grantBefore.State, grantAfter.State)
 	require.Equal(t, grantBefore.UpdatedAt.UTC(), grantAfter.UpdatedAt.UTC())
 	require.Equal(t, grantBefore.Reason, grantAfter.Reason)
+
+	// A repeated or older observation must not move liveness backwards, nor
+	// invalidate the worker token via an ORM-managed UpdatedAt side effect.
+	for _, observedAt := range []time.Time{fixture.now, fixture.now.Add(-time.Second)} {
+		fixture.now = observedAt
+		require.NoError(t, service.ObserveFlow(context.Background(), openAPIFlowReport(request)))
+		require.Equal(t, viewer, requireViewer(t, fixture.db, reservation.GrantID))
+	}
 
 	quota := limit.NewQuota(fixture.db, func() time.Time { return fixture.now })
 	occupied, err := quota.Occupied(context.Background(), testClientID)
@@ -249,6 +259,23 @@ func TestOpenAPIObserveFlowRollsBackOnViewerDatabaseFailure(t *testing.T) {
 	require.Equal(t, grantBefore.State, requireGrant(t, fixture.db, reservation.GrantID).State)
 	require.Equal(t, grantBefore.UpdatedAt.UTC(), requireGrant(t, fixture.db, reservation.GrantID).UpdatedAt.UTC())
 	require.NotContains(t, err.Error(), "fixture flow rejection")
+}
+
+func TestOpenAPIObserveFlowPendingDatabaseFailurePreservesLease(t *testing.T) {
+	fixture := newOpenAPIGrantFixture(t)
+	defer fixture.close(t)
+	service, token, reservation := issueOpenAPITestGrant(t, fixture)
+	request := openAPIViewerRequest("flow-pending-db-failure")
+	_, err := service.BindViewer(context.Background(), token, request)
+	require.NoError(t, err)
+	recordClientDisableRevocation(t, fixture, reservation.GrantID)
+	before := requireViewer(t, fixture.db, reservation.GrantID)
+	require.NoError(t, fixture.db.Exec("CREATE TRIGGER reject_pending_flow BEFORE UPDATE ON gb_openapi_viewer BEGIN SELECT RAISE(ABORT, 'fixture pending flow rejection'); END").Error)
+	fixture.now = fixture.now.Add(time.Second)
+	err = service.ObserveFlow(context.Background(), openAPIFlowReport(request))
+	require.ErrorIs(t, err, ErrOpenAPIFlowUnavailable)
+	require.NotContains(t, err.Error(), "fixture pending flow rejection")
+	require.Equal(t, before, requireViewer(t, fixture.db, reservation.GrantID))
 }
 
 func openAPIFlowReport(request OpenAPIViewerBindRequest) OpenAPIFlowReport {

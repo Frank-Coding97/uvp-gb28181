@@ -104,16 +104,16 @@ func (s *OpenAPIGrantService) ObserveFlow(ctx context.Context, report OpenAPIFlo
 			return nil
 		}
 
-		// Revocation owns the worker handoff. A late flow report may refresh
-		// liveness, but it must not consume the retry lease or close a row that
-		// has already entered revocation.
+		// Revocation owns the complete worker token, including updated_at.
+		// Liveness is independent: a final flow must not invalidate an in-flight
+		// claim or close a row without the worker's fresh absence confirmation.
 		if grant.State == models.GrantStateRevoked || viewer.State == models.ViewerStateRevokePending {
-			if viewer.LastSeenAt != nil && viewer.LastSeenAt.UTC().Equal(now) && viewer.UpdatedAt.UTC().Equal(now) {
+			if viewer.LastSeenAt != nil && !viewer.LastSeenAt.UTC().Truncate(time.Microsecond).Before(now) {
 				return nil
 			}
 			updated := tx.WithContext(ctx).Model(&models.Viewer{}).
 				Where("id = ? AND grant_id = ? AND state = ?", viewer.ID, grant.GrantID, viewer.State).
-				Updates(map[string]any{"last_seen_at": now, "updated_at": now})
+				UpdateColumn("last_seen_at", now)
 			if updated.Error != nil || updated.RowsAffected != 1 {
 				return ErrOpenAPIFlowUnavailable
 			}

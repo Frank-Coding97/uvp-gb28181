@@ -110,6 +110,28 @@ func checkNativeRevocation(t *testing.T, root *gorm.DB) {
 	require.Equal(t, clock.UTC().Truncate(time.Microsecond), aViewer.RetryAt.UTC())
 	require.EqualValues(t, 1, nativeRevocationAuditCount(t, db, aBefore.ID, "client.disabled"))
 
+	// A real final Hook may arrive while the worker owns a retry lease. Only
+	// liveness may change: ORM callbacks or native timestamp behavior must not
+	// silently invalidate the full worker CAS token.
+	flow := playauth.OpenAPIFlowReport{
+		NodeUUID: aViewer.NodeUUID, BootNonce: aViewer.BootNonce, Identifier: aViewer.Identifier,
+		Protocol: "https-flv", Schema: aViewer.Schema, VHost: aViewer.VHost,
+		App: aViewer.App, Stream: aViewer.Stream, Player: true,
+	}
+	clock = clock.Add(time.Second)
+	require.NoError(t, grantService.ObserveFlow(ctx, flow))
+	observedViewer := nativeRevocationViewerRow(t, db, aGrantID)
+	require.NotNil(t, observedViewer.LastSeenAt)
+	require.Equal(t, clock.UTC().Truncate(time.Microsecond), observedViewer.LastSeenAt.UTC())
+	expectedViewer := aViewer
+	expectedViewer.LastSeenAt = observedViewer.LastSeenAt
+	require.Equal(t, expectedViewer, observedViewer, "native final flow must preserve every lease field")
+	for _, observedAt := range []time.Time{clock, clock.Add(-time.Second)} {
+		clock = observedAt
+		require.NoError(t, grantService.ObserveFlow(ctx, flow))
+		require.Equal(t, observedViewer, nativeRevocationViewerRow(t, db, aGrantID), "duplicate and older flow must not rewrite the row")
+	}
+
 	bAfterClientDisable := nativeRevocationClient(t, db, bBefore.ID)
 	require.Equal(t, models.StatusActive, bAfterClientDisable.Status)
 	require.Equal(t, bBefore.AuthEpoch, bAfterClientDisable.AuthEpoch)
