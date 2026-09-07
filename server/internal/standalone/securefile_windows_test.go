@@ -26,6 +26,30 @@ func TestWindowsProtectedFileDescriptorUsesTwoDirectFAEntries(t *testing.T) {
 	require.NotContains(t, sddl, "OICI")
 }
 
+func TestWindowsProtectedDirectoryUsesTwoInheritedFAEntries(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, protectConfigDir(dir, true))
+	userSID, err := currentWindowsUserSID()
+	require.NoError(t, err)
+	descriptor, err := windows.GetNamedSecurityInfo(
+		dir,
+		windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION|windows.OWNER_SECURITY_INFORMATION,
+	)
+	require.NoError(t, err)
+	dacl, _, err := descriptor.DACL()
+	require.NoError(t, err)
+	require.NotNil(t, dacl)
+	require.Equal(t, uint16(2), dacl.AceCount)
+	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		require.NoError(t, windows.GetAce(dacl, index, &ace))
+		require.Equal(t, uint8(windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE), ace.Header.AceFlags)
+		require.Equal(t, windowsFileAllAccessMask, ace.Mask)
+	}
+	require.NoError(t, validateProtectedACL(descriptor, userSID, true))
+}
+
 func TestWindowsConfigLockReleasesAfterCallbackPanic(t *testing.T) {
 	dir := t.TempDir()
 	panicked := false

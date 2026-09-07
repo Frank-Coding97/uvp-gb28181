@@ -428,10 +428,10 @@ func protectedFileSecurityAttributes(userSID *windows.SID) (*windows.SECURITY_DE
 	if userSID == nil || !userSID.IsValid() {
 		return nil, nil, errors.New("invalid effective Windows user SID")
 	}
-	// Use the file-specific full-access mask. Windows otherwise expands a
-	// generic inherited ACE into direct FILE_ALL_ACCESS plus an inherit-only
-	// ACE, which would make a directory's policy less precise than the two
-	// principals we explicitly requested.
+	// Use the file-specific full-access mask. A generic inherited ACE is
+	// expanded by Windows into a direct FILE_ALL_ACCESS ACE plus an
+	// inherit-only generic ACE; the file-specific mask remains one direct OI/CI
+	// ACE for each principal.
 	sddl := fmt.Sprintf("D:P(A;;FA;;;%s)(A;;FA;;;SY)", userSID.String())
 	descriptor, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
@@ -452,11 +452,13 @@ func setProtectedACL(path string, userSID *windows.SID, directory bool) error {
 	if err != nil {
 		return errors.New("build SYSTEM SID")
 	}
-	// Every object is created with its own protected descriptor. Keeping the
-	// directory ACL direct avoids Windows splitting inherited generic ACEs into
-	// extra inherit-only entries; callers protect newly-created directories
-	// explicitly before using them.
+	// Keep directory entries inheritable so SQLite/Redis child objects receive
+	// the same protected principals. FILE_ALL_ACCESS avoids the generic-mask
+	// split that would otherwise create inherit-only ACEs.
 	inheritance := uint32(windows.NO_INHERITANCE)
+	if directory {
+		inheritance = windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT
+	}
 	entries := []windows.EXPLICIT_ACCESS{
 		{
 			AccessPermissions: windowsFileAllAccessMask,
@@ -551,6 +553,9 @@ func validateProtectedACL(descriptor *windows.SECURITY_DESCRIPTOR, userSID *wind
 	}
 	expected := map[string]bool{userSID.String(): false, systemSID.String(): false}
 	var expectedFlags uint8
+	if directory {
+		expectedFlags = windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE
+	}
 	for index := uint32(0); index < uint32(dacl.AceCount); index++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, index, &ace); err != nil || ace == nil {
