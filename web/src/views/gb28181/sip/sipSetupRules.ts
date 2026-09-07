@@ -1,4 +1,4 @@
-import type { SipDeploymentMode, SipNetworkAddress } from "@/api/gb28181";
+import type { SipDeploymentMode, SipNetworkAddress, SipNetworkInterfaces } from "@/api/gb28181";
 
 export function isConcreteIPv4(value: string): boolean {
     const parts = value.split(".");
@@ -10,8 +10,9 @@ export function deriveNetworkSelection(
     mode: SipDeploymentMode,
     listenIp: string,
     advertiseIp: string,
-    _items: SipNetworkAddress[]
+    items: SipNetworkAddress[]
 ): { listenIp: string; advertiseIp: string; advertiseIpInferred: boolean } {
+    void items;
     if (mode === "public") return { listenIp, advertiseIp, advertiseIpInferred: false };
     if (listenIp !== "0.0.0.0") return { listenIp, advertiseIp: listenIp, advertiseIpInferred: false };
     return { listenIp, advertiseIp: "", advertiseIpInferred: false };
@@ -25,8 +26,50 @@ export function networkCanContinue(mode: SipDeploymentMode | "", listenIp: strin
     return isConcreteIPv4(advertiseIp);
 }
 
-export function networkOptions(items: SipNetworkAddress[], _currentIp: string): Array<SipNetworkAddress & { unavailable?: boolean }> {
-    return items;
+export function networkOptions(items: SipNetworkAddress[], currentIp: string): Array<SipNetworkAddress & { unavailable?: boolean }> {
+    if (!isConcreteIPv4(currentIp) || items.some(item => item.ip === currentIp)) return items;
+    return [
+        ...items,
+        {
+            ip: currentIp,
+            interfaceName: "已保存地址（当前不可用）",
+            cidr: "",
+            loopback: false,
+            virtual: false,
+            recommended: false,
+            more: false,
+            listenOnly: false,
+            unavailable: true
+        }
+    ];
+}
+
+export type SipAddressAvailability = "ok" | "missing" | "unavailable";
+
+function sipAddressTargets(mode: SipDeploymentMode | "", listenIp: string, advertiseIp: string): string[] {
+    if (mode === "public") return isConcreteIPv4(listenIp) ? [listenIp] : [];
+    if (mode !== "lan") return [];
+    const targets: string[] = [];
+    if (isConcreteIPv4(listenIp)) targets.push(listenIp);
+    if (isConcreteIPv4(advertiseIp) && !targets.includes(advertiseIp)) targets.push(advertiseIp);
+    return targets;
+}
+
+export function sipAddressAvailability(
+    mode: SipDeploymentMode | "",
+    listenIp: string,
+    advertiseIp: string,
+    network: SipNetworkInterfaces | null
+): SipAddressAvailability {
+    if (!network || network.scanStatus !== "ok") return "unavailable";
+    const targets = sipAddressTargets(mode, listenIp, advertiseIp);
+    if (!targets.length) return "ok";
+    const available = new Set(
+        network.items
+            .filter(item => !item.loopback && !item.listenOnly && isConcreteIPv4(item.ip))
+            .map(item => item.ip)
+    );
+    return targets.every(ip => available.has(ip)) ? "ok" : "missing";
 }
 
 export function activeSipAddresses(

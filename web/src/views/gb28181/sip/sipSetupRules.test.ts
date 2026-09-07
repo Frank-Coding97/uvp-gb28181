@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SipNetworkAddress } from "@/api/gb28181";
 import {
     activeSipAddresses, deriveDomain, deriveNetworkSelection, evaluatePasswordStrength, formatRegisterUri,
-    identityCanContinue, networkCanContinue, networkOptions, passwordAcceptable
+    identityCanContinue, networkCanContinue, networkOptions, passwordAcceptable, sipAddressAvailability
 } from "./sipSetupRules";
 
 const items: SipNetworkAddress[] = [
@@ -31,9 +31,51 @@ describe("SIP network rules", () => {
         expect(networkCanContinue("public", "0.0.0.0", "203.0.113.10")).toBe(true);
     });
 
-    it("does not retain a saved address that disappeared from interfaces", () => {
+    it("keeps a disappeared saved address visible without treating it as current", () => {
         const options = networkOptions(items, "10.10.10.10");
-        expect(options.map(item => item.ip)).not.toContain("10.10.10.10");
+        expect(options.map(item => item.ip)).toContain("10.10.10.10");
+        expect(options.find(item => item.ip === "10.10.10.10")?.unavailable).toBe(true);
+    });
+
+    it("does not report a LAN address change while the saved IPs are present", () => {
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.10", {
+            items,
+            scanStatus: "ok"
+        })).toBe("ok");
+    });
+
+    it("reports a missing concrete LAN address but ignores dynamic and public NAT addresses", () => {
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.10", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("missing");
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.20", {
+            items,
+            scanStatus: "ok"
+        })).toBe("missing");
+        expect(sipAddressAvailability("lan", "0.0.0.0", "", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("ok");
+        expect(sipAddressAvailability("public", "192.168.1.10", "203.0.113.10", {
+            items,
+            scanStatus: "ok"
+        })).toBe("ok");
+        expect(sipAddressAvailability("public", "192.168.1.10", "203.0.113.10", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("missing");
+        expect(sipAddressAvailability("public", "0.0.0.0", "203.0.113.10", {
+            items: [items[0]],
+            scanStatus: "ok"
+        })).toBe("ok");
+    });
+
+    it("does not report an address change when the interface scan fails", () => {
+        expect(sipAddressAvailability("lan", "192.168.1.10", "192.168.1.10", {
+            items: [],
+            scanStatus: "failed"
+        })).toBe("unavailable");
     });
 
     it("lists only currently scanned addresses for wildcard LAN", () => {

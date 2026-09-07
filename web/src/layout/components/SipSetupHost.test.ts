@@ -20,8 +20,8 @@ vi.mock("@/api/standalone-setup", () => ({
 vi.mock("./SipSetupModal.vue", () => ({
     default: {
         name: "SipSetupModal",
-        props: ["visible", "required"],
-        template: '<div data-testid="sip-setup-modal" :data-visible="String(visible)" :data-required="String(required)" />'
+        props: ["visible", "required", "standalone"],
+        template: '<div data-testid="sip-setup-modal" :data-visible="String(visible)" :data-required="String(required)" :data-standalone="String(standalone)" />'
     }
 }));
 
@@ -119,6 +119,7 @@ describe("SipSetupHost permission boundary", () => {
         expect(loader).toHaveBeenCalledTimes(1);
         expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-visible")).toBe("true");
         expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-required")).toBe("false");
+        expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-standalone")).toBe("false");
         wrapper.unmount();
     });
 
@@ -134,6 +135,7 @@ describe("SipSetupHost permission boundary", () => {
 
         expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-visible")).toBe("true");
         expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-required")).toBe("false");
+        expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-standalone")).toBe("false");
         wrapper.unmount();
     });
 
@@ -161,6 +163,7 @@ describe("SipSetupHost permission boundary", () => {
 
         expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-visible")).toBe("true");
         expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-required")).toBe("true");
+        expect(wrapper.get("[data-testid='sip-setup-modal']").attributes("data-standalone")).toBe("true");
         wrapper.unmount();
     });
 

@@ -2,12 +2,14 @@
 import { computed, ref, watch } from "vue";
 import { Message } from "@arco-design/web-vue";
 import { AlertCircle, Bell, ChevronLeft, ChevronRight, Save } from "lucide-vue-next";
+import type { SipNetworkInterfaces } from "@/api/gb28181";
+import { loadStandaloneSetupStatus } from "@/api/standalone-setup";
 import DeploymentStep from "@/views/gb28181/sip/steps/DeploymentStep.vue";
 import NetworkStep from "@/views/gb28181/sip/steps/NetworkStep.vue";
 import IdentityStep from "@/views/gb28181/sip/steps/IdentityStep.vue";
 import ConfirmStep from "@/views/gb28181/sip/steps/ConfirmStep.vue";
 import { useSipSetup } from "@/views/gb28181/sip/useSipSetup";
-import { identityCanContinue, networkCanContinue } from "@/views/gb28181/sip/sipSetupRules";
+import { identityCanContinue, networkCanContinue, networkOptions, sipAddressAvailability } from "@/views/gb28181/sip/sipSetupRules";
 
 const props = withDefaults(defineProps<{
     visible: boolean;
@@ -16,7 +18,8 @@ const props = withDefaults(defineProps<{
     // required=false(默认):legacy 首装引导,保留"稍后再配".
     editing?: boolean;
     required?: boolean;
-}>(), { editing: false, required: false });
+    standalone?: boolean;
+}>(), { editing: false, required: false, standalone: false });
 const emit = defineEmits<{
     close: [];
     saved: [];
@@ -27,8 +30,32 @@ const canClose = computed(() => props.editing || !props.required);
 
 const setup = useSipSetup();
 const step = ref(1);
+const detectedStandalone = ref(false);
+const savedNetworkConfig = ref<{
+    deploymentMode: "lan" | "public";
+    listenIp: string;
+    advertiseIp: string;
+} | null>(null);
 // reloadError 用于保存后热启动失败时,把后端的错误信息展示在 Modal 里,让用户改端口/IP 后重试.
 const reloadError = ref("");
+const standaloneMode = computed(() => props.standalone || detectedStandalone.value);
+
+const savedAddressAvailability = computed(() => {
+    if (!standaloneMode.value || !savedNetworkConfig.value) return "ok";
+    return sipAddressAvailability(
+        savedNetworkConfig.value.deploymentMode,
+        savedNetworkConfig.value.listenIp,
+        savedNetworkConfig.value.advertiseIp,
+        setup.network.value
+    );
+});
+const savedAddressChanged = computed(() => savedAddressAvailability.value === "missing");
+const networkForStep = computed<SipNetworkInterfaces | null>(() => {
+    const network = setup.network.value;
+    const saved = savedNetworkConfig.value;
+    if (!network || !standaloneMode.value || !saved) return network;
+    return { ...network, items: networkOptions(network.items, saved.listenIp) };
+});
 
 const canNext = computed(() => {
     if (step.value === 1) return setup.form.deploymentMode !== "";
@@ -48,8 +75,22 @@ watch(() => props.visible, async open => {
     if (!open) return;
     step.value = 1;
     reloadError.value = "";
+    detectedStandalone.value = false;
+    savedNetworkConfig.value = null;
     try {
+        if (!props.standalone) {
+            const standaloneProbe = await loadStandaloneSetupStatus();
+            detectedStandalone.value = standaloneProbe.kind === "standalone";
+        }
         await Promise.all([setup.loadStatus(), setup.loadNetwork()]);
+        const config = setup.status.value?.config;
+        if (config) {
+            savedNetworkConfig.value = {
+                deploymentMode: config.deploymentMode,
+                listenIp: config.listenIp,
+                advertiseIp: config.advertiseIp
+            };
+        }
     } catch {
         Message.warning(setup.error.value || "部分配置数据加载失败,可以先手动填写");
     }
@@ -103,6 +144,17 @@ function closeModal() {
             </div>
         </div>
 
+        <div v-if="savedAddressChanged" class="sip-modal-address-warning">
+            <span class="sip-modal-error-icon">
+                <AlertCircle :size="18" />
+            </span>
+            <div class="sip-modal-error-body">
+                <strong>SIP 接入地址已变化</strong>
+                <span>已保存的本机 SIP 地址不在当前网卡列表中，请选择新的本机地址后再保存。</span>
+                <em>当前已保存配置仍保留，未被自动修改。</em>
+            </div>
+        </div>
+
         <a-steps :current="step" size="small" class="sip-modal-steps">
             <a-step title="部署方式" description="局域网 / 公网" />
             <a-step title="网络地址" description="监听 & 宣告" />
@@ -126,7 +178,7 @@ function closeModal() {
             <NetworkStep
                 v-else-if="step === 2"
                 :form="setup.form"
-                :network="setup.network.value"
+                :network="networkForStep"
                 @update="Object.assign(setup.form, $event)"
             />
             <IdentityStep
@@ -208,6 +260,24 @@ function closeModal() {
     font-size: 13px;
     font-weight: 620;
     color: var(--uvp-text-primary);
+}
+
+.sip-setup-dialog .sip-modal-address-warning {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    background: var(--uvp-warning-soft);
+    border: 1px solid var(--uvp-warning-border);
+    border-radius: 10px;
+}
+
+.sip-setup-dialog .sip-modal-address-warning .sip-modal-error-icon {
+    color: var(--uvp-warning);
+}
+
+.sip-setup-dialog .sip-modal-address-warning .sip-modal-error-body {
+    color: var(--uvp-warning);
 }
 
 .sip-setup-dialog .sip-modal-steps {

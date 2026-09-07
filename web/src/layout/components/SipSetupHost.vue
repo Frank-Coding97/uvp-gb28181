@@ -23,6 +23,7 @@ const currentPermissions = computed(() => props.permissions ?? account.permissio
 const canViewStatus = computed(() => hasSipStatusPermission(currentPermissions.value));
 const canUpdateConfig = computed(() => hasSipUpdatePermission(currentPermissions.value));
 const standaloneSipRequired = ref(false);
+const standaloneMode = ref(false);
 let requestVersion = 0;
 
 const permissionKey = (permissions: string[]) => permissions.slice().sort().join("|");
@@ -47,6 +48,7 @@ watch(
         const permissions = currentPermissions.value.slice();
         store.reset();
         standaloneSipRequired.value = false;
+        standaloneMode.value = false;
         if (!userId || !hasSipStatusPermission(permissions)) {
             return;
         }
@@ -73,6 +75,7 @@ watch(
             }
             const standaloneProbe = await loadStandaloneSetupStatus();
             if (!isCurrentSession()) return;
+            standaloneMode.value = standaloneProbe.kind === "standalone";
             standaloneSipRequired.value =
                 standaloneProbe.kind === "standalone" && standaloneProbe.status.phase === "pending_sip";
             if ((standaloneSipRequired.value && store.needsAttention) || store.shouldAutoOpen(currentPermissions.value)) {
@@ -95,6 +98,7 @@ watch(
         v-if="canViewStatus"
         :visible="canUpdateConfig && store.modalOpen"
         :required="standaloneSipRequired"
+        :standalone="standaloneMode"
         @close="store.closeModal({ suppressThisSession: true })"
         @saved="refreshAfterSave"
     />
