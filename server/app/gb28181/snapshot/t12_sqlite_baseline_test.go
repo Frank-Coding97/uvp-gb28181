@@ -24,6 +24,7 @@ func newSnapshotSQLiteBaselineDB(t *testing.T) (*gorm.DB, *gbmodels.GbDevice, *g
 	t.Cleanup(func() { _ = raw.Close() })
 	_, err = sqlitebootstrap.Initialize(context.Background(), db)
 	require.NoError(t, err)
+	require.NoError(t, sqlitebootstrap.Migrate(context.Background(), db))
 
 	device := &gbmodels.GbDevice{DeviceID: "34020000001320007890", Name: "T12 snapshot device"}
 	require.NoError(t, db.Create(device).Error)

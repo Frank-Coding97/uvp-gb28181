@@ -24,6 +24,7 @@ func newSubscribeSQLiteBaselineDB(t *testing.T) (*gorm.DB, *gbmodels.GbDevice, *
 	t.Cleanup(func() { _ = raw.Close() })
 	_, err = sqlitebootstrap.Initialize(context.Background(), db)
 	require.NoError(t, err)
+	require.NoError(t, sqlitebootstrap.Migrate(context.Background(), db))
 
 	device := &gbmodels.GbDevice{
 		DeviceID: "34020000001320001234", Name: "T12 SQLite device", IP: "192.0.2.10", Port: 5060,

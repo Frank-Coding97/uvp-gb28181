@@ -668,7 +668,7 @@ func TestHandlerHomeQueryNoDataPreservesCacheAndMarksStale(t *testing.T) {
 	var home gbmodels.GbPTZHomePosition
 	require.NoError(t, db.Where("channel_id = ?", 1).First(&home).Error)
 	require.Zero(t, home.SourceOperationSeq)
-	require.Equal(t, *now, home.ConfirmedAt)
+	require.True(t, now.Equal(home.ConfirmedAt))
 	model, err := service.GetHomePositionReadModel(context.Background(), 1, nil)
 	require.NoError(t, err)
 	require.Equal(t, gbmodels.PTZFreshnessStale, model.Freshness)
@@ -711,7 +711,7 @@ func TestHandlerOlderHomeQueryCannotOverwriteNewerControlCache(t *testing.T) {
 	require.NoError(t, db.Where("channel_id = ?", 1).First(&home).Error)
 	require.True(t, home.Enabled)
 	require.Equal(t, query.ID+1, home.SourceOperationSeq)
-	require.Equal(t, newer.ConfirmedAt, home.ConfirmedAt)
+	require.True(t, newer.ConfirmedAt.Equal(home.ConfirmedAt))
 }
 
 func TestHandlerHomeReconcileMismatchKeepsAcceptedAndDeviceValue(t *testing.T) {

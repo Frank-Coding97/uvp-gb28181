@@ -91,7 +91,7 @@ func TestHomePositionCacheCausalCASRejectsEqualAndOlderSources(t *testing.T) {
 		require.NoError(t, candidateErr)
 		require.False(t, candidateApplied)
 		require.False(t, got.Enabled)
-		require.Equal(t, initial.ConfirmedAt, got.ConfirmedAt, "equal/older source must not renew freshness")
+		require.True(t, initial.ConfirmedAt.Equal(got.ConfirmedAt), "equal/older source must not renew freshness")
 		require.Equal(t, uint(10), got.SourceOperationSeq)
 	}
 
@@ -102,7 +102,7 @@ func TestHomePositionCacheCausalCASRejectsEqualAndOlderSources(t *testing.T) {
 	require.True(t, applied)
 	require.True(t, got.Enabled)
 	require.Equal(t, uint(11), got.SourceOperationSeq)
-	require.Equal(t, newer.ConfirmedAt, got.ConfirmedAt)
+	require.True(t, newer.ConfirmedAt.Equal(got.ConfirmedAt))
 }
 
 func TestHomePositionFreshnessUsesOnlyHomeConfirmationAndNewerQueries(t *testing.T) {

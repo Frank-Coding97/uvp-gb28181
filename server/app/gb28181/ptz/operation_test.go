@@ -99,7 +99,7 @@ func TestOperationResponseRequiredCreationIsAtomicAndQueued(t *testing.T) {
 	require.Equal(t, uint(17), operation.ActorID)
 	require.Equal(t, uint(23), operation.ActorDeptID)
 	require.NotNil(t, operation.QueueDeadlineAt)
-	require.Equal(t, now.Add(5*time.Second), *operation.QueueDeadlineAt)
+	require.True(t, now.Add(5*time.Second).Equal(*operation.QueueDeadlineAt))
 	require.NotNil(t, operation.TriggerOperationID)
 	require.Equal(t, trigger, *operation.TriggerOperationID)
 	require.JSONEq(t, `{"enabled":false,"presetId":0,"resetTime":0}`, operation.PayloadJSON)

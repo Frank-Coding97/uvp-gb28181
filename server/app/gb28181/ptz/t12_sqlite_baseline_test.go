@@ -2,7 +2,6 @@ package ptz
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 
+	"uvplatform.cn/uvp-gb28181/app/gb28181/manscdp"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/protocol"
 	"uvplatform.cn/uvp-gb28181/app/gb28181/uac"
@@ -26,6 +26,7 @@ func newPTZSQLiteBaselineDB(t *testing.T) (*gorm.DB, *gbmodels.GbDevice, *gbmode
 	t.Cleanup(func() { _ = raw.Close() })
 	_, err = sqlitebootstrap.Initialize(context.Background(), db)
 	require.NoError(t, err)
+	require.NoError(t, sqlitebootstrap.Migrate(context.Background(), db))
 
 	device := &gbmodels.GbDevice{
 		DeviceID: "34020000001320005678", Name: "T12 PTZ device", IP: "192.0.2.20", Port: 5060,
@@ -40,6 +41,17 @@ func newPTZSQLiteBaselineDB(t *testing.T) (*gorm.DB, *gbmodels.GbDevice, *gbmode
 	return db, device, channel
 }
 
+type t12PTZSender struct {
+	calls int
+	body  []byte
+}
+
+func (s *t12PTZSender) SendMessageTracked(_ context.Context, _, _, _ string, body []byte) (uac.TrackedMessageResult, error) {
+	s.calls++
+	s.body = append([]byte(nil), body...)
+	return uac.TrackedMessageResult{CallID: "t12-ptz-call", CSeq: "1", StatusCode: 200, Attempted: true}, nil
+}
+
 func t12PTZTarget(device *gbmodels.GbDevice, channel *gbmodels.GbChannel) Target {
 	return Target{
 		DeviceID: device.ID, DeviceCode: device.DeviceID, ChannelID: channel.ID, ChannelCode: channel.ChannelID,
@@ -50,7 +62,7 @@ func t12PTZTarget(device *gbmodels.GbDevice, channel *gbmodels.GbChannel) Target
 
 func TestT12PTZSQLiteBaselinePersistsIdempotentControlAndRejectsOffline(t *testing.T) {
 	db, device, channel := newPTZSQLiteBaselineDB(t)
-	sender := &fakeTrackedSender{}
+	sender := &t12PTZSender{}
 	now := time.Date(2026, 9, 7, 12, 3, 0, 0, time.UTC)
 	service, err := NewService(db, sender, func() time.Time { return now })
 	require.NoError(t, err)
@@ -61,7 +73,10 @@ func TestT12PTZSQLiteBaselinePersistsIdempotentControlAndRejectsOffline(t *testi
 		CmdType: "DeviceControl", Action: "left", IdempotencyKey: "t12-ptz-control",
 		Payload: map[string]interface{}{"action": "left"},
 		Build: func(sn int) ([]byte, error) {
-			return []byte(fmt.Sprintf("<Control><SN>%d</SN><DeviceID>%s><PTZCmd>left</PTZCmd></Control>", sn, channel.ChannelID)), nil
+			return manscdp.BuildPTZControlWithProfile(protocol.ProfileFor(protocol.Version2022), channel.ChannelID, sn, manscdp.PTZCommand{
+				Action: manscdp.PTZActionLeft,
+				Speed:  8,
+			})
 		},
 	}
 	one, err := service.Execute(ctx, t12PTZTarget(device, channel), command)
@@ -70,6 +85,12 @@ func TestT12PTZSQLiteBaselinePersistsIdempotentControlAndRejectsOffline(t *testi
 	require.Equal(t, gbmodels.ControlTargetScopeChannel, one.TargetScope)
 	require.Equal(t, channel.ChannelID, one.TargetCode)
 	require.Equal(t, 1, sender.calls)
+	parsed, err := manscdp.ParsePTZControlWithProfile(protocol.ProfileFor(protocol.Version2022), sender.body)
+	require.NoError(t, err)
+	require.Equal(t, one.SN, parsed.SN)
+	require.Equal(t, channel.ChannelID, parsed.DeviceID)
+	require.Equal(t, "left", parsed.Command.Action)
+	require.NotEmpty(t, parsed.Command.Raw)
 
 	two, err := service.Execute(ctx, t12PTZTarget(device, channel), command)
 	require.NoError(t, err)
