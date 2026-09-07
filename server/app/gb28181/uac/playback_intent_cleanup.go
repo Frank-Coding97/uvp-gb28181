@@ -47,6 +47,9 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 	if o.originalReleased {
 		return ErrPlaybackCleanupUnknown
 	}
+	if err := o.finishINFO(ctx); err != nil {
+		return err
+	}
 	stored, err := o.persistOriginalFacts(ctx)
 	if err != nil {
 		return err // Keep original owner until its observed facts are durable.
@@ -64,11 +67,16 @@ func (o *playbackIntentOperation) CleanupKnownBranch(ctx context.Context) (resul
 			branch = step.KnownBranch
 		}
 	}
-	if branch == nil || len(branch.CleanupAttempts) != 0 || o.invite.CSeq == math.MaxUint32 {
+	if branch == nil || len(branch.CleanupAttempts) != 0 {
 		o.releaseOriginal()
 		return ErrPlaybackCleanupUnknown
 	}
-	owner, err := o.dua.NewBranchCleanup(o.request, first, o.invite.CSeq+1)
+	lastCSeq := playbackLastINFOCSeq(o.invite.CSeq, branch)
+	if lastCSeq == math.MaxUint32 {
+		o.releaseOriginal()
+		return ErrPlaybackCleanupUnknown
+	}
+	owner, err := o.dua.NewBranchCleanup(o.request, first, lastCSeq+1)
 	if err != nil {
 		o.releaseOriginal()
 		return err

@@ -14,7 +14,7 @@ import (
 const maxPlaybackIntentOperations = 64
 
 // This registry is a bounded, strong cleanup owner, not a legacy dialog store.
-// None of these objects expose Do/Bye/INFO or claim remote completion.
+// It never exposes legacy Do/Bye or claims remote completion.
 type playbackIntentOperation struct {
 	store                 *playauth.DeviceOperationIntentStore
 	id                    playauth.DeviceOperationIntentIdentity
@@ -23,6 +23,8 @@ type playbackIntentOperation struct {
 	dua                   *sipgo.DialogUA
 	originalReleased      bool // Protected by work, not merely releaseOnce.
 	cleanup               *playbackIntentCleanup
+	info                  *playbackIntentINFO
+	ackWritten            bool // Actual original ACK write; never reconstructed from storage.
 	owned                 *sipgo.OwnedClientInvite
 	request               *sip.Request
 	invite                playauth.DeviceSIPInviteIdentity
@@ -346,6 +348,7 @@ func (o *playbackIntentOperation) ReadAndAccept(ctx context.Context) (PlaybackDi
 		o.lost.Store(true)
 		return PlaybackDialogMetadata{}, err
 	}
+	o.ackWritten = true
 	metadata := (&sipgoPlaybackDialog{session: o.owned.Session()}).Metadata()
 	metadata.DeviceID, metadata.ChannelID, metadata.SSRC = o.input.DeviceID, o.input.ChannelID, o.input.SSRC
 	return metadata, nil
@@ -426,6 +429,9 @@ func (o *playbackIntentOperation) CloseLocal(ctx context.Context) error {
 	defer o.leave()
 	if o.cleanup != nil {
 		return o.finishCleanup(ctx)
+	}
+	if err := o.finishINFO(ctx); err != nil {
+		return err
 	}
 	if _, err := o.persistOriginalFacts(ctx); err != nil {
 		return err
