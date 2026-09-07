@@ -39,6 +39,8 @@ type UAC struct {
 	inviteTransport  inviteDialogTransport
 	playbackEndMu    sync.RWMutex
 	playbackEndHook  func(context.Context, PlaybackDialogMetadata, string) error
+	playbackIntentMu sync.Mutex
+	playbackIntents  map[string]*playbackIntentOperation
 
 	// outCSeq 给本端构造的 MESSAGE/INVITE 生成稳定 CSeq,
 	// 配合 generated Call-ID 用于 metrics 配对

@@ -52,7 +52,11 @@ func (u *UAC) preparePlaybackIntentSnapshot(request *sip.Request) (*sip.Request,
 // Zero Via/Contact ports still depend on connection-time selection and cannot
 // be called fixed by this pre-transaction contract.
 func fixedPlaybackIntentIdentity(r *sip.Request) bool {
-	if r == nil || r.Method != sip.INVITE {
+	return fixedPlaybackRequestIdentity(r, sip.INVITE)
+}
+
+func fixedPlaybackRequestIdentity(r *sip.Request, method sip.RequestMethod) bool {
+	if r == nil || r.Method != method {
 		return false
 	}
 	for _, header := range []string{"Call-ID", "From", "CSeq", "Via", "Contact"} {
@@ -61,11 +65,21 @@ func fixedPlaybackIntentIdentity(r *sip.Request) bool {
 		}
 	}
 	callID, from, cseq, via, contact := r.CallID(), r.From(), r.CSeq(), r.Via(), r.Contact()
-	if callID == nil || *callID == "" || from == nil || cseq == nil || cseq.SeqNo == 0 || cseq.MethodName != sip.INVITE || via == nil || contact == nil {
+	if callID == nil || *callID == "" || from == nil || cseq == nil || cseq.SeqNo == 0 || cseq.MethodName != method || via == nil || contact == nil {
 		return false
 	}
 	tag, tagOK := from.Params.Get("tag")
 	branch, branchOK := via.Params.Get("branch")
+	if len(from.Params) != 1 || from.Params[0].K != "tag" || len(contact.Params) != 0 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, param := range via.Params {
+		if (param.K != "branch" && param.K != "rport") || seen[param.K] {
+			return false
+		}
+		seen[param.K] = true
+	}
 	// Request getters can derive defaults from URI/Via. Require the explicit
 	// application routing snapshot instead of silently accepting that fallback.
 	host, portText, err := net.SplitHostPort(r.MessageData.Destination())
@@ -77,15 +91,28 @@ func fixedPlaybackIntentIdentity(r *sip.Request) bool {
 
 // Extract only: this function never generates headers, tags, branches or IDs.
 func snapshotPlaybackIntentRequest(r *sip.Request) (playbackIntentSnapshot, error) {
-	if !fixedPlaybackIntentIdentity(r) {
+	return snapshotPlaybackRequest(r, sip.INVITE)
+}
+
+func snapshotPlaybackRequest(r *sip.Request, method sip.RequestMethod) (playbackIntentSnapshot, error) {
+	if (method != sip.INVITE && method != sip.CANCEL) || !fixedPlaybackRequestIdentity(r, method) {
 		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 	}
-	for _, header := range []string{"To", "Max-Forwards", "Content-Length", "Content-Type"} {
+	for _, header := range []string{"To", "Max-Forwards", "Content-Length"} {
 		if len(r.GetHeaders(header)) != 1 {
 			return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 		}
 	}
-	if r.To() == nil || r.To().Address.Host == "" || r.MaxForwards() == nil || r.ContentLength() == nil || r.ContentType() == nil || int(*r.ContentLength()) != len(r.Body()) {
+	if r.To() == nil || r.To().Address.Host == "" || len(r.To().Params) != 0 || r.MaxForwards() == nil || r.ContentLength() == nil || int(*r.ContentLength()) != len(r.Body()) {
+		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
+	}
+	contentType := ""
+	if method == sip.INVITE {
+		if len(r.GetHeaders("Content-Type")) != 1 || r.ContentType() == nil {
+			return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
+		}
+		contentType = string(*r.ContentType())
+	} else if len(r.GetHeaders("Content-Type")) != 0 || len(r.Body()) != 0 {
 		return playbackIntentSnapshot{}, errPlaybackIntentSnapshot
 	}
 	tag, _ := r.From().Params.Get("tag")
@@ -97,6 +124,6 @@ func snapshotPlaybackIntentRequest(r *sip.Request) (playbackIntentSnapshot, erro
 		fromURI: r.From().Address.String(), localTag: tag, toURI: r.To().Address.String(), contactURI: r.Contact().Address.String(),
 		transport: r.Transport(), destination: r.Destination(), viaHost: via.Host, viaPort: via.Port, viaTransport: via.Transport,
 		branch: branch, rportValue: rport, rportPresent: hasRport, maxForwards: uint32(*r.MaxForwards()),
-		contentType: string(*r.ContentType()), bodyLength: len(r.Body()), bodySHA256: sha256.Sum256(r.Body()),
+		contentType: contentType, bodyLength: len(r.Body()), bodySHA256: sha256.Sum256(r.Body()),
 	}, nil
 }
