@@ -20,7 +20,10 @@ const (
 	runMarkerSchema = 1
 )
 
-var errRunMarkerInvalid = errors.New("standalone: invalid run marker")
+var (
+	errRunMarkerInvalid           = errors.New("standalone: invalid run marker")
+	ErrRunMarkerOwnershipMismatch = errors.New("standalone: run marker ownership mismatch")
+)
 
 type runMarkerPayload struct {
 	Schema    int    `json:"schema"`
@@ -125,7 +128,7 @@ func (m *RunMarker) finish() error {
 			return err
 		}
 		if payload.Nonce != m.nonce {
-			return nil
+			return ErrRunMarkerOwnershipMismatch
 		}
 		if err := os.Remove(m.path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("remove run marker %q: %w", m.path, err)
@@ -144,6 +147,9 @@ func newRunNonce() (string, error) {
 
 func decodeRunMarker(raw []byte) (runMarkerPayload, error) {
 	var payload runMarkerPayload
+	if _, err := decodeStrictJSONObject(raw); err != nil {
+		return runMarkerPayload{}, fmt.Errorf("%w: %v", errRunMarkerInvalid, err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&payload); err != nil {

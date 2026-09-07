@@ -69,7 +69,7 @@ func TestBeginRunReportsPreviousUncleanAndFinishUsesCurrentNonce(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, second.PreviousUnclean)
 
-	require.NoError(t, first.Finish())
+	require.ErrorIs(t, first.Finish(), ErrRunMarkerOwnershipMismatch)
 	_, err = os.Stat(testRunMarkerPath(paths))
 	require.NoError(t, err, "an older run must not remove the newer marker")
 	require.NoError(t, second.Finish())
@@ -103,7 +103,7 @@ func TestFinishDoesNotRemoveMarkerWithForgedNonce(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, writeSecureConfigFile(testRunMarkerPath(paths), raw, true, nil))
 
-	require.NoError(t, marker.Finish())
+	require.ErrorIs(t, marker.Finish(), ErrRunMarkerOwnershipMismatch)
 	_, err = os.Stat(testRunMarkerPath(paths))
 	require.NoError(t, err, "Finish must not remove another run marker")
 	next, err := BeginRun(paths)
@@ -202,6 +202,7 @@ func TestRunMarkerMalformedPayloadIsNotAcceptedAsPreviousRun(t *testing.T) {
 	paths := runMarkerTestPaths(t)
 	markerPath := testRunMarkerPath(paths)
 	for _, raw := range [][]byte{
+		[]byte(`{"schema":1,"nonce":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","nonce":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","started_at":"2026-09-08T00:00:00Z"}`),
 		[]byte(`{"schema":2,"nonce":"n","started_at":"2026-09-08T00:00:00Z"}`),
 		[]byte(`{"schema":1,"nonce":"n","started_at":"not-time"}`),
 		[]byte(`{"schema":1,"nonce":"n","started_at":"2026-09-08T00:00:00Z","extra":true}`),
