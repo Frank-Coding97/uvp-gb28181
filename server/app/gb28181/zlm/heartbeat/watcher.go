@@ -112,8 +112,10 @@ func (w *Watcher) Tick() {
 //	ctx, cancel := context.WithCancel(context.Background())
 //	watcher.Start(ctx)
 //	// ... cancel() 时停止
-func (w *Watcher) Start(ctx context.Context) {
+func (w *Watcher) Start(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		tk := time.NewTicker(w.checkInterval)
 		defer tk.Stop()
 		for {
@@ -121,8 +123,12 @@ func (w *Watcher) Start(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-tk.C:
+				if ctx.Err() != nil {
+					return
+				}
 				w.Tick()
 			}
 		}
 	}()
+	return done
 }

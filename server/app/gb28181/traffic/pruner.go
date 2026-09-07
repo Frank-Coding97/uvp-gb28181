@@ -11,18 +11,27 @@ const (
 	pruneBatchSize          = 500
 )
 
-func StartSessionPruner(ctx context.Context, repo *GormRepository, now func() time.Time, onError func(error)) {
+func StartSessionPruner(ctx context.Context, repo *GormRepository, now func() time.Time, onError func(error)) <-chan struct{} {
+	done := make(chan struct{})
 	if repo == nil {
-		return
+		close(done)
+		return done
 	}
 	if now == nil {
 		now = time.Now
 	}
 	go func() {
+		defer close(done)
 		ticker := time.NewTicker(pruneInterval)
 		defer ticker.Stop()
 		for {
+			if ctx.Err() != nil {
+				return
+			}
 			for {
+				if ctx.Err() != nil {
+					return
+				}
 				deleted, err := repo.PruneSettledBefore(ctx, now().Add(-settledSessionRetention), pruneBatchSize)
 				if err != nil {
 					if onError != nil {
@@ -41,4 +50,5 @@ func StartSessionPruner(ctx context.Context, repo *GormRepository, now func() ti
 			}
 		}
 	}()
+	return done
 }

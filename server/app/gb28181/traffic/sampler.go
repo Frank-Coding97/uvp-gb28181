@@ -42,11 +42,16 @@ func NewSampler(nodes SamplerNodeRegistry, clientFor SamplerClientFactory, repo 
 	return &Sampler{nodes: nodes, clientFor: clientFor, repo: repo, attribution: attribution, realtime: realtime, now: now, failures: make(map[int64]int)}
 }
 
-func (s *Sampler) Start(ctx context.Context, interval time.Duration) {
+func (s *Sampler) Start(ctx context.Context, interval time.Duration) <-chan struct{} {
+	done := make(chan struct{})
 	if interval <= 0 {
 		interval = time.Minute
 	}
 	go func() {
+		defer close(done)
+		if ctx.Err() != nil {
+			return
+		}
 		_ = s.SampleOnce(ctx)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -55,10 +60,14 @@ func (s *Sampler) Start(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				if ctx.Err() != nil {
+					return
+				}
 				_ = s.SampleOnce(ctx)
 			}
 		}
 	}()
+	return done
 }
 
 func (s *Sampler) SampleOnce(ctx context.Context) error {
@@ -67,16 +76,25 @@ func (s *Sampler) SampleOnce(ctx context.Context) error {
 	}
 	var failures []error
 	for _, mediaNode := range s.nodes.ListActive() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if mediaNode == nil {
 			continue
 		}
 		items, err := s.clientFor(mediaNode).GetMediaList(ctx, "__defaultVhost__", "rtp", "")
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			s.noteFailure(ctx, mediaNode.ID, s.now().UTC())
 			failures = append(failures, fmt.Errorf("node %d: %w", mediaNode.ID, err))
 			continue
 		}
 		s.noteSuccess(ctx, mediaNode.ID, s.now().UTC())
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := s.observeNode(ctx, mediaNode, items); err != nil {
 			failures = append(failures, err)
 		}
@@ -89,7 +107,7 @@ func (s *Sampler) noteFailure(ctx context.Context, nodeID int64, at time.Time) {
 	s.failures[nodeID]++
 	count := s.failures[nodeID]
 	s.mu.Unlock()
-	if count == 2 {
+	if count == 2 && ctx.Err() == nil {
 		_ = s.repo.OpenGap(ctx, nodeID, "api_failed", at)
 	}
 }
@@ -99,7 +117,7 @@ func (s *Sampler) noteSuccess(ctx context.Context, nodeID int64, at time.Time) {
 	count := s.failures[nodeID]
 	delete(s.failures, nodeID)
 	s.mu.Unlock()
-	if count >= 2 {
+	if count >= 2 && ctx.Err() == nil {
 		_ = s.repo.CloseGap(ctx, nodeID, "api_failed", at)
 	}
 }
@@ -139,6 +157,10 @@ func (s *Sampler) observeNode(ctx context.Context, mediaNode *node.Node, items [
 	at := s.now().UTC()
 	var failures []error
 	for _, group := range groups {
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err)
+			return errors.Join(failures...)
+		}
 		attribution, err := s.attribution.Resolve(mediaNode.ID, group.app, group.stream)
 		if err != nil {
 			failures = append(failures, fmt.Errorf("node %d stream %s: %w", mediaNode.ID, group.stream, err))
@@ -154,6 +176,10 @@ func (s *Sampler) observeNode(ctx context.Context, mediaNode *node.Node, items [
 		if err != nil {
 			failures = append(failures, fmt.Errorf("apply node %d stream %s: %w", mediaNode.ID, group.stream, err))
 			continue
+		}
+		if err := ctx.Err(); err != nil {
+			failures = append(failures, err)
+			return errors.Join(failures...)
 		}
 		if s.realtime != nil {
 			s.realtime.Put(RealtimeSnapshot{
