@@ -85,6 +85,15 @@ func runStandaloneServer(engine *gin.Engine, admission *ginhelper.StandaloneAdmi
 				if err == nil {
 					err = gb28181.StopContext(ctx)
 				}
+				if err == nil && app.CasbinV2 != nil {
+					// Policy reload can still be reading SQLite after HTTP drains.
+					// Join it before closing the shared database connection.
+					if closer, ok := app.CasbinV2.(interface{ Shutdown(context.Context) error }); ok {
+						err = closer.Shutdown(ctx)
+					} else {
+						err = errors.New("authorization policy loader cannot drain")
+					}
+				}
 				if err == nil && app.Cache != nil {
 					err = app.Cache.Close()
 				}
