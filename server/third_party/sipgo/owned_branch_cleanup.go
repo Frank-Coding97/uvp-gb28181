@@ -83,26 +83,41 @@ func validCleanupInvite(r *sip.Request) bool {
 func cloneOwnedCleanupRequest(r *sip.Request) *sip.Request {
 	copy := r.Clone()
 	copy.SetBody(append([]byte(nil), r.Body()...))
-	for _, h := range r.Headers() {
+	detachOwnedPrimitiveHeaders(copy.Headers(), copy.ReplaceHeader)
+	return copy
+}
+
+func detachOwnedPrimitiveHeaders(headers []sip.Header, replace func(sip.Header)) {
+	seen := map[string]bool{}
+	for index, h := range headers {
+		var detached sip.Header
 		switch h := h.(type) {
 		case *sip.CallIDHeader:
 			v := *h
-			copy.ReplaceHeader(&v)
+			detached = &v
 		case *sip.MaxForwardsHeader:
 			v := *h
-			copy.ReplaceHeader(&v)
+			detached = &v
 		case *sip.ContentLengthHeader:
 			v := *h
-			copy.ReplaceHeader(&v)
+			detached = &v
 		case *sip.ContentTypeHeader:
 			v := *h
-			copy.ReplaceHeader(&v)
+			detached = &v
 		case *sip.ExpiresHeader:
 			v := *h
-			copy.ReplaceHeader(&v)
+			detached = &v
+		}
+		if detached != nil {
+			// Headers is the private clone's ordered slice. Replacing by name
+			// alone only detaches the first occurrence; preserve every position.
+			headers[index] = detached
+			if !seen[h.Name()] {
+				replace(detached) // refresh the fast accessor for the first header
+				seen[h.Name()] = true
+			}
 		}
 	}
-	return copy
 }
 
 func (o *OwnedBranchCleanup) ACKRequest() *sip.Request { return cloneOwnedCleanupRequest(o.ack) }

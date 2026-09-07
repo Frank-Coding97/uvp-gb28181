@@ -26,6 +26,9 @@ type OwnedClientInvite struct {
 	accepted, ackPrepared, ackStarted   bool
 	ack                                 *sip.Request
 	unmatched                           chan *sip.Response
+	branches                            []*sip.Response
+	branchesIncomplete                  bool
+	branchChanges                       chan struct{}
 	writeErrors                         chan error
 	provisionalObserved, finalObserved  bool
 	cancelPrepared, cancelStarted       bool
@@ -75,7 +78,10 @@ func (ua *DialogUA) PrepareWriteInviteOwned(ctx context.Context, request *sip.Re
 func newOwnedClientInvite(ua *DialogUA, request *sip.Request, tx *sip.ClientTx) *OwnedClientInvite {
 	session := &DialogClientSession{Dialog: Dialog{InviteRequest: request}, UA: ua, inviteTx: tx}
 	session.Dialog.Init()
-	o := &OwnedClientInvite{session: session, tx: tx, quiesced: make(chan struct{}), unmatched: make(chan *sip.Response, 1), writeErrors: make(chan error, 1)}
+	o := &OwnedClientInvite{session: session, tx: tx, quiesced: make(chan struct{}), unmatched: make(chan *sip.Response, 1), branchChanges: make(chan struct{}, 1), writeErrors: make(chan error, 1)}
+	if !tx.OnRetransmission(func(response *sip.Response) { o.observeBranch(response, true) }) {
+		o.closing, o.branchesIncomplete = true, true
+	}
 	go func() {
 		<-tx.Quiesced()
 		o.mu.Lock()
@@ -169,8 +175,8 @@ func (o *OwnedClientInvite) NextResponse(ctx context.Context) (*sip.Response, er
 		if response == nil {
 			return nil, ErrOwnedInviteState
 		}
-		copy := response.Clone()
-		copy.SetBody(append([]byte(nil), response.Body()...))
+		o.observeBranch(response, false)
+		copy := cloneOwnedBranchResponse(response)
 		o.mu.Lock()
 		if response.StatusCode >= 200 {
 			o.finalObserved = true
@@ -241,7 +247,7 @@ func (o *OwnedClientInvite) PrepareACK() (*sip.Request, error) {
 // and registered callback; it does not grant another explicit attempt.
 func (o *OwnedClientInvite) WritePreparedACK() error {
 	o.mu.Lock()
-	if o.closing || o.ack == nil || o.ackStarted {
+	if o.closing || o.ack == nil || o.ackStarted || o.branchesIncomplete || len(o.branches) > 1 {
 		o.mu.Unlock()
 		return ErrOwnedInviteState
 	}
@@ -257,14 +263,6 @@ func (o *OwnedClientInvite) WritePreparedACK() error {
 	}
 	if !o.tx.OnRetransmission(func(response *sip.Response) {
 		if !sameOwnedInviteResponse(expected, response) {
-			if response != nil {
-				copy := response.Clone()
-				copy.SetBody(append([]byte(nil), response.Body()...))
-				select {
-				case o.unmatched <- copy:
-				default:
-				}
-			}
 			return
 		}
 		if err := write(); err != nil {
@@ -285,9 +283,8 @@ func (o *OwnedClientInvite) WritePreparedACK() error {
 	return nil
 }
 
-// UnmatchedResponses retains the first unmatched retransmission until drained.
-// It is an unsupported-branch signal, not a complete fork inventory. The owner
-// must keep coverage unknown and must not interpret an empty channel as closure.
+// UnmatchedResponses is a legacy best-effort hint. ObservedBranches retains
+// bounded material even if this channel is full. Neither API proves coverage.
 func (o *OwnedClientInvite) UnmatchedResponses() <-chan *sip.Response { return o.unmatched }
 
 // WriteErrors reports a retransmission write failure without claiming that the
