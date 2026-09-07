@@ -169,6 +169,7 @@ func t18StartHeadlessEdge(ctx context.Context) (*t18EdgeBrowser, error) {
 		"--disable-extensions",
 		"--disable-default-apps",
 		"--incognito",
+		"--window-size=1365,900",
 		"--user-data-dir=" + profile,
 		"--remote-debugging-address=127.0.0.1",
 		"--remote-debugging-port=0",
@@ -575,14 +576,17 @@ func (cdp *t18CDP) close() error {
 }
 
 type t18BrowserDOMState struct {
-	URLScrubbed     bool `json:"urlScrubbed"`
-	SetupForm       bool `json:"setupForm"`
-	LoginRoute      bool `json:"loginRoute"`
-	LoginForm       bool `json:"loginForm"`
-	SIPModalVisible bool `json:"sipModalVisible"`
-	SIPRequired     bool `json:"sipRequired"`
-	SIPSkipVisible  bool `json:"sipSkipVisible"`
-	SIPCloseVisible bool `json:"sipCloseVisible"`
+	URLScrubbed             bool `json:"urlScrubbed"`
+	SetupForm               bool `json:"setupForm"`
+	LoginRoute              bool `json:"loginRoute"`
+	LoginForm               bool `json:"loginForm"`
+	SIPModalVisible         bool `json:"sipModalVisible"`
+	SIPRequired             bool `json:"sipRequired"`
+	SIPSkipVisible          bool `json:"sipSkipVisible"`
+	SIPCloseVisible         bool `json:"sipCloseVisible"`
+	DashboardVisible        bool `json:"dashboardVisible"`
+	DashboardAPIRequested   bool `json:"dashboardAPIRequested"`
+	ServerErrorToastVisible bool `json:"serverErrorToastVisible"`
 }
 
 const t18BrowserDOMStateExpression = `(() => {
@@ -607,6 +611,24 @@ const t18BrowserDOMStateExpression = `(() => {
    .some(node => String(node.textContent || "").includes("请完成配置后再使用系统"));
  const sipSkip = sipDialog && sipDialog.querySelector(".sip-modal-skip");
  const sipClose = sipDialog && sipDialog.querySelector(".arco-modal-close-btn, .arco-modal-close, [aria-label='Close']");
+ const dashboardVisible = Boolean(document.querySelector(".dashboard-shell, .dashboard-grid"));
+ const dashboardAPIRequested = performance.getEntriesByType("resource").some(entry => {
+   try {
+     const path = new URL(String(entry.name || ""), href).pathname;
+     return path === "/api/gb28181/sip/platform" ||
+       path === "/api/gb28181/sip/dashboard/snapshot" ||
+       path.startsWith("/api/gb28181/sip/dashboard/") ||
+       path.startsWith("/api/gb28181/home/") ||
+       path === "/api/gb28181/zlm/overview";
+   } catch (_) {
+     return false;
+   }
+ });
+ const serverErrorToastVisible = Array.from(document.querySelectorAll(".arco-message, .arco-notification, [role=alert]")).some(node => {
+   if (!visible(node)) return false;
+   const text = String(node.textContent || "");
+   return text.includes("服务器异常") || text.includes("请联系管理员");
+ });
  return {
    urlScrubbed: !href.includes("bootstrap_token="),
    setupForm: setupForm,
@@ -615,7 +637,10 @@ const t18BrowserDOMStateExpression = `(() => {
    sipModalVisible: sipModalVisible,
    sipRequired: requiredCopy,
    sipSkipVisible: visible(sipSkip),
-   sipCloseVisible: visible(sipClose)
+   sipCloseVisible: visible(sipClose),
+   dashboardVisible: dashboardVisible,
+   dashboardAPIRequested: dashboardAPIRequested,
+   serverErrorToastVisible: serverErrorToastVisible
  };
 })()`
 
@@ -646,7 +671,7 @@ func t18WaitLoginRoute(ctx context.Context, cdp *t18CDP) error {
 func t18WaitSIPRequired(ctx context.Context, cdp *t18CDP) error {
 	for {
 		state, err := cdp.evalState(ctx)
-		if err == nil && !state.LoginRoute && state.URLScrubbed && state.SIPModalVisible && state.SIPRequired && !state.SIPSkipVisible && !state.SIPCloseVisible {
+		if err == nil && !state.LoginRoute && state.URLScrubbed && state.SIPModalVisible && state.SIPRequired && !state.SIPSkipVisible && !state.SIPCloseVisible && !state.DashboardVisible && !state.DashboardAPIRequested && !state.ServerErrorToastVisible {
 			return nil
 		}
 		if err := t18WaitPoll(ctx); err != nil {
@@ -664,6 +689,6 @@ func t18LogBrowserState(t *testing.T, cdp *t18CDP) {
 		t.Log("browser DOM state unavailable")
 		return
 	}
-	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t login_form=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t",
-		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.LoginForm, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible)
+	t.Logf("browser DOM state: scrubbed=%t setup=%t login_route=%t login_form=%t sip_modal=%t sip_required=%t sip_skip=%t sip_close=%t dashboard=%t dashboard_api=%t server_error_toast=%t",
+		state.URLScrubbed, state.SetupForm, state.LoginRoute, state.LoginForm, state.SIPModalVisible, state.SIPRequired, state.SIPSkipVisible, state.SIPCloseVisible, state.DashboardVisible, state.DashboardAPIRequested, state.ServerErrorToastVisible)
 }

@@ -57,6 +57,16 @@ export const staticRoutes = [
     }
   },
   {
+    path: "/standalone-sip-setup",
+    name: "standalone-sip-setup",
+    component: () => import(/* webpackChunkName: "standalone-sip-setup" */ "@/views/standalone-sip-setup/index.vue"),
+    meta: {
+      title: "配置 SIP 服务",
+      hide: true,
+      standaloneSetup: true
+    }
+  },
+  {
     path: "/layout",
     name: "layout",
     redirect: HOME_PATH,

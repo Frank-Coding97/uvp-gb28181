@@ -59,7 +59,7 @@ router.beforeEach(async (to: any, _: any, next: any) => {
         });
     }
     const standaloneProbe = await loadStandaloneSetupStatus();
-    const standaloneNavigation = standaloneSetupNavigation(to.path, to.query, standaloneProbe);
+    const standaloneNavigation = standaloneSetupNavigation(to.path, to.query, standaloneProbe, hasRefreshToken());
     if (standaloneNavigation) return next(standaloneNavigation);
     if (standaloneProbe.kind === "standalone"
         && standaloneProbe.status.phase === "pending_admin"
@@ -72,8 +72,8 @@ router.beforeEach(async (to: any, _: any, next: any) => {
     ];
     if (publicRoutes.includes(to.path)) return next();
     // 新的登录逻辑
-    const tokenExist = hasRefreshToken();
     // 1、去登录页，无token，放行
+    const tokenExist = hasRefreshToken();
     if (to.path === "/login" && !tokenExist) return next();
     // 2、没有token，直接重定向到登录页
     if (!tokenExist) return next("/login");

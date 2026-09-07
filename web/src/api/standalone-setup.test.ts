@@ -12,6 +12,7 @@ import {
   isStandaloneAdminPasswordValid,
   loadStandaloneSetupStatus,
   readBootstrapTokenOnce,
+  refreshStandaloneSetupStatus,
   requestStandaloneSetupStatus,
   resetStandaloneSetupStateForTests,
   stripBootstrapTokenQuery,
@@ -57,6 +58,19 @@ describe("standalone setup API contract", () => {
       .mockResolvedValueOnce(response(200, { phase: "complete", standalone: true }));
     await expect(loadStandaloneSetupStatus(fetcher)).resolves.toEqual({ kind: "unavailable" });
     await expect(loadStandaloneSetupStatus(fetcher)).resolves.toEqual({
+      kind: "standalone",
+      status: { phase: "complete", standalone: true }
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes a cached phase after completing standalone SIP setup", async () => {
+    const fetcher = vi.fn<Fetcher>()
+      .mockResolvedValueOnce(response(200, { phase: "pending_sip", standalone: true }))
+      .mockResolvedValueOnce(response(200, { phase: "complete", standalone: true }));
+
+    await expect(loadStandaloneSetupStatus(fetcher)).resolves.toMatchObject({ status: { phase: "pending_sip" } });
+    await expect(refreshStandaloneSetupStatus(fetcher)).resolves.toEqual({
       kind: "standalone",
       status: { phase: "complete", standalone: true }
     });

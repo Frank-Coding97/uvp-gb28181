@@ -1,4 +1,5 @@
 export const STANDALONE_SETUP_PATH = "/standalone-setup";
+export const STANDALONE_SIP_SETUP_PATH = "/standalone-sip-setup";
 export const STANDALONE_SETUP_STATUS_PATH = "/api/standalone/setup/status";
 export const STANDALONE_SETUP_ADMIN_PATH = "/api/standalone/setup/admin";
 export const BOOTSTRAP_TOKEN_QUERY = "bootstrap_token";
@@ -70,6 +71,12 @@ export function loadStandaloneSetupStatus(fetcher: Fetcher = nativeFetch): Promi
     return result;
   });
   return statusProbePromise;
+}
+
+/** Fetch a fresh phase after completing the standalone SIP setup. */
+export function refreshStandaloneSetupStatus(fetcher: Fetcher = nativeFetch): Promise<StandaloneSetupProbe> {
+  statusProbePromise = undefined;
+  return loadStandaloneSetupStatus(fetcher);
 }
 
 function cacheStandalonePhase(phase: StandaloneSetupPhase) {
@@ -182,14 +189,25 @@ export function stripBootstrapTokenQuery(query: Record<string, unknown>): Record
 export function standaloneSetupNavigation(
   path: string,
   query: Record<string, unknown>,
-  probe: StandaloneSetupProbe
+  probe: StandaloneSetupProbe,
+  isAuthenticated = true
 ): { path: string; query?: Record<string, unknown> } | null {
   if (probe.kind !== "standalone") return null;
   if (probe.status.phase === "pending_admin" && path !== STANDALONE_SETUP_PATH) {
     return { path: STANDALONE_SETUP_PATH, query: stripBootstrapTokenQuery(query) };
   }
-  if (probe.status.phase !== "pending_admin" && path === STANDALONE_SETUP_PATH) {
+  if (probe.status.phase === "pending_admin") return null;
+  if (probe.status.phase === "pending_sip") {
+    if (!isAuthenticated && path !== STANDALONE_SETUP_PATH) return null;
+    if (path === STANDALONE_SETUP_PATH) return { path: "/login" };
+    if (path === "/login" || path === STANDALONE_SIP_SETUP_PATH) return null;
+    return { path: STANDALONE_SIP_SETUP_PATH, query: stripBootstrapTokenQuery(query) };
+  }
+  if (path === STANDALONE_SETUP_PATH) {
     return { path: "/login" };
+  }
+  if (path === STANDALONE_SIP_SETUP_PATH) {
+    return { path: "/home" };
   }
   return null;
 }

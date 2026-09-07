@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { STANDALONE_SETUP_PATH } from "@/api/standalone-setup";
+import { createMemoryHistory, createRouter } from "vue-router";
+import {
+  STANDALONE_SETUP_PATH,
+  STANDALONE_SIP_SETUP_PATH,
+  standaloneSetupNavigation
+} from "@/api/standalone-setup";
 import { staticRoutes } from "./route";
 
 describe("standalone setup route", () => {
@@ -13,6 +18,17 @@ describe("standalone setup route", () => {
       meta: { hide: true }
     });
     expect(staticRoutes.some(item => item.path === "/login")).toBe(true);
+  });
+
+  it("keeps the pending SIP route full-screen and outside the layout", () => {
+    const route = staticRoutes.find(item => item.path === STANDALONE_SIP_SETUP_PATH);
+    expect(route).toMatchObject({
+      path: "/standalone-sip-setup",
+      name: "standalone-sip-setup",
+      meta: { hide: true, standaloneSetup: true }
+    });
+    const routeRouter = createRouter({ history: createMemoryHistory(), routes: staticRoutes as never });
+    expect(routeRouter.resolve(STANDALONE_SIP_SETUP_PATH).matched.map((record: { name?: unknown }) => record.name)).toEqual(["standalone-sip-setup"]);
   });
 
   it("probes setup status before applying the legacy refresh-token guard", () => {
@@ -61,5 +77,22 @@ describe("standalone setup route", () => {
     await navigation;
     expect(router.currentRoute.value.path).toBe(STANDALONE_SETUP_PATH);
     expect(router.currentRoute.value.fullPath).not.toContain("bootstrap_token");
+  });
+
+  it("redirects authenticated pending SIP navigation to the full-screen setup route", () => {
+    expect(standaloneSetupNavigation("/home", {}, { kind: "standalone", status: { phase: "pending_sip", standalone: true } })).toEqual({
+      path: "/standalone-sip-setup",
+      query: {}
+    });
+    expect(
+      standaloneSetupNavigation("/home", {}, { kind: "standalone", status: { phase: "pending_sip", standalone: true } }, false)
+    ).toBeNull();
+  });
+
+  it("keeps the legacy setup route redirect for a completed installation", () => {
+    const complete = { kind: "standalone" as const, status: { phase: "complete" as const, standalone: true } };
+
+    expect(standaloneSetupNavigation(STANDALONE_SETUP_PATH, {}, complete)).toEqual({ path: "/login" });
+    expect(standaloneSetupNavigation(STANDALONE_SIP_SETUP_PATH, {}, complete)).toEqual({ path: "/home" });
   });
 });
