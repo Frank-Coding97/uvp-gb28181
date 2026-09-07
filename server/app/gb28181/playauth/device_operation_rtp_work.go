@@ -223,6 +223,7 @@ func (w *rtpResourceWork) flush(ctx context.Context) error {
 			}
 			candidate := w.step
 			candidate.RowVersion = step.RowVersion
+			candidate.Recovery = step.Recovery // independent cleanup domain, never owned by this execution
 			if step.State != RTPStepMayHaveDispatched || step.OwnerRunID != w.step.OwnerRunID || !rtpFactsExtend(*step, candidate) {
 				return false, ErrDeviceIntentConflict
 			}
@@ -251,6 +252,7 @@ func (w *rtpResourceWork) flush(ctx context.Context) error {
 		if step.Identity == w.step.Identity && step.OwnerRunID == w.step.OwnerRunID {
 			copy := w.step
 			copy.RowVersion = step.RowVersion
+			copy.Recovery = step.Recovery
 			if reflect.DeepEqual(copy, step) {
 				w.step.RowVersion = step.RowVersion
 				return nil

@@ -73,6 +73,7 @@ type DeviceRTPResourceStep struct {
 	IngressCloseResult      string                    `json:"-"`
 	IngressCloseObservedAt  *time.Time                `json:"-"`
 	LocalQuiescedAt         *time.Time                `json:"-"`
+	Recovery                *DeviceRTPRecovery        `json:"-"`
 }
 
 type DeviceRTPOpenResult struct {
@@ -122,6 +123,7 @@ type rtpStepWire struct {
 	IngressCloseResult      string             `json:"ingressCloseResult,omitempty"`
 	IngressCloseObservedAt  *time.Time         `json:"ingressCloseObservedAt,omitempty"`
 	LocalQuiescedAt         *time.Time         `json:"localQuiescedAt,omitempty"`
+	Recovery                *rtpRecoveryWire   `json:"cleanup,omitempty"`
 }
 
 type rtpStepsWire struct {
@@ -140,7 +142,7 @@ func stepToWire(step DeviceRTPResourceStep) rtpStepWire {
 		ResourceID: i.ResourceID, VHost: i.VHost, App: i.App, Stream: i.Stream, Port: i.Port, LocalIP: i.LocalIP, TCPMode: i.TCPMode, SSRC: i.SSRC, OnlyTrack: i.OnlyTrack,
 		State: step.State, RowVersion: step.RowVersion, PreparedAt: step.PreparedAt, DispatchStartedAt: step.DispatchStartedAt,
 		OwnerRunID: step.OwnerRunID, OpenObservedAt: step.OpenObservedAt, ResourceCloseResult: step.ResourceCloseResult, ResourceCloseObservedAt: step.ResourceCloseObservedAt,
-		IngressCloseResult: step.IngressCloseResult, IngressCloseObservedAt: step.IngressCloseObservedAt, LocalQuiescedAt: step.LocalQuiescedAt}
+		IngressCloseResult: step.IngressCloseResult, IngressCloseObservedAt: step.IngressCloseObservedAt, LocalQuiescedAt: step.LocalQuiescedAt, Recovery: recoveryToWire(step.Recovery)}
 	if step.OpenResult != nil {
 		w.OpenResult = &rtpOpenResultWire{Result: step.OpenResult.Result, Port: step.OpenResult.Port}
 	}
@@ -154,7 +156,7 @@ func (w rtpStepWire) step() DeviceRTPResourceStep {
 		Port: w.Port, LocalIP: w.LocalIP, TCPMode: w.TCPMode, SSRC: w.SSRC, OnlyTrack: w.OnlyTrack},
 		State: w.State, RowVersion: w.RowVersion, PreparedAt: w.PreparedAt, DispatchStartedAt: w.DispatchStartedAt,
 		OwnerRunID: w.OwnerRunID, OpenObservedAt: w.OpenObservedAt, ResourceCloseResult: w.ResourceCloseResult, ResourceCloseObservedAt: w.ResourceCloseObservedAt,
-		IngressCloseResult: w.IngressCloseResult, IngressCloseObservedAt: w.IngressCloseObservedAt, LocalQuiescedAt: w.LocalQuiescedAt}
+		IngressCloseResult: w.IngressCloseResult, IngressCloseObservedAt: w.IngressCloseObservedAt, LocalQuiescedAt: w.LocalQuiescedAt, Recovery: w.Recovery.recovery()}
 	if w.OpenResult != nil {
 		step.OpenResult = &DeviceRTPOpenResult{Result: w.OpenResult.Result, Port: w.OpenResult.Port}
 	}
@@ -230,7 +232,7 @@ func readRTPSteps(tx *gorm.DB, id DeviceOperationIntentIdentity) (DeviceRTPResou
 		default:
 			return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
 		}
-		if !validRTPExecution(step, row.UpdatedAt) || step.RowVersion > row.RowVersion-2 {
+		if !validRTPExecution(step, row.UpdatedAt) || !validRTPRecovery(step, row.UpdatedAt) || step.RowVersion > row.RowVersion-2 {
 			return DeviceRTPResourceSteps{}, ErrDeviceIntentUnavailable
 		}
 		ids[w.StepID], resources[w.ResourceID] = true, true

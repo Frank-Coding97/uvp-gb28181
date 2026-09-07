@@ -45,6 +45,9 @@ type DeviceOperationBarrier struct {
 
 	mu    sync.Mutex
 	lanes map[uint]*deviceOperationLane
+
+	rtpCleanupMu     sync.Mutex
+	rtpCleanupOwners map[string]*RTPRecoveryWork
 }
 
 type deviceOperationLane struct {
