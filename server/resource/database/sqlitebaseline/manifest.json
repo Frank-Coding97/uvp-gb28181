@@ -1,0 +1,1811 @@
+{
+  "version": "sqlite-baseline-20260907-e07857cc",
+  "source_commit": "e07857cce505d0ef6201bafe4a93306c2b84dbc2",
+  "sha256": "cf94b8273725744a3a85ef78a39d9360b69477f85f508dfe61ea8d58e19576fd",
+  "tables": 86,
+  "table_names": [
+    "gb_alarm_binding",
+    "gb_alarm_event",
+    "gb_alarm_resource",
+    "gb_alarm_resource_parent",
+    "gb_anomaly_record",
+    "gb_cascade_channel_projection",
+    "gb_cascade_device_projection",
+    "gb_cascade_media_session",
+    "gb_cascade_platform",
+    "gb_catalog_node",
+    "gb_channel",
+    "gb_channel_mount",
+    "gb_custom_group",
+    "gb_channel_favorite_item",
+    "gb_channel_favorite_group",
+    "gb_custom_group_device",
+    "gb_device",
+    "gb_device_control_state",
+    "gb_device_status_event",
+    "gb_device_subscription",
+    "gb_mobile_position_history",
+    "gb_mobile_position_latest",
+    "gb_playback_scheme",
+    "gb_playback_scheme_slot",
+    "gb_ptz_cruise_track",
+    "gb_ptz_home_position",
+    "gb_ptz_operation",
+    "gb_ptz_operation_attempt",
+    "gb_ptz_preset",
+    "gb_ptz_state",
+    "gb_recording_plan_gap",
+    "gb_recording_plan_execution",
+    "gb_recording_plan_channel_state",
+    "gb_recording_plan_binding",
+    "gb_recording_plan_period",
+    "gb_recording_plan",
+    "gb_recording_file",
+    "gb_recording_reconcile_state",
+    "gb_recording_session",
+    "gb_sip_config",
+    "gb_sip_security_access_rule",
+    "gb_sip_security_audit",
+    "gb_sip_security_ban",
+    "gb_sip_security_event",
+    "gb_sip_security_policy",
+    "gb_sip_trace_capture",
+    "gb_sip_trace_message",
+    "gb_sip_trace_session_diagnosis",
+    "gb_talk_session",
+    "meta_node",
+    "gb_zlm_managed_resource",
+    "scheduler_log",
+    "scheduler_setting",
+    "sys_affix",
+    "sys_affix_chunk",
+    "sys_api",
+    "sys_casbin_rule",
+    "sys_civil_code",
+    "sys_department",
+    "sys_dict",
+    "sys_dict_item",
+    "sys_gen",
+    "sys_gen_field",
+    "sys_job_results",
+    "sys_jobs",
+    "sys_menu",
+    "sys_menu_api",
+    "sys_operation_logs",
+    "sys_param",
+    "sys_role",
+    "sys_role_menu",
+    "sys_user_role",
+    "sys_users",
+    "sys_user_sessions",
+    "sys_login_logs",
+    "gb_device_firmware_upgrade",
+    "gb_device_grant",
+    "gb_device_traffic_session",
+    "gb_device_traffic_daily",
+    "gb_device_traffic_gap",
+    "gb_device_traffic_hourly",
+    "gb_dashboard_layout",
+    "gb_sip_metric_minute",
+    "gb_sip_metric_flush",
+    "gb_sip_metric_gap",
+    "gb_play_attempt"
+  ],
+  "indexes": 242,
+  "index_manifest": [
+    {
+      "table": "gb_alarm_binding",
+      "name": "uk_alarm_binding_channel",
+      "source_name": "uk_alarm_binding_channel",
+      "columns": "\"device_id\", \"channel_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_alarm_binding",
+      "name": "idx_alarm_binding_device",
+      "source_name": "idx_alarm_binding_device",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_binding",
+      "name": "idx_alarm_binding_resource",
+      "source_name": "idx_alarm_binding_resource",
+      "columns": "\"alarm_resource_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_event",
+      "name": "uk_dedupe_key",
+      "source_name": "uk_dedupe_key",
+      "columns": "\"dedupe_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_alarm_event",
+      "name": "idx_alarm_device_time",
+      "source_name": "idx_alarm_device_time",
+      "columns": "\"device_id\", \"alarm_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_event",
+      "name": "gb_alarm_event__idx_channel_id",
+      "source_name": "idx_channel_id",
+      "columns": "\"channel_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_event",
+      "name": "idx_received_at",
+      "source_name": "idx_received_at",
+      "columns": "\"received_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_event",
+      "name": "idx_alarm_time",
+      "source_name": "idx_alarm_time",
+      "columns": "\"alarm_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_resource",
+      "name": "uk_alarm_resource_code",
+      "source_name": "uk_alarm_resource_code",
+      "columns": "\"owner_dept_id\", \"device_code\", \"alarm_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_alarm_resource",
+      "name": "idx_alarm_resource_device",
+      "source_name": "idx_alarm_resource_device",
+      "columns": "\"owner_dept_id\", \"device_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_resource",
+      "name": "idx_alarm_resource_device_id",
+      "source_name": "idx_alarm_resource_device_id",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_resource",
+      "name": "idx_alarm_resource_alarm_code",
+      "source_name": "idx_alarm_resource_alarm_code",
+      "columns": "\"alarm_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_resource",
+      "name": "idx_alarm_resource_type",
+      "source_name": "idx_alarm_resource_type",
+      "columns": "\"resource_type\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_resource",
+      "name": "idx_alarm_resource_deleted_at",
+      "source_name": "idx_alarm_resource_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_resource_parent",
+      "name": "uk_alarm_resource_parent",
+      "source_name": "uk_alarm_resource_parent",
+      "columns": "\"alarm_resource_id\", \"parent_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_alarm_resource_parent",
+      "name": "idx_alarm_parent_resource",
+      "source_name": "idx_alarm_parent_resource",
+      "columns": "\"alarm_resource_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_alarm_resource_parent",
+      "name": "idx_alarm_parent_code",
+      "source_name": "idx_alarm_parent_code",
+      "columns": "\"parent_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_anomaly_record",
+      "name": "idx_node",
+      "source_name": "idx_node",
+      "columns": "\"catalog_node_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_anomaly_record",
+      "name": "idx_owner_dept_resolved",
+      "source_name": "idx_owner_dept_resolved",
+      "columns": "\"owner_dept_id\", \"resolved\", \"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_channel_projection",
+      "name": "uk_cascade_channel_source",
+      "source_name": "uk_cascade_channel_source",
+      "columns": "\"platform_id\", \"source_channel_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_cascade_channel_projection",
+      "name": "uk_cascade_channel_published",
+      "source_name": "uk_cascade_channel_published",
+      "columns": "\"platform_id\", \"published_channel_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_cascade_channel_projection",
+      "name": "idx_cascade_channel_platform_active",
+      "source_name": "idx_cascade_channel_platform_active",
+      "columns": "\"platform_id\", \"active\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_channel_projection",
+      "name": "idx_cascade_channel_device_projection",
+      "source_name": "idx_cascade_channel_device_projection",
+      "columns": "\"device_projection_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_channel_projection",
+      "name": "idx_cascade_channel_deleted_at",
+      "source_name": "idx_cascade_channel_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_device_projection",
+      "name": "uk_cascade_device_source",
+      "source_name": "uk_cascade_device_source",
+      "columns": "\"platform_id\", \"source_device_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_cascade_device_projection",
+      "name": "uk_cascade_device_published",
+      "source_name": "uk_cascade_device_published",
+      "columns": "\"platform_id\", \"published_device_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_cascade_device_projection",
+      "name": "idx_cascade_device_platform_active",
+      "source_name": "idx_cascade_device_platform_active",
+      "columns": "\"platform_id\", \"active\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_device_projection",
+      "name": "idx_cascade_device_deleted_at",
+      "source_name": "idx_cascade_device_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_media_session",
+      "name": "uk_cascade_media_dialog",
+      "source_name": "uk_cascade_media_dialog",
+      "columns": "\"dialog_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_cascade_media_session",
+      "name": "idx_cascade_media_platform_state",
+      "source_name": "idx_cascade_media_platform_state",
+      "columns": "\"platform_id\", \"state\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_media_session",
+      "name": "idx_cascade_media_call_id",
+      "source_name": "idx_cascade_media_call_id",
+      "columns": "\"call_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_platform",
+      "name": "uk_cascade_platform_name",
+      "source_name": "uk_cascade_platform_name",
+      "columns": "\"name\"",
+      "unique": true
+    },
+    {
+      "table": "gb_cascade_platform",
+      "name": "uk_cascade_platform_local_identity",
+      "source_name": "uk_cascade_platform_local_identity",
+      "columns": "\"local_device_id\", \"local_domain\"",
+      "unique": true
+    },
+    {
+      "table": "gb_cascade_platform",
+      "name": "idx_cascade_platform_enabled",
+      "source_name": "idx_cascade_platform_enabled",
+      "columns": "\"enabled\"",
+      "unique": false
+    },
+    {
+      "table": "gb_cascade_platform",
+      "name": "idx_cascade_platform_deleted_at",
+      "source_name": "idx_cascade_platform_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "idx_code",
+      "source_name": "idx_code",
+      "columns": "\"code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "gb_catalog_node__idx_deleted_at",
+      "source_name": "idx_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "idx_owner_dept_parent",
+      "source_name": "idx_owner_dept_parent",
+      "columns": "\"owner_dept_id\", \"parent_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "idx_owner_dept_path",
+      "source_name": "idx_owner_dept_path",
+      "columns": "\"owner_dept_id\", \"path\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "idx_owner_dept_type",
+      "source_name": "idx_owner_dept_type",
+      "columns": "\"owner_dept_id\", \"node_type\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "idx_owner_dept_anomaly",
+      "source_name": "idx_owner_dept_anomaly",
+      "columns": "\"owner_dept_id\", \"anomaly\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "idx_owner_dept_civil_code",
+      "source_name": "idx_owner_dept_civil_code",
+      "columns": "\"owner_dept_id\", \"civil_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_catalog_node",
+      "name": "idx_catalog_alarm_resource",
+      "source_name": "idx_catalog_alarm_resource",
+      "columns": "\"alarm_resource_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel",
+      "name": "uk_device_channel",
+      "source_name": "uk_device_channel",
+      "columns": "\"device_id\", \"channel_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_channel",
+      "name": "idx_device_id",
+      "source_name": "idx_device_id",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel",
+      "name": "gb_channel__idx_deleted_at",
+      "source_name": "idx_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel",
+      "name": "gb_channel__idx_owner_dept_deleted",
+      "source_name": "idx_owner_dept_deleted",
+      "columns": "\"owner_dept_id\", \"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel",
+      "name": "idx_stream_transport",
+      "source_name": "idx_stream_transport",
+      "columns": "\"stream_transport\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel",
+      "name": "idx_stream_id",
+      "source_name": "idx_stream_id",
+      "columns": "\"stream_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel_mount",
+      "name": "uk_channel_parent",
+      "source_name": "uk_channel_parent",
+      "columns": "\"channel_id\", \"parent_node_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_channel_mount",
+      "name": "idx_parent_sort",
+      "source_name": "idx_parent_sort",
+      "columns": "\"parent_node_id\", \"sort_order\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel_mount",
+      "name": "idx_owner_dept",
+      "source_name": "idx_owner_dept",
+      "columns": "\"owner_dept_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_custom_group",
+      "name": "uk_custom_group_sibling_name",
+      "source_name": "uk_custom_group_sibling_name",
+      "columns": "\"owner_dept_id\", \"parent_id\", \"name\"",
+      "unique": true
+    },
+    {
+      "table": "gb_custom_group",
+      "name": "idx_custom_group_parent",
+      "source_name": "idx_custom_group_parent",
+      "columns": "\"parent_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_custom_group",
+      "name": "idx_custom_group_dept_path",
+      "source_name": "idx_custom_group_dept_path",
+      "columns": "\"owner_dept_id\", \"path\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel_favorite_item",
+      "name": "uk_gb_channel_favorite_item_code",
+      "source_name": "uk_gb_channel_favorite_item_code",
+      "columns": "\"group_id\",\"device_code\",\"channel_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_channel_favorite_item",
+      "name": "idx_gb_channel_favorite_item_group",
+      "source_name": "idx_gb_channel_favorite_item_group",
+      "columns": "\"group_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_channel_favorite_group",
+      "name": "uk_gb_channel_favorite_group_owner_name",
+      "source_name": "uk_gb_channel_favorite_group_owner_name",
+      "columns": "\"owner_user_id\",\"name\"",
+      "unique": true
+    },
+    {
+      "table": "gb_channel_favorite_group",
+      "name": "idx_gb_channel_favorite_group_owner",
+      "source_name": "idx_gb_channel_favorite_group_owner",
+      "columns": "\"owner_user_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_custom_group_device",
+      "name": "uk_custom_group_device",
+      "source_name": "uk_custom_group_device",
+      "columns": "\"group_id\", \"device_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_custom_group_device",
+      "name": "idx_custom_group_device_group",
+      "source_name": "idx_custom_group_device_group",
+      "columns": "\"group_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_custom_group_device",
+      "name": "idx_custom_group_device_device",
+      "source_name": "idx_custom_group_device_device",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device",
+      "name": "uk_device_id",
+      "source_name": "uk_device_id",
+      "columns": "\"device_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_device",
+      "name": "gb_device__idx_deleted_at",
+      "source_name": "idx_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device",
+      "name": "idx_status_keepalive",
+      "source_name": "idx_status_keepalive",
+      "columns": "\"status\", \"keepalive_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device",
+      "name": "idx_subscribe_capability",
+      "source_name": "idx_subscribe_capability",
+      "columns": "\"subscribe_capability\", \"subscribe_last_test\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device",
+      "name": "gb_device__idx_owner_dept_deleted",
+      "source_name": "idx_owner_dept_deleted",
+      "columns": "\"owner_dept_id\", \"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device",
+      "name": "idx_gb_device_zlm_node",
+      "source_name": "idx_gb_device_zlm_node",
+      "columns": "\"zlm_node_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_control_state",
+      "name": "uk_control_state_target",
+      "source_name": "uk_control_state_target",
+      "columns": "\"device_id\", \"target_scope\", \"target_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_device_control_state",
+      "name": "idx_control_state_device_target",
+      "source_name": "idx_control_state_device_target",
+      "columns": "\"device_id\", \"target_scope\", \"target_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_control_state",
+      "name": "idx_control_state_channel",
+      "source_name": "idx_control_state_channel",
+      "columns": "\"channel_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_status_event",
+      "name": "idx_device_occurred",
+      "source_name": "idx_device_occurred",
+      "columns": "\"device_id\", \"occurred_at\", \"id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_status_event",
+      "name": "idx_event_type_occurred",
+      "source_name": "idx_event_type_occurred",
+      "columns": "\"event_type\", \"occurred_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_status_event",
+      "name": "idx_device_code",
+      "source_name": "idx_device_code",
+      "columns": "\"device_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_status_event",
+      "name": "gb_device_status_event__idx_deleted_at",
+      "source_name": "idx_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_subscription",
+      "name": "uk_device_subscription_kind",
+      "source_name": "uk_device_subscription_kind",
+      "columns": "\"device_id\", \"kind\"",
+      "unique": true
+    },
+    {
+      "table": "gb_device_subscription",
+      "name": "idx_subscription_call_id",
+      "source_name": "idx_subscription_call_id",
+      "columns": "\"call_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_subscription",
+      "name": "idx_subscription_due",
+      "source_name": "idx_subscription_due",
+      "columns": "\"enabled\", \"next_action_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_mobile_position_history",
+      "name": "idx_position_history_device_source_time",
+      "source_name": "idx_position_history_device_source_time",
+      "columns": "\"device_id\", \"source_code\", \"event_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_mobile_position_history",
+      "name": "idx_position_history_channel_time",
+      "source_name": "idx_position_history_channel_time",
+      "columns": "\"channel_id\", \"event_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_mobile_position_history",
+      "name": "idx_position_history_received_at",
+      "source_name": "idx_position_history_received_at",
+      "columns": "\"received_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_mobile_position_latest",
+      "name": "uk_position_device_source",
+      "source_name": "uk_position_device_source",
+      "columns": "\"device_id\", \"source_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_mobile_position_latest",
+      "name": "gb_mobile_position_latest__idx_channel_id",
+      "source_name": "idx_channel_id",
+      "columns": "\"channel_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_mobile_position_latest",
+      "name": "idx_event_time",
+      "source_name": "idx_event_time",
+      "columns": "\"event_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_playback_scheme",
+      "name": "uk_playback_scheme_owner_name",
+      "source_name": "uk_playback_scheme_owner_name",
+      "columns": "\"owner_user_id\", \"name\"",
+      "unique": true
+    },
+    {
+      "table": "gb_playback_scheme",
+      "name": "idx_playback_scheme_owner_updated",
+      "source_name": "idx_playback_scheme_owner_updated",
+      "columns": "\"owner_user_id\", \"updated_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_playback_scheme",
+      "name": "idx_playback_scheme_dept",
+      "source_name": "idx_playback_scheme_dept",
+      "columns": "\"owner_dept_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_playback_scheme_slot",
+      "name": "uk_playback_scheme_slot",
+      "source_name": "uk_playback_scheme_slot",
+      "columns": "\"scheme_id\", \"slot_index\"",
+      "unique": true
+    },
+    {
+      "table": "gb_playback_scheme_slot",
+      "name": "idx_playback_scheme_slot_scheme",
+      "source_name": "idx_playback_scheme_slot_scheme",
+      "columns": "\"scheme_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_cruise_track",
+      "name": "uk_ptz_cruise_channel_track",
+      "source_name": "uk_ptz_cruise_channel_track",
+      "columns": "\"channel_id\", \"track_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_ptz_cruise_track",
+      "name": "idx_ptz_cruise_device",
+      "source_name": "idx_ptz_cruise_device",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_home_position",
+      "name": "uk_ptz_home_position_channel",
+      "source_name": "uk_ptz_home_position_channel",
+      "columns": "\"channel_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_ptz_home_position",
+      "name": "idx_ptz_home_position_device",
+      "source_name": "idx_ptz_home_position_device",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "uk_ptz_operation_id",
+      "source_name": "uk_ptz_operation_id",
+      "columns": "\"operation_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "uk_ptz_operation_idempotency",
+      "source_name": "uk_ptz_operation_idempotency",
+      "columns": "\"channel_id\", \"idempotency_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_channel_time",
+      "source_name": "idx_ptz_operation_channel_time",
+      "columns": "\"channel_id\", \"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_device_sn",
+      "source_name": "idx_ptz_operation_device_sn",
+      "columns": "\"device_id\", \"sn\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_status_time",
+      "source_name": "idx_ptz_operation_status_time",
+      "columns": "\"status\", \"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_call_id",
+      "source_name": "idx_ptz_operation_call_id",
+      "columns": "\"call_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_channel_cmd_id",
+      "source_name": "idx_ptz_operation_channel_cmd_id",
+      "columns": "\"channel_id\", \"cmd_type\", \"id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_status_next_attempt",
+      "source_name": "idx_ptz_operation_status_next_attempt",
+      "columns": "\"status\", \"next_attempt_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_status_queue_deadline",
+      "source_name": "idx_ptz_operation_status_queue_deadline",
+      "columns": "\"status\", \"queue_deadline_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_status_transport_deadline",
+      "source_name": "idx_ptz_operation_status_transport_deadline",
+      "columns": "\"status\", \"transport_deadline_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_status_deadline",
+      "source_name": "idx_ptz_operation_status_deadline",
+      "columns": "\"status\", \"deadline_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_target",
+      "source_name": "idx_ptz_operation_target",
+      "columns": "\"device_code\", \"target_scope\", \"target_code\", \"status\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation",
+      "name": "idx_ptz_operation_device_scope_time",
+      "source_name": "idx_ptz_operation_device_scope_time",
+      "columns": "\"device_id\", \"scope_key\", \"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_operation_attempt",
+      "name": "uk_ptz_operation_attempt",
+      "source_name": "uk_ptz_operation_attempt",
+      "columns": "\"operation_id\", \"attempt_no\"",
+      "unique": true
+    },
+    {
+      "table": "gb_ptz_operation_attempt",
+      "name": "idx_ptz_attempt_status_lease",
+      "source_name": "idx_ptz_attempt_status_lease",
+      "columns": "\"status\", \"lease_until\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_preset",
+      "name": "uk_ptz_preset_channel_number",
+      "source_name": "uk_ptz_preset_channel_number",
+      "columns": "\"channel_id\", \"preset_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_ptz_preset",
+      "name": "idx_ptz_preset_device",
+      "source_name": "idx_ptz_preset_device",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_state",
+      "name": "uk_ptz_state_channel",
+      "source_name": "uk_ptz_state_channel",
+      "columns": "\"channel_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_ptz_state",
+      "name": "idx_ptz_state_device",
+      "source_name": "idx_ptz_state_device",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_ptz_state",
+      "name": "idx_ptz_state_received",
+      "source_name": "idx_ptz_state_received",
+      "columns": "\"received_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_gap",
+      "name": "idx_recording_plan_gap_channel",
+      "source_name": "idx_recording_plan_gap_channel",
+      "columns": "\"channel_id\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_gap",
+      "name": "idx_recording_plan_gap_plan",
+      "source_name": "idx_recording_plan_gap_plan",
+      "columns": "\"plan_id\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_execution",
+      "name": "idx_recording_plan_execution_channel",
+      "source_name": "idx_recording_plan_execution_channel",
+      "columns": "\"channel_id\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_execution",
+      "name": "idx_recording_plan_execution_plan",
+      "source_name": "idx_recording_plan_execution_plan",
+      "columns": "\"plan_id\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_channel_state",
+      "name": "idx_recording_plan_state_reconcile",
+      "source_name": "idx_recording_plan_state_reconcile",
+      "columns": "\"reconcile_at\",\"channel_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_channel_state",
+      "name": "idx_recording_plan_state_retry",
+      "source_name": "idx_recording_plan_state_retry",
+      "columns": "\"next_retry_at\",\"channel_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_channel_state",
+      "name": "idx_recording_plan_state_plan_actual",
+      "source_name": "idx_recording_plan_state_plan_actual",
+      "columns": "\"plan_id\",\"actual_state\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_binding",
+      "name": "uk_recording_plan_binding_channel",
+      "source_name": "uk_recording_plan_binding_channel",
+      "columns": "\"channel_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_recording_plan_binding",
+      "name": "idx_recording_plan_binding_plan",
+      "source_name": "idx_recording_plan_binding_plan",
+      "columns": "\"plan_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan_period",
+      "name": "idx_recording_plan_period_plan_weekday",
+      "source_name": "idx_recording_plan_period_plan_weekday",
+      "columns": "\"plan_id\",\"weekday\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_plan",
+      "name": "idx_recording_plan_dept_deleted",
+      "source_name": "idx_recording_plan_dept_deleted",
+      "columns": "\"owner_dept_id\",\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_file",
+      "name": "uk_recording_file_key",
+      "source_name": "uk_recording_file_key",
+      "columns": "\"file_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_recording_file",
+      "name": "idx_recording_file_channel_start",
+      "source_name": "idx_recording_file_channel_start",
+      "columns": "\"channel_id\", \"start_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_file",
+      "name": "idx_recording_file_device_start",
+      "source_name": "idx_recording_file_device_start",
+      "columns": "\"device_id\", \"start_time\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_file",
+      "name": "idx_recording_file_date_tuple",
+      "source_name": "idx_recording_file_date_tuple",
+      "columns": "\"node_id\", \"vhost\", \"app\", \"stream\", \"record_date\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_file",
+      "name": "idx_recording_file_missing",
+      "source_name": "idx_recording_file_missing",
+      "columns": "\"missing_at\", \"reconcile_miss_count\"",
+      "unique": false
+    },
+    {
+      "table": "gb_recording_session",
+      "name": "uk_recording_session_media",
+      "source_name": "uk_recording_session_media",
+      "columns": "\"node_id\", \"vhost\", \"app\", \"stream\"",
+      "unique": true
+    },
+    {
+      "table": "gb_recording_session",
+      "name": "idx_recording_session_channel_state",
+      "source_name": "idx_recording_session_channel_state",
+      "columns": "\"channel_id\", \"state\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_access_rule",
+      "name": "uk_gb_sip_security_access_rule_match",
+      "source_name": "uk_gb_sip_security_access_rule_match",
+      "columns": "\"list_type\", \"match_type\", \"match_value\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_security_access_rule",
+      "name": "idx_gb_sip_security_access_rule_list_status",
+      "source_name": "idx_gb_sip_security_access_rule_list_status",
+      "columns": "\"list_type\", \"status\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_audit",
+      "name": "idx_gb_sip_security_audit_time",
+      "source_name": "idx_gb_sip_security_audit_time",
+      "columns": "\"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_ban",
+      "name": "uk_gb_sip_security_ban_decision",
+      "source_name": "uk_gb_sip_security_ban_decision",
+      "columns": "\"decision_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_security_ban",
+      "name": "idx_gb_sip_security_ban_source_status",
+      "source_name": "idx_gb_sip_security_ban_source_status",
+      "columns": "\"source_ip\", \"status\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_ban",
+      "name": "idx_gb_sip_security_ban_attribution_status",
+      "source_name": "idx_gb_sip_security_ban_attribution_status",
+      "columns": "\"risk_scope\", \"device_id\", \"status\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_ban",
+      "name": "idx_gb_sip_security_ban_expiry",
+      "source_name": "idx_gb_sip_security_ban_expiry",
+      "columns": "\"expires_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_event",
+      "name": "uk_gb_sip_security_event",
+      "source_name": "uk_gb_sip_security_event",
+      "columns": "\"bucket_at\", \"source_ip\", \"device_id\", \"risk_scope\", \"transport\", \"method\", \"reason\", \"action\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_security_event",
+      "name": "idx_gb_sip_security_event_source_time",
+      "source_name": "idx_gb_sip_security_event_source_time",
+      "columns": "\"source_ip\", \"last_seen_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_event",
+      "name": "idx_gb_sip_security_event_attribution_time",
+      "source_name": "idx_gb_sip_security_event_attribution_time",
+      "columns": "\"risk_scope\", \"device_id\", \"last_seen_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_event",
+      "name": "idx_gb_sip_security_event_reason_time",
+      "source_name": "idx_gb_sip_security_event_reason_time",
+      "columns": "\"reason\", \"last_seen_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_security_policy",
+      "name": "uk_gb_sip_security_policy_scope",
+      "source_name": "uk_gb_sip_security_policy_scope",
+      "columns": "\"scope_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_trace_capture",
+      "name": "uk_sip_trace_capture_active",
+      "source_name": "uk_sip_trace_capture_active",
+      "columns": "\"active_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_trace_capture",
+      "name": "idx_sip_trace_capture_device_started",
+      "source_name": "idx_sip_trace_capture_device_started",
+      "columns": "\"device_id\", \"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_capture",
+      "name": "idx_sip_trace_capture_device_code",
+      "source_name": "idx_sip_trace_capture_device_code",
+      "columns": "\"device_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_capture",
+      "name": "idx_sip_trace_capture_created_by",
+      "source_name": "idx_sip_trace_capture_created_by",
+      "columns": "\"created_by\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_capture",
+      "name": "idx_sip_trace_capture_planned_end",
+      "source_name": "idx_sip_trace_capture_planned_end",
+      "columns": "\"planned_end_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_message",
+      "name": "idx_gb_sip_trace_occurred_event",
+      "source_name": "idx_gb_sip_trace_occurred_event",
+      "columns": "\"occurred_at\", \"event_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_message",
+      "name": "idx_gb_sip_trace_device_occurred",
+      "source_name": "idx_gb_sip_trace_device_occurred",
+      "columns": "\"device_id\", \"occurred_at\", \"event_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_message",
+      "name": "idx_gb_sip_trace_call_occurred",
+      "source_name": "idx_gb_sip_trace_call_occurred",
+      "columns": "\"call_id\", \"occurred_at\", \"event_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_message",
+      "name": "idx_gb_sip_trace_business_occurred",
+      "source_name": "idx_gb_sip_trace_business_occurred",
+      "columns": "\"business_code\", \"occurred_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_session_diagnosis",
+      "name": "uk_sip_trace_diagnosis_session",
+      "source_name": "uk_sip_trace_diagnosis_session",
+      "columns": "\"session_day\", \"category\", \"correlation_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_trace_session_diagnosis",
+      "name": "idx_sip_trace_diagnosis_category_state_observed",
+      "source_name": "idx_sip_trace_diagnosis_category_state_observed",
+      "columns": "\"session_day\", \"category\", \"state\", \"observed_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_session_diagnosis",
+      "name": "idx_sip_trace_diagnosis_device_observed",
+      "source_name": "idx_sip_trace_diagnosis_device_observed",
+      "columns": "\"device_id\", \"observed_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_trace_session_diagnosis",
+      "name": "idx_sip_trace_diagnosis_call_cseq",
+      "source_name": "idx_sip_trace_diagnosis_call_cseq",
+      "columns": "\"call_id\", \"cseq\"",
+      "unique": false
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "uk_talk_session_session_id",
+      "source_name": "uk_talk_session_session_id",
+      "columns": "\"session_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "uk_talk_session_lease",
+      "source_name": "uk_talk_session_lease",
+      "columns": "\"lease_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "uk_talk_session_source_key",
+      "source_name": "uk_talk_session_source_key",
+      "columns": "\"source_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "uk_talk_session_recv_key",
+      "source_name": "uk_talk_session_recv_key",
+      "columns": "\"recv_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "uk_talk_session_ssrc_key",
+      "source_name": "uk_talk_session_ssrc_key",
+      "columns": "\"ssrc_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "idx_talk_session_channel_created",
+      "source_name": "idx_talk_session_channel_created",
+      "columns": "\"channel_id\", \"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "idx_talk_session_state_expires",
+      "source_name": "idx_talk_session_state_expires",
+      "columns": "\"state\", \"expires_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "idx_talk_session_source",
+      "source_name": "idx_talk_session_source",
+      "columns": "\"node_id\", \"app\", \"source_stream\"",
+      "unique": false
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "idx_talk_session_recv",
+      "source_name": "idx_talk_session_recv",
+      "columns": "\"node_id\", \"recv_stream\"",
+      "unique": false
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "idx_talk_session_call_id",
+      "source_name": "idx_talk_session_call_id",
+      "columns": "\"call_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "idx_talk_session_broadcast_match",
+      "source_name": "idx_talk_session_broadcast_match",
+      "columns": "\"device_id\", \"target_id\", \"state\"",
+      "unique": false
+    },
+    {
+      "table": "gb_talk_session",
+      "name": "idx_talk_session_broadcast_sn",
+      "source_name": "idx_talk_session_broadcast_sn",
+      "columns": "\"broadcast_sn\"",
+      "unique": false
+    },
+    {
+      "table": "meta_node",
+      "name": "uk_media_server_uuid",
+      "source_name": "uk_media_server_uuid",
+      "columns": "\"media_server_uuid\"",
+      "unique": true
+    },
+    {
+      "table": "meta_node",
+      "name": "idx_state",
+      "source_name": "idx_state",
+      "columns": "\"state\"",
+      "unique": false
+    },
+    {
+      "table": "meta_node",
+      "name": "idx_recovery_required",
+      "source_name": "idx_recovery_required",
+      "columns": "\"recovery_required\"",
+      "unique": false
+    },
+    {
+      "table": "gb_zlm_managed_resource",
+      "name": "uk_gb_zlm_managed_resource_identity",
+      "source_name": "uk_gb_zlm_managed_resource_identity",
+      "columns": "\"node_id\",\"resource_type\",\"resource_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_zlm_managed_resource",
+      "name": "idx_gb_zlm_managed_resource_observed",
+      "source_name": "idx_gb_zlm_managed_resource_observed",
+      "columns": "\"node_id\",\"last_observed_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_zlm_managed_resource",
+      "name": "idx_gb_zlm_managed_resource_tombstone",
+      "source_name": "idx_gb_zlm_managed_resource_tombstone",
+      "columns": "\"node_id\",\"tombstoned_at\"",
+      "unique": false
+    },
+    {
+      "table": "scheduler_log",
+      "name": "idx_happened_at",
+      "source_name": "idx_happened_at",
+      "columns": "\"happened_at\"",
+      "unique": false
+    },
+    {
+      "table": "sys_affix",
+      "name": "idx_sys_affix_file_md5",
+      "source_name": "idx_sys_affix_file_md5",
+      "columns": "\"file_md5\"",
+      "unique": false
+    },
+    {
+      "table": "sys_affix_chunk",
+      "name": "idx_upload_id",
+      "source_name": "idx_upload_id",
+      "columns": "\"upload_id\"",
+      "unique": false
+    },
+    {
+      "table": "sys_affix_chunk",
+      "name": "idx_file_md5",
+      "source_name": "idx_file_md5",
+      "columns": "\"file_md5\"",
+      "unique": false
+    },
+    {
+      "table": "sys_casbin_rule",
+      "name": "idx_casbin_rule",
+      "source_name": "idx_casbin_rule",
+      "columns": "\"ptype\", \"v0\", \"v1\", \"v2\", \"v3\", \"v4\", \"v5\"",
+      "unique": true
+    },
+    {
+      "table": "sys_casbin_rule",
+      "name": "idx_sys_casbin_rule",
+      "source_name": "idx_sys_casbin_rule",
+      "columns": "\"ptype\", \"v0\", \"v1\", \"v2\", \"v3\", \"v4\", \"v5\"",
+      "unique": true
+    },
+    {
+      "table": "sys_civil_code",
+      "name": "idx_parent_code",
+      "source_name": "idx_parent_code",
+      "columns": "\"parent_code\", \"level\"",
+      "unique": false
+    },
+    {
+      "table": "sys_civil_code",
+      "name": "idx_pinyin",
+      "source_name": "idx_pinyin",
+      "columns": "\"pinyin\"",
+      "unique": false
+    },
+    {
+      "table": "sys_job_results",
+      "name": "idx_job_id",
+      "source_name": "idx_job_id",
+      "columns": "\"job_id\"",
+      "unique": false
+    },
+    {
+      "table": "sys_job_results",
+      "name": "sys_job_results__idx_status",
+      "source_name": "idx_status",
+      "columns": "\"status\"",
+      "unique": false
+    },
+    {
+      "table": "sys_job_results",
+      "name": "idx_start_time",
+      "source_name": "idx_start_time",
+      "columns": "\"start_time\"",
+      "unique": false
+    },
+    {
+      "table": "sys_job_results",
+      "name": "sys_job_results__idx_created_at",
+      "source_name": "idx_created_at",
+      "columns": "\"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "sys_jobs",
+      "name": "idx_group",
+      "source_name": "idx_group",
+      "columns": "\"group\"",
+      "unique": false
+    },
+    {
+      "table": "sys_jobs",
+      "name": "sys_jobs__idx_status",
+      "source_name": "idx_status",
+      "columns": "\"status\"",
+      "unique": false
+    },
+    {
+      "table": "sys_jobs",
+      "name": "idx_executor_name",
+      "source_name": "idx_executor_name",
+      "columns": "\"executor_name\"",
+      "unique": false
+    },
+    {
+      "table": "sys_jobs",
+      "name": "sys_jobs__idx_created_at",
+      "source_name": "idx_created_at",
+      "columns": "\"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "sys_menu",
+      "name": "idx_parent_id",
+      "source_name": "idx_parent_id",
+      "columns": "\"parent_id\"",
+      "unique": false
+    },
+    {
+      "table": "sys_menu",
+      "name": "idx_sort",
+      "source_name": "idx_sort",
+      "columns": "\"sort\"",
+      "unique": false
+    },
+    {
+      "table": "sys_menu",
+      "name": "idx_type",
+      "source_name": "idx_type",
+      "columns": "\"type\"",
+      "unique": false
+    },
+    {
+      "table": "sys_operation_logs",
+      "name": "idx_sys_operation_logs_deleted_at",
+      "source_name": "idx_sys_operation_logs_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "sys_operation_logs",
+      "name": "sys_operation_logs__idx_user_id",
+      "source_name": "idx_user_id",
+      "columns": "\"user_id\"",
+      "unique": false
+    },
+    {
+      "table": "sys_param",
+      "name": "idx_sys_param_code",
+      "source_name": "idx_sys_param_code",
+      "columns": "\"code\"",
+      "unique": true
+    },
+    {
+      "table": "sys_param",
+      "name": "idx_sys_param_deleted_at",
+      "source_name": "idx_sys_param_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "sys_users",
+      "name": "username",
+      "source_name": "username",
+      "columns": "\"username\"",
+      "unique": true
+    },
+    {
+      "table": "sys_user_sessions",
+      "name": "sys_user_sessions__idx_user_id",
+      "source_name": "idx_user_id",
+      "columns": "\"user_id\"",
+      "unique": false
+    },
+    {
+      "table": "sys_user_sessions",
+      "name": "idx_session_valid",
+      "source_name": "idx_session_valid",
+      "columns": "\"revoked_at\",\"session_expires_at\",\"login_at\"",
+      "unique": false
+    },
+    {
+      "table": "sys_user_sessions",
+      "name": "idx_client_ip",
+      "source_name": "idx_client_ip",
+      "columns": "\"client_ip\"",
+      "unique": false
+    },
+    {
+      "table": "sys_login_logs",
+      "name": "idx_login_logs_user_id",
+      "source_name": "idx_login_logs_user_id",
+      "columns": "\"user_id\"",
+      "unique": false
+    },
+    {
+      "table": "sys_login_logs",
+      "name": "idx_login_logs_username",
+      "source_name": "idx_login_logs_username",
+      "columns": "\"username\"",
+      "unique": false
+    },
+    {
+      "table": "sys_login_logs",
+      "name": "idx_login_logs_result",
+      "source_name": "idx_login_logs_result",
+      "columns": "\"result\"",
+      "unique": false
+    },
+    {
+      "table": "sys_login_logs",
+      "name": "idx_login_logs_failure_reason",
+      "source_name": "idx_login_logs_failure_reason",
+      "columns": "\"failure_reason\"",
+      "unique": false
+    },
+    {
+      "table": "sys_login_logs",
+      "name": "idx_login_logs_ip",
+      "source_name": "idx_login_logs_ip",
+      "columns": "\"ip\"",
+      "unique": false
+    },
+    {
+      "table": "sys_login_logs",
+      "name": "idx_login_logs_created_at",
+      "source_name": "idx_login_logs_created_at",
+      "columns": "\"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_firmware_upgrade",
+      "name": "idx_firmware_upgrade_device_sn",
+      "source_name": "idx_firmware_upgrade_device_sn",
+      "columns": "device_code,sn",
+      "unique": false
+    },
+    {
+      "table": "gb_device_firmware_upgrade",
+      "name": "idx_firmware_upgrade_device_session",
+      "source_name": "idx_firmware_upgrade_device_session",
+      "columns": "device_code,session_id",
+      "unique": false
+    },
+    {
+      "table": "gb_device_firmware_upgrade",
+      "name": "idx_firmware_upgrade_device_status",
+      "source_name": "idx_firmware_upgrade_device_status",
+      "columns": "device_id,status",
+      "unique": false
+    },
+    {
+      "table": "gb_device_firmware_upgrade",
+      "name": "idx_firmware_upgrade_device_time",
+      "source_name": "idx_firmware_upgrade_device_time",
+      "columns": "device_id,created_at",
+      "unique": false
+    },
+    {
+      "table": "gb_device_firmware_upgrade",
+      "name": "idx_firmware_upgrade_deadline",
+      "source_name": "idx_firmware_upgrade_deadline",
+      "columns": "deadline_at",
+      "unique": false
+    },
+    {
+      "table": "gb_device_grant",
+      "name": "uk_device_target",
+      "source_name": "uk_device_target",
+      "columns": "\"device_id\",\"target_type\",\"target_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_device_grant",
+      "name": "idx_target",
+      "source_name": "idx_target",
+      "columns": "\"target_type\",\"target_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_grant",
+      "name": "idx_device",
+      "source_name": "idx_device",
+      "columns": "\"device_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_grant",
+      "name": "gb_device_grant__idx_deleted_at",
+      "source_name": "idx_deleted_at",
+      "columns": "\"deleted_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_session",
+      "name": "uk_traffic_session_business",
+      "source_name": "uk_traffic_session_business",
+      "columns": "\"business_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_device_traffic_session",
+      "name": "idx_traffic_session_node_state",
+      "source_name": "idx_traffic_session_node_state",
+      "columns": "\"node_id\",\"state\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_session",
+      "name": "idx_traffic_session_zlm",
+      "source_name": "idx_traffic_session_zlm",
+      "columns": "\"zlm_session_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_session",
+      "name": "idx_traffic_session_direction",
+      "source_name": "idx_traffic_session_direction",
+      "columns": "\"direction\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_session",
+      "name": "idx_traffic_session_device_started",
+      "source_name": "idx_traffic_session_device_started",
+      "columns": "\"device_code\",\"channel_code\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_session",
+      "name": "idx_traffic_session_channel_started",
+      "source_name": "idx_traffic_session_channel_started",
+      "columns": "\"channel_code\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_session",
+      "name": "idx_traffic_session_owner_dept",
+      "source_name": "idx_traffic_session_owner_dept",
+      "columns": "\"owner_dept_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_daily",
+      "name": "uk_traffic_daily_scope",
+      "source_name": "uk_traffic_daily_scope",
+      "columns": "\"stat_date\",\"device_code\",\"channel_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_device_traffic_daily",
+      "name": "idx_traffic_daily_device",
+      "source_name": "idx_traffic_daily_device",
+      "columns": "\"device_code\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_daily",
+      "name": "idx_traffic_daily_owner_dept",
+      "source_name": "idx_traffic_daily_owner_dept",
+      "columns": "\"owner_dept_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_gap",
+      "name": "idx_traffic_gap_node_state",
+      "source_name": "idx_traffic_gap_node_state",
+      "columns": "\"node_id\",\"reason\",\"state\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_gap",
+      "name": "idx_traffic_gap_started",
+      "source_name": "idx_traffic_gap_started",
+      "columns": "\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_hourly",
+      "name": "uk_traffic_hourly_scope",
+      "source_name": "uk_traffic_hourly_scope",
+      "columns": "\"stat_hour\",\"device_code\",\"channel_code\"",
+      "unique": true
+    },
+    {
+      "table": "gb_device_traffic_hourly",
+      "name": "idx_traffic_hourly_device",
+      "source_name": "idx_traffic_hourly_device",
+      "columns": "\"device_code\",\"stat_hour\"",
+      "unique": false
+    },
+    {
+      "table": "gb_device_traffic_hourly",
+      "name": "idx_traffic_hourly_owner_dept",
+      "source_name": "idx_traffic_hourly_owner_dept",
+      "columns": "\"owner_dept_id\"",
+      "unique": false
+    },
+    {
+      "table": "gb_dashboard_layout",
+      "name": "uk_dashboard_layout_user_key",
+      "source_name": "uk_dashboard_layout_user_key",
+      "columns": "\"user_id\",\"dashboard_key\"",
+      "unique": true
+    },
+    {
+      "table": "gb_dashboard_layout",
+      "name": "idx_dashboard_layout_updated",
+      "source_name": "idx_dashboard_layout_updated",
+      "columns": "\"updated_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_metric_minute",
+      "name": "uk_sip_metric_minute_bucket",
+      "source_name": "uk_sip_metric_minute_bucket",
+      "columns": "\"bucket_start\",\"method\",\"direction\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_metric_minute",
+      "name": "idx_sip_metric_minute_bucket",
+      "source_name": "idx_sip_metric_minute_bucket",
+      "columns": "\"bucket_start\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_metric_flush",
+      "name": "uk_sip_metric_flush_id",
+      "source_name": "uk_sip_metric_flush_id",
+      "columns": "\"flush_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_sip_metric_flush",
+      "name": "idx_sip_metric_flush_created",
+      "source_name": "idx_sip_metric_flush_created",
+      "columns": "\"created_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_sip_metric_gap",
+      "name": "idx_sip_metric_gap_window",
+      "source_name": "idx_sip_metric_gap_window",
+      "columns": "\"started_at\",\"ended_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_play_attempt",
+      "name": "uk_play_attempt_correlation",
+      "source_name": "uk_play_attempt_correlation",
+      "columns": "\"correlation_id\"",
+      "unique": true
+    },
+    {
+      "table": "gb_play_attempt",
+      "name": "idx_play_attempt_user_started",
+      "source_name": "idx_play_attempt_user_started",
+      "columns": "\"user_id\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_play_attempt",
+      "name": "idx_play_attempt_device_started",
+      "source_name": "idx_play_attempt_device_started",
+      "columns": "\"device_code\",\"started_at\"",
+      "unique": false
+    },
+    {
+      "table": "gb_play_attempt",
+      "name": "idx_play_attempt_outcome_started",
+      "source_name": "idx_play_attempt_outcome_started",
+      "columns": "\"outcome\",\"started_at\"",
+      "unique": false
+    }
+  ],
+  "seed_statements": 912,
+  "seeded_tables": [
+    "gb_sip_security_policy",
+    "sys_api",
+    "sys_casbin_rule",
+    "sys_department",
+    "sys_dict",
+    "sys_dict_item",
+    "sys_menu",
+    "sys_menu_api",
+    "sys_role",
+    "sys_role_menu"
+  ],
+  "inputs": {
+    "uvp-gb28181.sql": "3edc18d3d73510602101c633bb940dc044560ba3e80627e08726749d98fe2f09",
+    "2026-08-15-device-grant-table.sql": "1bed8dabb71f168b72fde28540f25b53b9c92bcddae5d06400d61a1d84dd4bfb",
+    "2026-08-15-device-traffic.sql": "9fdaef7450f0de93eaf0467a761acd13bfd468c2b0d7bfa28ad84afd67c3fdfe",
+    "2026-08-21-device-traffic-hourly.sql": "6f5ab75f0bef394cbee8dd1e542cb28eb33de207773506c7873454210997bd9b",
+    "2026-09-02-home-dashboard.sql": "b265e4f9c155b7eda27330d1b45a6c2310c3382d81490a7242c67e0fd2d4feec"
+  }
+}
