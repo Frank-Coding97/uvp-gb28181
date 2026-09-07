@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 )
@@ -88,7 +88,9 @@ func TestCaptureStopIsIdempotentAndReturnsWorkbenchFilter(t *testing.T) {
 
 	again, err := service.Stop(context.Background(), started.Capture.ID, 7)
 	require.NoError(t, err)
-	require.Equal(t, stopped.EndedAt, again.EndedAt)
+	require.NotNil(t, stopped.EndedAt)
+	require.NotNil(t, again.EndedAt)
+	require.True(t, stopped.EndedAt.Equal(*again.EndedAt))
 	filter := again.WorkbenchFilter(now)
 	require.Equal(t, device.DeviceID, filter.DeviceID)
 	require.Equal(t, again.StartedAt, filter.From)

@@ -11,11 +11,11 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	"uvplatform.cn/uvp-gb28181/app/global/app"

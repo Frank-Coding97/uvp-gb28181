@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
 	basemodels "uvplatform.cn/uvp-gb28181/app/models"

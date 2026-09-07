@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 
 	cascademodel "uvplatform.cn/uvp-gb28181/app/gb28181/cascade/model"
 )

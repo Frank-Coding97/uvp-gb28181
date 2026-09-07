@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestOnlineUserListFiltersAndUsesOneActivityCutoff(t *testing.T) {

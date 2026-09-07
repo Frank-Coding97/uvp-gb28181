@@ -4,11 +4,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"uvplatform.cn/uvp-gb28181/app/models"
 	"uvplatform.cn/uvp-gb28181/app/utils/cachehelper"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestLoginLogManagementDeletesSelectedAndClearsLogs(t *testing.T) {

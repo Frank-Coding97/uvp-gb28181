@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 	"gorm.io/gorm"
@@ -22,6 +21,7 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/utils/passwordhelper"
 	"uvplatform.cn/uvp-gb28181/app/utils/response"
 	"uvplatform.cn/uvp-gb28181/app/utils/tokenhelper"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 type fakeAuthSessionLifecycle struct {

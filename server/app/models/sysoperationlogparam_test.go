@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestSysOperationLogListRequestFiltersPath(t *testing.T) {

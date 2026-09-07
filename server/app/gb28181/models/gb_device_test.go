@@ -10,9 +10,9 @@ import (
 	"uvplatform.cn/uvp-gb28181/app/global/app"
 	"uvplatform.cn/uvp-gb28181/app/utils/ymlconfig"
 
-	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 // setupTestDB 初始化测试用 GORM 连接(指向 config.yml 配置的 MySQL)

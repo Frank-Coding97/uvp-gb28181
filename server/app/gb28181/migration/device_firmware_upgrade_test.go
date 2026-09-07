@@ -7,11 +7,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 	gbmodels "uvplatform.cn/uvp-gb28181/app/gb28181/models"
+	sqlite "uvplatform.cn/uvp-gb28181/internal/sqlitedialect"
 )
 
 func TestFirmwareUpgradeSchemaAndFreshInstallMatch(t *testing.T) {
