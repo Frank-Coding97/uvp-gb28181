@@ -90,7 +90,7 @@ describe("standalone setup route", () => {
   });
 
   it("keeps the legacy setup route redirect for a completed installation", () => {
-    const complete = { kind: "standalone" as const, status: { phase: "complete" as const, standalone: true } };
+    const complete = { kind: "standalone" as const, status: { phase: "complete" as const, standalone: true as const } };
 
     expect(standaloneSetupNavigation(STANDALONE_SETUP_PATH, {}, complete)).toEqual({ path: "/login" });
     expect(standaloneSetupNavigation(STANDALONE_SIP_SETUP_PATH, {}, complete)).toEqual({ path: "/home" });

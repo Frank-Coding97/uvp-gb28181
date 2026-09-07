@@ -143,6 +143,11 @@ func TestLifecyclePublishesChangedBusinessStatusAndWaitsForObserver(t *testing.T
 			return updates
 		},
 		Stop: func(context.Context) error {
+			select {
+			case <-observerDone:
+			default:
+				t.Fatal("Stop started before business observer exited")
+			}
 			stopCalled = true
 			return nil
 		},

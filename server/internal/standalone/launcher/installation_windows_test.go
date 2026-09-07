@@ -26,6 +26,7 @@ type t18Launch struct {
 	cancel   context.CancelFunc
 	done     chan error
 	finished chan struct{}
+	statuses chan Status
 }
 
 type t18HTTPClient struct {
@@ -180,6 +181,9 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 			t.Fatal("completed setup state unavailable")
 		}
 		t18AssertSetupStatus(t, body, true, "complete")
+		if os.Getenv("UVP_T19_REQUIRE_BUSINESS_READY") == "1" {
+			t19WaitBusinessReady(t, second)
+		}
 	}
 
 	second.cancel()
@@ -216,6 +220,9 @@ func TestWindowsStandaloneT18InstallationHTTPFlow(t *testing.T) {
 		if status != http.StatusOK || json.Unmarshal(body, &config) != nil || config.Data.Config.Port != 15070 {
 			t.Fatal("SIP settings did not survive restart")
 		}
+		if os.Getenv("UVP_T19_REQUIRE_BUSINESS_READY") == "1" {
+			t19WaitBusinessReady(t, third)
+		}
 		third.cancel()
 		if !t18WaitFinished(t, third, 90*time.Second) {
 			t.Fatal("completed installation did not stop cleanly")
@@ -228,16 +235,53 @@ func t18Start(t *testing.T, installDir string, browserURLs chan<- string) *t18La
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	finished := make(chan struct{})
+	statuses := make(chan Status, 64)
 	go func() {
 		defer close(finished)
-		done <- LaunchWithBrowser(ctx, installDir, "", nil, func(entry string) {
+		done <- LaunchWithBrowser(ctx, installDir, "", func(status Status) {
+			select {
+			case statuses <- status:
+			default:
+			}
+		}, func(entry string) {
 			select {
 			case browserURLs <- entry:
 			default:
 			}
 		})
 	}()
-	return &t18Launch{cancel: cancel, done: done, finished: finished}
+	return &t18Launch{cancel: cancel, done: done, finished: finished, statuses: statuses}
+}
+
+// This observes the launcher's signed backend probe, which in turn requires
+// live ZLM configuration and an authenticated keepalive accepted by Collector.
+// No synthetic Hook or direct Collector update is used by this test.
+func t19WaitBusinessReady(t *testing.T, run *t18Launch) {
+	t.Helper()
+	started := time.Now()
+	timer := time.NewTimer(100 * time.Second)
+	defer timer.Stop()
+	lastReason := "not_observed"
+	for {
+		select {
+		case state := <-run.statuses:
+			if state.State != Ready {
+				continue
+			}
+			lastReason = state.BusinessReason
+			if state.BusinessReady {
+				if state.BusinessReason != "ready" || state.SIPState != "running" {
+					t.Fatal("inconsistent business readiness state")
+				}
+				t.Logf("real ZLM authenticated Hook business ready after %s", time.Since(started).Round(time.Millisecond))
+				return
+			}
+		case <-run.finished:
+			t.Fatal("owned launcher exited before business readiness")
+		case <-timer.C:
+			t.Fatalf("real ZLM Hook readiness timed out: reason=%s", lastReason)
+		}
+	}
 }
 
 func t18WaitBrowserEntry(run *t18Launch, browserURLs <-chan string, timeout time.Duration) (string, bool) {

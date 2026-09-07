@@ -8,10 +8,14 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"uvplatform.cn/uvp-gb28181/app/gb28181"
+	gbconfig "uvplatform.cn/uvp-gb28181/app/gb28181/config"
 	gbcontrollers "uvplatform.cn/uvp-gb28181/app/gb28181/controllers"
 	gbroutes "uvplatform.cn/uvp-gb28181/app/gb28181/routes"
 	gbsetup "uvplatform.cn/uvp-gb28181/app/gb28181/setup"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm"
+	"uvplatform.cn/uvp-gb28181/app/gb28181/zlm/businessreadiness"
 	"uvplatform.cn/uvp-gb28181/app/global/app"
+	approutes "uvplatform.cn/uvp-gb28181/app/routes"
 	"uvplatform.cn/uvp-gb28181/app/utils/ginhelper"
 	"uvplatform.cn/uvp-gb28181/bootstrap"
 	"uvplatform.cn/uvp-gb28181/internal/standalone/bootstrapcredential"
@@ -115,6 +119,19 @@ func (s *standaloneSetup) activate() error {
 	}
 	gb28181.Start()
 	s.started = true
+	// Publish only after Start has assembled the registry. The installation
+	// gate prevents readiness requests from observing partially built globals.
+	cfg := gbconfig.LoadFrom(app.ConfigYml)
+	registry := gb28181.ZLMRegistry()
+	probe := businessreadiness.NewProbe(businessreadiness.ProbeConfig{Client: zlm.NewServiceAdapter(cfg.Media)})
+	approutes.SetStandaloneBusinessProbe(func(ctx context.Context) (bool, string) {
+		result := probe.Check(ctx, businessreadiness.Input{
+			InstallationPhase: s.handler.Phase(),
+			SIPState:          string(gb28181.SIPRuntimeStatus().Snapshot().State),
+			ZLM:               cfg.ZLM, Media: cfg.Media, Registry: registry,
+		})
+		return result.BusinessReady, string(result.Reason)
+	})
 	if err := s.handler.SetPhase("complete"); err != nil {
 		return err
 	}
