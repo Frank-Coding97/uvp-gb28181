@@ -61,6 +61,28 @@ func TestMySQLReleaseInitializationContract(t *testing.T) {
 	}
 }
 
+func TestPostgreSQLRetainedInitializationObjectsAreReplayable(t *testing.T) {
+	body, err := os.ReadFile("postgresql_converted.sql")
+	require.NoError(t, err)
+	sql := string(body)
+	for _, table := range []string{
+		"gb_device_control_state", "gb_alarm_resource", "gb_alarm_resource_parent", "gb_alarm_binding",
+		"gb_playback_scheme", "gb_playback_scheme_slot", "gb_sip_trace_capture", "gb_sip_trace_message",
+		"gb_sip_trace_session_diagnosis", "sys_user_sessions", "sys_login_logs",
+	} {
+		t.Run(table, func(t *testing.T) {
+			require.True(t, regexp.MustCompile(`(?m)^CREATE TABLE IF NOT EXISTS `+table+`\s*\(`).MatchString(sql), "retained table must be replayable")
+			require.False(t, regexp.MustCompile(`(?mi)\bDROP TABLE\s+(?:IF EXISTS\s+)?`+table+`\b`).MatchString(sql),
+				"replay must not be fixed by deleting retained operational state")
+			indexes := regexp.MustCompile(`(?mi)CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF NOT EXISTS\s+)?\w+\s+ON\s+`+table+`\s*\(`).FindAllString(sql, -1)
+			require.NotEmpty(t, indexes, "retained table indexes must be covered")
+			for _, statement := range indexes {
+				require.Regexp(t, `(?i)^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF NOT EXISTS\s+`, statement)
+			}
+		})
+	}
+}
+
 func TestInitializationDiagnosisSchemaContract(t *testing.T) {
 	files := []string{"uvp-gb28181.sql", "postgresql_converted.sql", "sqlserver_converted.sql"}
 	columns := []string{
@@ -98,6 +120,7 @@ func diagnosisSchemaSection(text string) string {
 	for _, declaration := range []string{
 		"create table `gb_sip_trace_session_diagnosis`",
 		"create table gb_sip_trace_session_diagnosis",
+		"create table if not exists gb_sip_trace_session_diagnosis",
 		"create table [gb_sip_trace_session_diagnosis]",
 	} {
 		if candidate := strings.Index(text, declaration); candidate >= 0 && (tableStart < 0 || candidate < tableStart) {
@@ -105,7 +128,7 @@ func diagnosisSchemaSection(text string) string {
 		}
 	}
 	if tableStart < 0 {
-		return text
+		return ""
 	}
 	section := text[tableStart:]
 	for _, marker := range []string{"\n-- table structure for `", "\ncreate table ", "\nif object_id(n'"} {
@@ -114,4 +137,13 @@ func diagnosisSchemaSection(text string) string {
 		}
 	}
 	return section
+}
+
+func TestDiagnosisSchemaSectionDoesNotFallBackToWholeScript(t *testing.T) {
+	for _, declaration := range []string{"create table", "create table if not exists"} {
+		section := declaration + " gb_sip_trace_session_diagnosis (id bigint);\ncreate index diagnosis_idx on gb_sip_trace_session_diagnosis(id);"
+		script := "create table before_table (payload json);\n" + section + "\ncreate table after_table (payload json);"
+		require.Equal(t, section, diagnosisSchemaSection(script))
+	}
+	require.Empty(t, diagnosisSchemaSection("create table unrelated_table (payload json);"))
 }

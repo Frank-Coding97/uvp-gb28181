@@ -1854,7 +1854,7 @@ ALTER TABLE gb_ptz_operation
     ADD COLUMN target_scope VARCHAR(16),
     ADD COLUMN target_code VARCHAR(20),
     ADD COLUMN scope_key VARCHAR(64);
-CREATE TABLE gb_device_control_state (
+CREATE TABLE IF NOT EXISTS gb_device_control_state (
     id BIGSERIAL PRIMARY KEY,
     device_id BIGINT NOT NULL,
     channel_id BIGINT NOT NULL DEFAULT 0,
@@ -1873,12 +1873,12 @@ CREATE TABLE gb_device_control_state (
     updated_at TIMESTAMP(3) NOT NULL,
     CONSTRAINT uk_control_state_target UNIQUE (device_id, target_scope, target_code)
 );
-CREATE INDEX idx_control_state_device_target ON gb_device_control_state (device_id, target_scope, target_code);
-CREATE INDEX idx_control_state_channel ON gb_device_control_state (channel_id);
+CREATE INDEX IF NOT EXISTS idx_control_state_device_target ON gb_device_control_state (device_id, target_scope, target_code);
+CREATE INDEX IF NOT EXISTS idx_control_state_channel ON gb_device_control_state (channel_id);
 CREATE INDEX idx_ptz_operation_target ON gb_ptz_operation (device_code, target_scope, target_code, status);
 CREATE INDEX idx_ptz_operation_device_scope_time ON gb_ptz_operation (device_id, scope_key, created_at);
 
-CREATE TABLE gb_alarm_resource (
+CREATE TABLE IF NOT EXISTS gb_alarm_resource (
     id BIGSERIAL PRIMARY KEY,
     owner_dept_id BIGINT NOT NULL,
     device_id BIGINT NOT NULL DEFAULT 0,
@@ -1895,7 +1895,7 @@ CREATE TABLE gb_alarm_resource (
     CONSTRAINT uk_alarm_resource_code UNIQUE (owner_dept_id, device_code, alarm_code)
 );
 
-CREATE TABLE gb_alarm_resource_parent (
+CREATE TABLE IF NOT EXISTS gb_alarm_resource_parent (
     id BIGSERIAL PRIMARY KEY,
     alarm_resource_id BIGINT NOT NULL,
     parent_code VARCHAR(20) NOT NULL,
@@ -1903,7 +1903,7 @@ CREATE TABLE gb_alarm_resource_parent (
     CONSTRAINT uk_alarm_resource_parent UNIQUE (alarm_resource_id, parent_code)
 );
 
-CREATE TABLE gb_alarm_binding (
+CREATE TABLE IF NOT EXISTS gb_alarm_binding (
     id BIGSERIAL PRIMARY KEY,
     device_id BIGINT NOT NULL,
     channel_code VARCHAR(20) NOT NULL,
@@ -1914,17 +1914,17 @@ CREATE TABLE gb_alarm_binding (
     CONSTRAINT uk_alarm_binding_channel UNIQUE (device_id, channel_code)
 );
 
-CREATE INDEX idx_alarm_resource_device ON gb_alarm_resource (owner_dept_id, device_code);
-CREATE INDEX idx_alarm_resource_device_id ON gb_alarm_resource (device_id);
-CREATE INDEX idx_alarm_resource_alarm_code ON gb_alarm_resource (alarm_code);
-CREATE INDEX idx_alarm_resource_type ON gb_alarm_resource (resource_type);
-CREATE INDEX idx_alarm_resource_deleted_at ON gb_alarm_resource (deleted_at);
-CREATE INDEX idx_alarm_parent_resource ON gb_alarm_resource_parent (alarm_resource_id);
-CREATE INDEX idx_alarm_parent_code ON gb_alarm_resource_parent (parent_code);
-CREATE INDEX idx_alarm_binding_device ON gb_alarm_binding (device_id);
-CREATE INDEX idx_alarm_binding_resource ON gb_alarm_binding (alarm_resource_id);
+CREATE INDEX IF NOT EXISTS idx_alarm_resource_device ON gb_alarm_resource (owner_dept_id, device_code);
+CREATE INDEX IF NOT EXISTS idx_alarm_resource_device_id ON gb_alarm_resource (device_id);
+CREATE INDEX IF NOT EXISTS idx_alarm_resource_alarm_code ON gb_alarm_resource (alarm_code);
+CREATE INDEX IF NOT EXISTS idx_alarm_resource_type ON gb_alarm_resource (resource_type);
+CREATE INDEX IF NOT EXISTS idx_alarm_resource_deleted_at ON gb_alarm_resource (deleted_at);
+CREATE INDEX IF NOT EXISTS idx_alarm_parent_resource ON gb_alarm_resource_parent (alarm_resource_id);
+CREATE INDEX IF NOT EXISTS idx_alarm_parent_code ON gb_alarm_resource_parent (parent_code);
+CREATE INDEX IF NOT EXISTS idx_alarm_binding_device ON gb_alarm_binding (device_id);
+CREATE INDEX IF NOT EXISTS idx_alarm_binding_resource ON gb_alarm_binding (alarm_resource_id);
 
-CREATE TABLE gb_playback_scheme (
+CREATE TABLE IF NOT EXISTS gb_playback_scheme (
     id BIGSERIAL PRIMARY KEY,
     owner_user_id BIGINT NOT NULL,
     owner_dept_id BIGINT NOT NULL,
@@ -1937,10 +1937,10 @@ CREATE TABLE gb_playback_scheme (
     updated_at TIMESTAMP(3) NOT NULL,
     CONSTRAINT uk_playback_scheme_owner_name UNIQUE (owner_user_id, name)
 );
-CREATE INDEX idx_playback_scheme_owner_updated ON gb_playback_scheme (owner_user_id, updated_at);
-CREATE INDEX idx_playback_scheme_dept ON gb_playback_scheme (owner_dept_id);
+CREATE INDEX IF NOT EXISTS idx_playback_scheme_owner_updated ON gb_playback_scheme (owner_user_id, updated_at);
+CREATE INDEX IF NOT EXISTS idx_playback_scheme_dept ON gb_playback_scheme (owner_dept_id);
 
-CREATE TABLE gb_playback_scheme_slot (
+CREATE TABLE IF NOT EXISTS gb_playback_scheme_slot (
     id BIGSERIAL PRIMARY KEY,
     scheme_id BIGINT NOT NULL,
     slot_index INTEGER NOT NULL,
@@ -1951,21 +1951,21 @@ CREATE TABLE gb_playback_scheme_slot (
     created_at TIMESTAMP(3) NOT NULL,
     CONSTRAINT uk_playback_scheme_slot UNIQUE (scheme_id, slot_index)
 );
-CREATE INDEX idx_playback_scheme_slot_scheme ON gb_playback_scheme_slot (scheme_id);
+CREATE INDEX IF NOT EXISTS idx_playback_scheme_slot_scheme ON gb_playback_scheme_slot (scheme_id);
 
-CREATE TABLE gb_sip_trace_capture (
+CREATE TABLE IF NOT EXISTS gb_sip_trace_capture (
     id CHAR(36) PRIMARY KEY, device_id BIGINT NOT NULL, device_code VARCHAR(20) NOT NULL, created_by BIGINT NOT NULL,
     started_at TIMESTAMP(3) WITH TIME ZONE NOT NULL, planned_end_at TIMESTAMP(3) WITH TIME ZONE NOT NULL,
     ended_at TIMESTAMP(3) WITH TIME ZONE NULL, end_reason VARCHAR(16) NOT NULL DEFAULT '', active_key VARCHAR(64) NULL,
     created_at TIMESTAMP(3) WITH TIME ZONE NOT NULL, updated_at TIMESTAMP(3) WITH TIME ZONE NOT NULL
 );
-CREATE UNIQUE INDEX uk_sip_trace_capture_active ON gb_sip_trace_capture (active_key);
-CREATE INDEX idx_sip_trace_capture_device_started ON gb_sip_trace_capture (device_id, started_at);
-CREATE INDEX idx_sip_trace_capture_device_code ON gb_sip_trace_capture (device_code);
-CREATE INDEX idx_sip_trace_capture_created_by ON gb_sip_trace_capture (created_by);
-CREATE INDEX idx_sip_trace_capture_planned_end ON gb_sip_trace_capture (planned_end_at);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_sip_trace_capture_active ON gb_sip_trace_capture (active_key);
+CREATE INDEX IF NOT EXISTS idx_sip_trace_capture_device_started ON gb_sip_trace_capture (device_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_sip_trace_capture_device_code ON gb_sip_trace_capture (device_code);
+CREATE INDEX IF NOT EXISTS idx_sip_trace_capture_created_by ON gb_sip_trace_capture (created_by);
+CREATE INDEX IF NOT EXISTS idx_sip_trace_capture_planned_end ON gb_sip_trace_capture (planned_end_at);
 
-CREATE TABLE gb_sip_trace_message (
+CREATE TABLE IF NOT EXISTS gb_sip_trace_message (
     event_id VARCHAR(36) PRIMARY KEY, occurred_at TIMESTAMP(6) WITH TIME ZONE NOT NULL, direction VARCHAR(16) NOT NULL,
     transport VARCHAR(16) NOT NULL, local_addr VARCHAR(255) NOT NULL, remote_addr VARCHAR(255) NOT NULL,
     device_id VARCHAR(64) NOT NULL, method VARCHAR(32) NOT NULL, status_code SMALLINT NOT NULL,
@@ -1978,12 +1978,12 @@ CREATE TABLE gb_sip_trace_message (
     payload_nonce BYTEA NOT NULL, payload_ciphertext BYTEA NOT NULL, payload_algorithm VARCHAR(32) NOT NULL,
     payload_key_version VARCHAR(64) NOT NULL, payload_digest_sha256 CHAR(64) NOT NULL
 );
-CREATE INDEX idx_gb_sip_trace_occurred_event ON gb_sip_trace_message (occurred_at, event_id);
-CREATE INDEX idx_gb_sip_trace_device_occurred ON gb_sip_trace_message (device_id, occurred_at, event_id);
-CREATE INDEX idx_gb_sip_trace_call_occurred ON gb_sip_trace_message (call_id, occurred_at, event_id);
-CREATE INDEX idx_gb_sip_trace_business_occurred ON gb_sip_trace_message (business_code, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_gb_sip_trace_occurred_event ON gb_sip_trace_message (occurred_at, event_id);
+CREATE INDEX IF NOT EXISTS idx_gb_sip_trace_device_occurred ON gb_sip_trace_message (device_id, occurred_at, event_id);
+CREATE INDEX IF NOT EXISTS idx_gb_sip_trace_call_occurred ON gb_sip_trace_message (call_id, occurred_at, event_id);
+CREATE INDEX IF NOT EXISTS idx_gb_sip_trace_business_occurred ON gb_sip_trace_message (business_code, occurred_at);
 
-CREATE TABLE gb_sip_trace_session_diagnosis (
+CREATE TABLE IF NOT EXISTS gb_sip_trace_session_diagnosis (
     id BIGSERIAL PRIMARY KEY,
     session_day DATE NOT NULL,
     observed_at TIMESTAMP(6) WITH TIME ZONE NOT NULL,
@@ -2003,15 +2003,15 @@ CREATE TABLE gb_sip_trace_session_diagnosis (
     resolved_at TIMESTAMP(6) WITH TIME ZONE NULL,
     CONSTRAINT uk_sip_trace_diagnosis_session UNIQUE (session_day, category, correlation_key)
 );
-CREATE INDEX idx_sip_trace_diagnosis_category_state_observed
+CREATE INDEX IF NOT EXISTS idx_sip_trace_diagnosis_category_state_observed
     ON gb_sip_trace_session_diagnosis (session_day, category, state, observed_at);
-CREATE INDEX idx_sip_trace_diagnosis_device_observed
+CREATE INDEX IF NOT EXISTS idx_sip_trace_diagnosis_device_observed
     ON gb_sip_trace_session_diagnosis (device_id, observed_at);
-CREATE INDEX idx_sip_trace_diagnosis_call_cseq
+CREATE INDEX IF NOT EXISTS idx_sip_trace_diagnosis_call_cseq
     ON gb_sip_trace_session_diagnosis (call_id, cseq);
 
 -- 在线用户会话与权限 seed。
-CREATE TABLE sys_user_sessions (
+CREATE TABLE IF NOT EXISTS sys_user_sessions (
     sid VARCHAR(36) PRIMARY KEY,
     user_id BIGINT NOT NULL,
     refresh_token_hash CHAR(64) NULL,
@@ -2030,9 +2030,9 @@ CREATE TABLE sys_user_sessions (
     created_at TIMESTAMP NULL,
     updated_at TIMESTAMP NULL
 );
-CREATE INDEX idx_user_id ON sys_user_sessions (user_id);
-CREATE INDEX idx_session_valid ON sys_user_sessions (revoked_at,session_expires_at,login_at);
-CREATE INDEX idx_client_ip ON sys_user_sessions (client_ip);
+CREATE INDEX IF NOT EXISTS idx_user_id ON sys_user_sessions (user_id);
+CREATE INDEX IF NOT EXISTS idx_session_valid ON sys_user_sessions (revoked_at,session_expires_at,login_at);
+CREATE INDEX IF NOT EXISTS idx_client_ip ON sys_user_sessions (client_ip);
 
 INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
 (339,'查询在线用户','/api/sysOnlineUser/list','GET','系统管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),
@@ -2056,9 +2056,9 @@ CREATE TABLE IF NOT EXISTS sys_login_logs (
   user_agent VARCHAR(500) NOT NULL DEFAULT '', browser VARCHAR(100) NOT NULL DEFAULT '未知', os VARCHAR(100) NOT NULL DEFAULT '未知',
   created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NULL, deleted_at TIMESTAMP NULL
 );
-CREATE INDEX idx_login_logs_user_id ON sys_login_logs(user_id); CREATE INDEX idx_login_logs_username ON sys_login_logs(username);
-CREATE INDEX idx_login_logs_result ON sys_login_logs(result); CREATE INDEX idx_login_logs_failure_reason ON sys_login_logs(failure_reason);
-CREATE INDEX idx_login_logs_ip ON sys_login_logs(ip); CREATE INDEX idx_login_logs_created_at ON sys_login_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_login_logs_user_id ON sys_login_logs(user_id); CREATE INDEX IF NOT EXISTS idx_login_logs_username ON sys_login_logs(username);
+CREATE INDEX IF NOT EXISTS idx_login_logs_result ON sys_login_logs(result); CREATE INDEX IF NOT EXISTS idx_login_logs_failure_reason ON sys_login_logs(failure_reason);
+CREATE INDEX IF NOT EXISTS idx_login_logs_ip ON sys_login_logs(ip); CREATE INDEX IF NOT EXISTS idx_login_logs_created_at ON sys_login_logs(created_at);
 INSERT INTO sys_api (id,title,path,method,api_group,created_at,updated_at,deleted_at,created_by) VALUES
 (341,'登录日志列表','/api/sysLoginLog/list','GET','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(342,'登录日志详情','/api/sysLoginLog/:id','GET','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(343,'删除登录日志','/api/sysLoginLog/delete','DELETE','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(344,'清空登录日志','/api/sysLoginLog/clear','POST','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1),(345,'解锁登录账号','/api/sysLoginLog/unlock','POST','日志管理',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,NULL,1);
 INSERT INTO sys_menu (id,parent_id,path,name,component,title,hide,disable,sort,type,permission,icon,created_at,updated_at,created_by) VALUES
